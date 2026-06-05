@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --max-time 5 \"http://localhost:3000/api/memory/search?q=猫\")",
+      "Bash(time curl -s --max-time 8 \"http://localhost:3000/api/memory/search?q=猫\")",
+      "Bash(curl -s --max-time 8 \"http://localhost:3000/api/memory/search?q=%E7%8C%AB\")",
+      "Bash(node -e ' *)",
+      "Bash(curl -s --max-time 5 \"http://localhost:3000/api/memory/search?q=%E7%94%BB+%E7%8C%AB\")",
+      "Bash(curl -s --max-time 5 \"http://localhost:3000/api/memory/search?q=%E7%8C%AB\")",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(node app.js)",
+      "Bash(curl -s \"http://localhost:3000/api/memory/search?q=%E7%8C%AB\")",
+      "Bash(curl -s \"http://localhost:3099/debug/search?q=%E7%8C%AB\")"
+    ]
+  }
+}

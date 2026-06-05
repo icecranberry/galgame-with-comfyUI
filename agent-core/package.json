@@ -1,0 +1,20 @@
+{
+  "name": "generate-image-agent",
+  "version": "1.0.0",
+  "description": "本地 AI 图像生成智能体",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.85.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
+  }
+}

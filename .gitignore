@@ -1,0 +1,13 @@
+node_modules/
+.env
+*.db
+*.db-wal
+*.db-shm
+agent-core/data/
+agent-core/public/
+__pycache__/
+*.pyc
+.venv/
+venv/
+vector-service/models/
+vector-service/chroma_data/
