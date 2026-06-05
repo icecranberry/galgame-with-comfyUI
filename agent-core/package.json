@@ -1,7 +1,7 @@
 {
   "name": "generate-image-agent",
   "version": "1.0.0",
-  "description": "本地 AI 图像生成智能体",
+  "description": "喂？在吗在吗在吗",
   "main": "app.js",
   "type": "module",
   "scripts": {

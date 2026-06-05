@@ -2,202 +2,130 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 
+let _seq = Date.now()
+function uid() { return ++_seq }
+
 export const useChatStore = defineStore('chat', () => {
-  const conversations = ref([])
-  const currentConvId = ref(null)
-  const messages = ref([])
+  const characters = ref([])
+  const activeCharId = ref(null)
+  const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
   const streaming = ref(false)
   const streamingContent = ref('')
-  const currentCharId = ref(null)
-  const emotion = ref(null)
-  // Image generation state
-  const generateStatus = ref(null) // { stage: 'submitting'|'generating'|'downloading'|'done', taskId }
-  const generateProgress = ref('')
+  const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
-  const currentConv = computed(() =>
-    conversations.value.find(c => c.conversation_id === currentConvId.value)
-  )
-
-  async function loadConversations() {
-    try {
-      const data = await api.listConversations()
-      conversations.value = data.conversations || []
-    } catch (e) {
-      console.error('loadConversations:', e)
-    }
+  async function loadCharacters() {
+    try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
   }
 
-  async function loadMessages(convId) {
+  async function loadMessages(charId) {
     try {
-      const data = await api.getMessages(convId)
-      messages.value = data.messages || []
-    } catch (e) {
-      console.error('loadMessages:', e)
-    }
+      const d = await api.getMessages(charId);
+      const raw = d.messages || [];
+      // 将服务端消息转为前端统一格式：text 消息直接映射，assistant 文本消息带 images 的在其后插入 image_gen 条目
+      const result = [];
+      let genSeq = 0;
+      for (const msg of raw) {
+        result.push({ ...msg, type: msg.type || 'text' });
+        // 历史 assistant 消息如果带有 images JSON，在它后面插入已完成的 image_gen
+        if (msg.role === 'assistant' && msg.images) {
+          try {
+            const imageUrls = JSON.parse(msg.images);
+            if (Array.isArray(imageUrls) && imageUrls.length > 0) {
+              result.push({
+                id: uid(),
+                role: 'assistant',
+                type: 'image_gen',
+                genId: `hist_${msg.id}_${genSeq++}`,
+                genStatus: 'done',
+                images: imageUrls.map(url => ({ url, base64: null })),
+                created_at: msg.created_at,
+              });
+            }
+          } catch {}
+        }
+      }
+      messages.value = result;
+    } catch {}
   }
 
-  async function loadEmotion(convId) {
-    try {
-      const data = await api.getEmotion(convId, currentCharId.value)
-      emotion.value = data
-    } catch (e) {
-      // emotion may not exist yet
-    }
-  }
-
-  async function selectConversation(convId) {
-    currentConvId.value = convId
+  async function selectChar(charId) {
+    activeCharId.value = charId
     messages.value = []
-    emotion.value = null
-    generateStatus.value = null
-    generateProgress.value = ''
-    await Promise.all([loadMessages(convId), loadEmotion(convId)])
+    await loadMessages(charId)
+    await loadCharacters()
   }
 
-  async function newConversation() {
-    const { conversation_id } = await api.createConversation()
-    await loadConversations()
-    await selectConversation(conversation_id)
-    return conversation_id
-  }
+  function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
   async function sendMessage(content) {
     if (streaming.value || !content.trim()) return
+    const charId = activeCharId.value
+    if (!charId) return
 
-    let convId = currentConvId.value
-    if (!convId) {
-      convId = await newConversation()
-    }
+    const now = new Date().toISOString()
+    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now })
 
-    // Add user message locally
-    messages.value.push({
-      id: Date.now(),
-      conversation_id: convId,
-      role: 'user',
-      content,
-    })
+    streaming.value = true; streamingContent.value = ''
 
-    streaming.value = true
-    streamingContent.value = ''
-    generateStatus.value = null
-    generateProgress.value = ''
+    const aiMsgId = uid()
+    messages.value.push({ id: aiMsgId, role: 'assistant', type: 'text', content: '', created_at: now })
 
-    // Placeholder for AI message
-    const aiMsgId = Date.now() + 1
-    messages.value.push({
-      id: aiMsgId,
-      conversation_id: convId,
-      role: 'assistant',
-      content: '',
-      images: [],
-      generating: false,
-    })
+    let lastEvent = null; let fullResponse = ''
 
-    let lastEvent = null
-    let fullResponse = ''
-
-    const { stream, abort } = api.chatStream(convId, content, currentCharId.value)
+    const { stream } = api.chatStream(charId, content)
     const reader = stream.getReader()
-
     try {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
-        // Track events
-        if (value?.type === 'event') {
-          lastEvent = value.event
-        }
-
+        if (value?.type === 'event') lastEvent = value.event
         if (value?.type === 'data') {
           const d = value.data
-
-          // Text streaming
           if (d.content) {
-            fullResponse += d.content
-            streamingContent.value = fullResponse
-            // Update the AI message content in-place
-            const aiMsg = messages.value.find(m => m.id === aiMsgId)
-            if (aiMsg) aiMsg.content = fullResponse
+            fullResponse += d.content; streamingContent.value = fullResponse
+            const m = messages.value.find(x => x.id === aiMsgId)
+            if (m) m.content = fullResponse
           }
-
-          // Context update: replace full tagged content with clean context text
           if (lastEvent === 'context_update' && d.content) {
-            fullResponse = d.content
-            streamingContent.value = d.content
-            const aiMsg = messages.value.find(m => m.id === aiMsgId)
-            if (aiMsg) aiMsg.content = d.content
+            fullResponse = d.content; streamingContent.value = d.content
+            const m = messages.value.find(x => x.id === aiMsgId)
+            if (m) m.content = d.content
           }
-
-          // Image generation events
           if (lastEvent === 'generate_start') {
-            generateStatus.value = { stage: 'submitting', taskId: null, prompt: d.prompt }
-            generateProgress.value = '准备生成...'
-            const aiMsg = messages.value.find(m => m.id === aiMsgId)
-            if (aiMsg) aiMsg.generating = true
+            const genTime = Date.now()
+            messages.value.push({
+              id: uid(), role: 'assistant', type: 'image_gen',
+              genId: d.taskId || uid(), genStatus: 'pending', genStartTime: genTime,
+              created_at: new Date().toISOString(),
+            })
           }
-
           if (lastEvent === 'generate_progress') {
-            generateStatus.value = { stage: d.stage, taskId: d.taskId }
-            if (d.stage === 'submitting') {
-              generateProgress.value = '正在提交...'
-            } else if (d.stage === 'generating') {
-              generateProgress.value = 'AI 正在绘制中，请稍候...'
-            } else if (d.stage === 'done') {
-              generateProgress.value = '完成！'
-            } else {
-              generateProgress.value = ''
-            }
+            const gm = findGenMsg(d.taskId)
+            if (gm) gm.genStatus = 'generating'
           }
-
           if (lastEvent === 'generate_done') {
-            generateStatus.value = { stage: 'done', taskId: d.taskId }
-            generateProgress.value = ''
-            const aiMsg = messages.value.find(m => m.id === aiMsgId)
-            if (aiMsg && d.images) {
-              aiMsg.images = d.images
-              aiMsg.generating = false
+            const gm = findGenMsg(d.taskId)
+            if (gm && d.images) {
+              gm.images = d.images
+              gm.genStatus = 'done'
             }
           }
-
           if (lastEvent === 'generate_error') {
-            generateStatus.value = { stage: 'error', taskId: d.taskId, error: d.error }
-            generateProgress.value = '生成失败: ' + (d.error || '未知错误')
-            const aiMsg = messages.value.find(m => m.id === aiMsgId)
-            if (aiMsg) aiMsg.generating = false
-          }
-
-          // User/assistant message saved
-          if (d.role === 'user') {
-            const userMsg = messages.value.find(m => m.role === 'user' && m.id === Date.now())
-            if (userMsg) userMsg.id = d.id
+            const gm = findGenMsg(d.taskId)
+            if (gm) gm.genStatus = 'error'
           }
         }
       }
-    } finally {
-      reader.releaseLock()
-    }
+    } catch (err) {
+      console.error('[chat] stream error:', err.message)
+      const m = messages.value.find(x => x.id === aiMsgId)
+      if (m && !m.content) m.content = '(连接断开，请重试)'
+    } finally { reader.releaseLock() }
 
-    streaming.value = false
-    streamingContent.value = ''
-
-    // Refresh conversation list and emotion
-    await Promise.all([
-      loadConversations(),
-      loadEmotion(convId),
-    ])
+    streaming.value = false; streamingContent.value = ''
+    await loadCharacters()
   }
 
-  function abortStream() {
-    streaming.value = false
-    streamingContent.value = ''
-  }
-
-  return {
-    conversations, currentConvId, messages, streaming, streamingContent,
-    currentCharId, emotion, currentConv,
-    generateStatus, generateProgress,
-    loadConversations, loadMessages, selectConversation, newConversation,
-    sendMessage, abortStream,
-  }
+  return { characters, activeCharId, messages, streaming, streamingContent, activeChar,
+    loadCharacters, loadMessages, selectChar, sendMessage }
 })

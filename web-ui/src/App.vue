@@ -1,28 +1,20 @@
 <template>
   <div class="app-layout">
     <Sidebar />
-    <main class="main-content">
-      <router-view />
-    </main>
+    <router-view />
   </div>
 </template>
 
 <script setup>
 import { onMounted } from 'vue'
 import { useChatStore } from './stores/chat.js'
-import { useCharacterStore } from './stores/character.js'
 import Sidebar from './components/Sidebar.vue'
 
 const chat = useChatStore()
-const chars = useCharacterStore()
-
 onMounted(async () => {
-  await Promise.all([
-    chat.loadConversations(),
-    chars.loadCharacters(),
-  ])
-  if (chars.characters.length > 0 && !chat.currentCharId) {
-    chat.currentCharId = chars.characters[0].id
+  await chat.loadCharacters()
+  if (chat.characters.length > 0 && !chat.activeCharId) {
+    chat.selectChar(chat.characters[0].id)
   }
 })
 </script>
@@ -31,105 +23,53 @@ onMounted(async () => {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg-primary: #1a1b1e;
-  --bg-secondary: #25262b;
-  --bg-tertiary: #2c2e33;
-  --bg-hover: #373a40;
-  --border: #373a40;
-  --text-primary: #c1c2c5;
-  --text-secondary: #909296;
-  --text-bright: #e4e5e6;
-  --accent: #7c3aed;
-  --accent-hover: #6d28d9;
-  --accent-light: #8b5cf6;
-  --success: #34d399;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --user-bubble: #2d3748;
-  --ai-bubble: #1a1b2e;
-  --sidebar-width: 280px;
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ebebeb;
+  --bg-hover: #e0e0e0;
+  --border: #e0e0e0;
+  --text-primary: #333333;
+  --text-secondary: #999999;
+  --text-bright: #111111;
+  --accent: #5b8def;
+  --accent-hover: #4a7de0;
+  --accent-light: #7ba5f5;
+  --success: #52c41a;
+  --warning: #faad14;
+  --danger: #ff4d4f;
 }
 
 html, body, #app {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
 }
 
-.app-layout {
-  display: flex;
-  height: 100vh;
-}
-
-.main-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-}
+.app-layout { display: flex; height: 100vh; }
 
 button {
-  cursor: pointer;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.15s;
+  cursor: pointer; border: none; border-radius: 6px;
+  padding: 7px 14px; font-size: 13px; font-weight: 500; transition: all 0.15s;
 }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: white;
-}
+.btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-
-.btn-danger {
-  background: transparent;
-  color: var(--danger);
-  border: 1px solid var(--danger);
-}
-.btn-danger:hover:not(:disabled) { background: var(--danger); color: white; }
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 4px 8px;
-}
-.btn-ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
 
 input, textarea, select {
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-bright);
-  padding: 10px 14px;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.15s;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-bright); padding: 8px 12px;
+  font-size: 13px; outline: none; transition: border-color 0.15s;
 }
-input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
-}
-
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 textarea { resize: vertical; font-family: inherit; }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-
-a { color: var(--accent-light); text-decoration: none; }
-a:hover { text-decoration: underline; }
+::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
 </style>

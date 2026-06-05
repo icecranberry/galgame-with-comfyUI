@@ -8,6 +8,7 @@ import chatRoutes from './src/routes/chat.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
+import configRoutes from './src/routes/config.js';
 
 const app = express();
 
@@ -19,10 +20,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 // API 路由
-app.use('/api/conversations', chatRoutes);
+app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/memory', memoryRoutes);
 app.use('/api/images', imagesRoutes);
-app.use('/api/characters', charactersRoutes);
+app.use('/api/characters', charactersRoutes);  // /api/characters CRUD
+app.use('/api/config', configRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -69,6 +71,14 @@ app.listen(config.port, () => {
     console.warn('[vector] WARNING: not reachable — vector search, memory extraction degraded');
   }
 })();
+
+// 全局未捕获异常，防止进程崩溃
+process.on('unhandledRejection', (reason) => {
+  console.error('[agent-core] unhandled rejection:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[agent-core] uncaught exception:', err.message);
+});
 
 // 优雅退出
 process.on('SIGINT', async () => {

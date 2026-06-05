@@ -1,0 +1,9 @@
+{
+  "name": "generate-image-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Image Generation Agent — monorepo root",
+  "scripts": {
+    "dev": "node scripts/dev.mjs"
+  }
+}

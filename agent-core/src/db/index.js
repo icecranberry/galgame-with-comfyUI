@@ -28,6 +28,7 @@ function initSchema(db) {
       conversation_id TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
       content TEXT NOT NULL,
+      images TEXT,
       token_count INTEGER DEFAULT 0,
       is_deleted INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -139,6 +140,9 @@ function initSchema(db) {
   // 迁移: 添加 mood_valence/mood_arousal/mood_dominance 列
   migrateEmotionTable(db);
 
+  // 迁移: 消息表添加 images 列
+  migrateMessagesTable(db);
+
   // 迁移: 更新旧角色 prompt 为新标签格式
   migrateCharacterPrompts(db);
 
@@ -194,9 +198,58 @@ function migrateEmotionTable(db) {
   }
 }
 
+function migrateMessagesTable(db) {
+  const cols = db.prepare(`PRAGMA table_info('messages')`).all().map(c => c.name);
+  if (!cols.includes('images')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN images TEXT`);
+    console.log('[db] migration: added images column to messages');
+  }
+}
+
 function rebuildFtsIndex(db) {
-  // 清空并重建 FTS5 索引
-  db.exec(`DELETE FROM messages_fts`);
+  try {
+    db.exec(`DELETE FROM messages_fts`);
+  } catch (err) {
+    // FTS5 虚拟表可能在进程强杀后损坏 → 重建
+    if (err.code === 'SQLITE_CORRUPT_VTAB') {
+      console.log('[db] FTS5 table corrupted, recreating...');
+      // 先删触发器（它们依赖 messages_fts）
+      db.exec(`DROP TRIGGER IF EXISTS messages_ai`);
+      db.exec(`DROP TRIGGER IF EXISTS messages_ad`);
+      db.exec(`DROP TRIGGER IF EXISTS messages_au`);
+      // 删掉损坏的虚拟表
+      db.exec(`DROP TABLE IF EXISTS messages_fts`);
+      // 重建
+      db.exec(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+          content,
+          content='messages',
+          content_rowid='id'
+        );
+      `);
+      // 重建触发器
+      db.exec(`
+        CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+          INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+      `);
+      db.exec(`
+        CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        END;
+      `);
+      db.exec(`
+        CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+          INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+      `);
+    } else {
+      throw err;
+    }
+  }
+
+  // 从 messages 表重建 FTS 索引
   const msgs = db.prepare(`SELECT id, content FROM messages WHERE is_deleted = 0`).all();
   if (msgs.length > 0) {
     const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
