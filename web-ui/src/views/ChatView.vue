@@ -11,39 +11,52 @@
         <button class="btn-header-settings" title="角色设置" @click="openSettings">⚙️</button>
       </div>
 
+      <!--
+        column-reverse 布局：第一条消息在可视底部，新消息自然出现，无需 JS 滚动
+        scrollTop=0 即底部，scrollTop 增大 = 向上翻历史
+      -->
       <div ref="msgList" class="message-list" @scroll="onScroll">
-        <div ref="msgInner" class="msg-inner">
-          <!-- 顶部加载指示器 -->
-          <div v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
-          <div v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
-          <div v-for="(group, gi) in messageGroups" :key="gi">
-            <div class="time-divider">{{ group.label }}</div>
+        <div v-for="(group, gi) in reversedGroups" :key="gi">
+          <div class="time-divider">{{ group.label }}</div>
 
-            <template v-for="(msg, mi) in group.msgs" :key="msg.id">
-              <!-- Text bubble (user or assistant) -->
-              <div v-if="msg.type !== 'image_gen'" class="message" :class="[msg.role, { 'msg-same-role': mi > 0 && group.msgs[mi-1].role === msg.role }]">
-                <div class="msg-avatar" :style="msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
-                  <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
-                </div>
-                <div class="msg-bubble">
-                  <div class="msg-text" v-html="renderContent(msg.content)"></div>
-                </div>
+          <template v-for="(msg, mi) in group.msgs" :key="msg.id">
+            <!-- Text bubble (user or assistant) -->
+            <div v-if="msg.type !== 'image_gen'" class="message" :class="[msg.role, { 'msg-same-role': mi > 0 && group.msgs[mi-1].role === msg.role }]">
+              <div class="msg-avatar" :style="msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
+                <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
+              <!-- 等待态：助手消息内容为空时显示打字动画，不套气泡 -->
+              <svg v-if="msg.role === 'assistant' && !msg.content && chat.streaming"
+                class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
+                style="align-self:center"
+              >
+                <circle cx="4" cy="5" r="3" class="dot dot-0" />
+                <circle cx="16" cy="5" r="3" class="dot dot-1" />
+                <circle cx="28" cy="5" r="3" class="dot dot-2" />
+                <circle cx="40" cy="5" r="3" class="dot dot-3" />
+                <circle cx="52" cy="5" r="3" class="dot dot-4" />
+                <circle cx="64" cy="5" r="3" class="dot dot-5" />
+              </svg>
+              <div v-else class="msg-bubble">
+                <div class="msg-text" v-html="renderContent(msg.content)"></div>
+              </div>
+            </div>
 
-              <!-- Image generation bubble -->
-              <div v-else class="message assistant" :class="{ 'msg-same-role': mi > 0 && group.msgs[mi-1].role === 'assistant' }">
-                <div class="msg-avatar" :style="agentAvatarStyle">
-                  <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
-                </div>
-                <ImageGenBubble
-                  :msg="msg"
-                  @preview="previewImage = $event"
-                />
+            <!-- Image generation bubble -->
+            <div v-else class="message assistant" :class="{ 'msg-same-role': mi > 0 && group.msgs[mi-1].role === 'assistant' }">
+              <div class="msg-avatar" :style="agentAvatarStyle">
+                <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
-            </template>
-          </div>
-          <div ref="bottomAnchor"></div>
+              <ImageGenBubble
+                :msg="msg"
+                @preview="previewImage = $event"
+              />
+            </div>
+          </template>
         </div>
+        <!-- 加载指示器放在最后：column-reverse 中最后 = 可视顶部（历史消息方向） -->
+        <div v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
+        <div v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
       </div>
 
       <div class="input-area">
@@ -158,8 +171,6 @@ const chat = useChatStore()
 const inputText = ref('')
 const inputEl = ref(null)
 const msgList = ref(null)
-const msgInner = ref(null)
-const bottomAnchor = ref(null)
 const previewImage = ref(null)
 
 // ── 角色设置面板 ──
@@ -275,6 +286,9 @@ const messageGroups = computed(() => {
   return groups
 })
 
+// column-reverse 布局需要消息从新到旧排列（第一个 DOM 节点 = 可视底部）
+const reversedGroups = computed(() => [...messageGroups.value].reverse())
+
 function timeLabel(iso) {
   if (!iso) return ''
   const d = new Date(iso); const now = new Date(); const diff = now - d
@@ -292,72 +306,25 @@ function timeLabel(iso) {
 }
 
 // ══════════════════════════════════════════════════
-// 滚动引擎（含 0.2s 缓动动画）
+// 滚动（column-reverse 布局，无需 JS 动画）
 // ══════════════════════════════════════════════════
 //
-// 两个独立机制协同：
-//   forceScrollDown = 明确事件触发，0.2s 缓动动画滚底（初始 / 切角色 / 发消息 / 新消息）
-//   ResizeObserver   = 全天候监听，4px 阈值过滤抖动，0.2s 缓动动画
-//
-// 用户上翻 → userScrolledUp=true → Observer 暂停跟滚，直到用户滚回底部
+// column-reverse 原理：
+//   · 第一个 flex 子元素渲染在可视底部 → 新消息天然在底部
+//   · scrollTop=0 = 视口在最底部（最新消息）
+//   · scrollTop 增大 = 向上翻看历史 → 检测接近 max 来加载更多
+//   · 不需要 ResizeObserver、scroll 动画、userScrolledUp 追踪
 
-let userScrolledUp = false
-let resizeObs = null
-let _scrollGen = 0
-let _lastObsHeight = 0
-let _scrollAnimId = null
-
-function isNearBottom() {
+// ── 检测是否接近可视顶部（即更早的消息） ──
+function isNearVisualTop() {
   const el = msgList.value
-  if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  if (!el) return false
+  // column-reverse: scrollTop 接近最大值 = 接近可视顶部
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
 
-// ── 缓动滚底（0.2s easeOutCubic）──
-function smoothScrollToBottom(duration = 200) {
-  const el = msgList.value
-  if (!el) return
-  userScrolledUp = false
-  _scrollGen++
-
-  if (_scrollAnimId) {
-    cancelAnimationFrame(_scrollAnimId)
-  }
-
-  const start = el.scrollTop
-  const end = el.scrollHeight - el.clientHeight
-  if (end <= start) return
-  const startTime = performance.now()
-  const gen = _scrollGen
-
-  function animate(now) {
-    if (gen !== _scrollGen) return
-    const elapsed = now - startTime
-    const progress = Math.min(elapsed / duration, 1)
-    // easeOutCubic: 1 - (1-t)^3
-    const eased = 1 - Math.pow(1 - progress, 3)
-    el.scrollTop = start + (end - start) * eased
-    if (progress < 1) {
-      _scrollAnimId = requestAnimationFrame(animate)
-    } else {
-      _scrollAnimId = null
-    }
-  }
-
-  _scrollAnimId = requestAnimationFrame(animate)
-}
-
-// 兼容旧调用名
-function forceScrollDown() {
-  smoothScrollToBottom(200)
-}
-
-// ── scroll 事件：加载更多 + 追踪用户意图 ──
 function onScroll() {
-  const el = msgList.value
-  if (!el || chat.loadingOlder) return
-  if (el.scrollTop < 80) loadMore()
-  userScrolledUp = !isNearBottom()
+  if (!chat.loadingOlder && isNearVisualTop()) loadMore()
 }
 
 async function loadMore() {
@@ -366,26 +333,10 @@ async function loadMore() {
   const prevHeight = el?.scrollHeight || 0
   await chat.loadOlderMessages()
   await nextTick()
-  if (el) el.scrollTop = el.scrollHeight - prevHeight
-}
-
-// ── ResizeObserver：全天候，4px 阈值防抖，0.2s 缓动 ──
-function startAutoScroll() {
-  const target = msgInner.value
-  if (!target) return
-  _lastObsHeight = target.offsetHeight
-  resizeObs = new ResizeObserver((entries) => {
-    if (userScrolledUp || chat.loadingOlder) return
-    const h = entries[0]?.contentRect?.height || 0
-    if (Math.abs(h - _lastObsHeight) < 4) return  // <4px = 子像素抖动
-    _lastObsHeight = h
-    smoothScrollToBottom(200)
-  })
-  resizeObs.observe(target)
-}
-
-function stopAutoScroll() {
-  if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
+  if (el) {
+    // column-reverse: 旧消息追加到 flex 尾部（可视顶部），需补偿 scrollTop
+    el.scrollTop += el.scrollHeight - prevHeight
+  }
 }
 
 // ── 生命周期 ──
@@ -394,28 +345,18 @@ onMounted(async () => {
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
-  smoothScrollToBottom(0)  // 初始加载，瞬间到位（duration=0）
-  startAutoScroll()
+  // column-reverse 天然从底部开始，无需手动滚底
   inputEl.value?.focus()
 })
 
-onUnmounted(() => stopAutoScroll())
+onUnmounted(() => {})
 
-// 切角色
+// 切角色：重置滚动位置到可视底部
 watch(() => chat.activeCharId, async (id, oldId) => {
   if (id && id !== oldId) {
     await nextTick()
-    forceScrollDown()
-    stopAutoScroll()
-    await nextTick()
-    startAutoScroll()
+    if (msgList.value) msgList.value.scrollTop = 0
   }
-})
-
-// 新消息追加
-watch(() => chat.messages.length, async (newLen, oldLen) => {
-  await nextTick()
-  if (oldLen > 0 && newLen > oldLen && !chat.loadingOlder) forceScrollDown()
 })
 
 async function send() {
@@ -445,9 +386,10 @@ function renderContent(text) {
 .btn-header-settings { width:32px; height:32px; border-radius:8px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-secondary); font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition: color 0.15s, border-color 0.15s; }
 .btn-header-settings:hover { color:var(--text-bright); border-color:var(--accent); }
 
-.message-list { flex:1; overflow-y:auto; padding:16px 24px; }
-
-.msg-inner { display:flex; flex-direction:column; gap:2px; }
+.message-list {
+  flex:1; overflow-y:auto; padding:16px 24px;
+  display:flex; flex-direction:column-reverse; gap:2px;
+}
 
 .load-older { text-align:center; padding:8px 0; font-size:12px; color:var(--text-secondary); user-select:none; }
 .load-older-hint { opacity:0.6; }
@@ -478,6 +420,24 @@ function renderContent(text) {
 }
 .message.user .msg-bubble { background:#2b5278; color:#e8e8e8; }
 .message.assistant .msg-bubble { background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); }
+
+/* 打字指示器：6 个圆点依次变色的 wave 动画 */
+.typing-dots { overflow: visible; flex-shrink: 0; }
+.typing-dots .dot {
+  fill: #fff; animation: dotBlink 1.2s ease-in-out infinite;
+}
+.typing-dots .dot-0 { animation-delay: 0.00s; }
+.typing-dots .dot-1 { animation-delay: 0.10s; }
+.typing-dots .dot-2 { animation-delay: 0.20s; }
+.typing-dots .dot-3 { animation-delay: 0.30s; }
+.typing-dots .dot-4 { animation-delay: 0.40s; }
+.typing-dots .dot-5 { animation-delay: 0.50s; }
+
+@keyframes dotBlink {
+  0%, 20%, 100% { fill: #fff; }
+  40%, 60% { fill: #aaa; }
+}
+
 .msg-text { font-size:14px; line-height:1.6; }
 .msg-text :deep(code) { background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:13px; }
 .msg-text :deep(strong) { font-weight:600; }

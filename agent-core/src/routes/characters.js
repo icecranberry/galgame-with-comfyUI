@@ -205,12 +205,11 @@ router.post('/generate', async (req, res) => {
 ---
 
 【输出要求】
-- 严格按上述模板输出，不要添加额外解释
-- 在第一行单独输出 display_name（如：芙宁娜）
-- 在第二行单独输出 name（英文内部标识，如：furina）
-- 第三行输出 VAD 情绪基线，JSON 格式如 {"valence":0.65,"arousal":0.7,"dominance":0.55}（valence=愉悦度, arousal=兴奋度, dominance=支配度，0-1之间）
-- 之后输出完整的 base_prompt
-- display_name 和 name 行不要有任何前缀或冒号，只输出值本身`;
+- 严格按以下格式输出，不要添加任何标签、前缀、冒号或额外解释，只输出值本身
+- 第1行：只输出角色中文显示名，例如：芙宁娜
+- 第2行：只输出角色英文标识（纯字母数字下划线），例如：furina
+- 第3行：只输出 VAD 情绪基线 JSON，例如：{"valence":0.65,"arousal":0.7,"dominance":0.55}（valence=愉悦度, arousal=兴奋度, dominance=支配度，值域0-1）
+- 第4行起：完整的 base_prompt 模板内容`;
 
     const result = await chatSync([
       { role: 'system', content: systemPrompt },
@@ -224,10 +223,13 @@ router.post('/generate', async (req, res) => {
     let emotionBaseline = '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
     let promptStart = 0;
 
-    // 找 display_name（第一行非空）
+    // 防御：如果 AI 错误地输出了 "display_name" / "name" 等标签行，跳过它们
+    const SKIP_LABELS = /^(display_name|name|emotion_baseline|vad|vad_baseline)$/i;
+
+    // 找 display_name（第一个有效非空行）
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      if (!line) continue;
+      if (!line || SKIP_LABELS.test(line)) continue;
       if (!displayName) { displayName = line; continue; }
       if (!charName) { charName = line.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'char_' + Date.now(); continue; }
       // 第三行尝试解析 JSON

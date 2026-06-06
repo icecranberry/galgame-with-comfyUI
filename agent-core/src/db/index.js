@@ -168,6 +168,9 @@ function initSchema(db) {
   // 必须在 migrateCharacterPrompts 之后执行，防止后者写回旧指令
   migrateStripExtractedRules(db);
 
+  // 迁移: 更新 image_intent 规则为新版本（修复 needImage 触发率过低）
+  migrateImageIntentRule(db);
+
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
 }
@@ -176,16 +179,27 @@ function seedGlobalRules(db) {
   const DEFAULT_RULES = [
     {
       rule_key: 'image_intent',
-      rule_content: `## 图像生成判断
-在每次回复的最后，请判断用户的发言是否隐含了想要看到画面的意图。
-即使对方没有明确使用"画""生成""发张"等词汇，只要表达了以下倾向，就应当在回复最末尾追加 <needImage> 标签：
-- 想看某个场景、角色、画面（"好想看……""会是什么样子呢"）
-- 你的回复内容很适合配合一张图片展示（"我给你看看"）
-- 用户的情绪适合用一张图来回应的
+      rule_content: `## 图像生成判断（最高优先级，每次回复必须执行）
 
-注意：
-- 如果你的回复已经包含了 <prompt> 和 <context> 标签，则不要加 <needImage>
-- <needImage> 标签必须放在回复的最末尾，前后不要加任何其他文字或标点`,
+在回复的最后一步，你必须判断用户是否想要看到一张图片。只要用户的消息中出现以下任意情况，就必须在回复末尾追加 <needImage> 标签（独占一行）。
+
+### 触发条件
+
+1. 直接索要图像：发张、发个、发图、发出来、发一张、上图、来张图、给图、给我图
+2. 生成类指令：生成、画一个、画张、做张、制作一张、创建一张
+3. 想看/想见：想看、好想看、想看看、让我看看、给我看看、瞧瞧、看一下
+4. 询问外观：长什么样、是什么样子、什么样、啥样、长啥样、是怎样的、什么样子
+5. 未看到/索要重发：没看到、看不到、图呢、怎么没有图、再发一次、没发出来、再发下
+6. 用户的发言描述了一个具体的视觉场景、角色外貌或风景，你的回复天然适合配图展示
+
+### 排除条件（仅以下情况不触发）
+
+- 用户说"明白了""看到了""懂了"仅表示已理解你的文字回复，没有进一步想看图的意图
+
+### 核心原则
+
+- 宁可多触发，绝不可漏触发。不确定时选触发。
+- <needImage> 放在回复最末尾独占一行，前后不加任何文字。`,
     },
     {
       rule_key: 'image_gen',
@@ -263,6 +277,46 @@ function migrateStripExtractedRules(db) {
   if (updated > 0) {
     console.log(`[db] migration: stripped extracted rules from ${updated} characters`);
   }
+}
+
+/**
+ * 迁移: 将旧的 image_intent 规则替换为优化后的新版本。
+ * 旧版 needImage 触发率极低 — 新版本增加了具体触发条件列表和"宁可多触发"原则。
+ * 幂等 — 多次执行安全（检查内容是否仍为旧版）。
+ */
+function migrateImageIntentRule(db) {
+  const NEW_RULE = `## 图像生成判断（最高优先级，每次回复必须执行）
+
+在回复的最后一步，你必须判断用户是否想要看到一张图片。只要用户的消息中出现以下任意情况，就必须在回复末尾追加 <needImage> 标签（独占一行）。
+
+### 触发条件
+
+1. 直接索要图像：发张、发个、发图、发出来、发一张、上图、来张图、给图、给我图
+2. 生成类指令：生成、画一个、画张、做张、制作一张、创建一张
+3. 想看/想见：想看、好想看、想看看、让我看看、给我看看、瞧瞧、看一下
+4. 询问外观：长什么样、是什么样子、什么样、啥样、长啥样、是怎样的、什么样子
+5. 未看到/索要重发：没看到、看不到、图呢、怎么没有图、再发一次、没发出来、再发下
+6. 用户的发言描述了一个具体的视觉场景、角色外貌或风景，你的回复天然适合配图展示
+
+### 排除条件（仅以下情况不触发）
+
+- 用户说"明白了""看到了""懂了"仅表示已理解你的文字回复，没有进一步想看图的意图
+
+### 核心原则
+
+- 宁可多触发，绝不可漏触发。不确定时选触发。
+- <needImage> 放在回复最末尾独占一行，前后不加任何文字。`;
+
+  const row = db.prepare(`SELECT rule_content FROM global_rules WHERE rule_key = 'image_intent'`).get();
+  if (!row) return;
+  // 通过特征字符串判断是否为旧版（旧版以 "在每次回复的最后，请判断" 开头，无"最高优先级"）
+  if (row.rule_content.includes('最高优先级')) {
+    // 已经是新版，跳过
+    return;
+  }
+  db.prepare(`UPDATE global_rules SET rule_content = ?, updated_at = CURRENT_TIMESTAMP WHERE rule_key = 'image_intent'`)
+    .run(NEW_RULE);
+  console.log('[db] migration: updated image_intent rule to optimized version');
 }
 
 function migrateCharacterPrompts(db) {
