@@ -34,7 +34,10 @@ export const useChatStore = defineStore('chat', () => {
     const result = [];
     let genSeq = 0;
     for (const msg of raw) {
-      result.push({ ...msg, type: msg.type || 'text' });
+      // 清除历史消息中残留的 <br> 气泡分割标记，跳过清理后为空的消息
+      const content = msg.content?.replace(/<br\s*\/?>/gi, '').trim();
+      if (!content) continue;   // 跳过空气泡（buggy 版本遗留的空 DB 记录）
+      result.push({ ...msg, content, type: msg.type || 'text' });
       if (msg.role === 'assistant' && msg.images) {
         try {
           const imageUrls = JSON.parse(msg.images);
@@ -148,8 +151,11 @@ export const useChatStore = defineStore('chat', () => {
 
     streaming.value = true; streamingContent.value = ''
 
-    const aiMsgId = uid()
-    messages.value.push({ id: aiMsgId, role: 'assistant', type: 'text', content: '', created_at: now })
+    const firstBubbleId = uid()
+    const bubbleIds = [firstBubbleId]        // temp IDs, msg_saved replaces them with real IDs
+    let bubbleText = ''                       // raw text for current bubble (not yet cleaned)
+    let msgSavedIdx = 0
+    messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: now })
 
     // ── 安全超时：30s 无响应自动复位，防止 streaming 永久锁死发送键 ──
     let safetyFired = false
@@ -160,8 +166,10 @@ export const useChatStore = defineStore('chat', () => {
         abort()
         streaming.value = false
         streamingContent.value = ''
-        const m = messages.value.find(x => x.id === aiMsgId)
-        if (m && !m.content) m.content = '(请求超时，请重试)'
+        for (const bid of bubbleIds) {
+          const m = messages.value.find(x => x.id === bid)
+          if (m && !m.content) m.content = '(请求超时，请重试)'
+        }
         // 清理未完成的生图占位
         for (let i = messages.value.length - 1; i >= 0; i--) {
           const gm = messages.value[i]
@@ -175,7 +183,6 @@ export const useChatStore = defineStore('chat', () => {
     let lastEvent = null; let fullResponse = ''
 
     // 流式标签过滤：缓冲 300ms 预读，若以 <con 开头则自动剥离 XML 标签
-    let _showDirect = false
     let _stripTags = false
     let _bufTimer = null
     function cleanDisplay(s) {
@@ -185,7 +192,7 @@ export const useChatStore = defineStore('chat', () => {
       const idx = t.indexOf('<prompt>')
       if (idx !== -1) t = t.slice(0, idx)
       // 3. 剥离其余展示标签
-      t = t.replace(/<\/?context>/gi, '').replace(/<needImage>/gi, '')
+      t = t.replace(/<\/?context>/gi, '').replace(/<needImage>/gi, '').replace(/<br\s*\/?>/gi, '')
       // 4. 清理多余空白：连续空行压缩为单个换行，首尾去空白
       t = t.replace(/\n{3,}/g, '\n\n').trim()
       return t
@@ -200,36 +207,52 @@ export const useChatStore = defineStore('chat', () => {
         if (value?.type === 'event') lastEvent = value.event
         if (value?.type === 'data') {
           const d = value.data
-          // ── 内容输出 ──
+          // ── token ──
           if (d.content) {
             fullResponse += d.content
-            if (_showDirect) {
-              const display = _stripTags ? cleanDisplay(fullResponse) : fullResponse
-              streamingContent.value = display
-              const m = messages.value.find(x => x.id === aiMsgId)
-              if (m) m.content = display
-            } else if (!_bufTimer) {
+            bubbleText += d.content
+            // 立即写入当前气泡（不等 300ms buffer），确保 typing dots 消失
+            const curId = bubbleIds[bubbleIds.length - 1]
+            const display = _stripTags ? cleanDisplay(bubbleText) : bubbleText
+            const m = messages.value.find(x => x.id === curId)
+            if (m) m.content = display
+
+            // 300ms buffer 只用于 _stripTags 修正（检测 <con 开头）
+            if (!_bufTimer) {
               _bufTimer = setTimeout(() => {
-                _showDirect = true
                 _stripTags = fullResponse.startsWith('<con')
-                const display = _stripTags ? cleanDisplay(fullResponse) : fullResponse
-                streamingContent.value = display
-                const m = messages.value.find(x => x.id === aiMsgId)
-                if (m) m.content = display
+                const nowId = bubbleIds[bubbleIds.length - 1]
+                const dm = messages.value.find(x => x.id === nowId)
+                if (dm) dm.content = _stripTags ? cleanDisplay(bubbleText) : bubbleText
               }, 300)
             }
           }
+          // ── bubble_break ──
+          if (lastEvent === 'bubble_break') {
+            fullResponse += '<br>'
+            // flush 最终内容到当前气泡
+            const prevId = bubbleIds[bubbleIds.length - 1]
+            const pm = messages.value.find(x => x.id === prevId)
+            if (pm) pm.content = _stripTags ? cleanDisplay(bubbleText) : bubbleText
+            // 开启新气泡（短暂空 → 下个 token 立即填充）
+            bubbleText = ''
+            const newId = uid()
+            bubbleIds.push(newId)
+            messages.value.push({ id: newId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
+          }
+          // ── context_update ──
           if (lastEvent === 'context_update' && d.content) {
-            fullResponse = d.content; _showDirect = true; _stripTags = false
+            fullResponse = d.content; _stripTags = false
             streamingContent.value = d.content
-            const m = messages.value.find(x => x.id === aiMsgId)
+            const curId = bubbleIds[bubbleIds.length - 1]
+            const m = messages.value.find(x => x.id === curId)
             if (m) m.content = d.content
           }
+          // ── 生图事件 ──
           if (lastEvent === 'generate_start') {
-            const genTime = Date.now()
             messages.value.push({
               id: uid(), role: 'assistant', type: 'image_gen',
-              genId: d.taskId || uid(), genStatus: 'pending', genStartTime: genTime,
+              genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
               created_at: new Date().toISOString(),
             })
           }
@@ -237,21 +260,24 @@ export const useChatStore = defineStore('chat', () => {
             const gm = findGenMsg(d.taskId)
             if (gm) {
               gm.genStatus = 'generating'
-              // 注入真实进度数据（ComfyUI WebSocket → KSampler 采样步数）
               if (d.progress !== undefined) gm.genProgress = d.progress
               if (d.totalSteps !== undefined) gm.genTotalSteps = d.totalSteps
             }
           }
           if (lastEvent === 'generate_done') {
             const gm = findGenMsg(d.taskId)
-            if (gm && d.images) {
-              gm.images = d.images
-              gm.genStatus = 'done'
-            }
+            if (gm && d.images) { gm.images = d.images; gm.genStatus = 'done' }
           }
           if (lastEvent === 'generate_error') {
             const gm = findGenMsg(d.taskId)
             if (gm) gm.genStatus = 'error'
+          }
+          // ── msg_saved: 临时 ID → 真实 ID ──
+          if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
+            const tempId = bubbleIds[msgSavedIdx]
+            const m = messages.value.find(x => x.id === tempId)
+            if (m) m.id = d.id
+            msgSavedIdx++
           }
         }
       }
@@ -260,18 +286,43 @@ export const useChatStore = defineStore('chat', () => {
       else if (err.name === 'AbortError') { /* 用户主动取消，正常 */ }
       else {
         console.error('[chat] stream error:', err.message)
-        const m = messages.value.find(x => x.id === aiMsgId)
-        if (m && !m.content) m.content = '(连接断开，请重试)'
+        for (const bid of bubbleIds) {
+          const m = messages.value.find(x => x.id === bid)
+          if (m && !m.content) m.content = '(连接断开，请重试)'
+        }
       }
     } finally {
       clearTimeout(safetyTimer)
       if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-      // ── 防御性 flush：若响应在 300ms 缓冲内就结束了，_showDirect 仍为 false ──
-      // fullResponse 已有完整内容但从未写入消息，导致空气泡。补写一次。
-      if (!_showDirect && fullResponse) {
-        const display = fullResponse
-        const m = messages.value.find(x => x.id === aiMsgId)
-        if (m) m.content = display
+      // 清除所有空泡（leading/trailing/consecutive separators 都可能产生）
+      // 从后往前删 trailing，从前往后删 leading，确保 bubbleIds 索引稳定
+      for (let i = bubbleIds.length - 1; i >= 0; i--) {
+        const m = messages.value.find(x => x.id === bubbleIds[i])
+        if (m && !m.content?.trim()) {
+          // 保留至少一个泡（哪怕空，给错误信息留位置）
+          if (i > 0 || bubbleIds.length === 1) {
+            messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+            bubbleIds.splice(i, 1)
+          }
+        } else {
+          break  // trailing: 遇到有内容的就停
+        }
+      }
+      // 从前删 leading 空泡
+      for (let i = 0; i < bubbleIds.length - 1; i++) {
+        const m = messages.value.find(x => x.id === bubbleIds[i])
+        if (m && !m.content?.trim()) {
+          messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+          bubbleIds.splice(i, 1)
+          i--
+        } else {
+          break
+        }
+      }
+      // 兜底：完全无回复
+      if (!fullResponse && bubbleIds.length === 1) {
+        const m = messages.value.find(x => x.id === bubbleIds[0])
+        if (m && !m.content) m.content = '(无回复)'
       }
       reader.releaseLock()
     }

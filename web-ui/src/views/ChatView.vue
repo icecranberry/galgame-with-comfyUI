@@ -368,7 +368,9 @@ async function send() {
 
 function renderContent(text) {
   if (!text) return ''
-  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  // <br> 必须在 HTML 转义之前剥离——转义后 < 变成 &lt;，正则无法匹配
+  return text.replace(/<br\s*\/?>/gi, '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
     .replace(/`([^`]+)`/g,'<code>$1</code>')
     .replace(/\n/g,'<br>')
