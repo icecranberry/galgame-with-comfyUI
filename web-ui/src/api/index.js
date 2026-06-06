@@ -149,6 +149,20 @@ export async function updateGlobalRule(key, data) {
   return res.json()
 }
 
+// ── User Avatar ──
+export async function getUserAvatar() {
+  const res = await fetch(`${BASE}/config/user-avatar`)
+  return res.json()
+}
+
+export async function uploadUserAvatar(base64) {
+  const res = await fetch(`${BASE}/config/user-avatar`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  return res.json()
+}
+
 // ── ComfyUI health ──
 export async function comfyuiHealth() {
   try {

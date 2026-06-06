@@ -19,16 +19,22 @@
           <div v-for="(group, gi) in messageGroups" :key="gi">
             <div class="time-divider">{{ group.label }}</div>
 
-            <template v-for="msg in group.msgs" :key="msg.id">
+            <template v-for="(msg, mi) in group.msgs" :key="msg.id">
               <!-- Text bubble (user or assistant) -->
-              <div v-if="msg.type !== 'image_gen'" class="message" :class="msg.role">
+              <div v-if="msg.type !== 'image_gen'" class="message" :class="[msg.role, { 'msg-same-role': mi > 0 && group.msgs[mi-1].role === msg.role }]">
+                <div class="msg-avatar" :style="msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
+                  <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
+                </div>
                 <div class="msg-bubble">
                   <div class="msg-text" v-html="renderContent(msg.content)"></div>
                 </div>
               </div>
 
               <!-- Image generation bubble -->
-              <div v-else class="message assistant">
+              <div v-else class="message assistant" :class="{ 'msg-same-role': mi > 0 && group.msgs[mi-1].role === 'assistant' }">
+                <div class="msg-avatar" :style="agentAvatarStyle">
+                  <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
+                </div>
                 <ImageGenBubble
                   :msg="msg"
                   @preview="previewImage = $event"
@@ -125,76 +131,17 @@
       </div>
     </div>
 
-    <!-- 头像选择器弹窗 -->
-    <div v-if="showAvatarPicker" class="avpicker-overlay" @click.self="closeAvatarPicker">
-      <div class="avpicker-panel">
-        <div class="avpicker-header">
-          <span>选择头像</span>
-          <button class="avpicker-close" @click="closeAvatarPicker">&times;</button>
-        </div>
-        <div class="avpicker-tabs">
-          <button :class="['avtab', { active: avTab === 'upload' }]" @click="avTab = 'upload'">上传图片</button>
-          <button :class="['avtab', { active: avTab === 'recent' }]" @click="switchToRecent">最近生成</button>
-        </div>
-
-        <!-- 上传 tab -->
-        <div v-if="avTab === 'upload'" class="avtab-body">
-          <label class="av-upload-zone">
-            <input type="file" accept="image/*" @change="onFilePicked" hidden ref="fileInput" />
-            <div class="av-upload-inner">
-              <div class="av-upload-icon">📁</div>
-              <div class="av-upload-text">点击选择图片文件</div>
-            </div>
-          </label>
-        </div>
-
-        <!-- 最近生成 tab -->
-        <div v-if="avTab === 'recent'" class="avtab-body av-gallery">
-          <div v-if="recentLoading" class="av-loading">加载中...</div>
-          <div v-else-if="recentImages.length === 0" class="av-empty">暂无生成的图片</div>
-          <img
-            v-for="(url, i) in recentImages"
-            :key="'rec'+i"
-            :src="proxyUrl(url)"
-            class="av-thumb"
-            @click="selectRecentImage(url)"
-            @error="onRecentImgErr(i)"
-            :class="{ 'av-thumb-err': recentImgErr.has(i) }"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- 头像裁剪编辑器 -->
-    <div v-if="cropImage" class="crop-overlay">
-      <div class="crop-panel">
-        <div class="crop-header">
-          <span>裁剪头像 — 拖拽移动图片、滚轮缩放</span>
-          <button class="crop-close" @click="cancelCrop">&times;</button>
-        </div>
-        <div class="crop-body">
-          <canvas ref="cropCanvas" class="crop-canvas"
-            @mousedown.prevent="cropMouseDown"
-            @mousemove.prevent="cropMouseMove"
-            @mouseup="cropMouseUp"
-            @mouseleave="cropMouseUp"
-            @wheel.prevent="cropWheel"
-            @touchstart.prevent="cropTouchStart"
-            @touchmove.prevent="cropTouchMove"
-            @touchend="cropTouchEnd"
-          ></canvas>
-          <div class="crop-preview-container">
-            <div class="crop-preview-label">预览</div>
-            <canvas ref="previewCanvas" class="crop-preview"></canvas>
-            <div class="crop-zoom-info">{{ Math.round(cropVars.imgScale * 100) }}%</div>
-          </div>
-        </div>
-        <div class="crop-actions">
-          <button class="btn-cancel" @click="cancelCrop">取消</button>
-          <button class="btn-primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</button>
-        </div>
-      </div>
-    </div>
+    <!-- 角色头像选择器 -->
+    <AvatarCropper
+      v-if="showAvatarPicker"
+      title="选择角色头像"
+      :show-recent-tab="true"
+      :recent-images="recentImages"
+      :recent-loading="recentLoading"
+      @close="closeAvatarPicker"
+      @save="onAgentAvatarSave"
+      @switch-to-recent="switchToRecent"
+    />
   </div>
 </template>
 
@@ -203,6 +150,8 @@ import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from
 import { useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import AvatarCropper from '../components/AvatarCropper.vue'
+import { userAvatar, loadUserAvatar } from '../userConfig.js'
 
 const route = useRoute()
 const chat = useChatStore()
@@ -225,6 +174,17 @@ const avatarPreviewStyle = computed(() => {
   const p = chat.activeChar?.avatar_path
   if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
   return { background: chat.activeChar?.avatar_color || '#5b8def' }
+})
+
+const agentAvatarStyle = computed(() => {
+  const p = chat.activeChar?.avatar_path
+  if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  return { background: chat.activeChar?.avatar_color || '#5b8def' }
+})
+
+const userAvatarStyle = computed(() => {
+  if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  return { background: '#5b8def' }
 })
 
 function openSettings() { showSettings.value = true }
@@ -267,26 +227,15 @@ async function removeAvatar() {
 }
 
 // ══════════════════════════════════════════════════
-// 头像选择器 + 裁剪编辑器
+// 头像选择器（使用 AvatarCropper 组件）
 // ══════════════════════════════════════════════════
 
 const showAvatarPicker = ref(false)
-const avTab = ref('upload')
-const fileInput = ref(null)
 const recentImages = ref([])
 const recentLoading = ref(false)
-const recentImgErr = ref(new Set())
-
-// 裁剪状态
-const cropImage = ref(null)
-const cropCanvas = ref(null)
-const previewCanvas = ref(null)
-const cropSaving = ref(false)
 
 function openAvatarPicker() {
-  avTab.value = 'upload'
   recentImages.value = []
-  cropImage.value = null
   showAvatarPicker.value = true
 }
 
@@ -295,251 +244,17 @@ function closeAvatarPicker() {
 }
 
 async function switchToRecent() {
-  avTab.value = 'recent'
   if (recentImages.value.length > 0) return
   recentLoading.value = true
-  recentImgErr.value = new Set()
   try {
     const d = await chat.getRecentChatImages()
     recentImages.value = d.images || []
   } catch {} finally { recentLoading.value = false }
 }
 
-function proxyUrl(url) {
-  // Vite dev 模式下 /images/xxx 已经代理到 backend，直接用
-  return url
-}
-
-function onRecentImgErr(i) {
-  const s = new Set(recentImgErr.value)
-  s.add(i)
-  recentImgErr.value = s
-}
-
-// ── 上传 ──
-function onFilePicked(e) {
-  const file = e.target.files[0]
-  if (!file) return
-  loadImageFromFile(file)
-}
-
-function selectRecentImage(url) {
-  const img = new Image()
-  img.crossOrigin = 'anonymous'
-  img.onload = () => startCrop(img)
-  img.onerror = () => {}
-  img.src = url
-}
-
-function loadImageFromFile(file) {
-  const reader = new FileReader()
-  reader.onload = () => {
-    const img = new Image()
-    img.onload = () => startCrop(img)
-    img.src = reader.result
-  }
-  reader.readAsDataURL(file)
-}
-
-// ── 裁剪引擎 ──
-// 行业标准做法：裁剪圆固定在画布中心不动，用户拖拽/缩放底图来调整选取区域
-// 图片始终以原分辨率渲染到 canvas（借助 ctx.drawImage 的目标缩放），保存时直接裁原图，无精度损失
-
-const CROP_CANVAS = 400              // 画布尺寸（像素）
-const CROP_CX = CROP_CANVAS / 2      // 裁剪圆心 X
-const CROP_CY = CROP_CANVAS / 2      // 裁剪圆心 Y
-const CROP_R = 160                   // 裁剪圆半径
-
-const cropVars = reactive({
-  imgScale: 1,         // 当前缩放（画布像素/原图像素）
-  imgX: 0,             // 原图左上角在画布上的 X 坐标
-  imgY: 0,             // 原图左上角在画布上的 Y 坐标
-})
-
-let cropDragging = false
-let cropDragStart = { x: 0, y: 0, imgX: 0, imgY: 0 }
-let cropPinchDist = 0
-let cropPinchScale = 1
-
-function startCrop(img) {
+async function onAgentAvatarSave(base64) {
+  await chat.uploadAvatar(base64)
   showAvatarPicker.value = false
-  cropImage.value = img
-
-  // 初始缩放：让原图的短边刚好填满裁剪圆（圆直径 320px）
-  const minDim = Math.min(img.naturalWidth, img.naturalHeight)
-  const initScale = (CROP_R * 2) / minDim  // 确保短边 ≥ 圆直径
-
-  cropVars.imgScale = initScale
-  // 居中：让原图中心对齐画布中心
-  cropVars.imgX = CROP_CX - (img.naturalWidth * initScale) / 2
-  cropVars.imgY = CROP_CY - (img.naturalHeight * initScale) / 2
-
-  cropDragging = false
-  nextTick(() => drawCrop())
-}
-
-// ── 绘制 ──
-function drawCrop() {
-  const canvas = cropCanvas.value
-  if (!canvas || !cropImage.value) return
-  const ctx = canvas.getContext('2d')
-  canvas.width = CROP_CANVAS
-  canvas.height = CROP_CANVAS
-
-  const img = cropImage.value
-  const sw = img.naturalWidth, sh = img.naturalHeight
-  const dw = sw * cropVars.imgScale, dh = sh * cropVars.imgScale
-  const dx = cropVars.imgX, dy = cropVars.imgY
-
-  // 背景（棋盘格，便于看透明区域）
-  ctx.fillStyle = '#1a1a1a'
-  ctx.fillRect(0, 0, CROP_CANVAS, CROP_CANVAS)
-
-  // 图片
-  ctx.save()
-  ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh)
-
-  // 半透明暗色遮罩（圆形之外）
-  ctx.beginPath()
-  ctx.rect(0, 0, CROP_CANVAS, CROP_CANVAS)
-  ctx.arc(CROP_CX, CROP_CY, CROP_R, 0, Math.PI * 2, true)
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'
-  ctx.fill()
-
-  // 白色圆框
-  ctx.beginPath()
-  ctx.arc(CROP_CX, CROP_CY, CROP_R, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)'
-  ctx.lineWidth = 2
-  ctx.stroke()
-  ctx.restore()
-
-  // 预览（80px 圆形）
-  const preview = previewCanvas.value
-  if (preview) {
-    const ps = 80
-    preview.width = ps
-    preview.height = ps
-    const pctx = preview.getContext('2d')
-    pctx.clearRect(0, 0, ps, ps)
-    pctx.save()
-    pctx.beginPath()
-    pctx.arc(ps / 2, ps / 2, ps / 2, 0, Math.PI * 2)
-    pctx.clip()
-    // 从原图直接绘制（保持清晰度）
-    pctx.drawImage(img,
-      (CROP_CX - CROP_R - cropVars.imgX) / cropVars.imgScale,
-      (CROP_CY - CROP_R - cropVars.imgY) / cropVars.imgScale,
-      (CROP_R * 2) / cropVars.imgScale,
-      (CROP_R * 2) / cropVars.imgScale,
-      0, 0, ps, ps)
-    pctx.restore()
-  }
-}
-
-// ── 鼠标拖拽 ──
-function cropMouseDown(e) {
-  cropDragging = true
-  cropDragStart = { x: e.clientX, y: e.clientY, imgX: cropVars.imgX, imgY: cropVars.imgY }
-}
-
-function cropMouseMove(e) {
-  if (!cropDragging) return
-  const dx = e.clientX - cropDragStart.x
-  const dy = e.clientY - cropDragStart.y
-  cropVars.imgX = cropDragStart.imgX + dx
-  cropVars.imgY = cropDragStart.imgY + dy
-  drawCrop()
-}
-
-function cropMouseUp() { cropDragging = false }
-
-// ── 滚轮缩放（以鼠标/手指位置为中心） ──
-function cropWheel(e) {
-  const rect = cropCanvas.value.getBoundingClientRect()
-  const mx = e.clientX - rect.left   // 鼠标在画布上的 X
-  const my = e.clientY - rect.top
-  const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
-  zoomAt(mx, my, factor)
-}
-
-function zoomAt(mx, my, factor) {
-  const oldS = cropVars.imgScale
-  const newS = Math.max(0.1, Math.min(5, oldS * factor))
-  // 以 (mx, my) 为锚点：缩放后该点对应的原图坐标不变
-  cropVars.imgX = mx - (mx - cropVars.imgX) * (newS / oldS)
-  cropVars.imgY = my - (my - cropVars.imgY) * (newS / oldS)
-  cropVars.imgScale = newS
-  drawCrop()
-}
-
-// ── 触摸（单指拖拽 + 双指缩放） ──
-function cropTouchStart(e) {
-  if (e.touches.length === 1) {
-    cropDragging = true
-    cropDragStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, imgX: cropVars.imgX, imgY: cropVars.imgY }
-  } else if (e.touches.length === 2) {
-    cropDragging = false
-    cropPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
-    cropPinchScale = cropVars.imgScale
-  }
-}
-
-function cropTouchMove(e) {
-  if (e.touches.length === 2) {
-    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
-    const factor = dist / cropPinchDist
-    const newS = Math.max(0.1, Math.min(5, cropPinchScale * factor))
-    const rect = cropCanvas.value.getBoundingClientRect()
-    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
-    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
-    // 以两指中心为锚点
-    cropVars.imgX = cx - (cx - cropVars.imgX) * (newS / cropVars.imgScale)
-    cropVars.imgY = cy - (cy - cropVars.imgY) * (newS / cropVars.imgScale)
-    cropVars.imgScale = newS
-    drawCrop()
-  } else if (e.touches.length === 1 && cropDragging) {
-    const dx = e.touches[0].clientX - cropDragStart.x
-    const dy = e.touches[0].clientY - cropDragStart.y
-    cropVars.imgX = cropDragStart.imgX + dx
-    cropVars.imgY = cropDragStart.imgY + dy
-    drawCrop()
-  }
-}
-
-function cropTouchEnd(e) {
-  if (e.touches.length === 0) cropDragging = false
-}
-
-function cancelCrop() { cropImage.value = null }
-
-// ── 保存：直接从原图裁剪（无缩放精度损失） ──
-async function saveCrop() {
-  if (cropSaving.value || !cropImage.value) return
-  cropSaving.value = true
-  try {
-    const img = cropImage.value
-    const s = cropVars.imgScale
-    // 圆形区域在画布上的范围 → 映射回原图坐标
-    const srcX = (CROP_CX - CROP_R - cropVars.imgX) / s
-    const srcY = (CROP_CY - CROP_R - cropVars.imgY) / s
-    const srcLen = (CROP_R * 2) / s   // 原图上需要截取的正方形边长
-    const outSize = 200
-
-    const tmpCanvas = document.createElement('canvas')
-    tmpCanvas.width = outSize
-    tmpCanvas.height = outSize
-    const ctx = tmpCanvas.getContext('2d')
-    ctx.beginPath()
-    ctx.arc(outSize / 2, outSize / 2, outSize / 2, 0, Math.PI * 2)
-    ctx.clip()
-    ctx.drawImage(img, srcX, srcY, srcLen, srcLen, 0, 0, outSize, outSize)
-    const base64 = tmpCanvas.toDataURL('image/png')
-    await chat.uploadAvatar(base64)
-    cropImage.value = null
-  } catch (err) {
-    console.error('[chat] save avatar failed:', err)
-  } finally { cropSaving.value = false }
 }
 
 const messageGroups = computed(() => {
@@ -577,12 +292,12 @@ function timeLabel(iso) {
 }
 
 // ══════════════════════════════════════════════════
-// 滚动引擎
+// 滚动引擎（含 0.2s 缓动动画）
 // ══════════════════════════════════════════════════
 //
 // 两个独立机制协同：
-//   forceScrollDown = 明确事件触发，16 帧 rAF 持续滚底（初始 / 切角色 / 发消息）
-//   ResizeObserver   = 全天候监听，4px 阈值过滤抖动
+//   forceScrollDown = 明确事件触发，0.2s 缓动动画滚底（初始 / 切角色 / 发消息 / 新消息）
+//   ResizeObserver   = 全天候监听，4px 阈值过滤抖动，0.2s 缓动动画
 //
 // 用户上翻 → userScrolledUp=true → Observer 暂停跟滚，直到用户滚回底部
 
@@ -590,6 +305,7 @@ let userScrolledUp = false
 let resizeObs = null
 let _scrollGen = 0
 let _lastObsHeight = 0
+let _scrollAnimId = null
 
 function isNearBottom() {
   const el = msgList.value
@@ -597,28 +313,43 @@ function isNearBottom() {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 120
 }
 
-// ── 持续滚底（最大 16 帧 rAF，连续 4 帧高度不变就提前停）──
-function forceScrollDown() {
+// ── 缓动滚底（0.2s easeOutCubic）──
+function smoothScrollToBottom(duration = 200) {
+  const el = msgList.value
+  if (!el) return
   userScrolledUp = false
   _scrollGen++
+
+  if (_scrollAnimId) {
+    cancelAnimationFrame(_scrollAnimId)
+  }
+
+  const start = el.scrollTop
+  const end = el.scrollHeight - el.clientHeight
+  if (end <= start) return
+  const startTime = performance.now()
   const gen = _scrollGen
-  let lastH = 0, stableFrames = 0
-  function tick(count) {
+
+  function animate(now) {
     if (gen !== _scrollGen) return
-    const el = msgList.value
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    // 提前终止：scrollHeight 连续 4 帧不变说明 DOM 已稳定
-    if (el.scrollHeight === lastH) {
-      stableFrames++
+    const elapsed = now - startTime
+    const progress = Math.min(elapsed / duration, 1)
+    // easeOutCubic: 1 - (1-t)^3
+    const eased = 1 - Math.pow(1 - progress, 3)
+    el.scrollTop = start + (end - start) * eased
+    if (progress < 1) {
+      _scrollAnimId = requestAnimationFrame(animate)
     } else {
-      lastH = el.scrollHeight; stableFrames = 0
-    }
-    if (stableFrames < 4 && count < 16) {
-      requestAnimationFrame(() => tick(count + 1))
+      _scrollAnimId = null
     }
   }
-  tick(0)
+
+  _scrollAnimId = requestAnimationFrame(animate)
+}
+
+// 兼容旧调用名
+function forceScrollDown() {
+  smoothScrollToBottom(200)
 }
 
 // ── scroll 事件：加载更多 + 追踪用户意图 ──
@@ -638,7 +369,7 @@ async function loadMore() {
   if (el) el.scrollTop = el.scrollHeight - prevHeight
 }
 
-// ── ResizeObserver：全天候，4px 阈值防抖 ──
+// ── ResizeObserver：全天候，4px 阈值防抖，0.2s 缓动 ──
 function startAutoScroll() {
   const target = msgInner.value
   if (!target) return
@@ -648,8 +379,7 @@ function startAutoScroll() {
     const h = entries[0]?.contentRect?.height || 0
     if (Math.abs(h - _lastObsHeight) < 4) return  // <4px = 子像素抖动
     _lastObsHeight = h
-    const el = msgList.value
-    if (el) el.scrollTop = el.scrollHeight
+    smoothScrollToBottom(200)
   })
   resizeObs.observe(target)
 }
@@ -660,11 +390,11 @@ function stopAutoScroll() {
 
 // ── 生命周期 ──
 onMounted(async () => {
-  await chat.loadCharacters()
+  await Promise.all([chat.loadCharacters(), loadUserAvatar()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
-  forceScrollDown()
+  smoothScrollToBottom(0)  // 初始加载，瞬间到位（duration=0）
   startAutoScroll()
   inputEl.value?.focus()
 })
@@ -724,9 +454,23 @@ function renderContent(text) {
 
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
 
-.message { display:flex; margin:3px 0; }
-.message.user { justify-content:flex-end; }
-.message.assistant { justify-content:flex-start; }
+.message { display:flex; margin:3px 0; align-items:flex-end; gap:8px; }
+.message.user { flex-direction:row-reverse; }
+.message.assistant { flex-direction:row; }
+
+/* 连续同角色消息：隐藏头像，用占位保持对齐 */
+.msg-avatar {
+  width:42px; height:42px; border-radius:50%; flex-shrink:0;
+  background-size:cover; background-position:center;
+  display:flex; align-items:center; justify-content:center;
+  transition: opacity 0.15s;
+}
+.msg-same-role .msg-avatar {
+  opacity: 0; pointer-events: none;
+}
+.avatar-fallback {
+  color:#fff; font-size:14px; font-weight:700; user-select:none;
+}
 
 .msg-bubble {
   max-width:75%; padding:10px 14px; border-radius:8px;
@@ -804,47 +548,4 @@ function renderContent(text) {
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:#d9534f; border-color:transparent; }
 
-/* 头像选择器 */
-.avpicker-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1001; }
-.avpicker-panel { width:520px; max-height:80vh; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
-.avpicker-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-.avpicker-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
-.avpicker-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.avpicker-close:hover { color:var(--text-bright); background:var(--bg-hover); }
-
-.avpicker-tabs { display:flex; border-bottom:1px solid var(--border); }
-.avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; }
-.avtab:hover { color:var(--text-bright); }
-.avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
-
-.avtab-body { padding:16px; overflow-y:auto; max-height:380px; }
-.av-upload-zone { display:block; border:2px dashed var(--border); border-radius:10px; cursor:pointer; transition:border-color 0.15s; }
-.av-upload-zone:hover { border-color:var(--accent); }
-.av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:48px 16px; gap:10px; }
-.av-upload-icon { font-size:40px; }
-.av-upload-text { font-size:14px; color:var(--text-secondary); }
-
-.av-gallery { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
-.av-loading, .av-empty { font-size:13px; color:var(--text-secondary); text-align:center; padding:40px 0; grid-column:1/-1; }
-.av-thumb { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; transition:border-color 0.15s; }
-.av-thumb:hover { border-color:var(--accent); }
-.av-thumb-err { opacity:0.3; cursor:default; }
-
-/* 裁剪编辑器 */
-.crop-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:1002; }
-.crop-panel { background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border); overflow:hidden; }
-.crop-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-.crop-header span { font-size:14px; font-weight:600; color:var(--text-bright); }
-.crop-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.crop-close:hover { color:var(--text-bright); background:var(--bg-hover); }
-
-.crop-body { display:flex; gap:20px; padding:20px; align-items:flex-start; }
-.crop-canvas { display:block; border-radius:8px; cursor:grab; max-width:400px; }
-.crop-canvas:active { cursor:grabbing; }
-.crop-preview-container { display:flex; flex-direction:column; align-items:center; gap:8px; }
-.crop-preview-label { font-size:12px; color:var(--text-secondary); }
-.crop-preview { width:80px; height:80px; border-radius:50%; border:2px solid var(--border); }
-.crop-zoom-info { font-size:12px; color:var(--text-secondary); }
-
-.crop-actions { padding:14px 20px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
 </style>

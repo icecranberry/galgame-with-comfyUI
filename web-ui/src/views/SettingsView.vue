@@ -80,6 +80,22 @@
         </div>
       </div>
 
+      <!-- 用户头像 -->
+      <div class="card">
+        <h3>用户头像</h3>
+        <div class="avatar-row">
+          <div
+            class="avatar-preview clickable"
+            :style="userAvatarStyle"
+            @click="showUserAvatarPicker = true"
+          >{{ userAvatar ? '' : '我' }}</div>
+          <div>
+            <button class="sp-btn-small" @click="showUserAvatarPicker = true">更换头像</button>
+            <button v-if="userAvatar" class="sp-btn-small sp-btn-subtle" @click="removeUserAvatar">移除</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ComfyUI status -->
       <div class="card">
         <h3>ComfyUI 连接</h3>
@@ -119,13 +135,23 @@
       </div>
     </div>
 
+    <!-- 用户头像选择器 -->
+    <AvatarCropper
+      v-if="showUserAvatarPicker"
+      title="设置我的头像"
+      :show-recent-tab="false"
+      @close="showUserAvatarPicker = false"
+      @save="onUserAvatarSave"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { getConfig, updateComfyConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
+import AvatarCropper from '../components/AvatarCropper.vue'
+import { userAvatar, loadUserAvatar, uploadUserAvatar } from '../userConfig.js'
 
 const chat = useChatStore()
 
@@ -160,7 +186,25 @@ onMounted(async () => {
   } catch {}
   await checkHealth()
   await loadRules()
+  await loadUserAvatar()
 })
+
+// ── 用户头像 ──
+const showUserAvatarPicker = ref(false)
+
+const userAvatarStyle = computed(() => {
+  if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  return { background: '#5b8def' }
+})
+
+async function onUserAvatarSave(base64) {
+  await uploadUserAvatar(base64)
+  showUserAvatarPicker.value = false
+}
+
+async function removeUserAvatar() {
+  await uploadUserAvatar('')
+}
 
 function markDirty() { dirty.value = true; saved.value = false }
 
@@ -321,4 +365,14 @@ async function generateNewChar() {
 .gen-details summary { font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .gen-details summary:hover { color:var(--accent); }
 .gen-preview { margin-top:8px; padding:10px; border-radius:6px; background:var(--bg-primary); border:1px solid var(--border); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow-y:auto; color:var(--text-primary); font-family:inherit; }
+
+/* 用户头像 */
+.avatar-row { display:flex; align-items:center; gap:14px; }
+.avatar-preview { width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; font-weight:700; flex-shrink:0; }
+.avatar-preview.clickable { cursor:pointer; transition: opacity 0.15s; }
+.avatar-preview.clickable:hover { opacity:0.85; }
+.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); cursor:pointer; margin-right:6px; }
+.sp-btn-small:hover { border-color:var(--accent); }
+.sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
+.sp-btn-subtle:hover { color:#d9534f; border-color:transparent; }
 </style>

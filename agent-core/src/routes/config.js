@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config, updateComfyConfig, updateFeatureFlag } from '../config.js';
 import { getDb } from '../db/index.js';
 
@@ -60,6 +63,41 @@ router.put('/rules/:key', (req, res) => {
   db.prepare(`UPDATE global_rules SET ${updates.join(', ')} WHERE rule_key = ?`).run(...params);
   const updated = db.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(req.params.key);
   res.json({ ok: true, rule: updated });
+});
+
+// GET /api/config/user-avatar — 获取用户头像路径
+router.get('/user-avatar', (req, res) => {
+  const __filename = fileURLToPath(import.meta.url);
+  const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+  const avatarDir = path.join(projectRoot, 'data', 'avatars');
+  const userAvatarPath = path.join(avatarDir, 'user_avatar.png');
+  if (fs.existsSync(userAvatarPath)) {
+    res.json({ avatar_path: '/avatars/user_avatar.png' });
+  } else {
+    res.json({ avatar_path: null });
+  }
+});
+
+// POST /api/config/user-avatar — 上传用户头像（base64）
+router.post('/user-avatar', (req, res) => {
+  const { base64 } = req.body;
+  const __filename = fileURLToPath(import.meta.url);
+  const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+  const avatarDir = path.join(projectRoot, 'data', 'avatars');
+  fs.mkdirSync(avatarDir, { recursive: true });
+
+  // null / 空字符串 = 删除头像
+  if (!base64) {
+    const userAvatarPath = path.join(avatarDir, 'user_avatar.png');
+    try { if (fs.existsSync(userAvatarPath)) fs.unlinkSync(userAvatarPath); } catch {}
+    return res.json({ ok: true, avatar_path: null });
+  }
+
+  const filePath = path.join(avatarDir, 'user_avatar.png');
+  const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
+  fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+
+  res.json({ ok: true, avatar_path: '/avatars/user_avatar.png' });
 });
 
 export default router;
