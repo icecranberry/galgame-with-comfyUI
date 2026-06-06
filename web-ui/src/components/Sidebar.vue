@@ -9,9 +9,12 @@
         :key="c.id"
         class="char-item"
         :class="{ active: c.id === chat.activeCharId }"
-        @click="chat.selectChar(c.id)"
+        @click="onCharClick(c)"
       >
-        <div class="char-avatar">{{ c.display_name.charAt(0) }}</div>
+        <div
+          class="char-avatar"
+          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#5b8def' }"
+        >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-info">
           <div class="char-name">{{ c.display_name }}</div>
           <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
@@ -28,18 +31,27 @@
 
     <div class="sidebar-footer">
       <router-link to="/settings" class="nav-link" :class="{ active: $route.path === '/settings' }">
-        ⚙️ 生图参数
+        ⚙️ 系统参数
       </router-link>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 
 const router = useRouter()
+const route = useRoute()
 const chat = useChatStore()
+
+async function onCharClick(c) {
+  await chat.selectChar(c.id)
+  // 当前不在聊天页则跳转到聊天页
+  if (!route.path.startsWith('/chat')) {
+    router.push('/chat/' + c.id)
+  }
+}
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -87,7 +99,7 @@ function formatTime(iso) {
 
 .char-avatar {
   width: 44px; height: 44px; border-radius: 50%;
-  background: #5b8def; color: white;
+  color: white;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 600; flex-shrink: 0;
 }

@@ -133,18 +133,28 @@ export async function generateImage(rawPrompt, { onProgress } = {}) {
     console.error('[imageSkill] ComfyUI error:', err.message);
   }
 
-  return fallbackFromFolder();
+  // 尝试 fallback：从 ComfyUI output 文件夹直接读最新图片
+  console.log('[imageSkill] Trying fallback from ComfyUI output folder...');
+  const fallback = fallbackFromFolder();
+  if (fallback.success) console.log('[imageSkill] Fallback succeeded:', fallback.images[0]?.filename);
+  else console.warn('[imageSkill] Fallback also failed:', fallback.error);
+  return fallback;
 }
 
 function fallbackFromFolder() {
-  const latest = findLatestImageInFolder(OUTPUT_DIR, OUTPUT_SUBFOLDER);
-  if (!latest) return { success: false, images: [], source: null, error: 'No image found' };
-  try {
-    const buffer = fs.readFileSync(latest.path);
-    const ext = path.extname(latest.name).slice(1) || 'png';
-    const base64 = `data:image/${ext};base64,${buffer.toString('base64')}`;
-    return { success: true, images: [{ base64, filename: latest.name }], source: 'folder' };
-  } catch (err) {
-    return { success: false, images: [], source: null, error: err.message };
+  // 先搜 bot/ 子文件夹，再搜 output 根目录
+  for (const subfolder of [OUTPUT_SUBFOLDER, '.']) {
+    const latest = findLatestImageInFolder(OUTPUT_DIR, subfolder);
+    if (!latest) continue;
+    try {
+      const buffer = fs.readFileSync(latest.path);
+      const ext = path.extname(latest.name).slice(1) || 'png';
+      const base64 = `data:image/${ext};base64,${buffer.toString('base64')}`;
+      console.log(`[imageSkill] Found in ${subfolder}/: ${latest.name}`);
+      return { success: true, images: [{ base64, filename: latest.name }], source: 'folder' };
+    } catch (err) {
+      console.warn(`[imageSkill] Read failed for ${latest.path}:`, err.message);
+    }
   }
+  return { success: false, images: [], source: null, error: 'No image found' };
 }

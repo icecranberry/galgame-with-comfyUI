@@ -34,6 +34,24 @@ export async function generateCharacter(description) {
   return res.json()
 }
 
+export async function deleteCharacter(id) {
+  const res = await fetch(`${BASE}/characters/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function uploadAvatar(characterId, base64) {
+  const res = await fetch(`${BASE}/characters/${characterId}/avatar`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  return res.json()
+}
+
+export async function getRecentImages(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/recent-images`)
+  return res.json()
+}
+
 export function chatStream(characterId, message) {
   const controller = new AbortController()
   const stream = new ReadableStream({
@@ -116,6 +134,19 @@ export async function updateFeatureFlag(key, value) {
   await fetch(`${BASE}/config/features`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }),
   })
+}
+
+// ── Global Rules ──
+export async function getGlobalRules() {
+  const res = await fetch(`${BASE}/config/rules`)
+  return res.json()
+}
+
+export async function updateGlobalRule(key, data) {
+  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  return res.json()
 }
 
 // ── ComfyUI health ──

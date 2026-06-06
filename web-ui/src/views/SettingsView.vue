@@ -1,101 +1,130 @@
 <template>
   <div class="settings-view">
     <div class="page-header">
-      <h2>ComfyUI 生图参数</h2>
+      <h2>系统参数</h2>
       <span class="hint">修改即时生效，无需重启</span>
     </div>
 
-    <!-- ComfyUI params -->
-    <div class="card">
-      <label class="fl">画师串（节点 96）</label>
-      <p class="fd">拼接在 prompt 质量词之前，参考来源：https://anima.mooshieblob.com/</p>
-      <input v-model="form.artist" class="fi" @input="markDirty" />
+    <div class="settings-grid">
+      <!-- ComfyUI params -->
+      <div class="card">
+        <h3>画师串 & 分辨率</h3>
+        <p class="fd">拼接在 prompt 质量词之前，参考来源：https://anima.mooshieblob.com/</p>
+        <input v-model="form.artist" class="fi" @input="markDirty" />
 
-      <div class="fr">
-        <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-        <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-      </div>
-
-      <div class="fpresets">
-        <span class="pl">预设：</span>
-        <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p)">{{ p.label }}</button>
-      </div>
-
-      <div class="sa">
-        <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
-        <span v-if="saved" class="smsg">已保存</span>
-      </div>
-    </div>
-
-    <!-- 角色工坊：AI 生成角色人格 -->
-    <div class="card">
-      <h3>角色工坊</h3>
-      <p class="fd">输入简短的描述，AI 自动扩写成完整角色人格并写入数据库</p>
-      <div class="cg-row">
-        <input v-model="charDesc" class="fi" placeholder="例：芙宁娜（原神） / 傲娇的猫娘女仆 / 沉稳的退伍军人"
-          @keydown.enter="generateNewChar" :disabled="generating" />
-        <button class="btn-primary cg-btn" @click="generateNewChar" :disabled="generating || !charDesc.trim()">
-          {{ generating ? '生成中...' : '✨ 生成角色' }}
-        </button>
-      </div>
-      <div v-if="genError" class="gen-error">{{ genError }}</div>
-      <div v-if="genResult" class="gen-result">
-        <div class="gen-result-header">
-          <span class="gen-check">✅</span>
-          <span>角色 <strong>{{ genResult.display_name }}</strong> 已写入数据库</span>
+        <div class="fr">
+          <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+          <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
         </div>
-        <details class="gen-details">
-          <summary>查看生成的人格提示词</summary>
-          <pre class="gen-preview">{{ genResult.base_prompt }}</pre>
-        </details>
-      </div>
-    </div>
 
-    <!-- Feature toggles -->
-    <div class="card">
-      <h3>功能开关</h3>
-      <p class="fd">开发期关闭以节省 DeepSeek API 调用</p>
-
-      <div class="toggle-row">
-        <div>
-          <div class="tl">情绪刺激评估</div>
-          <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
+        <div class="fpresets">
+          <span class="pl">预设：</span>
+          <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p)">{{ p.label }}</button>
         </div>
-        <label class="switch">
-          <input type="checkbox" v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
-          <span class="slider"></span>
-        </label>
-      </div>
 
-      <div class="toggle-row">
-        <div>
-          <div class="tl">记忆碎片提取</div>
-          <div class="td">从对话中提取事实/偏好/情绪碎片存入向量数据库</div>
+        <div class="sa">
+          <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
+          <span v-if="saved" class="smsg">已保存</span>
         </div>
-        <label class="switch">
-          <input type="checkbox" v-model="features.memoryExtract" @change="saveFeature('memoryExtract', features.memoryExtract)" />
-          <span class="slider"></span>
-        </label>
+      </div>
+
+      <!-- 功能开关 -->
+      <div class="card">
+        <h3>功能开关</h3>
+        <p class="fd">开发期关闭以节省 DeepSeek API 调用</p>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">情绪刺激评估</div>
+            <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">记忆碎片提取</div>
+            <div class="td">从对话中提取事实/偏好/情绪碎片存入向量数据库</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.memoryExtract" @change="saveFeature('memoryExtract', features.memoryExtract)" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 角色工坊：AI 生成角色人格 -->
+      <div class="card">
+        <h3>角色工坊</h3>
+        <p class="fd">输入简短的描述，AI 自动扩写成完整角色人格并写入数据库</p>
+        <div class="cg-row">
+          <input v-model="charDesc" class="fi" placeholder="例：芙宁娜（原神） / 傲娇的猫娘女仆 / 沉稳的退伍军人"
+            @keydown.enter="generateNewChar" :disabled="generating" />
+          <button class="btn-primary cg-btn" @click="generateNewChar" :disabled="generating || !charDesc.trim()">
+            {{ generating ? '生成中...' : '✨ 生成角色' }}
+          </button>
+        </div>
+        <div v-if="genError" class="gen-error">{{ genError }}</div>
+        <div v-if="genResult" class="gen-result">
+          <div class="gen-result-header">
+            <span class="gen-check">✅</span>
+            <span>角色 <strong>{{ genResult.display_name }}</strong> 已写入数据库</span>
+          </div>
+          <details class="gen-details">
+            <summary>查看生成的人格提示词</summary>
+            <pre class="gen-preview">{{ genResult.base_prompt }}</pre>
+          </details>
+        </div>
+      </div>
+
+      <!-- ComfyUI status -->
+      <div class="card">
+        <h3>ComfyUI 连接</h3>
+        <div class="sr">
+          <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
+          <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
+        </div>
+        <button class="btn-ghost" @click="checkHealth">刷新</button>
       </div>
     </div>
 
-    <!-- ComfyUI status -->
-    <div class="card">
-      <h3>ComfyUI 连接</h3>
-      <div class="sr">
-        <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
-        <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
+    <!-- 全局规则 — 跨满宽 -->
+    <div class="card card-full">
+      <h3>全局规则</h3>
+      <p class="fd">追加到每个角色 system prompt 末尾的通用指令，修改即时生效</p>
+
+      <div class="rules-grid">
+        <div v-for="rule in rules" :key="rule.rule_key" class="rule-block">
+          <div class="rule-header">
+            <span class="rule-label">{{ ruleLabels[rule.rule_key] || rule.rule_key }}</span>
+            <label class="switch">
+              <input type="checkbox" :checked="rule._active" @change="rule._active = $event.target.checked; markRuleDirty(rule.rule_key)" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <textarea
+            class="rule-textarea"
+            :value="rule._content"
+            @input="rule._content = $event.target.value; markRuleDirty(rule.rule_key)"
+            rows="10"
+          ></textarea>
+          <div class="rule-actions">
+            <button class="btn-primary btn-sm" :disabled="!rulesDirty[rule.rule_key]" @click="saveRule(rule)">保存</button>
+            <span v-if="rulesSaved[rule.rule_key]" class="smsg">已保存</span>
+          </div>
+        </div>
       </div>
-      <button class="btn-ghost" @click="checkHealth">刷新</button>
     </div>
 
-    <router-link to="/chat" class="back-btn-bottom">← 返回聊天</router-link>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { getConfig, updateComfyConfig, updateFeatureFlag, comfyuiHealth } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
 
 const chat = useChatStore()
@@ -105,6 +134,14 @@ const features = reactive({ emotion: false, memory: false, memoryExtract: false 
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
+const rules = ref([])
+const rulesDirty = ref({})
+const rulesSaved = ref({})
+
+const ruleLabels = {
+  image_intent: '图像生成判断（<needImage>）',
+  image_gen: '图像生成指令（<prompt>+<context>）',
+}
 
 const presets = [
   { label: '512×768', width: 512, height: 768 },
@@ -122,6 +159,7 @@ onMounted(async () => {
     Object.assign(features, data.features)
   } catch {}
   await checkHealth()
+  await loadRules()
 })
 
 function markDirty() { dirty.value = true; saved.value = false }
@@ -139,6 +177,38 @@ async function saveFeature(key, val) {
 }
 
 async function checkHealth() { health.value = await comfyuiHealth() }
+
+// ── 全局规则 ──
+async function loadRules() {
+  try {
+    const data = await getGlobalRules()
+    rules.value = (data.rules || []).map(r => ({
+      ...r,
+      _content: r.rule_content,
+      _active: !!r.is_active,
+    }))
+  } catch {}
+}
+
+function markRuleDirty(key) { rulesDirty.value[key] = true; rulesSaved.value[key] = false }
+async function saveRule(rule) {
+  try {
+    const result = await updateGlobalRule(rule.rule_key, {
+      rule_content: rule._content,
+      is_active: rule._active,
+    })
+    if (result.ok) {
+      rule.rule_content = rule._content
+      rule.is_active = rule._active ? 1 : 0
+      rule.updated_at = result.rule?.updated_at || new Date().toISOString()
+      rulesDirty.value[rule.rule_key] = false
+      rulesSaved.value[rule.rule_key] = true
+      setTimeout(() => rulesSaved.value[rule.rule_key] = false, 2000)
+    }
+  } catch (err) {
+    console.error('[rules] save failed:', err)
+  }
+}
 
 // ── 角色工坊 ──
 const charDesc = ref('')
@@ -164,13 +234,15 @@ async function generateNewChar() {
 </script>
 
 <style scoped>
-.settings-view { padding: 24px; overflow-y: auto; height: 100vh; max-width: 620px; }
+.settings-view { padding: 24px; overflow-y: auto; height: 100vh; flex: 1; }
 .page-header { margin-bottom: 24px; }
 .page-header h2 { font-size: 20px; color: var(--text-bright); }
 .hint { font-size: 12px; color: var(--text-secondary); }
-.hint { font-size: 12px; color: var(--text-secondary); }
 
-.card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.card-full { grid-column: 1 / -1; margin-top: 16px; }
+.rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 8px; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -201,18 +273,41 @@ async function generateNewChar() {
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
 
-.back-btn-bottom {
-  display: block; text-align: center;
-  padding: 12px 0; margin-top: 8px;
-  border-radius: 20px;
-  background: var(--bg-secondary);
+/* 全局规则 */
+.rule-block {
   border: 1px solid var(--border);
-  color: var(--text-primary);
-  font-size: 14px; font-weight: 500;
-  text-decoration: none; cursor: pointer;
-  transition: background 0.15s;
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--bg-primary);
 }
-.back-btn-bottom:hover { background: var(--bg-hover); }
+.rule-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px;
+}
+.rule-label {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.rule-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 12px; line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 120px;
+  font-family: inherit;
+}
+.rule-textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.rule-actions {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 10px;
+}
+.btn-sm { font-size: 12px; padding: 5px 14px; }
 
 /* 角色工坊 */
 .cg-row { display:flex; gap:10px; align-items:center; }

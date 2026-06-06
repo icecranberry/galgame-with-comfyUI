@@ -248,12 +248,8 @@ function stripTags(content) {
 
 function getDefaultPrompt() {
   return `你是一个创意图像生成助手。用户会和你聊天，描述他们想生成的图像。
-你可以帮助优化图像描述，使其更适合 AI 图像生成。请用中文回复，语气友好而专业。
-
-当用户想要生成图片时，你的回复必须包含两个标签：
-
-<context>假设图片已生成，带着图跟用户说话。不要描述图片内容，自然联想互动。</context>
-<prompt>描述需要画的内容，用中文。需要详细：IP角色注明角色名（作品名）；描述场景、镜头、表情、衣服、动作；多角色时区分发色和动作。</prompt>`;
+你可以帮助优化图像描述，使其更适合 AI 图像生成。
+请用中文回复，语气友好而专业。`;
 }
 
 async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send) {

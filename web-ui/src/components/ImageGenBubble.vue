@@ -68,16 +68,37 @@ const images = ref(props.msg.images || [])
 watch(() => props.msg.genStatus, (v) => { genStatus.value = v })
 watch(() => props.msg.images, (v) => { images.value = v || [] })
 
+// ── 真实进度（ComfyUI WebSocket → KSampler step/total）──
+const realProgress = ref(props.msg.genProgress ?? 0)
+const realTotalSteps = ref(props.msg.genTotalSteps ?? 0)
+watch(() => props.msg.genProgress, (v) => { if (v !== undefined) realProgress.value = v })
+watch(() => props.msg.genTotalSteps, (v) => { if (v !== undefined) realTotalSteps.value = v })
+
+// ── 模拟进度兜底（提交中 / 等待 WebSocket 阶段）──
 const simulatedPct = ref(0)
 let timer = null
 let maxedOut = false
 
-const displayPct = computed(() => genStatus.value === 'done' ? 100 : Math.floor(simulatedPct.value))
-const dashOffset = computed(() => circumference * (1 - (genStatus.value === 'done' ? 100 : simulatedPct.value) / 100))
+// 显示百分比：真实进度优先，无真实进度时用模拟
+const displayPct = computed(() => {
+  if (genStatus.value === 'done') return 100
+  if (realProgress.value > 0) return Math.floor(realProgress.value * 100)
+  return Math.floor(simulatedPct.value)
+})
+
+const dashOffset = computed(() => circumference * (1 - displayPct.value / 100))
 
 const statusText = computed(() => {
   if (genStatus.value === 'pending') return '发送中...'
-  if (genStatus.value === 'generating' && displayPct.value >= 95) return '即将完成...'
+  if (genStatus.value === 'generating') {
+    if (realProgress.value > 0) {
+      const pct = Math.floor(realProgress.value * 100)
+      if (realTotalSteps.value > 0) return `生成中 ${pct}%（${realTotalSteps.value}步）`
+      return `生成中 ${pct}%`
+    }
+    if (displayPct.value >= 95) return '即将完成...'
+    return '生成中...'
+  }
   return '发送中...'
 })
 
@@ -85,6 +106,8 @@ function scheduleTick() {
   timer = setTimeout(() => {
     if (genStatus.value === 'done') { simulatedPct.value = 100; return }
     if (genStatus.value === 'error') return
+    // 真实进度存在时，模拟停止增量（避免覆盖）
+    if (realProgress.value > 0) { scheduleTick(); return }
     if (maxedOut) { scheduleTick(); return }
     const inc = 1 + Math.random() * 3
     simulatedPct.value = Math.min(95, simulatedPct.value + inc)

@@ -105,6 +105,37 @@ export const useChatStore = defineStore('chat', () => {
     return result
   }
 
+  async function updateAvatarColor(color) {
+    const id = activeCharId.value
+    if (!id) return
+    await api.updateCharacter(id, { avatar_color: color })
+    await loadCharacters()
+  }
+
+  async function uploadAvatar(base64) {
+    const id = activeCharId.value
+    if (!id) return
+    const r = await api.uploadAvatar(id, base64 || '')
+    await loadCharacters()
+    return r
+  }
+
+  async function getRecentChatImages() {
+    const id = activeCharId.value
+    if (!id) return { images: [] }
+    return api.getRecentImages(id)
+  }
+
+  async function deleteActiveCharacter() {
+    const id = activeCharId.value
+    const char = characters.value.find(c => c.id === id)
+    if (!id || char?.name === 'default') return
+    await api.deleteCharacter(id)
+    messages.value = []
+    activeCharId.value = null
+    await loadCharacters()
+  }
+
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
   async function sendMessage(content) {
@@ -204,7 +235,12 @@ export const useChatStore = defineStore('chat', () => {
           }
           if (lastEvent === 'generate_progress') {
             const gm = findGenMsg(d.taskId)
-            if (gm) gm.genStatus = 'generating'
+            if (gm) {
+              gm.genStatus = 'generating'
+              // 注入真实进度数据（ComfyUI WebSocket → KSampler 采样步数）
+              if (d.progress !== undefined) gm.genProgress = d.progress
+              if (d.totalSteps !== undefined) gm.genTotalSteps = d.totalSteps
+            }
           }
           if (lastEvent === 'generate_done') {
             const gm = findGenMsg(d.taskId)
@@ -245,5 +281,5 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return { characters, activeCharId, messages, streaming, streamingContent, hasMoreOlder, loadingOlder, activeChar,
-    loadCharacters, loadMessages, loadOlderMessages, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, sendMessage }
+    loadCharacters, loadMessages, loadOlderMessages, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
 })

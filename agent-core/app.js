@@ -21,6 +21,7 @@ app.use(express.static('public'));
 
 // 图片存储目录（独立于 public，不会被 vite build 清空）
 app.use('/images', express.static('data/images'));
+app.use('/avatars', express.static('data/avatars'));
 
 // API 路由
 app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
