@@ -85,6 +85,16 @@ function initSchema(db) {
       finished_at DATETIME
     );
 
+    -- 全局规则表（追加到每个角色的 system prompt 末尾）
+    CREATE TABLE IF NOT EXISTS global_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_key TEXT NOT NULL UNIQUE,
+      rule_content TEXT NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 角色配置表
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +147,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
   `);
 
+  // 种子: 默认全局规则
+  seedGlobalRules(db);
+
   // 迁移: 添加 mood_valence/mood_arousal/mood_dominance 列
   migrateEmotionTable(db);
 
@@ -150,6 +163,29 @@ function initSchema(db) {
   rebuildFtsIndex(db);
 }
 
+function seedGlobalRules(db) {
+  const DEFAULT_RULES = [
+    {
+      rule_key: 'image_intent',
+      rule_content: `## 图像生成判断
+在每次回复的最后，请判断用户的发言是否隐含了想要看到画面的意图。
+即使对方没有明确使用"画""生成""发张"等词汇，只要表达了以下倾向，就应当在回复最末尾追加 <needImage> 标签：
+- 想看某个场景、角色、画面（"好想看……""会是什么样子呢"）
+- 你的回复内容很适合配合一张图片展示（"我给你看看"）
+- 用户的情绪适合用一张图来回应的
+
+注意：
+- 如果你的回复已经包含了 <prompt> 和 <context> 标签，则不要加 <needImage>
+- <needImage> 标签必须放在回复的最末尾，前后不要加任何其他文字或标点`,
+    },
+  ];
+
+  const insert = db.prepare(`INSERT OR IGNORE INTO global_rules (rule_key, rule_content) VALUES (?, ?)`);
+  for (const rule of DEFAULT_RULES) {
+    insert.run(rule.rule_key, rule.rule_content);
+  }
+}
+
 function migrateCharacterPrompts(db) {
   // 将旧 <generate> 标签格式的角色 prompt 更新为新格式
   const rows = db.prepare(`SELECT id, base_prompt FROM characters WHERE base_prompt LIKE '%<generate>%'`).all();
@@ -160,6 +196,12 @@ function migrateCharacterPrompts(db) {
 
 当用户想要生成图片时，你的回复必须包含两个标签：
 
+<context>
+假设图片已经生成好了，你带着这张图跟用户说话。
+不要描述图片内容！基于内容做自然的联想和互动。
+例如："看，我就说有这件事吧"、"怎么样，很可爱吧~"、"喏，给你"
+</context>
+
 <prompt>
 描述需要画的内容，用中文。需要详细：
 - IP 角色注明 角色名（作品名），如"芙宁娜（原神）"
@@ -167,12 +209,6 @@ function migrateCharacterPrompts(db) {
 - 多角色时区分：什么发色的谁在做什么动作
 - 不要用英文，用中文描述
 </prompt>
-
-<context>
-假设图片已经生成好了，你带着这张图跟用户说话。
-不要描述图片内容！基于内容做自然的联想和互动。
-例如："看，我就说有这件事吧"、"怎么样，很可爱吧~"、"喏，给你"
-</context>
 
 注意：<context>里的文字会显示给用户，<prompt>里的用于生成图片。两个标签缺一不可。`;
     for (const row of rows) {
@@ -265,4 +301,13 @@ export function closeDb() {
     db.close();
     db = null;
   }
+}
+
+/**
+ * 获取所有激活的全局规则内容（拼接为一个字符串）
+ */
+export function getActiveGlobalRules() {
+  const database = getDb();
+  const rules = database.prepare(`SELECT rule_content FROM global_rules WHERE is_active = 1`).all();
+  return rules.map(r => r.rule_content).join('\n\n');
 }

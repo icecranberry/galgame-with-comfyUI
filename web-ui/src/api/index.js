@@ -13,16 +13,62 @@ export async function getMessages(characterId, { limit = 50, before } = {}) {
   return res.json()
 }
 
+export async function updateCharacter(id, data) {
+  const res = await fetch(`${BASE}/characters/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function clearMessages(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/messages`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function generateCharacter(description) {
+  const res = await fetch(`${BASE}/characters/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description }),
+  })
+  return res.json()
+}
+
 export function chatStream(characterId, message) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
+      // ── 健壮连接：fetch 异常 + 非 2xx 响应均重试（覆盖代理 ECONNRESET → 502 场景）──
+      let res
+      let retries = 0
+      const MAX_RETRIES = 3
+      while (true) {
+        try {
+          res = await fetch(`${BASE}/characters/${characterId}/chat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+            signal: controller.signal,
+          })
+          if (res.ok) break  // 成功
+          // 非 2xx：也按重试处理（代理 502/504 等）
+          retries++
+          if (retries > MAX_RETRIES) {
+            outerController.error(new Error(`Server returned ${res.status}`))
+            return
+          }
+          console.warn(`[api] bad status ${res.status} (${retries}/${MAX_RETRIES}), retrying in ${retries}s...`)
+          await new Promise(r => setTimeout(r, retries * 1000))
+        } catch (err) {
+          if (err.name === 'AbortError') { outerController.close(); return }
+          retries++
+          if (retries > MAX_RETRIES) { outerController.error(err); return }
+          console.warn(`[api] fetch failed (${retries}/${MAX_RETRIES}): ${err.message}, retrying in ${retries}s...`)
+          await new Promise(r => setTimeout(r, retries * 1000))
+        }
+      }
+
+      // ── 流式读取 ──
       try {
-        const res = await fetch(`${BASE}/characters/${characterId}/chat`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message }),
-          signal: controller.signal,
-        })
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''

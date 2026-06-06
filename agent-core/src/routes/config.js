@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { config, updateComfyConfig, updateFeatureFlag } from '../config.js';
+import { getDb } from '../db/index.js';
 
 const router = Router();
 
@@ -30,6 +31,35 @@ router.put('/features', (req, res) => {
   }
   updateFeatureFlag(key, value);
   res.json({ ok: true, features: config.features });
+});
+
+// GET /api/config/rules — 获取全部全局规则
+router.get('/rules', (req, res) => {
+  const db = getDb();
+  const rules = db.prepare(`SELECT id, rule_key, rule_content, is_active, created_at, updated_at FROM global_rules ORDER BY id`).all();
+  res.json({ rules });
+});
+
+// PUT /api/config/rules/:key — 更新单条全局规则
+router.put('/rules/:key', (req, res) => {
+  const db = getDb();
+  const { rule_content, is_active } = req.body;
+  const rule = db.prepare(`SELECT id FROM global_rules WHERE rule_key = ?`).get(req.params.key);
+  if (!rule) {
+    return res.status(404).json({ error: `Rule not found: ${req.params.key}` });
+  }
+  const updates = [];
+  const params = [];
+  if (rule_content !== undefined) { updates.push('rule_content = ?'); params.push(rule_content); }
+  if (is_active !== undefined) { updates.push('is_active = ?'); params.push(is_active ? 1 : 0); }
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+  updates.push("updated_at = datetime('now')");
+  params.push(req.params.key);
+  db.prepare(`UPDATE global_rules SET ${updates.join(', ')} WHERE rule_key = ?`).run(...params);
+  const updated = db.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(req.params.key);
+  res.json({ ok: true, rule: updated });
 });
 
 export default router;

@@ -8,7 +8,7 @@
     <!-- ComfyUI params -->
     <div class="card">
       <label class="fl">画师串（节点 96）</label>
-      <p class="fd">拼接在 prompt 质量词之前</p>
+      <p class="fd">拼接在 prompt 质量词之前，参考来源：https://anima.mooshieblob.com/</p>
       <input v-model="form.artist" class="fi" @input="markDirty" />
 
       <div class="fr">
@@ -24,6 +24,30 @@
       <div class="sa">
         <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
         <span v-if="saved" class="smsg">已保存</span>
+      </div>
+    </div>
+
+    <!-- 角色工坊：AI 生成角色人格 -->
+    <div class="card">
+      <h3>角色工坊</h3>
+      <p class="fd">输入简短的描述，AI 自动扩写成完整角色人格并写入数据库</p>
+      <div class="cg-row">
+        <input v-model="charDesc" class="fi" placeholder="例：芙宁娜（原神） / 傲娇的猫娘女仆 / 沉稳的退伍军人"
+          @keydown.enter="generateNewChar" :disabled="generating" />
+        <button class="btn-primary cg-btn" @click="generateNewChar" :disabled="generating || !charDesc.trim()">
+          {{ generating ? '生成中...' : '✨ 生成角色' }}
+        </button>
+      </div>
+      <div v-if="genError" class="gen-error">{{ genError }}</div>
+      <div v-if="genResult" class="gen-result">
+        <div class="gen-result-header">
+          <span class="gen-check">✅</span>
+          <span>角色 <strong>{{ genResult.display_name }}</strong> 已写入数据库</span>
+        </div>
+        <details class="gen-details">
+          <summary>查看生成的人格提示词</summary>
+          <pre class="gen-preview">{{ genResult.base_prompt }}</pre>
+        </details>
       </div>
     </div>
 
@@ -72,6 +96,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { getConfig, updateComfyConfig, updateFeatureFlag, comfyuiHealth } from '../api/index.js'
+import { useChatStore } from '../stores/chat.js'
+
+const chat = useChatStore()
 
 const form = ref({ artist: '', width: 1600, height: 1200 })
 const features = reactive({ emotion: false, memory: false, memoryExtract: false })
@@ -112,6 +139,28 @@ async function saveFeature(key, val) {
 }
 
 async function checkHealth() { health.value = await comfyuiHealth() }
+
+// ── 角色工坊 ──
+const charDesc = ref('')
+const generating = ref(false)
+const genError = ref('')
+const genResult = ref(null)
+
+async function generateNewChar() {
+  const desc = charDesc.value.trim()
+  if (!desc || generating.value) return
+  generating.value = true; genError.value = ''; genResult.value = null
+  try {
+    const r = await chat.generateCharacter(desc)
+    if (r.error) { genError.value = r.error; return }
+    genResult.value = r
+    charDesc.value = ''
+  } catch (err) {
+    genError.value = '生成失败: ' + (err.message || '网络错误')
+  } finally {
+    generating.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -164,4 +213,17 @@ async function checkHealth() { health.value = await comfyuiHealth() }
   transition: background 0.15s;
 }
 .back-btn-bottom:hover { background: var(--bg-hover); }
+
+/* 角色工坊 */
+.cg-row { display:flex; gap:10px; align-items:center; }
+.cg-row .fi { flex:1; margin-bottom:0; }
+.cg-btn { flex-shrink:0; white-space:nowrap; }
+.gen-error { margin-top:8px; padding:8px 12px; border-radius:6px; background:rgba(217,83,79,0.08); color:#d9534f; font-size:13px; }
+.gen-result { margin-top:12px; padding:12px; border-radius:8px; background:rgba(76,175,80,0.06); border:1px solid rgba(76,175,80,0.2); }
+.gen-result-header { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text-bright); }
+.gen-check { font-size:18px; }
+.gen-details { margin-top:10px; }
+.gen-details summary { font-size:12px; color:var(--text-secondary); cursor:pointer; }
+.gen-details summary:hover { color:var(--accent); }
+.gen-preview { margin-top:8px; padding:10px; border-radius:6px; background:var(--bg-primary); border:1px solid var(--border); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow-y:auto; color:var(--text-primary); font-family:inherit; }
 </style>

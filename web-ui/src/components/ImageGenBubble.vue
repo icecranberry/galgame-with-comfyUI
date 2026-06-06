@@ -78,7 +78,7 @@ const dashOffset = computed(() => circumference * (1 - (genStatus.value === 'don
 const statusText = computed(() => {
   if (genStatus.value === 'pending') return '发送中...'
   if (genStatus.value === 'generating' && displayPct.value >= 95) return '即将完成...'
-  return 'AI 绘制中...'
+  return '发送中...'
 })
 
 function scheduleTick() {

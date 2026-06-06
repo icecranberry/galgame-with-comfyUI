@@ -22,8 +22,25 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
     params.response_format = response_format;
   }
 
+  // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
+  const logMsgs = messages.map(m => {
+    if (m.content && m.content.includes('ANIMA3 提示词生成模板')) {
+      return { ...m, content: '# ANIMA3 提示词生成模板 v3.0（已省略，共 ' + m.content.length + ' 字符）' };
+    }
+    return m;
+  });
+  console.log('\n══════════ [DeepSeek → sync request] ══════════');
+  console.log(JSON.stringify(logMsgs, null, 2));
+  console.log('───────────────────────────────────────────────');
+
   const res = await client.chat.completions.create(params);
-  return res.choices[0].message.content;
+  const content = res.choices[0].message.content;
+
+  console.log('[DeepSeek ← sync response]');
+  console.log((content || '').slice(0, 2000));
+  console.log('═══════════════════════════════════════════════\n');
+
+  return content;
 }
 
 /**
@@ -31,6 +48,10 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.8 } = {}) {
+  console.log('\n══════════ [DeepSeek → stream request] ══════════');
+  console.log(JSON.stringify(messages, null, 2));
+  console.log('────────────────────────────────────────────────');
+
   const stream = await client.chat.completions.create({
     model,
     messages,
@@ -39,10 +60,21 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
     stream: true,
   });
 
+  console.log('[DeepSeek ← stream response start]');
+  let total = '';
+
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content;
-    if (delta) yield delta;
+    if (delta) {
+      total += delta;
+      yield delta;
+    }
   }
+
+  console.log('[DeepSeek ← stream response end]');
+  console.log((total || '(empty)').slice(0, 2000));
+  if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
+  console.log('═══════════════════════════════════════════════\n');
 }
 
 /**

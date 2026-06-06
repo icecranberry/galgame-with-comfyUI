@@ -2,8 +2,8 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb } from '../db/index.js';
-import { chatStream } from '../llm/deepseek.js';
+import { getDb, getActiveGlobalRules } from '../db/index.js';
+import { chatStream, chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
 import { extractMemoryFragments } from '../services/memoryExtractor.js';
@@ -19,21 +19,61 @@ const router = Router();
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
 
+// DELETE /api/characters/:id/messages — 清空角色对话记录（软删除）
+router.delete('/characters/:id/messages', (req, res) => {
+  const db = getDb();
+  const conversationId = convId(req.params.id);
+  const result = db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`)
+    .run(conversationId);
+  // 重建 FTS5 索引
+  db.exec(`DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages WHERE is_deleted = 0)`);
+  res.json({ ok: true, deleted: result.changes });
+});
+
 // GET /api/characters/:id/messages — 获取角色对话消息
+//   ?limit=50            每次最多条数
+//   ?before=ISO_DATE     加载该日期之前的旧消息（不传则默认最近 7 天）
 router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
   const { limit = '50', before } = req.query;
-
-  let sql = `SELECT id, conversation_id, role, content, images, token_count, created_at
-             FROM messages WHERE conversation_id = ? AND is_deleted = 0`;
+  const limitNum = parseInt(limit, 10);
   const params = [conversationId];
-  if (before) { sql += ` AND id < ?`; params.push(parseInt(before, 10)); }
-  sql += ` ORDER BY id ASC LIMIT ?`;
-  params.push(parseInt(limit, 10));
+
+  let sql;
+  if (before) {
+    // 向上翻：加载 before 日期之前的旧消息（从新到旧取 limit 条，再反转顺序）
+    sql = `SELECT * FROM (
+      SELECT id, conversation_id, role, content, images, token_count, created_at
+      FROM messages
+      WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?
+      ORDER BY id DESC LIMIT ?
+    ) ORDER BY id ASC`;
+    params.push(before, limitNum);
+  } else {
+    // 默认：加载最近 7 天的最新消息
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    sql = `SELECT * FROM (
+      SELECT id, conversation_id, role, content, images, token_count, created_at
+      FROM messages
+      WHERE conversation_id = ? AND is_deleted = 0 AND created_at >= ?
+      ORDER BY id DESC LIMIT ?
+    ) ORDER BY id ASC`;
+    params.push(weekAgo, limitNum);
+  }
 
   const messages = db.prepare(sql).all(...params);
-  res.json({ messages, hasMore: messages.length === parseInt(limit, 10) });
+
+  // 是否还有更早的消息
+  let hasMore = false;
+  if (messages.length > 0) {
+    const oldest = messages[0].created_at;
+    const older = db.prepare(`SELECT COUNT(*) as c FROM messages WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?`)
+      .get(conversationId, oldest);
+    hasMore = older.c > 0;
+  }
+
+  res.json({ messages, hasMore });
 });
 
 // POST /api/characters/:id/chat — 流式对话
@@ -64,11 +104,16 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
 
-    // 3. system prompt（固定人格，不叠加记忆和情绪）
+    // 3. system prompt（固定人格 + 全局规则）
     let systemPrompt = character?.base_prompt || getDefaultPrompt();
+    const globalRules = getActiveGlobalRules();
+    if (globalRules) {
+      systemPrompt += '\n\n' + globalRules;
+    }
 
-    // 4. 生图意图
-    if (detectImageIntent(message)) {
+    // 4. 生图意图（正则强匹配 → 强制生成）
+    const explicitImageIntent = detectImageIntent(message);
+    if (explicitImageIntent) {
       systemPrompt += '\n\n【强制要求】用户要求生成图片。立即用 <prompt> 和 <context> 标签回复，不要问任何问题。';
     }
 
@@ -82,7 +127,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       { role: 'system', content: systemPrompt },
       ...history.map(m => ({ role: m.role, content: m.content })),
     ];
-    if (detectImageIntent(message)) {
+    if (explicitImageIntent) {
       msgs.push({ role: 'user', content: '请立即用 <prompt> 和 <context> 标签回复，不要额外说明。' });
     }
 
@@ -95,9 +140,11 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     send('response_end', {});
 
-    // 7. 解析标签
+    // 7. 解析标签 & needImage 判定
     const tags = extractImageTags(fullContent);
-    const displayContent = tags.context || stripTags(fullContent);
+    const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
+    let displayContent = tags.context || stripTags(fullContent);
+    displayContent = stripNeedImage(displayContent);
     if (tags.prompt || tags.context) send('context_update', { content: displayContent });
 
     // 8. 保存回复
@@ -105,10 +152,18 @@ router.post('/characters/:id/chat', async (req, res) => {
       .run(conversationId, displayContent, Math.ceil(displayContent.length / 2));
     send('msg_saved', { id: aiMsg.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
 
-    // 9. 生图
+    // 9. 生图（两种触发路径）
     if (tags.prompt) {
-      send('generate_start', { prompt: tags.prompt });
-      await triggerImageGeneration(conversationId, tags.prompt, aiMsg.lastInsertRowid, send);
+      // 路径 A: 模型直接输出了 <prompt>（正则强匹配 → 或模型自主决定）
+      const db2 = getDb();
+      const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
+        .run(conversationId, tags.prompt, tags.prompt);
+      const genTaskId = taskResult.lastInsertRowid;
+      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
+      await triggerImageGeneration(conversationId, tags.prompt, aiMsg.lastInsertRowid, genTaskId, send);
+    } else if (hasNeedImageTag) {
+      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt+context
+      await handleNeedImageFlow(conversationId, character, send);
     }
 
     // 10. 后处理（按开关决定）
@@ -144,9 +199,27 @@ router.post('/characters/:id/chat', async (req, res) => {
 // ── helpers ──
 
 function detectImageIntent(message) {
-  return [/画[一个张幅]/, /生成[一个张幅]?图/, /给我[看看瞧瞧]/, /展示[一下]/, /来[一个张幅]/, /帮我画/, /帮我生成/,
-    /做[一个张幅]图/, /画出来/, /生成出来/, /我想要[一个张幅]?图/, /能[不能]?画/, /能不能画/, /出[一个张幅]图/,
-    /创建[一个张幅]?图/, /制作[一个张幅]?图/, /整[一个张幅]/, /来[张个幅]图/, /要[一个张幅]图/, /搞[一个张幅]/, /设计[一个张幅]?图/,
+  return [
+    // 画/生成/做/创建/制作/设计 + 量词
+    /画[一个张幅]/, /生成[一个张幅]?图/, /做[一个张幅]图/, /创建[一个张幅]?图/, /制作[一个张幅]?图/, /设计[一个张幅]?图/,
+    /出[一个张幅]图/,
+    // 给我/展示/来/要/搞/整 + 量词
+    /给我[看看瞧瞧]/, /展示[一下]/, /来[一个张幅]/, /来[张个幅]图/, /要[一个张幅]图/, /搞[一个张幅]/, /整[一个张幅]/,
+    // 帮我 + 动作
+    /帮我画/, /帮我生成/,
+    // 动词 + 出来
+    /画出来/, /生成出来/,
+    // 我想/我能 + 动作
+    /我想要[一个张幅]?图/, /能[不能]?画/, /能不能画/,
+    // ── 新增: 更自然的聊天式触发 ──
+    /发[一二三四五六七八九十]?[张个幅]/,   // 发张、发一张、发个、发幅
+    /发图/,                                   // 发图（简写）
+    /发出来/,                                 // 发出来看看
+    /想看/,                                   // 想看xxx
+    /看看.*[图图片照]/,                       // 看看...图/照片
+    /找[一二三四五六七八九十]?[张个幅]/,     // 找张、找一张、找个
+    /搜[一二三四五六七八九十]?[张个幅]/,     // 搜张、搜一张
+    /[图图片照]呢/,                           // 图呢、照片呢
   ].some(p => p.test(message));
 }
 
@@ -156,8 +229,21 @@ function extractImageTags(content) {
   return { prompt: promptMatch?.[1]?.trim() || null, context: contextMatch?.[1]?.trim() || null };
 }
 
+function hasNeedImage(content) {
+  return /<needImage>/i.test(content);
+}
+
+function stripNeedImage(content) {
+  return content.replace(/<needImage>/gi, '').trim();
+}
+
 function stripTags(content) {
-  return content.replace(/<prompt>[\s\S]*?<\/prompt>/gi, '').replace(/<context>[\s\S]*?<\/context>/gi, '').replace(/<generate>[\s\S]*?<\/generate>/gi, '').trim();
+  return content
+    .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
+    .replace(/<context>[\s\S]*?<\/context>/gi, '')
+    .replace(/<generate>[\s\S]*?<\/generate>/gi, '')
+    .replace(/<needImage>/gi, '')
+    .trim();
 }
 
 function getDefaultPrompt() {
@@ -166,25 +252,22 @@ function getDefaultPrompt() {
 
 当用户想要生成图片时，你的回复必须包含两个标签：
 
-<prompt>描述需要画的内容，用中文。需要详细：IP角色注明角色名（作品名）；描述场景、镜头、表情、衣服、动作；多角色时区分发色和动作。</prompt>
-<context>假设图片已生成，带着图跟用户说话。不要描述图片内容，自然联想互动。</context>`;
+<context>假设图片已生成，带着图跟用户说话。不要描述图片内容，自然联想互动。</context>
+<prompt>描述需要画的内容，用中文。需要详细：IP角色注明角色名（作品名）；描述场景、镜头、表情、衣服、动作；多角色时区分发色和动作。</prompt>`;
 }
 
-async function triggerImageGeneration(conversationId, prompt, assistantMsgId, send) {
+async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send) {
   const db = getDb();
-  const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
-    .run(conversationId, prompt, prompt);
-  const taskId = taskResult.lastInsertRowid;
 
-  // 计算 public/images 的绝对路径（app.js 所在目录/public/images）
+  // 计算 data/images 的绝对路径（agent-core/data/images/，不会被 vite build 清空）
   const __filename = fileURLToPath(import.meta.url);
   const projectRoot = path.dirname(path.dirname(path.dirname(__filename))); // agent-core/
-  const imagesDir = path.join(projectRoot, 'public', 'images');
+  const imagesDir = path.join(projectRoot, 'data', 'images');
 
   try {
     const result = await generateImage(prompt, { onProgress: (p) => send('generate_progress', { taskId, ...p }) });
     if (result.success && result.images.length > 0) {
-      // 落盘 base64 图片到 public/images/，构建 URL 数组
+      // 落盘 base64 图片到 data/images/，构建 URL 数组
       fs.mkdirSync(imagesDir, { recursive: true });
       const urls = [];
       for (const img of result.images) {
@@ -215,6 +298,68 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, se
     db.prepare(`UPDATE image_tasks SET status='failed', error_message=?, finished_at=datetime('now') WHERE id=?`)
       .run(err.message, taskId);
     send('generate_error', { taskId, error: err.message });
+  }
+}
+
+/**
+ * needImage 二次触发流程:
+ *   模型自主判断用户想要图片 → 追加了 <needImage> →
+ *   后端再请求一次模型，让它补上 <prompt> + <context> →
+ *   然后走正常生图流程
+ */
+async function handleNeedImageFlow(conversationId, character, send) {
+  const db = getDb();
+  console.log('[chat] needImage detected, requesting prompt from model...');
+
+  // 1. 构建二次请求的 system prompt（人格 + 全局规则 + 强制生图指令）
+  let systemPrompt = character?.base_prompt || getDefaultPrompt();
+  const globalRules = getActiveGlobalRules();
+  if (globalRules) {
+    systemPrompt += '\n\n' + globalRules;
+  }
+  systemPrompt += '\n\n【强制要求】你刚才判断用户想要一张图片。现在请立即用 <prompt> 和 <context> 标签描述一张合适的画面。不要额外解释，不要确认，直接输出两个标签。';
+
+  // 2. 加载历史（含刚才的第一轮回复）
+  const history = db.prepare(`
+    SELECT role, content FROM messages
+    WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
+  `).all(conversationId).reverse();
+
+  const msgs = [
+    { role: 'system', content: systemPrompt },
+    ...history.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: '请立即用 <prompt> 和 <context> 标签回复，不要额外说明。' },
+  ];
+
+  // 3. 静默请求模型生成 prompt + context（不流式，避免前端气泡混乱）
+  let fullContent = '';
+  try {
+    fullContent = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024 });
+    console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
+  } catch (err) {
+    console.error('[chat] needImage follow-up error:', err.message);
+    send('generate_error', { error: '生图请求失败' });
+    return;
+  }
+
+  // 4. 解析标签
+  const tags = extractImageTags(fullContent);
+  const displayContent = tags.context || stripTags(fullContent);
+
+  // 5. 保存第二轮回复（context 文本，用户下次进入对话可见）
+  const aiMsg = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
+    .run(conversationId, displayContent, Math.ceil(displayContent.length / 2));
+
+  // 6. 触发生图（不发 context_update，首条回复保持不变）
+  if (tags.prompt) {
+    const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
+      .run(conversationId, tags.prompt, tags.prompt);
+    const genTaskId = taskResult.lastInsertRowid;
+    send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
+    await triggerImageGeneration(conversationId, tags.prompt, aiMsg.lastInsertRowid, genTaskId, send);
+  } else {
+    console.log('[chat] needImage follow-up: no prompt tags found, falling back');
+    send('generate_error', { error: '模型未返回图像描述' });
   }
 }
 

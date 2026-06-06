@@ -19,6 +19,9 @@ app.use(express.json({ limit: '10mb' }));
 // 静态文件（Vue 前端，构建后）
 app.use(express.static('public'));
 
+// 图片存储目录（独立于 public，不会被 vite build 清空）
+app.use('/images', express.static('data/images'));
+
 // API 路由
 app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/memory', memoryRoutes);
@@ -49,10 +52,12 @@ getDb();
 console.log('[db] SQLite initialized');
 
 // 先启动 HTTP 服务，向量检查异步进行
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`[agent-core] http://localhost:${config.port}`);
   console.log('============================================');
 });
+// 缩短 keep-alive 空闲超时，避免 Vite 代理在进程重启后复用到已死连接
+server.keepAliveTimeout = 5000;
 
 // 异步检查向量服务（不阻塞启动）
 (async () => {
@@ -81,8 +86,15 @@ process.on('uncaughtException', (err) => {
 });
 
 // 优雅退出
-process.on('SIGINT', async () => {
+const shutdown = () => {
   console.log('\n[agent-core] shutting down...');
-  closeDb();
-  process.exit(0);
-});
+  // 先关 HTTP 服务（拒绝新连接），再清理资源
+  server.close(() => {
+    closeDb();
+    process.exit(0);
+  });
+  // 5 秒硬超时兜底
+  setTimeout(() => process.exit(1), 5000).unref();
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
