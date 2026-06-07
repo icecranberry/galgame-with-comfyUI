@@ -54,6 +54,17 @@
             <span class="slider"></span>
           </label>
         </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">智能配图判断</div>
+            <div class="td">AI 回复后自动判断是否需要配图增强表达，无需用户主动要求</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.autoImageJudge" @change="saveFeature('autoImageJudge', features.autoImageJudge)" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- 角色工坊：AI 生成角色人格 -->
@@ -156,7 +167,7 @@ import { userAvatar, loadUserAvatar, uploadUserAvatar } from '../userConfig.js'
 const chat = useChatStore()
 
 const form = ref({ artist: '', width: 1600, height: 1200 })
-const features = reactive({ emotion: false, memory: false, memoryExtract: false })
+const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false })
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)

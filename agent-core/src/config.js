@@ -28,6 +28,7 @@ export const config = {
     emotion: process.env.FEATURE_EMOTION !== 'false',
     memory: process.env.FEATURE_MEMORY !== 'false',
     memoryExtract: process.env.FEATURE_MEMORY_EXTRACT === 'true', // 默认关
+    autoImageJudge: process.env.FEATURE_AUTO_IMAGE_JUDGE !== 'false', // 默认开
   },
 };
 
@@ -57,7 +58,7 @@ export function updateFeatureFlag(key, value) {
   config.features[key] = boolVal;
   const envKey = `FEATURE_${key.toUpperCase().replace(/([A-Z])/g, '_$1').toUpperCase()}`;
   // 简化的 key 映射
-  const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT' };
+  const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT', autoImageJudge: 'FEATURE_AUTO_IMAGE_JUDGE' };
   persistEnv(keyMap[key] || `FEATURE_${key.toUpperCase()}`, boolVal);
   console.log(`[config] Feature ${key} = ${boolVal}`);
 }

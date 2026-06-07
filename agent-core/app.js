@@ -86,8 +86,11 @@ process.on('uncaughtException', (err) => {
   console.error('[agent-core] uncaught exception:', err.message);
 });
 
-// 优雅退出
+// 优雅退出（幂等 — 防止 shutdown 端点 + 信号双重触发）
+let shuttingDown = false;
 const shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('\n[agent-core] shutting down...');
   // 先关 HTTP 服务（拒绝新连接），再清理资源
   server.close(() => {
@@ -99,3 +102,9 @@ const shutdown = () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// 供 dev.mjs 在 taskkill 前触发优雅退出
+app.post('/api/shutdown', (req, res) => {
+  res.json({ ok: true });
+  shutdown();
+});

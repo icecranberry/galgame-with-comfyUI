@@ -136,7 +136,10 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     // 格式锚定：在用户消息前插入 few-shot 正确格式对话范例
     // （DeepSeek/LLM 对上下文中的示例遵循度远超规则文本，这是最有效的格式矫正手段）
-    msgs.splice(msgs.length - (explicitImageIntent ? 2 : 1), 0, buildFormatAnchor(charDisplayName));
+    // 生图意图时跳过 — 此时需要的是结构化标签输出，而非对话格式范例
+    if (!explicitImageIntent) {
+      msgs.splice(msgs.length - 1, 0, buildFormatAnchor(charDisplayName));
+    }
 
     // 6. 流式生成（温度 0.65）
     // 气泡分割: 每个 chunk 内按 <br> 或连续空行切分，分隔符触发 bubble_break
@@ -172,16 +175,10 @@ router.post('/characters/:id/chat', async (req, res) => {
     displayContent = stripNeedImage(displayContent);
     if (tags.prompt || tags.context) send('context_update', { content: displayContent });
 
-    // 8. 在 fullContent（保留标记）上按气泡分割符拆分保存，再逐条清理
-    // 分隔符: <br> 及其两侧紧邻的换行，或连续 2+ 换行
-    const rawSegments = fullContent.split(/(?:\n*<br\s*\/?>\n*|\n{2,})/i)
-      .map(s => s.trim())
+    // 8. 在 displayContent（已剥离 XML 标签的干净文本）上按气泡分割符拆分保存
+    const segments = displayContent.split(/(?:<br\s*\/?>|\n{2,})/i)
+      .map(s => stripBracketActions(s).trim())
       .filter(s => s.length > 0);
-    const segments = rawSegments.map(s => {
-      let t = stripBracketActions(s);
-      t = stripNeedImage(stripTags(t));
-      return t;
-    }).filter(s => s.trim().length > 0);
     const savedIds = [];
     for (const seg of segments) {
       const r = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
@@ -198,7 +195,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     const lastInsertRowid = savedIds[savedIds.length - 1];
 
-    // 9. 生图（两种触发路径）
+    // 9. 生图（三种触发路径）
     if (tags.prompt) {
       // 路径 A: 模型直接输出了 <prompt>（正则强匹配 → 或模型自主决定）
       const db2 = getDb();
@@ -210,6 +207,18 @@ router.post('/characters/:id/chat', async (req, res) => {
     } else if (hasNeedImageTag) {
       // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt+context
       await handleNeedImageFlow(conversationId, character, send);
+    } else if (config.features.autoImageJudge) {
+      // 路径 C: 静默判断 — 延迟约 300ms，SSE 保持打开以支持后续生图进度推送
+      try {
+        const needImage = await judgeImageNeed(conversationId);
+        if (needImage) {
+          console.log('[chat] auto judge: image needed, triggering needImage flow');
+          const char = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
+          await handleNeedImageFlow(conversationId, char, send);
+        }
+      } catch (err) {
+        console.error('[chat] auto judge error:', err.message);
+      }
     }
 
     // 10. 后处理（按开关决定）
@@ -373,6 +382,51 @@ function getDefaultPrompt() {
   return `你是一个创意图像生成助手。用户会和你聊天，描述他们想生成的图像。
 你可以帮助优化图像描述，使其更适合 AI 图像生成。
 请用中文回复，语气友好而专业。`;
+}
+
+/**
+ * 静默判断：给定最近对话，是否需要配一张图片增强表达
+ * 极轻量 DeepSeek 调用（只需"是/否"），延迟通常 < 300ms
+ */
+async function judgeImageNeed(conversationId) {
+  const db = getDb();
+  // 取最后一条用户消息 + 最后一条助手消息作为判断上下文
+  // 不直接 LIMIT 2 是因为助手回复会被气泡分割拆成多条 DB 记录
+  const lastUser = db.prepare(`
+    SELECT content FROM messages
+    WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
+    ORDER BY id DESC LIMIT 1
+  `).get(conversationId);
+
+  const lastAssistant = db.prepare(`
+    SELECT content FROM messages
+    WHERE conversation_id = ? AND is_deleted = 0 AND role = 'assistant'
+    ORDER BY id DESC LIMIT 1
+  `).get(conversationId);
+
+  if (!lastUser && !lastAssistant) return false;
+
+  // 构建极简判断 prompt — 用户一条 + 助手一条
+  const parts = [];
+  if (lastUser) parts.push(`用户: ${lastUser.content.slice(0, 400)}`);
+  if (lastAssistant) parts.push(`助手: ${lastAssistant.content.slice(0, 400)}`);
+  const ctx = parts.join('\n');
+
+  const judgePrompt = `判断：以上对话是否需要配一张图片来增强表达效果？只回答"是"或"否"。`;
+
+  try {
+    const result = await chatSync([
+      { role: 'system', content: '你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是否配一张图会让表达更好。只回复"是"或"否"，不要解释。' },
+      { role: 'user', content: ctx + '\n\n' + judgePrompt },
+    ], { temperature: 0, max_tokens: 5 });
+
+    const verdict = result.trim().startsWith('是');
+    console.log(`[chat] judgeImageNeed: ${verdict ? 'YES' : 'no'} (response: "${result.trim().slice(0, 20)}")`);
+    return verdict;
+  } catch (err) {
+    console.error('[chat] judgeImageNeed error:', err.message);
+    return false; // 失败时默认不生图（安全侧）
+  }
 }
 
 async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send) {

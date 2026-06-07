@@ -82,19 +82,36 @@ async function waitFor(url, child, timeoutSec = 30) {
 // ── 子进程管理 ──
 const children = new Set();
 
-function shutdown() {
+async function shutdown() {
+  if (shutdown._called) return;
+  shutdown._called = true;
   console.log(`\n${C.yellow}Shutting down all services...${C.reset}`);
+
+  // ── Windows: 先请求 agent-core 优雅退出（防止 SQLite WAL 损坏）──
+  if (process.platform === "win32") {
+    try {
+      await fetch("http://localhost:3000/api/shutdown", {
+        method: "POST",
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {
+      // 可能已经挂了，无视
+    }
+    // 给 agent-core 时间关 HTTP 服务 → closeDb → exit
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+
+  // ── 强制清理残留进程 ──
   for (const c of children) {
     try {
       if (process.platform === "win32") {
-        // Windows: taskkill 整个进程树
         execSync(`taskkill /F /T /PID ${c.pid}`, { windowsHide: true, stdio: "ignore" });
       } else {
         c.kill("SIGTERM");
       }
     } catch {}
   }
-  setTimeout(() => process.exit(0), 1500);
+  setTimeout(() => process.exit(0), 1000);
 }
 
 process.on("SIGINT", shutdown);

@@ -171,6 +171,9 @@ function initSchema(db) {
   // 迁移: 更新 image_intent 规则为新版本（修复 needImage 触发率过低）
   migrateImageIntentRule(db);
 
+  // 迁移: 停用 image_intent 规则（图像生成判断已移至后端 judgeImageNeed）
+  migrateNeuterImageIntent(db);
+
   // 迁移: 优化 image_gen 规则 — 格式约束前置 + 正向示例（修复括号动作描写规则被无视的问题）
   migrateImageGenRule(db);
 
@@ -180,30 +183,6 @@ function initSchema(db) {
 
 function seedGlobalRules(db) {
   const DEFAULT_RULES = [
-    {
-      rule_key: 'image_intent',
-      rule_content: `## 图像生成判断（最高优先级，每次回复必须执行）
-
-在回复的最后一步，你必须判断用户是否想要看到一张图片。只要用户的消息中出现以下任意情况，就必须在回复末尾追加 <needImage> 标签（独占一行）。
-
-### 触发条件
-
-1. 直接索要图像：发张、发个、发图、发出来、发一张、上图、来张图、给图、给我图
-2. 生成类指令：生成、画一个、画张、做张、制作一张、创建一张
-3. 想看/想见：想看、好想看、想看看、让我看看、给我看看、瞧瞧、看一下
-4. 询问外观：长什么样、是什么样子、什么样、啥样、长啥样、是怎样的、什么样子
-5. 未看到/索要重发：没看到、看不到、图呢、怎么没有图、再发一次、没发出来、再发下
-6. 用户的发言描述了一个具体的视觉场景、角色外貌或风景，你的回复天然适合配图展示
-
-### 排除条件（仅以下情况不触发）
-
-- 用户说"明白了""看到了""懂了"仅表示已理解你的文字回复，没有进一步想看图的意图
-
-### 核心原则
-
-- 宁可多触发，绝不可漏触发。不确定时选触发。
-- <needImage> 放在回复最末尾独占一行，前后不加任何文字。`,
-    },
     {
       rule_key: 'image_gen',
       rule_content: `## 对话格式铁律（最高优先级，违反即失败）
@@ -242,7 +221,8 @@ function seedGlobalRules(db) {
     insert.run(rule.rule_key, rule.rule_content);
   }
   // 清理已从默认列表中移除的旧规则
-  const knownKeys = DEFAULT_RULES.map(r => r.rule_key);
+  // image_intent 保留在 knownKeys 中，由 migrateNeuterImageIntent 迁移停用，而非直接删除
+  const knownKeys = [...DEFAULT_RULES.map(r => r.rule_key), 'image_intent'];
   const orphaned = db.prepare(`DELETE FROM global_rules WHERE rule_key NOT IN (${knownKeys.map(() => '?').join(',')})`).run(...knownKeys);
   if (orphaned.changes > 0) console.log(`[db] cleaned up ${orphaned.changes} orphaned global rule(s)`);
 }
@@ -328,6 +308,19 @@ function migrateImageIntentRule(db) {
   db.prepare(`UPDATE global_rules SET rule_content = ?, updated_at = CURRENT_TIMESTAMP WHERE rule_key = 'image_intent'`)
     .run(NEW_RULE);
   console.log('[db] migration: updated image_intent rule to optimized version');
+}
+
+/**
+ * 迁移: 停用 image_intent 全局规则 — 图像生成判断已移至后端 judgeImageNeed，
+ * 模型不再需要输出 <needImage> 标签。
+ * 幂等 — 将 is_active 设为 0（无论当前状态）。
+ */
+function migrateNeuterImageIntent(db) {
+  const row = db.prepare(`SELECT is_active FROM global_rules WHERE rule_key = 'image_intent'`).get();
+  if (!row) return;
+  if (row.is_active === 0) return; // 已停用
+  db.prepare(`UPDATE global_rules SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE rule_key = 'image_intent'`).run();
+  console.log('[db] migration: disabled image_intent rule (judgment moved to backend judgeImageNeed)');
 }
 
 /**
@@ -445,10 +438,13 @@ function migrateMessagesTable(db) {
 }
 
 function rebuildFtsIndex(db) {
+  // ── 轻量完整性检查：不每次清空重建，只在确实损坏或计数不一致时才处理 ──
+  let ftsOk = false;
+  let ftsCount = 0;
   try {
-    db.exec(`DELETE FROM messages_fts`);
+    ftsCount = db.prepare(`SELECT count(*) AS c FROM messages_fts`).get().c;
+    ftsOk = true;
   } catch (err) {
-    // FTS5 虚拟表可能在进程强杀后损坏 → 重建
     if (err.code === 'SQLITE_CORRUPT_VTAB') {
       console.log('[db] FTS5 table corrupted, recreating...');
       // 先删触发器（它们依赖 messages_fts）
@@ -487,14 +483,27 @@ function rebuildFtsIndex(db) {
     }
   }
 
-  // 从 messages 表重建 FTS 索引
-  const msgs = db.prepare(`SELECT id, content FROM messages WHERE is_deleted = 0`).all();
-  if (msgs.length > 0) {
-    const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
-    for (const m of msgs) {
-      insert.run(m.id, m.content);
+  // 只在 FTS 损坏或计数不一致时才全量重建
+  const msgCount = db.prepare(`SELECT count(*) AS c FROM messages WHERE is_deleted = 0`).get().c;
+  if (!ftsOk || ftsCount !== msgCount) {
+    if (ftsOk) {
+      // 表完好但计数不一致 — 清空后重建
+      try {
+        db.exec(`DELETE FROM messages_fts`);
+      } catch (delErr) {
+        console.log('[db] DELETE FROM messages_fts failed, dropping and recreating...');
+        db.exec(`DROP TABLE IF EXISTS messages_fts`);
+        db.exec(`CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='id')`);
+      }
     }
-    console.log(`[db] FTS5 index rebuilt: ${msgs.length} messages indexed`);
+    const msgs = db.prepare(`SELECT id, content FROM messages WHERE is_deleted = 0`).all();
+    if (msgs.length > 0) {
+      const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
+      for (const m of msgs) {
+        insert.run(m.id, m.content);
+      }
+      console.log(`[db] FTS5 index rebuilt: ${msgs.length} messages indexed`);
+    }
   }
 }
 

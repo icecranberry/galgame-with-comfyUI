@@ -223,7 +223,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
               promptId,
             });
           }
-          console.log(`[comfyClient] 🎯 progress: ${value}/${max} (${Math.round(pct * 100)}%)`);
+          // progress sent to frontend via onProgress callback, no console spam needed
         } else if (msg.type === 'executing') {
           const node = msg.data?.node;
           if (node != null) {
