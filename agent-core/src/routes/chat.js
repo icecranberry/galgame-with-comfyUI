@@ -16,6 +16,89 @@ import { generateImage } from '../services/imageSkill.js';
 
 const router = Router();
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ── 智能分句队列 ──
+// 规则:
+//   1. 队列 > 20 字: 遇到 ！？～~ 在符号后断句（保留符号）; 遇到 ，。 断句并去掉标点
+//   2. 队列 ≤ 20 字: 遇到 ！？ 且前后不是 ！？ 时，强制断句（保留符号）
+//   3. 断句后清空队列重新计数
+//   4. flush() 时去掉末尾句号
+class SentenceSplitter {
+  constructor() {
+    this.buffer = '';        // 当前累积的字符
+    this.pendingSplit = -1;  // 规则 2 的延迟断句位置（等下一个字符确认不是 ！？）
+  }
+
+  // 逐字符喂入，返回已确认完成的段落数组
+  feed(text) {
+    const segments = [];
+    const emit = (s) => { if (s) segments.push(s); };
+
+    for (const ch of text) {
+      // 若有延迟断句且新字符不是 ！？，则先执行延迟断句
+      if (this.pendingSplit >= 0 && !/[！？]/.test(ch)) {
+        emit(this.buffer.slice(0, this.pendingSplit));
+        this.buffer = this.buffer.slice(this.pendingSplit);
+        this.pendingSplit = -1;
+      }
+
+      this.buffer += ch;
+      const n = this.buffer.length;
+
+      if (n > 20) {
+        // ── 规则 1: 队列超过 20 字 ──
+        if (this.pendingSplit >= 0) {
+          // 先消费延迟断句再按规则 1 继续
+          emit(this.buffer.slice(0, this.pendingSplit));
+          this.buffer = this.buffer.slice(this.pendingSplit);
+          this.pendingSplit = -1;
+          // 重新检查当前字符（buffer 已缩短，ch 是最后字符）
+          if (/[！？～~]/.test(ch)) {
+            emit(this.buffer);
+            this.buffer = '';
+          } else if (/[，。]/.test(ch)) {
+            emit(this.buffer.slice(0, -1));
+            this.buffer = '';
+          }
+        } else if (/[！？～~]/.test(ch)) {
+          // 在符号后断句，保留符号
+          emit(this.buffer);
+          this.buffer = '';
+        } else if (/[，。]/.test(ch)) {
+          // 断句并去掉逗号/句号
+          emit(this.buffer.slice(0, -1));
+          this.buffer = '';
+        }
+        // else: 普通字符，继续累积（不会无限增长，因为规则 1 迟早命中标点）
+      } else {
+        // ── 规则 2: 队列 ≤ 20 字 ──
+        if (/[！？]/.test(ch)) {
+          const prevCh = n > 1 ? this.buffer[n - 2] : null;
+          if (prevCh && /[！？]/.test(prevCh)) {
+            // 前面也是 ！？，连续符号序列，取消断句意图
+            this.pendingSplit = -1;
+          } else {
+            // 标记延迟断句位置，等下一个字符确认
+            this.pendingSplit = n;
+          }
+        }
+        // 非 ！？ 字符：不触发断句，继续累积
+      }
+    }
+    return { segments };
+  }
+
+  // 流结束，清空缓冲区并应用规则 4（去末尾句号）
+  flush() {
+    let text = this.buffer;
+    this.buffer = '';
+    this.pendingSplit = -1;
+    // 规则 4: 去掉末尾句号
+    return text.replace(/。$/, '');
+  }
+}
+
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
 
@@ -142,35 +225,56 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
 
     // 6. 流式生成（温度 0.65）
-    // 气泡分割: 每个 chunk 内按 <br> 或连续空行切分，分隔符触发 bubble_break
-    // <br> 跨越 chunk 边界的概率极低且无害（前端会 strip 残留 <br>）
+    // 智能分句: 后端 SentenceSplitter 按中文标点自动切分气泡，
+    //   页面吐字和队列累积同步进行 — token 事件逐字推送，分句点触发 bubble_break
+    const splitter = new SentenceSplitter();
+    const collectedSegments = [];
     let fullContent = '';
+    let sentBubbleLen = 0;  // 当前气泡已推送到前端的字符数
+
     send('response_start', {});
     for await (const chunk of chatStream(msgs, { temperature: 0.65 })) {
-      // 按分隔符切分 chunk，parts 交替: [文本, 分隔符, 文本, 分隔符, ...]
-      const parts = chunk.split(/(<br\s*\/?>|\n{2,})/i);
-      for (let i = 0; i < parts.length; i++) {
-        if (i % 2 === 0) {
-          // 文本段
-          if (parts[i]) {
-            fullContent += parts[i];
-            send('token', { content: parts[i] });
-          }
-        } else {
-          // 分隔符
-          fullContent += parts[i];
-          send('bubble_break', {});
+      // 安全网：strip 模型可能残留的 <br> 标签和换行符（分句由 SentenceSplitter 负责）
+      const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n/g, '');
+      fullContent += cleanChunk;
+
+      const { segments } = splitter.feed(cleanChunk);
+
+      // 已完成的分句 → 补发该句剩余字符 + 触发 bubble_break，句间停顿 0.5s
+      for (const segText of segments) {
+        if (sentBubbleLen < segText.length) {
+          send('token', { content: segText.slice(sentBubbleLen) });
         }
+        collectedSegments.push(segText);
+        send('bubble_break', {});
+        sentBubbleLen = 0;
+        await sleep(500);
+      }
+
+      // 发送 splitter buffer 中尚未推送的新字符（流式逐字显示）
+      const pending = splitter.buffer;
+      if (sentBubbleLen < pending.length) {
+        send('token', { content: pending.slice(sentBubbleLen) });
+        sentBubbleLen = pending.length;
       }
     }
-    // 安全网：清洗输出中残留的括号动作描写
+
+    // flush 剩余缓冲区（规则 4: 去掉末尾句号）
+    const lastSeg = splitter.flush();
+    if (lastSeg) {
+      if (sentBubbleLen < lastSeg.length) {
+        send('token', { content: lastSeg.slice(sentBubbleLen) });
+      }
+      collectedSegments.push(lastSeg);
+    }
+    // 安全网：清洗输出中残留的括号动作描写（应用到 fullContent）
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 
     // 7. 解析标签 & 准备显示文本
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-    // 去掉 <prompt> 块和 </?context> 标签，但保留 <br> 和换行供后续分割
+    // 去掉 <prompt> 块和 </?context> 标签
     let rawDisplay = tags.context ||
       fullContent
         .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
@@ -178,11 +282,11 @@ router.post('/characters/:id/chat', async (req, res) => {
         .replace(/<needImage>/gi, '');
     rawDisplay = stripNeedImage(rawDisplay);
 
-    // 8. 先分割后清洗：在 rawDisplay 上按气泡分隔符拆分，再逐条清理
-    const segments = rawDisplay.split(/(?:<br\s*\/?>|\n{2,})/i)
+    // 8. 使用流式阶段收集的分句结果，再做末端清洗
+    const segments = collectedSegments
       .map(s => stripBracketActions(s).trim())
       .filter(s => s.length > 0)
-      .map(s => s.replace(/<\/?context>/gi, '').replace(/<br\s*\/?>/gi, '').trim())
+      .map(s => s.replace(/<\/?context>/gi, '').trim())
       .filter(s => s.length > 0);
 
     const displayContent = segments.join('\n\n');
@@ -369,23 +473,20 @@ function buildFormatAnchor(_displayName) {
 
 # 格式规范（铁律）
 - 情绪通过对话文字本身传达（语气词、用词选择、语速），严禁用（括号描述动作表情）
-- 每条消息之间必须用 <br> 分隔（字面字符串 <br>，独占一行）
+- 正常说话即可，系统会自动处理句子分段。不需要输出 <br> 或任何特殊分隔标记。
 
 # 正确格式
 ✅ 嘿嘿，是吧是吧！那家店的汤底真的超棒的，我每次路过都会去！
-<br>
 ✅ 啊...下次...要不要一起去？我知道你也会喜欢的。
-<br>
 ✅ 哼！才不是呢！我很厉害的好吧！只不过平时懒得出手而已啦~
-<br>
 ✅ 等一下哦——我看看，这个好像要这样弄...
 
 # 错误格式（禁止）
 ❌ （笑了笑，伸手拍拍你的肩膀）走吧，我们出发。
 ❌ （眼神忽然变得认真，语气低沉）这件事没那么简单。
-❌ 嘿嘿，是吧是吧！\n\n啊...下次要不要一起去？（用换行而非 <br>）
+❌ 嘿嘿，是吧是吧！<br>啊...下次要不要一起去？（不要输出 <br> 标签）
 
-记住：用字面 <br> 分隔每条消息，不要用换行代替，不要括号描写。`,
+记住：正常说话，不要括号描写，不要输出 <br> 标签。`,
   };
 }
 

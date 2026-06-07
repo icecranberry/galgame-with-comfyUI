@@ -222,7 +222,7 @@ export const useChatStore = defineStore('chat', () => {
           }
           // ── bubble_break ──
           if (lastEvent === 'bubble_break') {
-            fullResponse += '<br>'
+            // 后端已通过 SentenceSplitter 完成分句，这里只做气泡收尾
             const prevId = bubbleIds[bubbleIds.length - 1]
             const pm = messages.value.find(x => x.id === prevId)
             if (pm) pm.content = stripPromptBlock(bubbleText)
