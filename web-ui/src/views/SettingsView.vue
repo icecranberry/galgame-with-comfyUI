@@ -177,7 +177,8 @@ const rulesSaved = ref({})
 
 const ruleLabels = {
   image_intent: '图像生成判断（<needImage>）',
-  image_gen: '图像生成指令（<prompt>+<context>）',
+  image_gen: '图像生成指令（<prompt>）',
+  judge_prompt: '智能配图判断提示词',
 }
 
 const presets = [

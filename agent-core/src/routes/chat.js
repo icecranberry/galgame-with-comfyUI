@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getActiveGlobalRules } from '../db/index.js';
+import { getDb, getActiveGlobalRules, getGlobalRule } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
@@ -113,7 +113,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 4. 生图意图（正则强匹配 → 强制生成）
     const explicitImageIntent = detectImageIntent(message);
     if (explicitImageIntent) {
-      systemPrompt += '\n\n【强制要求】用户要求生成图片。立即用 <prompt> 和 <context> 标签回复，不要问任何问题。';
+      systemPrompt += '\n\n【强制要求】用户要求生成图片。正常回复文字，然后在末尾加上 <prompt> 标签描述画面。不要额外用任何标签包裹正文。';
     }
 
     // 5. 历史消息（清洗旧回复中的括号动作描写，防止错误格式在上下文中自我强化）
@@ -126,13 +126,13 @@ router.post('/characters/:id/chat', async (req, res) => {
       content: m.role === 'assistant' ? stripBracketActions(m.content) : m.content,
     }));
 
-    const charDisplayName = character?.display_name || '助手';
+    const charDisplayName = character?.display_name || 'Agent';
     const msgs = [
       { role: 'system', content: systemPrompt },
       ...history,
     ];
     if (explicitImageIntent) {
-      msgs.push({ role: 'user', content: '请立即用 <prompt> 和 <context> 标签回复，不要额外说明。' });
+      msgs.push({ role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。不要用 <context> 包裹正文。' });
     }
     // 格式锚定：在用户消息前插入 few-shot 正确格式对话范例
     // （DeepSeek/LLM 对上下文中的示例遵循度远超规则文本，这是最有效的格式矫正手段）
@@ -167,18 +167,29 @@ router.post('/characters/:id/chat', async (req, res) => {
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 
-    // 7. 解析标签
+    // 7. 解析标签 & 准备显示文本
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-    // context 文本也按气泡分割
-    let displayContent = tags.context || stripTags(fullContent);
-    displayContent = stripNeedImage(displayContent);
-    if (tags.prompt || tags.context) send('context_update', { content: displayContent });
+    // 去掉 <prompt> 块和 </?context> 标签，但保留 <br> 和换行供后续分割
+    let rawDisplay = tags.context ||
+      fullContent
+        .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
+        .replace(/<\/?context>/gi, '')
+        .replace(/<needImage>/gi, '');
+    rawDisplay = stripNeedImage(rawDisplay);
 
-    // 8. 在 displayContent（已剥离 XML 标签的干净文本）上按气泡分割符拆分保存
-    const segments = displayContent.split(/(?:<br\s*\/?>|\n{2,})/i)
+    // 8. 先分割后清洗：在 rawDisplay 上按气泡分隔符拆分，再逐条清理
+    const segments = rawDisplay.split(/(?:<br\s*\/?>|\n{2,})/i)
       .map(s => stripBracketActions(s).trim())
+      .filter(s => s.length > 0)
+      .map(s => s.replace(/<\/?context>/gi, '').replace(/<br\s*\/?>/gi, '').trim())
       .filter(s => s.length > 0);
+
+    const displayContent = segments.join('\n\n');
+    // 有生图标签或 needImage 时，用清洗后的文本替换流式内容
+    if (tags.prompt || tags.context || hasNeedImageTag) {
+      send('context_update', { content: displayContent });
+    }
     const savedIds = [];
     for (const seg of segments) {
       const r = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
@@ -390,8 +401,8 @@ function getDefaultPrompt() {
  */
 async function judgeImageNeed(conversationId) {
   const db = getDb();
-  // 取最后一条用户消息 + 最后一条助手消息作为判断上下文
-  // 不直接 LIMIT 2 是因为助手回复会被气泡分割拆成多条 DB 记录
+  // 取最后一条用户消息 + 最后一条Agent消息作为判断上下文
+  // 不直接 LIMIT 2 是因为Agent回复会被气泡分割拆成多条 DB 记录
   const lastUser = db.prepare(`
     SELECT content FROM messages
     WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
@@ -406,18 +417,21 @@ async function judgeImageNeed(conversationId) {
 
   if (!lastUser && !lastAssistant) return false;
 
-  // 构建极简判断 prompt — 用户一条 + 助手一条
+  // 构建极简判断 prompt — 用户一条 + Agent一条
   const parts = [];
   if (lastUser) parts.push(`用户: ${lastUser.content.slice(0, 400)}`);
-  if (lastAssistant) parts.push(`助手: ${lastAssistant.content.slice(0, 400)}`);
+  if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 400)}`);
   const ctx = parts.join('\n');
 
-  const judgePrompt = `判断：以上对话是否需要配一张图片来增强表达效果？只回答"是"或"否"。`;
+  const db2 = getDb();
+  const judgeRule = db2.prepare(`SELECT rule_content FROM global_rules WHERE rule_key = 'judge_prompt' AND is_active = 1`).get();
+  const judgeSystemPrompt = judgeRule?.rule_content ||
+    '你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断任意一方是否需要发送/索取一张图片。只回复"是"或"否"，不要解释。';
 
   try {
     const result = await chatSync([
-      { role: 'system', content: '你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是否配一张图会让表达更好。只回复"是"或"否"，不要解释。' },
-      { role: 'user', content: ctx + '\n\n' + judgePrompt },
+      { role: 'system', content: judgeSystemPrompt },
+      { role: 'user', content: ctx },
     ], { temperature: 0, max_tokens: 5 });
 
     const verdict = result.trim().startsWith('是');
@@ -477,18 +491,18 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 /**
  * needImage 二次触发流程:
  *   模型自主判断用户想要图片 → 追加了 <needImage> →
- *   后端再请求一次模型，让它补上 <prompt> + <context> →
+ *   后端再请求一次模型，让它补上 <prompt> →
  *   然后走正常生图流程
  */
 async function handleNeedImageFlow(conversationId, character, send) {
   const db = getDb();
   console.log('[chat] needImage detected, requesting prompt from model...');
 
-  // 1. 构建二次请求的 system prompt（规则前置 + 人格在后 + 强制生图指令）
+  // 1. 构建二次请求的 system prompt
   const globalRules = getActiveGlobalRules();
   let systemPrompt = globalRules ? globalRules + '\n\n' : '';
   systemPrompt += character?.base_prompt || getDefaultPrompt();
-  systemPrompt += '\n\n【强制要求】你刚才判断用户想要一张图片。现在请立即用 <prompt> 和 <context> 标签描述一张合适的画面。不要额外解释，不要确认，直接输出两个标签。';
+  systemPrompt += '\n\n【强制要求】你刚才判断用户想要一张图片。现在请立即回复自然的文字，并在末尾加上 <prompt> 标签描述画面。不要用任何标签包裹正文。';
 
   // 2. 加载历史（清洗括号，防止错误格式污染二次请求上下文）
   const rawHistory = db.prepare(`
@@ -503,7 +517,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const msgs = [
     { role: 'system', content: systemPrompt },
     ...history,
-    { role: 'user', content: '请立即用 <prompt> 和 <context> 标签回复，不要额外说明。' },
+    { role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。' },
   ];
 
   // 3. 静默请求模型生成 prompt + context（不流式，避免前端气泡混乱）

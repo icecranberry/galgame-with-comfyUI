@@ -15,7 +15,7 @@
         column-reverse 布局：第一条消息在可视底部，新消息自然出现，无需 JS 滚动
         scrollTop=0 即底部，scrollTop 增大 = 向上翻历史
       -->
-      <div ref="msgList" class="message-list" @scroll="onScroll">
+      <div ref="msgList" class="message-list">
         <div v-for="(group, gi) in reversedGroups" :key="gi">
           <div class="time-divider">{{ group.label }}</div>
 
@@ -25,7 +25,7 @@
               <div class="msg-avatar" :style="msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
                 <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
-              <!-- 等待态：助手消息内容为空时显示打字动画，不套气泡 -->
+              <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
               <svg v-if="msg.role === 'assistant' && !msg.content && chat.streaming"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
@@ -54,9 +54,9 @@
             </div>
           </template>
         </div>
-        <!-- 加载指示器放在最后：column-reverse 中最后 = 可视顶部（历史消息方向） -->
-        <div v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
-        <div v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+        <!-- 加载指示器：IntersectionObserver 监测此元素，进入视口时自动加载 -->
+        <div ref="loadHint" v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
+        <div ref="loadHint" v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
       </div>
 
       <div class="input-area">
@@ -114,7 +114,7 @@
 
         <!-- 删除角色 -->
         <button class="sp-btn sp-btn-danger" @click="deleteChar" :disabled="deleting || chat.activeChar?.name === 'default'"
-          :title="chat.activeChar?.name === 'default' ? '不能删除默认助手' : ''">
+          :title="chat.activeChar?.name === 'default' ? '不能删除默认Agent' : ''">
           {{ deleting ? '删除中...' : '⚠️ 删除角色' }}
         </button>
       </div>
@@ -306,25 +306,28 @@ function timeLabel(iso) {
 }
 
 // ══════════════════════════════════════════════════
-// 滚动（column-reverse 布局，无需 JS 动画）
+// 无限滚动加载（IntersectionObserver — 不依赖 scroll 坐标计算）
 // ══════════════════════════════════════════════════
 //
-// column-reverse 原理：
-//   · 第一个 flex 子元素渲染在可视底部 → 新消息天然在底部
-//   · scrollTop=0 = 视口在最底部（最新消息）
-//   · scrollTop 增大 = 向上翻看历史 → 检测接近 max 来加载更多
-//   · 不需要 ResizeObserver、scroll 动画、userScrolledUp 追踪
+// column-reverse 下 scroll 坐标不可靠（边界不触发事件），
+// IntersectionObserver 直接监测"加载提示"元素是否进入视口，无需关心坐标。
 
-// ── 检测是否接近可视顶部（即更早的消息） ──
-function isNearVisualTop() {
-  const el = msgList.value
-  if (!el) return false
-  // column-reverse: scrollTop 接近最大值 = 接近可视顶部
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+const loadHint = ref(null)
+let loadObs = null
+
+function startLoadObserver() {
+  stopLoadObserver()
+  if (!loadHint.value) return
+  loadObs = new IntersectionObserver((entries) => {
+    if (entries[0]?.isIntersecting && chat.hasMoreOlder && !chat.loadingOlder) {
+      loadMore()
+    }
+  }, { threshold: 0.1 })
+  loadObs.observe(loadHint.value)
 }
 
-function onScroll() {
-  if (!chat.loadingOlder && isNearVisualTop()) loadMore()
+function stopLoadObserver() {
+  if (loadObs) { loadObs.disconnect(); loadObs = null }
 }
 
 async function loadMore() {
@@ -333,9 +336,18 @@ async function loadMore() {
   const prevHeight = el?.scrollHeight || 0
   await chat.loadOlderMessages()
   await nextTick()
+  // 重新观察新的 loadHint（DOM 可能已更新）
+  stopLoadObserver()
+  await nextTick()
+  startLoadObserver()
   if (el) {
     // column-reverse: 旧消息追加到 flex 尾部（可视顶部），需补偿 scrollTop
-    el.scrollTop += el.scrollHeight - prevHeight
+    // 先推到 max，再回退留余量防止下次滚不动
+    const delta = el.scrollHeight - prevHeight
+    el.scrollTop += delta
+    if (chat.hasMoreOlder) {
+      el.scrollTop = Math.max(0, el.scrollTop - 60)
+    }
   }
 }
 
@@ -345,17 +357,24 @@ onMounted(async () => {
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
+  startLoadObserver()
   // column-reverse 天然从底部开始，无需手动滚底
   inputEl.value?.focus()
 })
 
-onUnmounted(() => {})
+onUnmounted(() => {
+  stopLoadObserver()
+})
 
-// 切角色：重置滚动位置到可视底部
+// 切角色：重置滚动位置到可视底部，重新绑定观察器
 watch(() => chat.activeCharId, async (id, oldId) => {
   if (id && id !== oldId) {
     await nextTick()
     if (msgList.value) msgList.value.scrollTop = 0
+    // DOM 重建后 loadHint ref 指向新元素，需重新观察
+    stopLoadObserver()
+    await nextTick()
+    startLoadObserver()
   }
 })
 
