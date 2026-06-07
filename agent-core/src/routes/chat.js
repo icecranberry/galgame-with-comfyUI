@@ -18,84 +18,121 @@ const router = Router();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ── 智能分句队列 ──
-// 规则:
-//   1. 队列 > 20 字: 遇到 ！？～~ 在符号后断句（保留符号）; 遇到 ，。 断句并去掉标点
-//   2. 队列 ≤ 20 字: 遇到 ！？ 且前后不是 ！？ 时，强制断句（保留符号）
-//   3. 断句后清空队列重新计数
-//   4. flush() 时去掉末尾句号
+// ── 统一缓冲分句器 ──
+//   字符先进 3 字闸门检测 <pr，安全的再逐字进入分句逻辑。
+//   分句规则:
+//     1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，。 断句并去掉标点
+//     2. 队列 ≤ 20 字: 遇到 ！？ 且前后不是 ！？ 时，强制断句（保留符号）
+//     3. 。逗号无论队列长度都触发分句，去掉句号本身，重置 20 字计数器
+//     4. flushAll() 时去掉末尾句号
+//   返回值: { segments: string[], stopped: boolean }
 class SentenceSplitter {
   constructor() {
-    this.buffer = '';        // 当前累积的字符
-    this.pendingSplit = -1;  // 规则 2 的延迟断句位置（等下一个字符确认不是 ！？）
+    this.gate = '';          // <pr 检测窗口（最多 4 字）
+    this.buffer = '';        // 分句累积队列
+    this.pendingSplit = -1;  // 规则 2 的延迟断句位置
+    this.stopped = false;
   }
 
-  // 逐字符喂入，返回已确认完成的段落数组
+  // 喂入 chunk，返回已完成的安全段落
   feed(text) {
     const segments = [];
     const emit = (s) => { if (s) segments.push(s); };
 
     for (const ch of text) {
-      // 若有延迟断句且新字符不是 ！？，则先执行延迟断句
-      if (this.pendingSplit >= 0 && !/[！？]/.test(ch)) {
-        emit(this.buffer.slice(0, this.pendingSplit));
-        this.buffer = this.buffer.slice(this.pendingSplit);
+      if (this.stopped) break;
+
+      // ── 闸门：3~4 字滑动窗口检测 <pr ──
+      this.gate += ch;
+      if (this.gate.length >= 3 && this.gate.slice(-3) === '<pr') {
+        this.stopped = true;
+        break;
+      }
+      if (this.gate.length < 4) continue;  // 缓冲未满，不出字
+      const safe = this.gate[0];            // 确认安全，释放一字
+      this.gate = this.gate.slice(1);
+
+      // ── 规则 3: 。始终触发分句，去掉句号，重置计数器 ──
+      if (safe === '。') {
+        emit(this.buffer);
+        this.buffer = '';
         this.pendingSplit = -1;
+        continue;
       }
 
-      this.buffer += ch;
+      // ── 分句逻辑 ──
+      this.buffer += safe;
       const n = this.buffer.length;
 
       if (n > 20) {
-        // ── 规则 1: 队列超过 20 字 ──
+        // ── 规则 1 ──
         if (this.pendingSplit >= 0) {
-          // 先消费延迟断句再按规则 1 继续
           emit(this.buffer.slice(0, this.pendingSplit));
           this.buffer = this.buffer.slice(this.pendingSplit);
           this.pendingSplit = -1;
-          // 重新检查当前字符（buffer 已缩短，ch 是最后字符）
-          if (/[！？～~]/.test(ch)) {
+          if (/[！？～~]/.test(safe)) {
             emit(this.buffer);
             this.buffer = '';
-          } else if (/[，。]/.test(ch)) {
+          } else if (/[，]/.test(safe)) {
             emit(this.buffer.slice(0, -1));
             this.buffer = '';
           }
-        } else if (/[！？～~]/.test(ch)) {
-          // 在符号后断句，保留符号
+        } else if (/[！？～~]/.test(safe)) {
           emit(this.buffer);
           this.buffer = '';
-        } else if (/[，。]/.test(ch)) {
-          // 断句并去掉逗号/句号
+        } else if (/[，]/.test(safe)) {
           emit(this.buffer.slice(0, -1));
           this.buffer = '';
         }
-        // else: 普通字符，继续累积（不会无限增长，因为规则 1 迟早命中标点）
       } else {
-        // ── 规则 2: 队列 ≤ 20 字 ──
-        if (/[！？]/.test(ch)) {
+        // ── 规则 2 ──
+        if (/[！？]/.test(safe)) {
           const prevCh = n > 1 ? this.buffer[n - 2] : null;
           if (prevCh && /[！？]/.test(prevCh)) {
-            // 前面也是 ！？，连续符号序列，取消断句意图
             this.pendingSplit = -1;
           } else {
-            // 标记延迟断句位置，等下一个字符确认
             this.pendingSplit = n;
           }
         }
-        // 非 ！？ 字符：不触发断句，继续累积
       }
     }
-    return { segments };
+    return { segments, stopped: this.stopped };
   }
 
-  // 流结束，清空缓冲区并应用规则 4（去末尾句号）
-  flush() {
+  // 流结束，释放闸门剩余安全字 + flush 分句队列
+  flushAll() {
+    if (this.stopped) {
+      this.gate = '';
+      this.buffer = '';
+      this.pendingSplit = -1;
+      return { segments: [], stopped: true };
+    }
+    // 闸门中剩下的字全放（已确认不含 <pr），。仍触发分句
+    for (const safe of this.gate) {
+      if (safe === '。') {
+        // 压出当前 buffer 为一个 segment，丢弃句号
+        if (this.buffer) {
+          const seg = this.buffer.replace(/。$/, '');
+          if (seg) this.buffer = seg;  // will be flushed below
+          else this.buffer = '';
+        }
+        continue;
+      }
+      this.buffer += safe;
+      const n = this.buffer.length;
+      if (n > 20) {
+        if (/[，。]/.test(safe)) {
+          this.buffer = this.buffer.slice(0, -1);
+        }
+      }
+    }
+    this.gate = '';
+    // flush 分句队列
     let text = this.buffer;
     this.buffer = '';
     this.pendingSplit = -1;
-    // 规则 4: 去掉末尾句号
-    return text.replace(/。$/, '');
+    text = text.replace(/。$/, '');  // 规则 4: 去末尾句号
+    return { segments: text ? [text] : [], stopped: false };
   }
 }
 
@@ -106,11 +143,11 @@ function convId(charId) { return `char_${charId}`; }
 router.delete('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
-  const result = db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`)
-    .run(conversationId);
+  db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`UPDATE raw_messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
   // 重建 FTS5 索引
   db.exec(`DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages WHERE is_deleted = 0)`);
-  res.json({ ok: true, deleted: result.changes });
+  res.json({ ok: true });
 });
 
 // GET /api/characters/:id/messages — 获取角色对话消息
@@ -127,7 +164,7 @@ router.get('/characters/:id/messages', (req, res) => {
   if (before) {
     // 向上翻：加载 before 日期之前的旧消息（从新到旧取 limit 条，再反转顺序）
     sql = `SELECT * FROM (
-      SELECT id, conversation_id, role, content, images, token_count, created_at
+      SELECT id, conversation_id, role, content, images, created_at
       FROM messages
       WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?
       ORDER BY id DESC LIMIT ?
@@ -137,7 +174,7 @@ router.get('/characters/:id/messages', (req, res) => {
     // 默认：加载最近 7 天的最新消息
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     sql = `SELECT * FROM (
-      SELECT id, conversation_id, role, content, images, token_count, created_at
+      SELECT id, conversation_id, role, content, images, created_at
       FROM messages
       WHERE conversation_id = ? AND is_deleted = 0 AND created_at >= ?
       ORDER BY id DESC LIMIT ?
@@ -179,9 +216,11 @@ router.post('/characters/:id/chat', async (req, res) => {
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {
-    // 1. 保存用户消息
-    const userMsg = db.prepare(`INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`)
+    // 1. 保存用户消息（双表：raw_messages 完整原文 + messages 单条展示）
+    const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'user', ?)`)
       .run(conversationId, message);
+    const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
+      .run(conversationId, userRaw.lastInsertRowid, message);
     send('msg_saved', { id: userMsg.lastInsertRowid, role: 'user', created_at: new Date().toISOString() });
 
     // 2. 加载角色
@@ -199,15 +238,11 @@ router.post('/characters/:id/chat', async (req, res) => {
       systemPrompt += '\n\n【强制要求】用户要求生成图片。正常回复文字，然后在末尾加上 <prompt> 标签描述画面。不要额外用任何标签包裹正文。';
     }
 
-    // 5. 历史消息（清洗旧回复中的括号动作描写，防止错误格式在上下文中自我强化）
-    const rawHistory = db.prepare(`
-      SELECT role, content FROM messages
+    // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
+    const history = db.prepare(`
+      SELECT role, content FROM raw_messages
       WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
     `).all(conversationId).reverse();
-    const history = rawHistory.map(m => ({
-      role: m.role,
-      content: m.role === 'assistant' ? stripBracketActions(m.content) : m.content,
-    }));
 
     const charDisplayName = character?.display_name || 'Agent';
     const msgs = [
@@ -225,86 +260,74 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
 
     // 6. 流式生成（温度 0.65）
-    // 智能分句: 后端 SentenceSplitter 按中文标点自动切分气泡，
-    //   页面吐字和队列累积同步进行 — token 事件逐字推送，分句点触发 bubble_break
+    // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
     const splitter = new SentenceSplitter();
     const collectedSegments = [];
     let fullContent = '';
-    let sentBubbleLen = 0;  // 当前气泡已推送到前端的字符数
 
     send('response_start', {});
     for await (const chunk of chatStream(msgs, { temperature: 0.65 })) {
-      // 安全网：strip 模型可能残留的 <br> 标签和换行符（分句由 SentenceSplitter 负责）
       const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n/g, '');
       fullContent += cleanChunk;
 
-      const { segments } = splitter.feed(cleanChunk);
+      const { segments, stopped } = splitter.feed(cleanChunk);
 
-      // 已完成的分句 → 补发该句剩余字符 + 触发 bubble_break，句间停顿 0.5s
       for (const segText of segments) {
-        if (sentBubbleLen < segText.length) {
-          send('token', { content: segText.slice(sentBubbleLen) });
-        }
+        send('token', { content: segText });
         collectedSegments.push(segText);
         send('bubble_break', {});
-        sentBubbleLen = 0;
         await sleep(500);
       }
-
-      // 发送 splitter buffer 中尚未推送的新字符（流式逐字显示）
-      const pending = splitter.buffer;
-      if (sentBubbleLen < pending.length) {
-        send('token', { content: pending.slice(sentBubbleLen) });
-        sentBubbleLen = pending.length;
-      }
+      // stopped=true 后 feed() 不再产出 segment，但 fullContent 继续累积
     }
 
-    // flush 剩余缓冲区（规则 4: 去掉末尾句号）
-    const lastSeg = splitter.flush();
-    if (lastSeg) {
-      if (sentBubbleLen < lastSeg.length) {
-        send('token', { content: lastSeg.slice(sentBubbleLen) });
+    // 释放缓冲剩余 + flush 分句队列
+    const { segments: lastSegs, stopped: wasStopped } = splitter.flushAll();
+    if (lastSegs.length > 0) {
+      for (const segText of lastSegs) {
+        send('token', { content: segText });
+        collectedSegments.push(segText);
+        send('bubble_break', {});
       }
-      collectedSegments.push(lastSeg);
     }
-    // 安全网：清洗输出中残留的括号动作描写（应用到 fullContent）
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 
-    // 7. 解析标签 & 准备显示文本
+    // 7. 后处理：gate 已阻止 <prompt> 内容进入 collectedSegments，
+    //    segments 直接可用；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-    // 去掉 <prompt> 块和 </?context> 标签
-    let rawDisplay = tags.context ||
-      fullContent
-        .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
-        .replace(/<\/?context>/gi, '')
-        .replace(/<needImage>/gi, '');
-    rawDisplay = stripNeedImage(rawDisplay);
-
-    // 8. 使用流式阶段收集的分句结果，再做末端清洗
     const segments = collectedSegments
       .map(s => stripBracketActions(s).trim())
-      .filter(s => s.length > 0)
-      .map(s => s.replace(/<\/?context>/gi, '').trim())
-      .filter(s => s.length > 0);
-
+      .filter(Boolean);
     const displayContent = segments.join('\n\n');
-    // 有生图标签或 needImage 时，用清洗后的文本替换流式内容
-    if (tags.prompt || tags.context || hasNeedImageTag) {
+
+    // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
+    if (wasStopped || tags.prompt || tags.context || hasNeedImageTag) {
       send('context_update', { content: displayContent });
     }
+    // 8.5 保存 raw_messages（完整原文，保留 <prompt> 标签，不做自然语言转换）
+    const rawContent = fullContent
+      .replace(/<\/?context>/gi, '')
+      .replace(/<needImage>/gi, '')
+      .trim();
+    const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
+      .run(conversationId, rawContent, tags.prompt || null);
+    const rawMsgId = rawResult.lastInsertRowid;
+
     const savedIds = [];
-    for (const seg of segments) {
-      const r = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
-        .run(conversationId, seg, Math.ceil(seg.length / 2));
+    for (let i = 0; i < segments.length; i++) {
+      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, ?)`)
+        .run(conversationId, rawMsgId, segments[i], i);
       savedIds.push(r.lastInsertRowid);
       send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
     }
     if (segments.length === 0) {
       // 兜底：AI 没有返回有效文本
-      const r = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
-        .run(conversationId, '(无回复)', 3);
+      const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
+        .run(conversationId, '(无回复)');
+      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
+        .run(conversationId, rawEmpty.lastInsertRowid, '(无回复)');
       savedIds.push(r.lastInsertRowid);
       send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
     }
@@ -427,10 +450,6 @@ function hasNeedImage(content) {
   return /<needImage>/i.test(content);
 }
 
-function stripNeedImage(content) {
-  return content.replace(/<needImage>/gi, '').trim();
-}
-
 function stripTags(content) {
   return content
     .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
@@ -502,26 +521,24 @@ function getDefaultPrompt() {
  */
 async function judgeImageNeed(conversationId) {
   const db = getDb();
-  // 取最后一条用户消息 + 最后一条Agent消息作为判断上下文
-  // 不直接 LIMIT 2 是因为Agent回复会被气泡分割拆成多条 DB 记录
+  // 直接从 raw_messages 取最后一条用户/Agent 完整消息，无需合并
   const lastUser = db.prepare(`
-    SELECT content FROM messages
+    SELECT content FROM raw_messages
     WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
     ORDER BY id DESC LIMIT 1
   `).get(conversationId);
 
   const lastAssistant = db.prepare(`
-    SELECT content FROM messages
+    SELECT content FROM raw_messages
     WHERE conversation_id = ? AND is_deleted = 0 AND role = 'assistant'
     ORDER BY id DESC LIMIT 1
   `).get(conversationId);
 
   if (!lastUser && !lastAssistant) return false;
 
-  // 构建极简判断 prompt — 用户一条 + Agent一条
   const parts = [];
   if (lastUser) parts.push(`用户: ${lastUser.content.slice(0, 400)}`);
-  if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 400)}`);
+  if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 600)}`);
   const ctx = parts.join('\n');
 
   const db2 = getDb();
@@ -603,17 +620,13 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const globalRules = getActiveGlobalRules();
   let systemPrompt = globalRules ? globalRules + '\n\n' : '';
   systemPrompt += character?.base_prompt || getDefaultPrompt();
-  systemPrompt += '\n\n【强制要求】你刚才判断用户想要一张图片。现在请立即回复自然的文字，并在末尾加上 <prompt> 标签描述画面。不要用任何标签包裹正文。';
+  systemPrompt += '\n\n**强制要求必须执行**你刚才判断用户想要一张图片。现在请立即回复自然的文字，并在末尾加上 <prompt> 标签描述画面。不要用任何标签包裹正文。';
 
-  // 2. 加载历史（清洗括号，防止错误格式污染二次请求上下文）
-  const rawHistory = db.prepare(`
-    SELECT role, content FROM messages
+  // 2. 加载历史（从 raw_messages 取完整消息，无需合并）
+  const history = db.prepare(`
+    SELECT role, content FROM raw_messages
     WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
   `).all(conversationId).reverse();
-  const history = rawHistory.map(m => ({
-    role: m.role,
-    content: m.role === 'assistant' ? stripBracketActions(m.content) : m.content,
-  }));
 
   const msgs = [
     { role: 'system', content: systemPrompt },
@@ -636,9 +649,15 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const tags = extractImageTags(fullContent);
   const displayContent = tags.context || stripTags(fullContent);
 
-  // 5. 保存第二轮回复（context 文本，用户下次进入对话可见）
-  const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, role, content, token_count) VALUES (?, 'assistant', ?, ?)`)
-    .run(conversationId, displayContent, Math.ceil(displayContent.length / 2)).lastInsertRowid;
+  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本）
+  const rawContent = fullContent
+    .replace(/<\/?context>/gi, '')
+    .replace(/<needImage>/gi, '')
+    .trim();
+  const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
+    .run(conversationId, rawContent, tags.prompt || null);
+  const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
+    .run(conversationId, rawResult.lastInsertRowid, displayContent).lastInsertRowid;
 
   // 6. 触发生图（不发 context_update，首条回复保持不变）
   if (tags.prompt) {

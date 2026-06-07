@@ -21,15 +21,30 @@ export function getDb() {
 }
 
 function initSchema(db) {
+  // 破坏性迁移：拆 messages → raw_messages + messages（必须在 CREATE TABLE 前执行）
+  migrateSplitMessages(db);
+
   db.exec(`
-    -- 原始消息表（底片，不做物理删除）
-    CREATE TABLE IF NOT EXISTS messages (
+    -- 原始完整消息表（LLM 上下文用，不拆分）
+    CREATE TABLE IF NOT EXISTS raw_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
       content TEXT NOT NULL,
+      prompt TEXT,
+      is_deleted INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 分句展示消息表（前端用，每个气泡一条）
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      raw_id INTEGER REFERENCES raw_messages(id),
+      role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+      content TEXT NOT NULL,
       images TEXT,
-      token_count INTEGER DEFAULT 0,
+      seq INTEGER DEFAULT 0,
       is_deleted INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -141,6 +156,8 @@ function initSchema(db) {
   // Indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_raw ON messages(raw_id);
+    CREATE INDEX IF NOT EXISTS idx_raw_messages_conv ON raw_messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_fragments_conv ON memory_fragments(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_type ON memory_fragments(fragment_type);
     CREATE INDEX IF NOT EXISTS idx_summaries_conv ON rolling_summaries(conversation_id);
@@ -154,9 +171,6 @@ function initSchema(db) {
 
   // 迁移: 添加 mood_valence/mood_arousal/mood_dominance 列
   migrateEmotionTable(db);
-
-  // 迁移: 消息表添加 images 列
-  migrateMessagesTable(db);
 
   // 迁移: 角色表添加 avatar_color 列
   migrateCharactersTable(db);
@@ -381,6 +395,37 @@ function migrateJudgePromptRule(db) {
   console.log('[db] migration: inserted judge_prompt rule');
 }
 
+function migrateSplitMessages(db) {
+  // 幂等：raw_messages 已存在则迁移已完成
+  const rawExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='raw_messages'`).get();
+  if (rawExists) return;
+
+  // 检查旧 messages 表是否存在（有 group_id 或 token_count 列说明是旧 schema）
+  const oldMsg = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='messages'`).get();
+  if (!oldMsg) return; // 全新安装，无需迁移
+
+  const cols = db.prepare(`PRAGMA table_info('messages')`).all().map(c => c.name);
+  if (!cols.includes('group_id') && !cols.includes('token_count')) return; // 已是新 schema
+
+  console.log('[db] migration: splitting messages into raw_messages + messages (destructive)...');
+
+  // 先删 FTS5 触发器和虚拟表（它们依赖 messages）
+  db.exec(`DROP TRIGGER IF EXISTS messages_ai`);
+  db.exec(`DROP TRIGGER IF EXISTS messages_ad`);
+  db.exec(`DROP TRIGGER IF EXISTS messages_au`);
+  db.exec(`DROP TABLE IF EXISTS messages_fts`);
+
+  // 清空依赖表（FK 引用 messages.id 将失效）
+  db.exec(`DROP TABLE IF EXISTS memory_fragments`);
+  db.exec(`DROP TABLE IF EXISTS emotion_snapshots`);
+  db.exec(`DROP TABLE IF EXISTS rolling_summaries`);
+
+  // 删除旧 messages 表
+  db.exec(`DROP TABLE IF EXISTS messages`);
+
+  console.log('[db] migration: old schema dropped, new tables will be created from scratch');
+}
+
 function migrateCharacterPrompts(db) {
   // 将旧 <generate> 标签格式的角色 prompt 更新为新格式
   const rows = db.prepare(`SELECT id, base_prompt FROM characters WHERE base_prompt LIKE '%<generate>%'`).all();
@@ -432,14 +477,6 @@ function migrateCharactersTable(db) {
   if (!cols.includes('avatar_path')) {
     db.exec(`ALTER TABLE characters ADD COLUMN avatar_path TEXT`);
     console.log('[db] migration: added avatar_path to characters');
-  }
-}
-
-function migrateMessagesTable(db) {
-  const cols = db.prepare(`PRAGMA table_info('messages')`).all().map(c => c.name);
-  if (!cols.includes('images')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN images TEXT`);
-    console.log('[db] migration: added images column to messages');
   }
 }
 

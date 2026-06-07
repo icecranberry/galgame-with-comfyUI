@@ -26,7 +26,7 @@
                 <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="msg.role === 'assistant' && !msg.content && chat.streaming"
+              <svg v-if="msg.role === 'assistant' && !msg.content && chat.streaming && chat.showTypingDots"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -37,7 +37,7 @@
                 <circle cx="52" cy="5" r="3" class="dot dot-4" />
                 <circle cx="64" cy="5" r="3" class="dot dot-5" />
               </svg>
-              <div v-else class="msg-bubble">
+              <div v-else-if="msg.content" class="msg-bubble">
                 <div class="msg-text" v-html="renderContent(msg.content)"></div>
               </div>
             </div>

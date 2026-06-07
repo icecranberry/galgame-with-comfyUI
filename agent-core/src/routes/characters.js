@@ -44,7 +44,7 @@ router.get('/', (req, res) => {
       ORDER BY id DESC LIMIT 1
     `).get(convId);
 
-    const count = db.prepare(`SELECT COUNT(*) as c FROM messages WHERE conversation_id = ? AND is_deleted = 0`).get(convId);
+    const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ? AND is_deleted = 0`).get(convId);
 
     return {
       ...c,
@@ -86,7 +86,7 @@ router.post('/', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_color, is_active } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_color, avatar_path, is_active } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }

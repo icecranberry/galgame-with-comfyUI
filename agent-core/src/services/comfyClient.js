@@ -290,7 +290,7 @@ async function downloadImagesFromHistory(promptId, retries = 3) {
           if (output.images) {
             for (const img of output.images) {
               try {
-                const base64 = await downloadImageAsBase64(img.filename, img.subfolder || '');
+                const base64 = await downloadImageAsBase64(img.filename, img.subfolder || '', img.type || 'output');
                 images.push({ base64, filename: img.filename });
               } catch (e) {
                 console.error(`[comfyClient] download failed: ${img.filename}`, e.message);
@@ -351,7 +351,7 @@ async function pollAndDownload(promptId, onProgress, maxRetries = 600, interval 
         if (output.images) {
           for (const img of output.images) {
             try {
-              const base64 = await downloadImageAsBase64(img.filename, img.subfolder || '');
+              const base64 = await downloadImageAsBase64(img.filename, img.subfolder || '', img.type || 'output');
               images.push({ base64, filename: img.filename });
             } catch (e) {
               console.error(`[comfyClient] download failed: ${img.filename}`, e.message);
@@ -375,8 +375,8 @@ async function pollAndDownload(promptId, onProgress, maxRetries = 600, interval 
   throw new Error(`ComfyUI timeout (${maxRetries}s) for prompt ${promptId}`);
 }
 
-export async function downloadImageAsBase64(filename, subfolder = '') {
-  const params = new URLSearchParams({ filename });
+export async function downloadImageAsBase64(filename, subfolder = '', type = 'output') {
+  const params = new URLSearchParams({ filename, type });
   if (subfolder) params.set('subfolder', subfolder);
   const url = `${BASE}/view?${params}`;
   const res = await fetch(url);

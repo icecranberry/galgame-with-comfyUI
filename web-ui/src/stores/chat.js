@@ -11,6 +11,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
   const streaming = ref(false)
   const streamingContent = ref('')
+  const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
   const hasMoreOlder = ref(false)   // 是否还有更早的一周可加载
   const loadingOlder = ref(false)   // 正在加载旧消息中
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
@@ -149,7 +150,7 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date().toISOString()
     messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now })
 
-    streaming.value = true; streamingContent.value = ''
+    streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
 
     const firstBubbleId = uid()
     const bubbleIds = [firstBubbleId]        // temp IDs, msg_saved replaces them with real IDs
@@ -167,8 +168,13 @@ export const useChatStore = defineStore('chat', () => {
         streaming.value = false
         streamingContent.value = ''
         for (const bid of bubbleIds) {
-          const m = messages.value.find(x => x.id === bid)
-          if (m && !m.content) m.content = '(请求超时，请重试)'
+          let m = messages.value.find(x => x.id === bid)
+          if (!m) {
+            m = { id: bid, role: 'assistant', type: 'text', content: '(请求超时，请重试)', created_at: new Date().toISOString() }
+            messages.value.push(m)
+          } else if (!m.content) {
+            m.content = '(请求超时，请重试)'
+          }
         }
         // 清理未完成的生图占位
         for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -204,11 +210,17 @@ export const useChatStore = defineStore('chat', () => {
           const d = value.data
           // ── token ──
           if (d.content) {
+            if (showTypingDots.value) showTypingDots.value = false
             fullResponse += d.content
             bubbleText += d.content
             const curId = bubbleIds[bubbleIds.length - 1]
-            const m = messages.value.find(x => x.id === curId)
-            if (m) m.content = bubbleText
+            let m = messages.value.find(x => x.id === curId)
+            if (!m) {
+              // bubble_break 延迟创建的气泡，首个 token 到达时才具现化
+              m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
+              messages.value.push(m)
+            }
+            m.content = bubbleText
 
             // 300ms buffer: 定时消毒 strip <prompt>（buffer 只触发一次，节省 CPU）
             if (!_bufTimer) {
@@ -229,7 +241,7 @@ export const useChatStore = defineStore('chat', () => {
             bubbleText = ''
             const newId = uid()
             bubbleIds.push(newId)
-            messages.value.push({ id: newId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
+            // 延迟创建：不立即推 messages，等首个 content token 到达再建气泡，避免空白行闪烁
           }
           // ── context_update ──
           if (lastEvent === 'context_update' && d.content) {
@@ -239,8 +251,13 @@ export const useChatStore = defineStore('chat', () => {
             const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
             for (let i = 0; i < parts.length; i++) {
               if (i < bubbleIds.length) {
-                const m = messages.value.find(x => x.id === bubbleIds[i])
-                if (m) m.content = parts[i]
+                let m = messages.value.find(x => x.id === bubbleIds[i])
+                if (!m) {
+                  m = { id: bubbleIds[i], role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() }
+                  messages.value.push(m)
+                } else {
+                  m.content = parts[i]
+                }
               } else {
                 const newId = uid()
                 bubbleIds.push(newId)
@@ -292,19 +309,25 @@ export const useChatStore = defineStore('chat', () => {
       else {
         console.error('[chat] stream error:', err.message)
         for (const bid of bubbleIds) {
-          const m = messages.value.find(x => x.id === bid)
-          if (m && !m.content) m.content = '(连接断开，请重试)'
+          let m = messages.value.find(x => x.id === bid)
+          if (!m) {
+            m = { id: bid, role: 'assistant', type: 'text', content: '(连接断开，请重试)', created_at: new Date().toISOString() }
+            messages.value.push(m)
+          } else if (!m.content) {
+            m.content = '(连接断开，请重试)'
+          }
         }
       }
     } finally {
       clearTimeout(safetyTimer)
       if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-      // 清除所有空泡（leading/trailing/consecutive separators 都可能产生）
-      // 从后往前删 trailing，从前往后删 leading，确保 bubbleIds 索引稳定
+      // 从后往前删 trailing 空泡 / 未具现化的气泡
       for (let i = bubbleIds.length - 1; i >= 0; i--) {
         const m = messages.value.find(x => x.id === bubbleIds[i])
-        if (m && !m.content?.trim()) {
-          // 保留至少一个泡（哪怕空，给错误信息留位置）
+        if (!m) {
+          // 延迟创建但从未收到内容，直接清理 bubbleId
+          if (i > 0 || bubbleIds.length === 1) bubbleIds.splice(i, 1)
+        } else if (!m.content?.trim()) {
           if (i > 0 || bubbleIds.length === 1) {
             messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
             bubbleIds.splice(i, 1)
@@ -313,10 +336,13 @@ export const useChatStore = defineStore('chat', () => {
           break  // trailing: 遇到有内容的就停
         }
       }
-      // 从前删 leading 空泡
+      // 从前删 leading 空泡 / 未具现化的气泡
       for (let i = 0; i < bubbleIds.length - 1; i++) {
         const m = messages.value.find(x => x.id === bubbleIds[i])
-        if (m && !m.content?.trim()) {
+        if (!m) {
+          bubbleIds.splice(i, 1)
+          i--
+        } else if (!m.content?.trim()) {
           messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
           bubbleIds.splice(i, 1)
           i--
@@ -332,10 +358,10 @@ export const useChatStore = defineStore('chat', () => {
       reader.releaseLock()
     }
 
-    streaming.value = false; streamingContent.value = ''
+    streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
     await loadCharacters()
   }
 
-  return { characters, activeCharId, messages, streaming, streamingContent, hasMoreOlder, loadingOlder, activeChar,
+  return { characters, activeCharId, messages, streaming, streamingContent, showTypingDots, hasMoreOlder, loadingOlder, activeChar,
     loadCharacters, loadMessages, loadOlderMessages, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
 })
