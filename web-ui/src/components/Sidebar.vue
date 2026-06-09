@@ -47,10 +47,7 @@ const chat = useChatStore()
 
 async function onCharClick(c) {
   await chat.selectChar(c.id)
-  // 当前不在聊天页则跳转到聊天页
-  if (!route.path.startsWith('/chat')) {
-    router.push('/chat/' + c.id)
-  }
+  router.push('/chat/' + c.id)
 }
 
 function formatTime(iso) {

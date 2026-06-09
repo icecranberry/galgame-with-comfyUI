@@ -62,7 +62,7 @@ async function optimizePrompt(rawPrompt) {
     const result = await chatSync([
       { role: 'system', content: systemMsg },
       { role: 'user', content: rawPrompt },
-    ], { temperature: 0.6, max_tokens: 1024 });
+    ], { temperature: 0.3, max_tokens: 1024 });
 
     const cleaned = result.trim();
     console.log(`[imageSkill] Prompt optimized: "${rawPrompt.slice(0, 40)}..." → "${cleaned.slice(0, 60)}..."`);

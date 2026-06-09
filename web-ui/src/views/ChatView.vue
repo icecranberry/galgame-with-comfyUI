@@ -160,13 +160,14 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 
 const route = useRoute()
+const router = useRouter()
 const chat = useChatStore()
 const inputText = ref('')
 const inputEl = ref(null)
@@ -366,9 +367,22 @@ onUnmounted(() => {
   stopLoadObserver()
 })
 
-// 切角色：重置滚动位置到可视底部，重新绑定观察器
+// 浏览器前进/后退 → 同步 store
+watch(() => route.params.id, (newId) => {
+  const id = parseInt(newId)
+  if (id && id !== chat.activeCharId) {
+    chat.selectChar(id)
+  }
+})
+
+// 切角色：同步 URL + 重置滚动位置 + 重新绑定观察器
 watch(() => chat.activeCharId, async (id, oldId) => {
   if (id && id !== oldId) {
+    // 同步 URL（避免循环：仅当 URL 不匹配时才 push）
+    const routeId = parseInt(route.params.id)
+    if (id !== routeId) {
+      router.replace('/chat/' + id)
+    }
     await nextTick()
     if (msgList.value) msgList.value.scrollTop = 0
     // DOM 重建后 loadHint ref 指向新元素，需重新观察

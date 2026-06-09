@@ -244,19 +244,12 @@ router.post('/characters/:id/chat', async (req, res) => {
       WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
     `).all(conversationId).reverse();
 
-    const charDisplayName = character?.display_name || 'Agent';
     const msgs = [
       { role: 'system', content: systemPrompt },
       ...history,
     ];
     if (explicitImageIntent) {
       msgs.push({ role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。不要用 <context> 包裹正文。' });
-    }
-    // 格式锚定：在用户消息前插入 few-shot 正确格式对话范例
-    // （DeepSeek/LLM 对上下文中的示例遵循度远超规则文本，这是最有效的格式矫正手段）
-    // 生图意图时跳过 — 此时需要的是结构化标签输出，而非对话格式范例
-    if (!explicitImageIntent) {
-      msgs.splice(msgs.length - 1, 0, buildFormatAnchor(charDisplayName));
     }
 
     // 6. 流式生成（温度 0.65）
@@ -481,33 +474,6 @@ function stripBracketActions(text) {
   }).replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/**
- * 构建格式锚定消息 — 用 few-shot 正确对话范例告诉模型"应该这样写回复"
- * 这是纠正括号动作描写最有效的手段，因为模型对上下文示例的遵循度远超规则文本
- */
-function buildFormatAnchor(_displayName) {
-  return {
-    role: 'user',
-    content: `[系统提示：以下示例与当前对话无关，仅供格式参考。不要照抄内容，但必须遵循格式规范。]
-
-# 格式规范（铁律）
-- 情绪通过对话文字本身传达（语气词、用词选择、语速），严禁用（括号描述动作表情）
-- 正常说话即可，系统会自动处理句子分段。不需要输出 <br> 或任何特殊分隔标记。
-
-# 正确格式
-✅ 嘿嘿，是吧是吧！那家店的汤底真的超棒的，我每次路过都会去！
-✅ 啊...下次...要不要一起去？我知道你也会喜欢的。
-✅ 哼！才不是呢！我很厉害的好吧！只不过平时懒得出手而已啦~
-✅ 等一下哦——我看看，这个好像要这样弄...
-
-# 错误格式（禁止）
-❌ （笑了笑，伸手拍拍你的肩膀）走吧，我们出发。
-❌ （眼神忽然变得认真，语气低沉）这件事没那么简单。
-❌ 嘿嘿，是吧是吧！<br>啊...下次要不要一起去？（不要输出 <br> 标签）
-
-记住：正常说话，不要括号描写，不要输出 <br> 标签。`,
-  };
-}
 
 function getDefaultPrompt() {
   return `你是一个创意图像生成助手。用户会和你聊天，描述他们想生成的图像。
@@ -649,6 +615,12 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const tags = extractImageTags(fullContent);
   const displayContent = tags.context || stripTags(fullContent);
 
+  // 4.5 推送 follow-up 文字到前端（填入现有 trailing empty 气泡，再 freeze）
+  if (displayContent) {
+    send('token', { content: displayContent });
+    send('bubble_break', {});
+  }
+
   // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本）
   const rawContent = fullContent
     .replace(/<\/?context>/gi, '')
@@ -658,6 +630,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
     .run(conversationId, rawContent, tags.prompt || null);
   const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
     .run(conversationId, rawResult.lastInsertRowid, displayContent).lastInsertRowid;
+  send('msg_saved', { id: lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
 
   // 6. 触发生图（不发 context_update，首条回复保持不变）
   if (tags.prompt) {
