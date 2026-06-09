@@ -52,20 +52,29 @@ export async function getRecentImages(characterId) {
   return res.json()
 }
 
-export function chatStream(characterId, message) {
+export function chatStream(characterId, message, clientMsgId) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
       // ── 健壮连接：fetch 异常 + 非 2xx 响应均重试（覆盖代理 ECONNRESET → 502 场景）──
+      //    每次尝试带 8s 超时，防止 Vite proxy 挂起导致无限等待
       let res
       let retries = 0
       const MAX_RETRIES = 3
       while (true) {
+        let timeoutId, onUserAbort
+        const attemptCtrl = new AbortController()
         try {
+          // 8s 超时：超时后走重试逻辑，保证连接断开场景下 8 秒内必有一次判决
+          timeoutId = setTimeout(() => attemptCtrl.abort(new Error('timeout')), 8000)
+          // 用户主动取消也中止本次尝试
+          onUserAbort = () => attemptCtrl.abort()
+          controller.signal.addEventListener('abort', onUserAbort, { once: true })
+
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message }),
-            signal: controller.signal,
+            body: JSON.stringify({ message, client_msg_id: clientMsgId }),
+            signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
           // 非 2xx：也按重试处理（代理 502/504 等）
@@ -82,6 +91,9 @@ export function chatStream(characterId, message) {
           if (retries > MAX_RETRIES) { outerController.error(err); return }
           console.warn(`[api] fetch failed (${retries}/${MAX_RETRIES}): ${err.message}, retrying in ${retries}s...`)
           await new Promise(r => setTimeout(r, retries * 1000))
+        } finally {
+          clearTimeout(timeoutId)
+          if (onUserAbort) controller.signal.removeEventListener('abort', onUserAbort)
         }
       }
 

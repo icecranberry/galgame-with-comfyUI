@@ -148,216 +148,263 @@ export const useChatStore = defineStore('chat', () => {
     if (!charId) return
 
     const now = new Date().toISOString()
+    // 幂等键：防止重试导致服务端写入重复用户消息
+    const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
     messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now })
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
 
-    const firstBubbleId = uid()
-    const bubbleIds = [firstBubbleId]        // temp IDs, msg_saved replaces them with real IDs
-    let bubbleText = ''                       // raw text for current bubble (not yet cleaned)
-    let msgSavedIdx = 0
-    messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: now })
-
     // ── 安全超时：30s 无响应自动复位，防止 streaming 永久锁死发送键 ──
     let safetyFired = false
-    let safetyTimer = setTimeout(() => {
+    let abort = () => {}
+    const safetyTimer = setTimeout(() => {
       if (streaming.value) {
         console.warn('[chat] streaming safety timeout — force reset')
         safetyFired = true
         abort()
         streaming.value = false
         streamingContent.value = ''
-        for (const bid of bubbleIds) {
-          let m = messages.value.find(x => x.id === bid)
-          if (!m) {
-            m = { id: bid, role: 'assistant', type: 'text', content: '(请求超时，请重试)', created_at: new Date().toISOString() }
-            messages.value.push(m)
-          } else if (!m.content) {
-            m.content = '(请求超时，请重试)'
+        // 清理当前重试窗口中的空泡
+        for (let i = messages.value.length - 1; i >= 0; i--) {
+          const m = messages.value[i]
+          if (m.role === 'assistant' && m.type === 'text' && !m.content?.trim()) {
+            messages.value.splice(i, 1)
           }
         }
-        // 清理未完成的生图占位
+        // 标记未完成的生图
         for (let i = messages.value.length - 1; i >= 0; i--) {
           const gm = messages.value[i]
           if (gm.type === 'image_gen' && gm.genStatus !== 'done' && gm.genStatus !== 'error') {
             gm.genStatus = 'error'
           }
         }
+        // 确保至少有一条提示
+        messages.value.push({
+          id: uid(), role: 'assistant', type: 'text',
+          content: '(请求超时，请重试)', created_at: new Date().toISOString()
+        })
       }
     }, 30000)
-
-    let lastEvent = null; let fullResponse = ''
-    let _bufTimer = null
 
     // 安全剥离 <prompt> 块 —— 不作为正常显示内容
     function stripPromptBlock(s) {
       let t = s.replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
       const idx = t.indexOf('<prompt>')
       if (idx !== -1) t = t.slice(0, idx)
-      // 也清理残留的 context/needImage 标签（向后兼容旧版 LLM 输出）
       t = t.replace(/<\/?context>/gi, '').replace(/<needImage>/gi, '').replace(/<br\s*\/?>/gi, '')
       return t.replace(/\n{3,}/g, '\n\n').trim()
     }
 
-    const { stream, abort } = api.chatStream(charId, content)
-    const reader = stream.getReader()
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value?.type === 'event') lastEvent = value.event
-        if (value?.type === 'data') {
-          const d = value.data
-          // ── token ──
-          if (d.content) {
-            if (showTypingDots.value) showTypingDots.value = false
-            fullResponse += d.content
-            bubbleText += d.content
-            const curId = bubbleIds[bubbleIds.length - 1]
-            let m = messages.value.find(x => x.id === curId)
-            if (!m) {
-              // bubble_break 延迟创建的气泡，首个 token 到达时才具现化
-              m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
-              messages.value.push(m)
-            }
-            m.content = bubbleText
+    // ── 流中断静默重试：最多 2 次额外尝试（共 3 次），仅在没有收到任何 token 时重试 ──
+    const MAX_STREAM_RETRIES = 2
+    let fullResponse = ''
 
-            // 300ms buffer: 定时消毒 strip <prompt>（buffer 只触发一次，节省 CPU）
-            if (!_bufTimer) {
-              _bufTimer = setTimeout(() => {
-                _bufTimer = null
-                const nowId = bubbleIds[bubbleIds.length - 1]
-                const dm = messages.value.find(x => x.id === nowId)
-                if (dm) dm.content = stripPromptBlock(bubbleText)
-              }, 300)
-            }
-          }
-          // ── bubble_break ──
-          if (lastEvent === 'bubble_break') {
-            // 后端已通过 SentenceSplitter 完成分句，这里只做气泡收尾
-            const prevId = bubbleIds[bubbleIds.length - 1]
-            const pm = messages.value.find(x => x.id === prevId)
-            if (pm) pm.content = stripPromptBlock(bubbleText)
-            bubbleText = ''
-            const newId = uid()
-            bubbleIds.push(newId)
-            // 延迟创建：不立即推 messages，等首个 content token 到达再建气泡，避免空白行闪烁
-          }
-          // ── context_update ──
-          if (lastEvent === 'context_update' && d.content) {
-            fullResponse = d.content
-            if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-            // 已清洗的显示文本，按 \n\n 分发给各气泡
-            const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
-            for (let i = 0; i < parts.length; i++) {
-              if (i < bubbleIds.length) {
-                let m = messages.value.find(x => x.id === bubbleIds[i])
-                if (!m) {
-                  m = { id: bubbleIds[i], role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() }
-                  messages.value.push(m)
-                } else {
-                  m.content = parts[i]
-                }
-              } else {
-                const newId = uid()
-                bubbleIds.push(newId)
-                messages.value.push({ id: newId, role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() })
+    for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
+      if (safetyFired) break
+      let thisAttemptHadTokens = false
+
+      // 重试日志
+      if (streamAttempt > 0) {
+        console.warn(`[chat] stream retry ${streamAttempt}/${MAX_STREAM_RETRIES}...`)
+      }
+
+      // ── 每轮尝试的状态 ──
+      let bubbleIds, bubbleText, msgSavedIdx, lastEvent, _bufTimer
+      function initAttemptState() {
+        const firstBubbleId = uid()
+        bubbleIds = [firstBubbleId]
+        bubbleText = ''
+        msgSavedIdx = 0
+        lastEvent = null
+        _bufTimer = null
+        messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
+      }
+      initAttemptState()
+
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId)
+      abort = streamAbort
+      const reader = stream.getReader()
+      let streamSuccess = false
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) { streamSuccess = true; break }
+          if (value?.type === 'event') lastEvent = value.event
+          if (value?.type === 'data') {
+            const d = value.data
+            // ── token ──
+            if (d.content) {
+              if (showTypingDots.value) showTypingDots.value = false
+              thisAttemptHadTokens = true
+              fullResponse += d.content
+              bubbleText += d.content
+              const curId = bubbleIds[bubbleIds.length - 1]
+              let m = messages.value.find(x => x.id === curId)
+              if (!m) {
+                m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
+                messages.value.push(m)
+              }
+              m.content = bubbleText
+
+              if (!_bufTimer) {
+                _bufTimer = setTimeout(() => {
+                  _bufTimer = null
+                  const nowId = bubbleIds[bubbleIds.length - 1]
+                  const dm = messages.value.find(x => x.id === nowId)
+                  if (dm) dm.content = stripPromptBlock(bubbleText)
+                }, 300)
               }
             }
-            // 删多余空泡
-            for (let i = bubbleIds.length - 1; i >= parts.length; i--) {
-              messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+            // ── bubble_break ──
+            if (lastEvent === 'bubble_break') {
+              const prevId = bubbleIds[bubbleIds.length - 1]
+              const pm = messages.value.find(x => x.id === prevId)
+              if (pm) pm.content = stripPromptBlock(bubbleText)
+              bubbleText = ''
+              const newId = uid()
+              bubbleIds.push(newId)
             }
-            bubbleIds.length = parts.length
-          }
-          // ── 生图事件 ──
-          if (lastEvent === 'generate_start') {
-            messages.value.push({
-              id: uid(), role: 'assistant', type: 'image_gen',
-              genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
-              created_at: new Date().toISOString(),
-            })
-          }
-          if (lastEvent === 'generate_progress') {
-            const gm = findGenMsg(d.taskId)
-            if (gm) {
-              gm.genStatus = 'generating'
-              if (d.progress !== undefined) gm.genProgress = d.progress
-              if (d.totalSteps !== undefined) gm.genTotalSteps = d.totalSteps
+            // ── context_update ──
+            if (lastEvent === 'context_update' && d.content) {
+              fullResponse = d.content
+              if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+              const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
+              for (let i = 0; i < parts.length; i++) {
+                if (i < bubbleIds.length) {
+                  let m = messages.value.find(x => x.id === bubbleIds[i])
+                  if (!m) {
+                    m = { id: bubbleIds[i], role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() }
+                    messages.value.push(m)
+                  } else {
+                    m.content = parts[i]
+                  }
+                } else {
+                  const newId = uid()
+                  bubbleIds.push(newId)
+                  messages.value.push({ id: newId, role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() })
+                }
+              }
+              for (let i = bubbleIds.length - 1; i >= parts.length; i--) {
+                messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+              }
+              bubbleIds.length = parts.length
+            }
+            // ── 生图事件 ──
+            if (lastEvent === 'generate_start') {
+              messages.value.push({
+                id: uid(), role: 'assistant', type: 'image_gen',
+                genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
+                created_at: new Date().toISOString(),
+              })
+            }
+            if (lastEvent === 'generate_progress') {
+              const gm = findGenMsg(d.taskId)
+              if (gm) {
+                gm.genStatus = 'generating'
+                if (d.progress !== undefined) gm.genProgress = d.progress
+                if (d.totalSteps !== undefined) gm.genTotalSteps = d.totalSteps
+              }
+            }
+            if (lastEvent === 'generate_done') {
+              const gm = findGenMsg(d.taskId)
+              if (gm && d.images) { gm.images = d.images; gm.genStatus = 'done' }
+            }
+            if (lastEvent === 'generate_error') {
+              const gm = findGenMsg(d.taskId)
+              if (gm) gm.genStatus = 'error'
+            }
+            // ── msg_saved: 临时 ID → 真实 ID ──
+            if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
+              const tempId = bubbleIds[msgSavedIdx]
+              const m = messages.value.find(x => x.id === tempId)
+              if (m) m.id = d.id
+              msgSavedIdx++
             }
           }
-          if (lastEvent === 'generate_done') {
-            const gm = findGenMsg(d.taskId)
-            if (gm && d.images) { gm.images = d.images; gm.genStatus = 'done' }
-          }
-          if (lastEvent === 'generate_error') {
-            const gm = findGenMsg(d.taskId)
-            if (gm) gm.genStatus = 'error'
-          }
-          // ── msg_saved: 临时 ID → 真实 ID ──
-          if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
-            const tempId = bubbleIds[msgSavedIdx]
-            const m = messages.value.find(x => x.id === tempId)
-            if (m) m.id = d.id
-            msgSavedIdx++
-          }
-        }
-      }
-    } catch (err) {
-      if (safetyFired) { /* 超时已处理，忽略后续错误 */ }
-      else if (err.name === 'AbortError') { /* 用户主动取消，正常 */ }
-      else {
-        console.error('[chat] stream error:', err.message)
-        for (const bid of bubbleIds) {
-          let m = messages.value.find(x => x.id === bid)
-          if (!m) {
-            m = { id: bid, role: 'assistant', type: 'text', content: '(连接断开，请重试)', created_at: new Date().toISOString() }
-            messages.value.push(m)
-          } else if (!m.content) {
-            m.content = '(连接断开，请重试)'
-          }
-        }
-      }
-    } finally {
-      clearTimeout(safetyTimer)
-      if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-      // 从后往前删 trailing 空泡 / 未具现化的气泡
-      for (let i = bubbleIds.length - 1; i >= 0; i--) {
-        const m = messages.value.find(x => x.id === bubbleIds[i])
-        if (!m) {
-          // 延迟创建但从未收到内容，直接清理 bubbleId
-          if (i > 0 || bubbleIds.length === 1) bubbleIds.splice(i, 1)
-        } else if (!m.content?.trim()) {
-          if (i > 0 || bubbleIds.length === 1) {
-            messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
-            bubbleIds.splice(i, 1)
-          }
-        } else {
-          break  // trailing: 遇到有内容的就停
-        }
-      }
-      // 从前删 leading 空泡 / 未具现化的气泡
-      for (let i = 0; i < bubbleIds.length - 1; i++) {
-        const m = messages.value.find(x => x.id === bubbleIds[i])
-        if (!m) {
-          bubbleIds.splice(i, 1)
-          i--
-        } else if (!m.content?.trim()) {
-          messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
-          bubbleIds.splice(i, 1)
-          i--
-        } else {
-          break
-        }
-      }
-      // 兜底：完全无回复
-      if (!fullResponse && bubbleIds.length === 1) {
-        const m = messages.value.find(x => x.id === bubbleIds[0])
-        if (m && !m.content) m.content = '(无回复)'
-      }
-      reader.releaseLock()
-    }
+        } // end while(true)
 
+        // stream 正常结束
+        break
+      } catch (err) {
+        if (safetyFired) { break }
+        if (err.name === 'AbortError') { break }
+
+        console.error(`[chat] stream error (attempt ${streamAttempt + 1}):`, err.message)
+
+        if (!thisAttemptHadTokens && streamAttempt < MAX_STREAM_RETRIES) {
+          // ── 静默重试：没有收到任何 token，连接可能在握手阶段断开 ──
+          //    清理当前尝试的气泡（包括占位和未具现化），准备下次重试
+          for (const bid of bubbleIds) {
+            messages.value = messages.value.filter(x => x.id !== bid)
+          }
+          // 短暂等待让服务端重启完成（递减退避：1s → 0.5s）
+          const delay = streamAttempt === 0 ? 1000 : 500
+          await new Promise(r => setTimeout(r, delay))
+          continue  // 进入下一轮 retry
+        }
+
+        // 已经有 token 了，不重试，显示部分内容
+        if (thisAttemptHadTokens) {
+          console.warn('[chat] stream interrupted after tokens received, keeping partial content')
+        } else {
+          // 重试已耗尽，显示错误
+          for (const bid of bubbleIds) {
+            let m = messages.value.find(x => x.id === bid)
+            if (!m) {
+              m = { id: bid, role: 'assistant', type: 'text', content: '(连接断开，请重试)', created_at: new Date().toISOString() }
+              messages.value.push(m)
+            } else if (!m.content) {
+              m.content = '(连接断开，请重试)'
+            }
+          }
+        }
+        break
+      } finally {
+        if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+        reader.releaseLock()
+
+        // 如果不是静默重试（streamSuccess || 最终失败），做气泡清理
+        const isRetrying = !streamSuccess && !safetyFired && !thisAttemptHadTokens && streamAttempt < MAX_STREAM_RETRIES
+        if (!isRetrying) {
+          // 从后往前删 trailing 空泡
+          for (let i = bubbleIds.length - 1; i >= 0; i--) {
+            const m = messages.value.find(x => x.id === bubbleIds[i])
+            if (!m) {
+              if (i > 0 || bubbleIds.length === 1) bubbleIds.splice(i, 1)
+            } else if (!m.content?.trim()) {
+              if (i > 0 || bubbleIds.length === 1) {
+                messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+                bubbleIds.splice(i, 1)
+              }
+            } else {
+              break
+            }
+          }
+          // 从前删 leading 空泡
+          for (let i = 0; i < bubbleIds.length - 1; i++) {
+            const m = messages.value.find(x => x.id === bubbleIds[i])
+            if (!m) {
+              bubbleIds.splice(i, 1)
+              i--
+            } else if (!m.content?.trim()) {
+              messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
+              bubbleIds.splice(i, 1)
+              i--
+            } else {
+              break
+            }
+          }
+          // 兜底：完全无回复
+          if (!fullResponse && bubbleIds.length === 1) {
+            const m = messages.value.find(x => x.id === bubbleIds[0])
+            if (m && !m.content) m.content = '(无回复)'
+          }
+        }
+      }
+    } // end retry loop
+
+    clearTimeout(safetyTimer)
     streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
     await loadCharacters()
   }

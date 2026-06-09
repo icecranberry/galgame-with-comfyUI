@@ -49,7 +49,7 @@ router.get('/', (req, res) => {
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
-      last_message_at: last?.created_at || null,
+      last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
       message_count: count?.c || 0,
     };
   });

@@ -139,6 +139,20 @@ class SentenceSplitter {
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
 
+// 将 SQLite CURRENT_TIMESTAMP (UTC, 无时区标记) 转为 ISO 8601
+// SQLite: "YYYY-MM-DD HH:MM:SS"  →  JS: 被误解析为本地时间（各浏览器行为不一致）
+// 统一转为 "YYYY-MM-DDTHH:MM:SS.000Z" 确保前端正确按 UTC 转换显示
+function toISODate(sqliteDT) {
+  if (!sqliteDT) return sqliteDT;
+  return sqliteDT.replace(' ', 'T') + '.000Z';
+}
+
+// 反向: 将 ISO 8601 转为 SQLite 可比较的时间格式 "YYYY-MM-DD HH:MM:SS"
+function normalizeForSQLite(dt) {
+  if (!dt) return dt;
+  return dt.replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+}
+
 // DELETE /api/characters/:id/messages — 清空角色对话记录（软删除）
 router.delete('/characters/:id/messages', (req, res) => {
   const db = getDb();
@@ -169,7 +183,7 @@ router.get('/characters/:id/messages', (req, res) => {
       WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?
       ORDER BY id DESC LIMIT ?
     ) ORDER BY id ASC`;
-    params.push(before, limitNum);
+    params.push(normalizeForSQLite(before), limitNum);
   } else {
     // 默认：加载最近 7 天的最新消息
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -179,17 +193,20 @@ router.get('/characters/:id/messages', (req, res) => {
       WHERE conversation_id = ? AND is_deleted = 0 AND created_at >= ?
       ORDER BY id DESC LIMIT ?
     ) ORDER BY id ASC`;
-    params.push(weekAgo, limitNum);
+    params.push(normalizeForSQLite(weekAgo), limitNum);
   }
 
-  const messages = db.prepare(sql).all(...params);
+  const messages = db.prepare(sql).all(...params).map(m => ({
+    ...m,
+    created_at: toISODate(m.created_at),
+  }));
 
   // 是否还有更早的消息
   let hasMore = false;
   if (messages.length > 0) {
     const oldest = messages[0].created_at;
     const older = db.prepare(`SELECT COUNT(*) as c FROM messages WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?`)
-      .get(conversationId, oldest);
+      .get(conversationId, normalizeForSQLite(oldest));
     hasMore = older.c > 0;
   }
 
@@ -198,7 +215,7 @@ router.get('/characters/:id/messages', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, client_msg_id } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
@@ -217,11 +234,25 @@ router.post('/characters/:id/chat', async (req, res) => {
 
   try {
     // 1. 保存用户消息（双表：raw_messages 完整原文 + messages 单条展示）
-    const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'user', ?)`)
-      .run(conversationId, message);
-    const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-      .run(conversationId, userRaw.lastInsertRowid, message);
-    send('msg_saved', { id: userMsg.lastInsertRowid, role: 'user', created_at: new Date().toISOString() });
+    //    幂等检查：client_msg_id 已存在则跳过写入，前端 SSE 流已建立无需重复 commit
+    let userMsgId;
+    if (client_msg_id) {
+      const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+      if (existing) {
+        // 重试请求：用户消息已写入，直接复用（避免 DB 重复记录）
+        console.log(`[chat] idempotent: skipping duplicate user message (client_msg_id=${client_msg_id})`);
+        userMsgId = existing.id;
+        send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
+      }
+    }
+    if (!userMsgId) {
+      const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
+        .run(conversationId, message, client_msg_id || null);
+      const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
+        .run(conversationId, userRaw.lastInsertRowid, message);
+      userMsgId = userMsg.lastInsertRowid;
+      send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
+    }
 
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
@@ -249,7 +280,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       ...history,
     ];
     if (explicitImageIntent) {
-      msgs.push({ role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。不要用 <context> 包裹正文。' });
+      msgs.push({ role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。' });
     }
 
     // 6. 流式生成（温度 0.65）
@@ -296,14 +327,15 @@ router.post('/characters/:id/chat', async (req, res) => {
     const displayContent = segments.join('\n\n');
 
     // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
-    if (wasStopped || tags.prompt || tags.context || hasNeedImageTag) {
+    if (wasStopped || tags.prompt || hasNeedImageTag) {
       send('context_update', { content: displayContent });
     }
-    // 8.5 保存 raw_messages（完整原文，保留 <prompt> 标签，不做自然语言转换）
-    const rawContent = fullContent
-      .replace(/<\/?context>/gi, '')
-      .replace(/<needImage>/gi, '')
-      .trim();
+    // 8.5 保存 raw_messages（完整原文，<prompt> 转为自然语言）
+    const rawContent = convertPromptToNaturalText(
+      fullContent
+        .replace(/<needImage>/gi, '')
+        .trim()
+    );
     const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
       .run(conversationId, rawContent, tags.prompt || null);
     const rawMsgId = rawResult.lastInsertRowid;
@@ -336,7 +368,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
       await triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
     } else if (hasNeedImageTag) {
-      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt+context
+      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
       await handleNeedImageFlow(conversationId, character, send);
     } else if (config.features.autoImageJudge) {
       // 路径 C: 静默判断 — 延迟约 300ms，SSE 保持打开以支持后续生图进度推送
@@ -435,18 +467,28 @@ function detectImageIntent(message) {
 
 function extractImageTags(content) {
   const promptMatch = content.match(/<prompt>([\s\S]*?)<\/prompt>/i);
-  const contextMatch = content.match(/<context>([\s\S]*?)<\/context>/i);
-  return { prompt: promptMatch?.[1]?.trim() || null, context: contextMatch?.[1]?.trim() || null };
+  return { prompt: promptMatch?.[1]?.trim() || null };
 }
 
 function hasNeedImage(content) {
   return /<needImage>/i.test(content);
 }
 
+/**
+ * 将 <prompt>...</prompt> XML 标签转换为自然语言描述
+ * 例：<prompt>初音未来站在舞台上</prompt> → 然后发送了图片：初音未来站在舞台上
+ * 用于 raw_messages 完整记录，使 LLM 上下文更自然可读
+ */
+function convertPromptToNaturalText(content) {
+  if (!content) return content;
+  return content.replace(/<prompt>([\s\S]*?)<\/prompt>/gi, (_, desc) => {
+    return `然后发送了图片：${desc.trim()}`;
+  });
+}
+
 function stripTags(content) {
   return content
     .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
-    .replace(/<context>[\s\S]*?<\/context>/gi, '')
     .replace(/<generate>[\s\S]*?<\/generate>/gi, '')
     .replace(/<needImage>/gi, '')
     .replace(/<br\s*\/?>/gi, '')     // 气泡分割标记不展示
@@ -580,13 +622,13 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
  */
 async function handleNeedImageFlow(conversationId, character, send) {
   const db = getDb();
-  console.log('[chat] needImage detected, requesting prompt from model...');
+  console.log('[chat] needImage detected, requesting prompt from model (compact)...');
 
   // 1. 构建二次请求的 system prompt
   const globalRules = getActiveGlobalRules();
   let systemPrompt = globalRules ? globalRules + '\n\n' : '';
   systemPrompt += character?.base_prompt || getDefaultPrompt();
-  systemPrompt += '\n\n**强制要求必须执行**你刚才判断用户想要一张图片。现在请立即回复自然的文字，并在末尾加上 <prompt> 标签描述画面。不要用任何标签包裹正文。';
+  systemPrompt += '\n\n**强制要求必须执行**现在请在20字内自然地补充一句对话正文，并在末尾加上 <prompt> 标签描述画面。<prompt> 标签及其内容不受 20 字限制。不要用任何标签包裹正文。';
 
   // 2. 加载历史（从 raw_messages 取完整消息，无需合并）
   const history = db.prepare(`
@@ -597,10 +639,10 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const msgs = [
     { role: 'system', content: systemPrompt },
     ...history,
-    { role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。' },
+    { role: 'user', content: '20字内补充正文并在末尾加上 <prompt> 标签。<prompt> 标签以及标签内容不受20字的限制。' },
   ];
 
-  // 3. 静默请求模型生成 prompt + context（不流式，避免前端气泡混乱）
+  // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
   let fullContent = '';
   try {
     fullContent = await chatSync(msgs, { temperature: 0.6, max_tokens: 1024 });
@@ -613,7 +655,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
 
   // 4. 解析标签
   const tags = extractImageTags(fullContent);
-  const displayContent = tags.context || stripTags(fullContent);
+  const displayContent = stripTags(fullContent);
 
   // 4.5 推送 follow-up 文字到前端（填入现有 trailing empty 气泡，再 freeze）
   if (displayContent) {
@@ -621,11 +663,12 @@ async function handleNeedImageFlow(conversationId, character, send) {
     send('bubble_break', {});
   }
 
-  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本）
-  const rawContent = fullContent
-    .replace(/<\/?context>/gi, '')
-    .replace(/<needImage>/gi, '')
-    .trim();
+  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，<prompt> 转为自然语言）
+  const rawContent = convertPromptToNaturalText(
+    fullContent
+      .replace(/<needImage>/gi, '')
+      .trim()
+  );
   const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
     .run(conversationId, rawContent, tags.prompt || null);
   const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
