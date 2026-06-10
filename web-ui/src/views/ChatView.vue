@@ -55,6 +55,7 @@
               <ImageGenBubble
                 :msg="item.msg"
                 @preview="previewImage = $event"
+                @loaded="scrollToBottom(true)"
               />
             </div>
           </template>
@@ -349,7 +350,8 @@ function onScroll() {
 async function scrollToBottom(force = false) {
   await nextTick()
   const el = msgList.value
-  if (el && (force || !userScrolledUp)) {
+  if (!el) return
+  if (force || !userScrolledUp) {
     el.scrollTop = el.scrollHeight
   }
 }
@@ -415,30 +417,43 @@ watch(() => route.params.id, (newId) => {
   }
 })
 
-// 切角色：关闭动画 + 滚底 + 重新绑定观察器
+// 切角色：关闭动画 + 设标志，滚底统一由 flatItems.length watcher 处理
 watch(() => chat.activeCharId, async (id, oldId) => {
   if (id && id !== oldId) {
     const routeId = parseInt(route.params.id)
     if (id !== routeId) {
       router.replace('/chat/' + id)
     }
-    // 同步设置，切断上个角色的遗留状态
     noTransition.value = true
     userScrolledUp = false
     stopLoadObserver()
-    await nextTick()
-    scrollToBottom(true)  // 强制滚底，不等动画
-    startLoadObserver()
-    // 延迟恢复动画（等 DOM 完全稳定，避免 TransitionGroup 检测到初始 enter）
-    setTimeout(() => {
-      noTransition.value = false
-    }, 100)
+    // 隐藏容器：避免 setTimeout 间隙中旧滚动位置闪出
+    if (msgList.value) msgList.value.style.visibility = 'hidden'
   }
 })
 
-// 新消息到达（流式分句产生新气泡）→ 自动滚底（非切角色时）
+// 消息列表变化 → 统一滚底入口
+// 切角色时路径: →0 (空) 被跳过 → N (消息到) noTransition=true → 滚底+恢复
+// 流式分句:      N→N+1 noTransition=false → 条件滚底
 watch(() => flatItems.value.length, () => {
-  if (!noTransition.value) scrollToBottom()
+  if (flatItems.value.length === 0) return
+  if (noTransition.value) {
+    // 切角色后消息加载完成：滚底 + 恢复可见
+    setTimeout(() => {
+      const el = msgList.value
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+      el.style.visibility = ''
+      // 二次确认 + 恢复动画
+      setTimeout(() => {
+        el.scrollTop = el.scrollHeight
+        startLoadObserver()
+        noTransition.value = false
+      }, 150)
+    }, 50)
+  } else {
+    scrollToBottom()
+  }
 })
 
 async function send() {

@@ -29,6 +29,7 @@
           class="igb-img"
           @click="$emit('preview', img.url || img.base64)"
           @error="onImgError(i)"
+          @load="onImgLoad"
         />
         <div v-else class="igb-missing">
           <div class="igb-missing-icon">🖼️</div>
@@ -48,16 +49,36 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 
 const props = defineProps({ msg: { type: Object, required: true } })
-defineEmits(['preview'])
+const emit = defineEmits(['preview', 'loaded'])
 
-// 跟踪图片加载失败的索引
+// 跟踪图片加载失败和完成
 const imgError = reactive(new Set())
+const imgLoadCount = ref(0)
+let loadedEmitted = false
+
 function onImgError(i) { imgError.add(i) }
-// 切换消息时重置（历史消息重加载）
-watch(() => props.msg.genId, () => imgError.clear())
+function onImgLoad() {
+  imgLoadCount.value++
+  checkAllLoaded()
+}
+function checkAllLoaded() {
+  if (loadedEmitted) return
+  const imgs = props.msg.images || []
+  const doneCount = imgLoadCount.value + imgError.size
+  if (doneCount >= imgs.length && imgs.length > 0) {
+    loadedEmitted = true
+    emit('loaded')
+  }
+}
+// 切换消息时重置
+watch(() => props.msg.genId, () => {
+  imgError.clear()
+  imgLoadCount.value = 0
+  loadedEmitted = false
+})
 
 const circumference = 2 * Math.PI * 34
 
@@ -108,7 +129,16 @@ function scheduleTick() {
 }
 
 watch(genStatus, (v) => {
-  if (v === 'done') { simulatedPct.value = 100; clearTimeout(timer) }
+  if (v === 'done') {
+    simulatedPct.value = 100; clearTimeout(timer)
+    // 重置加载计数，等待图片渲染和加载
+    imgLoadCount.value = 0
+    loadedEmitted = false
+    // 兜底：如果图片已缓存 @load 同步触发，nextTick+setTimeout 做二次确认
+    nextTick(() => {
+      setTimeout(() => checkAllLoaded(), 100)
+    })
+  }
   if (v === 'error') clearTimeout(timer)
 })
 
