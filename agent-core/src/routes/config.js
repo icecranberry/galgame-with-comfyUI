@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getDeepseekApiKeyPreview, updateDeepseekApiKey } from '../config.js';
 import { getDb } from '../db/index.js';
 
 const router = Router();
@@ -16,6 +16,7 @@ router.get('/', (req, res) => {
       height: config.comfyui.height,
     },
     features: config.features,
+    deepseek: getDeepseekApiKeyPreview(),
   });
 });
 
@@ -34,6 +35,16 @@ router.put('/features', (req, res) => {
   }
   updateFeatureFlag(key, value);
   res.json({ ok: true, features: config.features });
+});
+
+// PUT /api/config/deepseek — 更新 DeepSeek API Key
+router.put('/deepseek', (req, res) => {
+  const { apiKey } = req.body;
+  const result = updateDeepseekApiKey(apiKey);
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json({ ok: true, ...getDeepseekApiKeyPreview() });
 });
 
 // GET /api/config/rules — 获取全部全局规则

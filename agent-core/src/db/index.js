@@ -184,7 +184,7 @@ function initSchema(db) {
 function seedGlobalRules(db) {
   const DEFAULT_RULES = [
     {
-      rule_key: 'image_gen',
+      rule_key: 'system_rules',
       rule_content: `## 对话格式铁律（最高优先级，违反即失败）
 
 **绝对禁止** 用括号描述动作/表情/语气/神态，例如（笑了笑）、（压低声音）、（眼神温柔）。这不是写剧本。所有情绪通过对话文字本身传达。
@@ -213,11 +213,15 @@ function seedGlobalRules(db) {
       rule_key: 'judge_prompt',
       rule_content: `你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是否配一张图会让表达更好。只回复"是"或"否"，不要解释。`,
     },
+    {
+      rule_key: 'image_prompt',
+      rule_content: `请立即回复正文并在末尾加上 <prompt> 标签。`,
+    },
   ];
 
-  // judge_prompt: 非系统提示词规则，不拼入 LLM system prompt
+  // judge_prompt / image_prompt: 非系统提示词规则（元规则），不拼入 LLM system prompt
   // image_intent: 已废弃，保留停用记录
-  const META_RULE_KEYS = ['image_intent', 'judge_prompt'];
+  const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
 
   const insert = db.prepare(`INSERT OR IGNORE INTO global_rules (rule_key, rule_content) VALUES (?, ?)`);
   for (const rule of DEFAULT_RULES) {
@@ -309,8 +313,8 @@ export function closeDb() {
 /**
  * 获取所有激活的全局规则内容（拼接为一个字符串）
  */
-// judge_prompt / image_intent 是元规则（非 LLM system prompt 内容），不拼入
-const META_RULE_KEYS = ['image_intent', 'judge_prompt'];
+// judge_prompt / image_prompt / image_intent 是元规则（非 LLM system prompt 内容），不拼入
+const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
 
 export function getActiveGlobalRules() {
   const database = getDb();

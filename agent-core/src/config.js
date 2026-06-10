@@ -8,7 +8,7 @@ const envPath = resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 export const config = {
-  port: parseInt(process.env.PORT, 10) || 3000,
+  port: parseInt(process.env.PORT, 10) || 3099,
   dbPath: process.env.DB_PATH || './data/agent.db',
   deepseek: {
     apiKey: process.env.DEEPSEEK_API_KEY,
@@ -61,4 +61,22 @@ export function updateFeatureFlag(key, value) {
   const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT', autoImageJudge: 'FEATURE_AUTO_IMAGE_JUDGE' };
   persistEnv(keyMap[key] || `FEATURE_${key.toUpperCase()}`, boolVal);
   console.log(`[config] Feature ${key} = ${boolVal}`);
+}
+
+export function getDeepseekApiKeyPreview() {
+  const key = config.deepseek.apiKey || '';
+  if (!key) return { hasApiKey: false, preview: '' };
+  const preview = key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`;
+  return { hasApiKey: true, preview };
+}
+
+export function updateDeepseekApiKey(apiKey) {
+  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+    return { ok: false, error: 'API Key cannot be empty' };
+  }
+  const trimmed = apiKey.trim();
+  config.deepseek.apiKey = trimmed;
+  persistEnv('DEEPSEEK_API_KEY', trimmed);
+  console.log('[config] DeepSeek API key updated');
+  return { ok: true };
 }

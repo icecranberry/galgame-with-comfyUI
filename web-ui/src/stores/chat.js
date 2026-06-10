@@ -195,13 +195,16 @@ export const useChatStore = defineStore('chat', () => {
       return t.replace(/\n{3,}/g, '\n\n').trim()
     }
 
-    // ── 流中断静默重试：最多 2 次额外尝试（共 3 次），仅在没有收到任何 token 时重试 ──
+    // ── 流中断静默重试：最多 2 次额外尝试（共 3 次）──
+    //    重试条件：没有收到任何完整气泡（bubble_break）或服务端已保存（msg_saved）
+    //    这比 "收到任何 token" 更严格 —— 防止只收到几个残字就不重试的问题
     const MAX_STREAM_RETRIES = 2
     let fullResponse = ''
 
     for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
       if (safetyFired) break
-      let thisAttemptHadTokens = false
+      let thisAttemptHadBubble = false      // 收到完整气泡（bubble_break）
+      let thisAttemptHadMsgSaved = false    // 服务端已保存消息（msg_saved assistant）
 
       // 重试日志
       if (streamAttempt > 0) {
@@ -224,19 +227,17 @@ export const useChatStore = defineStore('chat', () => {
       const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId)
       abort = streamAbort
       const reader = stream.getReader()
-      let streamSuccess = false
 
       try {
         while (true) {
           const { done, value } = await reader.read()
-          if (done) { streamSuccess = true; break }
+          if (done) break
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
             const d = value.data
             // ── token ──
             if (d.content) {
               if (showTypingDots.value) showTypingDots.value = false
-              thisAttemptHadTokens = true
               fullResponse += d.content
               bubbleText += d.content
               const curId = bubbleIds[bubbleIds.length - 1]
@@ -258,6 +259,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── bubble_break ──
             if (lastEvent === 'bubble_break') {
+              thisAttemptHadBubble = true
               const prevId = bubbleIds[bubbleIds.length - 1]
               const pm = messages.value.find(x => x.id === prevId)
               if (pm) pm.content = stripPromptBlock(bubbleText)
@@ -316,6 +318,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── msg_saved: 临时 ID → 真实 ID ──
             if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
+              thisAttemptHadMsgSaved = true
               const tempId = bubbleIds[msgSavedIdx]
               const m = messages.value.find(x => x.id === tempId)
               if (m) m.id = d.id
@@ -324,7 +327,24 @@ export const useChatStore = defineStore('chat', () => {
           }
         } // end while(true)
 
-        // stream 正常结束
+        // stream 正常结束（done=true）
+        // 有完整气泡或服务端已保存 → 成功
+        if (thisAttemptHadBubble || thisAttemptHadMsgSaved) break
+        // 无意义空流（连接后立即关闭，无数据）→ 可重试
+        if (streamAttempt < MAX_STREAM_RETRIES) {
+          for (const bid of bubbleIds) {
+            messages.value = messages.value.filter(x => x.id !== bid)
+          }
+          const delay = streamAttempt === 0 ? 1000 : 500
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+        // 重试耗尽
+        for (const bid of bubbleIds) {
+          let m = messages.value.find(x => x.id === bid)
+          if (!m) continue  // 延迟创建未触发，无需填充
+          if (!m.content) m.content = '(无回复)'
+        }
         break
       } catch (err) {
         if (safetyFired) { break }
@@ -332,8 +352,14 @@ export const useChatStore = defineStore('chat', () => {
 
         console.error(`[chat] stream error (attempt ${streamAttempt + 1}):`, err.message)
 
-        if (!thisAttemptHadTokens && streamAttempt < MAX_STREAM_RETRIES) {
-          // ── 静默重试：没有收到任何 token，连接可能在握手阶段断开 ──
+        // 有完整气泡或服务端已保存 → 不重试，接受已有内容
+        if (thisAttemptHadBubble || thisAttemptHadMsgSaved) {
+          console.warn('[chat] stream interrupted but content already committed, keeping partial content')
+          break
+        }
+
+        if (streamAttempt < MAX_STREAM_RETRIES) {
+          // ── 静默重试：没有任何有价值内容，连接可能在握手/早期阶段断开 ──
           //    清理当前尝试的气泡（包括占位和未具现化），准备下次重试
           for (const bid of bubbleIds) {
             messages.value = messages.value.filter(x => x.id !== bid)
@@ -344,19 +370,14 @@ export const useChatStore = defineStore('chat', () => {
           continue  // 进入下一轮 retry
         }
 
-        // 已经有 token 了，不重试，显示部分内容
-        if (thisAttemptHadTokens) {
-          console.warn('[chat] stream interrupted after tokens received, keeping partial content')
-        } else {
-          // 重试已耗尽，显示错误
-          for (const bid of bubbleIds) {
-            let m = messages.value.find(x => x.id === bid)
-            if (!m) {
-              m = { id: bid, role: 'assistant', type: 'text', content: '(连接断开，请重试)', created_at: new Date().toISOString() }
-              messages.value.push(m)
-            } else if (!m.content) {
-              m.content = '(连接断开，请重试)'
-            }
+        // 重试已耗尽，显示错误
+        for (const bid of bubbleIds) {
+          let m = messages.value.find(x => x.id === bid)
+          if (!m) {
+            m = { id: bid, role: 'assistant', type: 'text', content: '(连接断开，请重试)', created_at: new Date().toISOString() }
+            messages.value.push(m)
+          } else if (!m.content) {
+            m.content = '(连接断开，请重试)'
           }
         }
         break
@@ -364,8 +385,8 @@ export const useChatStore = defineStore('chat', () => {
         if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
         reader.releaseLock()
 
-        // 如果不是静默重试（streamSuccess || 最终失败），做气泡清理
-        const isRetrying = !streamSuccess && !safetyFired && !thisAttemptHadTokens && streamAttempt < MAX_STREAM_RETRIES
+        // 判断此次尝试是否将重试（气泡已在 retry 路径中被清理，避免 finally 再次清理/兜底）
+        const isRetrying = !safetyFired && !thisAttemptHadBubble && !thisAttemptHadMsgSaved && streamAttempt < MAX_STREAM_RETRIES
         if (!isRetrying) {
           // 从后往前删 trailing 空泡
           for (let i = bubbleIds.length - 1; i >= 0; i--) {

@@ -4,10 +4,10 @@
  *   $ npm run dev   (在项目根目录)
  *
  * 启动流程:
- *   1. 清理端口占用 (3000, 8765, 5173)
+ *   1. 清理端口占用 (3099, 8765, 5173)
  *   2. 检查 Node.js / Python 环境
  *   3. vector-service  (:8765) — Python uvicorn
- *   4. agent-core       (:3000) — Express (node --watch)
+ *   4. agent-core       (:3099) — Express (node --watch)
  *   5. web-ui           (:5173) — Vite HMR
  *
  * Ctrl+C 一键停止全部子进程。
@@ -37,7 +37,43 @@ function tag(name) {
   return `${C.dim}[${C.cyan}${name}${C.dim}]${C.reset}`;
 }
 
-// ── 端口清理 ──
+// ── 端口清理（带进程身份验证，防止误杀其他应用）──
+const PROJECT_KEYWORDS = [
+  "generate-image-agent", "agent-core", "vector-service", "web-ui",
+  "app.js", "server:app", "vite", "uvicorn",
+];
+
+function getProcessName(pid) {
+  try {
+    return execSync(
+      `powershell -NoProfile -Command "(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName"`,
+      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
+    ).trim();
+  } catch { return ""; }
+}
+
+function isProjectProcess(pid) {
+  // 第一层：只检查 node.exe / python.exe —— 其他进程（如京东金融等原生应用）直接放行
+  const name = getProcessName(pid).toLowerCase();
+  if (!name || (name !== "node.exe" && name !== "python.exe")) {
+    return false;
+  }
+
+  // 第二层：检查命令行是否包含项目路径/关键字
+  try {
+    const cmdLine = execSync(
+      `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`,
+      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
+    ).trim();
+
+    const lower = cmdLine.toLowerCase();
+    return PROJECT_KEYWORDS.some((kw) => lower.includes(kw));
+  } catch {
+    // 无法获取命令行 → 保守处理，不杀
+    return false;
+  }
+}
+
 function killPort(port) {
   try {
     if (process.platform === "win32") {
@@ -53,10 +89,24 @@ function killPort(port) {
         const pid = parts[parts.length - 1];
         if (pid && /^\d+$/.test(pid)) seen.add(pid);
       }
+
+      let killedCount = 0;
       for (const pid of seen) {
-        execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, stdio: "ignore" });
+        if (isProjectProcess(pid)) {
+          execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, stdio: "ignore" });
+          killedCount++;
+          console.log(`        ${C.dim}Killed old project process (PID ${pid}) on port ${port}${C.reset}`);
+        } else {
+          const procName = getProcessName(pid) || `PID ${pid}`;
+          console.log(
+            `\n        ${C.yellow}[WARN] Port ${port} occupied by "${procName}" (PID ${pid}) — not killing${C.reset}`
+          );
+          console.log(
+            `        ${C.yellow}       This is NOT a project process. Check your running applications.${C.reset}`
+          );
+        }
       }
-      return seen.size > 0;
+      return killedCount > 0;
     } else {
       execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { stdio: "ignore" });
       return true;
@@ -90,7 +140,7 @@ async function shutdown() {
   // ── Windows: 先请求 agent-core 优雅退出（防止 SQLite WAL 损坏）──
   if (process.platform === "win32") {
     try {
-      await fetch("http://localhost:3000/api/shutdown", {
+      await fetch("http://localhost:3099/api/shutdown", {
         method: "POST",
         signal: AbortSignal.timeout(3000),
       });
@@ -133,7 +183,7 @@ async function main() {
 
   // [0/4] 端口清理
   process.stdout.write(`  [0/4] Cleaning up ports...`);
-  killPort(3000);
+  killPort(3099);
   killPort(8765);
   killPort(5173);
   console.log(` ${C.green}Done${C.reset}`);
@@ -173,8 +223,8 @@ async function main() {
     },
     {
       name: "agent-core",
-      port: 3000,
-      url: "http://localhost:3000/api/health",
+      port: 3099,
+      url: "http://localhost:3099/api/health",
       cwd: resolve(ROOT, "agent-core"),
       getCmd() { return "node"; },
       args: ["--watch", "app.js"],
@@ -224,7 +274,7 @@ async function main() {
   console.log(`  ${C.bold}All services running!${C.reset}`);
   console.log();
   console.log(`    Web UI:  ${C.cyan}http://localhost:5173${C.reset}  (Vite HMR)`);
-  console.log(`    API:     ${C.cyan}http://localhost:3000${C.reset}   (Express)`);
+  console.log(`    API:     ${C.cyan}http://localhost:3099${C.reset}   (Express)`);
   console.log(`    Vector:  ${C.cyan}http://localhost:8765${C.reset}   (FastAPI)`);
   console.log();
   console.log(`  ${C.dim}Press Ctrl+C to stop all services${C.reset}`);

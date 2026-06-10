@@ -12,21 +12,26 @@
       </div>
 
       <!--
-        column-reverse 布局：第一条消息在可视底部，新消息自然出现，无需 JS 滚动
-        scrollTop=0 即底部，scrollTop 增大 = 向上翻历史
+        正常 column 布局：最旧消息在顶部，最新消息在底部
+        新消息到达时 JS 滚底，TransitionGroup FLIP 驱动已有气泡平滑上移
       -->
-      <div ref="msgList" class="message-list">
-        <div v-for="(group, gi) in reversedGroups" :key="gi">
-          <div class="time-divider">{{ group.label }}</div>
+      <div ref="msgList" class="message-list" @scroll="onScroll">
+        <!-- 加载指示器置于列表顶部 → 用户上滚到顶部触发 IntersectionObserver 加载历史 -->
+        <div ref="loadHint" v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
+        <div ref="loadHint" v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
-          <template v-for="(msg, mi) in group.msgs" :key="msg.id">
+        <TransitionGroup :name="noTransition ? 'none' : 'msg-list'" tag="div" class="msg-list-inner">
+          <template v-for="item in flatItems" :key="item.id">
+            <!-- 时间分隔符 -->
+            <div v-if="item.type === 'divider'" class="time-divider">{{ item.label }}</div>
+
             <!-- Text bubble (user or assistant) -->
-            <div v-if="msg.type !== 'image_gen'" class="message" :class="[msg.role, { 'msg-same-role': mi > 0 && group.msgs[mi-1].role === msg.role }]">
-              <div class="msg-avatar" :style="msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
-                <span v-if="msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
+            <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
+              <div class="msg-avatar" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
+                <span v-if="item.msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="msg.role === 'assistant' && !msg.content && chat.streaming && chat.showTypingDots"
+              <svg v-if="item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -37,26 +42,23 @@
                 <circle cx="52" cy="5" r="3" class="dot dot-4" />
                 <circle cx="64" cy="5" r="3" class="dot dot-5" />
               </svg>
-              <div v-else-if="msg.content" class="msg-bubble">
-                <div class="msg-text" v-html="renderContent(msg.content)"></div>
+              <div v-else-if="item.msg.content" class="msg-bubble">
+                <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
               </div>
             </div>
 
             <!-- Image generation bubble -->
-            <div v-else class="message assistant" :class="{ 'msg-same-role': mi > 0 && group.msgs[mi-1].role === 'assistant' }">
+            <div v-else class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
               <div class="msg-avatar" :style="agentAvatarStyle">
                 <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <ImageGenBubble
-                :msg="msg"
+                :msg="item.msg"
                 @preview="previewImage = $event"
               />
             </div>
           </template>
-        </div>
-        <!-- 加载指示器：IntersectionObserver 监测此元素，进入视口时自动加载 -->
-        <div ref="loadHint" v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
-        <div ref="loadHint" v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+        </TransitionGroup>
       </div>
 
       <div class="input-area">
@@ -287,8 +289,19 @@ const messageGroups = computed(() => {
   return groups
 })
 
-// column-reverse 布局需要消息从新到旧排列（第一个 DOM 节点 = 可视底部）
-const reversedGroups = computed(() => [...messageGroups.value].reverse())
+// 扁平化列表，供 TransitionGroup 使用（时间正序：最旧在上，最新在下）
+const flatItems = computed(() => {
+  const items = []
+  for (const group of messageGroups.value) {
+    items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
+    for (let mi = 0; mi < group.msgs.length; mi++) {
+      const msg = group.msgs[mi]
+      const sameRole = mi > 0 && group.msgs[mi - 1].role === msg.role
+      items.push({ type: 'message', msg, id: msg.id, sameRole })
+    }
+  }
+  return items
+})
 
 function timeLabel(iso) {
   if (!iso) return ''
@@ -307,11 +320,43 @@ function timeLabel(iso) {
 }
 
 // ══════════════════════════════════════════════════
-// 无限滚动加载（IntersectionObserver — 不依赖 scroll 坐标计算）
+// 滚动管理（正常 column 布局，scrollTop=0 为顶部）
 // ══════════════════════════════════════════════════
-//
-// column-reverse 下 scroll 坐标不可靠（边界不触发事件），
-// IntersectionObserver 直接监测"加载提示"元素是否进入视口，无需关心坐标。
+
+// 切角色时关闭 TransitionGroup 动画，避免 0.2s 渐入渐出
+const noTransition = ref(false)
+let userScrolledUp = false
+let scrollTimer = null
+
+function onScroll() {
+  const el = msgList.value
+  if (!el) return
+  const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  // 用户上滚超过 60px 则停止自动跟随，滚回底部 10px 内恢复跟随
+  if (distToBottom > 60) {
+    userScrolledUp = true
+  } else if (distToBottom < 10) {
+    userScrolledUp = false
+  }
+  // 用户停止滚动 2s 后若在底部则恢复跟随
+  if (scrollTimer) clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    if (distToBottom < 60) userScrolledUp = false
+  }, 2000)
+}
+
+// force=true 时跳过 userScrolledUp 检查（切角色 / 初次加载 / 用户发消息）
+async function scrollToBottom(force = false) {
+  await nextTick()
+  const el = msgList.value
+  if (el && (force || !userScrolledUp)) {
+    el.scrollTop = el.scrollHeight
+  }
+}
+
+// ══════════════════════════════════════════════════
+// 无限滚动加载（IntersectionObserver — 监测顶部 loadHint）
+// ══════════════════════════════════════════════════
 
 const loadHint = ref(null)
 let loadObs = null
@@ -337,18 +382,13 @@ async function loadMore() {
   const prevHeight = el?.scrollHeight || 0
   await chat.loadOlderMessages()
   await nextTick()
-  // 重新观察新的 loadHint（DOM 可能已更新）
   stopLoadObserver()
   await nextTick()
   startLoadObserver()
   if (el) {
-    // column-reverse: 旧消息追加到 flex 尾部（可视顶部），需补偿 scrollTop
-    // 先推到 max，再回退留余量防止下次滚不动
+    // 旧消息插入到列表顶部，需补偿 scrollTop 保持用户当前视口不跳
     const delta = el.scrollHeight - prevHeight
     el.scrollTop += delta
-    if (chat.hasMoreOlder) {
-      el.scrollTop = Math.max(0, el.scrollTop - 60)
-    }
   }
 }
 
@@ -359,7 +399,7 @@ onMounted(async () => {
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
   startLoadObserver()
-  // column-reverse 天然从底部开始，无需手动滚底
+  scrollToBottom(true)  // 首次加载强制滚底
   inputEl.value?.focus()
 })
 
@@ -375,28 +415,39 @@ watch(() => route.params.id, (newId) => {
   }
 })
 
-// 切角色：同步 URL + 重置滚动位置 + 重新绑定观察器
+// 切角色：关闭动画 + 滚底 + 重新绑定观察器
 watch(() => chat.activeCharId, async (id, oldId) => {
   if (id && id !== oldId) {
-    // 同步 URL（避免循环：仅当 URL 不匹配时才 push）
     const routeId = parseInt(route.params.id)
     if (id !== routeId) {
       router.replace('/chat/' + id)
     }
-    await nextTick()
-    if (msgList.value) msgList.value.scrollTop = 0
-    // DOM 重建后 loadHint ref 指向新元素，需重新观察
+    // 同步设置，切断上个角色的遗留状态
+    noTransition.value = true
+    userScrolledUp = false
     stopLoadObserver()
     await nextTick()
+    scrollToBottom(true)  // 强制滚底，不等动画
     startLoadObserver()
+    // 延迟恢复动画（等 DOM 完全稳定，避免 TransitionGroup 检测到初始 enter）
+    setTimeout(() => {
+      noTransition.value = false
+    }, 100)
   }
+})
+
+// 新消息到达（流式分句产生新气泡）→ 自动滚底（非切角色时）
+watch(() => flatItems.value.length, () => {
+  if (!noTransition.value) scrollToBottom()
 })
 
 async function send() {
   const text = inputText.value.trim()
   if (!text || chat.streaming) return
   inputText.value = ''
+  userScrolledUp = false  // 用户主动发送 → 强制跟随
   await chat.sendMessage(text)
+  await scrollToBottom(true)
 }
 
 function renderContent(text) {
@@ -423,7 +474,28 @@ function renderContent(text) {
 
 .message-list {
   flex:1; overflow-y:auto; padding:16px 24px;
-  display:flex; flex-direction:column-reverse; gap:2px;
+}
+
+.msg-list-inner {
+  display:flex; flex-direction:column; gap:2px;
+}
+
+/* TransitionGroup：新消息从下方淡入 + 已有气泡 FLIP 上移 0.2s */
+.msg-list-move {
+  transition: transform 0.2s ease;
+}
+.msg-list-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.msg-list-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+/* leave 元素脱离流，避免加载历史时 TransitionGroup 跳动 */
+.msg-list-leave-active {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
 .load-older { text-align:center; padding:8px 0; font-size:12px; color:var(--text-secondary); user-select:none; }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
-import { generateImage } from '../services/imageSkill.js';
+import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { config } from '../config.js';
 
 const router = Router();
@@ -94,6 +94,32 @@ router.get('/tasks/:id/status', (req, res) => {
     created_at: task.created_at,
     finished_at: task.finished_at,
   });
+});
+
+// POST /api/images/test-style — 测试画风（固定提示词，不写DB，仅返回展示用图）
+router.post('/test-style', async (req, res) => {
+  const { artist, width, height } = req.body;
+
+  const FIXED_PROMPT = `1girl, solo, kiana kaslana, honkai impact 3rd, herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`;
+
+  console.log(`[test-style] artist="${artist}" ${width}x${height}`);
+
+  try {
+    const result = await generateImageRaw(FIXED_PROMPT, {
+      artist: artist || config.comfyui.artist,
+      width: width || config.comfyui.width,
+      height: height || config.comfyui.height,
+    });
+
+    if (result.success) {
+      res.json({ success: true, images: result.images, promptId: result.promptId });
+    } else {
+      res.json({ success: false, error: result.error || 'No image generated' });
+    }
+  } catch (err) {
+    console.error('[test-style] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // GET /api/images/comfyui-health — ComfyUI 连接检查

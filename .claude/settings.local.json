@@ -6,20 +6,20 @@
       "Bash(timeout 3 node app.js)",
       "Bash(node -e ' *)",
       "Bash(start /min node app.js)",
-      "Bash(curl -s http://localhost:3000/api/health)",
-      "Bash(curl -s -X POST http://localhost:3000/api/conversations)",
-      "Bash(curl -s http://localhost:3000/api/conversations)",
+      "Bash(curl -s http://localhost:3099/api/health)",
+      "Bash(curl -s -X POST http://localhost:3099/api/conversations)",
+      "Bash(curl -s http://localhost:3099/api/conversations)",
       "Bash(taskkill /f /im node.exe)",
-      "Bash(curl -s http://localhost:3000/api/conversations/a4b0fae1-e3c0-445d-bee5-37c763c7ca17/messages)",
+      "Bash(curl -s http://localhost:3099/api/conversations/a4b0fae1-e3c0-445d-bee5-37c763c7ca17/messages)",
       "Bash(node -e \"process.stdin.on\\('data',d=>{const j=JSON.parse\\(d\\);j.messages.forEach\\(m=>console.log\\('['+m.role+']',m.content.slice\\(0,100\\)\\)\\)}\\)\")",
-      "Bash(curl -s \"http://localhost:3000/api/memory/search?q=猫+摄影\")",
+      "Bash(curl -s \"http://localhost:3099/api/memory/search?q=猫+摄影\")",
       "Bash(node -e \"process.stdin.on\\('data',d=>{const j=JSON.parse\\(d\\);console.log\\('results:',j.results.length\\)}\\)\")",
-      "Bash(curl -s \"http://localhost:3000/api/conversations\")",
+      "Bash(curl -s \"http://localhost:3099/api/conversations\")",
       "Bash(node -e \"process.stdin.on\\('data',d=>{const j=JSON.parse\\(d\\);console.log\\('count:',j.conversations.length\\)}\\)\")",
       "Bash(tasklist /fi \"imagename eq node.exe\")",
-      "Bash(curl -s --max-time 5 \"http://localhost:3000/api/memory/search?q=%E5%B0%8F%E6%98%8E\")",
+      "Bash(curl -s --max-time 5 \"http://localhost:3099/api/memory/search?q=%E5%B0%8F%E6%98%8E\")",
       "Bash(echo \"=== Test 2: Follow-up chat - AI should recall user info ===\")",
-      "Bash(curl -s -N --max-time 20 -X POST http://localhost:3000/api/conversations/dd2c367c-d569-43fc-9d58-dd2e0ec5f673/chat -H 'Content-Type: application/json' -d '{\"message\":\"你还记得我叫什么吗？我喜欢什么动物？\"}')"
+      "Bash(curl -s -N --max-time 20 -X POST http://localhost:3099/api/conversations/dd2c367c-d569-43fc-9d58-dd2e0ec5f673/chat -H 'Content-Type: application/json' -d '{\"message\":\"你还记得我叫什么吗？我喜欢什么动物？\"}')"
     ]
   }
 }

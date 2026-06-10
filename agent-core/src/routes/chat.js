@@ -102,10 +102,25 @@ class SentenceSplitter {
   // 流结束，释放闸门剩余安全字 + flush 分句队列
   flushAll() {
     if (this.stopped) {
+      // 闸门中 <pr 之前仍有安全字（如 "。<pr" 中的 "。"），释放后再清空
+      const pending = this.gate.slice(0, -3);
+      for (const safe of pending) {
+        if (safe === '。') {
+          if (this.buffer) {
+            const seg = this.buffer.replace(/。$/, '');
+            if (seg) this.buffer = seg;
+            else this.buffer = '';
+          }
+          continue;
+        }
+        this.buffer += safe;
+      }
+      let text = this.buffer;
       this.gate = '';
       this.buffer = '';
       this.pendingSplit = -1;
-      return { segments: [], stopped: true };
+      text = text.replace(/。$/, '');
+      return { segments: text ? [text] : [], stopped: true };
     }
     // 闸门中剩下的字全放（已确认不含 <pr），。仍触发分句
     for (const safe of this.gate) {
@@ -280,7 +295,9 @@ router.post('/characters/:id/chat', async (req, res) => {
       ...history,
     ];
     if (explicitImageIntent) {
-      msgs.push({ role: 'user', content: '请立即回复正文并在末尾加上 <prompt> 标签。' });
+      const imagePromptRule = getGlobalRule('image_prompt');
+      const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 <prompt> 标签。';
+      msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 <prompt> 标签。' });
     }
 
     // 6. 流式生成（温度 0.65）
@@ -330,12 +347,10 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (wasStopped || tags.prompt || hasNeedImageTag) {
       send('context_update', { content: displayContent });
     }
-    // 8.5 保存 raw_messages（完整原文，<prompt> 转为自然语言）
-    const rawContent = convertPromptToNaturalText(
-      fullContent
-        .replace(/<needImage>/gi, '')
-        .trim()
-    );
+    // 8.5 保存 raw_messages（完整原文，保留 <prompt> 标签以便 LLM 理解上下文）
+    const rawContent = fullContent
+      .replace(/<needImage>/gi, '')
+      .trim();
     const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
       .run(conversationId, rawContent, tags.prompt || null);
     const rawMsgId = rawResult.lastInsertRowid;
@@ -474,17 +489,6 @@ function hasNeedImage(content) {
   return /<needImage>/i.test(content);
 }
 
-/**
- * 将 <prompt>...</prompt> XML 标签转换为自然语言描述
- * 例：<prompt>初音未来站在舞台上</prompt> → 然后发送了图片：初音未来站在舞台上
- * 用于 raw_messages 完整记录，使 LLM 上下文更自然可读
- */
-function convertPromptToNaturalText(content) {
-  if (!content) return content;
-  return content.replace(/<prompt>([\s\S]*?)<\/prompt>/gi, (_, desc) => {
-    return `然后发送了图片：${desc.trim()}`;
-  });
-}
 
 function stripTags(content) {
   return content
@@ -628,7 +632,8 @@ async function handleNeedImageFlow(conversationId, character, send) {
   const globalRules = getActiveGlobalRules();
   let systemPrompt = globalRules ? globalRules + '\n\n' : '';
   systemPrompt += character?.base_prompt || getDefaultPrompt();
-  systemPrompt += '\n\n**强制要求必须执行**现在请在20字内自然地补充一句对话正文，并在末尾加上 <prompt> 标签描述画面。<prompt> 标签及其内容不受 20 字限制。不要用任何标签包裹正文。';
+  const imagePromptRule = getGlobalRule('image_prompt');
+  systemPrompt += '\n\n**强制要求必须执行**现在请在20字内自然地补充一句对话正文，并在末尾加上 <prompt> 标签描述画面。<prompt> 标签及其内容不受 20 字限制。';
 
   // 2. 加载历史（从 raw_messages 取完整消息，无需合并）
   const history = db.prepare(`
@@ -636,10 +641,11 @@ async function handleNeedImageFlow(conversationId, character, send) {
     WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
   `).all(conversationId).reverse();
 
+  const imagePromptPrefix = imagePromptRule?.rule_content ? imagePromptRule.rule_content + '\n\n' : '请立即回复正文并在末尾加上 <prompt> 标签。\n\n';
   const msgs = [
     { role: 'system', content: systemPrompt },
     ...history,
-    { role: 'user', content: '20字内补充正文并在末尾加上 <prompt> 标签。<prompt> 标签以及标签内容不受20字的限制。' },
+    { role: 'user', content: imagePromptPrefix + '20字内补充正文并在末尾加上 <prompt> 标签。<prompt> 标签以及标签内容不受20字的限制。' },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -663,12 +669,10 @@ async function handleNeedImageFlow(conversationId, character, send) {
     send('bubble_break', {});
   }
 
-  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，<prompt> 转为自然语言）
-  const rawContent = convertPromptToNaturalText(
-    fullContent
-      .replace(/<needImage>/gi, '')
-      .trim()
-  );
+  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，保留 <prompt> 标签）
+  const rawContent = fullContent
+    .replace(/<needImage>/gi, '')
+    .trim();
   const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
     .run(conversationId, rawContent, tags.prompt || null);
   const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)

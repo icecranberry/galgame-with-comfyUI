@@ -148,6 +148,14 @@ export async function updateFeatureFlag(key, value) {
   })
 }
 
+export async function updateDeepseekApiKey(apiKey) {
+  const res = await fetch(`${BASE}/config/deepseek`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+  })
+  return res.json()
+}
+
 // ── Global Rules ──
 export async function getGlobalRules() {
   const res = await fetch(`${BASE}/config/rules`)
@@ -173,6 +181,16 @@ export async function uploadUserAvatar(base64) {
     body: JSON.stringify({ base64 }),
   })
   return res.json()
+}
+
+// ── 测试画风（固定 Kiana 提示词，不存 DB）──
+export async function testStyle(artist, width, height) {
+  const res = await fetch(`${BASE}/images/test-style`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist, width, height }),
+  });
+  return res.json();
 }
 
 // ── ComfyUI health ──

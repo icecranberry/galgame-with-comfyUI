@@ -28,6 +28,73 @@
         </div>
       </div>
 
+      <!-- DeepSeek API Key -->
+      <div class="card">
+        <h3>DeepSeek API Key</h3>
+        <p class="fd">用于 AI 对话和角色生成，Key 存储在本地，请勿公开分享</p>
+        <div class="apikey-row">
+          <input
+            v-model="deepseekApiKey"
+            :type="showApiKey ? 'text' : 'password'"
+            class="fi"
+            style="margin-bottom:0"
+            placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+            @input="deepseekDirty = true; deepseekSaved = false"
+          />
+          <button class="sp-btn-small" style="flex-shrink:0" @click="showApiKey = !showApiKey">
+            {{ showApiKey ? '隐藏' : '显示' }}
+          </button>
+        </div>
+        <div v-if="deepseekPreview.hasApiKey" class="key-status">
+          <span class="key-ok">🔑 当前:</span>
+          <code class="key-preview">{{ deepseekPreview.preview }}</code>
+        </div>
+        <div v-else class="key-status key-missing">⚠️ 未设置，AI 对话功能不可用</div>
+        <div class="sa" style="margin-top:12px">
+          <button class="btn-primary" :disabled="!deepseekDirty" @click="saveDeepseekApiKey">保存</button>
+          <span v-if="deepseekSaved" class="smsg">已保存</span>
+        </div>
+      </div>
+
+      <!-- 测试画风：使用当前画师串 & 分辨率，固定 Kiana 提示词 -->
+      <div class="card">
+        <h3>测试画风</h3>
+        <p class="fd">使用上方当前画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
+
+        <button
+          class="btn-primary style-test-btn"
+          :disabled="styleTesting"
+          @click="runStyleTest"
+        >
+          {{ styleTesting ? '生成中...' : '🎨 发送测试' }}
+        </button>
+
+        <div v-if="styleError" class="style-error">{{ styleError }}</div>
+
+        <div v-if="styleTesting" class="style-loading">
+          <span class="style-spinner"></span>
+          <span>ComfyUI 正在生成图片，请耐心等待...</span>
+        </div>
+
+        <div v-if="styleImages.length > 0" class="style-result">
+          <img
+            v-for="(img, i) in styleImages"
+            :key="i"
+            :src="img.base64"
+            class="style-preview-img"
+            @click="previewImage = img.base64"
+            alt="测试画风结果"
+          />
+        </div>
+
+        <!-- 全屏预览 -->
+        <Teleport to="body">
+          <div v-if="previewImage" class="style-overlay" @click="previewImage = null">
+            <img :src="previewImage" class="style-overlay-img" />
+          </div>
+        </Teleport>
+      </div>
+
       <!-- 功能开关 -->
       <div class="card">
         <h3>功能开关</h3>
@@ -159,7 +226,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getConfig, updateComfyConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateDeepseekApiKey, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import { userAvatar, loadUserAvatar, uploadUserAvatar } from '../userConfig.js'
@@ -177,24 +244,33 @@ const rulesSaved = ref({})
 
 const ruleLabels = {
   image_intent: '图像生成判断（<needImage>）',
-  image_gen: '图像生成指令（<prompt>）',
+  system_rules: '系统规则（<prompt>）',
+  image_prompt: '图像生成指令（<prompt>）',
   judge_prompt: '智能配图判断提示词',
 }
 
 const presets = [
-  { label: '512×768', width: 512, height: 768 },
+  { label: '768×512', width: 768, height: 512 },
+  { label: '768×768', width: 768, height: 768 },
   { label: '1024×1024', width: 1024, height: 1024 },
   { label: '1280×720', width: 1280, height: 720 },
   { label: '1600×1200', width: 1600, height: 1200 },
   { label: '1920×1080', width: 1920, height: 1080 },
-  { label: '1080×1920', width: 1080, height: 1920 },
 ]
+
+// ── DeepSeek API Key ──
+const deepseekPreview = ref({ hasApiKey: false, preview: '' })
+const deepseekApiKey = ref('')
+const showApiKey = ref(false)
+const deepseekDirty = ref(false)
+const deepseekSaved = ref(false)
 
 onMounted(async () => {
   try {
     const data = await getConfig()
     form.value = { artist: data.comfy.artist, width: data.comfy.width, height: data.comfy.height }
     Object.assign(features, data.features)
+    deepseekPreview.value = data.deepseek
   } catch {}
   await checkHealth()
   await loadRules()
@@ -224,6 +300,21 @@ async function saveComfy() {
   await updateComfyConfig(form.value)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
+}
+
+async function saveDeepseekApiKey() {
+  try {
+    const result = await updateDeepseekApiKey(deepseekApiKey.value)
+    if (result.ok) {
+      deepseekPreview.value = result
+      deepseekApiKey.value = ''
+      deepseekDirty.value = false
+      deepseekSaved.value = true
+      setTimeout(() => deepseekSaved.value = false, 2000)
+    }
+  } catch (err) {
+    console.error('[deepseek] save failed:', err)
+  }
 }
 
 function applyPreset(p) { form.value.width = p.width; form.value.height = p.height; dirty.value = true; saved.value = false }
@@ -263,6 +354,35 @@ async function saveRule(rule) {
     }
   } catch (err) {
     console.error('[rules] save failed:', err)
+  }
+}
+
+// ── 测试画风 ──
+const styleTesting = ref(false)
+const styleError = ref('')
+const styleImages = ref([])
+const previewImage = ref(null)
+
+async function runStyleTest() {
+  styleTesting.value = true
+  styleError.value = ''
+  styleImages.value = []
+
+  try {
+    const result = await testStyle(
+      form.value.artist,
+      form.value.width,
+      form.value.height,
+    )
+    if (result.success && result.images?.length > 0) {
+      styleImages.value = result.images
+    } else {
+      styleError.value = result.error || '生成失败，请检查 ComfyUI 连接'
+    }
+  } catch (err) {
+    styleError.value = '请求失败: ' + (err.message || '网络错误')
+  } finally {
+    styleTesting.value = false
   }
 }
 
@@ -387,4 +507,23 @@ async function generateNewChar() {
 .sp-btn-small:hover { border-color:var(--accent); }
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:#d9534f; border-color:transparent; }
+
+/* DeepSeek API Key */
+.apikey-row { display: flex; gap: 8px; align-items: center; }
+.key-status { margin-top: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.key-ok { color: var(--success); }
+.key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(217,83,79,0.06); }
+.key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-secondary); }
+
+/* 测试画风 */
+.style-test-btn { margin-bottom: 12px; }
+.style-error { padding: 8px 12px; border-radius: 6px; background: rgba(217,83,79,0.08); color: #d9534f; font-size: 13px; margin-bottom: 12px; }
+.style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
+.style-spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.style-result { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.style-preview-img { max-width: 480px; max-height: 480px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; object-fit: contain; background: var(--bg-primary); transition: transform 0.15s; }
+.style-preview-img:hover { transform: scale(1.03); }
+.style-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
+.style-overlay-img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 8px; }
 </style>
