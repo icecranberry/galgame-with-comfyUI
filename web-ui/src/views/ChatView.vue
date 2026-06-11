@@ -85,10 +85,14 @@
       </div>
     </template>
 
-    <div v-if="previewImage" class="img-overlay" @click="previewImage = null">
-      <img :src="previewImage" class="img-full" @click.stop />
-      <button class="img-close" @click="previewImage = null">&times;</button>
-    </div>
+    <VueEasyLightbox
+      :visible="!!previewImage"
+      :imgs="previewImage"
+      :max-zoom="6"
+      :min-zoom="0.3"
+      :zoom-scale="0.35"
+      @hide="previewImage = null"
+    />
 
     <!-- 角色设置面板（点击 ⚙️ 弹出） -->
     <Transition name="panel-slide">
@@ -181,6 +185,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
+import VueEasyLightbox from 'vue-easy-lightbox'
+import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 
 const route = useRoute()
@@ -209,62 +215,62 @@ const avatarPreviewStyle = computed(() => {
 })
 
 const agentAvatarStyle = computed(() => {
-  const p = chat.activeChar?.avatar_path
-  if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: chat.activeChar?.avatar_color || '#e07b6c' }
+const p = chat.activeChar?.avatar_path
+if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+return { background: chat.activeChar?.avatar_color || '#e07b6c' }
 })
 
 const userAvatarStyle = computed(() => {
-  if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#e07b6c' }
+if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+return { background: '#e07b6c' }
 })
 
 function openSettings() { showSettings.value = true }
 function closeSettings() { showSettings.value = false }
 
 function openCharEditor() {
-  const c = chat.activeChar
-  if (!c) return
-  editForm.value = { display_name: c.display_name || '', base_prompt: c.base_prompt || '' }
-  showEditor.value = true
+const c = chat.activeChar
+if (!c) return
+editForm.value = { display_name: c.display_name || '', base_prompt: c.base_prompt || '' }
+showEditor.value = true
 }
 function closeCharEditor() { showEditor.value = false }
 
 async function saveCharEditor() {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await chat.updateActiveCharacter({ display_name: editForm.value.display_name, base_prompt: editForm.value.base_prompt })
-    showEditor.value = false
-  } catch (err) {
-    console.error('[chat] save character failed:', err)
-  } finally { saving.value = false }
+if (saving.value) return
+saving.value = true
+try {
+await chat.updateActiveCharacter({ display_name: editForm.value.display_name, base_prompt: editForm.value.base_prompt })
+showEditor.value = false
+} catch (err) {
+console.error('[chat] save character failed:', err)
+} finally { saving.value = false }
 }
 
 async function clearChatHistory() {
-  if (clearing.value) return
-  const ok = await confirmFn({ title:'清空聊天记录', message:'确定要清空当前角色的所有聊天记录吗？\n此操作不可恢复。', okText:'清空' })
-  if (!ok) return
-  clearing.value = true
-  try { await chat.clearActiveMessages() } catch {} finally { clearing.value = false }
+if (clearing.value) return
+const ok = await confirmFn({ title:'清空聊天记录', message:'确定要清空当前角色的所有聊天记录吗？\n此操作不可恢复。', okText:'清空' })
+if (!ok) return
+clearing.value = true
+try { await chat.clearActiveMessages() } catch {} finally { clearing.value = false }
 }
 
 async function deleteChar() {
-  if (deleting.value || chat.activeChar?.name === 'default') return
-  const ok = await confirmFn({
-    title: '删除角色',
-    message: `确定要删除角色「${chat.activeChar?.display_name}」吗？\n此操作不可恢复。`,
-    okText: '删除', danger: true,
-  })
-  if (!ok) return
-  deleting.value = true
-  try { await chat.deleteActiveCharacter(); showSettings.value = false } catch {} finally { deleting.value = false }
+if (deleting.value || chat.activeChar?.name === 'default') return
+const ok = await confirmFn({
+title: '删除角色',
+message: `确定要删除角色「${chat.activeChar?.display_name}」吗？\n此操作不可恢复。`,
+okText: '删除', danger: true,
+})
+if (!ok) return
+deleting.value = true
+try { await chat.deleteActiveCharacter(); showSettings.value = false } catch {} finally { deleting.value = false }
 }
 
 async function removeAvatar() {
-  const ok = await confirmFn({ title:'移除头像', message:'确定要移除当前角色的头像吗？', okText:'移除' })
-  if (!ok) return
-  await chat.uploadAvatar(null)
+const ok = await confirmFn({ title:'移除头像', message:'确定要移除当前角色的头像吗？', okText:'移除' })
+if (!ok) return
+await chat.uploadAvatar(null)
 }
 
 // ══════════════════════════════════════════════════
@@ -276,58 +282,58 @@ const recentImages = ref([])
 const recentLoading = ref(false)
 
 function openAvatarPicker() {
-  recentImages.value = []
-  showAvatarPicker.value = true
+recentImages.value = []
+showAvatarPicker.value = true
 }
 
 function closeAvatarPicker() {
-  showAvatarPicker.value = false
+showAvatarPicker.value = false
 }
 
 async function switchToRecent() {
-  if (recentImages.value.length > 0) return
-  recentLoading.value = true
-  try {
-    const d = await chat.getRecentChatImages()
-    recentImages.value = d.images || []
-  } catch {} finally { recentLoading.value = false }
+if (recentImages.value.length > 0) return
+recentLoading.value = true
+try {
+const d = await chat.getRecentChatImages()
+recentImages.value = d.images || []
+} catch {} finally { recentLoading.value = false }
 }
 
 async function onAgentAvatarSave(base64) {
-  await chat.uploadAvatar(base64)
-  showAvatarPicker.value = false
+await chat.uploadAvatar(base64)
+showAvatarPicker.value = false
 }
 
 const messageGroups = computed(() => {
-  const groups = []
-  for (const msg of chat.messages) {
-    const lastGroup = groups[groups.length - 1]
-    if (lastGroup) {
-      const lastMsg = lastGroup.msgs[lastGroup.msgs.length - 1]
-      const diff = Math.abs(new Date(msg.created_at) - new Date(lastMsg.created_at))
-      if (diff <= 10 * 60 * 1000) {
-        lastGroup.msgs.push(msg)
-        continue
-      }
-    }
-    const t = timeLabel(msg.created_at)
-    groups.push({ label: t, msgs: [msg] })
-  }
-  return groups
+const groups = []
+for (const msg of chat.messages) {
+const lastGroup = groups[groups.length - 1]
+if (lastGroup) {
+const lastMsg = lastGroup.msgs[lastGroup.msgs.length - 1]
+const diff = Math.abs(new Date(msg.created_at) - new Date(lastMsg.created_at))
+if (diff <= 10 * 60 * 1000) {
+  lastGroup.msgs.push(msg)
+  continue
+}
+}
+const t = timeLabel(msg.created_at)
+groups.push({ label: t, msgs: [msg] })
+}
+return groups
 })
 
 // 扁平化列表（时间正序：最旧在上，最新在下）
 const flatItems = computed(() => {
-  const items = []
-  for (const group of messageGroups.value) {
-    items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
-    for (let mi = 0; mi < group.msgs.length; mi++) {
-      const msg = group.msgs[mi]
-      const sameRole = mi > 0 && group.msgs[mi - 1].role === msg.role
-      items.push({ type: 'message', msg, id: msg.id, sameRole })
-    }
-  }
-  return items
+const items = []
+for (const group of messageGroups.value) {
+items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
+for (let mi = 0; mi < group.msgs.length; mi++) {
+const msg = group.msgs[mi]
+const sameRole = mi > 0 && group.msgs[mi - 1].role === msg.role
+items.push({ type: 'message', msg, id: msg.id, sameRole })
+}
+}
+return items
 })
 
 function timeLabel(iso) {
@@ -693,10 +699,6 @@ function renderContent(text) {
   pointer-events: none;
 }
 
-.img-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; z-index:1000; cursor:zoom-out; }
-.img-full { max-width:90vw; max-height:90vh; border-radius:8px; cursor:default; }
-.img-close { position:absolute; top:16px; right:16px; width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.1); color:#fff; font-size:22px; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.img-close:hover { background:rgba(255,255,255,0.25); }
 
 /* ── 毛玻璃角色设置面板 ── */
 .settings-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:flex-start; justify-content:flex-end; z-index:1000; padding:60px 24px 0 0; }

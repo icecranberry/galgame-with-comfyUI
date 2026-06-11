@@ -93,7 +93,7 @@ function formatTime(iso) {
 <style scoped>
 .sidebar {
   width: 300px; min-width: 300px;
-  height: 100vh;
+  height: 100vh; height: 100dvh;
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -166,18 +166,17 @@ function formatTime(iso) {
 .sidebar.is-mobile {
   position: fixed;
   top: 0; left: 0;
-  width: 100%; height: 100%; min-width: unset;
+  width: 100%; height: 100%; height: 100dvh; min-width: unset;
   z-index: 100;
   /* GPU 加速：translate3d 强制合成层，避免动画期间重绘 */
   transform: translate3d(-100%, 0, 0);
   transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
   border-right: none;
-  /* 移动端降低模糊强度：blur(16px) 在动画时每帧重采样背景，造成卡顿 */
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  /* 提高背景不透明度补偿模糊减弱 */
-  background: rgba(255, 255, 255, 0.7);
+  /* 移动端取消毛玻璃，纯色背景减轻 GPU 负担 */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(255, 255, 255, 0.92);
 }
 /* 打开态：滑入屏幕 */
 .sidebar.is-mobile.mobile-open {

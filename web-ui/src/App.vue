@@ -74,7 +74,7 @@ onUnmounted(() => {
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 :root {
   --bg-primary: #f0ece8;
@@ -102,6 +102,8 @@ onUnmounted(() => {
 
 html, body, #app {
   height: 100%;
+  /* 100dvh 随 Chrome 地址栏显隐动态调整，100vh 作为旧浏览器兜底 */
+  min-height: 100vh; min-height: 100dvh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: var(--text-primary);
   overflow: hidden;
@@ -109,7 +111,7 @@ html, body, #app {
 html, body { background: var(--bg-primary); }
 #app { background: transparent; }
 
-.app-layout { display: flex; height: 100vh; position: relative; z-index: 1; }
+.app-layout { display: flex; height: 100vh; height: 100dvh; position: relative; z-index: 1; }
 #app { position: relative; z-index: 1; }
 
 button {

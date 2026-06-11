@@ -415,7 +415,7 @@ async function generateNewChar() {
 </script>
 
 <style scoped>
-.settings-view { padding: 32px; overflow-y: auto; height: 100vh; flex: 1; }
+.settings-view { padding: 32px; overflow-y: auto; height: 100vh; height: 100dvh; flex: 1; }
 .page-header { margin-bottom: 28px; }
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
 .hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
@@ -536,4 +536,14 @@ async function generateNewChar() {
 .style-preview-img:hover { transform: scale(1.03); }
 .style-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
 .style-overlay-img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 12px; }
+
+/* ── 移动端：卡片单列 + 间距收缩 ── */
+@media (max-width: 767px) {
+  .settings-view { padding: 16px; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .rules-grid { grid-template-columns: 1fr; }
+  .fr { flex-direction: column; gap: 10px; }
+  .cg-row { flex-direction: column; align-items: stretch; }
+  .style-preview-img { max-width: 100%; }
+}
 </style>
