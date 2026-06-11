@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node app.js",
-    "dev": "node --watch app.js"
+    "dev": "node --watch-path ./src --watch-path ./app.js app.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

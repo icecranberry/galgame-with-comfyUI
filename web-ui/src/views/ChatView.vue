@@ -13,14 +13,14 @@
 
       <!--
         正常 column 布局：最旧消息在顶部，最新消息在底部
-        新消息到达时 JS 滚底，TransitionGroup FLIP 驱动已有气泡平滑上移
+        新消息到达时 JS 平滑滚底，与列表高度变化同步
       -->
       <div ref="msgList" class="message-list" @scroll="onScroll">
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部触发 IntersectionObserver 加载历史 -->
         <div ref="loadHint" v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
         <div ref="loadHint" v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
-        <TransitionGroup :name="noTransition ? 'none' : 'msg-list'" tag="div" class="msg-list-inner">
+        <div class="msg-list-inner">
           <template v-for="item in flatItems" :key="item.id">
             <!-- 时间分隔符 -->
             <div v-if="item.type === 'divider'" class="time-divider">{{ item.label }}</div>
@@ -59,7 +59,7 @@
               />
             </div>
           </template>
-        </TransitionGroup>
+        </div>
       </div>
 
       <div class="input-area">
@@ -290,7 +290,7 @@ const messageGroups = computed(() => {
   return groups
 })
 
-// 扁平化列表，供 TransitionGroup 使用（时间正序：最旧在上，最新在下）
+// 扁平化列表（时间正序：最旧在上，最新在下）
 const flatItems = computed(() => {
   const items = []
   for (const group of messageGroups.value) {
@@ -324,8 +324,6 @@ function timeLabel(iso) {
 // 滚动管理（正常 column 布局，scrollTop=0 为顶部）
 // ══════════════════════════════════════════════════
 
-// 切角色时关闭 TransitionGroup 动画，避免 0.2s 渐入渐出
-const noTransition = ref(false)
 let userScrolledUp = false
 let scrollTimer = null
 
@@ -333,26 +331,29 @@ function onScroll() {
   const el = msgList.value
   if (!el) return
   const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-  // 用户上滚超过 60px 则停止自动跟随，滚回底部 10px 内恢复跟随
   if (distToBottom > 60) {
     userScrolledUp = true
   } else if (distToBottom < 10) {
     userScrolledUp = false
   }
-  // 用户停止滚动 2s 后若在底部则恢复跟随
   if (scrollTimer) clearTimeout(scrollTimer)
   scrollTimer = setTimeout(() => {
     if (distToBottom < 60) userScrolledUp = false
   }, 2000)
 }
 
-// force=true 时跳过 userScrolledUp 检查（切角色 / 初次加载 / 用户发消息）
+// force=true: 瞬间滚底（切角色/首次加载/发消息/图片加载完毕）
+// force=false: 平滑滚动（流式分句，列表高度变化有 0.2s 缓动）
 async function scrollToBottom(force = false) {
   await nextTick()
   const el = msgList.value
   if (!el) return
   if (force || !userScrolledUp) {
-    el.scrollTop = el.scrollHeight
+    if (force) {
+      el.scrollTop = el.scrollHeight
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
   }
 }
 
@@ -417,42 +418,38 @@ watch(() => route.params.id, (newId) => {
   }
 })
 
-// 切角色：关闭动画 + 设标志，滚底统一由 flatItems.length watcher 处理
-watch(() => chat.activeCharId, async (id, oldId) => {
+let pendingCharSwitch = false
+
+// 切角色：停 Observer + 隐藏容器，等消息加载完成后滚底
+watch(() => chat.activeCharId, (id, oldId) => {
   if (id && id !== oldId) {
     const routeId = parseInt(route.params.id)
-    if (id !== routeId) {
-      router.replace('/chat/' + id)
-    }
-    noTransition.value = true
+    if (id !== routeId) router.replace('/chat/' + id)
+    pendingCharSwitch = true
     userScrolledUp = false
     stopLoadObserver()
-    // 隐藏容器：避免 setTimeout 间隙中旧滚动位置闪出
     if (msgList.value) msgList.value.style.visibility = 'hidden'
   }
 })
 
-// 消息列表变化 → 统一滚底入口
-// 切角色时路径: →0 (空) 被跳过 → N (消息到) noTransition=true → 滚底+恢复
-// 流式分句:      N→N+1 noTransition=false → 条件滚底
+// 消息列表变化 → 统一滚底
 watch(() => flatItems.value.length, () => {
   if (flatItems.value.length === 0) return
-  if (noTransition.value) {
-    // 切角色后消息加载完成：滚底 + 恢复可见
+  if (pendingCharSwitch) {
+    // 切角色后消息加载完成：滚底 + 恢复可见 + 重启 Observer
     setTimeout(() => {
       const el = msgList.value
       if (!el) return
       el.scrollTop = el.scrollHeight
       el.style.visibility = ''
-      // 二次确认 + 恢复动画
       setTimeout(() => {
         el.scrollTop = el.scrollHeight
         startLoadObserver()
-        noTransition.value = false
+        pendingCharSwitch = false
       }, 150)
     }, 50)
   } else {
-    scrollToBottom()
+    scrollToBottom()  // 流式分句：平滑滚动
   }
 })
 
@@ -495,23 +492,6 @@ function renderContent(text) {
   display:flex; flex-direction:column; gap:2px;
 }
 
-/* TransitionGroup：新消息从下方淡入 + 已有气泡 FLIP 上移 0.2s */
-.msg-list-move {
-  transition: transform 0.2s ease;
-}
-.msg-list-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.msg-list-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-/* leave 元素脱离流，避免加载历史时 TransitionGroup 跳动 */
-.msg-list-leave-active {
-  position: absolute;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
 
 .load-older { text-align:center; padding:8px 0; font-size:12px; color:var(--text-secondary); user-select:none; }
 .load-older-hint { opacity:0.6; }
