@@ -87,10 +87,11 @@
           />
         </div>
 
-        <!-- 全屏预览 -->
+        <!-- 全屏预览 — 按设定分辨率直接定宽高，max-width/max-height 约束超限 -->
         <Teleport to="body">
           <div v-if="previewImage" class="style-overlay" @click="previewImage = null">
-            <img :src="previewImage" class="style-overlay-img" />
+            <img :src="previewImage" class="style-overlay-img"
+              :style="{ width: form.width + 'px', height: form.height + 'px' }" />
           </div>
         </Teleport>
       </div>
@@ -228,10 +229,12 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { getConfig, updateComfyConfig, updateDeepseekApiKey, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
+import { useSettingsStore } from '../stores/settings.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import { userAvatar, loadUserAvatar, uploadUserAvatar } from '../userConfig.js'
 
 const chat = useChatStore()
+const settingsStore = useSettingsStore()
 
 const form = ref({ artist: '', width: 1600, height: 1200 })
 const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false })
@@ -269,6 +272,7 @@ onMounted(async () => {
   try {
     const data = await getConfig()
     form.value = { artist: data.comfy.artist, width: data.comfy.width, height: data.comfy.height }
+    settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     deepseekPreview.value = data.deepseek
   } catch {}
@@ -282,7 +286,7 @@ const showUserAvatarPicker = ref(false)
 
 const userAvatarStyle = computed(() => {
   if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#5b8def' }
+  return { background: '#e07b6c' }
 })
 
 async function onUserAvatarSave(base64) {
@@ -298,6 +302,7 @@ function markDirty() { dirty.value = true; saved.value = false }
 
 async function saveComfy() {
   await updateComfyConfig(form.value)
+  settingsStore.setComfySize(form.value.width, form.value.height)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
 }
@@ -410,29 +415,42 @@ async function generateNewChar() {
 </script>
 
 <style scoped>
-.settings-view { padding: 24px; overflow-y: auto; height: 100vh; flex: 1; }
-.page-header { margin-bottom: 24px; }
-.page-header h2 { font-size: 20px; color: var(--text-bright); }
-.hint { font-size: 12px; color: var(--text-secondary); }
+.settings-view { padding: 32px; overflow-y: auto; height: 100vh; flex: 1; }
+.page-header { margin-bottom: 28px; }
+.page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
+.hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+
+/* ── 毛玻璃卡片 ── */
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--glass-shadow);
+  transition: box-shadow 0.2s ease;
+}
+.card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
 .rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 8px; }
+.card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; }
+.fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
+.fi:focus { border-color: var(--accent); }
 .fr { display: flex; gap: 14px; }
 .fh { flex: 1; }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 4px 0 16px; }
 .pl { font-size: 11px; color: var(--text-secondary); }
-.pbtn { font-size: 11px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
-.pbtn:hover { border-color: var(--accent); color: var(--accent-light); }
+.pbtn { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
+.pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
 .sa { display: flex; align-items: center; gap: 12px; }
 .smsg { color: var(--success); font-size: 13px; }
 
-.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
 .toggle-row:last-child { border-bottom: none; }
 .tl { font-size: 14px; font-weight: 500; color: var(--text-bright); }
 .td { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
@@ -449,81 +467,73 @@ async function generateNewChar() {
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
 
-/* 全局规则 */
+/* ── 全局规则 ── */
 .rule-block {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
-  background: var(--bg-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
 }
 .rule-header {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 10px;
 }
-.rule-label {
-  font-size: 14px; font-weight: 600; color: var(--text-bright);
-}
+.rule-label { font-size: 14px; font-weight: 600; color: var(--text-bright); }
 .rule-textarea {
   width: 100%;
   padding: 10px 12px;
   font-size: 12px; line-height: 1.6;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-secondary);
+  border: 1px solid #d5d0ca;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
   color: var(--text-primary);
-  resize: vertical;
-  min-height: 120px;
+  resize: vertical; min-height: 120px;
   font-family: inherit;
 }
-.rule-textarea:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-.rule-actions {
-  display: flex; align-items: center; gap: 12px;
-  margin-top: 10px;
-}
-.btn-sm { font-size: 12px; padding: 5px 14px; }
+.rule-textarea:focus { border-color: var(--accent); outline: none; }
+.rule-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.btn-sm { font-size: 12px; padding: 5px 14px; border-radius: 6px; }
 
-/* 角色工坊 */
+/* ── 角色工坊 ── */
 .cg-row { display:flex; gap:10px; align-items:center; }
 .cg-row .fi { flex:1; margin-bottom:0; }
-.cg-btn { flex-shrink:0; white-space:nowrap; }
-.gen-error { margin-top:8px; padding:8px 12px; border-radius:6px; background:rgba(217,83,79,0.08); color:#d9534f; font-size:13px; }
-.gen-result { margin-top:12px; padding:12px; border-radius:8px; background:rgba(76,175,80,0.06); border:1px solid rgba(76,175,80,0.2); }
+.cg-btn { flex-shrink:0; white-space:nowrap; border-radius: 8px; }
+.gen-error { margin-top:8px; padding:8px 12px; border-radius:8px; background:rgba(255,77,79,0.06); color:var(--danger); font-size:13px; }
+.gen-result { margin-top:12px; padding:14px; border-radius:12px; background:var(--glass-bg); border:1px solid var(--glass-border); }
 .gen-result-header { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text-bright); }
 .gen-check { font-size:18px; }
 .gen-details { margin-top:10px; }
 .gen-details summary { font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .gen-details summary:hover { color:var(--accent); }
-.gen-preview { margin-top:8px; padding:10px; border-radius:6px; background:var(--bg-primary); border:1px solid var(--border); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow-y:auto; color:var(--text-primary); font-family:inherit; }
+.gen-preview { margin-top:8px; padding:10px; border-radius:8px; background:var(--bg-primary); border:1px solid var(--glass-border); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow-y:auto; color:var(--text-primary); font-family:inherit; }
 
-/* 用户头像 */
+/* ── 用户头像 ── */
 .avatar-row { display:flex; align-items:center; gap:14px; }
 .avatar-preview { width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; font-weight:700; flex-shrink:0; }
 .avatar-preview.clickable { cursor:pointer; transition: opacity 0.15s; }
 .avatar-preview.clickable:hover { opacity:0.85; }
-.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); cursor:pointer; margin-right:6px; }
+.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
 .sp-btn-small:hover { border-color:var(--accent); }
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
-.sp-btn-subtle:hover { color:#d9534f; border-color:transparent; }
+.sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
 
-/* DeepSeek API Key */
+/* ── DeepSeek API Key ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
 .key-status { margin-top: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .key-ok { color: var(--success); }
-.key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(217,83,79,0.06); }
-.key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-secondary); }
+.key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
+.key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
 
-/* 测试画风 */
-.style-test-btn { margin-bottom: 12px; }
-.style-error { padding: 8px 12px; border-radius: 6px; background: rgba(217,83,79,0.08); color: #d9534f; font-size: 13px; margin-bottom: 12px; }
+/* ── 测试画风 ── */
+.style-test-btn { margin-bottom: 12px; border-radius: 8px; }
+.style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; }
 .style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
-.style-spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+.style-spinner { width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .style-result { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.style-preview-img { max-width: 480px; max-height: 480px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; object-fit: contain; background: var(--bg-primary); transition: transform 0.15s; }
+.style-preview-img { max-width: 480px; max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
 .style-preview-img:hover { transform: scale(1.03); }
 .style-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
-.style-overlay-img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 8px; }
+.style-overlay-img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 12px; }
 </style>

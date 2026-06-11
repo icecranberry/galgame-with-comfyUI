@@ -1,13 +1,17 @@
 <template>
   <div class="igb">
     <!-- Generating / pending overlay (hidden when done) -->
-    <div v-if="genStatus !== 'done' && genStatus !== 'error'" class="igb-gen">
+    <div
+      v-if="genStatus !== 'done' && genStatus !== 'error'"
+      class="igb-gen"
+      :style="genBoxStyle"
+    >
       <div class="igb-placeholder">
         <div class="igb-beam"></div>
         <div class="igb-ring-container">
           <svg viewBox="0 0 80 80" class="igb-ring">
             <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(0,0,0,0.06)" stroke-width="3" />
-            <circle cx="40" cy="40" r="34" fill="none" stroke="#5b8def"
+            <circle cx="40" cy="40" r="34" fill="none" stroke="#e07b6c"
               stroke-width="3" stroke-linecap="round"
               :stroke-dasharray="circumference"
               :stroke-dashoffset="dashOffset"
@@ -31,7 +35,7 @@
           @error="onImgError(i)"
           @load="onImgLoad"
         />
-        <div v-else class="igb-missing">
+        <div v-else class="igb-missing" :style="genBoxStyle">
           <div class="igb-missing-icon">🖼️</div>
           <div class="igb-missing-text">图片不可用</div>
         </div>
@@ -39,7 +43,7 @@
     </template>
 
     <!-- Error -->
-    <div v-if="genStatus === 'error'" class="igb-gen">
+    <div v-if="genStatus === 'error'" class="igb-gen" :style="genBoxStyle">
       <div class="igb-placeholder igb-error">
         <div style="font-size:36px">⚠️</div>
         <div style="margin-top:8px; font-size:13px; color:#999">生成失败，请重试</div>
@@ -50,9 +54,36 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useSettingsStore } from '../stores/settings.js'
+
+const settings = useSettingsStore()
 
 const props = defineProps({ msg: { type: Object, required: true } })
 const emit = defineEmits(['preview', 'loaded'])
+
+// ── 根据系统设置的宽高比计算占位容器尺寸，与 igb-img 的 max-width/max-height 对齐 ──
+const GEN_MAX_W = 600   // 与 .igb-img max-width 一致
+const GEN_MAX_H = 800   // 与 .igb-img max-height 一致
+const GEN_MIN_W = 180
+const GEN_MIN_H = 120
+
+const genBoxStyle = computed(() => {
+  const W = settings.comfyWidth
+  const H = settings.comfyHeight
+  // 宽度上限：JS 全局上限 600px，或 70vw（移动端适配），取较小值
+  const SAFE_W = Math.min(GEN_MAX_W, (window.innerWidth || 375) * 0.7)
+  if (!W || !H) return { width: `${Math.min(320, SAFE_W)}px`, height: '320px' }
+  const ratio = W / H
+  let w = SAFE_W
+  let h = Math.round(w / ratio)
+  if (h > GEN_MAX_H) {
+    h = GEN_MAX_H
+    w = Math.round(h * ratio)
+  }
+  w = Math.max(GEN_MIN_W, w)
+  h = Math.max(GEN_MIN_H, h)
+  return { width: `${w}px`, height: `${h}px` }
+})
 
 // 跟踪图片加载失败和完成
 const imgError = reactive(new Set())
@@ -143,6 +174,7 @@ watch(genStatus, (v) => {
 })
 
 onMounted(() => {
+  settings.loadComfyConfig()
   if (genStatus.value !== 'done' && genStatus.value !== 'error') scheduleTick()
 })
 onUnmounted(() => clearTimeout(timer))
@@ -152,14 +184,26 @@ onUnmounted(() => clearTimeout(timer))
 .igb { display: flex; flex-direction: column; gap: 6px; }
 
 .igb-img {
-  max-width: 600px; max-height: 800px; width: auto; height: auto;
+  max-width: min(600px, 70vw); max-height: min(800px, 60vh); width: auto; height: auto;
   border-radius: 20px; cursor: pointer; object-fit: contain;
 }
 
 .igb-gen {
-  width: 320px; height: 320px;
+  /* width/height 由 genBoxStyle 动态注入，这里提供 fallback */
+  width: 320px; height: 320px; max-width: 100%;
   border-radius: 20px; overflow: hidden; position: relative;
-  background: #d0d0d0;
+  /* Warm gradient replacing flat gray — uses accent tones at very low opacity */
+  background:
+    linear-gradient(165deg,
+      rgba(224, 123, 108, 0.07) 0%,
+      rgba(240, 168, 154, 0.04) 30%,
+      rgba(224, 123, 108, 0.02) 55%,
+      rgba(240, 168, 154, 0.06) 100%
+    );
+  /* Subtle border for shape definition */
+  border: 1px solid rgba(224, 123, 108, 0.08);
+  /* Inner depth — avoids the flat cardboard look */
+  box-shadow: inset 0 0 80px rgba(224, 123, 108, 0.03);
 }
 
 .igb-placeholder {
@@ -167,17 +211,41 @@ onUnmounted(() => clearTimeout(timer))
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   position: relative; overflow: hidden;
+  /* Subtle shimmer sweep across the placeholder */
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.15) 45%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0.15) 55%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
 }
-.igb-error { background: #e8e8e8; }
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.igb-error { background: #e8e8e8; animation: none; }
 
 .igb-beam {
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, transparent 0%, rgba(91,141,239,0.06) 40%, rgba(91,141,239,0.12) 50%, rgba(91,141,239,0.06) 60%, transparent 100%);
-  animation: beamScan 2.5s ease-in-out infinite;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(224, 123, 108, 0.04) 35%,
+    rgba(224, 123, 108, 0.10) 50%,
+    rgba(224, 123, 108, 0.04) 65%,
+    transparent 100%
+  );
+  animation: beamScan 3s ease-in-out infinite;
 }
 @keyframes beamScan {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
+  0% { transform: translateY(-100%); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
 }
 
 .igb-ring-container { position: relative; width: 80px; height: 80px; z-index: 1; }
@@ -186,13 +254,20 @@ onUnmounted(() => clearTimeout(timer))
 
 .igb-pct {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  font-size: 16px; font-weight: 600; color: #5b8def; z-index: 2;
+  font-size: 16px; font-weight: 600; color: var(--accent); z-index: 2;
+  /* Subtle text glow for legibility against the gradient */
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.6);
 }
-.igb-text { margin-top: 12px; font-size: 13px; color: #666; z-index: 1; }
+.igb-text {
+  margin-top: 12px; font-size: 13px;
+  color: var(--text-secondary); z-index: 1;
+  letter-spacing: 0.02em;
+}
 
 /* 图片不可用占位 */
 .igb-missing {
-  width: 320px; height: 320px;
+  /* width/height 由 genBoxStyle 动态注入，这里提供 fallback */
+  width: 320px; height: 320px; max-width: 100%;
   border-radius: 20px; background: #e8e8e8;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;

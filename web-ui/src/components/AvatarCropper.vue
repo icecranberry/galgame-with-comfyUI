@@ -318,20 +318,38 @@ async function saveCrop() {
 </script>
 
 <style scoped>
-.avpicker-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1001; }
-.avpicker-panel { width:520px; max-height:80vh; background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
-.avpicker-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+/* ── 选择器弹窗 ── */
+.avpicker-overlay {
+  position:fixed; inset:0; background:transparent;
+  display:flex; align-items:center; justify-content:center; z-index:1001;
+  animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.avpicker-panel {
+  width:520px; max-height:80vh;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius:16px;
+  border:1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
+  display:flex; flex-direction:column; overflow:hidden;
+  animation: avScaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes avFadeIn  { from { opacity:0; } to { opacity:1; } }
+@keyframes avScaleIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
+
+.avpicker-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .avpicker-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
 .avpicker-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.avpicker-close:hover { color:var(--text-bright); background:var(--bg-hover); }
+.avpicker-close:hover { color:var(--text-bright); background:rgba(0,0,0,0.06); }
 
-.avpicker-tabs { display:flex; border-bottom:1px solid var(--border); }
+.avpicker-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.2); }
 .avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; }
 .avtab:hover { color:var(--text-bright); }
 .avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
 .avtab-body { padding:16px; overflow-y:auto; max-height:380px; }
-.av-upload-zone { display:block; border:2px dashed var(--border); border-radius:10px; cursor:pointer; transition:border-color 0.15s; }
+.av-upload-zone { display:block; border:2px dashed rgba(255,255,255,0.25); border-radius:10px; cursor:pointer; transition:border-color 0.15s; }
 .av-upload-zone:hover { border-color:var(--accent); }
 .av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:48px 16px; gap:10px; }
 .av-upload-icon { font-size:40px; }
@@ -343,13 +361,26 @@ async function saveCrop() {
 .av-thumb:hover { border-color:var(--accent); }
 .av-thumb-err { opacity:0.3; cursor:default; }
 
-/* 裁剪编辑器 */
-.crop-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:1002; }
-.crop-panel { background:var(--bg-secondary); border-radius:12px; border:1px solid var(--border); overflow:hidden; }
-.crop-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+/* ── 裁剪编辑器 ── */
+.crop-overlay {
+  position:fixed; inset:0; background:transparent;
+  display:flex; align-items:center; justify-content:center; z-index:1002;
+  animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.crop-panel {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius:16px;
+  border:1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
+  overflow:hidden;
+  animation: avScaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.crop-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .crop-header span { font-size:14px; font-weight:600; color:var(--text-bright); }
 .crop-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.crop-close:hover { color:var(--text-bright); background:var(--bg-hover); }
+.crop-close:hover { color:var(--text-bright); background:rgba(0,0,0,0.06); }
 
 .crop-body { display:flex; gap:20px; padding:20px; align-items:flex-start; }
 .crop-canvas { display:block; border-radius:8px; cursor:grab; max-width:400px; }
