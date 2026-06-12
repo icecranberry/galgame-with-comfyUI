@@ -52,7 +52,7 @@ export async function getRecentImages(characterId) {
   return res.json()
 }
 
-export function chatStream(characterId, message, clientMsgId) {
+export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -73,7 +73,7 @@ export function chatStream(characterId, message, clientMsgId) {
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, force_image_gen: forceImageGen }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
@@ -148,10 +148,10 @@ export async function updateFeatureFlag(key, value) {
   })
 }
 
-export async function updateDeepseekApiKey(apiKey) {
-  const res = await fetch(`${BASE}/config/deepseek`, {
+export async function updateLlmConfig(data) {
+  const res = await fetch(`${BASE}/config/llm`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey }),
+    body: JSON.stringify(data),
   })
   return res.json()
 }

@@ -21,14 +21,14 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ── 统一缓冲分句器 ──
 //   字符先进 3 字闸门检测 <pr，安全的再逐字进入分句逻辑。
 //   分句规则:
-//     1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，。 断句并去掉标点
-//     2. 队列 ≤ 20 字: 遇到 ！？ 且前后不是 ！？ 时，强制断句（保留符号）
+//     1. 队列 > 20 字: 遇到 ！？～~… 保留符号后断句; 遇到 ，。 断句并去掉标点
+//     2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
 //     3. 。逗号无论队列长度都触发分句，去掉句号本身，重置 20 字计数器
 //     4. flushAll() 时去掉末尾句号
 //   返回值: { segments: string[], stopped: boolean }
 class SentenceSplitter {
   constructor() {
-    this.gate = '';          // <pr 检测窗口（最多 4 字）
+    this.gate = '';          // {" 检测窗口（最多 3 字）
     this.buffer = '';        // 分句累积队列
     this.pendingSplit = -1;  // 规则 2 的延迟断句位置
     this.stopped = false;
@@ -42,13 +42,13 @@ class SentenceSplitter {
     for (const ch of text) {
       if (this.stopped) break;
 
-      // ── 闸门：3~4 字滑动窗口检测 <pr ──
+      // ── 闸门：2~3 字滑动窗口检测 {" ──
       this.gate += ch;
-      if (this.gate.length >= 3 && this.gate.slice(-3) === '<pr') {
+      if (this.gate.length >= 2 && this.gate.slice(-2) === '{"') {
         this.stopped = true;
         break;
       }
-      if (this.gate.length < 4) continue;  // 缓冲未满，不出字
+      if (this.gate.length < 3) continue;  // 缓冲未满，不出字
       const safe = this.gate[0];            // 确认安全，释放一字
       this.gate = this.gate.slice(1);
 
@@ -70,14 +70,14 @@ class SentenceSplitter {
           emit(this.buffer.slice(0, this.pendingSplit));
           this.buffer = this.buffer.slice(this.pendingSplit);
           this.pendingSplit = -1;
-          if (/[！？～~]/.test(safe)) {
+          if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
             emit(this.buffer);
             this.buffer = '';
           } else if (/[，]/.test(safe)) {
             emit(this.buffer.slice(0, -1));
             this.buffer = '';
           }
-        } else if (/[！？～~]/.test(safe)) {
+        } else if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
           emit(this.buffer);
           this.buffer = '';
         } else if (/[，]/.test(safe)) {
@@ -86,9 +86,9 @@ class SentenceSplitter {
         }
       } else {
         // ── 规则 2 ──
-        if (/[！？]/.test(safe)) {
+        if (/[！？…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
           const prevCh = n > 1 ? this.buffer[n - 2] : null;
-          if (prevCh && /[！？]/.test(prevCh)) {
+          if (prevCh && /[！？…]/.test(prevCh)) {
             this.pendingSplit = -1;
           } else {
             this.pendingSplit = n;
@@ -230,7 +230,7 @@ router.get('/characters/:id/messages', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', async (req, res) => {
-  const { message, client_msg_id } = req.body;
+  const { message, client_msg_id, force_image_gen } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
@@ -281,8 +281,11 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 4. 生图意图（正则强匹配 → 强制生成）
     const explicitImageIntent = detectImageIntent(message);
     if (explicitImageIntent) {
-      systemPrompt += '\n\n【强制要求】用户要求生成图片。正常回复文字，然后在末尾加上 <prompt> 标签描述画面。不要额外用任何标签包裹正文。';
+      systemPrompt += '\n\n【强制要求】用户要求生成图片。对白正文 20 字以内简要回复，然后在末尾加上 {"prompt":"..."} 标签，标签内的画面描述不限制长度可尽情详写。';
     }
+
+    // 内置对话规则（不依赖 DB seed，代码层面兜底）
+    systemPrompt += '\n\n<dialogue_rules>\n- **一次对话长度在' + (explicitImageIntent ? '20' : '30至60') + '字之内**\n</dialogue_rules>';
 
     // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
     const history = db.prepare(`
@@ -296,8 +299,8 @@ router.post('/characters/:id/chat', async (req, res) => {
     ];
     if (explicitImageIntent) {
       const imagePromptRule = getGlobalRule('image_prompt');
-      const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 <prompt> 标签。';
-      msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 <prompt> 标签。' });
+      const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。';
+      msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。' });
     }
 
     // 6. 流式生成（温度 0.65）
@@ -334,7 +337,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 
-    // 7. 后处理：gate 已阻止 <prompt> 内容进入 collectedSegments，
+    // 7. 后处理：gate 已阻止 {"prompt"... JSON 内容进入 collectedSegments，
     //    segments 直接可用；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
@@ -347,7 +350,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (wasStopped || tags.prompt || hasNeedImageTag) {
       send('context_update', { content: displayContent });
     }
-    // 8.5 保存 raw_messages（完整原文，保留 <prompt> 标签以便 LLM 理解上下文）
+    // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
     const rawContent = fullContent
       .replace(/<needImage>/gi, '')
       .trim();
@@ -373,9 +376,9 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     const lastInsertRowid = savedIds[savedIds.length - 1];
 
-    // 9. 生图（三种触发路径）
+    // 9. 生图（四种触发路径）
     if (tags.prompt) {
-      // 路径 A: 模型直接输出了 <prompt>（正则强匹配 → 或模型自主决定）
+      // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
       const db2 = getDb();
       const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
         .run(conversationId, tags.prompt, tags.prompt);
@@ -384,6 +387,10 @@ router.post('/characters/:id/chat', async (req, res) => {
       await triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
     } else if (hasNeedImageTag) {
       // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
+      await handleNeedImageFlow(conversationId, character, send);
+    } else if (force_image_gen) {
+      // 路径 D: 强制生图 — 用户主动勾选，跳过智能判断
+      console.log('[chat] force image gen: user requested, triggering needImage flow');
       await handleNeedImageFlow(conversationId, character, send);
     } else if (config.features.autoImageJudge) {
       // 路径 C: 静默判断 — 延迟约 300ms，SSE 保持打开以支持后续生图进度推送
@@ -481,8 +488,10 @@ function detectImageIntent(message) {
 }
 
 function extractImageTags(content) {
-  const promptMatch = content.match(/<prompt>([\s\S]*?)<\/prompt>/i);
-  return { prompt: promptMatch?.[1]?.trim() || null };
+  // 匹配 {"prompt":"..."} JSON 格式（支持引号转义）
+  const jsonMatch = content.match(/\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/);
+  if (jsonMatch) return { prompt: jsonMatch[1].replace(/\\"/g, '"').trim() };
+  return { prompt: null };
 }
 
 function hasNeedImage(content) {
@@ -492,7 +501,7 @@ function hasNeedImage(content) {
 
 function stripTags(content) {
   return content
-    .replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
+    .replace(/\{"prompt"\s*:\s*"[^"]*"\}/gi, '')
     .replace(/<generate>[\s\S]*?<\/generate>/gi, '')
     .replace(/<needImage>/gi, '')
     .replace(/<br\s*\/?>/gi, '')     // 气泡分割标记不展示
@@ -621,19 +630,18 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 /**
  * needImage 二次触发流程:
  *   模型自主判断用户想要图片 → 追加了 <needImage> →
- *   后端再请求一次模型，让它补上 <prompt> →
+ *   后端再请求一次模型，让它补上 {"prompt":"..."} →
  *   然后走正常生图流程
  */
 async function handleNeedImageFlow(conversationId, character, send) {
   const db = getDb();
   console.log('[chat] needImage detected, requesting prompt from model (compact)...');
 
-  // 1. 构建二次请求的 system prompt
+  // 1. 构建二次请求的消息列表（首因效应：生图指令置顶，人格在后）
   const globalRules = getActiveGlobalRules();
-  let systemPrompt = globalRules ? globalRules + '\n\n' : '';
-  systemPrompt += character?.base_prompt || getDefaultPrompt();
+  let personalityPrompt = globalRules ? globalRules + '\n\n' : '';
+  personalityPrompt += character?.base_prompt || getDefaultPrompt();
   const imagePromptRule = getGlobalRule('image_prompt');
-  systemPrompt += '\n\n**强制要求必须执行**现在请在20字内自然地补充一句对话正文，并在末尾加上 <prompt> 标签描述画面。<prompt> 标签及其内容不受 20 字限制。';
 
   // 2. 加载历史（从 raw_messages 取完整消息，无需合并）
   const history = db.prepare(`
@@ -641,11 +649,17 @@ async function handleNeedImageFlow(conversationId, character, send) {
     WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
   `).all(conversationId).reverse();
 
-  const imagePromptPrefix = imagePromptRule?.rule_content ? imagePromptRule.rule_content + '\n\n' : '请立即回复正文并在末尾加上 <prompt> 标签。\n\n';
+  const formatGuide = imagePromptRule?.rule_content || '';
+
   const msgs = [
-    { role: 'system', content: systemPrompt },
+    // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
+    { role: 'system', content: '【最高优先级指令，覆盖所有其他规则】基于对话中你（assistant）的最后一句话，自然地接一句 20 字内的补充对白，然后紧接着输出 {"prompt":"..."}。\n\n规则：\n- 对白正文：20 字以内，简要自然地接话\n- {"prompt":"..."} 内的画面描述：不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例：\n"嗯，我也这么想。{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}"\n\n注意：正文 + {"prompt":"..."} 缺一不可，其中正文20字以内，prompt 内容不限长。' },
+    // ── 人格和规则 ──
+    { role: 'system', content: personalityPrompt },
+    // ── prompt 格式说明单独一条，不混杂指令 ──
+    ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     ...history,
-    { role: 'user', content: imagePromptPrefix + '20字内补充正文并在末尾加上 <prompt> 标签。<prompt> 标签以及标签内容不受20字的限制。' },
+    { role: 'system', content: '接上面对话中你最后一句，补充 20 字内接话 + {"prompt":"..."}。现在输出：' },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -669,7 +683,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
     send('bubble_break', {});
   }
 
-  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，保留 <prompt> 标签）
+  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，保留 {"prompt" JSON 标签）
   const rawContent = fullContent
     .replace(/<needImage>/gi, '')
     .trim();

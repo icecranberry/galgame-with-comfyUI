@@ -2,7 +2,7 @@
  * 图像生成 Skill
  *
  * 流程:
- *   1. 接收 <prompt> 中的中文画面描述
+ *   1. 接收 {"prompt":"..."} 中的中文画面描述
  *   2. 用提示词生成助手.txt 规则，调 DeepSeek 优化为英文 prompt
  *   3. 加载 workflow，按节点 title 注入参数（画师串/质量提示词/画面描述/宽/高）
  *   4. 提交 ComfyUI → 轮询 → 下载 base64

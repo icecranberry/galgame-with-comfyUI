@@ -142,7 +142,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content) {
+  async function sendMessage(content, forceImageGen = false) {
     if (streaming.value || !content.trim()) return
     const charId = activeCharId.value
     if (!charId) return
@@ -186,10 +186,10 @@ export const useChatStore = defineStore('chat', () => {
       }
     }, 30000)
 
-    // 安全剥离 <prompt> 块 —— 不作为正常显示内容
+    // 安全剥离 {"prompt":"..."} JSON 块 —— 不作为正常显示内容
     function stripPromptBlock(s) {
-      let t = s.replace(/<prompt>[\s\S]*?<\/prompt>/gi, '')
-      const idx = t.indexOf('<prompt>')
+      let t = s.replace(/\{"prompt"\s*:\s*"[^"]*"\}/gi, '')
+      const idx = t.indexOf('{"prompt"')
       if (idx !== -1) t = t.slice(0, idx)
       t = t.replace(/<\/?context>/gi, '').replace(/<needImage>/gi, '').replace(/<br\s*\/?>/gi, '')
       return t.replace(/\n{3,}/g, '\n\n').trim()
@@ -224,7 +224,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       initAttemptState()
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, forceImageGen)
       abort = streamAbort
       const reader = stream.getReader()
 

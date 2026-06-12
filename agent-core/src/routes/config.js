@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getDeepseekApiKeyPreview, updateDeepseekApiKey } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig } from '../config.js';
 import { getDb } from '../db/index.js';
 
 const router = Router();
@@ -11,19 +11,20 @@ const router = Router();
 router.get('/', (req, res) => {
   res.json({
     comfy: {
+      url: config.comfyui.url,
       artist: config.comfyui.artist,
       width: config.comfyui.width,
       height: config.comfyui.height,
     },
     features: config.features,
-    deepseek: getDeepseekApiKeyPreview(),
+    llm: getLlmConfig(),
   });
 });
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height } = req.body;
-  updateComfyConfig({ artist, width, height });
+  const { artist, width, height, url } = req.body;
+  updateComfyConfig({ artist, width, height, url });
   res.json({ ok: true, ...config.comfyui });
 });
 
@@ -37,14 +38,14 @@ router.put('/features', (req, res) => {
   res.json({ ok: true, features: config.features });
 });
 
-// PUT /api/config/deepseek — 更新 DeepSeek API Key
-router.put('/deepseek', (req, res) => {
-  const { apiKey } = req.body;
-  const result = updateDeepseekApiKey(apiKey);
+// PUT /api/config/llm — 更新 LLM 配置
+router.put('/llm', (req, res) => {
+  const { apiKey, baseURL, model } = req.body;
+  const result = updateLlmConfig({ apiKey, baseURL, model });
   if (!result.ok) {
     return res.status(400).json(result);
   }
-  res.json({ ok: true, ...getDeepseekApiKeyPreview() });
+  res.json({ ok: true, ...getLlmConfig() });
 });
 
 // GET /api/config/rules — 获取全部全局规则

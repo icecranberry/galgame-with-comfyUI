@@ -69,6 +69,10 @@
       </div>
 
       <div class="input-area">
+        <label class="force-img-toggle" :class="{ active: forceImageGen }" title="强制生图">
+          <input type="checkbox" v-model="forceImageGen" />
+          <span class="force-img-icon">🖼️</span>
+        </label>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
           @keydown.enter.exact.prevent="send"
@@ -196,6 +200,7 @@ const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
+const forceImageGen = ref(false)
 const inputEl = ref(null)
 const msgList = ref(null)
 const previewImage = ref(null)
@@ -490,7 +495,7 @@ async function send() {
   if (!text || chat.streaming) return
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text)
+  await chat.sendMessage(text, forceImageGen.value)
   await scrollToBottom(true)
 }
 
@@ -612,6 +617,27 @@ function renderContent(text) {
 .msg-text { font-size:14px; line-height:1.6; }
 .msg-text :deep(code) { background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:13px; }
 .msg-text :deep(strong) { font-weight:600; }
+
+/* ── 强制生图开关 ── */
+.force-img-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  transition: all 0.25s ease;
+  opacity: 0.5;
+}
+.force-img-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.force-img-icon { font-size: 18px; line-height: 1; transition: transform 0.25s ease; }
+.force-img-toggle:hover { opacity: 0.8; border-color: rgba(224, 123, 108, 0.3); }
+.force-img-toggle.active {
+  opacity: 1;
+  background: linear-gradient(135deg, rgba(224, 123, 108, 0.15) 0%, rgba(208, 110, 94, 0.15) 100%);
+  border-color: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12), 0 0 16px rgba(224, 123, 108, 0.08);
+}
+.force-img-toggle.active .force-img-icon { transform: scale(1.1); }
 
 /* ── 毛玻璃输入区 ── */
 .input-area {

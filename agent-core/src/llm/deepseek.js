@@ -1,12 +1,14 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
 
-const client = new OpenAI({
-  baseURL: config.deepseek.baseURL,
-  apiKey: config.deepseek.apiKey,
-});
+const DEFAULT_MODEL = config.llm.model || 'deepseek-chat';
 
-const DEFAULT_MODEL = 'deepseek-chat';
+function getClient() {
+  return new OpenAI({
+    baseURL: config.llm.baseURL,
+    apiKey: config.llm.apiKey,
+  });
+}
 
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
@@ -33,7 +35,7 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
   console.log(JSON.stringify(logMsgs, null, 2));
   console.log('───────────────────────────────────────────────');
 
-  const res = await client.chat.completions.create(params);
+  const res = await getClient().chat.completions.create(params);
   const content = res.choices[0].message.content;
 
   console.log('[DeepSeek ← sync response]');
@@ -52,7 +54,7 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
   console.log(JSON.stringify(messages, null, 2));
   console.log('────────────────────────────────────────────────');
 
-  const stream = await client.chat.completions.create({
+  const stream = await getClient().chat.completions.create({
     model,
     messages,
     max_tokens,

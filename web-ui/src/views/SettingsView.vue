@@ -28,31 +28,50 @@
         </div>
       </div>
 
-      <!-- DeepSeek API Key -->
+      <!-- LLM API 设置 -->
       <div class="card">
-        <h3>DeepSeek API Key</h3>
-        <p class="fd">用于 AI 对话和角色生成，Key 存储在本地，请勿公开分享</p>
+        <h3>LLM API 设置</h3>
+        <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
+
+        <!-- API Key -->
+        <label class="fl">API Key</label>
         <div class="apikey-row">
           <input
-            v-model="deepseekApiKey"
+            v-model="llmApiKey"
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
             style="margin-bottom:0"
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            @input="deepseekDirty = true; deepseekSaved = false"
+            @input="markLlmDirty"
           />
           <button class="sp-btn-small" style="flex-shrink:0" @click="showApiKey = !showApiKey">
             {{ showApiKey ? '隐藏' : '显示' }}
           </button>
         </div>
-        <div v-if="deepseekPreview.hasApiKey" class="key-status">
+        <div v-if="llmPreview.hasApiKey" class="key-status">
           <span class="key-ok">🔑 当前:</span>
-          <code class="key-preview">{{ deepseekPreview.preview }}</code>
+          <code class="key-preview">{{ llmPreview.preview }}</code>
         </div>
         <div v-else class="key-status key-missing">⚠️ 未设置，AI 对话功能不可用</div>
+
+        <!-- API 地址 -->
+        <label class="fl" style="margin-top:14px">API 地址</label>
+        <select v-model="llmBaseURL" class="fi" style="margin-bottom:6px" @change="markLlmDirty">
+          <option value="https://api.deepseek.com">DeepSeek</option>
+          <option value="https://dashscope.aliyuncs.com/compatible-mode/v1">通义千问 (DashScope)</option>
+          <option value="https://api.moonshot.cn/v1">Moonshot (Kimi)</option>
+          <option value="https://api.openai.com/v1">OpenAI</option>
+          <option value="">自定义…</option>
+        </select>
+        <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
+
+        <!-- 模型 -->
+        <label class="fl" style="margin-top:14px">模型</label>
+        <input v-model="llmModel" class="fi" placeholder="deepseek-chat" @input="markLlmDirty" />
+
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!deepseekDirty" @click="saveDeepseekApiKey">保存</button>
-          <span v-if="deepseekSaved" class="smsg">已保存</span>
+          <button class="btn-primary" :disabled="!llmDirty" @click="saveLlmConfig">保存</button>
+          <span v-if="llmSaved" class="smsg">已保存</span>
         </div>
       </div>
 
@@ -175,14 +194,20 @@
         </div>
       </div>
 
-      <!-- ComfyUI status -->
+      <!-- ComfyUI 连接 -->
       <div class="card">
         <h3>ComfyUI 连接</h3>
+        <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
+        <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
         </div>
-        <button class="btn-ghost" @click="checkHealth">刷新</button>
+        <div class="sa" style="margin-top:12px">
+          <button class="btn-primary" :disabled="!connDirty" @click="saveComfyUrl">保存</button>
+          <span v-if="connSaved" class="smsg">已保存</span>
+          <button class="btn-ghost" @click="checkHealth">刷新连接</button>
+        </div>
       </div>
     </div>
 
@@ -227,7 +252,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getConfig, updateComfyConfig, updateDeepseekApiKey, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
 import { useSettingsStore } from '../stores/settings.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
@@ -237,6 +262,9 @@ const chat = useChatStore()
 const settingsStore = useSettingsStore()
 
 const form = ref({ artist: '', width: 1600, height: 1200 })
+const comfyUrl = ref('')
+const connDirty = ref(false)
+const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false })
 const dirty = ref(false)
 const saved = ref(false)
@@ -247,8 +275,8 @@ const rulesSaved = ref({})
 
 const ruleLabels = {
   image_intent: '图像生成判断（<needImage>）',
-  system_rules: '系统规则（<prompt>）',
-  image_prompt: '图像生成指令（<prompt>）',
+  system_rules: '系统规则（{"prompt":"..."}）',
+  image_prompt: '图像生成指令（{"prompt":"..."}）',
   judge_prompt: '智能配图判断提示词',
 }
 
@@ -261,20 +289,30 @@ const presets = [
   { label: '1920×1080', width: 1920, height: 1080 },
 ]
 
-// ── DeepSeek API Key ──
-const deepseekPreview = ref({ hasApiKey: false, preview: '' })
-const deepseekApiKey = ref('')
+// ── LLM API ──
+const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
+const llmApiKey = ref('')
+const llmBaseURL = ref('https://api.deepseek.com')
+const llmModel = ref('deepseek-chat')
+const isCustomBaseURL = computed(() => {
+  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
+  return !presets.includes(llmBaseURL.value)
+})
 const showApiKey = ref(false)
-const deepseekDirty = ref(false)
-const deepseekSaved = ref(false)
+const llmDirty = ref(false)
+const llmSaved = ref(false)
+function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 
 onMounted(async () => {
   try {
     const data = await getConfig()
     form.value = { artist: data.comfy.artist, width: data.comfy.width, height: data.comfy.height }
+    comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
-    deepseekPreview.value = data.deepseek
+    llmPreview.value = { ...data.llm }
+    llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
+    llmModel.value = data.llm.model || 'deepseek-chat'
   } catch {}
   await checkHealth()
   await loadRules()
@@ -299,26 +337,39 @@ async function removeUserAvatar() {
 }
 
 function markDirty() { dirty.value = true; saved.value = false }
+function markConnDirty() { connDirty.value = true; connSaved.value = false }
 
 async function saveComfy() {
-  await updateComfyConfig(form.value)
+  await updateComfyConfig({ artist: form.value.artist, width: form.value.width, height: form.value.height })
   settingsStore.setComfySize(form.value.width, form.value.height)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
 }
 
-async function saveDeepseekApiKey() {
+async function saveComfyUrl() {
+  await updateComfyConfig({ url: comfyUrl.value })
+  connDirty.value = false; connSaved.value = true
+  setTimeout(() => connSaved.value = false, 2000)
+}
+
+async function saveLlmConfig() {
   try {
-    const result = await updateDeepseekApiKey(deepseekApiKey.value)
+    const payload = {}
+    if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+    if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
+    if (llmModel.value) payload.model = llmModel.value
+    const result = await updateLlmConfig(payload)
     if (result.ok) {
-      deepseekPreview.value = result
-      deepseekApiKey.value = ''
-      deepseekDirty.value = false
-      deepseekSaved.value = true
-      setTimeout(() => deepseekSaved.value = false, 2000)
+      llmPreview.value = { ...result }
+      llmBaseURL.value = result.baseURL || llmBaseURL.value
+      llmModel.value = result.model || llmModel.value
+      if (payload.apiKey) llmApiKey.value = ''
+      llmDirty.value = false
+      llmSaved.value = true
+      setTimeout(() => llmSaved.value = false, 2000)
     }
   } catch (err) {
-    console.error('[deepseek] save failed:', err)
+    console.error('[llm] save failed:', err)
   }
 }
 
@@ -518,7 +569,7 @@ async function generateNewChar() {
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
 
-/* ── DeepSeek API Key ── */
+/* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
 .key-status { margin-top: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .key-ok { color: var(--success); }
