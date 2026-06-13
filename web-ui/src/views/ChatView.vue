@@ -458,6 +458,31 @@ async function loadMore() {
 
 // ── 生命周期 ──
 
+// 移动端键盘适配：键盘弹起/收起时同步滚动消息列表
+// visualViewport.resize 在浏览器原生帧率触发，用 instant scrollTop 与键盘动画同步
+let viewportCleanup = null
+
+function setupMobileKeyboard() {
+  if (!window.visualViewport || !isMobile) return
+  let prevH = window.visualViewport.height
+  const onResize = () => {
+    const el = msgList.value
+    if (!el) return
+    const h = window.visualViewport.height
+    if (Math.abs(h - prevH) < 10) return
+    prevH = h
+    userScrolledUp = false
+    el.scrollTop = el.scrollHeight
+  }
+  window.visualViewport.addEventListener('resize', onResize)
+  viewportCleanup = () => window.visualViewport.removeEventListener('resize', onResize)
+}
+
+function teardownMobileKeyboard() {
+  viewportCleanup?.()
+  viewportCleanup = null
+}
+
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
@@ -466,10 +491,12 @@ onMounted(async () => {
   startLoadObserver()
   scrollToBottom(true)  // 首次加载强制滚底
   inputEl.value?.focus()
+  setupMobileKeyboard()
 })
 
 onUnmounted(() => {
   stopLoadObserver()
+  teardownMobileKeyboard()
 })
 
 // 浏览器前进/后退 → 同步 store
