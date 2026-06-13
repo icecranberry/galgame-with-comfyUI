@@ -68,6 +68,19 @@
         </div>
       </div>
 
+      <!-- 回复候选词：v-if 控制 DOM 存在 + 仅 opacity 动画，避免移动端与滚动竞争 compositor -->
+      <Transition name="guesses-fade">
+        <div v-if="chat.guesses" class="guesses-row">
+          <span class="guess-prefix">🔮</span>
+          <button
+            v-for="(text, key) in (chat.guesses || {})"
+            :key="key"
+            class="guess-pill"
+            @click="pickGuess(text)"
+          >{{ text }}</button>
+        </div>
+      </Transition>
+
       <div class="input-area">
         <div class="force-img-wrap">
           <label class="force-img-toggle" :class="{ active: forceImageGen }">
@@ -444,6 +457,7 @@ async function loadMore() {
 }
 
 // ── 生命周期 ──
+
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
@@ -500,6 +514,18 @@ watch(() => flatItems.value.length, () => {
     scrollToBottom()  // 流式分句：平滑滚动
   }
 })
+
+// 候选词出现时平滑滚底（此时 streaming 已结束，scrollTo 不与气泡插入竞争）
+watch(() => chat.guesses, (val) => {
+  if (val) { nextTick(() => scrollToBottom()) }
+})
+
+function pickGuess(text) {
+  if (!text || chat.streaming) return
+  inputText.value = text
+  chat.guesses = null
+  inputEl.value?.focus()
+}
 
 async function send() {
   const text = inputText.value.trim()
@@ -669,6 +695,50 @@ function renderContent(text) {
 }
 .force-img-tip.is-mobile {
   left: calc(50% + 20px);
+}
+
+/* ── 回复候选词（AI 猜想用户回复）── */
+.guesses-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 24px 8px;
+  flex-wrap: wrap;
+}
+/* 候选词进入/离开：仅 opacity 过渡，不触发布局合成层竞争 */
+.guesses-fade-enter-active,
+.guesses-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.guesses-fade-enter-from,
+.guesses-fade-leave-to {
+  opacity: 0;
+}
+.guess-prefix {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.guess-pill {
+  padding: 6px 14px;
+  font-size: 13px; line-height: 1.4;
+  border-radius: 18px;
+  border: 1.5px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-primary);
+  cursor: pointer;
+  max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.guess-pill:hover {
+  border-color: var(--accent-light);
+  background: rgba(224, 123, 108, 0.08);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.12);
+}
+.guess-pill:active {
+  transform: scale(0.96);
 }
 
 /* ── 毛玻璃输入区 ── */
@@ -846,6 +916,9 @@ function renderContent(text) {
 @media (max-width: 767px) {
   .chat-header { padding: 12px 16px; }
   .message-list { padding: 5px 10px; }
+  .guesses-row { padding: 2px 10px 6px; gap: 4px; flex-wrap: nowrap; }
+  .guess-prefix { display: none; }
+  .guess-pill { padding: 4px 10px; font-size: 12px; max-width: 50%; min-width: 60px; flex: 1; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
   .input-area { padding: 8px 16px; }
 }
 
