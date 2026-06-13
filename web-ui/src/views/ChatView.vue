@@ -1,9 +1,9 @@
 <template>
   <div class="chat-view">
     <div v-if="!chat.activeCharId" class="empty-state">
-      <!-- <div class="empty-icon">💬</div>
+      <div class="empty-icon">💬</div>
       <h2>选择一个角色开始对话</h2>
-      <button v-if="isMobile" class="btn-empty-pick" @click="toggleMobileSidebar">选择角色</button> -->
+      <button v-if="isMobile" class="btn-empty-pick" @click="toggleMobileSidebar">选择角色</button>
     </div>
 
     <template v-else>
@@ -68,26 +68,13 @@
         </div>
       </div>
 
-      <!-- 回复候选词：AI 预测用户接下来可能说的话；发消息或点击候选词后缓动消失 -->
-      <div class="guesses-row" :class="{ collapsed: !chat.guesses }">
-        <span class="guess-prefix">🔮</span>
-        <button
-          v-for="(text, key) in (chat.guesses || {})"
-          :key="key"
-          class="guess-pill"
-          @click="pickGuess(text)"
-        >{{ text }}</button>
-      </div>
-
       <div class="input-area">
         <div class="force-img-wrap">
           <label class="force-img-toggle" :class="{ active: forceImageGen }">
             <input type="checkbox" v-model="forceImageGen" />
             <span class="force-img-icon">🎨</span>
           </label>
-          <transition name="tip-float">
-            <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
-          </transition>
+          <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
         </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
@@ -110,7 +97,7 @@
       :imgs="previewImage"
       :max-zoom="6"
       :min-zoom="0.3"
-      :zoom-scale="0.5"
+      :zoom-scale="0.35"
       @hide="previewImage = null"
     />
 
@@ -457,34 +444,6 @@ async function loadMore() {
 }
 
 // ── 生命周期 ──
-
-// 移动端键盘适配：visualViewport 高度变化时强制消息列表滚底
-// 不做 delta 补偿——浏览器原生已处理视口滚动，我们只需保证气泡贴底
-let viewportCleanup = null
-
-function setupMobileKeyboard() {
-  if (!window.visualViewport || !isMobile) return
-  let prevH = window.visualViewport.height
-  const onResize = () => {
-    const el = msgList.value
-    if (!el) return
-    const h = window.visualViewport.height
-    // 键盘弹起或收起都会触发 resize，统一滚底
-    // 只在高度确实变化时处理，避免触摸引起的微小抖动
-    if (Math.abs(h - prevH) < 10) return
-    prevH = h
-    userScrolledUp = false
-    el.scrollTop = el.scrollHeight
-  }
-  window.visualViewport.addEventListener('resize', onResize)
-  viewportCleanup = () => window.visualViewport.removeEventListener('resize', onResize)
-}
-
-function teardownMobileKeyboard() {
-  viewportCleanup?.()
-  viewportCleanup = null
-}
-
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
@@ -493,15 +452,10 @@ onMounted(async () => {
   startLoadObserver()
   scrollToBottom(true)  // 首次加载强制滚底
   inputEl.value?.focus()
-  setupMobileKeyboard()
-  setupResizeObserver()
 })
 
 onUnmounted(() => {
   stopLoadObserver()
-  teardownMobileKeyboard()
-  resizeObs?.disconnect()
-  resizeObs = null
 })
 
 // 浏览器前进/后退 → 同步 store
@@ -546,45 +500,6 @@ watch(() => flatItems.value.length, () => {
     scrollToBottom()  // 流式分句：平滑滚动
   }
 })
-
-// 候选词出现时，CSS 过渡每帧都会改变 msgList 的 flex:1 空间
-// ResizeObserver 在浏览器布局阶段原生回调，与 CSS 过渡共享 layout 计算，零额外开销
-// 候选词消失时消息列表自然变大，底部露出无需跟滚
-let resizeObs = null
-
-function setupResizeObserver() {
-  const el = msgList.value
-  if (!el) return
-  resizeObs = new ResizeObserver(() => {
-    if (!userScrolledUp) {
-      el.scrollTop = el.scrollHeight
-    }
-  })
-  resizeObs.observe(el)
-}
-
-// 候选词过渡期间临时解除 userScrolledUp 限制，保证跟滚不中断
-watch(() => chat.guesses, (val) => {
-  if (!val) return
-  // 过渡开始前先滚到底
-  nextTick(() => {
-    const el = msgList.value
-    if (el) el.scrollTop = el.scrollHeight
-  })
-  userScrolledUp = false
-  // 250ms 后（CSS 0.2s 过渡结束）做最后一次对齐
-  setTimeout(() => {
-    const el = msgList.value
-    if (el) el.scrollTop = el.scrollHeight
-  }, 250)
-})
-
-function pickGuess(text) {
-  if (!text || chat.streaming) return
-  inputText.value = text
-  chat.guesses = null
-  inputEl.value?.focus()
-}
 
 async function send() {
   const text = inputText.value.trim()
@@ -754,62 +669,6 @@ function renderContent(text) {
 }
 .force-img-tip.is-mobile {
   left: calc(50% + 20px);
-}
-
-/* tip 浮入浮出动画 */
-.tip-float-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
-.tip-float-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
-.tip-float-enter-from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-.tip-float-leave-to   { opacity: 0; transform: translateX(-50%) translateY(6px); }
-
-/* ── 回复候选词（AI 猜想用户回复）── */
-.guesses-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 24px 8px;
-  flex-wrap: wrap;
-  max-height: 56px;
-  opacity: 1;
-  overflow: hidden;
-  pointer-events: auto;
-  transition: max-height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity   0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              padding-top 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              padding-bottom 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.guesses-row.collapsed {
-  max-height: 0;
-  opacity: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  pointer-events: none;
-}
-.guess-prefix {
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.guess-pill {
-  padding: 6px 14px;
-  font-size: 13px; line-height: 1.4;
-  border-radius: 18px;
-  border: 1.5px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  color: var(--text-primary);
-  cursor: pointer;
-  max-width: 260px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-.guess-pill:hover {
-  border-color: var(--accent-light);
-  background: rgba(224, 123, 108, 0.08);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.12);
-}
-.guess-pill:active {
-  transform: scale(0.96);
 }
 
 /* ── 毛玻璃输入区 ── */
@@ -987,10 +846,6 @@ function renderContent(text) {
 @media (max-width: 767px) {
   .chat-header { padding: 12px 16px; }
   .message-list { padding: 5px 10px; }
-  .guesses-row { padding: 2px 10px 6px; gap: 4px; max-height: 42px; flex-wrap: nowrap; }
-  .guesses-row.collapsed { padding-top: 0; padding-bottom: 0; }
-  .guess-prefix { display: none; }
-  .guess-pill { padding: 4px 10px; font-size: 12px; max-width: 50%; min-width: 60px; flex: 1; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
   .input-area { padding: 8px 16px; }
 }
 

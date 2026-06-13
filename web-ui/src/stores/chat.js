@@ -157,17 +157,12 @@ export const useChatStore = defineStore('chat', () => {
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
 
-    // ── 安全超时：30s 无任何 SSE 活动复位；若有生图进行中则放宽到 10 分钟 ──
+    // ── 安全超时：30s 无响应自动复位，防止 streaming 永久锁死发送键 ──
     let safetyFired = false
-    let lastSseActivity = Date.now()
     let abort = () => {}
-    const safetyTimer = setInterval(() => {
-      if (!streaming.value) { clearInterval(safetyTimer); return }
-      const idle = Date.now() - lastSseActivity
-      const hasActiveGen = messages.value.some(m => m.type === 'image_gen' && m.genStatus !== 'done' && m.genStatus !== 'error')
-      const limit = hasActiveGen ? 600_000 : 30_000
-      if (idle > limit) {
-        console.warn('[chat] SSE safety timeout — force reset (idle=%ds, hasGen=%s)', Math.round(idle / 1000), hasActiveGen)
+    const safetyTimer = setTimeout(() => {
+      if (streaming.value) {
+        console.warn('[chat] streaming safety timeout — force reset')
         safetyFired = true
         abort()
         streaming.value = false
@@ -187,14 +182,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
         // 确保至少有一条提示
-        if (!hasActiveGen) {
-          messages.value.push({
-            id: uid(), role: 'assistant', type: 'text',
-            content: '(请求超时，请重试)', created_at: new Date().toISOString()
-          })
-        }
+        messages.value.push({
+          id: uid(), role: 'assistant', type: 'text',
+          content: '(请求超时，请重试)', created_at: new Date().toISOString()
+        })
       }
-    }, 5000)
+    }, 30000)
 
     // 安全剥离 {"prompt":"..."} JSON 块
     function stripPromptBlock(s) {
@@ -244,7 +237,6 @@ export const useChatStore = defineStore('chat', () => {
           if (done) break
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
-            lastSseActivity = Date.now()
             const d = value.data
             // ── token ──
             if (d.content) {
@@ -444,7 +436,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } // end retry loop
 
-    clearInterval(safetyTimer)
+    clearTimeout(safetyTimer)
     streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
     await loadCharacters()
   }

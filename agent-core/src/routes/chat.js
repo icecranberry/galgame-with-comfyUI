@@ -24,17 +24,51 @@ const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 // ── 统一缓冲分句器 ──
 //   字符先进 3 字闸门检测 <pr，安全的再逐字进入分句逻辑。
 //   分句规则:
-//     1. 队列 > 20 字: 遇到 ！？～~… 保留符号后断句; 遇到 ， 断句并去掉标点
+//     1. 队列 > 20 字: 遇到 ！？～~… 保留符号后断句; 遇到 ，。 断句并去掉标点
 //     2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
-//     3. 。触发分句：若后方紧跟引号/破折号等标点则推迟分句并保留句号；否则立刻分句并去掉句号
+//     3. 。逗号无论队列长度都触发分句，去掉句号本身，重置 20 字计数器
 //     4. flushAll() 时去掉末尾句号
+//     5. 成对符号保护: 《》【】「」（ ）"" '' 等，遇到开符号后直到闭符号才允许分句
 //   返回值: { segments: string[], stopped: boolean }
 class SentenceSplitter {
+  // ── 成对符号定义 ──
+  static OPEN_TO_CLOSE = {
+    '《': '》', '【': '】', '「': '」', '（': '）',
+    '“': '”',   // " →
+    '‘': '’',   // ' →
+  };
+  static CLOSE_TO_OPEN = {
+    '》': '《', '】': '【', '」': '「', '）': '（',
+    '”': '“',   // " →
+    '’': '‘',   // ' →
+  };
+  static TOGGLE_PAIRS = new Set(['"', '\'']);  // ASCII 引号，开=闭，遇同类切换
+
   constructor() {
     this.gate = '';          // {" 检测窗口（最多 3 字）
     this.buffer = '';        // 分句累积队列
     this.pendingSplit = -1;  // 规则 2 的延迟断句位置
     this.stopped = false;
+    this.pairStack = [];     // 成对符号栈（未闭合的开符号）
+  }
+
+  _canSplit() { return this.pairStack.length === 0; }
+
+  _trackPair(ch) {
+    if (SentenceSplitter.OPEN_TO_CLOSE[ch]) {
+      this.pairStack.push(ch);
+    } else if (SentenceSplitter.CLOSE_TO_OPEN[ch]) {
+      const expected = SentenceSplitter.CLOSE_TO_OPEN[ch];
+      for (let i = this.pairStack.length - 1; i >= 0; i--) {
+        if (this.pairStack[i] === expected) { this.pairStack.splice(i, 1); break; }
+      }
+    } else if (SentenceSplitter.TOGGLE_PAIRS.has(ch)) {
+      if (this.pairStack.length > 0 && this.pairStack[this.pairStack.length - 1] === ch) {
+        this.pairStack.pop();
+      } else {
+        this.pairStack.push(ch);
+      }
+    }
   }
 
   // 喂入 chunk，返回已完成的安全段落
@@ -55,42 +89,48 @@ class SentenceSplitter {
       const safe = this.gate[0];            // 确认安全，释放一字
       this.gate = this.gate.slice(1);
 
-      // ── 规则 3: 。分句（若后方紧跟标点符号则推迟，保留句号）──
+      // ── 规则 3: 。始终触发分句，去掉句号，重置计数器 ──
       if (safe === '。') {
-        if (this.gate && /^[""'』」—～~…]/.test(this.gate)) {
-          // 句号后方有连接性标点 → 推迟分句，保留句号
+        if (this._canSplit()) {
+          emit(this.buffer);
+          this.buffer = '';
+          this.pendingSplit = -1;
+        } else {
           this.buffer += safe;
-          continue;
         }
-        emit(this.buffer);
-        this.buffer = '';
-        this.pendingSplit = -1;
         continue;
       }
 
       // ── 分句逻辑 ──
       this.buffer += safe;
+      this._trackPair(safe);
       const n = this.buffer.length;
 
       if (n > 20) {
         // ── 规则 1 ──
         if (this.pendingSplit >= 0) {
-          emit(this.buffer.slice(0, this.pendingSplit));
-          this.buffer = this.buffer.slice(this.pendingSplit);
-          this.pendingSplit = -1;
-          if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+          if (this._canSplit()) {
+            emit(this.buffer.slice(0, this.pendingSplit));
+            this.buffer = this.buffer.slice(this.pendingSplit);
+            this.pendingSplit = -1;
+            if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+              emit(this.buffer);
+              this.buffer = '';
+            } else if (/[，]/.test(safe)) {
+              emit(this.buffer.slice(0, -1));
+              this.buffer = '';
+            }
+          }
+        } else if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+          if (this._canSplit()) {
             emit(this.buffer);
             this.buffer = '';
-          } else if (/[，]/.test(safe)) {
+          }
+        } else if (/[，]/.test(safe)) {
+          if (this._canSplit()) {
             emit(this.buffer.slice(0, -1));
             this.buffer = '';
           }
-        } else if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
-          emit(this.buffer);
-          this.buffer = '';
-        } else if (/[，]/.test(safe)) {
-          emit(this.buffer.slice(0, -1));
-          this.buffer = '';
         }
       } else {
         // ── 规则 2 ──
@@ -98,7 +138,7 @@ class SentenceSplitter {
           const prevCh = n > 1 ? this.buffer[n - 2] : null;
           if (prevCh && /[！？…]/.test(prevCh)) {
             this.pendingSplit = -1;
-          } else {
+          } else if (this._canSplit()) {
             this.pendingSplit = n;
           }
         }
@@ -114,46 +154,45 @@ class SentenceSplitter {
       const pending = this.gate.slice(0, -2);
       for (const safe of pending) {
         if (safe === '。') {
-          const idx = pending.indexOf(safe);
-          const remaining = pending.slice(idx + 1);
-          if (remaining && /^[""'』」—～~…]/.test(remaining)) {
+          if (this._canSplit()) {
+            if (this.buffer) {
+              const seg = this.buffer.replace(/。$/, '');
+              if (seg) this.buffer = seg;
+              else this.buffer = '';
+            }
+          } else {
             this.buffer += safe;
-            continue;
-          }
-          if (this.buffer) {
-            const seg = this.buffer.replace(/。$/, '');
-            if (seg) this.buffer = seg;
-            else this.buffer = '';
           }
           continue;
         }
         this.buffer += safe;
+        this._trackPair(safe);
       }
       let text = this.buffer;
       this.gate = '';
       this.buffer = '';
       this.pendingSplit = -1;
+      this.pairStack.length = 0;
       text = text.replace(/。$/, '');
       return { segments: text ? [text] : [], stopped: true };
     }
     // 闸门中剩下的字全放（已确认不含 <pr），。仍触发分句
     for (const safe of this.gate) {
       if (safe === '。') {
-        const idx = this.gate.indexOf(safe);
-        const remaining = this.gate.slice(idx + 1);
-        if (remaining && /^[""'』」—～~…]/.test(remaining)) {
+        if (this._canSplit()) {
+          // 压出当前 buffer 为一个 segment，丢弃句号
+          if (this.buffer) {
+            const seg = this.buffer.replace(/。$/, '');
+            if (seg) this.buffer = seg;  // will be flushed below
+            else this.buffer = '';
+          }
+        } else {
           this.buffer += safe;
-          continue;
-        }
-        // 压出当前 buffer 为一个 segment，丢弃句号
-        if (this.buffer) {
-          const seg = this.buffer.replace(/。$/, '');
-          if (seg) this.buffer = seg;  // will be flushed below
-          else this.buffer = '';
         }
         continue;
       }
       this.buffer += safe;
+      this._trackPair(safe);
       const n = this.buffer.length;
       if (n > 20) {
         if (/[，。]/.test(safe)) {
@@ -166,6 +205,7 @@ class SentenceSplitter {
     let text = this.buffer;
     this.buffer = '';
     this.pendingSplit = -1;
+    this.pairStack.length = 0;
     text = text.replace(/。$/, '');  // 规则 4: 去末尾句号
     return { segments: text ? [text] : [], stopped: false };
   }
@@ -728,16 +768,19 @@ async function handleNeedImageFlow(conversationId, character, send) {
 
   // 3.5 恢复 pre-fill 前缀（chatSync 只返回新生成的 tokens）
   //     pre-fill 是 {"prompt"  模型续写 :"..."} 或先写正文
-  if (fullContent.startsWith(':"')) {
+  //     模型也可能完全无视 pre-fill，直接输出纯正文
+  const modelFollowedPrefill = fullContent.startsWith(':"');
+  if (modelFollowedPrefill) {
     // 模型从 JSON 内部续写 → 拼回完整 {"prompt":"..."}
     fullContent = '{"prompt"' + fullContent;
+    // 补全尾部闭合（模型偶尔忘写 "}）
+    if (!fullContent.endsWith('"}')) {
+      fullContent = fullContent.replace(/"?\s*$/g, '"');
+      if (!fullContent.endsWith('"}')) fullContent += '"}';
+    }
   }
-  // else: 模型先写了正文（无视了 pre-fill），保持原样，extractImageTags 从尾部提取 JSON
-  // 补全尾部闭合（模型偶尔忘写 "}）
-  if (!fullContent.endsWith('"}')) {
-    fullContent = fullContent.replace(/"?\s*$/g, '"');
-    if (!fullContent.endsWith('"}')) fullContent += '"}';
-  }
+  // else: 模型先写了正文（无视了 pre-fill），保持原样，不强行补 "}
+  //       extractImageTags 会从正文中提取可能嵌入的 {"prompt":"..."} 标签
 
   // 4. 解析标签
   const tags = extractImageTags(fullContent);
@@ -771,10 +814,22 @@ async function handleNeedImageFlow(conversationId, character, send) {
       console.log(`[chat] needImage: prev raw already has prompt, saved as new raw id=${assistantRawId}`);
     }
   } else {
-    // 正常：有正文（无论有无 prompt）
+    // 正常：有正文（无论有无 prompt）→ 经 SentenceSplitter 分句
     if (displayContent) {
-      send('token', { content: displayContent });
-      send('bubble_break', {});
+      const splitter = new SentenceSplitter();
+      const { segments: feedSegs } = splitter.feed(displayContent);
+      const { segments: flushSegs } = splitter.flushAll();
+      const allSegments = [...feedSegs, ...flushSegs]
+        .map(s => stripBracketActions(s).trim())
+        .filter(Boolean);
+
+      for (const segText of allSegments) {
+        send('token', { content: segText });
+        send('bubble_break', {});
+        await sleep(500);
+      }
+      // 更新 displayContent 为清洗后的分段文本，供下方 messages 表写入
+      displayContent = allSegments.join('\n\n');
     }
     const rawContent = fullContent
       .replace(/<needImage>/gi, '')
@@ -786,11 +841,23 @@ async function handleNeedImageFlow(conversationId, character, send) {
 
   // 保存 messages（展示用）—— merge 路径不新建 message
   if (!merged) {
-    const msgContent = displayContent || '';
-    const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-      .run(conversationId, assistantRawId, msgContent);
-    assistantMsgId = msgResult.lastInsertRowid;
-    send('msg_saved', { id: assistantMsgId, role: 'assistant', created_at: new Date().toISOString() });
+    // 按句子分段保存（与主流程一致）
+    const segments = (displayContent || '').split('\n\n').filter(Boolean);
+    if (segments.length > 0) {
+      for (let i = 0; i < segments.length; i++) {
+        const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, ?)`)
+          .run(conversationId, assistantRawId, segments[i], i);
+        if (i === segments.length - 1) {
+          assistantMsgId = msgResult.lastInsertRowid;
+        }
+        send('msg_saved', { id: msgResult.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
+      }
+    } else {
+      const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
+        .run(conversationId, assistantRawId, displayContent || '');
+      assistantMsgId = msgResult.lastInsertRowid;
+      send('msg_saved', { id: assistantMsgId, role: 'assistant', created_at: new Date().toISOString() });
+    }
   }
   console.log(`[chat] needImage: msgId=${assistantMsgId}, rawId=${assistantRawId}, merged=${merged}, hasPrompt=${!!tags.prompt}`);
 
