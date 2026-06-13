@@ -21,6 +21,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ── 回复猜想冷却：每个 conversation 生成一次后进入 20s 冷却，用户新消息到达时重置 ──
 const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 
+// ── 智能配图计数器（per-conversation）：每轮用户发言 -1，生图成功后重置为 3，归零时跳过 LLM 判断直接生图 ──
+const imageJudgeCounters = new Map();  // conversationId -> count
+
 // ── 统一缓冲分句器 ──
 //   字符先进 3 字闸门检测 <pr，安全的再逐字进入分句逻辑。
 //   分句规则:
@@ -332,6 +335,11 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 1.5 用户发送新消息 → 重置回复猜想冷却，本轮的 assistant 回复可以触发一次猜想
     guessCooldowns.delete(conversationId);
 
+    // 1.6 智能配图计数器 -1（per-conversation）
+    const counter = imageJudgeCounters.get(conversationId) ?? 3;
+    imageJudgeCounters.set(conversationId, Math.max(0, counter - 1));
+    console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);
+
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
 
@@ -623,6 +631,13 @@ function getDefaultPrompt() {
  * 极轻量 DeepSeek 调用（只需"是/否"），延迟通常 < 300ms
  */
 async function judgeImageNeed(conversationId) {
+  // 计数器归零 → 跳过 LLM 判断，直接返回"是"进入生图
+  const judgeCounter = imageJudgeCounters.get(conversationId) ?? 3;
+  if (judgeCounter <= 0) {
+    console.log(`[chat] judgeImageNeed[${conversationId}]: counter is ${judgeCounter}, skipping LLM → YES`);
+    return true;
+  }
+
   const db = getDb();
   // 直接从 raw_messages 取最后一条用户/Agent 完整消息，无需合并
   const lastUser = db.prepare(`
@@ -707,6 +722,10 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         .run(JSON.stringify(urls), taskId);
 
       send('generate_done', { taskId, images: result.images, source: result.source });
+
+      // 生图成功 → 智能配图计数器重置为 3
+      imageJudgeCounters.set(conversationId, 3);
+      console.log(`[chat] imageJudgeCounter[${conversationId}] reset to 3 (image generated successfully)`);
     } else {
       throw new Error(result.error || 'No images generated');
     }
