@@ -14,6 +14,7 @@ export const useChatStore = defineStore('chat', () => {
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
   const hasMoreOlder = ref(false)   // 是否还有更早的一周可加载
   const loadingOlder = ref(false)   // 正在加载旧消息中
+  const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
   async function loadCharacters() {
@@ -84,6 +85,7 @@ export const useChatStore = defineStore('chat', () => {
   async function selectChar(charId) {
     activeCharId.value = charId
     messages.value = []
+    guesses.value = null  // 切角色时清除候选词
     await loadMessages(charId)
     await loadCharacters()
   }
@@ -147,6 +149,7 @@ export const useChatStore = defineStore('chat', () => {
     const charId = activeCharId.value
     if (!charId) return
 
+    guesses.value = null  // 用户主动发送 → 清除候选词
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
@@ -328,6 +331,10 @@ export const useChatStore = defineStore('chat', () => {
               const gm = findGenMsg(d.taskId)
               if (gm) gm.genStatus = 'error'
             }
+            // ── guesses: 回复候选词 ──
+            if (lastEvent === 'guesses' && d.a && d.b) {
+              guesses.value = { a: d.a, b: d.b }
+            }
             // ── msg_saved: 临时 ID → 真实 ID ──
             if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
               thisAttemptHadMsgSaved = true
@@ -442,6 +449,6 @@ export const useChatStore = defineStore('chat', () => {
     await loadCharacters()
   }
 
-  return { characters, activeCharId, messages, streaming, streamingContent, showTypingDots, hasMoreOlder, loadingOlder, activeChar,
+  return { characters, activeCharId, messages, streaming, streamingContent, showTypingDots, hasMoreOlder, loadingOlder, guesses, activeChar,
     loadCharacters, loadMessages, loadOlderMessages, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
 })

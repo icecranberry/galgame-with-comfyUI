@@ -9,7 +9,7 @@
       <!-- ComfyUI params -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">拼接在 prompt 质量词之前，参考来源：https://anima.mooshieblob.com/</p>
+        <p class="fd">建议选择1~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
         <input v-model="form.artist" class="fi" @input="markDirty" />
 
         <div class="fr">
@@ -162,6 +162,17 @@
             <span class="slider"></span>
           </label>
         </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">聊天候选词</div>
+            <div class="td">AI 回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- 角色工坊：AI 生成角色人格 -->
@@ -275,7 +286,7 @@ const form = ref({ artist: '', width: 1600, height: 1200 })
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false, promptOptimize: false })
+const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false })
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)

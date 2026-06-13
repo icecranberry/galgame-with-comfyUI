@@ -61,8 +61,7 @@ onMounted(async () => {
   await chat.loadCharacters()
 
   if (isMobile.value) {
-    // 移动端：默认展示角色列表，不自动选中角色
-    mobileSidebarOpen.value = true
+    // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出
   } else if (chat.characters.length > 0 && !chat.activeCharId) {
     chat.selectChar(chat.characters[0].id)
   }

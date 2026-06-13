@@ -1,5 +1,5 @@
 <template>
-  <aside class="sidebar" :class="{ 'is-mobile': isMobile, 'mobile-open': isMobile && mobileOpen }">
+  <aside class="sidebar" :class="{ 'mobile-open': isMobile && mobileOpen }">
     <!-- 移动端：顶部关闭按钮 -->
     <div class="sidebar-header">
       <button v-if="isMobile" class="mobile-close-btn" @click="$emit('charSelected')" title="返回聊天">
@@ -161,27 +161,33 @@ function formatTime(iso) {
 }
 
 /* ══════════════════════════════════════════════════
-   移动端：Sidebar 固定定位 + 左侧滑入/滑出动画
+   移动端：媒体查询控制起始位置，CSS 层天生无闪动
    ══════════════════════════════════════════════════ */
-.sidebar.is-mobile {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%; height: 100dvh; min-width: unset;
-  z-index: 100;
-  /* GPU 加速：translate3d 强制合成层，避免动画期间重绘 */
-  transform: translate3d(-100%, 0, 0);
-  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: transform;
-  border-right: none;
-  /* 移动端取消毛玻璃，纯色背景减轻 GPU 负担 */
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  background: rgba(255, 255, 255, 0.92);
-}
-/* 打开态：滑入屏幕 */
-.sidebar.is-mobile.mobile-open {
-  transform: translate3d(0, 0, 0);
-  transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1);
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%; height: 100dvh; min-width: unset;
+    z-index: 100;
+    /* GPU 加速：translate3d 强制合成层 */
+    transform: translate3d(-100%, 0, 0);
+    transition: transform 0.3s cubic-bezier(0, 0, 0.2, 1);
+    will-change: transform;
+    border-right: none;
+    /* 移动端取消毛玻璃，纯色背景减轻 GPU 负担 */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.92);
+  }
+  /* 打开态：滑入屏幕 */
+  .sidebar.mobile-open {
+    transform: translate3d(0, 0, 0);
+  }
+
+  .sidebar .sidebar-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  }
 }
 
 /* 移动端关闭按钮（顶部左侧返回箭头） */
@@ -194,10 +200,4 @@ function formatTime(iso) {
 }
 .mobile-close-btn:hover { background: rgba(0, 0, 0, 0.06); }
 .mobile-close-btn svg { flex-shrink: 0; }
-
-/* 移动端 sidebar-header 调整 */
-.sidebar.is-mobile .sidebar-header {
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-}
 </style>
