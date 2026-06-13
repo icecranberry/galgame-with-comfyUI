@@ -69,10 +69,15 @@
       </div>
 
       <div class="input-area">
-        <label class="force-img-toggle" :class="{ active: forceImageGen }" title="强制生图">
-          <input type="checkbox" v-model="forceImageGen" />
-          <span class="force-img-icon">🖼️</span>
-        </label>
+        <div class="force-img-wrap">
+          <label class="force-img-toggle" :class="{ active: forceImageGen }">
+            <input type="checkbox" v-model="forceImageGen" />
+            <span class="force-img-icon">🎨</span>
+          </label>
+          <transition name="tip-float">
+            <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
+          </transition>
+        </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
           @keydown.enter.exact.prevent="send"
@@ -94,7 +99,7 @@
       :imgs="previewImage"
       :max-zoom="6"
       :min-zoom="0.3"
-      :zoom-scale="0.35"
+      :zoom-scale="0.5"
       @hide="previewImage = null"
     />
 
@@ -200,7 +205,15 @@ const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
-const forceImageGen = ref(false)
+const forceImageGen = ref(localStorage.getItem('forceImageGen') === 'true')
+watch(forceImageGen, (v) => { localStorage.setItem('forceImageGen', v); showForceTip() })
+const forceTipVisible = ref(false)
+let forceTipTimer = null
+function showForceTip() {
+  forceTipVisible.value = true
+  clearTimeout(forceTipTimer)
+  forceTipTimer = setTimeout(() => { forceTipVisible.value = false }, 2000)
+}
 const inputEl = ref(null)
 const msgList = ref(null)
 const previewImage = ref(null)
@@ -619,6 +632,9 @@ function renderContent(text) {
 .msg-text :deep(strong) { font-weight:600; }
 
 /* ── 强制生图开关 ── */
+.force-img-wrap {
+  position: relative;
+}
 .force-img-toggle {
   display: flex; align-items: center; justify-content: center;
   width: 40px; height: 40px; flex-shrink: 0;
@@ -638,6 +654,30 @@ function renderContent(text) {
   box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12), 0 0 16px rgba(224, 123, 108, 0.08);
 }
 .force-img-toggle.active .force-img-icon { transform: scale(1.1); }
+
+.force-img-tip {
+  position: absolute;
+  bottom: calc(100% + 18px);
+  left: calc(50% + 10px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 14px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+}
+.force-img-tip.is-mobile {
+  left: calc(50% + 20px);
+}
+
+/* tip 浮入浮出动画 */
+.tip-float-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.tip-float-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.tip-float-enter-from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+.tip-float-leave-to   { opacity: 0; transform: translateX(-50%) translateY(6px); }
 
 /* ── 毛玻璃输入区 ── */
 .input-area {

@@ -179,10 +179,10 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
       settle({ error: `ComfyUI execution timeout (${timeoutMs / 1000}s) for prompt ${promptId}` });
     }, timeoutMs);
 
-    // 活动心跳检测：60s 无任何消息 → 认为卡死
+    // 活动心跳检测：30s 无任何消息 → 认为 WS 通道断开，触发上层重试
     const heartbeat = setInterval(() => {
-      if (Date.now() - lastActivity > 60_000 && !done) {
-        settle({ error: 'ComfyUI progress stalled (60s no update)' });
+      if (Date.now() - lastActivity > 30_000 && !done) {
+        settle({ error: 'ComfyUI progress stalled (30s no update)' });
       }
     }, 5000);
 

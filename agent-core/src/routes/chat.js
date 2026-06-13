@@ -102,8 +102,8 @@ class SentenceSplitter {
   // 流结束，释放闸门剩余安全字 + flush 分句队列
   flushAll() {
     if (this.stopped) {
-      // 闸门中 <pr 之前仍有安全字（如 "。<pr" 中的 "。"），释放后再清空
-      const pending = this.gate.slice(0, -3);
+      // 闸门中 {" 之前仍有安全字（如 "。{"" 中的 "。"），释放后再清空
+      const pending = this.gate.slice(0, -2);
       for (const safe of pending) {
         if (safe === '。') {
           if (this.buffer) {
@@ -488,7 +488,6 @@ function detectImageIntent(message) {
 }
 
 function extractImageTags(content) {
-  // 匹配 {"prompt":"..."} JSON 格式（支持引号转义）
   const jsonMatch = content.match(/\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/);
   if (jsonMatch) return { prompt: jsonMatch[1].replace(/\\"/g, '"').trim() };
   return { prompt: null };
@@ -504,8 +503,8 @@ function stripTags(content) {
     .replace(/\{"prompt"\s*:\s*"[^"]*"\}/gi, '')
     .replace(/<generate>[\s\S]*?<\/generate>/gi, '')
     .replace(/<needImage>/gi, '')
-    .replace(/<br\s*\/?>/gi, '')     // 气泡分割标记不展示
-    .replace(/\n{2,}/g, '\n')       // 连续空行压缩为单换行
+    .replace(/<br\s*\/?>/gi, '')
+    .replace(/\n{2,}/g, '\n')
     .trim();
 }
 
@@ -591,7 +590,15 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   const imagesDir = path.join(projectRoot, 'data', 'images');
 
   try {
-    const result = await generateImage(prompt, { onProgress: (p) => send('generate_progress', { taskId, ...p }) });
+    const result = await generateImage(prompt, {
+      onProgress: (p) => {
+        if (p.stage === 'retrying') {
+          send('generate_retrying', { taskId, attempt: p.attempt, maxRetries: p.maxRetries });
+        } else {
+          send('generate_progress', { taskId, ...p });
+        }
+      }
+    });
     if (result.success && result.images.length > 0) {
       // 落盘 base64 图片到 data/images/，构建 URL 数组
       fs.mkdirSync(imagesDir, { recursive: true });
@@ -609,8 +616,9 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       }
 
       // 更新消息：挂上图片 URL
-      db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
+      const updateResult = db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
         .run(JSON.stringify(urls), assistantMsgId);
+      console.log(`[chat] images saved to message id=${assistantMsgId}, rows updated=${updateResult.changes}`);
 
       db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, finished_at=datetime('now') WHERE id=?`)
         .run(JSON.stringify(urls), taskId);
@@ -643,23 +651,25 @@ async function handleNeedImageFlow(conversationId, character, send) {
   personalityPrompt += character?.base_prompt || getDefaultPrompt();
   const imagePromptRule = getGlobalRule('image_prompt');
 
-  // 2. 加载历史（从 raw_messages 取完整消息，无需合并）
+  // 2. 加载最近 3 轮历史（生图任务只需锚点上下文，取太多稀释注意力）
   const history = db.prepare(`
     SELECT role, content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
+    WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 6
   `).all(conversationId).reverse();
 
   const formatGuide = imagePromptRule?.rule_content || '';
 
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: '【最高优先级指令，覆盖所有其他规则】基于对话中你（assistant）的最后一句话，自然地接一句 20 字内的补充对白，然后紧接着输出 {"prompt":"..."}。\n\n规则：\n- 对白正文：20 字以内，简要自然地接话\n- {"prompt":"..."} 内的画面描述：不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例：\n"嗯，我也这么想。{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}"\n\n注意：正文 + {"prompt":"..."} 缺一不可，其中正文20字以内，prompt 内容不限长。' },
-    // ── 人格和规则 ──
+    { role: 'system', content: '【最高优先级指令，覆盖所有其他规则】基于对话中你（assistant）的最后一句话，输出一个 {"prompt":"..."} 来描述当前场景画面。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
+    // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
     ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     ...history,
-    { role: 'system', content: '接上面对话中你最后一句，补充 20 字内接话 + {"prompt":"..."}。现在输出：' },
+    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你在上面对话中最后一句话时所处的场景。只输出 JSON，不要任何其他文字。' },
+    // ── pre-fill：只给 key，模型续写 :"..."} 或先写正文 ──
+    { role: 'assistant', content: '{"prompt"' },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -673,33 +683,81 @@ async function handleNeedImageFlow(conversationId, character, send) {
     return;
   }
 
-  // 4. 解析标签
-  const tags = extractImageTags(fullContent);
-  const displayContent = stripTags(fullContent);
-
-  // 4.5 推送 follow-up 文字到前端（填入现有 trailing empty 气泡，再 freeze）
-  if (displayContent) {
-    send('token', { content: displayContent });
-    send('bubble_break', {});
+  // 3.5 恢复 pre-fill 前缀（chatSync 只返回新生成的 tokens）
+  //     pre-fill 是 {"prompt"  模型续写 :"..."} 或先写正文
+  if (fullContent.startsWith(':"')) {
+    // 模型从 JSON 内部续写 → 拼回完整 {"prompt":"..."}
+    fullContent = '{"prompt"' + fullContent;
+  }
+  // else: 模型先写了正文（无视了 pre-fill），保持原样，extractImageTags 从尾部提取 JSON
+  // 补全尾部闭合（模型偶尔忘写 "}）
+  if (!fullContent.endsWith('"}')) {
+    fullContent = fullContent.replace(/"?\s*$/g, '"');
+    if (!fullContent.endsWith('"}')) fullContent += '"}';
   }
 
-  // 5. 保存第二轮回复（双表：raw_messages 完整原文 + messages 展示文本，保留 {"prompt" JSON 标签）
-  const rawContent = fullContent
-    .replace(/<needImage>/gi, '')
-    .trim();
-  const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
-    .run(conversationId, rawContent, tags.prompt || null);
-  const lastInsertRowid = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-    .run(conversationId, rawResult.lastInsertRowid, displayContent).lastInsertRowid;
-  send('msg_saved', { id: lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
+  // 4. 解析标签
+  const tags = extractImageTags(fullContent);
+  let displayContent = stripTags(fullContent);
 
-  // 6. 触发生图（不发 context_update，首条回复保持不变）
+  let assistantRawId;
+  let assistantMsgId;
+  let merged = false;  // 是否拼回上一条（不新建 message）
+
+  if (!displayContent && tags.prompt) {
+    // 模型只输出纯 JSON，无正文 → 优先拼回上一条 raw_messages
+    const prevRaw = db.prepare(`SELECT id, prompt FROM raw_messages WHERE conversation_id = ? AND role = 'assistant' AND is_deleted = 0 ORDER BY id DESC LIMIT 1`)
+      .get(conversationId);
+    const prevMsg = db.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' AND is_deleted = 0 ORDER BY id DESC LIMIT 1`)
+      .get(conversationId);
+
+    if (prevRaw && !prevRaw.prompt) {
+      // 上一条无 prompt → UPDATE raw.prompt + content 拼入 JSON，图片挂到上一条 message
+      const promptJson = JSON.stringify({ prompt: tags.prompt });
+      db.prepare(`UPDATE raw_messages SET prompt = ?, content = content || ? WHERE id = ?`).run(tags.prompt, promptJson, prevRaw.id);
+      assistantRawId = prevRaw.id;
+      assistantMsgId = prevMsg?.id;
+      merged = true;
+      console.log(`[chat] needImage: merged prompt into raw=${prevRaw.id}, msg=${assistantMsgId}`);
+    } else {
+      // 上一条已有 prompt → 兜底：新写 raw（raw 内容含占位，messages 存空不在前端显示杂讯）
+      const rawContent = `(图片) ${fullContent.replace(/<needImage>/gi, '').trim()}`;
+      const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
+        .run(conversationId, rawContent, tags.prompt);
+      assistantRawId = rawResult.lastInsertRowid;
+      console.log(`[chat] needImage: prev raw already has prompt, saved as new raw id=${assistantRawId}`);
+    }
+  } else {
+    // 正常：有正文（无论有无 prompt）
+    if (displayContent) {
+      send('token', { content: displayContent });
+      send('bubble_break', {});
+    }
+    const rawContent = fullContent
+      .replace(/<needImage>/gi, '')
+      .trim();
+    const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
+      .run(conversationId, rawContent, tags.prompt || null);
+    assistantRawId = rawResult.lastInsertRowid;
+  }
+
+  // 保存 messages（展示用）—— merge 路径不新建 message
+  if (!merged) {
+    const msgContent = displayContent || '';
+    const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
+      .run(conversationId, assistantRawId, msgContent);
+    assistantMsgId = msgResult.lastInsertRowid;
+    send('msg_saved', { id: assistantMsgId, role: 'assistant', created_at: new Date().toISOString() });
+  }
+  console.log(`[chat] needImage: msgId=${assistantMsgId}, rawId=${assistantRawId}, merged=${merged}, hasPrompt=${!!tags.prompt}`);
+
+  // 5. 触发生图
   if (tags.prompt) {
     const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
       .run(conversationId, tags.prompt, tags.prompt);
     const genTaskId = taskResult.lastInsertRowid;
     send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
-    await triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
+    await triggerImageGeneration(conversationId, tags.prompt, assistantMsgId, genTaskId, send);
   } else {
     console.log('[chat] needImage follow-up: no prompt tags found, falling back');
     send('generate_error', { error: '模型未返回图像描述' });

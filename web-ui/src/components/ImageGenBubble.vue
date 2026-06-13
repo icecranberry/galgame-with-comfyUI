@@ -1,17 +1,17 @@
 <template>
   <div class="igb">
-    <!-- Generating / pending overlay (hidden when done) -->
+    <!-- Generating / pending / retrying overlay (hidden when done) -->
     <div
       v-if="genStatus !== 'done' && genStatus !== 'error'"
       class="igb-gen"
       :style="genBoxStyle"
     >
-      <div class="igb-placeholder">
+      <div class="igb-placeholder" :class="{ 'igb-retrying': genStatus === 'retrying' }">
         <div class="igb-beam"></div>
         <div class="igb-ring-container">
           <svg viewBox="0 0 80 80" class="igb-ring">
             <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(0,0,0,0.06)" stroke-width="3" />
-            <circle cx="40" cy="40" r="34" fill="none" stroke="#e07b6c"
+            <circle cx="40" cy="40" r="34" fill="none" :stroke="ringColor"
               stroke-width="3" stroke-linecap="round"
               :stroke-dasharray="circumference"
               :stroke-dashoffset="dashOffset"
@@ -139,11 +139,15 @@ const displayPct = computed(() => {
 
 const dashOffset = computed(() => circumference * (1 - displayPct.value / 100))
 
-// 始终显示"发送中..."
+// 状态文字：重试中 / 发送中
 const statusText = computed(() => {
   if (genStatus.value === 'done' || genStatus.value === 'error') return ''
+  if (genStatus.value === 'retrying') return '发送失败，重试中...'
   return '发送中...'
 })
+
+// 重试时 ring 变为橙色
+const ringColor = computed(() => genStatus.value === 'retrying' ? '#f0a040' : '#e07b6c')
 
 function scheduleTick() {
   timer = setTimeout(() => {
@@ -160,6 +164,14 @@ function scheduleTick() {
 }
 
 watch(genStatus, (v) => {
+  if (v === 'retrying') {
+    // 重试时重置模拟进度，重新开始滚动
+    clearTimeout(timer)
+    simulatedPct.value = 0
+    maxedOut = false
+    realPct.value = 0
+    scheduleTick()
+  }
   if (v === 'done') {
     simulatedPct.value = 100; clearTimeout(timer)
     // 重置加载计数，等待图片渲染和加载
@@ -192,14 +204,7 @@ onUnmounted(() => clearTimeout(timer))
   /* width/height 由 genBoxStyle 动态注入，这里提供 fallback */
   width: 320px; height: 320px; max-width: 100%;
   border-radius: 20px; overflow: hidden; position: relative;
-  /* Warm gradient replacing flat gray — uses accent tones at very low opacity */
-  background:
-    linear-gradient(165deg,
-      rgba(224, 123, 108, 0.07) 0%,
-      rgba(240, 168, 154, 0.04) 30%,
-      rgba(224, 123, 108, 0.02) 55%,
-      rgba(240, 168, 154, 0.06) 100%
-    );
+  background-color: #8b8b8b2c;
   /* Subtle border for shape definition */
   border: 1px solid rgba(224, 123, 108, 0.08);
   /* Inner depth — avoids the flat cardboard look */
@@ -229,6 +234,18 @@ onUnmounted(() => clearTimeout(timer))
 }
 
 .igb-error { background: #e8e8e8; animation: none; }
+.igb-retrying {
+  /* 重试中：暖橙色背景提示 */
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(240, 160, 64, 0.10) 45%,
+    rgba(240, 160, 64, 0.18) 50%,
+    rgba(240, 160, 64, 0.10) 55%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+}
 
 .igb-beam {
   position: absolute; inset: 0;

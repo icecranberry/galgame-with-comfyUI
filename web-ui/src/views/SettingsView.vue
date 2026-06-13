@@ -118,7 +118,6 @@
       <!-- 功能开关 -->
       <div class="card">
         <h3>功能开关</h3>
-        <p class="fd">开发期关闭以节省 DeepSeek API 调用</p>
 
         <div class="toggle-row">
           <div>
@@ -138,6 +137,17 @@
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.memoryExtract" @change="saveFeature('memoryExtract', features.memoryExtract)" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">Anima 提示词优化</div>
+            <div class="td">画面描述将携带Anima提示词助手多请求一次LLM，能够优化特定动作姿势</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.promptOptimize" @change="saveFeature('promptOptimize', features.promptOptimize)" />
             <span class="slider"></span>
           </label>
         </div>
@@ -265,7 +275,7 @@ const form = ref({ artist: '', width: 1600, height: 1200 })
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false })
+const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false, promptOptimize: false })
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
@@ -274,9 +284,9 @@ const rulesDirty = ref({})
 const rulesSaved = ref({})
 
 const ruleLabels = {
-  image_intent: '图像生成判断（<needImage>）',
-  system_rules: '系统规则（{"prompt":"..."}）',
-  image_prompt: '图像生成指令（{"prompt":"..."}）',
+  image_intent: '图像生成判断',
+  system_rules: '系统规则',
+  image_prompt: '图像生成指令',
   judge_prompt: '智能配图判断提示词',
 }
 

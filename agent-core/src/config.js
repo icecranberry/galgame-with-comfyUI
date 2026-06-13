@@ -22,15 +22,16 @@ export const config = {
   comfyui: {
     url: process.env.COMFYUI_URL || 'http://localhost:8188',
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
-    artist: process.env.COMFYUI_ARTIST || '@tony taka',
-    width: parseInt(process.env.COMFYUI_WIDTH, 10) || 1600,
-    height: parseInt(process.env.COMFYUI_HEIGHT, 10) || 1200,
+    artist: process.env.COMFYUI_ARTIST || '@ebora',
+    width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,
+    height: parseInt(process.env.COMFYUI_HEIGHT, 10) || 512,
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
     memory: process.env.FEATURE_MEMORY !== 'false',
     memoryExtract: process.env.FEATURE_MEMORY_EXTRACT === 'true', // 默认关
     autoImageJudge: process.env.FEATURE_AUTO_IMAGE_JUDGE !== 'false', // 默认开
+    promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE !== 'true', // 默认关
   },
 };
 
@@ -62,7 +63,7 @@ export function updateFeatureFlag(key, value) {
   config.features[key] = boolVal;
   const envKey = `FEATURE_${key.toUpperCase().replace(/([A-Z])/g, '_$1').toUpperCase()}`;
   // 简化的 key 映射
-  const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT', autoImageJudge: 'FEATURE_AUTO_IMAGE_JUDGE' };
+  const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT', autoImageJudge: 'FEATURE_AUTO_IMAGE_JUDGE', promptOptimize: 'FEATURE_PROMPT_OPTIMIZE' };
   persistEnv(keyMap[key] || `FEATURE_${key.toUpperCase()}`, boolVal);
   console.log(`[config] Feature ${key} = ${boolVal}`);
 }
