@@ -97,28 +97,43 @@ router.get('/tasks/:id/status', (req, res) => {
 });
 
 // POST /api/images/test-style — 测试画风（固定提示词，不写DB，仅返回展示用图）
+// mode: 'chat' (对话配图) | 'moments' (朋友圈配图)，默认 'chat'
 router.post('/test-style', async (req, res) => {
-  const { artist, width, height } = req.body;
+  const { artist, width, height, mode = 'chat', prompt: customPrompt } = req.body;
 
-  const FIXED_PROMPT = `1girl, solo, kiana kaslana, honkai impact 3rd, herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`;
+  const CHAT_PROMPT_DEFAULT = `1girl, solo, kiana kaslana(honkai impact 3rd), herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`;
 
-  console.log(`[test-style] artist="${artist}" ${width}x${height}`);
+  const MOMENTS_PROMPT_DEFAULT = `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`;
+
+  const isMoments = mode === 'moments';
+  // 自定义 prompt 优先，否则用默认
+  const prompt = customPrompt || (isMoments ? MOMENTS_PROMPT_DEFAULT : CHAT_PROMPT_DEFAULT);
+  const finalArtist = artist || (isMoments ? config.comfyui.momentsArtist : config.comfyui.artist);
+  const finalWidth = width || (isMoments ? config.comfyui.momentsWidth : config.comfyui.width);
+  const finalHeight = height || (isMoments ? config.comfyui.momentsHeight : config.comfyui.height);
+
+  console.log(`[test-style] mode="${mode}" artist="${finalArtist}" ${finalWidth}x${finalHeight}`);
+
+  const t0 = Date.now();
 
   try {
-    const result = await generateImageRaw(FIXED_PROMPT, {
-      artist: artist || config.comfyui.artist,
-      width: width || config.comfyui.width,
-      height: height || config.comfyui.height,
+    const result = await generateImageRaw(prompt, {
+      artist: finalArtist,
+      width: finalWidth,
+      height: finalHeight,
     });
 
+    const elapsed = Date.now() - t0;
+
     if (result.success) {
-      res.json({ success: true, images: result.images, promptId: result.promptId });
+      res.json({ success: true, images: result.images, promptId: result.promptId, elapsed });
     } else {
-      res.json({ success: false, error: result.error || 'No image generated' });
+      res.json({ success: false, error: result.error || 'No image generated', elapsed });
     }
   } catch (err) {
+    const elapsed = Date.now() - t0;
     console.error('[test-style] error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message, elapsed });
   }
 });
 

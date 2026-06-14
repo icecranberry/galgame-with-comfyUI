@@ -111,6 +111,40 @@ function initSchema(db) {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 朋友圈帖子表
+    CREATE TABLE IF NOT EXISTS moment_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id),
+      content TEXT NOT NULL,
+      images TEXT DEFAULT '[]',
+      prompt TEXT,
+      style TEXT,
+      resolution TEXT DEFAULT '1600x1200',
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      is_deleted INTEGER DEFAULT 0
+    );
+
+    -- 朋友圈评论表
+    CREATE TABLE IF NOT EXISTS moment_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL REFERENCES moment_posts(id),
+      author_type TEXT NOT NULL CHECK(author_type IN ('user','character')),
+      author_id INTEGER,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      is_deleted INTEGER DEFAULT 0
+    );
+
+    -- 朋友圈点赞表（单用户：每个帖子最多一个赞，UNIQUE 约束 + toggle）
+    CREATE TABLE IF NOT EXISTS moment_likes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL REFERENCES moment_posts(id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(post_id)
+    );
+
     -- 角色配置表
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,6 +199,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_emotion_conv ON emotion_snapshots(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_conv ON image_tasks(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(post_id, created_at ASC);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -174,11 +211,27 @@ function initSchema(db) {
     console.log('[db] idx_raw_client_msg skipped:', err.message);
   }
 
+  // 迁移: characters 表新增 next_moment_at 列
+  migrateMomentsSchema(db);
+
   // 种子: 默认全局规则
   seedGlobalRules(db);
 
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
+}
+
+function migrateMomentsSchema(db) {
+  // characters 表: 新增 next_moment_at 列（如果不存在）
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'next_moment_at')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN next_moment_at DATETIME`);
+      console.log('[db] Added characters.next_moment_at column');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentsSchema error:', err.message);
+  }
 }
 
 function seedGlobalRules(db) {

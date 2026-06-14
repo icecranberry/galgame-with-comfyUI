@@ -366,8 +366,25 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     const msgs = [
       { role: 'system', content: systemPrompt },
-      ...history,
     ];
+
+    // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
+    const recentMoments = db.prepare(`
+      SELECT content, created_at FROM moment_posts
+      WHERE character_id = ? AND status = 'done' AND is_deleted = 0
+      ORDER BY created_at DESC LIMIT 2
+    `).all(characterId);
+    if (recentMoments.length > 0) {
+      const momentLines = recentMoments.map((m, i) =>
+        `${i + 1}. [${m.created_at}] ${m.content}`
+      ).join('\n');
+      msgs.push({
+        role: 'system',
+        content: `「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`
+      });
+    }
+
+    msgs.push(...history);
     if (explicitImageIntent) {
       const imagePromptRule = getGlobalRule('image_prompt');
       const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。';

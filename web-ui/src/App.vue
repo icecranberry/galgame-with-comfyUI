@@ -4,6 +4,7 @@
     <Transition name="scrim-fade">
       <div v-if="isMobile && mobileSidebarOpen" class="mobile-scrim" @click="closeMobileSidebar"></div>
     </Transition>
+    <NavBar />
     <Sidebar
       :is-mobile="isMobile"
       :mobile-open="mobileSidebarOpen"
@@ -18,6 +19,8 @@
 import { ref, onMounted, onUnmounted, provide } from 'vue'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
+import { loadUserConfig } from './userConfig.js'
+import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
@@ -58,6 +61,7 @@ onMounted(async () => {
   window.addEventListener('resize', checkMobile)
 
   settings.loadComfyConfig()
+  loadUserConfig()  // 应用启动即加载，不阻塞渲染
   await chat.loadCharacters()
 
   if (isMobile.value) {

@@ -1,25 +1,44 @@
 <template>
-  <div class="settings-view">
-    <div class="page-header">
-      <h2>系统参数</h2>
+  <div ref="scrollEl" class="settings-view" @scroll="onSettingsScroll">
+    <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
+      <h2 @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">系统参数</h2>
       <span class="hint">修改即时生效，无需重启</span>
     </div>
 
     <div class="settings-grid">
-      <!-- ComfyUI params -->
+      <!-- ComfyUI params: 对话配图 + 朋友圈配图 -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
         <p class="fd">建议选择1~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
-        <input v-model="form.artist" class="fi" @input="markDirty" />
 
-        <div class="fr">
-          <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-          <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+        <!-- 对话配图 -->
+        <div class="moments-subsection">
+          <h4 class="subsection-title">▸ 对话配图</h4>
+          <input v-model="form.artist" class="fi" @input="markDirty" placeholder="画师串"/>
+          <div class="fr">
+            <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+            <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+          </div>
+          <div class="fpresets">
+            <span class="pl">预设：</span>
+            <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, 'chat')">{{ p.label }}</button>
+          </div>
         </div>
 
-        <div class="fpresets">
-          <span class="pl">预设：</span>
-          <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p)">{{ p.label }}</button>
+        <div class="moments-divider"></div>
+
+        <!-- 朋友圈配图 -->
+        <div class="moments-subsection">
+          <h4 class="subsection-title">▸ 朋友圈配图</h4>
+          <input v-model="form.momentsArtist" class="fi" @input="markDirty" placeholder="画师串"/>
+          <div class="fr">
+            <div class="fh"><label class="fl">宽度</label><input v-model.number="form.momentsWidth" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+            <div class="fh"><label class="fl">高度</label><input v-model.number="form.momentsHeight" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+          </div>
+          <div class="fpresets">
+            <span class="pl">预设：</span>
+            <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, 'moments')">{{ p.label }}</button>
+          </div>
         </div>
 
         <div class="sa">
@@ -27,6 +46,91 @@
           <span v-if="saved" class="smsg">已保存</span>
         </div>
       </div>
+
+      <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
+      <div class="card">
+        <h3>测试画风</h3>
+        <p class="fd">使用上方对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
+
+        <div class="style-test-row">
+          <button
+            class="btn-primary style-test-btn"
+            :disabled="styleTesting"
+            @click="runStyleTest"
+          >
+            {{ styleTesting ? '生成中...' : '🎨 发送测试' }}
+          </button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'chat' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'chat'"
+          >对话配图</button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'moments' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'moments'"
+          >朋友圈配图</button>
+          <button class="test-prompt-btn" @click="openPromptEditor">测试提示词</button>
+        </div>
+
+        <div v-if="styleError" class="style-error">{{ styleError }}</div>
+
+        <div v-if="styleTesting" class="style-loading">
+          <span class="style-spinner"></span>
+          <span>ComfyUI 正在生成图片，请耐心等待...</span>
+        </div>
+
+        <div v-if="styleImages.length > 0" class="style-result">
+          <div v-if="styleElapsed != null" class="style-elapsed">
+            ⏱ 生成耗时 {{ formatElapsed(styleElapsed) }}
+          </div>
+          <img
+            v-for="(img, i) in styleImages"
+            :key="i"
+            :src="img.base64"
+            class="style-preview-img"
+            @click="openLightbox(i)"
+            alt="测试画风结果"
+          />
+        </div>
+
+        <!-- 全屏预览 -->
+        <VueEasyLightbox
+          :visible="lightboxVisible"
+          :imgs="lightboxImgs"
+          :index="lightboxIndex"
+          :max-zoom="6"
+          :min-zoom="0.3"
+          :zoom-scale="0.35"
+          @hide="lightboxVisible = false"
+        />
+      </div>
+
+      <!-- 测试提示词编辑弹窗 -->
+      <Teleport to="body">
+        <div v-if="showPromptEditor" class="prompt-editor-overlay" @click.self="showPromptEditor = false">
+          <div class="prompt-editor-modal">
+            <div class="prompt-editor-header">
+              <h3>编辑测试提示词</h3>
+              <button class="prompt-editor-close" @click="showPromptEditor = false">✕</button>
+            </div>
+            <div class="prompt-editor-body">
+              <div class="prompt-editor-field">
+                <label class="fl">对话配图提示词</label>
+                <textarea v-model="testPrompts.chat" class="fi prompt-textarea" rows="5"></textarea>
+              </div>
+              <div class="prompt-editor-field">
+                <label class="fl">朋友圈配图提示词</label>
+                <textarea v-model="testPrompts.moments" class="fi prompt-textarea" rows="5"></textarea>
+              </div>
+            </div>
+            <div class="prompt-editor-actions">
+              <button class="btn-ghost" @click="resetTestPrompts">恢复默认</button>
+              <button class="btn-primary" @click="saveTestPrompts">保存</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
 
       <!-- LLM API 设置 -->
       <div class="card">
@@ -75,45 +179,6 @@
         </div>
       </div>
 
-      <!-- 测试画风：使用当前画师串 & 分辨率，固定 Kiana 提示词 -->
-      <div class="card">
-        <h3>测试画风</h3>
-        <p class="fd">使用上方当前画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
-
-        <button
-          class="btn-primary style-test-btn"
-          :disabled="styleTesting"
-          @click="runStyleTest"
-        >
-          {{ styleTesting ? '生成中...' : '🎨 发送测试' }}
-        </button>
-
-        <div v-if="styleError" class="style-error">{{ styleError }}</div>
-
-        <div v-if="styleTesting" class="style-loading">
-          <span class="style-spinner"></span>
-          <span>ComfyUI 正在生成图片，请耐心等待...</span>
-        </div>
-
-        <div v-if="styleImages.length > 0" class="style-result">
-          <img
-            v-for="(img, i) in styleImages"
-            :key="i"
-            :src="img.base64"
-            class="style-preview-img"
-            @click="previewImage = img.base64"
-            alt="测试画风结果"
-          />
-        </div>
-
-        <!-- 全屏预览 — 按设定分辨率直接定宽高，max-width/max-height 约束超限 -->
-        <Teleport to="body">
-          <div v-if="previewImage" class="style-overlay" @click="previewImage = null">
-            <img :src="previewImage" class="style-overlay-img"
-              :style="{ width: form.width + 'px', height: form.height + 'px' }" />
-          </div>
-        </Teleport>
-      </div>
 
       <!-- 功能开关 -->
       <div class="card">
@@ -199,9 +264,9 @@
         </div>
       </div>
 
-      <!-- 用户头像 -->
+      <!-- 用户设置 -->
       <div class="card">
-        <h3>用户头像</h3>
+        <h3>用户设置</h3>
         <div class="avatar-row">
           <div
             class="avatar-preview clickable"
@@ -212,6 +277,17 @@
             <button class="sp-btn-small" @click="showUserAvatarPicker = true">更换头像</button>
             <button v-if="userAvatar" class="sp-btn-small sp-btn-subtle" @click="removeUserAvatar">移除</button>
           </div>
+        </div>
+
+        <label class="fl" style="margin-top:14px">用户昵称</label>
+        <input v-model="userNicknameInput" class="fi" placeholder="给自己起个名字" @input="markUserDirty" />
+
+        <label class="fl" style="margin-top:10px">自我设定</label>
+        <textarea v-model="userPersonaInput" class="fi user-persona" placeholder="描述一下自己的自画像，包括性格、外观、性别、年龄等" rows="3" @input="markUserDirty"></textarea>
+
+        <div class="sa" style="margin-top:4px">
+          <button class="btn-primary" :disabled="!userDirty" @click="saveUserConfig">保存</button>
+          <span v-if="userSaved" class="smsg">已保存</span>
         </div>
       </div>
 
@@ -272,17 +348,38 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
 import { useSettingsStore } from '../stores/settings.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
-import { userAvatar, loadUserAvatar, uploadUserAvatar } from '../userConfig.js'
+import VueEasyLightbox from 'vue-easy-lightbox'
+import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona, loadUserConfig, saveUserConfig as saveUserConfigApi } from '../userConfig.js'
 
 const chat = useChatStore()
 const settingsStore = useSettingsStore()
+const isMobile = inject('isMobile')
+const toggleMobileSidebar = inject('toggleMobileSidebar')
 
-const form = ref({ artist: '', width: 1600, height: 1200 })
+// ── 移动端滚动方向感知：下滑隐藏标题，上滑显示 ──
+const scrollEl = ref(null)
+const headerVisible = ref(true)
+let settingsLastScroll = 0
+function onSettingsScroll() {
+  if (!isMobile) return
+  const el = scrollEl.value
+  if (!el) return
+  const delta = el.scrollTop - settingsLastScroll
+  if (el.scrollTop > 40 && delta > 8) {
+    headerVisible.value = false
+  } else if (delta < -4) {
+    headerVisible.value = true
+  }
+  settingsLastScroll = el.scrollTop
+}
+
+const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', momentsWidth: 1600, momentsHeight: 1200 })
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
@@ -327,7 +424,12 @@ function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 onMounted(async () => {
   try {
     const data = await getConfig()
-    form.value = { artist: data.comfy.artist, width: data.comfy.width, height: data.comfy.height }
+    form.value = {
+      artist: data.comfy.artist, width: data.comfy.width, height: data.comfy.height,
+      momentsArtist: data.comfy.momentsArtist || data.comfy.artist,
+      momentsWidth: data.comfy.momentsWidth || 1600,
+      momentsHeight: data.comfy.momentsHeight || 1200,
+    }
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
@@ -338,6 +440,9 @@ onMounted(async () => {
   await checkHealth()
   await loadRules()
   await loadUserAvatar()
+  await loadUserConfig()
+  userNicknameInput.value = userNickname.value
+  userPersonaInput.value = userPersona.value
 })
 
 // ── 用户头像 ──
@@ -357,11 +462,29 @@ async function removeUserAvatar() {
   await uploadUserAvatar('')
 }
 
+// ── 用户昵称 + 自我设定 ──
+const userNicknameInput = ref('')
+const userPersonaInput = ref('')
+const userDirty = ref(false)
+const userSaved = ref(false)
+function markUserDirty() { userDirty.value = true; userSaved.value = false }
+async function saveUserConfig() {
+  await saveUserConfigApi({
+    nickname: userNicknameInput.value,
+    persona: userPersonaInput.value,
+  })
+  userDirty.value = false; userSaved.value = true
+  setTimeout(() => userSaved.value = false, 2000)
+}
+
 function markDirty() { dirty.value = true; saved.value = false }
 function markConnDirty() { connDirty.value = true; connSaved.value = false }
 
 async function saveComfy() {
-  await updateComfyConfig({ artist: form.value.artist, width: form.value.width, height: form.value.height })
+  await updateComfyConfig({
+    artist: form.value.artist, width: form.value.width, height: form.value.height,
+    momentsArtist: form.value.momentsArtist, momentsWidth: form.value.momentsWidth, momentsHeight: form.value.momentsHeight,
+  })
   settingsStore.setComfySize(form.value.width, form.value.height)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
@@ -394,7 +517,14 @@ async function saveLlmConfig() {
   }
 }
 
-function applyPreset(p) { form.value.width = p.width; form.value.height = p.height; dirty.value = true; saved.value = false }
+function applyPreset(p, mode = 'chat') {
+  if (mode === 'moments') {
+    form.value.momentsWidth = p.width; form.value.momentsHeight = p.height;
+  } else {
+    form.value.width = p.width; form.value.height = p.height;
+  }
+  dirty.value = true; saved.value = false;
+}
 
 async function saveFeature(key, val) {
   await updateFeatureFlag(key, val)
@@ -435,22 +565,45 @@ async function saveRule(rule) {
 }
 
 // ── 测试画风 ──
+const testMode = ref('chat')  // 'chat' | 'moments'
 const styleTesting = ref(false)
 const styleError = ref('')
 const styleImages = ref([])
-const previewImage = ref(null)
+const styleElapsed = ref(null)  // ms
+
+// Lightbox
+const lightboxVisible = ref(false)
+const lightboxIndex = ref(0)
+const lightboxImgs = computed(() => styleImages.value.map(i => i.base64))
+
+function openLightbox(index) {
+  lightboxIndex.value = index
+  lightboxVisible.value = true
+}
+
+function formatElapsed(ms) {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const min = Math.floor(ms / 60000)
+  const sec = ((ms % 60000) / 1000).toFixed(0)
+  return `${min}min ${sec}s`
+}
 
 async function runStyleTest() {
   styleTesting.value = true
   styleError.value = ''
   styleImages.value = []
+  styleElapsed.value = null
 
   try {
     const result = await testStyle(
-      form.value.artist,
-      form.value.width,
-      form.value.height,
+      testMode.value === 'moments' ? form.value.momentsArtist : form.value.artist,
+      testMode.value === 'moments' ? form.value.momentsWidth : form.value.width,
+      testMode.value === 'moments' ? form.value.momentsHeight : form.value.height,
+      testMode.value,
+      testPrompts.value[testMode.value] || '',
     )
+    if (result.elapsed != null) styleElapsed.value = result.elapsed
     if (result.success && result.images?.length > 0) {
       styleImages.value = result.images
     } else {
@@ -461,6 +614,37 @@ async function runStyleTest() {
   } finally {
     styleTesting.value = false
   }
+}
+
+// ── 测试提示词编辑器 ──
+const TEST_PROMPTS_KEY = 'test-style-prompts'
+const DEFAULT_TEST_PROMPTS = {
+  chat: `1girl, solo, kiana kaslana(honkai impact 3rd), herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`,
+  moments: `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`,
+}
+
+function loadTestPrompts() {
+  try {
+    const raw = localStorage.getItem(TEST_PROMPTS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { ...DEFAULT_TEST_PROMPTS }
+}
+
+const testPrompts = ref(loadTestPrompts())
+const showPromptEditor = ref(false)
+
+function openPromptEditor() {
+  showPromptEditor.value = true
+}
+
+function saveTestPrompts() {
+  localStorage.setItem(TEST_PROMPTS_KEY, JSON.stringify(testPrompts.value))
+  showPromptEditor.value = false
+}
+
+function resetTestPrompts() {
+  testPrompts.value = { ...DEFAULT_TEST_PROMPTS }
 }
 
 // ── 角色工坊 ──
@@ -488,8 +672,14 @@ async function generateNewChar() {
 
 <style scoped>
 .settings-view { padding: 32px; overflow-y: auto; height: 100vh; height: 100dvh; flex: 1; }
-.page-header { margin-bottom: 28px; }
+.page-header {
+  margin-bottom: 28px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+.page-header.header-hidden { transform: translateY(-100%); margin-bottom: 0; }
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
+.is-clickable { cursor: pointer; }
 .hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -512,6 +702,9 @@ async function generateNewChar() {
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
+.moments-subsection { margin-bottom: 4px; }
+.subsection-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
+.moments-divider { height: 1px; background: var(--glass-border); margin: 16px 0; }
 .fi:focus { border-color: var(--accent); }
 .fr { display: flex; gap: 14px; }
 .fh { flex: 1; }
@@ -589,6 +782,7 @@ async function generateNewChar() {
 .sp-btn-small:hover { border-color:var(--accent); }
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
+.user-persona { resize: vertical; min-height: 60px; font-family: inherit; }
 
 /* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
@@ -598,20 +792,68 @@ async function generateNewChar() {
 .key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
 
 /* ── 测试画风 ── */
-.style-test-btn { margin-bottom: 12px; border-radius: 8px; }
+.style-test-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.style-test-btn { border-radius: 8px; margin: 0; }
+.test-mode-btn {
+  padding: 7px 14px; font-size: 12px; font-weight: 500;
+  border-radius: 8px; border: 1px solid var(--glass-border);
+  background: transparent; color: var(--text-secondary);
+  cursor: pointer; transition: all 0.2s ease;
+}
+.test-mode-btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.test-mode-btn.active {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+.test-mode-btn:disabled { opacity: 0.5; pointer-events: none; }
+.test-prompt-btn {
+  margin-left: auto; padding: 0; font-size: 12px;
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.test-prompt-btn:hover { color: var(--accent); }
 .style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; }
 .style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
 .style-spinner { width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.style-result { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.style-result { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: flex-start; flex-direction: column; }
+.style-elapsed { font-size: 13px; color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); }
 .style-preview-img { max-width: 480px; max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
 .style-preview-img:hover { transform: scale(1.03); }
-.style-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
-.style-overlay-img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 12px; }
+
+/* ── 测试提示词弹窗 ── */
+.prompt-editor-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex;
+  align-items: center; justify-content: center; z-index: 10000;
+}
+.prompt-editor-modal {
+  background: var(--bg-primary); border-radius: 16px; padding: 24px;
+  width: min(640px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.prompt-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.prompt-editor-header h3 { font-size: 16px; font-weight: 600; color: var(--text-bright); }
+.prompt-editor-close {
+  width: 28px; height: 28px; border-radius: 50%; border: none;
+  background: var(--glass-bg-strong); color: var(--text-secondary);
+  font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.prompt-editor-body { flex: 1; overflow-y: auto; }
+.prompt-editor-field { margin-bottom: 16px; }
+.prompt-textarea { min-height: 100px; resize: vertical; font-family: inherit; margin-bottom: 0; }
+.prompt-editor-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
 /* ── 移动端：卡片单列 + 间距收缩 ── */
 @media (max-width: 767px) {
   .settings-view { padding: 16px; }
+  .page-header {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 8px 0; margin-bottom: 20px;
+  }
   .settings-grid { grid-template-columns: 1fr; }
   .rules-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }

@@ -183,14 +183,74 @@ export async function uploadUserAvatar(base64) {
   return res.json()
 }
 
-// ── 测试画风（固定 Kiana 提示词，不存 DB）──
-export async function testStyle(artist, width, height) {
+// ── User config (nickname + persona) ──
+export async function getUserConfig() {
+  const res = await fetch(`${BASE}/config/user`)
+  return res.json()
+}
+
+export async function updateUserConfig(data) {
+  const res = await fetch(`${BASE}/config/user`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+// ── 测试画风（固定提示词，不存 DB；mode: 'chat' | 'moments'；prompt 可选覆盖默认）──
+export async function testStyle(artist, width, height, mode = 'chat', prompt = '') {
+  const body = { artist, width, height, mode };
+  if (prompt) body.prompt = prompt;
   const res = await fetch(`${BASE}/images/test-style`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist, width, height }),
+    body: JSON.stringify(body),
   });
   return res.json();
+}
+
+// ── Moments 朋友圈 ──
+export async function listMoments({ limit = 20, before } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set('before', String(before))
+  const res = await fetch(`${BASE}/moments?${params}`)
+  return res.json()
+}
+
+export async function getMoment(id) {
+  const res = await fetch(`${BASE}/moments/${id}`)
+  return res.json()
+}
+
+export async function generateMoment(characterId) {
+  const res = await fetch(`${BASE}/moments/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: characterId }),
+  })
+  return res.json()
+}
+
+export async function deleteMoment(id) {
+  const res = await fetch(`${BASE}/moments/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function commentMoment(postId, content) {
+  const res = await fetch(`${BASE}/moments/${postId}/comments`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  return res.json()
+}
+
+export async function deleteMomentComment(postId, commentId) {
+  const res = await fetch(`${BASE}/moments/${postId}/comments/${commentId}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function likeMoment(postId) {
+  const res = await fetch(`${BASE}/moments/${postId}/like`, { method: 'POST' })
+  return res.json()
 }
 
 // ── ComfyUI health ──

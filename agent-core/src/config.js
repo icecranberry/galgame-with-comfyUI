@@ -25,6 +25,9 @@ export const config = {
     artist: process.env.COMFYUI_ARTIST || '@ebora',
     width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,
     height: parseInt(process.env.COMFYUI_HEIGHT, 10) || 512,
+    momentsArtist: process.env.COMFYUI_MOMENTS_ARTIST || process.env.COMFYUI_ARTIST || '@ebora',
+    momentsWidth: parseInt(process.env.COMFYUI_MOMENTS_WIDTH, 10) || 1600,
+    momentsHeight: parseInt(process.env.COMFYUI_MOMENTS_HEIGHT, 10) || 1200,
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
@@ -33,6 +36,10 @@ export const config = {
     autoImageJudge: process.env.FEATURE_AUTO_IMAGE_JUDGE !== 'false', // 默认开
     promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE !== 'true', // 默认关
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
+  },
+  user: {
+    nickname: process.env.USER_NICKNAME || '',
+    persona: process.env.USER_PERSONA || '',
   },
 };
 
@@ -47,15 +54,21 @@ function persistEnv(key, value) {
   fs.writeFileSync(envPath, envContent, 'utf8');
 }
 
-export function updateComfyConfig({ artist, width, height, url }) {
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight }) {
   if (artist !== undefined) config.comfyui.artist = artist;
   if (width !== undefined) config.comfyui.width = parseInt(width, 10) || config.comfyui.width;
   if (height !== undefined) config.comfyui.height = parseInt(height, 10) || config.comfyui.height;
   if (url !== undefined) config.comfyui.url = url;
+  if (momentsArtist !== undefined) config.comfyui.momentsArtist = momentsArtist;
+  if (momentsWidth !== undefined) config.comfyui.momentsWidth = parseInt(momentsWidth, 10) || config.comfyui.momentsWidth;
+  if (momentsHeight !== undefined) config.comfyui.momentsHeight = parseInt(momentsHeight, 10) || config.comfyui.momentsHeight;
   persistEnv('COMFYUI_ARTIST', config.comfyui.artist);
   persistEnv('COMFYUI_WIDTH', config.comfyui.width);
   persistEnv('COMFYUI_HEIGHT', config.comfyui.height);
   if (url !== undefined) persistEnv('COMFYUI_URL', url);
+  if (momentsArtist !== undefined) persistEnv('COMFYUI_MOMENTS_ARTIST', momentsArtist);
+  if (momentsWidth !== undefined) persistEnv('COMFYUI_MOMENTS_WIDTH', config.comfyui.momentsWidth);
+  if (momentsHeight !== undefined) persistEnv('COMFYUI_MOMENTS_HEIGHT', config.comfyui.momentsHeight);
   console.log('[config] ComfyUI settings saved');
 }
 
@@ -99,4 +112,20 @@ export function updateLlmConfig({ apiKey, baseURL, model }) {
   }
   console.log('[config] LLM settings saved');
   return { ok: true };
+}
+
+export function updateUserConfig({ nickname, persona }) {
+  if (nickname !== undefined) {
+    config.user.nickname = nickname;
+    persistEnv('USER_NICKNAME', nickname);
+  }
+  if (persona !== undefined) {
+    config.user.persona = persona;
+    persistEnv('USER_PERSONA', persona);
+  }
+  console.log('[config] User settings saved');
+}
+
+export function getUserConfig() {
+  return { ...config.user };
 }

@@ -4,11 +4,13 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
+import MomentsView from './views/MomentsView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
   { path: '/chat/:id', component: ChatView },
+  { path: '/moments', component: MomentsView },
   { path: '/settings', component: SettingsView },
 ]
 

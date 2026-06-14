@@ -13,7 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { chatSync } from '../llm/deepseek.js';
-import { submitWorkflow, findLatestImageInFolder } from './comfyClient.js';
+import { submitWorkflow } from './comfyClient.js';
 import { config } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,8 +21,6 @@ const WORKFLOW_PATH = path.join(__dirname, '..', '..', '..', 'workflow', 'skill�
 const RULES_PATH = path.join(__dirname, '..', '..', '..', 'workflow', '提示词生成助手.txt');
 
 const PROMPT_PLACEHOLDER = '请输入画面描述';
-const OUTPUT_DIR = config.comfyui.outputDir || 'D:/AI/ComfyUI-aki-v3/ComfyUI/output';
-const OUTPUT_SUBFOLDER = 'bot';
 
 // ComfyUI 提交最大重试次数（首次 + 2 次重试 = 共 3 次）
 const MAX_SUBMIT_RETRIES = 2;
@@ -195,14 +193,8 @@ async function submitWithRetry(wf, { onProgress, submitRetries = MAX_SUBMIT_RETR
     }
   }
 
-  // 全部尝试耗尽，返回最后一次失败结果
-  console.log('[imageSkill] All ComfyUI submit attempts exhausted, trying folder fallback...');
-  const fallback = fallbackFromFolder();
-  if (fallback.success) {
-    console.log('[imageSkill] Fallback succeeded:', fallback.images[0]?.filename);
-    return fallback;
-  }
-  console.warn('[imageSkill] All attempts + fallback failed');
+  // 全部尝试耗尽，返回失败
+  console.log('[imageSkill] All ComfyUI submit attempts exhausted, generation failed');
   return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted' };
 }
 
@@ -227,20 +219,3 @@ export async function generateImage(rawPrompt, { onProgress } = {}) {
   return submitWithRetry(wf, { onProgress });
 }
 
-function fallbackFromFolder() {
-  // 先搜 bot/ 子文件夹，再搜 output 根目录
-  for (const subfolder of [OUTPUT_SUBFOLDER, '.']) {
-    const latest = findLatestImageInFolder(OUTPUT_DIR, subfolder);
-    if (!latest) continue;
-    try {
-      const buffer = fs.readFileSync(latest.path);
-      const ext = path.extname(latest.name).slice(1) || 'png';
-      const base64 = `data:image/${ext};base64,${buffer.toString('base64')}`;
-      console.log(`[imageSkill] Found in ${subfolder}/: ${latest.name}`);
-      return { success: true, images: [{ base64, filename: latest.name }], source: 'folder' };
-    } catch (err) {
-      console.warn(`[imageSkill] Read failed for ${latest.path}:`, err.message);
-    }
-  }
-  return { success: false, images: [], source: null, error: 'No image found' };
-}

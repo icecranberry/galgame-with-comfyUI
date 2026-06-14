@@ -9,6 +9,8 @@ import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
 import configRoutes from './src/routes/config.js';
+import momentsRoutes from './src/routes/moments.js';
+import { startMomentScheduler } from './src/services/momentScheduler.js';
 
 const app = express();
 
@@ -29,6 +31,7 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/images', imagesRoutes);
 app.use('/api/characters', charactersRoutes);  // /api/characters CRUD
 app.use('/api/config', configRoutes);
+app.use('/api/moments', momentsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -51,6 +54,9 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 启动朋友圈定时调度器
+startMomentScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

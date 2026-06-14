@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig } from '../config.js';
 import { getDb } from '../db/index.js';
 
 const router = Router();
@@ -15,6 +15,9 @@ router.get('/', (req, res) => {
       artist: config.comfyui.artist,
       width: config.comfyui.width,
       height: config.comfyui.height,
+      momentsArtist: config.comfyui.momentsArtist,
+      momentsWidth: config.comfyui.momentsWidth,
+      momentsHeight: config.comfyui.momentsHeight,
     },
     features: config.features,
     llm: getLlmConfig(),
@@ -23,8 +26,8 @@ router.get('/', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url } = req.body;
-  updateComfyConfig({ artist, width, height, url });
+  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight } = req.body;
+  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight });
   res.json({ ok: true, ...config.comfyui });
 });
 
@@ -75,6 +78,18 @@ router.put('/rules/:key', (req, res) => {
   db.prepare(`UPDATE global_rules SET ${updates.join(', ')} WHERE rule_key = ?`).run(...params);
   const updated = db.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(req.params.key);
   res.json({ ok: true, rule: updated });
+});
+
+// GET /api/config/user — 获取用户昵称 + 自我设定
+router.get('/user', (req, res) => {
+  res.json(getUserConfig());
+});
+
+// PUT /api/config/user — 更新用户昵称 + 自我设定
+router.put('/user', (req, res) => {
+  const { nickname, persona } = req.body;
+  updateUserConfig({ nickname, persona });
+  res.json({ ok: true, ...getUserConfig() });
 });
 
 // GET /api/config/user-avatar — 获取用户头像路径
