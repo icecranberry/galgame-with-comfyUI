@@ -11,6 +11,7 @@ export const useMomentsStore = defineStore('moments', () => {
 
   // ── 红点通知状态（SSE 驱动）──
   const newPostCount = ref(0)
+  const isViewingMoments = ref(false)   // 用户当前是否在朋友圈页面
 
   // 当前可见的帖子（前 page * PAGE_SIZE 条）
   const visiblePosts = computed(() => posts.value.slice(0, page.value * PAGE_SIZE))
@@ -87,8 +88,6 @@ export const useMomentsStore = defineStore('moments', () => {
         like_count: 0,
         liked: false,
       })
-      // 手动触发的帖子自动标记为已读
-      markSeen()
     }
     return result
   }
@@ -104,6 +103,8 @@ export const useMomentsStore = defineStore('moments', () => {
   let _reconnectTimer = null
 
   function _onNewPost() {
+    // 用户正在朋友圈页面时，不需要红点（帖子会直接出现在列表中）
+    if (isViewingMoments.value) return
     newPostCount.value++
   }
 
@@ -136,7 +137,7 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   return { posts, visiblePosts, loading, hasMore, page,
-    newPostCount,
+    newPostCount, isViewingMoments,
     loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
     connectSSE, disconnectSSE, markSeen }
 })

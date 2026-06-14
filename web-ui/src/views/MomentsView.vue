@@ -83,11 +83,16 @@ function onPreview({ images, index }) {
 }
 
 onMounted(async () => {
+  moments.isViewingMoments = true
   await chat.loadCharacters()
   await loadUserConfig()
   await moments.loadPosts()
   // 显式标记已读：兜底防止 loadPosts 因 loading guard 跳过内部 markSeen
   moments.markSeen()
+})
+
+onUnmounted(() => {
+  moments.isViewingMoments = false
 })
 
 // ── 滚动方向感知：下滑隐藏顶栏，上滑显示（仅移动端）──

@@ -232,6 +232,14 @@ function formatTime(iso) {
   line-height: 13px;
   text-align: center;
   white-space: nowrap;
+  animation: jelly-pop 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.35);
+}
+
+@keyframes jelly-pop {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  80%  { transform: scale(0.92); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* ── 更多菜单弹窗 ── */
