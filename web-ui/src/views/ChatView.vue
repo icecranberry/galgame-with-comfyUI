@@ -23,9 +23,8 @@
         新消息到达时 JS 平滑滚底，与列表高度变化同步
       -->
       <div ref="msgList" class="message-list" @scroll="onScroll">
-        <!-- 加载指示器置于列表顶部 → 用户上滚到顶部触发 IntersectionObserver 加载历史 -->
-        <div ref="loadHint" v-if="chat.loadingOlder" class="load-older">加载更早的消息...</div>
-        <div ref="loadHint" v-else-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+        <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
+        <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
         <div class="msg-list-inner">
           <template v-for="item in flatItems" :key="item.id">
@@ -209,6 +208,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
+import { getConfig, updateFeatureFlag } from '../api/index.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -217,8 +217,22 @@ const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
-const forceImageGen = ref(localStorage.getItem('forceImageGen') === 'true')
-watch(forceImageGen, (v) => { localStorage.setItem('forceImageGen', v); showForceTip() })
+const forceImageGen = ref(false)
+async function loadForceImageGen() {
+  try {
+    const data = await getConfig()
+    if (data.features?.forceImageGen !== undefined) {
+      forceImageGen.value = data.features.forceImageGen
+    }
+  } catch {}
+}
+// localStorage 迁移：读旧值作为初始值（API 失败时的兜底）
+forceImageGen.value = localStorage.getItem('forceImageGen') === 'true'
+watch(forceImageGen, (v) => {
+  updateFeatureFlag('forceImageGen', v).catch(() => {})
+  if (localStorage.getItem('forceImageGen') !== null) localStorage.removeItem('forceImageGen')
+  showForceTip()
+})
 const forceTipVisible = ref(false)
 let forceTipTimer = null
 function showForceTip() {
@@ -336,7 +350,7 @@ showAvatarPicker.value = false
 
 const messageGroups = computed(() => {
 const groups = []
-for (const msg of chat.messages) {
+for (const msg of chat.visibleMessages) {
 const lastGroup = groups[groups.length - 1]
 if (lastGroup) {
 const lastMsg = lastGroup.msgs[lastGroup.msgs.length - 1]
@@ -402,6 +416,15 @@ function onScroll() {
   scrollTimer = setTimeout(() => {
     if (distToBottom < 60) userScrolledUp = false
   }, 2000)
+
+  // 滚动到顶部 → 展开渲染窗口显示更早消息
+  if (el.scrollTop < 40 && chat.hasMoreOlder) {
+    const prevHeight = el.scrollHeight
+    chat.expandWindow()
+    nextTick(() => {
+      if (msgList.value) msgList.value.scrollTop += msgList.value.scrollHeight - prevHeight
+    })
+  }
 }
 
 // force=true: 瞬间滚底（切角色/首次加载/发消息/图片加载完毕）
@@ -416,44 +439,6 @@ async function scrollToBottom(force = false) {
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     }
-  }
-}
-
-// ══════════════════════════════════════════════════
-// 无限滚动加载（IntersectionObserver — 监测顶部 loadHint）
-// ══════════════════════════════════════════════════
-
-const loadHint = ref(null)
-let loadObs = null
-
-function startLoadObserver() {
-  stopLoadObserver()
-  if (!loadHint.value) return
-  loadObs = new IntersectionObserver((entries) => {
-    if (entries[0]?.isIntersecting && chat.hasMoreOlder && !chat.loadingOlder) {
-      loadMore()
-    }
-  }, { threshold: 0.1 })
-  loadObs.observe(loadHint.value)
-}
-
-function stopLoadObserver() {
-  if (loadObs) { loadObs.disconnect(); loadObs = null }
-}
-
-async function loadMore() {
-  if (!chat.hasMoreOlder || chat.loadingOlder) return
-  const el = msgList.value
-  const prevHeight = el?.scrollHeight || 0
-  await chat.loadOlderMessages()
-  await nextTick()
-  stopLoadObserver()
-  await nextTick()
-  startLoadObserver()
-  if (el) {
-    // 旧消息插入到列表顶部，需补偿 scrollTop 保持用户当前视口不跳
-    const delta = el.scrollHeight - prevHeight
-    el.scrollTop += delta
   }
 }
 
@@ -485,18 +470,16 @@ function teardownMobileKeyboard() {
 }
 
 onMounted(async () => {
-  await Promise.all([chat.loadCharacters(), loadUserAvatar()])
+  await Promise.all([chat.loadCharacters(), loadUserAvatar(), loadForceImageGen()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
-  startLoadObserver()
   scrollToBottom(true)  // 首次加载强制滚底
   if (!isMobile) inputEl.value?.focus()
   setupMobileKeyboard()
 })
 
 onUnmounted(() => {
-  stopLoadObserver()
   teardownMobileKeyboard()
 })
 
@@ -517,16 +500,15 @@ watch(() => chat.activeCharId, (id, oldId) => {
     if (id !== routeId) router.replace('/chat/' + id)
     pendingCharSwitch = true
     userScrolledUp = false
-    stopLoadObserver()
     if (msgList.value) msgList.value.style.visibility = 'hidden'
   }
 })
 
-// 消息列表变化 → 统一滚底
-watch(() => flatItems.value.length, () => {
-  if (flatItems.value.length === 0) return
+// 新消息到达 → 自动滚底（监听 messages.length，窗口展开不影响）
+watch(() => chat.messages.length, (newLen) => {
+  if (newLen === 0) return
   if (pendingCharSwitch) {
-    // 切角色后消息加载完成：滚底 + 恢复可见 + 重启 Observer
+    // 切角色后消息加载完成：滚底 + 恢复可见
     setTimeout(() => {
       const el = msgList.value
       if (!el) return
@@ -534,7 +516,6 @@ watch(() => flatItems.value.length, () => {
       el.style.visibility = ''
       setTimeout(() => {
         el.scrollTop = el.scrollHeight
-        startLoadObserver()
         pendingCharSwitch = false
       }, 150)
     }, 50)

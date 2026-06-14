@@ -32,46 +32,26 @@ function userNickname() {
 
 // ──────────────── 朋友圈帖子 ────────────────
 
-// GET /api/moments — 分页拉取所有帖子（时间倒序，游标分页）
+// GET /api/moments — 全量返回所有帖子（本地 SQLite，数据量可控，无需分页）
 router.get('/', (req, res) => {
   const db = getDb();
-  const { limit = '20', before } = req.query;
-  const limitNum = parseInt(limit, 10);
 
-  let sql, params;
-  if (before) {
-    sql = `
-      SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
-        (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id AND is_deleted = 0) AS comment_count,
-        (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count
-      FROM moment_posts mp
-      JOIN characters c ON c.id = mp.character_id
-      WHERE mp.is_deleted = 0 AND mp.status = 'done' AND mp.id < ?
-      ORDER BY mp.id DESC LIMIT ?
-    `;
-    params = [before, limitNum];
-  } else {
-    sql = `
-      SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
-        (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id AND is_deleted = 0) AS comment_count,
-        (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count
-      FROM moment_posts mp
-      JOIN characters c ON c.id = mp.character_id
-      WHERE mp.is_deleted = 0 AND mp.status = 'done'
-      ORDER BY mp.id DESC LIMIT ?
-    `;
-    params = [limitNum];
-  }
-
-  const posts = db.prepare(sql).all(...params).map(p => ({
+  const posts = db.prepare(`
+    SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
+      (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id AND is_deleted = 0) AS comment_count,
+      (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count
+    FROM moment_posts mp
+    JOIN characters c ON c.id = mp.character_id
+    WHERE mp.is_deleted = 0 AND mp.status = 'done'
+    ORDER BY mp.id DESC
+  `).all().map(p => ({
     ...p,
     images: JSON.parse(p.images || '[]'),
     created_at: toISO(p.created_at),
     liked: !!db.prepare('SELECT id FROM moment_likes WHERE post_id = ?').get(p.id),
   }));
 
-  const hasMore = posts.length === limitNum;
-  res.json({ posts, hasMore });
+  res.json({ posts });
 });
 
 // GET /api/moments/:id — 单个帖子详情（含评论）

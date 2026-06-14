@@ -220,7 +220,7 @@
         <div class="toggle-row">
           <div>
             <div class="tl">智能配图判断</div>
-            <div class="td">AI 回复后自动判断是否需要配图增强表达，无需用户主动要求</div>
+            <div class="td">回复后提交LLM自动二次判断是否需要配图增强表达，无需用户主动要求</div>
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.autoImageJudge" @change="saveFeature('autoImageJudge', features.autoImageJudge)" />
@@ -231,7 +231,7 @@
         <div class="toggle-row">
           <div>
             <div class="tl">聊天候选词</div>
-            <div class="td">AI 回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
+            <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />

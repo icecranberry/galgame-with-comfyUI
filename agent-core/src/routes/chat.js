@@ -225,12 +225,6 @@ function toISODate(sqliteDT) {
   return sqliteDT.replace(' ', 'T') + '.000Z';
 }
 
-// 反向: 将 ISO 8601 转为 SQLite 可比较的时间格式 "YYYY-MM-DD HH:MM:SS"
-function normalizeForSQLite(dt) {
-  if (!dt) return dt;
-  return dt.replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
-}
-
 // DELETE /api/characters/:id/messages — 清空角色对话记录（软删除）
 router.delete('/characters/:id/messages', (req, res) => {
   const db = getDb();
@@ -242,53 +236,22 @@ router.delete('/characters/:id/messages', (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/characters/:id/messages — 获取角色对话消息
-//   ?limit=50            每次最多条数
-//   ?before=ISO_DATE     加载该日期之前的旧消息（不传则默认最近 7 天）
+// GET /api/characters/:id/messages — 获取角色全部对话消息（本地 SQLite，数据量可控，无需分页）
 router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
-  const { limit = '50', before } = req.query;
-  const limitNum = parseInt(limit, 10);
-  const params = [conversationId];
 
-  let sql;
-  if (before) {
-    // 向上翻：加载 before 日期之前的旧消息（从新到旧取 limit 条，再反转顺序）
-    sql = `SELECT * FROM (
-      SELECT id, conversation_id, role, content, images, created_at
-      FROM messages
-      WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?
-      ORDER BY id DESC LIMIT ?
-    ) ORDER BY id ASC`;
-    params.push(normalizeForSQLite(before), limitNum);
-  } else {
-    // 默认：加载最近 7 天的最新消息
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    sql = `SELECT * FROM (
-      SELECT id, conversation_id, role, content, images, created_at
-      FROM messages
-      WHERE conversation_id = ? AND is_deleted = 0 AND created_at >= ?
-      ORDER BY id DESC LIMIT ?
-    ) ORDER BY id ASC`;
-    params.push(normalizeForSQLite(weekAgo), limitNum);
-  }
-
-  const messages = db.prepare(sql).all(...params).map(m => ({
+  const messages = db.prepare(`
+    SELECT id, conversation_id, role, content, images, created_at
+    FROM messages
+    WHERE conversation_id = ? AND is_deleted = 0
+    ORDER BY id ASC
+  `).all(conversationId).map(m => ({
     ...m,
     created_at: toISODate(m.created_at),
   }));
 
-  // 是否还有更早的消息
-  let hasMore = false;
-  if (messages.length > 0) {
-    const oldest = messages[0].created_at;
-    const older = db.prepare(`SELECT COUNT(*) as c FROM messages WHERE conversation_id = ? AND is_deleted = 0 AND created_at < ?`)
-      .get(conversationId, normalizeForSQLite(oldest));
-    hasMore = older.c > 0;
-  }
-
-  res.json({ messages, hasMore });
+  res.json({ messages });
 });
 
 // POST /api/characters/:id/chat — 流式对话

@@ -88,7 +88,8 @@ const genBoxStyle = computed(() => {
 // 跟踪图片加载失败和完成
 const imgError = reactive(new Set())
 const imgLoadCount = ref(0)
-let loadedEmitted = false
+// 挂载时 genStatus 已经是 done → 历史图片，不需要 loaded 通知
+let loadedEmitted = props.msg.genStatus === 'done'
 
 function onImgError(i) { imgError.add(i) }
 function onImgLoad() {
@@ -108,7 +109,7 @@ function checkAllLoaded() {
 watch(() => props.msg.genId, () => {
   imgError.clear()
   imgLoadCount.value = 0
-  loadedEmitted = false
+  loadedEmitted = props.msg.genStatus === 'done'
 })
 
 const circumference = 2 * Math.PI * 34

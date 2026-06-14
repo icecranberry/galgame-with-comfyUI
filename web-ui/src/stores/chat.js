@@ -12,10 +12,15 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
-  const hasMoreOlder = ref(false)   // 是否还有更早的一周可加载
-  const loadingOlder = ref(false)   // 正在加载旧消息中
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
+
+  // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
+  const INITIAL_COUNT = 50
+  const EXPAND_COUNT = 30
+  const renderStart = ref(0)
+  const visibleMessages = computed(() => messages.value.slice(renderStart.value))
+  const hasMoreOlder = computed(() => renderStart.value > 0)
 
   async function loadCharacters() {
     try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
@@ -27,7 +32,8 @@ export const useChatStore = defineStore('chat', () => {
       const raw = d.messages || [];
       const result = rawToMessages(raw);
       messages.value = result;
-      hasMoreOlder.value = !!d.hasMore;
+      // 首屏展示最近 INITIAL_COUNT 条，避免渲染过多 DOM
+      renderStart.value = Math.max(0, result.length - INITIAL_COUNT);
     } catch {}
   }
 
@@ -60,31 +66,16 @@ export const useChatStore = defineStore('chat', () => {
     return result;
   }
 
-  // 加载更早一周的消息（向上翻）
-  async function loadOlderMessages() {
-    if (!hasMoreOlder.value || loadingOlder.value) return
-    const oldest = messages.value[0]
-    if (!oldest?.created_at) return
-    loadingOlder.value = true
-    try {
-      const d = await api.getMessages(activeCharId.value, { before: oldest.created_at });
-      const raw = d.messages || [];
-      if (raw.length > 0) {
-        const older = rawToMessages(raw);
-        // 去重后拼到现有消息前面
-        const existingIds = new Set(messages.value.map(m => m.id));
-        const fresh = older.filter(m => !existingIds.has(m.id));
-        messages.value = [...fresh, ...messages.value];
-      }
-      hasMoreOlder.value = !!d.hasMore;
-    } catch {} finally {
-      loadingOlder.value = false
-    }
+  // 向上展开渲染窗口（无需网络请求，数据已全量在内存中）
+  function expandWindow() {
+    if (!hasMoreOlder.value) return
+    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
   }
 
   async function selectChar(charId) {
     activeCharId.value = charId
     messages.value = []
+    renderStart.value = 0
     guesses.value = null  // 切角色时清除候选词
     await loadMessages(charId)
     await loadCharacters()
@@ -102,6 +93,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!id) return
     await api.clearMessages(id)
     messages.value = []
+    renderStart.value = 0
   }
 
   // 在设置页面调用：AI 生成角色并直接入库
@@ -138,6 +130,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!id || char?.name === 'default') return
     await api.deleteCharacter(id)
     messages.value = []
+    renderStart.value = 0
     activeCharId.value = null
     await loadCharacters()
   }
@@ -441,6 +434,6 @@ export const useChatStore = defineStore('chat', () => {
     await loadCharacters()
   }
 
-  return { characters, activeCharId, messages, streaming, streamingContent, showTypingDots, hasMoreOlder, loadingOlder, guesses, activeChar,
-    loadCharacters, loadMessages, loadOlderMessages, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, activeChar,
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
 })

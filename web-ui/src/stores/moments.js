@@ -1,24 +1,27 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 
-export const useMomentsStore = defineStore('moments', () => {
-  const posts = ref([])
-  const loading = ref(false)
-  const hasMore = ref(true)
+const PAGE_SIZE = 20
 
-  // 加载帖子（refresh=true 从头加载）
-  async function loadPosts({ refresh } = {}) {
+export const useMomentsStore = defineStore('moments', () => {
+  const posts = ref([])           // 全量帖子数据
+  const loading = ref(false)
+  const page = ref(0)             // 当前渲染到第几批（0-based）
+
+  // 当前可见的帖子（前 page * PAGE_SIZE 条）
+  const visiblePosts = computed(() => posts.value.slice(0, page.value * PAGE_SIZE))
+
+  const hasMore = computed(() => posts.value.length > page.value * PAGE_SIZE)
+
+  // 加载全部帖子（页面首次挂载时调用）
+  async function loadPosts() {
     if (loading.value) return
     loading.value = true
     try {
-      if (refresh) {
-        posts.value = []
-        hasMore.value = true
-      }
-      const data = await api.listMoments({ limit: 20 })
+      const data = await api.listMoments()
       posts.value = data.posts || []
-      hasMore.value = !!data.hasMore
+      page.value = 1   // 首屏显示第一批
     } catch (err) {
       console.error('[moments] loadPosts error:', err)
     } finally {
@@ -26,23 +29,10 @@ export const useMomentsStore = defineStore('moments', () => {
     }
   }
 
-  // 加载更多（滚动到底部）
-  async function loadMore() {
-    if (loading.value || !hasMore.value || posts.value.length === 0) return
-    loading.value = true
-    try {
-      const oldest = posts.value[posts.value.length - 1]
-      const data = await api.listMoments({ limit: 20, before: oldest.id })
-      const newPosts = data.posts || []
-      if (newPosts.length > 0) {
-        posts.value.push(...newPosts)
-      }
-      hasMore.value = !!data.hasMore
-    } catch (err) {
-      console.error('[moments] loadMore error:', err)
-    } finally {
-      loading.value = false
-    }
+  // 加载更多（滚动到底部 → 前端 slice 多展示一批，无网络请求）
+  function loadMore() {
+    if (!hasMore.value) return
+    page.value++
   }
 
   // 发评论 → 返回 { comment, reply }
@@ -102,5 +92,6 @@ export const useMomentsStore = defineStore('moments', () => {
     posts.value = posts.value.filter(p => p.id !== postId)
   }
 
-  return { posts, loading, hasMore, loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost }
+  return { posts, visiblePosts, loading, hasMore, page,
+    loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost }
 })

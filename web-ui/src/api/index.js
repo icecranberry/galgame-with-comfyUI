@@ -6,10 +6,8 @@ export async function listCharacters() {
   return res.json()
 }
 
-export async function getMessages(characterId, { limit = 50, before } = {}) {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (before) params.set('before', String(before))
-  const res = await fetch(`${BASE}/characters/${characterId}/messages?${params}`)
+export async function getMessages(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/messages`)
   return res.json()
 }
 
@@ -210,10 +208,8 @@ export async function testStyle(artist, width, height, mode = 'chat', prompt = '
 }
 
 // ── Moments 朋友圈 ──
-export async function listMoments({ limit = 20, before } = {}) {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (before) params.set('before', String(before))
-  const res = await fetch(`${BASE}/moments?${params}`)
+export async function listMoments() {
+  const res = await fetch(`${BASE}/moments`)
   return res.json()
 }
 

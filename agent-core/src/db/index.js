@@ -111,6 +111,13 @@ function initSchema(db) {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 系统设置表（画师串/分辨率/功能开关，替代 .env 中的对应字段）
+    CREATE TABLE IF NOT EXISTS system_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 朋友圈帖子表
     CREATE TABLE IF NOT EXISTS moment_posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,6 +223,9 @@ function initSchema(db) {
 
   // 种子: 默认全局规则
   seedGlobalRules(db);
+
+  // 系统设置: 从 .env 种子 → DB 值覆盖 config
+  seedAndLoadSystemSettings(db);
 
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
@@ -387,4 +397,69 @@ export function getActiveGlobalRules() {
 export function getGlobalRule(key) {
   const database = getDb();
   return database.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(key);
+}
+
+// ── 系统设置（替代 .env 中的画师串/分辨率/功能开关） ──
+
+/** 按 key 读取系统设置 */
+export function getSetting(key) {
+  const database = getDb();
+  return database.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = ?`).pluck().get(key) ?? null;
+}
+
+/** 写入单条系统设置 */
+export function setSetting(key, value) {
+  const database = getDb();
+  database.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
+    .run(key, String(value));
+}
+
+// 需要从 DB 迁移到 config 的字段映射
+const SETTING_TO_CONFIG = {
+  comfy_artist:            { obj: 'comfyui',   key: 'artist',          type: 'string'  },
+  comfy_width:             { obj: 'comfyui',   key: 'width',           type: 'int'     },
+  comfy_height:            { obj: 'comfyui',   key: 'height',          type: 'int'     },
+  comfy_moments_artist:    { obj: 'comfyui',   key: 'momentsArtist',   type: 'string'  },
+  comfy_moments_width:     { obj: 'comfyui',   key: 'momentsWidth',    type: 'int'     },
+  comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
+  feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
+  feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
+  feature_memory_extract:        { obj: 'features', key: 'memoryExtract',    type: 'bool' },
+  feature_auto_image_judge:     { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
+  feature_prompt_optimize:      { obj: 'features', key: 'promptOptimize',    type: 'bool' },
+  feature_reply_guesses:         { obj: 'features', key: 'replyGuesses',     type: 'bool' },
+  feature_force_image_gen:      { obj: 'features', key: 'forceImageGen',    type: 'bool' },
+};
+
+function castValue(raw, type) {
+  if (raw == null) return undefined;
+  switch (type) {
+    case 'int':  { const v = parseInt(raw, 10); return Number.isNaN(v) ? undefined : v; }
+    case 'bool': return raw === 'true' || raw === '1';
+    default:     return raw;
+  }
+}
+
+function seedAndLoadSystemSettings(db) {
+  // 1. 种子：从当前 config 内存值写入 DB（首次运行迁移 .env 中的值）
+  const seed = db.prepare(`INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)`);
+  for (const [settingKey, { obj, key }] of Object.entries(SETTING_TO_CONFIG)) {
+    seed.run(settingKey, String(config[obj][key]));
+  }
+
+  // 2. 加载：从 DB 读取所有设置，覆盖 config 内存对象（DB 优先于 .env）
+  const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
+  let applied = 0;
+  for (const row of rows) {
+    const mapping = SETTING_TO_CONFIG[row.setting_key];
+    if (!mapping) continue;
+    const value = castValue(row.setting_value, mapping.type);
+    if (value !== undefined) {
+      config[mapping.obj][mapping.key] = value;
+      applied++;
+    }
+  }
+  if (applied > 0) {
+    console.log(`[db] system_settings: seeded ${Object.keys(SETTING_TO_CONFIG).length} keys, applied ${applied} to config`);
+  }
 }

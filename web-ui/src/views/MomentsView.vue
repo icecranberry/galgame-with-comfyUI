@@ -33,7 +33,7 @@
       <!-- 帖子列表 -->
       <TransitionGroup name="post-enter" tag="div" class="moments-list">
         <MomentCard
-          v-for="post in moments.posts"
+          v-for="post in moments.visiblePosts"
           :key="post.id"
           :post="post"
           @preview="onPreview"
@@ -85,7 +85,7 @@ function onPreview({ images, index }) {
 onMounted(async () => {
   await chat.loadCharacters()
   await loadUserConfig()
-  await moments.loadPosts({ refresh: true })
+  await moments.loadPosts()
 })
 
 // ── 滚动方向感知：下滑隐藏顶栏，上滑显示（仅移动端）──

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { setSetting } from './db/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, '..', '.env');
@@ -34,8 +35,9 @@ export const config = {
     memory: process.env.FEATURE_MEMORY !== 'false',
     memoryExtract: process.env.FEATURE_MEMORY_EXTRACT === 'true', // 默认关
     autoImageJudge: process.env.FEATURE_AUTO_IMAGE_JUDGE !== 'false', // 默认开
-    promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE !== 'true', // 默认关
+    promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE === 'true', // 默认关
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
+    forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
   },
   user: {
     nickname: process.env.USER_NICKNAME || '',
@@ -54,31 +56,30 @@ function persistEnv(key, value) {
   fs.writeFileSync(envPath, envContent, 'utf8');
 }
 
+// 同步写入 DB（内存已更新，DB 写入由 setSetting 同步完成）
+function persistSettingSync(key, value) {
+  try {
+    setSetting(key, value);
+  } catch (err) {
+    console.error(`[config] persistSetting failed for ${key}:`, err.message);
+  }
+}
+
 export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight }) {
-  if (artist !== undefined) config.comfyui.artist = artist;
-  if (width !== undefined) config.comfyui.width = parseInt(width, 10) || config.comfyui.width;
-  if (height !== undefined) config.comfyui.height = parseInt(height, 10) || config.comfyui.height;
-  if (url !== undefined) config.comfyui.url = url;
-  if (momentsArtist !== undefined) config.comfyui.momentsArtist = momentsArtist;
-  if (momentsWidth !== undefined) config.comfyui.momentsWidth = parseInt(momentsWidth, 10) || config.comfyui.momentsWidth;
-  if (momentsHeight !== undefined) config.comfyui.momentsHeight = parseInt(momentsHeight, 10) || config.comfyui.momentsHeight;
-  persistEnv('COMFYUI_ARTIST', config.comfyui.artist);
-  persistEnv('COMFYUI_WIDTH', config.comfyui.width);
-  persistEnv('COMFYUI_HEIGHT', config.comfyui.height);
-  if (url !== undefined) persistEnv('COMFYUI_URL', url);
-  if (momentsArtist !== undefined) persistEnv('COMFYUI_MOMENTS_ARTIST', momentsArtist);
-  if (momentsWidth !== undefined) persistEnv('COMFYUI_MOMENTS_WIDTH', config.comfyui.momentsWidth);
-  if (momentsHeight !== undefined) persistEnv('COMFYUI_MOMENTS_HEIGHT', config.comfyui.momentsHeight);
+  if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
+  if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
+  if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }
+  if (url !== undefined) { config.comfyui.url = url; persistEnv('COMFYUI_URL', url); }
+  if (momentsArtist !== undefined) { config.comfyui.momentsArtist = momentsArtist; persistSettingSync('comfy_moments_artist', momentsArtist); }
+  if (momentsWidth !== undefined) { config.comfyui.momentsWidth = parseInt(momentsWidth, 10) || config.comfyui.momentsWidth; persistSettingSync('comfy_moments_width', config.comfyui.momentsWidth); }
+  if (momentsHeight !== undefined) { config.comfyui.momentsHeight = parseInt(momentsHeight, 10) || config.comfyui.momentsHeight; persistSettingSync('comfy_moments_height', config.comfyui.momentsHeight); }
   console.log('[config] ComfyUI settings saved');
 }
 
 export function updateFeatureFlag(key, value) {
   const boolVal = value === true || value === 'true';
   config.features[key] = boolVal;
-  const envKey = `FEATURE_${key.toUpperCase().replace(/([A-Z])/g, '_$1').toUpperCase()}`;
-  // 简化的 key 映射
-  const keyMap = { emotion: 'FEATURE_EMOTION', memory: 'FEATURE_MEMORY', memoryExtract: 'FEATURE_MEMORY_EXTRACT', autoImageJudge: 'FEATURE_AUTO_IMAGE_JUDGE', promptOptimize: 'FEATURE_PROMPT_OPTIMIZE', replyGuesses: 'FEATURE_REPLY_GUESSES' };
-  persistEnv(keyMap[key] || `FEATURE_${key.toUpperCase()}`, boolVal);
+  persistSettingSync(`feature_${key}`, String(boolVal));
   console.log(`[config] Feature ${key} = ${boolVal}`);
 }
 
