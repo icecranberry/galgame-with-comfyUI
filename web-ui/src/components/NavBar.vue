@@ -13,10 +13,21 @@
           <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
             <path d="M679.17 398.982V126.497s-133.338-71.481-288.989-16.366l288.99 288.851z m25.245 160.303V137.748s157.63 71.434 202.052 244.963L704.415 559.285z m-84.8 122.527l290.99-273.649s51.488 83.709-25.293 273.649H619.614z m-148.586 34.695h393.014S816.6 845.102 646.788 898.195L471.03 716.507z m-128.293-86.811v256.18s102.072 65.365 276.878 21.477L342.736 629.696z m-227.366 13.25l199.075-178.62v406.207c0-0.001-120.272-41.75-199.075-227.587z m-5.045-28.57S64.787 467.442 128.48 339.824h273.81L110.326 614.377z m35.357-303.193s57.603-130.594 214.21-191.87l186.894 191.87H145.682z" />
           </svg>
-          <span v-if="hasNew" class="nav-dot"></span>
+          <span v-if="moments.newPostCount > 0" class="nav-dot">{{ moments.newPostCount > 99 ? '99+' : moments.newPostCount }}</span>
         </div>
         <span class="nav-label">朋友圈</span>
       </router-link>
+
+      <router-link to="/gallery" class="nav-item" :class="{ active: $route.path.startsWith('/gallery') }" title="相册">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+        <span class="nav-label">相册</span>
+      </router-link>
+
+
     </div>
 
     <div class="nav-bottom">
@@ -31,14 +42,18 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useMomentsStore } from '../stores/moments.js'
 
 const moments = useMomentsStore()
-const hasNew = ref(false)
 
-// 简单的新内容检测：store 中的 posts 数量变化即视为有更新
-// 实际新内容检测需要和后端协作（对比 last_seen_post_id），此处先用简化方案
+onMounted(() => {
+  moments.connectSSE()
+})
+
+onUnmounted(() => {
+  moments.disconnectSSE()
+})
 </script>
 
 <style scoped>
@@ -109,13 +124,20 @@ const hasNew = ref(false)
 
 .nav-dot {
   position: absolute;
-  top: -2px;
-  right: -4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  top: -5px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 10px;
   background: var(--danger);
   border: 1.5px solid rgba(255, 255, 255, 0.8);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* 移动端隐藏 NavBar */

@@ -271,6 +271,9 @@ router.post('/characters/:id/chat', async (req, res) => {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  // 生图期间 SSE 流可能长时间无数据写入，禁用 socket/response 超时
+  req.socket.setTimeout(0);
+  res.setTimeout(0);
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {

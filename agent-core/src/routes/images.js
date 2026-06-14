@@ -1,9 +1,45 @@
 import { Router } from 'express';
+import { readdir, stat } from 'fs/promises';
+import { join, resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { config } from '../config.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const IMAGES_DIR = resolve(__dirname, '../../data/images');
+
 const router = Router();
+
+// GET /api/images/gallery — 获取相册图片列表（按修改时间倒序）
+router.get('/gallery', async (req, res) => {
+  try {
+    const files = await readdir(IMAGES_DIR);
+    const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f));
+
+    const stats = await Promise.all(
+      imageFiles.map(async (name) => {
+        const s = await stat(join(IMAGES_DIR, name));
+        return { name, size: s.size, mtime: s.mtimeMs };
+      })
+    );
+
+    // 按修改时间倒序（最新的在前）
+    stats.sort((a, b) => b.mtime - a.mtime);
+
+    const images = stats.map(s => ({
+      name: s.name,
+      url: `/images/${s.name}`,
+      size: s.size,
+      mtime: s.mtime,
+    }));
+
+    res.json({ images });
+  } catch (err) {
+    console.error('[gallery] read images dir error:', err.message);
+    res.status(500).json({ error: 'Failed to read images directory' });
+  }
+});
 
 // GET /api/images/tasks — 获取生图任务列表
 router.get('/tasks', (req, res) => {

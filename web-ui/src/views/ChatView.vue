@@ -84,7 +84,7 @@
       <div class="input-area">
         <div class="force-img-wrap">
           <label class="force-img-toggle" :class="{ active: forceImageGen }">
-            <input type="checkbox" v-model="forceImageGen" />
+            <input type="checkbox" :checked="forceImageGen" @change="onForceImageGenChange" />
             <span class="force-img-icon">🎨</span>
           </label>
           <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
@@ -208,7 +208,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
-import { getConfig, updateFeatureFlag } from '../api/index.js'
+import { useSettingsStore } from '../stores/settings.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -217,22 +217,13 @@ const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
-const forceImageGen = ref(false)
-async function loadForceImageGen() {
-  try {
-    const data = await getConfig()
-    if (data.features?.forceImageGen !== undefined) {
-      forceImageGen.value = data.features.forceImageGen
-    }
-  } catch {}
-}
-// localStorage 迁移：读旧值作为初始值（API 失败时的兜底）
-forceImageGen.value = localStorage.getItem('forceImageGen') === 'true'
-watch(forceImageGen, (v) => {
-  updateFeatureFlag('forceImageGen', v).catch(() => {})
-  if (localStorage.getItem('forceImageGen') !== null) localStorage.removeItem('forceImageGen')
+const settings = useSettingsStore()
+const forceImageGen = computed(() => settings.forceImageGen)
+
+function onForceImageGenChange(e) {
+  settings.setForceImageGen(e.target.checked)
   showForceTip()
-})
+}
 const forceTipVisible = ref(false)
 let forceTipTimer = null
 function showForceTip() {
@@ -470,7 +461,7 @@ function teardownMobileKeyboard() {
 }
 
 onMounted(async () => {
-  await Promise.all([chat.loadCharacters(), loadUserAvatar(), loadForceImageGen()])
+  await Promise.all([chat.loadCharacters(), loadUserAvatar(), settings.loadComfyConfig()])
   if (route.params.id) await chat.selectChar(parseInt(route.params.id))
   else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
   await nextTick()
@@ -735,8 +726,7 @@ function renderContent(text) {
   -webkit-backdrop-filter: blur(10px);
   color: var(--text-primary);
   cursor: pointer;
-  max-width: 260px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: normal; word-break: break-word;
   transition: all 0.15s ease;
   flex-shrink: 0;
 }

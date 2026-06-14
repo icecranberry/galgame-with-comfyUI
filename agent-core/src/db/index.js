@@ -424,11 +424,11 @@ const SETTING_TO_CONFIG = {
   comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
   feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_memory_extract:        { obj: 'features', key: 'memoryExtract',    type: 'bool' },
-  feature_auto_image_judge:     { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
-  feature_prompt_optimize:      { obj: 'features', key: 'promptOptimize',    type: 'bool' },
-  feature_reply_guesses:         { obj: 'features', key: 'replyGuesses',     type: 'bool' },
-  feature_force_image_gen:      { obj: 'features', key: 'forceImageGen',    type: 'bool' },
+  feature_memoryExtract:        { obj: 'features', key: 'memoryExtract',    type: 'bool' },
+  feature_autoImageJudge:      { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
+  feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
+  feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
+  feature_forceImageGen:        { obj: 'features', key: 'forceImageGen',    type: 'bool' },
 };
 
 function castValue(raw, type) {
@@ -441,6 +441,18 @@ function castValue(raw, type) {
 }
 
 function seedAndLoadSystemSettings(db) {
+  // 0. 清理旧的 snake_case 键（v1 迁移：统一为 camelCase，匹配 updateFeatureFlag 写入的键名）
+  const OLD_SNAKE_CASE_KEYS = [
+    'feature_memory_extract', 'feature_auto_image_judge', 'feature_prompt_optimize',
+    'feature_reply_guesses', 'feature_force_image_gen',
+  ];
+  const cleaned = db.prepare(
+    `DELETE FROM system_settings WHERE setting_key IN (${OLD_SNAKE_CASE_KEYS.map(() => '?').join(',')})`
+  ).run(...OLD_SNAKE_CASE_KEYS);
+  if (cleaned.changes > 0) {
+    console.log(`[db] system_settings: cleaned ${cleaned.changes} legacy snake_case key(s)`);
+  }
+
   // 1. 种子：从当前 config 内存值写入 DB（首次运行迁移 .env 中的值）
   const seed = db.prepare(`INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)`);
   for (const [settingKey, { obj, key }] of Object.entries(SETTING_TO_CONFIG)) {

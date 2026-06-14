@@ -30,6 +30,42 @@ function userNickname() {
   return config.user.nickname || '我';
 }
 
+// ──────────────── SSE 推送 ────────────────
+
+const sseClients = new Set();
+
+/** 向所有连接的 SSE 客户端广播新帖事件 */
+function broadcastNewPost(postInfo) {
+  const data = JSON.stringify(postInfo);
+  const payload = `event: new_post\ndata: ${data}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch { sseClients.delete(client); }
+  }
+}
+
+// GET /api/moments/stream — SSE 推送端点（新帖实时通知）
+router.get('/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write('event: connected\ndata: {}\n\n');
+  sseClients.add(res);
+
+  // 心跳：每 30s 发送 keepalive，防止代理断连
+  const heartbeat = setInterval(() => {
+    try { res.write(':keepalive\n\n'); } catch { clearInterval(heartbeat); sseClients.delete(res); }
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
+
 // ──────────────── 朋友圈帖子 ────────────────
 
 // GET /api/moments — 全量返回所有帖子（本地 SQLite，数据量可控，无需分页）
@@ -340,6 +376,19 @@ async function generateMomentPost(character) {
     .run(toSQLite(nextAt), character.id);
 
   console.log(`[moments] Post ${postId} done for ${character.display_name}, next at ${nextAt}`);
+
+  // SSE 广播：通知所有连接的前端有新帖
+  broadcastNewPost({
+    id: postId,
+    character_id: character.id,
+    content: text,
+    images: imageUrls,
+    display_name: character.display_name,
+    avatar_path: character.avatar_path,
+    avatar_color: character.avatar_color,
+    status: 'done',
+    created_at: new Date().toISOString(),
+  });
 
   return {
     id: postId,

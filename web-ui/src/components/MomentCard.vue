@@ -381,6 +381,7 @@ function formatTime(iso) {
   object-fit: cover;
   border-radius: 8px;
   cursor: pointer;
+  margin-top: 15px;
   transition: transform 0.2s ease;
 }
 .moment-img:hover { transform: scale(1.02); }

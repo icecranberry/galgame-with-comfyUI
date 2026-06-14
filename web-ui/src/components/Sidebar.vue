@@ -29,9 +29,12 @@
     <!-- 移动端底部：朋友圈 + 更多 -->
     <div v-if="isMobile" class="sidebar-footer">
       <router-link to="/moments" class="footer-moments-btn" :class="{ active: $route.path === '/moments' }" @click="onFooterClick">
-        <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
-          <path d="M679.17 398.982V126.497s-133.338-71.481-288.989-16.366l288.99 288.851z m25.245 160.303V137.748s157.63 71.434 202.052 244.963L704.415 559.285z m-84.8 122.527l290.99-273.649s51.488 83.709-25.293 273.649H619.614z m-148.586 34.695h393.014S816.6 845.102 646.788 898.195L471.03 716.507z m-128.293-86.811v256.18s102.072 65.365 276.878 21.477L342.736 629.696z m-227.366 13.25l199.075-178.62v406.207c0-0.001-120.272-41.75-199.075-227.587z m-5.045-28.57S64.787 467.442 128.48 339.824h273.81L110.326 614.377z m35.357-303.193s57.603-130.594 214.21-191.87l186.894 191.87H145.682z" />
-        </svg>
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
+            <path d="M679.17 398.982V126.497s-133.338-71.481-288.989-16.366l288.99 288.851z m25.245 160.303V137.748s157.63 71.434 202.052 244.963L704.415 559.285z m-84.8 122.527l290.99-273.649s51.488 83.709-25.293 273.649H619.614z m-148.586 34.695h393.014S816.6 845.102 646.788 898.195L471.03 716.507z m-128.293-86.811v256.18s102.072 65.365 276.878 21.477L342.736 629.696z m-227.366 13.25l199.075-178.62v406.207c0-0.001-120.272-41.75-199.075-227.587z m-5.045-28.57S64.787 467.442 128.48 339.824h273.81L110.326 614.377z m35.357-303.193s57.603-130.594 214.21-191.87l186.894 191.87H145.682z" />
+          </svg>
+          <span v-if="moments.newPostCount > 0" class="nav-dot">{{ moments.newPostCount > 99 ? '99+' : moments.newPostCount }}</span>
+        </div>
         <span>朋友圈</span>
       </router-link>
       <button class="footer-more-btn" @click="showMoreMenu = !showMoreMenu">
@@ -45,6 +48,9 @@
     <Transition name="menu-slide">
       <div v-if="showMoreMenu" class="more-menu-overlay" @click.self="showMoreMenu = false">
         <div class="more-menu-panel">
+          <router-link to="/gallery" class="more-menu-item" @click="onMenuItemClick">
+            🖼️ 相册
+          </router-link>
           <router-link to="/settings" class="more-menu-item" @click="onMenuItemClick">
             ⚙️ 系统设置
           </router-link>
@@ -55,9 +61,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
+import { useMomentsStore } from '../stores/moments.js'
 
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
@@ -69,7 +76,17 @@ const emit = defineEmits(['charSelected'])
 const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
+const moments = useMomentsStore()
 const showMoreMenu = ref(false)
+
+onMounted(() => {
+  // 移动端兜底：如果 NavBar CSS 隐藏导致未连接 SSE，Sidebar 补上
+  moments.connectSSE()
+})
+
+onUnmounted(() => {
+  // 不在此处断开 SSE，因为 NavBar/Sidebar 共享同一连接
+})
 
 async function onCharClick(c) {
   await chat.selectChar(c.id)
@@ -193,6 +210,29 @@ function formatTime(iso) {
   transition: all 0.2s ease;
 }
 .footer-more-btn:hover { background: rgba(255, 255, 255, 0.35); color: var(--text-bright); }
+
+.nav-icon-wrap {
+  position: relative;
+  display: flex;
+}
+
+.nav-dot {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: var(--danger);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  white-space: nowrap;
+}
 
 /* ── 更多菜单弹窗 ── */
 .more-menu-overlay {

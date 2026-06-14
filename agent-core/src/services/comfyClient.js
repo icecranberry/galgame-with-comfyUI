@@ -179,12 +179,13 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
       settle({ error: `ComfyUI execution timeout (${timeoutMs / 1000}s) for prompt ${promptId}` });
     }, timeoutMs);
 
-    // 活动心跳检测：30s 无任何消息 → 认为 WS 通道断开，触发上层重试
+    // 活动心跳检测：120s 无任何消息 → 认为 WS 通道断开，触发上层重试
+    //     大图采样可能长时间不发 progress，放宽到 120s 避免误判
     const heartbeat = setInterval(() => {
-      if (Date.now() - lastActivity > 30_000 && !done) {
-        settle({ error: 'ComfyUI progress stalled (30s no update)' });
+      if (Date.now() - lastActivity > 120_000 && !done) {
+        settle({ error: `ComfyUI progress stalled (${Math.round((Date.now() - lastActivity) / 1000)}s no update)` });
       }
-    }, 5000);
+    }, 10_000);
 
     // ── 收到 node:null → 立即结算（不等 WebSocket close）──
     async function onExecutionComplete() {

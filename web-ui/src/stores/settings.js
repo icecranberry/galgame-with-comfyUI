@@ -5,7 +5,17 @@ import * as api from '../api/index.js'
 export const useSettingsStore = defineStore('settings', () => {
   const comfyWidth = ref(1600)
   const comfyHeight = ref(1200)
+  const forceImageGen = ref(false)
   let loaded = false
+
+  // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
+  const legacyForceImageGen = localStorage.getItem('forceImageGen')
+  if (legacyForceImageGen !== null) {
+    forceImageGen.value = legacyForceImageGen === 'true'
+    localStorage.removeItem('forceImageGen')
+    // 异步持久化到后端（fire-and-forget）
+    api.updateFeatureFlag('forceImageGen', forceImageGen.value).catch(() => {})
+  }
 
   async function loadComfyConfig() {
     if (loaded) return
@@ -13,6 +23,9 @@ export const useSettingsStore = defineStore('settings', () => {
       const data = await api.getConfig()
       comfyWidth.value = data.comfy?.width || 1600
       comfyHeight.value = data.comfy?.height || 1200
+      if (data.features?.forceImageGen !== undefined) {
+        forceImageGen.value = data.features.forceImageGen
+      }
       loaded = true
     } catch {
       // keep defaults
@@ -27,5 +40,13 @@ export const useSettingsStore = defineStore('settings', () => {
     comfyHeight.value = height
   }
 
-  return { comfyWidth, comfyHeight, loadComfyConfig, setComfySize }
+  /**
+   * 切换强制生图开关，持久化到后端
+   */
+  async function setForceImageGen(v) {
+    forceImageGen.value = v
+    await api.updateFeatureFlag('forceImageGen', v)
+  }
+
+  return { comfyWidth, comfyHeight, forceImageGen, loadComfyConfig, setComfySize, setForceImageGen }
 })

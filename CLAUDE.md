@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 组件 | 技术 | 端口 |
 |------|------|------|
-| 前端 | Vue 3 + Pinia + Vue Router + Vite | 5173 |
+| 前端 | Vue 3 + Pinia + Vue Router + Vite + vue-easy-lightbox | 5173 |
 | 主控后端 | Node.js + Express (ESM) | 3099 |
 | 向量服务 | Python FastAPI + ChromaDB + ONNX Runtime | 8765 |
 | LLM | DeepSeek API (兼容 OpenAI SDK，透传) | - |
@@ -64,6 +64,7 @@ project-root/
 │     │  ├─ images.js       # 生图 API（tasks 增删查、直接生成、测试画风、健康检查）
 │     │  ├─ characters.js   # 角色 CRUD + AI 生成角色 + 头像上传
 │     │  ├─ memory.js       # 记忆检索、碎片查询、情绪历史
+│     │  ├─ moments.js      # 朋友圈 API（帖子生成、评论、点赞、自动回复）
 │     │  └─ config.js       # 配置读写（ComfyUI 参数、feature flags、全局规则、用户头像）
 │     └─ services/
 │        ├─ emotionEngine.js    # VAD 三维情绪引擎（双层衰减 + 规则表/LLM 刺激评估）
@@ -73,6 +74,7 @@ project-root/
 │        ├─ vectorClient.js     # Python 向量服务 HTTP 客户端
 │        ├─ imageSkill.js       # 生图调度（提示词优化 → 注入 workflow → 提交 ComfyUI → 兜底文件夹）
 │        ├─ comfyClient.js      # ComfyUI 客户端（GUI→API 转换 + WebSocket 进度 + 轮询兜底）
+│        ├─ momentScheduler.js   # 朋友圈定时调度器（每 10 分钟扫描，排队发帖）
 │        └─ seeds.js            # 默认角色种子数据
 ├─ web-ui/                  # Vue 3 前端 (Vite HMR, :5173)
 │  ├─ vite.config.js
@@ -80,14 +82,18 @@ project-root/
 │     ├─ main.js            # 入口：Vue + Pinia + Router (hash mode)
 │     ├─ stores/
 │     │  ├─ chat.js         # 全局核心 store（角色、消息、SSE 流式消费、重试逻辑）
-│     │  └─ settings.js
-│     ├─ api/index.js       # 后端 API 封装（含 SSE ReadableStream 解析）
+│     │  ├─ settings.js     # 设置 store
+│     │  └─ moments.js      # 朋友圈 store（帖子分页、评论、点赞）
+│     ├─ api/index.js       # 后端 API 封装（含 SSE ReadableStream 解析 + 朋友圈 API）
 │     ├─ views/
 │     │  ├─ ChatView.vue    # 主聊天视图
+│     │  ├─ MomentsView.vue # 朋友圈时间线
 │     │  └─ SettingsView.vue
 │     └─ components/
+│        ├─ NavBar.vue      # 底部三 Tab 导航（聊天/朋友圈/设置）
 │        ├─ Sidebar.vue
 │        ├─ ImageGenBubble.vue
+│        ├─ MomentCard.vue  # 朋友圈帖子卡片
 │        ├─ AvatarCropper.vue
 │        └─ ConfirmDialog.vue
 ├─ vector-service/          # 向量服务 (Python FastAPI, :8765)
@@ -135,13 +141,35 @@ RRF (k=60) 融合排序后取 Top 10 注入 system prompt。
 2. **路径 B（模型自主）**: 模型在回复中自行输出 `<needImage>` 标签，后端二次请求模型补上 `<prompt>`，走异步生图
 3. **路径 C（静默判断）**: `autoImageJudge=true` 时，对话后调用一次轻量 DeepSeek（"是/否"，~300ms），判断是否应该配图。失败时默认不生图
 
+### 灵性生图模式 (forceImageGen)
+
+`config.features.forceImageGen=true` 时启用。per-conversation 计数器（`imageJudgeCounters`，初始值 3）：
+- 用户每发一条消息，对应 conversation 的计数器 -1
+- 计数器归零时跳过 LLM 判断，直接走路径 A（强匹配），强制生图
+- 生图成功后计数器重置为 3
+- 本质上是一个"每 3 轮对话至少配一张图"的保底机制
+
+### 朋友圈系统 (Moments)
+
+AI 角色自动发朋友圈，用户可评论、点赞，角色 AI 自动回复评论。
+
+- **定时调度** (`momentScheduler.js`): 每 10 分钟扫描 `next_moment_at <= now` 的角色，每次只处理一个（排队串行，避免并发生图撑爆 ComfyUI）。发帖后随机设定 2~8 小时后的下次发帖时间。
+- **帖子生成** (`generateMomentPost` in moments.js): 单次 LLM 调用同时输出文案和配图 prompt（JSON 格式），确保图文语义一致。五种随机风格：自拍/美食/风景/日常/遇到的人和事。
+- **评论自动回复** (`generateCharacterReply`): 用户评论后，LLM 基于角色人设 + 帖子内容 + 评论区上下文自动生成 15~50 字的角色回复。回复失败不阻塞评论写入。
+- **独立生图参数**: 朋友圈配图使用 `momentsArtist`、`momentsWidth` (1600)、`momentsHeight` (1200)，与聊天生图分开配置。生图失败不阻塞发帖（无图但有文案）。
+- **DB 表**: `moment_posts`、`moment_comments`、`moment_likes`（UNIQUE 约束实现 toggle）
+- **前端**: `MomentsView.vue` + `MomentCard.vue` 实现时间线 UI，前端分页加载（每批 20 条，全量数据一次请求，slice 分批渲染）。`vue-easy-lightbox` 支持图片放大查看。`NavBar.vue` 底部三 Tab 导航。
+
 ### 流式分句器 (SentenceSplitter)
 
 核心：3 字滑动窗口检测 `<pr` 前缀阻断 prompt 标签暴露给用户。配合 20 字闸门 + 中英文标点分句规则（`。！？～~，`），在 SSE 流式输出时实时断句为气泡段。
 
 ### Config 运行时持久化
 
-`config.js` 中的 `updateComfyConfig()` 和 `updateFeatureFlag()` 不仅更新内存对象，还直接写回 `.env` 文件，保证重启后配置不丢失。
+配置通过双通道持久化，保证重启后不丢失：
+- **`system_settings` DB 表**：ComfyUI 参数（画师、分辨率）和所有 Feature Flags 写入 `system_settings` 表，启动时 DB 优先覆盖 `.env` 默认值
+- **`.env` 文件**：LLM API Key/BaseURL/Model、ComfyUI URL、用户昵称/人设通过 `persistEnv()` 写回 `.env`
+- `config.js` 中的 `updateComfyConfig()`、`updateFeatureFlag()`、`updateLlmConfig()`、`updateUserConfig()` 同时更新内存 + 持久化
 
 ### 前端流式消费与健壮性
 
@@ -155,11 +183,14 @@ RRF (k=60) 融合排序后取 Top 10 注入 system prompt。
 
 ### Feature Flags
 
-`config.features` 控制四个开关，均由环境变量驱动：
+`config.features` 控制七个开关，均由环境变量驱动：
 - `emotion` (默认开) — 情绪引擎
 - `memory` (默认开) — 记忆检索注入
 - `memoryExtract` (默认关) — 异步记忆提取（昂贵操作）
 - `autoImageJudge` (默认开) — 静默生图判断
+- `promptOptimize` (默认关) — 生图时用 LLM 润色 prompt
+- `replyGuesses` (默认关) — 回复猜想（AI 回复后生成用户可能的下一句回复）
+- `forceImageGen` (默认关) — 灵性生图模式（每 3 轮对话强制生成一张图）
 
 ### 全局规则系统
 

@@ -150,37 +150,59 @@ export const useChatStore = defineStore('chat', () => {
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
 
-    // ── 安全超时：30s 无响应自动复位，防止 streaming 永久锁死发送键 ──
+    // ── 安全超时：自适应时长，防止 streaming 永久锁死发送键 ──
+    //     纯文本场景 30s，生图场景延长到 600s（匹配 ComfyUI 后端超时）
+    const TEXT_SAFETY_MS = 30_000
+    const IMAGE_SAFETY_MS = 600_000
     let safetyFired = false
     let abort = () => {}
-    const safetyTimer = setTimeout(() => {
-      if (streaming.value) {
-        console.warn('[chat] streaming safety timeout — force reset')
-        safetyFired = true
-        abort()
-        streaming.value = false
-        streamingContent.value = ''
-        // 清理当前重试窗口中的空泡
-        for (let i = messages.value.length - 1; i >= 0; i--) {
-          const m = messages.value[i]
-          if (m.role === 'assistant' && m.type === 'text' && !m.content?.trim()) {
-            messages.value.splice(i, 1)
-          }
-        }
-        // 标记未完成的生图
-        for (let i = messages.value.length - 1; i >= 0; i--) {
-          const gm = messages.value[i]
-          if (gm.type === 'image_gen' && gm.genStatus !== 'done' && gm.genStatus !== 'error') {
-            gm.genStatus = 'error'
-          }
-        }
-        // 确保至少有一条提示
-        messages.value.push({
-          id: uid(), role: 'assistant', type: 'text',
-          content: '(请求超时，请重试)', created_at: new Date().toISOString()
-        })
+    let safetyTimer = null
+    let safetyMs = TEXT_SAFETY_MS
+
+    function clearSafetyTimer() {
+      if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null }
+    }
+    function resetSafetyTimer(newMs) {
+      clearSafetyTimer()
+      if (newMs) safetyMs = newMs
+      safetyTimer = setTimeout(onSafetyFire, safetyMs)
+    }
+    function onSafetyFire() {
+      if (!streaming.value) return
+      // 检查是否有正在进行的生图任务
+      const hasActiveGen = messages.value.some(m => m.type === 'image_gen' && m.genStatus !== 'done' && m.genStatus !== 'error')
+      if (hasActiveGen && safetyMs < IMAGE_SAFETY_MS) {
+        // 生图还在跑，自动升级到生图级超时
+        console.warn('[chat] safety timer: active image gen detected, extending to 600s')
+        resetSafetyTimer(IMAGE_SAFETY_MS)
+        return
       }
-    }, 30000)
+      console.warn('[chat] streaming safety timeout — force reset')
+      safetyFired = true
+      abort()
+      streaming.value = false
+      streamingContent.value = ''
+      // 清理当前重试窗口中的空泡
+      for (let i = messages.value.length - 1; i >= 0; i--) {
+        const m = messages.value[i]
+        if (m.role === 'assistant' && m.type === 'text' && !m.content?.trim()) {
+          messages.value.splice(i, 1)
+        }
+      }
+      // 标记未完成的生图
+      for (let i = messages.value.length - 1; i >= 0; i--) {
+        const gm = messages.value[i]
+        if (gm.type === 'image_gen' && gm.genStatus !== 'done' && gm.genStatus !== 'error') {
+          gm.genStatus = 'error'
+        }
+      }
+      // 确保至少有一条提示
+      messages.value.push({
+        id: uid(), role: 'assistant', type: 'text',
+        content: '(请求超时，请重试)', created_at: new Date().toISOString()
+      })
+    }
+    resetSafetyTimer(TEXT_SAFETY_MS)
 
     // 安全剥离 {"prompt":"..."} JSON 块
     function stripPromptBlock(s) {
@@ -290,6 +312,8 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── 生图事件 ──
             if (lastEvent === 'generate_start') {
+              // 生图开始，延长安全超时到 10 分钟（匹配 ComfyUI 后端超时）
+              resetSafetyTimer(IMAGE_SAFETY_MS)
               messages.value.push({
                 id: uid(), role: 'assistant', type: 'image_gen',
                 genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
@@ -429,7 +453,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } // end retry loop
 
-    clearTimeout(safetyTimer)
+    clearSafetyTimer()
     streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
     await loadCharacters()
   }

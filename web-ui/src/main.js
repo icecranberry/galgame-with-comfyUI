@@ -5,12 +5,14 @@ import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
 import MomentsView from './views/MomentsView.vue'
+import GalleryView from './views/GalleryView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
   { path: '/chat/:id', component: ChatView },
   { path: '/moments', component: MomentsView },
+  { path: '/gallery', component: GalleryView },
   { path: '/settings', component: SettingsView },
 ]
 

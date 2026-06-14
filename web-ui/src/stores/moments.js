@@ -9,6 +9,9 @@ export const useMomentsStore = defineStore('moments', () => {
   const loading = ref(false)
   const page = ref(0)             // 当前渲染到第几批（0-based）
 
+  // ── 红点通知状态（SSE 驱动）──
+  const newPostCount = ref(0)
+
   // 当前可见的帖子（前 page * PAGE_SIZE 条）
   const visiblePosts = computed(() => posts.value.slice(0, page.value * PAGE_SIZE))
 
@@ -22,6 +25,8 @@ export const useMomentsStore = defineStore('moments', () => {
       const data = await api.listMoments()
       posts.value = data.posts || []
       page.value = 1   // 首屏显示第一批
+      // 自动标记为已读
+      markSeen()
     } catch (err) {
       console.error('[moments] loadPosts error:', err)
     } finally {
@@ -82,6 +87,8 @@ export const useMomentsStore = defineStore('moments', () => {
         like_count: 0,
         liked: false,
       })
+      // 手动触发的帖子自动标记为已读
+      markSeen()
     }
     return result
   }
@@ -92,6 +99,44 @@ export const useMomentsStore = defineStore('moments', () => {
     posts.value = posts.value.filter(p => p.id !== postId)
   }
 
+  // ── SSE 推送 ──
+  let _sseConn = null
+  let _reconnectTimer = null
+
+  function _onNewPost() {
+    newPostCount.value++
+  }
+
+  function _createSSE() {
+    _sseConn = api.connectMomentsStream(_onNewPost)
+  }
+
+  /** 连接 SSE 推送流，收到新帖时 newPostCount++；断线自动重连 */
+  function connectSSE() {
+    if (_sseConn && !_sseConn._closed) return
+    _createSSE()
+
+    if (_reconnectTimer) clearInterval(_reconnectTimer)
+    _reconnectTimer = setInterval(() => {
+      if (_sseConn && _sseConn._closed) {
+        _createSSE()
+      }
+    }, 15000)
+  }
+
+  /** 断开 SSE */
+  function disconnectSSE() {
+    if (_reconnectTimer) { clearInterval(_reconnectTimer); _reconnectTimer = null }
+    if (_sseConn) { _sseConn.close(); _sseConn = null }
+  }
+
+  /** 标记已读：newPostCount 归零 */
+  function markSeen() {
+    newPostCount.value = 0
+  }
+
   return { posts, visiblePosts, loading, hasMore, page,
-    loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost }
+    newPostCount,
+    loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
+    connectSSE, disconnectSSE, markSeen }
 })

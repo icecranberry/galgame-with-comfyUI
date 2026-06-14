@@ -213,6 +213,65 @@ export async function listMoments() {
   return res.json()
 }
 
+/**
+ * 连接朋友圈 SSE 推送流
+ * @param {(post: object) => void} onNewPost 新帖回调
+ * @returns {{ close: () => void }} 关闭函数，含 _closed 标记用于重连判断
+ */
+export function connectMomentsStream(onNewPost) {
+  const controller = new AbortController()
+  const conn = { _closed: false }
+
+  conn.close = () => {
+    conn._closed = true
+    controller.abort()
+  }
+
+  fetch(`${BASE}/moments/stream`, { signal: controller.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        console.warn('[api] moments SSE connection failed:', res.status)
+        conn._closed = true
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        let done, value
+        try {
+          ({ done, value } = await reader.read())
+        } catch { break }
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        let eventType = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith('data: ') && eventType === 'new_post') {
+            try {
+              const post = JSON.parse(line.slice(6))
+              onNewPost(post)
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+      conn._closed = true
+    })
+    .catch(err => {
+      conn._closed = true
+      if (err.name !== 'AbortError') {
+        console.warn('[api] moments SSE error:', err.message)
+      }
+    })
+
+  return conn
+}
+
 export async function getMoment(id) {
   const res = await fetch(`${BASE}/moments/${id}`)
   return res.json()
@@ -255,4 +314,10 @@ export async function comfyuiHealth() {
     const res = await fetch(`${BASE}/images/comfyui-health`)
     return await res.json()
   } catch { return { connected: false } }
+}
+
+// ── Gallery 相册 ──
+export async function listGalleryImages() {
+  const res = await fetch(`${BASE}/images/gallery`)
+  return res.json()
 }

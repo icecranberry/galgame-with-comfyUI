@@ -10,6 +10,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3099',
         changeOrigin: true,
+        // SSE 长连接在生图期间可能长时间无数据，禁用代理层超时
+        timeout: 0,
+        proxyTimeout: 0,
       },
       '/images': {
         target: 'http://localhost:3099',
