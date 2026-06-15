@@ -312,6 +312,8 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── 生图事件 ──
             if (lastEvent === 'generate_start') {
+              // 生图开始，清除候选词（生图期间 streaming 为 true，用户无法发送，避免半可用 UX）
+              guesses.value = null
               // 生图开始，延长安全超时到 10 分钟（匹配 ComfyUI 后端超时）
               resetSafetyTimer(IMAGE_SAFETY_MS)
               messages.value.push({

@@ -88,6 +88,9 @@ export const useMomentsStore = defineStore('moments', () => {
         like_count: 0,
         liked: false,
       })
+      // 仍在朋友圈页面 → 帖子已直接可见，抵消 SSE 刚推送的红点计数
+      // 已离开朋友圈 → 保留红点，让用户知道生成已完成
+      if (isViewingMoments.value) markSeen()
     }
     return result
   }
@@ -103,8 +106,7 @@ export const useMomentsStore = defineStore('moments', () => {
   let _reconnectTimer = null
 
   function _onNewPost() {
-    // 用户正在朋友圈页面时，不需要红点（帖子会直接出现在列表中）
-    if (isViewingMoments.value) return
+    // SSE 推送始终累加计数——即使在朋友圈页面，自动生成的帖子也不自动刷新列表
     newPostCount.value++
   }
 

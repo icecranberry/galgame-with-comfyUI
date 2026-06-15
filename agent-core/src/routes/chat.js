@@ -318,7 +318,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 4. 生图意图（正则强匹配 → 强制生成）
     const explicitImageIntent = detectImageIntent(message);
     if (explicitImageIntent) {
-      systemPrompt += '\n\n【强制要求】用户要求生成图片。对白正文 20 字以内简要回复，然后在末尾加上 {"prompt":"..."} 标签，标签内的画面描述不限制长度可尽情详写。';
+      systemPrompt += '\n\n【强制要求】用户要求生成图片。对白正文 20 字以内简要回复，然后在末尾加上 {"prompt":"..."} 标签，标签内画面描述不限长度，且标签内的英文/日文均不计入正文字数。';
     }
 
     // 内置对话规则（不依赖 DB seed，代码层面兜底）

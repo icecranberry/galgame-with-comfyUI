@@ -107,7 +107,7 @@ html, body, #app {
   height: 100%;
   /* 100dvh 随 Chrome 地址栏显隐动态调整，100vh 作为旧浏览器兜底 */
   min-height: 100vh; min-height: 100dvh;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: var(--text-primary);
   overflow: hidden;
 }

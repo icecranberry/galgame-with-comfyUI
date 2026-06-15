@@ -8,6 +8,8 @@ agent-core/public/
 __pycache__/
 *.pyc
 .venv/
+.reasonix
+.codegraph
 venv/
 vector-service/models/
 vector-service/chroma_data/

@@ -1,3 +1,6 @@
+// HarmonyOS Sans — 全局字体
+import './assets/fonts/fonts.css'
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
