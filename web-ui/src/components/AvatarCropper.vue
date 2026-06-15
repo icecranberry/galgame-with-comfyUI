@@ -326,7 +326,7 @@ async function saveCrop() {
 }
 .avpicker-panel {
   width:520px; max-height:80vh;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-radius:16px;

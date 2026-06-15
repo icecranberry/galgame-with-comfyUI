@@ -79,7 +79,7 @@
         <div v-if="recruit.show" class="modal-overlay" @click.self="closeRecruit">
           <div class="modal-panel">
             <div class="modal-header">
-              <h3>🏮 招募新角色</h3>
+              <h3>招募新角色</h3>
               <button class="modal-close" @click="closeRecruit">✕</button>
             </div>
 
@@ -90,7 +90,7 @@
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
                 rows="4"
-                placeholder="例：芙宁娜（原神）/ 傲娇的猫娘女仆 / 沉稳的退伍军人"
+                placeholder="例：芙宁娜（原神）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 我的野蛮女友"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
               ></textarea>
@@ -101,31 +101,42 @@
                   :disabled="!recruit.desc.trim() || recruit.loading"
                   @click="doGenerate"
                 >
-                  {{ recruit.loading ? '正在向灵魂之海呼唤...' : '✨ 生成角色' }}
+                  {{ recruit.loading ? '正在酒馆招募...' : '✨ 招募角色' }}
                 </button>
               </div>
               <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
             </div>
 
             <!-- 步骤 1：预览确认 -->
-            <div v-if="recruit.step === 'preview'" class="modal-body">
+            <div v-if="recruit.step === 'preview'" class="modal-body" style="position:relative">
               <div class="preview-card">
-                <div class="preview-name">{{ recruit.result.display_name }}</div>
-                <div class="preview-emotion">
-                  <span v-for="(v, k) in parseVAD(recruit.result.emotion_baseline)" :key="k" class="vad-tag">
-                    {{ {valence:'愉悦',arousal:'兴奋',dominance:'掌控'}[k] }}: {{ (v * 100).toFixed(0) }}%
-                  </span>
-                </div>
+                <input
+                  v-model="recruit.result.display_name"
+                  class="preview-name-input"
+                  placeholder="角色名称"
+                />
                 <div class="preview-prompt-label">人格提示词</div>
                 <pre class="preview-prompt">{{ recruit.result.base_prompt }}</pre>
               </div>
-              <div class="modal-actions">
-                <button class="btn-ghost" @click="recruit.step = 'input'; recruit.error = ''">返回修改</button>
-                <button class="btn-primary" :disabled="recruit.saving" @click="confirmRecruit">
-                  {{ recruit.saving ? '入库中...' : '✅ 确认入库' }}
-                </button>
+              <div class="modal-actions modal-actions-between">
+                <button
+                  class="btn-ghost"
+                  :disabled="recruit.loading"
+                  @click="doGenerate"
+                >重新招募</button>
+                <div class="modal-actions-right">
+                  <button class="btn-ghost" @click="recruit.step = 'input'; recruit.error = ''">返回修改</button>
+                  <button class="btn-primary" :disabled="recruit.saving" @click="confirmRecruit">
+                    {{ recruit.saving ? '招募中...' : '确认招募' }}
+                  </button>
+                </div>
               </div>
               <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              <!-- 扫描动画覆盖层 -->
+              <div v-if="recruit.loading" class="scan-overlay">
+                <div class="scan-line"></div>
+                <div class="scan-text">正在重新招募...</div>
+              </div>
             </div>
           </div>
         </div>
@@ -157,38 +168,21 @@
                 </div>
               </div>
 
-              <!-- 展示名 -->
-              <label class="fl">展示名</label>
-              <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+              <!-- 白色内容卡片 — 与招募预览一致 -->
+              <div class="preview-card">
+                <!-- 展示名 -->
+                <label class="fl">展示名</label>
+                <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
 
-              <!-- 情绪基线 VAD -->
-              <label class="fl" style="margin-top:12px">情绪基线</label>
-              <div class="vad-sliders">
-                <div class="vad-row">
-                  <span class="vad-label">😊 愉悦</span>
-                  <input type="range" min="0" max="100" :value="detail.vad.valence" @input="detail.vad.valence = +$event.target.value; detail.dirty = true" />
-                  <span class="vad-val">{{ detail.vad.valence }}%</span>
-                </div>
-                <div class="vad-row">
-                  <span class="vad-label">⚡ 兴奋</span>
-                  <input type="range" min="0" max="100" :value="detail.vad.arousal" @input="detail.vad.arousal = +$event.target.value; detail.dirty = true" />
-                  <span class="vad-val">{{ detail.vad.arousal }}%</span>
-                </div>
-                <div class="vad-row">
-                  <span class="vad-label">👑 掌控</span>
-                  <input type="range" min="0" max="100" :value="detail.vad.dominance" @input="detail.vad.dominance = +$event.target.value; detail.dirty = true" />
-                  <span class="vad-val">{{ detail.vad.dominance }}%</span>
-                </div>
+                <!-- 人格提示词 -->
+                <label class="fl" style="margin-top:12px">人格提示词</label>
+                <textarea
+                  v-model="detail.editPrompt"
+                  class="fi prompt-textarea"
+                  rows="12"
+                  @input="detail.dirty = true"
+                ></textarea>
               </div>
-
-              <!-- 人格提示词 -->
-              <label class="fl" style="margin-top:12px">人格提示词</label>
-              <textarea
-                v-model="detail.editPrompt"
-                class="fi prompt-textarea"
-                rows="12"
-                @input="detail.dirty = true"
-              ></textarea>
 
               <!-- 操作按钮 -->
               <div class="detail-actions">
@@ -236,6 +230,7 @@ const router = useRouter()
 const chat = useChatStore()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
+const confirmFn = inject('confirm')
 
 // ── 移动端滚动标题隐藏 ──
 const headerVisible = ref(true)
@@ -380,14 +375,6 @@ async function confirmRecruit() {
   }
 }
 
-function parseVAD(raw) {
-  try {
-    if (typeof raw === 'string') return JSON.parse(raw)
-    if (typeof raw === 'object') return raw
-  } catch {}
-  return { valence: 0.5, arousal: 0.5, dominance: 0.5 }
-}
-
 // ═══════════════════════════════════════
 // 角色详情弹窗
 // ═══════════════════════════════════════
@@ -397,7 +384,6 @@ const detail = reactive({
   editName: '',
   editPrompt: '',
   dirty: false,
-  vad: { valence: 50, arousal: 50, dominance: 50 },
 })
 
 function openCharDetail(c) {
@@ -405,10 +391,6 @@ function openCharDetail(c) {
   detail.editName = c.display_name || ''
   detail.editPrompt = c.base_prompt || ''
   detail.dirty = false
-  const vad = parseVAD(c.emotion_baseline)
-  detail.vad.valence = Math.round(vad.valence * 100)
-  detail.vad.arousal = Math.round(vad.arousal * 100)
-  detail.vad.dominance = Math.round(vad.dominance * 100)
   detail.show = true
 }
 
@@ -423,11 +405,6 @@ async function saveCharDetail() {
   await api.updateCharacter(c.id, {
     display_name: detail.editName,
     base_prompt: detail.editPrompt,
-    emotion_baseline: JSON.stringify({
-      valence: detail.vad.valence / 100,
-      arousal: detail.vad.arousal / 100,
-      dominance: detail.vad.dominance / 100,
-    }),
   })
   detail.dirty = false
   await chat.loadCharacters()
@@ -449,7 +426,12 @@ async function deleteChar() {
     alert('默认角色不能删除')
     return
   }
-  if (!confirm(`确定要删除「${c.display_name}」吗？此操作不可撤销。`)) return
+  const ok = await confirmFn({
+    title: '删除角色',
+    message: `确定要删除「${c.display_name}」吗？\n聊天记录和朋友圈内容也将一并删除。`,
+    okText: '删除', danger: true,
+  })
+  if (!ok) return
   await api.deleteCharacter(c.id)
   detail.show = false
   detail.char = null
@@ -667,13 +649,14 @@ onMounted(async () => {
 }
 
 .modal-panel {
-  background: var(--bg-primary); border-radius: 18px;
-  width: min(520px, 92vw); max-height: 85vh;
+  background: #f4f1eeed; border-radius: 18px;
+  width: min(880px, 96vw); max-height: 90vh;
   display: flex; flex-direction: column;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
+  overflow: hidden;backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
-.modal-wide { width: min(580px, 94vw); }
+.modal-wide { width: min(760px, 97vw); }
 
 .modal-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -692,7 +675,7 @@ onMounted(async () => {
 .modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
 
 .modal-body {
-  padding: 20px 22px 22px;
+  padding: 0px 22px 22px;
   overflow-y: auto; flex: 1;
 }
 
@@ -701,12 +684,64 @@ onMounted(async () => {
 .modal-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;
 }
+.modal-actions-between {
+  justify-content: space-between;
+}
+.modal-actions-right {
+  display: flex;
+  gap: 10px;
+}
 
 .recruit-textarea { width: 100%; resize: vertical; min-height: 80px; font-family: inherit; }
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
 .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 
 .gen-error { margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,77,79,0.06); color: var(--danger); font-size: 13px; }
+
+/* ── 扫描动画覆盖层 ── */
+.scan-overlay {
+  position: absolute; inset: 0;
+  background: transparent;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 0 0 18px 18px;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10; overflow: hidden;
+}
+.scan-line {
+  position: absolute; left: 10%; right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scan-sweep 2s ease-in-out infinite;
+  box-shadow: 0 0 24px rgba(224,123,108,0.6), 0 0 8px rgba(224,123,108,0.3);
+}
+@keyframes scan-sweep {
+  0%   { top: 10%; opacity: 0.2; }
+  25%  { top: 90%; opacity: 1; }
+  50%  { top: 90%; opacity: 0.2; }
+  75%  { top: 10%; opacity: 1; }
+  100% { top: 10%; opacity: 0.2; }
+}
+.scan-text {
+  font-size: 14px; color: var(--accent); font-weight: 600;
+  animation: scan-pulse 1.2s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(224,123,108,0.3);
+}
+@keyframes scan-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.97); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+
+/* ── 预览姓名可编辑 ── */
+.preview-name-input {
+  font-size: 20px; font-weight: 700; color: var(--text-bright);
+  background: transparent; border: 1px dashed transparent;
+  border-radius: 8px; padding: 4px 10px; margin: -4px -10px;
+  width: 100%; outline: none; font-family: inherit;
+  transition: border-color 0.2s;
+}
+.preview-name-input:hover  { border-color: var(--glass-border); }
+.preview-name-input:focus  { border-color: var(--accent); background: rgba(255,255,255,0.5); }
 
 /* ── 预览卡片 ── */
 .preview-card {
@@ -719,18 +754,12 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 
-.preview-emotion { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.vad-tag {
-  font-size: 12px; padding: 3px 10px; border-radius: 20px;
-  background: rgba(224, 123, 108, 0.1); color: var(--accent-hover);
-}
-
-.preview-prompt-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.preview-prompt-label { font-size: 12px; color: var(--text-secondary); margin: 6px 0; }
 .preview-prompt {
   padding: 12px; border-radius: 10px;
   background: var(--bg-primary); border: 1px solid var(--glass-border);
   font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
-  max-height: 260px; overflow-y: auto; color: var(--text-primary); font-family: inherit;
+  max-height: 500px; overflow-y: auto; color: var(--text-primary); font-family: inherit;
 }
 
 /* ── 角色详情弹窗 ── */
@@ -750,15 +779,25 @@ onMounted(async () => {
 .sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
 .sp-btn-subtle:hover { color: var(--danger); border-color: transparent; }
 
-.prompt-textarea { min-height: 180px; resize: vertical; font-family: inherit; }
+.prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
-.vad-sliders { display: flex; flex-direction: column; gap: 6px; }
-.vad-row {
-  display: flex; align-items: center; gap: 10px;
+/* 角色详情 input/textarea — 与招募预览卡片统一 */
+.modal-wide .fi {
+  background: var(--bg-primary);
+  border: 1px solid var(--glass-border);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.vad-label { font-size: 12px; color: var(--text-secondary); width: 56px; flex-shrink: 0; }
-.vad-row input[type=range] { flex: 1; accent-color: var(--accent); }
-.vad-val { font-size: 12px; color: var(--text-secondary); width: 36px; text-align: right; }
+.modal-wide .fi:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1);
+}
+.modal-wide .prompt-textarea {
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
 
 .detail-actions {
   display: flex; align-items: center; margin-top: 18px; gap: 10px;

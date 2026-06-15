@@ -13,15 +13,24 @@ function getClient() {
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
  */
-export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format } = {}) {
+export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking, reasoning_effort } = {}) {
   const params = {
     model,
     messages,
     max_tokens,
-    temperature,
   };
+  // temperature 为 null 时不发送（deepseek-reasoner 不支持此参数）
+  if (temperature != null) {
+    params.temperature = temperature;
+  }
   if (response_format) {
     params.response_format = response_format;
+  }
+  if (thinking) {
+    params.thinking = thinking;
+  }
+  if (reasoning_effort) {
+    params.reasoning_effort = reasoning_effort;
   }
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏

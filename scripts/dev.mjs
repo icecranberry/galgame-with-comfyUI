@@ -226,8 +226,8 @@ async function main() {
       port: 3099,
       url: "http://localhost:3099/api/health",
       cwd: resolve(ROOT, "agent-core"),
-      getCmd() { return "node"; },
-      args: ["--watch", "app.js"],
+      getCmd() { return "npx"; },
+      args: ["nodemon", "--watch", "src", "--watch", "app.js", "-e", "js,json", "app.js"],
     },
     {
       name: "web-ui",

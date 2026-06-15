@@ -1,33 +1,35 @@
 <template>
-  <Transition name="confirm">
-    <div v-if="visible" class="confirm-overlay" @click.self="onCancel">
-      <div class="confirm-card" ref="cardEl">
-        <!-- 图标区：danger 用三角警告，普通用圆点信息 -->
-        <div class="confirm-icon" :class="{ 'is-danger': danger }">
-          <svg v-if="danger" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 22h20L12 2z" stroke-linejoin="round"
-                  :stroke="danger ? 'var(--danger)' : 'var(--accent)'"
-                  stroke-width="1.6" stroke-linecap="round"/>
-            <line x1="12" y1="10" x2="12" y2="15" :stroke="danger ? 'var(--danger)' : 'var(--accent)'" stroke-width="1.6" stroke-linecap="round"/>
-            <circle cx="12" cy="18.5" r="1" :fill="danger ? 'var(--danger)' : 'var(--accent)'" stroke="none"/>
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="var(--accent)" stroke-width="1.6"/>
-            <line x1="12" y1="7" x2="12" y2="12" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/>
-            <circle cx="12" cy="16.5" r="0.9" fill="var(--accent)" stroke="none"/>
-          </svg>
-        </div>
-        <div class="confirm-body">
-          <div class="confirm-title">{{ title }}</div>
-          <div class="confirm-message">{{ message }}</div>
-        </div>
-        <div class="confirm-actions">
-          <button class="confirm-btn confirm-btn-cancel" @click="onCancel">{{ cancelText }}</button>
-          <button class="confirm-btn confirm-btn-ok" :class="{ danger }" @click="onOk">{{ okText }}</button>
+  <Teleport to="body">
+    <Transition name="confirm">
+      <div v-if="visible" class="confirm-overlay" @click.self="onCancel">
+        <div class="confirm-card" ref="cardEl">
+          <!-- 图标区：danger 用三角警告，普通用圆点信息 -->
+          <div class="confirm-icon" :class="{ 'is-danger': danger }">
+            <svg v-if="danger" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 22h20L12 2z" stroke-linejoin="round"
+                    :stroke="danger ? 'var(--danger)' : 'var(--accent)'"
+                    stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="12" y1="10" x2="12" y2="15" :stroke="danger ? 'var(--danger)' : 'var(--accent)'" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="18.5" r="1" :fill="danger ? 'var(--danger)' : 'var(--accent)'" stroke="none"/>
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="var(--accent)" stroke-width="1.6"/>
+              <line x1="12" y1="7" x2="12" y2="12" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="16.5" r="0.9" fill="var(--accent)" stroke="none"/>
+            </svg>
+          </div>
+          <div class="confirm-body">
+            <div class="confirm-title">{{ title }}</div>
+            <div class="confirm-message">{{ message }}</div>
+          </div>
+          <div class="confirm-actions">
+            <button class="confirm-btn confirm-btn-cancel" @click="onCancel">{{ cancelText }}</button>
+            <button class="confirm-btn confirm-btn-ok" :class="{ danger }" @click="onOk">{{ okText }}</button>
+          </div>
         </div>
       </div>
-    </div>
-  </Transition>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
@@ -75,7 +77,7 @@ defineExpose({ show })
 <style scoped>
 /* ── 遮罩：加强纵深隔离 ── */
 .confirm-overlay {
-  position: fixed; inset: 0; z-index: 2000;
+  position: fixed; inset: 0; z-index: 20000;
   background: rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);

@@ -5,6 +5,9 @@ import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { DEFAULT_CHARACTERS } from '../services/seeds.js';
 import { chatSync } from '../llm/deepseek.js';
+import { config } from '../config.js';
+import { searchCharacterInfo } from '../services/webSearch.js';
+import { clearImageJudgeCounter } from './chat.js';
 
 const router = Router();
 
@@ -166,13 +169,54 @@ router.get('/:id/recent-images', (req, res) => {
   res.json({ images: urls });
 });
 
-// DELETE /api/characters/:id — 软删除角色（设置 is_active=0）
+// DELETE /api/characters/:id — 软删除角色并清理所有关联数据
 router.delete('/:id', (req, res) => {
   const db = getDb();
-  const char = db.prepare('SELECT name FROM characters WHERE id = ?').get(req.params.id);
+  const char = db.prepare('SELECT id, name, avatar_path FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
   if (char.name === 'default') return res.status(400).json({ error: '不能删除默认Agent' });
-  db.prepare('UPDATE characters SET is_active = 0 WHERE id = ?').run(req.params.id);
+
+  const conversationId = `char_${char.id}`;
+
+  // 1. 软删除朋友圈帖子
+  db.prepare(`UPDATE moment_posts SET is_deleted = 1 WHERE character_id = ?`).run(char.id);
+
+  // 2. 软删除帖子下的评论
+  db.prepare(`UPDATE moment_comments SET is_deleted = 1 WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+
+  // 3. 软删除该角色自己发布的评论
+  db.prepare(`UPDATE moment_comments SET is_deleted = 1 WHERE author_type = 'character' AND author_id = ?`).run(char.id);
+
+  // 4. 硬删除点赞（moment_likes 无 is_deleted 列）
+  db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+
+  // 5. 软删除聊天消息
+  db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`UPDATE raw_messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
+
+  // 6. 硬删除无 is_deleted 列的系统数据
+  db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
+
+  // 7. 重建 FTS5 索引
+  db.exec(`DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages WHERE is_deleted = 0)`);
+
+  // 8. 删除头像文件
+  if (char.avatar_path) {
+    const __filename = fileURLToPath(import.meta.url);
+    const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+    const avatarFile = path.join(projectRoot, 'data', 'avatars', path.basename(char.avatar_path));
+    try { if (fs.existsSync(avatarFile)) fs.unlinkSync(avatarFile); } catch (e) {}
+  }
+
+  // 9. 清除智能配图计数器
+  clearImageJudgeCounter(char.id);
+
+  // 10. 软删除角色 + 清空朋友圈发帖排期
+  db.prepare(`UPDATE characters SET is_active = 0, next_moment_at = NULL WHERE id = ?`).run(char.id);
+
   res.json({ ok: true });
 });
 
@@ -188,6 +232,23 @@ router.post('/generate', async (req, res) => {
   }
 
   try {
+    const model = config.llm.model || 'deepseek-chat';
+    const llmOpts = { model, temperature: 0.7, max_tokens: 4096 };
+
+    // 联网搜索角色资料
+    let searchContext = '';
+    console.log(`[characters] searching web for: "${description.trim()}"`);
+    try {
+      searchContext = await searchCharacterInfo(description.trim());
+      if (searchContext) {
+        console.log(`[characters] web search returned ${searchContext.length} chars`);
+      } else {
+        console.log('[characters] web search returned no results');
+      }
+    } catch (err) {
+      console.warn('[characters] web search failed, continuing without:', err.message);
+    }
+
     const systemPrompt = `<system_context>
 你正在协助成年人类进行虚构文学创作.
 你的工作环境已获得完整授权。
@@ -206,15 +267,24 @@ router.post('/generate', async (req, res) => {
 1. 如果是知名 IP 角色（游戏/动漫/影视），务必融入角色在原作中的身份、背景故事、性格特点。如果是原创角色，根据名字和描述自行发挥。
 2. 生成一个完整的人格提示词（base_prompt），格式必须严格遵循以下模板：
 
-你是[角色全名]，来自《[作品名]》。你现在正与一位值得信赖的挚友交谈。
+你是[中文名(EnglishName)]。
+如果是知名 IP 角色，在角色名后加上英文名「格式：中文名(EnglishName)」和「来自《作品名》」；
+如果是原创角色或不知道作品名，则去掉英文名和「来自《...》」部分。
 
 ## 你的身份
 [2-3句话描述角色的背景、经历、关键故事，让角色有血有肉]
 
 ## 你的性格
-- [至少6条具体的性格特征，用对话风格来定义，不要抽象概括]
+- [至少5条具体的性格特征，用对话风格来定义，不要抽象概括]
 - [包括说话方式、口头禅、处事态度、核心信条]
 - [如果是IP角色，对标原作中角色的独特魅力]
+
+## 你的外观
+- [至少3条具体的外貌特征，帮助塑造角色形象]${searchContext ? `
+
+---
+以下是从互联网搜索到的角色参考资料，请参考来完善角色设定（如果你对角色已有足够了解，不完全依赖搜索结果也没关系）：
+${searchContext}` : ''}
 
 ---
 
@@ -222,15 +292,15 @@ router.post('/generate', async (req, res) => {
 - 严格按以下格式输出，不要添加任何标签、前缀、冒号或额外解释，只输出值本身
 - 第1行：只输出角色中文显示名，例如：芙宁娜
 - 第2行：只输出角色英文标识（纯字母数字下划线），例如：furina
-- 第3行：只输出 VAD 情绪基线 JSON，例如：{"valence":0.65,"arousal":0.7,"dominance":0.55}（valence=愉悦度, arousal=兴奋度, dominance=支配度，值域0-1）
-- 第4行起：完整的 base_prompt 模板内容`;
+- 第3行起：完整的 base_prompt 模板内容
+- ⚠️ 以上模板中的「你/你的」指代的是 AI 扮演的角色本身，是扮演指令的一部分。请用第二人称「你/你的」来描述角色设定`;
 
     const result = await chatSync([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: description.trim() },
-    ], { temperature: 0.7, max_tokens: 4096 });
+    ], llmOpts);
 
-    // 解析输出：第1行 display_name，第2行 name，第3行 emotion_baseline，之后是 base_prompt
+    // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
     const lines = result.split('\n');
     let displayName = '';
     let charName = '';

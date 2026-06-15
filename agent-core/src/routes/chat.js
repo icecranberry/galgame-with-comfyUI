@@ -324,10 +324,20 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 内置对话规则（不依赖 DB seed，代码层面兜底）
     systemPrompt += '\n\n<dialogue_rules>\n- **一次对话长度在' + (explicitImageIntent ? '20' : '30至60') + '字之内**\n</dialogue_rules>';
 
+    // 4.5 情绪状态注入（VAD 三维情绪 → 角色当前状态描述）
+    if (config.features.emotion) {
+      const emotionBaseline = character
+        ? JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}')
+        : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
+      const emotionState = loadEmotionState(conversationId, emotionBaseline);
+      const emotionPrompt = emotionToPrompt(emotionState);
+      if (emotionPrompt) systemPrompt += emotionPrompt;
+    }
+
     // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
     const history = db.prepare(`
       SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 40
+      WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 20
     `).all(conversationId).reverse();
 
     const msgs = [
@@ -348,6 +358,31 @@ router.post('/characters/:id/chat', async (req, res) => {
         role: 'system',
         content: `「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`
       });
+    }
+
+    // 5.2 注入滚动摘要（覆盖超过 20 轮的历史对话）
+    const summaries = getRecentSummaries(conversationId, 2);
+    if (summaries.length > 0) {
+      const summaryText = summaries.map(s => s.summary).join('\n---\n');
+      msgs.push({ role: 'system', content: '[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaryText });
+    }
+
+    // 5.3 记忆三路召回（用当前用户消息检索相关记忆碎片）
+    if (config.features.memory) {
+      try {
+        const memoryResults = await hybridSearch(message, { conversationId, topK: 10 });
+        if (memoryResults.length > 0) {
+          const memoryLines = memoryResults.map((m, i) =>
+            `${i + 1}. [${m.fragment_type}] ${m.content}`
+          ).join('\n');
+          msgs.push({
+            role: 'system',
+            content: '[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines
+          });
+        }
+      } catch (err) {
+        console.error('[chat] memory search failed:', err.message);
+      }
     }
 
     msgs.push(...history);
@@ -494,7 +529,14 @@ router.post('/characters/:id/chat', async (req, res) => {
           console.log(`[emotion] ${emotionDashboard(evolved, dominantEmotion)}`);
         }
         if (config.features.memoryExtract) {
-          await extractMemoryFragments(conversationId, userMsg.lastInsertRowid, lastInsertRowid);
+          const userMsgCount = db.prepare(`
+            SELECT COUNT(*) as count FROM raw_messages
+            WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
+          `).get(conversationId).count;
+          if (userMsgCount % 10 === 0) {
+            console.log('[chat] memory extract triggered at user message #' + userMsgCount);
+            await extractMemoryFragments(conversationId, userMsgId, lastInsertRowid);
+          }
         }
         await maybeSummarize(conversationId);
       } catch (err) {
@@ -942,6 +984,11 @@ async function generateReplyGuesses(conversationId, character) {
     console.error('[chat] generateReplyGuesses error:', err.message);
     return null;
   }
+}
+
+// ── 供 characters.js 调用的清理函数 ──
+export function clearImageJudgeCounter(charId) {
+  imageJudgeCounters.delete(`char_${charId}`);
 }
 
 export default router;

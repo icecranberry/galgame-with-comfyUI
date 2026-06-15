@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node app.js",
-    "dev": "node --watch-path ./src --watch-path ./app.js app.js"
+    "dev": "nodemon --watch src --watch app.js -e js,json app.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
@@ -16,5 +16,8 @@
     "openai": "^4.85.0",
     "uuid": "^11.1.0",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }
