@@ -178,9 +178,11 @@ router.delete('/:id', (req, res) => {
 
 // POST /api/characters/generate — AI 扩写角色人格
 // Body: { description: "芙宁娜|芙宁娜（原神）|原神游戏里的芙宁娜" }
-// 返回生成的完整角色数据，同时写入数据库
+// Body: { description: "...", save: false } — 预览模式：只生成不入库，由前端确认后再调 POST /api/characters 入库
+// 默认 save=true，返回生成的完整角色数据，同时写入数据库
 router.post('/generate', async (req, res) => {
-  const { description } = req.body;
+  const { description, save } = req.body;
+  const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
   if (!description || typeof description !== 'string' || description.trim().length < 2) {
     return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
   }
@@ -256,24 +258,36 @@ router.post('/generate', async (req, res) => {
       return res.status(500).json({ error: 'AI 生成的角色人格不完整，请重试' });
     }
 
-    // 确保 name 不重复
     const db = getDb();
+
+    // 确保 name 不重复
     const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
     if (exists) charName = charName + '_' + Date.now();
 
-    // 直接写入数据库
-    const insertResult = db.prepare(
-      `INSERT INTO characters (name, display_name, base_prompt, emotion_baseline) VALUES (?, ?, ?, ?)`
-    ).run(charName, displayName, basePrompt, emotionBaseline);
+    if (shouldSave) {
+      // 直接写入数据库
+      const insertResult = db.prepare(
+        `INSERT INTO characters (name, display_name, base_prompt, emotion_baseline) VALUES (?, ?, ?, ?)`
+      ).run(charName, displayName, basePrompt, emotionBaseline);
 
-    console.log(`[characters] AI-generated: "${displayName}" (${charName})`);
-    res.status(201).json({
-      id: insertResult.lastInsertRowid,
-      name: charName,
-      display_name: displayName,
-      base_prompt: basePrompt,
-      emotion_baseline: emotionBaseline,
-    });
+      console.log(`[characters] AI-generated: "${displayName}" (${charName}) — saved`);
+      res.status(201).json({
+        id: insertResult.lastInsertRowid,
+        name: charName,
+        display_name: displayName,
+        base_prompt: basePrompt,
+        emotion_baseline: emotionBaseline,
+      });
+    } else {
+      // 预览模式：不入库，返回生成数据
+      console.log(`[characters] AI-generated preview: "${displayName}" (${charName}) — not saved`);
+      res.json({
+        name: charName,
+        display_name: displayName,
+        base_prompt: basePrompt,
+        emotion_baseline: emotionBaseline,
+      });
+    }
   } catch (err) {
     console.error('[characters] generate failed:', err.message);
     res.status(500).json({ error: '生成失败: ' + err.message });

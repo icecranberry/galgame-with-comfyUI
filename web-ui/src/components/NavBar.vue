@@ -27,6 +27,18 @@
         <span class="nav-label">相册</span>
       </router-link>
 
+      <router-link to="/tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21h18" />
+          <path d="M5 21V7l8-4v18" />
+          <path d="M19 21V11l-6-4" />
+          <path d="M9 9v.01" />
+          <path d="M9 12v.01" />
+          <path d="M9 15v.01" />
+          <path d="M9 18v.01" />
+        </svg>
+        <span class="nav-label">酒馆</span>
+      </router-link>
 
     </div>
 

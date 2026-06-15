@@ -95,15 +95,17 @@
         </div>
 
         <!-- 全屏预览 -->
-        <VueEasyLightbox
-          :visible="lightboxVisible"
-          :imgs="lightboxImgs"
-          :index="lightboxIndex"
-          :max-zoom="6"
-          :min-zoom="0.3"
-          :zoom-scale="0.35"
-          @hide="lightboxVisible = false"
-        />
+        <Teleport to="body">
+          <VueEasyLightbox
+            :visible="lightboxVisible"
+            :imgs="lightboxImgs"
+            :index="lightboxIndex"
+            :max-zoom="6"
+            :min-zoom="0.3"
+            :zoom-scale="0.35"
+            @hide="lightboxVisible = false"
+          />
+        </Teleport>
       </div>
 
       <!-- 测试提示词编辑弹窗 -->
@@ -240,57 +242,6 @@
         </div>
       </div>
 
-      <!-- 角色工坊：AI 生成角色人格 -->
-      <div class="card">
-        <h3>角色工坊</h3>
-        <p class="fd">输入简短的描述，AI 自动扩写成完整角色人格并写入数据库</p>
-        <div class="cg-row">
-          <input v-model="charDesc" class="fi" placeholder="例：芙宁娜（原神） / 傲娇的猫娘女仆 / 沉稳的退伍军人"
-            @keydown.enter="generateNewChar" :disabled="generating" />
-          <button class="btn-primary cg-btn" @click="generateNewChar" :disabled="generating || !charDesc.trim()">
-            {{ generating ? '生成中...' : '✨ 生成角色' }}
-          </button>
-        </div>
-        <div v-if="genError" class="gen-error">{{ genError }}</div>
-        <div v-if="genResult" class="gen-result">
-          <div class="gen-result-header">
-            <span class="gen-check">✅</span>
-            <span>角色 <strong>{{ genResult.display_name }}</strong> 已写入数据库</span>
-          </div>
-          <details class="gen-details">
-            <summary>查看生成的人格提示词</summary>
-            <pre class="gen-preview">{{ genResult.base_prompt }}</pre>
-          </details>
-        </div>
-      </div>
-
-      <!-- 用户设置 -->
-      <div class="card">
-        <h3>用户设置</h3>
-        <div class="avatar-row">
-          <div
-            class="avatar-preview clickable"
-            :style="userAvatarStyle"
-            @click="showUserAvatarPicker = true"
-          >{{ userAvatar ? '' : '我' }}</div>
-          <div>
-            <button class="sp-btn-small" @click="showUserAvatarPicker = true">更换头像</button>
-            <button v-if="userAvatar" class="sp-btn-small sp-btn-subtle" @click="removeUserAvatar">移除</button>
-          </div>
-        </div>
-
-        <label class="fl" style="margin-top:14px">用户昵称</label>
-        <input v-model="userNicknameInput" class="fi" placeholder="给自己起个名字" @input="markUserDirty" />
-
-        <label class="fl" style="margin-top:10px">自我设定</label>
-        <textarea v-model="userPersonaInput" class="fi user-persona" placeholder="描述一下自己的自画像，包括性格、外观、性别、年龄等" rows="3" @input="markUserDirty"></textarea>
-
-        <div class="sa" style="margin-top:4px">
-          <button class="btn-primary" :disabled="!userDirty" @click="saveUserConfig">保存</button>
-          <span v-if="userSaved" class="smsg">已保存</span>
-        </div>
-      </div>
-
       <!-- ComfyUI 连接 -->
       <div class="card">
         <h3>ComfyUI 连接</h3>
@@ -336,28 +287,16 @@
       </div>
     </div>
 
-    <!-- 用户头像选择器 -->
-    <AvatarCropper
-      v-if="showUserAvatarPicker"
-      title="设置我的头像"
-      :show-recent-tab="false"
-      @close="showUserAvatarPicker = false"
-      @save="onUserAvatarSave"
-    />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
-import { useChatStore } from '../stores/chat.js'
 import { useSettingsStore } from '../stores/settings.js'
-import AvatarCropper from '../components/AvatarCropper.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
-import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona, loadUserConfig, saveUserConfig as saveUserConfigApi } from '../userConfig.js'
 
-const chat = useChatStore()
 const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -439,43 +378,7 @@ onMounted(async () => {
   } catch {}
   await checkHealth()
   await loadRules()
-  await loadUserAvatar()
-  await loadUserConfig()
-  userNicknameInput.value = userNickname.value
-  userPersonaInput.value = userPersona.value
 })
-
-// ── 用户头像 ──
-const showUserAvatarPicker = ref(false)
-
-const userAvatarStyle = computed(() => {
-  if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#e07b6c' }
-})
-
-async function onUserAvatarSave(base64) {
-  await uploadUserAvatar(base64)
-  showUserAvatarPicker.value = false
-}
-
-async function removeUserAvatar() {
-  await uploadUserAvatar('')
-}
-
-// ── 用户昵称 + 自我设定 ──
-const userNicknameInput = ref('')
-const userPersonaInput = ref('')
-const userDirty = ref(false)
-const userSaved = ref(false)
-function markUserDirty() { userDirty.value = true; userSaved.value = false }
-async function saveUserConfig() {
-  await saveUserConfigApi({
-    nickname: userNicknameInput.value,
-    persona: userPersonaInput.value,
-  })
-  userDirty.value = false; userSaved.value = true
-  setTimeout(() => userSaved.value = false, 2000)
-}
 
 function markDirty() { dirty.value = true; saved.value = false }
 function markConnDirty() { connDirty.value = true; connSaved.value = false }
@@ -647,27 +550,6 @@ function resetTestPrompts() {
   testPrompts.value = { ...DEFAULT_TEST_PROMPTS }
 }
 
-// ── 角色工坊 ──
-const charDesc = ref('')
-const generating = ref(false)
-const genError = ref('')
-const genResult = ref(null)
-
-async function generateNewChar() {
-  const desc = charDesc.value.trim()
-  if (!desc || generating.value) return
-  generating.value = true; genError.value = ''; genResult.value = null
-  try {
-    const r = await chat.generateCharacter(desc)
-    if (r.error) { genError.value = r.error; return }
-    genResult.value = r
-    charDesc.value = ''
-  } catch (err) {
-    genError.value = '生成失败: ' + (err.message || '网络错误')
-  } finally {
-    generating.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -760,29 +642,8 @@ async function generateNewChar() {
 .rule-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .btn-sm { font-size: 12px; padding: 5px 14px; border-radius: 6px; }
 
-/* ── 角色工坊 ── */
-.cg-row { display:flex; gap:10px; align-items:center; }
-.cg-row .fi { flex:1; margin-bottom:0; }
-.cg-btn { flex-shrink:0; white-space:nowrap; border-radius: 8px; }
-.gen-error { margin-top:8px; padding:8px 12px; border-radius:8px; background:rgba(255,77,79,0.06); color:var(--danger); font-size:13px; }
-.gen-result { margin-top:12px; padding:14px; border-radius:12px; background:var(--glass-bg); border:1px solid var(--glass-border); }
-.gen-result-header { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text-bright); }
-.gen-check { font-size:18px; }
-.gen-details { margin-top:10px; }
-.gen-details summary { font-size:12px; color:var(--text-secondary); cursor:pointer; }
-.gen-details summary:hover { color:var(--accent); }
-.gen-preview { margin-top:8px; padding:10px; border-radius:8px; background:var(--bg-primary); border:1px solid var(--glass-border); font-size:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow-y:auto; color:var(--text-primary); font-family:inherit; }
-
-/* ── 用户头像 ── */
-.avatar-row { display:flex; align-items:center; gap:14px; }
-.avatar-preview { width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; font-weight:700; flex-shrink:0; }
-.avatar-preview.clickable { cursor:pointer; transition: opacity 0.15s; }
-.avatar-preview.clickable:hover { opacity:0.85; }
 .sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
 .sp-btn-small:hover { border-color:var(--accent); }
-.sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
-.sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
-.user-persona { resize: vertical; min-height: 60px; font-family: inherit; }
 
 /* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
@@ -857,7 +718,6 @@ async function generateNewChar() {
   .settings-grid { grid-template-columns: 1fr; }
   .rules-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
-  .cg-row { flex-direction: column; align-items: stretch; }
   .style-preview-img { max-width: 100%; }
 }
 </style>

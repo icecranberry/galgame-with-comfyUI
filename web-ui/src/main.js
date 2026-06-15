@@ -6,6 +6,7 @@ import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
 import MomentsView from './views/MomentsView.vue'
 import GalleryView from './views/GalleryView.vue'
+import TavernView from './views/TavernView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
@@ -13,6 +14,7 @@ const routes = [
   { path: '/chat/:id', component: ChatView },
   { path: '/moments', component: MomentsView },
   { path: '/gallery', component: GalleryView },
+  { path: '/tavern', component: TavernView },
   { path: '/settings', component: SettingsView },
 ]
 

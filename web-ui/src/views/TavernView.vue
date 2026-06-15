@@ -1,0 +1,799 @@
+<template>
+  <div class="tavern-view" @scroll="onScroll">
+    <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
+      <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">🏮 酒馆</h2>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         用户信息行
+         ═══════════════════════════════════════════ -->
+    <div class="user-row card">
+      <div
+        class="user-avatar clickable"
+        :style="userAvatarStyle"
+        @click="showUserAvatarPicker = true"
+      >{{ userAvatar ? '' : '我' }}</div>
+      <div class="user-info">
+        <div class="user-nickname-row">
+          <input
+            v-if="editingNickname"
+            ref="nicknameInput"
+            v-model="userNicknameInput"
+            class="inline-input nickname-input"
+            @blur="saveNickname"
+            @keydown.enter="saveNickname"
+          />
+          <span v-else class="user-nickname-text" @click="startEditNickname">{{ userNickname || '给自己起个名字' }}</span>
+          <button v-if="!editingNickname" class="edit-pen" @click="startEditNickname" title="编辑昵称">✎</button>
+        </div>
+        <div class="user-persona-row">
+          <textarea
+            v-if="editingPersona"
+            ref="personaInput"
+            v-model="userPersonaInput"
+            class="inline-input persona-input"
+            rows="2"
+            @blur="savePersona"
+            @keydown.escape="cancelEditPersona"
+          ></textarea>
+          <span v-else class="user-persona-text" @click="startEditPersona">{{ userPersona || '写一段自画像，告诉角色你是谁...' }}</span>
+          <button v-if="!editingPersona" class="edit-pen" @click="startEditPersona" title="编辑自画像">✎</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         角色卡片网格
+         ═══════════════════════════════════════════ -->
+    <div class="section-title">角色</div>
+    <div class="char-grid">
+      <!-- 招募卡片：永远在第一格 -->
+      <div class="char-card recruit-card" @click="openRecruit">
+        <div class="recruit-plus">+</div>
+        <span>招募</span>
+      </div>
+
+      <!-- 角色卡片 -->
+      <div
+        v-for="c in chat.characters"
+        :key="c.id"
+        class="char-card"
+        @click="openCharDetail(c)"
+      >
+        <div
+          class="char-card-avatar"
+          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
+        >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+        <div class="char-card-name">{{ c.display_name }}</div>
+        <div class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
+          {{ c.message_count > 0 ? `${c.message_count} 条消息` : '待唤醒' }}
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         招募弹窗
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="recruit.show" class="modal-overlay" @click.self="closeRecruit">
+          <div class="modal-panel">
+            <div class="modal-header">
+              <h3>🏮 招募新角色</h3>
+              <button class="modal-close" @click="closeRecruit">✕</button>
+            </div>
+
+            <!-- 步骤 0：输入描述 -->
+            <div v-if="recruit.step === 'input'" class="modal-body">
+              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色，也可以是原创设定。</p>
+              <textarea
+                v-model="recruit.desc"
+                class="fi recruit-textarea"
+                rows="4"
+                placeholder="例：芙宁娜（原神）/ 傲娇的猫娘女仆 / 沉稳的退伍军人"
+                :disabled="recruit.loading"
+                @keydown.enter.exact="doGenerate"
+              ></textarea>
+              <div class="modal-actions">
+                <button class="btn-ghost" @click="closeRecruit">取消</button>
+                <button
+                  class="btn-primary"
+                  :disabled="!recruit.desc.trim() || recruit.loading"
+                  @click="doGenerate"
+                >
+                  {{ recruit.loading ? '正在向灵魂之海呼唤...' : '✨ 生成角色' }}
+                </button>
+              </div>
+              <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+            </div>
+
+            <!-- 步骤 1：预览确认 -->
+            <div v-if="recruit.step === 'preview'" class="modal-body">
+              <div class="preview-card">
+                <div class="preview-name">{{ recruit.result.display_name }}</div>
+                <div class="preview-emotion">
+                  <span v-for="(v, k) in parseVAD(recruit.result.emotion_baseline)" :key="k" class="vad-tag">
+                    {{ {valence:'愉悦',arousal:'兴奋',dominance:'掌控'}[k] }}: {{ (v * 100).toFixed(0) }}%
+                  </span>
+                </div>
+                <div class="preview-prompt-label">人格提示词</div>
+                <pre class="preview-prompt">{{ recruit.result.base_prompt }}</pre>
+              </div>
+              <div class="modal-actions">
+                <button class="btn-ghost" @click="recruit.step = 'input'; recruit.error = ''">返回修改</button>
+                <button class="btn-primary" :disabled="recruit.saving" @click="confirmRecruit">
+                  {{ recruit.saving ? '入库中...' : '✅ 确认入库' }}
+                </button>
+              </div>
+              <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         角色详情弹窗
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="detail.show" class="modal-overlay" @click.self="closeCharDetail">
+          <div class="modal-panel modal-wide">
+            <div class="modal-header">
+              <h3>{{ detail.char?.display_name }}</h3>
+              <button class="modal-close" @click="closeCharDetail">✕</button>
+            </div>
+            <div class="modal-body">
+              <!-- 头像 -->
+              <div class="detail-avatar-row">
+                <div
+                  class="detail-avatar clickable"
+                  :style="detail.char?.avatar_path ? { backgroundImage: `url(${detail.char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: detail.char?.avatar_color || '#e07b6c' }"
+                  @click="openCharAvatarEditor"
+                >{{ detail.char?.avatar_path ? '' : detail.char?.display_name?.charAt(0) }}</div>
+                <div>
+                  <button class="sp-btn-small" @click="openCharAvatarEditor">更换头像</button>
+                  <button v-if="detail.char?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeCharAvatar">移除</button>
+                </div>
+              </div>
+
+              <!-- 展示名 -->
+              <label class="fl">展示名</label>
+              <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+
+              <!-- 情绪基线 VAD -->
+              <label class="fl" style="margin-top:12px">情绪基线</label>
+              <div class="vad-sliders">
+                <div class="vad-row">
+                  <span class="vad-label">😊 愉悦</span>
+                  <input type="range" min="0" max="100" :value="detail.vad.valence" @input="detail.vad.valence = +$event.target.value; detail.dirty = true" />
+                  <span class="vad-val">{{ detail.vad.valence }}%</span>
+                </div>
+                <div class="vad-row">
+                  <span class="vad-label">⚡ 兴奋</span>
+                  <input type="range" min="0" max="100" :value="detail.vad.arousal" @input="detail.vad.arousal = +$event.target.value; detail.dirty = true" />
+                  <span class="vad-val">{{ detail.vad.arousal }}%</span>
+                </div>
+                <div class="vad-row">
+                  <span class="vad-label">👑 掌控</span>
+                  <input type="range" min="0" max="100" :value="detail.vad.dominance" @input="detail.vad.dominance = +$event.target.value; detail.dirty = true" />
+                  <span class="vad-val">{{ detail.vad.dominance }}%</span>
+                </div>
+              </div>
+
+              <!-- 人格提示词 -->
+              <label class="fl" style="margin-top:12px">人格提示词</label>
+              <textarea
+                v-model="detail.editPrompt"
+                class="fi prompt-textarea"
+                rows="12"
+                @input="detail.dirty = true"
+              ></textarea>
+
+              <!-- 操作按钮 -->
+              <div class="detail-actions">
+                <button class="btn-ghost danger" @click="deleteChar">🗑 删除角色</button>
+                <div class="detail-actions-right">
+                  <button class="btn-ghost" @click="goChat(detail.char)">💬 去聊天</button>
+                  <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 角色头像裁剪器 -->
+    <AvatarCropper
+      v-if="showCharAvatarPicker"
+      :title="`设置 ${detail.char?.display_name || ''} 头像`"
+      :show-recent-tab="false"
+      @close="showCharAvatarPicker = false"
+      @save="onCharAvatarSave"
+    />
+
+    <!-- 用户头像裁剪器 -->
+    <AvatarCropper
+      v-if="showUserAvatarPicker"
+      title="设置我的头像"
+      :show-recent-tab="false"
+      @close="showUserAvatarPicker = false"
+      @save="onUserAvatarSave"
+    />
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted, inject, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { useChatStore } from '../stores/chat.js'
+import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
+import * as api from '../api/index.js'
+import AvatarCropper from '../components/AvatarCropper.vue'
+
+const router = useRouter()
+const chat = useChatStore()
+const isMobile = inject('isMobile')
+const toggleMobileSidebar = inject('toggleMobileSidebar')
+
+// ── 移动端滚动标题隐藏 ──
+const headerVisible = ref(true)
+let lastScroll = 0
+function onScroll(e) {
+  if (!isMobile) return
+  const top = e.target.scrollTop
+  if (top > 40 && top - lastScroll > 8) headerVisible.value = false
+  else if (top - lastScroll < -4) headerVisible.value = true
+  lastScroll = top
+}
+
+// ═══════════════════════════════════════
+// 用户信息
+// ═══════════════════════════════════════
+const showUserAvatarPicker = ref(false)
+const nicknameInput = ref(null)
+const personaInput = ref(null)
+
+const userAvatarStyle = computed(() => {
+  if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  return { background: '#e07b6c' }
+})
+
+async function onUserAvatarSave(base64) {
+  await uploadUserAvatar(base64)
+  showUserAvatarPicker.value = false
+}
+
+// 昵称
+const editingNickname = ref(false)
+const userNicknameInput = ref('')
+
+function startEditNickname() {
+  userNicknameInput.value = userNickname.value
+  editingNickname.value = true
+  nextTick(() => nicknameInput.value?.focus())
+}
+
+async function saveNickname() {
+  editingNickname.value = false
+  const val = userNicknameInput.value.trim()
+  if (val !== (userNickname.value || '')) {
+    await saveUserConfig({ nickname: val, persona: undefined })
+  }
+}
+
+// 自画像
+const editingPersona = ref(false)
+const userPersonaInput = ref('')
+
+function startEditPersona() {
+  userPersonaInput.value = userPersona.value
+  editingPersona.value = true
+  nextTick(() => personaInput.value?.focus())
+}
+
+async function savePersona() {
+  editingPersona.value = false
+  const val = userPersonaInput.value.trim()
+  if (val !== (userPersona.value || '')) {
+    await saveUserConfig({ nickname: undefined, persona: val })
+  }
+}
+
+function cancelEditPersona() {
+  editingPersona.value = false
+}
+
+// ═══════════════════════════════════════
+// 招募弹窗
+// ═══════════════════════════════════════
+const recruit = reactive({
+  show: false,
+  step: 'input',   // 'input' | 'preview'
+  desc: '',
+  loading: false,
+  saving: false,
+  error: '',
+  result: null,    // 生成结果
+})
+
+function openRecruit() {
+  recruit.show = true
+  recruit.step = 'input'
+  recruit.desc = ''
+  recruit.error = ''
+  recruit.result = null
+  recruit.loading = false
+  recruit.saving = false
+}
+
+function closeRecruit() {
+  recruit.show = false
+}
+
+async function doGenerate() {
+  const desc = recruit.desc.trim()
+  if (!desc || recruit.loading) return
+
+  recruit.loading = true
+  recruit.error = ''
+
+  try {
+    const result = await api.generateCharacterPreview(desc)
+    if (result.error) {
+      recruit.error = result.error
+      return
+    }
+    recruit.result = result
+    recruit.step = 'preview'
+  } catch (err) {
+    recruit.error = '生成失败: ' + (err.message || '网络错误')
+  } finally {
+    recruit.loading = false
+  }
+}
+
+async function confirmRecruit() {
+  if (!recruit.result || recruit.saving) return
+  recruit.saving = true
+  recruit.error = ''
+
+  try {
+    const r = await api.createCharacter({
+      name: recruit.result.name,
+      display_name: recruit.result.display_name,
+      base_prompt: recruit.result.base_prompt,
+      emotion_baseline: recruit.result.emotion_baseline,
+    })
+    if (r.error) {
+      recruit.error = r.error
+      return
+    }
+    // 成功：关闭弹窗，刷新角色列表
+    recruit.show = false
+    await chat.loadCharacters()
+  } catch (err) {
+    recruit.error = '入库失败: ' + (err.message || '网络错误')
+  } finally {
+    recruit.saving = false
+  }
+}
+
+function parseVAD(raw) {
+  try {
+    if (typeof raw === 'string') return JSON.parse(raw)
+    if (typeof raw === 'object') return raw
+  } catch {}
+  return { valence: 0.5, arousal: 0.5, dominance: 0.5 }
+}
+
+// ═══════════════════════════════════════
+// 角色详情弹窗
+// ═══════════════════════════════════════
+const detail = reactive({
+  show: false,
+  char: null,
+  editName: '',
+  editPrompt: '',
+  dirty: false,
+  vad: { valence: 50, arousal: 50, dominance: 50 },
+})
+
+function openCharDetail(c) {
+  detail.char = c
+  detail.editName = c.display_name || ''
+  detail.editPrompt = c.base_prompt || ''
+  detail.dirty = false
+  const vad = parseVAD(c.emotion_baseline)
+  detail.vad.valence = Math.round(vad.valence * 100)
+  detail.vad.arousal = Math.round(vad.arousal * 100)
+  detail.vad.dominance = Math.round(vad.dominance * 100)
+  detail.show = true
+}
+
+function closeCharDetail() {
+  detail.show = false
+  detail.char = null
+}
+
+async function saveCharDetail() {
+  if (!detail.char || !detail.dirty) return
+  const c = detail.char
+  await api.updateCharacter(c.id, {
+    display_name: detail.editName,
+    base_prompt: detail.editPrompt,
+    emotion_baseline: JSON.stringify({
+      valence: detail.vad.valence / 100,
+      arousal: detail.vad.arousal / 100,
+      dominance: detail.vad.dominance / 100,
+    }),
+  })
+  detail.dirty = false
+  await chat.loadCharacters()
+  // 更新本地引用
+  const updated = chat.characters.find(x => x.id === c.id)
+  if (updated) detail.char = updated
+}
+
+function goChat(c) {
+  closeCharDetail()
+  chat.selectChar(c.id)
+  router.push('/chat/' + c.id)
+}
+
+async function deleteChar() {
+  const c = detail.char
+  if (!c) return
+  if (c.name === 'default') {
+    alert('默认角色不能删除')
+    return
+  }
+  if (!confirm(`确定要删除「${c.display_name}」吗？此操作不可撤销。`)) return
+  await api.deleteCharacter(c.id)
+  detail.show = false
+  detail.char = null
+  await chat.loadCharacters()
+}
+
+// ── 角色头像 ──
+const showCharAvatarPicker = ref(false)
+
+function openCharAvatarEditor() {
+  showCharAvatarPicker.value = true
+}
+
+async function onCharAvatarSave(base64) {
+  if (!detail.char) return
+  await api.uploadAvatar(detail.char.id, base64 || '')
+  await chat.loadCharacters()
+  const updated = chat.characters.find(x => x.id === detail.char.id)
+  if (updated) detail.char = updated
+  showCharAvatarPicker.value = false
+}
+
+async function removeCharAvatar() {
+  if (!detail.char) return
+  await api.uploadAvatar(detail.char.id, '')
+  await chat.loadCharacters()
+  const updated = chat.characters.find(x => x.id === detail.char.id)
+  if (updated) detail.char = updated
+}
+
+// ── 初始化 ──
+onMounted(async () => {
+  await loadUserAvatar()
+  await loadUserConfig()
+  userNicknameInput.value = userNickname.value
+  userPersonaInput.value = userPersona.value
+  if (chat.characters.length === 0) await chat.loadCharacters()
+})
+</script>
+
+<style scoped>
+.tavern-view {
+  padding: 32px;
+  overflow-y: auto;
+  height: 100vh; height: 100dvh;
+  flex: 1;
+}
+
+.page-header {
+  margin-bottom: 24px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+.page-header.header-hidden { transform: translateY(-100%); margin-bottom: 0; }
+.page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
+.is-clickable { cursor: pointer; }
+
+/* ── 卡片共用 ── */
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── 用户行 ── */
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.user-avatar {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 22px; font-weight: 700;
+  flex-shrink: 0;
+}
+.user-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
+.user-avatar.clickable:hover { opacity: 0.85; }
+
+.user-info { flex: 1; min-width: 0; }
+
+.user-nickname-row, .user-persona-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.user-nickname-text {
+  font-size: 17px; font-weight: 600; color: var(--text-bright);
+  cursor: pointer; padding: 2px 0;
+}
+.user-persona-text {
+  font-size: 13px; color: var(--text-secondary);
+  cursor: pointer; padding: 2px 0;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.user-persona-text:hover, .user-nickname-text:hover { color: var(--accent); }
+
+.edit-pen {
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 14px; padding: 2px 4px;
+  opacity: 0; transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.user-nickname-row:hover .edit-pen, .user-persona-row:hover .edit-pen { opacity: 1; }
+.edit-pen:hover { color: var(--accent); }
+
+.inline-input {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--text-bright);
+  outline: none;
+  font-family: inherit;
+}
+.nickname-input { font-size: 17px; font-weight: 600; width: 200px; }
+.persona-input { width: 100%; resize: none; }
+
+/* ── 角色网格 ── */
+.section-title {
+  font-size: 15px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.char-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 20px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.char-card:hover {
+  background: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+.char-card-avatar {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 24px; font-weight: 700;
+  flex-shrink: 0;
+}
+
+.char-card-name {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+  text-align: center;
+  line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.char-card-status {
+  font-size: 11px; color: var(--text-secondary);
+}
+.char-card-status.active { color: var(--accent); }
+.char-card-status.idle { color: var(--text-secondary); }
+
+/* ── 招募卡片 ── */
+.recruit-card {
+  border-style: dashed;
+  border-color: rgba(224, 123, 108, 0.35);
+  justify-content: center;
+  min-height: 160px;
+}
+.recruit-card:hover {
+  border-color: var(--accent);
+  background: rgba(224, 123, 108, 0.06);
+}
+
+.recruit-plus {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: rgba(224, 123, 108, 0.12);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 300;
+}
+.recruit-card span {
+  font-size: 13px; color: var(--accent); font-weight: 500;
+}
+
+/* ── 弹窗共用 ── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000;
+}
+
+.modal-panel {
+  background: var(--bg-primary); border-radius: 18px;
+  width: min(520px, 92vw); max-height: 85vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.modal-wide { width: min(580px, 94vw); }
+
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
+
+.modal-close {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: none; background: var(--glass-bg-strong);
+  color: var(--text-secondary); font-size: 15px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
+
+.modal-body {
+  padding: 20px 22px 22px;
+  overflow-y: auto; flex: 1;
+}
+
+.modal-hint { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5; }
+
+.modal-actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;
+}
+
+.recruit-textarea { width: 100%; resize: vertical; min-height: 80px; font-family: inherit; }
+.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
+.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+
+.gen-error { margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,77,79,0.06); color: var(--danger); font-size: 13px; }
+
+/* ── 预览卡片 ── */
+.preview-card {
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 14px; padding: 18px;
+}
+
+.preview-name {
+  font-size: 20px; font-weight: 700; color: var(--text-bright);
+  margin-bottom: 8px;
+}
+
+.preview-emotion { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.vad-tag {
+  font-size: 12px; padding: 3px 10px; border-radius: 20px;
+  background: rgba(224, 123, 108, 0.1); color: var(--accent-hover);
+}
+
+.preview-prompt-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.preview-prompt {
+  padding: 12px; border-radius: 10px;
+  background: var(--bg-primary); border: 1px solid var(--glass-border);
+  font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow-y: auto; color: var(--text-primary); font-family: inherit;
+}
+
+/* ── 角色详情弹窗 ── */
+.fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
+
+.detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.detail-avatar {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 26px; font-weight: 700; flex-shrink: 0;
+}
+.detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
+.detail-avatar.clickable:hover { opacity: 0.85; }
+
+.sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
+.sp-btn-small:hover { border-color: var(--accent); }
+.sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
+.sp-btn-subtle:hover { color: var(--danger); border-color: transparent; }
+
+.prompt-textarea { min-height: 180px; resize: vertical; font-family: inherit; }
+
+.vad-sliders { display: flex; flex-direction: column; gap: 6px; }
+.vad-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.vad-label { font-size: 12px; color: var(--text-secondary); width: 56px; flex-shrink: 0; }
+.vad-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.vad-val { font-size: 12px; color: var(--text-secondary); width: 36px; text-align: right; }
+
+.detail-actions {
+  display: flex; align-items: center; margin-top: 18px; gap: 10px;
+}
+.detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
+.btn-ghost.danger { color: var(--danger); }
+.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
+
+/* ── 弹窗动画 ── */
+.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+
+@keyframes modal-pop {
+  0% { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 移动端 ── */
+@media (max-width: 767px) {
+  .tavern-view { padding: 16px; }
+  .page-header {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    padding: 8px 0; margin-bottom: 18px;
+  }
+  .char-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+  }
+  .char-card { padding: 14px 8px 12px; }
+  .char-card-avatar { width: 52px; height: 52px; font-size: 20px; }
+  .char-card-name { font-size: 13px; }
+  .recruit-plus { width: 40px; height: 40px; font-size: 24px; }
+  .recruit-card { min-height: 132px; }
+}
+</style>

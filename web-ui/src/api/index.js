@@ -32,6 +32,24 @@ export async function generateCharacter(description) {
   return res.json()
 }
 
+/** 预览模式生成角色：只生成不入库，由前端确认后再调 createCharacter */
+export async function generateCharacterPreview(description) {
+  const res = await fetch(`${BASE}/characters/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description, save: false }),
+  })
+  return res.json()
+}
+
+/** 直接创建角色（确认入库） */
+export async function createCharacter(data) {
+  const res = await fetch(`${BASE}/characters`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
 export async function deleteCharacter(id) {
   const res = await fetch(`${BASE}/characters/${id}`, { method: 'DELETE' })
   return res.json()

@@ -48,6 +48,9 @@
     <Transition name="menu-slide">
       <div v-if="showMoreMenu" class="more-menu-overlay" @click.self="showMoreMenu = false">
         <div class="more-menu-panel">
+          <router-link to="/tavern" class="more-menu-item" @click="onMenuItemClick">
+            🏮 酒馆
+          </router-link>
           <router-link to="/gallery" class="more-menu-item" @click="onMenuItemClick">
             🖼️ 相册
           </router-link>
