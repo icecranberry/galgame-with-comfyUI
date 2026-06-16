@@ -38,7 +38,7 @@ Node.js + Express (主控 :3000)
   │           └── ONNX Embedding（Jina v2 base zh）
   │
   └── WebSocket/HTTP → ComfyUI (:8188)
-                        └── SDXL / FLUX 模型推理
+                        └── Anima 模型推理
 
 PM2 管理: Node.js + Python 向量服务 + ComfyUI（三个进程）
 ```

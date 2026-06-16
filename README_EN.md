@@ -2,7 +2,7 @@
 
 [中文](./README.md)
 
-A **local AI companion app** inspired by visual novels. Chat with customizable characters, trigger **ComfyUI**-powered image generation (SDXL / FLUX) from conversation context, with emotion simulation, long-term memory retrieval, and a social-feed-style "Moments" system.
+A **local AI companion app** inspired by visual novels. Chat with customizable characters, trigger **ComfyUI**-powered image generation (Anima) from conversation context, with emotion simulation, long-term memory retrieval, and a social-feed-style "Moments" system.
 
 ---
 
@@ -39,7 +39,7 @@ Node.js + Express (Core :3099)
   │           └── ONNX Embedding (Jina v2 base zh, 768d)
   │
   └── WebSocket/HTTP → ComfyUI (:8188)
-                        └── SDXL / FLUX inference
+                        └── Anima inference
 ```
 
 ---
@@ -62,7 +62,7 @@ Node.js + Express (Core :3099)
 
 - **Node.js** ≥ 18
 - **Python** ≥ 3.10 (with venv)
-- **ComfyUI** installed and running on `:8188` (SDXL / FLUX models ready)
+- **ComfyUI** installed and running on `:8188` (Anima models ready)
 - **DeepSeek API Key**
 
 ---

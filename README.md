@@ -2,7 +2,7 @@
 
 [English](./README_EN.md)
 
-受 Galgame 启发的**本地 AI 陪伴应用**。与可自定义人格的角色对话，AI 根据上下文自动触发 **ComfyUI** 生图（SDXL / FLUX），具备三维情绪模拟、长期记忆检索、朋友圈动态系统。
+受 Galgame 启发的**本地 AI 陪伴应用**。与可自定义人格的角色对话，AI 根据上下文自动触发 **ComfyUI** 生图（Anima），具备三维情绪模拟、长期记忆检索、朋友圈动态系统。
 
 ---
 
@@ -39,7 +39,7 @@ Node.js + Express (主控 :3099)
   │           └── ONNX Embedding（Jina v2 base zh, 768d）
   │
   └── WebSocket/HTTP → ComfyUI (:8188)
-                        └── SDXL / FLUX 推理
+                        └── Anima 推理
 ```
 
 ---
@@ -62,7 +62,7 @@ Node.js + Express (主控 :3099)
 
 - **Node.js** ≥ 18
 - **Python** ≥ 3.10（含 venv）
-- **ComfyUI** 已安装并运行在 `:8188`（SDXL / FLUX 模型已就绪）
+- **ComfyUI** 已安装并运行在 `:8188`（Anima 模型已就绪）
 - **DeepSeek API Key**
 
 ---
