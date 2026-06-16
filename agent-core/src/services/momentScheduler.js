@@ -32,6 +32,7 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT * FROM characters
       WHERE is_active = 1
+        AND moments_disabled = 0
         AND (next_moment_at IS NULL OR next_moment_at <= datetime('now'))
       ORDER BY next_moment_at ASC NULLS FIRST
       LIMIT 1
@@ -41,7 +42,7 @@ async function tick() {
       // 没有需要发帖的角色——给下一个最早发帖的角色估算时间
       const nextUp = db.prepare(`
         SELECT display_name, next_moment_at FROM characters
-        WHERE is_active = 1 AND next_moment_at IS NOT NULL
+        WHERE is_active = 1 AND moments_disabled = 0 AND next_moment_at IS NOT NULL
         ORDER BY next_moment_at ASC LIMIT 1
       `).get();
       if (nextUp) {
@@ -49,7 +50,7 @@ async function tick() {
       } else {
         console.log('[momentScheduler] No active characters or all have NULL next_moment_at — initializing...');
         // 首次启动：给所有角色设定首次发帖时间（1~4 小时内）
-        const chars = db.prepare('SELECT id FROM characters WHERE is_active = 1 AND next_moment_at IS NULL').all();
+        const chars = db.prepare('SELECT id FROM characters WHERE is_active = 1 AND moments_disabled = 0 AND next_moment_at IS NULL').all();
         for (const c of chars) {
           const delay = 1 * 3600_000 + Math.random() * 3 * 3600_000;
           const nextAt = new Date(Date.now() + delay).toISOString();

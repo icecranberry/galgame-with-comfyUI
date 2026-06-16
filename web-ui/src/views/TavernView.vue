@@ -76,8 +76,8 @@
          ═══════════════════════════════════════════ -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="recruit.show" class="modal-overlay" @click.self="closeRecruit">
-          <div class="modal-panel">
+        <div v-if="recruit.show" class="modal-overlay">
+          <div class="modal-panel modal-wide">
             <div class="modal-header">
               <h3>招募新角色</h3>
               <button class="modal-close" @click="closeRecruit">✕</button>
@@ -116,7 +116,16 @@
                   placeholder="角色名称"
                 />
                 <div class="preview-prompt-label">人格提示词</div>
-                <pre class="preview-prompt">{{ recruit.result.base_prompt }}</pre>
+                <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
+
+                <!-- 朋友圈开关 -->
+                <div class="toggle-row" style="margin-top:12px">
+                  <span class="toggle-label">不看ta的朋友圈</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="recruit.result.momentsDisabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
               </div>
               <div class="modal-actions modal-actions-between">
                 <button
@@ -148,7 +157,7 @@
          ═══════════════════════════════════════════ -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="detail.show" class="modal-overlay" @click.self="closeCharDetail">
+        <div v-if="detail.show" class="modal-overlay">
           <div class="modal-panel modal-wide">
             <div class="modal-header">
               <h3>{{ detail.char?.display_name }}</h3>
@@ -182,13 +191,21 @@
                   rows="12"
                   @input="detail.dirty = true"
                 ></textarea>
+
+                <!-- 朋友圈开关 -->
+                <div class="toggle-row" style="margin-top:12px">
+                  <span class="toggle-label">不看ta的朋友圈</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="detail.momentsDisabled" @change="detail.dirty = true" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
               </div>
 
               <!-- 操作按钮 -->
               <div class="detail-actions">
                 <button class="btn-ghost danger" @click="deleteChar">🗑 删除角色</button>
                 <div class="detail-actions-right">
-                  <button class="btn-ghost" @click="goChat(detail.char)">💬 去聊天</button>
                   <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
                 </div>
               </div>
@@ -340,7 +357,7 @@ async function doGenerate() {
       recruit.error = result.error
       return
     }
-    recruit.result = result
+    recruit.result = { ...result, momentsDisabled: false }
     recruit.step = 'preview'
   } catch (err) {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
@@ -360,6 +377,7 @@ async function confirmRecruit() {
       display_name: recruit.result.display_name,
       base_prompt: recruit.result.base_prompt,
       emotion_baseline: recruit.result.emotion_baseline,
+      moments_disabled: recruit.result.momentsDisabled ? 1 : 0,
     })
     if (r.error) {
       recruit.error = r.error
@@ -383,6 +401,7 @@ const detail = reactive({
   char: null,
   editName: '',
   editPrompt: '',
+  momentsDisabled: false,
   dirty: false,
 })
 
@@ -390,6 +409,7 @@ function openCharDetail(c) {
   detail.char = c
   detail.editName = c.display_name || ''
   detail.editPrompt = c.base_prompt || ''
+  detail.momentsDisabled = !!c.moments_disabled
   detail.dirty = false
   detail.show = true
 }
@@ -405,18 +425,13 @@ async function saveCharDetail() {
   await api.updateCharacter(c.id, {
     display_name: detail.editName,
     base_prompt: detail.editPrompt,
+    moments_disabled: detail.momentsDisabled,
   })
   detail.dirty = false
   await chat.loadCharacters()
   // 更新本地引用
   const updated = chat.characters.find(x => x.id === c.id)
   if (updated) detail.char = updated
-}
-
-function goChat(c) {
-  closeCharDetail()
-  chat.selectChar(c.id)
-  router.push('/chat/' + c.id)
 }
 
 async function deleteChar() {
@@ -762,6 +777,55 @@ onMounted(async () => {
   max-height: 500px; overflow-y: auto; color: var(--text-primary); font-family: inherit;
 }
 
+/* ── Toggle Switch ── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #c5c0ba;
+  border-radius: 22px;
+  transition: background 0.25s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
 /* ── 角色详情弹窗 ── */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 
@@ -834,5 +898,66 @@ onMounted(async () => {
   .char-card-name { font-size: 13px; }
   .recruit-plus { width: 40px; height: 40px; font-size: 24px; }
   .recruit-card { min-height: 132px; }
+
+  /* ── 弹窗移动端适配 ── */
+  .modal-panel {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .modal-header {
+    padding: 14px 16px;
+  }
+  .modal-header h3 {
+    font-size: 16px;
+  }
+  .modal-body {
+    padding: 0 16px 16px;
+  }
+  .modal-actions {
+    flex-wrap: wrap; gap: 8px;
+  }
+  .modal-actions-between {
+    flex-direction: column; gap: 10px;
+  }
+  .modal-actions-right {
+    flex-wrap: wrap; gap: 8px; justify-content: flex-end;
+  }
+
+  /* 招募预览卡片 */
+  .preview-card {
+    padding: 14px;
+  }
+  .preview-name-input {
+    font-size: 18px;
+    padding: 4px 8px; margin: -4px -8px;
+  }
+  .preview-prompt {
+    font-size: 14px;
+    max-height: 350px;
+  }
+
+  /* 角色详情 */
+  .detail-avatar-row {
+    gap: 10px; margin-bottom: 12px;
+  }
+  .detail-avatar {
+    width: 52px; height: 52px; font-size: 22px;
+  }
+  .detail-actions {
+    flex-wrap: wrap; gap: 8px;
+  }
+  .detail-actions-right {
+    margin-left: 0; flex-wrap: wrap; gap: 8px;
+  }
+  .prompt-textarea {
+    min-height: 350px; font-size: 16px;
+  }
+  .modal-wide .prompt-textarea {
+    font-size: 16px;
+  }
+  .modal-wide .fi {
+    font-size: 16px;
+  }
 }
 </style>

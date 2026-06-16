@@ -631,7 +631,7 @@ function renderContent(text) {
   max-width:75%; padding:10px 14px; border-radius:8px;
   font-size:14px; line-height:1.6; word-break:break-word;
 }
-.message.user .msg-bubble { background:#2b5278; color:#e8e8e8; }
+.message.user .msg-bubble { background:#a25740; color:#e8e8e8; }
 .message.assistant .msg-bubble { background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); }
 
 /* 打字指示器：6 个圆点依次变色的 wave 动画 */

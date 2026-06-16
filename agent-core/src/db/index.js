@@ -162,6 +162,7 @@ function initSchema(db) {
       avatar_path TEXT,
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
       is_active INTEGER DEFAULT 1,
+      moments_disabled INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -232,12 +233,15 @@ function initSchema(db) {
 }
 
 function migrateMomentsSchema(db) {
-  // characters 表: 新增 next_moment_at 列（如果不存在）
   try {
     const cols = db.prepare(`PRAGMA table_info(characters)`).all();
     if (!cols.find(c => c.name === 'next_moment_at')) {
       db.exec(`ALTER TABLE characters ADD COLUMN next_moment_at DATETIME`);
       console.log('[db] Added characters.next_moment_at column');
+    }
+    if (!cols.find(c => c.name === 'moments_disabled')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN moments_disabled INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.moments_disabled column (default 0)');
     }
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);

@@ -501,6 +501,10 @@ router.post('/characters/:id/chat', async (req, res) => {
       // 路径 D: 强制生图 — 用户主动勾选，跳过智能判断
       console.log('[chat] force image gen: user requested, triggering needImage flow');
       await handleNeedImageFlow(conversationId, character, send);
+    } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
+      // 路径 E: 计数器归零 → 强制生图（独立于 autoImageJudge 开关）
+      console.log('[chat] counter forced: skipping judge, triggering needImage flow');
+      await handleNeedImageFlow(conversationId, character, send);
     } else if (config.features.autoImageJudge) {
       // 路径 C: 静默判断 — 延迟约 300ms，SSE 保持打开以支持后续生图进度推送
       try {
@@ -656,13 +660,6 @@ function getDefaultPrompt() {
  * 极轻量 DeepSeek 调用（只需"是/否"），延迟通常 < 300ms
  */
 async function judgeImageNeed(conversationId) {
-  // 计数器归零 → 跳过 LLM 判断，直接返回"是"进入生图
-  const judgeCounter = imageJudgeCounters.get(conversationId) ?? 3;
-  if (judgeCounter <= 0) {
-    console.log(`[chat] judgeImageNeed[${conversationId}]: counter is ${judgeCounter}, skipping LLM → YES`);
-    return true;
-  }
-
   const db = getDb();
   // 直接从 raw_messages 取最后一条用户/Agent 完整消息，无需合并
   const lastUser = db.prepare(`
@@ -945,7 +942,7 @@ async function generateReplyGuesses(conversationId, character) {
 
 规则：
 1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或表达不同态度
-2. 每条 5~25 个汉字，像真实聊天一样自然口语化
+2. 每条 5~25 个汉字，像真实聊天一样自然口语化，风趣幽默。
 3. 直接输出 JSON，不要任何解释
 
 输出格式：
