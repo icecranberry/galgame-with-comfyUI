@@ -68,6 +68,33 @@ export async function getRecentImages(characterId) {
   return res.json()
 }
 
+// ── Character Relationships ──
+export async function getRelationships(characterId) {
+  const res = await fetch(`${BASE}/relationships?character_id=${characterId}`)
+  return res.json()
+}
+
+export async function createRelationship(from_character_id, to_character_id, relationship_text) {
+  const res = await fetch(`${BASE}/relationships`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_character_id, to_character_id, relationship_text }),
+  })
+  return res.json()
+}
+
+export async function updateRelationship(id, relationship_text) {
+  const res = await fetch(`${BASE}/relationships/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ relationship_text }),
+  })
+  return res.json()
+}
+
+export async function deleteRelationship(id) {
+  const res = await fetch(`${BASE}/relationships/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({
@@ -292,6 +319,18 @@ export function connectMomentsStream(onNewPost) {
 
 export async function getMoment(id) {
   const res = await fetch(`${BASE}/moments/${id}`)
+  return res.json()
+}
+
+/** 获取朋友圈未读计数 */
+export async function getMomentsUnread() {
+  const res = await fetch(`${BASE}/moments/unread-count`)
+  return res.json()
+}
+
+/** 清零朋友圈未读计数 */
+export async function markMomentsRead() {
+  const res = await fetch(`${BASE}/moments/mark-read`, { method: 'POST' })
   return res.json()
 }
 

@@ -34,8 +34,14 @@ function userNickname() {
 
 const sseClients = new Set();
 
-/** 向所有连接的 SSE 客户端广播新帖事件 */
+/** 向所有连接的 SSE 客户端广播新帖事件，同时递增 DB 未读计数 */
 function broadcastNewPost(postInfo) {
+  // 递增 DB 未读计数
+  try {
+    const db = getDb();
+    db.prepare('UPDATE moment_unread SET count = count + 1 WHERE id = 1').run();
+  } catch (e) { /* 非关键路径，忽略错误 */ }
+
   const data = JSON.stringify(postInfo);
   const payload = `event: new_post\ndata: ${data}\n\n`;
   for (const client of sseClients) {
@@ -64,6 +70,20 @@ router.get('/stream', (req, res) => {
     clearInterval(heartbeat);
     sseClients.delete(res);
   });
+});
+
+// GET /api/moments/unread-count — 获取未读计数（页面初始加载时调用）
+router.get('/unread-count', (req, res) => {
+  const db = getDb();
+  const row = db.prepare('SELECT count FROM moment_unread WHERE id = 1').get();
+  res.json({ count: row ? row.count : 0 });
+});
+
+// POST /api/moments/mark-read — 清零未读计数（进入朋友圈页面时调用）
+router.post('/mark-read', (req, res) => {
+  const db = getDb();
+  db.prepare('UPDATE moment_unread SET count = 0 WHERE id = 1').run();
+  res.json({ ok: true });
 });
 
 // ──────────────── 朋友圈帖子 ────────────────

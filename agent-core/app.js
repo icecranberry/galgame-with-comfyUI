@@ -10,6 +10,7 @@ import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
+import relationshipsRoutes from './src/routes/relationships.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 
 const app = express();
@@ -32,6 +33,7 @@ app.use('/api/images', imagesRoutes);
 app.use('/api/characters', charactersRoutes);  // /api/characters CRUD
 app.use('/api/config', configRoutes);
 app.use('/api/moments', momentsRoutes);
+app.use('/api/relationships', relationshipsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {

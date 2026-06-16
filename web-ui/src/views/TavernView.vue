@@ -115,7 +115,7 @@
                   class="preview-name-input"
                   placeholder="角色名称"
                 />
-                <div class="preview-prompt-label">人格提示词</div>
+                <div class="preview-prompt-label">人格提示词（——关于外观描述：若不准确自行纠正或传图给其他AI反推提示词）</div>
                 <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
 
                 <!-- 朋友圈开关 -->
@@ -176,39 +176,38 @@
                   <button v-if="detail.char?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeCharAvatar">移除</button>
                 </div>
               </div>
-
-              <!-- 白色内容卡片 — 与招募预览一致 -->
               <div class="preview-card">
-                <!-- 展示名 -->
                 <label class="fl">展示名</label>
                 <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
-
-                <!-- 人格提示词 -->
                 <label class="fl" style="margin-top:12px">人格提示词</label>
-                <textarea
-                  v-model="detail.editPrompt"
-                  class="fi prompt-textarea"
-                  rows="12"
-                  @input="detail.dirty = true"
-                ></textarea>
-
-                <!-- 朋友圈开关 -->
-                <div class="toggle-row" style="margin-top:12px">
-                  <span class="toggle-label">不看ta的朋友圈</span>
-                  <label class="toggle-switch">
-                    <input type="checkbox" v-model="detail.momentsDisabled" @change="detail.dirty = true" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
+                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" rows="12" @input="detail.dirty = true"></textarea>
               </div>
-
-              <!-- 操作按钮 -->
               <div class="detail-actions">
                 <button class="btn-ghost danger" @click="deleteChar">🗑 删除角色</button>
                 <div class="detail-actions-right">
                   <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- 悬浮侧边栏 -->
+          <div class="detail-float">
+            <div class="float-card" @click="showRelationGraph = true">
+              <div class="float-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                </svg>
+              </div>
+              <span class="float-label">关系图</span>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不看ta的朋友圈</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.momentsDisabled" @change="detail.dirty = true" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
           </div>
         </div>
@@ -236,6 +235,17 @@
         @save="onUserAvatarSave"
       />
     </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         角色关系图（独立全屏弹窗）
+         ═══════════════════════════════════════════ -->
+    <RelationshipGraph
+      v-if="detail.char"
+      :visible="showRelationGraph"
+      :center-character="detail.char"
+      :all-characters="chat.characters"
+      @close="showRelationGraph = false"
+    />
   </div>
 </template>
 
@@ -246,6 +256,7 @@ import { useChatStore } from '../stores/chat.js'
 import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
+import RelationshipGraph from '../components/RelationshipGraph.vue'
 
 const router = useRouter()
 const chat = useChatStore()
@@ -408,6 +419,8 @@ const detail = reactive({
   momentsDisabled: false,
   dirty: false,
 })
+
+const showRelationGraph = ref(false)
 
 function openCharDetail(c) {
   detail.char = c
@@ -849,6 +862,62 @@ onMounted(async () => {
 .detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
 .detail-avatar.clickable:hover { opacity: 0.85; }
 
+/* ── 悬浮侧边栏 ── */
+.detail-float {
+  position: absolute;
+  left: calc(50% + min(380px, 48.5vw) + 16px);
+  top: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 20px;
+}
+.float-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+  transition: all 0.15s;
+  width: 180px;
+}
+.float-card:first-child {
+  cursor: pointer;
+}
+.float-card:first-child:hover {
+  background: rgba(251, 233, 222, 0.85);
+  border-color: rgba(224,123,108,0.2);
+  box-shadow: 0 4px 20px rgba(224,123,108,0.1);
+}
+.float-card-toggle {
+  justify-content: space-between;
+  gap: 0;
+}
+.float-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: rgba(224,123,108,0.1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.float-label {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  white-space: nowrap;
+}
+.float-switch {
+  flex-shrink: 0;
+}
+
+/* override old layout styles */
+.detail-layout { display: block; }
+.detail-sidebar { display: none; }
+
 .sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
 .sp-btn-small:hover { border-color: var(--accent); }
 .sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
@@ -952,6 +1021,14 @@ onMounted(async () => {
   .detail-avatar-row {
     gap: 10px; margin-bottom: 12px;
   }
+  .detail-layout { flex-direction: column; }
+  .detail-float {
+    position: static; transform: none;
+    flex-direction: row; width: 100%; margin-top: 12px;
+  }
+  .float-card { width: auto; flex: 1; padding: 10px 12px; gap: 6px; }
+  .float-icon { width: 28px; height: 28px; border-radius: 8px; }
+  .float-label { font-size: 12px; }
   .detail-avatar {
     width: 52px; height: 52px; font-size: 22px;
   }

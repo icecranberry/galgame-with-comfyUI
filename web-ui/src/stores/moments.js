@@ -140,6 +140,7 @@ export const useMomentsStore = defineStore('moments', () => {
   // ── SSE 推送 ──
   let _sseConn = null
   let _reconnectTimer = null
+  let _connecting = null   // Promise 锁：防止并发 connectSSE
 
   function _onNewPost() {
     // SSE 推送始终累加计数——即使在朋友圈页面，自动生成的帖子也不自动刷新列表
@@ -147,20 +148,40 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   function _createSSE() {
+    // 关闭旧连接，防止重复注册回调
+    if (_sseConn && !_sseConn._closed) _sseConn.close()
     _sseConn = api.connectMomentsStream(_onNewPost)
   }
 
   /** 连接 SSE 推送流，收到新帖时 newPostCount++；断线自动重连 */
-  function connectSSE() {
+  async function connectSSE() {
+    // 防止并发调用导致重复建立 SSE 连接
+    if (_connecting) return _connecting
     if (_sseConn && !_sseConn._closed) return
-    _createSSE()
 
-    if (_reconnectTimer) clearInterval(_reconnectTimer)
-    _reconnectTimer = setInterval(() => {
-      if (_sseConn && _sseConn._closed) {
-        _createSSE()
-      }
-    }, 15000)
+    _connecting = (async () => {
+      // 先从 DB 加载持久化的未读计数作为初始值
+      try {
+        const { count } = await api.getMomentsUnread()
+        newPostCount.value = count || 0
+      } catch { /* 非关键 */ }
+
+      _createSSE()
+
+      if (_reconnectTimer) clearInterval(_reconnectTimer)
+      _reconnectTimer = setInterval(async () => {
+        if (_sseConn && _sseConn._closed) {
+          // 重连前同步 DB 计数（覆盖断线期间的遗漏）
+          try {
+            const { count } = await api.getMomentsUnread()
+            newPostCount.value = count || 0
+          } catch { /* 非关键 */ }
+          _createSSE()
+        }
+      }, 15000)
+    })()
+
+    try { await _connecting } finally { _connecting = null }
   }
 
   /** 断开 SSE */
@@ -169,9 +190,10 @@ export const useMomentsStore = defineStore('moments', () => {
     if (_sseConn) { _sseConn.close(); _sseConn = null }
   }
 
-  /** 标记已读：newPostCount 归零 */
-  function markSeen() {
+  /** 标记已读：清零本地计数 + 调 API 清零 DB 计数 */
+  async function markSeen() {
     newPostCount.value = 0
+    try { await api.markMomentsRead() } catch { /* 非关键 */ }
   }
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filteredPosts, charactersWithPosts,

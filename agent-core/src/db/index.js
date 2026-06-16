@@ -152,6 +152,23 @@ function initSchema(db) {
       UNIQUE(post_id)
     );
 
+    -- 朋友圈未读计数表（单用户，单行）
+    CREATE TABLE IF NOT EXISTS moment_unread (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      count INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO moment_unread (id, count) VALUES (1, 0);
+
+    -- 角色关系表（有向：from → to，关系文本存储在 relationship_text 中）
+    CREATE TABLE IF NOT EXISTS character_relationships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      to_character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      relationship_text TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(from_character_id, to_character_id)
+    );
+
     -- 角色配置表
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,6 +227,8 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(post_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
+    CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
