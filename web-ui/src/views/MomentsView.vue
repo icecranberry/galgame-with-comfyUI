@@ -1,7 +1,7 @@
 <template>
   <div class="moments-view">
     <!-- 顶栏 -->
-    <div class="moments-header" :class="{ 'header-hidden': !headerVisible }">
+    <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
       <button class="btn-post" @click="showPicker = !showPicker" :disabled="genPending">
         {{ genPending ? '扰动中...' : '💫扰动世界线' }}

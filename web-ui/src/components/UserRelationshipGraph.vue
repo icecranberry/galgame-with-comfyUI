@@ -5,7 +5,7 @@
         <div class="rel-panel">
           <!-- Header -->
           <div class="rel-header">
-            <h3>🔗 {{ centerCharacter.display_name }} 的关系图</h3>
+            <h3>🔗 我的关系图</h3>
             <button class="rel-close" @click="$emit('close')">✕</button>
           </div>
 
@@ -24,21 +24,24 @@
             >
               <Background :gap="24" />
 
-              <!-- Custom character node -->
+              <!-- Custom user node (center) -->
+              <template #node-userNode="nodeProps">
+                <UserNode :data="nodeProps.data" />
+              </template>
+
+              <!-- Custom character node (peripheral) -->
               <template #node-charNode="nodeProps">
                 <CharacterNode
                   :data="nodeProps.data"
-                  :is-center="nodeProps.data.isCenter"
+                  :is-center="false"
                 />
               </template>
-
-              <!-- Custom edge label styling -->
             </VueFlow>
           </div>
 
           <!-- Hint -->
           <div class="rel-hint">
-            💡 从{{ centerCharacter.display_name }}的头像按住拖拽到其他角色即可连线，例如{{ centerCharacter.display_name }} —老板→ 小明，代表小明是{{ centerCharacter.display_name }}的老板。
+            💡 从你的头像按住拖拽到角色即可连线，例如你 —基友→ 小明
           </div>
         </div>
 
@@ -53,16 +56,13 @@
             </div>
             <div class="rel-dialog-body">
               <p class="rel-dialog-desc">
-                {{ inputDialog.isEdit
-                  ? `${centerCharacter.display_name} → ${inputDialog.targetName}`
-                  : `${centerCharacter.display_name} → ${inputDialog.targetName}`
-                }}
+                我 → {{ inputDialog.targetName }}
               </p>
               <input
                 ref="inputRef"
                 v-model="inputDialog.text"
                 class="rel-input"
-                placeholder="输入关系，如：女同事"
+                placeholder="输入关系，如：女朋友"
                 @keydown.enter="confirmInput"
               />
               <div class="rel-dialog-actions">
@@ -83,17 +83,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, nextTick, markRaw, inject } from 'vue'
+import { ref, reactive, computed, watch, nextTick, markRaw, inject, onMounted } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import * as api from '../api/index.js'
+import { userAvatar, userNickname } from '../userConfig.js'
 import CharacterNode from './CharacterNode.vue'
+import UserNode from './UserNode.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  centerCharacter: { type: Object, required: true },
   allCharacters: { type: Array, required: true },
 })
 
@@ -101,7 +102,7 @@ const emit = defineEmits(['close'])
 const confirmFn = inject('confirm')
 
 const { addEdges, removeEdges, fitView } = useVueFlow()
-const nodeTypes = markRaw({ charNode: markRaw(CharacterNode) })
+const nodeTypes = markRaw({ userNode: markRaw(UserNode), charNode: markRaw(CharacterNode) })
 
 const elements = ref([])
 
@@ -113,12 +114,9 @@ const inputDialog = reactive({
   isEdit: false,
   text: '',
   targetName: '',
-  sourceId: '',
   targetId: '',
-  sourceHandle: null,
-  targetHandle: null,
-  edgeId: null,   // non-null when editing existing
-  pendingEdge: null, // { source, target, sourceHandle, targetHandle }
+  edgeId: null,
+  pendingEdge: null,
 })
 
 // ── Existing relationships (loaded from API) ──
@@ -129,12 +127,10 @@ const CENTER_X = 540
 const CENTER_Y = 456
 const RADIUS = 336
 
-// ── isValidConnection: only allow center → other ──
+// ── isValidConnection: only allow user (source) → character (target) ──
 function isValidConnection(connection) {
-  // source must be the center character
-  if (connection.source !== String(props.centerCharacter.id)) return false
-  // target must not be the center character
-  if (connection.target === String(props.centerCharacter.id)) return false
+  // source must be the user node
+  if (connection.source !== 'user') return false
   // no duplicate edges
   const exists = elements.value.some(
     el => el.source === connection.source && el.target === connection.target
@@ -145,30 +141,27 @@ function isValidConnection(connection) {
 
 // ── Build nodes / edges from characters ──
 async function buildGraph() {
-  const center = props.centerCharacter
-  const others = props.allCharacters.filter(c => c.id !== center.id)
+  const others = props.allCharacters || []
 
-  // Build nodes synchronously first — show avatars immediately
+  // Build nodes
   const graphNodes = []
 
-  // Center node
+  // User center node
   graphNodes.push({
-    id: String(center.id),
-    type: 'charNode',
+    id: 'user',
+    type: 'userNode',
     position: { x: CENTER_X - 60, y: CENTER_Y - 60 },
     data: {
-      id: center.id,
-      display_name: center.display_name,
-      avatar_path: center.avatar_path,
-      avatar_color: center.avatar_color,
-      isCenter: true,
+      avatar_url: userAvatar.value,
+      nickname: userNickname.value || '我',
+      avatar_color: '#e07b6c',
     },
     draggable: false,
     selectable: false,
     connectable: true,
   })
 
-  // Other nodes: circular layout
+  // Character nodes: circular layout
   const angleStep = (2 * Math.PI) / Math.max(others.length, 1)
   others.forEach((c, i) => {
     const angle = i * angleStep - Math.PI / 2
@@ -193,25 +186,24 @@ async function buildGraph() {
 
   // Load existing relationships from API
   try {
-    const res = await api.getRelationships(center.id)
+    const res = await api.getUserRelationships()
     existingRels.value = res.relationships || []
   } catch (err) {
-    console.warn('[RelationshipGraph] failed to load relationships:', err.message)
+    console.warn('[UserRelationshipGraph] failed to load relationships:', err.message)
     existingRels.value = []
   }
 
   // Collect node IDs for edge validation
   const nodeIds = new Set(graphNodes.map(n => n.id))
 
-  // Build edges — only include those whose source AND target exist in current nodes
-  // Also compute sourceHandle based on target position relative to center
+  // Build edges
   const nodePosMap = Object.fromEntries(graphNodes.map(n => [n.id, n.position]))
   const centerPos = { x: CENTER_X, y: CENTER_Y }
 
   const graphEdges = existingRels.value
-    .filter(rel => nodeIds.has(String(rel.from_character_id)) && nodeIds.has(String(rel.to_character_id)))
+    .filter(rel => nodeIds.has('user') && nodeIds.has(String(rel.character_id)))
     .map(rel => {
-      const targetPos = nodePosMap[String(rel.to_character_id)]
+      const targetPos = nodePosMap[String(rel.character_id)]
       let sourceHandle = 'source-top'
       let targetHandle = 'target-top'
       if (targetPos) {
@@ -227,8 +219,8 @@ async function buildGraph() {
       }
       return {
         id: `e-${rel.id}`,
-        source: String(rel.from_character_id),
-        target: String(rel.to_character_id),
+        source: 'user',
+        target: String(rel.character_id),
         sourceHandle,
         targetHandle,
         label: rel.relationship_text,
@@ -242,9 +234,9 @@ async function buildGraph() {
       }
     })
 
-  console.log('[RelationshipGraph] built', graphNodes.length, 'nodes,', graphEdges.length, 'edges (filtered from', existingRels.value.length, 'relations)')
+  console.log('[UserRelationshipGraph] built', graphNodes.length, 'nodes,', graphEdges.length, 'edges')
 
-  // Set nodes first via v-model, wait for vue-flow to build nodeLookup, then add edges
+  // Set nodes first, then add edges
   elements.value = graphNodes
   await new Promise(r => setTimeout(r, 0))
   if (graphEdges.length > 0) addEdges(graphEdges)
@@ -253,10 +245,10 @@ async function buildGraph() {
   fitView({ padding: 0.1, duration: 200 })
 }
 
-// ── Watch visible / centerCharacter ──
+// ── Watch visible ──
 watch(
-  () => [props.visible, props.centerCharacter?.id],
-  ([v]) => {
+  () => props.visible,
+  (v) => {
     if (v) buildGraph()
   },
   { immediate: true }
@@ -264,21 +256,14 @@ watch(
 
 // ── Connect handler (new edge drawn) ──
 function onConnect(connection) {
-  console.log('[RelationshipGraph] onConnect:', connection)
   const targetNode = elements.value.find(el => el.id === connection.target)
-  if (!targetNode) {
-    console.warn('[RelationshipGraph] onConnect: target node not found for id', connection.target)
-    return
-  }
+  if (!targetNode) return
 
   inputDialog.show = true
   inputDialog.isEdit = false
   inputDialog.text = ''
   inputDialog.targetName = targetNode.data.display_name
-  inputDialog.sourceId = connection.source
   inputDialog.targetId = connection.target
-  inputDialog.sourceHandle = connection.sourceHandle || null
-  inputDialog.targetHandle = connection.targetHandle || null
   inputDialog.edgeId = null
   inputDialog.pendingEdge = connection
 
@@ -297,7 +282,6 @@ function onEdgeClick({ edge }) {
   inputDialog.targetName = targetNode?.data?.display_name || ''
   inputDialog.edgeId = relId
   inputDialog.pendingEdge = null
-  inputDialog.sourceId = edge.source
   inputDialog.targetId = edge.target
 
   nextTick(() => inputRef.value?.focus())
@@ -308,8 +292,6 @@ function cancelInput() {
   inputDialog.text = ''
   inputDialog.pendingEdge = null
   inputDialog.edgeId = null
-  inputDialog.sourceHandle = null
-  inputDialog.targetHandle = null
 }
 
 async function confirmInput() {
@@ -319,7 +301,7 @@ async function confirmInput() {
   if (inputDialog.isEdit) {
     // Edit existing
     try {
-      const res = await api.updateRelationship(inputDialog.edgeId, text)
+      const res = await api.updateUserRelationship(inputDialog.edgeId, text)
       if (res.error) {
         alert('保存失败: ' + res.error)
         return
@@ -337,24 +319,17 @@ async function confirmInput() {
       const cached = existingRels.value.find(r => r.id === inputDialog.edgeId)
       if (cached) cached.relationship_text = text
     } catch (err) {
-      console.error('[RelationshipGraph] update failed:', err.message)
+      console.error('[UserRelationshipGraph] update failed:', err.message)
       alert('保存失败: ' + err.message)
       return
     }
   } else {
     // Create new
     try {
-      console.log('[RelationshipGraph] creating relationship:', {
-        from: parseInt(inputDialog.sourceId),
-        to: parseInt(inputDialog.targetId),
-        text
-      })
-      const res = await api.createRelationship(
-        parseInt(inputDialog.sourceId),
+      const res = await api.createUserRelationship(
         parseInt(inputDialog.targetId),
         text
       )
-      console.log('[RelationshipGraph] API response:', res)
       if (res.error) {
         alert('创建失败: ' + res.error)
         return
@@ -367,10 +342,8 @@ async function confirmInput() {
       // Add edge via imperative API
       const newEdge = {
         id: `e-${created.id}`,
-        source: String(created.from_character_id),
-        target: String(created.to_character_id),
-        sourceHandle: inputDialog.sourceHandle || undefined,
-        targetHandle: inputDialog.targetHandle || undefined,
+        source: 'user',
+        target: String(created.character_id),
         label: created.relationship_text,
         style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
@@ -383,7 +356,7 @@ async function confirmInput() {
       addEdges([newEdge])
       existingRels.value.push(created)
     } catch (err) {
-      console.error('[RelationshipGraph] create failed:', err.message)
+      console.error('[UserRelationshipGraph] create failed:', err.message)
       alert('创建失败: ' + err.message)
       return
     }
@@ -407,12 +380,12 @@ async function deleteEdge() {
   if (!ok) return
 
   try {
-    await api.deleteRelationship(inputDialog.edgeId)
+    await api.deleteUserRelationship(inputDialog.edgeId)
     removeEdges([edgeId])
     elements.value = elements.value.filter(el => el.id !== edgeId)
     existingRels.value = existingRels.value.filter(r => r.id !== inputDialog.edgeId)
   } catch (err) {
-    console.error('[RelationshipGraph] delete failed:', err.message)
+    console.error('[UserRelationshipGraph] delete failed:', err.message)
     alert('删除失败: ' + err.message)
     return
   }

@@ -95,6 +95,33 @@ export async function deleteRelationship(id) {
   return res.json()
 }
 
+// ── User Relationships ──
+export async function getUserRelationships() {
+  const res = await fetch(`${BASE}/user-relationships`)
+  return res.json()
+}
+
+export async function createUserRelationship(character_id, relationship_text) {
+  const res = await fetch(`${BASE}/user-relationships`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id, relationship_text }),
+  })
+  return res.json()
+}
+
+export async function updateUserRelationship(id, relationship_text) {
+  const res = await fetch(`${BASE}/user-relationships/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ relationship_text }),
+  })
+  return res.json()
+}
+
+export async function deleteUserRelationship(id) {
+  const res = await fetch(`${BASE}/user-relationships/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({

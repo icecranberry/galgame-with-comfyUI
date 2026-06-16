@@ -159,6 +159,15 @@ function initSchema(db) {
     );
     INSERT OR IGNORE INTO moment_unread (id, count) VALUES (1, 0);
 
+    -- 用户关系表（用户 → 角色，用户为单例无 user_id，每个角色唯一一条）
+    CREATE TABLE IF NOT EXISTS user_relationships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      relationship_text TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(character_id)
+    );
+
     -- 角色关系表（有向：from → to，关系文本存储在 relationship_text 中）
     CREATE TABLE IF NOT EXISTS character_relationships (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,7 +235,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(is_deleted, status);
     CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(post_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_user_rels_char ON user_relationships(character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
   `);

@@ -95,16 +95,17 @@ router.get('/', (req, res) => {
   const posts = db.prepare(`
     SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
       (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id AND is_deleted = 0) AS comment_count,
-      (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count
+      (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count,
+      (SELECT id FROM moment_likes WHERE post_id = mp.id) IS NOT NULL AS liked
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
     WHERE mp.is_deleted = 0 AND mp.status = 'done'
     ORDER BY mp.id DESC
   `).all().map(p => ({
     ...p,
+    liked: !!p.liked,
     images: JSON.parse(p.images || '[]'),
     created_at: toISO(p.created_at),
-    liked: !!db.prepare('SELECT id FROM moment_likes WHERE post_id = ?').get(p.id),
   }));
 
   res.json({ posts });

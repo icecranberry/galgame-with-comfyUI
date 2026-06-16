@@ -5,10 +5,11 @@
  * "# Reasonix executor handoff"，导致 auto-title 全部变成
  * "# Reasonix executo…"。
  *
- * 修复：从 .display.json（存有每条消息的摘要）取最后一个 hash
- * 对应的标题，写入 desktop-topic-titles.json 并标记 source=manual。
+ * 修复：从 .display.json（存有每条消息的摘要）取第一个 hash
+ * 对应的标题（即该会话的第一条用户消息），写入
+ * desktop-topic-titles.json 并标记 source=manual。
  *
- * 使用方式：
+ * 使用方式（取第一条消息）：
  *   node scripts/fix-session-titles.mjs
  */
 
@@ -75,12 +76,12 @@ for (const [sessionFile, topicId] of Object.entries(sessionToTopic)) {
     continue;
   }
 
-  // 取最后一个 hash 的值作为标题
+  // 取第一个 hash 的值作为标题（用户的第一条消息）
   const hashKeys = Object.keys(hashes);
   if (hashKeys.length === 0) continue;
 
-  const lastHash = hashKeys[hashKeys.length - 1];
-  let newTitle = hashes[lastHash];
+  const firstHash = hashKeys[0];
+  let newTitle = hashes[firstHash];
 
   // 去掉换行和多余空白（保持单行）
   newTitle = newTitle
@@ -94,21 +95,24 @@ for (const [sessionFile, topicId] of Object.entries(sessionToTopic)) {
   }
 
   const oldTitle = currentTitles[topicId];
-  const oldSource = currentSources[topicId];
 
-  // 只在旧标题是 auto 且为 "# Reasonix executo…" 时才修复
-  // （或者旧 source 不存在/为 auto）
-  const isAutoOrMissing = !oldSource || oldSource === 'auto';
-  const isBadTitle = oldTitle === '# Reasonix executo…';
-
-  if (isAutoOrMissing && isBadTitle) {
-    currentTitles[topicId] = newTitle;
-    currentSources[topicId] = 'manual';
-    console.log(`  ✅ ${topicId}`);
-    console.log(`     旧: ${oldTitle}`);
-    console.log(`     新: ${newTitle}`);
-    fixCount++;
+  // 无变化则跳过
+  if (oldTitle === newTitle) {
+    continue;
   }
+
+  // 跳过已手动重命名且标题干净简洁（≤15 字）的用户自定义标题
+  const oldSource = currentSources[topicId];
+  if (oldSource === 'manual' && oldTitle.length <= 15 && !oldTitle.startsWith('# Reasonix')) {
+    continue;
+  }
+
+  currentTitles[topicId] = newTitle;
+  currentSources[topicId] = 'manual';
+  console.log(`  ✅ ${topicId}`);
+  console.log(`     旧: ${oldTitle}`);
+  console.log(`     新: ${newTitle}`);
+  fixCount++;
 }
 
 // --------------------- 落盘 ---------------------

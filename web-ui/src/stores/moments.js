@@ -140,7 +140,7 @@ export const useMomentsStore = defineStore('moments', () => {
   // ── SSE 推送 ──
   let _sseConn = null
   let _reconnectTimer = null
-  let _connecting = null   // Promise 锁：防止并发 connectSSE
+  let _sseStarted = false   // 同步 flag：防止重复建立 SSE
 
   function _onNewPost() {
     // SSE 推送始终累加计数——即使在朋友圈页面，自动生成的帖子也不自动刷新列表
@@ -148,44 +148,40 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   function _createSSE() {
-    // 关闭旧连接，防止重复注册回调
     if (_sseConn && !_sseConn._closed) _sseConn.close()
     _sseConn = api.connectMomentsStream(_onNewPost)
   }
 
   /** 连接 SSE 推送流，收到新帖时 newPostCount++；断线自动重连 */
   async function connectSSE() {
-    // 防止并发调用导致重复建立 SSE 连接
-    if (_connecting) return _connecting
+    if (_sseStarted) return
     if (_sseConn && !_sseConn._closed) return
+    _sseStarted = true
 
-    _connecting = (async () => {
-      // 先从 DB 加载持久化的未读计数作为初始值
-      try {
-        const { count } = await api.getMomentsUnread()
-        newPostCount.value = count || 0
-      } catch { /* 非关键 */ }
+    // 先从 DB 加载持久化的未读计数作为初始值
+    try {
+      const { count } = await api.getMomentsUnread()
+      newPostCount.value = count || 0
+    } catch { /* 非关键 */ }
 
-      _createSSE()
+    _createSSE()
 
-      if (_reconnectTimer) clearInterval(_reconnectTimer)
-      _reconnectTimer = setInterval(async () => {
-        if (_sseConn && _sseConn._closed) {
-          // 重连前同步 DB 计数（覆盖断线期间的遗漏）
-          try {
-            const { count } = await api.getMomentsUnread()
-            newPostCount.value = count || 0
-          } catch { /* 非关键 */ }
-          _createSSE()
-        }
-      }, 15000)
-    })()
-
-    try { await _connecting } finally { _connecting = null }
+    if (_reconnectTimer) clearInterval(_reconnectTimer)
+    _reconnectTimer = setInterval(async () => {
+      if (_sseConn && _sseConn._closed) {
+        // 重连前同步 DB 计数（覆盖断线期间的遗漏）
+        try {
+          const { count } = await api.getMomentsUnread()
+          newPostCount.value = count || 0
+        } catch { /* 非关键 */ }
+        _createSSE()
+      }
+    }, 15000)
   }
 
   /** 断开 SSE */
   function disconnectSSE() {
+    _sseStarted = false
     if (_reconnectTimer) { clearInterval(_reconnectTimer); _reconnectTimer = null }
     if (_sseConn) { _sseConn.close(); _sseConn = null }
   }

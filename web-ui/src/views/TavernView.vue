@@ -43,6 +43,23 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
+         用户关系图入口卡片
+         ═══════════════════════════════════════════ -->
+    <div class="relation-entry card" @click="showUserRelationGraph = true">
+      <div class="relation-entry-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+          <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+        </svg>
+      </div>
+      <div class="relation-entry-text">
+        <span class="relation-entry-title">我的关系图</span>
+        <span class="relation-entry-hint">查看和管理你与所有角色的关系</span>
+      </div>
+      <span class="relation-entry-arrow">›</span>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
     <div class="section-title">角色</div>
@@ -246,6 +263,15 @@
       :all-characters="chat.characters"
       @close="showRelationGraph = false"
     />
+
+    <!-- ═══════════════════════════════════════════
+         用户关系图（独立全屏弹窗）
+         ═══════════════════════════════════════════ -->
+    <UserRelationshipGraph
+      :visible="showUserRelationGraph"
+      :all-characters="chat.characters"
+      @close="showUserRelationGraph = false"
+    />
   </div>
 </template>
 
@@ -257,6 +283,7 @@ import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
+import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
 
 const router = useRouter()
 const chat = useChatStore()
@@ -421,6 +448,7 @@ const detail = reactive({
 })
 
 const showRelationGraph = ref(false)
+const showUserRelationGraph = ref(false)
 
 function openCharDetail(c) {
   detail.char = c
@@ -585,6 +613,49 @@ onMounted(async () => {
 }
 .user-nickname-row:hover .edit-pen, .user-persona-row:hover .edit-pen { opacity: 1; }
 .edit-pen:hover { color: var(--accent); }
+
+/* ── 关系图入口卡片 ── */
+.relation-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.relation-entry:hover {
+  background: rgba(224, 123, 108, 0.04);
+  border-color: rgba(224, 123, 108, 0.2);
+  box-shadow: 0 2px 16px rgba(224, 123, 108, 0.08);
+}
+
+.relation-entry-icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: rgba(224, 123, 108, 0.1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.relation-entry-text {
+  flex: 1;
+  display: flex; flex-direction: column;
+  gap: 2px;
+}
+.relation-entry-title {
+  font-size: 15px; font-weight: 600; color: var(--text-bright);
+}
+.relation-entry-hint {
+  font-size: 12px; color: var(--text-secondary);
+}
+
+.relation-entry-arrow {
+  font-size: 22px; color: var(--text-secondary);
+  flex-shrink: 0;
+}
 
 .inline-input {
   background: rgba(255,255,255,0.9);
@@ -885,7 +956,7 @@ onMounted(async () => {
   border: 1px solid rgba(0,0,0,0.06);
   box-shadow: 0 2px 16px rgba(0,0,0,0.06);
   transition: all 0.15s;
-  width: 180px;
+  width: 220px;
 }
 .float-card:first-child {
   cursor: pointer;

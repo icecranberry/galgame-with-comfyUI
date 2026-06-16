@@ -83,13 +83,10 @@ const moments = useMomentsStore()
 const showMoreMenu = ref(false)
 
 onMounted(() => {
-  // 移动端兜底：如果 NavBar CSS 隐藏导致未连接 SSE，Sidebar 补上
-  moments.connectSSE()
+  // SSE 连接由 NavBar 统一管理（NavBar 在移动端 CSS 隐藏但组件仍挂载，onMounted 正常触发）
 })
 
-onUnmounted(() => {
-  // 不在此处断开 SSE，因为 NavBar/Sidebar 共享同一连接
-})
+onUnmounted(() => {})
 
 async function onCharClick(c) {
   await chat.selectChar(c.id)
