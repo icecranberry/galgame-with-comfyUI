@@ -315,6 +315,14 @@ router.post('/characters/:id/chat', async (req, res) => {
     let systemPrompt = globalRules ? globalRules + '\n\n' : '';
     systemPrompt += character?.base_prompt || getDefaultPrompt();
 
+    // 3.5 用户→角色关系注入（酒馆关系图设定）
+    const userRel = db.prepare(
+      'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    ).get(characterId);
+    if (userRel && userRel.relationship_text) {
+      systemPrompt += `\n\n【角色关系】user与你的关系：你对于user而言是${userRel.relationship_text}。请在对话中自然体现这层关系，不必刻意说明，行为举止应符合这层关系。`;
+    }
+
     // 4. 生图意图（正则强匹配 → 强制生成）
     const explicitImageIntent = detectImageIntent(message);
     if (explicitImageIntent) {

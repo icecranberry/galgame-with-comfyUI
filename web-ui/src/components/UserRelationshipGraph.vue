@@ -21,6 +21,7 @@
               :is-valid-connection="isValidConnection"
               @connect="onConnect"
               @edge-click="onEdgeClick"
+              @pane-ready="onPaneReady"
             >
               <Background :gap="24" />
 
@@ -105,6 +106,7 @@ const { addEdges, removeEdges, fitView } = useVueFlow()
 const nodeTypes = markRaw({ userNode: markRaw(UserNode), charNode: markRaw(CharacterNode) })
 
 const elements = ref([])
+const paneReady = ref(false)
 
 const inputRef = ref(null)
 
@@ -241,8 +243,27 @@ async function buildGraph() {
   await new Promise(r => setTimeout(r, 0))
   if (graphEdges.length > 0) addEdges(graphEdges)
   await nextTick()
+  // Wait for VueFlow internal layout + custom node avatar images to settle
   await new Promise(r => requestAnimationFrame(r))
-  fitView({ padding: 0.1, duration: 200 })
+  await new Promise(r => requestAnimationFrame(r))
+  if (paneReady.value) {
+    fitView({ padding: 0.1, duration: 200 })
+  }
+  // Safety: delayed fitView after images have definitely loaded
+  setTimeout(() => {
+    fitView({ padding: 0.1, duration: 200 })
+  }, 400)
+}
+
+// ── pane-ready: VueFlow 完成首次渲染后触发 ──
+function onPaneReady() {
+  paneReady.value = true
+  // 若 buildGraph 已执行但 fitView 因 pane 未就绪而跳过，此处补刀
+  if (elements.value.length > 0) {
+    setTimeout(() => {
+      fitView({ padding: 0.1, duration: 200 })
+    }, 100)
+  }
 }
 
 // ── Watch visible ──
@@ -250,6 +271,7 @@ watch(
   () => props.visible,
   (v) => {
     if (v) buildGraph()
+    else paneReady.value = false
   },
   { immediate: true }
 )
