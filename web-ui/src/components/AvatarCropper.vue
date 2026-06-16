@@ -321,7 +321,7 @@ async function saveCrop() {
 /* ── 选择器弹窗 ── */
 .avpicker-overlay {
   position:fixed; inset:0; background:transparent;
-  display:flex; align-items:center; justify-content:center; z-index:1001;
+  display:flex; align-items:center; justify-content:center; z-index:11001;
   animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .avpicker-panel {
@@ -364,7 +364,7 @@ async function saveCrop() {
 /* ── 裁剪编辑器 ── */
 .crop-overlay {
   position:fixed; inset:0; background:transparent;
-  display:flex; align-items:center; justify-content:center; z-index:1002;
+  display:flex; align-items:center; justify-content:center; z-index:11002;
   animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .crop-panel {

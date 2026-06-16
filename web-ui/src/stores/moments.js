@@ -8,15 +8,45 @@ export const useMomentsStore = defineStore('moments', () => {
   const posts = ref([])           // 全量帖子数据
   const loading = ref(false)
   const page = ref(0)             // 当前渲染到第几批（0-based）
+  const filterCharacterId = ref(null)  // null = 全部
 
   // ── 红点通知状态（SSE 驱动）──
   const newPostCount = ref(0)
   const isViewingMoments = ref(false)   // 用户当前是否在朋友圈页面
 
-  // 当前可见的帖子（前 page * PAGE_SIZE 条）
-  const visiblePosts = computed(() => posts.value.slice(0, page.value * PAGE_SIZE))
+  // 按角色筛选后的帖子
+  const filteredPosts = computed(() => {
+    if (filterCharacterId.value === null) return posts.value
+    return posts.value.filter(p => p.character_id === filterCharacterId.value)
+  })
 
-  const hasMore = computed(() => posts.value.length > page.value * PAGE_SIZE)
+  // 当前可见的帖子（前 page * PAGE_SIZE 条）
+  const visiblePosts = computed(() => filteredPosts.value.slice(0, page.value * PAGE_SIZE))
+
+  const hasMore = computed(() => filteredPosts.value.length > page.value * PAGE_SIZE)
+
+  // 有帖子的角色列表（按最新帖子时间降序）
+  const charactersWithPosts = computed(() => {
+    const map = new Map()
+    for (const p of posts.value) {
+      const id = p.character_id
+      if (!id) continue
+      const existing = map.get(id)
+      const postTime = new Date(p.created_at || 0).getTime()
+      if (!existing || postTime > existing._latestPostAt) {
+        map.set(id, {
+          character_id: id,
+          display_name: p.display_name || '未知',
+          avatar_path: p.avatar_path || '',
+          avatar_color: p.avatar_color || '#e07b6c',
+          _latestPostAt: postTime,
+        })
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b._latestPostAt - a._latestPostAt)
+      .map(({ _latestPostAt, ...rest }) => rest) // 去掉内部字段
+  })
 
   // 加载全部帖子（页面首次挂载时调用）
   async function loadPosts() {
@@ -33,6 +63,12 @@ export const useMomentsStore = defineStore('moments', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  // 设置筛选角色（null = 全部）
+  function setFilter(id) {
+    filterCharacterId.value = id
+    page.value = 1
   }
 
   // 加载更多（滚动到底部 → 前端 slice 多展示一批，无网络请求）
@@ -138,8 +174,8 @@ export const useMomentsStore = defineStore('moments', () => {
     newPostCount.value = 0
   }
 
-  return { posts, visiblePosts, loading, hasMore, page,
+  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments,
-    loadPosts, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
+    loadPosts, setFilter, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
     connectSSE, disconnectSSE, markSeen }
 })

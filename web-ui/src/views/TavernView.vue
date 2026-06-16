@@ -216,22 +216,26 @@
     </Teleport>
 
     <!-- 角色头像裁剪器 -->
-    <AvatarCropper
-      v-if="showCharAvatarPicker"
-      :title="`设置 ${detail.char?.display_name || ''} 头像`"
-      :show-recent-tab="false"
-      @close="showCharAvatarPicker = false"
-      @save="onCharAvatarSave"
-    />
+    <Teleport to="body">
+      <AvatarCropper
+        v-if="showCharAvatarPicker"
+        :title="`设置 ${detail.char?.display_name || ''} 头像`"
+        :show-recent-tab="false"
+        @close="showCharAvatarPicker = false"
+        @save="onCharAvatarSave"
+      />
+    </Teleport>
 
     <!-- 用户头像裁剪器 -->
-    <AvatarCropper
-      v-if="showUserAvatarPicker"
-      title="设置我的头像"
-      :show-recent-tab="false"
-      @close="showUserAvatarPicker = false"
-      @save="onUserAvatarSave"
-    />
+    <Teleport to="body">
+      <AvatarCropper
+        v-if="showUserAvatarPicker"
+        title="设置我的头像"
+        :show-recent-tab="false"
+        @close="showUserAvatarPicker = false"
+        @save="onUserAvatarSave"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -471,6 +475,13 @@ async function onCharAvatarSave(base64) {
 
 async function removeCharAvatar() {
   if (!detail.char) return
+  const ok = await confirmFn({
+    title: '移除头像',
+    message: `确定要移除「${detail.char.display_name}」的头像吗？`,
+    okText: '移除',
+    danger: true,
+  })
+  if (!ok) return
   await api.uploadAvatar(detail.char.id, '')
   await chat.loadCharacters()
   const updated = chat.characters.find(x => x.id === detail.char.id)

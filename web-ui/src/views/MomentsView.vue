@@ -30,6 +30,31 @@
     <!-- 内容区 -->
     <div ref="scrollContainer" class="moments-feed" @scroll="onScroll">
 
+      <!-- 角色筛选条 -->
+      <div class="moments-filter-bar">
+        <div
+          ref="filterScrollRef"
+          class="filter-scroll"
+          @wheel="onFilterWheel"
+        >
+          <div
+            class="filter-avatar filter-all"
+            :class="{ active: moments.filterCharacterId === null }"
+            @click="moments.setFilter(null)"
+          >全部</div>
+          <div
+            v-for="ch in moments.charactersWithPosts"
+            :key="ch.character_id"
+            class="filter-avatar"
+            :class="{ active: moments.filterCharacterId === ch.character_id }"
+            :style="ch.avatar_path
+              ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' }
+              : { background: ch.avatar_color || '#e07b6c' }"
+            @click="moments.setFilter(ch.character_id)"
+          >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
+        </div>
+      </div>
+
       <!-- 帖子列表 -->
       <TransitionGroup name="post-enter" tag="div" class="moments-list">
         <MomentCard
@@ -75,6 +100,17 @@ const showPicker = ref(false)
 const genPending = ref(false)
 const previewImage = ref(null)
 const scrollContainer = ref(null)
+const filterScrollRef = ref(null)
+
+function onFilterWheel(e) {
+  const el = filterScrollRef.value
+  if (!el) return
+  const atLeftEdge = el.scrollLeft <= 0 && e.deltaY < 0
+  const atRightEdge = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 && e.deltaY > 0
+  if (atLeftEdge || atRightEdge) return
+  e.preventDefault()
+  el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
+}
 
 const characters = computed(() => chat.characters)
 
@@ -223,6 +259,74 @@ async function triggerGenerate(c) {
   padding: 20px 24px;
 }
 
+/* 筛选条外层：与帖子列表同宽 */
+.moments-filter-bar {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 0 0 14px 0;
+}
+
+/* 内层滚动容器：padding 给阴影和缩放留空间，负 margin 保持对齐 */
+.filter-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 6px;
+  margin: -8px -6px 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.filter-scroll::-webkit-scrollbar { display: none; }
+
+/* 所有头像（含「全部」）统一尺寸模型 */
+.filter-avatar {
+  flex-shrink: 0;
+  width: 54px;
+  height: 54px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.55;
+  border: 2px solid var(--glass-border);
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  user-select: none;
+  background-size: cover;
+  background-position: center;
+}
+.filter-avatar.active {
+  opacity: 1;
+  border-color: var(--accent);
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
+}
+.filter-avatar:hover:not(.active) {
+  opacity: 0.85;
+  border-color: var(--text-secondary);
+}
+
+/* 「全部」按钮：只覆盖视觉属性，结构尺寸继承 .filter-avatar */
+.filter-all {
+  background: rgba(255,255,255,0.75);
+  color: var(--text-secondary);
+  font-size: 12px;
+  width: 54px;
+  height: 54px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.filter-all.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  opacity: 1;
+}
+
 .moments-list {
   max-width: 600px;
   margin: 0 auto;
@@ -274,6 +378,7 @@ async function triggerGenerate(c) {
   }
   .moments-feed { padding: 80px 12px 8px; }
   .moments-list { max-width: 100%; }
+  .moments-filter-bar { max-width: 100%; padding: 0 0 6px 0; }
   .picker-dropdown { right: 12px; }
 }
 </style>
