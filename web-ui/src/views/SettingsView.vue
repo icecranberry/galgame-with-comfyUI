@@ -9,7 +9,7 @@
       <!-- ComfyUI params: 对话配图 + 朋友圈配图 -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">建议选择1~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
+        <p class="fd">建议选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
 
         <!-- 对话配图 -->
         <div class="moments-subsection">
@@ -51,6 +51,7 @@
       <div class="card">
         <h3>测试画风</h3>
         <p class="fd">使用上方对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
+        <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别</p>
 
         <div class="style-test-row">
           <button

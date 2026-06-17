@@ -42,7 +42,7 @@
 
           <!-- Hint -->
           <div class="rel-hint">
-            💡 从你的头像按住拖拽到角色即可连线，例如你 —基友→ 小明
+            💡 从你的头像按住拖拽到角色即可连线，例如你 —老板→ 小明，则小明是你的老板
           </div>
         </div>
 
@@ -57,13 +57,13 @@
             </div>
             <div class="rel-dialog-body">
               <p class="rel-dialog-desc">
-                我 → {{ inputDialog.targetName }}
+                我 → {{ `${inputDialog.targetName}——${inputDialog.targetName}是我的XX` }}
               </p>
               <input
                 ref="inputRef"
                 v-model="inputDialog.text"
                 class="rel-input"
-                placeholder="输入关系，如：女朋友"
+                placeholder="输入关系，如：老板"
                 @keydown.enter="confirmInput"
               />
               <div class="rel-dialog-actions">

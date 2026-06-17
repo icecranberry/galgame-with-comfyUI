@@ -315,14 +315,6 @@ router.post('/characters/:id/chat', async (req, res) => {
     let systemPrompt = globalRules ? globalRules + '\n\n' : '';
     systemPrompt += character?.base_prompt || getDefaultPrompt();
 
-    // 3.5 用户→角色关系注入（酒馆关系图设定）
-    const userRel = db.prepare(
-      'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
-    ).get(characterId);
-    if (userRel && userRel.relationship_text) {
-      systemPrompt += `\n\n【角色关系】user与你的关系：你对于user而言是${userRel.relationship_text}。请在对话中自然体现这层关系，不必刻意说明，行为举止应符合这层关系。`;
-    }
-
     // 4. 生图意图（正则强匹配 → 强制生成）
     const explicitImageIntent = detectImageIntent(message);
     if (explicitImageIntent) {
@@ -351,6 +343,34 @@ router.post('/characters/:id/chat', async (req, res) => {
     const msgs = [
       { role: 'system', content: systemPrompt },
     ];
+
+    // 5.0 用户→角色关系注入（酒馆关系图设定 —— 独立 system 消息）
+    const userRel = db.prepare(
+      'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    ).get(characterId);
+    if (userRel && userRel.relationship_text) {
+      msgs.push({
+        role: 'system',
+        content: `**【角色关系】你与user的关系：你对于user而言是${userRel.relationship_text}。这个关系为最高优先级，即使你在外有其他性格，但是你在user面前就是这样的。请在对话中自然体现这层关系，不必刻意说明，行为举止应符合这层关系。**`
+      });
+    }
+
+    // 5.0.5 角色间关系注入（酒馆关系图 —— 当前角色与其他角色的关系，在用户关系之后）
+    const charRels = db.prepare(`
+      SELECT cr.relationship_text, c.display_name
+      FROM character_relationships cr
+      JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
+      WHERE cr.from_character_id = ?
+    `).all(characterId);
+    if (charRels.length > 0) {
+      const relLines = charRels.map(r =>
+        `- ${r.display_name}是你的${r.relationship_text}`
+      ).join('\n');
+      msgs.push({
+        role: 'system',
+        content: `**【角色间关系】你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。**`
+      });
+    }
 
     // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
     const recentMoments = db.prepare(`

@@ -138,7 +138,13 @@ function formatTime(iso) {
 
 .char-list {
   flex: 1; overflow-y: auto;
+  padding-top: 10px;
+  scrollbar-width: none;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.char-list::-webkit-scrollbar {
+  display: none;
 }
 
 .char-item {
@@ -150,7 +156,7 @@ function formatTime(iso) {
 }
 .char-item:hover { background: rgba(255, 255, 255, 0.22); }
 .char-item.active {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgb(226 166 122 / 28%);
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
 }
 

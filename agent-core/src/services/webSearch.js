@@ -70,7 +70,7 @@ export async function searchCharacterInfo(query) {
 
   // 1. 萌娘百科（ACG 角色专业 wiki，大陆可直连）
   try {
-    const moe = await searchMoegirl(searchName);
+    const moe = await searchMoegirl(searchName, context);
     // 如有作品上下文，对结果排序并只保留匹配作品名的第一条（排除同名干扰）
     if (context && moe.length > 0) {
       const ctx = context.toLowerCase();
@@ -124,17 +124,90 @@ export async function searchCharacterInfo(query) {
 }
 
 /**
+ * 尝试将查询词作为页面标题直接解析（跟随 Wiki 重定向）
+ *
+ * 萌娘百科有很多角色简称/别名的重定向页，如"丽娜"→"亚历山德丽娜·莎芭丝缇安"。
+ * opensearch 不会跟随重定向，需要先用 action=query&redirects=1 尝试直接解析。
+ *
+ * @param {string} baseUrl - MediaWiki API 基地址
+ * @param {string} query - 页面标题（角色名）
+ * @returns {Promise<object|null>} 解析成功返回 { title, content, source }，失败返回 null
+ */
+async function tryDirectPageResolve(baseUrl, query) {
+  try {
+    const url = `${baseUrl}?${new URLSearchParams({
+      action: 'query',
+      titles: query,
+      redirects: '1',       // 跟随重定向页面
+      prop: 'extracts',
+      exintro: '1',
+      explaintext: '1',
+      format: 'json',
+      origin: '*',
+    })}`;
+
+    const res = await fetchWithTimeout(url, {
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    const data = await res.json();
+
+    // 记录重定向信息
+    if (data.query?.redirects?.length > 0) {
+      const r = data.query.redirects[0];
+      console.log(`[webSearch] page redirect resolved: "${r.from}" → "${r.to}"`);
+    }
+
+    const pages = data.query?.pages || {};
+    const pageData = Object.values(pages)[0];
+
+    // 页面不存在（missing）或无内容 → 返回 null，回退到搜索
+    if (!pageData || pageData.missing || !pageData.extract || pageData.extract.trim().length < 10) {
+      return null;
+    }
+
+    const canonicalTitle = pageData.title;
+    const pageUrl = `https://zh.moegirl.org.cn/${encodeURIComponent(canonicalTitle)}`;
+
+    console.log(`[webSearch] direct page resolve success: "${query}" → "${canonicalTitle}" (${pageData.extract.length} chars)`);
+
+    return {
+      title: canonicalTitle,
+      content: pageData.extract.slice(0, 2500),
+      source: pageUrl,
+    };
+  } catch (err) {
+    console.warn(`[webSearch] direct page resolve failed for "${query}": ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * 萌娘百科搜索（ACG 角色专业 wiki，MediaWiki API，大陆可直连）
  *
- * 使用 opensearch 接口搜索 → prop=extracts 获取摘要
+ * 1. 先尝试直接页面解析（跟随 wiki 重定向，如"丽娜"→完整页面）
+ * 2. 回退到 opensearch 搜索 → prop=extracts 获取摘要
+ *
+ * @param {string} query - 角色名
+ * @param {string} context - 作品上下文（可选，用于优化搜索关键词）
  */
-async function searchMoegirl(query) {
+async function searchMoegirl(query, context = '') {
   const BASE = 'https://mzh.moegirl.org.cn/api.php';
 
-  // Step 1: opensearch 搜索（返回标题 + URL）
+  // Step 0: 先尝试将查询词作为页面标题直接解析（跟随 redirects）
+  // 处理萌娘百科的角色简称/别名重定向（如"丽娜"→"亚历山德丽娜·莎芭丝缇安"）
+  if (query.length >= 2) {
+    const directResult = await tryDirectPageResolve(BASE, query);
+    if (directResult) {
+      return [directResult];
+    }
+  }
+
+  // Step 1: 直接解析失败，走 opensearch 搜索
+  // 有上下文时将上下文拼入搜索词，提高命中率
+  const searchQuery = context ? `${query} ${context}` : query;
   const searchUrl = `${BASE}?${new URLSearchParams({
     action: 'opensearch',
-    search: query,
+    search: searchQuery,
     format: 'json',
     limit: '5',
   })}`;

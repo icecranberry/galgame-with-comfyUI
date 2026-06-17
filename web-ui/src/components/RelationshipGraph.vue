@@ -54,10 +54,10 @@
             </div>
             <div class="rel-dialog-body">
               <p class="rel-dialog-desc">
-                {{ inputDialog.isEdit
+                {{ (inputDialog.isEdit
                   ? `${centerCharacter.display_name} → ${inputDialog.targetName}`
-                  : `${centerCharacter.display_name} → ${inputDialog.targetName}`
-                }}
+                  : `${centerCharacter.display_name} → ${inputDialog.targetName}`)
+                  + `：${inputDialog.targetName}是${centerCharacter.display_name}的什么人？`}}
               </p>
               <input
                 ref="inputRef"

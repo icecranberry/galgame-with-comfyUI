@@ -236,9 +236,12 @@
       <AvatarCropper
         v-if="showCharAvatarPicker"
         :title="`设置 ${detail.char?.display_name || ''} 头像`"
-        :show-recent-tab="false"
+        :show-recent-tab="true"
+        :recent-images="recentImages"
+        :recent-loading="recentLoading"
         @close="showCharAvatarPicker = false"
         @save="onCharAvatarSave"
+        @switch-to-recent="switchToRecent"
       />
     </Teleport>
 
@@ -500,9 +503,22 @@ async function deleteChar() {
 
 // ── 角色头像 ──
 const showCharAvatarPicker = ref(false)
+const recentImages = ref([])
+const recentLoading = ref(false)
 
 function openCharAvatarEditor() {
+  recentImages.value = []
   showCharAvatarPicker.value = true
+}
+
+async function switchToRecent() {
+  if (recentImages.value.length > 0) return
+  if (!detail.char?.id) return
+  recentLoading.value = true
+  try {
+    const d = await api.getRecentImages(detail.char.id)
+    recentImages.value = d.images || []
+  } catch {} finally { recentLoading.value = false }
 }
 
 async function onCharAvatarSave(base64) {

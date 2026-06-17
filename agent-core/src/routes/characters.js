@@ -147,19 +147,23 @@ router.post('/:id/avatar', (req, res) => {
   res.json({ ok: true, avatar_path: avatarPath });
 });
 
-// GET /api/characters/:id/recent-images — 获取该角色最近聊天生成的图片 URL
+// GET /api/characters/:id/recent-images — 获取该角色最近生成的图片（聊天配图 + 朋友圈配图）
 router.get('/:id/recent-images', (req, res) => {
   const db = getDb();
-  const conversationId = `char_${req.params.id}`;
-  const rows = db.prepare(`
+  const characterId = req.params.id;
+  const conversationId = `char_${characterId}`;
+
+  const urls = [];
+  const seen = new Set();
+
+  // 1. 聊天配图
+  const chatRows = db.prepare(`
     SELECT images FROM messages
     WHERE conversation_id = ? AND is_deleted = 0 AND images IS NOT NULL
     ORDER BY id DESC LIMIT 30
   `).all(conversationId);
 
-  const urls = [];
-  const seen = new Set();
-  for (const row of rows) {
+  for (const row of chatRows) {
     try {
       const arr = JSON.parse(row.images);
       for (const u of arr) {
@@ -167,6 +171,23 @@ router.get('/:id/recent-images', (req, res) => {
       }
     } catch {}
   }
+
+  // 2. 朋友圈配图
+  const momentRows = db.prepare(`
+    SELECT images FROM moment_posts
+    WHERE character_id = ? AND status = 'done' AND is_deleted = 0 AND images IS NOT NULL
+    ORDER BY created_at DESC LIMIT 30
+  `).all(characterId);
+
+  for (const row of momentRows) {
+    try {
+      const arr = JSON.parse(row.images);
+      for (const u of arr) {
+        if (!seen.has(u)) { seen.add(u); urls.push(u); }
+      }
+    } catch {}
+  }
+
   res.json({ images: urls });
 });
 
@@ -281,7 +302,9 @@ router.post('/generate', async (req, res) => {
 - [如果是IP角色，对标原作中角色的独特魅力]
 
 ## 你的外观
-- [至少3条具体的外貌特征，帮助塑造角色形象]${searchContext ? `
+- [一句话准确简洁地描述角色的外貌(发型瞳色等)，突出最具辨识度的特征]
+- [一句话简洁描述穿着和主要装饰品]
+${searchContext ? `
 
 ---
 以下是从互联网搜索到的角色参考资料，请参考来完善角色设定（如果你对角色已有足够了解，不完全依赖搜索结果也没关系）：
