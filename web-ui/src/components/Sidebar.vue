@@ -5,7 +5,7 @@
         v-for="c in chat.characters"
         :key="c.id"
         class="char-item"
-        :class="{ active: c.id === chat.activeCharId }"
+        :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat') }"
         @click="onCharClick(c)"
       >
         <div

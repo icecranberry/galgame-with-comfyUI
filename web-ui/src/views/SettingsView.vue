@@ -51,7 +51,7 @@
       <div class="card">
         <h3>测试画风</h3>
         <p class="fd">使用上方对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
-        <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别</p>
+        <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
 
         <div class="style-test-row">
           <button

@@ -355,17 +355,26 @@ router.post('/characters/:id/chat', async (req, res) => {
       });
     }
 
-    // 5.0.5 角色间关系注入（酒馆关系图 —— 当前角色与其他角色的关系，在用户关系之后）
+    // 5.0.5 角色间关系注入（酒馆关系图 —— 双向：你定义的 + 别人定义你的，在用户关系之后）
     const charRels = db.prepare(`
-      SELECT cr.relationship_text, c.display_name
+      SELECT 'from' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
       JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
       WHERE cr.from_character_id = ?
-    `).all(characterId);
+      UNION ALL
+      SELECT 'to' AS direction, cr.relationship_text, c.display_name
+      FROM character_relationships cr
+      JOIN characters c ON c.id = cr.from_character_id AND c.is_active = 1
+      WHERE cr.to_character_id = ?
+    `).all(characterId, characterId);
     if (charRels.length > 0) {
-      const relLines = charRels.map(r =>
-        `- ${r.display_name}是你的${r.relationship_text}`
-      ).join('\n');
+      const relLines = charRels.map(r => {
+        if (r.direction === 'from') {
+          return `- ${r.display_name}是你的${r.relationship_text}`;
+        } else {
+          return `- ${r.display_name}认为你是她的${r.relationship_text}`;
+        }
+      }).join('\n');
       msgs.push({
         role: 'system',
         content: `**【角色间关系】你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。**`
