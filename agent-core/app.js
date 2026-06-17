@@ -88,6 +88,21 @@ server.keepAliveTimeout = 5000;
   }
 })();
 
+// 周期性 WAL checkpoint：每 5 分钟将 WAL 日志写入主 DB 文件，
+// 缩短异常退出时的"脏窗口"，降低 WAL 损坏概率
+const WAL_CHECKPOINT_INTERVAL = 5 * 60 * 1000;
+const walCheckpointTimer = setInterval(() => {
+  try {
+    const db = getDb();
+    const r = db.pragma('wal_checkpoint(PASSIVE)');
+    if (r[0]?.log > 0 || r[0]?.checkpointed > 0) {
+      console.log(`[db] periodic WAL checkpoint: ${r[0].checkpointed} pages checkpointed, ${r[0].log} remaining`);
+    }
+  } catch (_) { /* silent — 定期维护不应阻塞主流程 */ }
+}, WAL_CHECKPOINT_INTERVAL);
+// 不阻塞 process.exit()：WAL checkpoint 不是必须完成的关键操作
+walCheckpointTimer.unref();
+
 // 全局未捕获异常，防止进程崩溃
 process.on('unhandledRejection', (reason) => {
   console.error('[agent-core] unhandled rejection:', reason?.message || reason);
@@ -102,7 +117,17 @@ const shutdown = () => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log('\n[agent-core] shutting down...');
-  // 先关 HTTP 服务（拒绝新连接），再清理资源
+
+  // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
+  try {
+    const db = getDb();
+    const r = db.pragma('wal_checkpoint(TRUNCATE)');
+    console.log(`[db] WAL checkpointed before shutdown: ${r[0]?.checkpointed || 0} pages`);
+  } catch (e) {
+    console.warn('[db] WAL checkpoint failed:', e.message);
+  }
+
+  // 2. 先关 HTTP 服务（拒绝新连接），再清理资源
   server.close(() => {
     closeDb();
     process.exit(0);
@@ -112,6 +137,9 @@ const shutdown = () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// Windows: 关闭控制台窗口 → CTRL_CLOSE_EVENT（若 Node 未映射为 SIGBREAK 则直接被杀，
+// 周期性 WAL checkpoint 已把脏窗口缩到 ≤5 分钟，最坏情况损失 < 5 分钟的写入）
+process.on('SIGBREAK', shutdown);
 
 // 供 dev.mjs 在 taskkill 前触发优雅退出
 app.post('/api/shutdown', (req, res) => {

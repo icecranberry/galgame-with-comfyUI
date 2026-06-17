@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb } from '../db/index.js';
+import { getDb, repairFtsIndex } from '../db/index.js';
 import { DEFAULT_CHARACTERS } from '../services/seeds.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
@@ -192,7 +192,7 @@ router.get('/:id/recent-images', (req, res) => {
 });
 
 // DELETE /api/characters/:id — 删除角色并清理所有关联数据
-router.delete('/:id', (req, res) => {
+router.delete('/:id', (req, res, next) => {
   const db = getDb();
   const char = db.prepare('SELECT id, name, avatar_path FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
@@ -200,9 +200,28 @@ router.delete('/:id', (req, res) => {
 
   const conversationId = `char_${char.id}`;
 
-  // 1. 清理聊天消息（FTS5 通过 trigger 自动同步）
-  db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+  const cleanupMessages = () => {
+    // 1. 清理聊天消息（FTS5 通过 trigger 自动同步）
+    db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+  };
+
+  try {
+    cleanupMessages();
+  } catch (err) {
+    if (err.code === 'SQLITE_CORRUPT_VTAB') {
+      console.warn('[characters] FTS5 corrupted during delete, repairing...');
+      try {
+        repairFtsIndex();
+        cleanupMessages();
+      } catch (retryErr) {
+        console.error('[characters] retry after FTS repair failed:', retryErr.message);
+        return next(retryErr);
+      }
+    } else {
+      return next(err);
+    }
+  }
 
   // 2. 清理系统数据
   db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
@@ -294,8 +313,6 @@ router.post('/generate', async (req, res) => {
 - [一句话准确简洁地描述角色的外貌(发型瞳色等)，突出最具辨识度的特征]
 - [一句话简洁描述穿着和主要装饰品]
 
-## （可选）你的口头禅（如果角色参考资料没有明确提到禁止强行加上）
-- 0~2个 角色常用的特殊自称（可选，如果角色参考资料没有明确提到禁止强行加上）或者口癖（可选，如果角色参考资料没有明确提到禁止强行加上）
 ${searchContext ? `
 
 ---

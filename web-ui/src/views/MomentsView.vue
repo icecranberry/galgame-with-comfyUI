@@ -42,6 +42,17 @@
             :class="{ active: moments.filterCharacterId === null }"
             @click="moments.setFilter(null)"
           >全部</div>
+          <!-- 赞过筛选 -->
+          <div
+            class="filter-avatar filter-heart"
+            :class="{ active: moments.filterLiked }"
+            @click="moments.toggleFilterLiked()"
+            title="只看赞过的"
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" :fill="moments.filterLiked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+          </div>
           <div
             v-for="ch in moments.charactersWithPosts"
             :key="ch.character_id"
@@ -67,6 +78,7 @@
 
       <!-- 加载更多 -->
       <div v-if="moments.loading" class="load-more">加载中...</div>
+      <div v-else-if="moments.filterLiked && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— 还没有赞过的帖子 —</div>
       <div v-else-if="!moments.hasMore && moments.posts.length > 0" class="load-more">— 没有更多了 —</div>
     </div>
 
@@ -120,6 +132,7 @@ function onPreview({ images, index }) {
 
 onMounted(async () => {
   moments.isViewingMoments = true
+  moments.resetFilters()
   await chat.loadCharacters()
   await loadUserConfig()
   await moments.loadPosts()
@@ -227,7 +240,7 @@ async function triggerGenerate(c) {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   padding: 12px;
   min-width: 200px;
-  max-height: 320px;
+  max-height: 448px;
   overflow-y: auto;
 }
 .picker-title {
@@ -324,6 +337,19 @@ async function triggerGenerate(c) {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+  opacity: 1;
+}
+
+/* 赞过筛选心形按钮 */
+.filter-heart {
+  background: rgba(255,255,255,0.75);
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.filter-heart.active {
+  background: rgba(255, 77, 79, 0.12);
+  color: #ff4d6d;
+  border-color: #ff4d6d;
   opacity: 1;
 }
 

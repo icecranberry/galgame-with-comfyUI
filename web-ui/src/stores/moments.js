@@ -9,6 +9,7 @@ export const useMomentsStore = defineStore('moments', () => {
   const loading = ref(false)
   const page = ref(0)             // 当前渲染到第几批（0-based）
   const filterCharacterId = ref(null)  // null = 全部
+  const filterLiked = ref(false)        // 是否只显示赞过的
 
   // ── 红点通知状态（SSE 驱动）──
   const newPostCount = ref(0)
@@ -16,8 +17,14 @@ export const useMomentsStore = defineStore('moments', () => {
 
   // 按角色筛选后的帖子
   const filteredPosts = computed(() => {
-    if (filterCharacterId.value === null) return posts.value
-    return posts.value.filter(p => p.character_id === filterCharacterId.value)
+    let result = posts.value
+    if (filterCharacterId.value !== null) {
+      result = result.filter(p => p.character_id === filterCharacterId.value)
+    }
+    if (filterLiked.value) {
+      result = result.filter(p => p.liked)
+    }
+    return result
   })
 
   // 当前可见的帖子（前 page * PAGE_SIZE 条）
@@ -68,6 +75,19 @@ export const useMomentsStore = defineStore('moments', () => {
   // 设置筛选角色（null = 全部）
   function setFilter(id) {
     filterCharacterId.value = id
+    page.value = 1
+  }
+
+  // 切换「赞过」筛选
+  function toggleFilterLiked() {
+    filterLiked.value = !filterLiked.value
+    page.value = 1
+  }
+
+  // 重置所有筛选条件（进入页面时调用）
+  function resetFilters() {
+    filterCharacterId.value = null
+    filterLiked.value = false
     page.value = 1
   }
 
@@ -192,8 +212,8 @@ export const useMomentsStore = defineStore('moments', () => {
     try { await api.markMomentsRead() } catch { /* 非关键 */ }
   }
 
-  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filteredPosts, charactersWithPosts,
+  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments,
-    loadPosts, setFilter, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
+    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
     connectSSE, disconnectSSE, markSeen }
 })

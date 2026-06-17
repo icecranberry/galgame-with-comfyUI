@@ -161,6 +161,7 @@ async def scrape_moegirl(req: ScrapeRequest):
             inner = tmpl_match.group(1)
             inner_soup = BeautifulSoup(inner, 'lxml')
             article = (
+                inner_soup.select_one('#mw-body') or
                 inner_soup.select_one('#moe-article') or
                 inner_soup.select_one('#mw-content-text') or
                 inner_soup.select_one('.mw-parser-output')
@@ -169,6 +170,7 @@ async def scrape_moegirl(req: ScrapeRequest):
     if not article:
         # 降级：直接在原始 soup 中查找
         article = (
+            soup.select_one('#mw-body') or
             soup.select_one('#moe-article') or
             soup.select_one('#mw-content-text') or
             soup.select_one('.mw-parser-output')
@@ -188,19 +190,39 @@ async def scrape_moegirl(req: ScrapeRequest):
         if alt:
             img.replace_with(f' ({alt}) ')
 
-    # 正文纯文本
-    text = article.get_text(separator='\n', strip=True)
-    text = '\n'.join(text.split('\n')[:400])
-
-    # 过滤游戏数值行
+    # ── 正文提取：先拿全部原始文本 → 以"简介"为界裁剪 → 再过滤游戏数值 ──
+    # 萌娘百科角色页骨架：引文 → 信息框+导航噪音 → 简介(正式内容开始)
     import re
+    raw_text = article.get_text(separator='\n', strip=True)
+    _full_text = '\n'.join(raw_text.split('\n')[:1000])  # 原始完整文本，供"简介"定位和 infobox 降级使用
+
+    # 正文裁剪：以"简介"为界——"简介"以下才是有效正文，去掉上面的引文和导航噪音
+    jm = re.search(r'(?:^|\n)==?\s*简介\s*==?\n|\n简介\n|^\s*简介\n', _full_text)
+    if jm:
+        text = _full_text[jm.start():].strip()
+        print(f"[scrape] cut at '简介': {len(text)} chars from 简介 to end")
+    else:
+        text = _full_text
+        print(f"[scrape] '简介' not found, keeping full text ({len(text)} chars)")
+
+    # 过滤游戏数值行 + 维基模板噪音
     game_kw = re.compile(
         r'暴击|伤害|强化特殊技|特殊技|增益|减益|冷却|能量|触发'
         r'|充能|抗打断|提升\d+%|造成的伤害|持续\d+秒|发动'
         r'|buff|debuff|命之座|神之眼|神之心|始基力|特色料理'
         r'|武器\d?|音擎|驱动盘', re.I
     )
-    lines = [l for l in text.split('\n') if not game_kw.search(l)]
+    wiki_noise = re.compile(
+        r'欢迎来到|编辑导航|萌娘百科祝|游戏数据或信息的著作权'
+        r'|不允许添加|显示视频|宽屏模式|Wiki入门|条目编辑规范'
+        r'|诚邀.*加入|参与萌百|版本更新公告|主题活动——'
+        r'|版本活动复刻|特别活动商店|休伯利安军械库'
+        r'|◆新|\[ 显示全部 \]', re.I
+    )
+    lines = [l for l in text.split('\n')
+             if not game_kw.search(l)
+             and not wiki_noise.search(l)
+             and l.strip() != '•']
     text = '\n'.join(lines)[:8000]
 
     # ── 提取信息框 —— 基于内容的健壮提取 ──
@@ -252,12 +274,11 @@ async def scrape_moegirl(req: ScrapeRequest):
                     break
 
     # Step 3: 降级——HTML 方式都失败，从已处理的正文文本中按行解析
-    # 直接用 text 变量（已过滤/截断），Node.js 侧已验证其编码正确
     if not infobox_fields:
-        idx = text.find('基本资料')
+        idx = _full_text.find('基本资料')
         if idx >= 0:
-            end = text.find('简介', idx + 4)
-            block = text[idx:end] if end >= 0 else text[idx:idx+3000]
+            end = _full_text.find('简介', idx + 4)
+            block = _full_text[idx:end] if end >= 0 else _full_text[idx:idx+3000]
 
             all_field_names = [
                 '本名','外文名','别号','昵称','称号',
@@ -298,15 +319,7 @@ async def scrape_moegirl(req: ScrapeRequest):
     # 格式化信息框为文本
     infobox_text = ''
     if infobox_fields:
-        # 从正文中移除已提取的信息框原始区域（"基本资料" → "简介"），避免重复
-        idx = text.find('基本资料')
-        if idx >= 0:
-            end = text.find('简介', idx)
-            if end >= 0:
-                text = text[:idx].strip() + '\n\n' + text[end:].strip()
-                print(f"[scrape] stripped infobox section from body text")
-
-        lines = ['【萌娘百科 · 基本信息框】']
+        lines = ['【基本信息框】']
         for key, val in infobox_fields:
             lines.append(f'{key}: {val}')
         infobox_text = '\n'.join(lines)

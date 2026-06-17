@@ -318,22 +318,16 @@ async function generateMomentPost(character) {
   ];
   const pickedStyle = STYLES[Math.floor(Math.random() * STYLES.length)];
 
-  // 2.5 50% 概率：多人模式 —— 随机挑选一条角色关系，注入对方人格
+  // 2.5 50% 概率：多人模式 —— 随机挑选一条当前角色定义的关系（单向：from only）
   let multiPerson = null;
   if (Math.random() < 0.5) {
     const allRels = db.prepare(`
-      SELECT 'from' AS direction, cr.relationship_text,
+      SELECT cr.relationship_text,
              c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
       FROM character_relationships cr
-      JOIN characters c ON c.id = cr.to_character_id
+      JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
       WHERE cr.from_character_id = ?
-      UNION ALL
-      SELECT 'to' AS direction, cr.relationship_text,
-             c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
-      FROM character_relationships cr
-      JOIN characters c ON c.id = cr.from_character_id
-      WHERE cr.to_character_id = ?
-    `).all(character.id, character.id);
+    `).all(character.id);
 
     if (allRels.length > 0) {
       const picked = allRels[Math.floor(Math.random() * allRels.length)];
@@ -344,12 +338,7 @@ async function generateMomentPost(character) {
         .replace(/你的/g, picked.other_name + '的')
         .replace(/你/g, picked.other_name);
 
-      let relDesc;
-      if (picked.direction === 'from') {
-        relDesc = `${picked.other_name}是你的${picked.relationship_text}`;
-      } else {
-        relDesc = `${picked.other_name}认为你是她的${picked.relationship_text}`;
-      }
+      const relDesc = `${picked.other_name}是你的${picked.relationship_text}`;
 
       multiPerson = {
         otherName: picked.other_name,

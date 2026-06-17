@@ -161,7 +161,7 @@
 
     <!-- 角色人格编辑弹窗（二级菜单） -->
     <Transition name="editor-fade">
-      <div v-if="showEditor" class="editor-overlay" @click.self="closeCharEditor">
+      <div v-if="showEditor" class="editor-overlay">
       <div class="editor-panel">
         <div class="editor-header">
           <span>编辑角色人格 — {{ chat.activeChar?.display_name }}</span>
@@ -171,9 +171,9 @@
           <label>显示名称</label>
           <input v-model="editForm.display_name" class="editor-input" />
         </div>
-        <div class="editor-field">
+        <div class="editor-field editor-field-grow">
           <label>人格提示词（base_prompt）</label>
-          <textarea v-model="editForm.base_prompt" class="editor-textarea" rows="18"></textarea>
+          <textarea v-model="editForm.base_prompt" class="editor-textarea"></textarea>
         </div>
         <div class="editor-actions">
           <div class="editor-actions-right">
@@ -264,6 +264,7 @@ function openSettings() { showSettings.value = true }
 function closeSettings() { showSettings.value = false }
 
 function openCharEditor() {
+showSettings.value = false
 const c = chat.activeChar
 if (!c) return
 editForm.value = { display_name: c.display_name || '', base_prompt: c.base_prompt || '' }
@@ -283,6 +284,7 @@ console.error('[chat] save character failed:', err)
 }
 
 async function clearChatHistory() {
+showSettings.value = false
 if (clearing.value) return
 const ok = await confirmFn({ title:'清空聊天记录', message:'确定要清空当前角色的所有聊天记录吗？\n此操作不可恢复。', okText:'清空' })
 if (!ok) return
@@ -292,6 +294,7 @@ try { await chat.clearActiveMessages() } catch {} finally { clearing.value = fal
 
 async function deleteChar() {
 if (deleting.value || chat.activeChar?.name === 'default') return
+showSettings.value = false
 const ok = await confirmFn({
 title: '删除角色',
 message: `确定要删除角色「${chat.activeChar?.display_name}」吗？\n此操作不可恢复。`,
@@ -299,10 +302,11 @@ okText: '删除', danger: true,
 })
 if (!ok) return
 deleting.value = true
-try { await chat.deleteActiveCharacter(); showSettings.value = false } catch {} finally { deleting.value = false }
+try { await chat.deleteActiveCharacter() } catch {} finally { deleting.value = false }
 }
 
 async function removeAvatar() {
+showSettings.value = false
 const ok = await confirmFn({ title:'移除头像', message:'确定要移除当前角色的头像吗？', okText:'移除' })
 if (!ok) return
 await chat.uploadAvatar(null)
@@ -317,6 +321,7 @@ const recentImages = ref([])
 const recentLoading = ref(false)
 
 function openAvatarPicker() {
+showSettings.value = false
 recentImages.value = []
 showAvatarPicker.value = true
 }
@@ -521,7 +526,7 @@ watch(() => chat.guesses, (val) => {
 })
 
 function pickGuess(text) {
-  if (!text || chat.streaming) return
+  if (!text) return
   inputText.value = text
   chat.guesses = null
   inputEl.value?.focus()
@@ -871,7 +876,7 @@ function renderContent(text) {
 /* ── 毛玻璃编辑弹窗 ── */
 .editor-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:center; justify-content:center; z-index:1001; }
 .editor-panel {
-  width:640px; max-height:85vh;
+  width:768px; max-height:90vh; height:80vh;
   background: rgba(255, 255, 255, 0.55);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
@@ -896,6 +901,8 @@ function renderContent(text) {
 .editor-input:focus { border-color:var(--accent); }
 .editor-textarea { padding:10px 12px; font-size:13px; line-height:1.6; background:rgba(255,255,255,0.9); border:1px solid #d5d0ca; border-radius:8px; color:var(--text-bright); outline:none; resize:vertical; font-family:inherit; }
 .editor-textarea:focus { border-color:var(--accent); }
+.editor-field-grow { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+.editor-field-grow .editor-textarea { flex:1; min-height:120px; resize:none; overflow-y:auto; }
 .editor-actions { padding:16px 20px; border-top:1px solid rgba(255, 255, 255, 0.22); display:flex; justify-content:flex-end; align-items:center; }
 .editor-actions-right { display:flex; gap:10px; }
 .btn-cancel { padding:8px 18px; border-radius:8px; border:1px solid rgba(255, 255, 255, 0.22); background:rgba(255, 255, 255, 0.28); color:var(--text-primary); font-size:13px; cursor:pointer; transition: all 0.15s; }
@@ -919,6 +926,14 @@ function renderContent(text) {
   .guess-prefix { display: none; }
   .guess-pill { padding: 4px 10px; font-size: 12px; max-width: 50%; min-width: 60px; flex: 1; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
   .input-area { padding: 8px 16px; }
+
+  /* 手机端编辑弹窗全屏 */
+  .editor-overlay { background: rgba(0,0,0,0.3); }
+  .editor-panel {
+    width:100vw; max-width:100vw;
+    height:100vh; max-height:100vh;
+    border-radius:0; border:none;
+  }
 }
 
 </style>

@@ -256,6 +256,31 @@ function initSchema(db) {
 
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
+
+  // 启动时 FTS 写入测试：部分损坏场景下 SELECT 能过但 INSERT 会炸，提前修复
+  try {
+    db.prepare(`INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', -1, 'fts_write_test')`).run();
+  } catch (writeErr) {
+    if (writeErr.code === 'SQLITE_CORRUPT_VTAB') {
+      console.log('[db] FTS5 write-test failed at startup, force rebuilding...');
+      // 用导出的 repairFtsIndex 不行（circular），直接内联重建
+      db.exec(`DROP TRIGGER IF EXISTS messages_ai`);
+      db.exec(`DROP TRIGGER IF EXISTS messages_ad`);
+      db.exec(`DROP TRIGGER IF EXISTS messages_au`);
+      db.exec(`DROP TABLE IF EXISTS messages_fts`);
+      db.exec(`CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='id')`);
+      db.exec(`CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END;`);
+      db.exec(`CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content); END;`);
+      db.exec(`CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END;`);
+      // 全量重建索引
+      const msgs = db.prepare(`SELECT id, content FROM messages`).all();
+      const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
+      for (const m of msgs) insert.run(m.id, m.content);
+      console.log(`[db] FTS5 startup force-rebuild: ${msgs.length} messages indexed`);
+    } else {
+      throw writeErr;
+    }
+  }
 }
 
 function migrateMomentsSchema(db) {
@@ -406,6 +431,62 @@ export function closeDb() {
     db.close();
     db = null;
   }
+}
+
+/**
+ * 强制重建 FTS5 索引。当写入操作（DELETE/INSERT/UPDATE on messages）
+ * 因 FTS 虚拟表损坏（SQLITE_CORRUPT_VTAB）而失败时，路由层可调用此函数
+ * 完全重建 FTS 表结构和索引，之后重试原操作即可成功。
+ */
+export function repairFtsIndex() {
+  const database = getDb();
+  console.log('[db] repairFtsIndex: full FTS rebuild...');
+
+  // 1. 删触发器（它们依赖 messages_fts）
+  database.exec(`DROP TRIGGER IF EXISTS messages_ai`);
+  database.exec(`DROP TRIGGER IF EXISTS messages_ad`);
+  database.exec(`DROP TRIGGER IF EXISTS messages_au`);
+
+  // 2. 删损坏的虚拟表
+  database.exec(`DROP TABLE IF EXISTS messages_fts`);
+
+  // 3. 重建 FTS 表结构
+  database.exec(`
+    CREATE VIRTUAL TABLE messages_fts USING fts5(
+      content,
+      content='messages',
+      content_rowid='id'
+    );
+  `);
+
+  // 4. 重建触发器
+  database.exec(`
+    CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+  `);
+  database.exec(`
+    CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+    END;
+  `);
+  database.exec(`
+    CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+  `);
+
+  // 5. 全量重建索引
+  const msgs = database.prepare(`SELECT id, content FROM messages`).all();
+  if (msgs.length > 0) {
+    const insert = database.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
+    for (const m of msgs) {
+      insert.run(m.id, m.content);
+    }
+    console.log(`[db] repairFtsIndex: ${msgs.length} messages re-indexed`);
+  }
+  console.log('[db] repairFtsIndex: done');
 }
 
 /**

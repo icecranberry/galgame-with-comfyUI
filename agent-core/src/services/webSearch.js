@@ -201,13 +201,27 @@ async function searchMoegirl(query, context = '') {
   if (query.length >= 2) {
     const directResult = await tryDirectPageResolve(BASE, query);
     if (directResult) {
-      // 有上下文时校验页面内容是否匹配（上下文含"原神"但解析到"胡桃"消歧义页 → 回退搜索）
-      if (context) {
+      const isDisambig = /消歧义页|可以指|下列[^。]*条目|列出[^。]*同名/.test(directResult.content);
+
+      if (isDisambig) {
+        console.log(`[webSearch] direct page "${directResult.title}" is a disambiguation page`);
+        // 尝试构造具体页面：重定向标题 + 上下文 → "琪亚娜·卡斯兰娜(崩坏3)"
+        // 萌娘百科同一角色跨作品的页面命名规则为 角色名(作品名)
+        if (context) {
+          const specificTitle = `${directResult.title}(${context})`;
+          console.log(`[webSearch] trying specific page: "${specificTitle}"`);
+          const specificResult = await tryDirectPageResolve(BASE, specificTitle);
+          if (specificResult) {
+            return [specificResult];
+          }
+          console.log(`[webSearch] specific page not found, falling back to opensearch`);
+        }
+        // 构造失败，继续走 opensearch
+      } else if (context) {
         const ctx = context.toLowerCase();
         const text = `${directResult.title} ${directResult.content}`.toLowerCase();
         if (!text.includes(ctx)) {
           console.log(`[webSearch] direct page "${directResult.title}" doesn't match context "${context}", falling back to search`);
-          // 不回退搜索，因为直接解析失败，走到 Step 1
         } else {
           return [directResult];
         }
@@ -217,31 +231,39 @@ async function searchMoegirl(query, context = '') {
     }
   }
 
-  // Step 1: 直接解析失败，走 opensearch 搜索
-  // 有上下文时将上下文拼入搜索词，提高命中率
-  const searchQuery = context ? `${query} ${context}` : query;
-  const searchUrl = `${BASE}?${new URLSearchParams({
-    action: 'opensearch',
-    search: searchQuery,
-    format: 'json',
-    limit: '5',
-  })}`;
+  // Step 1: 直接解析失败/消歧义页/context 不匹配 → opensearch 搜索
+  // 最多两次尝试：先拼 context 搜（精确），无结果时去掉 context 重试（宽泛）
+  const searchQueries = context
+    ? [`${query} ${context}`, query]
+    : [query];
 
-  let searchData;
-  try {
-    const res = await fetchWithTimeout(searchUrl, {
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-    });
-    searchData = await res.json();
-  } catch (err) {
-    console.warn('[webSearch] Moegirl opensearch failed:', err.message);
-    return [];
+  let titles = [];
+  let urls = [];
+
+  for (const q of searchQueries) {
+    const searchUrl = `${BASE}?${new URLSearchParams({
+      action: 'opensearch',
+      search: q,
+      format: 'json',
+      limit: '5',
+    })}`;
+
+    let searchData;
+    try {
+      const res = await fetchWithTimeout(searchUrl, {
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+      searchData = await res.json();
+    } catch (err) {
+      console.warn(`[webSearch] Moegirl opensearch "${q}" failed: ${err.message}`);
+      continue;
+    }
+
+    titles = Array.isArray(searchData?.[1]) ? searchData[1] : [];
+    urls = Array.isArray(searchData?.[3]) ? searchData[3] : [];
+    console.log(`[webSearch] opensearch "${q}" → ${titles.length} results`);
+    if (titles.length > 0) break;
   }
-
-  // opensearch 返回: [query, [title1, title2, ...], [...], [url1, url2, ...]]
-  const titles = Array.isArray(searchData?.[1]) ? searchData[1] : [];
-  const urls = Array.isArray(searchData?.[3]) ? searchData[3] : [];
-  if (titles.length === 0) return [];
 
   // Step 2: 获取前 3 条摘要
   const extracts = [];
@@ -268,7 +290,7 @@ async function searchMoegirl(query, context = '') {
         extracts.push({
           title: pageData.title,
           content: pageData.extract.slice(0, 2500),
-          source: pageUrl || `萌娘百科·${pageData.title}`,
+          source: pageUrl || `${pageData.title}`,
         });
       }
     } catch {

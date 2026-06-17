@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getActiveGlobalRules, getGlobalRule } from '../db/index.js';
+import { getDb, getActiveGlobalRules, getGlobalRule, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
@@ -226,11 +226,35 @@ function toISODate(sqliteDT) {
 }
 
 // DELETE /api/characters/:id/messages — 清空角色对话记录
-router.delete('/characters/:id/messages', (req, res) => {
+router.delete('/characters/:id/messages', (req, res, next) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
-  db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+
+  const doDelete = () => {
+    db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+  };
+
+  try {
+    doDelete();
+  } catch (err) {
+    // FTS5 虚拟表损坏时 DELETE 触发器（messages_ad）写入 messages_fts 会失败，
+    // 重建 FTS 后重试即可。主表和 raw_messages 的数据不受影响。
+    if (err.code === 'SQLITE_CORRUPT_VTAB') {
+      console.warn('[chat] FTS5 corrupted during message delete, repairing...');
+      try {
+        repairFtsIndex();
+        doDelete();
+        console.log('[chat] retry after FTS repair succeeded');
+      } catch (retryErr) {
+        console.error('[chat] retry after FTS repair failed:', retryErr.message);
+        return next(retryErr);
+      }
+    } else {
+      return next(err);
+    }
+  }
+
   res.json({ ok: true });
 });
 
@@ -350,6 +374,19 @@ router.post('/characters/:id/chat', async (req, res) => {
       msgs.push({
         role: 'system',
         content: `**【角色关系】你与user的关系：你对于user而言是${userRel.relationship_text}。这个关系为最高优先级，即使你在外有其他性格，但是你在user面前就是这样的。请在对话中自然体现这层关系，不必刻意说明，行为举止应符合这层关系。**`
+      });
+    }
+
+    // 5.0.1 用户信息注入（让角色知道对话对象的姓名和自画像，建立 user↔用户名的映射）
+    const chatUserName = config.user.nickname || '用户';
+    const chatUserPersona = config.user.persona || '';
+    if (chatUserName || chatUserPersona) {
+      const parts = [];
+      if (chatUserName) parts.push(`消息中标记为"user"的人是"${chatUserName}"`);
+      if (chatUserPersona) parts.push(`关于${chatUserName}：\n${chatUserPersona}`);
+      msgs.push({
+        role: 'system',
+        content: `【对话对象】${parts.join('。')}`
       });
     }
 
@@ -825,6 +862,11 @@ async function handleNeedImageFlow(conversationId, character, send) {
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
     ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
+    // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
+    ...(config.user.nickname || config.user.persona ? [{
+      role: 'system',
+      content: `【对话对象】消息中标记为"user"的人是"${config.user.nickname || '用户'}"。关于${config.user.nickname || 'ta'}：\n${config.user.persona || ''}`
+    }] : []),
     ...history,
     { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你在上面对话中最后一句话时所处的场景。只输出 JSON，不要任何其他文字。' },
     // ── pre-fill：只给 key，模型续写 :"..."} 或先写正文 ──
