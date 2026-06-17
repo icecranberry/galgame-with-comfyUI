@@ -44,8 +44,8 @@ router.post('/', (req, res) => {
   }
 
   // 验证两个角色都存在
-  const fromChar = db.prepare('SELECT id FROM characters WHERE id = ? AND is_active = 1').get(from_character_id);
-  const toChar = db.prepare('SELECT id FROM characters WHERE id = ? AND is_active = 1').get(to_character_id);
+  const fromChar = db.prepare('SELECT id FROM characters WHERE id = ?').get(from_character_id);
+  const toChar = db.prepare('SELECT id FROM characters WHERE id = ?').get(to_character_id);
   if (!fromChar || !toChar) {
     return res.status(404).json({ error: 'Character not found' });
   }

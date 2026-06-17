@@ -84,16 +84,19 @@ export async function searchCharacterInfo(query) {
         console.log(`[webSearch] filtered ${moe.length} → 1 result by context "${context}": "${matched[0].title}"`);
         // 深度抓取萌娘百科基本资料栏，补全外貌等关键信息
         const best = matched[0];
-        if (best.source && best.source.includes('moegirl.org.cn')) {
-          try {
-            const pageData = await scrapeMoegirlPage(best.source);
-            if (pageData && pageData.content) {
-              best.content = pageData.content;
-              console.log(`[webSearch] scraped moegirl page (${pageData.content.length} chars) for "${best.title}"`);
-            }
-          } catch (err) {
-            console.warn(`[webSearch] infobox scrape failed: ${err.message}`);
+        // 深度抓取萌娘百科页面（Python 服务提取 infobox + 正文）
+        // 向前兼容：source 可能是完整 URL，也可能是"萌娘百科·Title"格式
+        const scrapeUrl = best.source && best.source.includes('moegirl.org.cn')
+          ? best.source
+          : `https://zh.moegirl.org.cn/${encodeURIComponent(best.title)}`;
+        try {
+          const pageData = await scrapeMoegirlPage(scrapeUrl);
+          if (pageData && pageData.content) {
+            best.content = pageData.content;
+            console.log(`[webSearch] scraped moegirl page (${pageData.content.length} chars) for "${best.title}"`);
           }
+        } catch (err) {
+          console.warn(`[webSearch] infobox scrape failed: ${err.message}`);
         }
         moe.length = 0; moe.push(best);
       } else {
@@ -198,7 +201,19 @@ async function searchMoegirl(query, context = '') {
   if (query.length >= 2) {
     const directResult = await tryDirectPageResolve(BASE, query);
     if (directResult) {
-      return [directResult];
+      // 有上下文时校验页面内容是否匹配（上下文含"原神"但解析到"胡桃"消歧义页 → 回退搜索）
+      if (context) {
+        const ctx = context.toLowerCase();
+        const text = `${directResult.title} ${directResult.content}`.toLowerCase();
+        if (!text.includes(ctx)) {
+          console.log(`[webSearch] direct page "${directResult.title}" doesn't match context "${context}", falling back to search`);
+          // 不回退搜索，因为直接解析失败，走到 Step 1
+        } else {
+          return [directResult];
+        }
+      } else {
+        return [directResult];
+      }
     }
   }
 
@@ -340,6 +355,58 @@ async function searchBing(query) {
 }
 
 /**
+ * 从纯文本中提取信息框字段（Node.js 侧安全网，Python 提取失败时兜底）
+ * 正文格式：基本资料\n字段名\n值\n字段名\n值\n...简介\n正文
+ */
+function extractInfoboxFromText(bodyText) {
+  const idx = bodyText.indexOf('基本资料');
+  if (idx < 0) return { infobox: null, cleanBody: bodyText };
+
+  const end = bodyText.indexOf('简介', idx + 4);
+  const block = end >= 0 ? bodyText.slice(idx, end) : bodyText.slice(idx, idx + 3000);
+
+  const FIELD_NAMES = new Set([
+    '本名','外文名','别号','昵称','称号',
+    '性别','发色','瞳色','身高','体重','三围',
+    '生日','年龄','种族','血型','星座',
+    '萌点','爱好','喜欢','讨厌',
+    '出身地区','出身','活动范围','所属团体','所属组织','组合',
+    '个人状态','状态','配音','声优',
+    '武器','神之眼','神之心','命之座','始基力','特色料理','相关人士',
+  ]);
+
+  const lines = block.split('\n');
+  const found = []; // [{ lineIndex, name }]
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i].trim();
+    if (FIELD_NAMES.has(s)) {
+      found.push({ idx: i, name: s });
+    }
+  }
+
+  if (found.length === 0) return { infobox: null, cleanBody: bodyText };
+
+  const infoboxLines = ['【萌娘百科 · 基本信息框】'];
+  for (let j = 0; j < found.length; j++) {
+    const { idx: li, name } = found[j];
+    const endLi = j + 1 < found.length ? found[j + 1].idx : lines.length;
+    const valLines = lines.slice(li + 1, endLi).filter(l => l.trim());
+    const val = valLines.join('\n').trim();
+    if (val) {
+      infoboxLines.push(`${name}: ${val}`);
+    }
+  }
+
+  // 从正文中移除已提取的信息框区域
+  let cleanBody = bodyText;
+  if (end >= 0) {
+    cleanBody = bodyText.slice(0, idx).trim() + '\n\n' + bodyText.slice(end).trim();
+  }
+
+  return { infobox: infoboxLines.join('\n'), cleanBody };
+}
+
+/**
  * 调用 Python 爬虫服务获取萌娘百科页面内容
  */
 async function scrapeMoegirlPage(pageUrl) {
@@ -355,7 +422,29 @@ async function scrapeMoegirlPage(pageUrl) {
       return null;
     }
     const data = await res.json();
-    console.log(`[webSearch] python scrape done: ${data.content.length} chars`);
+    const pyInfoboxLen = data.infobox?.length || 0;
+    const bodyLen = data.content?.length || 0;
+    console.log(`[webSearch] python scrape done: infobox=${pyInfoboxLen} chars, body=${bodyLen} chars`);
+
+    let infoboxText = data.infobox || '';
+    let bodyText = data.content || '';
+
+    // Python 未提取到信息框 → Node.js 侧从正文文本中解析（安全网）
+    if (!infoboxText && bodyText.includes('基本资料')) {
+      console.log('[webSearch] Python infobox empty, falling back to Node.js text parsing');
+      const parsed = extractInfoboxFromText(bodyText);
+      if (parsed.infobox) {
+        infoboxText = parsed.infobox;
+        bodyText = parsed.cleanBody;
+        console.log(`[webSearch] Node.js infobox extracted: ${infoboxText.length} chars`);
+      }
+    }
+
+    // 组装内容：信息框前置，正文置后
+    if (infoboxText) {
+      data.content = infoboxText + '\n\n【正文描述】\n' + bodyText;
+      data.content = data.content.slice(0, 8000);
+    }
     return data;
   } catch (err) {
     console.warn(`[webSearch] python scrape call failed: ${err.message}`);

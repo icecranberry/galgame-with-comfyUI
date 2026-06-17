@@ -37,7 +37,7 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
   // 获取最近两轮对话作为提取上下文（从 raw_messages 取完整消息）
   const recent = db.prepare(`
     SELECT role, content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0
+    WHERE conversation_id = ?
     ORDER BY id DESC LIMIT 6
   `).all(conversationId).reverse();
 

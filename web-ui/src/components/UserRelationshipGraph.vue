@@ -129,6 +129,23 @@ const CENTER_X = 540
 const CENTER_Y = 456
 const RADIUS = 336
 
+// ── Compute optimal source/target handles based on target position relative to center ──
+function computeHandles(targetPos) {
+  const dx = targetPos.x + 36 - CENTER_X
+  const dy = targetPos.y + 36 - CENTER_Y
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return {
+      sourceHandle: dx > 0 ? 'source-right' : 'source-left',
+      targetHandle: dx > 0 ? 'target-left' : 'target-right',
+    }
+  } else {
+    return {
+      sourceHandle: dy > 0 ? 'source-bottom' : 'source-top',
+      targetHandle: dy > 0 ? 'target-top' : 'target-bottom',
+    }
+  }
+}
+
 // ── isValidConnection: only allow user (source) → character (target) ──
 function isValidConnection(connection) {
   // source must be the user node
@@ -200,31 +217,18 @@ async function buildGraph() {
 
   // Build edges
   const nodePosMap = Object.fromEntries(graphNodes.map(n => [n.id, n.position]))
-  const centerPos = { x: CENTER_X, y: CENTER_Y }
 
   const graphEdges = existingRels.value
     .filter(rel => nodeIds.has('user') && nodeIds.has(String(rel.character_id)))
     .map(rel => {
       const targetPos = nodePosMap[String(rel.character_id)]
-      let sourceHandle = 'source-top'
-      let targetHandle = 'target-top'
-      if (targetPos) {
-        const dx = targetPos.x + 36 - centerPos.x
-        const dy = targetPos.y + 36 - centerPos.y
-        if (Math.abs(dx) > Math.abs(dy)) {
-          sourceHandle = dx > 0 ? 'source-right' : 'source-left'
-          targetHandle = dx > 0 ? 'target-left' : 'target-right'
-        } else {
-          sourceHandle = dy > 0 ? 'source-bottom' : 'source-top'
-          targetHandle = dy > 0 ? 'target-top' : 'target-bottom'
-        }
-      }
+      const handles = targetPos ? computeHandles(targetPos) : { sourceHandle: 'source-top', targetHandle: 'target-top' }
       return {
         id: `e-${rel.id}`,
         source: 'user',
         target: String(rel.character_id),
-        sourceHandle,
-        targetHandle,
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         label: rel.relationship_text,
         style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
@@ -361,11 +365,15 @@ async function confirmInput() {
         alert('创建失败: 服务器返回数据异常')
         return
       }
-      // Add edge via imperative API
+      // Add edge via imperative API — compute optimal handles from target position
+      const targetNode = elements.value.find(el => el.id === String(created.character_id))
+      const handles = targetNode ? computeHandles(targetNode.position) : { sourceHandle: undefined, targetHandle: undefined }
       const newEdge = {
         id: `e-${created.id}`,
         source: 'user',
         target: String(created.character_id),
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         label: created.relationship_text,
         style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },

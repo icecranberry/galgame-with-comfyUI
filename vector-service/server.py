@@ -123,7 +123,8 @@ class ScrapeRequest(BaseModel):
 
 class ScrapeResponse(BaseModel):
     title: str = ''
-    content: str = ''
+    content: str = ''     # 正文（不含信息框）
+    infobox: str = ''     # 基本信息框，高度浓缩的结构化数据，独立于正文
     source: str = ''
 
 _scraper = cloudscraper.create_scraper()
@@ -147,6 +148,7 @@ async def scrape_moegirl(req: ScrapeRequest):
     # 正文被包裹在 <template id="MOE_SKIN_TEMPLATE_BODYCONTENT"> 内（Vue 渲染用）
     # 需要提取模板内容单独解析
     article = None
+    inner_soup = None   # 模板内部 soup（infobox 提取时需要）
     template = soup.select_one('template#MOE_SKIN_TEMPLATE_BODYCONTENT')
     if template:
         import re
@@ -201,50 +203,125 @@ async def scrape_moegirl(req: ScrapeRequest):
     lines = [l for l in text.split('\n') if not game_kw.search(l)]
     text = '\n'.join(lines)[:8000]
 
-    # 提取结构化基本资料
-    raw = article.get_text()
-    idx = raw.find('基本资料')
-    fields_output = ''
-    if idx >= 0:
-        end = raw.find('简介', idx + 4)
-        block = raw[idx:end].strip() if end >= 0 else raw[idx:idx+3000].strip()
-        char_fields = {
-            '本名','外文名','别号','昵称','称号',
-            '性别','发色','瞳色','身高','体重','三围',
-            '生日','年龄','种族','血型','星座',
-            '萌点','爱好','喜欢','讨厌',
-            '出身地区','出身','活动范围','所属团体','所属组织','组合',
-            '个人状态','状态','配音','声优','相关人士',
-        }
-        all_field_names = [
-            '本名','外文名','别号','昵称','称号',
-            '性别','发色','瞳色','身高','体重','三围',
-            '生日','年龄','种族','血型','星座',
-            '萌点','爱好','喜欢','讨厌',
-            '出身地区','出身','活动范围','所属团体','所属组织','组合',
-            '个人状态','状态','配音','声优',
-            '武器','神之眼','神之心','命之座','始基力','特色料理','相关人士',
-        ]
-        fp = []
-        for name in all_field_names:
-            p = block.find(name)
-            if p >= 0 and (p == 0 or block[p-1] == ' '):
-                fp.append((p, name))
-        fp.sort(key=lambda x: x[0])
-        if fp:
-            out = ['【萌娘百科 · 基本资料】']
-            for i, (pos, name) in enumerate(fp):
-                end_pos = fp[i+1][0] if i+1 < len(fp) else len(block)
-                val = block[pos+len(name):end_pos].strip()
-                if val and name in char_fields:
-                    out.append(f'{name}: {val}')
-            fields_output = '\n'.join(out)
+    # ── 提取信息框 —— 基于内容的健壮提取 ──
+    # 策略：找到含"基本资料"的 HTML 元素 → 向上查找父级 <table> → 提取 th→td 键值对
+    # 不依赖 CSS class 命名，适应萌娘百科的任何模板变更
+    infobox_fields = []
+
+    def _extract_infobox_from_table(table):
+        """从 table 元素中提取 th→td 键值对"""
+        fields = []
+        for row in table.select('tr'):
+            th = row.select_one('th')
+            td = row.select_one('td')
+            if th and td:
+                key = th.get_text(strip=True)
+                val = td.get_text(strip=True)
+                if key and val and len(val) < 200 and len(key) < 30:
+                    if not re.search(r'^[\d.,\s%＋+\-×\/=<>≥≤±]+$', val):
+                        fields.append((key, val))
+        return fields
+
+    # Step 1: 在所有 scope 中查找含"基本资料"文本的元素，向上找父级 table
+    for scope in [inner_soup, soup, article]:
+        if scope is None:
+            continue
+        # 找到包含"基本资料"文本的任意元素（通常是 <th>）
+        anchor = scope.find(string=re.compile(r'^\s*基本资料\s*$'))
+        if anchor:
+            infobox_table = anchor.find_parent('table')
+            if infobox_table:
+                infobox_fields = _extract_infobox_from_table(infobox_table)
+                if infobox_fields:
+                    print(f"[scrape] infobox extracted via content anchor + parent table: {len(infobox_fields)} fields")
+                    break
+
+    # Step 2: 降级——在 scope 中直接找 table.infobox（CSS class 方式）
+    if not infobox_fields:
+        for scope in [inner_soup, soup, article]:
+            if scope is None:
+                continue
+            infobox_table = scope.select_one(
+                'table.infobox, table.infobox2, table.infobox3, '
+                'table.moe-infobox, table[class*="infobox"]'
+            )
+            if infobox_table:
+                infobox_fields = _extract_infobox_from_table(infobox_table)
+                if infobox_fields:
+                    print(f"[scrape] infobox extracted via CSS class: {len(infobox_fields)} fields")
+                    break
+
+    # Step 3: 降级——HTML 方式都失败，从已处理的正文文本中按行解析
+    # 直接用 text 变量（已过滤/截断），Node.js 侧已验证其编码正确
+    if not infobox_fields:
+        idx = text.find('基本资料')
+        if idx >= 0:
+            end = text.find('简介', idx + 4)
+            block = text[idx:end] if end >= 0 else text[idx:idx+3000]
+
+            all_field_names = [
+                '本名','外文名','别号','昵称','称号',
+                '性别','发色','瞳色','身高','体重','三围',
+                '生日','年龄','种族','血型','星座',
+                '萌点','爱好','喜欢','讨厌',
+                '出身地区','出身','活动范围','所属团体','所属组织','组合',
+                '个人状态','状态','配音','声优',
+                '武器','神之眼','神之心','命之座','始基力','特色料理','相关人士',
+            ]
+            char_fields = {
+                '本名','外文名','别号','昵称','称号',
+                '性别','发色','瞳色','身高','体重','三围',
+                '生日','年龄','种族','血型','星座',
+                '萌点','爱好','喜欢','讨厌',
+                '出身地区','出身','活动范围','所属团体','所属组织','组合',
+                '个人状态','状态','配音','声优','相关人士',
+            }
+            lines = block.split('\n')
+            found = []  # (line_index, field_name)
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped in all_field_names:
+                    found.append((i, stripped))
+            if found:
+                for j, (li, name) in enumerate(found):
+                    end_li = found[j+1][0] if j+1 < len(found) else len(lines)
+                    val_lines = [l for l in lines[li+1:end_li] if l.strip()]
+                    val = '\n'.join(val_lines).strip()
+                    if val and name in char_fields:
+                        infobox_fields.append((name, val))
+                print(f"[scrape] infobox extracted via text line parsing: {len(infobox_fields)} fields")
+            else:
+                print(f"[scrape] text fallback: '基本资料' found but no field names matched")
+        else:
+            print(f"[scrape] text fallback: '基本资料' not found in page text")
+
+    # 格式化信息框为文本
+    infobox_text = ''
+    if infobox_fields:
+        # 从正文中移除已提取的信息框原始区域（"基本资料" → "简介"），避免重复
+        idx = text.find('基本资料')
+        if idx >= 0:
+            end = text.find('简介', idx)
+            if end >= 0:
+                text = text[:idx].strip() + '\n\n' + text[end:].strip()
+                print(f"[scrape] stripped infobox section from body text")
+
+        lines = ['【萌娘百科 · 基本信息框】']
+        for key, val in infobox_fields:
+            lines.append(f'{key}: {val}')
+        infobox_text = '\n'.join(lines)
+        print(f"[scrape] infobox formatted: {len(infobox_text)} chars")
 
     title = soup.title.string if soup.title else ''
     title = title.replace(' - 萌娘百科', '').replace('万物皆可萌的百科全书', '').strip()
 
-    print(f"[scrape] done: body={len(text)} chars, fields={len(fields_output)} chars")
-    return ScrapeResponse(title=title, content=text + '\n' + fields_output, source=req.url)
+    print(f"[scrape] done: body={len(text)} chars, infobox={len(infobox_text)} chars")
+    return ScrapeResponse(
+        title=title,
+        content=text,          # 正文（游戏数值已过滤）
+        infobox=infobox_text,  # 信息框（CSS 提取的结构化字段，独立返回）
+        source=req.url,
+    )
 
 
 # ── Startup ──

@@ -94,12 +94,12 @@ router.get('/', (req, res) => {
 
   const posts = db.prepare(`
     SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
-      (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id AND is_deleted = 0) AS comment_count,
+      (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id) AS comment_count,
       (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count,
       (SELECT id FROM moment_likes WHERE post_id = mp.id) IS NOT NULL AS liked
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
-    WHERE mp.is_deleted = 0 AND mp.status = 'done'
+    WHERE mp.status = 'done'
     ORDER BY mp.id DESC
   `).all().map(p => ({
     ...p,
@@ -118,7 +118,7 @@ router.get('/:id', (req, res) => {
     SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
-    WHERE mp.id = ? AND mp.is_deleted = 0
+    WHERE mp.id = ?
   `).get(req.params.id);
 
   if (!post) return res.status(404).json({ error: 'Post not found' });
@@ -130,7 +130,7 @@ router.get('/:id', (req, res) => {
       CASE WHEN mc.author_type = 'character' THEN c.avatar_color ELSE NULL END AS char_avatar_color
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
-    WHERE mc.post_id = ? AND mc.is_deleted = 0
+    WHERE mc.post_id = ?
     ORDER BY mc.created_at ASC
   `).all(req.params.id);
 
@@ -151,7 +151,7 @@ router.post('/generate', async (req, res) => {
   if (!character_id) return res.status(400).json({ error: 'character_id is required' });
 
   const db = getDb();
-  const character = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(character_id);
+  const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(character_id);
   if (!character) return res.status(404).json({ error: 'Character not found' });
 
   try {
@@ -163,10 +163,13 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-// DELETE /api/moments/:id — 软删除帖子
+// DELETE /api/moments/:id — 删除帖子及关联的评论和点赞
 router.delete('/:id', (req, res) => {
   const db = getDb();
-  db.prepare('UPDATE moment_posts SET is_deleted = 1 WHERE id = ?').run(req.params.id);
+  // 显式清理评论和点赞（兼容旧 DB 无 CASCADE）
+  db.prepare('DELETE FROM moment_likes WHERE post_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM moment_comments WHERE post_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM moment_posts WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -184,7 +187,7 @@ router.post('/:id/comments', async (req, res) => {
     SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.avatar_color
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
-    WHERE mp.id = ? AND mp.is_deleted = 0
+    WHERE mp.id = ?
   `).get(req.params.id);
 
   if (!post) return res.status(404).json({ error: 'Post not found' });
@@ -208,7 +211,7 @@ router.post('/:id/comments', async (req, res) => {
       CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE ? END AS display_name
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
-    WHERE mc.post_id = ? AND mc.is_deleted = 0
+    WHERE mc.post_id = ?
     ORDER BY mc.created_at ASC
   `).all(userNickname(), post.id);
 
@@ -245,7 +248,7 @@ router.post('/:id/comments', async (req, res) => {
 // DELETE /api/moments/:id/comments/:commentId
 router.delete('/:id/comments/:commentId', (req, res) => {
   const db = getDb();
-  db.prepare('UPDATE moment_comments SET is_deleted = 1 WHERE id = ? AND post_id = ?')
+  db.prepare('DELETE FROM moment_comments WHERE id = ? AND post_id = ?')
     .run(req.params.commentId, req.params.id);
   res.json({ ok: true });
 });
@@ -322,13 +325,13 @@ async function generateMomentPost(character) {
       SELECT 'from' AS direction, cr.relationship_text,
              c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
       FROM character_relationships cr
-      JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
+      JOIN characters c ON c.id = cr.to_character_id
       WHERE cr.from_character_id = ?
       UNION ALL
       SELECT 'to' AS direction, cr.relationship_text,
              c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
       FROM character_relationships cr
-      JOIN characters c ON c.id = cr.from_character_id AND c.is_active = 1
+      JOIN characters c ON c.id = cr.from_character_id
       WHERE cr.to_character_id = ?
     `).all(character.id, character.id);
 
@@ -535,12 +538,12 @@ async function generateCharacterReply(post, historyComments) {
   const charRels = db.prepare(`
     SELECT 'from' AS direction, cr.relationship_text, c.display_name
     FROM character_relationships cr
-    JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
+    JOIN characters c ON c.id = cr.to_character_id
     WHERE cr.from_character_id = ?
     UNION ALL
     SELECT 'to' AS direction, cr.relationship_text, c.display_name
     FROM character_relationships cr
-    JOIN characters c ON c.id = cr.from_character_id AND c.is_active = 1
+    JOIN characters c ON c.id = cr.from_character_id
     WHERE cr.to_character_id = ?
   `).all(post.character_id, post.character_id);
   if (charRels.length > 0) {

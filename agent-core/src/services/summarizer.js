@@ -32,7 +32,7 @@ export async function maybeSummarize(conversationId) {
   // 统计该会话的消息总数（完整消息，非气泡）
   const { count } = db.prepare(`
     SELECT COUNT(*) as count FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0 AND role IN ('user', 'assistant')
+    WHERE conversation_id = ? AND role IN ('user', 'assistant')
   `).get(conversationId);
 
   // 统计已有的摘要数量
@@ -69,13 +69,13 @@ export async function maybeSummarize(conversationId) {
   if (startId) {
     recentMessages = db.prepare(`
       SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND is_deleted = 0 AND id > ? AND role IN ('user','assistant')
+      WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
       ORDER BY id ASC LIMIT ?
     `).all(conversationId, startId, SUMMARIZE_INTERVAL);
   } else {
     recentMessages = db.prepare(`
       SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND is_deleted = 0 AND role IN ('user','assistant')
+      WHERE conversation_id = ? AND role IN ('user','assistant')
       ORDER BY id ASC LIMIT ?
     `).all(conversationId, SUMMARIZE_INTERVAL);
   }
@@ -109,12 +109,12 @@ export async function maybeSummarize(conversationId) {
 
   // 获取实际的消息 ID（raw_messages）
   const rangeStart = db.prepare(`
-    SELECT id FROM raw_messages WHERE conversation_id = ? AND is_deleted = 0
+    SELECT id FROM raw_messages WHERE conversation_id = ?
     ORDER BY id ASC LIMIT 1 OFFSET ?
   `).get(conversationId, coveredMessages);
 
   const rangeEnd = db.prepare(`
-    SELECT id FROM raw_messages WHERE conversation_id = ? AND is_deleted = 0
+    SELECT id FROM raw_messages WHERE conversation_id = ?
     ORDER BY id ASC LIMIT 1 OFFSET ?
   `).get(conversationId, count - 1);
 

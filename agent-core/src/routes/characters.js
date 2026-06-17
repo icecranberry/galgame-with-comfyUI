@@ -37,17 +37,17 @@ seedCharacters();
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
   const db = getDb();
-  const characters = db.prepare(`SELECT * FROM characters WHERE is_active = 1`).all();
+  const characters = db.prepare(`SELECT * FROM characters`).all();
 
   const enriched = characters.map(c => {
     const convId = `char_${c.id}`;
     const last = db.prepare(`
       SELECT role, content, created_at FROM messages
-      WHERE conversation_id = ? AND is_deleted = 0
+      WHERE conversation_id = ?
       ORDER BY id DESC LIMIT 1
     `).get(convId);
 
-    const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ? AND is_deleted = 0`).get(convId);
+    const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ?`).get(convId);
 
     return {
       ...c,
@@ -159,7 +159,7 @@ router.get('/:id/recent-images', (req, res) => {
   // 1. 聊天配图
   const chatRows = db.prepare(`
     SELECT images FROM messages
-    WHERE conversation_id = ? AND is_deleted = 0 AND images IS NOT NULL
+    WHERE conversation_id = ? AND images IS NOT NULL
     ORDER BY id DESC LIMIT 30
   `).all(conversationId);
 
@@ -175,7 +175,7 @@ router.get('/:id/recent-images', (req, res) => {
   // 2. 朋友圈配图
   const momentRows = db.prepare(`
     SELECT images FROM moment_posts
-    WHERE character_id = ? AND status = 'done' AND is_deleted = 0 AND images IS NOT NULL
+    WHERE character_id = ? AND status = 'done' AND images IS NOT NULL
     ORDER BY created_at DESC LIMIT 30
   `).all(characterId);
 
@@ -191,7 +191,7 @@ router.get('/:id/recent-images', (req, res) => {
   res.json({ images: urls });
 });
 
-// DELETE /api/characters/:id — 软删除角色并清理所有关联数据
+// DELETE /api/characters/:id — 删除角色并清理所有关联数据
 router.delete('/:id', (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT id, name, avatar_path FROM characters WHERE id = ?').get(req.params.id);
@@ -200,32 +200,23 @@ router.delete('/:id', (req, res) => {
 
   const conversationId = `char_${char.id}`;
 
-  // 1. 软删除朋友圈帖子
-  db.prepare(`UPDATE moment_posts SET is_deleted = 1 WHERE character_id = ?`).run(char.id);
+  // 1. 清理聊天消息（FTS5 通过 trigger 自动同步）
+  db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
 
-  // 2. 软删除帖子下的评论
-  db.prepare(`UPDATE moment_comments SET is_deleted = 1 WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
-
-  // 3. 软删除该角色自己发布的评论
-  db.prepare(`UPDATE moment_comments SET is_deleted = 1 WHERE author_type = 'character' AND author_id = ?`).run(char.id);
-
-  // 4. 硬删除点赞（moment_likes 无 is_deleted 列）
-  db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
-
-  // 5. 软删除聊天消息
-  db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`UPDATE raw_messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
-
-  // 6. 硬删除无 is_deleted 列的系统数据
+  // 2. 清理系统数据
   db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
   db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
   db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
   db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
 
-  // 7. 重建 FTS5 索引
-  db.exec(`DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages WHERE is_deleted = 0)`);
+  // 3. 清理朋友圈（显式清理以兼容旧 DB 无 CASCADE；新 DB 的 CASCADE 自动兜底）
+  db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+  db.prepare(`DELETE FROM moment_comments WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+  db.prepare(`DELETE FROM moment_comments WHERE author_type = 'character' AND author_id = ?`).run(char.id);
+  db.prepare(`DELETE FROM moment_posts WHERE character_id = ?`).run(char.id);
 
-  // 8. 删除头像文件
+  // 4. 删除头像文件
   if (char.avatar_path) {
     const __filename = fileURLToPath(import.meta.url);
     const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
@@ -233,11 +224,9 @@ router.delete('/:id', (req, res) => {
     try { if (fs.existsSync(avatarFile)) fs.unlinkSync(avatarFile); } catch (e) {}
   }
 
-  // 9. 清除智能配图计数器
+  // 5. 删除角色（CASCADE 自动清理 character_relationships / user_relationships）
   clearImageJudgeCounter(char.id);
-
-  // 10. 软删除角色 + 清空朋友圈发帖排期
-  db.prepare(`UPDATE characters SET is_active = 0, next_moment_at = NULL WHERE id = ?`).run(char.id);
+  db.prepare(`DELETE FROM characters WHERE id = ?`).run(char.id);
 
   res.json({ ok: true });
 });
@@ -304,10 +293,15 @@ router.post('/generate', async (req, res) => {
 ## 你的外观
 - [一句话准确简洁地描述角色的外貌(发型瞳色等)，突出最具辨识度的特征]
 - [一句话简洁描述穿着和主要装饰品]
+
+## （可选）你的口头禅（如果角色参考资料没有明确提到禁止强行加上）
+- 0~2个 角色常用的特殊自称（可选，如果角色参考资料没有明确提到禁止强行加上）或者口癖（可选，如果角色参考资料没有明确提到禁止强行加上）
 ${searchContext ? `
 
 ---
-以下是从互联网搜索到的角色参考资料，请参考来完善角色设定（如果你对角色已有足够了解，不完全依赖搜索结果也没关系）：
+以下是从萌娘百科获取的角色参考资料，用于完善角色设定：
+- 参考资料中【萌娘百科 · 基本信息框】内的字段（发色、瞳色、身高、萌点等）来自页面信息框，是高度精确的结构化数据，**写入角色设定时必须优先采用**。
+- 【正文描述】部分来自页面正文，作为背景故事和性格描写的补充参考。
 ${searchContext}` : ''}
 
 ---

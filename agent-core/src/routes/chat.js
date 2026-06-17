@@ -225,14 +225,12 @@ function toISODate(sqliteDT) {
   return sqliteDT.replace(' ', 'T') + '.000Z';
 }
 
-// DELETE /api/characters/:id/messages — 清空角色对话记录（软删除）
+// DELETE /api/characters/:id/messages — 清空角色对话记录
 router.delete('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
-  db.prepare(`UPDATE messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`UPDATE raw_messages SET is_deleted = 1 WHERE conversation_id = ?`).run(conversationId);
-  // 重建 FTS5 索引
-  db.exec(`DELETE FROM messages_fts WHERE rowid NOT IN (SELECT id FROM messages WHERE is_deleted = 0)`);
+  db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
+  db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
   res.json({ ok: true });
 });
 
@@ -244,7 +242,7 @@ router.get('/characters/:id/messages', (req, res) => {
   const messages = db.prepare(`
     SELECT id, conversation_id, role, content, images, created_at
     FROM messages
-    WHERE conversation_id = ? AND is_deleted = 0
+    WHERE conversation_id = ?
     ORDER BY id ASC
   `).all(conversationId).map(m => ({
     ...m,
@@ -307,7 +305,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);
 
     // 2. 加载角色
-    const character = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
 
     // 3. system prompt（全局规则前置 → 人格在后）
     // 规则优先保证格式约束获得最高注意力（首因效应），人格紧随确保角色感不丢失
@@ -337,7 +335,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
     const history = db.prepare(`
       SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 20
+      WHERE conversation_id = ? ORDER BY id DESC LIMIT 20
     `).all(conversationId).reverse();
 
     const msgs = [
@@ -359,12 +357,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     const charRels = db.prepare(`
       SELECT 'from' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
-      JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
+      JOIN characters c ON c.id = cr.to_character_id
       WHERE cr.from_character_id = ?
       UNION ALL
       SELECT 'to' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
-      JOIN characters c ON c.id = cr.from_character_id AND c.is_active = 1
+      JOIN characters c ON c.id = cr.from_character_id
       WHERE cr.to_character_id = ?
     `).all(characterId, characterId);
     if (charRels.length > 0) {
@@ -384,7 +382,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
     const recentMoments = db.prepare(`
       SELECT content, created_at FROM moment_posts
-      WHERE character_id = ? AND status = 'done' AND is_deleted = 0
+      WHERE character_id = ? AND status = 'done'
       ORDER BY created_at DESC LIMIT 2
     `).all(characterId);
     if (recentMoments.length > 0) {
@@ -548,7 +546,7 @@ router.post('/characters/:id/chat', async (req, res) => {
         const needImage = await judgeImageNeed(conversationId);
         if (needImage) {
           console.log('[chat] auto judge: image needed, triggering needImage flow');
-          const char = db.prepare('SELECT * FROM characters WHERE id = ? AND is_active = 1').get(characterId);
+          const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
           await handleNeedImageFlow(conversationId, char, send);
         }
       } catch (err) {
@@ -572,7 +570,7 @@ router.post('/characters/:id/chat', async (req, res) => {
         if (config.features.memoryExtract) {
           const userMsgCount = db.prepare(`
             SELECT COUNT(*) as count FROM raw_messages
-            WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
+            WHERE conversation_id = ? AND role = 'user'
           `).get(conversationId).count;
           if (userMsgCount % 10 === 0) {
             console.log('[chat] memory extract triggered at user message #' + userMsgCount);
@@ -701,13 +699,13 @@ async function judgeImageNeed(conversationId) {
   // 直接从 raw_messages 取最后一条用户/Agent 完整消息，无需合并
   const lastUser = db.prepare(`
     SELECT content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0 AND role = 'user'
+    WHERE conversation_id = ? AND role = 'user'
     ORDER BY id DESC LIMIT 1
   `).get(conversationId);
 
   const lastAssistant = db.prepare(`
     SELECT content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0 AND role = 'assistant'
+    WHERE conversation_id = ? AND role = 'assistant'
     ORDER BY id DESC LIMIT 1
   `).get(conversationId);
 
@@ -815,7 +813,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
   // 2. 加载最近 3 轮历史（生图任务只需锚点上下文，取太多稀释注意力）
   const history = db.prepare(`
     SELECT role, content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 6
+    WHERE conversation_id = ? ORDER BY id DESC LIMIT 6
   `).all(conversationId).reverse();
 
   const formatGuide = imagePromptRule?.rule_content || '';
@@ -870,9 +868,9 @@ async function handleNeedImageFlow(conversationId, character, send) {
 
   if (!displayContent && tags.prompt) {
     // 模型只输出纯 JSON，无正文 → 优先拼回上一条 raw_messages
-    const prevRaw = db.prepare(`SELECT id, prompt FROM raw_messages WHERE conversation_id = ? AND role = 'assistant' AND is_deleted = 0 ORDER BY id DESC LIMIT 1`)
+    const prevRaw = db.prepare(`SELECT id, prompt FROM raw_messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`)
       .get(conversationId);
-    const prevMsg = db.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' AND is_deleted = 0 ORDER BY id DESC LIMIT 1`)
+    const prevMsg = db.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`)
       .get(conversationId);
 
     if (prevRaw && !prevRaw.prompt) {
@@ -962,7 +960,7 @@ async function generateReplyGuesses(conversationId, character) {
   // 取最近 2 轮（4 条 raw_messages）作为上下文
   const history = db.prepare(`
     SELECT role, content FROM raw_messages
-    WHERE conversation_id = ? AND is_deleted = 0
+    WHERE conversation_id = ?
     ORDER BY id DESC LIMIT 4
   `).all(conversationId).reverse();
 

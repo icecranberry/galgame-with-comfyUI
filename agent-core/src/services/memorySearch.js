@@ -70,7 +70,7 @@ function keywordSearch(query, conversationId, limit) {
              (${keywords.map(() => `(CASE WHEN m.content LIKE ? THEN 1 ELSE 0 END + CASE WHEN mf.content LIKE ? THEN 2 ELSE 0 END)`).join(' + ')}) as match_score
       FROM messages m
       LEFT JOIN memory_fragments mf ON mf.source_msg_id = m.id
-      WHERE m.is_deleted = 0 AND (${likeConditions})
+      WHERE (${likeConditions})
     `;
     // match_score params
     for (const kw of keywords) {

@@ -222,7 +222,7 @@
             <div class="float-card float-card-toggle">
               <span class="float-label">不看ta的朋友圈</span>
               <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.momentsDisabled" @change="detail.dirty = true" />
+                <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -448,6 +448,7 @@ const detail = reactive({
   editPrompt: '',
   momentsDisabled: false,
   dirty: false,
+  momentsToggling: false,
 })
 
 const showRelationGraph = ref(false)
@@ -480,6 +481,26 @@ async function saveCharDetail() {
   // 更新本地引用
   const updated = chat.characters.find(x => x.id === c.id)
   if (updated) detail.char = updated
+}
+
+// 不看朋友圈 toggle — 即时持久化，无需等"保存"按钮
+async function toggleMomentsDisabled() {
+  const c = detail.char
+  if (!c) return
+  detail.momentsToggling = true
+  try {
+    await api.updateCharacter(c.id, { moments_disabled: detail.momentsDisabled })
+    // 同步更新本地角色列表中的值，避免 reload 全部角色
+    c.moments_disabled = detail.momentsDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.moments_disabled = detail.momentsDisabled
+  } catch (e) {
+    // 失败时回弹 toggle
+    detail.momentsDisabled = !detail.momentsDisabled
+    console.error('toggleMomentsDisabled failed:', e)
+  } finally {
+    detail.momentsToggling = false
+  }
 }
 
 async function deleteChar() {

@@ -30,7 +30,6 @@ function initSchema(db) {
       content TEXT NOT NULL,
       prompt TEXT,
       client_msg_id TEXT,
-      is_deleted INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -43,7 +42,6 @@ function initSchema(db) {
       content TEXT NOT NULL,
       images TEXT,
       seq INTEGER DEFAULT 0,
-      is_deleted INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -121,7 +119,7 @@ function initSchema(db) {
     -- 朋友圈帖子表
     CREATE TABLE IF NOT EXISTS moment_posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER NOT NULL REFERENCES characters(id),
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
       images TEXT DEFAULT '[]',
       prompt TEXT,
@@ -129,25 +127,23 @@ function initSchema(db) {
       resolution TEXT DEFAULT '1600x1200',
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
       error_message TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      is_deleted INTEGER DEFAULT 0
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 朋友圈评论表
     CREATE TABLE IF NOT EXISTS moment_comments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      post_id INTEGER NOT NULL REFERENCES moment_posts(id),
+      post_id INTEGER NOT NULL REFERENCES moment_posts(id) ON DELETE CASCADE,
       author_type TEXT NOT NULL CHECK(author_type IN ('user','character')),
       author_id INTEGER,
       content TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      is_deleted INTEGER DEFAULT 0
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 朋友圈点赞表（单用户：每个帖子最多一个赞，UNIQUE 约束 + toggle）
     CREATE TABLE IF NOT EXISTS moment_likes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      post_id INTEGER NOT NULL REFERENCES moment_posts(id),
+      post_id INTEGER NOT NULL REFERENCES moment_posts(id) ON DELETE CASCADE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(post_id)
     );
@@ -235,7 +231,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(is_deleted, status);
+    CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(status);
     CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(post_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_user_rels_char ON user_relationships(character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
@@ -382,7 +378,7 @@ function rebuildFtsIndex(db) {
   }
 
   // 只在 FTS 损坏或计数不一致时才全量重建
-  const msgCount = db.prepare(`SELECT count(*) AS c FROM messages WHERE is_deleted = 0`).get().c;
+  const msgCount = db.prepare(`SELECT count(*) AS c FROM messages`).get().c;
   if (!ftsOk || ftsCount !== msgCount) {
     if (ftsOk) {
       // 表完好但计数不一致 — 清空后重建
@@ -394,7 +390,7 @@ function rebuildFtsIndex(db) {
         db.exec(`CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='id')`);
       }
     }
-    const msgs = db.prepare(`SELECT id, content FROM messages WHERE is_deleted = 0`).all();
+    const msgs = db.prepare(`SELECT id, content FROM messages`).all();
     if (msgs.length > 0) {
       const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
       for (const m of msgs) {

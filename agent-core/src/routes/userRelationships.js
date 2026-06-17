@@ -38,7 +38,7 @@ router.post('/', (req, res) => {
   }
 
   // 验证角色存在
-  const char = db.prepare('SELECT id FROM characters WHERE id = ? AND is_active = 1').get(character_id);
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(character_id);
   if (!char) {
     return res.status(404).json({ error: 'Character not found' });
   }
