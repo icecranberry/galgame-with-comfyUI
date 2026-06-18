@@ -269,10 +269,6 @@
         <div v-for="rule in rules" :key="rule.rule_key" class="rule-block">
           <div class="rule-header">
             <span class="rule-label">{{ ruleLabels[rule.rule_key] || rule.rule_key }}</span>
-            <label class="switch">
-              <input type="checkbox" :checked="rule._active" @change="rule._active = $event.target.checked; markRuleDirty(rule.rule_key)" />
-              <span class="slider"></span>
-            </label>
           </div>
           <textarea
             class="rule-textarea"
@@ -334,6 +330,7 @@ const rulesSaved = ref({})
 const ruleLabels = {
   image_intent: '图像生成判断',
   system_rules: '系统规则',
+  dialogue_rules: '聊天规则',
   image_prompt: '图像生成指令',
   judge_prompt: '智能配图判断提示词',
 }
@@ -443,7 +440,6 @@ async function loadRules() {
     rules.value = (data.rules || []).map(r => ({
       ...r,
       _content: r.rule_content,
-      _active: !!r.is_active,
     }))
   } catch {}
 }
@@ -453,11 +449,9 @@ async function saveRule(rule) {
   try {
     const result = await updateGlobalRule(rule.rule_key, {
       rule_content: rule._content,
-      is_active: rule._active,
     })
     if (result.ok) {
       rule.rule_content = rule._content
-      rule.is_active = rule._active ? 1 : 0
       rule.updated_at = result.rule?.updated_at || new Date().toISOString()
       rulesDirty.value[rule.rule_key] = false
       rulesSaved.value[rule.rule_key] = true
