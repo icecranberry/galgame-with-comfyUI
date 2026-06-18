@@ -212,7 +212,7 @@
             <div class="td">从对话中提取事实/偏好/情绪碎片存入向量数据库</div>
           </div>
           <label class="switch">
-            <input type="checkbox" v-model="features.memoryExtract" @change="saveFeature('memoryExtract', features.memoryExtract)" />
+            <input type="checkbox" v-model="features.memory" @change="saveFeature('memory', features.memory)" />
             <span class="slider"></span>
           </label>
         </div>
@@ -327,7 +327,7 @@ const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', mom
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, memoryExtract: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false })
+const features = reactive({ emotion: false, memory: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false })
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)

@@ -7,7 +7,9 @@ import { chatStream, chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
 import { extractMemoryFragments } from '../services/memoryExtractor.js';
+import { deleteByConversation } from '../services/vectorClient.js';
 import { maybeSummarize, getRecentSummaries } from '../services/summarizer.js';
+import { maybeExtractPortrait } from '../services/portraitExtractor.js';
 import {
   loadEmotionState, evolveEmotion, evaluateStimulus,
   emotionToPrompt, saveEmotionSnapshot, emotionDashboard,
@@ -231,8 +233,20 @@ router.delete('/characters/:id/messages', (req, res, next) => {
   const conversationId = convId(req.params.id);
 
   const doDelete = () => {
+    const charId = parseInt(req.params.id, 10);
+    // 先删子表（有 FK 指向 messages.id），再删主表
+    db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
+    // 主表
     db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+    // 清理 ChromaDB 中该 conversation 的向量
+    deleteByConversation(conversationId).then(
+      n => { if (n > 0) console.log(`[chat] chroma deleted ${n} vectors for ${conversationId}`); },
+      err => console.error(`[chat] chroma cleanup failed for ${conversationId}:`, err.message)
+    );
   };
 
   try {
@@ -387,6 +401,24 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_info>${infoParts.join('。')}</user_info>`);
     }
 
+    // 5.0b2 注入角色视角的用户画像（如果该角色对用户有特征记录）
+    const portraitRows = db.prepare(`
+      SELECT trait_type, content FROM user_portraits
+      WHERE character_id = ?
+      ORDER BY trait_type, confidence DESC
+    `).all(characterId);
+    if (portraitRows.length > 0) {
+      const grouped = {};
+      for (const row of portraitRows) {
+        (grouped[row.trait_type] = grouped[row.trait_type] || []).push(row.content);
+      }
+      const portraitParts = [];
+      if (grouped.appearance) portraitParts.push('外貌特征：' + grouped.appearance.join('、'));
+      if (grouped.personality) portraitParts.push('性格特征：' + grouped.personality.join('、'));
+      if (grouped.preference) portraitParts.push('偏好习惯：' + grouped.preference.join('、'));
+      relParts.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitParts.join('\n')}</user_portrait>`);
+    }
+
     // 5.0c 角色间关系（酒馆关系图）
     const charRels = db.prepare(`
       SELECT 'from' AS direction, cr.relationship_text, c.display_name
@@ -419,7 +451,7 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
     // 5.2 注入滚动摘要（覆盖超过 20 轮的历史对话）
-    const summaries = getRecentSummaries(conversationId, 2);
+    const summaries = getRecentSummaries(conversationId, 1);
     if (summaries.length > 0) {
       const summaryText = summaries.map(s => s.summary).join('\n---\n');
       msgs.push({ role: 'system', content: '[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaryText });
@@ -428,15 +460,30 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 5.3 记忆三路召回（用当前用户消息检索相关记忆碎片）
     if (config.features.memory) {
       try {
-        const memoryResults = await hybridSearch(message, { conversationId, topK: 10 });
-        if (memoryResults.length > 0) {
-          const memoryLines = memoryResults.map((m, i) =>
-            `${i + 1}. [${m.fragment_type}] ${m.content}`
-          ).join('\n');
-          msgs.push({
-            role: 'system',
-            content: '[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines
+        const excludeEntities = [character.display_name, chatUserName, 'user'];
+        const rawResults = await hybridSearch(message, { conversationId, topK: 10, excludeEntities });
+        // 关键：必须有至少一个关键词或实体通道的命中，纯向量命中不可靠（短查询泛化太强）
+        const hasKeywordOrEntityHit = rawResults.some(
+          r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity'))
+        );
+        if (!hasKeywordOrEntityHit) {
+          // 没有关键词/实体命中 → RAG 不注入，避免无关碎片污染上下文
+          console.log('[chat] RAG skipped: no keyword/entity hits for query');
+        } else {
+          // 质量控制：过滤无实体的碎片，确保注入的内容有特异性
+          const memoryResults = rawResults.filter(m => {
+            if (!m.entities || m.entities.length === 0) return false;
+            return true;
           });
+          if (memoryResults.length >= 1) {
+            const memoryLines = memoryResults.map((m, i) =>
+              `${i + 1}. [${m.fragment_type}] ${m.content}`
+            ).join('\n');
+            msgs.push({
+              role: 'system',
+              content: '[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines
+            });
+          }
         }
       } catch (err) {
         console.error('[chat] memory search failed:', err.message);
@@ -606,16 +653,21 @@ router.post('/characters/:id/chat', async (req, res) => {
           saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion);
           console.log(`[emotion] ${emotionDashboard(evolved, dominantEmotion)}`);
         }
-        if (config.features.memoryExtract) {
+        if (config.features.memory) {
           const userMsgCount = db.prepare(`
             SELECT COUNT(*) as count FROM raw_messages
             WHERE conversation_id = ? AND role = 'user'
           `).get(conversationId).count;
           if (userMsgCount % 10 === 0) {
             console.log('[chat] memory extract triggered at user message #' + userMsgCount);
-            await extractMemoryFragments(conversationId, userMsgId, lastInsertRowid);
+            await extractMemoryFragments(conversationId, userMsgId, lastInsertRowid, {
+              characterPrompt: character.base_prompt,
+              participantNames: [character.display_name, chatUserName, 'user'],
+            });
           }
         }
+        // 用户画像提取（每 10 条用户消息触发，无 feature flag 始终开启）
+        await maybeExtractPortrait(conversationId, characterId);
         await maybeSummarize(conversationId);
       } catch (err) {
         console.error('[chat] post-processing error:', err.message);

@@ -10,7 +10,8 @@
       "Bash(node --input-type=module -e ' *)",
       "Bash(node app.js)",
       "Bash(curl -s \"http://localhost:3099/api/memory/search?q=%E7%8C%AB\")",
-      "Bash(curl -s \"http://localhost:3099/debug/search?q=%E7%8C%AB\")"
+      "Bash(curl -s \"http://localhost:3099/debug/search?q=%E7%8C%AB\")",
+      "Bash(node -e \"const Database=require\\('better-sqlite3'\\);const db=new Database\\('data/agent.db',{readonly:true}\\);const rows=db.prepare\\('SELECT setting_key, setting_value FROM system_settings ORDER BY setting_key'\\).all\\(\\);console.log\\(JSON.stringify\\(rows,null,2\\)\\);db.close\\(\\);\")"
     ]
   }
 }

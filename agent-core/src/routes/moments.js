@@ -392,7 +392,7 @@ async function generateMomentPost(character) {
   msgs.push({ role: 'system', content: systemPrompt });
   msgs.push({ role: 'user', content: userMsg });
 
-  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 768 });
+  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024 });
 
   // 解析 LLM 输出
   let text = '', imagePrompt = '';
@@ -408,9 +408,18 @@ async function generateMomentPost(character) {
       imagePrompt = parsed.imagePrompt || '';
     }
   } catch {
-    // fallback: 用整个回复作为文案，尝试提取 prompt
-    text = result.trim().slice(0, 200);
-    imagePrompt = 'scenic view, beautiful lighting, detailed';
+    // 修复：尝试补全可能被截断的 JSON（如末尾缺少 "}）
+    try {
+      const repaired = result.trim() + '"}';
+      const parsed = JSON.parse(repaired);
+      text = parsed.text || '';
+      imagePrompt = parsed.imagePrompt || '';
+      console.log('[moments] JSON completed with closing "} and parsed successfully');
+    } catch {
+      // fallback: 用整个回复作为文案，尝试提取 prompt
+      text = result.trim().slice(0, 200);
+      imagePrompt = 'scenic view, beautiful lighting, detailed';
+    }
   }
 
   if (!text) {

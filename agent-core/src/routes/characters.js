@@ -8,6 +8,7 @@ import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
+import { deleteByConversation } from '../services/vectorClient.js';
 
 const router = Router();
 
@@ -225,6 +226,11 @@ router.delete('/:id', (req, res, next) => {
 
   // 2. 清理系统数据
   db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+  // 清理 ChromaDB
+  deleteByConversation(conversationId).then(
+    n => { if (n > 0) console.log(`[characters] chroma deleted ${n} vectors for ${conversationId}`); },
+    err => console.error(`[characters] chroma cleanup failed for ${conversationId}:`, err.message)
+  );
   db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
   db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
   db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);

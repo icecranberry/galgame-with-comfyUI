@@ -1,16 +1,25 @@
 /**
  * 滚动摘要生成器
  *
- * 每个会话每 50 条消息触发一次摘要生成。
- * 新摘要 = LLM(上一段摘要 + 最近 50 条消息)。
+ * 每个会话每 20 条消息触发一次摘要生成。
+ * 新摘要 = LLM(上一段摘要 + 最近 20 条消息)。
+ * 生成后自动向量化存入 ChromaDB，纳入 RAG 召回。
  */
 
-import { getDb } from '../db/index.js';
+import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
+import { upsertVector } from './vectorClient.js';
 
-const SUMMARIZE_INTERVAL = 50; // 每 50 条消息触发一次
+/** 去掉消息末尾的 {"prompt":"..."} JSON 标签 */
+function stripPromptJson(content) {
+  return content.replace(/\s*\{["']prompt["']:\s*".*?"\s*\}\s*$/s, '');
+}
 
-const SUMMARY_PROMPT = `你是一个对话摘要生成器。请将以下对话片段压缩为 200-400 字的摘要，只保留关键信息：
+const SUMMARIZE_INTERVAL = 20; // 每 20 条消息触发一次
+
+const SUMMARY_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
+
+你是一个对话摘要生成器。请将以下对话片段压缩为 200-400 字的摘要，只保留关键信息：
 
 {{previous_summary}}
 
@@ -83,19 +92,22 @@ export async function maybeSummarize(conversationId) {
   if (recentMessages.length === 0) return null;
 
   const recentText = recentMessages
-    .map(m => `[${m.role}]: ${m.content}`)
+    .map(m => `[${m.role}]: ${stripPromptJson(m.content)}`)
     .join('\n');
 
   // 调用 DeepSeek 生成摘要
   let summary;
   try {
     summary = await chatSync(
-      [{
-        role: 'user',
-        content: SUMMARY_PROMPT
-          .replace('{{previous_summary}}', previousSummary)
-          .replace('{{recent_messages}}', recentText),
-      }],
+      [
+        { role: 'system', content: getSystemRules({ roleplay: false }) },
+        {
+          role: 'user',
+          content: SUMMARY_PROMPT
+            .replace('{{previous_summary}}', previousSummary)
+            .replace('{{recent_messages}}', recentText),
+        },
+      ],
       { temperature: 0.5, max_tokens: 800 }
     );
   } catch (err) {
@@ -123,6 +135,26 @@ export async function maybeSummarize(conversationId) {
     INSERT INTO rolling_summaries (conversation_id, start_msg_id, end_msg_id, summary)
     VALUES (?, ?, ?, ?)
   `).run(conversationId, rangeStart?.id || 0, rangeEnd?.id || 0, summary);
+
+  // 异步向量化摘要并存入 ChromaDB（不阻塞返回）
+  setImmediate(async () => {
+    try {
+      const chromaId = `summary_${conversationId}_${summary_count + 1}`;
+      await upsertVector(
+        chromaId,
+        summary,
+        {
+          conversation_id: conversationId,
+          fragment_type: 'summary',
+          summary_index: summary_count + 1,
+        },
+        'summary'
+      );
+      console.log(`[summarizer] vectorized summary #${summary_count + 1} for conv ${conversationId}`);
+    } catch (err) {
+      console.error(`[summarizer] vectorize failed:`, err.message);
+    }
+  });
 
   console.log(`[summarizer] generated summary #${summary_count + 1} for conv ${conversationId} (${count} msgs)`);
 

@@ -143,6 +143,9 @@
         <!-- 编辑人格 → 二级弹窗 -->
         <button class="sp-btn" @click="openCharEditor">📝 编辑角色人格</button>
 
+        <!-- 查看角色对用户的印象 -->
+        <button class="sp-btn" @click="openImpression">💭 查看对你的印象</button>
+
         <!-- 清空聊天记录 -->
         <button class="sp-btn" @click="clearChatHistory" :disabled="clearing">
           {{ clearing ? '清空中...' : '🗑️ 清空聊天记录' }}
@@ -185,6 +188,123 @@
     </div>
     </Transition>
 
+    <!-- 角色对用户的印象弹窗 -->
+    <Transition name="editor-fade">
+      <div v-if="showImpression" class="editor-overlay" @click.self="showImpression = false">
+      <div class="editor-panel impression-panel">
+        <div class="editor-header">
+          <span>💭 {{ chat.activeChar?.display_name }} 对你的印象</span>
+          <button class="editor-close" @click="showImpression = false">&times;</button>
+        </div>
+        <div class="impression-body">
+          <!-- 加载中 -->
+          <div v-if="impressionLoading" class="impression-status">
+            <div class="impression-loading-spinner"></div>
+            <span>正在读取对你的印象...</span>
+          </div>
+          <!-- 错误 -->
+          <div v-else-if="impressionError" class="impression-status impression-error-state">
+            <span class="impression-error-icon">⚠️</span>
+            <span>加载失败: {{ impressionError }}</span>
+          </div>
+          <!-- 画像列表（加载完成后始终显示三个分组，空组自带"添加"入口） -->
+          <div v-else class="impression-list">
+            <div v-for="key in groupKeys" :key="key">
+              <div class="impression-group">
+                <div class="impression-group-header">
+                  <span class="impression-group-badge" :style="{ background: typeColor[key] }">
+                    {{ typeIcon[key] }}
+                  </span>
+                  <span class="impression-group-title">{{ typeLabel[key] }}</span>
+                  <span class="impression-group-count">{{ impressionGrouped[key]?.length || 0 }}</span>
+                  <button class="impression-add-btn" :style="{ color: typeColor[key] }" title="添加" @click="startAdd(key)">+</button>
+                </div>
+
+                <!-- 添加模式（该组为空或用户点击 + 后） -->
+                <div v-if="addingKey === key" class="impression-card-list">
+                  <div class="impression-card impression-card-editing" :style="{ '--tint': typeColor[key] }">
+                    <textarea
+                      v-model="addingContent"
+                      class="impression-edit-textarea"
+                      :style="{ borderColor: typeColor[key] }"
+                      rows="2"
+                      placeholder="输入新的特征描述..."
+                      @keydown.esc="cancelAdd"
+                      @keydown.enter.ctrl="saveAdd(key)"
+                    ></textarea>
+                    <div class="impression-edit-actions">
+                      <button class="impression-btn impression-btn-cancel" @click="cancelAdd" :disabled="savingAdd">取消</button>
+                      <button class="impression-btn impression-btn-save" :style="{ background: typeColor[key] }" @click="saveAdd(key)" :disabled="savingAdd || addingContent.trim().length < 2">
+                        {{ savingAdd ? '添加中...' : '添加' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 已有特征列表 -->
+                <div v-if="impressionGrouped[key]?.length" class="impression-card-list">
+                  <div
+                    v-for="trait in impressionGrouped[key]"
+                    :key="trait.id"
+                    class="impression-card"
+                    :class="{ 'impression-card-editing': editingId === trait.id }"
+                    :style="{ '--tint': typeColor[key] }"
+                  >
+                    <!-- 编辑模式 -->
+                    <template v-if="editingId === trait.id">
+                      <textarea
+                        v-model="editingContent"
+                        class="impression-edit-textarea"
+                        :style="{ borderColor: typeColor[key] }"
+                        rows="2"
+                        @keydown.esc="cancelEdit"
+                        @keydown.enter.ctrl="saveEdit(trait)"
+                      ></textarea>
+                      <div class="impression-edit-actions">
+                        <button class="impression-btn impression-btn-cancel" @click="cancelEdit" :disabled="savingEdit">取消</button>
+                        <button class="impression-btn impression-btn-save" :style="{ background: typeColor[key] }" @click="saveEdit(trait)" :disabled="savingEdit || editingContent.trim().length < 2">
+                          {{ savingEdit ? '保存中...' : '保存' }}
+                        </button>
+                      </div>
+                    </template>
+                    <!-- 查看模式 -->
+                    <template v-else>
+                      <div class="impression-card-main">
+                        <span class="impression-card-text">{{ trait.content }}</span>
+                        <div class="impression-card-meta">
+                          <span class="impression-card-confidence" :title="'置信度: ' + Math.round((trait.confidence || 0.5) * 100) + '%'">
+                            <span class="dot" :class="'dot-' + confidenceLevel(trait.confidence)"></span>
+                            <span class="dot" :class="'dot-' + confidenceLevel(trait.confidence, 1)"></span>
+                            <span class="dot" :class="'dot-' + confidenceLevel(trait.confidence, 2)"></span>
+                          </span>
+                          <span class="impression-card-time">{{ formatTime(trait.created_at) }}</span>
+                        </div>
+                      </div>
+                      <div class="impression-card-actions">
+                        <button class="impression-action-btn" title="编辑" @click="startEdit(trait)">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button class="impression-action-btn impression-action-btn-danger" title="删除" @click="removeTrait(trait)">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- 空组占位 -->
+                <div v-else-if="addingKey !== key" class="impression-empty-row">
+                  <span class="impression-empty-row-text">暂无记录</span>
+                  <button class="impression-add-link" :style="{ color: typeColor[key] }" @click="startAdd(key)">+ 添加特征</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </Transition>
+
     <!-- 角色头像选择器 -->
     <AvatarCropper
       v-if="showAvatarPicker"
@@ -208,6 +328,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
+import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 
 const route = useRoute()
@@ -242,6 +363,139 @@ const saving = ref(false)
 const clearing = ref(false)
 const deleting = ref(false)
 const editForm = ref({ display_name: '', base_prompt: '' })
+
+// ── 印象弹窗 ──
+const showImpression = ref(false)
+const impressionLoading = ref(false)
+const impressionError = ref('')
+const impressionGrouped = ref({ appearance: [], personality: [], preference: [] })
+
+async function openImpression() {
+  showSettings.value = false
+  showImpression.value = true
+  impressionLoading.value = true
+  impressionError.value = ''
+  impressionGrouped.value = { appearance: [], personality: [], preference: [] }
+  try {
+    const data = await getCharacterPortrait(chat.activeChar.id)
+    impressionGrouped.value = data.grouped || { appearance: [], personality: [], preference: [] }
+  } catch (err) {
+    impressionError.value = err.message
+  } finally {
+    impressionLoading.value = false
+  }
+}
+
+// ── 印象编辑/删除 ──
+const editingId = ref(null)
+const editingContent = ref('')
+const savingEdit = ref(false)
+
+function startEdit(trait) {
+  editingId.value = trait.id
+  editingContent.value = trait.content
+}
+function cancelEdit() {
+  editingId.value = null
+  editingContent.value = ''
+}
+async function saveEdit(trait) {
+  const trimmed = editingContent.value.trim()
+  if (trimmed.length < 2) return
+  savingEdit.value = true
+  try {
+    await updatePortrait(trait.id, trimmed)
+    // 更新本地数据
+    trait.content = trimmed
+    editingId.value = null
+    editingContent.value = ''
+  } catch (err) {
+    alert('保存失败: ' + err.message)
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+async function removeTrait(trait) {
+  if (!confirmFn) {
+    if (!confirm(`确定删除「${trait.content}」？`)) return
+  } else {
+    const ok = await confirmFn(`确定删除「${trait.content}」？`)
+    if (!ok) return
+  }
+  try {
+    await deletePortrait(trait.id)
+    // 从本地分组中移除
+    const group = impressionGrouped.value[trait.trait_type]
+    if (group) {
+      const idx = group.findIndex(t => t.id === trait.id)
+      if (idx !== -1) group.splice(idx, 1)
+    }
+  } catch (err) {
+    alert('删除失败: ' + err.message)
+  }
+}
+
+// ── 印象添加 ──
+const addingKey = ref(null)
+const addingContent = ref('')
+const savingAdd = ref(false)
+
+function startAdd(key) {
+  // 如果正在编辑某条，先取消
+  if (editingId.value !== null) cancelEdit()
+  addingKey.value = key
+  addingContent.value = ''
+}
+function cancelAdd() {
+  addingKey.value = null
+  addingContent.value = ''
+}
+async function saveAdd(key) {
+  const trimmed = addingContent.value.trim()
+  if (trimmed.length < 2) return
+  savingAdd.value = true
+  try {
+    const row = await addPortrait(chat.activeChar.id, key, trimmed)
+    // 添加到本地分组
+    if (!impressionGrouped.value[key]) impressionGrouped.value[key] = []
+    impressionGrouped.value[key].push(row)
+    addingKey.value = null
+    addingContent.value = ''
+  } catch (err) {
+    alert('添加失败: ' + err.message)
+  } finally {
+    savingAdd.value = false
+  }
+}
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now - d
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin}分钟前`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}小时前`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay === 1) return '昨天'
+  if (diffDay < 7) return `${diffDay}天前`
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+const typeLabel = { appearance: '外貌特征', personality: '性格特征', preference: '偏好习惯' }
+const typeIcon = { appearance: '🎨', personality: '🧠', preference: '❤️' }
+const typeColor = { appearance: '#e07b6c', personality: '#9b7fd4', preference: '#e05a7a' }
+
+const groupKeys = ['appearance', 'personality', 'preference']
+
+function confidenceLevel(confidence, index = 0) {
+  const val = confidence ?? 0.5
+  const threshold = (index + 1) / 3
+  return val >= threshold ? 'on' : 'off'
+}
 
 const avatarPreviewStyle = computed(() => {
   const p = chat.activeChar?.avatar_path
@@ -877,7 +1131,7 @@ function renderContent(text) {
 .editor-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:center; justify-content:center; z-index:1001; }
 .editor-panel {
   width:768px; max-height:90vh; height:80vh;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-radius:16px;
@@ -934,6 +1188,289 @@ function renderContent(text) {
     height:100vh; max-height:100vh;
     border-radius:0; border:none;
   }
+}
+
+/* ── 印象弹窗 ── */
+.impression-panel {
+  max-width: 520px;
+  max-height: 68vh;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+}
+.impression-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px 20px 16px;
+}
+
+/* 状态 */
+.impression-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+  color: #888;
+  font-size: 14px;
+  gap: 12px;
+}
+.impression-loading-spinner {
+  width: 28px; height: 28px;
+  border: 3px solid rgba(0,0,0,0.08);
+  border-top-color: var(--accent, #e07b6c);
+  border-radius: 50%;
+  animation: impression-spin 0.7s linear infinite;
+}
+@keyframes impression-spin { to { transform: rotate(360deg); } }
+.impression-error-state { color: #e55; }
+.impression-error-icon { font-size: 24px; }
+.impression-empty-icon { font-size: 40px; opacity: 0.5; }
+.impression-empty-text { font-size: 15px; color: var(--text-secondary); font-weight: 500; }
+.impression-empty-hint { font-size: 13px; color: #aaa; }
+
+/* 分组 */
+.impression-group { margin-bottom: 16px; }
+.impression-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+.impression-group-badge {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.impression-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.impression-group-count {
+  font-size: 11px;
+  color: #bbb;
+  background: rgba(0,0,0,0.04);
+  border-radius: 10px;
+  padding: 0 7px;
+  line-height: 18px;
+  margin-left: auto;
+}
+.impression-add-btn {
+  width: 24px; height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px dashed currentColor;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  margin-left: 4px;
+}
+.impression-add-btn:hover { opacity: 1; }
+
+/* 空组占位 */
+.impression-empty-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1.5px dashed rgba(0,0,0,0.08);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.3);
+}
+.impression-empty-row-text {
+  font-size: 13px;
+  color: #bbb;
+}
+.impression-add-link {
+  font-size: 13px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  transition: background 0.15s;
+  text-decoration: none;
+}
+.impression-add-link:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+/* 卡片列表 */
+.impression-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 卡片 */
+.impression-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.65);
+  border-radius: 10px;
+  border-left: 3px solid var(--tint, #ccc);
+  transition: all 0.2s ease;
+  position: relative;
+}
+.impression-card:hover {
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.impression-card-editing {
+  flex-direction: column;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+
+.impression-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.impression-card-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.impression-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 置信度圆点 */
+.impression-card-confidence {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.impression-card-confidence .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+.impression-card-confidence .dot.on {
+  background: var(--tint, #ccc);
+  opacity: 0.8;
+}
+.impression-card-confidence .dot.off {
+  background: rgba(0,0,0,0.08);
+}
+
+.impression-card-time {
+  font-size: 11px;
+  color: #bbb;
+  margin-left: auto;
+}
+
+/* 操作按钮 */
+.impression-card-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0.55;
+  transition: opacity 0.18s ease;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.impression-card:hover .impression-card-actions {
+  opacity: 1;
+}
+@media (max-width: 767px) {
+  .impression-card-actions { opacity: 1; }
+}
+.impression-action-btn {
+  width: 28px; height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.impression-action-btn:hover {
+  background: rgba(0,0,0,0.06);
+  color: var(--text-bright);
+}
+.impression-action-btn-danger:hover {
+  background: rgba(255,77,79,0.1);
+  color: var(--danger, #e55);
+}
+
+/* 编辑模式 */
+.impression-edit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1.5px solid #d5d0ca;
+  border-radius: 8px;
+  background: white;
+  color: var(--text-bright);
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.impression-edit-textarea:focus {
+  box-shadow: 0 0 0 3px rgba(224,123,108,0.12);
+}
+.impression-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.impression-btn {
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.impression-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.impression-btn-cancel {
+  border-color: rgba(0,0,0,0.12);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.impression-btn-cancel:hover { background: rgba(0,0,0,0.04); }
+.impression-btn-save {
+  color: white;
+  border: none;
+}
+.impression-btn-save:hover { filter: brightness(1.08); }
+
+@media (max-width: 767px) {
+  .impression-panel {
+    max-width: 100vw;
+    max-height: 75vh;
+  }
+  .impression-card { padding: 8px 10px; }
 }
 
 </style>

@@ -18,7 +18,6 @@ def _get_tokenizer():
     if _tokenizer is None:
         _tokenizer = AutoTokenizer.from_pretrained(
             MODEL_PATH,
-            trust_remote_code=True,
         )
     return _tokenizer
 

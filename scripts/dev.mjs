@@ -114,6 +114,44 @@ function killPort(port) {
   } catch { return false; }
 }
 
+// ── 嵌入模型检测 & 自动下载 ──
+const MODEL_ONNX = resolve(ROOT, "vector-service", "models", "jina-embeddings-v2-base-zh", "onnx", "model_int8.onnx");
+
+function checkModel() {
+  return existsSync(MODEL_ONNX);
+}
+
+function downloadModelBg() {
+  return new Promise((resolvePromise) => {
+    const venvPy = resolve(ROOT, "vector-service", "venv", "Scripts", "python.exe");
+    const python = existsSync(venvPy) ? venvPy : "python";
+    const script = resolve(ROOT, "vector-service", "download_model.py");
+
+    console.log(`        ${C.yellow}模型缺失，后台自动下载 (~155MB, hf-mirror.com)...${C.reset}`);
+
+    const child = spawn(python, [script], {
+      cwd: resolve(ROOT, "vector-service"),
+      stdio: "pipe",
+      windowsHide: true,
+      shell: process.platform === "win32",
+    });
+
+    // 把下载进度输出到控制台
+    child.stdout.on("data", (d) => process.stdout.write(`        ${d}`));
+    child.stderr.on("data", (d) => process.stderr.write(`        ${d}`));
+
+    child.on("exit", (code) => {
+      const ok = code === 0 && checkModel();
+      if (ok) {
+        console.log(`        ${C.green}[OK] 模型下载完成${C.reset}`);
+      } else {
+        console.log(`        ${C.red}[FAIL] 模型下载失败 (code ${code})，vector-service 将跳过${C.reset}`);
+      }
+      resolvePromise(ok);
+    });
+  });
+}
+
 // ── HTTP 健康检查 ──
 async function waitFor(url, child, timeoutSec = 30) {
   const deadline = Date.now() + timeoutSec * 1000;
@@ -127,6 +165,30 @@ async function waitFor(url, child, timeoutSec = 30) {
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;
+}
+
+// ── 启动单个服务（返回是否就绪）──
+async function startService(svc) {
+  const child = spawn(svc.getCmd(), svc.args, {
+    cwd: svc.cwd,
+    stdio: "pipe",
+    windowsHide: true,
+    shell: process.platform === "win32",
+  });
+
+  children.add(child);
+
+  child.stdout.on("data", (d) => process.stdout.write(`${tag(svc.name)} ${d}`));
+  child.stderr.on("data", (d) => process.stderr.write(`${tag(svc.name)} ${d}`));
+
+  child.on("exit", (code) => {
+    children.delete(child);
+    if (code !== null && code !== 0 && code !== 143 && code !== 1) {
+      console.log(`${tag(svc.name)} ${C.red}exited (code ${code})${C.reset}`);
+    }
+  });
+
+  return waitFor(svc.url, child);
 }
 
 // ── 子进程管理 ──
@@ -239,35 +301,36 @@ async function main() {
     },
   ];
 
-  // [2/4], [3/4], [4/4] 启动
-  for (let i = 0; i < services.length; i++) {
-    const svc = services[i];
-    const step = i + 2;
+  // [2/4] 模型检测（后台下载，不阻塞）
+  const modelReady = checkModel()
+    ? Promise.resolve(true)
+    : downloadModelBg();
+
+  // [3/4], [4/4] 并行启动 agent-core + web-ui
+  const coreSvcs = services.slice(1); // agent-core, web-ui
+  const corePromises = coreSvcs.map((svc) => {
+    const step = svc.name === "agent-core" ? 3 : 4;
     process.stdout.write(`  [${step}/4] Starting ${svc.name} (:${svc.port})...`);
+    return startService(svc).then(ok =>
+      console.log(ok ? ` ${C.green}OK${C.reset}` : ` ${C.yellow}timeout — continuing${C.reset}`));
+  });
 
-    const child = spawn(svc.getCmd(), svc.args, {
-      cwd: svc.cwd,
-      stdio: "pipe",
-      windowsHide: true,
-      shell: process.platform === "win32",
-    });
+  // vector-service: 等模型就绪后再启动
+  const vectorSvc = services[0];
+  modelReady.then(async (ok) => {
+    if (!ok) {
+      console.log(`  [2/4] ${C.red}vector-service SKIPPED (模型缺失)${C.reset}`);
+      return;
+    }
+    process.stdout.write(`  [2/4] Starting vector-service (:${vectorSvc.port})...`);
+    const started = await startService(vectorSvc);
+    console.log(started ? ` ${C.green}OK${C.reset}` : ` ${C.yellow}timeout — continuing${C.reset}`);
+  });
 
-    children.add(child);
-
-    // 将输出重定向到父进程（带上 tag）
-    child.stdout.on("data", (d) => process.stdout.write(`${tag(svc.name)} ${d}`));
-    child.stderr.on("data", (d) => process.stderr.write(`${tag(svc.name)} ${d}`));
-
-    child.on("exit", (code) => {
-      children.delete(child);
-      if (code !== null && code !== 0 && code !== 143 && code !== 1) {
-        console.log(`${tag(svc.name)} ${C.red}exited (code ${code})${C.reset}`);
-      }
-    });
-
-    const ok = await waitFor(svc.url, child);
-    console.log(ok ? ` ${C.green}OK${C.reset}` : ` ${C.yellow}timeout — continuing${C.reset}`);
-  }
+  // 等 agent-core + web-ui 就绪
+  await Promise.all(corePromises);
+  // 等 vector-service 就绪（如果模型需要下载，这里会等下载完成 + 启动）
+  await modelReady;
 
   console.log();
   console.log(`  ${C.bold}${"=".repeat(40)}${C.reset}`);

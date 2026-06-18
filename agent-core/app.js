@@ -12,6 +12,7 @@ import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
 import userRelationshipsRoutes from './src/routes/userRelationships.js';
+import portraitsRoutes from './src/routes/portraits.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 
 const app = express();
@@ -36,6 +37,7 @@ app.use('/api/config', configRoutes);
 app.use('/api/moments', momentsRoutes);
 app.use('/api/relationships', relationshipsRoutes);
 app.use('/api/user-relationships', userRelationshipsRoutes);
+app.use('/api/portraits', portraitsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {

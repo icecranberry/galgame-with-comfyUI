@@ -392,6 +392,47 @@ export async function likeMoment(postId) {
   return res.json()
 }
 
+// ── 角色对用户的画像（user_portraits）──
+export async function getCharacterPortrait(characterId) {
+  const res = await fetch(`${BASE}/portraits/${characterId}`)
+  return res.json()
+}
+
+export async function addPortrait(characterId, traitType, content) {
+  const res = await fetch(`${BASE}/portraits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, traitType, content }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || '添加失败')
+  }
+  return res.json()
+}
+
+export async function updatePortrait(id, content) {
+  const res = await fetch(`${BASE}/portraits/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || '更新失败')
+  }
+  return res.json()
+}
+
+export async function deletePortrait(id) {
+  const res = await fetch(`${BASE}/portraits/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || '删除失败')
+  }
+  return res.json()
+}
+
 // ── ComfyUI health ──
 export async function comfyuiHealth() {
   try {

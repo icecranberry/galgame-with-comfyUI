@@ -8,11 +8,13 @@ Python FastAPI 向量服务
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import uuid
+import os
 import cloudscraper
 from bs4 import BeautifulSoup
 
 from embedding import embed, embed_single
-from chroma_store import upsert_memory, search_similar, delete_by_id, collection_count
+from chroma_store import upsert_memory, search_similar, delete_by_id, delete_by_metadata, collection_count
+from config import MODEL_PATH
 
 app = FastAPI(title="Vector Service", version="1.0.0")
 
@@ -31,6 +33,7 @@ class SearchRequest(BaseModel):
     text: str = Field(..., description="查询文本")
     top_k: int = Field(default=20, ge=1, le=100)
     filter_type: str | None = Field(default=None, pattern="^(fact|preference|emotion)$")
+    conversation_id: str | None = Field(default=None, description="可选，限定会话范围")
 
 
 class SearchResult(BaseModel):
@@ -47,6 +50,7 @@ class SearchResponse(BaseModel):
 class UpsertRequest(BaseModel):
     chroma_id: str | None = None
     text: str
+    embedding: list[float] | None = None
     metadata: dict = Field(default_factory=dict)
     fragment_type: str | None = None
 
@@ -57,6 +61,10 @@ class UpsertResponse(BaseModel):
 
 class DeleteRequest(BaseModel):
     chroma_id: str
+
+
+class DeleteByConversationRequest(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID，如 char_5")
 
 
 # ── Routes ──
@@ -83,7 +91,7 @@ async def embed_route(req: EmbedRequest):
 async def search_route(req: SearchRequest):
     try:
         vec = embed_single(req.text)
-        items = search_similar(vec, top_k=req.top_k, filter_type=req.filter_type)
+        items = search_similar(vec, top_k=req.top_k, filter_type=req.filter_type, conversation_id=req.conversation_id)
         return SearchResponse(
             results=[SearchResult(**item) for item in items]
         )
@@ -94,7 +102,10 @@ async def search_route(req: SearchRequest):
 @app.post("/upsert", response_model=UpsertResponse)
 async def upsert_route(req: UpsertRequest):
     try:
-        vec = embed_single(req.text)
+        if req.embedding is not None:
+            vec = req.embedding
+        else:
+            vec = embed_single(req.text)
         chroma_id = req.chroma_id or str(uuid.uuid4())
 
         metadata = {**req.metadata}
@@ -112,6 +123,17 @@ async def delete_route(req: DeleteRequest):
     try:
         delete_by_id(req.chroma_id)
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/delete-by-conversation")
+async def delete_by_conversation_route(req: DeleteByConversationRequest):
+    """按 conversation_id 批量清理向量"""
+    try:
+        deleted = delete_by_metadata({"conversation_id": req.conversation_id})
+        print(f"[delete-by-conversation] removed {deleted} vectors for {req.conversation_id}")
+        return {"ok": True, "deleted": deleted}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -341,6 +363,25 @@ async def scrape_moegirl(req: ScrapeRequest):
 
 @app.on_event("startup")
 async def startup():
+    # 检查模型文件是否存在
+    model_file = f"{MODEL_PATH}/onnx/model_int8.onnx"
+    if not os.path.exists(model_file):
+        print()
+        print("=" * 60)
+        print("  [错误] 嵌入模型文件缺失!")
+        print(f"  缺少: {model_file}")
+        print()
+        print("  请运行以下命令下载:")
+        print()
+        print(f"    cd {os.path.dirname(os.path.abspath(__file__))}")
+        print("    python download_model.py")
+        print()
+        print("  国内用户可加 --mirror 走镜像:")
+        print("    python download_model.py --mirror")
+        print("=" * 60)
+        print()
+        return
+
     print("[vector-service] startup — warming up embedding model...")
     try:
         embed_single("预热")

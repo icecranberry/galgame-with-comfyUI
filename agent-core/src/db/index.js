@@ -164,6 +164,19 @@ function initSchema(db) {
       UNIQUE(character_id)
     );
 
+    -- 用户画像表（角色视角下的用户特征，AI 自动从对话中提取）
+    -- trait_type: appearance(外貌) / personality(性格) / preference(偏好)
+    CREATE TABLE IF NOT EXISTS user_portraits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      trait_type TEXT NOT NULL CHECK(trait_type IN ('appearance','personality','preference')),
+      content TEXT NOT NULL,
+      confidence REAL DEFAULT 0.5,
+      source_msg_id INTEGER REFERENCES messages(id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(character_id, trait_type, content)
+    );
+
     -- 角色关系表（有向：from → to，关系文本存储在 relationship_text 中）
     CREATE TABLE IF NOT EXISTS character_relationships (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,6 +247,8 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(status);
     CREATE INDEX IF NOT EXISTS idx_moment_comments_post ON moment_comments(post_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_user_rels_char ON user_relationships(character_id);
+    CREATE INDEX IF NOT EXISTS idx_portraits_char ON user_portraits(character_id);
+    CREATE INDEX IF NOT EXISTS idx_portraits_type ON user_portraits(trait_type);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
   `);
@@ -561,7 +576,6 @@ const SETTING_TO_CONFIG = {
   comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
   feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_memoryExtract:        { obj: 'features', key: 'memoryExtract',    type: 'bool' },
   feature_autoImageJudge:      { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
   feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
@@ -578,7 +592,22 @@ function castValue(raw, type) {
 }
 
 function seedAndLoadSystemSettings(db) {
-  // 0. 清理旧的 snake_case 键（v1 迁移：统一为 camelCase，匹配 updateFeatureFlag 写入的键名）
+  // 0. 迁移：合并 feature_memoryExtract → feature_memory（v2 迁移：统一记忆开关）
+  const oldExtract = db.prepare(
+    `SELECT setting_value FROM system_settings WHERE setting_key = 'feature_memoryExtract'`
+  ).get();
+  if (oldExtract) {
+    if (oldExtract.setting_value === 'true') {
+      db.prepare(
+        `INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('feature_memory', 'true', CURRENT_TIMESTAMP)`
+      ).run();
+      console.log('[db] migration: merged feature_memoryExtract=true → feature_memory=true');
+    }
+    db.prepare(`DELETE FROM system_settings WHERE setting_key = 'feature_memoryExtract'`).run();
+    console.log('[db] migration: removed orphaned feature_memoryExtract row');
+  }
+
+  // 1. 清理旧的 snake_case 键（v1 迁移：统一为 camelCase，匹配 updateFeatureFlag 写入的键名）
   const OLD_SNAKE_CASE_KEYS = [
     'feature_memory_extract', 'feature_auto_image_judge', 'feature_prompt_optimize',
     'feature_reply_guesses', 'feature_force_image_gen',
@@ -590,13 +619,13 @@ function seedAndLoadSystemSettings(db) {
     console.log(`[db] system_settings: cleaned ${cleaned.changes} legacy snake_case key(s)`);
   }
 
-  // 1. 种子：从当前 config 内存值写入 DB（首次运行迁移 .env 中的值）
+  // 2. 种子：从当前 config 内存值写入 DB（首次运行迁移 .env 中的值）
   const seed = db.prepare(`INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)`);
   for (const [settingKey, { obj, key }] of Object.entries(SETTING_TO_CONFIG)) {
     seed.run(settingKey, String(config[obj][key]));
   }
 
-  // 2. 加载：从 DB 读取所有设置，覆盖 config 内存对象（DB 优先于 .env）
+  // 3. 加载：从 DB 读取所有设置，覆盖 config 内存对象（DB 优先于 .env）
   const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
   let applied = 0;
   for (const row of rows) {

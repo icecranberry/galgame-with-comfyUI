@@ -46,11 +46,11 @@ export async function embedBatch(texts) {
   return data.embeddings;
 }
 
-export async function vectorSearch(text, { topK = 20, filterType = null } = {}) {
+export async function vectorSearch(text, { topK = 20, filterType = null, conversationId = null } = {}) {
   const res = await fetchWithTimeout(`${BASE}/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, top_k: topK, filter_type: filterType }),
+    body: JSON.stringify({ text, top_k: topK, filter_type: filterType, conversation_id: conversationId }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -90,6 +90,20 @@ export async function deleteVector(chromaId) {
     throw new Error(`Delete error: ${err.detail || res.status}`);
   }
   return true;
+}
+
+export async function deleteByConversation(conversationId) {
+  const res = await fetchWithTimeout(`${BASE}/delete-by-conversation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: conversationId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`DeleteByConversation error: ${err.detail || res.status}`);
+  }
+  const data = await res.json();
+  return data.deleted;
 }
 
 export async function healthCheck() {

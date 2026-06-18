@@ -22,6 +22,7 @@ def _get_collection():
         _collection = _client.get_or_create_collection(
             name=CHROMA_COLLECTION,
             metadata={"hnsw:space": "cosine"},
+            embedding_function=None,
         )
         print(f"[chroma] collection '{CHROMA_COLLECTION}' ready, count={_collection.count()}")
     return _collection
@@ -38,7 +39,7 @@ def upsert_memory(chroma_id: str, embedding: list[float], metadata: dict, text: 
     )
 
 
-def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None) -> list[dict]:
+def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None, conversation_id: str = None) -> list[dict]:
     """
     向量相似检索。
 
@@ -46,12 +47,19 @@ def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = N
         embedding: 查询嵌入向量
         top_k: 返回结果数
         filter_type: 可选过滤 fragment_type ('fact'/'preference'/'emotion')
+        conversation_id: 可选过滤 conversation_id
 
     Returns:
         [{id, score, metadata, document}, ...]
     """
     col = _get_collection()
-    where = {"fragment_type": filter_type} if filter_type else None
+    # 构建 ChromaDB where 条件（支持多条件 AND 组合）
+    conditions = []
+    if filter_type:
+        conditions.append({"fragment_type": filter_type})
+    if conversation_id:
+        conditions.append({"conversation_id": conversation_id})
+    where = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if len(conditions) == 1 else None)
 
     results = col.query(
         query_embeddings=[embedding],
@@ -77,6 +85,23 @@ def delete_by_id(chroma_id: str):
     """删除单条记忆向量"""
     col = _get_collection()
     col.delete(ids=[chroma_id])
+
+
+def delete_by_metadata(where_filter: dict) -> int:
+    """按元数据条件批量删除记忆向量
+
+    Args:
+        where_filter: ChromaDB where 条件，如 {"conversation_id": "char_5"}
+
+    Returns:
+        删除的向量数量
+    """
+    col = _get_collection()
+    # 先查询匹配的 ids，再按 ids 删除（ChromaDB delete 支持 where 但需先获得匹配 id 列表才能计数）
+    results = col.get(where=where_filter, include=[])
+    if results["ids"]:
+        col.delete(ids=results["ids"])
+    return len(results["ids"])
 
 
 def collection_count() -> int:
