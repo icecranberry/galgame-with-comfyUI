@@ -150,24 +150,57 @@ router.post('/test-style', async (req, res) => {
 
   console.log(`[test-style] mode="${mode}" artist="${finalArtist}" ${finalWidth}x${finalHeight}`);
 
-  const t0 = Date.now();
+  const t0 = performance.now();
+  const timing = {};
 
   try {
     const result = await generateImageRaw(prompt, {
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
+      onProgress: (p) => {
+        // 捕获各阶段时间戳用于 timing breakdown
+        if (p.stage === 'submitting') timing.submitting = performance.now();
+        else if (p.phase === 'submitted') timing.submitted = performance.now();
+        else if (p.phase === 'started') timing.started = performance.now();
+        else if (p.phase === 'executed') timing.executed = performance.now();
+        else if (p.phase === 'done') timing.done = performance.now();
+      },
     });
 
-    const elapsed = Date.now() - t0;
+    const elapsed = Math.round(performance.now() - t0);
+
+    // 计算各阶段耗时（ms，整数）
+    const breakdown = {};
+    if (timing.submitted && timing.started) {
+      breakdown.ws_setup = Math.round(timing.started - timing.submitted);
+    }
+    if (timing.submitted && timing.executed) {
+      breakdown.comfyui = Math.round(timing.executed - timing.submitted);
+    }
+    if (timing.executed && timing.done) {
+      breakdown.download = Math.round(timing.done - timing.executed);
+    }
+    if (timing.done) {
+      breakdown.overhead = Math.round(elapsed - (timing.done - t0));
+    }
 
     if (result.success) {
-      res.json({ success: true, images: result.images, promptId: result.promptId, elapsed });
+      res.json({
+        success: true, images: result.images, promptId: result.promptId, elapsed,
+        timing: {
+          total_ms: elapsed,
+          comfyui_ms: breakdown.comfyui,
+          download_ms: breakdown.download,
+          overhead_ms: breakdown.overhead,
+          ws_setup_ms: breakdown.ws_setup,
+        },
+      });
     } else {
       res.json({ success: false, error: result.error || 'No image generated', elapsed });
     }
   } catch (err) {
-    const elapsed = Date.now() - t0;
+    const elapsed = Math.round(performance.now() - t0);
     console.error('[test-style] error:', err.message);
     res.status(500).json({ success: false, error: err.message, elapsed });
   }

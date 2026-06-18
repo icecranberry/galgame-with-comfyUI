@@ -161,6 +161,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
     const timeoutMs = 600_000; // 10 分钟
     let settled = false;
     let done = false;
+    let started = false;
     let lastActivity = Date.now();
 
     function settle(result) {
@@ -190,8 +191,12 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
     // ── 收到 node:null → 立即结算（不等 WebSocket close）──
     async function onExecutionComplete() {
       done = true;
-      // 等 500ms 让 ComfyUI 写完文件 + 更新 history
-      await new Promise(r => setTimeout(r, 500));
+      // 通知调用方 ComfyUI 执行完毕（此时还没下载图片）
+      if (onProgress) {
+        onProgress({ phase: 'executed', promptId });
+      }
+      // 等 100ms 让 ComfyUI 更新 history（downloadImagesFromHistory 自带重试兜底慢写盘）
+      await new Promise(r => setTimeout(r, 100));
       try {
         const images = await downloadImagesFromHistory(promptId, /* retries */ 3);
         if (onProgress) {
@@ -228,6 +233,11 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
         } else if (msg.type === 'executing') {
           const node = msg.data?.node;
           if (node != null) {
+            if (!started) {
+              started = true;
+              // 首次收到 executing → ComfyUI 开始处理本 prompt，用于计时细分
+              if (onProgress) onProgress({ phase: 'started', promptId });
+            }
             if (onProgress) onProgress({ phase: 'executing', node, promptId });
             console.log(`[comfyClient] ⚙️ executing node: ${node}`);
           } else if (!done) {

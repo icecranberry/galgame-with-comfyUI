@@ -10,6 +10,7 @@
       <div class="card">
         <h3>画师串 & 分辨率</h3>
         <p class="fd">建议选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
+        <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均6秒/图</p>
 
         <!-- 对话配图 -->
         <div class="moments-subsection">
@@ -84,6 +85,13 @@
         <div v-if="styleImages.length > 0" class="style-result">
           <div v-if="styleElapsed != null" class="style-elapsed">
             ⏱ 生成耗时 {{ formatElapsed(styleElapsed) }}
+            <span v-if="styleTiming" class="style-timing-breakdown">
+              · ComfyUI {{ formatElapsed(styleTiming.comfyui_ms) }}
+              · 下载 {{ formatElapsed(styleTiming.download_ms) }}
+              <span v-if="styleTiming.ws_setup_ms != null" title="WebSocket 建连 + ComfyUI 预热">
+                · 连接预热 {{ formatElapsed(styleTiming.ws_setup_ms) }}
+              </span>
+            </span>
           </div>
           <img
             v-for="(img, i) in styleImages"
@@ -468,6 +476,7 @@ const styleTesting = ref(false)
 const styleError = ref('')
 const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
+const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
 
 // Lightbox
 const lightboxVisible = ref(false)
@@ -502,6 +511,7 @@ async function runStyleTest() {
       testPrompts.value[testMode.value] || '',
     )
     if (result.elapsed != null) styleElapsed.value = result.elapsed
+    if (result.timing) styleTiming.value = result.timing
     if (result.success && result.images?.length > 0) {
       styleImages.value = result.images
     } else {
@@ -517,7 +527,7 @@ async function runStyleTest() {
 // ── 测试提示词编辑器 ──
 const TEST_PROMPTS_KEY = 'test-style-prompts'
 const DEFAULT_TEST_PROMPTS = {
-  chat: `1girl, solo, kiana kaslana(honkai impact 3rd), herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`,
+  chat: `Hatsune Miku (VOCALOID), 1girl, close-up shot, teal twin-tailed hair, blue eyes, black school uniform with tie, holding a fork, looking happily at a matcha mille crepe cake on a white plate, matcha latte with musical note latte art beside it, soft natural lighting, shallow depth of field, cafe background with wooden tables, warm and cozy atmosphere, 1girl, teal-haired Hatsune Miku smiling while eating matcha cake`,
   moments: `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`,
 }
 
@@ -675,6 +685,8 @@ function resetTestPrompts() {
 @keyframes spin { to { transform: rotate(360deg); } }
 .style-result { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: flex-start; flex-direction: column; }
 .style-elapsed { font-size: 13px; color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); }
+.style-timing-breakdown { font-size: 12px; color: var(--text-muted, #999); }
+.style-timing-breakdown::before { content: ' '; }
 .style-preview-img { max-width: 480px; max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
 .style-preview-img:hover { transform: scale(1.03); }
 

@@ -90,6 +90,7 @@ onUnmounted(() => {
   align-items: center;
   padding: 16px 0;
   z-index: 10;
+  user-select: none;
 }
 
 .nav-top {

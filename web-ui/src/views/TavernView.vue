@@ -102,12 +102,12 @@
 
             <!-- 步骤 0：输入描述 -->
             <div v-if="recruit.step === 'input'" class="modal-body">
-              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色，也可以是原创设定。</p>
+              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名），也可以是原创设定。</p>
               <textarea
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
                 rows="4"
-                placeholder="例：芙宁娜（原神）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 我的野蛮女友"
+                placeholder="例：芙宁娜（原神）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
               ></textarea>
@@ -180,6 +180,23 @@
               <h3>{{ detail.char?.display_name }}</h3>
               <button class="modal-close" @click="closeCharDetail">✕</button>
             </div>
+            <!-- 移动端工具栏 -->
+            <div class="mobile-detail-toolbar" v-if="isMobile">
+              <div class="toolbar-item" @click="showRelationGraph = true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                </svg>
+                <span>关系图</span>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不看ta的朋友圈</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
             <div class="modal-body">
               <!-- 头像 -->
               <div class="detail-avatar-row">
@@ -199,6 +216,9 @@
                 <label class="fl" style="margin-top:12px">人格提示词</label>
                 <textarea v-model="detail.editPrompt" class="fi prompt-textarea" rows="12" @input="detail.dirty = true"></textarea>
               </div>
+            </div>
+            <!-- 操作栏 sticky footer -->
+            <div class="modal-footer">
               <div class="detail-actions">
                 <button class="btn-ghost danger" @click="deleteChar">🗑 删除角色</button>
                 <div class="detail-actions-right">
@@ -209,7 +229,7 @@
           </div>
 
           <!-- 悬浮侧边栏 -->
-          <div class="detail-float">
+          <div class="detail-float" v-if="!isMobile">
             <div class="float-card" @click="showRelationGraph = true">
               <div class="float-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1051,8 +1071,16 @@ onMounted(async () => {
   color: var(--text-primary);
 }
 
+/* ── 操作栏 sticky footer ── */
+.modal-footer {
+  flex-shrink: 0;
+  padding: 10px 22px 18px;
+  border-top: 1px solid var(--glass-border);
+  background: inherit;
+}
+
 .detail-actions {
-  display: flex; align-items: center; margin-top: 18px; gap: 10px;
+  display: flex; align-items: center; margin-top: 0; gap: 10px;
 }
 .detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
 .btn-ghost.danger { color: var(--danger); }
@@ -1094,13 +1122,25 @@ onMounted(async () => {
     border-radius: 0;
   }
   .modal-header {
-    padding: 14px 16px;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    padding-bottom: 14px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
   }
   .modal-header h3 {
     font-size: 16px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 8px;
+  }
+  .modal-close {
+    flex-shrink: 0;
   }
   .modal-body {
-    padding: 0 16px 16px;
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
   .modal-actions {
     flex-wrap: wrap; gap: 8px;
@@ -1130,13 +1170,56 @@ onMounted(async () => {
     gap: 10px; margin-bottom: 12px;
   }
   .detail-layout { flex-direction: column; }
-  .detail-float {
-    position: static; transform: none;
-    flex-direction: row; width: 100%; margin-top: 12px;
+
+  /* 移动端详情工具栏 */
+  .mobile-detail-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--glass-border);
+    background: rgba(0, 0, 0, 0.02);
+    flex-shrink: 0;
   }
-  .float-card { width: auto; flex: 1; padding: 10px 12px; gap: 6px; }
-  .float-icon { width: 28px; height: 28px; border-radius: 8px; }
-  .float-label { font-size: 12px; }
+  .toolbar-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: rgba(224, 123, 108, 0.08);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: 1;
+    justify-content: center;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .toolbar-item:active {
+    background: rgba(224, 123, 108, 0.16);
+  }
+  .toolbar-item-toggle {
+    cursor: default;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .toolbar-switch {
+    width: 34px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .toolbar-switch .toggle-slider::before {
+    height: 14px;
+    width: 14px;
+  }
+  .toolbar-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+  }
+
   .detail-avatar {
     width: 52px; height: 52px; font-size: 22px;
   }
@@ -1145,6 +1228,9 @@ onMounted(async () => {
   }
   .detail-actions-right {
     margin-left: 0; flex-wrap: wrap; gap: 8px;
+  }
+  .modal-footer {
+    padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   }
   .prompt-textarea {
     min-height: 350px; font-size: 16px;

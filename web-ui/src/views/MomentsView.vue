@@ -3,14 +3,14 @@
     <!-- 顶栏 -->
     <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
-      <button class="btn-post" @click="showPicker = !showPicker" :disabled="genPending">
-        {{ genPending ? '扰动中...' : '💫扰动世界线' }}
+      <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="genPending">
+        {{ genPending ? '扰动中' : '扰动世界线' }}
       </button>
     </div>
 
     <!-- 角色选择器 -->
     <Transition name="picker-fade">
-      <div v-if="showPicker" class="picker-dropdown">
+      <div v-if="showPicker" ref="pickerRef" class="picker-dropdown" @click.stop>
         <div class="picker-title">选择发朋友圈的角色：</div>
         <div
           v-for="c in characters"
@@ -109,6 +109,7 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 
 const showPicker = ref(false)
+const pickerRef = ref(null)
 const genPending = ref(false)
 const previewImage = ref(null)
 const scrollContainer = ref(null)
@@ -138,11 +139,21 @@ onMounted(async () => {
   await moments.loadPosts()
   // 显式标记已读：兜底防止 loadPosts 因 loading guard 跳过内部 markSeen
   moments.markSeen()
+  // 点击空白关闭选择器
+  document.addEventListener('click', onDocumentClick)
 })
 
 onUnmounted(() => {
   moments.isViewingMoments = false
+  document.removeEventListener('click', onDocumentClick)
 })
+
+function onDocumentClick(e) {
+  const picker = pickerRef.value
+  if (!picker || !showPicker.value) return
+  // 点击在弹窗内部由 @click.stop 阻止冒泡，走到这里的一定是外部点击
+  showPicker.value = false
+}
 
 // ── 滚动方向感知：下滑隐藏顶栏，上滑显示（仅移动端）──
 const headerVisible = ref(true)
@@ -214,17 +225,42 @@ async function triggerGenerate(c) {
 .is-clickable { cursor: pointer; }
 
 .btn-post {
-  padding: 8px 18px;
-  border-radius: 12px;
-  border: 1px solid var(--glass-border);
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px; font-weight: 500;
+  padding: 8px 22px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  background: linear-gradient(
+    120deg,
+    #f8edea 0%,
+    #f2eaf4 35%,
+    #eaf0f8 65%,
+    #f8edea 100%
+  );
+  background-size: 220% 100%;
+  color: #c06a5a;
+  font-size: 13px; font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  letter-spacing: 1px;
+  transition:
+    border-color 0.35s ease,
+    box-shadow 0.35s ease,
+    color 0.3s ease;
 }
-.btn-post:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
-.btn-post:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-post:hover:not(:disabled) {
+  border: 2px solid rgba(224, 123, 108, 0.55);
+  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  color: #a85545;
+  animation: waterflow 1s ease-in-out infinite;
+}
+
+@keyframes waterflow {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+.btn-post:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
 
 /* 角色选择器下拉 */
 .picker-dropdown {
