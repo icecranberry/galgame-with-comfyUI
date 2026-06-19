@@ -523,7 +523,7 @@ async function generateCharacterReply(post, historyComments) {
     'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
   ).get(post.character_id);
   if (userRel && userRel.relationship_text) {
-    userRelMsg = `**【你与user的关系】\n你对于user而言是${userRel.relationship_text}。**这个关系为最高优先级，请在回复中自然体现。`;
+    userRelMsg = `**【你与user的关系】\n你对于user而言的身份是${userRel.relationship_text}。**这个关系为最高优先级，请在回复中自然体现。`;
   }
 
   // 角色间关系（双向）— 仅保留与当前对话参与者相关的关系

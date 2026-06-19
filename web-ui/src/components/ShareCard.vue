@@ -4,6 +4,8 @@
       <div v-if="visible" class="share-overlay" @click.self="close">
         <!-- 截图目标：彩色底板 + 卡片 + 装饰 -->
         <div ref="cardRef" class="share-frame">
+          <!-- 截图专用阴影层（屏幕不可见，由 html2canvas onclone 激活） -->
+          <div class="screenshot-shadow frame-shadow" />
           <!-- 背景装饰光斑 -->
           <div class="share-blob blob-1" />
           <div class="share-blob blob-2" />
@@ -11,6 +13,7 @@
 
           <!-- 白色卡片浮于底色之上 -->
           <div class="share-card">
+            <div class="screenshot-shadow card-shadow" />
             <!-- 顶部装饰条 -->
             <div class="share-decorator" />
 
@@ -60,32 +63,32 @@
 
         <!-- 操作栏（在截图目标外部） -->
         <div class="share-actions">
-          <button class="share-btn copy-btn" :class="{ copied }" :disabled="copying" @click="copyScreenshot">
+          <button class="share-btn copy-btn" :class="{ copied }" :disabled="copying" @click="copyScreenshot" title="复制截图">
             <template v-if="!copying && !copied">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              复制截图
+              <span class="btn-label">复制截图</span>
             </template>
             <template v-else-if="copying">
-              <svg class="spin-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <svg class="spin-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                 <circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" />
               </svg>
-              生成中
+              <span class="btn-label">生成中</span>
             </template>
             <template v-else>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              已复制
+              <span class="btn-label">已复制</span>
             </template>
           </button>
-          <button class="share-btn close-btn" @click="close">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <button class="share-btn close-btn" @click="close" title="关闭">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
-            关闭
+            <span class="btn-label">关闭</span>
           </button>
         </div>
       </div>
@@ -156,11 +159,17 @@ async function copyScreenshot() {
     await new Promise(r => setTimeout(r, 100))
 
     const canvas = await html2canvas(el, {
-      backgroundColor: null,        // 保留 frame 自身的渐变背景
+      backgroundColor: null,
       scale: 2,
       useCORS: true,
       allowTaint: true,
       logging: false,
+      onclone(clonedDoc) {
+        // 在克隆 DOM 中激活阴影层（屏幕 DOM 不受影响）
+        clonedDoc.querySelectorAll('.screenshot-shadow').forEach(el => {
+          el.style.opacity = '1'
+        })
+      },
     })
 
     const blob = await new Promise((resolve, reject) => {
@@ -177,7 +186,7 @@ async function copyScreenshot() {
     console.error('[ShareCard] copy screenshot failed:', err)
     // fallback: 降级下载
     try {
-      const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false })
+      const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false, onclone(clonedDoc) { clonedDoc.querySelectorAll('.screenshot-shadow').forEach(el => { el.style.opacity = '1' }) } })
       canvas.toBlob(blob => {
         if (!blob) return
         const url = URL.createObjectURL(blob)
@@ -210,14 +219,14 @@ watch(() => props.visible, v => {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 24px;
+  flex-direction: row;              /* PC：卡片在左，按钮在右 */
+  align-items: center;           /* 按钮垂直居中于卡片 */
+  justify-content: center;
+  gap: 24px;
+  padding: 40px 24px;
   overflow-y: auto;
-  overflow-x: hidden;              /* 禁止水平溢出导致左右平移 */
-  overscroll-behavior: contain;    /* 滚动不传导到 body */
-  justify-content: safe center;    /* 内容不超出时居中，超出时顶部对齐避免被裁 */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 /* ============================================
@@ -243,6 +252,11 @@ watch(() => props.visible, v => {
   border-radius: 20px;
   padding: 40px 34px;
 
+  /* 斜投阴影：用 filter drop-shadow（html2canvas 可渲染，box-shadow 不行） */
+  filter:
+    drop-shadow(8px 14px 24px rgba(0, 0, 0, 0.15))
+    drop-shadow(16px 26px 48px rgba(0, 0, 0, 0.10));
+
   /* 底板自身的呼吸感 — 卡片再在其中浮起 */
   display: flex;
   flex-direction: column;
@@ -250,6 +264,28 @@ watch(() => props.visible, v => {
   gap: 20px;
 }
 
+/* ── 截图专用阴影层：屏幕不可见，html2canvas onclone 中激活 ── */
+.screenshot-shadow {
+  opacity: 0;
+  position: absolute;
+  pointer-events: none;
+}
+.frame-shadow {
+  inset: 0;
+  border-radius: 20px;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 85% 85%, rgba(0, 0, 0, 0.14) 0%, transparent 100%),
+    radial-gradient(ellipse 40% 30% at 90% 100%, rgba(0, 0, 0, 0.08) 0%, transparent 100%);
+}
+.card-shadow {
+  inset: 0;
+  border-radius: 16px;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 50% 40% at 90% 90%, rgba(0, 0, 0, 0.10) 0%, transparent 100%),
+    radial-gradient(ellipse 30% 25% at 95% 100%, rgba(0, 0, 0, 0.06) 0%, transparent 100%);
+}
 /* ── 背景装饰光斑（html2canvas 兼容：用真实 DOM 不用伪元素）── */
 .share-blob {
   position: absolute;
@@ -284,11 +320,10 @@ watch(() => props.visible, v => {
   z-index: 1;
   overflow: hidden;  /* 配合 border-radius 裁边 */
 
-  /* 多层阴影：近 → 远，营造悬浮感 */
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.04),      /* 极近：微妙的边界 */
-    0 6px 20px rgba(0, 0, 0, 0.06),     /* 中距：主要立体感 */
-    0 16px 48px rgba(0, 0, 0, 0.07);    /* 远距：氛围光 */
+  /* 斜投阴影：用 filter drop-shadow（html2canvas 可渲染） */
+  filter:
+    drop-shadow(9px 14px 7px rgb(84 43 17 / 17%))
+    drop-shadow(10px 18px 36px rgb(237 139 70 / 22%));
 }
 
 /* 顶部渐变装饰条 */
@@ -404,19 +439,27 @@ watch(() => props.visible, v => {
    ============================================ */
 .share-actions {
   display: flex;
+  flex-direction: column;   /* PC：按钮竖向排列在卡片右侧 */
   gap: 12px;
+  flex-shrink: 0;           /* 不被卡片挤窄 */
 }
 .share-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 12px 26px;
-  border-radius: 14px;
+  justify-content: center;
+  gap: 4px;
+  width: 56px;
+  height: 56px;                 /* PC 端正方形按钮 */
+  border-radius: 16px;
   border: none;
-  font-size: 14px;
-  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  color: #555;                  /* 图标颜色 */
+}
+/* 桌面端隐藏文字 */
+.btn-label {
+  display: none;
 }
 .copy-btn {
   background: rgba(255, 255, 255, 0.92);
@@ -474,7 +517,10 @@ watch(() => props.visible, v => {
 /* ── 移动端 ── */
 @media (max-width: 767px) {
   .share-overlay {
-    padding: 12px;
+    flex-direction: column;   /* 手机端恢复纵向布局 */
+    align-items: center;
+    justify-content: flex-start;  /* 从顶部开始，避免被浏览器顶栏裁掉 */
+    padding: max(24px, env(safe-area-inset-top)) 12px 12px;  /* 顶 padding 适配刘海/状态栏 */
     gap: 14px;
   }
   .share-frame {
@@ -512,12 +558,23 @@ watch(() => props.visible, v => {
     margin-top: 14px;
   }
   .share-actions {
+    flex-direction: row;   /* 手机端恢复横向排列 */
     width: 100%;
   }
   .share-btn {
     flex: 1;
+    flex-direction: row;
+    width: auto;
+    height: auto;
     justify-content: center;
     padding: 14px 20px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    gap: 6px;
+  }
+  .btn-label {
+    display: inline;              /* 手机端显示文字 */
   }
 }
 </style>

@@ -262,6 +262,9 @@ function initSchema(db) {
   // 迁移: moment_unread 计数 → 时序方案 (last_moments_seen_at)
   migrateMomentUnreadToTimestamp(db);
 
+  // 迁移: 好感度系统 — user_relationships 和 emotion_snapshots 新增 affinity 列
+  migrateAffinitySchema(db);
+
   // 种子: 默认全局规则
   seedGlobalRules(db);
 
@@ -310,6 +313,39 @@ function migrateMomentsSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 好感度系统 — user_relationships 和 emotion_snapshots 新增 affinity 列
+ */
+function migrateAffinitySchema(db) {
+  try {
+    // user_relationships 表
+    const urCols = db.prepare(`PRAGMA table_info(user_relationships)`).all();
+    if (!urCols.find(c => c.name === 'affinity')) {
+      db.exec(`ALTER TABLE user_relationships ADD COLUMN affinity REAL DEFAULT 50`);
+      console.log('[db] Added user_relationships.affinity column (default 50)');
+      // 已有关系的行设置为默认值 50
+      db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE affinity IS NULL`).run();
+    }
+
+    // emotion_snapshots 表
+    const esCols = db.prepare(`PRAGMA table_info(emotion_snapshots)`).all();
+    if (!esCols.find(c => c.name === 'affinity')) {
+      db.exec(`ALTER TABLE emotion_snapshots ADD COLUMN affinity REAL`);
+      console.log('[db] Added emotion_snapshots.affinity column');
+    }
+    if (!esCols.find(c => c.name === 'affinity_delta')) {
+      db.exec(`ALTER TABLE emotion_snapshots ADD COLUMN affinity_delta REAL`);
+      console.log('[db] Added emotion_snapshots.affinity_delta column');
+    }
+    if (!esCols.find(c => c.name === 'reason')) {
+      db.exec(`ALTER TABLE emotion_snapshots ADD COLUMN reason TEXT`);
+      console.log('[db] Added emotion_snapshots.reason column');
+    }
+  } catch (err) {
+    console.log('[db] migrateAffinitySchema error:', err.message);
   }
 }
 

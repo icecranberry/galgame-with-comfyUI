@@ -3,7 +3,7 @@ import { getDb } from '../db/index.js';
 
 const router = Router();
 
-// GET /api/portraits/:characterId — 获取指定角色视角下的用户画像
+// GET /api/portraits/:characterId — 获取指定角色视角下的用户画像 + VAD 情绪 + 好感度
 router.get('/:characterId', (req, res) => {
   const db = getDb();
   const { characterId } = req.params;
@@ -22,7 +22,32 @@ router.get('/:characterId', (req, res) => {
     grouped[p.trait_type].push(p);
   }
 
-  res.json({ portraits, grouped });
+  // 追加 VAD 情绪状态 + 好感度 + 最近变化
+  const conversationId = `char_${characterId}`;
+  const lastSnapshot = db.prepare(`
+    SELECT valence, arousal, dominance, mood_valence, mood_arousal, mood_dominance,
+           dominant_emotion, affinity, affinity_delta, reason
+    FROM emotion_snapshots
+    WHERE conversation_id = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(conversationId);
+
+  const affinity = db.prepare(
+    'SELECT affinity FROM user_relationships WHERE character_id = ?'
+  ).get(characterId)?.affinity ?? 50;
+
+  res.json({
+    portraits,
+    grouped,
+    vad: lastSnapshot ? {
+      instant: { valence: lastSnapshot.valence, arousal: lastSnapshot.arousal, dominance: lastSnapshot.dominance },
+      mood: { valence: lastSnapshot.mood_valence, arousal: lastSnapshot.mood_arousal, dominance: lastSnapshot.mood_dominance },
+      dominantEmotion: lastSnapshot.dominant_emotion,
+    } : null,
+    affinity,
+    lastAffinityDelta: lastSnapshot?.affinity_delta ?? null,
+    lastReason: lastSnapshot?.reason || null,
+  });
 });
 
 // POST /api/portraits — 手动添加一条画像

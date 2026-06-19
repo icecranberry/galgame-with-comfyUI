@@ -12,7 +12,8 @@ import { maybeSummarize, getRecentSummaries } from '../services/summarizer.js';
 import { maybeExtractPortrait } from '../services/portraitExtractor.js';
 import {
   loadEmotionState, evolveEmotion, evaluateStimulus,
-  emotionToPrompt, saveEmotionSnapshot, emotionDashboard,
+  stateToPrompt, affinityToPrompt, saveEmotionSnapshot, emotionDashboard,
+  loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage } from '../services/imageSkill.js';
 
@@ -361,12 +362,15 @@ router.post('/characters/:id/chat', async (req, res) => {
     systemPrompt += '\n\n<dialogue_rules>\n- **回复控制在' + (explicitImageIntent ? '1句话以内' : '2~3句话') + '，保持口语化轻快节奏**\n</dialogue_rules>';
 
     // 4.5 情绪状态注入（VAD 三维情绪 → 角色当前状态描述）
+    //     好感度提前加载，后续注入到 <user_relation> 中作为温度层
+    let affinity = null;
     if (config.features.emotion) {
       const emotionBaseline = character
         ? JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}')
         : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
       const emotionState = loadEmotionState(conversationId, emotionBaseline);
-      const emotionPrompt = emotionToPrompt(emotionState);
+      affinity = loadAffinity(characterId);
+      const emotionPrompt = stateToPrompt(emotionState);
       if (emotionPrompt) systemPrompt += emotionPrompt;
     }
 
@@ -383,12 +387,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 5.0 角色关系与用户信息注入（合并为单条 system 消息，避免多条系统消息稀释注意力）
     const relParts = [];
 
-    // 5.0a 用户→角色关系
+    // 5.0a 用户→角色关系（身份定义，纯静态）
     const userRel = db.prepare(
       'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
     ).get(characterId);
     if (userRel && userRel.relationship_text) {
-      relParts.push(`<user_relation>你对于user而言是${userRel.relationship_text}。这个关系为最高优先级，即使你在外有其他性格，但是在user面前就是这样的。请在对话中自然体现这层关系，不必刻意说明，行为举止应符合这层关系。</user_relation>`);
+      relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
     }
 
     // 5.0b 用户信息（建立 user↔用户名的映射）
@@ -447,6 +451,14 @@ router.post('/characters/:id/chat', async (req, res) => {
         role: 'system',
         content: '<context>\n' + relParts.join('\n\n') + '\n</context>'
       });
+    }
+
+    // 5.0c 好感度指令（独立 system 消息，可有限覆盖人设，优先级在 global rules 之下）
+    if (config.features.emotion && affinity != null) {
+      const affinityMsg = affinityToPrompt(affinity);
+      if (affinityMsg) {
+        msgs.push({ role: 'system', content: affinityMsg });
+      }
     }
 
     // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
@@ -648,10 +660,29 @@ router.post('/characters/:id/chat', async (req, res) => {
             ? JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}')
             : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
           const emotionState = loadEmotionState(conversationId, emotionBaseline);
-          const { delta, dominantEmotion } = await evaluateStimulus(message, fullContent);
+          const currentAffinity = loadAffinity(characterId);
+
+          // 构建 LLM 评估上下文
+          const evalContext = {
+            characterPersonality: character?.base_prompt?.slice(0, 500) || '',
+            emotionBaseline,
+            currentVad: getCompositeEmotion(emotionState),
+            currentAffinity,
+            relationship: db.prepare(
+              'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+            ).get(characterId)?.relationship_text || '',
+          };
+          const { delta, dominantEmotion, affinityDelta, reason, source } = await evaluateStimulus(message, fullContent, evalContext);
           const evolved = evolveEmotion(emotionState, delta, emotionBaseline);
-          saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion);
-          console.log(`[emotion] ${emotionDashboard(evolved, dominantEmotion)}`);
+          const newAffinity = evolveAffinity(currentAffinity, affinityDelta ?? 0);
+
+          saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion, newAffinity, affinityDelta, reason);
+          saveAffinity(characterId, newAffinity);
+
+          if (reason) {
+            console.log(`[emotion] reason: ${reason}`);
+          }
+          console.log(`[emotion]\n${emotionDashboard(evolved, dominantEmotion, newAffinity, affinityDelta, source)}`);
         }
         if (config.features.memory) {
           const userMsgCount = db.prepare(`

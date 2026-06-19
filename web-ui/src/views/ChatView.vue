@@ -193,7 +193,7 @@
       <div v-if="showImpression" class="editor-overlay" @click.self="showImpression = false">
       <div class="editor-panel impression-panel">
         <div class="editor-header">
-          <span>💭 {{ chat.activeChar?.display_name }} 对你的印象</span>
+          <span>{{ chat.activeChar?.display_name }} 对你的印象</span>
           <button class="editor-close" @click="showImpression = false">&times;</button>
         </div>
         <div class="impression-body">
@@ -207,8 +207,9 @@
             <span class="impression-error-icon">⚠️</span>
             <span>加载失败: {{ impressionError }}</span>
           </div>
-          <!-- 画像列表（加载完成后始终显示三个分组，空组自带"添加"入口） -->
-          <div v-else class="impression-list">
+          <!-- 画像列表 + 情绪状态（双栏） -->
+          <div v-else class="impression-content">
+            <div class="impression-left">
             <div v-for="key in groupKeys" :key="key">
               <div class="impression-group">
                 <div class="impression-group-header">
@@ -299,7 +300,97 @@
                 </div>
               </div>
             </div>
-          </div>
+            </div>  <!-- impression-left -->
+
+            <!-- 右栏：VAD 情绪 + 好感度 -->
+            <div class="impression-right">
+              <div class="vad-section">
+                <div class="vad-section-title">情绪与好感度</div>
+
+                <!-- 无数据 -->
+                <div v-if="!impressionVad" class="vad-empty">
+                  <span>暂无情绪数据</span>
+                  <span class="vad-empty-hint">开始对话后自动生成</span>
+                </div>
+
+                <template v-else>
+                  <!-- VAD 三维 -->
+                  <div v-for="(conf, key) in VAD_LABELS" :key="key" class="vad-bar-group">
+                    <div class="vad-bar-label">{{ conf.name }}</div>
+                    <div class="vad-bar-row">
+                      <span class="vad-bar-end vad-bar-end-left">{{ conf.left }}</span>
+                      <div class="vad-bar-track">
+                        <div
+                          class="vad-bar-fill"
+                          :style="{ width: vadPercent(key, impressionVad.instant[key]) + '%' }"
+                        ></div>
+                        <div
+                          class="vad-bar-dot"
+                          :style="{ left: vadPercent(key, impressionVad.instant[key]) + '%' }"
+                        ></div>
+                      </div>
+                      <span class="vad-bar-end vad-bar-end-right">{{ conf.right }}</span>
+                    </div>
+                  </div>
+
+                  <!-- 情绪特征（VAD → 最近四字词） -->
+                  <div class="vad-dominant">
+                    <span class="vad-dominant-label">情绪特征</span>
+                    <span class="vad-emotion-tag">{{ topEmotions(impressionVad.instant, 1)[0]?.label || '—' }}</span>
+                  </div>
+
+                  <!-- 好感度 -->
+                  <div class="affinity-section">
+                    <div class="affinity-header">
+                      <span class="affinity-label">好感度</span>
+                      <span class="affinity-value">{{ Math.round(impressionAffinity) }}</span>
+                      <span class="affinity-tag">{{ affinityLabel(impressionAffinity) }}</span>
+                    </div>
+                    <div class="affinity-hearts">
+                      <div
+                        v-for="i in 5"
+                        :key="i"
+                        class="affinity-heart"
+                        :class="{ filled: impressionAffinity >= i * 20, half: impressionAffinity > (i - 1) * 20 && impressionAffinity < i * 20 }"
+                      >
+                        <svg viewBox="0 0 24 22" class="heart-svg">
+                          <defs>
+                            <clipPath :id="'heart-clip-' + i">
+                              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                            </clipPath>
+                          </defs>
+                          <!-- 底色（空心） -->
+                          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+                            class="heart-bg"/>
+                          <!-- 填充（clip 到对应百分比） -->
+                          <rect
+                            v-if="impressionAffinity > (i - 1) * 20"
+                            x="0" y="0" width="24" height="22"
+                            class="heart-fg"
+                            :clip-path="'url(#heart-clip-' + i + ')'"
+                            :style="{ width: Math.min(100, Math.max(0, (impressionAffinity - (i - 1) * 20) / 20 * 100)) + '%' }"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+
+                    <!-- 最近一次好感度变化 -->
+                    <div v-if="impressionLastDelta != null" class="affinity-change">
+                      <div class="affinity-change-row">
+                        <span class="affinity-change-label">最近变化</span>
+                        <span class="affinity-change-delta" :class="impressionLastDelta >= 0 ? 'delta-up' : 'delta-down'">
+                          {{ impressionLastDelta >= 0 ? '+' : '' }}{{ impressionLastDelta.toFixed(1) }}
+                        </span>
+                      </div>
+                      <div v-if="impressionLastReason" class="affinity-change-reason">
+                        💬 {{ impressionLastReason }}
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>  <!-- impression-content -->
         </div>
       </div>
     </div>
@@ -369,6 +460,107 @@ const showImpression = ref(false)
 const impressionLoading = ref(false)
 const impressionError = ref('')
 const impressionGrouped = ref({ appearance: [], personality: [], preference: [] })
+const impressionVad = ref(null)      // { instant, mood, dominantEmotion }
+const impressionAffinity = ref(50)
+const impressionLastDelta = ref(null)
+const impressionLastReason = ref('')
+
+const VAD_LABELS = {
+  valence: { name: '愉悦度', left: '低落', right: '愉悦', range: [-1, 1] },
+  arousal: { name: '唤醒度', left: '平静', right: '激动', range: [0, 1] },
+  dominance: { name: '支配度', left: '顺从', right: '自主', range: [0, 1] },
+}
+const EMOTION_VAD_MAP = [
+  // ═══ 高愉悦 (V > 0.4) ═══
+  { label: '欢天喜地', v: 0.85, a: 0.80, d: 0.50 },
+  { label: '心花怒放', v: 0.80, a: 0.70, d: 0.55 },
+  { label: '喜出望外', v: 0.75, a: 0.65, d: 0.45 },
+  { label: '兴高采烈', v: 0.70, a: 0.75, d: 0.55 },
+  { label: '眉飞色舞', v: 0.60, a: 0.70, d: 0.60 },
+  { label: '春风得意', v: 0.75, a: 0.50, d: 0.70 },
+  { label: '轻松愉快', v: 0.70, a: 0.55, d: 0.55 },
+  { label: '兴致勃勃', v: 0.55, a: 0.65, d: 0.55 },
+  { label: '心满意足', v: 0.65, a: 0.35, d: 0.55 },
+  { label: '怡然自乐', v: 0.60, a: 0.30, d: 0.45 },
+  { label: '悠然自得', v: 0.55, a: 0.25, d: 0.55 },
+  { label: '乐在其中', v: 0.50, a: 0.45, d: 0.50 },
+  { label: '安心自在', v: 0.50, a: 0.30, d: 0.50 },
+  { label: '舒舒服服', v: 0.40, a: 0.25, d: 0.40 },
+  { label: '温温柔柔', v: 0.50, a: 0.35, d: 0.35 },
+  { label: '受宠若惊', v: 0.40, a: 0.65, d: 0.25 },
+  { label: '又惊又喜', v: 0.50, a: 0.70, d: 0.35 },
+
+  // ═══ 中低愉悦 / 中性 (V: -0.2 ~ 0.4) ═══
+  { label: '充满好奇', v: 0.20, a: 0.55, d: 0.45 },
+  { label: '自信满满', v: 0.40, a: 0.50, d: 0.75 },
+  { label: '掌控全局', v: 0.30, a: 0.50, d: 0.85 },
+  { label: '心如止水', v: 0.20, a: 0.35, d: 0.50 },
+  { label: '不知不觉', v: 0.10, a: 0.35, d: 0.45 },
+  { label: '兴致索然', v: -0.15, a: 0.20, d: 0.45 },
+
+  // ═══ 负面 · 低唤醒 · 低支配 (V < 0, A < 0.4, D < 0.4) ═══
+  { label: '昏昏欲睡', v: -0.10, a: 0.20, d: 0.40 },
+  { label: '无精打采', v: -0.20, a: 0.22, d: 0.30 },
+  { label: '萎靡不振', v: -0.25, a: 0.15, d: 0.25 },
+  { label: '百无聊赖', v: -0.25, a: 0.18, d: 0.40 },
+  { label: '闷闷不乐', v: -0.40, a: 0.28, d: 0.30 },
+  { label: '郁郁寡欢', v: -0.50, a: 0.30, d: 0.35 },
+  { label: '垂头丧气', v: -0.55, a: 0.22, d: 0.25 },
+  { label: '心灰意冷', v: -0.55, a: 0.20, d: 0.30 },
+  { label: '茫然若失', v: -0.30, a: 0.30, d: 0.20 },
+  { label: '黯然神伤', v: -0.60, a: 0.25, d: 0.20 },
+  { label: '悲从中来', v: -0.70, a: 0.30, d: 0.15 },
+  { label: '孤立无援', v: -0.35, a: 0.25, d: 0.15 },
+
+  // ═══ 负面 · 高唤醒 (V < 0, A > 0.4) ═══
+  { label: '惴惴不安', v: -0.25, a: 0.50, d: 0.30 },
+  { label: '忐忑不安', v: -0.30, a: 0.55, d: 0.25 },
+  { label: '如坐针毡', v: -0.35, a: 0.70, d: 0.20 },
+  { label: '忧心忡忡', v: -0.40, a: 0.65, d: 0.30 },
+  { label: '心惊胆战', v: -0.45, a: 0.75, d: 0.20 },
+  { label: '心烦意乱', v: -0.30, a: 0.60, d: 0.55 },
+  { label: '气急败坏', v: -0.50, a: 0.65, d: 0.55 },
+  { label: '愤愤不平', v: -0.45, a: 0.55, d: 0.60 },
+  { label: '恼羞成怒', v: -0.55, a: 0.70, d: 0.50 },
+  { label: '怒不可遏', v: -0.65, a: 0.75, d: 0.70 },
+  { label: '咬牙切齿', v: -0.70, a: 0.70, d: 0.75 },
+
+  // ═══ 负面 · 高支配 (V < 0, D > 0.55) ═══
+  { label: '不屑一顾', v: -0.20, a: 0.35, d: 0.70 },
+  { label: '若即若离', v: -0.15, a: 0.30, d: 0.55 },
+  { label: '冷若冰霜', v: -0.25, a: 0.28, d: 0.65 },
+  { label: '漠不关心', v: -0.30, a: 0.25, d: 0.55 },
+  { label: '大失所望', v: -0.40, a: 0.40, d: 0.35 },
+]
+
+function vadDistance(e, vad) {
+  return Math.sqrt(
+    Math.pow(e.v - vad.valence, 2) +
+    Math.pow(e.a - vad.arousal, 2) +
+    Math.pow(e.d - vad.dominance, 2)
+  )
+}
+
+function topEmotions(vad, n = 3) {
+  if (!vad) return []
+  return [...EMOTION_VAD_MAP]
+    .map(e => ({ ...e, dist: vadDistance(e, vad) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, n)
+}
+
+function vadPercent(key, value) {
+  const { range } = VAD_LABELS[key]
+  return ((value - range[0]) / (range[1] - range[0])) * 100
+}
+
+function affinityLabel(val) {
+  if (val >= 80) return '深度信任'
+  if (val >= 60) return '亲切友好'
+  if (val >= 40) return '中性友善'
+  if (val >= 20) return '保持距离'
+  return '冷淡疏离'
+}
 
 async function openImpression() {
   showSettings.value = false
@@ -376,9 +568,15 @@ async function openImpression() {
   impressionLoading.value = true
   impressionError.value = ''
   impressionGrouped.value = { appearance: [], personality: [], preference: [] }
+  impressionVad.value = null
+  impressionAffinity.value = 50
   try {
     const data = await getCharacterPortrait(chat.activeChar.id)
     impressionGrouped.value = data.grouped || { appearance: [], personality: [], preference: [] }
+    impressionVad.value = data.vad || null
+    impressionAffinity.value = data.affinity ?? 50
+    impressionLastDelta.value = data.lastAffinityDelta ?? null
+    impressionLastReason.value = data.lastReason || ''
   } catch (err) {
     impressionError.value = err.message
   } finally {
@@ -1192,7 +1390,7 @@ function renderContent(text) {
 
 /* ── 印象弹窗 ── */
 .impression-panel {
-  max-width: 520px;
+  max-width: 720px;
   max-height: 68vh;
   height: auto;
   display: flex;
@@ -1201,7 +1399,7 @@ function renderContent(text) {
 .impression-body {
   overflow-y: auto;
   flex: 1;
-  padding: 8px 20px 16px;
+  padding: 0;
 }
 
 /* 状态 */
@@ -1254,7 +1452,7 @@ function renderContent(text) {
 }
 .impression-group-count {
   font-size: 11px;
-  color: #bbb;
+  color: #979797;
   background: rgba(0,0,0,0.04);
   border-radius: 10px;
   padding: 0 7px;
@@ -1471,6 +1669,222 @@ function renderContent(text) {
     max-height: 75vh;
   }
   .impression-card { padding: 8px 10px; }
+  .impression-content { flex-direction: column; }
+  .impression-right { border-left: none; border-top: 1px solid rgba(0,0,0,0.06); padding: 14px 0 0; min-width: 0; }
+}
+
+/* ── 印象双栏布局 ── */
+.impression-content {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+.impression-left {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 20px 16px;
+  overflow-y: auto;
+}
+.impression-right {
+  width: 240px;
+  min-width: 240px;
+  border-left: 1px solid rgba(0,0,0,0.06);
+  padding: 8px 18px 16px;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.015);
+}
+
+/* ── VAD 条形图 ── */
+.vad-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.vad-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 24px 0;
+  font-size: 13px;
+  color: #aaa;
+}
+.vad-empty-hint {
+  font-size: 11px;
+  color: #ccc;
+}
+.vad-bar-group {
+  margin-bottom: 10px;
+}
+.vad-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 3px;
+}
+.vad-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vad-bar-end {
+  font-size: 10px;
+  color: #bbb;
+  white-space: nowrap;
+  min-width: 28px;
+  line-height: 1;
+}
+.vad-bar-end-left { text-align: right; }
+.vad-bar-end-right { text-align: left; }
+.vad-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(0,0,0,0.06);
+  border-radius: 3px;
+  position: relative;
+  overflow: visible;
+}
+.vad-bar-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, #6366f1, #a78bfa, #e07b6c);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.vad-bar-dot {
+  position: absolute;
+  top: 50%; transform: translate(-50%, -50%);
+  width: 10px; height: 10px;
+  background: white;
+  border: 2px solid #6366f1;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+}
+
+/* ── 主导情绪 ── */
+.vad-dominant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 8px 10px;
+  background: rgba(99,102,241,0.06);
+  border-radius: 8px;
+}
+.vad-dominant-label {
+  font-size: 11px;
+  color: #888;
+}
+.vad-dominant-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.vad-emotion-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6366f1;
+  background: rgba(99,102,241,0.08);
+  padding: 2px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* ── 好感度 ── */
+.affinity-section {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+.affinity-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.affinity-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+}
+.affinity-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+}
+.affinity-tag {
+  font-size: 11px;
+  color: #e07b6c;
+  background: rgba(224,123,108,0.08);
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: auto;
+}
+/* ── 好感度爱心 ── */
+.affinity-hearts {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.affinity-heart {
+  width: 36px;
+  height: 34px;
+  position: relative;
+  transition: transform 0.2s ease;
+}
+.affinity-heart.filled {
+  transform: scale(1.06);
+}
+.affinity-heart .heart-svg {
+  width: 100%;
+  height: 100%;
+}
+.affinity-heart .heart-bg {
+  fill: none;
+  stroke: rgba(0,0,0,0.12);
+  stroke-width: 1.2;
+}
+.affinity-heart .heart-fg {
+  fill: #e05a7a;
+}
+.affinity-heart.filled .heart-fg {
+  fill: #e0245e;
+}
+.affinity-heart.half .heart-fg {
+  fill: #f0889e;
+}
+
+/* ── 好感度最近变化 ── */
+.affinity-change {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+.affinity-change-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.affinity-change-label {
+  font-size: 11px;
+  color: #999;
+}
+.affinity-change-delta {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.affinity-change-delta.delta-up { color: #e05a7a; }
+.affinity-change-delta.delta-down { color: #6366f1; }
+.affinity-change-reason {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #aaa;
+  line-height: 1.5;
+  font-style: italic;
 }
 
 </style>
