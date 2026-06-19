@@ -163,7 +163,7 @@ RRF (k=60) 融合排序后取 Top 10 注入 system prompt。
 AI 角色自动发朋友圈，用户可评论、点赞，角色 AI 自动回复评论。
 
 - **定时调度** (`momentScheduler.js`): 每 10 分钟扫描 `next_moment_at <= now` 的角色，每次只处理一个（排队串行，避免并发生图撑爆 ComfyUI）。发帖后随机设定 2~8 小时后的下次发帖时间。
-- **帖子生成** (`generateMomentPost` in moments.js): 单次 LLM 调用同时输出文案和配图 prompt（JSON 格式），确保图文语义一致。五种随机风格：自拍/美食/风景/日常/遇到的人和事。
+- **帖子生成** (`generateMomentPost` in moments.js): 单次 LLM 调用同时输出文案和配图 prompt（JSON 格式），确保图文语义一致。45 种随机风格，覆盖自拍/美食/风景/日常/恋爱/游戏/城市/心情等生活全场景。
 - **评论自动回复** (`generateCharacterReply`): 用户评论后，LLM 基于角色人设 + 帖子内容 + 评论区上下文自动生成 15~50 字的角色回复。回复失败不阻塞评论写入。
 - **独立生图参数**: 朋友圈配图使用 `momentsArtist`、`momentsWidth` (1600)、`momentsHeight` (1200)，与聊天生图分开配置。生图失败不阻塞发帖（无图但有文案）。
 - **DB 表**: `moment_posts`、`moment_comments`、`moment_likes`（UNIQUE 约束实现 toggle）

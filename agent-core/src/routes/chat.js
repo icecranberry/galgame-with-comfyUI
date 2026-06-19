@@ -240,6 +240,8 @@ router.delete('/characters/:id/messages', (req, res, next) => {
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
+    // 重置好感度到默认值
+    db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE character_id = ?`).run(charId);
     // 主表
     db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);

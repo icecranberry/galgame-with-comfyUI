@@ -197,7 +197,7 @@
 
         <div class="toggle-row">
           <div>
-            <div class="tl">情绪刺激评估</div>
+            <div class="tl">好感度系统</div>
             <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
           </div>
           <label class="switch">
@@ -564,7 +564,7 @@ function resetTestPrompts() {
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
 }
-.page-header.header-hidden { transform: translateY(-100%); margin-bottom: 0; }
+.page-header.header-hidden { transform: translateY(-200%); margin-bottom: 0; }
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
 .is-clickable { cursor: pointer; }
 .hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }

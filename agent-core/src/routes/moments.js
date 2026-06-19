@@ -6,6 +6,7 @@ import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
+import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 
 const router = Router();
 
@@ -191,7 +192,7 @@ router.post('/:id/comments', async (req, res) => {
 
   const db = getDb();
   const post = db.prepare(`
-    SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.avatar_color
+    SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.avatar_color, c.emotion_baseline
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
     WHERE mp.id = ?
@@ -315,6 +316,7 @@ async function generateMomentPost(character) {
     { name: '购物/开箱', desc: '新买的东西到了，兴奋开箱分享，配图是物品特写' },
     { name: '倒霉日常', desc: '今天发生的糗事、翻车现场，配图可以是尴尬情境或夸张 reaction' },
     { name: '才艺展示', desc: '展示自己的技能——画画、弹琴、手作、烹饪成果，配图是作品展示' },
+    { name: '身材展示', desc: '展示自己的身材或健身成果，配图是全身或局部特写' },
     { name: '天气/季节', desc: '对天气或季节变化的感叹（下雨、初雪、花开），配图是天气氛围' },
     { name: '求助/提问', desc: '向朋友圈求助或发起话题讨论，配图是相关情境' },
     { name: '做梦/幻想', desc: '分享昨晚的怪梦或白日梦，配图是超现实或梦幻风格' },
@@ -322,6 +324,22 @@ async function generateMomentPost(character) {
     { name: '读书/观影', desc: '刚看完的书或电影的简短感想，配图是书影封面或相关氛围' },
     { name: '突发状况', desc: '意外事件——停电、迷路、偶遇，配图是事发场景' },
     { name: '手工/创作', desc: '自己做的东西——烘焙、手帐、模型涂装，配图是创作过程或成品' },
+    { name: '游戏时刻', desc: '晒战绩、吐槽队友、沉迷新游，配图是游戏画面或电竞氛围' },
+    { name: '追星/粉丝', desc: '为偶像打call、演唱会/漫展/新专辑，配图是应援或相关物料' },
+    { name: '养生/健康', desc: '泡脚、早睡、养生茶、拉伸打卡，配图是养生场景或静谧氛围' },
+    { name: '消费/剁手', desc: '分享买到的好价好物、省钱攻略或冲动消费后的反思，配图是物品或支付截图风格' },
+    { name: '立Flag/打卡', desc: '公开立flag或每日打卡记录（早起/背单词/戒糖），配图是打卡场景或进度展示' },
+    { name: '吃瓜/八卦', desc: '围观热点事件或身边八卦，配图是吃瓜表情包风格或围观氛围' },
+    { name: '仪式感', desc: '点亮生活的仪式感瞬间——点蜡烛、泡澡、换新床单、买花，配图是精致生活氛围' },
+    { name: '摄影/随手拍', desc: '分享自己拍的照片（非自拍），强调构图、光影、瞬间捕捉，配图是有摄影感的画面' },
+    { name: '心情日记', desc: '记录当下某种心情——无聊、焦虑、平静、兴奋，不带事件只写感受' },
+    { name: '冷知识/科普', desc: '分享一个有趣的冷知识或小科普，让人看完"原来如此"' },
+    { name: '挑战/互动', desc: '发起一个挑战或话题让大家参与（猜图、接龙、选择题）' },
+    { name: '梦境/脑洞', desc: '分享昨晚做的怪梦或一个天马行空的脑洞故事' },
+    { name: '秘密/树洞', desc: '像树洞一样分享一个小心事或秘密，语气真诚脆弱' },
+    { name: '里程碑', desc: '达成某个小目标的纪念——粉丝数、连续打卡第N天、成就解锁' },
+    { name: '发呆/放空', desc: '什么事都不想做，就发呆、看云、听雨、盯着天花板' },
+    { name: '穿搭改造', desc: '旧衣新穿、一衣多穿或搭配改造的思路和成果对比' },
   ];
   const pickedStyle = STYLES[Math.floor(Math.random() * STYLES.length)];
 
@@ -592,11 +610,27 @@ ${commentHistory}
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
 - 只输出回复内容，不要任何前缀或引号`;
 
-  // 权限 → 用户关系 → 角色间关系 → 人设+上下文
+  // 权限 → 用户关系 → 角色间关系 → 人设+上下文 → VAD情绪 → 好感度
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (userRelMsg) msgs.push({ role: 'system', content: userRelMsg });
   if (charRelMsg) msgs.push({ role: 'system', content: charRelMsg });
   msgs.push({ role: 'system', content: contextPrompt });
+
+  // 注入 VAD 情绪状态 + 好感度指令
+  if (config.features.emotion) {
+    const convId = `char_${post.character_id}`;
+    const emotionBaseline = post.emotion_baseline
+      ? JSON.parse(post.emotion_baseline)
+      : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
+    const emotionState = loadEmotionState(convId, emotionBaseline);
+    const emotionPrompt = stateToPrompt(emotionState);
+    if (emotionPrompt) msgs.push({ role: 'system', content: emotionPrompt });
+
+    const affinity = loadAffinity(post.character_id);
+    const affPrompt = affinityToPrompt(affinity);
+    if (affPrompt) msgs.push({ role: 'system', content: affPrompt });
+  }
+
   msgs.push({ role: 'user', content: '回复这条评论：' });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128 });

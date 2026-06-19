@@ -141,14 +141,23 @@
         <div class="sp-divider"></div>
 
         <!-- 编辑人格 → 二级弹窗 -->
-        <button class="sp-btn" @click="openCharEditor">📝 编辑角色人格</button>
+        <button class="sp-btn" @click="openCharEditor">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M892.691692 30.72l77.981539 77.981538a73.491692 73.491692 0 0 1 0 103.975385l-584.861539 584.861539-228.036923 46.08 46.08-228.036924L788.716308 30.72a73.491692 73.491692 0 0 1 103.975384 0z m25.993846 129.969231l-77.981538-77.981539-569.186462 569.186462-19.692307 97.673846 97.673846-19.692308 569.186461-569.186461z" fill="currentColor"/><path d="M652.366769 167.699692l180.854154 182.035693 55.689846-55.689847-180.854154-182.114461zM73.491692 953.344h888.595693v-78.769231H73.570462z" fill="currentColor"/></svg>
+          编辑角色人格
+        </button>
 
         <!-- 查看角色对用户的印象 -->
-        <button class="sp-btn" @click="openImpression">💭 查看对你的印象</button>
+        <button class="sp-btn" @click="openImpression">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M607.839811 895.957102H214.69447A86.82497 86.82497 0 0 1 127.880338 809.070721V214.784781A86.839419 86.839419 0 0 1 214.69447 127.880338h594.28594a86.33729 86.33729 0 0 1 61.436749 25.456857c16.400473 16.400473 25.362934 38.208767 25.373771 61.411462L894.439878 607.821749v0.10476a32.031496 32.031496 0 0 0 64.059379 0.101149L959.825022 214.889542v-0.104761A150.775976 150.775976 0 0 0 808.98041 63.940169H214.69447A150.638703 150.638703 0 0 0 63.940169 214.784781v594.28594a150.638703 150.638703 0 0 0 150.757914 150.82655h393.141728a31.970084 31.970084 0 0 0 0-63.940169z" fill="currentColor"/><path d="M950.544667 905.331381l-122.071536-122.071536a192.217875 192.217875 0 1 0-45.213286 45.213286l122.071536 122.071536a31.970084 31.970084 0 0 0 45.213286-45.213286z m-278.547941-105.302594a128.028448 128.028448 0 1 1 90.531332-37.497116 127.193975 127.193975 0 0 1-90.527719 37.497116zM768.004516 352.212795c17.653989 0 31.966472-14.402794 31.970084-32.056783s-14.308871-32.074845-31.966472-32.078457L256.002709 287.911382a32.020659 32.020659 0 0 0-31.970084 32.024271c0 17.657601 14.308871 32.092907 31.966472 32.092908L768.004516 352.212795zM448.000226 544.033302a31.96286 31.96286 0 1 0 0-63.940169h-192.001129a31.937573 31.937573 0 1 0 0 63.878758l192.001129 0.061411zM256.017159 671.91364a31.959247 31.959247 0 1 0 0 63.922107l127.999549 0.018062a31.941185 31.941185 0 1 0 0-63.878757z" fill="currentColor"/></svg>
+          查看对你的印象
+        </button>
+
+        <div class="sp-divider sp-divider-strong"></div>
 
         <!-- 清空聊天记录 -->
-        <button class="sp-btn" @click="clearChatHistory" :disabled="clearing">
-          {{ clearing ? '清空中...' : '🗑️ 清空聊天记录' }}
+        <button class="sp-btn sp-btn-danger" @click="clearChatHistory" :disabled="clearing">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M687.6 96.4H336.4v91.2h351.1V96.4zM636.7 398v405.5h-73.9V398h73.9z m-175.5 0v405.5h-73.9V398h73.9z m332.1-119.2H230.7l27.9 648.8h506.7l28-648.8zM696.8 5.1c40.4 0 73.3 35.6 73.9 79.8v102.7h147.8c20.2 0 36.6 17.8 37 39.9v41.2c0 5.5-4 10-9 10.1h-70.1L848 941.6c-1.8 42.9-33.7 76.6-72.6 77.3H249.8c-39 0-71.3-33.4-73.7-76l-0.1-1.3-28.5-662.7H77.7c-5 0-9.1-4.4-9.2-9.8v-40.9c0-22.2 16.2-40.2 36.3-40.5h148.4V86.2c0-44.3 32.5-80.4 72.7-81.1h370.9z" fill="currentColor"/></svg>
+          {{ clearing ? '清空中...' : '清空聊天记录' }}
         </button>
 
         <div class="sp-divider"></div>
@@ -156,7 +165,8 @@
         <!-- 删除角色 -->
         <button class="sp-btn sp-btn-danger" @click="deleteChar" :disabled="deleting || chat.activeChar?.name === 'default'"
           :title="chat.activeChar?.name === 'default' ? '不能删除默认Agent' : ''">
-          {{ deleting ? '删除中...' : '⚠️ 删除角色' }}
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 179.2l390.4 627.2H128l384-627.2m0-64c-19.2 0-44.8 12.8-51.2 32l-390.4 627.2c-25.6 44.8 6.4 96 51.2 96H896c51.2 0 83.2-57.6 51.2-96l-384-627.2c-6.4-19.2-32-32-51.2-32z" fill="#d81e06"/><path d="M512 640c-19.2 0-32-12.8-32-32v-192c0-19.2 12.8-32 32-32s32 12.8 32 32v192c0 19.2-12.8 32-32 32z" fill="#d81e06"/><path d="M512 723.2m-32 0a32 32 0 1 0 64 0 32 32 0 1 0-64 0Z" fill="#d81e06"/></svg>
+          {{ deleting ? '删除中...' : '删除角色' }}
         </button>
       </div>
     </div>
@@ -1288,12 +1298,10 @@ function renderContent(text) {
 .settings-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:flex-start; justify-content:flex-end; z-index:1000; padding:60px 24px 0 0; }
 .settings-panel {
   width:280px;
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: rgba(255, 255, 255, 0.95);
   border-radius:16px;
-  border:1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+  border:1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.14);
   overflow:hidden;
 }
 
@@ -1319,11 +1327,13 @@ function renderContent(text) {
 .color-native::-webkit-color-swatch { border-radius:50%; border:none; }
 
 .sp-divider { height:1px; background:rgba(255, 255, 255, 0.2); margin:0 16px; }
+.sp-divider-strong { height:2px; background:rgb(219 219 219 / 38%); margin:6px 16px; }
 .sp-btn { display:block; width:100%; text-align:left; padding:12px 16px; border:none; border-radius:0; background:transparent; color:var(--text-primary); font-size:13px; cursor:pointer; transition:background 0.15s ease; }
 .sp-btn:hover { background:rgba(255, 255, 255, 0.2); }
 .sp-btn:disabled { opacity:0.4; cursor:not-allowed; }
 .sp-btn-danger { color:var(--danger); }
 .sp-btn-danger:hover:not(:disabled) { background:rgba(255, 77, 79, 0.06); }
+.sp-btn-icon { width:16px; height:16px; vertical-align:middle; margin-right:6px; display:inline-block; }
 
 /* ── 毛玻璃编辑弹窗 ── */
 .editor-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:center; justify-content:center; z-index:1001; }
@@ -1665,12 +1675,14 @@ function renderContent(text) {
 
 @media (max-width: 767px) {
   .impression-panel {
-    max-width: 100vw;
-    max-height: 75vh;
+    width: 100vw; max-width: 100vw;
+    height: 100vh; height: 100dvh;
+    max-height: 100vh; max-height: 100dvh;
+    border-radius: 0; border: none;
   }
   .impression-card { padding: 8px 10px; }
   .impression-content { flex-direction: column; }
-  .impression-right { border-left: none; border-top: 1px solid rgba(0,0,0,0.06); padding: 14px 0 0; min-width: 0; }
+  .impression-right { width: 100% !important; border-left: none; border-top: 1px solid rgba(0,0,0,0.06); padding: 14px 0 0; min-width: 0; }
 }
 
 /* ── 印象双栏布局 ── */
