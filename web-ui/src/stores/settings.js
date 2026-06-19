@@ -6,6 +6,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const comfyWidth = ref(1600)
   const comfyHeight = ref(1200)
   const forceImageGen = ref(false)
+  const realtimeAffinityDisplay = ref(false)
   let loaded = false
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
@@ -25,6 +26,9 @@ export const useSettingsStore = defineStore('settings', () => {
       comfyHeight.value = data.comfy?.height || 1200
       if (data.features?.forceImageGen !== undefined) {
         forceImageGen.value = data.features.forceImageGen
+      }
+      if (data.features?.realtimeAffinityDisplay !== undefined) {
+        realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
       }
       loaded = true
     } catch {
@@ -48,5 +52,10 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateFeatureFlag('forceImageGen', v)
   }
 
-  return { comfyWidth, comfyHeight, forceImageGen, loadComfyConfig, setComfySize, setForceImageGen }
+  async function setRealtimeAffinityDisplay(v) {
+    realtimeAffinityDisplay.value = v
+    await api.updateFeatureFlag('realtimeAffinityDisplay', v)
+  }
+
+  return { comfyWidth, comfyHeight, forceImageGen, realtimeAffinityDisplay, loadComfyConfig, setComfySize, setForceImageGen, setRealtimeAffinityDisplay }
 })

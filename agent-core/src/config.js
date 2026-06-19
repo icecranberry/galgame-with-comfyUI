@@ -37,6 +37,7 @@ export const config = {
     promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE === 'true', // 默认关
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
+    realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true' // 默认关：好感度实时显示
   },
   user: {
     nickname: process.env.USER_NICKNAME || '',

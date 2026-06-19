@@ -600,27 +600,73 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     const lastInsertRowid = savedIds[savedIds.length - 1];
 
-    // 8.8 回复猜想（生图之前推送，不受生图延迟影响）
+    // 8.8 回复猜想 ← 启动（不 await，与情绪评估并行发起 LLM 调用）
     //      每次用户消息到达时重置冷却 → 每轮对话最多触发一次 → 写入 20s 冷却
+    let guessPromise = null;
+    let guessCooldownStart = 0;
     if (config.features.replyGuesses && displayContent && segments.length > 0) {
       const now = Date.now();
       const cooldownUntil = guessCooldowns.get(conversationId);
       if (!cooldownUntil || now >= cooldownUntil) {
-        try {
-          const guesses = await generateReplyGuesses(conversationId, character);
-          if (guesses) {
-            send('guesses', guesses);
-            guessCooldowns.set(conversationId, now + 20_000);  // 20s 冷却
-          }
-        } catch (err) {
-          console.error('[chat] guess generation error:', err.message);
-        }
+        guessPromise = generateReplyGuesses(conversationId, character);
+        guessCooldownStart = now;
       } else {
         console.log(`[chat] guess skipped: cooldown active (${Math.round((cooldownUntil - now) / 1000)}s remaining)`);
       }
     }
 
-    // 9. 生图（四种触发路径）
+    // 9. 启动情绪评估 promise（不 await — 与回复猜想 + 生图三路并行）
+    let emotionPromise = null;
+    let emotionCleanup = null;  // { emotionState, emotionBaseline, currentAffinity }
+    if (config.features.emotion) {
+      const emotionBaseline = character
+        ? JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}')
+        : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
+      const emotionState = loadEmotionState(conversationId, emotionBaseline);
+      const currentAffinity = loadAffinity(characterId);
+      const evalContext = {
+        characterPersonality: character?.base_prompt?.slice(0, 500) || '',
+        emotionBaseline,
+        currentVad: getCompositeEmotion(emotionState),
+        currentAffinity,
+        relationship: db.prepare(
+          'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+        ).get(characterId)?.relationship_text || '',
+      };
+      emotionPromise = evaluateStimulus(message, fullContent, evalContext);
+      emotionCleanup = { emotionState, emotionBaseline, currentAffinity };
+
+      // 挂载 .then()：算完立刻推送 SSE + 写 DB，不等生图
+      emotionPromise.then(r => {
+        if (!r) return;
+        const { delta, dominantEmotion, affinityDelta, reason, source } = r;
+        const evolved = evolveEmotion(emotionCleanup.emotionState, delta, emotionCleanup.emotionBaseline);
+        const newAffinity = evolveAffinity(emotionCleanup.currentAffinity, affinityDelta ?? 0);
+        saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion, newAffinity, affinityDelta, reason);
+        saveAffinity(characterId, newAffinity);
+        if (config.features.realtimeAffinityDisplay) {
+          send('affinity_update', { affinity: newAffinity, affinityDelta: affinityDelta ?? 0, lastReason: reason || '' });
+        }
+        console.log(`[emotion]\n${emotionDashboard(evolved, dominantEmotion, newAffinity, affinityDelta, source, reason)}`);
+      }).catch(err => {
+        console.error('[chat] emotion evaluation error:', err.message);
+      });
+    }
+
+    // 结算回复猜想（此时大概率已完成，await 近乎瞬间；失败静默不阻塞后续）
+    if (guessPromise) {
+      try {
+        const guesses = await guessPromise;
+        if (guesses) {
+          send('guesses', guesses);
+          guessCooldowns.set(conversationId, guessCooldownStart + 20_000);
+        }
+      } catch (err) {
+        console.error('[chat] guess generation error:', err.message);
+      }
+    }
+
+    // 10. 生图（四种触发路径）—— 此时情绪评估已在后台并行运行
     if (tags.prompt) {
       // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
       const db2 = getDb();
@@ -654,38 +700,21 @@ router.post('/characters/:id/chat', async (req, res) => {
       }
     }
 
-    // 10. 后处理（按开关决定）
+    // 11. 兜底等待情绪评估（生图期间已由 .then() 处理完毕，这里几乎瞬间返回）
+    if (emotionPromise) {
+      try {
+        await Promise.race([
+          emotionPromise,
+          new Promise(resolve => setTimeout(() => resolve(null), 3000)),
+        ]);
+      } catch (err) {
+        console.error('[chat] emotion evaluation error:', err.message);
+      }
+    }
+
+    // 12. 后处理（异步，不依赖 SSE 连接）
     setImmediate(async () => {
       try {
-        if (config.features.emotion) {
-          const emotionBaseline = character
-            ? JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}')
-            : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
-          const emotionState = loadEmotionState(conversationId, emotionBaseline);
-          const currentAffinity = loadAffinity(characterId);
-
-          // 构建 LLM 评估上下文
-          const evalContext = {
-            characterPersonality: character?.base_prompt?.slice(0, 500) || '',
-            emotionBaseline,
-            currentVad: getCompositeEmotion(emotionState),
-            currentAffinity,
-            relationship: db.prepare(
-              'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
-            ).get(characterId)?.relationship_text || '',
-          };
-          const { delta, dominantEmotion, affinityDelta, reason, source } = await evaluateStimulus(message, fullContent, evalContext);
-          const evolved = evolveEmotion(emotionState, delta, emotionBaseline);
-          const newAffinity = evolveAffinity(currentAffinity, affinityDelta ?? 0);
-
-          saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion, newAffinity, affinityDelta, reason);
-          saveAffinity(characterId, newAffinity);
-
-          if (reason) {
-            console.log(`[emotion] reason: ${reason}`);
-          }
-          console.log(`[emotion]\n${emotionDashboard(evolved, dominantEmotion, newAffinity, affinityDelta, source)}`);
-        }
         if (config.features.memory) {
           const userMsgCount = db.prepare(`
             SELECT COUNT(*) as count FROM raw_messages

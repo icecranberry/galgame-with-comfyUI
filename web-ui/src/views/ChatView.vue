@@ -10,11 +10,32 @@
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
-        <div class="btn-header-settings" title="角色设置" @click="openSettings">
+        <div class="chat-header-center">
+          <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
+          <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity" class="header-affinity">
+            ❤️{{ Math.round(chat.realtimeAffinity.affinity) }}
+            <span class="affinity-delta-wrap">
+              <Transition name="roll">
+                <span :key="chat.affinityKey" class="header-affinity-delta" :class="chat.realtimeAffinity.affinityDelta >= 0 ? 'delta-up' : 'delta-down'">
+                  {{ chat.realtimeAffinity.affinityDelta >= 0 ? '+' : '' }}{{ Number(chat.realtimeAffinity.affinityDelta).toFixed(1) }}
+                </span>
+              </Transition>
+            </span>
+          </span>
+        </div>
+        <div class="chat-header-right">
+          <span class="affinity-reason-wrap">
+            <Transition name="roll">
+              <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity?.lastReason" :key="chat.affinityKey" class="header-reason">
+                💬"{{ chat.realtimeAffinity.lastReason }}"
+              </span>
+            </Transition>
+          </span>
+          <div class="btn-header-settings" title="角色设置" @click="openSettings">
           <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
             <path d="M416.4 958h191.2V849.7c0-12.7 6.4-25.5 19.1-31.9 31.9-12.7 63.7-31.9 89.2-51 12.7-6.4 25.5-6.4 38.2 0l95.6 57.3 95.6-165.7-95.6-57.3C837 588.5 830.6 575.7 837 563c0-19.1 6.4-31.9 6.4-51s0-31.9-6.4-51c0-12.7 6.4-25.5 12.7-31.9l95.6-57.3-95.6-165.7-95.6 57.3c-12.7 6.4-25.5 6.4-38.2 0-25.5-19.1-57.3-38.2-89.2-51-12.7-12.7-19.1-25.5-19.1-38.2V66H416.4v108.3c0 12.7-6.4 25.5-19.1 31.9-31.9 12.7-63.7 31.9-89.2 51-12.7 6.4-25.5 6.4-38.2 0l-95.6-51-95.6 165.6 95.6 57.3c12.7 6.4 19.1 19.1 12.7 31.9 0 19.1-6.4 31.9-6.4 51s0 31.9 6.4 51c6.4 12.7 0 25.5-12.7 31.9l-95.6 57.3 95.6 165.7 95.6-57.3c12.7-6.4 25.5-6.4 38.2 0 25.5 19.1 57.3 38.2 89.2 51 12.7 6.4 19.1 19.1 19.1 31.9V958z m223 63.7H384.6c-19.1 0-31.9-12.7-31.9-31.9v-121c-25.5-12.7-51-25.5-70.1-38.2l-101.9 63.7c-12.7 6.4-31.9 6.4-44.6-12.7L8.6 658.6c-12.7-19.1-6.4-38.2 12.7-44.6l101.9-63.7v-76.5L21.4 410.1c-19.1-6.4-25.5-25.5-12.7-44.6l127.4-223c6.4-12.7 25.5-19.1 44.6-6.4l101.9 63.7c19.1-12.7 44.6-31.9 70.1-38.2V34.1c0-19.1 12.7-31.9 31.9-31.9h254.9c19.1 0 31.9 12.7 31.9 31.9v121.1c25.5 12.7 51 25.5 70.1 38.2l101.9-63.7c12.7-6.4 31.9-6.4 44.6 12.7l127.4 223c12.7 19.1 6.4 38.2-12.7 44.6l-101.9 63.7v76.5l101.9 63.7c12.7 6.4 19.1 25.5 12.7 44.6L888 881.5c-6.4 12.7-25.5 19.1-44.6 12.7l-101.9-63.7c-19.1 12.7-44.6 31.9-70.1 38.2v121.1c-0.1 19.2-12.8 31.9-32 31.9zM512 703.2c-108.3 0-191.2-82.8-191.2-191.2S403.7 320.8 512 320.8 703.2 403.7 703.2 512 620.3 703.2 512 703.2z m0-318.6c-70.1 0-127.4 57.3-127.4 127.4S441.9 639.4 512 639.4 639.4 582.1 639.4 512 582.1 384.6 512 384.6z"/>
           </svg>
+        </div>
         </div>
       </div>
 
@@ -384,6 +405,15 @@
                       </div>
                     </div>
 
+                    <!-- 实时显示开关 -->
+                    <div class="affinity-realtime-toggle">
+                      <span class="affinity-realtime-label">实时显示</span>
+                      <label class="switch">
+                        <input type="checkbox" v-model="realtimeAffinityEnabled" />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+
                     <!-- 最近一次好感度变化 -->
                     <div v-if="impressionLastDelta != null" class="affinity-change">
                       <div class="affinity-change-row">
@@ -441,6 +471,10 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const settings = useSettingsStore()
 const forceImageGen = computed(() => settings.forceImageGen)
+const realtimeAffinityEnabled = computed({
+  get: () => settings.realtimeAffinityDisplay,
+  set: (v) => settings.setRealtimeAffinityDisplay(v),
+})
 
 function onForceImageGenChange(e) {
   settings.setForceImageGen(e.target.checked)
@@ -453,6 +487,25 @@ function showForceTip() {
   clearTimeout(forceTipTimer)
   forceTipTimer = setTimeout(() => { forceTipVisible.value = false }, 2000)
 }
+// ── 实时好感度：拉取当前角色最新值 ──
+async function fetchRealtimeAffinity() {
+  if (!realtimeAffinityEnabled.value || !chat.activeCharId) return
+  try {
+    const data = await getCharacterPortrait(chat.activeCharId)
+    chat.realtimeAffinity = {
+      affinity: data.affinity ?? 50,
+      affinityDelta: data.lastAffinityDelta ?? 0,
+      lastReason: data.lastReason || ''
+    }
+  } catch {}
+}
+
+// 开关从关→开时拉取
+watch(realtimeAffinityEnabled, async (on) => { if (on) fetchRealtimeAffinity() })
+
+// 切换角色时拉取
+watch(() => chat.activeCharId, async (newId) => { if (newId) fetchRealtimeAffinity() })
+
 const inputEl = ref(null)
 const msgList = ref(null)
 const previewImage = ref(null)
@@ -929,12 +982,16 @@ function teardownMobileKeyboard() {
 
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar(), settings.loadComfyConfig()])
-  if (route.params.id) await chat.selectChar(parseInt(route.params.id))
-  else if (chat.characters.length > 0) await chat.selectChar(chat.characters[0].id)
+  const targetId = route.params.id ? parseInt(route.params.id) : (chat.characters.length > 0 ? chat.characters[0].id : null)
+  if (targetId && targetId !== chat.activeCharId) {
+    await chat.selectChar(targetId)
+  }
   await nextTick()
   scrollToBottom(true)  // 首次加载强制滚底
   if (!isMobile) inputEl.value?.focus()
   setupMobileKeyboard()
+  // selectChar 之后拉取实时好感度（避免被 selectChar 清空）
+  fetchRealtimeAffinity()
 })
 
 onUnmounted(() => {
@@ -1897,6 +1954,43 @@ function renderContent(text) {
   color: #aaa;
   line-height: 1.5;
   font-style: italic;
+}
+
+/* ── 实时显示开关 ── */
+.affinity-realtime-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0 4px; margin-top: 4px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+.affinity-realtime-label { font-size: 12px; color: #888; font-weight: 500; }
+
+/* ── Header 实时好感度 ── */
+.chat-header-center { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.header-affinity { font-size: 14px; font-weight: 600; color: #e0245e; white-space: nowrap; }
+.header-affinity-delta { font-size: 11px; font-weight: 500; margin-left: 4px; }
+.header-affinity-delta.delta-up { color: #e0245e; }
+.header-affinity-delta.delta-down { color: #4a90d9; }
+.chat-header-right { display: flex; align-items: center; gap: 10px; }
+.header-reason {
+  font-size: 11px; color: #999; font-style: italic;
+  white-space: nowrap;
+}
+
+/* ── delta / reason roll 动画容器 ── */
+.affinity-delta-wrap,
+.affinity-reason-wrap { position: relative; display: inline-block; vertical-align: bottom; }
+
+/* ── roll Transition ── */
+.roll-enter-active { animation: roll-in 0.2s ease; }
+.roll-leave-active  { animation: roll-out 0.2s ease; position: absolute; left: 0; top: 0; }
+@keyframes roll-out { from { transform: translateY(0);    opacity: 1; } to { transform: translateY(-120%); opacity: 0; } }
+@keyframes roll-in  { from { transform: translateY(120%); opacity: 0; } to { transform: translateY(0);     opacity: 1; } }
+@media (max-width: 768px) {
+  .header-affinity { font-size: 12px; }
+  .header-affinity-delta { font-size: 10px; }
+  .header-reason {
+    max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+  }
 }
 
 </style>

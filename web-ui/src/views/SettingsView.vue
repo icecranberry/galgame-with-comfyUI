@@ -249,6 +249,17 @@
             <span class="slider"></span>
           </label>
         </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">实时显示好感度</div>
+            <div class="td">在聊天顶部实时显示当前好感度数值和最近变化原因</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- ComfyUI 连接 -->
@@ -327,7 +338,7 @@ const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', mom
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false })
+const features = reactive({ emotion: false, memory: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
@@ -606,13 +617,6 @@ function resetTestPrompts() {
 .toggle-row:last-child { border-bottom: none; }
 .tl { font-size: 14px; font-weight: 500; color: var(--text-bright); }
 .td { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; inset: 0; background: var(--bg-hover); border-radius: 24px; cursor: pointer; transition: 0.2s; }
-.slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(20px); }
 
 .sr { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
 .sd { width: 9px; height: 9px; border-radius: 50%; }

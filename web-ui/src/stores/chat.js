@@ -13,6 +13,8 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
+  const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
+  const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
   // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
@@ -77,6 +79,8 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     renderStart.value = 0
     guesses.value = null  // 切角色时清除候选词
+    realtimeAffinity.value = null  // 切角色时清除实时好感度
+    affinityKey.value = 0         // 重置动画 key，避免切角色触发 roll
     await loadMessages(charId)
     await loadCharacters()
   }
@@ -344,6 +348,15 @@ export const useChatStore = defineStore('chat', () => {
             if (lastEvent === 'guesses' && d.a && d.b) {
               guesses.value = { a: d.a, b: d.b }
             }
+            // ── affinity_update: 实时好感度（递增 key 触发 roll 动画）──
+            if (lastEvent === 'affinity_update' && d.affinity !== undefined) {
+              realtimeAffinity.value = {
+                affinity: d.affinity,
+                affinityDelta: d.affinityDelta ?? 0,
+                lastReason: d.lastReason || '',
+              }
+              affinityKey.value++
+            }
             // ── msg_saved: 临时 ID → 真实 ID ──
             if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
               thisAttemptHadMsgSaved = true
@@ -458,6 +471,6 @@ export const useChatStore = defineStore('chat', () => {
     await loadCharacters()
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, activeChar,
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
 })
