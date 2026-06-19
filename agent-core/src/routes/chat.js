@@ -527,6 +527,16 @@ router.post('/characters/:id/chat', async (req, res) => {
       msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。' });
     }
 
+    // 5.5 在当前用户消息前加时间戳（从后往前找第一个 user 消息）
+    const now = new Date();
+    const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        msgs[i].content = `${timeTag} ${msgs[i].content}`;
+        break;
+      }
+    }
+
     // 6. 流式生成（温度 0.65）
     // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
     const splitter = new SentenceSplitter();
@@ -624,6 +634,22 @@ router.post('/characters/:id/chat', async (req, res) => {
         : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
       const emotionState = loadEmotionState(conversationId, emotionBaseline);
       const currentAffinity = loadAffinity(characterId);
+      // 上一轮对话（供 LLM 参考上下文，只取最近一组 user+assistant）
+      const prevRound = db.prepare(`
+        SELECT role, content FROM raw_messages
+        WHERE conversation_id = ? AND id < (SELECT MAX(id) FROM raw_messages WHERE conversation_id = ?)
+        ORDER BY id DESC LIMIT 2
+      `).all(conversationId, conversationId).reverse();
+      const prevUser = prevRound.find(r => r.role === 'user')?.content || '';
+      const prevAssistant = prevRound.find(r => r.role === 'assistant')?.content || '';
+
+      // 对话历史摘要
+      const summaryRow = db.prepare(`
+        SELECT summary FROM rolling_summaries
+        WHERE conversation_id = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(conversationId);
+
       const evalContext = {
         characterPersonality: character?.base_prompt?.slice(0, 500) || '',
         emotionBaseline,
@@ -632,6 +658,9 @@ router.post('/characters/:id/chat', async (req, res) => {
         relationship: db.prepare(
           'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
         ).get(characterId)?.relationship_text || '',
+        prevUser,
+        prevAssistant,
+        summary: summaryRow?.summary || '',
       };
       emotionPromise = evaluateStimulus(message, fullContent, evalContext);
       emotionCleanup = { emotionState, emotionBaseline, currentAffinity };
@@ -1160,10 +1189,21 @@ async function generateReplyGuesses(conversationId, character) {
 对话中助手说"走吧，我们出门吃晚饭？"
 输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}`;
 
+  // 过滤掉 assistant 消息中的生图 prompt JSON，避免干扰预测
+  const cleanedHistory = history.map(msg => {
+    if (msg.role === 'assistant') {
+      return {
+        ...msg,
+        content: msg.content.replace(/\s*\{[^{}]*"prompt"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}$/, '')
+      };
+    }
+    return msg;
+  });
+
   const msgs = [
     { role: 'system', content: systemPrompt },
     ...(personalityBrief ? [{ role: 'system', content: `角色人设供参考（有助于预测用户可能的反应）：${personalityBrief}` }] : []),
-    ...history,
+    ...cleanedHistory,
     { role: 'user', content: '请根据以上对话，预测用户接下来最可能回复的两句话。只输出 JSON：' },
   ];
 

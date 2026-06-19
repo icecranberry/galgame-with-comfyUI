@@ -683,7 +683,8 @@ const SETTING_TO_CONFIG = {
   feature_autoImageJudge:      { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
   feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
-  feature_forceImageGen:        { obj: 'features', key: 'forceImageGen',    type: 'bool' },
+  feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
+  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
 };
 
 function castValue(raw, type) {

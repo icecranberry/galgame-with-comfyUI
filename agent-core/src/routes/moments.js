@@ -631,7 +631,9 @@ ${commentHistory}
     if (affPrompt) msgs.push({ role: 'system', content: affPrompt });
   }
 
-  msgs.push({ role: 'user', content: '回复这条评论：' });
+  const now = new Date();
+  const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  msgs.push({ role: 'user', content: `${timeTag} 回复这条评论：` });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128 });
 
