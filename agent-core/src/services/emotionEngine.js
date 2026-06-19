@@ -487,7 +487,7 @@ ${contextBlock}
   try {
     let raw = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.2, max_tokens: 200 }
+      { temperature: 0.2, max_tokens: 200, label: '情绪判断' }
     );
     raw = raw.trim();
     if (raw.startsWith('```')) {

@@ -909,7 +909,7 @@ async function judgeImageNeed(conversationId) {
     const result = await chatSync([
       { role: 'system', content: judgeSystemPrompt },
       { role: 'user', content: ctx },
-    ], { temperature: 0, max_tokens: 5 });
+    ], { temperature: 0, max_tokens: 5, label: '判断需要图片' });
 
     const verdict = result.trim().startsWith('是');
     console.log(`[chat] judgeImageNeed: ${verdict ? 'YES' : 'no'} (response: "${result.trim().slice(0, 20)}")`);
@@ -1049,7 +1049,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
   let fullContent = '';
   try {
-    fullContent = await chatSync(msgs, { temperature: 0.3, max_tokens: 1024 });
+    fullContent = await chatSync(msgs, { temperature: 0.3, max_tokens: 1024, label: '生图' });
     console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
   } catch (err) {
     console.error('[chat] needImage follow-up error:', err.message);
@@ -1226,7 +1226,7 @@ async function generateReplyGuesses(conversationId, character) {
   ];
 
   try {
-    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128 });
+    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '预测' });
     console.log(`[chat] generateReplyGuesses raw response: ${result.slice(0, 120)}`);
 
     // 尝试提取 JSON 对象

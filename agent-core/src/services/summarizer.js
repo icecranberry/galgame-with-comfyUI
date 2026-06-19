@@ -108,7 +108,7 @@ export async function maybeSummarize(conversationId) {
             .replace('{{recent_messages}}', recentText),
         },
       ],
-      { temperature: 0.5, max_tokens: 800 }
+      { temperature: 0.5, max_tokens: 800, label: '对话摘要提取助手' }
     );
   } catch (err) {
     console.error('[summarizer] generation failed:', err.message);

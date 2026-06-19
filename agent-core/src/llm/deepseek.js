@@ -13,7 +13,7 @@ function getClient() {
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
  */
-export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" } } = {}) {
+export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync' } = {}) {
   const params = {
     model,
     messages,
@@ -38,14 +38,18 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
     }
     return m;
   });
-  console.log('\n══════════ [DeepSeek → sync request] ══════════');
-  console.log(JSON.stringify(logMsgs, null, 2));
-  console.log('───────────────────────────────────────────────');
+  // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
+  const requestLog =
+    `\n══════════ [DeepSeek → ${label}] ══════════\n` +
+    JSON.stringify(logMsgs, null, 2) + '\n' +
+    '───────────────────────────────────────────────';
 
   const res = await getClient().chat.completions.create(params);
   const content = res.choices[0].message.content;
 
-  console.log('[DeepSeek ← sync response]');
+  // 请求+响应一起输出，保证每次调用的日志是完整的原子块
+  console.log(requestLog);
+  console.log(`[DeepSeek ← ${label}]`);
   console.log((content || '').slice(0, 2000));
   console.log('═══════════════════════════════════════════════\n');
 

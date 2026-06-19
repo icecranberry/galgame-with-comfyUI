@@ -81,7 +81,7 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
     const prompt = buildExtractPrompt(characterPrompt, participantNames, messagesText);
     let raw = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.3, max_tokens: 1024 }
+      { temperature: 0.3, max_tokens: 1024, label: 'RAG记忆提取助手' }
     );
     // 处理 DeepSeek 可能返回的 markdown code fence
     raw = raw.trim();

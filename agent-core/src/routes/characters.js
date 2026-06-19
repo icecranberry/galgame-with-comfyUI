@@ -334,7 +334,7 @@ ${searchContext}` : ''}
     const result = await chatSync([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: description.trim() },
-    ], llmOpts);
+    ], { ...llmOpts, label: '创造角色' });
 
     // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
     const lines = result.split('\n');

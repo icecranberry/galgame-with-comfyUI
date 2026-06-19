@@ -417,7 +417,7 @@ async function generateMomentPost(character) {
   msgs.push({ role: 'system', content: systemPrompt });
   msgs.push({ role: 'user', content: userMsg });
 
-  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024 });
+  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '发朋友圈助手' });
 
   // 解析 LLM 输出
   let text = '', imagePrompt = '';
@@ -637,7 +637,7 @@ ${commentHistory}
   const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
   msgs.push({ role: 'user', content: `${timeTag} 回复这条评论：` });
 
-  const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128 });
+  const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });
 
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }

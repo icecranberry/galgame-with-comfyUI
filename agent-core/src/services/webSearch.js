@@ -34,7 +34,7 @@ async function extractNameForSearch(rawQuery) {
     const result = await chatSync([
       { role: 'system', content: '你是一个动漫游戏角色搜索关键词提取器和纠错器。从用户输入中提取核心角色名称和所属作品。\n如果角色名有错别字（如输入"芙宁哪"→纠正为"芙宁娜"），请自动纠正为正确的官方名称。\n输出格式：角色名|作品名\n如果没有作品名，只输出角色名，|后面留空。\n\n示例：\n输入：绝区零里的千夏\n输出：千夏|绝区零\n输入：芙宁娜（原神）\n输出：芙宁娜|原神\n输入：帮我看一下雷电将军的背景故事\n输出：雷电将军|\n输入：一个金发双马尾的傲娇角色\n输出：金发双马尾傲娇角色|\n输入：芙宁哪\n输出：芙宁娜|原神\n输入：我想要钟离\n输出：钟离|原神' },
       { role: 'user', content: rawQuery },
-    ], { temperature: 0, max_tokens: 60 });
+    ], { temperature: 0, max_tokens: 60, label: '网络搜索' });
     const trimmed = (result || '').trim();
     const pipeIdx = trimmed.indexOf('|');
     if (pipeIdx !== -1) {

@@ -94,7 +94,7 @@ export async function maybeExtractPortrait(conversationId, characterId) {
             .replace('{{messages}}', messagesText),
         },
       ],
-      { temperature: 0.3, max_tokens: 600 }
+      { temperature: 0.3, max_tokens: 600, label: '提取用户画像' }
     );
   } catch (err) {
     console.error('[portraitExtractor] LLM call failed:', err.message);
