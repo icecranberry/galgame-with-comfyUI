@@ -397,13 +397,15 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
     }
 
-    // 5.0b 用户信息（建立 user↔用户名的映射）
+    // 5.0b 用户信息（建立 user↔用户名的映射，结构化字段）
     const chatUserName = config.user.nickname || '用户';
-    const chatUserPersona = config.user.persona || '';
-    if (chatUserName || chatUserPersona) {
+    const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
+    if (hasUserInfo) {
       const infoParts = [];
-      if (chatUserName) infoParts.push(`消息中标记为"user"的人是"${chatUserName}"`);
-      if (chatUserPersona) infoParts.push(`关于${chatUserName}：\n${chatUserPersona}`);
+      infoParts.push(`消息中标记为"user"的人是"${chatUserName}"`);
+      if (config.user.gender) infoParts.push(`性别：${config.user.gender}`);
+      if (config.user.appearance) infoParts.push(`外观特征：${config.user.appearance}`);
+      if (config.user.persona) infoParts.push(`其他说明：${config.user.persona}`);
       relParts.push(`<user_info>${infoParts.join('。')}</user_info>`);
     }
 
@@ -1016,10 +1018,21 @@ async function handleNeedImageFlow(conversationId, character, send) {
     // ── prompt 格式说明单独一条，不混杂指令 ──
     ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
-    ...(config.user.nickname || config.user.persona ? [{
-      role: 'system',
-      content: `【对话对象】消息中标记为"user"的人是"${config.user.nickname || '用户'}"。当你生成关于user的图片（例如合照，互动的场景）的时候，需要严格遵循user的特征：关于${config.user.nickname || 'ta'}：\n${config.user.persona || ''}${userRelationContent}`
-    }] : []),
+    ...(() => {
+      const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
+      if (!hasUserInfo) return [];
+      const u = config.user;
+      const userName = u.nickname || '用户';
+      const parts = [];
+      parts.push(`消息中标记为"user"的人是"${userName}"`);
+      if (u.gender) parts.push(`性别：${u.gender}（这是不可变更的事实，不受角色关系或场景影响）`);
+      if (u.appearance) parts.push(`外观特征：${u.appearance}`);
+      if (u.persona) parts.push(`其他说明：${u.persona}`);
+      return [{
+        role: 'system',
+        content: `【对话对象】${parts.join('。')}。当你生成关于user的图片（例如合照，互动的场景）的时候，需要严格遵循以上user的特征，尤其是性别和外观。${userRelationContent}`
+      }];
+    })(),
     // ── 对话上下文（单条文本块，非交替轮次，避免模型进入"对话模式"）──
     ...(history.length > 0 ? [{
       role: 'system',
@@ -1169,14 +1182,19 @@ async function generateReplyGuesses(conversationId, character) {
 
   if (history.length === 0) return null;
 
-  const personalityBrief = character?.base_prompt?.slice(0, 200) || '';
+  // 角色人设：将 "你" 替换为 "assistant"，避免模型代入角色身份
+  const personalityBrief = character?.base_prompt
+    ?.replace(/你/g, 'assistant')
+    ?.slice(0, 250)
+    ?.trim() || '';
 
-  const systemPrompt = `${getSystemRules({ roleplay: false })}
-你是一个对话预测助手。根据最近的对话历史，预测用户接下来最可能回复的两句话。
+  // 预测助手使用独立的 system prompt，不注入角色扮演系统规则
+  // getSystemRules() 包含 "<完全角色扮演自由>" 等指令，会导致模型站错角色
+  const systemPrompt = `你是一个对话预测助手。根据最近的对话历史，预测用户接下来最可能回复的两句话。
 
 规则：
 1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或表达不同态度
-2. 每条 5~25 个汉字，像真实聊天一样自然口语化，风趣幽默。
+2. 每条 5~25 个汉字，像网友聊天一样自然口语化，风趣幽默
 3. 直接输出 JSON，不要任何解释
 
 输出格式：
@@ -1204,7 +1222,7 @@ async function generateReplyGuesses(conversationId, character) {
     { role: 'system', content: systemPrompt },
     ...(personalityBrief ? [{ role: 'system', content: `角色人设供参考（有助于预测用户可能的反应）：${personalityBrief}` }] : []),
     ...cleanedHistory,
-    { role: 'user', content: '请根据以上对话，预测用户接下来最可能回复的两句话。只输出 JSON：' },
+    { role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' },
   ];
 
   try {

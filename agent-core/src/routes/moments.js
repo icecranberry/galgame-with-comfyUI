@@ -527,7 +527,9 @@ async function generateMomentPost(character) {
 async function generateCharacterReply(post, historyComments) {
   const db = getDb();
   const userName = config.user.nickname || '用户';
-  const userPersona = config.user.persona || '你最重要的朋友';
+  const u = config.user;
+  let userPersona = u.appearance || u.persona || '你最重要的朋友';
+  if (u.gender) userPersona = `[性别：${u.gender}] ${userPersona}`;
 
   // 构建评论区对话历史
   const commentHistory = historyComments.map(c => {

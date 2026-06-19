@@ -85,10 +85,10 @@ router.get('/user', (req, res) => {
   res.json(getUserConfig());
 });
 
-// PUT /api/config/user — 更新用户昵称 + 自我设定
+// PUT /api/config/user — 更新用户昵称 + 性别 + 外观 + 其他说明
 router.put('/user', (req, res) => {
-  const { nickname, persona } = req.body;
-  updateUserConfig({ nickname, persona });
+  const { nickname, gender, appearance, persona } = req.body;
+  updateUserConfig({ nickname, gender, appearance, persona });
   res.json({ ok: true, ...getUserConfig() });
 });
 

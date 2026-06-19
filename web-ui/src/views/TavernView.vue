@@ -5,7 +5,7 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         用户信息行
+         用户信息卡片
          ═══════════════════════════════════════════ -->
     <div class="user-row card">
       <div
@@ -14,30 +14,77 @@
         @click="showUserAvatarPicker = true"
       >{{ userAvatar ? '' : '我' }}</div>
       <div class="user-info">
-        <div class="user-nickname-row">
-          <input
-            v-if="editingNickname"
-            ref="nicknameInput"
-            v-model="userNicknameInput"
-            class="inline-input nickname-input"
-            @blur="saveNickname"
-            @keydown.enter="saveNickname"
-          />
-          <span v-else class="user-nickname-text" @click="startEditNickname">{{ userNickname || '给自己起个名字' }}</span>
-          <button v-if="!editingNickname" class="edit-pen" @click="startEditNickname" title="编辑昵称">✎</button>
+        <!-- 姓名 -->
+        <div class="user-field-row">
+          <span class="field-label">称呼</span>
+          <div class="field-value-wrap">
+            <input
+              v-if="editingNickname"
+              ref="nicknameInput"
+              v-model="userNicknameInput"
+              class="inline-input nickname-input"
+              @blur="saveNickname"
+              @keydown.enter="saveNickname"
+              placeholder="给自己起个名字"
+            />
+            <span v-else class="field-value" @click="startEditNickname">{{ userNickname || '给自己起个名字' }}</span>
+            <button v-if="!editingNickname" class="edit-pen" @click="startEditNickname" title="编辑称呼">✎</button>
+          </div>
         </div>
-        <div class="user-persona-row">
-          <textarea
-            v-if="editingPersona"
-            ref="personaInput"
-            v-model="userPersonaInput"
-            class="inline-input persona-input"
-            rows="2"
-            @blur="savePersona"
-            @keydown.escape="cancelEditPersona"
-          ></textarea>
-          <span v-else class="user-persona-text" @click="startEditPersona">{{ userPersona || '写一段自画像，告诉角色你是谁...' }}</span>
-          <button v-if="!editingPersona" class="edit-pen" @click="startEditPersona" title="编辑自画像">✎</button>
+        <!-- 性别 -->
+        <div class="user-field-row">
+          <span class="field-label">性别</span>
+          <div class="field-value-wrap">
+            <input
+              v-if="editingGender"
+              ref="genderInput"
+              v-model="userGenderInput"
+              class="inline-input field-input"
+              @blur="saveGender"
+              @keydown.enter="saveGender"
+              placeholder="男 / 女 / ..."
+            />
+            <span v-else class="field-value" @click="startEditGender">{{ userGender || '点击设置性别...' }}</span>
+            <button v-if="!editingGender" class="edit-pen" @click="startEditGender" title="编辑性别">✎</button>
+          </div>
+        </div>
+        <!-- 外观特征 -->
+        <div class="user-field-row">
+          <span class="field-label">外观</span>
+          <div class="field-value-wrap">
+            <textarea
+              v-if="editingAppearance"
+              ref="appearanceInput"
+              v-model="userAppearanceInput"
+              class="inline-input field-textarea"
+              rows="2"
+              @blur="saveAppearance"
+              @keydown.enter.exact="saveAppearance"
+              @keydown.escape="cancelEditAppearance"
+              placeholder="金色头发，双马尾，贫乳，大小姐，穿着Lolita"
+            ></textarea>
+            <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
+            <button v-if="!editingAppearance" class="edit-pen" @click="startEditAppearance" title="编辑外观">✎</button>
+          </div>
+        </div>
+        <!-- 其他说明 -->
+        <div class="user-field-row">
+          <span class="field-label">其他</span>
+          <div class="field-value-wrap">
+            <textarea
+              v-if="editingPersona"
+              ref="personaInput"
+              v-model="userPersonaInput"
+              class="inline-input field-textarea"
+              rows="2"
+              @blur="savePersona"
+              @keydown.enter.exact="savePersona"
+              @keydown.escape="cancelEditPersona"
+              placeholder="性格、身份、经历等补充信息"
+            ></textarea>
+            <span v-else class="field-value" @click="startEditPersona">{{ userPersona || '点击补充其他信息...' }}</span>
+            <button v-if="!editingPersona" class="edit-pen" @click="startEditPersona" title="编辑其他说明">✎</button>
+          </div>
         </div>
       </div>
     </div>
@@ -302,7 +349,7 @@
 import { ref, reactive, computed, onMounted, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
-import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
+import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
@@ -330,6 +377,7 @@ function onScroll(e) {
 // ═══════════════════════════════════════
 const showUserAvatarPicker = ref(false)
 const nicknameInput = ref(null)
+const appearanceInput = ref(null)
 const personaInput = ref(null)
 
 const userAvatarStyle = computed(() => {
@@ -342,7 +390,7 @@ async function onUserAvatarSave(base64) {
   showUserAvatarPicker.value = false
 }
 
-// 昵称
+// ── 姓名 ──
 const editingNickname = ref(false)
 const userNicknameInput = ref('')
 
@@ -356,11 +404,53 @@ async function saveNickname() {
   editingNickname.value = false
   const val = userNicknameInput.value.trim()
   if (val !== (userNickname.value || '')) {
-    await saveUserConfig({ nickname: val, persona: undefined })
+    await saveUserConfig({ nickname: val })
   }
 }
 
-// 自画像
+// ── 性别 ──
+const editingGender = ref(false)
+const userGenderInput = ref('')
+const genderInput = ref(null)
+
+function startEditGender() {
+  userGenderInput.value = userGender.value
+  editingGender.value = true
+  nextTick(() => genderInput.value?.focus())
+}
+
+async function saveGender() {
+  editingGender.value = false
+  const val = userGenderInput.value.trim()
+  if (val !== (userGender.value || '')) {
+    await saveUserConfig({ gender: val })
+  }
+}
+
+// ── 外观 ──
+const editingAppearance = ref(false)
+const userAppearanceInput = ref('')
+
+function startEditAppearance() {
+  userAppearanceInput.value = userAppearance.value
+  editingAppearance.value = true
+  nextTick(() => appearanceInput.value?.focus())
+}
+
+async function saveAppearance() {
+  editingAppearance.value = false
+  const val = userAppearanceInput.value.trim()
+  if (val !== (userAppearance.value || '')) {
+    await saveUserConfig({ appearance: val })
+  }
+}
+
+function cancelEditAppearance() {
+  editingAppearance.value = false
+  userAppearanceInput.value = userAppearance.value
+}
+
+// ── 其他说明 ──
 const editingPersona = ref(false)
 const userPersonaInput = ref('')
 
@@ -374,12 +464,13 @@ async function savePersona() {
   editingPersona.value = false
   const val = userPersonaInput.value.trim()
   if (val !== (userPersona.value || '')) {
-    await saveUserConfig({ nickname: undefined, persona: val })
+    await saveUserConfig({ persona: val })
   }
 }
 
 function cancelEditPersona() {
   editingPersona.value = false
+  userPersonaInput.value = userPersona.value
 }
 
 // ═══════════════════════════════════════
@@ -591,6 +682,8 @@ onMounted(async () => {
   await loadUserAvatar()
   await loadUserConfig()
   userNicknameInput.value = userNickname.value
+  userGenderInput.value = userGender.value
+  userAppearanceInput.value = userAppearance.value
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
 })
@@ -627,7 +720,7 @@ onMounted(async () => {
 /* ── 用户行 ── */
 .user-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 18px;
   margin-bottom: 28px;
 }
@@ -642,25 +735,32 @@ onMounted(async () => {
 .user-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
 .user-avatar.clickable:hover { opacity: 0.85; }
 
-.user-info { flex: 1; min-width: 0; }
+.user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 
-.user-nickname-row, .user-persona-row {
-  display: flex; align-items: center; gap: 8px;
+.user-field-row {
+  display: flex; align-items: flex-start; gap: 10px;
 }
-.user-nickname-text {
-  font-size: 17px; font-weight: 600; color: var(--text-bright);
-  cursor: pointer; padding: 2px 0;
+.field-label {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  min-width: 32px; padding-top: 4px; flex-shrink: 0;
+  user-select: none;
 }
-.user-persona-text {
+.field-value-wrap {
+  flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.field-value {
   font-size: 13px; color: var(--text-secondary);
-  cursor: pointer; padding: 2px 0;
-  line-height: 1.5;
+  cursor: pointer; padding: 2px 0; line-height: 1.5;
+  flex: 1; min-width: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.user-persona-text:hover, .user-nickname-text:hover { color: var(--accent); }
+.user-field-row:first-child .field-value {
+  font-size: 15px; font-weight: 600; color: var(--text-bright);
+}
+.field-value:hover { color: var(--accent); }
 
 .edit-pen {
   background: none; border: none; color: var(--text-secondary);
@@ -668,8 +768,35 @@ onMounted(async () => {
   opacity: 0; transition: opacity 0.15s;
   flex-shrink: 0;
 }
-.user-nickname-row:hover .edit-pen, .user-persona-row:hover .edit-pen { opacity: 1; }
+.user-field-row:hover .edit-pen { opacity: 1; }
 .edit-pen:hover { color: var(--accent); }
+
+/* ── 文本输入框 ── */
+.field-textarea {
+  width: 100%; resize: none;
+  font-size: 13px; line-height: 1.5;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px; padding: 6px 10px;
+  color: var(--text-bright);
+}
+.field-textarea:focus { outline: none; border-color: var(--accent); }
+.field-input {
+  font-size: 13px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px; padding: 4px 10px;
+  color: var(--text-bright); width: 120px;
+}
+.field-input:focus { outline: none; border-color: var(--accent); }
+.nickname-input {
+  font-size: 15px; font-weight: 600;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px; padding: 4px 10px;
+  color: var(--text-bright); width: 160px;
+}
+.nickname-input:focus { outline: none; border-color: var(--accent); }
 
 /* ── 关系图入口卡片 ── */
 .relation-entry {
@@ -724,9 +851,6 @@ onMounted(async () => {
   outline: none;
   font-family: inherit;
 }
-.nickname-input { font-size: 17px; font-weight: 600; width: 200px; }
-.persona-input { width: 100%; resize: none; }
-
 /* ── 角色网格 ── */
 .section-title {
   font-size: 15px; font-weight: 600; color: var(--text-secondary);

@@ -41,6 +41,8 @@ export const config = {
   },
   user: {
     nickname: process.env.USER_NICKNAME || '',
+    gender: process.env.USER_GENDER || '',
+    appearance: process.env.USER_APPEARANCE || '',
     persona: process.env.USER_PERSONA || '',
   },
 };
@@ -115,10 +117,18 @@ export function updateLlmConfig({ apiKey, baseURL, model }) {
   return { ok: true };
 }
 
-export function updateUserConfig({ nickname, persona }) {
+export function updateUserConfig({ nickname, gender, appearance, persona }) {
   if (nickname !== undefined) {
     config.user.nickname = nickname;
     persistEnv('USER_NICKNAME', nickname);
+  }
+  if (gender !== undefined) {
+    config.user.gender = gender;
+    persistEnv('USER_GENDER', gender);
+  }
+  if (appearance !== undefined) {
+    config.user.appearance = appearance;
+    persistEnv('USER_APPEARANCE', appearance);
   }
   if (persona !== undefined) {
     config.user.persona = persona;
