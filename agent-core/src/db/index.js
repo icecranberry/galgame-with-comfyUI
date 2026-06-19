@@ -148,12 +148,8 @@ function initSchema(db) {
       UNIQUE(post_id)
     );
 
-    -- 朋友圈未读计数表（单用户，单行）
-    CREATE TABLE IF NOT EXISTS moment_unread (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      count INTEGER NOT NULL DEFAULT 0
-    );
-    INSERT OR IGNORE INTO moment_unread (id, count) VALUES (1, 0);
+    -- 朋友圈未读计数已迁移为时序方案（last_moments_seen_at）
+    -- moment_unread 表如有残留，由下方 migrateMomentUnreadToTimestamp() 清理
 
     -- 用户关系表（用户 → 角色，用户为单例无 user_id，每个角色唯一一条）
     CREATE TABLE IF NOT EXISTS user_relationships (
@@ -263,6 +259,9 @@ function initSchema(db) {
   // 迁移: characters 表新增 next_moment_at 列
   migrateMomentsSchema(db);
 
+  // 迁移: moment_unread 计数 → 时序方案 (last_moments_seen_at)
+  migrateMomentUnreadToTimestamp(db);
+
   // 种子: 默认全局规则
   seedGlobalRules(db);
 
@@ -312,6 +311,75 @@ function migrateMomentsSchema(db) {
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);
   }
+}
+
+/**
+ * 迁移: moment_unread 计数 → 时序方案 (last_moments_seen_at)
+ *
+ * 旧方案：moment_unread 表中维护一个 count 整数，broadcastNewPost +1，markRead 清零。
+ * 新方案：system_settings 中存 last_moments_seen_at 时间戳，
+ *         未读数 = COUNT(*) FROM moment_posts WHERE created_at > last_moments_seen_at。
+ *
+ * 迁移时尽可能保留旧计数的语义：如果旧 count = N，则 last_moments_seen_at
+ * 设为第 N 篇最旧未读帖子的 created_at（即从该帖之后开始算未读）。
+ */
+function migrateMomentUnreadToTimestamp(db) {
+  try {
+    // 检查旧表是否存在
+    const tableExists = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'moment_unread'`
+    ).get();
+
+    if (!tableExists) {
+      // 全新安装：直接种子默认值（epoch，所有帖子都视为已读）
+      seedLastMomentsSeenAt(db, new Date(0).toISOString());
+      return;
+    }
+
+    // 读旧计数
+    const oldRow = db.prepare(`SELECT count FROM moment_unread WHERE id = 1`).get();
+    const oldCount = oldRow ? oldRow.count : 0;
+
+    let lastSeenAt;
+    if (oldCount > 0) {
+      // 第 N 篇最旧未读帖子 = 按时间升序的第 oldCount 篇（跳过已读的）
+      // OFFSET oldCount - 1：第 1 篇未读是最旧的未读帖
+      const boundary = db.prepare(
+        `SELECT created_at FROM moment_posts WHERE status = 'done' ORDER BY created_at DESC LIMIT 1 OFFSET ?`
+      ).get(oldCount);
+
+      if (boundary && boundary.created_at) {
+        // last_moments_seen_at = 边界帖的 created_at（created_at > last_seen 会包含该帖及更新的）
+        // 为了让 COUNT(*) WHERE created_at > last_seen 刚好 = oldCount，
+        // 设 last_seen = 边界帖 created_at 的前一秒
+        const boundaryDate = new Date(boundary.created_at.replace(' ', 'T') + 'Z');
+        boundaryDate.setSeconds(boundaryDate.getSeconds() - 1);
+        lastSeenAt = boundaryDate.toISOString();
+      } else {
+        // 没有帖子，置为当前时间
+        lastSeenAt = new Date().toISOString();
+      }
+    } else {
+      // count = 0：全部已读，设为当前时间
+      lastSeenAt = new Date().toISOString();
+    }
+
+    seedLastMomentsSeenAt(db, lastSeenAt);
+    console.log(`[db] migrateMomentUnreadToTimestamp: old count=${oldCount} → last_seen=${lastSeenAt}`);
+
+    // 删除旧表
+    db.exec(`DROP TABLE IF EXISTS moment_unread`);
+    console.log('[db] Dropped legacy moment_unread table');
+  } catch (err) {
+    console.log('[db] migrateMomentUnreadToTimestamp error:', err.message);
+  }
+}
+
+/** 种子 last_moments_seen_at（如已存在则保留现有值） */
+function seedLastMomentsSeenAt(db, defaultValue) {
+  db.prepare(
+    `INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)`
+  ).run('last_moments_seen_at', defaultValue);
 }
 
 function seedGlobalRules(db) {

@@ -34,14 +34,8 @@ function userNickname() {
 
 const sseClients = new Set();
 
-/** 向所有连接的 SSE 客户端广播新帖事件，同时递增 DB 未读计数 */
+/** 向所有连接的 SSE 客户端广播新帖事件 */
 function broadcastNewPost(postInfo) {
-  // 递增 DB 未读计数
-  try {
-    const db = getDb();
-    db.prepare('UPDATE moment_unread SET count = count + 1 WHERE id = 1').run();
-  } catch (e) { /* 非关键路径，忽略错误 */ }
-
   const data = JSON.stringify(postInfo);
   const payload = `event: new_post\ndata: ${data}\n\n`;
   for (const client of sseClients) {
@@ -72,18 +66,31 @@ router.get('/stream', (req, res) => {
   });
 });
 
-// GET /api/moments/unread-count — 获取未读计数（页面初始加载时调用）
+// GET /api/moments/unread-count — 获取未读计数（基于 last_moments_seen_at 时序）
 router.get('/unread-count', (req, res) => {
   const db = getDb();
-  const row = db.prepare('SELECT count FROM moment_unread WHERE id = 1').get();
+  const lastSeen = db.prepare(
+    `SELECT setting_value FROM system_settings WHERE setting_key = 'last_moments_seen_at'`
+  ).pluck().get() || '1970-01-01T00:00:00.000Z';
+
+  // 转换为 SQLite datetime 格式（ISO → "YYYY-MM-DD HH:MM:SS"）
+  const lastSeenSQLite = toSQLite(lastSeen);
+
+  const row = db.prepare(
+    `SELECT COUNT(*) AS count FROM moment_posts WHERE status = 'done' AND created_at > ?`
+  ).get(lastSeenSQLite);
+
   res.json({ count: row ? row.count : 0 });
 });
 
-// POST /api/moments/mark-read — 清零未读计数（进入朋友圈页面时调用）
+// POST /api/moments/mark-read — 更新 last_moments_seen_at（进入朋友圈页面时调用）
 router.post('/mark-read', (req, res) => {
   const db = getDb();
-  db.prepare('UPDATE moment_unread SET count = 0 WHERE id = 1').run();
-  res.json({ ok: true });
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('last_moments_seen_at', ?, CURRENT_TIMESTAMP)`
+  ).run(now);
+  res.json({ ok: true, lastSeenAt: now });
 });
 
 // ──────────────── 朋友圈帖子 ────────────────

@@ -50,7 +50,7 @@
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
       <div class="card">
-        <h3>测试画风</h3>
+        <h3>测试画风&速度</h3>
         <p class="fd">使用上方对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
         <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
 
@@ -146,7 +146,7 @@
       <!-- LLM API 设置 -->
       <div class="card">
         <h3>LLM API 设置</h3>
-        <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
+        <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
 
         <!-- API Key -->
         <label class="fl">API Key</label>
@@ -181,8 +181,8 @@
         <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl" style="margin-top:14px">模型</label>
-        <input v-model="llmModel" class="fi" placeholder="deepseek-chat" @input="markLlmDirty" />
+        <label class="fl" style="margin-top:14px">模型(建议deepseek-v4-flash)</label>
+        <input v-model="llmModel" class="fi" placeholder="deepseek-v4-flash" @input="markLlmDirty" />
 
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!llmDirty" @click="saveLlmConfig">保存</button>

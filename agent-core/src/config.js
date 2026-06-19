@@ -15,7 +15,7 @@ export const config = {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
     baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-    model: process.env.LLM_MODEL || 'deepseek-chat',
+    model: process.env.LLM_MODEL || 'deepseek-v4-flash',
   },
   vectorService: {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',

@@ -4,7 +4,7 @@
     <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
       <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="genPending">
-        {{ genPending ? '扰动中' : '扰动世界线' }}
+        {{ genPending ? '扰动中' : '🎬 扰动世界线' }}
       </button>
     </div>
 
@@ -73,6 +73,7 @@
           :key="post.id"
           :post="post"
           @preview="onPreview"
+          @share="onShare"
         />
       </TransitionGroup>
 
@@ -91,6 +92,13 @@
       :zoom-scale="0.35"
       @hide="previewImage = null"
     />
+
+    <!-- 分享卡片 -->
+    <ShareCard
+      :post="sharePost"
+      :visible="!!sharePost"
+      @close="onShareClose"
+    />
   </div>
 </template>
 
@@ -100,6 +108,7 @@ import { useMomentsStore } from '../stores/moments.js'
 import { useChatStore } from '../stores/chat.js'
 import { loadUserConfig } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
+import ShareCard from '../components/ShareCard.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 
@@ -112,6 +121,7 @@ const showPicker = ref(false)
 const pickerRef = ref(null)
 const genPending = ref(false)
 const previewImage = ref(null)
+const sharePost = ref(null)
 const scrollContainer = ref(null)
 const filterScrollRef = ref(null)
 
@@ -129,6 +139,14 @@ const characters = computed(() => chat.characters)
 
 function onPreview({ images, index }) {
   previewImage.value = images[index]
+}
+
+function onShare(post) {
+  sharePost.value = post
+}
+
+function onShareClose() {
+  sharePost.value = null
 }
 
 onMounted(async () => {

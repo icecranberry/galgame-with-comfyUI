@@ -55,6 +55,15 @@
         </svg>
         <span v-if="(post.comment_count || 0) > 0">{{ post.comment_count }}</span>
       </button>
+      <button class="action-btn share-btn" @click="$emit('share', post)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+        </svg>
+      </button>
     </div>
 
     <!-- 评论区域 -->
@@ -144,7 +153,7 @@ const props = defineProps({
   post: { type: Object, required: true },
 })
 
-const emit = defineEmits(['preview'])
+const emit = defineEmits(['preview', 'share'])
 
 const moments = useMomentsStore()
 const isMobile = inject('isMobile')
@@ -404,6 +413,7 @@ function formatTime(iso) {
 }
 .action-btn:hover { background: rgba(255, 255, 255, 0.28); color: var(--text-bright); }
 .action-btn.active { color: var(--accent); }
+.action-btn.share-btn { margin-left: auto; }
 
 .comments-section {
   border-top: 1px solid var(--glass-border);

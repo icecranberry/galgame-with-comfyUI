@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
 
-const DEFAULT_MODEL = config.llm.model || 'deepseek-chat';
+const DEFAULT_MODEL = config.llm.model || 'deepseek-v4-flash';
 
 function getClient() {
   return new OpenAI({
@@ -13,7 +13,7 @@ function getClient() {
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
  */
-export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking, reasoning_effort } = {}) {
+export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" } } = {}) {
   const params = {
     model,
     messages,
@@ -26,11 +26,9 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
   if (response_format) {
     params.response_format = response_format;
   }
-  if (thinking) {
+  // thinking 默认禁用（deepseek-v4-flash 非思考模式）；传 null 则不发送此参数
+  if (thinking !== null) {
     params.thinking = thinking;
-  }
-  if (reasoning_effort) {
-    params.reasoning_effort = reasoning_effort;
   }
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
@@ -58,18 +56,24 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
  * 流式聊天（用于对话）
  * @returns {AsyncGenerator<string>}
  */
-export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.8 } = {}) {
+export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" } } = {}) {
   console.log('\n══════════ [DeepSeek → stream request] ══════════');
   console.log(JSON.stringify(messages, null, 2));
   console.log('────────────────────────────────────────────────');
 
-  const stream = await getClient().chat.completions.create({
+  const params = {
     model,
     messages,
     max_tokens,
     temperature,
     stream: true,
-  });
+  };
+  // thinking 默认禁用（deepseek-v4-flash 非思考模式）；传 null 则不发送此参数
+  if (thinking !== null) {
+    params.thinking = thinking;
+  }
+
+  const stream = await getClient().chat.completions.create(params);
 
   console.log('[DeepSeek ← stream response start]');
   let total = '';

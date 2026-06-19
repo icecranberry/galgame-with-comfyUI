@@ -4,6 +4,9 @@ import * as api from '../api/index.js'
 
 const PAGE_SIZE = 20
 
+// 轮询未读计数间隔（ms）
+const POLL_INTERVAL = 30_000
+
 export const useMomentsStore = defineStore('moments', () => {
   const posts = ref([])           // 全量帖子数据
   const loading = ref(false)
@@ -11,7 +14,7 @@ export const useMomentsStore = defineStore('moments', () => {
   const filterCharacterId = ref(null)  // null = 全部
   const filterLiked = ref(false)        // 是否只显示赞过的
 
-  // ── 红点通知状态（SSE 驱动）──
+  // ── 红点通知状态 ──
   const newPostCount = ref(0)
   const isViewingMoments = ref(false)   // 用户当前是否在朋友圈页面
 
@@ -52,7 +55,7 @@ export const useMomentsStore = defineStore('moments', () => {
     }
     return Array.from(map.values())
       .sort((a, b) => b._latestPostAt - a._latestPostAt)
-      .map(({ _latestPostAt, ...rest }) => rest) // 去掉内部字段
+      .map(({ _latestPostAt, ...rest }) => rest)
   })
 
   // 加载全部帖子（页面首次挂载时调用）
@@ -62,9 +65,8 @@ export const useMomentsStore = defineStore('moments', () => {
     try {
       const data = await api.listMoments()
       posts.value = data.posts || []
-      page.value = 1   // 首屏显示第一批
-      // 自动标记为已读
-      markSeen()
+      page.value = 1
+      await markSeen()
     } catch (err) {
       console.error('[moments] loadPosts error:', err)
     } finally {
@@ -100,7 +102,6 @@ export const useMomentsStore = defineStore('moments', () => {
   // 发评论 → 返回 { comment, reply }
   async function addComment(postId, content) {
     const result = await api.commentMoment(postId, content)
-    // 更新本地数据
     const post = posts.value.find(p => p.id === postId)
     if (post) {
       if (!post._comments) post._comments = []
@@ -137,16 +138,13 @@ export const useMomentsStore = defineStore('moments', () => {
   async function generatePost(characterId) {
     const result = await api.generateMoment(characterId)
     if (result.id) {
-      // 插入到列表最前面
       posts.value.unshift({
         ...result,
         comment_count: 0,
         like_count: 0,
         liked: false,
       })
-      // 仍在朋友圈页面 → 帖子已直接可见，抵消 SSE 刚推送的红点计数
-      // 已离开朋友圈 → 保留红点，让用户知道生成已完成
-      if (isViewingMoments.value) markSeen()
+      if (isViewingMoments.value) await markSeen()
     }
     return result
   }
@@ -157,14 +155,22 @@ export const useMomentsStore = defineStore('moments', () => {
     posts.value = posts.value.filter(p => p.id !== postId)
   }
 
-  // ── SSE 推送 ──
+  // ── 未读计数：时序方案，DB 为单一数据源 ──
   let _sseConn = null
-  let _reconnectTimer = null
-  let _sseStarted = false   // 同步 flag：防止重复建立 SSE
+  let _pollTimer = null
+  let _sseStarted = false
 
-  function _onNewPost() {
-    // SSE 推送始终累加计数——即使在朋友圈页面，自动生成的帖子也不自动刷新列表
-    newPostCount.value++
+  /** 从 DB 拉取最新未读计数（唯一数据源） */
+  async function refreshUnreadCount() {
+    try {
+      const { count } = await api.getMomentsUnread()
+      newPostCount.value = count || 0
+    } catch { /* 非关键 */ }
+  }
+
+  /** SSE 新帖事件 → 立即触发一次 DB 轮询 */
+  function _onNewPost(_post) {
+    refreshUnreadCount()
   }
 
   function _createSSE() {
@@ -172,44 +178,45 @@ export const useMomentsStore = defineStore('moments', () => {
     _sseConn = api.connectMomentsStream(_onNewPost)
   }
 
-  /** 连接 SSE 推送流，收到新帖时 newPostCount++；断线自动重连 */
-  async function connectSSE() {
-    if (_sseStarted) return
-    if (_sseConn && !_sseConn._closed) return
-    _sseStarted = true
+  /** SSE 断线重连定时器 */
+  function _startReconnectTimer() {
+    if (_pollTimer) clearInterval(_pollTimer)
+    _pollTimer = setInterval(async () => {
+      if (!_sseStarted) return
 
-    // 先从 DB 加载持久化的未读计数作为初始值
-    try {
-      const { count } = await api.getMomentsUnread()
-      newPostCount.value = count || 0
-    } catch { /* 非关键 */ }
-
-    _createSSE()
-
-    if (_reconnectTimer) clearInterval(_reconnectTimer)
-    _reconnectTimer = setInterval(async () => {
-      if (_sseConn && _sseConn._closed) {
-        // 重连前同步 DB 计数（覆盖断线期间的遗漏）
-        try {
-          const { count } = await api.getMomentsUnread()
-          newPostCount.value = count || 0
-        } catch { /* 非关键 */ }
+      // 检查 SSE 是否断线，是则重连
+      if (!_sseConn || _sseConn._closed) {
         _createSSE()
       }
-    }, 15000)
+
+      // 每次 tick 都从 DB 刷新真实计数（单一数据源）
+      await refreshUnreadCount()
+    }, POLL_INTERVAL)
   }
 
-  /** 断开 SSE */
+  /** 连接 SSE 推送流 + 启动轮询 */
+  async function connectSSE() {
+    if (_sseStarted) return
+    _sseStarted = true
+
+    // 从 DB 加载初始未读计数
+    await refreshUnreadCount()
+
+    _createSSE()
+    _startReconnectTimer()
+  }
+
+  /** 断开 SSE + 停止轮询 */
   function disconnectSSE() {
     _sseStarted = false
-    if (_reconnectTimer) { clearInterval(_reconnectTimer); _reconnectTimer = null }
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
     if (_sseConn) { _sseConn.close(); _sseConn = null }
   }
 
-  /** 标记已读：清零本地计数 + 调 API 清零 DB 计数 */
+  /** 标记已读：更新 last_moments_seen_at 为当前时间 */
   async function markSeen() {
-    newPostCount.value = 0
     try { await api.markMomentsRead() } catch { /* 非关键 */ }
+    newPostCount.value = 0
   }
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,

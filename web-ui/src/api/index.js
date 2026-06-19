@@ -316,6 +316,7 @@ export function connectMomentsStream(onNewPost) {
           ({ done, value } = await reader.read())
         } catch { break }
         if (done) break
+
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
