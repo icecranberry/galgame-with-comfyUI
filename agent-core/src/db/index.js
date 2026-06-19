@@ -265,6 +265,9 @@ function initSchema(db) {
   // 迁移: 好感度系统 — user_relationships 和 emotion_snapshots 新增 affinity 列
   migrateAffinitySchema(db);
 
+  // 迁移: characters 表新增 next_proactive_at 和 proactive_disabled 列（主动聊天）
+  migrateProactiveSchema(db);
+
   // 种子: 默认全局规则
   seedGlobalRules(db);
 
@@ -346,6 +349,26 @@ function migrateAffinitySchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateAffinitySchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: characters 表新增 next_proactive_at 和 proactive_disabled 列
+ * 用于主动聊天调度器判断何时向用户主动发起对话
+ */
+function migrateProactiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'next_proactive_at')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN next_proactive_at DATETIME`);
+      console.log('[db] Added characters.next_proactive_at column');
+    }
+    if (!cols.find(c => c.name === 'proactive_disabled')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN proactive_disabled INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.proactive_disabled column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateProactiveSchema error:', err.message);
   }
 }
 
@@ -684,6 +707,8 @@ const SETTING_TO_CONFIG = {
   feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:        { obj: 'features', key: 'forceImageGen',    type: 'bool' },
+  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
+  feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
 };
 
 function castValue(raw, type) {

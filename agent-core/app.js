@@ -14,6 +14,7 @@ import relationshipsRoutes from './src/routes/relationships.js';
 import userRelationshipsRoutes from './src/routes/userRelationships.js';
 import portraitsRoutes from './src/routes/portraits.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
+import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 
 const app = express();
 
@@ -63,6 +64,9 @@ console.log('[db] SQLite initialized');
 
 // 启动朋友圈定时调度器
 startMomentScheduler();
+
+// 启动主动对话调度器（由 config.features.proactiveChat 控制开关，scheduler 内部自行判断）
+startProactiveChatScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
