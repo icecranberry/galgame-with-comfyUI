@@ -9,8 +9,58 @@
 
 import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
+import { embedBatch } from './vectorClient.js';
 
 const EXTRACT_INTERVAL = 10; // 每 10 条用户消息触发
+const SIMILARITY_THRESHOLD = 0.85; // 余弦相似度阈值，超过即判定为语义重复
+
+/**
+ * 余弦相似度（对 L2 归一化向量等价于点积）
+ */
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+  }
+  return dot; // 向量已 L2 归一化，|a| = |b| = 1
+}
+
+/**
+ * 向量相似度去重：检查新 trait 是否与已有 portrait 语义重复
+ */
+async function checkDuplicate(characterId, traitType, content) {
+  const db = getDb();
+
+  const existing = db.prepare(`
+    SELECT id, content FROM user_portraits
+    WHERE character_id = ? AND trait_type = ?
+  `).all(characterId, traitType);
+
+  if (existing.length === 0) return false;
+
+  // 批量嵌入：新内容 + 已有内容
+  const texts = [content, ...existing.map(e => e.content)];
+  let embeddings;
+  try {
+    embeddings = await embedBatch(texts);
+  } catch (err) {
+    // 向量服务不可用 → 静默回退，仅靠 UNIQUE 约束
+    console.warn('[portraitExtractor] vector service unavailable, skip similarity check:', err.message);
+    return false;
+  }
+
+  const newEmb = embeddings[0];
+  const existingEmbs = embeddings.slice(1);
+
+  for (let i = 0; i < existingEmbs.length; i++) {
+    const sim = cosineSimilarity(newEmb, existingEmbs[i]);
+    if (sim > SIMILARITY_THRESHOLD) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
 
@@ -138,6 +188,17 @@ export async function maybeExtractPortrait(conversationId, characterId) {
     const content = trait.content.trim();
     if (content.length < 3) continue;
 
+    // 向量相似度去重：检查是否与已有 portrait 语义重复
+    try {
+      const isDup = await checkDuplicate(characterId, type, content);
+      if (isDup) {
+        // 静默跳过，不做额外日志（避免刷屏）
+        continue;
+      }
+    } catch (err) {
+      // 向量检查异常 → 静默回退，继续走 UNIQUE 约束
+    }
+
     try {
       const result = insert.run(characterId, type, content, 0.5, sourceMsgId);
       if (result.changes > 0) added++;
@@ -162,4 +223,85 @@ function normalizeType(type) {
   if (t === 'personality' || t === 'persona') return 'personality';
   if (t === 'preference' || t === 'pref') return 'preference';
   return null;
+}
+
+/**
+ * 清理已有 portrait 中的语义重复条目
+ *
+ * 按 (character_id, trait_type) 分组，组内通过向量相似度聚类，
+ * 每个相似集群只保留最新一条（id 最大），删除其余。
+ *
+ * @param {number} [characterId] - 可选，指定角色 ID；不传则清理所有角色
+ * @returns {Promise<{checked: number, removed: number}>} 检查数和删除数
+ */
+export async function deduplicatePortraits(characterId) {
+  const db = getDb();
+
+  const where = characterId != null
+    ? 'WHERE character_id = ?'
+    : '';
+  const params = characterId != null ? [characterId] : [];
+
+  const portraits = db.prepare(`
+    SELECT id, character_id, trait_type, content
+    FROM user_portraits
+    ${where}
+    ORDER BY character_id, trait_type, id DESC
+  `).all(...params);
+
+  if (portraits.length === 0) return { checked: 0, removed: 0 };
+
+  // 按 (character_id, trait_type) 分组
+  const groups = {};
+  for (const p of portraits) {
+    const key = `${p.character_id}|${p.trait_type}`;
+    groups[key] = groups[key] || [];
+    groups[key].push(p);
+  }
+
+  let removed = 0;
+
+  for (const [key, group] of Object.entries(groups)) {
+    if (group.length <= 1) continue;
+
+    // 批量嵌入组内所有 content
+    const contents = group.map(p => p.content);
+    let embeddings;
+    try {
+      embeddings = await embedBatch(contents);
+    } catch (err) {
+      console.warn(`[deduplicatePortraits] embed failed for ${key}:`, err.message);
+      continue;
+    }
+
+    // 贪心聚类：从最新（id 最大）的开始，标记所有与其相似度 > 阈值的条目
+    const toDelete = new Set();
+    const kept = new Set();
+
+    for (let i = 0; i < group.length; i++) {
+      if (toDelete.has(i)) continue;
+      kept.add(i);
+      for (let j = i + 1; j < group.length; j++) {
+        if (toDelete.has(j)) continue;
+        const sim = cosineSimilarity(embeddings[i], embeddings[j]);
+        if (sim > SIMILARITY_THRESHOLD) {
+          toDelete.add(j);
+        }
+      }
+    }
+
+    // 删除标记的条目
+    const deleteStmt = db.prepare('DELETE FROM user_portraits WHERE id = ?');
+    for (const idx of toDelete) {
+      const portrait = group[idx];
+      deleteStmt.run(portrait.id);
+      removed++;
+    }
+  }
+
+  if (removed > 0) {
+    console.log(`[deduplicatePortraits] removed ${removed} duplicate portraits across ${Object.keys(groups).length} groups`);
+  }
+
+  return { checked: portraits.length, removed };
 }
