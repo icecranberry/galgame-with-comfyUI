@@ -47,7 +47,7 @@
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
         <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
-        <div class="msg-list-inner">
+        <div ref="msgListInner" class="msg-list-inner">
           <template v-for="item in flatItems" :key="item.id">
             <!-- 时间分隔符 -->
             <div v-if="item.type === 'divider'" class="time-divider">{{ item.label }}</div>
@@ -508,6 +508,7 @@ watch(() => chat.activeCharId, async (newId) => { if (newId) fetchRealtimeAffini
 
 const inputEl = ref(null)
 const msgList = ref(null)
+const msgListInner = ref(null)
 const previewImage = ref(null)
 
 // ── 角色设置面板 ──
@@ -980,6 +981,52 @@ function teardownMobileKeyboard() {
   viewportCleanup = null
 }
 
+// ResizeObserver：挂载后临时监听内容区高度变化（图片加载撑高），追底后自毁
+// 只修复"从其他页面切回时历史图片异步加载导致滚动漂移"，不长期驻留
+let resizeObserver = null
+let resizeRaf = null
+let lastObservedSH = 0
+let resizeObserverTimer = null
+const RESIZE_OBSERVER_TTL = 2000  // 挂载后最多存活 3s
+
+function setupResizeObserver() {
+  const inner = msgListInner.value
+  const el = msgList.value
+  if (!inner || !el) return
+  lastObservedSH = el.scrollHeight
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeRaf) return
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = null
+      const el2 = msgList.value
+      if (!el2 || pendingCharSwitch || chat.streaming) return
+      const newSH = el2.scrollHeight
+      if (newSH === lastObservedSH) return
+      // 用旧 scrollHeight 算 distBefore，避免 userScrolledUp 被 scroll 事件误判污染
+      const distBefore = lastObservedSH - el2.scrollTop - el2.clientHeight
+      lastObservedSH = newSH
+      if (distBefore > 60) return
+      el2.scrollTop = el2.scrollHeight
+      userScrolledUp = false
+      // 完成一次追底后延迟自毁：给剩余图片 500ms 缓冲，之后卸载
+      clearTimeout(resizeObserverTimer)
+      resizeObserverTimer = setTimeout(teardownResizeObserver, 500)
+    })
+  })
+  resizeObserver.observe(inner)
+  // 兜底：TTL 到期强制自毁，防止意外长驻
+  resizeObserverTimer = setTimeout(teardownResizeObserver, RESIZE_OBSERVER_TTL)
+}
+
+function teardownResizeObserver() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = null }
+  clearTimeout(resizeObserverTimer)
+  resizeObserverTimer = null
+  lastObservedSH = 0
+}
+
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar(), settings.loadComfyConfig()])
   const targetId = route.params.id ? parseInt(route.params.id) : (chat.characters.length > 0 ? chat.characters[0].id : null)
@@ -988,6 +1035,7 @@ onMounted(async () => {
   }
   await nextTick()
   scrollToBottom(true)  // 首次加载强制滚底
+  setupResizeObserver()  // 之后由 ResizeObserver 追底（图片加载等异步布局变化）
   if (!isMobile) inputEl.value?.focus()
   setupMobileKeyboard()
   // selectChar 之后拉取实时好感度（避免被 selectChar 清空）
@@ -996,6 +1044,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   teardownMobileKeyboard()
+  teardownResizeObserver()
 })
 
 // 浏览器前进/后退 → 同步 store
@@ -1030,7 +1079,9 @@ watch(() => chat.messages.length, (newLen) => {
       el.scrollTop = el.scrollHeight
       el.style.visibility = ''
       setTimeout(() => {
-        el.scrollTop = el.scrollHeight
+        const el2 = msgList.value
+        if (!el2) return
+        el2.scrollTop = el2.scrollHeight
         pendingCharSwitch = false
       }, 150)
     }, 50)

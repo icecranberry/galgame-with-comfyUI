@@ -298,7 +298,7 @@ async function generateMomentPost(character) {
 
   // 2. 随机选取风格（代码侧硬随机，避免 LLM 偏见）
   const STYLES = [
-    { name: '自拍', desc: '配图是你自己的照片（自拍视角或他拍视角），imagePrompt 要包含你的外观' },
+    { name: '自拍', desc: '配图是你自己的照片，自拍视角，selfie pose，arm stretched towards viewer，imagePrompt 要包含你的外观' },
     { name: '美食', desc: '分享今天吃到的美食，配图是食物特写' },
     { name: '风景', desc: '分享今天看到的风景或去的地方，配图是景色' },
     { name: '日常', desc: '分享一件小事或感悟，配图是场景 mood shot' },
@@ -328,7 +328,6 @@ async function generateMomentPost(character) {
     { name: '追星/粉丝', desc: '为偶像打call、演唱会/漫展/新专辑，配图是应援或相关物料' },
     { name: '养生/健康', desc: '泡脚、早睡、养生茶、拉伸打卡，配图是养生场景或静谧氛围' },
     { name: '消费/剁手', desc: '分享买到的好价好物、省钱攻略或冲动消费后的反思，配图是物品或支付截图风格' },
-    { name: '立Flag/打卡', desc: '公开立flag或每日打卡记录（早起/背单词/戒糖），配图是打卡场景或进度展示' },
     { name: '吃瓜/八卦', desc: '围观热点事件或身边八卦，配图是吃瓜表情包风格或围观氛围' },
     { name: '仪式感', desc: '点亮生活的仪式感瞬间——点蜡烛、泡澡、换新床单、买花，配图是精致生活氛围' },
     { name: '摄影/随手拍', desc: '分享自己拍的照片（非自拍），强调构图、光影、瞬间捕捉，配图是有摄影感的画面' },
@@ -343,9 +342,9 @@ async function generateMomentPost(character) {
   ];
   const pickedStyle = STYLES[Math.floor(Math.random() * STYLES.length)];
 
-  // 2.5 50% 概率：多人模式 —— 随机挑选一条当前角色定义的关系（单向：from only）
+  // 2.5 40% 概率：多人模式 —— 随机挑选一条当前角色定义的关系（单向：from only）
   let multiPerson = null;
-  if (Math.random() < 0.5) {
+  if (Math.random() < 0.4) {
     const allRels = db.prepare(`
       SELECT cr.relationship_text,
              c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
@@ -400,11 +399,14 @@ async function generateMomentPost(character) {
 规则：
 - 只输出 JSON，不要解释
 - 文案和配图 prompt 必须语义一致
-- text 用中文，imagePrompt 用英文`;
+- text 用中文，imagePrompt 用英文
+- text里禁止输出'#下午茶的仪式感'、'#一个人的盛宴'类似这种tag标签`;
 
+  const now = new Date();
+  const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
   const userMsg = multiPerson
-    ? `${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
-    : '发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：';
+    ? `${timeTag} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
+    : `${timeTag} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
 
   // 权限层最先 → 关系（如有多人）→ 人设+格式 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -546,7 +548,7 @@ async function generateCharacterReply(post, historyComments) {
     userRelMsg = `**【你与user的关系】\n你对于user而言的身份是${userRel.relationship_text}。**这个关系为最高优先级，请在回复中自然体现。`;
   }
 
-  // 角色间关系（双向）— 仅保留与当前对话参与者相关的关系
+  // 角色间关系（双向）
   let charRelMsg = '';
   const charRels = db.prepare(`
     SELECT 'from' AS direction, cr.relationship_text, c.display_name
@@ -561,29 +563,14 @@ async function generateCharacterReply(post, historyComments) {
   `).all(post.character_id, post.character_id);
 
   if (charRels.length > 0) {
-    // 收集当前评论区的其他角色参与者
-    const participantNames = new Set();
-    for (const c of historyComments) {
-      if (c.author_type === 'character' && c.display_name) {
-        participantNames.add(c.display_name);
+    const relLines = charRels.map(r => {
+      if (r.direction === 'from') {
+        return `- ${r.display_name}是你的${r.relationship_text}`;
+      } else {
+        return `- ${r.display_name}认为你是她的${r.relationship_text}`;
       }
-    }
-
-    // 只保留关系对方在对话参与者中的记录
-    const relevantRels = participantNames.size > 0
-      ? charRels.filter(r => participantNames.has(r.display_name))
-      : [];
-
-    if (relevantRels.length > 0) {
-      const relLines = relevantRels.map(r => {
-        if (r.direction === 'from') {
-          return `- ${r.display_name}是你的${r.relationship_text}`;
-        } else {
-          return `- ${r.display_name}认为你是她的${r.relationship_text}`;
-        }
-      }).join('\n');
-      charRelMsg = `**【你与其他角色的关系】**\n${relLines}\n\n请在回复中自然体现这些关系，不必刻意说明。`;
-    }
+    }).join('\n');
+    charRelMsg = `**【你与其他角色的关系】**\n${relLines}\n\n请在回复中自然体现这些关系，不必刻意说明。你的人设可能会有其他的性格，但是在私下里，你的关系网就是这样的，在回复里不用完全保持公开人设，以私下关系为最高优先级。`;
   }
 
   // 权限层

@@ -28,7 +28,7 @@ const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 const imageJudgeCounters = new Map();  // conversationId -> count
 
 // ── 统一缓冲分句器 ──
-//   字符先进 3 字闸门检测 <pr，安全的再逐字进入分句逻辑。
+//   字符先进 3 字闸门检测 {" 和 {p（兜底），安全的再逐字进入分句逻辑。
 //   分句规则:
 //     1. 队列 > 20 字: 遇到 ！？～~… 保留符号后断句; 遇到 ，。 断句并去掉标点
 //     2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
@@ -85,11 +85,14 @@ class SentenceSplitter {
     for (const ch of text) {
       if (this.stopped) break;
 
-      // ── 闸门：2~3 字滑动窗口检测 {" ──
+      // ── 闸门：2~3 字滑动窗口检测 {" 和 {p（兜底），含 Unicode 引号变体 ──
       this.gate += ch;
-      if (this.gate.length >= 2 && this.gate.slice(-2) === '{"') {
-        this.stopped = true;
-        break;
+      if (this.gate.length >= 2) {
+        const last2 = this.gate.slice(-2);
+        if (last2[0] === '{' && (last2[1] === '"' || last2[1] === '“' || last2[1] === '”' || last2[1] === 'p')) {
+          this.stopped = true;
+          break;
+        }
       }
       if (this.gate.length < 3) continue;  // 缓冲未满，不出字
       const safe = this.gate[0];            // 确认安全，释放一字
@@ -156,7 +159,7 @@ class SentenceSplitter {
   // 流结束，释放闸门剩余安全字 + flush 分句队列
   flushAll() {
     if (this.stopped) {
-      // 闸门中 {" 之前仍有安全字（如 "。{"" 中的 "。"），释放后再清空
+      // 闸门中 {" 或 {p 之前仍有安全字（如 "。{" 中的 "。"），释放后再清空
       const pending = this.gate.slice(0, -2);
       for (const safe of pending) {
         if (safe === '。') {
@@ -378,7 +381,7 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
     const history = db.prepare(`
-      SELECT role, content FROM raw_messages
+      SELECT role, content, created_at FROM raw_messages
       WHERE conversation_id = ? ORDER BY id DESC LIMIT 20
     `).all(conversationId).reverse();
 
@@ -529,13 +532,32 @@ router.post('/characters/:id/chat', async (req, res) => {
       msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。' });
     }
 
-    // 5.5 在当前用户消息前加时间戳（从后往前找第一个 user 消息）
+    // 5.5 在最近的 user 消息前加时间戳
+    //     倒数第一句 → [当前时间]（用现在的时间）
+    //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
     const now = new Date();
     const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+    let foundCount = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {
-        msgs[i].content = `${timeTag} ${msgs[i].content}`;
-        break;
+        foundCount++;
+        if (foundCount === 1) {
+          // 倒数第一句 user 消息 → 当前时间
+          msgs[i].content = `${timeTag} ${msgs[i].content}`;
+        } else if (foundCount === 2) {
+          // 倒数第二句 user 消息 → 该消息的 DB 时间
+          // 如果间隔 ≤ 10 分钟则视为同一轮会话，不标记
+          const msgCreatedAt = msgs[i].created_at;
+          if (msgCreatedAt) {
+            const prevDate = new Date(msgCreatedAt + 'Z'); // SQLite UTC → JS Date
+            const gapMinutes = (now - prevDate) / 60000;
+            if (gapMinutes > 10) {
+              const prevTag = `[上次对话时间 ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`;
+              msgs[i].content = `${prevTag} ${msgs[i].content}`;
+            }
+          }
+          break;
+        }
       }
     }
 
@@ -573,12 +595,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 
-    // 7. 后处理：gate 已阻止 {"prompt"... JSON 内容进入 collectedSegments，
-    //    segments 直接可用；如有 prompt 标签则在 fullContent 上提取
+    // 7. 后处理：gate 尝试阻止 {"prompt"... JSON 内容进入 collectedSegments，
+    //    stripTags 兜底清洗；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
     const segments = collectedSegments
-      .map(s => stripBracketActions(s).trim())
+      .map(s => stripTags(stripBracketActions(s)).trim())
       .filter(Boolean);
     const displayContent = segments.join('\n\n');
 
@@ -684,7 +706,44 @@ router.post('/characters/:id/chat', async (req, res) => {
       });
     }
 
-    // 结算回复猜想（此时大概率已完成，await 近乎瞬间；失败静默不阻塞后续）
+    // 10. 生图判断 ← 同步决策 + 异步发射（与预测、情绪三路并行发射 LLM 调用）
+    let imageGenPromise = null;
+    if (tags.prompt) {
+      // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
+      const db2 = getDb();
+      const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
+        .run(conversationId, tags.prompt, tags.prompt);
+      const genTaskId = taskResult.lastInsertRowid;
+      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
+      imageGenPromise = triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
+    } else if (hasNeedImageTag) {
+      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+    } else if (force_image_gen) {
+      // 路径 D: 强制生图 — 用户主动勾选，跳过智能判断
+      console.log('[chat] force image gen: user requested, triggering needImage flow');
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+    } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
+      // 路径 E: 计数器归零 → 强制生图（独立于 autoImageJudge 开关）
+      console.log('[chat] counter forced: skipping judge, triggering needImage flow');
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+    } else if (config.features.autoImageJudge) {
+      // 路径 C: 静默判断
+      imageGenPromise = (async () => {
+        try {
+          const needImage = await judgeImageNeed(conversationId);
+          if (needImage) {
+            console.log('[chat] auto judge: image needed, triggering needImage flow');
+            const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+            await handleNeedImageFlow(conversationId, char, send);
+          }
+        } catch (err) {
+          console.error('[chat] auto judge error:', err.message);
+        }
+      })();
+    }
+
+    // 结算回复猜想（三路已同时发射，此时大概率已完成；失败静默不阻塞后续）
     if (guessPromise) {
       try {
         const guesses = await guessPromise;
@@ -697,41 +756,16 @@ router.post('/characters/:id/chat', async (req, res) => {
       }
     }
 
-    // 10. 生图（四种触发路径）—— 此时情绪评估已在后台并行运行
-    if (tags.prompt) {
-      // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
-      const db2 = getDb();
-      const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
-        .run(conversationId, tags.prompt, tags.prompt);
-      const genTaskId = taskResult.lastInsertRowid;
-      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
-      await triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
-    } else if (hasNeedImageTag) {
-      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
-      await handleNeedImageFlow(conversationId, character, send);
-    } else if (force_image_gen) {
-      // 路径 D: 强制生图 — 用户主动勾选，跳过智能判断
-      console.log('[chat] force image gen: user requested, triggering needImage flow');
-      await handleNeedImageFlow(conversationId, character, send);
-    } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
-      // 路径 E: 计数器归零 → 强制生图（独立于 autoImageJudge 开关）
-      console.log('[chat] counter forced: skipping judge, triggering needImage flow');
-      await handleNeedImageFlow(conversationId, character, send);
-    } else if (config.features.autoImageJudge) {
-      // 路径 C: 静默判断 — 延迟约 300ms，SSE 保持打开以支持后续生图进度推送
+    // 结算生图
+    if (imageGenPromise) {
       try {
-        const needImage = await judgeImageNeed(conversationId);
-        if (needImage) {
-          console.log('[chat] auto judge: image needed, triggering needImage flow');
-          const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
-          await handleNeedImageFlow(conversationId, char, send);
-        }
+        await imageGenPromise;
       } catch (err) {
-        console.error('[chat] auto judge error:', err.message);
+        console.error('[chat] image generation error:', err.message);
       }
     }
 
-    // 11. 兜底等待情绪评估（生图期间已由 .then() 处理完毕，这里几乎瞬间返回）
+    // 兜底等待情绪评估（三路中最后一条保底，3s 超时）
     if (emotionPromise) {
       try {
         await Promise.race([
@@ -827,7 +861,8 @@ function detectImageIntent(message) {
 }
 
 function extractImageTags(content) {
-  const jsonMatch = content.match(/\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/);
+  const re = /\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/i;
+  const jsonMatch = content.match(re);
   if (jsonMatch) return { prompt: jsonMatch[1].replace(/\\"/g, '"').trim() };
   return { prompt: null };
 }
@@ -839,7 +874,10 @@ function hasNeedImage(content) {
 
 function stripTags(content) {
   return content
-    .replace(/\{"prompt"\s*:\s*"[^"]*"\}/gi, '')
+    // 完整 JSON prompt 标签：处理 {"prompt":"..."} 和 {“prompt“:"..."} 等变体
+    .replace(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"](?:[^“”"]|\\[“”"])*[“”"]\}/gi, '')
+    // 兜底：闸门漏过的未闭合或格式异常的 prompt 标签（从 {prompt": 开始清到行尾）
+    .replace(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"].*$/gm, '')
     .replace(/<generate>[\s\S]*?<\/generate>/gi, '')
     .replace(/<needImage>/gi, '')
     .replace(/<br\s*\/?>/gi, '')
@@ -1033,15 +1071,29 @@ async function handleNeedImageFlow(conversationId, character, send) {
         content: `【对话对象】${parts.join('。')}。当你生成关于user的图片（例如合照，互动的场景）的时候，需要严格遵循以上user的特征，尤其是性别和外观。${userRelationContent}`
       }];
     })(),
-    // ── 对话上下文（单条文本块，非交替轮次，避免模型进入"对话模式"）──
-    ...(history.length > 0 ? [{
-      role: 'system',
-      content: '【对话上下文】\n' + history.map(m => {
-        const label = m.role === 'user' ? '用户' : (character?.display_name || '角色');
-        return `${label}: ${m.content}`;
-      }).join('\n\n')
-    }] : []),
-    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你在上面对话中最后一句话时所处的场景。只输出 JSON，不要任何其他文字。' },
+    // ── 提取 assistant 最后一句，单独强调（避免混在上下文中模型找不到"最后一句"）──
+    ...(() => {
+      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+      if (!lastAssistantMsg) return [];
+      return [{
+        role: 'system',
+        content: `【你刚刚说的最后一句话】「${lastAssistantMsg.content}」`
+      }];
+    })(),
+    // ── 对话上下文（不含最后一句 assistant，避免重复；单条文本块，非交替轮次，避免模型进入"对话模式"）──
+    ...(() => {
+      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+      const filteredHistory = history.filter(m => m !== lastAssistantMsg);
+      if (filteredHistory.length === 0) return [];
+      return [{
+        role: 'system',
+        content: '【对话上下文】\n' + filteredHistory.map(m => {
+          const label = m.role === 'user' ? '用户' : (character?.display_name || '角色');
+          return `${label}: ${m.content}`;
+        }).join('\n\n')
+      }];
+    })(),
+    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【你刚刚说的最后一句话】所处场景的画面。只输出 JSON，不要任何其他文字。' },
     // ── pre-fill：从 prompt 值内部起始，模型续写 "少女站在..."} 完成 JSON ──
     { role: 'assistant', content: '{"prompt":"' },
   ];
@@ -1065,14 +1117,12 @@ async function handleNeedImageFlow(conversationId, character, send) {
   if (modelFollowedPrefill) {
     // 模型从 pre-fill 的 prompt 值内部续写 → 拼回完整
     fullContent = '{"prompt":"' + fullContent;
-    // 补全尾部闭合（模型偶尔忘写 "}）
-    if (!fullContent.endsWith('"}')) {
-      fullContent = fullContent.replace(/"?\s*$/g, '"');
-      if (!fullContent.endsWith('"}')) fullContent += '"}';
-    }
   }
-  // else: 模型先写了正文（无视了 pre-fill），保持原样，不强行补 "}
-  //       extractImageTags 会从正文中提取可能嵌入的 {"prompt":"..."} 标签
+  // 补全尾部闭合（token 截断或模型偶尔忘写 "}，两种路径都需修复）
+  if (!fullContent.endsWith('"}')) {
+    fullContent = fullContent.replace(/"?\s*$/g, '"');
+    if (!fullContent.endsWith('"}')) fullContent += '"}';
+  }
 
   // 4. 解析标签
   const tags = extractImageTags(fullContent);

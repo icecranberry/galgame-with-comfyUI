@@ -738,7 +738,7 @@ onMounted(async () => {
 .user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 
 .user-field-row {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: baseline; gap: 10px;
 }
 .field-label {
   font-size: 12px; font-weight: 600; color: var(--text-secondary);
