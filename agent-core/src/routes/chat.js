@@ -31,7 +31,7 @@ const imageJudgeCounters = new Map();  // conversationId -> count
 // ── 统一缓冲分句器 ──
 //   字符先进 3 字闸门检测 {" 和 {p（兜底），安全的再逐字进入分句逻辑。
 //   分句规则:
-//     1. 队列 > 20 字: 遇到 ！？～~… 保留符号后断句; 遇到 ，。 断句并去掉标点
+//     1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，。 断句并去掉标点
 //     2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
 //     3. 。逗号无论队列长度都触发分句，去掉句号本身，重置 20 字计数器
 //     4. flushAll() 时去掉末尾句号
@@ -120,21 +120,39 @@ class SentenceSplitter {
         // ── 规则 1 ──
         if (this.pendingSplit >= 0) {
           if (this._canSplit()) {
-            emit(this.buffer.slice(0, this.pendingSplit));
-            this.buffer = this.buffer.slice(this.pendingSplit);
-            this.pendingSplit = -1;
-            if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+            // 如果 pendingSplit 由 … 触发且当前字也是 …，取消延迟分句，改为将 …… 作为整体发出
+            const splitTriggerChar = this.buffer[this.pendingSplit - 1];
+            if (splitTriggerChar === '…' && safe === '…') {
+              this.pendingSplit = -1;
               emit(this.buffer);
               this.buffer = '';
-            } else if (/[，]/.test(safe)) {
-              emit(this.buffer.slice(0, -1));
-              this.buffer = '';
+            } else {
+              emit(this.buffer.slice(0, this.pendingSplit));
+              this.buffer = this.buffer.slice(this.pendingSplit);
+              this.pendingSplit = -1;
+              if (safe === '…') {
+                // 分句后当前字是 …，继续延迟等待（可能后面还有 …）
+                if (this.buffer.length > 0) {
+                  this.pendingSplit = this.buffer.length;
+                }
+              } else if (/[！？～~]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+                emit(this.buffer);
+                this.buffer = '';
+              } else if (/[，]/.test(safe)) {
+                emit(this.buffer.slice(0, -1));
+                this.buffer = '';
+              }
             }
           }
-        } else if (/[！？～~…]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+        } else if (/[！？～~]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
           if (this._canSplit()) {
             emit(this.buffer);
             this.buffer = '';
+          }
+        } else if (safe === '…') {
+          // … 延迟分句，等待下一个字确认是否为 ……
+          if (this._canSplit()) {
+            this.pendingSplit = n;
           }
         } else if (/[，]/.test(safe)) {
           if (this._canSplit()) {
@@ -296,7 +314,21 @@ router.get('/characters/:id/messages', (req, res) => {
     created_at: toISODate(m.created_at),
   }));
 
-  res.json({ messages });
+  // 附带最新好感度快照（切角色后恢复用）
+  const lastSnapshot = db.prepare(`
+    SELECT affinity, affinity_delta, reason FROM emotion_snapshots
+    WHERE conversation_id = ? AND affinity IS NOT NULL
+    ORDER BY id DESC LIMIT 1
+  `).get(conversationId);
+
+  res.json({
+    messages,
+    affinity: lastSnapshot ? {
+      value: lastSnapshot.affinity,
+      delta: lastSnapshot.affinity_delta ?? 0,
+      reason: lastSnapshot.reason || '',
+    } : null,
+  });
 });
 
 // GET /api/messages/:id — 单条消息查询（送礼图片轮询用）
@@ -793,15 +825,22 @@ router.post('/characters/:id/chat', async (req, res) => {
       imageGenPromise = triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
     } else if (hasNeedImageTag) {
       // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+      // 提前创建 task + 发送 generate_start，前端立即显示遮罩层
+      const preTaskId = createPreparingTask(conversationId);
+      send('generate_start', { taskId: preTaskId });
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
     } else if (force_image_gen) {
       // 路径 D: 强制生图 — 用户主动勾选，跳过智能判断
       console.log('[chat] force image gen: user requested, triggering needImage flow');
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+      const preTaskId = createPreparingTask(conversationId);
+      send('generate_start', { taskId: preTaskId });
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
     } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
       // 路径 E: 计数器归零 → 强制生图
       console.log('[chat] counter forced: skipping judge, triggering needImage flow');
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send);
+      const preTaskId = createPreparingTask(conversationId);
+      send('generate_start', { taskId: preTaskId });
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
     } else {
       // 路径 C: 静默判断（系统强制开启）
       imageGenPromise = (async () => {
@@ -809,8 +848,11 @@ router.post('/characters/:id/chat', async (req, res) => {
           const needImage = await judgeImageNeed(conversationId);
           if (needImage) {
             console.log('[chat] auto judge: image needed, triggering needImage flow');
+            // ★ judge 返回 YES 瞬间 → 立即创建 task + send generate_start，前端立刻显示遮罩层
+            const preTaskId = createPreparingTask(conversationId);
+            send('generate_start', { taskId: preTaskId });
             const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
-            await handleNeedImageFlow(conversationId, char, send);
+            await handleNeedImageFlow(conversationId, char, send, preTaskId);
           }
         } catch (err) {
           console.error('[chat] auto judge error:', err.message);
@@ -1004,6 +1046,17 @@ function getDefaultPrompt() {
 }
 
 /**
+ * 创建 pending 状态的 image_tasks 行，用于提前发送 generate_start
+ * 让前端在 judge / needImage 二次 LLM 调用期间就显示遮罩层
+ */
+function createPreparingTask(conversationId) {
+  const db = getDb();
+  const result = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, '', '', 'pending')`)
+    .run(conversationId);
+  return result.lastInsertRowid;
+}
+
+/**
  * 静默判断：给定最近对话，是否需要配一张图片增强表达
  * 极轻量 DeepSeek 调用（只需"是/否"），延迟通常 < 300ms
  */
@@ -1113,7 +1166,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
  *   后端再请求一次模型，让它补上 {"prompt":"..."} →
  *   然后走正常生图流程
  */
-async function handleNeedImageFlow(conversationId, character, send) {
+async function handleNeedImageFlow(conversationId, character, send, preExistingTaskId = null) {
   const db = getDb();
   console.log('[chat] needImage detected, requesting prompt from model (compact)...');
 
@@ -1190,7 +1243,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
         content: `【最后一轮对话】\n${parts.join('\n')}`
       }];
     })(),
-    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【最后一轮对话】所处场景的画面。只输出 JSON，不要任何其他文字。' },
+    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。只输出 JSON，不要任何其他文字。' },
     // ── pre-fill：从 prompt 值内部起始，模型续写 "少女站在..."} 完成 JSON ──
     { role: 'assistant', content: '{"prompt":"' },
   ];
@@ -1202,7 +1255,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
     console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
   } catch (err) {
     console.error('[chat] needImage follow-up error:', err.message);
-    send('generate_error', { error: '生图请求失败' });
+    send('generate_error', { taskId: preExistingTaskId, error: '生图请求失败' });
     return;
   }
 
@@ -1302,14 +1355,23 @@ async function handleNeedImageFlow(conversationId, character, send) {
 
   // 5. 触发生图
   if (tags.prompt) {
-    const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
-      .run(conversationId, tags.prompt, tags.prompt);
-    const genTaskId = taskResult.lastInsertRowid;
-    send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
+    let genTaskId;
+    if (preExistingTaskId) {
+      // 使用预先创建的 task，更新 prompt 和状态
+      db.prepare(`UPDATE image_tasks SET prompt_original=?, prompt_refined=?, status='running' WHERE id=?`)
+        .run(tags.prompt, tags.prompt, preExistingTaskId);
+      genTaskId = preExistingTaskId;
+      // generate_start 已经在 judge/needImage 判定时发送，不再重复
+    } else {
+      const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
+        .run(conversationId, tags.prompt, tags.prompt);
+      genTaskId = taskResult.lastInsertRowid;
+      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
+    }
     await triggerImageGeneration(conversationId, tags.prompt, assistantMsgId, genTaskId, send);
   } else {
     console.log('[chat] needImage follow-up: no prompt tags found, falling back');
-    send('generate_error', { error: '模型未返回图像描述' });
+    send('generate_error', { taskId: preExistingTaskId, error: '模型未返回图像描述' });
   }
 }
 

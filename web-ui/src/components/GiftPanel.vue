@@ -38,7 +38,7 @@
             @click="selectGift('large')"
           >
             <span class="gift-emoji">💎</span>
-            <span class="gift-label">给你准备了份心意</span>
+            <span class="gift-label">特意备了心意</span>
             <span class="gift-bonus">+15 好感</span>
             <span v-if="cooldowns.large > 0" class="gift-cd">
               冷却 {{ formatCd(cooldowns.large) }}
@@ -55,7 +55,7 @@
           :disabled="loading"
           @click="doSend"
         >
-          {{ loading ? '送出中...' : '确认送出' }}
+          {{ loading ? '准备礼物中...' : '确认送出' }}
         </button>
       </div>
     </div>

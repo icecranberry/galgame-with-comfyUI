@@ -781,6 +781,16 @@ export async function giveGift(characterId, giftType, character, userName = '你
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
+  // 拉取上一轮对话上下文（供角色了解送礼前的对话氛围）
+  const conversationId = `char_${characterId}`;
+  const recentMessages = db.prepare(`
+    SELECT role, content FROM raw_messages
+    WHERE conversation_id = ? ORDER BY id DESC LIMIT 4
+  `).all(conversationId).reverse();
+  const chatContext = recentMessages.length > 0
+    ? recentMessages.map(m => `${m.role === 'user' ? userName : character.display_name}：${m.content}`).join('\n')
+    : '';
+
   const reactionPrompt = `${systemRules}
 
 你是角色「${character.display_name}」，你正在和 ${userName} 对话。
@@ -788,8 +798,10 @@ export async function giveGift(characterId, giftType, character, userName = '你
 【角色人格】
 ${basePrompt}
 
-${affinityDesc ? `【你们的关系】\n${affinityDesc}\n` : ''}
-【礼物】
+${affinityDesc ? `【你们的关系】\n${affinityDesc}\n` : ''}${chatContext ? `【上一轮对话上下文】
+${chatContext}
+
+` : ''}【礼物】
 ${userName} 刚刚送了你${giftDesc}
 
 请以你的角色口吻，自然回应收到这份礼物（15~40字），假装已经拆开看到了具体是什么。

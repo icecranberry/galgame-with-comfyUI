@@ -35,8 +35,15 @@ export const useChatStore = defineStore('chat', () => {
       const raw = d.messages || [];
       const result = rawToMessages(raw);
       messages.value = result;
-      // 首屏展示最近 INITIAL_COUNT 条，避免渲染过多 DOM
       renderStart.value = Math.max(0, result.length - INITIAL_COUNT);
+      // 恢复好感度快照（切角色后 reatimeAffinity 被清空，从 DB 恢复）
+      if (d.affinity && !realtimeAffinity.value) {
+        realtimeAffinity.value = {
+          affinity: d.affinity.value,
+          affinityDelta: d.affinity.delta ?? 0,
+          lastReason: d.affinity.reason || '',
+        }
+      }
     } catch {}
   }
 

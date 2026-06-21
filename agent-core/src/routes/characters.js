@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { deleteByConversation } from '../services/vectorClient.js';
-import { cropPersonalityForEmotion, giveGift, getGiftCooldowns } from '../services/emotionEngine.js';
+import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
 import { generateImage } from '../services/imageSkill.js';
 
 const router = Router();
@@ -464,6 +464,11 @@ router.post('/:id/gift', async (req, res) => {
         console.error(`[gift] image gen failed for ${char.display_name}:`, err.message);
       });
     }
+
+    // 保存情绪快照：让切角色后仍能恢复送礼的好感度和 reason
+    const emotionBaseline = JSON.parse(char.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}');
+    const emotionState = loadEmotionState(conversationId, emotionBaseline);
+    saveEmotionSnapshot(conversationId, msgId, emotionState, 'joy', result.newAffinity, result.affinityDelta, '哇，收到礼物了');
 
     res.json({
       success: true,

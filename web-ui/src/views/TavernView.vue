@@ -1,7 +1,7 @@
 <template>
   <div class="tavern-view" @scroll="onScroll">
     <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
-      <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">🏮 酒馆</h2>
+      <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">酒馆</h2>
     </div>
 
     <!-- ═══════════════════════════════════════════

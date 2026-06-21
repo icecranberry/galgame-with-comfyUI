@@ -115,15 +115,15 @@ export function computeProactiveScore(hoursSince, affinity, compositeVad) {
 /**
  * 将 proactive_score 映射到下次发起间隔（小时）
  *
- * score=0 → 30h（几乎不主动）
- * score=0.5 → 16h（中等）
- * score=1 → 2h（非常主动）
+ * score=0 → 15h（几乎不主动）
+ * score=0.5 → 8h（中等）
+ * score=1 → 1h（非常主动）
  *
  * @param {number} score 0~1
  * @returns {number} 间隔小时数
  */
 export function scoreToIntervalHours(score) {
-  return Math.max(2, 30 - score * 28);
+  return Math.max(1, 15 - score * 14);
 }
 
 // ── 主动聊天动机（按好感度分档，向下兼容）──
@@ -242,6 +242,22 @@ function loadRelationshipContext(characterId) {
   return `\n【角色与 user 的关系】\n你是user的${userRel.relationship_text}。`;
 }
 
+/**
+ * 加载用户画像（性别、外观）
+ * @returns {string} 格式化后的用户画像段落，无信息时返回空字符串
+ */
+function loadUserProfile() {
+  const parts = [];
+  if (config.user.gender) {
+    parts.push(`性别：${config.user.gender}`);
+  }
+  if (config.user.appearance) {
+    parts.push(`外观：${config.user.appearance}`);
+  }
+  if (parts.length === 0) return '';
+  return `\n【user画像】\n${parts.join('\n')}`;
+}
+
 // ── LLM 开场白生成 ──
 
 /**
@@ -254,9 +270,10 @@ function loadRelationshipContext(characterId) {
  * @param {string|null} recentSummary - 最近对话摘要（可选）
  * @param {{ name: string, desc: string }} motive - 随机选取的聊天动机
  * @param {string} relationshipContext - 人际关系描述文本（可选）
+ * @param {string} userProfile - 用户画像描述文本（可选）
  * @returns {Promise<string>} 生成的文本
  */
-async function generateGreeting(character, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, streak = 0) {
+async function generateGreeting(character, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak = 0) {
   const conversationId = `char_${character.id}`;
 
   // 1. 获取情绪状态的自然语言描述
@@ -291,7 +308,7 @@ ${character.base_prompt}
 ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}`;
 
   // 消息 2：当前状态 + 时间 + 动机 + 要求（任务指令）
-  const msg2 = `${affinityText ? `${affinityText}\n` : ''}${emotionText ? `【角色当前状态】\n${emotionText}\n` : ''}${relationshipContext ? `${relationshipContext}\n` : ''}【上次聊天时间】
+  const msg2 = `${affinityText ? `${affinityText}\n` : ''}${emotionText ? `【角色当前状态】\n${emotionText}\n` : ''}${relationshipContext ? `${relationshipContext}\n` : ''}${userProfile ? `${userProfile}\n` : ''}【上次聊天时间】
 ${timeDesc}
 
 【当前时间】
@@ -383,7 +400,7 @@ function writeProactiveMessage(character, content) {
  * @param {number} msgId - messages 表的 id
  * @returns {Promise<string[]|null>} 图片 URL 数组，失败返回 null
  */
-async function generateImageForGreeting(character, greeting, motiveName, msgId) {
+async function generateImageForGreeting(character, greeting, motiveName, msgId, rawId) {
   try {
     console.log(`⚡ Generating image for ${character.display_name} (motive: ${motiveName})...`);
 
@@ -433,6 +450,15 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     if (!prompt || prompt.length < 5) {
       console.warn('⚡ Image prompt too short, skipping image generation');
       return null;
+    }
+
+    // 将 prompt 合并到 raw_messages 中，模仿正常消息流的处理方式
+    if (rawId) {
+      const db = getDb();
+      const promptJson = JSON.stringify({ prompt });
+      db.prepare('UPDATE raw_messages SET prompt = ?, content = content || ? WHERE id = ?')
+        .run(prompt, promptJson, rawId);
+      console.log(`⚡ Updated raw_message ${rawId} with prompt`);
     }
 
     console.log(`⚡ Image prompt: "${prompt.slice(0, 100)}..."`);
@@ -586,12 +612,13 @@ async function tick() {
       if (summary) recentSummary = summary.summary;
     } catch (_) { /* ignore */ }
 
-    // 5.5 随机选取聊天动机（按好感度分档）+ 加载角色人际关系
+    // 5.5 随机选取聊天动机（按好感度分档）+ 加载角色人际关系 + 用户画像
     const motive = pickMotive(affinity, streak);
     const relationshipContext = loadRelationshipContext(candidate.id);
+    const userProfile = loadUserProfile();
 
     // 6. 生成开场白
-    const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, streak);
+    const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
@@ -600,7 +627,7 @@ async function tick() {
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     let imageUrls = null;
     if (motive.imageGen) {
-      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId);
+      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId, rawId);
     }
 
     broadcastProactiveMessage({
@@ -635,8 +662,8 @@ async function tick() {
 // ── 频率定时器（与 VAD/好感度算法双线并行）──
 
 function freqToMinutes(freq) {
-  // freq 0.1 → 180min (3h), freq 1.0 → 5min
-  return Math.round(5 + (1 - freq) / 0.9 * 175);
+  // freq 0.1 → 120min (2h), freq 1.0 → 5min
+  return Math.round(5 + (1 - freq) / 0.9 * 115);
 }
 
 function startupToMinutes(freq) {
@@ -822,7 +849,8 @@ export async function forceProactiveNow() {
   const streak = candidate.proactive_streak || 0;
   const motive = pickMotive(affinity, streak);
   const relationshipContext = loadRelationshipContext(candidate.id);
-  const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, streak);
+  const userProfile = loadUserProfile();
+  const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
   const { rawId, msgId } = writeProactiveMessage(candidate, greeting);
 
@@ -832,7 +860,7 @@ export async function forceProactiveNow() {
   // 如果需要配图，先生成图片再一起推送；否则直接推送
   let imageUrls = null;
   if (motive.imageGen) {
-    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId);
+    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId, rawId);
   }
 
   broadcastProactiveMessage({

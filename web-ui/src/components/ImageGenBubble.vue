@@ -144,6 +144,7 @@ const dashOffset = computed(() => circumference * (1 - displayPct.value / 100))
 const statusText = computed(() => {
   if (genStatus.value === 'done' || genStatus.value === 'error') return ''
   if (genStatus.value === 'retrying') return '发送失败，重试中...'
+  if (genStatus.value === 'pending') return '发送中...'
   return '发送中...'
 })
 
