@@ -7,7 +7,7 @@ const RECONNECT_INTERVAL = 30_000
 export const useProactiveStore = defineStore('proactive', () => {
   // 有未读主动消息的角色 ID 集合
   const unreadIds = shallowRef(new Set())
-  // 每位角色最新主动消息数据 { [charId]: { content, display_name, avatar_path, avatar_color, created_at, msg_id } }
+  // 每位角色最新主动消息数据 { [charId]: { content, display_name, avatar_path, created_at, msg_id } }
   const latestMessages = ref({})
   // SSE 回调（供 App.vue 注入）
   const onMessageCallback = ref(null)

@@ -20,7 +20,7 @@
         >
           <div
             class="picker-avatar"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
           >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
           <span>{{ c.display_name }}</span>
         </div>
@@ -60,7 +60,7 @@
             :class="{ active: moments.filterCharacterId === ch.character_id }"
             :style="ch.avatar_path
               ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' }
-              : { background: ch.avatar_color || '#e07b6c' }"
+              : { background: '#e07b6c' }"
             @click="moments.setFilter(ch.character_id)"
           >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
         </div>

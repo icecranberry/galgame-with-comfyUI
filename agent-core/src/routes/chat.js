@@ -246,6 +246,8 @@ router.delete('/characters/:id/messages', (req, res, next) => {
     db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
     // 重置好感度到默认值
     db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE character_id = ?`).run(charId);
+    // 重置主动聊天连胜计数
+    db.prepare(`UPDATE characters SET proactive_streak = 0 WHERE id = ?`).run(charId);
     // 主表
     db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
@@ -295,6 +297,16 @@ router.get('/characters/:id/messages', (req, res) => {
   }));
 
   res.json({ messages });
+});
+
+// GET /api/messages/:id — 单条消息查询（送礼图片轮询用）
+router.get('/messages/:id', (req, res) => {
+  const db = getDb();
+  const msg = db.prepare(
+    'SELECT id, role, content, images, created_at FROM messages WHERE id = ?'
+  ).get(req.params.id);
+  if (!msg) return res.status(404).json({ error: 'not found' });
+  res.json({ ...msg, created_at: toISODate(msg.created_at) });
 });
 
 // POST /api/characters/:id/chat — 流式对话
@@ -376,6 +388,25 @@ router.post('/characters/:id/chat', async (req, res) => {
         : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
       const emotionState = loadEmotionState(conversationId, emotionBaseline);
       affinity = loadAffinity(characterId);
+
+      // 4.5a 每日首次互动奖励：距上次互动跨天 → +5（在注入 LLM 之前就加成）
+      const relRow = db.prepare(
+        'SELECT last_interaction_at FROM user_relationships WHERE character_id = ?'
+      ).get(characterId);
+      const lastAt = relRow?.last_interaction_at;
+      if (lastAt) {
+        const lastDate = lastAt.slice(0, 10); // "YYYY-MM-DD"
+        const today = new Date().toISOString().slice(0, 10);
+        if (lastDate !== today) {
+          affinity = saveAffinity(characterId, affinity + 5);
+          console.log(`[chat] daily first interaction bonus: +5 → affinity=${affinity.toFixed(0)}`);
+        }
+      } else {
+        // 从未互动过 → 首次互动也给奖励
+        affinity = saveAffinity(characterId, affinity + 5);
+        console.log(`[chat] first ever interaction bonus: +5 → affinity=${affinity.toFixed(0)}`);
+      }
+
       const emotionPrompt = stateToPrompt(emotionState);
       if (emotionPrompt) systemPrompt += emotionPrompt;
     }
@@ -615,6 +646,27 @@ router.post('/characters/:id/chat', async (req, res) => {
         send('bubble_break', {});
       }
     }
+
+    // 补救：LLM 偶尔把 {"prompt":"..."} 放在正文前面（而非末尾），
+    // 闸门在流开头就检测到 {" → stopped=true，导致后续正文全部丢失。
+    // 此时从 fullContent 中剥离 prompt JSON，把剩余正文重新过分句器。
+    if (wasStopped && collectedSegments.length === 0) {
+      const textOnly = stripTags(fullContent).trim();
+      if (textOnly) {
+        const lateSplitter = new SentenceSplitter();
+        const { segments: lateSegs1 } = lateSplitter.feed(textOnly);
+        const { segments: lateSegs2 } = lateSplitter.flushAll();
+        const lateSegments = [...lateSegs1, ...lateSegs2]
+          .map(s => stripBracketActions(s).trim())
+          .filter(Boolean);
+        for (const segText of lateSegments) {
+          send('token', { content: segText });
+          collectedSegments.push(segText);
+          send('bubble_break', {});
+        }
+      }
+    }
+
     fullContent = stripBracketActions(fullContent);
     send('response_end', {});
 

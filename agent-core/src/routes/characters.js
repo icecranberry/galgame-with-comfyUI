@@ -9,7 +9,8 @@ import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { deleteByConversation } from '../services/vectorClient.js';
-import { cropPersonalityForEmotion } from '../services/emotionEngine.js';
+import { cropPersonalityForEmotion, giveGift, getGiftCooldowns } from '../services/emotionEngine.js';
+import { generateImage } from '../services/imageSkill.js';
 
 const router = Router();
 
@@ -73,15 +74,15 @@ router.get('/', (req, res) => {
 // POST /api/characters — 创建角色
 router.post('/', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_color, moments_disabled, proactive_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, moments_disabled, proactive_disabled } = req.body;
   if (!name || !base_prompt) return res.status(400).json({ error: 'name and base_prompt are required' });
 
   const emotion = emotion_baseline ? (typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)) : '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
 
   try {
     const shortPrompt = cropPersonalityForEmotion(base_prompt);
-    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, avatar_color, moments_disabled, proactive_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(name, display_name || name, base_prompt, shortPrompt, emotion, avatar_color || null, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0);
+    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0);
     res.status(201).json({ id: result.lastInsertRowid, name, display_name });
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: `"${name}" already exists` });
@@ -92,13 +93,12 @@ router.post('/', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_color, avatar_path, moments_disabled, proactive_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
   if (base_prompt !== undefined) { updates.push('base_prompt = ?'); params.push(base_prompt); updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt)); }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
-  if (avatar_color !== undefined) { updates.push('avatar_color = ?'); params.push(avatar_color || null); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
 
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
@@ -401,6 +401,95 @@ ${searchContext}` : ''}
     console.error('[characters] generate failed:', err.message);
     res.status(500).json({ error: '生成失败: ' + err.message });
   }
+});
+
+// POST /api/characters/:id/gift — 向角色赠送礼物
+// Body: { giftType: 'small' | 'large' }
+router.post('/:id/gift', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const { giftType } = req.body;
+  if (!['small', 'large'].includes(giftType)) {
+    return res.status(400).json({ error: 'giftType must be "small" or "large"' });
+  }
+
+  try {
+    const userName = config.user.nickname || '你';
+    const result = await giveGift(char.id, giftType, char, userName);
+
+    if (!result.success) {
+      return res.status(409).json({
+        error: result.message,
+        cooldownRemaining: result.cooldownRemaining,
+        cooldowns: getGiftCooldowns(),
+      });
+    }
+
+    // 先写入文字消息，异步生图完成后补图片
+    const conversationId = `char_${char.id}`;
+    const rawResult = db.prepare(
+      `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
+    ).run(conversationId, result.reaction);
+    const msgResult = db.prepare(
+      `INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'assistant', ?, NULL, 0)`
+    ).run(conversationId, rawResult.lastInsertRowid, result.reaction);
+    const msgId = msgResult.lastInsertRowid;
+
+    // 异步生图：不阻塞响应，完成后补图片到消息气泡
+    if (result.imagePrompt) {
+      const __filename = fileURLToPath(import.meta.url);
+      const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+      const imagesDir = path.join(projectRoot, 'data', 'images');
+
+      generateImage(result.imagePrompt, {
+        onProgress: (p) => {
+          console.log(`[gift] image gen progress for ${char.display_name}:`, p.stage || p);
+        }
+      }).then(imgResult => {
+        if (imgResult.success && imgResult.images.length > 0) {
+          fs.mkdirSync(imagesDir, { recursive: true });
+          const img = imgResult.images[0];
+          const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
+          const filePath = path.join(imagesDir, filename);
+          const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
+          fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+          const imageUrl = `/images/${filename}`;
+          db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
+            .run(JSON.stringify([imageUrl]), msgId);
+          console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
+        }
+      }).catch(err => {
+        console.error(`[gift] image gen failed for ${char.display_name}:`, err.message);
+      });
+    }
+
+    res.json({
+      success: true,
+      affinityDelta: result.affinityDelta,
+      affinity: result.newAffinity,
+      reaction: result.reaction,
+      msgId,
+      cooldowns: getGiftCooldowns(),
+    });
+  } catch (err) {
+    console.error('[characters] gift failed:', err.message);
+    res.status(500).json({ error: '送礼失败: ' + err.message });
+  }
+});
+
+// DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用）
+router.delete('/gift/cooldowns', (_req, res) => {
+  const db = getDb();
+  db.prepare('DELETE FROM gift_history').run();
+  console.log('[gift] cooldown reset (global)');
+  res.json({ ok: true, cooldowns: { small: 0, large: 0 } });
+});
+
+// GET /api/gift/cooldowns — 查询送礼冷却状态
+router.get('/gift/cooldowns', (_req, res) => {
+  res.json({ cooldowns: getGiftCooldowns() });
 });
 
 export default router;

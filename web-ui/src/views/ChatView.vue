@@ -115,6 +115,9 @@
           @keydown.enter.exact.prevent="send"
           @keydown.enter.shift.exact="inputText += '\n'"
         ></textarea>
+        <button class="gift-btn" @click="showGiftPanel = true" title="送礼物">
+          <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
+        </button>
         <button class="send-btn" @click="send" :disabled="!inputText.trim() || chat.streaming" :title="chat.streaming ? '发送中...' : '发送'">
           <svg v-if="!chat.streaming" class="send-icon" viewBox="0 0 1024 1024" fill="#fff">
             <path d="M659.655431 521.588015q23.970037-6.71161 46.022472-13.423221 19.17603-5.752809 39.310861-11.505618t33.558052-10.546816l-13.423221 50.816479q-5.752809 21.093633-10.546816 31.640449-9.588015 25.88764-22.531835 47.940075t-24.449438 38.35206q-13.423221 19.17603-27.805243 35.475655l-117.932584 35.475655 96.838951 17.258427q-19.17603 16.299625-41.228464 33.558052-19.17603 14.382022-43.625468 30.202247t-51.29588 29.243446-59.925094 13.902622-62.801498-4.314607q-34.516854-4.794007-69.033708-16.299625 10.546816-16.299625 23.011236-36.434457 10.546816-17.258427 25.40824-40.749064t31.161049-52.254682q46.022472-77.662921 89.168539-152.449438t77.662921-135.191011q39.310861-69.992509 75.745318-132.314607-45.06367 51.775281-94.921348 116.014981-43.146067 54.651685-95.88015 129.917603t-107.385768 164.434457q-11.505618 18.217228-25.88764 42.187266t-30.202247 50.816479-32.599251 55.131086-33.078652 55.131086q-38.35206 62.322097-78.621723 130.397004 0.958801-20.134831 7.670412-51.775281 5.752809-26.846442 19.17603-67.116105t38.35206-94.921348q16.299625-34.516854 24.928839-53.692884t13.423221-29.722846q4.794007-11.505618 7.670412-15.340824-4.794007-5.752809-1.917603-23.011236 1.917603-15.340824 11.026217-44.58427t31.161049-81.977528q22.052434-53.692884 58.007491-115.535581t81.018727-122.726592 97.797753-117.932584 107.865169-101.153558 110.262172-72.389513 106.906367-32.11985q0.958801 33.558052-6.71161 88.689139t-19.17603 117.932584-25.88764 127.520599-27.805243 117.453184z"/>
@@ -124,6 +127,13 @@
           </svg>
         </button>
       </div>
+      <GiftPanel
+        v-if="showGiftPanel"
+        :character-id="chat.activeCharId"
+        :character-name="chat.activeChar?.display_name || ''"
+        @close="showGiftPanel = false"
+        @sent="onGiftSent"
+      />
     </template>
 
     <VueEasyLightbox
@@ -405,15 +415,6 @@
                       </div>
                     </div>
 
-                    <!-- 实时显示开关 -->
-                    <div class="affinity-realtime-toggle">
-                      <span class="affinity-realtime-label">实时显示</span>
-                      <label class="switch">
-                        <input type="checkbox" v-model="realtimeAffinityEnabled" />
-                        <span class="slider"></span>
-                      </label>
-                    </div>
-
                     <!-- 最近一次好感度变化 -->
                     <div v-if="impressionLastDelta != null" class="affinity-change">
                       <div class="affinity-change-row">
@@ -425,6 +426,14 @@
                       <div v-if="impressionLastReason" class="affinity-change-reason">
                         💬 {{ impressionLastReason }}
                       </div>
+                    </div>
+                    <!-- 实时显示开关 -->
+                    <div class="affinity-realtime-toggle">
+                      <span class="affinity-realtime-label">实时显示</span>
+                      <label class="switch">
+                        <input type="checkbox" v-model="realtimeAffinityEnabled" />
+                        <span class="slider"></span>
+                      </label>
                     </div>
                   </div>
                 </template>
@@ -456,6 +465,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
+import GiftPanel from '../components/GiftPanel.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
@@ -469,6 +479,7 @@ const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
+const showGiftPanel = ref(false)
 const settings = useSettingsStore()
 const forceImageGen = computed(() => settings.forceImageGen)
 const realtimeAffinityEnabled = computed({
@@ -479,6 +490,69 @@ const realtimeAffinityEnabled = computed({
 function onForceImageGenChange(e) {
   settings.setForceImageGen(e.target.checked)
   showForceTip()
+}
+
+function onGiftSent(result) {
+  showGiftPanel.value = false
+
+  // 刷新顶部好感度显示
+  chat.realtimeAffinity = {
+    affinity: result.affinity,
+    affinityDelta: result.affinityDelta,
+    lastReason: '哇，收到礼物了',
+  }
+  chat.affinityKey++
+
+  // 1. 文字气泡
+  chat.messages.push({
+    id: result.msgId,
+    role: 'assistant',
+    content: result.reaction,
+    created_at: new Date().toISOString(),
+  })
+
+  // 2. 生图气泡（pending → 遮罩 + 进度条，和普通生图完全一致）
+  const genId = `gift_${result.msgId}`
+  const genMsg = {
+    id: Date.now(),
+    role: 'assistant',
+    type: 'image_gen',
+    genId,
+    genStatus: 'pending',
+    genStartTime: Date.now(),
+    created_at: new Date().toISOString(),
+  }
+  chat.messages.push(genMsg)
+  nextTick(() => scrollToBottom(true))
+
+  // 3. 轮询图片就绪，更新 image_gen 气泡
+  let polls = 0
+  const timer = setInterval(async () => {
+    polls++
+    try {
+      const res = await fetch(`/api/messages/${result.msgId}`)
+      if (!res.ok) { clearInterval(timer); return }
+      const data = await res.json()
+      if (data.images) {
+        try {
+          const urls = JSON.parse(data.images)
+          if (Array.isArray(urls) && urls.length > 0) {
+            const idx = chat.messages.findIndex(m => m.genId === genId)
+            if (idx >= 0) {
+              chat.messages[idx].images = urls.map(url => ({ url, base64: null }))
+              chat.messages[idx].genStatus = 'done'
+            }
+          }
+        } catch {}
+        clearInterval(timer)
+      }
+    } catch { /* ignore */ }
+    if (polls >= 20) {
+      const idx = chat.messages.findIndex(m => m.genId === genId)
+      if (idx >= 0) chat.messages[idx].genStatus = 'error'
+      clearInterval(timer)
+    }
+  }, 4000)
 }
 const forceTipVisible = ref(false)
 let forceTipTimer = null
@@ -762,13 +836,13 @@ function confidenceLevel(confidence, index = 0) {
 const avatarPreviewStyle = computed(() => {
   const p = chat.activeChar?.avatar_path
   if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: chat.activeChar?.avatar_color || '#e07b6c' }
+  return { background: '#e07b6c' }
 })
 
 const agentAvatarStyle = computed(() => {
 const p = chat.activeChar?.avatar_path
 if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-return { background: chat.activeChar?.avatar_color || '#e07b6c' }
+return { background: '#e07b6c' }
 })
 
 const userAvatarStyle = computed(() => {
@@ -1342,6 +1416,24 @@ function renderContent(text) {
     0 0 24px rgba(224, 123, 108, 0.08),
     inset 0 0 10px rgba(224, 123, 108, 0.04);
 }
+
+/* ── 送礼按钮：圆形 + 振动 + 花样式 ── */
+.gift-btn {
+  width: 42px; height: 42px; flex-shrink: 0;
+  border-radius: 50%;
+  font-size: 0;
+  background: linear-gradient(135deg, #f9c270 0%, #e07b6c 100%);
+  color: #fff;
+  border: none; padding: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(249, 194, 112, 0.25);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex; align-items: center; justify-content: center;
+}
+.gift-btn-icon { font-size: 20px; transition: transform 0.2s ease; }
+.gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
+.gift-btn:hover .gift-btn-icon { transform: rotate(12deg) scale(1.1); }
+.gift-btn:active { transform: scale(0.94); }
 
 /* ── 发送按钮：圆形 + 渐变 + 发光 + 启停缓动 ── */
 .send-btn {
@@ -2052,4 +2144,24 @@ function renderContent(text) {
   .btn-header-settings { flex-shrink: 0; }
 }
 
+</style>
+
+<style>
+/* ── 印象弹窗内的实时显示开关缩小版 ── */
+.affinity-realtime-toggle .switch {
+  width: 32px;
+  height: 18px;
+}
+.affinity-realtime-toggle .slider {
+  border-radius: 18px;
+}
+.affinity-realtime-toggle .slider::before {
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+}
+.affinity-realtime-toggle .switch input:checked + .slider::before {
+  transform: translateX(14px);
+}
 </style>

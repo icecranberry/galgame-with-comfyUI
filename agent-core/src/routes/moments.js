@@ -101,7 +101,7 @@ router.get('/', (req, res) => {
   const db = getDb();
 
   const posts = db.prepare(`
-    SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color,
+    SELECT mp.*, c.display_name, c.avatar_path,
       (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id) AS comment_count,
       (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count,
       (SELECT id FROM moment_likes WHERE post_id = mp.id) IS NOT NULL AS liked
@@ -123,7 +123,7 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const db = getDb();
   const post = db.prepare(`
-    SELECT mp.*, c.display_name, c.avatar_path, c.avatar_color
+    SELECT mp.*, c.display_name, c.avatar_path
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
     WHERE mp.id = ?
@@ -134,8 +134,8 @@ router.get('/:id', (req, res) => {
   const comments = db.prepare(`
     SELECT mc.*,
       CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE NULL END AS char_display_name,
-      CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path,
-      CASE WHEN mc.author_type = 'character' THEN c.avatar_color ELSE NULL END AS char_avatar_color
+      CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path
+
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
     WHERE mc.post_id = ?
@@ -192,7 +192,7 @@ router.post('/:id/comments', async (req, res) => {
 
   const db = getDb();
   const post = db.prepare(`
-    SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.avatar_color, c.emotion_baseline
+    SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.emotion_baseline
     FROM moment_posts mp
     JOIN characters c ON c.id = mp.character_id
     WHERE mp.id = ?
@@ -241,7 +241,7 @@ router.post('/:id/comments', async (req, res) => {
         content: reply,
         char_display_name: post.display_name,
         char_avatar_path: post.avatar_path,
-        char_avatar_color: post.avatar_color,
+        
         created_at: new Date().toISOString(),
       };
     }
@@ -523,7 +523,7 @@ async function generateMomentPost(character) {
     images: imageUrls,
     display_name: character.display_name,
     avatar_path: character.avatar_path,
-    avatar_color: character.avatar_color,
+    
     status: 'done',
     created_at: new Date().toISOString(),
   });
@@ -535,7 +535,7 @@ async function generateMomentPost(character) {
     images: imageUrls,
     display_name: character.display_name,
     avatar_path: character.avatar_path,
-    avatar_color: character.avatar_color,
+    
     status: 'done',
     created_at: new Date().toISOString(),
   };

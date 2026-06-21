@@ -526,6 +526,25 @@ export async function comfyuiHealth() {
   } catch { return { connected: false } }
 }
 
+// ── Gift 送礼 ──
+export async function sendGift(characterId, giftType) {
+  const res = await fetch(`${BASE}/characters/${characterId}/gift`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ giftType }),
+  })
+  return res.json()
+}
+
+export async function getGiftCooldowns() {
+  const res = await fetch(`${BASE}/characters/gift/cooldowns`)
+  return res.json()
+}
+
+export async function resetGiftCooldowns() {
+  const res = await fetch(`${BASE}/characters/gift/cooldowns`, { method: 'DELETE' })
+  return res.json()
+}
+
 // ── Gallery 相册 ──
 export async function listGalleryImages() {
   const res = await fetch(`${BASE}/images/gallery`)

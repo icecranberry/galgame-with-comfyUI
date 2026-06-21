@@ -173,7 +173,6 @@ async function buildGraph() {
     data: {
       avatar_url: userAvatar.value,
       nickname: userNickname.value || '我',
-      avatar_color: '#e07b6c',
     },
     draggable: false,
     selectable: false,
@@ -194,7 +193,7 @@ async function buildGraph() {
         id: c.id,
         display_name: c.display_name,
         avatar_path: c.avatar_path,
-        avatar_color: c.avatar_color,
+        
         isCenter: false,
       },
       draggable: true,

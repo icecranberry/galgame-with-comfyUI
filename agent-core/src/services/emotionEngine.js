@@ -16,7 +16,7 @@
  *   - DeepSeek 兜底复杂场景（准），注入角色人格 + 好感度 + 关系上下文
  */
 
-import { getDb } from '../db/index.js';
+import { getDb, getSystemRules, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 
 // ── 常量 ──
@@ -85,7 +85,7 @@ export function loadAffinity(characterId) {
 export function saveEmotionSnapshot(conversationId, afterMsgId, state, dominantEmotion, affinity, affinityDelta = null, reason = null) {
   const db = getDb();
   db.prepare(`
-    INSERT INTO emotion_snapshots (conversation_id, after_msg_id,
+    INSERT OR REPLACE INTO emotion_snapshots (conversation_id, after_msg_id,
       valence, arousal, dominance,
       mood_valence, mood_arousal, mood_dominance,
       dominant_emotion, affinity, affinity_delta, reason)
@@ -102,20 +102,31 @@ export function saveEmotionSnapshot(conversationId, afterMsgId, state, dominantE
 }
 
 /**
- * 更新好感度到 user_relationships 表
+ * 更新好感度到 user_relationships 表（同时更新 last_interaction_at）
  */
-export function saveAffinity(characterId, affinity) {
+export function saveAffinity(characterId, affinity, updateLastInteraction = true) {
   const db = getDb();
   const clamped = clamp(affinity, 0, 100);
-  // 尝试 UPDATE，如果该角色还没有 user_relationships 行则 INSERT
-  const result = db.prepare(
-    'UPDATE user_relationships SET affinity = ? WHERE character_id = ?'
-  ).run(clamped, characterId);
-  if (result.changes === 0) {
-    // 如果没有 user_relationships 行，创建默认行
-    db.prepare(
-      'INSERT INTO user_relationships (character_id, relationship_text, affinity) VALUES (?, ?, ?)'
-    ).run(characterId, '', clamped);
+  const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+  if (updateLastInteraction) {
+    const result = db.prepare(
+      'UPDATE user_relationships SET affinity = ?, last_interaction_at = ? WHERE character_id = ?'
+    ).run(clamped, now, characterId);
+    if (result.changes === 0) {
+      db.prepare(
+        'INSERT INTO user_relationships (character_id, relationship_text, affinity, last_interaction_at) VALUES (?, ?, ?, ?)'
+      ).run(characterId, '', clamped, now);
+    }
+  } else {
+    const result = db.prepare(
+      'UPDATE user_relationships SET affinity = ? WHERE character_id = ?'
+    ).run(clamped, characterId);
+    if (result.changes === 0) {
+      db.prepare(
+        'INSERT INTO user_relationships (character_id, relationship_text, affinity) VALUES (?, ?, ?)'
+      ).run(characterId, '', clamped);
+    }
   }
   return clamped;
 }
@@ -283,7 +294,9 @@ const RULE_TABLE = [
   [/孤独|寂寞|没人[理懂]|被.*(?:抛弃|遗忘|忘记)|一个人/i,
     { valence: -0.14, arousal: -0.08, dominance: -0.12 }, 'sadness'],
   [/对不起|抱歉|都是我的错|怪我|是我不好|原谅[我]/i,
-    { valence: -0.10, arousal: -0.02, dominance: -0.10, affinity: -0.5 }, 'sadness'],
+    { valence: -0.05, arousal: -0.02, dominance: -0.10, affinity: 1.5 }, 'sadness'],
+  [/原谅我[好吗吧]|和好[好吗吧]|别生气[了好吗]|我错了|不会再[这样了有下次]|原谅.*好吗|和好.*好吗/i,
+    { valence: -0.03, arousal: 0.0, dominance: -0.10, affinity: 2.5 }, 'sadness'],
 
   // ── 恐惧/焦虑 ──
   [/害怕|恐怖|吓死|吓坏|好吓人|吓到我了|吓人|吓一跳|焦虑|慌了|好怕/i,
@@ -695,6 +708,136 @@ function clamp(v, min, max) {
 function round(v, precision = 3) {
   const factor = Math.pow(10, precision);
   return Math.round(v * factor) / factor;
+}
+
+// ── 送礼系统 ──
+
+const GIFT_COOLDOWNS = { small: 8, large: 16 }; // 小时
+const GIFT_AFFINITY = { small: 8, large: 15 };
+
+/**
+ * 获取送礼冷却剩余时间（全局冷却，跟系统不跟角色）
+ * 小礼物和大礼物各自独立冷却，全局生效。
+ * @returns {{ small: number, large: number }} 剩余秒数（0=可用）
+ */
+export function getGiftCooldowns() {
+  const db = getDb();
+  const now = Date.now();
+  const result = { small: 0, large: 0 };
+
+  for (const type of ['small', 'large']) {
+    const last = db.prepare(
+      'SELECT created_at FROM gift_history WHERE gift_type = ? ORDER BY id DESC LIMIT 1'
+    ).get(type);
+    if (last) {
+      const lastAt = new Date(last.created_at.replace(' ', 'T') + 'Z').getTime();
+      const elapsed = (now - lastAt) / 1000;
+      result[type] = Math.max(0, Math.ceil(GIFT_COOLDOWNS[type] * 3600 - elapsed));
+    }
+  }
+  return result;
+}
+
+/**
+ * 向角色赠送礼物
+ *
+ * @param {number} characterId
+ * @param {'small'|'large'} giftType
+ * @param {object} character - { display_name, base_prompt }
+ * @param {string} [userName='你'] - 用户昵称
+ * @returns {{ success: boolean, affinityDelta?: number, newAffinity?: number, reaction?: string, liked?: boolean, imagePrompt?: string, cooldownRemaining?: number, message?: string }}
+ */
+export async function giveGift(characterId, giftType, character, userName = '你') {
+  const db = getDb();
+
+  // 1. 校验
+  if (!['small', 'large'].includes(giftType)) {
+    return { success: false, message: '无效的礼物类型' };
+  }
+
+  // 2. 冷却检查（全局冷却，大小礼物各自独立）
+  const cooldowns = getGiftCooldowns();
+  if (cooldowns[giftType] > 0) {
+    return {
+      success: false,
+      cooldownRemaining: cooldowns[giftType],
+      message: `该礼物全局冷却中，剩余约 ${Math.ceil(cooldowns[giftType] / 3600)} 小时`
+    };
+  }
+
+  // 3. 当前好感度（含时间回归）
+  const currentAffinity = loadAffinity(characterId);
+  const baseDelta = GIFT_AFFINITY[giftType];
+
+  // 4. LLM 生成角色反应 + 生图描述
+  const systemRules = getSystemRules();
+  const basePrompt = character.base_prompt || character.short_prompt || '';
+  const affinityDesc = affinityToPrompt(currentAffinity);
+  const giftDesc = giftType === 'small'
+    ? '一份日常小礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的小东西（如一盒你爱的甜点、一支精致的花、一个有趣的小挂件……），然后自然地反应。'
+    : '一份精心准备的珍贵礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的大礼（比较贵重的或者比较特殊的），然后自然地反应。';
+
+  // 获取生图提示词规则
+  const imageRules = getGlobalRule('image_prompt');
+  const imageRulesText = imageRules?.rule_content || '';
+
+  const reactionPrompt = `${systemRules}
+
+你是角色「${character.display_name}」，你正在和 ${userName} 对话。
+
+【角色人格】
+${basePrompt}
+
+${affinityDesc ? `【你们的关系】\n${affinityDesc}\n` : ''}
+【礼物】
+${userName} 刚刚送了你${giftDesc}
+
+请以你的角色口吻，自然回应收到这份礼物（15~40字），假装已经拆开看到了具体是什么。
+然后按以下规则输出生图描述：
+
+${imageRulesText}
+
+注意：这是对于收到礼物之后的反应的配图。
+
+只返回 JSON（不要其他文字）：
+{"text":"你的中文回应","imagePrompt":"英文生图描述"}`;
+
+  let reaction, imagePrompt;
+  try {
+    const result = await chatSync(
+      [{ role: 'user', content: reactionPrompt }],
+      { temperature: 0.85, max_tokens: 400, label: '送礼反应' }
+    );
+    let raw = result.trim();
+    if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    const parsed = JSON.parse(raw);
+    reaction = (parsed.text || parsed.reaction || '谢谢你...').trim();
+    imagePrompt = (parsed.imagePrompt || parsed.imageprompt || '').trim();
+  } catch (err) {
+    console.error('[emotionEngine] giveGift LLM parse failed:', err.message);
+    reaction = '谢谢你！';
+    imagePrompt = `1girl, ${character.display_name}, receiving a gift, warm smile, soft lighting, gift scene`;
+  }
+
+  // 5. 计算最终好感度变化
+  const affinityDelta = baseDelta;
+  const newAffinity = clamp(currentAffinity + affinityDelta, 0, 100);
+
+  // 6. 记录送礼时间（全局冷却用）
+  db.prepare(
+    'INSERT INTO gift_history (gift_type) VALUES (?)'
+  ).run(giftType);
+
+  // 7. 更新好感度
+  saveAffinity(characterId, newAffinity, true);
+
+  return {
+    success: true,
+    affinityDelta,
+    newAffinity,
+    reaction,
+    imagePrompt: imagePrompt || null,
+  };
 }
 
 /**

@@ -11,7 +11,7 @@
         <div class="char-avatar-wrap">
           <div
             class="char-avatar"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
           >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         </div>
         <div class="char-info">

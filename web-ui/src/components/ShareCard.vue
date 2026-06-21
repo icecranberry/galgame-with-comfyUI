@@ -120,7 +120,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: p.avatar_color || '#e07b6c' }
+  return { background: '#e07b6c' }
 })
 
 function formatFullTime(iso) {

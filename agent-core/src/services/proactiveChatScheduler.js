@@ -33,8 +33,10 @@ const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
 
 let timer = null;
 let processing = false;
-let freqTimer = null;
+let freqTimer = null;        // 线路 B：频率强制线
 let freqRunning = false;
+let startupTimer = null;     // 线路 C：启动强制线
+let startupRunning = false;
 
 // ── 未回复连续计数（DB 持久化，重启不丢失）──
 
@@ -330,7 +332,7 @@ ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
     }
     return greeting;
   } catch (err) {
-    console.error(`[proactiveChatScheduler] generateGreeting failed for ${character.display_name}:`, err.message);
+    console.error(`⚡ generateGreeting failed for ${character.display_name}:`, err.message);
     // 兜底问候语
     return `${userName}，在干嘛呢？`;
   }
@@ -361,7 +363,7 @@ function writeProactiveMessage(character, content) {
   ).run(conversationId, rawId, content);
   const msgId = msgResult.lastInsertRowid;
 
-  console.log(`[proactiveChatScheduler] Written proactive message for ${character.display_name}: raw=${rawId}, msg=${msgId}`);
+  console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msg=${msgId}`);
 
   return { rawId, msgId };
 }
@@ -383,7 +385,7 @@ function writeProactiveMessage(character, content) {
  */
 async function generateImageForGreeting(character, greeting, motiveName, msgId) {
   try {
-    console.log(`[proactiveChatScheduler] Generating image for ${character.display_name} (motive: ${motiveName})...`);
+    console.log(`⚡ Generating image for ${character.display_name} (motive: ${motiveName})...`);
 
     // 1. LLM 生成画面描述 prompt
     const systemRules = getSystemRules({ roleplay: false });
@@ -424,21 +426,21 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
       const clean = imagePromptText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
       prompt = JSON.parse(clean).prompt;
     } catch {
-      console.warn('[proactiveChatScheduler] Failed to parse image prompt JSON, using raw text');
+      console.warn('⚡ Failed to parse image prompt JSON, using raw text');
       prompt = imagePromptText.trim();
     }
 
     if (!prompt || prompt.length < 5) {
-      console.warn('[proactiveChatScheduler] Image prompt too short, skipping image generation');
+      console.warn('⚡ Image prompt too short, skipping image generation');
       return null;
     }
 
-    console.log(`[proactiveChatScheduler] Image prompt: "${prompt.slice(0, 100)}..."`);
+    console.log(`⚡ Image prompt: "${prompt.slice(0, 100)}..."`);
 
     // 2. 提交 ComfyUI 生图
     const result = await generateImage(prompt);
     if (!result.success || !result.images?.length) {
-      console.warn(`[proactiveChatScheduler] Image generation failed: ${result.error || 'no images'}`);
+      console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;
     }
 
@@ -457,10 +459,10 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
       .run(JSON.stringify(urls), msgId);
 
-    console.log(`[proactiveChatScheduler] Image saved to msg ${msgId}: ${urls.length} file(s)`);
+    console.log(`⚡ Image saved to msg ${msgId}: ${urls.length} file(s)`);
     return urls;
   } catch (err) {
-    console.error(`[proactiveChatScheduler] generateImageForGreeting failed:`, err.message);
+    console.error(`⚡ generateImageForGreeting failed:`, err.message);
     return null;
   }
 }
@@ -482,7 +484,7 @@ export function updateNextProactiveAt(characterId, score) {
   db.prepare('UPDATE characters SET next_proactive_at = ? WHERE id = ?')
     .run(toSQLiteDate(nextAt), characterId);
 
-  console.log(`[proactiveChatScheduler] ${characterId}: score=${score.toFixed(3)}, interval=${intervalHours.toFixed(1)}h (jitter=${jitter.toFixed(2)}), next=${nextAt}`);
+  console.log(`⚡ ${characterId}: score=${score.toFixed(3)}, interval=${intervalHours.toFixed(1)}h (jitter=${jitter.toFixed(2)}), next=${nextAt}`);
 }
 
 /**
@@ -505,14 +507,14 @@ function initializeFirstTimes() {
       .run(toSQLiteDate(nextAt), c.id);
     count++;
   }
-  console.log(`[proactiveChatScheduler] Initialized ${count} character(s) with first proactive times`);
+  console.log(`⚡ Initialized ${count} character(s) with first proactive times`);
 }
 
 // ── 核心 tick ──
 
 async function tick() {
   if (processing) {
-    console.log('[proactiveChatScheduler] Previous tick still processing, skip this tick');
+    console.log('⚡ [Line A·VAD]  previous tick still processing, skip');
     return;
   }
 
@@ -539,14 +541,14 @@ async function tick() {
     // 未回复连续 ≥3：跳过，不再主动发（直到 user 回复后重置）
     const streak = candidate.proactive_streak || 0;
     if (streak >= 3) {
-      console.log(`[proactiveChatScheduler] Skipping ${candidate.display_name}: unanswered streak=${streak}`);
+      console.log(`⚡ Skipping ${candidate.display_name}: unanswered streak=${streak}`);
       updateNextProactiveAt(candidate.id, 0);
       return;
     }
 
     processing = true;
     const conversationId = `char_${candidate.id}`;
-    console.log(`[proactiveChatScheduler] Processing ${candidate.display_name}... (streak=${streak})`);
+    console.log(`⚡ Processing ${candidate.display_name}... (streak=${streak})`);
 
     // 1. 获取上次 user 发言时间（不是 assistant 的主动消息时间）
     const lastMsg = db.prepare(`
@@ -571,7 +573,7 @@ async function tick() {
 
     // 4. 计算 proactive_score
     const score = computeProactiveScore(hoursSince, affinity, compositeVad);
-    console.log(`[proactiveChatScheduler] ${candidate.display_name}: hoursSince=${hoursSince}, affinity=${affinity}, vad=(${compositeVad.valence.toFixed(2)},${compositeVad.arousal.toFixed(2)},${compositeVad.dominance.toFixed(2)}), score=${score.toFixed(3)}`);
+    console.log(`⚡ ${candidate.display_name}: hoursSince=${hoursSince}, affinity=${affinity}, vad=(${compositeVad.valence.toFixed(2)},${compositeVad.arousal.toFixed(2)},${compositeVad.dominance.toFixed(2)}), score=${score.toFixed(3)}`);
 
     // 5. 获取最近对话摘要（取最近1条，提供话题引导）
     let recentSummary = null;
@@ -590,7 +592,7 @@ async function tick() {
 
     // 6. 生成开场白
     const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, streak);
-    console.log(`[proactiveChatScheduler] ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
+    console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
     const { rawId, msgId } = writeProactiveMessage(candidate, greeting);
@@ -605,7 +607,7 @@ async function tick() {
       character_id: candidate.id,
       display_name: candidate.display_name,
       avatar_path: candidate.avatar_path,
-      avatar_color: candidate.avatar_color,
+      
       content: greeting,
       msg_id: msgId,
       raw_id: rawId,
@@ -620,9 +622,9 @@ async function tick() {
     // 8. 更新下次时间
     updateNextProactiveAt(candidate.id, score);
 
-    console.log(`[proactiveChatScheduler] Done: ${candidate.display_name} (streak=${streak + 1})`);
+    console.log(`⚡ [Line A·VAD]  done: ${candidate.display_name} (streak=${streak + 1}) — next in ${fmtIn(CHECK_INTERVAL / 60000)}`);
   } catch (err) {
-    console.error('[proactiveChatScheduler] tick error:', err.message);
+    console.error('⚡ [Line A·VAD]  tick error:', err.message);
   } finally {
     processing = false;
   }
@@ -637,13 +639,25 @@ function freqToMinutes(freq) {
   return Math.round(10 + (1 - freq) / 0.9 * 230);
 }
 
-function stopFreqLine() {
-  if (freqTimer) {
-    clearTimeout(freqTimer);
-    freqTimer = null;
+function startupToMinutes(freq) {
+  // freq 0.1 → 10min, freq 1.0 → 6min（启动线更密集）
+  return Math.round(10 - (freq - 0.1) / 0.9 * 4);
+}
+
+function fmtIn(minutes) {
+  if (minutes >= 60) {
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return m > 0 ? `${h}时${m}分后` : `${h}时后`;
   }
+  return `${Math.round(minutes)}分后`;
+}
+
+// ── 线路 B：频率强制线 ──
+
+function stopFreqLine() {
+  if (freqTimer) { clearTimeout(freqTimer); freqTimer = null; }
   freqRunning = false;
-  console.log('[proactiveChatScheduler] Freq line stopped');
 }
 
 function startFreqLine() {
@@ -653,46 +667,126 @@ function startFreqLine() {
 
   freqRunning = true;
   const intervalMin = freqToMinutes(freq);
-  const jitterMin = -5 + Math.random() * 10; // ±5 分钟
+  const jitterMin = -5 + Math.random() * 10;
   const delayMin = Math.max(1, intervalMin + jitterMin);
 
-  console.log(`[proactiveChatScheduler] Freq line started: freq=${freq}, interval=${intervalMin}min, first=${delayMin.toFixed(0)}min`);
-
-  // 启动后首次在 delayMin 分钟后触发，之后每隔 intervalMin 分钟 ±5min 随机
   const scheduleNext = () => {
     if (!freqRunning) return;
-    const jitter = -5 + Math.random() * 10;
-    const nextMin = Math.max(1, intervalMin + jitter);
+    const nextMin = Math.max(1, intervalMin + (-5 + Math.random() * 10));
     freqTimer = setTimeout(() => {
       if (!freqRunning) return;
-      console.log('[proactiveChatScheduler] Freq tick — forcing proactive...');
-      forceProactiveNow().then(() => {
+      console.log(`⚡ [Line B·Freq]  firing...`);
+      forceProactiveNow().then((r) => {
+        if (r) {
+          console.log(`⚡ [Line B·Freq]  force done: ${r.character} (${r.motive})`);
+        } else {
+          console.log('⚡ [Line B·Freq]  no eligible character (all disabled or streak≥3)');
+        }
+        if (freqRunning) scheduleNext();
+      }).catch((err) => {
+        console.error('⚡ [Line B·Freq]  unexpected error:', err.message);
         if (freqRunning) scheduleNext();
       });
     }, nextMin * 60_000);
   };
 
   freqTimer = setTimeout(scheduleNext, delayMin * 60_000);
+  return delayMin;
+}
+
+// ── 线路 C：启动强制线 ──
+
+function stopStartupLine() {
+  if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+  startupRunning = false;
+}
+
+function startStartupLine() {
+  stopStartupLine();
+  const freq = config.features.proactiveChatFreq;
+  if (freq <= 0) return;
+
+  startupRunning = true;
+  const intervalMin = startupToMinutes(freq);
+
+  const scheduleNext = (isFirst = false) => {
+    if (!startupRunning) return;
+    const nextMin = isFirst
+      ? Math.max(0.5, 1 + Math.random() * 2)                     // 首发: 1~3min
+      : Math.max(1, intervalMin + (-3 + Math.random() * 6));     // 之后: interval±3min
+    startupTimer = setTimeout(() => {
+      if (!startupRunning) { console.log('⚡ [Line C·Startup] skipped (stopped)'); return; }
+      console.log(`⚡ [Line C·Startup] firing...`);
+      forceProactiveNow().then((r) => {
+        if (r) {
+          console.log(`⚡ [Line C·Startup] force done: ${r.character} (${r.motive})`);
+        } else {
+          console.log('⚡ [Line C·Startup] no eligible character (all disabled or streak≥3)');
+        }
+        if (startupRunning) scheduleNext();
+      }).catch((err) => {
+        console.error('⚡ [Line C·Startup] unexpected error:', err.message);
+        if (startupRunning) scheduleNext();
+      });
+    }, nextMin * 60_000);
+  };
+
+  // 首发：1~3min 后触发（外部已等 60s，这里不需要再等）
+  const firstMin = 1 + Math.random() * 2;
+  scheduleNext(true);
+  return firstMin;
 }
 
 /**
  * 当频率配置变更时调用（由 config 路由触发）
  */
 export function restartProactiveFreq() {
-  if (freqRunning) startFreqLine();
+  startFreqLine();
+  startStartupLine();
 }
 
-export function startProactiveChatScheduler() {
-  console.log('[proactiveChatScheduler] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
+// ── 启动：三条线并行 ──
 
-  // 启动后先等 60 秒再首次检查，让服务稳定并确保 DB 迁移已完成
+export function startProactiveChatScheduler() {
+  console.log('⚡ [Proactive] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
+
+  const freq = config.features.proactiveChatFreq;
+  if (freq <= 0) {
+    console.log('⚡ [Proactive] freq=0, all lines disabled');
+    return;
+  }
+
+  // 线路 A：VAD/好感度调度（60s 后首次检查，之后每 5min）
   setTimeout(() => {
     tick();
     timer = setInterval(tick, CHECK_INTERVAL);
+    const nextAt = new Date(Date.now() + CHECK_INTERVAL);
+    console.log(`⚡ [Line A·VAD]     next trigger at ${nextAt.toLocaleString('zh-CN', { hour12: false })} (in ${fmtIn(CHECK_INTERVAL / 60000)})`);
   }, 60_000);
+  console.log(`⚡ [Line A·VAD]     first trigger in ${fmtIn(1)} (after DB init)`);
 
-  // 频率线：启动后 60s + 延迟（方便首次调试）
+  // 线路 B：频率强制线（60s 后启动，先打印预估）
+  if (freq > 0) {
+    console.log(`⚡ [Line B·Freq]    first trigger in ${fmtIn(1 + freqToMinutes(freq))} (after DB init, interval ${fmtIn(freqToMinutes(freq))}±5min)`);
+  } else {
+    console.log('⚡ [Line B·Freq]    disabled (freq=0)');
+  }
   setTimeout(() => startFreqLine(), 60_000);
+
+  // 线路 C：启动强制线（和 B 线一样 60s 后启动，首发之后按 startupToMinutes 间隔）
+  setTimeout(() => {
+    const firstMin = startStartupLine();
+    if (firstMin != null) {
+      console.log(`⚡ [Line C·Startup] next trigger in ${fmtIn(firstMin)} (interval ${fmtIn(startupToMinutes(freq))}±3min)`);
+    } else {
+      console.log('⚡ [Line C·Startup] disabled (freq=0)');
+    }
+  }, 60_000);
+  if (freq > 0) {
+    console.log(`⚡ [Line C·Startup] first trigger in ${fmtIn(1 + startupToMinutes(freq))} (after DB init, interval ${fmtIn(startupToMinutes(freq))}±3min)`);
+  } else {
+    console.log('⚡ [Line C·Startup] disabled (freq=0)');
+  }
 }
 
 /**
@@ -701,20 +795,20 @@ export function startProactiveChatScheduler() {
  * @returns {Promise<{ character: string, motive: string, greeting: string } | null>}
  */
 export async function forceProactiveNow() {
-  const db = getDb();
-
-  const candidates = db.prepare(
+  try {
+    const db = getDb();
+    const candidates = db.prepare(
     'SELECT * FROM characters WHERE proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3'
   ).all();
 
   if (candidates.length === 0) {
-    console.log('[proactiveChatScheduler] force: no eligible characters (all disabled or streak≥3)');
+    console.log('⚡ force: no eligible characters (all disabled or streak≥3)');
     return null;
   }
 
   const candidate = candidates[Math.floor(Math.random() * candidates.length)];
   const conversationId = `char_${candidate.id}`;
-  console.log(`[proactiveChatScheduler] force: picked ${candidate.display_name}`);
+  console.log(`⚡ force: picked ${candidate.display_name}`);
 
   const lastMsg = db.prepare(`
     SELECT created_at FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1
@@ -754,7 +848,7 @@ export async function forceProactiveNow() {
     character_id: candidate.id,
     display_name: candidate.display_name,
     avatar_path: candidate.avatar_path,
-    avatar_color: candidate.avatar_color,
+    
     content: greeting,
     msg_id: msgId,
     raw_id: rawId,
@@ -764,8 +858,12 @@ export async function forceProactiveNow() {
 
   updateNextProactiveAt(candidate.id, score);
 
-  console.log(`[proactiveChatScheduler] force: done ${candidate.display_name} (motive: ${motive.name})`);
-  return { character: candidate.display_name, motive: motive.name, greeting };
+    console.log(`⚡ force: done ${candidate.display_name} (motive: ${motive.name})`);
+    return { character: candidate.display_name, motive: motive.name, greeting };
+  } catch (err) {
+    console.error('⚡ forceProactiveNow error:', err.message);
+    return null;
+  }
 }
 
 export function stopProactiveChatScheduler() {
@@ -774,5 +872,6 @@ export function stopProactiveChatScheduler() {
     timer = null;
   }
   stopFreqLine();
-  console.log('[proactiveChatScheduler] Stopped');
+  stopStartupLine();
+  console.log('⚡ All lines stopped');
 }

@@ -56,7 +56,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: props.data.avatar_color || '#e07b6c' }
+  return { background: '#e07b6c' }
 })
 </script>
 

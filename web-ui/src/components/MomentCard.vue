@@ -183,7 +183,7 @@ const hiddenCount = computed(() => Math.max(0, comments.value.length - MAX_VISIB
 const avatarStyle = computed(() => {
   const p = props.post
   if (p.avatar_path) return { backgroundImage: `url(${p.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: p.avatar_color || '#e07b6c' }
+  return { background: '#e07b6c' }
 })
 
 // 首次加载评论

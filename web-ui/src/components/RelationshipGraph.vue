@@ -179,7 +179,7 @@ async function buildGraph() {
       id: center.id,
       display_name: center.display_name,
       avatar_path: center.avatar_path,
-      avatar_color: center.avatar_color,
+      
       isCenter: true,
     },
     draggable: false,
@@ -201,7 +201,7 @@ async function buildGraph() {
         id: c.id,
         display_name: c.display_name,
         avatar_path: c.avatar_path,
-        avatar_color: c.avatar_color,
+        
         isCenter: false,
       },
       draggable: true,

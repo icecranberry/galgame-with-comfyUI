@@ -14,8 +14,8 @@ router.get('/', (req, res) => {
       ur.relationship_text,
       ur.created_at,
       c.display_name AS to_display_name,
-      c.avatar_path AS to_avatar_path,
-      c.avatar_color AS to_avatar_color
+      c.avatar_path AS to_avatar_path
+      
     FROM user_relationships ur
     JOIN characters c ON c.id = ur.character_id
     WHERE ur.relationship_text != ''
@@ -54,8 +54,8 @@ router.post('/', (req, res) => {
       SELECT
         ur.*,
         c.display_name AS to_display_name,
-        c.avatar_path AS to_avatar_path,
-        c.avatar_color AS to_avatar_color
+        c.avatar_path AS to_avatar_path
+        
       FROM user_relationships ur
       JOIN characters c ON c.id = ur.character_id
       WHERE ur.id = ?
@@ -92,8 +92,8 @@ router.put('/:id', (req, res) => {
     SELECT
       ur.*,
       c.display_name AS to_display_name,
-      c.avatar_path AS to_avatar_path,
-      c.avatar_color AS to_avatar_color
+      c.avatar_path AS to_avatar_path
+      
     FROM user_relationships ur
     JOIN characters c ON c.id = ur.character_id
     WHERE ur.id = ?

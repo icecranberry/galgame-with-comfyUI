@@ -40,7 +40,7 @@ router.get('/unread', (_req, res) => {
   const db = getDb();
   try {
     const rows = db.prepare(`
-      SELECT c.id, c.display_name, c.avatar_path, c.avatar_color,
+      SELECT c.id, c.display_name, c.avatar_path,
              m.content, m.created_at as last_message_at, m.id as msg_id
       FROM characters c
       JOIN messages m ON m.id = (
@@ -57,7 +57,7 @@ router.get('/unread', (_req, res) => {
       character_id: r.id,
       display_name: r.display_name,
       avatar_path: r.avatar_path,
-      avatar_color: r.avatar_color,
+      
       content: r.content,
       created_at: toISO(r.last_message_at),
       msg_id: r.msg_id,

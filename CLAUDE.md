@@ -110,8 +110,8 @@ project-root/
 │  ├─ config.py
 │  └─ download_model.py     # 模型下载脚本
 ├─ workflow/                # ComfyUI workflow 模板 + 提示词规则
-│  ├─ skill外置AI智能体使用的单图工作流.json
-│  └─ 提示词生成助手.txt
+│  ├─ 制图图工作流.json
+│  └─ Anima提示词优化助手.txt
 ├─ scripts/
 │  ├─ dev.mjs               # 一键 dev 启动脚本（端口清理 → 环境检查 → 启动三进程）
 │  └─ stop.mjs              # 一键停止所有 dev 服务

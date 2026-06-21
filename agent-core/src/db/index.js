@@ -67,10 +67,10 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- 情绪快照表
+    -- 情绪快照表（每 conversation 仅保留最新一条）
     CREATE TABLE IF NOT EXISTS emotion_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      conversation_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL UNIQUE,
       after_msg_id INTEGER REFERENCES messages(id),
       valence REAL NOT NULL DEFAULT 0.5,
       arousal REAL NOT NULL DEFAULT 0.5,
@@ -189,7 +189,6 @@ function initSchema(db) {
       name TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       base_prompt TEXT NOT NULL,
-      avatar_color TEXT,
       avatar_path TEXT,
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
       moments_disabled INTEGER DEFAULT 0,
@@ -235,7 +234,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_fragments_conv ON memory_fragments(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_type ON memory_fragments(fragment_type);
     CREATE INDEX IF NOT EXISTS idx_summaries_conv ON rolling_summaries(conversation_id);
-    CREATE INDEX IF NOT EXISTS idx_emotion_conv ON emotion_snapshots(conversation_id);
+
     CREATE INDEX IF NOT EXISTS idx_image_tasks_conv ON image_tasks(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
@@ -267,6 +266,12 @@ function initSchema(db) {
 
   // 迁移: characters 表新增 next_proactive_at 和 proactive_disabled 列（主动聊天）
   migrateProactiveSchema(db);
+
+  // 迁移: emotion_snapshots 改为每 conversation 仅保留最新一条（UNIQUE 约束 + 清理历史）
+  migrateEmotionSnapshotsUnique(db);
+
+  // 迁移: 好感度回归系统 — user_relationships 加 last_interaction_at + gift_history 表
+  migrateAffinityRegressionSchema(db);
 
   // 种子: 默认全局规则
   seedGlobalRules(db);
@@ -300,6 +305,55 @@ function initSchema(db) {
     } else {
       throw writeErr;
     }
+  }
+}
+
+/**
+ * 迁移: emotion_snapshots 改为每 conversation 仅保留最新一条
+ * - 清理历史数据（只保留每个 conversation_id 的 max(id)）
+ * - 将 conversation_id 改为 UNIQUE 约束（如果尚未）
+ */
+function migrateEmotionSnapshotsUnique(db) {
+  try {
+    const tableInfo = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'emotion_snapshots'`).get();
+    if (!tableInfo) return; // 表不存在，CREATE TABLE 会建新的
+
+    // 删除历史数据：每个 conversation_id 只保留最新一条
+    const deleted = db.prepare(`
+      DELETE FROM emotion_snapshots
+      WHERE id NOT IN (SELECT MAX(id) FROM emotion_snapshots GROUP BY conversation_id)
+    `).run();
+    if (deleted.changes > 0) {
+      console.log(`[db] emotion_snapshots cleaned: ${deleted.changes} old snapshots removed`);
+    }
+
+    // 如果 conversation_id 还没有 UNIQUE 约束，重建表
+    if (!/UNIQUE/.test(tableInfo.sql)) {
+      db.exec(`
+        CREATE TABLE emotion_snapshots_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_id TEXT NOT NULL UNIQUE,
+          after_msg_id INTEGER REFERENCES messages(id),
+          valence REAL NOT NULL DEFAULT 0.5,
+          arousal REAL NOT NULL DEFAULT 0.5,
+          dominance REAL NOT NULL DEFAULT 0.5,
+          mood_valence REAL DEFAULT 0.5,
+          mood_arousal REAL DEFAULT 0.5,
+          mood_dominance REAL DEFAULT 0.5,
+          dominant_emotion TEXT,
+          affinity REAL,
+          affinity_delta REAL,
+          reason TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO emotion_snapshots_new SELECT * FROM emotion_snapshots;
+        DROP TABLE emotion_snapshots;
+        ALTER TABLE emotion_snapshots_new RENAME TO emotion_snapshots;
+      `);
+      console.log('[db] emotion_snapshots rebuilt with UNIQUE constraint');
+    }
+  } catch (err) {
+    console.log('[db] migrateEmotionSnapshotsUnique error:', err.message);
   }
 }
 
@@ -386,6 +440,56 @@ function migrateProactiveSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateProactiveSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 好感度回归系统
+ * - user_relationships 表新增 last_interaction_at（记录最近一次互动时间）
+ * - 新建 gift_history 表（送礼记录，含冷却检查）
+ */
+function migrateAffinityRegressionSchema(db) {
+  try {
+    // user_relationships 表
+    const urCols = db.prepare(`PRAGMA table_info(user_relationships)`).all();
+    if (!urCols.find(c => c.name === 'last_interaction_at')) {
+      db.exec(`ALTER TABLE user_relationships ADD COLUMN last_interaction_at DATETIME`);
+      console.log('[db] Added user_relationships.last_interaction_at column');
+    }
+
+    // gift_history 表：全局冷却（跟系统不跟角色），仅需 gift_type + created_at
+    const ghCols = db.prepare(`PRAGMA table_info(gift_history)`).all();
+    const hasCharId = ghCols.some(c => c.name === 'character_id');
+    if (ghCols.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS gift_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      console.log('[db] Created gift_history table (global cooldown)');
+    } else if (hasCharId) {
+      // 迁移：去掉 character_id，改为全局冷却，每种礼物只保留最新一条
+      db.exec(`DROP TABLE IF EXISTS gift_history_new`);
+      db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.exec(`INSERT INTO gift_history_new (gift_type, created_at) SELECT gift_type, MAX(created_at) FROM gift_history GROUP BY gift_type`);
+      db.exec(`DROP TABLE gift_history`);
+      db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
+      console.log('[db] gift_history migrated to global cooldown (removed character_id, deduplicated)');
+    }
+
+    // 启动时去重：每种礼物只保留最新一条
+    for (const type of ['small', 'large']) {
+      const rows = db.prepare(`SELECT id FROM gift_history WHERE gift_type = ? ORDER BY id DESC`).all(type);
+      if (rows.length > 1) {
+        const keepId = rows[0].id;
+        db.prepare(`DELETE FROM gift_history WHERE gift_type = ? AND id != ?`).run(type, keepId);
+        console.log(`[db] gift_history pruned ${rows.length - 1} old ${type} row(s), kept #${keepId}`);
+      }
+    }
+  } catch (err) {
+    console.log('[db] migrateAffinityRegressionSchema error:', err.message);
   }
 }
 

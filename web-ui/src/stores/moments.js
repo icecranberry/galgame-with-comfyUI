@@ -48,7 +48,6 @@ export const useMomentsStore = defineStore('moments', () => {
           character_id: id,
           display_name: p.display_name || '未知',
           avatar_path: p.avatar_path || '',
-          avatar_color: p.avatar_color || '#e07b6c',
           _latestPostAt: postTime,
         })
       }

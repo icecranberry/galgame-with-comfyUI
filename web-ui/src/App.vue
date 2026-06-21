@@ -255,7 +255,7 @@ textarea { resize: vertical; font-family: inherit; }
 /* ── 临时调试按钮 ── */
 .debug-force-btn {
   position: fixed;
-  bottom: 16px;
+  bottom: 300px;
   right: 16px;
   width: 44px;
   height: 44px;

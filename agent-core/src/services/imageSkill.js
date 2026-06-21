@@ -3,7 +3,7 @@
  *
  * 流程:
  *   1. 接收 {"prompt":"..."} 中的中文画面描述
- *   2. 用提示词生成助手.txt 规则，调 DeepSeek 优化为英文 prompt
+ *   2. 用Anima提示词优化助手.txt 规则，调 DeepSeek 优化为英文 prompt
  *   3. 加载 workflow，按节点 title 注入参数（画师串/质量提示词/画面描述/宽/高）
  *   4. 提交 ComfyUI → 轮询 → 下载 base64
  *   5. 兜底: 本地 output/bot/ 文件夹
@@ -17,8 +17,8 @@ import { submitWorkflow } from './comfyClient.js';
 import { config } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = path.join(__dirname, '..', '..', '..', 'workflow', 'skill外置AI智能体使用的单图工作流.json');
-const RULES_PATH = path.join(__dirname, '..', '..', '..', 'workflow', '提示词生成助手.txt');
+const WORKFLOW_PATH = path.join(__dirname, '..', '..', '..', 'workflow', '制图工作流.json');
+const RULES_PATH = path.join(__dirname, '..', '..', '..', 'workflow', 'Anima提示词优化助手.txt');
 
 const PROMPT_PLACEHOLDER = '请输入画面描述';
 
@@ -39,7 +39,7 @@ let _rulesCache = '';
 function loadRules() {
   if (_rulesCache) return _rulesCache;
   if (!fs.existsSync(RULES_PATH)) {
-    console.warn('[imageSkill] 提示词生成助手.txt not found, using raw prompt');
+    console.warn('[imageSkill] Anima提示词优化助手.txt not found, using raw prompt');
     return '';
   }
   _rulesCache = fs.readFileSync(RULES_PATH, 'utf8');

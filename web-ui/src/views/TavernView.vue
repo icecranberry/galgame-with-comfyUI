@@ -126,7 +126,7 @@
       >
         <div
           class="char-card-avatar"
-          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
+          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
         >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-card-name">{{ c.display_name }}</div>
         <div class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
@@ -154,7 +154,7 @@
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
                 rows="4"
-                placeholder="例：安比·德玛拉（绝区零）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
+                placeholder="例：安比·德玛拉（绝区零）/ 芙宁娜（原神）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
               ></textarea>
@@ -264,7 +264,7 @@
               <div class="detail-avatar-row">
                 <div
                   class="detail-avatar clickable"
-                  :style="detail.char?.avatar_path ? { backgroundImage: `url(${detail.char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: detail.char?.avatar_color || '#e07b6c' }"
+                  :style="detail.char?.avatar_path ? { backgroundImage: `url(${detail.char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
                   @click="openCharAvatarEditor"
                 >{{ detail.char?.avatar_path ? '' : detail.char?.display_name?.charAt(0) }}</div>
                 <div>

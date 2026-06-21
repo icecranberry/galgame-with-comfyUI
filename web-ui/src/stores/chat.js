@@ -113,13 +113,6 @@ export const useChatStore = defineStore('chat', () => {
     return result
   }
 
-  async function updateAvatarColor(color) {
-    const id = activeCharId.value
-    if (!id) return
-    await api.updateCharacter(id, { avatar_color: color })
-    await loadCharacters()
-  }
-
   async function uploadAvatar(base64) {
     const id = activeCharId.value
     if (!id) return
@@ -514,5 +507,5 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
 })
