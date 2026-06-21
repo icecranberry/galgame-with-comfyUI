@@ -379,6 +379,7 @@ function writeProactiveMessage(character, content) {
  * @param {string} greeting - 已生成的开场白文本
  * @param {string} motiveName - 动机名称（用于 prompt 引导）
  * @param {number} msgId - messages 表的 id
+ * @returns {Promise<string[]|null>} 图片 URL 数组，失败返回 null
  */
 async function generateImageForGreeting(character, greeting, motiveName, msgId) {
   try {
@@ -429,7 +430,7 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
 
     if (!prompt || prompt.length < 5) {
       console.warn('[proactiveChatScheduler] Image prompt too short, skipping image generation');
-      return;
+      return null;
     }
 
     console.log(`[proactiveChatScheduler] Image prompt: "${prompt.slice(0, 100)}..."`);
@@ -438,7 +439,7 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     const result = await generateImage(prompt);
     if (!result.success || !result.images?.length) {
       console.warn(`[proactiveChatScheduler] Image generation failed: ${result.error || 'no images'}`);
-      return;
+      return null;
     }
 
     // 3. 落盘 base64 图片到 data/images/ + 更新 messages 表
@@ -457,9 +458,10 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
       .run(JSON.stringify(urls), msgId);
 
     console.log(`[proactiveChatScheduler] Image saved to msg ${msgId}: ${urls.length} file(s)`);
+    return urls;
   } catch (err) {
     console.error(`[proactiveChatScheduler] generateImageForGreeting failed:`, err.message);
-    // 生图失败不影响消息本身，静默处理
+    return null;
   }
 }
 
@@ -593,7 +595,12 @@ async function tick() {
     // 7. 写入消息到 DB
     const { rawId, msgId } = writeProactiveMessage(candidate, greeting);
 
-    // 7.5 广播主动消息到 SSE 客户端（前端实时感知）
+    // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
+    let imageUrls = null;
+    if (motive.imageGen) {
+      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId);
+    }
+
     broadcastProactiveMessage({
       character_id: candidate.id,
       display_name: candidate.display_name,
@@ -602,13 +609,9 @@ async function tick() {
       content: greeting,
       msg_id: msgId,
       raw_id: rawId,
+      images: imageUrls || [],
       created_at: new Date().toISOString(),
     });
-
-    // 7.6 如果该动机启用了配图，异步生图（不阻塞 tick）
-    if (motive.imageGen) {
-      generateImageForGreeting(candidate, greeting, motive.name, msgId);
-    }
 
     // 7.7 递增未回复连续计数（DB 持久化）
     db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
@@ -741,6 +744,12 @@ export async function forceProactiveNow() {
   db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
     .run(streak + 1, candidate.id);
 
+  // 如果需要配图，先生成图片再一起推送；否则直接推送
+  let imageUrls = null;
+  if (motive.imageGen) {
+    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId);
+  }
+
   broadcastProactiveMessage({
     character_id: candidate.id,
     display_name: candidate.display_name,
@@ -749,12 +758,9 @@ export async function forceProactiveNow() {
     content: greeting,
     msg_id: msgId,
     raw_id: rawId,
+    images: imageUrls || [],
     created_at: new Date().toISOString(),
   });
-
-  if (motive.imageGen) {
-    generateImageForGreeting(candidate, greeting, motive.name, msgId);
-  }
 
   updateNextProactiveAt(candidate.id, score);
 
