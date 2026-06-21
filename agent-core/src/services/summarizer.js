@@ -9,6 +9,7 @@
 import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { upsertVector } from './vectorClient.js';
+import { config } from '../config.js';
 
 /** 去掉消息末尾的 {"prompt":"..."} JSON 标签 */
 function stripPromptJson(content) {
@@ -19,7 +20,11 @@ const SUMMARIZE_INTERVAL = 20; // 每 20 条消息触发一次
 
 const SUMMARY_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
 
-你是一个对话摘要生成器。请将以下对话片段压缩为 200-400 字的摘要，只保留关键信息：
+你是一个对话摘要生成器。请将以下对话片段压缩为 200-400 字的摘要，只保留关键信息。
+
+对话角色说明：
+- [user] 是真人用户，名字是「{{user_name}}」。摘要中称其为"{{user_name}}"。
+- [assistant] 是 AI 角色，名字是「{{character_name}}」。摘要中称其为"{{character_name}}"。
 
 {{previous_summary}}
 
@@ -95,6 +100,16 @@ export async function maybeSummarize(conversationId) {
     .map(m => `[${m.role}]: ${stripPromptJson(m.content)}`)
     .join('\n');
 
+  // 解析角色名和用户名
+  const charIdMatch = conversationId.match(/^char_(\d+)$/);
+  let characterName = '角色';
+  if (charIdMatch) {
+    const char = db.prepare('SELECT display_name FROM characters WHERE id = ?')
+      .get(parseInt(charIdMatch[1], 10));
+    if (char) characterName = char.display_name;
+  }
+  const userName = config.user.nickname || '用户';
+
   // 调用 DeepSeek 生成摘要
   let summary;
   try {
@@ -104,6 +119,8 @@ export async function maybeSummarize(conversationId) {
         {
           role: 'user',
           content: SUMMARY_PROMPT
+            .replace('{{user_name}}', userName)
+            .replace('{{character_name}}', characterName)
             .replace('{{previous_summary}}', previousSummary)
             .replace('{{recent_messages}}', recentText),
         },

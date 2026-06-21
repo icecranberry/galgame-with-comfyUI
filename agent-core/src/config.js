@@ -33,14 +33,15 @@ export const config = {
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
     memory: process.env.FEATURE_MEMORY !== 'false',
-    autoImageJudge: process.env.FEATURE_AUTO_IMAGE_JUDGE !== 'false', // 默认开
     promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE === 'true', // 默认关
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
-    realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true' // 默认关：好感度实时显示
+    realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
+    proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
+    proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
   },
   user: {
-    nickname: process.env.USER_NICKNAME || '',
+    nickname: process.env.USER_NICKNAME || '用户',
     gender: process.env.USER_GENDER || '',
     appearance: process.env.USER_APPEARANCE || '',
     persona: process.env.USER_PERSONA || '',
@@ -85,6 +86,18 @@ export function updateFeatureFlag(key, value) {
   console.log(`[config] Feature ${key} = ${boolVal}`);
 }
 
+/**
+ * 更新主动聊天频率 0~1
+ * freq=0 → 双线全关；freq>0 → 启用以频率为基准的定时触发线
+ */
+export function updateProactiveFreq(value) {
+  const f = Math.max(0, Math.min(1, parseFloat(value) || 0));
+  config.features.proactiveChatFreq = f;
+  config.features.proactiveChat = f > 0;
+  persistSettingSync('feature_proactiveChatFreq', String(f));
+  console.log(`[config] proactiveChatFreq = ${f}`);
+}
+
 export function getLlmConfig() {
   const key = config.llm.apiKey || '';
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
@@ -120,19 +133,19 @@ export function updateLlmConfig({ apiKey, baseURL, model }) {
 export function updateUserConfig({ nickname, gender, appearance, persona }) {
   if (nickname !== undefined) {
     config.user.nickname = nickname;
-    persistEnv('USER_NICKNAME', nickname);
+    persistSettingSync('user_nickname', nickname);
   }
   if (gender !== undefined) {
     config.user.gender = gender;
-    persistEnv('USER_GENDER', gender);
+    persistSettingSync('user_gender', gender);
   }
   if (appearance !== undefined) {
     config.user.appearance = appearance;
-    persistEnv('USER_APPEARANCE', appearance);
+    persistSettingSync('user_appearance', appearance);
   }
   if (persona !== undefined) {
     config.user.persona = persona;
-    persistEnv('USER_PERSONA', persona);
+    persistSettingSync('user_persona', persona);
   }
   console.log('[config] User settings saved');
 }

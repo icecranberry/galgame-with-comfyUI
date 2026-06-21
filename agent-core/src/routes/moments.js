@@ -342,18 +342,35 @@ async function generateMomentPost(character) {
   ];
   const pickedStyle = STYLES[Math.floor(Math.random() * STYLES.length)];
 
-  // 2.5 40% 概率：多人模式 —— 随机挑选一条当前角色定义的关系（单向：from only）
-  let multiPerson = null;
-  if (Math.random() < 0.4) {
-    const allRels = db.prepare(`
-      SELECT cr.relationship_text,
-             c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
-      FROM character_relationships cr
-      JOIN characters c ON c.id = cr.to_character_id AND c.is_active = 1
-      WHERE cr.from_character_id = ?
-    `).all(character.id);
+  // 2.5 Sigmoid 模型：根据角色关系网数量决定多人概率
+  // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k × (R - R_mid)))
+  const MULTI_P_MIN = 0.30;  // 最低多人概率
+  const MULTI_P_MAX = 0.80;  // 最高多人概率（社交达人，永远留 20% 单人空间）
+  const MULTI_K = 1.0;       // 陡峭度：越大曲线越陡，1.0 时 R≈4~6 为快速拉升区
+  const MULTI_R_MID = 5;     // 拐点：R=5 时概率正好 = (P_min+P_max)/2 = 55%
 
-    if (allRels.length > 0) {
+  let multiPerson = null;
+  const relCount = db.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM character_relationships cr
+    JOIN characters c ON c.id = cr.to_character_id
+    WHERE cr.from_character_id = ?
+  `).get(character.id)?.cnt || 0;
+
+  // R=0 时没有关系网对象，强制单人
+  if (relCount > 0) {
+    const multiProb = MULTI_P_MIN + (MULTI_P_MAX - MULTI_P_MIN) / (1 + Math.exp(-MULTI_K * (relCount - MULTI_R_MID)));
+    console.log(`[moments] ${character.display_name} relCount=${relCount}, multiProb=${(multiProb * 100).toFixed(0)}%`);
+
+    if (Math.random() < multiProb) {
+      const allRels = db.prepare(`
+        SELECT cr.relationship_text,
+               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
+        FROM character_relationships cr
+        JOIN characters c ON c.id = cr.to_character_id
+        WHERE cr.from_character_id = ?
+      `).all(character.id);
+
       const picked = allRels[Math.floor(Math.random() * allRels.length)];
       // 将对方人格中的「你」替换为角色名（注意：你的/你们的/你自己 等复合形式）
       const otherPersona = picked.other_prompt
@@ -400,7 +417,8 @@ async function generateMomentPost(character) {
 - 只输出 JSON，不要解释
 - 文案和配图 prompt 必须语义一致
 - text 用中文，imagePrompt 用英文
-- text里禁止输出'#下午茶的仪式感'、'#一个人的盛宴'类似这种tag标签`;
+- text里禁止输出'#下午茶的仪式感'、'#一个人的盛宴'类似这种tag标签
+- 做的事情要符合当前时间，不需要提及现在的时间。除非极度需要说明时间才提及。`;
 
   const now = new Date();
   const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;

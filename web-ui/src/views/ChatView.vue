@@ -13,7 +13,7 @@
         <div class="chat-header-center">
           <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
           <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity" class="header-affinity">
-            ❤️{{ Math.round(chat.realtimeAffinity.affinity) }}
+            <svg class="affinity-heart-icon" viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M512.042667 193.237333a255.914667 255.914667 0 0 1 351.658666 9.728 256 256 0 0 1 10.069334 351.402667l-361.813334 362.325333-361.728-362.325333a256 256 0 0 1 361.813334-361.130667z"/></svg>{{ Math.round(chat.realtimeAffinity.affinity) }}
             <span class="affinity-delta-wrap">
               <Transition name="roll">
                 <span :key="chat.affinityKey" class="header-affinity-delta" :class="chat.realtimeAffinity.affinityDelta >= 0 ? 'delta-up' : 'delta-down'">
@@ -2017,7 +2017,8 @@ function renderContent(text) {
 
 /* ── Header 实时好感度 ── */
 .chat-header-center { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.header-affinity { font-size: 14px; font-weight: 600; color: #e0245e; white-space: nowrap; }
+.header-affinity { font-size: 14px; font-weight: 600; color: #e0245e; white-space: nowrap;display: flex;align-items: center; }
+.affinity-heart-icon { vertical-align: middle; margin-right: 1px; flex-shrink: 0; }
 .header-affinity-delta { font-size: 11px; font-weight: 500; margin-left: 4px; }
 .header-affinity-delta.delta-up { color: #e0245e; }
 .header-affinity-delta.delta-down { color: #4a90d9; }
@@ -2039,9 +2040,16 @@ function renderContent(text) {
 @media (max-width: 768px) {
   .header-affinity { font-size: 12px; }
   .header-affinity-delta { font-size: 10px; }
+  .chat-header-right { max-width: 40vw; }
+  .affinity-reason-wrap { min-width: 0; overflow: hidden; }
   .header-reason {
-    max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+    display: block;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+  .btn-header-settings { flex-shrink: 0; }
 }
 
 </style>

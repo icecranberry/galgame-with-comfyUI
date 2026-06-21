@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { deleteByConversation } from '../services/vectorClient.js';
+import { cropPersonalityForEmotion } from '../services/emotionEngine.js';
 
 const router = Router();
 
@@ -72,14 +73,15 @@ router.get('/', (req, res) => {
 // POST /api/characters — 创建角色
 router.post('/', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_color, moments_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_color, moments_disabled, proactive_disabled } = req.body;
   if (!name || !base_prompt) return res.status(400).json({ error: 'name and base_prompt are required' });
 
   const emotion = emotion_baseline ? (typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)) : '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
 
   try {
-    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, emotion_baseline, avatar_color, moments_disabled) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(name, display_name || name, base_prompt, emotion, avatar_color || null, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0);
+    const shortPrompt = cropPersonalityForEmotion(base_prompt);
+    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, avatar_color, moments_disabled, proactive_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(name, display_name || name, base_prompt, shortPrompt, emotion, avatar_color || null, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0);
     res.status(201).json({ id: result.lastInsertRowid, name, display_name });
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: `"${name}" already exists` });
@@ -90,16 +92,17 @@ router.post('/', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_color, avatar_path, is_active, moments_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_color, avatar_path, moments_disabled, proactive_disabled } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
-  if (base_prompt !== undefined) { updates.push('base_prompt = ?'); params.push(base_prompt); }
+  if (base_prompt !== undefined) { updates.push('base_prompt = ?'); params.push(base_prompt); updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt)); }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_color !== undefined) { updates.push('avatar_color = ?'); params.push(avatar_color || null); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
-  if (is_active !== undefined) { updates.push('is_active = ?'); params.push(is_active); }
+
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
+  if (proactive_disabled !== undefined) { updates.push('proactive_disabled = ?'); params.push(proactive_disabled ? 1 : 0); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
@@ -373,8 +376,8 @@ ${searchContext}` : ''}
     if (shouldSave) {
       // 直接写入数据库
       const insertResult = db.prepare(
-        `INSERT INTO characters (name, display_name, base_prompt, emotion_baseline, moments_disabled) VALUES (?, ?, ?, ?, 0)`
-      ).run(charName, displayName, basePrompt, emotionBaseline);
+        `INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled) VALUES (?, ?, ?, ?, ?, 0)`
+      ).run(charName, displayName, basePrompt, cropPersonalityForEmotion(basePrompt), emotionBaseline);
 
       console.log(`[characters] AI-generated: "${displayName}" (${charName}) — saved`);
       res.status(201).json({

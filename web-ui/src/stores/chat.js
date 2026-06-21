@@ -15,6 +15,7 @@ export const useChatStore = defineStore('chat', () => {
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
   const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增
+  const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
   // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
@@ -80,6 +81,11 @@ export const useChatStore = defineStore('chat', () => {
     renderStart.value = 0
     guesses.value = null  // 切角色时清除候选词
     realtimeAffinity.value = null  // 切角色时清除实时好感度
+    // 标记主动消息已读（DB 持久化），Sidebar 的 onCharClick 也会调，这里兜底
+    try {
+      const { useProactiveStore } = await import('../stores/notifications.js')
+      useProactiveStore().markRead(charId)
+    } catch { /* 非关键 */ }
     affinityKey.value = 0         // 重置动画 key，避免切角色触发 roll
     await loadMessages(charId)
     await loadCharacters()
@@ -471,6 +477,42 @@ export const useChatStore = defineStore('chat', () => {
     await loadCharacters()
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage }
+  /**
+   * 处理 SSE 推送的主动消息
+   * - 更新角色列表中该角色的 last_message
+   * - 如果是当前活跃角色，直接追加到消息列表
+   */
+  function handleProactiveMessage(data) {
+    const charId = data.character_id
+
+    // 更新角色列表中的预览 + 冒泡到最上面
+    const char = characters.value.find(c => c.id === charId)
+    if (char) {
+      char.last_message = data.content
+      char.last_message_at = data.created_at
+      // 按最后消息时间降序重排，让主动发消息的角色冒泡到顶部
+      characters.value.sort((a, b) => {
+        if (!a.last_message_at && !b.last_message_at) return 0
+        if (!a.last_message_at) return 1
+        if (!b.last_message_at) return -1
+        return new Date(b.last_message_at) - new Date(a.last_message_at)
+      })
+      // 通知 Sidebar 滚动到顶部，用户能直接看到是谁发来的
+      sidebarScrollSignal.value++
+    }
+
+    // 如果是当前活跃角色，直接追加消息到聊天界面
+    if (activeCharId.value === charId && data.msg_id) {
+      messages.value.push({
+        id: data.msg_id,
+        role: 'assistant',
+        type: 'text',
+        content: data.content,
+        created_at: data.created_at,
+      })
+    }
+  }
+
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, updateAvatarColor, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
 })

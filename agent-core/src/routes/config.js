@@ -2,8 +2,9 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq } from '../config.js';
 import { getDb } from '../db/index.js';
+import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
 
@@ -39,6 +40,17 @@ router.put('/features', (req, res) => {
   }
   updateFeatureFlag(key, value);
   res.json({ ok: true, features: config.features });
+});
+
+// PUT /api/config/proactive-freq — 更新主动聊天频率 0~1
+router.put('/proactive-freq', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 0 || value > 1) {
+    return res.status(400).json({ error: 'value must be 0~1' });
+  }
+  updateProactiveFreq(value);
+  restartProactiveFreq();
+  res.json({ ok: true, proactiveChatFreq: config.features.proactiveChatFreq });
 });
 
 // PUT /api/config/llm — 更新 LLM 配置
@@ -99,7 +111,8 @@ router.get('/user-avatar', (req, res) => {
   const avatarDir = path.join(projectRoot, 'data', 'avatars');
   const userAvatarPath = path.join(avatarDir, 'user_avatar.png');
   if (fs.existsSync(userAvatarPath)) {
-    res.json({ avatar_path: '/avatars/user_avatar.png' });
+    const mtime = fs.statSync(userAvatarPath).mtimeMs;
+    res.json({ avatar_path: `/avatars/user_avatar.png?v=${mtime}` });
   } else {
     res.json({ avatar_path: null });
   }
@@ -123,8 +136,9 @@ router.post('/user-avatar', (req, res) => {
   const filePath = path.join(avatarDir, 'user_avatar.png');
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
   fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+  const mtime = fs.statSync(filePath).mtimeMs;
 
-  res.json({ ok: true, avatar_path: '/avatars/user_avatar.png' });
+  res.json({ ok: true, avatar_path: `/avatars/user_avatar.png?v=${mtime}` });
 });
 
 export default router;

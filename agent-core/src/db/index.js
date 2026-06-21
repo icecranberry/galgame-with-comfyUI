@@ -192,8 +192,8 @@ function initSchema(db) {
       avatar_color TEXT,
       avatar_path TEXT,
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
-      is_active INTEGER DEFAULT 1,
       moments_disabled INTEGER DEFAULT 0,
+      short_prompt TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -264,6 +264,9 @@ function initSchema(db) {
 
   // 迁移: 好感度系统 — user_relationships 和 emotion_snapshots 新增 affinity 列
   migrateAffinitySchema(db);
+
+  // 迁移: characters 表新增 next_proactive_at 和 proactive_disabled 列（主动聊天）
+  migrateProactiveSchema(db);
 
   // 种子: 默认全局规则
   seedGlobalRules(db);
@@ -346,6 +349,43 @@ function migrateAffinitySchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateAffinitySchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: characters 表新增 proactive 相关列
+ * - next_proactive_at: 下次主动聊天时间
+ * - proactive_disabled: 是否禁用主动聊天
+ * - proactive_last_read_at: 用户最后一次查看该角色主动消息的时间（用于未读红点判断）
+ */
+function migrateProactiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'next_proactive_at')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN next_proactive_at DATETIME`);
+      console.log('[db] Added characters.next_proactive_at column');
+    }
+    if (!cols.find(c => c.name === 'proactive_disabled')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN proactive_disabled INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.proactive_disabled column (default 0)');
+    }
+    if (!cols.find(c => c.name === 'proactive_last_read_at')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN proactive_last_read_at DATETIME`);
+      console.log('[db] Added characters.proactive_last_read_at column');
+    }
+    if (!cols.find(c => c.name === 'proactive_streak')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN proactive_streak INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.proactive_streak column (default 0)');
+    }
+
+    // messages 表：is_proactive 标记主动聊天消息
+    const msgCols = db.prepare(`PRAGMA table_info(messages)`).all();
+    if (!msgCols.find(c => c.name === 'is_proactive')) {
+      db.exec(`ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0`);
+      console.log('[db] Added messages.is_proactive column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateProactiveSchema error:', err.message);
   }
 }
 
@@ -444,7 +484,7 @@ function seedGlobalRules(db) {
     {
       rule_key: 'dialogue_rules',
       rule_content: `<dialogue_format_rules>
-- **绝对禁止**用括号描述动作、表情、语气或神态，例如（笑了笑）、（压低声音）、（眼神温柔）。本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。
+- **绝对禁止**用括号描述动作、表情、语气或神态，例如（笑了笑）、（压低声音）、【转身往厨房走，又回头看了你一眼】。本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。
 - **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
 - {"prompt":"画面描述"}：表示在这句对白之后，系统生成并发送了一张图片，该图片的画面内容为 JSON 内的描述。这是系统的内部标记，用于帮助你理解对话上下文（此处曾出现过一张图片），你只需要当作这张图片已经存在，自然地继续后续对话即可。
 </dialogue_format_rules>`,
@@ -680,17 +720,25 @@ const SETTING_TO_CONFIG = {
   comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
   feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_autoImageJudge:      { obj: 'features', key: 'autoImageJudge',    type: 'bool' },
   feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
+  feature_forceImageGen:        { obj: 'features', key: 'forceImageGen',    type: 'bool' },
+  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
+  feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
+  feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
+  user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
+  user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
+  user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
+  user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
 };
 
 function castValue(raw, type) {
   if (raw == null) return undefined;
   switch (type) {
     case 'int':  { const v = parseInt(raw, 10); return Number.isNaN(v) ? undefined : v; }
+    case 'float': { const v = parseFloat(raw); return Number.isNaN(v) ? undefined : v; }
     case 'bool': return raw === 'true' || raw === '1';
     default:     return raw;
   }

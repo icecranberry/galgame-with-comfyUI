@@ -230,17 +230,6 @@
 
         <div class="toggle-row">
           <div>
-            <div class="tl">智能配图判断</div>
-            <div class="td">回复后提交LLM自动二次判断是否需要配图增强表达，无需用户主动要求</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.autoImageJudge" @change="saveFeature('autoImageJudge', features.autoImageJudge)" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="toggle-row">
-          <div>
             <div class="tl">聊天候选词</div>
             <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
           </div>
@@ -259,6 +248,20 @@
             <input type="checkbox" v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
             <span class="slider"></span>
           </label>
+        </div>
+
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">主动聊天频率</div>
+            <div class="td">0 关闭，越大越频繁。</div>
+          </div>
+          <div class="freq-control">
+            <input type="range" min="0" max="1" step="0.1"
+              v-model.number="freqSlider"
+              @change="onFreqChange"
+            />
+            <span class="freq-val">{{ freqSlider.toFixed(1) }}</span>
+          </div>
         </div>
       </div>
 
@@ -308,7 +311,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle, updateProactiveFreq } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -338,7 +341,8 @@ const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', mom
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, autoImageJudge: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
+const features = reactive({ emotion: false, memory: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
+const freqSlider = ref(0.5)
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
@@ -389,6 +393,7 @@ onMounted(async () => {
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
+    freqSlider.value = features.proactiveChatFreq ?? 0.5
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
@@ -448,6 +453,13 @@ function applyPreset(p, mode = 'chat') {
 
 async function saveFeature(key, val) {
   await updateFeatureFlag(key, val)
+}
+
+// 滑块松手时触发，持久化到后端并更新 features
+async function onFreqChange() {
+  const v = freqSlider.value
+  features.proactiveChatFreq = v
+  try { await updateProactiveFreq(v) } catch { /* 非关键 */ }
 }
 
 async function checkHealth() { health.value = await comfyuiHealth() }
@@ -613,10 +625,38 @@ function resetTestPrompts() {
 .sa { display: flex; align-items: center; gap: 12px; }
 .smsg { color: var(--success); font-size: 13px; }
 
-.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
+.toggle-row { display: flex; gap: 14px; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
 .toggle-row:last-child { border-bottom: none; }
 .tl { font-size: 14px; font-weight: 500; color: var(--text-bright); }
 .td { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+.freq-control {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.freq-control input[type="range"] {
+  border: none;
+  width: 100px; accent-color: var(--accent);
+  -webkit-appearance: none; appearance: none;
+  background: transparent;
+}
+.freq-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; background: #ffffff;box-shadow: 0 0 2px 1px lightcoral;
+}
+.freq-control input[type="range"]::-moz-range-track {
+  height: 4px; border-radius: 2px; background: #fff;
+}
+.freq-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); margin-top: -6px; cursor: pointer;
+}
+.freq-control input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); border: none; cursor: pointer;
+}
+.freq-val {
+  font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
+}
 
 .sr { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
 .sd { width: 9px; height: 9px; border-radius: 50%; }

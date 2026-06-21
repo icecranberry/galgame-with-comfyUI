@@ -61,7 +61,7 @@
               @blur="saveAppearance"
               @keydown.enter.exact="saveAppearance"
               @keydown.escape="cancelEditAppearance"
-              placeholder="金色头发，双马尾，贫乳，大小姐，穿着Lolita"
+              placeholder="外观描述越详细越不容易和其他角色串，示例：金色头发，超长双马尾，钻头卷，公主切，白色蝴蝶结发饰，侧发，贫乳，大小姐，穿着white dress, lolita, frills, lace"
             ></textarea>
             <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
             <button v-if="!editingAppearance" class="edit-pen" @click="startEditAppearance" title="编辑外观">✎</button>
@@ -149,12 +149,12 @@
 
             <!-- 步骤 0：输入描述 -->
             <div v-if="recruit.step === 'input'" class="modal-body">
-              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名），也可以是原创设定。</p>
+              <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
               <textarea
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
                 rows="4"
-                placeholder="例：芙宁娜（原神）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
+                placeholder="例：安比·德玛拉（绝区零）/ 御坂美琴（某科学的超电磁炮）/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
               ></textarea>
@@ -187,6 +187,14 @@
                   <span class="toggle-label">不看ta的朋友圈</span>
                   <label class="toggle-switch">
                     <input type="checkbox" v-model="recruit.result.momentsDisabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <!-- 主动聊天开关 -->
+                <div class="toggle-row" style="margin-top:12px">
+                  <span class="toggle-label">不主动聊天</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="recruit.result.proactiveDisabled" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -243,6 +251,13 @@
                   <span class="toggle-slider"></span>
                 </label>
               </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不主动聊天</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
             </div>
             <div class="modal-body">
               <!-- 头像 -->
@@ -290,6 +305,13 @@
               <span class="float-label">不看ta的朋友圈</span>
               <label class="toggle-switch float-switch">
                 <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不主动聊天</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -513,7 +535,7 @@ async function doGenerate() {
       recruit.error = result.error
       return
     }
-    recruit.result = { ...result, momentsDisabled: false }
+    recruit.result = { ...result, momentsDisabled: false, proactiveDisabled: false }
     recruit.step = 'preview'
   } catch (err) {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
@@ -534,6 +556,7 @@ async function confirmRecruit() {
       base_prompt: recruit.result.base_prompt,
       emotion_baseline: recruit.result.emotion_baseline,
       moments_disabled: recruit.result.momentsDisabled ? 1 : 0,
+      proactive_disabled: recruit.result.proactiveDisabled ? 1 : 0,
     })
     if (r.error) {
       recruit.error = r.error
@@ -558,8 +581,10 @@ const detail = reactive({
   editName: '',
   editPrompt: '',
   momentsDisabled: false,
+  proactiveDisabled: false,
   dirty: false,
   momentsToggling: false,
+  proactiveToggling: false,
 })
 
 const showRelationGraph = ref(false)
@@ -570,6 +595,7 @@ function openCharDetail(c) {
   detail.editName = c.display_name || ''
   detail.editPrompt = c.base_prompt || ''
   detail.momentsDisabled = !!c.moments_disabled
+  detail.proactiveDisabled = !!c.proactive_disabled
   detail.dirty = false
   detail.show = true
 }
@@ -586,6 +612,7 @@ async function saveCharDetail() {
     display_name: detail.editName,
     base_prompt: detail.editPrompt,
     moments_disabled: detail.momentsDisabled,
+    proactive_disabled: detail.proactiveDisabled,
   })
   detail.dirty = false
   await chat.loadCharacters()
@@ -611,6 +638,24 @@ async function toggleMomentsDisabled() {
     console.error('toggleMomentsDisabled failed:', e)
   } finally {
     detail.momentsToggling = false
+  }
+}
+
+// 不主动聊天 toggle — 即时持久化，无需等"保存"按钮
+async function toggleProactiveDisabled() {
+  const c = detail.char
+  if (!c) return
+  detail.proactiveToggling = true
+  try {
+    await api.updateCharacter(c.id, { proactive_disabled: detail.proactiveDisabled })
+    c.proactive_disabled = detail.proactiveDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.proactive_disabled = detail.proactiveDisabled
+  } catch (e) {
+    detail.proactiveDisabled = !detail.proactiveDisabled
+    console.error('toggleProactiveDisabled failed:', e)
+  } finally {
+    detail.proactiveToggling = false
   }
 }
 

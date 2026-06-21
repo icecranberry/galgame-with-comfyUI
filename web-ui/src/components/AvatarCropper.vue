@@ -8,7 +8,7 @@
       </div>
       <div v-if="showRecentTab" class="avpicker-tabs">
         <button :class="['avtab', { active: avTab === 'upload' }]" @click="avTab = 'upload'">上传图片</button>
-        <button :class="['avtab', { active: avTab === 'recent' }]" @click="switchToRecent">最近生成</button>
+        <button :class="['avtab', { active: avTab === 'recent' }]" @click="switchToRecent">最近图片</button>
       </div>
 
       <!-- 上传 tab -->
@@ -22,7 +22,7 @@
         </label>
       </div>
 
-      <!-- 最近生成 tab -->
+      <!-- 最近图片 tab -->
       <div v-if="showRecentTab && avTab === 'recent'" class="avtab-body av-gallery">
         <div v-if="recentLoading" class="av-loading">加载中...</div>
         <div v-else-if="recentImages.length === 0" class="av-empty">暂无生成的图片</div>

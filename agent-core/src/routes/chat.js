@@ -16,6 +16,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage } from '../services/imageSkill.js';
+import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
 
@@ -526,6 +527,23 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
 
     msgs.push(...history);
+
+    // 5.4 重逢上下文 + streak 重置：不依赖 proactiveChat 开关，只要 DB 里有 streak 就处理
+    const streak = getUnansweredStreak(characterId);
+    if (streak >= 2) {
+      let insertAt = msgs.length;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') { insertAt = i; break; }
+      }
+      msgs.splice(insertAt, 0, {
+        role: 'system',
+        content: `【⚠️ 重逢提示 — 仅本次生成可见，不存入对话记录】assistant 之前连续发了 ${streak} 条主动消息 user 都没回——现在 user 终于回复了。assistant 应在接下来的回复中自然地流露一点"终于等到你"的情绪——不质问、不委屈、不阴阳怪气。嘴硬的用别扭的方式，温柔的用直接的方式，搞怪的用段子。让 user 感觉到：ta 回来聊天这件事，对 assistant 来说很重要。`,
+      });
+    }
+    if (streak > 0) {
+      resetUnansweredStreak(characterId);
+    }
+
     if (explicitImageIntent) {
       const imagePromptRule = getGlobalRule('image_prompt');
       const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。';
@@ -559,6 +577,11 @@ router.post('/characters/:id/chat', async (req, res) => {
           break;
         }
       }
+    }
+
+    // 5.6 清理 created_at：仅用于时间标签计算，不应送入 LLM
+    for (const msg of msgs) {
+      delete msg.created_at;
     }
 
     // 6. 流式生成（温度 0.65）
@@ -675,7 +698,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       `).get(conversationId);
 
       const evalContext = {
-        characterPersonality: character?.base_prompt?.slice(0, 500) || '',
+        characterPersonality: character?.short_prompt || '',
         emotionBaseline,
         currentVad: getCompositeEmotion(emotionState),
         currentAffinity,
@@ -724,11 +747,11 @@ router.post('/characters/:id/chat', async (req, res) => {
       console.log('[chat] force image gen: user requested, triggering needImage flow');
       imageGenPromise = handleNeedImageFlow(conversationId, character, send);
     } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
-      // 路径 E: 计数器归零 → 强制生图（独立于 autoImageJudge 开关）
+      // 路径 E: 计数器归零 → 强制生图
       console.log('[chat] counter forced: skipping judge, triggering needImage flow');
       imageGenPromise = handleNeedImageFlow(conversationId, character, send);
-    } else if (config.features.autoImageJudge) {
-      // 路径 C: 静默判断
+    } else {
+      // 路径 C: 静默判断（系统强制开启）
       imageGenPromise = (async () => {
         try {
           const needImage = await judgeImageNeed(conversationId);
@@ -780,6 +803,22 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 12. 后处理（异步，不依赖 SSE 连接）
     setImmediate(async () => {
       try {
+        // 12.0 重置主动聊天计时器：用户刚聊完，防止立即触发主动消息
+        if (config.features.proactiveChat) {
+          try {
+            const currentAffinity = loadAffinity(characterId);
+            const baseline = JSON.parse(character.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}');
+            const currentEmotion = loadEmotionState(conversationId, baseline);
+            const compositeVad = getCompositeEmotion(currentEmotion);
+            // hoursSince=0: 刚聊完，timeScore 极低 → 整体 score 偏低 → 间隔较长
+            const score = computeProactiveScore(0, currentAffinity, compositeVad);
+            updateNextProactiveAt(characterId, score);
+          } catch (err) {
+            console.error('[chat] Failed to reset next_proactive_at:', err.message);
+          }
+
+        }
+
         if (config.features.memory) {
           const userMsgCount = db.prepare(`
             SELECT COUNT(*) as count FROM raw_messages
@@ -1045,12 +1084,12 @@ async function handleNeedImageFlow(conversationId, character, send) {
     'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
   ).get(character.id);
   if (userRel && userRel.relationship_text) {
-    userRelationContent = `\n\n【你和user的关系】user是你的${userRel.relationship_text}。在生成包含你和user的合照或互动场景时，请通过人物姿态、表情、距离等方式体现这层关系。`;
+    userRelationContent = `\n\n【你和user的关系】你是user的${userRel.relationship_text}。在生成包含你和user的合照或互动场景时，请通过人物姿态、表情、距离等方式体现这层关系。`;
   }
 
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中 assistant（角色）的最后一句话，为其所处的场景生成画面描述。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话），为这轮对话所处的场景生成画面描述。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
@@ -1063,7 +1102,7 @@ async function handleNeedImageFlow(conversationId, character, send) {
       const userName = u.nickname || '用户';
       const parts = [];
       parts.push(`消息中标记为"user"的人是"${userName}"`);
-      if (u.gender) parts.push(`性别：${u.gender}（这是不可变更的事实，不受角色关系或场景影响）`);
+      if (u.gender) parts.push(`**性别：${u.gender}**（这是不可变更的事实，不受角色关系或场景影响）`);
       if (u.appearance) parts.push(`外观特征：${u.appearance}`);
       if (u.persona) parts.push(`其他说明：${u.persona}`);
       return [{
@@ -1071,19 +1110,12 @@ async function handleNeedImageFlow(conversationId, character, send) {
         content: `【对话对象】${parts.join('。')}。当你生成关于user的图片（例如合照，互动的场景）的时候，需要严格遵循以上user的特征，尤其是性别和外观。${userRelationContent}`
       }];
     })(),
-    // ── 提取 assistant 最后一句，单独强调（避免混在上下文中模型找不到"最后一句"）──
+    // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
     ...(() => {
       const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
-      if (!lastAssistantMsg) return [];
-      return [{
-        role: 'system',
-        content: `【你刚刚说的最后一句话】「${lastAssistantMsg.content}」`
-      }];
-    })(),
-    // ── 对话上下文（不含最后一句 assistant，避免重复；单条文本块，非交替轮次，避免模型进入"对话模式"）──
-    ...(() => {
-      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
-      const filteredHistory = history.filter(m => m !== lastAssistantMsg);
+      const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+      const excludeSet = new Set([lastAssistantMsg, lastUserMsg].filter(Boolean));
+      const filteredHistory = history.filter(m => !excludeSet.has(m));
       if (filteredHistory.length === 0) return [];
       return [{
         role: 'system',
@@ -1093,7 +1125,20 @@ async function handleNeedImageFlow(conversationId, character, send) {
         }).join('\n\n')
       }];
     })(),
-    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【你刚刚说的最后一句话】所处场景的画面。只输出 JSON，不要任何其他文字。' },
+    // ── 最后一轮对话（用户最后一句 + 角色最后一句），放在上下文之后、最终指令之前，作为生图焦点 ──
+    ...(() => {
+      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+      const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+      if (!lastAssistantMsg) return [];
+      const parts = [];
+      if (lastUserMsg) parts.push(`用户: ${lastUserMsg.content}`);
+      parts.push(`${character?.display_name || '角色'}: ${lastAssistantMsg.content}`);
+      return [{
+        role: 'system',
+        content: `【最后一轮对话】\n${parts.join('\n')}`
+      }];
+    })(),
+    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【最后一轮对话】所处场景的画面。只输出 JSON，不要任何其他文字。' },
     // ── pre-fill：从 prompt 值内部起始，模型续写 "少女站在..."} 完成 JSON ──
     { role: 'assistant', content: '{"prompt":"' },
   ];
@@ -1232,11 +1277,8 @@ async function generateReplyGuesses(conversationId, character) {
 
   if (history.length === 0) return null;
 
-  // 角色人设：将 "你" 替换为 "assistant"，避免模型代入角色身份
-  const personalityBrief = character?.base_prompt
-    ?.replace(/你/g, 'assistant')
-    ?.slice(0, 250)
-    ?.trim() || '';
+  // 角色人设（short_prompt 已裁剪并替换过 "你"→"assistant"）
+  const personalityBrief = character?.short_prompt || '';
 
   // 预测助手使用独立的 system prompt，不注入角色扮演系统规则
   // getSystemRules() 包含 "<完全角色扮演自由>" 等指令，会导致模型站错角色
@@ -1244,16 +1286,13 @@ async function generateReplyGuesses(conversationId, character) {
 
 规则：
 1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或表达不同态度
-2. 每条 5~25 个汉字，像网友聊天一样自然口语化，风趣幽默
+2. 每条 5~25 个汉字，像网友聊天一样自然口语化，思维跳脱但又合理，不要过于书面化或公式化
 3. 直接输出 JSON，不要任何解释
 
 输出格式：
 {"a":"<猜想A>","b":"<猜想B>"}
 
 示例：
-对话中助手说"早上好，今天你起得真早啊"
-输出：{"a":"是啊，昨天很早就休息了","b":"你也不赖嘛"}
-
 对话中助手说"走吧，我们出门吃晚饭？"
 输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}`;
 

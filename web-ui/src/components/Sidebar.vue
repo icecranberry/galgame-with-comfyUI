@@ -1,6 +1,6 @@
 <template>
   <aside class="sidebar" :class="{ 'mobile-open': isMobile && mobileOpen }">
-    <div class="char-list">
+    <div ref="charListEl" class="char-list">
       <div
         v-for="c in chat.characters"
         :key="c.id"
@@ -8,10 +8,12 @@
         :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat') }"
         @click="onCharClick(c)"
       >
-        <div
-          class="char-avatar"
-          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
-        >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+        <div class="char-avatar-wrap">
+          <div
+            class="char-avatar"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: c.avatar_color || '#e07b6c' }"
+          >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+        </div>
         <div class="char-info">
           <div class="char-name">{{ c.display_name }}</div>
           <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
@@ -19,6 +21,7 @@
         <div class="char-meta">
           <span class="char-time">{{ formatTime(c.last_message_at) }}</span>
         </div>
+        <span v-if="proactive.hasUnread(c.id)" class="proactive-dot"></span>
       </div>
 
       <div v-if="chat.characters.length === 0" class="char-empty">
@@ -75,10 +78,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { useMomentsStore } from '../stores/moments.js'
+import { useProactiveStore } from '../stores/notifications.js'
 
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
@@ -91,7 +95,16 @@ const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
 const moments = useMomentsStore()
+const proactive = useProactiveStore()
 const showMoreMenu = ref(false)
+const charListEl = ref(null)
+
+// 主动消息到达 → 角色冒泡到顶部 → 列表自动滚到顶部
+watch(() => chat.sidebarScrollSignal, () => {
+  if (charListEl.value) {
+    charListEl.value.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+})
 
 onMounted(() => {
   // SSE 连接由 NavBar 统一管理（NavBar 在移动端 CSS 隐藏但组件仍挂载，onMounted 正常触发）
@@ -100,6 +113,7 @@ onMounted(() => {
 onUnmounted(() => {})
 
 async function onCharClick(c) {
+  proactive.markRead(c.id)
   await chat.selectChar(c.id)
   router.push('/chat/' + c.id)
   if (props.isMobile) emit('charSelected')
@@ -164,6 +178,7 @@ function formatTime(iso) {
   margin: 2px 8px; border-radius: 12px;
   transition: background 0.2s ease;
   background: transparent;
+  position: relative;
 }
 .char-item:hover { background: rgba(255, 255, 255, 0.22); }
 .char-item.active {
@@ -171,11 +186,34 @@ function formatTime(iso) {
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
 }
 
+.char-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .char-avatar {
   width: 44px; height: 44px; border-radius: 50%;
   color: white;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 600; flex-shrink: 0;
+}
+
+.proactive-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--danger, #ff4d4f);
+  border: 2.5px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 10px rgba(255, 77, 79, 0.6), 0 0 20px rgba(255, 77, 79, 0.25);
+  animation: proactive-pulse 1.2s ease-in-out infinite, jelly-pop 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.35);
+}
+
+@keyframes proactive-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 77, 79, 0.5), 0 0 16px rgba(255, 77, 79, 0.2); }
+  50%      { box-shadow: 0 0 16px rgba(255, 77, 79, 0.8), 0 0 32px rgba(255, 77, 79, 0.4); }
 }
 
 .char-info { flex: 1; min-width: 0; }

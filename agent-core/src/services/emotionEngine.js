@@ -476,10 +476,8 @@ ${contextBlock}
 
 重要提示：
 1. 角色的情绪基线是 valence=${emotionBaseline.valence?.toFixed(2) ?? '0.50'}, arousal=${emotionBaseline.arousal?.toFixed(2) ?? '0.50'}, dominance=${emotionBaseline.dominance?.toFixed(2) ?? '0.50'}
-2. 好感度越高，角色对用户的小善意越敏感；好感度越低，越冷漠或防御
-3. affinity_delta 应基于角色人格判断——傲娇角色即使内心高兴，好感度变化也较小
-4. 如果用户消息中性平淡，delta 应接近 0，不要强行解读
-5. 角色回复中如果包含"生图提示词已省略"，忽略它，那是无关的技术内容
+2. affinity_delta 应基于角色人格判断——傲娇角色即使内心高兴，好感度变化也较小
+3. 如果用户消息中性平淡，delta 应接近 0，不要强行解读
 
 只返回 JSON（不要任何其他文字）：
 {"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."}`;
@@ -562,7 +560,7 @@ export function affinityToPrompt(affinity) {
   if (affinity == null) return '';
 
   // 共性前置：全局规则约束
-  const constraint = '注意：以下关系的优先级遵循<system_context>和<core_rules>。你仍然需要遵守对话格式规范和角色扮演基本框架。';
+  const constraint = '';
 
   if (affinity >= 100)
     return `${constraint}
@@ -697,4 +695,63 @@ function clamp(v, min, max) {
 function round(v, precision = 3) {
   const factor = Math.pow(10, precision);
   return Math.round(v * factor) / factor;
+}
+
+/**
+ * 裁剪角色人格文本，仅保留关键信息用于情绪判断
+ *
+ * 规则（按固定格式）：
+ *   1. 从开头取到 "## 你的身份" 之前
+ *   2. 从 "## 你的性格" 取到第二个换行符（即第一条性格描述）
+ *   3. 拼接后 "你" → "assistant"
+ *
+ * 输入示例 → 输出示例:
+ *   "你是瓦雷莎...\n\n## 你的身份\n...\n## 你的性格\n- 你说话总是慢悠悠的...\n- 你是..."
+ *   → "assistant是瓦雷莎...## assistant的性格\n- assistant说话总是慢悠悠的..."
+ */
+export function cropPersonalityForEmotion(basePrompt) {
+  if (!basePrompt) return '';
+
+  let result = '';
+
+  // 规则 1: 从头开始，到 "## 你的身份" 停止（不含该标题）
+  const identityIdx = basePrompt.indexOf('## 你的身份');
+  if (identityIdx !== -1) {
+    result += basePrompt.slice(0, identityIdx).trimEnd();
+  } else {
+    result += basePrompt.trimEnd();
+  }
+
+  // 规则 2: 从 "## 你的性格" 开始，遇到第二个换行符结束
+  const personalityIdx = basePrompt.indexOf('## 你的性格');
+  if (personalityIdx !== -1) {
+    const fromPersonality = basePrompt.slice(personalityIdx);
+    let newlineCount = 0;
+    let endIdx = 0;
+    for (let i = 0; i < fromPersonality.length; i++) {
+      if (fromPersonality[i] === '\n') {
+        newlineCount++;
+        if (newlineCount === 2) {
+          endIdx = i;
+          break;
+        }
+      }
+    }
+    if (endIdx > 0) {
+      result += fromPersonality.slice(0, endIdx);
+    } else {
+      // 没有第二个换行符（异常格式），整段保留
+      result += fromPersonality;
+    }
+  }
+
+  // 规则 3: "你" 全部替换为 "assistant"
+  result = result.replace(/你/g, 'assistant');
+
+  // 兜底：最长不超过 200 字
+  if (result.length > 200) {
+    result = result.slice(0, 200);
+  }
+
+  return result;
 }

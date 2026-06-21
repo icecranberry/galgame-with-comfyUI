@@ -13,12 +13,22 @@
     <router-view />
   </div>
   <ConfirmDialog ref="confirmDialog" />
+
+  <!-- 临时调试：浮动按钮强制主动聊天 -->
+  <button
+    class="debug-force-btn"
+    :disabled="forceLoading"
+    :title="forceResult || '强制随机角色发起主动聊天'"
+    @click="onForceProactive"
+  >{{ forceLoading ? '⏳' : '⚡' }}</button>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, provide } from 'vue'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
+import { useProactiveStore } from './stores/notifications.js'
+import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -26,7 +36,30 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
+const proactive = useProactiveStore()
 const confirmDialog = ref(null)
+
+// ── 临时调试：强制主动聊天 ──
+const forceLoading = ref(false)
+const forceResult = ref('')
+async function onForceProactive() {
+  if (forceLoading.value) return
+  forceLoading.value = true
+  forceResult.value = ''
+  try {
+    const r = await forceProactive()
+    if (r.ok) {
+      forceResult.value = `${r.character}: ${r.motive} — "${r.greeting}"`
+      setTimeout(() => { forceResult.value = '' }, 5000)
+    } else {
+      forceResult.value = r.error || '失败'
+    }
+  } catch (e) {
+    forceResult.value = e.message || '请求失败'
+  } finally {
+    forceLoading.value = false
+  }
+}
 
 function confirm(opts) {
   return confirmDialog.value?.show(opts) ?? Promise.resolve(false)
@@ -56,6 +89,43 @@ function closeMobileSidebar() {
 provide('isMobile', isMobile)
 provide('toggleMobileSidebar', toggleMobileSidebar)
 
+// ── 主动聊天通知提示音 (Web Audio API, C5-E5 双音) ──
+let _audioCtx = null
+function playProactiveSound() {
+  try {
+    if (!_audioCtx) {
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    const ctx = _audioCtx
+
+    // 第一音 C5 ~523Hz, 100ms
+    const osc1 = ctx.createOscillator()
+    const gain1 = ctx.createGain()
+    osc1.type = 'sine'
+    osc1.frequency.setValueAtTime(523.25, ctx.currentTime)
+    gain1.gain.setValueAtTime(0.12, ctx.currentTime)
+    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1)
+    osc1.connect(gain1)
+    gain1.connect(ctx.destination)
+    osc1.start(ctx.currentTime)
+    osc1.stop(ctx.currentTime + 0.1)
+
+    // 第二音 E5 ~659Hz, 100ms, 延迟 0.1s
+    const osc2 = ctx.createOscillator()
+    const gain2 = ctx.createGain()
+    osc2.type = 'sine'
+    osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1)
+    gain2.gain.setValueAtTime(0.12, ctx.currentTime + 0.1)
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2)
+    osc2.connect(gain2)
+    gain2.connect(ctx.destination)
+    osc2.start(ctx.currentTime + 0.1)
+    osc2.stop(ctx.currentTime + 0.2)
+  } catch {
+    // 浏览器不支持 AudioContext 时静默
+  }
+}
+
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
@@ -63,6 +133,18 @@ onMounted(async () => {
   settings.loadComfyConfig()
   loadUserConfig()  // 应用启动即加载，不阻塞渲染
   await chat.loadCharacters()
+
+  // 连接主动聊天 SSE 通知流
+  proactive.connectSSE()
+  proactive.setOnMessage((data) => {
+    // 更新聊天 store
+    chat.handleProactiveMessage(data)
+
+    // 非当前活跃角色 → 播放提示音
+    if (data.character_id !== chat.activeCharId) {
+      playProactiveSound()
+    }
+  })
 
   if (isMobile.value) {
     // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出
@@ -73,6 +155,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
+  proactive.disconnectSSE()
 })
 </script>
 
@@ -168,4 +251,34 @@ textarea { resize: vertical; font-family: inherit; }
 .slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(20px); }
+
+/* ── 临时调试按钮 ── */
+.debug-force-btn {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(224, 123, 108, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(224, 123, 108, 0.4);
+  color: #fff;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 9999;
+  box-shadow: 0 2px 12px rgba(224, 123, 108, 0.3);
+  transition: all 0.2s;
+}
+.debug-force-btn:hover:not(:disabled) {
+  background: rgba(224, 123, 108, 0.8);
+  transform: scale(1.08);
+}
+.debug-force-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 </style>

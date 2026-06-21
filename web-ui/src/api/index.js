@@ -218,6 +218,13 @@ export async function updateFeatureFlag(key, value) {
   })
 }
 
+/** 更新主动聊天频率 0~1 */
+export async function updateProactiveFreq(value) {
+  await fetch(`${BASE}/config/proactive-freq`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+}
+
 export async function updateLlmConfig(data) {
   const res = await fetch(`${BASE}/config/llm`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -343,6 +350,83 @@ export function connectMomentsStream(onNewPost) {
     })
 
   return conn
+}
+
+/**
+ * 连接主动聊天 SSE 推送流
+ * @param {(data: object) => void} onProactiveMessage 新主动消息回调
+ * @returns {{ close: () => void }} 关闭函数，含 _closed 标记用于重连判断
+ */
+export function connectNotificationsStream(onProactiveMessage) {
+  const controller = new AbortController()
+  const conn = { _closed: false }
+
+  conn.close = () => {
+    conn._closed = true
+    controller.abort()
+  }
+
+  fetch(`${BASE}/notifications/stream`, { signal: controller.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        console.warn('[api] notifications SSE connection failed:', res.status)
+        conn._closed = true
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        let done, value
+        try {
+          ({ done, value } = await reader.read())
+        } catch { break }
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        let eventType = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith('data: ') && eventType === 'proactive_message') {
+            try {
+              const data = JSON.parse(line.slice(6))
+              onProactiveMessage(data)
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+      conn._closed = true
+    })
+    .catch(err => {
+      conn._closed = true
+      if (err.name !== 'AbortError') {
+        console.warn('[api] notifications SSE error:', err.message)
+      }
+    })
+
+  return conn
+}
+
+/** 获取有未读主动消息的角色列表 */
+export async function getProactiveUnread() {
+  const res = await fetch(`${BASE}/notifications/unread`)
+  return res.json()
+}
+
+/** 标记某角色的主动消息已读 */
+export async function markProactiveRead(characterId) {
+  await fetch(`${BASE}/notifications/mark-read/${characterId}`, { method: 'POST' })
+}
+
+/** 调试：强制随机角色发起一次主动聊天 */
+export async function forceProactive() {
+  const res = await fetch(`${BASE}/notifications/force-proactive`, { method: 'POST' })
+  return res.json()
 }
 
 export async function getMoment(id) {

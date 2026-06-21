@@ -2,9 +2,12 @@
   <nav class="nav-bar">
     <div class="nav-top">
       <router-link to="/chat" class="nav-item" :class="{ active: $route.path.startsWith('/chat') }" title="聊天">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          <span v-if="proactive.unreadCount > 0" class="nav-dot">{{ proactive.unreadCount > 99 ? '99+' : proactive.unreadCount }}</span>
+        </div>
         <span class="nav-label">聊天</span>
       </router-link>
 
@@ -51,10 +54,12 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
+import { useProactiveStore } from '../stores/notifications.js'
 
 const router = useRouter()
 const route = useRoute()
 const moments = useMomentsStore()
+const proactive = useProactiveStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {
