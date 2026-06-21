@@ -354,7 +354,7 @@ async function generateMomentPost(character) {
     SELECT COUNT(*) AS cnt
     FROM character_relationships cr
     JOIN characters c ON c.id = cr.to_character_id
-    WHERE cr.from_character_id = ?
+    WHERE cr.from_character_id = ? AND cr.relationship_text != ''
   `).get(character.id)?.cnt || 0;
 
   // R=0 时没有关系网对象，强制单人
@@ -368,7 +368,7 @@ async function generateMomentPost(character) {
                c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
         FROM character_relationships cr
         JOIN characters c ON c.id = cr.to_character_id
-        WHERE cr.from_character_id = ?
+        WHERE cr.from_character_id = ? AND cr.relationship_text != ''
       `).all(character.id);
 
       const picked = allRels[Math.floor(Math.random() * allRels.length)];
@@ -572,12 +572,12 @@ async function generateCharacterReply(post, historyComments) {
     SELECT 'from' AS direction, cr.relationship_text, c.display_name
     FROM character_relationships cr
     JOIN characters c ON c.id = cr.to_character_id
-    WHERE cr.from_character_id = ?
+    WHERE cr.from_character_id = ? AND cr.relationship_text != ''
     UNION ALL
     SELECT 'to' AS direction, cr.relationship_text, c.display_name
     FROM character_relationships cr
     JOIN characters c ON c.id = cr.from_character_id
-    WHERE cr.to_character_id = ?
+    WHERE cr.to_character_id = ? AND cr.relationship_text != ''
   `).all(post.character_id, post.character_id);
 
   if (charRels.length > 0) {

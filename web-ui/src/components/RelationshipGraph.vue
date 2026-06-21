@@ -227,7 +227,7 @@ async function buildGraph() {
   const nodePosMap = Object.fromEntries(graphNodes.map(n => [n.id, n.position]))
 
   const graphEdges = existingRels.value
-    .filter(rel => nodeIds.has(String(rel.from_character_id)) && nodeIds.has(String(rel.to_character_id)))
+    .filter(rel => nodeIds.has(String(rel.from_character_id)) && nodeIds.has(String(rel.to_character_id)) && rel.relationship_text)
     .map(rel => {
       const targetPos = nodePosMap[String(rel.to_character_id)]
       const handles = targetPos ? computeHandles(targetPos) : { sourceHandle: 'source-top', targetHandle: 'target-top' }

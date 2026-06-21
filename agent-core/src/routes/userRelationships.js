@@ -18,6 +18,7 @@ router.get('/', (req, res) => {
       c.avatar_color AS to_avatar_color
     FROM user_relationships ur
     JOIN characters c ON c.id = ur.character_id
+    WHERE ur.relationship_text != ''
     ORDER BY ur.created_at ASC
   `).all();
 

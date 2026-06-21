@@ -436,12 +436,12 @@ router.post('/characters/:id/chat', async (req, res) => {
       SELECT 'from' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
       JOIN characters c ON c.id = cr.to_character_id
-      WHERE cr.from_character_id = ?
+      WHERE cr.from_character_id = ? AND cr.relationship_text != ''
       UNION ALL
       SELECT 'to' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
       JOIN characters c ON c.id = cr.from_character_id
-      WHERE cr.to_character_id = ?
+      WHERE cr.to_character_id = ? AND cr.relationship_text != ''
     `).all(characterId, characterId);
     if (charRels.length > 0) {
       const relLines = charRels.map(r => {
