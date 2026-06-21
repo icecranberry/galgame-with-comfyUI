@@ -10,7 +10,7 @@
       <div class="card">
         <h3>画师串 & 分辨率</h3>
         <p class="fd">建议选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/ 或者 直接描述画面风格</p>
-        <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均6秒/图</p>
+        <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均7秒/图</p>
 
         <!-- 对话配图 -->
         <div class="moments-subsection">

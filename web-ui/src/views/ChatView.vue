@@ -54,7 +54,7 @@
 
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
-              <div class="msg-avatar" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle">
+              <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
                 <span v-if="item.msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
@@ -76,7 +76,7 @@
 
             <!-- Image generation bubble -->
             <div v-else class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
-              <div class="msg-avatar" :style="agentAvatarStyle">
+              <div class="msg-avatar clickable" :style="agentAvatarStyle" title="角色设置" @click="openSettings()">
                 <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <ImageGenBubble
@@ -1272,6 +1272,13 @@ function renderContent(text) {
   background-size:cover; background-position:center;
   display:flex; align-items:center; justify-content:center;
   transition: opacity 0.15s;
+}
+.msg-avatar.clickable {
+  cursor: pointer;
+}
+.msg-avatar.clickable:hover {
+  opacity: 0.85;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
 }
 .msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
 .avatar-fallback { color:#fff; font-size:14px; font-weight:700; user-select:none; }

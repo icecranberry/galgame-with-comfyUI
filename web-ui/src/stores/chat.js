@@ -390,7 +390,7 @@ export const useChatStore = defineStore('chat', () => {
         for (const bid of bubbleIds) {
           let m = messages.value.find(x => x.id === bid)
           if (!m) continue  // 延迟创建未触发，无需填充
-          if (!m.content) m.content = '(无回复)'
+          if (!m.content) m.content = '...'
         }
         break
       } catch (err) {
@@ -466,7 +466,7 @@ export const useChatStore = defineStore('chat', () => {
           // 兜底：完全无回复
           if (!fullResponse && bubbleIds.length === 1) {
             const m = messages.value.find(x => x.id === bubbleIds[0])
-            if (m && !m.content) m.content = '(无回复)'
+            if (m && !m.content) m.content = '...'
           }
         }
       }

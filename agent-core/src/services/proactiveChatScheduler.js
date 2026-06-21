@@ -812,27 +812,45 @@ export function startProactiveChatScheduler() {
  * 无视 processing 锁和 next_proactive_at 时间，直接走完整流程。
  * @returns {Promise<{ character: string, motive: string, greeting: string } | null>}
  */
-export async function forceProactiveNow() {
+export async function forceProactiveNow(targetCharacterId) {
   try {
     const db = getDb();
-    const candidates = db.prepare(
-    'SELECT * FROM characters WHERE proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3'
-  ).all();
 
-  if (candidates.length === 0) {
-    console.log('⚡ force: no eligible characters (all disabled or streak≥3)');
-    return null;
-  }
-
-  const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+    let candidate;
+    if (targetCharacterId) {
+      // 指定角色：直接按 id 查找，仍需满足基本条件
+      candidate = db.prepare(
+        'SELECT * FROM characters WHERE id = ? AND proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3'
+      ).get(targetCharacterId);
+      if (!candidate) {
+        console.log(`⚡ force: character ${targetCharacterId} not eligible (disabled or streak≥3)`);
+        return null;
+      }
+      console.log(`⚡ force: targeted ${candidate.display_name} (id=${targetCharacterId})`);
+    } else {
+      const candidates = db.prepare(
+        'SELECT * FROM characters WHERE proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3'
+      ).all();
+      if (candidates.length === 0) {
+        console.log('⚡ force: no eligible characters (all disabled or streak≥3)');
+        return null;
+      }
+      candidate = candidates[Math.floor(Math.random() * candidates.length)];
+      console.log(`⚡ force: picked ${candidate.display_name}`);
+    }
   const conversationId = `char_${candidate.id}`;
-  console.log(`⚡ force: picked ${candidate.display_name}`);
 
   const lastMsg = db.prepare(`
     SELECT created_at FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1
   `).get(conversationId);
   const lastMessageAt = lastMsg ? toISO(lastMsg.created_at) : null;
   let hoursSince = lastMessageAt ? (Date.now() - new Date(lastMessageAt).getTime()) / 3600000 : null;
+
+  // 若用户 2 分钟内刚发过消息，跳过（避免正在聊天时插入主动消息）
+  if (hoursSince !== null && hoursSince * 60 < 2) {
+    console.log(`⚡ force: ${candidate.display_name} skipped — user messaged ${(hoursSince * 60).toFixed(1)}min ago (<2min)`);
+    return null;
+  }
 
   const affinity = loadAffinity(candidate.id);
   const emotionBaseline = JSON.parse(candidate.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}');

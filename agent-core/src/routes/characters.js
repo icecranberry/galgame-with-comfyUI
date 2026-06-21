@@ -11,6 +11,7 @@ import { clearImageJudgeCounter } from './chat.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
 import { generateImage } from '../services/imageSkill.js';
+import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
 
@@ -84,6 +85,23 @@ router.post('/', (req, res) => {
     const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0);
     res.status(201).json({ id: result.lastInsertRowid, name, display_name });
+
+    // 创建成功后，30~60 秒内发起一次主动聊天（除非角色禁用了主动聊天）
+    if (!(proactive_disabled && (proactive_disabled === 1 || proactive_disabled === '1'))) {
+      const newCharId = result.lastInsertRowid;
+      const delayMs = 30_000 + Math.floor(Math.random() * 30_000); // 30~60s
+      setTimeout(() => {
+        forceProactiveNow(newCharId).then((r) => {
+          if (r) {
+            console.log(`[char] proactive greeting sent for new character "${display_name}" (id=${newCharId})`);
+          } else {
+            console.log(`[char] proactive greeting skipped for "${display_name}" (id=${newCharId}): not eligible`);
+          }
+        }).catch((err) => {
+          console.error(`[char] proactive greeting error for "${display_name}":`, err.message);
+        });
+      }, delayMs).unref();
+    }
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: `"${name}" already exists` });
     throw err;

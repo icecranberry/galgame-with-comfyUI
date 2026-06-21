@@ -49,35 +49,37 @@
         <!-- ═══════════════════════════════════════════
              关系输入弹窗
              ═══════════════════════════════════════════ -->
-        <div v-if="inputDialog.show" class="rel-dialog-overlay" @click.self="cancelInput">
-          <div class="rel-dialog">
-            <div class="rel-dialog-header">
-              <span>{{ inputDialog.isEdit ? '编辑关系' : '新建关系' }}</span>
-              <button class="rel-dialog-close" @click="cancelInput">✕</button>
-            </div>
-            <div class="rel-dialog-body">
-              <p class="rel-dialog-desc">
-                我 → {{ `${inputDialog.targetName}——${inputDialog.targetName}是我的XX` }}
-              </p>
-              <input
-                ref="inputRef"
-                v-model="inputDialog.text"
-                class="rel-input"
-                placeholder="输入关系，如：老板"
-                @keydown.enter="confirmInput"
-              />
-              <div class="rel-dialog-actions">
-                <button v-if="inputDialog.isEdit" class="btn-ghost danger" @click="deleteEdge">🗑 删除</button>
-                <div class="rel-dialog-actions-right">
-                  <button class="btn-ghost" @click="cancelInput">取消</button>
-                  <button class="btn-primary" :disabled="!inputDialog.text.trim()" @click="confirmInput">
-                    {{ inputDialog.isEdit ? '保存' : '确认' }}
-                  </button>
+        <Transition name="dialog-fade">
+          <div v-if="inputDialog.show" class="rel-dialog-overlay" @mousedown.self="cancelInput">
+            <div class="rel-dialog">
+              <div class="rel-dialog-header">
+                <span>{{ inputDialog.isEdit ? '编辑关系' : '新建关系' }}</span>
+                <button class="rel-dialog-close" @click="cancelInput">✕</button>
+              </div>
+              <div class="rel-dialog-body">
+                <p class="rel-dialog-desc">
+                  我 → {{ `${inputDialog.targetName}——${inputDialog.targetName}是我的XX` }}
+                </p>
+                <input
+                  ref="inputRef"
+                  v-model="inputDialog.text"
+                  class="rel-input"
+                  placeholder="输入关系，如：老板"
+                  @keydown.enter="confirmInput"
+                />
+                <div class="rel-dialog-actions">
+                  <button v-if="inputDialog.isEdit" class="btn-ghost danger" @click="deleteEdge">🗑 删除</button>
+                  <div class="rel-dialog-actions-right">
+                    <button class="btn-ghost" @click="cancelInput">取消</button>
+                    <button class="btn-primary" :disabled="!inputDialog.text.trim()" @click="confirmInput">
+                      {{ inputDialog.isEdit ? '保存' : '确认' }}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </Transition>
       </div>
     </Transition>
   </Teleport>
@@ -550,5 +552,27 @@ async function deleteEdge() {
 @keyframes rel-pop {
   0% { transform: scale(0.92); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Dialog transition ── */
+.dialog-fade-enter-active,
+.dialog-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.dialog-fade-enter-active .rel-dialog,
+.dialog-fade-leave-active .rel-dialog {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.dialog-fade-enter-from,
+.dialog-fade-leave-to {
+  opacity: 0;
+}
+.dialog-fade-enter-from .rel-dialog {
+  transform: scale(0.92);
+  opacity: 0;
+}
+.dialog-fade-leave-to .rel-dialog {
+  transform: scale(0.92);
+  opacity: 0;
 }
 </style>

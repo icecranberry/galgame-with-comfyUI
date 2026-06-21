@@ -61,7 +61,7 @@
               @blur="saveAppearance"
               @keydown.enter.exact="saveAppearance"
               @keydown.escape="cancelEditAppearance"
-              placeholder="外观描述越详细越不容易和其他角色串，示例：金色头发，超长双马尾，钻头卷，公主切，白色蝴蝶结发饰，侧发，贫乳，大小姐，穿着white dress, lolita, frills, lace"
+              placeholder="外观描述越紧密越不容易和其他角色串，示例：长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔"
             ></textarea>
             <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
             <button v-if="!editingAppearance" class="edit-pen" @click="startEditAppearance" title="编辑外观">✎</button>

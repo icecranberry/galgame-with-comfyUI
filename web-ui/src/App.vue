@@ -14,13 +14,6 @@
   </div>
   <ConfirmDialog ref="confirmDialog" />
 
-  <!-- 临时调试：浮动按钮强制主动聊天 -->
-  <button
-    class="debug-force-btn"
-    :disabled="forceLoading"
-    :title="forceResult || '强制随机角色发起主动聊天'"
-    @click="onForceProactive"
-  >{{ forceLoading ? '⏳' : '⚡' }}</button>
 </template>
 
 <script setup>
@@ -252,33 +245,4 @@ textarea { resize: vertical; font-family: inherit; }
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(20px); }
 
-/* ── 临时调试按钮 ── */
-.debug-force-btn {
-  position: fixed;
-  bottom: 300px;
-  right: 16px;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(224, 123, 108, 0.55);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(224, 123, 108, 0.4);
-  color: #fff;
-  font-size: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 9999;
-  box-shadow: 0 2px 12px rgba(224, 123, 108, 0.3);
-  transition: all 0.2s;
-}
-.debug-force-btn:hover:not(:disabled) {
-  background: rgba(224, 123, 108, 0.8);
-  transform: scale(1.08);
-}
-.debug-force-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
-}
 </style>

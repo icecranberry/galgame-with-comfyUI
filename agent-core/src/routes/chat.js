@@ -733,9 +733,9 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (segments.length === 0) {
       // 兜底：AI 没有返回有效文本
       const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
-        .run(conversationId, '(无回复)');
+        .run(conversationId, '...');
       const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-        .run(conversationId, rawEmpty.lastInsertRowid, '(无回复)');
+        .run(conversationId, rawEmpty.lastInsertRowid, '...');
       savedIds.push(r.lastInsertRowid);
       send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
     }
@@ -1396,7 +1396,9 @@ async function generateReplyGuesses(conversationId, character) {
 
   // 预测助手使用独立的 system prompt，不注入角色扮演系统规则
   // getSystemRules() 包含 "<完全角色扮演自由>" 等指令，会导致模型站错角色
-  const systemPrompt = `你是一个对话预测助手。根据最近的对话历史，预测用户接下来最可能回复的两句话。
+  const systemPrompt = `你是一个对话预测助手。你的任务是预测**用户（user）**接下来最可能回复的两句话。
+
+⚠️ 重要：你要预测的是 user 的回复，**绝对不要**预测 assistant 会说什么。对话最后一条是 assistant 说的，你预测的必须是 user 对这句话的回应——不要把 assistant 的话接下去。
 
 规则：
 1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或表达不同态度
@@ -1407,8 +1409,9 @@ async function generateReplyGuesses(conversationId, character) {
 {"a":"<猜想A>","b":"<猜想B>"}
 
 示例：
-对话中助手说"走吧，我们出门吃晚饭？"
-输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}`;
+对话中assistant说"走吧，我们出门吃晚饭？"
+输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}
+`;
 
   // 过滤掉 assistant 消息中的生图 prompt JSON，避免干扰预测
   const cleanedHistory = history.map(msg => {
@@ -1423,7 +1426,7 @@ async function generateReplyGuesses(conversationId, character) {
 
   const msgs = [
     { role: 'system', content: systemPrompt },
-    ...(personalityBrief ? [{ role: 'system', content: `角色人设供参考（有助于预测用户可能的反应）：${personalityBrief}` }] : []),
+    ...(personalityBrief ? [{ role: 'system', content: `【仅供了解对话背景，你要预测的是用户（user）会怎么回应这个角色，不要模仿这个角色的语气说话】\n对话中assistant的角色设定：${personalityBrief}` }] : []),
     ...cleanedHistory,
     { role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' },
   ];
