@@ -635,13 +635,13 @@ async function tick() {
 // ── 频率定时器（与 VAD/好感度算法双线并行）──
 
 function freqToMinutes(freq) {
-  // freq 0.1 → 240min (4h), freq 1.0 → 10min
-  return Math.round(10 + (1 - freq) / 0.9 * 230);
+  // freq 0.1 → 180min (3h), freq 1.0 → 5min
+  return Math.round(5 + (1 - freq) / 0.9 * 175);
 }
 
 function startupToMinutes(freq) {
-  // freq 0.1 → 10min, freq 1.0 → 6min（启动线更密集）
-  return Math.round(10 - (freq - 0.1) / 0.9 * 4);
+  // freq 0.1 → 10min, freq 1.0 → 5min（启动线更密集）
+  return Math.round(5 + (1 - freq) / 0.9 * 5);
 }
 
 function fmtIn(minutes) {
@@ -667,12 +667,15 @@ function startFreqLine() {
 
   freqRunning = true;
   const intervalMin = freqToMinutes(freq);
-  const jitterMin = -5 + Math.random() * 10;
-  const delayMin = Math.max(1, intervalMin + jitterMin);
+  const maxJitter = Math.min(10, intervalMin * 0.3);
+  const delayMin = Math.max(1, intervalMin + (-maxJitter + Math.random() * maxJitter * 2));
+
+  console.log(`⚡ [Line B·Freq]  timer set, first fire in ${delayMin.toFixed(1)}min (base ${intervalMin}min ±${maxJitter.toFixed(0)}min)`);
 
   const scheduleNext = () => {
     if (!freqRunning) return;
-    const nextMin = Math.max(1, intervalMin + (-5 + Math.random() * 10));
+    const maxJitter = Math.min(10, intervalMin * 0.3);
+    const nextMin = Math.max(1, intervalMin + (-maxJitter + Math.random() * maxJitter * 2));
     freqTimer = setTimeout(() => {
       if (!freqRunning) return;
       console.log(`⚡ [Line B·Freq]  firing...`);
@@ -690,6 +693,7 @@ function startFreqLine() {
     }, nextMin * 60_000);
   };
 
+  console.log(`⚡ [Line B·Freq]  timer set, first fire in ${delayMin.toFixed(1)}min`);
   freqTimer = setTimeout(scheduleNext, delayMin * 60_000);
   return delayMin;
 }
@@ -707,33 +711,20 @@ function startStartupLine() {
   if (freq <= 0) return;
 
   startupRunning = true;
-  const intervalMin = startupToMinutes(freq);
 
-  const scheduleNext = (isFirst = false) => {
-    if (!startupRunning) return;
-    const nextMin = isFirst
-      ? Math.max(0.5, 1 + Math.random() * 2)                     // 首发: 1~3min
-      : Math.max(1, intervalMin + (-3 + Math.random() * 6));     // 之后: interval±3min
-    startupTimer = setTimeout(() => {
-      if (!startupRunning) { console.log('⚡ [Line C·Startup] skipped (stopped)'); return; }
-      console.log(`⚡ [Line C·Startup] firing...`);
-      forceProactiveNow().then((r) => {
-        if (r) {
-          console.log(`⚡ [Line C·Startup] force done: ${r.character} (${r.motive})`);
-        } else {
-          console.log('⚡ [Line C·Startup] no eligible character (all disabled or streak≥3)');
-        }
-        if (startupRunning) scheduleNext();
-      }).catch((err) => {
-        console.error('⚡ [Line C·Startup] unexpected error:', err.message);
-        if (startupRunning) scheduleNext();
-      });
-    }, nextMin * 60_000);
-  };
-
-  // 首发：1~3min 后触发（外部已等 60s，这里不需要再等）
+  // 单次首发：1~3min 后触发一次即结束（只做启动暖场）
   const firstMin = 1 + Math.random() * 2;
-  scheduleNext(true);
+  startupTimer = setTimeout(async () => {
+    if (!startupRunning) return;
+    console.log('⚡ [Line C·Startup] firing (one-shot)...');
+    const r = await forceProactiveNow();
+    if (r) {
+      console.log(`⚡ [Line C·Startup] force done: ${r.character} (${r.motive}) — line finished`);
+    } else {
+      console.log('⚡ [Line C·Startup] no eligible character — line finished');
+    }
+    startupRunning = false;
+  }, firstMin * 60_000);
   return firstMin;
 }
 
