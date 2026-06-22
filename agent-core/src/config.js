@@ -49,7 +49,12 @@ export const config = {
 };
 
 function persistEnv(key, value) {
-  let envContent = fs.readFileSync(envPath, 'utf8');
+  let envContent = '';
+  if (fs.existsSync(envPath)) {
+    envContent = fs.readFileSync(envPath, 'utf8');
+  } else {
+    envContent = '# 此文件由系统自动管理，通过 Settings 页面修改配置即可\n';
+  }
   const line = `${key}=${String(value)}`;
   if (envContent.includes(`${key}=`)) {
     envContent = envContent.replace(new RegExp(`^${key}=.*$`, 'm'), line);
@@ -99,7 +104,17 @@ export function updateProactiveFreq(value) {
 }
 
 export function getLlmConfig() {
-  const key = config.llm.apiKey || '';
+  // 实时读取 .env 中的 API Key（兼容用户手动编辑 .env 不重启的场景）
+  let envKey = '';
+  try {
+    if (fs.existsSync(envPath)) {
+      const raw = fs.readFileSync(envPath, 'utf8');
+      const m = raw.match(/^LLM_API_KEY=(.+)$/m);
+      if (m) envKey = m[1].trim();
+    }
+  } catch {}
+  // 优先用内存值（可能通过 UI 刚保存但还没写盘），回退到 .env 文件值
+  const key = config.llm.apiKey || envKey || '';
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
   return {
     provider: config.llm.provider,

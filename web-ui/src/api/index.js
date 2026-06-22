@@ -550,3 +550,34 @@ export async function listGalleryImages() {
   const res = await fetch(`${BASE}/images/gallery`)
   return res.json()
 }
+
+// ── 画师串收藏夹 ──
+export async function getArtistFavorites() {
+  const res = await fetch(`${BASE}/config/artist-favorites`)
+  return res.json()
+}
+
+export async function addArtistFavorite({ label, artist }) {
+  const res = await fetch(`${BASE}/config/artist-favorites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, artist }),
+  })
+  return res.json()
+}
+
+export async function updateArtistFavorite(id, data) {
+  const res = await fetch(`${BASE}/config/artist-favorites/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function deleteArtistFavorite(id) {
+  const res = await fetch(`${BASE}/config/artist-favorites/${id}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}

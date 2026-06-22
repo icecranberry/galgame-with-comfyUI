@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRules, repairFtsIndex } from '../db/index.js';
-import { DEFAULT_CHARACTERS } from '../services/seeds.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
@@ -14,29 +13,6 @@ import { generateImage } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
-
-function seedCharacters() {
-  const db = getDb();
-  // 只 INSERT 新角色；已有角色只更新显示名称和情绪基线，不覆盖 base_prompt
-  // 避免用户手动编辑人格后重启被 seeds.js 覆盖
-  const insert = db.prepare(`INSERT OR IGNORE INTO characters (name, display_name, base_prompt, emotion_baseline) VALUES (?, ?, ?, ?)`);
-  const updateMeta = db.prepare(`UPDATE characters SET display_name = ?, emotion_baseline = ? WHERE name = ?`);
-  let added = 0, updatedMeta = 0;
-  for (const ch of DEFAULT_CHARACTERS) {
-    const insertResult = insert.run(ch.name, ch.display_name, ch.base_prompt, ch.emotion_baseline);
-    if (insertResult.changes > 0) {
-      added++;
-    } else {
-      // 已存在：只更新展示名和情绪基线，不动 base_prompt
-      updateMeta.run(ch.display_name, ch.emotion_baseline, ch.name);
-      updatedMeta++;
-    }
-  }
-  if (added > 0 || updatedMeta > 0) {
-    console.log(`[characters] seeded: ${added} new, ${updatedMeta} meta-updated`);
-  }
-}
-seedCharacters();
 
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {

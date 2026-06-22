@@ -9,13 +9,22 @@
       <!-- ComfyUI params: 对话配图 + 朋友圈配图 -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">建议选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/ 或者 直接描述画面风格</p>
+        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
         <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均7秒/图</p>
 
         <!-- 对话配图 -->
         <div class="moments-subsection">
           <h4 class="subsection-title">▸ 对话配图</h4>
-          <input v-model="form.artist" class="fi" @input="markDirty" placeholder="画师串"/>
+          <div class="fav-input-row">
+            <input v-model="form.artist" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
+            <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites('chat')" :disabled="!form.artist.trim()">☆</button>
+          </div>
+          <div v-if="artistFavorites.length" class="fav-chips">
+            <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form.artist }" @click="applyFavorite(fav, 'chat')" :title="fav.artist">
+              {{ fav.label }}
+              <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
+            </button>
+          </div>
           <div class="fr">
             <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
             <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
@@ -31,7 +40,16 @@
         <!-- 朋友圈配图 -->
         <div class="moments-subsection">
           <h4 class="subsection-title">▸ 朋友圈配图</h4>
-          <input v-model="form.momentsArtist" class="fi" @input="markDirty" placeholder="画师串"/>
+          <div class="fav-input-row">
+            <input v-model="form.momentsArtist" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
+            <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites('moments')" :disabled="!form.momentsArtist.trim()">☆</button>
+          </div>
+          <div v-if="artistFavorites.length" class="fav-chips">
+            <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form.momentsArtist }" @click="applyFavorite(fav, 'moments')" :title="fav.artist">
+              {{ fav.label }}
+              <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
+            </button>
+          </div>
           <div class="fr">
             <div class="fh"><label class="fl">宽度</label><input v-model.number="form.momentsWidth" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
             <div class="fh"><label class="fl">高度</label><input v-model.number="form.momentsHeight" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
@@ -307,11 +325,40 @@
     </div>
 
   </div>
+
+  <!-- 收藏画师串弹窗 -->
+  <Teleport to="body">
+    <Transition name="fav-dialog-fade">
+      <div v-if="favDialog.show" class="fav-dialog-overlay">
+        <div class="fav-dialog">
+          <div class="fav-dialog-header">
+            <span>收藏画师串</span>
+            <button class="fav-dialog-close" @click="cancelAddFavorite">✕</button>
+          </div>
+          <div class="fav-dialog-body">
+            <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
+            <input
+              ref="favDialogInput"
+              v-model="favDialog.label"
+              class="fav-dialog-input"
+              placeholder="输入收藏名称"
+              maxlength="30"
+              @keyup.enter="confirmAddFavorite"
+            />
+            <div class="fav-dialog-actions">
+              <button class="btn-ghost" @click="cancelAddFavorite">取消</button>
+              <button class="btn-primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, inject } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle, updateProactiveFreq } from '../api/index.js'
+import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle, updateProactiveFreq, getArtistFavorites, addArtistFavorite, deleteArtistFavorite } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -367,6 +414,76 @@ const presets = [
   { label: '1920×1080', width: 1920, height: 1080 },
 ]
 
+// ── 画师串收藏夹 ──
+const artistFavorites = ref([])
+const favDialog = reactive({
+  show: false,
+  mode: 'chat',
+  label: '',
+})
+
+async function loadArtistFavorites() {
+  try {
+    const data = await getArtistFavorites()
+    artistFavorites.value = data.favorites || []
+  } catch {}
+}
+
+function addToFavorites(mode) {
+  const artist = (mode === 'moments' ? form.value.momentsArtist : form.value.artist).trim()
+  if (!artist) return
+  if (artistFavorites.value.some(f => f.artist === artist)) {
+    alert('已收藏过该画师串')
+    return
+  }
+  favDialog.mode = mode
+  favDialog.label = artist.length > 20 ? artist.slice(0, 20) + '…' : artist
+  favDialog.show = true
+}
+
+async function confirmAddFavorite() {
+  const artist = (favDialog.mode === 'moments' ? form.value.momentsArtist : form.value.artist).trim()
+  const label = favDialog.label.trim() || artist
+  try {
+    const result = await addArtistFavorite({ label, artist })
+    if (result.ok) {
+      artistFavorites.value.push(result.favorite)
+    }
+  } catch (err) {
+    console.error('[favorites] add failed:', err)
+  }
+  favDialog.show = false
+}
+
+function cancelAddFavorite() {
+  favDialog.show = false
+}
+
+const favDialogInput = ref(null)
+watch(() => favDialog.show, async (v) => {
+  if (v) {
+    await nextTick()
+    favDialogInput.value?.focus()
+    favDialogInput.value?.select()
+  }
+})
+
+function applyFavorite(fav, mode) {
+  if (mode === 'moments') {
+    form.value.momentsArtist = fav.artist
+  } else {
+    form.value.artist = fav.artist
+  }
+  markDirty()
+}
+
+async function removeFavorite(id) {
+  try {
+    await deleteArtistFavorite(id)
+    artistFavorites.value = artistFavorites.value.filter(f => f.id !== id)
+  } catch {}
+}
+
 // ── LLM API ──
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
 const llmApiKey = ref('')
@@ -400,6 +517,7 @@ onMounted(async () => {
   } catch {}
   await checkHealth()
   await loadRules()
+  await loadArtistFavorites()
 })
 
 function markDirty() { dirty.value = true; saved.value = false }
@@ -429,6 +547,7 @@ async function saveLlmConfig() {
     if (llmModel.value) payload.model = llmModel.value
     const result = await updateLlmConfig(payload)
     if (result.ok) {
+      settingsStore.setHasApiKey(result.hasApiKey)
       llmPreview.value = { ...result }
       llmBaseURL.value = result.baseURL || llmBaseURL.value
       llmModel.value = result.model || llmModel.value
@@ -622,6 +741,82 @@ function resetTestPrompts() {
 .pl { font-size: 11px; color: var(--text-secondary); }
 .pbtn { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
 .pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
+
+/* ── 画师串收藏夹 ── */
+.fav-input-row { display: flex; gap: 8px; align-items: flex-start; }
+.fav-input { flex: 1; margin-bottom: 8px; }
+.fav-star-btn {
+  width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong); color: var(--text-secondary); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0; transition: all 0.15s; flex-shrink: 0;
+}
+.fav-star-btn:hover:not(:disabled) { border-color: #e2a83e; color: #e2a83e; }
+.fav-star-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fav-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.fav-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; padding: 4px 8px; border-radius: 14px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg-strong);
+  color: var(--text-primary); cursor: pointer; transition: all 0.15s;
+}
+.fav-chip:hover { border-color: var(--accent); }
+.fav-chip.active { border-color: var(--accent); background: rgba(239, 137, 74, 0.1); color: var(--accent); }
+.fav-chip-x {
+  font-size: 14px; line-height: 1; color: var(--text-secondary); margin-left: 2px;
+}
+.fav-chip-x:hover { color: var(--danger); }
+
+/* ── 收藏弹窗 ── */
+.fav-dialog-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.fav-dialog {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
+  width: 400px; max-width: 90vw;
+  overflow: hidden;
+}
+.fav-dialog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 0;
+  font-size: 15px; font-weight: 600; color: var(--text-bright);
+}
+.fav-dialog-close {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: transparent; color: var(--text-secondary); font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.fav-dialog-close:hover { background: rgba(0,0,0,0.06); color: #333; }
+.fav-dialog-body { padding: 12px 20px 20px; }
+.fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+.fav-dialog-input {
+  width: 100%; padding: 10px 12px; font-size: 14px;
+  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
+  transition: border-color 0.2s;
+}
+.fav-dialog-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+/* ── 弹窗过渡动画 ── */
+.fav-dialog-fade-enter-active { transition: opacity 0.2s ease; }
+.fav-dialog-fade-leave-active { transition: opacity 0.15s ease; }
+.fav-dialog-fade-enter-active .fav-dialog { animation: fav-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+.fav-dialog-fade-leave-active .fav-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
+.fav-dialog-fade-enter-from,
+.fav-dialog-fade-leave-to { opacity: 0; }
+.fav-dialog-fade-leave-to .fav-dialog { transform: scale(0.95); opacity: 0; }
+
+@keyframes fav-pop {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
 .sa { display: flex; align-items: center; gap: 12px; }
 .smsg { color: var(--success); font-size: 13px; }
 

@@ -7,6 +7,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const comfyHeight = ref(1200)
   const forceImageGen = ref(false)
   const realtimeAffinityDisplay = ref(false)
+  const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   let loaded = false
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
@@ -30,6 +31,7 @@ export const useSettingsStore = defineStore('settings', () => {
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
       }
+      hasApiKey.value = data.llm?.hasApiKey ?? false
       loaded = true
     } catch {
       // keep defaults
@@ -57,5 +59,7 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateFeatureFlag('realtimeAffinityDisplay', v)
   }
 
-  return { comfyWidth, comfyHeight, forceImageGen, realtimeAffinityDisplay, loadComfyConfig, setComfySize, setForceImageGen, setRealtimeAffinityDisplay }
+  function setHasApiKey(v) { hasApiKey.value = v }
+
+  return { comfyWidth, comfyHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, loadComfyConfig, setComfySize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey }
 })

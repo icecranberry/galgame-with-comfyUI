@@ -188,7 +188,7 @@
         <!-- 清空聊天记录 -->
         <button class="sp-btn sp-btn-danger" @click="clearChatHistory" :disabled="clearing">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M687.6 96.4H336.4v91.2h351.1V96.4zM636.7 398v405.5h-73.9V398h73.9z m-175.5 0v405.5h-73.9V398h73.9z m332.1-119.2H230.7l27.9 648.8h506.7l28-648.8zM696.8 5.1c40.4 0 73.3 35.6 73.9 79.8v102.7h147.8c20.2 0 36.6 17.8 37 39.9v41.2c0 5.5-4 10-9 10.1h-70.1L848 941.6c-1.8 42.9-33.7 76.6-72.6 77.3H249.8c-39 0-71.3-33.4-73.7-76l-0.1-1.3-28.5-662.7H77.7c-5 0-9.1-4.4-9.2-9.8v-40.9c0-22.2 16.2-40.2 36.3-40.5h148.4V86.2c0-44.3 32.5-80.4 72.7-81.1h370.9z" fill="currentColor"/></svg>
-          {{ clearing ? '清空中...' : '清空聊天记录' }}
+          {{ clearing ? '清空中...' : '清空记忆' }}
         </button>
 
         <div class="sp-divider"></div>
@@ -876,7 +876,7 @@ console.error('[chat] save character failed:', err)
 async function clearChatHistory() {
 showSettings.value = false
 if (clearing.value) return
-const ok = await confirmFn({ title:'清空聊天记录', message:'确定要清空当前角色的所有聊天记录吗？\n此操作不可恢复。', okText:'清空' })
+const ok = await confirmFn({ title:'清空记忆', message:'确定要清空当前角色的所有记忆吗？\n此操作不可恢复。', okText:'清空' })
 if (!ok) return
 clearing.value = true
 try { await chat.clearActiveMessages() } catch {} finally { clearing.value = false }

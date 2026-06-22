@@ -1,4 +1,10 @@
 <template>
+  <!-- API Key 未配置横幅 -->
+  <div v-if="!settings.hasApiKey" class="api-key-banner">
+    <span class="banner-icon">⚠️</span>
+    <span class="banner-text">尚未配置 API Key，请前往设置页面填写 DeepSeek（或其他兼容）API Key</span>
+    <router-link to="/settings" class="banner-link">前往设置 →</router-link>
+  </div>
   <div class="app-layout" :class="{ 'is-mobile': isMobile }">
     <!-- 移动端遮罩层：Sidebar 拉出时覆盖聊天区域 -->
     <Transition name="scrim-fade">
@@ -181,16 +187,15 @@ onUnmounted(() => {
 
 html, body, #app {
   height: 100%;
-  /* 100dvh 随 Chrome 地址栏显隐动态调整，100vh 作为旧浏览器兜底 */
   min-height: 100vh; min-height: 100dvh;
   font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: var(--text-primary);
   overflow: hidden;
 }
 html, body { background: var(--bg-primary); }
-#app { background: transparent; }
+#app { background: transparent; display: flex; flex-direction: column; }
 
-.app-layout { display: flex; height: 100vh; height: 100dvh; position: relative; z-index: 1; }
+.app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
 #app { position: relative; z-index: 1; }
 
 button {
@@ -236,6 +241,34 @@ textarea { resize: vertical; font-family: inherit; }
 .scrim-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 .scrim-fade-enter-from,
 .scrim-fade-leave-to { opacity: 0; }
+
+/* ── API Key 未配置横幅 ── */
+.api-key-banner {
+  width: 100%;
+  background: #e04444;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  z-index: 1000;
+  position: relative;
+  flex-shrink: 0;
+}
+.banner-icon { font-size: 16px; flex-shrink: 0; }
+.banner-text { font-weight: 500; }
+.banner-link {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  margin-left: 4px;
+  transition: opacity 0.15s;
+}
+.banner-link:hover { opacity: 0.8; }
 
 /* ── 全局 toggle switch（ChatView / SettingsView 共用）── */
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }

@@ -4,8 +4,6 @@
       <div v-if="visible" class="share-overlay" @click.self="close">
         <!-- 截图目标：彩色底板 + 卡片 + 装饰 -->
         <div ref="cardRef" class="share-frame">
-          <!-- 截图专用阴影层（屏幕不可见，由 html2canvas onclone 激活） -->
-          <div class="screenshot-shadow frame-shadow" />
           <!-- 背景装饰光斑 -->
           <div class="share-blob blob-1" />
           <div class="share-blob blob-2" />
@@ -13,7 +11,6 @@
 
           <!-- 白色卡片浮于底色之上 -->
           <div class="share-card">
-            <div class="screenshot-shadow card-shadow" />
             <!-- 顶部装饰条 -->
             <div class="share-decorator" />
 
@@ -164,12 +161,6 @@ async function copyScreenshot() {
       useCORS: true,
       allowTaint: true,
       logging: false,
-      onclone(clonedDoc) {
-        // 在克隆 DOM 中激活阴影层（屏幕 DOM 不受影响）
-        clonedDoc.querySelectorAll('.screenshot-shadow').forEach(el => {
-          el.style.opacity = '1'
-        })
-      },
     })
 
     const blob = await new Promise((resolve, reject) => {
@@ -186,7 +177,7 @@ async function copyScreenshot() {
     console.error('[ShareCard] copy screenshot failed:', err)
     // fallback: 降级下载
     try {
-      const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false, onclone(clonedDoc) { clonedDoc.querySelectorAll('.screenshot-shadow').forEach(el => { el.style.opacity = '1' }) } })
+      const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false })
       canvas.toBlob(blob => {
         if (!blob) return
         const url = URL.createObjectURL(blob)
@@ -252,11 +243,6 @@ watch(() => props.visible, v => {
   border-radius: 20px;
   padding: 40px 34px;
 
-  /* 斜投阴影：用 filter drop-shadow（html2canvas 可渲染，box-shadow 不行） */
-  filter:
-    drop-shadow(8px 14px 24px rgba(0, 0, 0, 0.15))
-    drop-shadow(16px 26px 48px rgba(0, 0, 0, 0.10));
-
   /* 底板自身的呼吸感 — 卡片再在其中浮起 */
   display: flex;
   flex-direction: column;
@@ -264,28 +250,6 @@ watch(() => props.visible, v => {
   gap: 20px;
 }
 
-/* ── 截图专用阴影层：屏幕不可见，html2canvas onclone 中激活 ── */
-.screenshot-shadow {
-  opacity: 0;
-  position: absolute;
-  pointer-events: none;
-}
-.frame-shadow {
-  inset: 0;
-  border-radius: 20px;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse 60% 50% at 85% 85%, rgba(0, 0, 0, 0.14) 0%, transparent 100%),
-    radial-gradient(ellipse 40% 30% at 90% 100%, rgba(0, 0, 0, 0.08) 0%, transparent 100%);
-}
-.card-shadow {
-  inset: 0;
-  border-radius: 16px;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse 50% 40% at 90% 90%, rgba(0, 0, 0, 0.10) 0%, transparent 100%),
-    radial-gradient(ellipse 30% 25% at 95% 100%, rgba(0, 0, 0, 0.06) 0%, transparent 100%);
-}
 /* ── 背景装饰光斑（html2canvas 兼容：用真实 DOM 不用伪元素）── */
 .share-blob {
   position: absolute;
@@ -319,11 +283,6 @@ watch(() => props.visible, v => {
   position: relative;
   z-index: 1;
   overflow: hidden;  /* 配合 border-radius 裁边 */
-
-  /* 斜投阴影：用 filter drop-shadow（html2canvas 可渲染） */
-  filter:
-    drop-shadow(9px 14px 7px rgb(84 43 17 / 17%))
-    drop-shadow(10px 18px 36px rgb(237 139 70 / 22%));
 }
 
 /* 顶部渐变装饰条 */

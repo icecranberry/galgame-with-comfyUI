@@ -617,7 +617,8 @@ router.post('/characters/:id/chat', async (req, res) => {
     //     倒数第一句 → [当前时间]（用现在的时间）
     //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
     const now = new Date();
-    const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+    const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
+    const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
     let foundCount = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {
@@ -633,7 +634,8 @@ router.post('/characters/:id/chat', async (req, res) => {
             const prevDate = new Date(msgCreatedAt + 'Z'); // SQLite UTC → JS Date
             const gapMinutes = (now - prevDate) / 60000;
             if (gapMinutes > 10) {
-              const prevTag = `[上次对话时间 ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`;
+              const prevWeekDay = ['周日','周一','周二','周三','周四','周五','周六'][prevDate.getDay()];
+              const prevTag = `[上次对话时间 ${prevWeekDay} ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`;
               msgs[i].content = `${prevTag} ${msgs[i].content}`;
             }
           }
@@ -994,9 +996,19 @@ function detectImageIntent(message) {
 }
 
 function extractImageTags(content) {
+  // 先尝试原始 ASCII 引号匹配
   const re = /\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/i;
   const jsonMatch = content.match(re);
   if (jsonMatch) return { prompt: jsonMatch[1].replace(/\\"/g, '"').trim() };
+
+  // 兜底：将智能弯引号规范化为 ASCII 引号后重试
+  // LLM 偶尔会输出 " (U+201C) / " (U+201D) 等弯引号替代 "
+  const normalized = content
+    .replace(/[“”„‟＂]/g, '"')
+    .replace(/[‘’‚‛＇]/g, "'");
+  const retryMatch = normalized.match(re);
+  if (retryMatch) return { prompt: retryMatch[1].replace(/\\"/g, '"').trim() };
+
   return { prompt: null };
 }
 
@@ -1243,9 +1255,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         content: `【最后一轮对话】\n${parts.join('\n')}`
       }];
     })(),
-    { role: 'system', content: '现在，输出一个 {"prompt":"..."} 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。只输出 JSON，不要任何其他文字。' },
-    // ── pre-fill：从 prompt 值内部起始，模型续写 "少女站在..."} 完成 JSON ──
-    { role: 'assistant', content: '{"prompt":"' },
+    { role: 'system', content: '现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境。只输出 JSON，不要任何其他文字。' },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -1259,23 +1269,45 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     return;
   }
 
-  // 3.5 恢复 pre-fill 前缀（chatSync 只返回新生成的 tokens）
-  //     pre-fill 是 {"prompt":"  模型续写 prompt 值（"少女站在..."}）或先写正文
-  //     如果响应不包含 {"prompt":，说明模型从我们给的 pre-fill 末尾续写
-  //     如果模型另起炉灶输出完整 JSON 或对话，则不从 pre-fill 拼接
-  const modelFollowedPrefill = !fullContent.includes('{"prompt"');
-  if (modelFollowedPrefill) {
-    // 模型从 pre-fill 的 prompt 值内部续写 → 拼回完整
-    fullContent = '{"prompt":"' + fullContent;
+  // 4. 解析模型输出的完整 JSON（不再用 pre-fill 拼接，走 JSON.parse + 多层兜底）
+  let prompt = null;
+  try {
+    // 清洗 markdown 代码块外壳 → JSON.parse
+    const clean = fullContent.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    prompt = JSON.parse(clean).prompt;
+  } catch {
+    // 兜底1：规范化弯引号后重试 JSON.parse
+    try {
+      const normalized = fullContent
+        .replace(/[“”„‟＂]/g, '"')
+        .replace(/[‘’‚‛＇]/g, "'");
+      const clean = normalized.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      prompt = JSON.parse(clean).prompt;
+    } catch {
+      // 兜底2：从文本中尽力提取 prompt 值（匹配 {"prompt":"..."} 的各种变体，要求有 }）
+      const lenientMatch = fullContent.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*?)[“”"]?\s*\}/i);
+      if (lenientMatch) {
+        prompt = lenientMatch[1].trim();
+      }
+      // 兜底3：连 } 都没有（token 截断等）→ 从 prompt 前缀截取到末尾
+      if (!prompt) {
+        const prefixMatch = fullContent.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*)/i);
+        if (prefixMatch) {
+          prompt = prefixMatch[1].replace(/[\s"“”'』」\}\]]*$/g, '').trim();
+        }
+      }
+      if (prompt && prompt.length >= 5) {
+        console.log(`[chat] needImage: prompt recovered via lenient fallback (${prompt.length} chars)`);
+      } else {
+        prompt = null;
+      }
+      if (!prompt) {
+        console.warn('[chat] needImage: all prompt extraction methods failed, raw:', fullContent.slice(0, 120));
+      }
+    }
   }
-  // 补全尾部闭合（token 截断或模型偶尔忘写 "}，两种路径都需修复）
-  if (!fullContent.endsWith('"}')) {
-    fullContent = fullContent.replace(/"?\s*$/g, '"');
-    if (!fullContent.endsWith('"}')) fullContent += '"}';
-  }
+  const tags = { prompt };
 
-  // 4. 解析标签
-  const tags = extractImageTags(fullContent);
   let displayContent = stripTags(fullContent);
 
   let assistantRawId;

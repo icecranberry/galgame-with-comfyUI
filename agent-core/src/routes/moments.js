@@ -421,7 +421,8 @@ async function generateMomentPost(character) {
 - 做的事情要符合当前时间，不需要提及现在的时间。除非极度需要说明时间才提及。`;
 
   const now = new Date();
-  const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
+  const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
   const userMsg = multiPerson
     ? `${timeTag} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
     : `${timeTag} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
@@ -639,7 +640,8 @@ ${commentHistory}
   }
 
   const now = new Date();
-  const timeTag = `[当前时间 ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
+  const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
   msgs.push({ role: 'user', content: `${timeTag} 回复这条评论：` });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });

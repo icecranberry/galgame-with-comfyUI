@@ -312,7 +312,7 @@ ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}`;
 ${timeDesc}
 
 【当前时间】
-${(() => { const d = new Date(); return `${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}
+${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; return `${wd} ${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}
 
 请以角色的口吻，生成一句自然的口语化开场白（15~50 字）。
 ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
@@ -322,7 +322,7 @@ ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
 - 自然口语化，像是突然想到就发了一条消息
 - 符合角色性格、当前情绪、好感度状态，以及本次聊天的动机
 - 绝对不要以\"你说\"、\"你说……如果\"、\"你知道吗\"这类句式开场——直接说你自己的话，不需要用提问/假设来起头
-- 绝对不要使用括号描述动作，例如（笑了笑）、【转身往厨房走，又回头看了你一眼】`;
+- 本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。`;
 
   try {
     const result = await chatSync(

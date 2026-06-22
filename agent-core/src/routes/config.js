@@ -141,4 +141,66 @@ router.post('/user-avatar', (req, res) => {
   res.json({ ok: true, avatar_path: `/avatars/user_avatar.png?v=${mtime}` });
 });
 
+// ── 画师串收藏夹 ──
+
+// GET /api/config/artist-favorites
+router.get('/artist-favorites', (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT id, label, artist, sort_order, created_at FROM artist_favorites ORDER BY sort_order, created_at DESC`
+  ).all();
+  res.json({ favorites: rows });
+});
+
+// POST /api/config/artist-favorites
+router.post('/artist-favorites', (req, res) => {
+  const db = getDb();
+  const { label, artist } = req.body;
+  if (!label || !artist) {
+    return res.status(400).json({ error: 'label and artist are required' });
+  }
+  // 去重检查
+  const existing = db.prepare(`SELECT id FROM artist_favorites WHERE artist = ?`).get(artist.trim());
+  if (existing) {
+    return res.status(409).json({ error: 'duplicate', id: existing.id });
+  }
+  const result = db.prepare(
+    `INSERT INTO artist_favorites (label, artist) VALUES (?, ?)`
+  ).run(label.trim(), artist.trim());
+  const row = db.prepare(`SELECT * FROM artist_favorites WHERE id = ?`).get(result.lastInsertRowid);
+  res.json({ ok: true, favorite: row });
+});
+
+// PUT /api/config/artist-favorites/:id
+router.put('/artist-favorites/:id', (req, res) => {
+  const db = getDb();
+  const { label, artist } = req.body;
+  const existing = db.prepare(`SELECT id FROM artist_favorites WHERE id = ?`).get(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Favorite not found' });
+  }
+  const updates = [];
+  const params = [];
+  if (label !== undefined) { updates.push('label = ?'); params.push(label.trim()); }
+  if (artist !== undefined) { updates.push('artist = ?'); params.push(artist.trim()); }
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+  params.push(req.params.id);
+  db.prepare(`UPDATE artist_favorites SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  const updated = db.prepare(`SELECT * FROM artist_favorites WHERE id = ?`).get(req.params.id);
+  res.json({ ok: true, favorite: updated });
+});
+
+// DELETE /api/config/artist-favorites/:id
+router.delete('/artist-favorites/:id', (req, res) => {
+  const db = getDb();
+  const existing = db.prepare(`SELECT id FROM artist_favorites WHERE id = ?`).get(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Favorite not found' });
+  }
+  db.prepare(`DELETE FROM artist_favorites WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
+
 export default router;
