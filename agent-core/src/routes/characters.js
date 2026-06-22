@@ -282,8 +282,11 @@ router.post('/generate', async (req, res) => {
       console.warn('[characters] web search failed, continuing without:', err.message);
     }
 
-    const systemPrompt = `${getSystemRulesWithWorld({ roleplay: false })}
-你是一个角色人格生成器。用户会输入一个简短的描述（格式可能是"角色名"、"角色名（作品名）"、"作品名里的角色名"等）。
+    // msgs[0] — 舞台：破限词 + 世界观
+    const stageRules = getSystemRulesWithWorld({ roleplay: false });
+
+    // msgs[1] — 任务：角色生成指令 + 模板 + 输出要求
+    const systemPrompt = `你是一个角色人格生成器。用户会输入一个简短的描述（格式可能是"角色名"、"角色名（作品名）"、"作品名里的角色名"等）。
 
 你的任务：
 1. 如果是知名 IP 角色（游戏/动漫/影视），务必融入角色在原作中的身份、背景故事、性格特点。如果是原创角色，根据名字和描述自行发挥。
@@ -328,10 +331,12 @@ ${searchContext}` : ''}
 	- 第4行起：完整的 base_prompt 模板内容
 - ⚠️ 以上模板中的「你/你的」指代的是 AI 扮演的角色本身，是扮演指令的一部分。请用第二人称「你/你的」来描述角色设定`;
 
-    const result = await chatSync([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: description.trim() },
-    ], { ...llmOpts, label: '创造角色' });
+    const msgs = [];
+    if (stageRules) msgs.push({ role: 'system', content: stageRules });
+    msgs.push({ role: 'system', content: systemPrompt });
+    msgs.push({ role: 'user', content: description.trim() });
+
+    const result = await chatSync(msgs, { ...llmOpts, label: '创造角色' });
 
     // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
     const lines = result.split('\n');

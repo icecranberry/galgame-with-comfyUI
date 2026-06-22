@@ -1075,12 +1075,14 @@ onMounted(async () => {
 /* ── 预览姓名可编辑 ── */
 .preview-name-input {
   font-size: 20px; font-weight: 700; color: var(--text-bright);
-  background: transparent; border: 1px dashed transparent;
-  border-radius: 8px; padding: 4px 10px; margin: -4px -10px;
+  background: #f0ece8;
+  border: 1px dashed rgba(224, 123, 108, 0.25);
+  border-radius: 8px; padding: 4px 10px;
   width: 100%; outline: none; font-family: inherit;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, background 0.2s;
+  cursor: text;
 }
-.preview-name-input:hover  { border-color: var(--glass-border); }
+.preview-name-input:hover  { border-color: rgba(224, 123, 108, 0.45); background: rgba(224, 123, 108, 0.07); }
 .preview-name-input:focus  { border-color: var(--accent); background: rgba(255,255,255,0.5); }
 
 /* ── 预览卡片 ── */
@@ -1347,8 +1349,8 @@ onMounted(async () => {
   /* 移动端详情工具栏 */
   .mobile-detail-toolbar {
     display: flex;
-    gap: 8px;
-    padding: 8px 16px;
+    gap: 4px;
+    padding: 8px 8px;
     border-bottom: 1px solid var(--glass-border);
     background: rgba(0, 0, 0, 0.02);
     flex-shrink: 0;

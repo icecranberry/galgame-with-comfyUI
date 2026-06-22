@@ -396,9 +396,7 @@ async function generateMomentPost(character) {
   const multiPersonImageNote = multiPerson ? `
 - **多人画面**：imagePrompt 中必须包含你和${multiPerson.otherName}两个人。你们的互动方式、肢体距离、表情和氛围都要贴合你们的关系（例如亲密的伴侣会有更近的距离和更私密的场景）。描述清楚各自的外观、位置、互动动作` : '';
 
-  const systemPrompt = `${character.base_prompt}
-
-你正在发朋友圈。请根据你的人设，生成一条自然的朋友圈动态。
+  const postingTask = `你正在发朋友圈。请根据你的人设，生成一条自然的朋友圈动态。
 
 输出格式（严格 JSON）：
 {"text":"朋友圈文案（50-200字，自然口语化，可以分享生活、食物、风景、感悟等）","imagePrompt":"描述需要画的内容。需要详细：
@@ -427,15 +425,16 @@ async function generateMomentPost(character) {
     ? `${timeTag} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
     : `${timeTag} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
 
-  // 权限层最先 → 关系（如有多人）→ 人设+格式 → user
+  // msgs[0] 舞台 → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
+  msgs.push({ role: 'system', content: character.base_prompt });
   if (multiPerson) {
     msgs.push({
       role: 'system',
       content: `**【最高优先级——你与${multiPerson.otherName}的真实关系】**\n${multiPerson.relDesc}。\n\n这是你们私下相处的真实状态。你的公开人设是你对外展示的一面，但在${multiPerson.otherName}面前，你们有只属于彼此的相处方式——你们的肢体接触、距离、语气、眼神，都是这个关系里才会有的。不要退回普通朋友的距离，不要用营业微笑面对这个人。\n\n朋友圈记录的是你们独处的真实瞬间，不是给粉丝看的舞台。\n\n${multiPerson.otherName}的公开信息供参考：\n---\n${multiPerson.otherPersona}\n---`
     });
   }
-  msgs.push({ role: 'system', content: systemPrompt });
+  msgs.push({ role: 'system', content: postingTask });
   msgs.push({ role: 'user', content: userMsg });
 
   const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '发朋友圈助手' });
@@ -595,10 +594,23 @@ async function generateCharacterReply(post, historyComments) {
   // 权限层
   const permissionPrompt = getSystemRulesWithWorld();
 
-  // 角色人设 + 朋友圈上下文 + 回复规则
-  const contextPrompt = `${post.base_prompt}
+  // 加载情绪状态 + 好感度（提前，用于 msgs[1] 和 msgs[2]）
+  let emotionPrompt = '';
+  let affPrompt = '';
+  if (config.features.emotion) {
+    const convId = `char_${post.character_id}`;
+    const emotionBaseline = post.emotion_baseline
+      ? JSON.parse(post.emotion_baseline)
+      : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
+    const emotionState = loadEmotionState(convId, emotionBaseline);
+    emotionPrompt = stateToPrompt(emotionState) || '';
 
-关于${userName}：
+    const affinity = loadAffinity(post.character_id);
+    affPrompt = affinityToPrompt(affinity) || '';
+  }
+
+  // 朋友圈上下文 + 回复规则
+  const contextTask = `关于${userName}：
 ${userPersona}
 
 你在朋友圈发了：
@@ -618,26 +630,19 @@ ${commentHistory}
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
 - 只输出回复内容，不要任何前缀或引号`;
 
-  // 权限 → 用户关系 → 角色间关系 → 人设+上下文 → VAD情绪 → 好感度
+  // msgs[0] 舞台 → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
-  if (userRelMsg) msgs.push({ role: 'system', content: userRelMsg });
-  if (charRelMsg) msgs.push({ role: 'system', content: charRelMsg });
-  msgs.push({ role: 'system', content: contextPrompt });
 
-  // 注入 VAD 情绪状态 + 好感度指令
-  if (config.features.emotion) {
-    const convId = `char_${post.character_id}`;
-    const emotionBaseline = post.emotion_baseline
-      ? JSON.parse(post.emotion_baseline)
-      : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
-    const emotionState = loadEmotionState(convId, emotionBaseline);
-    const emotionPrompt = stateToPrompt(emotionState);
-    if (emotionPrompt) msgs.push({ role: 'system', content: emotionPrompt });
+  // msgs[1] — 角色：人格 + 情绪
+  const charContent = [post.base_prompt, emotionPrompt].filter(Boolean).join('\n\n');
+  msgs.push({ role: 'system', content: charContent });
 
-    const affinity = loadAffinity(post.character_id);
-    const affPrompt = affinityToPrompt(affinity);
-    if (affPrompt) msgs.push({ role: 'system', content: affPrompt });
-  }
+  // msgs[2] — 交互：用户关系 + 角色间关系 + 好感度
+  const relContext = [userRelMsg, charRelMsg, affPrompt].filter(Boolean).join('\n\n');
+  if (relContext) msgs.push({ role: 'system', content: relContext });
+
+  // msgs[3] — 任务：用户信息 + 朋友圈内容 + 评论区 + 规则
+  msgs.push({ role: 'system', content: contextTask });
 
   const now = new Date();
   const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];

@@ -448,13 +448,16 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
     // ═══════════════════════════════════════════
-    // msgs[1] — 身份：角色人格 + 情绪 + 用户上下文 + 好感度
+    // msgs[1] — 角色：人格 + 情绪（我是谁）
     // ═══════════════════════════════════════════
-    const identityParts = [];
-    identityParts.push(character?.base_prompt || getDefaultPrompt());
-    if (emotionPrompt) identityParts.push(emotionPrompt);
+    const charParts = [];
+    charParts.push(character?.base_prompt || getDefaultPrompt());
+    if (emotionPrompt) charParts.push(emotionPrompt);
+    msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
-    // 用户上下文（合并原分散的 relParts）
+    // ═══════════════════════════════════════════
+    // msgs[2] — 交互：用户上下文 + 关系 + 好感度（我在跟谁说话）
+    // ═══════════════════════════════════════════
     const relParts = [];
 
     // 用户→角色关系
@@ -518,20 +521,18 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
-    if (relParts.length > 0) {
-      identityParts.push('<context>\n' + relParts.join('\n\n') + '\n</context>');
-    }
-
     // 好感度指令
     if (config.features.emotion && affinity != null) {
       const affinityMsg = affinityToPrompt(affinity);
-      if (affinityMsg) identityParts.push(affinityMsg);
+      if (affinityMsg) relParts.push(affinityMsg);
     }
 
-    msgs.push({ role: 'system', content: identityParts.join('\n\n') });
+    if (relParts.length > 0) {
+      msgs.push({ role: 'system', content: relParts.join('\n\n') });
+    }
 
     // ═══════════════════════════════════════════
-    // msgs[2] — 格式：对话规则（DB + 硬编码） + 生图意图（独立！）
+    // msgs[3] — 格式：对话规则（DB + 硬编码） + 生图意图
     // ═══════════════════════════════════════════
     const formatParts = [];
     const dialogueRule = getGlobalRule('dialogue_rules');
@@ -542,7 +543,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     msgs.push({ role: 'system', content: formatParts.join('\n\n') });
 
     // ═══════════════════════════════════════════
-    // msgs[3] — 素材：摘要 + RAG记忆 + 朋友圈（合并为一条）
+    // msgs[4] — 素材：摘要 + RAG记忆 + 朋友圈（合并为一条）
     // ═══════════════════════════════════════════
     const materialParts = [];
 
@@ -582,14 +583,39 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     // 最近朋友圈
     const recentMoments = db.prepare(`
-      SELECT content, created_at FROM moment_posts
+      SELECT id, content, created_at FROM moment_posts
       WHERE character_id = ? AND status = 'done'
       ORDER BY created_at DESC LIMIT 2
     `).all(characterId);
     if (recentMoments.length > 0) {
-      const momentLines = recentMoments.map((m, i) =>
-        `${i + 1}. [${m.created_at}] ${m.content}`
-      ).join('\n');
+      const momentLines = recentMoments.map((m, i) => {
+        let line = `${i + 1}. [${m.created_at}] ${m.content}`;
+
+        // 如果 user 评论过这条朋友圈，把评论区内容也注入
+        const hasUserComment = db.prepare(`
+          SELECT COUNT(*) AS cnt FROM moment_comments
+          WHERE post_id = ? AND author_type = 'user'
+        `).get(m.id);
+        if (hasUserComment && hasUserComment.cnt > 0) {
+          const comments = db.prepare(`
+            SELECT mc.author_type, mc.content,
+              CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE ? END AS display_name
+            FROM moment_comments mc
+            LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
+            WHERE mc.post_id = ?
+            ORDER BY mc.created_at ASC
+          `).all(chatUserName, m.id);
+          if (comments.length > 0) {
+            const commentLines = comments.map(c => {
+              const name = c.author_type === 'character' ? c.display_name : chatUserName;
+              return `  ${name}：${c.content}`;
+            }).join('\n');
+            line += `\n  评论区：\n${commentLines}`;
+          }
+        }
+
+        return line;
+      }).join('\n');
       materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
     }
 
