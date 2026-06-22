@@ -2,14 +2,14 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRules, repairFtsIndex } from '../db/index.js';
+import { getDb, getSystemRules, getGlobalRule, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
-import { generateImage } from '../services/imageSkill.js';
+import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
@@ -489,6 +489,114 @@ router.delete('/gift/cooldowns', (_req, res) => {
 // GET /api/gift/cooldowns — 查询送礼冷却状态
 router.get('/gift/cooldowns', (_req, res) => {
   res.json({ cooldowns: getGiftCooldowns() });
+});
+
+// POST /api/characters/:id/generate-avatar — AI 生成角色头像（脸部特写，表情跟随人格）
+router.post('/:id/generate-avatar', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const imagePromptRule = getGlobalRule('image_prompt');
+  const imageRuleContent = imagePromptRule?.rule_content || '';
+
+  const systemPrompt = `你是专业的角色头像生成提示词助手。根据角色的人格设定，生成一张脸部特写头像的画面描述。
+
+${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : ''}
+
+【头像生成额外要求】
+- 画面内容必须是脸部特写（close-up portrait, face focus）
+- 表情必须准确反映角色的人格特质和性格
+- 上半身构图，重点在面部、发型、眼睛和表情
+- 简洁干净的背景（simple background），适合做头像
+- 严格输出 JSON 格式：{"prompt":"..."}
+- prompt 字段内必须是英文描述`;
+
+  const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述（输出 JSON）：
+
+---角色设定---
+${char.base_prompt}
+---
+
+要求：脸部特写，表情跟随人格，干净简洁的背景适合做头像。`;
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[generate-avatar] Step 1/2: generating prompt for character "${char.display_name}"...`);
+
+    const llmResult = await chatSync([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ], { model, temperature: 0.6, max_tokens: 1024, label: '生成头像提示词' });
+
+    // 解析 LLM 输出的 JSON
+    let promptText;
+    try {
+      // 尝试提取 JSON 对象
+      const jsonMatch = llmResult.match(/\{[\s\S]*"prompt"[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        promptText = parsed.prompt;
+      } else {
+        // 兜底：直接当做 prompt
+        promptText = llmResult.trim();
+      }
+    } catch {
+      promptText = llmResult.trim();
+    }
+
+    if (!promptText || promptText.length < 10) {
+      return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+    }
+
+    console.log(`[generate-avatar] Prompt generated (${promptText.length} chars): "${promptText.slice(0, 80)}..."`);
+
+    // Step 2: 调用 ComfyUI 生图（1024x1024）
+    console.log(`[generate-avatar] Step 2/2: generating image at 1024x1024...`);
+    const result = await generateImageRaw(promptText, {
+      artist: config.comfyui.artist,
+      width: 1024,
+      height: 1024,
+      onProgress: (p) => {
+        if (p.stage) console.log(`[generate-avatar] ComfyUI: ${p.stage}`);
+      },
+    });
+
+    if (result.success && result.images.length > 0) {
+      // 落盘到 data/images/，和聊天图片/朋友圈图片一样存入系统
+      const __filename = fileURLToPath(import.meta.url);
+      const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+      const imagesDir = path.join(projectRoot, 'data', 'images');
+      fs.mkdirSync(imagesDir, { recursive: true });
+
+      const savedPaths = [];
+      for (const img of result.images) {
+        const ts = Date.now();
+        const filename = `avatar_gen_${req.params.id}_${ts}_${img.filename || 'comfy.png'}`;
+        const filePath = path.join(imagesDir, filename);
+        const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+        savedPaths.push(`/images/${filename}`);
+        // 挂 URL 供前端裁剪使用
+        img.url = `/images/${filename}`;
+      }
+
+      console.log(`[generate-avatar] Image saved to ${savedPaths.length} file(s): ${savedPaths.join(', ')}`);
+
+      res.json({
+        success: true,
+        images: result.images,
+        savedPaths,
+        promptId: result.promptId,
+        promptText,
+      });
+    } else {
+      res.status(500).json({ error: result.error || '图像生成失败，请重试' });
+    }
+  } catch (err) {
+    console.error('[generate-avatar] error:', err.message);
+    res.status(500).json({ error: '生成失败: ' + err.message });
+  }
 });
 
 export default router;

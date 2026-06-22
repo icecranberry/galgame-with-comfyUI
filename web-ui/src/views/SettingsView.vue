@@ -300,12 +300,19 @@
       </div>
     </div>
 
-    <!-- 全局规则 — 跨满宽 -->
-    <div class="card card-full">
-      <h3>全局规则</h3>
+    <!-- 全局规则 — 跨满宽，整体折叠 -->
+    <div class="card card-full" :class="{ 'card-collapsed': !rulesExpanded }" @click="!rulesExpanded && (rulesExpanded = true)">
+      <h3 class="collapsible-header" @click.stop="rulesExpanded = !rulesExpanded">
+        <span>全局规则</span>
+      </h3>
       <p class="fd">追加到每个角色 system prompt 末尾的通用指令，修改即时生效</p>
 
-      <div class="rules-grid">
+      <svg v-if="!rulesExpanded" class="collapse-arrow" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <path d="M534.826667 935.466667a47.36 47.36 0 0 1-66.986667-66.773334L835.413333 501.333333 467.84 133.973333a47.36 47.36 0 1 1 66.986667-66.773333l400.64 400.64a47.36 47.36 0 0 1 0 66.986667z" fill="currentColor"/>
+      </svg>
+
+      <Transition name="rules-expand">
+        <div v-if="rulesExpanded" class="rules-grid">
         <div v-for="rule in rules" :key="rule.rule_key" class="rule-block">
           <div class="rule-header">
             <span class="rule-label">{{ ruleLabels[rule.rule_key] || rule.rule_key }}</span>
@@ -322,6 +329,7 @@
           </div>
         </div>
       </div>
+      </Transition>
     </div>
 
   </div>
@@ -396,6 +404,7 @@ const health = ref(null)
 const rules = ref([])
 const rulesDirty = ref({})
 const rulesSaved = ref({})
+const rulesExpanded = ref(false)
 
 const ruleLabels = {
   image_intent: '图像生成判断',
@@ -857,6 +866,54 @@ function resetTestPrompts() {
 .sd { width: 9px; height: 9px; border-radius: 50%; }
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
+
+/* ── 全局规则折叠 ── */
+.card-collapsed {
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-collapsed:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(239, 137, 74, 0.12);
+}
+.collapsible-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: color 0.15s;
+}
+.collapsible-header:hover { color: var(--accent); }
+.collapse-arrow {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* 展开/合拢过渡 */
+.rules-expand-enter-active,
+.rules-expand-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.rules-expand-enter-from,
+.rules-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.rules-expand-enter-to,
+.rules-expand-leave-from {
+  opacity: 1;
+  max-height: 2000px;
+}
 
 /* ── 全局规则 ── */
 .rule-block {

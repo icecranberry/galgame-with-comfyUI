@@ -1,14 +1,15 @@
 <template>
   <!-- 头像选择器弹窗 -->
-  <div v-if="!cropImage" class="avpicker-overlay" @click.self="$emit('close')">
+  <div v-if="!cropImage" class="avpicker-overlay" @click.self="tryClose">
     <div class="avpicker-panel">
       <div class="avpicker-header">
         <span>{{ title }}</span>
-        <button class="avpicker-close" @click="$emit('close')">&times;</button>
+        <button class="avpicker-close" :disabled="isGenerating" @click="tryClose">&times;</button>
       </div>
-      <div v-if="showRecentTab" class="avpicker-tabs">
-        <button :class="['avtab', { active: avTab === 'upload' }]" @click="avTab = 'upload'">上传图片</button>
-        <button :class="['avtab', { active: avTab === 'recent' }]" @click="switchToRecent">最近图片</button>
+      <div v-if="showRecentTab || showGenerateTab" class="avpicker-tabs">
+        <button :class="['avtab', { active: avTab === 'upload' }]" :disabled="isGenerating" @click="avTab = 'upload'">上传图片</button>
+        <button v-if="showRecentTab" :class="['avtab', { active: avTab === 'recent' }]" :disabled="isGenerating" @click="switchToRecent">最近图片</button>
+        <button v-if="showGenerateTab" :class="['avtab', { active: avTab === 'generate' }]" :disabled="isGenerating" @click="avTab = 'generate'">生成头像</button>
       </div>
 
       <!-- 上传 tab -->
@@ -35,6 +36,33 @@
           @error="onRecentImgErr(i)"
           :class="{ 'av-thumb-err': recentImgErr.has(i) }"
         />
+      </div>
+
+      <!-- 生成头像 tab -->
+      <div v-if="showGenerateTab && avTab === 'generate'" class="avtab-body">
+        <div v-if="genError" class="gen-error">
+          <div class="gen-error-icon">⚠️</div>
+          <div class="gen-error-text">{{ genError }}</div>
+          <button class="gen-retry-btn" @click="startGenerate">重新生成</button>
+        </div>
+
+        <div v-else-if="genStatus === 'idle'" class="gen-idle">
+          <div class="gen-label">生成角色头像</div>
+          <div class="gen-desc">给角色拍个大头贴⭐~</div>
+          <div class="gen-meta">尺寸 1024×1024 · 约需等待30秒</div>
+          <button class="gen-start-btn" @click="startGenerate" :disabled="!characterId">
+            {{ characterId ? '开始生成' : '缺少角色数据' }}
+          </button>
+        </div>
+
+        <div v-else-if="genStatus === 'generating'" class="gen-running">
+          <div class="gen-spinner">
+            <div class="gen-spinner-ring"></div>
+            <div class="gen-spinner-icon">🎨</div>
+          </div>
+          <div class="gen-phase">{{ genPhaseText }}</div>
+          <div class="gen-progress-hint">正在超速思考，请耐心等待...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -72,11 +100,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
+import { generateAvatar } from '../api/index.js'
 
 const props = defineProps({
   title: { type: String, default: '选择头像' },
   showRecentTab: { type: Boolean, default: true },
+  showGenerateTab: { type: Boolean, default: false },
+  characterId: { type: [Number, String], default: null },
+  characterBasePrompt: { type: String, default: '' },
   recentImages: { type: Array, default: () => [] },
   recentLoading: { type: Boolean, default: false },
 })
@@ -92,6 +124,84 @@ const cropImage = ref(null)
 const cropCanvas = ref(null)
 const previewCanvas = ref(null)
 const cropSaving = ref(false)
+
+// ── 生成头像状态 ──
+const genStatus = ref('idle') // idle | generating | error
+const genError = ref('')
+const genPhaseText = ref('准备中...')
+let _genPhaseTimer = null
+
+const isGenerating = computed(() => genStatus.value === 'generating')
+
+function tryClose() {
+  if (isGenerating.value) return
+  emit('close')
+}
+
+const genPhaseMessages = [
+  '正在分析角色人格...',
+  '构思画面构图...',
+  '生成画面描述...',
+  '提交绘图引擎...',
+  'AI 正在绘制中...',
+  '即将完成...',
+]
+
+function cycleGenPhase(startIdx = 0) {
+  let idx = startIdx
+  genPhaseText.value = genPhaseMessages[idx]
+  _genPhaseTimer = setInterval(() => {
+    idx = (idx + 1) % genPhaseMessages.length
+    genPhaseText.value = genPhaseMessages[idx]
+  }, 6000)
+}
+
+function stopPhaseCycle() {
+  if (_genPhaseTimer) { clearInterval(_genPhaseTimer); _genPhaseTimer = null }
+}
+
+onUnmounted(() => { stopPhaseCycle() })
+
+async function startGenerate() {
+  if (!props.characterId || genStatus.value === 'generating') return
+  genStatus.value = 'generating'
+  genError.value = ''
+  cycleGenPhase(0)
+
+  try {
+    const result = await generateAvatar(props.characterId)
+    stopPhaseCycle()
+
+    if (result.success && result.images?.length > 0) {
+      const imgData = result.images[0]
+      // 加载 base64 图片并进入裁剪流程
+      const img = new Image()
+      img.onload = () => {
+        genStatus.value = 'idle'
+        startCrop(img)
+      }
+      img.onerror = () => {
+        genStatus.value = 'idle'
+        genError.value = '图片加载失败，请重试'
+      }
+      if (imgData.base64) {
+        img.src = imgData.base64
+      } else if (imgData.url) {
+        // 如果返回的是 URL，需要通过 Image 加载（注意 CORS）
+        img.crossOrigin = 'anonymous'
+        img.src = imgData.url
+      }
+    } else {
+      genStatus.value = 'idle'
+      genError.value = result.error || '图像生成失败，请重试'
+    }
+  } catch (err) {
+    stopPhaseCycle()
+    genStatus.value = 'idle'
+    genError.value = err.message || '生成失败，请检查后端服务'
+    console.error('[avatar] generate failed:', err)
+  }
+}
 
 function switchToRecent() {
   avTab.value = 'recent'
@@ -341,11 +451,13 @@ async function saveCrop() {
 .avpicker-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .avpicker-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
 .avpicker-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.avpicker-close:hover { color:var(--text-bright); background:rgba(0,0,0,0.06); }
+.avpicker-close:hover:not(:disabled) { color:var(--text-bright); background:rgba(0,0,0,0.06); }
+.avpicker-close:disabled { opacity:0.3; cursor:not-allowed; }
 
 .avpicker-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.2); }
 .avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; }
-.avtab:hover { color:var(--text-bright); }
+.avtab:hover:not(:disabled) { color:var(--text-bright); }
+.avtab:disabled { opacity:0.35; cursor:not-allowed; }
 .avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
 .avtab-body { padding:16px; overflow-y:auto; max-height:380px; }
@@ -396,4 +508,79 @@ async function saveCrop() {
 .btn-primary { background:var(--accent); color:#fff; padding:8px 18px; border-radius:6px; border:none; font-size:13px; cursor:pointer; }
 .btn-primary:hover:not(:disabled) { background:var(--accent-hover); }
 .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
+
+/* ── 生成头像 Tab ── */
+.gen-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 32px;
+  gap: 10px;
+}
+.gen-icon { font-size: 44px; }
+.gen-label { font-size: 15px; font-weight: 600; color: var(--text-bright); }
+.gen-desc { font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.5; }
+.gen-meta { font-size: 12px; color: var(--text-muted, #999); }
+.gen-start-btn {
+  margin-top: 12px;
+  padding: 10px 28px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gen-start-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.gen-start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 生成中动画 */
+.gen-running {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px 40px;
+  gap: 16px;
+}
+.gen-spinner {
+  position: relative;
+  width: 80px; height: 80px;
+  display: flex; align-items: center; justify-content: center;
+}
+.gen-spinner-ring {
+  position: absolute; inset: 0;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: genSpin 1s linear infinite;
+}
+@keyframes genSpin { to { transform: rotate(360deg); } }
+.gen-spinner-icon { font-size: 28px; z-index: 1; }
+.gen-phase { font-size: 15px; font-weight: 600; color: var(--text-bright); }
+.gen-progress-hint { font-size: 12px; color: var(--text-secondary); }
+
+/* 生成失败 */
+.gen-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 32px;
+  gap: 10px;
+}
+.gen-error-icon { font-size: 36px; }
+.gen-error-text { font-size: 13px; color: #e07b6c; text-align: center; }
+.gen-retry-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gen-retry-btn:hover { background: rgba(var(--accent-rgb, 100, 140, 255), 0.1); }
 </style>

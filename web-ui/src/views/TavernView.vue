@@ -326,6 +326,9 @@
         v-if="showCharAvatarPicker"
         :title="`设置 ${detail.char?.display_name || ''} 头像`"
         :show-recent-tab="true"
+        :show-generate-tab="true"
+        :character-id="detail.char?.id"
+        :character-base-prompt="detail.char?.base_prompt || ''"
         :recent-images="recentImages"
         :recent-loading="recentLoading"
         @close="showCharAvatarPicker = false"
@@ -340,6 +343,7 @@
         v-if="showUserAvatarPicker"
         title="设置我的头像"
         :show-recent-tab="false"
+        :show-generate-tab="false"
         @close="showUserAvatarPicker = false"
         @save="onUserAvatarSave"
       />

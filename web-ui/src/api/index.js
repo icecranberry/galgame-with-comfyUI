@@ -68,6 +68,18 @@ export async function getRecentImages(characterId) {
   return res.json()
 }
 
+/** AI 生成角色头像（脸部特写，表情跟随人格） */
+export async function generateAvatar(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/generate-avatar`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Avatar generation failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ── Character Relationships ──
 export async function getRelationships(characterId) {
   const res = await fetch(`${BASE}/relationships?character_id=${characterId}`)
