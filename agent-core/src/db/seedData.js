@@ -30,10 +30,6 @@ export const DEFAULT_SYSTEM_SETTINGS = {
 };
 
 // ── 全局规则 ──
-// META_RULE_KEYS 中的规则不拼入 LLM system prompt，由特定流程按需读取
-// image_intent 已废弃，仅保留占位避免被清理
-const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
-
 export const DEFAULT_GLOBAL_RULES = [
   {
     rule_key: 'system_rules',
@@ -149,12 +145,6 @@ export function seedAll(db) {
     const result = seedRule.run(rule.rule_key, rule.rule_content);
     if (result.changes > 0) ruleCount++;
   }
-  // 清理已从默认列表中移除的旧规则（保留元规则占位）
-  const knownKeys = [...DEFAULT_GLOBAL_RULES.map(r => r.rule_key), ...META_RULE_KEYS];
-  const orphaned = db.prepare(
-    `DELETE FROM global_rules WHERE rule_key NOT IN (${knownKeys.map(() => '?').join(',')})`
-  ).run(...knownKeys);
-  if (orphaned.changes > 0) console.log(`[seed] global_rules: cleaned ${orphaned.changes} orphaned rule(s)`);
   if (ruleCount > 0) console.log(`[seed] global_rules: ${ruleCount} rules seeded`);
 
   // 3. 默认角色

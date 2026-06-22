@@ -298,6 +298,23 @@
           <button class="btn-ghost" @click="checkHealth">刷新连接</button>
         </div>
       </div>
+
+      <!-- 世界观 -->
+      <div class="card">
+        <h3>世界观</h3>
+        <p class="fd">定义角色们所处的共同世界背景，留空则不追加</p>
+        <textarea
+          v-model="worldSetting"
+          class="rule-textarea"
+          rows="8"
+          placeholder="例如：这是一个剑与魔法的中世纪奇幻大陆，名为「泽拉瑞尔」。大陆上有三大王国…"
+          @input="worldDirty = true; worldSaved = false"
+        ></textarea>
+        <div class="sa" style="margin-top:12px">
+          <button class="btn-primary" :disabled="!worldDirty" @click="saveWorldSetting">保存</button>
+          <span v-if="worldSaved" class="smsg">已保存</span>
+        </div>
+      </div>
     </div>
 
     <!-- 全局规则 — 跨满宽，整体折叠 -->
@@ -405,6 +422,9 @@ const rules = ref([])
 const rulesDirty = ref({})
 const rulesSaved = ref({})
 const rulesExpanded = ref(false)
+const worldSetting = ref('')
+const worldDirty = ref(false)
+const worldSaved = ref(false)
 
 const ruleLabels = {
   image_intent: '图像生成判断',
@@ -412,6 +432,7 @@ const ruleLabels = {
   dialogue_rules: '聊天规则',
   image_prompt: '图像生成指令',
   judge_prompt: '智能配图判断提示词',
+  world_setting: '世界观',
 }
 
 const presets = [
@@ -593,13 +614,24 @@ async function onFreqChange() {
 async function checkHealth() { health.value = await comfyuiHealth() }
 
 // ── 全局规则 ──
+const WORLD_TAG_RE = /^<world_setting>\s*([\s\S]*?)\s*<\/world_setting>$/;
+
+function unwrapWorldSetting(raw) {
+  const m = raw?.match(WORLD_TAG_RE);
+  return m ? m[1] : (raw || '');
+}
+
 async function loadRules() {
   try {
     const data = await getGlobalRules()
-    rules.value = (data.rules || []).map(r => ({
-      ...r,
-      _content: r.rule_content,
-    }))
+    rules.value = (data.rules || [])
+      .filter(r => r.rule_key !== 'world_setting')
+      .map(r => ({
+        ...r,
+        _content: r.rule_content,
+      }))
+    const world = (data.rules || []).find(r => r.rule_key === 'world_setting')
+    worldSetting.value = unwrapWorldSetting(world?.rule_content)
   } catch {}
 }
 
@@ -618,6 +650,21 @@ async function saveRule(rule) {
     }
   } catch (err) {
     console.error('[rules] save failed:', err)
+  }
+}
+
+async function saveWorldSetting() {
+  try {
+    const raw = worldSetting.value.trim()
+    const content = raw ? `<world_setting>\n${raw}\n</world_setting>` : ''
+    const result = await updateGlobalRule('world_setting', { rule_content: content })
+    if (result.ok) {
+      worldDirty.value = false
+      worldSaved.value = true
+      setTimeout(() => worldSaved.value = false, 2000)
+    }
+  } catch (err) {
+    console.error('[world_setting] save failed:', err)
   }
 }
 

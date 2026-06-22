@@ -70,13 +70,20 @@ router.get('/rules', (req, res) => {
   res.json({ rules });
 });
 
-// PUT /api/config/rules/:key — 更新单条全局规则
+// PUT /api/config/rules/:key — 更新或新建单条全局规则
 router.put('/rules/:key', (req, res) => {
   const db = getDb();
   const { rule_content, is_active } = req.body;
-  const rule = db.prepare(`SELECT id FROM global_rules WHERE rule_key = ?`).get(req.params.key);
-  if (!rule) {
-    return res.status(404).json({ error: `Rule not found: ${req.params.key}` });
+  const existing = db.prepare(`SELECT id FROM global_rules WHERE rule_key = ?`).get(req.params.key);
+  if (!existing) {
+    // 不存在则新建
+    const content = rule_content !== undefined ? rule_content : '';
+    const active = is_active !== undefined ? (is_active ? 1 : 0) : 1;
+    const result = db.prepare(
+      `INSERT INTO global_rules (rule_key, rule_content, is_active) VALUES (?, ?, ?)`
+    ).run(req.params.key, content, active);
+    const created = db.prepare(`SELECT * FROM global_rules WHERE id = ?`).get(result.lastInsertRowid);
+    return res.json({ ok: true, rule: created });
   }
   const updates = [];
   const params = [];

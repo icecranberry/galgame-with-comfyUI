@@ -730,14 +730,25 @@ export function repairFtsIndex() {
  * 获取所有激活的全局规则内容（拼接为一个字符串）
  */
 // judge_prompt / image_prompt / image_intent 是元规则（非 LLM system prompt 内容），不拼入
+// world_setting 单独追加到末尾，也不在批量拼接中
 const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
 
 export function getActiveGlobalRules() {
   const database = getDb();
+  const excludeKeys = [...META_RULE_KEYS, 'world_setting'];
   const rules = database.prepare(
-    `SELECT rule_content FROM global_rules WHERE is_active = 1 AND rule_key NOT IN (${META_RULE_KEYS.map(() => '?').join(',')})`
-  ).all(...META_RULE_KEYS);
+    `SELECT rule_content FROM global_rules WHERE is_active = 1 AND rule_key NOT IN (${excludeKeys.map(() => '?').join(',')})`
+  ).all(...excludeKeys);
   return rules.map(r => r.rule_content).join('\n\n');
+}
+
+/** 获取世界观（独立消息注入，不拼入全局规则） */
+export function getWorldSetting() {
+  const world = getGlobalRule('world_setting');
+  if (world?.rule_content && world.is_active) {
+    return world.rule_content;
+  }
+  return null;
 }
 
 /** 获取单条全局规则（用于元规则如 judge_prompt） */
@@ -755,16 +766,28 @@ export function getGlobalRule(key) {
  */
 export function getSystemRules({ roleplay = true } = {}) {
   const rule = getGlobalRule('system_rules');
-  if (!rule?.rule_content) return '';
 
-  const content = rule.rule_content;
-  const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
-  if (!rpMatch) return content;  // 无标签（旧数据），向下兼容
+  // 基础内容
+  let base = '';
+  if (rule?.rule_content) {
+    const content = rule.rule_content;
+    const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
+    if (!rpMatch) {
+      base = content;  // 无标签（旧数据），向下兼容
+    } else {
+      const before = content.slice(0, rpMatch.index).trim();
+      // 基础上下文始终保留，roleplay 指令按需包含
+      base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
+    }
+  }
 
-  const before = content.slice(0, rpMatch.index).trim();
+  // 世界观追加到末尾
+  const world = getGlobalRule('world_setting');
+  if (world?.rule_content && world.is_active) {
+    base = base ? base + '\n\n' + world.rule_content : world.rule_content;
+  }
 
-  // 基础上下文始终保留，roleplay 指令按需包含
-  return roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
+  return base;
 }
 
 // ── 系统设置（替代 .env 中的画师串/分辨率/功能开关） ──
