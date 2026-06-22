@@ -648,8 +648,12 @@ export function stateToPrompt(state, dominantEmotion = null) {
   else if (comp.arousal < 0.25) lines.push('感到困倦疲惫');
   else if (comp.arousal < 0.4) lines.push('有些疲惫');
 
-  if (comp.dominance > 0.7) lines.push('语气自信果断');
-  else if (comp.dominance < 0.25) lines.push('语气温和顺从，不太主动');
+  if (comp.dominance > 0.80) lines.push('语气极度强势，不容置疑');
+  else if (comp.dominance > 0.65) lines.push('语气自信果断，掌控对话');
+  else if (comp.dominance > 0.55) lines.push('语气从容自主');
+  else if (comp.dominance < 0.15) lines.push('语气极度顺从，几乎失去自我');
+  else if (comp.dominance < 0.25) lines.push('语气温柔顺从，跟随对方节奏');
+  else if (comp.dominance < 0.35) lines.push('语气温和柔软，不太主动');
 
   if (dominantEmotion && dominantEmotion !== 'neutral') {
     const label = EMOTION_LABELS[dominantEmotion] || dominantEmotion;
