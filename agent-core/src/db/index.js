@@ -751,6 +751,13 @@ export function getWorldSetting() {
   return null;
 }
 
+/** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用 */
+export function getSystemRulesWithWorld(opts = {}) {
+  const rules = getSystemRules(opts);
+  const world = getWorldSetting();
+  return [rules, world].filter(Boolean).join('\n\n');
+}
+
 /** 获取单条全局规则（用于元规则如 judge_prompt） */
 export function getGlobalRule(key) {
   const database = getDb();
@@ -779,12 +786,6 @@ export function getSystemRules({ roleplay = true } = {}) {
       // 基础上下文始终保留，roleplay 指令按需包含
       base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
     }
-  }
-
-  // 世界观追加到末尾
-  const world = getGlobalRule('world_setting');
-  if (world?.rule_content && world.is_active) {
-    base = base ? base + '\n\n' + world.rule_content : world.rule_content;
   }
 
   return base;

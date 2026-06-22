@@ -15,7 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRules, getGlobalRule } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import {
@@ -296,23 +296,40 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
   const motiveLabel = motive?.name || '日常';
   const motiveDesc = motive?.desc || '你突然想和对方说说话';
 
-  const systemRules = getSystemRules();
+  const systemRules = getSystemRulesWithWorld();
 
-  // 消息 1：系统规则 + 角色人格 + 最近对话摘要（身份与上下文）
-  const msg1 = `${systemRules ? systemRules + '\n\n' : '你是一个角色扮演 AI。'}
+  // msgs[0] — 舞台：破限词 + 世界观
 
-接下来，你将扮演以下角色，主动向 "${userName}" 发起一段对话。
+  // msgs[1] — 身份：角色人格 + 摘要 + 当前状态 + 关系 + 用户画像
+  const msgIdentity = `接下来，你将扮演以下角色，主动向 "${userName}" 发起一段对话。
 
 【角色人格】
 ${character.base_prompt}
-${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}`;
+${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
 
-  // 消息 2：当前状态 + 时间 + 动机 + 要求（任务指令）
-  const msg2 = `${affinityText ? `${affinityText}\n` : ''}${emotionText ? `【角色当前状态】\n${emotionText}\n` : ''}${relationshipContext ? `${relationshipContext}\n` : ''}${userProfile ? `${userProfile}\n` : ''}【上次聊天时间】
+  // 上一轮对话（最近 1 轮 user+assistant），过滤掉生图 prompt JSON
+  const PROMPT_JSON_RE = /\s*\{[^{}]*"prompt"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}$/;
+  const prevRound = (() => {
+    const db = getDb();
+    const rows = db.prepare(
+      `SELECT role, content FROM raw_messages
+       WHERE conversation_id = ?
+       ORDER BY id DESC LIMIT 2`
+    ).all(conversationId).reverse();
+    if (rows.length === 0) return '';
+    const cleaned = rows.map(r => ({
+      ...r,
+      content: r.role === 'assistant' ? r.content.replace(PROMPT_JSON_RE, '') : r.content,
+    }));
+    return '\n【上一轮对话】\n' + cleaned.map(r => `${r.role === 'user' ? userName : character.display_name}：${r.content}`).join('\n');
+  })();
+
+  // msgs[2] — 任务：时间 + 上一轮对话 + 动机 + 要求
+  const msgTask = `【上次聊天时间】
 ${timeDesc}
 
 【当前时间】
-${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; return `${wd} ${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}
+${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; return `${wd} ${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}${prevRound}
 
 请以角色的口吻，生成一句自然的口语化开场白（15~50 字）。
 ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
@@ -325,11 +342,13 @@ ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
 - 本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。`;
 
   try {
+    const msgs = [];
+    msgs.push({ role: 'system', content: systemRules || '你是一个角色扮演 AI。' });
+    msgs.push({ role: 'system', content: msgIdentity });
+    msgs.push({ role: 'system', content: msgTask });
+
     const result = await chatSync(
-      [
-        { role: 'system', content: msg1 },
-        { role: 'system', content: msg2 },
-      ],
+      msgs,
       { temperature: 0.85, max_tokens: 128, label: '主动聊天' }
     );
 
@@ -405,7 +424,7 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     console.log(`⚡ Generating image for ${character.display_name} (motive: ${motiveName})...`);
 
     // 1. LLM 生成画面描述 prompt
-    const systemRules = getSystemRules({ roleplay: false });
+    const systemRules = getSystemRulesWithWorld({ roleplay: false });
     const imagePromptRule = getGlobalRule('image_prompt');
     const imagePromptInst = imagePromptRule?.rule_content || '';
 
@@ -420,7 +439,9 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     const appearanceBlock = appearance.replace(/你/g, '角色');
 
     const imagePromptText = await chatSync(
-      [{ role: 'system', content: `${systemRules ? systemRules + '\n\n' : ''}接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
+      [
+        { role: 'system', content: systemRules || '你是一个角色扮演 AI。' },
+        { role: 'system', content: `接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
 
 【角色名字】
 ${nameBlock}
@@ -434,7 +455,8 @@ ${motiveName}
 【角色的开场白】
 "${greeting}"
 
-${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输出 JSON，不要其他文字` }],
+${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输出 JSON，不要其他文字` },
+      ],
       { temperature: 0.3, max_tokens: 1024, label: '主动聊天配图prompt' }
     );
 

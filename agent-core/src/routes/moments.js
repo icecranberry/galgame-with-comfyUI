@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRules } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
@@ -391,7 +391,7 @@ async function generateMomentPost(character) {
   }
 
   // 3. LLM 生成文案 + 配图提示词
-  const permissionPrompt = getSystemRules();
+  const permissionPrompt = getSystemRulesWithWorld();
 
   const multiPersonImageNote = multiPerson ? `
 - **多人画面**：imagePrompt 中必须包含你和${multiPerson.otherName}两个人。你们的互动方式、肢体距离、表情和氛围都要贴合你们的关系（例如亲密的伴侣会有更近的距离和更私密的场景）。描述清楚各自的外观、位置、互动动作` : '';
@@ -593,7 +593,7 @@ async function generateCharacterReply(post, historyComments) {
   }
 
   // 权限层
-  const permissionPrompt = getSystemRules();
+  const permissionPrompt = getSystemRulesWithWorld();
 
   // 角色人设 + 朋友圈上下文 + 回复规则
   const contextPrompt = `${post.base_prompt}

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRules, getGlobalRule, repairFtsIndex } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld, getGlobalRule, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
@@ -282,7 +282,7 @@ router.post('/generate', async (req, res) => {
       console.warn('[characters] web search failed, continuing without:', err.message);
     }
 
-    const systemPrompt = `${getSystemRules({ roleplay: false })}
+    const systemPrompt = `${getSystemRulesWithWorld({ roleplay: false })}
 你是一个角色人格生成器。用户会输入一个简短的描述（格式可能是"角色名"、"角色名（作品名）"、"作品名里的角色名"等）。
 
 你的任务：

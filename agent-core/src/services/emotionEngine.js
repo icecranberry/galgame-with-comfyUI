@@ -16,7 +16,7 @@
  *   - DeepSeek 兜底复杂场景（准），注入角色人格 + 好感度 + 关系上下文
  */
 
-import { getDb, getSystemRules, getGlobalRule } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/deepseek.js';
 
 // ── 常量 ──
@@ -770,7 +770,7 @@ export async function giveGift(characterId, giftType, character, userName = '你
   const baseDelta = GIFT_AFFINITY[giftType];
 
   // 4. LLM 生成角色反应 + 生图描述
-  const systemRules = getSystemRules();
+  const systemRules = getSystemRulesWithWorld();
   const basePrompt = character.base_prompt || character.short_prompt || '';
   const affinityDesc = affinityToPrompt(currentAffinity);
   const giftDesc = giftType === 'small'

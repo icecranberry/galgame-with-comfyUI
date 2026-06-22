@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getActiveGlobalRules, getGlobalRule, getSystemRules, repairFtsIndex } from '../db/index.js';
+import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/deepseek.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
@@ -396,23 +396,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
 
-    // 3. system prompt（全局规则前置 → 人格在后）
-    // 规则优先保证格式约束获得最高注意力（首因效应），人格紧随确保角色感不丢失
-    const globalRules = getActiveGlobalRules();
-    let systemPrompt = globalRules ? globalRules + '\n\n' : '';
-    systemPrompt += character?.base_prompt || getDefaultPrompt();
-
-    // 4. 生图意图（正则强匹配 → 强制生成）
+    // 3. 生图意图（正则强匹配 → 提前检测，用于 msgs[2] 格式消息）
     const explicitImageIntent = detectImageIntent(message);
-    if (explicitImageIntent) {
-      systemPrompt += '\n\n【强制要求】用户要求生成图片。对白正文用 1 句话简要回复，然后在末尾加上 {"prompt":"..."} 标签，标签内画面描述不限长度，且标签内的英文/日文均不计入回复句数。';
-    }
 
-    // 内置对话规则（不依赖 DB seed，代码层面兜底）
-    systemPrompt += '\n\n<dialogue_rules>\n- **回复控制在' + (explicitImageIntent ? '1句话以内' : '2~3句话') + '，保持口语化轻快节奏**\n</dialogue_rules>';
-
-    // 4.5 情绪状态注入（VAD 三维情绪 → 角色当前状态描述）
-    //     好感度提前加载，后续注入到 <user_relation> 中作为温度层
+    // 4. 情绪状态加载（VAD 三维情绪 → 用于 msgs[1] 身份消息）
+    //     好感度提前加载
+    let emotionPrompt = '';
     let affinity = null;
     if (config.features.emotion) {
       const emotionBaseline = character
@@ -439,8 +428,7 @@ router.post('/characters/:id/chat', async (req, res) => {
         console.log(`[chat] first ever interaction bonus: +5 → affinity=${affinity.toFixed(0)}`);
       }
 
-      const emotionPrompt = stateToPrompt(emotionState);
-      if (emotionPrompt) systemPrompt += emotionPrompt;
+      emotionPrompt = stateToPrompt(emotionState) || '';
     }
 
     // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
@@ -449,14 +437,27 @@ router.post('/characters/:id/chat', async (req, res) => {
       WHERE conversation_id = ? ORDER BY id DESC LIMIT 20
     `).all(conversationId).reverse();
 
-    const msgs = [
-      { role: 'system', content: systemPrompt },
-    ];
+    const msgs = [];
 
-    // 5.0 角色关系与用户信息注入（合并为单条 system 消息，避免多条系统消息稀释注意力）
+    // ═══════════════════════════════════════════
+    // msgs[0] — 舞台：破限词 + 世界观
+    // ═══════════════════════════════════════════
+    const jailbreak = getSystemRules();
+    const worldSetting = getWorldSetting();
+    const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
+    if (stageContent) msgs.push({ role: 'system', content: stageContent });
+
+    // ═══════════════════════════════════════════
+    // msgs[1] — 身份：角色人格 + 情绪 + 用户上下文 + 好感度
+    // ═══════════════════════════════════════════
+    const identityParts = [];
+    identityParts.push(character?.base_prompt || getDefaultPrompt());
+    if (emotionPrompt) identityParts.push(emotionPrompt);
+
+    // 用户上下文（合并原分散的 relParts）
     const relParts = [];
 
-    // 5.0a 用户→角色关系（身份定义，纯静态）
+    // 用户→角色关系
     const userRel = db.prepare(
       'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
     ).get(characterId);
@@ -464,7 +465,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
     }
 
-    // 5.0b 用户信息（建立 user↔用户名的映射，结构化字段）
+    // 用户信息
     const chatUserName = config.user.nickname || '用户';
     const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
     if (hasUserInfo) {
@@ -476,7 +477,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_info>${infoParts.join('。')}</user_info>`);
     }
 
-    // 5.0b2 注入角色视角的用户画像（如果该角色对用户有特征记录）
+    // 角色视角的用户画像
     const portraitRows = db.prepare(`
       SELECT trait_type, content FROM user_portraits
       WHERE character_id = ?
@@ -494,7 +495,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitParts.join('\n')}</user_portrait>`);
     }
 
-    // 5.0c 角色间关系（酒馆关系图）
+    // 角色间关系
     const charRels = db.prepare(`
       SELECT 'from' AS direction, cr.relationship_text, c.display_name
       FROM character_relationships cr
@@ -518,42 +519,51 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
 
     if (relParts.length > 0) {
-      msgs.push({
-        role: 'system',
-        content: '<context>\n' + relParts.join('\n\n') + '\n</context>'
-      });
+      identityParts.push('<context>\n' + relParts.join('\n\n') + '\n</context>');
     }
 
-    // 5.0c 好感度指令（独立 system 消息，可有限覆盖人设，优先级在 global rules 之下）
+    // 好感度指令
     if (config.features.emotion && affinity != null) {
       const affinityMsg = affinityToPrompt(affinity);
-      if (affinityMsg) {
-        msgs.push({ role: 'system', content: affinityMsg });
-      }
+      if (affinityMsg) identityParts.push(affinityMsg);
     }
 
-    // 5.1 注入角色的最近朋友圈作为谈资（system level，在 history 之前）
-    // 5.2 注入滚动摘要（覆盖超过 20 轮的历史对话）
+    msgs.push({ role: 'system', content: identityParts.join('\n\n') });
+
+    // ═══════════════════════════════════════════
+    // msgs[2] — 格式：对话规则（DB + 硬编码） + 生图意图（独立！）
+    // ═══════════════════════════════════════════
+    const formatParts = [];
+    const dialogueRule = getGlobalRule('dialogue_rules');
+    if (dialogueRule?.rule_content && dialogueRule.is_active) {
+      formatParts.push(dialogueRule.rule_content);
+    }
+    formatParts.push('<dialogue_rules>\n- **回复控制在' + (explicitImageIntent ? '1句话以内' : '2~3句话') + '，保持口语化轻快节奏**\n</dialogue_rules>');
+    msgs.push({ role: 'system', content: formatParts.join('\n\n') });
+
+    // ═══════════════════════════════════════════
+    // msgs[3] — 素材：摘要 + RAG记忆 + 朋友圈（合并为一条）
+    // ═══════════════════════════════════════════
+    const materialParts = [];
+
+    // 滚动摘要
     const summaries = getRecentSummaries(conversationId, 1);
     if (summaries.length > 0) {
       const summaryText = summaries.map(s => s.summary).join('\n---\n');
-      msgs.push({ role: 'system', content: '[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaryText });
+      materialParts.push('[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaryText);
     }
 
-    // 5.3 记忆三路召回（用当前用户消息检索相关记忆碎片）
+    // 记忆三路召回
     if (config.features.memory) {
       try {
         const excludeEntities = [character.display_name, chatUserName, 'user'];
         const rawResults = await hybridSearch(message, { conversationId, topK: 10, excludeEntities });
-        // 关键：必须有至少一个关键词或实体通道的命中，纯向量命中不可靠（短查询泛化太强）
         const hasKeywordOrEntityHit = rawResults.some(
           r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity'))
         );
         if (!hasKeywordOrEntityHit) {
-          // 没有关键词/实体命中 → RAG 不注入，避免无关碎片污染上下文
           console.log('[chat] RAG skipped: no keyword/entity hits for query');
         } else {
-          // 质量控制：过滤无实体的碎片，确保注入的内容有特异性
           const memoryResults = rawResults.filter(m => {
             if (!m.entities || m.entities.length === 0) return false;
             return true;
@@ -562,10 +572,7 @@ router.post('/characters/:id/chat', async (req, res) => {
             const memoryLines = memoryResults.map((m, i) =>
               `${i + 1}. [${m.fragment_type}] ${m.content}`
             ).join('\n');
-            msgs.push({
-              role: 'system',
-              content: '[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines
-            });
+            materialParts.push('[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines);
           }
         }
       } catch (err) {
@@ -573,7 +580,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       }
     }
 
-    // 5.4 注入角色的最近朋友圈作为谈资（紧贴 history，利用近因效应）
+    // 最近朋友圈
     const recentMoments = db.prepare(`
       SELECT content, created_at FROM moment_posts
       WHERE character_id = ? AND status = 'done'
@@ -583,10 +590,11 @@ router.post('/characters/:id/chat', async (req, res) => {
       const momentLines = recentMoments.map((m, i) =>
         `${i + 1}. [${m.created_at}] ${m.content}`
       ).join('\n');
-      msgs.push({
-        role: 'system',
-        content: `「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`
-      });
+      materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
+    }
+
+    if (materialParts.length > 0) {
+      msgs.push({ role: 'system', content: materialParts.join('\n\n') });
     }
 
     msgs.push(...history);
@@ -605,12 +613,6 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
     if (streak > 0) {
       resetUnansweredStreak(characterId);
-    }
-
-    if (explicitImageIntent) {
-      const imagePromptRule = getGlobalRule('image_prompt');
-      const imagePromptContent = imagePromptRule?.rule_content || '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。';
-      msgs.push({ role: 'user', content: imagePromptContent + '请立即回复正文并在末尾加上 {"prompt":"..."} 标签。' });
     }
 
     // 5.5 在最近的 user 消息前加时间戳
@@ -837,6 +839,12 @@ router.post('/characters/:id/chat', async (req, res) => {
       const preTaskId = createPreparingTask(conversationId);
       send('generate_start', { taskId: preTaskId });
       imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
+    } else if (explicitImageIntent) {
+      // 正则强匹配命中 → 跳过判断助手，直接走 handleNeedImageFlow
+      console.log('[chat] regex intent hit: skipping judge, triggering needImage flow');
+      const preTaskId = createPreparingTask(conversationId);
+      send('generate_start', { taskId: preTaskId });
+      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
     } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
       // 路径 E: 计数器归零 → 强制生图
       console.log('[chat] counter forced: skipping judge, triggering needImage flow');
@@ -930,7 +938,10 @@ router.post('/characters/:id/chat', async (req, res) => {
         }
         // 用户画像提取（每 10 条用户消息触发，无 feature flag 始终开启）
         await maybeExtractPortrait(conversationId, characterId);
-        await maybeSummarize(conversationId);
+        await maybeSummarize(conversationId, {
+          characterName: character?.display_name,
+          userName: chatUserName,
+        });
       } catch (err) {
         console.error('[chat] post-processing error:', err.message);
       }
@@ -1237,7 +1248,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       return [{
         role: 'system',
         content: '【对话上下文】\n' + filteredHistory.map(m => {
-          const label = m.role === 'user' ? '用户' : (character?.display_name || '角色');
+          const userName = config.user.nickname || '用户';
+          const label = m.role === 'user' ? userName : (character?.display_name || '角色');
           return `${label}: ${m.content}`;
         }).join('\n\n')
       }];
@@ -1248,7 +1260,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
       if (!lastAssistantMsg) return [];
       const parts = [];
-      if (lastUserMsg) parts.push(`用户: ${lastUserMsg.content}`);
+      const userName = config.user.nickname || '用户';
+      if (lastUserMsg) parts.push(`${userName}: ${lastUserMsg.content}`);
       parts.push(`${character?.display_name || '角色'}: ${lastAssistantMsg.content}`);
       return [{
         role: 'system',
@@ -1414,11 +1427,11 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
 async function generateReplyGuesses(conversationId, character) {
   const db = getDb();
 
-  // 取最近 2 轮（4 条 raw_messages）作为上下文
+  // 取最近 1 轮（2 条 raw_messages）作为上下文
   const history = db.prepare(`
     SELECT role, content FROM raw_messages
     WHERE conversation_id = ?
-    ORDER BY id DESC LIMIT 4
+    ORDER BY id DESC LIMIT 2
   `).all(conversationId).reverse();
 
   if (history.length === 0) return null;
@@ -1426,9 +1439,14 @@ async function generateReplyGuesses(conversationId, character) {
   // 角色人设（short_prompt 已裁剪并替换过 "你"→"assistant"）
   const personalityBrief = character?.short_prompt || '';
 
-  // 预测助手使用独立的 system prompt，不注入角色扮演系统规则
-  // getSystemRules() 包含 "<完全角色扮演自由>" 等指令，会导致模型站错角色
-  const systemPrompt = `你是一个对话预测助手。你的任务是预测**用户（user）**接下来最可能回复的两句话。
+  // msgs[0] — 舞台：破限词 + 世界观（不含 roleplay，避免预测助手站错角色）
+  const jailbreak = getSystemRules({ roleplay: false });
+  const worldSetting = getWorldSetting();
+  const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
+
+  // msgs[1] — 任务：预测指令（先定义任务） + 角色背景（后补充上下文）
+  const taskParts = [];
+  taskParts.push(`你是一个对话预测助手。你的任务是预测**用户（user）**接下来最可能回复的两句话。
 
 ⚠️ 重要：你要预测的是 user 的回复，**绝对不要**预测 assistant 会说什么。对话最后一条是 assistant 说的，你预测的必须是 user 对这句话的回应——不要把 assistant 的话接下去。
 
@@ -1442,8 +1460,11 @@ async function generateReplyGuesses(conversationId, character) {
 
 示例：
 对话中assistant说"走吧，我们出门吃晚饭？"
-输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}
-`;
+输出：{"a":"好耶，我想吃火锅！","b":"不了吧，我们点外卖吃吃就好"}`);
+
+  if (personalityBrief) {
+    taskParts.push(`【仅供了解对话背景，你要预测的是用户（user）会怎么回应这个角色，不要模仿这个角色的语气说话】\n对话中assistant的角色设定：${personalityBrief}`);
+  }
 
   // 过滤掉 assistant 消息中的生图 prompt JSON，避免干扰预测
   const cleanedHistory = history.map(msg => {
@@ -1456,12 +1477,11 @@ async function generateReplyGuesses(conversationId, character) {
     return msg;
   });
 
-  const msgs = [
-    { role: 'system', content: systemPrompt },
-    ...(personalityBrief ? [{ role: 'system', content: `【仅供了解对话背景，你要预测的是用户（user）会怎么回应这个角色，不要模仿这个角色的语气说话】\n对话中assistant的角色设定：${personalityBrief}` }] : []),
-    ...cleanedHistory,
-    { role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' },
-  ];
+  const msgs = [];
+  if (stageContent) msgs.push({ role: 'system', content: stageContent });
+  msgs.push({ role: 'system', content: taskParts.join('\n\n') });
+  msgs.push(...cleanedHistory);
+  msgs.push({ role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' });
 
   try {
     const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '预测' });
