@@ -110,6 +110,25 @@
          角色卡片网格
          ═══════════════════════════════════════════ -->
     <div class="section-title">角色</div>
+    
+    <!-- ═══════════════════════════════════════════
+         世界观设置入口卡片
+         ═══════════════════════════════════════════ -->
+    <div class="relation-entry card" @click="openWorldSetting">
+      <div class="relation-entry-icon world-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <ellipse cx="12" cy="12" rx="4" ry="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <line x1="12" y1="2" x2="12" y2="22"/>
+        </svg>
+      </div>
+      <div class="relation-entry-text">
+        <span class="relation-entry-title">世界观设置</span>
+        <span class="relation-entry-hint">{{ worldSettingSummary }}</span>
+      </div>
+      <span class="relation-entry-arrow">›</span>
+    </div>
     <div class="char-grid">
       <!-- 招募卡片：永远在第一格 -->
       <div class="char-card recruit-card" @click="openRecruit">
@@ -236,6 +255,43 @@
           <span class="toast-icon">{{ toast.type === 'success' ? '📚' : '🔍' }}</span>
           <span class="toast-msg">{{ toast.message }}</span>
           <button class="toast-close" @click="toast.show = false">✕</button>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         世界观编辑弹窗
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="showWorldModal" class="modal-overlay" @click.self="closeWorldSetting">
+          <div class="modal-panel">
+            <div class="modal-header">
+              <h3>世界观设置</h3>
+              <button class="modal-close" @click="closeWorldSetting">✕</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-hint">定义角色们所处的共同世界背景，留空则不追加。</p>
+              <textarea
+                v-model="worldSetting"
+                class="fi world-textarea"
+                rows="10"
+                placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
+                @input="worldDirty = true"
+              ></textarea>
+              <div class="modal-actions">
+                <button class="btn-ghost" @click="closeWorldSetting">取消</button>
+                <button
+                  class="btn-primary"
+                  :disabled="!worldDirty || worldSaving"
+                  @click="saveWorldSetting"
+                >
+                  {{ worldSaving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+              <div v-if="worldSaved" class="world-saved-hint">✓ 已保存</div>
+            </div>
+          </div>
         </div>
       </Transition>
     </Teleport>
@@ -666,6 +722,65 @@ const detail = reactive({
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
 
+// ═══════════════════════════════════════
+// 世界观设置
+// ═══════════════════════════════════════
+const WORLD_TAG_RE = /^<world_setting>\s*([\s\S]*?)\s*<\/world_setting>$/;
+const showWorldModal = ref(false)
+const worldSetting = ref('')
+const worldDirty = ref(false)
+const worldSaving = ref(false)
+const worldSaved = ref(false)
+
+const worldSettingSummary = computed(() => {
+  const v = worldSetting.value.trim()
+  if (!v) return '定义所有角色共处的世界背景'
+  const firstLine = v.split('\n')[0].slice(0, 40)
+  return firstLine + (firstLine.length >= 40 || v.includes('\n') ? '…' : '')
+})
+
+function unwrapWorldSetting(raw) {
+  const m = raw?.match(WORLD_TAG_RE)
+  return m ? m[1] : (raw || '')
+}
+
+async function loadWorldSetting() {
+  try {
+    const data = await api.getGlobalRules()
+    const world = (data.rules || []).find(r => r.rule_key === 'world_setting')
+    worldSetting.value = unwrapWorldSetting(world?.rule_content)
+  } catch {}
+}
+
+function openWorldSetting() {
+  worldDirty.value = false
+  worldSaved.value = false
+  showWorldModal.value = true
+}
+
+function closeWorldSetting() {
+  showWorldModal.value = false
+}
+
+async function saveWorldSetting() {
+  if (worldSaving.value) return
+  worldSaving.value = true
+  try {
+    const raw = worldSetting.value.trim()
+    const content = raw ? `<world_setting>\n${raw}\n</world_setting>` : ''
+    const result = await api.updateGlobalRule('world_setting', { rule_content: content })
+    if (result.ok) {
+      worldDirty.value = false
+      worldSaved.value = true
+      setTimeout(() => worldSaved.value = false, 2000)
+    }
+  } catch (err) {
+    console.error('[world_setting] save failed:', err)
+  } finally {
+    worldSaving.value = false
+  }
+}
+
 function openCharDetail(c) {
   detail.char = c
   detail.editName = c.display_name || ''
@@ -802,6 +917,7 @@ async function removeCharAvatar() {
 onMounted(async () => {
   await loadUserAvatar()
   await loadUserConfig()
+  loadWorldSetting()
   userNicknameInput.value = userNickname.value
   userGenderInput.value = userGender.value
   userAppearanceInput.value = userAppearance.value
@@ -931,7 +1047,7 @@ onMounted(async () => {
   transition: all 0.2s;
 }
 .relation-entry:hover {
-  background: rgba(224, 123, 108, 0.04);
+  background: rgba(255, 255, 255, 0.2);
   border-color: rgba(224, 123, 108, 0.2);
   box-shadow: 0 2px 16px rgba(224, 123, 108, 0.08);
 }
@@ -960,6 +1076,26 @@ onMounted(async () => {
 .relation-entry-arrow {
   font-size: 22px; color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+/* ── 世界观入口卡片 ── */
+.world-icon {
+  background: rgba(120, 140, 200, 0.1);
+  color: #788cc8;
+}
+
+/* ── 世界观编辑弹窗 ── */
+.world-textarea {
+  min-height: 200px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.world-saved-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #4caf84;
+  font-weight: 500;
 }
 
 .inline-input {

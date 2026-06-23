@@ -5,7 +5,7 @@
         <div class="rel-panel">
           <!-- Header -->
           <div class="rel-header">
-            <h3>🔗 我的关系图</h3>
+            <h3>我的关系图</h3>
             <button class="rel-close" @click="$emit('close')">✕</button>
           </div>
 
