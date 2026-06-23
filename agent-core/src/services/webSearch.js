@@ -92,8 +92,15 @@ export async function searchCharacterInfo(query) {
         try {
           const pageData = await scrapeMoegirlPage(scrapeUrl);
           if (pageData && pageData.content) {
-            best.content = pageData.content;
-            console.log(`[webSearch] scraped moegirl page (${pageData.content.length} chars) for "${best.title}"`);
+            const infoboxLen = pageData.infobox?.length || 0;
+            const contentLen = pageData.content?.length || 0;
+            // 质量检查：infobox 为空且正文很短 → 可能是消歧义页或无效页，丢弃不用
+            if (infoboxLen === 0 && contentLen < 600) {
+              console.log(`[webSearch] low quality scrape (infobox=0, body=${contentLen} chars), discarding`);
+            } else {
+              best.content = pageData.content;
+              console.log(`[webSearch] scraped moegirl page (${pageData.content.length} chars) for "${best.title}"`);
+            }
           }
         } catch (err) {
           console.warn(`[webSearch] infobox scrape failed: ${err.message}`);
@@ -286,10 +293,16 @@ async function searchMoegirl(query, context = '') {
       }).then(r => r.json());
 
       const pageData = Object.values(extractRes.query?.pages || {})[0];
-      if (pageData?.extract && pageData.extract.trim().length > 10) {
+      const extractText = pageData?.extract?.trim() || '';
+      if (extractText.length > 10) {
+        // 过滤消歧义页面：不把消歧义页当作角色详情返回
+        if (/消歧义页|可以指|下列[^。]{0,20}(条目|角色|人物|用语|作品)/.test(extractText)) {
+          console.log(`[webSearch] skipping disambiguation page: "${pageData.title}"`);
+          continue;
+        }
         extracts.push({
           title: pageData.title,
-          content: pageData.extract.slice(0, 2500),
+          content: extractText.slice(0, 2500),
           source: pageUrl || `${pageData.title}`,
         });
       }

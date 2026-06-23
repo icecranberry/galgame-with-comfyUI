@@ -148,7 +148,7 @@
             </div>
 
             <!-- 步骤 0：输入描述 -->
-            <div v-if="recruit.step === 'input'" class="modal-body">
+            <div v-if="recruit.step === 'input'" class="modal-body" style="position:relative">
               <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
               <textarea
                 v-model="recruit.desc"
@@ -169,6 +169,11 @@
                 </button>
               </div>
               <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+              <!-- 招募加载遮罩 -->
+              <div v-if="recruit.loading" class="scan-overlay">
+                <div class="scan-line"></div>
+                <div class="scan-text">{{ loadingTip }}</div>
+              </div>
             </div>
 
             <!-- 步骤 1：预览确认 -->
@@ -216,10 +221,21 @@
               <!-- 扫描动画覆盖层 -->
               <div v-if="recruit.loading" class="scan-overlay">
                 <div class="scan-line"></div>
-                <div class="scan-text">正在重新招募...</div>
+                <div class="scan-text">{{ loadingTip }}</div>
               </div>
             </div>
           </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 搜索提示 Toast -->
+    <Teleport to="body">
+      <Transition name="toast-slide">
+        <div v-if="toast.show" class="search-toast" :class="toast.type">
+          <span class="toast-icon">{{ toast.type === 'success' ? '📚' : '🔍' }}</span>
+          <span class="toast-msg">{{ toast.message }}</span>
+          <button class="toast-close" @click="toast.show = false">✕</button>
         </div>
       </Transition>
     </Teleport>
@@ -512,6 +528,53 @@ const recruit = reactive({
   result: null,    // 生成结果
 })
 
+// 招募加载提示语轮播
+const LOADING_TIPS = [
+  '正在酒馆发布公告…',
+  '正在审核冒险者资格…',
+  '正在翻阅冒险者公会档案…',
+  '正在筛查简历…',
+  '正在办理冒险者资格证…',
+  '正在调取异世界档案…',
+  '正在向公会会长请示…',
+  '正在检查悬赏令真伪…',
+  '正在鉴定勇者血统…',
+  '正在占卜命运之线…',
+]
+const loadingTip = ref(LOADING_TIPS[0])
+let _tipTimer = null
+
+function startLoadingTips() {
+  loadingTip.value = LOADING_TIPS[0]
+  let idx = 0
+  _tipTimer = setInterval(() => {
+    idx = (idx + 1) % LOADING_TIPS.length
+    loadingTip.value = LOADING_TIPS[idx]
+  }, 2200)
+}
+
+function stopLoadingTips() {
+  if (_tipTimer) { clearInterval(_tipTimer); _tipTimer = null }
+}
+
+// Toast 冒泡提示
+const toast = reactive({
+  show: false,
+  message: '',
+  type: 'info', // 'info' | 'success'
+  timer: null,
+})
+
+function showToast(message, type = 'info') {
+  if (toast.timer) clearTimeout(toast.timer)
+  toast.message = message
+  toast.type = type
+  toast.show = true
+  toast.timer = setTimeout(() => {
+    toast.show = false
+  }, 5000)
+}
+
 function openRecruit() {
   recruit.show = true
   recruit.step = 'input'
@@ -524,6 +587,7 @@ function openRecruit() {
 
 function closeRecruit() {
   recruit.show = false
+  stopLoadingTips()
 }
 
 async function doGenerate() {
@@ -532,6 +596,7 @@ async function doGenerate() {
 
   recruit.loading = true
   recruit.error = ''
+  startLoadingTips()
 
   try {
     const result = await api.generateCharacterPreview(desc)
@@ -541,10 +606,17 @@ async function doGenerate() {
     }
     recruit.result = { ...result, momentsDisabled: false, proactiveDisabled: false }
     recruit.step = 'preview'
+    // 冒泡提示搜索结果
+    if (result.search_found) {
+      showToast('已在网络上找到详细角色资料', 'success')
+    } else {
+      showToast('未找到相关资料，请检查IP角色名字输入是否正确，如果是原创设定则无视本条提示', 'info')
+    }
   } catch (err) {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
   } finally {
     recruit.loading = false
+    stopLoadingTips()
   }
 }
 
@@ -1416,5 +1488,75 @@ onMounted(async () => {
   .modal-wide .fi {
     font-size: 16px;
   }
+}
+
+/* ═══════════════════════════════════════
+   Toast 冒泡提示
+   ═══════════════════════════════════════ */
+.search-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  max-width: 520px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(12px);
+  border: 1px solid;
+}
+.search-toast.info {
+  background: rgba(30, 40, 60, 0.92);
+  border-color: rgba(120, 140, 200, 0.3);
+  color: #c8d6f8;
+}
+.search-toast.success {
+  background: rgba(20, 50, 30, 0.92);
+  border-color: rgba(80, 180, 100, 0.35);
+  color: #b8e8c8;
+}
+.toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.toast-msg {
+  flex: 1;
+  line-height: 1.5;
+}
+.toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: opacity 0.2s;
+}
+.toast-close:hover {
+  opacity: 1;
+}
+
+/* Toast transition */
+.toast-slide-enter-active {
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.toast-slide-leave-active {
+  transition: all 0.25s ease-in;
+}
+.toast-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-20px);
+}
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-12px);
 }
 </style>

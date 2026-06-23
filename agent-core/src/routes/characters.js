@@ -266,7 +266,6 @@ router.post('/generate', async (req, res) => {
 
   try {
     const model = config.llm.model || 'deepseek-chat';
-    const llmOpts = { model, temperature: 0.7, max_tokens: 4096 };
 
     // 联网搜索角色资料
     let searchContext = '';
@@ -281,6 +280,12 @@ router.post('/generate', async (req, res) => {
     } catch (err) {
       console.warn('[characters] web search failed, continuing without:', err.message);
     }
+
+    const searchFound = !!(searchContext && searchContext.length >= 600);
+
+    // 温度策略：有参考资料 → 低温忠实还原；原创设定 → 中等温度兼顾创造力与格式
+    const temperature = searchFound ? 0.3 : 0.7;
+    console.log(`[characters] search_found=${searchFound}, temperature=${temperature}`);
 
     // msgs[0] — 舞台：破限词 + 世界观
     const stageRules = getSystemRulesWithWorld({ roleplay: false });
@@ -336,7 +341,7 @@ ${searchContext}` : ''}
     msgs.push({ role: 'system', content: systemPrompt });
     msgs.push({ role: 'user', content: description.trim() });
 
-    const result = await chatSync(msgs, { ...llmOpts, label: '创造角色' });
+    const result = await chatSync(msgs, { model, temperature, max_tokens: 4096, label: '创造角色' });
 
     // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
     const lines = result.split('\n');
@@ -385,6 +390,7 @@ ${searchContext}` : ''}
         display_name: displayName,
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
+        search_found: searchFound,
       });
     } else {
       // 预览模式：不入库，返回生成数据
@@ -394,6 +400,7 @@ ${searchContext}` : ''}
         display_name: displayName,
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
+        search_found: searchFound,
       });
     }
   } catch (err) {
