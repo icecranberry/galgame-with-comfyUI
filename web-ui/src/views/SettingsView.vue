@@ -918,6 +918,7 @@ function resetTestPrompts() {
 .card-collapsed {
   cursor: pointer;
   position: relative;
+  padding-right: 48px; /* 为右侧箭头留空间，避免文字重叠 */
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .card-collapsed:hover {

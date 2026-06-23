@@ -748,10 +748,10 @@ onMounted(async () => {
 
 .page-header {
   margin-bottom: 24px;
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: transform;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform, opacity;
 }
-.page-header.header-hidden { transform: translateY(-100%); margin-bottom: 0; }
+.page-header.header-hidden { transform: translateY(-100%); margin-bottom: 0; opacity: 0; pointer-events: none; }
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
 .is-clickable { cursor: pointer; }
 

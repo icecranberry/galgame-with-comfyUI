@@ -24,6 +24,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, provide } from 'vue'
+import { useRoute } from 'vue-router'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
 import { useProactiveStore } from './stores/notifications.js'
@@ -36,6 +37,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 const chat = useChatStore()
 const settings = useSettingsStore()
 const proactive = useProactiveStore()
+const route = useRoute()
 const confirmDialog = ref(null)
 
 // ── 临时调试：强制主动聊天 ──
@@ -147,7 +149,8 @@ onMounted(async () => {
 
   if (isMobile.value) {
     // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出
-  } else if (chat.characters.length > 0 && !chat.activeCharId) {
+  } else if (chat.characters.length > 0 && !chat.activeCharId && !route.params.id) {
+    // 仅在无路由角色参数时自动选第一个（有路由时 ChatView 会根据路由自行 selectChar）
     chat.selectChar(chat.characters[0].id)
   }
 })
