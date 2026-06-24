@@ -1300,7 +1300,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
   let fullContent = '';
   try {
-    fullContent = await chatSync(msgs, { temperature: 0.3, max_tokens: 1024, label: '生图' });
+    fullContent = await chatSync(msgs, { temperature: 0.5, max_tokens: 1024, label: '生图' });
     console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
   } catch (err) {
     console.error('[chat] needImage follow-up error:', err.message);

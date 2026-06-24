@@ -832,7 +832,7 @@ ${imageRulesText}
   } catch (err) {
     console.error('[emotionEngine] giveGift LLM parse failed:', err.message);
     reaction = '谢谢你！';
-    imagePrompt = `1girl, ${character.display_name}, receiving a gift, warm smile, soft lighting, gift scene`;
+    imagePrompt = `${character.display_name}, receiving a gift, warm smile, soft lighting, gift scene`;
   }
 
   // 5. 计算最终好感度变化
