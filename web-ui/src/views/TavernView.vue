@@ -1501,7 +1501,7 @@ onMounted(async () => {
   /* ── 弹窗移动端适配 ── */
   .modal-panel {
     width: 100vw;
-    max-height: 100vh;
+    max-height: 100vh; max-height: 100dvh;
     border-radius: 0;
   }
   .modal-header {

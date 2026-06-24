@@ -20,3 +20,5 @@ launcher/build/
 launcher/*.spec
 邻舍.EXE.exe
 launcher_config.json
+
+.production

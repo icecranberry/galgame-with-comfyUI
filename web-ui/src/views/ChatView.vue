@@ -114,8 +114,10 @@
           placeholder="输入消息..." rows="1"
           @keydown.enter.exact.prevent="send"
           @keydown.enter.shift.exact="inputText += '\n'"
+          @focus="inputFocused = true"
+          @blur="inputFocused = false"
         ></textarea>
-        <button class="gift-btn" @click="showGiftPanel = true" title="送礼物">
+        <button v-show="!(isMobile && inputFocused)" class="gift-btn" @click="showGiftPanel = true" title="送礼物">
           <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
         </button>
         <button class="send-btn" @click="send" :disabled="!inputText.trim() || chat.streaming" :title="chat.streaming ? '发送中...' : '发送'">
@@ -483,6 +485,7 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
+const inputFocused = ref(false)
 const settings = useSettingsStore()
 const forceImageGen = computed(() => settings.forceImageGen)
 const realtimeAffinityEnabled = computed({
@@ -1290,7 +1293,7 @@ function renderContent(text) {
 </script>
 
 <style scoped>
-.chat-view { flex:1; display:flex; flex-direction:column; height:100vh; overflow:hidden; background:transparent; }
+.chat-view { flex:1; display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; background:transparent; }
 .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
 .empty-icon { font-size:56px; }
 .empty-state h2 { font-size:18px; color:var(--text-secondary); font-weight:400; }
@@ -1492,6 +1495,7 @@ function renderContent(text) {
 /* ── 毛玻璃输入区 ── */
 .input-area {
   padding:8px 24px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--glass-border);
   display:flex; gap:10px; align-items:flex-end;
   background: rgba(255, 255, 255, 0.5);
@@ -1687,15 +1691,17 @@ function renderContent(text) {
   .guesses-row { padding: 2px 10px 6px; gap: 4px; flex-wrap: nowrap; }
   .guess-prefix { display: none; }
   .guess-pill { padding: 4px 10px; font-size: 12px; max-width: 50%; min-width: 60px; flex: 1; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-  .input-area { padding: 8px 16px; }
+  .input-area { padding: 8px 16px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 
   /* 手机端编辑弹窗全屏 */
   .editor-overlay { background: rgba(0,0,0,0.3); }
   .editor-panel {
     width:100vw; max-width:100vw;
-    height:100vh; max-height:100vh;
+    height:100vh; height:100dvh; max-height:100vh; max-height:100dvh;
     border-radius:0; border:none;
   }
+  .editor-header { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+  .editor-actions { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ── 印象弹窗 ── */
