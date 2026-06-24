@@ -106,7 +106,7 @@ export const DEFAULT_CHARACTERS = [
     emotion_baseline: JSON.stringify({ valence: 0.5, arousal: 0.5, dominance: 0.5 }),
     moments_disabled: 1,
     proactive_disabled: 1,
-    avatar_path: null,
+    avatar_path: '/avatars/default_assistant_header.png',
   },
 ];
 

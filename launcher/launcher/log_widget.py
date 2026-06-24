@@ -12,9 +12,10 @@ class LogWidget(QPlainTextEdit):
     append_requested = Signal(str, str)  # (text, color_name)
 
     # 关键词着色规则：匹配到任意关键词 → 使用对应颜色
+    # 注意：仅匹配明确的错误/警告标签，避免裸子串（如 "error"）误伤正常日志
     COLOR_RULES = [
-        (["error", "fail", "✗", "exception", "traceback"], "red"),
-        (["warn", "[!]", "warning"], "yellow"),
+        (["[error]", "✗", "exception:", "traceback (most recent call last)"], "red"),
+        (["[warn]", "[!]", "⚠"], "yellow"),
         (["✓", "ok", "done", "ready", "healthy", "success", "🎉"], "green"),
         (["[向量服务]"], "cyan"),
         (["[主控后端]"], "lime"),

@@ -8,11 +8,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QCheckBox,
     QFileDialog,
     QFrame,
 )
 from PySide6.QtCore import Qt, Signal
+from .switch import Switch
 
 
 class SettingsPage(QWidget):
@@ -72,7 +72,7 @@ class SettingsPage(QWidget):
             '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #E07B6C; text-decoration: none;">'
             'https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
             '<br>'
-            '• 老司机请确认已经放置了Anima模型发布页面的anima_baseV10、qwen_image_vae、anima_baseV10_txt，'
+            '• 老司机请确认已经放置了Anima模型发布页面的anima_baseV10、qwen_image_vae、anima_baseV10_txt，<br>'
             '并且内核升级到支持Anima的<span style="color: #ff4444; font-weight: bold;">v0.23.0</span>以上，'
             '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #E07B6C; text-decoration: none;">'
             'https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
@@ -95,16 +95,13 @@ class SettingsPage(QWidget):
         layout.addWidget(_separator())
 
         # --- 开关 ---
-        self.auto_browser_check = QCheckBox("启动后自动打开浏览器 (http://localhost:3099)")
-        self.auto_browser_check.setStyleSheet(_toggle_style())
+        self.auto_browser_check = Switch("启动后自动打开浏览器 (http://localhost:3099)")
         layout.addWidget(self.auto_browser_check)
 
-        self.toast_check = QCheckBox("启动前提示确认 ComfyUI 已运行")
-        self.toast_check.setStyleSheet(_toggle_style())
+        self.toast_check = Switch("启动前提示确认 ComfyUI 已运行")
         layout.addWidget(self.toast_check)
 
-        self.mirror_check = QCheckBox("使用国内镜像源加速依赖下载 (npm+pip)")
-        self.mirror_check.setStyleSheet(_toggle_style())
+        self.mirror_check = Switch("使用国内镜像源加速依赖下载 (npm+pip)")
         layout.addWidget(self.mirror_check)
 
         # 弹性空间把仓库地址推到底部
@@ -203,33 +200,6 @@ def _secondary_btn_style() -> str:
             padding: 8px 14px; border-radius: 6px; border: none;
         }
         QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
-    """
-
-
-def _toggle_style() -> str:
-    """滑块开关样式。"""
-    return """
-        QCheckBox {
-            color: #2E2A27;
-            font-size: 13px;
-            spacing: 10px;
-        }
-        QCheckBox::indicator {
-            width: 40px;
-            height: 22px;
-            border-radius: 11px;
-            border: none;
-            background: #C9C0BB;
-        }
-        QCheckBox::indicator:checked {
-            background: #E07B6C;
-        }
-        QCheckBox::indicator:hover {
-            background: #BDB4AE;
-        }
-        QCheckBox::indicator:checked:hover {
-            background: #D96D5D;
-        }
     """
 
 

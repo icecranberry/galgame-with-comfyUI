@@ -804,7 +804,7 @@ class MainWindow(QMainWindow):
         self._shutdown_overlay.raise_()
         self._start_spinner()
 
-        self._log_page.append_log("[系统] 窗口关闭，正在安全停止服务...")
+        self._log_page.append_log("[系统] 为保证数据库完整，正在安全停止服务...")
         self._runner.stop_all()
 
         # 服务全部停止后自动关闭窗口
