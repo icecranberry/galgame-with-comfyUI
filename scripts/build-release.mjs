@@ -581,17 +581,17 @@ async function main() {
   // 使用说明
   const { writeFileSync } = await import("node:fs");
   writeFileSync(resolve(RELEASE_DIR, "使用说明.txt"), [
-    "邻舍 - AI 图像生成智能体",
+    "邻舍.EXE",
+    "",
+    "【首次使用，非常重要】",
+    "！！！<<<ComfyUI内核版本需要更新到v0.23.0以上，否则不支持Anima>>>！！！",
+    "anima_baseV10、qwen_image_vae、anima_baseV10_txt需要都在ComfyUI的models目录下的子文件夹内",
     "",
     "【使用步骤】",
     "1. 双击运行 邻舍.EXE.exe",
     "2. 在「设置」中配置 ComfyUI 启动器路径",
     "3. 返回「首页」点击「启动」",
-    "4. 浏览器访问 http://localhost:3099",
-    "",
-    "【首次使用】",
-    "启动后如需配置 LLM API Key，请编辑：",
-    "  agent-core\\.env （首次启动时自动创建）",
+    "4. 浏览器访问 http://localhost:3099 支持手机端网页访问，网页地址在日志中显示",
     "",
     "【版本更新】",
     "切换到「版本」页签 → 点击「检查更新」",
@@ -603,8 +603,8 @@ async function main() {
   ].join("\n"), "utf-8");
   ok("使用说明.txt");
 
-  // 默认头像：复制到 avatars 目录，确保首次启动时有默认头像
-  const defaultAvatar = resolve(WEB_UI, "public", "default_assistant_header.png");
+  // 默认头像：从 assets 源复制到 avatars 目录
+  const defaultAvatar = resolve(AGENT_CORE, "assets", "default_assistant_header.png");
   if (existsSync(defaultAvatar)) {
     const avatarDst = resolve(RELEASE_DIR, "agent-core", "data", "avatars");
     ensureDir(avatarDst);
@@ -612,7 +612,7 @@ async function main() {
     copyFileSync(defaultAvatar, resolve(avatarDst, "default_assistant_header.png"));
     ok("默认头像 → agent-core\\data\\avatars\\");
   } else {
-    warn("默认头像不存在: web-ui/public/default_assistant_header.png");
+    warn("默认头像不存在: agent-core/assets/default_assistant_header.png");
   }
 
   // ═══════════════════════════════════════════
