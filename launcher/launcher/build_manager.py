@@ -1,5 +1,11 @@
 """
-构建管理器 —— 顺序执行构建流水线（env check → npm install ×2 → vite build → venv setup → model download）。
+构建管理器 —— 顺序执行构建流水线。
+
+预构建 release（runtime/ 下有捆绑运行时）:
+  检查到预构建产物后直接跳过全部步骤，零构建启动。
+
+开发环境（无捆绑运行时）:
+  回退到系统工具: npm install ×2 → vite build → venv → pip install → model download。
 """
 import os
 import shutil
@@ -7,6 +13,7 @@ import sys
 from PySide6.QtCore import QObject, Signal, QProcess, QTimer
 from PySide6.QtWidgets import QApplication
 from .env_manager import EnvManager
+from .service_runner import find_bundled_node, find_bundled_python, find_bundled_npm
 
 
 class BuildManager(QObject):
@@ -41,16 +48,33 @@ class BuildManager(QObject):
     # ------------------------------------------------------------------
 
     def is_built(self) -> bool:
-        """快速检查关键构建产物是否存在（验证真实安装，非仅目录存在）。"""
-        node_modules = os.path.join(self._project_path, "agent-core", "node_modules")
-        return all(
-            [
-                # 验证 express 真实安装，防止 npm install 中途失败导致目录存在但包缺失
-                os.path.isdir(os.path.join(node_modules, "express")),
-                os.path.isfile(os.path.join(self._project_path, "agent-core", "public", "index.html")),
-                os.path.isdir(os.path.join(self._project_path, "vector-service", "venv")),
-            ]
+        """快速检查关键构建产物是否存在。
+
+        预构建 release 路径（有捆绑运行时）:
+          - agent-core/node_modules/express + public/index.html
+
+        开发环境路径（无捆绑运行时）:
+          - agent-core/node_modules/express + public/index.html + vector-service/venv
+        """
+        bundled_node = find_bundled_node(self._project_path)
+        bundled_python = find_bundled_python(self._project_path)
+
+        node_modules_ok = os.path.isdir(
+            os.path.join(self._project_path, "agent-core", "node_modules", "express")
         )
+        public_ok = os.path.isfile(
+            os.path.join(self._project_path, "agent-core", "public", "index.html")
+        )
+
+        if bundled_node and bundled_python:
+            # 预构建 release: 有捆绑运行时 + 预装产物即视为已构建
+            return node_modules_ok and public_ok
+
+        # 开发环境: 还需要 venv
+        venv_ok = os.path.isdir(
+            os.path.join(self._project_path, "vector-service", "venv")
+        )
+        return node_modules_ok and public_ok and venv_ok
 
     def start_build(self, force: bool = False) -> str | None:
         """启动构建流水线。返回 None 表示成功启动，否则返回错误信息。"""
@@ -137,83 +161,143 @@ class BuildManager(QObject):
     # ------------------------------------------------------------------
 
     def _build_build_steps(self) -> list[dict]:
-        """生成项目构建步骤（npm install ×2, vite build, venv, pip, model）。"""
-        # npm: 优先用 tool_path_overrides 中的路径，否则让 QProcess 从 PATH 查找
-        node_dir = self._tool_path_overrides.get("node")
-        if node_dir and os.path.isfile(os.path.join(node_dir, "npm.cmd")):
-            node_cmd = os.path.join(node_dir, "npm.cmd")
-        else:
-            node_cmd = "npm.cmd"  # QProcess 会自行在 PATH 中查找
+        """生成项目构建步骤。
 
-        # python: 优先用 winget 安装路径，否则让 QProcess 从 PATH 查找
-        # 绝不使用 sys.executable 兜底（PyInstaller 打包后是启动器自身）
-        py_dir = self._tool_path_overrides.get("python")
-        if py_dir and os.path.isfile(os.path.join(py_dir, "python.exe")):
-            python_cmd = os.path.join(py_dir, "python.exe")
-        elif not getattr(sys, "frozen", False):
-            python_cmd = sys.executable  # 开发环境可以用
-        else:
-            python_cmd = "python.exe"  # 让 QProcess 在 PATH 上查找
-        venv_pip = os.path.join(
-            self._project_path, "vector-service", "venv", "Scripts", "pip.exe"
-        )
-        venv_python = os.path.join(
-            self._project_path, "vector-service", "venv", "Scripts", "python.exe"
-        )
+        工具优先级: 捆绑运行时 > tool_path_overrides > PATH 查找
+        每个步骤带 skip_if —— 产物已存在则跳过。
+        """
+        project = self._project_path
+        agent_core = os.path.join(project, "agent-core")
+        vector_svc = os.path.join(project, "vector-service")
+        web_ui = os.path.join(project, "web-ui")
 
-        # npm install 参数：跳过审计和赞助商列表以加速
+        # ── 解析 Node.js / npm ──
+        bundled_node = find_bundled_node(project)
+        bundled_npm = find_bundled_npm(project)
+        if bundled_npm:
+            node_cmd = bundled_npm
+        elif bundled_node:
+            node_cmd = os.path.join(os.path.dirname(bundled_node), "npm.cmd")
+        else:
+            node_dir = self._tool_path_overrides.get("node")
+            if node_dir and os.path.isfile(os.path.join(node_dir, "npm.cmd")):
+                node_cmd = os.path.join(node_dir, "npm.cmd")
+            else:
+                node_cmd = "npm.cmd"
+
+        # ── 解析 Python ──
+        bundled_python = find_bundled_python(project)
+        if bundled_python:
+            python_cmd = bundled_python
+        else:
+            py_dir = self._tool_path_overrides.get("python")
+            if py_dir and os.path.isfile(os.path.join(py_dir, "python.exe")):
+                python_cmd = os.path.join(py_dir, "python.exe")
+            elif not getattr(sys, "frozen", False):
+                python_cmd = sys.executable
+            else:
+                python_cmd = "python.exe"
+
+        # venv 内的 pip/python（仅在无捆绑 Python 时使用）
+        venv_pip = os.path.join(vector_svc, "venv", "Scripts", "pip.exe")
+        venv_python = os.path.join(vector_svc, "venv", "Scripts", "python.exe")
+
+        # npm install 参数
         _npm_args = ["install", "--no-audit", "--no-fund"]
         if self.use_mirror:
             _npm_args.append("--registry=https://registry.npmmirror.com")
 
-        return [
-            {
-                "name": "安装 agent-core 依赖（首次约 3-8 分钟）",
-                "cwd": os.path.join(self._project_path, "agent-core"),
-                "cmd": node_cmd,
-                "args": _npm_args,
-                "timeout": 600000,
-            },
-            {
-                "name": "安装 web-ui 依赖（首次约 2-5 分钟）",
-                "cwd": os.path.join(self._project_path, "web-ui"),
-                "cmd": node_cmd,
-                "args": _npm_args,
-                "timeout": 600000,
-            },
-            {
-                "name": "构建前端 (vite build)",
-                "cwd": os.path.join(self._project_path, "web-ui"),
-                "cmd": node_cmd,
-                "args": ["run", "build"],
-                "timeout": 120000,
-            },
-            {
+        # pip install 参数
+        _pip_args = ["-m", "pip", "install", "-r", "requirements.txt"]
+        if self.use_mirror:
+            _pip_args.append("-i")
+            _pip_args.append("https://pypi.tuna.tsinghua.edu.cn/simple")
+
+        steps: list[dict] = []
+
+        # ── 步骤 1: agent-core npm install ──
+        steps.append({
+            "name": "安装 agent-core 依赖（首次约 3-8 分钟）",
+            "cwd": agent_core,
+            "cmd": node_cmd,
+            "args": _npm_args,
+            "timeout": 600000,
+            "skip_if": lambda: os.path.isdir(
+                os.path.join(agent_core, "node_modules", "express")
+            ),
+        })
+
+        # ── 步骤 2: web-ui npm install ──
+        steps.append({
+            "name": "安装 web-ui 依赖（首次约 2-5 分钟）",
+            "cwd": web_ui,
+            "cmd": node_cmd,
+            "args": _npm_args,
+            "timeout": 600000,
+            "skip_if": lambda: os.path.isdir(
+                os.path.join(web_ui, "node_modules")
+            ),
+        })
+
+        # ── 步骤 3: vite build ──
+        steps.append({
+            "name": "构建前端 (vite build)",
+            "cwd": web_ui,
+            "cmd": node_cmd,
+            "args": ["run", "build"],
+            "timeout": 120000,
+            "skip_if": lambda: os.path.isfile(
+                os.path.join(agent_core, "public", "index.html")
+            ),
+        })
+
+        # ── 步骤 4-5: Python 环境 ──
+        if bundled_python:
+            # 捆绑 Python 环境（预构建 release）：pip install 可选
+            steps.append({
+                "name": "安装 Python 依赖（首次约 1-3 分钟）",
+                "cwd": vector_svc,
+                "cmd": bundled_python,
+                "args": _pip_args,
+                "timeout": 300000,
+                "skip_if": lambda: _check_python_deps(bundled_python),
+            })
+        else:
+            # 开发环境：需要创建 venv + pip install
+            steps.append({
                 "name": "创建 Python 虚拟环境",
-                "cwd": os.path.join(self._project_path, "vector-service"),
+                "cwd": vector_svc,
                 "cmd": python_cmd,
                 "args": ["-m", "venv", "venv"],
                 "timeout": 60000,
                 "skip_if": lambda: os.path.isdir(
-                    os.path.join(self._project_path, "vector-service", "venv")
+                    os.path.join(vector_svc, "venv")
                 ),
-            },
-            {
+            })
+            steps.append({
                 "name": "安装 Python 依赖（首次约 1-3 分钟）",
-                "cwd": os.path.join(self._project_path, "vector-service"),
+                "cwd": vector_svc,
                 "cmd": venv_pip,
                 "args": ["install", "-r", "requirements.txt"]
                         + (["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"] if self.use_mirror else []),
                 "timeout": 300000,
-            },
-            {
-                "name": "下载嵌入模型 (~155MB)",
-                "cwd": os.path.join(self._project_path, "vector-service"),
-                "cmd": venv_python,
-                "args": ["download_model.py"],
-                "timeout": 600000,
-            },
-        ]
+            })
+
+        # ── 步骤: 下载嵌入模型 ──
+        model_python = bundled_python if bundled_python else venv_python
+        model_onnx = os.path.join(
+            vector_svc, "models", "jina-embeddings-v2-base-zh", "onnx", "model_int8.onnx"
+        )
+        steps.append({
+            "name": "下载嵌入模型 (~155MB)",
+            "cwd": vector_svc,
+            "cmd": model_python,
+            "args": ["download_model.py"],
+            "timeout": 600000,
+            "skip_if": lambda: os.path.isfile(model_onnx),
+        })
+
+        return steps
 
     def _resolve_tool_path(self, tool_key: str, default: str, binary: str | None = None) -> str:
         """解析工具路径。若 winget 安装后记录过路径，则拼接绝对路径；否则返回默认值。"""
@@ -354,6 +438,19 @@ class BuildManager(QObject):
 # ------------------------------------------------------------------
 # Helper
 # ------------------------------------------------------------------
+
+
+def _check_python_deps(python_exe: str) -> bool:
+    """快速检查 Python 关键依赖是否已安装（import 测试，~1s）。"""
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            [python_exe, "-c", "import fastapi, uvicorn, chromadb, onnxruntime, numpy"],
+            capture_output=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def _decode_output(data: bytes) -> str:

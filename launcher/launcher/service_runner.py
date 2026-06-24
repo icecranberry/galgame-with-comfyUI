@@ -1,6 +1,10 @@
 """
 服务运行器 —— 管理 2 个生产服务进程（vector-service + agent-core）。
 包括端口清理、启动、健康检查、优雅停止。
+
+运行时发现顺序:
+  1. runtime/ 目录下捆绑的 Node.js / Python（预构建 release）
+  2. 系统已安装的 Node.js / Python（开发环境）
 """
 import os
 import sys
@@ -8,7 +12,90 @@ from PySide6.QtCore import QObject, Signal, QProcess, QTimer, QUrl, QByteArray, 
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 
-# 服务定义
+# ── 捆绑运行时发现 ──
+
+def find_bundled_node(project_path: str) -> str | None:
+    """在 runtime/nodejs*/ 中查找捆绑的 Node.js，返回 node.exe 路径。"""
+    runtime_dir = os.path.join(project_path, "runtime")
+    if not os.path.isdir(runtime_dir):
+        return None
+    for entry in sorted(os.listdir(runtime_dir), reverse=True):
+        if entry.startswith("nodejs") or entry.startswith("node-v"):
+            node_exe = os.path.join(runtime_dir, entry, "node.exe")
+            if os.path.isfile(node_exe):
+                return node_exe
+    return None
+
+
+def find_bundled_python(project_path: str) -> str | None:
+    """在 runtime/python/ 中查找捆绑的 Python，返回 python.exe 路径。"""
+    python_exe = os.path.join(project_path, "runtime", "python", "python.exe")
+    if os.path.isfile(python_exe):
+        return python_exe
+    return None
+
+
+def find_bundled_npm(project_path: str) -> str | None:
+    """查找捆绑 Node.js 附带的 npm.cmd。"""
+    node_exe = find_bundled_node(project_path)
+    if node_exe:
+        npm_cmd = os.path.join(os.path.dirname(node_exe), "npm.cmd")
+        if os.path.isfile(npm_cmd):
+            return npm_cmd
+    return None
+
+
+def find_bundled_git(project_path: str) -> str | None:
+    """在 runtime/git/ 中查找捆绑的 Git，返回 git.exe 路径。"""
+    for sub in ("cmd", "bin"):
+        candidate = os.path.join(project_path, "runtime", "git", sub, "git.exe")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+# ── 服务定义 ──
+
+def _resolve_node(project_path: str) -> str:
+    """获取 Node.js 可执行文件路径。"""
+    bundled = find_bundled_node(project_path)
+    if bundled:
+        return bundled
+    return "node.exe" if sys.platform == "win32" else "node"
+
+
+def _resolve_python(project_path: str) -> str:
+    """获取 Python 可执行文件路径。
+
+    优先级: 捆绑 Python > venv > 系统 Python 已知路径 > PATH
+    """
+    # 1. 捆绑 Python（预构建 release）
+    bundled = find_bundled_python(project_path)
+    if bundled:
+        return bundled
+
+    # 2. venv（开发环境或启动器构建的）
+    venv_py = os.path.join(project_path, "vector-service", "venv", "Scripts", "python.exe")
+    if os.path.isfile(venv_py):
+        return venv_py
+
+    # 3. 系统已知安装路径
+    for candidate in [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\python.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\python.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Python313\python.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Python312\python.exe"),
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+
+    # 4. 开发环境兜底
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+
+    return "python.exe"
+
+
 SERVICES = {
     "vector": {
         "name": "vector",
@@ -16,7 +103,7 @@ SERVICES = {
         "port": 8765,
         "health_path": "/health",
         "cwd": "vector-service",
-        "get_cmd": lambda project_path: _venv_python(project_path),
+        "get_cmd": lambda project_path: _resolve_python(project_path),
         "get_args": lambda: [
             "-m",
             "uvicorn",
@@ -34,30 +121,10 @@ SERVICES = {
         "health_path": "/api/health",
         "shutdown_path": "/api/shutdown",
         "cwd": "agent-core",
-        "get_cmd": lambda _: "node.exe" if sys.platform == "win32" else "node",
+        "get_cmd": lambda project_path: _resolve_node(project_path),
         "get_args": lambda: ["app.js"],
     },
 }
-
-
-def _venv_python(project_path: str) -> str:
-    """获取 vector-service venv 中的 python 路径。"""
-    venv_py = os.path.join(project_path, "vector-service", "venv", "Scripts", "python.exe")
-    if os.path.exists(venv_py):
-        return venv_py
-    # fallback: 在已知安装路径中查找 Python，绝不使用 sys.executable（PyInstaller 打包后是启动器自身）
-    for candidate in [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\python.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\python.exe"),
-        os.path.expandvars(r"%ProgramFiles%\Python313\python.exe"),
-        os.path.expandvars(r"%ProgramFiles%\Python312\python.exe"),
-    ]:
-        if os.path.isfile(candidate):
-            return candidate
-    # 最后兜底：仅在非冻结模式下用 sys.executable（开发环境）
-    if not getattr(sys, "frozen", False):
-        return sys.executable
-    return "python.exe"  # 让 QProcess 在 PATH 上查找
 
 
 class PortCleaner(QObject):

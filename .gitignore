@@ -17,8 +17,11 @@ vector-service/chroma_data/
 # 邻舍启动器
 launcher/dist/
 launcher/build/
+launcher/build_cache/
 launcher/*.spec
 邻舍.EXE.exe
 launcher_config.json
 
 .production
+release/
+runtime/

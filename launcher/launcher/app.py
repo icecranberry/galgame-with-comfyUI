@@ -642,10 +642,17 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _lazy_git_init(self):
-        # 仅检查 git 是否在已知安装路径中存在，不扫 PATH 防止卡死
-        git_exe = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\bin"), "git.exe")
-        git_cmd = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\cmd"), "git.exe")
-        if not os.path.isfile(git_exe) and not os.path.isfile(git_cmd):
+        # 检查 Git 是否可用: 捆绑 Git > 系统安装路径
+        from .service_runner import find_bundled_git
+        bundled_git = find_bundled_git(self._project_path)
+        if bundled_git:
+            has_git = True
+        else:
+            git_exe = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\bin"), "git.exe")
+            git_cmd = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\cmd"), "git.exe")
+            has_git = os.path.isfile(git_exe) or os.path.isfile(git_cmd)
+
+        if not has_git:
             self._home_page.update_version_info(None, "Git 未安装", None)
             self._git_ready = True
             return

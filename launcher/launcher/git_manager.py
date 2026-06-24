@@ -171,12 +171,12 @@ class GitManager(QObject):
         return None
 
     def checkout_tag(self, tag: str) -> str | None:
-        """异步 checkout 指定 tag。返回 None 表示启动成功。"""
+        """异步 checkout 指定 tag。使用 --force 覆盖本地修改（预构建产物等）。"""
         if not self.is_git_repo():
             return "不是有效的 git 仓库"
 
         self._pending_op = "checkout"
-        self._run_git(["checkout", f"tags/{tag}"])
+        self._run_git(["checkout", "--force", f"tags/{tag}"])
         return None
 
     def cancel(self):
@@ -214,8 +214,16 @@ class GitManager(QObject):
         # 记录当前 fetch 代际，用于 _on_finished 忽略 stale callback
         self._started_fetch_gen = self._fetch_gen
 
-        git_exe = _find_git()
+        git_exe = self._resolve_git()
         self._proc.start(git_exe, args)
+
+    def _resolve_git(self) -> str:
+        """解析 git.exe 路径: 捆绑 Git > 系统 Git。"""
+        from .service_runner import find_bundled_git
+        bundled = find_bundled_git(self._project_path)
+        if bundled:
+            return bundled
+        return _find_git()
 
     def _on_stdout(self):
         data = self._proc.readAllStandardOutput()
@@ -261,8 +269,17 @@ def _decode_output(data: bytes) -> str:
 
 
 def _find_git() -> str:
-    """查找 git.exe 的完整路径。QProcess 不像 subprocess 那样自动搜索 PATH。"""
+    """查找 git.exe 的完整路径。QProcess 不像 subprocess 那样自动搜索 PATH。
+
+    优先级: 捆绑 Git (runtime/git/) > PATH > 已知安装路径
+    """
     import shutil
+
+    # 0. 捆绑 Git（预构建 release）
+    # 从调用栈推断 project_path —— 遍历 _project_path 属性
+    # 但这里没有 project_path，所以检查常见相对路径
+    # _find_git 被 GitManager 调用，GitManager 有 self._project_path
+    # 我们改为在 GitManager 实例方法中处理
 
     # 1. shutil.which 搜索系统 PATH
     found = shutil.which("git")

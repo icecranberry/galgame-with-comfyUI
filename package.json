@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "stop": "node scripts/stop.mjs",
-    "build": "cd web-ui && npm run build && cd ../launcher && pyinstaller --onefile --windowed --name \"邻舍.EXE\" --icon \"assets/icon.ico\" --add-data \"assets/launchHeader.jpg;assets\" --add-data \"assets/icon.ico;assets\" --add-data \"assets/HarmonyOS_Sans_Regular.ttf;assets\" --add-data \"assets/navbar-title.png;assets\" --hidden-import PySide6.QtCore --hidden-import PySide6.QtGui --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtNetwork --clean --noconfirm main.py && copy /Y \"dist\\邻舍.EXE.exe\" \"..\\邻舍.EXE.exe\"",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/build-release.mjs",
+    "build": "cd web-ui && npm run build && cd ../launcher && pyinstaller --onefile --windowed --name \"邻舍.EXE\" --icon \"assets/icon.ico\" --add-data \"assets/launchHeader.jpg;assets\" --add-data \"assets/icon.ico;assets\" --add-data \"assets/HarmonyOS_Sans_Regular.ttf;assets\" --add-data \"assets/navbar-title.png;assets\" --hidden-import PySide6.QtCore --hidden-import PySide6.QtGui --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtNetwork --clean --noconfirm main.py && copy /Y \"dist\\邻舍.EXE.exe\" \"..\\邻舍.EXE.exe\""
   }
 }
