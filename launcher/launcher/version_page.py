@@ -170,7 +170,7 @@ class VersionPage(QWidget):
         reply = QMessageBox.question(
             self,
             "切换版本",
-            f"确定切换到 {tag}？\n\n切换后将自动重新构建项目，请确保没有未提交的更改。",
+            f"确定切换到 {tag}？\n\n切换后将自动重新构建项目，请耐心等待。",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:

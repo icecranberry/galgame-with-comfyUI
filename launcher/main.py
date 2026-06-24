@@ -22,8 +22,8 @@ from launcher.app import MainWindow
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("邻舍.EXE")
-    app.setApplicationDisplayName("邻舍启动器")
+    app.setApplicationName("邻舍")
+    app.setApplicationDisplayName("邻舍.EXE")
 
     # 加载 HarmonyOS Sans SC 字体
     _load_fonts()

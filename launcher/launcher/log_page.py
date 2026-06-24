@@ -193,7 +193,12 @@ class LogPage(QWidget):
             """)
         else:
             self.start_btn.setText("▶ 启动服务")
-            self.start_btn.setEnabled(True)
+            # 不忙时也要尊重服务运行状态，不能无条件启用
+            all_stopped = (
+                not self.vector_indicator._running
+                and not self.agent_indicator._running
+            )
+            self.start_btn.setEnabled(all_stopped)
             self.start_btn.setStyleSheet("""
                 QPushButton {
                     background: #E07B6C; color: #FCFAF8; font-size: 12px;
