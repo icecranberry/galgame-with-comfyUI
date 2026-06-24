@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 from .log_widget import LogWidget
 
 
@@ -35,7 +34,7 @@ class VersionPage(QWidget):
         self.setStyleSheet("background: #F7F3F0;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 44, 16, 0)
+        layout.setContentsMargins(16, 44, 16, 12)
         layout.setSpacing(10)
 
         # --- 版本信息 ---
@@ -64,7 +63,6 @@ class VersionPage(QWidget):
                 border-radius: 6px; font-size: 13px;
             }
             QListWidget::item {
-                padding: 8px 12px;
                 border-bottom: 1px solid #F1ECE8;
             }
             QListWidget::item:hover {
@@ -72,11 +70,11 @@ class VersionPage(QWidget):
             }
             QListWidget::item:selected {
                 background: #F7D7D1;
-                color: #E07B6C;
             }
         """)
         self.tag_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.tag_list, stretch=1)
+        layout.addSpacing(20)
 
         # --- 操作按钮 ---
         btn_layout = QHBoxLayout()
@@ -119,23 +117,25 @@ class VersionPage(QWidget):
     def set_current_tag(self, tag: str | None):
         self._current_tag = tag
 
-    def set_tags(self, tags: list[str]):
+    def set_tags(self, tags: list[dict]):
         self.tag_list.clear()
         current = self._current_tag
         if current and not current.startswith("v"):
             current = "v" + current
 
         for tag in tags:
-            display = tag if tag.startswith("v") else f"v{tag}"
-            is_current = (tag == self._current_tag) or (display == current)
-            item = QListWidgetItem(f"{display}  [当前]" if is_current else display)
-            item.setData(Qt.UserRole, tag)
-            if is_current:
-                item.setForeground(QColor(224, 123, 108))  # #E07B6C
-                font = item.font()
-                font.setBold(True)
-                item.setFont(font)
+            name = tag["name"]
+            message = tag.get("message", "")
+            display = name if name.startswith("v") else f"v{name}"
+            is_current = (name == self._current_tag) or (display == current)
+
+            # 自定义 item widget：tag 名 + 注释
+            widget = _TagItemWidget(display, message, is_current)
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, name)
+            item.setSizeHint(widget.sizeHint())
             self.tag_list.addItem(item)
+            self.tag_list.setItemWidget(item, widget)
 
     def set_remote_status(self, has_updates: bool | None):
         if has_updates is True:
@@ -193,6 +193,40 @@ class VersionPage(QWidget):
         if item:
             tag = item.data(Qt.UserRole)
             self.switch_btn.setEnabled(not self._building and tag != self._current_tag)
+
+
+# ------------------------------------------------------------------
+# Tag 列表项控件
+# ------------------------------------------------------------------
+
+
+class _TagItemWidget(QWidget):
+    """单个 tag 项：名称 + 注释（第二行浅色）。"""
+
+    def __init__(self, tag_name: str, message: str, is_current: bool, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 4, 0, 4)
+        layout.setSpacing(2)
+
+        # 第一行：tag 名
+        name_color = "#E07B6C" if is_current else "#2E2A27"
+        name_weight = "bold" if is_current else "normal"
+        self._name_label = QLabel(tag_name)
+        self._name_label.setStyleSheet(
+            f"color: {name_color}; font-size: 13px; font-weight: {name_weight};"
+            "background: transparent; border: none;"
+        )
+        layout.addWidget(self._name_label)
+
+        # 第二行：注释（有则显示）
+        if message:
+            msg_label = QLabel(message)
+            msg_label.setStyleSheet(
+                "color: #756B65; font-size: 11px; background: transparent; border: none;"
+            )
+            msg_label.setWordWrap(True)
+            layout.addWidget(msg_label)
 
 
 # ------------------------------------------------------------------

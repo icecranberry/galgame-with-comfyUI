@@ -12,6 +12,13 @@ from PySide6.QtCore import Qt
 
 QA_DATA = [
     {
+        "q": "下载下来的Anima模型包怎么用？",
+        "a": (
+            "找到ComfyUI整合包安装目录里的的ComfyUI-aki-v3\ComfyUI"
+            "粘贴同名文件夹就行了"
+        ),
+    },
+    {
         "q": "出图慢，卡顿怎么办？",
         "a": (
             "显存 ≤ 8G 可以考虑ComfyUI启动器高级选项页面打开使用共享显存，"

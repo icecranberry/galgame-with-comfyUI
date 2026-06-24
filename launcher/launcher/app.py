@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         self._is_built = False
         self._switching_version = False
         self._closing = False
-        self._cached_tags: list[str] = []
+        self._cached_tags: list[dict] = []
         self._cached_current_tag: str | None = None
         self._cached_has_updates: bool | None = None
         self._git_ready = False
@@ -137,7 +137,6 @@ class MainWindow(QMainWindow):
         self._setup_title_bar()
         self._setup_pages()
         self._setup_nav()
-        self._setup_shutdown_overlay()
         self._connect_signals()
 
         self._load_settings_to_form()
@@ -308,53 +307,6 @@ class MainWindow(QMainWindow):
         self._update_nav_highlight(self.PAGE_HOME)
 
     # ==================================================================
-    # 关闭遮罩
-    # ==================================================================
-
-    def _setup_shutdown_overlay(self):
-        """全屏半透明遮罩，在关闭服务时显示「正在关闭服务...」。"""
-        content = self._content
-        self._shutdown_overlay = QWidget(content)
-        self._shutdown_overlay.setObjectName("shutdownOverlay")
-        self._shutdown_overlay.setStyleSheet("""
-            #shutdownOverlay {
-                background: rgba(46, 42, 39, 0.78);
-                border-radius: 12px;
-            }
-        """)
-        self._shutdown_overlay.hide()
-
-        layout = QVBoxLayout(self._shutdown_overlay)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-
-        # 加载动画点（模拟转圈）
-        self._spinner_label = QLabel("⠋", self._shutdown_overlay)
-        self._spinner_label.setStyleSheet(
-            "color: #E07B6C; font-size: 32px; background: transparent;"
-        )
-        self._spinner_label.setAlignment(Qt.AlignCenter)
-
-        text_label = QLabel("正在安全关闭服务...", self._shutdown_overlay)
-        text_label.setStyleSheet(
-            "color: white; font-size: 16px; font-weight: bold; background: transparent;"
-        )
-        text_label.setAlignment(Qt.AlignCenter)
-
-        sub_label = QLabel("请稍候，正在停止邻舍后端进程", self._shutdown_overlay)
-        sub_label.setStyleSheet(
-            "color: rgba(255,255,255,0.5); font-size: 12px; background: transparent;"
-        )
-        sub_label.setAlignment(Qt.AlignCenter)
-
-        layout.addStretch()
-        layout.addWidget(self._spinner_label)
-        layout.addWidget(text_label)
-        layout.addWidget(sub_label)
-        layout.addStretch()
-
-    # ==================================================================
     # 信号连接
     # ==================================================================
 
@@ -422,6 +374,9 @@ class MainWindow(QMainWindow):
         self._slide_anim.start()
 
         if index == self.PAGE_VERSION:
+            # 切到版本页时若缓存为空，主动加载本地 tag（不等 fetch）
+            if not self._cached_tags and self._git_ready:
+                self._init_git_cache()
             self._version_page.set_current_tag(self._cached_current_tag)
             self._version_page.set_tags(self._cached_tags)
             self._version_page.set_remote_status(self._cached_has_updates)
@@ -689,6 +644,7 @@ class MainWindow(QMainWindow):
             self._home_page.update_version_info(None, "无 Git 仓库", None)
             self._git_ready = True
             return
+        self._init_git_cache()  # 先加载本地 tag，不等网络 fetch
         self._maybe_daily_fetch()
 
     def _init_git_cache(self):
@@ -752,9 +708,6 @@ class MainWindow(QMainWindow):
         self._grip.move(cw - 20, ch - 20)
         self._grip.raise_()
         self._apply_rounded_mask()
-        # 关闭遮罩跟随窗口
-        if hasattr(self, "_shutdown_overlay") and self._shutdown_overlay.isVisible():
-            self._shutdown_overlay.setGeometry(self._content.rect())
 
     def _apply_rounded_mask(self):
         """用 QPainterPath 生成 12px 圆角区域，裁剪内容容器。"""
@@ -784,79 +737,44 @@ class MainWindow(QMainWindow):
         super().mouseReleaseEvent(event)
 
     def closeEvent(self, event):
-        """窗口关闭时安全停止所有服务（完全非阻塞，由信号驱动关闭）。"""
+        """窗口关闭时后台静默停止所有服务，不阻塞用户。"""
         if not self._runner.is_any_running():
             event.accept()
             return
 
-        # 第二轮进入：关闭流程已触发，直接接受
         if self._closing:
             event.accept()
             return
 
-        # 第一轮：启动异步关闭流程
         self._closing = True
-        event.ignore()
+        event.accept()
 
-        # 显示遮罩 + 启动转圈动画
-        self._shutdown_overlay.setGeometry(self._content.rect())
-        self._shutdown_overlay.show()
-        self._shutdown_overlay.raise_()
-        self._start_spinner()
+        # 窗口关闭后保持应用运行，后台静默完成清理
+        QApplication.setQuitOnLastWindowClosed(False)
 
-        self._log_page.append_log("[系统] 为保证数据库完整，正在安全停止服务...")
         self._runner.stop_all()
 
-        # 服务全部停止后自动关闭窗口
         def on_all_stopped(vs, acs, overall):
             if overall == "all_stopped":
                 try:
                     self._runner.status_summary.disconnect(on_all_stopped)
                 except RuntimeError:
                     pass
-                self._stop_spinner()
-                self.close()
+                self._final_quit()
 
         self._runner.status_summary.connect(on_all_stopped)
 
-        # 硬超时兜底：12 秒后强制退出
-        QTimer.singleShot(12000, self._force_close)
+        # 硬超时兜底：15 秒后强制退出
+        QTimer.singleShot(15000, self._final_quit)
 
-    def _force_close(self):
-        """硬超时：断开所有状态监听，强制清理并关闭窗口。"""
-        self._log_page.append_log("[系统] 关闭超时，强制退出...")
+    def _final_quit(self):
+        """强制清理并退出应用。"""
         try:
             self._runner.status_summary.disconnect()
         except RuntimeError:
             pass
         self._runner._force_kill_all()
-        self._stop_spinner()
-        self._closing = False
-        self.close()
-
-    # ------------------------------------------------------------------
-    # 转圈动画
-    # ------------------------------------------------------------------
-
-    _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-
-    def _start_spinner(self):
-        """启动关闭遮罩上的 braille 转圈动画。"""
-        self._spinner_idx = 0
-        self._spinner_label.setText(self._SPINNER_FRAMES[0])
-        self._spinner_timer = QTimer(self)
-        self._spinner_timer.timeout.connect(self._tick_spinner)
-        self._spinner_timer.start(80)
-
-    def _tick_spinner(self):
-        self._spinner_idx = (self._spinner_idx + 1) % len(self._SPINNER_FRAMES)
-        self._spinner_label.setText(self._SPINNER_FRAMES[self._spinner_idx])
-
-    def _stop_spinner(self):
-        if hasattr(self, "_spinner_timer") and self._spinner_timer:
-            self._spinner_timer.stop()
-            self._spinner_timer.deleteLater()
-            self._spinner_timer = None
+        QApplication.quit()
 
 
 # ==================================================================

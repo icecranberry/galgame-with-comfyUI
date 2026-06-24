@@ -62,19 +62,28 @@ class GitManager(QObject):
         return os.path.isdir(os.path.join(self._project_path, ".git"))
 
     @_cached()
-    def get_tags(self) -> list[str]:
-        """获取所有 tags，按创建时间倒序。"""
+    def get_tags(self) -> list[dict]:
+        """获取所有 tags，按创建时间倒序。每条含 name / message。"""
         try:
             result = subprocess.run(
-                ["git", "tag", "--sort=-creatordate"],
+                ["git", "for-each-ref", "--sort=-creatordate",
+                 "--format=%(refname:short)%00%(subject)", "refs/tags/"],
                 cwd=self._project_path,
                 capture_output=True,
-                text=True,
                 timeout=10,
                 creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
-                return [t.strip() for t in result.stdout.splitlines() if t.strip()]
+                tags = []
+                # null-byte 分隔，先按换行拆条目，再按 \0 拆字段
+                for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+                    if not line.strip():
+                        continue
+                    parts = line.split("\0")
+                    name = parts[0].strip()
+                    message = parts[1].strip() if len(parts) > 1 else ""
+                    tags.append({"name": name, "message": message})
+                return tags
         except Exception:
             pass
         return []
@@ -188,7 +197,8 @@ class GitManager(QObject):
         self._proc.readyReadStandardError.connect(self._on_stderr)
         self._proc.finished.connect(self._on_finished)
 
-        self._proc.start("git", args)
+        git_exe = _find_git()
+        self._proc.start(git_exe, args)
 
     def _on_stdout(self):
         data = self._proc.readAllStandardOutput()
@@ -225,3 +235,29 @@ def _decode_output(data: bytes) -> str:
             return data.decode("gbk")
         except UnicodeDecodeError:
             return data.decode("utf-8", errors="replace")
+
+
+def _find_git() -> str:
+    """查找 git.exe 的完整路径。QProcess 不像 subprocess 那样自动搜索 PATH。"""
+    import shutil
+
+    # 1. shutil.which 搜索系统 PATH
+    found = shutil.which("git")
+    if found:
+        return found
+
+    # 2. Windows 已知安装路径
+    for base in [
+        os.path.expandvars(r"%ProgramFiles%\Git\bin"),
+        os.path.expandvars(r"%ProgramFiles%\Git\cmd"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Git\bin"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Git\cmd"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\bin"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\cmd"),
+    ]:
+        candidate = os.path.join(base, "git.exe")
+        if os.path.isfile(candidate):
+            return candidate
+
+    # 3. 兜底
+    return "git"
