@@ -9,7 +9,7 @@
     "dev": "nodemon --watch src --watch app.js -e js,json app.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
