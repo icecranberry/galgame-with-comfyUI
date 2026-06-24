@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from .log_widget import LogWidget
 
 
@@ -31,7 +32,7 @@ class VersionPage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setStyleSheet("background: #1a1a1a;")
+        self.setStyleSheet("background: #F7F3F0;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 44, 16, 0)
@@ -40,7 +41,7 @@ class VersionPage(QWidget):
         # --- 版本信息 ---
         info_layout = QHBoxLayout()
         self.version_info_label = QLabel("当前: ---   远程: --")
-        self.version_info_label.setStyleSheet("color: #e0e0e0; font-size: 14px;")
+        self.version_info_label.setStyleSheet("color: #2E2A27; font-size: 14px;")
         info_layout.addWidget(self.version_info_label)
         info_layout.addStretch()
 
@@ -53,24 +54,25 @@ class VersionPage(QWidget):
 
         # --- 版本列表 ---
         list_label = QLabel("可用版本:")
-        list_label.setStyleSheet("color: #999; font-size: 12px;")
+        list_label.setStyleSheet("color: #756B65; font-size: 12px;")
         layout.addWidget(list_label)
 
         self.tag_list = QListWidget()
         self.tag_list.setStyleSheet("""
             QListWidget {
-                background: #121212; color: #ccc; border: 1px solid #333;
-                border-radius: 4px; font-size: 13px;
+                background: #FCFAF8; color: #2E2A27; border: 1px solid #E5D9D2;
+                border-radius: 6px; font-size: 13px;
             }
             QListWidget::item {
                 padding: 8px 12px;
-                border-bottom: 1px solid #222;
+                border-bottom: 1px solid #F1ECE8;
             }
             QListWidget::item:hover {
-                background: #252525;
+                background: #F1ECE8;
             }
             QListWidget::item:selected {
-                background: #2a3a4a;
+                background: #F7D7D1;
+                color: #E07B6C;
             }
         """)
         self.tag_list.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -90,10 +92,10 @@ class VersionPage(QWidget):
         self.rebuild_btn = QPushButton("强制重新构建" if not self._building else "取消构建")
         self.rebuild_btn.setStyleSheet("""
             QPushButton {
-                background: #555; color: #ccc; font-size: 12px;
+                background: #E5D9D2; color: #756B65; font-size: 12px;
                 padding: 8px 16px; border-radius: 6px; border: none;
             }
-            QPushButton:hover { background: #666; }
+            QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
         """)
         self.rebuild_btn.clicked.connect(self._on_rebuild_clicked)
         btn_layout.addWidget(self.rebuild_btn)
@@ -102,7 +104,7 @@ class VersionPage(QWidget):
 
         # --- 警告 ---
         warn_label = QLabel("⚠ 切换版本后将自动重新构建项目")
-        warn_label.setStyleSheet("color: #aa8800; font-size: 12px;")
+        warn_label.setStyleSheet("color: #C88700; font-size: 12px;")
         layout.addWidget(warn_label)
 
         # --- 操作日志 ---
@@ -129,7 +131,7 @@ class VersionPage(QWidget):
             item = QListWidgetItem(f"{display}  [当前]" if is_current else display)
             item.setData(Qt.UserRole, tag)
             if is_current:
-                item.setForeground(Qt.green)
+                item.setForeground(QColor(224, 123, 108))  # #E07B6C
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)
@@ -201,9 +203,9 @@ class VersionPage(QWidget):
 def _btn_style() -> str:
     return """
         QPushButton {
-            background: #333; color: #ccc; font-size: 12px;
+            background: #E5D9D2; color: #756B65; font-size: 12px;
             padding: 8px 16px; border-radius: 6px; border: none;
         }
-        QPushButton:hover { background: #444; }
-        QPushButton:disabled { background: #222; color: #555; }
+        QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
+        QPushButton:disabled { background: #F1ECE8; color: #C9C0BB; }
     """

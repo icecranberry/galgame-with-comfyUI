@@ -22,14 +22,14 @@ class LogWidget(QPlainTextEdit):
     ]
 
     COLORS = {
-        "red": QColor("#ff4444"),
-        "yellow": QColor("#ffaa00"),
-        "green": QColor("#44cc44"),
-        "cyan": QColor("#00cccc"),
-        "lime": QColor("#88ff00"),
-        "dodgerblue": QColor("#4499ff"),
-        "white": QColor("#e0e0e0"),
-        "grey": QColor("#888888"),
+        "red": QColor("#D9434A"),
+        "yellow": QColor("#C88700"),
+        "green": QColor("#4A9B4A"),
+        "cyan": QColor("#008B8B"),
+        "lime": QColor("#6BAA00"),
+        "dodgerblue": QColor("#4A80CC"),
+        "white": QColor("#2E2A27"),
+        "grey": QColor("#756B65"),
     }
 
     def __init__(self, parent=None, max_lines: int = 5000):
@@ -44,11 +44,13 @@ class LogWidget(QPlainTextEdit):
         self.setFont(font)
         self.setStyleSheet("""
             QPlainTextEdit {
-                background: #121212;
-                color: #e0e0e0;
-                border: none;
+                background: #FCFAF8;
+                color: #2E2A27;
+                border: 1px solid #E5D9D2;
+                border-radius: 6px;
                 padding: 8px;
-                selection-background: #333;
+                selection-background: #F7D7D1;
+                selection-color: #2E2A27;
             }
         """)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)

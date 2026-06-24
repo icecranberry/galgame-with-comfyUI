@@ -28,7 +28,7 @@ class SettingsPage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setStyleSheet("background: #1a1a1a;")
+        self.setStyleSheet("background: #F7F3F0;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 44, 24, 0)
@@ -36,7 +36,7 @@ class SettingsPage(QWidget):
 
         # --- ComfyUI 路径 ---
         comfy_label = QLabel("ComfyUI 启动器路径:")
-        comfy_label.setStyleSheet("color: #e0e0e0; font-size: 13px;")
+        comfy_label.setStyleSheet("color: #2E2A27; font-size: 13px;")
         layout.addWidget(comfy_label)
 
         comfy_row = QHBoxLayout()
@@ -59,28 +59,28 @@ class SettingsPage(QWidget):
 
         # ComfyUI 状态
         self.comfy_status_label = QLabel("")
-        self.comfy_status_label.setStyleSheet("color: #888; font-size: 12px;")
+        self.comfy_status_label.setStyleSheet("color: #756B65; font-size: 12px;")
         layout.addWidget(self.comfy_status_label)
 
         # ComfyUI 引导
         guide_label = QLabel(
-            '<p style="color: #888; font-size: 12px; margin: 0; line-height: 1.8;">'
+            '<p style="color: #756B65; font-size: 12px; margin: 0; line-height: 1.8;">'
             '• ComfyUI运行之后就可以把弹出的工作台关闭，并不刚需，邻舍.EXE会自动连接ComfyUI<br>'
             '• 新手请直接下载@秋叶aaaki的ComfyUI整合包+Anima模型，'
             '并在版本管理的内核页面升级到<span style="color: #ff4444; font-weight: bold;">v0.23.0</span>以上<br>下载地址 '
-            '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #5698D6; text-decoration: none;">https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
+            '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #E07B6C; text-decoration: none;">https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
             '<br>'
             '• 老司机请确认已经放置了Anima模型发布页面的anima_baseV10、qwen_image_vae、anima_baseV10_txt，'
             '<br>并且内核升级到支持Anima的<span style="color: #ff4444; font-weight: bold;">v0.23.0</span>以上，'
-            '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #5698D6; text-decoration: none;">https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
+            '<a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" style="color: #E07B6C; text-decoration: none;">https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE</a>'
             '也有单独Anima模型包下载'
             '<br>'
-            '• 老司机也可以直接更改 <code style="color: #aaa; background: #252525; padding: 1px 4px; border-radius: 2px;">workflow\\制图工作流.json</code>，例如lora、模型、后处理，重启服务刷新'
+            '• 老司机也可以直接更改 <code style="color: #756B65; background: #F1ECE8; padding: 1px 4px; border-radius: 2px;">workflow\\制图工作流.json</code>，例如lora、模型、后处理，重启服务刷新'
             '</p>'
         )
         guide_label.setOpenExternalLinks(True)
         guide_label.setWordWrap(True)
-        guide_label.setStyleSheet("color: #888; font-size: 12px; background: transparent; padding: 0; margin: 0;")
+        guide_label.setStyleSheet("color: #756B65; font-size: 12px; background: transparent; padding: 0; margin: 0;")
         layout.addWidget(guide_label)
 
         # --- 分隔线 ---
@@ -101,11 +101,11 @@ class SettingsPage(QWidget):
         # --- 仓库信息 ---
         repo_label = QLabel(
             '仓库: <a href="https://github.com/icecranberry/galgame-with-comfyUI"'
-            ' style="color: #5698D6; text-decoration: none;">'
+            ' style="color: #E07B6C; text-decoration: none;">'
             'github.com/icecranberry/galgame-with-comfyUI</a>'
         )
         repo_label.setOpenExternalLinks(True)
-        repo_label.setStyleSheet("color: #666; font-size: 12px;")
+        repo_label.setStyleSheet("color: #756B65; font-size: 12px;")
         layout.addWidget(repo_label)
 
         layout.addStretch()
@@ -114,7 +114,7 @@ class SettingsPage(QWidget):
         layout.addWidget(_separator())
 
         about_title = QLabel("关于")
-        about_title.setStyleSheet("color: #999; font-size: 14px; font-weight: bold;")
+        about_title.setStyleSheet("color: #756B65; font-size: 14px; font-weight: bold;")
         layout.addWidget(about_title)
 
         about_label = QLabel(
@@ -122,7 +122,7 @@ class SettingsPage(QWidget):
             "为描绘梦想而生\n\n"
             "一键部署、构建、启动，让角色触手可及。"
         )
-        about_label.setStyleSheet("color: #777; font-size: 12px; line-height: 1.6;")
+        about_label.setStyleSheet("color: #756B65; font-size: 12px; line-height: 1.6;")
         layout.addWidget(about_label)
 
         layout.addSpacing(16)
@@ -159,10 +159,10 @@ class SettingsPage(QWidget):
     def set_comfy_status(self, connected: bool):
         if connected:
             self.comfy_status_label.setText("● 已检测到 ComfyUI (:8188)")
-            self.comfy_status_label.setStyleSheet("color: #44cc44; font-size: 12px;")
+            self.comfy_status_label.setStyleSheet("color: #4A9B4A; font-size: 12px;")
         else:
             self.comfy_status_label.setText("○ 未检测到 ComfyUI (:8188)")
-            self.comfy_status_label.setStyleSheet("color: #888; font-size: 12px;")
+            self.comfy_status_label.setStyleSheet("color: #C9C0BB; font-size: 12px;")
 
     # ------------------------------------------------------------------
     # Slots
@@ -186,27 +186,27 @@ class SettingsPage(QWidget):
 def _input_style() -> str:
     return """
         QLineEdit {
-            background: #121212; color: #e0e0e0; border: 1px solid #333;
-            border-radius: 4px; padding: 8px 12px; font-size: 13px;
+            background: #FCFAF8; color: #2E2A27; border: 1px solid #E5D9D2;
+            border-radius: 6px; padding: 8px 12px; font-size: 13px;
         }
-        QLineEdit:focus { border-color: #5577aa; }
+        QLineEdit:focus { border-color: #E07B6C; }
     """
 
 
 def _secondary_btn_style() -> str:
     return """
         QPushButton {
-            background: #333; color: #ccc; font-size: 12px;
+            background: #E5D9D2; color: #756B65; font-size: 12px;
             padding: 8px 14px; border-radius: 6px; border: none;
         }
-        QPushButton:hover { background: #444; }
+        QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
     """
 
 
 def _checkbox_style() -> str:
     return """
         QCheckBox {
-            color: #ccc; font-size: 13px;
+            color: #2E2A27; font-size: 13px;
         }
         QCheckBox::indicator {
             width: 16px; height: 16px;
@@ -217,5 +217,5 @@ def _checkbox_style() -> str:
 def _separator() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.HLine)
-    line.setStyleSheet("background: #333; max-height: 1px; border: none;")
+    line.setStyleSheet("background: #E5D9D2; max-height: 1px; border: none;")
     return line

@@ -2,6 +2,7 @@
 首页 —— 全屏背景图 + 标题阴影 + 启动邻舍/ComfyUI 并排按钮 + 快捷入口卡片 + 版本号。
 """
 import os
+import socket
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -25,11 +26,11 @@ class ShortcutCard(QWidget):
         self.setFixedSize(175, 56)
         self._hovered = False
 
-        # box-shadow 投影
+        # box-shadow 投影（浅色主题用柔和阴影）
         card_shadow = QGraphicsDropShadowEffect(self)
-        card_shadow.setBlurRadius(16)
-        card_shadow.setOffset(0, 4)
-        card_shadow.setColor(QColor(0, 0, 0, 100))
+        card_shadow.setBlurRadius(12)
+        card_shadow.setOffset(0, 2)
+        card_shadow.setColor(QColor(0, 0, 0, 30))
         self.setGraphicsEffect(card_shadow)
 
         layout = QHBoxLayout(self)
@@ -48,11 +49,11 @@ class ShortcutCard(QWidget):
 
         title_label = QLabel(title, self)
         title_label.setStyleSheet(
-            "color: #1b3a5c; font-size: 12px; font-weight: bold; background: transparent;"
+            "color: #2E2A27; font-size: 12px; font-weight: bold; background: transparent;"
         )
         desc_label = QLabel(description, self)
         desc_label.setStyleSheet(
-            "color: #2e5a85; font-size: 10px; background: transparent;"
+            "color: #756B65; font-size: 10px; background: transparent;"
         )
 
         text_layout.addWidget(title_label)
@@ -68,17 +69,17 @@ class ShortcutCard(QWidget):
         w, h = self.width(), self.height()
         r = 8
 
-        # 毛玻璃背景
-        bg_alpha = 122 if self._hovered else 102  # ~48% / ~40% white
-        painter.setBrush(QBrush(QColor(255, 255, 255, bg_alpha)))
+        # 暖色卡片背景 #FCFAF8
+        bg_alpha = 255 if self._hovered else 240
+        painter.setBrush(QBrush(QColor(252, 250, 248, bg_alpha)))
 
-        # 边框
-        border_alpha = 56 if self._hovered else 38  # ~22% / ~15% white
-        painter.setPen(QPen(QColor(255, 255, 255, border_alpha), 1))
+        # 边框 #E5D9D2
+        border_color = QColor(224, 123, 108, 80) if self._hovered else QColor(229, 217, 210)
+        painter.setPen(QPen(border_color, 1))
 
         painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), r, r)
 
-        # 蓝色左边 accent (4px)
+        # 主题色左边 accent (4px) — #E07B6C
         accent_path = QPainterPath()
         accent_path.addRoundedRect(QRectF(0.5, 4, 4, h - 8), 2, 2)
         # clip 到只在卡片左边缘矩形内
@@ -86,7 +87,7 @@ class ShortcutCard(QWidget):
         clip_path.addRect(QRectF(0, 0, 5, h))
         accent_path = accent_path.intersected(clip_path)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(86, 152, 214)))  # #5698D6
+        painter.setBrush(QBrush(QColor(224, 123, 108)))  # #E07B6C
         painter.drawPath(accent_path)
 
         painter.end()
@@ -124,7 +125,7 @@ class HomePage(QWidget):
         self.setStyleSheet("background: transparent;")
 
         # --- 背景图 ---
-        bg_path = os.path.join(self._assets_dir, "launchHeader.png")
+        bg_path = os.path.join(self._assets_dir, "launchHeader.jpg")
         self._bg_pixmap = QPixmap(bg_path)
         self._bg_label = QLabel(self)
         self._bg_label.setScaledContents(False)
@@ -134,24 +135,61 @@ class HomePage(QWidget):
         # --- 标题 (左上) ---
         self.title_label = QLabel("邻舍.EXE", self)
         self.title_label.setStyleSheet(
-            "color: white; font-size: 28px; font-weight: bold; background: transparent;"
+            "color: #FFFFFF; font-size: 28px; font-weight: bold; background: transparent;"
         )
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setOffset(2, 2)
-        shadow.setColor(QColor(0, 0, 0, 180))
+        shadow.setBlurRadius(16)
+        shadow.setOffset(1, 2)
+        shadow.setColor(QColor(224, 123, 108, 120))
         self.title_label.setGraphicsEffect(shadow)
 
         # --- 副标题 (标题下方 20px) ---
-        self.subtitle_label = QLabel("把想象拖进现实。", self)
+        self.subtitle_label = QLabel("把想象拖进现实", self)
         self.subtitle_label.setStyleSheet(
-            "color: rgba(255,255,255,0.75); font-size: 16px; background: transparent;"
+            "color: #FFFFFF; font-size: 16px; font-weight: bold; background: transparent;"
         )
         sub_shadow = QGraphicsDropShadowEffect(self)
-        sub_shadow.setBlurRadius(8)
+        sub_shadow.setBlurRadius(10)
         sub_shadow.setOffset(1, 1)
-        sub_shadow.setColor(QColor(0, 0, 0, 140))
+        sub_shadow.setColor(QColor(224, 123, 108, 100))
         self.subtitle_label.setGraphicsEffect(sub_shadow)
+
+        # --- 手机端访问条幅 (服务启动后显示，常驻提醒) ---
+        self._mobile_banner = QWidget(self)
+        self._mobile_banner.setObjectName("mobileBanner")
+        self._mobile_banner.setStyleSheet("""
+            #mobileBanner {
+                background: rgba(252, 250, 248, 0.94);
+                border: 1px solid rgba(224, 123, 108, 0.25);
+                border-radius: 10px;
+            }
+        """)
+        self._mobile_banner.hide()
+
+        banner_shadow = QGraphicsDropShadowEffect(self._mobile_banner)
+        banner_shadow.setBlurRadius(14)
+        banner_shadow.setOffset(0, 3)
+        banner_shadow.setColor(QColor(0, 0, 0, 30))
+        self._mobile_banner.setGraphicsEffect(banner_shadow)
+
+        banner_layout = QHBoxLayout(self._mobile_banner)
+        banner_layout.setContentsMargins(16, 12, 18, 12)
+        banner_layout.setSpacing(10)
+
+        banner_icon = QLabel("📱", self._mobile_banner)
+        banner_icon.setStyleSheet("font-size: 20px; background: transparent;")
+        banner_icon.setFixedWidth(28)
+        banner_icon.setAlignment(Qt.AlignCenter)
+
+        self._banner_text = QLabel("", self._mobile_banner)
+        self._banner_text.setTextFormat(Qt.RichText)
+        self._banner_text.setStyleSheet(
+            "color: #2E2A27; font-size: 13px; background: transparent;"
+        )
+        self._banner_text.setWordWrap(True)
+
+        banner_layout.addWidget(banner_icon)
+        banner_layout.addWidget(self._banner_text, 1)
 
         # --- 快捷入口卡片 + 阴影 (左下区域) ---
         images_path = os.path.join(self._project_dir, "agent-core", "data", "images")
@@ -165,9 +203,9 @@ class HomePage(QWidget):
         self._card_workflow.clicked.connect(lambda: self.open_directory.emit(workflow_path))
 
         # --- 版本号 (左下) ---
-        self.version_label = QLabel("", self)
+        self.version_label = QLabel("邻舍.EXE v1.0.0", self)
         self.version_label.setStyleSheet(
-            "color: rgba(255,255,255,0.7); font-size: 13px; background: transparent;"
+            "color: #B09890; font-size: 12px; background: transparent;"
         )
 
         # --- 按钮容器 (右下，并排) ---
@@ -176,40 +214,46 @@ class HomePage(QWidget):
         btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.setSpacing(20)
 
-        # ComfyUI 按钮（紫色）
+        # ComfyUI 按钮（次要按钮 — 暖色边框风格）
         self.comfyui_btn = QPushButton("▸ 启动 ComfyUI")
         self.comfyui_btn.setFixedHeight(44)
         self.comfyui_btn.setStyleSheet("""
             QPushButton {
-                background: #4A90D9;
-                color: white;
+                background: #FCFAF8;
+                color: #E07B6C;
                 font-size: 13px;
                 font-weight: bold;
                 padding: 0 22px;
                 border-radius: 10px;
-                border: none;
+                border: 1.5px solid #E5D9D2;
             }
-            QPushButton:hover { background: #5BA0E9; }
-            QPushButton:pressed { background: #3A80C9; }
+            QPushButton:hover {
+                background: #F7D7D1;
+                border-color: #E07B6C;
+            }
+            QPushButton:pressed {
+                background: #F0C8C0;
+                color: #C95F4F;
+            }
         """)
         self.comfyui_btn.setCursor(Qt.PointingHandCursor)
         self.comfyui_btn.clicked.connect(self.open_comfyui_clicked.emit)
 
-        # 启动邻舍按钮（绿色）
+        # 启动邻舍按钮（主按钮 — 主题色填充）
         self.launch_btn = QPushButton("▶  启动邻舍")
         self.launch_btn.setFixedHeight(44)
         self.launch_btn.setStyleSheet("""
             QPushButton {
-                background: #4CAF50;
-                color: white;
+                background: #E07B6C;
+                color: #FCFAF8;
                 font-size: 16px;
                 font-weight: bold;
                 padding: 0 28px;
                 border-radius: 10px;
                 border: none;
             }
-            QPushButton:hover { background: #45a049; }
-            QPushButton:pressed { background: #3d8b40; }
+            QPushButton:hover { background: #D96D5D; }
+            QPushButton:pressed { background: #C95F4F; }
         """)
         self.launch_btn.setCursor(Qt.PointingHandCursor)
         self.launch_btn.clicked.connect(self.launch_clicked.emit)
@@ -228,38 +272,72 @@ class HomePage(QWidget):
             self.launch_btn.setText("●  运行中")
             self.launch_btn.setStyleSheet("""
                 QPushButton {
-                    background: #2E7D32;
-                    color: #a5d6a7;
+                    background: #C95F4F;
+                    color: #F7D7D1;
                     font-size: 16px;
                     font-weight: bold;
                     padding: 0 28px;
                     border-radius: 10px;
-                    border: 2px solid #4CAF50;
+                    border: 2px solid #E07B6C;
                 }
-                QPushButton:hover { background: #3d8b40; }
-                QPushButton:pressed { background: #2E7D32; }
+                QPushButton:hover { background: #D96D5D; }
+                QPushButton:pressed { background: #C95F4F; }
             """)
         else:
             self.launch_btn.setText("▶  启动邻舍")
             self.launch_btn.setStyleSheet("""
                 QPushButton {
-                    background: #4CAF50;
-                    color: white;
+                    background: #E07B6C;
+                    color: #FCFAF8;
                     font-size: 16px;
                     font-weight: bold;
                     padding: 0 28px;
                     border-radius: 10px;
                     border: none;
                 }
-                QPushButton:hover { background: #45a049; }
-                QPushButton:pressed { background: #3d8b40; }
+                QPushButton:hover { background: #D96D5D; }
+                QPushButton:pressed { background: #C95F4F; }
             """)
+
+    @staticmethod
+    def _get_local_ip() -> str | None:
+        """获取本机局域网 IP 地址。失败时返回 None。"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
+
+    def show_mobile_banner(self) -> None:
+        """显示手机端访问条幅（服务启动后常驻提醒）。IP 只获取一次并缓存。"""
+        if not hasattr(self, '_cached_ip'):
+            self._cached_ip = self._get_local_ip()
+        if self._cached_ip:
+            self._banner_text.setText(
+                f'手机端可访问 '
+                f'<span style="color:#E07B6C;font-weight:bold;">http://{self._cached_ip}:3099</span>'
+                f' 打开邻舍'
+            )
+            self._mobile_banner.show()
+        else:
+            self._mobile_banner.hide()
+
+    def hide_mobile_banner(self) -> None:
+        """隐藏手机端访问条幅。不清除缓存 IP，避免下次显示时重复探测。"""
+        self._mobile_banner.hide()
 
     def update_version_info(self, tag: str | None, branch: str, has_updates: bool | None):
         if tag:
-            text = f"v{tag}" if not tag.startswith("v") else tag
+            project_ver = f"v{tag}" if not tag.startswith("v") else tag
+            text = f"邻舍.EXE v1.0.0  ·  内核 {project_ver}"
+        elif branch and branch != "main":
+            text = f"邻舍.EXE v1.0.0  ·  内核 {branch}"
         else:
-            text = branch if branch else ""
+            text = "邻舍.EXE v1.0.0"
         self.version_label.setText(text)
 
     # ------------------------------------------------------------------
@@ -289,6 +367,12 @@ class HomePage(QWidget):
         self.title_label.move(30, 44)
         # 副标题
         self.subtitle_label.move(34, 94)
+
+        # 手机端访问条幅 (居中，副标题下方)
+        banner_w = min(480, w - 60)
+        self._mobile_banner.setGeometry(
+            (w - banner_w) // 2, 140, banner_w, 48
+        )
 
         # 快捷入口卡片 (左下)
         card_x = 24

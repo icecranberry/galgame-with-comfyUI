@@ -48,7 +48,7 @@ class QAPage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setStyleSheet("background: #1a1a1a;")
+        self.setStyleSheet("background: #F7F3F0;")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -62,14 +62,17 @@ class QAPage(QWidget):
                 border: none;
             }
             QScrollBar:vertical {
-                background: #121212;
+                background: #F1ECE8;
                 width: 6px;
                 margin: 0;
             }
             QScrollBar::handle:vertical {
-                background: #444;
+                background: #C9C0BB;
                 border-radius: 3px;
                 min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #B0A8A3;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
@@ -84,23 +87,23 @@ class QAPage(QWidget):
 
         # 标题
         title = QLabel("常见问题 · Q&A")
-        title.setStyleSheet("color: #e0e0e0; font-size: 18px; font-weight: bold;")
+        title.setStyleSheet("color: #2E2A27; font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
 
         for item in QA_DATA:
-            # Q — 蓝色
+            # Q — 主题色
             q_label = QLabel(f"Q：{item['q']}")
             q_label.setWordWrap(True)
             q_label.setStyleSheet(
-                "color: #5698D6; font-size: 14px; font-weight: bold;"
+                "color: #E07B6C; font-size: 14px; font-weight: bold;"
             )
             layout.addWidget(q_label)
 
-            # A — 浅灰
+            # A — 次文字色
             a_label = QLabel(f"A：{item['a']}")
             a_label.setWordWrap(True)
             a_label.setStyleSheet(
-                "color: #bbb; font-size: 13px; line-height: 1.6;"
+                "color: #756B65; font-size: 13px; line-height: 1.6;"
             )
             layout.addWidget(a_label)
 

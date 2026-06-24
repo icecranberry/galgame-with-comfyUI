@@ -58,7 +58,7 @@ class Toast(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setStyleSheet(
-            "background: rgba(20,20,20,0.92); color: white; font-size: 14px; "
+            "background: rgba(46,42,39,0.92); color: #FCFAF8; font-size: 14px; "
             "padding: 16px 28px; border-radius: 10px;"
         )
         label = QLabel(text, self)
@@ -73,8 +73,13 @@ class Toast(QWidget):
 
     def show_toast(self, duration_ms: int = 3000):
         self.show()
-        self.resize(self.parent().width() - 100, 50)
-        self.move(50, self.parent().height() - 130)
+        self.raise_()
+        toast_w = min(self.parent().width() - 100, 600)
+        self.resize(toast_w, 50)
+        self.move(
+            (self.parent().width() - toast_w) // 2,
+            self.parent().height() - 130,
+        )
 
         self._fade_in = QPropertyAnimation(self._opacity_effect, b"opacity")
         self._fade_in.setDuration(300)
@@ -161,19 +166,19 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._central = central
 
-        # 窗口投影
+        # 窗口投影（暖色浅色主题用更柔和的阴影）
         self._window_shadow = QGraphicsDropShadowEffect(central)
-        self._window_shadow.setBlurRadius(24)
-        self._window_shadow.setOffset(0, 6)
-        self._window_shadow.setColor(QColor(0, 0, 0, 100))
+        self._window_shadow.setBlurRadius(28)
+        self._window_shadow.setOffset(0, 8)
+        self._window_shadow.setColor(QColor(0, 0, 0, 50))
         central.setGraphicsEffect(self._window_shadow)
 
-        # 内容容器：圆角遮罩 + 深色背景，偏移 SHADOW_MARGIN 给投影留白
+        # 内容容器：圆角遮罩 + 暖色奶油风背景，偏移 SHADOW_MARGIN 给投影留白
         self._content = QWidget(central)
         self._content.setObjectName("content")
         self._content.setStyleSheet("""
             #content {
-                background: #1a1a1a;
+                background: #F7F3F0;
                 border-radius: 12px;
             }
         """)
@@ -258,7 +263,7 @@ class MainWindow(QMainWindow):
         self._nav.setObjectName("nav")
         self._nav.setStyleSheet("""
             #nav {
-                background: #121212;
+                background: #E07B6C;
                 border-top-left-radius: 12px;
                 border-bottom-left-radius: 12px;
             }
@@ -296,7 +301,7 @@ class MainWindow(QMainWindow):
         self._shutdown_overlay.setObjectName("shutdownOverlay")
         self._shutdown_overlay.setStyleSheet("""
             #shutdownOverlay {
-                background: rgba(0, 0, 0, 0.75);
+                background: rgba(46, 42, 39, 0.78);
                 border-radius: 12px;
             }
         """)
@@ -310,7 +315,7 @@ class MainWindow(QMainWindow):
         # 加载动画点（模拟转圈）
         self._spinner_label = QLabel("⠋", self._shutdown_overlay)
         self._spinner_label.setStyleSheet(
-            "color: #5698D6; font-size: 32px; background: transparent;"
+            "color: #E07B6C; font-size: 32px; background: transparent;"
         )
         self._spinner_label.setAlignment(Qt.AlignCenter)
 
@@ -422,14 +427,10 @@ class MainWindow(QMainWindow):
         # 检查是否配置了 ComfyUI 启动器路径
         comfyui_path = self._config.get("comfyui_exe")
         if not comfyui_path:
-            toast = Toast(self._content, "请先配置 ComfyUI 启动器路径")
+            toast = Toast(self._stack, "请先配置 ComfyUI 启动器路径")
             toast.show_toast(3000)
             self._switch_page(self.PAGE_SETTINGS)
             return
-
-        if self._config.get("check_comfyui_before_start"):
-            toast = Toast(self._content, "⚠ 请确认已经启动 ComfyUI")
-            toast.show_toast(3000)
 
         self._switch_page(self.PAGE_LOG)
 
@@ -444,6 +445,9 @@ class MainWindow(QMainWindow):
         self._runner.stop_all()
 
     def _start_services(self):
+        if self._config.get("check_comfyui_before_start"):
+            toast = Toast(self._stack, "⚠ 请确认已经启动 ComfyUI")
+            toast.show_toast(3000)
         self._log_page.append_log("[系统] 正在启动服务...")
         self._runner.start_all()
 
@@ -563,6 +567,14 @@ class MainWindow(QMainWindow):
         # 同步首页启动按钮状态
         is_running = v_status == "running" or a_status == "running"
         self._home_page.set_launch_state(is_running)
+
+        # 手机端访问条幅：agent_core 运行即常驻显示
+        if a_status == "running":
+            self._home_page.show_mobile_banner()
+            self._log_page.show_mobile_banner()
+        else:
+            self._home_page.hide_mobile_banner()
+            self._log_page.hide_mobile_banner()
 
         if overall == "all_running" and self._config.get("auto_open_browser"):
             webbrowser.open("http://localhost:3099")
@@ -745,11 +757,11 @@ class MainWindow(QMainWindow):
 
 
 def _add_text_shadow(btn: QPushButton):
-    """给按钮文字添加阴影。"""
+    """给按钮文字添加阴影（浅色主题下极淡）。"""
     shadow = QGraphicsDropShadowEffect(btn)
-    shadow.setBlurRadius(6)
+    shadow.setBlurRadius(4)
     shadow.setOffset(0, 1)
-    shadow.setColor(QColor(0, 0, 0, 160))
+    shadow.setColor(QColor(0, 0, 0, 30))
     btn.setGraphicsEffect(shadow)
 
 
@@ -757,7 +769,7 @@ def _title_btn_style() -> str:
     return """
         QPushButton {
             background: transparent;
-            color: rgba(255,255,255,0.85);
+            color: #756B65;
             font-size: 14px;
             font-weight: bold;
             border: none;
@@ -765,8 +777,8 @@ def _title_btn_style() -> str:
             padding: 4px 8px;
         }
         QPushButton:hover {
-            background: rgba(255,255,255,0.15);
-            color: white;
+            background: rgba(224,123,108,0.12);
+            color: #E07B6C;
         }
     """
 
@@ -775,9 +787,10 @@ def _nav_btn_style(active: bool = False) -> str:
     if active:
         return """
             QPushButton {
-                background: #1a1a1a;
-                color: #5698D6;
+                background: rgba(255,255,255,0.22);
+                color: #FCFAF8;
                 font-size: 13px;
+                font-weight: bold;
                 border: none;
                 border-radius: 6px;
                 text-align: left;
@@ -787,7 +800,7 @@ def _nav_btn_style(active: bool = False) -> str:
     return """
         QPushButton {
             background: transparent;
-            color: #888;
+            color: rgba(255,255,255,0.72);
             font-size: 13px;
             border: none;
             border-radius: 6px;
@@ -795,7 +808,7 @@ def _nav_btn_style(active: bool = False) -> str:
             padding-left: 12px;
         }
         QPushButton:hover {
-            background: #222;
-            color: #ccc;
+            background: rgba(255,255,255,0.12);
+            color: #FCFAF8;
         }
     """
