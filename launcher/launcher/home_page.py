@@ -132,28 +132,6 @@ class HomePage(QWidget):
         self._bg_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self._bg_label.lower()
 
-        # --- 标题 (左上) ---
-        self.title_label = QLabel("邻舍.EXE", self)
-        self.title_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 28px; font-weight: bold; background: transparent;"
-        )
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(16)
-        shadow.setOffset(1, 2)
-        shadow.setColor(QColor(224, 123, 108, 120))
-        self.title_label.setGraphicsEffect(shadow)
-
-        # --- 副标题 (标题下方 20px) ---
-        self.subtitle_label = QLabel("把想象拖进现实", self)
-        self.subtitle_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 16px; font-weight: bold; background: transparent;"
-        )
-        sub_shadow = QGraphicsDropShadowEffect(self)
-        sub_shadow.setBlurRadius(10)
-        sub_shadow.setOffset(1, 1)
-        sub_shadow.setColor(QColor(224, 123, 108, 100))
-        self.subtitle_label.setGraphicsEffect(sub_shadow)
-
         # --- 手机端访问条幅 (服务启动后显示，常驻提醒) ---
         self._mobile_banner = QWidget(self)
         self._mobile_banner.setObjectName("mobileBanner")
@@ -363,10 +341,6 @@ class HomePage(QWidget):
                 self._bg_label.setPixmap(cropped)
         self._bg_label.setGeometry(-bleed, -bleed, w + bleed * 2, h + bleed * 2)
 
-        # 标题 (左上)
-        self.title_label.move(30, 44)
-        # 副标题
-        self.subtitle_label.move(34, 94)
 
         # 手机端访问条幅 (居中，副标题下方)
         banner_w = min(480, w - 60)

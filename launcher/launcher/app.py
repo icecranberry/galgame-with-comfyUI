@@ -3,6 +3,7 @@
 """
 import os
 import sys
+import socket
 import subprocess
 import webbrowser
 from PySide6.QtWidgets import (
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QSizeGrip,
     QApplication,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, QPropertyAnimation, QEasingCurve, Signal, QRect, QPoint
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, Signal, QRect, QPoint
 from PySide6.QtGui import QColor, QPixmap, QPainterPath, QRegion
 
 from .config_manager import ConfigManager
@@ -123,12 +124,14 @@ class MainWindow(QMainWindow):
 
         self._is_built = False
         self._switching_version = False
+        self._closing = False
         self._cached_tags: list[str] = []
         self._cached_current_tag: str | None = None
         self._cached_has_updates: bool | None = None
         self._git_ready = False
         self._slide_anim: QPropertyAnimation | None = None
         self._animating = False
+        self._cached_ip: str | None = None
 
         self._setup_window()
         self._setup_title_bar()
@@ -271,8 +274,22 @@ class MainWindow(QMainWindow):
         self._update_nav_geometry()
 
         layout = QVBoxLayout(self._nav)
-        layout.setContentsMargins(8, 16, 8, 24)
+        layout.setContentsMargins(10, 10, 10, 24)
         layout.setSpacing(4)
+
+        # --- Navbar 顶部标题图片 ---
+        nav_title_path = os.path.join(self._assets_dir, "navbar-title.png")
+        nav_title_pixmap = QPixmap(nav_title_path)
+        img_max_w = NAV_W - 20  # 左右各 10px 留空
+        if nav_title_pixmap.width() > img_max_w:
+            nav_title_pixmap = nav_title_pixmap.scaledToWidth(img_max_w, Qt.SmoothTransformation)
+        self._nav_title_img = QLabel(self._nav)
+        self._nav_title_img.setPixmap(nav_title_pixmap)
+        self._nav_title_img.setAlignment(Qt.AlignCenter)
+        self._nav_title_img.setStyleSheet("background: transparent;")
+        layout.addWidget(self._nav_title_img)
+        layout.addSpacing(8)
+
         layout.addStretch()  # 把按钮推到底部
 
         self._nav_btns: list[QPushButton] = []
@@ -568,17 +585,17 @@ class MainWindow(QMainWindow):
         is_running = v_status == "running" or a_status == "running"
         self._home_page.set_launch_state(is_running)
 
-        # 手机端访问条幅：agent_core 运行即常驻显示
+        # 手机端访问条幅：agent_core 运行即常驻显示（仅日志页）
         if a_status == "running":
-            self._home_page.show_mobile_banner()
             self._log_page.show_mobile_banner()
         else:
-            self._home_page.hide_mobile_banner()
             self._log_page.hide_mobile_banner()
 
         if overall == "all_running" and self._config.get("auto_open_browser"):
-            webbrowser.open("http://localhost:3099")
-            self._log_page.append_log("[系统] 🌐 浏览器已打开 http://localhost:3099")
+            ip = self._get_local_ip()
+            url = f"http://localhost:3099?mobile_ip={ip}" if ip else "http://localhost:3099"
+            webbrowser.open(url)
+            self._log_page.append_log(f"[系统] 🌐 浏览器已打开 {url}")
 
     # ==================================================================
     # 设置
@@ -618,6 +635,20 @@ class MainWindow(QMainWindow):
         """用 subprocess 打开文件，工作目录设为文件所在目录。"""
         subprocess.Popen([path], cwd=os.path.dirname(path), shell=False)
 
+    def _get_local_ip(self) -> str | None:
+        """获取本机局域网 IP 地址（带缓存）。失败时返回 None。"""
+        if self._cached_ip is not None:
+            return self._cached_ip
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            self._cached_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            self._cached_ip = None
+        return self._cached_ip
+
     def _load_settings_to_form(self):
         self._settings_page.set_values(
             comfyui_exe=self._config.get("comfyui_exe"),
@@ -630,6 +661,12 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _lazy_git_init(self):
+        import shutil
+
+        if not shutil.which("git"):
+            self._home_page.update_version_info(None, "Git 未安装", None)
+            self._git_ready = True
+            return
         if not self._git.is_git_repo():
             self._home_page.update_version_info(None, "无 Git 仓库", None)
             self._git_ready = True
@@ -730,25 +767,79 @@ class MainWindow(QMainWindow):
         super().mouseReleaseEvent(event)
 
     def closeEvent(self, event):
-        """窗口关闭时安全停止所有服务。已停止则直接关闭。"""
+        """窗口关闭时安全停止所有服务（完全非阻塞，由信号驱动关闭）。"""
         if not self._runner.is_any_running():
             event.accept()
             return
 
-        # 显示遮罩
+        # 第二轮进入：关闭流程已触发，直接接受
+        if self._closing:
+            event.accept()
+            return
+
+        # 第一轮：启动异步关闭流程
+        self._closing = True
+        event.ignore()
+
+        # 显示遮罩 + 启动转圈动画
         self._shutdown_overlay.setGeometry(self._content.rect())
         self._shutdown_overlay.show()
         self._shutdown_overlay.raise_()
-        QApplication.processEvents()
+        self._start_spinner()
 
         self._log_page.append_log("[系统] 窗口关闭，正在安全停止服务...")
-        # 先发送优雅关闭请求
         self._runner.stop_all()
-        # 短暂等待优雅关闭生效
-        QThread.msleep(1500)
-        # 兜底强制清理残留进程
+
+        # 服务全部停止后自动关闭窗口
+        def on_all_stopped(vs, acs, overall):
+            if overall == "all_stopped":
+                try:
+                    self._runner.status_summary.disconnect(on_all_stopped)
+                except RuntimeError:
+                    pass
+                self._stop_spinner()
+                self.close()
+
+        self._runner.status_summary.connect(on_all_stopped)
+
+        # 硬超时兜底：12 秒后强制退出
+        QTimer.singleShot(12000, self._force_close)
+
+    def _force_close(self):
+        """硬超时：断开所有状态监听，强制清理并关闭窗口。"""
+        self._log_page.append_log("[系统] 关闭超时，强制退出...")
+        try:
+            self._runner.status_summary.disconnect()
+        except RuntimeError:
+            pass
         self._runner._force_kill_all()
-        event.accept()
+        self._stop_spinner()
+        self._closing = False
+        self.close()
+
+    # ------------------------------------------------------------------
+    # 转圈动画
+    # ------------------------------------------------------------------
+
+    _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def _start_spinner(self):
+        """启动关闭遮罩上的 braille 转圈动画。"""
+        self._spinner_idx = 0
+        self._spinner_label.setText(self._SPINNER_FRAMES[0])
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.timeout.connect(self._tick_spinner)
+        self._spinner_timer.start(80)
+
+    def _tick_spinner(self):
+        self._spinner_idx = (self._spinner_idx + 1) % len(self._SPINNER_FRAMES)
+        self._spinner_label.setText(self._SPINNER_FRAMES[self._spinner_idx])
+
+    def _stop_spinner(self):
+        if hasattr(self, "_spinner_timer") and self._spinner_timer:
+            self._spinner_timer.stop()
+            self._spinner_timer.deleteLater()
+            self._spinner_timer = None
 
 
 # ==================================================================

@@ -20,6 +20,12 @@
   </div>
   <ConfirmDialog ref="confirmDialog" />
 
+  <!-- 手机端访问提示 Toast -->
+  <Transition name="toast-slide">
+    <div v-if="mobileToast.visible" class="mobile-toast">
+      <span class="toast-text">手机端可访问 <b>{{ mobileToast.url }}</b> 打开邻舍</span>
+    </div>
+  </Transition>
 </template>
 
 <script setup>
@@ -39,6 +45,9 @@ const settings = useSettingsStore()
 const proactive = useProactiveStore()
 const route = useRoute()
 const confirmDialog = ref(null)
+
+// ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
+const mobileToast = ref({ visible: false, url: '' })
 
 // ── 临时调试：强制主动聊天 ──
 const forceLoading = ref(false)
@@ -152,6 +161,23 @@ onMounted(async () => {
   } else if (chat.characters.length > 0 && !chat.activeCharId && !route.params.id) {
     // 仅在无路由角色参数时自动选第一个（有路由时 ChatView 会根据路由自行 selectChar）
     chat.selectChar(chat.characters[0].id)
+  }
+
+  // ── 手机端访问 Toast：启动器通过 ?mobile_ip= 传入本机 IP，底部浮窗 2s ──
+  const TOAST_KEY = 'mobile_toast_shown'
+  const params = new URLSearchParams(window.location.search)
+  const mobileIp = params.get('mobile_ip')
+  if (mobileIp && !sessionStorage.getItem(TOAST_KEY)) {
+    sessionStorage.setItem(TOAST_KEY, '1')
+    mobileToast.value = { visible: true, url: `http://${mobileIp}:3099` }
+    setTimeout(() => { mobileToast.value.visible = false }, 5000)
+  }
+  // 清理 URL 中的 mobile_ip 参数（无论是否弹 toast）
+  if (mobileIp) {
+    params.delete('mobile_ip')
+    const newSearch = params.toString()
+    const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash
+    window.history.replaceState(null, '', newUrl)
   }
 })
 
@@ -280,5 +306,48 @@ textarea { resize: vertical; font-family: inherit; }
 .slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(20px); }
+
+/* ── 手机端访问 Toast（底部浮窗，2s 自动消失）── */
+.mobile-toast {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(46, 42, 39, 0.92);
+  color: #FCFAF8;
+  font-size: 14px;
+  padding: 14px 26px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.mobile-toast b {
+  color: #F0A89A;
+  font-weight: 600;
+}
+.toast-icon { font-size: 18px; flex-shrink: 0; }
+.toast-text { line-height: 1.4; }
+
+/* Toast 动画：底部滑入 + 淡入 */
+.toast-slide-enter-active {
+  transition: all 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.toast-slide-leave-active {
+  transition: all 0.3s cubic-bezier(0.55, 0.06, 0.68, 0.19);
+}
+.toast-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(20px);
+}
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
+}
 
 </style>

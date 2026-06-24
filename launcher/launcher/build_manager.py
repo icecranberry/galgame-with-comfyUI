@@ -1,9 +1,10 @@
 """
-构建管理器 —— 顺序执行构建流水线（npm install ×2, vite build, venv setup, model download）。
+构建管理器 —— 顺序执行构建流水线（env check → npm install ×2 → vite build → venv setup → model download）。
 """
 import os
 import sys
 from PySide6.QtCore import QObject, Signal, QProcess
+from .env_manager import EnvManager
 
 
 class BuildManager(QObject):
@@ -21,6 +22,9 @@ class BuildManager(QObject):
         self._current_idx = 0
         self._proc: QProcess | None = None
         self._cancelled = False
+        self._env_mgr = EnvManager(self)
+        self._env_mgr.output.connect(self.output.emit)
+        self._tool_path_overrides: dict[str, str] = {}
 
     @property
     def project_path(self) -> str:
@@ -51,10 +55,60 @@ class BuildManager(QObject):
 
         self._cancelled = False
         self._current_idx = -1
+        self._tool_path_overrides.clear()
 
-        # 构建步骤定义
-        node_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
-        python_cmd = sys.executable
+        # 阶段1: 系统环境检测 + 自动安装
+        env_steps = self._build_env_steps()
+
+        # 阶段2: 项目构建步骤（使用可能已安装的系统工具）
+        build_steps = self._build_build_steps()
+
+        self._steps = env_steps + build_steps
+
+        self._check_env_file()
+        self._run_next_step()
+        return None
+
+    # ------------------------------------------------------------------
+    # 环境检测与自动安装
+    # ------------------------------------------------------------------
+
+    def _build_env_steps(self) -> list[dict]:
+        """检测系统依赖，为缺失的工具生成 winget 安装步骤。"""
+        steps: list[dict] = []
+        winget_ok = self._env_mgr.is_winget_available()
+
+        if not winget_ok:
+            self.output.emit("[env] ⚠ winget 不可用，将跳过自动安装")
+
+        for tool_key in ("node", "python", "git"):
+            info = self._env_mgr.TOOLS[tool_key]
+            if self._env_mgr.is_tool_available(tool_key):
+                self.output.emit(f"[env] ✓ {info['display']} 已就绪")
+            elif winget_ok:
+                self.output.emit(
+                    f"[env] ➜ {info['display']} 未安装，正在通过 winget 安装..."
+                )
+                steps.append(self._env_mgr.get_install_step(tool_key))
+            else:
+                self.output.emit(
+                    f"[ERROR] ❌ {info['display']} 未安装，请手动安装"
+                )
+                self.output.emit(
+                    f"[ERROR]     winget install {info['winget_id']}"
+                )
+
+        return steps
+
+    # ------------------------------------------------------------------
+    # 项目构建步骤
+    # ------------------------------------------------------------------
+
+    def _build_build_steps(self) -> list[dict]:
+        """生成项目构建步骤（npm install ×2, vite build, venv, pip, model）。"""
+        node_cmd = self._resolve_tool_path("node", "npm.cmd")
+        # 优先用系统 Python（winget 安装的），否则用 sys.executable 兜底
+        python_cmd = self._resolve_tool_path("python", sys.executable, binary="python.exe")
         venv_pip = os.path.join(
             self._project_path, "vector-service", "venv", "Scripts", "pip.exe"
         )
@@ -62,7 +116,7 @@ class BuildManager(QObject):
             self._project_path, "vector-service", "venv", "Scripts", "python.exe"
         )
 
-        self._steps = [
+        return [
             {
                 "name": "安装 agent-core 依赖",
                 "cwd": os.path.join(self._project_path, "agent-core"),
@@ -110,9 +164,15 @@ class BuildManager(QObject):
             },
         ]
 
-        self._check_env_file()
-        self._run_next_step()
-        return None
+    def _resolve_tool_path(self, tool_key: str, default: str, binary: str | None = None) -> str:
+        """解析工具路径。若 winget 安装后记录过路径，则拼接绝对路径；否则返回默认值。"""
+        override_dir = self._tool_path_overrides.get(tool_key)
+        if override_dir:
+            target = binary if binary else os.path.basename(default)
+            resolved = os.path.join(override_dir, target)
+            if os.path.isfile(resolved):
+                return resolved
+        return default
 
     def cancel(self):
         self._cancelled = True
@@ -215,6 +275,22 @@ class BuildManager(QObject):
 
         step = self._steps[self._current_idx]
         ok = exit_code == 0 and exit_status == QProcess.NormalExit
+
+        # 安装后路径发现（winget 安装后 PATH 可能未刷新）
+        tool_key = step.get("_tool_key")
+        if tool_key and ok:
+            install_dir = self._env_mgr.find_tool_dir(tool_key)
+            if install_dir:
+                self._tool_path_overrides[tool_key] = install_dir
+                info = self._env_mgr.TOOLS[tool_key]
+                self.output.emit(
+                    f"[env] ✓ {info['display']} 已安装: {install_dir}"
+                )
+            else:
+                self.output.emit(
+                    f"[WARN] {self._env_mgr.TOOLS[tool_key]['display']} "
+                    "安装完成但未找到二进制文件，后续步骤可能失败"
+                )
 
         if ok:
             self.output.emit(f"[构建] ✓ {step['name']} 完成")

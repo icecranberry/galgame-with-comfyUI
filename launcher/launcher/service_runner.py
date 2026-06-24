@@ -5,9 +5,8 @@
 import os
 import sys
 import time
-from PySide6.QtCore import QObject, Signal, QProcess, QTimer
+from PySide6.QtCore import QObject, Signal, QProcess, QTimer, QUrl, QByteArray
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtCore import QUrl
 
 
 # 服务定义
@@ -184,12 +183,14 @@ class ServiceWorker(QObject):
     # ------------------------------------------------------------------
 
     def _graceful_shutdown(self, shutdown_path: str):
-        """POST /api/shutdown 优雅关闭。"""
-        import urllib.request
-
+        """POST /api/shutdown 优雅关闭（非阻塞，使用 Qt 网络栈）。"""
         url = f"http://localhost:{self.port}{shutdown_path}"
         try:
-            urllib.request.urlopen(f"http://localhost:{self.port}{shutdown_path}", data=b"", timeout=3)
+            manager = QNetworkAccessManager()
+            req = QNetworkRequest(QUrl(url))
+            req.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+            manager.post(req, QByteArray())
+            manager.finished.connect(manager.deleteLater)
             self.output.emit(self.name, f"[{self.display}] 已发送关闭请求")
         except Exception:
             pass
@@ -198,11 +199,29 @@ class ServiceWorker(QObject):
         QTimer.singleShot(3000, self._kill_process)
 
     def _kill_process(self):
+        """强制终止进程（非阻塞：terminate → 3s → kill → 2s → 放弃）。"""
         if self._proc and self._proc.state() != QProcess.NotRunning:
             self._proc.terminate()
-            if not self._proc.waitForFinished(3000):
-                self._proc.kill()
-                self._proc.waitForFinished(2000)
+            # 非阻塞：3 秒后检查是否仍在运行，若在则强制 kill
+            QTimer.singleShot(3000, self._check_terminate_timeout)
+        else:
+            self._pid = None
+            self._set_status(self.STATUS_STOPPED)
+            self.health_changed.emit(self.name, False)
+
+    def _check_terminate_timeout(self):
+        """terminate() 3 秒后仍未退出 → force kill。"""
+        if self._proc and self._proc.state() != QProcess.NotRunning:
+            self._proc.kill()
+            QTimer.singleShot(2000, self._check_kill_timeout)
+
+    def _check_kill_timeout(self):
+        """kill() 2 秒后仍未退出 → 放弃等待，强制标记为已停止。"""
+        if self._proc and self._proc.state() != QProcess.NotRunning:
+            self.output.emit(
+                self.name,
+                f"[WARN] [{self.display}] 进程无法终止，强制标记为停止",
+            )
         self._pid = None
         self._set_status(self.STATUS_STOPPED)
         self.health_changed.emit(self.name, False)
