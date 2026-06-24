@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self._cached_current_tag: str | None = None
         self._cached_has_updates: bool | None = None
         self._git_ready = False
+        self._pending_fetch_is_auto = False  # 自动 fetch 静默模式，失败不报错给用户
         self._slide_anim: QPropertyAnimation | None = None
         self._animating = False
         self._cached_ip: str | None = None
@@ -436,6 +437,7 @@ class MainWindow(QMainWindow):
 
     def _on_check_update(self):
         self._version_page.append_log("正在检查更新...")
+        self._pending_fetch_is_auto = False  # 用户手动触发，正常报错
         err = self._git.fetch_remote()
         if err:
             self._version_page.append_log(f"[ERROR] {err}")
@@ -471,6 +473,8 @@ class MainWindow(QMainWindow):
     def _on_git_operation_done(self, operation: str, success: bool, message: str):
         if operation == "fetch":
             if success:
+                import datetime
+                self._config.set("last_fetch_date", datetime.date.today().isoformat())
                 self._init_git_cache()
                 try:
                     self._cached_has_updates = self._git.has_updates()
@@ -484,7 +488,12 @@ class MainWindow(QMainWindow):
                     self._cached_current_tag, "main", self._cached_has_updates
                 )
             else:
-                self._version_page.append_log(f"[ERROR] fetch 失败: {message}")
+                if self._pending_fetch_is_auto:
+                    # 后台自动 fetch 失败：静默，不向用户显示错误
+                    pass
+                else:
+                    self._version_page.append_log(f"[ERROR] fetch 失败: {message}")
+                self._pending_fetch_is_auto = False
 
         elif operation == "checkout":
             if success:
@@ -670,7 +679,7 @@ class MainWindow(QMainWindow):
         today = datetime.date.today().isoformat()
         last_fetch = self._config.get("last_fetch_date")
         if last_fetch != today:
-            self._config.set("last_fetch_date", today)
+            self._pending_fetch_is_auto = True  # 后台静默，失败不打扰用户
             self._git.fetch_remote()
 
     # ==================================================================

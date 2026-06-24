@@ -44,6 +44,8 @@ class GitManager(QObject):
         self._project_path = project_path
         self._proc: QProcess | None = None
         self._pending_op = ""
+        self._fetch_gen = 0          # fetch 代际：递增以忽略被 kill 的 stale callback
+        self._finished_fetch_gen = 0 # 当前完成的 fetch 代际
         self._git_cache: dict[str, dict] = {}  # key → {value, ts}
 
     @property
@@ -163,6 +165,7 @@ class GitManager(QObject):
         if not self.is_git_repo():
             return "不是有效的 git 仓库"
 
+        self._fetch_gen += 1
         self._pending_op = "fetch"
         self._run_git(["fetch", "origin", "--tags"])
         return None
@@ -197,6 +200,20 @@ class GitManager(QObject):
         self._proc.readyReadStandardError.connect(self._on_stderr)
         self._proc.finished.connect(self._on_finished)
 
+        # 注入关键环境变量，避免 git 因找不到 HOME/.gitconfig 而崩溃
+        env = self._proc.processEnvironment()
+        for key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH",
+                     "TEMP", "TMP", "SystemRoot", "PATH",
+                     "APPDATA", "LOCALAPPDATA", "SSH_AUTH_SOCK"):
+            if key in os.environ and key not in env.keys():
+                env.insert(key, os.environ[key])
+        # 禁止 git 弹出交互式认证窗口（否则 QProcess 无法处理会导致挂死）
+        env.insert("GIT_TERMINAL_PROMPT", "0")
+        self._proc.setProcessEnvironment(env)
+
+        # 记录当前 fetch 代际，用于 _on_finished 忽略 stale callback
+        self._started_fetch_gen = self._fetch_gen
+
         git_exe = _find_git()
         self._proc.start(git_exe, args)
 
@@ -215,6 +232,12 @@ class GitManager(QObject):
             # 我们仍然转发但标记为信息级别
 
     def _on_finished(self, exit_code, exit_status):
+        # 忽略被 kill 的旧 QProcess 的 stale callback
+        finished_gen = getattr(self, '_started_fetch_gen', 0)
+        if self._pending_op == "fetch" and finished_gen != self._fetch_gen:
+            # 这是上一个 fetch 进程的回调，已被新 fetch kill，忽略
+            return
+
         ok = exit_code == 0 and exit_status == QProcess.NormalExit
         msg = "操作成功" if ok else f"操作失败 (exit code: {exit_code})"
         self.operation_done.emit(self._pending_op, ok, msg)
