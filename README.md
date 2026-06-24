@@ -1,4 +1,4 @@
-# 🎮 galgame-with-comfyUI
+# 🎮 邻舍 · galgame-with-comfyUI
 
 [English](./README_EN.md)
 
@@ -18,6 +18,50 @@
 | 📱 **朋友圈** | AI 角色自动发帖配图，用户可评论点赞，AI 自动回复评论 |
 | 🖼️ **相册** | 所有生成图片按日期分组浏览，懒加载 + Lightbox 预览 |
 | 🏠 **酒馆** | 角色招募 / 浏览 / 编辑，AI 一键生成角色，用户信息管理 |
+
+---
+
+## 📸 界面预览
+
+| 聊天 | 朋友圈 |
+|------|--------|
+| [![聊天页面](https://github.com/user-attachments/assets/2a08cbe1-f4c8-4814-a986-fc2d47fc8e85)](https://github.com/user-attachments/assets/2a08cbe1-f4c8-4814-a986-fc2d47fc8e85) | [![朋友圈页面](https://github.com/user-attachments/assets/7de290fe-3eb3-4d10-a329-81993cf19c56)](https://github.com/user-attachments/assets/7de290fe-3eb3-4d10-a329-81993cf19c56) |
+
+| 相册 | 酒馆 |
+|------|------|
+| [![相册页面](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd)](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd) | [![酒馆页面](https://github.com/user-attachments/assets/8f77d9ac-7c38-4ccd-b467-880eb56c10b9)](https://github.com/user-attachments/assets/8f77d9ac-7c38-4ccd-b467-880eb56c10b9) |
+
+| 手机端适配 |
+|------------|
+| [![手机端适配](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201)](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201) |
+
+---
+
+## 🚀 安装与使用
+
+### 1. 下载
+
+从 [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) 页面下载最新版本压缩包，解压到任意目录。
+
+### 2. 前置准备
+
+启动器会**自动检测并安装** Node.js、Python、Git 等运行环境，你只需要确保以下两项已就绪：
+
+| 必要条件 | 说明 |
+|----------|------|
+| **ComfyUI** | 已安装并运行在 `:8188`，Anima 模型已就绪 |
+| **DeepSeek API Key** | 在启动器设置中配置，或手动编辑 `agent-core/.env` |
+
+### 3. 启动
+
+双击运行 **`邻舍.EXE.exe`**，然后在启动器中：
+
+1. **设置** → 配置 ComfyUI 启动器路径（可选，用于一键启动 ComfyUI）
+2. **首页** → 点击 **「▶ 启动邻舍」**
+
+首次运行会自动完成环境检测、依赖安装、前端构建、向量模型下载等全部流程。构建完成后浏览器自动打开，即可开始使用。
+
+> 💡 启动器支持版本切换（git tags），可在 **版本** 页面在线升级/降级。
 
 ---
 
@@ -55,19 +99,23 @@ Node.js + Express (主控 :3099)
 | 生图引擎 | ComfyUI (WebSocket + HTTP) |
 | 数据库 | SQLite (better-sqlite3) + FTS5 |
 | 嵌入模型 | Jina v2 base zh (768d, 均值池化 + L2 归一) |
+| 启动器 | PySide6 (Qt) + PyInstaller |
 
 ---
 
-## 📋 前置条件
+## 🛠️ 开发者指南
+
+如需从源码开发或贡献代码：
+
+### 前置条件
 
 - **Node.js** ≥ 18
 - **Python** ≥ 3.10（含 venv）
-- **ComfyUI** 已安装并运行在 `:8188`（Anima 模型已就绪）
+- **Git**
+- **ComfyUI** 已安装并运行在 `:8188`
 - **DeepSeek API Key**
 
----
-
-## 🚀 快速开始
+### 快速开始
 
 ```bash
 # 1. 克隆仓库
@@ -98,6 +146,13 @@ npm run stop
 ```
 
 启动后访问 `http://localhost:5173`
+
+### 打包启动器
+
+```bash
+cd launcher
+build.bat          # 生成 邻舍.EXE.exe
+```
 
 ---
 
@@ -133,6 +188,10 @@ npm run stop
 │   ├── server.py
 │   ├── embedding.py     # ONNX 推理
 │   └── chroma_store.py  # ChromaDB 封装
+├── launcher/            # 邻舍.EXE 启动器 (PySide6 + PyInstaller)
+│   ├── launcher/        # 启动器源码
+│   ├── main.py          # 入口
+│   └── build.bat        # 打包脚本
 ├── workflow/            # ComfyUI workflow 模板 & 提示词规则
 ├── scripts/             # dev / stop 脚本
 └── ecosystem.config.cjs # PM2 生产配置

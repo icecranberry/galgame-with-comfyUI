@@ -1,4 +1,4 @@
-# 🎮 galgame-with-comfyUI
+# 🎮 Neighbor · galgame-with-comfyUI
 
 [中文](./README.md)
 
@@ -18,6 +18,50 @@ A **local AI companion app** inspired by visual novels. Chat with customizable c
 | 📱 **Moments Feed** | AI characters auto-post with images, users can comment & like, AI auto-replies |
 | 🖼️ **Gallery** | All generated images grouped by date, lazy loading + Lightbox preview |
 | 🏠 **Tavern** | Character recruitment / browsing / editing, AI one-click character generation, user profile |
+
+---
+
+## 📸 Screenshots
+
+| Chat | Moments |
+|------|---------|
+| [![Chat page](https://github.com/user-attachments/assets/2a08cbe1-f4c8-4814-a986-fc2d47fc8e85)](https://github.com/user-attachments/assets/2a08cbe1-f4c8-4814-a986-fc2d47fc8e85) | [![Moments page](https://github.com/user-attachments/assets/7de290fe-3eb3-4d10-a329-81993cf19c56)](https://github.com/user-attachments/assets/7de290fe-3eb3-4d10-a329-81993cf19c56) |
+
+| Gallery | Tavern |
+|---------|--------|
+| [![Gallery page](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd)](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd) | [![Tavern page](https://github.com/user-attachments/assets/8f77d9ac-7c38-4ccd-b467-880eb56c10b9)](https://github.com/user-attachments/assets/8f77d9ac-7c38-4ccd-b467-880eb56c10b9) |
+
+| Mobile View |
+|-------------|
+| [![Mobile view](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201)](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201) |
+
+---
+
+## 🚀 Installation & Usage
+
+### 1. Download
+
+Download the latest release package from [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) and extract it anywhere.
+
+### 2. Prerequisites
+
+The launcher **auto-detects and installs** Node.js, Python, Git, and other dependencies. You only need:
+
+| Required | Notes |
+|----------|-------|
+| **ComfyUI** | Installed and running on `:8188`, Anima models ready |
+| **DeepSeek API Key** | Configure in launcher settings, or manually edit `agent-core/.env` |
+
+### 3. Launch
+
+Double-click **`邻舍.EXE.exe`** to open the launcher, then:
+
+1. **Settings** → set ComfyUI launcher path (optional, for one-click ComfyUI launch)
+2. **Home** → click **「▶ 启动邻舍」** (Launch)
+
+On first run, the launcher auto-completes environment checks, dependency installation, frontend build, and model download. Once ready, the browser opens automatically.
+
+> 💡 The launcher supports version switching via git tags — upgrade/downgrade from the **Version** tab.
 
 ---
 
@@ -55,19 +99,23 @@ Node.js + Express (Core :3099)
 | Image Engine | ComfyUI (WebSocket + HTTP) |
 | Database | SQLite (better-sqlite3) + FTS5 |
 | Embedding | Jina v2 base zh (768d, mean pooling + L2 norm) |
+| Launcher | PySide6 (Qt) + PyInstaller |
 
 ---
 
-## 📋 Prerequisites
+## 🛠️ Developer Guide
+
+For source code development and contributions:
+
+### Prerequisites
 
 - **Node.js** ≥ 18
 - **Python** ≥ 3.10 (with venv)
-- **ComfyUI** installed and running on `:8188` (Anima models ready)
+- **Git**
+- **ComfyUI** installed and running on `:8188`
 - **DeepSeek API Key**
 
----
-
-## 🚀 Quick Start
+### Quick Start
 
 ```bash
 # 1. Clone
@@ -100,6 +148,13 @@ npm run stop
 ```
 
 Open `http://localhost:5173`
+
+### Build Launcher
+
+```bash
+cd launcher
+build.bat          # Produces 邻舍.EXE.exe
+```
 
 ---
 
@@ -135,6 +190,10 @@ All settings support runtime hot-reload with persistence across restarts:
 │   ├── server.py
 │   ├── embedding.py     # ONNX inference
 │   └── chroma_store.py  # ChromaDB wrapper
+├── launcher/            # 邻舍.EXE launcher (PySide6 + PyInstaller)
+│   ├── launcher/        # Launcher source
+│   ├── main.py          # Entry point
+│   └── build.bat        # Build script
 ├── workflow/            # ComfyUI workflow templates & prompt rules
 ├── scripts/             # dev / stop scripts
 └── ecosystem.config.cjs # PM2 production config
