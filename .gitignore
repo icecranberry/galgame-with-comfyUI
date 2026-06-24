@@ -13,3 +13,10 @@ __pycache__/
 venv/
 vector-service/models/
 vector-service/chroma_data/
+
+# 邻舍启动器
+launcher/dist/
+launcher/build/
+launcher/*.spec
+邻舍.EXE.exe
+launcher_config.json
