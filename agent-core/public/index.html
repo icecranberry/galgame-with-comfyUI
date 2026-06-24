@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>喂？在吗在吗在吗</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🐷</text></svg>">
+  <style>
+    /* ── 背景几何柔光图形 ── */
+    .bg-geo {
+      position: fixed; pointer-events: none; z-index: 0;
+      will-change: transform;
+      border-radius: 50%;
+      filter: blur(100px);
+    }
+    /* 顶部弥漫暖光 — 铺满上半屏 */
+    .bg-geo-1 {
+      width: 90vw; height: 55vh; max-width: 1200px; max-height: 500px;
+      top: -12%; left: 5%;
+      background: radial-gradient(ellipse at 50% 40%, rgba(238, 200, 170, 0.70) 0%, rgba(230, 190, 160, 0.35) 30%, transparent 55%);
+      opacity: 0.90;
+    }
+    /* 右下暖桃色大光晕 */
+    .bg-geo-2 {
+      width: 65vw; height: 50vh; max-width: 850px; max-height: 450px;
+      bottom: -10%; right: -10%;
+      background: radial-gradient(ellipse at 40% 50%, rgba(240, 195, 170, 0.65) 0%, rgba(225, 180, 155, 0.30) 30%, transparent 55%);
+      opacity: 0.85;
+    }
+    /* 左侧中段暖米色漫射 */
+    .bg-geo-3 {
+      width: 50vw; height: 60vh; max-width: 650px; max-height: 550px;
+      top: 15%; left: -8%;
+      background: radial-gradient(ellipse at 60% 45%, rgba(235, 210, 185, 0.60) 0%, rgba(220, 195, 170, 0.28) 30%, transparent 55%);
+      opacity: 0.85;
+    }
+    /* 中部微暖玫瑰调 */
+    .bg-geo-4 {
+      width: 55vw; height: 45vh; max-width: 720px; max-height: 420px;
+      top: 35%; left: 25%;
+      background: radial-gradient(ellipse at 50% 50%, rgba(240, 200, 190, 0.55) 0%, rgba(225, 185, 175, 0.25) 30%, transparent 55%);
+      opacity: 0.80;
+    }
+    /* 底部暖杏色横漫 */
+    .bg-geo-5 {
+      width: 80vw; height: 30vh; max-width: 1050px; max-height: 280px;
+      bottom: -6%; left: 10%;
+      background: radial-gradient(ellipse at 50% 40%, rgba(228, 195, 170, 0.58) 0%, rgba(215, 180, 158, 0.26) 30%, transparent 55%);
+      opacity: 0.82;
+    }
+    /* 右中偏上淡紫灰微光 */
+    .bg-geo-6 {
+      width: 40vw; height: 40vh; max-width: 520px; max-height: 380px;
+      top: 10%; right: 10%;
+      background: radial-gradient(ellipse at 45% 50%, rgba(218, 195, 205, 0.50) 0%, rgba(205, 182, 190, 0.22) 32%, transparent 58%);
+      opacity: 0.72;
+    }
+    /* 中央顶部微暖灰调 */
+    .bg-geo-7 {
+      width: 70vw; height: 20vh; max-width: 920px; max-height: 180px;
+      top: 0; left: 15%;
+      background: radial-gradient(ellipse at 50% 55%, rgba(225, 208, 195, 0.52) 0%, rgba(210, 195, 182, 0.22) 32%, transparent 60%);
+      opacity: 0.75;
+    }
+  </style>
+  <script type="module" crossorigin src="/assets/index-DyynFufo.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CVaTwc3X.css">
+</head>
+<body>
+  <!-- 柔光几何背景层 -->
+  <div class="bg-geo bg-geo-1"></div>
+  <div class="bg-geo bg-geo-2"></div>
+  <div class="bg-geo bg-geo-3"></div>
+  <div class="bg-geo bg-geo-4"></div>
+  <div class="bg-geo bg-geo-5"></div>
+  <div class="bg-geo bg-geo-6"></div>
+  <div class="bg-geo bg-geo-7"></div>
+  <div id="app"></div>
+</body>
+</html>

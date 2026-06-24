@@ -4,7 +4,6 @@ node_modules/
 *.db-wal
 *.db-shm
 agent-core/data/
-agent-core/public/
 __pycache__/
 *.pyc
 .venv/

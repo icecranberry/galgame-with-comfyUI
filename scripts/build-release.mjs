@@ -13,12 +13,10 @@
 
 import { spawn, execSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, createWriteStream } from "node:fs";
-import { resolve, basename, dirname } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createInterface } from "node:readline";
 import https from "node:https";
 import http from "node:http";
-import { createWriteStream as _createWriteStream } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -26,7 +24,8 @@ const ROOT = resolve(__dirname, "..");
 // ── 配置 ──
 const NODE_VERSION = "22.18.0";
 const PYTHON_VERSION = "3.12.10";
-const GIT_VERSION = "2.47.1.windows.1";
+const GIT_TAG = "2.47.1.windows.1";        // GitHub release tag
+const GIT_VER = "2.47.1";                  // 文件名中的版本号（无 .windows.1）
 
 // 从 git tag 自动获取版本号
 let VERSION = "dev";
@@ -61,8 +60,8 @@ const MIRRORS = {
   nodeOfficial: `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`,
   python: `https://npmmirror.com/mirrors/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`,
   pythonOfficial: `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`,
-  git: `https://npmmirror.com/mirrors/git-for-windows/v${GIT_VERSION}/PortableGit-${GIT_VERSION}-64-bit.7z.exe`,
-  gitOfficial: `https://github.com/git-for-windows/git/releases/download/v${GIT_VERSION}/PortableGit-${GIT_VERSION}-64-bit.7z.exe`,
+  git: `https://npmmirror.com/mirrors/git-for-windows/v${GIT_TAG}/PortableGit-${GIT_VER}-64-bit.7z.exe`,
+  gitOfficial: `https://github.com/git-for-windows/git/releases/download/v${GIT_TAG}/PortableGit-${GIT_VER}-64-bit.7z.exe`,
   pipBootstrap: "https://bootstrap.pypa.io/get-pip.py",
 };
 
@@ -76,10 +75,6 @@ const C = {
   red:   "\x1b[31m",
   bold:  "\x1b[1m",
 };
-
-function tag(name) {
-  return `${C.dim}[${C.cyan}${name}${C.dim}]${C.reset}`;
-}
 
 const LOG_PREFIX = `  `;
 
@@ -103,10 +98,6 @@ function fail(msg) {
 
 function ensureDir(dir) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
 }
 
 /**
@@ -308,9 +299,9 @@ async function main() {
   // ═══════════════════════════════════════════
   // [3/8] 便携 Git
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[3/8]${C.reset} 准备便携 Git v${GIT_VERSION}...`);
+  console.log(`  ${C.bold}[3/8]${C.reset} 准备便携 Git v${GIT_TAG}...`);
 
-  const gitExe = resolve(CACHE_DIR, `PortableGit-${GIT_VERSION}-64-bit.7z.exe`);
+  const gitExe = resolve(CACHE_DIR, `PortableGit-${GIT_VER}-64-bit.7z.exe`);
   const gitCmd = resolve(GIT_DIR, "cmd", "git.exe");
   const gitBin = resolve(GIT_DIR, "bin", "git.exe");
 
@@ -368,18 +359,14 @@ async function main() {
     ok("web-ui 完成");
   }
 
-  // vite build
-  if (existsSync(resolve(AGENT_CORE, "public", "index.html"))) {
-    ok("vite build 产物已存在，跳过");
-  } else {
-    log("vite build (~1min)...");
-    const r = await exec(npmCmd, ["run", "build"], { cwd: WEB_UI, print: true });
-    if (!r.ok) {
-      warn("vite build 失败，继续...");
-    } else {
-      ok("vite build 完成");
-    }
+  // vite build —— 始终重新构建，确保 public/ 与源码一致
+  log("vite build (~1min)...");
+  const buildResult = await exec(npmCmd, ["run", "build"], { cwd: WEB_UI, print: true });
+  if (!buildResult.ok) {
+    fail("vite build 失败!");
+    process.exit(1);
   }
+  ok("vite build 完成");
 
   // ═══════════════════════════════════════════
   // [5/8] 预装 Python 依赖
