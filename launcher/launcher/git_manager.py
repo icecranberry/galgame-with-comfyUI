@@ -3,7 +3,33 @@ Git 管理器 —— 封装 git CLI 调用，所有耗时操作通过 QProcess �
 """
 import os
 import re
+import subprocess
+import sys
+import time
 from PySide6.QtCore import QObject, Signal, QProcess
+
+# Windows 下隐藏 subprocess 弹出的命令行窗口
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
+_CACHE_TTL = 2.0  # 同一次初始化链内去重，2 秒内复用缓存
+
+
+def _cached(ttl: float = _CACHE_TTL):
+    """装饰器：短 TTL 内存缓存，消除启动时链式调用导致的重复 subprocess。"""
+
+    def deco(func):
+        def wrapper(self, *args, **kwargs):
+            now = time.monotonic()
+            key = func.__name__
+            entry = self._git_cache.get(key)
+            if entry and (now - entry["ts"]) < ttl:
+                return entry["value"]
+            value = func(self, *args, **kwargs)
+            self._git_cache[key] = {"value": value, "ts": now}
+            return value
+
+        return wrapper
+
+    return deco
 
 
 class GitManager(QObject):
@@ -18,6 +44,7 @@ class GitManager(QObject):
         self._project_path = project_path
         self._proc: QProcess | None = None
         self._pending_op = ""
+        self._git_cache: dict[str, dict] = {}  # key → {value, ts}
 
     @property
     def project_path(self) -> str:
@@ -34,10 +61,9 @@ class GitManager(QObject):
         """检查是否为 git 仓库。"""
         return os.path.isdir(os.path.join(self._project_path, ".git"))
 
+    @_cached()
     def get_tags(self) -> list[str]:
         """获取所有 tags，按创建时间倒序。"""
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["git", "tag", "--sort=-creatordate"],
@@ -45,6 +71,7 @@ class GitManager(QObject):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return [t.strip() for t in result.stdout.splitlines() if t.strip()]
@@ -52,10 +79,9 @@ class GitManager(QObject):
             pass
         return []
 
+    @_cached()
     def get_current_tag(self) -> str | None:
         """获取 HEAD 对应的 tag 名（精确匹配），不在 tag 上则返回 None。"""
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["git", "describe", "--tags", "--exact-match", "--abbrev=0"],
@@ -63,6 +89,7 @@ class GitManager(QObject):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -70,10 +97,9 @@ class GitManager(QObject):
             pass
         return None
 
+    @_cached()
     def get_current_branch(self) -> str:
         """获取当前分支名。"""
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -81,6 +107,7 @@ class GitManager(QObject):
                 capture_output=True,
                 text=True,
                 timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -88,12 +115,9 @@ class GitManager(QObject):
             pass
         return "unknown"
 
+    @_cached(ttl=5.0)  # ls-remote 走网络，缓存稍长
     def get_latest_remote_tag(self) -> str | None:
         """获取远程最新 tag（需要先 fetch）。"""
-        tags = self.get_tags()
-        # 过滤出远程存在的 tags（在 origin 上）
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["git", "ls-remote", "--tags", "--sort=-creatordate", "origin"],
@@ -101,6 +125,7 @@ class GitManager(QObject):
                 capture_output=True,
                 text=True,
                 timeout=15,
+                creationflags=_CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 for line in result.stdout.splitlines():

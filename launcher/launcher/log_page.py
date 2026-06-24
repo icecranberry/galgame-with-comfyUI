@@ -179,6 +179,33 @@ class LogPage(QWidget):
     # 服务状态
     # ------------------------------------------------------------------
 
+    def set_busy_state(self, busy: bool, label: str = ""):
+        """构建/启动中时禁用启动按钮，防止重复点击。"""
+        self._busy = busy
+        if busy:
+            self.start_btn.setText(label)
+            self.start_btn.setEnabled(False)
+            self.start_btn.setStyleSheet("""
+                QPushButton {
+                    background: #E5D9D2; color: #756B65; font-size: 12px;
+                    padding: 6px 14px; border-radius: 6px; border: none;
+                }
+            """)
+        else:
+            self.start_btn.setText("▶ 启动服务")
+            self.start_btn.setEnabled(True)
+            self.start_btn.setStyleSheet("""
+                QPushButton {
+                    background: #E07B6C; color: #FCFAF8; font-size: 12px;
+                    padding: 6px 14px; border-radius: 6px; border: none;
+                }
+                QPushButton:hover { background: #D96D5D; }
+                QPushButton:pressed { background: #C95F4F; }
+                QPushButton:disabled {
+                    background: #E5D9D2; color: #C9C0BB;
+                }
+            """)
+
     def update_service_status(self, service_name: str, status: str, pid: int | None = None):
         running = status == "running"
         if service_name == "vector":
@@ -186,7 +213,7 @@ class LogPage(QWidget):
         elif service_name == "agent_core":
             self.agent_indicator.set_running(running, pid)
 
-        # 更新按钮状态：有服务运行时可停止，无可运行服务时可启动
+        # 更新按钮状态
         any_running = (
             self.vector_indicator._running or self.agent_indicator._running
         )
@@ -194,4 +221,5 @@ class LogPage(QWidget):
             not self.vector_indicator._running and not self.agent_indicator._running
         )
         self.stop_btn.setEnabled(any_running)
-        self.start_btn.setEnabled(all_stopped)
+        if not getattr(self, "_busy", False):
+            self.start_btn.setEnabled(all_stopped)

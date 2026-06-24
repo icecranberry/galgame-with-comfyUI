@@ -21,7 +21,7 @@ pyinstaller ^
   --windowed ^
   --name "邻舍.EXE" ^
   --icon "assets/icon.ico" ^
-  --add-data "assets/launchHeader.png;assets" ^
+  --add-data "assets/launchHeader.jpg;assets" ^
   --add-data "assets/icon.ico;assets" ^
   --hidden-import PySide6.QtCore ^
   --hidden-import PySide6.QtGui ^

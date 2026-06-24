@@ -4,8 +4,7 @@
 """
 import os
 import sys
-import time
-from PySide6.QtCore import QObject, Signal, QProcess, QTimer, QUrl, QByteArray
+from PySide6.QtCore import QObject, Signal, QProcess, QTimer, QUrl, QByteArray, QThread
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 
@@ -46,7 +45,55 @@ def _venv_python(project_path: str) -> str:
     venv_py = os.path.join(project_path, "vector-service", "venv", "Scripts", "python.exe")
     if os.path.exists(venv_py):
         return venv_py
-    return sys.executable  # fallback
+    # fallback: 在已知安装路径中查找 Python，绝不使用 sys.executable（PyInstaller 打包后是启动器自身）
+    for candidate in [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\python.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\python.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Python313\python.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Python312\python.exe"),
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    # 最后兜底：仅在非冻结模式下用 sys.executable（开发环境）
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    return "python.exe"  # 让 QProcess 在 PATH 上查找
+
+
+class PortCleaner(QObject):
+    """在后台线程中执行 psutil 端口清理，避免阻塞 GUI。"""
+
+    output = Signal(str, str)  # (service_name, text)
+    finished = Signal()
+
+    def run(self):
+        """在后台线程中执行（由 QThread.started 触发）。"""
+        try:
+            import psutil
+
+            ports = [3099, 8765]
+            keywords = [
+                "agent-core", "vector-service", "web-ui",
+                "app.js", "server:app", "uvicorn", "nodemon",
+            ]
+            for conn in psutil.net_connections(kind="inet"):
+                if conn.laddr.port in ports and conn.status == "LISTEN":
+                    try:
+                        proc = psutil.Process(conn.pid)
+                        name = proc.name().lower()
+                        if name in ("node.exe", "python.exe"):
+                            cmdline = " ".join(proc.cmdline()).lower()
+                            if any(kw.lower() in cmdline for kw in keywords):
+                                proc.kill()
+                                self.output.emit(
+                                    "system",
+                                    f"  已终止残留进程: {proc.name()} (PID {conn.pid}) on port {conn.laddr.port}",
+                                )
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+        except Exception:
+            pass
+        self.finished.emit()
 
 
 class ServiceWorker(QObject):
@@ -297,9 +344,27 @@ class ServiceRunner(QObject):
         self._project_path = path
 
     def start_all(self):
-        """顺序启动：先端口清理 → vector → agent_core。"""
+        """顺序启动：端口清理（后台线程） → vector → agent_core。"""
+        # 防止重复点击
+        if hasattr(self, "_cleaner_thread") and self._cleaner_thread and self._cleaner_thread.isRunning():
+            self.output.emit("system", "[!] 端口清理正在进行中，请稍后再试")
+            return
+
         self.output.emit("system", "正在清理端口...")
-        self._kill_port_processes()
+
+        # 在后台线程中执行 psutil 端口清理，避免阻塞 GUI
+        self._cleaner_thread = QThread(self)
+        self._cleaner_worker = PortCleaner()
+        self._cleaner_worker.moveToThread(self._cleaner_thread)
+        self._cleaner_worker.output.connect(self.output)
+        self._cleaner_thread.started.connect(self._cleaner_worker.run)
+        self._cleaner_worker.finished.connect(self._on_ports_cleaned)
+        self._cleaner_worker.finished.connect(self._cleaner_thread.quit)
+        self._cleaner_thread.start()
+
+    def _on_ports_cleaned(self):
+        """端口清理完成 → 启动服务链。"""
+        self.output.emit("system", "端口清理完成")
 
         # 先启 vector
         self._workers["vector"].start()

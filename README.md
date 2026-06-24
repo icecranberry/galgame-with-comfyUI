@@ -1,4 +1,4 @@
-# 🎮 邻舍 · galgame-with-comfyUI
+# 🎮 邻舍.EXE
 
 [English](./README_EN.md)
 

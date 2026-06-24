@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
         # 检查是否配置了 ComfyUI 启动器路径
         comfyui_path = self._config.get("comfyui_exe")
         if not comfyui_path:
-            toast = Toast(self._stack, "请先配置 ComfyUI 启动器路径")
+            toast = Toast(self._content, "请先配置 ComfyUI 启动器路径")
             toast.show_toast(3000)
             self._switch_page(self.PAGE_SETTINGS)
             return
@@ -453,8 +453,13 @@ class MainWindow(QMainWindow):
 
         if not self._build.is_built():
             self._log_page.append_log("[系统] 检测到未构建，开始自动构建...")
+            self._home_page.set_launch_state("building")
+            self._log_page.set_busy_state(True, "⏳ 构建中...")
+            self._build.use_mirror = self._config.get("use_mirror")
             self._build.start_build(force=True)
         else:
+            self._home_page.set_launch_state("starting")
+            self._log_page.set_busy_state(True, "⏳ 启动中...")
             self._start_services()
 
     def _on_stop_all(self):
@@ -463,9 +468,11 @@ class MainWindow(QMainWindow):
 
     def _start_services(self):
         if self._config.get("check_comfyui_before_start"):
-            toast = Toast(self._stack, "⚠ 请确认已经启动 ComfyUI")
+            toast = Toast(self._content, "⚠ 请确认已经启动 ComfyUI")
             toast.show_toast(3000)
         self._log_page.append_log("[系统] 正在启动服务...")
+        self._home_page.set_launch_state("starting")
+        self._log_page.set_busy_state(True, "⏳ 启动中...")
         self._runner.start_all()
 
     # ==================================================================
@@ -492,6 +499,8 @@ class MainWindow(QMainWindow):
         self._switch_page(self.PAGE_VERSION)
         self._version_page.set_building(True)
         self._version_page.append_log("开始强制重新构建...")
+        self._home_page.set_launch_state("building")
+        self._build.use_mirror = self._config.get("use_mirror")
         self._build.start_build(force=True)
 
     def _on_cancel_build(self):
@@ -563,6 +572,8 @@ class MainWindow(QMainWindow):
             self._log_page.append_log(f"[ERROR] 构建失败: {message}")
             self._version_page.append_log(f"[ERROR] {message}")
             self._switching_version = False
+            self._home_page.set_launch_state(False)
+            self._log_page.set_busy_state(False)
 
     # ==================================================================
     # 服务信号
@@ -583,7 +594,12 @@ class MainWindow(QMainWindow):
 
         # 同步首页启动按钮状态
         is_running = v_status == "running" or a_status == "running"
-        self._home_page.set_launch_state(is_running)
+        if is_running:
+            self._home_page.set_launch_state(True)
+            self._log_page.set_busy_state(False)
+        elif overall == "all_stopped":
+            self._home_page.set_launch_state(False)
+            self._log_page.set_busy_state(False)
 
         # 手机端访问条幅：agent_core 运行即常驻显示（仅日志页）
         if a_status == "running":
@@ -654,6 +670,7 @@ class MainWindow(QMainWindow):
             comfyui_exe=self._config.get("comfyui_exe"),
             auto_browser=self._config.get("auto_open_browser"),
             check_comfyui=self._config.get("check_comfyui_before_start"),
+            use_mirror=self._config.get("use_mirror"),
         )
 
     # ==================================================================
@@ -661,9 +678,10 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _lazy_git_init(self):
-        import shutil
-
-        if not shutil.which("git"):
+        # 仅检查 git 是否在已知安装路径中存在，不扫 PATH 防止卡死
+        git_exe = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\bin"), "git.exe")
+        git_cmd = os.path.join(os.path.expandvars(r"%ProgramFiles%\Git\cmd"), "git.exe")
+        if not os.path.isfile(git_exe) and not os.path.isfile(git_cmd):
             self._home_page.update_version_info(None, "Git 未安装", None)
             self._git_ready = True
             return
@@ -681,11 +699,10 @@ class MainWindow(QMainWindow):
             self._cached_tags = self._git.get_tags()
         except Exception:
             pass
-        version_display = self._cached_current_tag or self._git.get_current_branch()
+        branch = self._git.get_current_branch()
+        version_display = self._cached_current_tag or branch
         self._home_page.update_version_info(
-            self._cached_current_tag,
-            self._git.get_current_branch(),
-            self._cached_has_updates,
+            self._cached_current_tag, branch, self._cached_has_updates,
         )
         self._config.set("current_tag", self._cached_current_tag or "")
         self._config.set("version_display", version_display)

@@ -244,10 +244,18 @@ class HomePage(QWidget):
     # Public
     # ------------------------------------------------------------------
 
-    def set_launch_state(self, running: bool):
-        """根据服务运行状态更新启动按钮的外观和文字。"""
-        if running:
+    def set_launch_state(self, state):
+        """更新启动按钮的外观和文字。
+
+        state:
+            False / "stopped" — 待启动
+            "building"        — 构建中
+            "starting"        — 服务启动中
+            True  / "running" — 运行中
+        """
+        if state in (True, "running"):
             self.launch_btn.setText("●  运行中")
+            self.launch_btn.setEnabled(True)
             self.launch_btn.setStyleSheet("""
                 QPushButton {
                     background: #C95F4F;
@@ -261,8 +269,37 @@ class HomePage(QWidget):
                 QPushButton:hover { background: #D96D5D; }
                 QPushButton:pressed { background: #C95F4F; }
             """)
-        else:
+        elif state == "building":
+            self.launch_btn.setText("⏳ 构建中...")
+            self.launch_btn.setEnabled(False)
+            self.launch_btn.setStyleSheet("""
+                QPushButton {
+                    background: #E5D9D2;
+                    color: #756B65;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0 28px;
+                    border-radius: 10px;
+                    border: none;
+                }
+            """)
+        elif state == "starting":
+            self.launch_btn.setText("⏳ 启动中...")
+            self.launch_btn.setEnabled(False)
+            self.launch_btn.setStyleSheet("""
+                QPushButton {
+                    background: #E5D9D2;
+                    color: #756B65;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 0 28px;
+                    border-radius: 10px;
+                    border: none;
+                }
+            """)
+        else:  # False / "stopped"
             self.launch_btn.setText("▶  启动邻舍")
+            self.launch_btn.setEnabled(True)
             self.launch_btn.setStyleSheet("""
                 QPushButton {
                     background: #E07B6C;

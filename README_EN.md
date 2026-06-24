@@ -1,4 +1,4 @@
-# 🎮 Neighbor · galgame-with-comfyUI
+# 🎮 邻舍.EXE
 
 [中文](./README.md)
 

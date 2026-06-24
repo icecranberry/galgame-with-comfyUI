@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "current_tag": "",
     "last_fetch_date": "",
     "version_display": "",  # 持久化版本信息，启动即可显示
+    "use_mirror": True,  # 使用国内镜像源加速 npm/pip 依赖下载
 }
 
 
