@@ -175,6 +175,12 @@ class VersionPage(QWidget):
 
     def set_current_tag(self, tag: str | None):
         self._current_tag = tag
+        self._refresh_info_label()
+
+    def _refresh_info_label(self):
+        """根据当前 _current_tag 刷新顶部版本信息标签。"""
+        tag = self._current_tag
+        self.version_info_label.setText(f"当前: {tag or '--'}   远程: --")
 
     def set_tags(self, tags: list[dict]):
         self.tag_list.clear()
@@ -185,11 +191,12 @@ class VersionPage(QWidget):
         for tag in tags:
             name = tag["name"]
             message = tag.get("message", "")
+            date = tag.get("date", "")
             display = name if name.startswith("v") else f"v{name}"
             is_current = (name == self._current_tag) or (display == current)
 
-            # 自定义 item widget：tag 名 + 注释
-            widget = _TagItemWidget(display, message, is_current)
+            # 自定义 item widget：tag 名 + 注释 + 日期
+            widget = _TagItemWidget(display, message, date, is_current)
             item = QListWidgetItem()
             item.setData(Qt.UserRole, name)
             item.setSizeHint(widget.sizeHint())
@@ -260,15 +267,20 @@ class VersionPage(QWidget):
 
 
 class _TagItemWidget(QWidget):
-    """单个 tag 项：名称 + 注释（第二行浅色）。"""
+    """单个 tag 项：左侧名称 + 注释，右侧日期。"""
 
-    def __init__(self, tag_name: str, message: str, is_current: bool, parent=None):
+    def __init__(self, tag_name: str, message: str, date: str, is_current: bool, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 4, 0, 4)
-        layout.setSpacing(2)
 
-        # 第一行：tag 名
+        # 主布局：水平，左右分布
+        root = QHBoxLayout(self)
+        root.setContentsMargins(20, 6, 16, 6)
+        root.setSpacing(12)
+
+        # ── 左侧：名称 + 注释 ──
+        left = QVBoxLayout()
+        left.setSpacing(2)
+
         name_color = "#E07B6C" if is_current else "#2E2A27"
         name_weight = "bold" if is_current else "normal"
         self._name_label = QLabel(tag_name)
@@ -276,16 +288,26 @@ class _TagItemWidget(QWidget):
             f"color: {name_color}; font-size: 13px; font-weight: {name_weight};"
             "background: transparent; border: none;"
         )
-        layout.addWidget(self._name_label)
+        left.addWidget(self._name_label)
 
-        # 第二行：注释（有则显示）
         if message:
             msg_label = QLabel(message)
             msg_label.setStyleSheet(
                 "color: #756B65; font-size: 11px; background: transparent; border: none;"
             )
             msg_label.setWordWrap(True)
-            layout.addWidget(msg_label)
+            left.addWidget(msg_label)
+
+        root.addLayout(left, 1)
+
+        # ── 右侧：日期 ──
+        if date:
+            date_label = QLabel(date)
+            date_label.setStyleSheet(
+                "color: #B09890; font-size: 11px; background: transparent; border: none;"
+            )
+            date_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            root.addWidget(date_label)
 
 
 # ------------------------------------------------------------------

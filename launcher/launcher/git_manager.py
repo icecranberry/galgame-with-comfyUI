@@ -141,11 +141,11 @@ class GitManager(QObject):
 
     @_cached()
     def get_tags(self) -> list[dict]:
-        """获取所有 tags，按创建时间倒序。每条含 name / message。"""
+        """获取所有 tags，按创建时间倒序。每条含 name / message / date。"""
         try:
             result = subprocess.run(
                 ["git", "for-each-ref", "--sort=-creatordate",
-                 "--format=%(refname:short)%00%(subject)", "refs/tags/"],
+                 "--format=%(refname:short)%00%(subject)%00%(creatordate:short)", "refs/tags/"],
                 cwd=self._project_path,
                 capture_output=True,
                 timeout=10,
@@ -160,7 +160,8 @@ class GitManager(QObject):
                     parts = line.split("\0")
                     name = parts[0].strip()
                     message = parts[1].strip() if len(parts) > 1 else ""
-                    tags.append({"name": name, "message": message})
+                    date = parts[2].strip() if len(parts) > 2 else ""
+                    tags.append({"name": name, "message": message, "date": date})
                 return tags
         except Exception:
             pass

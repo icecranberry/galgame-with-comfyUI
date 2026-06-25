@@ -483,6 +483,7 @@ class MainWindow(QMainWindow):
 
     def _on_switch_tag(self, tag: str):
         self._switching_version = True
+        self._pending_checkout_tag = tag  # 兜底：若 get_current_tag() 失败，直接用此值
         self._version_page.set_building(True)
         self._version_page.append_log(f"正在切换到 {tag}...")
         err = self._git.checkout_tag(tag)
@@ -564,7 +565,15 @@ class MainWindow(QMainWindow):
                 self._version_page.append_log("✓ 已切换到目标版本")
                 # 清理旧版本构建产物，避免残留和 skip_if 误判
                 _clean_stale_artifacts(self._project_path, self._version_page)
+                # 清除 git 缓存，确保 get_current_tag/get_tags 读到最新值
+                self._git.clear_cache()
                 self._init_git_cache()
+                # 兜底：若 shallow clone 导致 get_current_tag() 失败，用请求的 tag
+                if not self._cached_current_tag and hasattr(self, "_pending_checkout_tag"):
+                    self._cached_current_tag = self._pending_checkout_tag
+                    self._home_page.update_version_info(
+                        self._cached_current_tag, "main", self._cached_has_updates,
+                    )
                 self._config.set("current_tag", self._cached_current_tag or "")
                 self._version_page.set_current_tag(self._cached_current_tag)
                 self._version_page.set_tags(self._cached_tags)
