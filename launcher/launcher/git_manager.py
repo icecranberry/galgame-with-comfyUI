@@ -48,6 +48,7 @@ class GitManager(QObject):
         self._fetch_gen = 0          # fetch 代际：递增以忽略被 kill 的 stale callback
         self._finished_fetch_gen = 0 # 当前完成的 fetch 代际
         self._git_cache: dict[str, dict] = {}  # key → {value, ts}
+        self._stderr_lines: list[str] = []     # 累积当前操作的 stderr
 
     @property
     def project_path(self) -> str:
@@ -62,6 +63,21 @@ class GitManager(QObject):
     def clear_cache(self):
         """清除 _cached 装饰器的内存缓存。"""
         self._git_cache.clear()
+
+    def is_busy(self) -> bool:
+        """是否有正在进行的异步操作。"""
+        return bool(self._pending_op)
+
+    def _cleanup_locks(self):
+        """清理残留的 git 锁文件（进程被 kill 后可能遗留）。"""
+        for name in ("index.lock", "HEAD.lock", "config.lock",
+                     "packed-refs.lock", "shallow.lock"):
+            lock = os.path.join(self._project_path, ".git", name)
+            try:
+                if os.path.isfile(lock):
+                    os.remove(lock)
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------
     # 同步方法（快速，不阻塞）
@@ -224,7 +240,10 @@ class GitManager(QObject):
         """异步 fetch origin。返回 None 表示启动成功，否则返回错误信息。"""
         if not self.is_git_repo():
             return "不是有效的 git 仓库"
+        if self.is_busy():
+            return "上一个操作仍在进行中，请稍后再试"
 
+        self._cleanup_locks()
         self._fetch_gen += 1
         self._pending_op = "fetch"
         self._run_git(["fetch", "origin", "--tags"])
@@ -234,7 +253,10 @@ class GitManager(QObject):
         """异步 checkout 指定 tag。使用 --force 覆盖本地修改（预构建产物等）。"""
         if not self.is_git_repo():
             return "不是有效的 git 仓库"
+        if self.is_busy():
+            return "上一个操作仍在进行中，请稍后再试"
 
+        self._cleanup_locks()
         self._pending_op = "checkout"
         self._run_git(["checkout", "--force", f"tags/{tag}"])
         return None
@@ -249,13 +271,15 @@ class GitManager(QObject):
             return "已是有效的 git 仓库"
         if not self._repo_url:
             return "未配置远程仓库地址"
+        if self.is_busy():
+            return "上一个操作仍在进行中，请稍后再试"
 
         self._fetch_gen += 1
         self._pending_op = "init_repo"
         self._init_repo_steps = [
             (["init"], "git init"),
             (["remote", "add", "origin", self._repo_url], "git remote add"),
-            (["fetch", "origin", "--tags", "--depth", "1"], "git fetch"),
+            (["fetch", "origin", "--tags"], "git fetch"),
         ]
         self._init_repo_step_idx = 0
         self._run_git(self._init_repo_steps[0][0])
@@ -275,6 +299,8 @@ class GitManager(QObject):
         if self._proc is not None:
             self._proc.kill()
             self._proc.deleteLater()
+
+        self._stderr_lines.clear()
 
         self._proc = QProcess(self)
         self._proc.setWorkingDirectory(self._project_path)
@@ -318,9 +344,8 @@ class GitManager(QObject):
         data = self._proc.readAllStandardError()
         text = _decode_output(data.data())
         if text.strip():
+            self._stderr_lines.append(text.strip())
             self.output.emit(text.strip())
-            # git 经常把正常消息写到 stderr (如 clone progress)
-            # 我们仍然转发但标记为信息级别
 
     def _on_finished(self, exit_code, exit_status):
         # 忽略被 kill 的旧 QProcess 的 stale callback
@@ -344,7 +369,17 @@ class GitManager(QObject):
             # 全部完成
             self._init_repo_steps = []
 
-        msg = "操作成功" if ok else f"操作失败 (exit code: {exit_code})"
+        if ok:
+            msg = "操作成功"
+        else:
+            stderr_tail = ""
+            if self._stderr_lines:
+                joined = "; ".join(self._stderr_lines[-3:])
+                stderr_tail = f" | stderr: {joined}"
+            crash_hint = ""
+            if exit_status != QProcess.NormalExit:
+                crash_hint = f" (进程异常终止)"
+            msg = f"操作失败 (exit code: {exit_code}){crash_hint}{stderr_tail}"
         self.operation_done.emit(self._pending_op, ok, msg)
         self._pending_op = ""
 

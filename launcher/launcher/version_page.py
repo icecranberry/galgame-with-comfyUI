@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QScroller,
 )
 from PySide6.QtCore import Qt, Signal
 from .log_widget import LogWidget
@@ -57,6 +58,7 @@ class VersionPage(QWidget):
         layout.addWidget(list_label)
 
         self.tag_list = QListWidget()
+        self.tag_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         self.tag_list.setStyleSheet("""
             QListWidget {
                 background: #FCFAF8; color: #2E2A27; border: 1px solid #E5D9D2;
@@ -72,6 +74,11 @@ class VersionPage(QWidget):
                 background: #F7D7D1;
             }
         """)
+        # 平滑滚动：像素级滚动 + 触控惯性
+        QScroller.grabGesture(
+            self.tag_list.viewport(),
+            QScroller.LeftMouseButtonGesture,
+        )
         self.tag_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.tag_list, stretch=1)
         layout.addSpacing(20)

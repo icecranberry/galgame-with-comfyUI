@@ -481,13 +481,21 @@ async function main() {
   }
 
   {
+    // 删除旧 .spec 文件，避免缓存导致 --add-data 不生效
+    const specFile = resolve(launcherDir, "邻舍.EXE.spec");
+    if (existsSync(specFile)) {
+      const { unlinkSync } = await import("node:fs");
+      unlinkSync(specFile);
+      log("已删除旧的 .spec 文件");
+    }
+
     const r = await exec("pyinstaller", [
       "--onefile", "--windowed",
       "--name", "邻舍.EXE",
       "--icon", "assets/icon.ico",
       "--add-data", "assets/launchHeader.jpg;assets",
       "--add-data", "assets/icon.ico;assets",
-      "--add-data", "assets/HarmonyOS_Sans_Regular.ttf;assets",
+      "--add-data", "assets/HarmonyOS_Sans_SC_Regular.ttf;assets",
       "--add-data", "assets/navbar-title.png;assets",
       "--hidden-import", "PySide6.QtCore",
       "--hidden-import", "PySide6.QtGui",

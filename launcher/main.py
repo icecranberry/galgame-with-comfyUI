@@ -63,7 +63,7 @@ def _find_icon() -> str | None:
 
 def _load_fonts():
     """加载 HarmonyOS Sans SC Regular 字体并设为全局默认。"""
-    font_path = _assets_path("HarmonyOS_Sans_Regular.ttf")
+    font_path = _assets_path("HarmonyOS_Sans_SC_Regular.ttf")
     if font_path:
         font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id >= 0:
