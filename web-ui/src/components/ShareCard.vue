@@ -55,7 +55,7 @@
           </div>
 
           <!-- 底板底部水印 -->
-          <div class="share-frame-watermark">——来自{{ post.display_name }}的朋友圈</div>
+          <div class="share-frame-watermark">——来自邻舍.EXE</div>
         </div>
 
         <!-- 操作栏（在截图目标外部） -->

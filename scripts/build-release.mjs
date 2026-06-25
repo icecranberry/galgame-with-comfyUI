@@ -507,6 +507,7 @@ async function main() {
 
   // shallow clone 保留 .git/
   log("创建 shallow clone (保留 .git 用于版本更新)...");
+  const GITHUB_REPO_URL = "https://github.com/icecranberry/galgame-with-comfyUI.git";
   const cloneResult = await exec("git", ["clone", "--depth", "1", ROOT, RELEASE_DIR]);
   let hasGit = cloneResult.ok;
 
@@ -520,7 +521,13 @@ async function main() {
     const rcOk = await robocopy(ROOT, RELEASE_DIR, robocopyExclude);
     if (!rcOk) { fail("文件复制失败!"); process.exit(1); }
   } else {
-    ok("shallow clone 完成");
+    // 修正 remote URL：clone 会把 origin 设为本机路径，客户电脑上不存在
+    const remoteResult = await exec("git", ["remote", "set-url", "origin", GITHUB_REPO_URL], { cwd: RELEASE_DIR });
+    if (remoteResult.ok) {
+      ok("shallow clone 完成，remote 已指向 GitHub");
+    } else {
+      warn(`修正 remote URL 失败: ${remoteResult.stderr.slice(0, 200)}，版本更新可能不可用`);
+    }
   }
 
   // ── 覆盖预构建产物 ──

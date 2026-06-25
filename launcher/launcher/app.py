@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
 
         self._config = ConfigManager(self._exe_dir)
         self._project_path = self._exe_dir
-        self._git = GitManager(self._project_path)
+        self._git = GitManager(self._project_path, self._config.get("repo_url"))
         self._build = BuildManager(self._project_path)
         self._runner = ServiceRunner(self._project_path)
 
@@ -436,6 +436,22 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _on_check_update(self):
+        if not self._git.is_git_repo():
+            # 无 .git → 先尝试初始化仓库
+            self._version_page.append_log("未检测到版本管理数据，正在初始化...")
+            self._version_page.append_log("（首次初始化需要联网下载版本信息，约需 10-30 秒）")
+            self._pending_fetch_is_auto = False
+            err = self._git.init_repo()
+            if err:
+                self._version_page.append_log(f"[ERROR] {err}")
+            return
+        if self._git.is_remote_local_path():
+            self._version_page.append_log("[WARN] Git remote 指向本地路径，正在自动修复...")
+            if self._git.repair_remote():
+                self._version_page.append_log("✓ 已修复 remote URL")
+            else:
+                self._version_page.append_log("[ERROR] 无法修复 remote URL，请检查网络连接")
+                return
         self._version_page.append_log("正在检查更新...")
         self._pending_fetch_is_auto = False  # 用户手动触发，正常报错
         err = self._git.fetch_remote()
@@ -471,7 +487,32 @@ class MainWindow(QMainWindow):
         self._version_page.append_log(text)
 
     def _on_git_operation_done(self, operation: str, success: bool, message: str):
-        if operation == "fetch":
+        if operation == "init_repo":
+            if success:
+                self._init_git_cache()
+                try:
+                    self._cached_has_updates = self._git.has_updates()
+                except Exception:
+                    pass
+                self._home_page.update_version_info(
+                    self._cached_current_tag, "main", self._cached_has_updates,
+                )
+                self._version_page.set_current_tag(self._cached_current_tag)
+                self._version_page.set_tags(self._cached_tags)
+                self._version_page.set_remote_status(self._cached_has_updates)
+                self._git_ready = True
+            else:
+                self._home_page.update_version_info(
+                    None,
+                    "版本管理初始化失败，可到「版本」页手动重试",
+                    None,
+                )
+                self._git_ready = True
+                if not self._pending_fetch_is_auto:
+                    self._version_page.append_log(f"[ERROR] 初始化失败: {message}")
+            self._pending_fetch_is_auto = False
+
+        elif operation == "fetch":
             if success:
                 import datetime
                 self._config.set("last_fetch_date", datetime.date.today().isoformat())
@@ -656,10 +697,26 @@ class MainWindow(QMainWindow):
             self._home_page.update_version_info(None, "Git 未安装", None)
             self._git_ready = True
             return
+
         if not self._git.is_git_repo():
-            self._home_page.update_version_info(None, "无 Git 仓库", None)
+            # 无 .git 目录 → 自动初始化仓库（git init + remote add + fetch）
+            self._home_page.update_version_info(None, "正在初始化版本管理…", None)
+            self._pending_fetch_is_auto = True  # 静默模式
+            err = self._git.init_repo()
+            if err:
+                self._home_page.update_version_info(None, err, None)
+                self._git_ready = True
+            # 成功则等待 operation_done 信号，在 _on_git_operation_done 中继续
+            return
+
+        # 修复可能残留的构建机本地路径 remote（指向 GitHub）
+        if self._git.repair_remote():
+            self._git.clear_cache()
+        else:
+            self._home_page.update_version_info(None, "Git 仓库异常", None)
             self._git_ready = True
             return
+
         self._init_git_cache()  # 先加载本地 tag，不等网络 fetch
         self._maybe_daily_fetch()
 

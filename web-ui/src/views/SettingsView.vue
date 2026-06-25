@@ -165,6 +165,7 @@
       <div class="card">
         <h3>LLM API 设置</h3>
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
+        <p class="fd">deepseek的key获取地址：https://platform.deepseek.com/api_keys ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
 
         <!-- API Key -->
         <label class="fl">API Key</label>

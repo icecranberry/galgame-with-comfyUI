@@ -39,9 +39,10 @@ class GitManager(QObject):
     output = Signal(str)  # 操作输出（逐行）
     operation_done = Signal(str, bool, str)  # (operation_name, success, message)
 
-    def __init__(self, project_path: str, parent=None):
+    def __init__(self, project_path: str, repo_url: str = "", parent=None):
         super().__init__(parent)
         self._project_path = project_path
+        self._repo_url = repo_url
         self._proc: QProcess | None = None
         self._pending_op = ""
         self._fetch_gen = 0          # fetch 代际：递增以忽略被 kill 的 stale callback
@@ -55,6 +56,13 @@ class GitManager(QObject):
     def set_project_path(self, path: str):
         self._project_path = path
 
+    def set_repo_url(self, url: str):
+        self._repo_url = url
+
+    def clear_cache(self):
+        """清除 _cached 装饰器的内存缓存。"""
+        self._git_cache.clear()
+
     # ------------------------------------------------------------------
     # 同步方法（快速，不阻塞）
     # ------------------------------------------------------------------
@@ -62,6 +70,58 @@ class GitManager(QObject):
     def is_git_repo(self) -> bool:
         """检查是否为 git 仓库。"""
         return os.path.isdir(os.path.join(self._project_path, ".git"))
+
+    def get_remote_url(self) -> str | None:
+        """获取当前 origin remote URL。"""
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=self._project_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
+
+    def is_remote_local_path(self) -> bool:
+        """检查 remote URL 是否为本地路径（构建机遗留）。"""
+        url = self.get_remote_url()
+        if not url:
+            return False
+        # 本地路径特征：盘符开头(Windows) 或 / 开头但不含 ://
+        if sys.platform == "win32":
+            if len(url) >= 2 and url[1] == ":":
+                return True
+        if url.startswith("/") and "://" not in url:
+            return True
+        return False
+
+    def repair_remote(self) -> bool:
+        """如果 origin URL 是本地路径（构建机遗留），修正为 GitHub URL。"""
+        if not self._repo_url:
+            return False
+        if not self.is_git_repo():
+            return False
+        if not self.is_remote_local_path():
+            return True  # 已经是正常 URL，无需修复
+
+        try:
+            result = subprocess.run(
+                ["git", "remote", "set-url", "origin", self._repo_url],
+                cwd=self._project_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     @_cached()
     def get_tags(self) -> list[dict]:
@@ -179,10 +239,33 @@ class GitManager(QObject):
         self._run_git(["checkout", "--force", f"tags/{tag}"])
         return None
 
+    def init_repo(self) -> str | None:
+        """异步初始化 git 仓库（无 .git 目录时）。
+
+        链式执行: git init → git remote add origin → git fetch origin --tags。
+        返回 None 表示启动成功，否则返回错误信息。
+        """
+        if self.is_git_repo():
+            return "已是有效的 git 仓库"
+        if not self._repo_url:
+            return "未配置远程仓库地址"
+
+        self._fetch_gen += 1
+        self._pending_op = "init_repo"
+        self._init_repo_steps = [
+            (["init"], "git init"),
+            (["remote", "add", "origin", self._repo_url], "git remote add"),
+            (["fetch", "origin", "--tags", "--depth", "1"], "git fetch"),
+        ]
+        self._init_repo_step_idx = 0
+        self._run_git(self._init_repo_steps[0][0])
+        return None
+
     def cancel(self):
         """取消当前操作。"""
         if self._proc and self._proc.state() != QProcess.NotRunning:
             self._proc.kill()
+        self._init_repo_steps = []
 
     # ------------------------------------------------------------------
     # Internal
@@ -242,11 +325,25 @@ class GitManager(QObject):
     def _on_finished(self, exit_code, exit_status):
         # 忽略被 kill 的旧 QProcess 的 stale callback
         finished_gen = getattr(self, '_started_fetch_gen', 0)
-        if self._pending_op == "fetch" and finished_gen != self._fetch_gen:
+        if self._pending_op in ("fetch", "init_repo") and finished_gen != self._fetch_gen:
             # 这是上一个 fetch 进程的回调，已被新 fetch kill，忽略
             return
 
         ok = exit_code == 0 and exit_status == QProcess.NormalExit
+
+        # init_repo 是多步链式操作
+        if self._pending_op == "init_repo" and ok:
+            self._init_repo_step_idx += 1
+            steps = getattr(self, '_init_repo_steps', [])
+            if self._init_repo_step_idx < len(steps):
+                # 继续下一步
+                step_label = steps[self._init_repo_step_idx][1]
+                self.output.emit(f"[init] {step_label}...")
+                self._run_git(steps[self._init_repo_step_idx][0])
+                return
+            # 全部完成
+            self._init_repo_steps = []
+
         msg = "操作成功" if ok else f"操作失败 (exit code: {exit_code})"
         self.operation_done.emit(self._pending_op, ok, msg)
         self._pending_op = ""
