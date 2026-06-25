@@ -12,8 +12,57 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScroller,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
 from .log_widget import LogWidget
+
+
+class SmoothListWidget(QListWidget):
+    """带平滑滚动动画的 QListWidget。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._anim: QPropertyAnimation | None = None
+
+    def wheelEvent(self, event):
+        """滚轮事件：使用动画平滑滚动。"""
+        scrollbar = self.verticalScrollBar()
+        # 每次滚轮步进像素数，currentTick 可获取高精度触控板增量
+        delta = event.angleDelta().y()
+        if event.pixelDelta().y() != 0:
+            delta = event.pixelDelta().y()
+        target = scrollbar.value() - delta
+        target = max(scrollbar.minimum(), min(scrollbar.maximum(), target))
+        self._animate_to(target)
+        event.accept()
+
+    def scroll_to_item(self, index: int):
+        """平滑滚动到指定索引的项（目标项显示在可视区偏上位置）。"""
+        item = self.item(index)
+        if item is None:
+            return
+        target = self.visualItemRect(item).top() + self.verticalScrollBar().value()
+        target -= self.viewport().height() // 3
+        target = max(
+            self.verticalScrollBar().minimum(),
+            min(self.verticalScrollBar().maximum(), target),
+        )
+        self._animate_to(target)
+
+    def _animate_to(self, target: int):
+        """QPropertyAnimation 驱动滚动条到目标位置。"""
+        scrollbar = self.verticalScrollBar()
+        if target == scrollbar.value():
+            return
+
+        if self._anim and self._anim.state() == QPropertyAnimation.Running:
+            self._anim.stop()
+
+        self._anim = QPropertyAnimation(scrollbar, b"value", self)
+        self._anim.setDuration(200)
+        self._anim.setStartValue(scrollbar.value())
+        self._anim.setEndValue(target)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.start()
 
 
 class VersionPage(QWidget):
@@ -57,7 +106,7 @@ class VersionPage(QWidget):
         list_label.setStyleSheet("color: #756B65; font-size: 12px;")
         layout.addWidget(list_label)
 
-        self.tag_list = QListWidget()
+        self.tag_list = SmoothListWidget()
         self.tag_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         self.tag_list.setStyleSheet("""
             QListWidget {
@@ -80,6 +129,9 @@ class VersionPage(QWidget):
             QScroller.LeftMouseButtonGesture,
         )
         self.tag_list.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tag_list.currentItemChanged.connect(
+            lambda: self.on_tag_selection_changed()
+        )
         layout.addWidget(self.tag_list, stretch=1)
         layout.addSpacing(20)
 
