@@ -85,6 +85,7 @@ class BuildManager(QObject):
         try:
             self._cancelled = False
             self._current_idx = -1
+            self._force = force
             self._tool_path_overrides.clear()
 
             # 跳过环境检测（os.path.isdir 在 Windows 特殊目录上可能阻塞）
@@ -343,10 +344,13 @@ class BuildManager(QObject):
             return
 
         step = self._steps[self._current_idx]
+        force = getattr(self, "_force", False)
 
-        # 跳过条件
+        # 跳过条件：force 模式下只有非关键步骤才允许跳过
+        # 关键步骤（npm install ×2 + vite build）在 force 时必须执行
+        _force_steps = {"安装 agent-core 依赖", "安装 web-ui 依赖", "构建前端 (vite build)"}
         skip_if = step.get("skip_if")
-        if skip_if and skip_if():
+        if skip_if and skip_if() and not (force and step["name"] in _force_steps):
             self.output.emit(f"跳过: {step['name']} (已存在)")
             self._run_next_step()
             return
@@ -354,6 +358,21 @@ class BuildManager(QObject):
         self.step_changed.emit(step["name"])
         self.output.emit(f"{step['name']}...")
         QApplication.processEvents()  # 强制渲染步骤标题
+
+        # 预检查：验证命令可执行文件是否存在
+        cmd_path = _resolve_executable(step["cmd"], step["cwd"])
+        if cmd_path is None:
+            self.output.emit(
+                f"[ERROR] 未找到 {step['cmd']}，请确保已安装 Node.js（https://nodejs.org/）"
+            )
+            self.build_done.emit(False, f"未找到 {step['cmd']}")
+            return
+        if not os.path.isfile(cmd_path):
+            self.output.emit(
+                f"[ERROR] {cmd_path} 不存在，bundled runtime 可能不完整"
+            )
+            self.build_done.emit(False, f"{step['cmd']} 不存在")
+            return
 
         self._proc = QProcess(self)
         self._proc.setWorkingDirectory(step["cwd"])
@@ -372,7 +391,8 @@ class BuildManager(QObject):
                 env.insert(_key, os.environ[_key])
         self._proc.setProcessEnvironment(env)
 
-        self._proc.start(step["cmd"], step["args"])
+        # 使用完整路径启动，避免 PATH 查找失败的模糊报错
+        self._proc.start(cmd_path, step["args"])
 
         # 超时保护
         timeout = step.get("timeout", 60000)
@@ -461,3 +481,54 @@ def _decode_output(data: bytes) -> str:
             return data.decode("gbk")
         except UnicodeDecodeError:
             return data.decode("utf-8", errors="replace")
+
+
+def _resolve_executable(cmd: str, cwd: str) -> str | None:
+    """解析可执行文件路径。
+
+    - 如果是绝对路径 → 直接返回（存在性由调用方检查）
+    - 如果是相对路径 → 拼接 cwd 后返回
+    - 如果是裸命令名（如 "npm.cmd"）→ 搜索 PATH + 常见安装位置
+
+    返回 None 表示完全找不到（系统未安装该工具）。
+    返回路径不代表文件一定存在（调用方需 os.path.isfile 验证）。
+    """
+    # 绝对路径：直接返回
+    if os.path.isabs(cmd):
+        return cmd
+
+    # 相对路径：拼接工作目录
+    if "/" in cmd or "\\" in cmd:
+        return os.path.normpath(os.path.join(cwd, cmd))
+
+    # 裸命令名：搜索 PATH
+    import shutil
+    found = shutil.which(cmd)
+    if found:
+        return found
+
+    # PATH 中找不到 → 搜索常见安装位置
+    if sys.platform == "win32":
+        name_lower = cmd.lower()
+        if name_lower in ("npm.cmd", "npm", "node.exe", "node"):
+            for base in [
+                os.path.expandvars(r"%ProgramFiles%\nodejs"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\nodejs"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\nodejs"),
+            ]:
+                candidate = os.path.join(base, "npm.cmd" if "npm" in name_lower else "node.exe")
+                if os.path.isfile(candidate):
+                    return candidate
+        elif name_lower in ("python.exe", "python", "python3"):
+            for base in [
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312"),
+                os.path.expandvars(r"%ProgramFiles%\Python313"),
+                os.path.expandvars(r"%ProgramFiles%\Python312"),
+            ]:
+                candidate = os.path.join(base, "python.exe")
+                if os.path.isfile(candidate):
+                    return candidate
+
+    # 完全找不到 → 返回 None
+    return None

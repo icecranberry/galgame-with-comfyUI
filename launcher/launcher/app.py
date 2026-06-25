@@ -52,6 +52,29 @@ def _assets_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "..", "assets")
 
 
+def _clean_stale_artifacts(project_path: str, log_page=None):
+    """清理旧版本残留的构建产物，确保新版本强制重新构建。
+
+    git checkout --force 在 shallow clone 中不会正确清理所有文件，
+    Vite 的 emptyOutDir 也因为 skip_if 可能被跳过。这里显式删除：
+    - agent-core/public/ （前端构建输出，含旧版本 hash 的 JS/CSS）
+    """
+    import shutil
+
+    targets = [
+        os.path.join(project_path, "agent-core", "public"),
+    ]
+    for target in targets:
+        if os.path.isdir(target):
+            try:
+                shutil.rmtree(target)
+                if log_page:
+                    log_page.append_log(f"已清理: {os.path.relpath(target, project_path)}")
+            except OSError as e:
+                if log_page:
+                    log_page.append_log(f"[WARN] 清理 {os.path.relpath(target, project_path)} 失败: {e}")
+
+
 class Toast(QWidget):
     """半透明浮层通知，淡入 → 停留 → 淡出。"""
 
@@ -539,6 +562,8 @@ class MainWindow(QMainWindow):
         elif operation == "checkout":
             if success:
                 self._version_page.append_log("✓ 已切换到目标版本")
+                # 清理旧版本构建产物，避免残留和 skip_if 误判
+                _clean_stale_artifacts(self._project_path, self._version_page)
                 self._init_git_cache()
                 self._config.set("current_tag", self._cached_current_tag or "")
                 self._version_page.set_current_tag(self._cached_current_tag)
