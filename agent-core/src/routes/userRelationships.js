@@ -27,6 +27,8 @@ router.get('/', (req, res) => {
 
 // POST /api/user-relationships — 创建用户到角色的关系
 // Body: { character_id, relationship_text }
+// 如果已存在该角色的关系记录但 relationship_text 为空 → 覆盖写入
+// 如果已存在且有实质内容 → 返回 409
 router.post('/', (req, res) => {
   const db = getDb();
   const { character_id, relationship_text } = req.body;
@@ -44,30 +46,34 @@ router.post('/', (req, res) => {
     return res.status(404).json({ error: 'Character not found' });
   }
 
-  try {
-    const result = db.prepare(`
-      INSERT INTO user_relationships (character_id, relationship_text)
-      VALUES (?, ?)
-    `).run(character_id, relationship_text.trim());
+  // 检查是否已存在该角色的关系记录
+  const existing = db.prepare('SELECT id, relationship_text FROM user_relationships WHERE character_id = ?').get(character_id);
 
-    const created = db.prepare(`
-      SELECT
-        ur.*,
-        c.display_name AS to_display_name,
-        c.avatar_path AS to_avatar_path
-        
-      FROM user_relationships ur
-      JOIN characters c ON c.id = ur.character_id
-      WHERE ur.id = ?
-    `).get(result.lastInsertRowid);
-
-    res.status(201).json({ relationship: created });
-  } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+  if (existing) {
+    // 已有实质内容 → 拒绝覆盖
+    if (existing.relationship_text && existing.relationship_text.trim()) {
       return res.status(409).json({ error: 'Relationship already exists with this character' });
     }
-    throw err;
+    // 空关系（之前被"删除"过的）→ 覆盖写入
+    db.prepare('UPDATE user_relationships SET relationship_text = ? WHERE id = ?')
+      .run(relationship_text.trim(), existing.id);
+  } else {
+    db.prepare('INSERT INTO user_relationships (character_id, relationship_text) VALUES (?, ?)')
+      .run(character_id, relationship_text.trim());
   }
+
+  const created = db.prepare(`
+    SELECT
+      ur.*,
+      c.display_name AS to_display_name,
+      c.avatar_path AS to_avatar_path
+
+    FROM user_relationships ur
+    JOIN characters c ON c.id = ur.character_id
+    WHERE ur.character_id = ?
+  `).get(character_id);
+
+  res.status(201).json({ relationship: created });
 });
 
 // PUT /api/user-relationships/:id — 修改关系文本
@@ -102,7 +108,8 @@ router.put('/:id', (req, res) => {
   res.json({ relationship: updated });
 });
 
-// DELETE /api/user-relationships/:id — 删除关系
+// DELETE /api/user-relationships/:id — "删除"关系（仅清空文字，保留记录）
+// 真正的删除仅在角色被删除时由 ON DELETE CASCADE 触发
 router.delete('/:id', (req, res) => {
   const db = getDb();
   const rel = db.prepare('SELECT id FROM user_relationships WHERE id = ?').get(req.params.id);
@@ -110,7 +117,7 @@ router.delete('/:id', (req, res) => {
     return res.status(404).json({ error: 'Relationship not found' });
   }
 
-  db.prepare('DELETE FROM user_relationships WHERE id = ?').run(req.params.id);
+  db.prepare('UPDATE user_relationships SET relationship_text = ? WHERE id = ?').run('', req.params.id);
   res.json({ ok: true });
 });
 
