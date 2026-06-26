@@ -113,6 +113,60 @@ export const useChatStore = defineStore('chat', () => {
     renderStart.value = 0
   }
 
+  // 撤回上一轮对话（用户最后一条消息 + 之后的所有 assistant 消息）
+  async function undoLastRound() {
+    const id = activeCharId.value
+    if (!id) return
+    const result = await api.undoLastRound(id)
+    if (!result.ok || !result.deleted) return
+
+    // 找到本地消息数组中最后一个 user 消息的 raw_id
+    const msgs = messages.value
+    let lastUserIdx = -1
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        lastUserIdx = i
+        break
+      }
+    }
+
+    let lastUserRawId = null
+    let tailRawId = null
+
+    if (lastUserIdx === -1) {
+      // 没有 user 消息（纯主动聊天等），后端已删最后一条 agent raw
+      const lastMsg = msgs[msgs.length - 1]
+      tailRawId = lastMsg?.raw_id ?? null
+    } else {
+      lastUserRawId = msgs[lastUserIdx].raw_id ?? null
+    }
+
+    // raw_id 缺失时（旧数据、跨版本等），最安全的方式是重新加载
+    if ((lastUserIdx >= 0 && lastUserRawId == null) || (lastUserIdx === -1 && tailRawId == null && msgs.length > 0)) {
+      await loadMessages(id)
+      return
+    }
+
+    if (lastUserIdx === -1) {
+      // 纯主动聊天：只移除末尾相同 raw_id 的消息
+      if (tailRawId != null) {
+        messages.value = msgs.filter(m => m.raw_id !== tailRawId)
+      }
+    } else {
+      // 正常路径：移除 raw_id >= lastUserRawId 的所有消息
+      messages.value = msgs.filter(m => {
+        if (m.raw_id != null) return m.raw_id < lastUserRawId
+        const idx = msgs.indexOf(m)
+        return idx < lastUserIdx
+      })
+    }
+
+    // 调整渲染窗口
+    if (renderStart.value > messages.value.length - INITIAL_COUNT) {
+      renderStart.value = Math.max(0, messages.value.length - INITIAL_COUNT)
+    }
+  }
+
   // 在设置页面调用：AI 生成角色并直接入库
   async function generateCharacter(description) {
     const result = await api.generateCharacter(description)
@@ -514,5 +568,5 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
 })

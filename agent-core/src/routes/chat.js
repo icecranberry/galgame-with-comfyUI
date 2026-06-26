@@ -299,13 +299,97 @@ router.delete('/characters/:id/messages', (req, res, next) => {
   res.json({ ok: true });
 });
 
+// DELETE /api/characters/:id/messages/last-round — 撤回上一轮对话（仅删 messages + raw_messages）
+router.delete('/characters/:id/messages/last-round', (req, res, next) => {
+  const db = getDb();
+  const conversationId = convId(req.params.id);
+
+  const doDelete = () => {
+    // 1. 找到最后一轮对话的起点（最后一条 user 消息的 raw_id）
+    const lastUserRaw = db.prepare(`
+      SELECT id FROM raw_messages
+      WHERE conversation_id = ? AND role = 'user'
+      ORDER BY id DESC LIMIT 1
+    `).get(conversationId);
+
+    if (!lastUserRaw) {
+      // 没有 user 消息 → 全部是主动聊天等 agent 消息，每次撤回最后一条 agent 消息
+      const lastAssistantRaw = db.prepare(`
+        SELECT id FROM raw_messages
+        WHERE conversation_id = ? AND role = 'assistant'
+        ORDER BY id DESC LIMIT 1
+      `).get(conversationId);
+      if (!lastAssistantRaw) {
+        return res.json({ ok: true, deleted: 0, message: '没有可撤回的对话' });
+      }
+      const lastRawId = lastAssistantRaw.id;
+      const msgCount = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE raw_id = ?`).get(lastRawId).c;
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.prepare(`DELETE FROM messages WHERE raw_id = ?`).run(lastRawId);
+        db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(lastRawId);
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+      console.log(`[chat] undo last round (proactive only): raw=${lastRawId}, ${msgCount} msgs deleted for ${conversationId}`);
+      return res.json({ ok: true, deleted: 1 + msgCount });
+    }
+
+    const lastUserRawId = lastUserRaw.id;
+
+    // 2. 统计即将删除的数量
+    const rawCount = db.prepare(`
+      SELECT COUNT(*) AS c FROM raw_messages
+      WHERE conversation_id = ? AND id >= ?
+    `).get(conversationId, lastUserRawId).c;
+
+    const msgCount = db.prepare(`
+      SELECT COUNT(*) AS c FROM messages
+      WHERE conversation_id = ? AND raw_id >= ?
+    `).get(conversationId, lastUserRawId).c;
+
+    // 3. 临时关闭外键检查，仅删两张表（其他表如 memory_fragments 的 FK 引用不做处理）
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND raw_id >= ?`)
+        .run(conversationId, lastUserRawId);
+
+      db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ? AND id >= ?`)
+        .run(conversationId, lastUserRawId);
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+
+    console.log(`[chat] undo last round: ${rawCount} raw + ${msgCount} msgs deleted for ${conversationId}`);
+    res.json({ ok: true, deleted: rawCount + msgCount });
+  };
+
+  try {
+    doDelete();
+  } catch (err) {
+    if (err.code === 'SQLITE_CORRUPT_VTAB') {
+      console.warn('[chat] FTS5 corrupted during undo last round, repairing...');
+      try {
+        repairFtsIndex();
+        doDelete();
+        console.log('[chat] undo last round retry after FTS repair succeeded');
+      } catch (retryErr) {
+        console.error('[chat] undo last round retry failed:', retryErr.message);
+        return next(retryErr);
+      }
+    } else {
+      return next(err);
+    }
+  }
+});
+
 // GET /api/characters/:id/messages — 获取角色全部对话消息（本地 SQLite，数据量可控，无需分页）
 router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
 
   const messages = db.prepare(`
-    SELECT id, conversation_id, role, content, images, created_at
+    SELECT id, conversation_id, raw_id, role, content, images, created_at
     FROM messages
     WHERE conversation_id = ?
     ORDER BY id ASC

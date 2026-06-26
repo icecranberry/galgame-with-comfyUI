@@ -120,7 +120,22 @@
         <button v-show="!(isMobile && inputFocused)" class="gift-btn" @click="showGiftPanel = true" title="送礼物">
           <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
         </button>
-        <button class="send-btn" @click="send" :disabled="!inputText.trim() || chat.streaming" :title="chat.streaming ? '发送中...' : '发送'">
+        <!-- 撤回气泡：长按发送按钮浮现 -->
+        <Transition name="undo-bubble">
+          <button v-if="showUndoBubble" class="undo-bubble-btn" @click.stop="undoLastRound">
+            ↩ 撤回上一轮对话
+          </button>
+        </Transition>
+        <button class="send-btn" :class="{ 'send-disabled': sendDisabled }"
+          @click="onSendClick"
+          :title="chat.streaming ? '发送中...' : (showUndoBubble ? '' : '发送（长按可撤回）')"
+          @mousedown="onSendPressStart"
+          @mouseup="onSendPressEnd"
+          @mouseleave="onSendPressEnd"
+          @touchstart="onSendPressStart"
+          @touchend="onSendPressEnd"
+          @touchcancel="onSendPressEnd"
+        >
           <svg v-if="!chat.streaming" class="send-icon" viewBox="0 0 1024 1024" fill="#fff">
             <path d="M659.655431 521.588015q23.970037-6.71161 46.022472-13.423221 19.17603-5.752809 39.310861-11.505618t33.558052-10.546816l-13.423221 50.816479q-5.752809 21.093633-10.546816 31.640449-9.588015 25.88764-22.531835 47.940075t-24.449438 38.35206q-13.423221 19.17603-27.805243 35.475655l-117.932584 35.475655 96.838951 17.258427q-19.17603 16.299625-41.228464 33.558052-19.17603 14.382022-43.625468 30.202247t-51.29588 29.243446-59.925094 13.902622-62.801498-4.314607q-34.516854-4.794007-69.033708-16.299625 10.546816-16.299625 23.011236-36.434457 10.546816-17.258427 25.40824-40.749064t31.161049-52.254682q46.022472-77.662921 89.168539-152.449438t77.662921-135.191011q39.310861-69.992509 75.745318-132.314607-45.06367 51.775281-94.921348 116.014981-43.146067 54.651685-95.88015 129.917603t-107.385768 164.434457q-11.505618 18.217228-25.88764 42.187266t-30.202247 50.816479-32.599251 55.131086-33.078652 55.131086q-38.35206 62.322097-78.621723 130.397004 0.958801-20.134831 7.670412-51.775281 5.752809-26.846442 19.17603-67.116105t38.35206-94.921348q16.299625-34.516854 24.928839-53.692884t13.423221-29.722846q4.794007-11.505618 7.670412-15.340824-4.794007-5.752809-1.917603-23.011236 1.917603-15.340824 11.026217-44.58427t31.161049-81.977528q22.052434-53.692884 58.007491-115.535581t81.018727-122.726592 97.797753-117.932584 107.865169-101.153558 110.262172-72.389513 106.906367-32.11985q0.958801 33.558052-6.71161 88.689139t-19.17603 117.932584-25.88764 127.520599-27.805243 117.453184z"/>
           </svg>
@@ -1210,11 +1225,14 @@ onMounted(async () => {
   setupMobileKeyboard()
   // selectChar 之后拉取实时好感度（避免被 selectChar 清空）
   fetchRealtimeAffinity()
+  // 点击页面其他地方关闭撤回气泡
+  window.addEventListener('click', dismissUndoBubble)
 })
 
 onUnmounted(() => {
   teardownMobileKeyboard()
   teardownResizeObserver()
+  window.removeEventListener('click', dismissUndoBubble)
 })
 
 // 浏览器前进/后退 → 同步 store
@@ -1272,9 +1290,68 @@ function pickGuess(text) {
   inputEl.value?.focus()
 }
 
+// ── 长按发送按钮 → 撤回气泡 ──
+const showUndoBubble = ref(false)
+let pressTimer = null
+let longPressFired = false
+const sendDisabled = computed(() => !inputText.value.trim() || chat.streaming)
+
+function onSendPressStart() {
+  // 流式中不允许长按（正在发送消息），仅输入为空时可以
+  if (chat.streaming) return
+  if (!chat.messages.length) return
+  longPressFired = false
+  pressTimer = setTimeout(() => {
+    longPressFired = true
+    showUndoBubble.value = true
+  }, 600)
+}
+
+function onSendPressEnd() {
+  clearTimeout(pressTimer)
+  pressTimer = null
+}
+
+function onSendClick() {
+  if (longPressFired) {
+    // 长按刚触发，忽略本次 click（由 mouseup/touchend 之后的浏览器 click 事件产生）
+    longPressFired = false
+    return
+  }
+  if (showUndoBubble.value) {
+    // 气泡已显示，点击发送按钮 = 关闭气泡
+    showUndoBubble.value = false
+    return
+  }
+  if (sendDisabled.value) return
+  send()
+}
+
+function dismissUndoBubble(e) {
+  // 忽略来自发送按钮区域的点击（由 onSendClick 统一处理）
+  if (e && e.target.closest('.send-btn')) return
+  showUndoBubble.value = false
+}
+
+async function undoLastRound() {
+  showUndoBubble.value = false
+  const ok = await confirmFn({
+    title: '撤回对话',
+    message: '确定撤回上一轮对话吗？\n你最后一条消息和角色的回复都会被删除。',
+    okText: '撤回',
+  })
+  if (!ok) return
+  try {
+    await chat.undoLastRound()
+    await scrollToBottom(true)
+  } catch (err) {
+    console.error('[chat] undo last round failed:', err)
+  }
+}
+
 async function send() {
+  if (sendDisabled.value) return
   const text = inputText.value.trim()
-  if (!text || chat.streaming) return
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
   await chat.sendMessage(text, forceImageGen.value)
@@ -1574,7 +1651,7 @@ function renderContent(text) {
   opacity: 0;
   transition: opacity 0.3s ease, inset 0.3s ease;
 }
-.send-btn:not(:disabled):hover {
+.send-btn:not(.send-disabled):hover {
   box-shadow:
     0 4px 18px rgba(224, 123, 108, 0.35),
     0 0 32px rgba(224, 123, 108, 0.10);
@@ -1591,12 +1668,44 @@ function renderContent(text) {
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 /* 禁用态 — 渐变保留仅降透明度 + 收光，靠 transition 实现 0.35s 缓入缓出 */
-.send-btn:disabled {
+.send-btn.send-disabled {
   opacity: 0.35;
   box-shadow: none;
-  pointer-events: none;
 }
 
+/* ── 长按撤回气泡 ── */
+.undo-bubble-btn {
+  position: absolute;
+  right: 5px;
+  bottom: 72px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-bright);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 1px 4px rgba(0, 0, 0, 0.04);
+  z-index: 10;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.undo-bubble-btn:hover {
+  background: rgba(255, 255, 255, 1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.13), 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.undo-bubble-btn:active {
+  transform: scale(0.96);
+}
+
+.undo-bubble-enter-active { transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.undo-bubble-leave-active { transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1); }
+.undo-bubble-enter-from { opacity: 0; transform: translateY(8px) scale(0.92); }
+.undo-bubble-leave-to   { opacity: 0; transform: translateY(8px) scale(0.92); }
 
 /* ── 毛玻璃角色设置面板 ── */
 .settings-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:flex-start; justify-content:flex-end; z-index:1000; padding:60px 24px 0 0; }

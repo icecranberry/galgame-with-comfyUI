@@ -24,6 +24,11 @@ export async function clearMessages(characterId) {
   return res.json()
 }
 
+export async function undoLastRound(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/messages/last-round`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function generateCharacter(description) {
   const res = await fetch(`${BASE}/characters/generate`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
