@@ -289,12 +289,22 @@ async function generateMomentPost(character) {
   const db = getDb();
 
   // 0. 并发保护：检查该角色是否已有正在生成中的帖子
+  const staleThresholdSeconds = 600; // 10 分钟：超过此时间视为卡住的僵尸帖子
   const existingGenerating = db.prepare(
-    `SELECT id FROM moment_posts WHERE character_id = ? AND status = 'generating' LIMIT 1`
+    `SELECT id, created_at FROM moment_posts WHERE character_id = ? AND status = 'generating' LIMIT 1`
   ).get(character.id);
   if (existingGenerating) {
-    console.log(`[moments] ${character.display_name} already has a generating post (id=${existingGenerating.id}), skip`);
-    throw new Error('ALREADY_GENERATING');
+    // 判断是否已超时（卡住的僵尸帖）
+    const ageSeconds = (Date.now() - new Date(existingGenerating.created_at + 'Z').getTime()) / 1000;
+    if (ageSeconds > staleThresholdSeconds) {
+      // 僵尸帖：标记为 failed，继续本次生成
+      console.log(`[moments] ${character.display_name} has a stuck generating post (id=${existingGenerating.id}, ${Math.round(ageSeconds)}s old), marking as failed`);
+      db.prepare(`UPDATE moment_posts SET status = 'failed' WHERE id = ?`).run(existingGenerating.id);
+    } else {
+      // 近期帖：真正的并发调用，拒绝
+      console.log(`[moments] ${character.display_name} already has a generating post (id=${existingGenerating.id}, ${Math.round(ageSeconds)}s old), skip`);
+      throw new Error('ALREADY_GENERATING');
+    }
   }
 
   // 0.5 悲观锁：立即把 next_moment_at 推到未来，防止调度器/手动 API 并发触发同一角色

@@ -86,8 +86,38 @@ async function tick() {
   }
 }
 
+/**
+ * 启动时清理僵尸 generating 帖子（>10 分钟未完成）
+ * 确保版本升级后老用户的卡住帖子自动修复
+ */
+function cleanupStuckPosts() {
+  const db = getDb();
+  try {
+    const stuck = db.prepare(`
+      UPDATE moment_posts SET status = 'failed'
+      WHERE status = 'generating'
+        AND created_at < datetime('now', '-10 minutes')
+    `).run();
+    if (stuck.changes > 0) {
+      console.log(`[momentScheduler] Cleaned up ${stuck.changes} stuck generating post(s)`);
+      // 重置受影响角色的 next_moment_at，让它们立即重试
+      db.prepare(`
+        UPDATE characters
+        SET next_moment_at = datetime('now', '+' || (ABS(RANDOM() % 300) + 30) || ' seconds')
+        WHERE moments_disabled = 0
+          AND next_moment_at <= datetime('now')
+      `).run();
+    }
+  } catch (err) {
+    console.error('[momentScheduler] cleanup error:', err.message);
+  }
+}
+
 export function startMomentScheduler() {
   console.log('[momentScheduler] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
+
+  // 启动时立即清理僵尸帖，无需等 30 秒
+  cleanupStuckPosts();
 
   // 启动后先等 30 秒再首次检查，让服务稳定下来
   setTimeout(() => {
