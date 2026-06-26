@@ -6,9 +6,9 @@ import { config } from '../config.js';
 const BASE = config.comfyui.url;
 const WS_BASE = BASE.replace(/^http/, 'ws');
 
-// ── 节点定义缓存（从 ComfyUI /object_info 获取）──
+// ── 节点定义缓存（从 ComfyUI /object_info 获取，~2.8MB，常驻内存）──
 
-let objectInfoCache = null;   // 原始 response
+let objectInfoCache = null;   // 完整响应，含 input/output/meta 等，供未来扩展使用
 let widgetSlotMap = null;     // Map<nodeType, [{name, slot}]>  所有 widget 输入的位置
 let pollingTimer = null;
 
@@ -72,7 +72,7 @@ function startObjectInfoPolling() {
       const info = await fetchObjectInfo();
       objectInfoCache = info;
       widgetSlotMap = buildWidgetSlotMap(info);
-      console.log(`[comfyClient] object_info cached: ${Object.keys(info).length} node types, ${widgetSlotMap.size} have widgets`);
+      console.log(`[comfyClient] object_info cached: ${Object.keys(info).length} types (${(JSON.stringify(info).length/1024).toFixed(0)}KB), ${widgetSlotMap.size} with widgets`);
       // 成功后清除定时器
       if (pollingTimer) {
         clearInterval(pollingTimer);

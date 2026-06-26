@@ -63,8 +63,7 @@ const proactive = useProactiveStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {
-    moments.resetFilters()
-    moments.loadPosts()
+    moments.requestScrollToTop()
   } else {
     router.push('/moments')
   }

@@ -104,7 +104,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { useChatStore } from '../stores/chat.js'
 import { loadUserConfig } from '../userConfig.js'
@@ -115,7 +114,6 @@ import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
-const route = useRoute()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 
@@ -168,11 +166,11 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
 })
 
-// 同路由重复点击时刷新列表（兜底保护）
-watch(() => route.path, (path) => {
-  if (path === '/moments' && !moments.loading) {
-    moments.resetFilters()
-    moments.loadPosts()
+// 同路由重复点击 → 先拉取最新内容，再滚动到顶部
+watch(() => moments.scrollToTopSignal, async () => {
+  await moments.loadPosts()
+  if (scrollContainer.value) {
+    scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
   }
 })
 

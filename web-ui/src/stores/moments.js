@@ -18,6 +18,12 @@ export const useMomentsStore = defineStore('moments', () => {
   const newPostCount = ref(0)
   const isViewingMoments = ref(false)   // 用户当前是否在朋友圈页面
 
+  // ── 滚动到顶部信号 ──
+  const scrollToTopSignal = ref(0)
+  function requestScrollToTop() {
+    scrollToTopSignal.value++
+  }
+
   // 按角色筛选后的帖子
   const filteredPosts = computed(() => {
     let result = posts.value
@@ -219,7 +225,7 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
-    newPostCount, isViewingMoments,
+    newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
     loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
     connectSSE, disconnectSSE, markSeen }
 })

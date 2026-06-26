@@ -121,8 +121,7 @@ async function onCharClick(c) {
 
 function onMomentsClick() {
   if (route.path === '/moments') {
-    moments.resetFilters()
-    moments.loadPosts()
+    moments.requestScrollToTop()
   }
   if (props.isMobile) emit('charSelected')
 }
