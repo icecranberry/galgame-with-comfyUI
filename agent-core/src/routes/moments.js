@@ -167,6 +167,9 @@ router.post('/generate', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[moments] generate error:', err.message);
+    if (err.message === 'ALREADY_GENERATING') {
+      return res.status(409).json({ error: '该角色正在生成朋友圈中，请稍后再试' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -284,6 +287,21 @@ router.post('/:id/like', (req, res) => {
  */
 async function generateMomentPost(character) {
   const db = getDb();
+
+  // 0. 并发保护：检查该角色是否已有正在生成中的帖子
+  const existingGenerating = db.prepare(
+    `SELECT id FROM moment_posts WHERE character_id = ? AND status = 'generating' LIMIT 1`
+  ).get(character.id);
+  if (existingGenerating) {
+    console.log(`[moments] ${character.display_name} already has a generating post (id=${existingGenerating.id}), skip`);
+    throw new Error('ALREADY_GENERATING');
+  }
+
+  // 0.5 悲观锁：立即把 next_moment_at 推到未来，防止调度器/手动 API 并发触发同一角色
+  // 成功后再修正为正确的下次时间，失败则设短重试时间
+  const lockNextAt = new Date(Date.now() + 3600_000).toISOString(); // 1 小时后（锁）
+  db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
+    .run(toSQLite(lockNextAt), character.id);
 
   // 1. 创建 pending 记录
   const postResult = db.prepare(

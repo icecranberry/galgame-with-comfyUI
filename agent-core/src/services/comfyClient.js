@@ -13,7 +13,25 @@ const WS_BASE = BASE.replace(/^http/, 'ws');
  *   - widget 输入如有 link，link 优先
  *   - Reroute 节点递归解析
  *   - KSampler/OpenAI seed 后跳过 control_after_generate
+ *
+ * 兼容处理：部分 ComfyUI 前端（如 UE 版）导出的 workflow 会省略 widget-only inputs
+ * （如 LoraLoader 的 lora_name/strength 只留 widgets_values 不写 inputs）。
+ * NODE_WIDGET_FALLBACK 定义常见节点类型的缺失 widget 插槽，按需补全。
  */
+const NODE_WIDGET_FALLBACK = {
+  // LoraLoader: inputs[0]=model, [1]=clip, [2]=lora_name, [3]=strength_model, [4]=strength_clip
+  LoraLoader: [
+    { name: 'lora_name', slot: 2 },
+    { name: 'strength_model', slot: 3 },
+    { name: 'strength_clip', slot: 4 },
+  ],
+  // LoraLoaderModelOnly: inputs[0]=model, [1]=lora_name, [2]=strength_model
+  LoraLoaderModelOnly: [
+    { name: 'lora_name', slot: 1 },
+    { name: 'strength_model', slot: 2 },
+  ],
+};
+
 function guiToApi(workflow) {
   const nodeIds = new Set(workflow.nodes.map(n => String(n.id)));
   const rerouteIds = new Set(workflow.nodes.filter(n => n.type === 'Reroute').map(n => String(n.id)));
@@ -73,6 +91,26 @@ function guiToApi(workflow) {
           wvIdx++;
         }
       }
+    }
+
+    // 孤儿 widget 补全：部分 ComfyUI 前端导出时省略 widget-only inputs
+    const fallbackDefs = NODE_WIDGET_FALLBACK[node.type];
+    if (fallbackDefs && wvIdx < wvs.length) {
+      const missingSlots = fallbackDefs.filter(f => !(f.name in apiNode.inputs));
+      for (let j = 0; j < missingSlots.length && wvIdx + j < wvs.length; j++) {
+        const val = wvs[wvIdx + j];
+        apiNode.inputs[missingSlots[j].name] = val ?? '';
+      }
+      console.log(`[comfyClient] ${node.type}(id=${node.id}) fallback injected:`,
+        missingSlots.map((f, j) => `${f.name}=${JSON.stringify(wvs[wvIdx + j])}`).join(', '));
+    }
+
+    // 诊断日志：模型加载器节点输出完整的 widgets_values 和 inputs 对照
+    if (['CLIPLoader', 'UNETLoader', 'VAELoader'].includes(node.type)) {
+      console.log(`[comfyClient] ${node.type}(id=${node.id}) guiToApi result:`,
+        JSON.stringify(apiNode.inputs));
+      console.log(`[comfyClient] ${node.type}(id=${node.id}) raw widgets_values:`,
+        JSON.stringify(wvs), `| inputs count: ${(node.inputs || []).length}`);
     }
 
     api[String(node.id)] = apiNode;

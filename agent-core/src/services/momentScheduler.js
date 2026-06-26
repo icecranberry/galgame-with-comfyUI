@@ -71,10 +71,13 @@ async function tick() {
       console.log(`[momentScheduler] Done: ${candidate.display_name}`);
     } catch (err) {
       console.error(`[momentScheduler] Failed for ${candidate.display_name}:`, err.message);
-      // 失败也设置下次时间，避免反复重试（30 分钟后重试）
-      const nextAt = new Date(Date.now() + 30 * 60_000).toISOString();
-      db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
-        .run(toSQLiteDate(nextAt), candidate.id);
+      // ALREADY_GENERATING 表示已有另一个生成任务在进行中（锁已设），跳过
+      if (err.message !== 'ALREADY_GENERATING') {
+        // 失败也设置下次时间，避免反复重试（30 分钟后重试）
+        const nextAt = new Date(Date.now() + 30 * 60_000).toISOString();
+        db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
+          .run(toSQLiteDate(nextAt), candidate.id);
+      }
     }
   } catch (err) {
     console.error('[momentScheduler] tick error:', err.message);
