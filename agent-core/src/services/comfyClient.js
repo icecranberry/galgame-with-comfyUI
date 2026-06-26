@@ -6,26 +6,101 @@ import { config } from '../config.js';
 const BASE = config.comfyui.url;
 const WS_BASE = BASE.replace(/^http/, 'ws');
 
+// ── 节点定义缓存（从 ComfyUI /object_info 获取）──
+
+let objectInfoCache = null;   // 原始 response
+let widgetSlotMap = null;     // Map<nodeType, [{name, slot}]>  所有 widget 输入的位置
+let pollingTimer = null;
+
 /**
- * GUI workflow → API prompt 转换
- *
- * 严格模拟 ComfyUI 原生 Web UI 的提交流程：
- *   - widget 输入如有 link，link 优先
- *   - Reroute 节点递归解析
- *   - KSampler/OpenAI seed 后跳过 control_after_generate
- *
- * 兼容处理：部分 ComfyUI 前端（如 UE 版）导出的 workflow 会省略 widget-only inputs
- * （如 LoraLoader 的 lora_name/strength 只留 widgets_values 不写 inputs）。
- * NODE_WIDGET_FALLBACK 定义常见节点类型的缺失 widget 插槽，按需补全。
+ * 从 ComfyUI 获取所有已注册节点的完整 input schema。
+ * 用于解析紧凑格式 workflow（如 aki-v2）中省略的 widget 输入。
  */
+async function fetchObjectInfo() {
+  const res = await fetch(`${BASE}/object_info`);
+  if (!res.ok) throw new Error(`object_info returned ${res.status}`);
+  return res.json();
+}
+
+/** 判断 object_info 中的类型是否为连接类型（非 widget）*/
+function isConnectionType(typeInfo) {
+  if (!Array.isArray(typeInfo) || typeInfo.length === 0) return false;
+  // ["MODEL"] — 单元素字符串 → 连接类型
+  // ["FLOAT", {...}] — 字符串+配置 → widget
+  // [["opt1","opt2"]] — 嵌套数组 → COMBO widget
+  return typeInfo.length === 1 && typeof typeInfo[0] === 'string';
+}
+
+/** 从 object_info 构建每个节点类型的 widget 插槽列表 */
+function buildWidgetSlotMap(objectInfo) {
+  const map = new Map();
+  for (const [nodeType, info] of Object.entries(objectInfo)) {
+    const inputDef = info.input || {};
+    const required = inputDef.required || {};
+    const optional = inputDef.optional || {};
+
+    const slots = [];
+    let slotIdx = 0;
+
+    for (const entries of [required, optional]) {
+      // 兼容数组格式 [[name, typeInfo], ...] 和对象格式 {name: typeInfo, ...}
+      const list = Array.isArray(entries)
+        ? entries
+        : Object.entries(entries);
+      for (const [name, typeInfo] of list) {
+        if (!isConnectionType(typeInfo)) {
+          slots.push({ name, slot: slotIdx });
+        }
+        slotIdx++;
+      }
+    }
+
+    if (slots.length > 0) {
+      map.set(nodeType, slots);
+    }
+  }
+  return map;
+}
+
+/** 启动后台轮询，直到成功获取 object_info */
+function startObjectInfoPolling() {
+  if (pollingTimer) return;
+
+  const poll = async () => {
+    try {
+      console.log('[comfyClient] Fetching ComfyUI /object_info...');
+      const info = await fetchObjectInfo();
+      objectInfoCache = info;
+      widgetSlotMap = buildWidgetSlotMap(info);
+      console.log(`[comfyClient] object_info cached: ${Object.keys(info).length} node types, ${widgetSlotMap.size} have widgets`);
+      // 成功后清除定时器
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+    } catch (err) {
+      console.log(`[comfyClient] object_info unavailable (${err.message}), retrying in 30s...`);
+    }
+  };
+
+  poll(); // 立即尝试一次
+  pollingTimer = setInterval(poll, 30_000);
+}
+
+// 模块加载时启动轮询
+startObjectInfoPolling();
+
+// ── 紧凑格式硬编码兜底（object_info 不可用时的最后防线）──
+
 const NODE_WIDGET_FALLBACK = {
-  // LoraLoader: inputs[0]=model, [1]=clip, [2]=lora_name, [3]=strength_model, [4]=strength_clip
+  PrimitiveInt:    [{ name: 'value', slot: 0 }],
+  PrimitiveString: [{ name: 'value', slot: 0 }],
+  PrimitiveFloat:  [{ name: 'value', slot: 0 }],
   LoraLoader: [
     { name: 'lora_name', slot: 2 },
     { name: 'strength_model', slot: 3 },
     { name: 'strength_clip', slot: 4 },
   ],
-  // LoraLoaderModelOnly: inputs[0]=model, [1]=lora_name, [2]=strength_model
   LoraLoaderModelOnly: [
     { name: 'lora_name', slot: 1 },
     { name: 'strength_model', slot: 2 },
@@ -93,16 +168,40 @@ function guiToApi(workflow) {
       }
     }
 
-    // 孤儿 widget 补全：部分 ComfyUI 前端导出时省略 widget-only inputs
-    const fallbackDefs = NODE_WIDGET_FALLBACK[node.type];
-    if (fallbackDefs && wvIdx < wvs.length) {
-      const missingSlots = fallbackDefs.filter(f => !(f.name in apiNode.inputs));
-      for (let j = 0; j < missingSlots.length && wvIdx + j < wvs.length; j++) {
-        const val = wvs[wvIdx + j];
-        apiNode.inputs[missingSlots[j].name] = val ?? '';
+    // 孤儿 widget 补全：紧凑格式（如 aki-v2）下 widget-only inputs 从 inputs 数组省略
+    // 优先用 ComfyUI /object_info 的节点定义，不可用时回退到硬编码 NODE_WIDGET_FALLBACK
+    if (wvIdx < wvs.length) {
+      // 优先：object_info 推导的 widget 插槽
+      const objSlots = widgetSlotMap?.get(node.type);
+      if (objSlots) {
+        // consumedCount 个 widget 已被主循环消费，剩余从 objSlots[consumedCount] 开始
+        let consumedCount = 0;
+        // 计算主循环实际消费了多少个 widget（从 inputs 中匹配的 widget 数）
+        for (const inp of (node.inputs || [])) {
+          if (inp.widget) consumedCount++;
+        }
+        // consumedCount 与 wvIdx 应该一致，但以防万一用 consumedCount
+        const remainingSlots = objSlots.slice(wvIdx)
+          .filter(s => !(s.name in apiNode.inputs));
+        for (let j = 0; j < remainingSlots.length && wvIdx + j < wvs.length; j++) {
+          apiNode.inputs[remainingSlots[j].name] = wvs[wvIdx + j] ?? '';
+        }
+        if (remainingSlots.length > 0) {
+          console.log(`[comfyClient] ${node.type}(id=${node.id}) object_info fallback:`,
+            remainingSlots.map((s, j) => `${s.name}=${JSON.stringify(wvs[wvIdx + j])}`).join(', '));
+        }
+      } else {
+        // 兜底：硬编码 NODE_WIDGET_FALLBACK
+        const fallbackDefs = NODE_WIDGET_FALLBACK[node.type];
+        if (fallbackDefs) {
+          const missingSlots = fallbackDefs.filter(f => !(f.name in apiNode.inputs));
+          for (let j = 0; j < missingSlots.length && wvIdx + j < wvs.length; j++) {
+            apiNode.inputs[missingSlots[j].name] = wvs[wvIdx + j] ?? '';
+          }
+          console.log(`[comfyClient] ${node.type}(id=${node.id}) hardcoded fallback:`,
+            missingSlots.map((f, j) => `${f.name}=${JSON.stringify(wvs[wvIdx + j])}`).join(', '));
+        }
       }
-      console.log(`[comfyClient] ${node.type}(id=${node.id}) fallback injected:`,
-        missingSlots.map((f, j) => `${f.name}=${JSON.stringify(wvs[wvIdx + j])}`).join(', '));
     }
 
     // 诊断日志：模型加载器节点输出完整的 widgets_values 和 inputs 对照
