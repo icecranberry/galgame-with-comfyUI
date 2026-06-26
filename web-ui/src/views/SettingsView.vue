@@ -9,7 +9,7 @@
       <!-- ComfyUI params: 对话配图 + 朋友圈配图 -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：https://anima.mooshieblob.com/</p>
+        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a></p>
         <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均7秒/图</p>
 
         <!-- 对话配图 -->
@@ -165,7 +165,7 @@
       <div class="card">
         <h3>LLM API 设置</h3>
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
-        <p class="fd">deepseek的key获取地址：https://platform.deepseek.com/api_keys ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
+        <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
 
         <!-- API Key -->
         <label class="fl">API Key</label>
@@ -727,6 +727,9 @@ function resetTestPrompts() {
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
+/* ── 保存按钮加宽 ── */
+.btn-primary { padding-left: 28px; padding-right: 28px; }
+
 /* ── 毛玻璃卡片 ── */
 .card {
   background: var(--glass-bg);
@@ -755,6 +758,16 @@ function resetTestPrompts() {
 .pl { font-size: 11px; color: var(--text-secondary); }
 .pbtn { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
 .pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
+
+/* ── 外部链接高亮 ── */
+.ext-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+.ext-link:hover { color: var(--accent-hover); }
 
 /* ── 画师串收藏夹 ── */
 .fav-input-row { display: flex; gap: 8px; align-items: flex-start; }

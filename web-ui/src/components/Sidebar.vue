@@ -31,7 +31,7 @@
 
     <!-- 移动端底部：朋友圈 + 更多 -->
     <div v-if="isMobile" class="sidebar-footer">
-      <router-link to="/moments" class="footer-moments-btn" :class="{ active: $route.path === '/moments' }" @click="onFooterClick">
+      <div class="footer-moments-btn" :class="{ active: $route.path === '/moments' }" @click="onMomentsClick">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
             <path d="M679.17 398.982V126.497s-133.338-71.481-288.989-16.366l288.99 288.851z m25.245 160.303V137.748s157.63 71.434 202.052 244.963L704.415 559.285z m-84.8 122.527l290.99-273.649s51.488 83.709-25.293 273.649H619.614z m-148.586 34.695h393.014S816.6 845.102 646.788 898.195L471.03 716.507z m-128.293-86.811v256.18s102.072 65.365 276.878 21.477L342.736 629.696z m-227.366 13.25l199.075-178.62v406.207c0-0.001-120.272-41.75-199.075-227.587z m-5.045-28.57S64.787 467.442 128.48 339.824h273.81L110.326 614.377z m35.357-303.193s57.603-130.594 214.21-191.87l186.894 191.87H145.682z" />
@@ -39,7 +39,7 @@
           <span v-if="moments.newPostCount > 0" class="nav-dot">{{ moments.newPostCount > 99 ? '99+' : moments.newPostCount }}</span>
         </div>
         <span>朋友圈</span>
-      </router-link>
+      </div>
       <button class="footer-more-btn" @click="showMoreMenu = !showMoreMenu">
         <svg viewBox="0 0 1024 1024" width="22" height="22" fill="currentColor">
           <path d="M436 128H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V168a40 40 0 0 0-40-40z m-32 276H200V200h204z m32 144H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H200V620h204z m452-276H588a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H620V620h204zM716 118c-104.9 0-190 85.1-190 190s85.1 190 190 190 190-85.1 190-190-85.1-190-190-190z m83.4 273.4A117.8 117.8 0 1 1 834 308a117 117 0 0 1-34.6 83.4z"/>
@@ -119,7 +119,11 @@ async function onCharClick(c) {
   if (props.isMobile) emit('charSelected')
 }
 
-function onFooterClick() {
+function onMomentsClick() {
+  if (route.path === '/moments') {
+    moments.resetFilters()
+    moments.loadPosts()
+  }
   if (props.isMobile) emit('charSelected')
 }
 

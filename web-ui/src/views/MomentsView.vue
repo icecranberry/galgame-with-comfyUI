@@ -103,7 +103,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { useChatStore } from '../stores/chat.js'
 import { loadUserConfig } from '../userConfig.js'
@@ -114,6 +115,7 @@ import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
+const route = useRoute()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 
@@ -164,6 +166,14 @@ onMounted(async () => {
 onUnmounted(() => {
   moments.isViewingMoments = false
   document.removeEventListener('click', onDocumentClick)
+})
+
+// 同路由重复点击时刷新列表（兜底保护）
+watch(() => route.path, (path) => {
+  if (path === '/moments' && !moments.loading) {
+    moments.resetFilters()
+    moments.loadPosts()
+  }
 })
 
 function onDocumentClick(e) {
