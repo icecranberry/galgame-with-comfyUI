@@ -12,7 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { submitWorkflow } from './comfyClient.js';
 import { config } from '../config.js';
 

@@ -16,7 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import {
   loadEmotionState, getCompositeEmotion, loadAffinity,
@@ -213,6 +213,27 @@ const STREAK_2_STRATEGIES = [
   '对方已经连续没回你的消息了。你决定把"没人回"变成一个段子。用夸张的表演式语气。要让对方看了笑出来，然后忍不住想回',
 ];
 
+// ── 上下文衔接策略 ──
+// 根据距上次聊天时间选择不同的衔接强度，解决主动聊天"话题跳跃太突兀"的问题
+
+const CONTEXT_BRIDGE_STRATEGIES = {
+  // < 2 小时：热衔接 — 先承接上一轮对话，再丝滑过渡到新动机
+  hot: [
+    '你们刚聊完不久，上一轮的话题还热乎着。不要像"刚上线"一样生硬切话题——先对上一轮的内容做一个简短的承接反应（接个话茬、吐槽一句、回眸一笑），再丝滑地过渡到你这次的动机。让人感觉对话从未中断。',
+    '你们几分钟前还在聊，现在只是那段对话的延续。先自然地呼应一下上一轮的茬，哪怕只是一句感叹，然后用"对了……"的轻松感切到这次的动机话题。',
+    '上一轮的话题还没冷——先接住它，顺势带一笔，然后自然地转向这次的动机。不要让人觉得你"重启"了，要让切换像水流一样平滑。',
+  ],
+  // 2~24 小时：温衔接 — 对上一轮有轻量回响
+  warm: [
+    '你们今天聊过。可以简单提一句"之前聊到……"或对上一轮有一个轻量回响，再引入这次的动机。不用长篇大论，一个自然的呼应就够了。',
+    '上次聊天还在今天，记忆犹新。用"我刚刚还在想……"或"说到这个……"的句式，把上一轮的内容当作引子，自然过渡到这次的动机。',
+  ],
+  // > 24 小时：凉衔接 — "想起来"式引子
+  cool: [
+    '你们有段时间没聊了。可以从上一轮聊天中找一个记忆点，用"突然想起来"或"之前聊到……"的感觉做引子，自然过渡到这次的动机。',
+  ],
+};
+
 function pickStreakHint(streak) {
   if (streak >= 2) {
     return STREAK_2_STRATEGIES[Math.floor(Math.random() * STREAK_2_STRATEGIES.length)];
@@ -285,8 +306,9 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
 
   // 3. 距上次聊天时间描述
   let timeDesc = '你们还没有聊过天';
+  let hoursAgo = Infinity;
   if (lastMessageAt) {
-    const hoursAgo = (Date.now() - new Date(lastMessageAt).getTime()) / 3600000;
+    hoursAgo = (Date.now() - new Date(lastMessageAt).getTime()) / 3600000;
     if (hoursAgo < 1) timeDesc = '不到一小时前刚聊过';
     else if (hoursAgo < 24) timeDesc = `大约 ${Math.round(hoursAgo)} 小时前聊过`;
     else timeDesc = `大约 ${Math.round(hoursAgo / 24)} 天前聊过`;
@@ -324,7 +346,16 @@ ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotio
     return '\n【上一轮对话】\n' + cleaned.map(r => `${r.role === 'user' ? userName : character.display_name}：${r.content}`).join('\n');
   })();
 
-  // msgs[2] — 任务：时间 + 上一轮对话 + 动机 + 要求
+  // 上下文衔接：根据时间距离自动选择衔接策略
+  let bridgingHint = '';
+  if (prevRound) {
+    const strategies = hoursAgo < 2 ? CONTEXT_BRIDGE_STRATEGIES.hot
+      : hoursAgo < 24 ? CONTEXT_BRIDGE_STRATEGIES.warm
+      : CONTEXT_BRIDGE_STRATEGIES.cool;
+    bridgingHint = `\n【上下文衔接】${strategies[Math.floor(Math.random() * strategies.length)]}`;
+  }
+
+  // msgs[2] — 任务：时间 + 上一轮对话 + 衔接指令 + 动机 + 要求
   const msgTask = `【上次聊天时间】
 ${timeDesc}
 
@@ -332,8 +363,8 @@ ${timeDesc}
 ${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; return `${wd} ${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}${prevRound}
 
 请以角色的口吻，生成一句自然的口语化开场白（15~50 字）。
-${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}
-你这次主动发消息的动机是「${motiveLabel}」：${motiveDesc}。请在开场白中自然体现这个动机——不要生硬地说"我因为xxx来找你"，让动机成为你说话的潜台词。
+${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}${bridgingHint}
+你这次主动发消息的动机是「${motiveLabel}」：${motiveDesc}。请在承接上文之后，把动机自然地融入开场白中——不要生硬地说"我因为xxx来找你"，让动机成为你说话的潜台词。
 要求：
 - 仅输出对话文字，不要包含任何动作描写、括号、格式标记
 - 自然口语化，像是突然想到就发了一条消息

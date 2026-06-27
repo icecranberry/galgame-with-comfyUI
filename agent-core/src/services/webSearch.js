@@ -9,7 +9,7 @@
  * 搜索链路：萌娘百科（mzh.moegirl.org.cn）→ 无结果时 Bing 降级
  */
 
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT = 5000; // 萌娘百科/通用单次请求 5s 超时

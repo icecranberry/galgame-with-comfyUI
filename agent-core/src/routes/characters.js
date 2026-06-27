@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule, repairFtsIndex } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';

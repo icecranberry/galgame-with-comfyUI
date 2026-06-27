@@ -8,7 +8,7 @@
  */
 
 import { getDb, getSystemRules } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { embedBatch } from './vectorClient.js';
 
 const EXTRACT_INTERVAL = 10; // 每 10 条用户消息触发

@@ -17,7 +17,7 @@
  */
 
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 
 // ── 常量 ──
 

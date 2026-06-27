@@ -6,7 +6,7 @@
  */
 
 import { getDb } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { upsertVector } from './vectorClient.js';
 
 function buildExtractPrompt(characterPrompt, participantNames, messagesText) {

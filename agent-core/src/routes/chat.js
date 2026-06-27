@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
-import { chatStream, chatSync } from '../llm/deepseek.js';
+import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
 import { extractMemoryFragments } from '../services/memoryExtractor.js';
@@ -786,7 +786,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     let fullContent = '';
 
     send('response_start', {});
-    for await (const chunk of chatStream(msgs, { temperature: 0.72 })) {
+    for await (const chunk of chatStream(msgs, { temperature: 0.72, label: '主聊天流' })) {
       const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n/g, '');
       fullContent += cleanChunk;
 

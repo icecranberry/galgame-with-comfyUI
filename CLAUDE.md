@@ -52,7 +52,7 @@ project-root/
 │  └─ src/
 │     ├─ config.js          # 配置中心（dotenv + DB 持久化 + .env 写回，三通道同步）
 │     ├─ db/index.js        # SQLite 表/FTS5/触发器/索引/种子/迁移/repairFtsIndex
-│     ├─ llm/deepseek.js    # OpenAI 兼容客户端（chatSync + chatStream，含重试/超时/截断）
+│     ├─ llm/llm-client.js  # OpenAI 兼容客户端（chatSync + chatStream，含重试/超时/截断）
 │     ├─ middleware/errorHandler.js
 │     ├─ routes/
 │     │  ├─ chat.js         # SSE 流式对话 + 三种生图触发 + 后处理（情绪/记忆/画像/好感度）

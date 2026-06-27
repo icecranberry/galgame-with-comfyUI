@@ -7,7 +7,7 @@
  */
 
 import { getDb, getSystemRules } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { upsertVector } from './vectorClient.js';
 
 /** 去掉消息末尾的 {"prompt":"..."} JSON 标签 */

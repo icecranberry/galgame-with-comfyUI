@@ -60,8 +60,8 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
  * 流式聊天（用于对话）
  * @returns {AsyncGenerator<string>}
  */
-export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" } } = {}) {
-  console.log('\n══════════ [DeepSeek → stream request] ══════════');
+export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" }, label = 'stream' } = {}) {
+  console.log(`\n══════════ [DeepSeek → ${label}] ══════════`);
   console.log(JSON.stringify(messages, null, 2));
   console.log('────────────────────────────────────────────────');
 
@@ -79,7 +79,7 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
 
   const stream = await getClient().chat.completions.create(params);
 
-  console.log('[DeepSeek ← stream response start]');
+  console.log(`[DeepSeek ← ${label} start]`);
   let total = '';
 
   for await (const chunk of stream) {
@@ -90,7 +90,7 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
     }
   }
 
-  console.log('[DeepSeek ← stream response end]');
+  console.log(`[DeepSeek ← ${label} end]`);
   console.log((total || '(empty)').slice(0, 2000));
   if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
   console.log('═══════════════════════════════════════════════\n');
