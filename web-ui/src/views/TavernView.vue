@@ -173,7 +173,7 @@
                 v-model="recruit.desc"
                 class="fi recruit-textarea"
                 rows="4"
-                placeholder="例：安比·德玛拉（绝区零）/ 芙宁娜，原神/ 御坂美琴《某科学的超电磁炮》/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
+                placeholder="例：安比·德玛拉（绝区零）/ 流萤，崩坏：星穹铁道/ 御坂美琴《某科学的超电磁炮》/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
               ></textarea>
@@ -207,21 +207,6 @@
                 <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
 
                 <!-- 朋友圈开关 -->
-                <div class="toggle-row" style="margin-top:12px">
-                  <span class="toggle-label">不看ta的朋友圈</span>
-                  <label class="toggle-switch">
-                    <input type="checkbox" v-model="recruit.result.momentsDisabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-                <!-- 主动聊天开关 -->
-                <div class="toggle-row" style="margin-top:12px">
-                  <span class="toggle-label">不主动聊天</span>
-                  <label class="toggle-switch">
-                    <input type="checkbox" v-model="recruit.result.proactiveDisabled" />
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
               </div>
               <div class="modal-actions modal-actions-between">
                 <button
@@ -330,6 +315,13 @@
                   <span class="toggle-slider"></span>
                 </label>
               </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不发生奇遇</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
             </div>
             <div class="modal-body">
               <!-- 头像 -->
@@ -384,6 +376,13 @@
               <span class="float-label">不主动聊天</span>
               <label class="toggle-switch float-switch">
                 <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不发生奇遇</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -660,7 +659,7 @@ async function doGenerate() {
       recruit.error = result.error
       return
     }
-    recruit.result = { ...result, momentsDisabled: false, proactiveDisabled: false }
+    recruit.result = { ...result }
     recruit.step = 'preview'
     // 冒泡提示搜索结果
     if (result.search_found) {
@@ -687,8 +686,6 @@ async function confirmRecruit() {
       display_name: recruit.result.display_name,
       base_prompt: recruit.result.base_prompt,
       emotion_baseline: recruit.result.emotion_baseline,
-      moments_disabled: recruit.result.momentsDisabled ? 1 : 0,
-      proactive_disabled: recruit.result.proactiveDisabled ? 1 : 0,
     })
     if (r.error) {
       recruit.error = r.error
@@ -714,9 +711,11 @@ const detail = reactive({
   editPrompt: '',
   momentsDisabled: false,
   proactiveDisabled: false,
+  eventsDisabled: false,
   dirty: false,
   momentsToggling: false,
   proactiveToggling: false,
+  eventsToggling: false,
 })
 
 const showRelationGraph = ref(false)
@@ -787,6 +786,7 @@ function openCharDetail(c) {
   detail.editPrompt = c.base_prompt || ''
   detail.momentsDisabled = !!c.moments_disabled
   detail.proactiveDisabled = !!c.proactive_disabled
+  detail.eventsDisabled = !!c.events_disabled
   detail.dirty = false
   detail.show = true
 }
@@ -804,6 +804,7 @@ async function saveCharDetail() {
     base_prompt: detail.editPrompt,
     moments_disabled: detail.momentsDisabled,
     proactive_disabled: detail.proactiveDisabled,
+    events_disabled: detail.eventsDisabled,
   })
   detail.dirty = false
   await chat.loadCharacters()
@@ -847,6 +848,24 @@ async function toggleProactiveDisabled() {
     console.error('toggleProactiveDisabled failed:', e)
   } finally {
     detail.proactiveToggling = false
+  }
+}
+
+// 不发生奇遇 toggle — 即时持久化
+async function toggleEventsDisabled() {
+  const c = detail.char
+  if (!c) return
+  detail.eventsToggling = true
+  try {
+    await api.updateCharacter(c.id, { events_disabled: detail.eventsDisabled })
+    c.events_disabled = detail.eventsDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.events_disabled = detail.eventsDisabled
+  } catch (e) {
+    detail.eventsDisabled = !detail.eventsDisabled
+    console.error('toggleEventsDisabled failed:', e)
+  } finally {
+    detail.eventsToggling = false
   }
 }
 

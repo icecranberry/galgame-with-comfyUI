@@ -598,3 +598,106 @@ export async function deleteArtistFavorite(id) {
   })
   return res.json()
 }
+
+// ── Events 奇遇 ──
+export async function listEvents() {
+  const res = await fetch(`${BASE}/events`)
+  return res.json()
+}
+
+export async function getActiveEvent(characterId) {
+  const res = await fetch(`${BASE}/events/active/${characterId}`)
+  return res.json()
+}
+
+export async function chooseEventOption(eventId, choice, customText) {
+  const res = await fetch(`${BASE}/events/${eventId}/choose`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ choice, customText }),
+  })
+  return res.json()
+}
+
+export async function dismissEvent(eventId) {
+  const res = await fetch(`${BASE}/events/${eventId}/dismiss`, { method: 'POST' })
+  return res.json()
+}
+
+export async function getEventsUnread() {
+  const res = await fetch(`${BASE}/events/unread-count`)
+  return res.json()
+}
+
+export async function markEventsRead() {
+  const res = await fetch(`${BASE}/events/mark-read`, { method: 'POST' })
+  return res.json()
+}
+
+export async function generateEvent(characterId, eventTypeKey) {
+  const res = await fetch(`${BASE}/events/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, eventTypeKey }),
+  })
+  return res.json()
+}
+
+/**
+ * 连接奇遇事件 SSE 推送流
+ * @param {{ onNewEvent?: Function, onUpdate?: Function, onConclusion?: Function, onExpired?: Function }} handlers
+ * @returns {{ close: () => void }}
+ */
+export function connectEventsStream(handlers = {}) {
+  const controller = new AbortController()
+  const conn = { _closed: false }
+
+  conn.close = () => {
+    conn._closed = true
+    controller.abort()
+  }
+
+  fetch(`${BASE}/events/stream`, { signal: controller.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        console.warn('[api] events SSE connection failed:', res.status)
+        conn._closed = true
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        let done, value
+        try { ({ done, value } = await reader.read()) } catch { break }
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        let eventType = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (eventType === 'new_event') handlers.onNewEvent?.(data)
+              else if (eventType === 'event_update') handlers.onUpdate?.(data)
+              else if (eventType === 'event_concluded') handlers.onConclusion?.(data)
+              else if (eventType === 'event_expired') handlers.onExpired?.(data)
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+      conn._closed = true
+    })
+    .catch(err => {
+      conn._closed = true
+      if (err.name !== 'AbortError') {
+        console.warn('[api] events SSE error:', err.message)
+      }
+    })
+
+  return conn
+}

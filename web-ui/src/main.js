@@ -10,12 +10,14 @@ import SettingsView from './views/SettingsView.vue'
 import MomentsView from './views/MomentsView.vue'
 import GalleryView from './views/GalleryView.vue'
 import TavernView from './views/TavernView.vue'
+import EventsView from './views/EventsView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
   { path: '/chat/:id', component: ChatView },
   { path: '/moments', component: MomentsView },
+  { path: '/events', component: EventsView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },
   { path: '/settings', component: SettingsView },

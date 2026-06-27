@@ -39,6 +39,7 @@ export const config = {
     realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
     proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
+    events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
   },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',

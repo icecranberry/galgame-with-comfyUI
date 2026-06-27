@@ -22,6 +22,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_realtimeAffinityDisplay: 'true',
   feature_proactiveChat: 'true',
   feature_proactiveChatFreq: '1',
+  feature_events: 'true',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',

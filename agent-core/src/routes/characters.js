@@ -51,15 +51,15 @@ router.get('/', (req, res) => {
 // POST /api/characters — 创建角色
 router.post('/', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, moments_disabled, proactive_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, moments_disabled, proactive_disabled, events_disabled } = req.body;
   if (!name || !base_prompt) return res.status(400).json({ error: 'name and base_prompt are required' });
 
   const emotion = emotion_baseline ? (typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)) : '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
 
   try {
     const shortPrompt = cropPersonalityForEmotion(base_prompt);
-    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0);
+    const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled, events_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0, events_disabled !== undefined ? (events_disabled ? 1 : 0) : 0);
     res.status(201).json({ id: result.lastInsertRowid, name, display_name });
 
     // 创建成功后，30~60 秒内发起一次主动聊天（除非角色禁用了主动聊天）
@@ -87,7 +87,7 @@ router.post('/', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
@@ -97,6 +97,7 @@ router.put('/:id', (req, res) => {
 
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
   if (proactive_disabled !== undefined) { updates.push('proactive_disabled = ?'); params.push(proactive_disabled ? 1 : 0); }
+  if (events_disabled !== undefined) { updates.push('events_disabled = ?'); params.push(events_disabled ? 1 : 0); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
@@ -518,9 +519,9 @@ ${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : '
 
 【头像生成额外要求】
 - 画面内容必须是脸部特写（close-up portrait, face focus）
-- 表情必须准确反映角色的人格特质和性格
-- 上半身构图，重点在面部、发型、眼睛和表情
-- 简洁干净的背景（simple background），适合做头像
+- 完全正面拍照，证件照风格，正常细节不用强调超清细节
+- 完全脸部特写，重点在面部、发型、眼睛和表情
+- 白色背景（simple background），适合做证件照
 - 严格输出 JSON 格式：{"prompt":"..."}
 - prompt 字段内必须是英文描述`;
 
@@ -530,7 +531,7 @@ ${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : '
 ${char.base_prompt}
 ---
 
-要求：脸部特写，表情跟随人格，干净简洁的背景适合做头像。`;
+要求：脸部特写，表情跟随人格但是表情幅度很小，干净简洁的背景适合做证件照。`;
 
   try {
     const model = config.llm.model || 'deepseek-chat';
@@ -566,9 +567,9 @@ ${char.base_prompt}
     // Step 2: 调用 ComfyUI 生图（1024x1024）
     console.log(`[generate-avatar] Step 2/2: generating image at 1024x1024...`);
     const result = await generateImageRaw(promptText, {
-      artist: config.comfyui.artist,
-      width: 1024,
-      height: 1024,
+      artist: config.comfyui.momentsArtist,
+      width: 768,
+      height: 768,
       onProgress: (p) => {
         if (p.stage) console.log(`[generate-avatar] ComfyUI: ${p.stage}`);
       },

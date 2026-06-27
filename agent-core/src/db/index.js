@@ -205,6 +205,51 @@ function initSchema(db) {
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- 奇遇事件表（每角色同时最多一个活跃事件）
+    CREATE TABLE IF NOT EXISTS character_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      event_type_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','open','engaged','completed','expired','cancelled')),
+      title TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      image TEXT,
+      prompt TEXT,
+      style TEXT,
+      resolution TEXT DEFAULT '1600x1200',
+      choice_a TEXT NOT NULL DEFAULT '',
+      choice_b TEXT NOT NULL DEFAULT '',
+      choice_c_label TEXT NOT NULL DEFAULT '自由发挥',
+      current_branch INTEGER DEFAULT 0,
+      max_branches INTEGER DEFAULT 3,
+      choice_history TEXT DEFAULT '[]',
+      summary TEXT DEFAULT '',
+      engaged INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      last_interaction_at DATETIME,
+      half_time_notified INTEGER DEFAULT 0,
+      error_message TEXT
+    );
+
+    -- 奇遇事件历史表
+    CREATE TABLE IF NOT EXISTS event_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      event_type_key TEXT,
+      title TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      final_image TEXT,
+      summary TEXT NOT NULL DEFAULT '',
+      choice_history TEXT DEFAULT '[]',
+      total_branches INTEGER DEFAULT 0,
+      engaged INTEGER DEFAULT 0,
+      outcome TEXT DEFAULT 'expired' CHECK(outcome IN ('completed','expired','cancelled')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ended_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // FTS5 external content table — drop & recreate to handle schema changes
@@ -256,6 +301,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_portraits_type ON user_portraits(trait_type);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
+    CREATE INDEX IF NOT EXISTS idx_ce_char_status ON character_events(character_id, status);
+    CREATE INDEX IF NOT EXISTS idx_ce_expires ON character_events(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_eh_char ON event_history(character_id, created_at DESC);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -263,6 +311,13 @@ function initSchema(db) {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_raw_client_msg ON raw_messages(client_msg_id) WHERE client_msg_id IS NOT NULL`);
   } catch (err) {
     console.log('[db] idx_raw_client_msg skipped:', err.message);
+  }
+
+  // Partial unique index: 每角色最多一个活跃事件
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_event ON character_events(character_id) WHERE status IN ('pending','open','engaged')`);
+  } catch (err) {
+    console.log('[db] idx_one_active_event skipped:', err.message);
   }
 
   // 迁移: characters 表新增 next_moment_at 列
@@ -285,6 +340,9 @@ function initSchema(db) {
 
   // 迁移: artist_favorites.artist 加 UNIQUE 约束（防止重复收藏）
   migrateArtistFavoritesUnique(db);
+
+  // 迁移: characters 表新增 events_disabled 列（奇遇系统）
+  migrateEventsSchema(db);
 
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
@@ -386,6 +444,18 @@ function migrateMomentsSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);
+  }
+}
+
+function migrateEventsSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'events_disabled')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN events_disabled INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.events_disabled column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateEventsSchema error:', err.message);
   }
 }
 
@@ -824,6 +894,7 @@ const SETTING_TO_CONFIG = {
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
   feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
   feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
+  feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },

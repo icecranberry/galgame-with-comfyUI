@@ -703,6 +703,24 @@ router.post('/characters/:id/chat', async (req, res) => {
       materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
     }
 
+    // 正在进行的奇遇（不入库，仅注入上下文，和当前时间一样，每次实时读取）
+    const activeEvent = db.prepare(`
+      SELECT title, description, current_branch, max_branches, summary, status, engaged
+      FROM character_events
+      WHERE character_id = ? AND status IN ('open','engaged')
+      ORDER BY id DESC LIMIT 1
+    `).get(characterId);
+
+    if (activeEvent) {
+      let eventContext;
+      if (activeEvent.engaged && activeEvent.summary) {
+        eventContext = `「${character.display_name}正在经历一场奇遇：${activeEvent.summary}（第 ${activeEvent.current_branch}/${activeEvent.max_branches} 步）」`;
+      } else {
+        eventContext = `「${character.display_name}正在经历一场奇遇：${activeEvent.title}——${activeEvent.description}」`;
+      }
+      materialParts.push(eventContext);
+    }
+
     if (materialParts.length > 0) {
       msgs.push({ role: 'system', content: materialParts.join('\n\n') });
     }
@@ -1327,7 +1345,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
 
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话），为这轮对话所处的场景生成画面描述。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话），为这轮对话所处的场景生成画面描述。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- ，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
@@ -1378,7 +1396,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         content: `【最后一轮对话】\n${parts.join('\n')}`
       }];
     })(),
-    { role: 'system', content: '现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。prompt 值内的画面描述不限制长度，尽情详细描述场景、角色、表情、动作、穿着、环境。只输出 JSON，不要任何其他文字。' },
+    { role: 'system', content: '现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。尽情详细描述场景、角色、表情、动作、穿着、环境。只输出 JSON，不要任何其他文字。' },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）

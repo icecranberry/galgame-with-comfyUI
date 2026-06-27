@@ -29,11 +29,15 @@ async function tick() {
   const db = getDb();
   try {
     // 找出下一个需要发帖的角色（next_moment_at <= now 或 NULL）
+    // 跳过有活跃奇遇事件的角色
     const candidate = db.prepare(`
-      SELECT * FROM characters
-      WHERE moments_disabled = 0
-        AND (next_moment_at IS NULL OR next_moment_at <= datetime('now'))
-      ORDER BY next_moment_at ASC NULLS FIRST
+      SELECT c.* FROM characters c
+      WHERE c.moments_disabled = 0
+        AND (c.next_moment_at IS NULL OR c.next_moment_at <= datetime('now'))
+        AND c.id NOT IN (
+          SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged')
+        )
+      ORDER BY c.next_moment_at ASC NULLS FIRST
       LIMIT 1
     `).get();
 

@@ -14,8 +14,10 @@ import relationshipsRoutes from './src/routes/relationships.js';
 import userRelationshipsRoutes from './src/routes/userRelationships.js';
 import portraitsRoutes from './src/routes/portraits.js';
 import notificationsRoutes from './src/routes/notifications.js';
+import eventsRoutes from './src/routes/events.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
+import { startEventScheduler } from './src/services/eventScheduler.js';
 
 const app = express();
 
@@ -41,6 +43,7 @@ app.use('/api/relationships', relationshipsRoutes);
 app.use('/api/user-relationships', userRelationshipsRoutes);
 app.use('/api/portraits', portraitsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/events', eventsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -69,6 +72,9 @@ startMomentScheduler();
 
 // 启动主动对话调度器（由 config.features.proactiveChat 控制开关，scheduler 内部自行判断）
 startProactiveChatScheduler();
+
+// 启动奇遇事件调度器（由 config.features.events 控制开关，scheduler 内部自行判断）
+startEventScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

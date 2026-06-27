@@ -447,6 +447,7 @@ async function generateMomentPost(character) {
 {"text":"朋友圈文案（50-200字，自然口语化，可以分享生活、食物、风景、感悟等）","imagePrompt":"描述需要画的内容。需要详细：
 - **非常重要，这条一定要加：**命中 IP 时必须写 'character\(series\)' + **≥8 个外观锚点**（发型/发色/眼色/标志服饰/配饰)，如:'Furina \(Genshin Impact\)'。角色名字放在 prompt 字段内最开头
 - 原创角色：直接描述外观，不写 character/series
+- 朋友圈中主角提到的其他人如果没有IP，那就都带上主角的IP，比如说：'Furina \(Genshin Impact\) and Lumine \(Genshin Impact\) are having a picnic together'
 - **不确定的角色特征不允许编造**：若本地知识库无该 IP 角色的准确信息（发色、瞳色、标志服装等），禁止凭空编造角色标签。
 - 描述场景在哪、镜头角度、角色表情、衣服、动作、场景中的其他背景物品，在自然语言描述之外，可以用Danbooru格式的tag标签来重复强调动作，镜头。
 - 将text中的所有角色加入画面，明确追加说明什么发色的角色在做什么，例如：'琪亚娜和芽衣，白色头发的琪亚娜抱着紫色头发的芽衣'${multiPersonImageNote}

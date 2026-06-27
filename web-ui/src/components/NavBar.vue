@@ -21,6 +21,17 @@
         <span class="nav-label">朋友圈</span>
       </div>
 
+      <div class="nav-item" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+          </svg>
+          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
+        </div>
+        <span class="nav-label">奇遇</span>
+      </div>
+
       <router-link to="/gallery" class="nav-item" :class="{ active: $route.path.startsWith('/gallery') }" title="相册">
         <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
           <path stroke="currentColor" stroke-width="20" d="M898.8 748.4c-11.9 0-21.5-9.6-21.5-21.5V254.1c0-23.7-19.3-43-43-43H189.7c-23.7 0-43 19.3-43 43v515.7c0 23.7 19.3 43 43 43h537.2c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5H189.7c-47.4 0-86-38.5-86-86V254.1c0-47.4 38.5-86 86-86h644.7c47.4 0 86 38.6 86 86v472.8c0 11.8-9.6 21.4-21.5 21.4z"/>
@@ -54,11 +65,13 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
+import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
 
 const router = useRouter()
 const route = useRoute()
 const moments = useMomentsStore()
+const events = useEventsStore()
 const proactive = useProactiveStore()
 
 function handleMomentsClick() {
@@ -69,12 +82,22 @@ function handleMomentsClick() {
   }
 }
 
+function handleEventsClick() {
+  if (route.path === '/events') {
+    events.requestScrollToTop()
+  } else {
+    router.push('/events')
+  }
+}
+
 onMounted(() => {
   moments.connectSSE()
+  events.connectSSE()
 })
 
 onUnmounted(() => {
   moments.disconnectSSE()
+  events.disconnectSSE()
 })
 </script>
 
