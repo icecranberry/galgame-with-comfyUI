@@ -109,13 +109,15 @@ export const useEventsStore = defineStore('events', () => {
       if (result.concluded) {
         // 事件已结束，从活跃列表移除
         activeEvents.value = activeEvents.value.filter(e => e.id !== eventId)
-        await loadEvents() // 刷新以获取更新后的历史
+        await loadEvents() // 刷新以获取更新后的历史（内部调用 markSeen）
       } else if (result.event) {
         // 更新活跃事件
         const idx = activeEvents.value.findIndex(e => e.id === eventId)
         if (idx !== -1) {
           activeEvents.value[idx] = result.event
         }
+        // 用户刚在事件页面看到了分支更新，标记已读（避免离开页面后自身触发红点）
+        await markSeen()
       }
       return result
     } catch (err) {
@@ -162,13 +164,12 @@ export const useEventsStore = defineStore('events', () => {
   // ── SSE 连接 ──
   let _sseConn = null
   let _pollTimer = null
+  let _sseStarted = false
 
-  function connectSSE() {
-    if (_sseConn && !_sseConn._closed) return
-
-    _sseConn = api.connectEventsStream({
+  /** 创建 SSE 事件处理器（connectSSE 和 _createSSE 共用，避免重复代码） */
+  function _makeHandlers() {
+    return {
       onNewEvent(data) {
-        // 追加到活跃列表前端
         const exists = activeEvents.value.find(e => e.id === data.id)
         if (!exists) {
           activeEvents.value.unshift(data)
@@ -176,31 +177,49 @@ export const useEventsStore = defineStore('events', () => {
         refreshUnreadCount()
       },
       onUpdate(data) {
-        // 更新已有事件
         const idx = activeEvents.value.findIndex(e => e.id === data.id)
         if (idx !== -1) {
           activeEvents.value[idx] = { ...activeEvents.value[idx], ...data }
         }
+        // 分支更新也触发红点（后端通过 last_interaction_at 判断）
+        refreshUnreadCount()
       },
       onConclusion(data) {
-        // 从活跃列表移除
         activeEvents.value = activeEvents.value.filter(e =>
           !(e.character_id === data.character_id && e.title === data.event_title)
         )
-        // 刷新以获取历史
-        loadEvents()
+        if (isViewingEvents.value) {
+          // 正在浏览事件页面 → 完整刷新列表（含 markSeen 清零红点）
+          loadEvents()
+        } else {
+          // 不在事件页面 → 只刷新未读计数，避免 markSeen 错误清零红点
+          refreshUnreadCount()
+        }
       },
       onExpired(data) {
         activeEvents.value = activeEvents.value.filter(e =>
           !(e.character_id === data.character_id && e.title === data.event_title)
         )
+        refreshUnreadCount()
       },
-    })
+    }
+  }
 
+  function connectSSE() {
+    if (_sseStarted) return
+    _sseStarted = true
+
+    // 先关闭旧连接（如果存在）
+    if (_sseConn && !_sseConn._closed) {
+      _sseConn.close()
+    }
+
+    _sseConn = api.connectEventsStream(_makeHandlers())
     _startPoll()
   }
 
   function disconnectSSE() {
+    _sseStarted = false
     if (_sseConn) {
       _sseConn.close()
       _sseConn = null
@@ -208,11 +227,20 @@ export const useEventsStore = defineStore('events', () => {
     _stopPoll()
   }
 
+  /** SSE 断线重连（仅被 poll timer 内部调用，不改变 _sseStarted 状态） */
+  function _createSSE() {
+    if (_sseConn && !_sseConn._closed) {
+      _sseConn.close()
+    }
+    _sseConn = api.connectEventsStream(_makeHandlers())
+  }
+
   function _startPoll() {
     if (_pollTimer) return
     _pollTimer = setInterval(() => {
-      if (_sseConn?._closed) {
-        connectSSE() // 重连
+      if (!_sseStarted) return
+      if (!_sseConn || _sseConn._closed) {
+        _createSSE()
       }
       refreshUnreadCount()
     }, POLL_INTERVAL)

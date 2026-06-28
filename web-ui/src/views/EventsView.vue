@@ -230,7 +230,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   store.isViewingEvents = false
-  store.disconnectSSE()
+  // 注意：不在此处断开 SSE，NavBar 的 onMounted 已经建立了连接。
+  // 如果在卸载时断开，用户离开奇遇页面后红点将永远不再更新。
+  // 朋友圈 (MomentsView) 也是同样的设计。
 })
 
 watch(() => store.scrollToTopSignal, async () => {

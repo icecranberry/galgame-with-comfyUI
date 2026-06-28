@@ -58,9 +58,10 @@ router.get('/unread-count', (req, res) => {
 
   const lastSeenSQLite = toSQLite(lastSeen);
 
+  // 未读 = 新创建的事件 + 已有事件但有新分支更新（last_interaction_at 在每次用户选择后更新）
   const row = db.prepare(
-    `SELECT COUNT(*) AS count FROM character_events WHERE status IN ('open','engaged') AND created_at > ?`
-  ).get(lastSeenSQLite);
+    `SELECT COUNT(*) AS count FROM character_events WHERE status IN ('open','engaged') AND (created_at > ? OR (last_interaction_at IS NOT NULL AND last_interaction_at > ?))`
+  ).get(lastSeenSQLite, lastSeenSQLite);
 
   res.json({ count: row ? row.count : 0 });
 });
