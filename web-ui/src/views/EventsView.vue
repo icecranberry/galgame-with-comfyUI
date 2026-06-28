@@ -1,8 +1,8 @@
 <template>
-  <div class="events-page" @scroll.passive="onScroll" @wheel.passive="onPageWheel" ref="pageEl">
+  <div class="events-page" @scroll.passive="onScroll" @wheel.passive="onPageWheel" @touchmove.passive="onPageTouchMove" ref="pageEl">
     <!-- 标题栏 -->
-    <div class="events-topbar" ref="topbarEl">
-      <div class="topbar-title">
+    <div class="events-topbar" :class="{ 'header-hidden': isMobile && !headerVisible }" ref="topbarEl">
+      <div class="topbar-title" @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">
         <span>奇遇</span>
       </div>
       <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="stirring">
@@ -220,6 +220,8 @@ const normalizedHistory = computed(() => store.filteredHistory.map(h => ({
 })))
 
 const setTopbarVisible = inject?.('setTopbarVisible', null)
+const isMobile = inject('isMobile')
+const toggleMobileSidebar = inject('toggleMobileSidebar')
 
 onMounted(async () => {
   store.isViewingEvents = true
@@ -282,9 +284,10 @@ async function confirmGenerate(useCustom) {
   }
 }
 
+const headerVisible = ref(true)
 let lastScrollTop = 0
 
-// 滚动到底部后继续滚轮 → 自动展开往期奇遇
+// 滚动到底部后继续滚轮 → 自动展开往期奇遇（PC）
 function onPageWheel(e) {
   if (showHistory.value || !pageEl.value || e.deltaY <= 0) return
   const el = pageEl.value
@@ -293,22 +296,35 @@ function onPageWheel(e) {
   }
 }
 
-function onScroll() {
-  // 移动端标题栏
-  if (setTopbarVisible && topbarEl.value) {
-    const st = pageEl.value?.scrollTop || 0
-    const direction = st > lastScrollTop ? 'down' : 'up'
-    lastScrollTop = st
-    setTopbarVisible(direction === 'up' || st <= 60)
-  }
-  // 滚动加载更多历史
-  if (showHistory.value && hasMoreHistory.value && pageEl.value) {
-    const el = pageEl.value
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-      historyPage.value++
-    }
+// 滑动到底部后继续上划 → 自动展开往期奇遇（移动端）
+function onPageTouchMove(e) {
+  if (showHistory.value || !pageEl.value) return
+  const el = pageEl.value
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 5) {
+    showHistory.value = true
   }
 }
+
+	function onScroll() {
+		const st = pageEl.value?.scrollTop || 0
+		// 移动端标题栏显隐
+		if (isMobile) {
+			const delta = st - lastScrollTop
+			if (st > 60 && delta > 8) {
+				headerVisible.value = false
+			} else if (delta < -4) {
+				headerVisible.value = true
+			}
+		}
+		lastScrollTop = st
+		// 滚动加载更多历史
+		if (showHistory.value && hasMoreHistory.value && pageEl.value) {
+			const el = pageEl.value
+			if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+				historyPage.value++
+			}
+		}
+	}
 
 </script>
 
@@ -331,8 +347,12 @@ function onScroll() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 24px;
   border-bottom: 1px solid rgba(0,0,0,0.05);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
 }
+.header-hidden { transform: translateY(-100%); }
 .topbar-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; color: var(--text-bright); }
+.topbar-title.is-clickable { cursor: pointer; }
 .topbar-badge { font-size: 12px; background: var(--danger); color: #fff; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
 
 /* 扰动世界线按钮 — 和朋友圈一致 */
@@ -565,8 +585,14 @@ function onScroll() {
 .slide-down-enter-to, .slide-down-leave-from { opacity: 1; max-height: 800px; }
 
 @media (max-width: 767px) {
-  .events-content { padding: 8px; }
+  .events-page { position: relative; }
+  .events-topbar {
+    padding: 12px 14px;
+    position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+  }
+  .events-content { padding: 80px 8px 8px; }
+  .waterfall-row { gap: 6px; }
+  .waterfall-col { gap: 6px; }
   .history-section { padding: 0 8px 20px; }
-  .events-topbar { padding: 12px 14px; }
 }
 </style>

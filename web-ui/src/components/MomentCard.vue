@@ -303,6 +303,10 @@ function formatTime(iso) {
   box-shadow: var(--glass-shadow);
   transition: box-shadow 0.2s ease;
 }
+
+@media (max-width: 767px) {
+  .moment-card { padding: 15px; }
+}
 .moment-card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 
 .moment-header {

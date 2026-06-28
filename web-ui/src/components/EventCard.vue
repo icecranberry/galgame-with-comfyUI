@@ -50,7 +50,7 @@
     <div class="preview-footer">
       <span class="preview-text">{{ previewText }}</span>
       <div class="preview-meta-row">
-        <span v-if="choiceHistory.length > 1" class="preview-meta">已选择 {{ choiceHistory.length - 1 }} 步</span>
+        <span v-if="choiceHistory.length > 1" class="preview-meta">已推演 {{ choiceHistory.length - 1 }} 步</span>
       </div>
     </div>
   </div>
@@ -472,6 +472,25 @@ watch(isExpired, (val) => {
   border-color: rgba(224,123,108,0.2);
 }
 
+/* narrow 移动端：compact 模式 header 防挤压 — 隐藏不重要元素 */
+@media (max-width: 550px) {
+  .event-preview.is-compact .preview-header { gap: 8px; padding: 6px 8px; }
+  .event-preview.is-compact .preview-avatar { width: 36px; height: 36px; font-size: 14px; }
+  .event-preview.is-compact .preview-name { font-size: 13px; }
+  .event-preview.is-compact .preview-title { font-size: 11px; }
+  .event-preview.is-compact .preview-badge.history-time { display: none; }
+  .event-preview.is-compact .card-more-wrap { display: none; }
+  .event-preview.is-compact { margin-bottom: 0; }
+  .event-preview.is-compact .preview-footer .preview-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+    white-space: normal;
+    word-break: break-word;
+  }
+}
+
 /* ═══════════════ 详情遮罩 ═══════════════ */
 .detail-overlay {
   position: fixed; inset: 0; z-index: 200;
@@ -500,6 +519,19 @@ watch(isExpired, (val) => {
 }
 .detail-title-name { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.9); }
 .detail-title-event { font-size: 13px; color: rgba(255,255,255,0.65); }
+
+@media (max-width: 550px) {
+  .detail-close { display: none; }
+  .detail-title-bar {
+    gap: 6px; padding: 6px 12px;
+    max-width: calc(100vw - 24px);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .detail-title-name { font-size: 13px; }
+  .detail-title-event { font-size: 11px; }
+  .detail-title-badge { font-size: 10px; padding: 2px 8px; }
+}
+
 .detail-title-badge {
   font-size: 11px; color: rgba(255,255,255,0.6);
   padding: 3px 10px; border-radius: 10px;
@@ -674,7 +706,7 @@ watch(isExpired, (val) => {
 }
 
 .ending-text {
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   text-align: center;
   padding: 40px 32px;

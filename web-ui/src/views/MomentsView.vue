@@ -464,7 +464,7 @@ async function triggerGenerate(c) {
     padding: 12px 16px;
     position: absolute; top: 0; left: 0; right: 0; z-index: 20;
   }
-  .moments-feed { padding: 80px 12px 8px; }
+  .moments-feed { padding: 80px 10px 8px; }
   .moments-list { max-width: 100%; }
   .moments-filter-bar { max-width: 100%; padding: 0 0 6px 0; }
   .picker-dropdown { right: 12px; }
