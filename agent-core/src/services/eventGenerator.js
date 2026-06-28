@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
-import { chatSync } from '../llm/deepseek.js';
+import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
@@ -26,91 +26,107 @@ const imagesDir = path.join(projectRoot, 'data', 'images');
 // 每个条目给大方向，LLM 结合角色个性、世界观、关系网、当前时间自由发挥
 
 const EVENT_TYPES = [
-  // ═══ 日常奇遇（60-120min）═══
-  { key: 'street_wander', name: '街头漫步', durationMin: 90, urgency: 1,
-    desc: '你正在街头/小镇/城市里闲逛，没有明确目的地，一路观察四周的店铺、行人和风景。可能会遇到有趣的小店、街头表演、或是某个让你驻足的瞬间。' },
-  { key: 'shop_discovery', name: '偶遇小店', durationMin: 120, urgency: 1,
-    desc: '你无意间发现了一家从未注意过的小店——可能是一家旧书店、杂货铺、古董店或手工艺品店。店主似乎有些特别，店里的某样东西吸引了你的注意。' },
-  { key: 'rain_shelter', name: '雨天躲雨', durationMin: 60, urgency: 1,
-    desc: '突然下起了雨，你没带伞，匆忙躲进了最近的屋檐/店铺/车站。在这个意外的停留中，你遇到了一些有意思的事或人。' },
-  { key: 'lost_explore', name: '迷路探索', durationMin: 90, urgency: 1,
-    desc: '你本来想去某个地方，但不小心走错了路，来到一个陌生的街区/区域。与其立刻回头，你决定顺便探索一下这个未知的地方。' },
-  { key: 'library_find', name: '图书馆发现', durationMin: 120, urgency: 1,
-    desc: '你在图书馆/资料室/书店里翻阅书籍时，意外发现了一本特别的书/一份旧资料/一张夹在书里的纸条，上面似乎藏着什么线索。' },
-  { key: 'park_encounter', name: '公园散步', durationMin: 90, urgency: 1,
-    desc: '你在公园/花园里散步，享受片刻宁静。也许会遇到遛狗的人、下棋的老人、玩耍的孩子，或者一只主动靠近你的小动物。' },
-  { key: 'night_market', name: '夜市闲逛', durationMin: 120, urgency: 1,
-    desc: '夜幕降临后你来到了夜市/集市，摊位林立，食物的香气、小贩的吆喝、琳琅满目的小商品。你被某个摊位吸引了目光。' },
-  { key: 'bus_adventure', name: '公交车奇遇', durationMin: 60, urgency: 1,
-    desc: '坐上了不知开往哪里的公交车/电车/列车，窗外风景变换，车厢里的其他乘客各有故事。你和一个陌生人/一件奇怪的事不期而遇。' },
+  // ═══ 街头日常（40-120min）═══
+  // 城市中的偶然发现与公共空间的即兴事件，节奏舒缓但有意外趣味
+  { key: 'urban_wander', name: '城市漫游', durationMin: 90, urgency: 1,
+    desc: '角色离开了熟悉的日常路线——可能是故意绕路、追某个东西、或纯粹走神——来到了一个平时不会涉足的城市角落。请自由想象这个地方：一条陌生的巷子、一个没去过的街区、一片被遗忘的公共空间。角色在那里注意到了什么让ta停下脚步的东西。氛围：探索与发现，节奏舒缓但有微小惊喜。' },
+  { key: 'stranger_kindness', name: '陌生人的善意', durationMin: 60, urgency: 1,
+    desc: '一个陌生人与角色产生了短暂但温暖的互动——一次意外的帮助、一句让人愣住的好话、或一份不求回报的小小善意。请自由想象这个陌生人是谁、ta做了什么、以及角色如何回应。氛围：人与人之间偶然的暖意，克制真实不煽情，互动结束各走各路。' },
+  { key: 'night_owling', name: '深夜时分', durationMin: 90, urgency: 1,
+    desc: '深夜，角色还在外面（或醒着）。城市的这一面与白天完全不同——更安静、更诚实、或更荒诞。请自由想象角色深夜在外的原因（失眠/有事/纯粹不想回家）以及ta在这段时间里遇到的事。氛围：深夜的独特质感，安静/微醺/或温柔的荒诞，略带孤独但不悲伤。' },
+  { key: 'animal_encounter', name: '动物奇缘', durationMin: 60, urgency: 1,
+    desc: '一只不属于角色的动物闯入了ta的生活半径——流浪猫狗、别人走丢的宠物、公园里的野鸟、或城市里偶然出现的野生动物。这只动物的行为引起了角色的好奇，角色决定花一点时间回应它。请自由想象动物的种类、行为、以及这场互动的走向。氛围：人与动物的短暂连接，温暖或有趣，动物推动叙事。' },
+  { key: 'found_treasure', name: '意外淘宝', durationMin: 90, urgency: 1,
+    desc: '角色在旧货摊/二手店/路边/阁楼/某个不起眼的角落发现了一件让ta在意的东西——不一定是值钱的，但一定带着"别人的故事"的痕迹。请自由想象这件物品是什么、它引发了角色怎样的好奇或行动。氛围：物品作为微型叙事的入口，怀旧或好奇驱使的小小探索。' },
+  { key: 'wrong_place', name: '误入之境', durationMin: 40, urgency: 2,
+    desc: '角色因为某个原因（走错路/追东西/被引导/纯粹好奇）进入了一个本不该在此时此刻出现的地方。这个空间正在发生某件事，角色的出现让情况变得微妙。请自由想象这个空间是什么、里面正在发生什么、以及角色如何应对这个尴尬/有趣的局面。氛围：轻微越界的紧张与趣味，短暂刺激但不危险。' },
+  { key: 'public_scene', name: '街头现场', durationMin: 60, urgency: 1,
+    desc: '角色在公共场合遇到了一场正在进行中的即兴事件——街头表演、快闪、小型比赛、围观骚动、或某种公开的集体行为。角色不知怎的从旁观者变成了参与者。请自由想象这场公共事件的性质以及角色被卷入的方式。氛围：公共空间的集体能量，轻松或热烈，被氛围带动。' },
+  { key: 'shop_encounter', name: '店铺奇遇', durationMin: 60, urgency: 1,
+    desc: '角色走进了一家店——可能是被橱窗吸引、被招牌逗乐、被香味牵引、或只是因为下雨进来躲一躲。店里的人或物让这次消费变成了一场微型冒险。请自由想象这家店的类型（书店/古董店/奇怪的专卖店/街角便利店）以及店里正在发生的事。氛围：日常消费的意外展开，轻松有趣或荒诞。' },
 
-  // ═══ 社交互动（20-60min）═══
-  { key: 'stranger_approach', name: '被人搭讪', durationMin: 20, urgency: 2,
-    desc: '一个陌生人突然向你搭话——可能是问路、推销、搭讪，或者有求于你。这个人的态度和意图尚不明朗，你需要决定如何应对。' },
-  { key: 'old_acquaintance', name: '偶遇熟人', durationMin: 30, urgency: 1,
-    desc: '你撞见了一个意想不到的人——可能是旧友、曾经的对手、或是一个你很久没见的人。重逢的瞬间有些微妙，接下来会发生什么？' },
-  { key: 'mysterious_stranger', name: '神秘陌生人', durationMin: 40, urgency: 1,
-    desc: '你注意到一个看起来很不寻常的人——穿着奇怪、举止神秘、或者身上带着某种说不出的气场。这个人似乎在等待着什么，或者等待着谁。' },
-  { key: 'street_performer', name: '街头艺人互动', durationMin: 30, urgency: 1,
-    desc: '路边有一个街头艺人正在表演——可能是音乐、魔术、杂技或画画。表演很精彩，而你被拉进了表演之中，成为了临时参与者。' },
-  { key: 'neighbor_visit', name: '邻居来访', durationMin: 40, urgency: 1,
-    desc: '你的邻居突然敲门来访——可能是来借东西、投诉噪音、送来食物，或者只是单纯想聊天。这次访问可能会引出一些意想不到的事。' },
-  { key: 'sales_pitch', name: '被推销拦住', durationMin: 20, urgency: 2,
-    desc: '一个热情的推销员/传单员/募捐者拦住了你，不依不饶地介绍着什么——可能是健身卡、保险、慈善捐款、或者是某种更奇怪的东西。你需要快速摆脱或应对。' },
+  // ═══ 社交碰撞（20-60min）═══
+  // 人与人之间的即兴交锋与微妙互动，高密度社交张力
+  { key: 'eye_contact', name: '眼神交汇', durationMin: 20, urgency: 2,
+    desc: '角色与一个陌生人/半熟人对视——不是普通的扫过，而是有内容的眼神接触。对方的眼睛里有什么让角色在意：挑衅、好奇、认出、或某种说不清的意味。请自由想象对方是谁、那个眼神的含义、以及角色决定如何回应。氛围：非语言的社交张力，微妙的心理博弈，短暂但高密度。' },
+  { key: 'challenged', name: '被挑战了', durationMin: 30, urgency: 2,
+    desc: '有人当面向角色发起了某种挑战——不一定是恶意的，可能是即兴比赛、智力较劲、或某种角色擅长/不擅长的事。周围的人开始起哄。请自由想象挑战的内容、挑战者的身份和动机、以及角色如何应对（迎战/机智化解/意外翻车/优雅脱身）。氛围：社交压力下的即时决策，紧张但不危险，好玩。' },
+  { key: 'silver_tongue', name: '被说服了', durationMin: 30, urgency: 2,
+    desc: '一个口才出众的人正在试图说服角色接受某件事——买一件东西、参加一个活动、相信一个观点。角色的理性在抵抗，但对方的论点出人意料地有道理，角色发现自己居然在认真考虑。请自由想象对方在推销/论证什么、以及角色从抗拒到动摇的心理过程。氛围：理性与冲动的拉锯，有趣而非诈骗。' },
+  { key: 'overheard', name: '不小心听到了', durationMin: 40, urgency: 1,
+    desc: '角色无意间听到了一段让ta在意的对话——关于某个人、某件事、或某个信息。这段信息与角色的生活有某种关联（不一定是关于角色本人的）。请自由想象角色听到了什么、为什么在意、以及ta决定怎么做（装作没听到/继续听/采取行动）。氛围：信息不对等引发的道德微型困境，好奇心与边界感的冲突。' },
+  { key: 'someone_needs_help', name: '有人需要帮助', durationMin: 30, urgency: 2,
+    desc: '角色注意到旁边有人处于需要帮助的状态——情绪崩溃、迷路了、身体不适、或只是看起来很无助。周围其他人都在回避目光，而角色恰好站在一个可以行动的位置。请自由想象这个人需要什么样的帮助、以及角色决定介入后发生了什么。氛围：助人动机与社交惰性的微型博弈，走向温暖或意外的展开。' },
+  { key: 'unexpected_praise', name: '突如其来的夸奖', durationMin: 20, urgency: 2,
+    desc: '一个陌生人/半熟人对角色给出了认真而意外的正面评价——真诚到让角色愣住的程度，夸的可能是角色自己都没意识到的优点。请自由想象对方夸奖了什么、在什么情境下、以及这句评价在角色心里留下的回响。氛围：被看见的微妙感受，温暖或微妙的尴尬，不过度。' },
 
-  // ═══ 冒险探索（60-120min）═══
-  { key: 'hidden_place', name: '发现隐藏地点', durationMin: 120, urgency: 1,
-    desc: '你发现了一个从未注意过的地方——一面墙后面的暗门、楼梯间深处的通道、或者一扇标记着"禁止入内"的门。好奇心驱使着你一探究竟。' },
-  { key: 'clue_chase', name: '追踪线索', durationMin: 120, urgency: 1,
-    desc: '你手中出现了一条模糊的线索——可能是一张旧地图、一段密文、一个地址或是一个名字。线索指向某个未知的目的地，你决定去调查一下。' },
-  { key: 'secret_room', name: '意外发现密室', durationMin: 90, urgency: 1,
-    desc: '在你熟悉的地方——家里、工作场所或常去的建筑里——你意外发现了隐藏在墙壁/地板/书架后的一个密室。里面有什么？为什么被藏起来？' },
-  { key: 'treasure_map', name: '宝藏地图', durationMin: 120, urgency: 1,
-    desc: '一张看似破旧的地图落到了你手中，上面标记了一个X。地图看起来不像是恶作剧——纸张泛黄、墨迹陈旧。X标记的地点似乎在附近。' },
-  { key: 'abandoned_building', name: '废弃建筑探险', durationMin: 90, urgency: 1,
-    desc: '一座废弃的建筑——旧工厂、学校、医院或宅邸——出现在你面前。周围安静得有些诡异，但某种东西吸引着你走进去。' },
-  { key: 'underground_entrance', name: '地下通道入口', durationMin: 120, urgency: 1,
-    desc: '你发现了一个通往地下的入口——可能是下水道、防空洞、废弃地铁站或天然洞穴。入口处散发着微弱的冷风，暗示着下面有更大的空间。' },
+  // ═══ 冒险意志（60-120min）═══
+  // 探索未知空间与追寻线索，好奇心驱动，过程比结果重要
+  { key: 'hidden_space', name: '隐藏的空间', durationMin: 120, urgency: 1,
+    desc: '角色发现了一个隐藏/被遗忘/不该存在的空间——暗门、废弃楼层、建筑夹层、地下通道、或城市中被所有人忽略的角落。这个空间有一种特别的氛围，让角色感到好奇多于恐惧。请自由想象这个空间在哪里、怎么被发现的、以及里面有什么。氛围：城市探索与空间叙事，场所本身是主角，神秘但不恐怖。' },
+  { key: 'cryptic_clue', name: '神秘线索', durationMin: 90, urgency: 1,
+    desc: '角色收到或发现了一个指向某处的加密信息/线索——纸条、短信、涂鸦、地图碎片、或更隐晦的提示。它暗示了某个时间和地点，但没有说会发生什么。请自由想象线索的形式、它指向的目的地、以及角色到那里后的发现（惊喜/虚惊/新的谜题）。氛围：信息驱动的微型探索，解谜感，结果开放。' },
+  { key: 'childhood_echo', name: '童年的回响', durationMin: 90, urgency: 1,
+    desc: '角色偶然遇到了某种与童年/过去强烈关联的触发物——一个被遗忘的地方、一件旧物、一种气味、一首歌。它让角色陷入了某种情绪，并产生了顺着这个线索做点什么的冲动。请自由想象触发物是什么、它连接着怎样的回忆、以及角色因此做了什么。氛围：过去与现在的温柔碰撞，怀旧驱动行动，情感真挚不煽情。' },
+  { key: 'unexpected_guide', name: '意外的向导', durationMin: 90, urgency: 1,
+    desc: '某个人/物/迹象似乎在引导角色去某个地方——一个小孩、一位老人、一只动物、或者一连串"巧合"的路标。角色不确定这是真正的指引还是过度解读，但好奇心占了上风。请自由想象向导的形式（人或非人）、目的地在哪里、以及跟随的过程中的体验。氛围："被引导"的不确定感，过程比结果重要。' },
+  { key: 'strange_invitation', name: '奇怪的请柬', durationMin: 90, urgency: 1,
+    desc: '角色收到了一张奇怪的邀请——不是常规社交邀约，而是带有神秘/荒诞/或异常正式感的请柬。地址存在但角色从没去过，时间就是今天。请自由想象请柬的来源、目的地的样子、以及角色决定赴约后的发现。氛围：被邀请进入未知领域，社交冒险，可以是神秘/荒诞/或意外的温馨。' },
+  { key: 'curious_machine', name: '奇怪的机器', durationMin: 60, urgency: 1,
+    desc: '角色遇到了一台不寻常的机器/装置——自动贩卖机、扭蛋机、老式街机、或某种叫不出名字的设备。它的操作方式很奇怪，似乎藏着什么秘密功能。请自由想象这台机器的外观和用途、角色摆弄它的过程、以及最终触发了什么。氛围：人机交互的趣味瞬间，轻松或略带神秘，机器的未知功能是探索入口。' },
+  { key: 'high_place', name: '高处', durationMin: 60, urgency: 1,
+    desc: '角色来到了一个高处——天台、山顶、屋顶、或某个能俯瞰城市/风景的位置。站得高让角色的想法变得不一样了，ta开始注意到平时不会注意的东西，或产生平时不会有的想法。请自由想象这个高处的位置、角色在那里的所见所感、以及是否有什么意外的发现或决定。氛围：物理高度带来心理视角的转变，独处与反思。' },
 
-  // ═══ 紧急事件（20-30min）═══
-  { key: 'sudden_fight', name: '突发战斗', durationMin: 20, urgency: 2,
-    desc: '毫无预兆地，危险出现了！可能是怪物/敌人/不明生物突然出现在你面前，也可能是被卷入了一场突发的冲突。你需要立刻做出反应——战斗还是逃跑？' },
-  { key: 'being_chased', name: '被追赶', durationMin: 20, urgency: 2,
-    desc: '有人在追你！你不太确定追你的是什么——可能是一群不明人士、一只凶猛的动物、或者某种更诡异的东西。你需要找到脱身的办法，而且要快。' },
-  { key: 'rescue_request', name: '救援请求', durationMin: 30, urgency: 2,
-    desc: '你听到了呼救声——有人（或动物）身处危险之中，需要立刻帮助。情况看起来很紧急，你没有太多时间思考。' },
-  { key: 'falling_object', name: '天降之物', durationMin: 20, urgency: 2,
-    desc: '一个东西从天上掉了下来——可能是一块陨石碎片、一个奇怪的包裹、一架失控的无人机、或是某种无法形容的物体。它在你的脚边砸出了一个小坑。' },
-  { key: 'sudden_weather', name: '突发天气', durationMin: 30, urgency: 2,
-    desc: '天气突然剧烈变化——暴风雨、冰雹、突如其来的浓雾、或者异常的闪电。这种变化来得太急了，你被困在了露天之处，需要立刻找到避难所。' },
-  { key: 'equipment_failure', name: '突发故障', durationMin: 30, urgency: 2,
-    desc: '你正在使用的某种设备突然失灵——可能是汽车抛锚、电梯停运、通讯中断、或者是某种更关键的设备。故障发生得不是时候，你必须想办法解决。' },
+  // ═══ 危机时刻（20-30min）═══
+  // 高张力即时应变，紧张但不暴力，重点是应对而非危险本身
+  { key: 'chase', name: '追逐', durationMin: 20, urgency: 2,
+    desc: '角色突然需要追某人/某物，或者被人追——不是生死时速，而是城市中的即兴奔跑。请自由想象追逐的原因（追回被偷/被抢的东西、追一个认识的人、被误会导致被追）、追逐的路线、以及结局。氛围：城市空间中的动态追逐，身体与环境的互动，紧张但不暴力。' },
+  { key: 'caught_in_conflict', name: '卷入冲突', durationMin: 20, urgency: 2,
+    desc: '角色不小心被卷入了正在发生的冲突——争吵、打架、对峙。不是角色挑起的，但ta现在站在了事件的半径内。请自由想象冲突的性质、各方立场、以及角色在其中的选择（介入调停/帮某一方/趁乱脱身/做点别的）。氛围：第三方视角的冲突应对，道德抉择与实用主义的碰撞。' },
+  { key: 'gut_feeling', name: '不对劲', durationMin: 20, urgency: 2,
+    desc: '角色的直觉拉响了警报——有东西不对，但理性说一切正常。可能是有人在跟踪、某个场景过于安静、或一个看起来正常但后颈汗毛竖起来的状况。请自由想象让角色不安的源头、以及最终的结果（虚惊一场/微小威胁/或发现了真正的问题）。氛围：心理悬疑，气氛营造比实际危险更重要。' },
+  { key: 'stuck', name: '被困住了', durationMin: 30, urgency: 2,
+    desc: '角色被困在了某个地方——电梯停了、门锁坏了、通道被封了。不是生死危机，但确实需要想办法出去。在等待或尝试脱困的过程中，角色开始注意到这个空间里平时不会关注的东西。请自由想象被困的地点和原因、以及脱困过程中的意外发现。氛围：受限空间内的微型冒险，静态中的动态思考。' },
+  { key: 'crowd_chaos', name: '人群骚动', durationMin: 20, urgency: 2,
+    desc: '角色所在的人群突然发生了某种集体变化——恐慌、骚动、方向的突然一致、或情绪的集体转变。角色被裹挟其中，需要在混乱中保持平衡并找到自己的出路。请自由想象骚动的原因（真实的/夸大的/误会）以及角色如何应对。氛围：集体行为中的个体应对，保持清醒与自我。' },
+  { key: 'falsely_accused', name: '被冤枉', durationMin: 30, urgency: 2,
+    desc: '有人认定角色做了某件ta没做的事。对方的指控听起来有几分道理（虽然完全是误会），而真正的原因/责任人藏在背后。角色需要在有限时间内为自己辩护或找出真相。请自由想象被指控的内容、真正的犯人/原因、以及角色自证的过程和结果。氛围：清白与证据的博弈，自证的过程是叙事核心。' },
+  { key: 'lost_something', name: '丢了重要的东西', durationMin: 30, urgency: 2,
+    desc: '角色发现丢了某样重要的东西——可能是钥匙/钱包/手机，也可能是有情感价值的非贵重物品。角色开始回溯自己的行动路线，重新走一遍今天走过的路。请自由想象丢失的物品及其重要性、回溯路线上的发现、以及最终是否找到。氛围：寻找失物的微型旅程，略带焦虑但保持希望，每一站都可能引出小事件。' },
 
-  // ═══ 神秘现象（60-120min）═══
-  { key: 'strange_sound', name: '奇怪的声音', durationMin: 90, urgency: 1,
-    desc: '你听到了一个无法解释的声音——墙壁里的敲击声、远处的低语、地板下的刮擦声，或者是某种不属于这个世界的旋律。声音引导着你走向某处。' },
-  { key: 'glowing_object', name: '发光物品', durationMin: 120, urgency: 1,
-    desc: '一个发光的物品出现在你面前——可能是从垃圾堆里捡到的，可能是别人给你的，也可能是自己"出现"在身边的。它发出柔和的光芒，似乎在等待什么。' },
-  { key: 'prophecy_divination', name: '预言/占卜', durationMin: 60, urgency: 1,
-    desc: '你偶然获得了一次占卜/预言的机会——可能是一个街头占卜师拉住你，也可能是一张塔罗牌从牌堆中滑落，或者是某种更超自然的感知。结果让你不安。' },
-  { key: 'time_anomaly', name: '时空裂缝', durationMin: 90, urgency: 1,
-    desc: '你似乎触碰到了某种——异常。时间感变得奇怪，周围的环境似乎不太对劲。这个地方好像不属于这个时间点，或者你自己不属于这个时间点。' },
-  { key: 'magic_malfunction', name: '魔法失控', durationMin: 60, urgency: 1,
-    desc: '你尝试使用某种能力/魔法/道具时出了意外——效果超出了预期范围，或者完全偏离了目标。事态正在朝着不可预测的方向发展。' },
+  // ═══ 奇异现象（60-120min）═══
+  // 日常中的微小异常，模糊现实与感知的边界，神秘而不过度恐怖
+  { key: 'time_anomaly', name: '时间感异常', durationMin: 90, urgency: 1,
+    desc: '角色对时间的感知出现了异常——某个瞬间感觉重复了、时间流速不对劲、或计时工具集体出问题。不一定是真的超自然，也可以是心理性的：太疲惫、太专注、或情绪影响了对时间的感知。请自由想象时间异常的表现形式、角色如何察觉、以及这种体验带来的心理变化。氛围：时间感知被扭曲的体验，迷离或诗意。' },
+  { key: 'reflection_anomaly', name: '镜中异常', durationMin: 60, urgency: 1,
+    desc: '角色在镜子/玻璃/水面中看到了与预期不符的倒影——可能只是一瞬间、可能是光线造成的错觉、也可能是角色的心理投射。请自由想象角色看到了什么（不限于倒影不同步）、ta如何试图验证或解释、以及这件事在ta心里留下的印象。氛围：自我认知与视觉错觉的交界，镜像作为心理洞察的入口。' },
+  { key: 'glowing_object', name: '发光体', durationMin: 90, urgency: 1,
+    desc: '角色发现了一个不该发光的东西在微弱地发光——可能是一块石头、一片叶子、一个旧设备、或某种无法名状的物体。光很微弱但确实存在。请自由想象发光体是什么、它为什么发光（自然现象/科技残余/未知）、以及角色决定拿它怎么办。氛围：日常中的微小异常，神秘而温柔，发光体是好奇心的起点而非威胁。' },
+  { key: 'prediction', name: '被预言了', durationMin: 60, urgency: 1,
+    desc: '某人（占卜师/奇怪的陌生人/或者一个随口说话的人）对角色的近期未来做出了一个具体预测——不是关于遥远命运，就是接下来几小时内的事。预测的第一部分已经开始发生。请自由想象预测的内容、预言者的身份和可信度、以及角色面对应验时的反应（相信/质疑/试图改变结果）。氛围：预言作为行动的催化剂，自我实现预言与自由意志的博弈。' },
+  { key: 'synchronicity', name: '巧合的编织', durationMin: 90, urgency: 1,
+    desc: '角色经历了一连串"太巧了"的事件——不同来源的信息指向同一个方向、刚想到什么就立刻遇到什么、或者随机事件形成了某种叙事连贯性。请自由想象这些巧合的具体内容以及它们暗示的"方向"（可能根本没有真正的方向，但角色忍不住去联想）。氛围：世界中隐藏的联系感，诗意的而非神秘学的。' },
+  { key: 'object_behavior', name: '物品的意志', durationMin: 60, urgency: 1,
+    desc: '角色身边的某件私人物品出现了无法解释的行为——旧玩具发出了声音、书翻到了恰好回答角色疑问的那一页、许久不用的东西自己启动了。每个单独事件都可以用理性解释，但它们先后发生的时间点太巧了。请自由想象是哪件物品、发生了什么、以及角色如何解读这一连串"巧合"。氛围：日常物品的神秘性，轻松诡谲，不过度。' },
+  { key: 'atmosphere_shift', name: '空气变了', durationMin: 60, urgency: 1,
+    desc: '角色进入某个空间后，环境氛围发生了明显变化——光线的质感变了、温度微妙的差异、声音的远近不同了、或者某种无法描述的"氛围"改变了。在这种氛围中，角色的情绪和想法被微妙地影响。请自由想象空间的变化、它对角色心理的渗透、以及在这个特殊氛围中发生的事。氛围：环境对心理的渗透，空间作为情绪催化剂。' },
 
-  // ═══ 日常琐事（30-90min）═══
-  { key: 'shopping_dilemma', name: '购物选择困难', durationMin: 60, urgency: 1,
-    desc: '你被一个购物选择困住了——两件东西都想要，或者因为某个原因迟迟无法做出决定。这个选择似乎折射出了更深层的某个问题。' },
-  { key: 'pet_lost', name: '宠物走失', durationMin: 60, urgency: 1,
-    desc: '你的宠物/一只熟悉的动物不见了！它可能只是顽皮躲起来了，也可能真的走丢了。你开始在附近寻找，同时心里越来越焦急。' },
-  { key: 'cooking_disaster', name: '做饭翻车', durationMin: 90, urgency: 1,
-    desc: '你尝试做一道菜，但事情走向了完全相反的方向——锅烧糊了、调料放错了、厨房一团糟。现在你不只是要做饭，还要处理这个小灾难。' },
-  { key: 'cleanup_find', name: '大扫除发现', durationMin: 90, urgency: 1,
-    desc: '在整理/打扫时，你翻出了一件被遗忘的旧物——可能是旧照片、信件、纪念品、或某个已经失去的时光的碎片。它勾起了你的回忆。' },
-  { key: 'plant_accident', name: '种植意外', durationMin: 60, urgency: 1,
-    desc: '你养的植物/花园里的植物出了状况——可能突然疯长、开出奇怪的花、枯萎得离奇、或是表现出某种无法解释的异常。这好像不是正常的园艺问题。' },
-  { key: 'diy_fail', name: 'DIY翻车现场', durationMin: 90, urgency: 1,
-    desc: '你信心满满地开始了一个DIY项目——修东西、组装家具、做手工艺品——但发现事情远比想象的复杂。现在是坚持还是放弃？' },
+  // ═══ 生活泥沼（30-90min）═══
+  // 日常生活中的连锁翻车与荒诞喜剧，轻松解压，共鸣感强
+  { key: 'domestic_chaos', name: '居家翻车', durationMin: 90, urgency: 1,
+    desc: '角色在家里做了一件"很简单"的事——修东西/做饭/组装家具/大扫除——然后局面以指数级恶化。每一步补救都制造了新的问题，而某个重要的人（客人/室友/房东）可能正在逼近。请自由想象翻车的起因、连锁反应的过程、以及最终如何收场（或干脆没收场）。氛围：越努力越糟糕的生活喜剧，荒诞解压。' },
+  { key: 'cleaning_time_capsule', name: '打扫出的过去', durationMin: 90, urgency: 1,
+    desc: '角色在彻底清扫/整理时翻出了一件被遗忘的旧物——它触发了强烈的回忆或情绪，让角色停下了手中的活。请自由想象这件旧物是什么、它关联着怎样的记忆、以及角色面对这份记忆时的反应（可能会因此去做某件事）。氛围：旧物作为记忆的触发器，物理整理导致了心理整理，怀旧/释然/或重新面对。' },
+  { key: 'nature_fights_back', name: '自然造反', durationMin: 60, urgency: 1,
+    desc: '角色周围的某种自然元素出现了不正常的行为——养的植物疯长/枯萎/变色、家里出现了不该出现的昆虫/动物、或者天气精准地只在角色出门的那一刻变坏。请自由想象"造反"的具体表现、角色试图"镇压"或理解的过程、以及结果。氛围：人与自然的小型对抗，绿色幽默，轻松有趣。' },
+  { key: 'errand_curse', name: '出门不顺', durationMin: 60, urgency: 1,
+    desc: '角色只是出门办一件小事——取快递/买东西/缴费——然后被一连串计划外的事件精准狙击。每个问题单独看都不值一提，合在一起却让人怀疑今天不宜出门。请自由想象这些连环小倒霉的具体内容以及角色从烦躁到哭笑不得的心态变化。氛围：日常琐事的连锁打击，共鸣感强，最终可以一笑而过。' },
+  { key: 'cohabitant_mystery', name: '同居生物的谜之行为', durationMin: 60, urgency: 1,
+    desc: '与角色同住的生物（宠物/室友/家人）今天表现出了让角色完全无法理解的行为模式。它们在做什么？为什么要这样做？角色的好奇心从好笑变成了认真调查。请自由想象同居者是谁/是什么、它们的谜之行为、以及角色调查后发现的真相（可能非常无聊但很可爱）。氛围：观察与推理的趣味，轻松搞笑或温暖。' },
+  { key: 'unexpected_guest', name: '不速之客', durationMin: 60, urgency: 1,
+    desc: '有人突然出现在角色家门口——没有预约、临时起意、路过、或有某种急事。角色当时的状态（穿着/家里的状况/正在做的事）让这个时机非常微妙，角色需要在开门前快速调整。请自由想象来客是谁、ta的来意、以及角色从慌乱到应对的过程。氛围：私人空间被意外闯入的社交喜剧，真实而好笑。' },
+  { key: 'power_outage', name: '停电了', durationMin: 60, urgency: 1,
+    desc: '突然停电了——跳闸/线路维修/原因不明。角色被困在黑暗中，手边只有手机（电量不确定）和几根蜡烛。请自由想象角色在黑暗中做了什么、想了什么、或者在烛光中注意到了平时被忽略的东西。氛围：被强制抽离现代便利后的另类体验，安静/有趣/或小小觉悟。' },
 ];
 
 /**
@@ -118,8 +134,79 @@ const EVENT_TYPES = [
  * 目前全部可用，后续可以根据好感度/标签过滤
  */
 function getAvailableEventTypes(character, db) {
-  // 后续可根据 character 的属性（如好感度、性格标签等）过滤事件池
   return EVENT_TYPES;
+}
+
+// 奇遇类别 → VAD 情绪偏移（被 chat.js 情绪引擎消费，纯规则零 LLM 开销）
+// 正值=提升(V愉悦/A兴奋/D支配感)，负值=降低，范围 [-0.15, +0.15]
+const EVENT_VAD_MODIFIERS = {
+  // ═══ 街头日常 — 舒缓/微小惊喜 ═══
+  urban_wander:        { valence: 0.05, arousal: 0.02, dominance: 0.00 },
+  stranger_kindness:   { valence: 0.08, arousal: 0.00, dominance: 0.00 },
+  night_owling:        { valence: 0.00, arousal:-0.05, dominance: 0.00 },
+  animal_encounter:    { valence: 0.08, arousal: 0.03, dominance: 0.00 },
+  found_treasure:      { valence: 0.05, arousal: 0.05, dominance: 0.02 },
+  wrong_place:         { valence:-0.03, arousal: 0.08, dominance:-0.05 },
+  public_scene:        { valence: 0.03, arousal: 0.05, dominance:-0.02 },
+  shop_encounter:      { valence: 0.05, arousal: 0.00, dominance: 0.00 },
+
+  // ═══ 社交碰撞 — 警觉/微紧张 ═══
+  eye_contact:         { valence: 0.00, arousal: 0.08, dominance: 0.00 },
+  challenged:          { valence:-0.03, arousal: 0.12, dominance:-0.05 },
+  silver_tongue:       { valence: 0.00, arousal: 0.05, dominance:-0.05 },
+  overheard:           { valence:-0.05, arousal: 0.08, dominance: 0.00 },
+  someone_needs_help:  { valence: 0.02, arousal: 0.05, dominance: 0.05 },
+  unexpected_praise:   { valence: 0.10, arousal: 0.03, dominance: 0.02 },
+
+  // ═══ 冒险意志 — 好奇/兴奋 ═══
+  hidden_space:        { valence: 0.05, arousal: 0.10, dominance: 0.05 },
+  cryptic_clue:        { valence: 0.03, arousal: 0.12, dominance: 0.03 },
+  childhood_echo:      { valence: 0.00, arousal: 0.00, dominance:-0.05 },
+  unexpected_guide:    { valence: 0.03, arousal: 0.08, dominance:-0.02 },
+  strange_invitation:  { valence: 0.02, arousal: 0.08, dominance: 0.00 },
+  curious_machine:     { valence: 0.08, arousal: 0.10, dominance: 0.05 },
+  high_place:          { valence: 0.02, arousal:-0.03, dominance: 0.05 },
+
+  // ═══ 危机时刻 — 不安/警觉 ═══
+  chase:               { valence:-0.10, arousal: 0.15, dominance:-0.10 },
+  caught_in_conflict:  { valence:-0.10, arousal: 0.12, dominance:-0.08 },
+  gut_feeling:         { valence:-0.08, arousal: 0.10, dominance: 0.00 },
+  stuck:               { valence:-0.05, arousal: 0.05, dominance:-0.10 },
+  crowd_chaos:         { valence:-0.08, arousal: 0.12, dominance:-0.10 },
+  falsely_accused:     { valence:-0.12, arousal: 0.10, dominance:-0.08 },
+  lost_something:      { valence:-0.08, arousal: 0.08, dominance:-0.05 },
+
+  // ═══ 奇异现象 — 不安/好奇交织 ═══
+  time_anomaly:        { valence:-0.05, arousal: 0.08, dominance:-0.08 },
+  reflection_anomaly:  { valence:-0.08, arousal: 0.10, dominance:-0.05 },
+  glowing_object:      { valence: 0.03, arousal: 0.10, dominance: 0.00 },
+  prediction:          { valence: 0.00, arousal: 0.08, dominance:-0.05 },
+  synchronicity:       { valence: 0.05, arousal: 0.08, dominance: 0.00 },
+  object_behavior:     { valence:-0.03, arousal: 0.10, dominance:-0.05 },
+  atmosphere_shift:    { valence:-0.05, arousal: 0.05, dominance:-0.08 },
+
+  // ═══ 生活泥沼 — 微烦躁/荒诞喜剧 ═══
+  domestic_chaos:      { valence:-0.05, arousal: 0.08, dominance:-0.05 },
+  cleaning_time_capsule:{ valence: 0.00, arousal: 0.00, dominance: 0.00 },
+  nature_fights_back:  { valence:-0.03, arousal: 0.05, dominance:-0.05 },
+  errand_curse:        { valence:-0.08, arousal: 0.05, dominance:-0.05 },
+  cohabitant_mystery:  { valence: 0.02, arousal: 0.05, dominance: 0.00 },
+  unexpected_guest:    { valence:-0.03, arousal: 0.08, dominance:-0.03 },
+  power_outage:        { valence:-0.02, arousal:-0.05, dominance:-0.03 },
+};
+
+/**
+ * 根据事件类型 key 获取对应的 VAD 情绪偏移量
+ * @param {string} eventTypeKey
+ * @returns {{ valence: number, arousal: number, dominance: number } | null}
+ */
+export function getEventVadModifier(eventTypeKey) {
+  return EVENT_VAD_MODIFIERS[eventTypeKey] || null;
+}
+
+export function getUrgencyLevel(eventTypeKey) {
+  const found = EVENT_TYPES.find(e => e.key === eventTypeKey);
+  return found ? found.urgency : 1;
 }
 
 /**
@@ -140,6 +227,16 @@ export async function generateEvent(character, options = {}) {
   if (options.eventTypeKey) {
     eventType = available.find(e => e.key === options.eventTypeKey);
     if (!eventType) throw new Error(`Unknown event type: ${options.eventTypeKey}`);
+  } else if (options.customPrompt) {
+    // 用户自定义事件动机：跳过随机选类型，使用自定义提示
+    eventType = {
+      key: 'custom',
+      name: '自定义事件',
+      durationMin: 60,
+      urgency: 1,
+      desc: options.customPrompt,
+    };
+    console.log(`[eventGen] Custom event for ${character.display_name}: "${options.customPrompt.slice(0, 60)}..."`);
   } else {
     eventType = available[Math.floor(Math.random() * available.length)];
   }
@@ -170,8 +267,53 @@ export async function generateEvent(character, options = {}) {
     WHERE cr.from_character_id = ? AND cr.relationship_text != ''
   `).all(character.id);
 
+  // 多人关系：sigmoid 模型，照搬朋友圈算法但降低频率
+  // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k * (R - R_mid)))
+  const relCount = relationships.length;
+  const MULTI_P_MIN = 0.10;  // 1人也保持 10% 随机到关系网对象的概率
+  const MULTI_P_MAX = 0.50;  // 社交达人趋于 50%
+  const MULTI_K = 1.0;       // 陡峭度
+  const MULTI_R_MID = 5;     // 拐点：R=5 时概率 = 30%
+
+  let multiPerson = null;
+  if (relCount > 0) {
+    const multiProb = MULTI_P_MIN + (MULTI_P_MAX - MULTI_P_MIN) / (1 + Math.exp(-MULTI_K * (relCount - MULTI_R_MID)));
+    console.log(`[eventGen] ${character.display_name} relCount=${relCount}, multiProb=${(multiProb * 100).toFixed(0)}%`);
+
+    if (Math.random() < multiProb) {
+      const allRels = db.prepare(`
+        SELECT cr.relationship_text,
+               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
+        FROM character_relationships cr
+        JOIN characters c ON c.id = cr.to_character_id
+        WHERE cr.from_character_id = ? AND cr.relationship_text != ''
+      `).all(character.id);
+
+      const picked = allRels[Math.floor(Math.random() * allRels.length)];
+      const otherPersona = picked.other_prompt.replace(/你/g, picked.other_name);
+
+      // 查反向关系，双向注入
+      const reverseRel = db.prepare(`
+        SELECT relationship_text FROM character_relationships
+        WHERE from_character_id = ? AND to_character_id = ? AND relationship_text != ''
+      `).get(picked.other_id, character.id);
+
+      let relDesc = `${character.display_name}是${picked.other_name}的${picked.relationship_text}`;
+      if (reverseRel) {
+        relDesc += `，${picked.other_name}是${character.display_name}的${reverseRel.relationship_text}`;
+      }
+
+      multiPerson = {
+        otherName: picked.other_name,
+        otherPersona,
+        relDesc,
+      };
+      console.log(`[eventGen] Multi-person event: ${character.display_name} + ${picked.other_name} (${relDesc})`);
+    }
+  }
+
   // 4. 生成初始场景
-  const jailbreakPrompt = getSystemRulesWithWorld({ roleplay: false }); // 不需要 <roleplay> 指令
+  const jailbreakPrompt = getSystemRulesWithWorld({ roleplay: false });
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
@@ -182,41 +324,69 @@ export async function generateEvent(character, options = {}) {
   if (recentMoment) {
     contextBlock += `\n关联线索——${character.display_name}一小时前刚发了朋友圈："${recentMoment.content}"。事件素材可以与此呼应，提高关联性。\n`;
   }
-  if (relationships.length > 0) {
-    const relLines = relationships.map(r => `${character.display_name}是${r.display_name}的${r.relationship_text}`).join('；');
-    contextBlock += `\n角色关系网：${relLines}。如果事件涉及多人互动，优先从关系网中选择对象。\n`;
+
+  // 将角色人格中的"你"替换为角色名（保留引号内对话不变，简单正则处理）
+  const displayName = character.display_name;
+  const personaText = character.base_prompt.replace(/你/g, displayName);
+
+  // [0] 分镜导演声明 + jailbreak（最先确立创作身份）
+  const directorSystem = `${jailbreakPrompt}
+
+你是一个分镜导演，正在为角色「${displayName}」构思一个即将发生的"奇遇事件"——一段实时展开的故事片段。
+这不是角色扮演，而是编剧创作。你需要根据角色人格信息，以第三人称视角想象一个电影画面：镜头跟随着${displayName}，记录ta正在经历的事。`;
+
+  // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
+  let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
+
+${personaText}`;
+
+  if (multiPerson) {
+    personaMsg += `\n\n---\n以下是${multiPerson.otherName}的人格设定（${multiPerson.relDesc}），供事件涉及多人互动时参考：
+
+${multiPerson.otherPersona}`;
   }
 
-  const directorPrompt = `你是一个分镜导演，正在为角色「${character.display_name}」构思一个即将发生的"奇遇事件"——一段实时展开的故事片段。
+  // [2] JSON 格式
+  const multiPersonImageNote = multiPerson
+    ? `**多人画面**：prompt 中必须包含${displayName}和${multiPerson.otherName}两个人。描述清楚各自的外观、位置、互动动作。用句号分隔两人描述。`
+    : '';
 
-这不是角色扮演，而是编剧创作。你需要在脑海中想象一个电影画面：镜头跟随着${character.display_name}，记录ta正在经历的事。
-
-事件类型方向：**${eventType.name}**——${eventType.desc}
-${contextBlock}
-${timeTag}
-
-请以第三人称（"${character.display_name}"或"ta"）创作这个事件的开场场景。要求：
-- 场景长度 80-150 字，像一个电影分镜的开场，有画面感
-- 给出两个明确的行动选项（A和B），以及一个自由输入的C选项
-- 选项的好坏/后果可以不同，但都不要明显"找死"——保持合理的叙事张力`;
+  // 解析 image_prompt 规则的 {"prompt":"..."} JSON，提取其中的 prompt 指令文本
+  const imagePromptInstruction = parseImagePromptRule(imageRulesText)
+    || '≥8个外观锚点，角色名用character(series)格式';
 
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"title":"事件标题（10字以内）","description":"场景叙述（第三人称，80-150字）","prompt":"画面描述（英文，描述场景、角色外观、动作、氛围。${imageRulesText ? imageRulesText.slice(0, 200) : '≥8个外观锚点，角色名用character(series)格式'}）","choiceA":"选项A文字（简短有力，8-20字）","choiceB":"选项B文字（简短有力，8-20字）","choiceCLabel":"自由选项标签（5-10字）"}`;
+{"title":"事件标题（10字以内）","description":"场景叙述（第三人称，80-150字）","prompt":"画面描述（英文。${imagePromptInstruction}）${multiPersonImageNote}","choiceA":"选项A文字（简短有力，8-20字）","choiceB":"选项B文字（简短有力，8-20字）"}`;
+
+  // [3] 创作任务
+  const multiPersonNote = multiPerson
+    ? `\n**多人事件**：${multiPerson.relDesc}。事件中应包含${multiPerson.otherName}作为互动对象，描述ta们之间的互动方式、肢体距离和氛围要贴合两人的真实关系。`
+    : '';
+
+  const directorPrompt = `事件类型方向：**${eventType.name}**——${eventType.desc}
+${contextBlock}
+${timeTag}${multiPersonNote}
+
+请以第三人称创作这个事件的开场场景。要求：
+- 场景长度 80-150 字，像一个电影分镜的开场，有画面感
+- 给出两个明确的行动选项（A和B）
+- 选项的好坏/后果可以不同，但都不要明显"找死"——保持合理的叙事张力`;
 
   const msgs = [
-    { role: 'system', content: jailbreakPrompt },
-    { role: 'system', content: character.base_prompt },
+    { role: 'system', content: directorSystem },
+    { role: 'system', content: personaMsg },
     { role: 'system', content: formatPrompt },
     { role: 'user', content: directorPrompt },
   ];
 
   let eventData;
+  let rawResult = '';
   try {
-    const result = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, label: '奇遇生成' });
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇生成' });
+    const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in LLM response');
-    eventData = JSON.parse(jsonMatch[0]);
+    eventData = JSON.parse(repairJson(jsonMatch[0]));
     // field 兼容：imagePrompt / prompt 两种写法都接受
     const imagePromptText = eventData.prompt || eventData.imagePrompt;
     if (!eventData.title || !eventData.description || !eventData.choiceA || !eventData.choiceB) {
@@ -225,14 +395,8 @@ ${timeTag}
     eventData.prompt = imagePromptText;
   } catch (err) {
     console.error(`[eventGen] LLM generation failed for ${character.display_name}:`, err.message);
-    eventData = {
-      title: eventType.name,
-      description: eventType.desc,
-      prompt: `beautiful illustration, ${character.display_name} in an adventure scene, cinematic lighting`,
-      choiceA: '迎难而上',
-      choiceB: '谨慎观望',
-      choiceCLabel: '自由发挥',
-    };
+    console.log(`[eventGen] Raw LLM response:\n${rawResult}`);
+    throw err;
   }
 
   // 5. 生图
@@ -283,7 +447,7 @@ ${timeTag}
     `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
     eventData.choiceA,
     eventData.choiceB,
-    eventData.choiceCLabel || '自由发挥',
+    eventData.choiceCLabel || '自由行动',
     JSON.stringify(initialChoiceEntry),
     toSQLite(expiresAt)
   );
@@ -321,10 +485,13 @@ export async function generateNextBranch(character, event, choice) {
   const db = getDb();
   const now = new Date();
 
+  // 0. 标记处理中，防止切页后重复提交
+  db.prepare(`UPDATE character_events SET processing = 1 WHERE id = ?`).run(event.id);
+
   // 1. 检查是否过期
   const expiresAt = new Date(event.expires_at + 'Z');
   if (now >= expiresAt) {
-    // 过期了，直接走到期结论流程
+    db.prepare(`UPDATE character_events SET processing = 0 WHERE id = ?`).run(event.id);
     await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
     return null;
   }
@@ -344,56 +511,70 @@ export async function generateNextBranch(character, event, choice) {
     historyText = `初始场景：${event.description}`;
   } else {
     historyText = choiceHistory.map((h, i) =>
-      `第${i + 1}步：选择「${h.choice_label}」→ ${h.summary}`
+      `第${i + 1}幕：推进「${h.choice_label}」→ ${h.summary}`
     ).join('\n');
   }
-  historyText += `\n当前用户选择：${choice.label}${choice.customText ? '——' + choice.customText : ''}`;
+  // choice.customText 仅在非 C 选项时作为补充说明；C 选项的 label 已等于 customText
+  const choiceExtra = choice.choice !== 'C' && choice.customText ? '——' + choice.customText : '';
+  historyText += `\n剧情推进：${choice.label}${choiceExtra}`;
 
-  // 4. LLM 生成下一步
+  // 4. LLM 生成下一步（try-catch 确保失败时清除 processing 标记）
+  try {
   const jailbreakPrompt = getSystemRulesWithWorld({ roleplay: false });
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
-  const directorPrompt = `继续推进「${character.display_name}」的奇遇事件。
+  const displayName2 = character.display_name;
+  const personaText2 = character.base_prompt.replace(/你/g, displayName2);
 
-事件标题：${event.title}
-${historyText}
+  const directorSystem2 = `${jailbreakPrompt}
 
-角色关系网：${relationships.length > 0 ? relationships.map(r => `${character.display_name}是${r.display_name}的${r.relationship_text}`).join('；') : '无特殊关系'}
+你是一个分镜导演，正在为角色「${displayName2}」的奇遇事件推进叙事。
+这是编剧创作而非角色扮演，请以第三人称视角继续展开故事。`;
 
+  const personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
+
+${personaText2}`;
+
+  // 解析 image_prompt 规则的 {"prompt":"..."} JSON，提取其中的 prompt 指令文本
+  const branchImagePromptInstruction = parseImagePromptRule(imageRulesText)
+    || '描述场景、角色外观、动作、氛围';
+
+  const formatPrompt2 = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
+
+{"description":"选择后的场景叙述（第三人称，80-150字）","prompt":"画面描述（英文。${branchImagePromptInstruction}）","choiceA":"新选项A","choiceB":"新选项B"}`;
+
+  const relBlock2 = relationships.length > 0
+    ? `\n角色关系网：${relationships.map(r => `${displayName2}是${r.display_name}的${r.relationship_text}`).join('；')}\n`
+    : '';
+
+  const directorPrompt2 = `事件标题：${event.title}
+${historyText}${relBlock2}
 请以第三人称创作选择之后发生的下一个场景。要求：
 - 场景长度 80-150 字，有画面感
 - 给出新的A和B选项（不要和之前的选项重复，保持故事持续发展）`;
 
-  const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
-
-{"description":"选择后的场景叙述（第三人称，80-150字）","prompt":"画面描述（英文。${imageRulesText ? imageRulesText.slice(0, 200) : '描述场景、角色外观、动作、氛围'}）","choiceA":"新选项A","choiceB":"新选项B","choiceCLabel":"自由选项标签"}`;
-
   const msgs = [
-    { role: 'system', content: jailbreakPrompt },
-    { role: 'system', content: character.base_prompt },
-    { role: 'system', content: formatPrompt },
-    { role: 'user', content: directorPrompt },
+    { role: 'system', content: directorSystem2 },
+    { role: 'system', content: personaMsg2 },
+    { role: 'system', content: formatPrompt2 },
+    { role: 'user', content: directorPrompt2 },
   ];
 
   let branchData;
+  let rawBranchResult = '';
   try {
-    const result = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, label: '奇遇分支' });
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇分支' });
+    const jsonMatch = rawBranchResult.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in LLM response');
-    branchData = JSON.parse(jsonMatch[0]);
+    branchData = JSON.parse(repairJson(jsonMatch[0]));
     const branchPromptText = branchData.prompt || branchData.imagePrompt;
     if (!branchData.description) throw new Error('Incomplete branch data');
     branchData.prompt = branchPromptText || event.prompt;
   } catch (err) {
     console.error(`[eventGen] Branch generation failed:`, err.message);
-    branchData = {
-      description: `${character.display_name}${choice.label}。故事继续展开……`,
-      prompt: event.prompt || `illustration of ${character.display_name} in an adventure scene`,
-      choiceA: '继续前进',
-      choiceB: '换一种方式',
-      choiceCLabel: '自由发挥',
-    };
+    console.log(`[eventGen] Raw branch LLM response:\n${rawBranchResult}`);
+    throw err;
   }
 
   // 5. 生图
@@ -427,21 +608,18 @@ ${historyText}
   };
   choiceHistory.push(newChoiceEntry);
 
-  // 生成运行中的摘要
-  const summary = await generateRunningSummary(character, event, choiceHistory, branchData.description);
-
-  // 7. 更新 DB
+  // 7. 更新 DB（清除 processing 标记，不生成摘要——摘要只在结局时生成）
   db.prepare(`
     UPDATE character_events SET
       description = ?, image = ?, prompt = ?,
       choice_a = ?, choice_b = ?, choice_c_label = ?,
-      current_branch = ?, choice_history = ?, summary = ?,
-      engaged = 1, last_interaction_at = datetime('now')
+      current_branch = ?, choice_history = ?,
+      engaged = 1, processing = 0, last_interaction_at = datetime('now')
     WHERE id = ?
   `).run(
     branchData.description, imageUrl, branchData.prompt,
-    branchData.choiceA, branchData.choiceB, branchData.choiceCLabel || '自由发挥',
-    event.current_branch + 1, JSON.stringify(choiceHistory), summary,
+    branchData.choiceA, branchData.choiceB, '自由行动',
+    event.current_branch + 1, JSON.stringify(choiceHistory),
     event.id
   );
 
@@ -461,13 +639,16 @@ ${historyText}
     choice_b: updatedEvent.choice_b,
     choice_c_label: updatedEvent.choice_c_label,
     current_branch: updatedEvent.current_branch,
-    summary: updatedEvent.summary,
     choice_history: JSON.parse(updatedEvent.choice_history || '[]'),
     expires_at: toISO(updatedEvent.expires_at),
     created_at: toISO(updatedEvent.created_at),
   });
 
-  return updatedEvent;
+    return updatedEvent;
+  } catch (err) {
+    db.prepare(`UPDATE character_events SET processing = 0 WHERE id = ?`).run(event.id);
+    throw err;
+  }
 }
 
 /**
@@ -518,7 +699,7 @@ ${historyText}
     const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '奇遇结局' });
     const jsonMatch = result.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found');
-    conclusionData = JSON.parse(jsonMatch[0]);
+    conclusionData = JSON.parse(repairJson(jsonMatch[0]));
     if (!conclusionData.summary) throw new Error('No summary generated');
   } catch (err) {
     console.error(`[eventGen] Conclusion generation failed:`, err.message);
@@ -531,15 +712,25 @@ ${historyText}
   }
 
   // 2. 存入记忆
-  // memory_fragments CHECK 约束只允许 fact/preference/emotion，事件摘要用 'fact' 存储
   const conversationId = `char_${character.id}`;
   const fragmentType = 'fact';
 
   try {
     const entities = JSON.stringify([character.display_name, event.title]);
 
+    // 摘要文本：仅结论（用于 memory_fragments + 聊天注入，避免全量分支撑爆上下文）
+    const summaryText = `【奇遇】${event.title}\n${conclusionData.summary}`;
+
+    // 完整文本：全部分支（用于 ChromaDB 向量检索，使事件细节也可被语义召回）
+    const parsedHistory = JSON.parse(event.choice_history || '[]');
+    let fullVectorText = `【奇遇】${event.title}\n开始：${event.description}`;
+    for (const h of parsedHistory) {
+      if (h.branch === 0) continue;
+      fullVectorText += `\n选择了：「${h.choice_label}」→ ${h.summary}`;
+    }
+    fullVectorText += `\n结局：${conclusionData.summary}`;
+
     if (!event.engaged) {
-      // 临时单槽：删除旧的未互动事件记忆再插入新的
       db.prepare(`
         DELETE FROM memory_fragments
         WHERE conversation_id = ? AND fragment_type = 'fact' AND content LIKE '【未互动的奇遇】%'
@@ -547,20 +738,20 @@ ${historyText}
       console.log(`[eventGen] Replaced old unengaged event memory for ${character.display_name}`);
     }
 
-    const summaryWithTag = event.engaged
-      ? `【奇遇·已完成】${conclusionData.summary}`
-      : `【未互动的奇遇】${conclusionData.summary}`;
+    const contentWithTag = event.engaged
+      ? `【奇遇·已完成】${summaryText}`
+      : `【未互动的奇遇】${summaryText}`;
 
     const insertResult = db.prepare(`
       INSERT INTO memory_fragments (conversation_id, fragment_type, content, entities)
       VALUES (?, ?, ?, ?)
-    `).run(conversationId, fragmentType, summaryWithTag, entities);
+    `).run(conversationId, fragmentType, contentWithTag, entities);
 
-    // 向量化
+    // 向量化存入 RAG
     try {
       await upsertVector({
         id: `event_${insertResult.lastInsertRowid}`,
-        text: summaryWithTag,
+        text: fullVectorText, // 向量检索用完整分支文本，提高召回
         metadata: {
           conversation_id: conversationId,
           fragment_type: 'event',
@@ -608,36 +799,41 @@ ${historyText}
 /**
  * 生成运行中的事件摘要（每步更新）
  */
-async function generateRunningSummary(character, event, choiceHistory, latestDescription) {
-  const historyText = choiceHistory.map((h, i) =>
-    `第${i + 1}步：选择「${h.choice_label}」→ ${h.summary}`
-  ).join('\n');
-
-  // 用 LLM 压缩摘要
-  const taskPrompt = `请将以下奇遇事件进度归纳为一句话摘要（30-60字），用第三人称：
-
-事件标题：${event.title}
-进展：
-${historyText}
-
-只输出摘要文本，不要引号或解释。`;
-
-  try {
-    const result = await chatSync([
-      { role: 'user', content: taskPrompt },
-    ], { temperature: 0.3, max_tokens: 128, label: '奇遇摘要' });
-    return result.trim();
-  } catch {
-    // 兜底：用最新的描述作为摘要
-    return `${character.display_name}正在经历"${event.title}"，最近的发展是：${latestDescription.slice(0, 60)}`;
-  }
-}
-
 // ── 工具函数 ──
 
 function toSQLite(iso) {
   if (!iso) return iso;
   return iso.replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+}
+
+// 修复 LLM 输出的非法 JSON 转义（image_prompt 规则中的 \( \) 等不是合法 JSON 转义）
+function repairJson(text) {
+  return text.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+}
+
+/**
+ * 解析 image_prompt 规则的 {"prompt":"..."} JSON 格式
+ * 成功则返回 prompt 字段内容，失败返回 null
+ *
+ * rule_content 可能包含：(1) 真实换行符（JSON 不允许）(2) 非法转义序列如 \(
+ * 两步清洗后再解析
+ */
+function parseImagePromptRule(ruleContent) {
+  if (!ruleContent) return null;
+  try {
+    // Step 1: 真实控制字符 → JSON 合法转义
+    let sanitized = ruleContent
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n')
+      .replace(/\t/g, '\\t');
+    // Step 2: 非法转义序列（如 \( → (）
+    sanitized = repairJson(sanitized);
+    // Step 3: 解析
+    const parsed = JSON.parse(sanitized);
+    return parsed.prompt || null;
+  } catch {
+    return null;
+  }
 }
 
 function toISO(dt) {

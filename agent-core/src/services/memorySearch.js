@@ -198,11 +198,15 @@ function entitySearch(query, conversationId, limit, excludeEntities = []) {
       // 用这些实体再做一次扩展搜索
       if (uniqueEntities.length > 0) {
         const entityResults = expandByEntities(uniqueEntities, conversationId, limit);
-        return [...rows.map(r => formatFragmentRow(r, 'entity')), ...entityResults].slice(0, limit);
+        const merged = [...rows.map(r => formatFragmentRow(r, 'entity')), ...entityResults].slice(0, limit);
+        if (merged.length > 0) console.log(`[hybridSearch:ent] got ${merged.length} results:`, merged.map(r => `${r.fragment_type}:${r.content?.slice(0, 50)}`));
+        return merged;
       }
     }
 
-    return rows.map(r => formatFragmentRow(r, 'entity'));
+    const final = rows.map(r => formatFragmentRow(r, 'entity'));
+    if (final.length > 0) console.log(`[hybridSearch:ent] got ${final.length} results:`, final.map(r => `${r.fragment_type}:${r.content?.slice(0, 50)}`));
+    return final;
   } catch (err) {
     console.error('[memorySearch] entity search error:', err.message);
     return [];

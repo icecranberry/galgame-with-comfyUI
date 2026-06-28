@@ -450,7 +450,7 @@ async function generateMomentPost(character) {
 - 朋友圈中主角提到的其他人如果没有IP，那就都带上主角的IP，比如说：'Furina \(Genshin Impact\) and Lumine \(Genshin Impact\) are having a picnic together'
 - **不确定的角色特征不允许编造**：若本地知识库无该 IP 角色的准确信息（发色、瞳色、标志服装等），禁止凭空编造角色标签。
 - 描述场景在哪、镜头角度、角色表情、衣服、动作、场景中的其他背景物品，在自然语言描述之外，可以用Danbooru格式的tag标签来重复强调动作，镜头。
-- 将text中的所有角色加入画面，明确追加说明什么发色的角色在做什么，例如：'琪亚娜和芽衣，白色头发的琪亚娜抱着紫色头发的芽衣'${multiPersonImageNote}
+- 将text中的所有角色加入画面，描述多角色时，禁止用逗号串联两个角色的外貌（错误例子： A, blonde, B, red hair）。必须使用句号（.）将两个角色的描述完全隔开（正确例子： A, blonde. B, red hair），且每个角色的描述必须是一个语法完整的独立主谓宾短句。明确追加说明什么发色的角色在做什么，例如：'琪亚娜和芽衣，白色头发的琪亚娜抱着紫色头发的芽衣。'${multiPersonImageNote}
 - **最终输出为英文，角色名也需要翻译成英文**
 - 注意：不要在 prompt 值中使用未转义的双引号，如需引号请用单引号替代"}
 

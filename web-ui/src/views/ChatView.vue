@@ -167,7 +167,7 @@
       <div v-if="showSettings" class="settings-overlay" @click.self="closeSettings">
         <div class="settings-panel">
         <div class="sph">
-          <span>角色设置</span>
+          <span>关于{{ chat.activeChar?.display_name }}</span>
         </div>
 
         <!-- 头像设置 -->
@@ -191,13 +191,13 @@
         <!-- 编辑人格 → 二级弹窗 -->
         <button class="sp-btn" @click="openCharEditor">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M892.691692 30.72l77.981539 77.981538a73.491692 73.491692 0 0 1 0 103.975385l-584.861539 584.861539-228.036923 46.08 46.08-228.036924L788.716308 30.72a73.491692 73.491692 0 0 1 103.975384 0z m25.993846 129.969231l-77.981538-77.981539-569.186462 569.186462-19.692307 97.673846 97.673846-19.692308 569.186461-569.186461z" fill="currentColor"/><path d="M652.366769 167.699692l180.854154 182.035693 55.689846-55.689847-180.854154-182.114461zM73.491692 953.344h888.595693v-78.769231H73.570462z" fill="currentColor"/></svg>
-          编辑角色人格
+          查看详细信息
         </button>
 
         <!-- 查看角色对用户的印象 -->
         <button class="sp-btn" @click="openImpression">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M607.839811 895.957102H214.69447A86.82497 86.82497 0 0 1 127.880338 809.070721V214.784781A86.839419 86.839419 0 0 1 214.69447 127.880338h594.28594a86.33729 86.33729 0 0 1 61.436749 25.456857c16.400473 16.400473 25.362934 38.208767 25.373771 61.411462L894.439878 607.821749v0.10476a32.031496 32.031496 0 0 0 64.059379 0.101149L959.825022 214.889542v-0.104761A150.775976 150.775976 0 0 0 808.98041 63.940169H214.69447A150.638703 150.638703 0 0 0 63.940169 214.784781v594.28594a150.638703 150.638703 0 0 0 150.757914 150.82655h393.141728a31.970084 31.970084 0 0 0 0-63.940169z" fill="currentColor"/><path d="M950.544667 905.331381l-122.071536-122.071536a192.217875 192.217875 0 1 0-45.213286 45.213286l122.071536 122.071536a31.970084 31.970084 0 0 0 45.213286-45.213286z m-278.547941-105.302594a128.028448 128.028448 0 1 1 90.531332-37.497116 127.193975 127.193975 0 0 1-90.527719 37.497116zM768.004516 352.212795c17.653989 0 31.966472-14.402794 31.970084-32.056783s-14.308871-32.074845-31.966472-32.078457L256.002709 287.911382a32.020659 32.020659 0 0 0-31.970084 32.024271c0 17.657601 14.308871 32.092907 31.966472 32.092908L768.004516 352.212795zM448.000226 544.033302a31.96286 31.96286 0 1 0 0-63.940169h-192.001129a31.937573 31.937573 0 1 0 0 63.878758l192.001129 0.061411zM256.017159 671.91364a31.959247 31.959247 0 1 0 0 63.922107l127.999549 0.018062a31.941185 31.941185 0 1 0 0-63.878757z" fill="currentColor"/></svg>
-          查看对你的印象
+          对你的印象
         </button>
 
         <div class="sp-divider sp-divider-strong"></div>
@@ -214,37 +214,115 @@
         <button class="sp-btn sp-btn-danger" @click="deleteChar" :disabled="deleting || chat.activeChar?.name === 'default'"
           :title="chat.activeChar?.name === 'default' ? '不能删除默认Agent' : ''">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 179.2l390.4 627.2H128l384-627.2m0-64c-19.2 0-44.8 12.8-51.2 32l-390.4 627.2c-25.6 44.8 6.4 96 51.2 96H896c51.2 0 83.2-57.6 51.2-96l-384-627.2c-6.4-19.2-32-32-51.2-32z" fill="#d81e06"/><path d="M512 640c-19.2 0-32-12.8-32-32v-192c0-19.2 12.8-32 32-32s32 12.8 32 32v192c0 19.2-12.8 32-32 32z" fill="#d81e06"/><path d="M512 723.2m-32 0a32 32 0 1 0 64 0 32 32 0 1 0-64 0Z" fill="#d81e06"/></svg>
-          {{ deleting ? '删除中...' : '删除角色' }}
+          {{ deleting ? '删除中...' : '删除' + chat.activeChar?.display_name }}
         </button>
       </div>
     </div>
     </Transition>
 
-    <!-- 角色人格编辑弹窗（二级菜单） -->
-    <Transition name="editor-fade">
-      <div v-if="showEditor" class="editor-overlay">
-      <div class="editor-panel">
-        <div class="editor-header">
-          <span>编辑角色人格 — {{ chat.activeChar?.display_name }}</span>
-          <button class="editor-close" @click="closeCharEditor">&times;</button>
-        </div>
-        <div class="editor-field">
-          <label>显示名称</label>
-          <input v-model="editForm.display_name" class="editor-input" />
-        </div>
-        <div class="editor-field editor-field-grow">
-          <label>人格提示词（base_prompt）</label>
-          <textarea v-model="editForm.base_prompt" class="editor-textarea"></textarea>
-        </div>
-        <div class="editor-actions">
-          <div class="editor-actions-right">
-            <button class="btn-cancel" @click="closeCharEditor">取消</button>
-            <button class="btn-primary" @click="saveCharEditor" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
+    <!-- 角色详细信息编辑弹窗（酒馆同款） -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="showEditor" class="modal-overlay">
+          <div class="modal-panel modal-wide">
+            <div class="modal-header">
+              <h3>{{ chat.activeChar?.display_name }}</h3>
+              <button class="modal-close" @click="closeCharEditor">✕</button>
+            </div>
+            <!-- 移动端工具栏 -->
+            <div class="mobile-detail-toolbar" v-if="isMobile">
+              <div class="toolbar-item" @click="showRelationGraph = true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                </svg>
+                <span>关系图</span>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不看ta的朋友圈</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不主动聊天</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不发生奇遇</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="modal-body">
+              <div class="preview-card">
+                <label class="fl">展示名</label>
+                <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+                <label class="fl" style="margin-top:12px">人格提示词</label>
+                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" rows="12" @input="detail.dirty = true"></textarea>
+              </div>
+            </div>
+            <!-- 操作栏 sticky footer -->
+            <div class="modal-footer">
+              <div class="detail-actions">
+                <div class="detail-actions-right">
+                  <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharEditor">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 悬浮侧边栏 -->
+          <div class="detail-float" v-if="!isMobile">
+            <div class="float-card" @click="showRelationGraph = true">
+              <div class="float-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                </svg>
+              </div>
+              <span class="float-label">关系图</span>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不看ta的朋友圈</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不主动聊天</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="float-card float-card-toggle">
+              <span class="float-label">不发生奇遇</span>
+              <label class="toggle-switch float-switch">
+                <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-    </Transition>
+      </Transition>
+    </Teleport>
+
+    <!-- 角色关系图（详情弹窗入口） -->
+    <RelationshipGraph
+      v-if="chat.activeChar"
+      :visible="showRelationGraph"
+      :center-character="chat.activeChar"
+      :all-characters="chat.characters"
+      @close="showRelationGraph = false"
+    />
 
     <!-- 角色对用户的印象弹窗 -->
     <Transition name="editor-fade">
@@ -462,10 +540,10 @@
     </div>
     </Transition>
 
-    <!-- 角色头像选择器 -->
+    <!-- 角色头像选择器（设置面板） -->
     <AvatarCropper
       v-if="showAvatarPicker"
-      title="选择角色头像"
+      :title="'选择' + (chat.activeChar?.display_name || '') + '的头像'"
       :show-recent-tab="true"
       :show-generate-tab="true"
       :character-id="chat.activeChar?.id"
@@ -485,10 +563,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
+import RelationshipGraph from '../components/RelationshipGraph.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
+import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 
@@ -609,10 +689,22 @@ const previewImage = ref(null)
 // ── 角色设置面板 ──
 const showSettings = ref(false)
 const showEditor = ref(false)
-const saving = ref(false)
+const showRelationGraph = ref(false)
 const clearing = ref(false)
 const deleting = ref(false)
-const editForm = ref({ display_name: '', base_prompt: '' })
+
+// ── 角色详情编辑弹窗（酒馆同款） ──
+const detail = reactive({
+  editName: '',
+  editPrompt: '',
+  momentsDisabled: false,
+  proactiveDisabled: false,
+  eventsDisabled: false,
+  dirty: false,
+  momentsToggling: false,
+  proactiveToggling: false,
+  eventsToggling: false,
+})
 
 // ── 印象弹窗 ──
 const showImpression = ref(false)
@@ -964,40 +1056,110 @@ return { background: '#e07b6c' }
 function openSettings() { showSettings.value = true }
 function closeSettings() { showSettings.value = false }
 
+// ══════════════════════════════════════════════════
+// 角色详情编辑弹窗（酒馆同款）
+// ══════════════════════════════════════════════════
+
 function openCharEditor() {
-showSettings.value = false
-const c = chat.activeChar
-if (!c) return
-editForm.value = { display_name: c.display_name || '', base_prompt: c.base_prompt || '' }
-showEditor.value = true
+  showSettings.value = false
+  const c = chat.activeChar
+  if (!c) return
+  detail.editName = c.display_name || ''
+  detail.editPrompt = c.base_prompt || ''
+  detail.momentsDisabled = !!c.moments_disabled
+  detail.proactiveDisabled = !!c.proactive_disabled
+  detail.eventsDisabled = !!c.events_disabled
+  detail.dirty = false
+  showEditor.value = true
 }
-function closeCharEditor() { showEditor.value = false }
+
+function closeCharEditor() {
+  showEditor.value = false
+}
 
 async function saveCharEditor() {
-if (saving.value) return
-saving.value = true
-try {
-await chat.updateActiveCharacter({ display_name: editForm.value.display_name, base_prompt: editForm.value.base_prompt })
-showEditor.value = false
-} catch (err) {
-console.error('[chat] save character failed:', err)
-} finally { saving.value = false }
+  const c = chat.activeChar
+  if (!c || !detail.dirty) return
+  await api.updateCharacter(c.id, {
+    display_name: detail.editName,
+    base_prompt: detail.editPrompt,
+    moments_disabled: detail.momentsDisabled,
+    proactive_disabled: detail.proactiveDisabled,
+    events_disabled: detail.eventsDisabled,
+  })
+  detail.dirty = false
+  await chat.loadCharacters()
+}
+
+// 不看朋友圈 toggle — 即时持久化
+async function toggleMomentsDisabled() {
+  const c = chat.activeChar
+  if (!c) return
+  detail.momentsToggling = true
+  try {
+    await api.updateCharacter(c.id, { moments_disabled: detail.momentsDisabled })
+    c.moments_disabled = detail.momentsDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.moments_disabled = detail.momentsDisabled
+  } catch (e) {
+    detail.momentsDisabled = !detail.momentsDisabled
+    console.error('toggleMomentsDisabled failed:', e)
+  } finally {
+    detail.momentsToggling = false
+  }
+}
+
+// 不主动聊天 toggle — 即时持久化
+async function toggleProactiveDisabled() {
+  const c = chat.activeChar
+  if (!c) return
+  detail.proactiveToggling = true
+  try {
+    await api.updateCharacter(c.id, { proactive_disabled: detail.proactiveDisabled })
+    c.proactive_disabled = detail.proactiveDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.proactive_disabled = detail.proactiveDisabled
+  } catch (e) {
+    detail.proactiveDisabled = !detail.proactiveDisabled
+    console.error('toggleProactiveDisabled failed:', e)
+  } finally {
+    detail.proactiveToggling = false
+  }
+}
+
+// 不发生奇遇 toggle — 即时持久化
+async function toggleEventsDisabled() {
+  const c = chat.activeChar
+  if (!c) return
+  detail.eventsToggling = true
+  try {
+    await api.updateCharacter(c.id, { events_disabled: detail.eventsDisabled })
+    c.events_disabled = detail.eventsDisabled
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.events_disabled = detail.eventsDisabled
+  } catch (e) {
+    detail.eventsDisabled = !detail.eventsDisabled
+    console.error('toggleEventsDisabled failed:', e)
+  } finally {
+    detail.eventsToggling = false
+  }
 }
 
 async function clearChatHistory() {
 showSettings.value = false
 if (clearing.value) return
-const ok = await confirmFn({ title:'清空记忆', message:'确定要清空当前角色的所有记忆吗？\n此操作不可恢复。', okText:'清空' })
+const ok = await confirmFn({ title:'清空记忆', message:`确定要清空${chat.activeChar?.display_name}的所有记忆吗？\n此操作不可恢复。`, okText:'清空' })
 if (!ok) return
 clearing.value = true
 try { await chat.clearActiveMessages() } catch {} finally { clearing.value = false }
 }
 
+// 设置面板中的删除角色（保留兼容）
 async function deleteChar() {
 if (deleting.value || chat.activeChar?.name === 'default') return
 showSettings.value = false
 const ok = await confirmFn({
-title: '删除角色',
+title: '删除' + chat.activeChar?.display_name,
 message: `确定要删除角色「${chat.activeChar?.display_name}」吗？\n此操作不可恢复。`,
 okText: '删除', danger: true,
 })
@@ -1793,6 +1955,202 @@ function renderContent(text) {
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
 
+/* ── 弹窗共用（酒馆同款详情编辑弹窗） ── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000;
+}
+
+.modal-panel {
+  background: #f4f1eeed; border-radius: 18px;
+  width: min(880px, 96vw); max-height: 90vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+  overflow: hidden; backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.modal-wide { width: min(760px, 97vw); }
+
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
+
+.modal-close {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: none; background: var(--glass-bg-strong);
+  color: var(--text-secondary); font-size: 15px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
+
+.modal-body {
+  padding: 0px 22px 22px;
+  overflow-y: auto; flex: 1;
+}
+
+/* ── Toggle Switch ── */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #c5c0ba;
+  border-radius: 22px;
+  transition: background 0.25s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+/* ── 详情编辑弹窗 ── */
+.fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
+.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
+.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+
+.detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.detail-avatar {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 26px; font-weight: 700; flex-shrink: 0;
+}
+.detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
+.detail-avatar.clickable:hover { opacity: 0.85; }
+
+/* ── 悬浮侧边栏 ── */
+.detail-float {
+  position: absolute;
+  left: calc(50% + min(380px, 48.5vw) + 16px);
+  top: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 20px;
+}
+.float-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+  transition: all 0.15s;
+  width: 220px;
+}
+.float-card-toggle {
+  justify-content: space-between;
+  gap: 0;
+}
+.float-label {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  white-space: nowrap;
+}
+.float-switch {
+  flex-shrink: 0;
+}
+.float-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: rgba(224,123,108,0.1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.float-card:first-child {
+  cursor: pointer;
+}
+.float-card:first-child:hover {
+  background: rgba(251, 233, 222, 0.85);
+  border-color: rgba(224,123,108,0.2);
+  box-shadow: 0 4px 20px rgba(224,123,108,0.1);
+}
+
+/* ── 预览卡片 ── */
+.preview-card {
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 14px; padding: 18px;
+}
+
+.prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
+
+/* 详情 input/textarea */
+.modal-wide .fi {
+  background: var(--bg-primary);
+  border: 1px solid var(--glass-border);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.modal-wide .fi:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1);
+}
+.modal-wide .prompt-textarea {
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+/* ── 操作栏 sticky footer ── */
+.modal-footer {
+  flex-shrink: 0;
+  padding: 10px 22px 18px;
+  border-top: 1px solid var(--glass-border);
+  background: inherit;
+}
+
+.detail-actions {
+  display: flex; align-items: center; margin-top: 0; gap: 10px;
+}
+.detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
+.btn-ghost.danger { color: var(--danger); }
+.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
+
+/* ── 弹窗动画 ── */
+.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+
+@keyframes modal-pop {
+  0% { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 /* ── 移动端空间优化 ── */
 @media (max-width: 767px) {
   .chat-header { padding: 12px 16px; }
@@ -1811,6 +2169,95 @@ function renderContent(text) {
   }
   .editor-header { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
   .editor-actions { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+
+  /* ── 详情弹窗移动端适配 ── */
+  .modal-panel {
+    width: 100vw;
+    max-height: 100vh; max-height: 100dvh;
+    border-radius: 0;
+  }
+  .modal-header {
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    padding-bottom: 14px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  }
+  .modal-header h3 {
+    font-size: 16px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 8px;
+  }
+  .modal-close { flex-shrink: 0; }
+  .modal-body {
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .preview-card { padding: 14px; }
+
+  .detail-avatar-row { gap: 10px; margin-bottom: 12px; }
+  .detail-avatar { width: 52px; height: 52px; font-size: 22px; }
+
+  /* 移动端详情工具栏 */
+  .mobile-detail-toolbar {
+    display: flex;
+    gap: 4px;
+    padding: 8px 8px;
+    border-bottom: 1px solid var(--glass-border);
+    background: rgba(0, 0, 0, 0.02);
+    flex-shrink: 0;
+  }
+  .toolbar-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: rgba(224, 123, 108, 0.08);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: 1;
+    justify-content: center;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .toolbar-item:active {
+    background: rgba(224, 123, 108, 0.16);
+  }
+  .toolbar-item-toggle {
+    cursor: default;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .toolbar-switch {
+    width: 34px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .toolbar-switch .toggle-slider::before {
+    height: 14px;
+    width: 14px;
+  }
+  .toolbar-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+  }
+
+  .detail-actions { flex-wrap: wrap; gap: 8px; }
+  .detail-actions-right { margin-left: 0; flex-wrap: wrap; gap: 8px; }
+  .modal-footer {
+    padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .prompt-textarea { min-height: 350px; font-size: 16px; }
+  .modal-wide .prompt-textarea { font-size: 16px; }
+  .modal-wide .fi { font-size: 16px; }
 }
 
 /* ── 印象弹窗 ── */

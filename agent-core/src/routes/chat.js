@@ -16,6 +16,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage } from '../services/imageSkill.js';
+import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 
 const router = Router();
@@ -262,6 +263,9 @@ router.delete('/characters/:id/messages', (req, res, next) => {
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
+    // 删除奇遇数据
+    db.prepare(`DELETE FROM character_events WHERE character_id = ?`).run(charId);
+    db.prepare(`DELETE FROM event_history WHERE character_id = ?`).run(charId);
     // 重置好感度到默认值
     db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE character_id = ?`).run(charId);
     // 重置主动聊天连胜计数
@@ -483,6 +487,14 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 3. 生图意图（正则强匹配 → 提前检测，用于 msgs[2] 格式消息）
     const explicitImageIntent = detectImageIntent(message);
 
+    // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
+    const activeEvent = db.prepare(`
+      SELECT title, description, current_branch, choice_history, status, engaged, event_type_key
+      FROM character_events
+      WHERE character_id = ? AND status IN ('open','engaged')
+      ORDER BY id DESC LIMIT 1
+    `).get(characterId);
+
     // 4. 情绪状态加载（VAD 三维情绪 → 用于 msgs[1] 身份消息）
     //     好感度提前加载
     let emotionPrompt = '';
@@ -512,6 +524,21 @@ router.post('/characters/:id/chat', async (req, res) => {
         console.log(`[chat] first ever interaction bonus: +5 → affinity=${affinity.toFixed(0)}`);
       }
 
+      // 4.6 奇遇情绪联动：根据事件类型叠加 VAD 偏移（纯规则映射，零 LLM 开销）
+      if (activeEvent && activeEvent.event_type_key) {
+        const vadMod = getEventVadModifier(activeEvent.event_type_key);
+        if (vadMod) {
+          const clamp = v => Math.max(-1, Math.min(1, v));
+          emotionState.instant.valence = clamp(emotionState.instant.valence + vadMod.valence);
+          emotionState.instant.arousal = clamp(emotionState.instant.arousal + vadMod.arousal);
+          emotionState.instant.dominance = clamp(emotionState.instant.dominance + vadMod.dominance);
+          emotionState.mood.valence = clamp(emotionState.mood.valence + vadMod.valence * 0.5);
+          emotionState.mood.arousal = clamp(emotionState.mood.arousal + vadMod.arousal * 0.5);
+          emotionState.mood.dominance = clamp(emotionState.mood.dominance + vadMod.dominance * 0.5);
+          console.log(`[chat] 🎭 adventure VAD: ${activeEvent.event_type_key} → V${vadMod.valence>=0?'+':''}${vadMod.valence.toFixed(2)} A${vadMod.arousal>=0?'+':''}${vadMod.arousal.toFixed(2)} D${vadMod.dominance>=0?'+':''}${vadMod.dominance.toFixed(2)}`);
+        }
+      }
+
       emotionPrompt = stateToPrompt(emotionState) || '';
     }
 
@@ -532,11 +559,14 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
     // ═══════════════════════════════════════════
-    // msgs[1] — 角色：人格 + 情绪（我是谁）
+    // msgs[1] — 角色：人格 + 情绪 + 当前奇遇锚点（我是谁）
     // ═══════════════════════════════════════════
     const charParts = [];
     charParts.push(character?.base_prompt || getDefaultPrompt());
     if (emotionPrompt) charParts.push(emotionPrompt);
+    if (activeEvent) {
+      charParts.push(`【当前状态】你正在经历一个突发事件：「${activeEvent.title}」。你的情绪、行为和注意力都受此事影响。请在回复中自然地体现这一点。`);
+    }
     msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
     // ═══════════════════════════════════════════
@@ -703,22 +733,29 @@ router.post('/characters/:id/chat', async (req, res) => {
       materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
     }
 
-    // 正在进行的奇遇（不入库，仅注入上下文，和当前时间一样，每次实时读取）
-    const activeEvent = db.prepare(`
-      SELECT title, description, current_branch, max_branches, summary, status, engaged
-      FROM character_events
-      WHERE character_id = ? AND status IN ('open','engaged')
-      ORDER BY id DESC LIMIT 1
+    // 最近奇遇总结（和朋友圈一样主动注入）—— 2条参与过的 + 1条未参与的
+    // 能出现在 event_history 中的都是已结束的奇遇，区别仅在于用户是否参与过
+    const engagedEvents = db.prepare(`
+      SELECT title, summary, ended_at
+      FROM event_history
+      WHERE character_id = ? AND engaged = 1
+      ORDER BY ended_at DESC LIMIT 2
+    `).all(characterId);
+    const unengagedEvent = db.prepare(`
+      SELECT title, summary, ended_at
+      FROM event_history
+      WHERE character_id = ? AND engaged = 0
+      ORDER BY ended_at DESC LIMIT 1
     `).get(characterId);
 
-    if (activeEvent) {
-      let eventContext;
-      if (activeEvent.engaged && activeEvent.summary) {
-        eventContext = `「${character.display_name}正在经历一场奇遇：${activeEvent.summary}（第 ${activeEvent.current_branch}/${activeEvent.max_branches} 步）」`;
-      } else {
-        eventContext = `「${character.display_name}正在经历一场奇遇：${activeEvent.title}——${activeEvent.description}」`;
-      }
-      materialParts.push(eventContext);
+    const eventItems = [...engagedEvents];
+    if (unengagedEvent) eventItems.push(unengagedEvent);
+
+    if (eventItems.length > 0) {
+      const eventLines = eventItems.map((e, i) =>
+        `${i + 1}. ${e.title}：${e.summary || ''}`
+      ).join('\n');
+      materialParts.push(`「${character.display_name}最近经历了一些事：\n${eventLines}\n你可以在对话中自然地提起或询问这些经历。」`);
     }
 
     if (materialParts.length > 0) {
@@ -727,7 +764,40 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     msgs.push(...history);
 
-    // 5.4 重逢上下文 + streak 重置：不依赖 proactiveChat 开关，只要 DB 里有 streak 就处理
+    // 正在进行的奇遇（作为独立 system 消息注入到 user 消息之前，指令前置 + XML 结构化）
+    // 和朋友圈不同——奇遇是"此刻正在发生"的事，优先级更高，需要紧贴对话
+    // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
+    if (activeEvent) {
+      const parsedHistory = JSON.parse(activeEvent.choice_history || '[]');
+      const latestStep = parsedHistory.length > 1 ? parsedHistory[parsedHistory.length - 1] : null;
+
+      const eventParts = [];
+      eventParts.push(`<current_event priority="high">`);
+      eventParts.push(``);
+      eventParts.push(`【最高优先级行为指令】`);
+      eventParts.push(`1. 你正在经历一个实时事件，你的情绪、身体感受和注意力都受此事牵动`);
+      eventParts.push(`2. 你必须在回复中自然地体现此事件对你的影响——不要脱离事件去聊无关话题`);
+      eventParts.push(`3. 当下任何语句，必须从当前事件的角度回应`);
+      eventParts.push(``);
+      eventParts.push(`【事件信息】`);
+      eventParts.push(`标题：${activeEvent.title}`);
+      eventParts.push(`当前处境：${activeEvent.description}`);
+      if (latestStep) {
+        eventParts.push(`最新进展（「${latestStep.choice_label}」）：${latestStep.summary}`);
+      }
+      eventParts.push(`</current_event>`);
+      const eventContext = eventParts.join('\n');
+
+      // 5.4 奇遇上下文 — 拼入最后一句 user 消息最前面（不入库，仅传给 LLM）
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          msgs[i].content = `${eventContext}\n\n${msgs[i].content}`;
+          break;
+        }
+      }
+    }
+
+    // 5.5 重逢上下文 + streak 重置
     const streak = getUnansweredStreak(characterId);
     if (streak >= 2) {
       let insertAt = msgs.length;
@@ -743,7 +813,7 @@ router.post('/characters/:id/chat', async (req, res) => {
       resetUnansweredStreak(characterId);
     }
 
-    // 5.5 在最近的 user 消息前加时间戳
+    // 5.6 在最近的 user 消息前加时间戳
     //     倒数第一句 → [当前时间]（用现在的时间）
     //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
     const now = new Date();
@@ -1061,6 +1131,8 @@ router.post('/characters/:id/chat', async (req, res) => {
             await extractMemoryFragments(conversationId, userMsgId, lastInsertRowid, {
               characterPrompt: character.base_prompt,
               participantNames: [character.display_name, chatUserName, 'user'],
+              characterName: character.display_name,
+              userName: chatUserName,
             });
           }
         }
@@ -1343,9 +1415,10 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     userRelationContent = `\n\n【你和user的关系】你是user的${userRel.relationship_text}。在生成包含你和user的合照或互动场景时，请通过人物姿态、表情、距离等方式体现这层关系。`;
   }
 
+  const userName = config.user.nickname || '用户';
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话），为这轮对话所处的场景生成画面描述。\n\n规则：\n- 只输出 {"prompt":"..."}，不要输出任何对话文字\n- ，尽情详细描述场景、角色、表情、动作、穿着、环境\n\n示例输出：\n{"prompt":"午后阳光透过百叶窗洒进教室，白色长发的少女托腮望着窗外，微风轻拂她的发梢和领巾"}' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考【上一轮画面】，为这轮对话所处的场景生成画面描述。' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
@@ -1357,13 +1430,13 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       const u = config.user;
       const userName = u.nickname || '用户';
       const parts = [];
-      parts.push(`消息中标记为"user"的人是"${userName}"`);
+      parts.push(`对话中另一个人是"${userName}"`);
       if (u.gender) parts.push(`**性别：${u.gender}**（这是不可变更的事实，不受角色关系或场景影响）`);
       if (u.appearance) parts.push(`外观特征：${u.appearance}`);
       if (u.persona) parts.push(`其他说明：${u.persona}`);
       return [{
         role: 'system',
-        content: `【对话对象】${parts.join('。')}。当你生成关于user的图片（例如合照，互动的场景）的时候，需要严格遵循以上user的特征，尤其是性别和外观。${userRelationContent}`
+        content: `【对话对象】${parts.join('。')}。当你生成关于${userName}的图片（例如合照，互动的场景）的时候，需要严格遵循以上${userName}的特征，尤其是性别和外观。${userRelationContent}`
       }];
     })(),
     // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
@@ -1396,7 +1469,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         content: `【最后一轮对话】\n${parts.join('\n')}`
       }];
     })(),
-    { role: 'system', content: '现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要user参与的画面才加入user的特征。尽情详细描述场景、角色、表情、动作、穿着、环境。只输出 JSON，不要任何其他文字。' },
+    { role: 'system', content: `现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。只输出 JSON，不要任何其他文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）

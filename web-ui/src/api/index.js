@@ -242,6 +242,13 @@ export async function updateProactiveFreq(value) {
   })
 }
 
+/** 更新奇遇触发频率 0~1 */
+export async function updateEventFreq(value) {
+  await fetch(`${BASE}/config/event-freq`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+}
+
 export async function updateLlmConfig(data) {
   const res = await fetch(`${BASE}/config/llm`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -259,6 +266,14 @@ export async function getGlobalRules() {
 export async function updateGlobalRule(key, data) {
   const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+/** 重置单条全局规则为默认值 */
+export async function resetGlobalRule(key) {
+  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}/reset`, {
+    method: 'POST',
   })
   return res.json()
 }
@@ -623,6 +638,16 @@ export async function dismissEvent(eventId) {
   return res.json()
 }
 
+export async function concludeEvent(eventId) {
+  const res = await fetch(`${BASE}/events/${eventId}/conclude`, { method: 'POST' })
+  return res.json()
+}
+
+export async function deleteEvent(eventId) {
+  const res = await fetch(`${BASE}/events/${eventId}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function getEventsUnread() {
   const res = await fetch(`${BASE}/events/unread-count`)
   return res.json()
@@ -633,10 +658,10 @@ export async function markEventsRead() {
   return res.json()
 }
 
-export async function generateEvent(characterId, eventTypeKey) {
+export async function generateEvent(characterId, eventTypeKey, customPrompt) {
   const res = await fetch(`${BASE}/events/generate`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ characterId, eventTypeKey }),
+    body: JSON.stringify({ characterId, eventTypeKey, customPrompt }),
   })
   return res.json()
 }

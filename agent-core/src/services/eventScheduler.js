@@ -9,12 +9,20 @@
  * - processing 锁防并发
  */
 
-import { getDb } from '../db/index.js';
-import { generateEvent, concludeEvent } from './eventGenerator.js';
+import { getDb, getSystemRulesWithWorld } from '../db/index.js';
+import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { config } from '../config.js';
 
-const CHECK_INTERVAL = 10 * 60 * 1000; // 10 分钟
+const BASE_INTERVAL_MIN = 10; // 基准间隔 10 分钟（freq=1）
+
+function getCheckIntervalMs() {
+  const freq = config.features.eventFreq ?? 1;
+  if (freq <= 0) return Infinity; // 禁用
+  // freq=1 → 10min, freq=0.5 → 20min, freq=0.1 → 100min
+  const intervalMin = Math.round(BASE_INTERVAL_MIN / freq);
+  return intervalMin * 60 * 1000;
+}
 
 let timer = null;
 let processing = false;
@@ -32,6 +40,13 @@ async function tick() {
 
   // 功能开关
   if (!config.features.events) return;
+
+  // 频率控制：eventFreq=0 时关闭自动触发
+  const freq = config.features.eventFreq ?? 1;
+  if (freq <= 0) {
+    console.log('[eventScheduler] eventFreq=0, auto-generation disabled. Skipping tick.');
+    return;
+  }
 
   const db = getDb();
   try {
@@ -68,12 +83,52 @@ async function tick() {
     `).all();
 
     for (const event of halfTimeEvents) {
-      console.log(`[eventScheduler] Half-time notification for "${event.title}" (${event.display_name})`);
+      console.log(`[eventScheduler] Half-time notification for "${event.title}" (${event.display_name}), engaged=${event.engaged}`);
       try {
-        // 标记已通知
         db.prepare(`UPDATE character_events SET half_time_notified = 1 WHERE id = ?`).run(event.id);
 
-        // 广播紧急联络
+        // 根据 urgency 生成不同语气的主动消息
+        const isUrgent = event.event_type_key ? getUrgencyLevel(event.event_type_key) : 1;
+        const userName = config.user?.nickname || '用户';
+        const urgencyNote = isUrgent >= 2
+          ? `语气要紧急、需要帮助——像在求助或呼救，推动${userName}尽快回应`
+          : `语气轻松自然——像在分享正在发生的事，随手告诉${userName}`;
+
+        const greetingPrompt = `你正在经历一场奇遇事件，现在时间已经过半，但${userName}还没有注意到这件事。
+
+奇遇标题：${event.title}
+当前场景：${event.description}
+${urgencyNote}
+
+请以${event.display_name}的身份，用第一人称给${userName}发一条主动消息（15-50字），根据事情的紧急程度自然表达——紧急事件呼救求援，日常事件随手分享。`;
+
+        // 构建用户信息 system 消息（含用户-角色关系）
+        const userInfoParts = [`对方是${userName}`];
+        if (config.user?.gender) userInfoParts.push(config.user.gender);
+        if (config.user?.appearance) userInfoParts.push(config.user.appearance);
+        if (config.user?.persona) userInfoParts.push(config.user.persona);
+        const userRel = db.prepare(
+          `SELECT relationship_text FROM user_relationships WHERE character_id = ?`
+        ).pluck().get(event.character_id);
+        if (userRel) userInfoParts.push(`你对于${userName}而言的身份是${userRel}`);
+        const userInfoMsg = `你正在和${userName}聊天，以下是${userName}的相关信息：\n${userInfoParts.filter(Boolean).join('，')}`;
+
+        // 生成主动消息内容
+        const { chatSync } = await import('../llm/llm-client.js');
+        const jailbreak = getSystemRulesWithWorld({ roleplay: true });
+        const greeting = await chatSync([
+          { role: 'system', content: jailbreak },
+          { role: 'system', content: event.base_prompt },
+          { role: 'system', content: userInfoMsg },
+          { role: 'user', content: greetingPrompt },
+        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
+
+        // 插入主动聊天消息（和 proactiveChatScheduler 一样的逻辑）
+        const conversationId = `char_${event.character_id}`;
+        db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
+        db.prepare(`INSERT INTO messages (conversation_id, role, content, seq, is_proactive) VALUES (?, 'assistant', ?, 0, 1)`).run(conversationId, greeting);
+        db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
+
         broadcastEventUrgency({
           character_id: event.character_id,
           character_name: event.display_name,
@@ -82,12 +137,22 @@ async function tick() {
           event_description: event.description,
           expires_at: event.expires_at,
         });
+        console.log(`[eventScheduler] Urgency proactive message sent for ${event.display_name}: "${greeting.slice(0, 50)}..."`);
       } catch (err) {
         console.error(`[eventScheduler] Half-time notification error:`, err.message);
       }
     }
 
     // ── 3. 新事件生成 ──
+    // 全局上限：活跃事件最多 4 个（用户强制触发不受此限，走路由直接调用 generateEvent）
+    const activeCount = db.prepare(
+      `SELECT COUNT(*) AS count FROM character_events WHERE status IN ('pending','open','engaged')`
+    ).get();
+    if (activeCount.count >= 4) {
+      console.log(`[eventScheduler] Active event count is ${activeCount.count}, max 4 reached. Skipping auto-generation.`);
+      return;
+    }
+
     // 检查是否有角色符合条件：无活跃事件 + events_disabled=0 + 冷却已过
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
@@ -166,13 +231,28 @@ function cleanupStuckEvents() {
     if (stuck.changes > 0) {
       console.log(`[eventScheduler] Cleaned up ${stuck.changes} stuck pending event(s)`);
     }
+
+    // 清理卡住的 processing 标记（>5 分钟未完成）
+    const stuckProc = db.prepare(`
+      UPDATE character_events SET processing = 0
+      WHERE processing = 1
+        AND last_interaction_at < datetime('now', '-5 minutes')
+    `).run();
+    if (stuckProc.changes > 0) {
+      console.log(`[eventScheduler] Reset ${stuckProc.changes} stuck processing flag(s)`);
+    }
   } catch (err) {
     console.error('[eventScheduler] cleanup error:', err.message);
   }
 }
 
 export function startEventScheduler() {
-  console.log('[eventScheduler] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
+  const intervalMs = getCheckIntervalMs();
+  if (intervalMs === Infinity) {
+    console.log('[eventScheduler] eventFreq=0, scheduler disabled');
+    return;
+  }
+  console.log('[eventScheduler] Starting (interval:', (intervalMs / 60000).toFixed(1), 'min, freq:', config.features.eventFreq ?? 1, ')');
 
   // 启动时立即清理僵尸事件
   cleanupStuckEvents();
@@ -180,7 +260,7 @@ export function startEventScheduler() {
   // 启动后先等 30 秒再首次检查
   setTimeout(() => {
     tick();
-    timer = setInterval(tick, CHECK_INTERVAL);
+    timer = setInterval(tick, intervalMs);
   }, 30_000);
 }
 
@@ -190,4 +270,10 @@ export function stopEventScheduler() {
     timer = null;
     console.log('[eventScheduler] Stopped');
   }
+}
+
+/** 重启调度器（频率变更后调用，使用新的间隔） */
+export function restartEventScheduler() {
+  stopEventScheduler();
+  startEventScheduler();
 }

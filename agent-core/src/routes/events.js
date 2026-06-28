@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { config } from '../config.js';
-import { generateEvent, generateNextBranch } from '../services/eventGenerator.js';
+import { generateEvent, generateNextBranch, concludeEvent } from '../services/eventGenerator.js';
 import {
   addSSEClient,
   removeSSEClient,
@@ -163,7 +163,7 @@ router.post('/:id/choose', async (req, res) => {
   // 构建选择对象
   const choiceLabel = choice === 'A' ? event.choice_a
     : choice === 'B' ? event.choice_b
-    : (customText || '自由发挥');
+    : (customText || '自由行动');
 
   const character = db.prepare(`SELECT * FROM characters WHERE id = ?`).get(event.character_id);
   if (!character) {
@@ -186,6 +186,8 @@ router.post('/:id/choose', async (req, res) => {
       concluded: false,
       event: {
         ...updatedEvent,
+        display_name: character.display_name,
+        avatar_path: character.avatar_path || null,
         choice_history: JSON.parse(updatedEvent.choice_history || '[]'),
         created_at: toISO(updatedEvent.created_at),
         expires_at: toISO(updatedEvent.expires_at),
@@ -230,14 +232,14 @@ router.post('/:id/dismiss', async (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/events/generate — 手动触发事件生成（调试用）
+// POST /api/events/generate — 手动触发事件生成（调试用，必须在 /:id/* 之前避免被 id 参数捕获）
 router.post('/generate', async (req, res) => {
   if (!config.features.events) {
     return res.status(503).json({ error: 'events_disabled' });
   }
 
   const db = getDb();
-  const { characterId, eventTypeKey } = req.body;
+  const { characterId, eventTypeKey, customPrompt } = req.body;
 
   let character;
   if (characterId) {
@@ -262,7 +264,7 @@ router.post('/generate', async (req, res) => {
   }
 
   try {
-    const event = await generateEvent(character, { eventTypeKey, manual: true });
+    const event = await generateEvent(character, { eventTypeKey, customPrompt, manual: true });
     res.json({
       ...event,
       choice_history: JSON.parse(event.choice_history || '[]'),
@@ -274,6 +276,42 @@ router.post('/generate', async (req, res) => {
       return res.status(409).json({ error: 'already_active_event' });
     }
     console.error(`[events] generate error:`, err.message);
+    res.status(500).json({ error: 'internal_error', message: err.message });
+  }
+});
+
+// DELETE /api/events/:id — 删除事件（活跃或历史均可）
+router.delete('/:id', (req, res) => {
+  const db = getDb();
+  // 尝试从活跃表删除
+  const ce = db.prepare(`DELETE FROM character_events WHERE id = ?`).run(req.params.id);
+  // 尝试从历史表删除
+  const eh = db.prepare(`DELETE FROM event_history WHERE id = ?`).run(req.params.id);
+  if (ce.changes === 0 && eh.changes === 0) {
+    return res.status(404).json({ error: 'event_not_found' });
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/events/:id/conclude — 前端倒计时归零时主动触发结局生成（必须在 /generate 之后避免 id 捕获 "generate"）
+router.post('/:id/conclude', async (req, res) => {
+  const db = getDb();
+  const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
+
+  if (!event) {
+    return res.status(404).json({ error: 'event_not_found' });
+  }
+
+  const character = db.prepare(`SELECT * FROM characters WHERE id = ?`).get(event.character_id);
+  if (!character) {
+    return res.status(404).json({ error: 'character_not_found' });
+  }
+
+  try {
+    await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[events] conclude error:`, err.message);
     res.status(500).json({ error: 'internal_error', message: err.message });
   }
 });

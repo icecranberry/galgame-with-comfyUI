@@ -221,7 +221,7 @@ function initSchema(db) {
       resolution TEXT DEFAULT '1600x1200',
       choice_a TEXT NOT NULL DEFAULT '',
       choice_b TEXT NOT NULL DEFAULT '',
-      choice_c_label TEXT NOT NULL DEFAULT '自由发挥',
+      choice_c_label TEXT NOT NULL DEFAULT '自由行动',
       current_branch INTEGER DEFAULT 0,
       max_branches INTEGER DEFAULT 3,
       choice_history TEXT DEFAULT '[]',
@@ -453,6 +453,13 @@ function migrateEventsSchema(db) {
     if (!cols.find(c => c.name === 'events_disabled')) {
       db.exec(`ALTER TABLE characters ADD COLUMN events_disabled INTEGER DEFAULT 0`);
       console.log('[db] Added characters.events_disabled column (default 0)');
+    }
+
+    // character_events 加 processing 列：标记分支生成进行中，防止切页后重复提交
+    const ceCols = db.prepare(`PRAGMA table_info(character_events)`).all();
+    if (!ceCols.find(c => c.name === 'processing')) {
+      db.exec(`ALTER TABLE character_events ADD COLUMN processing INTEGER DEFAULT 0`);
+      console.log('[db] Added character_events.processing column (default 0)');
     }
   } catch (err) {
     console.log('[db] migrateEventsSchema error:', err.message);

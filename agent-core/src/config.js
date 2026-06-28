@@ -40,6 +40,7 @@ export const config = {
     proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
+    eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
   },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',
@@ -102,6 +103,17 @@ export function updateProactiveFreq(value) {
   config.features.proactiveChat = f > 0;
   persistSettingSync('feature_proactiveChatFreq', String(f));
   console.log(`[config] proactiveChatFreq = ${f}`);
+}
+
+/**
+ * 更新奇遇触发频率 0~1
+ * freq=0 → 关闭自动触发；freq>0 → 以频率为基准的定时触发
+ */
+export function updateEventFreq(value) {
+  const f = Math.max(0, Math.min(1, parseFloat(value) || 0));
+  config.features.eventFreq = f;
+  persistSettingSync('feature_eventFreq', String(f));
+  console.log(`[config] eventFreq = ${f}`);
 }
 
 export function getLlmConfig() {

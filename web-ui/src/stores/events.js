@@ -9,10 +9,21 @@ export const useEventsStore = defineStore('events', () => {
   const history = ref([])             // 事件历史
   const loading = ref(false)
   const filterCharacterId = ref(null) // null = 全部
+  const filterEngaged = ref(false)      // 只看参与过的
 
   // ── 红点通知状态 ──
   const newEventCount = ref(0)
   const isViewingEvents = ref(false)
+
+  // ── 筛选 ──
+  function setFilter(charId) {
+    filterCharacterId.value = charId
+    filterEngaged.value = false
+  }
+  function toggleFilterEngaged() {
+    filterEngaged.value = !filterEngaged.value
+    filterCharacterId.value = null
+  }
 
   // ── 滚动到顶部信号 ──
   const scrollToTopSignal = ref(0)
@@ -20,15 +31,19 @@ export const useEventsStore = defineStore('events', () => {
     scrollToTopSignal.value++
   }
 
-  // 按角色筛选
+  // 按角色 + 参与状态筛选
   const filteredActive = computed(() => {
-    if (filterCharacterId.value === null) return activeEvents.value
-    return activeEvents.value.filter(e => e.character_id === filterCharacterId.value)
+    let result = activeEvents.value
+    if (filterCharacterId.value !== null) result = result.filter(e => e.character_id === filterCharacterId.value)
+    if (filterEngaged.value) result = result.filter(e => e.engaged)
+    return result
   })
 
   const filteredHistory = computed(() => {
-    if (filterCharacterId.value === null) return history.value
-    return history.value.filter(e => e.character_id === filterCharacterId.value)
+    let result = history.value
+    if (filterCharacterId.value !== null) result = result.filter(e => e.character_id === filterCharacterId.value)
+    if (filterEngaged.value) result = result.filter(e => e.engaged)
+    return result
   })
 
   // 有事件的角色列表
@@ -119,6 +134,16 @@ export const useEventsStore = defineStore('events', () => {
     }
   }
 
+  async function deleteEvent(eventId) {
+    try {
+      await api.deleteEvent(eventId)
+      activeEvents.value = activeEvents.value.filter(e => e.id !== eventId)
+      history.value = history.value.filter(e => e.id !== eventId)
+    } catch (err) {
+      console.error('[events] deleteEvent error:', err)
+    }
+  }
+
   // ── 未读计数 ──
   async function refreshUnreadCount() {
     try {
@@ -202,10 +227,11 @@ export const useEventsStore = defineStore('events', () => {
 
   return {
     activeEvents, history, loading,
-    filterCharacterId, newEventCount, isViewingEvents,
+    filterCharacterId, filterEngaged, newEventCount, isViewingEvents,
     scrollToTopSignal,
     filteredActive, filteredHistory, charactersWithEvents,
-    loadEvents, makeChoice, dismissEvent,
+    loadEvents, makeChoice, dismissEvent, deleteEvent,
+    setFilter, toggleFilterEngaged,
     refreshUnreadCount, markSeen,
     connectSSE, disconnectSSE, requestScrollToTop,
   }

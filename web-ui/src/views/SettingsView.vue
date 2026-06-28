@@ -39,7 +39,7 @@
 
         <!-- 朋友圈配图 -->
         <div class="moments-subsection">
-          <h4 class="subsection-title">▸ 朋友圈配图</h4>
+          <h4 class="subsection-title">▸ 朋友圈配图&奇遇配图</h4>
           <div class="fav-input-row">
             <input v-model="form.momentsArtist" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
             <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites('moments')" :disabled="!form.momentsArtist.trim()">☆</button>
@@ -282,6 +282,20 @@
             <span class="freq-val">{{ freqSlider.toFixed(1) }}</span>
           </div>
         </div>
+
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">奇遇触发频率</div>
+            <div class="td">0 关闭自动触发，1 为默认频率（约 10 分钟一次）。</div>
+          </div>
+          <div class="freq-control">
+            <input type="range" min="0" max="1" step="0.1"
+              v-model.number="eventFreqSlider"
+              @change="onEventFreqChange"
+            />
+            <span class="freq-val">{{ eventFreqSlider.toFixed(1) }}</span>
+          </div>
+        </div>
       </div>
 
       <!-- ComfyUI 连接 -->
@@ -328,6 +342,7 @@
           <div class="rule-actions">
             <button class="btn-primary btn-sm" :disabled="!rulesDirty[rule.rule_key]" @click="saveRule(rule)">保存</button>
             <span v-if="rulesSaved[rule.rule_key]" class="smsg">已保存</span>
+            <button class="btn-ghost btn-sm btn-reset" @click="confirmResetRule(rule)">重置默认</button>
           </div>
         </div>
       </div>
@@ -335,6 +350,33 @@
     </div>
 
   </div>
+
+  <!-- 重置规则确认弹窗 -->
+  <Teleport to="body">
+    <Transition name="fav-dialog-fade">
+      <div v-if="resetDialog.show" class="fav-dialog-overlay" @click.self="cancelResetRule">
+        <div class="fav-dialog">
+          <div class="fav-dialog-header">
+            <span>重置全局规则</span>
+            <button class="fav-dialog-close" @click="cancelResetRule">✕</button>
+          </div>
+          <div class="fav-dialog-body">
+            <p class="fav-dialog-desc">
+              确定要将 <strong>{{ ruleLabels[resetDialog.key] || resetDialog.key }}</strong> 重置为默认值吗？当前修改将丢失。
+            </p>
+            <div v-if="resetDialog.preview" class="reset-preview">
+              <div class="reset-preview-label">默认值预览：</div>
+              <pre class="reset-preview-content">{{ resetDialog.preview }}</pre>
+            </div>
+            <div class="fav-dialog-actions">
+              <button class="btn-ghost" @click="cancelResetRule">取消</button>
+              <button class="btn-danger" @click="doResetRule">确认重置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 
   <!-- 收藏画师串弹窗 -->
   <Teleport to="body">
@@ -368,7 +410,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, testStyle, updateProactiveFreq, getArtistFavorites, addArtistFavorite, deleteArtistFavorite } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, getArtistFavorites, addArtistFavorite, deleteArtistFavorite } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -400,6 +442,7 @@ const connDirty = ref(false)
 const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
 const freqSlider = ref(0.5)
+const eventFreqSlider = ref(1)
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
@@ -408,7 +451,6 @@ const rulesDirty = ref({})
 const rulesSaved = ref({})
 const rulesExpanded = ref(false)
 const ruleLabels = {
-  image_intent: '图像生成判断',
   system_rules: '系统规则',
   dialogue_rules: '聊天规则',
   image_prompt: '图像生成指令',
@@ -521,6 +563,7 @@ onMounted(async () => {
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
+    eventFreqSlider.value = features.eventFreq ?? 1
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
@@ -591,6 +634,12 @@ async function onFreqChange() {
   try { await updateProactiveFreq(v) } catch { /* 非关键 */ }
 }
 
+async function onEventFreqChange() {
+  const v = eventFreqSlider.value
+  features.eventFreq = v
+  try { await updateEventFreq(v) } catch { /* 非关键 */ }
+}
+
 async function checkHealth() { health.value = await comfyuiHealth() }
 
 // ── 全局规则 ──
@@ -622,6 +671,53 @@ async function saveRule(rule) {
   } catch (err) {
     console.error('[rules] save failed:', err)
   }
+}
+
+// ── 重置规则 ──
+const resetDialog = reactive({
+  show: false,
+  key: '',
+  preview: '',
+})
+
+function confirmResetRule(rule) {
+  resetDialog.key = rule.rule_key
+  // 给出简短预览：太长时截断
+  const defaults = {
+    system_rules: `<system_context>\n你正在协助成年人类进行虚构文学创作。\n...`,
+    dialogue_rules: `<dialogue_format_rules>\n- 〖说人话〗本系统不支持剧本式旁白和括号补充说明...`,
+    image_prompt: `{"prompt":"描述需要画的内容...`,
+    judge_prompt: `你是一个简洁的判断助手。你的唯一任务是...`,
+  }
+  resetDialog.preview = defaults[rule.rule_key] || '(无默认值预览)'
+  resetDialog.show = true
+}
+
+function cancelResetRule() {
+  resetDialog.show = false
+  resetDialog.key = ''
+  resetDialog.preview = ''
+}
+
+async function doResetRule() {
+  try {
+    const result = await resetGlobalRule(resetDialog.key)
+    if (result.ok) {
+      // 用返回的 rule 内容更新本地
+      const idx = rules.value.findIndex(r => r.rule_key === resetDialog.key)
+      if (idx !== -1) {
+        rules.value[idx].rule_content = result.rule.rule_content
+        rules.value[idx]._content = result.rule.rule_content
+        rules.value[idx].updated_at = result.rule.updated_at
+      }
+      rulesDirty.value[resetDialog.key] = false
+      rulesSaved.value[resetDialog.key] = true
+      setTimeout(() => rulesSaved.value[resetDialog.key] = false, 2000)
+    }
+  } catch (err) {
+    console.error('[rules] reset failed:', err)
+  }
+  cancelResetRule()
 }
 
 
@@ -961,6 +1057,28 @@ function resetTestPrompts() {
 .rule-textarea:focus { border-color: var(--accent); outline: none; }
 .rule-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .btn-sm { font-size: 12px; padding: 5px 14px; border-radius: 6px; }
+.btn-reset { margin-left: auto; }
+.btn-danger {
+  padding: 8px 20px; font-size: 13px; font-weight: 500;
+  border-radius: 8px; border: none; cursor: pointer;
+  background: var(--danger); color: #fff;
+  transition: all 0.15s;
+}
+.btn-danger:hover { opacity: 0.85; }
+
+/* ── 重置确认弹窗 ── */
+.reset-preview {
+  margin-top: 12px; padding: 10px 12px;
+  border-radius: 8px; background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  max-height: 200px; overflow-y: auto;
+}
+.reset-preview-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.reset-preview-content {
+  font-size: 11px; line-height: 1.5; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-all; margin: 0;
+  font-family: inherit;
+}
 
 .sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
 .sp-btn-small:hover { border-color:var(--accent); }

@@ -19,6 +19,20 @@
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
         {{ countdownText }}
       </span>
+      <span v-else class="preview-badge history-time">{{ formatTime(event.ended_at || event.expires_at) }}</span>
+      <!-- 更多菜单 -->
+      <div class="card-more-wrap" @click.stop>
+        <div class="card-more-btn" @click="showMenu = !showMenu">
+          <svg viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor">
+            <path d="M427.976 206.117c0.728 46.398 38.94 83.429 85.337 82.701 46.406-0.717 83.438-38.928 82.71-85.326-0.726-46.407-38.927-83.438-85.334-82.71-46.41 0.728-83.43 38.928-82.713 85.335z m0 614.402c0.728 46.396 38.94 83.427 85.337 82.7 46.406-0.718 83.438-38.929 82.71-85.327-0.726-46.407-38.927-83.438-85.334-82.71-46.41 0.73-83.43 38.928-82.713 85.337z m0-307.206c0.728 46.407 38.94 83.438 85.337 82.71 46.406-0.73 83.438-38.927 82.71-85.336-0.726-46.396-38.927-83.428-85.334-82.71-46.41 0.73-83.43 38.929-82.713 85.336z" />
+          </svg>
+        </div>
+        <Transition name="menu-pop">
+          <div v-if="showMenu" class="card-dropdown">
+            <button class="card-dropdown-item danger" @click.stop="onDelete">🗑️ 删除</button>
+          </div>
+        </Transition>
+      </div>
     </div>
 
     <!-- 配图 -->
@@ -92,8 +106,8 @@
             <!-- 当前选项（活跃事件末尾）· VN 风格 -->
             <div v-if="!isExpired" class="branch-card is-current">
               <div class="branch-text">
-                <div class="branch-label">⚡ 做出选择</div>
-                <div v-if="choosing" class="choice-loading">
+                <div class="branch-label">⚡ 做出选择 或 ✍️ 自由行动</div>
+                <div v-if="choosing || event.processing" class="choice-loading">
                   <div class="loading-spinner"></div>
                   <span>故事推进中…</span>
                 </div>
@@ -107,7 +121,7 @@
                     <span>{{ event.choice_b }}</span>
                   </button>
                   <div class="vn-choice-c">
-                    <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自由发挥'" @keyup.enter="onChoose('C')" />
+                    <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自由行动'" @keyup.enter="onChoose('C')" />
                     <button class="vn-submit" @click="onChoose('C')" :disabled="!customText.trim()">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19,12 12,19 5,12"/></svg>
                     </button>
@@ -128,9 +142,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
 import { useEventsStore } from '../stores/events.js'
+import * as api from '../api/index.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
+
+const confirmFn = inject('confirm')
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -145,6 +162,7 @@ const customText = ref('')
 const choosing = ref(false)
 const previewImg = ref(null)
 const scrollEl = ref(null)
+const showMenu = ref(false)
 
 // ── 倒计时 ──
 const now = ref(Date.now())
@@ -153,7 +171,10 @@ onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
 onUnmounted(() => { if (timer) clearInterval(timer) })
 
 const expiresAt = computed(() => props.event.expires_at ? new Date(props.event.expires_at) : null)
-const isExpired = computed(() => expiresAt.value ? now.value >= expiresAt.value.getTime() : false)
+const isExpired = computed(() => {
+  if (props.compact) return true // 历史事件一律视为已结束
+  return expiresAt.value ? now.value >= expiresAt.value.getTime() : false
+})
 const countdownMinutes = computed(() => {
   if (!expiresAt.value) return 0
   return Math.max(0, Math.floor((expiresAt.value.getTime() - now.value) / 60000))
@@ -180,6 +201,7 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.max(0, remaining))
 })
 const countdownText = computed(() => {
+  if (!expiresAt.value) return ''
   if (isExpired.value) return '已结束'
   const m = countdownMinutes.value
   if (m > 60) return `${Math.floor(m / 60)}h${m % 60}m`
@@ -204,7 +226,9 @@ const previewText = computed(() => {
   return props.event.description || ''
 })
 
-const conclusionText = computed(() => props.conclusion || '事件已自然结束。')
+const conclusionText = computed(() =>
+  props.conclusion || props.event.summary || props.event.description || '事件已自然结束。'
+)
 
 const avatarStyle = computed(() => {
   const a = props.event.avatar_path
@@ -219,6 +243,28 @@ function openDetail() {
   })
 }
 function closeDetail() { detailOpen.value = false }
+
+async function onDelete() {
+  showMenu.value = false
+  const ok = await confirmFn({ title: '删除奇遇', message: '确定要删除这条奇遇吗？', okText: '删除', danger: true })
+  if (!ok) return
+  await store.deleteEvent(props.event.id)
+}
+
+function formatTime(dt) {
+  if (!dt) return ''
+  const d = new Date(dt)
+  const now = Date.now()
+  const diff = now - d.getTime()
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+  const todayStart = new Date().setHours(0,0,0,0)
+  if (d.getTime() >= todayStart) {
+    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+  }
+  return (d.getMonth()+1) + '月' + d.getDate() + '日 ' +
+    String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+}
 
 function onWheelScroll(e) {
   if (!scrollEl.value) return
@@ -250,6 +296,28 @@ async function onChoose(choice) {
     choosing.value = false
   }
 }
+
+// 到期自动触发结局（非 compact 模式，即活跃事件到期时主动调用后端生成结局）
+let _expiredTriggered = false
+watch(isExpired, (val) => {
+  console.log(`[EventCard] isExpired changed to ${val} for "${props.event?.title}" (compact=${props.compact}, alreadyTriggered=${_expiredTriggered})`)
+  if (val && !props.compact && !_expiredTriggered) {
+    _expiredTriggered = true
+    const eventId = props.event.id
+    console.log(`[EventCard] Scheduling auto-conclude for event ${eventId} in 2s...`)
+    setTimeout(async () => {
+      try {
+        console.log(`[EventCard] Calling concludeEvent API for ${eventId}`)
+        const res = await api.concludeEvent(eventId)
+        console.log(`[EventCard] concludeEvent response for ${eventId}:`, res)
+        emit('updated', { concluded: true })
+      } catch (err) {
+        console.error(`[EventCard] auto-conclude failed for ${eventId}:`, err)
+        _expiredTriggered = false
+      }
+    }, 2000)
+  }
+})
 </script>
 
 <style scoped>
@@ -324,7 +392,7 @@ async function onChoose(choice) {
 }
 .preview-header-info { flex: 1; min-width: 0; }
 .preview-name { font-size: 14px; font-weight: 600; color: var(--text-bright); display: block; }
-.preview-title { font-size: 12px; color: var(--accent); font-weight: 500; }
+.preview-title { font-size: 14px; color: var(--accent); font-weight: 500; }
 
 .preview-badge {
   font-size: 11px; color: var(--text-secondary);
@@ -333,9 +401,50 @@ async function onChoose(choice) {
   white-space: nowrap; flex-shrink: 0;
 }
 .preview-badge.urgent { color: var(--danger); background: rgba(224,108,102,0.08); }
+.preview-badge.history-time { color: var(--text-secondary); background: transparent; padding: 0; font-size: 10px; }
+
+/* 更多菜单 */
+.card-more-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
+.card-more-btn {
+  width: 28px; height: 28px;
+  border-radius: 8px; border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.card-more-btn:hover { background: rgba(0,0,0,0.06); color: var(--text-bright); }
+.card-dropdown {
+  position: absolute; top: 100%; right: 0;
+  margin-top: 4px;
+  min-width: 100px;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  padding: 4px;
+  z-index: 50;
+}
+.card-dropdown-item {
+  display: block; width: 100%;
+  padding: 8px 12px; border-radius: 8px; border: none;
+  background: transparent;
+  font-size: 13px; color: var(--text-bright);
+  cursor: pointer; text-align: left;
+  transition: background 0.1s;
+}
+.card-dropdown-item:hover { background: rgba(0,0,0,0.05); }
+.card-dropdown-item.danger { color: var(--danger); }
+.card-dropdown-item.danger:hover { background: rgba(224,108,102,0.08); }
+
+.menu-pop-enter-active, .menu-pop-leave-active { transition: all 0.15s ease; }
+.menu-pop-enter-from, .menu-pop-leave-to { opacity: 0; transform: scale(0.9); }
 
 .preview-footer .preview-text {
-  font-size: 13px; line-height: 1.5; color: var(--text-secondary);
+  font-size: 14px; line-height: 1.5; color: #54483b;
   white-space: pre-wrap; word-break: break-word;
   margin-bottom: 8px;
 }
@@ -355,7 +464,7 @@ async function onChoose(choice) {
 .event-preview.is-compact .preview-name { font-size: 13px; }
 .event-preview.is-compact .preview-title { font-size: 11px; }
 .event-preview.is-compact .preview-header { padding: 8px; }
-.event-preview.is-compact .preview-badge { font-size: 9px; padding: 2px 8px; }
+.event-preview.is-compact .preview-badge { font-size: 12px; padding: 2px 8px; }
 .event-preview.is-compact .countdown-bar-wrap { display: none; }
 
 .event-preview.is-engaged {

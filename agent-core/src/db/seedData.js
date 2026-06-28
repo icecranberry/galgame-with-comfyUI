@@ -23,6 +23,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_proactiveChat: 'true',
   feature_proactiveChatFreq: '1',
   feature_events: 'true',
+  feature_eventFreq: '1',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',
@@ -53,9 +54,9 @@ export const DEFAULT_GLOBAL_RULES = [
   {
     rule_key: 'dialogue_rules',
     rule_content: `<dialogue_format_rules>
-- 本系统不支持剧本式旁白补充说明。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。
+- 〖说人话〗本系统不支持剧本式旁白和括号补充说明。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。
 - **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
-- {"prompt":"画面描述"}：你可以用这种格式来触发图片生成。对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
+- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
 </dialogue_format_rules>`,
   },
   {
@@ -71,10 +72,10 @@ export const DEFAULT_GLOBAL_RULES = [
     rule_content: `{"prompt":"描述需要画的内容。需要详细：
 - **非常重要，这条一定要加：**命中 IP 时必须写 'character\(series\)' + **≥8 个外观锚点**（发型/发色/眼色/标志服饰/配饰)，如:'Furina \(Genshin Impact\)'。角色名字放在 prompt 字段内最开头
 - 原创角色：直接描述外观，不写 character/series
-- **不确定的角色特征不允许编造**：若本地知识库无该 IP 角色的准确信息（发色、瞳色、标志服装等）就不写。绝对禁止凭空编造角色标签。
 - 描述场景在哪、镜头角度、角色表情、衣服、动作、场景中的其他背景物品，在自然语言描述之外，可以用Danbooru格式的tag标签来重复强调动作，镜头。
-- 明确追加说明什么发色的角色在做什么，例如：'琪亚娜（崩坏3）和芽衣（崩坏3），白色头发的琪亚娜抱着紫色头发的芽衣'
+- 描述多角色时，禁止用逗号串联两个角色的外貌（错误例子： A, blonde, B, red hair）。必须使用句号（.）将两个角色的描述完全隔开（正确例子： A, blonde. B, red hair），且每个角色的描述必须是一个语法完整的独立主谓宾短句。明确追加说明什么发色的角色在做什么，例如：'琪亚娜和芽衣，白色头发的琪亚娜抱着紫色头发的芽衣。'
 - **最终输出为英文，角色名也需要翻译成英文**
+- **画面prompt不超过600字**
 - 注意：不要在 prompt 值中使用未转义的双引号，如需引号请用单引号替代"}`,
   },
 ];
@@ -107,6 +108,7 @@ export const DEFAULT_CHARACTERS = [
     emotion_baseline: JSON.stringify({ valence: 0.5, arousal: 0.5, dominance: 0.5 }),
     moments_disabled: 1,
     proactive_disabled: 1,
+    events_disabled: 1,
     avatar_path: '/avatars/default_assistant_header.png',
   },
 ];
@@ -150,14 +152,14 @@ export function seedAll(db) {
 
   // 3. 默认角色
   const seedChar = db.prepare(
-    `INSERT OR IGNORE INTO characters (name, display_name, base_prompt, emotion_baseline, moments_disabled, proactive_disabled, avatar_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO characters (name, display_name, base_prompt, emotion_baseline, moments_disabled, proactive_disabled, events_disabled, avatar_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
   let charCount = 0;
   for (const ch of DEFAULT_CHARACTERS) {
     const result = seedChar.run(
       ch.name, ch.display_name, ch.base_prompt, ch.emotion_baseline,
-      ch.moments_disabled, ch.proactive_disabled, ch.avatar_path
+      ch.moments_disabled, ch.proactive_disabled, ch.events_disabled, ch.avatar_path
     );
     if (result.changes > 0) charCount++;
   }

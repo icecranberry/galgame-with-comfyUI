@@ -2,9 +2,11 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq } from '../config.js';
 import { getDb } from '../db/index.js';
+import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
+import { restartEventScheduler } from '../services/eventScheduler.js';
 
 const router = Router();
 
@@ -51,6 +53,17 @@ router.put('/proactive-freq', (req, res) => {
   updateProactiveFreq(value);
   restartProactiveFreq();
   res.json({ ok: true, proactiveChatFreq: config.features.proactiveChatFreq });
+});
+
+// PUT /api/config/event-freq — 更新奇遇触发频率 0~1
+router.put('/event-freq', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 0 || value > 1) {
+    return res.status(400).json({ error: 'value must be 0~1' });
+  }
+  updateEventFreq(value);
+  restartEventScheduler();
+  res.json({ ok: true, eventFreq: config.features.eventFreq });
 });
 
 // PUT /api/config/llm — 更新 LLM 配置
@@ -208,6 +221,29 @@ router.delete('/artist-favorites/:id', (req, res) => {
   }
   db.prepare(`DELETE FROM artist_favorites WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
+});
+
+// POST /api/config/rules/:key/reset — 重置单条全局规则为默认值
+router.post('/rules/:key/reset', (req, res) => {
+  const db = getDb();
+  const defaultRule = DEFAULT_GLOBAL_RULES.find(r => r.rule_key === req.params.key);
+  if (!defaultRule) {
+    return res.status(404).json({ error: `No default value for rule key: ${req.params.key}` });
+  }
+  const existing = db.prepare(`SELECT id FROM global_rules WHERE rule_key = ?`).get(req.params.key);
+  if (!existing) {
+    // 规则不存在则用默认值新建
+    const result = db.prepare(
+      `INSERT INTO global_rules (rule_key, rule_content, is_active) VALUES (?, ?, 1)`
+    ).run(req.params.key, defaultRule.rule_content);
+    const created = db.prepare(`SELECT * FROM global_rules WHERE id = ?`).get(result.lastInsertRowid);
+    return res.json({ ok: true, rule: created });
+  }
+  db.prepare(
+    `UPDATE global_rules SET rule_content = ?, updated_at = datetime('now') WHERE rule_key = ?`
+  ).run(defaultRule.rule_content, req.params.key);
+  const updated = db.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(req.params.key);
+  res.json({ ok: true, rule: updated });
 });
 
 export default router;
