@@ -239,7 +239,7 @@
         <div class="toggle-row">
           <div>
             <div class="tl">Anima 提示词优化</div>
-            <div class="td">画面描述将携带Anima提示词助手多请求一次LLM，能够优化特定动作姿势</div>
+            <div class="td">画面描述将携带Anima提示词助手多请求一次LLM，画面将更加精准</div>
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.promptOptimize" @change="saveFeature('promptOptimize', features.promptOptimize)" />

@@ -281,13 +281,12 @@ class GitManager(QObject):
         return None
 
     def has_updates(self) -> bool | None:
-        """检查远程是否有更新的 tag。返回 None 表示无法判断。"""
+        """检查远程是否有更新的 tag（语义化版本比较）。返回 None 表示无法判断。"""
         current = self.get_current_tag()
         latest = self.get_latest_remote_tag()
         if current is None or latest is None:
             return None
-        # 简单字符串比较；对于语义化版本可以更精确
-        return current != latest
+        return _version_greater(latest, current)
 
     # ------------------------------------------------------------------
     # 异步方法（通过 QProcess）
@@ -518,6 +517,28 @@ def _decode_output(data: bytes) -> str:
             return data.decode("gbk")
         except UnicodeDecodeError:
             return data.decode("utf-8", errors="replace")
+
+
+def _version_greater(a: str, b: str) -> bool:
+    """语义化版本比较。返回 a > b。
+
+    例如: _version_greater("v1.0.22", "v1.0.21") → True
+          _version_greater("v1.0.9", "v1.0.21")  → False
+    """
+    import re
+
+    def parse(v: str):
+        nums = re.findall(r"\d+", v.lstrip("vV"))
+        return tuple(int(n) for n in nums)
+
+    try:
+        pa = parse(a)
+        pb = parse(b)
+        if not pa or not pb:
+            return a != b
+        return pa > pb
+    except Exception:
+        return a != b
 
 
 def _find_git() -> str:

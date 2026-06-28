@@ -10,9 +10,9 @@ import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { upsertVector } from './vectorClient.js';
 
-/** 去掉消息末尾的 {"prompt":"..."} JSON 标签 */
+/** 去掉消息中的 {"prompt":"..."} JSON 标签（可能在开头/中间/末尾），避免长篇英文生图 prompt 干扰摘要提取 */
 function stripPromptJson(content) {
-  return content.replace(/\s*\{["']prompt["']:\s*".*?"\s*\}\s*$/s, '');
+  return content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '');
 }
 
 const SUMMARIZE_INTERVAL = 20; // 每 20 条消息触发一次

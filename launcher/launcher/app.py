@@ -525,6 +525,9 @@ class MainWindow(QMainWindow):
                 self._version_page.set_tags(self._cached_tags)
                 self._version_page.set_remote_status(self._cached_has_updates)
                 self._git_ready = True
+                # 检测到新版本 → 在日志页显示更新提示
+                if self._cached_has_updates is True:
+                    self._log_page.show_update_hint(True)
             else:
                 self._home_page.update_version_info(
                     None,
@@ -552,6 +555,9 @@ class MainWindow(QMainWindow):
                 self._home_page.update_version_info(
                     self._cached_current_tag, "main", self._cached_has_updates
                 )
+                # 检测到新版本 → 在日志页显示更新提示
+                if self._cached_has_updates is True:
+                    self._log_page.show_update_hint(True)
             else:
                 if self._pending_fetch_is_auto:
                     # 后台自动 fetch 失败：静默，不向用户显示错误
@@ -568,6 +574,11 @@ class MainWindow(QMainWindow):
                 # 清除 git 缓存，确保 get_current_tag/get_tags 读到最新值
                 self._git.clear_cache()
                 self._init_git_cache()
+                # 切换版本后重新判断是否有更新
+                try:
+                    self._cached_has_updates = self._git.has_updates()
+                except Exception:
+                    pass
                 # 兜底：若 shallow clone 导致 get_current_tag() 失败，用请求的 tag
                 if not self._cached_current_tag and hasattr(self, "_pending_checkout_tag"):
                     self._cached_current_tag = self._pending_checkout_tag
@@ -577,6 +588,9 @@ class MainWindow(QMainWindow):
                 self._config.set("current_tag", self._cached_current_tag or "")
                 self._version_page.set_current_tag(self._cached_current_tag)
                 self._version_page.set_tags(self._cached_tags)
+                self._version_page.set_remote_status(self._cached_has_updates)
+                # 更新日志页的版本提示：若已切换到最新版则隐藏提示
+                self._log_page.show_update_hint(self._cached_has_updates is True)
                 self._version_page.append_log("开始构建新版本...")
                 self._build.start_build(force=True)
             else:

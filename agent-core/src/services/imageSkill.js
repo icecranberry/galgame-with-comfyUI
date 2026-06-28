@@ -83,17 +83,13 @@ async function optimizePrompt(rawPrompt) {
 }
 
 /**
- * 直接使用已优化好的 prompt 生成图像（跳过 DeepSeek 优化步骤）
+ * 生图入口：prompt 直接注入 workflow（受 promptOptimize 开关控制）
  *
- * 用于测试画风等场景：prompt 已经是最终英文形式，直接注入 workflow。
+ * 测试画风场景可通过 skipOptimization: true 强制跳过 LLM 优化。
  * 不写数据库，仅返回 base64 图片数据。
  */
-export async function generateImageRaw(rawPrompt, { artist, width, height, onProgress } = {}) {
-  // 构建 workflow（跳过 DeepSeek 优化，直接注入原始 prompt）
-  const wf = buildWorkflow(rawPrompt, { artist, width, height });
-  if (onProgress) onProgress({ stage: 'submitting' });
-
-  return submitWithRetry(wf, { onProgress });
+export async function generateImageRaw(rawPrompt, opts = {}) {
+  return submitWithRetry(rawPrompt, opts);
 }
 
 /**
@@ -145,19 +141,46 @@ function buildWorkflow(promptText, overrides = {}) {
 }
 
 /**
- * 提交 workflow 到 ComfyUI，带重试循环
+ * 提交 ComfyUI 生图（含 prompt 优化、workflow 构建、重试循环）
  *
- * 最多 submitRetries 次尝试（默认 3 次 = 首次 + 2 次重试）。
+ * 流程:
+ *   1. 如果 skipOptimization 为 false 且 config.features.promptOptimize !== false，
+ *      调用 optimizePrompt 优化 prompt
+ *   2. 构建 workflow（按节点 title 注入参数）
+ *   3. 提交 ComfyUI → 轮询 → 下载 base64（最多 submitRetries 次尝试）
+ *
  * 重试条件：WebSocket 通道断开/卡死（comfyClient 内 30s 无活动判定）。
  * 每次重试重新随机种子、重新提交。
  *
- * @param {object} wf — 已注入参数的工作流
- * @param {object} opts
- * @param {function} opts.onProgress — 进度回调，重试时 stage='retrying'
- * @param {number} opts.submitRetries — 最大提交次数
+ * @param {string}   rawPrompt      - 原始画面描述
+ * @param {object}   [opts]
+ * @param {string}   [opts.artist]          - 画师串覆盖
+ * @param {number}   [opts.width]           - 图片宽度覆盖
+ * @param {number}   [opts.height]          - 图片高度覆盖
+ * @param {function} [opts.onProgress]      - 进度回调，stage: 'optimizing'/'submitting'/'generating'/'retrying'
+ * @param {number}   [opts.submitRetries=2] - 最大重试次数（首次 + 重试次数）
+ * @param {boolean}  [opts.skipOptimization=false] - 强制跳过 LLM 优化（测试画风专用）
  * @returns {Promise<{success, images, source, promptId}>}
  */
-async function submitWithRetry(wf, { onProgress, submitRetries = MAX_SUBMIT_RETRIES } = {}) {
+async function submitWithRetry(rawPrompt, {
+  artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
+  skipOptimization = false,
+} = {}) {
+  // 1. 优化 prompt（可通过功能开关或 skipOptimization 跳过）
+  const shouldOptimize = !skipOptimization && config.features.promptOptimize !== false;
+  let finalPrompt = rawPrompt;
+  if (shouldOptimize) {
+    if (onProgress) onProgress({ stage: 'optimizing' });
+    finalPrompt = await optimizePrompt(rawPrompt);
+  } else if (!skipOptimization) {
+    console.log(`[imageSkill] Prompt optimization disabled, using raw prompt directly`);
+  }
+
+  // 2. 构建 workflow
+  const wf = buildWorkflow(finalPrompt, { artist, width, height });
+  if (onProgress) onProgress({ stage: 'submitting' });
+
+  // 3. 提交 ComfyUI，带重试循环
   let lastResult = null;
 
   for (let attempt = 0; attempt <= submitRetries; attempt++) {
@@ -199,23 +222,9 @@ async function submitWithRetry(wf, { onProgress, submitRetries = MAX_SUBMIT_RETR
 }
 
 /**
- * 执行图像生成
+ * 执行图像生成（受 promptOptimize 开关控制）
  */
-export async function generateImage(rawPrompt, { onProgress } = {}) {
-  // 1. 优化 prompt（只做一次，重试时复用；可通过功能开关跳过）
-  const shouldOptimize = config.features.promptOptimize !== false;
-  let finalPrompt = rawPrompt;
-  if (shouldOptimize) {
-    if (onProgress) onProgress({ stage: 'optimizing' });
-    finalPrompt = await optimizePrompt(rawPrompt);
-  } else {
-    console.log(`[imageSkill] Prompt optimization disabled, using raw prompt directly`);
-  }
-
-  // 2. 构建 workflow + 带重试提交 ComfyUI
-  const wf = buildWorkflow(finalPrompt);
-  if (onProgress) onProgress({ stage: 'submitting' });
-
-  return submitWithRetry(wf, { onProgress });
+export async function generateImage(rawPrompt, opts = {}) {
+  return submitWithRetry(rawPrompt, opts);
 }
 

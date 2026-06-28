@@ -104,24 +104,33 @@ export const useEventsStore = defineStore('events', () => {
 
   // 选择事件选项
   async function makeChoice(eventId, choice, customText) {
+    console.log(`[store] makeChoice START event=${eventId}`)
+    // 前端也标记 processing，避免组件重渲染时丢失 loading 状态
+    const idx = activeEvents.value.findIndex(e => e.id === eventId)
+    if (idx !== -1 && !activeEvents.value[idx].processing) {
+      activeEvents.value[idx] = { ...activeEvents.value[idx], processing: true }
+    }
     try {
       const result = await api.chooseEventOption(eventId, choice, customText)
+      console.log(`[store] makeChoice API_OK event=${eventId} concluded=${result.concluded}`)
       if (result.concluded) {
-        // 事件已结束，从活跃列表移除
         activeEvents.value = activeEvents.value.filter(e => e.id !== eventId)
-        await loadEvents() // 刷新以获取更新后的历史（内部调用 markSeen）
+        await loadEvents()
       } else if (result.event) {
-        // 更新活跃事件
-        const idx = activeEvents.value.findIndex(e => e.id === eventId)
-        if (idx !== -1) {
-          activeEvents.value[idx] = result.event
+        const idx2 = activeEvents.value.findIndex(e => e.id === eventId)
+        if (idx2 !== -1) {
+          activeEvents.value[idx2] = result.event // result.event.processing is 0
         }
-        // 用户刚在事件页面看到了分支更新，标记已读（避免离开页面后自身触发红点）
         await markSeen()
       }
       return result
     } catch (err) {
-      console.error('[events] makeChoice error:', err)
+      console.error(`[store] makeChoice ERROR event=${eventId}:`, err?.message)
+      // 失败时清除 processing 标记
+      const idx3 = activeEvents.value.findIndex(e => e.id === eventId)
+      if (idx3 !== -1) {
+        activeEvents.value[idx3] = { ...activeEvents.value[idx3], processing: false }
+      }
       throw err
     }
   }

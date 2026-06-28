@@ -235,9 +235,12 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
 
 // ── 辅助函数 ──
 
-/** 去掉消息末尾的 {"prompt":"..."} JSON 标签，避免长篇英文生图 prompt 干扰提取 */
+/** 去掉消息中的 {"prompt":"..."} JSON 标签（可能出现在开头、中间或末尾），避免长篇英文生图 prompt 干扰提取 */
 function stripPromptJson(content) {
-  return content.replace(/\s*\{["']prompt["']:\s*".*?"\s*\}\s*$/s, '');
+  // (?:[^"\\]|\\.) 正确跳过 JSON 字符串内的转义引号，避免提前截断
+  // g 全局标志：一条消息可能有多个 prompt JSON
+  // 不加 $ 锚点：prompt JSON 经常出现在消息开头（后面还有中文回复）
+  return content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '');
 }
 
 function normalizeType(type) {

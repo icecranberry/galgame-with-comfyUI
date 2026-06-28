@@ -1695,12 +1695,12 @@ async function generateReplyGuesses(conversationId, character) {
     taskParts.push(`【仅供了解对话背景，你要预测的是用户（user）会怎么回应这个角色，不要模仿这个角色的语气说话】\n对话中assistant的角色设定：${personalityBrief}`);
   }
 
-  // 过滤掉 assistant 消息中的生图 prompt JSON，避免干扰预测
+  // 过滤掉 assistant 消息中的生图 prompt JSON（可能在开头/中间/末尾），避免干扰预测
   const cleanedHistory = history.map(msg => {
     if (msg.role === 'assistant') {
       return {
         ...msg,
-        content: msg.content.replace(/\s*\{[^{}]*"prompt"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}$/, '')
+        content: msg.content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '')
       };
     }
     return msg;

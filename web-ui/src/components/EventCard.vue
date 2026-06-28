@@ -242,7 +242,10 @@ function openDetail() {
     if (scrollEl.value) scrollEl.value.scrollTo({ left: scrollEl.value.scrollWidth, behavior: 'smooth' })
   })
 }
-function closeDetail() { detailOpen.value = false }
+function closeDetail() {
+  detailOpen.value = false
+  choosing.value = false // 关闭详情时重置选择状态
+}
 
 async function onDelete() {
   showMenu.value = false
@@ -277,24 +280,29 @@ function onWheelScroll(e) {
 
 async function onChoose(choice) {
   if (choosing.value) return
+  const eventId = props.event.id
   choosing.value = true
+  customText.value = ''
+  console.log(`[EventCard] onChoose START event=${eventId} choice=${choice}`)
+
   try {
-    const result = await store.makeChoice(props.event.id, choice, choice === 'C' ? customText.value : '')
-    customText.value = ''
-    if (result.concluded) {
+    const result = await store.makeChoice(eventId, choice, choice === 'C' ? customText.value : '')
+    console.log(`[EventCard] onChoose DONE event=${eventId} concluded=${result?.concluded}`)
+    if (result?.concluded) {
       emit('updated', { concluded: true })
       closeDetail()
-    } else if (result.event) {
+    } else if (result?.event) {
       emit('updated', { event: result.event })
       nextTick(() => {
         if (scrollEl.value) scrollEl.value.scrollTo({ left: scrollEl.value.scrollWidth, behavior: 'smooth' })
       })
     }
   } catch (err) {
-    console.error('[EventCard] choose error:', err)
-  } finally {
-    choosing.value = false
+    console.error(`[EventCard] onChoose ERROR event=${eventId}:`, err?.message || err)
   }
+
+  choosing.value = false
+  console.log(`[EventCard] onChoose END event=${eventId} choosing reset`)
 }
 
 // 到期自动触发结局（非 compact 模式，即活跃事件到期时主动调用后端生成结局）

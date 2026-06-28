@@ -329,8 +329,8 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
 ${character.base_prompt}
 ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
 
-  // 上一轮对话（最近 1 轮 user+assistant），过滤掉生图 prompt JSON
-  const PROMPT_JSON_RE = /\s*\{[^{}]*"prompt"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}$/;
+  // 上一轮对话（最近 1 轮 user+assistant），过滤掉生图 prompt JSON（可能在开头/中间/末尾）
+  const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
   const prevRound = (() => {
     const db = getDb();
     const rows = db.prepare(

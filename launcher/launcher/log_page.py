@@ -84,6 +84,20 @@ class LogPage(QWidget):
         status_layout.addWidget(self.agent_indicator)
         status_layout.addStretch()
 
+        # --- 版本更新提示（默认隐藏，检测到新版本时显示） ---
+        self._update_hint = QLabel("")
+        self._update_hint.setStyleSheet("""
+            QLabel {
+                color: #E07B6C;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 2px 8px;
+                background: transparent;
+            }
+        """)
+        self._update_hint.hide()
+        status_layout.addWidget(self._update_hint)
+
         self.stop_btn = QPushButton("■ 停止所有")
         self.stop_btn.setStyleSheet("""
             QPushButton {
@@ -174,6 +188,18 @@ class LogPage(QWidget):
     def hide_mobile_banner(self) -> None:
         """隐藏手机端访问条幅。"""
         self._mobile_banner.hide()
+
+    # ------------------------------------------------------------------
+    # 版本更新提示
+    # ------------------------------------------------------------------
+
+    def show_update_hint(self, visible: bool, text: str = "有新版本噢~请去版本标签页更新"):
+        """显示或隐藏版本更新提示。"""
+        if visible:
+            self._update_hint.setText(text)
+            self._update_hint.show()
+        else:
+            self._update_hint.hide()
 
     # ------------------------------------------------------------------
     # 服务状态

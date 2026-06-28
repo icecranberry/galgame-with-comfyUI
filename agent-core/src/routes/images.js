@@ -158,6 +158,7 @@ router.post('/test-style', async (req, res) => {
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
+      skipOptimization: true,
       onProgress: (p) => {
         // 捕获各阶段时间戳用于 timing breakdown
         if (p.stage === 'submitting') timing.submitting = performance.now();

@@ -384,9 +384,9 @@ ${timeTag}${multiPersonNote}
   let rawResult = '';
   try {
     rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇生成' });
-    const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in LLM response');
-    eventData = JSON.parse(repairJson(jsonMatch[0]));
+    const jsonStr = extractFirstJson(rawResult);
+    if (!jsonStr) throw new Error('No JSON found in LLM response');
+    eventData = JSON.parse(repairJson(jsonStr));
     // field 兼容：imagePrompt / prompt 两种写法都接受
     const imagePromptText = eventData.prompt || eventData.imagePrompt;
     if (!eventData.title || !eventData.description || !eventData.choiceA || !eventData.choiceB) {
@@ -430,6 +430,8 @@ ${timeTag}${multiPersonNote}
     choice_text: '',
     summary: eventData.description,
     image: imageUrl,
+    // 存储多人模式信息，供后续分支生成时复用
+    multiPerson: multiPerson ? { otherName: multiPerson.otherName, otherPersona: multiPerson.otherPersona, relDesc: multiPerson.relDesc } : null,
   }];
   const expiresAt = new Date(now.getTime() + eventType.durationMin * 60 * 1000).toISOString();
 
@@ -504,8 +506,19 @@ export async function generateNextBranch(character, event, choice) {
     WHERE cr.from_character_id = ? AND cr.relationship_text != ''
   `).all(character.id);
 
-  // 3. 构建 choice_history 文本
+  // 2.5 检查是否为多人模式（从 choice_history[0] 读取初始事件时存储的 multiPerson 数据）
   const choiceHistory = JSON.parse(event.choice_history || '[]');
+  const storedMultiPerson = choiceHistory.length > 0 ? choiceHistory[0].multiPerson : null;
+  let multiPerson2 = null;
+  if (storedMultiPerson) {
+    multiPerson2 = {
+      otherName: storedMultiPerson.otherName,
+      otherPersona: storedMultiPerson.otherPersona,
+      relDesc: storedMultiPerson.relDesc,
+    };
+  }
+
+  // 3. 构建 choice_history 文本
   let historyText = '';
   if (choiceHistory.length === 0) {
     historyText = `初始场景：${event.description}`;
@@ -532,32 +545,48 @@ export async function generateNextBranch(character, event, choice) {
 你是一个分镜导演，正在为角色「${displayName2}」的奇遇事件推进叙事。
 这是编剧创作而非角色扮演，请以第三人称视角继续展开故事。`;
 
-  const personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
+  let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
 ${personaText2}`;
 
-  // 解析 image_prompt 规则的 {"prompt":"..."} JSON，提取其中的 prompt 指令文本
+  if (multiPerson2) {
+    personaMsg2 += `\n\n---\n以下是${multiPerson2.otherName}的人格设定（${multiPerson2.relDesc}），供事件涉及多人互动时参考：
+
+${multiPerson2.otherPersona}`;
+  }
+
   const branchImagePromptInstruction = parseImagePromptRule(imageRulesText)
     || '描述场景、角色外观、动作、氛围';
 
+  const multiPersonImageNote2 = multiPerson2
+    ? `**多人画面**：prompt 中必须包含${displayName2}和${multiPerson2.otherName}两个人。描述清楚各自的外观、位置、互动动作。用句号分隔两人描述。`
+    : '';
+
   const formatPrompt2 = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"description":"选择后的场景叙述（第三人称，80-150字）","prompt":"画面描述（英文。${branchImagePromptInstruction}）","choiceA":"新选项A","choiceB":"新选项B"}`;
+{"description":"选择后的场景叙述（第三人称，80-150字）","prompt":"画面描述（英文。${branchImagePromptInstruction}）${multiPersonImageNote2}","choiceA":"新选项A","choiceB":"新选项B"}`;
 
-  const relBlock2 = relationships.length > 0
-    ? `\n角色关系网：${relationships.map(r => `${displayName2}是${r.display_name}的${r.relationship_text}`).join('；')}\n`
+  // 只有多人模式才注入关系信息（和初始事件生成一致）
+  const multiNote2 = multiPerson2
+    ? `\n**多人事件**：${multiPerson2.relDesc}。事件中应包含${multiPerson2.otherName}作为主要互动对象，描述ta们之间的互动方式、肢体距离和氛围要贴合两人的真实关系。${relationships.map(r => `${displayName2}是${r.display_name}的${r.relationship_text}`).join('；')}`
     : '';
 
   const directorPrompt2 = `事件标题：${event.title}
-${historyText}${relBlock2}
+${historyText}${multiNote2}
 请以第三人称创作选择之后发生的下一个场景。要求：
 - 场景长度 80-150 字，有画面感
 - 给出新的A和B选项（不要和之前的选项重复，保持故事持续发展）`;
+
+  // 上一幕画面注入：视觉参考帮助 LLM 保持画面连贯（叙事已有 historyText，此处仅补充视觉信息）
+  const prevSceneMsg = event.prompt
+    ? { role: 'system', content: `【上一幕画面 · 视觉参考】\n${event.prompt}` }
+    : null;
 
   const msgs = [
     { role: 'system', content: directorSystem2 },
     { role: 'system', content: personaMsg2 },
     { role: 'system', content: formatPrompt2 },
+    ...(prevSceneMsg ? [prevSceneMsg] : []),
     { role: 'user', content: directorPrompt2 },
   ];
 
@@ -565,9 +594,9 @@ ${historyText}${relBlock2}
   let rawBranchResult = '';
   try {
     rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇分支' });
-    const jsonMatch = rawBranchResult.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in LLM response');
-    branchData = JSON.parse(repairJson(jsonMatch[0]));
+    const jsonStr = extractFirstJson(rawBranchResult);
+    if (!jsonStr) throw new Error('No JSON found in LLM response');
+    branchData = JSON.parse(repairJson(jsonStr));
     const branchPromptText = branchData.prompt || branchData.imagePrompt;
     if (!branchData.description) throw new Error('Incomplete branch data');
     branchData.prompt = branchPromptText || event.prompt;
@@ -697,9 +726,9 @@ ${historyText}
   let conclusionData;
   try {
     const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '奇遇结局' });
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found');
-    conclusionData = JSON.parse(repairJson(jsonMatch[0]));
+    const jsonStr = extractFirstJson(result);
+    if (!jsonStr) throw new Error('No JSON found');
+    conclusionData = JSON.parse(repairJson(jsonStr));
     if (!conclusionData.summary) throw new Error('No summary generated');
   } catch (err) {
     console.error(`[eventGen] Conclusion generation failed:`, err.message);
@@ -809,6 +838,23 @@ function toSQLite(iso) {
 // 修复 LLM 输出的非法 JSON 转义（image_prompt 规则中的 \( \) 等不是合法 JSON 转义）
 function repairJson(text) {
   return text.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+}
+
+// 从 LLM 原始输出中提取第一个完整 JSON 对象（括号计数，防 LLM 输出多段 JSON 拼在一起）
+function extractFirstJson(text) {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0, inString = false, escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+  }
+  return null; // 括号未闭合
 }
 
 /**
