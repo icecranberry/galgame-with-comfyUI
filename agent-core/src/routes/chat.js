@@ -1418,7 +1418,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   const userName = config.user.nickname || '用户';
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考【上一轮画面】，为这轮对话所处的场景生成画面描述。' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──
@@ -1440,34 +1440,62 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       }];
     })(),
     // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
+    // 同时剥离历史 prompt JSON 避免 token 浪费，并提取最近一轮 prompt 作为【上一次画面描述】
     ...(() => {
+	    // 移除消息中任意位置的 {"prompt":"..."} JSON 块（支持弯引号变体，不锚定 $）
+	    const stripPrompt = (content) => {
+	      return content.replace(/\s*\{["'“”「」]?prompt["'“”「」]?\s*:\s*"[^]*?"\s*\}/g, '').trim();
+	    };
+      const extractPrompt = (content) => {
+        // 提取完整的 {"prompt":"..."} JSON 块（保留格式头，用于【上一次画面描述】）
+        const allMatches = [...content.matchAll(/\{["'“”「」]?prompt["'“”「」]?\s*:\s*"([^]*?)"\s*\}/g)];
+        if (allMatches.length === 0) return null;
+        return allMatches[allMatches.length - 1][0].trim();
+      };
+
       const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
       const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
       const excludeSet = new Set([lastAssistantMsg, lastUserMsg].filter(Boolean));
       const filteredHistory = history.filter(m => !excludeSet.has(m));
-      if (filteredHistory.length === 0) return [];
-      return [{
+
+      // 从历史 assistant 消息中提取最近一轮的 prompt，同时剥离所有 prompt JSON
+      let lastScenePrompt = null;
+      const cleanedHistory = filteredHistory.map(m => {
+        const cleaned = stripPrompt(m.content);
+        if (m.role === 'assistant') {
+          const extracted = extractPrompt(m.content);
+          if (extracted) lastScenePrompt = extracted;  // 持续覆盖，最终保留最新一轮
+        }
+        return { ...m, content: cleaned };
+      });
+
+      if (cleanedHistory.length === 0) return [];
+
+      const contextBlock = {
         role: 'system',
-        content: '【对话上下文】\n' + filteredHistory.map(m => {
+        content: '【对话上下文】\n' + cleanedHistory.map(m => {
           const userName = config.user.nickname || '用户';
           const label = m.role === 'user' ? userName : (character?.display_name || '角色');
           return `${label}: ${m.content}`;
-        }).join('\n\n')
-      }];
-    })(),
-    // ── 最后一轮对话（用户最后一句 + 角色最后一句），放在上下文之后、最终指令之前，作为生图焦点 ──
-    ...(() => {
-      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
-      const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
-      if (!lastAssistantMsg) return [];
-      const parts = [];
-      const userName = config.user.nickname || '用户';
-      if (lastUserMsg) parts.push(`${userName}: ${lastUserMsg.content}`);
-      parts.push(`${character?.display_name || '角色'}: ${lastAssistantMsg.content}`);
-      return [{
-        role: 'system',
-        content: `【最后一轮对话】\n${parts.join('\n')}`
-      }];
+        }).join('\n\n') + '\n\n' + (() => {
+          const la = [...history].reverse().find(m => m.role === 'assistant');
+          const lu = [...history].reverse().find(m => m.role === 'user');
+          const p = [];
+          const un = config.user.nickname || '用户';
+          if (lu) p.push(un + ': ' + lu.content);
+          if (la) p.push((character?.display_name || '角色') + ': ' + la.content);
+          return p.length ? '【最后一轮对话】\n' + p.join('\n') : '';
+        })()
+        };
+
+      // 如果存在上一轮画面，追加独立块用于画面连续性
+      if (lastScenePrompt) {
+        return [
+          { role: 'system', content: `【上一次画面描述】以下为上一轮对话中生成的画面描述，用于保持画面风格的连贯性（角色外观、场景氛围、光线色调等），本轮生成的新画面应在此基础上自然延续：\n${lastScenePrompt}` },
+          contextBlock,
+        ];
+      }
+      return [contextBlock];
     })(),
     { role: 'system', content: `现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。只输出 JSON，不要任何其他文字。` },
   ];
