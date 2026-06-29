@@ -15,6 +15,7 @@ import userRelationshipsRoutes from './src/routes/userRelationships.js';
 import portraitsRoutes from './src/routes/portraits.js';
 import notificationsRoutes from './src/routes/notifications.js';
 import eventsRoutes from './src/routes/events.js';
+import streamRoutes from './src/routes/stream.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 import { startEventScheduler } from './src/services/eventScheduler.js';
@@ -44,6 +45,7 @@ app.use('/api/user-relationships', userRelationshipsRoutes);
 app.use('/api/portraits', portraitsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/stream', streamRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {

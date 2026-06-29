@@ -6,6 +6,7 @@ import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
+import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 
 const router = Router();
@@ -42,6 +43,7 @@ function broadcastNewPost(postInfo) {
   for (const client of sseClients) {
     try { client.write(payload); } catch { sseClients.delete(client); }
   }
+  broadcastToUnified('new_post', postInfo);
 }
 
 // GET /api/moments/stream — SSE 推送端点（新帖实时通知）

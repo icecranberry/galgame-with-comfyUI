@@ -67,6 +67,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
+import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -91,11 +92,13 @@ function handleEventsClick() {
 }
 
 onMounted(() => {
-  moments.connectSSE()
-  events.connectSSE()
+  startUnifiedStream()   // 单一 HTTP 连接承载所有 SSE 事件
+  moments.connectSSE()   // 订阅 'new_post' 事件
+  events.connectSSE()    // 订阅 'new_event'/'event_update' 等事件
 })
 
 onUnmounted(() => {
+  stopUnifiedStream()
   moments.disconnectSSE()
   events.disconnectSSE()
 })

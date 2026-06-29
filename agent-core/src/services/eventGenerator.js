@@ -7,7 +7,7 @@
  * - concludeEvent(): 到期/完成后生成结局，存入记忆
  */
 
-import fs from 'fs';
+import { promises as fsp } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
@@ -408,11 +408,11 @@ ${timeTag}${multiPersonNote}
       height: config.comfyui.momentsHeight,
     });
     if (genResult.success && genResult.images.length > 0) {
-      fs.mkdirSync(imagesDir, { recursive: true });
+      await fsp.mkdir(imagesDir, { recursive: true });
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
       const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      fs.writeFileSync(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
+      await fsp.writeFile(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
       imageUrl = `/images/${filename}`;
       console.log(`[eventGen] Image generated for ${character.display_name}: ${imageUrl}`);
     } else {
@@ -487,8 +487,16 @@ export async function generateNextBranch(character, event, choice) {
   const db = getDb();
   const now = new Date();
 
-  // 0. 标记处理中，防止切页后重复提交
-  db.prepare(`UPDATE character_events SET processing = 1 WHERE id = ?`).run(event.id);
+  // 0. 原子性标记处理中（CAS：仅 processing=0 时置 1），防止并发重复提交
+  // 如果已有其他请求在处理中，直接抛出错误，避免：
+  //   - 两次 LLM 调用浪费 token / 并发生图压垮 ComfyUI
+  //   - 浏览器 HTTP/1.1 6 连接限制下，双 choose 请求挤占剩余连接导致其他 API 排队 23s+
+  const casResult = db.prepare(
+    `UPDATE character_events SET processing = 1 WHERE id = ? AND processing = 0`
+  ).run(event.id);
+  if (casResult.changes === 0) {
+    throw new Error('EVENT_ALREADY_PROCESSING');
+  }
 
   // 1. 检查是否过期
   const expiresAt = new Date(event.expires_at + 'Z');
@@ -615,11 +623,11 @@ ${historyText}${multiNote2}
       height: config.comfyui.momentsHeight,
     });
     if (genResult.success && genResult.images.length > 0) {
-      fs.mkdirSync(imagesDir, { recursive: true });
+      await fsp.mkdir(imagesDir, { recursive: true });
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
       const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      fs.writeFileSync(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
+      await fsp.writeFile(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
       imageUrl = `/images/${filename}`;
       console.log(`[eventGen] Branch image generated: ${imageUrl}`);
     }

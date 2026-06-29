@@ -160,10 +160,10 @@ export const useMomentsStore = defineStore('moments', () => {
     posts.value = posts.value.filter(p => p.id !== postId)
   }
 
-  // ── 未读计数：时序方案，DB 为单一数据源 ──
-  let _sseConn = null
+  // ── 未读计数：统一 SSE 订阅 + poll timer 兜底 ──
   let _pollTimer = null
   let _sseStarted = false
+  let _unsubNewPost = null
 
   /** 从 DB 拉取最新未读计数（唯一数据源） */
   async function refreshUnreadCount() {
@@ -173,33 +173,7 @@ export const useMomentsStore = defineStore('moments', () => {
     } catch { /* 非关键 */ }
   }
 
-  /** SSE 新帖事件 → 立即触发一次 DB 轮询 */
-  function _onNewPost(_post) {
-    refreshUnreadCount()
-  }
-
-  function _createSSE() {
-    if (_sseConn && !_sseConn._closed) _sseConn.close()
-    _sseConn = api.connectMomentsStream(_onNewPost)
-  }
-
-  /** SSE 断线重连定时器 */
-  function _startReconnectTimer() {
-    if (_pollTimer) clearInterval(_pollTimer)
-    _pollTimer = setInterval(async () => {
-      if (!_sseStarted) return
-
-      // 检查 SSE 是否断线，是则重连
-      if (!_sseConn || _sseConn._closed) {
-        _createSSE()
-      }
-
-      // 每次 tick 都从 DB 刷新真实计数（单一数据源）
-      await refreshUnreadCount()
-    }, POLL_INTERVAL)
-  }
-
-  /** 连接 SSE 推送流 + 启动轮询 */
+  /** 连接统一 SSE 推送流（仅订阅 new_post 事件） + 启动 polling */
   async function connectSSE() {
     if (_sseStarted) return
     _sseStarted = true
@@ -207,15 +181,25 @@ export const useMomentsStore = defineStore('moments', () => {
     // 从 DB 加载初始未读计数
     await refreshUnreadCount()
 
-    _createSSE()
-    _startReconnectTimer()
+    // 动态导入避免循环依赖（unifiedStream 不依赖 moments store）
+    const { onEvent } = await import('./unifiedStream.js')
+    _unsubNewPost = onEvent('new_post', (_post) => {
+      if (!isViewingMoments.value) newPostCount.value++
+    })
+
+    if (!_pollTimer) {
+      _pollTimer = setInterval(async () => {
+        if (!_sseStarted) return
+        await refreshUnreadCount()
+      }, POLL_INTERVAL)
+    }
   }
 
-  /** 断开 SSE + 停止轮询 */
+  /** 断开 SSE 订阅 + 停止轮询 */
   function disconnectSSE() {
     _sseStarted = false
+    if (_unsubNewPost) { _unsubNewPost(); _unsubNewPost = null }
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
-    if (_sseConn) { _sseConn.close(); _sseConn = null }
   }
 
   /** 标记已读：更新 last_moments_seen_at 为当前时间 */

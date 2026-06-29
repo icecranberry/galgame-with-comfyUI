@@ -5,6 +5,8 @@
  * 独立于 express/Router，避免 services ↔ routes 循环依赖。
  */
 
+import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
+
 const sseClients = new Set();
 
 /**
@@ -16,6 +18,7 @@ export function broadcastProactiveMessage(data) {
   for (const client of sseClients) {
     try { client.write(payload); } catch { sseClients.delete(client); }
   }
+  broadcastToUnified('proactive_message', data);
 }
 
 /**

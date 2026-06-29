@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
+import { onEvent } from './unifiedStream.js'
 
 const POLL_INTERVAL = 30_000
 
@@ -76,11 +77,26 @@ export const useEventsStore = defineStore('events', () => {
       const data = await api.listEvents()
       const now = Date.now()
       const expired = []
+
+      // 保留本地 processing / queued 状态 —— 后端 DB 里没有排队状态，
+      // 直接用后端数据覆盖会导致切换页面后 loading 消失
+      const localMeta = new Map()
+      for (const e of activeEvents.value) {
+        if (e.processing || _chooseQueue.some(q => q.eventId === e.id)) {
+          localMeta.set(e.id, { processing: true, _queued: _chooseQueue.some(q => q.eventId === e.id) })
+        }
+      }
+
       activeEvents.value = (data.active || []).filter(e => {
         if (!e.expires_at) return true
         if (new Date(e.expires_at).getTime() > now) return true
+        // 过期但正在本地处理/排队中 → 保留（后端调度器可能还没结算）
+        if (localMeta.has(e.id)) return true
         expired.push(e)
         return false
+      }).map(e => {
+        const local = localMeta.get(e.id)
+        return local ? { ...e, processing: local.processing, _queued: local._queued } : e
       })
       // 过期事件在调度器处理前先并入前端 history，避免消失
       history.value = [
@@ -102,14 +118,18 @@ export const useEventsStore = defineStore('events', () => {
     }
   }
 
-  // 选择事件选项
-  async function makeChoice(eventId, choice, customText) {
-    console.log(`[store] makeChoice START event=${eventId}`)
-    // 前端也标记 processing，避免组件重渲染时丢失 loading 状态
-    const idx = activeEvents.value.findIndex(e => e.id === eventId)
-    if (idx !== -1 && !activeEvents.value[idx].processing) {
-      activeEvents.value[idx] = { ...activeEvents.value[idx], processing: true }
-    }
+  // ── 选择队列：最多 2 个 HTTP 请求并发，超出排队 ──
+  // 用户点第 3 个分支时不会报错，而是暂存并在有空闲时自动处理。
+  // UI 立刻显示"推进中"（processing=true），无需等待 HTTP 响应。
+  const MAX_CONCURRENT_CHOOSES = 2
+  let _choosingCount = 0
+  const _chooseQueue = []  // { eventId, choice, customText }
+
+  /** 实际执行 HTTP 请求 + 结果处理 */
+  async function _executeChoice(eventId, choice, customText) {
+    _choosingCount++
+    console.log(`[store] makeChoice EXEC event=${eventId} (concurrent: ${_choosingCount}/${MAX_CONCURRENT_CHOOSES})`)
+
     try {
       const result = await api.chooseEventOption(eventId, choice, customText)
       console.log(`[store] makeChoice API_OK event=${eventId} concluded=${result.concluded}`)
@@ -117,22 +137,94 @@ export const useEventsStore = defineStore('events', () => {
         activeEvents.value = activeEvents.value.filter(e => e.id !== eventId)
         await loadEvents()
       } else if (result.event) {
-        const idx2 = activeEvents.value.findIndex(e => e.id === eventId)
-        if (idx2 !== -1) {
-          activeEvents.value[idx2] = result.event // result.event.processing is 0
+        const idx = activeEvents.value.findIndex(e => e.id === eventId)
+        if (idx !== -1) {
+          activeEvents.value[idx] = result.event
         }
         await markSeen()
       }
       return result
     } catch (err) {
       console.error(`[store] makeChoice ERROR event=${eventId}:`, err?.message)
-      // 失败时清除 processing 标记
-      const idx3 = activeEvents.value.findIndex(e => e.id === eventId)
-      if (idx3 !== -1) {
-        activeEvents.value[idx3] = { ...activeEvents.value[idx3], processing: false }
+      const idx = activeEvents.value.findIndex(e => e.id === eventId)
+      if (idx !== -1) {
+        activeEvents.value[idx] = { ...activeEvents.value[idx], processing: false }
       }
       throw err
+    } finally {
+      _choosingCount--
+      // 有空闲槽位 → 处理队列中的下一个
+      _drainQueue()
     }
+  }
+
+  /** 从队列取出下一个待处理的选择 */
+  function _drainQueue() {
+    if (_chooseQueue.length === 0) return
+    if (_choosingCount >= MAX_CONCURRENT_CHOOSES) return
+
+    const next = _chooseQueue.shift()
+    const idx = activeEvents.value.findIndex(e => e.id === next.eventId)
+
+    // 事件已不在活跃列表中（被删除/过期/结束），跳过
+    if (idx === -1) {
+      console.log(`[store] makeChoice SKIP_QUEUED event=${next.eventId}: no longer active`)
+      _drainQueue() // 尝试下一个
+      return
+    }
+
+    console.log(`[store] makeChoice DEQUEUE event=${next.eventId} (${_chooseQueue.length} left in queue)`)
+    // 清除 _queued 标记：HTTP 请求即将发出，不可再取消
+    if (idx !== -1) {
+      activeEvents.value[idx] = { ...activeEvents.value[idx], _queued: false }
+    }
+    // 不 await —— 让队列异步消化，不阻塞当前调用栈
+    _executeChoice(next.eventId, next.choice, next.customText)
+  }
+
+  /** 取消排队中的选择，恢复可点击状态 */
+  function cancelQueuedChoice(eventId) {
+    // 从队列移除
+    const qIdx = _chooseQueue.findIndex(q => q.eventId === eventId)
+    if (qIdx !== -1) {
+      _chooseQueue.splice(qIdx, 1)
+      console.log(`[store] cancelQueuedChoice REMOVED event=${eventId} from queue`)
+    }
+    // 恢复本地状态
+    const idx = activeEvents.value.findIndex(e => e.id === eventId)
+    if (idx !== -1) {
+      activeEvents.value[idx] = { ...activeEvents.value[idx], processing: false, _queued: false }
+    }
+  }
+
+  /** 选择事件选项（可排队） */
+  async function makeChoice(eventId, choice, customText) {
+    const idx = activeEvents.value.findIndex(e => e.id === eventId)
+
+    // 守卫 1：同一事件已有请求在处理或排队中
+    if (idx !== -1 && activeEvents.value[idx].processing) {
+      console.warn(`[store] makeChoice IGNORED event=${eventId}: already processing`)
+      return null
+    }
+    if (_chooseQueue.some(q => q.eventId === eventId)) {
+      console.warn(`[store] makeChoice IGNORED event=${eventId}: already in queue`)
+      return null
+    }
+
+    // 立即标记 processing，UI 显示"推进中"
+    if (idx !== -1) {
+      activeEvents.value[idx] = { ...activeEvents.value[idx], processing: true }
+    }
+
+    // 有可用槽位 → 立即执行
+    if (_choosingCount < MAX_CONCURRENT_CHOOSES) {
+      return _executeChoice(eventId, choice, customText)
+    }
+
+    // 槽位满 → 入队等待
+    console.log(`[store] makeChoice QUEUED event=${eventId} (queue depth: ${_chooseQueue.length + 1})`)
+    _chooseQueue.push({ eventId, choice, customText })
+    return null
   }
 
   // 取消事件
@@ -170,47 +262,19 @@ export const useEventsStore = defineStore('events', () => {
     try { await api.markEventsRead() } catch { /* silent */ }
   }
 
-  // ── SSE 连接 ──
-  let _sseConn = null
+  // ── 统一 SSE 订阅（替代独立 SSE 长连接）──
   let _pollTimer = null
   let _sseStarted = false
+  let _unsubs = []  // onEvent 返回的取消订阅函数
 
-  /** 创建 SSE 事件处理器（connectSSE 和 _createSSE 共用，避免重复代码） */
-  function _makeHandlers() {
-    return {
-      onNewEvent(data) {
-        const exists = activeEvents.value.find(e => e.id === data.id)
-        if (!exists) {
-          activeEvents.value.unshift(data)
-        }
-        refreshUnreadCount()
-      },
-      onUpdate(data) {
-        const idx = activeEvents.value.findIndex(e => e.id === data.id)
-        if (idx !== -1) {
-          activeEvents.value[idx] = { ...activeEvents.value[idx], ...data }
-        }
-        // 分支更新也触发红点（后端通过 last_interaction_at 判断）
-        refreshUnreadCount()
-      },
-      onConclusion(data) {
-        activeEvents.value = activeEvents.value.filter(e =>
-          !(e.character_id === data.character_id && e.title === data.event_title)
-        )
-        if (isViewingEvents.value) {
-          // 正在浏览事件页面 → 完整刷新列表（含 markSeen 清零红点）
-          loadEvents()
-        } else {
-          // 不在事件页面 → 只刷新未读计数，避免 markSeen 错误清零红点
-          refreshUnreadCount()
-        }
-      },
-      onExpired(data) {
-        activeEvents.value = activeEvents.value.filter(e =>
-          !(e.character_id === data.character_id && e.title === data.event_title)
-        )
-        refreshUnreadCount()
-      },
+  /** SSE 事件触发时，本地更新未读计数而不发起额外 API 请求。
+   *  避免在 HTTP/1.1 6 连接限制下（3 SSE + 长 choose = 仅剩 1-2 连接），
+   *  refreshUnreadCount 的 fetch 抢走最后可用连接导致页面导航等请求排队 23 秒。
+   *  Poll timer (30s) 仍会定期同步以修正偏差。
+   */
+  function _bumpUnreadLocal() {
+    if (!isViewingEvents.value) {
+      newEventCount.value = activeEvents.value.length
     }
   }
 
@@ -218,48 +282,46 @@ export const useEventsStore = defineStore('events', () => {
     if (_sseStarted) return
     _sseStarted = true
 
-    // 先关闭旧连接（如果存在）
-    if (_sseConn && !_sseConn._closed) {
-      _sseConn.close()
-    }
+    // 订阅统一 SSE 流的事件类型（单个 HTTP 连接承载所有事件）
+    _unsubs = [
+      onEvent('new_event', (data) => {
+        const exists = activeEvents.value.find(e => e.id === data.id)
+        if (!exists) activeEvents.value.unshift(data)
+        _bumpUnreadLocal()
+      }),
+      onEvent('event_update', (data) => {
+        const idx = activeEvents.value.findIndex(e => e.id === data.id)
+        if (idx !== -1) activeEvents.value[idx] = { ...activeEvents.value[idx], ...data }
+        _bumpUnreadLocal()
+      }),
+      onEvent('event_concluded', (data) => {
+        activeEvents.value = activeEvents.value.filter(e =>
+          !(e.character_id === data.character_id && e.title === data.event_title)
+        )
+        if (isViewingEvents.value) loadEvents()
+        else _bumpUnreadLocal()
+      }),
+      onEvent('event_expired', (data) => {
+        activeEvents.value = activeEvents.value.filter(e =>
+          !(e.character_id === data.character_id && e.title === data.event_title)
+        )
+        _bumpUnreadLocal()
+      }),
+    ]
 
-    _sseConn = api.connectEventsStream(_makeHandlers())
-    _startPoll()
+    if (!_pollTimer) {
+      _pollTimer = setInterval(() => {
+        if (!_sseStarted) return
+        refreshUnreadCount()
+      }, POLL_INTERVAL)
+    }
   }
 
   function disconnectSSE() {
     _sseStarted = false
-    if (_sseConn) {
-      _sseConn.close()
-      _sseConn = null
-    }
-    _stopPoll()
-  }
-
-  /** SSE 断线重连（仅被 poll timer 内部调用，不改变 _sseStarted 状态） */
-  function _createSSE() {
-    if (_sseConn && !_sseConn._closed) {
-      _sseConn.close()
-    }
-    _sseConn = api.connectEventsStream(_makeHandlers())
-  }
-
-  function _startPoll() {
-    if (_pollTimer) return
-    _pollTimer = setInterval(() => {
-      if (!_sseStarted) return
-      if (!_sseConn || _sseConn._closed) {
-        _createSSE()
-      }
-      refreshUnreadCount()
-    }, POLL_INTERVAL)
-  }
-
-  function _stopPoll() {
-    if (_pollTimer) {
-      clearInterval(_pollTimer)
-      _pollTimer = null
-    }
+    _unsubs.forEach(fn => fn())
+    _unsubs = []
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
   }
 
   return {
@@ -267,7 +329,7 @@ export const useEventsStore = defineStore('events', () => {
     filterCharacterId, filterEngaged, newEventCount, isViewingEvents,
     scrollToTopSignal,
     filteredActive, filteredHistory, charactersWithEvents,
-    loadEvents, makeChoice, dismissEvent, deleteEvent,
+    loadEvents, makeChoice, cancelQueuedChoice, dismissEvent, deleteEvent,
     setFilter, toggleFilterEngaged,
     refreshUnreadCount, markSeen,
     connectSSE, disconnectSSE, requestScrollToTop,

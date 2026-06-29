@@ -141,13 +141,50 @@ function buildWorkflow(promptText, overrides = {}) {
 }
 
 /**
+ * 最终阀门：统计 prompt 中所有 "数字+单词" 样式标签（如 1girl、2boys、3cats），
+ * 按单词词干汇总数量后拼到 prompt 最前面，同时移除原始标签避免重复干扰。
+ *
+ * 例如 "2girls, 1girl, sitting, long hair" → "3girls, sitting, long hair"
+ * 例如 "1boy, 2boys, gym"                  → "3boys, gym"
+ * 例如 "1cat, 1cat, sleeping"              → "2cats, sleeping"
+ */
+function finalizeCountTags(prompt) {
+  // 匹配 数字 + 3+字母的单词（排除 4k、8k、3d 等短标签），带可选复数 s
+  const tagRe = /\b(\d+)\s*([a-z]{3,})s?\b/gi;
+  const counts = new Map();  // stem → total
+
+  let m;
+  while ((m = tagRe.exec(prompt)) !== null) {
+    const num = parseInt(m[1], 10) || 1;
+    const word = m[2].toLowerCase();
+    // 词干：去掉末尾 s（cat → cat, girls → girl）
+    const stem = word.endsWith('s') && word.length > 3 ? word.slice(0, -1) : word;
+    counts.set(stem, (counts.get(stem) || 0) + num);
+  }
+
+  if (counts.size === 0) return prompt;
+
+  // 按汇总数量从大到小排序
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([stem, count]) => count === 1 ? `1${stem}` : `${count}${stem}s`);
+
+  // 移除原始 数字+单词 标签
+  let cleaned = prompt.replace(/\b\d+\s*[a-z]{3,}s?\b\s*,?\s*/gi, '');
+  cleaned = cleaned.replace(/^,\s*/, '').replace(/,\s*$/, '').trim();
+
+  return parts.join(', ') + (cleaned ? ', ' + cleaned : '');
+}
+
+/**
  * 提交 ComfyUI 生图（含 prompt 优化、workflow 构建、重试循环）
  *
  * 流程:
  *   1. 如果 skipOptimization 为 false 且 config.features.promptOptimize !== false，
  *      调用 optimizePrompt 优化 prompt
- *   2. 构建 workflow（按节点 title 注入参数）
- *   3. 提交 ComfyUI → 轮询 → 下载 base64（最多 submitRetries 次尝试）
+ *   2. 最终阀门：统计 prompt 中所有 数字+girl/boy 标签，汇总后重新拼到最前面
+ *   3. 构建 workflow（按节点 title 注入参数）
+ *   4. 提交 ComfyUI → 轮询 → 下载 base64（最多 submitRetries 次尝试）
  *
  * 重试条件：WebSocket 通道断开/卡死（comfyClient 内 30s 无活动判定）。
  * 每次重试重新随机种子、重新提交。
@@ -176,11 +213,15 @@ async function submitWithRetry(rawPrompt, {
     console.log(`[imageSkill] Prompt optimization disabled, using raw prompt directly`);
   }
 
-  // 2. 构建 workflow
+  // 2. 最终阀门：统计 count 标签数量并重组
+  finalPrompt = finalizeCountTags(finalPrompt);
+  console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
+
+  // 3. 构建 workflow
   const wf = buildWorkflow(finalPrompt, { artist, width, height });
   if (onProgress) onProgress({ stage: 'submitting' });
 
-  // 3. 提交 ComfyUI，带重试循环
+  // 4. 提交 ComfyUI，带重试循环
   let lastResult = null;
 
   for (let attempt = 0; attempt <= submitRetries; attempt++) {

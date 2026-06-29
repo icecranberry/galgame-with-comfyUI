@@ -150,6 +150,12 @@ router.post('/:id/choose', async (req, res) => {
     return res.status(400).json({ error: 'event_not_active' });
   }
 
+  // 防止并发重复提交：如果上一个分支还在处理中（LLM + 生图），拒绝新请求
+  // 浏览器的 HTTP/1.1 6 连接限制 + 3 个 SSE 长连接 + 长 choose 请求 → 连接池耗尽
+  if (event.processing === 1) {
+    return res.status(409).json({ error: 'event_processing', message: '上一个分支仍在推进中，请等待完成后再选择' });
+  }
+
   // 检查过期
   const expiresAt = new Date(event.expires_at + 'Z');
   if (new Date() >= expiresAt) {

@@ -12,9 +12,9 @@ export const useProactiveStore = defineStore('proactive', () => {
   // SSE 回调（供 App.vue 注入）
   const onMessageCallback = ref(null)
 
-  const _sseConn = ref(null)
   const _sseStarted = ref(false)
   const _pollTimer = ref(null)
+  let _unsubProactive = null
 
   const unreadCount = computed(() => unreadIds.value.size)
 
@@ -42,25 +42,31 @@ export const useProactiveStore = defineStore('proactive', () => {
     onMessageCallback.value = callback
   }
 
-  // ── SSE 内部逻辑 ──
+  // ── 统一 SSE 订阅 ──
 
   function _onMessage(data) {
     addProactive(data)
     if (onMessageCallback.value) onMessageCallback.value(data)
   }
 
-  function _createSSE() {
-    if (_sseConn.value && !_sseConn.value._closed) _sseConn.value.close()
-    _sseConn.value = api.connectNotificationsStream(_onMessage)
-  }
-
   function _startReconnectTimer() {
     if (_pollTimer.value) clearInterval(_pollTimer.value)
-    _pollTimer.value = setInterval(() => {
+    _pollTimer.value = setInterval(async () => {
       if (!_sseStarted.value) return
-      if (!_sseConn.value || _sseConn.value._closed) {
-        _createSSE()
-      }
+      // 从后端恢复未读状态（DB 为单一数据源，定期同步防丢失）
+      try {
+        const { unread } = await api.getProactiveUnread()
+        if (unread?.length) {
+          const ids = new Set()
+          const msgs = { ...latestMessages.value }
+          for (const r of unread) {
+            ids.add(r.character_id)
+            msgs[r.character_id] = r
+          }
+          unreadIds.value = ids
+          latestMessages.value = msgs
+        }
+      } catch { /* 非关键 */ }
     }, RECONNECT_INTERVAL)
   }
 
@@ -83,14 +89,17 @@ export const useProactiveStore = defineStore('proactive', () => {
       }
     } catch { /* 非关键 */ }
 
-    _createSSE()
+    // 订阅统一 SSE 流的 proactive_message 事件
+    const { onEvent } = await import('./unifiedStream.js')
+    _unsubProactive = onEvent('proactive_message', _onMessage)
+
     _startReconnectTimer()
   }
 
   function disconnectSSE() {
     _sseStarted.value = false
     if (_pollTimer.value) { clearInterval(_pollTimer.value); _pollTimer.value = null }
-    if (_sseConn.value) { _sseConn.value.close(); _sseConn.value = null }
+    if (_unsubProactive) { _unsubProactive(); _unsubProactive = null }
   }
 
   return {

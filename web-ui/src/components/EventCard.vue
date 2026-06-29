@@ -107,9 +107,16 @@
             <div v-if="!isExpired" class="branch-card is-current">
               <div class="branch-text">
                 <div class="branch-label">⚡ 做出选择 或 ✍️ 自由行动</div>
-                <div v-if="choosing || event.processing" class="choice-loading">
+                <!-- 真实处理中（HTTP 请求已发出，不可取消） -->
+                <div v-if="(choosing || event.processing) && !event._queued" class="choice-loading">
                   <div class="loading-spinner"></div>
                   <span>故事推进中…</span>
+                </div>
+                <!-- 排队中（尚未发送 HTTP，可取消重新选择） -->
+                <div v-else-if="event._queued" class="choice-loading is-queued">
+                  <div class="loading-spinner"></div>
+                  <span>故事推进中…</span>
+                  <button class="queued-back-btn" @click.stop="onCancelQueue">← 返回重选</button>
                 </div>
                 <div v-else class="vn-choices">
                   <button class="vn-choice" @click="onChoose('A')">
@@ -287,11 +294,18 @@ async function onChoose(choice) {
 
   try {
     const result = await store.makeChoice(eventId, choice, choice === 'C' ? customText.value : '')
-    console.log(`[EventCard] onChoose DONE event=${eventId} concluded=${result?.concluded}`)
-    if (result?.concluded) {
+    console.log(`[EventCard] onChoose DONE event=${eventId} concluded=${result?.concluded} queued=${result === null}`)
+    if (!result) {
+      // 已排队：choosing 重置（本地状态），但 event.processing 为 true（store 状态）
+      // 模板 v-if="choosing || event.processing" → 仍然显示 loading
+      // SSE event_update 到达后 event.processing=false → loading 消失 + 新选项出现
+      choosing.value = false
+      return
+    }
+    if (result.concluded) {
       emit('updated', { concluded: true })
       closeDetail()
-    } else if (result?.event) {
+    } else if (result.event) {
       emit('updated', { event: result.event })
       nextTick(() => {
         if (scrollEl.value) scrollEl.value.scrollTo({ left: scrollEl.value.scrollWidth, behavior: 'smooth' })
@@ -303,6 +317,14 @@ async function onChoose(choice) {
 
   choosing.value = false
   console.log(`[EventCard] onChoose END event=${eventId} choosing reset`)
+}
+
+/** 取消排队中的选择：从队列移除 + 恢复可点击状态 */
+function onCancelQueue() {
+  const eventId = props.event.id
+  console.log(`[EventCard] cancelQueue event=${eventId}`)
+  store.cancelQueuedChoice(eventId)
+  choosing.value = false
 }
 
 // 到期自动触发结局（非 compact 模式，即活跃事件到期时主动调用后端生成结局）
@@ -700,6 +722,18 @@ watch(isExpired, (val) => {
 .choice-loading {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   padding: 32px; color: var(--text-secondary); font-size: 13px;
+}
+/* 排队中的 loading：右下角显示取消按钮 */
+.choice-loading.is-queued {
+  position: relative; flex-direction: column; gap: 14px;
+}
+.queued-back-btn {
+  padding: 4px 14px; border: 1px solid rgba(0,0,0,0.12); border-radius: 14px;
+  background: rgba(255,255,255,0.7); color: var(--text-secondary);
+  font-size: 11px; cursor: pointer; transition: all 0.2s;
+}
+.queued-back-btn:hover {
+  background: rgba(0,0,0,0.04); color: var(--text-primary); border-color: rgba(0,0,0,0.2);
 }
 .loading-spinner {
   width: 18px; height: 18px;

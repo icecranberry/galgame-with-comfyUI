@@ -3,11 +3,17 @@ import { config } from '../config.js';
 
 const DEFAULT_MODEL = config.llm.model || 'deepseek-v4-flash';
 
+// 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
+// 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
+let _client = null;
 function getClient() {
-  return new OpenAI({
-    baseURL: config.llm.baseURL,
-    apiKey: config.llm.apiKey,
-  });
+  if (!_client) {
+    _client = new OpenAI({
+      baseURL: config.llm.baseURL,
+      apiKey: config.llm.apiKey,
+    });
+  }
+  return _client;
 }
 
 /**

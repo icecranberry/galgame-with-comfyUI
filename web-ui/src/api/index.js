@@ -626,11 +626,20 @@ export async function getActiveEvent(characterId) {
 }
 
 export async function chooseEventOption(eventId, choice, customText) {
-  const res = await fetch(`${BASE}/events/${eventId}/choose`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ choice, customText }),
-  })
-  return res.json()
+  // 120s 超时：LLM (~15s) + ComfyUI 生图 (~90s) 的总耗时上限
+  // 避免请求无限挂起耗尽浏览器 HTTP/1.1 连接池（6 连接限制 + 3 SSE = 仅剩 3 可用）
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 120_000)
+  try {
+    const res = await fetch(`${BASE}/events/${eventId}/choose`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choice, customText }),
+      signal: controller.signal,
+    })
+    return res.json()
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 export async function dismissEvent(eventId) {
@@ -667,10 +676,77 @@ export async function generateEvent(characterId, eventTypeKey, customPrompt) {
 }
 
 /**
- * 连接奇遇事件 SSE 推送流
- * @param {{ onNewEvent?: Function, onUpdate?: Function, onConclusion?: Function, onExpired?: Function }} handlers
- * @returns {{ close: () => void }}
+ * 连接统一 SSE 推送流（替代 3 个独立 SSE 长连接）
+ *
+ * 合并以下三条流为一个 HTTP 连接，释放 HTTP/1.1 6 连接限制下的 2 个连接位：
+ *   - /api/events/stream    → handlers['new_event'|'event_update'|...]
+ *   - /api/moments/stream    → handlers['new_post']
+ *   - /api/notifications/stream → handlers['proactive_message']
+ *
+ * @param {{ [eventType: string]: Function }} handlers - key = SSE event type, value = callback(data)
+ * @returns {{ close: () => void, _closed: boolean }}
  */
+export function connectUnifiedStream(handlers = {}, { onClose } = {}) {
+  const controller = new AbortController()
+  const conn = { _closed: false }
+
+  conn.close = () => {
+    conn._closed = true
+    controller.abort()
+  }
+
+  function _handleClose() {
+    if (conn._closed) return  // 已经关闭过（可能是主动 close）
+    conn._closed = true
+    if (onClose) onClose()
+  }
+
+  fetch(`${BASE}/stream`, { signal: controller.signal })
+    .then(async (res) => {
+      if (!res.ok) {
+        console.warn('[api] unified SSE connection failed:', res.status)
+        _handleClose()
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        let done, value
+        try { ({ done, value } = await reader.read()) } catch { break }
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        let eventType = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              const fn = handlers[eventType]
+              if (fn) fn(data)
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+      _handleClose()
+    })
+    .catch(err => {
+      if (err.name !== 'AbortError') {
+        console.warn('[api] unified SSE error:', err.message)
+      }
+      _handleClose()
+    })
+
+  return conn
+}
+
+/** @deprecated 使用 connectUnifiedStream 替代 */
 export function connectEventsStream(handlers = {}) {
   const controller = new AbortController()
   const conn = { _closed: false }

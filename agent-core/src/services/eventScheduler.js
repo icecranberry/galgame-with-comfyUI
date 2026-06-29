@@ -12,6 +12,7 @@
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
+import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
 
 const BASE_INTERVAL_MIN = 10; // 基准间隔 10 分钟（freq=1）
@@ -73,7 +74,7 @@ async function tick() {
     // 对于 status='open' 且 half_time_notified=0 的事件，检查是否已经过半
     // 半程判断：expires_at - created_at = duration; now >= created_at + duration/2
     const halfTimeEvents = db.prepare(`
-      SELECT ce.*, c.display_name, c.base_prompt
+      SELECT ce.*, c.display_name, c.base_prompt, c.avatar_path
       FROM character_events ce
       JOIN characters c ON c.id = ce.character_id
       WHERE ce.status = 'open'
@@ -125,9 +126,23 @@ ${urgencyNote}
 
         // 插入主动聊天消息（和 proactiveChatScheduler 一样的逻辑）
         const conversationId = `char_${event.character_id}`;
-        db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
-        db.prepare(`INSERT INTO messages (conversation_id, role, content, seq, is_proactive) VALUES (?, 'assistant', ?, 0, 1)`).run(conversationId, greeting);
+        const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
+        const rawId = rawResult.lastInsertRowid;
+        const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`).run(conversationId, rawId, greeting);
+        const msgId = msgResult.lastInsertRowid;
         db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
+
+        // 走正常主动聊天 SSE 通道 → 前端播放提示音
+        broadcastProactiveMessage({
+          character_id: event.character_id,
+          display_name: event.display_name,
+          avatar_path: event.avatar_path || null,
+          content: greeting,
+          msg_id: msgId,
+          raw_id: rawId,
+          images: null,
+          created_at: new Date().toISOString(),
+        });
 
         broadcastEventUrgency({
           character_id: event.character_id,
