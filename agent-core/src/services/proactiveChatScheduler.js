@@ -24,6 +24,7 @@ import {
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
+import { splitText } from '../utils/sentenceSplitter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -408,11 +409,11 @@ ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}$
 // ── 写入主动消息 ──
 
 /**
- * 将角色的主动发起消息写入 DB
+ * 将角色的主动发起消息写入 DB（分句写入 messages 表）
  *
  * @param {object} character
  * @param {string} content - 消息文本
- * @returns {{ rawId: number, msgId: number }}
+ * @returns {{ rawId: number, firstMsgId: number, lastMsgId: number, msgIds: number[] }}
  */
 function writeProactiveMessage(character, content) {
   const db = getDb();
@@ -424,15 +425,29 @@ function writeProactiveMessage(character, content) {
   ).run(conversationId, content);
   const rawId = rawResult.lastInsertRowid;
 
-  // 写入 messages（分句展示，标记 is_proactive=1 以区分正常聊天）
-  const msgResult = db.prepare(
-    `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`
-  ).run(conversationId, rawId, content);
-  const msgId = msgResult.lastInsertRowid;
+  // 分句后逐条写入 messages，标记 is_proactive=1 以区分正常聊天
+  const segments = splitText(content);
+  // 兜底：如果分句结果为空（极其罕见），整段写入
+  if (segments.length === 0) {
+    const msgResult = db.prepare(
+      `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`
+    ).run(conversationId, rawId, content);
+    console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msg=${msgResult.lastInsertRowid} (fallback, no segments)`);
+    return { rawId, firstMsgId: msgResult.lastInsertRowid, lastMsgId: msgResult.lastInsertRowid, msgIds: [msgResult.lastInsertRowid] };
+  }
 
-  console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msg=${msgId}`);
+  const insertMsg = db.prepare(
+    `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, ?, 1)`
+  );
+  const msgIds = [];
+  for (let i = 0; i < segments.length; i++) {
+    const r = insertMsg.run(conversationId, rawId, segments[i], i);
+    msgIds.push(r.lastInsertRowid);
+  }
 
-  return { rawId, msgId };
+  console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msgs=${msgIds.length} segment(s)`);
+
+  return { rawId, firstMsgId: msgIds[0], lastMsgId: msgIds[msgIds.length - 1], msgIds };
 }
 
 // ── 主动聊天的配图生成 ──
@@ -679,21 +694,21 @@ async function tick() {
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
-    const { rawId, msgId } = writeProactiveMessage(candidate, greeting);
+    const { rawId, firstMsgId, lastMsgId } = writeProactiveMessage(candidate, greeting);
 
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     let imageUrls = null;
     if (motive.imageGen) {
-      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId, rawId);
+      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
     }
 
     broadcastProactiveMessage({
       character_id: candidate.id,
       display_name: candidate.display_name,
       avatar_path: candidate.avatar_path,
-      
+
       content: greeting,
-      msg_id: msgId,
+      msg_id: firstMsgId,
       raw_id: rawId,
       images: imageUrls || [],
       created_at: new Date().toISOString(),
@@ -927,7 +942,7 @@ export async function forceProactiveNow(targetCharacterId) {
   const userProfile = loadUserProfile();
   const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
-  const { rawId, msgId } = writeProactiveMessage(candidate, greeting);
+  const { rawId, firstMsgId, lastMsgId } = writeProactiveMessage(candidate, greeting);
 
   db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
     .run(streak + 1, candidate.id);
@@ -935,16 +950,16 @@ export async function forceProactiveNow(targetCharacterId) {
   // 如果需要配图，先生成图片再一起推送；否则直接推送
   let imageUrls = null;
   if (motive.imageGen) {
-    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, msgId, rawId);
+    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
   }
 
   broadcastProactiveMessage({
     character_id: candidate.id,
     display_name: candidate.display_name,
     avatar_path: candidate.avatar_path,
-    
+
     content: greeting,
-    msg_id: msgId,
+    msg_id: firstMsgId,
     raw_id: rawId,
     images: imageUrls || [],
     created_at: new Date().toISOString(),

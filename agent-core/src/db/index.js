@@ -344,6 +344,9 @@ function initSchema(db) {
   // 迁移: characters 表新增 events_disabled 列（奇遇系统）
   migrateEventsSchema(db);
 
+  // 迁移: 防打扰模式 — characters 表新增 dnd_original_state 列
+  migrateDisturbSchema(db);
+
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
@@ -463,6 +466,23 @@ function migrateEventsSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateEventsSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 防打扰模式 — characters 表新增 dnd_original_state 列
+ * 存储被 DND 覆盖前的原始状态 JSON: {"moments_disabled":0,"proactive_disabled":0,"events_disabled":0}
+ * NULL 表示该角色当前未被 DND 覆盖
+ */
+function migrateDisturbSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'dnd_original_state')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN dnd_original_state TEXT`);
+      console.log('[db] Added characters.dnd_original_state column');
+    }
+  } catch (err) {
+    console.log('[db] migrateDisturbSchema error:', err.message);
   }
 }
 
@@ -902,6 +922,7 @@ const SETTING_TO_CONFIG = {
   feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
   feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
   feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
+  feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
@@ -954,10 +975,27 @@ function loadSystemSettings(db) {
   let applied = 0;
   for (const row of rows) {
     const mapping = SETTING_TO_CONFIG[row.setting_key];
-    if (!mapping) continue;
-    const value = castValue(row.setting_value, mapping.type);
-    if (value !== undefined) {
-      config[mapping.obj][mapping.key] = value;
+    if (mapping) {
+      const value = castValue(row.setting_value, mapping.type);
+      if (value !== undefined) {
+        config[mapping.obj][mapping.key] = value;
+        applied++;
+      }
+      continue;
+    }
+    // 额外处理 disturb 配置（不在 SETTING_TO_CONFIG 映射中）
+    if (row.setting_key === 'disturb_start_time') {
+      config.disturb.startTime = row.setting_value;
+      applied++;
+    } else if (row.setting_key === 'disturb_end_time') {
+      config.disturb.endTime = row.setting_value;
+      applied++;
+    } else if (row.setting_key === 'disturb_character_ids') {
+      try {
+        config.disturb.characterIds = JSON.parse(row.setting_value);
+      } catch {
+        config.disturb.characterIds = [];
+      }
       applied++;
     }
   }

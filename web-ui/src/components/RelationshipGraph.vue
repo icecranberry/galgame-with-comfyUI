@@ -131,7 +131,6 @@ const existingRels = ref([])
 // ── Layout constants ──
 const CENTER_X = 540
 const CENTER_Y = 456
-const RADIUS = 336
 
 // ── Compute optimal source/target handles based on target position relative to center ──
 function computeHandles(targetPos) {
@@ -168,6 +167,7 @@ function isValidConnection(connection) {
 async function buildGraph() {
   const center = props.centerCharacter
   const others = props.allCharacters.filter(c => c.id !== center.id)
+  const radius = Math.max(336, Math.ceil(others.length * 16))
 
   // Build nodes synchronously first — show avatars immediately
   const graphNodes = []
@@ -193,8 +193,8 @@ async function buildGraph() {
   const angleStep = (2 * Math.PI) / Math.max(others.length, 1)
   others.forEach((c, i) => {
     const angle = i * angleStep - Math.PI / 2
-    const x = CENTER_X + RADIUS * Math.cos(angle) - 36
-    const y = CENTER_Y + RADIUS * Math.sin(angle) - 36
+    const x = CENTER_X + radius * Math.cos(angle) - 36
+    const y = CENTER_Y + radius * Math.sin(angle) - 36
     graphNodes.push({
       id: String(c.id),
       type: 'charNode',

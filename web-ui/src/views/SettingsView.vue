@@ -296,6 +296,24 @@
             <span class="freq-val">{{ eventFreqSlider.toFixed(1) }}</span>
           </div>
         </div>
+
+        <!-- 防打扰模式 -->
+        <div class="toggle-row">
+          <div style="flex:1">
+            <div class="tl">防打扰模式</div>
+            <div class="td">在指定时间段内自动禁用勾选角色的朋友圈、主动聊天和奇遇</div>
+          </div>
+          <div
+            v-if="disturbMode"
+            class="disturb-setup-btn"
+            title="防打扰设置"
+            @click="openDisturbDialog"
+          >⚙</div>
+          <label class="switch">
+            <input type="checkbox" v-model="disturbMode" @change="onDisturbModeToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- ComfyUI 连接 -->
@@ -406,11 +424,65 @@
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 防打扰模式设置弹窗 -->
+  <Teleport to="body">
+    <Transition name="disturb-dialog-fade">
+      <div v-if="disturbDialog.show" class="disturb-dialog-overlay" @click.self="cancelDisturbDialog">
+        <div class="disturb-dialog">
+          <div class="disturb-dialog-header">
+            <span>防打扰设置</span>
+            <button class="fav-dialog-close" @click="cancelDisturbDialog">✕</button>
+          </div>
+          <div class="disturb-dialog-body">
+            <!-- 时间段设置 -->
+            <div class="disturb-dialog-section">
+              <span class="disturb-dialog-label">⏰ 静默时段</span>
+              <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
+              <div class="disturb-time-row">
+                <input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
+                <span class="disturb-time-sep">—</span>
+                <input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
+              </div>
+            </div>
+
+            <!-- 角色选择 -->
+            <div class="disturb-dialog-section">
+              <span class="disturb-dialog-label">👤 适用角色</span>
+              <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
+              <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
+              <div v-else class="disturb-char-grid">
+                <label
+                  v-for="ch in allCharacters"
+                  :key="ch.id"
+                  class="disturb-char-chip"
+                  :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
+                  @click="toggleDisturbDialogChar(ch.id)"
+                >
+                  <img
+                    :src="ch.avatar_path || '/avatars/default_assistant_header.png'"
+                    class="disturb-char-avatar"
+                    @error="$event.target.src='/avatars/default_assistant_header.png'"
+                  />
+                  <span class="disturb-char-name">{{ ch.display_name }}</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="disturb-dialog-actions">
+              <button class="btn-ghost" @click="cancelDisturbDialog">取消</button>
+              <button class="btn-primary" @click="confirmDisturbDialog">保存设置</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, getArtistFavorites, addArtistFavorite, deleteArtistFavorite } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -443,6 +515,21 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+
+// ── 防打扰模式 ──
+const disturbMode = ref(false)
+const disturbStartTime = ref('22:00')
+const disturbEndTime = ref('08:00')
+const disturbCharacterIds = ref([])
+const allCharacters = ref([]) // 全部角色列表（含头像）
+
+// 弹窗状态（编辑期间使用独立副本，确认后才同步）
+const disturbDialog = reactive({
+  show: false,
+  startTime: '22:00',
+  endTime: '08:00',
+  characterIds: [],
+})
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
@@ -564,6 +651,13 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
+    // 防打扰模式
+    if (data.disturb) {
+      disturbMode.value = features.disturbMode ?? false
+      disturbStartTime.value = data.disturb.startTime || '22:00'
+      disturbEndTime.value = data.disturb.endTime || '08:00'
+      disturbCharacterIds.value = data.disturb.characterIds || []
+    }
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
@@ -638,6 +732,64 @@ async function onEventFreqChange() {
   const v = eventFreqSlider.value
   features.eventFreq = v
   try { await updateEventFreq(v) } catch { /* 非关键 */ }
+}
+
+// ── 防打扰模式 ──
+
+async function onDisturbModeToggle() {
+  try {
+    await updateDisturbMode(disturbMode.value)
+    features.disturbMode = disturbMode.value
+  } catch { /* 非关键 */ }
+}
+
+function openDisturbDialog() {
+  // 复制当前已保存的设置到弹窗副本
+  disturbDialog.startTime = disturbStartTime.value
+  disturbDialog.endTime = disturbEndTime.value
+  disturbDialog.characterIds = [...disturbCharacterIds.value]
+  disturbDialog.show = true
+  // 按需加载角色列表
+  if (allCharacters.value.length === 0) {
+    loadAllCharacters()
+  }
+}
+
+function cancelDisturbDialog() {
+  disturbDialog.show = false
+}
+
+async function confirmDisturbDialog() {
+  try {
+    await updateDisturbSettings({
+      startTime: disturbDialog.startTime,
+      endTime: disturbDialog.endTime,
+      characterIds: [...disturbDialog.characterIds],
+    })
+    // 同步到外层状态
+    disturbStartTime.value = disturbDialog.startTime
+    disturbEndTime.value = disturbDialog.endTime
+    disturbCharacterIds.value = [...disturbDialog.characterIds]
+    disturbDialog.show = false
+  } catch (err) {
+    console.error('[disturb] save failed:', err)
+  }
+}
+
+function toggleDisturbDialogChar(id) {
+  const idx = disturbDialog.characterIds.indexOf(id)
+  if (idx >= 0) {
+    disturbDialog.characterIds.splice(idx, 1)
+  } else {
+    disturbDialog.characterIds.push(id)
+  }
+}
+
+async function loadAllCharacters() {
+  try {
+    const data = await listCharacters()
+    allCharacters.value = data.characters || []
+  } catch { /* 非关键 */ }
 }
 
 async function checkHealth() { health.value = await comfyuiHealth() }
@@ -974,6 +1126,138 @@ function resetTestPrompts() {
 }
 .freq-val {
   font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
+}
+
+/* ── 防打扰模式 ── */
+.disturb-setup-btn {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid transparent;
+  cursor: pointer; transition: all 0.2s ease;
+  display: flex; align-items: center; justify-content: center;
+  margin-right: 6px; flex-shrink: 0;
+  font-size: 17px; line-height: 1;
+}
+.disturb-setup-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  transform: rotate(60deg);
+}
+
+/* ── 防打扰弹窗 ── */
+.disturb-dialog-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.disturb-dialog {
+  background: #fff;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
+  width: 640px; max-width: calc(100vw - 48px); max-height: 85vh;
+  overflow-y: auto; overflow-x: hidden;
+}
+/* PC 端圆角弹窗 */
+@media (min-width: 768px) {
+  .disturb-dialog { border-radius: 16px; }
+}
+/* 手机端全屏 */
+@media (max-width: 767px) {
+  .disturb-dialog {
+    width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh;
+    border-radius: 0;
+  }
+  .disturb-dialog-overlay { backdrop-filter: none; background: rgba(0, 0, 0, 0.5); }
+  .disturb-dialog-header { padding-top: 20px; }
+  .disturb-dialog-body { padding-bottom: 32px; }
+}
+.disturb-dialog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 0;
+  font-size: 16px; font-weight: 600; color: var(--text-bright);
+}
+.disturb-dialog-body { padding: 14px 22px 20px; }
+.disturb-dialog-section { margin-bottom: 18px; }
+.disturb-dialog-label {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.disturb-dialog-hint {
+  font-size: 12px; color: var(--text-secondary); margin: 4px 0 10px;
+}
+.disturb-time-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.disturb-time-input {
+  font-family: inherit;
+  padding: 8px 12px;
+  border: 1px solid #d5d0ca;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-bright);
+  font-size: 14px;
+  width: 130px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.disturb-time-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.disturb-time-sep { color: var(--text-secondary); }
+.disturb-no-chars {
+  font-size: 13px; color: var(--text-secondary); margin: 8px 0;
+}
+.disturb-char-grid {
+  display: flex; flex-wrap: wrap; gap: 10px;
+}
+.disturb-char-chip {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 12px; border-radius: 12px;
+  border: 2px solid transparent;
+  background: #f5f3ef;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  min-width: 70px;
+}
+.disturb-char-chip:hover {
+  border-color: #d5d0ca;
+  background: #eeebe5;
+}
+.disturb-char-chip.selected {
+  border-color: var(--accent);
+  background: rgba(224, 123, 108, 0.08);
+}
+.disturb-char-avatar {
+  width: 42px; height: 42px; border-radius: 50%; object-fit: cover;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+.disturb-char-chip.selected .disturb-char-avatar {
+  border-color: var(--accent);
+}
+.disturb-char-name {
+  font-size: 11px; color: var(--text-secondary); text-align: center;
+  max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.disturb-char-chip.selected .disturb-char-name {
+  color: var(--accent); font-weight: 500;
+}
+.disturb-dialog-actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+/* ── 弹窗过渡动画 ── */
+.disturb-dialog-fade-enter-active { transition: opacity 0.2s ease; }
+.disturb-dialog-fade-leave-active { transition: opacity 0.15s ease; }
+.disturb-dialog-fade-enter-active .disturb-dialog { animation: disturb-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+.disturb-dialog-fade-leave-active .disturb-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
+.disturb-dialog-fade-enter-from,
+.disturb-dialog-fade-leave-to { opacity: 0; }
+.disturb-dialog-fade-leave-to .disturb-dialog { transform: scale(0.95); opacity: 0; }
+
+@keyframes disturb-pop {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .sr { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }

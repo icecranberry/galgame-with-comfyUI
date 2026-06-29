@@ -74,7 +74,11 @@ export const useProactiveStore = defineStore('proactive', () => {
     if (_sseStarted.value) return
     _sseStarted.value = true
 
-    // 从后端恢复未读状态（DB 为单一数据源）
+    // 先订阅统一 SSE 流（必须在任何 await 之前，避免竞态窗口期内消息丢失）
+    const { onEvent } = await import('./unifiedStream.js')
+    _unsubProactive = onEvent('proactive_message', _onMessage)
+
+    // 从后端恢复未读状态（DB 为单一数据源，兜底 SSE 断开期间丢失的消息）
     try {
       const { unread } = await api.getProactiveUnread()
       if (unread?.length) {
@@ -88,10 +92,6 @@ export const useProactiveStore = defineStore('proactive', () => {
         latestMessages.value = msgs
       }
     } catch { /* 非关键 */ }
-
-    // 订阅统一 SSE 流的 proactive_message 事件
-    const { onEvent } = await import('./unifiedStream.js')
-    _unsubProactive = onEvent('proactive_message', _onMessage)
 
     _startReconnectTimer()
   }

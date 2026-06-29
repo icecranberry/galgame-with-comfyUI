@@ -249,6 +249,22 @@ export async function updateEventFreq(value) {
   })
 }
 
+/** 更新防打扰模式总开关 */
+export async function updateDisturbMode(value) {
+  const res = await fetch(`${BASE}/config/disturb-mode`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+  return res.json()
+}
+
+/** 更新防打扰时间段和角色列表 */
+export async function updateDisturbSettings(data) {
+  const res = await fetch(`${BASE}/config/disturb-settings`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
 export async function updateLlmConfig(data) {
   const res = await fetch(`${BASE}/config/llm`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -711,6 +727,7 @@ export function connectUnifiedStream(handlers = {}, { onClose } = {}) {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let eventType = ''
 
       while (true) {
         let done, value
@@ -721,7 +738,6 @@ export function connectUnifiedStream(handlers = {}, { onClose } = {}) {
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
-        let eventType = ''
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             eventType = line.slice(7).trim()
@@ -766,6 +782,7 @@ export function connectEventsStream(handlers = {}) {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let eventType = ''
 
       while (true) {
         let done, value
@@ -776,7 +793,6 @@ export function connectEventsStream(handlers = {}) {
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
-        let eventType = ''
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             eventType = line.slice(7).trim()

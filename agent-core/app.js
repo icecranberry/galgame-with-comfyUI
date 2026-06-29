@@ -19,6 +19,7 @@ import streamRoutes from './src/routes/stream.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 import { startEventScheduler } from './src/services/eventScheduler.js';
+import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
 
 const app = express();
 
@@ -77,6 +78,9 @@ startProactiveChatScheduler();
 
 // 启动奇遇事件调度器（由 config.features.events 控制开关，scheduler 内部自行判断）
 startEventScheduler();
+
+// 启动防打扰模式调度器（由 config.features.disturbMode 控制开关，scheduler 内部自行判断）
+startDisturbScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

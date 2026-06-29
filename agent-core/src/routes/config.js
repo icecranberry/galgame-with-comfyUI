@@ -2,11 +2,12 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings } from '../config.js';
 import { getDb } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
+import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 
 const router = Router();
 
@@ -24,6 +25,11 @@ router.get('/', (req, res) => {
     },
     features: config.features,
     llm: getLlmConfig(),
+    disturb: {
+      startTime: config.disturb.startTime,
+      endTime: config.disturb.endTime,
+      characterIds: config.disturb.characterIds || [],
+    },
   });
 });
 
@@ -221,6 +227,45 @@ router.delete('/artist-favorites/:id', (req, res) => {
   }
   db.prepare(`DELETE FROM artist_favorites WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
+});
+
+// ── 防打扰模式 ──
+
+// PUT /api/config/disturb-mode — 更新防打扰模式总开关
+router.put('/disturb-mode', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'boolean') {
+    return res.status(400).json({ error: 'value must be boolean' });
+  }
+  updateDisturbMode(value);
+  // 总开关变更后立即触发一次检测
+  triggerDisturbCheck();
+  res.json({ ok: true, disturbMode: config.features.disturbMode });
+});
+
+// PUT /api/config/disturb-settings — 更新防打扰时间段和角色列表
+router.put('/disturb-settings', (req, res) => {
+  const { startTime, endTime, characterIds } = req.body;
+  if (startTime !== undefined && !/^\d{2}:\d{2}$/.test(startTime)) {
+    return res.status(400).json({ error: 'startTime must be HH:MM format' });
+  }
+  if (endTime !== undefined && !/^\d{2}:\d{2}$/.test(endTime)) {
+    return res.status(400).json({ error: 'endTime must be HH:MM format' });
+  }
+  if (characterIds !== undefined && !Array.isArray(characterIds)) {
+    return res.status(400).json({ error: 'characterIds must be an array' });
+  }
+  updateDisturbSettings({ startTime, endTime, characterIds });
+  // 设置变更后立即触发一次检测
+  triggerDisturbCheck();
+  res.json({
+    ok: true,
+    disturb: {
+      startTime: config.disturb.startTime,
+      endTime: config.disturb.endTime,
+      characterIds: config.disturb.characterIds || [],
+    },
+  });
 });
 
 // POST /api/config/rules/:key/reset — 重置单条全局规则为默认值

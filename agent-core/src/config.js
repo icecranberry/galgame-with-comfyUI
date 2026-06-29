@@ -41,6 +41,12 @@ export const config = {
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
+    disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
+  },
+  disturb: {
+    startTime: process.env.DISTURB_START_TIME || '22:00',
+    endTime: process.env.DISTURB_END_TIME || '08:00',
+    characterIds: [], // 内存中缓存，启动时从 DB 加载
   },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',
@@ -176,6 +182,35 @@ export function updateUserConfig({ nickname, gender, appearance, persona }) {
     persistSettingSync('user_persona', persona);
   }
   console.log('[config] User settings saved');
+}
+
+/**
+ * 更新防打扰模式总开关
+ */
+export function updateDisturbMode(value) {
+  const boolVal = value === true || value === 'true';
+  config.features.disturbMode = boolVal;
+  persistSettingSync('feature_disturbMode', String(boolVal));
+  console.log(`[config] disturbMode = ${boolVal}`);
+}
+
+/**
+ * 更新防打扰时间段和角色列表
+ */
+export function updateDisturbSettings({ startTime, endTime, characterIds }) {
+  if (startTime !== undefined) {
+    config.disturb.startTime = startTime;
+    persistSettingSync('disturb_start_time', startTime);
+  }
+  if (endTime !== undefined) {
+    config.disturb.endTime = endTime;
+    persistSettingSync('disturb_end_time', endTime);
+  }
+  if (characterIds !== undefined) {
+    config.disturb.characterIds = characterIds;
+    persistSettingSync('disturb_character_ids', JSON.stringify(characterIds));
+  }
+  console.log('[config] disturb settings saved');
 }
 
 export function getUserConfig() {

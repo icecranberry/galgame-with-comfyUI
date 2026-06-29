@@ -14,6 +14,7 @@ import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
+import { splitText } from '../utils/sentenceSplitter.js';
 
 const BASE_INTERVAL_MIN = 10; // 基准间隔 10 分钟（freq=1）
 
@@ -124,12 +125,27 @@ ${urgencyNote}
           { role: 'user', content: greetingPrompt },
         ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
 
-        // 插入主动聊天消息（和 proactiveChatScheduler 一样的逻辑）
+        // 写入消息（分句）
         const conversationId = `char_${event.character_id}`;
         const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
         const rawId = rawResult.lastInsertRowid;
-        const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`).run(conversationId, rawId, greeting);
-        const msgId = msgResult.lastInsertRowid;
+
+        const segments = splitText(greeting);
+        let firstMsgId;
+        if (segments.length === 0) {
+          const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`)
+            .run(conversationId, rawId, greeting);
+          firstMsgId = r.lastInsertRowid;
+        } else {
+          const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, ?, 1)`);
+          for (let i = 0; i < segments.length; i++) {
+            const r = insertMsg.run(conversationId, rawId, segments[i], i);
+            if (i === 0) firstMsgId = r.lastInsertRowid;
+          }
+        }
+
+        // 奇遇紧急联络也递增 proactive_streak（和正常主动聊天一致），
+        // 使 streak 累积后能限制正常主动聊天，但奇遇本身的紧急联络不受 streak 限制
         db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
 
         // 走正常主动聊天 SSE 通道 → 前端播放提示音
@@ -138,7 +154,7 @@ ${urgencyNote}
           display_name: event.display_name,
           avatar_path: event.avatar_path || null,
           content: greeting,
-          msg_id: msgId,
+          msg_id: firstMsgId,
           raw_id: rawId,
           images: null,
           created_at: new Date().toISOString(),
