@@ -183,7 +183,7 @@ router.get('/characters/:id/messages', (req, res) => {
   const conversationId = convId(req.params.id);
 
   const messages = db.prepare(`
-    SELECT id, conversation_id, raw_id, role, content, images, created_at
+    SELECT id, conversation_id, raw_id, role, content, images, created_at, event_id
     FROM messages
     WHERE conversation_id = ?
     ORDER BY id ASC

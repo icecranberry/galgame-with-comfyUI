@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
     const convId = `char_${c.id}`;
     const last = db.prepare(`
       SELECT role, content, created_at FROM messages
-      WHERE conversation_id = ?
+      WHERE conversation_id = ? AND raw_id IS NOT NULL
       ORDER BY id DESC LIMIT 1
     `).get(convId);
 

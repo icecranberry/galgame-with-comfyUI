@@ -55,6 +55,21 @@ export const useChatStore = defineStore('chat', () => {
       // 清除历史消息中残留的 <br> 气泡分割标记，跳过清理后为空的消息
       const content = msg.content?.replace(/<br\s*\/?>/gi, '').trim();
       if (!content) continue;   // 跳过空气泡（buggy 版本遗留的空 DB 记录）
+
+      // 奇遇分享卡片：raw_id 为 null 且 event_id 不为 null
+      if (msg.raw_id === null && msg.event_id != null) {
+        let eventData = null;
+        try { eventData = JSON.parse(msg.content); } catch {}
+        result.push({
+          ...msg,
+          content: msg.content,
+          type: 'event_card',
+          eventId: msg.event_id,
+          eventData,
+        });
+        continue;
+      }
+
       result.push({ ...msg, content, type: msg.type || 'text' });
       if (msg.role === 'assistant' && msg.images) {
         try {
@@ -557,6 +572,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // 如果是当前活跃角色，直接追加消息到聊天界面
     if (activeCharId.value === charId && data.msg_id) {
+      // 文字问候气泡
       messages.value.push({
         id: data.msg_id,
         role: 'assistant',
@@ -564,6 +580,27 @@ export const useChatStore = defineStore('chat', () => {
         content: data.content,
         created_at: data.created_at,
       })
+
+      // 奇遇分享卡片气泡（如果有）
+      if (data.card_msg_id) {
+        messages.value.push({
+          id: data.card_msg_id,
+          role: 'assistant',
+          type: 'event_card',
+          eventId: data.event_id,
+          eventData: {
+            title: data.event_title,
+            description: data.event_description,
+            image: data.event_image,
+            expires_at: data.event_expires_at,
+            character_id: data.character_id,
+            display_name: data.display_name,
+            avatar_path: data.avatar_path,
+          },
+          content: '',
+          created_at: data.created_at,
+        })
+      }
     }
   }
 

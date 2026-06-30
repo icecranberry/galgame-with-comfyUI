@@ -133,15 +133,34 @@ ${urgencyNote}
         const segments = splitText(greeting);
         let firstMsgId;
         if (segments.length === 0) {
-          const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`)
-            .run(conversationId, rawId, greeting);
+          const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, 0, 1, ?)`)
+            .run(conversationId, rawId, greeting, event.id);
           firstMsgId = r.lastInsertRowid;
         } else {
-          const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, ?, 1)`);
+          const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, ?, 1, ?)`);
           for (let i = 0; i < segments.length; i++) {
-            const r = insertMsg.run(conversationId, rawId, segments[i], i);
+            const r = insertMsg.run(conversationId, rawId, segments[i], i, event.id);
             if (i === 0) firstMsgId = r.lastInsertRowid;
           }
+        }
+
+        // 奇遇分享卡片气泡（只写 messages，不污染 raw_messages）
+        // content 存事件快照 JSON 用于离线/历史恢复
+        const cardSnapshot = JSON.stringify({
+          title: event.title,
+          description: event.description,
+          image: event.image || null,
+          expires_at: event.expires_at,
+        });
+        let cardMsgId = null;
+        try {
+          const cardSeq = segments.length > 0 ? segments.length : 1;
+          const cardResult = db.prepare(
+            `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, NULL, 'assistant', ?, ?, 1, ?)`
+          ).run(conversationId, cardSnapshot, cardSeq, event.id);
+          cardMsgId = cardResult.lastInsertRowid;
+        } catch (err) {
+          console.error(`[eventScheduler] Failed to write event card message:`, err.message);
         }
 
         // 奇遇紧急联络也递增 proactive_streak（和正常主动聊天一致），
@@ -158,6 +177,13 @@ ${urgencyNote}
           raw_id: rawId,
           images: null,
           created_at: new Date().toISOString(),
+          // 奇遇分享卡片
+          card_msg_id: cardMsgId,
+          event_id: event.id,
+          event_title: event.title,
+          event_description: event.description,
+          event_image: event.image || null,
+          event_expires_at: event.expires_at,
         });
 
         broadcastEventUrgency({

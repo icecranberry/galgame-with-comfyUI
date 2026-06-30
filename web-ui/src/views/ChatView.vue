@@ -52,6 +52,17 @@
             <!-- 时间分隔符 -->
             <div v-if="item.type === 'divider'" class="time-divider">{{ item.label }}</div>
 
+            <!-- Event share card (奇遇分享卡片) -->
+            <div v-else-if="item.msg.type === 'event_card'" class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
+              <div class="msg-avatar clickable" :style="agentAvatarStyle" title="角色设置" @click="openSettings()">
+                <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
+              </div>
+              <EventShareCard
+                :msg="item.msg"
+                @open-detail="onOpenEventDetail"
+              />
+            </div>
+
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
               <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
@@ -554,6 +565,15 @@
       @save="onAgentAvatarSave"
       @switch-to-recent="switchToRecent"
     />
+
+    <!-- 奇遇事件详情覆盖层（从分享卡片触发） -->
+    <EventCard
+      v-if="detailEvent"
+      :key="detailEventKey"
+      :event="detailEvent"
+      :initial-open="true"
+      @updated="onDetailEventUpdated"
+    />
   </div>
 </template>
 
@@ -562,6 +582,8 @@ import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted, injec
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import EventShareCard from '../components/EventShareCard.vue'
+import EventCard from '../components/EventCard.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import GiftPanel from '../components/GiftPanel.vue'
@@ -571,16 +593,59 @@ import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
+import { useEventsStore } from '../stores/events.js'
 
 const route = useRoute()
 const router = useRouter()
 const chat = useChatStore()
+const eventsStore = useEventsStore()
 const confirmFn = inject('confirm')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
 const inputFocused = ref(false)
+
+// ── 奇遇分享卡片 → 详情覆盖层 ──
+const detailEvent = ref(null)
+const detailEventKey = ref(0)  // 递增以强制 EventCard 重新挂载（重新触发 initialOpen）
+
+async function onOpenEventDetail(eventId) {
+  if (eventId == null) {
+    console.warn('[ChatView] onOpenEventDetail called with null/undefined eventId')
+    return
+  }
+  // 优先从 store 获取（活跃事件、实时数据）
+  const evt = eventsStore.activeEvents.find(e => e.id === eventId) || null
+  if (evt) {
+    detailEvent.value = evt
+    detailEventKey.value++
+    console.log('[ChatView] Event detail opened from store:', eventId, evt.title)
+    return
+  }
+  // 回退到 API（历史事件或 store 未同步）
+  console.log('[ChatView] Event not in store, fetching from API:', eventId)
+  const data = await api.getEventById(eventId)
+  if (data) {
+    // 确保历史事件有正确的过期标记
+    if (data.ended_at && !data.expires_at) {
+      data.expires_at = data.ended_at
+    }
+    detailEvent.value = data
+    detailEventKey.value++
+  } else {
+    console.warn('[ChatView] Event not found via API either:', eventId)
+  }
+}
+
+function onDetailEventUpdated(update) {
+  // EventCard emit 的事件更新（分支选择完成/事件结束等）
+  if (update?.concluded || update?.expired) {
+    detailEvent.value = null
+  } else if (update?.event) {
+    detailEvent.value = update.event
+  }
+}
 const settings = useSettingsStore()
 const forceImageGen = computed(() => settings.forceImageGen)
 const realtimeAffinityEnabled = computed({

@@ -232,7 +232,7 @@ export async function generateEvent(character, options = {}) {
     eventType = {
       key: 'custom',
       name: '自定义事件',
-      durationMin: 60,
+      durationMin: 5,
       urgency: 1,
       desc: options.customPrompt,
     };
@@ -804,11 +804,12 @@ ${historyText}
     console.error(`[eventGen] Memory save failed:`, memErr.message);
   }
 
-  // 3. 移到 event_history
+  // 3. 移到 event_history（保留原始 ID，确保分享卡片等引用不失效）
   db.prepare(`
-    INSERT INTO event_history (character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    event.id,
     character.id, event.event_type_key,
     event.title, event.description, event.image,
     conclusionData.summary,

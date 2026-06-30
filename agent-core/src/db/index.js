@@ -551,6 +551,11 @@ function migrateProactiveSchema(db) {
       db.exec(`ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0`);
       console.log('[db] Added messages.is_proactive column (default 0)');
     }
+    // messages 表：event_id 关联奇遇事件（仅分句展示表，不污染 raw_messages）
+    if (!msgCols.find(c => c.name === 'event_id')) {
+      db.exec(`ALTER TABLE messages ADD COLUMN event_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added messages.event_id column (nullable, no FK)');
+    }
   } catch (err) {
     console.log('[db] migrateProactiveSchema error:', err.message);
   }

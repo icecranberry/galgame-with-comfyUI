@@ -53,26 +53,13 @@ def _assets_dir() -> str:
 
 
 def _clean_stale_artifacts(project_path: str, log_page=None):
-    """清理旧版本残留的构建产物，确保新版本强制重新构建。
+    """清理旧版本残留的构建产物。
 
-    git checkout --force 在 shallow clone 中不会正确清理所有文件，
-    Vite 的 emptyOutDir 也因为 skip_if 可能被跳过。这里显式删除：
-    - agent-core/public/ （前端构建输出，含旧版本 hash 的 JS/CSS）
+    agent-core/public/ 已纳入 Git 追踪，git checkout --force 会自动替换，
+    无需手动清理。
     """
-    import shutil
-
-    targets = [
-        os.path.join(project_path, "agent-core", "public"),
-    ]
-    for target in targets:
-        if os.path.isdir(target):
-            try:
-                shutil.rmtree(target)
-                if log_page:
-                    log_page.append_log(f"已清理: {os.path.relpath(target, project_path)}")
-            except OSError as e:
-                if log_page:
-                    log_page.append_log(f"[WARN] 清理 {os.path.relpath(target, project_path)} 失败: {e}")
+    # 当前无需要清理的产物。保留函数体以便将来扩展。
+    pass
 
 
 class Toast(QWidget):

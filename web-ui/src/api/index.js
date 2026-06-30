@@ -641,6 +641,12 @@ export async function getActiveEvent(characterId) {
   return res.json()
 }
 
+export async function getEventById(eventId) {
+  const res = await fetch(`${BASE}/events/by-id/${eventId}`)
+  if (!res.ok) return null
+  return res.json()
+}
+
 export async function chooseEventOption(eventId, choice, customText) {
   // 120s 超时：LLM (~15s) + ComfyUI 生图 (~90s) 的总耗时上限
   // 避免请求无限挂起耗尽浏览器 HTTP/1.1 连接池（6 连接限制 + 3 SSE = 仅剩 3 可用）

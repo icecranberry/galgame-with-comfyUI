@@ -137,6 +137,47 @@ router.get('/active/:characterId', (req, res) => {
   });
 });
 
+// GET /api/events/by-id/:id — 按 ID 查询事件（活跃表优先，回退历史表）
+// 用于聊天中历史分享卡片还原
+router.get('/by-id/:id', (req, res) => {
+  const db = getDb();
+  const id = req.params.id;
+
+  // 先查活跃事件
+  let event = db.prepare(`
+    SELECT ce.*, c.display_name, c.avatar_path
+    FROM character_events ce
+    JOIN characters c ON c.id = ce.character_id
+    WHERE ce.id = ?
+  `).get(id);
+
+  if (!event) {
+    // 回退到历史事件（注意：event_history 图片列名是 final_image）
+    event = db.prepare(`
+      SELECT eh.*, eh.final_image AS image, c.display_name, c.avatar_path
+      FROM event_history eh
+      JOIN characters c ON c.id = eh.character_id
+      WHERE eh.id = ?
+    `).get(id);
+  }
+
+  if (!event) {
+    return res.status(404).json({ error: 'event_not_found' });
+  }
+
+  // 历史事件表没有 expires_at，用 ended_at 代替，确保前端能正确识别为已过期
+  const expiresAt = event.expires_at || (event.ended_at || null);
+
+  res.json({
+    ...event,
+    choice_history: JSON.parse(event.choice_history || '[]'),
+    created_at: toISO(event.created_at),
+    expires_at: toISO(expiresAt),
+    ended_at: event.ended_at ? toISO(event.ended_at) : null,
+    last_interaction_at: event.last_interaction_at ? toISO(event.last_interaction_at) : null,
+  });
+});
+
 // POST /api/events/:id/choose — 选择选项 (A/B/C)
 router.post('/:id/choose', async (req, res) => {
   const db = getDb();
@@ -216,11 +257,12 @@ router.post('/:id/dismiss', async (req, res) => {
     return res.status(404).json({ error: 'event_not_found' });
   }
 
-  // 移到 history（不生成结局，不存记忆）
+  // 移到 history（不生成结局，不存记忆；保留原始 ID）
   db.prepare(`
-    INSERT INTO event_history (character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')
   `).run(
+    event.id,
     event.character_id, event.event_type_key,
     event.title, event.description, event.image,
     event.summary || event.description,

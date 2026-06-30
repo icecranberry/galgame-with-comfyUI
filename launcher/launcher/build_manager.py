@@ -346,11 +346,10 @@ class BuildManager(QObject):
         step = self._steps[self._current_idx]
         force = getattr(self, "_force", False)
 
-        # 跳过条件：force 模式下只有非关键步骤才允许跳过
-        # 关键步骤（npm install ×2 + vite build）在 force 时必须执行
-        _force_steps = {"安装 agent-core 依赖", "安装 web-ui 依赖", "构建前端 (vite build)"}
+        # 跳过条件：force 模式下所有步骤都必须执行，不允许跳过
+        # 版本切换后 node_modules 可能为旧版本，仅凭存在性无法判断是否匹配新的 package.json
         skip_if = step.get("skip_if")
-        if skip_if and skip_if() and not (force and step["name"] in _force_steps):
+        if skip_if and skip_if() and not force:
             self.output.emit(f"跳过: {step['name']} (已存在)")
             self._run_next_step()
             return

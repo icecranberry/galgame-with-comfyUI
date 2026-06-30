@@ -1,6 +1,6 @@
 <template>
-  <!-- ═══ 预览卡片（列表用）═══ -->
-  <div class="event-preview" :class="{ 'is-expired': isExpired, 'is-compact': compact, 'is-engaged': compact && event.engaged }" @click="openDetail">
+  <!-- ═══ 预览卡片（列表用）。initialOpen 模式不渲染预览，直接进详情 ═══ -->
+  <div v-if="!initialOpen" class="event-preview" :class="{ 'is-expired': isExpired, 'is-compact': compact, 'is-engaged': compact && event.engaged }" @click="openDetail">
     <!-- 倒计时进度条（最上方，compact 模式隐藏） -->
     <div v-if="!compact" class="countdown-bar-wrap">
       <div class="countdown-bar" :style="{ width: progressPercent + '%' }" :class="barColorClass"></div>
@@ -160,6 +160,7 @@ const props = defineProps({
   event: { type: Object, required: true },
   conclusion: { type: String, default: '' },
   compact: { type: Boolean, default: false },
+  initialOpen: { type: Boolean, default: false },
 })
 const emit = defineEmits(['updated'])
 const store = useEventsStore()
@@ -174,7 +175,10 @@ const showMenu = ref(false)
 // ── 倒计时 ──
 const now = ref(Date.now())
 let timer = null
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
+onMounted(() => {
+  timer = setInterval(() => { now.value = Date.now() }, 1000)
+  if (props.initialOpen) openDetail()
+})
 onUnmounted(() => { if (timer) clearInterval(timer) })
 
 const expiresAt = computed(() => props.event.expires_at ? new Date(props.event.expires_at) : null)
