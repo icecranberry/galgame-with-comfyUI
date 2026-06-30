@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRulesWithWorld } from '../db/index.js';
+import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
@@ -438,7 +438,15 @@ async function generateMomentPost(character) {
   }
 
   // 3. LLM 生成文案 + 配图提示词
-  const permissionPrompt = getSystemRulesWithWorld();
+  const worldSetting = getWorldSetting();
+  const permissionPrompt = worldSetting
+    ? getSystemRulesWithWorld()
+    : getSystemRules();
+  const worldIntegrationNote = worldSetting
+    ? `<world_integration priority="highest">
+上述世界观设定是最高优先级的创作框架。朋友圈帖子的内容、角色的行为方式和互动模式、环境细节的描写，都必须在这个世界观的框架下自然展开。世界观不是背景说明，是地基。
+</world_integration>`
+    : null;
 
   const multiPersonImageNote = multiPerson ? `
 - **多人画面**：imagePrompt 中必须包含你和${multiPerson.otherName}两个人。你们的互动方式、肢体距离、表情和氛围都要贴合你们的关系（例如亲密的伴侣会有更近的距离和更私密的场景）。描述清楚各自的外观、位置、互动动作` : '';
@@ -472,8 +480,9 @@ async function generateMomentPost(character) {
     ? `${timeTag} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
     : `${timeTag} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
 
-  // msgs[0] 舞台 → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
+  // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
+  if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: character.base_prompt });
   if (multiPerson) {
     msgs.push({
@@ -639,7 +648,15 @@ async function generateCharacterReply(post, historyComments) {
   }
 
   // 权限层
-  const permissionPrompt = getSystemRulesWithWorld();
+  const worldSettingReply = getWorldSetting();
+  const permissionPrompt = worldSettingReply
+    ? getSystemRulesWithWorld()
+    : getSystemRules();
+  const worldIntegrationNoteReply = worldSettingReply
+    ? `<world_integration priority="highest">
+上述世界观设定是最高优先级的创作框架。角色在回复评论时的行为方式、语言风格、互动模式，都必须在这个世界观的框架下自然展开。世界观不是背景说明，是地基。
+</world_integration>`
+    : null;
 
   // 加载情绪状态 + 好感度（提前，用于 msgs[1] 和 msgs[2]）
   let emotionPrompt = '';
@@ -677,8 +694,9 @@ ${commentHistory}
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
 - 本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。`;
 
-  // msgs[0] 舞台 → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
+  // msgs[0] 舞台 → [世界观] → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
+  if (worldIntegrationNoteReply) msgs.push({ role: 'system', content: worldIntegrationNoteReply });
 
   // msgs[1] — 角色：人格 + 情绪
   const charContent = [post.base_prompt, emotionPrompt].filter(Boolean).join('\n\n');

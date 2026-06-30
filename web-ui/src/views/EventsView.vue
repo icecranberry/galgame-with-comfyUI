@@ -42,7 +42,7 @@
               🎲 随机奇遇
             </button>
             <button class="btn-custom" @click="confirmGenerate(true)" :disabled="stirring || !customEventText.trim()">
-              🎬 开始推演
+              开始推演
             </button>
           </div>
         </div>

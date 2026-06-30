@@ -844,8 +844,36 @@ export function getActiveGlobalRules() {
   return rules.map(r => r.rule_content).join('\n\n');
 }
 
-/** 获取世界观（独立消息注入，不拼入全局规则） */
+/** 判断当前时间是否在指定时间段内（24 小时制，支持跨午夜） */
+function isInDisturbTimeRange(now, startTime, endTime) {
+  const toMinutes = (hhmm) => {
+    const parts = String(hhmm).split(':');
+    return parseInt(parts[0], 10) * 60 + (parseInt(parts[1], 10) || 0);
+  };
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const startMin = toMinutes(startTime);
+  const endMin = toMinutes(endTime);
+  if (startMin <= endMin) {
+    return nowMin >= startMin && nowMin < endMin;
+  } else {
+    return nowMin >= startMin || nowMin < endMin;
+  }
+}
+
+/** 获取世界观（独立消息注入，不拼入全局规则）
+ *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值 */
 export function getWorldSetting() {
+  // 防打扰隐藏世界观：不改 DB，仅在 prompt 构建时返回 null
+  if (config.features.disturbMode && config.disturb.hideWorld) {
+    const now = new Date();
+    if (isInDisturbTimeRange(now, config.disturb.startTime, config.disturb.endTime)) {
+      // 跳过周末：周六(6) / 周日(0)
+      if (!config.disturb.skipWeekends || (now.getDay() !== 0 && now.getDay() !== 6)) {
+        return null;
+      }
+    }
+  }
+
   const world = getGlobalRule('world_setting');
   if (world?.rule_content && world.is_active) {
     return world.rule_content;
@@ -1001,6 +1029,12 @@ function loadSystemSettings(db) {
       } catch {
         config.disturb.characterIds = [];
       }
+      applied++;
+    } else if (row.setting_key === 'disturb_hide_world') {
+      config.disturb.hideWorld = row.setting_value === 'true' || row.setting_value === '1';
+      applied++;
+    } else if (row.setting_key === 'disturb_skip_weekends') {
+      config.disturb.skipWeekends = row.setting_value === 'true' || row.setting_value === '1';
       applied++;
     }
   }

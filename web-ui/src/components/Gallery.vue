@@ -40,7 +40,7 @@
       <span v-if="loadingMore">加载中...</span>
       <span v-else>上滑加载更多</span>
     </div>
-    <div v-else-if="!hasMore && images.length > 0" class="load-more">— 共 {{ images.length }} 张 —</div>
+    <div v-else-if="!hasMore && images.length > 0" class="load-more">— 共 {{ total }} 张 —</div>
 
     <!-- 图片预览 Lightbox -->
     <VueEasyLightbox
@@ -61,17 +61,20 @@ import { listGalleryImages } from '../api/index.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 
+const PAGE_SIZE = 60
+
 const emit = defineEmits(['loaded'])
 
-const images = ref([])
+const images = ref([])          // 已加载的全部图片（累积）
+const total = ref(0)
+const hasMore = ref(false)
 const loading = ref(true)
 const loadingMore = ref(false)
-const visibleDays = ref(2)  // 初始只展示 2 组（今天 + 昨天）
 const lightboxVisible = ref(false)
 const lightboxIndex = ref(0)
 const scrollContainer = ref(null)
 
-// 将所有图片按天分组（全部数据，仅内存操作）
+// 将所有已加载图片按天分组
 const allDayGroups = computed(() => {
   if (images.value.length === 0) return []
 
@@ -80,7 +83,7 @@ const allDayGroups = computed(() => {
   const yesterdayStart = todayStart - 86400000
   const thisYear = now.getFullYear()
 
-  const map = new Map()  // key: dayStart (ms), value: { label, images }
+  const map = new Map()
 
   for (const img of images.value) {
     const d = new Date(img.mtime)
@@ -107,26 +110,26 @@ const allDayGroups = computed(() => {
     map.get(dayStart).images.push(img)
   }
 
-  // 按 dayStart 倒序排列（最新在前）
   return [...map.values()].sort((a, b) => b.dayStart - a.dayStart)
 })
 
-// 当前可见的分组
-const visibleDayGroups = computed(() => {
-  const groups = allDayGroups.value.slice(0, visibleDays.value)
-
-  // 为每张图片嵌入 flatIndex，供 lightbox 定位
+// 为每张图片嵌入 flatIndex，供 lightbox 定位
+const allFlatImages = computed(() => {
   let idx = 0
-  for (const group of groups) {
+  const result = []
+  for (const group of allDayGroups.value) {
     for (const img of group.images) {
       img.flatIndex = idx++
     }
+    result.push(group)
   }
-
-  return groups
+  return result
 })
 
-// 可见图片的 URL 扁平数组，供 lightbox 使用
+// 可见分组（全部，因为已经分页加载了）
+const visibleDayGroups = computed(() => allFlatImages.value)
+
+// 可见图片 URL 扁平数组，供 lightbox 使用
 const lightboxImgs = computed(() => {
   const urls = []
   for (const group of visibleDayGroups.value) {
@@ -137,36 +140,49 @@ const lightboxImgs = computed(() => {
   return urls
 })
 
-const hasMore = computed(() => visibleDays.value < allDayGroups.value.length)
-
 function onPreview(flatIndex) {
   lightboxIndex.value = flatIndex
   lightboxVisible.value = true
 }
 
+// 加载下一页
+async function loadPage(offset) {
+  try {
+    const data = await listGalleryImages(PAGE_SIZE, offset)
+    if (offset === 0) {
+      // 首页：替换全部数据
+      images.value = data.images || []
+    } else {
+      // 增量追加
+      images.value.push(...(data.images || []))
+    }
+    total.value = data.total || images.value.length
+    hasMore.value = data.hasMore ?? false
+    emit('loaded', total.value)
+  } catch (err) {
+    console.error('[gallery] load images error:', err)
+  }
+}
+
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  await loadPage(images.value.length)
+  loadingMore.value = false
+}
+
 function onScroll() {
   const el = scrollContainer.value
   if (!el || loadingMore.value || !hasMore.value) return
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
-    loadingMore.value = true
-    // 延迟一小段让用户感知加载过程
-    setTimeout(() => {
-      visibleDays.value = Math.min(visibleDays.value + 2, allDayGroups.value.length)
-      loadingMore.value = false
-    }, 200)
+  // 距底部 300px 时触发加载
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
+    loadMore()
   }
 }
 
 onMounted(async () => {
-  try {
-    const data = await listGalleryImages()
-    images.value = data.images || []
-    emit('loaded', images.value.length)
-  } catch (err) {
-    console.error('[gallery] load images error:', err)
-  } finally {
-    loading.value = false
-  }
+  await loadPage(0)
+  loading.value = false
 })
 </script>
 

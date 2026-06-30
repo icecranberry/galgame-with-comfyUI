@@ -594,8 +594,8 @@ export async function resetGiftCooldowns() {
 }
 
 // ── Gallery 相册 ──
-export async function listGalleryImages() {
-  const res = await fetch(`${BASE}/images/gallery`)
+export async function listGalleryImages(limit = 100, offset = 0) {
+  const res = await fetch(`${BASE}/images/gallery?limit=${limit}&offset=${offset}`)
   return res.json()
 }
 

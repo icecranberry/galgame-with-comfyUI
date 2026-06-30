@@ -189,9 +189,14 @@ function checkAndApply() {
     const db = getDb();
     const now = new Date();
     const inRange = isInTimeRange(now, config.disturb.startTime, config.disturb.endTime);
+
+    // 跳过周末：周六(6) / 周日(0)
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const effectiveInRange = inRange && !(config.disturb.skipWeekends && isWeekend);
+
     const characterIds = config.disturb.characterIds || [];
 
-    if (inRange) {
+    if (effectiveInRange) {
       applyDnd(db, characterIds);
     } else {
       removeDnd(db);

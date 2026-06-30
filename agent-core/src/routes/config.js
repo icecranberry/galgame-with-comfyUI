@@ -29,6 +29,8 @@ router.get('/', (req, res) => {
       startTime: config.disturb.startTime,
       endTime: config.disturb.endTime,
       characterIds: config.disturb.characterIds || [],
+      hideWorld: config.disturb.hideWorld || false,
+      skipWeekends: config.disturb.skipWeekends || false,
     },
   });
 });
@@ -245,7 +247,7 @@ router.put('/disturb-mode', (req, res) => {
 
 // PUT /api/config/disturb-settings — 更新防打扰时间段和角色列表
 router.put('/disturb-settings', (req, res) => {
-  const { startTime, endTime, characterIds } = req.body;
+  const { startTime, endTime, characterIds, hideWorld, skipWeekends } = req.body;
   if (startTime !== undefined && !/^\d{2}:\d{2}$/.test(startTime)) {
     return res.status(400).json({ error: 'startTime must be HH:MM format' });
   }
@@ -255,7 +257,13 @@ router.put('/disturb-settings', (req, res) => {
   if (characterIds !== undefined && !Array.isArray(characterIds)) {
     return res.status(400).json({ error: 'characterIds must be an array' });
   }
-  updateDisturbSettings({ startTime, endTime, characterIds });
+  if (hideWorld !== undefined && typeof hideWorld !== 'boolean') {
+    return res.status(400).json({ error: 'hideWorld must be boolean' });
+  }
+  if (skipWeekends !== undefined && typeof skipWeekends !== 'boolean') {
+    return res.status(400).json({ error: 'skipWeekends must be boolean' });
+  }
+  updateDisturbSettings({ startTime, endTime, characterIds, hideWorld, skipWeekends });
   // 设置变更后立即触发一次检测
   triggerDisturbCheck();
   res.json({
@@ -264,6 +272,8 @@ router.put('/disturb-settings', (req, res) => {
       startTime: config.disturb.startTime,
       endTime: config.disturb.endTime,
       characterIds: config.disturb.characterIds || [],
+      hideWorld: config.disturb.hideWorld || false,
+      skipWeekends: config.disturb.skipWeekends || false,
     },
   });
 });

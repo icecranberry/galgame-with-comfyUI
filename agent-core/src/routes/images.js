@@ -11,30 +11,69 @@ const IMAGES_DIR = resolve(__dirname, '../../data/images');
 
 const router = Router();
 
-// GET /api/images/gallery — 获取相册图片列表（按修改时间倒序）
-router.get('/gallery', async (req, res) => {
-  try {
-    const files = await readdir(IMAGES_DIR);
-    const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f));
+// ── 相册缓存（避免每次请求都 readdir + stat 2251 个文件阻塞事件循环）──
+const galleryCache = {
+  data: null,       // { images: [...], total: number }
+  mtime: 0,         // 缓存创建时间
+  ttl: 30_000,      // 30 秒 TTL（生图不频繁，短缓存已足够）
+};
 
-    const stats = await Promise.all(
-      imageFiles.map(async (name) => {
+/** 刷新相册缓存：批量 stat（限制并发数），避免 Promise.all 2251 并发压垮事件循环 */
+async function refreshGalleryCache() {
+  const files = await readdir(IMAGES_DIR);
+  const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f));
+
+  // 批量 stat：每次最多 64 个并发，避免事件循环被 2000+ 个 Promise 同时 resolve 卡死
+  const BATCH_SIZE = 64;
+  const results = [];
+  for (let i = 0; i < imageFiles.length; i += BATCH_SIZE) {
+    const batch = imageFiles.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (name) => {
         const s = await stat(join(IMAGES_DIR, name));
         return { name, size: s.size, mtime: s.mtimeMs };
       })
     );
+    results.push(...batchResults);
+  }
 
-    // 按修改时间倒序（最新的在前）
-    stats.sort((a, b) => b.mtime - a.mtime);
+  // 按修改时间倒序（最新的在前）
+  results.sort((a, b) => b.mtime - a.mtime);
 
-    const images = stats.map(s => ({
-      name: s.name,
-      url: `/images/${s.name}`,
-      size: s.size,
-      mtime: s.mtime,
-    }));
+  const images = results.map(s => ({
+    name: s.name,
+    url: `/images/${s.name}`,
+    size: s.size,
+    mtime: s.mtime,
+  }));
 
-    res.json({ images });
+  galleryCache.data = { images, total: images.length };
+  galleryCache.mtime = Date.now();
+}
+
+/** 当新图片生成后调用，使缓存失效（由 imageSkill 在生图成功后调用） */
+export function invalidateGalleryCache() {
+  galleryCache.data = null;
+  galleryCache.mtime = 0;
+}
+
+// GET /api/images/gallery — 获取相册图片列表（按修改时间倒序，支持分页）
+router.get('/gallery', async (req, res) => {
+  try {
+    // 检查缓存是否有效
+    if (!galleryCache.data || Date.now() - galleryCache.mtime > galleryCache.ttl) {
+      await refreshGalleryCache();
+    }
+
+    const { images, total } = galleryCache.data;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+
+    res.json({
+      images: images.slice(offset, offset + limit),
+      total,
+      hasMore: offset + limit < total,
+    });
   } catch (err) {
     console.error('[gallery] read images dir error:', err.message);
     res.status(500).json({ error: 'Failed to read images directory' });

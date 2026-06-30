@@ -47,6 +47,8 @@ export const config = {
     startTime: process.env.DISTURB_START_TIME || '22:00',
     endTime: process.env.DISTURB_END_TIME || '08:00',
     characterIds: [], // 内存中缓存，启动时从 DB 加载
+    hideWorld: false, // 隐藏世界观（DB 加载覆盖）
+    skipWeekends: false, // 跳过周末（DB 加载覆盖）
   },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',
@@ -197,7 +199,7 @@ export function updateDisturbMode(value) {
 /**
  * 更新防打扰时间段和角色列表
  */
-export function updateDisturbSettings({ startTime, endTime, characterIds }) {
+export function updateDisturbSettings({ startTime, endTime, characterIds, hideWorld, skipWeekends }) {
   if (startTime !== undefined) {
     config.disturb.startTime = startTime;
     persistSettingSync('disturb_start_time', startTime);
@@ -209,6 +211,14 @@ export function updateDisturbSettings({ startTime, endTime, characterIds }) {
   if (characterIds !== undefined) {
     config.disturb.characterIds = characterIds;
     persistSettingSync('disturb_character_ids', JSON.stringify(characterIds));
+  }
+  if (hideWorld !== undefined) {
+    config.disturb.hideWorld = hideWorld === true || hideWorld === 'true';
+    persistSettingSync('disturb_hide_world', String(config.disturb.hideWorld));
+  }
+  if (skipWeekends !== undefined) {
+    config.disturb.skipWeekends = skipWeekends === true || skipWeekends === 'true';
+    persistSettingSync('disturb_skip_weekends', String(config.disturb.skipWeekends));
   }
   console.log('[config] disturb settings saved');
 }

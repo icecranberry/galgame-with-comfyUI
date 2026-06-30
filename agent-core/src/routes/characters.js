@@ -7,6 +7,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
+import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
@@ -595,6 +596,9 @@ ${char.base_prompt}
       }
 
       console.log(`[generate-avatar] Image saved to ${savedPaths.length} file(s): ${savedPaths.join(', ')}`);
+
+      // 使相册缓存失效
+      invalidateGalleryCache();
 
       res.json({
         success: true,

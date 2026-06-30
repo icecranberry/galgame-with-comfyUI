@@ -13,6 +13,7 @@
  */
 
 import fs from 'fs';
+import { invalidateGalleryCache } from '../routes/images.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
@@ -552,6 +553,9 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     const db = getDb();
     db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
       .run(JSON.stringify(urls), msgId);
+
+    // 使相册缓存失效
+    invalidateGalleryCache();
 
     console.log(`⚡ Image saved to msg ${msgId}: ${urls.length} file(s)`);
     return urls;

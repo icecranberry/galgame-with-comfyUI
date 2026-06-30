@@ -28,6 +28,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   disturb_start_time: '22:00',
   disturb_end_time: '08:00',
   disturb_character_ids: '[]',
+  disturb_hide_world: 'false',
+  disturb_skip_weekends: 'false',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',

@@ -447,7 +447,7 @@
             </div>
 
             <!-- 角色选择 -->
-            <div class="disturb-dialog-section">
+            <div class="disturb-dialog-section disturb-char-scroll">
               <span class="disturb-dialog-label">👤 适用角色</span>
               <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
               <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
@@ -467,6 +467,26 @@
                   <span class="disturb-char-name">{{ ch.display_name }}</span>
                 </label>
               </div>
+            </div>
+
+            <!-- 额外选项 -->
+            <div class="disturb-dialog-section disturb-dialog-toggles">
+              <label class="disturb-option-row">
+                <span class="disturb-option-label">隐藏世界观</span>
+                <span class="disturb-option-hint">时段内暂时不向 AI 注入世界背景设定</span>
+                <label class="switch">
+                  <input type="checkbox" v-model="disturbDialog.hideWorld" />
+                  <span class="slider"></span>
+                </label>
+              </label>
+              <label class="disturb-option-row">
+                <span class="disturb-option-label">跳过周末</span>
+                <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
+                <label class="switch">
+                  <input type="checkbox" v-model="disturbDialog.skipWeekends" />
+                  <span class="slider"></span>
+                </label>
+              </label>
             </div>
 
             <div class="disturb-dialog-actions">
@@ -521,6 +541,8 @@ const disturbMode = ref(false)
 const disturbStartTime = ref('22:00')
 const disturbEndTime = ref('08:00')
 const disturbCharacterIds = ref([])
+const disturbHideWorld = ref(false)
+const disturbSkipWeekends = ref(false)
 const allCharacters = ref([]) // 全部角色列表（含头像）
 
 // 弹窗状态（编辑期间使用独立副本，确认后才同步）
@@ -529,6 +551,8 @@ const disturbDialog = reactive({
   startTime: '22:00',
   endTime: '08:00',
   characterIds: [],
+  hideWorld: false,
+  skipWeekends: false,
 })
 const dirty = ref(false)
 const saved = ref(false)
@@ -657,6 +681,8 @@ onMounted(async () => {
       disturbStartTime.value = data.disturb.startTime || '22:00'
       disturbEndTime.value = data.disturb.endTime || '08:00'
       disturbCharacterIds.value = data.disturb.characterIds || []
+      disturbHideWorld.value = data.disturb.hideWorld ?? false
+      disturbSkipWeekends.value = data.disturb.skipWeekends ?? false
     }
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
@@ -748,6 +774,8 @@ function openDisturbDialog() {
   disturbDialog.startTime = disturbStartTime.value
   disturbDialog.endTime = disturbEndTime.value
   disturbDialog.characterIds = [...disturbCharacterIds.value]
+  disturbDialog.hideWorld = disturbHideWorld.value
+  disturbDialog.skipWeekends = disturbSkipWeekends.value
   disturbDialog.show = true
   // 按需加载角色列表
   if (allCharacters.value.length === 0) {
@@ -765,11 +793,15 @@ async function confirmDisturbDialog() {
       startTime: disturbDialog.startTime,
       endTime: disturbDialog.endTime,
       characterIds: [...disturbDialog.characterIds],
+      hideWorld: disturbDialog.hideWorld,
+      skipWeekends: disturbDialog.skipWeekends,
     })
     // 同步到外层状态
     disturbStartTime.value = disturbDialog.startTime
     disturbEndTime.value = disturbDialog.endTime
     disturbCharacterIds.value = [...disturbDialog.characterIds]
+    disturbHideWorld.value = disturbDialog.hideWorld
+    disturbSkipWeekends.value = disturbDialog.skipWeekends
     disturbDialog.show = false
   } catch (err) {
     console.error('[disturb] save failed:', err)
@@ -1156,7 +1188,7 @@ function resetTestPrompts() {
   background: #fff;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
   width: 640px; max-width: calc(100vw - 48px); max-height: 85vh;
-  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
 }
 /* PC 端圆角弹窗 */
 @media (min-width: 768px) {
@@ -1176,9 +1208,19 @@ function resetTestPrompts() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 18px 22px 0;
   font-size: 16px; font-weight: 600; color: var(--text-bright);
+  flex-shrink: 0;
 }
-.disturb-dialog-body { padding: 14px 22px 20px; }
-.disturb-dialog-section { margin-bottom: 18px; }
+.disturb-dialog-body {
+  padding: 14px 22px 20px;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.disturb-dialog-section { margin-bottom: 18px; flex-shrink: 0; }
+.disturb-dialog-section.disturb-char-scroll {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  margin-bottom: 0;
+}
 .disturb-dialog-label {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
 }
@@ -1207,6 +1249,8 @@ function resetTestPrompts() {
 }
 .disturb-char-grid {
   display: flex; flex-wrap: wrap; gap: 10px;
+  overflow-y: auto; flex: 1; min-height: 0;
+  align-content: flex-start;
 }
 .disturb-char-chip {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -1241,9 +1285,26 @@ function resetTestPrompts() {
 .disturb-char-chip.selected .disturb-char-name {
   color: var(--accent); font-weight: 500;
 }
+.disturb-dialog-toggles {
+  padding-top: 10px; border-top: 1px solid #eee;
+  flex-shrink: 0;
+}
+.disturb-option-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0;
+  cursor: pointer; user-select: none;
+  flex-wrap: wrap;
+}
+.disturb-option-label {
+  font-size: 13px; font-weight: 500; color: var(--text-bright);
+}
+.disturb-option-hint {
+  flex: 1; min-width: 140px; font-size: 11px; color: var(--text-secondary);
+}
 .disturb-dialog-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 12px;
   border-top: 1px solid #eee;
+  flex-shrink: 0;
 }
 
 /* ── 弹窗过渡动画 ── */

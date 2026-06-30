@@ -125,7 +125,7 @@
       </div>
       <div class="relation-entry-text">
         <span class="relation-entry-title">世界观设置</span>
-        <span class="relation-entry-hint">{{ worldSettingSummary }}</span>
+        <span class="relation-entry-hint">定义所有角色共处的世界背景</span>
       </div>
       <span class="relation-entry-arrow">›</span>
     </div>

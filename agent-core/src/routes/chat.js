@@ -19,6 +19,7 @@ import { generateImage } from '../services/imageSkill.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
+import { invalidateGalleryCache } from './images.js';
 
 const router = Router();
 
@@ -1148,6 +1149,9 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         // 给前端用的 URL 也挂到 img 对象上
         img.url = `/images/${filename}`;
       }
+
+      // 使相册缓存失效
+      invalidateGalleryCache();
 
       // 更新消息：挂上图片 URL
       const updateResult = db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
