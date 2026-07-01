@@ -172,7 +172,7 @@ router.get('/tasks/:id/status', (req, res) => {
 });
 
 // POST /api/images/test-style — 测试画风（固定提示词，不写DB，仅返回展示用图）
-// mode: 'chat' (对话配图) | 'moments' (朋友圈配图)，默认 'chat'
+// mode: 'chat' (对话配图) | 'moments' (朋友圈配图) | 'event' (奇遇配图)，默认 'chat'
 router.post('/test-style', async (req, res) => {
   const { artist, width, height, mode = 'chat', prompt: customPrompt } = req.body;
 
@@ -180,12 +180,15 @@ router.post('/test-style', async (req, res) => {
 
   const MOMENTS_PROMPT_DEFAULT = `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`;
 
+  const EVENT_PROMPT_DEFAULT = `1girl, Hatsune Miku (VOCALOID), teal twin-tailed hair, blue eyes, standing alone on a dimly lit rooftop at dusk, looking over her shoulder with a mysterious expression, one hand reaching toward a glowing floating envelope in the air, city skyline in the distance, warm orange sky fading into deep purple, cinematic lighting, atmospheric, anime style, high quality illustration.`;
+
   const isMoments = mode === 'moments';
+  const isEvent = mode === 'event';
   // 自定义 prompt 优先，否则用默认
-  const prompt = customPrompt || (isMoments ? MOMENTS_PROMPT_DEFAULT : CHAT_PROMPT_DEFAULT);
-  const finalArtist = artist || (isMoments ? config.comfyui.momentsArtist : config.comfyui.artist);
-  const finalWidth = width || (isMoments ? config.comfyui.momentsWidth : config.comfyui.width);
-  const finalHeight = height || (isMoments ? config.comfyui.momentsHeight : config.comfyui.height);
+  const prompt = customPrompt || (isEvent ? EVENT_PROMPT_DEFAULT : (isMoments ? MOMENTS_PROMPT_DEFAULT : CHAT_PROMPT_DEFAULT));
+  const finalArtist = artist || (isEvent ? config.comfyui.eventArtist : (isMoments ? config.comfyui.momentsArtist : config.comfyui.artist));
+  const finalWidth = width || (isEvent ? config.comfyui.eventWidth : (isMoments ? config.comfyui.momentsWidth : config.comfyui.width));
+  const finalHeight = height || (isEvent ? config.comfyui.eventHeight : (isMoments ? config.comfyui.momentsHeight : config.comfyui.height));
 
   console.log(`[test-style] mode="${mode}" artist="${finalArtist}" ${finalWidth}x${finalHeight}`);
 

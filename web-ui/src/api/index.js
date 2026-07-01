@@ -286,6 +286,12 @@ export async function updateGlobalRule(key, data) {
   return res.json()
 }
 
+/** 获取单条规则的默认值（不修改，仅供预览） */
+export async function getDefaultRule(key) {
+  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}/default`)
+  return res.json()
+}
+
 /** 重置单条全局规则为默认值 */
 export async function resetGlobalRule(key) {
   const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}/reset`, {

@@ -444,7 +444,13 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (dialogueRule?.rule_content && dialogueRule.is_active) {
       formatParts.push(dialogueRule.rule_content);
     }
-    formatParts.push('<dialogue_rules>\n- **回复控制在' + (explicitImageIntent ? '1句话以内' : '2~3句话') + '，保持口语化轻快节奏**\n</dialogue_rules>');
+    const sentenceHint = (() => {
+      if (explicitImageIntent) return '1句话以内';
+      if (affinity == null || affinity < 60) return '1句话以内';
+      if (affinity < 80) return '1~2句话';
+      return '1~3句话';
+    })();
+    formatParts.push('<dialogue_rules>\n- **回复控制在' + sentenceHint + '，保持口语化轻快节奏**\n</dialogue_rules>');
     msgs.push({ role: 'system', content: formatParts.join('\n\n') });
 
     // ═══════════════════════════════════════════

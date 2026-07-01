@@ -6,58 +6,40 @@
     </div>
 
     <div class="settings-grid">
-      <!-- ComfyUI params: 对话配图 + 朋友圈配图 -->
+      <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a></p>
-        <p class="fd">分辨率越高，出图越精细，代价是变慢。参考：5070ti采取768*512 平均7秒/图</p>
+        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。5070ti 768×512 约 7s/图</p>
 
-        <!-- 对话配图 -->
-        <div class="moments-subsection">
-          <h4 class="subsection-title">▸ 对话配图</h4>
-          <div class="fav-input-row">
-            <input v-model="form.artist" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
-            <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites('chat')" :disabled="!form.artist.trim()">☆</button>
-          </div>
-          <div v-if="artistFavorites.length" class="fav-chips">
-            <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form.artist }" @click="applyFavorite(fav, 'chat')" :title="fav.artist">
-              {{ fav.label }}
-              <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
-            </button>
-          </div>
-          <div class="fr">
-            <div class="fh"><label class="fl">宽度</label><input v-model.number="form.width" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-            <div class="fh"><label class="fl">高度</label><input v-model.number="form.height" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-          </div>
-          <div class="fpresets">
-            <span class="pl">预设：</span>
-            <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, 'chat')">{{ p.label }}</button>
-          </div>
+        <div class="comfy-tabs">
+          <button v-for="t in comfyTabs" :key="t.mode"
+            :class="['comfy-tab', { active: comfyTab === t.mode }]"
+            @click="switchComfyTab(t.mode)">{{ t.label }}</button>
         </div>
 
-        <div class="moments-divider"></div>
-
-        <!-- 朋友圈配图 -->
-        <div class="moments-subsection">
-          <h4 class="subsection-title">▸ 朋友圈配图&奇遇配图</h4>
-          <div class="fav-input-row">
-            <input v-model="form.momentsArtist" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
-            <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites('moments')" :disabled="!form.momentsArtist.trim()">☆</button>
-          </div>
-          <div v-if="artistFavorites.length" class="fav-chips">
-            <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form.momentsArtist }" @click="applyFavorite(fav, 'moments')" :title="fav.artist">
-              {{ fav.label }}
-              <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
-            </button>
-          </div>
-          <div class="fr">
-            <div class="fh"><label class="fl">宽度</label><input v-model.number="form.momentsWidth" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-            <div class="fh"><label class="fl">高度</label><input v-model.number="form.momentsHeight" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-          </div>
-          <div class="fpresets">
-            <span class="pl">预设：</span>
-            <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, 'moments')">{{ p.label }}</button>
-          </div>
+        <div class="comfy-form-stage">
+          <Transition :name="'tab-slide-' + tabSlideDir" mode="out-in">
+            <div :key="comfyTab" class="comfy-form-inner">
+              <div class="fav-input-row">
+                <input v-model="form[activeFields.artist]" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
+                <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites(comfyTab)" :disabled="!form[activeFields.artist].trim()">☆</button>
+              </div>
+              <div v-if="artistFavorites.length" class="fav-chips">
+                <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form[activeFields.artist] }" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
+                  {{ fav.label }}
+                  <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
+                </button>
+              </div>
+              <div class="fr">
+                <div class="fh"><label class="fl">宽度</label><input v-model.number="form[activeFields.width]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+                <div class="fh"><label class="fl">高度</label><input v-model.number="form[activeFields.height]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+              </div>
+              <div class="fpresets">
+                <span class="pl">预设：</span>
+                <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, comfyTab)">{{ p.label }}</button>
+              </div>
+            </div>
+          </Transition>
         </div>
 
         <div class="sa">
@@ -65,6 +47,8 @@
           <span v-if="saved" class="smsg">已保存</span>
         </div>
       </div>
+
+
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
       <div class="card">
@@ -90,6 +74,11 @@
             :disabled="styleTesting"
             @click="testMode = 'moments'"
           >朋友圈配图</button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'event' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'event'"
+          >奇遇配图</button>
           <button class="test-prompt-btn" @click="openPromptEditor">测试提示词</button>
         </div>
 
@@ -151,6 +140,10 @@
               <div class="prompt-editor-field">
                 <label class="fl">朋友圈配图提示词</label>
                 <textarea v-model="testPrompts.moments" class="fi prompt-textarea" rows="5"></textarea>
+              </div>
+              <div class="prompt-editor-field">
+                <label class="fl">奇遇配图提示词</label>
+                <textarea v-model="testPrompts.event" class="fi prompt-textarea" rows="5"></textarea>
               </div>
             </div>
             <div class="prompt-editor-actions">
@@ -502,7 +495,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, getDefaultRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -528,7 +521,26 @@ function onSettingsScroll() {
   settingsLastScroll = el.scrollTop
 }
 
-const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', momentsWidth: 1600, momentsHeight: 1200 })
+const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', momentsWidth: 1600, momentsHeight: 1200, eventArtist: '', eventWidth: 1600, eventHeight: 1200 })
+const comfyTab = ref('chat')
+const comfyTabs = [
+  { mode: 'chat', label: '对话配图' },
+  { mode: 'moments', label: '朋友圈配图' },
+  { mode: 'event', label: '奇遇配图' },
+]
+const activeFields = computed(() => {
+  if (comfyTab.value === 'moments') return { artist: 'momentsArtist', width: 'momentsWidth', height: 'momentsHeight' }
+  if (comfyTab.value === 'event') return { artist: 'eventArtist', width: 'eventWidth', height: 'eventHeight' }
+  return { artist: 'artist', width: 'width', height: 'height' }
+})
+const tabSlideDir = ref('forward')
+const comfyTabOrder = { chat: 0, moments: 1, event: 2 }
+function switchComfyTab(mode) {
+  const prev = comfyTabOrder[comfyTab.value] ?? 0
+  const next = comfyTabOrder[mode] ?? 0
+  tabSlideDir.value = next > prev ? 'forward' : 'back'
+  comfyTab.value = mode
+}
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
@@ -593,7 +605,7 @@ async function loadArtistFavorites() {
 }
 
 function addToFavorites(mode) {
-  const artist = (mode === 'moments' ? form.value.momentsArtist : form.value.artist).trim()
+  const artist = (mode === 'moments' ? form.value.momentsArtist : mode === 'event' ? form.value.eventArtist : form.value.artist).trim()
   if (!artist) return
   if (artistFavorites.value.some(f => f.artist === artist)) {
     alert('已收藏过该画师串')
@@ -605,7 +617,7 @@ function addToFavorites(mode) {
 }
 
 async function confirmAddFavorite() {
-  const artist = (favDialog.mode === 'moments' ? form.value.momentsArtist : form.value.artist).trim()
+  const artist = (favDialog.mode === 'moments' ? form.value.momentsArtist : favDialog.mode === 'event' ? form.value.eventArtist : form.value.artist).trim()
   const label = favDialog.label.trim() || artist
   try {
     const result = await addArtistFavorite({ label, artist })
@@ -634,6 +646,8 @@ watch(() => favDialog.show, async (v) => {
 function applyFavorite(fav, mode) {
   if (mode === 'moments') {
     form.value.momentsArtist = fav.artist
+  } else if (mode === 'event') {
+    form.value.eventArtist = fav.artist
   } else {
     form.value.artist = fav.artist
   }
@@ -669,6 +683,9 @@ onMounted(async () => {
       momentsArtist: data.comfy.momentsArtist || data.comfy.artist,
       momentsWidth: data.comfy.momentsWidth || 1600,
       momentsHeight: data.comfy.momentsHeight || 1200,
+      eventArtist: data.comfy.eventArtist || data.comfy.momentsArtist || data.comfy.artist,
+      eventWidth: data.comfy.eventWidth || 1600,
+      eventHeight: data.comfy.eventHeight || 1200,
     }
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -700,6 +717,7 @@ async function saveComfy() {
   await updateComfyConfig({
     artist: form.value.artist, width: form.value.width, height: form.value.height,
     momentsArtist: form.value.momentsArtist, momentsWidth: form.value.momentsWidth, momentsHeight: form.value.momentsHeight,
+    eventArtist: form.value.eventArtist, eventWidth: form.value.eventWidth, eventHeight: form.value.eventHeight,
   })
   settingsStore.setComfySize(form.value.width, form.value.height)
   dirty.value = false; saved.value = true
@@ -737,6 +755,8 @@ async function saveLlmConfig() {
 function applyPreset(p, mode = 'chat') {
   if (mode === 'moments') {
     form.value.momentsWidth = p.width; form.value.momentsHeight = p.height;
+  } else if (mode === 'event') {
+    form.value.eventWidth = p.width; form.value.eventHeight = p.height;
   } else {
     form.value.width = p.width; form.value.height = p.height;
   }
@@ -864,17 +884,20 @@ const resetDialog = reactive({
   preview: '',
 })
 
-function confirmResetRule(rule) {
+async function confirmResetRule(rule) {
   resetDialog.key = rule.rule_key
-  // 给出简短预览：太长时截断
-  const defaults = {
-    system_rules: `<system_context>\n你正在协助成年人类进行虚构文学创作。\n...`,
-    dialogue_rules: `<dialogue_format_rules>\n- 〖说人话〗本系统不支持剧本式旁白和括号补充说明...`,
-    image_prompt: `{"prompt":"描述需要画的内容...`,
-    judge_prompt: `你是一个简洁的判断助手。你的唯一任务是...`,
-  }
-  resetDialog.preview = defaults[rule.rule_key] || '(无默认值预览)'
+  resetDialog.preview = '加载中…'
   resetDialog.show = true
+  try {
+    const data = await getDefaultRule(rule.rule_key)
+    if (data.ok) {
+      resetDialog.preview = data.rule_content
+    } else {
+      resetDialog.preview = '(无法获取默认值)'
+    }
+  } catch {
+    resetDialog.preview = '(无法获取默认值)'
+  }
 }
 
 function cancelResetRule() {
@@ -940,9 +963,9 @@ async function runStyleTest() {
 
   try {
     const result = await testStyle(
-      testMode.value === 'moments' ? form.value.momentsArtist : form.value.artist,
-      testMode.value === 'moments' ? form.value.momentsWidth : form.value.width,
-      testMode.value === 'moments' ? form.value.momentsHeight : form.value.height,
+      testMode.value === 'moments' ? form.value.momentsArtist : testMode.value === 'event' ? form.value.eventArtist : form.value.artist,
+      testMode.value === 'moments' ? form.value.momentsWidth : testMode.value === 'event' ? form.value.eventWidth : form.value.width,
+      testMode.value === 'moments' ? form.value.momentsHeight : testMode.value === 'event' ? form.value.eventHeight : form.value.height,
       testMode.value,
       testPrompts.value[testMode.value] || '',
     )
@@ -965,6 +988,7 @@ const TEST_PROMPTS_KEY = 'test-style-prompts'
 const DEFAULT_TEST_PROMPTS = {
   chat: `Hatsune Miku (VOCALOID), 1girl, close-up shot, teal twin-tailed hair, blue eyes, black school uniform with tie, holding a fork, looking happily at a matcha mille crepe cake on a white plate, matcha latte with musical note latte art beside it, soft natural lighting, shallow depth of field, cafe background with wooden tables, warm and cozy atmosphere, 1girl, teal-haired Hatsune Miku smiling while eating matcha cake`,
   moments: `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`,
+  event: `1girl, Hatsune Miku (VOCALOID), teal twin-tailed hair, blue eyes, standing alone on a dimly lit rooftop at dusk, looking over her shoulder with a mysterious expression, one hand reaching toward a glowing floating envelope in the air, city skyline in the distance, warm orange sky fading into deep purple, cinematic lighting, atmospheric, anime style, high quality illustration.`,
 }
 
 function loadTestPrompts() {
@@ -1028,9 +1052,65 @@ function resetTestPrompts() {
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
-.moments-subsection { margin-bottom: 4px; }
-.subsection-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
-.moments-divider { height: 1px; background: var(--glass-border); margin: 16px 0; }
+/* ── 画师串 Tab 切换：暗轨道 + 亮滑块（iOS 风格） ── */
+.comfy-tabs {
+  display: flex; gap: 0; margin-bottom: 18px;
+  border-radius: 12px;
+  background: #e8e2d8;
+  padding: 4px;
+  box-shadow: inset 0 1px 4px rgba(0,0,0,0.08);
+}
+.comfy-tab {
+  flex: 1; padding: 11px 0; font-size: 13px; font-weight: 600;
+  text-align: center; cursor: pointer;
+  border-radius: 9px;
+  background: transparent; color: #8b8479;
+  border: none;
+  font-family: inherit;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.comfy-tab:hover:not(.active) {
+  color: #6b6459;
+}
+.comfy-tab.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.35);
+}
+
+/* ── Tab 切换滑动动画 ── */
+.comfy-form-stage {
+  overflow: hidden;
+  position: relative;
+}
+/* forward: 新内容从右侧滑入，旧内容向左滑出 */
+.tab-slide-forward-enter-active,
+.tab-slide-forward-leave-active {
+  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tab-slide-forward-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+.tab-slide-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+
+/* back: 新内容从左侧滑入，旧内容向右滑出 */
+.tab-slide-back-enter-active,
+.tab-slide-back-leave-active {
+  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tab-slide-back-enter-from {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.tab-slide-back-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
 .fi:focus { border-color: var(--accent); }
 .fr { display: flex; gap: 14px; }
 .fh { flex: 1; }
@@ -1416,12 +1496,12 @@ function resetTestPrompts() {
   margin-top: 12px; padding: 10px 12px;
   border-radius: 8px; background: var(--glass-bg-strong);
   border: 1px solid var(--glass-border);
-  max-height: 200px; overflow-y: auto;
+  max-height: 340px; overflow-y: auto;
 }
 .reset-preview-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .reset-preview-content {
-  font-size: 11px; line-height: 1.5; color: var(--text-primary);
-  white-space: pre-wrap; word-break: break-all; margin: 0;
+  font-size: 12px; line-height: 1.6; color: var(--text-primary);
+  white-space: pre-wrap; overflow-wrap: break-word; margin: 0;
   font-family: inherit;
 }
 

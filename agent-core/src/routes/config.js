@@ -22,6 +22,9 @@ router.get('/', (req, res) => {
       momentsArtist: config.comfyui.momentsArtist,
       momentsWidth: config.comfyui.momentsWidth,
       momentsHeight: config.comfyui.momentsHeight,
+      eventArtist: config.comfyui.eventArtist,
+      eventWidth: config.comfyui.eventWidth,
+      eventHeight: config.comfyui.eventHeight,
     },
     features: config.features,
     llm: getLlmConfig(),
@@ -37,8 +40,8 @@ router.get('/', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight } = req.body;
-  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight });
+  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight } = req.body;
+  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight });
   res.json({ ok: true, ...config.comfyui });
 });
 
@@ -276,6 +279,15 @@ router.put('/disturb-settings', (req, res) => {
       skipWeekends: config.disturb.skipWeekends || false,
     },
   });
+});
+
+// GET /api/config/rules/:key/default — 获取单条规则的默认值（不修改，仅供预览）
+router.get('/rules/:key/default', (req, res) => {
+  const defaultRule = DEFAULT_GLOBAL_RULES.find(r => r.rule_key === req.params.key);
+  if (!defaultRule) {
+    return res.status(404).json({ error: `No default value for rule key: ${req.params.key}` });
+  }
+  res.json({ ok: true, rule_key: defaultRule.rule_key, rule_content: defaultRule.rule_content });
 });
 
 // POST /api/config/rules/:key/reset — 重置单条全局规则为默认值
