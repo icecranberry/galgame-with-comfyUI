@@ -88,7 +88,7 @@
               </div>
               <div class="branch-text">
                 <div class="choice-made-box">
-                  <div class="choice-made-label">{{ i === 0 ? '事件开始' : '选择了：' }}</div>
+                  <div class="choice-made-label">{{ i === 0 ? event.title : '选择了：' }}</div>
                   <div v-if="i > 0" class="choice-made-text">「{{ step.choice_label }}」</div>
                 </div>
                 <div class="branch-desc">{{ step.summary }}</div>
@@ -110,7 +110,7 @@
                 <!-- 真实处理中（HTTP 请求已发出，不可取消） -->
                 <div v-if="(choosing || event.processing) && !event._queued" class="choice-loading">
                   <div class="loading-spinner"></div>
-                  <span>故事推进中…</span>
+                  <span>{{ undoing ? '正在撤回…' : '故事推进中…' }}</span>
                 </div>
                 <!-- 排队中（尚未发送 HTTP，可取消重新选择） -->
                 <div v-else-if="event._queued" class="choice-loading is-queued">
@@ -135,6 +135,19 @@
                   </div>
                 </div>
               </div>
+              <!-- 撤回按钮：只有选择过至少一次才显示 -->
+              <button
+                v-if="choiceHistory.length > 1"
+                class="undo-btn"
+                :disabled="event.processing"
+                @click.stop="onUndo"
+                title="回到上一次选择"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="15,18 9,12 15,6"/>
+                </svg>
+                <span>回到上一次选择</span>
+              </button>
             </div>
           </div>
         </div>
@@ -168,6 +181,7 @@ const store = useEventsStore()
 const detailOpen = ref(false)
 const customText = ref('')
 const choosing = ref(false)
+const undoing = ref(false)
 const previewImg = ref(null)
 const scrollEl = ref(null)
 const showMenu = ref(false)
@@ -293,11 +307,12 @@ async function onChoose(choice) {
   if (choosing.value) return
   const eventId = props.event.id
   choosing.value = true
+  const customTextValue = customText.value
   customText.value = ''
-  console.log(`[EventCard] onChoose START event=${eventId} choice=${choice}`)
+  console.log(`[EventCard] onChoose START event=${eventId} choice=${choice} customText="${customTextValue}"`)
 
   try {
-    const result = await store.makeChoice(eventId, choice, choice === 'C' ? customText.value : '')
+    const result = await store.makeChoice(eventId, choice, choice === 'C' ? customTextValue : '')
     console.log(`[EventCard] onChoose DONE event=${eventId} concluded=${result?.concluded} queued=${result === null}`)
     if (!result) {
       // 已排队：choosing 重置（本地状态），但 event.processing 为 true（store 状态）
@@ -329,6 +344,29 @@ function onCancelQueue() {
   console.log(`[EventCard] cancelQueue event=${eventId}`)
   store.cancelQueuedChoice(eventId)
   choosing.value = false
+}
+
+/** 撤回上一次分支选择，回到上一步 */
+async function onUndo() {
+  if (undoing.value || props.event.processing) return
+  const eventId = props.event.id
+  undoing.value = true
+  console.log(`[EventCard] undo START event=${eventId}`)
+
+  try {
+    const result = await store.undoChoice(eventId)
+    console.log(`[EventCard] undo DONE event=${eventId}`)
+    if (result?.event) {
+      emit('updated', { event: result.event })
+      nextTick(() => {
+        if (scrollEl.value) scrollEl.value.scrollTo({ left: scrollEl.value.scrollWidth, behavior: 'smooth' })
+      })
+    }
+  } catch (err) {
+    console.error(`[EventCard] undo ERROR event=${eventId}:`, err?.message || err)
+  }
+
+  undoing.value = false
 }
 
 // 到期自动触发结局（非 compact 模式，即活跃事件到期时主动调用后端生成结局）
@@ -597,6 +635,7 @@ watch(isExpired, (val) => {
   width: min(640px, 80vw);
   height: 80vh; min-height: 500px;
   flex-shrink: 0;
+  position: relative;
   background: rgba(255,255,255,0.85);
   border-radius: 20px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.15);
@@ -660,7 +699,7 @@ watch(isExpired, (val) => {
   padding: 10px 14px;
 }
 .choice-made-label {
-  font-size: 11px; font-weight: 600; color: var(--accent);
+  font-size: 15px; font-weight: 600; color: var(--accent);
   margin-bottom: 4px;
 }
 .choice-made-text {
@@ -738,6 +777,37 @@ watch(isExpired, (val) => {
 }
 .queued-back-btn:hover {
   background: rgba(0,0,0,0.04); color: var(--text-primary); border-color: rgba(0,0,0,0.2);
+}
+
+/* ── 撤回按钮 ── */
+.undo-btn {
+  position: absolute;
+  bottom: 12px; right: 12px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 5;
+}
+.undo-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.9);
+  color: var(--accent);
+  border-color: rgba(224,123,108,0.25);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.undo-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.undo-btn svg {
+  flex-shrink: 0;
 }
 .loading-spinner {
   width: 18px; height: 18px;

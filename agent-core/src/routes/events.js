@@ -342,6 +342,91 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/events/:id/undo — 撤回上一次分支选择，回到上一步
+router.post('/:id/undo', (req, res) => {
+  const db = getDb();
+  const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
+
+  if (!event) {
+    return res.status(404).json({ error: 'event_not_found' });
+  }
+
+  if (event.status !== 'open' && event.status !== 'engaged') {
+    return res.status(400).json({ error: 'event_not_active' });
+  }
+
+  if (event.processing === 1) {
+    return res.status(409).json({ error: 'event_processing', message: '事件正在推进中，请等待完成后再撤回' });
+  }
+
+  const choiceHistory = JSON.parse(event.choice_history || '[]');
+
+  if (choiceHistory.length <= 1) {
+    return res.status(400).json({ error: 'cannot_undo', message: '已经是初始状态，无法继续撤回' });
+  }
+
+  // 弹出最后一步
+  const popped = choiceHistory.pop();
+  const newLast = choiceHistory[choiceHistory.length - 1];
+
+  // 恢复上一步的状态
+  const restoredDescription = newLast.summary || event.description;
+  const restoredImage = newLast.image || null;
+  // 从被弹出的步骤中恢复上一步的选项（兼容旧数据：如果 prev_choice_a 不存在则保持当前选项）
+  const restoredChoiceA = popped.prev_choice_a || event.choice_a;
+  const restoredChoiceB = popped.prev_choice_b || event.choice_b;
+  const restoredChoiceCLabel = popped.prev_choice_c_label || event.choice_c_label || '自由行动';
+  const restoredPrompt = popped.prev_prompt || event.prompt || '';
+  const restoredBranch = Math.max(0, event.current_branch - 1);
+
+  db.prepare(`
+    UPDATE character_events SET
+      description = ?, image = ?, prompt = ?,
+      choice_a = ?, choice_b = ?, choice_c_label = ?,
+      current_branch = ?, choice_history = ?,
+      processing = 0, last_interaction_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    restoredDescription, restoredImage, restoredPrompt,
+    restoredChoiceA, restoredChoiceB, restoredChoiceCLabel,
+    restoredBranch, JSON.stringify(choiceHistory),
+    event.id
+  );
+
+  const updatedEvent = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(event.id);
+  const character = db.prepare(`SELECT * FROM characters WHERE id = ?`).get(event.character_id);
+
+  // SSE 广播
+  broadcastEventUpdate({
+    id: updatedEvent.id,
+    character_id: updatedEvent.character_id,
+    display_name: character?.display_name || '',
+    avatar_path: character?.avatar_path || null,
+    title: updatedEvent.title,
+    description: updatedEvent.description,
+    image: updatedEvent.image,
+    choice_a: updatedEvent.choice_a,
+    choice_b: updatedEvent.choice_b,
+    choice_c_label: updatedEvent.choice_c_label,
+    current_branch: updatedEvent.current_branch,
+    choice_history: JSON.parse(updatedEvent.choice_history || '[]'),
+    expires_at: toISO(updatedEvent.expires_at),
+    created_at: toISO(updatedEvent.created_at),
+  });
+
+  res.json({
+    event: {
+      ...updatedEvent,
+      display_name: character?.display_name || '',
+      avatar_path: character?.avatar_path || null,
+      choice_history: JSON.parse(updatedEvent.choice_history || '[]'),
+      created_at: toISO(updatedEvent.created_at),
+      expires_at: toISO(updatedEvent.expires_at),
+      last_interaction_at: updatedEvent.last_interaction_at ? toISO(updatedEvent.last_interaction_at) : null,
+    },
+  });
+});
+
 // POST /api/events/:id/conclude — 前端倒计时归零时主动触发结局生成（必须在 /generate 之后避免 id 捕获 "generate"）
 router.post('/:id/conclude', async (req, res) => {
   const db = getDb();

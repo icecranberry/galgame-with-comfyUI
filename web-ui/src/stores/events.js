@@ -6,9 +6,12 @@ import { onEvent } from './unifiedStream.js'
 const POLL_INTERVAL = 30_000
 
 export const useEventsStore = defineStore('events', () => {
+  const HISTORY_PAGE_SIZE = 20
+
   const activeEvents = ref([])        // 活跃事件列表
-  const history = ref([])             // 事件历史
+  const history = ref([])             // 事件历史（全量）
   const loading = ref(false)
+  const historyPage = ref(1)          // 往期奇遇当前渲染页数
   const filterCharacterId = ref(null) // null = 全部
   const filterEngaged = ref(false)      // 只看参与过的
 
@@ -20,10 +23,12 @@ export const useEventsStore = defineStore('events', () => {
   function setFilter(charId) {
     filterCharacterId.value = charId
     filterEngaged.value = false
+    historyPage.value = 1
   }
   function toggleFilterEngaged() {
     filterEngaged.value = !filterEngaged.value
     filterCharacterId.value = null
+    historyPage.value = 1
   }
 
   // ── 滚动到顶部信号 ──
@@ -47,6 +52,14 @@ export const useEventsStore = defineStore('events', () => {
     return result
   })
 
+  // 前端切片：只渲染前 historyPage 页（对标朋友圈 moments store）
+  const visibleHistory = computed(() =>
+    filteredHistory.value.slice(0, historyPage.value * HISTORY_PAGE_SIZE)
+  )
+  const historyHasMore = computed(() =>
+    filteredHistory.value.length > historyPage.value * HISTORY_PAGE_SIZE
+  )
+
   // 有事件的角色列表
   const charactersWithEvents = computed(() => {
     const map = new Map()
@@ -69,7 +82,7 @@ export const useEventsStore = defineStore('events', () => {
       .map(({ _latestAt, ...rest }) => rest)
   })
 
-  // 加载全部事件
+  // 加载全部事件（对标朋友圈 loadPosts：一次性全量，前端切片渲染）
   async function loadEvents() {
     if (loading.value) return
     loading.value = true
@@ -110,12 +123,19 @@ export const useEventsStore = defineStore('events', () => {
         })),
         ...(data.history || []),
       ]
+      historyPage.value = 1
       await markSeen()
     } catch (err) {
       console.error('[events] loadEvents error:', err)
     } finally {
       loading.value = false
     }
+  }
+
+  // 加载更多历史（对标朋友圈 loadMore：纯前端切片，无网络请求）
+  function loadMoreHistory() {
+    if (!historyHasMore.value) return
+    historyPage.value++
   }
 
   // ── 选择队列：最多 2 个 HTTP 请求并发，超出排队 ──
@@ -141,7 +161,10 @@ export const useEventsStore = defineStore('events', () => {
         if (idx !== -1) {
           activeEvents.value[idx] = result.event
         }
-        await markSeen()
+        // 不在此处 markSeen()：分支更新后 last_interaction_at 已刷新，
+        // 如果立即 markSeen() 会导致 last_events_seen_at >= last_interaction_at，
+        // 使该事件在 DB 层面也变成"已读"，后续 SSE event_update 和离开页面
+        // 时都再也无法触发红点。红点由 loadEvents()（访问页面时）统一管理。
       }
       return result
     } catch (err) {
@@ -194,6 +217,29 @@ export const useEventsStore = defineStore('events', () => {
     const idx = activeEvents.value.findIndex(e => e.id === eventId)
     if (idx !== -1) {
       activeEvents.value[idx] = { ...activeEvents.value[idx], processing: false, _queued: false }
+    }
+  }
+
+  /** 撤回上一次分支选择，回到上一步 */
+  async function undoChoice(eventId) {
+    const idx = activeEvents.value.findIndex(e => e.id === eventId)
+    if (idx === -1) return
+
+    // 标记 processing 防止重复操作
+    activeEvents.value[idx] = { ...activeEvents.value[idx], processing: true }
+
+    try {
+      const result = await api.undoEventOption(eventId)
+      if (result.event) {
+        activeEvents.value[idx] = result.event
+      }
+      return result
+    } catch (err) {
+      console.error(`[store] undoChoice ERROR event=${eventId}:`, err?.message)
+      if (idx !== -1) {
+        activeEvents.value[idx] = { ...activeEvents.value[idx], processing: false }
+      }
+      throw err
     }
   }
 
@@ -252,7 +298,10 @@ export const useEventsStore = defineStore('events', () => {
     try {
       const data = await api.getEventsUnread()
       if (data && typeof data.count === 'number') {
-        newEventCount.value = data.count
+        // 用户停留在奇遇页面时不推送红点，离开后才允许更新
+        if (!isViewingEvents.value) {
+          newEventCount.value = data.count
+        }
       }
     } catch { /* silent */ }
   }
@@ -291,7 +340,12 @@ export const useEventsStore = defineStore('events', () => {
       }),
       onEvent('event_update', (data) => {
         const idx = activeEvents.value.findIndex(e => e.id === data.id)
-        if (idx !== -1) activeEvents.value[idx] = { ...activeEvents.value[idx], ...data }
+        if (idx !== -1) {
+          activeEvents.value[idx] = { ...activeEvents.value[idx], ...data }
+        } else {
+          // 事件不在本地列表中（如用户刷新后未重新加载），直接插入
+          activeEvents.value.unshift(data)
+        }
         _bumpUnreadLocal()
       }),
       onEvent('event_concluded', (data) => {
@@ -325,11 +379,11 @@ export const useEventsStore = defineStore('events', () => {
   }
 
   return {
-    activeEvents, history, loading,
+    activeEvents, history, loading, historyPage, historyHasMore, visibleHistory,
     filterCharacterId, filterEngaged, newEventCount, isViewingEvents,
     scrollToTopSignal,
     filteredActive, filteredHistory, charactersWithEvents,
-    loadEvents, makeChoice, cancelQueuedChoice, dismissEvent, deleteEvent,
+    loadEvents, loadMoreHistory, makeChoice, cancelQueuedChoice, undoChoice, dismissEvent, deleteEvent,
     setFilter, toggleFilterEngaged,
     refreshUnreadCount, markSeen,
     connectSSE, disconnectSSE, requestScrollToTop,

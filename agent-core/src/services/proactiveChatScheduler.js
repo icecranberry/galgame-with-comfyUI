@@ -448,7 +448,7 @@ function writeProactiveMessage(character, content) {
 
   console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msgs=${msgIds.length} segment(s)`);
 
-  return { rawId, firstMsgId: msgIds[0], lastMsgId: msgIds[msgIds.length - 1], msgIds };
+  return { rawId, firstMsgId: msgIds[0], lastMsgId: msgIds[msgIds.length - 1], msgIds, segments };
 }
 
 // ── 主动聊天的配图生成 ──
@@ -698,7 +698,7 @@ async function tick() {
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
-    const { rawId, firstMsgId, lastMsgId } = writeProactiveMessage(candidate, greeting);
+    const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
 
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     let imageUrls = null;
@@ -712,6 +712,8 @@ async function tick() {
       avatar_path: candidate.avatar_path,
 
       content: greeting,
+      segments,
+      msg_ids: msgIds,
       msg_id: firstMsgId,
       raw_id: rawId,
       images: imageUrls || [],
@@ -946,7 +948,7 @@ export async function forceProactiveNow(targetCharacterId) {
   const userProfile = loadUserProfile();
   const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
-  const { rawId, firstMsgId, lastMsgId } = writeProactiveMessage(candidate, greeting);
+  const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
 
   db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
     .run(streak + 1, candidate.id);
@@ -963,6 +965,8 @@ export async function forceProactiveNow(targetCharacterId) {
     avatar_path: candidate.avatar_path,
 
     content: greeting,
+    segments,
+    msg_ids: msgIds,
     msg_id: firstMsgId,
     raw_id: rawId,
     images: imageUrls || [],

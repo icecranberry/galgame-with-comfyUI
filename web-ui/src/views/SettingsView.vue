@@ -452,11 +452,12 @@
                   :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
                   @click="toggleDisturbDialogChar(ch.id)"
                 >
-                  <img
-                    :src="ch.avatar_path || '/avatars/default_assistant_header.png'"
+                  <div
                     class="disturb-char-avatar"
-                    @error="$event.target.src='/avatars/default_assistant_header.png'"
-                  />
+                    :style="ch.avatar_path
+                      ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                      : { background: '#e07b6c' }"
+                  >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
                   <span class="disturb-char-name">{{ ch.display_name }}</span>
                 </label>
               </div>
@@ -1351,9 +1352,13 @@ function resetTestPrompts() {
   background: rgba(224, 123, 108, 0.08);
 }
 .disturb-char-avatar {
-  width: 42px; height: 42px; border-radius: 50%; object-fit: cover;
+  width: 42px; height: 42px; border-radius: 50%;
+  background-size: cover; background-position: center;
   border: 2px solid transparent;
   transition: border-color 0.15s;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700;
+  user-select: none;
 }
 .disturb-char-chip.selected .disturb-char-avatar {
   border-color: var(--accent);

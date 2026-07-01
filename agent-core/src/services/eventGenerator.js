@@ -1,8 +1,12 @@
 /**
- * 奇遇事件生成器
+ * 特殊事件生成器
  *
- * - 硬编码 EVENT_TYPES（42 条，9 大类，钩子驱动），和朋友圈风格库一样的模式
- * - generateEvent(): LLM 生成事件初始场景 + 配图
+ * 不做"奇遇生成器"——做"特殊事件生成器"。事件范围覆盖日常全光谱：
+ * 从迟到/丢东西/逛街发现新鲜事，到目击紧急状况/收到匿名信息/撞见微妙异常，
+ * 只要能打破角色当下日常节奏的事，都在候选池里。
+ *
+ * - 硬编码 EVENT_TYPES（31 条极简方向，和朋友圈风格库一样模式：只给方向，不编故事）
+ * - generateEvent(): LLM 结合角色人格+世界观生成事件初始场景 + 配图
  * - generateNextBranch(): 用户选择后生成下一步 + 配图
  * - concludeEvent(): 到期/完成后生成结局，存入记忆
  */
@@ -22,111 +26,98 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..', '..');
 const imagesDir = path.join(projectRoot, 'data', 'images');
 
-// ── 事件类型库（硬编码，和朋友圈风格库一样模式） ──
-// 每个条目给大方向，LLM 结合角色个性、世界观、关系网、当前时间自由发挥
+// ── 事件类型库（和朋友圈风格库完全一样的模式：只给方向，不编故事） ──
+// 每条只描述"哪类事情"+"底层模式"，不预设具体场景。
+// LLM 结合角色人格、世界观、关系网、当前时间，从方向出发自由创作独一无二的事件。
+//
+// 设计铁律：
+//   - 不出现任何具体物品、地点、数字、动作
+//   - 不暗示任何具体叙事走向
+//   - 覆盖日常全光谱：从鸡毛蒜皮到紧急状况，从温情到诡异
+//   - "奇"只是可选风味之一，不是必须——平凡小事的涟漪也值得成为一个事件
 
 const EVENT_TYPES = [
-  // ═══ 手机/网络上出现了不该出现的东西（20-60min）═══
-  { key: 'flight_booked', name: '有人替你订了一张票', durationMin: 30, urgency: 2,
-    desc: '手机弹出一条预订确认——机票、车票、或活动门票。目的地是一个从没去过的地方。不是你订的。打过去问，客服说订单备注栏里留了一句话，是你很久以前在某处说过或写过的一句话。一字不差。那个人是谁——以及ta怎么知道你会在今天看到这条确认短信？' },
-  { key: 'trapped_in_group', name: '被拉进了一个退不出的群', durationMin: 25, urgency: 2,
-    desc: '不知被谁拉进了一个群聊。其他成员的头像全是默认灰色，名字都是单字。最新一条消息是刚发的：两个简单的字。然后自己就被设成了群主。所有按钮都是灰的——不能退群，不能拉人，不能禁言。唯一亮着的按钮是「发送消息」。光标在里面闪。' },
-  { key: 'self_sent_message', name: '收到一条自己发来的定时消息', durationMin: 30, urgency: 2,
-    desc: '手机弹出某个App的定时发送提醒——但自己从没用过这个功能。消息内容只有一行字，措辞是你习惯的句式，提到了一件只有自己知道的事。对写下这句话完全没有记忆。发送时间被设定在三个月前。发现这一点的时候，汗毛竖起来不是因为恐惧，而是因为那句话里藏着一个自己已经忘记的念头——现在重新被点燃了。' },
-  { key: 'mystery_friend', name: '社交账号多了个不认识的亲密好友', durationMin: 40, urgency: 1,
-    desc: '翻好友列表时发现一个完全没印象的账号，但它被标注为"亲密好友"——能看到所有仅密友可见的内容。聊天记录是空的，显示已互相关注半年。对方的头像是一张没有任何特征的风景照。点进主页——最近一条动态的发布时间是今天。内容只有一张照片：自己昨天下午去过的那个地方，角度是从自己当时站的位置背后拍的。' },
-  { key: 'phantom_post', name: '账号自动发了一条你不记得的动态', durationMin: 30, urgency: 2,
-    desc: '朋友截图发来一条"自己"刚发的动态——文字像是自己会说的话，配图是自己确实去过的地方。但自己没有发过。打开主页，那条动态稳稳地躺在时间线上，发布时间是十分钟前。已有几个共同好友点赞。删掉之前先看了一眼评论——有一条来自一个不认识的人，写了三个字："你想起来了？"然后那条评论在自己眼前被秒删了。' },
+  // ═══ 日常节奏被打乱（15-40min）═══
+  { key: 'routine_broken', name: '日常脱轨', durationMin: 20, urgency: 1,
+    desc: '原本按部就班的一天被一个小意外打断了——计划泡汤、路线受阻、或某个依赖的东西突然不可用了。事情本身不大，但它把人推出了舒适区，接下来遇到的人和事都不在计划里。' },
+  { key: 'running_late', name: '时间紧迫', durationMin: 15, urgency: 2,
+    desc: '因为某个原因快要迟到了。在赶路的过程中发生了一件事——它让"迟到"突然变成了最不重要的问题。' },
+  { key: 'lost_something', name: '找不到了', durationMin: 25, urgency: 1,
+    desc: '一个需要用到的东西找不到了。翻找的过程中撞上了别的东西——或别的人——或一段被压在角落的往事。' },
+  { key: 'something_broke', name: '关键时刻掉链子', durationMin: 20, urgency: 1,
+    desc: '某个依赖的东西在最不该坏的时候坏了。修理或想办法替代的过程把角色引向了平时不会去的地方或不会找的人。' },
 
-  // ═══ 物理空间出现了不该出现的东西（40-90min）═══
-  { key: 'shoes_at_door', name: '门口多了一双不认识的鞋', durationMin: 40, urgency: 2,
-    desc: '回家时门口摆着一双鞋——不是自己的，不是同住者的，不是任何来过家里的人的。鞋码不对，款式没印象，但鞋尖朝内，像有人穿进来后脱在这里。鞋底是干净的。鞋舌上有一个手写的小标记，不是商标——像是某种记号。房间里的空气温度和离开时不一样。' },
-  { key: 'things_moved', name: '房间里有什么东西被挪动过了', durationMin: 40, urgency: 1,
-    desc: '不是少了东西——是位置不对。椅子比平时离桌子远了大约一掌。杯子把手的方向反了。书架上有一本倒着插回去的书——书脊朝内，页边朝外。都很微小。但如果站在房间中央，把这些变化的点位连起来——它们构成了一条行动路线，从门口开始，在某个位置停下。那个位置前面，是一件自己每天都会碰但从没仔细看过的东西。' },
-  { key: 'mirror_delay', name: '镜子里的倒影慢了半拍', durationMin: 30, urgency: 2,
-    desc: '第一眼是正常的。折回来看第二眼时发现的——倒影的动作有极微小的延迟，不到半秒。举起手，镜像等了片刻才跟上。反复确认了三次。不是错觉。现在倒影正盯着自己，表情和本人脸上的不完全一致。嘴角的弧度多了一点点——只有自己在笑的时候才会出现的弧度，但此刻自己并没有在笑。是光线、是疲劳、还是别的什么——但手已经不自觉地想去碰一下镜面。' },
-  { key: 'unknown_door', name: '发现了一个从没注意过的空间', durationMin: 90, urgency: 1,
-    desc: '在这栋建筑里待了这么久，今天第一次注意到那个结构——楼梯下方的窄门、天花板上的检修口、或者走廊尽头一块颜色和周围墙面微妙不同的墙板。它一直在那里。撬开或推开之后，里面的空间比预期的深得多。空气从里面涌出来——不冷，带着一种不属于这栋建筑的气味。手机手电筒的光照进去，尽头拐了个弯，看不见最里面。' },
-  { key: 'upstairs_nobody', name: '天花板传来脚步声——楼上没人住', durationMin: 40, urgency: 2,
-    desc: '清晰的脚步声从上面传来——不急促，甚至有某种节奏感。七步或八步，走到某个位置停下，安静片刻，再走回来。问房东，楼上的住户上周搬走了，门锁着，水电都断了。抬头盯着天花板。脚步声停了。然后一个新的声音加进来——某种沉重的、被缓慢拖拽的东西。就在头顶正上方。' },
+  // ═══ 人际交集（20-50min）═══
+  { key: 'stranger_approach', name: '被搭话了', durationMin: 20, urgency: 1,
+    desc: '一个陌生人主动开口了。对方说的内容让人没办法用一句"你认错人了"结束对话——因为话里有一处细节，只对了一半，但那一半太准了。' },
+  { key: 'witness_moment', name: '目击时刻', durationMin: 30, urgency: 2,
+    desc: '恰好看到了不该被自己看到的一幕。可以是严重的（冲突/意外），也可以是微妙的（一个眼神/一个动作）。可以介入，可以走开——但选择之前只有几秒。' },
+  { key: 'put_on_spot', name: '被推到台前', durationMin: 20, urgency: 2,
+    desc: '突然成了众人注意力的焦点——被点名、被推举、或被动成为了某个局面的关键人物。没有准备、没有脚本、没有退路。所有人的目光已经聚过来了。' },
 
-  // ═══ 有人在冒充你、找你、或知道你（20-50min）═══
-  { key: 'name_poacher', name: '有人正用你的名字做某件事', durationMin: 40, urgency: 2,
-    desc: '偶然发现有人以你的名义在行动——预订了餐厅、报名了活动、或给某个公共平台投了稿。对方选的都是你会选的选项，语气模仿得很准，甚至知道你不吃香菜。还没有造成实质伤害，但有一件事卡在喉咙里：这个人对自己日常习惯的了解程度，超过了任何普通朋友。而自己完全不知道对方是谁。' },
-  { key: 'stranger_knows_name', name: '陌生人叫出了全名——还知道别的', durationMin: 25, urgency: 2,
-    desc: '一个完全没印象的人迎面走来，自然地叫了全名。对方提到昨天做的事——时间地点都对，语气像老朋友。自己确定不认识这张脸。在想好怎么回应之前，对方已经走近到只有一步的距离，用只有两个人能听到的音量说了后半句——那是一件从来没有对任何人说过的事。然后对方退后，等你的反应。' },
-  { key: 'mistaken_for_another', name: '被当面认定成另一个人——对方有证据', durationMin: 30, urgency: 2,
-    desc: '对面的人态度太过笃定，一时让人怀疑起自己。对方拿出了一张照片——里面的人确实和自己有几分像。但更让人在意的是照片里的场景：一个自己没有去过的地方，拍到的背影穿着一件自己确实有的外套。日期是上个周末。那天自己出过门。但没有去过那里。至少不记得去过。' },
-  { key: 'ex_appears', name: '那个人在最糟糕的时刻出现了', durationMin: 25, urgency: 2,
-    desc: '一个此刻绝对不想见到的人——正在朝这个方向走来。还有大约三十米。不能跑，跑了更难看。不能假装低头看手机，因为对方已经看到了自己。手边没有可以躲进去的巷子、店门、或人群。只剩下几秒钟，用来决定用什么表情面对，以及对方开口第一句说什么——是自己先说，还是等对方先开口。' },
+  // ═══ 机会与诱惑（20-60min）═══
+  { key: 'unexpected_offer', name: '天上掉下来的', durationMin: 30, urgency: 1,
+    desc: '有人提出了一个意料之外的提议、机会、或交易。它诱人但不完全对劲——好得不像真的，或者代价写在不起眼的地方。' },
+  { key: 'found_item', name: '捡到东西了', durationMin: 25, urgency: 1,
+    desc: '在公共或私密的空间里发现了一样不属于这里的东西。它不是垃圾也不是路人随手丢的——它有来历，可能还和角色的某个侧面有关联。' },
+  { key: 'tempting_path', name: '偷懒的诱惑', durationMin: 20, urgency: 1,
+    desc: '面前有一条更省事、更快、但不太符合规则的路。走不走——不需要告诉任何人。唯一知道的是自己。' },
 
-  // ═══ 被迫参与/被选中（20-60min）═══
-  { key: 'thing_thrown', name: '有人朝你扔了个东西——里面包着纸条', durationMin: 20, urgency: 2,
-    desc: '人群里飞出一个拳头大的纸团，精准地砸在胸前。打开皱巴巴的外层，里面是一张小纸条，手写的字很潦草。不是告白、不是广告、不是恶作剧。是一句指向某个时间和地点的短句。猛抬头找扔纸团的人，周围全是陌生面孔。其中一个背影正在走远——步伐不快不慢，没有回头。纸条还在手里。那个时间和地点，就是接下来两小时内的事。' },
-  { key: 'dragged_onstage', name: '被陌生人指名拉上了台', durationMin: 20, urgency: 2,
-    desc: '台上的人——表演者、主持人、或某种控场的角色——手指正直直地指着这个方向。周围的目光像探照灯一样汇聚过来。"就是你——上来一下。"没有任何提示、没有上下文。周围开始有掌声和起哄。坐在原地拒绝只需要两秒，但所有人会盯着更久。站起来上去——不知道上去之后会发生什么，但至少不需要继续被所有人从座位上盯着看。' },
-  { key: 'kid_package', name: '一个小孩把东西塞进手里就跑了', durationMin: 25, urgency: 2,
-    desc: '手心里突然多了一样东西——被一只小手塞进来的。抬头只来得及看到一个小孩的背影，已经跑远了，拐进了人堆或巷口。手掌打开，不是玩具、不是垃圾、不是钱。而是一件似曾相识的东西：前两天丢掉的那件小物、或者最近一直在找的那个东西、或者一个自己小时候也拥有过的完全同款的旧物。那孩子不认识。但手里的东西是真实的。' },
-  { key: 'stranger_game', name: '路边有个陌生人摆好了棋盘在等你', durationMin: 30, urgency: 1,
-    desc: '街角或公园长椅边，一个人面前摆着棋盘、扑克、或某种叫不出名字的游戏。周围没有别的玩家。也没有在等人——除了你。因为当你走得足够近时，对方抬起头，眼神没有犹疑："就差你了。"语气笃定得像认识你很久。对面的位置是空的。棋盘上的局面已经进行了一半——正在等一个黑子/白子/关键一步。' },
-  { key: 'unsigned_challenge', name: '收到了一封没有署名的信——但你认得那个符号', durationMin: 30, urgency: 2,
-    desc: '一封信或消息——没有发件人。措辞不像是威胁，更像是一种测试。提到了一个具体的时间和地点、一把长椅或一扇门、和一个只有自己知道含义的暗号。落款是一个符号——自己认得的，但想不起在哪里见过。翻来覆去看了三遍。那个符号开始在心里烧——不是害怕，是某种被点燃的旧东西，以为早就不在了。' },
+  // ═══ 小危机（15-40min）═══
+  { key: 'mistake_looming', name: '纸包不住火了', durationMin: 20, urgency: 2,
+    desc: '之前的一个错误、疏漏、或没说清的含糊之处马上就要暴露了。还有一点时间——但只够做一件事。补救、坦白、还是赌一把没人发现。' },
+  { key: 'caught_awkward', name: '被撞见了', durationMin: 15, urgency: 2,
+    desc: '正处在一个尴尬的、不应该的、或容易被误解的时刻——有人出现了。对方看到了多少不确定，但眼神说明了一些事。需要立刻决定怎么收场。' },
+  { key: 'emergency_minor', name: '紧急小事', durationMin: 25, urgency: 2,
+    desc: '目睹或卷入了一场突发的小型紧急状况——不是灾难级别的，但需要立刻反应。介入、求助、或避开——每个选择只用一秒做出，但会被反复想起。' },
 
-  // ═══ 过于精确的巧合——正在打破"随机"的底线（30-90min）═══
-  { key: 'dream_came_true', name: '今天的事和昨晚的梦逐帧重合', durationMin: 40, urgency: 1,
-    desc: '一次是意外。两次是概率。但现在是整个场景——同一个路口、同一个光线角度、同一个路人的外套颜色、胃里同样的微妙收紧感。梦里的事件正在一帧一帧地发生。但梦做到这里就醒了。接下来的部分——梦没有提前展示。站在这帧"已知"和下一帧"未知"的交界上，脚有点不想继续往前走了。但又不得不走。' },
-  { key: 'phantom_photo', name: '刚删掉的照片出现在了不该出现的地方', durationMin: 30, urgency: 2,
-    desc: '明明已经删掉并从回收站彻底清除的照片，出现在了完全不该出现的地方——朋友发来的截图的背景里、某家店面的展示墙上、或一本翻开的杂志内页。照片里的场景是真实的，角度和构图是只有自己才会那样拍的。它不应该在任何地方，但它确实在。而且——照片里有一处细节和记忆中的不一样了。多了点什么，或者少了点什么。' },
-  { key: 'thought_stolen', name: '脑中刚组织好的句子被人逐字说了出来', durationMin: 20, urgency: 2,
-    desc: '脑子里刚成形的一串措辞——还没开口、还没动嘴唇——被旁边的陌生人完整地、逐字逐句地说了出来。措辞完全一致，甚至停顿的位置都和脑中预演的重合。对方说完后继续做自己的事，完全没觉得有什么异常。那句话不是一个常用句。它包含一个极其生僻的引用或一组非常具体的意象。那个人不可能独立组合出同样的句子。不可能。但发生了。' },
-  { key: 'three_mentions', name: '同一个词今天被三个无关的人说了', durationMin: 40, urgency: 1,
-    desc: '第一次听到不以为意。第二次——来自完全不同的来源、完全不同的语境——手指顿了一下。到了第三次，第三个毫无关联的人嘴里吐出同一个词的时候，心跳在耳朵里响了一声。这个词不是日常用语，它非常具体。它可能是一个地名、一个人名、或一个不应该出现在今天对话中的专业术语。它不可能是流行语、不可能是算法推送、不可能是"你只是在注意它"。三次。三次。它在指向什么。' },
-  { key: 'perfect_stranger_repeat', name: '第三次撞见同一个完全陌生的人', durationMin: 60, urgency: 1,
-    desc: '第一次是昨天下午的咖啡店——排队时前面那个人。第二次是今天早上的地铁——隔着三个人。现在是第三次了。完全不同的地点、完全不同的时间带、换了衣服。但就是同一个人。对方也看到了你。这次没有移开视线，而是举起了一只手——像是在打招呼，又像是在示意你站在原地等ta过来。这个人的表情不是在笑，也不是在怕——是一种更复杂的东西，像是"终于"。' },
+  // ═══ 新鲜事与发现（30-90min）═══
+  { key: 'overheard_info', name: '听到了不该听的', durationMin: 30, urgency: 2,
+    desc: '无意中听到了关于某人——或关于自己——的信息。不是通过正常渠道，也没人知道角色现在知道了。这个信息让人重新审视某些事情。' },
+  { key: 'new_curiosity', name: '被种草了', durationMin: 30, urgency: 1,
+    desc: '接触到了一件从未了解过的事物——一项技能、一个圈子、一种生活方式。本来只是路过看了一眼，但它开始在心里生根。好奇心比预期的大得多。' },
 
-  // ═══ 身体/感官发出了异常信号（20-60min）═══
-  { key: 'phantom_smell', name: '闻到了一股物理上不该存在的味道', durationMin: 30, urgency: 1,
-    desc: '一阵突然而精确的气味——某个特定的人身上的洗衣液味道、童年厨房里的调料、或一处已经不存在的地方的空气。不是"类似"，是精确到能让大脑自动开始播放那一整段记忆。周围没有任何可以产生这种味道的来源。气味持续了几秒就消失了，但身体还没恢复——心跳偏快，眼眶有一点点发胀。气味走了，记忆还停在原地。' },
-  { key: 'mysterious_mark', name: '身上出现了一个不记得的印记', durationMin: 30, urgency: 1,
-    desc: '洗澡或换衣服时发现的——手腕内侧、锁骨下方、或脚踝附近——一个浅浅的痕迹。不是受伤，更像某种压痕或接触留下的印记。对着镜子仔细观察，开始用力回忆昨天的每一个片段，试图找出会留下这种印记的动作。有一段时间想不起来——不是大段的缺失，就是几分钟的空白，刚好够发生某件事但不够留下清晰的记忆。' },
-  { key: 'deja_vu_crash', name: '既视感强烈到像被人按进了水里', durationMin: 20, urgency: 2,
-    desc: '不是普通的"这个场景好像经历过"。是一股沉重的、近乎物理性的"这个瞬间已经发生过"的确信——每一个感官细节同时抵达，像一面墙迎面撞来。接下来对方会说的话、窗外即将经过的那辆车的颜色、自己喉咙里即将涌上来的某种情绪——全部在预感中，然后全部精确地、一样不差地发生了。不是幻觉。也不是巧合。结束了。但那几秒里自己被按在某种东西里面，现在还在喘气。' },
-  { key: 'eavesdrop_impossible', name: '听到了一段不该能听到的对话', durationMin: 30, urgency: 2,
-    desc: '声音从不可能的方向传来——隔了两堵墙的私语、没有人的走道深处、或者手机不处于通话状态却传出了微弱的说话声。内容是一段对话，正在进行。其中出现了自己的名字——两次。第二次后面跟着一句信息，是一个自己以为没有任何人知道的事实。屏住呼吸继续听。声音还在。但想不通声源在哪里。房间没有任何地方能让这个声音穿过来。' },
+  // ═══ 两难与冒险（20-40min）═══
+  { key: 'two_fires', name: '两头着火', durationMin: 25, urgency: 2,
+    desc: '两个同样重要、但互相矛盾的事情同时需要处理。选一边意味着另一边出问题——而不管选哪边，都要面对选了之后的结果。时间不等人，必须选。' },
+  { key: 'leap_of_faith', name: '赌一把', durationMin: 20, urgency: 1,
+    desc: '面前有一个需要冒险的决定。信息不够、时间有限、没有保证。但直觉在往某个方向用力——而且这个直觉过往的战绩有好有坏。赌不赌。' },
+  { key: 'someone_needs_help', name: '有人需要帮忙', durationMin: 25, urgency: 2,
+    desc: '一个陌生人或不太熟的人明显需要帮助——但帮这个忙有成本、有风险、或会把角色卷进一件不太想卷进的事。周围还有别人，但没有人在动。' },
 
-  // ═══ 社交场面的微小爆炸（20-40min）═══
-  { key: 'elevator_stranger', name: '困在电梯里——陌生人突然开始说真话', durationMin: 25, urgency: 2,
-    desc: '电梯停了。另一个被困的人——不认识，大概是同栋楼的面孔——在沉默了片刻之后，突然用完全不像陌生人之间说话的语气开了口。那句话不是闲聊。是坦白、质问、或一个信息——简短，但每个字都让人无法用"嗯嗯"敷衍过去。这个人可能不会再见到，可能马上就出去，可能这段对话的保质期只有电梯维修的这几分钟——但正因如此，有些话可以说，有些话必须说。' },
-  { key: 'rogue_device', name: '在绝对安静处——身上的设备突然炸响', durationMin: 20, urgency: 2,
-    desc: '在最不该出声的场合——表演中、会议的寂静里、或某个人正在说重要事情的时候——身上的某个设备以最大音量响了起来。但不是熟悉的铃声或通知音。播放的内容是一段自己从没录过的音频片段、一个陌生人的声音在叫自己的名字、或一段不应该存在的录音。关不掉。音量键失灵。所有人转头盯着。而那段音频还没播完——剩下的内容正在从扬声器里继续往外淌。' },
-  { key: 'impossible_question', name: '被当众问了一个任何回答都会暴露什么的题', durationMin: 20, urgency: 2,
-    desc: '一个看似无辜的问题从人群中浮起来——提问的人可能没有恶意，或者完全清楚自己在做什么。这个问题精准地触碰了一个绝对不能在这里说的点：两个人的秘密、一个正在进行的谎言、或一个还没准备好面对的真相。回答A会暴露其中一半，回答B会暴露另一半。沉默本身就是承认。需要决定在接下来两秒内毁掉哪一半——或者毁掉谁的。' },
-  { key: 'side_eye_secret', name: '撞破了一个自己不该看到的眼神交换', durationMin: 30, urgency: 2,
-    desc: '如果不是恰好站在这个角度，根本不会注意到。两个熟人在以为没人看的时候交换了一个表情——极快，不到一秒，但信息量太大了。有秘密、有共谋、有某种与自己有关的潜台词。现在两个人都恢复了正常，正在朝自己自然地说笑。但那个表情还残留在视网膜上。它暗示了一件事——自己一直被蒙在鼓里的事。而这件事可能已经存在了很长一段时间。' },
-  { key: 'wrong_offer', name: '一个不该答应的提议——但全身都在想答应', durationMin: 30, urgency: 1,
-    desc: '对方提了一个理智层面应该婉拒的提议。但身体的第一反应骗不了人——心跳加速不是因为紧张，是因为兴奋。对方的嘴角有一点非常微小的弧度，像是知道答案。表情管理还维持着——"我再考虑一下"——但脑子里已经在预演答应之后会发生的事。那些事和"不该做"之间有重叠区域，但那个区域边缘模糊，看起来很诱人。' },
+  // ═══ 一个人的道德瞬间（10-40min）═══
+  // 没有观众、没有对方在等你的反应、纯自己和良心对弈
+  { key: 'broke_something_secret', name: '不小心弄坏了', durationMin: 20, urgency: 2,
+    desc: '碰倒了、摔了、洒了——一件不属于自己的东西坏了。主人不在场。周围没人看到。可以走，可以留张纸条，可以试着修。但不管选什么，那声碎裂的声音还在耳朵里。' },
+  { key: 'forbidden_to_look', name: '忍不住想看的', durationMin: 20, urgency: 1,
+    desc: '某个不该看的东西刚好触手可及——没锁的屏幕、敞开的抽屉、一份写着"保密"但没人看守的文件。看了没人会发现。但知道之后就不能假装不知道了——而且看到的东西未必是想要的。' },
+  // ═══ 日常里的异物（20-90min）═══
+  // 略微异世界/奇幻方向：日常中混进了一样不属于这个日常的东西。不恐怖，不诡异——
+  // 更像是一瞬间的"等等，这个世界比我想的大一点"。全虚指，不给具体物品，LLM 自由发挥
+  { key: 'flea_market_find', name: '淘到了怪东西', durationMin: 40, urgency: 1,
+    desc: '地摊、旧货店、或某个不起眼的角落里——一样东西攫住了目光。说不上哪里特别，但手指碰上去的瞬间有种说不清的触感。摊主报了一个低得不像话的价，像是在清库存——又像是在找"对的人"把它带走。买下它的决定只需要一秒，搞清楚它是什么可能需要很久。' },
+  { key: 'mystery_vial', name: '捡到来路不明的东西', durationMin: 30, urgency: 1,
+    desc: '路边、台阶下、或某个不该有东西的地方——躺着一个小容器。瓶、罐、盒——材质不眼熟，里面装的东西透过外壳微微透出某种难以描述的光泽或温度。没有标签，没有说明，只有一个不认识的符号或一个褪色的手写字。拿起来的第一反应是"这是什么"——第二反应是"要不要打开"。' },
+  { key: 'phantom_shop', name: '不存在的店铺', durationMin: 60, urgency: 1,
+    desc: '一条走过无数遍的街上——今天多了一家店。不是新开的——门面有种在这里待了很久的感觉，但自己确定昨天、前天、上周这里都是另一家店或一堵墙。橱窗里摆的东西和这条街上的任何一家都不一样。门口挂着"营业中"。推开门的冲动和走过去的惯性在打架。' },
+  { key: 'vending_mystery', name: '贩卖机里的异物', durationMin: 20, urgency: 1,
+    desc: '投币、按键——哐当一声，掉出来的不是选的那个。不是隔壁货道滑错了——是一种不应该出现在任何自动贩卖机里的东西。包装上没有品牌，没有条形码，只有一行手写体或一个图案。机器不会解释。手里的东西也不会。现在该拿它怎么办——大概是今天第一个真正需要想的问题。' },
 
-  // ═══ 时间与空间的规则正在微妙崩坏（30-120min）═══
-  { key: 'vending_mystery', name: '自动贩卖机吐出了不是自己选的东西', durationMin: 30, urgency: 1,
-    desc: '按的是咖啡，哐当一声滚出来的是一样完全不同的物品——不是零食、不是饮料，而是一件不该出现在自动贩卖机里的东西。上面贴了一张手写的标签，字迹不像是店员写的。翻过来——背面还有一行更小的字，提到了附近某个具体的地点和一个时间段。"如果你拿到了这个"——自己在读这行字的时候手指有点发麻，因为那个地点是自己每天都会经过但从没进去过的地方。' },
-  { key: 'shop_switch', name: '推开店门——外面的世界被调包了', durationMin: 60, urgency: 1,
-    desc: '只是进去不到五分钟。推门出来时，街上有什么不一样了。不是大变——一个招牌换了颜色、路边停着一辆不该在这个城市的车、空气的湿度变了。手机信号满格但自动对时的时间是错的，差了整整几个小时。旁边便利店的店员制服颜色和记忆中不同。回头看刚才出来的那扇门——它在一个之前没有门的墙面上。摸了摸门把手——凉的，真实存在。但刚才自己是从哪里进去的？' },
-  { key: 'clock_divergence', name: '所有的钟都在说不同的时间——而且差距在扩大', durationMin: 40, urgency: 1,
-    desc: '手机上的时间、街边电子钟的时间、店里墙上的指针——三个完全不同的数字，差别大到不可能是时区或误差。盯得越久越不对劲。手机上的秒针走得太慢了。不对，是电子钟太快了。也不对。是自己感受到的时间流速变了？重新看三个钟——差距比刚才更大了。三个时间在以不同的速度向前流动。而自己正站在三个不同时间流速的交汇点上。' },
-  { key: 'number_pattern', name: '今天遇到的每一个数字都在重复同一个序列', durationMin: 40, urgency: 1,
-    desc: '早上找零的钱数。电梯停靠的楼层。外卖单号后几位。路过的车牌后三位——同一个数字组合。到了第七次开始主动找下一个数字来确认能不能打破这个模式。第十次：一辆公交车身侧面硕大的广告电话号码，同一个数字序列嵌在其中。手已经自动打开了备忘录在搜索这个数字。它可能是一个日期、一个坐标、一个编号——或者什么都不是。但如果它什么都不是，为什么自己的后颈有点发麻。' },
-  { key: 'liminal_hour', name: '凌晨三四点——城市在运行另一套规则', durationMin: 90, urgency: 1,
-    desc: '这个时间醒着的人之间有一种默契：便利店里穿玩偶服买东西的人、河堤上一个人反复练习挥棒的人、自助洗衣店里对着滚筒自言自语的人。每个人的存在都在说明同一件事——凌晨三点到四点半之间，正常世界的规则暂时松动了。而自己今晚也在这个时间醒着，走在街灯之间，还没有向自己解释清楚为什么要出门。然后看到下一个路灯下，另一个人影。' },
-
-  // ═══ 被迫扮演/越界/踏入禁区（20-50min）═══
-  { key: 'fake_identity_trap', name: '被误认成某个人——将错就错的诱惑太大了', durationMin: 30, urgency: 2,
-    desc: '对方迎上来的表情是松了一口气——"您终于到了！"——显然认错人了。纠正的话含在嘴里时，看到了对方手里递过来的东西、旁边众人的期待表情、和那扇正在为自己打开的门。继续往前走只需要闭嘴点头，但跨过那扇门之后，这个误会就暂时脱不掉了——除非自己主动拆穿。而那个被误认的身份——从对方恭敬的语气和周围人的反应来看——比自己预想的要有趣得多。' },
-  { key: 'caught_in_the_act', name: '正在做一件不该做的事——最不该的人出现了', durationMin: 20, urgency: 2,
-    desc: '手还放在不该放的位置。屏幕还亮着不该被看到的页面。或嘴里还含着那句不该说的话。而那个人——所有人类中最不该看到这一幕的那一个——正站在几米外，目光已经锁定。脸上可能已经有结论了，也可能什么都没有写，只是在等一个解释。自己需要在一秒之内决定：承认、否认、转移话题、反问对方为什么在这里、或者试试看能不能让这件事变成一个"笑点"。' },
-  { key: 'overheard_about_self', name: '不小心听到别人在认真讨论自己', durationMin: 25, urgency: 2,
-    desc: '自己的名字从转角飘过来。不是那种随口提到的语气——是在认真地、压低声音地讨论。内容让人定住了：涉及一件自己没告诉过任何人的事，或一个连自己都还没确认的"事实"。说话的人不知道自己在墙的另一边。继续听就不可逆地获取了不该获取的信息。走开就等于永远不知道那个人接下来要说的下半句——而那个下半句可能正是关于"怎么办"的部分。' },
-  { key: 'line_crossed', name: '越过了一条明确写着"止步"的线——没有人知道', durationMin: 40, urgency: 1,
-    desc: '不是什么惊天大事——翻过了一道"禁止进入"的围栏、推开了一扇写着"外人免进"的门、或走进了一段被警戒线拦住的路。没有人看见。这个事实比背后的场景更让人心跳加速。现在站在不该在的地方，周围的空气、声音、光线都和外面不是同一个世界。那道被越过的线还在身后——现在转身回去什么事都没有。但到目前为止，还没有人转身。前面似乎还有空间。' },
+  // ═══ 喜讯降临（20-60min）═══
+  // 纯粹的好消息：一条信息、一个通知、一通电话、一次告知——角色被动接收到了
+  // 让自己高兴起来的消息。不是角色"做到了"什么，而是"得知了"什么。
+  { key: 'unexpected_approval', name: '居然过了', durationMin: 25, urgency: 1,
+    desc: '一个没抱希望的申请、投递、或请求——居然通过了。当初提交的时候甚至犹豫过要不要点"发送"，现在结果就在面前。不是"努力终于有了回报"的励志叙事，就是那种"原来我也配"的、有点不真实的踏实感。' },
+  { key: 'public_recognition', name: '被看见了', durationMin: 30, urgency: 1,
+    desc: '某个默默做了很久的事情——一项创作、一份工作、或一种坚持——被人在公开场合提起来了。不是客套的夸奖，是有人真的看到了其中的用心，并且说了出来。被理解的感觉和被赞扬的感觉同时涌上来，分不清哪个更多。' },
+  { key: 'surprise_invitation', name: '意想不到的邀请', durationMin: 25, urgency: 1,
+    desc: '一个意料之外的邀请——来自一个没想到会想起自己的人、或一个没想到自己够格参与的场合。邀请本身就是一个信号：有人把角色放进了他们心里的某个名单。去不去另说——被放进去了这件事，本身就让人心情好了一截。' },
+  { key: 'second_chance_news', name: '失而复得', durationMin: 30, urgency: 1,
+    desc: '一个以为已经错过了的机会——关门了、过期了、或自己主动放弃了的——又回来了。不是努力争取来的，就是某个条件变了、某个人想起了角色、或命运突然觉得该给第二次。窗口重新打开的那一瞬间，比第一次得到机会还让人心跳。' },
+  { key: 'lucky_timing', name: '刚好赶上', durationMin: 20, urgency: 1,
+    desc: '一个稍纵即逝的好事——恰好被自己碰上了。不是提前知道、不是有内幕消息、就是刚好在对的时间站在了对的地方。那一瞬间的运气好得像被人安排好的一样。捡到宝的心情里混着一点得意——今天是我的天。' },
+  { key: 'mystery_blessing', name: '天上掉馅饼', durationMin: 25, urgency: 1,
+    desc: '一份来路不明的好意——匿名、间接、或通过一个"我也不知道为什么给你"的渠道——落到了角色头上。没有附加条件、没有隐形代价、就是纯粹的"有人想让ta高兴"。不知道是谁、不知道为什么——但今天确实被这个世界善待了一次。' },
 ];
 
 /**
@@ -137,70 +128,57 @@ function getAvailableEventTypes(character, db) {
   return EVENT_TYPES;
 }
 
-// 奇遇类别 → VAD 情绪偏移（被 chat.js 情绪引擎消费，纯规则零 LLM 开销）
-// 正值=提升(V愉悦/A兴奋/D支配感)，负值=降低，范围 [-0.15, +0.15]
+// 事件类别 → VAD 情绪偏移（被 chat.js 情绪引擎消费，纯规则零 LLM 开销）
+// 正值=提升(V愉悦/A兴奋/D支配感)，负值=降低，范围 [-0.30, +0.45]
 const EVENT_VAD_MODIFIERS = {
-  // ═══ 手机/网络异常 — 被窥视/微不安 ═══
-  flight_booked:        { valence:-0.03, arousal: 0.10, dominance:-0.05 },
-  trapped_in_group:     { valence:-0.05, arousal: 0.10, dominance:-0.08 },
-  self_sent_message:    { valence:-0.05, arousal: 0.12, dominance:-0.05 },
-  mystery_friend:       { valence:-0.03, arousal: 0.08, dominance:-0.03 },
-  phantom_post:         { valence:-0.05, arousal: 0.10, dominance:-0.05 },
+  // ═══ 日常节奏被打乱 ═══ — V:[-0.15,0], A:[+0.1,+0.35], D:[-0.15,0]
+  routine_broken:        { valence:-0.10, arousal: 0.20, dominance:-0.10 },
+  running_late:          { valence:-0.15, arousal: 0.35, dominance:-0.15 },
+  lost_something:        { valence:-0.10, arousal: 0.15, dominance:-0.10 },
+  something_broke:       { valence:-0.15, arousal: 0.25, dominance:-0.15 },
 
-  // ═══ 物理空间异常 — 安全感被打破 ═══
-  shoes_at_door:        { valence:-0.08, arousal: 0.10, dominance:-0.05 },
-  things_moved:         { valence:-0.05, arousal: 0.08, dominance:-0.05 },
-  mirror_delay:         { valence:-0.08, arousal: 0.12, dominance:-0.08 },
-  unknown_door:         { valence: 0.05, arousal: 0.10, dominance: 0.03 },
-  upstairs_nobody:      { valence:-0.08, arousal: 0.10, dominance:-0.05 },
+  // ═══ 人际交集 ═══ — 混合：好奇/压力/失控
+  stranger_approach:     { valence:-0.10, arousal: 0.25, dominance:-0.15 },
+  witness_moment:        { valence:-0.15, arousal: 0.35, dominance:-0.15 },
+  put_on_spot:           { valence:-0.25, arousal: 0.35, dominance:-0.30 },
 
-  // ═══ 冒充/找你 — 失控/被针对 ═══
-  name_poacher:         { valence:-0.08, arousal: 0.10, dominance:-0.08 },
-  stranger_knows_name:  { valence:-0.10, arousal: 0.12, dominance:-0.10 },
-  mistaken_for_another: { valence:-0.03, arousal: 0.08, dominance:-0.05 },
-  ex_appears:           { valence:-0.08, arousal: 0.12, dominance:-0.05 },
+  // ═══ 机会与诱惑 ═══ — 正面为主，带不确定性
+  unexpected_offer:      { valence: 0.15, arousal: 0.25, dominance: 0.10 },
+  found_item:            { valence: 0.10, arousal: 0.25, dominance: 0.05 },
+  tempting_path:         { valence: 0.10, arousal: 0.20, dominance: 0.15 },
 
-  // ═══ 被迫参与/被选中 — 被卷入 ═══
-  thing_thrown:         { valence: 0.00, arousal: 0.12, dominance:-0.05 },
-  dragged_onstage:      { valence:-0.05, arousal: 0.12, dominance:-0.10 },
-  kid_package:          { valence: 0.03, arousal: 0.10, dominance:-0.03 },
-  stranger_game:        { valence: 0.05, arousal: 0.08, dominance: 0.00 },
-  unsigned_challenge:   { valence: 0.03, arousal: 0.12, dominance: 0.02 },
+  // ═══ 小危机 ═══ — 高压、负价
+  mistake_looming:       { valence:-0.30, arousal: 0.35, dominance:-0.25 },
+  caught_awkward:        { valence:-0.30, arousal: 0.35, dominance:-0.30 },
+  emergency_minor:       { valence:-0.25, arousal: 0.45, dominance:-0.15 },
 
-  // ═══ 过于精确的巧合 — 敬畏/微不安 ═══
-  dream_came_true:      { valence: 0.00, arousal: 0.10, dominance:-0.05 },
-  phantom_photo:        { valence:-0.05, arousal: 0.10, dominance:-0.05 },
-  thought_stolen:       { valence:-0.05, arousal: 0.12, dominance:-0.08 },
-  three_mentions:       { valence: 0.00, arousal: 0.08, dominance:-0.03 },
-  perfect_stranger_repeat:{ valence: 0.03, arousal: 0.10, dominance: 0.00 },
+  // ═══ 新鲜事与发现 ═══
+  overheard_info:        { valence:-0.15, arousal: 0.25, dominance:-0.10 },
+  new_curiosity:         { valence: 0.25, arousal: 0.20, dominance: 0.10 },
 
-  // ═══ 身体/感官异常 — 身体比理智诚实 ═══
-  phantom_smell:        { valence: 0.00, arousal: 0.05, dominance:-0.03 },
-  mysterious_mark:      { valence:-0.05, arousal: 0.08, dominance:-0.05 },
-  deja_vu_crash:        { valence:-0.05, arousal: 0.15, dominance:-0.10 },
-  eavesdrop_impossible: { valence:-0.08, arousal: 0.10, dominance:-0.05 },
+  // ═══ 两难与冒险 ═══
+  two_fires:             { valence:-0.30, arousal: 0.35, dominance:-0.25 },
+  leap_of_faith:         { valence: 0.10, arousal: 0.30, dominance: 0.15 },
+  someone_needs_help:    { valence:-0.10, arousal: 0.25, dominance: 0.05 },
 
-  // ═══ 社交微爆炸 — 高压/即时应对 ═══
-  elevator_stranger:    { valence: 0.00, arousal: 0.10, dominance:-0.05 },
-  rogue_device:         { valence:-0.10, arousal: 0.15, dominance:-0.10 },
-  impossible_question:  { valence:-0.10, arousal: 0.12, dominance:-0.08 },
-  side_eye_secret:      { valence:-0.08, arousal: 0.10, dominance:-0.05 },
-  wrong_offer:          { valence: 0.05, arousal: 0.08, dominance: 0.02 },
+  // ═══ 一个人的道德瞬间 ═══ — 内疚/诱惑/责任，静水深流
+  broke_something_secret:{ valence:-0.25, arousal: 0.30, dominance:-0.15 },
+  forbidden_to_look:     { valence: 0.10, arousal: 0.25, dominance: 0.10 },
 
-  // ═══ 时空崩坏 — 敬畏/迷茫 ═══
-  vending_mystery:      { valence: 0.05, arousal: 0.08, dominance: 0.00 },
-  shop_switch:          { valence:-0.03, arousal: 0.10, dominance:-0.08 },
-  clock_divergence:     { valence:-0.05, arousal: 0.08, dominance:-0.08 },
-  number_pattern:       { valence: 0.00, arousal: 0.08, dominance:-0.03 },
-  liminal_hour:         { valence: 0.02, arousal:-0.03, dominance: 0.03 },
+  // ═══ 日常里的异物 ═══ — 好奇+兴奋，"世界比想的大"
+  flea_market_find:      { valence: 0.25, arousal: 0.25, dominance: 0.15 },
+  mystery_vial:          { valence: 0.15, arousal: 0.30, dominance: 0.10 },
+  phantom_shop:          { valence: 0.25, arousal: 0.30, dominance: 0.15 },
+  vending_mystery:       { valence: 0.15, arousal: 0.25, dominance: 0.05 },
 
-  // ═══ 被迫扮演/越界 — 兴奋与恐惧并存 ═══
-  fake_identity_trap:   { valence: 0.05, arousal: 0.10, dominance: 0.03 },
-  caught_in_the_act:    { valence:-0.12, arousal: 0.15, dominance:-0.10 },
-  overheard_about_self: { valence:-0.08, arousal: 0.10, dominance:-0.05 },
-  line_crossed:         { valence: 0.05, arousal: 0.08, dominance: 0.05 },
+  // ═══ 喜讯降临 ═══ — 纯粹愉悦：V全正、A中高（好消息天然唤醒兴奋）、D全正（喜讯提升自我效能感）
+  unexpected_approval:   { valence: 0.30, arousal: 0.30, dominance: 0.20 },  // 惊喜+"原来我也配"
+  public_recognition:    { valence: 0.25, arousal: 0.20, dominance: 0.25 },  // 被看见+被理解，支配感强
+  surprise_invitation:   { valence: 0.25, arousal: 0.30, dominance: 0.15 },  // 被纳入名单的兴奋
+  second_chance_news:    { valence: 0.25, arousal: 0.25, dominance: 0.15 },  // 窗口重开的心跳加速
+  lucky_timing:          { valence: 0.25, arousal: 0.35, dominance: 0.15 },  // 刚好赶上的兴奋
+  mystery_blessing:      { valence: 0.20, arousal: 0.20, dominance: 0.10 },  // 被世界善待，温和暖意
 };
-
 /**
  * 根据事件类型 key 获取对应的 VAD 情绪偏移量
  * @param {string} eventTypeKey
@@ -216,7 +194,7 @@ export function getUrgencyLevel(eventTypeKey) {
 }
 
 /**
- * 生成奇遇事件
+ * 生成特殊事件
  *
  * @param {object} character - 角色行
  * @param {object} [options] - 可选参数
@@ -352,24 +330,20 @@ export async function generateEvent(character, options = {}) {
 
   const directorSystem = `${jailbreakPrompt}
 ${worldIntegrationBlock}
-你正在生成一段紧密第三人称叙事（close third-person narration）。你写出的文字会被直接展示给读者——读者看到的是关于「${displayName}」的生动叙述。
+你正在为「${displayName}」生成一段特殊事件的开场叙事——所谓"特殊事件"，就是在角色当下的日常中撕开了一道口子的某个瞬间。它可以大（紧急状况、陌生人闯入、一个改变轨迹的邀约），也可以小（迟到了、东西丢了、一个没来由的情绪涌上来），可以是正面的（惊喜、发现、心动），也可以是负面的（危机、尴尬、暴露），可以"奇"——但不是必须奇。
+
+你的任务是写出这个"口子被撕开"的瞬间——紧密第三人称叙事（close third-person narration），读者看到的是关于「${displayName}」的生动叙述。
 
 铁律——违反以下任何一条即视为失败：
 - 指代角色只用「她」「他」「ta」「${displayName}」，绝对、绝对不要使用「你」字
 - 叙事中不存在一个被称呼的"你"——这不是第二人称游戏文本，这是第三人称小说叙事
 - 使用自由间接引语（free indirect discourse）：第三人称代词，但浸透角色的即时感受
 
-正确示例：
-"${displayName}的手指停在发送键上方。屏幕光映在瞳孔里，喉结滚动了一下。如果发出去——ta很清楚——有些东西就真的回不去了。"
-
-错误示例（严格禁止）：
-"你的手指停在发送键上方。你犹豫了。"
-→ 使用"你"就是失败。永远不要出现"你"。
-
 叙事原则：
 - 从具体的感官细节开始——声音、画面、身体感受
 - 展现身体反应而非命名情绪："手心渗出细密的汗"而非"ta感到紧张"
-- 结尾留下必须立刻面对的张力——不是在写结局，是在打开一个需要做出选择的瞬间`;
+- 结尾卡在角色必须做出选择的那个点——不是在写结局，是在打开一个需要立刻面对的瞬间
+- **最重要的是**：这个事件必须像是为${displayName}量身定做的。换个角色就不成立——不是情节不成立，是反应方式、关注点、内心活动不成立。`;
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
   let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
@@ -393,12 +367,12 @@ ${multiPerson.otherPersona}`;
 
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"title":"事件标题（8字以内，必须自带悬念钩子。如'有人替你订了票''天花板上的脚步''脑中刚想的话被说了出来'）","description":"场景叙述（紧密第三人称，80-150字。从一个具体的感官细节切入——声音/画面/身体感受——然后展开角色的即时反应。结尾必须留下一个需要立刻面对的局面。铁律：不使用'你'字，始终用ta/她/他）","prompt":"画面描述（英文。${imagePromptInstruction}）${multiPersonImageNote}","choiceA":"选项A（具体的行动路径，如'推门进去问清楚'。8-15字）","choiceB":"选项B（与A形成真正的行动对比——介入vs抽身/直接vs迂回/现在vs稍后。8-15字）"}
+{"title":"事件标题（8字以内，从本次事件的具体细节中提炼——一个让人想点进去看的标题）","description":"场景叙述（紧密第三人称，80-150字。从感官细节切入，展开角色的即时反应，结尾卡在选择点上。铁律：不使用'你'字，始终用ta/她/他。重要：事件方向只是一个出发点——具体场景必须由角色人格和世界观驱动，不要产出可以被复制粘贴到其他角色身上的通用故事）","prompt":"画面描述（英文。${imagePromptInstruction}）${multiPersonImageNote}","choiceA":"选项A（具体行动，8-15字。与B形成真正的行动对比）","choiceB":"选项B（与A形成真正的行动对比——介入vs抽身/直接vs迂回/面对vs回避/现在vs稍后。8-15字）"}
 
 选项设计原则：
-- A和B必须是性质完全不同的两条行动路径——读者应该能立刻感受到选择A和选择B通往不同的情绪走向
+- A和B必须是性质完全不同的两条行动路径——读者立刻感受到它们通往不同的情绪走向
 - 避免两个"本质上差不多"的选项
-- 根据场景选择最合适的对比维度：做vs不做、直接vs迂回、自己vs求助、现在vs等、诚实vs保留、介入vs抽身`;
+- 根据场景选择最合适的对比维度：做vs不做、直面vs绕开、自己解决vs求助、立刻vs等等、坦白vs保留、介入vs旁观`;
 
   // [3] 创作任务
   const multiPersonNote = multiPerson
@@ -413,10 +387,21 @@ ${multiPerson.otherPersona}`;
 ${contextBlock}
 ${timeTag}${multiPersonNote}
 
-请以紧密第三人称创作这个奇遇时刻的开场。要求：
-${worldPenetrationLine}- 从一个感官细节开始——一个声音、一个画面、一个身体感受——而不是背景介绍
-- 场景长度 80-150 字，结尾留下让角色必须立刻面对的局面
-- 两个选项的行动路径要有真正的差异和各自的代价——读者选A和选B应该通往完全不同的情绪走向`;
+**关键理解**：上面的事件方向只指了一个大概的方向——它不是剧本，里面没有任何具体的场景设定。你的任务是把方向翻译成${displayName}今天此刻实际遇到的事情。
+
+基于以下素材来创作：
+- ${displayName}的人格：外貌、性格、行为模式、说话方式——这是最重要的创作来源
+- ${worldSetting ? '世界观的基本法则——这个世界里什么是日常、什么算特殊，由世界观决定' : '现实世界背景——以真实世界的日常为基准'}
+- 当前时间：${timeTag}——事件发生在这个时间点，场景细节要贴合
+- ${multiPerson ? '与' + multiPerson.otherName + '的关系——互动要贴合两人的真实关系' : '角色近期的状态——事件应该自然地嵌入角色的生活中'}
+${contextBlock ? '- ' + contextBlock.trim() : ''}
+
+请以紧密第三人称创作这个特殊事件的开场。要求：
+${worldPenetrationLine}- 从一个感官细节开始——声音、画面、身体感受——而不是背景介绍
+- 场景长度 80-150 字，结尾卡在角色必须做出选择的那个点
+- 这个事件不需要惊天动地——它只需要在${displayName}今天的日常中撕开一道值得注意的口子。可以是温暖的、尴尬的、紧张的、好奇的、或微妙不安的——方向决定基调，角色人格决定具体样貌
+- 两个选项的行动路径要形成真正的岔路口——选A和选B通往不同的情绪走向。每条路径的后果应该让读者"没想到但回头想又合理"
+- **最重要**：这个事件必须像是为${displayName}量身定做的。如果可以把主角名字换成另一个人而故事依然成立——那就是失败的。`;
 
   const msgs = [
     { role: 'system', content: directorSystem },
@@ -609,15 +594,12 @@ export async function generateNextBranch(character, event, choice) {
 
   const directorSystem2 = `${jailbreakPrompt}
 ${worldIntegrationBlock2}
-你正在为「${displayName2}」的奇遇故事生成下一幕——一段紧密第三人称叙事。
+你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕结束在一个选择点上，角色做出了选择，现在该展现选择之后发生的事情。
 
 铁律（违反即失败）：
 - 指代角色只用「她」「他」「ta」「${displayName2}」，绝对不要使用「你」
 - 叙事中不存在被称呼的"你"——这是第三人称小说叙事，不是第二人称游戏文本
-- 读者应该始终能感受到${displayName2}的即时情绪变化——通过身体反应来展现，而非通过情绪命名
-
-正确：${displayName2}的手指不自觉蜷进掌心。喉咙发干。
-错误：你感到紧张。你的手心出汗。`;
+- 通过身体反应来展现角色的即时情绪变化，而非直接命名情绪`;
 
   let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
@@ -638,9 +620,11 @@ ${multiPerson2.otherPersona}`;
 
   const formatPrompt2 = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"description":"选择后的场景叙述（紧密第三人称，80-150字。承接上一个选择的结果，从一个具体的感官细节开始，展现角色此刻的即时感受和新出现的局面）","prompt":"画面描述（英文。${branchImagePromptInstruction}）${multiPersonImageNote2}","choiceA":"新选项A（具体行动，与B形成真正的对比。8-15字）","choiceB":"新选项B（具体行动，与A性质不同。8-15字）"}
+{"description":"选择后的场景叙述（紧密第三人称，80-150字。承接上一个选择的结果，从一个具体的感官细节开始，展现角色此刻的即时感受和新出现的局面。**场景转折要出乎意料但又在情理之中**——读者应该感到"居然会这样"但紧接着就觉得"仔细想确实会这样"）","prompt":"画面描述（英文。${branchImagePromptInstruction}）${multiPersonImageNote2}","choiceA":"新选项A（具体行动，与B形成真正的对比。8-15字）","choiceB":"新选项B（具体行动，与A性质不同。8-15字）"}
 
-选项设计原则与之前相同：A和B必须形成真正的行动对比，不要给本质上差不多的选项。`;
+选项设计原则：
+- A和B必须形成真正的行动对比，不要给本质上差不多的选项
+- **每个选项的后果要出乎意料但又在情理之中**——读者选之前猜不到接下来会发生什么，但发生之后回头看会觉得"这个展开确实合理"`;
 
   // 只有多人模式才注入关系信息（和初始事件生成一致）
   const multiNote2 = multiPerson2
@@ -653,9 +637,18 @@ ${multiPerson2.otherPersona}`;
 
   const directorPrompt2 = `事件标题：${event.title}
 ${historyText}${multiNote2}
+
+**核心要求——让分支有趣**：接下来的场景不能是"选了A所以A发生了"的平铺直叙。读者选择之后应该经历一个"没想到会这样——但仔细一想确实合理"的转折。这个转折可以来自：
+- 选择引发的连锁反应中，出现了角色没预料到的因素
+- 某个之前被忽略的细节突然变得关键
+- 另一个角色的反应方式出乎意料（但符合那个人的人设）
+- 环境或时机带来了额外的变量
+
+**重要提醒**：场景必须忠实于「${displayName2}」的人格——ta的反应方式、内心活动、决策逻辑，都应该让读者觉得"换了别人就不会这样"。
+
 请以紧密第三人称创作选择之后发生的下一个场景。要求：
 ${worldPenetrationLine2}- 承接上一个选择的结果，从一个具体的感官细节开始
-- 场景长度 80-150 字，展现角色此刻的即时感受和新出现的局面
+- 场景长度 80-150 字，展现角色此刻的即时感受和新出现的局面——其中至少有一个读者没预料到的元素
 - 给出新的A和B选项（不要和之前的选项重复，保持故事持续发展）
 - 新选项继续形成行动路径的对比——让玩家每一步都面临真正的岔路口`;
 
@@ -675,7 +668,7 @@ ${worldPenetrationLine2}- 承接上一个选择的结果，从一个具体的感
   let branchData;
   let rawBranchResult = '';
   try {
-    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇分支' });
+    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '事件分支' });
     const jsonStr = extractFirstJson(rawBranchResult);
     if (!jsonStr) throw new Error('No JSON found in LLM response');
     branchData = JSON.parse(repairJson(jsonStr));
@@ -710,12 +703,17 @@ ${worldPenetrationLine2}- 承接上一个选择的结果，从一个具体的感
   }
 
   // 6. 更新 choice_history 和 summary
+  // 存储上一步的选项信息，用于撤回（undo）时恢复
   const newChoiceEntry = {
     branch: event.current_branch + 1,
     choice_label: choice.label,
     choice_text: choice.customText || '',
     summary: branchData.description,
     image: imageUrl,
+    prev_choice_a: event.choice_a,
+    prev_choice_b: event.choice_b,
+    prev_choice_c_label: event.choice_c_label || '自由行动',
+    prev_prompt: event.prompt || '',
   };
   choiceHistory.push(newChoiceEntry);
 
@@ -790,7 +788,7 @@ export async function concludeEvent(character, event, outcome) {
     : '';
 
   const taskPrompt = event.engaged
-    ? `为以下奇遇事件生成结局叙述和记忆摘要。
+    ? `为以下特殊事件生成结局叙述和记忆摘要。
 事件标题：${event.title}
 ${historyText}
 当前场景：${event.description}
@@ -821,7 +819,7 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
 
   let conclusionData;
   try {
-    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '奇遇结局' });
+    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '事件结局' });
     const jsonStr = extractFirstJson(result);
     if (!jsonStr) throw new Error('No JSON found');
     conclusionData = JSON.parse(repairJson(jsonStr));
@@ -844,11 +842,11 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
     const entities = JSON.stringify([character.display_name, event.title]);
 
     // 摘要文本：仅结论（用于 memory_fragments + 聊天注入，避免全量分支撑爆上下文）
-    const summaryText = `【奇遇】${event.title}\n${conclusionData.summary}`;
+    const summaryText = `【事件】${event.title}\n${conclusionData.summary}`;
 
     // 完整文本：全部分支（用于 ChromaDB 向量检索，使事件细节也可被语义召回）
     const parsedHistory = JSON.parse(event.choice_history || '[]');
-    let fullVectorText = `【奇遇】${event.title}\n开始：${event.description}`;
+    let fullVectorText = `【事件】${event.title}\n开始：${event.description}`;
     for (const h of parsedHistory) {
       if (h.branch === 0) continue;
       fullVectorText += `\n选择了：「${h.choice_label}」→ ${h.summary}`;
@@ -858,14 +856,14 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
     if (!event.engaged) {
       db.prepare(`
         DELETE FROM memory_fragments
-        WHERE conversation_id = ? AND fragment_type = 'fact' AND content LIKE '【未互动的奇遇】%'
+        WHERE conversation_id = ? AND fragment_type = 'fact' AND content LIKE '【未互动的事件】%'
       `).run(conversationId);
       console.log(`[eventGen] Replaced old unengaged event memory for ${character.display_name}`);
     }
 
     const contentWithTag = event.engaged
-      ? `【奇遇·已完成】${summaryText}`
-      : `【未互动的奇遇】${summaryText}`;
+      ? `【事件·已完成】${summaryText}`
+      : `【未互动的事件】${summaryText}`;
 
     const insertResult = db.prepare(`
       INSERT INTO memory_fragments (conversation_id, fragment_type, content, entities)

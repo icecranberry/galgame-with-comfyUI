@@ -132,14 +132,17 @@ ${urgencyNote}
 
         const segments = splitText(greeting);
         let firstMsgId;
+        const msgIds = [];
         if (segments.length === 0) {
           const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, 0, 1, ?)`)
             .run(conversationId, rawId, greeting, event.id);
           firstMsgId = r.lastInsertRowid;
+          msgIds.push(r.lastInsertRowid);
         } else {
           const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, ?, 1, ?)`);
           for (let i = 0; i < segments.length; i++) {
             const r = insertMsg.run(conversationId, rawId, segments[i], i, event.id);
+            msgIds.push(r.lastInsertRowid);
             if (i === 0) firstMsgId = r.lastInsertRowid;
           }
         }
@@ -173,6 +176,8 @@ ${urgencyNote}
           display_name: event.display_name,
           avatar_path: event.avatar_path || null,
           content: greeting,
+          segments,
+          msg_ids: msgIds,
           msg_id: firstMsgId,
           raw_id: rawId,
           images: null,

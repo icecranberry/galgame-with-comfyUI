@@ -572,14 +572,18 @@ export const useChatStore = defineStore('chat', () => {
 
     // 如果是当前活跃角色，直接追加消息到聊天界面
     if (activeCharId.value === charId && data.msg_id) {
-      // 文字问候气泡
-      messages.value.push({
-        id: data.msg_id,
-        role: 'assistant',
-        type: 'text',
-        content: data.content,
-        created_at: data.created_at,
-      })
+      // 文字问候气泡：按 segments 分句，每个分句一个气泡
+      const segments = data.segments?.length ? data.segments : [data.content];
+      const msgIds = data.msg_ids?.length ? data.msg_ids : [data.msg_id];
+      for (let i = 0; i < segments.length; i++) {
+        messages.value.push({
+          id: msgIds[i] || (i === 0 ? data.msg_id : uid()),
+          role: 'assistant',
+          type: 'text',
+          content: segments[i],
+          created_at: data.created_at,
+        });
+      }
 
       // 奇遇分享卡片气泡（如果有）
       if (data.card_msg_id) {

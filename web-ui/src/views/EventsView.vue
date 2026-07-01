@@ -136,8 +136,6 @@ import EventCard from '../components/EventCard.vue'
 const store = useEventsStore()
 const chat = useChatStore()
 const showHistory = ref(false)
-const historyPage = ref(1)
-const HISTORY_PAGE_SIZE = 20
 const showPicker = ref(false)
 const pickerRef = ref(null)
 const stirring = ref(false)
@@ -169,12 +167,9 @@ function onFilterWheel(e) {
   el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
 }
 
-const visibleHistory = computed(() =>
-  store.filteredHistory.slice(0, historyPage.value * HISTORY_PAGE_SIZE)
-)
-const hasMoreHistory = computed(() =>
-  store.filteredHistory.length > historyPage.value * HISTORY_PAGE_SIZE
-)
+const historyColCount = computed(() => Math.min(colCount.value + 1, 6))
+const historyColumns = computed(() => splitColumns(store.visibleHistory, historyColCount.value))
+
 const winWidth = ref(window.innerWidth)
 
 function onResize() { winWidth.value = window.innerWidth }
@@ -195,29 +190,6 @@ function splitColumns(items, n) {
 }
 
 const activeColumns = computed(() => splitColumns(store.filteredActive, colCount.value))
-const historyColCount = computed(() => Math.min(colCount.value + 1, 6))
-const historyColumns = computed(() => splitColumns(visibleHistory.value, historyColCount.value))
-
-// 将 history 数据规范化为 event 结构，供 EventCard 复用
-const normalizedHistory = computed(() => store.filteredHistory.map(h => ({
-  id: h.id,
-  character_id: h.character_id,
-  display_name: h.display_name,
-  avatar_path: h.avatar_path,
-  event_type_key: h.event_type_key,
-  title: h.title,
-  description: h.description,
-  image: h.final_image || null,
-  choice_history: h.choice_history || [],
-  current_branch: h.total_branches || 0,
-  max_branches: h.total_branches || 0,
-  summary: h.summary,
-  engaged: h.engaged,
-  expires_at: h.ended_at,  // 已结束，用于 isExpired 判定
-  created_at: h.created_at,
-  outcome: h.outcome,
-  _conclusion: h.summary,
-})))
 
 const setTopbarVisible = inject?.('setTopbarVisible', null)
 const isMobile = inject('isMobile')
@@ -232,6 +204,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   store.isViewingEvents = false
+  // 离开奇遇页面时从 DB 同步红点计数，弥补离开前被跳过的 SSE event_update
+  store.refreshUnreadCount()
   // 注意：不在此处断开 SSE，NavBar 的 onMounted 已经建立了连接。
   // 如果在卸载时断开，用户离开奇遇页面后红点将永远不再更新。
   // 朋友圈 (MomentsView) 也是同样的设计。
@@ -317,11 +291,11 @@ function onPageTouchMove(e) {
 			}
 		}
 		lastScrollTop = st
-		// 滚动加载更多历史
-		if (showHistory.value && hasMoreHistory.value && pageEl.value) {
+		// 滚动加载更多历史（API 分页）
+		if (showHistory.value && store.historyHasMore && pageEl.value) {
 			const el = pageEl.value
 			if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-				historyPage.value++
+				store.loadMoreHistory()
 			}
 		}
 	}

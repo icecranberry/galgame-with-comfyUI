@@ -207,52 +207,64 @@ router.delete('/:id', (req, res, next) => {
   };
 
   try {
+    // ── FK 依赖顺序：先删引用 messages 的表，再删 messages 本身 ──
+    // memory_fragments.source_msg_id → messages.id
+    // emotion_snapshots.after_msg_id → messages.id
+    // user_portraits.source_msg_id → messages.id
+
+    // 1. 清理引用 messages 的系统数据（必须在 DELETE messages 之前）
+    db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+    db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
+    // user_portraits 也引用 messages，先清理掉避免 FK 冲突
+    db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(char.id);
+
+    // 清理 ChromaDB（异步，不阻塞）
+    deleteByConversation(conversationId).then(
+      n => { if (n > 0) console.log(`[characters] chroma deleted ${n} vectors for ${conversationId}`); },
+      err => console.error(`[characters] chroma cleanup failed for ${conversationId}:`, err.message)
+    );
+
+    // 2. 清理朋友圈（FK → moment_posts.id，FK → characters.id）
+    db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+    db.prepare(`DELETE FROM moment_comments WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
+    db.prepare(`DELETE FROM moment_comments WHERE author_type = 'character' AND author_id = ?`).run(char.id);
+    db.prepare(`DELETE FROM moment_posts WHERE character_id = ?`).run(char.id);
+
+    // 3. 删除头像文件
+    if (char.avatar_path) {
+      const __filename = fileURLToPath(import.meta.url);
+      const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+      const avatarFile = path.join(projectRoot, 'data', 'avatars', path.basename(char.avatar_path));
+      try { if (fs.existsSync(avatarFile)) fs.unlinkSync(avatarFile); } catch (e) {}
+    }
+
+    // 4. 删除角色（CASCADE 自动清理 character_relationships / user_relationships / character_events / event_history）
+    clearImageJudgeCounter(char.id);
+    db.prepare(`DELETE FROM characters WHERE id = ?`).run(char.id);
+
+    // 5. 最后删聊天消息（此时已无 FK 引用 messages，FTS5 通过 trigger 自动同步）
     cleanupMessages();
+
+    res.json({ ok: true });
   } catch (err) {
     if (err.code === 'SQLITE_CORRUPT_VTAB') {
       console.warn('[characters] FTS5 corrupted during delete, repairing...');
       try {
         repairFtsIndex();
         cleanupMessages();
+        res.json({ ok: true });
       } catch (retryErr) {
         console.error('[characters] retry after FTS repair failed:', retryErr.message);
         return next(retryErr);
       }
     } else {
+      console.error(`[characters] delete character ${char.id} failed:`, err.message);
       return next(err);
     }
   }
 
-  // 2. 清理系统数据
-  db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
-  // 清理 ChromaDB
-  deleteByConversation(conversationId).then(
-    n => { if (n > 0) console.log(`[characters] chroma deleted ${n} vectors for ${conversationId}`); },
-    err => console.error(`[characters] chroma cleanup failed for ${conversationId}:`, err.message)
-  );
-  db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
-  db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
-
-  // 3. 清理朋友圈（显式清理以兼容旧 DB 无 CASCADE；新 DB 的 CASCADE 自动兜底）
-  db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
-  db.prepare(`DELETE FROM moment_comments WHERE post_id IN (SELECT id FROM moment_posts WHERE character_id = ?)`).run(char.id);
-  db.prepare(`DELETE FROM moment_comments WHERE author_type = 'character' AND author_id = ?`).run(char.id);
-  db.prepare(`DELETE FROM moment_posts WHERE character_id = ?`).run(char.id);
-
-  // 4. 删除头像文件
-  if (char.avatar_path) {
-    const __filename = fileURLToPath(import.meta.url);
-    const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
-    const avatarFile = path.join(projectRoot, 'data', 'avatars', path.basename(char.avatar_path));
-    try { if (fs.existsSync(avatarFile)) fs.unlinkSync(avatarFile); } catch (e) {}
-  }
-
-  // 5. 删除角色（CASCADE 自动清理 character_relationships / user_relationships）
-  clearImageJudgeCounter(char.id);
-  db.prepare(`DELETE FROM characters WHERE id = ?`).run(char.id);
-
-  res.json({ ok: true });
 });
 
 // POST /api/characters/generate — AI 扩写角色人格

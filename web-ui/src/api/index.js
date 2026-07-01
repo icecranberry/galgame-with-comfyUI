@@ -670,6 +670,11 @@ export async function chooseEventOption(eventId, choice, customText) {
   }
 }
 
+export async function undoEventOption(eventId) {
+  const res = await fetch(`${BASE}/events/${eventId}/undo`, { method: 'POST' })
+  return res.json()
+}
+
 export async function dismissEvent(eventId) {
   const res = await fetch(`${BASE}/events/${eventId}/dismiss`, { method: 'POST' })
   return res.json()
