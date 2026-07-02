@@ -467,7 +467,7 @@
             <div class="disturb-dialog-section disturb-dialog-toggles">
               <label class="disturb-option-row">
                 <span class="disturb-option-label">隐藏世界观</span>
-                <span class="disturb-option-hint">时段内暂时不向 AI 注入世界背景设定</span>
+                <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
                 <label class="switch">
                   <input type="checkbox" v-model="disturbDialog.hideWorld" />
                   <span class="slider"></span>

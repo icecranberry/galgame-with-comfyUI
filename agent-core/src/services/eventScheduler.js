@@ -1,7 +1,7 @@
 /**
  * 奇遇事件调度器
  *
- * - 每 10 分钟扫描一次
+ * - 每 20 分钟扫描一次（freq=1 时）
  * - 到期检查：expires_at <= now → concludeEvent()
  * - 半程通知：已过半且未互动 → 生成主动消息紧急联络
  * - 新事件生成：随机选角色 + 随机选事件类型 → generateEvent()
@@ -16,12 +16,12 @@ import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 
-const BASE_INTERVAL_MIN = 10; // 基准间隔 10 分钟（freq=1）
+const BASE_INTERVAL_MIN = 20; // 基准间隔 20 分钟（freq=1）
 
 function getCheckIntervalMs() {
   const freq = config.features.eventFreq ?? 1;
   if (freq <= 0) return Infinity; // 禁用
-  // freq=1 → 10min, freq=0.5 → 20min, freq=0.1 → 100min
+  // freq=1 → 20min, freq=0.5 → 40min, freq=0.1 → 200min
   const intervalMin = Math.round(BASE_INTERVAL_MIN / freq);
   return intervalMin * 60 * 1000;
 }

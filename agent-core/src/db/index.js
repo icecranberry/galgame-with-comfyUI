@@ -929,11 +929,21 @@ export function getSetting(key) {
   return database.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = ?`).pluck().get(key) ?? null;
 }
 
+// 有意不纳入 SETTING_TO_CONFIG 的 DB-only 键（用于存储时间戳等运行时状态，不走 config 加载路径）
+const DB_ONLY_KEYS = new Set([
+  'last_moments_seen_at',
+  'last_events_seen_at',
+]);
+
 /** 写入单条系统设置 */
 export function setSetting(key, value) {
   const database = getDb();
   database.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
     .run(key, String(value));
+  // 写入时校验：如果 key 不在映射表、也不在 disturb 前缀、也不在 DB-only 白名单，说明重启后会丢失
+  if (!(key in SETTING_TO_CONFIG) && !key.startsWith('disturb_') && !DB_ONLY_KEYS.has(key)) {
+    console.warn(`[config] setSetting("${key}"): key is not registered in SETTING_TO_CONFIG — value will NOT survive restart. Add it to the mapping in db/index.js.`);
+  }
 }
 
 // 需要从 DB 迁移到 config 的字段映射
@@ -953,11 +963,10 @@ const SETTING_TO_CONFIG = {
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
-  feature_forceImageGen:        { obj: 'features', key: 'forceImageGen',    type: 'bool' },
-  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
   feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
   feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
   feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
+  feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
   feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
