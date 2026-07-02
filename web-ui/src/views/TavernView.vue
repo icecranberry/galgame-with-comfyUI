@@ -595,6 +595,10 @@ const LOADING_TIPS = [
   '正在检查悬赏令真伪…',
   '正在鉴定勇者血统…',
   '正在占卜命运之线…',
+  '正在校验冒险者等级徽章…',
+  '正在清点药水库存…',
+  '正在整理任务委托板…',
+  '正在给壁炉添柴…',
 ]
 const loadingTip = ref(LOADING_TIPS[0])
 let _tipTimer = null
