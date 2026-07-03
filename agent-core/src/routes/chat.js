@@ -20,6 +20,7 @@ import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
+import { getReplyDelay, formatScheduleContext } from '../services/scheduleManager.js';
 
 const router = Router();
 
@@ -231,6 +232,62 @@ router.post('/characters/:id/chat', async (req, res) => {
   const characterId = req.params.id;
   const conversationId = convId(characterId);
 
+  // ── 日程系统：回复队列拦截 ──
+  if (config.features.schedule !== false) {
+    const delayInfo = getReplyDelay(characterId);
+    if (delayInfo.delay > 0 || delayInfo.delay === -1) {
+      // 非即时回复 → 保存用户消息，写入 reply_queue，不启动 SSE 流
+      const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
+        .run(conversationId, message, client_msg_id || null);
+      const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
+        .run(conversationId, userRaw.lastInsertRowid, message);
+
+      const delayMinutes = delayInfo.delay === -1
+        ? -1
+        : delayInfo.delay;
+
+      const scheduledReplyAt = delayInfo.delay === -1
+        ? null  // sleeping: 等醒来时处理
+        : new Date(Date.now() + delayMinutes * 60000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+      // sleeping 时设置 scheduled_reply_at 为 sleep_until
+      let finalScheduledAt = scheduledReplyAt;
+      if (delayInfo.delay === -1) {
+        const sleepingStatus = db.prepare('SELECT sleep_until FROM characters WHERE id = ?').get(characterId);
+        if (sleepingStatus?.sleep_until) {
+          finalScheduledAt = sleepingStatus.sleep_until;
+        } else {
+          // fallback: 8 小时后（正常情况下不会走到这里）
+          finalScheduledAt = new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+        }
+        // 标记角色为睡眠状态
+        db.prepare('UPDATE characters SET is_sleeping = 1 WHERE id = ?').run(characterId);
+      }
+
+      db.prepare(`
+        INSERT INTO reply_queue (character_id, conversation_id, user_raw_msg_id, user_msg_id, user_content, client_msg_id, scheduled_reply_at, current_activity, delay_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        characterId, conversationId, userRaw.lastInsertRowid, userMsg.lastInsertRowid,
+        message, client_msg_id || null, finalScheduledAt,
+        delayInfo.activity, delayMinutes
+      );
+
+      // 重置主动聊天未回复计数（同正常流程）
+      resetUnansweredStreak(characterId);
+
+      return res.json({
+        queued: true,
+        delay: delayInfo.delay,
+        delayMinutes: delayMinutes,
+        currentActivity: delayInfo.activity,
+        estimatedReplyAt: delayInfo.delay === -1
+          ? finalScheduledAt
+          : new Date(Date.now() + delayMinutes * 60000).toISOString(),
+      });
+    }
+  }
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -355,6 +412,13 @@ router.post('/characters/:id/chat', async (req, res) => {
     const charParts = [];
     charParts.push(character?.base_prompt || getDefaultPrompt());
     if (emotionPrompt) charParts.push(emotionPrompt);
+
+    // 日程状态注入（不存入消息历史，每次动态注入）
+    if (config.features.schedule !== false) {
+      const scheduleCtx = formatScheduleContext(characterId);
+      if (scheduleCtx) charParts.push(scheduleCtx);
+    }
+
     if (activeEvent) {
       charParts.push(`【当前状态】你正在经历一个突发事件：「${activeEvent.title}」。你的情绪、行为和注意力都受此事影响。请在回复中自然地体现这一点。`);
     }
@@ -791,6 +855,8 @@ router.post('/characters/:id/chat', async (req, res) => {
         prevUser,
         prevAssistant,
         summary: summaryRow?.summary || '',
+        userName: chatUserName,
+        characterName: character?.display_name || '角色',
       };
       emotionPromise = evaluateStimulus(message, fullContent, evalContext);
       emotionCleanup = { emotionState, emotionBaseline, currentAffinity };

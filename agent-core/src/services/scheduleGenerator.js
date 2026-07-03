@@ -1,0 +1,318 @@
+/**
+ * 日程生成器
+ *
+ * 基于角色人格 + 职业生成每日时间表（schedule template）。
+ * LLM 输出 8-15 个活动的 JSON 数组，覆盖完整 24 小时。
+ *
+ * 生成时机（分散式）：
+ *   - 角色创建时：立即生成 + 分配随机刷新时间
+ *   - 每日刷新：replyQueueScheduler 每次 tick 检查是否有角色到期，每次只刷 1 个
+ *   - 手动强制：API POST /api/schedule/:id/regenerate
+ */
+
+import { getDb, getWorldSetting, getSystemRules } from '../db/index.js';
+import { chatSync } from '../llm/llm-client.js';
+
+/**
+ * 截取角色人格 prompt：从开头到 "##你的外观" 之前
+ */
+function cropPersonaForSchedule(basePrompt) {
+  if (!basePrompt) return '一个普通角色，没有特殊设定';
+  const idx = basePrompt.search(/##\s*你的外观/);
+  return idx > -1 ? basePrompt.slice(0, idx).trim() : basePrompt.slice(0, 800);
+}
+
+/**
+ * 为角色生成日程模板
+ * @param {object} character - { id, display_name, base_prompt }
+ * @returns {Promise<{schedule_json: string, version: number}>}
+ */
+export async function generateSchedule(character) {
+  const db = getDb();
+  const worldSetting = getWorldSetting();
+  const persona = cropPersonaForSchedule(character.base_prompt);
+
+  // ── 舞台：破限词 + 世界观 ──
+  const jailbreak = getSystemRules();
+  const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
+
+  // ── 世界观穿透指令（参照朋友圈生成）──
+  const worldIntegrationNote = worldSetting
+    ? `<world_integration priority="highest">
+上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有日程创作必须在这个世界观的框架内展开：
+
+1. 日程中的活动类型、地点、行为模式必须反映世界观下的真实生活。角色的一天应该自然地带出这个世界特有的元素——街头景象、社交方式、工作内容、生活节奏。
+2. 角色的职业、作息、行为习惯的"正常"与"异常"，由世界观定义。在这个世界里理所当然的事情，在现实世界可能不可思议——角色的日程应该自信地反映这种理所当然，不需要向读者解释。
+3. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到日程的每一个活动条目中。世界观不是背景，是地基。
+</world_integration>`
+    : null;
+
+  // ── 角色人格（裁剪到外观之前）──
+  const personaMsg = `${persona}
+
+基于以上人格设定，为该角色生成符合其身份、职业、性格的典型一天完整日程。职业和作息类型由你根据人格自行推断，不需要外部提示。`;
+
+  // ── 日程生成指令 ──
+  const scheduleInst = `你是一个日程编排助手。基于角色的职业和人格，生成该角色典型一天的完整日程。
+
+## 职业驱动原则
+角色的职业是日程的核心骨架。所有主要活动必须围绕职业展开。职业决定了角色一天中大部分时间的去向和活动类型。
+- 学生→上课、自习、社团、考试
+- 上班族→通勤、会议、午休、加班
+- 偶像→排练、录音、演出、粉丝互动
+- 店主→开店、进货、接待客人、打烊
+- 自由职业→在家工作、外出取材、交稿截止日
+- 其他职业同理类推
+
+## 睡眠时间个性化
+根据角色个性自行决定就寝和起床时间：
+- 夜猫子型→凌晨 1-2 点睡，上午 9-10 点起
+- 早睡早起型→晚上 10 点睡，早上 6 点起
+- 社畜型→晚上 11-12 点睡，早上 7 点起
+- NEET/家里蹲→凌晨 2-3 点睡，中午 11-12 点起
+- 艺人/夜班型→凌晨 1-2 点睡，上午 10-11 点起
+睡眠 block 的 replyDelay 必须是 -1（暂停一切回复）。睡眠总时长通常在 6-9 小时之间。
+
+## replyDelay 规则（非常重要）
+- 约 80% 的活动 replyDelay=0（秒回消息，不耽误聊天）
+- 对于需要专注的活动，replyDelay=1~60（分钟后回复），由你根据活动性质分配：
+  - 轻度分心（吃饭、散步、洗漱、化妆）→ 1~5 分钟
+  - 中度忙碌（开会、上课、接待客人、社交聚餐、排练、运动）→ 10~20 分钟
+  - 高度专注（考试、重要演出、手术、赶稿死线、重要会议、潜入任务）→ 30~60 分钟
+- 只有睡觉 replyDelay=-1
+
+## 输出格式
+输出一个 JSON 数组，8~15 个活动，按时间顺序覆盖完整 24 小时。
+每个活动对象格式：
+{
+  "startTime": "HH:MM",
+  "endTime": "HH:MM",
+  "activity": "简短活动名（含上下文，如「早课——高等数学」）",
+  "location": "地点",
+  "replyDelay": 数字（0 / 1~60 / -1）,
+  "tags": ["标签1", "标签2"],
+  "description": "角色视角的简短描述（20-40 字，让角色「感觉」到这个活动）"
+}
+
+只输出 JSON 数组，不要任何额外文字。`;
+
+  // ── 组装多层 system ──
+  const msgs = [];
+  // msgs[0]: 舞台（破限词 + 世界观）
+  if (stageContent) msgs.push({ role: 'system', content: stageContent });
+  // msgs[1]: 世界观穿透指令
+  if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  // msgs[2]: 角色人格
+  msgs.push({ role: 'system', content: personaMsg });
+  // msgs[3]: 生成指令
+  msgs.push({ role: 'system', content: scheduleInst });
+  // msgs[4]: 触发消息
+  msgs.push({ role: 'user', content: `请为 ${character.display_name} 生成完整的今日日程安排。` });
+
+  let rawResult = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      rawResult = await chatSync(msgs, {
+        temperature: 0.75,
+        max_tokens: 2048,
+        label: `schedule-gen:${character.display_name}`,
+      });
+
+      const schedule = parseAndValidateSchedule(rawResult, character.display_name);
+      if (schedule) {
+        const json = JSON.stringify(schedule);
+        const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(character.id);
+
+        if (existing) {
+          db.prepare(`
+            UPDATE schedule_templates
+            SET schedule_json = ?, version = version + 1, generated_at = CURRENT_TIMESTAMP
+            WHERE character_id = ?
+          `).run(json, character.id);
+          console.log(`[scheduleGen] Updated template for ${character.display_name} v${existing.version + 1}`);
+        } else {
+          db.prepare(`
+            INSERT INTO schedule_templates (character_id, schedule_json, version)
+            VALUES (?, ?, 1)
+          `).run(character.id, json);
+          console.log(`[scheduleGen] Created template for ${character.display_name}`);
+        }
+
+        return { schedule_json: json, version: (existing?.version || 0) + 1 };
+      }
+
+      console.warn(`[scheduleGen] Validation failed for ${character.display_name}, attempt ${attempt + 1}/2`);
+    } catch (err) {
+      console.error(`[scheduleGen] Attempt ${attempt + 1} failed for ${character.display_name}:`, err.message);
+      if (attempt === 1) throw err;
+    }
+  }
+
+  throw new Error(`Failed to generate valid schedule for ${character.display_name} after 2 attempts`);
+}
+
+/**
+ * 解析并校验 LLM 输出的日程 JSON
+ */
+function parseAndValidateSchedule(raw, displayName) {
+  // 尝试提取 JSON 数组
+  const jsonMatch = raw.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    console.warn(`[scheduleGen] No JSON array found in response for ${displayName}`);
+    return null;
+  }
+
+  let activities;
+  try {
+    activities = JSON.parse(jsonMatch[0]);
+  } catch {
+    console.warn(`[scheduleGen] JSON parse failed for ${displayName}`);
+    return null;
+  }
+
+  if (!Array.isArray(activities) || activities.length < 6) {
+    console.warn(`[scheduleGen] Too few activities (${activities?.length || 0}) for ${displayName}`);
+    return null;
+  }
+
+  // 校验每个活动
+  const required = ['startTime', 'endTime', 'activity', 'location', 'replyDelay'];
+  for (const act of activities) {
+    for (const key of required) {
+      if (!(key in act)) {
+        console.warn(`[scheduleGen] Missing key "${key}" in activity for ${displayName}`);
+        return null;
+      }
+    }
+    if (typeof act.replyDelay !== 'number') {
+      console.warn(`[scheduleGen] replyDelay is not a number for ${displayName}`);
+      return null;
+    }
+  }
+
+  // 校验必有一个 sleeping block（replyDelay=-1）且覆盖 ≥5 小时
+  const sleepingBlocks = activities.filter(a => a.replyDelay === -1);
+  if (sleepingBlocks.length === 0) {
+    console.warn(`[scheduleGen] No sleeping block found for ${displayName}`);
+    return null;
+  }
+
+  // 计算最长睡眠时长
+  let maxSleepDuration = 0;
+  for (const block of sleepingBlocks) {
+    const duration = timeToMinutes(block.endTime) - timeToMinutes(block.startTime);
+    const adjusted = duration < 0 ? duration + 24 * 60 : duration;
+    if (adjusted > maxSleepDuration) maxSleepDuration = adjusted;
+  }
+  if (maxSleepDuration < 5 * 60) {
+    console.warn(`[scheduleGen] Sleep too short (${maxSleepDuration}min) for ${displayName}, need ≥300min`);
+    return null;
+  }
+
+  // 校验时间不重叠
+  for (let i = 0; i < activities.length; i++) {
+    for (let j = i + 1; j < activities.length; j++) {
+      if (timeRangesOverlap(
+        activities[i].startTime, activities[i].endTime,
+        activities[j].startTime, activities[j].endTime
+      )) {
+        console.warn(`[scheduleGen] Overlapping activities for ${displayName}: "${activities[i].activity}" and "${activities[j].activity}"`);
+        return null;
+      }
+    }
+  }
+
+  // 80% 秒回保证：如果非 0 延迟活动超过 20%，随机将部分改回 0
+  const nonImmediate = activities.filter(a => a.replyDelay !== 0 && a.replyDelay !== -1);
+  const totalCount = activities.length;
+  const maxNonImmediate = Math.floor(totalCount * 0.2); // 最多 20%
+
+  if (nonImmediate.length > maxNonImmediate) {
+    // Shuffle non-immediate activities and convert excess to immediate
+    const shuffled = [...nonImmediate].sort(() => Math.random() - 0.5);
+    const toConvert = shuffled.slice(0, nonImmediate.length - maxNonImmediate);
+    for (const act of toConvert) {
+      act.replyDelay = 0;
+    }
+    console.log(`[scheduleGen] Converted ${toConvert.length} activities to immediate for 80% rule (${displayName})`);
+  }
+
+  // 补充 tags 和 description 默认值
+  for (const act of activities) {
+    if (!act.tags) act.tags = [];
+    if (!act.description) act.description = '';
+  }
+
+  return activities;
+}
+
+// ── 时间工具 ──
+
+function timeToMinutes(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
+/**
+ * 判断两个时间段是否重叠（支持跨午夜）
+ * 使用分钟表示法 + 标准化策略：将所有时间映射到 0~1440，
+ * 如果 end < start 则 end += 1440；第二个区间同样处理。
+ * 然后检查 [s1, e1) 和 [s2, e2) 是否重叠。
+ */
+function timeRangesOverlap(start1, end1, start2, end2) {
+  let s1 = timeToMinutes(start1);
+  let e1 = timeToMinutes(end1);
+  let s2 = timeToMinutes(start2);
+  let e2 = timeToMinutes(end2);
+
+  // 跨午夜修正：end < start 表示跨天，将 end 标准化到同一线性时间轴
+  if (e1 <= s1) e1 += 24 * 60;
+  if (e2 <= s2) e2 += 24 * 60;
+
+  // 标准区间重叠判断（不含端点接触）：s1 < e2 && s2 < e1
+  // 如果 s1...s2 不在同一天，将 s2/e2 也偏移一天再做检查
+  if (s1 < e2 && s2 < e1) return true;
+  if (e1 > 24 * 60 && s1 < e2 + 24 * 60 && s2 + 24 * 60 < e1) return true;
+  if (e2 > 24 * 60 && s1 + 24 * 60 < e2 && s2 < e1 + 24 * 60) return true;
+
+  return false;
+}
+
+/**
+ * 为角色设置分散式刷新时间（生成 template 后调用）
+ * 分散到明天 00:00~04:00 之间的随机时刻
+ */
+export function assignNextRefreshTime(characterId) {
+  const db = getDb();
+  const now = new Date();
+  // 明天的 00:00~04:00 之间随机
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  const randomOffset = Math.floor(Math.random() * 4 * 60 * 60 * 1000); // 0~4h in ms
+  const refreshAt = new Date(tomorrow.getTime() + randomOffset);
+
+  db.prepare('UPDATE characters SET next_schedule_refresh_at = ? WHERE id = ?')
+    .run(refreshAt.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, ''), characterId);
+
+  console.log(`[scheduleGen] Next refresh for char ${characterId}: ${refreshAt.toISOString()}`);
+  return refreshAt;
+}
+
+/**
+ * 为角色创建当天的 daily_schedules 快照（从 template 派生）
+ */
+export function snapshotTodaySchedule(characterId) {
+  const db = getDb();
+  const template = db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id = ?').get(characterId);
+  if (!template) return null;
+
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+  db.prepare(`
+    INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
+    VALUES (?, ?, ?)
+  `).run(characterId, today, template.schedule_json);
+
+  return template.schedule_json;
+}

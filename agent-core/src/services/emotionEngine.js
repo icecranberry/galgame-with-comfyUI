@@ -430,6 +430,8 @@ function ruleBasedEvaluate(userMsg) {
  * @param {string} context.prevUser - 上一轮用户消息（上下文参考）
  * @param {string} context.prevAssistant - 上一轮角色回复（上下文参考）
  * @param {string} context.summary - 对话历史摘要
+ * @param {string} [context.userName='用户'] - 用户显示名称
+ * @param {string} [context.characterName='角色'] - 角色显示名称
  */
 async function llmEvaluate(userMsg, assistantMsg, context = {}) {
   const {
@@ -441,11 +443,16 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
     prevUser = '',
     prevAssistant = '',
     summary = '',
+    userName = '用户',
+    characterName = '角色',
   } = context;
 
   // 过滤 assistant 消息中附带的生图 prompt JSON（总是在消息末尾）
   const cleanAssistant = assistantMsg.split(/\{\s*"prompt"/)[0].trim();
   const cleanPrevAssistant = prevAssistant.split(/\{\s*"prompt"/)[0].trim();
+
+  // 人格文本中的 "assistant" 替换为真实角色名（兼容旧 short_prompt 和 cropPersonalityForEmotion 的默认行为）
+  const personalityText = (characterPersonality || '').replace(/assistant/g, characterName);
 
   // 拼装上下文段落
   let contextBlock = '';
@@ -454,43 +461,43 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
   }
   if (prevUser || cleanPrevAssistant) {
     contextBlock += `【上一轮对话 — 仅供参考上下文，不需要评估】\n`;
-    if (prevUser) contextBlock += `用户: "${prevUser.slice(0, 400)}"\n`;
-    if (cleanPrevAssistant) contextBlock += `角色: "${cleanPrevAssistant.slice(0, 400)}"\n`;
+    if (prevUser) contextBlock += `${userName}: "${prevUser.slice(0, 400)}"\n`;
+    if (cleanPrevAssistant) contextBlock += `${characterName}: "${cleanPrevAssistant.slice(0, 400)}"\n`;
     contextBlock += `\n`;
   }
 
-  const prompt = `你是一个情绪与关系评估专家。你需要以角色的视角，分析【本轮对话】对角色产生的情绪影响。
+  const prompt = `你是一个情绪与关系评估专家。你需要以 ${characterName} 的视角，分析【本轮对话】对 ${characterName} 产生的情绪影响。
 
-【角色人格】
-${characterPersonality || '（未设定特殊人格，按默认友善助手判断）'}
+【${characterName}的人格】
+${personalityText || '（未设定特殊人格，按默认友善助手判断）'}
 
-【角色与用户的关系】
-用户将角色视为：${relationship || '普通朋友'}
-角色当前对用户的好感度：${currentAffinity}/100
-角色当前情绪状态：
+【${characterName}与${userName}的关系】
+${userName}将${characterName}视为：${relationship || '普通朋友'}
+${characterName}当前对${userName}的好感度：${currentAffinity}/100
+${characterName}当前情绪状态：
   愉悦度(V): ${currentVad.valence?.toFixed(2) ?? '0.50'} (负=不愉快, 正=愉快)
   唤醒度(A): ${currentVad.arousal?.toFixed(2) ?? '0.50'} (低=倦怠, 高=兴奋)
   支配度(D): ${currentVad.dominance?.toFixed(2) ?? '0.50'} (低=顺从, 高=掌控)
 ${contextBlock}
 【本轮对话 — 仅需评估这一轮】
-用户: "${userMsg.slice(0, 500)}"
-角色: "${cleanAssistant.slice(0, 500)}"
+${userName}: "${userMsg.slice(0, 500)}"
+${characterName}: "${cleanAssistant.slice(0, 500)}"
 
 【评估要求】
-仅评估【本轮对话】中用户消息对角色情绪和好感度的影响。上一轮对话和摘要仅作为上下文参考。
+仅评估【本轮对话】中 ${userName} 的消息对 ${characterName} 情绪和好感度的影响。上一轮对话和摘要仅作为上下文参考。
 
 规则：
 - vad_delta.valence: -0.3 ~ +0.3，正面互动为正，负面为负
 - vad_delta.arousal: -0.3 ~ +0.3，兴奋/紧张为正，平淡为负
 - vad_delta.dominance: -0.3 ~ +0.3，被尊重/掌控为正，被压制为负
-- affinity_delta: -3 ~ +6，用户让角色更喜欢ta为正，更疏远为负
+- affinity_delta: -3 ~ +6，${userName}让${characterName}更喜欢ta为正，更疏远为负
 - dominant_emotion: 仅限 joy|sadness|anger|fear|surprise|disgust|curiosity|boredom|fatigue|neutral
-- reason: 用角色第一人称口吻简短解释判断理由，不要提加分扣分（10~30字）
+- reason: 用${characterName}第一人称口吻简短解释判断理由，不要提加分扣分（10~30字）
 
 重要提示：
-1. 角色的情绪基线是 valence=${emotionBaseline.valence?.toFixed(2) ?? '0.50'}, arousal=${emotionBaseline.arousal?.toFixed(2) ?? '0.50'}, dominance=${emotionBaseline.dominance?.toFixed(2) ?? '0.50'}
-2. affinity_delta 应基于角色人格判断——傲娇角色即使内心高兴，好感度变化也较小
-3. 如果用户消息中性平淡，delta 应接近 0，不要强行解读
+1. ${characterName}的情绪基线是 valence=${emotionBaseline.valence?.toFixed(2) ?? '0.50'}, arousal=${emotionBaseline.arousal?.toFixed(2) ?? '0.50'}, dominance=${emotionBaseline.dominance?.toFixed(2) ?? '0.50'}
+2. affinity_delta 应基于${characterName}的人格判断——傲娇角色即使内心高兴，好感度变化也较小
+3. 如果${userName}的消息中性平淡，delta 应接近 0，不要强行解读
 
 只返回 JSON（不要任何其他文字）：
 {"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."}`;
@@ -862,13 +869,16 @@ ${imageRulesText}
  * 规则（按固定格式）：
  *   1. 从开头取到 "## 你的身份" 之前
  *   2. 从 "## 你的性格" 取到第二个换行符（即第一条性格描述）
- *   3. 拼接后 "你" → "assistant"
+ *   3. 拼接后 "你" → characterName（默认 "assistant" 向后兼容）
+ *
+ * @param {string} basePrompt - 角色完整人格 prompt
+ * @param {string} [characterName='assistant'] - 角色真实名称，用于替换 "你"
  *
  * 输入示例 → 输出示例:
- *   "你是瓦雷莎...\n\n## 你的身份\n...\n## 你的性格\n- 你说话总是慢悠悠的...\n- 你是..."
- *   → "assistant是瓦雷莎...## assistant的性格\n- assistant说话总是慢悠悠的..."
+ *   ("你是瓦雷莎...", "瓦雷莎")
+ *   → "瓦雷莎是瓦雷莎...## 瓦雷莎的性格\n- 瓦雷莎说话总是慢悠悠的..."
  */
-export function cropPersonalityForEmotion(basePrompt) {
+export function cropPersonalityForEmotion(basePrompt, characterName = 'assistant') {
   if (!basePrompt) return '';
 
   let result = '';
@@ -904,8 +914,8 @@ export function cropPersonalityForEmotion(basePrompt) {
     }
   }
 
-  // 规则 3: "你" 全部替换为 "assistant"
-  result = result.replace(/你/g, 'assistant');
+  // 规则 3: "你" 全部替换为角色名
+  result = result.replace(/你/g, characterName);
 
   // 兜底：最长不超过 200 字
   if (result.length > 200) {

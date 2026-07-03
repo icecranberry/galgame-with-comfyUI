@@ -45,6 +45,7 @@ export const config = {
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
+    schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',

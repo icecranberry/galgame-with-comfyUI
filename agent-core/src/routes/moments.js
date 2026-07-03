@@ -8,6 +8,7 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
+import { getCurrentActivity } from '../services/scheduleManager.js';
 
 const router = Router();
 
@@ -486,9 +487,21 @@ async function generateMomentPost(character) {
   const now = new Date();
   const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
   const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+
+  // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
+  let scheduleContext = '';
+  try {
+    if (config.features.schedule !== false) {
+      const activity = getCurrentActivity(character.id);
+      if (activity && activity.activity !== '自由时间') {
+        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}。朋友圈内容应当反映这个时段角色的状态和见闻。`;
+      }
+    }
+  } catch { /* schedule not available, skip */ }
+
   const userMsg = multiPerson
-    ? `${timeTag} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
-    : `${timeTag} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
+    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
+    : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -612,6 +625,19 @@ async function generateMomentPost(character) {
  */
 async function generateCharacterReply(post, historyComments) {
   const db = getDb();
+
+  // 睡眠检查：角色在睡觉时不自动回复评论
+  try {
+    if (config.features.schedule !== false) {
+      const { isSleeping } = await import('../services/scheduleManager.js');
+      const sleepStatus = isSleeping(post.character_id);
+      if (sleepStatus.sleeping) {
+        console.log(`[moments] ${post.display_name} is sleeping, skipping comment reply`);
+        return null;
+      }
+    }
+  } catch { /* schedule not available */ }
+
   const userName = config.user.nickname || '用户';
   const u = config.user;
   let userPersona = u.appearance || u.persona || '你最重要的朋友';

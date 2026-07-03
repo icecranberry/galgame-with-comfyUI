@@ -184,6 +184,18 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
         }
       }
 
+      // ── 日程系统：检测 queued 响应（非 SSE，是 JSON）──
+      const contentType = res.headers.get('Content-Type') || ''
+      if (contentType.includes('application/json')) {
+        const json = await res.json()
+        if (json.queued) {
+          // 返回一个立即完成的流，携带 queued 信息
+          outerController.enqueue(new TextEncoder().encode(`event: queued\ndata: ${JSON.stringify(json)}\n\n`))
+          outerController.close()
+          return
+        }
+      }
+
       // ── 流式读取 ──
       try {
         const reader = res.body.getReader()
@@ -834,4 +846,40 @@ export function connectEventsStream(handlers = {}) {
     })
 
   return conn
+}
+
+// ── Schedule 日程系统 ──
+
+export async function getScheduleOverview() {
+  const res = await fetch(`${BASE}/schedule`)
+  if (!res.ok) throw new Error(`schedule overview: ${res.status}`)
+  return res.json()
+}
+
+export async function getCharacterSchedule(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}`)
+  if (!res.ok) throw new Error(`character schedule: ${res.status}`)
+  return res.json()
+}
+
+export async function getCurrentActivity(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/current`)
+  if (!res.ok) throw new Error(`current activity: ${res.status}`)
+  return res.json()
+}
+
+export async function peekSnapshot(characterId, genImage = true) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/peek`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gen_image: genImage }),
+  })
+  if (!res.ok) throw new Error(`peek snapshot: ${res.status}`)
+  return res.json()
+}
+
+export async function regenerateSchedule(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/regenerate`, { method: 'POST' })
+  if (!res.ok) throw new Error(`regenerate schedule: ${res.status}`)
+  return res.json()
 }

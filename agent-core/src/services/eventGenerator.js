@@ -20,6 +20,7 @@ import { generateImageRaw } from './imageSkill.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
+import { getCurrentActivity } from './scheduleManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -383,18 +384,30 @@ ${multiPerson.otherPersona}`;
     ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
 
+  // 日程注入：获取角色当前活动，让事件起点与当前活动自然衔接
+  let scheduleContextLine = '';
+  try {
+    if (config.features.schedule !== false) {
+      const currentActivity = getCurrentActivity(character.id);
+      if (currentActivity && currentActivity.activity !== '自由时间') {
+        scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
+      }
+    }
+  } catch { /* schedule not available */ }
+
   const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}
 ${contextBlock}
 ${timeTag}${multiPersonNote}
-
+${scheduleContextLine}
 **关键理解**：上面的事件方向只指了一个大概的方向——它不是剧本，里面没有任何具体的场景设定。你的任务是把方向翻译成${displayName}今天此刻实际遇到的事情。
 
 基于以下素材来创作：
 - ${displayName}的人格：外貌、性格、行为模式、说话方式——这是最重要的创作来源
 - ${worldSetting ? '世界观的基本法则——这个世界里什么是日常、什么算特殊，由世界观决定' : '现实世界背景——以真实世界的日常为基准'}
-- 当前时间：${timeTag}——事件发生在这个时间点，场景细节要贴合
+- 当前时间：${timeTag}——事件发生在这个时间点，场景细节要贴合${scheduleContextLine ? '。' + scheduleContextLine + '事件的起点必须与角色此刻的活动自然衔接——如果正在图书馆复习，事件不应该是"走在街上偶然发现"' : ''}
 - ${multiPerson ? '与' + multiPerson.otherName + '的关系——互动要贴合两人的真实关系' : '角色近期的状态——事件应该自然地嵌入角色的生活中'}
 ${contextBlock ? '- ' + contextBlock.trim() : ''}
+${scheduleContextLine ? '- 【重要】事件发生的起点应该与角色当前的活动自然衔接——例如如果' + displayName + '正在图书馆复习，事件触发方式不应该是走在街上或者在家休息。事件应该从角色当前所在的地点、正在做的事情中自然地生长出来。' : ''}
 
 请以紧密第三人称创作这个特殊事件的开场。要求：
 ${worldPenetrationLine}- 从一个感官细节开始——声音、画面、身体感受——而不是背景介绍

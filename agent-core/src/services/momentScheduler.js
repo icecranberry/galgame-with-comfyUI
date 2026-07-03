@@ -33,6 +33,7 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.moments_disabled = 0
+        AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND (c.next_moment_at IS NULL OR c.next_moment_at <= datetime('now'))
         AND c.id NOT IN (
           SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged')

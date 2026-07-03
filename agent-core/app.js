@@ -16,10 +16,13 @@ import portraitsRoutes from './src/routes/portraits.js';
 import notificationsRoutes from './src/routes/notifications.js';
 import eventsRoutes from './src/routes/events.js';
 import streamRoutes from './src/routes/stream.js';
+import scheduleRoutes from './src/routes/schedule.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 import { startEventScheduler } from './src/services/eventScheduler.js';
 import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
+import { startReplyQueueScheduler } from './src/services/replyQueueScheduler.js';
+import { initialize as initScheduleManager } from './src/services/scheduleManager.js';
 
 const app = express();
 
@@ -47,6 +50,7 @@ app.use('/api/portraits', portraitsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/stream', streamRoutes);
+app.use('/api/schedule', scheduleRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -81,6 +85,12 @@ startEventScheduler();
 
 // 启动防打扰模式调度器（由 config.features.disturbMode 控制开关，scheduler 内部自行判断）
 startDisturbScheduler();
+
+// 启动回复队列调度器（日程刷新 + 延迟回复处理）
+startReplyQueueScheduler();
+
+// 初始化日程管理器（恢复睡眠状态）
+initScheduleManager();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

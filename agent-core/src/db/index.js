@@ -234,6 +234,44 @@ function initSchema(db) {
       error_message TEXT
     );
 
+    -- 日程模板表（每个角色一条，LLM 生成后缓存）
+    CREATE TABLE IF NOT EXISTS schedule_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL UNIQUE REFERENCES characters(id) ON DELETE CASCADE,
+      schedule_json TEXT NOT NULL DEFAULT '[]',
+      generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      version INTEGER DEFAULT 1
+    );
+
+    -- 每日日程实例表（从 template 快照，独立于模板可微调）
+    CREATE TABLE IF NOT EXISTS daily_schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      schedule_date TEXT NOT NULL,
+      schedule_json TEXT NOT NULL DEFAULT '[]',
+      generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(character_id, schedule_date)
+    );
+
+    -- 消息回复队列表（延迟回复 + 睡眠合并）
+    CREATE TABLE IF NOT EXISTS reply_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL,
+      user_raw_msg_id INTEGER NOT NULL,
+      user_msg_id INTEGER NOT NULL,
+      user_content TEXT NOT NULL,
+      client_msg_id TEXT,
+      scheduled_reply_at DATETIME NOT NULL,
+      status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','processing','done','cancelled')),
+      reply_raw_msg_id INTEGER,
+      reply_msg_ids TEXT DEFAULT '[]',
+      current_activity TEXT,
+      delay_minutes INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      processed_at DATETIME
+    );
+
     -- 奇遇事件历史表
     CREATE TABLE IF NOT EXISTS event_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -304,6 +342,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_ce_char_status ON character_events(character_id, status);
     CREATE INDEX IF NOT EXISTS idx_ce_expires ON character_events(expires_at);
     CREATE INDEX IF NOT EXISTS idx_eh_char ON event_history(character_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ds_char_date ON daily_schedules(character_id, schedule_date);
+    CREATE INDEX IF NOT EXISTS idx_rq_scheduled ON reply_queue(scheduled_reply_at, status);
+    CREATE INDEX IF NOT EXISTS idx_rq_character ON reply_queue(character_id, status);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -346,6 +387,9 @@ function initSchema(db) {
 
   // 迁移: 防打扰模式 — characters 表新增 dnd_original_state 列
   migrateDisturbSchema(db);
+
+  // 迁移: 日程系统 — characters 表新增 schedule 相关列
+  migrateScheduleSchema(db);
 
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
@@ -483,6 +527,33 @@ function migrateDisturbSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateDisturbSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 日程系统 — characters 表新增 schedule 相关列
+ */
+function migrateScheduleSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'schedule_enabled')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN schedule_enabled INTEGER DEFAULT 1`);
+      console.log('[db] Added characters.schedule_enabled column (default 1)');
+    }
+    if (!cols.find(c => c.name === 'is_sleeping')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN is_sleeping INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.is_sleeping column (default 0)');
+    }
+    if (!cols.find(c => c.name === 'sleep_until')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN sleep_until DATETIME`);
+      console.log('[db] Added characters.sleep_until column');
+    }
+    if (!cols.find(c => c.name === 'next_schedule_refresh_at')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN next_schedule_refresh_at DATETIME`);
+      console.log('[db] Added characters.next_schedule_refresh_at column');
+    }
+  } catch (err) {
+    console.log('[db] migrateScheduleSchema error:', err.message);
   }
 }
 
@@ -968,6 +1039,7 @@ const SETTING_TO_CONFIG = {
   feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
   feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
   feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
+  feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },

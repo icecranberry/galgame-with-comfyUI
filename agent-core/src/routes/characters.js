@@ -12,6 +12,8 @@ import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
+import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
+import { invalidateCache as invalidateScheduleCache } from '../services/scheduleManager.js';
 
 const router = Router();
 
@@ -58,10 +60,29 @@ router.post('/', (req, res) => {
   const emotion = emotion_baseline ? (typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)) : '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
 
   try {
-    const shortPrompt = cropPersonalityForEmotion(base_prompt);
+    const shortPrompt = cropPersonalityForEmotion(base_prompt, display_name || name);
     const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled, events_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0, events_disabled !== undefined ? (events_disabled ? 1 : 0) : 0);
     res.status(201).json({ id: result.lastInsertRowid, name, display_name });
+
+    // 异步生成日程模板（不阻塞响应）
+    const newCharId = result.lastInsertRowid;
+    const newCharDisplayName = display_name || name;
+    if (config.features.schedule !== false) {
+      setTimeout(async () => {
+        try {
+          const character = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(newCharId);
+          if (character) {
+            await generateSchedule(character);
+            assignNextRefreshTime(newCharId);
+            snapshotTodaySchedule(newCharId);
+            console.log(`[char] Schedule generated for new character "${newCharDisplayName}"`);
+          }
+        } catch (err) {
+          console.error(`[char] Schedule generation failed for "${newCharDisplayName}":`, err.message);
+        }
+      }, 3000).unref(); // 3 秒延迟，等角色稳定后再生成
+    }
 
     // 创建成功后，30~60 秒内发起一次主动聊天（除非角色禁用了主动聊天）
     if (!(proactive_disabled && (proactive_disabled === 1 || proactive_disabled === '1'))) {
@@ -92,7 +113,13 @@ router.put('/:id', (req, res) => {
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
-  if (base_prompt !== undefined) { updates.push('base_prompt = ?'); params.push(base_prompt); updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt)); }
+  if (base_prompt !== undefined) {
+    updates.push('base_prompt = ?'); params.push(base_prompt);
+    // 获取角色名用于人格裁剪：优先请求体中的 display_name，否则从 DB 查
+    const charForCrop = db.prepare('SELECT display_name, name FROM characters WHERE id = ?').get(req.params.id);
+    const cropName = display_name || charForCrop?.display_name || charForCrop?.name || 'assistant';
+    updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt, cropName));
+  }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
 
@@ -102,6 +129,16 @@ router.put('/:id', (req, res) => {
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+  // 如果更新了 base_prompt，标记日程模板需要重新生成
+  if (base_prompt !== undefined && config.features.schedule !== false) {
+    const charId = parseInt(req.params.id, 10);
+    // 将 version 设为 0，下次查看日程时触发重新生成
+    db.prepare('UPDATE schedule_templates SET version = 0 WHERE character_id = ?').run(charId);
+    invalidateScheduleCache(charId);
+    console.log(`[char] Schedule marked for regeneration (char ${charId}: base_prompt changed)`);
+  }
+
   res.json({ ok: true });
 });
 
@@ -404,7 +441,7 @@ ${searchContext}` : ''}
       // 直接写入数据库
       const insertResult = db.prepare(
         `INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled) VALUES (?, ?, ?, ?, ?, 0)`
-      ).run(charName, displayName, basePrompt, cropPersonalityForEmotion(basePrompt), emotionBaseline);
+      ).run(charName, displayName, basePrompt, cropPersonalityForEmotion(basePrompt, displayName), emotionBaseline);
 
       console.log(`[characters] AI-generated: "${displayName}" (${charName}) — saved`);
       res.status(201).json({
@@ -415,6 +452,24 @@ ${searchContext}` : ''}
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
       });
+
+      // 异步生成日程
+      if (config.features.schedule !== false) {
+        const newId = insertResult.lastInsertRowid;
+        setTimeout(async () => {
+          try {
+            const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(newId);
+            if (char) {
+              await generateSchedule(char);
+              assignNextRefreshTime(newId);
+              snapshotTodaySchedule(newId);
+              console.log(`[characters] Schedule generated for AI character "${displayName}"`);
+            }
+          } catch (err) {
+            console.error(`[characters] Schedule generation failed for "${displayName}":`, err.message);
+          }
+        }, 3000).unref();
+      }
     } else {
       // 预览模式：不入库，返回生成数据
       console.log(`[characters] AI-generated preview: "${displayName}" (${charName}) — not saved`);

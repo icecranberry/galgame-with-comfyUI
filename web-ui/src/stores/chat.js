@@ -423,6 +423,26 @@ export const useChatStore = defineStore('chat', () => {
             if (lastEvent === 'guesses' && d.a && d.b) {
               guesses.value = { a: d.a, b: d.b }
             }
+            // ── queued: 日程系统延迟回复 ──
+            if (lastEvent === 'queued') {
+              // 清理临时气泡（后端已保存用户消息）
+              for (const bid of bubbleIds) {
+                messages.value = messages.value.filter(x => x.id !== bid)
+              }
+              streaming.value = false
+              showTypingDots.value = false
+              if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+              const delayMins = d.delayMinutes || 0
+              const activity = d.currentActivity || '某件事'
+              if (delayMins === -1) {
+                const est = d.estimatedReplyAt ? new Date(d.estimatedReplyAt) : null
+                const timeStr = est ? `${est.getHours()}:${String(est.getMinutes()).padStart(2, '0')}` : '稍后'
+                console.log(`[chat] ${activeChar.value?.display_name} is sleeping, reply queued until ~${timeStr}`)
+              } else {
+                console.log(`[chat] ${activeChar.value?.display_name} is busy (${activity}), reply expected in ${delayMins}min`)
+              }
+              break  // 跳出 stream read 循环
+            }
             // ── affinity_update: 实时好感度（递增 key 触发 roll 动画）──
             if (lastEvent === 'affinity_update' && d.affinity !== undefined) {
               realtimeAffinity.value = {
@@ -608,6 +628,39 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function handleDelayedReply(data) {
+    const charId = data.character_id
+
+    // 更新角色列表中的预览 + 排序
+    const char = characters.value.find(c => c.id === charId)
+    if (char) {
+      const firstMsg = data.messages?.[0]
+      char.last_message = firstMsg?.content || '(延迟回复)'
+      char.last_message_at = data.created_at
+      characters.value.sort((a, b) => {
+        if (!a.last_message_at && !b.last_message_at) return 0
+        if (!a.last_message_at) return 1
+        if (!b.last_message_at) return -1
+        return new Date(b.last_message_at) - new Date(a.last_message_at)
+      })
+      sidebarScrollSignal.value++
+    }
+
+    // 如果是当前活跃角色，直接追加到消息列表
+    if (activeCharId.value === charId && data.messages?.length) {
+      for (const msg of data.messages) {
+        messages.value.push({
+          id: msg.id || uid(),
+          role: 'assistant',
+          type: 'text',
+          content: msg.content,
+          created_at: data.created_at,
+          is_delayed_reply: true,
+        })
+      }
+    }
+  }
+
   return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage }
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply }
 })

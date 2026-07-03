@@ -156,6 +156,14 @@ onMounted(async () => {
     }
   })
 
+  // 订阅日程延迟回复 SSE 事件
+  try {
+    const { onEvent } = await import('./stores/unifiedStream.js')
+    onEvent('delayed_reply', (data) => {
+      chat.handleDelayedReply(data)
+    })
+  } catch { /* unifiedStream may not be ready */ }
+
   if (isMobile.value) {
     // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出
   } else if (chat.characters.length > 0 && !chat.activeCharId && !route.params.id) {

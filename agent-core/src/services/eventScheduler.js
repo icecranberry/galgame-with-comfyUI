@@ -16,12 +16,12 @@ import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 
-const BASE_INTERVAL_MIN = 20; // 基准间隔 20 分钟（freq=1）
+const BASE_INTERVAL_MIN = 30; // 基准间隔 30 分钟（freq=1）
 
 function getCheckIntervalMs() {
   const freq = config.features.eventFreq ?? 1;
   if (freq <= 0) return Infinity; // 禁用
-  // freq=1 → 20min, freq=0.5 → 40min, freq=0.1 → 200min
+  // freq=1 → 30min, freq=0.5 → 60min, freq=0.1 → 300min (5h)
   const intervalMin = Math.round(BASE_INTERVAL_MIN / freq);
   return intervalMin * 60 * 1000;
 }
@@ -219,6 +219,7 @@ ${urgencyNote}
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.events_disabled = 0
+        AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND c.id NOT IN (
           SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged')
         )
