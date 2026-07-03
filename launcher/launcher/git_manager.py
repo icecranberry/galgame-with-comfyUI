@@ -303,7 +303,8 @@ class GitManager(QObject):
         self._fetch_gen += 1
         self._pending_op = "fetch"
         self._proxy_retried = False
-        self._run_git(["fetch", "origin", "--tags"])
+        # --update-shallow: 兼容 release 包的 shallow clone，非 shallow repo 上无操作
+        self._run_git(["fetch", "--update-shallow", "origin", "--tags"])
         return None
 
     def checkout_tag(self, tag: str) -> str | None:
@@ -452,13 +453,13 @@ class GitManager(QObject):
                 if _probe_github_reachable():
                     self.output.emit("[proxy] 直连 github.com 可达，自动切换直连重试...")
                     if self._pending_op == "fetch":
-                        self._run_git(["fetch", "origin", "--tags"], bypass_proxy=True)
+                        self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
                     elif self._pending_op == "init_repo":
                         steps = getattr(self, '_init_repo_steps', [])
                         if steps:
                             self._run_git(steps[-1][0], bypass_proxy=True)
                         else:
-                            self._run_git(["fetch", "origin", "--tags"], bypass_proxy=True)
+                            self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
                     return
                 else:
                     self.output.emit("[proxy] 直连 github.com 也不可达，请开启代理客户端后重试")

@@ -75,6 +75,8 @@ function _connect() {
     proactive_message: d => _dispatch('proactive_message', d),
     delayed_reply:     d => _dispatch('delayed_reply', d),
     schedule_peek_ready: d => _dispatch('schedule_peek_ready', d),
+    schedule_peek_progress: d => _dispatch('schedule_peek_progress', d),
+    schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
   }, {
     onClose: _scheduleReconnect,
   })

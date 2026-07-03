@@ -1,7 +1,6 @@
 """
 运行日志页 —— 服务状态指示 + 实时日志 + 提醒条幅。
 """
-import socket
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -11,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from .log_widget import LogWidget
+from .network import get_local_ip
 
 
 class ServiceIndicator(QWidget):
@@ -160,23 +160,10 @@ class LogPage(QWidget):
     # 条幅控制
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _get_local_ip() -> str | None:
-        """获取本机局域网 IP 地址。失败时返回 None。"""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return None
-
     def show_mobile_banner(self) -> None:
         """显示手机端访问条幅（全宽橙色长条，服务运行时常驻）。IP 只获取一次并缓存。"""
         if not hasattr(self, '_cached_ip'):
-            self._cached_ip = self._get_local_ip()
+            self._cached_ip = get_local_ip()
         if self._cached_ip:
             self._mobile_banner.setText(
                 f'手机端可访问 http://{self._cached_ip}:3099 打开邻舍'

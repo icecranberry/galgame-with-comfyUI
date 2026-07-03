@@ -721,6 +721,7 @@ async function saveComfy() {
     eventArtist: form.value.eventArtist, eventWidth: form.value.eventWidth, eventHeight: form.value.eventHeight,
   })
   settingsStore.setComfySize(form.value.width, form.value.height)
+  settingsStore.setEventSize(form.value.eventWidth, form.value.eventHeight)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
 }

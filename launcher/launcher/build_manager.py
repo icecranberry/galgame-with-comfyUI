@@ -209,10 +209,13 @@ class BuildManager(QObject):
             _npm_args.append("--registry=https://registry.npmmirror.com")
 
         # pip install 参数
+        # embeddable Python 没有系统 SSL 证书，使用镜像源时必须加 --trusted-host
         _pip_args = ["-m", "pip", "install", "-r", "requirements.txt"]
         if self.use_mirror:
-            _pip_args.append("-i")
-            _pip_args.append("https://pypi.tuna.tsinghua.edu.cn/simple")
+            _pip_args += [
+                "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                "--trusted-host", "pypi.tuna.tsinghua.edu.cn",
+            ]
 
         steps: list[dict] = []
 
@@ -280,7 +283,8 @@ class BuildManager(QObject):
                 "cwd": vector_svc,
                 "cmd": venv_pip,
                 "args": ["install", "-r", "requirements.txt"]
-                        + (["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"] if self.use_mirror else []),
+                        + (["-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                            "--trusted-host", "pypi.tuna.tsinghua.edu.cn"] if self.use_mirror else []),
                 "timeout": 300000,
             })
 
@@ -384,6 +388,7 @@ class BuildManager(QObject):
         env = self._proc.processEnvironment()
         env.insert("PYTHONUNBUFFERED", "1")
         env.insert("FORCE_COLOR", "0")
+        env.insert("PIP_DISABLE_PIP_VERSION_CHECK", "1")  # embeddable Python 加速
         for _key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
                       "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
             if _key in os.environ and _key not in env.keys():

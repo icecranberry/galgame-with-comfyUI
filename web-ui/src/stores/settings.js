@@ -5,6 +5,8 @@ import * as api from '../api/index.js'
 export const useSettingsStore = defineStore('settings', () => {
   const comfyWidth = ref(1600)
   const comfyHeight = ref(1200)
+  const eventWidth = ref(1600)
+  const eventHeight = ref(1200)
   const forceImageGen = ref(false)
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
@@ -25,6 +27,8 @@ export const useSettingsStore = defineStore('settings', () => {
       const data = await api.getConfig()
       comfyWidth.value = data.comfy?.width || 1600
       comfyHeight.value = data.comfy?.height || 1200
+      eventWidth.value = data.comfy?.eventWidth || 1600
+      eventHeight.value = data.comfy?.eventHeight || 1200
       if (data.features?.forceImageGen !== undefined) {
         forceImageGen.value = data.features.forceImageGen
       }
@@ -46,6 +50,11 @@ export const useSettingsStore = defineStore('settings', () => {
     comfyHeight.value = height
   }
 
+  function setEventSize(width, height) {
+    eventWidth.value = width
+    eventHeight.value = height
+  }
+
   /**
    * 切换强制生图开关，持久化到后端
    */
@@ -61,5 +70,5 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function setHasApiKey(v) { hasApiKey.value = v }
 
-  return { comfyWidth, comfyHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, loadComfyConfig, setComfySize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey }
 })

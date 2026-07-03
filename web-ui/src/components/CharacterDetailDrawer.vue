@@ -15,12 +15,11 @@
               <div class="dr-info">
                 <h3>{{ char?.display_name || '' }}</h3>
                 <div v-if="currentAct" class="dr-now">
-                  <i class="dr-dot" :class="dotClass"></i>
                   <span class="dr-act-text">{{ currentAct.activity }}</span>
                   <span class="dr-sep">·</span>
                   <span class="dr-loc-text">{{ currentAct.location }}</span>
                 </div>
-                <div v-else class="dr-now dr-no-data">暂无日程数据</div>
+                <div v-else class="dr-now dr-no-data">还没安排日程</div>
               </div>
               <button class="dr-close" @click="$emit('close')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -35,7 +34,7 @@
               </button>
               <button class="dr-btn" @click="$emit('regenerate')" :disabled="regenerating">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
-                <span>{{ regenerating ? '生成中...' : '改变ta的日程' }}</span>
+                <span>{{ scheduleBtnText }}</span>
               </button>
             </div>
           </div>
@@ -50,7 +49,7 @@
             <!-- 空 -->
             <div v-else-if="!activities.length" class="dr-empty">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.25"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              <p>暂无日程数据</p>
+              <p>还没有日程安排</p>
             </div>
 
             <!-- 时间轴 -->
@@ -64,7 +63,6 @@
                 @mouseleave="onLeave"
                 :class="{
                   'tl-curr': act.isCurrent,
-                  'tl-past': isPast(act),
                   'tl-sleep': act.replyDelay === -1,
                 }"
               >
@@ -76,8 +74,6 @@
                 <div class="tl-content">
                   <div class="tl-top">
                     <span class="tl-act">{{ act.activity }}</span>
-                    <span v-if="act.replyDelay > 0" class="tl-tag t-delay">{{ act.replyDelay }}min</span>
-                    <span v-else-if="act.replyDelay === -1" class="tl-tag t-sleep">睡眠</span>
                   </div>
                   <div class="tl-loc">{{ act.location }}</div>
                   <div v-if="act.isCurrent" class="tl-mark">
@@ -121,22 +117,12 @@ const { tooltip, onEnter, onMove, onLeave } = useTooltip()
 
 const currentAct = computed(() => props.activities.find((a: any) => a.isCurrent) || null)
 
-const dotClass = computed(() => {
-  if (!currentAct.value) return 'd-idle'
-  if (currentAct.value.replyDelay === -1) return 'd-sleep'
-  if (currentAct.value.replyDelay > 0) return 'd-busy'
-  return 'd-idle'
+const scheduleBtnText = computed(() => {
+  if (props.regenerating) return '生成中...'
+  if (!props.loading && !props.activities.length) return '为ta制作日程表'
+  return '改变ta的日程'
 })
 
-function isPast(act: any) {
-  if (act.isCurrent) return false
-  const now = new Date()
-  const nm = now.getHours() * 60 + now.getMinutes()
-  const [eh, em] = (act.endTime || '00:00').split(':').map(Number)
-  let em2 = eh * 60 + (em || 0)
-  if (em2 < nm && act.replyDelay === -1) em2 += 1440
-  return nm > em2
-}
 </script>
 
 <style scoped>
@@ -192,19 +178,15 @@ function isPast(act: any) {
 .dr-sep { color: #d9d6d0; flex-shrink: 0; }
 .dr-loc-text { overflow: hidden; text-overflow: ellipsis; }
 
-.dr-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.d-idle  { background: #52c41a; }
-.d-busy  { background: #faad14; }
-.d-sleep { background: #bfbfbf; }
-
 .dr-close {
-  display: flex; align-items: center; justify-content: center;
+  display: none; align-items: center; justify-content: center;
   width: 34px; height: 34px; flex-shrink: 0;
   border: 1px solid var(--border); border-radius: 50%;
   background: var(--glass-bg); color: var(--text-secondary);
   cursor: pointer; transition: 0.15s; padding: 0;
 }
 .dr-close:hover { background: rgba(255,77,79,0.08); color: #ff4d4f; border-color: rgba(255,77,79,0.2); }
+
 
 /* Row 2: action buttons */
 .dr-row2 {
@@ -213,18 +195,18 @@ function isPast(act: any) {
 
 .dr-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 14px;
-  border: 1px solid var(--border); border-radius: 8px;
-  background: var(--glass-bg);
-  color: var(--text-secondary); font-size: 0.82rem;
+  padding: 5px 10px;
+  border: 1px solid var(--accent); border-radius: 8px;
+  background: var(--accent);
+  color: #fff; font-size: 0.82rem;
   cursor: pointer; transition: 0.15s;
 }
 .dr-btn svg { flex-shrink: 0; }
-.dr-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
+.dr-btn:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
 .dr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Body ── */
-.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; }
+.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default;}
 
 .dr-skel { padding: 8px 0; }
 .sk-line { height: 11px; border-radius: 6px; background: var(--bg-hover); margin-bottom: 10px; animation: sk 1.5s ease-in-out infinite; }
@@ -242,7 +224,6 @@ function isPast(act: any) {
   display: grid; grid-template-columns: 18px 50px 1fr;
   gap: 8px; align-items: start; padding: 4px 0;
 }
-.tl-item.tl-past { opacity: 0.3; }
 
 .tl-node { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
 .tl-d { width: 9px; height: 9px; border-radius: 50%; background: #d9d9d9; flex-shrink: 0; }
@@ -265,9 +246,6 @@ function isPast(act: any) {
 
 .tl-top { display: flex; align-items: center; gap: 6px; }
 .tl-act { font-size: 0.85rem; color: var(--text-bright); font-weight: 500; }
-.tl-tag { font-size: 0.65rem; padding: 1px 5px; border-radius: 999px; font-weight: 600; }
-.t-delay { background: rgba(250,173,20,0.1); color: #ad6800; }
-.t-sleep { background: rgba(140,128,116,0.08); color: #8c8074; }
 .tl-loc { font-size: 0.75rem; color: var(--text-secondary); margin-top: 3px; }
 
 .tl-mark {
@@ -292,6 +270,7 @@ function isPast(act: any) {
 
 @media (max-width: 767px) {
   .drawer-panel { width: 100vw; max-width: 100vw; }
+  .dr-close { display: flex; }
 }
 
 /* ── Tooltip ── */

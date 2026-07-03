@@ -2,7 +2,6 @@
 首页 —— 全屏背景图 + 标题阴影 + 启动邻舍/ComfyUI 并排按钮 + 快捷入口卡片 + 版本号。
 """
 import os
-import socket
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -13,6 +12,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap, QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtCore import Qt, Signal, QRectF
+
+from .network import get_local_ip
 
 
 class ShortcutCard(QWidget):
@@ -314,23 +315,10 @@ class HomePage(QWidget):
                 QPushButton:pressed { background: #C95F4F; }
             """)
 
-    @staticmethod
-    def _get_local_ip() -> str | None:
-        """获取本机局域网 IP 地址。失败时返回 None。"""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return None
-
     def show_mobile_banner(self) -> None:
         """显示手机端访问条幅（服务启动后常驻提醒）。IP 只获取一次并缓存。"""
         if not hasattr(self, '_cached_ip'):
-            self._cached_ip = self._get_local_ip()
+            self._cached_ip = get_local_ip()
         if self._cached_ip:
             self._banner_text.setText(
                 f'手机端可访问 '

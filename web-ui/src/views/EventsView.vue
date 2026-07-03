@@ -1,5 +1,5 @@
 <template>
-  <div class="events-page" @scroll.passive="onScroll" @wheel.passive="onPageWheel" @touchmove.passive="onPageTouchMove" ref="pageEl">
+  <div class="events-page" ref="pageEl">
     <!-- 标题栏 -->
     <div class="events-topbar" :class="{ 'header-hidden': isMobile && !headerVisible }" ref="topbarEl">
       <div class="topbar-title" @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">
@@ -48,6 +48,9 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 可滚动内容区 -->
+    <div class="events-scroll" @scroll.passive="onScroll" @wheel.passive="onPageWheel" @touchmove.passive="onPageTouchMove" ref="scrollEl">
 
     <!-- 活跃事件瀑布流 -->
     <div class="events-content">
@@ -123,6 +126,8 @@
         </div>
       </Transition>
     </div>
+
+    </div><!-- /events-scroll -->
   </div>
 </template>
 
@@ -140,6 +145,7 @@ const showPicker = ref(false)
 const pickerRef = ref(null)
 const stirring = ref(false)
 const pageEl = ref(null)
+const scrollEl = ref(null)
 const topbarEl = ref(null)
 
 const characters = computed(() => chat.characters.filter(c => !c.events_disabled))
@@ -213,7 +219,7 @@ onUnmounted(() => {
 
 watch(() => store.scrollToTopSignal, async () => {
   await store.loadEvents()
-  if (pageEl.value) pageEl.value.scrollTop = 0
+  if (scrollEl.value) scrollEl.value.scrollTop = 0
 })
 
 function onEventUpdated({ concluded }) {
@@ -263,8 +269,8 @@ let lastScrollTop = 0
 
 // 滚动到底部后继续滚轮 → 自动展开往期奇遇（PC）
 function onPageWheel(e) {
-  if (showHistory.value || !pageEl.value || e.deltaY <= 0) return
-  const el = pageEl.value
+  if (showHistory.value || !scrollEl.value || e.deltaY <= 0) return
+  const el = scrollEl.value
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 5) {
     showHistory.value = true
   }
@@ -272,61 +278,70 @@ function onPageWheel(e) {
 
 // 滑动到底部后继续上划 → 自动展开往期奇遇（移动端）
 function onPageTouchMove(e) {
-  if (showHistory.value || !pageEl.value) return
-  const el = pageEl.value
+  if (showHistory.value || !scrollEl.value) return
+  const el = scrollEl.value
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 5) {
     showHistory.value = true
   }
 }
 
-	function onScroll() {
-		const st = pageEl.value?.scrollTop || 0
-		// 移动端标题栏显隐
-		if (isMobile) {
-			const delta = st - lastScrollTop
-			if (st > 60 && delta > 8) {
-				headerVisible.value = false
-			} else if (delta < -4) {
-				headerVisible.value = true
-			}
-		}
-		lastScrollTop = st
-		// 滚动加载更多历史（API 分页）
-		if (showHistory.value && store.historyHasMore && pageEl.value) {
-			const el = pageEl.value
-			if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-				store.loadMoreHistory()
-			}
-		}
-	}
+function onScroll() {
+  const el = scrollEl.value
+  if (!el) return
+
+  if (isMobile) {
+    const delta = el.scrollTop - lastScrollTop
+    if (el.scrollTop > 60 && delta > 8) {
+      headerVisible.value = false
+    } else if (delta < -4) {
+      headerVisible.value = true
+    }
+    lastScrollTop = el.scrollTop
+  }
+
+  // 滚动加载更多历史（API 分页）
+  if (showHistory.value && store.historyHasMore && scrollEl.value) {
+    const el2 = scrollEl.value
+    if (el2.scrollTop + el2.clientHeight >= el2.scrollHeight - 300) {
+      store.loadMoreHistory()
+    }
+  }
+}
 
 </script>
 
 <style scoped>
 .events-page {
   flex: 1;
-  min-height: 100vh; min-height: 100dvh;
-  background: var(--bg-page);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+  background: transparent;
+  position: relative;
 }
 
 /* ── 标题栏 ── */
 .events-topbar {
-  position: sticky; top: 0; z-index: 20;
-  background: rgba(255,255,255,0.78);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  display: flex; align-items: center; justify-content: space-between;
   padding: 14px 24px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  display: flex; align-items: center; justify-content: space-between;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
 }
 .header-hidden { transform: translateY(-100%); }
 .topbar-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; color: var(--text-bright); }
 .topbar-title.is-clickable { cursor: pointer; }
+
+/* ── 可滚动内容区 ── */
+.events-scroll {
+  flex: 1; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 40px;
+}
 .topbar-badge { font-size: 12px; background: var(--danger); color: #fff; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
 
 /* 扰动世界线按钮 — 和朋友圈一致 */
@@ -559,12 +574,12 @@ function onPageTouchMove(e) {
 .slide-down-enter-to, .slide-down-leave-from { opacity: 1; max-height: 800px; }
 
 @media (max-width: 767px) {
-  .events-page { position: relative; }
   .events-topbar {
-    padding: 12px 14px;
+    padding: 12px 16px;
     position: absolute; top: 0; left: 0; right: 0; z-index: 20;
   }
-  .events-content { padding: 80px 8px 8px; }
+  .events-scroll { padding: 80px 10px 8px; }
+  .events-content { padding: 0; }
   .waterfall-row { gap: 6px; }
   .waterfall-col { gap: 6px; }
   .history-section { padding: 0 8px 20px; }

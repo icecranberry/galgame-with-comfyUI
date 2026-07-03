@@ -878,8 +878,35 @@ export async function peekSnapshot(characterId, genImage = true) {
   return res.json()
 }
 
+/** 瞄一眼再拍一张：使用已生成的 prompt 重新提交 ComfyUI 生图 */
+export async function retakePeekSnapshot(characterId, prompt) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/peek/retake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) throw new Error(`retake peek: ${res.status}`)
+  return res.json()
+}
+
 export async function regenerateSchedule(characterId) {
   const res = await fetch(`${BASE}/schedule/${characterId}/regenerate`, { method: 'POST' })
   if (!res.ok) throw new Error(`regenerate schedule: ${res.status}`)
+  return res.json()
+}
+
+/** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */
+export async function regenerateAllSchedules() {
+  const res = await fetch(`${BASE}/schedule/regenerate-all`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `regenerate all: ${res.status}`)
+  }
+  return res.json()
+}
+
+/** 取消正在进行的重置世界线任务 */
+export async function cancelRegenerateAll() {
+  const res = await fetch(`${BASE}/schedule/regenerate-all/cancel`, { method: 'POST' })
   return res.json()
 }

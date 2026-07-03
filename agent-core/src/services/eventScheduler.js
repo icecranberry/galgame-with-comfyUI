@@ -1,7 +1,9 @@
 /**
  * 奇遇事件调度器
  *
- * - 每 20 分钟扫描一次（freq=1 时）
+ * 两条独立的定时线：
+ *   1. 半程通知 — 每 3 分钟检查一次（独立于事件生成周期，确保短时效事件也能触发）
+ *   2. 事件生成 — 每 30 分钟扫描一次（freq=1 时），到期检查 + 新事件生成
  * - 到期检查：expires_at <= now → concludeEvent()
  * - 半程通知：已过半且未互动 → 生成主动消息紧急联络
  * - 新事件生成：随机选角色 + 随机选事件类型 → generateEvent()
@@ -17,6 +19,7 @@ import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 
 const BASE_INTERVAL_MIN = 30; // 基准间隔 30 分钟（freq=1）
+const HALF_TIME_CHECK_MS = 3 * 60 * 1000; // 半程通知独立检查间隔 3 分钟
 
 function getCheckIntervalMs() {
   const freq = config.features.eventFreq ?? 1;
@@ -27,7 +30,9 @@ function getCheckIntervalMs() {
 }
 
 let timer = null;
+let halfTimeTimer = null; // 半程通知独立定时器（高频，解耦于事件生成周期）
 let processing = false;
+let halfTimeProcessing = false; // 半程通知并发锁（防 LLM 调用未完成时下一次 setInterval 触发）
 
 function toSQLiteDate(iso) {
   if (!iso) return iso;
@@ -68,140 +73,6 @@ async function tick() {
         await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
       } catch (err) {
         console.error(`[eventScheduler] Conclude error for ${event.display_name}:`, err.message);
-      }
-    }
-
-    // ── 2. 半程通知 ──
-    // 对于 status='open' 且 half_time_notified=0 的事件，检查是否已经过半
-    // 半程判断：expires_at - created_at = duration; now >= created_at + duration/2
-    const halfTimeEvents = db.prepare(`
-      SELECT ce.*, c.display_name, c.base_prompt, c.avatar_path
-      FROM character_events ce
-      JOIN characters c ON c.id = ce.character_id
-      WHERE ce.status = 'open'
-        AND ce.half_time_notified = 0
-        AND ce.engaged = 0
-        AND datetime(ce.created_at, '+' || ((julianday(ce.expires_at) - julianday(ce.created_at)) * 24 * 60 / 2) || ' minutes') <= datetime('now')
-    `).all();
-
-    for (const event of halfTimeEvents) {
-      console.log(`[eventScheduler] Half-time notification for "${event.title}" (${event.display_name}), engaged=${event.engaged}`);
-      try {
-        db.prepare(`UPDATE character_events SET half_time_notified = 1 WHERE id = ?`).run(event.id);
-
-        // 根据 urgency 生成不同语气的主动消息
-        const isUrgent = event.event_type_key ? getUrgencyLevel(event.event_type_key) : 1;
-        const userName = config.user?.nickname || '用户';
-        const urgencyNote = isUrgent >= 2
-          ? `语气要紧急、需要帮助——像在求助或呼救，推动${userName}尽快回应`
-          : `语气轻松自然——像在分享正在发生的事，随手告诉${userName}`;
-
-        const greetingPrompt = `你正在经历一场奇遇事件，现在时间已经过半，但${userName}还没有注意到这件事。
-
-奇遇标题：${event.title}
-当前场景：${event.description}
-${urgencyNote}
-
-请以${event.display_name}的身份，用第一人称给${userName}发一条主动消息（15-50字），根据事情的紧急程度自然表达——紧急事件呼救求援，日常事件随手分享。`;
-
-        // 构建用户信息 system 消息（含用户-角色关系）
-        const userInfoParts = [`对方是${userName}`];
-        if (config.user?.gender) userInfoParts.push(config.user.gender);
-        if (config.user?.appearance) userInfoParts.push(config.user.appearance);
-        if (config.user?.persona) userInfoParts.push(config.user.persona);
-        const userRel = db.prepare(
-          `SELECT relationship_text FROM user_relationships WHERE character_id = ?`
-        ).pluck().get(event.character_id);
-        if (userRel) userInfoParts.push(`你对于${userName}而言的身份是${userRel}`);
-        const userInfoMsg = `你正在和${userName}聊天，以下是${userName}的相关信息：\n${userInfoParts.filter(Boolean).join('，')}`;
-
-        // 生成主动消息内容
-        const { chatSync } = await import('../llm/llm-client.js');
-        const jailbreak = getSystemRulesWithWorld({ roleplay: true });
-        const greeting = await chatSync([
-          { role: 'system', content: jailbreak },
-          { role: 'system', content: event.base_prompt },
-          { role: 'system', content: userInfoMsg },
-          { role: 'user', content: greetingPrompt },
-        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
-
-        // 写入消息（分句）
-        const conversationId = `char_${event.character_id}`;
-        const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
-        const rawId = rawResult.lastInsertRowid;
-
-        const segments = splitText(greeting);
-        let firstMsgId;
-        const msgIds = [];
-        if (segments.length === 0) {
-          const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, 0, 1, ?)`)
-            .run(conversationId, rawId, greeting, event.id);
-          firstMsgId = r.lastInsertRowid;
-          msgIds.push(r.lastInsertRowid);
-        } else {
-          const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, ?, 1, ?)`);
-          for (let i = 0; i < segments.length; i++) {
-            const r = insertMsg.run(conversationId, rawId, segments[i], i, event.id);
-            msgIds.push(r.lastInsertRowid);
-            if (i === 0) firstMsgId = r.lastInsertRowid;
-          }
-        }
-
-        // 奇遇分享卡片气泡（只写 messages，不污染 raw_messages）
-        // content 存事件快照 JSON 用于离线/历史恢复
-        const cardSnapshot = JSON.stringify({
-          title: event.title,
-          description: event.description,
-          image: event.image || null,
-          expires_at: event.expires_at,
-        });
-        let cardMsgId = null;
-        try {
-          const cardSeq = segments.length > 0 ? segments.length : 1;
-          const cardResult = db.prepare(
-            `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, NULL, 'assistant', ?, ?, 1, ?)`
-          ).run(conversationId, cardSnapshot, cardSeq, event.id);
-          cardMsgId = cardResult.lastInsertRowid;
-        } catch (err) {
-          console.error(`[eventScheduler] Failed to write event card message:`, err.message);
-        }
-
-        // 奇遇紧急联络也递增 proactive_streak（和正常主动聊天一致），
-        // 使 streak 累积后能限制正常主动聊天，但奇遇本身的紧急联络不受 streak 限制
-        db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
-
-        // 走正常主动聊天 SSE 通道 → 前端播放提示音
-        broadcastProactiveMessage({
-          character_id: event.character_id,
-          display_name: event.display_name,
-          avatar_path: event.avatar_path || null,
-          content: greeting,
-          segments,
-          msg_ids: msgIds,
-          msg_id: firstMsgId,
-          raw_id: rawId,
-          images: null,
-          created_at: new Date().toISOString(),
-          // 奇遇分享卡片
-          card_msg_id: cardMsgId,
-          event_id: event.id,
-          event_title: event.title,
-          event_description: event.description,
-          event_image: event.image || null,
-          event_expires_at: event.expires_at,
-        });
-
-        broadcastEventUrgency({
-          character_id: event.character_id,
-          character_name: event.display_name,
-          event_id: event.id,
-          event_title: event.title,
-          event_description: event.description,
-          expires_at: event.expires_at,
-        });
-        console.log(`[eventScheduler] Urgency proactive message sent for ${event.display_name}: "${greeting.slice(0, 50)}..."`);
-      } catch (err) {
-        console.error(`[eventScheduler] Half-time notification error:`, err.message);
       }
     }
 
@@ -281,6 +152,161 @@ ${urgencyNote}
 }
 
 /**
+ * 半程通知独立检查（高频：每 3 分钟）
+ *
+ * 与 tick() 解耦的原因：
+ * tick() 按 eventFreq 控制间隔（30min@freq=1），而大量事件类型时长仅 15-30 分钟。
+ * 若半程检查与 tick() 绑定，短时效事件的半程点会落在两次 tick 之间，
+ * 等到下次 tick 时事件已过期 → 步骤 1 先执行 conclude 移除事件 → 步骤 2 永远看不到。
+ *
+ * 此函数独立运行，轻量 SQL 查询，不受 eventFreq 影响。
+ */
+async function checkHalfTimeNotifications() {
+  // 功能开关
+  if (!config.features.events) return;
+
+  // 并发锁：上一次 LLM 调用尚未完成时跳过本次（setInterval 不等待 async）
+  if (halfTimeProcessing) return;
+  halfTimeProcessing = true;
+
+  const db = getDb();
+  try {
+    // 对于 status='open' 且 half_time_notified=0 的事件，检查是否已经过半
+    const halfTimeEvents = db.prepare(`
+      SELECT ce.*, c.display_name, c.base_prompt, c.avatar_path
+      FROM character_events ce
+      JOIN characters c ON c.id = ce.character_id
+      WHERE ce.status = 'open'
+        AND ce.half_time_notified = 0
+        AND ce.engaged = 0
+        AND datetime(ce.created_at, '+' || ((julianday(ce.expires_at) - julianday(ce.created_at)) * 24 * 60 / 2) || ' minutes') <= datetime('now')
+    `).all();
+
+    for (const event of halfTimeEvents) {
+      console.log(`[eventScheduler] Half-time notification for "${event.title}" (${event.display_name}), engaged=${event.engaged}`);
+      try {
+        db.prepare(`UPDATE character_events SET half_time_notified = 1 WHERE id = ?`).run(event.id);
+
+        // 根据 urgency 生成不同语气的主动消息
+        const isUrgent = event.event_type_key ? getUrgencyLevel(event.event_type_key) : 1;
+        const userName = config.user?.nickname || '用户';
+        const urgencyNote = isUrgent >= 2
+          ? `语气要紧急、需要帮助——像在求助或呼救，推动${userName}尽快回应`
+          : `语气轻松自然——像在分享正在发生的事，随手告诉${userName}`;
+
+        const greetingPrompt = `你正在经历一场奇遇事件，现在时间已经过半，但${userName}还没有注意到这件事。
+
+奇遇标题：${event.title}
+当前场景：${event.description}
+${urgencyNote}
+
+请以${event.display_name}的身份，用第一人称给${userName}发一条主动消息（15-50字），根据事情的紧急程度自然表达——紧急事件呼救求援，日常事件随手分享。`;
+
+        // 构建用户信息 system 消息
+        const userInfoParts = [`对方是${userName}`];
+        if (config.user?.gender) userInfoParts.push(config.user.gender);
+        if (config.user?.appearance) userInfoParts.push(config.user.appearance);
+        if (config.user?.persona) userInfoParts.push(config.user.persona);
+        const userRel = db.prepare(
+          `SELECT relationship_text FROM user_relationships WHERE character_id = ?`
+        ).pluck().get(event.character_id);
+        if (userRel) userInfoParts.push(`你对于${userName}而言的身份是${userRel}`);
+        const userInfoMsg = `你正在和${userName}聊天，以下是${userName}的相关信息：\n${userInfoParts.filter(Boolean).join('，')}`;
+
+        // 生成主动消息内容
+        const { chatSync } = await import('../llm/llm-client.js');
+        const jailbreak = getSystemRulesWithWorld({ roleplay: true });
+        const greeting = await chatSync([
+          { role: 'system', content: jailbreak },
+          { role: 'system', content: event.base_prompt },
+          { role: 'system', content: userInfoMsg },
+          { role: 'user', content: greetingPrompt },
+        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
+
+        // 写入消息（分句）
+        const conversationId = `char_${event.character_id}`;
+        const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`).run(conversationId, greeting);
+        const rawId = rawResult.lastInsertRowid;
+
+        const segments = splitText(greeting);
+        let firstMsgId;
+        const msgIds = [];
+        if (segments.length === 0) {
+          const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, 0, 1, ?)`)
+            .run(conversationId, rawId, greeting, event.id);
+          firstMsgId = r.lastInsertRowid;
+          msgIds.push(r.lastInsertRowid);
+        } else {
+          const insertMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, ?, 'assistant', ?, ?, 1, ?)`);
+          for (let i = 0; i < segments.length; i++) {
+            const r = insertMsg.run(conversationId, rawId, segments[i], i, event.id);
+            msgIds.push(r.lastInsertRowid);
+            if (i === 0) firstMsgId = r.lastInsertRowid;
+          }
+        }
+
+        // 奇遇分享卡片气泡
+        const cardSnapshot = JSON.stringify({
+          title: event.title,
+          description: event.description,
+          image: event.image || null,
+          expires_at: event.expires_at,
+        });
+        let cardMsgId = null;
+        try {
+          const cardSeq = segments.length > 0 ? segments.length : 1;
+          const cardResult = db.prepare(
+            `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, event_id) VALUES (?, NULL, 'assistant', ?, ?, 1, ?)`
+          ).run(conversationId, cardSnapshot, cardSeq, event.id);
+          cardMsgId = cardResult.lastInsertRowid;
+        } catch (err) {
+          console.error(`[eventScheduler] Failed to write event card message:`, err.message);
+        }
+
+        // 递增 proactive_streak
+        db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
+
+        // SSE 广播
+        broadcastProactiveMessage({
+          character_id: event.character_id,
+          display_name: event.display_name,
+          avatar_path: event.avatar_path || null,
+          content: greeting,
+          segments,
+          msg_ids: msgIds,
+          msg_id: firstMsgId,
+          raw_id: rawId,
+          images: null,
+          created_at: new Date().toISOString(),
+          card_msg_id: cardMsgId,
+          event_id: event.id,
+          event_title: event.title,
+          event_description: event.description,
+          event_image: event.image || null,
+          event_expires_at: event.expires_at,
+        });
+
+        broadcastEventUrgency({
+          character_id: event.character_id,
+          character_name: event.display_name,
+          event_id: event.id,
+          event_title: event.title,
+          event_description: event.description,
+          expires_at: event.expires_at,
+        });
+        console.log(`[eventScheduler] Urgency proactive message sent for ${event.display_name}: "${greeting.slice(0, 50)}..."`);
+      } catch (err) {
+        console.error(`[eventScheduler] Half-time notification error:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[eventScheduler] checkHalfTime error:', err.message);
+  } finally {
+    halfTimeProcessing = false;
+  }
+}
+
+/**
  * 启动时清理僵尸 pending 事件（>10 分钟未完成）
  */
 function cleanupStuckEvents() {
@@ -315,7 +341,7 @@ export function startEventScheduler() {
     console.log('[eventScheduler] eventFreq=0, scheduler disabled');
     return;
   }
-  console.log('[eventScheduler] Starting (interval:', (intervalMs / 60000).toFixed(1), 'min, freq:', config.features.eventFreq ?? 1, ')');
+  console.log('[eventScheduler] Starting (generation interval:', (intervalMs / 60000).toFixed(1), 'min, half-time check interval: 3 min, freq:', config.features.eventFreq ?? 1, ')');
 
   // 启动时立即清理僵尸事件
   cleanupStuckEvents();
@@ -325,13 +351,22 @@ export function startEventScheduler() {
     tick();
     timer = setInterval(tick, intervalMs);
   }, 30_000);
+
+  // 半程通知独立定时器：高频检查，与事件生成周期解耦
+  // 确保短时效事件（15-30min）也能在过期前触发半程通知
+  halfTimeTimer = setInterval(checkHalfTimeNotifications, HALF_TIME_CHECK_MS);
 }
 
 export function stopEventScheduler() {
   if (timer) {
     clearInterval(timer);
     timer = null;
-    console.log('[eventScheduler] Stopped');
+    console.log('[eventScheduler] Stopped (generation timer)');
+  }
+  if (halfTimeTimer) {
+    clearInterval(halfTimeTimer);
+    halfTimeTimer = null;
+    console.log('[eventScheduler] Stopped (half-time timer)');
   }
 }
 

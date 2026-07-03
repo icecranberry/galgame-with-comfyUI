@@ -3,7 +3,6 @@
 """
 import os
 import sys
-import socket
 import subprocess
 import webbrowser
 from PySide6.QtWidgets import (
@@ -26,6 +25,7 @@ from .config_manager import ConfigManager
 from .git_manager import GitManager
 from .build_manager import BuildManager
 from .service_runner import ServiceRunner, ServiceWorker
+from .network import get_local_ip
 from .home_page import HomePage
 from .log_page import LogPage
 from .version_page import VersionPage
@@ -142,8 +142,6 @@ class MainWindow(QMainWindow):
         self._pending_fetch_is_auto = False  # 自动 fetch 静默模式，失败不报错给用户
         self._slide_anim: QPropertyAnimation | None = None
         self._animating = False
-        self._cached_ip: str | None = None
-
         self._setup_window()
         self._setup_title_bar()
         self._setup_pages()
@@ -472,6 +470,19 @@ class MainWindow(QMainWindow):
         self._switching_version = True
         self._pending_checkout_tag = tag  # 兜底：若 get_current_tag() 失败，直接用此值
         self._version_page.set_building(True)
+
+        if self._runner.is_any_running():
+            # Windows 下运行中的进程持有文件锁，git checkout 会失败
+            self._version_page.append_log("正在停止服务（切换版本需要独占文件访问）...")
+            self._runner.stop_all()
+            # 等待 5 秒让服务优雅退出，然后继续 checkout
+            QTimer.singleShot(5000, lambda: self._do_version_checkout(tag))
+            return
+
+        self._do_version_checkout(tag)
+
+    def _do_version_checkout(self, tag: str):
+        """停止服务后执行实际的 git checkout（由 _on_switch_tag 调度）。"""
         self._version_page.append_log(f"正在切换到 {tag}...")
         err = self._git.checkout_tag(tag)
         if err:
@@ -648,7 +659,7 @@ class MainWindow(QMainWindow):
             self._log_page.hide_mobile_banner()
 
         if overall == "all_running" and self._config.get("auto_open_browser"):
-            ip = self._get_local_ip()
+            ip = get_local_ip()
             url = f"http://localhost:3099?mobile_ip={ip}" if ip else "http://localhost:3099"
             webbrowser.open(url)
             self._log_page.append_log(f"[系统] 🌐 浏览器已打开 {url}")
@@ -690,20 +701,6 @@ class MainWindow(QMainWindow):
     def _open_in_own_dir(path: str):
         """用 subprocess 打开文件，工作目录设为文件所在目录。"""
         subprocess.Popen([path], cwd=os.path.dirname(path), shell=False)
-
-    def _get_local_ip(self) -> str | None:
-        """获取本机局域网 IP 地址（带缓存）。失败时返回 None。"""
-        if self._cached_ip is not None:
-            return self._cached_ip
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1)
-            s.connect(("8.8.8.8", 80))
-            self._cached_ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            self._cached_ip = None
-        return self._cached_ip
 
     def _load_settings_to_form(self):
         self._settings_page.set_values(

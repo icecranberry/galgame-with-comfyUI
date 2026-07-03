@@ -339,21 +339,30 @@ async function main() {
 
   const npmCmd = resolve(NODE_DIR, "npm.cmd");
 
-  // agent-core
-  if (existsSync(resolve(AGENT_CORE, "node_modules", "express"))) {
-    ok("agent-core 已预装，跳过");
-  } else {
-    log("agent-core npm install (~3-8min)...");
+  // agent-core — 始终重新安装，确保原生模块（better-sqlite3等）编译目标与捆绑 Node.js 一致
+  log("agent-core npm install (~3-8min)...");
+  // 先清理旧原生模块编译产物，防止残留 incompatible 的 .node 文件
+  if (existsSync(resolve(AGENT_CORE, "node_modules"))) {
+    const { rmSync } = await import("node:fs");
+    const prebuilds = resolve(AGENT_CORE, "node_modules", ".cache");
+    const sqlite3Build = resolve(AGENT_CORE, "node_modules", "better-sqlite3", "build");
+    try { if (existsSync(prebuilds)) rmSync(prebuilds, { recursive: true, force: true }); } catch {}
+    try { if (existsSync(sqlite3Build)) rmSync(sqlite3Build, { recursive: true, force: true }); } catch {}
+    log("  已清理原生模块编译缓存");
+  }
+  {
     const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: AGENT_CORE, print: true });
     if (!r.ok) { fail("agent-core npm install 失败!"); process.exit(1); }
     ok("agent-core 完成");
   }
 
-  // web-ui
+  // web-ui — 同样始终安装，确保依赖与 package.json 一致
+  log("web-ui npm install (~2-5min)...");
   if (existsSync(resolve(WEB_UI, "node_modules"))) {
-    ok("web-ui 已预装，跳过");
-  } else {
-    log("web-ui npm install (~2-5min)...");
+    const { rmSync } = await import("node:fs");
+    try { rmSync(resolve(WEB_UI, "node_modules", ".cache"), { recursive: true, force: true }); } catch {}
+  }
+  {
     const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: WEB_UI, print: true });
     if (!r.ok) { fail("web-ui npm install 失败!"); process.exit(1); }
     ok("web-ui 完成");
@@ -473,10 +482,19 @@ async function main() {
   const launcherDir = resolve(ROOT, "launcher");
 
   {
-    const check = await exec("pip", ["show", "PySide6"]);
+    // 优先使用捆绑 Python 安装 PyInstaller 依赖（与脚本其他步骤保持一致）
+    const check = await exec(pyExe, ["-m", "pip", "show", "PySide6"]);
     if (!check.ok) {
       log("安装 PyInstaller 依赖...");
-      await exec("pip", ["install", "PySide6", "psutil", "pyinstaller"], { print: true });
+      const r = await exec(pyExe, ["-m", "pip", "install", "PySide6", "psutil", "pyinstaller",
+        "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+        "--trusted-host", "pypi.tuna.tsinghua.edu.cn"], { print: true, timeout: 300000 });
+      if (!r.ok) {
+        // 捆绑 Python 失败则回退到系统 pip（构建机可能有完整 Python 环境）
+        warn("捆绑 Python 安装失败，尝试系统 pip...");
+        const r2 = await exec("pip", ["install", "PySide6", "psutil", "pyinstaller"], { print: true });
+        if (!r2.ok) { fail("PyInstaller 依赖安装失败!"); process.exit(1); }
+      }
     }
   }
 
@@ -489,7 +507,8 @@ async function main() {
       log("已删除旧的 .spec 文件");
     }
 
-    const r = await exec("pyinstaller", [
+    // 优先使用捆绑 Python 运行 PyInstaller，失败则回退系统 pyinstaller
+    let r = await exec(pyExe, ["-m", "PyInstaller",
       "--onefile", "--windowed",
       "--name", "邻舍.EXE",
       "--icon", "assets/icon.ico",
@@ -503,7 +522,25 @@ async function main() {
       "--hidden-import", "PySide6.QtNetwork",
       "--clean", "--noconfirm",
       "main.py",
-    ], { cwd: launcherDir, print: true });
+    ], { cwd: launcherDir, print: true, timeout: 300000 });
+    if (!r.ok) {
+      warn("捆绑 Python PyInstaller 失败，尝试系统 pyinstaller...");
+      r = await exec("pyinstaller", [
+        "--onefile", "--windowed",
+        "--name", "邻舍.EXE",
+        "--icon", "assets/icon.ico",
+        "--add-data", "assets/launchHeader.jpg;assets",
+        "--add-data", "assets/icon.ico;assets",
+        "--add-data", "assets/HarmonyOS_Sans_SC_Regular.ttf;assets",
+        "--add-data", "assets/navbar-title.png;assets",
+        "--hidden-import", "PySide6.QtCore",
+        "--hidden-import", "PySide6.QtGui",
+        "--hidden-import", "PySide6.QtWidgets",
+        "--hidden-import", "PySide6.QtNetwork",
+        "--clean", "--noconfirm",
+        "main.py",
+      ], { cwd: launcherDir, print: true });
+    }
     if (!r.ok) { fail("PyInstaller 打包失败!"); process.exit(1); }
     ok("PyInstaller 打包完成");
   }
@@ -516,7 +553,8 @@ async function main() {
   // shallow clone 保留 .git/
   log("创建 shallow clone (保留 .git 用于版本更新)...");
   const GITHUB_REPO_URL = "https://github.com/icecranberry/galgame-with-comfyUI.git";
-  const cloneResult = await exec("git", ["clone", "--depth", "1", ROOT, RELEASE_DIR]);
+  // depth=50 覆盖足够历史，确保用户端 git describe / checkout tag 不出问题
+  const cloneResult = await exec("git", ["clone", "--depth", "50", ROOT, RELEASE_DIR]);
   let hasGit = cloneResult.ok;
 
   if (!hasGit) {
