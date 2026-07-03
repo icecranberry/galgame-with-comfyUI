@@ -84,6 +84,59 @@ export function initialize() {
   if (sleepers > 0) {
     console.log(`[scheduleMgr] Initialized: ${sleepers} character(s) currently sleeping`);
   }
+
+  // 启动睡眠状态定时同步（时间边界兜底）
+  startSleepingStateCron();
+}
+
+/**
+ * 定时同步所有角色的 is_sleeping / sleep_until。
+ *
+ * 在入睡/起床高峰期（21:00-02:00 / 06:00-09:00）每 15 分钟跑一次，
+ * 其他时段每小时兜底一次。使用自调整 setTimeout 链，不用 setInterval。
+ */
+function startSleepingStateCron() {
+  let running = false;
+
+  async function tick() {
+    const db = getDb();
+    const chars = db.prepare(
+      'SELECT id FROM characters WHERE schedule_enabled = 1 OR schedule_enabled IS NULL'
+    ).all();
+
+    for (const char of chars) {
+      syncSleepingState(char.id);
+    }
+  }
+
+  function scheduleNext() {
+    const now = new Date();
+    const hour = now.getHours();
+    const sleepPeak = hour >= 21 || hour < 2;
+    const wakePeak = hour >= 6 && hour < 9;
+    const intervalMs = (sleepPeak || wakePeak) ? 15 * 60 * 1000 : 60 * 60 * 1000;
+
+    const tag = (sleepPeak || wakePeak)
+      ? `peak(${intervalMs / 60000}min)`
+      : `off(${intervalMs / 3600000}h)`;
+    console.log(`[scheduleMgr] Next sleeping-state sync in ${tag}`);
+
+    setTimeout(async () => {
+      if (running) return; // 上一轮还没跑完，跳过
+      running = true;
+      try {
+        await tick();
+      } catch (err) {
+        console.error('[scheduleMgr] Sleeping-state sync error:', err.message);
+      } finally {
+        running = false;
+        scheduleNext();
+      }
+    }, intervalMs).unref();
+  }
+
+  // 启动时不立即跑（initialize 里已经跑过了），直接排下一轮
+  scheduleNext();
 }
 
 /**
@@ -277,6 +330,27 @@ export function isSleeping(characterId, now = new Date()) {
   return { sleeping: false, sleepUntil: null };
 }
 
+// ── 睡眠状态同步 ──
+
+/**
+ * 根据当前日程同步角色的 is_sleeping / sleep_until 到 characters 表
+ * 应在日程生成/刷新后调用，确保其他 SQL 直读 is_sleeping 的模块拿到正确状态
+ */
+export function syncSleepingState(characterId, now = new Date()) {
+  const db = getDb();
+  const activity = getCurrentActivity(characterId, now);
+  const sleeping = !!(activity && activity.replyDelay === -1);
+
+  if (sleeping) {
+    const sleepUntil = calcSleepUntil(activity.endTime, now);
+    db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
+      .run(sleepUntil, characterId);
+  } else {
+    db.prepare('UPDATE characters SET is_sleeping = 0, sleep_until = NULL WHERE id = ? AND is_sleeping = 1')
+      .run(characterId);
+  }
+}
+
 // ── 全局概览 ──
 
 /**
@@ -295,14 +369,17 @@ export function getAllOverview() {
 
   return chars.map(char => {
     const activity = getCurrentActivity(char.id, now);
+    // 动态计算睡眠状态（不依赖 characters 表中的缓存值，日程更新后该缓存可能过期）
+    const sleeping = !!(activity && activity.replyDelay === -1);
+    const sleepUntil = sleeping ? calcSleepUntil(activity.endTime, now) : null;
     return {
       id: char.id,
       display_name: char.display_name,
       avatar_path: char.avatar_path,
       current_activity: activity ? `${activity.activity} · ${activity.location}` : '未设置日程',
       reply_delay: activity ? activity.replyDelay : 0,
-      is_sleeping: char.is_sleeping === 1,
-      sleep_until: char.sleep_until,
+      is_sleeping: sleeping,
+      sleep_until: sleepUntil,
       _desc: activity?.description || '',
     };
   });

@@ -527,7 +527,7 @@ const comfyTab = ref('chat')
 const comfyTabs = [
   { mode: 'chat', label: '对话配图' },
   { mode: 'moments', label: '朋友圈配图' },
-  { mode: 'event', label: '奇遇配图' },
+  { mode: 'event', label: '奇遇&日程配图' },
 ]
 const activeFields = computed(() => {
   if (comfyTab.value === 'moments') return { artist: 'momentsArtist', width: 'momentsWidth', height: 'momentsHeight' }
@@ -586,6 +586,7 @@ const presets = [
   { label: '768×768', width: 768, height: 768 },
   { label: '1024×1024', width: 1024, height: 1024 },
   { label: '1280×720', width: 1280, height: 720 },
+  { label: '1200×900', width: 1200, height: 900 },
   { label: '1600×1200', width: 1600, height: 1200 },
   { label: '1920×1080', width: 1920, height: 1080 },
 ]

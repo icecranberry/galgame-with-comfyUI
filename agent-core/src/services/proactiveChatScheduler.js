@@ -26,6 +26,7 @@ import {
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
+import { getTimeLight } from './timeLight.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -485,10 +486,14 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     const nameBlock = charName.replace(/你/g, '角色');
     const appearanceBlock = appearance.replace(/你/g, '角色');
 
+    const { timeStr, timeDesc, lightNote } = getTimeLight();
     const imagePromptText = await chatSync(
       [
         { role: 'system', content: systemRules || '你是一个角色扮演 AI。' },
         { role: 'system', content: `接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
+
+【当前时间与光线】
+现在是${timeStr}（${timeDesc}）。画面光线必须体现：${lightNote}。
 
 【角色名字】
 ${nameBlock}

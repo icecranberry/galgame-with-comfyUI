@@ -74,11 +74,11 @@ export async function generateSchedule(character) {
 睡眠 block 的 replyDelay 必须是 -1（暂停一切回复）。睡眠总时长通常在 6-9 小时之间。
 
 ## replyDelay 规则（非常重要）
-- 约 80% 的活动 replyDelay=0（秒回消息，不耽误聊天）
-- 对于需要专注的活动，replyDelay=1~60（分钟后回复），由你根据活动性质分配：
-  - 轻度分心（吃饭、散步、洗漱、化妆）→ 1~5 分钟
-  - 中度忙碌（开会、上课、接待客人、社交聚餐、排练、运动）→ 10~20 分钟
-  - 高度专注（考试、重要演出、手术、赶稿死线、重要会议、潜入任务）→ 30~60 分钟
+- **约 90% 的活动 replyDelay=0（秒回消息，不耽误聊天）**
+- 对于需要专注的活动，replyDelay=5~10（分钟后回复），由你根据活动性质分配：
+  - 轻度分心（吃饭、散步、洗漱、化妆）→ 0 分钟
+  - 中度忙碌（开会、上课、接待客人、社交聚餐、排练、运动）→ 0 分钟
+  - 高度专注（考试、重要演出、手术、赶稿死线、重要会议、潜入任务）→ 5~10 分钟
 - 只有睡觉 replyDelay=-1
 
 ## 输出格式
@@ -89,7 +89,7 @@ export async function generateSchedule(character) {
   "endTime": "HH:MM",
   "activity": "简短活动名（含上下文，如「早课——高等数学」）",
   "location": "地点",
-  "replyDelay": 数字（0 / 1~60 / -1）,
+  "replyDelay": 数字（0 / 10~60 / -1）,
   "tags": ["标签1", "标签2"],
   "description": "角色视角的简短描述（20-40 字，让角色「感觉」到这个活动）"
 }
@@ -113,7 +113,7 @@ export async function generateSchedule(character) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       rawResult = await chatSync(msgs, {
-        temperature: 0.75,
+        temperature: 0.5,
         max_tokens: 2048,
         label: `schedule-gen:${character.display_name}`,
       });

@@ -17,11 +17,13 @@ import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
   getAllOverview, ensureTodaySchedule, invalidateCache,
+  syncSleepingState,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { generateImage } from '../services/imageSkill.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
+import { getTimeLight } from '../services/timeLight.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -91,6 +93,7 @@ router.post('/regenerate-all', async (req, res) => {
         const result = await generateSchedule(character);
         assignNextRefreshTime(character.id);
         snapshotTodaySchedule(character.id);
+        syncSleepingState(character.id);
         invalidateCache(character.id);
 
         broadcast('schedule_reset_progress', {
@@ -394,7 +397,15 @@ router.post('/:characterId/peek', async (req, res) => {
 3. 画面中的每一个视觉元素都应该一致地属于这个世界。世界观不是背景，是地基。
 </world_integration>\n\n`;
     }
-    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度，角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${activity.activity}，地点：${activity.location}。照片里的角色要体现正在做的日程。`;
+    // 睡眠中：强制强调闭眼
+    const isSleeping = activity.replyDelay === -1;
+    // 当前时间 + 时段 + 光线描述
+    const { timeStr, timeDesc, lightNote } = getTimeLight();
+    const sleepNote = isSleeping
+      ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，不能睁眼。表情安详放松，呈现深度睡眠的自然状态。睡姿、被褥、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
+      : '';
+
+    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${activity.activity}，地点：${activity.location}，现在是${timeStr}（${timeDesc}），画面光线必须体现：${lightNote}。照片里的角色要体现正在做的日程。${sleepNote}`;
 
     // system2: 角色完整人格，"你"替换为角色姓名
     const personaText = character.base_prompt
@@ -545,6 +556,9 @@ router.post('/:characterId/regenerate', async (req, res) => {
 
     // 快照到今天
     snapshotTodaySchedule(characterId);
+
+    // 同步睡眠状态
+    syncSleepingState(characterId);
 
     // 清除缓存
     invalidateCache(characterId);

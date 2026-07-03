@@ -12,7 +12,7 @@
 import { getDb, getSystemRules, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
-import { getCurrentActivity } from './scheduleManager.js';
+import { getCurrentActivity, syncSleepingState } from './scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from './scheduleGenerator.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import {
@@ -87,6 +87,7 @@ async function maybeRefreshOneSchedule() {
   try {
     await generateSchedule(candidate);
     snapshotTodaySchedule(candidate.id);
+    syncSleepingState(candidate.id);
     assignNextRefreshTime(candidate.id);
     console.log(`[replyQueue] Schedule refreshed for ${candidate.display_name}`);
   } catch (err) {

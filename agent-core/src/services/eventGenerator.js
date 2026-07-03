@@ -21,6 +21,7 @@ import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
+import { getTimeLightTag } from './timeLight.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -305,8 +306,7 @@ export async function generateEvent(character, options = {}) {
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
-  const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
-  const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const timeTag = getTimeLightTag(now);
 
   let contextBlock = '';
   if (recentMoment) {

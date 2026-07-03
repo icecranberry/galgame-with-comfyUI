@@ -40,7 +40,33 @@
           </div>
 
           <!-- 时间轴 -->
-          <div class="dr-body">
+          <div class="dr-body" :class="{ 'dr-body-scanning': scanActive }">
+            <!-- 扫描特效遮罩（酒馆同款）-->
+            <div v-if="scanVisible" class="dr-scan-overlay">
+              <div class="dr-scan-line"></div>
+              <div class="dr-scan-glow"></div>
+              <div class="dr-scan-content">
+                <div class="dr-scan-icon">
+                  <svg viewBox="0 0 80 80" class="dr-scan-ring">
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
+                      stroke-width="2.5" stroke-linecap="round"
+                      stroke-dasharray="214"
+                      :stroke-dashoffset="214 * (1 - scanProgress / 100)"
+                      class="dr-scan-ring-fill"
+                    />
+                  </svg>
+                  <div class="dr-scan-pct">{{ scanProgress }}%</div>
+                </div>
+                <div class="dr-scan-label">{{ scanLabel }}</div>
+                <div class="dr-scan-phrase">
+                  <Transition name="phrase" mode="out-in">
+                    <p :key="currentScanTip">{{ scanTips[currentScanTip] }}</p>
+                  </Transition>
+                </div>
+              </div>
+            </div>
+
             <!-- 加载骨架 -->
             <div v-if="loading" class="dr-skel">
               <div class="sk-line" v-for="n in 5" :key="n" :style="{ width: (50 + Math.random() * 45) + '%' }"></div>
@@ -99,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
 
 const props = defineProps<{
@@ -121,6 +147,86 @@ const scheduleBtnText = computed(() => {
   if (props.regenerating) return '生成中...'
   if (!props.loading && !props.activities.length) return '为ta制作日程表'
   return '改变ta的日程'
+})
+
+// ── 扫描特效控制 ──
+const scanActive = computed(() => props.regenerating)
+
+const scanLabel = computed(() => {
+  if (props.regenerating) return '日程重新编排中'
+  return '日程加载中'
+})
+
+// 脉冲进度（loading/regenerating 用 interval 驱动，最后卡99%，数据到后跳100%再消失）
+const scanVisible = ref(false)
+const scanProgress = ref(0)
+let _scanPulseTimer: ReturnType<typeof setInterval> | null = null
+let _scanCompleteTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(scanActive, (active) => {
+  if (active) {
+    if (_scanCompleteTimer) { clearTimeout(_scanCompleteTimer); _scanCompleteTimer = null }
+    scanVisible.value = true
+    scanProgress.value = 0
+    _scanPulseTimer = setInterval(() => {
+      if (scanProgress.value < 99) {
+        scanProgress.value = Math.min(99, scanProgress.value + 1)
+      }
+    }, 180)
+  } else {
+    if (_scanPulseTimer) { clearInterval(_scanPulseTimer); _scanPulseTimer = null }
+    // 跳到 100%，短暂停留后隐藏遮罩
+    scanProgress.value = 100
+    _scanCompleteTimer = setTimeout(() => {
+      scanVisible.value = false
+      scanProgress.value = 0
+    }, 600)
+  }
+})
+
+// ── 过渡文字轮播 ──
+const scanTips = [
+  '正在翻阅日程档案……',
+  '正在校准时间轴偏差……',
+  '正在推算角色行动轨迹……',
+  '正在调取天气与季节数据……',
+  '正在匹配角色性格与行为……',
+  '正在绘制今日活动热力图……',
+  '正在协调角色间互动冲突……',
+  '正在查询世界观事件簿……',
+  '正在排列优先级队列……',
+  '正在注入随机扰动因子……',
+  '正在校对昼夜节律周期……',
+  '正在解析角色当日心情……',
+  '正在交叉验证时间线一致性……',
+  '正在向命运女神投币……',
+  '正在整理待办事项清单……',
+]
+const currentScanTip = ref(0)
+let _scanTipTimer: ReturnType<typeof setInterval> | null = null
+
+function startScanTips() {
+  currentScanTip.value = 0
+  let idx = 0
+  _scanTipTimer = setInterval(() => {
+    idx = (idx + 1) % scanTips.length
+    currentScanTip.value = idx
+  }, 2200)
+}
+
+function stopScanTips() {
+  if (_scanTipTimer) { clearInterval(_scanTipTimer); _scanTipTimer = null }
+}
+
+watch(scanActive, (active) => {
+  if (active) startScanTips()
+  else stopScanTips()
+}, { immediate: true })
+
+onUnmounted(() => {
+  stopScanTips()
+  if (_scanPulseTimer) { clearInterval(_scanPulseTimer); _scanPulseTimer = null }
+  if (_scanCompleteTimer) { clearTimeout(_scanCompleteTimer); _scanCompleteTimer = null }
 })
 
 </script>
@@ -206,11 +312,145 @@ const scheduleBtnText = computed(() => {
 .dr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Body ── */
-.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default;}
+.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default; position: relative; }
+.dr-body-scanning { overflow: hidden; }
 
 .dr-skel { padding: 8px 0; }
 .sk-line { height: 11px; border-radius: 6px; background: var(--bg-hover); margin-bottom: 10px; animation: sk 1.5s ease-in-out infinite; }
 @keyframes sk { 0%,100%{opacity:.3} 50%{opacity:.7} }
+
+/* ═══════════════════════════════════════════
+   扫描特效遮罩（酒馆同款）
+   ═══════════════════════════════════════════ */
+.dr-scan-overlay {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  overflow: hidden;
+}
+
+/* ── 扫描线（酒馆同款）── */
+.dr-scan-line {
+  position: absolute;
+  left: 12%; right: 12%;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(224,123,108,0.3) 15%,
+    var(--accent) 50%,
+    rgba(224,123,108,0.3) 85%,
+    transparent 100%
+  );
+  animation: dr-scan-sweep 2.4s ease-in-out infinite;
+  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  z-index: 2;
+  pointer-events: none;
+}
+
+@keyframes dr-scan-sweep {
+  0%   { top: 8%;  opacity: 0.15; }
+  22%  { top: 92%; opacity: 1; }
+  44%  { top: 92%; opacity: 0.15; }
+  66%  { top: 8%;  opacity: 1; }
+  88%  { top: 8%;  opacity: 0.15; }
+  100% { top: 8%;  opacity: 0.15; }
+}
+
+/* ── 扫描光晕 ── */
+.dr-scan-glow {
+  position: absolute;
+  left: 20%; right: 20%;
+  height: 60px;
+  background: radial-gradient(ellipse at center,
+    rgba(224,123,108,0.12) 0%,
+    rgba(224,123,108,0.04) 40%,
+    transparent 70%
+  );
+  animation: dr-glow-follow 2.4s ease-in-out infinite;
+  z-index: 1;
+  pointer-events: none;
+  filter: blur(8px);
+}
+
+@keyframes dr-glow-follow {
+  0%   { top: 6%;  opacity: 0.2; }
+  22%  { top: 72%; opacity: 0.9; }
+  44%  { top: 72%; opacity: 0.2; }
+  66%  { top: 6%;  opacity: 0.9; }
+  88%  { top: 6%;  opacity: 0.2; }
+  100% { top: 6%;  opacity: 0.2; }
+}
+
+/* ── 扫描文字内容区 ── */
+.dr-scan-content {
+  position: relative; z-index: 3;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 10px;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+/* ── 环形进度 ── */
+.dr-scan-icon {
+  position: relative; width: 72px; height: 72px;
+  margin-bottom: 4px;
+}
+.dr-scan-ring {
+  width: 72px; height: 72px;
+  transform: rotate(-90deg);
+}
+.dr-scan-ring-fill {
+  transition: stroke-dashoffset 0.5s ease;
+}
+.dr-scan-pct {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 17px; font-weight: 700;
+  color: var(--accent);
+}
+
+/* ── 状态标签 ── */
+.dr-scan-label {
+  font-size: 13px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  animation: dr-label-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dr-label-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+/* ── 过渡文字轮播 ── */
+.dr-scan-phrase {
+  position: relative;
+  min-height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+}
+.dr-scan-phrase p {
+  margin: 0; font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* phrase 过渡动画（与 ScheduleView 共用） */
+.phrase-enter-active,
+.phrase-leave-active {
+  transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.phrase-leave-to {
+  transform: translateY(-14px);
+  opacity: 0;
+}
+.phrase-enter-from {
+  transform: translateY(14px);
+  opacity: 0;
+}
 
 .dr-empty {
   display: flex; flex-direction: column; align-items: center;

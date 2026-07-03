@@ -21,6 +21,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { getReplyDelay, formatScheduleContext } from '../services/scheduleManager.js';
+import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
 
 const router = Router();
 
@@ -678,8 +679,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     //     倒数第一句 → [当前时间]（用现在的时间）
     //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
     const now = new Date();
-    const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
-    const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+    const timeTag = getTimeLightTag(now);
     let foundCount = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {
@@ -1285,6 +1285,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
     { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
+    // ── 当前时间 + 光线：帮助画面贴合时段氛围 ──
+    { role: 'system', content: (() => { const { timeStr, timeDesc, lightNote } = getTimeLight(); return `【当前时间与光线】现在是${timeStr}（${timeDesc}）。画面光线必须体现：${lightNote}。`; })() },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── prompt 格式说明单独一条，不混杂指令 ──

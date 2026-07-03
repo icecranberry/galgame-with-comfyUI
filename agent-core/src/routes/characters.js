@@ -13,7 +13,7 @@ import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
-import { invalidateCache as invalidateScheduleCache } from '../services/scheduleManager.js';
+import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 
 const router = Router();
 
@@ -76,6 +76,8 @@ router.post('/', (req, res) => {
             await generateSchedule(character);
             assignNextRefreshTime(newCharId);
             snapshotTodaySchedule(newCharId);
+            syncSleepingState(newCharId);
+            invalidateScheduleCache(newCharId);
             console.log(`[char] Schedule generated for new character "${newCharDisplayName}"`);
           }
         } catch (err) {
@@ -463,6 +465,8 @@ ${searchContext}` : ''}
               await generateSchedule(char);
               assignNextRefreshTime(newId);
               snapshotTodaySchedule(newId);
+              syncSleepingState(newId);
+              invalidateScheduleCache(newId);
               console.log(`[characters] Schedule generated for AI character "${displayName}"`);
             }
           } catch (err) {

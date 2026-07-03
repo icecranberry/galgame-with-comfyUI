@@ -14,8 +14,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   comfy_moments_width: '1600',
   comfy_moments_height: '1200',
   comfy_event_artist: '@ebora',
-  comfy_event_width: '1600',
-  comfy_event_height: '1200',
+  comfy_event_width: '1200',
+  comfy_event_height: '900',
   // Feature Flags
   feature_emotion: 'true',
   feature_memory: 'true',

@@ -8,6 +8,7 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
+import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 
 const router = Router();
@@ -485,8 +486,8 @@ async function generateMomentPost(character) {
 - 做的事情要符合当前时间，不需要提及现在的时间。除非极度需要说明时间才提及。`;
 
   const now = new Date();
-  const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
-  const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const timeTag = getTimeLightTag(now);
+  const { lightNote } = getTimeLight(now);
 
   // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
   let scheduleContext = '';
@@ -499,9 +500,10 @@ async function generateMomentPost(character) {
     }
   } catch { /* schedule not available, skip */ }
 
+  const lightHint = `\n【画面光线】${lightNote}`;
   const userMsg = multiPerson
-    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：`
-    : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：`;
+    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`
+    : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -749,9 +751,7 @@ ${commentHistory}
   // msgs[3] — 任务：用户信息 + 朋友圈内容 + 评论区 + 规则
   msgs.push({ role: 'system', content: contextTask });
 
-  const now = new Date();
-  const weekDay = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
-  const timeTag = `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const timeTag = getTimeLightTag(new Date());
   msgs.push({ role: 'user', content: `${timeTag} 回复这条评论：` });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });

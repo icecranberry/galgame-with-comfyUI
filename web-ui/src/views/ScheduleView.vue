@@ -1,47 +1,103 @@
 <template>
   <div class="schedule-view">
-    <!-- ═══ 主体：单栏全宽 ═══ -->
-    <div class="sched-body" v-if="!store.loading && enrichedChars.length > 0">
-      <main class="main-area">
-        <!-- 顶部 -->
-        <div class="main-topbar" :class="{ 'header-hidden': isMobile && !headerVisible }">
-          <div class="topbar-row">
-            <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">日程</h2>
-            <button
-              class="btn-reset"
-              @click.stop="showResetConfirm = true"
-              :disabled="resetTask?.processing"
-            >
-              {{ resetTask?.processing ? '重置中...' : '🔄 重置世界线' }}
-            </button>
+    <div class="sched-layout">
+      <!-- ═══ 左：主体内容区 ═══ -->
+      <div class="sched-main">
+        <!-- 已加载且有角色 -->
+        <template v-if="!store.loading && enrichedChars.length > 0">
+          <div class="main-topbar" :class="{ 'header-hidden': isMobile && !headerVisible }">
+            <div class="topbar-row">
+              <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">日程</h2>
+              <div class="topbar-actions">
+                <input
+                  v-model="searchQuery"
+                  class="search-input"
+                  placeholder="搜索..."
+                  @keydown.esc="searchQuery = ''"
+                />
+                <button
+                  class="btn-reset"
+                  @click.stop="showResetConfirm = true"
+                  :disabled="resetTask?.processing"
+                >
+                  <svg v-if="!resetTask?.processing" class="btn-reset-icon" viewBox="0 0 1024 1024" width="16" height="16"><path d="M1017.6 595.2c19.2-134.4-6.4-256-89.6-364.8C832 89.6 588.8-19.2 480 25.6c6.4 25.6 6.4 44.8 12.8 70.4 262.4 0 428.8 185.6 448 371.2 19.2 179.2-89.6 371.2-249.6 428.8v-179.2c0-25.6-12.8-38.4-32-38.4-38.4 0-51.2 12.8-38.4 57.6 12.8 70.4 6.4 140.8 0 211.2 0 38.4 19.2 32 64 32h160c83.2 0 96 12.8 96-32 0-25.6-6.4-38.4-38.4-38.4H832c96-76.8 166.4-179.2 185.6-313.6zM76.8 512c0-153.6 115.2-345.6 224-364.8v153.6c0 32 6.4 38.4 38.4 38.4s38.4-6.4 38.4-38.4V64c0-32-6.4-38.4-38.4-38.4H102.4C70.4 25.6 64 32 64 64s0 38.4 38.4 38.4h102.4c-230.4 185.6-243.2 467.2-128 659.2 108.8 185.6 326.4 256 460.8 236.8-6.4-25.6-6.4-44.8-12.8-70.4-275.2 6.4-448-217.6-448-416z"/></svg>
+                  <span>{{ resetTask?.processing ? '重置中...' : '重置世界线' }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-grid" @scroll.passive="onScroll" ref="cardGridEl">
+            <CharacterStatusCard
+              v-for="c in filteredChars"
+              :key="c.id"
+              :char="c"
+              @select="onSelectChar(c.id)"
+            />
+          </div>
+        </template>
+
+        <!-- 加载态 -->
+        <div v-else-if="store.loading" class="sched-placeholder">
+          <div class="loader"></div>
+          <p>加载角色日程中...</p>
+        </div>
+
+        <!-- 空态 -->
+        <div v-else class="sched-placeholder">
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p>今天还没有角色日程</p>
+          <span class="ph-hint">生成日程后，这里会显示每位角色的今日动向。</span>
+          <button class="btn-glass" @click="regenerateAll">为所有角色生成日程</button>
+        </div>
+      </div>
+
+      <!-- ═══ 扫描特效遮罩（仅生成时显示）═══ -->
+      <aside v-if="sidebarScanActive" class="sched-sidebar is-scanning">
+        <div class="sidebar-scan-overlay">
+          <div class="sidebar-scan-line"></div>
+          <div class="sidebar-scan-glow"></div>
+          <div class="sidebar-scan-content">
+            <div class="sidebar-scan-icon">
+              <svg viewBox="0 0 80 80" class="sidebar-scan-ring">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
+                  stroke-width="2.5" stroke-linecap="round"
+                  stroke-dasharray="214"
+                  :stroke-dashoffset="214 * (1 - sidebarScanProgress / 100)"
+                  class="sidebar-scan-ring-fill"
+                />
+              </svg>
+              <div class="sidebar-scan-pct">{{ sidebarScanProgress }}%</div>
+            </div>
+            <div class="sidebar-scan-label">日程生成中</div>
+            <div class="sidebar-scan-phrase">
+              <Transition name="phrase" mode="out-in">
+                <p :key="currentSidebarTipIndex">{{ sidebarTips[currentSidebarTipIndex] }}</p>
+              </Transition>
+            </div>
+            <div class="sidebar-scan-sub">
+              <template v-if="sidebarScanContext === 'reset' && resetTask">
+                正在为 <b>{{ resetTask.currentName || '...' }}</b> 编排日程
+                <span class="sidebar-scan-count">({{ resetTask.current }}/{{ resetTask.total }})</span>
+              </template>
+              <template v-else-if="sidebarScanContext === 'single'">
+                正在为 <b>{{ detailChar?.display_name || '...' }}</b> 重新编排日程
+              </template>
+              <template v-else>
+                <template v-if="store.characters.length > 0">
+                  正在检索 {{ store.characters.length }} 个角色的今日行程...
+                </template>
+                <template v-else>
+                  正在等待日程数据抵达...
+                </template>
+              </template>
+            </div>
           </div>
         </div>
-
-        <!-- 卡片网格 -->
-        <div class="card-grid" @scroll.passive="onScroll" ref="cardGridEl">
-          <CharacterStatusCard
-            v-for="c in filteredChars"
-            :key="c.id"
-            :char="c"
-            @select="onSelectChar(c.id)"
-          />
-        </div>
-      </main>
+      </aside>
     </div>
-
-    <!-- ═══ 加载态 ═══ -->
-    <div v-else-if="store.loading" class="sched-placeholder">
-      <div class="loader"></div>
-      <p>加载角色日程中...</p>
-    </div>
-
-    <!-- ═══ 空态 ═══ -->
-    <div v-else class="sched-placeholder">
-      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <p>今天还没有角色日程</p>
-      <span class="ph-hint">生成日程后，这里会显示每位角色的今日动向。</span>
-      <button class="btn-glass" @click="regenerateAll">为所有角色生成日程</button>
-    </div>
+  </div>
 
     <!-- ═══ 角色详情抽屉 ═══ -->
     <CharacterDetailDrawer
@@ -152,8 +208,8 @@
               <span>重置世界线</span>
             </div>
             <p class="reset-dialog-desc">
-              将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的今日日程。<br/>
-              此操作会调用 LLM 逐一生成，可能需要一些时间。
+              将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。<br/>
+              此操作会逐一生成，需要一些时间。
             </p>
             <div class="reset-dialog-actions">
               <button class="reset-btn-cancel" @click="showResetConfirm = false">取消</button>
@@ -223,7 +279,6 @@
         </div>
       </Transition>
     </Teleport>
-  </div>
 </template>
 
 <script setup lang="ts">
@@ -246,6 +301,7 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 // ── 时钟 ──
 // ── 筛选 ──
 const activeFilter = ref('all')
+const searchQuery = ref('')
 
 // ── 移动端滚动隐藏顶栏 ──
 const headerVisible = ref(true)
@@ -292,7 +348,9 @@ const enrichedChars = computed(() => {
 })
 
 const filteredChars = computed(() => {
-  const list = enrichedChars.value
+  let list = enrichedChars.value
+  const q = searchQuery.value.trim().toLowerCase()
+  if (q) list = list.filter(c => c.display_name?.toLowerCase().includes(q))
   if (activeFilter.value === 'awake') return list.filter(c => !c.is_sleeping)
   if (activeFilter.value === 'sleeping') return list.filter(c => c.is_sleeping)
   return list
@@ -316,7 +374,93 @@ const peekChar = ref<any>(null)
 const peekAct = ref<any>(null)
 const lightboxVisible = ref(false)
 
-// ── 加载文案轮播 ──
+// ── 重置世界线 ──
+interface ResetTask {
+  phase: 'running' | 'complete' | 'cancelled'
+  current: number
+  total: number
+  currentName: string
+  errors: { name: string; error: string }[]
+  processing: boolean
+}
+
+const showResetConfirm = ref(false)
+const resetTask = ref<ResetTask | null>(null)
+const resetProgressPct = computed(() => {
+  if (!resetTask.value || resetTask.value.total === 0) return 0
+  return Math.round((resetTask.value.current / resetTask.value.total) * 100)
+})
+
+// ── 侧边栏：扫描态控制 ──
+const sidebarScanActive = computed(() =>
+  store.loading || detailRegenerating.value || (resetTask.value?.phase === 'running')
+)
+const sidebarScanContext = computed(() => {
+  if (resetTask.value?.phase === 'running') return 'reset'
+  if (detailRegenerating.value) return 'single'
+  return 'load'
+})
+
+// 脉冲进度（加载/单角色再生用 interval 驱动）
+const _pulseProgress = ref(0)
+let _pulseTimer: ReturnType<typeof setInterval> | null = null
+const sidebarScanProgress = computed(() => {
+  if (resetTask.value?.phase === 'running') return resetProgressPct.value
+  return _pulseProgress.value
+})
+
+watch(sidebarScanActive, (active) => {
+  if (active && resetTask.value?.phase !== 'running') {
+    _pulseProgress.value = 0
+    _pulseTimer = setInterval(() => {
+      _pulseProgress.value = (_pulseProgress.value + 1) % 96
+    }, 180)
+  } else {
+    if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = null }
+    _pulseProgress.value = 0
+  }
+})
+
+// ── 侧边栏过渡文字轮播 ──
+const sidebarTips = [
+  '正在翻阅日程档案……',
+  '正在校准时间轴偏差……',
+  '正在推算角色行动轨迹……',
+  '正在调取天气与季节数据……',
+  '正在匹配角色性格与行为……',
+  '正在绘制今日活动热力图……',
+  '正在协调角色间互动冲突……',
+  '正在查询世界观事件簿……',
+  '正在排列优先级队列……',
+  '正在注入随机扰动因子……',
+  '正在校对昼夜节律周期……',
+  '正在解析角色当日心情……',
+  '正在交叉验证时间线一致性……',
+  '正在向命运女神投币……',
+  '正在整理待办事项清单……',
+]
+const currentSidebarTipIndex = ref(0)
+let _sidebarTipTimer: ReturnType<typeof setInterval> | null = null
+
+function startSidebarTips() {
+  currentSidebarTipIndex.value = 0
+  let idx = 0
+  _sidebarTipTimer = setInterval(() => {
+    idx = (idx + 1) % sidebarTips.length
+    currentSidebarTipIndex.value = idx
+  }, 2200)
+}
+
+function stopSidebarTips() {
+  if (_sidebarTipTimer) { clearInterval(_sidebarTipTimer); _sidebarTipTimer = null }
+}
+
+watch(sidebarScanActive, (active) => {
+  if (active) startSidebarTips()
+  else stopSidebarTips()
+}, { immediate: true })
+
+// ── 加载文案轮播（瞄一眼弹窗用）──
 const phrases = [
   '正在寻找拍摄角度……',
   '正在抓取表情……',
@@ -450,6 +594,8 @@ onMounted(() => {
 onUnmounted(() => {
   if (_resetUnlisten) _resetUnlisten()
   if (_phraseTimer) { clearInterval(_phraseTimer); _phraseTimer = null }
+  stopSidebarTips()
+  if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = null }
 })
 
 // ── 方法 ──
@@ -531,23 +677,6 @@ async function regenerateAll() {
   await store.fetchOverview()
 }
 
-// ── 重置世界线 ──
-interface ResetTask {
-  phase: 'running' | 'complete' | 'cancelled'
-  current: number
-  total: number
-  currentName: string
-  errors: { name: string; error: string }[]
-  processing: boolean
-}
-
-const showResetConfirm = ref(false)
-const resetTask = ref<ResetTask | null>(null)
-const resetProgressPct = computed(() => {
-  if (!resetTask.value || resetTask.value.total === 0) return 0
-  return Math.round((resetTask.value.current / resetTask.value.total) * 100)
-})
-
 let _resetUnlisten: (() => void) | null = null
 
 async function confirmResetAll() {
@@ -602,11 +731,11 @@ function finishReset() {
   background: transparent;
 }
 
-/* ── Body ── */
-.sched-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+/* ── Layout: 左主体 + 右侧边栏 ── */
+.sched-layout { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 
-/* ── Main Area ── */
-.main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+/* ── 左：主体内容区 ── */
+.sched-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 
 .main-topbar {
   padding: 14px 24px;
@@ -626,8 +755,19 @@ function finishReset() {
 .topbar-row h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--text-bright); }
 .topbar-row h2.is-clickable { cursor: pointer; }
 
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.search-input {
+  width: 140px; padding: 7px 12px;
+  border: 1px solid var(--glass-border); border-radius: 10px;
+  background: rgba(255,255,255,0.65); color: var(--text-primary);
+  font-size: 0.82rem; outline: none; transition: border-color 0.2s;
+}
+.search-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+.search-input:focus { border-color: var(--accent); }
+
 /* 重置世界线按钮 — 和朋友圈 btn-post 同款 */
 .btn-reset {
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
@@ -640,6 +780,7 @@ function finishReset() {
   transition: all 0.3s ease;
   white-space: nowrap;
 }
+.btn-reset-icon { flex-shrink: 0; fill: currentColor; }
 .btn-reset:hover:not(:disabled) {
   border: 2px solid rgba(224, 123, 108, 0.55);
   box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
@@ -681,6 +822,149 @@ function finishReset() {
   font-size: 0.85rem; cursor: pointer; transition: 0.15s;
 }
 .btn-glass:hover { background: var(--bg-hover); color: var(--text-bright); }
+
+/* ═══════════════════════════════════════════
+   扫描特效侧边栏（仅生成时显示）
+   ═══════════════════════════════════════════ */
+.sched-sidebar {
+  width: 260px; min-width: 260px;
+  border-left: 1px solid rgba(224,123,108,0.18);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 0 60px rgba(224,123,108,0.04);
+}
+
+.sidebar-scan-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  overflow: hidden;
+  z-index: 5;
+}
+
+/* ── 扫描线（酒馆同款）── */
+.sidebar-scan-line {
+  position: absolute;
+  left: 12%; right: 12%;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(224,123,108,0.3) 15%,
+    var(--accent) 50%,
+    rgba(224,123,108,0.3) 85%,
+    transparent 100%
+  );
+  animation: sidebar-scan-sweep 2.6s ease-in-out infinite;
+  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  z-index: 2;
+  pointer-events: none;
+}
+
+@keyframes sidebar-scan-sweep {
+  0%   { top: 8%;  opacity: 0.15; }
+  18%  { top: 92%; opacity: 1; }
+  36%  { top: 92%; opacity: 0.15; }
+  54%  { top: 8%;  opacity: 1; }
+  72%  { top: 8%;  opacity: 0.15; }
+  90%  { top: 92%; opacity: 0.7; }
+  100% { top: 8%;  opacity: 0.15; }
+}
+
+/* ── 扫描光晕 ── */
+.sidebar-scan-glow {
+  position: absolute;
+  left: 20%; right: 20%;
+  height: 60px;
+  background: radial-gradient(ellipse at center,
+    rgba(224,123,108,0.12) 0%,
+    rgba(224,123,108,0.04) 40%,
+    transparent 70%
+  );
+  animation: sidebar-glow-follow 2.6s ease-in-out infinite;
+  z-index: 1;
+  pointer-events: none;
+  filter: blur(8px);
+}
+
+@keyframes sidebar-glow-follow {
+  0%   { top: 6%;  opacity: 0.2; }
+  18%  { top: 70%; opacity: 0.9; }
+  36%  { top: 70%; opacity: 0.2; }
+  54%  { top: 6%;  opacity: 0.9; }
+  72%  { top: 6%;  opacity: 0.2; }
+  90%  { top: 70%; opacity: 0.6; }
+  100% { top: 6%;  opacity: 0.2; }
+}
+
+/* ── 扫描文字内容区 ── */
+.sidebar-scan-content {
+  position: relative; z-index: 3;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 10px;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+/* ── 环形进度 ── */
+.sidebar-scan-icon {
+  position: relative; width: 72px; height: 72px;
+  margin-bottom: 4px;
+}
+.sidebar-scan-ring {
+  width: 72px; height: 72px;
+  transform: rotate(-90deg);
+}
+.sidebar-scan-ring-fill {
+  transition: stroke-dashoffset 0.5s ease;
+}
+.sidebar-scan-pct {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 17px; font-weight: 700;
+  color: var(--accent);
+}
+
+/* ── 状态标签 ── */
+.sidebar-scan-label {
+  font-size: 13px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  animation: sidebar-label-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sidebar-label-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+/* ── 过渡文字轮播 ── */
+.sidebar-scan-phrase {
+  position: relative;
+  min-height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+}
+.sidebar-scan-phrase p {
+  margin: 0; font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ── 副标题/进度详情 ── */
+.sidebar-scan-sub {
+  font-size: 0.73rem; color: #bfbbb6;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.sidebar-scan-sub b { color: var(--text-secondary); font-weight: 600; }
+.sidebar-scan-count {
+  display: block; font-size: 0.7rem;
+  color: #c5bfb8; margin-top: 2px;
+}
 
 /* ── Peek Modal ── */
 .peek-overlay {
@@ -906,10 +1190,28 @@ function finishReset() {
   }
   .peek-film { max-width: 94vw; border-radius: 4px; }
   .reset-dialog { max-width: 94vw; border-radius: 12px; }
+
+  /* 移动端：扫描面板缩为底部横条 */
+  .sched-sidebar {
+    width: 100%; min-width: unset; max-height: 130px;
+    border-left: none; border-top: 1px solid rgba(224,123,108,0.18);
+    flex-shrink: 0;
+  }
+  .sched-layout { flex-direction: column; }
+  .sidebar-scan-ring { width: 56px; height: 56px; }
+  .sidebar-scan-icon { width: 56px; height: 56px; }
+  .sidebar-scan-pct { font-size: 14px; }
+  .sidebar-scan-content { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; padding: 14px 16px; }
+  .sidebar-scan-label { font-size: 12px; }
+  .sidebar-scan-phrase p { font-size: 0.75rem; }
+  .sidebar-scan-sub { font-size: 0.7rem; width: 100%; text-align: center; }
+  .sidebar-scan-count { display: inline; }
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
   .card-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  /* 平板端：sidebar 收窄 */
+  .sched-sidebar { width: 220px; min-width: 220px; }
 }
 
 @media (min-width: 1024px) {
