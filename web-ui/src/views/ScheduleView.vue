@@ -21,7 +21,7 @@
                   :disabled="resetTask?.processing"
                 >
                   <svg v-if="!resetTask?.processing" class="btn-reset-icon" viewBox="0 0 1024 1024" width="16" height="16"><path d="M1017.6 595.2c19.2-134.4-6.4-256-89.6-364.8C832 89.6 588.8-19.2 480 25.6c6.4 25.6 6.4 44.8 12.8 70.4 262.4 0 428.8 185.6 448 371.2 19.2 179.2-89.6 371.2-249.6 428.8v-179.2c0-25.6-12.8-38.4-32-38.4-38.4 0-51.2 12.8-38.4 57.6 12.8 70.4 6.4 140.8 0 211.2 0 38.4 19.2 32 64 32h160c83.2 0 96 12.8 96-32 0-25.6-6.4-38.4-38.4-38.4H832c96-76.8 166.4-179.2 185.6-313.6zM76.8 512c0-153.6 115.2-345.6 224-364.8v153.6c0 32 6.4 38.4 38.4 38.4s38.4-6.4 38.4-38.4V64c0-32-6.4-38.4-38.4-38.4H102.4C70.4 25.6 64 32 64 64s0 38.4 38.4 38.4h102.4c-230.4 185.6-243.2 467.2-128 659.2 108.8 185.6 326.4 256 460.8 236.8-6.4-25.6-6.4-44.8-12.8-70.4-275.2 6.4-448-217.6-448-416z"/></svg>
-                  <span>{{ resetTask?.processing ? '重置中...' : '重置世界线' }}</span>
+                  <span>{{ resetTask?.processing ? '重置中...' : '全部重置' }}</span>
                 </button>
               </div>
             </div>
@@ -33,6 +33,7 @@
               :key="c.id"
               :char="c"
               @select="onSelectChar(c.id)"
+              @peek="onCardPeek(c.id)"
             />
           </div>
         </template>
@@ -110,6 +111,7 @@
       @close="drawerOpen = false"
       @peek="onPeek"
       @regenerate="onRegenerate"
+      @chat="onChat"
     />
 
     <!-- ═══ 瞄一眼快照弹窗（胶卷边框风格） ═══ -->
@@ -217,7 +219,7 @@
                 <polyline points="1,4 1,10 7,10" />
                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
-              <span>重置世界线</span>
+              <span>全部重置</span>
             </div>
             <p class="reset-dialog-desc">
               将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。<br/>
@@ -295,6 +297,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { onEvent } from '../stores/unifiedStream.js'
@@ -306,6 +309,7 @@ import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 
 const store = useScheduleStore()
 const settingsStore = useSettingsStore()
+const router = useRouter()
 
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -659,6 +663,30 @@ async function onRegenerate() {
   } finally {
     detailRegenerating.value = false
   }
+}
+
+async function onCardPeek(id: number) {
+  const c = enrichedChars.value.find(x => x.id === id)
+  if (!c) return
+  detailChar.value = c
+  detailActs.value = []
+  try {
+    const d = await store.fetchCharacterSchedule(id)
+    detailActs.value = d.activities || []
+  } catch { /* */ }
+  const act = detailActs.value.find((a: any) => a.isCurrent) || detailActs.value[0]
+  peekChar.value = detailChar.value
+  peekAct.value = act || null
+  peekImage.value = null; peekError.value = null; peekPrompt.value = null
+  peekOpen.value = true; peekBusy.value = true; peekLoading.value = true
+  startFakeProgress()
+  store.peekSnapshot(id)
+}
+
+function onChat() {
+  if (!detailChar.value) return
+  drawerOpen.value = false
+  router.push(`/chat/${detailChar.value.id}`)
 }
 
 function retryPeek() {

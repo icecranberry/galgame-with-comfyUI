@@ -189,8 +189,9 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
       if (contentType.includes('application/json')) {
         const json = await res.json()
         if (json.queued) {
-          // 返回一个立即完成的流，携带 queued 信息
-          outerController.enqueue(new TextEncoder().encode(`event: queued\ndata: ${JSON.stringify(json)}\n\n`))
+          // 返回结构化事件（与正常 SSE 解析路径格式一致，确保 store 能正确识别）
+          outerController.enqueue({ type: 'event', event: 'queued' })
+          outerController.enqueue({ type: 'data', event: 'queued', data: json })
           outerController.close()
           return
         }

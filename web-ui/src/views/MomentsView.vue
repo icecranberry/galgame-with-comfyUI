@@ -95,8 +95,9 @@
 
     <!-- 分享卡片 -->
     <ShareCard
+      v-if="sharePost"
       :post="sharePost"
-      :visible="!!sharePost"
+      :visible="true"
       @close="onShareClose"
     />
   </div>

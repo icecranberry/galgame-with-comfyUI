@@ -28,13 +28,17 @@
 
             <!-- Row 2: 操作按钮 -->
             <div class="dr-row2">
-              <button class="dr-btn" @click="$emit('peek')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <button v-if="char?.tags?.length" class="dr-btn" @click="$emit('peek')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                 <span>瞄一眼</span>
               </button>
               <button class="dr-btn" @click="$emit('regenerate')" :disabled="regenerating">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                 <span>{{ scheduleBtnText }}</span>
+              </button>
+              <button class="dr-btn" @click="$emit('chat')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>聊天</span>
               </button>
             </div>
           </div>
@@ -137,7 +141,7 @@ const props = defineProps<{
   regenerating?: boolean
 }>()
 
-defineEmits(['close', 'peek', 'regenerate'])
+defineEmits(['close', 'peek', 'regenerate', 'chat'])
 
 const { tooltip, onEnter, onMove, onLeave } = useTooltip()
 
@@ -312,7 +316,8 @@ onUnmounted(() => {
 .dr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Body ── */
-.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default; position: relative; }
+.dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default; position: relative; scrollbar-width: none; }
+.dr-body::-webkit-scrollbar { display: none; }
 .dr-body-scanning { overflow: hidden; }
 
 .dr-skel { padding: 8px 0; }

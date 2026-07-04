@@ -630,6 +630,7 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.proactive_disabled = 0
+        AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND (c.next_proactive_at IS NULL OR c.next_proactive_at <= datetime('now'))
         AND c.id NOT IN (
           SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged')
@@ -902,7 +903,7 @@ export async function forceProactiveNow(targetCharacterId) {
     if (targetCharacterId) {
       // 指定角色：直接按 id 查找，仍需满足基本条件
       candidate = db.prepare(
-        'SELECT * FROM characters WHERE id = ? AND proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
+        'SELECT * FROM characters WHERE id = ? AND proactive_disabled = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
       ).get(targetCharacterId);
       if (!candidate) {
         console.log(`⚡ force: character ${targetCharacterId} not eligible (disabled or streak≥3)`);
@@ -911,7 +912,7 @@ export async function forceProactiveNow(targetCharacterId) {
       console.log(`⚡ force: targeted ${candidate.display_name} (id=${targetCharacterId})`);
     } else {
       const candidates = db.prepare(
-        'SELECT * FROM characters WHERE proactive_disabled = 0 AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
+        'SELECT * FROM characters WHERE proactive_disabled = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
       ).all();
       if (candidates.length === 0) {
         console.log('⚡ force: no eligible characters (all disabled or streak≥3)');

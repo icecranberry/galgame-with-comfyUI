@@ -441,6 +441,7 @@ export const useChatStore = defineStore('chat', () => {
               } else {
                 console.log(`[chat] ${activeChar.value?.display_name} is busy (${activity}), reply expected in ${delayMins}min`)
               }
+              thisAttemptHadMsgSaved = true  // 标记为成功，防止重试循环
               break  // 跳出 stream read 循环
             }
             // ── affinity_update: 实时好感度（递增 key 触发 roll 动画）──

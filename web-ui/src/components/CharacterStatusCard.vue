@@ -19,6 +19,14 @@
         <div class="name-row">
           <span class="char-name">{{ char.display_name }}</span>
           <span v-if="statusLabel" class="status-badge" :class="badgeClass">{{ statusLabel }}</span>
+          <template v-if="!char.is_sleeping && char.tags && char.tags.length > 0">
+            <span
+              v-for="(tag, i) in char.tags"
+              :key="i"
+              class="tag-badge"
+              :class="i === 0 ? 'tag-green' : 'tag-orange'"
+            >{{ tag }}</span>
+          </template>
         </div>
       </div>
 
@@ -33,6 +41,14 @@
           <span>{{ char._behavior || '暂无信息' }}</span>
         </div>
       </div>
+
+      <!-- 右上角相机按钮（有日程才显示） -->
+      <button v-if="char.tags?.length" class="peek-btn" @click.stop="$emit('peek')" title="瞄一眼">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </button>
 
       <!-- 底部 -->
       <div class="card-foot" v-if="footnote">
@@ -59,7 +75,7 @@ const props = defineProps<{
   char: any
 }>()
 
-defineEmits(['select'])
+defineEmits(['select', 'peek'])
 
 const { tooltip, onEnter, onMove, onLeave } = useTooltip()
 
@@ -82,7 +98,8 @@ const badgeClass = computed(() => statusMap[computedStatus.value]?.cls || '')
 
 const footnote = computed(() => {
   if (props.char.is_sleeping) {
-    return props.char.sleep_until ? `大概 ${props.char.sleep_until.slice(11,16)} 起` : ''
+    // 在梦乡中：显示 description，不显示起床时间
+    return props.char._description || ''
   }
   if (props.char._description && props.char._description !== props.char._behavior) {
     return props.char._description
@@ -112,8 +129,26 @@ const footnote = computed(() => {
   flex: 1; padding: 16px;
   display: flex; flex-direction: column; gap: 12px;
   min-width: 0;
+  position: relative;
 }
 .card-dim { opacity: 0.65; }
+
+/* ── 右上角相机按钮 ── */
+.peek-btn {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: none; background: transparent;
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+  padding: 7px 12px;
+}
+.status-card:hover .peek-btn { opacity: 1; }
+.peek-btn:hover {
+  background: rgba(224,123,108,0.08);
+  color: var(--accent);
+}
 
 /* ── Top ── */
 .card-top {
@@ -143,6 +178,13 @@ const footnote = computed(() => {
 
 .badge-busy   { background: rgba(224,123,108,0.1);  color: #c06858; }
 .badge-sleep  { background: rgba(149,128,204,0.1);  color: #7c6db8; }
+
+.tag-badge {
+  font-size: 0.65rem; padding: 2px 8px; border-radius: 999px;
+  font-weight: 600; white-space: nowrap; flex-shrink: 0;
+}
+.tag-green  { background: rgba(82,196,26,0.1);  color: #389e0d; }
+.tag-orange { background: rgba(250,173,20,0.1); color: #d48806; }
 
 /* ── Mid ── */
 .card-mid {

@@ -381,6 +381,7 @@ export function getAllOverview() {
       is_sleeping: sleeping,
       sleep_until: sleepUntil,
       _desc: activity?.description || '',
+      tags: activity?.tags || [],
     };
   });
 }

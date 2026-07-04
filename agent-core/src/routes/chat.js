@@ -238,10 +238,6 @@ router.post('/characters/:id/chat', async (req, res) => {
     const delayInfo = getReplyDelay(characterId);
     if (delayInfo.delay > 0 || delayInfo.delay === -1) {
       // 非即时回复 → 保存用户消息，写入 reply_queue，不启动 SSE 流
-      const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
-        .run(conversationId, message, client_msg_id || null);
-      const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-        .run(conversationId, userRaw.lastInsertRowid, message);
 
       const delayMinutes = delayInfo.delay === -1
         ? -1
@@ -261,7 +257,47 @@ router.post('/characters/:id/chat', async (req, res) => {
           // fallback: 8 小时后（正常情况下不会走到这里）
           finalScheduledAt = new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
         }
-        // 标记角色为睡眠状态
+      }
+
+      // 幂等检查：client_msg_id 已存在则跳过写入（前端重试保护）
+      let userRawId, userMsgId;
+      if (client_msg_id) {
+        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+        if (existing) {
+          // 重试请求：用户消息已写入，检查 reply_queue 是否已有 waiting 条目
+          console.log(`[chat] idempotent (sleeping): skipping duplicate user message (client_msg_id=${client_msg_id})`);
+          userRawId = existing.id;
+          const existingMsg = db.prepare('SELECT id FROM messages WHERE raw_id = ? AND role = ?').get(userRawId, 'user');
+          userMsgId = existingMsg?.id;
+          // 检查是否已有 waiting 的队列条目
+          const existingQueue = db.prepare(
+            'SELECT id FROM reply_queue WHERE client_msg_id = ? AND status = ?'
+          ).get(client_msg_id, 'waiting');
+          if (existingQueue) {
+            // 已经排队中，直接返回（完全幂等）
+            return res.json({
+              queued: true,
+              delay: delayInfo.delay,
+              delayMinutes: delayMinutes,
+              currentActivity: delayInfo.activity,
+              estimatedReplyAt: delayInfo.delay === -1
+                ? finalScheduledAt
+                : new Date(Date.now() + delayMinutes * 60000).toISOString(),
+            });
+          }
+        }
+      }
+      if (!userRawId) {
+        const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
+          .run(conversationId, message, client_msg_id || null);
+        userRawId = userRaw.lastInsertRowid;
+        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
+          .run(conversationId, userRawId, message);
+        userMsgId = userMsg.lastInsertRowid;
+      }
+
+      // sleeping 时标记角色为睡眠状态
+      if (delayInfo.delay === -1) {
         db.prepare('UPDATE characters SET is_sleeping = 1 WHERE id = ?').run(characterId);
       }
 
@@ -269,7 +305,7 @@ router.post('/characters/:id/chat', async (req, res) => {
         INSERT INTO reply_queue (character_id, conversation_id, user_raw_msg_id, user_msg_id, user_content, client_msg_id, scheduled_reply_at, current_activity, delay_minutes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        characterId, conversationId, userRaw.lastInsertRowid, userMsg.lastInsertRowid,
+        characterId, conversationId, userRawId, userMsgId,
         message, client_msg_id || null, finalScheduledAt,
         delayInfo.activity, delayMinutes
       );
@@ -285,6 +321,66 @@ router.post('/characters/:id/chat', async (req, res) => {
         estimatedReplyAt: delayInfo.delay === -1
           ? finalScheduledAt
           : new Date(Date.now() + delayMinutes * 60000).toISOString(),
+      });
+    }
+
+    // ── 安全兜底：日程未拦截但 DB 中标记为睡眠状态 ──
+    // 日程系统可能因模板缺失/缓存过期/功能开关等原因未检测到睡眠，
+    // 但 characters.is_sleeping 是 scheduleManager 定时同步的可靠标志
+    const sleepingChar = db.prepare('SELECT is_sleeping, sleep_until FROM characters WHERE id = ?').get(characterId);
+    if (sleepingChar && sleepingChar.is_sleeping === 1) {
+      const sleepUntil = sleepingChar.sleep_until
+        || new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+      // 保存用户消息 + 写入回复队列（同上面的 sleeping 路径）
+      let userRawId, userMsgId;
+      if (client_msg_id) {
+        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+        if (existing) {
+          console.log(`[chat] idempotent (sleeping fallback): skipping duplicate (client_msg_id=${client_msg_id})`);
+          userRawId = existing.id;
+          const existingMsg = db.prepare('SELECT id FROM messages WHERE raw_id = ? AND role = ?').get(userRawId, 'user');
+          userMsgId = existingMsg?.id;
+          const existingQueue = db.prepare(
+            'SELECT id FROM reply_queue WHERE client_msg_id = ? AND status = ?'
+          ).get(client_msg_id, 'waiting');
+          if (existingQueue) {
+            return res.json({
+              queued: true,
+              delay: -1,
+              delayMinutes: -1,
+              currentActivity: '睡觉',
+              estimatedReplyAt: sleepUntil,
+            });
+          }
+        }
+      }
+      if (!userRawId) {
+        const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
+          .run(conversationId, message, client_msg_id || null);
+        userRawId = userRaw.lastInsertRowid;
+        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
+          .run(conversationId, userRawId, message);
+        userMsgId = userMsg.lastInsertRowid;
+      }
+
+      db.prepare(`
+        INSERT INTO reply_queue (character_id, conversation_id, user_raw_msg_id, user_msg_id, user_content, client_msg_id, scheduled_reply_at, current_activity, delay_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        characterId, conversationId, userRawId, userMsgId,
+        message, client_msg_id || null, sleepUntil,
+        '睡觉', -1
+      );
+
+      resetUnansweredStreak(characterId);
+
+      return res.json({
+        queued: true,
+        delay: -1,
+        delayMinutes: -1,
+        currentActivity: '睡觉',
+        estimatedReplyAt: sleepUntil,
       });
     }
   }
