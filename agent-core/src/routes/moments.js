@@ -500,7 +500,7 @@ async function generateMomentPost(character) {
     }
   } catch { /* schedule not available, skip */ }
 
-  const lightHint = `\n【画面光线】${lightNote}`;
+  const lightHint = `\n【画面光线参考】${lightNote}（仅供参考，室内以人工光源为主）`;
   const userMsg = multiPerson
     ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`
     : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`;

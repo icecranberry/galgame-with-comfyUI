@@ -107,6 +107,8 @@ function playProactiveSound() {
       _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
     }
     const ctx = _audioCtx
+    // 浏览器可能在用户交互前将 AudioContext 置于 suspended 状态，需显式恢复
+    if (ctx.state === 'suspended') ctx.resume()
 
     // 第一音 C5 ~523Hz, 100ms
     const osc1 = ctx.createOscillator()

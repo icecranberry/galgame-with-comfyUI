@@ -361,6 +361,14 @@ export const useEventsStore = defineStore('events', () => {
         )
         _bumpUnreadLocal()
       }),
+      onEvent('event_urgency', (data) => {
+        // 半程强制联络：更新事件紧急标记 + 红点
+        const idx = activeEvents.value.findIndex(e => e.id === data.event_id)
+        if (idx !== -1) {
+          activeEvents.value[idx] = { ...activeEvents.value[idx], _urgent: true }
+        }
+        _bumpUnreadLocal()
+      }),
     ]
 
     if (!_pollTimer) {

@@ -183,10 +183,7 @@ async function checkHalfTimeNotifications() {
     `).all();
 
     for (const event of halfTimeEvents) {
-      console.log(`[eventScheduler] Half-time notification for "${event.title}" (${event.display_name}), engaged=${event.engaged}`);
       try {
-        db.prepare(`UPDATE character_events SET half_time_notified = 1 WHERE id = ?`).run(event.id);
-
         // 根据 urgency 生成不同语气的主动消息
         const isUrgent = event.event_type_key ? getUrgencyLevel(event.event_type_key) : 1;
         const userName = config.user?.nickname || '用户';
@@ -264,7 +261,7 @@ ${urgencyNote}
         }
 
         // 递增 proactive_streak
-        db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1, last_message_at = datetime('now') WHERE id = ?`).run(event.character_id);
+        db.prepare(`UPDATE characters SET proactive_streak = COALESCE(proactive_streak, 0) + 1 WHERE id = ?`).run(event.character_id);
 
         // SSE 广播
         broadcastProactiveMessage({
@@ -294,7 +291,9 @@ ${urgencyNote}
           event_description: event.description,
           expires_at: event.expires_at,
         });
-        console.log(`[eventScheduler] Urgency proactive message sent for ${event.display_name}: "${greeting.slice(0, 50)}..."`);
+
+        // 全部成功后再标记 notified，LLM/DB/广播任一失败时可重试
+        db.prepare(`UPDATE character_events SET half_time_notified = 1 WHERE id = ?`).run(event.id);
       } catch (err) {
         console.error(`[eventScheduler] Half-time notification error:`, err.message);
       }

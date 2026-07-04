@@ -151,7 +151,6 @@
                 :src="peekImage"
                 class="pk-img"
                 @click="lightboxVisible = true"
-                title="点击查看大图"
               />
             </div>
 
@@ -193,6 +192,19 @@
         :zoom-scale="0.35"
         @hide="lightboxVisible = false"
       />
+    </Teleport>
+
+    <!-- 瞄一眼图片悬浮 description 提示框 -->
+    <Teleport to="body">
+      <Transition name="lbtip">
+        <div
+          v-if="peekOpen && peekTooltipVisible && lightboxDescription"
+          class="lightbox-tooltip"
+          :style="{ left: peekTooltipX + 'px', top: peekTooltipY + 'px' }"
+        >
+          {{ lightboxDescription }}
+        </div>
+      </Transition>
     </Teleport>
 
     <!-- ═══ 重置世界线确认弹窗 ═══ -->
@@ -373,6 +385,13 @@ const peekPrompt = ref<string | null>(null)
 const peekChar = ref<any>(null)
 const peekAct = ref<any>(null)
 const lightboxVisible = ref(false)
+const peekTooltipVisible = ref(false)
+const peekTooltipX = ref(0)
+const peekTooltipY = ref(0)
+
+const lightboxDescription = computed(() => {
+  return peekAct.value?.description || ''
+})
 
 // ── 重置世界线 ──
 interface ResetTask {
@@ -669,6 +688,28 @@ function onPeekClose() {
   peekPrompt.value = null
   stopFakeProgress()
 }
+
+// ── 瞄一眼图片悬浮 description ──
+function handlePeekMouseMove(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  const overBody = target.closest('.pk-body')
+  if (overBody) {
+    peekTooltipX.value = e.clientX + 18
+    peekTooltipY.value = e.clientY - 12
+    peekTooltipVisible.value = true
+  } else {
+    peekTooltipVisible.value = false
+  }
+}
+
+watch(peekOpen, (v) => {
+  if (v) {
+    document.addEventListener('mousemove', handlePeekMouseMove)
+  } else {
+    document.removeEventListener('mousemove', handlePeekMouseMove)
+    peekTooltipVisible.value = false
+  }
+})
 
 async function regenerateAll() {
   for (const c of store.characters) {
@@ -1223,5 +1264,31 @@ function finishReset() {
 /* lightbox 必须在 peek-overlay (z-index:1100) 之上 */
 .vel-modal, .vel-img-wrapper, .vel-img {
   z-index: 1300 !important;
+}
+
+/* ── 瞄一眼图片悬浮 description 提示框（z-index 高于 peek-overlay 1100）── */
+.lightbox-tooltip {
+  position: fixed;
+  z-index: 1150;
+  max-width: 340px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #f0e8e0;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  border-radius: 10px;
+  pointer-events: none;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.lbtip-enter-active,
+.lbtip-leave-active {
+  transition: opacity 0.18s ease;
+}
+.lbtip-enter-from,
+.lbtip-leave-to {
+  opacity: 0;
 }
 </style>

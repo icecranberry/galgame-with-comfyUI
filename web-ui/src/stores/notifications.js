@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
 import * as api from '../api/index.js'
+import { onEvent } from './unifiedStream.js'
 
 const RECONNECT_INTERVAL = 30_000
 
@@ -70,15 +71,19 @@ export const useProactiveStore = defineStore('proactive', () => {
     }, RECONNECT_INTERVAL)
   }
 
-  async function connectSSE() {
+  function connectSSE() {
     if (_sseStarted.value) return
     _sseStarted.value = true
 
-    // 先订阅统一 SSE 流（必须在任何 await 之前，避免竞态窗口期内消息丢失）
-    const { onEvent } = await import('./unifiedStream.js')
+    // 同步注册 handler（消除与 startUnifiedStream 的启动竞态）
     _unsubProactive = onEvent('proactive_message', _onMessage)
 
-    // 从后端恢复未读状态（DB 为单一数据源，兜底 SSE 断开期间丢失的消息）
+    // 异步恢复未读状态（DB 为单一数据源，兜底 SSE 断开期间丢失的消息）
+    _restoreUnreadFromDB()
+    _startReconnectTimer()
+  }
+
+  async function _restoreUnreadFromDB() {
     try {
       const { unread } = await api.getProactiveUnread()
       if (unread?.length) {
@@ -92,8 +97,6 @@ export const useProactiveStore = defineStore('proactive', () => {
         latestMessages.value = msgs
       }
     } catch { /* 非关键 */ }
-
-    _startReconnectTimer()
   }
 
   function disconnectSSE() {
