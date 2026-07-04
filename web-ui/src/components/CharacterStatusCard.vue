@@ -20,7 +20,7 @@
           <span v-if="statusLabel" class="status-badge" :class="badgeClass">{{ statusLabel }}</span>
           <template v-if="!char.is_sleeping && char.tags && char.tags.length > 0">
             <span
-              v-for="(tag, i) in char.tags"
+              v-for="(tag, i) in char.tags.slice(0, 2).reverse()"
               :key="i"
               class="tag-badge"
               :class="i === 0 ? 'tag-green' : 'tag-orange'"
@@ -42,7 +42,7 @@
       </div>
 
       <!-- 右上角相机按钮（有日程才显示） -->
-      <button v-if="char.tags?.length" class="peek-btn" @click.stop="$emit('peek')" title="瞄一眼">
+      <button v-if="char.tags?.length" class="peek-btn" @click.stop="$emit('peek')">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
           <circle cx="12" cy="13" r="4"/>
@@ -189,6 +189,7 @@ const footnote = computed(() => {
 }
 .tag-green  { background: rgba(82,196,26,0.1);  color: #389e0d; }
 .tag-orange { background: rgba(250,173,20,0.1); color: #d48806; }
+.tag-overflow { background: rgba(0,0,0,0.04); color: var(--text-secondary); }
 
 /* ── Mid ── */
 .card-mid {

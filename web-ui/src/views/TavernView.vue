@@ -138,7 +138,7 @@
 
       <!-- 角色卡片 -->
       <div
-        v-for="c in chat.characters"
+        v-for="c in sortedCharacters"
         :key="c.id"
         class="char-card"
         @click="openCharDetail(c)"
@@ -454,6 +454,13 @@ import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
 
 const router = useRouter()
 const chat = useChatStore()
+
+// 按 display_name 首字母排序（中文按拼音）
+const sortedCharacters = computed(() =>
+  [...chat.characters].sort((a, b) =>
+    (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
+  )
+)
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const confirmFn = inject('confirm')

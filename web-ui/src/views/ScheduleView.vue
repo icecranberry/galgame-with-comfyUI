@@ -118,7 +118,7 @@
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="peekOpen" class="peek-overlay" @click="onPeekClose">
-          <div class="peek-film" @click.stop>
+          <div class="peek-film" :class="{ 'pk-shutter-fire': shutterFire }" :style="peekFilmStyle" @click.stop>
             <!-- 胶卷上黑边 + 白色矩形齿孔 -->
             <div class="pk-film-edge pk-film-edge-top" aria-hidden="true"></div>
 
@@ -148,12 +148,16 @@
               <template v-else-if="peekError">
                 <div class="pk-err"><p>生成失败</p><span>{{ peekError }}</span><button class="btn-glass" @click="retryPeek">重试</button></div>
               </template>
-              <img
-                v-else-if="peekImage"
-                :src="peekImage"
-                class="pk-img"
-                @click="lightboxVisible = true"
-              />
+              <div v-else-if="peekImage" class="pk-shutter-stage">
+                <div class="pk-shutter-flash"></div>
+                <div class="pk-shutter-curtain pk-curtain-top"></div>
+                <div class="pk-shutter-curtain pk-curtain-bottom"></div>
+                <img
+                  :src="peekImage"
+                  class="pk-img"
+                  @click="lightboxVisible = true"
+                />
+              </div>
             </div>
 
             <!-- 胶卷下黑边 + 白色矩形齿孔 -->
@@ -174,7 +178,7 @@
                     <polyline points="23,4 23,10 17,10" />
                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                   </svg>
-                  {{ peekBusy ? '拍摄中...' : '再拍一张' }}
+                  <span class="pk-retake-label">{{ peekBusy ? '拍摄中...' : '再拍一张' }}</span>
                 </button>
                 <button class="pk-x" @click="onPeekClose">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -300,7 +304,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useSettingsStore } from '../stores/settings.js'
@@ -351,7 +355,9 @@ const filterPills = [
 
 // ── 数据增强：解析 current_activity → _location + _behavior ──
 const enrichedChars = computed(() => {
-  return store.characters.map(c => {
+  return [...store.characters]
+    .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN'))
+    .map(c => {
     const raw = c.current_activity || ''
     const sep = raw.indexOf(' · ')
     const location = sep > -1 ? raw.slice(0, sep) : raw
@@ -397,6 +403,7 @@ const peekError = ref<string | null>(null)
 const peekPrompt = ref<string | null>(null)
 const peekChar = ref<any>(null)
 const peekAct = ref<any>(null)
+const shutterFire = ref(false) // 相机快门动画触发器
 const lightboxVisible = ref(false)
 const peekTooltipVisible = ref(false)
 const peekTooltipX = ref(0)
@@ -527,6 +534,21 @@ watch(peekLoading, (loading) => {
   }
 })
 
+// ── 相机快门动画：图片到达时触发 ──
+watch(peekImage, (newVal) => {
+  if (newVal) {
+    // 先复位再触发，确保每次图片到达都播放动画
+    shutterFire.value = false
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        shutterFire.value = true
+      })
+    })
+  } else {
+    shutterFire.value = false
+  }
+})
+
 // ── 进度条：模拟虚拟→ComfyUI真实接管（参照 ImageGenBubble 逻辑）──
 const realPct = ref(0)       // ComfyUI 真实进度 0~100
 const simulatedPct = ref(0)  // 虚拟进度 0~100
@@ -587,6 +609,11 @@ const peekBodyStyle = computed(() => {
     bodyW = bodyH * ratio
   }
   return { width: `${Math.round(bodyW)}px`, height: `${Math.round(bodyH)}px` }
+})
+
+// ── 胶卷外壳与 pk-body 同宽，防止 pk-bar 文字撑开容器 ──
+const peekFilmStyle = computed(() => {
+  return { width: peekBodyStyle.value.width }
 })
 
 // ── 生命周期 ──
@@ -1101,6 +1128,7 @@ function finishReset() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 14px;
   background: #fafaf9; flex-shrink: 0;
+  position: relative;
 }
 .pk-char { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -1110,7 +1138,66 @@ function finishReset() {
 .pk-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pk-x { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: 0.15s; }
 .pk-x:hover { background: rgba(0,0,0,0.06); }
-.pk-body { flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #fff; overflow: hidden; }
+.pk-body { flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #111; overflow: hidden; }
+
+/* ═══ 相机快门动画 ═══ */
+.pk-shutter-stage {
+  position: relative; width: 100%; height: 100%;
+  overflow: hidden;
+}
+/* ── 白色闪光（模拟闪光灯）── */
+.pk-shutter-flash {
+  position: absolute; inset: 0; z-index: 10;
+  background: #fff;
+  opacity: 0; pointer-events: none;
+}
+.pk-shutter-fire .pk-shutter-flash {
+  animation: shutter-flash 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes shutter-flash {
+  0%   { opacity: 0.85; }
+  45%  { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+
+/* ── 快门帘幕（双帘式焦平面快门）── */
+.pk-shutter-curtain {
+  position: absolute; left: 0; right: 0; z-index: 9;
+  height: 51%; /* 略超 50% 防漏缝 */
+  background: linear-gradient(180deg,
+    #1a1a1a 0%,
+    #2a2a2a 30%,
+    #1a1a1a 100%
+  );
+  pointer-events: none;
+}
+.pk-curtain-top {
+  top: 0;
+  transform-origin: top center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+.pk-curtain-bottom {
+  bottom: 0;
+  transform-origin: bottom center;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.5);
+}
+
+.pk-shutter-fire .pk-curtain-top {
+  animation: shutter-open-top 0.38s 0.04s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+.pk-shutter-fire .pk-curtain-bottom {
+  animation: shutter-open-bottom 0.38s 0.04s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes shutter-open-top {
+  0%   { transform: scaleY(1); }
+  100% { transform: scaleY(0); }
+}
+@keyframes shutter-open-bottom {
+  0%   { transform: scaleY(1); }
+  100% { transform: scaleY(0); }
+}
+
 .pk-wait { text-align: center; padding: 32px 24px; color: var(--text-secondary); }
 .pk-wait p { margin: 10px 0 0; font-size: 0.85rem; }
 
@@ -1288,6 +1375,15 @@ function finishReset() {
   }
   .peek-film { max-width: 94vw; border-radius: 4px; }
   .reset-dialog { max-width: 94vw; border-radius: 12px; }
+
+  /* 移动端 retake 按钮：仅图标 + 定位 pk-bar 右端 */
+  .pk-retake-label { display: none; }
+  .pk-retake-btn {
+    position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+    padding: 7px 7px;
+  }
+  .pk-bar { padding-right: 80px; }
+  .pk-x { margin-left: 0; }
 
   /* 移动端：扫描面板缩为底部横条（绝对定位，不挤压 card-grid）*/
   .sched-sidebar {
