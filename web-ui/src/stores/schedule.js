@@ -29,15 +29,15 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // ── 方法 ──
 
-  async function fetchOverview() {
-    loading.value = true
+  async function fetchOverview(silent = false) {
+    if (!silent) loading.value = true
     try {
       const data = await api.getScheduleOverview()
       characters.value = data.characters || []
     } catch (err) {
       console.error('[schedule] fetchOverview failed:', err.message)
     } finally {
-      loading.value = false
+      if (!silent) loading.value = false
     }
   }
 
@@ -76,9 +76,9 @@ export const useScheduleStore = defineStore('schedule', () => {
   async function regenerateSchedule(characterId) {
     try {
       const result = await api.regenerateSchedule(characterId)
-      // 刷新概览和当前日程
+      // 静默刷新概览（不显示 loading，避免 card-grid 闪烁）
       await Promise.all([
-        fetchOverview(),
+        fetchOverview(true),
         characterId === currentSchedule.value?.character_id
           ? fetchCharacterSchedule(characterId)
           : Promise.resolve(),

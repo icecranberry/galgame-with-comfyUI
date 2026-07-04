@@ -7,17 +7,23 @@
           <div class="dr-header">
             <!-- Row 1: 头像 + 信息 + 关闭 -->
             <div class="dr-row1">
-              <img
+              <div
                 class="dr-avatar"
-                :src="char?.avatar_path || '/avatars/default.png'"
-                @error="($event.target as HTMLImageElement).src = '/avatars/default.png'"
-              />
+                :style="char?.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+              >
+                <span v-if="!char?.avatar_path" class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
+              </div>
               <div class="dr-info">
                 <h3>{{ char?.display_name || '' }}</h3>
                 <div v-if="currentAct" class="dr-now">
-                  <span class="dr-act-text">{{ currentAct.activity }}</span>
-                  <span class="dr-sep">·</span>
-                  <span class="dr-loc-text">{{ currentAct.location }}</span>
+                  <div class="dr-now-line">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>{{ currentAct.activity }}</span>
+                  </div>
+                  <div class="dr-now-line">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span>{{ currentAct.location }}</span>
+                  </div>
                 </div>
                 <div v-else class="dr-now dr-no-data">还没安排日程</div>
               </div>
@@ -28,7 +34,7 @@
 
             <!-- Row 2: 操作按钮 -->
             <div class="dr-row2">
-              <button v-if="char?.tags?.length" class="dr-btn" @click="$emit('peek')">
+              <button v-if="activities.length > 0" class="dr-btn" @click="$emit('peek')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                 <span>瞄一眼</span>
               </button>
@@ -122,7 +128,8 @@
       <div
         v-if="tooltip.show"
         class="hover-tip"
-        :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
+        :class="{ flip: tooltip.flip }"
+        :style="tipStyle"
       >{{ tooltip.text }}</div>
     </Teleport>
   </Teleport>
@@ -143,7 +150,7 @@ const props = defineProps<{
 
 defineEmits(['close', 'peek', 'regenerate', 'chat'])
 
-const { tooltip, onEnter, onMove, onLeave } = useTooltip()
+const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
 const currentAct = computed(() => props.activities.find((a: any) => a.isCurrent) || null)
 
@@ -263,9 +270,15 @@ onUnmounted(() => {
 }
 
 .dr-avatar {
-  width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+  width: 52px; height: 52px; border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.dr-avatar-text {
+  color: #fff; font-size: 22px; font-weight: 600;
+  line-height: 1; user-select: none;
 }
 
 .dr-info {
@@ -276,17 +289,19 @@ onUnmounted(() => {
   line-height: 1.3;
 }
 .dr-now {
-  display: flex; align-items: center; gap: 5px;
+  display: flex; flex-direction: column; gap: 3px;
   margin-top: 4px; font-size: 0.8rem; color: var(--text-secondary);
-  white-space: nowrap; overflow: hidden;
+  overflow: hidden;
 }
 .dr-no-data {
   color: #bfbbb6; font-style: italic;
 }
 
-.dr-act-text { color: var(--text-bright); font-weight: 500; }
-.dr-sep { color: #d9d6d0; flex-shrink: 0; }
-.dr-loc-text { overflow: hidden; text-overflow: ellipsis; }
+.dr-now-line {
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dr-now-line svg { flex-shrink: 0; opacity: 0.4; color: var(--text-secondary); }
 
 .dr-close {
   display: none; align-items: center; justify-content: center;

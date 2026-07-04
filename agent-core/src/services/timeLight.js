@@ -9,7 +9,7 @@ const LIGHT_MAP = [
   // 注意：光线描述是"可选参考"而非"强制执行"。
   // 白天时段的光线实际受天气（晴/阴/雨）、场景（室内/室外/窗边）等因素影响很大，
   // 描述只给出该时段最典型的光线特征，不作为硬性约束。
-  [[0, 5], '凌晨', '夜色昏暗，若有室外场景可出现冷调月光或暖黄路灯点缀；室内以低亮度暖色人工光源为主'],
+  [[0, 5], '凌晨', '夜色昏暗，若有室外场景可出现冷调月光或暖黄路灯点缀；如果醒着，室内以低亮度暖色人工光源为主，如果睡觉，房间里没有灯光'],
   [[5, 7], '清晨', '室外可能是淡金晨光、薄雾或阴天灰调；室内窗边自然光与人工光混合，不强制统一色调'],
   [[7, 12], '上午', '室外日光清亮或阴天漫反射，室内以窗边散射自然光为主；光线氛围自由，不强制特定色温'],
   [[12, 13], '中午', '室外日照充足明亮，室内光线均匀；整体明亮通透即可，不强制顶光或深阴影'],
@@ -33,15 +33,18 @@ export function getTimeLight(now = new Date()) {
 }
 
 /**
- * 生成旧版兼容格式的简单时间标签
- * [当前时间 周三 07/03 14:30]
+ * 生成时间标签（用于主聊天流等不需要光线描述的场合）
+ * [当前时间 周三 07/03 14:30 / 下午]
  *
  * @param {Date} [now]
  * @returns {string}
  */
 export function getTimeTag(now = new Date()) {
   const weekDay = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
-  return `[当前时间 ${weekDay} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}]`;
+  const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const { timeDesc } = getTimeLight(now);
+  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${timeDesc}]`;
 }
 
 /**

@@ -906,7 +906,19 @@ export async function forceProactiveNow(targetCharacterId) {
         'SELECT * FROM characters WHERE id = ? AND proactive_disabled = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
       ).get(targetCharacterId);
       if (!candidate) {
-        console.log(`⚡ force: character ${targetCharacterId} not eligible (disabled or streak≥3)`);
+        // 诊断具体原因
+        const char = db.prepare('SELECT id, display_name, proactive_disabled, is_sleeping, proactive_streak FROM characters WHERE id = ?').get(targetCharacterId);
+        if (!char) {
+          console.log(`⚡ force: character ${targetCharacterId} not found`);
+        } else if (char.proactive_disabled) {
+          console.log(`⚡ force: ${char.display_name} not eligible (proactive_disabled=1)`);
+        } else if (char.is_sleeping) {
+          console.log(`⚡ force: ${char.display_name} not eligible (is_sleeping=1)`);
+        } else if ((char.proactive_streak || 0) >= 3) {
+          console.log(`⚡ force: ${char.display_name} not eligible (streak=${char.proactive_streak} ≥ 3)`);
+        } else {
+          console.log(`⚡ force: ${char.display_name} not eligible (has active event)`);
+        }
         return null;
       }
       console.log(`⚡ force: targeted ${candidate.display_name} (id=${targetCharacterId})`);
@@ -915,7 +927,7 @@ export async function forceProactiveNow(targetCharacterId) {
         'SELECT * FROM characters WHERE proactive_disabled = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
       ).all();
       if (candidates.length === 0) {
-        console.log('⚡ force: no eligible characters (all disabled or streak≥3)');
+        console.log('⚡ force: no eligible characters (all sleeping, disabled, streak≥3, or have active events)');
         return null;
       }
       candidate = candidates[Math.floor(Math.random() * candidates.length)];

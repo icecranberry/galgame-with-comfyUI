@@ -64,14 +64,25 @@ export async function generateSchedule(character) {
 - 自由职业→在家工作、外出取材、交稿截止日
 - 其他职业同理类推
 
-## 睡眠时间个性化
-根据角色个性自行决定就寝和起床时间：
-- 夜猫子型→凌晨 1-2 点睡，上午 9-10 点起
-- 早睡早起型→晚上 10 点睡，早上 6 点起
-- 社畜型→晚上 11-12 点睡，早上 7 点起
-- NEET/家里蹲→凌晨 2-3 点睡，中午 11-12 点起
-- 艺人/夜班型→凌晨 1-2 点睡，上午 10-11 点起
-睡眠 block 的 replyDelay 必须是 -1（暂停一切回复）。睡眠总时长通常在 6-9 小时之间。
+## 睡眠时间个性化（极其重要）
+**角色之间睡眠时间必须高度多样化，不要让所有角色都遵循朝九晚五的社畜作息。** 根据角色个性大胆决定就寝和起床时间，以下为参考类型：
+
+- 夜猫子·轻度→凌晨 1-2 点睡，上午 9-10 点起
+- 夜猫子·重度→凌晨 3-4 点睡，中午 11-12 点起（游戏宅、深夜主播、同人画师、程序员、自由职业者等）
+- 夜猫子·通宵修仙→凌晨 5-6 点睡，下午 1-2 点起（重度网瘾、作息完全崩坏的 NEET、深夜工作的特殊职业）
+- 早睡早起型→晚上 9-10 点睡，早上 5-6 点起（运动员、晨练爱好者、老派作息）
+- 标准社畜型→晚上 11-12 点睡，早上 7 点起
+- NEET/家里蹲→凌晨 2-4 点睡，中午 11-13 点起
+- 艺人/夜场型→凌晨 1-3 点睡，上午 10-11 点起（偶像、乐队、酒吧驻唱等）
+- 昼伏夜出型→早上 6-8 点睡，下午 14-16 点起（夜班工人、深夜保安、地下社会等）
+- 碎片化睡眠→分两段睡（如晚上睡 4h + 下午补觉 3h），适合作息极度不规律的创作者或病人
+
+睡眠 block 的 replyDelay 必须是 -1（暂停一切回复）。睡眠总时长通常在 5-9 小时之间（极端夜猫子可能只睡 5-6 小时）。
+
+**关键原则**：
+1. 角色的人格和职业直接决定睡眠类型——性格懒散的 NEET 不可能是早睡早起型，深夜主播不可能是社畜型
+2. 如果角色是自由职业、创作者、ACG 宅、夜生活相关职业，80% 以上的概率是夜猫子型
+3. 睡眠时间要贴合角色的"人设气質"——比如病娇角色可能作息极度不规律，军武角色可能作息严格
 
 ## replyDelay 规则（非常重要）
 - **约 90% 的活动 replyDelay=0（秒回消息，不耽误聊天）**
@@ -83,6 +94,10 @@ export async function generateSchedule(character) {
 
 ## 输出格式
 输出一个 JSON 数组，8~15 个活动，按时间顺序覆盖完整 24 小时。
+**绝对不允许出现时间空档**：上一个活动的 endTime 必须等于下一个活动的 startTime，
+不留任何空白分钟。所有时间必须被完整覆盖。如果日程从 03:00 开始，
+那么 00:00~03:00 也必须有一个活动覆盖（可以是睡眠或深夜活动）。
+
 每个活动对象格式：
 {
   "startTime": "HH:MM",
@@ -91,7 +106,7 @@ export async function generateSchedule(character) {
   "location": "地点",
   "replyDelay": 数字（0 / 10~60 / -1）,
   "tags": ["标签1", "标签2"],
-  "description": "角色视角的简短描述（20-40 字，让角色「感觉」到这个活动）"
+  "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }
 
 只输出 JSON 数组，不要任何额外文字。`;
@@ -222,6 +237,11 @@ function parseAndValidateSchedule(raw, displayName) {
     }
   }
 
+  // 校验 24 小时全覆盖（不允许时间空档）
+  if (!checkFullDayCoverage(activities, displayName)) {
+    return null;
+  }
+
   // 80% 秒回保证：如果非 0 延迟活动超过 20%，随机将部分改回 0
   const nonImmediate = activities.filter(a => a.replyDelay !== 0 && a.replyDelay !== -1);
   const totalCount = activities.length;
@@ -251,6 +271,114 @@ function parseAndValidateSchedule(raw, displayName) {
 function timeToMinutes(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + (m || 0);
+}
+
+/**
+ * 校验日程活动是否完整覆盖 24 小时（1440 分钟），不允许有空档。
+ * 将跨午夜活动拆分为两段，合并区间后检查是否恰好覆盖 [0, 1440)。
+ * 允许 1 分钟的端点容差（LLM 偶尔输出 08:01 而非 08:00）。
+ */
+function checkFullDayCoverage(activities, displayName) {
+  const intervals = [];
+
+  for (const act of activities) {
+    let s = timeToMinutes(act.startTime);
+    let e = timeToMinutes(act.endTime);
+
+    if (s === e) {
+      console.warn(`[scheduleGen] Zero-duration activity for ${displayName}: "${act.activity}" ${act.startTime}-${act.endTime}`);
+      return false;
+    }
+
+    if (e < s) {
+      // 跨午夜：拆分为 [s, 1440) 和 [0, e)
+      intervals.push([s, 1440]);
+      if (e > 0) intervals.push([0, e]);
+    } else {
+      intervals.push([s, e]);
+    }
+  }
+
+  // 按起点排序
+  intervals.sort((a, b) => a[0] - b[0]);
+
+  // 合并区间
+  const merged = [];
+  for (const [s, e] of intervals) {
+    if (merged.length === 0) {
+      merged.push([s, e]);
+    } else {
+      const last = merged[merged.length - 1];
+      if (s <= last[1] + 1) {
+        // 允许 1 分钟容差（如 01:00 和 01:01 视为连续）
+        last[1] = Math.max(last[1], e);
+      } else {
+        // 发现空档
+        const gapStart = last[1];
+        const gapEnd = s;
+        const gapMin = gapEnd - gapStart;
+        console.warn(
+          `[scheduleGen] Schedule gap detected for ${displayName}: ` +
+          `${minutesToHhmm(gapStart)} ~ ${minutesToHhmm(gapEnd)} (${gapMin} min gap). ` +
+          `After "${findActivityEndingAt(activities, gapStart)}", before "${findActivityStartingAt(activities, gapEnd)}"`
+        );
+        return false;
+      }
+    }
+  }
+
+  // 检查是否完整覆盖 [0, 1440)
+  if (merged.length !== 1 || merged[0][0] > 1 || merged[0][1] < 1439) {
+    const coverage = merged.map(([s, e]) => `${minutesToHhmm(s)}-${minutesToHhmm(e)}`).join(', ');
+    const uncovered = [];
+    if (merged.length === 0) {
+      uncovered.push('00:00-24:00（完全无覆盖）');
+    } else {
+      if (merged[0][0] > 1) uncovered.push(`00:00-${minutesToHhmm(merged[0][0])}`);
+      for (let i = 1; i < merged.length; i++) {
+        if (merged[i][0] > merged[i - 1][1] + 1) {
+          uncovered.push(`${minutesToHhmm(merged[i - 1][1])}-${minutesToHhmm(merged[i][0])}`);
+        }
+      }
+      if (merged[merged.length - 1][1] < 1439) {
+        uncovered.push(`${minutesToHhmm(merged[merged.length - 1][1])}-24:00`);
+      }
+    }
+    console.warn(
+      `[scheduleGen] Incomplete 24h coverage for ${displayName}: ` +
+      `merged=[${coverage}], uncovered=[${uncovered.join(', ')}]`
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/** 分钟数 → HH:MM */
+function minutesToHhmm(minutes) {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** 查找结束于指定时间（容差 ±2 分钟）的活动名（用于日志） */
+function findActivityEndingAt(activities, targetMin) {
+  for (const act of activities) {
+    const e = timeToMinutes(act.endTime);
+    if (Math.abs(e - targetMin) <= 2) return act.activity;
+    // 跨午夜情况
+    if (e < timeToMinutes(act.startTime) && Math.abs(e + 1440 - targetMin) <= 2) return act.activity;
+  }
+  return '?';
+}
+
+/** 查找开始于指定时间（容差 ±2 分钟）的活动名（用于日志） */
+function findActivityStartingAt(activities, targetMin) {
+  for (const act of activities) {
+    const s = timeToMinutes(act.startTime);
+    if (Math.abs(s - targetMin) <= 2) return act.activity;
+  }
+  return '?';
 }
 
 /**

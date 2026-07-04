@@ -162,7 +162,10 @@
             <!-- 底部信息栏（原 pk-top + footer 合并） -->
             <div class="pk-bar">
               <div class="pk-char">
-                <img :src="peekChar?.avatar_path || '/avatars/default.png'" @error="($event.target as HTMLImageElement).src = '/avatars/default.png'" />
+                <div
+                  class="pk-char-avatar"
+                  :style="peekChar?.avatar_path ? { backgroundImage: `url(${peekChar.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+                ><span v-if="!peekChar?.avatar_path" class="pk-char-avatar-text">{{ peekChar?.display_name?.charAt(0) || '' }}</span></div>
                 <div><b>{{ peekAct?.activity || '瞄一眼' }}</b><span v-if="peekAct?.location">{{ peekAct.location }}</span></div>
               </div>
               <div class="pk-actions">
@@ -202,7 +205,8 @@
         <div
           v-if="peekOpen && peekTooltipVisible && lightboxDescription"
           class="lightbox-tooltip"
-          :style="{ left: peekTooltipX + 'px', top: peekTooltipY + 'px' }"
+          :class="{ flip: peekTooltipFlip }"
+          :style="peekTooltipStyle"
         >
           {{ lightboxDescription }}
         </div>
@@ -352,11 +356,12 @@ const enrichedChars = computed(() => {
     const sep = raw.indexOf(' · ')
     const location = sep > -1 ? raw.slice(0, sep) : raw
     const behavior = sep > -1 ? raw.slice(sep + 3) : raw
+    const noSchedule = raw === '未设置日程'
     return {
       ...c,
-      _location: location || '未知地点',
-      _behavior: behavior || '暂无信息',
-      _description: c._desc || behavior || raw || '',
+      _location: noSchedule ? '未知地点' : (location || '未知地点'),
+      _behavior: noSchedule ? '自由行动' : (behavior || '暂无信息'),
+      _description: c._desc || (!noSchedule ? behavior : '') || (!noSchedule ? raw : '') || (noSchedule ? '没有日程，自由行动中...' : ''),
       _hasEvent: false,
       _nextActivity: null,
     }
@@ -374,7 +379,11 @@ const filteredChars = computed(() => {
 
 // ── 选中角色 / 抽屉 ──
 const drawerOpen = ref(false)
-const detailChar = ref<any>(null)
+const selectedCharId = ref<number | null>(null)
+const detailChar = computed(() => {
+  if (!selectedCharId.value) return null
+  return enrichedChars.value.find(x => x.id === selectedCharId.value) || null
+})
 const detailActs = ref<any[]>([])
 const detailLoading = ref(false)
 const detailRegenerating = ref(false)
@@ -392,6 +401,16 @@ const lightboxVisible = ref(false)
 const peekTooltipVisible = ref(false)
 const peekTooltipX = ref(0)
 const peekTooltipY = ref(0)
+const peekTooltipFlip = ref(false)
+
+const peekTooltipStyle = computed(() => {
+  if (!peekTooltipVisible.value) return { display: 'none' }
+  const base = { top: peekTooltipY.value + 'px' }
+  if (peekTooltipFlip.value) {
+    return { ...base, left: 'auto', right: (window.innerWidth - peekTooltipX.value) + 'px' }
+  }
+  return { ...base, left: peekTooltipX.value + 'px', right: 'auto' }
+})
 
 const lightboxDescription = computed(() => {
   return peekAct.value?.description || ''
@@ -606,8 +625,8 @@ onMounted(() => {
       resetTask.value.phase = data.phase
       resetTask.value.current = data.current || resetTask.value.current
       resetTask.value.processing = false
-      // 刷新日程概览
-      store.fetchOverview()
+      // 静默刷新概览（不触发 loading，避免 card-grid 闪烁）
+      store.fetchOverview(true)
     } else if (data.phase === 'error') {
       resetTask.value.phase = 'cancelled'
       resetTask.value.processing = false
@@ -625,8 +644,7 @@ onUnmounted(() => {
 function onFilter(key: string) { activeFilter.value = key }
 
 async function onSelectChar(id: number) {
-  const c = enrichedChars.value.find(x => x.id === id)
-  detailChar.value = c || null
+  selectedCharId.value = id
   drawerOpen.value = true
   detailLoading.value = true
   detailActs.value = []
@@ -652,8 +670,8 @@ async function onRegenerate() {
   if (!detailChar.value || detailRegenerating.value) return
   detailRegenerating.value = true
   try {
+    // regenerateSchedule 内部已静默刷新概览，这里不再重复调用
     try { await store.regenerateSchedule(detailChar.value.id) } catch { return }
-    await store.fetchOverview()
     detailLoading.value = true
     try {
       const d = await store.fetchCharacterSchedule(detailChar.value.id)
@@ -668,7 +686,7 @@ async function onRegenerate() {
 async function onCardPeek(id: number) {
   const c = enrichedChars.value.find(x => x.id === id)
   if (!c) return
-  detailChar.value = c
+  selectedCharId.value = id
   detailActs.value = []
   try {
     const d = await store.fetchCharacterSchedule(id)
@@ -722,8 +740,15 @@ function handlePeekMouseMove(e: MouseEvent) {
   const target = e.target as HTMLElement
   const overBody = target.closest('.pk-body')
   if (overBody) {
-    peekTooltipX.value = e.clientX + 18
     peekTooltipY.value = e.clientY - 12
+    // 靠近右边缘时翻转到光标左侧
+    if (e.clientX + 18 + 340 > window.innerWidth - 20) {
+      peekTooltipX.value = e.clientX - 18
+      peekTooltipFlip.value = true
+    } else {
+      peekTooltipX.value = e.clientX + 18
+      peekTooltipFlip.value = false
+    }
     peekTooltipVisible.value = true
   } else {
     peekTooltipVisible.value = false
@@ -741,9 +766,9 @@ watch(peekOpen, (v) => {
 
 async function regenerateAll() {
   for (const c of store.characters) {
+    // regenerateSchedule 内部已静默刷新，这里不额外调 fetchOverview
     try { await store.regenerateSchedule(c.id) } catch { /* continue */ }
   }
-  await store.fetchOverview()
 }
 
 let _resetUnlisten: (() => void) | null = null
@@ -789,7 +814,8 @@ function dismissResetProgress() {
 
 function finishReset() {
   resetTask.value = null
-  store.fetchOverview()
+  // 静默刷新，不触发 loading 闪烁
+  store.fetchOverview(true)
 }
 </script>
 
@@ -801,7 +827,7 @@ function finishReset() {
 }
 
 /* ── Layout: 左主体 + 右侧边栏 ── */
-.sched-layout { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.sched-layout { flex: 1; display: flex; min-height: 0; overflow: hidden; position: relative; }
 
 /* ── 左：主体内容区 ── */
 .sched-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -896,14 +922,16 @@ function finishReset() {
    扫描特效侧边栏（仅生成时显示）
    ═══════════════════════════════════════════ */
 .sched-sidebar {
-  width: 260px; min-width: 260px;
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 260px;
+  z-index: 10;
   border-left: 1px solid rgba(224,123,108,0.18);
   background: rgba(255, 255, 255, 0.45);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: flex; flex-direction: column;
   overflow: hidden;
-  position: relative;
   box-shadow: inset 0 0 60px rgba(224,123,108,0.04);
 }
 
@@ -1075,7 +1103,8 @@ function finishReset() {
   background: #fafaf9; flex-shrink: 0;
 }
 .pk-char { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.pk-char img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pk-char-avatar-text { color: #fff; font-size: 13px; font-weight: 600; line-height: 1; user-select: none; }
 .pk-char b { display: block; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pk-char span { font-size: 0.72rem; color: var(--text-secondary); }
 .pk-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -1260,13 +1289,12 @@ function finishReset() {
   .peek-film { max-width: 94vw; border-radius: 4px; }
   .reset-dialog { max-width: 94vw; border-radius: 12px; }
 
-  /* 移动端：扫描面板缩为底部横条 */
+  /* 移动端：扫描面板缩为底部横条（绝对定位，不挤压 card-grid）*/
   .sched-sidebar {
-    width: 100%; min-width: unset; max-height: 130px;
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: 100%; max-height: 130px;
     border-left: none; border-top: 1px solid rgba(224,123,108,0.18);
-    flex-shrink: 0;
   }
-  .sched-layout { flex-direction: column; }
   .sidebar-scan-ring { width: 56px; height: 56px; }
   .sidebar-scan-icon { width: 56px; height: 56px; }
   .sidebar-scan-pct { font-size: 14px; }
@@ -1280,7 +1308,7 @@ function finishReset() {
 @media (min-width: 768px) and (max-width: 1023px) {
   .card-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
   /* 平板端：sidebar 收窄 */
-  .sched-sidebar { width: 220px; min-width: 220px; }
+  .sched-sidebar { width: 220px; }
 }
 
 @media (min-width: 1024px) {

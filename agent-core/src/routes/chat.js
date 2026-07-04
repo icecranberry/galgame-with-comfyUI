@@ -21,7 +21,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { getReplyDelay, formatScheduleContext } from '../services/scheduleManager.js';
-import { getTimeLightTag, getLightHint } from '../services/timeLight.js';
+import { getTimeTag, getLightHint } from '../services/timeLight.js';
 
 const router = Router();
 
@@ -775,7 +775,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     //     倒数第一句 → [当前时间]（用现在的时间）
     //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
     const now = new Date();
-    const timeTag = getTimeLightTag(now);
+    const timeTag = getTimeTag(now);
     let foundCount = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {

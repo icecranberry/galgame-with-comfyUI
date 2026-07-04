@@ -9,12 +9,11 @@
     >
       <!-- 顶部：头像 + 名字 -->
       <div class="card-top">
-        <div class="avatar-box">
-          <img
-            :src="char.avatar_path || '/avatars/default.png'"
-            :alt="char.display_name"
-            @error="($event.target as HTMLImageElement).src = '/avatars/default.png'"
-          />
+        <div
+          class="avatar-box"
+          :style="char.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+        >
+          <span v-if="!char.avatar_path" class="avatar-text">{{ char.display_name.charAt(0) }}</span>
         </div>
         <div class="name-row">
           <span class="char-name">{{ char.display_name }}</span>
@@ -62,7 +61,8 @@
     <div
       v-if="tooltip.show"
       class="hover-tip"
-      :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
+      :class="{ flip: tooltip.flip }"
+      :style="tipStyle"
     >{{ tooltip.text }}</div>
   </Teleport>
 </template>
@@ -77,7 +77,7 @@ const props = defineProps<{
 
 defineEmits(['select', 'peek'])
 
-const { tooltip, onEnter, onMove, onLeave } = useTooltip()
+const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
 const statusMap: Record<string, { label: string; cls: string }> = {
   sleeping:  { label: '在梦乡', cls: 'badge-sleep' },
@@ -160,8 +160,12 @@ const footnote = computed(() => {
   border-radius: 50%; overflow: hidden;
   flex-shrink: 0;
   box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  display: flex; align-items: center; justify-content: center;
 }
-.avatar-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-text {
+  color: #fff; font-size: 18px; font-weight: 600;
+  line-height: 1; user-select: none;
+}
 
 .name-row {
   display: flex; align-items: center; gap: 8px;

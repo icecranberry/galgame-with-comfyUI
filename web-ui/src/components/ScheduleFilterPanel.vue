@@ -47,10 +47,12 @@
         @click="$emit('select-char', c.id)"
       >
         <div class="li-avatar">
-          <img
-            :src="c.avatar_path || '/avatars/default.png'"
-            @error="($event.target as HTMLImageElement).src = '/avatars/default.png'"
-          />
+          <div
+            class="li-avatar-img"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+          >
+            <span v-if="!c.avatar_path" class="li-avatar-text">{{ c.display_name.charAt(0) }}</span>
+          </div>
           <span class="li-dot" :class="dotClass(c)"></span>
         </div>
         <div class="li-info">
@@ -209,8 +211,14 @@ function activitySummary(c: any) {
 .li-avatar {
   position: relative; width: 36px; height: 36px; flex-shrink: 0;
 }
-.li-avatar img {
-  width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block;
+.li-avatar-img {
+  width: 100%; height: 100%; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.li-avatar-text {
+  color: #fff; font-size: 15px; font-weight: 600;
+  line-height: 1; user-select: none;
 }
 .li-dot {
   position: absolute; bottom: -1px; right: -1px;

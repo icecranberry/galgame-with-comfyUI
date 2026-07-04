@@ -402,7 +402,7 @@ router.post('/:characterId/peek', async (req, res) => {
     // 当前时间 + 时段 + 光线描述
     const { timeStr, timeDesc, lightNote } = getTimeLight();
     const sleepNote = isSleeping
-      ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，不能睁眼。表情安详放松，呈现深度睡眠的自然状态。睡姿、被褥、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
+      ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
       : '';
 
     system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${activity.activity}，地点：${activity.location}，现在是${timeStr}（${timeDesc}），光线参考：${lightNote}（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。${sleepNote}`;
@@ -418,7 +418,7 @@ router.post('/:characterId/peek', async (req, res) => {
     const system3 = `你将画面表达为prompt输出，只输出一个{"prompt":"..."} JSON格式。${imageInstruction ? '\n\n输出格式要求：\n' + imageInstruction : ''}`;
 
     // user: 拍摄指令
-    const userMsg = `请为「${charName}」拍一张当前正在${activity.activity}的人像照。`;
+    const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${activity.activity}的照片，具体照片表现是${activity.description}`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },
