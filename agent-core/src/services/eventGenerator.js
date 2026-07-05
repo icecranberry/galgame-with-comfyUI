@@ -329,6 +329,21 @@ export async function generateEvent(character, options = {}) {
 </world_integration>
 ` : '';
 
+  // 日程注入：获取角色当前活动，让事件起点与当前活动自然衔接
+  let scheduleContextLine = '';
+  let scheduleSystemBlock = '';
+  try {
+    if (config.features.schedule !== false) {
+      const currentActivity = getCurrentActivity(character.id);
+      if (currentActivity && currentActivity.activity !== '自由时间') {
+        scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
+        const { timeStr, timeDesc, lightNote } = getTimeLight(now);
+        const descPart = currentActivity.description ? `——${currentActivity.description}` : '';
+        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。现在是${timeStr}（${timeDesc}），光线参考：${lightNote}`;
+      }
+    }
+  } catch { /* schedule not available */ }
+
   const directorSystem = `${jailbreakPrompt}
 ${worldIntegrationBlock}
 你正在为「${displayName}」生成一段特殊事件的开场叙事——所谓"特殊事件"，就是在角色当下的日常中撕开了一道口子的某个瞬间。它可以大（紧急状况、陌生人闯入、一个改变轨迹的邀约），也可以小（迟到了、东西丢了、一个没来由的情绪涌上来），可以是正面的（惊喜、发现、心动），也可以是负面的（危机、尴尬、暴露），可以"奇"——但不是必须奇。
@@ -383,21 +398,6 @@ ${multiPerson.otherPersona}`;
   const worldPenetrationLine = worldSetting
     ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
-
-  // 日程注入：获取角色当前活动，让事件起点与当前活动自然衔接
-  let scheduleContextLine = '';
-  let scheduleSystemBlock = '';
-  try {
-    if (config.features.schedule !== false) {
-      const currentActivity = getCurrentActivity(character.id);
-      if (currentActivity && currentActivity.activity !== '自由时间') {
-        scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
-        const { timeStr, timeDesc, lightNote } = getTimeLight(now);
-        const descPart = currentActivity.description ? `——${currentActivity.description}` : '';
-        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。现在是${timeStr}（${timeDesc}），光线参考：${lightNote}`;
-      }
-    }
-  } catch { /* schedule not available */ }
 
   const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}
 ${timeTag}${multiPersonNote}
