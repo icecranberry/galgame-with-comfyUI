@@ -391,6 +391,9 @@ function initSchema(db) {
   // 迁移: 日程系统 — characters 表新增 schedule 相关列
   migrateScheduleSchema(db);
 
+  // 迁移: moment_comments 新增 auto_trigger + thread_root_id（朋友圈关系网互动）
+  migrateMomentAutoTrigger(db);
+
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
@@ -554,6 +557,25 @@ function migrateScheduleSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateScheduleSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: moment_comments 新增 auto_trigger + thread_root_id（朋友圈关系网互动）
+ */
+function migrateMomentAutoTrigger(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(moment_comments)`).all();
+    if (!cols.find(c => c.name === 'auto_trigger')) {
+      db.exec(`ALTER TABLE moment_comments ADD COLUMN auto_trigger INTEGER DEFAULT 0`);
+      console.log('[db] Added moment_comments.auto_trigger column (default 0)');
+    }
+    if (!cols.find(c => c.name === 'thread_root_id')) {
+      db.exec(`ALTER TABLE moment_comments ADD COLUMN thread_root_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added moment_comments.thread_root_id column (nullable)');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentAutoTrigger error:', err.message);
   }
 }
 

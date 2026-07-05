@@ -69,7 +69,16 @@ export const useMomentsStore = defineStore('moments', () => {
     loading.value = true
     try {
       const data = await api.listMoments()
-      posts.value = data.posts || []
+      // 保留已有帖子的运行时状态：页面切换回来时，_comments / liked 不会因对象替换而丢失
+      const prevMap = new Map(posts.value.map(p => [p.id, p]))
+      posts.value = (data.posts || []).map(p => {
+        const prev = prevMap.get(p.id)
+        if (prev) {
+          if (prev._comments) p._comments = prev._comments
+          if (prev.liked !== undefined) p.liked = prev.liked
+        }
+        return p
+      })
       page.value = 1
       await markSeen()
     } catch (err) {
@@ -105,13 +114,11 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   // 发评论 → 返回 { comment, reply }
+  // 注意：组件侧（MomentCard）已做乐观更新 + 数组操作，store 只负责 comment_count 统计
   async function addComment(postId, content) {
     const result = await api.commentMoment(postId, content)
     const post = posts.value.find(p => p.id === postId)
     if (post) {
-      if (!post._comments) post._comments = []
-      if (result.comment) post._comments.push(result.comment)
-      if (result.reply) post._comments.push(result.reply)
       post.comment_count = (post.comment_count || 0) + (result.comment ? 1 : 0) + (result.reply ? 1 : 0)
     }
     return result
@@ -164,6 +171,7 @@ export const useMomentsStore = defineStore('moments', () => {
   let _pollTimer = null
   let _sseStarted = false
   let _unsubNewPost = null
+  let _unsubNewComment = null
 
   /** 从 DB 拉取最新未读计数（唯一数据源） */
   async function refreshUnreadCount() {
@@ -173,7 +181,7 @@ export const useMomentsStore = defineStore('moments', () => {
     } catch { /* 非关键 */ }
   }
 
-  /** 连接统一 SSE 推送流（仅订阅 new_post 事件） + 启动 polling */
+  /** 连接统一 SSE 推送流 + 启动 polling */
   async function connectSSE() {
     if (_sseStarted) return
     _sseStarted = true
@@ -185,6 +193,20 @@ export const useMomentsStore = defineStore('moments', () => {
     const { onEvent } = await import('./unifiedStream.js')
     _unsubNewPost = onEvent('new_post', (_post) => {
       if (!isViewingMoments.value) newPostCount.value++
+    })
+
+    // 监听关系网互动产生的新评论，实时追加到帖子评论区
+    _unsubNewComment = onEvent('new_comment', (data) => {
+      if (!data?.post_id || !data?.comment) return
+      const post = posts.value.find(p => p.id === data.post_id)
+      if (post) {
+        if (!post._comments) post._comments = []
+        // 防重复（按 id 去重）
+        if (!post._comments.some(c => c.id === data.comment.id)) {
+          post._comments.push(data.comment)
+          post.comment_count = (post.comment_count || 0) + 1
+        }
+      }
     })
 
     if (!_pollTimer) {
@@ -199,6 +221,7 @@ export const useMomentsStore = defineStore('moments', () => {
   function disconnectSSE() {
     _sseStarted = false
     if (_unsubNewPost) { _unsubNewPost(); _unsubNewPost = null }
+    if (_unsubNewComment) { _unsubNewComment(); _unsubNewComment = null }
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
   }
 

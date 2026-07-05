@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._version_page)
 
         self._settings_page = SettingsPage()
+        self._settings_page.set_project_path(self._exe_dir)
         self._stack.addWidget(self._settings_page)
 
         self._qa_page = QAPage()

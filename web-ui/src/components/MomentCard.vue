@@ -76,13 +76,21 @@
           v-for="c in alwaysVisible"
           :key="c.id"
           class="comment-item"
-          :class="{ 'is-character': c.author_type === 'character' }"
+          :class="{ 'is-character': c.author_type === 'character' && c.author_id === post.character_id }"
         >
           <template v-if="c.author_type === 'character'">
             <span class="comment-char-name">{{ c.char_display_name || post.display_name }}</span>
-            <span class="comment-reply-to"> 回复 </span>
+            <template v-if="c.auto_trigger && !c.reply_to_name">
+              <!-- AI 互动首轮评论：无需"回复"前缀 -->
+            </template>
+            <template v-else>
+              <span class="comment-reply-to"> 回复 </span>
+              <span class="comment-user-name">{{ c.reply_to_name || userNickname || '我' }}</span>
+            </template>
           </template>
-          <span class="comment-user-name">{{ userNickname || '我' }}</span>
+          <template v-else>
+            <span class="comment-user-name">{{ userNickname || '我' }}</span>
+          </template>
           <span>：</span>
           <span class="comment-content">{{ c.content }}</span>
         </div>
@@ -95,13 +103,21 @@
             v-for="c in hiddenComments"
             :key="c.id"
             class="comment-item"
-            :class="{ 'is-character': c.author_type === 'character' }"
+            :class="{ 'is-character': c.author_type === 'character' && c.author_id === post.character_id }"
           >
             <template v-if="c.author_type === 'character'">
               <span class="comment-char-name">{{ c.char_display_name || post.display_name }}</span>
-              <span class="comment-reply-to"> 回复 </span>
+              <template v-if="c.auto_trigger && !c.reply_to_name">
+                <!-- AI 互动首轮评论：无需"回复"前缀 -->
+              </template>
+              <template v-else>
+                <span class="comment-reply-to"> 回复 </span>
+                <span class="comment-user-name">{{ c.reply_to_name || userNickname || '我' }}</span>
+              </template>
             </template>
-            <span class="comment-user-name">{{ userNickname || '我' }}</span>
+            <template v-else>
+              <span class="comment-user-name">{{ userNickname || '我' }}</span>
+            </template>
             <span>：</span>
             <span class="comment-content">{{ c.content }}</span>
           </div>
@@ -180,7 +196,7 @@ function goToChat() {
     router.push('/chat/' + props.post.character_id)
   }
 }
-const comments = ref([...(props.post._comments || [])])
+const comments = computed(() => props.post._comments || [])
 const commentsLoading = ref(false)
 const commentText = ref('')
 const sending = ref(false)
@@ -196,12 +212,10 @@ const avatarStyle = computed(() => {
   return { background: '#e07b6c' }
 })
 
-// 首次加载评论
+// 首次加载评论（store.loadComments 直接设置 post._comments，computed 自动同步）
 if (comments.value.length === 0) {
   commentsLoading.value = true
-  moments.loadComments(props.post.id).then(c => {
-    comments.value.length = 0
-    comments.value.push(...c)
+  moments.loadComments(props.post.id).finally(() => {
     commentsLoading.value = false
   })
 }
@@ -245,7 +259,8 @@ async function sendComment() {
   sending.value = true
 
   const tempId = 'temp_' + Date.now()
-  comments.value.push({
+  if (!props.post._comments) props.post._comments = []
+  props.post._comments.push({
     id: tempId,
     author_type: 'user',
     content: text,
@@ -257,16 +272,20 @@ async function sendComment() {
   expanded.value = true
   try {
     const result = await moments.addComment(props.post.id, text)
-    const idx = comments.value.findIndex(c => c.id === tempId)
+    const idx = props.post._comments.findIndex(c => c.id === tempId)
     if (idx >= 0 && result.comment) {
-      comments.value.splice(idx, 1, result.comment)
+      props.post._comments.splice(idx, 1, result.comment)
     }
     if (result.reply) {
-      comments.value.push(result.reply)
+      props.post._comments.push(result.reply)
     }
   } catch (err) {
     console.error('[MomentCard] comment error:', err)
-    comments.value = comments.value.filter(c => c.id !== tempId)
+    if (props.post._comments) {
+      const filteredVal = props.post._comments.filter(c => c.id !== tempId)
+      props.post._comments.length = 0
+      props.post._comments.push(...filteredVal)
+    }
   } finally {
     sending.value = false
   }
@@ -477,7 +496,7 @@ function formatTime(iso) {
   opacity: 0;
 }
 .expand-wrapper.open {
-  max-height: 600px;
+  max-height: 2600px;
   opacity: 1;
 }
 

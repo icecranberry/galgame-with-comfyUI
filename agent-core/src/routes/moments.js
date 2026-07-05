@@ -10,6 +10,7 @@ import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
+import { triggerFriendComments } from '../services/momentInteractionService.js';
 
 const router = Router();
 
@@ -46,6 +47,16 @@ function broadcastNewPost(postInfo) {
     try { client.write(payload); } catch { sseClients.delete(client); }
   }
   broadcastToUnified('new_post', postInfo);
+}
+
+/** 向所有连接的 SSE 客户端广播新评论事件（关系网互动） */
+function broadcastNewComment(commentData) {
+  const data = JSON.stringify(commentData);
+  const payload = `event: new_comment\ndata: ${data}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch { sseClients.delete(client); }
+  }
+  broadcastToUnified('new_comment', commentData);
 }
 
 // GET /api/moments/stream — SSE 推送端点（新帖实时通知）
@@ -138,8 +149,16 @@ router.get('/:id', (req, res) => {
   const comments = db.prepare(`
     SELECT mc.*,
       CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE NULL END AS char_display_name,
-      CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path
-
+      CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path,
+      CASE WHEN mc.auto_trigger = 1 THEN
+        (SELECT CASE WHEN prev.author_type = 'character' THEN pc.display_name ELSE '用户' END
+         FROM moment_comments prev
+         LEFT JOIN characters pc ON pc.id = prev.author_id
+         WHERE prev.post_id = mc.post_id
+           AND prev.thread_root_id = mc.thread_root_id
+           AND prev.id < mc.id
+         ORDER BY prev.id DESC LIMIT 1)
+      ELSE NULL END AS reply_to_name
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
     WHERE mc.post_id = ?
@@ -609,6 +628,14 @@ async function generateMomentPost(character) {
     created_at: new Date().toISOString(),
   });
 
+  // 异步触发关系网朋友互动（5 秒后启动，不阻塞，完全独立于用户）
+  const postRecord = { id: postId, content: text, images: imageUrls };
+  setTimeout(() => {
+    triggerFriendComments(postRecord, character).catch(err =>
+      console.error('[moments] friend interaction error:', err.message)
+    );
+  }, 5000);
+
   return {
     id: postId,
     character_id: character.id,
@@ -715,18 +742,10 @@ async function generateCharacterReply(post, historyComments) {
     affPrompt = affinityToPrompt(affinity) || '';
   }
 
-  // 朋友圈上下文 + 回复规则
-  const contextTask = `关于${userName}：
-${userPersona}
-
-你在朋友圈发了：
+  // 朋友圈上下文 + 回复规则（user 特征和评论区交互放到最后的 user 消息中）
+  const contextTask = `你在朋友圈发了：
 ---
 ${post.content}
----
-
-评论区目前的对话：
----
-${commentHistory}
 ---
 
 请以角色的身份自然回复评论区的最新评论。规则：
@@ -748,11 +767,20 @@ ${commentHistory}
   const relContext = [userRelMsg, charRelMsg, affPrompt].filter(Boolean).join('\n\n');
   if (relContext) msgs.push({ role: 'system', content: relContext });
 
-  // msgs[3] — 任务：用户信息 + 朋友圈内容 + 评论区 + 规则
+  // msgs[3] — 任务：朋友圈内容 + 规则
   msgs.push({ role: 'system', content: contextTask });
 
-  const timeTag = getTimeLightTag(new Date());
-  msgs.push({ role: 'user', content: `${timeTag} 回复这条评论：` });
+  // user 消息 — user 特征 + 评论区交互（独立于系统人设，避免人称混淆，不含光线时间）
+  const userMsg = `关于${userName}：
+${userPersona}
+
+评论区目前的对话：
+---
+${commentHistory}
+---
+
+回复这条评论：`;
+  msgs.push({ role: 'user', content: userMsg });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });
 

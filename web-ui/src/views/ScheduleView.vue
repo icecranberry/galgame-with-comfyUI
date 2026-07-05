@@ -182,9 +182,6 @@
                   </svg>
                   <span class="pk-retake-label">{{ peekBusy ? '拍摄中...' : '再拍一张' }}</span>
                 </button>
-                <button class="pk-x" @click="onPeekClose">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
               </div>
             </div>
           </div>
@@ -1127,8 +1124,6 @@ function finishReset() {
 .pk-char b { display: block; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pk-char span { font-size: 0.72rem; color: var(--text-secondary); }
 .pk-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.pk-x { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: 0.15s; }
-.pk-x:hover { background: rgba(0,0,0,0.06); }
 .pk-body { flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #111; overflow: hidden; }
 
 /* ═══ 相机快门动画 ═══ */
@@ -1374,7 +1369,6 @@ function finishReset() {
     padding: 7px 7px;
   }
   .pk-bar { padding-right: 80px; }
-  .pk-x { margin-left: 0; }
 
   /* 移动端：扫描面板缩为底部横条（绝对定位，不挤压 card-grid）*/
   .sched-sidebar {
