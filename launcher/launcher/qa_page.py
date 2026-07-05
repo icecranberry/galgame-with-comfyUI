@@ -42,7 +42,13 @@ QA_DATA = [
     },
     {
         "q": "主包主包我有鬼点子怎么办？",
-        "a": "欢迎来 B 站 @琪猫猫来了全秒了，视频底下畅所欲言",
+        "a": (
+            '欢迎来 B 站 @琪猫猫来了全秒了，'
+            '<a href="https://www.bilibili.com/video/BV1uH7q6vEQ9/"'
+            ' style="color: #E07B6C; text-decoration: none;">'
+            '我好像让纸片人「活」过来了【邻舍.EXE】</a>'
+            '视频底下畅所欲言'
+        ),
     },
 ]
 
@@ -109,6 +115,8 @@ class QAPage(QWidget):
             # A — 次文字色
             a_label = QLabel(f"A：{item['a']}")
             a_label.setWordWrap(True)
+            a_label.setTextFormat(Qt.RichText)
+            a_label.setOpenExternalLinks(True)
             a_label.setStyleSheet(
                 "color: #756B65; font-size: 13px; line-height: 1.6;"
             )

@@ -9,6 +9,7 @@
     "tag": "node scripts/tag.mjs",
     "release": "node scripts/build-release.mjs",
     "build": "node scripts/build.mjs",
-    "lasttag": "node scripts/lasttag.mjs"
+    "lasttag": "node scripts/lasttag.mjs",
+    "preview-launcher": "cd launcher && python main.py"
   }
 }

@@ -24,7 +24,7 @@ pyinstaller ^
   --add-data "assets/launchHeader.jpg;assets" ^
   --add-data "assets/icon.ico;assets" ^
   --add-data "assets/navbar-title.png;assets" ^
-  --add-data "assets/HarmonyOS_Sans_SC_Regular.ttf;assets" ^
+  --add-data "assets/MiSans-Regular.ttf;assets" ^
   --hidden-import PySide6.QtCore ^
   --hidden-import PySide6.QtGui ^
   --hidden-import PySide6.QtWidgets ^

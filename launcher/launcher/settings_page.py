@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
 )
 from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtGui import QFont, QFontDatabase
 from .switch import Switch
 
 # 需要迁移的数据项（相对于项目根目录）
@@ -126,6 +127,7 @@ class SettingsPage(QWidget):
     setting_changed = Signal(str, object)  # key, value — 实时自动保存
     open_comfyui_clicked = Signal()
     browse_comfyui_clicked = Signal()
+    migrate_panel_toggled = Signal(bool)  # True=展开, False=折叠
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,7 +173,7 @@ class SettingsPage(QWidget):
 
         # ComfyUI 引导（使用富文本 + wordWrap 保证完整显示）
         self.guide_label = QLabel(
-            '<span style="color: #756B65; font-size: 12px;">'
+            '<span style="color: #756B65; font-size: 13px;">'
             '• ComfyUI运行之后就可以把弹出的工作台关闭，并不刚需，邻舍.EXE会自动连接ComfyUI<br>'
             '• 新手请直接下载@秋叶aaaki的ComfyUI整合包+Anima模型，'
             '并在版本管理的内核页面升级到<span style="color: #ff4444; font-weight: bold;">v0.23.0</span>以上<br>'
@@ -194,8 +196,12 @@ class SettingsPage(QWidget):
         self.guide_label.setTextFormat(Qt.RichText)
         self.guide_label.setMinimumHeight(1)
         self.guide_label.setStyleSheet(
-            "color: #756B65; font-size: 12px; background: transparent; border: none;"
+            "color: #756B65; font-size: 13px; background: transparent; border: none;"
         )
+        # ★ 显式加载 MiSans 字体并直接设到此标签
+        _label_font = _load_misans_font()
+        if _label_font:
+            self.guide_label.setFont(_label_font)
         layout.addWidget(self.guide_label)
 
         # --- 分隔线 ---
@@ -214,10 +220,20 @@ class SettingsPage(QWidget):
         # --- 分隔线 ---
         layout.addWidget(_separator())
 
-        # --- 数据迁移 ---
-        migrate_title = QLabel("数据迁移")
-        migrate_title.setStyleSheet("color: #2E2A27; font-size: 14px; font-weight: bold;")
-        layout.addWidget(migrate_title)
+        # --- 数据迁移（可折叠） ---
+        self.migrate_header_btn = QPushButton("▶ 数据迁移")
+        self.migrate_header_btn.setStyleSheet(_collapsible_header_style())
+        self.migrate_header_btn.setCursor(Qt.PointingHandCursor)
+        self.migrate_header_btn.clicked.connect(self._on_toggle_migrate)
+        layout.addWidget(self.migrate_header_btn)
+
+        # 折叠内容区域
+        self.migrate_content = QWidget()
+        self.migrate_content.setStyleSheet("background: transparent;")
+        self.migrate_content.hide()
+        migrate_content_layout = QVBoxLayout(self.migrate_content)
+        migrate_content_layout.setContentsMargins(0, 4, 0, 0)
+        migrate_content_layout.setSpacing(10)
 
         migrate_desc = QLabel(
             "如果无法通过版本管理拉取新版本，可以下载最新版本安装包后，"
@@ -225,7 +241,7 @@ class SettingsPage(QWidget):
         )
         migrate_desc.setWordWrap(True)
         migrate_desc.setStyleSheet("color: #756B65; font-size: 12px; background: transparent; border: none;")
-        layout.addWidget(migrate_desc)
+        migrate_content_layout.addWidget(migrate_desc)
 
         # 迁移内容说明
         migrate_items_label = QLabel(
@@ -236,7 +252,7 @@ class SettingsPage(QWidget):
         migrate_items_label.setStyleSheet(
             "color: #B09890; font-size: 11px; background: transparent; border: none;"
         )
-        layout.addWidget(migrate_items_label)
+        migrate_content_layout.addWidget(migrate_items_label)
 
         # 选择旧版本文件夹
         select_row = QHBoxLayout()
@@ -252,7 +268,7 @@ class SettingsPage(QWidget):
         )
         self.migrate_path_label.setWordWrap(True)
         select_row.addWidget(self.migrate_path_label, 1)
-        layout.addLayout(select_row)
+        migrate_content_layout.addLayout(select_row)
 
         # 迁移按钮
         migrate_btn_row = QHBoxLayout()
@@ -269,7 +285,7 @@ class SettingsPage(QWidget):
         )
         self.migrate_status_label.setWordWrap(True)
         migrate_btn_row.addWidget(self.migrate_status_label, 1)
-        layout.addLayout(migrate_btn_row)
+        migrate_content_layout.addLayout(migrate_btn_row)
 
         # 进度条（迁移进行中显示）
         self.migrate_progress = QProgressBar()
@@ -281,14 +297,26 @@ class SettingsPage(QWidget):
         self.migrate_progress.setFixedHeight(18)
         self.migrate_progress.setStyleSheet(_progress_bar_style())
         self.migrate_progress.hide()
-        layout.addWidget(self.migrate_progress)
+        migrate_content_layout.addWidget(self.migrate_progress)
+
+        layout.addWidget(self.migrate_content)
 
         # 弹性空间把仓库地址推到底部
         layout.addStretch()
 
-        # --- 仓库地址（右下角） ---
+        # --- 外部链接（右下角） ---
         repo_row = QHBoxLayout()
         repo_row.addStretch()
+        bili_label = QLabel(
+            '<a href="https://space.bilibili.com/632137"'
+            ' style="color: #B09890; text-decoration: none; font-size: 11px;">'
+            'B站 @琪猫猫来了全秒了</a>'
+        )
+        bili_label.setOpenExternalLinks(True)
+        repo_row.addWidget(bili_label)
+        repo_row.addWidget(QLabel(
+            '<span style="color: #C9C0BB; font-size: 11px;"> · </span>'
+        ))
         repo_label = QLabel(
             '<a href="https://github.com/icecranberry/galgame-with-comfyUI"'
             ' style="color: #B09890; text-decoration: none; font-size: 11px;">'
@@ -363,6 +391,17 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
     # 数据迁移
     # ------------------------------------------------------------------
+
+    def _on_toggle_migrate(self):
+        """展开/折叠数据迁移面板。"""
+        if self.migrate_content.isVisible():
+            self.migrate_content.hide()
+            self.migrate_header_btn.setText("▶ 数据迁移")
+            self.migrate_panel_toggled.emit(False)
+        else:
+            self.migrate_content.show()
+            self.migrate_header_btn.setText("▼ 数据迁移")
+            self.migrate_panel_toggled.emit(True)
 
     def _on_select_migrate_source(self):
         """用户选择旧版本文件夹。"""
@@ -565,6 +604,23 @@ def _secondary_btn_style() -> str:
     """
 
 
+def _collapsible_header_style() -> str:
+    return """
+        QPushButton {
+            background: transparent;
+            color: #2E2A27;
+            font-size: 14px;
+            font-weight: bold;
+            border: none;
+            text-align: left;
+            padding: 6px 0px;
+        }
+        QPushButton:hover {
+            color: #E07B6C;
+        }
+    """
+
+
 def _primary_btn_style() -> str:
     return """
         QPushButton {
@@ -609,3 +665,37 @@ def _separator() -> QFrame:
     line.setFrameShape(QFrame.HLine)
     line.setStyleSheet("background: #E5D9D2; max-height: 1px; border: none;")
     return line
+
+
+def _load_misans_font() -> QFont | None:
+    """加载 MiSans 字体并返回 QFont 对象。"""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        candidates = [os.path.join(sys._MEIPASS, "assets", "MiSans-Regular.ttf")]
+    else:
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "assets", "MiSans-Regular.ttf"),
+            os.path.join(os.path.dirname(__file__), "assets", "MiSans-Regular.ttf"),
+        ]
+
+    font_path = None
+    for p in candidates:
+        if os.path.exists(p):
+            font_path = p
+            break
+
+    if not font_path:
+        return None
+
+    font_id = QFontDatabase.addApplicationFont(font_path)
+    if font_id < 0:
+        return None
+
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if not families:
+        return None
+
+    font = QFont(families[0])
+    font.setPixelSize(13)
+    return font

@@ -3,6 +3,7 @@
 [English](./README_EN.md)
 
 受 Galgame 启发的**本地 AI 陪伴应用**。与可自定义人格的角色对话，AI 根据上下文自动触发 **ComfyUI** 生图（Anima），具备三维情绪模拟、长期记忆检索、朋友圈动态系统。
+欢迎来视频底下提出更好建设性建议[我好像让纸片人「活」过来了【邻舍.EXE】-bilibili详细演示以及安装视频](https://www.bilibili.com/video/BV1uH7q6vEQ9/)
 
 ---
 
