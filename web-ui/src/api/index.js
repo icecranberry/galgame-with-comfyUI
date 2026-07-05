@@ -911,3 +911,10 @@ export async function cancelRegenerateAll() {
   const res = await fetch(`${BASE}/schedule/regenerate-all/cancel`, { method: 'POST' })
   return res.json()
 }
+
+/** 查询当前重置世界线任务状态（页面刷新恢复用） */
+export async function getResetStatus() {
+  const res = await fetch(`${BASE}/schedule/reset-status`)
+  if (!res.ok) throw new Error(`reset status: ${res.status}`)
+  return res.json()
+}

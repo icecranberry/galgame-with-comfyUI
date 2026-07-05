@@ -50,7 +50,7 @@ router.get('/', (req, res) => {
 });
 
 // ── 重置世界线状态 ──
-let resetTask = null; // { cancelled, processing, current, total }
+let resetTask = null; // { cancelled, processing, current, total, currentName }
 
 // ── POST /api/schedule/regenerate-all — 重置世界线（重新生成所有角色日程）──
 router.post('/regenerate-all', async (req, res) => {
@@ -66,7 +66,7 @@ router.post('/regenerate-all', async (req, res) => {
       return res.status(404).json({ error: '没有角色' });
     }
 
-    resetTask = { cancelled: false, processing: true, current: 0, total: characters.length };
+    resetTask = { cancelled: false, processing: true, current: 0, total: characters.length, currentName: '' };
 
     // 立即返回，不阻塞
     res.json({ started: true, total: characters.length });
@@ -77,6 +77,7 @@ router.post('/regenerate-all', async (req, res) => {
 
       const character = characters[i];
       resetTask.current = i + 1;
+      resetTask.currentName = character.display_name;
 
       // 广播进度：开始生成
       broadcast('schedule_reset_progress', {
@@ -141,6 +142,20 @@ router.post('/regenerate-all', async (req, res) => {
       error: err.message,
     });
   }
+});
+
+// ── GET /api/schedule/reset-status — 查询当前重置任务状态（页面刷新恢复用）──
+router.get('/reset-status', (req, res) => {
+  if (!resetTask?.processing) {
+    return res.json({ active: false });
+  }
+  res.json({
+    active: true,
+    phase: 'running',
+    current: resetTask.current,
+    total: resetTask.total,
+    currentName: resetTask.currentName || '',
+  });
 });
 
 // ── POST /api/schedule/regenerate-all/cancel — 取消重置世界线 ──

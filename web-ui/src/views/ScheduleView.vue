@@ -17,11 +17,13 @@
                 />
                 <button
                   class="btn-reset"
-                  @click.stop="showResetConfirm = true"
-                  :disabled="resetTask?.processing"
+                  :class="{ 'is-resetting': store.resetTask?.processing }"
+                  @click.stop="handleResetClick"
+                  :disabled="store.resetTask?.processing && !store.resetTask?.backgrounded"
                 >
-                  <svg v-if="!resetTask?.processing" class="btn-reset-icon" viewBox="0 0 1024 1024" width="16" height="16"><path d="M1017.6 595.2c19.2-134.4-6.4-256-89.6-364.8C832 89.6 588.8-19.2 480 25.6c6.4 25.6 6.4 44.8 12.8 70.4 262.4 0 428.8 185.6 448 371.2 19.2 179.2-89.6 371.2-249.6 428.8v-179.2c0-25.6-12.8-38.4-32-38.4-38.4 0-51.2 12.8-38.4 57.6 12.8 70.4 6.4 140.8 0 211.2 0 38.4 19.2 32 64 32h160c83.2 0 96 12.8 96-32 0-25.6-6.4-38.4-38.4-38.4H832c96-76.8 166.4-179.2 185.6-313.6zM76.8 512c0-153.6 115.2-345.6 224-364.8v153.6c0 32 6.4 38.4 38.4 38.4s38.4-6.4 38.4-38.4V64c0-32-6.4-38.4-38.4-38.4H102.4C70.4 25.6 64 32 64 64s0 38.4 38.4 38.4h102.4c-230.4 185.6-243.2 467.2-128 659.2 108.8 185.6 326.4 256 460.8 236.8-6.4-25.6-6.4-44.8-12.8-70.4-275.2 6.4-448-217.6-448-416z"/></svg>
-                  <span>{{ resetTask?.processing ? '重置中...' : '全部重置' }}</span>
+                  <svg v-if="!store.resetTask?.processing" class="btn-reset-icon" viewBox="0 0 1024 1024" width="16" height="16"><path d="M1017.6 595.2c19.2-134.4-6.4-256-89.6-364.8C832 89.6 588.8-19.2 480 25.6c6.4 25.6 6.4 44.8 12.8 70.4 262.4 0 428.8 185.6 448 371.2 19.2 179.2-89.6 371.2-249.6 428.8v-179.2c0-25.6-12.8-38.4-32-38.4-38.4 0-51.2 12.8-38.4 57.6 12.8 70.4 6.4 140.8 0 211.2 0 38.4 19.2 32 64 32h160c83.2 0 96 12.8 96-32 0-25.6-6.4-38.4-38.4-38.4H832c96-76.8 166.4-179.2 185.6-313.6zM76.8 512c0-153.6 115.2-345.6 224-364.8v153.6c0 32 6.4 38.4 38.4 38.4s38.4-6.4 38.4-38.4V64c0-32-6.4-38.4-38.4-38.4H102.4C70.4 25.6 64 32 64 64s0 38.4 38.4 38.4h102.4c-230.4 185.6-243.2 467.2-128 659.2 108.8 185.6 326.4 256 460.8 236.8-6.4-25.6-6.4-44.8-12.8-70.4-275.2 6.4-448-217.6-448-416z"/></svg>
+                  <svg v-else class="btn-reset-icon spinning" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  <span>{{ store.resetTask?.processing ? (store.resetTask?.backgrounded ? `重置中 ${store.resetTask.current}/${store.resetTask.total}` : '重置中...') : '全部重置' }}</span>
                 </button>
               </div>
             </div>
@@ -78,9 +80,9 @@
               </Transition>
             </div>
             <div class="sidebar-scan-sub">
-              <template v-if="sidebarScanContext === 'reset' && resetTask">
-                正在为 <b>{{ resetTask.currentName || '...' }}</b> 编排日程
-                <span class="sidebar-scan-count">({{ resetTask.current }}/{{ resetTask.total }})</span>
+              <template v-if="sidebarScanContext === 'reset' && store.resetTask">
+                正在为 <b>{{ store.resetTask.currentName || '...' }}</b> 编排日程
+                <span class="sidebar-scan-count">({{ store.resetTask.current }}/{{ store.resetTask.total }})</span>
               </template>
               <template v-else-if="sidebarScanContext === 'single'">
                 正在为 <b>{{ detailChar?.display_name || '...' }}</b> 重新编排日程
@@ -245,14 +247,14 @@
     <!-- ═══ 重置世界线进度弹窗 ═══ -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="resetTask" class="reset-overlay">
+        <div v-if="store.resetTask && !store.resetTask.backgrounded" class="reset-overlay">
           <div class="reset-dialog reset-progress-dialog" @click.stop>
             <div class="reset-dialog-header">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" :stroke="resetTask.phase === 'complete' ? '#52c41a' : 'var(--accent)'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" :stroke="store.resetTask.phase === 'complete' ? '#52c41a' : 'var(--accent)'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="1,4 1,10 7,10" />
                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
-              <span>{{ resetTask.phase === 'complete' ? '重置完成' : resetTask.phase === 'cancelled' ? '已取消' : '重置世界线中...' }}</span>
+              <span>{{ store.resetTask.phase === 'complete' ? '重置完成' : store.resetTask.phase === 'cancelled' ? '已取消' : '重置世界线中...' }}</span>
             </div>
 
             <!-- 进度条 -->
@@ -261,27 +263,27 @@
                 <div
                   class="reset-progress-fill"
                   :style="{ width: resetProgressPct + '%' }"
-                  :class="{ done: resetTask.phase === 'complete', cancelled: resetTask.phase === 'cancelled' }"
+                  :class="{ done: store.resetTask.phase === 'complete', cancelled: store.resetTask.phase === 'cancelled' }"
                 ></div>
               </div>
-              <span class="reset-progress-text">{{ resetTask.current }} / {{ resetTask.total }}</span>
+              <span class="reset-progress-text">{{ store.resetTask.current }} / {{ store.resetTask.total }}</span>
             </div>
 
             <!-- 当前任务 -->
-            <div class="reset-current-task" v-if="resetTask.phase === 'running'">
+            <div class="reset-current-task" v-if="store.resetTask.phase === 'running'">
               <div class="loader-ring-sm"></div>
-              <span>正在生成 <b>{{ resetTask.currentName }}</b> 的日程...</span>
+              <span>正在生成 <b>{{ store.resetTask.currentName }}</b> 的日程...</span>
             </div>
-            <div class="reset-current-task done" v-else-if="resetTask.phase === 'complete'">
-              <span>✅ 全部 {{ resetTask.total }} 个角色日程已更新</span>
+            <div class="reset-current-task done" v-else-if="store.resetTask.phase === 'complete'">
+              <span>✅ 全部 {{ store.resetTask.total }} 个角色日程已更新</span>
             </div>
-            <div class="reset-current-task cancelled" v-else-if="resetTask.phase === 'cancelled'">
-              <span>⚠️ 已取消，完成了 {{ resetTask.current }} / {{ resetTask.total }} 个角色</span>
+            <div class="reset-current-task cancelled" v-else-if="store.resetTask.phase === 'cancelled'">
+              <span>⚠️ 已取消，完成了 {{ store.resetTask.current }} / {{ store.resetTask.total }} 个角色</span>
             </div>
 
             <!-- 错误列表 -->
-            <div v-if="resetTask.errors.length > 0" class="reset-errors">
-              <div v-for="(e, i) in resetTask.errors" :key="i" class="reset-error-item">
+            <div v-if="store.resetTask.errors.length > 0" class="reset-errors">
+              <div v-for="(e, i) in store.resetTask.errors" :key="i" class="reset-error-item">
                 <span class="reset-error-name">{{ e.name }}</span>
                 <span class="reset-error-msg">{{ e.error }}</span>
               </div>
@@ -289,7 +291,7 @@
 
             <!-- 操作按钮 -->
             <div class="reset-dialog-actions">
-              <template v-if="resetTask.phase === 'running'">
+              <template v-if="store.resetTask.phase === 'running'">
                 <button class="reset-btn-cancel" @click="cancelReset">取消重置</button>
                 <button class="reset-btn-bg" @click="dismissResetProgress">后台静默生成</button>
               </template>
@@ -424,28 +426,19 @@ const lightboxDescription = computed(() => {
 })
 
 // ── 重置世界线 ──
-interface ResetTask {
-  phase: 'running' | 'complete' | 'cancelled'
-  current: number
-  total: number
-  currentName: string
-  errors: { name: string; error: string }[]
-  processing: boolean
-}
-
 const showResetConfirm = ref(false)
-const resetTask = ref<ResetTask | null>(null)
 const resetProgressPct = computed(() => {
-  if (!resetTask.value || resetTask.value.total === 0) return 0
-  return Math.round((resetTask.value.current / resetTask.value.total) * 100)
+  const rt = store.resetTask
+  if (!rt || rt.total === 0) return 0
+  return Math.round((rt.current / rt.total) * 100)
 })
 
-// ── 侧边栏：扫描态控制 ──
+// ── 侧边栏：扫描态控制（全部重置时不弹扫描面板，仅单角色再生/初始加载时显示）──
 const sidebarScanActive = computed(() =>
-  store.loading || detailRegenerating.value || (resetTask.value?.phase === 'running')
+  store.loading || detailRegenerating.value
 )
 const sidebarScanContext = computed(() => {
-  if (resetTask.value?.phase === 'running') return 'reset'
+  if (store.resetTask?.phase === 'running') return 'reset'
   if (detailRegenerating.value) return 'single'
   return 'load'
 })
@@ -454,12 +447,12 @@ const sidebarScanContext = computed(() => {
 const _pulseProgress = ref(0)
 let _pulseTimer: ReturnType<typeof setInterval> | null = null
 const sidebarScanProgress = computed(() => {
-  if (resetTask.value?.phase === 'running') return resetProgressPct.value
+  if (store.resetTask?.phase === 'running') return resetProgressPct.value
   return _pulseProgress.value
 })
 
 watch(sidebarScanActive, (active) => {
-  if (active && resetTask.value?.phase !== 'running') {
+  if (active && store.resetTask?.phase !== 'running') {
     _pulseProgress.value = 0
     _pulseTimer = setInterval(() => {
       _pulseProgress.value = (_pulseProgress.value + 1) % 96
@@ -617,9 +610,26 @@ const peekFilmStyle = computed(() => {
 })
 
 // ── 生命周期 ──
-onMounted(() => {
+onMounted(async () => {
   store.fetchOverview()
   settingsStore.loadComfyConfig()
+
+  // 页面刷新恢复：查询后端是否有正在进行的重置任务
+  try {
+    const status = await api.getResetStatus()
+    if (status.active) {
+      store.startResetTask(status.total)
+      // 用后端返回的当前进度更新
+      if (store.resetTask) {
+        store.resetTask.current = status.current
+        store.resetTask.total = status.total
+        store.resetTask.currentName = status.currentName || ''
+        // 刷新恢复后默认显示进度弹窗（非后台）
+        store.resetTask.backgrounded = false
+      }
+    }
+  } catch { /* 查询失败不阻塞 */ }
+
   try {
     onEvent('schedule_peek_ready', (d: any) => {
       if (d.prompt) peekPrompt.value = d.prompt
@@ -635,33 +645,8 @@ onMounted(() => {
       }
     })
   } catch { /* */ }
-
-  _resetUnlisten = onEvent('schedule_reset_progress', (data: any) => {
-    if (!resetTask.value) return
-
-    if (data.phase === 'running') {
-      resetTask.value.phase = 'running'
-      resetTask.value.current = data.current || 0
-      resetTask.value.total = data.total || resetTask.value.total
-      resetTask.value.currentName = data.character_name || ''
-      resetTask.value.processing = true
-      if (data.status === 'error' && data.character_name) {
-        resetTask.value.errors.push({ name: data.character_name, error: data.error || '未知错误' })
-      }
-    } else if (data.phase === 'complete' || data.phase === 'cancelled') {
-      resetTask.value.phase = data.phase
-      resetTask.value.current = data.current || resetTask.value.current
-      resetTask.value.processing = false
-      // 静默刷新概览（不触发 loading，避免 card-grid 闪烁）
-      store.fetchOverview(true)
-    } else if (data.phase === 'error') {
-      resetTask.value.phase = 'cancelled'
-      resetTask.value.processing = false
-    }
-  })
 })
 onUnmounted(() => {
-  if (_resetUnlisten) _resetUnlisten()
   if (_phraseTimer) { clearInterval(_phraseTimer); _phraseTimer = null }
   stopSidebarTips()
   if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = null }
@@ -798,29 +783,31 @@ async function regenerateAll() {
   }
 }
 
-let _resetUnlisten: (() => void) | null = null
+function handleResetClick() {
+  // 如果后台有正在进行的重置任务，点击重新打开进度弹窗
+  if (store.resetTask?.backgrounded) {
+    store.showResetTask()
+  } else {
+    showResetConfirm.value = true
+  }
+}
 
 async function confirmResetAll() {
   showResetConfirm.value = false
-  resetTask.value = {
-    phase: 'running',
-    current: 0,
-    total: 0,
-    currentName: '',
-    errors: [],
-    processing: true,
-  }
+  store.startResetTask(0)
 
   try {
     const result = await api.regenerateAllSchedules()
-    resetTask.value.total = result.total || 0
+    if (store.resetTask) {
+      store.resetTask.total = result.total || 0
+    }
   } catch (err: any) {
     if (err.message?.includes('busy') || err.message?.includes('正在进行中')) {
       alert('重置世界线正在进行中，请等待当前任务完成')
     } else {
       alert('启动重置失败: ' + (err.message || '未知错误'))
     }
-    resetTask.value = null
+    store.finishResetTask()
   }
 }
 
@@ -834,13 +821,12 @@ async function cancelReset() {
 }
 
 function dismissResetProgress() {
-  // 后台静默生成：关闭弹窗但不取消任务
-  // 重置完成后会自动刷新概览
-  resetTask.value = null
+  // 后台静默生成：关闭弹窗但不取消任务，保留在 store 中持续更新
+  store.backgroundResetTask()
 }
 
 function finishReset() {
-  resetTask.value = null
+  store.finishResetTask()
   // 静默刷新，不触发 loading 闪烁
   store.fetchOverview(true)
 }
@@ -914,6 +900,11 @@ function finishReset() {
   50%      { background-position: 100% 50%; }
 }
 .btn-reset:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-reset.is-resetting {
+  border-color: rgba(224, 123, 108, 0.35);
+  color: var(--accent);
+}
+.btn-reset .spinning { animation: spin 1.2s linear infinite; }
 
 
 /* ── Card Grid ── */

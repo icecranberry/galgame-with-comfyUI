@@ -32,15 +32,20 @@
         <span class="nav-label">奇遇</span>
       </div>
 
-      <router-link to="/schedule" class="nav-item" :class="{ active: $route.path.startsWith('/schedule') }" title="日程">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
+      <div class="nav-item" :class="{ active: $route.path.startsWith('/schedule') }" title="日程" @click="handleScheduleClick">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span v-if="scheduleStore.resetTask?.backgrounded" class="nav-reset-dot" title="日程重置中">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="nav-reset-spin"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </span>
+        </div>
         <span class="nav-label">日程</span>
-      </router-link>
+      </div>
 
       <router-link to="/gallery" class="nav-item" :class="{ active: $route.path.startsWith('/gallery') }" title="相册">
         <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
@@ -77,6 +82,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
+import { useScheduleStore } from '../stores/schedule.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 
 const router = useRouter()
@@ -84,6 +90,7 @@ const route = useRoute()
 const moments = useMomentsStore()
 const events = useEventsStore()
 const proactive = useProactiveStore()
+const scheduleStore = useScheduleStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {
@@ -98,6 +105,15 @@ function handleEventsClick() {
     events.requestScrollToTop()
   } else {
     router.push('/events')
+  }
+}
+
+function handleScheduleClick() {
+  // 如果已在日程页且后台有重置任务，重新打开进度弹窗
+  if (route.path.startsWith('/schedule') && scheduleStore.resetTask?.backgrounded) {
+    scheduleStore.showResetTask()
+  } else {
+    router.push('/schedule')
   }
 }
 
@@ -206,6 +222,27 @@ onUnmounted(() => {
   80%  { transform: scale(0.92); }
   100% { transform: scale(1); opacity: 1; }
 }
+
+/* 日程重置后台指示器 */
+.nav-reset-dot {
+  position: absolute;
+  top: -4px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(224, 123, 108, 0.15);
+  border: 1.5px solid var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  animation: jelly-pop 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.35);
+}
+.nav-reset-spin {
+  animation: nav-reset-rotate 1.2s linear infinite;
+}
+@keyframes nav-reset-rotate { to { transform: rotate(360deg); } }
 
 /* 移动端隐藏 NavBar */
 @media (max-width: 767px) {

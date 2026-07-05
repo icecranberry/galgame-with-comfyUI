@@ -606,6 +606,25 @@ export const useChatStore = defineStore('chat', () => {
         });
       }
 
+      // 配图气泡（如果主动消息带有图片）
+      if (data.images?.length) {
+        // 避免与 rawToMessages 加载时重复：检查最后一个气泡是否已经是同一批图片的 image_gen
+        const lastMsg = messages.value[messages.value.length - 1];
+        const alreadyHas = lastMsg?.type === 'image_gen' && lastMsg.images?.length === data.images.length
+          && lastMsg.images.every((img, i) => img.url === data.images[i]);
+        if (!alreadyHas) {
+          messages.value.push({
+            id: uid(),
+            role: 'assistant',
+            type: 'image_gen',
+            genId: `proactive_${data.raw_id || data.msg_id}_${Date.now()}`,
+            genStatus: 'done',
+            images: data.images.map(url => ({ url, base64: null })),
+            created_at: data.created_at,
+          });
+        }
+      }
+
       // 奇遇分享卡片气泡（如果有）
       if (data.card_msg_id) {
         messages.value.push({
