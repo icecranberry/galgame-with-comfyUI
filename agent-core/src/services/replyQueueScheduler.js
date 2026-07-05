@@ -13,6 +13,7 @@ import { getDb, getSystemRules, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { getCurrentActivity, syncSleepingState } from './scheduleManager.js';
+import { getTimeLight } from './timeLight.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from './scheduleGenerator.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import {
@@ -291,24 +292,71 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
     msgs.push({ role: 'system', content: relParts.join('\n') });
   }
 
+  // ── 计算延迟时长 ──
+  const now = new Date();
+  const firstCreatedAt = entry.created_at
+    ? new Date(entry.created_at.replace(' ', 'T'))
+    : null;
+  const delayMinutes = firstCreatedAt
+    ? Math.round((now.getTime() - firstCreatedAt.getTime()) / 60000)
+    : null;
+  let delayStr = '';
+  if (delayMinutes !== null) {
+    if (delayMinutes < 1) delayStr = '不到1分钟前';
+    else if (delayMinutes < 60) delayStr = `${delayMinutes} 分钟前`;
+    else if (delayMinutes < 1440) delayStr = `${Math.round(delayMinutes / 60)} 小时前`;
+    else delayStr = `${Math.round(delayMinutes / 1440)} 天前`;
+  }
+
   // 延迟说明（核心）
   const activity = entry.current_activity || '某件事';
   let delayNote;
   if (isSleepWakeup) {
-    delayNote = `[系统说明] 你刚才在睡觉。user 在你睡觉期间给你发了 ${allPending.length} 条消息。`;
-    if (allPending.length === 1) {
-      delayNote += `\n你刚睡醒，迷迷糊糊看到手机上有 user 的消息。请用刚睡醒的语气自然地回复 user。`;
+    // 计算距预定起床时间过了多久（处理系统重启后延迟处理的情况）
+    const scheduledAt = entry.scheduled_reply_at
+      ? new Date(entry.scheduled_reply_at.replace(' ', 'T'))
+      : null;
+    const minutesSinceWakeup = scheduledAt
+      ? (now.getTime() - scheduledAt.getTime()) / 60000
+      : 0;
+
+    if (minutesSinceWakeup > 30) {
+      // 已经起床很久了（如系统在起床时间之后才启动），读取当前日程上下文
+      let scheduleLine = '';
+      const currentActivity = getCurrentActivity(characterId);
+      if (currentActivity?.activity && currentActivity.activity !== '自由时间') {
+        const { timeStr, timeDesc } = getTimeLight();
+        scheduleLine = `\n【当前日程】${timeStr}（${timeDesc}），你正在【${currentActivity.location}】${currentActivity.activity}。`;
+        if (currentActivity.description) scheduleLine += ` ${currentActivity.description}`;
+      }
+
+      delayNote = `[系统说明] 你之前睡觉时 user 在${delayStr}给你发了 ${allPending.length} 条消息。现在你已经起床了。${scheduleLine}`;
+      if (allPending.length === 1) {
+        delayNote += `\n你拿起手机看到 user 的消息。请用自然的语气回复 user——你现在已经完全清醒了，不必用刚睡醒的语气。`;
+      } else {
+        delayNote += `\n以下是 user 发的这些消息：`;
+        for (let i = 0; i < allPending.length; i++) {
+          delayNote += `\n[${i + 1}] ${allPending[i].user_content}`;
+        }
+        delayNote += `\n请用自然的语气综合回应，就像翻看聊天记录一样。不必用刚睡醒的语气——你已经完全清醒了。可以简单提一下刚才在做什么。`;
+      }
     } else {
-      delayNote += `\n你刚睡醒，迷迷糊糊看到手机上有 user 发的 ${allPending.length} 条消息。依次读完后，用刚睡醒的语气自然地综合回应。不要逐条引用，就像刚睡醒看手机一样一次性聊回去。`;
+      // 刚起床（30 分钟内），用迷糊语气
+      delayNote = `[系统说明] 你刚才在睡觉。user 在你睡觉时（${delayStr}）给你发了 ${allPending.length} 条消息。`;
+      if (allPending.length === 1) {
+        delayNote += `\n你刚睡醒，迷迷糊糊看到手机上有 user 的消息。请用刚睡醒的语气自然地回复 user。`;
+      } else {
+        delayNote += `\n你刚睡醒，迷迷糊糊看到手机上有 user 发的 ${allPending.length} 条消息。依次读完后，用刚睡醒的语气自然地综合回应。不要逐条引用，就像刚睡醒看手机一样一次性聊回去。`;
+      }
     }
   } else if (allPending.length === 1) {
-    delayNote = `[系统说明] user 刚才给你发消息时，你正在${activity}。现在你有空了。请回复 user。在回复中自然地解释一下刚才在做什么。`;
+    delayNote = `[系统说明] user 在${delayStr}给你发了消息，当时你正在${activity}。因为忙所以没能马上回复。请回复 user，自然地解释一下刚才在做什么（忙了多久、为什么忙）。`;
   } else {
-    delayNote = `[系统说明] user 在你${activity}期间给你发了 ${allPending.length} 条消息。以下是这些消息：`;
+    delayNote = `[系统说明] user 从${delayStr}开始陆续给你发了 ${allPending.length} 条消息，当时你正在${activity}。因为忙所以没能马上回复。以下是这些消息：`;
     for (let i = 0; i < allPending.length; i++) {
       delayNote += `\n[${i + 1}] ${allPending[i].user_content}`;
     }
-    delayNote += `\n现在你有空了。请像刚看到手机一样，自然地把这几条消息综合回应一下。不要逐条引用格式回复，一次性自然地聊回去，并简单解释一下刚才在${activity}。`;
+    delayNote += `\n请像刚看到手机一样，自然地把这几条消息综合回应一下。不要逐条引用格式回复，一次性自然地聊回去，并简单解释一下刚才在${activity}、忙了多久。`;
   }
 
   msgs.push({ role: 'system', content: delayNote });

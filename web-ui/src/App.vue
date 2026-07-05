@@ -163,6 +163,11 @@ onMounted(async () => {
     const { onEvent } = await import('./stores/unifiedStream.js')
     onEvent('delayed_reply', (data) => {
       chat.handleDelayedReply(data)
+      // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
+      if (data.character_id !== chat.activeCharId) {
+        playProactiveSound()
+        proactive.addProactive(data)
+      }
     })
   } catch { /* unifiedStream may not be ready */ }
 

@@ -26,7 +26,8 @@ import {
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { getLightHint } from './timeLight.js';
+import { getLightHint, getTimeLight } from './timeLight.js';
+import { getCurrentActivity } from './scheduleManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -325,12 +326,29 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
 
   // msgs[0] — 舞台：破限词 + 世界观
 
-  // msgs[1] — 身份：角色人格 + 摘要 + 当前状态 + 关系 + 用户画像
+  // 日程上下文：角色当前在做什么（参照瞄一眼格式）
+  const scheduleCtx = (() => {
+    try {
+      const activity = getCurrentActivity(character.id);
+      if (!activity || !activity.activity || activity.activity === '自由时间') return '';
+      const { timeStr, timeDesc } = getTimeLight();
+      if (activity.replyDelay > 0) {
+        // 刚忙完：角色刚刚在忙一件事，现在才腾出手来看消息
+        return `\n【当前日程】${timeStr}（${timeDesc}）。你刚刚正在【${activity.location}】${activity.activity}${activity.description ? '，' + activity.description : ''}，现在才腾出手来看消息。`;
+      }
+      // 空闲中：自然地提及当前在做的事
+      let ctx = `\n【当前日程】${timeStr}（${timeDesc}），你正在【${activity.location}】${activity.activity}。`;
+      if (activity.description) ctx += ` ${activity.description}`;
+      return ctx;
+    } catch (_) { return ''; }
+  })();
+
+  // msgs[1] — 身份：角色人格 + 摘要 + 当前状态 + 日程 + 关系 + 用户画像
   const msgIdentity = `接下来，你将扮演以下角色，主动向 "${userName}" 发起一段对话。
 
 【角色人格】
 ${character.base_prompt}
-${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
+${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${scheduleCtx}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
 
   // 上一轮对话（最近 1 轮 user+assistant），过滤掉生图 prompt JSON（可能在开头/中间/末尾）
   const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
@@ -486,6 +504,19 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     const nameBlock = charName.replace(/你/g, '角色');
     const appearanceBlock = appearance.replace(/你/g, '角色');
 
+    // 日程上下文（参照瞄一眼格式：activity + location + time + light + sleep note）
+    const scheduleImgCtx = (() => {
+      try {
+        const activity = getCurrentActivity(character.id);
+        if (!activity || !activity.activity || activity.activity === "自由时间") return "";
+        const { timeStr, timeDesc, lightNote } = getTimeLight();
+        const isSleeping = activity.replyDelay === -1;
+        const sleepNote = isSleeping
+          ? "\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。"
+          : "";
+        return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + "现在是" + timeStr + "（" + timeDesc + "），光线参考：" + lightNote + "（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。" + sleepNote;
+      } catch (_) { return ""; }
+    })();
     const lightHint = getLightHint();
     const imagePromptText = await chatSync(
       [
@@ -499,8 +530,9 @@ ${nameBlock}
 
 【角色外观】
 ${appearanceBlock}
-
-【本次聊天的动机】
+${scheduleImgCtx ? `
+${scheduleImgCtx}
+` : ''}【本次聊天的动机】
 ${motiveName}
 
 【角色的开场白】

@@ -20,8 +20,8 @@ import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
-import { getReplyDelay, formatScheduleContext } from '../services/scheduleManager.js';
-import { getTimeTag, getLightHint } from '../services/timeLight.js';
+import { getReplyDelay, formatScheduleContext, getCurrentActivity } from '../services/scheduleManager.js';
+import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
 
 const router = Router();
 
@@ -1381,10 +1381,22 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
     { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
-    // ── 当前时间 + 光线：帮助画面贴合时段氛围 ──
-    { role: 'system', content: getLightHint() },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
+    // ── 当前时间 + 光线 + 日程上下文（参照瞄一眼格式，合并为一条消息）──
+    { role: 'system', content: (() => {
+      try {
+        const lightHint = getLightHint();
+        const activity = getCurrentActivity(character.id);
+        if (!activity || !activity.activity || activity.activity === '自由时间') return lightHint;
+        const { timeStr, timeDesc, lightNote } = getTimeLight();
+        const isSleeping = activity.replyDelay === -1;
+        const sleepNote = isSleeping
+          ? '\n\n【极其重要】你正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。'
+          : '';
+        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeStr + '（' + timeDesc + '），光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。照片里的你要体现正在做的日程。' + sleepNote;
+      } catch (_) { return getLightHint(); }
+    })() },
     // ── prompt 格式说明单独一条，不混杂指令 ──
     ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──

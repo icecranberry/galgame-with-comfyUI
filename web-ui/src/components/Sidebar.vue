@@ -16,6 +16,7 @@
         </div>
         <div class="char-info">
           <div class="char-name">{{ c.display_name }}</div>
+          <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
           <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
         </div>
         <div class="char-meta">
@@ -94,12 +95,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { useMomentsStore } from '../stores/moments.js'
 import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
+import { useScheduleStore } from '../stores/schedule.js'
 
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
@@ -114,8 +116,20 @@ const chat = useChatStore()
 const moments = useMomentsStore()
 const events = useEventsStore()
 const proactive = useProactiveStore()
+const schedule = useScheduleStore()
 const showMoreMenu = ref(false)
 const charListEl = ref(null)
+
+// 从 schedule store 构建 id → current_activity 映射
+const scheduleMap = computed(() => {
+  const map = {}
+  for (const sc of schedule.characters) {
+    if (sc.current_activity && sc.current_activity !== '未设置日程') {
+      map[sc.id] = sc.current_activity
+    }
+  }
+  return map
+})
 
 // 主动消息到达 → 角色冒泡到顶部 → 列表自动滚到顶部
 watch(() => chat.sidebarScrollSignal, () => {
@@ -126,6 +140,7 @@ watch(() => chat.sidebarScrollSignal, () => {
 
 onMounted(() => {
   // SSE 连接由 NavBar 统一管理（NavBar 在移动端 CSS 隐藏但组件仍挂载，onMounted 正常触发）
+  schedule.fetchOverview(true) // silent: 不触发 loading 闪烁
 })
 
 onUnmounted(() => {})
@@ -250,6 +265,12 @@ function formatTime(iso) {
 
 .char-info { flex: 1; min-width: 0; }
 .char-name { font-size: 14px; font-weight: 600; color: var(--text-bright); margin-bottom: 3px; }
+.char-schedule {
+  font-size: 11px; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 3px;
+  opacity: 0.8;
+}
 .char-preview {
   font-size: 12px; color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

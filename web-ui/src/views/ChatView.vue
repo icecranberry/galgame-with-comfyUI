@@ -11,17 +11,20 @@
           </svg>
         </button>
         <div class="chat-header-center">
-          <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
-          <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity" class="header-affinity">
-            <svg class="affinity-heart-icon" viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M512.042667 193.237333a255.914667 255.914667 0 0 1 351.658666 9.728 256 256 0 0 1 10.069334 351.402667l-361.813334 362.325333-361.728-362.325333a256 256 0 0 1 361.813334-361.130667z"/></svg>{{ Math.round(chat.realtimeAffinity.affinity) }}
-            <span class="affinity-delta-wrap">
-              <Transition name="roll">
-                <span :key="chat.affinityKey" class="header-affinity-delta" :class="chat.realtimeAffinity.affinityDelta >= 0 ? 'delta-up' : 'delta-down'">
-                  {{ chat.realtimeAffinity.affinityDelta >= 0 ? '+' : '' }}{{ Number(chat.realtimeAffinity.affinityDelta).toFixed(1) }}
-                </span>
-              </Transition>
+          <div class="chat-header-title-row">
+            <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
+            <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity" class="header-affinity">
+              <svg class="affinity-heart-icon" viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M512.042667 193.237333a255.914667 255.914667 0 0 1 351.658666 9.728 256 256 0 0 1 10.069334 351.402667l-361.813334 362.325333-361.728-362.325333a256 256 0 0 1 361.813334-361.130667z"/></svg>{{ Math.round(chat.realtimeAffinity.affinity) }}
+              <span class="affinity-delta-wrap">
+                <Transition name="roll">
+                  <span :key="chat.affinityKey" class="header-affinity-delta" :class="chat.realtimeAffinity.affinityDelta >= 0 ? 'delta-up' : 'delta-down'">
+                    {{ chat.realtimeAffinity.affinityDelta >= 0 ? '+' : '' }}{{ Number(chat.realtimeAffinity.affinityDelta).toFixed(1) }}
+                  </span>
+                </Transition>
+              </span>
             </span>
-          </span>
+          </div>
+          <div class="chat-header-schedule" v-if="currentScheduleText">{{ currentScheduleText }}</div>
         </div>
         <div class="chat-header-right">
           <span class="affinity-reason-wrap">
@@ -594,6 +597,7 @@ import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useEventsStore } from '../stores/events.js'
+import { useScheduleStore } from '../stores/schedule.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -647,6 +651,15 @@ function onDetailEventUpdated(update) {
   }
 }
 const settings = useSettingsStore()
+const scheduleStore = useScheduleStore()
+
+// 当前角色的日程活动文本
+const currentScheduleText = computed(() => {
+  if (!chat.activeCharId) return ''
+  const sc = scheduleStore.characters.find(c => c.id === chat.activeCharId)
+  if (!sc || !sc.current_activity || sc.current_activity === '未设置日程') return ''
+  return sc.current_activity
+})
 const forceImageGen = computed(() => settings.forceImageGen)
 const realtimeAffinityEnabled = computed({
   get: () => settings.realtimeAffinityDisplay,
@@ -1441,6 +1454,7 @@ function teardownResizeObserver() {
 
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar(), settings.loadComfyConfig()])
+  scheduleStore.fetchOverview(true) // silent: 获取日程概览用于 header 显示
   const targetId = route.params.id ? parseInt(route.params.id) : (chat.characters.length > 0 ? chat.characters[0].id : null)
   if (targetId && targetId !== chat.activeCharId) {
     await chat.selectChar(targetId)
@@ -1480,6 +1494,8 @@ watch(() => chat.activeCharId, (id, oldId) => {
     pendingCharSwitch = true
     userScrolledUp = false
     if (msgList.value) msgList.value.style.visibility = 'hidden'
+    // 静默刷新日程，确保 header 显示最新状态
+    scheduleStore.fetchOverview(true)
   }
 })
 
@@ -2835,7 +2851,13 @@ function renderContent(text) {
 .affinity-realtime-label { font-size: 12px; color: #888; font-weight: 500; }
 
 /* ── Header 实时好感度 ── */
-.chat-header-center { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.chat-header-center { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; }
+.chat-header-title-row { display: flex; align-items: center; gap: 8px; }
+.chat-header-schedule {
+  font-size: 11px; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  opacity: 0.75; margin-top: 2px;
+}
 .header-affinity { font-size: 14px; font-weight: 600; color: #e0245e; white-space: nowrap;display: flex;align-items: center; }
 .affinity-heart-icon { vertical-align: middle; margin-right: 1px; flex-shrink: 0; }
 .header-affinity-delta { font-size: 11px; font-weight: 500; margin-left: 4px; }
@@ -2857,6 +2879,7 @@ function renderContent(text) {
 @keyframes roll-out { from { transform: translateY(0);    opacity: 1; } to { transform: translateY(-120%); opacity: 0; } }
 @keyframes roll-in  { from { transform: translateY(120%); opacity: 0; } to { transform: translateY(0);     opacity: 1; } }
 @media (max-width: 768px) {
+  .chat-header-schedule { font-size: 10px; max-width: 50vw; }
   .header-affinity { font-size: 12px; }
   .header-affinity-delta { font-size: 10px; }
   .chat-header-right { max-width: 40vw; }

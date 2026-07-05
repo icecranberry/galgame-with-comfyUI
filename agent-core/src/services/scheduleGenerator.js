@@ -85,11 +85,7 @@ export async function generateSchedule(character) {
 3. 睡眠时间要贴合角色的"人设气質"——比如病娇角色可能作息极度不规律，军武角色可能作息严格
 
 ## replyDelay 规则（非常重要）
-- **约 90% 的活动 replyDelay=0（秒回消息，不耽误聊天）**
-- 对于需要专注的活动，replyDelay=5~10（分钟后回复），由你根据活动性质分配：
-  - 轻度分心（吃饭、散步、洗漱、化妆）→ 0 分钟
-  - 中度忙碌（开会、上课、接待客人、社交聚餐、排练、运动）→ 0 分钟
-  - 高度专注（考试、重要演出、手术、赶稿死线、重要会议、潜入任务）→ 5~10 分钟
+- 正常活动都是 replyDelay=0（即时回复）
 - 只有睡觉 replyDelay=-1
 
 ## 输出格式
@@ -104,7 +100,7 @@ export async function generateSchedule(character) {
   "endTime": "HH:MM",
   "activity": "简短活动名（含上下文，如「早课——高等数学」）",
   "location": "地点",
-  "replyDelay": 数字（0 / 10~60 / -1）,
+  "replyDelay": 数字（0 / -1）,
   "tags": ["标签1", "标签2"],
   "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }

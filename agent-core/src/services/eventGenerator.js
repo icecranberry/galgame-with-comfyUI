@@ -21,7 +21,7 @@ import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { getTimeLightTag } from './timeLight.js';
+import { getTimeLightTag, getTimeLight } from './timeLight.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -344,7 +344,7 @@ ${worldIntegrationBlock}
 - 从具体的感官细节开始——声音、画面、身体感受
 - 展现身体反应而非命名情绪："手心渗出细密的汗"而非"ta感到紧张"
 - 结尾卡在角色必须做出选择的那个点——不是在写结局，是在打开一个需要立刻面对的瞬间
-- **最重要的是**：这个事件必须像是为${displayName}量身定做的。换个角色就不成立——不是情节不成立，是反应方式、关注点、内心活动不成立。`;
+- **最重要的是**：这个事件必须像是为${displayName}量身定做的。换个角色就不成立——不是情节不成立，是反应方式、关注点、内心活动不成立。${scheduleSystemBlock}`;
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
   let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
@@ -386,17 +386,20 @@ ${multiPerson.otherPersona}`;
 
   // 日程注入：获取角色当前活动，让事件起点与当前活动自然衔接
   let scheduleContextLine = '';
+  let scheduleSystemBlock = '';
   try {
     if (config.features.schedule !== false) {
       const currentActivity = getCurrentActivity(character.id);
       if (currentActivity && currentActivity.activity !== '自由时间') {
         scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
+        const { timeStr, timeDesc, lightNote } = getTimeLight(now);
+        const descPart = currentActivity.description ? `——${currentActivity.description}` : '';
+        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。现在是${timeStr}（${timeDesc}），光线参考：${lightNote}`;
       }
     }
   } catch { /* schedule not available */ }
 
   const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}
-${contextBlock}
 ${timeTag}${multiPersonNote}
 ${scheduleContextLine}
 **关键理解**：上面的事件方向只指了一个大概的方向——它不是剧本，里面没有任何具体的场景设定。你的任务是把方向翻译成${displayName}今天此刻实际遇到的事情。

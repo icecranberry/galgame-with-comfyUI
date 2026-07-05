@@ -5,6 +5,8 @@
       <div
         class="moment-avatar"
         :style="avatarStyle"
+        @click="goToChat"
+        title="查看角色对话"
       ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
       <div class="moment-header-info">
         <span class="moment-name">{{ post.display_name }}</span>
@@ -146,6 +148,7 @@
 
 <script setup>
 import { ref, computed, nextTick, inject, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { userNickname } from '../userConfig.js'
 
@@ -155,6 +158,7 @@ const props = defineProps({
 
 const emit = defineEmits(['preview', 'share'])
 
+const router = useRouter()
 const moments = useMomentsStore()
 const isMobile = inject('isMobile')
 const confirmFn = inject('confirm')
@@ -169,6 +173,12 @@ watch(showMenu, (v) => {
 })
 function closeMenuOnOutside(e) {
   showMenu.value = false
+}
+
+function goToChat() {
+  if (props.post.character_id) {
+    router.push('/chat/' + props.post.character_id)
+  }
 }
 const comments = ref([...(props.post._comments || [])])
 const commentsLoading = ref(false)
@@ -319,6 +329,12 @@ function formatTime(iso) {
   width: 50px; height: 50px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.moment-avatar:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
 }
 .moment-header-info {
   display: flex; flex-direction: column; gap: 2px;
