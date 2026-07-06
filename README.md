@@ -124,8 +124,8 @@ git clone https://github.com/icecranberry/galgame-with-comfyUI.git
 cd galgame-with-comfyUI
 
 # 2. 安装依赖
-cd agent-core && npm install && cd ..
-cd web-ui && npm install && cd ..
+corepack enable
+pnpm install
 
 # 3. 配置环境变量
 cp agent-core/.env.example agent-core/.env
@@ -140,10 +140,10 @@ python download_model.py
 cd ..
 
 # 5. 一键启动开发服务
-npm run dev
+pnpm run dev
 
 # 停止服务
-npm run stop
+pnpm run stop
 ```
 
 启动后访问 `http://localhost:5173`

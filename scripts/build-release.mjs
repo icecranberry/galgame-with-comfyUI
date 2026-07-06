@@ -5,7 +5,7 @@
  *
  * 流程:
  *   1. 下载便携 Node.js / Python / Git
- *   2. 预装 npm 依赖 + vite build
+ *   2. 预装 pnpm 依赖 + vite build
  *   3. 预装 pip 依赖 + 下载嵌入模型
  *   4. PyInstaller 打包启动器
  *   5. shallow clone 保留 .git → 覆盖预构建产物 → 压缩 zip
@@ -337,10 +337,23 @@ async function main() {
   // ═══════════════════════════════════════════
   console.log(`  ${C.bold}[4/8]${C.reset} 预装 Node.js 依赖...`);
 
-  const npmCmd = resolve(NODE_DIR, "npm.cmd");
+  const corepackCmd = resolve(NODE_DIR, "corepack.cmd");
+  const pnpmCmd = resolve(NODE_DIR, "pnpm.cmd");
 
-  // agent-core — 始终重新安装，确保原生模块（better-sqlite3等）编译目标与捆绑 Node.js 一致
-  log("agent-core npm install (~3-8min)...");
+  log("启用 pnpm via Corepack...");
+  if (!existsSync(pnpmCmd)) {
+    if (!existsSync(corepackCmd)) {
+      fail("未找到 corepack.cmd，无法启用 pnpm");
+      process.exit(1);
+    }
+    let r = await exec(corepackCmd, ["enable"], { cwd: ROOT, print: true });
+    if (!r.ok) { fail("corepack enable 失败!"); process.exit(1); }
+    r = await exec(corepackCmd, ["prepare", "pnpm@10.32.1", "--activate"], { cwd: ROOT, print: true });
+    if (!r.ok) { fail("corepack prepare pnpm 失败!"); process.exit(1); }
+  }
+
+  // workspace — 始终重新安装，确保原生模块（better-sqlite3等）编译目标与捆绑 Node.js 一致
+  log("pnpm install (~3-8min)...");
   // 先清理旧原生模块编译产物，防止残留 incompatible 的 .node 文件
   if (existsSync(resolve(AGENT_CORE, "node_modules"))) {
     const { rmSync } = await import("node:fs");
@@ -350,27 +363,19 @@ async function main() {
     try { if (existsSync(sqlite3Build)) rmSync(sqlite3Build, { recursive: true, force: true }); } catch {}
     log("  已清理原生模块编译缓存");
   }
-  {
-    const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: AGENT_CORE, print: true });
-    if (!r.ok) { fail("agent-core npm install 失败!"); process.exit(1); }
-    ok("agent-core 完成");
-  }
-
-  // web-ui — 同样始终安装，确保依赖与 package.json 一致
-  log("web-ui npm install (~2-5min)...");
   if (existsSync(resolve(WEB_UI, "node_modules"))) {
     const { rmSync } = await import("node:fs");
     try { rmSync(resolve(WEB_UI, "node_modules", ".cache"), { recursive: true, force: true }); } catch {}
   }
   {
-    const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: WEB_UI, print: true });
-    if (!r.ok) { fail("web-ui npm install 失败!"); process.exit(1); }
-    ok("web-ui 完成");
+    const r = await exec(pnpmCmd, ["install", "--frozen-lockfile"], { cwd: ROOT, print: true });
+    if (!r.ok) { fail("pnpm install 失败!"); process.exit(1); }
+    ok("Node.js 依赖完成");
   }
 
   // vite build —— 始终重新构建，确保 public/ 与源码一致
   log("vite build (~1min)...");
-  const buildResult = await exec(npmCmd, ["run", "build"], { cwd: WEB_UI, print: true });
+  const buildResult = await exec(pnpmCmd, ["--dir", WEB_UI, "run", "build"], { cwd: ROOT, print: true });
   if (!buildResult.ok) {
     fail("vite build 失败!");
     process.exit(1);

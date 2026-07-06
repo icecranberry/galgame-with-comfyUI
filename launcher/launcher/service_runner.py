@@ -35,13 +35,23 @@ def find_bundled_python(project_path: str) -> str | None:
     return None
 
 
-def find_bundled_npm(project_path: str) -> str | None:
-    """查找捆绑 Node.js 附带的 npm.cmd。"""
+def find_bundled_pnpm(project_path: str) -> str | None:
+    """查找捆绑 Node.js 目录中的 pnpm.cmd。"""
     node_exe = find_bundled_node(project_path)
     if node_exe:
-        npm_cmd = os.path.join(os.path.dirname(node_exe), "npm.cmd")
-        if os.path.isfile(npm_cmd):
-            return npm_cmd
+        pnpm_cmd = os.path.join(os.path.dirname(node_exe), "pnpm.cmd")
+        if os.path.isfile(pnpm_cmd):
+            return pnpm_cmd
+    return None
+
+
+def find_bundled_corepack(project_path: str) -> str | None:
+    """查找捆绑 Node.js 附带的 corepack.cmd。"""
+    node_exe = find_bundled_node(project_path)
+    if node_exe:
+        corepack_cmd = os.path.join(os.path.dirname(node_exe), "corepack.cmd")
+        if os.path.isfile(corepack_cmd):
+            return corepack_cmd
     return None
 
 

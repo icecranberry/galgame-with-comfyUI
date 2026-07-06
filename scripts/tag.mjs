@@ -1,9 +1,9 @@
 /**
  * tag.mjs — 自动打 tag 并推送
  *
- *   $ npm run tag                        # 自动 patch+1，用 commit 注释
- *   $ npm run tag -- v2.0.0              # 手动指定版本
- *   $ npm run tag -- v2.0.0 "重大更新"   # 手动指定版本+注释
+ *   $ pnpm run tag                        # 自动 patch+1，用 commit 注释
+ *   $ pnpm run tag -- v2.0.0              # 手动指定版本
+ *   $ pnpm run tag -- v2.0.0 "重大更新"   # 手动指定版本+注释
  *
  * 流程:
  *   1. vite build 打包前端
@@ -58,7 +58,7 @@ for (const arg of args) {
 
 console.log();
 log("vite build...");
-run("cd web-ui && npm run build");
+run("pnpm --dir web-ui run build");
 ok("vite build 完成");
 
 // ── 2. 获取最新 tag ──
@@ -120,5 +120,5 @@ console.log(`  ${C.green}━━━━━━━━━━━━━━━━━━�
 console.log(`  ${C.green}  ${newVersion}  已推送到 origin${C.reset}`);
 console.log(`  ${C.green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
 console.log();
-console.log(`  下一步: ${C.yellow}npm run release${C.reset}`);
+console.log(`  下一步: ${C.yellow}pnpm run release${C.reset}`);
 console.log();

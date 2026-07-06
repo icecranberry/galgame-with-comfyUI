@@ -31,7 +31,7 @@ _INSTALL_PATHS: dict[str, list[str]] = {
 
 # 每个工具对应的二进制文件名
 _TOOL_BINARIES: dict[str, list[str]] = {
-    "node": ["npm.cmd", "node.exe"],
+    "node": ["corepack.cmd", "node.exe"],
     "python": ["python.exe"],
     "git": ["git.exe"],
     "winget": ["winget.exe"],
