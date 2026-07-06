@@ -218,7 +218,7 @@ export async function generateEvent(character, options = {}) {
     eventType = {
       key: 'custom',
       name: '自定义事件',
-      durationMin: 5,
+      durationMin: 60,
       urgency: 1,
       desc: options.customPrompt,
     };
