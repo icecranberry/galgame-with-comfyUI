@@ -1,7 +1,7 @@
 /**
  * dev.mjs — 一键启动全部开发服务
  *
- *   $ npm run dev   (在项目根目录)
+ *   $ pnpm run dev   (在项目根目录)
  *
  * 启动流程:
  *   1. 清理端口占用 (3099, 8765, 5173)
@@ -288,16 +288,16 @@ async function main() {
       port: 3099,
       url: "http://localhost:3099/api/health",
       cwd: resolve(ROOT, "agent-core"),
-      getCmd() { return "npx"; },
-      args: ["nodemon", "--watch", "src", "--watch", "app.js", "-e", "js,json", "app.js"],
+      getCmd() { return "pnpm"; },
+      args: ["exec", "nodemon", "--watch", "src", "--watch", "app.js", "-e", "js,json", "app.js"],
     },
     {
       name: "web-ui",
       port: 5173,
       url: "http://localhost:5173",
       cwd: resolve(ROOT, "web-ui"),
-      getCmd() { return "npx"; },
-      args: ["vite", "--host"],
+      getCmd() { return "pnpm"; },
+      args: ["exec", "vite", "--host"],
     },
   ];
 

@@ -6,15 +6,17 @@ const isWindows = os.platform() === 'win32';
 
 let stopped = 0;
 
-// ── 第一步：找到 npm run dev / dev.mjs 父进程，整棵树杀 ──
+// ── 第一步：找到 pnpm run dev / dev.mjs 父进程，整棵树杀 ──
 console.log('查找 dev 父进程…');
 try {
   if (isWindows) {
-    // wmic 查命令行包含 "npm" 和 "dev" 的 node 进程
-    const wmicOut = execSync(
+    // wmic 查命令行包含 pnpm/npm run dev 的 node 进程；保留 npm 兼容以便清理旧进程
+    const wmicOut = [
+      `wmic process where "name='node.exe' and commandline like '%pnpm%run dev%'" get ProcessId`,
       `wmic process where "name='node.exe' and commandline like '%npm%run dev%'" get ProcessId`,
-      { encoding: 'utf8' }
-    );
+    ].map(cmd => {
+      try { return execSync(cmd, { encoding: 'utf8' }); } catch { return ''; }
+    }).join('\n');
     const pids = wmicOut
       .split('\n')
       .map(l => l.trim())
@@ -23,20 +25,20 @@ try {
     for (const pid of pids) {
       try {
         execSync(`taskkill /PID ${pid} /T /F`, { encoding: 'utf8', stdio: 'pipe' });
-        console.log(`  已树杀 npm run dev (PID ${pid})`);
+        console.log(`  已树杀 pnpm/npm run dev (PID ${pid})`);
         stopped++;
       } catch (e) {
         console.log(`  跳过 PID ${pid}: ${e.stderr || e.message}`);
       }
     }
   } else {
-    // Unix: pgrep 找 npm run dev
+    // Unix: pgrep 找 pnpm/npm run dev
     try {
-      const pgrepOut = execSync('pgrep -f "npm run dev"', { encoding: 'utf8' });
+      const pgrepOut = execSync('pgrep -f "pnpm run dev|npm run dev"', { encoding: 'utf8' });
       const pids = pgrepOut.trim().split('\n').filter(Boolean);
       for (const pid of pids) {
         execSync(`kill -9 ${pid}`, { stdio: 'pipe' });
-        console.log(`  已杀掉 npm run dev (PID ${pid})`);
+        console.log(`  已杀掉 pnpm/npm run dev (PID ${pid})`);
         stopped++;
       }
     } catch {
@@ -46,7 +48,7 @@ try {
 } catch (e) {
   // wmic 没匹配到任何进程时也会抛异常
 }
-if (stopped === 0) console.log('  未找到运行中的 npm run dev');
+if (stopped === 0) console.log('  未找到运行中的 pnpm run dev');
 
 // ── 第二步：兜底，按端口清理残留 ──
 for (const port of PORTS) {
@@ -84,5 +86,5 @@ for (const port of PORTS) {
 if (stopped === 0) {
   console.log('\n所有服务均未运行，无需清理。');
 } else {
-  console.log(`\n已停止 ${stopped} 个进程。可运行 npm run dev 重新启动。`);
+  console.log(`\n已停止 ${stopped} 个进程。可运行 pnpm run dev 重新启动。`);
 }

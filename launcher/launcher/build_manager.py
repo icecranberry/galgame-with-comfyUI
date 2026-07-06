@@ -5,7 +5,7 @@
   检查到预构建产物后直接跳过全部步骤，零构建启动。
 
 开发环境（无捆绑运行时）:
-  回退到系统工具: npm install ×2 → vite build → venv → pip install → model download。
+  回退到系统工具: pnpm install → vite build → venv → pip install → model download。
 """
 import os
 import shutil
@@ -13,7 +13,7 @@ import sys
 from PySide6.QtCore import QObject, Signal, QProcess, QTimer
 from PySide6.QtWidgets import QApplication
 from .env_manager import EnvManager
-from .service_runner import find_bundled_node, find_bundled_python, find_bundled_npm
+from .service_runner import find_bundled_node, find_bundled_python, find_bundled_pnpm, find_bundled_corepack
 
 
 class BuildManager(QObject):
@@ -172,19 +172,30 @@ class BuildManager(QObject):
         vector_svc = os.path.join(project, "vector-service")
         web_ui = os.path.join(project, "web-ui")
 
-        # ── 解析 Node.js / npm ──
+        # ── 解析 Node.js / pnpm ──
         bundled_node = find_bundled_node(project)
-        bundled_npm = find_bundled_npm(project)
-        if bundled_npm:
-            node_cmd = bundled_npm
+        bundled_pnpm = find_bundled_pnpm(project)
+        bundled_corepack = find_bundled_corepack(project)
+        if bundled_pnpm:
+            node_cmd = bundled_pnpm
+            node_args_prefix = []
+        elif bundled_corepack:
+            node_cmd = bundled_corepack
+            node_args_prefix = ["pnpm"]
         elif bundled_node:
-            node_cmd = os.path.join(os.path.dirname(bundled_node), "npm.cmd")
+            node_cmd = os.path.join(os.path.dirname(bundled_node), "corepack.cmd")
+            node_args_prefix = ["pnpm"]
         else:
             node_dir = self._tool_path_overrides.get("node")
-            if node_dir and os.path.isfile(os.path.join(node_dir, "npm.cmd")):
-                node_cmd = os.path.join(node_dir, "npm.cmd")
+            if node_dir and os.path.isfile(os.path.join(node_dir, "pnpm.cmd")):
+                node_cmd = os.path.join(node_dir, "pnpm.cmd")
+                node_args_prefix = []
+            elif node_dir and os.path.isfile(os.path.join(node_dir, "corepack.cmd")):
+                node_cmd = os.path.join(node_dir, "corepack.cmd")
+                node_args_prefix = ["pnpm"]
             else:
-                node_cmd = "npm.cmd"
+                node_cmd = "corepack.cmd"
+                node_args_prefix = ["pnpm"]
 
         # ── 解析 Python ──
         bundled_python = find_bundled_python(project)
@@ -203,10 +214,10 @@ class BuildManager(QObject):
         venv_pip = os.path.join(vector_svc, "venv", "Scripts", "pip.exe")
         venv_python = os.path.join(vector_svc, "venv", "Scripts", "python.exe")
 
-        # npm install 参数
-        _npm_args = ["install", "--no-audit", "--no-fund"]
+        # pnpm install 参数
+        _pnpm_args = node_args_prefix + ["install", "--frozen-lockfile"]
         if self.use_mirror:
-            _npm_args.append("--registry=https://registry.npmmirror.com")
+            _pnpm_args.append("--registry=https://registry.npmmirror.com")
 
         # pip install 参数
         # embeddable Python 没有系统 SSL 证书，使用镜像源时必须加 --trusted-host
@@ -219,26 +230,16 @@ class BuildManager(QObject):
 
         steps: list[dict] = []
 
-        # ── 步骤 1: agent-core npm install ──
+        # ── 步骤 1: workspace pnpm install ──
         steps.append({
-            "name": "安装 agent-core 依赖（首次约 3-8 分钟）",
-            "cwd": agent_core,
+            "name": "安装 Node.js 依赖（首次约 3-8 分钟）",
+            "cwd": project,
             "cmd": node_cmd,
-            "args": _npm_args,
+            "args": _pnpm_args,
             "timeout": 600000,
             "skip_if": lambda: os.path.isdir(
                 os.path.join(agent_core, "node_modules", "express")
-            ),
-        })
-
-        # ── 步骤 2: web-ui npm install ──
-        steps.append({
-            "name": "安装 web-ui 依赖（首次约 2-5 分钟）",
-            "cwd": web_ui,
-            "cmd": node_cmd,
-            "args": _npm_args,
-            "timeout": 600000,
-            "skip_if": lambda: os.path.isdir(
+            ) and os.path.isdir(
                 os.path.join(web_ui, "node_modules")
             ),
         })
@@ -246,9 +247,9 @@ class BuildManager(QObject):
         # ── 步骤 3: vite build ──
         steps.append({
             "name": "构建前端 (vite build)",
-            "cwd": web_ui,
+            "cwd": project,
             "cmd": node_cmd,
-            "args": ["run", "build"],
+            "args": node_args_prefix + ["--dir", web_ui, "run", "build"],
             "timeout": 120000,
             "skip_if": lambda: os.path.isfile(
                 os.path.join(agent_core, "public", "index.html")
@@ -492,7 +493,7 @@ def _resolve_executable(cmd: str, cwd: str) -> str | None:
 
     - 如果是绝对路径 → 直接返回（存在性由调用方检查）
     - 如果是相对路径 → 拼接 cwd 后返回
-    - 如果是裸命令名（如 "npm.cmd"）→ 搜索 PATH + 常见安装位置
+    - 如果是裸命令名（如 "pnpm.cmd"）→ 搜索 PATH + 常见安装位置
 
     返回 None 表示完全找不到（系统未安装该工具）。
     返回路径不代表文件一定存在（调用方需 os.path.isfile 验证）。
@@ -514,13 +515,19 @@ def _resolve_executable(cmd: str, cwd: str) -> str | None:
     # PATH 中找不到 → 搜索常见安装位置
     if sys.platform == "win32":
         name_lower = cmd.lower()
-        if name_lower in ("npm.cmd", "npm", "node.exe", "node"):
+        if name_lower in ("pnpm.cmd", "pnpm", "corepack.cmd", "corepack", "node.exe", "node"):
             for base in [
                 os.path.expandvars(r"%ProgramFiles%\nodejs"),
                 os.path.expandvars(r"%ProgramFiles(x86)%\nodejs"),
                 os.path.expandvars(r"%LOCALAPPDATA%\Programs\nodejs"),
             ]:
-                candidate = os.path.join(base, "npm.cmd" if "npm" in name_lower else "node.exe")
+                if "pnpm" in name_lower:
+                    binary = "pnpm.cmd"
+                elif "corepack" in name_lower:
+                    binary = "corepack.cmd"
+                else:
+                    binary = "node.exe"
+                candidate = os.path.join(base, binary)
                 if os.path.isfile(candidate):
                     return candidate
         elif name_lower in ("python.exe", "python", "python3"):

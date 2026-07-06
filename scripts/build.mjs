@@ -1,7 +1,7 @@
 /**
  * build.mjs — 构建前端 + 打包启动器 EXE
  *
- *   $ node scripts/build.mjs   (或 npm run build)
+ *   $ node scripts/build.mjs   (或 pnpm run build)
  *
  * 流程:
  *   1. vite build (web-ui → agent-core/public)
@@ -97,8 +97,8 @@ async function main() {
   // ═══════════════════════════════════════════
   console.log(`  ${C.bold}[1/3]${C.reset} 前端构建 (vite build)...`);
 
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  const buildResult = await exec(npmCmd, ["run", "build"], { cwd: WEB_UI, print: true });
+  const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  const buildResult = await exec(pnpmCmd, ["run", "build"], { cwd: WEB_UI, print: true });
   if (!buildResult.ok) {
     fail("vite build 失败!");
     process.exit(1);
