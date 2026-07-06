@@ -495,7 +495,7 @@ class GitManager(QObject):
                 if self._proxy_retried:
                     hint = " — 直连失败，请检查网络或开启代理"
                 else:
-                    hint = " — 无法访问 github.com，请检查网络连接"
+                    hint = " — 无法访问 github.com，请检查网络或配置代理/VPN"
             crash_hint = ""
             if exit_status != QProcess.NormalExit:
                 crash_hint = f" (进程异常终止)"

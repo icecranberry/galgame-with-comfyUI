@@ -17,6 +17,7 @@ import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
+import { getCoreDialogueRules } from './dialogueRules.js';
 
 const BASE_INTERVAL_MIN = 30; // 基准间隔 30 分钟（freq=1）
 const HALF_TIME_CHECK_MS = 3 * 60 * 1000; // 半程通知独立检查间隔 3 分钟
@@ -191,13 +192,17 @@ async function checkHalfTimeNotifications() {
           ? `语气要紧急、需要帮助——像在求助或呼救，推动${userName}尽快回应`
           : `语气轻松自然——像在分享正在发生的事，随手告诉${userName}`;
 
+        const eventRules = getCoreDialogueRules({ userName });
         const greetingPrompt = `你正在经历一场奇遇事件，现在时间已经过半，但${userName}还没有注意到这件事。
 
 奇遇标题：${event.title}
 当前场景：${event.description}
 ${urgencyNote}
 
-请以${event.display_name}的身份，用第一人称给${userName}发一条主动消息（15-50字），根据事情的紧急程度自然表达——紧急事件呼救求援，日常事件随手分享。`;
+请以${event.display_name}的身份，用第一人称给${userName}发一条主动消息（15-50字），根据事情的紧急程度自然表达——紧急事件呼救求援，日常事件随手分享。
+
+格式要求：
+${eventRules}`;
 
         // 构建用户信息 system 消息
         const userInfoParts = [`对方是${userName}`];

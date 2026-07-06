@@ -576,9 +576,7 @@ const rulesSaved = ref({})
 const rulesExpanded = ref(false)
 const ruleLabels = {
   system_rules: '系统规则',
-  dialogue_rules: '聊天规则',
   image_prompt: '图像生成指令',
-  judge_prompt: '智能配图判断提示词',
 }
 
 const presets = [

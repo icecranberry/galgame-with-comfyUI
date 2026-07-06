@@ -87,15 +87,21 @@ router.put('/llm', (req, res) => {
   res.json({ ok: true, ...getLlmConfig() });
 });
 
+// 已内置到代码中的规则键，不再通过 API 暴露给前端编辑
+const INTERNAL_RULE_KEYS = ['dialogue_rules', 'judge_prompt'];
+
 // GET /api/config/rules — 获取全部全局规则
 router.get('/rules', (req, res) => {
   const db = getDb();
   const rules = db.prepare(`SELECT id, rule_key, rule_content, is_active, created_at, updated_at FROM global_rules ORDER BY id`).all();
-  res.json({ rules });
+  res.json({ rules: rules.filter(r => !INTERNAL_RULE_KEYS.includes(r.rule_key)) });
 });
 
 // PUT /api/config/rules/:key — 更新或新建单条全局规则
 router.put('/rules/:key', (req, res) => {
+  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+    return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
+  }
   const db = getDb();
   const { rule_content, is_active } = req.body;
   const existing = db.prepare(`SELECT id FROM global_rules WHERE rule_key = ?`).get(req.params.key);

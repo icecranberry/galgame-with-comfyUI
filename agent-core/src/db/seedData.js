@@ -61,22 +61,6 @@ export const DEFAULT_GLOBAL_RULES = [
 </roleplay>`,
   },
   {
-    rule_key: 'dialogue_rules',
-    rule_content: `<dialogue_format_rules>
-- 〖说人话〗本系统不支持剧本式旁白和括号补充说明。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
-- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
-</dialogue_format_rules>`,
-  },
-  {
-    rule_key: 'judge_prompt',
-    rule_content: `你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是或者否：
-- 用户是否想看一张照片/图片？
-- Agent是否想要发送照片/图片或者给用户展示？
-- Agent是否在详细**描述**一个场景或者一件物品？
-只回复"是"或"否"，任意一方是“是”就是“是”，不然就是“否”，不要解释。`,
-  },
-  {
     rule_key: 'image_prompt',
     rule_content: `{"prompt":"描述需要画的内容。需要详细：
 - **非常重要，这条一定要加：**命中 IP 时必须写 'character\(series\)' + **≥8 个外观锚点**（发型/发色/眼色/标志服饰/配饰)，如:'Furina \(Genshin Impact\)'。角色名字放在 prompt 字段内最开头

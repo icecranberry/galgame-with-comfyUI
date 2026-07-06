@@ -22,6 +22,7 @@ import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
+import { getCoreDialogueRules } from '../services/dialogueRules.js';
 
 const router = Router();
 
@@ -601,10 +602,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     // msgs[3] — 格式：对话规则（DB + 硬编码） + 生图意图
     // ═══════════════════════════════════════════
     const formatParts = [];
-    const dialogueRule = getGlobalRule('dialogue_rules');
-    if (dialogueRule?.rule_content && dialogueRule.is_active) {
-      formatParts.push(dialogueRule.rule_content);
-    }
+    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
+    formatParts.push(`<dialogue_format_rules>
+${coreRules}
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
+- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
+</dialogue_format_rules>`);
     const sentenceHint = (() => {
       if (explicitImageIntent) return '1句话以内';
       if (affinity == null || affinity < 60) return '1句话以内';
@@ -1264,10 +1267,11 @@ async function judgeImageNeed(conversationId) {
   if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 600)}`);
   const ctx = parts.join('\n');
 
-  const db2 = getDb();
-  const judgeRule = db2.prepare(`SELECT rule_content FROM global_rules WHERE rule_key = 'judge_prompt' AND is_active = 1`).get();
-  const judgeSystemPrompt = judgeRule?.rule_content ||
-    '你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断任意一方是否需要发送/索取一张图片。只回复"是"或"否"，不要解释。';
+  const judgeSystemPrompt = `你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是或者否：
+- 用户是否想看一张照片/图片？
+- Agent是否想要发送照片/图片或者给用户展示？
+- Agent是否在详细**描述**一个场景或者一件物品？
+只回复"是"或"否"，任意一方是"是"就是"是"，不然就是"否"，不要解释。`;
 
   try {
     const result = await chatSync([
@@ -1389,12 +1393,12 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         const lightHint = getLightHint();
         const activity = getCurrentActivity(character.id);
         if (!activity || !activity.activity || activity.activity === '自由时间') return lightHint;
-        const { timeStr, timeDesc, lightNote } = getTimeLight();
+        const { timeDesc, lightNote } = getTimeLight();
         const isSleeping = activity.replyDelay === -1;
         const sleepNote = isSleeping
           ? '\n\n【极其重要】你正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。'
           : '';
-        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeStr + '（' + timeDesc + '），光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。照片里的你要体现正在做的日程。' + sleepNote;
+        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeDesc + '，光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。照片里的你要体现正在做的日程。' + sleepNote;
       } catch (_) { return getLightHint(); }
     })() },
     // ── prompt 格式说明单独一条，不混杂指令 ──

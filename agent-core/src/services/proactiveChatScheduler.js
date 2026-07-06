@@ -28,6 +28,7 @@ import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getTimeLight } from './timeLight.js';
 import { getCurrentActivity } from './scheduleManager.js';
+import { getCoreDialogueRules } from './dialogueRules.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -377,6 +378,7 @@ ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotio
   }
 
   // msgs[2] — 任务：时间 + 上一轮对话 + 衔接指令 + 动机 + 要求
+  const proactiveRules = getCoreDialogueRules({ userName });
   const msgTask = `【上次聊天时间】
 ${timeDesc}
 
@@ -387,11 +389,10 @@ ${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三'
 ${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}${bridgingHint}
 你这次主动发消息的动机是「${motiveLabel}」：${motiveDesc}。请在承接上文之后，把动机自然地融入开场白中——不要生硬地说"我因为xxx来找你"，让动机成为你说话的潜台词。
 要求：
-- 仅输出对话文字，不要包含任何动作描写、括号、格式标记
+${proactiveRules}
 - 自然口语化，像是突然想到就发了一条消息
 - 符合角色性格、当前情绪、好感度状态，以及本次聊天的动机
-- 绝对不要以\"你说\"、\"你说……如果\"、\"你知道吗\"这类句式开场——直接说你自己的话，不需要用提问/假设来起头
-- 本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。`;
+- 绝对不要以\"你说\"、\"你说……如果\"、\"你知道吗\"这类句式开场——直接说你自己的话，不需要用提问/假设来起头`;
 
   try {
     const msgs = [];
@@ -509,12 +510,12 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
       try {
         const activity = getCurrentActivity(character.id);
         if (!activity || !activity.activity || activity.activity === "自由时间") return "";
-        const { timeStr, timeDesc, lightNote } = getTimeLight();
+        const { timeDesc, lightNote } = getTimeLight();
         const isSleeping = activity.replyDelay === -1;
         const sleepNote = isSleeping
           ? "\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。"
           : "";
-        return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + "现在是" + timeStr + "（" + timeDesc + "），光线参考：" + lightNote + "（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。" + sleepNote;
+        return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + "现在是" + timeDesc + "，光线参考：" + lightNote + "（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。" + sleepNote;
       } catch (_) { return ""; }
     })();
     const lightHint = getLightHint();

@@ -11,6 +11,7 @@ import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from 
 import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
+import { getCoreDialogueRules } from '../services/dialogueRules.js';
 
 const router = Router();
 
@@ -743,6 +744,7 @@ async function generateCharacterReply(post, historyComments) {
   }
 
   // 朋友圈上下文 + 回复规则（user 特征和评论区交互放到最后的 user 消息中）
+  const momentRules = getCoreDialogueRules({ userName, identityAnchor: false });
   const contextTask = `你在朋友圈发了：
 ---
 ${post.content}
@@ -751,9 +753,8 @@ ${post.content}
 请以角色的身份自然回复评论区的最新评论。规则：
 - 15~50 字，自然口语化，像熟人聊天一样随意
 - **不要反复叫对方名字**——熟人之间连续对话不需要每句都称呼，只在特别强调时用
-- 保持角色人设和语气
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
-- 本系统不支持剧本式旁白。所有情绪、动作以及场景反馈必须完全通过对话文字、角色本身的台词内容或标准叙事文本直接传达。`;
+${momentRules}`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];

@@ -73,6 +73,6 @@ export function getTimeLightTag(now = new Date()) {
  * @returns {string}
  */
 export function getLightHint(now = new Date()) {
-  const { timeStr, timeDesc, lightNote } = getTimeLight(now);
-  return `【当前时间与光线】现在是${timeStr}（${timeDesc}）。参考光线氛围：${lightNote}（注意：此为室外自然光参考，室内场景以人造光源为主；阴晴雨雪天气也会显著影响实际光线，不必严格遵守）。`;
+  const { timeDesc, lightNote } = getTimeLight(now);
+  return `【当前时间与光线】现在是${timeDesc}。参考光线氛围：${lightNote}（注意：此为室外自然光参考，室内场景以人造光源为主；阴晴雨雪天气也会显著影响实际光线，不必严格遵守）。`;
 }

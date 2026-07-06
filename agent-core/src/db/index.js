@@ -924,7 +924,8 @@ export function repairFtsIndex() {
 /**
  * 获取所有激活的全局规则内容（拼接为一个字符串）
  */
-// judge_prompt / image_prompt / image_intent 是元规则（非 LLM system prompt 内容），不拼入
+// image_intent / image_prompt 是元规则（非 LLM system prompt 内容），不拼入
+// judge_prompt 已内置到代码中（chat.js），此处保留向后兼容（旧 DB 可能仍有该行）
 // world_setting 单独追加到末尾，也不在批量拼接中
 const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
 
