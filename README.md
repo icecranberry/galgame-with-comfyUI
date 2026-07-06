@@ -111,7 +111,7 @@ Node.js + Express (主控 :3099)
 ### 前置条件
 
 - **Node.js** ≥ 18
-- **Python** ≥ 3.10（含 venv）
+- **uv**（用于管理 Python 环境）
 - **Git**
 - **ComfyUI** 已安装并运行在 `:8188`
 - **DeepSeek API Key**
@@ -131,13 +131,9 @@ cd web-ui && npm install && cd ..
 cp agent-core/.env.example agent-core/.env
 # 编辑 agent-core/.env，填入 DeepSeek API Key 和 ComfyUI 地址
 
-# 4. 初始化向量模型
-cd vector-service
-python -m venv venv
-venv/Scripts/pip install -r requirements.txt  # Windows
-# source venv/bin/pip install -r requirements.txt  # macOS/Linux
-python download_model.py
-cd ..
+# 4. 初始化 Python 环境与向量模型
+uv sync --project vector-service
+uv run --project vector-service python download_model.py
 
 # 5. 一键启动开发服务
 npm run dev

@@ -5,7 +5,7 @@
   检查到预构建产物后直接跳过全部步骤，零构建启动。
 
 开发环境（无捆绑运行时）:
-  回退到系统工具: npm install ×2 → vite build → venv → pip install → model download。
+  回退到系统工具: npm install ×2 → vite build → uv sync → model download。
 """
 import os
 import shutil
@@ -54,7 +54,7 @@ class BuildManager(QObject):
           - agent-core/node_modules/express + public/index.html
 
         开发环境路径（无捆绑运行时）:
-          - agent-core/node_modules/express + public/index.html + vector-service/venv
+          - agent-core/node_modules/express + public/index.html + .venv
         """
         bundled_node = find_bundled_node(self._project_path)
         bundled_python = find_bundled_python(self._project_path)
@@ -70,9 +70,9 @@ class BuildManager(QObject):
             # 预构建 release: 有捆绑运行时 + 预装产物即视为已构建
             return node_modules_ok and public_ok
 
-        # 开发环境: 还需要 venv
-        venv_ok = os.path.isdir(
-            os.path.join(self._project_path, "vector-service", "venv")
+        # 开发环境: 还需要 uv workspace 管理的根 .venv
+        venv_ok = _check_python_deps(
+            os.path.join(self._project_path, ".venv", "Scripts", "python.exe")
         )
         return node_modules_ok and public_ok and venv_ok
 
@@ -199,23 +199,19 @@ class BuildManager(QObject):
             else:
                 python_cmd = "python.exe"
 
-        # venv 内的 pip/python（仅在无捆绑 Python 时使用）
-        venv_pip = os.path.join(vector_svc, "venv", "Scripts", "pip.exe")
-        venv_python = os.path.join(vector_svc, "venv", "Scripts", "python.exe")
+        # uv 与 workspace 虚拟环境（仅源码开发构建时使用）
+        uv_cmd = self._resolve_tool_path("uv", "uv.exe", "uv.exe")
+        venv_python = os.path.join(project, ".venv", "Scripts", "python.exe")
 
         # npm install 参数
         _npm_args = ["install", "--no-audit", "--no-fund"]
         if self.use_mirror:
             _npm_args.append("--registry=https://registry.npmmirror.com")
 
-        # pip install 参数
-        # embeddable Python 没有系统 SSL 证书，使用镜像源时必须加 --trusted-host
-        _pip_args = ["-m", "pip", "install", "-r", "requirements.txt"]
+        # uv sync 参数
+        _uv_sync_args = ["sync", "--project", vector_svc, "--frozen", "--link-mode", "copy"]
         if self.use_mirror:
-            _pip_args += [
-                "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-                "--trusted-host", "pypi.tuna.tsinghua.edu.cn",
-            ]
+            _uv_sync_args += ["--default-index", "https://pypi.tuna.tsinghua.edu.cn/simple"]
 
         steps: list[dict] = []
 
@@ -255,37 +251,19 @@ class BuildManager(QObject):
             ),
         })
 
-        # ── 步骤 4-5: Python 环境 ──
+        # ── 步骤 4: Python 环境 ──
         if bundled_python:
-            # 捆绑 Python 环境（预构建 release）：pip install 可选
-            steps.append({
-                "name": "安装 Python 依赖（首次约 1-3 分钟）",
-                "cwd": vector_svc,
-                "cmd": bundled_python,
-                "args": _pip_args,
-                "timeout": 300000,
-                "skip_if": lambda: _check_python_deps(bundled_python),
-            })
+            # 预构建 release 正常会在 is_built() 直接跳过；若强制构建，假定依赖已预装。
+            pass
         else:
-            # 开发环境：需要创建 venv + pip install
+            # 开发环境：uv 会按 uv.lock 自动创建/同步 vector-service/.venv
             steps.append({
-                "name": "创建 Python 虚拟环境",
-                "cwd": vector_svc,
-                "cmd": python_cmd,
-                "args": ["-m", "venv", "venv"],
-                "timeout": 60000,
-                "skip_if": lambda: os.path.isdir(
-                    os.path.join(vector_svc, "venv")
-                ),
-            })
-            steps.append({
-                "name": "安装 Python 依赖（首次约 1-3 分钟）",
-                "cwd": vector_svc,
-                "cmd": venv_pip,
-                "args": ["install", "-r", "requirements.txt"]
-                        + (["-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-                            "--trusted-host", "pypi.tuna.tsinghua.edu.cn"] if self.use_mirror else []),
+                "name": "同步 Python 依赖（uv，首次约 1-3 分钟）",
+                "cwd": project,
+                "cmd": uv_cmd,
+                "args": _uv_sync_args,
                 "timeout": 300000,
+                "skip_if": lambda: _check_python_deps(venv_python),
             })
 
         # ── 步骤: 下载嵌入模型 ──
@@ -492,7 +470,7 @@ def _resolve_executable(cmd: str, cwd: str) -> str | None:
 
     - 如果是绝对路径 → 直接返回（存在性由调用方检查）
     - 如果是相对路径 → 拼接 cwd 后返回
-    - 如果是裸命令名（如 "npm.cmd"）→ 搜索 PATH + 常见安装位置
+    - 如果是裸命令名（如 "npm.cmd" / "uv.exe"）→ 搜索 PATH + 常见安装位置
 
     返回 None 表示完全找不到（系统未安装该工具）。
     返回路径不代表文件一定存在（调用方需 os.path.isfile 验证）。
@@ -521,6 +499,16 @@ def _resolve_executable(cmd: str, cwd: str) -> str | None:
                 os.path.expandvars(r"%LOCALAPPDATA%\Programs\nodejs"),
             ]:
                 candidate = os.path.join(base, "npm.cmd" if "npm" in name_lower else "node.exe")
+                if os.path.isfile(candidate):
+                    return candidate
+        elif name_lower in ("uv.exe", "uv"):
+            for base in [
+                os.path.expandvars(r"%USERPROFILE%\.cargo\bin"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\Scripts"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\Scripts"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps"),
+            ]:
+                candidate = os.path.join(base, "uv.exe")
                 if os.path.isfile(candidate):
                     return candidate
         elif name_lower in ("python.exe", "python", "python3"):

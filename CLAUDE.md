@@ -29,7 +29,7 @@ npm run dev          # 项目根目录
 # 分别启动
 cd agent-core && npm run dev          # Express + nodemon --watch
 cd web-ui && npm run dev              # Vite HMR
-cd vector-service && ./venv/Scripts/python.exe -m uvicorn server:app --host 0.0.0.0 --port 8765
+uv run --project vector-service python -m uvicorn server:app --host 0.0.0.0 --port 8765
 
 # 停止所有开发服务（优雅退出 → 等待 → taskkill）
 npm run stop

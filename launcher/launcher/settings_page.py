@@ -214,7 +214,7 @@ class SettingsPage(QWidget):
         self.toast_check = Switch("启动前提示确认 ComfyUI 已运行")
         layout.addWidget(self.toast_check)
 
-        self.mirror_check = Switch("使用国内镜像源加速依赖下载 (npm+pip)")
+        self.mirror_check = Switch("使用国内镜像源加速依赖下载 (npm+uv)")
         layout.addWidget(self.mirror_check)
 
         # --- 分隔线 ---
