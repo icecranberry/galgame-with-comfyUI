@@ -77,19 +77,24 @@ def _resolve_node(project_path: str) -> str:
 def _resolve_python(project_path: str) -> str:
     """获取 Python 可执行文件路径。
 
-    优先级: 捆绑 Python > venv > 系统 Python 已知路径 > PATH
+    优先级: 捆绑 Python > uv workspace .venv > 旧 venv > 系统 Python 已知路径 > PATH
     """
     # 1. 捆绑 Python（预构建 release）
     bundled = find_bundled_python(project_path)
     if bundled:
         return bundled
 
-    # 2. venv（开发环境或启动器构建的）
+    # 2. uv workspace .venv（开发环境或启动器构建的）
+    uv_venv_py = os.path.join(project_path, ".venv", "Scripts", "python.exe")
+    if os.path.isfile(uv_venv_py):
+        return uv_venv_py
+
+    # 3. 旧 venv（兼容历史本地环境）
     venv_py = os.path.join(project_path, "vector-service", "venv", "Scripts", "python.exe")
     if os.path.isfile(venv_py):
         return venv_py
 
-    # 3. 系统已知安装路径
+    # 4. 系统已知安装路径
     for candidate in [
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\python.exe"),
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\python.exe"),
@@ -99,7 +104,7 @@ def _resolve_python(project_path: str) -> str:
         if os.path.isfile(candidate):
             return candidate
 
-    # 4. 开发环境兜底
+    # 5. 开发环境兜底
     if not getattr(sys, "frozen", False):
         return sys.executable
 

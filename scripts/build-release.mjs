@@ -6,7 +6,7 @@
  * 流程:
  *   1. 下载便携 Node.js / Python / Git
  *   2. 预装 pnpm 依赖 + vite build
- *   3. 预装 pip 依赖 + 下载嵌入模型
+ *   3. 用 uv 预装 Python 依赖 + 下载嵌入模型
  *   4. PyInstaller 打包启动器
  *   5. shallow clone 保留 .git → 覆盖预构建产物 → 压缩 zip
  */
@@ -62,8 +62,9 @@ const MIRRORS = {
   pythonOfficial: `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`,
   git: `https://npmmirror.com/mirrors/git-for-windows/v${GIT_TAG}/PortableGit-${GIT_VER}-64-bit.7z.exe`,
   gitOfficial: `https://github.com/git-for-windows/git/releases/download/v${GIT_TAG}/PortableGit-${GIT_VER}-64-bit.7z.exe`,
-  pipBootstrap: "https://bootstrap.pypa.io/get-pip.py",
 };
+
+const UV_CMD = process.platform === "win32" ? "uv.exe" : "uv";
 
 // ── 终端颜色 ──
 const C = {
@@ -253,7 +254,6 @@ async function main() {
   console.log(`  ${C.bold}[2/8]${C.reset} 准备便携 Python ${PYTHON_VERSION}...`);
 
   const pyZip = resolve(CACHE_DIR, `python-${PYTHON_VERSION}-embed-amd64.zip`);
-  const getPip = resolve(CACHE_DIR, "get-pip.py");
 
   if (!existsSync(resolve(PY_DIR, "python.exe"))) {
     if (!existsSync(pyZip)) {
@@ -271,7 +271,7 @@ async function main() {
     ensureDir(PY_DIR);
     await extractZip(pyZip, PY_DIR);
 
-    // 修改 python3XX._pth 启用 site-packages + pip
+    // 修改 python3XX._pth 启用 site-packages
     const { readdirSync, writeFileSync } = await import("node:fs");
     const pthFiles = readdirSync(PY_DIR).filter(f => f.startsWith("python") && f.endsWith("._pth"));
     if (pthFiles.length > 0) {
@@ -283,14 +283,6 @@ async function main() {
     const sitePkgs = resolve(PY_DIR, "Lib", "site-packages");
     ensureDir(sitePkgs);
 
-    if (!existsSync(getPip)) {
-      log("下载 get-pip.py...");
-      await downloadFile(MIRRORS.pipBootstrap, getPip, 60);
-    }
-
-    log("安装 pip...");
-    const pipResult = await exec(resolve(PY_DIR, "python.exe"), [getPip, "--no-warn-script-location"]);
-    if (!pipResult.ok) { fail("pip 安装失败!"); process.exit(1); }
     ok("Python 就绪");
   } else {
     ok("已有捆绑 Python，跳过");
@@ -388,13 +380,9 @@ async function main() {
   console.log(`  ${C.bold}[5/8]${C.reset} 预装 Python 依赖...`);
 
   const pyExe = resolve(PY_DIR, "python.exe");
-  // pip 通用环境变量：跳过版本检查 + 信任镜像源（embeddable Python 可能缺 SSL 证书）
-  const pipEnv = {
-    PIP_DISABLE_PIP_VERSION_CHECK: "1",
-    PIP_NO_CACHE_DIR: "1",
-  };
-  const pipMirror = "https://pypi.tuna.tsinghua.edu.cn/simple";
-  const pipTrusted = ["--trusted-host", "pypi.tuna.tsinghua.edu.cn"];
+  const uvEnv = { UV_NO_PROGRESS: "1" };
+  const requirementsFile = resolve(CACHE_DIR, "vector-service-requirements.txt");
+  const uvMirror = "https://pypi.tuna.tsinghua.edu.cn/simple";
 
   {
     const check = await exec(pyExe, [
@@ -403,57 +391,47 @@ async function main() {
     if (check.ok) {
       ok("Python 依赖已预装，跳过");
     } else {
-      log("pip install (~1-3min)...");
-
-      // 先确保 pip 本身是最新的
-      log("  升级 pip...");
-      await exec(pyExe, ["-m", "pip", "install", "--upgrade", "pip", ...pipTrusted],
-        { print: true, env: pipEnv });
-
-      // 逐个安装关键包以便定位失败点
-      const pkgs = [
-        "numpy",
-        "fastapi",
-        "uvicorn[standard]",
-        "pydantic",
-        "httpx",
-        "onnxruntime",
-        "huggingface-hub",
-        "transformers",
-        "chromadb",
-        "cloudscraper",
-        "beautifulsoup4",
-        "lxml",
-      ];
-
-      let allOk = true;
-      for (const pkg of pkgs) {
-        log(`  pip install ${pkg}...`);
-        // 先试清华源 + trusted-host
-        let r = await exec(pyExe, [
-          "-m", "pip", "install", pkg,
-          "-i", pipMirror,
-          ...pipTrusted,
-        ], { print: true, env: pipEnv, timeout: 120000 });
-        // 清华源失败则用默认源
-        if (!r.ok) {
-          r = await exec(pyExe, [
-            "-m", "pip", "install", pkg,
-          ], { print: true, env: pipEnv, timeout: 120000 });
-        }
-        if (!r.ok) {
-          fail(`${pkg} 安装失败 (exit: ${r.code})`);
-          log(`  stderr: ${r.stderr.slice(-500)}`);
-          allOk = false;
-          break;
-        }
+      log("uv export vector-service requirements...");
+      const exported = await exec(UV_CMD, [
+        "export",
+        "--locked",
+        "--package", "galgame-vector-service",
+        "--format", "requirements.txt",
+        "--no-hashes",
+        "--no-header",
+        "--output-file", requirementsFile,
+      ], { cwd: ROOT, print: true, env: uvEnv, timeout: 120000 });
+      if (!exported.ok) {
+        fail("uv export 失败，请先执行 uv lock");
+        process.exit(1);
       }
 
-      if (!allOk) {
+      log("uv pip install into bundled Python (~1-3min)...");
+      let installed = await exec(UV_CMD, [
+        "pip", "install",
+        "--python", pyExe,
+        "-r", requirementsFile,
+        "--compile-bytecode",
+        "--link-mode", "copy",
+        "--default-index", uvMirror,
+      ], { print: true, env: uvEnv, timeout: 300000 });
+
+      if (!installed.ok) {
+        warn("镜像源安装失败，尝试默认源...");
+        installed = await exec(UV_CMD, [
+          "pip", "install",
+          "--python", pyExe,
+          "-r", requirementsFile,
+          "--compile-bytecode",
+          "--link-mode", "copy",
+        ], { print: true, env: uvEnv, timeout: 300000 });
+      }
+
+      if (!installed.ok) {
         fail("Python 依赖安装失败!");
         log(`  请检查网络连接或手动执行:`);
-        log(`  cd ${VECTOR_SVC}`);
-        log(`  ${pyExe} -m pip install -r requirements.txt`);
+        log(`  uv export --locked --package galgame-vector-service --format requirements.txt --no-hashes --output-file ${requirementsFile}`);
+        log(`  uv pip install --python ${pyExe} -r ${requirementsFile}`);
         process.exit(1);
       }
       ok("Python 依赖完成");
@@ -487,19 +465,47 @@ async function main() {
   const launcherDir = resolve(ROOT, "launcher");
 
   {
-    // 优先使用捆绑 Python 安装 PyInstaller 依赖（与脚本其他步骤保持一致）
-    const check = await exec(pyExe, ["-m", "pip", "show", "PySide6"]);
+    // 优先使用捆绑 Python 安装 PyInstaller 依赖（构建机需要 uv，打包产物不需要）
+    const check = await exec(pyExe, ["-c", "import PySide6, PyInstaller, psutil"]);
     if (!check.ok) {
       log("安装 PyInstaller 依赖...");
-      const r = await exec(pyExe, ["-m", "pip", "install", "PySide6", "psutil", "pyinstaller",
-        "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-        "--trusted-host", "pypi.tuna.tsinghua.edu.cn"], { print: true, timeout: 300000 });
-      if (!r.ok) {
-        // 捆绑 Python 失败则回退到系统 pip（构建机可能有完整 Python 环境）
-        warn("捆绑 Python 安装失败，尝试系统 pip...");
-        const r2 = await exec("pip", ["install", "PySide6", "psutil", "pyinstaller"], { print: true });
-        if (!r2.ok) { fail("PyInstaller 依赖安装失败!"); process.exit(1); }
+      const launcherRequirementsFile = resolve(CACHE_DIR, "launcher-requirements.txt");
+      const exported = await exec(UV_CMD, [
+        "export",
+        "--locked",
+        "--package", "galgame-launcher",
+        "--group", "build",
+        "--format", "requirements.txt",
+        "--no-hashes",
+        "--no-header",
+        "--output-file", launcherRequirementsFile,
+      ], { cwd: ROOT, print: true, env: { UV_NO_PROGRESS: "1" }, timeout: 120000 });
+      if (!exported.ok) {
+        fail("launcher 依赖导出失败，请先执行 uv lock");
+        process.exit(1);
       }
+
+      let installed = await exec(UV_CMD, [
+        "pip", "install",
+        "--python", pyExe,
+        "-r", launcherRequirementsFile,
+        "--compile-bytecode",
+        "--link-mode", "copy",
+        "--default-index", "https://pypi.tuna.tsinghua.edu.cn/simple",
+      ], { print: true, env: { UV_NO_PROGRESS: "1" }, timeout: 300000 });
+
+      if (!installed.ok) {
+        warn("镜像源安装失败，尝试默认源...");
+        installed = await exec(UV_CMD, [
+          "pip", "install",
+          "--python", pyExe,
+          "-r", launcherRequirementsFile,
+          "--compile-bytecode",
+          "--link-mode", "copy",
+        ], { print: true, env: { UV_NO_PROGRESS: "1" }, timeout: 300000 });
+      }
+
+      if (!installed.ok) { fail("PyInstaller 依赖安装失败!"); process.exit(1); }
     }
   }
 

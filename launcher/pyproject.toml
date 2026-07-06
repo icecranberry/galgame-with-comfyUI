@@ -1,0 +1,13 @@
+[project]
+name = "galgame-launcher"
+version = "1.0.0"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "PySide6>=6.6",
+  "psutil>=5.8",
+]
+
+[dependency-groups]
+build = [
+  "pyinstaller>=6.0",
+]

@@ -5,8 +5,8 @@
  *
  * 启动流程:
  *   1. 清理端口占用 (3099, 8765, 5173)
- *   2. 检查 Node.js / Python 环境
- *   3. vector-service  (:8765) — Python uvicorn
+ *   2. 检查 Node.js / uv 环境
+ *   3. vector-service  (:8765) — uv run uvicorn
  *   4. agent-core       (:3099) — Express (node --watch)
  *   5. web-ui           (:5173) — Vite HMR
  *
@@ -123,13 +123,9 @@ function checkModel() {
 
 function downloadModelBg() {
   return new Promise((resolvePromise) => {
-    const venvPy = resolve(ROOT, "vector-service", "venv", "Scripts", "python.exe");
-    const python = existsSync(venvPy) ? venvPy : "python";
-    const script = resolve(ROOT, "vector-service", "download_model.py");
-
     console.log(`        ${C.yellow}模型缺失，后台自动下载 (~155MB, hf-mirror.com)...${C.reset}`);
 
-    const child = spawn(python, [script], {
+    const child = spawn("uv", ["run", "python", "download_model.py"], {
       cwd: resolve(ROOT, "vector-service"),
       stdio: "pipe",
       windowsHide: true,
@@ -252,7 +248,7 @@ async function main() {
 
   // [1/4] 环境检查
   console.log(`  [1/4] Checking environment...`);
-  let nodeVer, pyVer;
+  let nodeVer, uvVer;
   try {
     nodeVer = execSync("node -v", { encoding: "utf8", windowsHide: true }).trim();
     console.log(`        Node.js: ${nodeVer}`);
@@ -261,10 +257,10 @@ async function main() {
     process.exit(1);
   }
   try {
-    pyVer = execSync("python --version", { encoding: "utf8", windowsHide: true }).trim();
-    console.log(`        Python:  ${pyVer}`);
+    uvVer = execSync("uv --version", { encoding: "utf8", windowsHide: true }).trim();
+    console.log(`        uv:      ${uvVer}`);
   } catch {
-    console.error(`  ${C.red}[ERROR] Python not found${C.reset}`);
+    console.error(`  ${C.red}[ERROR] uv not found. Install from https://docs.astral.sh/uv/${C.reset}`);
     process.exit(1);
   }
 
@@ -275,13 +271,8 @@ async function main() {
       port: 8765,
       url: "http://localhost:8765/health",
       cwd: resolve(ROOT, "vector-service"),
-      getCmd() {
-        // 优先使用 venv 里的 python
-        const venvPy = resolve(this.cwd, "venv", "Scripts", "python.exe");
-        if (existsSync(venvPy)) return venvPy;
-        return "python";
-      },
-      args: ["-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"],
+      getCmd() { return "uv"; },
+      args: ["run", "python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"],
     },
     {
       name: "agent-core",

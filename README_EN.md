@@ -110,7 +110,7 @@ For source code development and contributions:
 ### Prerequisites
 
 - **Node.js** ≥ 18
-- **Python** ≥ 3.10 (with venv)
+- **uv** for Python environment management
 - **Git**
 - **ComfyUI** installed and running on `:8188`
 - **DeepSeek API Key**
@@ -130,15 +130,9 @@ pnpm install
 cp agent-core/.env.example agent-core/.env
 # Edit agent-core/.env with your DeepSeek API Key and ComfyUI address
 
-# 4. Initialize embedding model
-cd vector-service
-python -m venv venv
-# Windows:
-venv/Scripts/pip install -r requirements.txt
-# macOS/Linux:
-# source venv/bin/pip install -r requirements.txt
-python download_model.py
-cd ..
+# 4. Initialize Python environment and embedding model
+uv sync --project vector-service
+uv run --project vector-service python download_model.py
 
 # 5. Start development services
 pnpm run dev

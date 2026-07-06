@@ -19,6 +19,12 @@ _INSTALL_PATHS: dict[str, list[str]] = {
         os.path.expandvars(r"%ProgramFiles%\Python313"),
         os.path.expandvars(r"%ProgramFiles%\Python312"),
     ],
+    "uv": [
+        os.path.expandvars(r"%USERPROFILE%\.cargo\bin"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python313\Scripts"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python312\Scripts"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps"),
+    ],
     "git": [
         os.path.expandvars(r"%ProgramFiles%\Git\bin"),
         os.path.expandvars(r"%ProgramFiles%\Git\cmd"),
@@ -33,6 +39,7 @@ _INSTALL_PATHS: dict[str, list[str]] = {
 _TOOL_BINARIES: dict[str, list[str]] = {
     "node": ["corepack.cmd", "node.exe"],
     "python": ["python.exe"],
+    "uv": ["uv.exe"],
     "git": ["git.exe"],
     "winget": ["winget.exe"],
 }
@@ -45,6 +52,10 @@ TOOLS: dict[str, dict] = {
     "python": {
         "display": "Python 3.12",
         "winget_id": "Python.Python.3.12",
+    },
+    "uv": {
+        "display": "uv",
+        "winget_id": "astral-sh.uv",
     },
     "git": {
         "display": "Git",

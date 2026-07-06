@@ -7,8 +7,8 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/3] 安装依赖...
-pip install PySide6 psutil pyinstaller
+echo [1/3] 同步依赖...
+uv sync --project . --group build --inexact
 if %errorlevel% neq 0 (
     echo [ERROR] 依赖安装失败
     exit /b 1
@@ -16,7 +16,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [2/3] PyInstaller 打包...
-pyinstaller ^
+uv run --project . --group build --no-sync pyinstaller ^
   --onefile ^
   --windowed ^
   --name "邻舍.EXE" ^
