@@ -4,11 +4,11 @@
  *   $ pnpm run dev   (在项目根目录)
  *
  * 启动流程:
- *   1. 清理端口占用 (3099, 8765, 5173)
+ *   1. 清理端口占用 (43099, 48765, 45173)
  *   2. 检查 Node.js / uv 环境
- *   3. vector-service  (:8765) — uv run uvicorn
- *   4. agent-core       (:3099) — Express (node --watch)
- *   5. web-ui           (:5173) — Vite HMR
+ *   3. vector-service  (:48765) — uv run uvicorn
+ *   4. agent-core       (:43099) — Express (node --watch)
+ *   5. web-ui           (:45173) — Vite HMR
  *
  * Ctrl+C 一键停止全部子进程。
  */
@@ -198,7 +198,7 @@ async function shutdown() {
   // ── Windows: 先请求 agent-core 优雅退出（防止 SQLite WAL 损坏）──
   if (process.platform === "win32") {
     try {
-      await fetch("http://localhost:3099/api/shutdown", {
+      await fetch("http://localhost:43099/api/shutdown", {
         method: "POST",
         signal: AbortSignal.timeout(3000),
       });
@@ -241,9 +241,9 @@ async function main() {
 
   // [0/4] 端口清理
   process.stdout.write(`  [0/4] Cleaning up ports...`);
-  killPort(3099);
-  killPort(8765);
-  killPort(5173);
+  killPort(43099);
+  killPort(48765);
+  killPort(45173);
   console.log(` ${C.green}Done${C.reset}`);
 
   // [1/4] 环境检查
@@ -268,24 +268,24 @@ async function main() {
   const services = [
     {
       name: "vector-service",
-      port: 8765,
-      url: "http://localhost:8765/health",
+      port: 48765,
+      url: "http://localhost:48765/health",
       cwd: resolve(ROOT, "vector-service"),
       getCmd() { return "uv"; },
-      args: ["run", "python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"],
+      args: ["run", "python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "48765"],
     },
     {
       name: "agent-core",
-      port: 3099,
-      url: "http://localhost:3099/api/health",
+      port: 43099,
+      url: "http://localhost:43099/api/health",
       cwd: resolve(ROOT, "agent-core"),
       getCmd() { return "pnpm"; },
       args: ["exec", "nodemon", "--watch", "src", "--watch", "app.js", "-e", "js,json", "app.js"],
     },
     {
       name: "web-ui",
-      port: 5173,
-      url: "http://localhost:5173",
+      port: 45173,
+      url: "http://localhost:45173",
       cwd: resolve(ROOT, "web-ui"),
       getCmd() { return "pnpm"; },
       args: ["exec", "vite", "--host"],
@@ -327,16 +327,16 @@ async function main() {
   console.log(`  ${C.bold}${"=".repeat(40)}${C.reset}`);
   console.log(`  ${C.bold}All services running!${C.reset}`);
   console.log();
-  console.log(`    Web UI:  ${C.cyan}http://localhost:5173${C.reset}  (Vite HMR)`);
-  console.log(`    API:     ${C.cyan}http://localhost:3099${C.reset}   (Express)`);
-  console.log(`    Vector:  ${C.cyan}http://localhost:8765${C.reset}   (FastAPI)`);
+  console.log(`    Web UI:  ${C.cyan}http://localhost:45173${C.reset}  (Vite HMR)`);
+  console.log(`    API:     ${C.cyan}http://localhost:43099${C.reset}   (Express)`);
+  console.log(`    Vector:  ${C.cyan}http://localhost:48765${C.reset}   (FastAPI)`);
   console.log();
   console.log(`  ${C.dim}Press Ctrl+C to stop all services${C.reset}`);
   console.log();
 
   // 3 秒后自动打开浏览器
   setTimeout(() => {
-    const url = "http://localhost:5173";
+    const url = "http://localhost:45173";
     try {
       if (process.platform === "win32") {
         execSync(`start "" "${url}"`, { windowsHide: true, stdio: "ignore" });

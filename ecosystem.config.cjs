@@ -11,7 +11,7 @@ module.exports = {
     {
       name: 'vector-svc',
       script: 'uvicorn',
-      args: 'server:app --host 0.0.0.0 --port 8765',
+      args: 'server:app --host 0.0.0.0 --port 48765',
       interpreter: '../.venv/Scripts/python.exe',
       cwd: './vector-service',
       wait_ready: true,

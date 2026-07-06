@@ -312,8 +312,8 @@
       <!-- ComfyUI 连接 -->
       <div class="card">
         <h3>ComfyUI 连接</h3>
-        <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
-        <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
+        <p class="fd">ComfyUI 服务地址，默认 http://localhost:48188</p>
+        <input v-model="comfyUrl" class="fi" placeholder="http://localhost:48188" @input="markConnDirty" />
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
@@ -689,7 +689,7 @@ onMounted(async () => {
       eventWidth: data.comfy.eventWidth || 1600,
       eventHeight: data.comfy.eventHeight || 1200,
     }
-    comfyUrl.value = data.comfy.url || 'http://localhost:8188'
+    comfyUrl.value = data.comfy.url || 'http://localhost:48188'
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5

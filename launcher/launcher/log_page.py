@@ -77,8 +77,8 @@ class LogPage(QWidget):
         # --- 服务状态栏 ---
         status_layout = QHBoxLayout()
 
-        self.vector_indicator = ServiceIndicator("向量服务", 8765)
-        self.agent_indicator = ServiceIndicator("主控后端", 3099)
+        self.vector_indicator = ServiceIndicator("向量服务", 48765)
+        self.agent_indicator = ServiceIndicator("主控后端", 43099)
 
         status_layout.addWidget(self.vector_indicator)
         status_layout.addWidget(self.agent_indicator)
@@ -166,7 +166,7 @@ class LogPage(QWidget):
             self._cached_ip = get_local_ip()
         if self._cached_ip:
             self._mobile_banner.setText(
-                f'手机端可访问 http://{self._cached_ip}:3099 打开邻舍'
+                f'手机端可访问 http://{self._cached_ip}:43099 打开邻舍'
             )
             self._mobile_banner.show()
         else:

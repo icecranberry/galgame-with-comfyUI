@@ -49,7 +49,7 @@ The launcher **auto-detects and installs** Node.js, Python, Git, and other depen
 
 | Required | Notes |
 |----------|-------|
-| **ComfyUI** | Installed and running on `:8188`, Anima models ready |
+| **ComfyUI** | Installed and running on `:48188`, Anima models ready |
 | **DeepSeek API Key** | Configure in launcher settings, or manually edit `agent-core/.env` |
 
 ### 3. Launch
@@ -68,21 +68,21 @@ On first run, the launcher auto-completes environment checks, dependency install
 ## 🏗️ Architecture
 
 ```
-Browser (Vue 3 SPA, :5173)
+Browser (Vue 3 SPA, :45173)
   │  HTTP + SSE
   ▼
-Node.js + Express (Core :3099)
+Node.js + Express (Core :43099)
   ├── Chat routing & session management
   ├── Personality engine
   ├── Memory manager (SQLite + rolling summaries + RAG)
   ├── DeepSeek API client
   └── ComfyUI client (image gen scheduler)
   │
-  ├── HTTP → Python FastAPI (Vector Service :8765)
+  ├── HTTP → Python FastAPI (Vector Service :48765)
   │           ├── ChromaDB
   │           └── ONNX Embedding (Jina v2 base zh, 768d)
   │
-  └── WebSocket/HTTP → ComfyUI (:8188)
+  └── WebSocket/HTTP → ComfyUI (:48188)
                         └── Anima inference
 ```
 
@@ -112,7 +112,7 @@ For source code development and contributions:
 - **Node.js** ≥ 18
 - **uv** for Python environment management
 - **Git**
-- **ComfyUI** installed and running on `:8188`
+- **ComfyUI** installed and running on `:48188`
 - **DeepSeek API Key**
 
 ### Quick Start
@@ -141,7 +141,7 @@ pnpm run dev
 pnpm run stop
 ```
 
-Open `http://localhost:5173`
+Open `http://localhost:45173`
 
 ### Build Launcher
 
@@ -168,19 +168,19 @@ All settings support runtime hot-reload with persistence across restarts:
 ## 📁 Project Structure
 
 ```
-├── agent-core/          # Core backend (Express, :3099)
+├── agent-core/          # Core backend (Express, :43099)
 │   ├── src/
 │   │   ├── routes/      # chat / images / characters / memory / moments / config
 │   │   ├── services/    # emotion engine / memory retrieval / image gen / moments / ComfyUI client
 │   │   ├── llm/         # DeepSeek client
 │   │   └── db/          # SQLite schema & migrations
 │   └── app.js
-├── web-ui/              # Vue 3 frontend (Vite, :5173)
+├── web-ui/              # Vue 3 frontend (Vite, :45173)
 │   └── src/
 │       ├── views/       # Chat / Tavern / Moments / Gallery / Settings
 │       ├── components/  # NavBar / Sidebar / ImageGenBubble / MomentCard / Gallery
 │       └── stores/      # Pinia stores
-├── vector-service/      # Python vector service (FastAPI, :8765)
+├── vector-service/      # Python vector service (FastAPI, :48765)
 │   ├── server.py
 │   ├── embedding.py     # ONNX inference
 │   └── chroma_store.py  # ChromaDB wrapper

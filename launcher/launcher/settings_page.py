@@ -208,7 +208,7 @@ class SettingsPage(QWidget):
         layout.addWidget(_separator())
 
         # --- 开关 ---
-        self.auto_browser_check = Switch("启动后自动打开浏览器 (http://localhost:3099)")
+        self.auto_browser_check = Switch("启动后自动打开浏览器 (http://localhost:43099)")
         layout.addWidget(self.auto_browser_check)
 
         self.toast_check = Switch("启动前提示确认 ComfyUI 已运行")
@@ -364,10 +364,10 @@ class SettingsPage(QWidget):
 
     def set_comfy_status(self, connected: bool):
         if connected:
-            self.comfy_status_label.setText("● 已检测到 ComfyUI (:8188)")
+            self.comfy_status_label.setText("● 已检测到 ComfyUI (:48188)")
             self.comfy_status_label.setStyleSheet("color: #4A9B4A; font-size: 12px;")
         else:
-            self.comfy_status_label.setText("○ 未检测到 ComfyUI (:8188)")
+            self.comfy_status_label.setText("○ 未检测到 ComfyUI (:48188)")
             self.comfy_status_label.setStyleSheet("color: #C9C0BB; font-size: 12px;")
 
     def set_project_path(self, path: str):

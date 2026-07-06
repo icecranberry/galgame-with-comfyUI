@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import os from 'os';
 
-const PORTS = [3099, 5173, 8765];
+const PORTS = [43099, 45173, 48765];
 const isWindows = os.platform() === 'win32';
 
 let stopped = 0;

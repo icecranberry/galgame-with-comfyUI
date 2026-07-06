@@ -50,7 +50,7 @@
 
 | 必要条件 | 说明 |
 |----------|------|
-| **ComfyUI** | 已安装并运行在 `:8188`，Anima 模型已就绪 |
+| **ComfyUI** | 已安装并运行在 `:48188`，Anima 模型已就绪 |
 | **DeepSeek API Key** | 在启动器设置中配置，或手动编辑 `agent-core/.env` |
 
 ### 3. 启动
@@ -69,21 +69,21 @@
 ## 🏗️ 系统架构
 
 ```
-浏览器 (Vue 3 SPA, :5173)
+浏览器 (Vue 3 SPA, :45173)
   │  HTTP + SSE
   ▼
-Node.js + Express (主控 :3099)
+Node.js + Express (主控 :43099)
   ├── 对话路由 & 会话管理
   ├── 人格引擎（固定人格 + 动态情绪 + 动态记忆）
   ├── 记忆管理器（SQLite 全量留存 + 滚动摘要 + RAG）
   ├── DeepSeek API 调用
   └── ComfyUI 客户端（生图调度）
   │
-  ├── HTTP → Python FastAPI (向量服务 :8765)
+  ├── HTTP → Python FastAPI (向量服务 :48765)
   │           ├── ChromaDB（向量存储/检索）
   │           └── ONNX Embedding（Jina v2 base zh, 768d）
   │
-  └── WebSocket/HTTP → ComfyUI (:8188)
+  └── WebSocket/HTTP → ComfyUI (:48188)
                         └── Anima 推理
 ```
 
@@ -113,7 +113,7 @@ Node.js + Express (主控 :3099)
 - **Node.js** ≥ 18
 - **uv**（用于管理 Python 环境）
 - **Git**
-- **ComfyUI** 已安装并运行在 `:8188`
+- **ComfyUI** 已安装并运行在 `:48188`
 - **DeepSeek API Key**
 
 ### 快速开始
@@ -142,7 +142,7 @@ pnpm run dev
 pnpm run stop
 ```
 
-启动后访问 `http://localhost:5173`
+启动后访问 `http://localhost:45173`
 
 ### 打包启动器
 
@@ -169,19 +169,19 @@ build.bat          # 生成 邻舍.EXE.exe
 ## 📁 项目结构
 
 ```
-├── agent-core/          # 主控后端 (Express, :3099)
+├── agent-core/          # 主控后端 (Express, :43099)
 │   ├── src/
 │   │   ├── routes/      # chat / images / characters / memory / moments / config
 │   │   ├── services/    # 情绪引擎 / 记忆检索 / 生图调度 / 朋友圈 / ComfyUI客户端
 │   │   ├── llm/         # DeepSeek 客户端
 │   │   └── db/          # SQLite 表定义 & 迁移
 │   └── app.js
-├── web-ui/              # Vue 3 前端 (Vite, :5173)
+├── web-ui/              # Vue 3 前端 (Vite, :45173)
 │   └── src/
 │       ├── views/       # Chat / Tavern / Moments / Gallery / Settings
 │       ├── components/  # NavBar / Sidebar / ImageGenBubble / MomentCard / Gallery
 │       └── stores/      # Pinia stores
-├── vector-service/      # Python 向量服务 (FastAPI, :8765)
+├── vector-service/      # Python 向量服务 (FastAPI, :48765)
 │   ├── server.py
 │   ├── embedding.py     # ONNX 推理
 │   └── chroma_store.py  # ChromaDB 封装

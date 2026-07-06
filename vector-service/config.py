@@ -10,4 +10,4 @@ USE_QUANTIZED = os.getenv("USE_QUANTIZED", "true").lower() == "true"
 
 # Server
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8765"))
+PORT = int(os.getenv("PORT", "48765"))

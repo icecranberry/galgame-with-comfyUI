@@ -12,11 +12,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 组件 | 技术 | 端口 |
 |------|------|------|
-| 前端 | Vue 3 + Pinia + Vue Router + Vite + vue-easy-lightbox | 5173 |
-| 主控后端 | Node.js + Express (ESM) | 3099 |
-| 向量服务 | Python FastAPI + ChromaDB + ONNX Runtime + 爬虫 | 8765 |
+| 前端 | Vue 3 + Pinia + Vue Router + Vite + vue-easy-lightbox | 45173 |
+| 主控后端 | Node.js + Express (ESM) | 43099 |
+| 向量服务 | Python FastAPI + ChromaDB + ONNX Runtime + 爬虫 | 48765 |
 | LLM | DeepSeek API (兼容 OpenAI SDK，透传) | - |
-| 生图引擎 | ComfyUI (WebSocket + HTTP) | 8188 |
+| 生图引擎 | ComfyUI (WebSocket + HTTP) | 48188 |
 | 数据库 | SQLite (better-sqlite3) + FTS5 | - |
 | 嵌入模型 | Jina v2 base zh (768d, ONNX, 均值池化 + L2 归一) | - |
 
@@ -29,7 +29,7 @@ npm run dev          # 项目根目录
 # 分别启动
 cd agent-core && npm run dev          # Express + nodemon --watch
 cd web-ui && npm run dev              # Vite HMR
-uv run --project vector-service python -m uvicorn server:app --host 0.0.0.0 --port 8765
+uv run --project vector-service python -m uvicorn server:app --host 0.0.0.0 --port 48765
 
 # 停止所有开发服务（优雅退出 → 等待 → taskkill）
 npm run stop
@@ -38,14 +38,14 @@ npm run stop
 pm2 start ecosystem.config.cjs
 
 # 测试 ComfyUI 连接
-curl http://localhost:3099/api/images/comfyui-health
+curl http://localhost:43099/api/images/comfyui-health
 ```
 
 ## 项目结构
 
 ```
 project-root/
-├─ agent-core/              # 主控后端 (Express, :3099)
+├─ agent-core/              # 主控后端 (Express, :43099)
 │  ├─ app.js                # 入口：中间件、路由挂载、WAL 定期 checkpoint、优雅退出
 │  ├─ data/                 # 运行时数据（DB、图片、头像，gitignore）
 │  ├─ public/               # web-ui build 产物（gitignore）
@@ -79,7 +79,7 @@ project-root/
 │        ├─ notificationBus.js       # 通知总线（SSE 广播，services↔routes 解耦）
 │        ├─ webSearch.js             # 联网搜索（萌娘百科→Bing 降级，含 LLM 关键词提取）
 │        └─ seeds.js                 # 默认角色种子数据
-├─ web-ui/                  # Vue 3 前端 (Vite HMR, :5173)
+├─ web-ui/                  # Vue 3 前端 (Vite HMR, :45173)
 │  ├─ vite.config.js        # Vite 配置（含 SSE 代理 timeout:0 防断开）
 │  └─ src/
 │     ├─ main.js            # 入口：hash mode 6 路由（/chat/:id, /moments, /gallery, /tavern, /settings）
@@ -92,7 +92,7 @@ project-root/
 │     ├─ api/index.js       # 后端 API 封装（含 SSE ReadableStream 解析 + 多通道 SSE 连接）
 │     ├─ views/             # 5 个视图页面
 │     └─ components/        # 8 个通用组件（NavBar/Sidebar/Gallery/AvatarCropper 等）
-├─ vector-service/          # 向量服务 (Python FastAPI, :8765)
+├─ vector-service/          # 向量服务 (Python FastAPI, :48765)
 │  ├─ server.py             # /embed /search /upsert /delete /health /scrape
 │  ├─ embedding.py          # ONNX 推理（Jina v2, mean pooling + L2 normalize）
 │  ├─ chroma_store.py       # ChromaDB 持久化（cosine 空间）
@@ -231,7 +231,7 @@ AI 角色自动发朋友圈，用户可评论、点赞，角色 AI 自动回复�
 
 避免 SQLite WAL 损坏和数据丢失：
 
-1. `npm run stop`（或 Ctrl+C）→ 向 `http://localhost:3099/api/shutdown` 发 POST 请求
+1. `npm run stop`（或 Ctrl+C）→ 向 `http://localhost:43099/api/shutdown` 发 POST 请求
 2. agent-core 收到 shutdown：先 WAL checkpoint (TRUNCATE) → `server.close()` → `closeDb()` → `process.exit(0)`
 3. 5 秒硬超时兜底 + shuttingDown flag 防重入
 4. 定期 WAL checkpoint（每 5 分钟 PASSIVE，已 `.unref()` 不阻塞退出），将异常退出数据损失窗口缩小到 ≤5 分钟

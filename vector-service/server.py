@@ -2,7 +2,7 @@
 Python FastAPI 向量服务
 提供嵌入推理和向量检索引擎
 
-启动: uvicorn server:app --host 0.0.0.0 --port 8765
+启动: uvicorn server:app --host 0.0.0.0 --port 48765
 """
 
 from fastapi import FastAPI, HTTPException
@@ -393,4 +393,4 @@ async def startup():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    uvicorn.run(app, host="0.0.0.0", port=48765)

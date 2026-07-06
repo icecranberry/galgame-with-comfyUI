@@ -184,7 +184,7 @@ onMounted(async () => {
   const mobileIp = params.get('mobile_ip')
   if (mobileIp && !sessionStorage.getItem(TOAST_KEY)) {
     sessionStorage.setItem(TOAST_KEY, '1')
-    mobileToast.value = { visible: true, url: `http://${mobileIp}:3099` }
+    mobileToast.value = { visible: true, url: `http://${mobileIp}:43099` }
     setTimeout(() => { mobileToast.value.visible = false }, 5000)
   }
   // 清理 URL 中的 mobile_ip 参数（无论是否弹 toast）

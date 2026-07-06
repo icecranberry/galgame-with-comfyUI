@@ -9,6 +9,7 @@
  * 搜索链路：萌娘百科（mzh.moegirl.org.cn）→ 无结果时 Bing 降级
  */
 
+import { config } from '../config.js';
 import { chatSync } from '../llm/llm-client.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -447,7 +448,7 @@ function extractInfoboxFromText(bodyText) {
 async function scrapeMoegirlPage(pageUrl) {
   console.log(`[webSearch] scrapeMoegirlPage calling python: ${pageUrl}`);
   try {
-    const res = await fetch(`http://localhost:8765/scrape`, {
+    const res = await fetch(`${config.vectorService.url}/scrape`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: pageUrl }),

@@ -9,7 +9,7 @@ const envPath = resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 export const config = {
-  port: parseInt(process.env.PORT, 10) || 3099,
+  port: parseInt(process.env.PORT, 10) || 43099,
   dbPath: process.env.DB_PATH || './data/agent.db',
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
@@ -18,10 +18,10 @@ export const config = {
     model: process.env.LLM_MODEL || 'deepseek-v4-flash',
   },
   vectorService: {
-    url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
+    url: process.env.VECTOR_SERVICE_URL || 'http://localhost:48765',
   },
   comfyui: {
-    url: process.env.COMFYUI_URL || 'http://localhost:8188',
+    url: process.env.COMFYUI_URL || 'http://localhost:48188',
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
     artist: process.env.COMFYUI_ARTIST || '@ebora',
     width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,

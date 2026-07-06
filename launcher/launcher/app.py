@@ -662,7 +662,7 @@ class MainWindow(QMainWindow):
 
         if overall == "all_running" and self._config.get("auto_open_browser"):
             ip = get_local_ip()
-            url = f"http://localhost:3099?mobile_ip={ip}" if ip else "http://localhost:3099"
+            url = f"http://localhost:43099?mobile_ip={ip}" if ip else "http://localhost:43099"
             webbrowser.open(url)
             self._log_page.append_log(f"[系统] 🌐 浏览器已打开 {url}")
 

@@ -115,7 +115,7 @@ SERVICES = {
     "vector": {
         "name": "vector",
         "display": "向量服务",
-        "port": 8765,
+        "port": 48765,
         "health_path": "/health",
         "cwd": "vector-service",
         "get_cmd": lambda project_path: _resolve_python(project_path),
@@ -126,13 +126,13 @@ SERVICES = {
             "--host",
             "0.0.0.0",
             "--port",
-            "8765",
+            "48765",
         ],
     },
     "agent_core": {
         "name": "agent_core",
         "display": "主控后端",
-        "port": 3099,
+        "port": 43099,
         "health_path": "/api/health",
         "shutdown_path": "/api/shutdown",
         "cwd": "agent-core",
@@ -153,7 +153,7 @@ class PortCleaner(QObject):
         try:
             import psutil
 
-            ports = [3099, 8765]
+            ports = [43099, 48765]
             keywords = [
                 "agent-core", "vector-service", "web-ui",
                 "app.js", "server:app", "uvicorn", "nodemon",
@@ -538,7 +538,7 @@ class ServiceRunner(QObject):
             self.status_summary.emit(v, a, "partial")
 
     def _kill_port_processes(self):
-        """杀死 3099 和 8765 端口上残留的项目进程。"""
+        """杀死 43099 和 48765 端口上残留的项目进程。"""
         try:
             import psutil
 
