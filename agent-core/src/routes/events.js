@@ -322,7 +322,16 @@ router.post('/generate', async (req, res) => {
     });
   } catch (err) {
     if (err.message === 'ALREADY_ACTIVE_EVENT') {
-      return res.status(409).json({ error: 'already_active_event' });
+      const active = db.prepare(
+        `SELECT title, expires_at FROM character_events WHERE character_id = ? AND status IN ('pending','open','engaged') LIMIT 1`
+      ).get(character.id);
+      const title = active?.title || '未命名事件';
+      const remaining = active?.expires_at
+        ? Math.max(0, Math.round((new Date(active.expires_at).getTime() - Date.now()) / 60000))
+        : 0;
+      const remainingText = remaining > 0 ? `剩余 ${remaining} 分钟` : '即将过期';
+      const msg = `${character.display_name} 当前还有未结束的奇遇「${title}」，${remainingText}。请先完成或取消后再试。`;
+      return res.status(409).json({ error: 'already_active_event', message: msg });
     }
     console.error(`[events] generate error:`, err.message);
     res.status(500).json({ error: 'internal_error', message: err.message });

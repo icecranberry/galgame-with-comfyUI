@@ -255,7 +255,7 @@ async function confirmGenerate(useCustom) {
   try {
     const customPrompt = useCustom ? customEventText.value.trim() : null
     const result = await api.generateEvent(c.id, null, customPrompt)
-    if (result.error) { alert(result.error); return }
+    if (result.error) { alert(result.message || result.error); return }
     store.loadEvents()
   } catch (err) {
     console.error('[EventsView] generate error:', err)

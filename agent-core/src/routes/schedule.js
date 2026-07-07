@@ -432,16 +432,33 @@ router.post('/:characterId/peek', async (req, res) => {
     const imageInstruction = parseImagePromptRule(imageRulesText);
     const system3 = `你将画面表达为prompt输出，只输出一个{"prompt":"..."} JSON格式。${imageInstruction ? '\n\n输出格式要求：\n' + imageInstruction : ''}`;
 
+    // event: 角色当前奇遇注入
+    const activeEvent = db.prepare(`
+      SELECT title, description, choice_history FROM character_events
+      WHERE character_id = ? AND status IN ('pending','open','engaged')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(characterId);
+
     // user: 拍摄指令
     const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${activity.activity}的照片，具体照片表现是${activity.description}`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },
       { role: 'system', content: system1 },
+    ];
+    if (activeEvent) {
+      const choiceHistory = JSON.parse(activeEvent.choice_history || '[]');
+      const branchCount = choiceHistory.length - 1;
+      llmMsgs.push({
+        role: 'system',
+        content: `【当前奇遇事件】角色正在经历一场奇遇事件——「${activeEvent.title}」。\n当前场景：${activeEvent.description}\n${branchCount > 0 ? `已推进了 ${branchCount} 步。` : '事件刚刚开始。'}\n人像照中角色的表情和神态应反映出当前奇遇事件带来的情绪。`,
+      });
+    }
+    llmMsgs.push(
       { role: 'system', content: personaText },
       { role: 'system', content: system3 },
       { role: 'user', content: userMsg },
-    ];
+    );
 
     // 立即返回，异步执行 LLM + 生图
     res.json({
