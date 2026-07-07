@@ -681,11 +681,15 @@ watch(isExpired, (val) => {
 
 .branch-text {
   flex: 1; overflow-y: auto;
+  min-height: 0;
   padding: 18px 22px;
   display: flex; flex-direction: column; gap: 12px;
 }
-.branch-text::-webkit-scrollbar { width: 4px; }
-.branch-text::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 2px; }
+.branch-text::-webkit-scrollbar { width: 6px; }
+.branch-text::-webkit-scrollbar-track { background: transparent; }
+.branch-text::-webkit-scrollbar-thumb { background: rgba(224,123,108,0.25); border-radius: 3px; }
+.branch-text::-webkit-scrollbar-thumb:hover { background: rgba(224,123,108,0.45); }
+.branch-text { scrollbar-width: thin; scrollbar-color: rgba(224,123,108,0.25) transparent; }
 
 .branch-desc {
   font-size: 15px; line-height: 1.75; color: var(--text-bright);

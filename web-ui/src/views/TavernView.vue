@@ -509,6 +509,7 @@ const sortedCharacters = computed(() =>
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const confirmFn = inject('confirm')
+const toastFn = inject('toast')
 
 const charRelCounts = ref({})
 
@@ -968,7 +969,7 @@ async function deleteChar() {
   const c = detail.char
   if (!c) return
   if (c.name === 'default') {
-    alert('默认角色不能删除')
+    toastFn('默认角色不能删除', 'warning')
     return
   }
   const ok = await confirmFn({

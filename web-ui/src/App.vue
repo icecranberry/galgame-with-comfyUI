@@ -19,6 +19,7 @@
     <router-view />
   </div>
   <ConfirmDialog ref="confirmDialog" />
+  <Toast ref="toastEl" />
 
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
@@ -39,12 +40,14 @@ import { loadUserConfig } from './userConfig.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import Toast from './components/Toast.vue'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
 const proactive = useProactiveStore()
 const route = useRoute()
 const confirmDialog = ref(null)
+const toastEl = ref(null)
 
 // ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
 const mobileToast = ref({ visible: false, url: '' })
@@ -74,7 +77,11 @@ async function onForceProactive() {
 function confirm(opts) {
   return confirmDialog.value?.show(opts) ?? Promise.resolve(false)
 }
+function toast(message, type = 'info', duration) {
+  toastEl.value?.show(message, type, duration)
+}
 provide('confirm', confirm)
+provide('toast', toast)
 
 // ══════════════════════════════════════════════════
 // 移动端响应式 — Sidebar 抽屉状态

@@ -200,6 +200,7 @@ const activeColumns = computed(() => splitColumns(store.filteredActive, colCount
 const setTopbarVisible = inject?.('setTopbarVisible', null)
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
+const toastFn = inject('toast')
 
 onMounted(async () => {
   store.isViewingEvents = true
@@ -255,7 +256,7 @@ async function confirmGenerate(useCustom) {
   try {
     const customPrompt = useCustom ? customEventText.value.trim() : null
     const result = await api.generateEvent(c.id, null, customPrompt)
-    if (result.error) { alert(result.message || result.error); return }
+    if (result.error) { toastFn(result.message || result.error, 'error'); return }
     store.loadEvents()
   } catch (err) {
     console.error('[EventsView] generate error:', err)

@@ -320,6 +320,7 @@ const router = useRouter()
 
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
+const toastFn = inject('toast')
 
 // ── 时钟 ──
 // ── 筛选 ──
@@ -800,9 +801,9 @@ async function confirmResetAll() {
     }
   } catch (err: any) {
     if (err.message?.includes('busy') || err.message?.includes('正在进行中')) {
-      alert('重置世界线正在进行中，请等待当前任务完成')
+      toastFn('重置世界线正在进行中，请等待当前任务完成', 'warning')
     } else {
-      alert('启动重置失败: ' + (err.message || '未知错误'))
+      toastFn('启动重置失败: ' + (err.message || '未知错误'), 'error')
     }
     store.finishResetTask()
   }

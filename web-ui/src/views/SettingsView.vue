@@ -504,6 +504,7 @@ import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
+const toastFn = inject('toast')
 
 // ── 移动端滚动方向感知：下滑隐藏标题，上滑显示 ──
 const scrollEl = ref(null)
@@ -608,7 +609,7 @@ function addToFavorites(mode) {
   const artist = (mode === 'moments' ? form.value.momentsArtist : mode === 'event' ? form.value.eventArtist : form.value.artist).trim()
   if (!artist) return
   if (artistFavorites.value.some(f => f.artist === artist)) {
-    alert('已收藏过该画师串')
+    toastFn('已收藏过该画师串', 'warning')
     return
   }
   favDialog.mode = mode

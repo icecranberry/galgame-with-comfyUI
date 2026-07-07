@@ -103,6 +103,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const confirmFn = inject('confirm')
+const toastFn = inject('toast')
 
 const { addEdges, removeEdges, fitView } = useVueFlow()
 const nodeTypes = markRaw({ userNode: markRaw(UserNode), charNode: markRaw(CharacterNode) })
@@ -330,12 +331,12 @@ async function confirmInput() {
     try {
       const res = await api.updateUserRelationship(inputDialog.edgeId, text)
       if (res.error) {
-        alert('保存失败: ' + res.error)
+        toastFn('保存失败: ' + res.error, 'error')
         return
       }
       const updated = res.relationship
       if (!updated) {
-        alert('保存失败: 服务器返回数据异常')
+        toastFn('保存失败: 服务器返回数据异常', 'error')
         return
       }
       // Update edge label
@@ -347,7 +348,7 @@ async function confirmInput() {
       if (cached) cached.relationship_text = text
     } catch (err) {
       console.error('[UserRelationshipGraph] update failed:', err.message)
-      alert('保存失败: ' + err.message)
+      toastFn('保存失败: ' + err.message, 'error')
       return
     }
   } else {
@@ -358,12 +359,12 @@ async function confirmInput() {
         text
       )
       if (res.error) {
-        alert('创建失败: ' + res.error)
+        toastFn('创建失败: ' + res.error, 'error')
         return
       }
       const created = res.relationship
       if (!created) {
-        alert('创建失败: 服务器返回数据异常')
+        toastFn('创建失败: 服务器返回数据异常', 'error')
         return
       }
       // Add edge via imperative API — compute optimal handles from target position
@@ -388,7 +389,7 @@ async function confirmInput() {
       existingRels.value.push(created)
     } catch (err) {
       console.error('[UserRelationshipGraph] create failed:', err.message)
-      alert('创建失败: ' + err.message)
+      toastFn('创建失败: ' + err.message, 'error')
       return
     }
   }
@@ -417,7 +418,7 @@ async function deleteEdge() {
     existingRels.value = existingRels.value.filter(r => r.id !== inputDialog.edgeId)
   } catch (err) {
     console.error('[UserRelationshipGraph] delete failed:', err.message)
-    alert('删除失败: ' + err.message)
+    toastFn('删除失败: ' + err.message, 'error')
     return
   }
   cancelInput()

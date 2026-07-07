@@ -47,7 +47,7 @@
                 >AVIF 有损</button>
               </div>
               <div class="type-desc">
-                {{ compressType === 'oxipng' ? '无损重编码 PNG，画质完全不变，预计大小下降70%' : '转为 AVIF 格式 有损压缩，小图压缩会微微失真，大图没区别，预计大小下降95%' }}
+                {{ compressType === 'oxipng' ? '无损重编码 PNG，画质几乎不变，预计大小下降70%' : '转为 AVIF 格式 有损压缩，小图压缩会微微失真，大图没区别，预计大小下降95%' }}
               </div>
               <button
                 class="btn-start-inline"
@@ -136,6 +136,7 @@ import { onEvent } from '../stores/unifiedStream.js'
 
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
+const toastFn = inject('toast')
 const galleryRef = ref(null)
 const totalCount = ref(0)
 
@@ -201,7 +202,7 @@ async function onStartCompress() {
   try {
     const res = await api.startCompress()
     if (res.error) {
-      alert(res.error)
+      toastFn(res.error, 'error')
       return
     }
     await fetchStatus()

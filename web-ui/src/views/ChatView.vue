@@ -245,13 +245,6 @@
             </div>
             <!-- 移动端工具栏 -->
             <div class="mobile-detail-toolbar" v-if="isMobile">
-              <div class="toolbar-item" @click="showRelationGraph = true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                </svg>
-                <span>关系图</span>
-              </div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
                 <label class="toggle-switch toolbar-switch">
@@ -275,6 +268,61 @@
               </div>
             </div>
             <div class="modal-body">
+              <!-- 头像 -->
+              <div class="detail-avatar-row">
+                <div
+                  class="detail-avatar clickable"
+                  :style="avatarPreviewStyle"
+                  @click="openAvatarPicker"
+                >{{ chat.activeChar?.avatar_path ? '' : chat.activeChar?.display_name?.charAt(0) }}</div>
+                <div>
+                  <button class="sp-btn-small" @click="openAvatarPicker">更换头像</button>
+                  <button v-if="chat.activeChar?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeAvatar">移除</button>
+                </div>
+              </div>
+              <!-- 角色关系 -->
+              <div class="detail-rel-section">
+                <div class="detail-rel-header">
+                  <span class="detail-rel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                      <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                    </svg>
+                    角色关系网
+                  </span>
+                  <button
+                    v-if="detail.relationships.length > 0"
+                    class="detail-rel-btn subtle"
+                    @click="showRelationGraph = true"
+                  >管理关系图 &rarr;</button>
+                </div>
+                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
+                  <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
+                    <span class="rel-from">{{ chat.activeChar?.display_name }}</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    <span class="rel-to">{{ rel.to_display_name }}</span>
+                    <span class="rel-text">{{ rel.relationship_text }}</span>
+                  </div>
+                  <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="showRelationGraph = true">
+                    共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
+                  </div>
+                </div>
+                <div v-else class="detail-rel-empty">
+                  <template v-if="detail.relationshipsLoading">
+                    <span class="rel-empty-spinner"></span> 加载中…
+                  </template>
+                  <template v-else>
+                    <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
+                    <button class="detail-rel-btn cta" @click="showRelationGraph = true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                        <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                      </svg>
+                      设置角色关系
+                    </button>
+                  </template>
+                </div>
+              </div>
               <div class="preview-card">
                 <label class="fl">展示名</label>
                 <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
@@ -285,6 +333,7 @@
             <!-- 操作栏 sticky footer -->
             <div class="modal-footer">
               <div class="detail-actions">
+                <button class="btn-ghost danger" @click="deleteCharFromModal">&#x1F5D1; 删除角色</button>
                 <div class="detail-actions-right">
                   <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharEditor">保存</button>
                 </div>
@@ -294,15 +343,6 @@
 
           <!-- 悬浮侧边栏 -->
           <div class="detail-float" v-if="!isMobile">
-            <div class="float-card" @click="showRelationGraph = true">
-              <div class="float-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                  <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                </svg>
-              </div>
-              <span class="float-label">关系图</span>
-            </div>
             <div class="float-card float-card-toggle">
               <span class="float-label">不看ta的朋友圈</span>
               <label class="toggle-switch float-switch">
@@ -555,19 +595,21 @@
     </Transition>
 
     <!-- 角色头像选择器（设置面板） -->
-    <AvatarCropper
-      v-if="showAvatarPicker"
-      :title="'选择' + (chat.activeChar?.display_name || '') + '的头像'"
-      :show-recent-tab="true"
-      :show-generate-tab="true"
-      :character-id="chat.activeChar?.id"
-      :character-base-prompt="chat.activeChar?.base_prompt || ''"
-      :recent-images="recentImages"
-      :recent-loading="recentLoading"
-      @close="closeAvatarPicker"
-      @save="onAgentAvatarSave"
-      @switch-to-recent="switchToRecent"
-    />
+    <Teleport to="body">
+      <AvatarCropper
+        v-if="showAvatarPicker"
+        :title="'选择' + (chat.activeChar?.display_name || '') + '的头像'"
+        :show-recent-tab="true"
+        :show-generate-tab="true"
+        :character-id="chat.activeChar?.id"
+        :character-base-prompt="chat.activeChar?.base_prompt || ''"
+        :recent-images="recentImages"
+        :recent-loading="recentLoading"
+        @close="closeAvatarPicker"
+        @save="onAgentAvatarSave"
+        @switch-to-recent="switchToRecent"
+      />
+    </Teleport>
 
     <!-- 奇遇事件详情覆盖层（从分享卡片触发） -->
     <EventCard
@@ -604,6 +646,7 @@ const router = useRouter()
 const chat = useChatStore()
 const eventsStore = useEventsStore()
 const confirmFn = inject('confirm')
+const toastFn = inject('toast')
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
@@ -771,10 +814,24 @@ const showRelationGraph = ref(false)
 const clearing = ref(false)
 const deleting = ref(false)
 
+// 关闭关系图后刷新关系数据
+watch(showRelationGraph, async (val) => {
+  if (!val && chat.activeChar) {
+    try {
+      const res = await api.getRelationships(chat.activeChar.id)
+      detail.relationships = res.relationships || []
+    } catch {
+      detail.relationships = []
+    }
+  }
+})
+
 // ── 角色详情编辑弹窗（酒馆同款） ──
 const detail = reactive({
   editName: '',
   editPrompt: '',
+  relationships: [],
+  relationshipsLoading: false,
   momentsDisabled: false,
   proactiveDisabled: false,
   eventsDisabled: false,
@@ -1027,7 +1084,7 @@ async function saveEdit(trait) {
     editingId.value = null
     editingContent.value = ''
   } catch (err) {
-    alert('保存失败: ' + err.message)
+    toastFn('保存失败: ' + err.message, 'error')
   } finally {
     savingEdit.value = false
   }
@@ -1049,7 +1106,7 @@ async function removeTrait(trait) {
       if (idx !== -1) group.splice(idx, 1)
     }
   } catch (err) {
-    alert('删除失败: ' + err.message)
+    toastFn('删除失败: ' + err.message, 'error')
   }
 }
 
@@ -1080,7 +1137,7 @@ async function saveAdd(key) {
     addingKey.value = null
     addingContent.value = ''
   } catch (err) {
-    alert('添加失败: ' + err.message)
+    toastFn('添加失败: ' + err.message, 'error')
   } finally {
     savingAdd.value = false
   }
@@ -1138,7 +1195,7 @@ function closeSettings() { showSettings.value = false }
 // 角色详情编辑弹窗（酒馆同款）
 // ══════════════════════════════════════════════════
 
-function openCharEditor() {
+async function openCharEditor() {
   showSettings.value = false
   const c = chat.activeChar
   if (!c) return
@@ -1148,11 +1205,40 @@ function openCharEditor() {
   detail.proactiveDisabled = !!c.proactive_disabled
   detail.eventsDisabled = !!c.events_disabled
   detail.dirty = false
+  detail.relationships = []
+  detail.relationshipsLoading = true
   showEditor.value = true
+  try {
+    const res = await api.getRelationships(c.id)
+    detail.relationships = res.relationships || []
+  } catch {
+    detail.relationships = []
+  } finally {
+    detail.relationshipsLoading = false
+  }
 }
 
 function closeCharEditor() {
   showEditor.value = false
+}
+
+async function deleteCharFromModal() {
+  const c = chat.activeChar
+  if (!c) return
+  if (c.name === 'default') {
+    toastFn('默认角色不能删除', 'warning')
+    return
+  }
+  const ok = await confirmFn({
+    title: '删除角色',
+    message: `确定要删除「${c.display_name}」吗？\n聊天记录和朋友圈内容也将一并删除。`,
+    okText: '删除', danger: true,
+  })
+  if (!ok) return
+  await api.deleteCharacter(c.id)
+  showEditor.value = false
+  await chat.loadCharacters()
+  router.push('/tavern')
 }
 
 async function saveCharEditor() {
@@ -2128,6 +2214,129 @@ function renderContent(text) {
 .detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
 .detail-avatar.clickable:hover { opacity: 0.85; }
 
+/* ── 角色关系区块（详情内嵌） ── */
+.detail-rel-section {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(224, 123, 108, 0.04);
+  border: 1px solid rgba(224, 123, 108, 0.1);
+}
+.detail-rel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.detail-rel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.detail-rel-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.detail-rel-btn.subtle {
+  background: rgba(224, 123, 108, 0.06);
+  border: 1px solid rgba(224, 123, 108, 0.15);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 10px;
+}
+.detail-rel-btn.subtle:hover {
+  background: rgba(224, 123, 108, 0.14);
+  border-color: rgba(224, 123, 108, 0.3);
+  color: #d06a5a;
+}
+.detail-rel-btn.cta {
+  padding: 10px 22px;
+  font-size: 14px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25);
+}
+.detail-rel-btn.cta:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 4px 18px rgba(224, 123, 108, 0.35);
+  transform: translateY(-1px);
+}
+.detail-rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.detail-rel-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+.rel-from, .rel-to {
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.rel-text {
+  color: var(--accent);
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: rgba(224, 123, 108, 0.1);
+}
+.detail-rel-more {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  padding: 4px 0;
+  transition: opacity 0.15s;
+}
+.detail-rel-more:hover {
+  opacity: 0.7;
+}
+.detail-rel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 8px 8px;
+  text-align: center;
+}
+.rel-empty-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 360px;
+}
+.rel-empty-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(224, 123, 108, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: rel-spin 0.6s linear infinite;
+}
+@keyframes rel-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── 悬浮侧边栏 ── */
 .detail-float {
   position: absolute;
@@ -2163,21 +2372,6 @@ function renderContent(text) {
 }
 .float-switch {
   flex-shrink: 0;
-}
-.float-icon {
-  width: 36px; height: 36px;
-  border-radius: 10px;
-  background: rgba(224,123,108,0.1);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--accent);
-}
-.float-card:first-child {
-  cursor: pointer;
-}
-.float-card:first-child:hover {
-  background: rgba(251, 233, 222, 0.85);
-  border-color: rgba(224,123,108,0.2);
-  box-shadow: 0 4px 20px rgba(224,123,108,0.1);
 }
 
 /* ── 预览卡片 ── */

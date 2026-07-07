@@ -120,6 +120,17 @@ const EVENT_TYPES = [
     desc: '一个稍纵即逝的好事——恰好被自己碰上了。不是提前知道、不是有内幕消息、就是刚好在对的时间站在了对的地方。那一瞬间的运气好得像被人安排好的一样。捡到宝的心情里混着一点得意——今天是我的天。' },
   { key: 'mystery_blessing', name: '天上掉馅饼', durationMin: 25, urgency: 1,
     desc: '一份来路不明的好意——匿名、间接、或通过一个"我也不知道为什么给你"的渠道——落到了角色头上。没有附加条件、没有隐形代价、就是纯粹的"有人想让ta高兴"。不知道是谁、不知道为什么——但今天确实被这个世界善待了一次。' },
+
+  { key: 'pressed_it', name: '手比脑子快', durationMin: 30, urgency: 2,
+    desc: '一个明显不是给人按的按钮、把手、或机关。好奇心赢了——手指在脑子喊出"等等"之前已经动了。现在有东西正在发生。不是灾难——还没到那步——但肯定不是"什么都没变"。站原地看着它发生，还是做点什么——不管哪种，都是今天最大的变量。' },
+
+  // ═══ 自然与偶然（20-50min）═══
+  { key: 'weather_trap', name: '老天爷留客', durationMin: 40, urgency: 2,
+    desc: '天气在没有任何预告的情况下翻脸了。回去的路变得不简单——不是不能走，是不值得冒那个险。不管是屋檐下、路边的店里、还是某个半开放的建筑里——接下来一段时间得待在这。以及，一转头才发现，还有别人也被同一场突变的天气送到了这个同样不该久留的地方。' },
+
+  // ═══ 小得意与小反转（15-30min）═══
+  { key: 'dare_accepted', name: '谁怕谁', durationMin: 20, urgency: 1,
+    desc: '一个挑战摆在了面前。可能是说出来的，可能是挂在一个眼神里没说出口的。最聪明的是耸耸肩走开——但这和历史战绩没关系。心跳已经在加速了，理性还在努力发言。而另一个声音——正在笑——已经站到了起跑线上。' },
 ];
 
 /**
@@ -180,6 +191,9 @@ const EVENT_VAD_MODIFIERS = {
   second_chance_news:    { valence: 0.25, arousal: 0.25, dominance: 0.15 },  // 窗口重开的心跳加速
   lucky_timing:          { valence: 0.25, arousal: 0.35, dominance: 0.15 },  // 刚好赶上的兴奋
   mystery_blessing:      { valence: 0.20, arousal: 0.20, dominance: 0.10 },  // 被世界善待，温和暖意
+  pressed_it:            { valence:-0.05, arousal: 0.40, dominance:-0.10 },
+  weather_trap:          { valence:-0.05, arousal: 0.15, dominance:-0.15 },
+  dare_accepted:         { valence: 0.10, arousal: 0.35, dominance: 0.15 },
 };
 /**
  * 根据事件类型 key 获取对应的 VAD 情绪偏移量
