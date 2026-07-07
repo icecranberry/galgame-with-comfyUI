@@ -184,6 +184,20 @@ onMounted(async () => {
   await loadPage(0)
   loading.value = false
 })
+
+// 供父组件调用刷新
+async function refresh() {
+  invalidateCache()
+  await loadPage(0)
+}
+
+function invalidateCache() {
+  images.value = []
+  total.value = 0
+  hasMore.value = false
+}
+
+defineExpose({ refresh })
 </script>
 
 <style scoped>

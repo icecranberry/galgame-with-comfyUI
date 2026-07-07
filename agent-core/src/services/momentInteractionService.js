@@ -5,7 +5,7 @@
  *   1. Sigmoid 概率判断 → 层叠选朋友（第1个必选，之后每个 50%）
  *   2. 朋友首轮评论（含双方人格 + 世界观 + 帖子原文）
  *   3. 发帖人必定回复
- *   4. 30% 连锁继续，最多 5 轮（全帖累计）
+ *   4. 30% 连锁继续，最多 3 轮（全帖累计）
  *
  * 与用户操作完全解耦——用户评论走 moments.js 原有逻辑。
  */
@@ -307,7 +307,7 @@ export async function triggerFriendComments(post, character) {
 
 /**
  * 执行单条互动线程：
- *   friend 评论 → poster 回复 → (30% 循环继续，最多 5 轮)
+ *   friend 评论 → poster 回复 → (30% 循环继续，最多 3 轮)
  */
 async function runInteractionThread(post, posterChar, friend) {
   const db = getDb();
@@ -333,8 +333,8 @@ async function runInteractionThread(post, posterChar, friend) {
   } catch { /* schedule not available */ }
 
   // 检查已用轮数
-  if (countUsedRounds(db, post.id, posterId) >= 5) {
-    console.log(`[momentInteraction] post ${post.id} 已满 5 轮，跳过`);
+  if (countUsedRounds(db, post.id, posterId) >= 3) {
+    console.log(`[momentInteraction] post ${post.id} 已满 3 轮，跳过`);
     return;
   }
 
@@ -406,9 +406,9 @@ async function runInteractionThread(post, posterChar, friend) {
   const userName = config.user.nickname || '用户';
   const posterAvatar = posterChar.avatar_path;
 
-  while (round < 5) {
-    if (countUsedRounds(db, post.id, posterId) >= 5) {
-      console.log(`[momentInteraction] 满 5 轮（已用 ${countUsedRounds(db, post.id, posterId)} 轮），停止续评`);
+  while (round < 3) {
+    if (countUsedRounds(db, post.id, posterId) >= 3) {
+      console.log(`[momentInteraction] 满 3 轮（已用 ${countUsedRounds(db, post.id, posterId)} 轮），停止续评`);
       break;
     }
 

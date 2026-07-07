@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { config } from '../config.js';
+import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = resolve(__dirname, '../../data/images');
@@ -21,7 +22,7 @@ const galleryCache = {
 /** 刷新相册缓存：批量 stat（限制并发数），避免 Promise.all 2251 并发压垮事件循环 */
 async function refreshGalleryCache() {
   const files = await readdir(IMAGES_DIR);
-  const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f));
+  const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif|avif)$/i.test(f));
 
   // 批量 stat：每次最多 64 个并发，避免事件循环被 2000+ 个 Promise 同时 resolve 卡死
   const BATCH_SIZE = 64;
@@ -271,6 +272,41 @@ router.get('/comfyui-health', async (req, res) => {
   } catch {
     res.json({ connected: false, url: config.comfyui.url });
   }
+});
+
+// ── 图片压缩 API ──
+
+// GET /api/images/compress/status — 获取压缩状态（含立即压缩进度）
+router.get('/compress/status', (req, res) => {
+  res.json(getState());
+});
+
+// PUT /api/images/compress/config — 更新压缩配置
+router.put('/compress/config', (req, res) => {
+  const { enabled, compressionType: type } = req.body;
+  if (type && !['oxipng', 'avif'].includes(type)) {
+    return res.status(400).json({ error: 'compressionType must be "oxipng" or "avif"' });
+  }
+  const state = updateServiceConfig({ enabled, type });
+  res.json(state);
+});
+
+// POST /api/images/compress/start — 启动立即压缩（全量，SSE 推送进度）
+router.post('/compress/start', (req, res) => {
+  const result = startFullCompression();
+  if (result.error) {
+    return res.status(409).json(result);
+  }
+  res.json(result);
+});
+
+// POST /api/images/compress/cancel — 取消正在进行的压缩
+router.post('/compress/cancel', (req, res) => {
+  const result = cancelCompression();
+  if (result.error) {
+    return res.status(404).json(result);
+  }
+  res.json(result);
 });
 
 export default router;

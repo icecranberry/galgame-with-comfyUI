@@ -33,6 +33,9 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   disturb_character_ids: '[]',
   disturb_hide_world: 'false',
   disturb_skip_weekends: 'false',
+  // 图片压缩
+  compression_enabled: 'false',
+  compression_type: 'oxipng',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',

@@ -618,6 +618,30 @@ export async function listGalleryImages(limit = 100, offset = 0) {
   return res.json()
 }
 
+// ── 图片压缩 ──
+export async function getCompressStatus() {
+  const res = await fetch(`${BASE}/images/compress/status`)
+  return res.json()
+}
+
+export async function updateCompressConfig(data) {
+  const res = await fetch(`${BASE}/images/compress/config`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function startCompress() {
+  const res = await fetch(`${BASE}/images/compress/start`, { method: 'POST' })
+  return res.json()
+}
+
+export async function cancelCompress() {
+  const res = await fetch(`${BASE}/images/compress/cancel`, { method: 'POST' })
+  return res.json()
+}
+
 // ── 画师串收藏夹 ──
 export async function getArtistFavorites() {
   const res = await fetch(`${BASE}/config/artist-favorites`)

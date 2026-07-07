@@ -54,6 +54,10 @@ export const config = {
     hideWorld: false, // 隐藏世界观（DB 加载覆盖）
     skipWeekends: false, // 跳过周末（DB 加载覆盖）
   },
+  compression: {
+    enabled: false,
+    type: 'oxipng',   // 'oxipng' | 'avif'
+  },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',
     gender: process.env.USER_GENDER || '',
@@ -232,4 +236,16 @@ export function updateDisturbSettings({ startTime, endTime, characterIds, hideWo
 
 export function getUserConfig() {
   return { ...config.user };
+}
+
+export function updateCompressConfig({ enabled, type }) {
+  if (enabled !== undefined) {
+    config.compression.enabled = enabled === true || enabled === 'true';
+    persistSettingSync('compression_enabled', String(config.compression.enabled));
+  }
+  if (type !== undefined) {
+    config.compression.type = type;
+    persistSettingSync('compression_type', type);
+  }
+  console.log(`[config] compression: enabled=${config.compression.enabled} type=${config.compression.type}`);
 }

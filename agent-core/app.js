@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
 import { config } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
@@ -23,6 +25,7 @@ import { startEventScheduler } from './src/services/eventScheduler.js';
 import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
 import { startReplyQueueScheduler } from './src/services/replyQueueScheduler.js';
 import { initialize as initScheduleManager } from './src/services/scheduleManager.js';
+import { startScheduler as startImageCompressor } from './src/services/imageCompressor.js';
 
 const app = express();
 
@@ -33,7 +36,24 @@ app.use(express.json({ limit: '10mb' }));
 // 静态文件（Vue 前端，构建后）
 app.use(express.static('public'));
 
-// 图片存储目录（独立于 public，不会被 vite build 清空）
+// 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
+app.use('/images', (req, res, next) => {
+  const pngMatch = req.path.match(/\.png$/i);
+  if (!pngMatch) return next();
+
+  const pngPath = path.join('data/images', req.path);
+  // 原 PNG 存在 → 直接走 static 兜底
+  if (fs.existsSync(pngPath)) return next();
+
+  // PNG 不存在（已被 AVIF 压缩后删除），检查同名 .avif
+  const avifPath = path.join('data/images', req.path.replace(/\.png$/i, '.avif'));
+  if (fs.existsSync(avifPath)) {
+    res.setHeader('Content-Type', 'image/avif');
+    return res.sendFile(path.resolve(avifPath));
+  }
+
+  next();
+});
 app.use('/images', express.static('data/images'));
 app.use('/avatars', express.static('data/avatars'));
 
@@ -91,6 +111,9 @@ startReplyQueueScheduler();
 
 // 初始化日程管理器（恢复睡眠状态）
 initScheduleManager();
+
+// 启动图片压缩调度器（定时 + 立即压缩功能）
+startImageCompressor();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

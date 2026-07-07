@@ -10,6 +10,7 @@
     "release": "node scripts/build-release.mjs",
     "build": "node scripts/build.mjs",
     "lasttag": "node scripts/lasttag.mjs",
+    "restart-core": "node scripts/restart-core.mjs",
     "preview-launcher": "cd launcher && python main.py"
   }
 }
