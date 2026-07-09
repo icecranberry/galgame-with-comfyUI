@@ -527,7 +527,7 @@
                         <option value="">请选择自定义工作流</option>
                         <option v-for="wf in filteredWorkflows" :key="wf.filename" :value="wf.filename">{{ wf.label }}</option>
                       </select>
-                      <p class="form-hint">单人图片启用自定工作流，可以给某个角色单独设置流程，同样会默认注入长、宽、画师串、画面描述、lora，不需要的字段可以不用。</p>
+                      <p class="form-hint">单人图片才会启用自定工作流，可以给某个角色单独设置完全自由的工作流，同样会默认注入长、宽、画师串、画面描述、lora（如果设置了），不需要的节点可以去掉。</p>
                     </div>
                   </Transition>
                 </div>
