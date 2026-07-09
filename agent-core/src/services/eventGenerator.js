@@ -467,6 +467,8 @@ ${worldPenetrationLine}- 从一个感官细节开始——声音、画面、身�
       artist: config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
+      loras: _parseCharLoras(character.loras),
+      ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
       await fsp.mkdir(imagesDir, { recursive: true });
@@ -719,6 +721,8 @@ ${worldPenetrationLine2}- 承接上一个选择的结果，从一个具体的感
       artist: config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
+      loras: _parseCharLoras(character.loras),
+      ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
       await fsp.mkdir(imagesDir, { recursive: true });
@@ -1011,4 +1015,13 @@ function parseImagePromptRule(ruleContent) {
 function toISO(dt) {
   if (!dt) return dt;
   return dt.replace(' ', 'T') + '.000Z';
+}
+
+function _parseCharLoras(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+  return [];
 }

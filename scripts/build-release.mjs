@@ -136,7 +136,15 @@ function exec(cmd, args, opts = {}) {
       windowsHide: true,
       shell: process.platform === "win32",
       ...opts,
-      env: { ...process.env, PYTHONUNBUFFERED: "1", FORCE_COLOR: "0", ...(opts.env || {}) },
+      // 确保打包的 Node.js 在 PATH 最前面，否则 npm postinstall 脚本
+      // （esbuild 的 node install.js 等）会因为 cmd.exe 找不到 node 而失败
+      env: {
+        ...process.env,
+        PATH: existsSync(NODE_DIR) ? `${NODE_DIR};${process.env.PATH}` : process.env.PATH,
+        PYTHONUNBUFFERED: "1",
+        FORCE_COLOR: "0",
+        ...(opts.env || {}),
+      },
     });
 
     let stdout = "";

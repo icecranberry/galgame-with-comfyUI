@@ -1296,6 +1296,27 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   const projectRoot = path.dirname(path.dirname(path.dirname(__filename))); // agent-core/
   const imagesDir = path.join(projectRoot, 'data', 'images');
 
+  // 查找角色 lora 设置
+  let loraOpts = {};
+  try {
+    const charId = parseInt(String(conversationId).replace(/^char_/, ''), 10);
+    if (!Number.isNaN(charId)) {
+      const char = db.prepare('SELECT custom_workflow, loras FROM characters WHERE id = ?').get(charId);
+      if (char) {
+        const loras = _parseLoras(char);
+        if (loras.length > 0 || char.custom_workflow) {
+          const opts = {};
+          if (char.custom_workflow) opts.customWorkflow = char.custom_workflow;
+          if (loras.length > 0) opts.loras = loras;
+          loraOpts = opts;
+          console.log(`[chat] Lora enabled for char ${charId}:${opts.customWorkflow ? ' custom=' + opts.customWorkflow : ''}${opts.loras ? ` ${opts.loras.length} lora(s) — ${opts.loras.map(l => l.path).join(', ')}` : ''}`);
+        }
+      }
+    }
+  } catch (e) {
+    console.log('[chat] Failed to load lora settings:', e.message);
+  }
+
   try {
     const result = await generateImage(prompt, {
       onProgress: (p) => {
@@ -1304,7 +1325,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         } else {
           send('generate_progress', { taskId, ...p });
         }
-      }
+      },
+      ...loraOpts,
     });
     if (result.success && result.images.length > 0) {
       // 落盘 base64 图片到 data/images/，构建 URL 数组
@@ -1716,6 +1738,21 @@ async function generateReplyGuesses(conversationId, character) {
 // ── 供 characters.js 调用的清理函数 ──
 export function clearImageJudgeCounter(charId) {
   imageJudgeCounters.delete(`char_${charId}`);
+}
+
+function _parseLoras(char) {
+  if (!char.loras) return [];
+  try {
+    const parsed = typeof char.loras === 'string' ? JSON.parse(char.loras) : char.loras;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(l => l.path && typeof l.path === 'string').map(l => ({
+      path: l.path,
+      weight: typeof l.weight === 'number' ? l.weight : 1,
+      triggerWord: l.triggerWord || '',
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export default router;

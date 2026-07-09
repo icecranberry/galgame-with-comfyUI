@@ -111,7 +111,7 @@ router.post('/', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
@@ -128,6 +128,8 @@ router.put('/:id', (req, res) => {
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
   if (proactive_disabled !== undefined) { updates.push('proactive_disabled = ?'); params.push(proactive_disabled ? 1 : 0); }
   if (events_disabled !== undefined) { updates.push('events_disabled = ?'); params.push(events_disabled ? 1 : 0); }
+  if (custom_workflow !== undefined) { updates.push('custom_workflow = ?'); params.push(custom_workflow || null); }
+  if (loras !== undefined) { updates.push('loras = ?'); params.push(Array.isArray(loras) ? JSON.stringify(loras) : (loras || '[]')); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
@@ -532,6 +534,8 @@ router.post('/:id/gift', async (req, res) => {
       const imagesDir = path.join(projectRoot, 'data', 'images');
 
       generateImage(result.imagePrompt, {
+        loras: _parseCharLoras(char.loras),
+        ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
         onProgress: (p) => {
           console.log(`[gift] image gen progress for ${char.display_name}:`, p.stage || p);
         }
@@ -647,10 +651,13 @@ ${char.base_prompt}
 
     // Step 2: 调用 ComfyUI 生图（1024x1024）
     console.log(`[generate-avatar] Step 2/2: generating image at 1024x1024...`);
+    const charLoras = _parseCharLoras(char.loras);
     const result = await generateImageRaw(promptText, {
       artist: config.comfyui.momentsArtist,
       width: 768,
       height: 768,
+      loras: charLoras.length > 0 ? charLoras : undefined,
+      ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
       onProgress: (p) => {
         if (p.stage) console.log(`[generate-avatar] ComfyUI: ${p.stage}`);
       },
@@ -695,5 +702,14 @@ ${char.base_prompt}
     res.status(500).json({ error: '生成失败: ' + err.message });
   }
 });
+
+function _parseCharLoras(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+  return [];
+}
 
 export default router;

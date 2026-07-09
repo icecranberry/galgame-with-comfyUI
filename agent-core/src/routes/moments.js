@@ -451,6 +451,7 @@ async function generateMomentPost(character) {
       const relDesc = `${picked.other_name}是你的${picked.relationship_text}`;
 
       multiPerson = {
+        otherId: picked.other_id,
         otherName: picked.other_name,
         otherPersona,
         relDesc,
@@ -578,10 +579,30 @@ async function generateMomentPost(character) {
   // 3. 生成配图
   let imageUrls = [];
   try {
+    // 构建 lora 参数：合并自身 + 对方（如有）的 lora
+    let loraOpts = {};
+    const selfLoras = _parseCharLoras(character.loras);
+    let otherLoras = [];
+    if (multiPerson) {
+      const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson.otherId);
+      if (otherChar) otherLoras = _parseCharLoras(otherChar.loras);
+    }
+
+    const allLoras = [...selfLoras, ...otherLoras];
+
+    if (allLoras.length > 0) {
+      loraOpts = {
+        customWorkflow: multiPerson ? null : (character.custom_workflow || null),
+        loras: allLoras,
+      };
+      console.log(`[moments] Lora: self=${selfLoras.length} other=${otherLoras.length} total=${allLoras.length}`);
+    }
+
     const genResult = await generateImageRaw(imagePrompt, {
       artist: config.comfyui.momentsArtist,
       width: config.comfyui.momentsWidth,
       height: config.comfyui.momentsHeight,
+      ...loraOpts,
     });
 
     if (genResult.success && genResult.images.length > 0) {
@@ -786,6 +807,15 @@ ${commentHistory}
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });
 
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
+}
+
+function _parseCharLoras(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+  return [];
 }
 
 export default router;

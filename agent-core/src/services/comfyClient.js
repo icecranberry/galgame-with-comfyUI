@@ -105,6 +105,10 @@ const NODE_WIDGET_FALLBACK = {
     { name: 'lora_name', slot: 1 },
     { name: 'strength_model', slot: 2 },
   ],
+  'Lora Loader (LoraManager)': [
+    { name: 'lora_name', slot: 1 },
+    { name: 'lora_config', slot: 2 },
+  ],
 };
 
 function guiToApi(workflow) {

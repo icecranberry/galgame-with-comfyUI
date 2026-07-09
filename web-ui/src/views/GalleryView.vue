@@ -47,7 +47,7 @@
                 >AVIF 有损</button>
               </div>
               <div class="type-desc">
-                {{ compressType === 'oxipng' ? '无损重编码 PNG，画质几乎不变，预计大小下降70%' : '转为 AVIF 格式 有损压缩，小图压缩会微微失真，大图没区别，预计大小下降95%' }}
+                {{ compressType === 'oxipng' ? '无损重编码 PNG，画质几乎不变，预计大小下降70%' : '转为 AVIF 格式（较新格式，过旧浏览器不支持） 有损压缩，小图压缩会微微失真，大图没区别，预计大小下降95%' }}
               </div>
               <button
                 class="btn-start-inline"

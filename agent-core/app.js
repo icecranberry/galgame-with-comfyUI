@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
@@ -71,6 +72,21 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/schedule', scheduleRoutes);
+
+// 工作流列表：返回 workflow/ 目录下所有 JSON 文件
+const _appDir = path.dirname(fileURLToPath(import.meta.url));
+const _workflowDir = path.join(_appDir, '..', 'workflow');
+app.get('/api/workflows', (req, res) => {
+  try {
+    const files = fs.readdirSync(_workflowDir).filter(f => f.endsWith('.json')).map(f => ({
+      filename: f,
+      label: f.replace('.json', ''),
+    }));
+    res.json({ workflows: files });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list workflows' });
+  }
+});
 
 // 健康检查
 app.get('/api/health', async (req, res) => {

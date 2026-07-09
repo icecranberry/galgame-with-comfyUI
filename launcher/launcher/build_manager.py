@@ -393,6 +393,27 @@ class BuildManager(QObject):
                       "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
             if _key in os.environ and _key not in env.keys():
                 env.insert(_key, os.environ[_key])
+
+        # 将捆绑的 Node.js 注入 PATH，确保 npm postinstall 脚本（esbuild 的
+        # node install.js 等）能通过 cmd.exe 找到 node 命令
+        bundled_node_exe = find_bundled_node(self._project_path)
+        if bundled_node_exe:
+            node_bin_dir = os.path.dirname(bundled_node_exe)
+            current_path = env.value("PATH", "")
+            if node_bin_dir not in current_path:
+                env.insert("PATH", f"{node_bin_dir};{current_path}")
+
+        # 同样将捆绑的 Python 注入 PATH（部分 pip 包 postinstall 可能需要）
+        bundled_py = find_bundled_python(self._project_path)
+        if bundled_py:
+            py_bin_dir = os.path.dirname(bundled_py)
+            # Scripts 目录也加入（pip 安装的可执行文件在此），但 embeddable 可能没有
+            scripts_dir = os.path.join(os.path.dirname(py_bin_dir), "Scripts")
+            current_path2 = env.value("PATH", "")
+            for extra in (py_bin_dir, scripts_dir):
+                if os.path.isdir(extra) and extra not in current_path2:
+                    env.insert("PATH", f"{extra};{env.value('PATH', '')}")
+
         self._proc.setProcessEnvironment(env)
 
         # 使用完整路径启动，避免 PATH 查找失败的模糊报错

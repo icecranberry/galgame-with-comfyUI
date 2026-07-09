@@ -238,7 +238,7 @@
     <Teleport to="body">
       <Transition name="modal-fade">
         <div v-if="showEditor" class="modal-overlay">
-          <div class="modal-panel modal-wide">
+          <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
             <div class="modal-header">
               <h3>{{ chat.activeChar?.display_name }}</h3>
               <button class="modal-close" @click="closeCharEditor">✕</button>
@@ -267,7 +267,7 @@
                 </label>
               </div>
             </div>
-            <div class="modal-body">
+            <div class="modal-body modal-body-detail">
               <!-- 头像 -->
               <div class="detail-avatar-row">
                 <div
@@ -327,7 +327,7 @@
                 <label class="fl">展示名</label>
                 <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
                 <label class="fl" style="margin-top:12px">人格提示词</label>
-                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" rows="12" @input="detail.dirty = true"></textarea>
+                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
               </div>
             </div>
             <!-- 操作栏 sticky footer -->
@@ -2159,6 +2159,39 @@ function renderContent(text) {
 .modal-body {
   padding: 0px 22px 22px;
   overflow-y: auto; flex: 1;
+}
+
+.modal-body-detail {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-body-detail .preview-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.modal-body-detail .prompt-textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: var(--text-secondary) transparent;
+}
+.modal-body-detail .prompt-textarea::-webkit-scrollbar {
+  width: 10px;
+}
+.modal-body-detail .prompt-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal-body-detail .prompt-textarea::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 5px;
+}
+.modal-body-detail .prompt-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--text-primary);
 }
 
 /* ── Toggle Switch ── */

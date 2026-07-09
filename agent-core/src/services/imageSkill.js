@@ -4,9 +4,15 @@
  * 流程:
  *   1. 接收 {"prompt":"..."} 中的中文画面描述
  *   2. 用Anima提示词优化助手.txt 规则，调 DeepSeek 优化为英文 prompt
- *   3. 加载 workflow，按节点 title 注入参数（画师串/质量提示词/画面描述/宽/高）
+ *   3. 按条件注入参数（画师串/质量提示词/画面描述/宽/高/lora）
  *   4. 提交 ComfyUI → 轮询 → 下载 base64
  *   5. 兜底: 本地 output/bot/ 文件夹
+ *
+ * Lora 加载方式:
+ *   不再使用 Lora Loader (LoraManager) 节点 + <lora:xxx:1> 标签
+ *   改为动态注入 ComfyUI 官方 LoraLoaderModelOnly 节点
+ *   多个 lora 通过堆叠多个 LoraLoaderModelOnly 节点实现
+ *   链路: UNETLoader → Lora1 → Lora2 → ... → KSampler
  */
 
 import fs from 'fs';
@@ -17,20 +23,20 @@ import { submitWorkflow } from './comfyClient.js';
 import { config } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = path.join(__dirname, '..', '..', '..', 'workflow', '制图工作流.json');
+const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
+const BASE_WORKFLOW = '制图工作流.json';
+const BASE_WORKFLOW_PATH = path.join(WORKFLOW_DIR, BASE_WORKFLOW);
 const RULES_PATH = path.join(__dirname, '..', '..', '..', 'workflow', 'Anima提示词优化助手.txt');
 
 const PROMPT_PLACEHOLDER = '请输入画面描述';
 
-// ComfyUI 提交最大重试次数（首次 + 2 次重试 = 共 3 次）
-const MAX_SUBMIT_RETRIES = 2;
-
-// 按节点 title 注入参数（而非硬编码节点 ID），工作流节点 ID 变化时不会断裂
+// 按节点 title 注入参数（而非硬编码节点 ID）
 const NODE_TITLES = {
   artist: '画师串',
   width:  '图片的宽',
   height: '图片的长',
   prompt: '画面描述',
+  loraTrigger: 'lora触发词',
 };
 
 // 缓存规则文本
@@ -83,24 +89,36 @@ async function optimizePrompt(rawPrompt) {
 }
 
 /**
- * 生图入口：prompt 直接注入 workflow（受 promptOptimize 开关控制）
+ * 构建注入参数后的 workflow 副本
  *
- * 测试画风场景可通过 skipOptimization: true 强制跳过 LLM 优化。
- * 不写数据库，仅返回 base64 图片数据。
- */
-export async function generateImageRaw(rawPrompt, opts = {}) {
-  return submitWithRetry(rawPrompt, opts);
-}
-
-/**
- * 构建注入参数后的 workflow 副本（种子每次随机）
+ * @param {string}   promptText  - 优化后的画面描述
+ * @param {object}   [overrides]
+ * @param {string}   [overrides.artist]
+ * @param {number}   [overrides.width]
+ * @param {number}   [overrides.height]
+ * @param {Array}    [overrides.loras]  - [{path, weight, triggerWord}]
+ * @param {string}   [overrides.customWorkflow] - 自定义工作流文件名（单人时替代基础工作流）
  */
 function buildWorkflow(promptText, overrides = {}) {
-  if (!fs.existsSync(WORKFLOW_PATH)) {
-    throw new Error(`Workflow not found: ${WORKFLOW_PATH}`);
+  let wfPath = BASE_WORKFLOW_PATH;
+  const loras = overrides.loras || [];
+  const hasLoras = loras.length > 0;
+
+  if (overrides.customWorkflow) {
+    const customPath = path.join(WORKFLOW_DIR, overrides.customWorkflow);
+    if (fs.existsSync(customPath)) {
+      wfPath = customPath;
+      console.log(`[imageSkill] Using custom workflow: ${overrides.customWorkflow}`);
+    } else {
+      console.warn(`[imageSkill] Custom workflow not found: ${overrides.customWorkflow}, using base workflow`);
+    }
   }
 
-  const workflow = JSON.parse(fs.readFileSync(WORKFLOW_PATH, 'utf8'));
+  if (!fs.existsSync(wfPath)) {
+    throw new Error(`Workflow not found: ${wfPath}`);
+  }
+
+  const workflow = JSON.parse(fs.readFileSync(wfPath, 'utf8'));
   const wf = JSON.parse(JSON.stringify(workflow));
 
   const defaults = {
@@ -112,98 +130,190 @@ function buildWorkflow(promptText, overrides = {}) {
   for (const node of wf.nodes || []) {
     if (!Array.isArray(node.widgets_values)) continue;
 
-    // KSampler seed 随机化："randomize" 是 GUI 概念，API 只看数字
+    // KSampler seed 随机化
     if (node.type === 'KSampler' && node.widgets_values.length > 1 && node.widgets_values[1] === 'randomize') {
       node.widgets_values[0] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     }
 
-    // 画面描述节点：替换占位符
+    // lora触发词节点：注入所有 lora 的 triggerWord 拼接
+    if (node.title === NODE_TITLES.loraTrigger && hasLoras) {
+      const triggerWords = loras.map(l => l.triggerWord || '').filter(Boolean).join(', ');
+      if (triggerWords) {
+        node.widgets_values[0] = triggerWords;
+        console.log(`[imageSkill] lora trigger words injected: "${triggerWords}"`);
+      }
+      continue;
+    }
+
+    // 画面描述节点：替换占位符，无占位符则写入第一个 widget
     if (node.title === NODE_TITLES.prompt) {
       const idx = node.widgets_values.findIndex(
         v => typeof v === 'string' && v.includes(PROMPT_PLACEHOLDER)
       );
       if (idx >= 0) {
         node.widgets_values[idx] = promptText;
-        console.log(`[imageSkill] Node "${node.title}" (id=${node.id}) prompt injected`);
-        continue;
+      } else if (node.widgets_values.length > 0) {
+        node.widgets_values[0] = promptText;
       }
+      console.log(`[imageSkill] Node "${node.title}" prompt injected`);
+      continue;
     }
 
     // 画师串 / 宽 / 高：替换第一个 widget
     const val = defaults[node.title];
     if (val !== undefined && node.widgets_values.length > 0) {
       node.widgets_values[0] = val;
-      console.log(`[imageSkill] Node "${node.title}" (id=${node.id}) = ${val}`);
+      console.log(`[imageSkill] Node "${node.title}" injected: ${val}`);
     }
   }
 
+  // 动态注入 LoraLoaderModelOnly 节点链
+  if (hasLoras) {
+    injectLoraNodes(wf, loras);
+  }
+
+  console.log(`[imageSkill] Workflow built: ${path.basename(wfPath)}${hasLoras ? ` (${loras.length} lora(s))` : ''}`);
   return wf;
 }
 
 /**
- * 最终阀门：统计 prompt 中所有 "数字+单词" 样式标签（如 1girl、2boys、3cats），
- * 按单词词干汇总数量后拼到 prompt 最前面，同时移除原始标签避免重复干扰。
- *
- * 例如 "2girls, 1girl, sitting, long hair" → "3girls, sitting, long hair"
- * 例如 "1boy, 2boys, gym"                  → "3boys, gym"
- * 例如 "1cat, 1cat, sleeping"              → "2cats, sleeping"
+ * 在 workflow 中动态插入 LoraLoaderModelOnly 节点
+ * 链路: UNETLoader → Lora1 → Lora2 → ... → KSampler
+ */
+function injectLoraNodes(wf, loras) {
+  const unetNode = wf.nodes.find(n => n.type === 'UNETLoader');
+  const samplerNode = wf.nodes.find(n => n.type === 'KSampler');
+
+  if (!unetNode || !samplerNode) {
+    console.warn('[imageSkill] Cannot inject lora nodes: UNETLoader or KSampler not found in workflow');
+    return;
+  }
+
+  // 移除旧的 UNETLoader→KSampler 直连 link
+  const unetModelOutput = unetNode.outputs.find(o => o.name === 'MODEL');
+  const oldLinkId = unetModelOutput?.links?.[0];
+  if (oldLinkId) {
+    wf.links = wf.links.filter(l => l[0] !== oldLinkId);
+    const samplerModelInput = samplerNode.inputs.find(inp => inp.name === 'model');
+    if (samplerModelInput) samplerModelInput.link = null;
+    console.log(`[imageSkill] Removed direct UNET→Sampler link #${oldLinkId}`);
+  }
+
+  // 生成新 ID（确保不冲突）
+  let maxNodeId = Math.max(wf.last_node_id || 0, ...wf.nodes.map(n => n.id));
+  let maxLinkId = Math.max(wf.last_link_id || 0, ...wf.links.map(l => l[0]));
+
+  const loraNodeIds = [];
+  const outputLinkIds = [];
+
+  for (let i = 0; i < loras.length; i++) {
+    const lora = loras[i];
+    const nodeId = ++maxNodeId;
+    loraNodeIds.push(nodeId);
+
+    const inputLinkId = ++maxLinkId;
+    const outputLinkId = ++maxLinkId;
+    outputLinkIds.push(outputLinkId);
+
+    const loraNode = {
+      id: nodeId,
+      type: 'LoraLoaderModelOnly',
+      pos: [-2680 + (i * 360), -960],
+      size: [280, 100],
+      flags: {},
+      order: 14 + i,
+      mode: 0,
+      inputs: [
+        { localized_name: '模型', name: 'model', type: 'MODEL', link: inputLinkId },
+        { localized_name: 'LoRA名称', name: 'lora_name', type: 'COMBO', widget: { name: 'lora_name' }, link: null },
+        { localized_name: '模型强度', name: 'strength_model', type: 'FLOAT', widget: { name: 'strength_model' }, link: null },
+      ],
+      outputs: [
+        { localized_name: '模型', name: 'MODEL', type: 'MODEL', links: [outputLinkId] },
+      ],
+      title: `lora${i + 1}`,
+      properties: {
+        cnr_id: 'comfy-core',
+        ver: '0.24.0',
+        'Node name for S&R': 'LoraLoaderModelOnly',
+      },
+      widgets_values: [lora.path, lora.weight ?? 1],
+    };
+
+    wf.nodes.push(loraNode);
+    console.log(`[imageSkill] LoraLoaderModelOnly node added: id=${nodeId}, title="lora${i + 1}", path="${lora.path}", weight=${lora.weight ?? 1}`);
+
+    // 上游来源：UNETLoader(第一个lora) 或 上一个 lora 节点
+    const sourceNodeId = i === 0 ? unetNode.id : loraNodeIds[i - 1];
+    wf.links.push([inputLinkId, sourceNodeId, 0, nodeId, 0, 'MODEL']);
+  }
+
+  // 最后一个 lora → KSampler
+  const samplerModelInput = samplerNode.inputs.find(inp => inp.name === 'model');
+  const finalLinkId = outputLinkIds[outputLinkIds.length - 1];
+  const finalLoraNodeId = loraNodeIds[loras.length - 1];
+
+  if (samplerModelInput) {
+    samplerModelInput.link = finalLinkId;
+  }
+  wf.links.push([finalLinkId, finalLoraNodeId, 0, samplerNode.id, 0, 'MODEL']);
+
+  // 更新 workflow 元数据
+  wf.last_node_id = maxNodeId;
+  wf.last_link_id = maxLinkId;
+}
+
+/**
+ * 最终阀门：统计 prompt 中所有 "数字+单词" 样式标签，汇总后拼到最前面
  */
 function finalizeCountTags(prompt) {
-  // 匹配 数字 + 3+字母的单词（排除 4k、8k、3d 等短标签），带可选复数 s
   const tagRe = /\b(\d+)\s*([a-z]{3,})s?\b/gi;
-  const counts = new Map();  // stem → total
+  const counts = new Map();
 
   let m;
   while ((m = tagRe.exec(prompt)) !== null) {
     const num = parseInt(m[1], 10) || 1;
     const word = m[2].toLowerCase();
-    // 词干：去掉末尾 s（cat → cat, girls → girl）
     const stem = word.endsWith('s') && word.length > 3 ? word.slice(0, -1) : word;
     counts.set(stem, (counts.get(stem) || 0) + num);
   }
 
   if (counts.size === 0) return prompt;
 
-  // 按汇总数量从大到小排序
   const parts = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([stem, count]) => count === 1 ? `1${stem}` : `${count}${stem}s`);
 
-  // 移除原始 数字+单词 标签
   let cleaned = prompt.replace(/\b\d+\s*[a-z]{3,}s?\b\s*,?\s*/gi, '');
   cleaned = cleaned.replace(/^,\s*/, '').replace(/,\s*$/, '').trim();
 
   return parts.join(', ') + (cleaned ? ', ' + cleaned : '');
 }
 
+// ComfyUI 提交最大重试次数
+const MAX_SUBMIT_RETRIES = 2;
+
 /**
  * 提交 ComfyUI 生图（含 prompt 优化、workflow 构建、重试循环）
  *
- * 流程:
- *   1. 如果 skipOptimization 为 false 且 config.features.promptOptimize !== false，
- *      调用 optimizePrompt 优化 prompt
- *   2. 最终阀门：统计 prompt 中所有 数字+girl/boy 标签，汇总后重新拼到最前面
- *   3. 构建 workflow（按节点 title 注入参数）
- *   4. 提交 ComfyUI → 轮询 → 下载 base64（最多 submitRetries 次尝试）
- *
- * 重试条件：WebSocket 通道断开/卡死（comfyClient 内 30s 无活动判定）。
- * 每次重试重新随机种子、重新提交。
- *
- * @param {string}   rawPrompt      - 原始画面描述
+ * @param {string}   rawPrompt               - 原始画面描述
  * @param {object}   [opts]
- * @param {string}   [opts.artist]          - 画师串覆盖
- * @param {number}   [opts.width]           - 图片宽度覆盖
- * @param {number}   [opts.height]          - 图片高度覆盖
- * @param {function} [opts.onProgress]      - 进度回调，stage: 'optimizing'/'submitting'/'generating'/'retrying'
- * @param {number}   [opts.submitRetries=2] - 最大重试次数（首次 + 重试次数）
- * @param {boolean}  [opts.skipOptimization=false] - 强制跳过 LLM 优化（测试画风专用）
+ * @param {Array}    [opts.loras]              - [{path, weight, triggerWord}]
+ * @param {string}   [opts.customWorkflow]       - 自定义工作流文件名（单人兼容）
+ * @param {string}   [opts.artist]
+ * @param {number}   [opts.width]
+ * @param {number}   [opts.height]
+ * @param {function} [opts.onProgress]
+ * @param {number}   [opts.submitRetries=2]
+ * @param {boolean}  [opts.skipOptimization=false]
  * @returns {Promise<{success, images, source, promptId}>}
  */
 async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
   skipOptimization = false,
+  loras, customWorkflow,
 } = {}) {
-  // 1. 优化 prompt（可通过功能开关或 skipOptimization 跳过）
+  // 1. 优化 prompt
   const shouldOptimize = !skipOptimization && config.features.promptOptimize !== false;
   let finalPrompt = rawPrompt;
   if (shouldOptimize) {
@@ -213,12 +323,12 @@ async function submitWithRetry(rawPrompt, {
     console.log(`[imageSkill] Prompt optimization disabled, using raw prompt directly`);
   }
 
-  // 2. 最终阀门：统计 count 标签数量并重组
+  // 2. 最终阀门
   finalPrompt = finalizeCountTags(finalPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 3. 构建 workflow
-  const wf = buildWorkflow(finalPrompt, { artist, width, height });
+  const wf = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow });
   if (onProgress) onProgress({ stage: 'submitting' });
 
   // 4. 提交 ComfyUI，带重试循环
@@ -227,7 +337,6 @@ async function submitWithRetry(rawPrompt, {
   for (let attempt = 0; attempt <= submitRetries; attempt++) {
     if (attempt > 0) {
       console.log(`[imageSkill] ComfyUI submit retry ${attempt}/${submitRetries} — re-randomizing seed`);
-      // 重试时重新随机种子
       for (const node of wf.nodes || []) {
         if (node.type === 'KSampler' && node.widgets_values.length > 1 && node.widgets_values[1] === 'randomize') {
           node.widgets_values[0] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -249,23 +358,21 @@ async function submitWithRetry(rawPrompt, {
       lastResult = { success: false, images: [], source: null, error: err.message };
     }
 
-    // 如果还有重试次数，短暂等待后再试
     if (attempt < submitRetries) {
-      const waitMs = 2000 + attempt * 1000; // 递增等待：2s → 3s
+      const waitMs = 2000 + attempt * 1000;
       console.log(`[imageSkill] Waiting ${waitMs}ms before retry...`);
       await new Promise(r => setTimeout(r, waitMs));
     }
   }
 
-  // 全部尝试耗尽，返回失败
   console.log('[imageSkill] All ComfyUI submit attempts exhausted, generation failed');
   return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted' };
 }
 
-/**
- * 执行图像生成（受 promptOptimize 开关控制）
- */
 export async function generateImage(rawPrompt, opts = {}) {
   return submitWithRetry(rawPrompt, opts);
 }
 
+export async function generateImageRaw(rawPrompt, opts = {}) {
+  return submitWithRetry(rawPrompt, opts);
+}

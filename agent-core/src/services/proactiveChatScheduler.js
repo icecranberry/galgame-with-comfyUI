@@ -570,7 +570,11 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     console.log(`⚡ Image prompt: "${prompt.slice(0, 100)}..."`);
 
     // 2. 提交 ComfyUI 生图
-    const result = await generateImage(prompt);
+    const charLoras = _parseCharLoras(character.loras);
+    const loraOpts = {};
+    if (charLoras.length > 0) loraOpts.loras = charLoras;
+    if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
+    const result = await generateImage(prompt, loraOpts);
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;
@@ -1031,6 +1035,15 @@ export async function forceProactiveNow(targetCharacterId) {
     console.error('⚡ forceProactiveNow error:', err.message);
     return null;
   }
+}
+
+function _parseCharLoras(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+  return [];
 }
 
 export function stopProactiveChatScheduler() {

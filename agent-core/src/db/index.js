@@ -397,6 +397,12 @@ function initSchema(db) {
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
+  // 迁移: characters 表新增 lora 列
+  migrateLoraSchema(db);
+
+  // characters 表新增 loras JSON 列
+  migrateLorasArraySchema(db);
+
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
@@ -1078,6 +1084,37 @@ function castValue(raw, type) {
     case 'float': { const v = parseFloat(raw); return Number.isNaN(v) ? undefined : v; }
     case 'bool': return raw === 'true' || raw === '1';
     default:     return raw;
+  }
+}
+
+/**
+ * 迁移: characters 表新增 lora 列（仅保留 custom_workflow 和 loras）
+ */
+function migrateLoraSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'custom_workflow')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN custom_workflow TEXT`);
+      console.log('[db] Added characters.custom_workflow column');
+    }
+  } catch (err) {
+    console.log('[db] migrateLoraSchema error:', err.message);
+  }
+}
+
+/**
+ * characters 表 loras JSON 列
+ * 格式: [{"path":"xxx.safetensors","weight":1,"triggerWord":"xxx"}]
+ */
+function migrateLorasArraySchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'loras')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN loras TEXT DEFAULT '[]'`);
+      console.log('[db] Added characters.loras column (JSON array, default [])');
+    }
+  } catch (err) {
+    console.log('[db] migrateLorasArraySchema error:', err.message);
   }
 }
 

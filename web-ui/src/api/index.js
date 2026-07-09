@@ -85,6 +85,12 @@ export async function generateAvatar(characterId) {
   return res.json()
 }
 
+// ── Workflows ──
+export async function getWorkflows() {
+  const res = await fetch(`${BASE}/workflows`)
+  return res.json()
+}
+
 // ── Character Relationships ──
 export async function getRelationships(characterId) {
   const res = await fetch(`${BASE}/relationships?character_id=${characterId}`)
