@@ -109,7 +109,7 @@
     <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
-    <div class="section-title">角色</div>
+    <div class="section-title">角色 ({{ sortedCharacters.length }})</div>
     
     <!-- ═══════════════════════════════════════════
          世界观设置入口卡片
@@ -143,6 +143,11 @@
         class="char-card"
         @click="openCharDetail(c)"
       >
+        <div v-if="c.moments_disabled || c.proactive_disabled || c.events_disabled" class="char-card-badges">
+          <span v-if="c.moments_disabled" class="char-status-dot dot-moments" title="不看ta的朋友圈"></span>
+          <span v-if="c.proactive_disabled" class="char-status-dot dot-proactive" title="不主动聊天"></span>
+          <span v-if="c.events_disabled" class="char-status-dot dot-events" title="不发生奇遇"></span>
+        </div>
         <div
           class="char-card-avatar"
           :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
@@ -152,15 +157,15 @@
           <span class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
             {{ c.message_count > 0 ? `${c.message_count} 条消息` : '待唤醒' }}
           </span>
-          <span v-if="charRelCounts[c.id]" class="char-rel-badge" title="已设置角色关系">
+          <span v-if="c.relationship_count > 0" class="char-rel-badge" title="已设置角色关系">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
               <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
             </svg>
-            {{ charRelCounts[c.id] }}
+            {{ c.relationship_count }}
           </span>
         </div>
-        <div v-if="!charRelCounts[c.id]" class="char-card-edit-row">
+        <div v-if="!(c.relationship_count > 0)" class="char-card-edit-row">
           <span class="char-card-edit" title="设置角色关系网">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
@@ -307,6 +312,7 @@
           角色详情弹窗
           ═══════════════════════════════════════════ -->
     <CharacterDetailModal
+      ref="detailModalRef"
       :visible="detailVisible"
       :character="detailChar"
       @close="closeCharDetail"
@@ -393,20 +399,6 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const confirmFn = inject('confirm')
 const toastFn = inject('toast')
-
-const charRelCounts = ref({})
-
-async function loadCharRelCounts() {
-  const chars = chat.characters || []
-  const results = await Promise.allSettled(
-    chars.map(c => api.getRelationships(c.id))
-  )
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') {
-      charRelCounts.value[chars[i].id] = (r.value.relationships || []).length
-    }
-  })
-}
 
 // ── 移动端滚动标题隐藏 ──
 const headerVisible = ref(true)
@@ -663,11 +655,15 @@ const detailChar = ref(null)
 
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
+const detailModalRef = ref(null)
 
 // 关闭关系图后刷新关系数据
 watch(showRelationGraph, async (val) => {
   if (!val && detailChar.value) {
-    await loadCharRelCounts()
+    await chat.loadCharacters()
+    const updated = chat.characters.find(x => x.id === detailChar.value.id)
+    if (updated) detailChar.value = updated
+    detailModalRef.value?.refreshRelationships()
   }
 })
 
@@ -744,14 +740,12 @@ async function onCharSaved(c) {
   await chat.loadCharacters()
   const updated = chat.characters.find(x => x.id === c.id)
   if (updated) detailChar.value = updated
-  loadCharRelCounts()
 }
 
 async function onCharDeleted(c) {
   detailVisible.value = false
   detailChar.value = null
   await chat.loadCharacters()
-  loadCharRelCounts()
 }
 
 function openRelationGraph(c) {
@@ -812,7 +806,6 @@ onMounted(async () => {
   userAppearanceInput.value = userAppearance.value
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
-  loadCharRelCounts()
 })
 </script>
 
@@ -1011,6 +1004,7 @@ onMounted(async () => {
 }
 
 .char-card {
+  position: relative;
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -1024,6 +1018,27 @@ onMounted(async () => {
   cursor: pointer;
   transition: all 0.2s ease;
 }
+
+/* ── 状态标记 ── */
+.char-card-badges {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 3px;
+  z-index: 1;
+}
+
+.char-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-moments { background: #b0a0d0; }
+.dot-proactive { background: #e8a87c; }
+.dot-events { background: #c0a0a0; }
 .char-card:hover {
   background: rgba(255, 255, 255, 0.45);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);

@@ -236,6 +236,7 @@
 
     <!-- 角色详细信息编辑弹窗（酒馆同款） -->
     <CharacterDetailModal
+      ref="detailModalRef"
       :visible="showEditor"
       :character="chat.activeChar"
       @close="closeCharEditor"
@@ -690,8 +691,16 @@ const previewImage = ref(null)
 const showSettings = ref(false)
 const showEditor = ref(false)
 const showRelationGraph = ref(false)
+const detailModalRef = ref(null)
 const clearing = ref(false)
 const deleting = ref(false)
+
+// 关闭关系图后刷新详情中的关系数据
+watch(showRelationGraph, (val) => {
+  if (!val) {
+    detailModalRef.value?.refreshRelationships()
+  }
+})
 
 // ── 角色详情编辑弹窗（酒馆同款） ──
 // ── 印象弹窗 ──

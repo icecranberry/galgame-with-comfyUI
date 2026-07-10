@@ -90,7 +90,7 @@ router.put('/llm', (req, res) => {
 });
 
 // 已内置到代码中的规则键，不再通过 API 暴露给前端编辑
-const INTERNAL_RULE_KEYS = ['dialogue_rules', 'judge_prompt'];
+const INTERNAL_RULE_KEYS = ['dialogue_rules', 'judge_prompt', 'system_rules', 'image_prompt'];
 
 // GET /api/config/rules — 获取全部全局规则
 router.get('/rules', (req, res) => {
@@ -291,6 +291,9 @@ router.put('/disturb-settings', (req, res) => {
 
 // GET /api/config/rules/:key/default — 获取单条规则的默认值（不修改，仅供预览）
 router.get('/rules/:key/default', (req, res) => {
+  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+    return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
+  }
   const defaultRule = DEFAULT_GLOBAL_RULES.find(r => r.rule_key === req.params.key);
   if (!defaultRule) {
     return res.status(404).json({ error: `No default value for rule key: ${req.params.key}` });
@@ -300,6 +303,9 @@ router.get('/rules/:key/default', (req, res) => {
 
 // POST /api/config/rules/:key/reset — 重置单条全局规则为默认值
 router.post('/rules/:key/reset', (req, res) => {
+  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+    return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
+  }
   const db = getDb();
   const defaultRule = DEFAULT_GLOBAL_RULES.find(r => r.rule_key === req.params.key);
   if (!defaultRule) {

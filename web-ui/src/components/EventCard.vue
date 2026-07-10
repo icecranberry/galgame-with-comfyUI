@@ -127,12 +127,15 @@
                     <span class="vn-choice-bar"></span>
                     <span>{{ event.choice_b }}</span>
                   </button>
-                  <div class="vn-choice-c">
-                    <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自由行动'" @keyup.enter="onChoose('C')" />
-                    <button class="vn-submit" @click="onChoose('C')" :disabled="!customText.trim()">
+                  <label class="vn-choice-c">
+                    <span class="vn-input-bar">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                    </span>
+                    <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自定义行动…'" @keyup.enter="onChoose('C')" />
+                    <button class="vn-submit" @click="onChoose('C')" :disabled="!customText.trim()" title="确定">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19,12 12,19 5,12"/></svg>
                     </button>
-                  </div>
+                  </label>
                 </div>
               </div>
               <!-- 撤回按钮：只有选择过至少一次才显示 -->
@@ -719,7 +722,7 @@ watch(isExpired, (val) => {
   display: flex; align-items: stretch;
   padding: 0;
   border: 1.5px solid rgba(0,0,0,0.06);
-  background: rgba(0,0,0,0.01);
+  background: rgba(255,255,255,0.5);
   cursor: pointer; text-align: left;
   transition: all 0.25s ease;
   font-size: 15px; color: var(--text-bright);
@@ -742,28 +745,37 @@ watch(isExpired, (val) => {
 
 .vn-choice-c {
   display: flex; align-items: center;
-  border: 1.5px solid rgba(0,0,0,0.06);
-  background: rgba(0,0,0,0.01);
+  border: 1.5px dashed rgba(0,0,0,0.22);
+  background: rgba(255,255,255,0.5);
   border-radius: 12px;
   overflow: hidden;
   transition: all 0.2s;
+  cursor: text;
 }
-.vn-choice-c:focus-within { border-color: rgba(224,123,108,0.25); }
+.vn-input-bar {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; align-self: stretch;
+  color: rgba(0,0,0,0.25);
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
 .vn-input {
   flex: 1; border: none; background: transparent;
   font-size: 15px; color: var(--text-bright); outline: none;
-  padding: 14px 16px;
+  box-shadow: none; -webkit-appearance: none;
+  padding: 14px 4px;
 }
-.vn-input::placeholder { color: var(--text-secondary); opacity: 0.45; }
+.vn-input:focus { outline: none; box-shadow: none; }
+.vn-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
 .vn-submit {
   width: 48px; align-self: stretch;
   border: none; background: transparent;
   color: var(--text-secondary);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
-  border-left: 1px solid rgba(0,0,0,0.06);
+  border-left: 1px dashed rgba(0,0,0,0.15);
 }
-.vn-submit:hover:not(:disabled) { background: rgba(224,123,108,0.08); color: var(--accent); }
+.vn-submit:hover:not(:disabled) { background: rgba(0,0,0,0.05); color: var(--text-primary); }
 .vn-submit:disabled { opacity: 0.2; cursor: default; }
 
 .choice-loading {

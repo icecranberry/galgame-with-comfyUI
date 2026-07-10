@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 import { seedAll } from './seedData.js';
+import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let db;
 
@@ -933,7 +934,7 @@ export function repairFtsIndex() {
 // image_intent / image_prompt 是元规则（非 LLM system prompt 内容），不拼入
 // judge_prompt 已内置到代码中（chat.js），此处保留向后兼容（旧 DB 可能仍有该行）
 // world_setting 单独追加到末尾，也不在批量拼接中
-const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt'];
+const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt', 'system_rules'];
 
 export function getActiveGlobalRules() {
   const database = getDb();
@@ -988,8 +989,11 @@ export function getSystemRulesWithWorld(opts = {}) {
   return [rules, world].filter(Boolean).join('\n\n');
 }
 
-/** 获取单条全局规则（用于元规则如 judge_prompt） */
+/** 获取单条全局规则（用于元规则如 judge_prompt）。内置规则直接返回硬编码常量。 */
 export function getGlobalRule(key) {
+  if (BUILTIN_RULE_KEYS.has(key)) {
+    return key === 'image_prompt' ? IMAGE_PROMPT_RULE : null;
+  }
   const database = getDb();
   return database.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(key);
 }
@@ -1002,20 +1006,17 @@ export function getGlobalRule(key) {
  *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
  */
 export function getSystemRules({ roleplay = true } = {}) {
-  const rule = getGlobalRule('system_rules');
+  const content = SYSTEM_RULES_CONTENT;
 
   // 基础内容
   let base = '';
-  if (rule?.rule_content) {
-    const content = rule.rule_content;
-    const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
-    if (!rpMatch) {
-      base = content;  // 无标签（旧数据），向下兼容
-    } else {
-      const before = content.slice(0, rpMatch.index).trim();
-      // 基础上下文始终保留，roleplay 指令按需包含
-      base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
-    }
+  const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
+  if (!rpMatch) {
+    base = content;  // 无标签（旧数据），向下兼容
+  } else {
+    const before = content.slice(0, rpMatch.index).trim();
+    // 基础上下文始终保留，roleplay 指令按需包含
+    base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
   }
 
   return base;

@@ -32,11 +32,17 @@ router.get('/', (req, res) => {
 
     const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ?`).get(convId);
 
+    const relCount = db.prepare(`
+      SELECT COUNT(*) as c FROM character_relationships
+      WHERE from_character_id = ? OR to_character_id = ?
+    `).pluck().get(c.id, c.id);
+
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
       last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
       message_count: count?.c || 0,
+      relationship_count: relCount || 0,
     };
   });
 
@@ -608,9 +614,10 @@ ${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : '
 
 【头像生成额外要求】
 - 画面内容必须是脸部特写（close-up portrait, face focus）
-- 完全正面拍照，证件照风格，正常细节不用强调超清细节
+- 完全正面拍照，正常细节不用强调超清细节
+- 光照必须完全平面、均匀（flat lighting, even lighting），不要在 prompt 中写 soft lighting / warm lighting 等任何光照描述。目标是无阴影、无高光的平面照明效果
 - 完全脸部特写，重点在面部、发型、眼睛和表情
-- 白色背景（simple background），适合做证件照
+- 白色背景（simple background）
 - 严格输出 JSON 格式：{"prompt":"..."}
 - prompt 字段内必须是英文描述`;
 
@@ -620,7 +627,7 @@ ${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : '
 ${char.base_prompt}
 ---
 
-要求：脸部特写，表情跟随人格但是表情幅度很小，干净简洁的背景适合做证件照。`;
+要求：脸部特写，表情跟随人格但是表情幅度很小。`;
 
   try {
     const model = config.llm.model || 'deepseek-chat';
@@ -649,6 +656,14 @@ ${char.base_prompt}
 
     if (!promptText || promptText.length < 10) {
       return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+    }
+
+    // 去除 LLM 可能误输出的光照标签，替换为平面照明
+    const lightingTerms = /\b(soft (lighting|light)|warm lighting|dramatic lighting|sunlight|moonlight|rim light|backlight|backlighting|volumetric lighting|lens flare|ray tracing|subsurface scattering)\b\s*,?\s*/gi;
+    promptText = promptText.replace(lightingTerms, '');
+    promptText = promptText.replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '');
+    if (!/\bflat lighting\b/i.test(promptText)) {
+      promptText += ', flat lighting, even lighting, no shadows, front-lit';
     }
 
     console.log(`[generate-avatar] Prompt generated (${promptText.length} chars): "${promptText.slice(0, 80)}..."`);

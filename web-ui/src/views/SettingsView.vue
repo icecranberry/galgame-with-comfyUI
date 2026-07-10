@@ -335,67 +335,7 @@
 
     </div>
 
-    <!-- 全局规则 — 跨满宽，整体折叠 -->
-    <div class="card card-full" :class="{ 'card-collapsed': !rulesExpanded }" @click="!rulesExpanded && (rulesExpanded = true)">
-      <h3 class="collapsible-header" @click.stop="rulesExpanded = !rulesExpanded">
-        <span>全局规则</span>
-      </h3>
-      <p class="fd">追加到每个角色 system prompt 末尾的通用指令，修改即时生效</p>
-
-      <svg v-if="!rulesExpanded" class="collapse-arrow" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-        <path d="M534.826667 935.466667a47.36 47.36 0 0 1-66.986667-66.773334L835.413333 501.333333 467.84 133.973333a47.36 47.36 0 1 1 66.986667-66.773333l400.64 400.64a47.36 47.36 0 0 1 0 66.986667z" fill="currentColor"/>
-      </svg>
-
-      <Transition name="rules-expand">
-        <div v-if="rulesExpanded" class="rules-grid">
-        <div v-for="rule in rules" :key="rule.rule_key" class="rule-block">
-          <div class="rule-header">
-            <span class="rule-label">{{ ruleLabels[rule.rule_key] || rule.rule_key }}</span>
-          </div>
-          <textarea
-            class="rule-textarea"
-            :value="rule._content"
-            @input="rule._content = $event.target.value; markRuleDirty(rule.rule_key)"
-            rows="10"
-          ></textarea>
-          <div class="rule-actions">
-            <button class="btn-primary btn-sm" :disabled="!rulesDirty[rule.rule_key]" @click="saveRule(rule)">保存</button>
-            <span v-if="rulesSaved[rule.rule_key]" class="smsg">已保存</span>
-            <button class="btn-ghost btn-sm btn-reset" @click="confirmResetRule(rule)">重置默认</button>
-          </div>
-        </div>
-      </div>
-      </Transition>
-    </div>
-
   </div>
-
-  <!-- 重置规则确认弹窗 -->
-  <Teleport to="body">
-    <Transition name="fav-dialog-fade">
-      <div v-if="resetDialog.show" class="fav-dialog-overlay" @click.self="cancelResetRule">
-        <div class="fav-dialog">
-          <div class="fav-dialog-header">
-            <span>重置全局规则</span>
-            <button class="fav-dialog-close" @click="cancelResetRule">✕</button>
-          </div>
-          <div class="fav-dialog-body">
-            <p class="fav-dialog-desc">
-              确定要将 <strong>{{ ruleLabels[resetDialog.key] || resetDialog.key }}</strong> 重置为默认值吗？当前修改将丢失。
-            </p>
-            <div v-if="resetDialog.preview" class="reset-preview">
-              <div class="reset-preview-label">默认值预览：</div>
-              <pre class="reset-preview-content">{{ resetDialog.preview }}</pre>
-            </div>
-            <div class="fav-dialog-actions">
-              <button class="btn-ghost" @click="cancelResetRule">取消</button>
-              <button class="btn-danger" @click="doResetRule">确认重置</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
 
   <!-- 收藏画师串弹窗 -->
   <Teleport to="body">
@@ -504,7 +444,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, getGlobalRules, updateGlobalRule, getDefaultRule, resetGlobalRule, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -580,14 +520,6 @@ const disturbDialog = reactive({
 const dirty = ref(false)
 const saved = ref(false)
 const health = ref(null)
-const rules = ref([])
-const rulesDirty = ref({})
-const rulesSaved = ref({})
-const rulesExpanded = ref(false)
-const ruleLabels = {
-  system_rules: '系统规则',
-  image_prompt: '图像生成指令',
-}
 
 const presets = [
   { label: '768×512', width: 768, height: 512 },
@@ -737,7 +669,6 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
   } catch {}
   await checkHealth()
-  await loadRules()
   await loadArtistFavorites()
 })
 
@@ -885,87 +816,6 @@ async function loadAllCharacters() {
 
 async function checkHealth() { health.value = await comfyuiHealth() }
 
-// ── 全局规则 ──
-async function loadRules() {
-  try {
-    const data = await getGlobalRules()
-    rules.value = (data.rules || [])
-      .filter(r => r.rule_key !== 'world_setting')
-      .map(r => ({
-        ...r,
-        _content: r.rule_content,
-      }))
-  } catch {}
-}
-
-function markRuleDirty(key) { rulesDirty.value[key] = true; rulesSaved.value[key] = false }
-async function saveRule(rule) {
-  try {
-    const result = await updateGlobalRule(rule.rule_key, {
-      rule_content: rule._content,
-    })
-    if (result.ok) {
-      rule.rule_content = rule._content
-      rule.updated_at = result.rule?.updated_at || new Date().toISOString()
-      rulesDirty.value[rule.rule_key] = false
-      rulesSaved.value[rule.rule_key] = true
-      setTimeout(() => rulesSaved.value[rule.rule_key] = false, 2000)
-    }
-  } catch (err) {
-    console.error('[rules] save failed:', err)
-  }
-}
-
-// ── 重置规则 ──
-const resetDialog = reactive({
-  show: false,
-  key: '',
-  preview: '',
-})
-
-async function confirmResetRule(rule) {
-  resetDialog.key = rule.rule_key
-  resetDialog.preview = '加载中…'
-  resetDialog.show = true
-  try {
-    const data = await getDefaultRule(rule.rule_key)
-    if (data.ok) {
-      resetDialog.preview = data.rule_content
-    } else {
-      resetDialog.preview = '(无法获取默认值)'
-    }
-  } catch {
-    resetDialog.preview = '(无法获取默认值)'
-  }
-}
-
-function cancelResetRule() {
-  resetDialog.show = false
-  resetDialog.key = ''
-  resetDialog.preview = ''
-}
-
-async function doResetRule() {
-  try {
-    const result = await resetGlobalRule(resetDialog.key)
-    if (result.ok) {
-      // 用返回的 rule 内容更新本地
-      const idx = rules.value.findIndex(r => r.rule_key === resetDialog.key)
-      if (idx !== -1) {
-        rules.value[idx].rule_content = result.rule.rule_content
-        rules.value[idx]._content = result.rule.rule_content
-        rules.value[idx].updated_at = result.rule.updated_at
-      }
-      rulesDirty.value[resetDialog.key] = false
-      rulesSaved.value[resetDialog.key] = true
-      setTimeout(() => rulesSaved.value[resetDialog.key] = false, 2000)
-    }
-  } catch (err) {
-    console.error('[rules] reset failed:', err)
-  }
-  cancelResetRule()
-}
-
 
 
 // ── 测试画风 ──
@@ -1086,7 +936,6 @@ function resetTestPrompts() {
 }
 .card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
-.rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -1451,105 +1300,6 @@ function resetTestPrompts() {
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
 
-/* ── 全局规则折叠 ── */
-.card-collapsed {
-  cursor: pointer;
-  position: relative;
-  padding-right: 48px; /* 为右侧箭头留空间，避免文字重叠 */
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.card-collapsed:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(239, 137, 74, 0.12);
-}
-.collapsible-header {
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: color 0.15s;
-}
-.collapsible-header:hover { color: var(--accent); }
-.collapse-arrow {
-  position: absolute;
-  top: 50%;
-  right: 24px;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 20px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-/* 展开/合拢过渡 */
-.rules-expand-enter-active,
-.rules-expand-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.rules-expand-enter-from,
-.rules-expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-}
-.rules-expand-enter-to,
-.rules-expand-leave-from {
-  opacity: 1;
-  max-height: 2000px;
-}
-
-/* ── 全局规则 ── */
-.rule-block {
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-}
-.rule-header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 10px;
-}
-.rule-label { font-size: 14px; font-weight: 600; color: var(--text-bright); }
-.rule-textarea {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 12px; line-height: 1.6;
-  border: 1px solid #d5d0ca;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--text-primary);
-  resize: vertical; min-height: 120px;
-  font-family: inherit;
-}
-.rule-textarea:focus { border-color: var(--accent); outline: none; }
-.rule-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-.btn-sm { font-size: 12px; padding: 5px 14px; border-radius: 6px; }
-.btn-reset { margin-left: auto; }
-.btn-danger {
-  padding: 8px 20px; font-size: 13px; font-weight: 500;
-  border-radius: 8px; border: none; cursor: pointer;
-  background: var(--danger); color: #fff;
-  transition: all 0.15s;
-}
-.btn-danger:hover { opacity: 0.85; }
-
-/* ── 重置确认弹窗 ── */
-.reset-preview {
-  margin-top: 12px; padding: 10px 12px;
-  border-radius: 8px; background: var(--glass-bg-strong);
-  border: 1px solid var(--glass-border);
-  max-height: 340px; overflow-y: auto;
-}
-.reset-preview-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
-.reset-preview-content {
-  font-size: 12px; line-height: 1.6; color: var(--text-primary);
-  white-space: pre-wrap; overflow-wrap: break-word; margin: 0;
-  font-family: inherit;
-}
-
 .sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
 .sp-btn-small:hover { border-color:var(--accent); }
 
@@ -1626,7 +1376,6 @@ function resetTestPrompts() {
     padding: 8px 0; margin-bottom: 20px;
   }
   .settings-grid { grid-template-columns: 1fr; }
-  .rules-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
 }

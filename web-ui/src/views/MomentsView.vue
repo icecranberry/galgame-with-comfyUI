@@ -136,7 +136,7 @@ function onFilterWheel(e) {
   el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
 }
 
-const characters = computed(() => chat.characters)
+const characters = computed(() => [...chat.characters].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 function onPreview({ images, index }) {
   previewImage.value = images[index]

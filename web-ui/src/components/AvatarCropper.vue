@@ -92,7 +92,7 @@
         </div>
       </div>
       <div class="crop-actions">
-        <button class="btn-cancel" @click="cancelCrop">取消</button>
+        <button class="btn-cancel" @click="regenerateAvatar" :disabled="isGenerating">重新生成</button>
         <button class="btn-primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</button>
       </div>
     </div>
@@ -143,7 +143,7 @@ const genPhaseMessages = [
   '构思画面构图...',
   '生成画面描述...',
   '提交绘图引擎...',
-  'AI 正在绘制中...',
+  '引擎正在绘制中...',
   '即将完成...',
 ]
 
@@ -401,6 +401,11 @@ function cropTouchEnd(e) {
 }
 
 function cancelCrop() { cropImage.value = null }
+
+function regenerateAvatar() {
+  cropImage.value = null
+  nextTick(() => startGenerate())
+}
 
 // ── 保存：直接从原图裁剪（无缩放精度损失） ──
 async function saveCrop() {

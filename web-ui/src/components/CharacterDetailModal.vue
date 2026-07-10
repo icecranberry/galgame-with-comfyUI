@@ -153,7 +153,7 @@
       <div v-if="showLoraModal" class="modal-overlay" @click.self="closeLoraModal">
         <div class="modal-panel modal-wide">
           <div class="modal-header">
-            <h3>Lora 设置 — {{ character?.display_name }}</h3>
+            <h3>LoRA 设置 — {{ character?.display_name }}</h3>
             <button class="modal-close" @click="closeLoraModal">✕</button>
           </div>
           <div class="modal-body">
@@ -231,6 +231,14 @@
             </div>
 
             <div class="modal-actions" style="margin-top:16px">
+              <span class="lora-civitai-label">LoRA 获取：</span>
+              <a :href="civitaiSearchUrl" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">
+                CivitAI 搜索：{{ civitaiDisplayName }}
+              </a>
+              <span class="lora-civitai-label">或</span>
+              <a :href="civitaiRedSearchUrl" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">
+                CivitAI.red 搜索：{{ civitaiDisplayName }}
+              </a>
               <div style="flex:1"></div>
               <button class="btn-primary" @click="saveLora" :disabled="loraLoading">
                 {{ loraLoading ? '保存中…' : '保存' }}
@@ -300,6 +308,18 @@ const customWorkflowOptions = computed(() =>
   filteredWorkflows.value.map(w => ({ value: w.filename, label: w.label }))
 )
 
+const civitaiSearchUrl = computed(() => {
+  const name = (props.character?.name || props.character?.display_name || '').replaceAll('_', ' ')
+  return `https://civitai.com/search/models?baseModel=Anima&sortBy=models_v9&query=${encodeURIComponent(name)}`
+})
+const civitaiRedSearchUrl = computed(() => {
+  const name = (props.character?.name || props.character?.display_name || '').replaceAll('_', ' ')
+  return `https://civitai.red/search/models?baseModel=Anima&sortBy=models_v9&query=${encodeURIComponent(name)}`
+})
+const civitaiDisplayName = computed(() => {
+  return (props.character?.name || props.character?.display_name || '').replaceAll('_', ' ')
+})
+
 const hasLoraSetup = computed(() => {
   const c = props.character
   if (!c) return false
@@ -325,6 +345,20 @@ watch(() => [props.visible, props.character], ([v, c]) => {
     init(c)
   }
 })
+
+function refreshRelationships() {
+  if (!props.character) return
+  detail.relationshipsLoading = true
+  api.getRelationships(props.character.id).then(res => {
+    detail.relationships = res.relationships || []
+  }).catch(() => {
+    detail.relationships = []
+  }).finally(() => {
+    detail.relationshipsLoading = false
+  })
+}
+
+defineExpose({ refreshRelationships })
 
 function init(c) {
   detail.editName = c.display_name || ''
@@ -467,7 +501,7 @@ function closeLoraModal() {
 async function saveLora() {
   if (!props.character) return
   const c = props.character
-  const customWf = customWorkflowEnabled.value ? editingCustomWorkflow.value : ''
+  const customWf = (customWorkflowEnabled.value && editingCustomWorkflow.value) ? editingCustomWorkflow.value : ''
   const validLoras = loraItems.value.filter(l => l.path && l.path.trim())
   loraLoading.value = true
   try {
@@ -552,7 +586,7 @@ async function saveLora() {
 .modal-body-detail .prompt-textarea::-webkit-scrollbar-thumb:hover { background: var(--text-primary); }
 
 .modal-actions {
-  display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;align-items: center;
 }
 
 /* ═══ Toggle Switch ═══ */
@@ -729,6 +763,10 @@ async function saveLora() {
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
 .lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
+
+.lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
+.lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
+.lora-civitai-link:hover { opacity: 1; text-decoration: underline; }
 
 /* ═══ 移动端 ═══ */
 @media (max-width: 767px) {

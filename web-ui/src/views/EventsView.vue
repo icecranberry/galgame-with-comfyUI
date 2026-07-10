@@ -148,7 +148,7 @@ const pageEl = ref(null)
 const scrollEl = ref(null)
 const topbarEl = ref(null)
 
-const characters = computed(() => chat.characters.filter(c => !c.events_disabled))
+const characters = computed(() => chat.characters.filter(c => !c.events_disabled).sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 // 筛选条：有事件的角色头像（活跃+历史合并去重）
 const charactersWithEvents = computed(() => {
