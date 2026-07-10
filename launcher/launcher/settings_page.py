@@ -14,10 +14,20 @@ from PySide6.QtWidgets import (
     QFrame,
     QMessageBox,
     QProgressBar,
+    QApplication,
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QFontDatabase
 from .switch import Switch
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
 
 # 需要迁移的数据项（相对于项目根目录）
 # type: "dir" 递归复制整个目录, "file" 复制单个文件
@@ -307,6 +317,24 @@ class SettingsPage(QWidget):
         # --- 外部链接（右下角） ---
         repo_row = QHBoxLayout()
         repo_row.addStretch()
+        qq_label = ClickableLabel(
+            '<span style="color: #B09890; font-size: 11px;">Q群：1056624274</span>'
+        )
+        qq_label.setCursor(Qt.PointingHandCursor)
+        def _copy_qq():
+            QApplication.clipboard().setText("1056624274")
+            qq_label.setText(
+                '<span style="color: #B09890; font-size: 11px;">已复制群号 ✓</span>'
+            )
+            QTimer.singleShot(1500, lambda: qq_label.setText(
+                '<span style="color: #B09890; font-size: 11px;">Q群：1056624274</span>'
+            ))
+
+        qq_label.clicked.connect(_copy_qq)
+        repo_row.addWidget(qq_label)
+        repo_row.addWidget(QLabel(
+            '<span style="color: #C9C0BB; font-size: 11px;"> · </span>'
+        ))
         bili_label = QLabel(
             '<a href="https://space.bilibili.com/632137"'
             ' style="color: #B09890; text-decoration: none; font-size: 11px;">'

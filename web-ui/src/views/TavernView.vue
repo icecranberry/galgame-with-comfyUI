@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="tavern-view" @scroll="onScroll">
     <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">酒馆</h2>
@@ -221,7 +221,7 @@
                   class="preview-name-input"
                   placeholder="角色名称"
                 />
-                <div class="preview-prompt-label">人格提示词（——关于外观描述：若不准确自行纠正或传图给其他AI反推提示词）</div>
+                <div class="preview-prompt-label">-</div>
                 <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
 
                 <!-- 朋友圈开关 -->
@@ -244,6 +244,10 @@
               <div v-if="recruit.loading" class="scan-overlay">
                 <div class="scan-line"></div>
                 <div class="scan-text">{{ loadingTip }}</div>
+              </div>
+              <div v-if="recruit.result" class="recruit-appearance-hint">
+                ↑检查外观描述，可以写的少但是更需要准确，必要情况下传立绘给识图AI精确反推描述或者查阅
+                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.display_name)}`" target="_blank">animadex</a>直接补充tag
               </div>
             </div>
           </div>
@@ -300,260 +304,29 @@
     </Teleport>
 
     <!-- ═══════════════════════════════════════════
-         角色详情弹窗
-         ═══════════════════════════════════════════ -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div v-if="detail.show" class="modal-overlay">
-          <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
-            <div class="modal-header">
-              <h3>{{ detail.char?.display_name }}</h3>
-              <button class="modal-close" @click="closeCharDetail">✕</button>
-            </div>
-            <!-- 移动端工具栏 -->
-            <div class="mobile-detail-toolbar" v-if="isMobile">
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不看ta的朋友圈</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不主动聊天</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不发生奇遇</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
-                <span>设置 Lora</span>
-                <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
-                <span v-else class="toolbar-badge">未配置</span>
-              </div>
-            </div>
-            <div class="modal-body modal-body-detail">
-              <!-- 头像 -->
-              <div class="detail-avatar-row">
-                <div
-                  class="detail-avatar clickable"
-                  :style="detail.char?.avatar_path ? { backgroundImage: `url(${detail.char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-                  @click="openCharAvatarEditor"
-                >{{ detail.char?.avatar_path ? '' : detail.char?.display_name?.charAt(0) }}</div>
-                <div>
-                  <button class="sp-btn-small" @click="openCharAvatarEditor">更换头像</button>
-                  <button v-if="detail.char?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeCharAvatar">移除</button>
-                </div>
-              </div>
-              <!-- 角色关系 -->
-              <div class="detail-rel-section">
-                <div class="detail-rel-header">
-                  <span class="detail-rel-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                      <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                    </svg>
-                    角色关系网
-                  </span>
-                  <button
-                    v-if="detail.relationships.length > 0"
-                    class="detail-rel-btn subtle"
-                    @click="showRelationGraph = true"
-                  >管理关系图 &rarr;</button>
-                </div>
-                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
-                  <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
-                    <span class="rel-from">{{ detail.char?.display_name }}</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                    <span class="rel-to">{{ rel.to_display_name }}</span>
-                    <span class="rel-text">{{ rel.relationship_text }}</span>
-                  </div>
-                  <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="showRelationGraph = true">
-                    共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
-                  </div>
-                </div>
-                <div v-else class="detail-rel-empty">
-                  <template v-if="detail.relationshipsLoading">
-                    <span class="rel-empty-spinner"></span> 加载中…
-                  </template>
-                  <template v-else>
-                    <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
-                    <button class="detail-rel-btn cta" @click="showRelationGraph = true">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                        <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                      </svg>
-                      设置角色关系
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <div class="preview-card">
-                <label class="fl">展示名</label>
-                <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
-                <label class="fl" style="margin-top:12px">人格提示词</label>
-                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
-              </div>
-            </div>
-            <!-- 操作栏 sticky footer -->
-            <div class="modal-footer">
-              <div class="detail-actions">
-                <button class="btn-ghost danger" @click="deleteChar">🗑 删除角色</button>
-                <div class="detail-actions-right">
-                  <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 悬浮侧边栏 -->
-          <div class="detail-float" v-if="!isMobile">
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不看ta的朋友圈</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不主动聊天</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不发生奇遇</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="float-card float-card-btn" @click="openLoraModal">
-              <span class="float-label">设置 Lora</span>
-              <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
-              <span v-else class="float-badge">未配置</span>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
-    <!-- ═══════════════════════════════════════════
-         Lora 设置弹窗
-         ═══════════════════════════════════════════ -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div v-if="showLoraModal" class="modal-overlay" @click.self="closeLoraModal">
-          <div class="modal-panel modal-wide">
-            <div class="modal-header">
-              <h3>Lora 设置 — {{ detail.char?.display_name }}</h3>
-              <button class="modal-close" @click="closeLoraModal">✕</button>
-            </div>
-            <div class="modal-body">
-              <div class="lora-body-card">
-                <!-- ── Lora 列表 ── -->
-                <TransitionGroup name="lora-card" tag="div" class="lora-list">
-                  <div v-for="(item, idx) in loraItems" :key="idx" class="lora-item-card">
-                    <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                    </button>
-                    <div class="lora-item-row">
-                      <div class="form-group lora-path-group">
-                        <label class="fl lora-inline-label">文件路径</label>
-                        <input
-                          v-model="item.path"
-                          class="fi"
-                          placeholder="models\loras下，例如Turbo-ANIMA.safetensors或者folder\remielle_anima.safetensors"
-                        />
-                      </div>
-                      <div class="form-group lora-weight-group">
-                        <label class="fl lora-inline-label">权重</label>
-                        <input
-                          v-model.number="item.weight"
-                          type="number"
-                          step="0.05"
-                          min="0"
-                          max="5"
-                          class="fi lora-weight-input"
-                        />
-                      </div>
-                    </div>
-                    <div class="lora-trigger-row">
-                      <label class="fl lora-inline-label">触发词</label>
-                      <input
-                        v-model="item.triggerWord"
-                        class="fi"
-                        placeholder="可选，用于增强 lora 效果的提示词"
-                      />
-                    </div>
-                  </div>
-                </TransitionGroup>
-
-                <!-- ── 空状态 ── -->
-                <div v-if="loraItems.length === 0" class="lora-empty-hint">
-                  尚未配置任何 LoRA，点击下方按钮添加
-                </div>
-
-                <!-- ── 添加 Lora 按钮 ── -->
-                <button class="lora-add-btn" @click="addLoraGroup">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                  添加 LoRA
-                </button>
-
-                <div class="lora-separator"></div>
-
-                <!-- ── 自定义工作流 ── -->
-                <div class="form-group">
-                <label class="lora-check-label" @click.stop>
-                  <span class="lora-checkbox-wrap">
-                    <input type="checkbox" v-model="customWorkflowEnabled" class="lora-checkbox" />
-                    <span class="lora-checkmark">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    </span>
-                  </span>
-                  <span class="lora-check-text">启用单人自定义工作流</span>
-                </label>
-                  <Transition name="lora-expand">
-                    <div v-if="customWorkflowEnabled">
-                      <select v-model="detail.customWorkflow" class="fi lora-select" style="margin-top:8px">
-                        <option value="">请选择自定义工作流</option>
-                        <option v-for="wf in filteredWorkflows" :key="wf.filename" :value="wf.filename">{{ wf.label }}</option>
-                      </select>
-                      <p class="form-hint">单人图片才会启用自定工作流，可以给某个角色单独设置完全自由的工作流，同样会默认注入长、宽、画师串、画面描述、lora（如果设置了），不需要的节点可以去掉。</p>
-                    </div>
-                  </Transition>
-                </div>
-              </div>
-
-              <div class="modal-actions" style="margin-top:16px">
-                <div style="flex:1"></div>
-                <button class="btn-primary" @click="saveLora" :disabled="loraLoading">
-                  {{ loraLoading ? '保存中…' : '保存' }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+          角色详情弹窗
+          ═══════════════════════════════════════════ -->
+    <CharacterDetailModal
+      :visible="detailVisible"
+      :character="detailChar"
+      @close="closeCharDetail"
+      @saved="onCharSaved"
+      @deleted="onCharDeleted"
+      @open-avatar-editor="openCharAvatarEditor"
+      @remove-avatar="removeCharAvatar"
+      @open-relation-graph="openRelationGraph"
+      @lora-saved="onCharSaved"
+    />
 
     <!-- 角色头像裁剪器 -->
     <Teleport to="body">
       <AvatarCropper
         v-if="showCharAvatarPicker"
-        :title="`设置 ${detail.char?.display_name || ''} 头像`"
+        :title="`设置 ${detailChar?.display_name || ''} 头像`"
         :show-recent-tab="true"
         :show-generate-tab="true"
-        :character-id="detail.char?.id"
-        :character-base-prompt="detail.char?.base_prompt || ''"
+        :character-id="detailChar?.id"
+        :character-base-prompt="detailChar?.base_prompt || ''"
         :recent-images="recentImages"
         :recent-loading="recentLoading"
         @close="showCharAvatarPicker = false"
@@ -575,12 +348,12 @@
     </Teleport>
 
     <!-- ═══════════════════════════════════════════
-         角色关系图（独立全屏弹窗）
-         ═══════════════════════════════════════════ -->
+          角色关系图（独立全屏弹窗）
+          ═══════════════════════════════════════════ -->
     <RelationshipGraph
-      v-if="detail.char"
+      v-if="detailChar"
       :visible="showRelationGraph"
-      :center-character="detail.char"
+      :center-character="detailChar"
       :all-characters="chat.characters"
       @close="showRelationGraph = false"
     />
@@ -605,6 +378,7 @@ import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
+import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 
 const router = useRouter()
 const chat = useChatStore()
@@ -845,7 +619,7 @@ async function doGenerate() {
     if (result.search_found) {
       showToast('已在网络上找到详细角色资料', 'success')
     } else {
-      showToast('未找到相关资料，请检查IP角色名字输入是否正确，如果是原创设定则无视本条提示', 'info')
+      showToast('未找到相关资料，请检查IP角色名字输入是否正确或者重新尝试，如果是原创设定则无视本条提示', 'info')
     }
   } catch (err) {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
@@ -884,108 +658,16 @@ async function confirmRecruit() {
 // ═══════════════════════════════════════
 // 角色详情弹窗
 // ═══════════════════════════════════════
-const detail = reactive({
-  show: false,
-  char: null,
-  editName: '',
-  editPrompt: '',
-  relationships: [],
-  relationshipsLoading: false,
-  momentsDisabled: false,
-  proactiveDisabled: false,
-  eventsDisabled: false,
-  customWorkflow: '',
-  loras: [],
-  dirty: false,
-  momentsToggling: false,
-  proactiveToggling: false,
-  eventsToggling: false,
-})
+const detailVisible = ref(false)
+const detailChar = ref(null)
 
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
 
-// ── Lora 设置弹窗 ──
-const showLoraModal = ref(false)
-const customWorkflows = ref([])
-const customWorkflowEnabled = ref(false)
-const loraLoading = ref(false)
-const loraItems = ref([])  // [{path, weight, triggerWord}]
-
-const FILTERED_CUSTOM_WORKFLOW_NAMES = ['制图工作流.json', '制图工作流-加入lora.json', '制图工作流-加入lora2.json', '制图工作流-加入lora3.json']
-const filteredWorkflows = computed(() =>
-  (customWorkflows.value || []).filter(w => !FILTERED_CUSTOM_WORKFLOW_NAMES.includes(w.filename))
-)
-
-// badge 显示：有 loras 或有自定义工作流
-const hasLoraSetup = computed(() => {
-  return (detail.loras && detail.loras.length > 0) || !!detail.customWorkflow
-})
-
-async function fetchWorkflows() {
-  try {
-    const data = await api.getWorkflows()
-    customWorkflows.value = data.workflows || []
-  } catch { customWorkflows.value = [] }
-}
-
-function addLoraGroup() {
-  loraItems.value.push({ path: '', weight: 1, triggerWord: '' })
-}
-
-function removeLoraGroup(idx) {
-  loraItems.value.splice(idx, 1)
-}
-
-function openLoraModal() {
-  if (!detail.char) return
-  customWorkflowEnabled.value = !!detail.customWorkflow
-  // 从 detail.loras 初始化编辑数组
-  loraItems.value = (detail.loras || []).length > 0
-    ? JSON.parse(JSON.stringify(detail.loras))
-    : []
-  showLoraModal.value = true
-  if (customWorkflows.value.length === 0) fetchWorkflows()
-}
-
-function closeLoraModal() {
-  showLoraModal.value = false
-}
-
-async function saveLora() {
-  if (!detail.char) return
-  if (!customWorkflowEnabled.value) detail.customWorkflow = ''
-  // 过滤空 path 的 lora
-  const validLoras = loraItems.value.filter(l => l.path && l.path.trim())
-  loraLoading.value = true
-  try {
-    await api.updateCharacter(detail.char.id, {
-      custom_workflow: detail.customWorkflow || null,
-      loras: validLoras,
-    })
-    detail.loras = validLoras
-    detail.dirty = false
-    await chat.loadCharacters()
-    const updated = chat.characters.find(x => x.id === detail.char.id)
-    if (updated) detail.char = updated
-    showLoraModal.value = false
-  } catch (e) {
-    console.error('saveLora failed:', e)
-  } finally {
-    loraLoading.value = false
-  }
-}
-
 // 关闭关系图后刷新关系数据
 watch(showRelationGraph, async (val) => {
-  if (!val && detail.char) {
+  if (!val && detailChar.value) {
     await loadCharRelCounts()
-    try {
-      const res = await api.getRelationships(detail.char.id)
-      detail.relationships = res.relationships || []
-    } catch {
-      detail.relationships = []
-    }
   }
 })
 
@@ -1049,126 +731,31 @@ async function saveWorldSetting() {
 }
 
 async function openCharDetail(c) {
-  detail.char = c
-  detail.editName = c.display_name || ''
-  detail.editPrompt = c.base_prompt || ''
-  detail.momentsDisabled = !!c.moments_disabled
-  detail.proactiveDisabled = !!c.proactive_disabled
-  detail.eventsDisabled = !!c.events_disabled
-  detail.customWorkflow = c.custom_workflow || ''
-  // 解析 loras JSON（DB 存 JSON 字符串，SQLite better-sqlite3 直接返回字符串）
-  detail.loras = _parseCharLoras(c.loras)
-  detail.dirty = false
-  detail.show = true
-  detail.relationships = []
-  detail.relationshipsLoading = true
-  try {
-    const res = await api.getRelationships(c.id)
-    detail.relationships = res.relationships || []
-  } catch {
-    detail.relationships = []
-  } finally {
-    detail.relationshipsLoading = false
-  }
+  detailChar.value = c
+  detailVisible.value = true
 }
 
 function closeCharDetail() {
-  detail.show = false
-  detail.char = null
+  detailVisible.value = false
+  detailChar.value = null
 }
 
-async function saveCharDetail() {
-  if (!detail.char || !detail.dirty) return
-  const c = detail.char
-  await api.updateCharacter(c.id, {
-    display_name: detail.editName,
-    base_prompt: detail.editPrompt,
-    moments_disabled: detail.momentsDisabled,
-    proactive_disabled: detail.proactiveDisabled,
-    events_disabled: detail.eventsDisabled,
-    custom_workflow: detail.customWorkflow || null,
-    loras: detail.loras,
-  })
-  detail.dirty = false
+async function onCharSaved(c) {
   await chat.loadCharacters()
-  // 更新本地引用
   const updated = chat.characters.find(x => x.id === c.id)
-  if (updated) detail.char = updated
+  if (updated) detailChar.value = updated
+  loadCharRelCounts()
 }
 
-// 不看朋友圈 toggle — 即时持久化，无需等"保存"按钮
-async function toggleMomentsDisabled() {
-  const c = detail.char
-  if (!c) return
-  detail.momentsToggling = true
-  try {
-    await api.updateCharacter(c.id, { moments_disabled: detail.momentsDisabled })
-    // 同步更新本地角色列表中的值，避免 reload 全部角色
-    c.moments_disabled = detail.momentsDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.moments_disabled = detail.momentsDisabled
-  } catch (e) {
-    // 失败时回弹 toggle
-    detail.momentsDisabled = !detail.momentsDisabled
-    console.error('toggleMomentsDisabled failed:', e)
-  } finally {
-    detail.momentsToggling = false
-  }
-}
-
-// 不主动聊天 toggle — 即时持久化，无需等"保存"按钮
-async function toggleProactiveDisabled() {
-  const c = detail.char
-  if (!c) return
-  detail.proactiveToggling = true
-  try {
-    await api.updateCharacter(c.id, { proactive_disabled: detail.proactiveDisabled })
-    c.proactive_disabled = detail.proactiveDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.proactive_disabled = detail.proactiveDisabled
-  } catch (e) {
-    detail.proactiveDisabled = !detail.proactiveDisabled
-    console.error('toggleProactiveDisabled failed:', e)
-  } finally {
-    detail.proactiveToggling = false
-  }
-}
-
-// 不发生奇遇 toggle — 即时持久化
-async function toggleEventsDisabled() {
-  const c = detail.char
-  if (!c) return
-  detail.eventsToggling = true
-  try {
-    await api.updateCharacter(c.id, { events_disabled: detail.eventsDisabled })
-    c.events_disabled = detail.eventsDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.events_disabled = detail.eventsDisabled
-  } catch (e) {
-    detail.eventsDisabled = !detail.eventsDisabled
-    console.error('toggleEventsDisabled failed:', e)
-  } finally {
-    detail.eventsToggling = false
-  }
-}
-
-async function deleteChar() {
-  const c = detail.char
-  if (!c) return
-  if (c.name === 'default') {
-    toastFn('默认角色不能删除', 'warning')
-    return
-  }
-  const ok = await confirmFn({
-    title: '删除角色',
-    message: `确定要删除「${c.display_name}」吗？\n聊天记录和朋友圈内容也将一并删除。`,
-    okText: '删除', danger: true,
-  })
-  if (!ok) return
-  await api.deleteCharacter(c.id)
-  detail.show = false
-  detail.char = null
+async function onCharDeleted(c) {
+  detailVisible.value = false
+  detailChar.value = null
   await chat.loadCharacters()
+  loadCharRelCounts()
+}
+
+function openRelationGraph(c) {
+  showRelationGraph.value = true
 }
 
 // ── 角色头像 ──
@@ -1183,46 +770,36 @@ function openCharAvatarEditor() {
 
 async function switchToRecent() {
   if (recentImages.value.length > 0) return
-  if (!detail.char?.id) return
+  if (!detailChar.value?.id) return
   recentLoading.value = true
   try {
-    const d = await api.getRecentImages(detail.char.id)
+    const d = await api.getRecentImages(detailChar.value.id)
     recentImages.value = d.images || []
   } catch {} finally { recentLoading.value = false }
 }
 
 async function onCharAvatarSave(base64) {
-  if (!detail.char) return
-  await api.uploadAvatar(detail.char.id, base64 || '')
+  if (!detailChar.value) return
+  await api.uploadAvatar(detailChar.value.id, base64 || '')
   await chat.loadCharacters()
-  const updated = chat.characters.find(x => x.id === detail.char.id)
-  if (updated) detail.char = updated
+  const updated = chat.characters.find(x => x.id === detailChar.value.id)
+  if (updated) detailChar.value = updated
   showCharAvatarPicker.value = false
 }
 
 async function removeCharAvatar() {
-  if (!detail.char) return
+  if (!detailChar.value) return
   const ok = await confirmFn({
     title: '移除头像',
-    message: `确定要移除「${detail.char.display_name}」的头像吗？`,
+    message: `确定要移除「${detailChar.value.display_name}」的头像吗？`,
     okText: '移除',
     danger: true,
   })
   if (!ok) return
-  await api.uploadAvatar(detail.char.id, '')
+  await api.uploadAvatar(detailChar.value.id, '')
   await chat.loadCharacters()
-  const updated = chat.characters.find(x => x.id === detail.char.id)
-  if (updated) detail.char = updated
-}
-
-// ── 解析角色 loras JSON 字段（兼容字符串和已解析数组）──
-function _parseCharLoras(raw) {
-  if (!raw) return []
-  if (Array.isArray(raw)) return raw
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) } catch { return [] }
-  }
-  return []
+  const updated = chat.characters.find(x => x.id === detailChar.value.id)
+  if (updated) detailChar.value = updated
 }
 
 // ── 初始化 ──
@@ -1560,7 +1137,7 @@ onMounted(async () => {
   overflow: hidden;backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
-.modal-wide { width: min(760px, 97vw); }
+.modal-wide { width: min(1100px, 97vw); }
 
 .modal-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -1699,6 +1276,24 @@ onMounted(async () => {
   background: var(--bg-primary); border: 1px solid var(--glass-border);
   font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
   max-height: 500px; overflow-y: auto; color: var(--text-primary); font-family: inherit;
+}
+
+.recruit-appearance-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-muted, #999);
+  white-space: nowrap;
+  text-align: center;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recruit-appearance-hint a {
+  color: var(--text-muted, #999);
+  text-decoration: underline;
 }
 
 /* ── Toggle Switch ── */
@@ -1894,7 +1489,7 @@ onMounted(async () => {
 /* ── 悬浮侧边栏 ── */
 .detail-float {
   position: absolute;
-  left: calc(50% + min(380px, 48.5vw) + 16px);
+  left: calc(50% + min(450px, 48.5vw) + 16px);
   top: 70px;
   display: flex;
   flex-direction: column;
@@ -1975,7 +1570,13 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.7;
   color: var(--text-primary);
+  scrollbar-width: auto;
+  scrollbar-color: var(--text-secondary) transparent;
 }
+.modal-wide .prompt-textarea::-webkit-scrollbar { width: 10px; }
+.modal-wide .prompt-textarea::-webkit-scrollbar-track { background: transparent; }
+.modal-wide .prompt-textarea::-webkit-scrollbar-thumb { background: var(--text-secondary); border-radius: 5px; }
+.modal-wide .prompt-textarea::-webkit-scrollbar-thumb:hover { background: var(--text-primary); }
 
 /* ── 操作栏 sticky footer ── */
 .modal-footer {
@@ -2236,237 +1837,5 @@ onMounted(async () => {
 .toast-slide-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(-12px);
-}
-
-/* ── Lora 设置弹窗 ── */
-.lora-body-card {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  padding: 18px;
-}
-.lora-expand-enter-active {
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.lora-expand-leave-active {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.lora-expand-enter-from {
-  opacity: 0;
-  max-height: 0;
-  transform: translateY(-6px);
-}
-.lora-expand-enter-to {
-  opacity: 1;
-  max-height: 180px;
-  transform: translateY(0);
-}
-.lora-expand-leave-from {
-  opacity: 1;
-  max-height: 180px;
-  transform: translateY(0);
-}
-.lora-expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-  transform: translateY(-6px);
-}
-.form-group {
-  margin-bottom: 16px;
-}
-.form-group .fl {
-  display: block;
-  margin-bottom: 6px;
-}
-.form-hint {
-  margin: 4px 0 0;
-  font-size: 11px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-.lora-select {
-  width: 100%;
-}
-.lora-separator {
-  border-top: 1px solid var(--border);
-  margin: 24px 0 20px;
-}
-.lora-check-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-.lora-checkbox {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.lora-checkbox-wrap {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.lora-checkmark {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  border: 1.5px solid var(--glass-border);
-  background: var(--bg-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-  cursor: pointer;
-}
-.lora-checkmark svg {
-  opacity: 0;
-  transform: scale(0.5);
-  transition: all 0.15s;
-}
-.lora-checkbox:checked + .lora-checkmark {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.lora-checkbox:checked + .lora-checkmark svg {
-  opacity: 1;
-  transform: scale(1);
-}
-.lora-check-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-/* ── Lora 条目卡片 ── */
-.lora-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.lora-item-card {
-  position: relative;
-  background: var(--bg-primary);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 10px 32px 10px 12px;
-}
-.lora-remove-btn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 77, 79, 0.08);
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-  z-index: 1;
-  padding: 0;
-}
-.lora-remove-btn:hover {
-  background: rgba(255, 77, 79, 0.2);
-}
-.lora-item-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-.lora-item-row .form-group,
-.lora-trigger-row .form-group {
-  margin-bottom: 0;
-}
-.lora-path-group {
-  flex: 2;
-  min-width: 0;
-}
-.lora-weight-group {
-  flex: 0 0 72px;
-}
-.lora-inline-label {
-  font-size: 11px;
-  margin-bottom: 3px;
-}
-.lora-item-card .fi {
-  background: var(--glass-bg);
-}
-.lora-weight-input {
-  text-align: center;
-  padding: 9px 4px;
-}
-.lora-trigger-row {
-  margin-top: 8px;
-}
-
-/* ── Lora 卡片增删动画 ── */
-.lora-card-enter-active,
-.lora-card-leave-active {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-.lora-card-enter-from,
-.lora-card-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 0;
-  border-width: 0;
-}
-.lora-card-enter-to,
-.lora-card-leave-from {
-  opacity: 1;
-  max-height: 120px;
-}
-
-.lora-empty-hint {
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 20px 0;
-  margin-bottom: 8px;
-}
-
-.lora-add-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px 0;
-  border: 1.5px dashed var(--glass-border);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  margin: 5px 0;
-}
-.lora-add-btn:hover {
-  border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.05);
-}
-
-@media (max-width: 767px) {
-  .form-group .fl {
-    font-size: 12px;
-  }
-  .form-hint {
-    font-size: 10px;
-  }
 }
 </style>

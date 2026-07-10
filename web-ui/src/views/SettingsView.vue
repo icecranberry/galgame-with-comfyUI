@@ -183,18 +183,26 @@
 
         <!-- API 地址 -->
         <label class="fl" style="margin-top:14px">API 地址</label>
-        <select v-model="llmBaseURL" class="fi" style="margin-bottom:6px" @change="markLlmDirty">
-          <option value="https://api.deepseek.com">DeepSeek</option>
-          <option value="https://dashscope.aliyuncs.com/compatible-mode/v1">通义千问 (DashScope)</option>
-          <option value="https://api.moonshot.cn/v1">Moonshot (Kimi)</option>
-          <option value="https://api.openai.com/v1">OpenAI</option>
-          <option value="">自定义…</option>
-        </select>
+        <DropdownSelect v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
         <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl" style="margin-top:14px">模型(建议deepseek-v4-flash)</label>
+        <label class="fl" style="margin-top:14px">模型</label>
         <input v-model="llmModel" class="fi" placeholder="deepseek-v4-flash" @input="markLlmDirty" />
+
+        <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
+        <template v-if="isCustomBaseURL">
+          <label class="fl" style="margin-top:14px">自定义请求头 <span class="pl">(JSON，可选，例如 OpenRouter: {"HTTP-Referer":"https://example.com","X-Title":"MyApp"}）</span></label>
+          <textarea
+            v-model="llmHeadersText"
+            class="fi"
+            style="min-height:60px;font-family:monospace;font-size:12px;resize:vertical"
+            :class="{ 'fi-error': !llmHeadersValid }"
+            placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
+            @input="markLlmDirty"
+          ></textarea>
+          <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
+        </template>
 
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!llmDirty" @click="saveLlmConfig">保存</button>
@@ -232,7 +240,7 @@
         <div class="toggle-row">
           <div>
             <div class="tl">Anima 提示词优化</div>
-            <div class="td">画面描述将携带Anima提示词助手多请求一次LLM，画面将更加精准</div>
+            <div class="td">画面将携带Anima提示词助手（108K上下文）多请求一次LLM，部分姿势和画面将更加精准</div>
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.promptOptimize" @change="saveFeature('promptOptimize', features.promptOptimize)" />
@@ -500,6 +508,7 @@ import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfy
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import DropdownSelect from '../components/DropdownSelect.vue'
 
 const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile')
@@ -671,6 +680,25 @@ const isCustomBaseURL = computed(() => {
   const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
   return !presets.includes(llmBaseURL.value)
 })
+const llmBaseURLOptions = computed(() => [
+  { value: 'https://api.deepseek.com', label: 'DeepSeek' },
+  { value: 'https://dashscope.aliyuncs.com/compatible-mode/v1', label: '通义千问 (DashScope)' },
+  { value: 'https://api.moonshot.cn/v1', label: 'Moonshot (Kimi)' },
+  { value: 'https://api.openai.com/v1', label: 'OpenAI' },
+  { value: '', label: '自定义…' },
+])
+const llmBaseURLSelectVal = computed({
+  get: () => isCustomBaseURL.value ? '' : llmBaseURL.value,
+  set: (val) => {
+    llmBaseURL.value = val
+    if (val !== '') llmHeadersText.value = '{}'
+    markLlmDirty()
+  }
+})
+const llmHeadersText = ref('{}')
+const llmHeadersValid = computed(() => {
+  try { JSON.parse(llmHeadersText.value); return true } catch { return false }
+})
 const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
@@ -705,6 +733,8 @@ onMounted(async () => {
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
+    llmHeadersText.value = data.llm.headers && Object.keys(data.llm.headers).length
+      ? JSON.stringify(data.llm.headers, null, 2) : '{}'
   } catch {}
   await checkHealth()
   await loadRules()
@@ -738,12 +768,19 @@ async function saveLlmConfig() {
     if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
     if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
     if (llmModel.value) payload.model = llmModel.value
+    if (isCustomBaseURL.value && llmHeadersText.value.trim() && llmHeadersText.value.trim() !== '{}') {
+      try { payload.headers = JSON.parse(llmHeadersText.value) } catch {}
+    } else if (!isCustomBaseURL.value) {
+      payload.headers = {}
+    }
     const result = await updateLlmConfig(payload)
     if (result.ok) {
       settingsStore.setHasApiKey(result.hasApiKey)
       llmPreview.value = { ...result }
       llmBaseURL.value = result.baseURL || llmBaseURL.value
       llmModel.value = result.model || llmModel.value
+      llmHeadersText.value = result.headers && Object.keys(result.headers).length
+        ? JSON.stringify(result.headers, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
       llmDirty.value = false
       llmSaved.value = true
@@ -1114,6 +1151,8 @@ function resetTestPrompts() {
 }
 
 .fi:focus { border-color: var(--accent); }
+.fi-error { border-color: var(--danger, #ff4d4f) !important; }
+.gen-error { margin-top: 6px; font-size: 12px; color: var(--danger, #ff4d4f); }
 .fr { display: flex; gap: 14px; }
 .fh { flex: 1; }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 4px 0 16px; }

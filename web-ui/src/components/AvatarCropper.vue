@@ -307,20 +307,23 @@ function drawCrop() {
   const preview = previewCanvas.value
   if (preview) {
     const ps = 80
-    preview.width = ps
-    preview.height = ps
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const bufSize = Math.round(ps * dpr)
+    preview.width = bufSize
+    preview.height = bufSize
     const pctx = preview.getContext('2d')
-    pctx.clearRect(0, 0, ps, ps)
+    pctx.imageSmoothingQuality = 'high'
+    pctx.clearRect(0, 0, bufSize, bufSize)
     pctx.save()
     pctx.beginPath()
-    pctx.arc(ps / 2, ps / 2, ps / 2, 0, Math.PI * 2)
+    pctx.arc(bufSize / 2, bufSize / 2, bufSize / 2, 0, Math.PI * 2)
     pctx.clip()
     pctx.drawImage(img,
       (CROP_CX - CROP_R - cropVars.imgX) / cropVars.imgScale,
       (CROP_CY - CROP_R - cropVars.imgY) / cropVars.imgScale,
       (CROP_R * 2) / cropVars.imgScale,
       (CROP_R * 2) / cropVars.imgScale,
-      0, 0, ps, ps)
+      0, 0, bufSize, bufSize)
     pctx.restore()
   }
 }

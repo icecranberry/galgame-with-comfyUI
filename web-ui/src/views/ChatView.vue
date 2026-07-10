@@ -235,139 +235,17 @@
     </Transition>
 
     <!-- 角色详细信息编辑弹窗（酒馆同款） -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div v-if="showEditor" class="modal-overlay">
-          <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
-            <div class="modal-header">
-              <h3>{{ chat.activeChar?.display_name }}</h3>
-              <button class="modal-close" @click="closeCharEditor">✕</button>
-            </div>
-            <!-- 移动端工具栏 -->
-            <div class="mobile-detail-toolbar" v-if="isMobile">
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不看ta的朋友圈</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不主动聊天</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不发生奇遇</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="modal-body modal-body-detail">
-              <!-- 头像 -->
-              <div class="detail-avatar-row">
-                <div
-                  class="detail-avatar clickable"
-                  :style="avatarPreviewStyle"
-                  @click="openAvatarPicker"
-                >{{ chat.activeChar?.avatar_path ? '' : chat.activeChar?.display_name?.charAt(0) }}</div>
-                <div>
-                  <button class="sp-btn-small" @click="openAvatarPicker">更换头像</button>
-                  <button v-if="chat.activeChar?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeAvatar">移除</button>
-                </div>
-              </div>
-              <!-- 角色关系 -->
-              <div class="detail-rel-section">
-                <div class="detail-rel-header">
-                  <span class="detail-rel-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                      <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                    </svg>
-                    角色关系网
-                  </span>
-                  <button
-                    v-if="detail.relationships.length > 0"
-                    class="detail-rel-btn subtle"
-                    @click="showRelationGraph = true"
-                  >管理关系图 &rarr;</button>
-                </div>
-                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
-                  <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
-                    <span class="rel-from">{{ chat.activeChar?.display_name }}</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                    <span class="rel-to">{{ rel.to_display_name }}</span>
-                    <span class="rel-text">{{ rel.relationship_text }}</span>
-                  </div>
-                  <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="showRelationGraph = true">
-                    共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
-                  </div>
-                </div>
-                <div v-else class="detail-rel-empty">
-                  <template v-if="detail.relationshipsLoading">
-                    <span class="rel-empty-spinner"></span> 加载中…
-                  </template>
-                  <template v-else>
-                    <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
-                    <button class="detail-rel-btn cta" @click="showRelationGraph = true">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                        <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                      </svg>
-                      设置角色关系
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <div class="preview-card">
-                <label class="fl">展示名</label>
-                <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
-                <label class="fl" style="margin-top:12px">人格提示词</label>
-                <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
-              </div>
-            </div>
-            <!-- 操作栏 sticky footer -->
-            <div class="modal-footer">
-              <div class="detail-actions">
-                <button class="btn-ghost danger" @click="deleteCharFromModal">&#x1F5D1; 删除角色</button>
-                <div class="detail-actions-right">
-                  <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharEditor">保存</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 悬浮侧边栏 -->
-          <div class="detail-float" v-if="!isMobile">
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不看ta的朋友圈</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不主动聊天</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="float-card float-card-toggle">
-              <span class="float-label">不发生奇遇</span>
-              <label class="toggle-switch float-switch">
-                <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <CharacterDetailModal
+      :visible="showEditor"
+      :character="chat.activeChar"
+      @close="closeCharEditor"
+      @saved="onCharSaved"
+      @deleted="onCharDeleted"
+      @lora-saved="onCharSaved"
+      @open-avatar-editor="onOpenAvatarEditor"
+      @remove-avatar="removeAvatar"
+      @open-relation-graph="onOpenRelationGraph"
+    />
 
     <!-- 角色关系图（详情弹窗入口） -->
     <RelationshipGraph
@@ -623,7 +501,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
@@ -631,6 +509,7 @@ import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
+import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -814,33 +693,7 @@ const showRelationGraph = ref(false)
 const clearing = ref(false)
 const deleting = ref(false)
 
-// 关闭关系图后刷新关系数据
-watch(showRelationGraph, async (val) => {
-  if (!val && chat.activeChar) {
-    try {
-      const res = await api.getRelationships(chat.activeChar.id)
-      detail.relationships = res.relationships || []
-    } catch {
-      detail.relationships = []
-    }
-  }
-})
-
 // ── 角色详情编辑弹窗（酒馆同款） ──
-const detail = reactive({
-  editName: '',
-  editPrompt: '',
-  relationships: [],
-  relationshipsLoading: false,
-  momentsDisabled: false,
-  proactiveDisabled: false,
-  eventsDisabled: false,
-  dirty: false,
-  momentsToggling: false,
-  proactiveToggling: false,
-  eventsToggling: false,
-})
-
 // ── 印象弹窗 ──
 const showImpression = ref(false)
 const impressionLoading = ref(false)
@@ -1197,119 +1050,31 @@ function closeSettings() { showSettings.value = false }
 
 async function openCharEditor() {
   showSettings.value = false
-  const c = chat.activeChar
-  if (!c) return
-  detail.editName = c.display_name || ''
-  detail.editPrompt = c.base_prompt || ''
-  detail.momentsDisabled = !!c.moments_disabled
-  detail.proactiveDisabled = !!c.proactive_disabled
-  detail.eventsDisabled = !!c.events_disabled
-  detail.dirty = false
-  detail.relationships = []
-  detail.relationshipsLoading = true
+  if (!chat.activeChar) return
   showEditor.value = true
-  try {
-    const res = await api.getRelationships(c.id)
-    detail.relationships = res.relationships || []
-  } catch {
-    detail.relationships = []
-  } finally {
-    detail.relationshipsLoading = false
-  }
 }
 
 function closeCharEditor() {
   showEditor.value = false
 }
 
-async function deleteCharFromModal() {
-  const c = chat.activeChar
-  if (!c) return
-  if (c.name === 'default') {
-    toastFn('默认角色不能删除', 'warning')
-    return
-  }
-  const ok = await confirmFn({
-    title: '删除角色',
-    message: `确定要删除「${c.display_name}」吗？\n聊天记录和朋友圈内容也将一并删除。`,
-    okText: '删除', danger: true,
-  })
-  if (!ok) return
-  await api.deleteCharacter(c.id)
+async function onCharSaved(c) {
+  await chat.loadCharacters()
+}
+
+async function onCharDeleted(c) {
   showEditor.value = false
   await chat.loadCharacters()
   router.push('/tavern')
 }
 
-async function saveCharEditor() {
-  const c = chat.activeChar
-  if (!c || !detail.dirty) return
-  await api.updateCharacter(c.id, {
-    display_name: detail.editName,
-    base_prompt: detail.editPrompt,
-    moments_disabled: detail.momentsDisabled,
-    proactive_disabled: detail.proactiveDisabled,
-    events_disabled: detail.eventsDisabled,
-  })
-  detail.dirty = false
-  await chat.loadCharacters()
+function onOpenAvatarEditor(c) {
+  openAvatarPicker()
 }
 
-// 不看朋友圈 toggle — 即时持久化
-async function toggleMomentsDisabled() {
-  const c = chat.activeChar
-  if (!c) return
-  detail.momentsToggling = true
-  try {
-    await api.updateCharacter(c.id, { moments_disabled: detail.momentsDisabled })
-    c.moments_disabled = detail.momentsDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.moments_disabled = detail.momentsDisabled
-  } catch (e) {
-    detail.momentsDisabled = !detail.momentsDisabled
-    console.error('toggleMomentsDisabled failed:', e)
-  } finally {
-    detail.momentsToggling = false
-  }
-}
-
-// 不主动聊天 toggle — 即时持久化
-async function toggleProactiveDisabled() {
-  const c = chat.activeChar
-  if (!c) return
-  detail.proactiveToggling = true
-  try {
-    await api.updateCharacter(c.id, { proactive_disabled: detail.proactiveDisabled })
-    c.proactive_disabled = detail.proactiveDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.proactive_disabled = detail.proactiveDisabled
-  } catch (e) {
-    detail.proactiveDisabled = !detail.proactiveDisabled
-    console.error('toggleProactiveDisabled failed:', e)
-  } finally {
-    detail.proactiveToggling = false
-  }
-}
-
-// 不发生奇遇 toggle — 即时持久化
-async function toggleEventsDisabled() {
-  const c = chat.activeChar
-  if (!c) return
-  detail.eventsToggling = true
-  try {
-    await api.updateCharacter(c.id, { events_disabled: detail.eventsDisabled })
-    c.events_disabled = detail.eventsDisabled
-    const inList = chat.characters.find(x => x.id === c.id)
-    if (inList) inList.events_disabled = detail.eventsDisabled
-  } catch (e) {
-    detail.eventsDisabled = !detail.eventsDisabled
-    console.error('toggleEventsDisabled failed:', e)
-  } finally {
-    detail.eventsToggling = false
-  }
-}
-
-async function clearChatHistory() {
+function onOpenRelationGraph(c) {
+  showRelationGraph.value = true
+}async function clearChatHistory() {
 showSettings.value = false
 if (clearing.value) return
 const ok = await confirmFn({ title:'清空记忆', message:`确定要清空${chat.activeChar?.display_name}的所有记忆吗？\n此操作不可恢复。`, okText:'清空' })
@@ -2373,7 +2138,7 @@ function renderContent(text) {
 /* ── 悬浮侧边栏 ── */
 .detail-float {
   position: absolute;
-  left: calc(50% + min(380px, 48.5vw) + 16px);
+  left: calc(50% + min(450px, 48.5vw) + 16px);
   top: 70px;
   display: flex;
   flex-direction: column;

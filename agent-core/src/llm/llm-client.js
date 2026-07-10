@@ -1,25 +1,45 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
 
-const DEFAULT_MODEL = config.llm.model || 'deepseek-v4-flash';
+function isDeepseek() {
+  return (config.llm.baseURL || '').includes('deepseek.com');
+}
+
+function providerLabel() {
+  const url = config.llm.baseURL || '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url || 'LLM';
+  }
+}
 
 // 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
 // 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
 let _client = null;
 function getClient() {
   if (!_client) {
-    _client = new OpenAI({
+    const opts = {
       baseURL: config.llm.baseURL,
       apiKey: config.llm.apiKey,
-    });
+    };
+    const headers = config.llm.headers;
+    if (headers && Object.keys(headers).length > 0) {
+      opts.defaultHeaders = headers;
+    }
+    _client = new OpenAI(opts);
   }
   return _client;
+}
+
+export function resetClient() {
+  _client = null;
 }
 
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
  */
-export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync' } = {}) {
+export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync' } = {}) {
   const params = {
     model,
     messages,
@@ -32,8 +52,8 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
   if (response_format) {
     params.response_format = response_format;
   }
-  // thinking 默认禁用（deepseek-v4-flash 非思考模式）；传 null 则不发送此参数
-  if (thinking !== null) {
+  // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
+  if (thinking !== null && isDeepseek()) {
     params.thinking = thinking;
   }
 
@@ -46,7 +66,7 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
   });
   // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
   const requestLog =
-    `\n══════════ [DeepSeek → ${label}] ══════════\n` +
+    `\n══════════ [${providerLabel()} → ${label}] ══════════\n` +
     JSON.stringify(logMsgs, null, 2) + '\n' +
     '───────────────────────────────────────────────';
 
@@ -55,7 +75,7 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
 
   // 请求+响应一起输出，保证每次调用的日志是完整的原子块
   console.log(requestLog);
-  console.log(`[DeepSeek ← ${label}]`);
+  console.log(`[${providerLabel()} ← ${label}]`);
   console.log((content || '').slice(0, 2000));
   console.log('═══════════════════════════════════════════════\n');
 
@@ -66,8 +86,8 @@ export async function chatSync(messages, { model = DEFAULT_MODEL, max_tokens = 2
  * 流式聊天（用于对话）
  * @returns {AsyncGenerator<string>}
  */
-export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" }, label = 'stream' } = {}) {
-  console.log(`\n══════════ [DeepSeek → ${label}] ══════════`);
+export async function* chatStream(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" }, label = 'stream' } = {}) {
+  console.log(`\n══════════ [${providerLabel()} → ${label}] ══════════`);
   console.log(JSON.stringify(messages, null, 2));
   console.log('────────────────────────────────────────────────');
 
@@ -78,14 +98,14 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
     temperature,
     stream: true,
   };
-  // thinking 默认禁用（deepseek-v4-flash 非思考模式）；传 null 则不发送此参数
-  if (thinking !== null) {
+  // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
+  if (thinking !== null && isDeepseek()) {
     params.thinking = thinking;
   }
 
   const stream = await getClient().chat.completions.create(params);
 
-  console.log(`[DeepSeek ← ${label} start]`);
+  console.log(`[${providerLabel()} ← ${label} start]`);
   let total = '';
 
   for await (const chunk of stream) {
@@ -96,7 +116,7 @@ export async function* chatStream(messages, { model = DEFAULT_MODEL, max_tokens 
     }
   }
 
-  console.log(`[DeepSeek ← ${label} end]`);
+  console.log(`[${providerLabel()} ← ${label} end]`);
   console.log((total || '(empty)').slice(0, 2000));
   if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
   console.log('═══════════════════════════════════════════════\n');

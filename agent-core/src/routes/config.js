@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings } from '../config.js';
+import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
@@ -84,6 +85,7 @@ router.put('/llm', (req, res) => {
   if (!result.ok) {
     return res.status(400).json(result);
   }
+  resetClient();
   res.json({ ok: true, ...getLlmConfig() });
 });
 
