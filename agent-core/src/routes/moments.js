@@ -11,7 +11,7 @@ import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from 
 import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
-import { getCoreDialogueRules } from '../services/dialogueRules.js';
+import { getCoreDialogueRules } from '../builtinRules.js';
 
 const router = Router();
 

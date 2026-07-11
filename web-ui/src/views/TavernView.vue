@@ -252,7 +252,7 @@
               </div>
               <div v-if="recruit.result" class="recruit-appearance-hint">
                 ↑检查外观描述，可以写的少但是更需要准确，必要情况下传立绘给识图AI精确反推描述或者查阅
-                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.display_name)}`" target="_blank">animadex</a>直接补充tag
+                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.name).replaceAll('_', '+')}`" target="_blank">animadex</a>直接补充tag
               </div>
             </div>
           </div>

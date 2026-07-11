@@ -28,7 +28,7 @@ import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getTimeLight } from './timeLight.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { getCoreDialogueRules } from './dialogueRules.js';
+import { getCoreDialogueRules } from '../builtinRules.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

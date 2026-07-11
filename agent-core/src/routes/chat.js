@@ -22,7 +22,7 @@ import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
-import { getCoreDialogueRules } from '../services/dialogueRules.js';
+import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 
 const router = Router();
 
@@ -605,7 +605,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     formatParts.push(`<dialogue_format_rules>
 ${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。**
 - {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
 </dialogue_format_rules>`);
     const sentenceHint = (() => {
@@ -1119,55 +1119,6 @@ ${coreRules}
 
 // ── helpers ──
 
-function detectImageIntent(message) {
-  return [
-    // ── 画/生成/做/创建/制作/设计 + 量词 ──
-    /画[一个张幅]/, /生成[一个张幅]?图/, /做[一个张幅]图/, /创建[一个张幅]?图/, /制作[一个张幅]?图/, /设计[一个张幅]?图/,
-    /出[一个张幅]图/,
-    // ── 给我/展示/来/要/搞/整 + 量词 ──
-    /给我[看看瞧瞧]/, /展示[一下]/, /来[一个张幅]/, /来[张个幅]图/, /要[一个张幅]图/, /搞[一个张幅]/, /整[一个张幅]/,
-    // ── 帮我 + 动作 ──
-    /帮我画/, /帮我生成/,
-    // ── 动词 + 出来 ──
-    /画出来/, /生成出来/,
-    // ── 我想/我能 + 动作 ──
-    /我想要[一个张幅]?图/, /能[不能]?画/, /能不能画/,
-    // ── 发图系 ──
-    /发[一二三四五六七八九十]?[张个幅]/,   // 发张、发一张、发个、发幅
-    /发图/,                                   // 发图（简写）
-    /发出来/,                                 // 发出来看看
-    /上图/,                                   // 上图（社群常用）
-    /来[张个幅]/,                             // 来张、来一张
-    /给[张个幅]图/,                           // 给张图
-    // ── 想看系 ──
-    /想看/,                                   // 想看xxx
-    /好想看/,                                 // 好想看
-    /想看看/,                                 // 想看看xxx
-    /让我[看看瞧瞧]/,                         // 让我看看/瞧瞧
-    /给我[看看瞧瞧]/,                         // 给我看看
-    /瞧瞧/,                                   // 瞧瞧
-    // ── 看看 + 任何名词（不只是图/照片）──
-    /看看.{1,10}/,                            // 看看乌冬面、看看效果
-    // ── 外观询问系 ──
-    /长什么样/, /是什么样[子子]/, /长啥样/, /什么样子/, /是怎样[的的]/,
-    // ── 未看到/索要重发系 ──
-    /没看到/, /看不到/, /没见到/, /看不见/,
-    /图呢/, /照片呢/, /[图图片照]呢/,
-    /再发[一]?[次下张个遍]/,                 // 再发一次、再发下、再发张
-    /重发/,                                   // 重发
-    /没发出来/,                               // 没发出来
-    /怎么没有[图图片照]/,                     // 怎么没有图
-    // ── 找/搜图系 ──
-    /找[一二三四五六七八九十]?[张个幅]/,     // 找张、找一张、找个
-    /搜[一二三四五六七八九十]?[张个幅]/,     // 搜张、搜一张
-    // ── 隐喻/口语系 ──
-    /整[一个张幅]图/,                         // 整张图
-    /搞[张个幅]/,                             // 搞张、搞一张
-    /来点.*图/,                               // 来点...图
-    /有没有.*[图图片照]/,                     // 有没有...图/照片
-  ].some(p => p.test(message));
-}
-
 function extractImageTags(content) {
   // 先尝试原始 ASCII 引号匹配
   const re = /\{"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"\}/i;
@@ -1267,15 +1218,9 @@ async function judgeImageNeed(conversationId) {
   if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 600)}`);
   const ctx = parts.join('\n');
 
-  const judgeSystemPrompt = `你是一个简洁的判断助手。你的唯一任务是：阅读对话，判断是或者否：
-- 用户是否想看一张照片/图片？
-- Agent是否想要发送照片/图片或者给用户展示？
-- Agent是否在详细**描述**一个场景或者一件物品？
-只回复"是"或"否"，任意一方是"是"就是"是"，不然就是"否"，不要解释。`;
-
   try {
     const result = await chatSync([
-      { role: 'system', content: judgeSystemPrompt },
+      { role: 'system', content: JUDGE_PROMPT },
       { role: 'user', content: ctx },
     ], { temperature: 0, max_tokens: 5, label: '判断需要图片' });
 

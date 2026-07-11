@@ -9,6 +9,7 @@ import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
+import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 const router = Router();
 
@@ -89,19 +90,17 @@ router.put('/llm', (req, res) => {
   res.json({ ok: true, ...getLlmConfig() });
 });
 
-// 已内置到代码中的规则键，不再通过 API 暴露给前端编辑
-const INTERNAL_RULE_KEYS = ['dialogue_rules', 'judge_prompt', 'system_rules', 'image_prompt'];
 
 // GET /api/config/rules — 获取全部全局规则
 router.get('/rules', (req, res) => {
   const db = getDb();
   const rules = db.prepare(`SELECT id, rule_key, rule_content, is_active, created_at, updated_at FROM global_rules ORDER BY id`).all();
-  res.json({ rules: rules.filter(r => !INTERNAL_RULE_KEYS.includes(r.rule_key)) });
+  res.json({ rules: rules.filter(r => !BUILTIN_RULE_KEYS.has(r.rule_key)) });
 });
 
 // PUT /api/config/rules/:key — 更新或新建单条全局规则
 router.put('/rules/:key', (req, res) => {
-  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+  if (BUILTIN_RULE_KEYS.has(req.params.key)) {
     return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
   }
   const db = getDb();
@@ -291,7 +290,7 @@ router.put('/disturb-settings', (req, res) => {
 
 // GET /api/config/rules/:key/default — 获取单条规则的默认值（不修改，仅供预览）
 router.get('/rules/:key/default', (req, res) => {
-  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+  if (BUILTIN_RULE_KEYS.has(req.params.key)) {
     return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
   }
   const defaultRule = DEFAULT_GLOBAL_RULES.find(r => r.rule_key === req.params.key);
@@ -303,7 +302,7 @@ router.get('/rules/:key/default', (req, res) => {
 
 // POST /api/config/rules/:key/reset — 重置单条全局规则为默认值
 router.post('/rules/:key/reset', (req, res) => {
-  if (INTERNAL_RULE_KEYS.includes(req.params.key)) {
+  if (BUILTIN_RULE_KEYS.has(req.params.key)) {
     return res.status(403).json({ error: 'This rule is now built-in and cannot be modified via API.' });
   }
   const db = getDb();

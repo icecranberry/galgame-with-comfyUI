@@ -17,7 +17,7 @@ import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { getCoreDialogueRules } from './dialogueRules.js';
+import { getCoreDialogueRules } from '../builtinRules.js';
 
 const BASE_INTERVAL_MIN = 30; // 基准间隔 30 分钟（freq=1）
 const HALF_TIME_CHECK_MS = 3 * 60 * 1000; // 半程通知独立检查间隔 3 分钟

@@ -932,13 +932,12 @@ export function repairFtsIndex() {
  * 获取所有激活的全局规则内容（拼接为一个字符串）
  */
 // image_intent / image_prompt 是元规则（非 LLM system prompt 内容），不拼入
-// judge_prompt 已内置到代码中（chat.js），此处保留向后兼容（旧 DB 可能仍有该行）
-// world_setting 单独追加到末尾，也不在批量拼接中
-const META_RULE_KEYS = ['image_intent', 'judge_prompt', 'image_prompt', 'system_rules'];
+// world_setting 单独追加到末尾，不在批量拼接中
+// BUILTIN_RULE_KEYS 从 builtinRules.js 导入，统一管理所有硬编码规则
 
 export function getActiveGlobalRules() {
   const database = getDb();
-  const excludeKeys = [...META_RULE_KEYS, 'world_setting'];
+  const excludeKeys = [...BUILTIN_RULE_KEYS, 'world_setting'];
   const rules = database.prepare(
     `SELECT rule_content FROM global_rules WHERE is_active = 1 AND rule_key NOT IN (${excludeKeys.map(() => '?').join(',')})`
   ).all(...excludeKeys);

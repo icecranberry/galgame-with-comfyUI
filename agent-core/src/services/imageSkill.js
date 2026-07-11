@@ -177,8 +177,9 @@ function buildWorkflow(promptText, overrides = {}) {
 }
 
 /**
- * 在 workflow 中动态插入 LoraLoaderModelOnly 节点
- * 链路: UNETLoader → Lora1 → Lora2 → ... → KSampler
+ * 在工作流中动态插入 LoraLoaderModelOnly 节点
+ * 链路: UNETLoader → Lora1 → Lora2 → ... → 原始下游节点
+ * 自动适配：无论 UNETLoader 直连 KSampler 还是中间有用户插入的节点，都正确链入。
  */
 function injectLoraNodes(wf, loras) {
   const unetNode = wf.nodes.find(n => n.type === 'UNETLoader');
@@ -189,15 +190,35 @@ function injectLoraNodes(wf, loras) {
     return;
   }
 
-  // 移除旧的 UNETLoader→KSampler 直连 link
+  // 查找 UNETLoader MODEL 输出当前连到的节点
   const unetModelOutput = unetNode.outputs.find(o => o.name === 'MODEL');
   const oldLinkId = unetModelOutput?.links?.[0];
-  if (oldLinkId) {
-    wf.links = wf.links.filter(l => l[0] !== oldLinkId);
-    const samplerModelInput = samplerNode.inputs.find(inp => inp.name === 'model');
-    if (samplerModelInput) samplerModelInput.link = null;
-    console.log(`[imageSkill] Removed direct UNET→Sampler link #${oldLinkId}`);
+
+  if (!oldLinkId) {
+    console.warn('[imageSkill] Cannot inject lora nodes: no MODEL link from UNETLoader');
+    return;
   }
+
+  // 从 links 中定位完整的 link 条目，获取原始下游节点
+  const oldLink = wf.links.find(l => l[0] === oldLinkId);
+  const downstreamNodeId = oldLink ? oldLink[3] : null;
+  const downstreamNode = downstreamNodeId ? wf.nodes.find(n => n.id === downstreamNodeId) : null;
+
+  if (!downstreamNode) {
+    console.warn('[imageSkill] Cannot inject lora nodes: downstream node not found for link #' + oldLinkId);
+    return;
+  }
+
+  const isDirectToSampler = downstreamNodeId === samplerNode.id;
+  console.log(`[imageSkill] UNETLoader MODEL → ${downstreamNode.type}#${downstreamNodeId}${isDirectToSampler ? ' (直连KSampler)' : ' (有中间节点，将保留)'}`);
+
+  // 删除 UNETLoader → 下游节点的旧 link
+  wf.links = wf.links.filter(l => l[0] !== oldLinkId);
+
+  // 清除下游节点的 model 输入 link
+  const downstreamModelInput = downstreamNode.inputs.find(inp => inp.name === 'model');
+  if (downstreamModelInput) downstreamModelInput.link = null;
+  console.log(`[imageSkill] Removed UNET→${downstreamNode.type}#${downstreamNodeId} link #${oldLinkId}`);
 
   // 生成新 ID（确保不冲突）
   let maxNodeId = Math.max(wf.last_node_id || 0, ...wf.nodes.map(n => n.id));
@@ -248,15 +269,15 @@ function injectLoraNodes(wf, loras) {
     wf.links.push([inputLinkId, sourceNodeId, 0, nodeId, 0, 'MODEL']);
   }
 
-  // 最后一个 lora → KSampler
-  const samplerModelInput = samplerNode.inputs.find(inp => inp.name === 'model');
+  // 最后一个 lora → 原始下游节点（保留用户中间链路）
   const finalLinkId = outputLinkIds[outputLinkIds.length - 1];
   const finalLoraNodeId = loraNodeIds[loras.length - 1];
+  const targetSlot = downstreamNode.inputs.findIndex(inp => inp.name === 'model');
 
-  if (samplerModelInput) {
-    samplerModelInput.link = finalLinkId;
+  if (targetSlot >= 0) {
+    downstreamNode.inputs[targetSlot].link = finalLinkId;
   }
-  wf.links.push([finalLinkId, finalLoraNodeId, 0, samplerNode.id, 0, 'MODEL']);
+  wf.links.push([finalLinkId, finalLoraNodeId, 0, downstreamNode.id, targetSlot >= 0 ? targetSlot : 0, 'MODEL']);
 
   // 更新 workflow 元数据
   wf.last_node_id = maxNodeId;
