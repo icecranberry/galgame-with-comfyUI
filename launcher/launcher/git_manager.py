@@ -3,6 +3,7 @@ Git 管理器 —— 封装 git CLI 调用，所有耗时操作通过 QProcess �
 """
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -292,12 +293,36 @@ class GitManager(QObject):
     # 异步方法（通过 QProcess）
     # ------------------------------------------------------------------
 
+    def _precheck(self) -> str | None:
+        """执行 git 前的快速环境预检，返回错误信息或 None。"""
+        # 1. Git 可执行文件是否存在
+        git_exe = self._resolve_git()
+        if not os.path.isfile(git_exe):
+            return "没有找到 Git，请重新安装启动器后再试"
+        # 2. DNS 是否能解析 github.com
+        try:
+            socket.getaddrinfo("github.com", 443)
+        except socket.gaierror:
+            return "域名解析失败，请检查网络连接或开启 VPN 后重试"
+        # 3. 磁盘空间是否足够
+        try:
+            usage = shutil.disk_usage(self._project_path)
+            if usage.free < 300 * 1024 * 1024:
+                return "磁盘空间不足（至少需要 300MB 剩余空间），请清理一些文件后重试"
+        except Exception:
+            pass
+        return None
+
     def fetch_remote(self) -> str | None:
         """异步 fetch origin。返回 None 表示启动成功，否则返回错误信息。"""
         if not self.is_git_repo():
             return "不是有效的 git 仓库"
         if self.is_busy():
             return "上一个操作仍在进行中，请稍后再试"
+
+        precheck_err = self._precheck()
+        if precheck_err:
+            return precheck_err
 
         self._cleanup_locks()
         self._fetch_gen += 1
@@ -445,13 +470,13 @@ class GitManager(QObject):
                 self._proxy_retried = True
 
                 if proxy_err == "refused":
-                    self.output.emit("[proxy] 代理客户端未运行 (127.0.0.1 端口拒绝连接)")
+                    self.output.emit("[proxy] 代理客户端未运行，已自动切换直连重试...")
                 else:
-                    self.output.emit("[proxy] 代理节点连接超时，可能是节点故障")
+                    self.output.emit("[proxy] 代理节点连接超时，已自动切换直连重试...")
 
                 # 快速探测直连是否可行
                 if _probe_github_reachable():
-                    self.output.emit("[proxy] 直连 github.com 可达，自动切换直连重试...")
+                    self.output.emit("[proxy] 直连 github.com 正常，继续下载...")
                     if self._pending_op == "fetch":
                         self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
                     elif self._pending_op == "init_repo":
@@ -462,10 +487,10 @@ class GitManager(QObject):
                             self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
                     return
                 else:
-                    self.output.emit("[proxy] 直连 github.com 也不可达，请开启代理客户端后重试")
+                    self.output.emit("[proxy] 直连 github.com 也不通，请开启 VPN 后重试")
                     self.operation_done.emit(
                         self._pending_op, False,
-                        "代理不可用且直连不通 — 请开启代理客户端或检查网络连接"
+                        "代理用不了，直连也不通 — 请检查网络或开启 VPN"
                     )
                     self._pending_op = ""
                     return
@@ -479,27 +504,46 @@ class GitManager(QObject):
                 joined = "; ".join(self._stderr_lines[-3:])
                 stderr_tail = f" | stderr: {joined}"
 
-            # 区分失败场景给出精准提示
+            # 区分失败场景给出小白也能看懂的提示
             hint = ""
             stderr_lower = stderr_tail.lower()
             if "empty reply from server" in stderr_lower:
-                hint = " — github.com 拒绝响应（可能被网络干扰），请尝试配置代理访问"
+                hint = " — 无法连接 GitHub（可能被网络拦截），请尝试开启 VPN"
             elif "could not resolve host" in stderr_lower:
-                hint = " — DNS 解析失败，请检查网络连接"
+                hint = " — 域名解析失败，请检查网络是否正常，或开启 VPN"
             elif "connection timed out" in stderr_lower:
                 if self._proxy_retried:
-                    hint = " — 直连超时，请开启代理客户端后重试"
+                    hint = " — 直连超时，请关闭代理后重试"
                 else:
-                    hint = " — 连接超时，请检查网络或考虑配置代理"
+                    hint = " — 连接超时，请检查网络或开启 VPN"
+            elif "rpc failed" in stderr_lower or "connection was reset" in stderr_lower:
+                if self._proxy_retried:
+                    hint = " — 直连被断开（可能网络不稳定），请开启 VPN 后重试"
+                else:
+                    hint = " — 连接被断开（可能是网络干扰），请开启 VPN"
             elif "unable to access" in stderr_lower:
                 if self._proxy_retried:
-                    hint = " — 直连失败，请检查网络或开启代理"
+                    hint = " — 直连不上 GitHub，请检查网络或开启 VPN"
                 else:
-                    hint = " — 无法访问 github.com，请检查网络或配置代理/VPN"
+                    hint = " — 无法连接 GitHub，请检查网络或开启 VPN"
+            elif "ssl certificate" in stderr_lower or "certificate verify" in stderr_lower or "unable to get local issuer certificate" in stderr_lower:
+                hint = " — 安全连接被阻止（可能是系统时间不对或杀毒软件拦截），请校准系统时间后重试"
+            elif "gnutls_handshake" in stderr_lower:
+                hint = " — 连接方式不兼容，请将 Git 更新到最新版本"
+            elif "the remote end hung up" in stderr_lower or "early eof" in stderr_lower or "transfer closed" in stderr_lower:
+                hint = " — 网络不稳定导致下载中断，请尝试开启 VPN 后重试"
+            elif "repository not found" in stderr_lower or "could not read from remote repository" in stderr_lower:
+                hint = " — 远程仓库不存在或无访问权限，请联系开发者"
+            elif "unable to create file" in stderr_lower or "filename too long" in stderr_lower:
+                hint = " — 文件写入失败，请尝试用管理员身份运行启动器"
+            elif "bad object" in stderr_lower or "object file is" in stderr_lower:
+                hint = " — 本地数据异常，可能需要重新下载完整版本"
+            elif "unable to update" in stderr_lower:
+                hint = " — 文件被占用无法更新，请先关闭其他程序后重试"
             crash_hint = ""
             if exit_status != QProcess.NormalExit:
-                crash_hint = f" (进程异常终止)"
-            msg = f"操作失败 (exit code: {exit_code}){crash_hint}{stderr_tail}{hint}"
+                crash_hint = "（程序意外崩溃）"
+            msg = f"操作失败{crash_hint}: {stderr_tail}{hint}"
         self.operation_done.emit(self._pending_op, ok, msg)
         self._pending_op = ""
 
