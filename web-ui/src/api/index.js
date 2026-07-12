@@ -920,8 +920,14 @@ export async function retakePeekSnapshot(characterId, prompt) {
   return res.json()
 }
 
-export async function regenerateSchedule(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/regenerate`, { method: 'POST' })
+export async function regenerateSchedule(characterId, direction) {
+  const body = {}
+  if (direction) body.direction = direction
+  const res = await fetch(`${BASE}/schedule/${characterId}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(`regenerate schedule: ${res.status}`)
   return res.json()
 }

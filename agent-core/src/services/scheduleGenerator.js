@@ -27,7 +27,7 @@ function cropPersonaForSchedule(basePrompt) {
  * @param {object} character - { id, display_name, base_prompt }
  * @returns {Promise<{schedule_json: string, version: number}>}
  */
-export async function generateSchedule(character) {
+export async function generateSchedule(character, direction) {
   const db = getDb();
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
@@ -107,6 +107,14 @@ export async function generateSchedule(character) {
 
 只输出 JSON 数组，不要任何额外文字。`;
 
+  // ── 用户指定的日程方向 ──
+  const directionMsg = direction ? `## 用户指定的日程方向
+请按照以下方向来影响角色今日日程的编排：
+
+${direction}
+
+注意：以上是用户希望的日程"方向"或"主题"，这就是严格的指令。以用户的意愿为准，可以想象理由，适当破坏角色原有的人设，自然地融入这个方向的元素。` : null;
+
   // ── 组装多层 system ──
   const msgs = [];
   // msgs[0]: 舞台（破限词 + 世界观）
@@ -115,6 +123,8 @@ export async function generateSchedule(character) {
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   // msgs[2]: 角色人格
   msgs.push({ role: 'system', content: personaMsg });
+  // msgs[2.5]: 用户方向（如果有）
+  if (directionMsg) msgs.push({ role: 'system', content: directionMsg });
   // msgs[3]: 生成指令
   msgs.push({ role: 'system', content: scheduleInst });
   // msgs[4]: 触发消息

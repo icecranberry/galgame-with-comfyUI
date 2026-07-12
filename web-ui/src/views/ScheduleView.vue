@@ -216,6 +216,40 @@
       </Transition>
     </Teleport>
 
+    <!-- ═══ 改变日程方向输入弹窗 ═══ -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showRegenerateModal" class="reset-overlay" @click.self="showRegenerateModal = false">
+          <div class="reset-dialog" @click.stop>
+            <div class="reset-dialog-header">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1,4 1,10 7,10" />
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+              </svg>
+              <span>为 {{ detailChar?.display_name || '...' }} 编排日程</span>
+            </div>
+            <div class="reset-dialog-desc">
+              <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则则正常随机规划。</p>
+              <textarea
+                v-model="regenerateDirection"
+                class="regenerate-textarea"
+                placeholder="例如：今天去游乐园、安排出差的一天、宅在家里打游戏..."
+                maxlength="200"
+                rows="3"
+                ref="regenerateTextareaRef"
+                @keydown.enter.exact="confirmRegenerateWithDirection"
+              ></textarea>
+              <div class="regenerate-charcount">{{ regenerateDirection.length }}/200</div>
+            </div>
+            <div class="reset-dialog-actions">
+              <button class="reset-btn-bg" style="flex: 1; border-style: solid;" @click="confirmRegenerateRandom">随机日程规划</button>
+              <button class="reset-btn-confirm" @click="confirmRegenerateWithDirection" :disabled="!regenerateDirection.trim()">按此方向生成</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- ═══ 重置世界线确认弹窗 ═══ -->
     <Teleport to="body">
       <Transition name="modal">
@@ -425,6 +459,17 @@ const lightboxDescription = computed(() => {
 
 // ── 重置世界线 ──
 const showResetConfirm = ref(false)
+
+// ── 日程方向输入弹窗 ──
+const showRegenerateModal = ref(false)
+const regenerateDirection = ref('')
+const regenerateTextareaRef = ref<HTMLTextAreaElement | null>(null)
+
+watch(showRegenerateModal, (v) => {
+  if (v) {
+    nextTick(() => regenerateTextareaRef.value?.focus())
+  }
+})
 const resetProgressPct = computed(() => {
   const rt = store.resetTask
   if (!rt || rt.total === 0) return 0
@@ -678,10 +723,15 @@ function onPeek() {
 
 async function onRegenerate() {
   if (!detailChar.value || detailRegenerating.value) return
+  showRegenerateModal.value = true
+  regenerateDirection.value = ''
+}
+
+async function doRegenerate(direction) {
+  if (!detailChar.value || detailRegenerating.value) return
   detailRegenerating.value = true
   try {
-    // regenerateSchedule 内部已静默刷新概览，这里不再重复调用
-    try { await store.regenerateSchedule(detailChar.value.id) } catch { return }
+    try { await store.regenerateSchedule(detailChar.value.id, direction) } catch { return }
     detailLoading.value = true
     try {
       const d = await store.fetchCharacterSchedule(detailChar.value.id)
@@ -691,6 +741,17 @@ async function onRegenerate() {
   } finally {
     detailRegenerating.value = false
   }
+}
+
+async function confirmRegenerateWithDirection() {
+  if (!regenerateDirection.value.trim()) return
+  showRegenerateModal.value = false
+  doRegenerate(regenerateDirection.value.trim())
+}
+
+async function confirmRegenerateRandom() {
+  showRegenerateModal.value = false
+  doRegenerate()
 }
 
 async function onCardPeek(id: number) {
@@ -1264,9 +1325,43 @@ function finishReset() {
   font-size: 1rem; font-weight: 700; color: var(--text-bright);
 }
 .reset-dialog-desc {
-  margin: 0; padding: 0 20px 18px;
+  margin: 0; padding: 0 20px;
   font-size: 0.88rem; color: var(--text-secondary); line-height: 1.6;
 }
+.reset-dialog-desc p {
+  margin: 0 0 10px;
+}
+
+/* ── 日程方向输入弹窗 ── */
+.regenerate-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.regenerate-textarea:focus {
+  border-color: var(--accent);
+}
+.regenerate-textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+.regenerate-charcount {
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
 .reset-dialog-actions {
   display: flex; gap: 12px; padding: 16px 20px;
   border-top: 1px solid var(--glass-border);

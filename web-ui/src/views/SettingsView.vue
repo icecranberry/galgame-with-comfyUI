@@ -444,7 +444,7 @@
               :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
               @click="wfModeDraft = m.value">
               <span class="wf-mo-title">{{ m.label }}</span>
-              <span class="wf-mo-desc">{{ m.desc }}</span>
+              <span class="wf-mo-desc" v-html="m.desc"></span>
             </button>
           </div>
 
@@ -880,9 +880,9 @@ const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
 
 // ── 工作流 ──
 const workflowModeOptions = [
-  { value: 'turbo', label: 'turbo', desc: '纯 turbo 模型，速度提升400%+，但代价是构图能力下降，画师串遵循偏弱' },
-  { value: 'base', label: 'base', desc: '纯 base 模型，泛用性最强的基底模型' },
-  { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，但是切换时需要加载模型导致首图较慢' },
+  { value: 'turbo', label: 'turbo', desc: '只用 Anima_turbo 模型，<span class="wf-mo-highlight">速度提升300%+</span>，但代价是构图能力下降，画师串影响略微下降' },
+  { value: 'base', label: 'base', desc: '只用 Anima_base 模型，泛用性最强的基底模型，构图能力强，画师串遵循强，速度较慢' },
+  { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，切换时需要加载模型导致首图较慢' },
 ]
 const sceneOptions = [
   { key: 'chat', label: '对话' },
@@ -1059,7 +1059,7 @@ function resetTestPrompts() {
   box-shadow: inset 0 1px 4px rgba(0,0,0,0.08);
 }
 .comfy-tab {
-  flex: 1; padding: 11px 0; font-size: 13px; font-weight: 600;
+  flex: 1; padding: 12px 0; font-size: 13px; font-weight: 600;
   text-align: center; cursor: pointer;
   border-radius: 9px;
   background: transparent; color: #8b8479;
@@ -1115,8 +1115,8 @@ function resetTestPrompts() {
 .fr { display: flex; gap: 14px; }
 .fh { flex: 1; }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 4px 0 16px; }
-.pl { font-size: 11px; color: var(--text-secondary); }
-.pbtn { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
+.pl { font-size: 12px; color: var(--text-secondary); }
+.pbtn { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
 .pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
 
 /* ── 外部链接高亮 ── */
@@ -1363,7 +1363,7 @@ function resetTestPrompts() {
   border-color: var(--accent);
 }
 .disturb-char-name {
-  font-size: 11px; color: var(--text-secondary); text-align: center;
+  font-size: 12px; color: var(--text-secondary); text-align: center;
   max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .disturb-char-chip.selected .disturb-char-name {
@@ -1383,7 +1383,7 @@ function resetTestPrompts() {
   font-size: 13px; font-weight: 500; color: var(--text-bright);
 }
 .disturb-option-hint {
-  flex: 1; min-width: 140px; font-size: 11px; color: var(--text-secondary);
+  flex: 1; min-width: 140px; font-size: 12px; color: var(--text-secondary);
 }
 .disturb-dialog-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 12px;
@@ -1442,7 +1442,7 @@ function resetTestPrompts() {
   transition: color 0.15s;
 }
 .test-prompt-btn:hover { color: var(--accent); }
-.style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; }
+.style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; white-space: pre-wrap; line-height: 1.5; }
 .style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
 .style-spinner { width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1532,7 +1532,10 @@ function resetTestPrompts() {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
 }
 .wf-mo-desc {
-  font-size: 11px; color: var(--text-secondary); line-height: 1.4;
+  font-size: 12px; color: var(--text-secondary); line-height: 1.4;
+}
+.wf-mo-desc:deep(.wf-mo-highlight) {
+  color: var(--accent); font-weight: 700;
 }
 .wf-mode-downloads {
   background: rgba(255, 255, 255, 0.04);
@@ -1540,10 +1543,10 @@ function resetTestPrompts() {
   border-radius: 8px; padding: 10px 14px; margin-bottom: 4px;
 }
 .wf-mode-dl-hint {
-  font-size: 11px; color: var(--text-secondary); margin: 0 0 6px;
+  font-size: 12px; color: var(--text-secondary); margin: 0 0 6px;
 }
 .wf-dl-item {
-  font-size: 11px; color: var(--text-secondary); line-height: 1.8;
+  font-size: 12px; color: var(--text-secondary); line-height: 1.8;
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
 }
 .wf-dl-label { font-weight: 500; color: var(--text-bright); min-width: 40px; }

@@ -234,6 +234,69 @@ function getTitle(node) {
 
 // ── 公开 API ──
 
+/**
+ * 解析 ComfyUI 400 错误中的 value_not_in_list 信息，生成用户友好提示
+ * 例如模型缺失 → 建议切换工作流模式或补全模型文件
+ */
+function formatComfyUIError(errText, status) {
+  try {
+    const data = JSON.parse(errText);
+    if (!data.node_errors) return `ComfyUI returned ${status}: ${errText.slice(0, 300)}`;
+
+    const missingModels = [];
+    const nodeIssues = [];
+
+    for (const [nodeId, nodeError] of Object.entries(data.node_errors)) {
+      const classType = nodeError.class_type || `node#${nodeId}`;
+      for (const e of nodeError.errors || []) {
+        if (e.type === 'value_not_in_list') {
+          const inputName = e.extra_info?.input_name || '';
+          const received = e.extra_info?.received_value || '';
+          const available = e.extra_info?.input_config?.flat(Infinity).filter(v => typeof v === 'string') || [];
+
+          if (inputName.toLowerCase().includes('unet') || classType.includes('UNET')) {
+            missingModels.push({ nodeId, classType, inputName, received, available });
+          } else {
+            nodeIssues.push({ nodeId, classType, inputName, received, available });
+          }
+        } else {
+          const detail = e.details || e.message;
+          nodeIssues.push({ nodeId, classType, detail });
+        }
+      }
+    }
+
+    const lines = [];
+
+    if (missingModels.length > 0) {
+      const m = missingModels[0];
+      lines.push(`当前工作流需要的模型 "${m.received}" 不存在`);
+      lines.push('');
+      lines.push('建议:');
+      lines.push('  1. 前往设置页切换工作流模式（turbo → base 或其他）');
+      lines.push(`  2. 下载缺失的模型文件放入 ComfyUI-aki-v3\\ComfyUI\\models\\diffusion_models即可自动识别`);
+    }
+
+    if (nodeIssues.length > 0) {
+      for (const issue of nodeIssues) {
+        if (issue.received !== undefined) {
+          lines.push(`[${issue.classType}] ${issue.inputName}: "${issue.received}" 不在列表中`);
+        } else {
+          lines.push(`[${issue.classType}] ${issue.detail}`);
+        }
+      }
+    }
+
+    if (lines.length > 0) {
+      const summary = lines.join('\n');
+      return `ComfyUI 工作流验证失败:\n${summary}`;
+    }
+  } catch {
+    // 解析失败，返回原始错误（截断）
+  }
+  return `ComfyUI returned ${status}: ${errText.slice(0, 300)}`;
+}
+
 export async function submitWorkflow(guiWorkflow, onProgress) {
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
@@ -270,7 +333,7 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`ComfyUI returned ${res.status}: ${errText}`);
+    throw new Error(formatComfyUIError(errText, res.status));
   }
 
   const data = await res.json();

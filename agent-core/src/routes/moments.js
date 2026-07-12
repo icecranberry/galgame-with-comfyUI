@@ -187,7 +187,7 @@ router.post('/generate', async (req, res) => {
   if (!character) return res.status(404).json({ error: 'Character not found' });
 
   try {
-    const result = await generateMomentPost(character);
+    const result = await generateMomentPost(character, { manual: true });
     res.json(result);
   } catch (err) {
     console.error('[moments] generate error:', err.message);
@@ -309,7 +309,7 @@ router.post('/:id/like', (req, res) => {
  * 生成一条朋友圈帖子（文案 + 配图）
  * 单次 LLM 调用输出 { text, imagePrompt }，确保图文一致
  */
-async function generateMomentPost(character) {
+async function generateMomentPost(character, opts = {}) {
   const db = getDb();
 
   // 0. 并发保护：检查该角色是否已有正在生成中的帖子
@@ -611,6 +611,7 @@ async function generateMomentPost(character) {
       width: config.comfyui.momentsWidth,
       height: config.comfyui.momentsHeight,
       scene: 'moments',
+      priority: opts.manual ? 'high' : 'low',
       ...loraOpts,
     });
 

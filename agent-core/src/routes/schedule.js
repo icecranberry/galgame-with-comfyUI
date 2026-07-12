@@ -317,6 +317,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,
+        priority: 'high',
         ...(() => {
           const chLoras = _parseLoras(character.loras);
           const opts = {};
@@ -525,6 +526,7 @@ router.post('/:characterId/peek', async (req, res) => {
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,
+        priority: 'high',
         ...(() => {
           const chLoras = _parseLoras(character.loras);
           const opts = {};
@@ -592,10 +594,12 @@ router.post('/:characterId/regenerate', async (req, res) => {
       return res.status(404).json({ error: 'character not found' });
     }
 
-    console.log(`[schedule] Regenerating schedule for ${character.display_name}...`);
+    const direction = (req.body && req.body.direction) ? String(req.body.direction).trim() : null;
+
+    console.log(`[schedule] Regenerating schedule for ${character.display_name}${direction ? ` (direction: ${direction.slice(0, 50)}...)` : ''}...`);
 
     // 生成新模板
-    const result = await generateSchedule(character);
+    const result = await generateSchedule(character, direction);
 
     // 分配下次刷新时间
     assignNextRefreshTime(characterId);

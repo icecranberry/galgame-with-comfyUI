@@ -21,22 +21,6 @@
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
 
-  <!-- 工作流恢复弹窗 -->
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="showWorkflowRestore" class="wf-restore-overlay" @click.self="() => {}">
-        <div class="wf-restore-modal">
-          <h2>工作流文件缺失</h2>
-          <p>检测到制图工作流文件不存在，点击恢复将自动写入 turbo 和 base 模板。</p>
-          <button class="btn-primary" style="margin-top:16px;padding:10px 28px;font-size:14px" :disabled="wfRestoring" @click="doRestoreWorkflow">
-            {{ wfRestoring ? '恢复中...' : '恢复工作流' }}
-          </button>
-          <p v-if="wfRestoreError" class="wf-restore-error">{{ wfRestoreError }}</p>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
-
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
     <div v-if="mobileToast.visible" class="mobile-toast">
@@ -51,7 +35,7 @@ import { useRoute } from 'vue-router'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
 import { useProactiveStore } from './stores/notifications.js'
-import { forceProactive, checkWorkflowStatus, restoreWorkflow } from './api/index.js'
+import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -67,28 +51,6 @@ const toastEl = ref(null)
 
 // ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
 const mobileToast = ref({ visible: false, url: '' })
-
-// ── 工作流恢复 ──
-const showWorkflowRestore = ref(false)
-const wfRestoring = ref(false)
-const wfRestoreError = ref('')
-
-async function doRestoreWorkflow() {
-  wfRestoring.value = true
-  wfRestoreError.value = ''
-  try {
-    const r = await restoreWorkflow()
-    if (r.ok) {
-      showWorkflowRestore.value = false
-    } else {
-      wfRestoreError.value = r.error || '恢复失败'
-    }
-  } catch (e) {
-    wfRestoreError.value = e.message || '请求失败'
-  } finally {
-    wfRestoring.value = false
-  }
-}
 
 // ── 临时调试：强制主动聊天 ──
 const forceLoading = ref(false)
@@ -239,14 +201,6 @@ onMounted(async () => {
     const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash
     window.history.replaceState(null, '', newUrl)
   }
-
-  // 检查工作流文件健康状态
-  try {
-    const wfHealth = await checkWorkflowStatus()
-    if (!wfHealth.activeExists) {
-      showWorkflowRestore.value = true
-    }
-  } catch { /* 静默 — 后端可能尚未就绪 */ }
 })
 
 onUnmounted(() => {
@@ -418,37 +372,6 @@ textarea { resize: vertical; font-family: inherit; }
   transform: translateX(-50%) translateY(12px);
 }
 
-/* ── 工作流恢复弹窗 ── */
-.wf-restore-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-.wf-restore-modal {
-  background: var(--bg-secondary);
-  border-radius: 16px;
-  padding: 32px 36px;
-  max-width: 520px; width: 90%;
-  text-align: center;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
-}
-.wf-restore-modal h2 {
-  font-size: 20px;
-  margin-bottom: 12px;
-  color: var(--text-bright);
-}
-.wf-restore-modal > p {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-bottom: 24px;
-  line-height: 1.6;
-}
-.wf-restore-error {
-  color: var(--danger);
-  font-size: 13px;
-  margin-top: 16px;
-}
 .modal-fade-enter-active { transition: opacity 0.3s ease; }
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }

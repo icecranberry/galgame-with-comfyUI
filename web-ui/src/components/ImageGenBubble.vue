@@ -45,8 +45,8 @@
     <!-- Error -->
     <div v-if="genStatus === 'error'" class="igb-gen" :style="genBoxStyle">
       <div class="igb-placeholder igb-error">
-        <div style="font-size:36px">⚠️</div>
-        <div style="margin-top:8px; font-size:13px; color:#999">生成失败，请重试</div>
+        <div style="font-size:36px">&#x26A0;&#xFE0F;</div>
+        <div class="igb-error-text">{{ msg.genError || '生成失败，请重试' }}</div>
       </div>
     </div>
   </div>
@@ -236,6 +236,17 @@ onUnmounted(() => clearTimeout(timer))
 }
 
 .igb-error { background: #e8e8e8; animation: none; }
+.igb-error-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #999;
+  white-space: pre-wrap !important;
+  text-align: left;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.5;
+}
 .igb-retrying {
   /* 重试中：暖橙色背景提示 */
   background: linear-gradient(
