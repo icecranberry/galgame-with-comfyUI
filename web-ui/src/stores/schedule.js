@@ -139,9 +139,9 @@ export const useScheduleStore = defineStore('schedule', () => {
     peekError.value = null
   }
 
-  async function regenerateSchedule(characterId) {
+  async function regenerateSchedule(characterId, direction) {
     try {
-      const result = await api.regenerateSchedule(characterId)
+      const result = await api.regenerateSchedule(characterId, direction)
       // 静默刷新概览（不显示 loading，避免 card-grid 闪烁）
       await Promise.all([
         fetchOverview(true),

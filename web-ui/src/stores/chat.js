@@ -417,7 +417,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             if (lastEvent === 'generate_error') {
               const gm = findGenMsg(d.taskId)
-              if (gm) gm.genStatus = 'error'
+              if (gm) { gm.genStatus = 'error'; gm.genError = d.error || '' }
             }
             // ── guesses: 回复候选词 ──
             if (lastEvent === 'guesses' && d.a && d.b) {

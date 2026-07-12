@@ -353,10 +353,59 @@ async function submitWithRetry(rawPrompt, {
   return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted' };
 }
 
+// ── 优先级队列 ──
+let activeTaskCount = 0;
+let lowQueue = [];           // { rawPrompt, opts, resolve, reject }
+let processingLow = false;
+let lastHighTime = 0;
+const QUIET = 180_000;        // 高优任务后 180s 内不派发低优
+
+async function _execute(rawPrompt, opts) {
+  activeTaskCount++;
+  try {
+    return await submitWithRetry(rawPrompt, opts);
+  } finally {
+    activeTaskCount--;
+    if (activeTaskCount === 0) processLowQueue();
+  }
+}
+
+function processLowQueue() {
+  if (processingLow || lowQueue.length === 0) return;
+  if (activeTaskCount > 0) return;
+
+  const remaining = QUIET - (Date.now() - lastHighTime);
+  if (remaining > 0) {
+    setTimeout(processLowQueue, remaining + 100);
+    return;
+  }
+
+  processingLow = true;
+  const { rawPrompt, opts, resolve, reject } = lowQueue.shift();
+  _execute(rawPrompt, opts).then(resolve, reject).finally(() => {
+    processingLow = false;
+    if (lowQueue.length > 0) processLowQueue();
+  });
+}
+
 export async function generateImage(rawPrompt, opts = {}) {
-  return submitWithRetry(rawPrompt, opts);
+  if (opts.priority === 'low') {
+    return new Promise((resolve, reject) => {
+      lowQueue.push({ rawPrompt, opts, resolve, reject });
+      processLowQueue();
+    });
+  }
+  lastHighTime = Date.now();
+  return _execute(rawPrompt, opts);
 }
 
 export async function generateImageRaw(rawPrompt, opts = {}) {
-  return submitWithRetry(rawPrompt, opts);
+  if (opts.priority === 'low') {
+    return new Promise((resolve, reject) => {
+      lowQueue.push({ rawPrompt, opts, resolve, reject });
+      processLowQueue();
+    });
+  }
+  lastHighTime = Date.now();
+  return _execute(rawPrompt, opts);
 }

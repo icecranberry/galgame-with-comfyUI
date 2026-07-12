@@ -615,6 +615,7 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
       scene: 'events',
+      priority: options.manual ? 'high' : 'low',
       loras: _parseCharLoras(character.loras),
       ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
@@ -871,6 +872,7 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
       artist: config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight, scene: 'events',
+      priority: 'high',
       loras: _parseCharLoras(character.loras),
       ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
