@@ -1059,7 +1059,6 @@ const SETTING_TO_CONFIG = {
   comfy_event_height:      { obj: 'comfyui',   key: 'eventHeight',     type: 'int'     },
   feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_promptOptimize:       { obj: 'features', key: 'promptOptimize',    type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
@@ -1075,6 +1074,7 @@ const SETTING_TO_CONFIG = {
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
   user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
+  workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
 };
 
 function castValue(raw, type) {
@@ -1181,6 +1181,15 @@ function loadSystemSettings(db) {
       applied++;
     } else if (row.setting_key === 'disturb_skip_weekends') {
       config.disturb.skipWeekends = row.setting_value === 'true' || row.setting_value === '1';
+      applied++;
+    }
+    // workflow_scene JSON 配置
+    if (row.setting_key === 'workflow_scene') {
+      try {
+        config.workflow.scene = { ...config.workflow.scene, ...JSON.parse(row.setting_value) };
+      } catch {
+        /* keep defaults */
+      }
       applied++;
     }
   }

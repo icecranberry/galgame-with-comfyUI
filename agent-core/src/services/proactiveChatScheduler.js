@@ -574,7 +574,7 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输
     const loraOpts = {};
     if (charLoras.length > 0) loraOpts.loras = charLoras;
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
-    const result = await generateImage(prompt, loraOpts);
+    const result = await generateImage(prompt, { scene: 'chat', ...loraOpts });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;

@@ -24,3 +24,4 @@ launcher_config.json
 .production
 release/
 runtime/
+workflow/

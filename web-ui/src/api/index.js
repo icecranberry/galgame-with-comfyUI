@@ -948,3 +948,32 @@ export async function getResetStatus() {
   if (!res.ok) throw new Error(`reset status: ${res.status}`)
   return res.json()
 }
+
+// ── 工作流管理 ──
+export async function checkWorkflowStatus() {
+  const res = await fetch(`${BASE}/workflows/status`)
+  return res.json()
+}
+
+export async function restoreWorkflow() {
+  const res = await fetch(`${BASE}/workflows/restore`, { method: 'POST' })
+  return res.json()
+}
+
+export async function updateWorkflowMode(mode) {
+  const res = await fetch(`${BASE}/config/workflow-mode`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  return res.json()
+}
+
+export async function updateWorkflowScene(scene) {
+  const res = await fetch(`${BASE}/config/workflow-scene`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene }),
+  })
+  return res.json()
+}

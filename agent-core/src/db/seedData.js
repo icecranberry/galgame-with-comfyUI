@@ -19,7 +19,6 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   // Feature Flags
   feature_emotion: 'true',
   feature_memory: 'true',
-  feature_promptOptimize: 'false',
   feature_replyGuesses: 'true',
   feature_forceImageGen: 'false',
   feature_realtimeAffinityDisplay: 'true',

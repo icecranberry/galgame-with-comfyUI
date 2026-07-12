@@ -3,10 +3,9 @@
  *
  * 流程:
  *   1. 接收 {"prompt":"..."} 中的中文画面描述
- *   2. 用Anima提示词优化助手.txt 规则，调 DeepSeek 优化为英文 prompt
- *   3. 按条件注入参数（画师串/质量提示词/画面描述/宽/高/lora）
- *   4. 提交 ComfyUI → 轮询 → 下载 base64
- *   5. 兜底: 本地 output/bot/ 文件夹
+ *   2. 按条件注入参数（画师串/质量提示词/画面描述/宽/高/lora）
+ *   3. 提交 ComfyUI → 轮询 → 下载 base64
+ *   4. 兜底: 本地 output/bot/ 文件夹
  *
  * Lora 加载方式:
  *   不再使用 Lora Loader (LoraManager) 节点 + <lora:xxx:1> 标签
@@ -18,15 +17,34 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { chatSync } from '../llm/llm-client.js';
 import { submitWorkflow } from './comfyClient.js';
 import { config } from '../config.js';
+import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth } from './workflowTemplates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
-const BASE_WORKFLOW = '制图工作流.json';
-const BASE_WORKFLOW_PATH = path.join(WORKFLOW_DIR, BASE_WORKFLOW);
-const RULES_PATH = path.join(__dirname, '..', '..', '..', 'workflow', 'Anima提示词优化助手.txt');
+const BASE_WORKFLOW_PATH = path.join(WORKFLOW_DIR, ACTIVE_WORKFLOW);
+const PRO_WORKFLOW_PATH = path.join(WORKFLOW_DIR, PRO_WORKFLOW);
+
+export { checkWorkflowHealth };
+
+/**
+ * 根据全局模式和场景选择工作流文件
+ * @param {'chat'|'moments'|'events'} [scene]
+ * @returns {string} 工作流文件路径
+ */
+function resolveWorkflowPath(scene) {
+  const mode = config.workflow?.mode || 'turbo';
+  if (mode === 'turbo') return BASE_WORKFLOW_PATH;
+  if (mode === 'base') return PRO_WORKFLOW_PATH;
+
+  // hybrid: 根据场景选择
+  if (mode === 'hybrid' && scene) {
+    const scenePref = config.workflow.scene?.[scene] || 'turbo';
+    return scenePref === 'base' ? PRO_WORKFLOW_PATH : BASE_WORKFLOW_PATH;
+  }
+  return BASE_WORKFLOW_PATH;
+}
 
 const PROMPT_PLACEHOLDER = '请输入画面描述';
 
@@ -39,55 +57,6 @@ const NODE_TITLES = {
   loraTrigger: 'lora触发词',
 };
 
-// 缓存规则文本
-let _rulesCache = '';
-
-function loadRules() {
-  if (_rulesCache) return _rulesCache;
-  if (!fs.existsSync(RULES_PATH)) {
-    console.warn('[imageSkill] Anima提示词优化助手.txt not found, using raw prompt');
-    return '';
-  }
-  _rulesCache = fs.readFileSync(RULES_PATH, 'utf8');
-  console.log(`[imageSkill] Prompt rules loaded (${_rulesCache.length} chars)`);
-  return _rulesCache;
-}
-
-/**
- * 用 DeepSeek + 提示词规则优化 prompt
- */
-async function optimizePrompt(rawPrompt) {
-  const rules = loadRules();
-  if (!rules) return rawPrompt;
-
-  const systemMsg = `${rules}
-
----
-
-【用户输入】
-用户会给你一段中文画面描述。你的任务：严格按照上述模板规则，将其转写为一条英文 prompt。
-
-重要：
-- 只输出最终的英文 prompt 文本（一行，无换行）
-- 不要输出任何解释、markdown、引导语
-- 不要输出质量词（masterpiece/best quality 等）和画师名
-- 不要输出光线/光影/色调标签`;
-
-  try {
-    const result = await chatSync([
-      { role: 'system', content: systemMsg },
-      { role: 'user', content: rawPrompt },
-    ], { temperature: 0.3, max_tokens: 1024, label: 'Anima 润色助手' });
-
-    const cleaned = result.trim();
-    console.log(`[imageSkill] Prompt optimized: "${rawPrompt.slice(0, 40)}..." → "${cleaned.slice(0, 60)}..."`);
-    return cleaned || rawPrompt;
-  } catch (err) {
-    console.error('[imageSkill] Prompt optimization failed:', err.message);
-    return rawPrompt;
-  }
-}
-
 /**
  * 构建注入参数后的 workflow 副本
  *
@@ -98,9 +67,14 @@ async function optimizePrompt(rawPrompt) {
  * @param {number}   [overrides.height]
  * @param {Array}    [overrides.loras]  - [{path, weight, triggerWord}]
  * @param {string}   [overrides.customWorkflow] - 自定义工作流文件名（单人时替代基础工作流）
+ * @param {string}   [overrides.scene] - 'chat'|'moments'|'events'，hybrid 模式下用于选择工作流
  */
 function buildWorkflow(promptText, overrides = {}) {
-  let wfPath = BASE_WORKFLOW_PATH;
+  let wfPath = overrides.customWorkflow
+    ? (fs.existsSync(path.join(WORKFLOW_DIR, overrides.customWorkflow))
+        ? path.join(WORKFLOW_DIR, overrides.customWorkflow)
+        : resolveWorkflowPath(overrides.scene))
+    : resolveWorkflowPath(overrides.scene);
   const loras = overrides.loras || [];
   const hasLoras = loras.length > 0;
 
@@ -315,44 +289,33 @@ function finalizeCountTags(prompt) {
 const MAX_SUBMIT_RETRIES = 2;
 
 /**
- * 提交 ComfyUI 生图（含 prompt 优化、workflow 构建、重试循环）
+ * 提交 ComfyUI 生图（含 workflow 构建、重试循环）
  *
- * @param {string}   rawPrompt               - 原始画面描述
+ * @param {string}   rawPrompt               - 画面描述
  * @param {object}   [opts]
  * @param {Array}    [opts.loras]              - [{path, weight, triggerWord}]
  * @param {string}   [opts.customWorkflow]       - 自定义工作流文件名（单人兼容）
+ * @param {string}   [opts.scene]                - 'chat'|'moments'|'events'
  * @param {string}   [opts.artist]
  * @param {number}   [opts.width]
  * @param {number}   [opts.height]
  * @param {function} [opts.onProgress]
  * @param {number}   [opts.submitRetries=2]
- * @param {boolean}  [opts.skipOptimization=false]
  * @returns {Promise<{success, images, source, promptId}>}
  */
 async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
-  skipOptimization = false,
-  loras, customWorkflow,
+  loras, customWorkflow, scene,
 } = {}) {
-  // 1. 优化 prompt
-  const shouldOptimize = !skipOptimization && config.features.promptOptimize !== false;
-  let finalPrompt = rawPrompt;
-  if (shouldOptimize) {
-    if (onProgress) onProgress({ stage: 'optimizing' });
-    finalPrompt = await optimizePrompt(rawPrompt);
-  } else if (!skipOptimization) {
-    console.log(`[imageSkill] Prompt optimization disabled, using raw prompt directly`);
-  }
-
-  // 2. 最终阀门
-  finalPrompt = finalizeCountTags(finalPrompt);
+  // 1. 最终阀门
+  let finalPrompt = finalizeCountTags(rawPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
-  // 3. 构建 workflow
-  const wf = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow });
+  // 2. 构建 workflow
+  const wf = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow, scene });
   if (onProgress) onProgress({ stage: 'submitting' });
 
-  // 4. 提交 ComfyUI，带重试循环
+  // 3. 提交 ComfyUI，带重试循环
   let lastResult = null;
 
   for (let attempt = 0; attempt <= submitRetries; attempt++) {

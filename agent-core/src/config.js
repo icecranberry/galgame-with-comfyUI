@@ -37,7 +37,6 @@ export const config = {
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
     memory: process.env.FEATURE_MEMORY !== 'false',
-    promptOptimize: process.env.FEATURE_PROMPT_OPTIMIZE === 'true', // 默认关
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
     realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
@@ -58,6 +57,14 @@ export const config = {
   compression: {
     enabled: false,
     type: 'oxipng',   // 'oxipng' | 'avif'
+  },
+  workflow: {
+    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid'
+    scene: {           // hybrid 模式下的场景→工作流映射
+      chat: 'turbo',
+      moments: 'base',
+      events: 'turbo',
+    },
   },
   user: {
     nickname: process.env.USER_NICKNAME || '用户',
@@ -254,4 +261,32 @@ export function updateCompressConfig({ enabled, type }) {
     persistSettingSync('compression_type', type);
   }
   console.log(`[config] compression: enabled=${config.compression.enabled} type=${config.compression.type}`);
+}
+
+export function updateWorkflowMode(mode) {
+  if (!['base', 'turbo', 'hybrid'].includes(mode)) {
+    return { ok: false, error: 'mode must be base, turbo, or hybrid' };
+  }
+  config.workflow.mode = mode;
+  persistSettingSync('workflow_mode', mode);
+  console.log(`[config] workflowMode = ${mode}`);
+  return { ok: true };
+}
+
+export function updateWorkflowScene(scene) {
+  if (!scene || typeof scene !== 'object') {
+    return { ok: false, error: 'scene must be an object' };
+  }
+  for (const [k, v] of Object.entries(scene)) {
+    if (['chat', 'moments', 'events'].includes(k) && ['base', 'turbo'].includes(v)) {
+      config.workflow.scene[k] = v;
+    }
+  }
+  persistSettingSync('workflow_scene', JSON.stringify(config.workflow.scene));
+  console.log(`[config] workflowScene =`, config.workflow.scene);
+  return { ok: true };
+}
+
+export function getWorkflowConfig() {
+  return { ...config.workflow };
 }

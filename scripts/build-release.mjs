@@ -639,6 +639,18 @@ async function main() {
     warn("未找到 邻舍.EXE.exe，PyInstaller 可能未成功");
   }
 
+  // workflow 模板文件（gitignore 不追踪，需显式复制）
+  log("复制 workflow 模板...");
+  const workflowSrc = resolve(ROOT, "workflow");
+  if (existsSync(workflowSrc)) {
+    const workflowDst = resolve(RELEASE_DIR, "workflow");
+    ensureDir(workflowDst);
+    await robocopy(workflowSrc, workflowDst);
+    ok("workflow 模板");
+  } else {
+    warn("workflow 目录不存在，跳过");
+  }
+
   // 使用说明
   const { writeFileSync } = await import("node:fs");
   writeFileSync(resolve(RELEASE_DIR, "使用说明.txt"), [

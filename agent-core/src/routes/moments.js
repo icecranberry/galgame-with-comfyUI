@@ -610,6 +610,7 @@ async function generateMomentPost(character) {
       artist: config.comfyui.momentsArtist,
       width: config.comfyui.momentsWidth,
       height: config.comfyui.momentsHeight,
+      scene: 'moments',
       ...loraOpts,
     });
 

@@ -181,7 +181,7 @@ router.post('/test-style', async (req, res) => {
 
   const MOMENTS_PROMPT_DEFAULT = `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`;
 
-  const EVENT_PROMPT_DEFAULT = `1girl, Hatsune Miku (VOCALOID), teal twin-tailed hair, blue eyes, standing alone on a dimly lit rooftop at dusk, looking over her shoulder with a mysterious expression, one hand reaching toward a glowing floating envelope in the air, city skyline in the distance, warm orange sky fading into deep purple, cinematic lighting, atmospheric, anime style, high quality illustration.`;
+  const EVENT_PROMPT_DEFAULT = `Yae Miko (Genshin Impact), long pink hair in a high ponytail, M-shaped bangs, purple fox-like eyes with a sly expression, wearing a red and white shrine maiden outfit with exposed side breast, lying on a futon in the Grand Narukami Shrine's private sleeping quarters. She is half-asleep, one hand loosely holding a closed light novel on her chest, the other tucked under her cheek. Her posture is relaxed, legs slightly bent, bare feet peeking out from under the thin silk blanket. Around her, soft lantern light casts warm shadows on tatami mats, a half-eaten plate of fried tofu sits on a low wooden tray nearby, and a faint smile plays on her lips as she drifts into peaceful slumber. Camera angle: slightly elevated, looking down from a 45-degree angle, capturing her serene yet mischievous aura in the dim, cozy chamber.`;
 
   const isMoments = mode === 'moments';
   const isEvent = mode === 'event';
@@ -201,7 +201,7 @@ router.post('/test-style', async (req, res) => {
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
-      skipOptimization: true,
+      scene: mode,
       onProgress: (p) => {
         // 捕获各阶段时间戳用于 timing breakdown
         if (p.stage === 'submitting') timing.submitting = performance.now();

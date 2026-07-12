@@ -153,7 +153,7 @@ const characters = computed(() => chat.characters.filter(c => !c.events_disabled
 // 筛选条：有事件的角色头像（活跃+历史合并去重）
 const charactersWithEvents = computed(() => {
   const map = new Map()
-  for (const e of [...store.filteredActive, ...store.filteredHistory]) {
+  for (const e of [...store.activeEvents, ...store.history]) {
     if (!e.character_id || map.has(e.character_id)) continue
     map.set(e.character_id, {
       character_id: e.character_id,

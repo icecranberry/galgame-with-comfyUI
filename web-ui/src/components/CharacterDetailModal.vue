@@ -110,6 +110,10 @@
             <div class="detail-actions">
               <button class="btn-ghost danger" @click="deleteChar">&#x1F5D1; 删除角色</button>
               <div class="detail-actions-right">
+                <div class="recruit-appearance-hint">
+                  外观描述补充tag查阅
+                  <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex</a>
+                </div>
                 <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
               </div>
             </div>
@@ -693,7 +697,16 @@ async function saveLora() {
   background: inherit;
 }
 .detail-actions { display: flex; align-items: center; margin-top: 0; gap: 10px; }
-.detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
+.detail-actions-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.recruit-appearance-hint {
+  font-size: 11px;
+  color: var(--text-muted, #999);
+  white-space: nowrap;
+}
+.recruit-appearance-hint a {
+  color: var(--text-muted, #999);
+  text-decoration: underline;
+}
 .btn-ghost.danger { color: var(--danger); }
 .btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 

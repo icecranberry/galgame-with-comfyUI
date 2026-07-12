@@ -45,6 +45,9 @@
         <div class="sa">
           <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
           <span v-if="saved" class="smsg">已保存</span>
+          <div style="flex:1"></div>
+          <button class="btn-ghost" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
+          <button class="btn-ghost" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
 
@@ -53,8 +56,9 @@
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
       <div class="card">
         <h3>测试画风&速度</h3>
-        <p class="fd">使用上方对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
+        <p class="fd">使用对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
         <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
+        <p class="fd">切换模型之后首次生图需要加载模型所以会慢一点</p>
 
         <div class="style-test-row">
           <button
@@ -233,17 +237,6 @@
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.memory" @change="saveFeature('memory', features.memory)" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="toggle-row">
-          <div>
-            <div class="tl">Anima 提示词优化</div>
-            <div class="td">画面将携带Anima提示词助手（108K上下文）多请求一次LLM，部分姿势和画面将更加精准</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.promptOptimize" @change="saveFeature('promptOptimize', features.promptOptimize)" />
             <span class="slider"></span>
           </label>
         </div>
@@ -440,11 +433,65 @@
       </div>
     </Transition>
   </Teleport>
+  <!-- 工作流模式弹窗 -->
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div v-if="showWfModeDialog" class="wf-mode-overlay" @click.self="showWfModeDialog = false">
+        <div class="wf-mode-modal">
+          <h3>工作流模式</h3>
+          <div class="wf-mode-options">
+            <button v-for="m in workflowModeOptions" :key="m.value"
+              :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
+              @click="wfModeDraft = m.value">
+              <span class="wf-mo-title">{{ m.label }}</span>
+              <span class="wf-mo-desc">{{ m.desc }}</span>
+            </button>
+          </div>
+
+          <div class="wf-mode-downloads">
+            <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
+            <div class="wf-dl-item">
+              <span class="wf-dl-label">Anima-turbo：</span>
+              <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>
+              <span class="wf-dl-sep">|</span>
+              <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+            </div>
+            <div class="wf-dl-item">
+              <span class="wf-dl-label">Anima-base：</span>
+              <a href="https://civitai.com/api/download/models/2945208?fileId=2824391" target="_blank" rel="noopener">Civitai 下载</a>
+              <span class="wf-dl-sep">|</span>
+              <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+            </div>
+          </div>
+
+          <Transition name="expand">
+            <div v-if="wfModeDraft === 'hybrid'" class="wf-mode-scenes">
+              <p class="wf-mode-hint">hybrid 模式下可为不同场景分配不同工作流，默认生图用 turbo</p>
+              <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
+                <span class="wf-scene-name">{{ s.label }}</span>
+                <div class="wf-scene-toggle">
+                  <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'turbo' }]"
+                    @click="wfSceneDraft[s.key] = 'turbo'">turbo</button>
+                  <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'base' }]"
+                    @click="wfSceneDraft[s.key] = 'base'">base</button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+
+          <div class="wf-mode-actions">
+            <button class="btn-ghost" @click="showWfModeDialog = false">取消</button>
+            <button class="btn-primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -454,6 +501,7 @@ const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
+const confirmFn = inject('confirm')
 
 // ── 移动端滚动方向感知：下滑隐藏标题，上滑显示 ──
 const scrollEl = ref(null)
@@ -495,7 +543,7 @@ function switchComfyTab(mode) {
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, promptOptimize: false, replyGuesses: false, realtimeAffinityDisplay: false })
+const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
 
@@ -667,6 +715,10 @@ onMounted(async () => {
     llmModel.value = data.llm.model || 'deepseek-chat'
     llmHeadersText.value = data.llm.headers && Object.keys(data.llm.headers).length
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
+    if (data.workflow) {
+      workflowMode.value = data.workflow.mode || 'turbo'
+      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'turbo', ...data.workflow.scene }
+    }
   } catch {}
   await checkHealth()
   await loadArtistFavorites()
@@ -826,6 +878,62 @@ const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
 const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
 
+// ── 工作流 ──
+const workflowModeOptions = [
+  { value: 'turbo', label: 'turbo', desc: '纯 turbo 模型，速度提升400%+，但代价是构图能力下降，画师串遵循偏弱' },
+  { value: 'base', label: 'base', desc: '纯 base 模型，泛用性最强的基底模型' },
+  { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，但是切换时需要加载模型导致首图较慢' },
+]
+const sceneOptions = [
+  { key: 'chat', label: '对话' },
+  { key: 'moments', label: '朋友圈' },
+  { key: 'events', label: '奇遇&日程' },
+]
+
+const workflowMode = ref('turbo')
+const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'turbo' })
+const wfResetting = ref(false)
+const wfSaving = ref(false)
+const showWfModeDialog = ref(false)
+
+// 弹窗草稿状态
+const wfModeDraft = ref('turbo')
+const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'turbo' })
+
+function openWfModeDialog() {
+  wfModeDraft.value = workflowMode.value
+  wfSceneDraft.value = { ...workflowScene.value }
+  showWfModeDialog.value = true
+}
+
+async function saveWfModeDialog() {
+  wfSaving.value = true
+  try {
+    const modeChanged = wfModeDraft.value !== workflowMode.value
+    const sceneChanged = JSON.stringify(wfSceneDraft.value) !== JSON.stringify(workflowScene.value)
+
+    if (modeChanged) await updateWorkflowMode(wfModeDraft.value)
+    if (sceneChanged || modeChanged) await updateWorkflowScene({ ...wfSceneDraft.value })
+
+    workflowMode.value = wfModeDraft.value
+    workflowScene.value = { ...wfSceneDraft.value }
+    showWfModeDialog.value = false
+  } catch {} finally { wfSaving.value = false }
+}
+
+async function doWorkflowReset2() {
+  const ok = await confirmFn({
+    title: '重置工作流',
+    message: '将用内置模板覆盖现有的\n制图工作流.json 和 制图工作流-pro.json',
+    okText: '重置',
+  })
+  if (!ok) return
+  wfResetting.value = true
+  try {
+    await restoreWorkflow()
+  } catch {} finally { wfResetting.value = false }
+}
+
 // Lightbox
 const lightboxVisible = ref(false)
 const lightboxIndex = ref(0)
@@ -877,7 +985,7 @@ const TEST_PROMPTS_KEY = 'test-style-prompts'
 const DEFAULT_TEST_PROMPTS = {
   chat: `Hatsune Miku (VOCALOID), 1girl, close-up shot, teal twin-tailed hair, blue eyes, black school uniform with tie, holding a fork, looking happily at a matcha mille crepe cake on a white plate, matcha latte with musical note latte art beside it, soft natural lighting, shallow depth of field, cafe background with wooden tables, warm and cozy atmosphere, 1girl, teal-haired Hatsune Miku smiling while eating matcha cake`,
   moments: `2girls, Kiana Kaslana(honkai impact 3rd), white hair in twin braids, blue eyes, wearing a casual outfit, sitting at a cozy café table with a giant strawberry cake in front of her, laughing joyfully. Raiden Mei(honkai impact 3rd) is sitting across from her, smiling softly, two pudding cups on the table. Warm afternoon sunlight streaming through the window, soft bokeh, cute and heartwarming atmosphere, anime style, high quality illustration.`,
-  event: `1girl, Hatsune Miku (VOCALOID), teal twin-tailed hair, blue eyes, standing alone on a dimly lit rooftop at dusk, looking over her shoulder with a mysterious expression, one hand reaching toward a glowing floating envelope in the air, city skyline in the distance, warm orange sky fading into deep purple, cinematic lighting, atmospheric, anime style, high quality illustration.`,
+  event: `Yae Miko (Genshin Impact), long pink hair in a high ponytail, M-shaped bangs, purple fox-like eyes with a sly expression, wearing a red and white shrine maiden outfit with exposed side breast, lying on a futon in the Grand Narukami Shrine's private sleeping quarters. She is half-asleep, one hand loosely holding a closed light novel on her chest, the other tucked under her cheek. Her posture is relaxed, legs slightly bent, bare feet peeking out from under the thin silk blanket. Around her, soft lantern light casts warm shadows on tatami mats, a half-eaten plate of fried tofu sits on a low wooden tray nearby, and a faint smile plays on her lips as she drifts into peaceful slumber. Camera angle: slightly elevated, looking down from a 45-degree angle, capturing her serene yet mischievous aura in the dim, cozy chamber.`,
 }
 
 function loadTestPrompts() {
@@ -933,6 +1041,8 @@ function resetTestPrompts() {
   padding: 24px;
   box-shadow: var(--glass-shadow);
   transition: box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
 }
 .card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
@@ -1094,7 +1204,7 @@ function resetTestPrompts() {
   to { transform: scale(1); opacity: 1; }
 }
 
-.sa { display: flex; align-items: center; gap: 12px; }
+.sa { display: flex; align-items: center; gap: 12px; margin-top: auto; }
 .smsg { color: var(--success); font-size: 13px; }
 
 .toggle-row { display: flex; gap: 14px; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
@@ -1364,7 +1474,7 @@ function resetTestPrompts() {
 .prompt-editor-body { flex: 1; overflow-y: auto; }
 .prompt-editor-field { margin-bottom: 16px; }
 .prompt-textarea { min-height: 100px; resize: vertical; font-family: inherit; margin-bottom: 0; }
-.prompt-editor-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.prompt-editor-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; }
 
 /* ── 移动端：卡片单列 + 间距收缩 ── */
 @media (max-width: 767px) {
@@ -1379,4 +1489,118 @@ function resetTestPrompts() {
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
 }
+
+/* ── 工作流模式弹窗 ── */
+.wf-mode-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10001;
+}
+.wf-mode-modal {
+  background: var(--bg-secondary);
+  border-radius: 16px; padding: 28px 32px;
+  max-width: 600px; width: 90%;
+  max-height: 85vh; overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  transition: max-height 0.35s ease, max-width 0.35s ease;
+}
+.wf-mode-modal h3 {
+  font-size: 18px; margin-bottom: 16px; color: var(--text-bright);
+  text-align: center;
+}
+.wf-mode-options {
+  display: flex; gap: 12px; margin-bottom: 16px;
+}
+.wf-mode-option {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex; flex-direction: column; gap: 6px;
+  text-align: center;
+}
+.wf-mode-option:hover { border-color: var(--accent); }
+.wf-mode-option.active {
+  border-color: var(--accent);
+  background: rgba(224, 123, 108, 0.08);
+}
+.wf-mo-title {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.wf-mo-desc {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.4;
+}
+.wf-mode-downloads {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 4px;
+}
+.wf-mode-dl-hint {
+  font-size: 11px; color: var(--text-secondary); margin: 0 0 6px;
+}
+.wf-dl-item {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.8;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.wf-dl-label { font-weight: 500; color: var(--text-bright); min-width: 40px; }
+.wf-dl-item a { color: var(--accent); text-decoration: underline; }
+.wf-dl-item a:hover { color: var(--accent-hover, var(--accent)); }
+.wf-dl-sep { opacity: 0.4; margin: 0 2px; }
+.wf-dl-alt { opacity: 0.5; }
+.wf-mode-hint {
+  font-size: 12px; color: var(--text-secondary);
+  margin-bottom: 10px; text-align: center;
+}
+.wf-mode-scenes {
+  background: rgba(224, 123, 108, 0.04);
+  border: 1px solid rgba(224, 123, 108, 0.12);
+  border-radius: 8px; padding: 12px 16px;
+}
+.wf-scene-row-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0;
+}
+.wf-scene-row-h + .wf-scene-row-h { border-top: 1px solid rgba(0,0,0,0.06); }
+.wf-scene-name {
+  font-size: 13px; color: var(--text-primary);
+}
+.wf-scene-toggle {
+  display: flex; gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden;
+}
+.wf-toggle-btn {
+  padding: 3px 14px; font-size: 12px;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  border: none; border-radius: 0; cursor: pointer; transition: all 0.15s;
+}
+.wf-toggle-btn:hover { color: var(--text-bright); }
+.wf-toggle-btn.active {
+  background: var(--accent); color: #fff;
+}
+/* hybrid 场景展开/收起动画 */
+.expand-enter-active, .expand-leave-active {
+  transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease, border-width 0.3s ease;
+  overflow: hidden;
+}
+.expand-enter-from, .expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0; padding-bottom: 0;
+  border-top-width: 0; border-bottom-width: 0;
+}
+.expand-enter-to, .expand-leave-from {
+  max-height: 300px;
+  opacity: 1;
+}
+.wf-mode-actions {
+  margin-top: 20px; display: flex; justify-content: center; gap: 10px;
+}
+.modal-fade-enter-active { transition: opacity 0.3s ease; }
+.modal-fade-leave-active { transition: opacity 0.2s ease; }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 </style>

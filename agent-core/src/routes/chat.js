@@ -1264,6 +1264,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   try {
     const result = await generateImage(prompt, {
+      scene: 'chat',
       onProgress: (p) => {
         if (p.stage === 'retrying') {
           send('generate_retrying', { taskId, attempt: p.attempt, maxRetries: p.maxRetries });

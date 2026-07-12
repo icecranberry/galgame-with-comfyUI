@@ -20,6 +20,8 @@ import notificationsRoutes from './src/routes/notifications.js';
 import eventsRoutes from './src/routes/events.js';
 import streamRoutes from './src/routes/stream.js';
 import scheduleRoutes from './src/routes/schedule.js';
+import workflowsRoutes from './src/routes/workflows.js';
+import { checkWorkflowHealth } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 import { startEventScheduler } from './src/services/eventScheduler.js';
@@ -72,21 +74,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/schedule', scheduleRoutes);
-
-// 工作流列表：返回 workflow/ 目录下所有 JSON 文件
-const _appDir = path.dirname(fileURLToPath(import.meta.url));
-const _workflowDir = path.join(_appDir, '..', 'workflow');
-app.get('/api/workflows', (req, res) => {
-  try {
-    const files = fs.readdirSync(_workflowDir).filter(f => f.endsWith('.json')).map(f => ({
-      filename: f,
-      label: f.replace('.json', ''),
-    }));
-    res.json({ workflows: files });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to list workflows' });
-  }
-});
+app.use('/api/workflows', workflowsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -109,6 +97,13 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 检查工作流文件健康状态
+const wfHealth = checkWorkflowHealth();
+if (!wfHealth.activeExists) {
+  console.warn('[workflow] Active workflow not found: 制图工作流.json');
+  console.warn('[workflow] Frontend will prompt user to restore from template (base/turbo)');
+}
 
 // 启动朋友圈定时调度器
 startMomentScheduler();

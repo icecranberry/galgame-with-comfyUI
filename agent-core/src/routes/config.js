@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
@@ -37,6 +37,7 @@ router.get('/', (req, res) => {
       hideWorld: config.disturb.hideWorld || false,
       skipWeekends: config.disturb.skipWeekends || false,
     },
+    workflow: getWorkflowConfig(),
   });
 });
 
@@ -253,6 +254,25 @@ router.put('/disturb-mode', (req, res) => {
   // 总开关变更后立即触发一次检测
   triggerDisturbCheck();
   res.json({ ok: true, disturbMode: config.features.disturbMode });
+});
+
+// PUT /api/config/workflow-mode — 更新工作流模式 (base|turbo|hybrid)
+router.put('/workflow-mode', (req, res) => {
+  const { mode } = req.body;
+  if (!mode || !['base', 'turbo', 'hybrid'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be base, turbo, or hybrid' });
+  }
+  const result = updateWorkflowMode(mode);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ok: true, workflow: getWorkflowConfig() });
+});
+
+// PUT /api/config/workflow-scene — 更新 hybrid 模式下场景→工作流映射
+router.put('/workflow-scene', (req, res) => {
+  const { scene } = req.body;
+  const result = updateWorkflowScene(scene);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ok: true, workflow: getWorkflowConfig() });
 });
 
 // PUT /api/config/disturb-settings — 更新防打扰时间段和角色列表
