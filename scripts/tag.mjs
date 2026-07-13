@@ -9,10 +9,10 @@
  *   1. vite build 打包前端
  *   2. 解析版本号（自动 patch+1 或手动指定）
  *   3. 工作区脏 → 自动提交；工作区干净 → 直接打 tag
- *   4. git tag + push origin
+ *   4. git fetch → git tag → 分步 push 分支 + tags（含失败重试）
  */
 
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,16 +24,35 @@ const C = {
 };
 
 function sh(cmd, opts = {}) {
-  const result = execSync(cmd, {
-    cwd: ROOT, encoding: "utf8", windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"], ...opts,
-  });
-  // 非 pipe 模式（如 inherit）返回 null
-  return result ? result.trim() : "";
+  try {
+    const result = execSync(cmd, {
+      cwd: ROOT, encoding: "utf8", windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"], ...opts,
+    });
+    return result ? result.trim() : "";
+  } catch (e) {
+    die(`命令执行失败: ${cmd}\n  ${e.stderr?.trim() || e.message}`);
+  }
 }
 
-function run(cmd) {
-  sh(cmd, { stdio: "inherit" });
+function exec(cmd, args) {
+  const result = spawnSync(cmd, args, {
+    cwd: ROOT, encoding: "utf8", windowsHide: true,
+    stdio: "inherit",
+  });
+  if (result.error) die(`${cmd} 执行失败: ${result.error.message}`);
+  if (result.status !== 0) die(`${cmd} 退出码 ${result.status}`);
+}
+
+function execShell(cmdStr) {
+  try {
+    execSync(cmdStr, {
+      cwd: ROOT, encoding: "utf8", windowsHide: true,
+      stdio: "inherit",
+    });
+  } catch {
+    die(`执行失败: ${cmdStr}`);
+  }
 }
 
 function log(msg)  { console.log(`  ${msg}`); }
@@ -58,19 +77,21 @@ for (const arg of args) {
 
 console.log();
 log("vite build...");
-run("cd web-ui && npm run build");
+execShell("cd web-ui && npm run build");
 ok("vite build 完成");
 
 // ── 2. 获取最新 tag ──
 
 let latestTag = "";
 try {
-  latestTag = sh("git describe --tags --abbrev=0");
+  latestTag = execSync("git describe --tags --abbrev=0", {
+    cwd: ROOT, encoding: "utf8", windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  }).trim();
 } catch {
   latestTag = "v0.0.0";
 }
 
-// 解析版本号
 const match = latestTag.match(/^v?(\d+)\.(\d+)\.(\d+)/);
 let major = 1, minor = 0, patch = 0;
 if (match) {
@@ -95,24 +116,60 @@ const isDirty = status.length > 0;
 if (isDirty) {
   const commitMsg = `【${newVersion}】${tagMessage}`;
   log(`工作区有变更，自动提交: ${commitMsg}`);
-  sh("git add .");
-  run(`git commit -m "${commitMsg}"`);
+  exec("git", ["add", "."]);
+  exec("git", ["commit", "-m", commitMsg]);
   ok("提交完成");
 } else {
   ok("工作区干净，跳过提交");
 }
 
-// ── 5. 打 tag ──
+// ── 5. 拉取远端 tags，避免冲突 ──
+
+log("拉取远端 tags...");
+exec("git", ["fetch", "--tags", "--quiet"]);
+ok("远端 tags 同步完成");
+
+// ── 6. 打 tag ──
 
 log(`创建 tag: ${newVersion}`);
-run(`git tag -a ${newVersion} -m "${tagMessage}"`);
+exec("git", ["tag", "-a", newVersion, "-m", tagMessage]);
 ok(`tag ${newVersion} 创建完成`);
 
-// ── 6. 推送 ──
+// ── 7. 推送（含重试机制） ──
 
 const branch = sh("git rev-parse --abbrev-ref HEAD");
-log(`推送 ${branch} + tags → origin...`);
-run(`git push origin ${branch} --tags`);
+
+function pushWithRetry(pushArgs, label) {
+  const maxRetries = 2;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = spawnSync("git", [
+        "-c", "http.postBuffer=524288000",
+        "push", ...pushArgs,
+      ], {
+        cwd: ROOT, encoding: "utf8", windowsHide: true,
+        stdio: "inherit",
+      });
+      if (result.status === 0) return;
+      throw new Error(`退出码 ${result.status}`);
+    } catch (e) {
+      if (attempt < maxRetries) {
+        const wait = attempt === 1 ? 5 : 10;
+        log(`${label} 推送失败 (${e.message})，${wait} 秒后重试...`);
+        execSync(`ping -n ${wait} 127.0.0.1 >nul`, { stdio: "ignore" });
+      } else {
+        die(`${label} 推送失败，已重试 ${maxRetries - 1} 次`);
+      }
+    }
+  }
+}
+
+log(`推送分支 ${branch}...`);
+pushWithRetry(["origin", branch], "分支");
+
+log("推送 tags...");
+pushWithRetry(["origin", "--tags"], "Tags");
+
 ok("推送完成");
 
 console.log();
