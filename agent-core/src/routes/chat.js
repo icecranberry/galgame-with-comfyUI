@@ -725,6 +725,22 @@ ${coreRules}
 
     msgs.push(...history);
 
+    // 合并连续同角色历史消息，兼容 LM Studio 等严格 Jinja 模板
+    // 仅合并历史区（跳过前面的 system 消息），不影响 system prompt 结构
+    if (history.length > 0) {
+      const mergeStart = msgs.length - history.length;
+      for (let i = msgs.length - 1; i > mergeStart; i--) {
+        if (msgs[i].role === msgs[i - 1].role) {
+          msgs[i - 1].content += '\n\n' + msgs[i].content;
+          // 保留 created_at：合并时用较早的消息时间
+          if (msgs[i].created_at && !msgs[i - 1].created_at) {
+            msgs[i - 1].created_at = msgs[i].created_at;
+          }
+          msgs.splice(i, 1);
+        }
+      }
+    }
+
     // 正在进行的奇遇（作为独立 system 消息注入到 user 消息之前，指令前置 + XML 结构化）
     // 和朋友圈不同——奇遇是"此刻正在发生"的事，优先级更高，需要紧贴对话
     // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
@@ -1642,6 +1658,17 @@ async function generateReplyGuesses(conversationId, character) {
   if (stageContent) msgs.push({ role: 'system', content: stageContent });
   msgs.push({ role: 'system', content: taskParts.join('\n\n') });
   msgs.push(...cleanedHistory);
+
+  if (cleanedHistory.length > 0) {
+    const mergeStart = msgs.length - cleanedHistory.length;
+    for (let i = msgs.length - 1; i > mergeStart; i--) {
+      if (msgs[i].role === msgs[i - 1].role) {
+        msgs[i - 1].content += '\n' + msgs[i].content;
+        msgs.splice(i, 1);
+      }
+    }
+  }
+
   msgs.push({ role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' });
 
   try {
