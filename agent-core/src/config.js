@@ -63,7 +63,8 @@ export const config = {
     scene: {           // hybrid 模式下的场景→工作流映射
       chat: 'turbo',
       moments: 'base',
-      events: 'turbo',
+      events: 'base',
+      schedule: 'base',
     },
   },
   user: {
@@ -278,7 +279,7 @@ export function updateWorkflowScene(scene) {
     return { ok: false, error: 'scene must be an object' };
   }
   for (const [k, v] of Object.entries(scene)) {
-    if (['chat', 'moments', 'events'].includes(k) && ['base', 'turbo'].includes(v)) {
+    if (['chat', 'moments', 'events', 'schedule'].includes(k) && ['base', 'turbo'].includes(v)) {
       config.workflow.scene[k] = v;
     }
   }

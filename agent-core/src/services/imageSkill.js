@@ -30,7 +30,7 @@ export { checkWorkflowHealth };
 
 /**
  * 根据全局模式和场景选择工作流文件
- * @param {'chat'|'moments'|'events'} [scene]
+ * @param {'chat'|'moments'|'events'|'schedule'} [scene]
  * @returns {string} 工作流文件路径
  */
 function resolveWorkflowPath(scene) {

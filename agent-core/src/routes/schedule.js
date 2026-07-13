@@ -226,43 +226,6 @@ router.get('/:characterId/current', (req, res) => {
   }
 });
 
-// ── 辅助函数：JSON 修复 / 提取 / image_prompt 规则解析 ──
-
-function repairJson(text) {
-  return text.replace(/\\([^"\\\/bfnrtu])/g, '$1');
-}
-
-function extractFirstJson(text) {
-  const start = text.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0, inString = false, escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === '\\') { escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
-  }
-  return null;
-}
-
-function parseImagePromptRule(ruleContent) {
-  if (!ruleContent) return null;
-  try {
-    let sanitized = ruleContent
-      .replace(/\r/g, '\\r')
-      .replace(/\n/g, '\\n')
-      .replace(/\t/g, '\\t');
-    sanitized = repairJson(sanitized);
-    const parsed = JSON.parse(sanitized);
-    return parsed.prompt || null;
-  } catch {
-    return null;
-  }
-}
-
 /** 将 base64 图片落盘，返回对外可访问的 URL 路径 */
 function savePeekImage(base64, filename) {
   try {
@@ -311,12 +274,13 @@ router.post('/:characterId/peek/retake', async (req, res) => {
       message: 'Retake started, result will be pushed via SSE schedule_peek_ready',
     });
 
-    // 异步生图，使用奇遇事件参数
+    // 异步生图，使用日程事件参数
     try {
       const result = await generateImage(prompt, {
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,
+        scene: 'schedule',
         priority: 'high',
         ...(() => {
           const chLoras = _parseLoras(character.loras);
@@ -435,10 +399,9 @@ router.post('/:characterId/peek', async (req, res) => {
       ? character.base_prompt.replace(/你/g, charName)
       : `角色名：${charName}`;
 
-    // system3: image_prompt 规则作为输出格式指令
+    // system3: image_prompt 规则作为 prompt 画质指令
     const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
-    const imageInstruction = parseImagePromptRule(imageRulesText);
-    const system3 = `你将画面表达为prompt输出，只输出一个{"prompt":"..."} JSON格式。${imageInstruction ? '\n\n输出格式要求：\n' + imageInstruction : ''}`;
+    const system3 = `直接输出英文画面描述，不要任何格式包装或额外文字。${imageRulesText ? '\n\n输出要求：\n' + imageRulesText : ''}`;
 
     // event: 角色当前奇遇注入
     const activeEvent = db.prepare(`
@@ -491,19 +454,13 @@ router.post('/:characterId/peek', async (req, res) => {
           label: '瞄一眼人像prompt生成',
         });
 
-        // 解析 LLM 响应：多层兜底
-        const jsonStr = extractFirstJson(rawResult);
-        if (jsonStr) {
-          try {
-            const parsed = JSON.parse(repairJson(jsonStr));
-            generatedPrompt = parsed.prompt || '';
-          } catch {
-            // JSON 解析失败，尝试正则提取
-            const promptMatch = rawResult.match(/"prompt"\s*:\s*"([^"]+)"/);
-            generatedPrompt = promptMatch ? promptMatch[1] : '';
-          }
-        } else {
-          // 无 JSON，尝试正则提取
+        // 提取 prompt：纯文本优先，JSON 格式向后兼容
+        let text = rawResult.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        if (text.length >= 5) {
+          generatedPrompt = text;
+        }
+        // 兜底：如果 LLM 仍输出了 {"prompt":"..."} JSON 格式
+        if (!generatedPrompt) {
           const promptMatch = rawResult.match(/"prompt"\s*:\s*"([^"]+)"/);
           generatedPrompt = promptMatch ? promptMatch[1] : '';
         }
@@ -521,11 +478,12 @@ router.post('/:characterId/peek', async (req, res) => {
 
       console.log(`[schedule] Peek prompt for ${charName}: "${generatedPrompt.slice(0, 120)}..."`);
 
-      // 用奇遇事件参数生图
+      // 用日程事件参数生图
       const result = await generateImage(generatedPrompt, {
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,
+        scene: 'schedule',
         priority: 'high',
         ...(() => {
           const chLoras = _parseLoras(character.loras);

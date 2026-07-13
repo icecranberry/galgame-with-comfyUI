@@ -535,8 +535,8 @@ ${multiPerson.otherPersona}`;
     ? `**多人画面**：prompt 中必须包含${displayName}和${multiPerson.otherName}两个人。描述清楚各自的外观、位置、互动动作。用句号分隔两人描述。`
     : '';
 
-  // 解析 image_prompt 规则的 {"prompt":"..."} JSON，提取其中的 prompt 指令文本
-  const imagePromptInstruction = parseImagePromptRule(imageRulesText)
+  // image_prompt 规则内容直接作为 prompt 字段的格式指令
+  const imagePromptInstruction = imageRulesText
     || '≥8个外观锚点，角色名用character(series)格式';
 
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
@@ -794,7 +794,7 @@ ${personaText2}`;
 ${multiPerson2.otherPersona}`;
   }
 
-  const branchImagePromptInstruction = parseImagePromptRule(imageRulesText)
+  const branchImagePromptInstruction = imageRulesText
     || '描述场景、角色外观、动作、氛围';
 
   const multiPersonImageNote2 = multiPerson2
@@ -1137,31 +1137,6 @@ function extractFirstJson(text) {
     else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
   }
   return null; // 括号未闭合
-}
-
-/**
- * 解析 image_prompt 规则的 {"prompt":"..."} JSON 格式
- * 成功则返回 prompt 字段内容，失败返回 null
- *
- * rule_content 可能包含：(1) 真实换行符（JSON 不允许）(2) 非法转义序列如 \(
- * 两步清洗后再解析
- */
-function parseImagePromptRule(ruleContent) {
-  if (!ruleContent) return null;
-  try {
-    // Step 1: 真实控制字符 → JSON 合法转义
-    let sanitized = ruleContent
-      .replace(/\r/g, '\\r')
-      .replace(/\n/g, '\\n')
-      .replace(/\t/g, '\\t');
-    // Step 2: 非法转义序列（如 \( → (）
-    sanitized = repairJson(sanitized);
-    // Step 3: 解析
-    const parsed = JSON.parse(sanitized);
-    return parsed.prompt || null;
-  } catch {
-    return null;
-  }
 }
 
 function toISO(dt) {

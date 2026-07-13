@@ -717,7 +717,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
-      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'turbo', ...data.workflow.scene }
+      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', ...data.workflow.scene }
     }
   } catch {}
   await checkHealth()
@@ -887,18 +887,19 @@ const workflowModeOptions = [
 const sceneOptions = [
   { key: 'chat', label: '对话' },
   { key: 'moments', label: '朋友圈' },
-  { key: 'events', label: '奇遇&日程' },
+  { key: 'events', label: '奇遇' },
+  { key: 'schedule', label: '日程' },
 ]
 
 const workflowMode = ref('turbo')
-const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'turbo' })
+const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base' })
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
-const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'turbo' })
+const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base' })
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value

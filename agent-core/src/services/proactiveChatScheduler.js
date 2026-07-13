@@ -539,18 +539,25 @@ ${motiveName}
 【角色的开场白】
 "${greeting}"
 
-${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}只输出 JSON，不要其他文字` },
+${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}直接输出英文画面描述，不要任何格式包装或额外文字` },
       ],
       { temperature: 0.3, max_tokens: 1024, label: '主动聊天配图prompt' }
     );
 
     let prompt;
-    try {
-      const clean = imagePromptText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-      prompt = JSON.parse(clean).prompt;
-    } catch {
-      console.warn('⚡ Failed to parse image prompt JSON, using raw text');
-      prompt = imagePromptText.trim();
+    // 纯文本优先，JSON 格式向后兼容
+    let text = imagePromptText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (text.length >= 5) {
+      prompt = text;
+    }
+    // 兜底：如果 LLM 仍输出了 {"prompt":"..."} JSON 格式
+    if (!prompt) {
+      try {
+        const parsed = JSON.parse(text);
+        prompt = parsed.prompt || parsed.imagePrompt || null;
+      } catch {
+        prompt = null;
+      }
     }
 
     if (!prompt || prompt.length < 5) {

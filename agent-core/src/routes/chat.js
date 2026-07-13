@@ -1445,7 +1445,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       }
       return [contextBlock];
     })(),
-    { role: 'system', content: `现在，输出一个完整的 {"prompt":"..."} JSON 来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。只输出 JSON，不要任何其他文字。` },
+    { role: 'system', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -1459,46 +1459,28 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     return;
   }
 
-  // 4. 解析模型输出的完整 JSON（不再用 pre-fill 拼接，走 JSON.parse + 多层兜底）
+  // 4. 提取 prompt：纯文本优先，JSON 格式向后兼容
   let prompt = null;
-  try {
-    // 清洗 markdown 代码块外壳 → JSON.parse
-    const clean = fullContent.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-    prompt = JSON.parse(clean).prompt;
-  } catch {
-    // 兜底1：规范化弯引号后重试 JSON.parse
-    try {
-      const normalized = fullContent
-        .replace(/[“”„‟＂]/g, '"')
-        .replace(/[‘’‚‛＇]/g, "'");
-      const clean = normalized.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-      prompt = JSON.parse(clean).prompt;
-    } catch {
-      // 兜底2：从文本中尽力提取 prompt 值（匹配 {"prompt":"..."} 的各种变体，要求有 }）
-      const lenientMatch = fullContent.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*?)[“”"]?\s*\}/i);
-      if (lenientMatch) {
-        prompt = lenientMatch[1].trim();
-      }
-      // 兜底3：连 } 都没有（token 截断等）→ 从 prompt 前缀截取到末尾
-      if (!prompt) {
-        const prefixMatch = fullContent.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*)/i);
-        if (prefixMatch) {
-          prompt = prefixMatch[1].replace(/[\s"“”'』」\}\]]*$/g, '').trim();
-        }
-      }
-      if (prompt && prompt.length >= 5) {
-        console.log(`[chat] needImage: prompt recovered via lenient fallback (${prompt.length} chars)`);
-      } else {
-        prompt = null;
-      }
-      if (!prompt) {
-        console.warn('[chat] needImage: all prompt extraction methods failed, raw:', fullContent.slice(0, 120));
-      }
+  // 先尝试直接作为纯文本
+  let text = fullContent.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  if (text.length >= 5) {
+    prompt = text;
+  }
+  // 兜底：如果 LLM 仍输出了 {"prompt":"..."} JSON 格式（历史兼容），解析其 prompt 值
+  if (!prompt) {
+    const jsonMatch = text.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*?)[“”"]?\s*\}/i);
+    if (jsonMatch) {
+      prompt = jsonMatch[1].trim();
     }
+  }
+  if (!prompt) {
+    console.warn('[chat] needImage: failed to extract prompt, raw:', fullContent.slice(0, 120));
   }
   const tags = { prompt };
 
   let displayContent = stripTags(fullContent);
+  // 独立生图调用的输出全是 prompt 文本，不展示为对话气泡
+  if (tags.prompt) displayContent = '';
 
   let assistantRawId;
   let assistantMsgId;
@@ -1520,8 +1502,9 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       merged = true;
       console.log(`[chat] needImage: merged prompt into raw=${prevRaw.id}, msg=${assistantMsgId}`);
     } else {
-      // 上一条已有 prompt → 兜底：新写 raw（raw 内容含占位，messages 存空不在前端显示杂讯）
-      const rawContent = `(图片) ${fullContent.replace(/<needImage>/gi, '').trim()}`;
+      // 上一条已有 prompt → 兜底：新写 raw，后端组装 {"prompt":"..."} 格式
+      const promptJson = JSON.stringify({ prompt: tags.prompt });
+      const rawContent = `(图片) ${promptJson}`;
       const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
         .run(conversationId, rawContent, tags.prompt);
       assistantRawId = rawResult.lastInsertRowid;
@@ -1545,9 +1528,10 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       // 更新 displayContent 为清洗后的分段文本，供下方 messages 表写入
       displayContent = allSegments.join('\n\n');
     }
-    const rawContent = fullContent
-      .replace(/<needImage>/gi, '')
-      .trim();
+    const promptJson = tags.prompt ? JSON.stringify({ prompt: tags.prompt }) : '';
+    const rawContent = tags.prompt
+      ? `(图片) ${promptJson}`
+      : fullContent.replace(/<needImage>/gi, '').trim();
     const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
       .run(conversationId, rawContent, tags.prompt || null);
     assistantRawId = rawResult.lastInsertRowid;
