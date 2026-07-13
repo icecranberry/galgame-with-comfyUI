@@ -1445,7 +1445,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       }
       return [contextBlock];
     })(),
-    { role: 'system', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
+    { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）

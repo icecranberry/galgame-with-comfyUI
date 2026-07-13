@@ -398,7 +398,7 @@ ${proactiveRules}
     const msgs = [];
     msgs.push({ role: 'system', content: systemRules || '你是一个角色扮演 AI。' });
     msgs.push({ role: 'system', content: msgIdentity });
-    msgs.push({ role: 'system', content: msgTask });
+    msgs.push({ role: 'user', content: msgTask });
 
     const result = await chatSync(
       msgs,
@@ -522,7 +522,7 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     const imagePromptText = await chatSync(
       [
         { role: 'system', content: systemRules || '你是一个角色扮演 AI。' },
-        { role: 'system', content: `接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
+        { role: 'user', content: `接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
 
 ${lightHint}
 
