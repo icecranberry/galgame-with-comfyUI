@@ -17,6 +17,7 @@ export const config = {
     baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
     model: process.env.LLM_MODEL || 'deepseek-v4-flash',
     headers: (() => { try { return JSON.parse(process.env.LLM_HEADERS || '{}'); } catch { return {}; } })(),
+    extraBody: (() => { try { return JSON.parse(process.env.LLM_EXTRA_BODY || '{}'); } catch { return {}; } })(),
   },
   vectorService: {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
@@ -177,10 +178,11 @@ export function getLlmConfig() {
     baseURL: config.llm.baseURL,
     model: config.llm.model,
     headers: config.llm.headers || {},
+    extraBody: config.llm.extraBody || {},
   };
 }
 
-export function updateLlmConfig({ apiKey, baseURL, model, headers }) {
+export function updateLlmConfig({ apiKey, baseURL, model, headers, extraBody }) {
   if (apiKey !== undefined) {
     if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
       return { ok: false, error: 'API Key cannot be empty' };
@@ -199,6 +201,10 @@ export function updateLlmConfig({ apiKey, baseURL, model, headers }) {
   if (headers !== undefined) {
     config.llm.headers = typeof headers === 'string' ? JSON.parse(headers) : headers;
     persistEnv('LLM_HEADERS', JSON.stringify(config.llm.headers));
+  }
+  if (extraBody !== undefined) {
+    config.llm.extraBody = typeof extraBody === 'string' ? JSON.parse(extraBody) : extraBody;
+    persistEnv('LLM_EXTRA_BODY', JSON.stringify(config.llm.extraBody));
   }
   console.log('[config] LLM settings saved');
   return { ok: true };

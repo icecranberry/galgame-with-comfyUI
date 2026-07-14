@@ -299,6 +299,40 @@ export async function updateLlmConfig(data) {
   return res.json()
 }
 
+// ── World Settings ──
+export async function getWorldSettings() {
+  const res = await fetch(`${BASE}/config/world-settings`)
+  return res.json()
+}
+
+export async function createWorldSetting(data) {
+  const res = await fetch(`${BASE}/config/world-settings`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function updateWorldSetting(id, data) {
+  const res = await fetch(`${BASE}/config/world-settings/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function deleteWorldSetting(id) {
+  const res = await fetch(`${BASE}/config/world-settings/${id}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}
+
+export async function activateWorldSetting(id) {
+  const res = await fetch(`${BASE}/config/world-settings/${id}/activate`, {
+    method: 'POST',
+  })
+  return res.json()
+}
+
 // ── Global Rules ──
 export async function getGlobalRules() {
   const res = await fetch(`${BASE}/config/rules`)

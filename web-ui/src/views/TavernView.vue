@@ -125,7 +125,7 @@
       </div>
       <div class="relation-entry-text">
         <span class="relation-entry-title">世界观设置</span>
-        <span class="relation-entry-hint">定义所有角色共处的世界背景</span>
+        <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
       </div>
       <span class="relation-entry-arrow">›</span>
     </div>
@@ -272,20 +272,67 @@
     </Teleport>
 
     <!-- ═══════════════════════════════════════════
-         世界观编辑弹窗
+         世界观设置弹窗
          ═══════════════════════════════════════════ -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="showWorldModal" class="modal-overlay" @click.self="closeWorldSetting">
+        <div v-if="showWorldModal" class="modal-overlay">
           <div class="modal-panel">
             <div class="modal-header">
               <h3>世界观设置</h3>
               <button class="modal-close" @click="closeWorldSetting">✕</button>
             </div>
             <div class="modal-body">
+              <!-- 新建名称输入 -->
+              <div v-if="showNewInput" class="world-new-row">
+                <input
+                  ref="newNameInput"
+                  v-model="worldNewName"
+                  class="fi world-name-input"
+                  placeholder="输入新世界观名称"
+                  @keyup.enter="confirmNew"
+                />
+                <button class="btn-primary btn-sm" :disabled="!worldNewName.trim()" @click="confirmNew">创建</button>
+                <button class="btn-ghost btn-sm" @click="showNewInput = false">取消</button>
+              </div>
+
+              <!-- 标签行 -->
+              <div class="world-tags">
+                <span
+                  v-for="item in worldItems"
+                  :key="item.id"
+                  class="world-tag"
+                  :class="{ 'world-tag-selected': selectedWorldId === item.id }"
+                  @click="selectWorld(item)"
+                >
+                  <input
+                    v-if="editingNameId === item.id"
+                    ref="editNameInput"
+                    v-model="editNameValue"
+                    class="world-tag-rename-input"
+                    @click.stop
+                    @keyup.enter="renameWorld(item)"
+                    @keyup.escape="editingNameId = null"
+                    @blur="renameWorld(item)"
+                  />
+                  <span v-else>{{ item.name }}</span>
+                  <div
+                    class="world-tag-act world-tag-edit"
+                    title="重命名"
+                    @click.stop="startRename(item)"
+                  >✎</div>
+                  <div
+                    class="world-tag-act world-tag-del"
+                    title="删除"
+                    @click.stop="handleDelete(item)"
+                  >×</div>
+                </span>
+                <div class="world-tag world-tag-add" @click="startNew">+</div>
+              </div>
+
               <p class="modal-hint">定义角色们所处的共同世界背景，留空则不追加。</p>
               <textarea
-                v-model="worldSetting"
+                v-model="worldContent"
                 class="fi world-textarea"
                 rows="10"
                 placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
@@ -296,7 +343,7 @@
                 <button
                   class="btn-primary"
                   :disabled="!worldDirty || worldSaving"
-                  @click="saveWorldSetting"
+                  @click="saveWorld"
                 >
                   {{ worldSaving ? '保存中...' : '保存' }}
                 </button>
@@ -668,61 +715,165 @@ watch(showRelationGraph, async (val) => {
 })
 
 // ═══════════════════════════════════════
-// 世界观设置
+// 世界观收藏（标签行 + textarea）
 // ═══════════════════════════════════════
-const WORLD_TAG_RE = /^<world_setting>\s*([\s\S]*?)\s*<\/world_setting>$/;
 const showWorldModal = ref(false)
-const worldSetting = ref('')
+const worldItems = ref([])
+const activeWorldName = ref('')
+const selectedWorldId = ref(null)
+const worldContent = ref('')
 const worldDirty = ref(false)
 const worldSaving = ref(false)
 const worldSaved = ref(false)
+const showNewInput = ref(false)
+const worldNewName = ref('')
+const newNameInput = ref(null)
+const editingNameId = ref(null)
+const editNameValue = ref('')
+const editNameInput = ref(null)
 
-const worldSettingSummary = computed(() => {
-  const v = worldSetting.value.trim()
-  if (!v) return '定义所有角色共处的世界背景'
-  const firstLine = v.split('\n')[0].slice(0, 40)
-  return firstLine + (firstLine.length >= 40 || v.includes('\n') ? '…' : '')
-})
-
-function unwrapWorldSetting(raw) {
-  const m = raw?.match(WORLD_TAG_RE)
-  return m ? m[1] : (raw || '')
-}
-
-async function loadWorldSetting() {
+async function loadWorldSettings() {
   try {
-    const data = await api.getGlobalRules()
-    const world = (data.rules || []).find(r => r.rule_key === 'world_setting')
-    worldSetting.value = unwrapWorldSetting(world?.rule_content)
+    const data = await api.getWorldSettings()
+    worldItems.value = data.list || []
+    const active = worldItems.value.find(w => w.is_active)
+    activeWorldName.value = active?.name || ''
   } catch {}
 }
 
 function openWorldSetting() {
-  worldDirty.value = false
   worldSaved.value = false
+  worldDirty.value = false
+  showNewInput.value = false
+  worldNewName.value = ''
   showWorldModal.value = true
+  loadWorldSettings().then(() => {
+    const active = worldItems.value.find(w => w.is_active)
+    if (active) {
+      selectedWorldId.value = active.id
+      worldContent.value = active.content || ''
+    } else if (worldItems.value.length > 0) {
+      selectedWorldId.value = worldItems.value[0].id
+      worldContent.value = worldItems.value[0].content || ''
+    }
+  })
 }
 
 function closeWorldSetting() {
   showWorldModal.value = false
 }
 
-async function saveWorldSetting() {
-  if (worldSaving.value) return
+function selectWorld(item) {
+  if (selectedWorldId.value === item.id) return
+  selectedWorldId.value = item.id
+  worldContent.value = item.content || ''
+  worldDirty.value = false
+  activateWorld(item.id)
+}
+
+function startNew() {
+  showNewInput.value = true
+  worldNewName.value = ''
+  nextTick(() => newNameInput.value?.focus())
+}
+
+async function confirmNew() {
+  const name = worldNewName.value.trim()
+  if (!name) return
   worldSaving.value = true
   try {
-    const raw = worldSetting.value.trim()
-    const content = raw ? `<world_setting>\n${raw}\n</world_setting>` : ''
-    const result = await api.updateGlobalRule('world_setting', { rule_content: content })
-    if (result.ok) {
-      worldDirty.value = false
-      worldSaved.value = true
-      setTimeout(() => worldSaved.value = false, 2000)
-    }
-  } catch (err) {
-    console.error('[world_setting] save failed:', err)
+    const result = await api.createWorldSetting({ name, content: '' })
+    showNewInput.value = false
+    worldNewName.value = ''
+    await loadWorldSettings()
+    selectedWorldId.value = result.item.id
+    worldContent.value = ''
+    worldDirty.value = false
+    activateWorld(result.item.id)
   } finally {
     worldSaving.value = false
+  }
+}
+
+async function saveWorld() {
+  if (worldSaving.value || !selectedWorldId.value) return
+  worldSaving.value = true
+  try {
+    await api.updateWorldSetting(selectedWorldId.value, { content: worldContent.value.trim() })
+    worldDirty.value = false
+    worldSaved.value = true
+    setTimeout(() => worldSaved.value = false, 2000)
+    await loadWorldSettings()
+  } catch (err) {
+    console.error('[world] save failed:', err)
+  } finally {
+    worldSaving.value = false
+  }
+}
+
+async function activateWorld(id) {
+  try {
+    await api.activateWorldSetting(id)
+    await loadWorldSettings()
+  } catch (err) {
+    console.error('[world] activate failed:', err)
+  }
+}
+
+async function handleDelete(item) {
+  if (worldItems.value.length <= 1) {
+    showToast('至少保留一套世界观')
+    return
+  }
+  const ok = await confirmFn({
+    title: '删除世界观',
+    message: `确定要删除「${item.name}」吗？`,
+    okText: '删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await api.deleteWorldSetting(item.id)
+    if (selectedWorldId.value === item.id) {
+      selectedWorldId.value = null
+      worldContent.value = ''
+      worldDirty.value = false
+    }
+    await loadWorldSettings()
+    if (!selectedWorldId.value) {
+      const first = worldItems.value.find(w => w.id !== item.id)
+      if (first) {
+        selectedWorldId.value = first.id
+        worldContent.value = first.content || ''
+      }
+    }
+  } catch (err) {
+    console.error('[world] delete failed:', err)
+  }
+}
+
+function startRename(item) {
+  editingNameId.value = item.id
+  editNameValue.value = item.name
+  nextTick(() => {
+    const el = editNameInput.value
+    if (el) {
+      if (Array.isArray(el)) el[0]?.focus?.()
+      else el.focus?.()
+    }
+  })
+}
+
+async function renameWorld(item) {
+  if (editingNameId.value !== item.id) return
+  const name = editNameValue.value.trim()
+  editingNameId.value = null
+  if (!name || name === item.name) return
+  try {
+    await api.updateWorldSetting(item.id, { name })
+    await loadWorldSettings()
+  } catch (err) {
+    console.error('[world] rename failed:', err)
   }
 }
 
@@ -800,7 +951,7 @@ async function removeCharAvatar() {
 onMounted(async () => {
   await loadUserAvatar()
   await loadUserConfig()
-  loadWorldSetting()
+  loadWorldSettings()
   userNicknameInput.value = userNickname.value
   userGenderInput.value = userGender.value
   userAppearanceInput.value = userAppearance.value
@@ -965,6 +1116,112 @@ onMounted(async () => {
 .world-icon {
   background: rgba(120, 140, 200, 0.1);
   color: #788cc8;
+}
+
+/* ── 世界观标签行 ── */
+.world-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.world-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 13px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  user-select: none;
+}
+.world-tag:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-bright);
+}
+.world-tag-selected {
+  background: rgba(224, 123, 108, 0.18);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.world-tag-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.world-tag:hover .world-tag-act {
+  opacity: 0.6;
+}
+.world-tag-act:hover {
+  opacity: 1 !important;
+}
+
+.world-tag-edit:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-bright);
+}
+
+.world-tag-del:hover {
+  color: #dc3c3c !important;
+  background: rgba(220, 60, 60, 0.25);
+}
+
+.world-tag-rename-input {
+  width: 80px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--text-bright);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+}
+
+.world-tag-add {
+  padding: 0;
+  width: 28px; height: 28px;
+  justify-content: center;
+  opacity: 0.7;
+  font-weight: 600;
+  font-size: 18px;
+}
+.world-tag-add:hover {
+  opacity: 1;
+}
+
+/* ── 新建名称行 ── */
+.world-new-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.world-name-input {
+  flex: 1;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 /* ── 世界观编辑弹窗 ── */

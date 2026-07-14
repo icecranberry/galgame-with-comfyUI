@@ -78,6 +78,11 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
   if (thinking !== null && isDeepseek()) {
     params.thinking = thinking;
   }
+  // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
+  const extraBody = config.llm.extraBody;
+  if (extraBody && Object.keys(extraBody).length > 0) {
+    Object.assign(params, extraBody);
+  }
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
   const logMsgs = messages.map(m => {
@@ -154,6 +159,11 @@ export async function* chatStream(messages, { model = config.llm.model || 'deeps
   // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
   if (thinking !== null && isDeepseek()) {
     params.thinking = thinking;
+  }
+  // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
+  const extraBody = config.llm.extraBody;
+  if (extraBody && Object.keys(extraBody).length > 0) {
+    Object.assign(params, extraBody);
   }
 
   const stream = await getClient().chat.completions.create(params);

@@ -207,6 +207,18 @@
           ></textarea>
           <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
 
+          <!-- 自定义请求体参数（仅自定义API时显示，用于注入 body 级参数如 thinking / agent 等） -->
+          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，可选，如 {"thinking":{"type":"enabled"},"agent":"Nova"}，直接合并到 API body)</span></label>
+          <textarea
+            v-model="llmExtraBodyText"
+            class="fi"
+            style="min-height:60px;font-family:monospace;font-size:12px;resize:vertical"
+            :class="{ 'fi-error': !llmExtraBodyValid }"
+            placeholder='{"thinking":{"type":"enabled"},"agent":"my-agent","agentName":"Nova"}'
+            @input="markLlmDirty"
+          ></textarea>
+          <p v-if="!llmExtraBodyValid" class="gen-error">JSON 格式无效</p>
+
           <!-- 后台 LLM 任务队列（仅自定义 API 时显示） -->
           <div class="toggle-row" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border)">
             <div>
@@ -697,6 +709,7 @@ const llmBaseURLSelectVal = computed({
     llmBaseURL.value = val
     if (val !== '') {
       llmHeadersText.value = '{}'
+      llmExtraBodyText.value = '{}'
       features.serializeBackgroundLLM = false
       backgroundConcurrency.value = 3
     }
@@ -706,6 +719,10 @@ const llmBaseURLSelectVal = computed({
 const llmHeadersText = ref('{}')
 const llmHeadersValid = computed(() => {
   try { JSON.parse(llmHeadersText.value); return true } catch { return false }
+})
+const llmExtraBodyText = ref('{}')
+const llmExtraBodyValid = computed(() => {
+  try { JSON.parse(llmExtraBodyText.value); return true } catch { return false }
 })
 const showApiKey = ref(false)
 const llmDirty = ref(false)
@@ -744,6 +761,8 @@ onMounted(async () => {
     llmModel.value = data.llm.model || 'deepseek-chat'
     llmHeadersText.value = data.llm.headers && Object.keys(data.llm.headers).length
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
+    llmExtraBodyText.value = data.llm.extraBody && Object.keys(data.llm.extraBody).length
+      ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
       workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', ...data.workflow.scene }
@@ -785,6 +804,11 @@ async function saveLlmConfig() {
     } else if (!isCustomBaseURL.value) {
       payload.headers = {}
     }
+    if (isCustomBaseURL.value && llmExtraBodyText.value.trim() && llmExtraBodyText.value.trim() !== '{}') {
+      try { payload.extraBody = JSON.parse(llmExtraBodyText.value) } catch {}
+    } else if (!isCustomBaseURL.value) {
+      payload.extraBody = {}
+    }
     const result = await updateLlmConfig(payload)
     if (result.ok) {
       settingsStore.setHasApiKey(result.hasApiKey)
@@ -793,6 +817,8 @@ async function saveLlmConfig() {
       llmModel.value = result.model || llmModel.value
       llmHeadersText.value = result.headers && Object.keys(result.headers).length
         ? JSON.stringify(result.headers, null, 2) : '{}'
+      llmExtraBodyText.value = result.extraBody && Object.keys(result.extraBody).length
+        ? JSON.stringify(result.extraBody, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
 
       // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）

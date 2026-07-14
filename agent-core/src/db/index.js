@@ -175,6 +175,17 @@ function initSchema(db) {
       UNIQUE(character_id, trait_type, content)
     );
 
+    -- 世界观收藏表（多套设定，可切换激活）
+    CREATE TABLE IF NOT EXISTS world_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      is_active INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 角色关系表（有向：from → to，关系文本存储在 relationship_text 中）
     CREATE TABLE IF NOT EXISTS character_relationships (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -403,6 +414,9 @@ function initSchema(db) {
 
   // characters 表新增 loras JSON 列
   migrateLorasArraySchema(db);
+
+  // 迁移: 将 global_rules.world_setting 移至 world_settings 表（多套世界观）
+  migrateWorldSettings(db);
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
@@ -961,19 +975,25 @@ function isInDisturbTimeRange(now, startTime, endTime) {
 }
 
 /** 获取世界观（独立消息注入，不拼入全局规则）
- *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值 */
+ *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值
+ *  优先从 world_settings 表读取激活项，兼容旧 global_rules.world_setting */
 export function getWorldSetting() {
   // 防打扰隐藏世界观：不改 DB，仅在 prompt 构建时返回 null
   if (config.features.disturbMode && config.disturb.hideWorld) {
     const now = new Date();
     if (isInDisturbTimeRange(now, config.disturb.startTime, config.disturb.endTime)) {
-      // 跳过周末：周六(6) / 周日(0)
       if (!config.disturb.skipWeekends || (now.getDay() !== 0 && now.getDay() !== 6)) {
         return null;
       }
     }
   }
 
+  const active = getActiveWorldSetting();
+  if (active?.content?.trim()) {
+    return `<world_setting>\n${active.content}\n</world_setting>`;
+  }
+
+  // 兼容旧表
   const world = getGlobalRule('world_setting');
   if (world?.rule_content && world.is_active) {
     return world.rule_content;
@@ -1118,6 +1138,94 @@ function migrateLorasArraySchema(db) {
   } catch (err) {
     console.log('[db] migrateLorasArraySchema error:', err.message);
   }
+}
+
+// 迁移: 将 global_rules.world_setting 移至 world_settings 表（idempotent）
+function migrateWorldSettings(db) {
+  try {
+    const existing = db.prepare(`SELECT rule_content FROM global_rules WHERE rule_key = 'world_setting'`).get();
+    if (!existing) return;
+
+    const raw = existing.rule_content || '';
+    const match = raw.match(/^<world_setting>\s*([\s\S]*?)\s*<\/world_setting>$/);
+    const content = match ? match[1] : raw;
+
+    if (!content.trim()) return;
+
+    const already = db.prepare(`SELECT id FROM world_settings`).get();
+    if (already) return;
+
+    db.prepare(
+      `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 1, 0)`
+    ).run('默认世界观', content);
+    console.log('[db] migrateWorldSettings: moved existing world_setting to world_settings table');
+  } catch (err) {
+    console.log('[db] migrateWorldSettings error:', err.message);
+  }
+}
+
+// ── 世界观收藏 CRUD ──
+
+export function listWorldSettings() {
+  const database = getDb();
+  return database.prepare(`SELECT * FROM world_settings ORDER BY sort_order, id`).all();
+}
+
+export function getActiveWorldSetting() {
+  const database = getDb();
+  return database.prepare(`SELECT * FROM world_settings WHERE is_active = 1`).get() || null;
+}
+
+export function getWorldSettingById(id) {
+  const database = getDb();
+  return database.prepare(`SELECT * FROM world_settings WHERE id = ?`).get(id);
+}
+
+export function createWorldSetting({ name, content }) {
+  const database = getDb();
+  const maxOrder = database.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_settings`).get().m;
+  const result = database.prepare(
+    `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 0, ?)`
+  ).run(name, content, maxOrder + 1);
+  return getWorldSettingById(result.lastInsertRowid);
+}
+
+export function updateWorldSetting(id, { name, content }) {
+  const database = getDb();
+  const sets = [];
+  const params = [];
+  if (name !== undefined) { sets.push('name = ?'); params.push(name); }
+  if (content !== undefined) { sets.push('content = ?'); params.push(content); }
+  if (sets.length === 0) return null;
+  sets.push("updated_at = datetime('now')");
+  params.push(id);
+  database.prepare(`UPDATE world_settings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  return getWorldSettingById(id);
+}
+
+export function deleteWorldSetting(id) {
+  const database = getDb();
+  const count = database.prepare(`SELECT COUNT(*) AS c FROM world_settings`).get().c;
+  if (count <= 1) return { ok: false, error: '不可删除最后一套世界观' };
+  const target = getWorldSettingById(id);
+  if (!target) return { ok: false, error: '世界观不存在' };
+  database.prepare(`DELETE FROM world_settings WHERE id = ?`).run(id);
+  if (target.is_active) {
+    const first = database.prepare(`SELECT id FROM world_settings LIMIT 1`).get();
+    if (first) {
+      database.prepare(`UPDATE world_settings SET is_active = 1 WHERE id = ?`).run(first.id);
+    }
+  }
+  return { ok: true };
+}
+
+export function activateWorldSetting(id) {
+  const database = getDb();
+  const target = getWorldSettingById(id);
+  if (!target) return null;
+  database.prepare(`UPDATE world_settings SET is_active = 0`).run();
+  database.prepare(`UPDATE world_settings SET is_active = 1, updated_at = datetime('now') WHERE id = ?`).run(id);
+  return getWorldSettingById(id);
 }
 
 // 清理历史遗留的 system_settings 键（idempotent）

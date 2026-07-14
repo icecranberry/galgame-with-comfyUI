@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
+import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
@@ -97,8 +98,8 @@ router.put('/background-llm-concurrency', (req, res) => {
 
 // PUT /api/config/llm — 更新 LLM 配置
 router.put('/llm', (req, res) => {
-  const { apiKey, baseURL, model } = req.body;
-  const result = updateLlmConfig({ apiKey, baseURL, model });
+  const { apiKey, baseURL, model, headers, extraBody } = req.body;
+  const result = updateLlmConfig({ apiKey, baseURL, model, headers, extraBody });
   if (!result.ok) {
     return res.status(400).json(result);
   }
@@ -359,6 +360,46 @@ router.post('/rules/:key/reset', (req, res) => {
   ).run(defaultRule.rule_content, req.params.key);
   const updated = db.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(req.params.key);
   res.json({ ok: true, rule: updated });
+});
+
+// ── 世界观收藏 ──
+
+// GET /api/world-settings — 获取全部世界观列表
+router.get('/world-settings', (req, res) => {
+  res.json({ list: listWorldSettings() });
+});
+
+// POST /api/world-settings — 创建新世界观
+router.post('/world-settings', (req, res) => {
+  const { name, content } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+  const item = createWorldSetting({ name: name.trim(), content: content?.trim() || '' });
+  res.json({ ok: true, item });
+});
+
+// PUT /api/world-settings/:id — 编辑某个世界观
+router.put('/world-settings/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || !getWorldSettingById(id)) return res.status(404).json({ error: 'not found' });
+  const { name, content } = req.body;
+  const item = updateWorldSetting(id, { name: name?.trim(), content: content?.trim() });
+  res.json({ ok: true, item });
+});
+
+// DELETE /api/world-settings/:id — 删除某个世界观
+router.delete('/world-settings/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const result = deleteWorldSetting(id);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ok: true });
+});
+
+// POST /api/world-settings/:id/activate — 切换激活某个世界观
+router.post('/world-settings/:id/activate', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const item = activateWorldSetting(id);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, item });
 });
 
 export default router;
