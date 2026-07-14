@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { submitWorkflow } from './comfyClient.js';
+import { submitWorkflow, apiToGui } from './comfyClient.js';
 import { config } from '../config.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth } from './workflowTemplates.js';
 
@@ -93,7 +93,11 @@ function buildWorkflow(promptText, overrides = {}) {
   }
 
   const workflow = JSON.parse(fs.readFileSync(wfPath, 'utf8'));
-  const wf = JSON.parse(JSON.stringify(workflow));
+  let wf = apiToGui(workflow);
+  if (!Array.isArray(wf.nodes)) {
+    throw new Error(`Workflow "${wfName}" is invalid: missing "nodes" array and could not be parsed as an API-format workflow. Please use ComfyUI's regular "Save" (not "Export (API)") to export the workflow.`);
+  }
+  wf = JSON.parse(JSON.stringify(wf));
 
   const defaults = {
     [NODE_TITLES.artist]: overrides.artist ?? config.comfyui.artist,
@@ -195,8 +199,8 @@ function injectLoraNodes(wf, loras) {
   console.log(`[imageSkill] Removed UNET→${downstreamNode.type}#${downstreamNodeId} link #${oldLinkId}`);
 
   // 生成新 ID（确保不冲突）
-  let maxNodeId = Math.max(wf.last_node_id || 0, ...wf.nodes.map(n => n.id));
-  let maxLinkId = Math.max(wf.last_link_id || 0, ...wf.links.map(l => l[0]));
+  let maxNodeId = Math.max(wf.last_node_id || 0, ...(wf.nodes || []).map(n => n.id));
+  let maxLinkId = Math.max(wf.last_link_id || 0, ...(wf.links || []).map(l => l[0]));
 
   const loraNodeIds = [];
   const outputLinkIds = [];

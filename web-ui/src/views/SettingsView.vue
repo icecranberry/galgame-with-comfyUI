@@ -206,6 +206,29 @@
             @input="markLlmDirty"
           ></textarea>
           <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
+
+          <!-- 后台 LLM 任务队列（仅自定义 API 时显示） -->
+          <div class="toggle-row" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border)">
+            <div>
+              <div class="tl">后台 LLM 任务队列</div>
+              <div class="td">限制LLM并发数量，避免本地 LLM 过载导致雪崩</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="features.serializeBackgroundLLM" @change="markLlmDirty()" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div v-if="features.serializeBackgroundLLM" class="toggle-row freq-row" style="margin-top:8px">
+            <div>
+              <div class="tl">最大并发后台请求数</div>
+              <div class="td">同时运行的后台 LLM 任务数上限</div>
+            </div>
+            <div class="freq-control">
+              <input type="range" min="1" max="10" step="1"
+                v-model.number="backgroundConcurrency" @change="markLlmDirty()" />
+              <span class="freq-val">{{ backgroundConcurrency }}</span>
+            </div>
+          </div>
         </template>
 
         <div class="sa" style="margin-top:12px">
@@ -491,7 +514,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
@@ -543,9 +566,10 @@ function switchComfyTab(mode) {
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false })
+const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3 })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+const backgroundConcurrency = ref(3)
 
 // ── 防打扰模式 ──
 const disturbMode = ref(false)
@@ -671,7 +695,11 @@ const llmBaseURLSelectVal = computed({
   get: () => isCustomBaseURL.value ? '' : llmBaseURL.value,
   set: (val) => {
     llmBaseURL.value = val
-    if (val !== '') llmHeadersText.value = '{}'
+    if (val !== '') {
+      llmHeadersText.value = '{}'
+      features.serializeBackgroundLLM = false
+      backgroundConcurrency.value = 3
+    }
     markLlmDirty()
   }
 })
@@ -701,6 +729,7 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
+    backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
       disturbMode.value = features.disturbMode ?? false
@@ -765,6 +794,19 @@ async function saveLlmConfig() {
       llmHeadersText.value = result.headers && Object.keys(result.headers).length
         ? JSON.stringify(result.headers, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
+
+      // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）
+      if (isCustomBaseURL.value) {
+        await updateFeatureFlag('serializeBackgroundLLM', features.serializeBackgroundLLM)
+        if (features.serializeBackgroundLLM) {
+          await updateBackgroundConcurrency(backgroundConcurrency.value)
+        }
+      } else {
+        features.serializeBackgroundLLM = false
+        backgroundConcurrency.value = 3
+        await updateFeatureFlag('serializeBackgroundLLM', false)
+      }
+
       llmDirty.value = false
       llmSaved.value = true
       setTimeout(() => llmSaved.value = false, 2000)

@@ -13,6 +13,7 @@
 
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
+import { runWithLimit } from './llmConcurrency.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
@@ -136,7 +137,7 @@ async function tick() {
     console.log(`[eventScheduler] Generating event for ${candidate.display_name}...`);
 
     try {
-      await generateEvent(candidate);
+      await runWithLimit(() => generateEvent(candidate));
       console.log(`[eventScheduler] Done: ${candidate.display_name}`);
     } catch (err) {
       console.error(`[eventScheduler] Failed for ${candidate.display_name}:`, err.message);

@@ -2,13 +2,14 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
+import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 const router = Router();
@@ -55,6 +56,9 @@ router.put('/features', (req, res) => {
     return res.status(400).json({ error: `Invalid feature key: ${key}` });
   }
   updateFeatureFlag(key, value);
+  if (key === 'serializeBackgroundLLM') {
+    applyFromConfig(config);
+  }
   res.json({ ok: true, features: config.features });
 });
 
@@ -78,6 +82,17 @@ router.put('/event-freq', (req, res) => {
   updateEventFreq(value);
   restartEventScheduler();
   res.json({ ok: true, eventFreq: config.features.eventFreq });
+});
+
+// PUT /api/config/background-llm-concurrency — 更新后台 LLM 并发数 1~10
+router.put('/background-llm-concurrency', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 1 || value > 10) {
+    return res.status(400).json({ error: 'value must be 1~10' });
+  }
+  updateBackgroundConcurrency(value);
+  applyFromConfig(config);
+  res.json({ ok: true, backgroundLLMMaxConcurrency: config.features.backgroundLLMMaxConcurrency });
 });
 
 // PUT /api/config/llm — 更新 LLM 配置

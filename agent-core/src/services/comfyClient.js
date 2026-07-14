@@ -111,7 +111,156 @@ const NODE_WIDGET_FALLBACK = {
   ],
 };
 
+// ── 节点输出定义兜底（ComfyUI object_info 不可用时的最后防线）──
+const OUTPUT_DEFS_FALLBACK = {
+  'CheckpointLoaderSimple':     [{ name: 'MODEL' }, { name: 'CLIP' }, { name: 'VAE' }],
+  'UNETLoader':                 [{ name: 'MODEL' }],
+  'CLIPLoader':                 [{ name: 'CLIP' }],
+  'DualCLIPLoader':             [{ name: 'CLIP' }],
+  'VAELoader':                  [{ name: 'VAE' }],
+  'VAEDecode':                  [{ name: 'IMAGE' }],
+  'VAEEncode':                  [{ name: 'LATENT' }],
+  'VAEEncodeForInpaint':        [{ name: 'LATENT' }],
+  'KSampler':                   [{ name: 'LATENT' }],
+  'KSamplerAdvanced':           [{ name: 'LATENT' }],
+  'EmptyLatentImage':           [{ name: 'LATENT' }],
+  'CLIPTextEncode':             [{ name: 'CONDITIONING' }],
+  'PreviewImage':               [],
+  'SaveImage':                  [],
+  'PrimitiveString':            [{ name: 'STRING' }],
+  'PrimitiveInt':               [{ name: 'INT' }],
+  'PrimitiveFloat':             [{ name: 'FLOAT' }],
+  'StringConcatenate':          [{ name: 'STRING' }],
+  'LoraLoaderModelOnly':        [{ name: 'MODEL' }],
+  'LoraLoader':                 [{ name: 'MODEL' }, { name: 'CLIP' }],
+  'CLIPSetLastLayer':           [{ name: 'CLIP' }],
+  'ModelSamplingDiscrete':      [{ name: 'MODEL' }],
+  'ModelSamplingSD3':           [{ name: 'MODEL' }],
+  'FreeU':                      [{ name: 'MODEL' }],
+  'FreeU_V2':                   [{ name: 'MODEL' }],
+  'ImageScaleBy':               [{ name: 'IMAGE' }],
+  'ImageUpscaleWithModel':      [{ name: 'IMAGE' }],
+  'UpscaleModelLoader':         [{ name: 'UPSCALE_MODEL' }],
+  'LoadImage':                  [{ name: 'IMAGE' }, { name: 'MASK' }],
+  'InpaintModelConditioning':   [{ name: 'positive' }, { name: 'negative' }, { name: 'latent' }],
+};
+
+function getOutputDefs(classType) {
+  // 优先从 ComfyUI /object_info 缓存动态获取（支持自定义节点）
+  if (objectInfoCache?.[classType] && Array.isArray(objectInfoCache[classType].output_name)) {
+    const info = objectInfoCache[classType];
+    return info.output_name.map((name, i) => ({
+      name,
+      type: (Array.isArray(info.output) ? info.output[i] : '*') || '*',
+      slot_index: i,
+    }));
+  }
+  // 兜底：硬编码常见节点
+  const fallback = OUTPUT_DEFS_FALLBACK[classType];
+  if (fallback) {
+    return fallback.map((def, i) => ({ type: '*', ...def, slot_index: def.slot_index ?? i }));
+  }
+  console.log(`[comfyClient] apiToGui: unknown node type "${classType}", inferring no outputs`);
+  return [];
+}
+
+/**
+ * 将 ComfyUI API 格式工作流（通过 Export (API) 导出）转换为 GUI 格式
+ * 使得后续 guiToApi → buildWorkflow 流程无须改动
+ */
+export function apiToGui(api) {
+  if (!api || typeof api !== 'object') return api;
+  if (Array.isArray(api.nodes)) return api; // 已经是 GUI 格式
+
+  const keys = Object.keys(api).filter(k => !isNaN(Number(k)));
+  if (keys.length === 0) return api;
+
+  const nodes = [];
+  const links = [];
+  let maxNodeId = 0;
+  let linkIdCounter = 1;
+  const linkBySource = {}; // "srcId_srcSlot" → [linkIds]
+
+  const entries = keys.map(k => ({ id: Number(k), ...api[k] }));
+
+  for (const { id, class_type, inputs, _meta } of entries) {
+    maxNodeId = Math.max(maxNodeId, id);
+    const title = _meta?.title || class_type;
+
+    const guiInputs = [];
+    const widgetsValues = [];
+    const inputKeys = Object.keys(inputs || {});
+
+    for (const name of inputKeys) {
+      const value = inputs[name];
+      if (value === undefined) continue;
+
+      if (Array.isArray(value) && value.length === 2 && typeof value[0] !== 'object') {
+        // 连接类型: [srcNodeId, srcSlot]
+        const lid = linkIdCounter++;
+        guiInputs.push({ name, type: '*', link: lid });
+        links.push([lid, Number(value[0]), Number(value[1]), id, guiInputs.length - 1, '*']);
+
+        const srcKey = `${value[0]}_${value[1]}`;
+        if (!linkBySource[srcKey]) linkBySource[srcKey] = [];
+        linkBySource[srcKey].push(lid);
+      } else {
+        // Widget 值
+        guiInputs.push({ name, type: 'STRING', widget: { name } });
+
+        if (class_type === 'KSampler' && name === 'seed') {
+          // KSampler seed 在 GUI 中占两个 slot：[seed, controlMode]
+          widgetsValues.push(value);
+          widgetsValues.push('fixed');
+        } else if (class_type === 'OpenAICompatibleLoader' && name === 'seed') {
+          widgetsValues.push(value);
+          widgetsValues.push('fixed');
+        } else {
+          widgetsValues.push(value !== undefined ? value : '');
+        }
+      }
+    }
+
+    const outputs = getOutputDefs(class_type).map(def => ({
+      ...def,
+      links: [],
+    }));
+
+    nodes.push({
+      id,
+      type: class_type,
+      title,
+      inputs: guiInputs,
+      outputs,
+      widgets_values: widgetsValues,
+      pos: [0, 0],
+      flags: {},
+      order: 0,
+      mode: 0,
+    });
+  }
+
+  // 回填每个节点 output 上的 links
+  for (const node of nodes) {
+    for (const output of node.outputs) {
+      const srcKey = `${node.id}_${output.slot_index}`;
+      const lids = linkBySource[srcKey];
+      if (lids && lids.length > 0) output.links = lids;
+    }
+  }
+
+  return {
+    last_node_id: maxNodeId,
+    last_link_id: linkIdCounter - 1,
+    nodes,
+    links,
+  };
+}
+
 function guiToApi(workflow) {
+  if (!Array.isArray(workflow.nodes)) {
+    throw new Error('Invalid workflow: missing or malformed "nodes" array. Please check your workflow JSON file.');
+  }
   const nodeIds = new Set(workflow.nodes.map(n => String(n.id)));
   const rerouteIds = new Set(workflow.nodes.filter(n => n.type === 'Reroute').map(n => String(n.id)));
 

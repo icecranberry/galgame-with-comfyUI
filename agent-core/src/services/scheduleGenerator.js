@@ -109,11 +109,11 @@ export async function generateSchedule(character, direction) {
 
   // ── 用户指定的日程方向 ──
   const directionMsg = direction ? `## 用户指定的日程方向
-请按照以下方向来影响角色今日日程的编排：
+**请按照以下方向来影响角色今日日程的编排：
 
-${direction}
+${direction}**
 
-注意：以上是用户希望的日程"方向"或"主题"，这就是严格的指令。以用户的意愿为准，可以想象理由，适当破坏角色原有的人设，自然地融入这个方向的元素。` : null;
+**注意：以上是用户指定的日程"方向"或"主题"，这就是严格的指令。所有日程编排以用户的意愿为准，可以想象理由，适当破坏角色原有的人设，自然地融入这个方向的元素。**` : null;
 
   // ── 组装多层 system ──
   const msgs = [];
@@ -225,8 +225,8 @@ function parseAndValidateSchedule(raw, displayName) {
     const adjusted = duration < 0 ? duration + 24 * 60 : duration;
     if (adjusted > maxSleepDuration) maxSleepDuration = adjusted;
   }
-  if (maxSleepDuration < 5 * 60) {
-    console.warn(`[scheduleGen] Sleep too short (${maxSleepDuration}min) for ${displayName}, need ≥300min`);
+  if (maxSleepDuration < 15) {
+    console.warn(`[scheduleGen] Sleep too short (${maxSleepDuration}min) for ${displayName}, need ≥15min`);
     return null;
   }
 
@@ -248,7 +248,8 @@ function parseAndValidateSchedule(raw, displayName) {
     return null;
   }
 
-  // 80% 秒回保证：如果非 0 延迟活动超过 20%，随机将部分改回 0
+  // 80% 秒回兜底：理想情况下 prompt 已限定 replyDelay 只有 0 和 -1，但 LLM 可能不听话
+  // 产生非 0 非 -1 的值。此兜底将超出的非秒回活动随机改回 0，确保不超过 20%
   const nonImmediate = activities.filter(a => a.replyDelay !== 0 && a.replyDelay !== -1);
   const totalCount = activities.length;
   const maxNonImmediate = Math.floor(totalCount * 0.2); // 最多 20%

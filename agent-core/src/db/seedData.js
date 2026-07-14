@@ -27,6 +27,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_events: 'true',
   feature_eventFreq: '1',
   feature_disturbMode: 'false',
+  feature_serializeBackgroundLLM: 'false',
+  feature_backgroundLLMMaxConcurrency: '3',
   disturb_start_time: '22:00',
   disturb_end_time: '08:00',
   disturb_character_ids: '[]',

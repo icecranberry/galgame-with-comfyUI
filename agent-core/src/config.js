@@ -46,6 +46,8 @@ export const config = {
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
+    serializeBackgroundLLM: process.env.FEATURE_SERIALIZE_BG_LLM === 'true', // 默认关：后台LLM任务串行化
+    backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',
@@ -142,6 +144,17 @@ export function updateEventFreq(value) {
   config.features.eventFreq = f;
   persistSettingSync('feature_eventFreq', String(f));
   console.log(`[config] eventFreq = ${f}`);
+}
+
+/**
+ * 更新后台 LLM 任务最大并发数 1~10
+ * 仅在 serializeBackgroundLLM 为 true 时生效
+ */
+export function updateBackgroundConcurrency(value) {
+  const n = Math.max(1, Math.min(10, parseInt(value, 10) || 3));
+  config.features.backgroundLLMMaxConcurrency = n;
+  persistSettingSync('feature_backgroundLLMMaxConcurrency', String(n));
+  console.log(`[config] backgroundLLMMaxConcurrency = ${n}`);
 }
 
 export function getLlmConfig() {

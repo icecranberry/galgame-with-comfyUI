@@ -25,6 +25,7 @@ import {
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
+import { runWithLimit } from './llmConcurrency.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getTimeLight } from './timeLight.js';
 import { getCurrentActivity } from './scheduleManager.js';
@@ -752,7 +753,7 @@ async function tick() {
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     let imageUrls = null;
     if (motive.imageGen) {
-      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
+      imageUrls = await runWithLimit(() => generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId));
     }
 
     broadcastProactiveMessage({
@@ -1017,7 +1018,7 @@ export async function forceProactiveNow(targetCharacterId) {
   // 如果需要配图，先生成图片再一起推送；否则直接推送
   let imageUrls = null;
   if (motive.imageGen) {
-    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
+    imageUrls = await runWithLimit(() => generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId));
   }
 
   broadcastProactiveMessage({

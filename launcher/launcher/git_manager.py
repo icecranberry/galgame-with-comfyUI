@@ -68,6 +68,41 @@ def _probe_github_reachable(timeout: float = 2.5) -> bool:
         return False
 
 
+# 常见本地代理端口（按优先级排序）
+_PROXY_PORTS = [7890, 7891, 10809, 10808, 7892, 8080, 8888]
+
+
+def _find_local_proxy(timeout: float = 1.2) -> int | None:
+    """探测本地常见代理端口，返回第一个可 TCP 连通的端口号。"""
+    for port in _PROXY_PORTS:
+        try:
+            sock = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+            sock.close()
+            return port
+        except Exception:
+            continue
+    return None
+
+
+def _set_git_global_proxy(git_exe: str, port: int) -> bool:
+    """使用指定 git 可执行文件设置全局 http.proxy 和 https.proxy。"""
+    proxy_url = f"http://127.0.0.1:{port}"
+    try:
+        subprocess.run(
+            [git_exe, "config", "--global", "http.proxy", proxy_url],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        subprocess.run(
+            [git_exe, "config", "--global", "https.proxy", proxy_url],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        return True
+    except Exception:
+        return False
+
+
 class GitManager(QObject):
     """Git 操作：fetch、tags、checkout、检测更新。"""
 
@@ -85,7 +120,8 @@ class GitManager(QObject):
         self._finished_fetch_gen = 0 # 当前完成的 fetch 代际
         self._git_cache: dict[str, dict] = {}  # key → {value, ts}
         self._stderr_lines: list[str] = []     # 累积当前操作的 stderr
-        self._proxy_retried = False  # 当前网络操作是否已尝试过绕过代理重试
+        self._proxy_retried = False     # 当前网络操作是否已尝试过绕过代理重试
+        self._auto_proxy_tried = False  # 当前网络操作是否已尝试过自动探测本地代理
 
     @property
     def project_path(self) -> str:
@@ -127,8 +163,9 @@ class GitManager(QObject):
     def get_remote_url(self) -> str | None:
         """获取当前 origin remote URL。"""
         try:
+            git_exe = self._resolve_git()
             result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
+                [git_exe, "remote", "get-url", "origin"],
                 cwd=self._project_path,
                 capture_output=True,
                 text=True,
@@ -164,8 +201,9 @@ class GitManager(QObject):
             return True  # 已经是正常 URL，无需修复
 
         try:
+            git_exe = self._resolve_git()
             result = subprocess.run(
-                ["git", "remote", "set-url", "origin", self._repo_url],
+                [git_exe, "remote", "set-url", "origin", self._repo_url],
                 cwd=self._project_path,
                 capture_output=True,
                 text=True,
@@ -180,8 +218,9 @@ class GitManager(QObject):
     def get_tags(self) -> list[dict]:
         """获取所有 tags，按创建时间倒序。每条含 name / message / date。"""
         try:
+            git_exe = self._resolve_git()
             result = subprocess.run(
-                ["git", "for-each-ref", "--sort=-creatordate",
+                [git_exe, "for-each-ref", "--sort=-creatordate",
                  "--format=%(refname:short)%00%(subject)%00%(creatordate:short)", "refs/tags/"],
                 cwd=self._project_path,
                 capture_output=True,
@@ -208,8 +247,9 @@ class GitManager(QObject):
     def get_current_tag(self) -> str | None:
         """获取 HEAD 对应的 tag 名（精确匹配），不在 tag 上则返回 None。"""
         try:
+            git_exe = self._resolve_git()
             result = subprocess.run(
-                ["git", "describe", "--tags", "--exact-match", "--abbrev=0"],
+                [git_exe, "describe", "--tags", "--exact-match", "--abbrev=0"],
                 cwd=self._project_path,
                 capture_output=True,
                 text=True,
@@ -226,8 +266,9 @@ class GitManager(QObject):
     def get_current_branch(self) -> str:
         """获取当前分支名。"""
         try:
+            git_exe = self._resolve_git()
             result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                [git_exe, "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=self._project_path,
                 capture_output=True,
                 text=True,
@@ -248,7 +289,7 @@ class GitManager(QObject):
         """
         for attempt in (0, 1):
             bypass = (attempt == 1)
-            cmd = ["git"]
+            cmd = [self._resolve_git()]
             if bypass:
                 cmd += ["-c", "http.proxy=", "-c", "https.proxy="]
             cmd += ["ls-remote", "--tags", "--sort=-creatordate", "origin"]
@@ -328,6 +369,7 @@ class GitManager(QObject):
         self._fetch_gen += 1
         self._pending_op = "fetch"
         self._proxy_retried = False
+        self._auto_proxy_tried = False
         # --update-shallow: 兼容 release 包的 shallow clone，非 shallow repo 上无操作
         self._run_git(["fetch", "--update-shallow", "origin", "--tags"])
         return None
@@ -360,6 +402,7 @@ class GitManager(QObject):
         self._fetch_gen += 1
         self._pending_op = "init_repo"
         self._proxy_retried = False
+        self._auto_proxy_tried = False
         self._init_repo_steps = [
             (["init"], "git init"),
             (["remote", "add", "origin", self._repo_url], "git remote add"),
@@ -494,6 +537,49 @@ class GitManager(QObject):
                     )
                     self._pending_op = ""
                     return
+        # ----------------------------------------------------
+
+        # ---- 直连被阻断 → 自动探测本地代理端口 ----
+        if not ok and not self._proxy_retried and not self._auto_proxy_tried:
+            stderr_check = " ".join(self._stderr_lines).lower()
+            is_direct_block = (
+                "connection was reset" in stderr_check or
+                "unable to access" in stderr_check or
+                "could not resolve host" in stderr_check or
+                ("connection timed out" in stderr_check and
+                 "127.0.0.1" not in stderr_check and
+                 "localhost" not in stderr_check)
+            )
+            if is_direct_block:
+                self._auto_proxy_tried = True
+                self.output.emit("[proxy] 检测到直连 GitHub 被阻断，正在自动搜索本地代理...")
+                proxy_port = _find_local_proxy()
+                if proxy_port:
+                    self.output.emit(
+                        f"[proxy] 发现本地代理端口 {proxy_port}，自动配置 git 代理..."
+                    )
+                    git_exe = self._resolve_git()
+                    if _set_git_global_proxy(git_exe, proxy_port):
+                        self.output.emit(
+                            f"[proxy] git 代理已自动设为 http://127.0.0.1:{proxy_port}，重试中..."
+                        )
+                        if self._pending_op == "fetch":
+                            self._run_git(
+                                ["fetch", "--update-shallow", "origin", "--tags"]
+                            )
+                        elif self._pending_op == "init_repo":
+                            steps = getattr(self, "_init_repo_steps", [])
+                            if steps and self._init_repo_step_idx < len(steps):
+                                self._run_git(steps[self._init_repo_step_idx][0])
+                            else:
+                                self._run_git(["fetch", "origin", "--tags"])
+                        return
+                    else:
+                        self.output.emit("[proxy] 代理配置写入失败，继续...")
+                else:
+                    self.output.emit(
+                        "[proxy] 未找到本地代理，请手动开启 VPN 或在启动器设置中配置代理后重试"
+                    )
         # ----------------------------------------------------
 
         if ok:

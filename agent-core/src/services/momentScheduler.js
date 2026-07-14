@@ -9,6 +9,7 @@
 
 import { getDb } from '../db/index.js';
 import { generateMomentPost } from '../routes/moments.js';
+import { runWithLimit } from './llmConcurrency.js';
 
 const CHECK_INTERVAL = 10 * 60 * 1000; // 10 分钟
 
@@ -72,7 +73,7 @@ async function tick() {
     console.log(`[momentScheduler] Generating moment for ${candidate.display_name}...`);
 
     try {
-      await generateMomentPost(candidate);
+      await runWithLimit(() => generateMomentPost(candidate));
       console.log(`[momentScheduler] Done: ${candidate.display_name}`);
     } catch (err) {
       console.error(`[momentScheduler] Failed for ${candidate.display_name}:`, err.message);

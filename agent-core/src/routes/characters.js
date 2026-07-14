@@ -610,7 +610,7 @@ router.post('/:id/generate-avatar', async (req, res) => {
 
   const systemPrompt = `你是专业的角色头像生成提示词助手。根据角色的人格设定，生成一张脸部特写头像的画面描述。
 
-${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : ''}
+${imageRuleContent ? `【画面描述要求】\n${imageRuleContent}\n` : ''}
 
 【头像生成额外要求】
 - 画面内容必须是脸部特写（close-up portrait, face focus）
@@ -618,10 +618,9 @@ ${imageRuleContent ? `【图像生成格式规范】\n${imageRuleContent}\n` : '
 - 光照必须完全平面、均匀（flat lighting, even lighting），不要在 prompt 中写 soft lighting / warm lighting 等任何光照描述。目标是无阴影、无高光的平面照明效果
 - 完全脸部特写，重点在面部、发型、眼睛和表情
 - 白色背景（simple background）
-- 严格输出 JSON 格式：{"prompt":"..."}
-- prompt 字段内必须是英文描述`;
+- 直接输出英文画面描述，不要任何格式包装或额外文字`;
 
-  const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述（输出 JSON）：
+const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述：
 
 ---角色设定---
 ${char.base_prompt}
@@ -638,20 +637,25 @@ ${char.base_prompt}
       { role: 'user', content: userMsg },
     ], { model, temperature: 0.6, max_tokens: 1024, label: '生成头像提示词' });
 
-    // 解析 LLM 输出的 JSON
+    // 提取 prompt：纯文本优先，JSON 格式向后兼容
     let promptText;
-    try {
-      // 尝试提取 JSON 对象
+    let text = llmResult.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (text.length >= 5) {
+      promptText = text;
+    }
+    // 兜底：如果 LLM 仍输出了 {"prompt":"..."} JSON 格式
+    if (!promptText) {
       const jsonMatch = llmResult.match(/\{[\s\S]*"prompt"[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        promptText = parsed.prompt;
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          promptText = parsed.prompt;
+        } catch {
+          promptText = llmResult.trim();
+        }
       } else {
-        // 兜底：直接当做 prompt
         promptText = llmResult.trim();
       }
-    } catch {
-      promptText = llmResult.trim();
     }
 
     if (!promptText || promptText.length < 10) {

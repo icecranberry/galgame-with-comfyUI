@@ -222,6 +222,10 @@ class VersionPage(QWidget):
         self.rebuild_btn.setText("取消构建" if building else "强制重新构建")
         self.switch_btn.setEnabled(not building and self.tag_list.currentItem() is not None)
 
+    def set_checking(self, checking: bool):
+        self.check_update_btn.setEnabled(not checking)
+        self.check_update_btn.setText("检查中..." if checking else "检查更新")
+
     def append_log(self, text: str):
         self.log_widget.append_line(text)
 

@@ -29,6 +29,7 @@ import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
 import { startReplyQueueScheduler } from './src/services/replyQueueScheduler.js';
 import { initialize as initScheduleManager } from './src/services/scheduleManager.js';
 import { startScheduler as startImageCompressor } from './src/services/imageCompressor.js';
+import { applyFromConfig } from './src/services/llmConcurrency.js';
 
 const app = express();
 
@@ -97,6 +98,9 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 初始化后台 LLM 并发限制（云端 API 用户自动跳过，零开销）
+applyFromConfig(config);
 
 // 启动时自动补全缺失的工作流文件（已有文件不会被覆盖）
 autoRestoreMissing();

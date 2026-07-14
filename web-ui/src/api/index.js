@@ -268,6 +268,13 @@ export async function updateEventFreq(value) {
   })
 }
 
+/** 更新后台 LLM 并发数 1~10 */
+export async function updateBackgroundConcurrency(value) {
+  await fetch(`${BASE}/config/background-llm-concurrency`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+}
+
 /** 更新防打扰模式总开关 */
 export async function updateDisturbMode(value) {
   const res = await fetch(`${BASE}/config/disturb-mode`, {

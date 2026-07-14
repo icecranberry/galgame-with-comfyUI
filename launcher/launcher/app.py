@@ -446,6 +446,8 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _on_check_update(self):
+        self._version_page.set_checking(True)
+
         if not self._git.is_git_repo():
             # 无 .git → 先尝试初始化仓库
             self._version_page.append_log("未检测到版本管理数据，正在初始化...")
@@ -454,6 +456,7 @@ class MainWindow(QMainWindow):
             err = self._git.init_repo()
             if err:
                 self._version_page.append_log(f"[ERROR] {err}")
+                self._version_page.set_checking(False)
             return
         if self._git.is_remote_local_path():
             self._version_page.append_log("[WARN] Git remote 指向本地路径，正在自动修复...")
@@ -461,12 +464,14 @@ class MainWindow(QMainWindow):
                 self._version_page.append_log("✓ 已修复 remote URL")
             else:
                 self._version_page.append_log("[ERROR] 无法修复 remote URL，请检查网络连接")
+                self._version_page.set_checking(False)
                 return
         self._version_page.append_log("正在检查更新...")
         self._pending_fetch_is_auto = False  # 用户手动触发，正常报错
         err = self._git.fetch_remote()
         if err:
             self._version_page.append_log(f"[ERROR] {err}")
+            self._version_page.set_checking(False)
 
     def _on_switch_tag(self, tag: str):
         self._switching_version = True
@@ -538,6 +543,7 @@ class MainWindow(QMainWindow):
                 if not self._pending_fetch_is_auto:
                     self._version_page.append_log(f"[ERROR] 初始化失败: {message}")
             self._pending_fetch_is_auto = False
+            self._version_page.set_checking(False)
 
         elif operation == "fetch":
             if success:
@@ -565,6 +571,7 @@ class MainWindow(QMainWindow):
                 else:
                     self._version_page.append_log(f"[ERROR] fetch 失败: {message}")
                 self._pending_fetch_is_auto = False
+            self._version_page.set_checking(False)
 
         elif operation == "checkout":
             if success:

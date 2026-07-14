@@ -3,43 +3,42 @@
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
       <div v-if="visible && !showLoraModal" class="modal-overlay">
-        <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh;width:min(900px, 97vw)">
+        <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
             <button class="modal-close" @click="$emit('close')">✕</button>
           </div>
 
-          <!-- 移动端工具栏 -->
-          <div class="mobile-detail-toolbar" v-if="isMobile">
-            <div class="toolbar-item toolbar-item-toggle">
-              <span>不看ta的朋友圈</span>
-              <label class="toggle-switch toolbar-switch">
-                <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="toolbar-item toolbar-item-toggle">
-              <span>不主动聊天</span>
-              <label class="toggle-switch toolbar-switch">
-                <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="toolbar-item toolbar-item-toggle">
-              <span>不发生奇遇</span>
-              <label class="toggle-switch toolbar-switch">
-                <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
-              <span>设置 Lora</span>
-              <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
-              <span v-else class="toolbar-badge">未配置</span>
-            </div>
-          </div>
-
           <div class="modal-body modal-body-detail">
+            <!-- 移动端工具栏 -->
+            <div class="mobile-detail-toolbar" v-if="isMobile">
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不看ta的朋友圈</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不主动聊天</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不发生奇遇</span>
+                <label class="toggle-switch toolbar-switch">
+                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
+                <span>设置 Lora</span>
+                <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
+                <span v-else class="toolbar-badge">未配置</span>
+              </div>
+            </div>
             <!-- 头像 -->
             <div class="detail-avatar-row">
               <div
@@ -542,7 +541,7 @@ async function saveLora() {
   overflow: hidden; backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
-.modal-wide { width: min(760px, 97vw); }
+.modal-wide { width: min(900px, 97vw); }
 
 .modal-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -783,7 +782,7 @@ async function saveLora() {
 
 /* ═══ 移动端 ═══ */
 @media (max-width: 767px) {
-  .modal-panel { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
+  .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
   .modal-close { flex-shrink: 0; }
@@ -795,11 +794,14 @@ async function saveLora() {
   .modal-footer { padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
   .prompt-textarea { min-height: 350px; font-size: 16px; }
   .modal-wide .prompt-textarea { font-size: 16px; }
+  .modal-body-detail { overflow-y: auto; }
+  .modal-body-detail .preview-card { flex: none; }
+  .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
   .modal-wide .fi { font-size: 16px; }
   .detail-rel-section { padding: 12px; margin-bottom: 14px; }
   .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
 
-  .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: 1px solid var(--glass-border); background: rgba(0, 0, 0, 0.02); flex-shrink: 0; }
+  .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
   .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(224, 123, 108, 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
   .toolbar-item:active { background: rgba(224, 123, 108, 0.16); }
   .toolbar-item-toggle { cursor: default; justify-content: space-between; background: rgba(0, 0, 0, 0.04); color: var(--text-secondary); font-weight: 500; }

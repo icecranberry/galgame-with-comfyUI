@@ -1068,6 +1068,8 @@ const SETTING_TO_CONFIG = {
   feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
   feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
   feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
+  feature_serializeBackgroundLLM:     { obj: 'features', key: 'serializeBackgroundLLM',    type: 'bool' },
+  feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
   compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
   compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
