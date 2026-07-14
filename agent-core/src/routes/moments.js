@@ -478,20 +478,7 @@ async function generateMomentPost(character, opts = {}) {
     : '你正在发朋友圈。请根据你的人设，生成一条自然的朋友圈动态。';
 
   const imagePromptRule = getGlobalRule('image_prompt');
-  let imagePromptGuide = '';
-  if (imagePromptRule?.rule_content) {
-    try {
-      let sanitized = imagePromptRule.rule_content
-        .replace(/\r/g, '\\r')
-        .replace(/\n/g, '\\n')
-        .replace(/\t/g, '\\t')
-        .replace(/\\([^"\\\/bfnrtu])/g, '$1');
-      const parsed = JSON.parse(sanitized);
-      imagePromptGuide = parsed.prompt || '';
-    } catch {
-      imagePromptGuide = '';
-    }
-  }
+  const imagePromptGuide = imagePromptRule?.rule_content || '';
 
   const postingTask = `${postingTaskIntro}
 
