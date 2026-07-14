@@ -4,6 +4,7 @@
  * - 定时任务：平时小压缩（30min / 3张），凌晨大压缩（10min / 15张）
  * - 立即压缩：全量处理直到最新文件，SSE 推送进度，可取消
  * - 状态持久化：cursor 机制记录处理进度，重启续传
+ * - 多目录支持：历史平铺 + chat/moments/events/gifts/avatargen/peek 子目录
  * - 两种压缩模式：
  *   OxiPng — 无损重编码 PNG (compressionLevel=9, palette, effort=10)，覆盖原文件
  *   AVIF   — 转 AVIF quality=50, effort=4，删除原 PNG
@@ -11,19 +12,19 @@
 
 import sharp from 'sharp';
 import { readdir, stat, unlink, rename } from 'fs/promises';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { join, resolve, dirname } from 'path';
+import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { broadcast } from './unifiedStreamBus.js';
 import { config, updateCompressConfig } from '../config.js';
+import { getAllImageDirs } from './imagePaths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const IMAGES_DIR = resolve(__dirname, '..', '..', 'data', 'images');
 const STATE_FILE = resolve(__dirname, '..', '..', 'data', 'image-compressor-state.json');
 
 // ── 默认状态 ──
 const DEFAULT_STATE = {
-  lastProcessedFile: null,
+  groups: {},        // { flat: { lastProcessedFile, totalProcessed }, chat: { ... }, ... }
   totalProcessed: 0,
   totalOriginalBytes: 0,
   totalCompressedBytes: 0,
@@ -35,8 +36,7 @@ let state = { ...DEFAULT_STATE };
 let schedulerTimer = null;
 let schedulerProcessing = false;
 
-// 立即压缩任务
-let batchTask = null;  // { cancelled, phase, current, total, currentFile, errors }
+let batchTask = null;
 
 // ── 状态持久化 ──
 
@@ -45,8 +45,21 @@ function loadState() {
     if (existsSync(STATE_FILE)) {
       const raw = readFileSync(STATE_FILE, 'utf-8');
       const loaded = JSON.parse(raw);
-      state = { ...DEFAULT_STATE, ...loaded };
-      // 不恢复 task（重启后立即压缩任务已失效）
+
+      // 检测旧格式并自动升级
+      if (loaded.lastProcessedFile && !loaded.groups) {
+        const oldFile = loaded.lastProcessedFile;
+        state = { ...DEFAULT_STATE };
+        state.groups.history = { lastProcessedFile: oldFile, totalProcessed: loaded.totalProcessed || 0 };
+        state.totalProcessed = loaded.totalProcessed || 0;
+        state.totalOriginalBytes = loaded.totalOriginalBytes || 0;
+        state.totalCompressedBytes = loaded.totalCompressedBytes || 0;
+        state.lastRun = loaded.lastRun || null;
+        console.log('[imageCompressor] State upgraded from legacy format');
+      } else {
+        state = { ...DEFAULT_STATE, ...loaded };
+        if (!state.groups) state.groups = {};
+      }
       batchTask = null;
     }
   } catch (e) {
@@ -58,48 +71,60 @@ function loadState() {
 function saveState() {
   try {
     const toSave = { ...state };
-    // batchTask 独立保存，不混入持久化
     writeFileSync(STATE_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
   } catch (e) {
     console.error('[imageCompressor] Failed to save state:', e.message);
   }
 }
 
-// ── 文件列表 ──
+function ensureGroup(groupKey) {
+  if (!state.groups[groupKey]) {
+    state.groups[groupKey] = { lastProcessedFile: null, totalProcessed: 0 };
+  }
+}
 
-async function listPngFiles() {
-  if (!existsSync(IMAGES_DIR)) return [];
-  const files = await readdir(IMAGES_DIR);
-  const pngs = files.filter(f => /\.png$/i.test(f));
+// ── 文件列表（多目录扫描）──
 
-  // 按创建时间升序排列
-  const withStats = [];
-  const BATCH = 64;
-  for (let i = 0; i < pngs.length; i += BATCH) {
-    const batch = pngs.slice(i, i + BATCH);
-    const results = await Promise.all(
-      batch.map(async (name) => {
-        const s = await stat(join(IMAGES_DIR, name));
-        return { name, birthtime: s.birthtimeMs, mtime: s.mtimeMs, size: s.size };
-      })
-    );
-    withStats.push(...results);
+async function listAllPngFiles() {
+  const dirs = getAllImageDirs();
+  const allFiles = [];
+
+  for (const { category, dir } of dirs) {
+    if (!existsSync(dir)) continue;
+    const files = await readdir(dir);
+    const pngs = files.filter(f => /\.png$/i.test(f));
+
+    const BATCH = 64;
+    for (let i = 0; i < pngs.length; i += BATCH) {
+      const batch = pngs.slice(i, i + BATCH);
+      const results = await Promise.all(
+        batch.map(async (name) => {
+          const fullPath = join(dir, name);
+          try {
+            const s = await stat(fullPath);
+            return { name, fullPath, folder: category, birthtime: s.birthtimeMs, size: s.size };
+          } catch { return null; }
+        })
+      );
+      for (const r of results) if (r) allFiles.push(r);
+    }
   }
 
-  withStats.sort((a, b) => a.birthtime - b.birthtime);
-  return withStats;
+  allFiles.sort((a, b) => a.birthtime - b.birthtime);
+  return allFiles;
 }
 
 // ── 单张压缩 ──
 
 async function compressOne(fileInfo) {
-  const { name, size } = fileInfo;
-  const inputPath = join(IMAGES_DIR, name);
+  const { name, fullPath: inputPath, folder, size } = fileInfo;
   const baseName = name.replace(/\.png$/i, '');
+  const dir = dirname(inputPath);
   const isAvif = config.compression.type === 'avif';
 
   const result = {
     filename: name,
+    folder,
     originalSize: size,
     compressedSize: 0,
     success: false,
@@ -110,7 +135,7 @@ async function compressOne(fileInfo) {
 
   try {
     if (isAvif) {
-      const outPath = join(IMAGES_DIR, `${baseName}.avif`);
+      const outPath = join(dir, `${baseName}.avif`);
       await sharp(inputPath)
         .avif({ quality: 50, effort: 4 })
         .toFile(outPath);
@@ -119,8 +144,9 @@ async function compressOne(fileInfo) {
       result.compressedSize = outStat.size;
       result.success = true;
 
-      // 先更新 cursor 再删原文件：状态原子化，防崩溃丢文件
-      state.lastProcessedFile = name;
+      ensureGroup(folder);
+      state.groups[folder].lastProcessedFile = name;
+      state.groups[folder].totalProcessed = (state.groups[folder].totalProcessed || 0) + 1;
       state.totalProcessed++;
       state.totalOriginalBytes += size;
       state.totalCompressedBytes += result.compressedSize;
@@ -129,8 +155,7 @@ async function compressOne(fileInfo) {
 
       await unlink(inputPath);
     } else {
-      // OxipNG: 重编码到临时文件，成功后再替换
-      const tmpPath = join(IMAGES_DIR, `${name}.tmp`);
+      const tmpPath = join(dir, `${name}.tmp`);
       await sharp(inputPath)
         .png({ compressionLevel: 9, palette: true, effort: 10 })
         .toFile(tmpPath);
@@ -149,7 +174,9 @@ async function compressOne(fileInfo) {
         result.success = true;
       }
 
-      state.lastProcessedFile = name;
+      ensureGroup(folder);
+      state.groups[folder].lastProcessedFile = name;
+      state.groups[folder].totalProcessed = (state.groups[folder].totalProcessed || 0) + 1;
       state.totalProcessed++;
       state.totalOriginalBytes += size;
       state.totalCompressedBytes += result.compressedSize;
@@ -163,8 +190,7 @@ async function compressOne(fileInfo) {
     result.error = err.message;
     result.success = false;
 
-    // 清理可能残留的临时文件
-    const tmpPath = join(IMAGES_DIR, `${name}.tmp`);
+    const tmpPath = join(dir, `${name}.tmp`);
     try { if (existsSync(tmpPath)) await unlink(tmpPath); } catch {}
 
     return result;
@@ -174,26 +200,52 @@ async function compressOne(fileInfo) {
 // ── 获取待处理文件列表 ──
 
 async function getPendingFiles(limit, cursorOnly = false) {
-  const allFiles = await listPngFiles();
+  const allFiles = await listAllPngFiles();
   if (allFiles.length === 0) return [];
 
-  // 从 cursor 之后开始
-  let startIdx = 0;
-  if (state.lastProcessedFile) {
-    const cursorIdx = allFiles.findIndex(f => f.name === state.lastProcessedFile);
-    startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
+  // 每个 folder 内跳过 cursor 之前的文件
+  const folderCursors = {};
+  for (const [folder, group] of Object.entries(state.groups)) {
+    folderCursors[folder] = group.lastProcessedFile || null;
   }
 
-  // 跳过最近 5 分钟内创建的文件（避免和 ComfyUI 写盘冲突）
   const now = Date.now();
   const safeBoundary = now - 5 * 60 * 1000;
 
-  const candidates = allFiles.slice(startIdx).filter(f => f.birthtime < safeBoundary);
+  const candidates = [];
+  for (const file of allFiles) {
+    if (file.birthtime >= safeBoundary) continue;
+
+    candidates.push(file);
+  }
+
+  // 过滤：对每个 folder，找到 cursor 在该 folder 内文件序列中的位置
+  const folderFileMap = {};
+  for (const file of candidates) {
+    if (!folderFileMap[file.folder]) folderFileMap[file.folder] = [];
+    folderFileMap[file.folder].push(file);
+  }
+
+  // 对每个 folder，按 birthtime 排序，跳过 cursor 及之前的文件
+  const pending = [];
+  for (const [folder, files] of Object.entries(folderFileMap)) {
+    files.sort((a, b) => a.birthtime - b.birthtime);
+    const cursor = folderCursors[folder];
+    if (cursor) {
+      const cursorIdx = files.findIndex(f => f.name === cursor);
+      const startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
+      pending.push(...files.slice(startIdx));
+    } else {
+      pending.push(...files);
+    }
+  }
+
+  pending.sort((a, b) => a.birthtime - b.birthtime);
 
   if (limit > 0 && !cursorOnly) {
-    return candidates.slice(0, limit);
+    return pending.slice(0, limit);
   }
-  return candidates;
+  return pending;
 }
 
 // ── 批量压缩 ──
@@ -214,10 +266,10 @@ async function compressBatch(limit) {
 // ── 定时调度器 ──
 
 const SCHEDULE_CONFIG = {
-  peak:   { interval: 10 * 60 * 1000, batch: 3  },  // 白天：10min / 3张
-  offPeak: { interval: 10 * 60 * 1000, batch: 15 },  // 凌晨：10min / 15张
-  offPeakStart: 2,  // 凌晨2点
-  offPeakEnd: 5,    // 早上5点
+  peak:   { interval: 10 * 60 * 1000, batch: 3  },
+  offPeak: { interval: 10 * 60 * 1000, batch: 15 },
+  offPeakStart: 2,
+  offPeakEnd: 5,
 };
 
 function isOffPeak() {
@@ -232,10 +284,7 @@ function getScheduleConfig() {
 async function schedulerTick() {
   if (schedulerProcessing) return;
   if (!config.compression.enabled) return;
-  if (batchTask?.processing) {
-    // 立即压缩进行中，跳过定时（避免抢文件）
-    return;
-  }
+  if (batchTask?.processing) return;
 
   schedulerProcessing = true;
   try {
@@ -255,13 +304,10 @@ function reschedule() {
   if (schedulerTimer) clearInterval(schedulerTimer);
   if (!config.compression.enabled) return;
 
-  // 先等 60 秒再开始第一个 tick
   schedulerTimer = setTimeout(() => {
     schedulerTick();
-    // 后续按当前时段间隔轮询
     schedulerTimer = setInterval(() => {
       schedulerTick();
-      // 动态调整间隔（可能在 tick 中途跨时段）
       const cfg = getScheduleConfig();
       if (schedulerTimer._interval !== cfg.interval) {
         clearInterval(schedulerTimer);
@@ -274,21 +320,13 @@ function reschedule() {
 // ── 立即压缩（全量，SSE 推送进度）──
 
 async function runFullCompression() {
-  const allFiles = await listPngFiles();
+  const allFiles = await listAllPngFiles();
   if (allFiles.length === 0) {
     batchTask = { phase: 'complete', current: 0, total: 0, processing: false };
     return;
   }
 
-  // 从头开始（忽略 cursor）
-  let startIdx = 0;
-  if (state.lastProcessedFile) {
-    const cursorIdx = allFiles.findIndex(f => f.name === state.lastProcessedFile);
-    startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
-  }
-
-  // 不过滤最近文件（立即压缩就是要全量）
-  const pending = allFiles.slice(startIdx);
+  const pending = await getPendingFiles(0, true);
 
   if (pending.length === 0) {
     batchTask = { phase: 'complete', current: 0, total: 0, processing: false };
@@ -300,7 +338,7 @@ async function runFullCompression() {
     cancelled: false,
     phase: 'running',
     current: state.totalProcessed,
-    total: allFiles.length,
+    total: state.totalProcessed + pending.length,
     currentFile: '',
     errors: [],
     processing: true,
@@ -309,7 +347,7 @@ async function runFullCompression() {
   broadcast('image_compress_progress', {
     phase: 'running',
     current: state.totalProcessed,
-    total: allFiles.length,
+    total: batchTask.total,
     currentFile: '',
   });
 
@@ -381,7 +419,6 @@ export function startFullCompression() {
     return { error: '已有压缩任务进行中', busy: true };
   }
 
-  // 不阻塞 HTTP 响应，异步执行
   runFullCompression().catch(err => {
     console.error('[imageCompressor] Full compression error:', err.message);
     if (batchTask) {
@@ -404,6 +441,6 @@ export function cancelCompression() {
 
 export function startScheduler() {
   loadState();
-  console.log(`[imageCompressor] Loaded: enabled=${config.compression.enabled}, type=${config.compression.type}, cursor at ${state.totalProcessed}`);
+  console.log(`[imageCompressor] Loaded: enabled=${config.compression.enabled}, type=${config.compression.type}, total=${state.totalProcessed}`);
   reschedule();
 }

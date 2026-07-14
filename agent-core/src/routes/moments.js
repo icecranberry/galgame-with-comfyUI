@@ -1,7 +1,5 @@
 import { Router } from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { saveBase64Image } from '../services/imagePaths.js';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -14,10 +12,6 @@ import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
 
 const router = Router();
-
-const __filename = fileURLToPath(import.meta.url);
-const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
-const imagesDir = path.join(projectRoot, 'data', 'images');
 
 // Helper: SQLite datetime → ISO (UTC)
 function toISO(dt) {
@@ -616,14 +610,11 @@ async function generateMomentPost(character, opts = {}) {
     });
 
     if (genResult.success && genResult.images.length > 0) {
-      fs.mkdirSync(imagesDir, { recursive: true });
       for (const img of genResult.images) {
         const ts = Date.now();
         const filename = `moment_${ts}_${img.filename || 'comfy.png'}`;
-        const filePath = path.join(imagesDir, filename);
-        const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-        imageUrls.push(`/images/${filename}`);
+        const url = saveBase64Image('moments', filename, img.base64);
+        imageUrls.push(url);
       }
     }
   } catch (err) {

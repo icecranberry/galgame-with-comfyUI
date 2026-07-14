@@ -15,22 +15,15 @@
  * - concludeEvent(): 到期/完成后生成结局，存入记忆
  */
 
-import { promises as fsp } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
+import { saveBase64Image } from './imagePaths.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeLightTag, getTimeLight } from './timeLight.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..', '..');
-const imagesDir = path.join(projectRoot, 'data', 'images');
 
 // ── 事件类型库（奇遇引擎） ──
 // 每条给出"这类奇遇的核心模式 + 有趣点来源 + 角色反应方向"，不预设具体场景。
@@ -620,12 +613,9 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
       ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
-      await fsp.mkdir(imagesDir, { recursive: true });
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
-      const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      await fsp.writeFile(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
-      imageUrl = `/images/${filename}`;
+      imageUrl = saveBase64Image('events', filename, img.base64);
       console.log(`[eventGen] Image generated for ${character.display_name}: ${imageUrl}`);
     } else {
       console.warn(`[eventGen] Image generation returned no images for ${character.display_name}`);
@@ -877,12 +867,9 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
       ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
-      await fsp.mkdir(imagesDir, { recursive: true });
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
-      const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      await fsp.writeFile(path.join(imagesDir, filename), Buffer.from(base64Data, 'base64'));
-      imageUrl = `/images/${filename}`;
+      imageUrl = saveBase64Image('events', filename, img.base64);
       console.log(`[eventGen] Branch image generated: ${imageUrl}`);
     }
   } catch (err) {

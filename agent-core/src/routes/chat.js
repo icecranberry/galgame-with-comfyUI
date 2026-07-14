@@ -1,7 +1,4 @@
 import { Router } from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -20,6 +17,7 @@ import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
+import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
@@ -1252,11 +1250,6 @@ async function judgeImageNeed(conversationId) {
 async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send) {
   const db = getDb();
 
-  // 计算 data/images 的绝对路径（agent-core/data/images/，不会被 vite build 清空）
-  const __filename = fileURLToPath(import.meta.url);
-  const projectRoot = path.dirname(path.dirname(path.dirname(__filename))); // agent-core/
-  const imagesDir = path.join(projectRoot, 'data', 'images');
-
   // 查找角色 lora 设置
   let loraOpts = {};
   try {
@@ -1291,19 +1284,13 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       ...loraOpts,
     });
     if (result.success && result.images.length > 0) {
-      // 落盘 base64 图片到 data/images/，构建 URL 数组
-      fs.mkdirSync(imagesDir, { recursive: true });
       const urls = [];
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `${ts}_${img.filename || 'comfy.png'}`;
-        const filePath = path.join(imagesDir, filename);
-        // 解码 base64 data URI → 写入文件
-        const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-        urls.push(`/images/${filename}`);
-        // 给前端用的 URL 也挂到 img 对象上
-        img.url = `/images/${filename}`;
+        const url = saveBase64Image('chat', filename, img.base64);
+        urls.push(url);
+        img.url = url;
       }
 
       // 使相册缓存失效
@@ -1618,7 +1605,10 @@ async function generateReplyGuesses(conversationId, character) {
 
   // msgs[0] — 舞台：破限词 + 世界观（不含 roleplay，避免预测助手站错角色）
   const jailbreak = getSystemRules({ roleplay: false });
-  const worldSetting = getWorldSetting();
+  let worldSetting = getWorldSetting();
+  if (worldSetting && worldSetting.length > 500) {
+    worldSetting = worldSetting.slice(0, 500);
+  }
   const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
 
   // msgs[1] — 任务：预测指令（先定义任务） + 角色背景（后补充上下文）

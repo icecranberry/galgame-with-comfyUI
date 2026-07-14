@@ -12,10 +12,7 @@
  *   - 每次只处理一个角色（排队）
  */
 
-import fs from 'fs';
 import { invalidateGalleryCache } from '../routes/images.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -28,12 +25,9 @@ import { generateImage } from './imageSkill.js';
 import { runWithLimit } from './llmConcurrency.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getTimeLight } from './timeLight.js';
+import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const imagesDir = path.join(__dirname, '..', '..', 'data', 'images');
 
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
 
@@ -288,6 +282,53 @@ function loadUserProfile() {
 // ── LLM 开场白生成 ──
 
 /**
+ * 兜底问候语池：按时间段分组，LLM 失败时随机抽取，避免每次都是"在干嘛呢？"
+ */
+function pickFallbackGreeting(userName) {
+  const hour = new Date().getHours();
+  let pool = [];
+  if (hour >= 6 && hour < 12) {
+    pool = MORNING_FALLBACKS;
+  } else if (hour >= 12 && hour < 18) {
+    pool = AFTERNOON_FALLBACKS;
+  } else if (hour >= 18 && hour < 23) {
+    pool = EVENING_FALLBACKS;
+  } else {
+    pool = NIGHT_FALLBACKS;
+  }
+  return pool[Math.floor(Math.random() * pool.length)](userName);
+}
+
+const MORNING_FALLBACKS = [
+  (n) => `${n}，早啊～`,
+  (n) => `早上好呀${n}！`,
+  (n) => `${n}，起来了吗？`,
+  (n) => `早安${n}～今天天气不错`,
+  (n) => `哈喽${n}，在干嘛呢？`,
+];
+const AFTERNOON_FALLBACKS = [
+  (n) => `${n}，在干嘛呢？`,
+  (n) => `嗨${n}，午安～`,
+  (n) => `${n}，有空没？`,
+  (n) => `下午好呀${n}～`,
+  (n) => `${n}，在忙吗？`,
+];
+const EVENING_FALLBACKS = [
+  (n) => `${n}，晚上好～`,
+  (n) => `晚安前想和${n}说句话`,
+  (n) => `${n}，今天过得怎么样？`,
+  (n) => `嗨${n}，忙完了吗？`,
+  (n) => `晚上好呀${n}～`,
+];
+const NIGHT_FALLBACKS = [
+  (n) => `${n}，这么晚了还没睡？`,
+  (n) => `${n}，睡了吗？`,
+  (n) => `夜深了，${n}还在？`,
+  (n) => `${n}，晚安安～`,
+  (n) => `还不睡？${n}也是夜猫子啊`,
+];
+
+/**
  * 以角色口吻生成一句自然的主动开场白
  *
  * @param {object} character - characters 表行
@@ -417,14 +458,12 @@ ${proactiveRules}
       else greeting = greeting.slice(0, maxLen) + '…';
     }
     if (greeting.length < 5) {
-      // 太短了，说明 LLM 没正经输出；兜底
-      return `${userName}，在干嘛呢？`;
+      return pickFallbackGreeting(userName);
     }
     return greeting;
   } catch (err) {
     console.error(`⚡ generateGreeting failed for ${character.display_name}:`, err.message);
-    // 兜底问候语
-    return `${userName}，在干嘛呢？`;
+    return pickFallbackGreeting(userName);
   }
 }
 
@@ -588,15 +627,12 @@ ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}直接
       return null;
     }
 
-    // 3. 落盘 base64 图片到 data/images/ + 更新 messages 表
-    fs.mkdirSync(imagesDir, { recursive: true });
+    // 3. 落盘 base64 图片到 data/images/chat/ + 更新 messages 表
     const urls = [];
     for (const img of result.images) {
       const filename = `${Date.now()}_${img.filename || 'comfy.png'}`;
-      const filePath = path.join(imagesDir, filename);
-      const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-      urls.push(`/images/${filename}`);
+      const url = saveBase64Image('chat', filename, img.base64);
+      urls.push(url);
     }
 
     const db = getDb();
@@ -744,7 +780,7 @@ async function tick() {
     const userProfile = loadUserProfile();
 
     // 6. 生成开场白
-    const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
+    const greeting = await runWithLimit(() => generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak));
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
@@ -1008,7 +1044,7 @@ export async function forceProactiveNow(targetCharacterId) {
   const motive = pickMotive(affinity, streak);
   const relationshipContext = loadRelationshipContext(candidate.id);
   const userProfile = loadUserProfile();
-  const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
+  const greeting = await runWithLimit(() => generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak));
 
   const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
 

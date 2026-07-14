@@ -37,9 +37,31 @@ export function resetClient() {
 }
 
 /**
- * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
+ * 判断是否可重试的错误
+ * 中转站 API 偶尔出现 401/500 但仍有输出，以及网络瞬断都属于可恢复错误
  */
-export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync' } = {}) {
+function isRetryableError(err) {
+  const status = err?.status || err?.response?.status;
+  const message = (err?.message || '') + (err?.error?.message || '');
+  const code = err?.code || err?.error?.code || '';
+  // 中转站：401 可能是认证中间件抖动，500/502/503 是后端瞬断
+  if (status === 401 || status === 429 || (status >= 500 && status < 600)) return true;
+  // 网络层错误
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND') return true;
+  if (message.includes('fetch failed') || message.includes('timeout') || message.includes('abort')) return true;
+  return false;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
+ * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
+ * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
+ */
+export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   const params = {
     model,
     messages,
@@ -70,16 +92,47 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
     JSON.stringify(logMsgs, null, 2) + '\n' +
     '───────────────────────────────────────────────';
 
-  const res = await getClient().chat.completions.create(params);
-  const content = res.choices[0].message.content;
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // 重试前等待（指数退避）
+      if (attempt > 0) {
+        const delay = retryDelay * Math.pow(2, attempt - 1);
+        console.warn(`[${providerLabel()}] ▸ 第 ${attempt}/${retries} 次重试 (${delay}ms 后退避)...`);
+        await sleep(delay);
+      }
 
-  // 请求+响应一起输出，保证每次调用的日志是完整的原子块
-  console.log(requestLog);
-  console.log(`[${providerLabel()} ← ${label}]`);
-  console.log((content || '').slice(0, 2000));
-  console.log('═══════════════════════════════════════════════\n');
+      const res = await getClient().chat.completions.create(params);
+      const content = res.choices[0].message.content;
 
-  return content;
+      // 请求+响应一起输出，保证每次调用的日志是完整的原子块
+      console.log(requestLog);
+      console.log(`[${providerLabel()} ← ${label}]`);
+      console.log((content || '').slice(0, 2000));
+      console.log('═══════════════════════════════════════════════\n');
+
+      return content;
+    } catch (err) {
+      lastError = err;
+      const status = err?.status || err?.response?.status;
+      const code = err?.code || err?.error?.code || '';
+      const msg = err?.message || '';
+
+      if (attempt < retries && isRetryableError(err)) {
+        console.warn(
+          `[${providerLabel()} ← ${label}] 失败 (status=${status}, code=${code}, msg=${msg}), ` +
+          `准备重试 (${attempt + 1}/${retries})`
+        );
+        continue;
+      }
+      // 不可重试或已耗尽重试次数 → 抛出
+      console.log(requestLog);
+      console.log(`[${providerLabel()} ← ${label}] ❌ 最终失败: status=${status}, code=${code}, msg=${msg}`);
+      console.log('═══════════════════════════════════════════════\n');
+      throw err;
+    }
+  }
+  throw lastError;
 }
 
 /**

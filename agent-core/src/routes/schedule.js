@@ -24,12 +24,7 @@ import { generateImage } from '../services/imageSkill.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
 import { getTimeLight } from '../services/timeLight.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PEEK_IMAGES_DIR = path.join(__dirname, '..', '..', 'data', 'images');
+import { saveBase64Image } from '../services/imagePaths.js';
 
 const router = Router();
 
@@ -229,16 +224,11 @@ router.get('/:characterId/current', (req, res) => {
 /** 将 base64 图片落盘，返回对外可访问的 URL 路径 */
 function savePeekImage(base64, filename) {
   try {
-    if (!fs.existsSync(PEEK_IMAGES_DIR)) {
-      fs.mkdirSync(PEEK_IMAGES_DIR, { recursive: true });
-    }
-    const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
     const ext = base64.match(/^data:image\/(\w+);base64,/)?.[1] || 'png';
     const safeName = `peek_${filename}_${Date.now()}.${ext}`;
-    const filePath = path.join(PEEK_IMAGES_DIR, safeName);
-    fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-    console.log(`[schedule] Peek image saved: ${safeName}`);
-    return `/images/${safeName}`;
+    const url = saveBase64Image('peek', safeName, base64);
+    console.log(`[schedule] Peek image saved: ${safeName} → ${url}`);
+    return url;
   } catch (err) {
     console.error('[schedule] Failed to save peek image:', err.message);
     return null;

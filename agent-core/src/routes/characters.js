@@ -12,6 +12,7 @@ import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
+import { saveBase64Image } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 
@@ -539,10 +540,6 @@ router.post('/:id/gift', async (req, res) => {
 
     // 异步生图：不阻塞响应，完成后补图片到消息气泡
     if (result.imagePrompt) {
-      const __filename = fileURLToPath(import.meta.url);
-      const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
-      const imagesDir = path.join(projectRoot, 'data', 'images');
-
       generateImage(result.imagePrompt, {
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
@@ -551,13 +548,9 @@ router.post('/:id/gift', async (req, res) => {
         }
       }).then(imgResult => {
         if (imgResult.success && imgResult.images.length > 0) {
-          fs.mkdirSync(imagesDir, { recursive: true });
           const img = imgResult.images[0];
           const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
-          const filePath = path.join(imagesDir, filename);
-          const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-          fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-          const imageUrl = `/images/${filename}`;
+          const imageUrl = saveBase64Image('gifts', filename, img.base64);
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
             .run(JSON.stringify([imageUrl]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
@@ -687,22 +680,13 @@ ${char.base_prompt}
     });
 
     if (result.success && result.images.length > 0) {
-      // 落盘到 data/images/，和聊天图片/朋友圈图片一样存入系统
-      const __filename = fileURLToPath(import.meta.url);
-      const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
-      const imagesDir = path.join(projectRoot, 'data', 'images');
-      fs.mkdirSync(imagesDir, { recursive: true });
-
       const savedPaths = [];
       for (const img of result.images) {
         const ts = Date.now();
         const filename = `avatar_gen_${req.params.id}_${ts}_${img.filename || 'comfy.png'}`;
-        const filePath = path.join(imagesDir, filename);
-        const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-        savedPaths.push(`/images/${filename}`);
-        // 挂 URL 供前端裁剪使用
-        img.url = `/images/${filename}`;
+        const url = saveBase64Image('avatargen', filename, img.base64);
+        savedPaths.push(url);
+        img.url = url;
       }
 
       console.log(`[generate-avatar] Image saved to ${savedPaths.length} file(s): ${savedPaths.join(', ')}`);

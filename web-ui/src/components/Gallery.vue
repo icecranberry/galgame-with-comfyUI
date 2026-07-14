@@ -2,18 +2,31 @@
   <div class="gallery" ref="scrollContainer" @scroll="onScroll">
     <!-- 加载状态 -->
     <div v-if="loading" class="gallery-empty">
-    <!-- 置空不填 -->
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="images.length === 0" class="gallery-empty">
+    <div v-else-if="images.length === 0 && !hasMore" class="gallery-empty">
       <div class="empty-icon">📭</div>
-      <p>相册暂无图片</p>
+      <p>{{ activeFolder ? '该分类暂无图片' : '相册暂无图片' }}</p>
       <p class="empty-hint">生成图片后会自动出现在这里</p>
     </div>
 
+    <!-- 文件夹筛选按钮（常驻） -->
+    <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
+      <button
+        v-for="f in folderButtons"
+        :key="f.key"
+        class="folder-btn"
+        :class="{ active: activeFolder === f.key }"
+        @click="onFolderChange(f.key)"
+      >
+        <span class="folder-label">{{ f.label }}</span>
+        <span class="folder-count">{{ f.count }}</span>
+      </button>
+    </div>
+
     <!-- 按时间分组的图片网格 -->
-    <template v-else>
+    <template v-if="images.length > 0">
       <div v-for="group in visibleDayGroups" :key="group.label" class="gallery-group">
         <div class="group-header">
           <span class="group-label">{{ group.label }}</span>
@@ -65,7 +78,7 @@ const PAGE_SIZE = 60
 
 const emit = defineEmits(['loaded'])
 
-const images = ref([])          // 已加载的全部图片（累积）
+const images = ref([])
 const total = ref(0)
 const hasMore = ref(false)
 const loading = ref(true)
@@ -74,7 +87,21 @@ const lightboxVisible = ref(false)
 const lightboxIndex = ref(0)
 const scrollContainer = ref(null)
 
-// 将所有已加载图片按天分组
+const folders = ref([])
+const activeFolder = ref(null)
+
+const folderButtons = computed(() => {
+  const all = { key: null, label: '全部', count: total.value }
+  if (!activeFolder.value) all.count = total.value
+  else {
+    // when filtered, compute "全部" count from folders
+    let sum = 0
+    for (const f of folders.value) sum += f.count
+    all.count = sum
+  }
+  return [all, ...folders.value.map(f => ({ key: f.key, label: f.label, count: f.count }))]
+})
+
 const allDayGroups = computed(() => {
   if (images.value.length === 0) return []
 
@@ -113,7 +140,6 @@ const allDayGroups = computed(() => {
   return [...map.values()].sort((a, b) => b.dayStart - a.dayStart)
 })
 
-// 为每张图片嵌入 flatIndex，供 lightbox 定位
 const allFlatImages = computed(() => {
   let idx = 0
   const result = []
@@ -126,10 +152,8 @@ const allFlatImages = computed(() => {
   return result
 })
 
-// 可见分组（全部，因为已经分页加载了）
 const visibleDayGroups = computed(() => allFlatImages.value)
 
-// 可见图片 URL 扁平数组，供 lightbox 使用
 const lightboxImgs = computed(() => {
   const urls = []
   for (const group of visibleDayGroups.value) {
@@ -145,15 +169,22 @@ function onPreview(flatIndex) {
   lightboxVisible.value = true
 }
 
-// 加载下一页
+function onFolderChange(key) {
+  if (activeFolder.value === key) return
+  activeFolder.value = key
+  images.value = []
+  total.value = 0
+  hasMore.value = false
+  loadPage(0)
+}
+
 async function loadPage(offset) {
   try {
-    const data = await listGalleryImages(PAGE_SIZE, offset)
+    const data = await listGalleryImages(PAGE_SIZE, offset, activeFolder.value || '')
     if (offset === 0) {
-      // 首页：替换全部数据
       images.value = data.images || []
+      if (data.folders) folders.value = data.folders
     } else {
-      // 增量追加
       images.value.push(...(data.images || []))
     }
     total.value = data.total || images.value.length
@@ -174,7 +205,6 @@ async function loadMore() {
 function onScroll() {
   const el = scrollContainer.value
   if (!el || loadingMore.value || !hasMore.value) return
-  // 距底部 300px 时触发加载
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
     loadMore()
   }
@@ -185,16 +215,11 @@ onMounted(async () => {
   loading.value = false
 })
 
-// 供父组件调用刷新
 async function refresh() {
-  invalidateCache()
-  await loadPage(0)
-}
-
-function invalidateCache() {
   images.value = []
   total.value = 0
   hasMore.value = false
+  await loadPage(0)
 }
 
 defineExpose({ refresh })
@@ -205,6 +230,51 @@ defineExpose({ refresh })
   height: 100%;
   overflow-y: auto;
   padding: 16px;
+}
+
+/* ── 文件夹筛选栏 ── */
+.folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  margin-bottom: 16px;
+}
+
+.folder-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.folder-btn:hover {
+  background: rgba(224, 123, 108, 0.08);
+  border-color: rgba(224, 123, 108, 0.2);
+}
+
+.folder-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.folder-label {
+  font-weight: 500;
+}
+
+.folder-count {
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 /* ── 空状态 ── */
@@ -297,6 +367,15 @@ defineExpose({ refresh })
   }
   .group-label {
     font-size: 14px;
+  }
+  .folder-bar {
+    gap: 6px;
+    padding: 2px 0 12px;
+    margin-bottom: 12px;
+  }
+  .folder-btn {
+    padding: 5px 10px;
+    font-size: 12px;
   }
 }
 </style>

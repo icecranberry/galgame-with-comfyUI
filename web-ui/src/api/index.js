@@ -626,8 +626,10 @@ export async function resetGiftCooldowns() {
 }
 
 // ── Gallery 相册 ──
-export async function listGalleryImages(limit = 100, offset = 0) {
-  const res = await fetch(`${BASE}/images/gallery?limit=${limit}&offset=${offset}`)
+export async function listGalleryImages(limit = 100, offset = 0, folder = '') {
+  let url = `${BASE}/images/gallery?limit=${limit}&offset=${offset}`
+  if (folder) url += `&folder=${encodeURIComponent(folder)}`
+  const res = await fetch(url)
   return res.json()
 }
 

@@ -198,13 +198,17 @@ function entitySearch(query, conversationId, limit, excludeEntities = []) {
       // 用这些实体再做一次扩展搜索
       if (uniqueEntities.length > 0) {
         const entityResults = expandByEntities(uniqueEntities, conversationId, limit);
-        const merged = [...rows.map(r => formatFragmentRow(r, 'entity')), ...entityResults].slice(0, limit);
+        const merged = dedupAndRank(
+          [...rows.map(r => formatFragmentRow(r, 'entity')), ...entityResults],
+          keywords,
+          limit
+        );
         if (merged.length > 0) console.log(`[hybridSearch:ent] got ${merged.length} results:`, merged.map(r => `${r.fragment_type}:${r.content?.slice(0, 50)}`));
         return merged;
       }
     }
 
-    const final = rows.map(r => formatFragmentRow(r, 'entity'));
+    const final = dedupAndRank(rows.map(r => formatFragmentRow(r, 'entity')), keywords, limit);
     if (final.length > 0) console.log(`[hybridSearch:ent] got ${final.length} results:`, final.map(r => `${r.fragment_type}:${r.content?.slice(0, 50)}`));
     return final;
   } catch (err) {
@@ -227,6 +231,34 @@ function expandByEntities(entities, conversationId, limit) {
   params.push(limit);
 
   return db.prepare(sql).all(...params).map(r => formatFragmentRow(r, 'entity'));
+}
+
+function dedupAndRank(results, queryKeywords, limit) {
+  // 按 frag_id 去重
+  const seen = new Set();
+  const deduped = [];
+  for (const item of results) {
+    const key = item.frag_id || item.id;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(item);
+    }
+  }
+
+  // 按 query 关键词在 content 中的命中数 × 类型权重排序
+  for (const item of deduped) {
+    let kwHits = 0;
+    for (const kw of queryKeywords) {
+      if (kw.length >= 2 && item.content && item.content.includes(kw)) {
+        kwHits++;
+      }
+    }
+    const typeW = TYPE_WEIGHT[item.fragment_type] || 1.0;
+    item._rankScore = kwHits * typeW;
+  }
+
+  deduped.sort((a, b) => b._rankScore - a._rankScore);
+  return deduped.slice(0, limit);
 }
 
 /**
