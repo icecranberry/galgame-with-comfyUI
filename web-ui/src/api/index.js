@@ -667,6 +667,20 @@ export async function listGalleryImages(limit = 100, offset = 0, folder = '') {
   return res.json()
 }
 
+/** 重新生成指定图片（用原 prompt 覆盖原文件） */
+export async function regenerateImage(imageUrl) {
+  const res = await fetch(`${BASE}/images/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: imageUrl }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Regenerate failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ── 图片压缩 ──
 export async function getCompressStatus() {
   const res = await fetch(`${BASE}/images/compress/status`)
@@ -995,6 +1009,13 @@ export async function cancelRegenerateAll() {
 export async function getResetStatus() {
   const res = await fetch(`${BASE}/schedule/reset-status`)
   if (!res.ok) throw new Error(`reset status: ${res.status}`)
+  return res.json()
+}
+
+/** 清空指定角色的所有日程（模板、快照、禁用自动生成） */
+export async function clearSchedule(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/clear`, { method: 'POST' })
+  if (!res.ok) throw new Error(`clear schedule: ${res.status}`)
   return res.json()
 }
 

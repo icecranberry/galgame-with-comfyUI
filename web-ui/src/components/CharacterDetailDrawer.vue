@@ -43,7 +43,7 @@
                 <span>{{ scheduleBtnText }}</span>
               </button>
               <button class="dr-btn" @click="$emit('chat')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 1 1 2 2z"/></svg>
                 <span>聊天</span>
               </button>
             </div>
@@ -329,6 +329,7 @@ onUnmounted(() => {
 .dr-btn svg { flex-shrink: 0; }
 .dr-btn:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
 .dr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
 
 /* ── Body ── */
 .dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default; position: relative; scrollbar-width: none; }

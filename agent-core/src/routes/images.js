@@ -3,10 +3,12 @@ import { readdir, stat } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
-import { generateImage, generateImageRaw } from '../services/imageSkill.js';
+import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
-import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY } from '../services/imagePaths.js';
+import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
+import fs from 'fs';
+import path from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = resolve(__dirname, '../../data/images');
@@ -165,21 +167,21 @@ router.post('/generate', async (req, res) => {
     .then(result => {
       if (result.success) {
         db.prepare(`
-          UPDATE image_tasks SET status = 'done', output_paths = ?, finished_at = datetime('now')
+          UPDATE image_tasks SET status = 'done', output_paths = ?, workflow_template = ?, finished_at = datetime('now')
           WHERE id = ?
-        `).run(JSON.stringify(result.images.map(i => i.filename)), taskId);
+        `).run(JSON.stringify(result.images.map(i => i.filename)), result.wfMode, taskId);
       } else {
         db.prepare(`
-          UPDATE image_tasks SET status = 'failed', error_message = ?, finished_at = datetime('now')
+          UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now')
           WHERE id = ?
-        `).run(result.error || 'No images', taskId);
+        `).run(result.error || 'No images', result.wfMode, taskId);
       }
     })
     .catch(err => {
       db.prepare(`
-        UPDATE image_tasks SET status = 'failed', error_message = ?, finished_at = datetime('now')
+        UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now')
         WHERE id = ?
-      `).run(err.message, taskId);
+      `).run(err.message, getLastWorkflowMode(), taskId);
     });
 
   res.status(202).json({ task_id: taskId, status: 'running' });
@@ -280,6 +282,110 @@ router.post('/test-style', async (req, res) => {
     const elapsed = Math.round(performance.now() - t0);
     console.error('[test-style] error:', err.message);
     res.status(500).json({ success: false, error: err.message, elapsed });
+  }
+});
+
+// POST /api/images/regenerate — 用原 prompt 重新生图，覆盖原文件
+router.post('/regenerate', async (req, res) => {
+  const { url: imageUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+
+  // 解析 URL 提取 category 和 filename（忽略查询参数）
+  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+  const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
+  if (!match) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+
+  const folder = match[1];
+  const filename = match[2];
+
+  // 映射 folder → category
+  let category = null;
+  for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {
+    if (info.dir === folder) { category = cat; break; }
+  }
+  if (!category && folder === '') category = LEGACY_CATEGORY;
+  if (!category) return res.status(400).json({ error: `unknown folder: ${folder}` });
+
+  // 查找 prompt：优先 image_tasks.output_paths，其次 moment_posts.images，最后 raw_messages
+  const db = getDb();
+  let promptText = null;
+
+  // 1. image_tasks
+  const task = db.prepare(
+    `SELECT prompt_original FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
+  ).get(`%${filename}%`);
+  if (task?.prompt_original) promptText = task.prompt_original;
+
+  // 2. moment_posts
+  if (!promptText) {
+    const mp = db.prepare(
+      `SELECT prompt FROM moment_posts WHERE images LIKE ? ORDER BY created_at DESC LIMIT 1`
+    ).get(`%${filename}%`);
+    if (mp?.prompt) promptText = mp.prompt;
+  }
+
+  // 3. raw_messages (主动聊天配图)
+  if (!promptText) {
+    const rm = db.prepare(
+      `SELECT raw.prompt FROM raw_messages raw
+       JOIN messages msg ON msg.raw_id = raw.id
+       WHERE msg.images LIKE ? ORDER BY raw.created_at DESC LIMIT 1`
+    ).get(`%${filename}%`);
+    if (rm?.prompt) promptText = rm.prompt;
+  }
+
+  if (!promptText || promptText.trim().length === 0) {
+    return res.status(404).json({ error: 'prompt not found for this image' });
+  }
+
+  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."`);
+
+  // 根据 category 选择生图参数
+  const categoryConfig = {
+    chat:      { artist: config.comfyui.artist,        width: config.comfyui.width,        height: config.comfyui.height },
+    moments:   { artist: config.comfyui.momentsArtist,  width: config.comfyui.momentsWidth,  height: config.comfyui.momentsHeight },
+    events:    { artist: config.comfyui.eventArtist,    width: config.comfyui.eventWidth,    height: config.comfyui.eventHeight },
+    peek:      { artist: config.comfyui.eventArtist,    width: config.comfyui.eventWidth,    height: config.comfyui.eventHeight },
+    gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
+    avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
+  };
+
+  const opts = categoryConfig[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
+
+  try {
+    const result = await generateImageRaw(promptText, {
+      artist: opts.artist,
+      width: opts.width,
+      height: opts.height,
+      scene: category === 'moments' ? 'moments' : (category === 'events' || category === 'peek' ? 'schedule' : 'chat'),
+    });
+
+    if (!result.success || !result.images?.length) {
+      return res.status(500).json({ error: result.error || 'Image generation failed' });
+    }
+
+    const img = result.images[0];
+    const dir = getImageDir(category);
+    const filePath = path.join(dir, filename);
+
+    // 原子写入：先写临时文件，再 rename
+    const tmpPath = filePath + '.regenerating';
+    const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+    fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+    fs.renameSync(tmpPath, filePath);
+
+    console.log(`[regenerate] overwrote ${filePath}`);
+
+    // 失效相册缓存
+    invalidateGalleryCache();
+
+    res.json({
+      success: true,
+      url: `${cleanUrl}?t=${Date.now()}`,
+    });
+  } catch (err) {
+    console.error('[regenerate] error:', err.message);
+    res.status(500).json({ error: 'Regenerate failed: ' + err.message });
   }
 });
 

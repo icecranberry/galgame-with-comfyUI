@@ -20,7 +20,7 @@ import {
   syncSleepingState,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
-import { generateImage } from '../services/imageSkill.js';
+import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
 import { getTimeLight } from '../services/timeLight.js';
@@ -292,6 +292,11 @@ router.post('/:characterId/peek/retake', async (req, res) => {
       if (result.success && result.images?.length > 0) {
         const img = result.images[0];
         const imageUrl = savePeekImage(img.base64, img.filename || 'comfy');
+        if (imageUrl) {
+          db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+            VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+            .run('schedule_peek_retake', prompt, prompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+        }
         broadcast('schedule_peek_ready', {
           character_id: character.id,
           display_name: character.display_name,
@@ -496,6 +501,11 @@ router.post('/:characterId/peek', async (req, res) => {
         // 图片落盘，通过 URL 发送（base64 过大可能导致 SSE 写失败）
         const img = result.images[0];
         const imageUrl = savePeekImage(img.base64, img.filename || 'comfy');
+        if (imageUrl) {
+          db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+            VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+            .run('schedule_peek', generatedPrompt, generatedPrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+        }
         broadcast('schedule_peek_ready', {
           character_id: character.id,
           display_name: character.display_name,
@@ -570,6 +580,46 @@ router.post('/:characterId/regenerate', async (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] POST /:id/regenerate error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/schedule/:characterId/clear — 清空角色所有日程 ──
+
+router.post('/:characterId/clear', (req, res) => {
+  try {
+    const characterId = parseInt(req.params.characterId, 10);
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'invalid characterId' });
+    }
+
+    const db = getDb();
+    const character = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+    if (!character) {
+      return res.status(404).json({ error: 'character not found' });
+    }
+
+    // 清空日程数据
+    db.prepare('DELETE FROM daily_schedules WHERE character_id = ?').run(characterId);
+    db.prepare('DELETE FROM schedule_templates WHERE character_id = ?').run(characterId);
+
+    // 标记角色不再自动生成日程
+    db.prepare(`
+      UPDATE characters SET
+        schedule_enabled = 0,
+        next_schedule_refresh_at = NULL,
+        is_sleeping = 0,
+        sleep_until = NULL
+      WHERE id = ?
+    `).run(characterId);
+
+    // 清除内存缓存
+    invalidateCache(characterId);
+
+    console.log(`[schedule] Cleared all schedule data for ${character.display_name}`);
+    res.json({ success: true, character_id: character.id, display_name: character.display_name });
+  } catch (err) {
+    console.error('[schedule] POST /:id/clear error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

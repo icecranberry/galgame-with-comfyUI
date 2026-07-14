@@ -10,7 +10,7 @@ import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
-import { generateImage, generateImageRaw } from '../services/imageSkill.js';
+import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
@@ -551,6 +551,9 @@ router.post('/:id/gift', async (req, res) => {
           const img = imgResult.images[0];
           const filename = `gift_${Date.now()}_${img.filename || 'comfy.png'}`;
           const imageUrl = saveBase64Image('gifts', filename, img.base64);
+          db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+            VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+            .run(conversationId, result.imagePrompt, result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
             .run(JSON.stringify([imageUrl]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
@@ -690,6 +693,10 @@ ${char.base_prompt}
       }
 
       console.log(`[generate-avatar] Image saved to ${savedPaths.length} file(s): ${savedPaths.join(', ')}`);
+
+      db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+        VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+        .run(`char_${char.id}_avatar`, promptText, promptText, JSON.stringify(savedPaths), getLastWorkflowMode());
 
       // 使相册缓存失效
       invalidateGalleryCache();

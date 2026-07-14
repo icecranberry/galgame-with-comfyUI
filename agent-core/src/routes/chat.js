@@ -12,7 +12,7 @@ import {
   stateToPrompt, affinityToPrompt, saveEmotionSnapshot, emotionDashboard,
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
-import { generateImage } from '../services/imageSkill.js';
+import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
@@ -1301,8 +1301,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         .run(JSON.stringify(urls), assistantMsgId);
       console.log(`[chat] images saved to message id=${assistantMsgId}, rows updated=${updateResult.changes}`);
 
-      db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, finished_at=datetime('now') WHERE id=?`)
-        .run(JSON.stringify(urls), taskId);
+      db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
+        .run(JSON.stringify(urls), result.wfMode, taskId);
 
       send('generate_done', { taskId, images: result.images, source: result.source });
 
@@ -1314,8 +1314,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
     }
   } catch (err) {
     console.error('[chat] generate failed:', err.message);
-    db.prepare(`UPDATE image_tasks SET status='failed', error_message=?, finished_at=datetime('now') WHERE id=?`)
-      .run(err.message, taskId);
+    db.prepare(`UPDATE image_tasks SET status='failed', error_message=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
+      .run(err.message, getLastWorkflowMode(), taskId);
     send('generate_error', { taskId, error: err.message });
   }
 }

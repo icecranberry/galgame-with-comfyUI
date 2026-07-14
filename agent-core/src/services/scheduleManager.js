@@ -55,6 +55,9 @@ export function initialize() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
+  // 全量清理超过 2 天的旧日程快照
+  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', '-2 days')`).run();
+
   // 检查所有启用日程的角色
   const chars = db.prepare(`
     SELECT id, display_name FROM characters
@@ -183,6 +186,10 @@ function getTodayScheduleRaw(characterId) {
         INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
         VALUES (?, ?, ?)
       `).run(characterId, today, template.schedule_json);
+      // 清理超过 2 天的旧快照
+      db.prepare(
+        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', '-2 days')`
+      ).run(characterId);
       row = { schedule_json: template.schedule_json };
     }
   }
@@ -363,7 +370,6 @@ export function getAllOverview() {
   const chars = db.prepare(`
     SELECT id, display_name, avatar_path, is_sleeping, sleep_until
     FROM characters
-    WHERE schedule_enabled = 1 OR schedule_enabled IS NULL
     ORDER BY display_name ASC
   `).all();
 

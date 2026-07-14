@@ -449,5 +449,10 @@ export function snapshotTodaySchedule(characterId) {
     VALUES (?, ?, ?)
   `).run(characterId, today, template.schedule_json);
 
+  // 清理超过 2 天的旧快照
+  db.prepare(
+    `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', '-2 days')`
+  ).run(characterId);
+
   return template.schedule_json;
 }

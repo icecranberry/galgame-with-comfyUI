@@ -10,7 +10,7 @@ export const IMAGE_CATEGORIES = {
   moments:   { dir: 'moments',   label: '朋友圈' },
   events:    { dir: 'events',    label: '奇遇' },
   gifts:     { dir: 'gifts',     label: '送礼' },
-  avatargen: { dir: 'avatargen', label: 'AI头像' },
+  avatargen: { dir: 'avatargen', label: '头像' },
   peek:      { dir: 'peek',      label: '日程' },
 };
 

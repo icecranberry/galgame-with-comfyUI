@@ -489,6 +489,20 @@ async function main() {
 
   const launcherDir = resolve(ROOT, "launcher");
 
+  // 烘焙版本号到 __init__.py（打包进 exe，运行后恢复）
+  let _initPyOrig = null;
+  if (VERSION !== "dev") {
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const initPy = resolve(launcherDir, "launcher", "__init__.py");
+    _initPyOrig = readFileSync(initPy, "utf-8");
+    let modified = _initPyOrig.replace(
+      /__version__\s*=\s*"[^"]*"/,
+      `__version__ = "${VERSION}"`
+    );
+    writeFileSync(initPy, modified, "utf-8");
+    log(`版本已写入 __init__.py: ${VERSION}`);
+  }
+
   {
     // 优先使用捆绑 Python 安装 PyInstaller 依赖（与脚本其他步骤保持一致）
     const check = await exec(pyExe, ["-m", "pip", "show", "PySide6"]);
@@ -551,6 +565,14 @@ async function main() {
     }
     if (!r.ok) { fail("PyInstaller 打包失败!"); process.exit(1); }
     ok("PyInstaller 打包完成");
+  }
+
+  // 恢复 __init__.py（避免本地工作区被污染）
+  if (_initPyOrig !== null) {
+    const { writeFileSync } = await import("node:fs");
+    const initPy = resolve(launcherDir, "launcher", "__init__.py");
+    writeFileSync(initPy, _initPyOrig, "utf-8");
+    log("__init__.py 已恢复");
   }
 
   // ═══════════════════════════════════════════

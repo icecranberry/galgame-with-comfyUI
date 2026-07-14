@@ -14,6 +14,7 @@ from PySide6.QtGui import QPixmap, QColor, QPainter, QPen, QBrush, QPainterPath
 from PySide6.QtCore import Qt, Signal, QRectF
 
 from .network import get_local_ip
+from . import __version__
 
 
 class ShortcutCard(QWidget):
@@ -182,9 +183,9 @@ class HomePage(QWidget):
         self._card_workflow.clicked.connect(lambda: self.open_directory.emit(workflow_path))
 
         # --- 版本号 (左下) ---
-        self.version_label = QLabel("邻舍.EXE v1.0.0", self)
+        self.version_label = QLabel(f"邻舍.EXE v{__version__}", self)
         self.version_label.setStyleSheet(
-            "color: #B09890; font-size: 12px; background: transparent;"
+            "color: #FFFFFF; font-size: 16px; font-weight: bold; font-style: italic; background: transparent;"
         )
 
         # --- 按钮容器 (右下，并排) ---
@@ -336,11 +337,11 @@ class HomePage(QWidget):
     def update_version_info(self, tag: str | None, branch: str, has_updates: bool | None):
         if tag:
             project_ver = f"v{tag}" if not tag.startswith("v") else tag
-            text = f"邻舍.EXE v1.0.0  ·  内核 {project_ver}"
+            text = f"邻舍.EXE v{__version__}  ·  内核 {project_ver}"
         elif branch and branch != "main":
-            text = f"邻舍.EXE v1.0.0  ·  内核 {branch}"
+            text = f"邻舍.EXE v{__version__}  ·  内核 {branch}"
         else:
-            text = "邻舍.EXE v1.0.0"
+            text = f"邻舍.EXE v{__version__}"
         self.version_label.setText(text)
 
     # ------------------------------------------------------------------

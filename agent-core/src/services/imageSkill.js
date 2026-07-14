@@ -29,6 +29,16 @@ const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
 const BASE_WORKFLOW_PATH = path.join(WORKFLOW_DIR, ACTIVE_WORKFLOW);
 const PRO_WORKFLOW_PATH = path.join(WORKFLOW_DIR, PRO_WORKFLOW);
 
+let lastUsedWorkflowMode = (config.workflow?.mode === 'base') ? 'base' : 'turbo';
+
+function pathToMode(wfPath) {
+  return path.basename(wfPath) === PRO_WORKFLOW ? 'base' : 'turbo';
+}
+
+export function getLastWorkflowMode() {
+  return lastUsedWorkflowMode;
+}
+
 export { checkWorkflowHealth };
 
 /**
@@ -46,7 +56,8 @@ function resolveWorkflowPath(scene) {
     const scenePref = config.workflow.scene?.[scene] || 'turbo';
     return scenePref === 'base' ? PRO_WORKFLOW_PATH : BASE_WORKFLOW_PATH;
   }
-  return BASE_WORKFLOW_PATH;
+  // hybrid + 无 scene: 沿用上一次实际使用的模式
+  return lastUsedWorkflowMode === 'base' ? PRO_WORKFLOW_PATH : BASE_WORKFLOW_PATH;
 }
 
 const PROMPT_PLACEHOLDER = '请输入画面描述';
@@ -153,8 +164,9 @@ function buildWorkflow(promptText, overrides = {}) {
     injectLoraNodes(wf, loras);
   }
 
-  console.log(`[imageSkill] Workflow built: ${path.basename(wfPath)}${hasLoras ? ` (${loras.length} lora(s))` : ''}`);
-  return wf;
+  console.log(`[imageSkill] Workflow built: ${path.basename(wfPath)} (${pathToMode(wfPath)})${hasLoras ? ` (${loras.length} lora(s))` : ''}`);
+  lastUsedWorkflowMode = pathToMode(wfPath);
+  return { wf, wfPath, wfMode: lastUsedWorkflowMode };
 }
 
 /**
@@ -319,7 +331,7 @@ async function submitWithRetry(rawPrompt, {
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 2. 构建 workflow
-  const wf = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow, scene });
+  const { wf, wfMode } = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow, scene });
   if (onProgress) onProgress({ stage: 'submitting' });
 
   // 3. 提交 ComfyUI，带重试循环
@@ -341,7 +353,7 @@ async function submitWithRetry(rawPrompt, {
         if (onProgress) onProgress({ stage: 'generating', ...p });
       });
       if (result.images.length > 0) {
-        return { success: true, images: result.images, source: 'api', promptId: result.promptId };
+        return { success: true, images: result.images, source: 'api', promptId: result.promptId, wfMode };
       }
       lastResult = result;
     } catch (err) {
@@ -357,7 +369,7 @@ async function submitWithRetry(rawPrompt, {
   }
 
   console.log('[imageSkill] All ComfyUI submit attempts exhausted, generation failed');
-  return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted' };
+  return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted', wfMode };
 }
 
 // ── 优先级队列 ──

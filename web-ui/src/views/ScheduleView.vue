@@ -227,6 +227,9 @@
                 <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
               </svg>
               <span>为 {{ detailChar?.display_name || '...' }} 编排日程</span>
+              <button class="reset-header-clear" title="清空日程" @click="onClearFromModal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
             </div>
             <div class="reset-dialog-desc">
               <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则则正常随机规划。</p>
@@ -355,6 +358,7 @@ const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
+const confirm = inject('confirm')
 
 // ── 时钟 ──
 // ── 筛选 ──
@@ -776,6 +780,32 @@ function onChat() {
   if (!detailChar.value) return
   drawerOpen.value = false
   router.push(`/chat/${detailChar.value.id}`)
+}
+
+async function onClearFromModal() {
+  if (!detailChar.value) return
+  const name = detailChar.value.display_name || '该角色'
+  const ok = await confirm({
+    title: '清空日程',
+    message: `确定清空${name}的所有日程数据？\n清空后将不再自动生成日程，此操作不可撤销。`,
+    danger: true,
+    okText: '清空',
+  })
+  if (!ok) return
+  showRegenerateModal.value = false
+  try {
+    await api.clearSchedule(detailChar.value.id)
+    detailActs.value = []
+    await store.fetchOverview(true)
+    const idx = store.characters.findIndex(c => c.id === detailChar.value.id)
+    if (idx > -1) {
+      store.characters[idx].current_activity = '未设置日程'
+      store.characters[idx].is_sleeping = false
+    }
+    toastFn?.('已清空日程')
+  } catch (err: any) {
+    toastFn?.('清空失败: ' + (err.message || '未知错误'))
+  }
 }
 
 function retryPeek() {
@@ -1392,6 +1422,11 @@ function finishReset() {
   font-size: 0.85rem; cursor: pointer; transition: 0.15s;
 }
 .reset-btn-bg:hover { border-color: var(--accent); color: var(--accent); }
+.reset-header-clear {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: #e8453c; opacity: 0.5; transition: 0.15s; padding: 4px; border-radius: 4px; line-height: 0;
+}
+.reset-header-clear:hover { opacity: 1; background: rgba(232,69,60,0.08); }
 
 /* 进度条 */
 .reset-progress-bar-wrap {
