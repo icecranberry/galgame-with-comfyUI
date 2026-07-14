@@ -104,6 +104,14 @@ router.put('/llm', (req, res) => {
     return res.status(400).json(result);
   }
   resetClient();
+
+  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1'];
+  const effectiveUrl = baseURL || config.llm.baseURL;
+  if (effectiveUrl && presets.includes(effectiveUrl) && config.features.serializeBackgroundLLM) {
+    updateFeatureFlag('serializeBackgroundLLM', false);
+    console.log('[config] serializeBackgroundLLM auto-disabled (preset LLM selected)');
+  }
+
   res.json({ ok: true, ...getLlmConfig() });
 });
 

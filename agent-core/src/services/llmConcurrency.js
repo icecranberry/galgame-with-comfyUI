@@ -28,7 +28,7 @@ function processQueue() {
   }
 }
 
-async function acquireSlot() {
+export async function acquireSlot() {
   if (maxConcurrency === null) return;
   if (activeCount < maxConcurrency) {
     activeCount++;
@@ -42,7 +42,7 @@ async function acquireSlot() {
   });
 }
 
-function releaseSlot() {
+export function releaseSlot() {
   if (maxConcurrency === null) return;
   activeCount--;
   processQueue();

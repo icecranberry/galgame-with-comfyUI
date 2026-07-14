@@ -22,7 +22,6 @@ import {
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
-import { runWithLimit } from './llmConcurrency.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getTimeLight } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -581,7 +580,7 @@ ${motiveName}
 
 ${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}直接输出英文画面描述，不要任何格式包装或额外文字` },
       ],
-      { temperature: 0.3, max_tokens: 1024, label: '主动聊天配图prompt' }
+      { temperature: 0.7, max_tokens: 1024, label: '主动聊天配图prompt' }
     );
 
     let prompt;
@@ -780,7 +779,7 @@ async function tick() {
     const userProfile = loadUserProfile();
 
     // 6. 生成开场白
-    const greeting = await runWithLimit(() => generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak));
+    const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
@@ -789,7 +788,7 @@ async function tick() {
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     let imageUrls = null;
     if (motive.imageGen) {
-      imageUrls = await runWithLimit(() => generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId));
+      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
     }
 
     broadcastProactiveMessage({
@@ -1044,7 +1043,7 @@ export async function forceProactiveNow(targetCharacterId) {
   const motive = pickMotive(affinity, streak);
   const relationshipContext = loadRelationshipContext(candidate.id);
   const userProfile = loadUserProfile();
-  const greeting = await runWithLimit(() => generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak));
+  const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
   const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
 
@@ -1054,7 +1053,7 @@ export async function forceProactiveNow(targetCharacterId) {
   // 如果需要配图，先生成图片再一起推送；否则直接推送
   let imageUrls = null;
   if (motive.imageGen) {
-    imageUrls = await runWithLimit(() => generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId));
+    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
   }
 
   broadcastProactiveMessage({

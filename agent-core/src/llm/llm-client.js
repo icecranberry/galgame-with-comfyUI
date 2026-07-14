@@ -1,5 +1,8 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
+import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
+
+const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
 function isDeepseek() {
   return (config.llm.baseURL || '').includes('deepseek.com');
@@ -62,6 +65,8 @@ function sleep(ms) {
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
 export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+  if (_limitEnabled()) await acquireSlot();
+  try {
   const params = {
     model,
     messages,
@@ -138,6 +143,9 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
     }
   }
   throw lastError;
+  } finally {
+    if (_limitEnabled()) releaseSlot();
+  }
 }
 
 /**
@@ -145,6 +153,8 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" }, label = 'stream' } = {}) {
+  if (_limitEnabled()) await acquireSlot();
+  try {
   console.log(`\n══════════ [${providerLabel()} → ${label}] ══════════`);
   console.log(JSON.stringify(messages, null, 2));
   console.log('────────────────────────────────────────────────');
@@ -183,6 +193,9 @@ export async function* chatStream(messages, { model = config.llm.model || 'deeps
   console.log((total || '(empty)').slice(0, 2000));
   if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
   console.log('═══════════════════════════════════════════════\n');
+  } finally {
+    if (_limitEnabled()) releaseSlot();
+  }
 }
 
 /**

@@ -19,6 +19,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui } from './comfyClient.js';
 import { config } from '../config.js';
+import { acquireSlot, releaseSlot } from './llmConcurrency.js';
+
+const _limitEnabled = () => config.features.serializeBackgroundLLM;
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth } from './workflowTemplates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -365,12 +368,14 @@ let lastHighTime = 0;
 const QUIET = 180_000;        // 高优任务后 180s 内不派发低优
 
 async function _execute(rawPrompt, opts) {
+  if (_limitEnabled()) await acquireSlot();
   activeTaskCount++;
   try {
     return await submitWithRetry(rawPrompt, opts);
   } finally {
     activeTaskCount--;
     if (activeTaskCount === 0) processLowQueue();
+    if (_limitEnabled()) releaseSlot();
   }
 }
 

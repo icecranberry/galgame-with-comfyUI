@@ -13,7 +13,6 @@
 
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
-import { runWithLimit } from './llmConcurrency.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
@@ -72,7 +71,7 @@ async function tick() {
       console.log(`[eventScheduler] Event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
       try {
         const character = { id: event.character_id, display_name: event.display_name, base_prompt: event.base_prompt };
-        await runWithLimit(() => concludeEvent(character, event, event.engaged ? 'completed' : 'expired'));
+        await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
       } catch (err) {
         console.error(`[eventScheduler] Conclude error for ${event.display_name}:`, err.message);
       }
@@ -137,7 +136,7 @@ async function tick() {
     console.log(`[eventScheduler] Generating event for ${candidate.display_name}...`);
 
     try {
-      await runWithLimit(() => generateEvent(candidate));
+      await generateEvent(candidate);
       console.log(`[eventScheduler] Done: ${candidate.display_name}`);
     } catch (err) {
       console.error(`[eventScheduler] Failed for ${candidate.display_name}:`, err.message);
@@ -219,12 +218,12 @@ ${eventRules}`;
         // 生成主动消息内容
         const { chatSync } = await import('../llm/llm-client.js');
         const jailbreak = getSystemRulesWithWorld({ roleplay: true });
-        const greeting = await runWithLimit(() => chatSync([
+        const greeting = await chatSync([
           { role: 'system', content: jailbreak },
           { role: 'system', content: event.base_prompt },
           { role: 'system', content: userInfoMsg },
           { role: 'user', content: greetingPrompt },
-        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' }));
+        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
 
         // 写入消息（分句）
         const conversationId = `char_${event.character_id}`;

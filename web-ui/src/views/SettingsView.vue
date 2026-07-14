@@ -208,7 +208,7 @@
           <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
 
           <!-- 自定义请求体参数（仅自定义API时显示，用于注入 body 级参数如 thinking / agent 等） -->
-          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，可选，如 {"thinking":{"type":"enabled"},"agent":"Nova"}，直接合并到 API body)</span></label>
+          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，可选，如 {"thinking":{"type":"disabled"}}，直接合并到 API body)</span></label>
           <textarea
             v-model="llmExtraBodyText"
             class="fi"
