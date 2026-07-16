@@ -112,6 +112,7 @@
       :regenerating="detailRegenerating"
       @close="drawerOpen = false"
       @peek="onPeek"
+      @peek-at="onPeekAt"
       @regenerate="onRegenerate"
       @chat="onChat"
       @wakePhone="onWakePhone"
@@ -725,6 +726,25 @@ function onPeek() {
   peekOpen.value = true; peekBusy.value = true; peekLoading.value = true
   startFakeProgress()
   store.peekSnapshot(detailChar.value.id)
+}
+
+function onPeekAt(act: any) {
+  if (!detailChar.value || !act) return
+  peekChar.value = detailChar.value
+  peekAct.value = act
+  peekImage.value = null; peekError.value = null; peekPrompt.value = null
+  peekOpen.value = true; peekBusy.value = true; peekLoading.value = true
+  startFakeProgress()
+  store.peekSnapshot(detailChar.value.id, {
+    activity: act.activity,
+    location: act.location,
+    replyDelay: act.replyDelay,
+    snapshotPrompt: act.snapshotPrompt,
+    description: act.description,
+    startTime: act.startTime,
+    endTime: act.endTime,
+    tags: act.tags,
+  })
 }
 
 async function onRegenerate() {

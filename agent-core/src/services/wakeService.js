@@ -217,8 +217,11 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     contextBefore.reverse();
 
     if (contextBefore.length > 0) {
-      msgs.push({ role: 'system', content: '以下是你们睡着前的最后一段对话，可作为此刻回应的上下文参考：' });
-      msgs.push(...contextBefore);
+      const contextText = contextBefore.map(m => {
+        const label = m.role === 'assistant' ? char.display_name : userName;
+        return `[${label}]: ${m.content}`;
+      }).join('\n');
+      msgs.push({ role: 'system', content: `以下是你们睡着前的最后一段对话，可作为此刻回应的上下文参考：\n\n${contextText}` });
       hasHistory = true;
     }
 
@@ -230,8 +233,11 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     `).all(conversationId, lastAssistant.id);
 
     if (unreadMessages.length > 0) {
-      msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：` });
-      msgs.push(...unreadMessages);
+      const unreadText = unreadMessages.map(m => {
+        const label = m.role === 'assistant' ? char.display_name : userName;
+        return `[${label}]: ${m.content}`;
+      }).join('\n');
+      msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：\n\n${unreadText}` });
       hasHistory = true;
     }
   }
@@ -243,8 +249,11 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     `).all(conversationId);
 
     if (history.length > 0) {
-      msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：` });
-      msgs.push(...history);
+      const historyText = history.map(m => {
+        const label = m.role === 'assistant' ? char.display_name : userName;
+        return `[${label}]: ${m.content}`;
+      }).join('\n');
+      msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：\n\n${historyText}` });
     }
   }
 

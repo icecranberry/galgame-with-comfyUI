@@ -1,6 +1,6 @@
 <template>
-  <Teleport to="body">
-    <div class="toast-container" aria-live="polite">
+  <Teleport v-if="ready" to="body">
+    <div class="toast-container __toast__root" aria-live="polite" style="z-index: 99999; isolation: isolate;">
       <TransitionGroup name="toast-item">
         <div
           v-for="item in toasts"
@@ -42,10 +42,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 let _id = 0
 const toasts = ref([])
+const ready = ref(false)
 
 function show(message, type = 'info', duration) {
   if (duration === undefined) {
@@ -61,8 +62,19 @@ function dismiss(id) {
   if (idx !== -1) toasts.value.splice(idx, 1)
 }
 
+onMounted(() => {
+  setTimeout(() => { ready.value = true })
+})
+
 defineExpose({ show })
 </script>
+
+<style>
+.__toast__root {
+  z-index: 99999 !important;
+  isolation: isolate;
+}
+</style>
 
 <style scoped>
 .toast-container {

@@ -30,6 +30,7 @@ function getCheckIntervalMs() {
   return intervalMin * 60 * 1000;
 }
 
+let startupTimer = null; // 启动延迟计时器（30s 后首次 tick），需追踪以便 stop 时清理
 let timer = null;
 let halfTimeTimer = null; // 半程通知独立定时器（高频，解耦于事件生成周期）
 let processing = false;
@@ -56,6 +57,7 @@ async function tick() {
     return;
   }
 
+  processing = true;
   const db = getDb();
   try {
     // ── 1. 到期检查 ──
@@ -132,7 +134,6 @@ async function tick() {
       return;
     }
 
-    processing = true;
     console.log(`[eventScheduler] Generating event for ${candidate.display_name}...`);
 
     try {
@@ -350,8 +351,9 @@ export function startEventScheduler() {
   // 启动时立即清理僵尸事件
   cleanupStuckEvents();
 
-  // 启动后先等 30 秒再首次检查
-  setTimeout(() => {
+  // 启动后先等 30 秒再首次检查（追踪 timeout ID 防止 restart 时泄漏旧回调）
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
     tick();
     timer = setInterval(tick, intervalMs);
   }, 30_000);
@@ -362,6 +364,11 @@ export function startEventScheduler() {
 }
 
 export function stopEventScheduler() {
+  if (startupTimer) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+    console.log('[eventScheduler] Stopped (startup timer)');
+  }
   if (timer) {
     clearInterval(timer);
     timer = null;

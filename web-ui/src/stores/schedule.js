@@ -119,14 +119,14 @@ export const useScheduleStore = defineStore('schedule', () => {
     return data
   }
 
-  async function peekSnapshot(characterId) {
+  async function peekSnapshot(characterId, activityContext = null) {
     peekGenerating.value = true
     peekImage.value = null
     peekError.value = null
 
     try {
       // 立即返回活动信息，图片异步通过 SSE 推送
-      await api.peekSnapshot(characterId, true)
+      await api.peekSnapshot(characterId, true, activityContext)
       // 图片结果将通过 unifiedStream 的 schedule_peek_ready 事件回调处理
     } catch (err) {
       peekError.value = err.message

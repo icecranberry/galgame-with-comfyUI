@@ -12,6 +12,7 @@
 import { getDb } from '../db/index.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { getTimeLight } from './timeLight.js';
 
 // ── 缓存 ──
 // key: characterId, value: { activity, expireAt }
@@ -293,14 +294,20 @@ export function formatScheduleContext(characterId, now = new Date()) {
 
   const timeStr = `${WEEKDAYS[now.getDay()]} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-  const lines = [`【当前状态】${timeStr}，你正在【${activity.location}】${activity.activity}。`];
+  const { timeDesc } = getTimeLight(now);
+
+  const lines = [`【当前状态】${timeStr}，${timeDesc}。你正在【${activity.location}】${activity.activity}。`];
+
+  if (activity.description && activity.description.trim()) {
+    lines.push(activity.description.trim());
+  }
 
   if (activity.replyDelay === -1) {
     lines.push('你正在睡觉。不要回复任何消息，直到自然醒来。');
   } else if (activity.replyDelay > 0) {
-    lines.push(`当前活动需要一定专注度，约 ${activity.replyDelay} 分钟后才能腾出手来回复消息。在回复 user 之前，应该自然地提一下刚才在做什么——例如"刚从${activity.location}出来就看到你的消息"。`);
+    lines.push(`当前活动需要一定专注度，约 ${activity.replyDelay} 分钟后才能腾出手来回复消息。回复时自然提及刚才在${activity.location}的处境。`);
   } else {
-    lines.push('你现在可以随时回复消息。');
+    lines.push('你现在可以随时回复消息，言行举止应与当前场景自然衔接。');
   }
 
   return lines.join(' ');

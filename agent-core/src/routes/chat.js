@@ -32,6 +32,9 @@ const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 // ── 智能配图计数器（per-conversation）：每轮用户发言 -1，生图成功后重置为 3，归零时跳过 LLM 判断直接生图 ──
 const imageJudgeCounters = new Map();  // conversationId -> count
 
+// ── 睡眠瞄一眼 prompt 缓存（per-character，内存级，服务重启后重置）──
+const sleepPromptCache = new Map();  // characterId -> prompt string
+
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
 
@@ -312,6 +315,15 @@ router.post('/characters/:id/chat', async (req, res) => {
       // 重置主动聊天未回复计数（同正常流程）
       resetUnansweredStreak(characterId);
 
+      // ── 睡眠模式：建立 SSE 流，推送 Zzz 消息 + 瞄一眼生图 ──
+      if (delayInfo.delay === -1) {
+        const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+        if (character) {
+          await handleSleepMode(res, characterId, conversationId, userMsgId, character, finalScheduledAt);
+          return;
+        }
+      }
+
       return res.json({
         queued: true,
         delay: delayInfo.delay,
@@ -373,6 +385,12 @@ router.post('/characters/:id/chat', async (req, res) => {
       );
 
       resetUnansweredStreak(characterId);
+
+      const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+      if (character) {
+        await handleSleepMode(res, characterId, conversationId, userMsgId, character, sleepUntil);
+        return;
+      }
 
       return res.json({
         queued: true,
@@ -1659,6 +1677,179 @@ async function generateReplyGuesses(conversationId, character) {
 // ── 供 characters.js 调用的清理函数 ──
 export function clearImageJudgeCounter(charId) {
   imageJudgeCounters.delete(`char_${charId}`);
+}
+
+/**
+ * 使用 LLM 生成睡眠场景的生图 prompt
+ * 复用日程瞄一眼的 prompt 工程模式：人格 + 时间光线 + 睡眠约束 + image_prompt 规则
+ */
+async function generateSleepPrompt(character) {
+  const charName = character.display_name;
+
+  // 命中缓存
+  const cached = sleepPromptCache.get(character.id);
+  if (cached) {
+    console.log(`[chat] sleep prompt cache hit for ${charName}`);
+    return cached;
+  }
+
+  const { timeDesc, lightNote } = getTimeLight();
+  const sleepNote = '【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。';
+
+  const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
+  const personaText = character.base_prompt
+    ? character.base_prompt.replace(/你/g, charName)
+    : `角色名：${charName}`;
+
+  const msgs = [
+    { role: 'system', content: `你是一个专业的人像摄影师，现在需要给「${charName}」拍一张睡颜照。照片里的角色正在睡觉。现在是${timeDesc}，光线参考：${lightNote}（室内以人造光源为主，不必严格遵守）。${sleepNote}` },
+    { role: 'system', content: personaText },
+    { role: 'system', content: `直接输出英文画面描述，不要任何格式包装或额外文字。${imageRulesText ? '\n\n输出要求：\n' + imageRulesText : ''}` },
+    { role: 'user', content: `请为「${charName}」拍一张正在睡觉的照片。` },
+  ];
+
+  let prompt = '';
+
+  try {
+    const rawResult = await chatSync(msgs, {
+      temperature: 0.7,
+      max_tokens: 512,
+      label: '睡眠瞄一眼prompt生成',
+    });
+
+    prompt = rawResult.trim()
+      .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    if (prompt.length < 5) {
+      const promptMatch = rawResult.match(/"prompt"\s*:\s*"([^"]+)"/);
+      prompt = promptMatch ? promptMatch[1] : '';
+    }
+
+    if (!prompt || prompt.length < 5) {
+      prompt = `${charName} sleeping peacefully in bed, eyes closed, covered with blanket, dark room, night time, soft moonlight through window, anime style`;
+    }
+  } catch (err) {
+    console.error(`[chat] generateSleepPrompt failed for ${charName}:`, err.message);
+    prompt = `${charName} sleeping peacefully in bed, eyes closed, covered with blanket, dark room, night time, anime style`;
+  }
+
+  // 写入缓存
+  if (prompt) {
+    sleepPromptCache.set(character.id, prompt);
+    console.log(`[chat] sleep prompt cached for ${charName}: "${prompt.slice(0, 80)}..."`);
+  }
+
+  return prompt;
+}
+
+/**
+ * 睡眠模式响应：建立 SSE 流，推送 Zzz 消息 + 瞄一眼睡眠图片
+ * 不写入 raw_messages（完整消息库），仅作用于 messages（分句展示库）
+ */
+async function handleSleepMode(res, characterId, conversationId, userMsgId, character, sleepUntil) {
+  const db = getDb();
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  if (res.socket) res.socket.setTimeout(0);
+  res.setTimeout(0);
+  const send = (event, data) => {
+    try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {}
+  };
+
+  let zzzMsgId = null;
+  let genTaskId = null;
+
+  try {
+    // 1. 发送用户消息保存确认（不发送 bubble_break，让 Zzz 直接填充 initAttemptState 占位泡，避免空行）
+    send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
+
+    // 2. 在 messages 表中写入 Zzz 消息（不写入 raw_messages，raw_id = NULL）
+    const zzzResult = db.prepare(
+      'INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, NULL, ?, ?, 0)'
+    ).run(conversationId, 'assistant', '(Zzz...)');
+    zzzMsgId = zzzResult.lastInsertRowid;
+
+    // 3. 通过 SSE 发送 Zzz 文字气泡
+    send('token', { content: '(Zzz...)' });
+    send('bubble_break', {});
+
+    // 4. 创建生图任务并发送 generate_start
+    const taskResult = db.prepare(
+      'INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, ?)'
+    ).run(conversationId, '', '', 'running');
+    genTaskId = taskResult.lastInsertRowid;
+
+    send('generate_start', { taskId: genTaskId });
+
+    // 5. LLM 生成睡眠画面 prompt
+    const generatedPrompt = await generateSleepPrompt(character);
+    db.prepare('UPDATE image_tasks SET prompt_original = ?, prompt_refined = ? WHERE id = ?')
+      .run(generatedPrompt, generatedPrompt, genTaskId);
+
+    // 6. 提交 ComfyUI 生图
+    const loras = _parseLoras(character);
+    const loraOpts = {};
+    if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
+    if (loras.length > 0) loraOpts.loras = loras;
+
+    const result = await generateImage(generatedPrompt, {
+      scene: 'chat',
+      onProgress: (p) => {
+        if (p.stage === 'retrying') {
+          send('generate_retrying', { taskId: genTaskId, attempt: p.attempt, maxRetries: p.maxRetries });
+        }
+        if (p.progress != null) {
+          send('generate_progress', { taskId: genTaskId, progress: p.progress, totalSteps: p.totalSteps });
+        }
+      },
+      ...loraOpts,
+    });
+
+    // 7. 保存图片并更新 messages 表
+    if (result.success && result.images?.length > 0) {
+      const urls = [];
+      for (const img of result.images) {
+        const ts = Date.now();
+        const filename = `${ts}_${img.filename || 'comfy.png'}`;
+        const url = saveBase64Image('chat', filename, img.base64);
+        if (url) {
+          urls.push(url);
+          img.url = url;
+        }
+      }
+
+      if (urls.length > 0) {
+        db.prepare('UPDATE messages SET images = ? WHERE id = ?')
+          .run(JSON.stringify(urls), zzzMsgId);
+      }
+
+      db.prepare(`UPDATE image_tasks SET status = 'done', output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?`)
+        .run(JSON.stringify(urls), result.wfMode || null, genTaskId);
+
+      invalidateGalleryCache();
+
+      send('generate_done', { taskId: genTaskId, images: result.images, source: result.source });
+    } else {
+      throw new Error(result.error || 'No images generated');
+    }
+  } catch (err) {
+    console.error('[chat] sleep peek error:', err.message);
+    if (genTaskId) {
+      try {
+        db.prepare(`UPDATE image_tasks SET status = 'failed', error_message = ?, finished_at = datetime('now') WHERE id = ?`)
+          .run(err.message, genTaskId);
+      } catch {}
+      send('generate_error', { taskId: genTaskId, error: err.message });
+    }
+  } finally {
+    send('done', {});
+    try { res.end(); } catch {}
+  }
 }
 
 function _parseLoras(char) {

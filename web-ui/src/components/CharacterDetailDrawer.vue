@@ -45,15 +45,15 @@
               <!-- 睡眠中 → 叫醒/摇醒按钮（三选一） -->
               <template v-if="char?.is_sleeping && !char?.is_temp_woken">
                 <!-- 被上门摇醒过 → 摇醒 -->
-                <button v-if="char?.was_door_woken" class="dr-btn wake-door-btn" @click="onWakeDoor">
+                <button v-if="char?.was_door_woken" class="dr-btn" @click="onWakeDoor">
                   <span>摇醒</span>
                 </button>
                 <!-- 三次电话未叫醒 → 上门摇醒 -->
-                <button v-else-if="(char?.wake_attempts || 0) >= 3" class="dr-btn wake-door-btn" @click="onWakeDoor">
+                <button v-else-if="(char?.wake_attempts || 0) >= 3" class="dr-btn" @click="onWakeDoor">
                   <span>上门摇醒</span>
                 </button>
                 <!-- 默认 → 电话叫醒 -->
-                <button v-else class="dr-btn wake-phone-btn" :class="{ shaking: phoneShaking }" @click="onWakePhone">
+                <button v-else class="dr-btn" :class="{ shaking: phoneShaking }" @click="onWakePhone">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                   <span>叫醒</span>
                 </button>
@@ -127,6 +127,9 @@
                 <div class="tl-content">
                   <div class="tl-top">
                     <span class="tl-act">{{ act.activity }}</span>
+                    <button class="tl-peek-btn" title="瞄一眼这个瞬间" @click.stop="$emit('peekAt', act)">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    </button>
                   </div>
                   <div class="tl-loc">{{ act.location }}</div>
                   <div v-if="act.isCurrent" class="tl-mark">
@@ -165,7 +168,7 @@ const props = defineProps<{
   regenerating?: boolean
 }>()
 
-const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor'])
+const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt'])
 
 const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
@@ -533,11 +536,22 @@ onUnmounted(() => {
 .tl-content {
   background: var(--glass-bg); border: 1px solid var(--glass-border);
   border-radius: 8px; padding: 0px 12px 8px;
+  position: relative;
 }
 .tl-curr .tl-content { border-color: rgba(82,196,26,0.2); background: rgba(82,196,26,0.03); }
 
 .tl-top { display: flex; align-items: center; gap: 6px; }
 .tl-act { font-size: 0.85rem; color: var(--text-bright); font-weight: 500; }
+.tl-peek-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border: none; border-radius: 50%;
+  background: transparent; color: var(--text-secondary);
+  cursor: pointer; opacity: 0; transition: opacity 0.2s, background 0.15s, color 0.15s;
+  margin-left: auto; padding: 0;
+}
+.tl-item:hover .tl-peek-btn { opacity: 0.35; }
+.tl-peek-btn:hover { opacity: 1 !important; background: rgba(224,123,108,0.1); color: var(--accent); }
 .tl-loc { font-size: 0.75rem; color: var(--text-secondary); margin-top: 3px; }
 
 .tl-mark {

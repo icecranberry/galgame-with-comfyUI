@@ -956,11 +956,13 @@ export async function getCurrentActivity(characterId) {
   return res.json()
 }
 
-export async function peekSnapshot(characterId, genImage = true) {
+export async function peekSnapshot(characterId, genImage = true, activityContext = null) {
+  const body = { gen_image: genImage };
+  if (activityContext) body.activity = activityContext;
   const res = await fetch(`${BASE}/schedule/${characterId}/peek`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ gen_image: genImage }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`peek snapshot: ${res.status}`)
   return res.json()

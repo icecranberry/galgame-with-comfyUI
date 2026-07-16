@@ -345,7 +345,22 @@ router.post('/:characterId/peek', async (req, res) => {
       return res.status(404).json({ error: 'character not found' });
     }
 
-    const activity = getCurrentActivity(characterId);
+    const reqActivity = req.body?.activity;
+    let activity;
+    if (reqActivity && reqActivity.activity && reqActivity.location) {
+      activity = {
+        activity: reqActivity.activity,
+        location: reqActivity.location,
+        replyDelay: reqActivity.replyDelay ?? 0,
+        snapshotPrompt: reqActivity.snapshotPrompt || '',
+        description: reqActivity.description || '',
+        startTime: reqActivity.startTime || '',
+        endTime: reqActivity.endTime || '',
+        tags: reqActivity.tags || [],
+      };
+    } else {
+      activity = getCurrentActivity(characterId);
+    }
     if (!activity) {
       return res.status(404).json({ error: 'no schedule found for this character' });
     }
