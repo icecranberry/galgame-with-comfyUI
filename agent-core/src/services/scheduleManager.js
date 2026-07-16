@@ -11,6 +11,7 @@
 
 import { getDb } from '../db/index.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
+import { broadcast } from './unifiedStreamBus.js';
 
 // ── 缓存 ──
 // key: characterId, value: { activity, expireAt }
@@ -87,6 +88,9 @@ export function initialize() {
   if (sleepers > 0) {
     console.log(`[scheduleMgr] Initialized: ${sleepers} character(s) currently sleeping`);
   }
+
+  // 恢复临时唤醒定时器
+  restoreTempWakeTimers();
 
   // 启动睡眠状态定时同步（时间边界兜底）
   startSleepingStateCron();
@@ -278,6 +282,12 @@ export function getCurrentActivity(characterId, now = new Date()) {
  * @returns {string|null} 适合拼入 system prompt 的文字
  */
 export function formatScheduleContext(characterId, now = new Date()) {
+  // 临时唤醒期间 → 覆盖睡眠提示
+  if (isTempWoken(characterId, now)) {
+    const timeStr = `${WEEKDAYS[now.getDay()]} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    return `【当前状态】${timeStr}，你被叫醒了，现在可以回复消息。`;
+  }
+
   const activity = getCurrentActivity(characterId, now);
   if (!activity) return null;
 
@@ -304,8 +314,23 @@ export function formatScheduleContext(characterId, now = new Date()) {
  *   delay: 0=秒回, >0=延迟分钟, -1=暂停(睡觉)
  */
 export function getReplyDelay(characterId, now = new Date()) {
+  // 临时唤醒期间：秒回（覆盖日程中的睡眠状态）
+  const tempWoken = isTempWoken(characterId, now);
+  if (tempWoken) {
+    return { delay: 0, activity: '被叫醒了', location: '' };
+  }
+
   const activity = getCurrentActivity(characterId, now);
   if (!activity) return { delay: 0, activity: '未知', location: '' };
+
+  // 兜底：日程显示睡眠 but DB 中 is_sleeping=0（临时唤醒期间 temporary_wake_until 被意外清除）
+  if (activity.replyDelay === -1) {
+    const db = getDb();
+    const char = db.prepare('SELECT is_sleeping FROM characters WHERE id = ?').get(characterId);
+    if (char && char.is_sleeping === 0) {
+      return { delay: 0, activity: '被叫醒了', location: '' };
+    }
+  }
 
   return {
     delay: activity.replyDelay,
@@ -314,12 +339,119 @@ export function getReplyDelay(characterId, now = new Date()) {
   };
 }
 
+// ── 临时唤醒状态管理 ──
+
+const tempWakeTimers = new Map(); // characterId → setTimeout
+
+/**
+ * 检查角色是否处于临时唤醒期
+ */
+export function isTempWoken(characterId, now = new Date()) {
+  const db = getDb();
+  const char = db.prepare('SELECT temporary_wake_until, is_sleeping FROM characters WHERE id = ?').get(characterId);
+  if (!char || !char.temporary_wake_until) return false;
+  const until = new Date(char.temporary_wake_until.replace(' ', 'T') + 'Z');
+  return until > now;
+}
+
+/**
+ * 获取临时唤醒到期时间，未唤醒返回 null
+ */
+export function getTempWakeUntil(characterId) {
+  const db = getDb();
+  const char = db.prepare('SELECT temporary_wake_until FROM characters WHERE id = ?').get(characterId);
+  if (!char || !char.temporary_wake_until) return null;
+  return char.temporary_wake_until;
+}
+
+/**
+ * 设置临时唤醒定时器
+ */
+export function scheduleTempWakeExpiry(characterId, tempWakeUntil) {
+  clearTempWakeTimer(characterId);
+
+  const until = new Date(tempWakeUntil.replace(' ', 'T') + 'Z');
+  const delayMs = until.getTime() - Date.now();
+  if (delayMs <= 0) {
+    revertTempWake(characterId);
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    revertTempWake(characterId);
+    tempWakeTimers.delete(characterId);
+  }, delayMs);
+  timer.unref?.();
+  tempWakeTimers.set(characterId, timer);
+  console.log(`[scheduleMgr] Temp wake expiry scheduled in ${Math.round(delayMs / 60000)}min for ${characterId}`);
+}
+
+function clearTempWakeTimer(characterId) {
+  const existing = tempWakeTimers.get(characterId);
+  if (existing) { clearTimeout(existing); tempWakeTimers.delete(characterId); }
+}
+
+/**
+ * 临时唤醒到期 → 回退到睡眠
+ */
+function revertTempWake(characterId) {
+  const db = getDb();
+  const char = db.prepare('SELECT id, sleep_until FROM characters WHERE id = ?').get(characterId);
+  if (!char) return;
+
+  const now = new Date();
+  const activity = getCurrentActivity(characterId, now);
+  let sleepUntil;
+  if (activity && activity.replyDelay === -1) {
+    sleepUntil = calcSleepUntil(activity.endTime, now);
+  } else {
+    sleepUntil = new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+  }
+
+  db.prepare(`UPDATE characters SET is_sleeping = 1, sleep_until = ?, temporary_wake_until = NULL, wake_mode = NULL, wake_attempts = 0 WHERE id = ?`)
+    .run(sleepUntil, characterId);
+  console.log(`[scheduleMgr] Temp wake expired for ${characterId}, back to sleep until ${sleepUntil}`);
+
+  broadcast('schedule_state_change', {
+    character_id: characterId,
+    is_sleeping: true,
+    sleep_until: sleepUntil,
+    temporary_wake_until: null,
+    wake_mode: null,
+  });
+}
+
+/**
+ * 服务重启时恢复临时唤醒定时器
+ */
+function restoreTempWakeTimers() {
+  const db = getDb();
+  const now = new Date();
+  const chars = db.prepare(`SELECT id, temporary_wake_until FROM characters WHERE temporary_wake_until IS NOT NULL`).all();
+  for (const char of chars) {
+    const until = new Date(char.temporary_wake_until.replace(' ', 'T') + 'Z');
+    if (until <= now) {
+      revertTempWake(char.id);
+    } else {
+      scheduleTempWakeExpiry(char.id, char.temporary_wake_until);
+    }
+  }
+  if (chars.length > 0) {
+    console.log(`[scheduleMgr] Restored ${chars.length} temp wake timer(s)`);
+  }
+}
+
 // ── 睡眠状态 ──
 
 /**
  * 检查角色是否正在睡觉
  */
 export function isSleeping(characterId, now = new Date()) {
+  // 临时唤醒期间 → 不视为睡眠
+  if (isTempWoken(characterId, now)) {
+    return { sleeping: false, sleepUntil: null };
+  }
+
   const db = getDb();
   // 优先读 DB 中的缓存状态
   const char = db.prepare('SELECT is_sleeping, sleep_until FROM characters WHERE id = ?').get(characterId);
@@ -345,16 +477,34 @@ export function isSleeping(characterId, now = new Date()) {
  */
 export function syncSleepingState(characterId, now = new Date()) {
   const db = getDb();
+
+  // 临时唤醒期间 → 跳过同步，保持 is_sleeping = 0，不覆盖 sleep_until
+  if (isTempWoken(characterId, now)) return;
+
   const activity = getCurrentActivity(characterId, now);
   const sleeping = !!(activity && activity.replyDelay === -1);
+  const prev = db.prepare('SELECT is_sleeping, sleep_until FROM characters WHERE id = ?').get(characterId);
 
   if (sleeping) {
     const sleepUntil = calcSleepUntil(activity.endTime, now);
+    const wasAlreadySleeping = prev && prev.is_sleeping === 1;
     db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
       .run(sleepUntil, characterId);
+
+    // 新睡眠周期 → 重置所有叫醒相关列
+    if (!wasAlreadySleeping) {
+      db.prepare(`UPDATE characters SET wake_attempts = 0, was_door_woken = 0, temporary_wake_until = NULL, wake_mode = NULL WHERE id = ?`)
+        .run(characterId);
+    }
   } else {
+    // 从睡眠转为清醒 → 清除 sleep 状态，不清除叫醒列（让自然醒后重置）
     db.prepare('UPDATE characters SET is_sleeping = 0, sleep_until = NULL WHERE id = ? AND is_sleeping = 1')
       .run(characterId);
+    // 自然醒来 → 重置所有叫醒列
+    if (prev && prev.is_sleeping === 1) {
+      db.prepare(`UPDATE characters SET wake_attempts = 0, was_door_woken = 0, temporary_wake_until = NULL, wake_mode = NULL WHERE id = ?`)
+        .run(characterId);
+    }
   }
 }
 
@@ -368,7 +518,7 @@ export function getAllOverview() {
   const now = new Date();
 
   const chars = db.prepare(`
-    SELECT id, display_name, avatar_path, is_sleeping, sleep_until
+    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode
     FROM characters
     ORDER BY display_name ASC
   `).all();
@@ -378,6 +528,7 @@ export function getAllOverview() {
     // 动态计算睡眠状态（不依赖 characters 表中的缓存值，日程更新后该缓存可能过期）
     const sleeping = !!(activity && activity.replyDelay === -1);
     const sleepUntil = sleeping ? calcSleepUntil(activity.endTime, now) : null;
+    const tempWoken = isTempWoken(char.id, now);
     return {
       id: char.id,
       display_name: char.display_name,
@@ -388,6 +539,11 @@ export function getAllOverview() {
       sleep_until: sleepUntil,
       _desc: activity?.description || '',
       tags: activity?.tags || [],
+      wake_attempts: char.wake_attempts,
+      was_door_woken: char.was_door_woken,
+      temporary_wake_until: char.temporary_wake_until,
+      wake_mode: char.wake_mode,
+      is_temp_woken: tempWoken,
     };
   });
 }

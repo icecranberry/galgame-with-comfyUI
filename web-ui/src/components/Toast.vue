@@ -70,7 +70,7 @@ defineExpose({ show })
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 30000;
+  z-index: 99999;
   display: flex;
   flex-direction: column;
   align-items: center;

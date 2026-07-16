@@ -67,6 +67,12 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   // ── 持久 SSE 监听（store 初始化时注册，不受页面切换影响）──
+
+  // 叫醒状态变更 → 刷新概览
+  onEvent('schedule_state_change', () => {
+    fetchOverview(true)
+  })
+
   onEvent('schedule_reset_progress', (data) => {
     if (!resetTask.value) return
 

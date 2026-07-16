@@ -114,6 +114,8 @@
       @peek="onPeek"
       @regenerate="onRegenerate"
       @chat="onChat"
+      @wakePhone="onWakePhone"
+      @wakeDoor="onWakeDoor"
     />
 
     <!-- ═══ 瞄一眼快照弹窗（胶卷边框风格） ═══ -->
@@ -416,8 +418,8 @@ const filteredChars = computed(() => {
   let list = enrichedChars.value
   const q = searchQuery.value.trim().toLowerCase()
   if (q) list = list.filter(c => c.display_name?.toLowerCase().includes(q))
-  if (activeFilter.value === 'awake') return list.filter(c => !c.is_sleeping)
-  if (activeFilter.value === 'sleeping') return list.filter(c => c.is_sleeping)
+  if (activeFilter.value === 'awake') return list.filter(c => !c.is_sleeping || c.is_temp_woken)
+  if (activeFilter.value === 'sleeping') return list.filter(c => c.is_sleeping && !c.is_temp_woken)
   return list
 })
 
@@ -780,6 +782,49 @@ function onChat() {
   if (!detailChar.value) return
   drawerOpen.value = false
   router.push(`/chat/${detailChar.value.id}`)
+}
+
+// ── 叫醒系统 ──
+async function onWakePhone() {
+  if (!detailChar.value) return
+  const id = detailChar.value.id
+  try {
+    const res = await api.wakeUpByPhone(id)
+    if (res.success) {
+      drawerOpen.value = false
+    } else {
+      toastFn('没叫醒...', 'info')
+    }
+    await store.fetchOverview(true)
+  } catch (err: any) {
+    toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
+  }
+}
+
+async function onWakeDoor() {
+  if (!detailChar.value) return
+  const name = detailChar.value.display_name || ''
+  const id = detailChar.value.id
+  const isFirstDoor = !detailChar.value.was_door_woken
+
+  toastFn(`${name}！${name}！`, 'info')
+  if (isFirstDoor) {
+    setTimeout(() => {
+      toastFn(`${name}亦未寝。`, 'info')
+    }, 2000)
+  }
+
+  try {
+    const res = await api.wakeUpByDoor(id)
+    if (res.success) {
+      drawerOpen.value = false
+      await store.fetchOverview(true)
+    } else {
+      toastFn(res.message || '摇醒失败', 'info')
+    }
+  } catch (err: any) {
+    toastFn('摇醒失败: ' + (err.message || '未知错误'), 'error')
+  }
 }
 
 async function onClearFromModal() {

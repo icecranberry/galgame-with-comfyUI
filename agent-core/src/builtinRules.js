@@ -29,14 +29,15 @@ export const SYSTEM_RULES_CONTENT = `<system_context>
 
 export const IMAGE_PROMPT_RULE = {
   rule_key: 'image_prompt',
-  rule_content: `描述需要画的内容。需要详细：
-- **非常重要，这条一定要加：**命中 IP 时必须写 'character\\(series\\)' + **≥8 个外观锚点**（发型/发色/眼色/标志服饰/配饰)，如:'Furina \\(Genshin Impact\\)'。角色名字放在 prompt 字段内最开头
-- 描述场景在哪、镜头角度、角色表情、衣服、动作、场景中的其他背景物品，在自然语言描述之外，可以用Danbooru格式的tag标签来重复强调动作，镜头。
-- 画面中主角提到的其他人如果没有IP，那就都带上主角的IP，比如说：'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together'
-- 描述多角色时，禁止用逗号串联两个角色的外貌（错误例子： A, blonde, B, red hair）。必须使用句号（.）将两个角色的描述完全隔开（正确例子： A, A has blonde hair on left. B, B has red hair on right），且每个角色的描述必须是一个语法完整的独立主谓宾短句。明确追加说明在哪个方位的什么发色的角色在做什么，例如：'2girls, 左边的白色头发的琪亚娜抱着右边紫色头发的芽衣。''1boy, 1girl, 凯文和梅，上面的白色头发的凯文压着下面的紫色头发的梅'
-- **最终输出为英文，角色名也需要翻译成英文**
-- **画面prompt不超过600字**
-- 注意：不要在画面描述中使用未转义的双引号，如需引号请用单引号替代`,
+  rule_content: `Describe the image in detail.
+  
+- **MUST:** When an existing IP character appears, write the character as 'Character \(Series\)' (e.g. 'Furina \(Genshin Impact\)'). The main character name MUST be the first item in the prompt. Include at least 8 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, etc.).
+- Describe the scene, camera angle, character expressions, clothing, actions, and surrounding objects. After the natural-language description, reinforce important actions and camera composition using Danbooru-style tags.
+- If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \(Genshin Impact\) and Lumine \(Genshin Impact\) are having a picnic together.'
+- For multiple characters, NEVER describe different characters in a single comma-separated appearance list (e.g. 'A, blonde, B, red hair'). Separate each character with complete sentences. Clearly state each character's position (left/right/top/bottom), appearance, and action. Example: '2girls. Kiana\(Honkai Impact\) with white hair on the left hugs Mei\(Honkai Impact\) with purple hair on the right.'
+- **The final prompt MUST be entirely in English, including character names.**
+- **The prompt MUST NOT exceed 600 characters.**
+- Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.`,
   is_active: 1,
 };
 

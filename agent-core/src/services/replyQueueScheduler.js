@@ -185,9 +185,9 @@ async function processReplyQueue() {
       WHERE id IN (${placeholders})
     `).run(rawResult.lastInsertRowid, msgIdsJson, new Date().toISOString(), ...ids);
 
-    // 睡觉醒来：更新角色状态
+    // 睡觉醒来：更新角色状态，重置叫醒列
     if (isSleepWakeup) {
-      db.prepare('UPDATE characters SET is_sleeping = 0, sleep_until = NULL WHERE id = ?')
+      db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, wake_attempts = 0, was_door_woken = 0, temporary_wake_until = NULL, wake_mode = NULL WHERE id = ?`)
         .run(characterId);
       console.log(`[replyQueue] ${entry.display_name} woke up, sleep state cleared`);
     }
@@ -373,15 +373,6 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
   // 取最后一条作为对话锚点
   if (history.length > 0) {
     msgs.push(...history);
-
-    // 合并连续同角色历史消息，兼容严格 Jinja 模板
-    const mergeStart = msgs.length - history.length;
-    for (let i = msgs.length - 1; i > mergeStart; i--) {
-      if (msgs[i].role === msgs[i - 1].role) {
-        msgs[i - 1].content += '\n\n' + msgs[i].content;
-        msgs.splice(i, 1);
-      }
-    }
   }
 
   return msgs;

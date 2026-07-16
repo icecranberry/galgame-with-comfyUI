@@ -88,7 +88,8 @@ const timeText = `${WD[now.getDay()]} ${String(now.getHours()).padStart(2,'0')}:
 
 const available = computed(() => props.characters.filter(c => !c.is_sleeping && c.reply_delay === 0).length)
 const busy = computed(() => props.characters.filter(c => !c.is_sleeping && c.reply_delay > 0).length)
-const sleeping = computed(() => props.characters.filter(c => c.is_sleeping).length)
+const sleeping = computed(() => props.characters.filter(c => c.is_sleeping && !c.is_temp_woken).length)
+const drowsy = computed(() => props.characters.filter(c => c.is_temp_woken).length)
 
 const summaries = [
   { key: 'all',       label: '全部', count: props.characters.length, color: '#8c8074' },
@@ -107,13 +108,15 @@ const filters = [
 ]
 
 function dotClass(c: any) {
-  if (c.is_sleeping) return 'd-sleep'
+  if (c.is_sleeping && !c.is_temp_woken) return 'd-sleep'
+  if (c.is_temp_woken) return 'd-drowsy'
   if (c.reply_delay > 0) return 'd-busy'
   return 'd-idle'
 }
 
 function statusText(c: any) {
-  if (c.is_sleeping) return '睡眠中'
+  if (c.is_sleeping && !c.is_temp_woken) return '睡眠中'
+  if (c.is_temp_woken) return '迷迷糊糊'
   if (c.reply_delay > 0) return '外出中'
   return '空闲'
 }
@@ -225,9 +228,10 @@ function activitySummary(c: any) {
   width: 10px; height: 10px; border-radius: 50%;
   border: 2px solid #fff;
 }
-.d-idle  { background: #52c41a; }
-.d-busy  { background: #faad14; }
-.d-sleep { background: #bfbfbf; }
+.d-idle   { background: #52c41a; }
+.d-busy   { background: #faad14; }
+.d-drowsy { background: #8ca4bc; }
+.d-sleep  { background: #bfbfbf; }
 
 .li-info {
   display: flex; flex-direction: column; min-width: 0; flex: 1;

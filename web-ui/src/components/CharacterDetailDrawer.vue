@@ -42,7 +42,24 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                 <span>{{ scheduleBtnText }}</span>
               </button>
-              <button class="dr-btn" @click="$emit('chat')">
+              <!-- 睡眠中 → 叫醒/摇醒按钮（三选一） -->
+              <template v-if="char?.is_sleeping && !char?.is_temp_woken">
+                <!-- 被上门摇醒过 → 摇醒 -->
+                <button v-if="char?.was_door_woken" class="dr-btn wake-door-btn" @click="onWakeDoor">
+                  <span>摇醒</span>
+                </button>
+                <!-- 三次电话未叫醒 → 上门摇醒 -->
+                <button v-else-if="(char?.wake_attempts || 0) >= 3" class="dr-btn wake-door-btn" @click="onWakeDoor">
+                  <span>上门摇醒</span>
+                </button>
+                <!-- 默认 → 电话叫醒 -->
+                <button v-else class="dr-btn wake-phone-btn" :class="{ shaking: phoneShaking }" @click="onWakePhone">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                  <span>叫醒</span>
+                </button>
+              </template>
+              <!-- 正常 → 聊天按钮 -->
+              <button v-else class="dr-btn" @click="$emit('chat')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 1 1 2 2z"/></svg>
                 <span>聊天</span>
               </button>
@@ -148,7 +165,7 @@ const props = defineProps<{
   regenerating?: boolean
 }>()
 
-defineEmits(['close', 'peek', 'regenerate', 'chat'])
+const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor'])
 
 const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
@@ -159,6 +176,20 @@ const scheduleBtnText = computed(() => {
   if (!props.loading && !props.activities.length) return '为ta制作日程表'
   return '改变ta的日程'
 })
+
+// ── 叫醒系统 ──
+const phoneShaking = ref(false)
+
+function onWakePhone() {
+  phoneShaking.value = true
+  setTimeout(() => { phoneShaking.value = false }, 600)
+  emit('wakePhone')
+}
+
+function onWakeDoor() {
+  emit('wakeDoor')
+}
+
 
 // ── 扫描特效控制 ──
 const scanActive = computed(() => props.regenerating)
@@ -542,5 +573,36 @@ onUnmounted(() => {
   border-radius: 8px; font-size: 0.78rem; line-height: 1.5;
   box-shadow: 0 4px 14px rgba(0,0,0,0.18);
   backdrop-filter: blur(6px);
+}
+
+/* ── Wake Buttons ── */
+.wake-phone-btn {
+  background: rgba(108,160,224,0.1);
+  border-color: rgba(108,160,224,0.25);
+  color: #7eb8f4;
+}
+.wake-phone-btn:hover:not(:disabled) {
+  background: rgba(108,160,224,0.18);
+  border-color: rgba(108,160,224,0.35);
+}
+.wake-door-btn {
+  background: rgba(224,142,108,0.1);
+  border-color: rgba(224,142,108,0.25);
+  color: #f0a878;
+}
+.wake-door-btn:hover:not(:disabled) {
+  background: rgba(224,142,108,0.18);
+  border-color: rgba(224,142,108,0.35);
+}
+.shaking {
+  animation: phone-shake 0.4s ease-in-out;
+}
+@keyframes phone-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-4px) rotate(-2deg); }
+  30% { transform: translateX(4px) rotate(2deg); }
+  45% { transform: translateX(-3px) rotate(-1deg); }
+  60% { transform: translateX(3px) rotate(1deg); }
+  75% { transform: translateX(-1px); }
 }
 </style>

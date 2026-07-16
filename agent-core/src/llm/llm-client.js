@@ -60,11 +60,25 @@ function sleep(ms) {
 }
 
 /**
+ * 合并连续同角色（非 system）消息，适配 LM Studio 等严格 Jinja 模板
+ * 仅处理 user/assistant 的连续同角色，不合并 system 消息（system 分层是有意设计）
+ */
+function mergeConsecutiveRoles(messages) {
+  for (let i = messages.length - 1; i > 0; i--) {
+    if (messages[i].role !== 'system' && messages[i].role === messages[i - 1].role) {
+      messages[i - 1].content += '\n\n' + messages[i].content;
+      messages.splice(i, 1);
+    }
+  }
+}
+
+/**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
 export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+  if (config.features.mergeMessages) mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
   const params = {
@@ -153,6 +167,7 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 4096, temperature = 0.7, thinking = { type: "disabled" }, label = 'stream' } = {}) {
+  if (config.features.mergeMessages) mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
   console.log(`\n══════════ [${providerLabel()} → ${label}] ══════════`);

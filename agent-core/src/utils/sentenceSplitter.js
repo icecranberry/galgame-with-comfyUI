@@ -5,9 +5,10 @@
  * 分句规则:
  *    1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，。 断句并去掉标点
  *    2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
- *    3. 。逗号无论队列长度都触发分句，去掉句号本身，重置 20 字计数器
- *    4. flushAll() 时去掉末尾句号
- *    5. 成对符号保护: 《》【】「」（ ）"" '' 等，遇到开符号后直到闭符号才允许分句
+ *    3. 。无论队列长度都触发分句，去掉句号，重置计数器
+ *    4. \n 作为段落分隔，触发分句并丢弃（上游已将 \n\n+ 归一化为单 \n）
+ *    5. flushAll() 时去掉末尾句号
+ *    6. 成对符号保护: 《》【】「」（ ）"" '' 等，遇到开符号后直到闭符号才允许分句
  *   返回值: { segments: string[], stopped: boolean }
  *
  * 使用方式（非流式场景，完整文本）:
@@ -95,6 +96,16 @@ export class SentenceSplitter {
           this.pendingSplit = -1;
         } else {
           this.buffer += safe;
+        }
+        continue;
+      }
+
+      // ── 规则 4: \\n 作为段落分隔，触发分句并丢弃 ──
+      if (safe === '\n') {
+        if (this._canSplit()) {
+          emit(this.buffer);
+          this.buffer = '';
+          this.pendingSplit = -1;
         }
         continue;
       }

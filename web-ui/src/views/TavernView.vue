@@ -738,6 +738,10 @@ async function loadWorldSettings() {
     worldItems.value = data.list || []
     const active = worldItems.value.find(w => w.is_active)
     activeWorldName.value = active?.name || ''
+    if (active) {
+      selectedWorldId.value = active.id
+      worldContent.value = active.content || ''
+    }
   } catch {}
 }
 
@@ -747,16 +751,7 @@ function openWorldSetting() {
   showNewInput.value = false
   worldNewName.value = ''
   showWorldModal.value = true
-  loadWorldSettings().then(() => {
-    const active = worldItems.value.find(w => w.is_active)
-    if (active) {
-      selectedWorldId.value = active.id
-      worldContent.value = active.content || ''
-    } else if (worldItems.value.length > 0) {
-      selectedWorldId.value = worldItems.value[0].id
-      worldContent.value = worldItems.value[0].content || ''
-    }
-  })
+  loadWorldSettings()
 }
 
 function closeWorldSetting() {

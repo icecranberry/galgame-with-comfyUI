@@ -241,6 +241,17 @@
               <span class="freq-val">{{ backgroundConcurrency }}</span>
             </div>
           </div>
+
+          <div class="toggle-row" style="margin-top:14px; padding-bottom:4px">
+            <div>
+              <div class="tl">合并消息兼容更多llm模板</div>
+              <div class="td">合并连续同角色消息，解决 LM Studio 等本地模型的模板冲突</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="features.mergeMessages" @change="markLlmDirty()" />
+              <span class="slider"></span>
+            </label>
+          </div>
         </template>
 
         <div class="sa" style="margin-top:12px">
@@ -578,7 +589,7 @@ function switchComfyTab(mode) {
 const comfyUrl = ref('')
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3 })
+const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
 const backgroundConcurrency = ref(3)
@@ -692,10 +703,8 @@ const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', mo
 const llmApiKey = ref('')
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
-const isCustomBaseURL = computed(() => {
-  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
-  return !presets.includes(llmBaseURL.value)
-})
+const isCustomBaseURL = ref(false)
+const presetURLs = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
 const llmBaseURLOptions = computed(() => [
   { value: 'https://api.deepseek.com', label: 'DeepSeek' },
   { value: 'https://dashscope.aliyuncs.com/compatible-mode/v1', label: '通义千问 (DashScope)' },
@@ -706,12 +715,17 @@ const llmBaseURLOptions = computed(() => [
 const llmBaseURLSelectVal = computed({
   get: () => isCustomBaseURL.value ? '' : llmBaseURL.value,
   set: (val) => {
-    llmBaseURL.value = val
-    if (val !== '') {
+    if (val === '') {
+      isCustomBaseURL.value = true
+      llmBaseURL.value = ''
+    } else {
+      isCustomBaseURL.value = false
+      llmBaseURL.value = val
       llmHeadersText.value = '{}'
       llmExtraBodyText.value = '{}'
       features.serializeBackgroundLLM = false
       backgroundConcurrency.value = 3
+      features.mergeMessages = false
     }
     markLlmDirty()
   }
@@ -759,6 +773,10 @@ onMounted(async () => {
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
+    const hasCustom = (data.llm.headers && Object.keys(data.llm.headers).length > 0)
+      || (data.llm.extraBody && Object.keys(data.llm.extraBody).length > 0)
+      || data.features?.mergeMessages
+    isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
     llmHeadersText.value = data.llm.headers && Object.keys(data.llm.headers).length
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
     llmExtraBodyText.value = data.llm.extraBody && Object.keys(data.llm.extraBody).length
@@ -827,10 +845,13 @@ async function saveLlmConfig() {
         if (features.serializeBackgroundLLM) {
           await updateBackgroundConcurrency(backgroundConcurrency.value)
         }
+        await updateFeatureFlag('mergeMessages', features.mergeMessages)
       } else {
         features.serializeBackgroundLLM = false
         backgroundConcurrency.value = 3
         await updateFeatureFlag('serializeBackgroundLLM', false)
+        features.mergeMessages = false
+        await updateFeatureFlag('mergeMessages', false)
       }
 
       llmDirty.value = false

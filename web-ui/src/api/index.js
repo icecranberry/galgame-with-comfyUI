@@ -1019,6 +1019,22 @@ export async function clearSchedule(characterId) {
   return res.json()
 }
 
+// ── 叫醒系统 ──
+
+/** 电话叫醒（40% 概率成功） */
+export async function wakeUpByPhone(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/wake-up-phone`, { method: 'POST' })
+  if (!res.ok) throw new Error(`wake up phone: ${res.status}`)
+  return res.json()
+}
+
+/** 上门摇醒（必定成功） */
+export async function wakeUpByDoor(characterId) {
+  const res = await fetch(`${BASE}/schedule/${characterId}/wake-up-door`, { method: 'POST' })
+  if (!res.ok) throw new Error(`wake up door: ${res.status}`)
+  return res.json()
+}
+
 // ── 工作流管理 ──
 export async function checkWorkflowStatus() {
   const res = await fetch(`${BASE}/workflows/status`)

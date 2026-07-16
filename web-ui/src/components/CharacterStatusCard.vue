@@ -2,7 +2,7 @@
   <article class="status-card" @click="$emit('select')">
     <div
       class="card-inner"
-      :class="{ 'card-dim': char.is_sleeping }"
+      :class="{ 'card-dim': char.is_sleeping && !char.is_temp_woken }"
       @mouseenter="(e) => onEnter(e, char._description)"
       @mousemove="onMove"
       @mouseleave="onLeave"
@@ -80,14 +80,17 @@ defineEmits(['select', 'peek'])
 const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
 const statusMap: Record<string, { label: string; cls: string }> = {
-  sleeping:  { label: '在梦乡', cls: 'badge-sleep' },
-  delayed:   { label: '正忙',   cls: 'badge-busy' },
-  available: { label: '',       cls: '' },
-  event:     { label: '',       cls: '' },
+  sleeping:  { label: '在梦乡',     cls: 'badge-sleep' },
+  drowsy:    { label: '迷迷糊糊',   cls: 'badge-drowsy' },
+  delayed:   { label: '正忙',       cls: 'badge-busy' },
+  available: { label: '',           cls: '' },
+  event:     { label: '',           cls: '' },
 }
 
 const computedStatus = computed(() => {
-  if (props.char.is_sleeping) return 'sleeping'
+  if (props.char.is_sleeping) {
+    return props.char.is_temp_woken ? 'drowsy' : 'sleeping'
+  }
   if (props.char._hasEvent) return 'event'
   if (props.char.reply_delay > 0) return 'delayed'
   return 'available'
@@ -97,9 +100,11 @@ const statusLabel = computed(() => statusMap[computedStatus.value]?.label || '')
 const badgeClass = computed(() => statusMap[computedStatus.value]?.cls || '')
 
 const footnote = computed(() => {
-  if (props.char.is_sleeping) {
-    // 在梦乡中：显示 description，不显示起床时间
+  if (props.char.is_sleeping && !props.char.is_temp_woken) {
     return props.char._description || ''
+  }
+  if (props.char.is_temp_woken) {
+    return props.char._description || '被叫醒了...'
   }
   if (props.char._description && props.char._description !== props.char._behavior) {
     return props.char._description
@@ -182,6 +187,7 @@ const footnote = computed(() => {
 
 .badge-busy   { background: rgba(224,123,108,0.1);  color: #c06858; }
 .badge-sleep  { background: rgba(149,128,204,0.1);  color: #7c6db8; }
+.badge-drowsy { background: rgba(140,160,190,0.1);  color: #6d84a8; }
 
 .tag-badge {
   font-size: 0.65rem; padding: 2px 8px; border-radius: 999px;

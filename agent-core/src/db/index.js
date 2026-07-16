@@ -409,6 +409,9 @@ function initSchema(db) {
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
+  // 迁移: 叫醒系统 — characters 表新增 wake 相关列
+  migrateWakeSchema(db);
+
   // 迁移: characters 表新增 lora 列
   migrateLoraSchema(db);
 
@@ -578,6 +581,33 @@ function migrateScheduleSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateScheduleSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 叫醒系统 — characters 表新增 wake 相关列
+ */
+function migrateWakeSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'wake_attempts')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN wake_attempts INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.wake_attempts column (default 0)');
+    }
+    if (!cols.find(c => c.name === 'was_door_woken')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN was_door_woken INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.was_door_woken column (default 0)');
+    }
+    if (!cols.find(c => c.name === 'temporary_wake_until')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN temporary_wake_until DATETIME`);
+      console.log('[db] Added characters.temporary_wake_until column');
+    }
+    if (!cols.find(c => c.name === 'wake_mode')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN wake_mode TEXT`);
+      console.log('[db] Added characters.wake_mode column');
+    }
+  } catch (err) {
+    console.log('[db] migrateWakeSchema error:', err.message);
   }
 }
 
@@ -1090,6 +1120,7 @@ const SETTING_TO_CONFIG = {
   feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
   feature_serializeBackgroundLLM:     { obj: 'features', key: 'serializeBackgroundLLM',    type: 'bool' },
   feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
+  feature_mergeMessages:             { obj: 'features', key: 'mergeMessages',             type: 'bool' },
   compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
   compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },

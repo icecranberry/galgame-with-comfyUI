@@ -8,6 +8,8 @@
  * POST   /api/schedule/:characterId/regenerate — 强制重新生成日程
  * POST   /api/schedule/regenerate-all          — 重置世界线（SSE 推送进度）
  * POST   /api/schedule/regenerate-all/cancel   — 取消重置世界线
+ * POST   /api/schedule/:characterId/wake-up-phone — 电话叫醒（40% 概率，最多 3 次）
+ * POST   /api/schedule/:characterId/wake-up-door — 上门摇醒（必定成功）
  * GET    /api/schedule/queue/status            — 调试：查看队列概览
  */
 
@@ -17,7 +19,7 @@ import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
   getAllOverview, ensureTodaySchedule, invalidateCache,
-  syncSleepingState,
+  syncSleepingState, isTempWoken,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
@@ -25,6 +27,7 @@ import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
 import { getTimeLight } from '../services/timeLight.js';
 import { saveBase64Image } from '../services/imagePaths.js';
+import { processWakeUp } from '../services/wakeService.js';
 
 const router = Router();
 
@@ -663,6 +666,126 @@ router.get('/queue/status', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] GET /queue/status error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/schedule/:characterId/wake-up-phone — 电话叫醒（40% 概率，最多 3 次）──
+
+router.post('/:id/wake-up-phone', async (req, res) => {
+  try {
+    const db = getDb();
+    const characterId = parseInt(req.params.id, 10);
+
+    const char = db.prepare(`SELECT id, display_name, is_sleeping, wake_attempts, temporary_wake_until FROM characters WHERE id = ?`).get(characterId);
+    if (!char) return res.status(404).json({ error: 'Character not found' });
+
+    // 已经在临时唤醒中
+    if (isTempWoken(characterId)) {
+      return res.json({ success: false, message: 'already awake', attempts: char.wake_attempts });
+    }
+
+    if (char.is_sleeping !== 1) {
+      return res.json({ success: false, message: 'not sleeping' });
+    }
+
+    // 原子增 count（防快速双击竞态）
+    db.prepare('UPDATE characters SET wake_attempts = wake_attempts + 1 WHERE id = ?').run(characterId);
+    const attempts = db.prepare('SELECT wake_attempts FROM characters WHERE id = ?').get(characterId).wake_attempts || 1;
+
+    // 超过 3 次电话上限 → 只允许上门摇醒
+    if (attempts > 3) {
+      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: capped at 3 → suggest door`);
+      return res.json({
+        success: false,
+        attempts: 3,
+        door_wake_available: true,
+      });
+    }
+
+    // 40% 概率叫醒
+    const rolled = Math.random();
+    if (rolled < 0.4) {
+      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} < 0.4 → success`);
+      // 临时唤醒 5~15 分钟
+      const tempMinutes = 5 + Math.floor(Math.random() * 11);
+      const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
+        .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+      db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0 WHERE id = ?`)
+        .run(tempWakeUntil, 'phone', characterId);
+
+      // 异步处理叫醒（不阻塞响应）
+      processWakeUp(characterId, 'phone', attempts).catch(err => {
+        console.error(`[schedule] Wake-up processing failed for ${char.display_name}:`, err.message);
+      });
+
+      return res.json({
+        success: true,
+        attempts,
+        temporary_wake_until: tempWakeUntil,
+        temp_minutes: tempMinutes,
+      });
+    }
+
+    // 叫醒失败
+    console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} >= 0.4 → miss`);
+    return res.json({
+      success: false,
+      attempts,
+      door_wake_available: attempts >= 3,
+    });
+  } catch (err) {
+    console.error('[schedule] POST /wake-up-phone error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/schedule/:characterId/wake-up-door — 上门摇醒（必定成功）──
+
+router.post('/:id/wake-up-door', async (req, res) => {
+  try {
+    const db = getDb();
+    const characterId = parseInt(req.params.id, 10);
+
+    const char = db.prepare(`SELECT id, display_name, is_sleeping, was_door_woken, temporary_wake_until FROM characters WHERE id = ?`).get(characterId);
+    if (!char) return res.status(404).json({ error: 'Character not found' });
+
+    // 已经在临时唤醒中
+    if (isTempWoken(characterId)) {
+      return res.json({ success: false, message: 'already awake' });
+    }
+
+    if (char.is_sleeping !== 1) {
+      return res.json({ success: false, message: 'not sleeping' });
+    }
+
+    // 判定模式: 之前上门摇醒过 → 'shake'，否则 'door'
+    const mode = char.was_door_woken === 1 ? 'shake' : 'door';
+
+    console.log(`[schedule] ${char.display_name} door wake → mode=${mode}`);
+
+    // 临时唤醒 5~15 分钟
+    const tempMinutes = 5 + Math.floor(Math.random() * 11);
+    const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
+      .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+    db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, was_door_woken = 1, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0 WHERE id = ?`)
+      .run(tempWakeUntil, mode, characterId);
+
+    // 异步处理叫醒
+    processWakeUp(characterId, mode, null).catch(err => {
+      console.error(`[schedule] Door-wake processing failed for ${char.display_name}:`, err.message);
+    });
+
+    return res.json({
+      success: true,
+      mode,
+      temporary_wake_until: tempWakeUntil,
+      temp_minutes: tempMinutes,
+    });
+  } catch (err) {
+    console.error('[schedule] POST /wake-up-door error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

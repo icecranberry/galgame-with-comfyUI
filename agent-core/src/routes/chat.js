@@ -326,8 +326,8 @@ router.post('/characters/:id/chat', async (req, res) => {
     // ── 安全兜底：日程未拦截但 DB 中标记为睡眠状态 ──
     // 日程系统可能因模板缺失/缓存过期/功能开关等原因未检测到睡眠，
     // 但 characters.is_sleeping 是 scheduleManager 定时同步的可靠标志
-    const sleepingChar = db.prepare('SELECT is_sleeping, sleep_until FROM characters WHERE id = ?').get(characterId);
-    if (sleepingChar && sleepingChar.is_sleeping === 1) {
+    const sleepingChar = db.prepare('SELECT is_sleeping, sleep_until, temporary_wake_until FROM characters WHERE id = ?').get(characterId);
+    if (sleepingChar && sleepingChar.is_sleeping === 1 && !sleepingChar.temporary_wake_until) {
       const sleepUntil = sleepingChar.sleep_until
         || new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 
@@ -603,14 +603,14 @@ router.post('/characters/:id/chat', async (req, res) => {
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     formatParts.push(`<dialogue_format_rules>
 ${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。**
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
 - {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
 </dialogue_format_rules>`);
     const sentenceHint = (() => {
-      if (explicitImageIntent) return '1句话以内';
-      if (affinity == null || affinity < 60) return '1句话以内';
-      if (affinity < 80) return '1~2句话';
-      return '1~3句话';
+      if (explicitImageIntent) return '15个汉字以内';
+      if (affinity == null || affinity < 60) return '10~30个汉字';
+      if (affinity < 80) return '10~40个汉字';
+      return '10~60个汉字';
     })();
     formatParts.push('<dialogue_rules>\n- **回复控制在' + sentenceHint + '，保持口语化轻快节奏**\n</dialogue_rules>');
     msgs.push({ role: 'system', content: formatParts.join('\n\n') });
@@ -723,22 +723,6 @@ ${coreRules}
 
     msgs.push(...history);
 
-    // 合并连续同角色历史消息，兼容 LM Studio 等严格 Jinja 模板
-    // 仅合并历史区（跳过前面的 system 消息），不影响 system prompt 结构
-    if (history.length > 0) {
-      const mergeStart = msgs.length - history.length;
-      for (let i = msgs.length - 1; i > mergeStart; i--) {
-        if (msgs[i].role === msgs[i - 1].role) {
-          msgs[i - 1].content += '\n\n' + msgs[i].content;
-          // 保留 created_at：合并时用较早的消息时间
-          if (msgs[i].created_at && !msgs[i - 1].created_at) {
-            msgs[i - 1].created_at = msgs[i].created_at;
-          }
-          msgs.splice(i, 1);
-        }
-      }
-    }
-
     // 正在进行的奇遇（作为独立 system 消息注入到 user 消息之前，指令前置 + XML 结构化）
     // 和朋友圈不同——奇遇是"此刻正在发生"的事，优先级更高，需要紧贴对话
     // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
@@ -831,7 +815,7 @@ ${coreRules}
 
     send('response_start', {});
     for await (const chunk of chatStream(msgs, { temperature: 0.72, label: '主聊天流' })) {
-      const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n/g, '');
+      const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
       fullContent += cleanChunk;
 
       const { segments, stopped } = splitter.feed(cleanChunk);
@@ -1648,16 +1632,6 @@ async function generateReplyGuesses(conversationId, character) {
   if (stageContent) msgs.push({ role: 'system', content: stageContent });
   msgs.push({ role: 'system', content: taskParts.join('\n\n') });
   msgs.push(...cleanedHistory);
-
-  if (cleanedHistory.length > 0) {
-    const mergeStart = msgs.length - cleanedHistory.length;
-    for (let i = msgs.length - 1; i > mergeStart; i--) {
-      if (msgs[i].role === msgs[i - 1].role) {
-        msgs[i - 1].content += '\n' + msgs[i].content;
-        msgs.splice(i, 1);
-      }
-    }
-  }
 
   msgs.push({ role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' });
 
