@@ -18,7 +18,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
-import { getReplyDelay, formatScheduleContext, getCurrentActivity } from '../services/scheduleManager.js';
+import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 
@@ -1360,22 +1360,36 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
-    // ── 当前时间 + 光线 + 日程上下文（参照瞄一眼格式，合并为一条消息）──
+    // ── 当前时间 + 光线 + 日程上下文 ──
     { role: 'system', content: (() => {
       try {
         const lightHint = getLightHint();
         const activity = getCurrentActivity(character.id);
+        const tempWoken = isTempWoken(character.id);
+
+        // 临时叫醒状态：根据叫醒方式描述当前视觉状态
+        if (tempWoken) {
+          const db = getDb();
+          const wakeMode = db.prepare('SELECT wake_mode FROM characters WHERE id = ?').get(character.id)?.wake_mode;
+          const userName = config.user.nickname || '用户';
+          let wakeDesc;
+          if (wakeMode === 'phone') {
+            wakeDesc = `你被${userName}的电话吵醒了，脑袋昏沉沉的。半睁着眼，睡眼惺忪，手机屏幕亮着，正在打哈欠，靠在床上看着手机。`;
+          } else if (wakeMode === 'door' || wakeMode === 'shake') {
+            const userAppearance = config.user.appearance ? `（${config.user.appearance}）` : '';
+            wakeDesc = `${userName}${userAppearance}紧急冲到你家把你叫醒了，你迷迷糊糊地睁开眼。${userName}用各种方式把你吵醒/摇醒了，你半坐在床上，穿着睡衣。**画面富有动感，动作激烈**`;
+          } else {
+            wakeDesc = `你刚被叫醒，脑袋还昏沉沉的。`;
+          }
+          const locStr = activity?.location ? `，正在【${activity.location}】附近` : '';
+          return lightHint + '\n\n【当前状态】' + wakeDesc + locStr;
+        }
+
         if (!activity || !activity.activity || activity.activity === '自由时间') return lightHint;
         const { timeDesc, lightNote } = getTimeLight();
-        const isSleeping = activity.replyDelay === -1;
-        const sleepNote = isSleeping
-          ? '\n\n【极其重要】你正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。'
-          : '';
-        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeDesc + '，光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。照片里的你要体现正在做的日程。' + sleepNote;
+        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeDesc + '，光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。';
       } catch (_) { return getLightHint(); }
     })() },
-    // ── prompt 格式说明单独一条，不混杂指令 ──
-    ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
@@ -1450,6 +1464,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       }
       return [contextBlock];
     })(),
+    // ── prompt 格式说明单独一条（放在对话上下文之后，模型理解了场景再告诉格式）──
+    ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
   ];
 

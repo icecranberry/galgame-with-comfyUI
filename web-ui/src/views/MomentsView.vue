@@ -84,12 +84,9 @@
     </div>
 
     <!-- 图片预览 -->
-    <VueEasyLightbox
+    <ImageLightbox
       :visible="!!previewImage"
       :imgs="previewImage"
-      :max-zoom="6"
-      :min-zoom="0.3"
-      :zoom-scale="0.35"
       @hide="previewImage = null"
     />
 
@@ -110,8 +107,7 @@ import { useChatStore } from '../stores/chat.js'
 import { loadUserConfig } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
-import VueEasyLightbox from 'vue-easy-lightbox'
-import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import ImageLightbox from '../components/ImageLightbox.vue'
 
 const moments = useMomentsStore()
 const chat = useChatStore()

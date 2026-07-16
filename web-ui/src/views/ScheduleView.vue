@@ -194,13 +194,10 @@
 
     <!-- 图片放大预览 -->
     <Teleport to="body">
-      <VueEasyLightbox
+      <ImageLightbox
         :visible="lightboxVisible"
         :imgs="peekImage ? [peekImage] : []"
         :z-index="1200"
-        :max-zoom="6"
-        :min-zoom="0.3"
-        :zoom-scale="0.35"
         @hide="lightboxVisible = false"
       />
     </Teleport>
@@ -351,8 +348,7 @@ import { onEvent } from '../stores/unifiedStream.js'
 import * as api from '../api/index.js'
 import CharacterStatusCard from '../components/CharacterStatusCard.vue'
 import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
-import VueEasyLightbox from 'vue-easy-lightbox'
-import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import ImageLightbox from '../components/ImageLightbox.vue'
 
 const store = useScheduleStore()
 const settingsStore = useSettingsStore()

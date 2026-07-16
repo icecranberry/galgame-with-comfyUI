@@ -10,6 +10,7 @@
  */
 
 import { getDb } from '../db/index.js';
+import { config } from '../config.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { getTimeLight } from './timeLight.js';
@@ -285,8 +286,19 @@ export function getCurrentActivity(characterId, now = new Date()) {
 export function formatScheduleContext(characterId, now = new Date()) {
   // 临时唤醒期间 → 覆盖睡眠提示
   if (isTempWoken(characterId, now)) {
+    const db = getDb();
+    const char = db.prepare('SELECT wake_mode, wake_attempts FROM characters WHERE id = ?').get(characterId);
+    const mode = char?.wake_mode || 'unknown';
+    const attempts = char?.wake_attempts || 1;
     const timeStr = `${WEEKDAYS[now.getDay()]} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    return `【当前状态】${timeStr}，你被叫醒了，现在可以回复消息。`;
+
+    const wakeMsgs = {
+      phone:   `被${config.user.nickname || '用户'}打来的${attempts}个电话吵醒`,
+      door:    `被${config.user.nickname || '用户'}上门从床上摇醒`,
+      shake:   `被${config.user.nickname || '用户'}又跑到床边晃醒`,
+    };
+    const wakeDesc = wakeMsgs[mode] || `被${config.user.nickname || '用户'}叫醒`;
+    return `【当前状态】${timeStr}，${wakeDesc}，脑袋还迷迷糊糊的。`;
   }
 
   const activity = getCurrentActivity(characterId, now);

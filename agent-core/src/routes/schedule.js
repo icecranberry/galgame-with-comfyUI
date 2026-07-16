@@ -397,15 +397,35 @@ router.post('/:characterId/peek', async (req, res) => {
 3. 画面中的每一个视觉元素都应该一致地属于这个世界。世界观不是背景，是地基。
 </world_integration>\n\n`;
     }
-    // 睡眠中：强制强调闭眼
-    const isSleeping = activity.replyDelay === -1;
+    // 睡眠中：强制强调闭眼（优先检查临时叫醒，因为日程 replyDelay 即使叫醒后仍为 -1）
+    const tempWoken = isTempWoken(characterId);
+    const isSleeping = !tempWoken && activity.replyDelay === -1;
     // 当前时间 + 时段 + 光线描述
     const { timeDesc, lightNote } = getTimeLight();
     const sleepNote = isSleeping
       ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
       : '';
 
-    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${activity.activity}，地点：${activity.location}，现在是${timeDesc}，光线参考：${lightNote}（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。${sleepNote}`;
+    // 临时叫醒时覆盖活动描述（日程数据仍是睡觉，与实际不符）
+    let effectiveActivity = activity.activity;
+    let effectiveDescription = activity.description;
+    let wakeNote = '';
+    if (tempWoken) {
+      const wakeMode = db.prepare('SELECT wake_mode FROM characters WHERE id = ?').get(characterId)?.wake_mode;
+      const userName = config.user.nickname || '用户';
+      if (wakeMode === 'phone') {
+        effectiveActivity = '被电话吵醒';
+        effectiveDescription = '半睁着眼看着手机，睡眼惺忪，正在打哈欠';
+        wakeNote = `\n\n【注意】角色刚被${userName}的电话吵醒，处于半睡半醒的迷糊状态。双眼半睁半合，睡眼惺忪，头发凌乱，正在打哈欠。手机屏幕的亮光照在角色脸上，角色靠在床上或枕头上看着手机屏幕。表情困倦慵懒，展现出被吵醒后的迷蒙感。`;
+      } else if (wakeMode === 'door' || wakeMode === 'shake') {
+        const userAppearance = config.user.appearance ? `（${config.user.appearance}）` : '';
+        effectiveActivity = '被各种方式叫醒/晃醒/摇醒/拖拽等姿势';
+        effectiveDescription = `被${userName}${userAppearance}从床上被各种方式叫醒/晃醒/摇醒/拖拽等姿势弄醒的瞬间`;
+        wakeNote = `\n\n【注意】画面中是${userName}${userAppearance}上门把角色从床上摇醒的场景。角色半坐在床上，睡眼惺忪地睁开眼，表情懵懂迷糊。${userName}${userAppearance}正俯身或弯腰，${userName}的手搭在角色任意部位，把角色晃醒或者摇醒或者拖拉拽弄醒。角色穿着睡衣，被子半掀开，展现了刚被强行弄醒的瞬间动态。`;
+      }
+    }
+
+    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，现在是${timeDesc}，光线参考：${lightNote}（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
 
     // system2: 角色完整人格，"你"替换为角色姓名
     const personaText = character.base_prompt
@@ -424,7 +444,7 @@ router.post('/:characterId/peek', async (req, res) => {
     `).get(characterId);
 
     // user: 拍摄指令
-    const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${activity.activity}的照片，具体照片表现是${activity.description}`;
+    const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },
@@ -718,10 +738,10 @@ router.post('/:id/wake-up-phone', async (req, res) => {
       });
     }
 
-    // 40% 概率叫醒
+    // 50% 概率叫醒
     const rolled = Math.random();
-    if (rolled < 0.4) {
-      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} < 0.4 → success`);
+    if (rolled < 0.5) {
+      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} < 0.5 → success`);
       // 临时唤醒 5~15 分钟
       const tempMinutes = 5 + Math.floor(Math.random() * 11);
       const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
@@ -744,7 +764,7 @@ router.post('/:id/wake-up-phone', async (req, res) => {
     }
 
     // 叫醒失败
-    console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} >= 0.4 → miss`);
+    console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} >= 0.5 → miss`);
     return res.json({
       success: false,
       attempts,

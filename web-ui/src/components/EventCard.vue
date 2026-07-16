@@ -160,7 +160,7 @@
 
   <!-- 图片预览：Teleport 到 body 并置于遮罩层之上 -->
   <Teleport to="body">
-    <vue-easy-lightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" />
+    <ImageLightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" @regenerated="onRegenerated" />
   </Teleport>
 </template>
 
@@ -168,7 +168,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
-import VueEasyLightbox from 'vue-easy-lightbox'
+import ImageLightbox from './ImageLightbox.vue'
 
 const confirmFn = inject('confirm')
 
@@ -246,6 +246,22 @@ const currentImage = computed(() => {
   if (choiceHistory.value.length > 0) return choiceHistory.value[choiceHistory.value.length - 1].image || props.event.image
   return props.event.image
 })
+
+function onRegenerated(newUrl) {
+  const base = newUrl.replace(/\?.*$/, '')
+  // 更新主图
+  if (props.event.image && props.event.image.replace(/\?.*$/, '') === base) {
+    props.event.image = newUrl
+  }
+  // 更新分支图
+  if (props.event.choice_history) {
+    for (const step of props.event.choice_history) {
+      if (step.image && step.image.replace(/\?.*$/, '') === base) {
+        step.image = newUrl
+      }
+    }
+  }
+}
 
 const previewText = computed(() => {
   if (choiceHistory.value.length > 0) {

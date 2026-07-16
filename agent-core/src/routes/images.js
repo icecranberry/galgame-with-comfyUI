@@ -306,39 +306,87 @@ router.post('/regenerate', async (req, res) => {
   if (!category && folder === '') category = LEGACY_CATEGORY;
   if (!category) return res.status(400).json({ error: `unknown folder: ${folder}` });
 
-  // 查找 prompt：优先 image_tasks.output_paths，其次 moment_posts.images，最后 raw_messages
+  // 查找 prompt：优先 image_tasks，其次 moment_posts，再 raw_messages，最后 character_events
   const db = getDb();
   let promptText = null;
+  let charLoras = null;
+  let charCustomWorkflow = null;
+
+  // 辅助：从 conversation_id 提取角色 lora/workflow
+  function tryGetCharConfig(conversationId) {
+    const m = conversationId?.match(/^char_(\d+)/);
+    if (!m) return;
+    const char = db.prepare(`SELECT loras, custom_workflow FROM characters WHERE id = ?`).get(parseInt(m[1]));
+    if (char) {
+      if (!charLoras && char.loras) {
+        try { charLoras = JSON.parse(char.loras); } catch {}
+      }
+      if (!charCustomWorkflow && char.custom_workflow) {
+        charCustomWorkflow = char.custom_workflow;
+      }
+    }
+  }
 
   // 1. image_tasks
   const task = db.prepare(
-    `SELECT prompt_original FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
+    `SELECT prompt_original, conversation_id FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
   ).get(`%${filename}%`);
-  if (task?.prompt_original) promptText = task.prompt_original;
+  if (task?.prompt_original) {
+    promptText = task.prompt_original;
+    if (task.conversation_id) tryGetCharConfig(task.conversation_id);
+  }
 
   // 2. moment_posts
   if (!promptText) {
     const mp = db.prepare(
-      `SELECT prompt FROM moment_posts WHERE images LIKE ? ORDER BY created_at DESC LIMIT 1`
+      `SELECT prompt, character_id FROM moment_posts WHERE images LIKE ? ORDER BY created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
-    if (mp?.prompt) promptText = mp.prompt;
+    if (mp?.prompt) {
+      promptText = mp.prompt;
+      if (mp.character_id) tryGetCharConfig(`char_${mp.character_id}`);
+    }
   }
 
   // 3. raw_messages (主动聊天配图)
   if (!promptText) {
     const rm = db.prepare(
-      `SELECT raw.prompt FROM raw_messages raw
+      `SELECT raw.prompt, raw.conversation_id FROM raw_messages raw
        JOIN messages msg ON msg.raw_id = raw.id
        WHERE msg.images LIKE ? ORDER BY raw.created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
-    if (rm?.prompt) promptText = rm.prompt;
+    if (rm?.prompt) {
+      promptText = rm.prompt;
+      if (rm.conversation_id) tryGetCharConfig(rm.conversation_id);
+    }
+  }
+
+  // 4. character_events (奇遇)
+  if (!promptText) {
+    const ceMatch = db.prepare(
+      `SELECT prompt, character_id FROM character_events WHERE image LIKE ? ORDER BY created_at DESC LIMIT 1`
+    ).get(`%${filename}%`);
+    if (ceMatch?.prompt) {
+      promptText = ceMatch.prompt;
+      if (ceMatch.character_id) tryGetCharConfig(`char_${ceMatch.character_id}`);
+    }
+  }
+
+  // 5. character_events.choice_history JSON (奇遇分支)
+  if (!promptText) {
+    const ch = db.prepare(
+      `SELECT id, prompt, character_id FROM character_events WHERE choice_history LIKE ? ORDER BY created_at DESC LIMIT 1`
+    ).get(`%${filename}%`);
+    if (ch) {
+      promptText = ch.prompt;
+      if (ch.character_id) tryGetCharConfig(`char_${ch.character_id}`);
+    }
   }
 
   if (!promptText || promptText.trim().length === 0) {
     return res.status(404).json({ error: 'prompt not found for this image' });
   }
 
-  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."`);
+  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."${charLoras?.length ? ` loras=${charLoras.length}` : ''}${charCustomWorkflow ? ` workflow=${charCustomWorkflow}` : ''}`);
 
   // 根据 category 选择生图参数
   const categoryConfig = {
@@ -353,12 +401,15 @@ router.post('/regenerate', async (req, res) => {
   const opts = categoryConfig[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
 
   try {
-    const result = await generateImageRaw(promptText, {
+    const genOpts = {
       artist: opts.artist,
       width: opts.width,
       height: opts.height,
       scene: category === 'moments' ? 'moments' : (category === 'events' || category === 'peek' ? 'schedule' : 'chat'),
-    });
+    };
+    if (charLoras?.length > 0) genOpts.loras = charLoras;
+    if (charCustomWorkflow) genOpts.customWorkflow = charCustomWorkflow;
+    const result = await generateImageRaw(promptText, genOpts);
 
     if (!result.success || !result.images?.length) {
       return res.status(500).json({ error: result.error || 'Image generation failed' });

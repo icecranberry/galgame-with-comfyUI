@@ -45,11 +45,11 @@
               <!-- 睡眠中 → 叫醒/摇醒按钮（三选一） -->
               <template v-if="char?.is_sleeping && !char?.is_temp_woken">
                 <!-- 被上门摇醒过 → 摇醒 -->
-                <button v-if="char?.was_door_woken" class="dr-btn" @click="onWakeDoor">
+                <button v-if="char?.was_door_woken" class="dr-btn" :class="{ shaking: doorShaking }" @click="onWakeDoor">
                   <span>摇醒</span>
                 </button>
                 <!-- 三次电话未叫醒 → 上门摇醒 -->
-                <button v-else-if="(char?.wake_attempts || 0) >= 3" class="dr-btn" @click="onWakeDoor">
+                <button v-else-if="(char?.wake_attempts || 0) >= 3" class="dr-btn" :class="{ shaking: doorShaking }" @click="onWakeDoor">
                   <span>上门摇醒</span>
                 </button>
                 <!-- 默认 → 电话叫醒 -->
@@ -182,15 +182,18 @@ const scheduleBtnText = computed(() => {
 
 // ── 叫醒系统 ──
 const phoneShaking = ref(false)
+const doorShaking = ref(false)
 
 function onWakePhone() {
   phoneShaking.value = true
-  setTimeout(() => { phoneShaking.value = false }, 600)
-  emit('wakePhone')
+  setTimeout(() => { phoneShaking.value = false }, 1600)
+  setTimeout(() => { emit('wakePhone') }, 1000)
 }
 
 function onWakeDoor() {
-  emit('wakeDoor')
+  doorShaking.value = true
+  setTimeout(() => { doorShaking.value = false }, 1600)
+  setTimeout(() => { emit('wakeDoor') }, 1000)
 }
 
 
@@ -609,7 +612,7 @@ onUnmounted(() => {
   border-color: rgba(224,142,108,0.35);
 }
 .shaking {
-  animation: phone-shake 0.4s ease-in-out;
+  animation: phone-shake 0.4s ease-in-out 2;
 }
 @keyframes phone-shake {
   0%, 100% { transform: translateX(0); }

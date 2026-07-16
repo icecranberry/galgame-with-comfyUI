@@ -167,12 +167,9 @@
       />
     </template>
 
-    <VueEasyLightbox
+    <ImageLightbox
       :visible="!!previewImage"
       :imgs="previewImage"
-      :max-zoom="6"
-      :min-zoom="0.3"
-      :zoom-scale="0.35"
       @hide="previewImage = null"
     />
 
@@ -512,8 +509,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
-import VueEasyLightbox from 'vue-easy-lightbox'
-import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import ImageLightbox from '../components/ImageLightbox.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
@@ -686,60 +682,6 @@ const inputEl = ref(null)
 const msgList = ref(null)
 const msgListInner = ref(null)
 const previewImage = ref(null)
-const imgRegenerating = ref(false)
-let _velToolbarBtn = null
-
-function createRegenerateBtn() {
-  const btn = document.createElement('button')
-  btn.setAttribute('data-vel-regenerate', '')
-  btn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>'
-  btn.style.cssText = 'margin-left:12px'
-  btn.addEventListener('click', onRegenerateImg)
-  return btn
-}
-
-watch(previewImage, async (v) => {
-  if (!v) return
-  await nextTick()
-  setTimeout(() => {
-    const toolbar = document.querySelector('.vel-toolbar')
-    if (toolbar && !toolbar.querySelector('[data-vel-regenerate]')) {
-      _velToolbarBtn = createRegenerateBtn()
-      toolbar.appendChild(_velToolbarBtn)
-    }
-  }, 50)
-})
-
-watch(imgRegenerating, (v) => {
-  if (_velToolbarBtn) {
-    _velToolbarBtn.disabled = v
-    _velToolbarBtn.style.opacity = v ? '0.4' : ''
-    _velToolbarBtn.title = v ? '重新生成中...' : '重新生成'
-    if (v) {
-      _velToolbarBtn.innerHTML = '<span class="vel-spin-inline"></span>'
-    } else {
-      _velToolbarBtn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>'
-    }
-  }
-})
-
-async function onRegenerateImg() {
-  if (imgRegenerating.value) return
-  const url = typeof previewImage.value === 'string' ? previewImage.value : (Array.isArray(previewImage.value) ? previewImage.value[0] : null)
-  if (!url) return
-  imgRegenerating.value = true
-  try {
-    const result = await api.regenerateImage(url)
-    if (result.success) {
-      previewImage.value = result.url
-    }
-  } catch (err) {
-    console.error('[chat] regenerate failed:', err.message)
-    toastFn?.('重新生成失败: ' + err.message, 'error')
-  } finally {
-    imgRegenerating.value = false
-  }
-}
 
 // ── 角色设置面板 ──
 const showSettings = ref(false)
@@ -2969,22 +2911,4 @@ function renderContent(text) {
 .affinity-realtime-toggle .switch input:checked + .slider::before {
   transform: translateX(14px);
 }
-
-/* ── 工具栏重新生成按钮 ── */
-[data-vel-regenerate] {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.4);
-  color: #ccc; cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-[data-vel-regenerate]:hover:not(:disabled) { background: rgba(0,0,0,0.6); color: #fff; }
-[data-vel-regenerate]:disabled { cursor: not-allowed; }
-
-.vel-spin-inline {
-  display: inline-block; width: 16px; height: 16px;
-  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
-  border-radius: 50%; animation: vel-spin 0.8s linear infinite;
-}
-@keyframes vel-spin { to { transform: rotate(360deg); } }
 </style>
