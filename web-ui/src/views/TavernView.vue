@@ -419,6 +419,7 @@
       :visible="showUserRelationGraph"
       :all-characters="chat.characters"
       @close="showUserRelationGraph = false"
+      @auto-deduce="onGraphAutoDeduce"
     />
 
     <!-- ═══════════════════════════════════════════
@@ -427,7 +428,9 @@
     <RelationshipDeductionModal
       :visible="showDeductionModal"
       :character="detailChar"
-      @close="showDeductionModal = false"
+      :mode="deductionMode"
+      :user-name="deductionUserName"
+      @close="showDeductionModal = false; deductionMode = 'character'"
       @saved="onDeductionSaved"
     />
   </div>
@@ -715,6 +718,8 @@ const detailChar = ref(null)
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
 const showDeductionModal = ref(false)
+const deductionMode = ref('character')
+const deductionUserName = ref('')
 const detailModalRef = ref(null)
 
 // 关闭关系图后刷新关系数据
@@ -913,6 +918,15 @@ function openRelationGraph(c) {
 
 function openDeduction(c) {
   detailChar.value = c
+  deductionMode.value = 'character'
+  deductionUserName.value = ''
+  showDeductionModal.value = true
+}
+
+function onGraphAutoDeduce() {
+  showUserRelationGraph.value = false
+  deductionMode.value = 'user'
+  deductionUserName.value = userNickname.value || 'User'
   showDeductionModal.value = true
 }
 

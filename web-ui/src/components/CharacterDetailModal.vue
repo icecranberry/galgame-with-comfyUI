@@ -185,11 +185,33 @@
                   <div class="lora-item-row">
                     <div class="form-group lora-path-group">
                       <label class="fl lora-inline-label">文件路径</label>
-                      <input
-                        v-model="item.path"
-                        class="fi"
-                        placeholder="models\loras下，例如Turbo-ANIMA.safetensors或者folder\remielle_anima.safetensors"
-                      />
+                      <div class="lora-autocomplete-wrap">
+                        <input
+                          v-model="item.path"
+                          class="fi"
+                          placeholder="输入文件名搜索..."
+                          @focus="onLoraInputFocus(idx)"
+                          @input="onLoraInput(idx)"
+                          @keydown="onLoraKeydown($event, idx)"
+                          @blur="onLoraInputBlur"
+                        />
+                        <ul v-if="activeLoraFileIdx === idx && loraSuggestions.length > 0" class="lora-dropdown">
+                          <li
+                            v-for="(file, di) in loraSuggestions"
+                            :key="file"
+                            :class="['lora-dropdown-item', { active: di === loraDropdownIdx }]"
+                            @mousedown.prevent="selectLoraFile(idx, file)"
+                          >
+                            <span>{{ file }}</span>
+                          </li>
+                        </ul>
+                        <div v-else-if="activeLoraFileIdx === idx && loraFiles.length === 0 && !loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
+                          请先在启动器中配置 ComfyUI 路径
+                        </div>
+                        <div v-else-if="activeLoraFileIdx === idx && loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
+                          加载中...
+                        </div>
+                      </div>
                     </div>
                     <div class="form-group lora-weight-group">
                       <label class="fl lora-inline-label">权重</label>
@@ -318,6 +340,11 @@ const customWorkflowEnabled = ref(false)
 const editingCustomWorkflow = ref('')
 const loraLoading = ref(false)
 const loraItems = ref([])
+const lorasFiles = ref([])
+const activeLoraFileIdx = ref(null)
+const loraDropdownIdx = ref(-1)
+const loraSuggestions = ref([])
+const loraFetching = ref(false)
 
 const FILTERED_CUSTOM_WORKFLOW_NAMES = ['制图工作流.json', '制图工作流-加入lora.json', '制图工作流-加入lora2.json', '制图工作流-加入lora3.json']
 const filteredWorkflows = computed(() =>
@@ -500,6 +527,59 @@ function removeLoraGroup(idx) {
   loraItems.value.splice(idx, 1)
 }
 
+async function fetchLorasFiles() {
+  loraFetching.value = true
+  try {
+    const data = await api.fetchLorasFiles()
+    lorasFiles.value = data.files || []
+  } catch { lorasFiles.value = [] }
+  loraFetching.value = false
+}
+
+function filterLoras(query) {
+  if (!query) return lorasFiles.value
+  const q = query.toLowerCase().replace(/\\/g, '/')
+  return lorasFiles.value.filter(f => f.toLowerCase().includes(q))
+}
+
+function onLoraInputFocus(idx) {
+  activeLoraFileIdx.value = idx
+  loraDropdownIdx.value = -1
+  loraSuggestions.value = filterLoras(loraItems.value[idx]?.path || '')
+}
+
+function onLoraInput(idx) {
+  activeLoraFileIdx.value = idx
+  loraDropdownIdx.value = -1
+  loraSuggestions.value = filterLoras(loraItems.value[idx]?.path || '')
+}
+
+function onLoraInputBlur() {
+  setTimeout(() => { activeLoraFileIdx.value = null }, 150)
+}
+
+function selectLoraFile(idx, file) {
+  loraItems.value[idx].path = file
+  activeLoraFileIdx.value = null
+}
+
+function onLoraKeydown(e, idx) {
+  if (activeLoraFileIdx.value !== idx) return
+  const items = loraSuggestions.value
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    loraDropdownIdx.value = Math.min(loraDropdownIdx.value + 1, items.length - 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    loraDropdownIdx.value = Math.max(loraDropdownIdx.value - 1, -1)
+  } else if (e.key === 'Enter' && loraDropdownIdx.value >= 0) {
+    e.preventDefault()
+    selectLoraFile(idx, items[loraDropdownIdx.value])
+  } else if (e.key === 'Escape') {
+    activeLoraFileIdx.value = null
+  }
+}
+
 function openLoraModal() {
   if (!props.character) return
   const c = props.character
@@ -511,6 +591,7 @@ function openLoraModal() {
     : []
   showLoraModal.value = true
   if (customWorkflows.value.length === 0) fetchWorkflows()
+  fetchLorasFiles()
 }
 
 function closeLoraModal() {
@@ -781,6 +862,39 @@ async function saveLora() {
 .lora-item-row { display: flex; gap: 10px; align-items: flex-end; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
 .lora-path-group { flex: 2; min-width: 0; }
+.lora-autocomplete-wrap { position: relative; }
+.lora-dropdown {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e2d6c7;
+  border-radius: 8px;
+  z-index: 10001;
+  list-style: none;
+  padding: 4px;
+  margin: 0;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
+  transform-origin: top center;
+}
+.lora-dropdown-item {
+  display: flex; align-items: center;
+  padding: 9px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-bright);
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.lora-dropdown-item:hover {
+  background: rgba(224,123,108,0.08);
+  color: var(--accent);
+}
+.lora-dropdown-item.active {
+  background: rgba(224,123,108,0.06);
+  color: var(--accent);
+  font-weight: 600;
+}
 .lora-weight-group { flex: 0 0 72px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
 .lora-item-card .fi { background: var(--glass-bg); }

@@ -6,7 +6,10 @@
           <!-- Header -->
           <div class="rel-header">
             <h3>我的关系图</h3>
-            <button class="rel-close" @click="$emit('close')">✕</button>
+            <div class="rel-header-actions">
+              <button class="rel-auto-btn" @click="$emit('auto-deduce')">推演关系</button>
+              <button class="rel-close" @click="$emit('close')">✕</button>
+            </div>
           </div>
 
           <!-- Canvas -->
@@ -101,7 +104,7 @@ const props = defineProps({
   allCharacters: { type: Array, required: true },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'auto-deduce'])
 const confirmFn = inject('confirm')
 const toastFn = inject('toast')
 
@@ -459,6 +462,17 @@ async function deleteEdge() {
   transition: all 0.15s;
 }
 .rel-close:hover { background: rgba(0,0,0,0.1); color: #333; }
+
+.rel-header-actions {
+  display: flex; align-items: center; gap: 8px;
+}
+.rel-auto-btn {
+  padding: 6px 14px; border-radius: 8px; border: none;
+  background: var(--accent, #e07b6c); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s;
+}
+.rel-auto-btn:hover { opacity: 0.85; transform: translateY(-1px); }
 
 /* ── Canvas wrap ── */
 .rel-canvas-wrap {

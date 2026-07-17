@@ -4,7 +4,7 @@
       <div v-if="visible" class="modal-overlay">
         <div class="modal-panel ded-modal">
           <div class="modal-header">
-            <h3>推演角色关系 — {{ character?.display_name }}</h3>
+            <h3>推演{{ mode === 'user' ? '用户' : '角色' }}关系 — {{ mode === 'user' ? userName : character?.display_name }}</h3>
             <button class="modal-close" @click="$emit('close')">&times;</button>
           </div>
           <div class="modal-body">
@@ -20,7 +20,7 @@
                   <div class="ded-col-header">
                     <div>
                       <span>推演结果</span>
-                      <p class="ded-col-subtitle">{{ character?.display_name }} → 小明，代表小明是{{ character?.display_name }}的老板。</p>
+                      <p class="ded-col-subtitle">{{ mode === 'user' ? userName : character?.display_name }} → 小明，代表小明是{{ mode === 'user' ? userName : character?.display_name }}的老板。</p>
                     </div>
                     <span class="ded-col-count">{{ suggestions.length }}条</span>
                   </div>
@@ -124,6 +124,8 @@ import * as api from '../api/index.js'
 const props = defineProps({
   visible: { type: Boolean, default: false },
   character: { type: Object, default: null },
+  mode: { type: String, default: 'character' }, // 'character' | 'user'
+  userName: { type: String, default: '' },
 })
 
 const emit = defineEmits(['close', 'saved'])
@@ -139,12 +141,17 @@ const editingSide = ref(null)
 const editText = ref('')
 
 async function deduce(boost) {
-  if (!props.character) return
+  if (props.mode === 'character' && !props.character) return
   loading.value = true
   suggestions.value = []
   try {
     const excludeNames = getExcludedNames()
-    const res = await api.deduceRelationships(props.character.id, boost, excludeNames)
+    let res
+    if (props.mode === 'user') {
+      res = await api.deduceUserRelationships(boost, excludeNames)
+    } else {
+      res = await api.deduceRelationships(props.character.id, boost, excludeNames)
+    }
     if (res.error) throw new Error(res.error)
     suggestions.value = dedupeByFromTo(res.relationships || [])
     if (boost) isBoosted.value = true
@@ -246,13 +253,25 @@ async function confirmAll() {
   if (confirmed.value.length === 0) return
   saving.value = true
   try {
-    for (const item of confirmed.value) {
-      const existing = await api.getRelationships(item.from_id)
-      const match = (existing.relationships || []).find(r => r.to_character_id === item.to_id)
-      if (match) {
-        await api.updateRelationship(match.id, item.relationship_text)
-      } else {
-        await api.createRelationship(item.from_id, item.to_id, item.relationship_text)
+    if (props.mode === 'user') {
+      for (const item of confirmed.value) {
+        const existing = await api.getUserRelationships()
+        const match = (existing.relationships || []).find(r => r.character_id === item.to_id)
+        if (match) {
+          await api.updateUserRelationship(match.id, item.relationship_text)
+        } else {
+          await api.createUserRelationship(item.to_id, item.relationship_text)
+        }
+      }
+    } else {
+      for (const item of confirmed.value) {
+        const existing = await api.getRelationships(item.from_id)
+        const match = (existing.relationships || []).find(r => r.to_character_id === item.to_id)
+        if (match) {
+          await api.updateRelationship(match.id, item.relationship_text)
+        } else {
+          await api.createRelationship(item.from_id, item.to_id, item.relationship_text)
+        }
       }
     }
     emit('saved')
@@ -482,10 +501,15 @@ watch(() => props.visible, (val) => {
 }
 
 /* ── Transition ── */
-.modal-fade-enter-active, .modal-fade-leave-active {
-  transition: opacity 0.2s ease;
-}
+.modal-fade-enter-active  { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.modal-fade-leave-active  { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+
+@keyframes modal-pop {
+  0%   { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
 
 .ded-collapse-enter-active, .ded-collapse-leave-active {
   transition: opacity 0.25s ease, transform 0.3s ease;

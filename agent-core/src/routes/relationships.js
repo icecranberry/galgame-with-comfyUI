@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getDb, getSystemRules, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
+import { config } from '../config.js';
 
 const router = Router();
 
@@ -23,21 +24,50 @@ function extractShortPersonality(basePrompt) {
   return text || '未知';
 }
 
-// POST /api/relationships/deduce — AI 推演角色关系
+// POST /api/relationships/deduce — AI 推演角色关系 / 用户→角色关系
 router.post('/deduce', async (req, res) => {
   try {
     const db = getDb();
-    const { characterId, boost = false, excludeNames = [] } = req.body;
+    const { characterId, mode = 'character', boost = false, excludeNames = [] } = req.body;
 
-    if (!characterId) return res.status(400).json({ error: 'characterId is required' });
+    const isUserMode = mode === 'user';
 
-    const centerChar = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
-    if (!centerChar) return res.status(404).json({ error: 'Character not found' });
+    let centerName, centerDisplay, centerPrompt;
+    let fromName;
+
+    if (isUserMode) {
+      const nickname = config.user?.nickname || 'User';
+      const persona = config.user?.persona || '';
+      const appearance = config.user?.appearance || '';
+      const gender = config.user?.gender || '';
+
+      centerName = 'user';
+      centerDisplay = nickname;
+      fromName = 'user';
+
+      const userParts = [`昵称: ${nickname}`];
+      if (gender) userParts.push(`性别: ${gender}`);
+      if (appearance) userParts.push(`外观: ${appearance}`);
+      if (persona) userParts.push(`性格/人格: ${persona}`);
+      centerPrompt = userParts.join('\n');
+    } else {
+      if (!characterId) return res.status(400).json({ error: 'characterId is required' });
+
+      const centerChar = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+      if (!centerChar) return res.status(404).json({ error: 'Character not found' });
+
+      centerName = centerChar.name;
+      centerDisplay = centerChar.display_name;
+      centerPrompt = centerChar.base_prompt;
+      fromName = centerChar.name;
+    }
 
     const allChars = db.prepare('SELECT * FROM characters').all();
-    if (allChars.length < 2) return res.status(400).json({ error: '至少需要2个角色才能推演关系' });
-
-    const excludeSet = new Set([centerChar.name, 'default', ...excludeNames.map(n => String(n))]);
+    const excludeSet = new Set([
+      ...(isUserMode ? [] : [centerName]),
+      'default',
+      ...excludeNames.map(n => String(n))
+    ]);
     const candidates = allChars.filter(c => !excludeSet.has(c.name));
     if (candidates.length === 0) return res.json({ relationships: [] });
 
@@ -79,7 +109,7 @@ router.post('/deduce', async (req, res) => {
       : '';
 
     const worldRecontextLine = worldSetting
-      ? `\n## 世界观融入流程（生成每条关系前必须完成以下思考，但不要在你的输出中展示步骤）\n步骤1：从世界观中提取关键要素——这个世界的独特地点、日常行为、社会制度是什么？随手记下 3~5 个词。\n步骤2：把目标角色\"${centerChar.display_name}\"放进去——她在这个世界里每天最可能做什么事？和谁互动最多？\n步骤3：遍历候选角色——每一个候选角色在这个世界里最可能是什么身份？和\"${centerChar.display_name}\"最可能发生什么交集？\n步骤4：把步骤3的交集压缩成 15 字以内的名词或形容词+名词标签。\n\n警告：跳过步骤1-3、直接用角色在原IP中的身份信息拼凑关系标签，等于没有遵守世界观。\n`
+      ? `\n## 世界观融入流程（生成每条关系前必须完成以下思考，但不要在你的输出中展示步骤）\n步骤1：从世界观中提取关键要素——这个世界的独特地点、日常行为、社会制度是什么？随手记下 3~5 个词。\n步骤2：把${isUserMode ? '用户"' + centerDisplay + '"' : '目标角色"' + centerDisplay + '"'}放进去——${isUserMode ? 'ta' : '她'}在这个世界里每天最可能做什么事？和谁互动最多？\n步骤3：遍历候选角色——每一个候选角色在这个世界里最可能是什么身份？和${isUserMode ? '用户"' + centerDisplay + '"' : '"' + centerDisplay + '"'}最可能发生什么交集？\n步骤4：把步骤3的交集压缩成 15 字以内的名词或形容词+名词标签。\n\n警告：跳过步骤1-3、直接用角色在原IP中的身份信息拼凑关系标签，等于没有遵守世界观。\n`
       : '';
 
     const worldExamplesLine = worldSetting
@@ -87,7 +117,9 @@ router.post('/deduce', async (req, res) => {
       : '';
 
     const taskWorldPrefix = worldSetting ? '在上述世界观框架下，' : '';
-    const userPrompt = `${boostInstruction}## 任务\n你是同人小说作家。${taskWorldPrefix}根据目标角色和候选角色的信息，推演目标角色对每个候选角色的关系。${worldRecontextLine}\n## 目标角色\n名称: ${centerChar.name}\n显示名: ${centerChar.display_name}\n完整设定:\n${centerChar.base_prompt}\n\n## 候选角色\n${charLines}\n\n## 要求\n1. from_name 固定为 "${centerChar.name}"，to_name 使用候选角色列表中的「名称」字段值\n2. 每条关系只涉及一个候选角色（目标角色 → 候选角色）\n3. 生成 5~10 条，不足 5 条也可\n4. 关系描述像真人说话一样自然，最终拼接成「ta是你的XXX」句式。仅允许名词或形容词+名词结构，禁止动词、介词和动态描写。15 字以内。\n  好例子: 互相看不顺眼的同事 / 一直暗恋的学姐 / 从小一起长大的死党${worldExamplesLine}\n  坏例子: 时空编织的共鸣者（太像设定集词条）/ 值得尊敬的指挥官（纯社会标签，无世界感）\n\n## 输出格式\n严格输出以下 JSON，不要其他内容:\n{"relationships":[{"from_name":"${centerChar.name}","to_name":"角色名称","relationship_text":"关系描述"}]}`;
+    const targetType = isUserMode ? '用户信息' : '目标角色';
+
+    const userPrompt = `${boostInstruction}## 任务\n你是同人小说作家。${taskWorldPrefix}根据${isUserMode ? '用户（User）的信息' : '目标角色和候选角色的信息'}，推演${isUserMode ? '用户对每个候选角色的关系' : '目标角色对每个候选角色的关系'}。${worldRecontextLine}\n## ${targetType}\n名称: ${isUserMode ? 'user' : centerName}\n显示名: ${centerDisplay}\n完整设定:\n${centerPrompt}\n\n## 候选角色\n${charLines}\n\n## 要求\n1. from_name 固定为 "${fromName}"，to_name 使用候选角色列表中的「名称」字段值\n2. 每条关系只涉及一个候选角色（${isUserMode ? '用户' : '目标角色'} → 候选角色）\n3. 生成 5~10 条，不足 5 条也可\n4. 关系描述像真人说话一样自然，最终拼接成「ta是你的XXX」句式。仅允许名词或形容词+名词结构，禁止动词、介词和动态描写。15 字以内。\n  好例子: 互相看不顺眼的同事 / 一直暗恋的学姐 / 从小一起长大的死党${worldExamplesLine}\n  坏例子: 时空编织的共鸣者（太像设定集词条）/ 值得尊敬的指挥官（纯社会标签，无世界感）\n\n## 输出格式\n严格输出以下 JSON，不要其他内容:\n{"relationships":[{"from_name":"${fromName}","to_name":"角色名称","relationship_text":"关系描述"}]}`;
 
     messages.push({ role: 'user', content: userPrompt });
 
@@ -95,7 +127,7 @@ router.post('/deduce', async (req, res) => {
       temperature: boost ? 1.1 : 0.8,
       max_tokens: 2048,
       response_format: { type: 'json_object' },
-      label: '关系推演' + (boost ? '-boost' : ''),
+      label: '关系推演' + (isUserMode ? '-user' : '') + (boost ? '-boost' : ''),
     });
 
     let parsed;
@@ -119,21 +151,35 @@ router.post('/deduce', async (req, res) => {
     for (const item of parsed.relationships) {
       if (!item.from_name || !item.to_name || !item.relationship_text) continue;
       if (item.from_name === item.to_name) continue;
-      if (item.from_name !== centerChar.name) continue;
+      if (item.from_name !== fromName) continue;
 
-      const fromChar = nameToChar[item.from_name];
-      const toChar = nameToChar[item.to_name];
-      if (!fromChar || !toChar) continue;
+      if (isUserMode) {
+        const toChar = nameToChar[item.to_name];
+        if (!toChar) continue;
 
-      relationships.push({
-        from_id: fromChar.id,
-        from_name: fromChar.name,
-        from_display: fromChar.display_name,
-        to_id: toChar.id,
-        to_name: toChar.name,
-        to_display: toChar.display_name,
-        relationship_text: item.relationship_text.slice(0, 20).trim(),
-      });
+        relationships.push({
+          from_name: 'user',
+          from_display: centerDisplay,
+          to_id: toChar.id,
+          to_name: toChar.name,
+          to_display: toChar.display_name,
+          relationship_text: item.relationship_text.slice(0, 20).trim(),
+        });
+      } else {
+        const fromChar = nameToChar[item.from_name];
+        const toChar = nameToChar[item.to_name];
+        if (!fromChar || !toChar) continue;
+
+        relationships.push({
+          from_id: fromChar.id,
+          from_name: fromChar.name,
+          from_display: fromChar.display_name,
+          to_id: toChar.id,
+          to_name: toChar.name,
+          to_display: toChar.display_name,
+          relationship_text: item.relationship_text.slice(0, 20).trim(),
+        });
+      }
     }
 
     res.json({ relationships });

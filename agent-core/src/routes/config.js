@@ -204,6 +204,49 @@ router.post('/user-avatar', (req, res) => {
   res.json({ ok: true, avatar_path: `/avatars/user_avatar.png?v=${mtime}` });
 });
 
+// GET /api/config/loras-files — 从 launcher_config.json 读取 comfyui_exe，推导 loras 文件夹，遍历返回 .safetensors 文件列表
+router.get('/loras-files', (req, res) => {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const projectRoot = path.dirname(path.dirname(path.dirname(__filename)));
+    const launcherConfigPath = path.join(projectRoot, '..', 'launcher_config.json');
+
+    if (!fs.existsSync(launcherConfigPath)) {
+      return res.json({ files: [], lorasDir: null, error: 'launcher_config.json 不存在，请先在启动器中配置 ComfyUI 路径' });
+    }
+
+    const launcherConfig = JSON.parse(fs.readFileSync(launcherConfigPath, 'utf-8'));
+    const comfyuiExe = launcherConfig.comfyui_exe;
+    if (!comfyuiExe) {
+      return res.json({ files: [], lorasDir: null, error: 'comfyui_exe 未配置，请先在启动器中设置 ComfyUI 启动器路径' });
+    }
+
+    const lorasDir = path.join(path.dirname(comfyuiExe), 'ComfyUI', 'models', 'loras');
+    if (!fs.existsSync(lorasDir)) {
+      return res.json({ files: [], lorasDir, error: `loras 目录不存在: ${lorasDir}` });
+    }
+
+    const files = [];
+    function walkDir(dir, relativeTo) {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const relativePath = path.relative(relativeTo, fullPath);
+        if (entry.isDirectory()) {
+          walkDir(fullPath, relativeTo);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.safetensors')) {
+          files.push(relativePath.replace(/\\/g, '/'));
+        }
+      }
+    }
+    walkDir(lorasDir, lorasDir);
+
+    res.json({ files: files.sort(), lorasDir });
+  } catch (err) {
+    res.status(500).json({ files: [], lorasDir: null, error: err.message });
+  }
+});
+
 // ── 画师串收藏夹 ──
 
 // GET /api/config/artist-favorites

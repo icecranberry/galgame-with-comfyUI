@@ -127,6 +127,15 @@ export async function deduceRelationships(characterId, boost, excludeNames) {
   return res.json()
 }
 
+export async function deduceUserRelationships(boost, excludeNames) {
+  const res = await fetch(`${BASE}/relationships/deduce`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'user', boost, excludeNames }),
+  })
+  return res.json()
+}
+
 // ── User Relationships ──
 export async function getUserRelationships() {
   const res = await fetch(`${BASE}/user-relationships`)
@@ -255,6 +264,11 @@ export async function updateComfyConfig(data) {
   await fetch(`${BASE}/config/comfy`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
   })
+}
+
+export async function fetchLorasFiles() {
+  const res = await fetch(`${BASE}/config/loras-files`)
+  return res.json()
 }
 
 export async function updateFeatureFlag(key, value) {
