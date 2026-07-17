@@ -94,6 +94,7 @@ async function tick() {
       SELECT c.* FROM characters c
       WHERE c.events_disabled = 0
         AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
+        AND (c.temporary_wake_until IS NULL OR c.temporary_wake_until <= datetime('now'))
         AND c.id NOT IN (
           SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged')
         )

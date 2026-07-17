@@ -36,6 +36,7 @@
               :char="c"
               @select="onSelectChar(c.id)"
               @peek="onCardPeek(c.id)"
+              @wake="onCardWake(c.id)"
             />
           </div>
         </template>
@@ -800,7 +801,64 @@ function onChat() {
   router.push(`/chat/${detailChar.value.id}`)
 }
 
-// ── 叫醒系统 ──
+// ── 卡片叫醒（镜像详情页当前按钮功能） ──
+async function onCardWake(id: number) {
+  const c = enrichedChars.value.find(x => x.id === id)
+  if (!c) return
+  const name = c.display_name || ''
+
+  // 被上门摇醒过 → 同「怎么又睡了」
+  if (c.was_door_woken) {
+    toastFn(`${name}！${name}！`, 'info')
+    try {
+      const res = await api.wakeUpByDoor(id)
+      if (res?.success) {
+        await store.fetchOverview(true)
+      } else {
+        toastFn(res.message || '摇醒失败', 'info')
+      }
+    } catch (err: any) {
+      toastFn('摇醒失败: ' + (err.message || '未知错误'), 'error')
+    }
+    return
+  }
+
+  // 三次电话未叫醒 → 同「上门摇醒」
+  if ((c.wake_attempts || 0) >= 3) {
+    const isFirstDoor = !c.was_door_woken
+    toastFn(`${name}！${name}！`, 'info')
+    if (isFirstDoor) {
+      setTimeout(() => {
+        toastFn(`${name}亦未寝。`, 'info')
+      }, 2000)
+    }
+    try {
+      const res = await api.wakeUpByDoor(id)
+      if (res?.success) {
+        await store.fetchOverview(true)
+      } else {
+        toastFn(res.message || '摇醒失败', 'info')
+      }
+    } catch (err: any) {
+      toastFn('摇醒失败: ' + (err.message || '未知错误'), 'error')
+    }
+    return
+  }
+
+  // 默认 → 同「电话叫醒」
+  try {
+    const res = await api.wakeUpByPhone(id)
+    if (res?.success) {
+      await store.fetchOverview(true)
+    } else {
+      toastFn(`没叫醒${name}...`, 'info')
+    }
+  } catch (err: any) {
+    toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
+  }
+}
+
+// ── 叫醒系统（抽屉内） ──
 async function onWakePhone() {
   if (!detailChar.value) return
   const id = detailChar.value.id

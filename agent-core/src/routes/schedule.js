@@ -416,12 +416,12 @@ router.post('/:characterId/peek', async (req, res) => {
       if (wakeMode === 'phone') {
         effectiveActivity = '被电话吵醒';
         effectiveDescription = '半睁着眼看着手机，睡眼惺忪，正在打哈欠';
-        wakeNote = `\n\n【注意】角色刚被${userName}的电话吵醒，处于半睡半醒的迷糊状态。双眼半睁半合，睡眼惺忪，头发凌乱，正在打哈欠。手机屏幕的亮光照在角色脸上，角色靠在床上或枕头上看着手机屏幕。表情困倦慵懒，展现出被吵醒后的迷蒙感。`;
+        wakeNote = `\n\n【注意】角色刚被${userName}的电话吵醒，处于半睡半醒的迷糊状态。双眼半睁半合，睡眼惺忪，头发凌乱，**穿着睡衣（睡觉时候绝对不会穿本来的衣服）**，正在打哈欠。手机屏幕的亮光照在角色脸上，角色靠在床上或枕头上看着手机屏幕。表情困倦慵懒，展现出被吵醒后的迷蒙感。`;
       } else if (wakeMode === 'door' || wakeMode === 'shake') {
         const userAppearance = config.user.appearance ? `（${config.user.appearance}）` : '';
         effectiveActivity = '被各种方式叫醒/晃醒/摇醒/拖拽等姿势';
         effectiveDescription = `被${userName}${userAppearance}从床上被各种方式叫醒/晃醒/摇醒/拖拽等姿势弄醒的瞬间`;
-        wakeNote = `\n\n【注意】画面中是${userName}${userAppearance}上门把角色从床上摇醒的场景。角色半坐在床上，睡眼惺忪地睁开眼，表情懵懂迷糊。${userName}${userAppearance}正俯身或弯腰，${userName}的手搭在角色任意部位，把角色晃醒或者摇醒或者拖拉拽弄醒。角色穿着睡衣，被子半掀开，展现了刚被强行弄醒的瞬间动态。`;
+        wakeNote = `\n\n【注意】画面中是${userName}${userAppearance}上门把角色从床上摇醒的场景。角色半坐在床上，睡眼惺忪地睁开眼，表情懵懂迷糊。${userName}${userAppearance}正俯身或弯腰，${userName}的手搭在角色任意部位，把角色晃醒或者摇醒或者拖拉拽弄醒。角色穿着**穿着睡衣（睡觉时候绝对不会穿本来的衣服）**，被子半掀开，展现了刚被强行弄醒的瞬间动态。`;
       }
     }
 
@@ -738,10 +738,10 @@ router.post('/:id/wake-up-phone', async (req, res) => {
       });
     }
 
-    // 50% 概率叫醒
+    // 40% 概率叫醒
     const rolled = Math.random();
-    if (rolled < 0.5) {
-      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} < 0.5 → success`);
+    if (rolled < 0.4) {
+      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} < 0.4 → success`);
       // 临时唤醒 5~15 分钟
       const tempMinutes = 5 + Math.floor(Math.random() * 11);
       const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
@@ -764,7 +764,7 @@ router.post('/:id/wake-up-phone', async (req, res) => {
     }
 
     // 叫醒失败
-    console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} >= 0.5 → miss`);
+    console.log(`[schedule] ${char.display_name} phone wake #${attempts}: rolled=${rolled.toFixed(3)} >= 0.4 → miss`);
     return res.json({
       success: false,
       attempts,

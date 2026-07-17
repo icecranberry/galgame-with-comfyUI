@@ -49,6 +49,19 @@
         </svg>
       </button>
 
+      <!-- 睡眠中 → 电话叫醒按钮 -->
+      <button
+        v-if="char.is_sleeping && !char.is_temp_woken"
+        class="wake-btn"
+        :class="{ shaking: wakeShaking }"
+        :style="{ top: char.tags?.length ? '56px' : '10px' }"
+        @click.stop="onWake"
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+      </button>
+
       <!-- 底部 -->
       <div class="card-foot" v-if="footnote">
         <span>{{ footnote }}</span>
@@ -68,14 +81,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
 
 const props = defineProps<{
   char: any
 }>()
 
-defineEmits(['select', 'peek'])
+const emit = defineEmits(['select', 'peek', 'wake'])
+
+const wakeShaking = ref(false)
+
+function onWake() {
+  wakeShaking.value = true
+  setTimeout(() => { wakeShaking.value = false }, 1600)
+  setTimeout(() => { emit('wake') }, 1000)
+}
 
 const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
@@ -137,6 +158,34 @@ const footnote = computed(() => {
   position: relative;
 }
 .card-dim { opacity: 0.65; }
+
+/* ── 右上角叫醒按钮 ── */
+.wake-btn {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: none; background: transparent;
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+  padding: 7px 12px;
+}
+.status-card:hover .wake-btn { opacity: 1; }
+.wake-btn:hover {
+  background: rgba(224,123,108,0.08);
+  color: var(--accent);
+}
+.wake-btn.shaking {
+  animation: phone-shake 0.4s ease-in-out 2;
+}
+@keyframes phone-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-4px) rotate(-2deg); }
+  30% { transform: translateX(4px) rotate(2deg); }
+  45% { transform: translateX(-3px) rotate(-1deg); }
+  60% { transform: translateX(3px) rotate(1deg); }
+  75% { transform: translateX(-1px); }
+}
 
 /* ── 右上角相机按钮 ── */
 .peek-btn {
