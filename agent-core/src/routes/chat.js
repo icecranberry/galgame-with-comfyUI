@@ -1674,7 +1674,7 @@ async function generateReplyGuesses(conversationId, character) {
   msgs.push({ role: 'user', content: '请根据以上对话，预测user接下来最可能回复的两句话。只输出 JSON：' });
 
   try {
-    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '预测' });
+    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, response_format: { type: 'json_object' }, label: '预测' });
     console.log(`[chat] generateReplyGuesses raw response: ${result.slice(0, 120)}`);
 
     // 尝试提取 JSON 对象

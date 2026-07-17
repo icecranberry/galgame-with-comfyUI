@@ -77,12 +77,12 @@ const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不�
 规则：
 1. 只提取对话中**明确提到或强烈暗示**的用户特征，不要臆想
 2. 每条特征一句话简洁描述，10-30 字
-3. 只输出 JSON 数组，不要任何其他内容
+3. 只输出 JSON 对象，不要任何其他内容
 4. 如果已有画像已涵盖某个特征，不要重复添加
 5. 每个维度最多输出一个，优先最有特点的
 
 输出格式：
-[{"type":"appearance","content":"白发，身高大约170cm"},{"type":"personality","content":"性格冷静，喜欢理性分析"}]
+{"traits":[{"type":"appearance","content":"白发，身高大约170cm"},{"type":"personality","content":"性格冷静，喜欢理性分析"}]}
 
 对话内容：
 {{messages}}`;
@@ -144,7 +144,7 @@ export async function maybeExtractPortrait(conversationId, characterId) {
             .replace('{{messages}}', messagesText),
         },
       ],
-      { temperature: 0.3, max_tokens: 600, label: '提取用户画像' }
+      { temperature: 0.3, max_tokens: 600, response_format: { type: 'json_object' }, label: '提取用户画像' }
     );
   } catch (err) {
     console.error('[portraitExtractor] LLM call failed:', err.message);
@@ -158,7 +158,8 @@ export async function maybeExtractPortrait(conversationId, characterId) {
     if (raw.startsWith('```')) {
       raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
     }
-    newTraits = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    newTraits = Array.isArray(parsed) ? parsed : (parsed.traits || []);
     if (!Array.isArray(newTraits)) newTraits = [];
   } catch (err) {
     console.error('[portraitExtractor] JSON parse failed:', err.message);

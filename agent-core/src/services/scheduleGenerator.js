@@ -89,7 +89,7 @@ export async function generateSchedule(character, direction) {
 - 只有睡觉 replyDelay=-1
 
 ## 输出格式
-输出一个 JSON 数组，8~15 个活动，按时间顺序覆盖完整 24 小时。
+输出一个 JSON 对象，外层 key 为 "activities"，值为活动数组。8~15 个活动，按时间顺序覆盖完整 24 小时。
 **绝对不允许出现时间空档**：上一个活动的 endTime 必须等于下一个活动的 startTime，
 不留任何空白分钟。所有时间必须被完整覆盖。如果日程从 03:00 开始，
 那么 00:00~03:00 也必须有一个活动覆盖（可以是睡眠或深夜活动）。
@@ -105,7 +105,7 @@ export async function generateSchedule(character, direction) {
   "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }
 
-只输出 JSON 数组，不要任何额外文字。`;
+只输出 JSON 对象，不要任何额外文字。格式：{"activities":[{...},{...}]}`;
 
   // ── 用户指定的日程方向 ──
   const directionMsg = direction ? `## 用户指定的日程方向
@@ -136,6 +136,7 @@ ${direction}**
       rawResult = await chatSync(msgs, {
         temperature: 0.5,
         max_tokens: 2048,
+        response_format: { type: 'json_object' },
         label: `schedule-gen:${character.display_name}`,
       });
 
@@ -176,19 +177,30 @@ ${direction}**
  * 解析并校验 LLM 输出的日程 JSON
  */
 function parseAndValidateSchedule(raw, displayName) {
-  // 尝试提取 JSON 数组
-  const jsonMatch = raw.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    console.warn(`[scheduleGen] No JSON array found in response for ${displayName}`);
-    return null;
+  let activities;
+
+  // 优先尝试完整 JSON 解析（兼容 json_object 模式的 {"activities":[...]} 和旧格式 [...]）
+  const trimmed = raw.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    activities = Array.isArray(parsed) ? parsed : (parsed.activities || null);
+  } catch {
+    // fallback: 旧的正则提取 JSON 数组
   }
 
-  let activities;
-  try {
-    activities = JSON.parse(jsonMatch[0]);
-  } catch {
-    console.warn(`[scheduleGen] JSON parse failed for ${displayName}`);
-    return null;
+  // 正则回退：从文本中提取 JSON 数组
+  if (!activities) {
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.warn(`[scheduleGen] No JSON array found in response for ${displayName}`);
+      return null;
+    }
+    try {
+      activities = JSON.parse(jsonMatch[0]);
+    } catch {
+      console.warn(`[scheduleGen] JSON parse failed for ${displayName}`);
+      return null;
+    }
   }
 
   if (!Array.isArray(activities) || activities.length < 6) {

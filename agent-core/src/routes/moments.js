@@ -528,7 +528,7 @@ async function generateMomentPost(character, opts = {}) {
   msgs.push({ role: 'system', content: postingTask });
   msgs.push({ role: 'user', content: userMsg });
 
-  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '发朋友圈助手' });
+  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出
   let text = '', imagePrompt = '';

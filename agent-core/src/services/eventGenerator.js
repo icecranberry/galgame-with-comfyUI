@@ -584,7 +584,7 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
   let eventData;
   let rawResult = '';
   try {
-    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '奇遇生成' });
+    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '奇遇生成' });
     const jsonStr = extractFirstJson(rawResult);
     if (!jsonStr) throw new Error('No JSON found in LLM response');
     eventData = JSON.parse(repairJson(jsonStr));
@@ -842,7 +842,7 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
   let branchData;
   let rawBranchResult = '';
   try {
-    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, label: '事件分支' });
+    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件分支' });
     const jsonStr = extractFirstJson(rawBranchResult);
     if (!jsonStr) throw new Error('No JSON found in LLM response');
     branchData = JSON.parse(repairJson(jsonStr));
@@ -993,7 +993,7 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
 
   let conclusionData;
   try {
-    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '事件结局' });
+    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件结局' });
     const jsonStr = extractFirstJson(result);
     if (!jsonStr) throw new Error('No JSON found');
     conclusionData = JSON.parse(repairJson(jsonStr));

@@ -505,7 +505,7 @@ ${characterName}: "${cleanAssistant.slice(0, 500)}"
   try {
     let raw = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.2, max_tokens: 200, label: '情绪判断' }
+      { temperature: 0.5, max_tokens: 200, response_format: { type: 'json_object' }, label: '情绪判断' }
     );
     raw = raw.trim();
     if (raw.startsWith('```')) {
@@ -839,7 +839,7 @@ ${imageRulesText}
   try {
     const result = await chatSync(
       [{ role: 'user', content: reactionPrompt }],
-      { temperature: 0.85, max_tokens: 400, label: '送礼反应' }
+      { temperature: 0.85, max_tokens: 400, response_format: { type: 'json_object' }, label: '送礼反应' }
     );
     let raw = result.trim();
     if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');

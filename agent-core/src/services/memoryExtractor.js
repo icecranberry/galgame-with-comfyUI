@@ -38,7 +38,7 @@ function buildExtractPrompt(characterPrompt, participantNames, messagesText) {
     ? participantNames.map(n => `"${n}"`).join('、')
     : '无';
 
-  return `从以下对话中提取**新增的、有长期记忆价值**的关键信息。返回严格的 JSON 数组。
+  return `从以下对话中提取**新增的、有长期记忆价值**的关键信息。返回严格的 JSON 对象。
 
 <known_info>
 以下是角色的已有设定，**不要重复提取角色设定中已有的信息**：
@@ -92,7 +92,7 @@ ${characterPrompt || '（无）'}
 对话内容：
 ${messagesText}
 
-只返回 JSON 数组，不要任何其他内容。`;
+只返回 JSON 对象，不要任何其他内容。输出格式：{"fragments":[...]}`;
 }
 
 // ── 主入口 ──
@@ -136,14 +136,15 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
     const prompt = buildExtractPrompt(characterPrompt, participantNames, messagesText);
     let raw = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.3, max_tokens: 1024, label: 'RAG记忆提取助手' }
+      { temperature: 0.3, max_tokens: 1024, response_format: { type: 'json_object' }, label: 'RAG记忆提取助手' }
     );
     // 处理 DeepSeek 可能返回的 markdown code fence
     raw = raw.trim();
     if (raw.startsWith('```')) {
       raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
     }
-    fragments = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    fragments = Array.isArray(parsed) ? parsed : (parsed.fragments || []);
     if (!Array.isArray(fragments)) fragments = [];
   } catch (err) {
     console.error('[memoryExtractor] extraction failed:', err.message);
