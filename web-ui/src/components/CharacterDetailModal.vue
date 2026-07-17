@@ -62,11 +62,18 @@
                   </svg>
                   角色关系网
                 </span>
+                <div class="detail-rel-btns">
+                <button
+                  v-if="detail.relationships.length > 0"
+                  class="detail-rel-btn subtle"
+                  @click="$emit('open-deduction', character)"
+                >推演关系</button>
                 <button
                   v-if="detail.relationships.length > 0"
                   class="detail-rel-btn subtle"
                   @click="$emit('open-relation-graph', character)"
                 >管理关系图 &rarr;</button>
+                </div>
               </div>
               <div v-if="detail.relationships.length > 0" class="detail-rel-list">
                 <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
@@ -85,13 +92,21 @@
                 </template>
                 <template v-else>
                   <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
+                  <div class="detail-rel-ctas">
+                  <button class="detail-rel-btn cta" @click="$emit('open-deduction', character)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    推演关系
+                  </button>
                   <button class="detail-rel-btn cta" @click="$emit('open-relation-graph', character)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
                       <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
                     </svg>
-                    设置角色关系
+                    手动设置关系
                   </button>
+                  </div>
                 </template>
               </div>
             </div>
@@ -272,6 +287,7 @@ const emit = defineEmits([
   'open-avatar-editor',
   'remove-avatar',
   'open-relation-graph',
+  'open-deduction',
   'lora-saved',
 ])
 
@@ -650,6 +666,8 @@ async function saveLora() {
 .detail-rel-btn.subtle:hover { background: rgba(224, 123, 108, 0.14); border-color: rgba(224, 123, 108, 0.3); color: #d06a5a; }
 .detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
 .detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(224, 123, 108, 0.35); transform: translateY(-1px); }
+.detail-rel-btns { display: flex; align-items: center; gap: 6px; }
+.detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
 .detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.6); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }

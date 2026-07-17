@@ -368,6 +368,7 @@
       @open-avatar-editor="openCharAvatarEditor"
       @remove-avatar="removeCharAvatar"
       @open-relation-graph="openRelationGraph"
+      @open-deduction="openDeduction"
       @lora-saved="onCharSaved"
     />
 
@@ -419,6 +420,16 @@
       :all-characters="chat.characters"
       @close="showUserRelationGraph = false"
     />
+
+    <!-- ═══════════════════════════════════════════
+          推演角色关系（AI 自动推理）
+          ═══════════════════════════════════════════ -->
+    <RelationshipDeductionModal
+      :visible="showDeductionModal"
+      :character="detailChar"
+      @close="showDeductionModal = false"
+      @saved="onDeductionSaved"
+    />
   </div>
 </template>
 
@@ -431,6 +442,7 @@ import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
+import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 
 const router = useRouter()
@@ -702,6 +714,7 @@ const detailChar = ref(null)
 
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
+const showDeductionModal = ref(false)
 const detailModalRef = ref(null)
 
 // 关闭关系图后刷新关系数据
@@ -896,6 +909,19 @@ async function onCharDeleted(c) {
 
 function openRelationGraph(c) {
   showRelationGraph.value = true
+}
+
+function openDeduction(c) {
+  detailChar.value = c
+  showDeductionModal.value = true
+}
+
+async function onDeductionSaved() {
+  await chat.loadCharacters()
+  if (detailChar.value) {
+    const updated = chat.characters.find(x => x.id === detailChar.value.id)
+    if (updated) detailChar.value = updated
+  }
 }
 
 // ── 角色头像 ──
@@ -1343,6 +1369,7 @@ onMounted(async () => {
 .char-card-edit-row {
   display: flex;
   justify-content: center;
+  gap: 4px;
   margin-top: 2px;
 }
 

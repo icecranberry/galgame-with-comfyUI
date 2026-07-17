@@ -118,6 +118,15 @@ export async function deleteRelationship(id) {
   return res.json()
 }
 
+export async function deduceRelationships(characterId, boost, excludeNames) {
+  const res = await fetch(`${BASE}/relationships/deduce`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId, boost, excludeNames }),
+  })
+  return res.json()
+}
+
 // ── User Relationships ──
 export async function getUserRelationships() {
   const res = await fetch(`${BASE}/user-relationships`)

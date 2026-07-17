@@ -117,20 +117,22 @@ export class SentenceSplitter {
 
       if (n > 20) {
         // ── 规则 1 ──
+        let handled = false;
         if (this.pendingSplit >= 0) {
           if (this._canSplit()) {
-            // 如果 pendingSplit 由 … 触发且当前字也是 …，取消延迟分句，改为将 …… 作为整体发出
             const splitTriggerChar = this.buffer[this.pendingSplit - 1];
             if (splitTriggerChar === '…' && safe === '…') {
               this.pendingSplit = -1;
               emit(this.buffer);
               this.buffer = '';
+              handled = true;
+            } else if (/[！？～~]/.test(splitTriggerChar) && /[！？～~]/.test(safe)) {
+              this.pendingSplit = -1;
             } else {
               emit(this.buffer.slice(0, this.pendingSplit));
               this.buffer = this.buffer.slice(this.pendingSplit);
               this.pendingSplit = -1;
               if (safe === '…') {
-                // 分句后当前字是 …，继续延迟等待（可能后面还有 …）
                 if (this.buffer.length > 0) {
                   this.pendingSplit = this.buffer.length;
                 }
@@ -141,22 +143,24 @@ export class SentenceSplitter {
                 emit(this.buffer.slice(0, -1));
                 this.buffer = '';
               }
+              handled = true;
             }
           }
-        } else if (/[！？～~]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
-          if (this._canSplit()) {
-            emit(this.buffer);
-            this.buffer = '';
-          }
-        } else if (safe === '…') {
-          // … 延迟分句，等待下一个字确认是否为 ……
-          if (this._canSplit()) {
-            this.pendingSplit = n;
-          }
-        } else if (/[，]/.test(safe)) {
-          if (this._canSplit()) {
-            emit(this.buffer.slice(0, -1));
-            this.buffer = '';
+        }
+        if (!handled) {
+          if (/[！？～~]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
+            if (this._canSplit()) {
+              this.pendingSplit = n;
+            }
+          } else if (safe === '…') {
+            if (this._canSplit()) {
+              this.pendingSplit = n;
+            }
+          } else if (/[，]/.test(safe)) {
+            if (this._canSplit()) {
+              emit(this.buffer.slice(0, -1));
+              this.buffer = '';
+            }
           }
         }
       } else {
