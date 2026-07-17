@@ -9,7 +9,7 @@
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card">
         <h3>画师串 & 分辨率</h3>
-        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。5070ti 768×512 约 7s/图</p>
+        <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
         <div class="comfy-tabs">
           <button v-for="t in comfyTabs" :key="t.mode"
@@ -205,7 +205,7 @@
           <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
 
           <!-- 自定义请求体参数（仅自定义API时显示，用于注入 body 级参数如 thinking / agent 等） -->
-          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，可选，如 {"thinking":{"type":"disabled"}}，直接合并到 API body)</span></label>
+          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，强烈建议加上 {"thinking":{"type":"disabled"}}，直接合并到 API body)</span></label>
           <textarea
             v-model="llmExtraBodyText"
             class="fi"
@@ -242,7 +242,7 @@
           <div class="toggle-row" style="margin-top:14px; padding-bottom:4px">
             <div>
               <div class="tl">合并消息兼容更多llm模板</div>
-              <div class="td">合并连续同角色消息，解决 LM Studio 等本地模型的模板冲突</div>
+              <div class="td">合并连续Assistant或User消息，解决 LM Studio本地模型或其他llm的模板冲突</div>
             </div>
             <label class="switch">
               <input type="checkbox" v-model="features.mergeMessages" @change="markLlmDirty()" />

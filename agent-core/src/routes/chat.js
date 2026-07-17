@@ -521,11 +521,10 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
     // ═══════════════════════════════════════════
-    // msgs[1] — 角色：人格 + 情绪 + 当前奇遇锚点（我是谁）
+    // msgs[1] — 角色：人格 + 当前奇遇锚点（我是谁）
     // ═══════════════════════════════════════════
     const charParts = [];
     charParts.push(character?.base_prompt || getDefaultPrompt());
-    if (emotionPrompt) charParts.push(emotionPrompt);
 
     // 日程状态注入（不存入消息历史，每次动态注入）
     if (config.features.schedule !== false) {
@@ -539,7 +538,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
     // ═══════════════════════════════════════════
-    // msgs[2] — 交互：用户上下文 + 关系 + 好感度（我在跟谁说话）
+    // msgs[2] — 交互：VAD情绪 + 用户上下文 + 关系 + 好感度（我的状态 & 我在跟谁说话）
     // ═══════════════════════════════════════════
     const relParts = [];
 
@@ -602,6 +601,11 @@ router.post('/characters/:id/chat', async (req, res) => {
         }
       }).join('\n');
       relParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
+    }
+
+    // VAD 情绪状态指令（与好感度同槽，行为指令级别）
+    if (config.features.emotion && emotionPrompt) {
+      relParts.push(emotionPrompt);
     }
 
     // 好感度指令

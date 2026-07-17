@@ -644,32 +644,42 @@ export function stateToPrompt(state, dominantEmotion = null) {
   const comp = getCompositeEmotion(state);
   const lines = [];
 
-  // ── 情绪状态 ──
-  if (comp.valence > 0.6) lines.push('心情非常愉快');
-  else if (comp.valence > 0.2) lines.push('心情不错');
-  else if (comp.valence < -0.5) lines.push('情绪低落，有些消沉');
-  else if (comp.valence < -0.1) lines.push('心情不太好');
+  // ── 愉悦度 (Valence): 影响对他人/事件的态度倾向 ──
+  if (comp.valence > 0.8) lines.push('- 你此刻心情极好，看什么都顺眼，对user格外宽容宠溺，很容易被逗笑');
+  else if (comp.valence > 0.6) lines.push('- 你心情愉快，态度友善包容，不容易被小事惹恼');
+  else if (comp.valence > 0.4) lines.push('- 你情绪平稳偏暖，整体状态自然放松');
+  else if (comp.valence > 0.2) lines.push('- 你心情中规中矩，没有明显的情绪波动');
+  else if (comp.valence >= 0.0) lines.push('- 你心情略微低落，但还能正常对话');
+  else if (comp.valence >= -0.3) lines.push('- 你心情不太好，容易不耐烦或冷淡，对user的热情可能反应平淡甚至抵触');
+  else if (comp.valence >= -0.6) lines.push('- 你情绪明显消沉，对什么都不太感兴趣，回复可能带有疏离感或消极情绪');
+  else lines.push('- 你极度消沉低落，可能感到无望或压抑，说话沉重，对user的互动可能反应冷淡甚至抗拒');
 
-  if (comp.arousal > 0.7) lines.push('精力充沛，反应活跃');
-  else if (comp.arousal > 0.55) lines.push('精神不错');
-  else if (comp.arousal < 0.25) lines.push('感到困倦疲惫');
-  else if (comp.arousal < 0.4) lines.push('有些疲惫');
+  // ── 唤醒度 (Arousal): 影响语速、话量、反应速度 ──
+  if (comp.arousal > 0.8) lines.push('- 你此刻极度兴奋激动，话语密度高、语速快，可能主动抢话或插话');
+  else if (comp.arousal > 0.65) lines.push('- 你精力充沛，反应活跃，语速偏快，容易主动开启话题');
+  else if (comp.arousal > 0.5) lines.push('- 你精神不错，能够正常参与对话互动');
+  else if (comp.arousal > 0.3) lines.push('- 你精神状态一般，不太主动发起话题，以配合user为主');
+  else if (comp.arousal > 0.15) lines.push('- 你有些疲惫困倦，话会变少变慢，回复可能简短敷衍');
+  else lines.push('- 你非常疲惫，几乎提不起说话的力气，回复极度简短慵懒，可能只用一两个词应付');
 
-  if (comp.dominance > 0.80) lines.push('语气极度强势，不容置疑');
-  else if (comp.dominance > 0.65) lines.push('语气自信果断，掌控对话');
-  else if (comp.dominance > 0.55) lines.push('语气从容自主');
-  else if (comp.dominance < 0.15) lines.push('语气极度顺从，几乎失去自我');
-  else if (comp.dominance < 0.25) lines.push('语气温柔顺从，跟随对方节奏');
-  else if (comp.dominance < 0.35) lines.push('语气温和柔软，不太主动');
+  // ── 支配度 (Dominance): 影响对话主导倾向 ──
+  if (comp.dominance > 0.8) lines.push('- 你语气极度强势，主导对话方向，不容置疑，较少顾及user的感受');
+  else if (comp.dominance > 0.6) lines.push('- 你语气自信果断，会主动引导话题走向，在对话中占有较强的主导权');
+  else if (comp.dominance > 0.4) lines.push('- 你语气从容自主，不卑不亢，和user对等交流');
+  else if (comp.dominance > 0.2) lines.push('- 你语气随和温顺，倾向于配合user的节奏，不太主动引导话题');
+  else lines.push('- 你此刻近乎完全顺从，会无条件跟随user的引导，容易出现"你说得对""听你的"等退让式回应');
 
   if (dominantEmotion && dominantEmotion !== 'neutral') {
     const label = EMOTION_LABELS[dominantEmotion] || dominantEmotion;
-    lines.push(`当前情绪基调: ${label}`);
+    lines.push(`- 核心情绪基调：${label}（由近期互动积累形成）`);
   }
 
   if (lines.length === 0) return '';
 
-  return `\n[角色当前状态]\n${lines.join('；')}。请在回复中自然地体现这些情绪状态（但不要直接说出它们）。`;
+  return `\n【当前情绪状态 — 此指令影响你的说话方式、语气和行为倾向】
+${lines.join('\n')}
+
+让这些情绪自然地渗透到你的每一个回复中。不要用"我很开心""我很难过"之类的语言直接描述自己的心情，而是让情绪影响你的用词、句式、节奏和态度——让user能从你说话的方式中感受到你的状态。`;
 }
 
 /**
