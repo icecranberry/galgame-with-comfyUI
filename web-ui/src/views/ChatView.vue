@@ -171,6 +171,7 @@
       :visible="!!previewImage"
       :imgs="previewImage"
       @hide="previewImage = null"
+      @deleted="onChatImageDeleted"
     />
 
     <!-- 角色设置面板（点击 ⚙️ 弹出） -->
@@ -682,6 +683,20 @@ const inputEl = ref(null)
 const msgList = ref(null)
 const msgListInner = ref(null)
 const previewImage = ref(null)
+
+function onChatImageDeleted(deletedUrl) {
+  const base = deletedUrl.replace(/\?.*$/, '')
+  chat.messages = chat.messages.filter(msg => {
+    if (msg.type === 'image_gen' && msg.images) {
+      return !msg.images.some(img => {
+        const imgUrl = typeof img === 'string' ? img : img.url
+        return imgUrl && imgUrl.replace(/\?.*$/, '') === base
+      })
+    }
+    return true
+  })
+  previewImage.value = null
+}
 
 // ── 角色设置面板 ──
 const showSettings = ref(false)

@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { setSetting } from './db/index.js';
+import { setSetting, getSetting } from './db/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, '..', '.env');
@@ -34,6 +34,7 @@ export const config = {
     eventArtist: process.env.COMFYUI_EVENT_ARTIST || process.env.COMFYUI_MOMENTS_ARTIST || process.env.COMFYUI_ARTIST || '@ebora',
     eventWidth: parseInt(process.env.COMFYUI_EVENT_WIDTH, 10) || 1600,
     eventHeight: parseInt(process.env.COMFYUI_EVENT_HEIGHT, 10) || 1200,
+    tlsVerify: process.env.COMFYUI_TLS_VERIFY !== 'false',
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
@@ -79,6 +80,11 @@ export const config = {
   },
 };
 
+// 启动时如果 tlsVerify=false，设置进程级环境变量让 fetch/ws 信任自签名证书
+if (config.comfyui.tlsVerify === false) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 function persistEnv(key, value) {
   let envContent = '';
   if (fs.existsSync(envPath)) {
@@ -104,7 +110,7 @@ function persistSettingSync(key, value) {
   }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight }) {
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify }) {
   if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
   if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
   if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }
@@ -115,6 +121,15 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
   if (eventArtist !== undefined) { config.comfyui.eventArtist = eventArtist; persistSettingSync('comfy_event_artist', eventArtist); }
   if (eventWidth !== undefined) { config.comfyui.eventWidth = parseInt(eventWidth, 10) || config.comfyui.eventWidth; persistSettingSync('comfy_event_width', config.comfyui.eventWidth); }
   if (eventHeight !== undefined) { config.comfyui.eventHeight = parseInt(eventHeight, 10) || config.comfyui.eventHeight; persistSettingSync('comfy_event_height', config.comfyui.eventHeight); }
+  if (tlsVerify !== undefined) {
+    config.comfyui.tlsVerify = tlsVerify === true || tlsVerify === 'true';
+    persistEnv('COMFYUI_TLS_VERIFY', String(config.comfyui.tlsVerify));
+    if (!config.comfyui.tlsVerify) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    } else {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    }
+  }
   console.log('[config] ComfyUI settings saved');
 }
 
@@ -310,4 +325,146 @@ export function updateWorkflowScene(scene) {
 
 export function getWorkflowConfig() {
   return { ...config.workflow };
+}
+
+// ── LLM 多配置 Profile 管理 ──
+
+function readProfilesFromDb() {
+  try {
+    const raw = getSetting('llm_profiles');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writeProfilesToDb(profiles) {
+  setSetting('llm_profiles', JSON.stringify(profiles));
+}
+
+function maskApiKey(key) {
+  if (!key) return { hasApiKey: false, preview: '' };
+  return {
+    hasApiKey: true,
+    preview: key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`,
+  };
+}
+
+export function getLlmProfiles() {
+  const profiles = readProfilesFromDb();
+  return profiles.map(p => ({
+    id: p.id,
+    name: p.name,
+    ...maskApiKey(p.apiKey),
+    baseURL: p.baseURL || '',
+    model: p.model || '',
+    createdAt: p.createdAt || '',
+  }));
+}
+
+export function getActiveProfileId() {
+  return getSetting('active_llm_profile_id') || null;
+}
+
+export function addLlmProfile(name) {
+  const profiles = readProfilesFromDb();
+  const id = 'p_' + Date.now();
+  const now = new Date().toISOString();
+  const profile = {
+    id,
+    name: name.trim(),
+    apiKey: config.llm.apiKey || '',
+    baseURL: config.llm.baseURL || 'https://api.deepseek.com',
+    model: config.llm.model || 'deepseek-v4-flash',
+    headers: config.llm.headers || {},
+    extraBody: config.llm.extraBody || {},
+    serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
+    mergeMessages: config.features.mergeMessages || false,
+    backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,
+    createdAt: now,
+  };
+  profiles.push(profile);
+  writeProfilesToDb(profiles);
+  return { ok: true, profile: { ...profile, ...maskApiKey(profile.apiKey) } };
+}
+
+export function deleteLlmProfile(id) {
+  let profiles = readProfilesFromDb();
+  if (profiles.length <= 1) {
+    return { ok: false, error: '不可删除最后一套配置' };
+  }
+  const target = profiles.find(p => p.id === id);
+  if (!target) {
+    return { ok: false, error: '配置不存在' };
+  }
+  const activeId = getActiveProfileId();
+  profiles = profiles.filter(p => p.id !== id);
+  writeProfilesToDb(profiles);
+
+  if (activeId === id) {
+    const first = profiles[0];
+    setSetting('active_llm_profile_id', first.id);
+    _applyProfileToConfig(first);
+  }
+  return { ok: true };
+}
+
+function _applyProfileToConfig(profile) {
+  if (profile.apiKey) {
+    config.llm.apiKey = profile.apiKey;
+    persistEnv('LLM_API_KEY', profile.apiKey);
+  }
+  if (profile.baseURL !== undefined) {
+    config.llm.baseURL = profile.baseURL;
+    persistEnv('LLM_BASE_URL', profile.baseURL);
+  }
+  if (profile.model !== undefined) {
+    config.llm.model = profile.model;
+    persistEnv('LLM_MODEL', profile.model);
+  }
+  config.llm.headers = profile.headers || {};
+  persistEnv('LLM_HEADERS', JSON.stringify(config.llm.headers));
+  config.llm.extraBody = profile.extraBody || {};
+  persistEnv('LLM_EXTRA_BODY', JSON.stringify(config.llm.extraBody));
+
+  if (profile.serializeBackgroundLLM !== undefined) {
+    updateFeatureFlag('serializeBackgroundLLM', profile.serializeBackgroundLLM);
+  }
+  if (profile.mergeMessages !== undefined) {
+    updateFeatureFlag('mergeMessages', profile.mergeMessages);
+  }
+  if (profile.backgroundConcurrency !== undefined) {
+    updateBackgroundConcurrency(profile.backgroundConcurrency);
+  }
+}
+
+export function activateLlmProfile(id) {
+  const profiles = readProfilesFromDb();
+  const profile = profiles.find(p => p.id === id);
+  if (!profile) {
+    return { ok: false, error: '配置不存在' };
+  }
+  setSetting('active_llm_profile_id', id);
+  _applyProfileToConfig(profile);
+
+  // resetClient is imported dynamically to avoid circular dependency at module level
+  return { ok: true };
+}
+
+export function syncActiveLlmProfile() {
+  const activeId = getActiveProfileId();
+  if (!activeId) return;
+  const profiles = readProfilesFromDb();
+  const idx = profiles.findIndex(p => p.id === activeId);
+  if (idx === -1) return;
+  profiles[idx] = {
+    ...profiles[idx],
+    apiKey: config.llm.apiKey || '',
+    baseURL: config.llm.baseURL || '',
+    model: config.llm.model || '',
+    headers: config.llm.headers || {},
+    extraBody: config.llm.extraBody || {},
+    serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
+    mergeMessages: config.features.mergeMessages || false,
+    backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,
+  };
+  writeProfilesToDb(profiles);
 }

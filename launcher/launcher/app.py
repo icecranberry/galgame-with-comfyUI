@@ -149,9 +149,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
 
         self._load_settings_to_form()
-        saved_version = self._config.get("version_display")
-        if saved_version:
-            self._home_page.update_version_info(saved_version, "", self._cached_has_updates)
+        self._home_page.update_version_info()
         QTimer.singleShot(1000, self._lazy_git_init)
 
     # ==================================================================
@@ -523,9 +521,7 @@ class MainWindow(QMainWindow):
                     self._cached_has_updates = self._git.has_updates()
                 except Exception:
                     pass
-                self._home_page.update_version_info(
-                    self._cached_current_tag, "main", self._cached_has_updates,
-                )
+                self._home_page.update_version_info()
                 self._version_page.set_current_tag(self._cached_current_tag)
                 self._version_page.set_tags(self._cached_tags)
                 self._version_page.set_remote_status(self._cached_has_updates)
@@ -534,11 +530,7 @@ class MainWindow(QMainWindow):
                 if self._cached_has_updates is True:
                     self._log_page.show_update_hint(True)
             else:
-                self._home_page.update_version_info(
-                    None,
-                    "版本管理初始化失败，可到「版本」页手动重试",
-                    None,
-                )
+                self._home_page.update_version_info()
                 self._git_ready = True
                 if not self._pending_fetch_is_auto:
                     self._version_page.append_log(f"[ERROR] 初始化失败: {message}")
@@ -558,9 +550,7 @@ class MainWindow(QMainWindow):
                 self._version_page.set_tags(self._cached_tags)
                 self._version_page.set_remote_status(self._cached_has_updates)
                 self._version_page.append_log("检查完成")
-                self._home_page.update_version_info(
-                    self._cached_current_tag, "main", self._cached_has_updates
-                )
+                self._home_page.update_version_info()
                 # 检测到新版本 → 在日志页显示更新提示
                 if self._cached_has_updates is True:
                     self._log_page.show_update_hint(True)
@@ -589,9 +579,7 @@ class MainWindow(QMainWindow):
                 # 兜底：若 shallow clone 导致 get_current_tag() 失败，用请求的 tag
                 if not self._cached_current_tag and hasattr(self, "_pending_checkout_tag"):
                     self._cached_current_tag = self._pending_checkout_tag
-                    self._home_page.update_version_info(
-                        self._cached_current_tag, "main", self._cached_has_updates,
-                    )
+                    self._home_page.update_version_info()
                 self._config.set("current_tag", self._cached_current_tag or "")
                 self._version_page.set_current_tag(self._cached_current_tag)
                 self._version_page.set_tags(self._cached_tags)
@@ -742,17 +730,17 @@ class MainWindow(QMainWindow):
             has_git = os.path.isfile(git_exe) or os.path.isfile(git_cmd)
 
         if not has_git:
-            self._home_page.update_version_info(None, "Git 未安装", None)
+            self._home_page.update_version_info()
             self._git_ready = True
             return
 
         if not self._git.is_git_repo():
             # 无 .git 目录 → 自动初始化仓库（git init + remote add + fetch）
-            self._home_page.update_version_info(None, "正在初始化版本管理…", None)
+            self._home_page.update_version_info()
             self._pending_fetch_is_auto = True  # 静默模式
             err = self._git.init_repo()
             if err:
-                self._home_page.update_version_info(None, err, None)
+                self._home_page.update_version_info()
                 self._git_ready = True
             # 成功则等待 operation_done 信号，在 _on_git_operation_done 中继续
             return
@@ -761,7 +749,7 @@ class MainWindow(QMainWindow):
         if self._git.repair_remote():
             self._git.clear_cache()
         else:
-            self._home_page.update_version_info(None, "Git 仓库异常", None)
+            self._home_page.update_version_info()
             self._git_ready = True
             return
 
@@ -778,9 +766,7 @@ class MainWindow(QMainWindow):
             pass
         branch = self._git.get_current_branch()
         version_display = self._cached_current_tag or branch
-        self._home_page.update_version_info(
-            self._cached_current_tag, branch, self._cached_has_updates,
-        )
+        self._home_page.update_version_info()
         self._config.set("current_tag", self._cached_current_tag or "")
         self._config.set("version_display", version_display)
         self._git_ready = True

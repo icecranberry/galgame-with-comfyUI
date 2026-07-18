@@ -3,8 +3,8 @@ import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
 
-const BASE = config.comfyui.url;
-const WS_BASE = BASE.replace(/^http/, 'ws');
+const getBase = () => config.comfyui.url;
+const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
 
 // ── 节点定义缓存（从 ComfyUI /object_info 获取，~2.8MB，常驻内存）──
 
@@ -17,7 +17,7 @@ let pollingTimer = null;
  * 用于解析紧凑格式 workflow（如 aki-v2）中省略的 widget 输入。
  */
 async function fetchObjectInfo() {
-  const res = await fetch(`${BASE}/object_info`);
+  const res = await fetch(`${getBase()}/object_info`);
   if (!res.ok) throw new Error(`object_info returned ${res.status}`);
   return res.json();
 }
@@ -474,7 +474,7 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
     extra_data: { extra_pnginfo: { workflow: guiWorkflow } },
   };
 
-  const res = await fetch(`${BASE}/api/prompt`, {
+  const res = await fetch(`${getBase()}/api/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -507,8 +507,9 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
 // ── WebSocket 实时进度 + 结果监听 ──
 
 function wsProgressAndDownload(clientId, promptId, onProgress) {
-  const wsUrl = `${WS_BASE}/ws?clientId=${encodeURIComponent(clientId)}`;
-  const ws = new WebSocket(wsUrl);
+  const wsUrl = `${getWsBase()}/ws?clientId=${encodeURIComponent(clientId)}`;
+  const wsOpts = config.comfyui.tlsVerify !== false ? {} : { rejectUnauthorized: false };
+  const ws = new WebSocket(wsUrl, wsOpts);
 
   return new Promise((resolve, reject) => {
     const timeoutMs = 600_000; // 10 分钟
@@ -642,7 +643,7 @@ async function downloadImagesFromHistory(promptId, retries = 3) {
   let lastErr;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const res = await fetch(`${BASE}/history/${promptId}`);
+      const res = await fetch(`${getBase()}/history/${promptId}`);
       const data = await res.json();
 
       if (data[promptId]) {
@@ -692,7 +693,7 @@ async function pollAndDownload(promptId, onProgress, maxRetries = 600, interval 
   console.warn('[comfyClient] Using polling fallback — progress will be rough');
 
   for (let i = 0; i < maxRetries; i++) {
-    const res = await fetch(`${BASE}/history/${promptId}`);
+    const res = await fetch(`${getBase()}/history/${promptId}`);
     const data = await res.json();
 
     if (data[promptId]) {
@@ -742,7 +743,7 @@ async function pollAndDownload(promptId, onProgress, maxRetries = 600, interval 
 export async function downloadImageAsBase64(filename, subfolder = '', type = 'output') {
   const params = new URLSearchParams({ filename, type });
   if (subfolder) params.set('subfolder', subfolder);
-  const url = `${BASE}/view?${params}`;
+  const url = `${getBase()}/view?${params}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Download failed: ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -761,3 +762,18 @@ export function findLatestImageInFolder(folderPath, subfolder = 'bot') {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/**
+ * 重启 ComfyUI 客户端连接（URL/TLS 变更后调用）。
+ * 清除缓存和轮询定时器，立即以新地址重新拉取 object_info。
+ */
+export function restartComfyClient() {
+  objectInfoCache = null;
+  widgetSlotMap = null;
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+  // 重新开始轮询（poll() 内部会立即尝试一次）
+  startObjectInfoPolling();
+}

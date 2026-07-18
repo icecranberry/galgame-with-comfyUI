@@ -421,6 +421,9 @@ function initSchema(db) {
   // 迁移: 将 global_rules.world_setting 移至 world_settings 表（多套世界观）
   migrateWorldSettings(db);
 
+  // 迁移: LLM 多配置切换（需在 seed 之后，确保 DB 已初始化）
+  migrateLlmProfiles(db);
+
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
@@ -1083,6 +1086,8 @@ export function getSetting(key) {
 const DB_ONLY_KEYS = new Set([
   'last_moments_seen_at',
   'last_events_seen_at',
+  'llm_profiles',
+  'active_llm_profile_id',
 ]);
 
 /** 写入单条系统设置 */
@@ -1168,6 +1173,38 @@ function migrateLorasArraySchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateLorasArraySchema error:', err.message);
+  }
+}
+
+// 迁移: LLM 多套配置切换 — 从当前 .env 生成默认 profile
+function migrateLlmProfiles(db) {
+  try {
+    const existing = db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'llm_profiles'`).get();
+    if (existing) return;
+
+    const now = new Date().toISOString();
+    const defaultProfile = {
+      id: 'p_' + Date.now(),
+      name: '默认配置',
+      apiKey: config.llm.apiKey || '',
+      baseURL: config.llm.baseURL || 'https://api.deepseek.com',
+      model: config.llm.model || 'deepseek-v4-flash',
+      headers: config.llm.headers || {},
+      extraBody: config.llm.extraBody || {},
+      serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
+      mergeMessages: config.features.mergeMessages || false,
+      backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,
+      createdAt: now,
+    };
+
+    const profiles = [defaultProfile];
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
+      .run('llm_profiles', JSON.stringify(profiles));
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
+      .run('active_llm_profile_id', defaultProfile.id);
+    console.log('[db] migrateLlmProfiles: created default profile from current config');
+  } catch (err) {
+    console.log('[db] migrateLlmProfiles error:', err.message);
   }
 }
 

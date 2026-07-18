@@ -686,6 +686,10 @@ async function main() {
   ].join("\n"), "utf-8");
   ok("使用说明.txt");
 
+  // VERSION 文件（供启动器运行时读取版本号）
+  writeFileSync(resolve(RELEASE_DIR, "VERSION"), VERSION + "\n", "utf-8");
+  ok("VERSION");
+
   // 默认头像：从 assets 源复制到 avatars 目录
   const defaultAvatar = resolve(AGENT_CORE, "assets", "default_assistant_header.png");
   if (existsSync(defaultAvatar)) {

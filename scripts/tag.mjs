@@ -13,6 +13,7 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -107,6 +108,11 @@ log(`版本: ${latestTag} → ${C.cyan}${newVersion}${C.reset}`);
 
 const tagMessage = manualMessage || sh("git log -1 --format=%s");
 log(`注释: ${tagMessage}`);
+
+// ── 写入 VERSION 文件 ──
+const versionWithoutV = newVersion.replace(/^v/, "");
+writeFileSync(resolve(ROOT, "VERSION"), versionWithoutV + "\n", "utf-8");
+log(`VERSION 文件已更新: ${versionWithoutV}`);
 
 // ── 4. 检查工作区状态 ──
 

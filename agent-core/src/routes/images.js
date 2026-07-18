@@ -440,6 +440,91 @@ router.post('/regenerate', async (req, res) => {
   }
 });
 
+// DELETE /api/images/delete — 删除图片文件，不清理 DB 引用
+router.delete('/delete', async (req, res) => {
+  const { url: imageUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+
+  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+  const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
+
+  let dirPath, filename, category;
+  if (match) {
+    const folder = match[1];
+    filename = match[2];
+    category = null;
+    for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {
+      if (info.dir === folder) { category = cat; break; }
+    }
+    if (!category && folder === '') category = LEGACY_CATEGORY;
+    if (!category) return res.status(400).json({ error: `unknown folder: ${folder}` });
+    dirPath = getImageDir(category);
+  } else {
+    // legacy flat format: /images/xxx.png
+    const legacyMatch = cleanUrl.match(/^\/images\/([^/]+)$/);
+    if (!legacyMatch) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+    filename = legacyMatch[1];
+    category = LEGACY_CATEGORY;
+    dirPath = getImageDir(LEGACY_CATEGORY);
+  }
+
+  const filePath = path.join(dirPath, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'file not found' });
+  }
+
+  try {
+    fs.unlinkSync(filePath);
+    console.log(`[delete] removed ${filePath}`);
+    invalidateGalleryCache();
+
+    // 聊天图片：清理 messages.images 和 raw_messages.prompt
+    if (category === 'chat') {
+      try {
+        const db = getDb();
+        const msgRows = db.prepare(
+          `SELECT id, images, raw_id FROM messages WHERE images LIKE '%' || ? || '%'`
+        ).all(filename);
+
+        for (const row of msgRows) {
+          try {
+            const urls = JSON.parse(row.images) || [];
+            const filtered = urls.filter(u => {
+              const uBase = u.replace(/\?.*$/, '');
+              return uBase !== cleanUrl;
+            });
+            if (filtered.length > 0) {
+              db.prepare(`UPDATE messages SET images = ? WHERE id = ?`).run(JSON.stringify(filtered), row.id);
+            } else {
+              db.prepare(`UPDATE messages SET images = NULL WHERE id = ?`).run(row.id);
+            }
+            console.log(`[delete] cleaned images from message id=${row.id}`);
+          } catch (e) {
+            console.error(`[delete] parse images for message id=${row.id}:`, e.message);
+          }
+        }
+
+        // 清除关联 raw_messages 的 prompt，使 regenerate 不再生效
+        const rawIds = [...new Set(msgRows.map(r => r.raw_id).filter(Boolean))];
+        if (rawIds.length > 0) {
+          const placeholders = rawIds.map(() => '?').join(',');
+          const result = db.prepare(
+            `UPDATE raw_messages SET prompt = NULL WHERE id IN (${placeholders})`
+          ).run(...rawIds);
+          console.log(`[delete] cleared prompt from ${result.changes} raw_messages`);
+        }
+      } catch (e) {
+        console.error('[delete] DB cleanup error:', e.message);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[delete] error:', err.message);
+    res.status(500).json({ error: 'Delete failed: ' + err.message });
+  }
+});
+
 // GET /api/images/comfyui-health — ComfyUI 连接检查
 router.get('/comfyui-health', async (req, res) => {
   try {

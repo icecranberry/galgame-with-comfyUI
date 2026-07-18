@@ -2,13 +2,14 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
+import { restartComfyClient } from '../services/comfyClient.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
@@ -29,9 +30,12 @@ router.get('/', (req, res) => {
       eventArtist: config.comfyui.eventArtist,
       eventWidth: config.comfyui.eventWidth,
       eventHeight: config.comfyui.eventHeight,
+      tlsVerify: config.comfyui.tlsVerify,
     },
     features: config.features,
     llm: getLlmConfig(),
+    llmProfiles: getLlmProfiles(),
+    activeLlmProfileId: getActiveProfileId(),
     disturb: {
       startTime: config.disturb.startTime,
       endTime: config.disturb.endTime,
@@ -45,8 +49,12 @@ router.get('/', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight } = req.body;
-  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight });
+  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify } = req.body;
+  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify });
+  // URL 或 TLS 设置变更后立即重启 ComfyUI 客户端连接（使新地址/证书策略立即生效）
+  if (url !== undefined || tlsVerify !== undefined) {
+    restartComfyClient();
+  }
   res.json({ ok: true, ...config.comfyui });
 });
 
@@ -112,9 +120,56 @@ router.put('/llm', (req, res) => {
     console.log('[config] serializeBackgroundLLM auto-disabled (preset LLM selected)');
   }
 
+  syncActiveLlmProfile();
+
   res.json({ ok: true, ...getLlmConfig() });
 });
 
+// ── LLM Profile 管理 ──
+
+// GET /api/config/llm/profiles — 获取所有 profile
+router.get('/llm/profiles', (req, res) => {
+  res.json({ profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
+});
+
+// POST /api/config/llm/profiles — 新增 profile（快照当前 LLM 配置）
+router.post('/llm/profiles', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+  const result = addLlmProfile(name);
+  res.json({ ok: true, profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
+});
+
+// DELETE /api/config/llm/profiles/:id — 删除 profile
+router.delete('/llm/profiles/:id', (req, res) => {
+  const result = deleteLlmProfile(req.params.id);
+  if (!result.ok) return res.status(400).json(result);
+  resetClient();
+  res.json({ ok: true, profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
+});
+
+// POST /api/config/llm/profiles/:id/activate — 切换激活 profile
+router.post('/llm/profiles/:id/activate', (req, res) => {
+  const result = activateLlmProfile(req.params.id);
+  if (!result.ok) return res.status(400).json(result);
+  resetClient();
+
+  // preset 检测：与 PUT /api/config/llm 一致
+  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1'];
+  if (presets.includes(config.llm.baseURL) && config.features.serializeBackgroundLLM) {
+    updateFeatureFlag('serializeBackgroundLLM', false);
+  }
+
+  res.json({ ok: true, llmConfig: getLlmConfig(), profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
+});
+
+// PUT /api/config/llm/profiles/active/sync — 同步当前配置到激活的 profile
+router.put('/llm/profiles/active/sync', (req, res) => {
+  syncActiveLlmProfile();
+  res.json({ ok: true });
+});
 
 // GET /api/config/rules — 获取全部全局规则
 router.get('/rules', (req, res) => {

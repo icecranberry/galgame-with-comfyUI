@@ -322,6 +322,35 @@ export async function updateLlmConfig(data) {
   return res.json()
 }
 
+// ── LLM Profile 管理 ──
+
+export async function getLlmProfiles() {
+  const res = await fetch(`${BASE}/config/llm/profiles`)
+  return res.json()
+}
+
+export async function addLlmProfile(name) {
+  const res = await fetch(`${BASE}/config/llm/profiles`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return res.json()
+}
+
+export async function deleteLlmProfile(id) {
+  const res = await fetch(`${BASE}/config/llm/profiles/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function activateLlmProfile(id) {
+  const res = await fetch(`${BASE}/config/llm/profiles/${id}/activate`, { method: 'POST' })
+  return res.json()
+}
+
+export async function syncActiveLlmProfile() {
+  await fetch(`${BASE}/config/llm/profiles/active/sync`, { method: 'PUT' })
+}
+
 // ── World Settings ──
 export async function getWorldSettings() {
   const res = await fetch(`${BASE}/config/world-settings`)
@@ -700,6 +729,20 @@ export async function regenerateImage(imageUrl) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || `Regenerate failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 删除指定图片（物理文件） */
+export async function deleteImage(imageUrl) {
+  const res = await fetch(`${BASE}/images/delete`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: imageUrl }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `删除失败 (${res.status})`)
   }
   return res.json()
 }

@@ -31,13 +31,14 @@
     <div class="moment-content">{{ post.content }}</div>
 
     <!-- 配图 -->
-    <div v-if="post.images?.length > 0" class="moment-images" :class="{ 'single': post.images.length === 1 }">
+    <div v-if="post.images?.length > 0 && visibleImages.length > 0" class="moment-images" :class="{ 'single': visibleImages.length === 1 }">
       <img
-        v-for="(img, i) in post.images"
+        v-for="(img, i) in visibleImages"
         :key="i"
         :src="img"
         class="moment-img"
-        @click="$emit('preview', { images: post.images, index: i })"
+        @click="onPreviewImg(i)"
+        @error="onImgError(i)"
         loading="lazy"
         alt="朋友圈配图"
       />
@@ -163,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, inject, watch } from 'vue'
+import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { userNickname } from '../userConfig.js'
@@ -183,6 +184,7 @@ const MAX_VISIBLE = 2
 const showReplyInput = ref(false)
 const expanded = ref(false)
 const showMenu = ref(false)
+const imgErrors = reactive(new Set())
 // 点击菜单外自动关闭
 watch(showMenu, (v) => {
   if (v) setTimeout(() => document.addEventListener('click', closeMenuOnOutside, { once: true }))
@@ -211,6 +213,18 @@ const avatarStyle = computed(() => {
   if (p.avatar_path) return { backgroundImage: `url(${p.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
   return { background: '#e07b6c' }
 })
+
+const visibleImages = computed(() => {
+  return (props.post.images || []).filter((_, i) => !imgErrors.has(i))
+})
+
+function onImgError(i) {
+  imgErrors.add(i)
+}
+
+function onPreviewImg(i) {
+  emit('preview', { images: visibleImages.value, index: i })
+}
 
 // 首次加载评论（store.loadComments 直接设置 post._comments，computed 自动同步）
 if (comments.value.length === 0) {

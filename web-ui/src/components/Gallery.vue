@@ -62,6 +62,7 @@
       :index="lightboxIndex"
       @hide="lightboxVisible = false"
       @regenerated="onRegenerated"
+      @deleted="onDeleted"
     />
   </div>
 </template>
@@ -173,6 +174,12 @@ function onRegenerated(newUrl) {
       img.url = newUrl
     }
   }
+}
+
+function onDeleted(deletedUrl) {
+  const base = deletedUrl.replace(/\?.*$/, '')
+  images.value = images.value.filter(img => img.url.replace(/\?.*$/, '') !== base)
+  total.value = Math.max(0, total.value - 1)
 }
 
 function onFolderChange(key) {

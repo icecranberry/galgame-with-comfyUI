@@ -160,7 +160,7 @@
 
   <!-- 图片预览：Teleport 到 body 并置于遮罩层之上 -->
   <Teleport to="body">
-    <ImageLightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" @regenerated="onRegenerated" />
+    <ImageLightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" @regenerated="onRegenerated" @deleted="onDeleted" />
   </Teleport>
 </template>
 
@@ -261,6 +261,10 @@ function onRegenerated(newUrl) {
       }
     }
   }
+}
+
+function onDeleted(deletedUrl) {
+  previewImg.value = null
 }
 
 const previewText = computed(() => {

@@ -121,6 +121,7 @@ class HomePage(QWidget):
         super().__init__(parent)
         self._assets_dir = assets_dir
         self._project_dir = project_dir
+        self._version = self._read_version_file()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -183,7 +184,7 @@ class HomePage(QWidget):
         self._card_workflow.clicked.connect(lambda: self.open_directory.emit(workflow_path))
 
         # --- 版本号 (左下) ---
-        self.version_label = QLabel(f"邻舍.EXE v{__version__}", self)
+        self.version_label = QLabel(f"邻舍.EXE v{self._version}", self)
         self.version_label.setStyleSheet(
             "color: #FFFFFF; font-size: 16px; font-weight: bold; font-style: italic; background: transparent;"
         )
@@ -334,15 +335,20 @@ class HomePage(QWidget):
         """隐藏手机端访问条幅。不清除缓存 IP，避免下次显示时重复探测。"""
         self._mobile_banner.hide()
 
-    def update_version_info(self, tag: str | None, branch: str, has_updates: bool | None):
-        if tag:
-            project_ver = f"v{tag}" if not tag.startswith("v") else tag
-            text = f"邻舍.EXE v{__version__}  ·  内核 {project_ver}"
-        elif branch and branch != "main":
-            text = f"邻舍.EXE v{__version__}  ·  内核 {branch}"
-        else:
-            text = f"邻舍.EXE v{__version__}"
-        self.version_label.setText(text)
+    def update_version_info(self):
+        self._version = self._read_version_file()
+        self.version_label.setText(f"邻舍.EXE v{self._version}")
+
+    def _read_version_file(self) -> str:
+        version_file = os.path.join(self._project_dir, "VERSION")
+        try:
+            with open(version_file, "r", encoding="utf-8") as f:
+                ver = f.read().strip()
+                if ver:
+                    return ver
+        except (FileNotFoundError, PermissionError):
+            pass
+        return __version__
 
     # ------------------------------------------------------------------
     # Layout

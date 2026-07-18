@@ -32,13 +32,14 @@
 import { ref, computed, watch, nextTick, inject, onUnmounted } from 'vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
-import { regenerateImage } from '../api/index.js'
+import { regenerateImage, deleteImage } from '../api/index.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   imgs: { type: [String, Array, Object], default: '' },
   index: { type: Number, default: 0 },
   showRegenerate: { type: Boolean, default: true },
+  showDelete: { type: Boolean, default: true },
   maxZoom: { type: Number, default: 6 },
   minZoom: { type: Number, default: 0.1 },
   zoomScale: { type: Number, default: 0.12 },
@@ -56,13 +57,16 @@ const props = defineProps({
   zIndex: { type: Number, default: null },
 })
 
-const emit = defineEmits(['hide', 'update:visible', 'regenerated'])
+const emit = defineEmits(['hide', 'update:visible', 'regenerated', 'deleted'])
 const toastFn = inject('toast', null)
+const confirmFn = inject('confirm', null)
 
 const cacheBump = ref(0)
 const lightboxKey = ref(0)
 const regenerating = ref(false)
+const deleting = ref(false)
 let _velToolbarBtn = null
+let _velDeleteBtn = null
 
 function bumpUrl(url) {
   if (!url || !cacheBump.value) return url
@@ -101,20 +105,41 @@ function createRegenerateBtn() {
   return btn
 }
 
+function createDeleteBtn() {
+  const btn = document.createElement('button')
+  btn.setAttribute('data-vel-delete', '')
+  btn.innerHTML = '<svg class="vel-del-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>'
+  btn.addEventListener('click', onDelete)
+  return btn
+}
+
 function injectBtn() {
-  if (!props.showRegenerate) return
   setTimeout(() => {
     const toolbars = document.querySelectorAll('.vel-toolbar')
     for (const tb of toolbars) {
       if (document.querySelector('[data-vel-regenerate]')) return
       const rect = tb.getBoundingClientRect()
-      _velToolbarBtn = createRegenerateBtn()
-      _velToolbarBtn.style.position = 'fixed'
-      _velToolbarBtn.style.top = rect.top + 'px'
       const offset = Math.min(window.innerWidth * 0.05, 50)
-      _velToolbarBtn.style.left = (rect.right + offset) + 'px'
-      _velToolbarBtn.style.zIndex = '1200'
-      tb.after(_velToolbarBtn)
+
+      // 删除按钮（左侧）
+      if (props.showDelete) {
+        _velDeleteBtn = createDeleteBtn()
+        _velDeleteBtn.style.position = 'fixed'
+        _velDeleteBtn.style.top = rect.top + 'px'
+        _velDeleteBtn.style.left = Math.max(10, rect.left - offset - 40) + 'px'
+        _velDeleteBtn.style.zIndex = '1200'
+        tb.after(_velDeleteBtn)
+      }
+
+      // 重绘按钮（右侧）
+      if (props.showRegenerate) {
+        _velToolbarBtn = createRegenerateBtn()
+        _velToolbarBtn.style.position = 'fixed'
+        _velToolbarBtn.style.top = rect.top + 'px'
+        _velToolbarBtn.style.left = (rect.right + offset) + 'px'
+        _velToolbarBtn.style.zIndex = '1200'
+        tb.after(_velToolbarBtn)
+      }
       return
     }
   }, 80)
@@ -127,6 +152,15 @@ function syncBtnState(v) {
   _velToolbarBtn.title = v ? '重新生成中...' : '重新生成'
   const svg = _velToolbarBtn.querySelector('.vel-reg-svg')
   if (svg) svg.classList.toggle('vel-reg-spinning', v)
+}
+
+function syncDeleteBtnState(v) {
+  if (!_velDeleteBtn) return
+  _velDeleteBtn.disabled = v
+  _velDeleteBtn.style.opacity = v ? '0.7' : ''
+  _velDeleteBtn.title = v ? '删除中...' : '删除图片'
+  const svg = _velDeleteBtn.querySelector('.vel-del-svg')
+  if (svg) svg.classList.toggle('vel-del-spinning', v)
 }
 
 /** 扫描页面上所有 img / background-image，把旧图 URL 替换为带 cache-bust 的新 URL */
@@ -160,8 +194,9 @@ watch(() => props.visible, async (v) => {
 })
 
 watch(regenerating, syncBtnState)
+watch(deleting, syncDeleteBtnState)
 
-onUnmounted(() => { _velToolbarBtn = null })
+onUnmounted(() => { _velToolbarBtn = null; _velDeleteBtn = null })
 
 function onHide() {
   emit('hide')
@@ -188,6 +223,28 @@ async function onRegenerate() {
     regenerating.value = false
   }
 }
+
+async function onDelete() {
+  if (deleting.value) return
+  const url = getCurrentUrl()
+  if (!url) return
+  const ok = confirmFn
+    ? await confirmFn({ message: '确定要删除这张图片吗？', okText: '删除', danger: true })
+    : window.confirm('确定要删除这张图片吗？')
+  if (!ok) return
+  deleting.value = true
+  try {
+    await deleteImage(url)
+    emit('deleted', url)
+    emit('hide')
+    emit('update:visible', false)
+  } catch (err) {
+    console.error('[ImageLightbox] delete failed:', err.message)
+    toastFn?.('删除失败: ' + err.message, 'error')
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <style>
@@ -207,4 +264,21 @@ async function onRegenerate() {
   transform-origin: center;
 }
 @keyframes vel-reg-spin { to { transform: rotate(360deg); } }
+
+[data-vel-delete] {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(239,68,68,0.3); background: #2d2d2d;
+  color: #ef4444; cursor: pointer;
+  padding: 10px;
+  transition: background 0.2s, color 0.2s;
+}
+[data-vel-delete]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #f87171; }
+[data-vel-delete]:disabled { cursor: not-allowed; }
+
+.vel-del-spinning {
+  animation: vel-del-spin 1s linear infinite;
+  transform-origin: center;
+}
+@keyframes vel-del-spin { to { transform: rotate(360deg); } }
 </style>

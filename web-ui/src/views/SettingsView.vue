@@ -161,6 +161,54 @@
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
 
+        <!-- LLM Profile 切换 -->
+        <div class="llm-profiles-bar">
+          <div v-for="p in llmProfiles" :key="p.id" class="profile-item-row">
+            <button
+              :class="['profile-tag', { active: p.id === activeLlmProfileId }]"
+              @click="switchProfile(p.id)"
+              :title="(p.preview || '未设置Key') + ' · ' + (p.model || '?')"
+            >
+              <span class="profile-name">{{ p.name }}</span>
+              <span v-if="p.id === activeLlmProfileId" class="profile-dot"></span>
+            </button>
+            <button
+              v-if="llmProfiles.length > 1 && p.id !== activeLlmProfileId"
+              class="profile-tag profile-delete-btn"
+              @click="removeProfile(p.id)"
+              title="删除该配置"
+            >
+              <span class="profile-x">×</span>
+            </button>
+          </div>
+          <button class="profile-tag profile-add" @click="showAddProfile = true">
+            <span>+ 新增配置</span>
+          </button>
+        </div>
+
+        <!-- 新增 Profile 弹窗 -->
+        <Teleport to="body">
+          <Transition name="add-profile-fade">
+            <div v-if="showAddProfile" class="add-profile-overlay" @click.self="showAddProfile = false">
+              <div class="add-profile-dialog">
+                <h4>新增配置</h4>
+                <p class="fd">将当前 LLM 配置（地址、模型、Key、自定义开关等）保存为一个新的配置快照</p>
+                <input
+                  v-model="newProfileName"
+                  class="fi"
+                  placeholder="输入配置名称，如：我的OpenAI、本地LLM"
+                  @keyup.enter="addProfile"
+                  ref="newProfileInput"
+                />
+                <div class="add-profile-actions">
+                  <button class="btn-ghost" @click="showAddProfile = false">取消</button>
+                  <button class="btn-primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </Teleport>
+
         <!-- API Key -->
         <label class="fl">API Key</label>
         <div class="apikey-row">
@@ -205,7 +253,7 @@
           <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
 
           <!-- 自定义请求体参数（仅自定义API时显示，用于注入 body 级参数如 thinking / agent 等） -->
-          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，强烈建议加上 {"thinking":{"type":"disabled"}}，直接合并到 API body)</span></label>
+          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，强烈建议加上 {"thinking":{"type":"disabled"}}，不然思考链挤占了正文，正文无输出)</span></label>
           <textarea
             v-model="llmExtraBodyText"
             class="fi"
@@ -358,6 +406,10 @@
         <h3>ComfyUI 连接</h3>
         <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
         <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
+        <label class="cb">
+          <input type="checkbox" v-model="comfySkipTls" @change="markConnDirty" />
+          <span>跳过 TLS 证书验证（连接云端 HTTPS ComfyUI 失败时勾选）</span>
+        </label>
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
@@ -534,7 +586,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -583,6 +635,7 @@ function switchComfyTab(mode) {
   comfyTab.value = mode
 }
 const comfyUrl = ref('')
+const comfySkipTls = ref(false)
 const connDirty = ref(false)
 const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false })
@@ -739,6 +792,124 @@ const llmDirty = ref(false)
 const llmSaved = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 
+// ── LLM Profile 切换 ──
+const llmProfiles = ref([])
+const activeLlmProfileId = ref('')
+const showAddProfile = ref(false)
+const newProfileName = ref('')
+const newProfileInput = ref(null)
+watch(() => showAddProfile.value, async (v) => {
+  if (v) {
+    newProfileName.value = ''
+    await nextTick()
+    newProfileInput.value?.focus()
+  }
+})
+
+async function loadLlmProfiles(data) {
+  if (data) {
+    llmProfiles.value = data.llmProfiles || []
+    activeLlmProfileId.value = data.activeLlmProfileId || ''
+  } else {
+    const res = await getLlmProfiles()
+    llmProfiles.value = res.profiles || []
+    activeLlmProfileId.value = res.activeProfileId || ''
+  }
+}
+
+async function switchProfile(id) {
+  if (id === activeLlmProfileId.value) return
+  try {
+    const result = await activateLlmProfile(id)
+    if (result.ok) {
+      activeLlmProfileId.value = result.activeProfileId
+      llmProfiles.value = result.profiles || []
+      if (result.llmConfig) {
+        llmPreview.value = { ...result.llmConfig }
+        llmBaseURL.value = result.llmConfig.baseURL || 'https://api.deepseek.com'
+        llmModel.value = result.llmConfig.model || 'deepseek-chat'
+        const hasCustom = (result.llmConfig.headers && Object.keys(result.llmConfig.headers).length > 0)
+          || (result.llmConfig.extraBody && Object.keys(result.llmConfig.extraBody).length > 0)
+        isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
+        llmHeadersText.value = result.llmConfig.headers && Object.keys(result.llmConfig.headers).length
+          ? JSON.stringify(result.llmConfig.headers, null, 2) : '{}'
+        llmExtraBodyText.value = result.llmConfig.extraBody && Object.keys(result.llmConfig.extraBody).length
+          ? JSON.stringify(result.llmConfig.extraBody, null, 2) : '{}'
+        settingsStore.setHasApiKey(result.llmConfig.hasApiKey)
+        llmApiKey.value = ''
+        llmDirty.value = false
+        llmSaved.value = false
+        // 刷新完整的 features 和 concurrency（profile 切换会影响这些）
+        const cfg = await getConfig()
+        Object.assign(features, cfg.features)
+        backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
+        freqSlider.value = cfg.features.proactiveChatFreq ?? 0.5
+        eventFreqSlider.value = cfg.features.eventFreq ?? 1
+      }
+    }
+  } catch (err) {
+    console.error('[llm] switch profile failed:', err)
+  }
+}
+
+async function addProfile() {
+  const name = newProfileName.value.trim()
+  if (!name) return
+  try {
+    await addLlmProfile(name)
+    showAddProfile.value = false
+    newProfileName.value = ''
+    await loadLlmProfiles()
+  } catch (err) {
+    console.error('[llm] add profile failed:', err)
+  }
+}
+
+async function removeProfile(id) {
+  const profile = llmProfiles.value.find(p => p.id === id)
+  const name = profile?.name || '该配置'
+  const title = `删除「${name}」`
+  const body = llmProfiles.value.length <= 1
+    ? '这是最后一套配置，不可删除'
+    : `将删除该配置快照，当前正在使用的配置不受影响，此操作不可撤销`
+
+  if (!confirmFn) {
+    if (!window.confirm(`${title}\n\n${body}`)) return
+  } else {
+    const ok = await confirmFn({ title, message: body, danger: true, okText: '删除' })
+    if (!ok) return
+  }
+  if (llmProfiles.value.length <= 1) return
+  try {
+    const result = await deleteLlmProfile(id)
+    if (result.ok) {
+      llmProfiles.value = result.profiles || []
+      activeLlmProfileId.value = result.activeProfileId || ''
+      // 如果删除的是激活的，需要刷新当前配置
+      const cfg = await getConfig()
+      llmPreview.value = { ...cfg.llm }
+      llmBaseURL.value = cfg.llm.baseURL || 'https://api.deepseek.com'
+      llmModel.value = cfg.llm.model || 'deepseek-chat'
+      const hasCustom = (cfg.llm.headers && Object.keys(cfg.llm.headers).length > 0)
+        || (cfg.llm.extraBody && Object.keys(cfg.llm.extraBody).length > 0)
+        || cfg.features?.mergeMessages
+      isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
+      llmHeadersText.value = cfg.llm.headers && Object.keys(cfg.llm.headers).length
+        ? JSON.stringify(cfg.llm.headers, null, 2) : '{}'
+      llmExtraBodyText.value = cfg.llm.extraBody && Object.keys(cfg.llm.extraBody).length
+        ? JSON.stringify(cfg.llm.extraBody, null, 2) : '{}'
+      Object.assign(features, cfg.features)
+      backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
+      settingsStore.setHasApiKey(cfg.llm.hasApiKey)
+      llmApiKey.value = ''
+      llmDirty.value = false
+      llmSaved.value = false
+    }
+  } catch (err) {
+    console.error('[llm] delete profile failed:', err)
+  }
+}
+
 onMounted(async () => {
   try {
     const data = await getConfig()
@@ -752,6 +923,7 @@ onMounted(async () => {
       eventHeight: data.comfy.eventHeight || 1200,
     }
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
+    comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
@@ -781,6 +953,7 @@ onMounted(async () => {
       workflowMode.value = data.workflow.mode || 'turbo'
       workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', ...data.workflow.scene }
     }
+    loadLlmProfiles(data)
   } catch {}
   await checkHealth()
   await loadArtistFavorites()
@@ -802,9 +975,11 @@ async function saveComfy() {
 }
 
 async function saveComfyUrl() {
-  await updateComfyConfig({ url: comfyUrl.value })
+  await updateComfyConfig({ url: comfyUrl.value, tlsVerify: !comfySkipTls.value })
   connDirty.value = false; connSaved.value = true
   setTimeout(() => connSaved.value = false, 2000)
+  // 保存后立即刷新连接状态
+  await checkHealth()
 }
 
 async function saveLlmConfig() {
@@ -849,6 +1024,8 @@ async function saveLlmConfig() {
         features.mergeMessages = false
         await updateFeatureFlag('mergeMessages', false)
       }
+
+      await syncActiveLlmProfile()
 
       llmDirty.value = false
       llmSaved.value = true
@@ -1204,6 +1381,8 @@ function resetTestPrompts() {
 .pl { font-size: 12px; color: var(--text-secondary); }
 .pbtn { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
 .pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.cb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: -6px 0 12px; cursor: pointer; user-select: none; }
+.cb input { width: 14px; height: 14px; cursor: pointer; }
 
 /* ── 外部链接高亮 ── */
 .ext-link {
@@ -1505,6 +1684,76 @@ function resetTestPrompts() {
 .key-ok { color: var(--success); }
 .key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
 .key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
+
+/* ── LLM Profile 切换 ── */
+.llm-profiles-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
+.profile-item-row { display: flex; align-items: center; gap: 0; }
+.profile-tag {
+  padding: 4px 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.profile-item-row .profile-tag { border-radius: 0; }
+.profile-item-row .profile-tag:first-child { border-radius: 9999px 0 0 9999px; }
+.profile-item-row .profile-tag:last-child { border-radius: 0 9999px 9999px 0; }
+.profile-item-row .profile-tag:first-child:last-child { border-radius: 9999px; }
+.profile-item-row .profile-tag:first-child:not(:last-child) { padding-right: 8px; }
+.profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
+.profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
+.profile-tag.active {
+  background: #e07b6c;
+  border-color: #e07b6c;
+  color: #fff;
+  font-weight: 600;
+}
+.profile-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+}
+.profile-delete-btn { padding: 4px 8px; min-width: unset; border: none; background: transparent; }
+.profile-delete-btn:hover { background: rgba(255, 77, 79, 0.08); }
+.profile-x { font-size: 14px; line-height: 1; color: var(--danger); }
+.profile-add { border-radius: 20px; border-style: dashed; color: var(--text-muted); }
+.profile-add:hover { border-color: var(--accent); color: var(--accent); }
+
+.add-profile-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.add-profile-dialog {
+  background: #ffffffe3;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 360px;
+  max-width: 440px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.add-profile-dialog h4 { margin: 0 0 8px; font-size: 16px; color: var(--text-bright); }
+.add-profile-dialog .fd { margin-bottom: 16px; }
+.add-profile-dialog .fi { width: 100%; margin-bottom: 16px; }
+.add-profile-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+.add-profile-fade-enter-active { transition: opacity 0.2s ease; }
+.add-profile-fade-leave-active { transition: opacity 0.15s ease; }
+.add-profile-fade-enter-active .add-profile-dialog { animation: profile-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+.add-profile-fade-leave-active .add-profile-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
+.add-profile-fade-enter-from,
+.add-profile-fade-leave-to { opacity: 0; }
+.add-profile-fade-leave-to .add-profile-dialog { transform: scale(0.95); opacity: 0; }
+
+@keyframes profile-pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* ── 测试画风 ── */
 .style-test-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
