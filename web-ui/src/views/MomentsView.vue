@@ -160,6 +160,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   moments.isViewingMoments = false
+  moments.refreshUnreadCount()
   document.removeEventListener('click', onDocumentClick)
 })
 

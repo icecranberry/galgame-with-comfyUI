@@ -4,9 +4,6 @@ import * as api from '../api/index.js'
 
 const PAGE_SIZE = 20
 
-// 轮询未读计数间隔（ms）
-const POLL_INTERVAL = 30_000
-
 export const useMomentsStore = defineStore('moments', () => {
   const posts = ref([])           // 全量帖子数据
   const loading = ref(false)
@@ -168,7 +165,6 @@ export const useMomentsStore = defineStore('moments', () => {
   }
 
   // ── 未读计数：统一 SSE 订阅 + poll timer 兜底 ──
-  let _pollTimer = null
   let _sseStarted = false
   let _unsubNewPost = null
   let _unsubNewComment = null
@@ -192,7 +188,7 @@ export const useMomentsStore = defineStore('moments', () => {
     // 动态导入避免循环依赖（unifiedStream 不依赖 moments store）
     const { onEvent } = await import('./unifiedStream.js')
     _unsubNewPost = onEvent('new_post', (_post) => {
-      if (!isViewingMoments.value) newPostCount.value++
+      newPostCount.value++
     })
 
     // 监听关系网互动产生的新评论，实时追加到帖子评论区
@@ -209,20 +205,14 @@ export const useMomentsStore = defineStore('moments', () => {
       }
     })
 
-    if (!_pollTimer) {
-      _pollTimer = setInterval(async () => {
-        if (!_sseStarted) return
-        await refreshUnreadCount()
-      }, POLL_INTERVAL)
-    }
   }
 
-  /** 断开 SSE 订阅 + 停止轮询 */
+  /** 断开 SSE 订阅 */
   function disconnectSSE() {
     _sseStarted = false
     if (_unsubNewPost) { _unsubNewPost(); _unsubNewPost = null }
     if (_unsubNewComment) { _unsubNewComment(); _unsubNewComment = null }
-    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
+
   }
 
   /** 标记已读：更新 last_moments_seen_at 为当前时间 */
@@ -234,5 +224,5 @@ export const useMomentsStore = defineStore('moments', () => {
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
     loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
-    connectSSE, disconnectSSE, markSeen }
+    connectSSE, disconnectSSE, markSeen, refreshUnreadCount }
 })

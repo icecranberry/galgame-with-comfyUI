@@ -3,8 +3,6 @@ import { ref, computed, shallowRef } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 
-const RECONNECT_INTERVAL = 30_000
-
 export const useProactiveStore = defineStore('proactive', () => {
   // 有未读主动消息的角色 ID 集合
   const unreadIds = shallowRef(new Set())
@@ -14,7 +12,6 @@ export const useProactiveStore = defineStore('proactive', () => {
   const onMessageCallback = ref(null)
 
   const _sseStarted = ref(false)
-  const _pollTimer = ref(null)
   let _unsubProactive = null
 
   const unreadCount = computed(() => unreadIds.value.size)
@@ -50,27 +47,6 @@ export const useProactiveStore = defineStore('proactive', () => {
     if (onMessageCallback.value) onMessageCallback.value(data)
   }
 
-  function _startReconnectTimer() {
-    if (_pollTimer.value) clearInterval(_pollTimer.value)
-    _pollTimer.value = setInterval(async () => {
-      if (!_sseStarted.value) return
-      // 从后端恢复未读状态（DB 为单一数据源，定期同步防丢失）
-      try {
-        const { unread } = await api.getProactiveUnread()
-        if (unread?.length) {
-          const ids = new Set()
-          const msgs = { ...latestMessages.value }
-          for (const r of unread) {
-            ids.add(r.character_id)
-            msgs[r.character_id] = r
-          }
-          unreadIds.value = ids
-          latestMessages.value = msgs
-        }
-      } catch { /* 非关键 */ }
-    }, RECONNECT_INTERVAL)
-  }
-
   function connectSSE() {
     if (_sseStarted.value) return
     _sseStarted.value = true
@@ -80,7 +56,6 @@ export const useProactiveStore = defineStore('proactive', () => {
 
     // 异步恢复未读状态（DB 为单一数据源，兜底 SSE 断开期间丢失的消息）
     _restoreUnreadFromDB()
-    _startReconnectTimer()
   }
 
   async function _restoreUnreadFromDB() {
@@ -101,7 +76,6 @@ export const useProactiveStore = defineStore('proactive', () => {
 
   function disconnectSSE() {
     _sseStarted.value = false
-    if (_pollTimer.value) { clearInterval(_pollTimer.value); _pollTimer.value = null }
     if (_unsubProactive) { _unsubProactive(); _unsubProactive = null }
   }
 

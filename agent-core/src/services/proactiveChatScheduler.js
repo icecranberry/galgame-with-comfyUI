@@ -826,8 +826,8 @@ async function tick() {
 // ── 频率定时器（与 VAD/好感度算法双线并行）──
 
 function freqToMinutes(freq) {
-  // freq 0.1 → 120min (2h), freq 1.0 → 5min
-  return Math.round(5 + (1 - freq) / 0.9 * 115);
+  // freq 0.1 → 120min (2h), freq 1.0 → 8min
+  return Math.round(8 + (1 - freq) / 0.9 * 112);
 }
 
 function startupToMinutes(freq) {

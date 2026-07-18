@@ -3,8 +3,6 @@ import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 
-const POLL_INTERVAL = 30_000
-
 export const useEventsStore = defineStore('events', () => {
   const HISTORY_PAGE_SIZE = 20
 
@@ -298,10 +296,7 @@ export const useEventsStore = defineStore('events', () => {
     try {
       const data = await api.getEventsUnread()
       if (data && typeof data.count === 'number') {
-        // 用户停留在奇遇页面时不推送红点，离开后才允许更新
-        if (!isViewingEvents.value) {
-          newEventCount.value = data.count
-        }
+        newEventCount.value = data.count
       }
     } catch { /* silent */ }
   }
@@ -312,19 +307,12 @@ export const useEventsStore = defineStore('events', () => {
   }
 
   // ── 统一 SSE 订阅（替代独立 SSE 长连接）──
-  let _pollTimer = null
   let _sseStarted = false
   let _unsubs = []  // onEvent 返回的取消订阅函数
 
-  /** SSE 事件触发时，本地更新未读计数而不发起额外 API 请求。
-   *  避免在 HTTP/1.1 6 连接限制下（3 SSE + 长 choose = 仅剩 1-2 连接），
-   *  refreshUnreadCount 的 fetch 抢走最后可用连接导致页面导航等请求排队 23 秒。
-   *  Poll timer (30s) 仍会定期同步以修正偏差。
-   */
+  /** SSE 事件触发时，本地更新未读计数而不发起额外 API 请求。 */
   function _bumpUnreadLocal() {
-    if (!isViewingEvents.value) {
-      newEventCount.value = activeEvents.value.length
-    }
+    newEventCount.value = activeEvents.value.length
   }
 
   function connectSSE() {
@@ -352,8 +340,8 @@ export const useEventsStore = defineStore('events', () => {
         activeEvents.value = activeEvents.value.filter(e =>
           !(e.character_id === data.character_id && e.title === data.event_title)
         )
+        _bumpUnreadLocal()
         if (isViewingEvents.value) loadEvents()
-        else _bumpUnreadLocal()
       }),
       onEvent('event_expired', (data) => {
         activeEvents.value = activeEvents.value.filter(e =>
@@ -371,19 +359,13 @@ export const useEventsStore = defineStore('events', () => {
       }),
     ]
 
-    if (!_pollTimer) {
-      _pollTimer = setInterval(() => {
-        if (!_sseStarted) return
-        refreshUnreadCount()
-      }, POLL_INTERVAL)
-    }
   }
 
   function disconnectSSE() {
     _sseStarted = false
     _unsubs.forEach(fn => fn())
     _unsubs = []
-    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null }
+
   }
 
   return {

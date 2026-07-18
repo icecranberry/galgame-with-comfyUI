@@ -46,8 +46,8 @@
           <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
           <span v-if="saved" class="smsg">已保存</span>
           <div style="flex:1"></div>
-          <button class="btn-ghost" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
-          <button class="btn-ghost" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
+          <button class="btn-ghost wf-action-btn" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
+          <button class="btn-ghost wf-action-btn" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
 
@@ -371,7 +371,7 @@
         <div class="toggle-row freq-row">
           <div>
             <div class="tl">奇遇触发频率</div>
-            <div class="td">0 关闭自动触发，1 为默认频率（约 10 分钟一次）。</div>
+            <div class="td">0 关闭自动触发，1 为默认频率（约 30 分钟一次）。</div>
           </div>
           <div class="freq-control">
             <input type="range" min="0" max="1" step="0.1"
@@ -1293,6 +1293,8 @@ function resetTestPrompts() {
 
 /* ── 保存按钮加宽 ── */
 .btn-primary { padding-left: 28px; padding-right: 28px; }
+.wf-action-btn { border-color: var(--accent); border-style: dashed; border-width: 2px; }
+.wf-action-btn:hover:not(:disabled) { border-color: var(--accent-light); }
 
 /* ── 毛玻璃卡片 ── */
 .card {
