@@ -22,7 +22,7 @@
               ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
               <div class="share-header-text">
                 <div class="share-name">{{ post.display_name }}</div>
-                <div class="share-time">{{ formatFullTime(post.created_at) }}</div>
+                <div class="share-time">{{ formatTime(post.created_at) }}</div>
               </div>
             </div>
 
@@ -120,15 +120,28 @@ const avatarStyle = computed(() => {
   return { background: '#e07b6c' }
 })
 
-function formatFullTime(iso) {
+function formatTime(iso) {
   if (!iso) return ''
   const d = new Date(iso)
-  const y = d.getFullYear()
-  const M = (d.getMonth() + 1).toString().padStart(2, '0')
-  const day = d.getDate().toString().padStart(2, '0')
-  const h = d.getHours().toString().padStart(2, '0')
-  const m = d.getMinutes().toString().padStart(2, '0')
-  return `${y}/${M}/${day} ${h}:${m}`
+  const now = new Date()
+  const diff = now - d
+
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (d >= todayStart) {
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  const yesterdayStart = new Date(todayStart.getTime() - 86400000)
+  if (d >= yesterdayStart) {
+    return '昨天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  const twoDaysAgoStart = new Date(todayStart.getTime() - 2 * 86400000)
+  if (d >= twoDaysAgoStart) {
+    return '前天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' +
+    d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
 }
 
 function close() {

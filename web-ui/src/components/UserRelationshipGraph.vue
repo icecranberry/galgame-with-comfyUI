@@ -8,7 +8,7 @@
             <h3>我的关系图</h3>
             <div class="rel-header-actions">
               <button class="rel-auto-btn" @click="$emit('auto-deduce')">推演关系</button>
-              <button class="rel-close" @click="$emit('close')">✕</button>
+              <button class="rel-close" @click="$emit('close')">&times;</button>
             </div>
           </div>
 
@@ -449,19 +449,20 @@ async function deleteEdge() {
 /* ── Header ── */
 .rel-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 16px 22px;
-  border-bottom: 1px solid rgba(0,0,0,0.08);
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(224,123,108,0.1);
   flex-shrink: 0;
+  background: rgba(248,245,241,0.55);
 }
-.rel-header h3 { font-size: 17px; font-weight: 600; color: #333; }
+.rel-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: #3a2a1a; }
 .rel-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: rgba(0,0,0,0.05);
-  color: #666; font-size: 15px;
+  width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.08); background: rgba(0,0,0,0.04);
+  color: #8a7a6a; font-size: 18px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.15s;
 }
-.rel-close:hover { background: rgba(0,0,0,0.1); color: #333; }
+.rel-close:hover { background: rgba(0,0,0,0.08); color: #4a3a2a; }
 
 .rel-header-actions {
   display: flex; align-items: center; gap: 8px;
@@ -483,11 +484,12 @@ async function deleteEdge() {
 
 /* ── Hint ── */
 .rel-hint {
-  padding: 10px 22px;
-  border-top: 1px solid rgba(0,0,0,0.06);
-  font-size: 12px; color: #999;
+  padding: 12px 24px;
+  border-top: 1px solid rgba(224,123,108,0.1);
+  font-size: 12px; color: #9a8a7a;
   flex-shrink: 0;
   text-align: center;
+  background: rgba(255,252,250,0.4);
 }
 
 /* ── Input dialog ── */

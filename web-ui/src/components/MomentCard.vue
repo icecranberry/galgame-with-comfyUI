@@ -324,12 +324,18 @@ function formatTime(iso) {
 
   if (diff < 60000) return '刚刚'
   if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
-  // 判断是否在今天之内
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   if (d >= todayStart) {
     return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
   }
-  // 超过一天：显示月日 + 时分
+  const yesterdayStart = new Date(todayStart.getTime() - 86400000)
+  if (d >= yesterdayStart) {
+    return '昨天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  const twoDaysAgoStart = new Date(todayStart.getTime() - 2 * 86400000)
+  if (d >= twoDaysAgoStart) {
+    return '前天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
   return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' +
     d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
 }

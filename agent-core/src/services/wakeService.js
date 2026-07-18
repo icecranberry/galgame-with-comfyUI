@@ -72,14 +72,10 @@ export async function processWakeUp(characterId, mode, attempts = null) {
     msgIds.push(msgResult.lastInsertRowid);
   }
 
-  // ── 标记 reply_queue 积压消息为 done ──
   if (hasBacklog) {
     const ids = pendingEntries.map(e => e.id);
     const placeholders = ids.map(() => '?').join(',');
-    db.prepare(`
-      UPDATE reply_queue SET status = 'done', reply_raw_msg_id = ?, reply_msg_ids = ?, processed_at = datetime(?)
-      WHERE id IN (${placeholders})
-    `).run(rawResult.lastInsertRowid, JSON.stringify(msgIds), new Date().toISOString(), ...ids);
+    db.prepare(`DELETE FROM reply_queue WHERE id IN (${placeholders})`).run(...ids);
   }
 
   // ── 调度临时唤醒过期 ──

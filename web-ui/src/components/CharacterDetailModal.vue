@@ -189,7 +189,7 @@
                         <input
                           v-model="item.path"
                           class="fi"
-                          placeholder="输入文件名搜索..."
+                          placeholder="在model/loras下搜索..."
                           @focus="onLoraInputFocus(idx)"
                           @input="onLoraInput(idx)"
                           @keydown="onLoraKeydown($event, idx)"
