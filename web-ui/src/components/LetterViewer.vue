@@ -24,7 +24,19 @@
 
         <!-- Text content -->
         <div class="paper-text-area">
-          <div class="paper-text handwritten">{{ displayText }}</div>
+          <div
+            ref="textRef"
+            class="paper-text handwritten"
+            :style="handwritingFontStyle"
+            @wheel.passive="onTextScroll"
+          >{{ displayText }}</div>
+        </div>
+
+        <!-- Scroll hint arrow -->
+        <div v-if="showScrollHint" class="scroll-hint" @click="scrollTextDown">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <path d="M14 6v14M8 17l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
 
         <!-- Illustration - right -->
@@ -37,7 +49,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
 
 const props = defineProps({
   letter: { type: Object, required: true },
@@ -50,11 +63,19 @@ const displayText = computed(() => {
   return props.letter.content
 })
 
+const handwritingFontStyle = computed(() => {
+  const fontId = props.letter?.handwriting_font
+  if (!fontId) return { fontFamily: getPageDefaultFontFamily() }
+  return { fontFamily: getFontFamily(fontId) }
+})
+
 const show = ref(false)
 const leaving = ref(false)
 const paperRef = ref(null)
+const textRef = ref(null)
 const portraitRef = ref(null)
 const illustrationRef = ref(null)
+const showScrollHint = ref(false)
 const dragState = reactive({
   active: null,
   startX: 0, startY: 0,
@@ -186,9 +207,32 @@ function applyZoom(type) {
   }
 }
 
+function checkOverflow() {
+  const el = textRef.value
+  if (!el) return
+  showScrollHint.value = el.scrollHeight > el.clientHeight + 2
+}
+
+function onTextScroll() {
+  showScrollHint.value = false
+}
+
+function scrollTextDown() {
+  const el = textRef.value
+  if (!el) return
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  showScrollHint.value = false
+}
+
 onMounted(async () => {
   show.value = true
   await nextTick()
+
+  // 按需加载角色手写字体
+  const fontId = props.letter?.handwriting_font
+  if (fontId) loadFont(fontId)
+
+  checkOverflow()
 
   if (!props.sourceRect || !paperRef.value) return
 
@@ -218,6 +262,11 @@ onMounted(async () => {
       paperRef.value.style.willChange = 'auto'
     }
   }, 430)
+})
+
+watch(() => props.letter?.reply_content || props.letter?.content, async () => {
+  await nextTick()
+  checkOverflow()
 })
 
 function requestClose() {
@@ -327,13 +376,12 @@ onUnmounted(() => {
 
 /* Text */
 .paper-text-area {
-  flex: 1; max-width: clamp(350px, 52vw, 620px); padding: 0 36px; z-index: 1;
+  flex: 1; max-width: clamp(350px, 52vw, 650px); padding: 0 36px; z-index: 1;
 }
 .paper-text {
-  font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif;
   font-size: clamp(17px, 2.2vw, 24px); line-height: 2.2; color: #3a2a1a;
   white-space: pre-wrap; word-break: break-word;
-  max-height: 70vh; overflow-y: auto;
+  max-height: 60vh; overflow-y: auto;
   scrollbar-width: none; -ms-overflow-style: none;
 }
 .paper-text::-webkit-scrollbar { display: none; }
@@ -364,4 +412,26 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #faf5ed 0%, #f3e6d8 50%, #faf5ed 100%);
 }
 .paper-no-bg .paper-text { color: #4a3a2a; }
+
+/* Scroll hint arrow */
+.scroll-hint {
+  position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
+  z-index: 5;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(58, 42, 26, 0.15);
+  color: rgba(58, 42, 26, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  animation: hint-bounce 1.6s ease-in-out infinite;
+  transition: opacity 0.2s ease;
+}
+.scroll-hint:hover {
+  background: rgba(58, 42, 26, 0.25);
+  color: rgba(58, 42, 26, 0.7);
+}
+@keyframes hint-bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(6px); }
+}
 </style>

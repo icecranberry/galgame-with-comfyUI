@@ -30,13 +30,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, provide } from 'vue'
+import { ref, onMounted, onUnmounted, provide, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
 import { useProactiveStore } from './stores/notifications.js'
 import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
+import { playNotificationSound } from './utils/sound.js'
+import { useMailboxStore } from './stores/mailbox.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -45,6 +47,7 @@ import Toast from './components/Toast.vue'
 const chat = useChatStore()
 const settings = useSettingsStore()
 const proactive = useProactiveStore()
+const mailbox = useMailboxStore()
 const route = useRoute()
 const confirmDialog = ref(null)
 const toastEl = ref(null)
@@ -106,45 +109,6 @@ function closeMobileSidebar() {
 provide('isMobile', isMobile)
 provide('toggleMobileSidebar', toggleMobileSidebar)
 
-// ── 主动聊天通知提示音 (Web Audio API, C5-E5 双音) ──
-let _audioCtx = null
-function playProactiveSound() {
-  try {
-    if (!_audioCtx) {
-      _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-    }
-    const ctx = _audioCtx
-    // 浏览器可能在用户交互前将 AudioContext 置于 suspended 状态，需显式恢复
-    if (ctx.state === 'suspended') ctx.resume()
-
-    // 第一音 C5 ~523Hz, 100ms
-    const osc1 = ctx.createOscillator()
-    const gain1 = ctx.createGain()
-    osc1.type = 'sine'
-    osc1.frequency.setValueAtTime(523.25, ctx.currentTime)
-    gain1.gain.setValueAtTime(0.12, ctx.currentTime)
-    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1)
-    osc1.connect(gain1)
-    gain1.connect(ctx.destination)
-    osc1.start(ctx.currentTime)
-    osc1.stop(ctx.currentTime + 0.1)
-
-    // 第二音 E5 ~659Hz, 100ms, 延迟 0.1s
-    const osc2 = ctx.createOscillator()
-    const gain2 = ctx.createGain()
-    osc2.type = 'sine'
-    osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1)
-    gain2.gain.setValueAtTime(0.12, ctx.currentTime + 0.1)
-    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2)
-    osc2.connect(gain2)
-    gain2.connect(ctx.destination)
-    osc2.start(ctx.currentTime + 0.1)
-    osc2.stop(ctx.currentTime + 0.2)
-  } catch {
-    // 浏览器不支持 AudioContext 时静默
-  }
-}
-
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
@@ -161,7 +125,7 @@ onMounted(async () => {
 
     // 非当前活跃角色 → 播放提示音
     if (data.character_id !== chat.activeCharId) {
-      playProactiveSound()
+      playNotificationSound()
     }
   })
 
@@ -172,11 +136,16 @@ onMounted(async () => {
       chat.handleDelayedReply(data)
       // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
       if (data.character_id !== chat.activeCharId) {
-        playProactiveSound()
+        playNotificationSound()
         proactive.addProactive(data)
       }
     })
   } catch { /* unifiedStream may not be ready */ }
+
+  // 信箱新回信 → 播放提示音
+  watch(() => mailbox.unreadCount, (newVal, oldVal) => {
+    if (newVal > oldVal) playNotificationSound()
+  })
 
   if (isMobile.value) {
     // 移动端：角色列表默认藏在屏幕左侧，用户点击按钮才拉出

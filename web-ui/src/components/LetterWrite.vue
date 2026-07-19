@@ -25,6 +25,7 @@
           class="paper-textarea"
           placeholder="... . . / -.-- --- ..- / - --- -- --- .-. .-. --- .--"
           rows="6"
+          :style="{ fontFamily: WRITE_FONT }"
         ></textarea>
       </div>
     </div>
@@ -44,6 +45,9 @@
 <script setup>
 import { ref } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
+import { getWriteFontFamily } from '../composables/useHandwritingFont.js'
+
+const WRITE_FONT = getWriteFontFamily()
 
 const props = defineProps({
   char: { type: Object, required: true },
@@ -114,7 +118,6 @@ async function send() {
   background: rgba(255,255,255,0.55);
   border: none; border-radius: 8px;
   padding: 14px 16px;
-  font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif;
   font-size: 18px; line-height: 2;
   color: #3a2a1a;
 }

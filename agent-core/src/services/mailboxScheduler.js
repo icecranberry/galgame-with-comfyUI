@@ -8,6 +8,7 @@ import { loadEmotionState, stateToPrompt } from './emotionEngine.js';
 import { formatScheduleContext } from './scheduleManager.js';
 import { getTimeLight } from './timeLight.js';
 import { config } from '../config.js';
+import { ensureFontForCharacter } from './handwritingFontService.js';
 
 const CHECK_INTERVAL = 60 * 1000;
 
@@ -71,6 +72,14 @@ async function processReply(db, letter) {
   });
 
   try {
+    // ── 步骤0: 确保角色已分配手写字体（向后兼容，旧角色首次回信时自动补选）──
+    let handwritingFont = '';
+    try {
+      handwritingFont = await ensureFontForCharacter(charId);
+    } catch (err) {
+      console.warn(`[mailboxScheduler] font ensure failed for char #${charId}:`, err.message);
+    }
+
     // ── 步骤1: LLM 生成回信 + 3 段生图 prompt ──
     const data = await generateReplyData(charId, charName, charBasePrompt, letter.content, letter.emotion_baseline);
     if (!data || !data.text) throw new Error('LLM reply generation returned empty');
@@ -111,8 +120,12 @@ async function processReply(db, letter) {
 
     console.log(`[mailboxScheduler] letter #${letterId} reply completed`);
 
+    condenseAndSave(db, letterId, data.text).catch(err => {
+      console.error(`[mailboxScheduler] condense #${letterId} failed:`, err.message);
+    });
+
     const fullLetter = db.prepare(`
-      SELECT ml.*, c.display_name, c.avatar_path
+      SELECT ml.*, c.display_name, c.avatar_path, c.handwriting_font
       FROM mailbox_letters ml
       LEFT JOIN characters c ON ml.character_id = c.id
       WHERE ml.id = ?
@@ -129,6 +142,7 @@ async function processReply(db, letter) {
       paper_path: paperPath,
       portrait_path: portraitPath,
       illustration_path: illustrationPath,
+      handwriting_font: fullLetter.handwriting_font || handwritingFont || '',
       is_read: 0,
     });
 
@@ -256,6 +270,30 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
 
   if (ctx4Parts.length > 0) msgs.push({ role: 'system', content: ctx4Parts.join('\n') });
 
+  // ── system 5: 最近信箱往来历史 ──
+  const recentLetters = db.prepare(`
+    SELECT content, reply_content,
+           CAST(julianday('now') - julianday(replied_at) AS INTEGER) AS days_ago
+    FROM mailbox_letters
+    WHERE character_id = ? AND direction = 'char_to_user' AND status = 'completed'
+      AND content != '' AND reply_content != ''
+    ORDER BY replied_at DESC
+    LIMIT 3
+  `).all(charId);
+
+  if (recentLetters.length > 0) {
+    const historyLines = recentLetters.map(l => {
+      const daysLabel = formatRelativeDay(l.days_ago);
+      return `【${daysLabel}的来信】
+${userName}的来信：
+${l.content}
+
+你的回信：
+${l.reply_content}`;
+    });
+    msgs.push({ role: 'system', content: `以下是你们最近的写信记录，你可以参考这些内容，让回信更有连续性和生活感：\n\n${historyLines.join('\n\n---\n\n')}` });
+  }
+
   // ── user: 任务 ──
   const imageRule = getGlobalRule('image_prompt');
   const imageGuide = imageRule?.rule_content || '';
@@ -356,7 +394,29 @@ async function generateImageSafe(prompt, charLoras, charCustomWorkflow, override
   }
 }
 
+async function condenseAndSave(db, letterId, text) {
+  if (!text) return;
+  const msgs = [
+    { role: 'system', content: '你是一个文字浓缩助手。把输入的文字浓缩为一句话，不超过50字。只返回浓缩后的文字，不要输出任何解释。' },
+    { role: 'user', content: `请浓缩以下文字：\n${text}` },
+  ];
+  const condensed = await chatSync(msgs, { temperature: 0.3, max_tokens: 100, label: '信箱浓缩助手' });
+  const result = (condensed || '').trim().slice(0, 50);
+  if (result) {
+    db.prepare('UPDATE mailbox_letters SET content_short = ? WHERE id = ?').run(result, letterId);
+    console.log(`[mailboxScheduler] letter #${letterId} condensed: "${result}"`);
+  }
+}
+
 function safeJSON(raw, fallback) {
   if (!raw) return fallback;
   try { return JSON.parse(raw); } catch { return fallback; }
+}
+
+function formatRelativeDay(days) {
+  if (days == null) return '之前';
+  if (days === 0) return '今天';
+  if (days === 1) return '昨天';
+  if (days === 2) return '前天';
+  return `${days}天前`;
 }

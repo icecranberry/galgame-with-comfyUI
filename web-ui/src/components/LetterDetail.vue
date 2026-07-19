@@ -34,7 +34,7 @@
       <!-- Character's reply -->
       <template v-else>
         <div class="letter-heading">回信</div>
-        <div class="letter-body-text handwritten">{{ letter.reply_content }}</div>
+        <div class="letter-body-text handwritten" :style="handwritingFontStyle">{{ letter.reply_content }}</div>
       </template>
     </div>
 
@@ -75,7 +75,8 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
 
 const props = defineProps({
   letter: { type: Object, required: true },
@@ -83,6 +84,12 @@ const props = defineProps({
 defineEmits(['delete'])
 
 const showOriginal = ref(false)
+
+const handwritingFontStyle = computed(() => {
+  const fontId = props.letter?.handwriting_font
+  if (!fontId) return { fontFamily: getPageDefaultFontFamily() }
+  return { fontFamily: getFontFamily(fontId) }
+})
 
 const statusClass = computed(() => {
   if (props.letter.status === 'processing') return 'status-processing'
@@ -110,6 +117,11 @@ function timeAgo(ts) {
   if (hr < 24) return `${hr}小时前`
   return new Date(ts).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
+
+onMounted(() => {
+  const fontId = props.letter?.handwriting_font
+  if (fontId) loadFont(fontId)
+})
 </script>
 
 <style scoped>
@@ -167,7 +179,6 @@ function timeAgo(ts) {
   white-space: pre-wrap; word-break: break-word;
 }
 .letter-body-text.handwritten {
-  font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif;
   font-size: 18px; line-height: 2.2;
 }
 

@@ -15,6 +15,7 @@ import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
+import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 
 const router = Router();
 
@@ -70,10 +71,15 @@ router.post('/', (req, res) => {
     const shortPrompt = cropPersonalityForEmotion(base_prompt, display_name || name);
     const result = db.prepare(`INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled, proactive_disabled, events_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0, events_disabled !== undefined ? (events_disabled ? 1 : 0) : 0);
-    res.status(201).json({ id: result.lastInsertRowid, name, display_name });
+    const newCharId = result.lastInsertRowid;
+    res.status(201).json({ id: newCharId, name, display_name });
+
+    // 异步选择手写字体（不阻塞响应）
+    assignFontForNewCharacter(newCharId, base_prompt).catch(err =>
+      console.warn(`[char] font assignment failed for "${display_name}":`, err.message)
+    );
 
     // 异步生成日程模板（不阻塞响应）
-    const newCharId = result.lastInsertRowid;
     const newCharDisplayName = display_name || name;
     if (config.features.schedule !== false) {
       setTimeout(async () => {
@@ -95,7 +101,6 @@ router.post('/', (req, res) => {
 
     // 创建成功后，30~60 秒内发起一次主动聊天（除非角色禁用了主动聊天）
     if (!(proactive_disabled && (proactive_disabled === 1 || proactive_disabled === '1'))) {
-      const newCharId = result.lastInsertRowid;
       const delayMs = 30_000 + Math.floor(Math.random() * 30_000); // 30~60s
       setTimeout(() => {
         forceProactiveNow(newCharId).then((r) => {
@@ -458,9 +463,17 @@ ${searchContext}` : ''}
         `INSERT INTO characters (name, display_name, base_prompt, short_prompt, emotion_baseline, moments_disabled) VALUES (?, ?, ?, ?, ?, 0)`
       ).run(charName, displayName, basePrompt, cropPersonalityForEmotion(basePrompt, displayName), emotionBaseline);
 
+      const generatedCharId = insertResult.lastInsertRowid;
+
       console.log(`[characters] AI-generated: "${displayName}" (${charName}) — saved`);
+
+      // 异步选择手写字体
+      assignFontForNewCharacter(generatedCharId, basePrompt).catch(err =>
+        console.warn(`[characters] font assignment failed for "${displayName}":`, err.message)
+      );
+
       res.status(201).json({
-        id: insertResult.lastInsertRowid,
+        id: generatedCharId,
         name: charName,
         display_name: displayName,
         base_prompt: basePrompt,
@@ -470,16 +483,15 @@ ${searchContext}` : ''}
 
       // 异步生成日程
       if (config.features.schedule !== false) {
-        const newId = insertResult.lastInsertRowid;
         setTimeout(async () => {
           try {
-            const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(newId);
+            const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(generatedCharId);
             if (char) {
               await generateSchedule(char);
-              assignNextRefreshTime(newId);
-              snapshotTodaySchedule(newId);
-              syncSleepingState(newId);
-              invalidateScheduleCache(newId);
+              assignNextRefreshTime(generatedCharId);
+              snapshotTodaySchedule(generatedCharId);
+              syncSleepingState(generatedCharId);
+              invalidateScheduleCache(generatedCharId);
               console.log(`[characters] Schedule generated for AI character "${displayName}"`);
             }
           } catch (err) {

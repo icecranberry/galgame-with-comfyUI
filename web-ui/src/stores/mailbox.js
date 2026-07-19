@@ -91,6 +91,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
       letter.paper_path = data.paper_path
       letter.portrait_path = data.portrait_path
       letter.illustration_path = data.illustration_path
+      letter.handwriting_font = data.handwriting_font || ''
       letter.is_read = 0
     } else {
       fetchLetters(currentPage.value)

@@ -580,6 +580,27 @@ router.post('/characters/:id/chat', async (req, res) => {
       relParts.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitParts.join('\n')}</user_portrait>`);
     }
 
+    // 最近信箱往来
+    const recentLetters = db.prepare(`
+      SELECT content, content_short, reply_content,
+             CAST(julianday('now') - julianday(replied_at) AS INTEGER) AS days_ago
+      FROM mailbox_letters
+      WHERE character_id = ? AND direction = 'char_to_user' AND status = 'completed'
+        AND content != '' AND reply_content != ''
+      ORDER BY replied_at DESC
+      LIMIT 2
+    `).all(characterId);
+
+    if (recentLetters.length > 0) {
+      const letterLines = recentLetters.map(l => {
+        const daysLabel = formatRelativeDay(l.days_ago);
+        const userBrief = (l.content || '').slice(0, 50);
+        const replyBrief = l.content_short || (l.reply_content || '').slice(0, 50);
+        return `- ${daysLabel}：${chatUserName}来信"${userBrief}..." → 你回信"${replyBrief}..."`;
+      });
+      relParts.push(`<mailbox_history>你与${chatUserName}的最近信箱往来：\n${letterLines.join('\n')}\n\n可以在对话中自然地提及近期的通信内容，让对话更有连续性。</mailbox_history>`);
+    }
+
     // 角色间关系
     const charRels = db.prepare(`
       SELECT 'from' AS direction, cr.relationship_text, c.display_name
@@ -619,26 +640,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     }
 
     // ═══════════════════════════════════════════
-    // msgs[3] — 格式：对话规则（DB + 硬编码） + 生图意图
-    // ═══════════════════════════════════════════
-    const formatParts = [];
-    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
-    formatParts.push(`<dialogue_format_rules>
-${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
-- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
-</dialogue_format_rules>`);
-    const sentenceHint = (() => {
-      if (explicitImageIntent) return '15个汉字以内';
-      if (affinity == null || affinity < 60) return '10~30个汉字';
-      if (affinity < 80) return '10~40个汉字';
-      return '10~60个汉字';
-    })();
-    formatParts.push('<dialogue_rules>\n- **回复控制在' + sentenceHint + '，保持口语化轻快节奏**\n</dialogue_rules>');
-    msgs.push({ role: 'system', content: formatParts.join('\n\n') });
-
-    // ═══════════════════════════════════════════
-    // msgs[4] — 素材：摘要 + RAG记忆 + 朋友圈（合并为一条）
+    // msgs[3] — 素材：摘要 + RAG记忆 + 朋友圈 + 奇遇（合并为一条）
     // ═══════════════════════════════════════════
     const materialParts = [];
 
@@ -662,6 +664,8 @@ ${coreRules}
         } else {
           const memoryResults = rawResults.filter(m => {
             if (!m.entities || m.entities.length === 0) return false;
+            // 排除事件类碎片（已有独立 event_history 注入通道，避免重复）
+            if (m.content && /【事件/.test(m.content)) return false;
             return true;
           });
           if (memoryResults.length >= 1) {
@@ -714,34 +718,41 @@ ${coreRules}
       materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
     }
 
-    // 最近奇遇总结（和朋友圈一样主动注入）—— 2条参与过的 + 1条未参与的
+    // 最近奇遇总结（和朋友圈一样主动注入）—— 1条最近参与过的
     // 能出现在 event_history 中的都是已结束的奇遇，区别仅在于用户是否参与过
-    const engagedEvents = db.prepare(`
+    const engagedEvent = db.prepare(`
       SELECT title, summary, ended_at
       FROM event_history
       WHERE character_id = ? AND engaged = 1
-      ORDER BY ended_at DESC LIMIT 2
-    `).all(characterId);
-    const unengagedEvent = db.prepare(`
-      SELECT title, summary, ended_at
-      FROM event_history
-      WHERE character_id = ? AND engaged = 0
       ORDER BY ended_at DESC LIMIT 1
     `).get(characterId);
 
-    const eventItems = [...engagedEvents];
-    if (unengagedEvent) eventItems.push(unengagedEvent);
-
-    if (eventItems.length > 0) {
-      const eventLines = eventItems.map((e, i) =>
-        `${i + 1}. ${e.title}：${e.summary || ''}`
-      ).join('\n');
-      materialParts.push(`「${character.display_name}最近经历了一些事：\n${eventLines}\n你可以在对话中自然地提起或询问这些经历。」`);
+    if (engagedEvent) {
+      materialParts.push(`「${character.display_name}最近经历了一些事：\n${engagedEvent.title}：${engagedEvent.summary || ''}\n你可以在对话中自然地提起或询问这些经历。」`);
     }
 
     if (materialParts.length > 0) {
       msgs.push({ role: 'system', content: materialParts.join('\n\n') });
     }
+
+    // ═══════════════════════════════════════════
+    // msgs[4] — 格式：对话规则（DB + 硬编码） + 生图意图
+    // ═══════════════════════════════════════════
+    const formatParts = [];
+    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
+    formatParts.push(`<dialogue_format_rules>
+${coreRules}
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
+- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
+</dialogue_format_rules>`);
+    const sentenceHint = (() => {
+      if (explicitImageIntent) return '15个汉字以内';
+      if (affinity == null || affinity < 60) return '10~30个汉字';
+      if (affinity < 80) return '10~40个汉字';
+      return '10~60个汉字';
+    })();
+    formatParts.push('<dialogue_rules>\n- **回复控制在' + sentenceHint + '，保持口语化轻快节奏**\n</dialogue_rules>');
+    msgs.push({ role: 'system', content: formatParts.join('\n\n') });
 
     msgs.push(...history);
 
@@ -1885,6 +1896,14 @@ function _parseLoras(char) {
   } catch {
     return [];
   }
+}
+
+function formatRelativeDay(days) {
+  if (days == null) return '之前';
+  if (days === 0) return '今天';
+  if (days === 1) return '昨天';
+  if (days === 2) return '前天';
+  return `${days}天前`;
 }
 
 export default router;

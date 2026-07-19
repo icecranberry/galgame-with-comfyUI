@@ -16,7 +16,7 @@
               </div>
             </div>
             <div class="header-actions">
-              <button class="btn-compose" @click="startWrite">写新信</button>
+              <button class="btn-compose" @click="startWrite">开始写一封信</button>
               <button class="btn-close" @click="close" title="关闭">&times;</button>
             </div>
           </div>
@@ -73,9 +73,9 @@
                   <div class="card-body">
                     <div class="card-top-row">
                       <span class="card-name">{{ letter.display_name }}</span>
-                      <span class="card-meta">{{ statusTimeText(letter) }}</span>
                     </div>
                     <div class="card-preview">{{ replyPreview(letter) }}</div>
+                    <span class="card-status" :class="statusTimeClass(letter)">{{ statusTimeText(letter) }}</span>
                   </div>
                   <span v-if="letter.direction === 'char_to_user' && !letter.is_read" class="unread-dot"></span>
                 </div>
@@ -108,7 +108,7 @@
                         <div class="detail-header-name">
                           {{ isReplied(activeLetter) ? activeLetter.display_name + ' 的回信' : '寄给 ' + activeLetter.display_name }}
                         </div>
-                        <div class="detail-header-meta">{{ statusTimeText(activeLetter) }}</div>
+                        <div class="detail-header-meta" :class="statusTimeClass(activeLetter)">{{ statusTimeText(activeLetter) }}</div>
                       </div>
                     </div>
                     <button class="btn-delete" @click="onDeleteLetter(activeLetter.id)">删除信件</button>
@@ -118,7 +118,7 @@
                   <div class="reading-card">
                     <!-- Outgoing letter - not yet replied -->
                     <div v-if="!isReplied(activeLetter) && activeLetter.status !== 'processing'" class="reading-content reading-outgoing">
-                      <div class="reading-text">{{ activeLetter.content }}</div>
+                      <div class="reading-text" :style="writeFontStyle">{{ activeLetter.content }}</div>
                     </div>
 
                     <!-- Replied -->
@@ -129,14 +129,14 @@
                         :style="activeLetter.paper_path ? { backgroundImage: `url(${activeLetter.paper_path})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}"
                         @click="openViewer"
                       >
-                        <div class="reading-text reading-reply">{{ activeLetter.reply_content?.slice(0, 160) }}{{ activeLetter.reply_content && activeLetter.reply_content.length > 160 ? '...' : '' }}</div>
+                        <div class="reading-text reading-reply" :style="activeHandwritingFontStyle">{{ activeLetter.reply_content?.slice(0, 160) }}{{ activeLetter.reply_content && activeLetter.reply_content.length > 160 ? '...' : '' }}</div>
                       </div>
                       <div class="reading-divider-row">
                         <div class="reading-divider"></div>
                         <span class="reading-divider-label"></span>
                         <div class="reading-divider"></div>
                       </div>
-                      <div class="reading-text reading-original reading-outgoing original-expanded">{{ activeLetter.content }}</div>
+                      <div class="reading-text reading-original reading-outgoing original-expanded" :style="writeFontStyle">{{ activeLetter.content }}</div>
                     </div>
 
                     <!-- Processing -->
@@ -155,8 +155,8 @@
                       <rect x="2" y="4" width="20" height="16" rx="2"/>
                       <path d="M22 7l-10 6L2 7"/>
                     </svg>
-                    <p class="welcome-title">暂无正在阅读的信件</p>
-                    <p class="welcome-hint">选择左侧的一封信开始阅读<br/>或者写下一封新的信件</p>
+                    <p class="welcome-title">曾许下心愿♪</p>
+                    <p class="welcome-hint">等待你的出现~</p>
                   </div>
                 </div>
               </Transition>
@@ -209,6 +209,7 @@
 <script setup>
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
+import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily } from '../composables/useHandwritingFont.js'
 import LetterViewer from './LetterViewer.vue'
 import LetterWrite from './LetterWrite.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -234,6 +235,16 @@ const viewingLetter = computed(() => {
   if (!viewingLetterId.value) return null
   return store.letters.find(l => l.id === viewingLetterId.value) || null
 })
+
+const activeHandwritingFontStyle = computed(() => {
+  const fontId = activeLetter.value?.handwriting_font
+  if (!fontId) return { fontFamily: getPageDefaultFontFamily() }
+  return { fontFamily: getFontFamily(fontId) }
+})
+
+const writeFontStyle = computed(() => ({
+  fontFamily: getWriteFontFamily(),
+}))
 
 watch(() => props.visible, (v) => {
   if (v) {
@@ -261,9 +272,19 @@ function statusTimeText(letter) {
   if (letter.status === 'failed') return '回信失败'
   if (letter.direction === 'user_to_char') {
     if (letter.reply_at && elapsedOverHalf(letter)) return '回信中'
-    return `等待回信 · ${time}`
+    return '等待回信'
   }
   return time
+}
+
+function statusTimeClass(letter) {
+  if (letter.status === 'completed') return 'status-completed'
+  if (letter.status === 'processing') return 'status-processing'
+  if (letter.direction === 'user_to_char') {
+    if (letter.reply_at && elapsedOverHalf(letter)) return 'status-processing'
+    return 'status-pending'
+  }
+  return ''
 }
 
 function elapsedOverHalf(letter) {
@@ -280,15 +301,26 @@ function replyPreview(letter) {
 
 function timeAgo(ts) {
   if (!ts) return ''
-  const diff = Date.now() - new Date(ts).getTime()
-  const min = Math.floor(diff / 60000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min}分钟前`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}小时前`
-  const d = Math.floor(hr / 24)
-  if (d < 7) return `${d}天前`
-  return new Date(ts).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const d = new Date(ts)
+  const now = new Date()
+  const diff = now - d
+
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (d >= todayStart) {
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  const yesterdayStart = new Date(todayStart.getTime() - 86400000)
+  if (d >= yesterdayStart) {
+    return '昨天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  const twoDaysAgoStart = new Date(todayStart.getTime() - 2 * 86400000)
+  if (d >= twoDaysAgoStart) {
+    return '前天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  }
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' +
+    d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
 }
 
 function estimateReply(letter) {
@@ -312,6 +344,7 @@ function selectLetter(letter) {
   writing.value = false
   viewingLetterId.value = null
   viewerSourceRect.value = null
+  if (letter.handwriting_font) loadFont(letter.handwriting_font)
   if (letter.direction === 'char_to_user' && !letter.is_read) store.markRead(letter.id)
 }
 
@@ -519,6 +552,20 @@ async function onDeleteLetter(id) {
   font-size: 11px; color: #aaa; flex-shrink: 0;
   white-space: nowrap;
 }
+
+/* Status text below preview — low-saturation, subordinate */
+.card-status {
+  font-size: 12px;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-top: 3px;
+  line-height: 1.5;
+  transition: color 0.2s, background 0.2s;
+}
+.card-status.status-completed { color: #7FA88A; background: rgba(127, 168, 138, 0.07); }
+.card-status.status-pending   { color: #B89A68; background: rgba(184, 154, 104, 0.07); }
+.card-status.status-processing { color: #7D98B8; background: rgba(125, 152, 184, 0.07); }
 .card-preview {
   font-size: 12px; color: #9a8a7a;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -553,6 +600,9 @@ async function onDeleteLetter(id) {
 .detail-header-info { flex: 1; min-width: 0; }
 .detail-header-name { font-size: 15px; font-weight: 600; color: #2a1a10; margin-bottom: 3px; }
 .detail-header-meta { font-size: 12px; color: #aaa; }
+.detail-header-meta.status-completed { color: #7FA88A; }
+.detail-header-meta.status-pending   { color: #B89A68; }
+.detail-header-meta.status-processing { color: #7D98B8; }
 
 .btn-delete {
   background: none; border: none;
@@ -586,7 +636,6 @@ async function onDeleteLetter(id) {
 }
 
 .reading-text {
-  font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif;
   font-size: 17px; line-height: 1.9; color: #3a2a1a;
   white-space: pre-wrap; word-break: break-word;
 }

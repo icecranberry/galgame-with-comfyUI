@@ -19,7 +19,7 @@ router.get('/', (req, res) => {
     const total = db.prepare('SELECT COUNT(*) AS c FROM mailbox_letters').get().c;
 
     const letters = db.prepare(`
-      SELECT ml.*, c.display_name, c.avatar_path
+      SELECT ml.*, c.display_name, c.avatar_path, c.handwriting_font
       FROM mailbox_letters ml
       LEFT JOIN characters c ON ml.character_id = c.id
       ORDER BY ml.created_at DESC
@@ -85,7 +85,7 @@ router.post('/send', (req, res) => {
     const replyAtStr = `${String(replyAtLocal.getHours()).padStart(2,'0')}:${String(replyAtLocal.getMinutes()).padStart(2,'0')}`;
     console.log(`[mailbox] letter to "${character.name}" → reply scheduled at ${replyAtStr} (in ${Math.round(replyDelayMs/60000)}min) [id=${result.lastInsertRowid}]`);
 
-    const letter = db.prepare('SELECT ml.*, c.display_name, c.avatar_path FROM mailbox_letters ml LEFT JOIN characters c ON ml.character_id = c.id WHERE ml.id = ?').get(result.lastInsertRowid);
+    const letter = db.prepare('SELECT ml.*, c.display_name, c.avatar_path, c.handwriting_font FROM mailbox_letters ml LEFT JOIN characters c ON ml.character_id = c.id WHERE ml.id = ?').get(result.lastInsertRowid);
 
     res.json({
       letter: {
@@ -106,7 +106,7 @@ router.get('/:id', (req, res) => {
   try {
     const db = getDb();
     const letter = db.prepare(`
-      SELECT ml.*, c.display_name, c.avatar_path
+      SELECT ml.*, c.display_name, c.avatar_path, c.handwriting_font
       FROM mailbox_letters ml
       LEFT JOIN characters c ON ml.character_id = c.id
       WHERE ml.id = ?

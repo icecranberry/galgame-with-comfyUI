@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { load as yamlLoad } from 'js-yaml';
 import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
@@ -259,7 +260,7 @@ router.post('/user-avatar', (req, res) => {
   res.json({ ok: true, avatar_path: `/avatars/user_avatar.png?v=${mtime}` });
 });
 
-// GET /api/config/loras-files — 从 launcher_config.json 读取 comfyui_exe，推导 loras 文件夹，遍历返回 .safetensors 文件列表
+// GET /api/config/loras-files — 从 launcher_config.json 读取 comfyui_exe，推导 loras 文件夹，并解析 extra_model_paths.yaml 获取外部路径
 router.get('/loras-files', (req, res) => {
   try {
     const __filename = fileURLToPath(import.meta.url);
@@ -276,27 +277,103 @@ router.get('/loras-files', (req, res) => {
       return res.json({ files: [], lorasDir: null, error: 'comfyui_exe 未配置，请先在启动器中设置 ComfyUI 启动器路径' });
     }
 
-    const lorasDir = path.join(path.dirname(comfyuiExe), 'ComfyUI', 'models', 'loras');
-    if (!fs.existsSync(lorasDir)) {
-      return res.json({ files: [], lorasDir, error: `loras 目录不存在: ${lorasDir}` });
+    const rootDir = path.dirname(comfyuiExe);
+    const defaultLoraDir = path.join(rootDir, 'ComfyUI', 'models', 'loras');
+
+    // 收集所有待扫描目录
+    const scanDirs = new Set();
+    const dirSourceMap = new Map(); // absPath → source groupName
+
+    if (fs.existsSync(defaultLoraDir)) {
+      scanDirs.add(defaultLoraDir);
     }
 
+    // 解析 extra_model_paths.yaml（可能在 rootDir 或 rootDir/ComfyUI 下）
+    let yamlPath = path.join(rootDir, 'extra_model_paths.yaml');
+    if (!fs.existsSync(yamlPath)) {
+      yamlPath = path.join(rootDir, 'ComfyUI', 'extra_model_paths.yaml');
+    }
+    if (fs.existsSync(yamlPath)) {
+      const yamlDir = path.dirname(yamlPath);
+      try {
+        const yamlContent = yamlLoad(fs.readFileSync(yamlPath, 'utf-8'));
+        if (yamlContent && typeof yamlContent === 'object') {
+          for (const [groupName, groupConfig] of Object.entries(yamlContent)) {
+            if (!groupConfig || typeof groupConfig !== 'object') continue;
+            const basePath = groupConfig.base_path;
+            const lorasField = groupConfig.loras;
+            if (!basePath || lorasField === undefined) continue;
+
+            const lorasValues = Array.isArray(lorasField)
+              ? lorasField
+              : typeof lorasField === 'string' ? [lorasField] : [];
+
+            for (const lv of lorasValues) {
+              if (typeof lv !== 'string') continue;
+              const lines = lv.split('\n').map(s => s.trim()).filter(Boolean);
+              for (const line of lines) {
+                const absPath = path.resolve(yamlDir, basePath, line === '.' ? '.' : line);
+                if (fs.existsSync(absPath)) {
+                  scanDirs.add(absPath);
+                  dirSourceMap.set(absPath, groupName);
+                }
+              }
+            }
+          }
+        }
+      } catch (yamlErr) {
+        console.warn('[loras-files] extra_model_paths.yaml 解析失败，仅扫描默认目录:', yamlErr.message);
+      }
+    }
+
+    // 遍历所有目录收集 .safetensors 文件
     const files = [];
-    function walkDir(dir, relativeTo) {
+    const seen = new Set();
+
+    function walkDir(dir) {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
-        const relativePath = path.relative(relativeTo, fullPath);
         if (entry.isDirectory()) {
-          walkDir(fullPath, relativeTo);
+          walkDir(fullPath);
         } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.safetensors')) {
-          files.push(relativePath.replace(/\\/g, '/'));
+          const relToDefault = path.relative(defaultLoraDir, fullPath);
+          const isDefault = !relToDefault.startsWith('..') && !path.isAbsolute(relToDefault);
+
+          if (isDefault) {
+            const name = relToDefault.replace(/\\/g, '/');
+            if (!seen.has(name)) {
+              seen.add(name);
+              files.push({ name, path: fullPath.replace(/\\/g, '/'), source: null });
+            }
+          } else {
+            const name = entry.name;
+            let source = 'unknown';
+            for (const [absPath, groupName] of dirSourceMap) {
+              const rel = path.relative(absPath, fullPath);
+              if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+                source = groupName;
+                break;
+              }
+            }
+            const key = name + '|' + source;
+            if (!seen.has(key)) {
+              seen.add(key);
+              files.push({ name, path: fullPath.replace(/\\/g, '/'), source });
+            }
+          }
         }
       }
     }
-    walkDir(lorasDir, lorasDir);
 
-    res.json({ files: files.sort(), lorasDir });
+    for (const dir of scanDirs) {
+      walkDir(dir);
+    }
+
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    console.log(`[loras-files] ${files.length} files from ${scanDirs.size} dir(s)`);
+
+    res.json({ files, lorasDir: defaultLoraDir.replace(/\\/g, '/') });
   } catch (err) {
     res.status(500).json({ files: [], lorasDir: null, error: err.message });
   }

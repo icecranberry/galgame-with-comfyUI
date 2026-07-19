@@ -198,11 +198,11 @@
                         <ul v-if="activeLoraFileIdx === idx && loraSuggestions.length > 0" class="lora-dropdown">
                           <li
                             v-for="(file, di) in loraSuggestions"
-                            :key="file"
+                            :key="file.path"
                             :class="['lora-dropdown-item', { active: di === loraDropdownIdx }]"
                             @mousedown.prevent="selectLoraFile(idx, file)"
                           >
-                            <span>{{ file }}</span>
+                            <span>{{ loraDisplayName(file) }}</span>
                           </li>
                         </ul>
                         <div v-else-if="activeLoraFileIdx === idx && loraFiles.length === 0 && !loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
@@ -554,10 +554,17 @@ async function fetchLorasFiles() {
   loraFetching.value = false
 }
 
+function loraDisplayName(file) {
+  return file.source ? `[${file.source}] ${file.name}` : file.name
+}
+
 function filterLoras(query) {
   if (!query) return lorasFiles.value
   const q = query.toLowerCase().replace(/\\/g, '/')
-  return lorasFiles.value.filter(f => f.toLowerCase().includes(q))
+  return lorasFiles.value.filter(f => {
+    const display = loraDisplayName(f).toLowerCase()
+    return display.includes(q) || f.name.toLowerCase().includes(q)
+  })
 }
 
 function onLoraInputFocus(idx) {
@@ -577,7 +584,7 @@ function onLoraInputBlur() {
 }
 
 function selectLoraFile(idx, file) {
-  loraItems.value[idx].path = file
+  loraItems.value[idx].path = file.name
   activeLoraFileIdx.value = null
 }
 

@@ -206,6 +206,7 @@ function initSchema(db) {
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
       moments_disabled INTEGER DEFAULT 0,
       short_prompt TEXT,
+      handwriting_font TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -309,6 +310,7 @@ function initSchema(db) {
       title TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       reply_content TEXT DEFAULT '',
+      content_short TEXT DEFAULT '',
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
       retry_count INTEGER NOT NULL DEFAULT 0,
       reply_at DATETIME,
@@ -445,6 +447,9 @@ function initSchema(db) {
 
   // 迁移: 信箱系统
   migrateMailboxSchema(db);
+
+  // 迁移: 手写字体 — characters 表新增 handwriting_font 列
+  migrateHandwritingFont(db);
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
@@ -1263,6 +1268,21 @@ function migrateMailboxSchema(db) {
     console.log('[db] mailbox indexes ensured');
   } catch (err) {
     console.log('[db] migrateMailboxSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 手写字体 — characters 表新增 handwriting_font 列
+ */
+function migrateHandwritingFont(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'handwriting_font')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN handwriting_font TEXT DEFAULT ''`);
+      console.log('[db] Added characters.handwriting_font column');
+    }
+  } catch (err) {
+    console.log('[db] migrateHandwritingFont error:', err.message);
   }
 }
 
