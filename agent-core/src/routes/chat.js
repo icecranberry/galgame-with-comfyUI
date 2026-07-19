@@ -756,31 +756,26 @@ ${coreRules}
 
     msgs.push(...history);
 
-    // 正在进行的奇遇（作为独立 system 消息注入到 user 消息之前，指令前置 + XML 结构化）
-    // 和朋友圈不同——奇遇是"此刻正在发生"的事，优先级更高，需要紧贴对话
+    // 正在进行的生活片段（作为独立 system 消息注入到 user 消息之前）
+    // 和朋友圈不同——片段是"此刻正在发生"的事，但不需要强制回应
     // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
     if (activeEvent) {
       const parsedHistory = JSON.parse(activeEvent.choice_history || '[]');
       const latestStep = parsedHistory.length > 1 ? parsedHistory[parsedHistory.length - 1] : null;
 
       const eventParts = [];
-      eventParts.push(`<current_event priority="high">`);
-      eventParts.push(``);
-      eventParts.push(`【最高优先级行为指令】`);
-      eventParts.push(`1. 你正在经历一个实时事件，你的情绪、身体感受和注意力都受此事牵动`);
-      eventParts.push(`2. 你必须在回复中自然地体现此事件对你的影响——不要脱离事件去聊无关话题`);
-      eventParts.push(`3. 当下任何语句，必须从当前事件的角度回应`);
-      eventParts.push(``);
-      eventParts.push(`【事件信息】`);
+      eventParts.push(`<current_event priority="normal">`);
+      eventParts.push(`现在，${character.display_name}正在经历一个生活片段：`);
       eventParts.push(`标题：${activeEvent.title}`);
       eventParts.push(`当前处境：${activeEvent.description}`);
       if (latestStep) {
-        eventParts.push(`最新进展（「${latestStep.choice_label}」）：${latestStep.summary}`);
+        eventParts.push(`最新情况（「${latestStep.choice_label}」）：${latestStep.summary}`);
       }
+      eventParts.push(`（这是她今天生活中的一小段。不需要专门围绕这件事展开对话——只在她觉得想提的时候，自然带过即可。）`);
       eventParts.push(`</current_event>`);
       const eventContext = eventParts.join('\n');
 
-      // 5.4 奇遇上下文 — 拼入最后一句 user 消息最前面（不入库，仅传给 LLM）
+      // 5.4 片段上下文 — 拼入最后一句 user 消息最前面（不入库，仅传给 LLM）
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === 'user') {
           msgs[i].content = `${eventContext}\n\n${msgs[i].content}`;

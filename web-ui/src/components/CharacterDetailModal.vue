@@ -189,7 +189,7 @@
                         <input
                           v-model="item.path"
                           class="fi"
-                          placeholder="在model/loras下搜索..."
+                          placeholder="在ComfyUI-aki-v3(或其他名称)\ComfyUI\models\loras下搜索..."
                           @focus="onLoraInputFocus(idx)"
                           @input="onLoraInput(idx)"
                           @keydown="onLoraKeydown($event, idx)"

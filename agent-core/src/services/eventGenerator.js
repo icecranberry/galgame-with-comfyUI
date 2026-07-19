@@ -1,17 +1,16 @@
 ﻿/**
- * 奇遇事件生成器
+ * 生活片段生成器
  *
- * EVENT_TYPES 不再做"剧情钩子库"，而是做"奇遇引擎"——
- * 每条描述的不是"发生了什么"，而是"为什么这种处境值得成为一个事件"。
+ * EVENT_TYPES 描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
  *
  * 设计理念：
- *   - desc：描述"这种处境的核心张力"+"它好玩的底层原因"，不预设具体场景
- *   - funFrom：这件事的有趣点来源（社死/反差/被看见/捡漏/好奇心……），引导 LLM 往有活人感的方向写
- *   - reactions：角色面对这类处境的典型反应倾向（仅供参考，LLM 根据人格选择最贴合的方向）
- *   - 所有具体物品/地点/人物/动作均由 LLM 根据角色人格+世界观自由创作，避免模板化
+ *   - desc：描述"此刻是什么状态，不需要发生什么特别的事"
+ *   - funFrom：这段生活的观看趣味来源（日常感/观察视角/身体感……）
+ *   - reactions：角色在这种状态下的自然反应倾向（轻量参考，LLM 根据人格选择）
+ *   - 所有具体物品/地点/人物/动作均由 LLM 根据角色人格+世界观自由创作
  *
- * - generateEvent(): LLM 结合角色人格+世界观+funFrom/reactions 生成事件初始场景 + 配图
- * - generateNextBranch(): 用户选择后生成下一步 + 配图
+ * - generateEvent(): LLM 结合角色人格+世界观，截取生活片段 + 配图
+ * - generateNextBranch(): 用户选择后自然接续 + 配图
  * - concludeEvent(): 到期/完成后生成结局，存入记忆
  */
 
@@ -25,18 +24,298 @@ import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeLightTag, getTimeLight } from './timeLight.js';
 
-// ── 事件类型库（奇遇引擎） ──
-// 每条给出"这类奇遇的核心模式 + 有趣点来源 + 角色反应方向"，不预设具体场景。
-// LLM 结合角色人格、世界观、关系网、当前时间，从方向出发自由创作独一无二的事件。
+// ── 生活片段类型库 ──
+// 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
+// LLM 结合角色人格+世界观+当前时间，在这个状态中截取属于该角色的具体的一分钟。
 //
 // 设计原则：
-//   - desc 描述"这种处境为什么值得成为一个事件"，不是"发生了什么"
-//   - 不出现具体物品/地点/人物/动作——那是 LLM 根据角色人格去创造的
-//   - funFrom 告诉模型"往哪里用力才会有活人感"（社死/反差/被看见/捡漏……）
-//   - reactions 给模型"这个角色可能怎么面对"的参考方向（不照搬，取最贴合人格的）
-//   - "奇"只是可选风味之一，平凡小事的情感涟漪同样值得成为一个事件
+//   - desc 描述"此刻是什么状态，不需要发生什么特别的事"
+//   - 不预设具体场景——具体物品/地点/人物/动作由 LLM 根据角色人格自由创作
+//   - funFrom 指出这一小段生活的观看趣味来源（日常感而非剧情张力）
+//   - reactions 给模型"这个角色可能怎么自然反应"的轻量参考
+//   - 事件结束=镜头切走，角色的人生不会有任何变化
 
 const EVENT_TYPES = [
+  // ═══ 晨间片段（15-20min）═══
+  {
+    key: 'morning_start', name: '刚醒', durationMin: 20, urgency: 1,
+    funFrom: ['日常感', '角色的习惯'],
+    reactions: ['慢慢来', '赶时间'],
+    desc: '角色刚醒、或者正在为今天做第一件事。不需要发生什么——只是看看她今天怎么开始的。',
+  },
+  {
+    key: 'getting_ready', name: '出门前', durationMin: 15, urgency: 1,
+    funFrom: ['习惯的可爱', '内心小剧场'],
+    reactions: ['按部就班', '手忙脚乱'],
+    desc: '角色在准备出门。穿什么、带什么、最后一刻想起什么。这些细小的决定本身就是值得一看的生活纹理。',
+  },
+  {
+    key: 'breakfast_moment', name: '吃早饭', durationMin: 20, urgency: 1,
+    funFrom: ['日常感', '安静的满足'],
+    reactions: ['认真吃', '随便对付'],
+    desc: '角色正在吃一天里的第一顿饭。怎么吃、在哪吃、吃的时候在想什么——每个人都不一样。',
+  },
+
+  // ═══ 通勤路上（15-25min）═══
+  {
+    key: 'commuting', name: '通勤路上', durationMin: 25, urgency: 1,
+    funFrom: ['观察视角', '日常感'],
+    reactions: ['放空', '看手机', '看窗外'],
+    desc: '角色在去某处的路上。交通工具上、步行中、或等红灯的间隙。这段路程本身就可以是一段安静的独处时间。',
+  },
+  {
+    key: 'wrong_way', name: '走岔了', durationMin: 20, urgency: 1,
+    funFrom: ['小烦恼', '角色的独特反应'],
+    reactions: ['不急', '有点急', '将错就错'],
+    desc: '坐过站了、拐错了路口、或者走神走到了不太认得的地方。不是什么大事——只是今天多绕了一小段路。',
+  },
+  {
+    key: 'slight_rush', name: '赶时间', durationMin: 15, urgency: 1,
+    funFrom: ['小烦恼', '内心小剧场'],
+    reactions: ['加速', '放弃', '边走边想策略'],
+    desc: '比预想的晚了一点。不是灾难——只是步速快了一点、心跳多了一拍、脑子里"应该来得及/估计来不及了"在交替闪烁。',
+  },
+
+  // ═══ 在学/在工作中（20-25min）═══
+  {
+    key: 'at_work', name: '正在做正事', durationMin: 25, urgency: 1,
+    funFrom: ['日常感', '习惯的可爱'],
+    reactions: ['专注', '摸鱼', '一边做一边想别的'],
+    desc: '角色在工作或学习中。可能很认真、可能在走神、可能在和面前的东西较劲。不需要发生什么——只是看看她怎么度过这段时间。',
+  },
+  {
+    key: 'on_break', name: '休息一下', durationMin: 20, urgency: 1,
+    funFrom: ['安静的满足', '内心小剧场'],
+    reactions: ['彻底放空', '做点别的', '思考人生'],
+    desc: '一段属于自己的间隙。喝水、伸懒腰、看窗外、刷手机、或者只是发了几秒呆。这种小暂停是日常生活里最多也最真实的褶皱。',
+  },
+  {
+    key: 'stuck_moment', name: '卡住了', durationMin: 20, urgency: 1,
+    funFrom: ['小烦恼', '角色的独特反应'],
+    reactions: ['死磕', '先放下', '问人'],
+    desc: '某件事做不下去了。一道题、一段文字、一个决定、或单纯不想继续了。卡住本身就是生活常态——看角色怎么面对它才是趣味所在。',
+  },
+  {
+    key: 'finished_early', name: '提前搞完了', durationMin: 25, urgency: 1,
+    funFrom: ['小确幸', '随意的决定'],
+    reactions: ['多出来的时间不知道该干什么', '立刻做想做的事'],
+    desc: '提前完成了手头的事，突然有了一段本不在计划里的空档。这个空档怎么填——甚至要不要填——是一个微妙的日常瞬间。',
+  },
+
+  // ═══ 购物消费（20-30min）═══
+  {
+    key: 'buying_something', name: '在买东西', durationMin: 20, urgency: 1,
+    funFrom: ['日常感', '角色的习惯'],
+    reactions: ['直奔目标', '顺便逛逛', '纠结'],
+    desc: '角色正在买东西。日常采购、买杯喝的、或者只是路过顺便拿了点什么。这个过程中角色的选择方式、比较方式、和店员的短暂交集，都是生活真实的一部分。',
+  },
+  {
+    key: 'trying_new', name: '尝新', durationMin: 20, urgency: 1,
+    funFrom: ['一点点的期待', '角色的独特反应'],
+    reactions: ['好奇', '犹豫', '拉了朋友一起试'],
+    desc: '看到没吃过/没用过的、听说了新品、或者店里今天刚好换了菜单。不是冒险——只是在日常的选项里多按了一下"第一次"。',
+  },
+  {
+    key: 'good_deal', name: '碰上优惠', durationMin: 20, urgency: 1,
+    funFrom: ['小确幸', '瞬间的犹豫'],
+    reactions: ['立刻拿下', '觉得不需要但心动'],
+    desc: '正好打折、刚好最后一件、或者别人多买了一份递过来。一件小事，但"刚好碰上"的运气感会让心跳轻快几下。',
+  },
+  {
+    key: 'just_browsing', name: '逛逛不买', durationMin: 30, urgency: 1,
+    funFrom: ['观察视角', '随意的决定'],
+    reactions: ['认真看', '随便扫', '被某样东西吸引'],
+    desc: '进来只是看看——打发时间、路过、或者就是现在不想回家。没有目标，脚步很慢，视线在货架之间漂。这种没有目的性的闲逛，是日常生活中最松弛的时刻之一。',
+  },
+
+  // ═══ 天气带来的小变化（25min）═══
+  {
+    key: 'weather_change', name: '变天了', durationMin: 25, urgency: 1,
+    funFrom: ['身体感', '小烦恼或小确幸'],
+    reactions: ['找地方躲', '就这么走', '停下来感受'],
+    desc: '下雨了、起风了、突然热了、太阳从云后面出来了。天气在没有任何预告的情况下做了一个微调——而角色的身体比判断先感觉到了。',
+  },
+  {
+    key: 'caught_in_rain', name: '没带伞', durationMin: 25, urgency: 1,
+    funFrom: ['小烦恼', '身体感'],
+    reactions: ['等', '跑', '找人借', '就这么淋'],
+    desc: '雨下起来了，而伞在别处。不是灾难——只是接下来十几分钟的活动范围被限定在了某个屋檐下，或者多了一段湿着袖子走路回家的路程。',
+  },
+
+  // ═══ 社交碎片（15-20min）═══
+  {
+    key: 'ran_into_friend', name: '碰到熟人了', durationMin: 20, urgency: 1,
+    funFrom: ['日常感', '瞬间的犹豫'],
+    reactions: ['打招呼', '假装没看见', '停下来聊两句'],
+    desc: '在没约好的地方看见了认识的人。可能是朋友、同学、同事、或只是"那个经常在这个点出没的人"。要不要说话、说多少、怎么结束——这些微小的社交判断，是日常里最频繁也最有角色辨识度的行为。',
+  },
+  {
+    key: 'brief_interaction', name: '和陌生人交集', durationMin: 15, urgency: 1,
+    funFrom: ['日常感', '角色的独特反应'],
+    reactions: ['礼貌', '冷淡', '热情'],
+    desc: '结账时的收银员、问路的路人、电梯里的同乘者、排队时站在前后的人。几秒钟的互动——但角色的方式（眼神、语气、身体距离）能看出很多东西。不需要发生什么特别的事。',
+  },
+  {
+    key: 'got_a_message', name: '收到消息', durationMin: 15, urgency: 1,
+    funFrom: ['一点点的期待', '角色的独特反应'],
+    reactions: ['立刻看', '等一会儿再看', '看了不知道怎么回'],
+    desc: '手机亮了。一条消息——可能是群聊、可能是私聊、可能是通知。不是大事——但看到消息后的几秒钟反应是角色最真实的瞬间。回不回、怎么回、先装作没看到——这些犹豫比消息本身更有趣。',
+  },
+  {
+    key: 'overheard_talk', name: '听见旁边在聊', durationMin: 15, urgency: 1,
+    funFrom: ['观察视角', '内心小剧场'],
+    reactions: ['继续听', '走开', '忍不住笑了'],
+    desc: '旁边的人在说话。不是秘密、不是关键信息——就是普通人的普通聊天。但角色的注意力被勾住了一小会儿：可能觉得好笑、可能有共鸣、可能引发了自己的念头。这是旁观且在意的一刻。',
+  },
+
+  // ═══ 一点小情绪（15-20min）═══
+  {
+    key: 'sudden_craving', name: '突然好想', durationMin: 20, urgency: 1,
+    funFrom: ['内心小剧场', '随意的决定'],
+    reactions: ['马上去', '忍一下', '在脑内预览'],
+    desc: '不知道哪里来的念头——突然特别想喝什么、吃什么、做某件小事。不是需求，是冲动。行动或不行动的这几十秒是角色和自己欲望之间的最短交涉。',
+  },
+  {
+    key: 'small_nostalgia', name: '忽然想起', durationMin: 20, urgency: 1,
+    funFrom: ['安静的满足', '角色的独特反应'],
+    reactions: ['沉浸在回忆里', '笑了一下', '发条消息'],
+    desc: '一个画面、一段旋律、一阵气味、或者完全没有触发源——脑子里突然跳出来一段过去的事。不是大事，不改变任何东西，只是今天多了一层很久之前的颜色。',
+  },
+  {
+    key: 'mild_frustration', name: '有点烦', durationMin: 15, urgency: 1,
+    funFrom: ['小烦恼', '角色的习惯'],
+    reactions: ['忍', '发泄一下', '转移注意力'],
+    desc: '不是因为什么大事。就是不太顺——少了点什么、慢了半拍、刚好不巧。这种低度的"有点烦"比愤怒更真实——它大多时候不需要解决，只是需要一个人自己消化几分钟。',
+  },
+  {
+    key: 'little_lift', name: '心里亮了一下', durationMin: 15, urgency: 1,
+    funFrom: ['小确幸', '安静的满足'],
+    reactions: ['偷偷笑', '想告诉谁', '默默记下'],
+    desc: '很小的事。听到了喜欢的那首歌的前奏、正好赶上了绿灯、今天的咖啡比昨天好喝、路过的人冲自己笑了一下。不需要理由的短暂愉快。',
+  },
+  {
+    key: 'random_thought', name: '脑子里突然', durationMin: 15, urgency: 1,
+    funFrom: ['内心小剧场', '角色的独特反应'],
+    reactions: ['顺着想下去', '马上打断', '记下来'],
+    desc: '一个念头不知道从哪冒了出来。和前后的上下文都没关系——一个比喻、一个记忆、一个问题、一个假设。思绪像风一样路过，角色可以选择追上去或让它飘走。',
+  },
+
+  // ═══ 兴趣爱好（20-30min）═══
+  {
+    key: 'doing_hobby', name: '沉浸在自己的世界', durationMin: 30, urgency: 1,
+    funFrom: ['安静的满足', '角色的习惯'],
+    reactions: ['全神贯注', '随性地做'],
+    desc: '角色在做一件不是必须做、但就是想做的事。画画、看书、做手工、打游戏——身边的时间变慢，世界的边界模糊了。这是她最放松也最像自己的状态。',
+  },
+  {
+    key: 'found_interesting', name: '看到有意思的', durationMin: 20, urgency: 1,
+    funFrom: ['一点点的期待', '观察视角'],
+    reactions: ['停下来仔细看', '拍照/收藏', '想告诉人'],
+    desc: '在网上或者路过的时候，看到了一个引起好奇心或审美共鸣的东西。不一定要拥有、不一定要深挖——就是单纯觉得"有意思"。',
+  },
+  {
+    key: 'planning_something', name: '在盘算', durationMin: 20, urgency: 1,
+    funFrom: ['一点点的期待', '内心小剧场'],
+    reactions: ['认真计划', '大致想想', '算了下次再说'],
+    desc: '角色在想一件想做但还没做的事。查路线、算时间、列清单、或者只是脑补了一下过程。计划本身的快乐有时候不亚于执行——尤其是在计划阶段，一切都还是最好的版本。',
+  },
+
+  // ═══ 临时决定（15-20min）═══
+  {
+    key: 'changed_mind', name: '改主意了', durationMin: 15, urgency: 1,
+    funFrom: ['随意的决定', '角色的独特反应'],
+    reactions: ['果断改', '纠结后改', '想改但没改'],
+    desc: '已经决定的事——临到跟前改了。想吃的店关门了所以换了一家、本来打算回家想了想又折去了别的地方。这种微小的方向修正，体现的是角色真实的选择倾向。',
+  },
+  {
+    key: 'taking_a_minute', name: '先坐一会儿', durationMin: 15, urgency: 1,
+    funFrom: ['安静的满足', '身体感'],
+    reactions: ['真的只是坐一会儿', '坐着坐着不想动了'],
+    desc: '角色决定暂时不赶路了。看到了长椅、台阶、或者刚好经过的咖啡馆——有地方能坐，而身体已经比计划先一步停了下来。不是偷懒——是和自己达成的一个即时休战协议。',
+  },
+  {
+    key: 'going_long_way', name: '多走一段', durationMin: 20, urgency: 1,
+    funFrom: ['随意的决定', '观察视角'],
+    reactions: ['想多看看', '心情好', '不想太早到'],
+    desc: '明明有更近的路，但选了远的那条。可能是因为天气太好了、可能在听一首没听完的歌、可能只是暂时没什么理由——就是想多在户外漂一会儿。这是只有自己知道的、没有任何后果的小任性。',
+  },
+
+  // ═══ 一点小幸运/小倒霉（10-20min）═══
+  {
+    key: 'just_in_time', name: '刚好赶上', durationMin: 15, urgency: 2,
+    funFrom: ['小确幸', '角色的习惯'],
+    reactions: ['心里得意', '太正常了', '觉得今天运气好'],
+    desc: '差一步就赶不上——但赶上了。车刚要走的时候到了站、最后一个被叫到号、在关门前三秒进了电梯。这种轻飘飘的幸运是日常最好的赠品，不值得庆祝但值得心里得意一下。',
+  },
+  {
+    key: 'small_inconvenience', name: '不太顺', durationMin: 15, urgency: 1,
+    funFrom: ['小烦恼', '角色的习惯'],
+    reactions: ['皱眉', '换一条路', '算了不在意'],
+    desc: '刚好差了一步、前面那个人把最后一杯买了、想走的路被施工围住了。这个级别的"不太顺"不值得生气——就是正常生活的摩擦力——但角色面对它时的第一反应，比事件本身更有信息量。',
+  },
+  {
+    key: 'cant_find_thing', name: '东西去哪了', durationMin: 20, urgency: 1,
+    funFrom: ['小烦恼', '角色的习惯'],
+    reactions: ['翻找', '回忆', '放弃先不用'],
+    desc: '某样东西不在应该在的位置。钥匙、耳机、笔、或者昨天随手放的东西。没有严重后果——只是多了几分钟在房间里转圈和在脑子里倒放的片段。',
+  },
+  {
+    key: 'forgot_thing', name: '忘了', durationMin: 15, urgency: 1,
+    funFrom: ['小烦恼', '内心小剧场'],
+    reactions: ['折回去', '算了', '找人带'],
+    desc: '出了门才想起来自己忘了什么。或是在某件事做到一半的时候停住——总觉得忘了做点什么但想不起来。那几秒钟的回忆回溯是日常生活里最小的侦探游戏。',
+  },
+  {
+    key: 'awkward_small', name: '尬了一小下', durationMin: 10, urgency: 1,
+    funFrom: ['微小的尴尬', '角色的习惯'],
+    reactions: ['假装没事', '自嘲', '赶紧离开'],
+    desc: '说错了一个字、跟陌生人同时走了同一侧、伸手想拿的东西被别人先拿了。这是一种十秒之内就结束的小尴尬——不值得写进日记的第 1 行，但值得写进第 73 行。',
+  },
+
+  // ═══ 身体感（10-15min）═══
+  {
+    key: 'body_moment', name: '感觉到了自己', durationMin: 15, urgency: 1,
+    funFrom: ['身体感', '日常感'],
+    reactions: ['忽视', '停下来感受', '调整'],
+    desc: '饿了、渴了、冷了、肩膀酸了——哪种都行。不是故事，是身体在一天里的常规汇报。角色的处理方式（忍一下/立刻找吃的/在心里骂一句）就是性格小样。',
+  },
+  {
+    key: 'mirror_moment', name: '看到了自己', durationMin: 10, urgency: 1,
+    funFrom: ['日常感', '内心小剧场'],
+    reactions: ['看看就走', '认真打量', '整理一下'],
+    desc: '路过镜子、橱窗玻璃、手机黑屏的反光——看到了自己。不是审视，就是一瞬间的对视。整理一下刘海、侧过脸看一眼、或者愣了一下——每个人和自己短暂相处的那几秒都不一样。',
+  },
+
+  // ═══ 注意到什么（15min）═══
+  {
+    key: 'noticed_detail', name: '注意到了', durationMin: 15, urgency: 1,
+    funFrom: ['观察视角', '日常感'],
+    reactions: ['多看两眼', '心里记下', '走过就算了'],
+    desc: '抬头看见了平时不会多看一眼的东西。光透过树叶的样子、墙上新贴的纸条、旁边那个人戴了一只很特别的耳环。注意到本身就是事件——因为注意到意味着那一瞬间角色和世界之间多了一层关系。',
+  },
+  {
+    key: 'animal_moment', name: '小动物', durationMin: 15, urgency: 1,
+    funFrom: ['小确幸', '观察视角'],
+    reactions: ['停下来看', '想摸', '拍照', '假装没兴趣'],
+    desc: '路上看见了猫、跟着走了几步的狗、停在窗台上的鸟。人和动物之间那几秒钟的关系是非社会性的、不设防的——角色的真实反应往往比在人群中更直接。',
+  },
+  {
+    key: 'season_signal', name: '季节的提示', durationMin: 15, urgency: 1,
+    funFrom: ['身体感', '安静的满足'],
+    reactions: ['停下来感受', '想起什么', '没什么感觉'],
+    desc: '一阵风里有不同的温度、阳光的角度变了、空气里有某种只在特定季节出现的气味。角色感觉到了——然后呢？也许只是拉了拉衣领，也许被带回了去年的某一天。',
+  },
+  {
+    key: 'odd_little', name: '有点奇怪', durationMin: 15, urgency: 1,
+    funFrom: ['观察视角', '内心小剧场'],
+    reactions: ['多看两眼', '心想算了', '和朋友说'],
+    desc: '看到了一个有点奇怪但也没那么奇怪的东西。超市里放在错误货架的商品、写着看不懂文字的招牌、路人的穿搭。它不会发展成任何事——只是今天多看了一秒。',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // 以下为剧情向事件——日常中的不寻常瞬间（与原日常片段共存）
+  // ═══════════════════════════════════════════════════════════════
+
   // ═══ 日常节奏被打乱（15-40min）═══
   {
     key: 'routine_broken', name: '日常脱轨', durationMin: 20, urgency: 1,
@@ -223,7 +502,7 @@ const EVENT_TYPES = [
     desc: '一个确定已经关上的门——有过期日期的、被通知结束的、自己放弃或被告知没戏的——又开了一条缝。不是努力争取来的，就是某个条件自己变了一下、某个人突然想起了名字、或命运在别处受了挫折决定在这里补一口气。窗口重新打开的这个瞬间，比第一次得到机会还让人心跳——因为失去过的人，知道它在手里到底有多重。',
   },
   {
-    key: 'lucky_timing', name: '刚好赶上', durationMin: 20, urgency: 1,
+    key: 'lucky_timing', name: '刚好遇上', durationMin: 20, urgency: 1,
     funFrom: ['幸运', '得意', '巧合'],
     reactions: ['得意地笑', '觉得今天不一样', '告诉别人', '趁热打铁继续做'],
     desc: '一个稍纵即逝的好事——恰好被自己撞上了。不是计划、不是消息灵通——就是刚刚好的时间站在了刚刚好的地方。那种"今天难道是我的幸运日"的得意感混着一点迷信式的小心——做别的事会不会把运气用薄了。但这种顺手捡到的轻飘飘的运气，是日常里最好的赠品：没付出成本、没预期等待、就是正好轮到了。',
@@ -264,9 +543,80 @@ function getAvailableEventTypes(character, db) {
   return EVENT_TYPES;
 }
 
-// 事件类别 → VAD 情绪偏移（被 chat.js 情绪引擎消费，纯规则零 LLM 开销）
-// 正值=提升(V愉悦/A兴奋/D支配感)，负值=降低，范围 [-0.30, +0.45]
+// 生活片段类别 → VAD 情绪偏移（被 chat.js 情绪引擎消费，纯规则零 LLM 开销）
+// 正值=提升(V愉悦/A兴奋/D支配感)，负值=降低，范围 [-0.15, +0.15]
+// 原则：日常小事不会让情绪剧烈波动，所有偏移量控制在轻度范围
 const EVENT_VAD_MODIFIERS = {
+  // ═══ 晨间片段 ═══ — 偏安静，轻微启动
+  morning_start:        { valence: 0.05, arousal:-0.05, dominance: 0.05 },
+  getting_ready:        { valence: 0.00, arousal: 0.10, dominance: 0.05 },
+  breakfast_moment:     { valence: 0.10, arousal:-0.05, dominance: 0.00 },
+
+  // ═══ 通勤路上 ═══ — 中性偏安静
+  commuting:            { valence: 0.00, arousal:-0.05, dominance: 0.00 },
+  wrong_way:            { valence:-0.05, arousal: 0.05, dominance:-0.05 },
+  slight_rush:          { valence:-0.10, arousal: 0.15, dominance:-0.10 },
+
+  // ═══ 在学/在工作中 ═══ — 中性到轻微波动
+  at_work:              { valence: 0.00, arousal: 0.00, dominance: 0.05 },
+  on_break:             { valence: 0.05, arousal:-0.10, dominance: 0.00 },
+  stuck_moment:         { valence:-0.10, arousal: 0.05, dominance:-0.10 },
+  finished_early:       { valence: 0.15, arousal: 0.10, dominance: 0.10 },
+
+  // ═══ 购物消费 ═══
+  buying_something:     { valence: 0.05, arousal: 0.00, dominance: 0.05 },
+  trying_new:           { valence: 0.10, arousal: 0.10, dominance: 0.05 },
+  good_deal:            { valence: 0.15, arousal: 0.10, dominance: 0.10 },
+  just_browsing:        { valence: 0.05, arousal:-0.05, dominance: 0.05 },
+
+  // ═══ 天气变化 ═══
+  weather_change:       { valence: 0.00, arousal: 0.05, dominance:-0.05 },
+  caught_in_rain:       { valence:-0.10, arousal: 0.10, dominance:-0.10 },
+
+  // ═══ 社交碎片 ═══
+  ran_into_friend:      { valence: 0.05, arousal: 0.10, dominance: 0.05 },
+  brief_interaction:    { valence: 0.00, arousal: 0.00, dominance: 0.00 },
+  got_a_message:        { valence: 0.10, arousal: 0.10, dominance: 0.05 },
+  overheard_talk:       { valence: 0.00, arousal: 0.05, dominance: 0.00 },
+
+  // ═══ 一点小情绪 ═══
+  sudden_craving:       { valence: 0.10, arousal: 0.10, dominance: 0.10 },
+  small_nostalgia:      { valence: 0.05, arousal:-0.05, dominance: 0.00 },
+  mild_frustration:     { valence:-0.10, arousal: 0.05, dominance:-0.05 },
+  little_lift:          { valence: 0.15, arousal: 0.10, dominance: 0.10 },
+  random_thought:       { valence: 0.00, arousal: 0.00, dominance: 0.00 },
+
+  // ═══ 兴趣爱好 ═══
+  doing_hobby:          { valence: 0.15, arousal: 0.00, dominance: 0.15 },
+  found_interesting:    { valence: 0.10, arousal: 0.10, dominance: 0.10 },
+  planning_something:   { valence: 0.10, arousal: 0.05, dominance: 0.10 },
+
+  // ═══ 临时决定 ═══
+  changed_mind:         { valence: 0.00, arousal: 0.05, dominance: 0.10 },
+  taking_a_minute:      { valence: 0.05, arousal:-0.10, dominance: 0.05 },
+  going_long_way:       { valence: 0.10, arousal: 0.00, dominance: 0.10 },
+
+  // ═══ 小幸运/小倒霉 ═══
+  just_in_time:         { valence: 0.15, arousal: 0.15, dominance: 0.10 },
+  small_inconvenience:  { valence:-0.05, arousal: 0.05, dominance:-0.05 },
+  cant_find_thing:      { valence:-0.10, arousal: 0.10, dominance:-0.10 },
+  forgot_thing:         { valence:-0.10, arousal: 0.10, dominance:-0.10 },
+  awkward_small:        { valence:-0.05, arousal: 0.10, dominance:-0.05 },
+
+  // ═══ 身体感 ═══
+  body_moment:          { valence:-0.05, arousal: 0.00, dominance: 0.00 },
+  mirror_moment:        { valence: 0.00, arousal: 0.00, dominance: 0.05 },
+
+  // ═══ 注意到什么 ═══
+  noticed_detail:       { valence: 0.05, arousal: 0.05, dominance: 0.00 },
+  animal_moment:        { valence: 0.15, arousal: 0.05, dominance: 0.05 },
+  season_signal:        { valence: 0.05, arousal: 0.00, dominance: 0.00 },
+  odd_little:           { valence: 0.00, arousal: 0.05, dominance: 0.00 },
+
+  // ════════════════════════════════════════════════════════
+  // 剧情向事件 VAD（与原日常片段偏移量共存）
+  // ════════════════════════════════════════════════════════
+
   // ═══ 日常节奏被打乱 ═══ — V:[-0.15,0], A:[+0.1,+0.35], D:[-0.15,0]
   routine_broken:        { valence:-0.10, arousal: 0.20, dominance:-0.10 },
   running_late:          { valence:-0.15, arousal: 0.35, dominance:-0.15 },
@@ -307,13 +657,15 @@ const EVENT_VAD_MODIFIERS = {
   phantom_shop:          { valence: 0.25, arousal: 0.30, dominance: 0.15 },
   vending_mystery:       { valence: 0.15, arousal: 0.25, dominance: 0.05 },
 
-  // ═══ 喜讯降临 ═══ — 纯粹愉悦：V全正、A中高（好消息天然唤醒兴奋）、D全正（喜讯提升自我效能感）
-  unexpected_approval:   { valence: 0.30, arousal: 0.30, dominance: 0.20 },  // 惊喜+"原来我也配"
-  public_recognition:    { valence: 0.25, arousal: 0.20, dominance: 0.25 },  // 被看见+被理解，支配感强
-  surprise_invitation:   { valence: 0.25, arousal: 0.30, dominance: 0.15 },  // 被纳入名单的兴奋
-  second_chance_news:    { valence: 0.25, arousal: 0.25, dominance: 0.15 },  // 窗口重开的心跳加速
-  lucky_timing:          { valence: 0.25, arousal: 0.35, dominance: 0.15 },  // 刚好赶上的兴奋
-  mystery_blessing:      { valence: 0.20, arousal: 0.20, dominance: 0.10 },  // 被世界善待，温和暖意
+  // ═══ 喜讯降临 ═══ — 纯粹愉悦：V全正、A中高、D全正
+  unexpected_approval:   { valence: 0.30, arousal: 0.30, dominance: 0.20 },
+  public_recognition:    { valence: 0.25, arousal: 0.20, dominance: 0.25 },
+  surprise_invitation:   { valence: 0.25, arousal: 0.30, dominance: 0.15 },
+  second_chance_news:    { valence: 0.25, arousal: 0.25, dominance: 0.15 },
+  lucky_timing:          { valence: 0.25, arousal: 0.35, dominance: 0.15 },
+  mystery_blessing:      { valence: 0.20, arousal: 0.20, dominance: 0.10 },
+
+  // ═══ 其他 ═══
   pressed_it:            { valence:-0.05, arousal: 0.40, dominance:-0.10 },
   weather_trap:          { valence:-0.05, arousal: 0.15, dominance:-0.15 },
   dare_accepted:         { valence: 0.10, arousal: 0.35, dominance: 0.15 },
@@ -483,9 +835,9 @@ export async function generateEvent(character, options = {}) {
 
   const directorSystem = `${jailbreakPrompt}
 ${worldIntegrationBlock}
-你正在为「${displayName}」生成一段特殊事件的开场叙事——所谓"特殊事件"，就是在角色当下的日常中不寻常的某个瞬间。它可以大（紧急状况、陌生人闯入、一个改变轨迹的邀约），也可以小（迟到了、东西丢了、一个没来由的情绪涌上来），可以是正面的（惊喜、发现、心动），也可以是负面的（危机、尴尬、暴露）。
+你正在为「${displayName}」截取今天生活中的一小段。
 
-你的任务是写出这个"口子被撕开"的瞬间——紧密第三人称叙事（close third-person narration），读者看到的是关于「${displayName}」的生动叙述。
+这不是"特殊事件"——这是角色今天 24 小时里随机的一分钟。镜头刚好转到这里，看到了她在做什么。
 
 铁律——违反以下任何一条即视为失败：
 
@@ -806,10 +1158,10 @@ ${multiPerson2.otherPersona}`;
 
   const eventTypeMeta = EVENT_TYPES.find(e => e.key === event.event_type_key);
   const funFromNote2 = eventTypeMeta?.funFrom?.length
-    ? `\n\n这件事的有趣张力来自${eventTypeMeta.funFrom.join('、')}——后续分支中请继续保持这个层面的力量。`
+    ? `\n\n这段生活的质感来自${eventTypeMeta.funFrom.join('、')}——后续中保持这个质感，不用刻意用力。`
     : '';
   const reactionsNote2 = eventTypeMeta?.reactions?.length
-    ? `\n\n${displayName2}面对这类处境时可能出现的反应倾向：${eventTypeMeta.reactions.join('、')}——仅供参考，根据角色个性和当下局面选择最贴合的方向。`
+    ? `\n\n${displayName2}在这种状态下可能出现的自然反应：${eventTypeMeta.reactions.join('、')}——仅供参考，根据角色个性选择最贴合的方向。`
     : '';
 
   const directorPrompt2 = `事件标题：${event.title}
