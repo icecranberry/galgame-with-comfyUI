@@ -21,6 +21,7 @@ import eventsRoutes from './src/routes/events.js';
 import streamRoutes from './src/routes/stream.js';
 import scheduleRoutes from './src/routes/schedule.js';
 import workflowsRoutes from './src/routes/workflows.js';
+import mailboxRoutes from './src/routes/mailbox.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
@@ -29,6 +30,7 @@ import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
 import { startReplyQueueScheduler } from './src/services/replyQueueScheduler.js';
 import { initialize as initScheduleManager } from './src/services/scheduleManager.js';
 import { startScheduler as startImageCompressor } from './src/services/imageCompressor.js';
+import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 
 const app = express();
@@ -76,6 +78,7 @@ app.use('/api/events', eventsRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/workflows', workflowsRoutes);
+app.use('/api/mailbox', mailboxRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -125,6 +128,9 @@ initScheduleManager();
 
 // 启动图片压缩调度器（定时 + 立即压缩功能）
 startImageCompressor();
+
+// 启动信箱调度器（每 60 秒扫描待回信的信件）
+startMailboxScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

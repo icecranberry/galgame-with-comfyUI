@@ -1131,3 +1131,39 @@ export async function updateWorkflowScene(scene) {
   })
   return res.json()
 }
+
+// ── 信箱 ──
+
+export async function listLetters(page = 1, limit = 20) {
+  const res = await fetch(`${BASE}/mailbox?page=${page}&limit=${limit}`)
+  return res.json()
+}
+
+export async function getUnreadCount() {
+  const res = await fetch(`${BASE}/mailbox/unread`)
+  return res.json()
+}
+
+export async function sendLetter(characterId, title, content) {
+  const res = await fetch(`${BASE}/mailbox/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: characterId, title, content }),
+  })
+  return res.json()
+}
+
+export async function getLetter(id) {
+  const res = await fetch(`${BASE}/mailbox/${id}`)
+  return res.json()
+}
+
+export async function markLetterRead(id) {
+  const res = await fetch(`${BASE}/mailbox/${id}/mark-read`, { method: 'PUT' })
+  return res.json()
+}
+
+export async function deleteLetter(id) {
+  const res = await fetch(`${BASE}/mailbox/${id}`, { method: 'DELETE' })
+  return res.json()
+}

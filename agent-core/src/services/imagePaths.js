@@ -12,6 +12,7 @@ export const IMAGE_CATEGORIES = {
   gifts:     { dir: 'gifts',     label: '送礼' },
   avatargen: { dir: 'avatargen', label: '头像' },
   peek:      { dir: 'peek',      label: '日程' },
+  mailbox:   { dir: 'mailbox',   label: '信箱' },
 };
 
 export const LEGACY_CATEGORY = 'history';

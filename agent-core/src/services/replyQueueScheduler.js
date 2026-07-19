@@ -174,16 +174,7 @@ async function processReplyQueue() {
       msgIds.push(msgResult.lastInsertRowid);
     }
 
-    // 更新 reply_queue 记录
-    const msgIdsJson = JSON.stringify(msgIds);
-    db.prepare(`
-      UPDATE reply_queue
-      SET status = 'done',
-          reply_raw_msg_id = ?,
-          reply_msg_ids = ?,
-          processed_at = datetime(?)
-      WHERE id IN (${placeholders})
-    `).run(rawResult.lastInsertRowid, msgIdsJson, new Date().toISOString(), ...ids);
+    db.prepare(`DELETE FROM reply_queue WHERE id IN (${placeholders})`).run(...ids);
 
     // 睡觉醒来：更新角色状态，重置叫醒列
     if (isSleepWakeup) {

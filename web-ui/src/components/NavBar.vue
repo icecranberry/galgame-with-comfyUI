@@ -56,10 +56,13 @@
       </router-link>
 
       <router-link to="/tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
-        <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
-          <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z"/>
-          <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z"/>
-        </svg>
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
+            <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z"/>
+            <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z"/>
+          </svg>
+          <span v-if="mailbox.unreadCount > 0" class="nav-dot">{{ mailbox.unreadCount > 99 ? '99+' : mailbox.unreadCount }}</span>
+        </div>
         <span class="nav-label">酒馆</span>
       </router-link>
 
@@ -83,6 +86,7 @@ import { useMomentsStore } from '../stores/moments.js'
 import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
+import { useMailboxStore } from '../stores/mailbox.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 
 const router = useRouter()
@@ -91,6 +95,7 @@ const moments = useMomentsStore()
 const events = useEventsStore()
 const proactive = useProactiveStore()
 const scheduleStore = useScheduleStore()
+const mailbox = useMailboxStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {
@@ -118,15 +123,17 @@ function handleScheduleClick() {
 }
 
 onMounted(() => {
-  startUnifiedStream()   // 单一 HTTP 连接承载所有 SSE 事件
-  moments.connectSSE()   // 订阅 'new_post' 事件
-  events.connectSSE()    // 订阅 'new_event'/'event_update' 等事件
+  startUnifiedStream()
+  moments.connectSSE()
+  events.connectSSE()
+  mailbox.startPolling()
 })
 
 onUnmounted(() => {
   stopUnifiedStream()
   moments.disconnectSSE()
   events.disconnectSSE()
+  mailbox.stopPolling()
 })
 </script>
 

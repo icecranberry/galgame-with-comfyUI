@@ -2,7 +2,7 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal" class="modal-overlay">
+      <div v-if="visible && !showLoraModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -345,6 +345,24 @@ const activeLoraFileIdx = ref(null)
 const loraDropdownIdx = ref(-1)
 const loraSuggestions = ref([])
 const loraFetching = ref(false)
+
+const clickShouldClose = ref(false)
+
+function onOverlayMouseDown(e) {
+  if (e.target === e.currentTarget) {
+    const textareaWasFocused = document.activeElement?.closest?.('.prompt-textarea') ?? false
+    clickShouldClose.value = !textareaWasFocused
+  } else {
+    clickShouldClose.value = false
+  }
+}
+function onOverlayClick() {
+  if (clickShouldClose.value) {
+    clickShouldClose.value = false
+    emit('close')
+  }
+  clickShouldClose.value = false
+}
 
 const FILTERED_CUSTOM_WORKFLOW_NAMES = ['制图工作流.json', '制图工作流-加入lora.json', '制图工作流-加入lora2.json', '制图工作流-加入lora3.json']
 const filteredWorkflows = computed(() =>

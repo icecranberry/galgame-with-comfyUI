@@ -388,6 +388,16 @@ function getTitle(node) {
  * 例如模型缺失 → 建议切换工作流模式或补全模型文件
  */
 function formatComfyUIError(errText, status) {
+  // 405 特判：Windows 上 localhost 可能解析到 IPv6 或被代理拦截
+  if (status === 405) {
+    const currentUrl = config.comfyui.url || '未配置';
+    const usingLocalhost = currentUrl.includes('localhost');
+    const hint = usingLocalhost
+      ? '\n注意: 当前使用 localhost，Windows 上可能优先解析到 IPv6 (::1) 导致 POST 失败\n  建议前往设置页将 ComfyUI 地址改为 http://127.0.0.1:8188'
+      : `\n当前地址: ${currentUrl}\n  请检查 ComfyUI 是否正常启动，端口是否正确`;
+    return `ComfyUI 连接失败 (405: Method Not Allowed)\n${hint}`;
+  }
+
   try {
     const data = JSON.parse(errText);
     if (!data.node_errors) return `ComfyUI returned ${status}: ${errText.slice(0, 300)}`;

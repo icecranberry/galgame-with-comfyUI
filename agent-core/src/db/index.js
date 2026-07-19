@@ -300,6 +300,25 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       ended_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- 信箱信件表
+    CREATE TABLE IF NOT EXISTS mailbox_letters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL CHECK(direction IN ('user_to_char','char_to_user')),
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      reply_content TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      reply_at DATETIME,
+      paper_path TEXT DEFAULT '',
+      portrait_path TEXT DEFAULT '',
+      illustration_path TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      replied_at DATETIME,
+      is_read INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   // FTS5 external content table — drop & recreate to handle schema changes
@@ -423,6 +442,9 @@ function initSchema(db) {
 
   // 迁移: LLM 多配置切换（需在 seed 之后，确保 DB 已初始化）
   migrateLlmProfiles(db);
+
+  // 迁移: 信箱系统
+  migrateMailboxSchema(db);
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
@@ -1229,6 +1251,18 @@ function migrateWorldSettings(db) {
     console.log('[db] migrateWorldSettings: moved existing world_setting to world_settings table');
   } catch (err) {
     console.log('[db] migrateWorldSettings error:', err.message);
+  }
+}
+
+// 迁移: 信箱系统 — mailbox_letters 表（由 CREATE TABLE IF NOT EXISTS 保证，仅新增索引）
+function migrateMailboxSchema(db) {
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_character_id ON mailbox_letters(character_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_status ON mailbox_letters(status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_reply_at ON mailbox_letters(reply_at)`);
+    console.log('[db] mailbox indexes ensured');
+  } catch (err) {
+    console.log('[db] migrateMailboxSchema error:', err.message);
   }
 }
 

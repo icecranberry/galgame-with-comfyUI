@@ -74,6 +74,8 @@ function _connect() {
     new_post:          d => _dispatch('new_post', d),
     new_comment:       d => _dispatch('new_comment', d),
     proactive_message: d => _dispatch('proactive_message', d),
+    reply_processing:  d => _dispatch('reply_processing', d),
+    reply_ready:       d => _dispatch('reply_ready', d),
     delayed_reply:     d => _dispatch('delayed_reply', d),
     schedule_peek_ready: d => _dispatch('schedule_peek_ready', d),
     schedule_peek_progress: d => _dispatch('schedule_peek_progress', d),

@@ -7,13 +7,14 @@
     <!-- ═══════════════════════════════════════════
          用户信息卡片
          ═══════════════════════════════════════════ -->
-    <div class="user-row card">
-      <div
-        class="user-avatar clickable"
-        :style="userAvatarStyle"
-        @click="showUserAvatarPicker = true"
-      >{{ userAvatar ? '' : '我' }}</div>
-      <div class="user-info">
+    <div class="user-row-wrapper">
+      <div class="user-row card">
+        <div
+          class="user-avatar clickable"
+          :style="userAvatarStyle"
+          @click="showUserAvatarPicker = true"
+        >{{ userAvatar ? '' : '我' }}</div>
+        <div class="user-info">
         <!-- 姓名 -->
         <div class="user-field-row">
           <span class="field-label">称呼</span>
@@ -86,6 +87,15 @@
             <button v-if="!editingPersona" class="edit-pen" @click="startEditPersona" title="编辑其他说明">✎</button>
           </div>
         </div>
+      </div>
+      </div>
+      <div class="mailbox-card card" @click="showMailbox = true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <path d="M2 4L12 13L22 4"/>
+        </svg>
+        <span class="mailbox-label">信箱</span>
+        <span v-if="mailboxUnread > 0" class="mailbox-badge">{{ mailboxUnread > 99 ? '99+' : mailboxUnread }}</span>
       </div>
     </div>
 
@@ -433,6 +443,11 @@
       @close="showDeductionModal = false; deductionMode = 'character'"
       @saved="onDeductionSaved"
     />
+
+    <!-- ═══════════════════════════════════════════
+         信箱弹窗
+         ═══════════════════════════════════════════ -->
+    <MailboxModal :visible="showMailbox" :characters="sortedCharacters" @close="showMailbox = false" />
   </div>
 </template>
 
@@ -447,9 +462,15 @@ import RelationshipGraph from '../components/RelationshipGraph.vue'
 import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
+import MailboxModal from '../components/MailboxModal.vue'
+import { useMailboxStore } from '../stores/mailbox.js'
 
 const router = useRouter()
 const chat = useChatStore()
+const mailboxStore = useMailboxStore()
+
+const showMailbox = ref(false)
+const mailboxUnread = computed(() => mailboxStore.unreadCount)
 
 // 按 display_name 首字母排序（中文按拼音）
 const sortedCharacters = computed(() =>
@@ -1024,11 +1045,45 @@ onMounted(async () => {
 }
 
 /* ── 用户行 ── */
+.user-row-wrapper {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 28px;
+}
 .user-row {
   display: flex;
   align-items: flex-start;
   gap: 18px;
-  margin-bottom: 28px;
+  flex: 1;
+}
+.mailbox-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 18px;
+  cursor: pointer;
+  position: relative;
+  width: 150px;
+  flex-shrink: 0;
+}
+.mailbox-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.mailbox-badge {
+  position: absolute;
+  top: -6px; right: -6px;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
 }
 
 .user-avatar {
