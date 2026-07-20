@@ -89,7 +89,7 @@
         </div>
       </div>
       </div>
-      <div class="mailbox-card card" @click="showMailbox = true">
+      <div v-if="!isMobile" class="mailbox-card card" @click="showMailbox = true">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="4" width="20" height="16" rx="2"/>
           <path d="M2 4L12 13L22 4"/>

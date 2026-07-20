@@ -3,46 +3,67 @@
     <div
       v-if="show"
       class="viewer-overlay"
-      :class="{ 'overlay-leave': leaving }"
+      :class="{ 'overlay-compact': compact, 'overlay-leave': leaving }"
       @click.self="requestClose"
     >
       <button
         class="viewer-close"
+        :class="{ 'viewer-close-compact': compact }"
         @click="requestClose"
       >&times;</button>
 
-      <div
+      <!-- Compact portrait: rotation wrapper keeps paper-bg coordinate system clean -->
+      <div v-if="compact" class="paper-rotate-wrap">
+        <div
+          class="paper-bg"
+          ref="paperRef"
+          :class="{ 'paper-compact': true, 'paper-no-bg': !letter.paper_path }"
+          :style="paperBgStyle"
+        >
+          <div v-if="letter.portrait_path" ref="portraitRef" class="paper-portrait portrait-compact"
+            @pointerdown.prevent="startDrag($event, 'portrait')"
+            @wheel.prevent.stop="handleWheel($event, 'portrait')"
+            @pointermove="onPinchMove($event, 'portrait')"
+          ><img :src="letter.portrait_path" alt="" draggable="false" /></div>
+
+          <div class="paper-text-area text-area-compact">
+            <div ref="textRef" class="paper-text handwritten text-compact" :style="handwritingFontStyle" @wheel.passive="onTextScroll">{{ displayText }}</div>
+          </div>
+
+          <div v-if="letter.illustration_path" ref="illustrationRef" class="paper-illustration illustration-compact"
+            @pointerdown.prevent="startDrag($event, 'illustration')"
+            @wheel.prevent.stop="handleWheel($event, 'illustration')"
+            @pointermove="onPinchMove($event, 'illustration')"
+          ><img :src="letter.illustration_path" alt="" draggable="false" /></div>
+        </div>
+      </div>
+
+      <!-- Normal mode: no rotation wrapper -->
+      <div v-else
         class="paper-bg"
         ref="paperRef"
         :class="{ 'paper-no-bg': !letter.paper_path }"
         :style="paperBgStyle"
       >
-        <!-- Portrait - tilted left -->
-        <div v-if="letter.portrait_path" ref="portraitRef" class="paper-portrait" @pointerdown.prevent="startDrag($event, 'portrait')" @wheel.prevent.stop="handleWheel($event, 'portrait')">
-          <img :src="letter.portrait_path" alt="" draggable="false" />
-        </div>
+        <div v-if="letter.portrait_path" ref="portraitRef" class="paper-portrait"
+          @pointerdown.prevent="startDrag($event, 'portrait')"
+          @wheel.prevent.stop="handleWheel($event, 'portrait')"
+        ><img :src="letter.portrait_path" alt="" draggable="false" /></div>
 
-        <!-- Text content -->
         <div class="paper-text-area">
-          <div
-            ref="textRef"
-            class="paper-text handwritten"
-            :style="handwritingFontStyle"
-            @wheel.passive="onTextScroll"
-          >{{ displayText }}</div>
+          <div ref="textRef" class="paper-text handwritten" :style="handwritingFontStyle" @wheel.passive="onTextScroll">{{ displayText }}</div>
         </div>
 
-        <!-- Scroll hint arrow -->
         <div v-if="showScrollHint" class="scroll-hint" @click="scrollTextDown">
           <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
             <path d="M14 6v14M8 17l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
 
-        <!-- Illustration - right -->
-        <div v-if="letter.illustration_path" ref="illustrationRef" class="paper-illustration" @pointerdown.prevent="startDrag($event, 'illustration')" @wheel.prevent.stop="handleWheel($event, 'illustration')">
-          <img :src="letter.illustration_path" alt="" draggable="false" />
-        </div>
+        <div v-if="letter.illustration_path" ref="illustrationRef" class="paper-illustration"
+          @pointerdown.prevent="startDrag($event, 'illustration')"
+          @wheel.prevent.stop="handleWheel($event, 'illustration')"
+        ><img :src="letter.illustration_path" alt="" draggable="false" /></div>
       </div>
     </div>
   </Teleport>
@@ -55,6 +76,7 @@ import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composable
 const props = defineProps({
   letter: { type: Object, required: true },
   sourceRect: { type: Object, default: null },
+  compact: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'delete'])
 
@@ -87,6 +109,15 @@ const dragState = reactive({
 const portraitZoom = ref(1)
 const illustrationZoom = ref(1)
 
+// ── Pinch-to-zoom state ──
+const pinchState = reactive({
+  active: null,           // 'portrait' | 'illustration' | null
+  pointerA: null,         // { pointerId, clientX, clientY }
+  pointerB: null,
+  initialDist: 0,         // distance between fingers at pinch start
+  initialZoom: 1,         // zoom level at pinch start
+})
+
 const paperBgStyle = computed(() => {
   if (props.letter.paper_path) {
     return { backgroundImage: `url(${props.letter.paper_path})` }
@@ -116,6 +147,25 @@ function startDrag(e, type) {
   const el = type === 'portrait' ? portraitRef.value : illustrationRef.value
   if (!el || !paperRef.value) return
 
+  // In compact mode, second finger starts pinch
+  if (props.compact && dragState.active === type) {
+    pinchState.active = type
+    pinchState.pointerA = { pointerId: dragState.pointerId, clientX: dragState.startX, clientY: dragState.startY }
+    pinchState.pointerB = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY }
+    const dx = pinchState.pointerB.clientX - pinchState.pointerA.clientX
+    const dy = pinchState.pointerB.clientY - pinchState.pointerA.clientY
+    pinchState.initialDist = Math.sqrt(dx * dx + dy * dy)
+    pinchState.initialZoom = type === 'portrait' ? portraitZoom.value : illustrationZoom.value
+    return
+  }
+
+  // Cleanup any existing pinch
+  if (pinchState.active) {
+    pinchState.active = null
+    pinchState.pointerA = null
+    pinchState.pointerB = null
+  }
+
   el.setPointerCapture(e.pointerId)
 
   const elRect = el.getBoundingClientRect()
@@ -135,7 +185,7 @@ function startDrag(e, type) {
   el.style.left = (dragState.startLeft - dragState.natW * (1 - zoom) / 2) + 'px'
   el.style.top = (dragState.startTop - dragState.natH * (1 - zoom) / 2) + 'px'
   el.style.right = 'auto'
-  el.style.transform = type === 'portrait' ? `rotate(-3deg) scale(${zoom})` : `scale(${zoom})`
+  el.style.transform = (type === 'portrait' && !props.compact) ? `rotate(-3deg) scale(${zoom})` : `scale(${zoom})`
 
   document.addEventListener('pointermove', onDragMove)
   document.addEventListener('pointerup', onDragEnd)
@@ -163,19 +213,35 @@ function onDragMove(e) {
   el.style.top = (visTop - dragState.natH * (1 - zoom) / 2) + 'px'
 }
 
-function onDragEnd() {
+function onDragEnd(e) {
+  // Clean up pinch if active
+  if (pinchState.active && (e.pointerId === pinchState.pointerA?.pointerId || e.pointerId === pinchState.pointerB?.pointerId)) {
+    pinchState.active = null
+    pinchState.pointerA = null
+    pinchState.pointerB = null
+  }
+
   if (!dragState.active) return
+  // Don't end drag during pinch
+  if (pinchState.active && e.pointerId !== dragState.pointerId) return
+
   const el = dragState.active === 'portrait' ? portraitRef.value : illustrationRef.value
   if (el) {
     try { el.releasePointerCapture(dragState.pointerId) } catch {}
   }
   dragState.active = null
+  pinchState.active = null
+  pinchState.pointerA = null
+  pinchState.pointerB = null
   document.removeEventListener('pointermove', onDragMove)
   document.removeEventListener('pointerup', onDragEnd)
   document.removeEventListener('pointercancel', onDragEnd)
 }
 
 function cleanupDrag() {
+  pinchState.active = null
+  pinchState.pointerA = null
+  pinchState.pointerB = null
   if (!dragState.active) return
   document.removeEventListener('pointermove', onDragMove)
   document.removeEventListener('pointerup', onDragEnd)
@@ -196,7 +262,9 @@ function applyZoom(type) {
   if (!el) return
   const zoom = type === 'portrait' ? portraitZoom.value : illustrationZoom.value
   const isDragged = el.style.left && el.style.left !== 'auto'
-  if (type === 'portrait') {
+  if (props.compact) {
+    el.style.transform = `scale(${zoom})`
+  } else if (type === 'portrait') {
     el.style.transform = isDragged
       ? `rotate(-3deg) scale(${zoom})`
       : `translateY(-50%) rotate(-3deg) scale(${zoom})`
@@ -205,6 +273,30 @@ function applyZoom(type) {
       ? `scale(${zoom})`
       : `translateY(-50%) scale(${zoom})`
   }
+}
+
+// ── Pinch-to-zoom ──
+function onPinchMove(e, type) {
+  if (!pinchState.active) return
+  if (pinchState.active !== type) return
+  const pointers = pinchState
+  if (e.pointerId === pointers.pointerA?.pointerId) {
+    pointers.pointerA.clientX = e.clientX
+    pointers.pointerA.clientY = e.clientY
+  } else if (e.pointerId === pointers.pointerB?.pointerId) {
+    pointers.pointerB.clientX = e.clientX
+    pointers.pointerB.clientY = e.clientY
+  } else {
+    return
+  }
+  const dx = pointers.pointerB.clientX - pointers.pointerA.clientX
+  const dy = pointers.pointerB.clientY - pointers.pointerA.clientY
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (pointers.initialDist < 10) return
+  const ratio = dist / pointers.initialDist
+  const zoomRef = type === 'portrait' ? portraitZoom : illustrationZoom
+  zoomRef.value = Math.max(0.3, Math.min(4, pointers.initialZoom * ratio))
+  applyZoom(type)
 }
 
 function checkOverflow() {
@@ -228,13 +320,12 @@ onMounted(async () => {
   show.value = true
   await nextTick()
 
-  // 按需加载角色手写字体
   const fontId = props.letter?.handwriting_font
   if (fontId) loadFont(fontId)
 
   checkOverflow()
 
-  if (!props.sourceRect || !paperRef.value) return
+  if (props.compact || !props.sourceRect || !paperRef.value) return
 
   const paper = paperRef.value
   const src = props.sourceRect
@@ -273,7 +364,7 @@ function requestClose() {
   if (leaving.value) return
   cleanupDrag()
 
-  if (!props.sourceRect || !paperRef.value) {
+  if (props.compact || !props.sourceRect || !paperRef.value) {
     leaving.value = true
     setTimeout(() => { emit('close') }, 280)
     return
@@ -433,5 +524,85 @@ onUnmounted(() => {
 @keyframes hint-bounce {
   0%, 100% { transform: translateX(-50%) translateY(0); }
   50% { transform: translateX(-50%) translateY(6px); }
+}
+
+/* ═══════════════════════════════════════
+   Compact (mobile landscape) mode
+   ═══════════════════════════════════════ */
+.viewer-overlay.overlay-compact {
+  padding: 0;
+}
+
+.viewer-close-compact {
+  top: 8px; right: 8px;
+  width: 32px; height: 32px;
+  font-size: 18px;
+}
+
+/* Rotation wrapper — handles the rotate, paper inside has clean coords */
+.paper-rotate-wrap {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+/* ── Compact paper (inside rotation wrapper or landscape) ── */
+.paper-bg.paper-compact {
+  position: relative;
+  aspect-ratio: 4/3;
+  display: flex; flex-direction: row; align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+/* ── 竖屏：wrapper 旋转，paper 填窄边 ── */
+@media (orientation: portrait) {
+  .paper-bg.paper-compact {
+    height: 100dvw;
+    width: auto;
+  }
+}
+
+/* ── 真横屏：wrapper 不旋转，paper 自然满屏 ── */
+@media (orientation: landscape) {
+  .paper-rotate-wrap {
+    position: static;
+    top: auto; left: auto;
+    transform: none;
+  }
+  .paper-bg.paper-compact {
+    width: 100vw;
+    height: 100vh; height: 100dvh;
+    aspect-ratio: auto;
+  }
+}
+
+/* ── Compact image positioning (shared by both orientations) ── */
+.paper-portrait.portrait-compact {
+  position: static; transform: none;
+  flex-shrink: 0; order: 0;
+  border-width: 2px; margin: 0 4px;
+}
+.paper-portrait.portrait-compact img {
+  width: clamp(50px, 14vw, 140px);
+}
+
+.paper-illustration.illustration-compact {
+  position: static; transform: none;
+  flex-shrink: 0; order: 2;
+  border-width: 2px; margin: 0 4px;
+}
+.paper-illustration.illustration-compact img {
+  width: clamp(60px, 18vw, 180px);
+}
+
+.text-area-compact {
+  flex: 1; min-width: 0; max-width: none;
+  order: 1; padding: 0 20px;
+}
+.text-compact {
+  max-height: 80vh;
+  font-size: clamp(13px, 1.8vw, 16px);
+  line-height: 1.8;
 }
 </style>

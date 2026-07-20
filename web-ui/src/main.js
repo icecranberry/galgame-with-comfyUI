@@ -12,6 +12,7 @@ import GalleryView from './views/GalleryView.vue'
 import TavernView from './views/TavernView.vue'
 import EventsView from './views/EventsView.vue'
 import ScheduleView from './views/ScheduleView.vue'
+import MailboxView from './views/MailboxView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
@@ -22,6 +23,7 @@ const routes = [
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },
+  { path: '/mailbox', component: MailboxView },
   { path: '/settings', component: SettingsView },
 ]
 
