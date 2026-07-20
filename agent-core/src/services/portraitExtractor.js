@@ -100,7 +100,7 @@ export async function maybeExtractPortrait(conversationId, characterId) {
   // 统计用户消息数
   const { count } = db.prepare(`
     SELECT COUNT(*) as count FROM raw_messages
-    WHERE conversation_id = ? AND role = 'user' AND is_deleted = 0
+    WHERE conversation_id = ? AND role = 'user'
   `).get(conversationId);
 
   // 每 EXTRACT_INTERVAL 条用户消息触发一次
@@ -121,7 +121,7 @@ export async function maybeExtractPortrait(conversationId, characterId) {
   // 取最近 10 条用户消息作为提取上下文（触发间隔 = 10，刚好覆盖一次区间）
   const recent = db.prepare(`
     SELECT 'user' AS role, content FROM raw_messages
-    WHERE conversation_id = ? AND role = 'user' AND is_deleted = 0
+    WHERE conversation_id = ? AND role = 'user'
     ORDER BY id DESC LIMIT 10
   `).all(conversationId).reverse();
 
@@ -171,7 +171,7 @@ export async function maybeExtractPortrait(conversationId, characterId) {
   // 获取 source_msg_id（最近的 assistant 消息 ID）
   const lastMsg = db.prepare(`
     SELECT id FROM messages
-    WHERE conversation_id = ? AND role = 'assistant' AND is_deleted = 0
+    WHERE conversation_id = ? AND role = 'assistant'
     ORDER BY id DESC LIMIT 1
   `).get(conversationId);
   const sourceMsgId = lastMsg?.id || null;

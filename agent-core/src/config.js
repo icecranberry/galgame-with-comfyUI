@@ -70,6 +70,7 @@ export const config = {
       moments: 'base',
       events: 'base',
       schedule: 'base',
+      mailbox: 'base',
     },
   },
   user: {
@@ -314,7 +315,7 @@ export function updateWorkflowScene(scene) {
     return { ok: false, error: 'scene must be an object' };
   }
   for (const [k, v] of Object.entries(scene)) {
-    if (['chat', 'moments', 'events', 'schedule'].includes(k) && ['base', 'turbo'].includes(v)) {
+    if (['chat', 'moments', 'events', 'schedule', 'mailbox'].includes(k) && ['base', 'turbo'].includes(v)) {
       config.workflow.scene[k] = v;
     }
   }

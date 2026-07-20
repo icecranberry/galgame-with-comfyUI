@@ -451,7 +451,7 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
     const activeEvent = db.prepare(`
-      SELECT title, description, current_branch, choice_history, status, engaged, event_type_key
+      SELECT id, title, description, current_branch, choice_history, status, engaged, event_type_key, emphasis_delivered
       FROM character_events
       WHERE character_id = ? AND status IN ('open','engaged')
       ORDER BY id DESC LIMIT 1
@@ -521,20 +521,42 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
     // ═══════════════════════════════════════════
-    // msgs[1] — 角色：人格 + 当前奇遇锚点（我是谁）
+    // msgs[1] — 角色：人格 + 日程 + 奇遇锚点（我是谁）
     // ═══════════════════════════════════════════
     const charParts = [];
     charParts.push(character?.base_prompt || getDefaultPrompt());
 
     // 日程状态注入（不存入消息历史，每次动态注入）
-    if (config.features.schedule !== false) {
-      const scheduleCtx = formatScheduleContext(characterId);
-      if (scheduleCtx) charParts.push(scheduleCtx);
+    const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
+
+    // 奇遇锚点：首轮强调 → 后续降格为日程同级
+    if (activeEvent) {
+      const isFirstEmphasis = !activeEvent.emphasis_delivered; // 0 或 NULL 均视为首轮
+      if (isFirstEmphasis) {
+        // 首轮：强指令锚点（独立行，排在最前）
+        charParts.push(`【当前状态】你正在经历一个突发事件：「${activeEvent.title}」。你的情绪、行为和注意力都受此事影响。请在回复中自然地体现这一点。`);
+      }
+      // 后续降格逻辑在日程注入后处理（合并/追加）
     }
 
-    if (activeEvent) {
-      charParts.push(`【当前状态】你正在经历一个突发事件：「${activeEvent.title}」。你的情绪、行为和注意力都受此事影响。请在回复中自然地体现这一点。`);
+    if (scheduleCtx) {
+      if (activeEvent && activeEvent.emphasis_delivered) {
+        // 有日程 + 已降格奇遇 → 合并到日程末尾，附带处境简述
+        const descSnippet = activeEvent.description.length > 50
+          ? activeEvent.description.slice(0, 50) + '...'
+          : activeEvent.description;
+        charParts.push(scheduleCtx.replace(/。$/, `。今天发生的「${activeEvent.title}」还在继续——${descSnippet}`));
+      } else {
+        charParts.push(scheduleCtx);
+      }
+    } else if (activeEvent && activeEvent.emphasis_delivered) {
+      // 无日程 + 已降格奇遇 → 单独一行轻量陈述，附带处境简述
+      const descSnippet = activeEvent.description.length > 50
+        ? activeEvent.description.slice(0, 50) + '...'
+        : activeEvent.description;
+      charParts.push(`【当前状态】今天发生的「${activeEvent.title}」还在继续——${descSnippet}`);
     }
+
     msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
     // ═══════════════════════════════════════════
@@ -668,7 +690,7 @@ router.post('/characters/:id/chat', async (req, res) => {
           const memoryResults = rawResults.filter(m => {
             if (!m.entities || m.entities.length === 0) return false;
             // 排除事件类碎片（已有独立 event_history 注入通道，避免重复）
-            if (m.content && /【事件/.test(m.content)) return false;
+            if (m.content && /【(事件|奇遇)/.test(m.content)) return false;
             return true;
           });
           if (memoryResults.length >= 1) {
@@ -759,22 +781,21 @@ ${coreRules}
 
     msgs.push(...history);
 
-    // 正在进行的生活片段（作为独立 system 消息注入到 user 消息之前）
-    // 和朋友圈不同——片段是"此刻正在发生"的事，但不需要强制回应
+    // 正在进行的生活片段 — 仅首轮强调时注入上下文块，后续轮次信息已在 msgs[1] 日程行中合并
     // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
-    if (activeEvent) {
+    if (activeEvent && !activeEvent.emphasis_delivered) {
       const parsedHistory = JSON.parse(activeEvent.choice_history || '[]');
       const latestStep = parsedHistory.length > 1 ? parsedHistory[parsedHistory.length - 1] : null;
 
       const eventParts = [];
-      eventParts.push(`<current_event priority="normal">`);
-      eventParts.push(`现在，${character.display_name}正在经历一个生活片段：`);
+      eventParts.push(`<current_event priority="active">`);
+      eventParts.push(`现在，${character.display_name}正在经历一个突发事件：`);
       eventParts.push(`标题：${activeEvent.title}`);
       eventParts.push(`当前处境：${activeEvent.description}`);
       if (latestStep) {
         eventParts.push(`最新情况（「${latestStep.choice_label}」）：${latestStep.summary}`);
       }
-      eventParts.push(`（这是她今天生活中的一小段。不需要专门围绕这件事展开对话——只在她觉得想提的时候，自然带过即可。）`);
+      eventParts.push(`（这是一件正在进行的事。你的情绪、行为和注意力都会受到这件事的影响，请自然地流露在回复中。但如果对方不主动提起，也不需要刻意围绕它展开对话。）`);
       eventParts.push(`</current_event>`);
       const eventContext = eventParts.join('\n');
 
@@ -785,6 +806,9 @@ ${coreRules}
           break;
         }
       }
+
+      // 首轮强调已注入，标记为已送达（后续轮次仅在 msgs[1] 日程行中合并）
+      db.prepare(`UPDATE character_events SET emphasis_delivered = 1 WHERE id = ?`).run(activeEvent.id);
     }
 
     // 5.5 重逢上下文 + streak 重置

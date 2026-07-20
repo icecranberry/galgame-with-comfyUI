@@ -12,7 +12,7 @@
               </svg>
               <div>
                 <h3>信箱</h3>
-                <p class="header-subtitle">来自邻舍的通信</p>
+                <p class="header-subtitle">来自邻舍的信件</p>
               </div>
             </div>
             <div class="header-actions">

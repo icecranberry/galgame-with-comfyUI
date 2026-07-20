@@ -58,13 +58,15 @@ router.post('/regenerate-all', async (req, res) => {
     }
 
     const db = getDb();
-    const characters = db.prepare('SELECT id, display_name, base_prompt FROM characters ORDER BY id').all();
+    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' ORDER BY id").all();
 
     if (!characters.length) {
       return res.status(404).json({ error: '没有角色' });
     }
 
-    resetTask = { cancelled: false, processing: true, current: 0, total: characters.length, currentName: '' };
+    const direction = (req.body && req.body.direction) ? String(req.body.direction).trim() : null;
+
+    resetTask = { cancelled: false, processing: true, current: 0, lastCompleted: 0, total: characters.length, currentName: '' };
 
     // 立即返回，不阻塞
     res.json({ started: true, total: characters.length });
@@ -89,11 +91,17 @@ router.post('/regenerate-all', async (req, res) => {
       console.log(`[schedule] Reset worldline: generating for ${character.display_name} (${i + 1}/${characters.length})`);
 
       try {
-        const result = await generateSchedule(character);
+        const result = await generateSchedule(character, direction);
+
+        // 生成期间已被取消 → 不保存、广播跳过
+        if (resetTask.cancelled) break;
+
         assignNextRefreshTime(character.id);
         snapshotTodaySchedule(character.id);
         syncSleepingState(character.id);
         invalidateCache(character.id);
+
+        resetTask.lastCompleted = i + 1;
 
         broadcast('schedule_reset_progress', {
           phase: 'running',
@@ -104,6 +112,9 @@ router.post('/regenerate-all', async (req, res) => {
           version: result.version,
         });
       } catch (genErr) {
+        // 生成失败但已被取消 → 直接跳出
+        if (resetTask.cancelled) break;
+
         console.error(`[schedule] Reset worldline: failed for ${character.display_name}:`, genErr.message);
         broadcast('schedule_reset_progress', {
           phase: 'running',
@@ -121,15 +132,17 @@ router.post('/regenerate-all', async (req, res) => {
       }
     }
 
+    const finalCurrent = resetTask.cancelled ? resetTask.lastCompleted : resetTask.current;
+
     // 广播完成
     broadcast('schedule_reset_progress', {
       phase: resetTask.cancelled ? 'cancelled' : 'complete',
-      current: resetTask.current,
+      current: finalCurrent,
       total: characters.length,
       cancelled: resetTask.cancelled,
     });
 
-    console.log(`[schedule] Reset worldline finished. Processed: ${resetTask.current}/${characters.length}, cancelled: ${resetTask.cancelled}`);
+    console.log(`[schedule] Reset worldline finished. Processed: ${finalCurrent}/${characters.length}, cancelled: ${resetTask.cancelled}`);
     resetTask = null;
   } catch (err) {
     console.error('[schedule] POST /regenerate-all error:', err.message);
@@ -400,8 +413,16 @@ router.post('/:characterId/peek', async (req, res) => {
     // 睡眠中：强制强调闭眼（优先检查临时叫醒，因为日程 replyDelay 即使叫醒后仍为 -1）
     const tempWoken = isTempWoken(characterId);
     const isSleeping = !tempWoken && activity.replyDelay === -1;
-    // 当前时间 + 时段 + 光线描述
-    const { timeDesc, lightNote } = getTimeLight();
+    // 当前时间 + 时段 + 光线描述（使用日程活动的 startTime 确定光线，反映活动实际发生时间而非墙钟）
+    let lightTime = new Date();
+    if (activity.startTime) {
+      const [h, m] = activity.startTime.split(':').map(Number);
+      if (!isNaN(h)) {
+        lightTime = new Date();
+        lightTime.setHours(h, m || 0, 0, 0);
+      }
+    }
+    const { timeDesc, lightNote } = getTimeLight(lightTime);
     const sleepNote = isSleeping
       ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
       : '';

@@ -43,7 +43,7 @@ export { checkWorkflowHealth };
 
 /**
  * 根据全局模式和场景选择工作流文件
- * @param {'chat'|'moments'|'events'|'schedule'} [scene]
+ * @param {'chat'|'moments'|'events'|'schedule'|'mailbox'} [scene]
  * @returns {string} 工作流文件路径
  */
 function resolveWorkflowPath(scene) {
@@ -81,7 +81,7 @@ const NODE_TITLES = {
  * @param {number}   [overrides.height]
  * @param {Array}    [overrides.loras]  - [{path, weight, triggerWord}]
  * @param {string}   [overrides.customWorkflow] - 自定义工作流文件名（单人时替代基础工作流）
- * @param {string}   [overrides.scene] - 'chat'|'moments'|'events'，hybrid 模式下用于选择工作流
+ * @param {string}   [overrides.scene] - 'chat'|'moments'|'events'|'schedule'|'mailbox'，hybrid 模式下用于选择工作流
  */
 function buildWorkflow(promptText, overrides = {}) {
   let wfPath = overrides.customWorkflow

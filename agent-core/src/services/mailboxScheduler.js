@@ -17,6 +17,14 @@ let processing = false;
 
 export function startMailboxScheduler() {
   if (timer) return;
+
+  // ── 启动时回收僵尸信件：上一进程非正常退出时 status 可能卡在 processing ──
+  const db = getDb();
+  const stuck = db.prepare(`UPDATE mailbox_letters SET status = 'pending', retry_count = 0 WHERE status = 'processing'`).run();
+  if (stuck.changes > 0) {
+    console.log(`[mailboxScheduler] recovered ${stuck.changes} stuck processing letter(s)`);
+  }
+
   console.log('[mailboxScheduler] started (check every 60s)');
   timer = setInterval(checkAndProcess, CHECK_INTERVAL);
   timer.unref();
@@ -382,7 +390,7 @@ async function generateImageSafe(prompt, charLoras, charCustomWorkflow, override
       artist: config.comfyui.momentsArtist,
       loras: charLoras,
       customWorkflow: charCustomWorkflow,
-      scene: 'chat',
+      scene: 'mailbox',
       ...overrides,
     });
     if (result.success && result.images && result.images.length > 0) return result.images[0]; // { base64, filename }

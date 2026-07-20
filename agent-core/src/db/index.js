@@ -451,6 +451,9 @@ function initSchema(db) {
   // 迁移: 手写字体 — characters 表新增 handwriting_font 列
   migrateHandwritingFont(db);
 
+  // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
+  migrateEventEmphasisSchema(db);
+
   // 迁移: 誓约系统 — user_relationships 表新增 is_oath 列
   migrateOathSchema(db);
 
@@ -570,6 +573,22 @@ function migrateEventsSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateEventsSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
+ * 0 = 首轮强调尚未触发，1 = 已触发过首轮强调（后续降格为日程同级）
+ */
+function migrateEventEmphasisSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_events)`).all();
+    if (!cols.find(c => c.name === 'emphasis_delivered')) {
+      db.exec(`ALTER TABLE character_events ADD COLUMN emphasis_delivered INTEGER DEFAULT 0`);
+      console.log('[db] Added character_events.emphasis_delivered column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateEventEmphasisSchema error:', err.message);
   }
 }
 

@@ -132,7 +132,7 @@
               <div class="detail-actions-right">
                 <div class="recruit-appearance-hint">
                   外观描述补充tag查阅
-                  <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex</a>
+                  <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
                 </div>
                 <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
               </div>

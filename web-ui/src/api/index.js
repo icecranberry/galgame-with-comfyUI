@@ -1070,8 +1070,14 @@ export async function regenerateSchedule(characterId, direction) {
 }
 
 /** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */
-export async function regenerateAllSchedules() {
-  const res = await fetch(`${BASE}/schedule/regenerate-all`, { method: 'POST' })
+export async function regenerateAllSchedules(direction) {
+  const body = {}
+  if (direction) body.direction = direction
+  const res = await fetch(`${BASE}/schedule/regenerate-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || `regenerate all: ${res.status}`)

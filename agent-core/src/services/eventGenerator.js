@@ -745,7 +745,7 @@ export async function generateEvent(character, options = {}) {
   // 多人关系：sigmoid 模型，照搬朋友圈算法但降低频率
   // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k * (R - R_mid)))
   const relCount = relationships.length;
-  const MULTI_P_MIN = 0.10;  // 1人也保持 10% 随机到关系网对象的概率
+  const MULTI_P_MIN = 0.30;  // 1人也保持 10% 随机到关系网对象的概率
   const MULTI_P_MAX = 0.50;  // 社交达人趋于 50%
   const MULTI_K = 1.0;       // 陡峭度
   const MULTI_R_MID = 5;     // 拐点：R=5 时概率 = 30%
@@ -779,6 +779,7 @@ export async function generateEvent(character, options = {}) {
       }
 
       multiPerson = {
+        otherId: picked.other_id,
         otherName: picked.other_name,
         otherPersona,
         relDesc,
@@ -952,7 +953,15 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
     throw err;
   }
 
-  // 5. 生图
+  // 5. 生图（多人时合并两人 LoRA）
+  const selfLoras = _parseCharLoras(character.loras);
+  let otherLoras = [];
+  if (multiPerson) {
+    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson.otherId);
+    if (otherChar) otherLoras = _parseCharLoras(otherChar.loras);
+  }
+  const allLoras = [...selfLoras, ...otherLoras];
+
   let imageUrl = null;
   try {
     const genResult = await generateImageRaw(eventData.prompt, {
@@ -961,8 +970,8 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
       height: config.comfyui.eventHeight,
       scene: 'events',
       priority: options.manual ? 'high' : 'low',
-      loras: _parseCharLoras(character.loras),
-      ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
+      loras: allLoras,
+      ...(!multiPerson && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
       const img = genResult.images[0];
@@ -985,7 +994,7 @@ ${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律—�
     summary: eventData.description,
     image: imageUrl,
     // 存储多人模式信息，供后续分支生成时复用
-    multiPerson: multiPerson ? { otherName: multiPerson.otherName, otherPersona: multiPerson.otherPersona, relDesc: multiPerson.relDesc } : null,
+    multiPerson: multiPerson ? { otherId: multiPerson.otherId, otherName: multiPerson.otherName, otherPersona: multiPerson.otherPersona, relDesc: multiPerson.relDesc } : null,
   }];
   const expiresAt = new Date(now.getTime() + eventType.durationMin * 60 * 1000).toISOString();
 
@@ -1074,6 +1083,7 @@ export async function generateNextBranch(character, event, choice) {
   let multiPerson2 = null;
   if (storedMultiPerson) {
     multiPerson2 = {
+      otherId: storedMultiPerson.otherId,
       otherName: storedMultiPerson.otherName,
       otherPersona: storedMultiPerson.otherPersona,
       relDesc: storedMultiPerson.relDesc,
@@ -1207,7 +1217,15 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
     throw err;
   }
 
-  // 5. 生图
+  // 5. 生图（多人时合并两人 LoRA）
+  const branchSelfLoras = _parseCharLoras(character.loras);
+  let branchOtherLoras = [];
+  if (multiPerson2) {
+    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson2.otherId);
+    if (otherChar) branchOtherLoras = _parseCharLoras(otherChar.loras);
+  }
+  const branchAllLoras = [...branchSelfLoras, ...branchOtherLoras];
+
   let imageUrl = null;
   try {
     const genResult = await generateImageRaw(branchData.prompt, {
@@ -1215,8 +1233,8 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight, scene: 'events',
       priority: 'high',
-      loras: _parseCharLoras(character.loras),
-      ...(character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
+      loras: branchAllLoras,
+      ...(!multiPerson2 && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
       const img = genResult.images[0];
@@ -1243,13 +1261,13 @@ ${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
   };
   choiceHistory.push(newChoiceEntry);
 
-  // 7. 更新 DB（清除 processing 标记，不生成摘要——摘要只在结局时生成）
+  // 7. 更新 DB（清除 processing 标记，重置强调标记以便下轮重新通知用户）
   db.prepare(`
     UPDATE character_events SET
       description = ?, image = ?, prompt = ?,
       choice_a = ?, choice_b = ?, choice_c_label = ?,
       current_branch = ?, choice_history = ?,
-      engaged = 1, processing = 0, last_interaction_at = datetime('now')
+      engaged = 1, processing = 0, emphasis_delivered = 0, last_interaction_at = datetime('now')
     WHERE id = ?
   `).run(
     branchData.description, imageUrl, branchData.prompt,

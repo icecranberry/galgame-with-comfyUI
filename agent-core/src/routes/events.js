@@ -393,7 +393,7 @@ router.post('/:id/undo', (req, res) => {
       description = ?, image = ?, prompt = ?,
       choice_a = ?, choice_b = ?, choice_c_label = ?,
       current_branch = ?, choice_history = ?,
-      processing = 0, last_interaction_at = datetime('now')
+      emphasis_delivered = 0, processing = 0, last_interaction_at = datetime('now')
     WHERE id = ?
   `).run(
     restoredDescription, restoredImage, restoredPrompt,

@@ -618,7 +618,7 @@ const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', mom
 const comfyTab = ref('chat')
 const comfyTabs = [
   { mode: 'chat', label: '对话配图' },
-  { mode: 'moments', label: '朋友圈配图' },
+  { mode: 'moments', label: '朋友圈&信件配图' },
   { mode: 'event', label: '奇遇&日程配图' },
 ]
 const activeFields = computed(() => {
@@ -951,7 +951,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
-      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', ...data.workflow.scene }
+      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
   } catch {}
@@ -1151,17 +1151,18 @@ const sceneOptions = [
   { key: 'moments', label: '朋友圈' },
   { key: 'events', label: '奇遇' },
   { key: 'schedule', label: '日程' },
+  { key: 'mailbox', label: '信箱' },
 ]
 
 const workflowMode = ref('turbo')
-const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base' })
+const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
-const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base' })
+const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value

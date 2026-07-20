@@ -8,7 +8,7 @@
 
     <!-- 头部：角色信息 -->
     <div class="preview-header">
-      <div class="preview-avatar" :style="avatarStyle">
+      <div class="preview-avatar" :style="avatarStyle" @click.stop="goToChat">
         <span v-if="!event.avatar_path">{{ event.display_name?.charAt(0) }}</span>
       </div>
       <div class="preview-header-info">
@@ -166,11 +166,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 
 const confirmFn = inject('confirm')
+const router = useRouter()
 
 const props = defineProps({
   event: { type: Object, required: true },
@@ -282,6 +284,12 @@ const avatarStyle = computed(() => {
   const a = props.event.avatar_path
   return a ? { backgroundImage: `url(${a})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}
 })
+
+function goToChat() {
+  if (props.event.character_id) {
+    router.push('/chat/' + props.event.character_id)
+  }
+}
 
 // ── 详情 ──
 function openDetail() {
@@ -484,6 +492,12 @@ watch(isExpired, (val) => {
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 16px; color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.preview-avatar:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
 }
 .preview-header-info { flex: 1; min-width: 0; }
 .preview-name { font-size: 14px; font-weight: 600; color: var(--text-bright); display: block; }

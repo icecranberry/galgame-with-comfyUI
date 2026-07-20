@@ -76,6 +76,9 @@ export const useScheduleStore = defineStore('schedule', () => {
   onEvent('schedule_reset_progress', (data) => {
     if (!resetTask.value) return
 
+    // 已是终态，忽略后续进度更新（取消请求后后端可能还有 in-flight 事件）
+    if (resetTask.value.phase === 'cancelled' || resetTask.value.phase === 'complete') return
+
     if (data.phase === 'running') {
       resetTask.value.phase = 'running'
       resetTask.value.current = data.current || 0

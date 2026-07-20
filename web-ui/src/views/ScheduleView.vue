@@ -233,17 +233,15 @@
               </button>
             </div>
             <div class="reset-dialog-desc">
-              <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则则正常随机规划。</p>
+              <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则正常随机规划。</p>
               <textarea
                 v-model="regenerateDirection"
                 class="regenerate-textarea"
                 placeholder="例如：今天去游乐园、安排出差的一天、宅在家里打游戏..."
-                maxlength="200"
                 rows="3"
                 ref="regenerateTextareaRef"
                 @keydown.enter.exact="confirmRegenerateWithDirection"
               ></textarea>
-              <div class="regenerate-charcount">{{ regenerateDirection.length }}/200</div>
             </div>
             <div class="reset-dialog-actions">
               <button class="reset-btn-bg" style="flex: 1; border-style: solid;" @click="confirmRegenerateRandom">随机日程规划</button>
@@ -266,13 +264,20 @@
               </svg>
               <span>全部重置</span>
             </div>
-            <p class="reset-dialog-desc">
-              将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。<br/>
-              此操作会逐一生成，需要一些时间。
-            </p>
+            <div class="reset-dialog-desc">
+              <p>将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。可输入方向来影响生成结果，留空则随机生成。</p>
+              <textarea
+                v-model="resetDirection"
+                class="regenerate-textarea"
+                placeholder="例如：今天全员的日程围绕夏日祭展开、让所有人过一天悠闲的周末..."
+                rows="3"
+                ref="resetDirectionTextareaRef"
+                @keydown.enter.exact="confirmResetAll"
+              ></textarea>
+            </div>
             <div class="reset-dialog-actions">
-              <button class="reset-btn-cancel" @click="showResetConfirm = false">取消</button>
-              <button class="reset-btn-confirm" @click="confirmResetAll">确认重置</button>
+              <button class="reset-btn-bg" style="flex: 1; border-style: solid;" @click="confirmResetRandom">随机日程规划</button>
+              <button class="reset-btn-confirm" @click="confirmResetAll" :disabled="!resetDirection.trim()">按此方向生成</button>
             </div>
           </div>
         </div>
@@ -327,8 +332,8 @@
             <!-- 操作按钮 -->
             <div class="reset-dialog-actions">
               <template v-if="store.resetTask.phase === 'running'">
-                <button class="reset-btn-cancel" @click="cancelReset">取消重置</button>
-                <button class="reset-btn-bg" @click="dismissResetProgress">后台静默生成</button>
+                <button class="reset-btn-cancel" @click="cancelReset" :disabled="resetCancelling">{{ resetCancelling ? '取消中...' : '取消重置' }}</button>
+                <button class="reset-btn-bg" @click="dismissResetProgress" :disabled="resetCancelling">后台静默生成</button>
               </template>
               <template v-else>
                 <button class="reset-btn-confirm" @click="finishReset">完成</button>
@@ -463,6 +468,9 @@ const lightboxDescription = computed(() => {
 
 // ── 重置世界线 ──
 const showResetConfirm = ref(false)
+const resetDirection = ref('')
+const resetDirectionTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const resetCancelling = ref(false)
 
 // ── 日程方向输入弹窗 ──
 const showRegenerateModal = ref(false)
@@ -996,16 +1004,25 @@ function handleResetClick() {
   if (store.resetTask?.backgrounded) {
     store.showResetTask()
   } else {
+    resetDirection.value = ''
     showResetConfirm.value = true
+    nextTick(() => resetDirectionTextareaRef.value?.focus())
   }
+}
+
+async function confirmResetRandom() {
+  resetDirection.value = ''
+  await confirmResetAll()
 }
 
 async function confirmResetAll() {
   showResetConfirm.value = false
   store.startResetTask(0)
 
+  const direction = resetDirection.value.trim() || undefined
+
   try {
-    const result = await api.regenerateAllSchedules()
+    const result = await api.regenerateAllSchedules(direction)
     if (store.resetTask) {
       store.resetTask.total = result.total || 0
     }
@@ -1020,13 +1037,28 @@ async function confirmResetAll() {
 }
 
 async function cancelReset() {
+  if (resetCancelling.value) return
+  resetCancelling.value = true
   try {
     await api.cancelRegenerateAll()
-    // 状态会通过 SSE 事件更新
+    // 立即反馈取消结果，不等 SSE（后端可能还有 in-flight LLM 调用）
+    if (store.resetTask && store.resetTask.phase === 'running') {
+      store.resetTask.phase = 'cancelled'
+      store.resetTask.current = Math.max(0, store.resetTask.current - 1)
+      store.resetTask.processing = false
+      store.resetTask.backgrounded = false
+    }
   } catch (err) {
+    resetCancelling.value = false
     console.error('[ScheduleView] cancel reset failed:', err)
   }
 }
+
+watch(() => store.resetTask?.phase, (phase) => {
+  if (phase && phase !== 'running') {
+    resetCancelling.value = false
+  }
+})
 
 function dismissResetProgress() {
   // 后台静默生成：关闭弹窗但不取消任务，保留在 store 中持续更新
@@ -1504,13 +1536,6 @@ function finishReset() {
   color: var(--text-secondary);
   opacity: 0.5;
 }
-.regenerate-charcount {
-  text-align: right;
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 .reset-dialog-actions {
   display: flex; gap: 12px; padding: 16px 20px;
   border-top: 1px solid var(--glass-border);
