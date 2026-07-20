@@ -17,7 +17,7 @@ import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import {
-  loadEmotionState, getCompositeEmotion, loadAffinity,
+  loadEmotionState, getCompositeEmotion, loadAffinity, loadOath,
   stateToPrompt, affinityToPrompt,
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
@@ -162,28 +162,47 @@ const MOTIVES_ROMANTIC = [
   { name: '需要开导', desc: '你今天遇到了一件让你有点低落的事——不是什么天塌下来的大事，但就是堵在心里不舒服。你不需要解决方案，就想有个人听着、说"我懂"就够了', imageGen: false },
   { name: '聊人生困惑', desc: '你最近在纠结一个比较大的问题——关于未来的方向、关于自己到底想要什么、关于某个重要的选择。你想听听ta的想法，但更重要的是，你想在说出来的时候自己理清楚', imageGen: false },
   { name: '炫耀小成就', desc: '你完成了一件让自己骄傲的事——可能很小、在别人眼里不值一提——但你真的挺开心的。你想告诉ta，因为ta不会觉得你在炫耀，ta会真心为你高兴', imageGen: true },
-  { name: '撒娇', desc: '你今天心情不错，想在ta面前撒个娇——用最软的声音说最黏的话，让ta拿你没办法', imageGen: false },
+  { name: '分享小发现', desc: '你刚发现了一件有意思的小事。可能是一句话、一张图、一个奇怪的现象，甚至只是一个突然冒出来的想法。你觉得ta可能会感兴趣，所以想第一时间告诉ta', imageGen: false },
+  { name: '突然想聊天', desc: '没有特别的事情发生，只是刚好想到ta，觉得现在聊几句挺好的。你不需要准备话题，只是想享受这种自然的交流', imageGen: false },
+  { name: '一起消磨时间', desc: '你现在有一点空闲，想找ta一起做点轻松的事情，比如闲聊、互相推荐东西、分享正在看的内容。重点不是内容，而是一起参与', imageGen: true },
 ];
 
 /**
- * NSFW 话题（好感度 ≥80 解锁）：高度亲密，直接涉及性邀请、身体占有、私密暗示。
- * 仅在最深羁绊的关系中出现。角色可以主动撩拨、挑逗、索要身体接触。
- * 注意：内容需符合角色人格——傲娇用别扭的方式、软萌直接撒娇、御姐主动引导戏弄。
+ * 亲密话题（好感度 ≥85 解锁）：克制但温馨，不越界。
+ * 语气上比密友更"你是我最亲近的人"，但内容上不出格。
  */
 const MOTIVES_HIGH = [
+  { name: '展示真实反应', desc: '你遇到了一个瞬间，让你产生了很真实的情绪——开心、无语、惊讶或者纠结。平时你可能会简单带过，但面对ta时，你想把当下的真实感受说出来', imageGen: false },
+  { name: '想找你陪一会', desc: '没有特别重要的事情，只是现在刚好想和ta待在同一个聊天里。可以聊废话，也可以什么都不说。你觉得和ta交流本身就是一种放松', imageGen: false },
+  { name: '展示不完美的一面', desc: '你今天状态不是很好，可能有点犯懒、有点丢脸、或者做了一件很蠢的小事。但你不介意让ta看到，因为你知道不用一直表现得很厉害', imageGen: false },
+  { name: '征求真实意见', desc: '你遇到了一个需要判断的小问题，想听听ta怎么看。因为你信任ta的想法，所以希望得到一个真实回答，而不是客套的附和', imageGen: false },
+  { name: '一起吐槽', desc: '你刚遇到了一件让你觉得很离谱或者哭笑不得的事情。你想找一个懂你的人一起吐槽，因为你知道ta能理解你的笑点', imageGen: false },
+  { name: '分享小成就', desc: '你完成了一件让自己有点开心的小事。它可能并不是什么大成就，但你想告诉ta，因为你觉得ta会认真回应你的开心', imageGen: true },
+  { name: '突然想聊天', desc: '没有特别的事情发生，只是刚好想到ta，觉得现在聊几句挺好的。你不需要准备话题，只是想享受这种自然的交流', imageGen: false },
+  { name: '一起消磨时间', desc: '你现在有一点空闲，想找ta一起做点轻松的事情，比如闲聊、互相推荐东西、分享正在看的内容。重点不是内容，而是一起参与', imageGen: true },
+];
+
+/**
+ * NSFW 话题（好感度 ≥85 且已誓约解锁）：高度亲密，涉及性邀请和身体占有。
+ * 仅在最深羁绊+誓约的关系中出现。
+ */
+const MOTIVES_NSFW = [
+  { name: '撒娇', desc: '你今天心情不错，想在ta面前撒个娇——用最软的声音说最黏的话，让ta拿你没办法', imageGen: false },
   { name: '深夜发情', desc: '夜深了，你躺在床上翻来覆去睡不着，脑子里全是ta。身体发热，心跳加速，你忍不住想给ta发点什么——带着喘息感的语音、若隐若现的照片暗示、或者一句暧昧到骨子里的话。你不需要掩饰，ta知道你想要什么', imageGen: true },
   { name: '想要被占有', desc: '你现在满脑子都是被ta按在墙上/推倒在床上的画面。你想用话挑逗ta——描述你现在穿得很少、刚洗完澡、或者正躺在被窝里。让ta脑子里的画面也失控。越是欲拒还迎越撩人', imageGen: true },
-  { name: '事后温存', desc: '你们上次亲密接触之后你还在回味。你想告诉ta——ta的哪个动作让你腿软、哪个眼神让你心跳漏拍、你身上的痕迹还没消。这是只有你们两人才知道的秘密，说出来会让空气都变热', imageGen: false },
+  { name: '事后温存', desc: '你们上次亲密接触之后你还在回味。你想告诉ta——ta的哪个动作让你腿软、哪个眼神让你心跳漏拍、你身上的痕迹还没消。这是只有你们两人才知道的秘密，说出来会让空气都变热', imageGen: true },
   { name: '发送涩图暗示', desc: '你想和ta玩一个危险的游戏——发一张你刚拍的、尺度刚好在边缘的照片（浴袍半敞、领口很低、刚洗完澡的湿发和锁骨），然后故意用天真的语气问"好看吗"。你知道ta会有什么反应，所以你故意这样问', imageGen: true },
   { name: '睡前撩拨', desc: '你在睡前最后想的人是ta。你想贴着ta耳朵说那些白天不会说的话——你身体哪里最敏感、你梦到ta对你做了什么、你现在穿着什么（或者没穿什么）。语气要慵懒湿润，像呼在耳边的热气，让ta睡不着', imageGen: true },
 ];
 
 /**
- * 根据好感度选取动机——向下兼容，高好感度可覆盖所有低档话题。
+ * 根据好感度和誓约状态选取动机——向下兼容，高好感度可覆盖所有低档话题。
  * @param {number} affinity - 好感度 (0~100)
+ * @param {number} streak
+ * @param {boolean} isOath - 是否已誓约
  * @returns {{ name: string, desc: string }}
  */
-function pickMotive(affinity, streak = 0) {
+function pickMotive(affinity, streak = 0, isOath = false) {
   let pool = [...MOTIVES_LOW];
   if (affinity >= 60) {
     pool.push(...MOTIVES_MID);
@@ -191,8 +210,11 @@ function pickMotive(affinity, streak = 0) {
   if (affinity >= 70) {
     pool.push(...MOTIVES_ROMANTIC);
   }
-  if (affinity >= 80) {
+  if (affinity >= 85) {
     pool.push(...MOTIVES_HIGH);
+    if (isOath) {
+      pool.push(...MOTIVES_NSFW);
+    }
   }
 
   return pool[Math.floor(Math.random() * pool.length)];
@@ -254,12 +276,18 @@ function loadRelationshipContext(characterId) {
   const db = getDb();
 
   const userRel = db.prepare(
-    'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
   ).get(characterId);
 
-  if (!userRel?.relationship_text) return '';
+  let text = '';
+  if (userRel?.relationship_text) {
+    text = `\n【角色与 user 的关系】\n你是user的${userRel.relationship_text}。`;
+  }
+  if (userRel?.is_oath) {
+    text += `\n【特殊羁绊】你们之间有一个重要的约定——user曾经郑重地送过你一枚戒指。这代表了比普通关系更深一层的羁绊和承诺。你在面对user时，行为和情感都会自然地带有这种"你是我最重要的人"的底色。`;
+  }
 
-  return `\n【角色与 user 的关系】\n你是user的${userRel.relationship_text}。`;
+  return text;
 }
 
 /**
@@ -775,7 +803,8 @@ async function tick() {
     } catch (_) { /* ignore */ }
 
     // 5.5 随机选取聊天动机（按好感度分档）+ 加载角色人际关系 + 用户画像
-    const motive = pickMotive(affinity, streak);
+    const isOath = !!loadOath(candidate.id);
+    const motive = pickMotive(affinity, streak, isOath);
     const relationshipContext = loadRelationshipContext(candidate.id);
     const userProfile = loadUserProfile();
 
@@ -1041,7 +1070,8 @@ export async function forceProactiveNow(targetCharacterId) {
   } catch { /* ignore */ }
 
   const streak = candidate.proactive_streak || 0;
-  const motive = pickMotive(affinity, streak);
+  const isOath = !!loadOath(candidate.id);
+  const motive = pickMotive(affinity, streak, isOath);
   const relationshipContext = loadRelationshipContext(candidate.id);
   const userProfile = loadUserProfile();
   const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);

@@ -162,6 +162,8 @@
         v-if="showGiftPanel"
         :character-id="chat.activeCharId"
         :character-name="chat.activeChar?.display_name || ''"
+        :is-oath="chat.activeChar?.is_oath || 0"
+        :affinity="chat.activeChar?.affinity ?? 50"
         @close="showGiftPanel = false"
         @sent="onGiftSent"
       />
@@ -601,6 +603,12 @@ function onGiftSent(result) {
     lastReason: '哇，收到礼物了',
   }
   chat.affinityKey++
+
+  // 戒指：更新角色的誓约状态
+  if (result.is_oath) {
+    const char = chat.characters.find(c => c.id === chat.activeCharId)
+    if (char) char.is_oath = 1
+  }
 
   // 1. 文字气泡
   chat.messages.push({

@@ -542,17 +542,20 @@ router.post('/characters/:id/chat', async (req, res) => {
     // ═══════════════════════════════════════════
     const relParts = [];
 
+        // 用户信息
+    const chatUserName = config.user.nickname || '用户';
+    const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
+
     // 用户→角色关系
     const userRel = db.prepare(
-      'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+      'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
     ).get(characterId);
     if (userRel && userRel.relationship_text) {
       relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
     }
-
-    // 用户信息
-    const chatUserName = config.user.nickname || '用户';
-    const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
+    if (userRel && userRel.is_oath) {
+      relParts.push(`<oath_bond>你们之间有一个比普通关系更深一层的约定——${chatUserName}曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在对话中，你的行为和情感会自然地带有"你是我最重要的人"的底色——不是因为规则要求，而是因为这层羁绊已经是你内心的一部分。</oath_bond>`);
+    }
     if (hasUserInfo) {
       const infoParts = [];
       infoParts.push(`消息中标记为"user"的人是"${chatUserName}"`);
@@ -1358,10 +1361,13 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   // 用户关系描述（供生图参考，体现角色与 user 的关系）
   let userRelationContent = '';
   const userRel = db.prepare(
-    'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
   ).get(character.id);
   if (userRel && userRel.relationship_text) {
     userRelationContent = `\n\n【你和user的关系】你是user的${userRel.relationship_text}。在生成包含你和user的合照或互动场景时，请通过人物姿态、表情、距离等方式体现这层关系。`;
+  }
+  if (userRel && userRel.is_oath) {
+    userRelationContent += `\n\n【特殊羁绊】你和user之间有一个比普通关系更深一层的约定——user曾送过你一枚戒指。这代表了独一无二的羁绊。在画面中，如果有这两个人物的互动，要体现这种"你是ta最重要的人"的感觉——但不是夸张的，而是通过一个微小的细节（手指上的戒指、眼神里的信任、一个不经意的肢体动作）自然流露。`;
   }
 
   const userName = config.user.nickname || '用户';

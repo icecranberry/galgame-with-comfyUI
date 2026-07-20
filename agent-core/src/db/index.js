@@ -451,6 +451,9 @@ function initSchema(db) {
   // 迁移: 手写字体 — characters 表新增 handwriting_font 列
   migrateHandwritingFont(db);
 
+  // 迁移: 誓约系统 — user_relationships 表新增 is_oath 列
+  migrateOathSchema(db);
+
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
@@ -1283,6 +1286,18 @@ function migrateHandwritingFont(db) {
     }
   } catch (err) {
     console.log('[db] migrateHandwritingFont error:', err.message);
+  }
+}
+
+function migrateOathSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(user_relationships)`).all();
+    if (!cols.find(c => c.name === 'is_oath')) {
+      db.exec(`ALTER TABLE user_relationships ADD COLUMN is_oath INTEGER DEFAULT 0`);
+      console.log('[db] Added user_relationships.is_oath column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateOathSchema error:', err.message);
   }
 }
 

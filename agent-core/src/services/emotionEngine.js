@@ -733,8 +733,8 @@ function round(v, precision = 3) {
 
 // ── 送礼系统 ──
 
-const GIFT_COOLDOWNS = { small: 8, large: 16 }; // 小时
-const GIFT_AFFINITY = { small: 8, large: 15 };
+const GIFT_COOLDOWNS = { small: 8, large: 16, ring: 0 }; // 小时，戒指无冷却
+const GIFT_AFFINITY = { small: 8, large: 15, ring: 0 }; // 戒指不增加好感度
 
 /**
  * 获取送礼冷却剩余时间（全局冷却，跟系统不跟角色）
@@ -744,7 +744,7 @@ const GIFT_AFFINITY = { small: 8, large: 15 };
 export function getGiftCooldowns() {
   const db = getDb();
   const now = Date.now();
-  const result = { small: 0, large: 0 };
+  const result = { small: 0, large: 0, ring: 0 };
 
   for (const type of ['small', 'large']) {
     const last = db.prepare(
@@ -757,6 +757,47 @@ export function getGiftCooldowns() {
     }
   }
   return result;
+}
+
+// ── 誓约系统 ──
+
+export function loadOath(characterId) {
+  const db = getDb();
+  return db.prepare(
+    'SELECT is_oath FROM user_relationships WHERE character_id = ?'
+  ).pluck().get(characterId) ?? 0;
+}
+
+export function setOath(characterId, value) {
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+  const existing = db.prepare(
+    'SELECT id FROM user_relationships WHERE character_id = ?'
+  ).get(characterId);
+  if (existing) {
+    db.prepare(
+      'UPDATE user_relationships SET is_oath = ? WHERE character_id = ?'
+    ).run(value ? 1 : 0, characterId);
+  } else {
+    db.prepare(
+      'INSERT INTO user_relationships (character_id, relationship_text, affinity, is_oath, last_interaction_at) VALUES (?, ?, 50, ?, ?)'
+    ).run(characterId, '', value ? 1 : 0, now);
+  }
+}
+
+/**
+ * 检查是否可以发送戒指：好感度 >= 85 且未誓约
+ * @returns {{ canSend: boolean, reason?: string }}
+ */
+export function canSendRing(characterId) {
+  const affinity = loadAffinity(characterId);
+  if (affinity < 85) {
+    return { canSend: false, reason: `好感度不足，当前 ${Math.round(affinity)}/85` };
+  }
+  if (loadOath(characterId)) {
+    return { canSend: false, reason: '已经和该角色缔结誓约' };
+  }
+  return { canSend: true };
 }
 
 /**
@@ -772,18 +813,28 @@ export async function giveGift(characterId, giftType, character, userName = '你
   const db = getDb();
 
   // 1. 校验
-  if (!['small', 'large'].includes(giftType)) {
+  if (!['small', 'large', 'ring'].includes(giftType)) {
     return { success: false, message: '无效的礼物类型' };
   }
 
-  // 2. 冷却检查（全局冷却，大小礼物各自独立）
-  const cooldowns = getGiftCooldowns();
-  if (cooldowns[giftType] > 0) {
-    return {
-      success: false,
-      cooldownRemaining: cooldowns[giftType],
-      message: `该礼物全局冷却中，剩余约 ${Math.ceil(cooldowns[giftType] / 3600)} 小时`
-    };
+  // 1.5 戒指特殊校验：好感度 + 已誓约检查
+  if (giftType === 'ring') {
+    const ringCheck = canSendRing(characterId);
+    if (!ringCheck.canSend) {
+      return { success: false, message: ringCheck.reason };
+    }
+  }
+
+  // 2. 冷却检查（戒指无冷却，跳过）
+  if (giftType !== 'ring') {
+    const cooldowns = getGiftCooldowns();
+    if (cooldowns[giftType] > 0) {
+      return {
+        success: false,
+        cooldownRemaining: cooldowns[giftType],
+        message: `该礼物全局冷却中，剩余约 ${Math.ceil(cooldowns[giftType] / 3600)} 小时`
+      };
+    }
   }
 
   // 3. 当前好感度（含时间回归）
@@ -796,7 +847,9 @@ export async function giveGift(characterId, giftType, character, userName = '你
   const affinityDesc = affinityToPrompt(currentAffinity);
   const giftDesc = giftType === 'small'
     ? '一份日常小礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的小东西（如一盒你爱的甜点、一支精致的花、一个有趣的小挂件……），然后自然地反应。'
-    : '一份精心准备的珍贵礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的大礼（比较贵重的或者比较特殊的），然后自然地反应。';
+    : giftType === 'large'
+      ? '一份精心准备的珍贵礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的大礼（比较贵重的或者比较特殊的），然后自然地反应。'
+      : '一枚戒指。这是一个非常特别的礼物——它代表了一种超越普通羁绊的约定和承诺。请根据你的性格和你们之间的关系，想象这一刻的郑重和意义，用你最真实的方式回应。';
 
   // 获取生图提示词规则
   const imageRules = getGlobalRule('image_prompt');
@@ -852,14 +905,18 @@ ${imageRulesText}
     imagePrompt = `${character.display_name}, receiving a gift, warm smile, soft lighting, gift scene`;
   }
 
-  // 5. 计算最终好感度变化
+  // 5. 计算最终好感度变化（戒指不改变好感度）
   const affinityDelta = baseDelta;
   const newAffinity = clamp(currentAffinity + affinityDelta, 0, 100);
 
-  // 6. 记录送礼时间（全局冷却用）
-  db.prepare(
-    'INSERT INTO gift_history (gift_type) VALUES (?)'
-  ).run(giftType);
+  // 6. 记录送礼：戒指不走 gift_history（无冷却），改为写入誓约标记
+  if (giftType === 'ring') {
+    setOath(characterId, 1);
+  } else {
+    db.prepare(
+      'INSERT INTO gift_history (gift_type) VALUES (?)'
+    ).run(giftType);
+  }
 
   // 7. 更新好感度
   saveAffinity(characterId, newAffinity, true);

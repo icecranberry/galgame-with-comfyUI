@@ -50,6 +50,12 @@
                 <button class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</button>
                 <button v-if="character?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="$emit('remove-avatar', character)">移除</button>
               </div>
+              <div v-if="character?.is_oath" class="detail-avatar-oath">
+                <span class="oath-badge" @click="removeOath">
+                  <span class="oath-badge-default">💍 已誓约</span>
+                  <span class="oath-badge-hover">解除誓约</span>
+                </span>
+              </div>
             </div>
 
             <!-- 角色关系 -->
@@ -442,6 +448,27 @@ function init(c) {
   })
 }
 
+async function removeOath() {
+  const c = props.character
+  if (!c || !c.is_oath) return
+  const ok = await confirmFn({
+    title: '解除誓约',
+    message: `确定要解除与「${c.display_name}」的誓约吗？\n解除后，双方的特殊关系状态将会结束。`,
+    okText: '解除誓约',
+  })
+  if (!ok) return
+  try {
+    await api.removeOath(c.id)
+    c.is_oath = 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.is_oath = 0
+    toastFn('誓约已解除', 'success')
+  } catch (e) {
+    toastFn('解除誓约失败', 'error')
+    console.error('removeOath failed:', e)
+  }
+}
+
 async function saveCharDetail() {
   const c = props.character
   if (!c || !detail.dirty) return
@@ -784,6 +811,29 @@ async function saveLora() {
 .rel-empty-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 360px; }
 .rel-empty-spinner { width: 14px; height: 14px; border: 2px solid rgba(224, 123, 108, 0.2); border-top-color: var(--accent); border-radius: 50%; animation: rel-spin 0.6s linear infinite; }
 @keyframes rel-spin { to { transform: rotate(360deg); } }
+
+/* ═══ 誓约状态（头像行内） ═══ */
+.detail-avatar-oath { display: flex; align-items: center; margin-left: auto; flex-shrink: 0; }
+.oath-badge {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 20px;
+  background: linear-gradient(135deg, rgba(212, 168, 83, 0.18), rgba(212, 168, 83, 0.08));
+  border: 1px solid rgba(212, 168, 83, 0.25);
+  cursor: pointer; user-select: none; overflow: hidden;
+  transition: all 0.25s ease; min-width: 80px; height: 28px;
+}
+.oath-badge:hover {
+  border-color: rgba(200, 80, 70, 0.25);
+  background: linear-gradient(135deg, rgba(200, 80, 70, 0.08), rgba(200, 80, 70, 0.03));
+}
+.oath-badge-default, .oath-badge-hover {
+  position: absolute; transition: all 0.25s ease;
+  white-space: nowrap; letter-spacing: 0.3px;
+}
+.oath-badge-default { opacity: 1; transform: translateY(0); color: #a8853a; }
+.oath-badge-hover { opacity: 0; transform: translateY(8px); color: rgba(200, 80, 70, 0.6); }
+.oath-badge:hover .oath-badge-default { opacity: 0; transform: translateY(-8px); }
+.oath-badge:hover .oath-badge-hover { opacity: 1; transform: translateY(0); }
 
 /* ═══ 悬浮侧边栏 ═══ */
 .detail-float {

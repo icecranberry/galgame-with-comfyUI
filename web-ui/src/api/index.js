@@ -711,6 +711,18 @@ export async function resetGiftCooldowns() {
   return res.json()
 }
 
+// ── 誓约系统 ──
+
+export async function getOathStatus(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/oath`)
+  return res.json()
+}
+
+export async function removeOath(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/oath`, { method: 'DELETE' })
+  return res.json()
+}
+
 // ── Gallery 相册 ──
 export async function listGalleryImages(limit = 100, offset = 0, folder = '') {
   let url = `${BASE}/images/gallery?limit=${limit}&offset=${offset}`

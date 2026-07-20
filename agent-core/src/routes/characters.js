@@ -9,7 +9,7 @@ import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
-import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot } from '../services/emotionEngine.js';
+import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
@@ -39,12 +39,18 @@ router.get('/', (req, res) => {
       WHERE from_character_id = ? OR to_character_id = ?
     `).pluck().get(c.id, c.id);
 
+    const userRel = db.prepare(
+      'SELECT affinity, is_oath FROM user_relationships WHERE character_id = ?'
+    ).get(c.id);
+
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
       last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
       message_count: count?.c || 0,
       relationship_count: relCount || 0,
+      affinity: userRel?.affinity ?? 50,
+      is_oath: userRel?.is_oath ?? 0,
     };
   });
 
@@ -524,8 +530,8 @@ router.post('/:id/gift', async (req, res) => {
   if (!char) return res.status(404).json({ error: 'Character not found' });
 
   const { giftType } = req.body;
-  if (!['small', 'large'].includes(giftType)) {
-    return res.status(400).json({ error: 'giftType must be "small" or "large"' });
+  if (!['small', 'large', 'ring'].includes(giftType)) {
+    return res.status(400).json({ error: 'giftType must be "small", "large" or "ring"' });
   }
 
   try {
@@ -578,7 +584,8 @@ router.post('/:id/gift', async (req, res) => {
     // 保存情绪快照：让切角色后仍能恢复送礼的好感度和 reason
     const emotionBaseline = JSON.parse(char.emotion_baseline || '{"valence":0.5,"arousal":0.5,"dominance":0.5}');
     const emotionState = loadEmotionState(conversationId, emotionBaseline);
-    saveEmotionSnapshot(conversationId, msgId, emotionState, 'joy', result.newAffinity, result.affinityDelta, '哇，收到礼物了');
+    const reasonMap = { small: '收到了一份小礼物', large: '收到了一份精心准备的礼物', ring: '这份心意，比想象中更让我开心……我会记住这一刻。' };
+    saveEmotionSnapshot(conversationId, msgId, emotionState, 'joy', result.newAffinity, result.affinityDelta, reasonMap[giftType] || '收到了一份礼物');
 
     res.json({
       success: true,
@@ -587,6 +594,7 @@ router.post('/:id/gift', async (req, res) => {
       reaction: result.reaction,
       msgId,
       cooldowns: getGiftCooldowns(),
+      is_oath: giftType === 'ring' ? 1 : loadOath(char.id),
     });
   } catch (err) {
     console.error('[characters] gift failed:', err.message);
@@ -605,6 +613,33 @@ router.delete('/gift/cooldowns', (_req, res) => {
 // GET /api/gift/cooldowns — 查询送礼冷却状态
 router.get('/gift/cooldowns', (_req, res) => {
   res.json({ cooldowns: getGiftCooldowns() });
+});
+
+// DELETE /api/characters/:id/oath — 解除誓约关系
+router.delete('/:id/oath', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const oath = loadOath(char.id);
+  if (!oath) {
+    return res.status(409).json({ error: '该角色未缔结誓约' });
+  }
+
+  setOath(char.id, 0);
+  console.log(`[oath] Oath removed for character ${char.display_name} (id=${char.id})`);
+  res.json({ ok: true, is_oath: 0 });
+});
+
+// GET /api/characters/:id/oath — 查询誓约状态
+router.get('/:id/oath', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const isOath = loadOath(char.id);
+  const canSend = canSendRing(char.id);
+  res.json({ is_oath: isOath, affinity: loadAffinity(char.id), canSendRing: canSend.canSend, reason: canSend.reason || null });
 });
 
 // POST /api/characters/:id/generate-avatar — AI 生成角色头像（脸部特写，表情跟随人格）

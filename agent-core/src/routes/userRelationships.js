@@ -12,6 +12,8 @@ router.get('/', (req, res) => {
       ur.id,
       ur.character_id,
       ur.relationship_text,
+      ur.affinity,
+      ur.is_oath,
       ur.created_at,
       c.display_name AS to_display_name,
       c.avatar_path AS to_avatar_path
