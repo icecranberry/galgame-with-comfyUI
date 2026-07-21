@@ -14,6 +14,7 @@
 
 import { invalidateGalleryCache } from '../routes/images.js';
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
+import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import {
@@ -570,7 +571,10 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     const appearance = appMatch ? appMatch[0] : character.base_prompt;
     // 将"你"替换为"角色"（生图 prompt 需要第三人称描述）
     const nameBlock = charName.replace(/你/g, '角色');
-    const appearanceBlock = appearance.replace(/你/g, '角色');
+    let appearanceBlock = appearance.replace(/你/g, '角色');
+
+    // 誓约角色：银白细戒指外观细节
+    appearanceBlock = appendOathRing(appearanceBlock, character.id, 'user', { isFirstPerson: false, charName: '角色' });
 
     // 日程上下文（参照瞄一眼格式：activity + location + time + light + sleep note）
     const scheduleImgCtx = (() => {

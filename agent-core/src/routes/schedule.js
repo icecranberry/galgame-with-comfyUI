@@ -15,6 +15,7 @@
 
 import { Router } from 'express';
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
+import { appendOathRing } from '../services/oathUtils.js';
 import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
@@ -449,9 +450,13 @@ router.post('/:characterId/peek', async (req, res) => {
     system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，${timeLightInline}。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
 
     // system2: 角色完整人格，"你"替换为角色姓名
-    const personaText = character.base_prompt
+    let personaText = character.base_prompt
       ? character.base_prompt.replace(/你/g, charName)
       : `角色名：${charName}`;
+
+    // 誓约角色：银白细戒指外观细节
+    const ringUserName = config.user?.nickname || 'user';
+    personaText = appendOathRing(personaText, characterId, ringUserName, { isFirstPerson: false, charName });
 
     // system3: image_prompt 规则作为 prompt 画质指令
     const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';

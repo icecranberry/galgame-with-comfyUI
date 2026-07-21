@@ -212,9 +212,10 @@ ${eventRules}`;
         if (config.user?.appearance) userInfoParts.push(config.user.appearance);
         if (config.user?.persona) userInfoParts.push(config.user.persona);
         const userRel = db.prepare(
-          `SELECT relationship_text FROM user_relationships WHERE character_id = ?`
-        ).pluck().get(event.character_id);
-        if (userRel) userInfoParts.push(`你对于${userName}而言的身份是${userRel}`);
+          `SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?`
+        ).get(event.character_id);
+        if (userRel?.relationship_text) userInfoParts.push(`你对于${userName}而言的身份是${userRel.relationship_text}`);
+        if (userRel?.is_oath) userInfoParts.push(`并且你和${userName}之间有一个重要的约定——${userName}曾送过你一枚戒指，这代表了独一无二的羁绊和承诺`);
         const userInfoMsg = `你正在和${userName}聊天，以下是${userName}的相关信息：\n${userInfoParts.filter(Boolean).join('，')}`;
 
         // 生成主动消息内容

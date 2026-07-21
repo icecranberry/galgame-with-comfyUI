@@ -185,16 +185,27 @@ const scheduleBtnText = computed(() => {
 // ── 叫醒系统 ──
 const phoneShaking = ref(false)
 const doorShaking = ref(false)
+const wakeBusy = ref(false)
 
 function onWakePhone() {
+  if (wakeBusy.value) return
+  wakeBusy.value = true
   phoneShaking.value = true
-  setTimeout(() => { phoneShaking.value = false }, 1600)
+  setTimeout(() => {
+    phoneShaking.value = false
+    wakeBusy.value = false
+  }, 1600)
   setTimeout(() => { emit('wakePhone') }, 1000)
 }
 
 function onWakeDoor() {
+  if (wakeBusy.value) return
+  wakeBusy.value = true
   doorShaking.value = true
-  setTimeout(() => { doorShaking.value = false }, 1600)
+  setTimeout(() => {
+    doorShaking.value = false
+    wakeBusy.value = false
+  }, 1600)
   setTimeout(() => { emit('wakeDoor') }, 1000)
 }
 

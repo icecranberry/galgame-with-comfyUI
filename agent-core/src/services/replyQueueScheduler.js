@@ -265,10 +265,13 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
   // msgs[2]: 交互关系
   const relParts = [];
   const userRel = db.prepare(
-    'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
   ).get(characterId);
   if (userRel?.relationship_text) {
     relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。</user_relation>`);
+  }
+  if (userRel?.is_oath) {
+    relParts.push(`<oath_bond>你们之间有一个比普通关系更深一层的约定——${chatUserName}曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在对话中，你的行为和情感会自然地带有"你是我最重要的人"的底色——不是因为规则要求，而是因为这层羁绊已经是你内心的一部分。</oath_bond>`);
   }
 
   // 用户信息

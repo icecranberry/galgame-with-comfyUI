@@ -15,6 +15,7 @@
  */
 
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule } from '../db/index.js';
+import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -805,7 +806,11 @@ export async function generateEvent(character, options = {}) {
 
   // 将角色人格中的"你"替换为角色名（保留引号内对话不变，简单正则处理）
   const displayName = character.display_name;
-  const personaText = character.base_prompt.replace(/你/g, displayName);
+  let personaText = character.base_prompt.replace(/你/g, displayName);
+
+  // 誓约角色：银白细戒指外观细节
+  const ringUserName1 = config.user?.nickname || 'user';
+  personaText = appendOathRing(personaText, character.id, ringUserName1, { isFirstPerson: false, charName: displayName });
 
   // [0] 第三人称叙事声明 + jailbreak + 世界观（有世界观时注入整合指令，无世界观时跳过）
   const worldIntegrationBlock = worldSetting ? `
@@ -1113,7 +1118,11 @@ export async function generateNextBranch(character, event, choice) {
   const imageRulesText = imageRules?.rule_content || '';
 
   const displayName2 = character.display_name;
-  const personaText2 = character.base_prompt.replace(/你/g, displayName2);
+  let personaText2 = character.base_prompt.replace(/你/g, displayName2);
+
+  // 誓约角色：银白细戒指外观细节
+  const ringUserName2 = config.user?.nickname || 'user';
+  personaText2 = appendOathRing(personaText2, character.id, ringUserName2, { isFirstPerson: false, charName: displayName2 });
 
   const worldIntegrationBlock2 = worldSetting2 ? `
 <world_integration priority="highest">

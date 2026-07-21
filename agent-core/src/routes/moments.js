@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
+import { appendOathRing } from '../services/oathUtils.js';
 import { getTimeLightTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
@@ -679,9 +680,13 @@ ${rules}`;
     : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
+  // 誓约角色：银白细戒指外观细节
+  const ringUserName = config.user.nickname || 'user';
+  const basePromptWithRing = appendOathRing(character.base_prompt, character.id, ringUserName, { isFirstPerson: true });
+
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
-  msgs.push({ role: 'system', content: character.base_prompt });
+  msgs.push({ role: 'system', content: basePromptWithRing });
   if (multiPerson) {
     msgs.push({
       role: 'system',
@@ -854,10 +859,13 @@ async function generateCharacterReply(post, historyComments) {
   // 用户→角色关系
   let userRelMsg = '';
   const userRel = db.prepare(
-    'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
   ).get(post.character_id);
   if (userRel && userRel.relationship_text) {
     userRelMsg = `**【你与user的关系】\n你对于user而言的身份是${userRel.relationship_text}。**这个关系为最高优先级，请在回复中自然体现。`;
+  }
+  if (userRel?.is_oath) {
+    userRelMsg += `\n\n**【特殊羁绊】**\n你和user之间有一个比普通关系更深一层的约定——user曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在回复时，你的行为和情感会自然地带有"你是我最重要的人"的底色。`;
   }
 
   // 角色间关系（双向）

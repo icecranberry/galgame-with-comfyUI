@@ -17,6 +17,7 @@
  */
 
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
+import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 
 // ── 常量 ──
@@ -440,6 +441,7 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
     currentVad = DEFAULT_STATE,
     currentAffinity = DEFAULT_AFFINITY,
     relationship = '',
+    relationshipOath = 0,
     prevUser = '',
     prevAssistant = '',
     summary = '',
@@ -473,7 +475,7 @@ ${personalityText || '（未设定特殊人格，按默认友善助手判断）'
 
 【${characterName}与${userName}的关系】
 ${userName}将${characterName}视为：${relationship || '普通朋友'}
-${characterName}当前对${userName}的好感度：${currentAffinity}/100
+${relationshipOath ? `${userName}曾送过${characterName}一枚戒指，这是他们之间独一无二的羁绊和承诺。\n` : ''}${characterName}当前对${userName}的好感度：${currentAffinity}/100
 ${characterName}当前情绪状态：
   愉悦度(V): ${currentVad.valence?.toFixed(2) ?? '0.50'} (负=不愉快, 正=愉快)
   唤醒度(A): ${currentVad.arousal?.toFixed(2) ?? '0.50'} (低=倦怠, 高=兴奋)
@@ -870,7 +872,7 @@ export async function giveGift(characterId, giftType, character, userName = '你
 你是角色「${character.display_name}」，你正在和 ${userName} 对话。
 
 【角色人格】
-${basePrompt}
+ ${appendOathRing(basePrompt, characterId, userName, { isFirstPerson: true })}
 
 ${affinityDesc ? `【你们的关系】\n${affinityDesc}\n` : ''}${chatContext ? `【上一轮对话上下文】
 ${chatContext}

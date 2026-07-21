@@ -13,6 +13,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
@@ -1002,8 +1003,11 @@ ${coreRules}
         currentVad: getCompositeEmotion(emotionState),
         currentAffinity,
         relationship: db.prepare(
-          'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+          'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
         ).get(characterId)?.relationship_text || '',
+        relationshipOath: db.prepare(
+          'SELECT is_oath FROM user_relationships WHERE character_id = ?'
+        ).pluck().get(characterId) || 0,
         prevUser,
         prevAssistant,
         summary: summaryRow?.summary || '',
@@ -1371,7 +1375,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
 
   // 1. 构建二次请求的消息列表（破限词+生图指令置顶，人格在后）
   const globalRules = getSystemRules({ roleplay: false });
-  const personalityPrompt = character?.base_prompt || getDefaultPrompt();
+  let personalityPrompt = character?.base_prompt || getDefaultPrompt();
   const imagePromptRule = getGlobalRule('image_prompt');
 
   // 2. 加载最近 3 轮历史（生图任务只需锚点上下文，取太多稀释注意力）
@@ -1391,7 +1395,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     userRelationContent = `\n\n【你和user的关系】你是user的${userRel.relationship_text}。在生成包含你和user的合照或互动场景时，请通过人物姿态、表情、距离等方式体现这层关系。`;
   }
   if (userRel && userRel.is_oath) {
-    userRelationContent += `\n\n【特殊羁绊】你和user之间有一个比普通关系更深一层的约定——user曾送过你一枚戒指。这代表了独一无二的羁绊。在画面中，如果有这两个人物的互动，要体现这种"你是ta最重要的人"的感觉——但不是夸张的，而是通过一个微小的细节（手指上的戒指、眼神里的信任、一个不经意的肢体动作）自然流露。`;
+    const ringUserName = config.user.nickname || 'user';
+    personalityPrompt = appendOathRing(personalityPrompt, character.id, ringUserName, { isFirstPerson: true });
   }
 
   const userName = config.user.nickname || '用户';
@@ -1752,9 +1757,13 @@ async function generateSleepPrompt(character) {
   const sleepNote = '【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。';
 
   const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
-  const personaText = character.base_prompt
+  let personaText = character.base_prompt
     ? character.base_prompt.replace(/你/g, charName)
     : `角色名：${charName}`;
+
+  // 誓约角色：银白细戒指外观细节
+  const oathRingUserName = config.user.nickname || 'user';
+  personaText = appendOathRing(personaText, character.id, oathRingUserName, { isFirstPerson: false, charName });
 
   const msgs = [
     { role: 'system', content: `你是一个专业的人像摄影师，现在需要给「${charName}」拍一张睡颜照。照片里的角色正在睡觉。${timeLightInline}。${sleepNote}` },

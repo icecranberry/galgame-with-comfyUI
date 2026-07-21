@@ -91,10 +91,16 @@ const props = defineProps<{
 const emit = defineEmits(['select', 'peek', 'wake'])
 
 const wakeShaking = ref(false)
+const wakeBusy = ref(false)
 
 function onWake() {
+  if (wakeBusy.value) return
+  wakeBusy.value = true
   wakeShaking.value = true
-  setTimeout(() => { wakeShaking.value = false }, 1600)
+  setTimeout(() => {
+    wakeShaking.value = false
+    wakeBusy.value = false
+  }, 1600)
   setTimeout(() => { emit('wake') }, 1000)
 }
 

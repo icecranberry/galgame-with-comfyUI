@@ -1,4 +1,5 @@
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
+import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImage } from './imageSkill.js';
 import { broadcast } from './unifiedStreamBus.js';
@@ -182,7 +183,9 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
   if (stage) msgs.push({ role: 'system', content: stage });
 
   // ── system 1: 角色完整人格 ──
-  msgs.push({ role: 'system', content: charBasePrompt });
+  const ringUserName = config.user.nickname || 'user';
+  const basePromptWithRing = appendOathRing(charBasePrompt, charId, ringUserName, { isFirstPerson: true });
+  msgs.push({ role: 'system', content: basePromptWithRing });
 
   // ── system 2: 朋友圈 + 对话 + 记忆 ──
   const mat2Parts = [];
@@ -238,9 +241,12 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
   }
 
   // 角色与用户的关系 + 好感度
-  const userRel = db.prepare('SELECT relationship_text, affinity FROM user_relationships WHERE character_id = ?').get(charId);
+  const userRel = db.prepare('SELECT relationship_text, affinity, is_oath FROM user_relationships WHERE character_id = ?').get(charId);
   if (userRel?.relationship_text) {
     rel3Parts.push(`你是 ${userName} 的"${userRel.relationship_text}"。${userName} 对你好感度：${Math.round(userRel.affinity || 50)}/100。`);
+  }
+  if (userRel?.is_oath) {
+    rel3Parts.push(`你和 ${userName} 之间有一个重要的约定——${userName} 曾送过你一枚戒指，这代表了独一无二的羁绊和承诺。在写信时，你的情感中会自然地带有"你是我最重要的人"的底色。`);
   }
 
   // 用户画像（角色视角）

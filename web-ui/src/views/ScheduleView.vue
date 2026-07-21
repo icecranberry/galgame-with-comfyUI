@@ -860,9 +860,14 @@ async function onCardWake(id: number) {
       await store.fetchOverview(true)
     } else {
       toastFn(`没叫醒${name}...`, 'info')
+      if (res?.door_wake_available) {
+        setTimeout(() => { toastFn(`电话打不通，试试上门找${name}吧`, 'info') }, 1200)
+      }
+      await store.fetchOverview(true)
     }
   } catch (err: any) {
     toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
+    await store.fetchOverview(true)
   }
 }
 
