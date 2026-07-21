@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -12,6 +12,7 @@ import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
 import { restartComfyClient } from '../services/comfyClient.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
+import { restartWeatherScheduler } from '../services/weatherService.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
@@ -34,6 +35,7 @@ router.get('/', (req, res) => {
       tlsVerify: config.comfyui.tlsVerify,
     },
     features: config.features,
+    weather: { city: config.weather.city || '' },
     llm: getLlmConfig(),
     llmProfiles: getLlmProfiles(),
     activeLlmProfileId: getActiveProfileId(),
@@ -68,6 +70,10 @@ router.put('/features', (req, res) => {
   updateFeatureFlag(key, value);
   if (key === 'serializeBackgroundLLM') {
     applyFromConfig(config);
+  }
+  if (key === 'weather' && value === true) {
+    restartWeatherScheduler();
+    triggerWeatherUpdate();
   }
   res.json({ ok: true, features: config.features });
 });
@@ -583,6 +589,16 @@ router.post('/world-settings/:id/activate', (req, res) => {
   const item = activateWorldSetting(id);
   if (!item) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, item });
+});
+
+// PUT /api/config/weather-city — 设置天气城市
+router.put('/weather-city', (req, res) => {
+  const { city } = req.body;
+  if (typeof city !== 'string') {
+    return res.status(400).json({ error: 'city must be a string' });
+  }
+  updateWeatherConfig(city);
+  res.json({ ok: true, city: config.weather.city });
 });
 
 export default router;

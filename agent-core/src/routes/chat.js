@@ -19,7 +19,7 @@ import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken } from '../services/scheduleManager.js';
-import { getTimeTag, getLightHint, getTimeLight } from '../services/timeLight.js';
+import { getTimeTag, getLightHint, getTimeLightInline } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 
 const router = Router();
@@ -1426,8 +1426,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         }
 
         if (!activity || !activity.activity || activity.activity === '自由时间') return lightHint;
-        const { timeDesc, lightNote } = getTimeLight();
-        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '') + '现在是' + timeDesc + '，光线参考：' + lightNote + '（室内场景以人造光源为主，不必严格遵守）。';
+        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '');
       } catch (_) { return getLightHint(); }
     })() },
     // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
@@ -1749,7 +1748,7 @@ async function generateSleepPrompt(character) {
     return cached;
   }
 
-  const { timeDesc, lightNote } = getTimeLight();
+  const timeLightInline = getTimeLightInline();
   const sleepNote = '【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。';
 
   const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
@@ -1758,7 +1757,7 @@ async function generateSleepPrompt(character) {
     : `角色名：${charName}`;
 
   const msgs = [
-    { role: 'system', content: `你是一个专业的人像摄影师，现在需要给「${charName}」拍一张睡颜照。照片里的角色正在睡觉。现在是${timeDesc}，光线参考：${lightNote}（室内以人造光源为主，不必严格遵守）。${sleepNote}` },
+    { role: 'system', content: `你是一个专业的人像摄影师，现在需要给「${charName}」拍一张睡颜照。照片里的角色正在睡觉。${timeLightInline}。${sleepNote}` },
     { role: 'system', content: personaText },
     { role: 'system', content: `直接输出英文画面描述，不要任何格式包装或额外文字。${imageRulesText ? '\n\n输出要求：\n' + imageRulesText : ''}` },
     { role: 'user', content: `请为「${charName}」拍一张正在睡觉的照片。` },

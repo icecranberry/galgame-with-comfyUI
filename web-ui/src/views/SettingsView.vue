@@ -399,6 +399,24 @@
             <span class="slider"></span>
           </label>
         </div>
+
+        <!-- 实时天气 -->
+        <div class="toggle-row">
+          <div style="flex:1">
+            <div class="tl">实时天气</div>
+            <div class="td">你将和角色共享天气</div>
+          </div>
+          <div
+            v-if="features.weather"
+            class="disturb-setup-btn"
+            title="设置城市"
+            @click="openWeatherCityDialog"
+          >⚙</div>
+          <label class="switch">
+            <input type="checkbox" v-model="features.weather" @change="saveFeature('weather', features.weather)" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- ComfyUI 连接 -->
@@ -528,6 +546,28 @@
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 天气城市设置弹窗 -->
+  <Teleport to="body">
+    <Transition name="disturb-dialog-fade">
+      <div v-if="weatherCityDialog.show" class="disturb-dialog-overlay" @click.self="weatherCityDialog.show = false">
+        <div class="disturb-dialog" style="max-width:360px;">
+          <div class="disturb-dialog-header">
+            <span>天气城市设置</span>
+            <button class="fav-dialog-close" @click="weatherCityDialog.show = false">✕</button>
+          </div>
+          <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
+            <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
+            <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
+            <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
+              <button class="btn-primary" @click="confirmWeatherCity">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
   <!-- 工作流模式弹窗 -->
   <Teleport to="body">
     <Transition name="modal-fade">
@@ -586,7 +626,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -638,7 +678,7 @@ const comfyUrl = ref('')
 const comfySkipTls = ref(false)
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false })
+const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
 const backgroundConcurrency = ref(3)
@@ -651,6 +691,10 @@ const disturbCharacterIds = ref([])
 const disturbHideWorld = ref(false)
 const disturbSkipWeekends = ref(false)
 const allCharacters = ref([]) // 全部角色列表（含头像）
+
+// ── 天气 ──
+const weatherCity = ref('')
+const weatherCityDialog = reactive({ show: false, city: '' })
 
 // 弹窗状态（编辑期间使用独立副本，确认后才同步）
 const disturbDialog = reactive({
@@ -938,6 +982,7 @@ onMounted(async () => {
       disturbHideWorld.value = data.disturb.hideWorld ?? false
       disturbSkipWeekends.value = data.disturb.skipWeekends ?? false
     }
+    weatherCity.value = data.weather?.city || ''
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
@@ -1118,6 +1163,24 @@ function toggleDisturbDialogChar(id) {
     disturbDialog.characterIds.splice(idx, 1)
   } else {
     disturbDialog.characterIds.push(id)
+  }
+}
+
+// ── 天气城市设置 ──
+
+function openWeatherCityDialog() {
+  weatherCityDialog.city = weatherCity.value
+  weatherCityDialog.show = true
+}
+
+async function confirmWeatherCity() {
+  try {
+    await updateWeatherCity(weatherCityDialog.city || '')
+    weatherCity.value = weatherCityDialog.city
+    settingsStore.setWeatherCity(weatherCity.value)
+    weatherCityDialog.show = false
+  } catch (err) {
+    console.error('[weather] save city failed:', err)
   }
 }
 

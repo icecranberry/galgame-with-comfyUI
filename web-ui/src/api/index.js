@@ -314,6 +314,14 @@ export async function updateDisturbSettings(data) {
   return res.json()
 }
 
+/** 设置天气城市 */
+export async function updateWeatherCity(city) {
+  const res = await fetch(`${BASE}/config/weather-city`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city }),
+  })
+  return res.json()
+}
+
 export async function updateLlmConfig(data) {
   const res = await fetch(`${BASE}/config/llm`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },

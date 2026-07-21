@@ -23,7 +23,7 @@ import {
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { getLightHint, getTimeLight } from './timeLight.js';
+import { getLightHint, getTimeLight, getTimeLightInline } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
@@ -577,12 +577,12 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
       try {
         const activity = getCurrentActivity(character.id);
         if (!activity || !activity.activity || activity.activity === "自由时间") return "";
-        const { timeDesc, lightNote } = getTimeLight();
+        const timeLightInline = getTimeLightInline();
         const isSleeping = activity.replyDelay === -1;
         const sleepNote = isSleeping
           ? "\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。"
           : "";
-        return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + "现在是" + timeDesc + "，光线参考：" + lightNote + "（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。" + sleepNote;
+        return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + timeLightInline + "。照片里的角色要体现正在做的日程。" + sleepNote;
       } catch (_) { return ""; }
     })();
     const lightHint = getLightHint();

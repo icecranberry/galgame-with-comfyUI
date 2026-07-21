@@ -51,6 +51,7 @@ export const config = {
     serializeBackgroundLLM: process.env.FEATURE_SERIALIZE_BG_LLM === 'true', // 默认关：后台LLM任务串行化
     backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板
+    weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',
@@ -78,6 +79,9 @@ export const config = {
     gender: process.env.USER_GENDER || '',
     appearance: process.env.USER_APPEARANCE || '',
     persona: process.env.USER_PERSONA || '',
+  },
+  weather: {
+    city: process.env.WEATHER_CITY || '',
   },
 };
 
@@ -326,6 +330,12 @@ export function updateWorkflowScene(scene) {
 
 export function getWorkflowConfig() {
   return { ...config.workflow };
+}
+
+export function updateWeatherConfig(city) {
+  config.weather.city = city;
+  persistSettingSync('weather_city', city);
+  console.log(`[config] weather city = ${city || '(auto)'}`);
 }
 
 // ── LLM 多配置 Profile 管理 ──

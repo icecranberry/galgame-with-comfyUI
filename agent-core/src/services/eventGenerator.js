@@ -22,7 +22,7 @@ import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { getTimeLightTag, getTimeLight } from './timeLight.js';
+import { getTimeLightTag, getTimeLightInline } from './timeLight.js';
 
 // ── 生活片段类型库 ──
 // 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
@@ -827,9 +827,9 @@ export async function generateEvent(character, options = {}) {
       const currentActivity = getCurrentActivity(character.id);
       if (currentActivity && currentActivity.activity !== '自由时间') {
         scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
-        const { timeStr, timeDesc, lightNote } = getTimeLight(now);
+        const timeLightInline = getTimeLightInline(now);
         const descPart = currentActivity.description ? `——${currentActivity.description}` : '';
-        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。现在是${timeStr}（${timeDesc}），光线参考：${lightNote}`;
+        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。${timeLightInline}`;
       }
     }
   } catch { /* schedule not available */ }

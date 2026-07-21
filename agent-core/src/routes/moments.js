@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
-import { getTimeLightTag, getTimeLight } from '../services/timeLight.js';
+import { getTimeLightTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
@@ -352,7 +352,6 @@ async function generateMomentPost(character, opts = {}) {
     { name: '聊天截图/meme', desc: '搞笑对话截图或表情包风格，配图可以夸张、meme 风格' },
     { name: '节日/装饰', desc: '过节、生日、纪念日或某个特殊日子的氛围，配图是庆祝或节日装饰' },
     { name: '聚会/多人', desc: '和朋友在一起的场景，配图是群体互动或聚会氛围' },
-    { name: '做梦/脑洞', desc: '分享昨晚的怪梦或天马行空的脑洞故事，配图是超现实或梦幻风格' },
     { name: '才艺/表演', desc: '展示自己的技能——唱歌、跳舞、弹琴、演出，配图是舞台或练习场景' },
     { name: '办公/会议', desc: '办公场景、开会、加班日常，配图是工位或会议室 mood shot' },
     { name: '雨/雪/雷', desc: '极端天气——暴雨、大雪、打雷闪电，配图是天气景象或窗外的雨/雪' },
@@ -654,14 +653,14 @@ ${rules}`;
 
 ${jsonFmt}
 
-**本次发朋友圈 — 风格：${pickedTopic.desc}，动机：${pickedMotivation.desc}**
+**本次发朋友圈是因为：${pickedTopic.desc}，可能的动机是：${pickedMotivation.desc}**
 
 ${rules}`;
   })();
 
   const now = new Date();
   const timeTag = getTimeLightTag(now);
-  const { lightNote } = getTimeLight(now);
+  const weatherNote = getLightNoteWithWeather(now);
 
   // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
   let scheduleContext = '';
@@ -674,7 +673,7 @@ ${rules}`;
     }
   } catch { /* schedule not available, skip */ }
 
-  const lightHint = `\n【画面光线参考】${lightNote}（仅供参考，室内以人工光源为主）`;
+  const lightHint = weatherNote ? `\n${weatherNote}` : '';
   const userMsg = multiPerson
     ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`
     : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`;

@@ -25,7 +25,7 @@ import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
-import { getTimeLight } from '../services/timeLight.js';
+import { getTimeLightInline } from '../services/timeLight.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { processWakeUp } from '../services/wakeService.js';
 
@@ -422,7 +422,7 @@ router.post('/:characterId/peek', async (req, res) => {
         lightTime.setHours(h, m || 0, 0, 0);
       }
     }
-    const { timeDesc, lightNote } = getTimeLight(lightTime);
+    const timeLightInline = getTimeLightInline(lightTime);
     const sleepNote = isSleeping
       ? `\n\n【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。`
       : '';
@@ -446,7 +446,7 @@ router.post('/:characterId/peek', async (req, res) => {
       }
     }
 
-    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，现在是${timeDesc}，光线参考：${lightNote}（室内场景以人造光源为主，不必严格遵守）。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
+    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，${timeLightInline}。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
 
     // system2: 角色完整人格，"你"替换为角色姓名
     const personaText = character.base_prompt

@@ -321,6 +321,16 @@ function initSchema(db) {
       replied_at DATETIME,
       is_read INTEGER NOT NULL DEFAULT 0
     );
+
+    -- 逐小时天气缓存表（仅保留 24 条，weather_time 为 HH:00）
+    CREATE TABLE IF NOT EXISTS weather_hourly (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      weather_time TEXT NOT NULL UNIQUE,
+      weather_text TEXT NOT NULL,
+      temperature TEXT NOT NULL,
+      wind_speed TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // FTS5 external content table — drop & recreate to handle schema changes
@@ -378,6 +388,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_ds_char_date ON daily_schedules(character_id, schedule_date);
     CREATE INDEX IF NOT EXISTS idx_rq_scheduled ON reply_queue(scheduled_reply_at, status);
     CREATE INDEX IF NOT EXISTS idx_rq_character ON reply_queue(character_id, status);
+    CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather_hourly(weather_time);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -1175,6 +1186,8 @@ const SETTING_TO_CONFIG = {
   feature_serializeBackgroundLLM:     { obj: 'features', key: 'serializeBackgroundLLM',    type: 'bool' },
   feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
   feature_mergeMessages:             { obj: 'features', key: 'mergeMessages',             type: 'bool' },
+  feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
+  weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
   compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
   compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
   user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },

@@ -309,7 +309,7 @@ ${l.reply_content}`;
 
   const userLen = (userContent || '').length;
   const textRange = userLen < 30 ? '100~300字' : userLen <= 50 ? '200~400字' : '300~500字';
-  const maxTokens = userLen < 30 ? 1200 : userLen <= 50 ? 1500 : 2000;
+  const maxTokens = 4096;
 
   const taskMsg = `你收到了一封来自 ${userName} 的来信。请以"${charName}"的身份和口吻回复这封信，并用JSON格式返回以下内容：${imageGuideBlock}
 {

@@ -31,6 +31,7 @@ import { startReplyQueueScheduler } from './src/services/replyQueueScheduler.js'
 import { initialize as initScheduleManager } from './src/services/scheduleManager.js';
 import { startScheduler as startImageCompressor } from './src/services/imageCompressor.js';
 import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
+import { startWeatherScheduler } from './src/services/weatherService.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 
 const app = express();
@@ -131,6 +132,9 @@ startImageCompressor();
 
 // 启动信箱调度器（每 60 秒扫描待回信的信件）
 startMailboxScheduler();
+
+// 启动天气调度器（每日 08:00 后更新小时级天气缓存）
+startWeatherScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
