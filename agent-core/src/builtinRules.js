@@ -38,7 +38,7 @@ Follow this progression:
 
 2. **MUST:** When an existing IP character appears, — Each character is written as 'Name \\(Series\\) \\(hair_color, eye_color, distinctive_features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown_hair, red_eyes, twin_tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.".
 
-3. Environment & Props — Describe furniture, objects, and background elements that ground the scene in a lived-in space.
+3. Environment & Props — Describe furniture, objects, and background elements that ground the scene in a lived-in space. If the conversation provides environment references (location, time of day, weather, setting details), weave them naturally into the description.
 
 4. Lighting — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
 

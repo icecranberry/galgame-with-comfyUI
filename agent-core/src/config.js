@@ -23,7 +23,7 @@ export const config = {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
   },
   comfyui: {
-    url: process.env.COMFYUI_URL || 'http://localhost:8188',
+    url: (process.env.COMFYUI_URL || 'http://localhost:8188').replace(/\/+$/, ''),
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
     artist: process.env.COMFYUI_ARTIST || '@ebora',
     width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,
@@ -119,7 +119,7 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
   if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
   if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
   if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }
-  if (url !== undefined) { config.comfyui.url = url; persistEnv('COMFYUI_URL', url); }
+  if (url !== undefined) { const n = String(url).replace(/\/+$/, ''); config.comfyui.url = n; persistEnv('COMFYUI_URL', n); }
   if (momentsArtist !== undefined) { config.comfyui.momentsArtist = momentsArtist; persistSettingSync('comfy_moments_artist', momentsArtist); }
   if (momentsWidth !== undefined) { config.comfyui.momentsWidth = parseInt(momentsWidth, 10) || config.comfyui.momentsWidth; persistSettingSync('comfy_moments_width', config.comfyui.momentsWidth); }
   if (momentsHeight !== undefined) { config.comfyui.momentsHeight = parseInt(momentsHeight, 10) || config.comfyui.momentsHeight; persistSettingSync('comfy_moments_height', config.comfyui.momentsHeight); }

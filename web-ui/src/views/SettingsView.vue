@@ -1020,6 +1020,7 @@ async function saveComfy() {
 }
 
 async function saveComfyUrl() {
+  comfyUrl.value = comfyUrl.value.replace(/\/+$/, '')
   await updateComfyConfig({ url: comfyUrl.value, tlsVerify: !comfySkipTls.value })
   connDirty.value = false; connSaved.value = true
   setTimeout(() => connSaved.value = false, 2000)

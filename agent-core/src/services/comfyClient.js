@@ -3,7 +3,7 @@ import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
 
-const getBase = () => config.comfyui.url;
+const getBase = () => config.comfyui.url.replace(/\/+$/, '');
 const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
 
 // ── 节点定义缓存（从 ComfyUI /object_info 获取，~2.8MB，常驻内存）──
@@ -17,8 +17,9 @@ let pollingTimer = null;
  * 用于解析紧凑格式 workflow（如 aki-v2）中省略的 widget 输入。
  */
 async function fetchObjectInfo() {
-  const res = await fetch(`${getBase()}/object_info`);
-  if (!res.ok) throw new Error(`object_info returned ${res.status}`);
+  const url = `${getBase()}/object_info`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`object_info returned ${res.status} (url: ${url})`);
   return res.json();
 }
 

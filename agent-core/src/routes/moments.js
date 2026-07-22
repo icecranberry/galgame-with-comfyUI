@@ -639,23 +639,11 @@ const MOTIVATIONS = [
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在上述世界观中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（80-200字），imagePrompt 用英文
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
-- 做的事情要符合当前时间和天气，文字不需要提及现在的时间和天气，只有图片会体现。除非极度需要说明时间和天气文字才会提及。`;
-
-    if (isSpecialMode) {
-      return `${postingTaskIntro}
-
-${jsonFmt}
-
-**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**
-
-${rules}`;
-    }
+- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
 
     return `${postingTaskIntro}
 
 ${jsonFmt}
-
-**本次发朋友圈是正在做或者想到：${pickedTopic.desc}，可能的动机是：${pickedMotivation.desc}**
 
 ${rules}`;
   })();
@@ -668,14 +656,18 @@ ${rules}`;
     if (config.features.schedule !== false) {
       const activity = getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
-        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}。朋友圈内容应当反映这个时段角色的状态和见闻。`;
+        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}。朋友圈的内容应当反映这个时段角色的状态和见闻。`;
       }
     }
   } catch { /* schedule not available, skip */ }
 
+  const styleDirective = isSpecialMode
+    ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
+    : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
+
   const userMsg = multiPerson
-    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
-    : `${timeTag}${scheduleContext} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
+    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
+    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   // 誓约角色：银白细戒指外观细节
