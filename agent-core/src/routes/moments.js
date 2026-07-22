@@ -7,7 +7,7 @@ import { generateImageRaw } from '../services/imageSkill.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 import { appendOathRing } from '../services/oathUtils.js';
-import { getTimeLightTag, getLightNoteWithWeather } from '../services/timeLight.js';
+import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
@@ -628,9 +628,13 @@ const MOTIVATIONS = [
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
 
+  const now = new Date();
+  const weatherNote = getLightNoteWithWeather(now);
+  const weatherHint = weatherNote ? `场景参考：${weatherNote}。` : '';
+
   const postingTask = (() => {
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（像角色本人随手发布的一条朋友圈，保持自然口语和角色个性）","imagePrompt":"${imagePromptGuide}${multiPersonImageNote}"}`;
+{"text":"朋友圈文案（像角色本人随手发布的一条朋友圈，保持自然口语和角色个性）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}"}`;
 
     const rules = `规则：
 - 只输出 JSON，不要解释
@@ -659,9 +663,7 @@ ${jsonFmt}
 ${rules}`;
   })();
 
-  const now = new Date();
-  const timeTag = getTimeLightTag(now);
-  const weatherNote = getLightNoteWithWeather(now);
+  const timeTag = getTimeTag(now, false);
 
   // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
   let scheduleContext = '';
@@ -674,10 +676,9 @@ ${rules}`;
     }
   } catch { /* schedule not available, skip */ }
 
-  const lightHint = weatherNote ? `\n${weatherNote}` : '';
   const userMsg = multiPerson
-    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`
-    : `${timeTag}${scheduleContext} 发一条朋友圈，只输出 {"text":"...","imagePrompt":"..."} JSON：${lightHint}`;
+    ? `${timeTag}${scheduleContext} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
+    : `${timeTag}${scheduleContext} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
   // 誓约角色：银白细戒指外观细节

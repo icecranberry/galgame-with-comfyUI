@@ -181,19 +181,19 @@ export function getTimeLight(now = new Date()) {
 }
 
 /**
- * 生成时间标签（用于主聊天流），含季节和天气。
+ * 生成时间标签（用于主聊天流）含季节和天气。
  * [当前时间 周三 07/03 14:30 / 夏日下午 — 多云、挺热]
- *
  * @param {Date} [now]
+ * @param {boolean} [needWeather=true] 是否附加天气
  * @returns {string}
  */
-export function getTimeTag(now = new Date()) {
+export function getTimeTag(now = new Date(), needWeather = true) {
   const weekDay = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
   const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const { timeDesc } = getTimeLight(now);
   const season = getSeason(now.getMonth() + 1);
-  const weather = getCurrentWeather(now.getHours());
+  const weather = needWeather ? getCurrentWeather(now.getHours()) : null;
   if (weather && weather.weather) {
     const wParts = [weather.weather];
     if (weather.temperature) wParts.push(weather.temperature);

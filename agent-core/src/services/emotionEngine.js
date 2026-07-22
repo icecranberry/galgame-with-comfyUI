@@ -993,3 +993,118 @@ export function cropPersonalityForEmotion(basePrompt, characterName = 'assistant
 
   return result;
 }
+
+// ── Short Prompt LLM 浓缩 + 启动迁移 ──
+
+let _migrationChecked = false;
+let _migrationQueue = [];
+let _migrationRunning = false;
+let _migrationTimer = null;
+
+/**
+ * 用 LLM 把完整人格浓缩成 ~200 字第三人称摘要
+ * @param {string} basePrompt - 角色完整人格 prompt
+ * @param {string} characterName - 角色显示名
+ * @returns {Promise<string>} 浓缩摘要
+ */
+export async function generateShortPromptWithLLM(basePrompt, characterName) {
+  if (!basePrompt) return '';
+  const name = characterName || 'assistant';
+  const prompt = `你是一个角色人格浓缩助手。你的任务是把给定的角色完整人格 prompt 浓缩成一段第三人称摘要（180字内）。
+
+要求：
+1. 格式：以"${name}是"开头，后面接连贯的摘要段落
+2. 用第三人称（她/他），不用"你"
+3. 只保留核心性格、说话方式、价值观、身份背景等内在特质
+4. 排除外观描写（发型、瞳色、穿着、身材等一切外表信息）
+5. 使用自然口语化的连贯段落，不要列表、标题或任何标记符号
+6. 输出纯文本，不要 JSON 格式或其他包装
+
+角色完整人格：
+${basePrompt}`;
+
+  const result = await chatSync(
+    [{ role: 'user', content: prompt }],
+    { temperature: 0.3, max_tokens: 512, label: '浓缩short_prompt' }
+  );
+
+  let condensed = result.trim();
+  // 确保以角色名开头
+  if (!condensed.startsWith(name)) {
+    condensed = `${name}是${condensed}`;
+  }
+  // 截断到 200 字
+  if (condensed.length > 200) {
+    condensed = condensed.slice(0, 200);
+  }
+  return condensed;
+}
+
+/**
+ * 全表扫描 short_prompt（每次启动只执行一次），
+ * 将仍包含旧格式标记（##）的角色入队等待 LLM 重新生成
+ * @returns {{ checked: boolean, queued: number }}
+ */
+export function runShortPromptMigration() {
+  if (_migrationChecked) {
+    return { checked: true, queued: 0 };
+  }
+  _migrationChecked = true;
+
+  const db = getDb();
+  const chars = db.prepare(
+    `SELECT id, name, display_name, base_prompt FROM characters WHERE short_prompt LIKE '%##%'`
+  ).all();
+
+  if (chars.length === 0) {
+    console.log('[short-prompt] 全表扫描完成，无需优化');
+    return { checked: true, queued: 0 };
+  }
+
+  _migrationQueue = chars;
+  console.log(`[short-prompt] 全表扫描完成，发现 ${chars.length} 个角色需优化，开始队列处理（1个/分钟）`);
+  _processNextInQueue();
+  return { checked: true, queued: chars.length };
+}
+
+function _processNextInQueue() {
+  if (_migrationQueue.length === 0) {
+    _migrationRunning = false;
+    console.log('[short-prompt] 队列处理完成');
+    return;
+  }
+  _migrationRunning = true;
+  const char = _migrationQueue.shift();
+
+  _migrationTimer = setTimeout(async () => {
+    // 二次检查：确认该角色 short_prompt 仍含旧格式标记（防竞态）
+    const db = getDb();
+    const current = db.prepare('SELECT short_prompt FROM characters WHERE id = ?').get(char.id);
+    if (!current?.short_prompt?.includes('##')) {
+      console.log(`[short-prompt] 跳过 "${char.display_name}"（已被其他操作更新）`);
+      _processNextInQueue();
+      return;
+    }
+
+    try {
+      const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name);
+      db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, char.id);
+      console.log(`[short-prompt] 已优化 "${char.display_name}" (id=${char.id})`);
+    } catch (err) {
+      console.warn(`[short-prompt] 优化失败 "${char.display_name}":`, err.message);
+    }
+    _processNextInQueue();
+  }, 60_000);
+  _migrationTimer.unref();
+}
+
+/**
+ * 查询迁移队列状态
+ */
+export function getMigrationStatus() {
+  return {
+    checked: _migrationChecked,
+    running: _migrationRunning,
+    remaining: _migrationQueue.length,
+  };
+}

@@ -9,7 +9,7 @@ import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
-import { cropPersonalityForEmotion, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
+import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
@@ -120,10 +120,33 @@ router.post('/', (req, res) => {
         });
       }, delayMs).unref();
     }
+
+    // 异步优化 short_prompt（不阻塞响应）
+    setImmediate(async () => {
+      try {
+        const optimized = await generateShortPromptWithLLM(base_prompt, display_name || name);
+        db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, newCharId);
+        console.log(`[char] short_prompt LLM-optimized for "${display_name || name}" (id=${newCharId})`);
+        runShortPromptMigration();
+      } catch (err) {
+        console.warn(`[char] short_prompt LLM optimization failed for "${display_name || name}":`, err.message);
+      }
+    });
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: `"${name}" already exists` });
     throw err;
   }
+});
+
+// POST /api/characters/migrate-short-prompts — 手动触发全表扫描迁移
+router.post('/migrate-short-prompts', (_req, res) => {
+  const result = runShortPromptMigration();
+  res.json(result);
+});
+
+// GET /api/characters/migrate-short-prompts — 查询迁移状态
+router.get('/migrate-short-prompts', (_req, res) => {
+  res.json(getMigrationStatus());
 });
 
 // PUT /api/characters/:id — 更新角色
@@ -162,6 +185,23 @@ router.put('/:id', (req, res) => {
   }
 
   res.json({ ok: true });
+
+  // 若 base_prompt 变更，异步优化 short_prompt
+  if (base_prompt !== undefined) {
+    const charId = parseInt(req.params.id, 10);
+    setImmediate(async () => {
+      try {
+        const char = db.prepare('SELECT display_name, name, base_prompt FROM characters WHERE id = ?').get(charId);
+        if (!char) return;
+        const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name);
+        db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, charId);
+        console.log(`[char] short_prompt LLM-optimized for "${char.display_name || char.name}" (id=${charId})`);
+        runShortPromptMigration();
+      } catch (err) {
+        console.warn(`[char] short_prompt LLM optimization failed for char ${charId}:`, err.message);
+      }
+    });
+  }
 });
 
 // POST /api/characters/:id/avatar — 上传裁剪后的头像（base64 png）
@@ -485,6 +525,18 @@ ${searchContext}` : ''}
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
+      });
+
+      // 异步优化 short_prompt（不阻塞响应）
+      setImmediate(async () => {
+        try {
+          const optimized = await generateShortPromptWithLLM(basePrompt, displayName);
+          db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, generatedCharId);
+          console.log(`[characters] short_prompt LLM-optimized for "${displayName}" (id=${generatedCharId})`);
+          runShortPromptMigration();
+        } catch (err) {
+          console.warn(`[characters] short_prompt LLM optimization failed for "${displayName}":`, err.message);
+        }
       });
 
       // 异步生成日程
