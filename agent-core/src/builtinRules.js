@@ -29,15 +29,29 @@ export const SYSTEM_RULES_CONTENT = `<system_context>
 
 export const IMAGE_PROMPT_RULE = {
   rule_key: 'image_prompt',
-  rule_content: `Describe the image in detail.
-  
-- **MUST:** When an existing IP character appears, write the character as 'Character \(Series\)' (e.g. 'Furina \(Genshin Impact\)'). The main character name MUST be the first item in the prompt. Include at least 8 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, etc.).
-- Describe the scene, camera angle, character expressions, clothing, actions, and surrounding objects. After the natural-language description, reinforce important actions and camera composition using Danbooru-style tags.
-- If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \(Genshin Impact\) and Lumine \(Genshin Impact\) are having a picnic together.'
-- For multiple characters, NEVER describe different characters in a single comma-separated appearance list (e.g. 'A, blonde, B, red hair'). Separate each character with complete sentences. Clearly state each character's position (left/right/top/bottom), appearance, and action. Example: '2girls. Kiana\(Honkai Impact\) with white hair on the left hugs Mei\(Honkai Impact\) with purple hair on the right.'
-- **The final prompt MUST be entirely in English, including character names.**
-- **The prompt MUST NOT exceed 600 characters.**
-- Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.`,
+  rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph. No Danbooru tags or comma-separated tag blocks.
+
+Follow this progression:
+
+1. Scene Setting — Open with the overall environment, framing, and mood.
+   e.g. "a chaotic yet cozy indoor living room scene", "a close-up portrait in warm afternoon light".
+
+2. **MUST:** When an existing IP character appears, — Each character is written as 'Name \\(Series\\) \\(hair_color, eye_color, distinctive_features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown_hair, red_eyes, twin_tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.".
+
+3. Environment & Props — Describe furniture, objects, and background elements that ground the scene in a lived-in space.
+
+4. Lighting — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
+
+5. Atmosphere — End with the emotional tone: comfort, chaos, intimacy, etc.
+   e.g. "conveying an atmosphere of joyful chaos and shared leisure".
+
+Hard Rules:
+- When an existing IP character appears, write the character as 'Character \\(Series\\)' (e.g. 'Furina \\(Genshin Impact\\)'). The first mention of each character MUST also include ≥6 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, build, distinctive features) in parentheses after the series.
+- If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together.'
+- ALL text in English. No Chinese characters anywhere.
+- Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
+- Multiple Characters — When there are 2+ characters, each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
+- MAX 800 characters total.`,
   is_active: 1,
 };
 

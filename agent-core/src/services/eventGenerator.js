@@ -23,7 +23,7 @@ import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { getTimeLightTag, getTimeLightInline } from './timeLight.js';
+import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
 
 // ── 生活片段类型库 ──
 // 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
@@ -49,12 +49,6 @@ const EVENT_TYPES = [
     funFrom: ['习惯的可爱', '内心小剧场'],
     reactions: ['按部就班', '手忙脚乱'],
     desc: '角色在准备出门。穿什么、带什么、最后一刻想起什么。这些细小的决定本身就是值得一看的生活纹理。',
-  },
-  {
-    key: 'breakfast_moment', name: '吃早饭', durationMin: 20, urgency: 1,
-    funFrom: ['日常感', '安静的满足'],
-    reactions: ['认真吃', '随便对付'],
-    desc: '角色正在吃一天里的第一顿饭。怎么吃、在哪吃、吃的时候在想什么——每个人都不一样。',
   },
 
   // ═══ 通勤路上（15-25min）═══
@@ -746,8 +740,8 @@ export async function generateEvent(character, options = {}) {
   // 多人关系：sigmoid 模型，照搬朋友圈算法但降低频率
   // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k * (R - R_mid)))
   const relCount = relationships.length;
-  const MULTI_P_MIN = 0.30;  // 1人也保持 10% 随机到关系网对象的概率
-  const MULTI_P_MAX = 0.50;  // 社交达人趋于 50%
+  const MULTI_P_MIN = 0.50;  // 最低多人概率
+  const MULTI_P_MAX = 0.80;  // 社交达人趋于 50%
   const MULTI_K = 1.0;       // 陡峭度
   const MULTI_R_MID = 5;     // 拐点：R=5 时概率 = 30%
 
@@ -797,7 +791,7 @@ export async function generateEvent(character, options = {}) {
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
-  const timeTag = getTimeLightTag(now);
+  const timeTag = getTimeTag(now, false);
 
   let contextBlock = '';
   if (recentMoment) {
@@ -832,43 +826,81 @@ export async function generateEvent(character, options = {}) {
       const currentActivity = getCurrentActivity(character.id);
       if (currentActivity && currentActivity.activity !== '自由时间') {
         scheduleContextLine = `此时${displayName}正在${currentActivity.location}${currentActivity.activity}。`;
-        const timeLightInline = getTimeLightInline(now);
         const descPart = currentActivity.description ? `——${currentActivity.description}` : '';
-        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。${timeLightInline}`;
+        scheduleSystemBlock = `\n【当前日程】${displayName}正在【${currentActivity.location}】${currentActivity.activity}${descPart}。`;
       }
     }
   } catch { /* schedule not available */ }
+
+  const worldPenetrationLine = worldSetting
+    ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
+    : '';
 
   const directorSystem = `${jailbreakPrompt}
 ${worldIntegrationBlock}
 你正在为「${displayName}」截取今天生活中的一小段。
 
-这不是"特殊事件"——这是角色今天 24 小时里随机的一分钟。镜头刚好转到这里，看到了她在做什么。
+这不是剧情概要，也不是完整故事。
 
-铁律——违反以下任何一条即视为失败：
+你只是把镜头停在今天最值得停留的一分钟。
+
+这一分钟之前发生了什么、之后会发生什么，都不重要。重要的是，这一分钟足够真实，足够属于${displayName}。
 
 【人称】
-- 指代角色只用「她」「他」「ta」「${displayName}」，绝对不要使用「你」
-- 自由间接引语（free indirect discourse）：第三人称代词，但浸透角色的即时感受
+- 指代角色只用「她」「他」「ta」「${displayName}」，不使用「你」
+- 叙述始终贴着角色此刻的感知。读者看到什么、听到什么、注意到什么，都应与角色保持一致，不跳出角色视角解释世界。
 
-【角色定制锁——事件触发器必须根植于角色独有信息】
-- 事件的触发点必须与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
-- 如果删掉这条独有信息、换个名字，这个事件就不该还能成立
+【角色定制锁——事件触发器根植于角色独有信息】
+- 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
+- 衡量标准：如果删掉这条独有信息、换个名字，这个事件就不再成立
 - "性格滤镜"不够——不是只在反应层面做高冷/活泼的区别，而是这件事之所以发生、之所以以这种方式发生，根子在角色的独有设定里
 
-【正文禁止摘要化——写现场，不写剧情概要】
-- 禁止在正文中出现这些抽象概括词："意外"、"不对劲"、"打断了她原本的节奏"、"事情开始变得复杂"、"她意识到情况不对"、"一切都脱离了计划"
-- 开头三句内必须出现：≥1 个具体动作 + ≥1 个具体物件/环境细节 + 1 个角色即时反应（身体或脑内）
-- 展现身体反应而非命名情绪："手心渗出细密的汗"而非"ta感到紧张"
+【正文——写现场，不写剧情总结】
+正文始终停留在现场，而不是剧情总结。
 
-【结尾——停在无法再装没看见的行动门槛上】
-- 结尾不写"她必须做出选择"或任何旁白式的决策宣告
-- 结尾停在一个由场景中的具体细节逼出来的行动门槛上：接不接话、打不打开、跟不跟上去、承认还是否认、帮忙还是走开、留着还是丢掉——但不一定是"A 或 B"的标准二选一题
-- 门槛必须来自场景中发生了什么事，不是来自旁白说"现在她面临抉择"
+镜头直接落在一个正在发生的动作上。
+
+背景、关系、原因，都随着动作自然露出来，而不是提前说明。
+
+情绪不要直接命名，让动作、停顿、呼吸、视线、声音、物件的位置变化自然表达。
+
+多写：
+- 动作
+- 声音
+- 光线
+- 温度
+- 呼吸
+- 小动作
+- 停顿
+- 物件变化
+
+少写：
+她意识到……
+她开始……
+她觉得……
+她很……
+事情变复杂了……
+一切脱离计划……
+
+如果一句话删掉以后画面没有损失，就删掉。
+
+开场直接进入正在发生的动作，不要先介绍背景。
+
+优先写角色正在经历什么，而不是向读者说明发生了什么。
+
+把镜头交给现场，而不是交给旁白。
+
+【结尾——停在行动门槛】
+结尾停在一个具体动作即将发生之前。
+
+这个门槛来自现场，而不是来自旁白。
 
 【schedule 起点锁】
-- 事件必须从${displayName}当前所在的地点、手头在做的事、视线范围内的东西中触发。第一句出现的地点、动作、物件，必须直接从当前 schedule 场景中承接
-- 不允许为制造戏剧性，直接把角色挪到另一个无关地点再触发事件${scheduleSystemBlock}`;
+- 事件从${displayName}当前所在的地点、手头在做的事、视线范围内的东西中触发。第一句出现的地点、动作、物件，直接从当前 schedule 场景中承接
+- 避免为制造戏剧性，直接把角色挪到另一个无关地点再触发事件${scheduleSystemBlock}
+
+${worldPenetrationLine}
+【天气约束】场景叙述中避免提及天气和光线信息，这些已通过画面描述（prompt）注入。`;
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
   let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
@@ -890,23 +922,38 @@ ${multiPerson.otherPersona}`;
   const imagePromptInstruction = imageRulesText
     || '≥8个外观锚点，角色名用character(series)格式';
 
+  const weatherNote = getLightNoteWithWeather(now);
+  const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"title":"事件标题（≤8字，口语感叹。从你刚写完的事件场景里抓最戳人的那个瞬间，用角色第一反应的口吻喊出来——不要给事件'取名'，是替角色喊出ta看到/发现/意识到时脑子里蹦出来的那句话。正确：包裹在动……|谁寄来的？！|钥匙怎么还在她这里。错误：神秘包裹降临|意外来客——这些是在概括事件类型。禁止万能感叹'天哪''不是吧''怎么会'——必须带上这个事件的具体信息点）","description":"场景叙述（紧密第三人称，80-150字。不使用'你'字，始终用ta/她/他）","prompt":"画面描述（英文。${imagePromptInstruction}）${multiPersonImageNote}","choiceA":"选项A（具体行动，8-15字。符合${displayName}的性格和当下处境）","choiceB":"选项B（与A形成真正的行动对比——但必须同样是${displayName}此刻真的可能做出来的事。分叉强度不能为了戏剧性让角色突然做出明显不像ta的选择。8-15字）"}
+{
+  "title": "事件标题事件标题（≤8字，口语感叹。从你刚写完的事件场景里抓最戳人的那个瞬间，用角色第一反应的口吻喊出来——不要给事件'取名'，是替角色喊出ta看到/发现/意识到时脑子里蹦出来的那句话。正确：包裹在动……|谁寄来的？！|钥匙怎么还在她这里。错误：神秘包裹降临|意外来客——这些是在概括事件类型。禁止万能感叹'天哪''不是吧''怎么会'——必须带上这个事件的具体信息点）",
+  "description": "场景叙述（80-150字。
+采用紧密第三人称（她/他/ta），始终贴着角色当下的感知与动作，不解释、不总结、不评价。
+
+不要像讲故事，而像镜头正在发生：
+- 从一个正在进行的动作切入，而不是背景介绍。
+- 多写细节（声音、触感、视线、停顿、呼吸、小动作），少解释心理。
+- 心理不要直接写『她很内疚』『她很紧张』，而要通过动作表现。
+- 每一句都推动画面继续发生，不回顾过去，不概括原因。
+- 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
+
+允许留白，让读者自己感受到情绪。",
+  "prompt": "画面描述（英文。${imagePromptInstruction}）${weatherHint}${multiPersonImageNote}",
+  "choiceA": "选项A（具体行动，8-15字。符合${displayName}的性格和当下处境）",
+  "choiceB": "选项B（与A形成真正的行动对比——但必须是${displayName}此刻真的可能做出来的事。8-15字）"
+}
 
 选项设计原则：
-- A和B必须是性质完全不同的两条行动路径——读者立刻感受到它们通往不同的情绪走向
-- **但两条路径都必须能从${displayName}的性格和当下处境中自然推出。不能为了让选项有差异而让角色突然做出任何不符合人设的事**
+- A和B必须是性质完全不同的两条路径——读者感受到它们通往不同的情绪走向
+- **但两条路径都必须能从${displayName}的性格和当下处境中自然推出**
 - 避免两个"本质上差不多"的选项
 - 根据场景选择最合适的对比维度：做vs不做、直面vs绕开、自己解决vs求助、立刻vs等等、坦白vs保留、介入vs旁观`;
 
   // [3] 创作任务
   const multiPersonNote = multiPerson
     ? `\n**多人事件**：${multiPerson.relDesc}。事件中应包含${multiPerson.otherName}作为互动对象，描述ta们之间的互动方式、肢体距离和氛围要贴合两人的真实关系。`
-    : '';
-
-  const worldPenetrationLine = worldSetting
-    ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
 
   const funFromNote = eventType.funFrom?.length
@@ -918,18 +965,11 @@ ${multiPerson.otherPersona}`;
 
   const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}${funFromNote}${reactionsNote}
 ${timeTag}${multiPersonNote}
-${scheduleContextLine}
-**关键理解**：上面的事件方向只是一个方向性的出发点——它不是剧本，里面没有任何具体场景设定。你的任务是把方向翻译成${displayName}今天此刻实际遇到的、具体的、不可被复制粘贴到别人身上的生活切片。
+${scheduleContextLine ? scheduleContextLine : ''}${contextBlock ? '\n关联线索：' + contextBlock.trim() : ''}
 
-创作素材：
-- ${displayName}的人格：外貌、性格、行为模式——这是最重要的创作来源，但不是"给角色套一个性格滤镜"——而是让事件触发根直接扎进角色独有的设定里
-- ${worldSetting ? '世界观的基本法则——这个世界里什么是日常、什么算特殊，由世界观决定' : '现实世界背景——以真实世界的日常为基准'}
-- 当前时间：${timeTag}${scheduleContextLine ? '。' + scheduleContextLine : ''}
-- ${multiPerson ? '与' + multiPerson.otherName + '的关系——互动要贴合两人的真实关系' : '角色近期的状态——事件自然地嵌入角色生活中'}
-${contextBlock ? '- ' + contextBlock.trim() : ''}
+**关键理解**：上面的事件方向只是一个出发点——不是剧本，里面没有具体场景。把方向翻译成${displayName}今天此刻实际遇到的、不可复制到别人身上的生活切片。
 
-请以紧密第三人称创作这个事件的开场。场景长度 80-150 字。
-${worldPenetrationLine}严格遵守 directorSystem 中列出的所有铁律——特别是角色定制锁、正文禁止摘要化、结尾停在行动门槛上而不是旁白式决策宣告。`;
+请以紧密第三人称创作这个事件的开场。场景长度 80-150 字。`;
 
 
   const msgs = [
@@ -1117,6 +1157,9 @@ export async function generateNextBranch(character, event, choice) {
   const imageRules = getGlobalRule('image_prompt');
   const imageRulesText = imageRules?.rule_content || '';
 
+  const weatherNote = getLightNoteWithWeather(now);
+  const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+
   const displayName2 = character.display_name;
   let personaText2 = character.base_prompt.replace(/你/g, displayName2);
 
@@ -1135,15 +1178,16 @@ export async function generateNextBranch(character, event, choice) {
 </world_integration>
 ` : '';
 
+  const worldPenetrationLine2 = worldSetting2
+    ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
+    : '';
+
   const directorSystem2 = `${jailbreakPrompt}
 ${worldIntegrationBlock2}
 你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。
 
-铁律（违反即失败）：
-- 指代角色只用「她」「他」「ta」「${displayName2}」，绝对不要使用「你」
-- 通过身体反应来展现角色的即时情绪变化，而非直接命名情绪
-- 禁止摘要化：不要用"意外""不对劲""事情变得更复杂了""她意识到局面超出了预期"这类抽象概括推进剧情
-- 必须写出：一个具体动作 + 一个具体物件/环境细节 + 一个角色即时反应（身体或脑内）`;
+${worldPenetrationLine2}
+【天气约束】场景叙述中禁止提及天气和光线信息，这些已通过画面描述（prompt）注入。`;
 
   let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
@@ -1164,15 +1208,27 @@ ${multiPerson2.otherPersona}`;
 
   const formatPrompt2 = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
-{"description":"选择后的场景叙述（紧密第三人称，80-150字。承接上一个选择的结果，展现角色此刻的即时感受和新出现的局面。场景转折要出乎意料但又在情理之中——读者应该感到'居然会这样'但紧接着就觉得'仔细想确实会这样'。禁止摘要化：不要用'意外''不对劲''事情变复杂了'等抽象概括推进剧情）","prompt":"画面描述（英文。${branchImagePromptInstruction}）${multiPersonImageNote2}","choiceA":"新选项A（具体行动。必须符合${displayName2}的个性——是ta此刻真的会做出来的事。8-15字）","choiceB":"新选项B（与A形成真正的行动对比——但同A一样，必须从${displayName2}的个性中自然推出。8-15字）"}`;
+{
+  "description": "选择后的场景叙述场景叙述，承接上一个选择的结果，展现角色此刻的即时感受和新出现的局面。场景转折要出乎意料但又在情理之中（80-150字）。
+
+采用紧密第三人称（她/他/ta），始终贴着角色当下的感知与动作，不解释、不总结、不评价。
+
+不要像讲故事，而像镜头正在发生：
+- 从一个正在进行的动作切入，而不是背景介绍。
+- 多写细节（声音、触感、视线、停顿、呼吸、小动作），少解释心理。
+- 心理不要直接写『她很内疚』『她很紧张』，而要通过动作表现。
+- 每一句都推动画面继续发生，不回顾过去，不概括原因。
+- 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
+
+允许留白，让读者自己感受到情绪。",
+  "prompt": "画面描述（英文。${branchImagePromptInstruction}）${weatherHint}${multiPersonImageNote2}",
+  "choiceA": "新选项A（具体行动。必须符合${displayName2}的个性——是ta此刻真的会做出来的事。8-15字）",
+  "choiceB": "新选项B（与A形成真正的行动对比——但必须从${displayName2}的个性中自然推出。8-15字）"
+}`;
 
   // 只有多人模式才注入关系信息（和初始事件生成一致）
   const multiNote2 = multiPerson2
     ? `\n**多人事件**：${multiPerson2.relDesc}。事件中应包含${multiPerson2.otherName}作为主要互动对象，描述ta们之间的互动方式、肢体距离和氛围要贴合两人的真实关系。${relationships.map(r => `${displayName2}是${r.display_name}的${r.relationship_text}`).join('；')}`
-    : '';
-
-  const worldPenetrationLine2 = worldSetting2
-    ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
 
   const eventTypeMeta = EVENT_TYPES.find(e => e.key === event.event_type_key);
@@ -1194,8 +1250,7 @@ ${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
 
 **重要提醒**：场景必须忠实于「${displayName2}」的人格——ta的反应方式、内心活动、决策逻辑，都应该让读者觉得"换了别人就不会这样"。
 
-请以紧密第三人称创作选择之后发生的下一个场景。场景长度 80-150 字。
-${worldPenetrationLine2}严格遵守 directorSystem2 中列出的铁律。`;
+请以紧密第三人称创作选择之后发生的下一个场景。场景长度 80-150 字。`;
 
   // 上一幕画面注入：视觉参考帮助 LLM 保持画面连贯（叙事已有 historyText，此处仅补充视觉信息）
   const prevSceneMsg = event.prompt

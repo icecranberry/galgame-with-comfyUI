@@ -8,23 +8,17 @@ function toISODate(sqliteDT) {
   return sqliteDT.replace(' ', 'T') + '.000Z';
 }
 
-// GET /api/mailbox — 列出所有信件
+// GET /api/mailbox — 列出所有信件（本地数据库，不分页）
 router.get('/', (req, res) => {
   try {
     const db = getDb();
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const offset = (page - 1) * limit;
-
-    const total = db.prepare('SELECT COUNT(*) AS c FROM mailbox_letters').get().c;
 
     const letters = db.prepare(`
       SELECT ml.*, c.display_name, c.avatar_path, c.handwriting_font
       FROM mailbox_letters ml
       LEFT JOIN characters c ON ml.character_id = c.id
       ORDER BY ml.created_at DESC
-      LIMIT ? OFFSET ?
-    `).all(limit, offset);
+    `).all();
 
     res.json({
       letters: letters.map(l => ({
@@ -33,9 +27,6 @@ router.get('/', (req, res) => {
         replied_at: toISODate(l.replied_at),
         reply_at: toISODate(l.reply_at),
       })),
-      total,
-      page,
-      limit,
     });
   } catch (err) {
     console.error('[mailbox] list error:', err.message);

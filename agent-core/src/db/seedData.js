@@ -90,9 +90,10 @@ const DEFAULT_ARTIST_FAVORITES = [
   { label: '@chigusa_minori', artist: '@chigusa_minori', sort_order: 1 },
   { label: '平面风', artist: 'ultra-smooth textures, glossy highlights, flat, high-saturation, minimalist, vector-like aesthetic, subtle brushstroke-inspired shading, pristine clean background, diffused light, hyper-saturated color palette', sort_order: 2 },
   { label: '@tsukishiro saika', artist: '@tsukishiro saika', sort_order: 3 },
-  { label: '@ixy', artist: '@ixy', sort_order: 4 },
+  { label: '@starshadowmagician', artist: '@starshadowmagician', sort_order: 4 },
   { label: '@agahari,@minaba hideo', artist: '@agahari,@minaba hideo', sort_order: 5 },
   { label: '崩铁立绘风', artist: 'Honkai: Star Rail, official art', sort_order: 6 },
+  { label: '水彩风', artist: 'A vibrant yet subtly muted watercolor-style illustration in a loose, expressive hand-drawn aesthetic with soft blended gradients and visible brushstroke textures', sort_order: 7 },
 ];
 
 /**

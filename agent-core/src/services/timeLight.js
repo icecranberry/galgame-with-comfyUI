@@ -10,17 +10,23 @@ import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 
 const LIGHT_MAP = [
-  // 注意：光线描述是"可选参考"而非"强制执行"。
-  // 白天时段的光线实际受天气（晴/阴/雨）、场景（室内/室外/窗边）等因素影响很大，
-  // 描述只给出该时段最典型的光线特征，不作为硬性约束。
-  [[0, 5], '凌晨', '夜色昏暗，若有室外场景可出现冷调月光或暖黄路灯点缀；如果醒着，室内以低亮度暖色人工光源为主，如果睡觉，房间里没有灯光'],
-  [[5, 7], '清晨', '室外可能是淡金晨光、薄雾或阴天灰调；室内窗边自然光与人工光混合，不强制统一色调'],
-  [[7, 12], '上午', '室外日光清亮或阴天漫反射，室内以窗边散射自然光为主；光线氛围自由，不强制特定色温'],
-  [[12, 13], '中午', '室外日照充足明亮，室内光线均匀；整体明亮通透即可，不强制顶光或深阴影'],
-  [[13, 17], '下午', '室外阳光可能偏暖但光线柔和多变（晴/阴差异大），室内散射自然光为主；不强制金色调'],
-  [[17, 19], '傍晚', '室外或呈暖调夕照或阴天灰蓝调，室内暖光与窗外暮色可能交织；不强制逆光或戏剧性光影'],
-  [[19, 22], '晚上', '室外深蓝暮色或已全黑，室内以暖黄灯光、屏幕光、烛光等人造光源为主；氛围自由'],
-  [[22, 24], '深夜', '深夜暗光环境，月光或路灯微光，沉静冷暗氛围（深夜色调较明确，可偏冷暗）'],
+  // [时间范围], 时段名, 无天气全量描述（室外+室内）, 有天气时仅室内描述
+  [[0, 5], '凌晨', '夜色昏暗，若有室外场景可出现冷调月光或暖黄路灯点缀；如果醒着，室内场景以低亮度暖色人工光源为主，如果睡觉，房间里没有灯光',
+    '若有室内场景以低亮度暖色人工光源为主'],
+  [[5, 7], '清晨', '室外可能是淡金晨光、薄雾或阴天灰调；室内场景以窗边自然光与人工光混合',
+    '若有室内场景以窗边自然光与人工光混合'],
+  [[7, 12], '上午', '室外日光清亮或阴天漫反射，室内场景以窗边散射自然光为主',
+    '若有室内场景以窗边散射自然光为主'],
+  [[12, 13], '中午', '室外日照充足明亮，室内场景光线均匀、明亮通透',
+    '若有室内场景光线均匀、明亮通透'],
+  [[13, 17], '下午', '室外阳光可能偏暖但光线柔和多变（晴/阴差异大），室内场景以散射自然光为主',
+    '若有室内场景以散射自然光为主'],
+  [[17, 19], '傍晚', '室外或呈暖调夕照或阴天灰蓝调，室内场景暖光与窗外暮色可能交织',
+    '若有室内场景暖光与窗外暮色可能交织'],
+  [[19, 22], '晚上', '室外深蓝暮色或已全黑，室内场景以暖黄灯光、屏幕光、烛光等人造光源为主',
+    '若有室内场景以暖黄灯光、屏幕光、烛光等人造光源为主'],
+  [[22, 24], '深夜', '深夜暗光环境，月光或路灯微光，沉静冷暗氛围（深夜色调较明确，可偏冷暗）',
+    '若有室内场景以暗光为主'],
 ];
 
 // 天气→光线修饰。QWeather v7 天气文本 → 对画面光线的影响描述。
@@ -129,13 +135,13 @@ export function getWeatherClause(hour) {
 
 /**
  * 内联时间+天气+光线从句，自然语言，同时说明室内外光线。
- * 示例（含天气）："现在是14:30，夏日的下午时分。外面多云、挺热，光线柔和偏散。室外阳光可能偏暖但光线柔和多变，室内散射自然光为主"
- * 示例（无天气）："现在是14:30，夏日的下午时分。室外阳光可能偏暖但光线柔和多变，室内散射自然光为主"
+ * 示例（含天气）："现在是14:30，夏日下午时分。外面多云、挺热，光线柔和偏散。室内散射自然光为主"
+ * 示例（无天气）："现在是14:30，夏日下午时分。室外阳光可能偏暖但光线柔和多变（晴/阴差异大），室内散射自然光为主"
  * @param {Date} [now]
  * @returns {string}
  */
 export function getTimeLightInline(now = new Date()) {
-  const { timeStr, timeDesc, lightNote, hour } = getTimeLight(now);
+  const { timeStr, timeDesc, lightNote, lightNoteIndoor, hour } = getTimeLight(now);
   const season = getSeason(now.getMonth() + 1);
   const weather = getCurrentWeather(hour);
   if (weather && weather.weather) {
@@ -144,7 +150,7 @@ export function getTimeLightInline(now = new Date()) {
     if (weather.temperature) parts.push(weather.temperature);
     if (weather.windSpeed) parts.push(weather.windSpeed);
     if (weatherLight) parts.push(weatherLight);
-    return `现在是${timeStr}，${season}日的${timeDesc}时分。外面${parts.join('、')}。${lightNote}`;
+    return `现在是${timeStr}，${season}日的${timeDesc}时分。外面${parts.join('、')}。${lightNoteIndoor}`;
   }
   return `现在是${timeStr}，${season}日的${timeDesc}时分。${lightNote}`;
 }
@@ -156,7 +162,7 @@ export function getTimeLightInline(now = new Date()) {
  * @returns {string}
  */
 export function getLightNoteWithWeather(now = new Date()) {
-  const { lightNote, hour } = getTimeLight(now);
+  const { lightNoteIndoor, hour } = getTimeLight(now);
   const weather = getCurrentWeather(hour);
   if (!weather || !weather.weather) return '';
   const weatherLight = getWeatherLightNote(hour);
@@ -164,12 +170,12 @@ export function getLightNoteWithWeather(now = new Date()) {
   if (weather.temperature) parts.push(weather.temperature);
   if (weather.windSpeed) parts.push(weather.windSpeed);
   if (weatherLight) parts.push(weatherLight);
-  return `外面${parts.join('、')}。${lightNote}`;
+  return `外面${parts.join('、')}。${lightNoteIndoor}`;
 }
 
 /**
  * @param {Date} [now]
- * @returns {{ timeStr: string, timeDesc: string, lightNote: string, hour: number }}
+ * @returns {{ timeStr: string, timeDesc: string, lightNote: string, lightNoteIndoor: string, hour: number }}
  */
 export function getTimeLight(now = new Date()) {
   const hour = now.getHours();
@@ -177,7 +183,8 @@ export function getTimeLight(now = new Date()) {
   const entry = LIGHT_MAP.find(([r]) => hour >= r[0] && hour < r[1]);
   const timeDesc = entry?.[1] || '未知';
   const lightNote = entry?.[2] || 'natural lighting';
-  return { timeStr, timeDesc, lightNote, hour };
+  const lightNoteIndoor = entry?.[3] || '室内场景以灯光为主';
+  return { timeStr, timeDesc, lightNote, lightNoteIndoor, hour };
 }
 
 /**
@@ -237,14 +244,14 @@ export function getSeason(month) {
 
 /**
  * 光线参考提示——作为系统背景环境设定，同时说明室内外光线。
- * 示例（含天气）："夏日的下午时分。外面多云、挺热，光线柔和偏散。室外阳光可能偏暖但光线柔和多变，室内散射自然光为主"
- * 示例（无天气）："夏日的下午时分。室外阳光可能偏暖但光线柔和多变，室内散射自然光为主"
+ * 示例（含天气）："夏日下午时分。外面多云、挺热，光线柔和偏散。室内散射自然光为主"
+ * 示例（无天气）："夏日下午时分。室外阳光可能偏暖但光线柔和多变（晴/阴差异大），室内散射自然光为主"
  *
  * @param {Date} [now]
  * @returns {string}
  */
 export function getLightHint(now = new Date()) {
-  const { timeDesc, lightNote, hour } = getTimeLight(now);
+  const { timeDesc, lightNote, lightNoteIndoor, hour } = getTimeLight(now);
   const season = getSeason(now.getMonth() + 1);
   const weather = getCurrentWeather(hour);
 
@@ -254,7 +261,7 @@ export function getLightHint(now = new Date()) {
     if (weather.temperature) parts.push(weather.temperature);
     if (weather.windSpeed) parts.push(weather.windSpeed);
     if (weatherLight) parts.push(weatherLight);
-    return `${season}日的${timeDesc}时分。外面${parts.join('、')}。${lightNote}`;
+    return `${season}日的${timeDesc}时分。外面${parts.join('、')}。${lightNoteIndoor}`;
   }
 
   return `${season}日的${timeDesc}时分。${lightNote}`;

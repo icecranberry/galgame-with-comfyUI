@@ -8,8 +8,6 @@ export const useMailboxStore = defineStore('mailbox', () => {
   const unreadCount = ref(0)
   const processingCount = ref(0)
   const loading = ref(false)
-  const currentPage = ref(1)
-  const totalLetters = ref(0)
 
   let pollTimer = null
   let _unsubProcessing = null
@@ -23,13 +21,11 @@ export const useMailboxStore = defineStore('mailbox', () => {
     letters.value.filter(l => l.status === 'completed')
   )
 
-  async function fetchLetters(page = 1) {
+  async function fetchLetters() {
     loading.value = true
     try {
-      const data = await api.listLetters(page, 30)
+      const data = await api.listLetters()
       letters.value = data.letters || []
-      totalLetters.value = data.total || 0
-      currentPage.value = page
     } catch (err) {
       console.error('[mailbox] fetchLetters error:', err)
     } finally {
@@ -51,7 +47,6 @@ export const useMailboxStore = defineStore('mailbox', () => {
     const result = await api.sendLetter(characterId, title, content)
     if (result.letter) {
       letters.value.unshift(result.letter)
-      totalLetters.value++
     }
     return result
   }
@@ -68,7 +63,6 @@ export const useMailboxStore = defineStore('mailbox', () => {
   async function deleteLetter(letterId) {
     await api.deleteLetter(letterId)
     letters.value = letters.value.filter(l => l.id !== letterId)
-    totalLetters.value--
     fetchUnread()
   }
 
@@ -94,7 +88,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
       letter.handwriting_font = data.handwriting_font || ''
       letter.is_read = 0
     } else {
-      fetchLetters(currentPage.value)
+      fetchLetters()
     }
     fetchUnread()
   }
@@ -115,7 +109,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
     pollTimer = setInterval(() => {
       fetchUnread()
       if (letters.value.some(l => l.status === 'pending' || l.status === 'processing')) {
-        fetchLetters(currentPage.value)
+        fetchLetters()
       }
     }, 60000)
   }
@@ -133,7 +127,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
   }
 
   return {
-    letters, unreadCount, processingCount, loading, currentPage, totalLetters,
+    letters, unreadCount, processingCount, loading,
     pendingLetters, completedLetters,
     fetchLetters, fetchUnread, sendLetter, markRead, deleteLetter,
     startPolling, stopPolling,
