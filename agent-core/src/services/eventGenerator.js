@@ -840,20 +840,12 @@ export async function generateEvent(character, options = {}) {
 ${worldIntegrationBlock}
 你正在为「${displayName}」截取今天生活中的一小段。
 
-这不是剧情概要，也不是完整故事。
-
-你只是把镜头停在今天最值得停留的一分钟。
-
-这一分钟之前发生了什么、之后会发生什么，都不重要。重要的是，这一分钟足够真实，足够属于${displayName}。
-
 【人称】
 - 指代角色只用「她」「他」「ta」「${displayName}」，不使用「你」
 - 叙述始终贴着角色此刻的感知。读者看到什么、听到什么、注意到什么，都应与角色保持一致，不跳出角色视角解释世界。
 
 【角色定制锁——事件触发器根植于角色独有信息】
 - 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
-- 衡量标准：如果删掉这条独有信息、换个名字，这个事件就不再成立
-- "性格滤镜"不够——不是只在反应层面做高冷/活泼的区别，而是这件事之所以发生、之所以以这种方式发生，根子在角色的独有设定里
 
 【正文——写现场，不写剧情总结】
 正文始终停留在现场，而不是剧情总结。
@@ -862,45 +854,15 @@ ${worldIntegrationBlock}
 
 背景、关系、原因，都随着动作自然露出来，而不是提前说明。
 
-情绪不要直接命名，让动作、停顿、呼吸、视线、声音、物件的位置变化自然表达。
-
-多写：
-- 动作
-- 声音
-- 光线
-- 温度
-- 呼吸
-- 小动作
-- 停顿
-- 物件变化
-
-少写：
-她意识到……
-她开始……
-她觉得……
-她很……
-事情变复杂了……
-一切脱离计划……
-
-如果一句话删掉以后画面没有损失，就删掉。
-
-开场直接进入正在发生的动作，不要先介绍背景。
-
-优先写角色正在经历什么，而不是向读者说明发生了什么。
-
-把镜头交给现场，而不是交给旁白。
-
 【结尾——停在行动门槛】
 结尾停在一个具体动作即将发生之前。
-
-这个门槛来自现场，而不是来自旁白。
 
 【schedule 起点锁】
 - 事件从${displayName}当前所在的地点、手头在做的事、视线范围内的东西中触发。第一句出现的地点、动作、物件，直接从当前 schedule 场景中承接
 - 避免为制造戏剧性，直接把角色挪到另一个无关地点再触发事件${scheduleSystemBlock}
 
 ${worldPenetrationLine}
-【天气约束】场景叙述中避免提及天气和光线信息，这些已通过画面描述（prompt）注入。`;
+【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间`;
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
   let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
@@ -930,8 +892,6 @@ ${multiPerson.otherPersona}`;
 {
   "title": "事件标题事件标题（≤8字，口语感叹。从你刚写完的事件场景里抓最戳人的那个瞬间，用角色第一反应的口吻喊出来——不要给事件'取名'，是替角色喊出ta看到/发现/意识到时脑子里蹦出来的那句话。正确：包裹在动……|谁寄来的？！|钥匙怎么还在她这里。错误：神秘包裹降临|意外来客——这些是在概括事件类型。禁止万能感叹'天哪''不是吧''怎么会'——必须带上这个事件的具体信息点）",
   "description": "场景叙述（80-150字。
-采用紧密第三人称（她/他/ta），始终贴着角色当下的感知与动作，不解释、不总结、不评价。
-
 不要像讲故事，而像镜头正在发生：
 - 从一个正在进行的动作切入，而不是背景介绍。
 - 多写细节（声音、触感、视线、停顿、呼吸、小动作），少解释心理。
@@ -940,7 +900,7 @@ ${multiPerson.otherPersona}`;
 - 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
 
 允许留白，让读者自己感受到情绪。",
-  "prompt": "画面描述（英文。${imagePromptInstruction}）${weatherHint}${multiPersonImageNote}",
+  "prompt": "${imagePromptInstruction}${weatherHint}${multiPersonImageNote}",
   "choiceA": "选项A（具体行动，8-15字。符合${displayName}的性格和当下处境）",
   "choiceB": "选项B（与A形成真正的行动对比——但必须是${displayName}此刻真的可能做出来的事。8-15字）"
 }
@@ -1159,6 +1119,7 @@ export async function generateNextBranch(character, event, choice) {
 
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+  const timeTag2 = getTimeTag(now, false);
 
   const displayName2 = character.display_name;
   let personaText2 = character.base_prompt.replace(/你/g, displayName2);
@@ -1187,7 +1148,7 @@ ${worldIntegrationBlock2}
 你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。
 
 ${worldPenetrationLine2}
-【天气约束】场景叙述中禁止提及天气和光线信息，这些已通过画面描述（prompt）注入。`;
+【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间`;
 
   let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
@@ -1221,7 +1182,7 @@ ${multiPerson2.otherPersona}`;
 - 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
 
 允许留白，让读者自己感受到情绪。",
-  "prompt": "画面描述（英文。${branchImagePromptInstruction}）${weatherHint}${multiPersonImageNote2}",
+  "prompt": "${branchImagePromptInstruction}${weatherHint}${multiPersonImageNote2}",
   "choiceA": "新选项A（具体行动。必须符合${displayName2}的个性——是ta此刻真的会做出来的事。8-15字）",
   "choiceB": "新选项B（与A形成真正的行动对比——但必须从${displayName2}的个性中自然推出。8-15字）"
 }`;
@@ -1240,7 +1201,7 @@ ${multiPerson2.otherPersona}`;
     : '';
 
   const directorPrompt2 = `事件标题：${event.title}
-${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
+${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
 
 **核心要求——让分支有趣**：接下来的场景不能是"选了A所以A发生了"的平铺直叙。读者选择之后应该经历一个"没想到会这样——但仔细一想确实合理"的转折。这个转折可以来自：
 - 选择引发的连锁反应中，出现了角色没预料到的因素
