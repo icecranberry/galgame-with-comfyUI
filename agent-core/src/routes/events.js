@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { config } from '../config.js';
 import { generateEvent, generateNextBranch, concludeEvent } from '../services/eventGenerator.js';
+import { matchAll } from '../services/characterSearch.js';
 import {
   addSSEClient,
   removeSSEClient,
@@ -218,6 +219,23 @@ router.post('/:id/choose', async (req, res) => {
     return res.status(404).json({ error: 'character_not_found' });
   }
 
+  // 检测选择文本和事件描述中是否提及其他角色
+  const scanText = (event.description || '') + ' ' + (choice === 'C' ? customText || '' : '') + ' ' + choiceLabel;
+  const crossMatches = matchAll(scanText, character.id);
+  // 排除已在多人模式中的人物（multiPerson）
+  const choiceHistoryForScan = JSON.parse(event.choice_history || '[]');
+  const multiPersonId = choiceHistoryForScan.length > 0 ? choiceHistoryForScan[0]?.multiPerson?.otherId : null;
+  const filteredMatches = multiPersonId
+    ? crossMatches.filter(m => m.id !== multiPersonId)
+    : crossMatches;
+  if (filteredMatches.length > 0) {
+    const existing = JSON.parse(event.referenced_character_ids || '[]');
+    const merged = [...new Set([...existing, ...filteredMatches.map(c => c.id)])].slice(0, 3);
+    db.prepare('UPDATE character_events SET referenced_character_ids = ? WHERE id = ?')
+      .run(JSON.stringify(merged), event.id);
+    event.referenced_character_ids = JSON.stringify(merged);
+  }
+
   try {
     const updatedEvent = await generateNextBranch(character, event, {
       choice,
@@ -259,15 +277,16 @@ router.post('/:id/dismiss', async (req, res) => {
 
   // 移到 history（不生成结局，不存记忆；保留原始 ID）
   db.prepare(`
-    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome, referenced_character_ids)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled', ?)
   `).run(
     event.id,
     event.character_id, event.event_type_key,
     event.title, event.description, event.image,
     event.summary || event.description,
     event.choice_history, event.current_branch || 0,
-    event.engaged
+    event.engaged,
+    event.referenced_character_ids || '[]'
   );
 
   db.prepare(`DELETE FROM character_events WHERE id = ?`).run(event.id);

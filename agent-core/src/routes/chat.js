@@ -22,6 +22,7 @@ import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getTimeLightInline } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
+import { matchAll } from '../services/characterSearch.js';
 
 const router = Router();
 
@@ -452,11 +453,25 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
     const activeEvent = db.prepare(`
-      SELECT id, title, description, current_branch, choice_history, status, engaged, event_type_key, emphasis_delivered
+      SELECT id, title, description, current_branch, choice_history, status, engaged, event_type_key, emphasis_delivered, referenced_character_ids
       FROM character_events
       WHERE character_id = ? AND status IN ('open','engaged')
       ORDER BY id DESC LIMIT 1
     `).get(characterId);
+
+    // ── 交叉角色检测（扫描最近三轮对话 + 当前消息 + 事件引用）──
+    const recentHistory = db.prepare(`
+      SELECT role, content FROM raw_messages
+      WHERE conversation_id = ? ORDER BY id DESC LIMIT 6
+    `).all(conversationId);
+    const scanText = recentHistory.map(m => m.content).join('\n') + '\n' + message;
+    const crossMatches = matchAll(scanText, characterId);
+    const eventRefIds = activeEvent?.referenced_character_ids
+      ? JSON.parse(activeEvent.referenced_character_ids) : [];
+    const allRefIds = [...new Set([...eventRefIds, ...crossMatches.map(m => m.id)])].slice(0, 3);
+    const crossChars = allRefIds.map(id => db.prepare(
+      'SELECT id, display_name, short_prompt, base_prompt, loras FROM characters WHERE id = ?'
+    ).get(id)).filter(Boolean);
 
     // 4. 情绪状态加载（VAD 三维情绪 → 用于 msgs[1] 身份消息）
     //     好感度提前加载
@@ -663,6 +678,17 @@ router.post('/characters/:id/chat', async (req, res) => {
 
     if (relParts.length > 0) {
       msgs.push({ role: 'system', content: relParts.join('\n\n') });
+    }
+
+    // ── 交叉角色引用（聊天文本）注入完整 short_prompt ──
+    if (crossChars.length > 0) {
+      const crossLines = crossChars.map(c =>
+        `角色「${c.display_name}」: ${c.short_prompt || (c.base_prompt || '').slice(0, 200)}`
+      ).join('\n\n');
+      msgs.push({
+        role: 'system',
+        content: `<cross_reference>\n当前对话中涉及以下其他角色，你应当了解他们的基本信息，在对话中自然互动时保持其人格一致性：\n\n${crossLines}\n</cross_reference>`
+      });
     }
 
     // ═══════════════════════════════════════════
@@ -1043,7 +1069,7 @@ ${coreRules}
         .run(conversationId, tags.prompt, tags.prompt);
       const genTaskId = taskResult.lastInsertRowid;
       send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
-      imageGenPromise = triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send);
+      imageGenPromise = triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send, allRefIds);
     } else if (hasNeedImageTag) {
       // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
       // 提前创建 task + 发送 generate_start，前端立即显示遮罩层
@@ -1290,7 +1316,7 @@ async function judgeImageNeed(conversationId) {
   }
 }
 
-async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send) {
+async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send, crossRefCharIds = []) {
   const db = getDb();
 
   // 查找角色 lora 设置
@@ -1312,6 +1338,24 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
     }
   } catch (e) {
     console.log('[chat] Failed to load lora settings:', e.message);
+  }
+
+  // 合并交叉引用角色 LoRA（去重，主角色优先）
+  if (crossRefCharIds.length > 0) {
+    const crossLoras = crossRefCharIds.flatMap(id => {
+      const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
+      return c ? _parseLoras(c) : [];
+    });
+    if (crossLoras.length > 0) {
+      const allLoras = [...(loraOpts.loras || []), ...crossLoras];
+      const seen = new Set();
+      loraOpts.loras = allLoras.filter(l => {
+        if (seen.has(l.path)) return false;
+        seen.add(l.path);
+        return true;
+      });
+      console.log(`[chat] Cross-ref loras merged: +${crossLoras.length} from chars [${crossRefCharIds.join(',')}], total ${loraOpts.loras.length}`);
+    }
   }
 
   try {
@@ -1383,6 +1427,31 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     SELECT role, content FROM raw_messages
     WHERE conversation_id = ? ORDER BY id DESC LIMIT 6
   `).all(conversationId).reverse();
+
+  // 2.5 扫描历史消息中的交叉角色引用（用于生图 LoRA 合并 + LLM 上下文注入）
+  const historyText = history.map(m => m.content).join('\n');
+  const latestUser = history.filter(m => m.role === 'user').pop()?.content || '';
+  const scanText = historyText + '\n' + latestUser;
+  const crossMatches = matchAll(scanText, character.id);
+  let crossRefCharIdsForImage = [];
+  let crossRefImageMsgs = [];
+  if (crossMatches.length > 0) {
+    const crossChars = crossMatches.slice(0, 3).map(m =>
+      db.prepare('SELECT id, display_name, short_prompt, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
+    ).filter(Boolean);
+
+    const crossBlocks = crossChars.map(c => {
+      const info = extractImageCrossRefInfo(c);
+      return `[${c.display_name}]\n${info}`;
+    }).join('\n\n');
+
+    crossRefImageMsgs.push({
+      role: 'system',
+      content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks}`
+    });
+
+    crossRefCharIdsForImage = crossChars.map(c => c.id);
+  }
 
   const formatGuide = imagePromptRule?.rule_content || '';
 
@@ -1508,6 +1577,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       }
       return [contextBlock];
     })(),
+    // ── 交叉角色生图上下文（在格式说明之前，让 LLM 知道画面中还有谁）──
+    ...crossRefImageMsgs,
     // ── prompt 格式说明单独一条（放在对话上下文之后，模型理解了场景再告诉格式）──
     ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
     { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
@@ -1639,7 +1710,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       genTaskId = taskResult.lastInsertRowid;
       send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
     }
-    await triggerImageGeneration(conversationId, tags.prompt, assistantMsgId, genTaskId, send);
+    await triggerImageGeneration(conversationId, tags.prompt, assistantMsgId, genTaskId, send, crossRefCharIdsForImage);
   } else {
     console.log('[chat] needImage follow-up: no prompt tags found, falling back');
     send('generate_error', { taskId: preExistingTaskId, error: '模型未返回图像描述' });
@@ -1937,6 +2008,36 @@ function formatRelativeDay(days) {
   if (days === 1) return '昨天';
   if (days === 2) return '前天';
   return `${days}天前`;
+}
+
+function extractImageCrossRefInfo(char) {
+  const parts = [];
+  const short = char.short_prompt || '';
+  if (short) {
+    let found = false;
+    let start = 0;
+    for (let i = 0; i < short.length; i++) {
+      if (short[i] === '，' || short[i] === '。' || short[i] === '\n') {
+        const seg = short.slice(start, i).trim();
+        if (seg && seg.includes('来自')) {
+          parts.push(short.slice(0, i));
+          found = true;
+          break;
+        }
+        start = i + 1;
+      }
+    }
+    if (!found) {
+      parts.push(short);
+    }
+  }
+  const base = char.base_prompt || '';
+  const m = base.match(/##\s*你的外观/);
+  if (m) {
+    const name = char.display_name || '';
+    parts.push(base.slice(m.index).replace(/你/g, name));
+  }
+  return parts.join('\n');
 }
 
 export default router;

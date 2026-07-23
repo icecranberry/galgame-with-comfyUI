@@ -222,6 +222,12 @@
           {{ clearing ? '清空中...' : '清空记忆' }}
         </button>
 
+        <!-- 撤回一轮对话 -->
+        <button class="sp-btn sp-btn-danger" @click="closeSettings(); undoLastRound()" :disabled="!chat.messages.length || chat.streaming">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M320 192h512v64H320zM320 448h512v64H320zM320 704h384v64H320zM160 256a32 32 0 1 0 0-64 32 32 0 0 0 0 64zM160 512a32 32 0 1 0 0-64 32 32 0 0 0 0 64zM160 768a32 32 0 1 0 0-64 32 32 0 0 0 0 64z" fill="currentColor"/></svg>
+          撤回一轮对话
+        </button>
+
         <div class="sp-divider"></div>
 
         <!-- 删除角色 -->
@@ -1459,7 +1465,7 @@ async function undoLastRound() {
   showUndoBubble.value = false
   const ok = await confirmFn({
     title: '撤回对话',
-    message: '确定撤回上一轮对话吗？\n你最后一条消息和角色的回复都会被删除。',
+    message: '确定撤回上一轮对话吗？\n你最后一条消息和角色的回复都会被删除。\n\n💡 提示：长按发送键可快速撤回。',
     okText: '撤回',
   })
   if (!ok) return

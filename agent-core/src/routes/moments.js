@@ -458,7 +458,7 @@ async function generateMomentPost(character, opts = {}) {
     { name: '烟花', desc: '看到烟花或庆典表演，（配图是夜空中的烟花）' },
     { name: '灯会', desc: '灯会、花灯、夜间装饰，（配图是灯光场景）' },
     { name: '樱花季', desc: '赏花、花海，（配图是花树或花瓣）' },
-    { name: '圣诞装饰', desc: '节日装饰很漂亮，（配图是装饰和灯光）' },
+    { name: '节日装饰', desc: '节日装饰很漂亮，（配图是装饰和灯光）' },
 
   ];
 
@@ -558,7 +558,7 @@ const MOTIVATIONS = [
   const MULTI_K = 1.0;       // 陡峭度：越大曲线越陡，1.0 时 R≈4~6 为快速拉升区
   const MULTI_R_MID = 5;     // 拐点：R=5 时概率正好 = (P_min+P_max)/2 = 55%
 
-  let multiPerson = null;
+  let multiPersons = [];
   const relCount = db.prepare(`
     SELECT COUNT(*) AS cnt
     FROM character_relationships cr
@@ -574,29 +574,35 @@ const MOTIVATIONS = [
     if (Math.random() < multiProb) {
       const allRels = db.prepare(`
         SELECT cr.relationship_text,
-               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
+               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt, c.short_prompt AS other_short
         FROM character_relationships cr
         JOIN characters c ON c.id = cr.to_character_id
         WHERE cr.from_character_id = ? AND cr.relationship_text != ''
       `).all(character.id);
 
-      const picked = allRels[Math.floor(Math.random() * allRels.length)];
-      // 将对方人格中的「你」替换为角色名（注意：你的/你们的/你自己 等复合形式）
-      const otherPersona = picked.other_prompt
-        .replace(/你自己/g, picked.other_name + '自己')
-        .replace(/你们的/g, picked.other_name + '的')
-        .replace(/你的/g, picked.other_name + '的')
-        .replace(/你/g, picked.other_name);
+      // 洗牌后依次抽取，最多 3 个额外角色（总上限 4 人含主角色）
+      const shuffled = [...allRels].sort(() => Math.random() - 0.5);
+      for (const rel of shuffled) {
+        if (multiPersons.length >= 3) break;
+        const otherShort = rel.other_short || '';
+        const base = rel.other_prompt || '';
+        const appMatch = base.match(/##\s*你的外观/);
+        const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, rel.other_name) : '';
+        const otherPersona = [otherShort, appSection].filter(Boolean).join('\n');
 
-      const relDesc = `${picked.other_name}是你的${picked.relationship_text}`;
+        multiPersons.push({
+          otherId: rel.other_id,
+          otherName: rel.other_name,
+          otherPersona,
+          relDesc: `${rel.other_name}是你的${rel.relationship_text}`,
+        });
 
-      multiPerson = {
-        otherId: picked.other_id,
-        otherName: picked.other_name,
-        otherPersona,
-        relDesc,
-      };
-      console.log(`[moments] Multi-person mode: ${character.display_name} + ${picked.other_name} (${relDesc})`);
+        // 第一个人已加，后续每人 50% 概率继续
+        if (Math.random() > 0.5) break;
+      }
+      if (multiPersons.length > 0) {
+        console.log(`[moments] Multi-person mode: ${character.display_name} + ${multiPersons.map(p => p.otherName).join(', ')} (${multiPersons.length} others)`);
+      }
     }
   }
 
@@ -616,8 +622,8 @@ const MOTIVATIONS = [
 </world_integration>`
     : null;
 
-  const multiPersonImageNote = multiPerson ? `
-- **多人画面**：imagePrompt 中必须包含你和${multiPerson.otherName}两个人。你们的互动方式、肢体距离、表情和氛围都要贴合你们的关系（例如亲密的伴侣会有更近的距离和更私密的场景）。描述清楚各自的外观、位置、互动动作` : '';
+  const multiPersonImageNote = multiPersons.length > 0 ? `
+- **多人画面**：imagePrompt 中必须包含你和${multiPersons.map(p => p.otherName).join('、')}共${multiPersons.length + 1}人。描述各自外观、互动方式、肢体距离和表情，贴合你们的关系。用句号分隔每人描述` : '';
 
   const postingTaskIntro = worldSetting
     ? '你正在发朋友圈。你的人设生存在上述世界观中，融入世界观，把世界观当做常识，生成一条自然的朋友圈动态。'
@@ -663,10 +669,12 @@ ${rules}`;
 
   const styleDirective = isSpecialMode
     ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
-    : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
+    // 二维动机表现不佳，暂时去掉二维动机
+    // : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
+    : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】**`;
 
-  const userMsg = multiPerson
-    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPerson.relDesc}——和${multiPerson.otherName}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
+  const userMsg = multiPersons.length > 0
+    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
     : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
@@ -677,19 +685,22 @@ ${rules}`;
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: basePromptWithRing });
-  if (multiPerson) {
-    msgs.push({
-      role: 'system',
-      content: `**【最高优先级——你与${multiPerson.otherName}的真实关系】**\n${multiPerson.relDesc}。\n\n这是你们私下相处的真实状态。你的公开人设是你对外展示的一面，但在${multiPerson.otherName}面前，你们有只属于彼此的相处方式——你们的肢体接触、距离、语气、眼神，都是这个关系里才会有的。不要退回普通朋友的距离，不要用营业微笑面对这个人。\n\n朋友圈记录的是你们独处的真实瞬间，不是给粉丝看的舞台。\n\n${multiPerson.otherName}的公开信息供参考：\n---\n${multiPerson.otherPersona}\n---`
-    });
+  if (multiPersons.length > 0) {
+    for (const mp of multiPersons) {
+      msgs.push({
+        role: 'system',
+        content: `**【最高优先级——你与${mp.otherName}的真实关系】**\n${mp.relDesc}。\n\n这是你们私下相处的真实状态。你的公开人设是你对外展示的一面，但在${mp.otherName}面前，你们有只属于彼此的相处方式——你们的肢体接触、距离、语气、眼神，都是这个关系里才会有的。不要退回普通朋友的距离，不要用营业微笑面对这个人。\n\n朋友圈记录的是你们独处的真实瞬间，不是给粉丝看的舞台。\n\n${mp.otherName}的公开信息供参考：\n---\n${mp.otherPersona}\n---`
+      });
+    }
   }
   msgs.push({ role: 'system', content: postingTask });
   msgs.push({ role: 'user', content: userMsg });
 
+  let text = '', imagePrompt = '', imageUrls = [];
+  try {
   const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出
-  let text = '', imagePrompt = '';
   try {
     const jsonMatch = result.match(/\{[^{}]*"text"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*"imagePrompt"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*\}/s);
     if (jsonMatch) {
@@ -724,25 +735,28 @@ ${rules}`;
   console.log(`[moments] Generated post for ${character.display_name}: "${text.slice(0, 40)}..."`);
 
   // 3. 生成配图
-  let imageUrls = [];
   try {
-    // 构建 lora 参数：合并自身 + 对方（如有）的 lora
+    // 构建 lora 参数：合并自身 + 对方们的 lora
     let loraOpts = {};
     const selfLoras = _parseCharLoras(character.loras);
-    let otherLoras = [];
-    if (multiPerson) {
-      const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson.otherId);
-      if (otherChar) otherLoras = _parseCharLoras(otherChar.loras);
-    }
-
+    const otherLoras = multiPersons.flatMap(mp => {
+      const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(mp.otherId);
+      return otherChar ? _parseCharLoras(otherChar.loras) : [];
+    });
     const allLoras = [...selfLoras, ...otherLoras];
+    const seen = new Set();
+    const uniqueLoras = allLoras.filter(l => {
+      if (seen.has(l.path)) return false;
+      seen.add(l.path);
+      return true;
+    });
 
-    if (allLoras.length > 0) {
+    if (uniqueLoras.length > 0) {
       loraOpts = {
-        customWorkflow: multiPerson ? null : (character.custom_workflow || null),
-        loras: allLoras,
+        customWorkflow: multiPersons.length > 0 ? null : (character.custom_workflow || null),
+        loras: uniqueLoras,
       };
-      console.log(`[moments] Lora: self=${selfLoras.length} other=${otherLoras.length} total=${allLoras.length}`);
+      console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
     }
 
     const genResult = await generateImageRaw(imagePrompt, {
@@ -815,6 +829,16 @@ ${rules}`;
     status: 'done',
     created_at: new Date().toISOString(),
   };
+
+  } catch (err) {
+    console.error(`[moments] Failed for ${character.display_name} post ${postId}:`, err.message);
+    db.prepare('UPDATE moment_posts SET status = ?, error_message = ? WHERE id = ?')
+      .run('failed', err.message, postId);
+    const retryAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
+      .run(toSQLite(retryAt), character.id);
+    throw err;
+  }
 }
 
 /**

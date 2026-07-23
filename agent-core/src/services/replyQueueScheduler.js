@@ -22,7 +22,7 @@ import {
 } from './emotionEngine.js';
 import { broadcast } from './unifiedStreamBus.js';
 
-const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
+const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
 let timer = null;
 let processing = false;
@@ -31,7 +31,7 @@ let processing = false;
 
 export function startReplyQueueScheduler() {
   if (timer) return;
-  console.log('[replyQueue] Scheduler started (interval: 5min)');
+  console.log('[replyQueue] Scheduler started (interval: 1min)');
 
   // 首次延迟 10 秒启动（等待 DB 就绪）
   timer = setTimeout(() => {

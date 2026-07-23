@@ -468,6 +468,9 @@ function initSchema(db) {
   // 迁移: 誓约系统 — user_relationships 表新增 is_oath 列
   migrateOathSchema(db);
 
+  // 迁移: 交叉角色引用 — character_events 表新增 referenced_character_ids 列
+  migrateEventCrossRef(db);
+
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
@@ -1330,6 +1333,23 @@ function migrateOathSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateOathSchema error:', err.message);
+  }
+}
+
+function migrateEventCrossRef(db) {
+  try {
+    let ceCols = db.prepare(`PRAGMA table_info(character_events)`).all();
+    if (!ceCols.find(c => c.name === 'referenced_character_ids')) {
+      db.exec(`ALTER TABLE character_events ADD COLUMN referenced_character_ids TEXT DEFAULT '[]'`);
+      console.log('[db] Added character_events.referenced_character_ids column');
+    }
+    let ehCols = db.prepare(`PRAGMA table_info(event_history)`).all();
+    if (!ehCols.find(c => c.name === 'referenced_character_ids')) {
+      db.exec(`ALTER TABLE event_history ADD COLUMN referenced_character_ids TEXT DEFAULT '[]'`);
+      console.log('[db] Added event_history.referenced_character_ids column');
+    }
+  } catch (err) {
+    console.log('[db] migrateEventCrossRef error:', err.message);
   }
 }
 

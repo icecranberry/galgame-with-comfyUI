@@ -1007,13 +1007,21 @@ let _migrationTimer = null;
  * @param {string} characterName - 角色显示名
  * @returns {Promise<string>} 浓缩摘要
  */
-export async function generateShortPromptWithLLM(basePrompt, characterName) {
+function isShortPromptValid(text, name) {
+  if (text.includes('##')) return false;
+  if (!text.includes('来自')) return false;
+  return true;
+}
+
+export async function generateShortPromptWithLLM(basePrompt, characterName, characterDbName = '') {
   if (!basePrompt) return '';
   const name = characterName || 'assistant';
+  const engName = (characterDbName || '').replace(/_/g, ' ');
+  const engNameSuffix = engName ? `(${engName})` : '';
   const prompt = `你是一个角色人格浓缩助手。你的任务是把给定的角色完整人格 prompt 浓缩成一段第三人称摘要（180字内）。
 
 要求：
-1. 格式：以"${name}是"开头，后面接连贯的摘要段落
+1. 格式：以"${name}${engNameSuffix}是来自《XXXX（作品名）》的XXX（身份）"开头，后面接连贯的摘要段落
 2. 用第三人称（她/他），不用"你"
 3. 只保留核心性格、说话方式、价值观、身份背景等内在特质
 4. 排除外观描写（发型、瞳色、穿着、身材等一切外表信息）
@@ -1023,21 +1031,44 @@ export async function generateShortPromptWithLLM(basePrompt, characterName) {
 角色完整人格：
 ${basePrompt}`;
 
-  const result = await chatSync(
-    [{ role: 'user', content: prompt }],
-    { temperature: 0.3, max_tokens: 512, label: '浓缩short_prompt' }
-  );
+  const MAX_RETRIES = 3;
+  let lastResult = '';
 
-  let condensed = result.trim();
-  // 确保以角色名开头
-  if (!condensed.startsWith(name)) {
-    condensed = `${name}是${condensed}`;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const result = await chatSync(
+      [{ role: 'user', content: prompt }],
+      { temperature: attempt === 0 ? 0.3 : 0.5, max_tokens: 512, label: '浓缩short_prompt' }
+    );
+
+    let condensed = result.trim();
+    if (!condensed.startsWith(name)) {
+      condensed = `${name}是${condensed}`;
+    }
+    if (condensed.length > 200) {
+      condensed = condensed.slice(0, 200);
+    }
+
+    if (isShortPromptValid(condensed, name)) {
+      return _ensureEngNameBeforeShi(condensed, engName);
+    }
+
+    lastResult = condensed;
+    console.warn(`[short-prompt] 第 ${attempt + 1} 次生成不合格（含##: ${condensed.includes('##')}, 含"来自": ${condensed.includes('来自')}），${attempt < MAX_RETRIES - 1 ? '重试中' : '已用尽重试次数'}`);
   }
-  // 截断到 200 字
-  if (condensed.length > 200) {
-    condensed = condensed.slice(0, 200);
+
+  return _ensureEngNameBeforeShi(lastResult, engName);
+}
+
+function _ensureEngNameBeforeShi(text, engName) {
+  if (!engName) return text;
+  const idx = text.indexOf('是');
+  if (idx > 0) {
+    const before = text.slice(0, idx);
+    if (!/[（）()]/.test(before)) {
+      return before + `(${engName})` + text.slice(idx);
+    }
   }
-  return condensed;
+  return text;
 }
 
 /**
@@ -1053,7 +1084,7 @@ export function runShortPromptMigration() {
 
   const db = getDb();
   const chars = db.prepare(
-    `SELECT id, name, display_name, base_prompt FROM characters WHERE short_prompt LIKE '%##%'`
+    `SELECT id, name, display_name, base_prompt FROM characters WHERE short_prompt LIKE '%##%' OR short_prompt NOT LIKE '%来自%'`
   ).all();
 
   if (chars.length === 0) {
@@ -1080,14 +1111,14 @@ function _processNextInQueue() {
     // 二次检查：确认该角色 short_prompt 仍含旧格式标记（防竞态）
     const db = getDb();
     const current = db.prepare('SELECT short_prompt FROM characters WHERE id = ?').get(char.id);
-    if (!current?.short_prompt?.includes('##')) {
+    if (current?.short_prompt && !current.short_prompt.includes('##') && current.short_prompt.includes('来自')) {
       console.log(`[short-prompt] 跳过 "${char.display_name}"（已被其他操作更新）`);
       _processNextInQueue();
       return;
     }
 
     try {
-      const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name);
+      const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name, char.name);
       db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, char.id);
       console.log(`[short-prompt] 已优化 "${char.display_name}" (id=${char.id})`);
     } catch (err) {

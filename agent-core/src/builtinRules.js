@@ -50,7 +50,7 @@ Hard Rules:
 - If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together.'
 - ALL text in English. No Chinese characters anywhere.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
-- Multiple Characters — When there are 2+ characters, each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
+- Multiple Characters — When there are 2+ characters, add an announcement of the total count explicitly (e.g. "Two people share the frame:" or "There are three people in the scene:"), then each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
 - MAX 800 characters total.`,
   is_active: 1,
 };

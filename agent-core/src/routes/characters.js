@@ -16,6 +16,7 @@ import { saveBase64Image } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
+import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 
 const router = Router();
 
@@ -79,6 +80,7 @@ router.post('/', (req, res) => {
       .run(name, display_name || name, base_prompt, shortPrompt, emotion, moments_disabled !== undefined ? (moments_disabled ? 1 : 0) : 0, proactive_disabled !== undefined ? (proactive_disabled ? 1 : 0) : 0, events_disabled !== undefined ? (events_disabled ? 1 : 0) : 0);
     const newCharId = result.lastInsertRowid;
     res.status(201).json({ id: newCharId, name, display_name });
+    refreshCharSearch();
 
     // 异步选择手写字体（不阻塞响应）
     assignFontForNewCharacter(newCharId, base_prompt).catch(err =>
@@ -124,7 +126,7 @@ router.post('/', (req, res) => {
     // 异步优化 short_prompt（不阻塞响应）
     setImmediate(async () => {
       try {
-        const optimized = await generateShortPromptWithLLM(base_prompt, display_name || name);
+        const optimized = await generateShortPromptWithLLM(base_prompt, display_name || name, name);
         db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, newCharId);
         console.log(`[char] short_prompt LLM-optimized for "${display_name || name}" (id=${newCharId})`);
         runShortPromptMigration();
@@ -185,6 +187,7 @@ router.put('/:id', (req, res) => {
   }
 
   res.json({ ok: true });
+  refreshCharSearch();
 
   // 若 base_prompt 变更，异步优化 short_prompt
   if (base_prompt !== undefined) {
@@ -193,7 +196,7 @@ router.put('/:id', (req, res) => {
       try {
         const char = db.prepare('SELECT display_name, name, base_prompt FROM characters WHERE id = ?').get(charId);
         if (!char) return;
-        const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name);
+        const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name, char.name);
         db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, charId);
         console.log(`[char] short_prompt LLM-optimized for "${char.display_name || char.name}" (id=${charId})`);
         runShortPromptMigration();
@@ -347,6 +350,7 @@ router.delete('/:id', (req, res, next) => {
     cleanupMessages();
 
     res.json({ ok: true });
+    refreshCharSearch();
   } catch (err) {
     if (err.code === 'SQLITE_CORRUPT_VTAB') {
       console.warn('[characters] FTS5 corrupted during delete, repairing...');
@@ -354,6 +358,7 @@ router.delete('/:id', (req, res, next) => {
         repairFtsIndex();
         cleanupMessages();
         res.json({ ok: true });
+        refreshCharSearch();
       } catch (retryErr) {
         console.error('[characters] retry after FTS repair failed:', retryErr.message);
         return next(retryErr);
@@ -526,11 +531,12 @@ ${searchContext}` : ''}
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
       });
+      refreshCharSearch();
 
       // 异步优化 short_prompt（不阻塞响应）
       setImmediate(async () => {
         try {
-          const optimized = await generateShortPromptWithLLM(basePrompt, displayName);
+          const optimized = await generateShortPromptWithLLM(basePrompt, displayName, charName);
           db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, generatedCharId);
           console.log(`[characters] short_prompt LLM-optimized for "${displayName}" (id=${generatedCharId})`);
           runShortPromptMigration();

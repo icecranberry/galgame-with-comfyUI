@@ -24,6 +24,7 @@ import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } fro
 import { upsertVector } from './vectorClient.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
+import { matchAll } from './characterSearch.js';
 
 // ── 生活片段类型库 ──
 // 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
@@ -753,14 +754,18 @@ export async function generateEvent(character, options = {}) {
     if (Math.random() < multiProb) {
       const allRels = db.prepare(`
         SELECT cr.relationship_text,
-               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt
+               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt, c.short_prompt AS other_short
         FROM character_relationships cr
         JOIN characters c ON c.id = cr.to_character_id
         WHERE cr.from_character_id = ? AND cr.relationship_text != ''
       `).all(character.id);
 
       const picked = allRels[Math.floor(Math.random() * allRels.length)];
-      const otherPersona = picked.other_prompt.replace(/你/g, picked.other_name);
+      const otherShort = picked.other_short || '';
+      const base = picked.other_prompt || '';
+      const appMatch = base.match(/##\s*你的外观/);
+      const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, picked.other_name) : '';
+      const otherPersona = [otherShort, appSection].filter(Boolean).join('\n');
 
       // 查反向关系，双向注入
       const reverseRel = db.prepare(`
@@ -1160,11 +1165,49 @@ ${personaText2}`;
 ${multiPerson2.otherPersona}`;
   }
 
+  // 交叉角色引用：从事件上下文中加载被提及的角色信息
+  const crossRefIds = JSON.parse(event.referenced_character_ids || '[]');
+  let crossRefNames = [];
+  if (crossRefIds.length > 0) {
+    const crossChars = crossRefIds.map(id =>
+      db.prepare('SELECT id, display_name, short_prompt, base_prompt FROM characters WHERE id = ?').get(id)
+    ).filter(Boolean);
+    if (crossChars.length > 0) {
+      crossRefNames = crossChars.map(c => c.display_name);
+      const crossBlocks = crossChars.map(c => {
+        const parts = [];
+        if (c.short_prompt) parts.push(c.short_prompt);
+        const base = c.base_prompt || '';
+        const m = base.match(/##\s*你的外观/);
+        if (m) parts.push(base.slice(m.index).replace(/你/g, c.display_name));
+        // 查询角色间关系
+        const relParts = [];
+        const fwd = db.prepare(
+          'SELECT relationship_text FROM character_relationships WHERE from_character_id = ? AND to_character_id = ? AND relationship_text != ?'
+        ).get(character.id, c.id, '');
+        if (fwd) relParts.push(`${displayName2}是${c.display_name}的${fwd.relationship_text}`);
+        const rev = db.prepare(
+          'SELECT relationship_text FROM character_relationships WHERE from_character_id = ? AND to_character_id = ? AND relationship_text != ?'
+        ).get(c.id, character.id, '');
+        if (rev) relParts.push(`${c.display_name}是${displayName2}的${rev.relationship_text}`);
+        if (relParts.length > 0) {
+          parts.push(`[关系] ${relParts.join('，')}`);
+        }
+        return `[${c.display_name}]\n${parts.join('\n')}`;
+      }).join('\n\n');
+      personaMsg2 += `\n\n---\n以下是在当前事件推进中被提及的其他角色信息，必须在生成的分支场景中现身互动：\n\n${crossBlocks}`;
+    }
+  }
+
   const branchImagePromptInstruction = imageRulesText
     || '描述场景、角色外观、动作、氛围';
 
-  const multiPersonImageNote2 = multiPerson2
-    ? `**多人画面**：prompt 中必须包含${displayName2}和${multiPerson2.otherName}两个人。描述清楚各自的外观、位置、互动动作。用句号分隔两人描述。`
+  const allOtherNames = [...new Set([
+    ...(multiPerson2 ? [multiPerson2.otherName] : []),
+    ...crossRefNames,
+  ])];
+  const multiPersonImageNote2 = allOtherNames.length > 0
+    ? `**多人画面**：prompt 中必须包含${displayName2}和${allOtherNames.join('、')}共${allOtherNames.length + 1}人。描述清楚各自的外观、位置、互动动作。用句号分隔每人描述。`
     : '';
 
   const formatPrompt2 = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
@@ -1242,14 +1285,42 @@ ${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
     throw err;
   }
 
-  // 5. 生图（多人时合并两人 LoRA）
+  // 4.5 检测当前事件描述和分支描述中是否提及其他角色
+  const branchDescText = (event.description || '') + ' ' + (branchData.description || '');
+  const crossRefMatches = matchAll(branchDescText, character.id);
+  const filteredMatches = multiPerson2
+    ? crossRefMatches.filter(m => m.id !== multiPerson2.otherId)
+    : crossRefMatches;
+  if (filteredMatches.length > 0) {
+    const existing = JSON.parse(event.referenced_character_ids || '[]');
+    const merged = [...new Set([...existing, ...filteredMatches.map(c => c.id)])].slice(0, 3);
+    db.prepare('UPDATE character_events SET referenced_character_ids = ? WHERE id = ?')
+      .run(JSON.stringify(merged), event.id);
+    event.referenced_character_ids = JSON.stringify(merged);
+  }
+
+  // 5. 生图（合并主角色 + 多人 + 交叉引用角色的 LoRA）
   const branchSelfLoras = _parseCharLoras(character.loras);
   let branchOtherLoras = [];
   if (multiPerson2) {
     const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson2.otherId);
     if (otherChar) branchOtherLoras = _parseCharLoras(otherChar.loras);
   }
-  const branchAllLoras = [...branchSelfLoras, ...branchOtherLoras];
+  let branchCrossRefLoras = [];
+  const crossRefIdsForLora = JSON.parse(event.referenced_character_ids || '[]');
+  if (crossRefIdsForLora.length > 0) {
+    branchCrossRefLoras = crossRefIdsForLora.flatMap(id => {
+      const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
+      return c ? _parseCharLoras(c.loras) : [];
+    });
+  }
+  const allLoras = [...branchSelfLoras, ...branchOtherLoras, ...branchCrossRefLoras];
+  const seen = new Set();
+  const branchAllLoras = allLoras.filter(l => {
+    if (seen.has(l.path)) return false;
+    seen.add(l.path);
+    return true;
+  });
 
   let imageUrl = null;
   try {
@@ -1461,15 +1532,16 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
 
   // 3. 移到 event_history（保留原始 ID，确保分享卡片等引用不失效）
   db.prepare(`
-    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome, referenced_character_ids)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.id,
     character.id, event.event_type_key,
     event.title, event.description, event.image,
     conclusionData.summary,
     event.choice_history, event.current_branch || 0,
-    event.engaged, outcome
+    event.engaged, outcome,
+    event.referenced_character_ids || '[]'
   );
 
   // 4. 删除活跃事件

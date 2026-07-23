@@ -433,7 +433,7 @@ function formatComfyUIError(errText, status) {
       lines.push(`当前工作流需要的模型 "${m.received}" 不存在`);
       lines.push('');
       lines.push('建议:');
-      lines.push('  1. 前往设置页切换工作流模式（turbo → base 或其他）');
+      lines.push('  1. 前往网页的系统参数页的画师串 & 分辨率右下角切换工作流模式（turbo → base 或其他）');
       lines.push(`  2. 下载缺失的模型文件放入 ComfyUI-aki-v3\\ComfyUI\\models\\diffusion_models即可自动识别`);
     }
 

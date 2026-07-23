@@ -33,6 +33,7 @@ import { startScheduler as startImageCompressor } from './src/services/imageComp
 import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { startWeatherScheduler } from './src/services/weatherService.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
+import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 
 const app = express();
 
@@ -102,6 +103,10 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 初始化角色名称注册表（交叉引用检索）
+refreshCharSearch();
+console.log('[search] Character name registry loaded');
 
 // 初始化后台 LLM 并发限制（云端 API 用户自动跳过，零开销）
 applyFromConfig(config);
