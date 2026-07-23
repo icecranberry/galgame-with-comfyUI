@@ -25,3 +25,6 @@ launcher_config.json
 release/
 runtime/
 workflow/
+
+# P-AI 本地协作约束（项目原生规则由 CLAUDE.md 维护）
+AGENTS.md

@@ -507,7 +507,7 @@ ${characterName}: "${cleanAssistant.slice(0, 500)}"
   try {
     let raw = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.5, max_tokens: 200, response_format: { type: 'json_object' }, label: '情绪判断' }
+      { temperature: 0.5, max_tokens: 200, response_format: { type: 'json_object' }, label: '情绪判断', requestKind: 'emotion_evaluate', conversationId: context.conversationId ?? null, characterId: context.characterId ?? null }
     );
     raw = raw.trim();
     if (raw.startsWith('```')) {

@@ -66,6 +66,45 @@ function initSchema(db) {
       start_msg_id INTEGER NOT NULL,
       end_msg_id INTEGER NOT NULL,
       summary TEXT NOT NULL,
+      checkpoint_version INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 每轮实际发送给 LLM 的上下文审计快照（不替代消息表）
+    CREATE TABLE IF NOT EXISTS llm_context_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_raw_msg_id INTEGER NOT NULL UNIQUE REFERENCES raw_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL,
+      character_id INTEGER,
+      summary_id INTEGER,
+      checkpoint_end_msg_id INTEGER DEFAULT 0,
+      memory_snapshot TEXT DEFAULT '[]',
+      dynamic_context TEXT DEFAULT '',
+      prompt_revision TEXT NOT NULL,
+      stable_prefix_hash TEXT NOT NULL,
+      history_prefix_hash TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- LLM usage / Prompt Cache telemetry；usage 缺失时 token 字段保持 NULL
+    CREATE TABLE IF NOT EXISTS llm_call_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      conversation_id TEXT,
+      character_id INTEGER,
+      prompt_revision TEXT,
+      request_hash TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      cache_creation_tokens INTEGER,
+      duration_ms INTEGER,
+      success INTEGER NOT NULL DEFAULT 1,
+      error_message TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -370,6 +409,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_fragments_conv ON memory_fragments(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_type ON memory_fragments(fragment_type);
     CREATE INDEX IF NOT EXISTS idx_summaries_conv ON rolling_summaries(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_summaries_checkpoint ON rolling_summaries(conversation_id, end_msg_id);
+    CREATE INDEX IF NOT EXISTS idx_context_snapshots_conv ON llm_context_snapshots(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_call_logs_kind_time ON llm_call_logs(request_kind, created_at);
 
     CREATE INDEX IF NOT EXISTS idx_image_tasks_conv ON image_tasks(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
@@ -465,6 +507,9 @@ function initSchema(db) {
   // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
   migrateEventEmphasisSchema(db);
 
+  // 迁移: 摘要 checkpoint 版本标记；旧摘要边界不可信，不能直接用于历史截断
+  migrateRollingSummaryCheckpointSchema(db);
+
   // 迁移: 誓约系统 — user_relationships 表新增 is_oath 列
   migrateOathSchema(db);
 
@@ -549,6 +594,18 @@ function migrateEmotionSnapshotsUnique(db) {
     }
   } catch (err) {
     console.log('[db] migrateEmotionSnapshotsUnique error:', err.message);
+  }
+}
+
+function migrateRollingSummaryCheckpointSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(rolling_summaries)`).all();
+    if (!cols.some(c => c.name === 'checkpoint_version')) {
+      // 旧算法的 end_msg_id 可能超过实际摘要范围；新增列时将历史记录标为 0。
+      db.exec(`ALTER TABLE rolling_summaries ADD COLUMN checkpoint_version INTEGER NOT NULL DEFAULT 0`);
+    }
+  } catch (err) {
+    console.log('[db] migrateRollingSummaryCheckpointSchema error:', err.message);
   }
 }
 

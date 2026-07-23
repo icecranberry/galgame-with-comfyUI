@@ -52,6 +52,8 @@ export const config = {
     backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板
     weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
+    promptCache: process.env.FEATURE_PROMPT_CACHE === 'true', // 仅显式启用时发送会话级 cache key
+    streamUsage: process.env.FEATURE_STREAM_USAGE === 'true', // 仅显式启用时请求流式 usage
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',
