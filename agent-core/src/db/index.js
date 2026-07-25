@@ -66,8 +66,10 @@ function initSchema(db) {
       start_msg_id INTEGER NOT NULL,
       end_msg_id INTEGER NOT NULL,
       summary TEXT NOT NULL,
+      checkpoint_version INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
 
     -- 情绪快照表（每 conversation 仅保留最新一条）
     CREATE TABLE IF NOT EXISTS emotion_snapshots (
@@ -370,6 +372,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_fragments_conv ON memory_fragments(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_type ON memory_fragments(fragment_type);
     CREATE INDEX IF NOT EXISTS idx_summaries_conv ON rolling_summaries(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_summaries_checkpoint ON rolling_summaries(conversation_id, end_msg_id);
 
     CREATE INDEX IF NOT EXISTS idx_image_tasks_conv ON image_tasks(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
@@ -465,6 +468,9 @@ function initSchema(db) {
   // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
   migrateEventEmphasisSchema(db);
 
+  // 迁移: 摘要 checkpoint 版本标记；旧摘要边界不可信，不能直接用于历史截断
+  migrateRollingSummaryCheckpointSchema(db);
+
   // 迁移: 誓约系统 — user_relationships 表新增 is_oath 列
   migrateOathSchema(db);
 
@@ -552,6 +558,18 @@ function migrateEmotionSnapshotsUnique(db) {
     }
   } catch (err) {
     console.log('[db] migrateEmotionSnapshotsUnique error:', err.message);
+  }
+}
+
+function migrateRollingSummaryCheckpointSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(rolling_summaries)`).all();
+    if (!cols.some(c => c.name === 'checkpoint_version')) {
+      // 旧算法的 end_msg_id 可能超过实际摘要范围；新增列时将历史记录标为 0。
+      db.exec(`ALTER TABLE rolling_summaries ADD COLUMN checkpoint_version INTEGER NOT NULL DEFAULT 0`);
+    }
+  } catch (err) {
+    console.log('[db] migrateRollingSummaryCheckpointSchema error:', err.message);
   }
 }
 

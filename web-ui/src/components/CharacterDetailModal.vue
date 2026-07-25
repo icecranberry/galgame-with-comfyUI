@@ -211,7 +211,7 @@
                             <span>{{ loraDisplayName(file) }}</span>
                           </li>
                         </ul>
-                        <div v-else-if="activeLoraFileIdx === idx && loraFiles.length === 0 && !loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
+                        <div v-else-if="activeLoraFileIdx === idx && lorasFiles.length === 0 && !loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
                           请先在启动器中配置 ComfyUI 路径
                         </div>
                         <div v-else-if="activeLoraFileIdx === idx && loraFetching" class="lora-dropdown" style="padding:16px;text-align:center;font-size:13px;color:var(--text-secondary)">
@@ -565,7 +565,7 @@ async function fetchWorkflows() {
 }
 
 function addLoraGroup() {
-  loraItems.value.push({ path: '', weight: 1, triggerWord: '' })
+  loraItems.value.push({ path: '', weight: 0.6, triggerWord: '' })
 }
 
 function removeLoraGroup(idx) {

@@ -251,11 +251,11 @@ function injectLoraNodes(wf, loras) {
         ver: '0.24.0',
         'Node name for S&R': 'LoraLoaderModelOnly',
       },
-      widgets_values: [lora.path, lora.weight ?? 1],
+      widgets_values: [lora.path, lora.weight ?? 0.6],
     };
 
     wf.nodes.push(loraNode);
-    console.log(`[imageSkill] LoraLoaderModelOnly node added: id=${nodeId}, title="lora${i + 1}", path="${lora.path}", weight=${lora.weight ?? 1}`);
+    console.log(`[imageSkill] LoraLoaderModelOnly node added: id=${nodeId}, title="lora${i + 1}", path="${lora.path}", weight=${lora.weight ?? 0.6}`);
 
     // 上游来源：UNETLoader(第一个lora) 或 上一个 lora 节点
     const sourceNodeId = i === 0 ? unetNode.id : loraNodeIds[i - 1];

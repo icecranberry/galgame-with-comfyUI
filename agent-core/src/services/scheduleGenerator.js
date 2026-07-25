@@ -115,19 +115,19 @@ ${direction}**
 
 **注意：以上是用户指定的日程"方向"或"主题"，这就是严格的指令。所有日程编排以用户的意愿为准，可以想象理由，适当破坏角色原有的人设，自然地融入这个方向的元素。**` : null;
 
-  // ── 组装多层 system ──
+  // ── 组装多层 system（前三层为跨角色共享前缀，提高 LLM 缓存命中率）──
   const msgs = [];
   // msgs[0]: 舞台（破限词 + 世界观）
   if (stageContent) msgs.push({ role: 'system', content: stageContent });
   // msgs[1]: 世界观穿透指令
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
-  // msgs[2]: 角色人格
-  msgs.push({ role: 'system', content: personaMsg });
-  // msgs[2.5]: 用户方向（如果有）
-  if (directionMsg) msgs.push({ role: 'system', content: directionMsg });
-  // msgs[3]: 生成指令
+  // msgs[2]: 核心生成指令（第三层 system，缓存友好）
   msgs.push({ role: 'system', content: scheduleInst });
-  // msgs[4]: 触发消息
+  // msgs[3]: 用户方向（如果有，置于指令之后，随角色变化）
+  if (directionMsg) msgs.push({ role: 'system', content: directionMsg });
+  // msgs[4]: 角色人格（随角色变化，不影响前缀缓存）
+  msgs.push({ role: 'system', content: personaMsg });
+  // msgs[5]: 触发消息
   msgs.push({ role: 'user', content: `请为 ${character.display_name} 生成完整的今日日程安排。` });
 
   let rawResult = '';

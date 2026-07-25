@@ -34,7 +34,7 @@ function tempLabel(celsius) {
   if (celsius <= 30)  return '有点热';
   if (celsius <= 35)  return '挺热';
   if (celsius <= 39)  return '热死了';
-  return '要融化了';
+  return '要热得融化了';
 }
 
 function beaufortLabel(kmh) {
@@ -287,8 +287,15 @@ export function getCurrentWeather(datetime = new Date()) {
 
   if (!row) return null;
 
+  const hour = datetime.getHours();
+  const isNight = hour >= 18 || hour < 6;
+  let weatherText = row.weather_text;
+  if (isNight && weatherText === '晴') {
+    weatherText = '月朗星稀';
+  }
+
   return {
-    weather: row.weather_text,
+    weather: weatherText,
     temperature: row.temperature,
     windSpeed: row.wind_speed,
   };

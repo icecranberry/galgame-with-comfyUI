@@ -841,34 +841,6 @@ export async function generateEvent(character, options = {}) {
     ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
 
-  const directorSystem = `${jailbreakPrompt}
-${worldIntegrationBlock}
-你正在为「${displayName}」截取今天生活中的一小段。
-
-【人称】
-- 指代角色只用「她」「他」「ta」「${displayName}」，不使用「你」
-- 叙述始终贴着角色此刻的感知。读者看到什么、听到什么、注意到什么，都应与角色保持一致，不跳出角色视角解释世界。
-
-【角色定制锁——事件触发器根植于角色独有信息】
-- 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
-
-【正文——写现场，不写剧情总结】
-正文始终停留在现场，而不是剧情总结。
-
-镜头直接落在一个正在发生的动作上。
-
-背景、关系、原因，都随着动作自然露出来，而不是提前说明。
-
-【结尾——停在行动门槛】
-结尾停在一个具体动作即将发生之前。
-
-【schedule 起点锁】
-- 事件从${displayName}当前所在的地点、手头在做的事、视线范围内的东西中触发。第一句出现的地点、动作、物件，直接从当前 schedule 场景中承接
-- 避免为制造戏剧性，直接把角色挪到另一个无关地点再触发事件${scheduleSystemBlock}
-
-${worldPenetrationLine}
-【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间`;
-
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
   let personaMsg = `以下是角色「${displayName}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
@@ -890,7 +862,7 @@ ${multiPerson.otherPersona}`;
     || '≥8个外观锚点，角色名用character(series)格式';
 
   const weatherNote = getLightNoteWithWeather(now);
-  const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+  const weatherHint = weatherNote ? `\n\nEnvironment reference：${weatherNote}。` : '';
 
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
@@ -903,11 +875,10 @@ ${multiPerson.otherPersona}`;
 - 心理不要直接写『她很内疚』『她很紧张』，而要通过动作表现。
 - 每一句都推动画面继续发生，不回顾过去，不概括原因。
 - 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
-
-允许留白，让读者自己感受到情绪。",
+- 行动需要符合当前天气和时间，但禁止直接提及天气时间",
   "prompt": "${imagePromptInstruction}${weatherHint}${multiPersonImageNote}",
   "choiceA": "选项A（具体行动，8-15字。符合${displayName}的性格和当下处境）",
-  "choiceB": "选项B（与A形成真正的行动对比——但必须是${displayName}此刻真的可能做出来的事。8-15字）"
+  "choiceB": "选项B（与A形成真正的行动对比——不符合${displayName}的个性，会将事件往意料之外但符合世界观的情况发展。8-15字）"
 }
 
 选项设计原则：
@@ -930,19 +901,58 @@ ${multiPerson.otherPersona}`;
 
   const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}${funFromNote}${reactionsNote}
 ${timeTag}${multiPersonNote}
-${scheduleContextLine ? scheduleContextLine : ''}${contextBlock ? '\n关联线索：' + contextBlock.trim() : ''}
+${scheduleContextLine ? scheduleContextLine : ''}${scheduleSystemBlock || ''}${contextBlock ? '\n关联线索：' + contextBlock.trim() : ''}
 
 **关键理解**：上面的事件方向只是一个出发点——不是剧本，里面没有具体场景。把方向翻译成${displayName}今天此刻实际遇到的、不可复制到别人身上的生活切片。
 
 请以紧密第三人称创作这个事件的开场。场景长度 80-150 字。`;
 
 
-  const msgs = [
-    { role: 'system', content: directorSystem },
-    { role: 'system', content: personaMsg },
-    { role: 'system', content: formatPrompt },
-    { role: 'user', content: directorPrompt },
-  ];
+  const msgs = [];
+
+  // [0] Base jailbreak rules — most stable, always cache-hit
+  msgs.push({ role: 'system', content: jailbreakPrompt });
+
+    // [2] World integration block — stable per world setting
+  if (worldIntegrationBlock) {
+    msgs.push({ role: 'system', content: worldIntegrationBlock });
+  }
+
+  // [1] JSON format — most stable, always cache-hit (template unchanged, only trailing env ref varies)
+  msgs.push({ role: 'system', content: formatPrompt });
+
+  // [3] Director instructions — stable per character
+  msgs.push({ role: 'system', content: `你正在为「${displayName}」截取今天生活中的一小段。
+
+【人称】
+- 指代角色只用「她」「他」「ta」「${displayName}」，不使用「你」
+- 叙述始终贴着角色此刻的感知。读者看到什么、听到什么、注意到什么，都应与角色保持一致，不跳出角色视角解释世界。
+
+【角色定制锁——事件触发器根植于角色独有信息】
+- 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
+
+【正文——写现场，不写剧情总结】
+正文始终停留在现场，而不是剧情总结。
+
+镜头直接落在一个正在发生的动作上。
+
+背景、关系、原因，都随着动作自然露出来，而不是提前说明。
+
+【结尾——停在行动门槛】
+结尾停在一个具体动作即将发生之前。
+
+【schedule 起点锁】
+- 事件从${displayName}当前所在的地点、手头在做的事、视线范围内的东西中触发。第一句出现的地点、动作、物件，直接从当前 schedule 场景中承接
+- 避免为制造戏剧性，直接把角色挪到另一个无关地点再触发事件
+
+${worldPenetrationLine}
+【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间` });
+
+  // [4] Character persona — stable per character
+  msgs.push({ role: 'system', content: personaMsg });
+
+  // [user] Event-specific creation task — changes per event
+  msgs.push({ role: 'user', content: directorPrompt });
 
   let eventData;
   let rawResult = '';
@@ -1123,7 +1133,7 @@ export async function generateNextBranch(character, event, choice) {
   const imageRulesText = imageRules?.rule_content || '';
 
   const weatherNote = getLightNoteWithWeather(now);
-  const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+  const weatherHint = weatherNote ? `\n\nEnvironment reference：${weatherNote}。` : '';
   const timeTag2 = getTimeTag(now, false);
 
   const displayName2 = character.display_name;
@@ -1147,13 +1157,6 @@ export async function generateNextBranch(character, event, choice) {
   const worldPenetrationLine2 = worldSetting2
     ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
     : '';
-
-  const directorSystem2 = `${jailbreakPrompt}
-${worldIntegrationBlock2}
-你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。
-
-${worldPenetrationLine2}
-【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间`;
 
   let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你了解角色的外貌、性格和行为模式：
 
@@ -1223,11 +1226,10 @@ ${multiPerson2.otherPersona}`;
 - 心理不要直接写『她很内疚』『她很紧张』，而要通过动作表现。
 - 每一句都推动画面继续发生，不回顾过去，不概括原因。
 - 结尾停在『必须做出选择之前』，留下悬念，不提前进入结果。
-
-允许留白，让读者自己感受到情绪。",
+- 行动需要符合当前天气和时间，但禁止直接提及天气时间。",
   "prompt": "${branchImagePromptInstruction}${weatherHint}${multiPersonImageNote2}",
   "choiceA": "新选项A（具体行动。必须符合${displayName2}的个性——是ta此刻真的会做出来的事。8-15字）",
-  "choiceB": "新选项B（与A形成真正的行动对比——但必须从${displayName2}的个性中自然推出。8-15字）"
+  "choiceB": "新选项B（与A形成真正的行动对比——不符合${displayName2}的个性，会将事件往意料之外但符合世界观的情况发展。8-15字）"
 }`;
 
   // 只有多人模式才注入关系信息（和初始事件生成一致）
@@ -1257,17 +1259,34 @@ ${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
 请以紧密第三人称创作选择之后发生的下一个场景。场景长度 80-150 字。`;
 
   // 上一幕画面注入：视觉参考帮助 LLM 保持画面连贯（叙事已有 historyText，此处仅补充视觉信息）
-  const prevSceneMsg = event.prompt
-    ? { role: 'system', content: `【上一幕画面 · 视觉参考】\n${event.prompt}` }
-    : null;
+  const prevSceneBlock = event.prompt
+    ? `\n\n【上一幕画面 · 视觉参考】\n${event.prompt}`
+    : '';
 
-  const msgs = [
-    { role: 'system', content: directorSystem2 },
-    { role: 'system', content: personaMsg2 },
-    { role: 'system', content: formatPrompt2 },
-    ...(prevSceneMsg ? [prevSceneMsg] : []),
-    { role: 'user', content: directorPrompt2 },
-  ];
+  const msgs = [];
+
+  // [0] Base jailbreak rules — most stable, always cache-hit
+  msgs.push({ role: 'system', content: jailbreakPrompt });
+
+  // [1] JSON format — most stable, always cache-hit (template unchanged, only trailing env ref varies)
+  msgs.push({ role: 'system', content: formatPrompt2 });
+
+  // [2] World integration block — stable per world setting
+  if (worldIntegrationBlock2) {
+    msgs.push({ role: 'system', content: worldIntegrationBlock2 });
+  }
+
+  // [3] Branch continuation instructions — stable per character
+  msgs.push({ role: 'system', content: `你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。
+
+${worldPenetrationLine2}
+【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间` });
+
+  // [4] Character persona — stable per character
+  msgs.push({ role: 'system', content: personaMsg2 });
+
+  // [user] Branch task
+  msgs.push({ role: 'user', content: directorPrompt2 + prevSceneBlock });
 
   let branchData;
   let rawBranchResult = '';

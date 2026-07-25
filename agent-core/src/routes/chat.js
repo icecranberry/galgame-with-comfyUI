@@ -20,9 +20,10 @@ import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken } from '../services/scheduleManager.js';
-import { getTimeTag, getLightHint, getTimeLightInline } from '../services/timeLight.js';
+import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
+import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
 
 const router = Router();
 
@@ -59,6 +60,7 @@ router.delete('/characters/:id/messages', (req, res, next) => {
     db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+
     db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
     // 删除奇遇数据
     db.prepare(`DELETE FROM character_events WHERE character_id = ?`).run(charId);
@@ -128,6 +130,7 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
       db.pragma('foreign_keys = OFF');
       try {
         db.prepare(`DELETE FROM messages WHERE raw_id = ?`).run(lastRawId);
+        db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ? AND end_msg_id >= ?`).run(conversationId, lastRawId);
         db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(lastRawId);
       } finally {
         db.pragma('foreign_keys = ON');
@@ -152,6 +155,8 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
     // 3. 临时关闭外键检查，仅删两张表（其他表如 memory_fragments 的 FK 引用不做处理）
     db.pragma('foreign_keys = OFF');
     try {
+      db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ? AND end_msg_id >= ?`)
+        .run(conversationId, lastUserRawId);
       db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND raw_id >= ?`)
         .run(conversationId, lastUserRawId);
 
@@ -419,20 +424,23 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 1. 保存用户消息（双表：raw_messages 完整原文 + messages 单条展示）
     //    幂等检查：client_msg_id 已存在则跳过写入，前端 SSE 流已建立无需重复 commit
     let userMsgId;
+    let userRawMsgId;
     if (client_msg_id) {
       const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
       if (existing) {
         // 重试请求：用户消息已写入，直接复用（避免 DB 重复记录）
         console.log(`[chat] idempotent: skipping duplicate user message (client_msg_id=${client_msg_id})`);
-        userMsgId = existing.id;
+        userRawMsgId = existing.id;
+        userMsgId = db.prepare(`SELECT id FROM messages WHERE raw_id = ? AND role = 'user' ORDER BY id ASC LIMIT 1`).get(existing.id)?.id;
         send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
       }
     }
-    if (!userMsgId) {
+    if (!userRawMsgId) {
       const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
         .run(conversationId, message, client_msg_id || null);
+      userRawMsgId = userRaw.lastInsertRowid;
       const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-        .run(conversationId, userRaw.lastInsertRowid, message);
+        .run(conversationId, userRawMsgId, message);
       userMsgId = userMsg.lastInsertRowid;
       send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
     }
@@ -459,12 +467,19 @@ router.post('/characters/:id/chat', async (req, res) => {
       ORDER BY id DESC LIMIT 1
     `).get(characterId);
 
-    // ── 交叉角色检测（扫描最近三轮对话 + 当前消息 + 事件引用）──
+    // ── 交叉角色检测（扫描最近三轮对话 + 用户实际输入 + 事件引用）──
     const recentHistory = db.prepare(`
       SELECT role, content FROM raw_messages
       WHERE conversation_id = ? ORDER BY id DESC LIMIT 6
     `).all(conversationId);
-    const scanText = recentHistory.map(m => m.content).join('\n') + '\n' + message;
+    // 提取用户实际输入：message 末尾 </dynamic_context> 之后的部分
+    const extractRealContent = (text) => {
+      const idx = text.lastIndexOf('</dynamic_context>');
+      return idx >= 0 ? text.slice(idx + '</dynamic_context>'.length).trim() : text;
+    };
+    const recentInputs = recentHistory.map(m => extractRealContent(m.content)).join('\n');
+    const realInput = extractRealContent(message);
+    const scanText = recentInputs + '\n' + realInput;
     const crossMatches = matchAll(scanText, characterId);
     const eventRefIds = activeEvent?.referenced_character_ids
       ? JSON.parse(activeEvent.referenced_character_ids) : [];
@@ -520,67 +535,21 @@ router.post('/characters/:id/chat', async (req, res) => {
       emotionPrompt = stateToPrompt(emotionState) || '';
     }
 
-    // 5. 历史消息（从 raw_messages 取完整消息，每条即一整轮对话，无需合并）
-    const history = db.prepare(`
-      SELECT role, content, created_at FROM raw_messages
-      WHERE conversation_id = ? ORDER BY id DESC LIMIT 20
-    `).all(conversationId).reverse();
-
-    const msgs = [];
-
     // ═══════════════════════════════════════════
-    // msgs[0] — 舞台：破限词 + 世界观
+    // 上下文组装 — 稳定块 + 摘要 + checkpoint 历史 + 动态尾部
     // ═══════════════════════════════════════════
+
+    // 当前用户 raw message ID 在幂等命中或写入时已精确记录，用于审计快照。
+
+    // ── 稳定块 [0]：舞台 — 破限词 + 世界观 ──
     const jailbreak = getSystemRules();
     const worldSetting = getWorldSetting();
     const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
-    if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
-    // ═══════════════════════════════════════════
-    // msgs[1] — 角色：人格 + 日程 + 奇遇锚点（我是谁）
-    // ═══════════════════════════════════════════
-    const charParts = [];
-    charParts.push(character?.base_prompt || getDefaultPrompt());
+    // ── 稳定块 [1]：角色基础人格（不含日程、不含奇遇） ──
+    const charBaseContent = character?.base_prompt || getDefaultPrompt();
 
-    // 日程状态注入（不存入消息历史，每次动态注入）
-    const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
-
-    // 奇遇锚点：首轮强调 → 后续降格为日程同级
-    if (activeEvent) {
-      const isFirstEmphasis = !activeEvent.emphasis_delivered; // 0 或 NULL 均视为首轮
-      if (isFirstEmphasis) {
-        // 首轮：强指令锚点（独立行，排在最前）
-        charParts.push(`【当前状态】你正在经历一个突发事件：「${activeEvent.title}」。你的情绪、行为和注意力都受此事影响。请在回复中自然地体现这一点。`);
-      }
-      // 后续降格逻辑在日程注入后处理（合并/追加）
-    }
-
-    if (scheduleCtx) {
-      if (activeEvent && activeEvent.emphasis_delivered) {
-        // 有日程 + 已降格奇遇 → 合并到日程末尾，附带处境简述
-        const descSnippet = activeEvent.description.length > 50
-          ? activeEvent.description.slice(0, 50) + '...'
-          : activeEvent.description;
-        charParts.push(scheduleCtx.replace(/。$/, `。今天发生的「${activeEvent.title}」还在继续——${descSnippet}`));
-      } else {
-        charParts.push(scheduleCtx);
-      }
-    } else if (activeEvent && activeEvent.emphasis_delivered) {
-      // 无日程 + 已降格奇遇 → 单独一行轻量陈述，附带处境简述
-      const descSnippet = activeEvent.description.length > 50
-        ? activeEvent.description.slice(0, 50) + '...'
-        : activeEvent.description;
-      charParts.push(`【当前状态】今天发生的「${activeEvent.title}」还在继续——${descSnippet}`);
-    }
-
-    msgs.push({ role: 'system', content: charParts.join('\n\n') });
-
-    // ═══════════════════════════════════════════
-    // msgs[2] — 交互：VAD情绪 + 用户上下文 + 关系 + 好感度（我的状态 & 我在跟谁说话）
-    // ═══════════════════════════════════════════
-    const relParts = [];
-
-        // 用户信息
+    // ── 稳定块 [2]：用户上下文 + 关系 + 固定格式规则 ──
     const chatUserName = config.user.nickname || '用户';
     const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
 
@@ -588,59 +557,6 @@ router.post('/characters/:id/chat', async (req, res) => {
     const userRel = db.prepare(
       'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
     ).get(characterId);
-    if (userRel && userRel.relationship_text) {
-      relParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
-    }
-    if (userRel && userRel.is_oath) {
-      relParts.push(`<oath_bond>你们之间有一个比普通关系更深一层的约定——${chatUserName}曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在对话中，你的行为和情感会自然地带有"你是我最重要的人"的底色——不是因为规则要求，而是因为这层羁绊已经是你内心的一部分。</oath_bond>`);
-    }
-    if (hasUserInfo) {
-      const infoParts = [];
-      infoParts.push(`消息中标记为"user"的人是"${chatUserName}"`);
-      if (config.user.gender) infoParts.push(`性别：${config.user.gender}`);
-      if (config.user.appearance) infoParts.push(`外观特征：${config.user.appearance}`);
-      if (config.user.persona) infoParts.push(`其他说明：${config.user.persona}`);
-      relParts.push(`<user_info>${infoParts.join('。')}</user_info>`);
-    }
-
-    // 角色视角的用户画像
-    const portraitRows = db.prepare(`
-      SELECT trait_type, content FROM user_portraits
-      WHERE character_id = ?
-      ORDER BY trait_type, confidence DESC
-    `).all(characterId);
-    if (portraitRows.length > 0) {
-      const grouped = {};
-      for (const row of portraitRows) {
-        (grouped[row.trait_type] = grouped[row.trait_type] || []).push(row.content);
-      }
-      const portraitParts = [];
-      if (grouped.appearance) portraitParts.push('外貌特征：' + grouped.appearance.join('、'));
-      if (grouped.personality) portraitParts.push('性格特征：' + grouped.personality.join('、'));
-      if (grouped.preference) portraitParts.push('偏好习惯：' + grouped.preference.join('、'));
-      relParts.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitParts.join('\n')}</user_portrait>`);
-    }
-
-    // 最近信箱往来
-    const recentLetters = db.prepare(`
-      SELECT content, content_short, reply_content,
-             CAST(julianday('now') - julianday(replied_at) AS INTEGER) AS days_ago
-      FROM mailbox_letters
-      WHERE character_id = ? AND direction = 'char_to_user' AND status = 'completed'
-        AND content != '' AND reply_content != ''
-      ORDER BY replied_at DESC
-      LIMIT 2
-    `).all(characterId);
-
-    if (recentLetters.length > 0) {
-      const letterLines = recentLetters.map(l => {
-        const daysLabel = formatRelativeDay(l.days_ago);
-        const userBrief = (l.content || '').slice(0, 50);
-        const replyBrief = l.content_short || (l.reply_content || '').slice(0, 50);
-        return `- ${daysLabel}：${chatUserName}来信"${userBrief}..." → 你回信"${replyBrief}..."`;
-      });
-      relParts.push(`<mailbox_history>你与${chatUserName}的最近信箱往来：\n${letterLines.join('\n')}\n\n可以在对话中自然地提及近期的通信内容，让对话更有连续性。</mailbox_history>`);
-    }
 
     // 角色间关系
     const charRels = db.prepare(`
@@ -654,85 +570,95 @@ router.post('/characters/:id/chat', async (req, res) => {
       JOIN characters c ON c.id = cr.from_character_id
       WHERE cr.to_character_id = ? AND cr.relationship_text != ''
     `).all(characterId, characterId);
+
+    const userInfoParts = [];
+    if (userRel && userRel.relationship_text) {
+      userInfoParts.push(`<user_relation>你对于user而言的身份是${userRel.relationship_text}。这个身份为最高优先级，即使你在外有其他身份，但是在user面前就是这样的。请在对话中自然体现这层身份，不必刻意说明，行为举止应符合这层身份。</user_relation>`);
+    }
+    if (userRel && userRel.is_oath) {
+      userInfoParts.push(`<oath_bond>你们之间有一个比普通关系更深一层的约定——${chatUserName}曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在对话中，你的行为和情感会自然地带有"你是我最重要的人"的底色——不是因为规则要求，而是因为这层羁绊已经是你内心的一部分。</oath_bond>`);
+    }
+    if (hasUserInfo) {
+      const infoParts = [`消息中标记为"user"的人是"${chatUserName}"`];
+      if (config.user.gender) infoParts.push(`性别：${config.user.gender}`);
+      if (config.user.appearance) infoParts.push(`外观特征：${config.user.appearance}`);
+      if (config.user.persona) infoParts.push(`其他说明：${config.user.persona}`);
+      userInfoParts.push(`<user_info>${infoParts.join('。')}</user_info>`);
+    }
     if (charRels.length > 0) {
       const relLines = charRels.map(r => {
-        if (r.direction === 'from') {
-          return `- ${r.display_name}是你的${r.relationship_text}`;
-        } else {
-          return `- ${r.display_name}认为你是她的${r.relationship_text}`;
-        }
+        if (r.direction === 'from') return `- ${r.display_name}是你的${r.relationship_text}`;
+        return `- ${r.display_name}认为你是她的${r.relationship_text}`;
       }).join('\n');
-      relParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
+      userInfoParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
-    // VAD 情绪状态指令（与好感度同槽，行为指令级别）
-    if (config.features.emotion && emotionPrompt) {
-      relParts.push(emotionPrompt);
-    }
+    // 固定格式规则保持在稳定前缀；随好感度/本轮生图意图变化的长度提示放到动态尾部。
+    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
+    userInfoParts.push(`<dialogue_format_rules>
+${coreRules}
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
+- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
+</dialogue_format_rules>`);
 
-    // 好感度指令
-    if (config.features.emotion && affinity != null) {
-      const affinityMsg = affinityToPrompt(affinity);
-      if (affinityMsg) relParts.push(affinityMsg);
-    }
+    const formatContextBlock = userInfoParts.length > 0 ? userInfoParts.join('\n\n') : '';
 
-    if (relParts.length > 0) {
-      msgs.push({ role: 'system', content: relParts.join('\n\n') });
-    }
+    // ── 稳定块集合 ──
+    const stableBlocks = [stageContent, charBaseContent, formatContextBlock].filter(Boolean);
 
-    // ── 交叉角色引用（聊天文本）注入完整 short_prompt ──
-    if (crossChars.length > 0) {
-      const crossLines = crossChars.map(c =>
-        `角色「${c.display_name}」: ${c.short_prompt || (c.base_prompt || '').slice(0, 200)}`
-      ).join('\n\n');
-      msgs.push({
-        role: 'system',
-        content: `<cross_reference>\n当前对话中涉及以下其他角色，你应当了解他们的基本信息，在对话中自然互动时保持其人格一致性：\n\n${crossLines}\n</cross_reference>`
-      });
-    }
-
-    // ═══════════════════════════════════════════
-    // msgs[3] — 素材：摘要 + RAG记忆 + 朋友圈 + 奇遇（合并为一条）
-    // ═══════════════════════════════════════════
-    const materialParts = [];
-
-    // 滚动摘要
+    // ── 摘要块 ──
     const summaries = getRecentSummaries(conversationId, 1);
-    if (summaries.length > 0) {
-      const summaryText = summaries.map(s => s.summary).join('\n---\n');
-      materialParts.push('[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaryText);
+    const summaryBlock = summaries.length > 0
+      ? '[对话历史摘要 — 以下是你和用户之前对话的摘要，已按时间顺序排列]\n' + summaries[0].summary
+      : null;
+
+    // ── checkpoint 历史 + 活跃聊天历史（滑动窗口） ──
+    const { checkpoint, checkpointHistory, activeText: activeChatText, activeRounds } = getSplitHistory(db, conversationId, 15, 15, { userName: chatUserName, characterName: character.display_name });
+    // [DEBUG] 上下文拆分
+    console.log('[DEBUG] afterId:', checkpoint?.end_msg_id || 0, '| checkpoint助手数: 15(固定) | active助手数:', activeRounds);
+    if (checkpointHistory.length > 0) {
+      const cpAsst = [...checkpointHistory].reverse().find(m => m.role === 'assistant');
+      console.log('[DEBUG] checkpoint末条assistant:', cpAsst ? cpAsst.content.slice(0, 60) : '(无)');
+    }
+    if (activeChatText) {
+      const firstLine = activeChatText.split('\n').find(l => l.trim()) || '';
+      console.log('[DEBUG] active首行:', firstLine.slice(0, 80));
     }
 
-    // 记忆三路召回
-    if (config.features.memory) {
-      try {
-        const excludeEntities = [character.display_name, chatUserName, 'user'];
-        const rawResults = await hybridSearch(message, { conversationId, topK: 10, excludeEntities });
-        const hasKeywordOrEntityHit = rawResults.some(
-          r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity'))
-        );
-        if (!hasKeywordOrEntityHit) {
-          console.log('[chat] RAG skipped: no keyword/entity hits for query');
-        } else {
-          const memoryResults = rawResults.filter(m => {
-            if (!m.entities || m.entities.length === 0) return false;
-            // 排除事件类碎片（已有独立 event_history 注入通道，避免重复）
-            if (m.content && /【(事件|奇遇)/.test(m.content)) return false;
-            return true;
-          });
-          if (memoryResults.length >= 1) {
-            const memoryLines = memoryResults.map((m, i) =>
-              `${i + 1}. [${m.fragment_type}] ${m.content}`
-            ).join('\n');
-            materialParts.push('[相关记忆 — 以下是与当前对话相关的记忆碎片，可在回复中自然引用]\n' + memoryLines);
-          }
-        }
-      } catch (err) {
-        console.error('[chat] memory search failed:', err.message);
-      }
+    // ── 动态尾部块（将附加到最新 user 消息） ──
+    const dynamicBlocks = [];
+    const memorySnapshot = [];
+
+    // 1. 最近信箱往来
+    const recentLetters = db.prepare(`
+      SELECT content, content_short, reply_content,
+             CAST(julianday('now') - julianday(replied_at) AS INTEGER) AS days_ago
+      FROM mailbox_letters
+      WHERE character_id = ? AND direction = 'char_to_user' AND status = 'completed'
+        AND content != '' AND reply_content != ''
+      ORDER BY replied_at DESC LIMIT 2
+    `).all(characterId);
+    if (recentLetters.length > 0) {
+      const letterLines = recentLetters.map(l => {
+        const daysLabel = formatRelativeDay(l.days_ago);
+        const userBrief = (l.content || '').slice(0, 50);
+        const replyBrief = l.content_short || (l.reply_content || '').slice(0, 50);
+        return `- ${daysLabel}：${chatUserName}来信"${userBrief}..." → 你回信"${replyBrief}..."`;
+      });
+      dynamicBlocks.push(`<mailbox_history>你与${chatUserName}的最近信箱往来：\n${letterLines.join('\n')}\n\n可以在对话中自然地提及近期的通信内容，让对话更有连续性。</mailbox_history>`);
     }
 
-    // 最近朋友圈
+    // 2. 最近奇遇总结
+    const engagedEvent = db.prepare(`
+      SELECT title, summary, ended_at
+      FROM event_history WHERE character_id = ? AND engaged = 1
+      ORDER BY ended_at DESC LIMIT 1
+    `).get(characterId);
+    if (engagedEvent) {
+      dynamicBlocks.push(`<event_history>\n${character.display_name}最近经历了一些事：\n${engagedEvent.title}：${engagedEvent.summary || ''}\n你可以在对话中自然地提起或询问这些经历。\n</event_history>`);
+    }
+
+    // 3. 最近朋友圈（含评论区）
     const recentMoments = db.prepare(`
       SELECT id, content, created_at FROM moment_posts
       WHERE character_id = ? AND status = 'done'
@@ -741,20 +667,13 @@ router.post('/characters/:id/chat', async (req, res) => {
     if (recentMoments.length > 0) {
       const momentLines = recentMoments.map((m, i) => {
         let line = `${i + 1}. [${m.created_at}] ${m.content}`;
-
-        // 如果 user 评论过这条朋友圈，把评论区内容也注入
-        const hasUserComment = db.prepare(`
-          SELECT COUNT(*) AS cnt FROM moment_comments
-          WHERE post_id = ? AND author_type = 'user'
-        `).get(m.id);
+        const hasUserComment = db.prepare(`SELECT COUNT(*) AS cnt FROM moment_comments WHERE post_id = ? AND author_type = 'user'`).get(m.id);
         if (hasUserComment && hasUserComment.cnt > 0) {
           const comments = db.prepare(`
             SELECT mc.author_type, mc.content,
               CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE ? END AS display_name
-            FROM moment_comments mc
-            LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
-            WHERE mc.post_id = ?
-            ORDER BY mc.created_at ASC
+            FROM moment_comments mc LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
+            WHERE mc.post_id = ? ORDER BY mc.created_at ASC
           `).all(chatUserName, m.id);
           if (comments.length > 0) {
             const commentLines = comments.map(c => {
@@ -764,139 +683,164 @@ router.post('/characters/:id/chat', async (req, res) => {
             line += `\n  评论区：\n${commentLines}`;
           }
         }
-
         return line;
       }).join('\n');
-      materialParts.push(`「${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。」`);
+      dynamicBlocks.push(`<recent_moments>\n${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。\n</recent_moments>`);
     }
 
-    // 最近奇遇总结（和朋友圈一样主动注入）—— 1条最近参与过的
-    // 能出现在 event_history 中的都是已结束的奇遇，区别仅在于用户是否参与过
-    const engagedEvent = db.prepare(`
-      SELECT title, summary, ended_at
-      FROM event_history
-      WHERE character_id = ? AND engaged = 1
-      ORDER BY ended_at DESC LIMIT 1
-    `).get(characterId);
-
-    if (engagedEvent) {
-      materialParts.push(`「${character.display_name}最近经历了一些事：\n${engagedEvent.title}：${engagedEvent.summary || ''}\n你可以在对话中自然地提起或询问这些经历。」`);
+    // 4. 好感度区间描述
+    if (config.features.emotion && affinity != null) {
+      const affinityMsg = affinityToPrompt(affinity);
+      if (affinityMsg) dynamicBlocks.push(affinityMsg);
     }
 
-    if (materialParts.length > 0) {
-      msgs.push({ role: 'system', content: materialParts.join('\n\n') });
+    // 5. 角色视角的用户画像
+    const portraitRows = db.prepare(`
+      SELECT trait_type, content FROM user_portraits
+      WHERE character_id = ?
+      ORDER BY trait_type, confidence DESC
+    `).all(characterId);
+    if (portraitRows.length > 0) {
+      const grouped = {};
+      for (const row of portraitRows) { (grouped[row.trait_type] = grouped[row.trait_type] || []).push(row.content); }
+      const portraitStrs = [];
+      if (grouped.appearance) portraitStrs.push('外貌特征：' + grouped.appearance.join('、'));
+      if (grouped.personality) portraitStrs.push('性格特征：' + grouped.personality.join('、'));
+      if (grouped.preference) portraitStrs.push('偏好习惯：' + grouped.preference.join('、'));
+      dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // ═══════════════════════════════════════════
-    // msgs[4] — 格式：对话规则（DB + 硬编码） + 生图意图
-    // ═══════════════════════════════════════════
-    const formatParts = [];
-    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
-    formatParts.push(`<dialogue_format_rules>
-${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
-- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
-</dialogue_format_rules>`);
+    // 6. 活跃聊天历史（滑动窗口 0~15 轮）
+    if (activeChatText) {
+      dynamicBlocks.push(activeChatText);
+    }
+
+    // 7. 日程上下文（当前在做什么 / 睡醒等）
+    const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
+    if (scheduleCtx) {
+      dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
+    }
+
+    // 8. VAD 三维情绪描述
+    if (config.features.emotion && emotionPrompt) {
+      dynamicBlocks.push(emotionPrompt);
+    }
+
+    // 9. 活跃奇遇（仅首轮强调时出现）
+    if (activeEvent) {
+      const isFirstEmphasis = !activeEvent.emphasis_delivered;
+      if (isFirstEmphasis) {
+        const parsedHistory = JSON.parse(activeEvent.choice_history || '[]');
+        const latestStep = parsedHistory.length > 1 ? parsedHistory[parsedHistory.length - 1] : null;
+        const latestStepLine = latestStep
+          ? `\n最新情况（「${latestStep.choice_label}」）：${latestStep.summary}`
+          : '';
+        dynamicBlocks.push(`<current_event priority="active">\n现在，${character.display_name}正在经历一个突发事件：\n标题：${activeEvent.title}\n当前处境：${activeEvent.description}${latestStepLine}\n（这是一件正在进行的事。你的情绪、行为和注意力都会受到这件事的影响，请自然地流露在回复中。但如果对方不主动提起，也不需要刻意围绕它展开对话。）\n</current_event>`);
+      }
+    }
+
+    // 10. RAG 三路召回记忆
+    if (config.features.memory) {
+      try {
+        const excludeEntities = [character.display_name, chatUserName, 'user'];
+        const rawResults = await hybridSearch(message, { conversationId, topK: 10, excludeEntities });
+        const hasKeywordOrEntityHit = rawResults.some(r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity')));
+        if (!hasKeywordOrEntityHit) {
+          console.log('[chat] RAG skipped: no keyword/entity hits for query');
+        } else {
+          const memoryResults = rawResults.filter(m => {
+            if (!m.entities || m.entities.length === 0) return false;
+            if (m.content && /【(事件|奇遇)/.test(m.content)) return false;
+            return true;
+          });
+          if (memoryResults.length >= 1) {
+            const memoryLines = memoryResults.map((m, i) => `${i + 1}. [${m.fragment_type}] ${m.content}`).join('\n');
+            memorySnapshot.push(...memoryResults.map(m => ({
+              id: m.id ?? null,
+              fragmentType: m.fragment_type,
+              content: m.content,
+              entities: m.entities ?? [],
+              sources: m.sources ?? [],
+            })));
+            dynamicBlocks.push(`<rag_memories>\n${memoryLines}\n</rag_memories>`);
+          }
+        }
+      } catch (err) { console.error('[chat] memory search failed:', err.message); }
+    }
+
+    // 11. 重逢提示（streak ≥ 2 时注入）
+    const streak = getUnansweredStreak(characterId);
+    if (streak >= 2) {
+      dynamicBlocks.push(`【⚠️ 重逢提示 — 仅本次生成可见，不存入对话记录】${character.display_name} 之前连续发了 ${streak} 条主动消息 ${chatUserName} 都没回——现在 ${chatUserName} 终于回复了。${character.display_name} 应在接下来的回复中自然地流露一点"终于等到你"的情绪——不质问、不委屈、不阴阳怪气。嘴硬的用别扭的方式，温柔的用直接的方式，搞怪的用段子。让 ${chatUserName} 感觉到：ta 回来聊天这件事，对 ${character.display_name} 来说很重要。`);
+    }
+    if (streak > 0) {
+      resetUnansweredStreak(characterId);
+    }
+
+    // 12. 交叉角色 short_prompt 注入
+    if (crossChars.length > 0) {
+      const crossLines = crossChars.map(c =>
+        `角色「${c.display_name}」: ${c.short_prompt || (c.base_prompt || '').slice(0, 200)}`
+      ).join('\n\n');
+      dynamicBlocks.push(`<cross_reference>\n当前对话中涉及以下其他角色，你应当了解他们的基本信息，在对话中自然互动时保持其人格的一致性：\n\n${crossLines}\n</cross_reference>`);
+    }
+
+    // 13. 回复长度提示（随好感度变化）
     const sentenceHint = (() => {
       if (explicitImageIntent) return '15个汉字以内';
       if (affinity == null || affinity < 60) return '10~30个汉字';
       if (affinity < 80) return '10~40个汉字';
       return '10~60个汉字';
     })();
-    formatParts.push('<dialogue_rules>\n- **回复控制在' + sentenceHint + '，保持口语化轻快节奏**\n</dialogue_rules>');
-    msgs.push({ role: 'system', content: formatParts.join('\n\n') });
+    dynamicBlocks.push(`<dialogue_rules>\n- **回复控制在${sentenceHint}，保持口语化轻快节奏**\n</dialogue_rules>`);
 
-    msgs.push(...history);
+    // 14. 时间上下文（当前时间 + 距上次聊天间隔）
+    const now = new Date();
+    const timeTag = getTimeTag(now);
+    const timeBlocks = [timeTag];
+    // 上次对话时间：取倒数第二条 user 消息的 created_at
+    const prevUserMsg = db.prepare(`
+      SELECT created_at FROM raw_messages
+      WHERE conversation_id = ? AND role = 'user'
+      ORDER BY id DESC LIMIT 1 OFFSET 1
+    `).get(conversationId);
+    if (prevUserMsg?.created_at) {
+      const prevDate = new Date(prevUserMsg.created_at + 'Z');
+      const gapMinutes = (now - prevDate) / 60000;
+      if (gapMinutes > 10) {
+        const prevWeekDay = ['周日','周一','周二','周三','周四','周五','周六'][prevDate.getDay()];
+        timeBlocks.push(`[上次对话时间 ${prevWeekDay} ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`);
+      }
+    }
+    dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);
 
-    // 正在进行的生活片段 — 仅首轮强调时注入上下文块，后续轮次信息已在 msgs[1] 日程行中合并
-    // 注：activeEvent 已在 msgs[1] 构建前查询，此处复用
+    // 生图仍由原有路径 A/B/C/D/E 决策；固定格式规则已在稳定前缀中，不额外改变主回复行为。
+    // ── 通过 buildChatContext 组装最终请求 ──
+    const { messages: msgs, metadata } = buildChatContext({
+      stableBlocks,
+      summaryBlock,
+      history: checkpointHistory,
+      dynamicBlocks,
+    });
+
+    // ── 副作用：首轮强调标记（event 已在 dynamicBlocks 中注入） ──
     if (activeEvent && !activeEvent.emphasis_delivered) {
-      const parsedHistory = JSON.parse(activeEvent.choice_history || '[]');
-      const latestStep = parsedHistory.length > 1 ? parsedHistory[parsedHistory.length - 1] : null;
-
-      const eventParts = [];
-      eventParts.push(`<current_event priority="active">`);
-      eventParts.push(`现在，${character.display_name}正在经历一个突发事件：`);
-      eventParts.push(`标题：${activeEvent.title}`);
-      eventParts.push(`当前处境：${activeEvent.description}`);
-      if (latestStep) {
-        eventParts.push(`最新情况（「${latestStep.choice_label}」）：${latestStep.summary}`);
-      }
-      eventParts.push(`（这是一件正在进行的事。你的情绪、行为和注意力都会受到这件事的影响，请自然地流露在回复中。但如果对方不主动提起，也不需要刻意围绕它展开对话。）`);
-      eventParts.push(`</current_event>`);
-      const eventContext = eventParts.join('\n');
-
-      // 5.4 片段上下文 — 拼入最后一句 user 消息最前面（不入库，仅传给 LLM）
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === 'user') {
-          msgs[i].content = `${eventContext}\n\n${msgs[i].content}`;
-          break;
-        }
-      }
-
-      // 首轮强调已注入，标记为已送达（后续轮次仅在 msgs[1] 日程行中合并）
       db.prepare(`UPDATE character_events SET emphasis_delivered = 1 WHERE id = ?`).run(activeEvent.id);
     }
 
-    // 5.5 重逢上下文 + streak 重置
-    const streak = getUnansweredStreak(characterId);
-    if (streak >= 2) {
-      let insertAt = msgs.length;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === 'user') { insertAt = i; break; }
-      }
-      msgs.splice(insertAt, 0, {
-        role: 'system',
-        content: `【⚠️ 重逢提示 — 仅本次生成可见，不存入对话记录】assistant 之前连续发了 ${streak} 条主动消息 user 都没回——现在 user 终于回复了。assistant 应在接下来的回复中自然地流露一点"终于等到你"的情绪——不质问、不委屈、不阴阳怪气。嘴硬的用别扭的方式，温柔的用直接的方式，搞怪的用段子。让 user 感觉到：ta 回来聊天这件事，对 assistant 来说很重要。`,
-      });
-    }
-    if (streak > 0) {
-      resetUnansweredStreak(characterId);
-    }
-
-    // 5.6 在最近的 user 消息前加时间戳
-    //     倒数第一句 → [当前时间]（用现在的时间）
-    //     倒数第二句 → [上次对话时间]（用该消息在 DB 中的 created_at）
-    const now = new Date();
-    const timeTag = getTimeTag(now);
-    let foundCount = 0;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'user') {
-        foundCount++;
-        if (foundCount === 1) {
-          // 倒数第一句 user 消息 → 当前时间
-          msgs[i].content = `${timeTag} ${msgs[i].content}`;
-        } else if (foundCount === 2) {
-          // 倒数第二句 user 消息 → 该消息的 DB 时间
-          // 如果间隔 ≤ 10 分钟则视为同一轮会话，不标记
-          const msgCreatedAt = msgs[i].created_at;
-          if (msgCreatedAt) {
-            const prevDate = new Date(msgCreatedAt + 'Z'); // SQLite UTC → JS Date
-            const gapMinutes = (now - prevDate) / 60000;
-            if (gapMinutes > 10) {
-              const prevWeekDay = ['周日','周一','周二','周三','周四','周五','周六'][prevDate.getDay()];
-              const prevTag = `[上次对话时间 ${prevWeekDay} ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`;
-              msgs[i].content = `${prevTag} ${msgs[i].content}`;
-            }
-          }
-          break;
-        }
-      }
-    }
-
-    // 5.6 清理 created_at：仅用于时间标签计算，不应送入 LLM
-    for (const msg of msgs) {
-      delete msg.created_at;
-    }
-
-    // 6. 流式生成（温度 0.65）
+    // 6. 流式生成（温度 0.72）
     // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
     const splitter = new SentenceSplitter();
     const collectedSegments = [];
     let fullContent = '';
 
+    const streamOpts = {
+      temperature: 0.72,
+      label: '主聊天流',
+    };
+
     send('response_start', {});
-    for await (const chunk of chatStream(msgs, { temperature: 0.72, label: '主聊天流' })) {
+    for await (const chunk of chatStream(msgs, streamOpts)) {
       const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
       fullContent += cleanChunk;
 
@@ -1024,6 +968,8 @@ ${coreRules}
       `).get(conversationId);
 
       const evalContext = {
+        conversationId,
+        characterId: parseInt(characterId, 10) || null,
         characterPersonality: character?.short_prompt || '',
         emotionBaseline,
         currentVad: getCompositeEmotion(emotionState),
@@ -1468,41 +1414,53 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     personalityPrompt = appendOathRing(personalityPrompt, character.id, ringUserName, { isFirstPerson: true });
   }
 
+  // ── 环境参考（Environment reference，置于 schedule 之前）──
+  const weatherHint = (() => {
+    try {
+      const note = getLightNoteWithWeather();
+      return note ? `Environment reference：${note}。` : '';
+    } catch { return ''; }
+  })();
+
+  // ── 日程/状态上下文（不含天气光线，避免与 Environment reference 重复）──
+  const scheduleCtx = (() => {
+    try {
+      const activity = getCurrentActivity(character.id);
+      const tempWoken = isTempWoken(character.id);
+
+      if (tempWoken) {
+        const db = getDb();
+        const wakeMode = db.prepare('SELECT wake_mode FROM characters WHERE id = ?').get(character.id)?.wake_mode;
+        const userName = config.user.nickname || '用户';
+        let wakeDesc;
+        if (wakeMode === 'phone') {
+          wakeDesc = `你被${userName}的电话吵醒了，脑袋昏沉沉的。半睁着眼，睡眼惺忪，手机屏幕亮着，正在打哈欠，靠在床上看着手机。`;
+        } else if (wakeMode === 'door' || wakeMode === 'shake') {
+          const userAppearance = config.user.appearance ? `（${config.user.appearance}）` : '';
+          wakeDesc = `${userName}${userAppearance}紧急冲到你家把你叫醒了，你迷迷糊糊地睁开眼。${userName}用各种方式把你吵醒/摇醒了，你半坐在床上，穿着睡衣。**画面富有动感，动作激烈**`;
+        } else {
+          wakeDesc = `你刚被叫醒，脑袋还昏沉沉的。`;
+        }
+        const locStr = activity?.location ? `，正在【${activity.location}】附近` : '';
+        return '【当前状态】' + wakeDesc + locStr;
+      }
+
+      if (!activity || !activity.activity || activity.activity === '自由时间') return '';
+      return '【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '');
+    } catch { return ''; }
+  })();
+
+  // ── 画面规则 + 环境参考 + 日程上下文（去重：天气仅由 Environment reference 提供）──
+  const formatGuideWithWeather = formatGuide
+    ? formatGuide + (weatherHint ? '\n\n' + weatherHint : '') + (scheduleCtx ? '\n\n' + scheduleCtx : '')
+    : (weatherHint || scheduleCtx ? (weatherHint || '') + (scheduleCtx ? '\n\n' + scheduleCtx : '') : '');
+
   const userName = config.user.nickname || '用户';
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
     { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
     // ── 人格和规则（为了让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
-    // ── 当前时间 + 光线 + 日程上下文 ──
-    { role: 'system', content: (() => {
-      try {
-        const lightHint = getLightHint();
-        const activity = getCurrentActivity(character.id);
-        const tempWoken = isTempWoken(character.id);
-
-        // 临时叫醒状态：根据叫醒方式描述当前视觉状态
-        if (tempWoken) {
-          const db = getDb();
-          const wakeMode = db.prepare('SELECT wake_mode FROM characters WHERE id = ?').get(character.id)?.wake_mode;
-          const userName = config.user.nickname || '用户';
-          let wakeDesc;
-          if (wakeMode === 'phone') {
-            wakeDesc = `你被${userName}的电话吵醒了，脑袋昏沉沉的。半睁着眼，睡眼惺忪，手机屏幕亮着，正在打哈欠，靠在床上看着手机。`;
-          } else if (wakeMode === 'door' || wakeMode === 'shake') {
-            const userAppearance = config.user.appearance ? `（${config.user.appearance}）` : '';
-            wakeDesc = `${userName}${userAppearance}紧急冲到你家把你叫醒了，你迷迷糊糊地睁开眼。${userName}用各种方式把你吵醒/摇醒了，你半坐在床上，穿着睡衣。**画面富有动感，动作激烈**`;
-          } else {
-            wakeDesc = `你刚被叫醒，脑袋还昏沉沉的。`;
-          }
-          const locStr = activity?.location ? `，正在【${activity.location}】附近` : '';
-          return lightHint + '\n\n【当前状态】' + wakeDesc + locStr;
-        }
-
-        if (!activity || !activity.activity || activity.activity === '自由时间') return lightHint;
-        return lightHint + '\n\n【当前日程】你正在【' + activity.location + '】' + activity.activity + '。' + (activity.description ? activity.description + '。' : '');
-      } catch (_) { return getLightHint(); }
-    })() },
     // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
@@ -1519,6 +1477,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         content: `【对话对象】${parts.join('。')}。当你生成关于${userName}的图片（例如合照，互动的场景）的时候，需要严格遵循以上${userName}的特征，尤其是性别和外观。${userRelationContent}`
       }];
     })(),
+    // ── 画面规则 + 环境参考（天气/光线/日程已整合到规则提示词中，紧随用户信息之后让 LLM 先明确画风格式再读对话）──
+    ...(formatGuideWithWeather ? [{ role: 'system', content: formatGuideWithWeather }] : []),
     // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
     // 同时剥离历史 prompt JSON 避免 token 浪费，并提取最近一轮 prompt 作为【上一次画面描述】
     ...(() => {
@@ -1571,17 +1531,15 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       // 如果存在上一轮画面，追加独立块用于画面连续性
       if (lastScenePrompt) {
         return [
-          { role: 'system', content: `【上一次画面描述】以下为上一轮对话中生成的画面描述，用于保持画面风格的连贯性（角色外观、场景氛围、光线色调等），本轮生成的新画面应在此基础上自然延续：\n${lastScenePrompt}` },
+          { role: 'system', content: `【上一次画面描述】以下为上一轮对话中生成的画面描述，如果场景和内容相似，那这些描述可以用于保持画面的连贯性（角色外观、场景氛围、光线色调等）在此基础上自然延续，但如果场景和内容不同，那就按照新的对话内容来：\n${lastScenePrompt}` },
           contextBlock,
         ];
       }
       return [contextBlock];
     })(),
-    // ── 交叉角色生图上下文（在格式说明之前，让 LLM 知道画面中还有谁）──
+    // ── 交叉角色生图上下文（在格式说明之后，让 LLM 知道画面中还有谁）──
     ...crossRefImageMsgs,
-    // ── prompt 格式说明单独一条（放在对话上下文之后，模型理解了场景再告诉格式）──
-    ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
-    { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确需要${userName}参与的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
+    { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确在和${userName}互动的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -1994,7 +1952,7 @@ function _parseLoras(char) {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(l => l.path && typeof l.path === 'string').map(l => ({
       path: l.path,
-      weight: typeof l.weight === 'number' ? l.weight : 1,
+      weight: typeof l.weight === 'number' ? l.weight : 0.6,
       triggerWord: l.triggerWord || '',
     }));
   } catch {

@@ -1,8 +1,8 @@
 /**
  * 滚动摘要生成器
  *
- * 每个会话每 20 条消息触发一次摘要生成。
- * 新摘要 = LLM(上一段摘要 + 最近 20 条消息)。
+ * 每个会话每 15 条 assistant 消息触发一次摘要生成（含主动聊天消息）。
+ * 新摘要 = LLM(上一段摘要 + 最近 15 轮对话)。
  * 生成后自动向量化存入 ChromaDB，纳入 RAG 召回。
  */
 
@@ -11,11 +11,11 @@ import { chatSync } from '../llm/llm-client.js';
 import { upsertVector } from './vectorClient.js';
 
 /** 去掉消息中的 {"prompt":"..."} JSON 标签（可能在开头/中间/末尾），避免长篇英文生图 prompt 干扰摘要提取 */
-function stripPromptJson(content) {
+export function stripPromptJson(content) {
   return content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '');
 }
 
-const SUMMARIZE_INTERVAL = 20; // 每 20 条消息触发一次
+const SUMMARIZE_INTERVAL = 15; // 每 15 条 assistant 消息触发一次
 
 const SUMMARY_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
 
@@ -44,56 +44,39 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
   const characterName = nameHints.characterName || 'assistant';
   const db = getDb();
 
-  // 统计该会话的消息总数（完整消息，非气泡）
+  // 最新摘要即 compaction checkpoint；只统计 checkpoint 之后的消息。
+  const lastSummary = db.prepare(`
+    SELECT id, summary, end_msg_id FROM rolling_summaries
+    WHERE conversation_id = ? AND checkpoint_version = 1
+    ORDER BY end_msg_id DESC, id DESC LIMIT 1
+  `).get(conversationId);
+  const checkpointEndId = lastSummary?.end_msg_id || 0;
+  // 统计 checkpoint 之后的 assistant 消息数量（含主动聊天）
   const { count } = db.prepare(`
     SELECT COUNT(*) as count FROM raw_messages
-    WHERE conversation_id = ? AND role IN ('user', 'assistant')
-  `).get(conversationId);
+    WHERE conversation_id = ? AND id > ? AND role = 'assistant'
+  `).get(conversationId, checkpointEndId);
 
-  // 统计已有的摘要数量
-  const { summary_count } = db.prepare(`
-    SELECT COUNT(*) as summary_count FROM rolling_summaries
-    WHERE conversation_id = ?
-  `).get(conversationId);
-
-  // 计算是否需要生成新摘要
-  const coveredMessages = summary_count * SUMMARIZE_INTERVAL;
-  if (count - coveredMessages < SUMMARIZE_INTERVAL) {
-    return null; // 还没到阈值
-  }
-
-  // 获取上一段摘要
-  const lastSummary = db.prepare(`
-    SELECT summary FROM rolling_summaries
-    WHERE conversation_id = ?
-    ORDER BY id DESC LIMIT 1
-  `).get(conversationId);
+  if (count < SUMMARIZE_INTERVAL) return null;
 
   const previousSummary = lastSummary?.summary || '（新对话开始）';
+  // 获取所有未摘要消息
+  const allUnsummarized = db.prepare(`
+    SELECT id, role, content FROM raw_messages
+    WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
+    ORDER BY id ASC
+  `).all(conversationId, checkpointEndId);
 
-  // 确定要摘要的消息范围
-  const startId = coveredMessages === 0
-    ? null
-    : db.prepare(`
-        SELECT end_msg_id FROM rolling_summaries
-        WHERE conversation_id = ? ORDER BY id DESC LIMIT 1
-      `).get(conversationId)?.end_msg_id || null;
-
-  // 获取最近 50 条完整消息
-  let recentMessages;
-  if (startId) {
-    recentMessages = db.prepare(`
-      SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
-      ORDER BY id ASC LIMIT ?
-    `).all(conversationId, startId, SUMMARIZE_INTERVAL);
-  } else {
-    recentMessages = db.prepare(`
-      SELECT role, content FROM raw_messages
-      WHERE conversation_id = ? AND role IN ('user','assistant')
-      ORDER BY id ASC LIMIT ?
-    `).all(conversationId, SUMMARIZE_INTERVAL);
+  // 截取覆盖前 15 条 assistant 的消息范围
+  let asstCount = 0;
+  let batchEnd = allUnsummarized.length;
+  for (let i = 0; i < allUnsummarized.length; i++) {
+    if (allUnsummarized[i].role === 'assistant') {
+      asstCount++;
+      if (asstCount >= SUMMARIZE_INTERVAL) { batchEnd = i + 1; break; }
+    }
   }
+  const recentMessages = allUnsummarized.slice(0, batchEnd);
 
   if (recentMessages.length === 0) return null;
 
@@ -124,60 +107,53 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     return null;
   }
 
-  // 确定消息 ID 范围
+  // 确定实际被摘要的消息 ID 范围，而不是用总数偏移推算。
   const firstMsg = recentMessages[0];
   const lastMsg = recentMessages[recentMessages.length - 1];
-
-  // 获取实际的消息 ID（raw_messages）
-  const rangeStart = db.prepare(`
-    SELECT id FROM raw_messages WHERE conversation_id = ?
-    ORDER BY id ASC LIMIT 1 OFFSET ?
-  `).get(conversationId, coveredMessages);
-
-  const rangeEnd = db.prepare(`
-    SELECT id FROM raw_messages WHERE conversation_id = ?
-    ORDER BY id ASC LIMIT 1 OFFSET ?
-  `).get(conversationId, count - 1);
+  const summaryIndex = (db.prepare(`
+    SELECT COUNT(*) AS count FROM rolling_summaries WHERE conversation_id = ?
+  `).get(conversationId)?.count || 0) + 1;
 
   // 保存摘要
   db.prepare(`
-    INSERT INTO rolling_summaries (conversation_id, start_msg_id, end_msg_id, summary)
-    VALUES (?, ?, ?, ?)
-  `).run(conversationId, rangeStart?.id || 0, rangeEnd?.id || 0, summary);
+    INSERT INTO rolling_summaries (conversation_id, start_msg_id, end_msg_id, summary, checkpoint_version)
+    VALUES (?, ?, ?, ?, 1)
+  `).run(conversationId, firstMsg.id, lastMsg.id, summary);
 
   // 异步向量化摘要并存入 ChromaDB（不阻塞返回）
   setImmediate(async () => {
     try {
-      const chromaId = `summary_${conversationId}_${summary_count + 1}`;
+      const chromaId = `summary_${conversationId}_${summaryIndex}`;
       await upsertVector(
         chromaId,
         summary,
         {
           conversation_id: conversationId,
           fragment_type: 'summary',
-          summary_index: summary_count + 1,
+          summary_index: summaryIndex,
         },
         'summary'
       );
-      console.log(`[summarizer] vectorized summary #${summary_count + 1} for conv ${conversationId}`);
+      console.log(`[summarizer] vectorized summary #${summaryIndex} for conv ${conversationId}`);
     } catch (err) {
       console.error(`[summarizer] vectorize failed:`, err.message);
     }
   });
 
-  console.log(`[summarizer] generated summary #${summary_count + 1} for conv ${conversationId} (${count} msgs)`);
+  console.log(`[summarizer] generated summary #${summaryIndex} for conv ${conversationId} (${recentMessages.length} msgs)`);
 
   return summary;
 }
 
 /**
  * 获取会话的最近摘要（用于构建 system prompt）
+ * 返回包含 id / end_msg_id / summary 的记录数组。
  */
 export function getRecentSummaries(conversationId, limit = 3) {
   const db = getDb();
   return db.prepare(`
-    SELECT summary FROM rolling_summaries
-    WHERE conversation_id = ?
-    ORDER BY id DESC LIMIT ?
+    SELECT id, end_msg_id, summary FROM rolling_summaries
+    WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
+    ORDER BY end_msg_id DESC, id DESC LIMIT ?
   `).all(conversationId, limit);
 }

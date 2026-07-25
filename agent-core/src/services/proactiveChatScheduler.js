@@ -24,7 +24,7 @@ import {
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { getLightHint, getTimeLight, getTimeLightInline } from './timeLight.js';
+import { getLightHint, getLightNoteWithWeather, getTimeLight, getTimeLightInline } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
@@ -561,7 +561,17 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     // 1. LLM 生成画面描述 prompt
     const systemRules = getSystemRulesWithWorld({ roleplay: false });
     const imagePromptRule = getGlobalRule('image_prompt');
-    const imagePromptInst = imagePromptRule?.rule_content || '';
+    let imagePromptInst = imagePromptRule?.rule_content || '';
+    // 追加 Environment reference，去重：天气仅由此处提供，不单独出现 lightHint
+    const weatherHint = (() => {
+      try {
+        const note = getLightNoteWithWeather();
+        return note ? `Environment reference：${note}。` : '';
+      } catch { return ''; }
+    })();
+    if (weatherHint) {
+      imagePromptInst = imagePromptInst ? imagePromptInst + '\n\n' + weatherHint : weatherHint;
+    }
 
     // 提取角色名：从开头截取到"## 你的身份"之前
     const nameMatch = character.base_prompt.match(/^([\s\S]*?)## 你的身份/);
@@ -589,15 +599,12 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
         return "【当前日程】角色正在【" + activity.location + "】" + activity.activity + "。" + (activity.description ? activity.description + "。" : "") + timeLightInline + "。照片里的角色要体现正在做的日程。" + sleepNote;
       } catch (_) { return ""; }
     })();
-    const lightHint = getLightHint();
     const imagePromptText = await chatSync(
       [
         { role: 'system', content: systemRules || '你是一个角色扮演 AI。' },
         { role: 'user', content: `接下来你将收到一个角色的外观描述和ta主动发起的一段对话，请为这段对话配一张图。
 
-${lightHint}
-
-【角色名字】
+${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}【角色名字】
 ${nameBlock}
 
 【角色外观】
@@ -610,7 +617,7 @@ ${motiveName}
 【角色的开场白】
 "${greeting}"
 
-${imagePromptInst ? `【图像生成指令】\n${imagePromptInst}\n` : ''}直接输出英文画面描述，不要任何格式包装或额外文字` },
+直接输出英文画面描述，不要任何格式包装或额外文字` },
       ],
       { temperature: 0.7, max_tokens: 1024, label: '主动聊天配图prompt' }
     );

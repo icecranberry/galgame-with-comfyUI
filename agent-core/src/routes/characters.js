@@ -318,6 +318,7 @@ router.delete('/:id', (req, res, next) => {
     db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+
     db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
     // user_portraits 也引用 messages，先清理掉避免 FK 冲突
     db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(char.id);

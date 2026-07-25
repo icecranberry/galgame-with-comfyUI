@@ -677,13 +677,14 @@ ${rules}`;
     ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
     : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
 
-  // msgs[0] 舞台 → [世界观] → msgs[1] 角色 → msgs[2] 交互(多人) → msgs[3] 任务 → user
+  // msgs[0] 舞台 → [世界观] → msgs[1] 任务 → msgs[2] 角色 → msgs[3] 交互(多人) → user
   // 誓约角色：银白细戒指外观细节
   const ringUserName = config.user.nickname || 'user';
   const basePromptWithRing = appendOathRing(character.base_prompt, character.id, ringUserName, { isFirstPerson: true });
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  msgs.push({ role: 'system', content: postingTask });
   msgs.push({ role: 'system', content: basePromptWithRing });
   if (multiPersons.length > 0) {
     for (const mp of multiPersons) {
@@ -693,7 +694,6 @@ ${rules}`;
       });
     }
   }
-  msgs.push({ role: 'system', content: postingTask });
   msgs.push({ role: 'user', content: userMsg });
 
   let text = '', imagePrompt = '', imageUrls = [];

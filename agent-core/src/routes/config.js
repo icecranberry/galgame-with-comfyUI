@@ -347,10 +347,10 @@ router.get('/loras-files', (req, res) => {
           const isDefault = !relToDefault.startsWith('..') && !path.isAbsolute(relToDefault);
 
           if (isDefault) {
-            const name = relToDefault.replace(/\\/g, '/');
+            const name = relToDefault;
             if (!seen.has(name)) {
               seen.add(name);
-              files.push({ name, path: fullPath.replace(/\\/g, '/'), source: null });
+              files.push({ name, path: fullPath, source: null });
             }
           } else {
             const name = entry.name;
@@ -365,7 +365,7 @@ router.get('/loras-files', (req, res) => {
             const key = name + '|' + source;
             if (!seen.has(key)) {
               seen.add(key);
-              files.push({ name, path: fullPath.replace(/\\/g, '/'), source });
+              files.push({ name, path: fullPath, source });
             }
           }
         }
@@ -379,7 +379,7 @@ router.get('/loras-files', (req, res) => {
     files.sort((a, b) => a.name.localeCompare(b.name));
     console.log(`[loras-files] ${files.length} files from ${scanDirs.size} dir(s)`);
 
-    res.json({ files, lorasDir: defaultLoraDir.replace(/\\/g, '/') });
+    res.json({ files, lorasDir: defaultLoraDir });
   } catch (err) {
     res.status(500).json({ files: [], lorasDir: null, error: err.message });
   }

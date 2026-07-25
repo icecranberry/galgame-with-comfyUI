@@ -51,7 +51,7 @@
         </div>
         <!-- 外观特征 -->
         <div class="user-field-row">
-          <span class="field-label">外观</span>
+          <span class="field-label">外观描述</span>
           <div class="field-value-wrap">
             <textarea
               v-if="editingAppearance"
@@ -62,7 +62,7 @@
               @blur="saveAppearance"
               @keydown.enter.exact="saveAppearance"
               @keydown.escape="cancelEditAppearance"
-              placeholder="外观描述越紧密越不容易和其他角色串，示例：长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔"
+              placeholder="外观描述越紧密越不容易和其他角色串，示例：小明（←改成你的名字）来自原创角色，小明（←改成你的名字）是长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔"
             ></textarea>
             <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
             <button v-if="!editingAppearance" class="edit-pen" @click="startEditAppearance" title="编辑外观">✎</button>
