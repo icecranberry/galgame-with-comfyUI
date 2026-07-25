@@ -128,9 +128,14 @@ async function processReplyQueue() {
 
   const ids = allPending.map(e => e.id);
 
-  // 全部标记 processing
+  // 原子性标记 processing（AND status='waiting' 确保与 wakeService 互斥）
   const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`UPDATE reply_queue SET status = 'processing' WHERE id IN (${placeholders})`).run(...ids);
+  const claimResult = db.prepare(`UPDATE reply_queue SET status = 'processing' WHERE id IN (${placeholders}) AND status = 'waiting'`).run(...ids);
+
+  if (claimResult.changes === 0) {
+    console.log(`[replyQueue] Entries for ${entry.display_name} already claimed by another process, skipping`);
+    return;
+  }
 
   const isSleepWakeup = entry.delay_minutes === -1;
 
@@ -363,10 +368,14 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
     LIMIT 30
   `).all(conversationId);
 
-  // 检查是否需要加一条 user 消息作为触发
-  // 取最后一条作为对话锚点
+  const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
+
   if (history.length > 0) {
-    msgs.push(...history);
+    const cleanedHistory = history.map(m => ({
+      ...m,
+      content: m.role === 'assistant' ? m.content.replace(PROMPT_JSON_RE, '') : m.content,
+    }));
+    msgs.push(...cleanedHistory);
   }
 
   return msgs;

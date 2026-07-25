@@ -101,7 +101,7 @@ export function getCheckpointHistory(db, conversationId, maxMessages = MAX_UNCOM
     ORDER BY end_msg_id DESC, id DESC LIMIT 1
   `).get(conversationId);
 
-  // 正常情况下摘要每 30 条（15 轮）推进；60 条上限只在连续摘要失败时兜底，避免请求无限增长。
+  // 正常情况下摘要每 ~20 条消息（10 条 assistant）推进；60 条上限只在连续摘要失败时兜底，避免请求无限增长。
   const history = db.prepare(`
     SELECT role, content, created_at FROM (
       SELECT id, role, content, created_at
@@ -127,11 +127,11 @@ export function getCheckpointHistory(db, conversationId, maxMessages = MAX_UNCOM
  *
  * @param {object} db
  * @param {string} conversationId
- * @param {number} [maxActiveRounds=15]  活跃聊天历史最多保留轮数
- * @param {number} [maxTotalRounds=30]   上下文暴露的总轮数上限（checkpoint + active）
+ * @param {number} [maxActiveRounds=10]  活跃聊天历史最多保留轮数
+ * @param {number} [maxCheckpointRounds=10] checkpoint 历史保留 assistant 条数
  * @returns {{ checkpoint, checkpointHistory, checkpointRounds, activeText, activeRounds }}
  */
-export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxCheckpointRounds = 15, { userName = 'user', characterName = 'assistant' } = {}) {
+export function getSplitHistory(db, conversationId, maxActiveRounds = 10, maxCheckpointRounds = 10, { userName = 'user', characterName = 'assistant' } = {}) {
   // 1. 找到最新摘要分界线（冻结点）
   const checkpoint = db.prepare(`
     SELECT id, end_msg_id, summary
@@ -142,8 +142,9 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxChe
 
   const afterId = checkpoint?.end_msg_id || 0;
 
-  // ── 2. 活跃窗口：未摘要消息 (id > afterId)，按时间顺序展示，统计 assistant 次数 ──
-  const activeFetchLimit = maxActiveRounds * 3; // 覆盖 15 条 assistant + 穿插的 user
+  // ── 2. 活跃窗口：未摘要消息 (id > afterId)，按时间顺序，最多显示 maxActiveRounds 条 assistant ──
+  const tailMsgs = [];
+  const activeFetchLimit = maxActiveRounds * 3; // 覆盖 10 条 assistant + 穿插的 user
   const activeRaw = db.prepare(`
     SELECT id, role, content FROM (
       SELECT id, role, content FROM raw_messages
@@ -152,15 +153,25 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxChe
     ) ORDER BY id ASC
   `).all(conversationId, afterId, activeFetchLimit);
 
-  // 尾部：仅当前用户消息（最后一条且 role=user，未收到回复）
-  const tailMsgs = [];
-  const hasUnrepliedUser = activeRaw.length > 0 && activeRaw[activeRaw.length - 1].role === 'user';
-  if (hasUnrepliedUser) {
-    tailMsgs.push({ role: 'user', content: stripPromptJson(activeRaw[activeRaw.length - 1].content) });
+  // 剔除末尾未回复的 user 消息（当前输入），不计入活跃窗口
+  const unrepliedUser = activeRaw.length > 0 && activeRaw[activeRaw.length - 1].role === 'user'
+    ? activeRaw.pop() : null;
+  if (unrepliedUser) {
+    tailMsgs.push({ role: 'user', content: stripPromptJson(unrepliedUser.content) });
   }
 
-  // 活跃聊天历史：排除末尾未回复的 user 消息，只展示已完成轮次
-  const displayMsgs = hasUnrepliedUser ? activeRaw.slice(0, -1) : activeRaw;
+  // 从尾部向前数 maxActiveRounds 条 assistant，截取对应消息段
+  let activeAsstCount = 0;
+  let activeSliceStart = activeRaw.length;
+  for (let i = activeRaw.length - 1; i >= 0; i--) {
+    if (activeRaw[i].role === 'assistant') {
+      activeAsstCount++;
+      if (activeAsstCount >= maxActiveRounds) { activeSliceStart = i; break; }
+    }
+  }
+  // assistant 不足 maxActiveRounds 条时，取全部消息
+  if (activeSliceStart === activeRaw.length) activeSliceStart = 0;
+  const displayMsgs = activeRaw.slice(activeSliceStart);
   const activeRounds = displayMsgs.filter(m => m.role === 'assistant').length;
 
   let activeText = '';
@@ -172,12 +183,12 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxChe
     activeText = `<active_chat_history>\n${lines.join('\n')}\n</active_chat_history>`;
   }
 
-  // ── 3. checkpoint 历史：已摘要消息 (id ≤ afterId)，固定 15 条 assistant ──
+  // ── 3. checkpoint 历史：已摘要消息 (id ≤ afterId)，固定 10 条 assistant ──
   let checkpointHistory = [];
   let checkpointRounds = 0;
 
   if (afterId > 0) {
-    const checkpointFetchLimit = maxCheckpointRounds * 3; // 覆盖 15 条 assistant
+    const checkpointFetchLimit = maxCheckpointRounds * 3; // 覆盖 10 条 assistant
     const checkpointRaw = db.prepare(`
       SELECT id, role, content FROM (
         SELECT id, role, content FROM raw_messages
@@ -186,7 +197,7 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxChe
       ) ORDER BY id ASC
     `).all(conversationId, afterId, checkpointFetchLimit);
 
-    // 从尾部向前数 15 条 assistant，截取对应消息段
+    // 从尾部向前数 10 条 assistant，截取对应消息段
     let asstCount = 0;
     let sliceStart = checkpointRaw.length;
     for (let i = checkpointRaw.length - 1; i >= 0; i--) {
@@ -195,6 +206,8 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 15, maxChe
         if (asstCount >= maxCheckpointRounds) { sliceStart = i; break; }
       }
     }
+    // assistant 不足 maxCheckpointRounds 条时，取全部消息
+    if (sliceStart === checkpointRaw.length) sliceStart = 0;
 
     const checkpointMsgs = checkpointRaw.slice(sliceStart);
     checkpointRounds = asstCount;

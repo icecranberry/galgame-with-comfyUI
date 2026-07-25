@@ -36,7 +36,7 @@ Follow this progression:
 1. Scene Setting — Open with the overall environment, framing, and mood.
    e.g. "a chaotic yet cozy indoor living room scene", "a close-up portrait in warm afternoon light".
 
-2. **MUST:** When an existing IP character appears, — Each character is written as 'Name \\(Series\\) \\(hair_color, eye_color, distinctive_features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown_hair, red_eyes, twin_tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.".
+2. **MUST:** When an existing IP character appears, — Each character is written as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.".
 
 3. Environment & Props — Describe furniture, objects, and background elements that ground the scene in a lived-in space. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
 

@@ -1,8 +1,8 @@
 /**
  * 滚动摘要生成器
  *
- * 每个会话每 15 条 assistant 消息触发一次摘要生成（含主动聊天消息）。
- * 新摘要 = LLM(上一段摘要 + 最近 15 轮对话)。
+ * 每个会话每 10 条 assistant 消息触发一次摘要生成（含主动聊天消息）。
+ * 新摘要 = LLM(上一段摘要 + 最近 10 轮对话)。
  * 生成后自动向量化存入 ChromaDB，纳入 RAG 召回。
  */
 
@@ -15,7 +15,7 @@ export function stripPromptJson(content) {
   return content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '');
 }
 
-const SUMMARIZE_INTERVAL = 15; // 每 15 条 assistant 消息触发一次
+const SUMMARIZE_INTERVAL = 10; // 每 10 条 assistant 消息触发一次
 
 const SUMMARY_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
 
@@ -67,17 +67,16 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     ORDER BY id ASC
   `).all(conversationId, checkpointEndId);
 
-  // 截取覆盖前 15 条 assistant 的消息范围
+  // 取最后 10 条 assistant 覆盖的消息段，afterId 推到末尾截断全部旧数据
   let asstCount = 0;
-  let batchEnd = allUnsummarized.length;
-  for (let i = 0; i < allUnsummarized.length; i++) {
+  let batchStart = 0;
+  for (let i = allUnsummarized.length - 1; i >= 0; i--) {
     if (allUnsummarized[i].role === 'assistant') {
       asstCount++;
-      if (asstCount >= SUMMARIZE_INTERVAL) { batchEnd = i + 1; break; }
+      if (asstCount >= SUMMARIZE_INTERVAL) { batchStart = i; break; }
     }
   }
-  const recentMessages = allUnsummarized.slice(0, batchEnd);
-
+  const recentMessages = allUnsummarized.slice(batchStart);
   if (recentMessages.length === 0) return null;
 
   const recentText = recentMessages
@@ -107,9 +106,10 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     return null;
   }
 
-  // 确定实际被摘要的消息 ID 范围，而不是用总数偏移推算。
+  // 确定实际被摘要的消息 ID 范围。end_msg_id 必须取最后一条 assistant，不能取末尾 user。
   const firstMsg = recentMessages[0];
-  const lastMsg = recentMessages[recentMessages.length - 1];
+  const lastAsst = [...recentMessages].reverse().find(m => m.role === 'assistant');
+  const lastMsg = lastAsst || recentMessages[recentMessages.length - 1];
   const summaryIndex = (db.prepare(`
     SELECT COUNT(*) AS count FROM rolling_summaries WHERE conversation_id = ?
   `).get(conversationId)?.count || 0) + 1;

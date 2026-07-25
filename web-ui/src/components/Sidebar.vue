@@ -218,6 +218,7 @@ function formatTime(iso) {
   border-right: 1px solid rgba(255, 255, 255, 0.25);
   display: flex; flex-direction: column; overflow: hidden;
   position: relative;
+  user-select: none;
 }
 
 .char-list {

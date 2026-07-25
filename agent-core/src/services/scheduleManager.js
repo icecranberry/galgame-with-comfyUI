@@ -18,6 +18,7 @@ import { broadcast } from './unifiedStreamBus.js';
 // ── 缓存 ──
 // key: characterId, value: { activity, expireAt }
 const activityCache = new Map();
+const groggyShown = new Set();  // 已展示过groggy唤醒提示的角色（仅首条消息触发一次）
 const CACHE_TTL = 60 * 1000; // 1 分钟
 
 // ── 时间工具 ──
@@ -283,6 +284,8 @@ export function getCurrentActivity(characterId, now = new Date()) {
 export function formatScheduleContext(characterId, now = new Date()) {
   // 临时唤醒期间 → 覆盖睡眠提示
   if (isTempWoken(characterId, now)) {
+    if (groggyShown.has(characterId)) return null;
+    groggyShown.add(characterId);
     const db = getDb();
     const char = db.prepare('SELECT wake_mode, wake_attempts FROM characters WHERE id = ?').get(characterId);
     const mode = char?.wake_mode || 'unknown';
@@ -378,6 +381,7 @@ export function getTempWakeUntil(characterId) {
  * 设置临时唤醒定时器
  */
 export function scheduleTempWakeExpiry(characterId, tempWakeUntil) {
+  characterId = Number(characterId);
   clearTempWakeTimer(characterId);
 
   const until = new Date(tempWakeUntil.replace(' ', 'T') + 'Z');
@@ -401,6 +405,7 @@ export function scheduleTempWakeExpiry(characterId, tempWakeUntil) {
  * 角色在聊天中保持活跃时不会被强制入睡，仅在无互动到期后才回退睡眠
  */
 export function extendTempWake(characterId) {
+  characterId = Number(characterId);
   if (!isTempWoken(characterId)) return false;
 
   const db = getDb();
@@ -411,11 +416,13 @@ export function extendTempWake(characterId) {
   db.prepare('UPDATE characters SET temporary_wake_until = ? WHERE id = ?')
     .run(newUntil, characterId);
 
+  console.log(`[scheduleMgr] Temp wake extended for ${characterId}, new expiry in ${minutes}min`);
   scheduleTempWakeExpiry(characterId, newUntil);
   return true;
 }
 
 function clearTempWakeTimer(characterId) {
+  characterId = Number(characterId);
   const existing = tempWakeTimers.get(characterId);
   if (existing) { clearTimeout(existing); tempWakeTimers.delete(characterId); }
 }
@@ -424,6 +431,7 @@ function clearTempWakeTimer(characterId) {
  * 临时唤醒到期 → 回退到睡眠或正常清醒
  */
 function revertTempWake(characterId) {
+  groggyShown.delete(characterId);
   const db = getDb();
   const char = db.prepare('SELECT id, sleep_until FROM characters WHERE id = ?').get(characterId);
   if (!char) return;
@@ -536,6 +544,14 @@ export function syncSleepingState(characterId, now = new Date()) {
     if (!wasAlreadySleeping) {
       db.prepare(`UPDATE characters SET wake_attempts = 0, was_door_woken = 0, temporary_wake_until = NULL, wake_mode = NULL WHERE id = ?`)
         .run(characterId);
+
+      broadcast('schedule_state_change', {
+        character_id: characterId,
+        is_sleeping: true,
+        sleep_until: sleepUntil,
+        temporary_wake_until: null,
+        wake_mode: null,
+      });
     }
   } else {
     // 从睡眠转为清醒 → 清除 sleep 状态，不清除叫醒列（让自然醒后重置）
@@ -545,6 +561,14 @@ export function syncSleepingState(characterId, now = new Date()) {
     if (prev && prev.is_sleeping === 1) {
       db.prepare(`UPDATE characters SET wake_attempts = 0, was_door_woken = 0, temporary_wake_until = NULL, wake_mode = NULL WHERE id = ?`)
         .run(characterId);
+
+      broadcast('schedule_state_change', {
+        character_id: characterId,
+        is_sleeping: false,
+        sleep_until: null,
+        temporary_wake_until: null,
+        wake_mode: null,
+      });
     }
   }
 }

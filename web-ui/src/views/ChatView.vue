@@ -131,7 +131,10 @@
           @focus="inputFocused = true"
           @blur="inputFocused = false"
         ></textarea>
-        <button v-show="!(isMobile && inputFocused)" class="gift-btn" @click="showGiftPanel = true" title="送礼物">
+        <button v-if="isCharSleeping" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @click="onWakeChar" title="叫醒角色">
+          <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        </button>
+        <button v-else v-show="!(isMobile && inputFocused)" class="gift-btn" @click="showGiftPanel = true" title="送礼物">
           <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
         </button>
         <!-- 撤回气泡：长按发送按钮浮现 -->
@@ -537,6 +540,7 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
 const inputFocused = ref(false)
+const wakeShaking = ref(false)
 
 // ── 奇遇分享卡片 → 详情覆盖层 ──
 const detailEvent = ref(null)
@@ -587,6 +591,15 @@ const currentScheduleText = computed(() => {
   const sc = scheduleStore.characters.find(c => c.id === chat.activeCharId)
   if (!sc || !sc.current_activity || sc.current_activity === '未设置日程') return ''
   return sc.current_activity
+})
+// 从 schedule store 获取当前角色睡眠状态（实时更新）
+const charSleepState = computed(() => {
+  if (!chat.activeCharId) return null
+  return scheduleStore.characters.find(c => c.id === chat.activeCharId) || null
+})
+const isCharSleeping = computed(() => {
+  const s = charSleepState.value
+  return s ? (s.is_sleeping && !s.is_temp_woken) : false
 })
 const forceImageGen = computed(() => settings.forceImageGen)
 const realtimeAffinityEnabled = computed({
@@ -674,6 +687,59 @@ function showForceTip() {
   clearTimeout(forceTipTimer)
   forceTipTimer = setTimeout(() => { forceTipVisible.value = false }, 2000)
 }
+
+// ── 聊天流叫醒按钮（三段式：电话→上门→摇醒） ──
+const wakeBusy = ref(false)
+
+async function onWakeChar() {
+  if (!chat.activeCharId) return
+  const id = chat.activeCharId
+  if (wakeBusy.value) return
+  wakeBusy.value = true
+  wakeShaking.value = true
+
+  const name = chat.activeChar?.display_name || ''
+  const s = charSleepState.value
+
+  try {
+    // 已上门/摇醒过 → 再次摇醒
+    if (s?.was_door_woken) {
+      toastFn(`${name}！${name}！`, 'info')
+      const res = await api.wakeUpByDoor(id)
+      if (!res?.success) toastFn(res?.message || '摇醒失败', 'info')
+      return
+    }
+
+    // 电话叫醒已满 3 次 → 上门
+    if ((s?.wake_attempts || 0) >= 3) {
+      toastFn(`${name}！${name}！`, 'info')
+      setTimeout(() => { toastFn(`${name}亦未寝。`, 'info') }, 2000)
+      const res = await api.wakeUpByDoor(id)
+      if (!res?.success) toastFn(res?.message || '摇醒失败', 'info')
+      return
+    }
+
+    // 默认 → 电话叫醒
+    const res = await api.wakeUpByPhone(id)
+    if (res?.success) {
+      // 成功：主动刷新确保按钮切回礼物
+    } else {
+      toastFn(`没叫醒${name}...`, 'info')
+      if (res?.door_wake_available) {
+        setTimeout(() => { toastFn(`电话打不通，试试上门找${name}吧`, 'info') }, 1200)
+      }
+    }
+  } catch (err) {
+    toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    // 每次 API 调用后刷新数据，使 wake_attempts 反映最新值
+    try { await scheduleStore.fetchOverview(true) } catch {}
+    try { await chat.loadCharacters() } catch {}
+    wakeShaking.value = false
+    wakeBusy.value = false
+  }
+}
+
 // ── 实时好感度：拉取当前角色最新值 ──
 async function fetchRealtimeAffinity() {
   if (!realtimeAffinityEnabled.value || !chat.activeCharId) return
@@ -1743,6 +1809,24 @@ function renderContent(text) {
 .gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
 .gift-btn:hover .gift-btn-icon { transform: rotate(12deg) scale(1.1); }
 .gift-btn:active { transform: scale(0.94); }
+
+/* ── 叫醒按钮（覆盖送礼按钮样式） ── */
+.wake-btn {
+  background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+  box-shadow: 0 2px 8px rgba(9, 132, 227, 0.25);
+}
+.wake-btn:hover {
+  box-shadow: 0 4px 16px rgba(9, 132, 227, 0.35);
+}
+.wake-shaking {
+  animation: wake-shake 0.5s ease-in-out infinite;
+}
+@keyframes wake-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-12deg); }
+  50% { transform: rotate(12deg); }
+  75% { transform: rotate(-8deg); }
+}
 
 /* ── 发送按钮：圆形 + 渐变 + 发光 + 启停缓动 ── */
 .send-btn {

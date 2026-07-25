@@ -80,6 +80,7 @@ function _connect() {
     schedule_peek_ready: d => _dispatch('schedule_peek_ready', d),
     schedule_peek_progress: d => _dispatch('schedule_peek_progress', d),
     schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
+    schedule_state_change: d => _dispatch('schedule_state_change', d),
     image_compress_progress: d => _dispatch('image_compress_progress', d),
   }, {
     onClose: _scheduleReconnect,

@@ -32,24 +32,51 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   // ── 构建 LLM 上下文 ──
   const msgs = buildWakeContext(char, conversationId, userName, mode, attempts);
 
-  // ── 检查 reply_queue 中的积压消息 ──
-  const pendingEntries = db.prepare(`
-    SELECT * FROM reply_queue
+  // ── 原子性抢占 reply_queue 中的积压消息 ──
+  // 使用 UPDATE + AND status='waiting' 确保与 replyQueueScheduler 互斥
+  const claimResult = db.prepare(`
+    UPDATE reply_queue SET status = 'processing'
     WHERE character_id = ? AND status = 'waiting'
+  `).run(characterId);
+
+  const hasBacklog = claimResult.changes > 0;
+
+  // 抢占成功后读取已标记的条目（用于后续删除 + 统计）
+  const pendingEntries = hasBacklog ? db.prepare(`
+    SELECT * FROM reply_queue
+    WHERE character_id = ? AND status = 'processing'
     ORDER BY created_at ASC
-  `).all(characterId);
+  `).all(characterId) : [];
 
-  const hasBacklog = pendingEntries.length > 0;
-
-  // 历史已在 buildWakeContext 中以 role: "user" 格式注入，不重复追加 backlog
-  // 积压消息在回复写入后统一标记 done
+  if (!hasBacklog) {
+    // 检查是否有 reply_queue 条目（被 replyQueueScheduler 抢先处理了）
+    const stillQueued = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM reply_queue WHERE character_id = ?
+    `).get(characterId);
+    if (stillQueued?.cnt > 0) {
+      console.log(`[wakeService] ${char.display_name} wake-up skipped — replyQueueScheduler already claimed entries`);
+      return;
+    }
+    console.log(`[wakeService] ${char.display_name} wake-up with no backlog — generating fresh reply`);
+  }
 
   // ── 调用 LLM 生成回复 ──
-  const fullReply = await chatSync(msgs, {
-    temperature: 0.75,
-    max_tokens: 512,
-    label: `wake-up:${char.display_name}:${mode}`,
-  });
+  let fullReply;
+  try {
+    fullReply = await chatSync(msgs, {
+      temperature: 0.75,
+      max_tokens: 512,
+      label: `wake-up:${char.display_name}:${mode}`,
+    });
+  } catch (err) {
+    // LLM 调用失败，恢复 reply_queue 条目状态
+    if (hasBacklog && pendingEntries.length > 0) {
+      const ids = pendingEntries.map(e => e.id);
+      const placeholders = ids.map(() => '?').join(',');
+      db.prepare(`UPDATE reply_queue SET status = 'waiting' WHERE id IN (${placeholders})`).run(...ids);
+    }
+    throw err;
+  }
 
   if (!fullReply || fullReply.trim().length === 0) {
     throw new Error('Empty reply from LLM');
@@ -72,7 +99,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
     msgIds.push(msgResult.lastInsertRowid);
   }
 
-  if (hasBacklog) {
+  if (pendingEntries.length > 0) {
     const ids = pendingEntries.map(e => e.id);
     const placeholders = ids.map(() => '?').join(',');
     db.prepare(`DELETE FROM reply_queue WHERE id IN (${placeholders})`).run(...ids);
@@ -198,6 +225,12 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
   //   3a. 上一轮对话参考（assistant 最后回复 + 之前 2 条，含 user 提问）
   //   3b. 睡眠期间收到的未回复 user 消息
 
+  const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
+
+  const cleanContent = (role, content) => {
+    return role === 'assistant' ? content.replace(PROMPT_JSON_RE, '') : content;
+  };
+
   let hasHistory = false;
 
   const lastAssistant = db.prepare(`
@@ -218,7 +251,7 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     if (contextBefore.length > 0) {
       const contextText = contextBefore.map(m => {
         const label = m.role === 'assistant' ? char.display_name : userName;
-        return `[${label}]: ${m.content}`;
+        return `[${label}]: ${cleanContent(m.role, m.content)}`;
       }).join('\n');
       msgs.push({ role: 'system', content: `以下是你们睡着前的最后一段对话，可作为此刻回应的上下文参考：\n\n${contextText}` });
       hasHistory = true;
@@ -234,7 +267,7 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     if (unreadMessages.length > 0) {
       const unreadText = unreadMessages.map(m => {
         const label = m.role === 'assistant' ? char.display_name : userName;
-        return `[${label}]: ${m.content}`;
+        return `[${label}]: ${cleanContent(m.role, m.content)}`;
       }).join('\n');
       msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：\n\n${unreadText}` });
       hasHistory = true;
@@ -250,7 +283,7 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
     if (history.length > 0) {
       const historyText = history.map(m => {
         const label = m.role === 'assistant' ? char.display_name : userName;
-        return `[${label}]: ${m.content}`;
+        return `[${label}]: ${cleanContent(m.role, m.content)}`;
       }).join('\n');
       msgs.push({ role: 'system', content: `以下是 ${userName} 在你睡觉时发的未回复消息：\n\n${historyText}` });
     }

@@ -20,6 +20,7 @@ import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
+import { broadcast } from '../services/unifiedStreamBus.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
@@ -616,9 +617,9 @@ ${coreRules}
       : null;
 
     // ── checkpoint 历史 + 活跃聊天历史（滑动窗口） ──
-    const { checkpoint, checkpointHistory, activeText: activeChatText, activeRounds } = getSplitHistory(db, conversationId, 15, 15, { userName: chatUserName, characterName: character.display_name });
+    const { checkpoint, checkpointHistory, activeText: activeChatText, activeRounds } = getSplitHistory(db, conversationId, 10, 10, { userName: chatUserName, characterName: character.display_name });
     // [DEBUG] 上下文拆分
-    console.log('[DEBUG] afterId:', checkpoint?.end_msg_id || 0, '| checkpoint助手数: 15(固定) | active助手数:', activeRounds);
+    console.log('[DEBUG] afterId:', checkpoint?.end_msg_id || 0, '| checkpoint助手数: 10(固定) | active助手数:', activeRounds);
     if (checkpointHistory.length > 0) {
       const cpAsst = [...checkpointHistory].reverse().find(m => m.role === 'assistant');
       console.log('[DEBUG] checkpoint末条assistant:', cpAsst ? cpAsst.content.slice(0, 60) : '(无)');
@@ -713,7 +714,7 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 6. 活跃聊天历史（滑动窗口 0~15 轮）
+    // 6. 活跃聊天历史（滑动窗口 0~10 轮）
     if (activeChatText) {
       dynamicBlocks.push(activeChatText);
     }
@@ -1465,7 +1466,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   const userName = config.user.nickname || '用户';
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【上一次画面描述·最高优先级】仅用于保持连续性，不得覆盖或限制【最后一轮对话】及其必然产生的画面结果。对于最后一轮对话直接或间接导致的状态变化（如衣着、姿势、动作、物品、环境等），必须描述变化完成后的最终状态。' },
     // ── 用户形象（建立 user↔用户名的映射，紧随最高指令之后让 LLM 明确画面对象）──
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
@@ -1538,7 +1539,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
       // 如果存在上一轮画面，追加独立块用于画面连续性
       if (lastScenePrompt) {
         return [
-          { role: 'system', content: `【上一次画面描述】以下为上一轮对话中生成的画面描述，如果场景和内容相似，那这些描述可以用于保持画面的连贯性（角色外观、场景氛围、光线色调等）在此基础上自然延续，但如果场景和内容不同，那就按照新的对话内容来：\n${lastScenePrompt}` },
+          { role: 'system', content: `【上一次画面环境描述】：\n${lastScenePrompt}` },
           contextBlock,
         ];
       }
@@ -1546,7 +1547,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     })(),
     // ── 交叉角色生图上下文（在格式说明之后，让 LLM 知道画面中还有谁）──
     ...crossRefImageMsgs,
-    { role: 'user', content: `现在，直接输出英文画面描述来描述你上面【最后一轮对话】需要的配图，明确在和${userName}互动的画面才加入${userName}的特征。不要任何格式包装或额外文字。` },
+    { role: 'user', content: `直接输出英文画面描述来描述【最后一轮对话】对应的配图。仅当最后一轮对话对应的画面需要出现${userName}时，才描述并使用${userName}的外观；否则不要让${userName}出现在画面中，也不要描述其特征。不要任何格式包装或额外文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
@@ -1865,6 +1866,15 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
   let genTaskId = null;
 
   try {
+    // 通知前端日程系统角色已进入睡眠
+    broadcast('schedule_state_change', {
+      character_id: characterId,
+      is_sleeping: true,
+      sleep_until: sleepUntil,
+      temporary_wake_until: null,
+      wake_mode: null,
+    });
+
     // 1. 发送用户消息保存确认（不发送 bubble_break，让 Zzz 直接填充 initAttemptState 占位泡，避免空行）
     send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
 
