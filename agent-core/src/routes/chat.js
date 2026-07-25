@@ -19,7 +19,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
-import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken } from '../services/scheduleManager.js';
+import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
@@ -456,6 +456,9 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
 
+    // 2.1 用户在跟临时唤醒的角色聊天 → 重置睡眠倒计时，保持活跃清醒
+    if (isTempWoken(characterId)) extendTempWake(characterId);
+
     // 3. 生图意图（正则强匹配 → 提前检测，用于 msgs[2] 格式消息）
     const explicitImageIntent = detectImageIntent(message);
 
@@ -597,7 +600,7 @@ router.post('/characters/:id/chat', async (req, res) => {
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     userInfoParts.push(`<dialogue_format_rules>
 ${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。发送图片的格式是 {"prompt":"Description of the scene"}，prompt值内的双引号必须用单引号替代。prompt内容不被字数限制**
+- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
 - {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
 </dialogue_format_rules>`);
 
@@ -1375,8 +1378,12 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   `).all(conversationId).reverse();
 
   // 2.5 扫描历史消息中的交叉角色引用（用于生图 LoRA 合并 + LLM 上下文注入）
-  const historyText = history.map(m => m.content).join('\n');
-  const latestUser = history.filter(m => m.role === 'user').pop()?.content || '';
+  const extractRealContent = (text) => {
+    const idx = text.lastIndexOf('</dynamic_context>');
+    return idx >= 0 ? text.slice(idx + '</dynamic_context>'.length).trim() : text;
+  };
+  const historyText = history.map(m => extractRealContent(m.content)).join('\n');
+  const latestUser = extractRealContent(history.filter(m => m.role === 'user').pop()?.content || '');
   const scanText = historyText + '\n' + latestUser;
   const crossMatches = matchAll(scanText, character.id);
   let crossRefCharIdsForImage = [];
@@ -1459,9 +1466,7 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
     { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【最高优先级指令，覆盖所有其他规则】基于对话上下文中最后一轮对话（用户最新一句话 + 角色最新一句话）,参考下方【上一次画面描述】，为这轮对话所处的场景生成画面描述。' },
-    // ── 人格和规则（为了让 prompt 内容贴合角色）──
-    { role: 'system', content: personalityPrompt },
-    // ── 用户信息注入（建立 user↔用户名的映射，与主流程一致）──
+    // ── 用户形象（建立 user↔用户名的映射，紧随最高指令之后让 LLM 明确画面对象）──
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
       if (!hasUserInfo) return [];
@@ -1477,8 +1482,10 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
         content: `【对话对象】${parts.join('。')}。当你生成关于${userName}的图片（例如合照，互动的场景）的时候，需要严格遵循以上${userName}的特征，尤其是性别和外观。${userRelationContent}`
       }];
     })(),
-    // ── 画面规则 + 环境参考（天气/光线/日程已整合到规则提示词中，紧随用户信息之后让 LLM 先明确画风格式再读对话）──
+    // ── 画面规则 + 环境参考（天气/光线/日程已整合到规则提示词中）──
     ...(formatGuideWithWeather ? [{ role: 'system', content: formatGuideWithWeather }] : []),
+    // ── 人格（让 prompt 内容贴合角色）──
+    { role: 'system', content: personalityPrompt },
     // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
     // 同时剥离历史 prompt JSON 避免 token 浪费，并提取最近一轮 prompt 作为【上一次画面描述】
     ...(() => {
@@ -1709,7 +1716,7 @@ async function generateReplyGuesses(conversationId, character) {
 ⚠️ 重要：你要预测的是 user 的回复，**绝对不要**预测 assistant 会说什么。对话最后一条是 assistant 说的，你预测的必须是 user 对这句话的回应——不要把 assistant 的话接下去。
 
 规则：
-1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或表达不同态度
+1. A 和 B 必须是不同方向的回复——不能是同一个意思的两种说法。例如：A 延续当前话题深入，B 切换视角或融入世界观表达不同态度
 2. 每条 5~25 个汉字，像网友聊天一样自然口语化，思维跳脱但又合理，不要过于书面化或公式化
 3. 直接输出 JSON，不要任何解释
 

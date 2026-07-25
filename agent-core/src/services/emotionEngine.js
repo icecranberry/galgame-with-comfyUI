@@ -456,53 +456,85 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
   // 人格文本中的 "assistant" 替换为真实角色名（兼容旧 short_prompt 和 cropPersonalityForEmotion 的默认行为）
   const personalityText = (characterPersonality || '').replace(/assistant/g, characterName);
 
-  // 拼装上下文段落
-  let contextBlock = '';
-  if (summary) {
-    contextBlock += `【对话历史摘要】\n${summary.slice(0, 600)}\n\n`;
-  }
-  if (prevUser || cleanPrevAssistant) {
-    contextBlock += `【上一轮对话 — 仅供参考上下文，不需要评估】\n`;
-    if (prevUser) contextBlock += `${userName}: "${prevUser.slice(0, 400)}"\n`;
-    if (cleanPrevAssistant) contextBlock += `${characterName}: "${cleanPrevAssistant.slice(0, 400)}"\n`;
-    contextBlock += `\n`;
-  }
+  // ===== 高缓存优化：固定指令前置，变量数据后置 =====
+  // OpenAI 兼容 API 按前缀缓存 prompt，固定部分放最前面可最大化缓存命中率。
+  // 所有指令正文使用「角色」「用户」占位，不插入任何变量名，确保跨角色、跨轮次完全一致。
 
-  const prompt = `你是一个情绪与关系评估专家。你需要以 ${characterName} 的视角，分析【本轮对话】对 ${characterName} 产生的情绪影响。
+  const staticSystem = `你是一个Galgame游戏高手。你需要以角色的视角，分析本轮对话对角色的情绪影响。
 
-【${characterName}的人格】
-${personalityText || '（未设定特殊人格，按默认友善助手判断）'}
+【角色人格】
+见下方「角色人格」区块。
 
-【${characterName}与${userName}的关系】
-${userName}将${characterName}视为：${relationship || '普通朋友'}
-${relationshipOath ? `${userName}曾送过${characterName}一枚戒指，这是他们之间独一无二的羁绊和承诺。\n` : ''}${characterName}当前对${userName}的好感度：${currentAffinity}/100
-${characterName}当前情绪状态：
-  愉悦度(V): ${currentVad.valence?.toFixed(2) ?? '0.50'} (负=不愉快, 正=愉快)
-  唤醒度(A): ${currentVad.arousal?.toFixed(2) ?? '0.50'} (低=倦怠, 高=兴奋)
-  支配度(D): ${currentVad.dominance?.toFixed(2) ?? '0.50'} (低=顺从, 高=掌控)
-${contextBlock}
+【角色与用户的关系】
+见下方「关系数据」区块。
+
+【对话上下文】
+见下方「对话上下文」区块。
+
 【本轮对话 — 仅需评估这一轮】
-${userName}: "${userMsg.slice(0, 500)}"
-${characterName}: "${cleanAssistant.slice(0, 500)}"
+见下方「本轮对话」区块。
 
 【评估要求】
-仅评估【本轮对话】中 ${userName} 的消息对 ${characterName} 情绪和好感度的影响。上一轮对话和摘要仅作为上下文参考。
+仅评估本轮对话中用户的消息对角色的情绪和好感度的影响。上一轮对话和摘要仅作为上下文参考。
 
-规则：
+评分规则：
 - vad_delta.valence: -0.3 ~ +0.3，正面互动为正，负面为负
 - vad_delta.arousal: -0.3 ~ +0.3，兴奋/紧张为正，平淡为负
 - vad_delta.dominance: -0.3 ~ +0.3，被尊重/掌控为正，被压制为负
-- affinity_delta: -3 ~ +6，${userName}让${characterName}更喜欢ta为正，更疏远为负
+- affinity_delta: -3 ~ +6，用户让角色更喜欢ta为正，更疏远为负
 - dominant_emotion: 仅限 joy|sadness|anger|fear|surprise|disgust|curiosity|boredom|fatigue|neutral
-- reason: 用${characterName}第一人称口吻简短解释判断理由，不要提加分扣分（10~30字）
+- reason: 用角色第一人称口吻简短解释判断理由，不要提加分扣分；提及用户时应使用用户名称而非"你"（10~30字）
 
 重要提示：
-1. ${characterName}的情绪基线是 valence=${emotionBaseline.valence?.toFixed(2) ?? '0.50'}, arousal=${emotionBaseline.arousal?.toFixed(2) ?? '0.50'}, dominance=${emotionBaseline.dominance?.toFixed(2) ?? '0.50'}
-2. affinity_delta 应基于${characterName}的人格判断——傲娇角色即使内心高兴，好感度变化也较小
-3. 如果${userName}的消息中性平淡，delta 应接近 0，不要强行解读
+1. 角色的情绪基线见下方数据，作为中性参照点
+2. affinity_delta 应基于角色人格判断——傲娇角色即使内心高兴，好感度变化也较小
+3. 如果用户的消息中性平淡，delta 应接近 0，不要强行解读
 
 只返回 JSON（不要任何其他文字）：
-{"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."}`;
+{"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."}
+
+===== 评估数据 =====`;
+
+  // 拼装上下文（归入变量数据块）
+  let contextLines = '';
+  if (summary) {
+    contextLines += `对话历史摘要：\n${summary.slice(0, 600)}\n\n`;
+  }
+  if (prevUser || cleanPrevAssistant) {
+    contextLines += `上一轮对话（仅供参考上下文，不需要评估）：\n`;
+    if (prevUser) contextLines += `${userName}: "${prevUser.slice(0, 400)}"\n`;
+    if (cleanPrevAssistant) contextLines += `${characterName}: "${cleanPrevAssistant.slice(0, 400)}"\n`;
+    contextLines += `\n`;
+  }
+
+  const variableData = `角色名称：${characterName}
+用户名称：${userName}
+
+角色人格：
+${personalityText || '（未设定特殊人格，按默认友善助手判断）'}
+
+关系数据：
+用户将角色视为：${relationship || '普通朋友'}
+${relationshipOath ? '用户曾送给角色一枚戒指，这是他们之间独一无二的羁绊和承诺。\n' : ''}角色当前对用户的好感度：${currentAffinity}/100
+
+角色情绪基线（中性参照）：
+  愉悦度: ${emotionBaseline.valence?.toFixed(2) ?? '0.50'}
+  唤醒度: ${emotionBaseline.arousal?.toFixed(2) ?? '0.50'}
+  支配度: ${emotionBaseline.dominance?.toFixed(2) ?? '0.50'}
+
+对话上下文：
+${contextLines || '（无）'}
+
+本轮对话：
+${userName}: "${userMsg.slice(0, 500)}"
+${characterName}: "${cleanAssistant.slice(0, 500)}"
+
+角色当前情绪状态（VAD 三维模型）：
+  愉悦度 Valence: ${currentVad.valence?.toFixed(2) ?? '0.50'} (负=不愉快，正=愉快)
+  唤醒度 Arousal: ${currentVad.arousal?.toFixed(2) ?? '0.50'} (低=倦怠，高=兴奋)
+  支配度 Dominance: ${currentVad.dominance?.toFixed(2) ?? '0.50'} (低=顺从，高=掌控)`;
+
+  const prompt = staticSystem + '\n' + variableData;
 
   try {
     let raw = await chatSync(

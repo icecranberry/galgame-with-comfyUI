@@ -1268,13 +1268,13 @@ ${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
   // [0] Base jailbreak rules — most stable, always cache-hit
   msgs.push({ role: 'system', content: jailbreakPrompt });
 
-  // [1] JSON format — most stable, always cache-hit (template unchanged, only trailing env ref varies)
-  msgs.push({ role: 'system', content: formatPrompt2 });
-
-  // [2] World integration block — stable per world setting
+  // [1] World integration block — stable per world setting
   if (worldIntegrationBlock2) {
     msgs.push({ role: 'system', content: worldIntegrationBlock2 });
   }
+
+  // [2] JSON format — most stable, always cache-hit (template unchanged, only trailing env ref varies)
+  msgs.push({ role: 'system', content: formatPrompt2 });
 
   // [3] Branch continuation instructions — stable per character
   msgs.push({ role: 'system', content: `你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。

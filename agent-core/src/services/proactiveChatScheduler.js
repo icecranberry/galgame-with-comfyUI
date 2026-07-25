@@ -24,7 +24,7 @@ import {
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { getLightHint, getLightNoteWithWeather, getTimeLight, getTimeLightInline } from './timeLight.js';
+import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
@@ -402,13 +402,10 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
     try {
       const activity = getCurrentActivity(character.id);
       if (!activity || !activity.activity || activity.activity === '自由时间') return '';
-      const { timeStr, timeDesc } = getTimeLight();
       if (activity.replyDelay > 0) {
-        // 刚忙完：角色刚刚在忙一件事，现在才腾出手来看消息
-        return `\n【当前日程】${timeStr}（${timeDesc}）。你刚刚正在【${activity.location}】${activity.activity}${activity.description ? '，' + activity.description : ''}，现在才腾出手来看消息。`;
+        return `\n【当前日程】你刚刚正在【${activity.location}】${activity.activity}${activity.description ? '，' + activity.description : ''}，现在才腾出手来看消息。`;
       }
-      // 空闲中：自然地提及当前在做的事
-      let ctx = `\n【当前日程】${timeStr}（${timeDesc}），你正在【${activity.location}】${activity.activity}。`;
+      let ctx = `\n【当前日程】你正在【${activity.location}】${activity.activity}。`;
       if (activity.description) ctx += ` ${activity.description}`;
       return ctx;
     } catch (_) { return ''; }

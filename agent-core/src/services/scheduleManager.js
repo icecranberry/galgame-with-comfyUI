@@ -13,15 +13,12 @@ import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
-import { getTimeLight } from './timeLight.js';
+
 
 // ── 缓存 ──
 // key: characterId, value: { activity, expireAt }
 const activityCache = new Map();
 const CACHE_TTL = 60 * 1000; // 1 分钟
-
-// 星期映射
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 // ── 时间工具 ──
 
@@ -290,25 +287,19 @@ export function formatScheduleContext(characterId, now = new Date()) {
     const char = db.prepare('SELECT wake_mode, wake_attempts FROM characters WHERE id = ?').get(characterId);
     const mode = char?.wake_mode || 'unknown';
     const attempts = char?.wake_attempts || 1;
-    const timeStr = `${WEEKDAYS[now.getDay()]} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
     const wakeMsgs = {
       phone:   `被${config.user.nickname || '用户'}打来的${attempts}个电话吵醒`,
       door:    `被${config.user.nickname || '用户'}上门从床上摇醒`,
       shake:   `被${config.user.nickname || '用户'}又跑到床边晃醒`,
     };
     const wakeDesc = wakeMsgs[mode] || `被${config.user.nickname || '用户'}叫醒`;
-    return `【当前状态】${timeStr}，${wakeDesc}，脑袋还迷迷糊糊的。`;
+    return `【当前状态】${wakeDesc}，脑袋还迷迷糊糊的。`;
   }
 
   const activity = getCurrentActivity(characterId, now);
   if (!activity) return null;
 
-  const timeStr = `${WEEKDAYS[now.getDay()]} ${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-  const { timeDesc } = getTimeLight(now);
-
-  const lines = [`【当前状态】${timeStr}，${timeDesc}。你正在【${activity.location}】${activity.activity}。`];
+  const lines = [`【当前状态】你正在【${activity.location}】${activity.activity}。`];
 
   if (activity.description && activity.description.trim()) {
     lines.push(activity.description.trim());
@@ -405,13 +396,32 @@ export function scheduleTempWakeExpiry(characterId, tempWakeUntil) {
   console.log(`[scheduleMgr] Temp wake expiry scheduled in ${Math.round(delayMs / 60000)}min for ${characterId}`);
 }
 
+/**
+ * 延长临时唤醒计时器 — 每次用户互动时重置倒计时为 5~15 分钟
+ * 角色在聊天中保持活跃时不会被强制入睡，仅在无互动到期后才回退睡眠
+ */
+export function extendTempWake(characterId) {
+  if (!isTempWoken(characterId)) return false;
+
+  const db = getDb();
+  const minutes = 5 + Math.floor(Math.random() * 11);
+  const newUntil = new Date(Date.now() + minutes * 60000)
+    .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+
+  db.prepare('UPDATE characters SET temporary_wake_until = ? WHERE id = ?')
+    .run(newUntil, characterId);
+
+  scheduleTempWakeExpiry(characterId, newUntil);
+  return true;
+}
+
 function clearTempWakeTimer(characterId) {
   const existing = tempWakeTimers.get(characterId);
   if (existing) { clearTimeout(existing); tempWakeTimers.delete(characterId); }
 }
 
 /**
- * 临时唤醒到期 → 回退到睡眠
+ * 临时唤醒到期 → 回退到睡眠或正常清醒
  */
 function revertTempWake(characterId) {
   const db = getDb();
@@ -420,21 +430,33 @@ function revertTempWake(characterId) {
 
   const now = new Date();
   const activity = getCurrentActivity(characterId, now);
-  let sleepUntil;
+
+  // 仍在睡眠时间块内 → 回退到睡眠
   if (activity && activity.replyDelay === -1) {
-    sleepUntil = calcSleepUntil(activity.endTime, now);
-  } else {
-    sleepUntil = new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+    const sleepUntil = calcSleepUntil(activity.endTime, now);
+    db.prepare(`UPDATE characters SET is_sleeping = 1, sleep_until = ?, temporary_wake_until = NULL, wake_mode = NULL, wake_attempts = 0 WHERE id = ?`)
+      .run(sleepUntil, characterId);
+    console.log(`[scheduleMgr] Temp wake expired for ${characterId}, back to sleep until ${sleepUntil}`);
+
+    broadcast('schedule_state_change', {
+      character_id: characterId,
+      is_sleeping: true,
+      sleep_until: sleepUntil,
+      temporary_wake_until: null,
+      wake_mode: null,
+    });
+    return;
   }
 
-  db.prepare(`UPDATE characters SET is_sleeping = 1, sleep_until = ?, temporary_wake_until = NULL, wake_mode = NULL, wake_attempts = 0 WHERE id = ?`)
-    .run(sleepUntil, characterId);
-  console.log(`[scheduleMgr] Temp wake expired for ${characterId}, back to sleep until ${sleepUntil}`);
+  // 睡眠时间块已结束 → 直接转入正常清醒
+  db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, temporary_wake_until = NULL, wake_mode = NULL, wake_attempts = 0, was_door_woken = 0 WHERE id = ?`)
+    .run(characterId);
+  console.log(`[scheduleMgr] Temp wake expired for ${characterId}, sleep block ended → staying awake`);
 
   broadcast('schedule_state_change', {
     character_id: characterId,
-    is_sleeping: true,
-    sleep_until: sleepUntil,
+    is_sleeping: false,
+    sleep_until: null,
     temporary_wake_until: null,
     wake_mode: null,
   });
