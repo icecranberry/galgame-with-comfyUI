@@ -89,7 +89,23 @@ function buildWorkflow(promptText, overrides = {}) {
         ? path.join(WORKFLOW_DIR, overrides.customWorkflow)
         : resolveWorkflowPath(overrides.scene))
     : resolveWorkflowPath(overrides.scene);
-  const loras = overrides.loras || [];
+  // 全局 LoRA 前置 + 角色 LoRA，按 path 去重（全局优先），关闭的 LoRA 跳过
+  // scenes 限制：空数组或无 scenes 字段=所有场景，overrides.scene 为空时也加载全部
+  const currentScene = overrides.scene;
+  const globalLoras = (config.comfyui.globalLora || []).filter(l => {
+    if (!l.path || typeof l.path !== 'string') return false;
+    if (l.enabled === false) return false;
+    if (!currentScene) return true;
+    if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
+    return l.scenes.includes(currentScene);
+  });
+  const providedLoras = (overrides.loras || []).filter(l => l.path && typeof l.path === 'string');
+  const seen = new Set();
+  const loras = [...globalLoras, ...providedLoras].filter(l => {
+    if (seen.has(l.path)) return false;
+    seen.add(l.path);
+    return true;
+  });
   const hasLoras = loras.length > 0;
 
   if (overrides.customWorkflow) {

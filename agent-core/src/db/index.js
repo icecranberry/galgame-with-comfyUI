@@ -1216,6 +1216,7 @@ const SETTING_TO_CONFIG = {
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
   user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
   workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
+  comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
 };
 
 function castValue(raw, type) {
@@ -1224,6 +1225,7 @@ function castValue(raw, type) {
     case 'int':  { const v = parseInt(raw, 10); return Number.isNaN(v) ? undefined : v; }
     case 'float': { const v = parseFloat(raw); return Number.isNaN(v) ? undefined : v; }
     case 'bool': return raw === 'true' || raw === '1';
+    case 'json': { try { const v = JSON.parse(raw); return v; } catch { return undefined; } }
     default:     return raw;
   }
 }

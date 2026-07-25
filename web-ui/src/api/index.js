@@ -271,6 +271,12 @@ export async function fetchLorasFiles() {
   return res.json()
 }
 
+export async function updateGlobalLora(loras) {
+  await fetch(`${BASE}/config/global-lora`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras }),
+  })
+}
+
 export async function updateFeatureFlag(key, value) {
   await fetch(`${BASE}/config/features`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }),

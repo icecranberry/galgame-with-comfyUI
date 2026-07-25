@@ -46,11 +46,16 @@
           <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
           <span v-if="saved" class="smsg">已保存</span>
           <div style="flex:1"></div>
+          <button class="btn-ghost wf-action-btn" style="font-size:12px;display:flex" @click="globalLoraModalVisible = true">
+            全局LoRA
+            <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
+          </button>
           <button class="btn-ghost wf-action-btn" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
           <button class="btn-ghost wf-action-btn" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
 
+      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" @saved="onGlobalLoraSaved" />
 
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
@@ -630,6 +635,7 @@ import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfy
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
+import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 
 const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile')
@@ -655,6 +661,9 @@ function onSettingsScroll() {
 }
 
 const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', momentsWidth: 1600, momentsHeight: 1200, eventArtist: '', eventWidth: 1600, eventHeight: 1200 })
+const globalLoras = ref([])
+const globalLoraModalVisible = ref(false)
+const globalLoraCount = computed(() => (globalLoras.value || []).filter(l => l.path && l.enabled !== false).length)
 const comfyTab = ref('chat')
 const comfyTabs = [
   { mode: 'chat', label: '对话配图' },
@@ -966,6 +975,7 @@ onMounted(async () => {
       eventWidth: data.comfy.eventWidth || 1600,
       eventHeight: data.comfy.eventHeight || 1200,
     }
+    globalLoras.value = data.comfy.globalLora || []
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -1017,6 +1027,10 @@ async function saveComfy() {
   settingsStore.setEventSize(form.value.eventWidth, form.value.eventHeight)
   dirty.value = false; saved.value = true
   setTimeout(() => saved.value = false, 2000)
+}
+
+function onGlobalLoraSaved(loras) {
+  globalLoras.value = loras
 }
 
 async function saveComfyUrl() {
@@ -1360,6 +1374,8 @@ function resetTestPrompts() {
 .btn-primary { padding-left: 28px; padding-right: 28px; }
 .wf-action-btn { border-color: var(--accent); border-style: dashed; border-width: 2px; }
 .wf-action-btn:hover:not(:disabled) { border-color: var(--accent-light); }
+.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); margin-left: 4px; }
+.float-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
 
 /* ── 毛玻璃卡片 ── */
 .card {

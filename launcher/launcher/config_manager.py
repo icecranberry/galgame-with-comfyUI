@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "last_fetch_date": "",
     "version_display": "",  # 持久化版本信息，启动即可显示
     "use_mirror": True,  # 使用国内镜像源加速 npm/pip 依赖下载
+    "extra_lora_folders": "",  # 额外 LoRA 文件夹路径，多个用;分隔；留空则仅从 ComfyUI/models/loras 读取
 }
 
 

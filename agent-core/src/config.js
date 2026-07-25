@@ -35,6 +35,7 @@ export const config = {
     eventWidth: parseInt(process.env.COMFYUI_EVENT_WIDTH, 10) || 1600,
     eventHeight: parseInt(process.env.COMFYUI_EVENT_HEIGHT, 10) || 1200,
     tlsVerify: process.env.COMFYUI_TLS_VERIFY !== 'false',
+    globalLora: [],
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
@@ -137,6 +138,20 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
     }
   }
   console.log('[config] ComfyUI settings saved');
+}
+
+export function updateGlobalLora(loras) {
+  if (!Array.isArray(loras)) loras = [];
+  const cleaned = loras.filter(l => l.path && typeof l.path === 'string').map(l => ({
+    path: l.path,
+    weight: typeof l.weight === 'number' ? l.weight : 0.6,
+    triggerWord: l.triggerWord || '',
+    enabled: l.enabled !== false,
+    scenes: Array.isArray(l.scenes) ? l.scenes : [],
+  }));
+  config.comfyui.globalLora = cleaned;
+  persistSettingSync('comfy_global_lora', JSON.stringify(cleaned));
+  console.log(`[config] Global lora updated: ${cleaned.length} item(s)`);
 }
 
 export function updateFeatureFlag(key, value) {

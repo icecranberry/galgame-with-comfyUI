@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora } from '../config.js';
 import { resetClient } from '../llm/llm-client.js';
 import { getDb } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -33,6 +33,7 @@ router.get('/', (req, res) => {
       eventWidth: config.comfyui.eventWidth,
       eventHeight: config.comfyui.eventHeight,
       tlsVerify: config.comfyui.tlsVerify,
+      globalLora: config.comfyui.globalLora || [],
     },
     features: config.features,
     weather: { city: config.weather.city || '' },
@@ -59,6 +60,16 @@ router.put('/comfy', (req, res) => {
     restartComfyClient();
   }
   res.json({ ok: true, ...config.comfyui });
+});
+
+// PUT /api/config/global-lora — 更新全局 LoRA
+router.put('/global-lora', (req, res) => {
+  const { loras } = req.body;
+  if (loras === undefined) {
+    return res.status(400).json({ error: 'loras is required' });
+  }
+  updateGlobalLora(loras);
+  res.json({ ok: true, globalLora: config.comfyui.globalLora });
 });
 
 // PUT /api/config/features — 更新功能开关
@@ -292,6 +303,18 @@ router.get('/loras-files', (req, res) => {
 
     if (fs.existsSync(defaultLoraDir)) {
       scanDirs.add(defaultLoraDir);
+    }
+
+    // 读取额外 LoRA 文件夹（launcher_config.json 中的 extra_lora_folders，多个用;分隔）
+    const extraFoldersStr = launcherConfig.extra_lora_folders;
+    if (extraFoldersStr && typeof extraFoldersStr === 'string') {
+      extraFoldersStr.split(';').map(s => s.trim()).filter(Boolean).forEach(folder => {
+        const absPath = path.resolve(folder);
+        if (fs.existsSync(absPath)) {
+          scanDirs.add(absPath);
+          dirSourceMap.set(absPath, 'custom');
+        }
+      });
     }
 
     // 解析 extra_model_paths.yaml（可能在 rootDir 或 rootDir/ComfyUI 下）

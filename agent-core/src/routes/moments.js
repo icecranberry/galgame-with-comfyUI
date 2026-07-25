@@ -597,8 +597,8 @@ const MOTIVATIONS = [
           relDesc: `${rel.other_name}是你的${rel.relationship_text}`,
         });
 
-        // 第一个人已加，后续每人 50% 概率继续
-        if (Math.random() > 0.5) break;
+        // 第一个人已加，后续每人 30% 概率继续
+        if (Math.random() > 0.3) break;
       }
       if (multiPersons.length > 0) {
         console.log(`[moments] Multi-person mode: ${character.display_name} + ${multiPersons.map(p => p.otherName).join(', ')} (${multiPersons.length} others)`);
