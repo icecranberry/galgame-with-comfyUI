@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- web-ui 为浅色单主题（bg-primary: #f0ece8），壳固定用 Light 避免系统深色模式下设置页错乱 -->
+    <style name="Theme.Shell" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/page_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/page_bg</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+    </style>
+</resources>

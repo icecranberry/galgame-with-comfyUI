@@ -25,3 +25,13 @@ launcher_config.json
 release/
 runtime/
 workflow/
+
+# 安卓网页壳：源码入库，构建产物与本地配置忽略
+android-shell/.gradle/
+android-shell/.idea/
+android-shell/build/
+android-shell/app/build/
+android-shell/local.properties
+android-shell/*.iml
+# 应用图标由 build-apk.mjs 从 android-shell/app-icon.png|jpg 同步生成
+android-shell/app/src/main/res/drawable-nodpi/ic_launcher_image.*

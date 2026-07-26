@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_title">邻舍</string>
+    <string name="setup_hint">输入电脑端显示的局域网地址，即可开始</string>
+    <string name="section_server">服务器地址</string>
+    <string name="url_hint">http://192.168.x.x:3099</string>
+    <string name="save_and_open">保存并打开</string>
+    <string name="exit_confirm">要退出邻舍吗？</string>
+    <string name="exit">退出</string>
+    <string name="change_url">修改地址</string>
+    <string name="cancel">取消</string>
+
+    <string name="notify_section">通知推送（仅局域网内生效）</string>
+    <string name="notify_chat">聊天消息</string>
+    <string name="notify_moments">朋友圈新帖</string>
+    <string name="notify_comments">朋友圈评论</string>
+    <string name="notify_group">群聊消息</string>
+    <string name="notify_mailbox">信箱回信</string>
+    <string name="notify_events">事件动态</string>
+    <string name="notify_system_hint">以上分类以后也可以随时在手机「系统设置 → 通知管理 → 邻舍」中按渠道开关。</string>
+    <string name="hide_service_notify">隐藏「通知服务运行中」常驻通知 →</string>
+
+    <string name="battery_callout_title">重要：保证通知能送达</string>
+    <string name="battery_callout_text">请在系统设置中把「邻舍」的后台权限设为「无限制」，并允许「自启动」（小米 / 华为 / OPPO 等手机必做），否则锁屏一段时间后将收不到通知。</string>
+    <string name="battery_go">去应用设置开启 →</string>
+</resources>

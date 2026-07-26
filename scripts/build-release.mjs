@@ -8,7 +8,8 @@
  *   2. 预装 npm 依赖 + vite build
  *   3. 预装 pip 依赖 + 下载嵌入模型
  *   4. PyInstaller 打包启动器
- *   5. shallow clone 保留 .git → 覆盖预构建产物 → 压缩 zip
+ *   5. 构建安卓 APK 壳（android-shell/，工具链自动下载到 build_cache，失败不阻塞）
+ *   6. shallow clone 保留 .git → 覆盖预构建产物 → 压缩 zip
  */
 
 import { spawn, execSync } from "node:child_process";
@@ -225,7 +226,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [1/8] 便携 Node.js
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[1/8]${C.reset} 准备便携 Node.js v${NODE_VERSION}...`);
+  console.log(`  ${C.bold}[1/9]${C.reset} 准备便携 Node.js v${NODE_VERSION}...`);
 
   const nodeZip = resolve(CACHE_DIR, `node-v${NODE_VERSION}-win-x64.zip`);
 
@@ -258,7 +259,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [2/8] 便携 Python
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[2/8]${C.reset} 准备便携 Python ${PYTHON_VERSION}...`);
+  console.log(`  ${C.bold}[2/9]${C.reset} 准备便携 Python ${PYTHON_VERSION}...`);
 
   const pyZip = resolve(CACHE_DIR, `python-${PYTHON_VERSION}-embed-amd64.zip`);
   const getPip = resolve(CACHE_DIR, "get-pip.py");
@@ -307,7 +308,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [3/8] 便携 Git
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[3/8]${C.reset} 准备便携 Git v${GIT_TAG}...`);
+  console.log(`  ${C.bold}[3/9]${C.reset} 准备便携 Git v${GIT_TAG}...`);
 
   const gitExe = resolve(CACHE_DIR, `PortableGit-${GIT_VER}-64-bit.7z.exe`);
   const gitCmd = resolve(GIT_DIR, "cmd", "git.exe");
@@ -343,7 +344,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [4/8] 预装 Node.js 依赖
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[4/8]${C.reset} 预装 Node.js 依赖...`);
+  console.log(`  ${C.bold}[4/9]${C.reset} 预装 Node.js 依赖...`);
 
   const npmCmd = resolve(NODE_DIR, "npm.cmd");
 
@@ -388,7 +389,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [5/8] 预装 Python 依赖
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[5/8]${C.reset} 预装 Python 依赖...`);
+  console.log(`  ${C.bold}[5/9]${C.reset} 预装 Python 依赖...`);
 
   const pyExe = resolve(PY_DIR, "python.exe");
   // pip 通用环境变量：跳过版本检查 + 信任镜像源（embeddable Python 可能缺 SSL 证书）
@@ -466,7 +467,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [6/8] 预下载嵌入模型
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[6/8]${C.reset} 预下载嵌入模型...`);
+  console.log(`  ${C.bold}[6/9]${C.reset} 预下载嵌入模型...`);
 
   const modelFile = resolve(VECTOR_SVC, "models", "jina-embeddings-v2-base-zh", "onnx", "model_int8.onnx");
 
@@ -485,7 +486,7 @@ async function main() {
   // ═══════════════════════════════════════════
   // [7/8] PyInstaller 打包启动器
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[7/8]${C.reset} PyInstaller 打包启动器...`);
+  console.log(`  ${C.bold}[7/9]${C.reset} PyInstaller 打包启动器...`);
 
   const launcherDir = resolve(ROOT, "launcher");
 
@@ -576,9 +577,24 @@ async function main() {
   }
 
   // ═══════════════════════════════════════════
-  // [8/8] 组装 Release 包
+  // [8/9] 构建安卓 APK 壳
   // ═══════════════════════════════════════════
-  console.log(`  ${C.bold}[8/8]${C.reset} 组装 Release 包...`);
+  console.log(`  ${C.bold}[8/9]${C.reset} 构建安卓 APK 壳...`);
+
+  // 构建逻辑在 build-apk.mjs 中，可通过 npm run apk 单独执行
+  let apkBuilt = null;   // 构建成功后的 APK 绝对路径
+  try {
+    const { buildApk } = await import("./build-apk.mjs");
+    apkBuilt = await buildApk();
+  } catch (e) {
+    warn(`APK 构建异常: ${e.message}`);
+  }
+  if (!apkBuilt) warn("release 将不包含 APK");
+
+  // ═══════════════════════════════════════════
+  // [9/9] 组装 Release 包
+  // ═══════════════════════════════════════════
+  console.log(`  ${C.bold}[9/9]${C.reset} 组装 Release 包...`);
 
   // shallow clone 保留 .git/
   log("创建 shallow clone (保留 .git 用于版本更新)...");
@@ -661,6 +677,16 @@ async function main() {
     warn("未找到 邻舍.EXE.exe，PyInstaller 可能未成功");
   }
 
+  // 安卓 APK 壳
+  const APK_NAME = `邻舍-安卓-v${VERSION}.apk`;
+  if (apkBuilt) {
+    const { copyFileSync } = await import("node:fs");
+    copyFileSync(apkBuilt, resolve(RELEASE_DIR, APK_NAME));
+    ok(APK_NAME);
+  } else {
+    warn("无 APK 产物，release 包中不含安卓壳");
+  }
+
   // 使用说明
   const { writeFileSync } = await import("node:fs");
   writeFileSync(resolve(RELEASE_DIR, "使用说明.txt"), [
@@ -675,6 +701,10 @@ async function main() {
     "2. 在「设置」中配置 ComfyUI 启动器路径",
     "3. 返回「首页」点击「启动」",
     "4. 浏览器访问 http://localhost:3099 支持手机端网页访问，网页地址在日志中显示",
+    "",
+    "【手机端（安卓）】",
+    "压缩包内附带 邻舍-安卓-vX.apk，安装后输入电脑端显示的局域网地址即可使用",
+    "（相比手机浏览器：按返回键会返回上一页，而不是退出到桌面）",
     "",
     "【版本更新】",
     "切换到「版本」页签 → 点击「检查更新」",
@@ -741,6 +771,7 @@ async function main() {
   console.log(`  - agent-core (预装依赖)`);
   console.log(`  - vector-service (含嵌入模型)`);
   console.log(`  - 邻舍.EXE 启动器`);
+  if (apkBuilt) console.log(`  - 邻舍-安卓 APK 壳`);
   console.log();
   console.log(`  用户解压后:`);
   console.log(`  - 零构建，解压即用`);

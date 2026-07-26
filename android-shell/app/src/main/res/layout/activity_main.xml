@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/setupPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingLeft="20dp"
+            android:paddingRight="20dp"
+            android:paddingTop="36dp"
+            android:paddingBottom="32dp">
+
+            <!-- ── 头部：图标 + 标题 ── -->
+            <ImageView
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:layout_gravity="center_horizontal"
+                android:src="@drawable/ic_launcher_image"
+                android:contentDescription="@string/app_title" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="12dp"
+                android:text="@string/app_title"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/hintText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="20dp"
+                android:gravity="center"
+                android:textSize="13sp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/text_secondary" />
+
+            <!-- ── 卡片 1：服务器地址 ── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="18dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/section_server"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary" />
+
+                <EditText
+                    android:id="@+id/urlInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_input"
+                    android:padding="14dp"
+                    android:hint="@string/url_hint"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="#B8AEA3"
+                    android:inputType="textUri"
+                    android:imeOptions="actionDone" />
+            </LinearLayout>
+
+            <!-- ── 卡片 2：通知推送 ── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="18dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/notify_section"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary" />
+
+                <CheckBox
+                    android:id="@+id/notifyChat"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_chat" />
+
+                <CheckBox
+                    android:id="@+id/notifyMoments"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_moments" />
+
+                <CheckBox
+                    android:id="@+id/notifyComments"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_comments" />
+
+                <CheckBox
+                    android:id="@+id/notifyGroup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_group" />
+
+                <CheckBox
+                    android:id="@+id/notifyMailbox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_mailbox" />
+
+                <CheckBox
+                    android:id="@+id/notifyEvents"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:buttonTint="@color/accent"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:text="@string/notify_events" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/notify_system_hint"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="@color/text_secondary" />
+
+                <TextView
+                    android:id="@+id/hideServiceNotifyBtn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:padding="4dp"
+                    android:text="@string/hide_service_notify"
+                    android:textSize="13sp"
+                    android:textColor="@color/accent_dark" />
+            </LinearLayout>
+
+            <!-- ── 提醒卡：后台无限制 ── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="vertical"
+                android:background="@drawable/bg_callout"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/battery_callout_title"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_dark" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/battery_callout_text"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="@color/text_primary" />
+
+                <TextView
+                    android:id="@+id/goBackgroundSettingsBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:padding="4dp"
+                    android:text="@string/battery_go"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_dark" />
+            </LinearLayout>
+
+            <!-- ── 保存按钮 ── -->
+            <Button
+                android:id="@+id/saveBtn"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="22dp"
+                android:background="@drawable/bg_button"
+                android:text="@string/save_and_open"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:stateListAnimator="@null" />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

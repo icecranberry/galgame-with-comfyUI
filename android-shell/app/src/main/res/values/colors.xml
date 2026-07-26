@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#F2789F</color>
+    <!-- 与 web-ui 的 bg-primary 变量保持一致 -->
+    <color name="page_bg">#F0ECE8</color>
+    <!-- web-ui 主强调色 -->
+    <color name="accent">#E07B6C</color>
+    <color name="accent_dark">#A25740</color>
+    <color name="card_stroke">#E5DCD2</color>
+    <color name="text_primary">#3D3630</color>
+    <color name="text_secondary">#8A7F74</color>
+</resources>
