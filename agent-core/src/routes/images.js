@@ -3,7 +3,7 @@ import { readdir, stat } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
-import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { generateImage, generateImageRaw, getLastWorkflowMode, getImageProviderHealth } from '../services/imageSkill.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
@@ -266,7 +266,7 @@ router.post('/test-style', async (req, res) => {
 
     if (result.success) {
       res.json({
-        success: true, images: result.images, promptId: result.promptId, elapsed,
+        success: true, images: result.images, promptId: result.promptId, source: result.source, wfMode: result.wfMode, elapsed,
         timing: {
           total_ms: elapsed,
           comfyui_ms: breakdown.comfyui,
@@ -546,6 +546,15 @@ router.get('/comfyui-health', async (req, res) => {
     }
   } catch {
     res.json({ connected: false, url: config.comfyui.url });
+  }
+});
+
+// GET /api/images/providers-health — unified image provider status (never exposes auth secrets)
+router.get('/providers-health', async (req, res) => {
+  try {
+    res.json(await getImageProviderHealth());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

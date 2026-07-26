@@ -706,6 +706,19 @@ export async function comfyuiHealth() {
   } catch { return { connected: false } }
 }
 
+export async function imageProvidersHealth() {
+  try {
+    const res = await fetch(`${BASE}/images/providers-health`)
+    return await res.json()
+  } catch {
+    return {
+      selected: 'auto',
+      comfyui: { available: false },
+      codex: { available: false, installed: false, loggedIn: false },
+    }
+  }
+}
+
 // ── Gift 送礼 ──
 export async function sendGift(characterId, giftType) {
   const res = await fetch(`${BASE}/characters/${characterId}/gift`, {

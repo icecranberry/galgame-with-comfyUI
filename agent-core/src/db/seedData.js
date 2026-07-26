@@ -6,6 +6,7 @@
 // ── 系统设置默认值 ──
 // key 与 system_settings 表的 setting_key 一致
 export const DEFAULT_SYSTEM_SETTINGS = {
+  image_provider: 'auto',
   // ComfyUI 参数
   comfy_artist: '@ebora',
   comfy_width: '768',

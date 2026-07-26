@@ -743,6 +743,10 @@ ${rules}`;
       const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(mp.otherId);
       return otherChar ? _parseCharLoras(otherChar.loras) : [];
     });
+    const referenceImages = [
+      character.avatar_path,
+      ...multiPersons.map(mp => db.prepare('SELECT avatar_path FROM characters WHERE id = ?').get(mp.otherId)?.avatar_path),
+    ].filter(Boolean);
     const allLoras = [...selfLoras, ...otherLoras];
     const seen = new Set();
     const uniqueLoras = allLoras.filter(l => {
@@ -765,6 +769,7 @@ ${rules}`;
       height: config.comfyui.momentsHeight,
       scene: 'moments',
       priority: opts.manual ? 'high' : 'low',
+      referenceImages,
       ...loraOpts,
     });
 

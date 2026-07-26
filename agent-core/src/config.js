@@ -23,6 +23,9 @@ export const config = {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
   },
   comfyui: {
+    provider: ['auto', 'comfyui', 'codex'].includes(process.env.IMAGE_PROVIDER)
+      ? process.env.IMAGE_PROVIDER
+      : 'auto',
     url: (process.env.COMFYUI_URL || 'http://localhost:8188').replace(/\/+$/, ''),
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
     artist: process.env.COMFYUI_ARTIST || '@ebora',
@@ -117,7 +120,12 @@ function persistSettingSync(key, value) {
   }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify }) {
+export function updateComfyConfig({ provider, artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify }) {
+  if (provider !== undefined) {
+    if (!['auto', 'comfyui', 'codex'].includes(provider)) throw new Error(`Invalid image provider: ${provider}`);
+    config.comfyui.provider = provider;
+    persistSettingSync('image_provider', provider);
+  }
   if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
   if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
   if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }

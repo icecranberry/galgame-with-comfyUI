@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui } from './comfyClient.js';
+import { generateImageWithCodex, getCodexImageStatus } from './codexImageClient.js';
 import { config } from '../config.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
 
@@ -338,7 +339,7 @@ const MAX_SUBMIT_RETRIES = 2;
  * @param {number}   [opts.submitRetries=2]
  * @returns {Promise<{success, images, source, promptId}>}
  */
-async function submitWithRetry(rawPrompt, {
+async function submitComfyWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
   loras, customWorkflow, scene,
 } = {}) {
@@ -386,6 +387,90 @@ async function submitWithRetry(rawPrompt, {
 
   console.log('[imageSkill] All ComfyUI submit attempts exhausted, generation failed');
   return { success: false, images: [], source: null, error: lastResult?.error || 'All ComfyUI attempts exhausted', wfMode };
+}
+
+export async function getImageProviderHealth() {
+  let comfyui = { available: false, error: null };
+  let timer;
+  try {
+    const controller = new AbortController();
+    timer = setTimeout(() => controller.abort(), 2500);
+    const response = await fetch(`${config.comfyui.url}/system_stats`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    comfyui = {
+      available: response.ok,
+      status: response.status,
+      error: response.ok ? null : `HTTP ${response.status}`,
+    };
+  } catch (err) {
+    comfyui = { available: false, error: err.name === 'AbortError' ? 'Connection timed out' : err.message };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const codexStatus = await getCodexImageStatus();
+  const codex = {
+    available: codexStatus.available,
+    installed: codexStatus.installed,
+    loggedIn: codexStatus.loggedIn,
+    configFound: codexStatus.configFound,
+    skillFound: codexStatus.skillFound,
+    version: codexStatus.version,
+    error: codexStatus.error,
+  };
+  return { selected: config.comfyui.provider || 'auto', comfyui, codex };
+}
+
+async function submitCodex(rawPrompt, opts = {}) {
+  if (opts.onProgress) opts.onProgress({ stage: 'provider-selected', provider: 'codex' });
+  const result = await generateImageWithCodex(rawPrompt, opts);
+  lastUsedWorkflowMode = 'codex-image-2';
+  return {
+    success: true,
+    images: result.images,
+    source: 'codex',
+    promptId: result.promptId,
+    wfMode: lastUsedWorkflowMode,
+  };
+}
+
+async function submitWithRetry(rawPrompt, opts = {}) {
+  const provider = config.comfyui.provider || 'auto';
+  if (provider === 'codex') {
+    try {
+      return await submitCodex(rawPrompt, opts);
+    } catch (err) {
+      return { success: false, images: [], source: 'codex', error: err.message, wfMode: 'codex-image-2' };
+    }
+  }
+  if (provider === 'comfyui') return submitComfyWithRetry(rawPrompt, opts);
+
+  const health = await getImageProviderHealth();
+  let comfyFailure = null;
+  if (health.comfyui.available) {
+    const comfyResult = await submitComfyWithRetry(rawPrompt, opts);
+    if (comfyResult.success) return comfyResult;
+    comfyFailure = comfyResult;
+    console.warn(`[imageSkill] ComfyUI failed in auto mode, falling back to Codex: ${comfyResult.error}`);
+  }
+
+  if (health.codex.available) {
+    try {
+      return await submitCodex(rawPrompt, opts);
+    } catch (err) {
+      return { success: false, images: [], source: 'codex', error: err.message, wfMode: 'codex-image-2' };
+    }
+  }
+
+  return {
+    success: false,
+    images: [],
+    source: null,
+    error: `No image provider is available. ComfyUI: ${comfyFailure?.error || health.comfyui.error || 'offline'}; Codex: ${health.codex.error || 'unavailable'}`,
+    wfMode: null,
+  };
 }
 
 // ── 优先级队列 ──

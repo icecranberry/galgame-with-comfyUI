@@ -22,6 +22,7 @@ const router = Router();
 router.get('/', (req, res) => {
   res.json({
     comfy: {
+      provider: config.comfyui.provider,
       url: config.comfyui.url,
       artist: config.comfyui.artist,
       width: config.comfyui.width,
@@ -53,8 +54,12 @@ router.get('/', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify } = req.body;
-  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify });
+  const { provider, artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify } = req.body;
+  try {
+    updateComfyConfig({ provider, artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   // URL 或 TLS 设置变更后立即重启 ComfyUI 客户端连接（使新地址/证书策略立即生效）
   if (url !== undefined || tlsVerify !== undefined) {
     restartComfyClient();

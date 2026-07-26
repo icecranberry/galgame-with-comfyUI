@@ -1184,6 +1184,7 @@ export function setSetting(key, value) {
 
 // 需要从 DB 迁移到 config 的字段映射
 const SETTING_TO_CONFIG = {
+  image_provider:            { obj: 'comfyui',   key: 'provider',        type: 'string'  },
   comfy_artist:            { obj: 'comfyui',   key: 'artist',          type: 'string'  },
   comfy_width:             { obj: 'comfyui',   key: 'width',           type: 'int'     },
   comfy_height:            { obj: 'comfyui',   key: 'height',          type: 'int'     },

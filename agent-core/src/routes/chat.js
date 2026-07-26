@@ -1274,13 +1274,14 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   try {
     const charId = parseInt(String(conversationId).replace(/^char_/, ''), 10);
     if (!Number.isNaN(charId)) {
-      const char = db.prepare('SELECT custom_workflow, loras FROM characters WHERE id = ?').get(charId);
+      const char = db.prepare('SELECT custom_workflow, loras, avatar_path FROM characters WHERE id = ?').get(charId);
       if (char) {
         const loras = _parseLoras(char);
-        if (loras.length > 0 || char.custom_workflow) {
+        if (loras.length > 0 || char.custom_workflow || char.avatar_path) {
           const opts = {};
           if (char.custom_workflow) opts.customWorkflow = char.custom_workflow;
           if (loras.length > 0) opts.loras = loras;
+          if (char.avatar_path) opts.referenceImages = [char.avatar_path];
           loraOpts = opts;
           console.log(`[chat] Lora enabled for char ${charId}:${opts.customWorkflow ? ' custom=' + opts.customWorkflow : ''}${opts.loras ? ` ${opts.loras.length} lora(s) — ${opts.loras.map(l => l.path).join(', ')}` : ''}`);
         }
@@ -1292,6 +1293,10 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   // 合并交叉引用角色 LoRA（去重，主角色优先）
   if (crossRefCharIds.length > 0) {
+    const crossReferences = crossRefCharIds
+      .map(id => db.prepare('SELECT avatar_path FROM characters WHERE id = ?').get(id)?.avatar_path)
+      .filter(Boolean);
+    loraOpts.referenceImages = [...new Set([...(loraOpts.referenceImages || []), ...crossReferences])];
     const crossLoras = crossRefCharIds.flatMap(id => {
       const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
       return c ? _parseLoras(c) : [];
@@ -1906,6 +1911,7 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
     const loraOpts = {};
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
     if (loras.length > 0) loraOpts.loras = loras;
+    if (character.avatar_path) loraOpts.referenceImages = [character.avatar_path];
 
     const result = await generateImage(generatedPrompt, {
       scene: 'chat',

@@ -71,6 +71,7 @@ async function processReply(db, letter) {
   const charBasePrompt = letter.base_prompt || '';
   const charLoras = safeJSON(letter.loras, []);
   const charCustomWorkflow = letter.custom_workflow || null;
+  const referenceImages = letter.avatar_path ? [letter.avatar_path] : [];
 
   // 标记 processing + 广播
   db.prepare('UPDATE mailbox_letters SET status = ? WHERE id = ?').run('processing', letterId);
@@ -95,9 +96,9 @@ async function processReply(db, letter) {
 
     // ── 步骤2: 并发生成3张图（使用 LLM 输出的 prompt，朋友圈画师串） ──
     const [paperResult, portraitResult, illustrationResult] = await Promise.all([
-      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900 }),
-      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200 }),
-      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900 }),
+      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, referenceImages }),
+      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200, referenceImages }),
+      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, referenceImages }),
     ]);
 
     if (!paperResult || !portraitResult || !illustrationResult) {

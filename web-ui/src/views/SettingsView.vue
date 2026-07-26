@@ -426,8 +426,15 @@
 
       <!-- ComfyUI 连接 -->
       <div class="card">
-        <h3>ComfyUI 连接</h3>
-        <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
+        <h3>图片生成连接</h3>
+        <p class="fd">可保留本地 ComfyUI，也可以使用当前电脑已登录的 Codex Image 2。</p>
+        <label class="field-label">图片生成引擎</label>
+        <select v-model="imageProvider" class="fi" @change="markConnDirty">
+          <option value="auto">自动（ComfyUI 优先，Codex Image 2 回退）</option>
+          <option value="comfyui">仅使用 ComfyUI</option>
+          <option value="codex">仅使用 Codex Image 2</option>
+        </select>
+        <p class="fd">Codex 模式会识别本机登录配置，并自动把角色已有头像或立绘作为人物参考图。</p>
         <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
         <label class="cb">
           <input type="checkbox" v-model="comfySkipTls" @change="markConnDirty" />
@@ -436,6 +443,10 @@
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
+        </div>
+        <div class="sr">
+          <span :class="['sd', health?.codex?.available ? 'on' : 'off']"></span>
+          <span>Codex Image 2：{{ health?.codex?.available ? '可用' : (health?.codex?.installed ? '需要登录或启用 imagegen' : '未检测到') }}</span>
         </div>
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!connDirty" @click="saveComfyUrl">保存</button>
@@ -631,7 +642,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, imageProvidersHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -684,6 +695,7 @@ function switchComfyTab(mode) {
   comfyTab.value = mode
 }
 const comfyUrl = ref('')
+const imageProvider = ref('auto')
 const comfySkipTls = ref(false)
 const connDirty = ref(false)
 const connSaved = ref(false)
@@ -977,6 +989,7 @@ onMounted(async () => {
     }
     globalLoras.value = data.comfy.globalLora || []
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
+    imageProvider.value = data.comfy.provider || 'auto'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
@@ -1035,7 +1048,7 @@ function onGlobalLoraSaved(loras) {
 
 async function saveComfyUrl() {
   comfyUrl.value = comfyUrl.value.replace(/\/+$/, '')
-  await updateComfyConfig({ url: comfyUrl.value, tlsVerify: !comfySkipTls.value })
+  await updateComfyConfig({ provider: imageProvider.value, url: comfyUrl.value, tlsVerify: !comfySkipTls.value })
   connDirty.value = false; connSaved.value = true
   setTimeout(() => connSaved.value = false, 2000)
   // 保存后立即刷新连接状态
@@ -1206,7 +1219,10 @@ async function loadAllCharacters() {
   } catch { /* 非关键 */ }
 }
 
-async function checkHealth() { health.value = await comfyuiHealth() }
+async function checkHealth() {
+  health.value = await imageProvidersHealth()
+  health.value.connected = health.value.comfyui?.available === true
+}
 
 
 

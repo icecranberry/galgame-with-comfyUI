@@ -656,6 +656,7 @@ ${motiveName}
     const loraOpts = {};
     if (charLoras.length > 0) loraOpts.loras = charLoras;
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
+    if (character.avatar_path) loraOpts.referenceImages = [character.avatar_path];
     const result = await generateImage(prompt, { priority: 'low', ...loraOpts });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);

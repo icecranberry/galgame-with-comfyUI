@@ -289,6 +289,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
         height: config.comfyui.eventHeight,
         scene: 'schedule',
         priority: 'high',
+        referenceImages: character.avatar_path ? [character.avatar_path] : [],
         ...(() => {
           const chLoras = _parseLoras(character.loras);
           const opts = {};
@@ -544,6 +545,7 @@ router.post('/:characterId/peek', async (req, res) => {
         height: config.comfyui.eventHeight,
         scene: 'schedule',
         priority: 'high',
+        referenceImages: character.avatar_path ? [character.avatar_path] : [],
         ...(() => {
           const chLoras = _parseLoras(character.loras);
           const opts = {};

@@ -619,6 +619,7 @@ router.post('/:id/gift', async (req, res) => {
     if (result.imagePrompt) {
       generateImage(result.imagePrompt, {
         loras: _parseCharLoras(char.loras),
+        referenceImages: char.avatar_path ? [char.avatar_path] : [],
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
         onProgress: (p) => {
           console.log(`[gift] image gen progress for ${char.display_name}:`, p.stage || p);

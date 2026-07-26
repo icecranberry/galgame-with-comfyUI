@@ -2,7 +2,7 @@
 
 [English](./README_EN.md)
 
-受 Galgame 启发的**本地 AI 陪伴应用**。与可自定义人格的角色对话，AI 根据上下文自动触发 **ComfyUI** 生图（Anima），具备三维情绪模拟、长期记忆检索、朋友圈动态系统。
+受 Galgame 启发的**本地 AI 陪伴应用**。与可自定义人格的角色对话，AI 根据上下文自动触发 **ComfyUI / Codex Image 2** 生图，具备三维情绪模拟、长期记忆检索、朋友圈动态系统。
 欢迎来视频底下提出更好建设性建议[我好像让纸片人「活」过来了【邻舍.EXE】-bilibili详细演示以及安装视频](https://www.bilibili.com/video/BV1uH7q6vEQ9/)
 
 ---
@@ -44,6 +44,8 @@
 
 ## 🚀 安装与使用
 
+Windows 源码版也可以直接双击根目录的 `start.bat`。首次运行会自动安装 Node/Python 依赖，之后启动后端、前端和向量记忆服务，并自动打开浏览器。
+
 ### 1. 下载
 
 从 [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) 页面下载最新版本压缩包，解压到任意目录。
@@ -54,7 +56,7 @@
 
 | 必要条件 | 说明 |
 |----------|------|
-| **ComfyUI** | 已安装并运行在 `:8188`，Anima 模型已就绪 |
+| **图片生成（二选一）** | ComfyUI 已运行在 `:8188`；或本机 Codex 已登录且内置 `imagegen` 可用 |
 | **DeepSeek API Key** | 在启动器设置中配置，或手动编辑 `agent-core/.env` |
 
 ### 3. 启动
@@ -101,7 +103,7 @@ Node.js + Express (主控 :3099)
 | 主控后端 | Node.js + Express (ESM) |
 | 向量服务 | Python FastAPI + ChromaDB + ONNX Runtime |
 | LLM | DeepSeek API（兼容 OpenAI SDK） |
-| 生图引擎 | ComfyUI (WebSocket + HTTP) |
+| 生图引擎 | ComfyUI (WebSocket + HTTP) / Codex Image 2 |
 | 数据库 | SQLite (better-sqlite3) + FTS5 |
 | 嵌入模型 | Jina v2 base zh (768d, 均值池化 + L2 归一) |
 | 启动器 | PySide6 (Qt) + PyInstaller |
@@ -117,7 +119,7 @@ Node.js + Express (主控 :3099)
 - **Node.js** ≥ 18
 - **Python** ≥ 3.10（含 venv）
 - **Git**
-- **ComfyUI** 已安装并运行在 `:8188`
+- **图片生成**：ComfyUI 已运行在 `:8188`，或本机 Codex 已登录并可使用内置 `imagegen`
 - **DeepSeek API Key**
 
 ### 快速开始
@@ -168,9 +170,11 @@ build.bat          # 生成 邻舍.EXE.exe
 | 配置项 | 说明 |
 |--------|------|
 | LLM API | Key / BaseURL / Model |
-| ComfyUI | URL / 画师风格 / 分辨率 |
+| 图片生成 | 自动 / ComfyUI / Codex Image 2，URL / 画师风格 / 分辨率 |
 | Feature Flags | 情绪 / 记忆 / 生图判断 / 提示词优化 等 7 项 |
 | 全局规则 | system_prompt / image_prompt / judge_prompt 在线编辑 |
+
+在 Codex Image 2 模式下，系统会自动把参与场景角色已有的头像或立绘作为人物参考图；没有角色图时则按文字描述生成。LoRA 仍仅由 ComfyUI 加载，其触发词会在 Codex 模式下作为风格提示使用。
 
 ---
 

@@ -976,9 +976,13 @@ ${worldPenetrationLine}
   // 5. 生图（多人时合并两人 LoRA）
   const selfLoras = _parseCharLoras(character.loras);
   let otherLoras = [];
+  const referenceImages = [character.avatar_path];
   if (multiPerson) {
-    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson.otherId);
-    if (otherChar) otherLoras = _parseCharLoras(otherChar.loras);
+    const otherChar = db.prepare('SELECT loras, avatar_path FROM characters WHERE id = ?').get(multiPerson.otherId);
+    if (otherChar) {
+      otherLoras = _parseCharLoras(otherChar.loras);
+      referenceImages.push(otherChar.avatar_path);
+    }
   }
   const allLoras = [...selfLoras, ...otherLoras];
 
@@ -991,6 +995,7 @@ ${worldPenetrationLine}
       scene: 'events',
       priority: options.manual ? 'high' : 'low',
       loras: allLoras,
+      referenceImages: referenceImages.filter(Boolean),
       ...(!multiPerson && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
@@ -1321,13 +1326,20 @@ ${worldPenetrationLine2}
   // 5. 生图（合并主角色 + 多人 + 交叉引用角色的 LoRA）
   const branchSelfLoras = _parseCharLoras(character.loras);
   let branchOtherLoras = [];
+  const branchReferenceImages = [character.avatar_path];
   if (multiPerson2) {
-    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson2.otherId);
-    if (otherChar) branchOtherLoras = _parseCharLoras(otherChar.loras);
+    const otherChar = db.prepare('SELECT loras, avatar_path FROM characters WHERE id = ?').get(multiPerson2.otherId);
+    if (otherChar) {
+      branchOtherLoras = _parseCharLoras(otherChar.loras);
+      branchReferenceImages.push(otherChar.avatar_path);
+    }
   }
   let branchCrossRefLoras = [];
   const crossRefIdsForLora = JSON.parse(event.referenced_character_ids || '[]');
   if (crossRefIdsForLora.length > 0) {
+    branchReferenceImages.push(...crossRefIdsForLora
+      .map(id => db.prepare('SELECT avatar_path FROM characters WHERE id = ?').get(id)?.avatar_path)
+      .filter(Boolean));
     branchCrossRefLoras = crossRefIdsForLora.flatMap(id => {
       const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
       return c ? _parseCharLoras(c.loras) : [];
@@ -1349,6 +1361,7 @@ ${worldPenetrationLine2}
       height: config.comfyui.eventHeight, scene: 'events',
       priority: 'high',
       loras: branchAllLoras,
+      referenceImages: [...new Set(branchReferenceImages.filter(Boolean))],
       ...(!multiPerson2 && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
