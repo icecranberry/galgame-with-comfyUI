@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#FAF7F4" />
-    <corners android:radius="12dp" />
-    <stroke android:width="1dp" android:color="@color/card_stroke" />
-</shape>
+<!-- 输入框：米白填充，聚焦时描珊瑚橙边 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFFFFF" />
+            <corners android:radius="13dp" />
+            <stroke android:width="1.5dp" android:color="@color/accent" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FAF7F5" />
+            <corners android:radius="13dp" />
+            <stroke android:width="1dp" android:color="#EDE6E0" />
+        </shape>
+    </item>
+</selector>

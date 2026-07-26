@@ -6,7 +6,9 @@
 - 返回键走网页历史（`webView.goBack()`），历史到底时弹出「退出 / 修改地址」对话框
 - 支持 `<input type="file">` 文件上传（头像上传）
 - 允许明文 HTTP（局域网地址）
-- release 构建使用 debug 签名，可直接安装（自用分发）
+- release 构建使用仓库内固定 keystore（`release.keystore`，v1.8 起）签名，
+  任何机器构建的包签名一致、可互相覆盖升级；keystore 缺失时回退 debug 签名。
+  从 v1.7 及更早（debug 签名）升级到 v1.8+ 需卸载重装一次
 
 ## 通知推送（仅局域网内生效）
 

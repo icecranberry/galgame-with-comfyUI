@@ -17,9 +17,14 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.CheckBox
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.graphics.Outline
+import android.view.MotionEvent
+import android.view.ViewOutlineProvider
+import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* 拒绝也不阻塞，网页功能不受影响 */ }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -77,6 +82,17 @@ class MainActivity : AppCompatActivity() {
         setupPanel = findViewById(R.id.setupPanel)
         urlInput = findViewById(R.id.urlInput)
         hintText = findViewById(R.id.hintText)
+
+        // logo 圆角裁切
+        findViewById<ImageView>(R.id.heroIcon).apply {
+            clipToOutline = true
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    val r = 20f * resources.displayMetrics.density
+                    outline.setRoundRect(0, 0, view.width, view.height, r)
+                }
+            }
+        }
 
         with(webView.settings) {
             javaScriptEnabled = true
@@ -147,21 +163,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.saveBtn).setOnClickListener {
-            var url = urlInput.text.toString().trim()
-            if (url.isEmpty()) return@setOnClickListener
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://$url"
-            }
-            val editor = prefs.edit().putString(KEY_URL, url)
-            for ((cat, id) in notifyToggleIds) {
-                editor.putBoolean("notify_$cat", findViewById<CheckBox>(id).isChecked)
-            }
-            editor.apply()
-            syncNotificationService(interactive = true)
-            showWeb()
-            webView.loadUrl(url)
-        }
+        setupSwipeToConfirm()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -222,6 +224,71 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    // ── 上滑确认（代替保存按钮：滑动过程即执行保存动作）──
+
+    private fun setupSwipeToConfirm() {
+        // 箭头持续上浮提示
+        val chevron = findViewById<View>(R.id.swipeChevron)
+        ObjectAnimator.ofFloat(chevron, "translationY", 0f, -10f, 0f).apply {
+            duration = 1400
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
+
+        val threshold = 110f * resources.displayMetrics.density
+        var downY = 0f
+        findViewById<View>(R.id.swipeBar).setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downY = e.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = e.rawY - downY
+                    // 整个欢迎页跟手上移（带一点阻尼）
+                    setupPanel.translationY = if (dy < 0) dy / 1.4f else 0f
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val dy = e.rawY - downY
+                    if (dy < -threshold && performSave()) {
+                        // 越过阈值且保存成功：整页上滑退场，进入网页
+                        setupPanel.animate()
+                            .translationY(-setupPanel.height.toFloat())
+                            .setDuration(220)
+                            .withEndAction {
+                                showWeb()
+                                setupPanel.translationY = 0f
+                            }
+                            .start()
+                    } else {
+                        if (dy < -threshold) hintText.text = getString(R.string.url_empty_hint)
+                        setupPanel.animate().translationY(0f).setDuration(180).start()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 保存地址与通知开关并开始加载网页；地址为空返回 false */
+    private fun performSave(): Boolean {
+        var url = urlInput.text.toString().trim()
+        if (url.isEmpty()) return false
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "http://$url"
+        }
+        val editor = prefs.edit().putString(KEY_URL, url)
+        for ((cat, id) in notifyToggleIds) {
+            editor.putBoolean("notify_$cat", findViewById<CompoundButton>(id).isChecked)
+        }
+        editor.apply()
+        syncNotificationService(interactive = true)
+        webView.loadUrl(url)
+        return true
+    }
+
     // ── 通知服务管理 ──
 
     /**
@@ -266,14 +333,20 @@ class MainActivity : AppCompatActivity() {
     // ── 视图切换 ──
 
     private fun showWeb() {
+        // 状态栏跟随页面配色：网页为暖米白
+        window.statusBarColor = getColor(R.color.page_bg)
+        window.navigationBarColor = getColor(R.color.page_bg)
         setupPanel.visibility = View.GONE
         webView.visibility = View.VISIBLE
     }
 
     private fun showSetup(error: String?) {
+        // 状态栏跟随页面配色：欢迎页为冷蓝白
+        window.statusBarColor = getColor(R.color.setup_bg)
+        window.navigationBarColor = getColor(R.color.setup_bg)
         urlInput.setText(prefs.getString(KEY_URL, "") ?: "")
         for ((cat, id) in notifyToggleIds) {
-            findViewById<CheckBox>(id).isChecked =
+            findViewById<CompoundButton>(id).isChecked =
                 prefs.getBoolean("notify_$cat", SseNotificationService.defaultFor(cat))
         }
         hintText.text = error ?: getString(R.string.setup_hint)

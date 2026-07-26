@@ -11,15 +11,28 @@ android {
         applicationId = "com.linshe.shell"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 11
+        versionName = "2.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            // 固定签名（随仓库分发，自用信任模型）：任何机器构建的包签名一致，可互相覆盖升级
+            storeFile = rootProject.file("release.keystore")
+            storePassword = "linshe-release"
+            keyAlias = "linshe"
+            keyPassword = "linshe-release"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // 自用分发，直接用 debug 签名保证可安装
-            signingConfig = signingConfigs.getByName("debug")
+            // keystore 缺失时回退 debug 签名，保证仍能出包（但签名将绑定构建机）
+            signingConfig = if (rootProject.file("release.keystore").exists())
+                signingConfigs.getByName("release")
+            else
+                signingConfigs.getByName("debug")
         }
     }
 

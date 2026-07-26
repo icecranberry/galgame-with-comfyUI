@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_title">邻舍</string>
+    <string name="welcome_title">邻舍.EXE</string>
     <string name="setup_hint">输入电脑端显示的局域网地址，即可开始</string>
     <string name="section_server">服务器地址</string>
     <string name="url_hint">http://192.168.x.x:3099</string>
-    <string name="save_and_open">保存并打开</string>
+    <string name="swipe_hint">向上滑动 打开邻舍.EXE</string>
+    <string name="url_empty_hint">请先输入服务器地址</string>
     <string name="exit_confirm">要退出邻舍吗？</string>
     <string name="exit">退出</string>
     <string name="change_url">修改地址</string>

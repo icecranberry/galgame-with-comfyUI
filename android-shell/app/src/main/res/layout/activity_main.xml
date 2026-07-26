@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -9,27 +10,36 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
-    <ScrollView
+    <FrameLayout
         android:id="@+id/setupPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fillViewport="true"
         android:visibility="gone">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:clipToPadding="false"
+        android:paddingBottom="112dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingLeft="20dp"
-            android:paddingRight="20dp"
-            android:paddingTop="36dp"
-            android:paddingBottom="32dp">
+            android:paddingLeft="22dp"
+            android:paddingRight="22dp"
+            android:paddingTop="44dp"
+            android:paddingBottom="12dp">
 
-            <!-- ── 头部：图标 + 标题 ── -->
+            <!-- ── 头部：圆角方形头像 + 标题 ── -->
             <ImageView
-                android:layout_width="84dp"
-                android:layout_height="84dp"
+                android:id="@+id/heroIcon"
+                android:layout_width="92dp"
+                android:layout_height="92dp"
                 android:layout_gravity="center_horizontal"
+                android:scaleType="centerCrop"
                 android:src="@drawable/ic_launcher_image"
                 android:contentDescription="@string/app_title" />
 
@@ -37,36 +47,42 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_horizontal"
-                android:layout_marginTop="12dp"
-                android:text="@string/app_title"
-                android:textSize="26sp"
+                android:layout_marginTop="14dp"
+                android:text="@string/welcome_title"
+                android:textSize="28sp"
                 android:textStyle="bold"
+                android:letterSpacing="0.04"
                 android:textColor="@color/text_primary" />
 
             <TextView
                 android:id="@+id/hintText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:layout_marginBottom="20dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="24dp"
                 android:gravity="center"
                 android:textSize="13sp"
-                android:lineSpacingExtra="3dp"
+                android:lineSpacingExtra="4dp"
                 android:textColor="@color/text_secondary" />
 
-            <!-- ── 卡片 1：服务器地址 ── -->
+            <!-- ── 主内容纸面 ── -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="18dp">
+                android:background="@drawable/bg_sheet"
+                android:elevation="3dp"
+                android:paddingLeft="20dp"
+                android:paddingRight="20dp"
+                android:paddingTop="20dp"
+                android:paddingBottom="20dp">
 
+                <!-- 服务器地址 -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/section_server"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary" />
 
@@ -76,86 +92,165 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:background="@drawable/bg_input"
-                    android:padding="14dp"
+                    android:paddingLeft="15dp"
+                    android:paddingRight="15dp"
+                    android:paddingTop="13dp"
+                    android:paddingBottom="13dp"
                     android:hint="@string/url_hint"
                     android:textSize="15sp"
                     android:textColor="@color/text_primary"
-                    android:textColorHint="#B8AEA3"
+                    android:textColorHint="#BFB3A6"
                     android:inputType="textUri"
                     android:imeOptions="actionDone" />
-            </LinearLayout>
 
-            <!-- ── 卡片 2：通知推送 ── -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="18dp">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="20dp"
+                    android:layout_marginBottom="18dp"
+                    android:background="#F3EDE8" />
 
+                <!-- 通知推送 -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/notify_section"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary" />
 
-                <CheckBox
-                    android:id="@+id/notifyChat"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_chat" />
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_chat"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyChat"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/notifyMoments"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_moments" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_moments"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyMoments"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/notifyComments"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_comments" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_comments"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyComments"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/notifyGroup"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_group" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_group"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/notifyMailbox"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_mailbox" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_mailbox"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyMailbox"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
-                <CheckBox
-                    android:id="@+id/notifyEvents"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:buttonTint="@color/accent"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:text="@string/notify_events" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/notify_events"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/notifyEvents"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:thumbTint="@color/switch_thumb"
+                        app:trackTint="@color/switch_track" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="match_parent"
@@ -163,25 +258,26 @@
                     android:layout_marginTop="8dp"
                     android:text="@string/notify_system_hint"
                     android:textSize="12sp"
-                    android:lineSpacingExtra="2dp"
+                    android:lineSpacingExtra="3dp"
                     android:textColor="@color/text_secondary" />
 
                 <TextView
                     android:id="@+id/hideServiceNotifyBtn"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:padding="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
                     android:text="@string/hide_service_notify"
                     android:textSize="13sp"
                     android:textColor="@color/accent_dark" />
             </LinearLayout>
 
-            <!-- ── 提醒卡：后台无限制 ── -->
+            <!-- ── 保活提醒（醒目卡片）── -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="16dp"
                 android:orientation="vertical"
                 android:background="@drawable/bg_callout"
                 android:padding="16dp">
@@ -208,25 +304,44 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:padding="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
                     android:text="@string/battery_go"
                     android:textSize="14sp"
                     android:textStyle="bold"
                     android:textColor="@color/accent_dark" />
             </LinearLayout>
 
-            <!-- ── 保存按钮 ── -->
-            <Button
-                android:id="@+id/saveBtn"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginTop="22dp"
-                android:background="@drawable/bg_button"
-                android:text="@string/save_and_open"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:stateListAnimator="@null" />
         </LinearLayout>
     </ScrollView>
+
+    <!-- ── 底部上滑确认区（固定，不随内容滚动）── -->
+    <LinearLayout
+        android:id="@+id/swipeBar"
+        android:layout_width="match_parent"
+        android:layout_height="118dp"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:gravity="center_horizontal|bottom"
+        android:background="@drawable/bg_swipe_fade"
+        android:paddingBottom="30dp">
+
+        <ImageView
+            android:id="@+id/swipeChevron"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:src="@drawable/ic_swipe_up"
+            android:contentDescription="@string/swipe_hint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/swipe_hint"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.06"
+            android:textColor="@color/accent_dark" />
+    </LinearLayout>
+    </FrameLayout>
 </FrameLayout>
