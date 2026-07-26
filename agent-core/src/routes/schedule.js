@@ -20,7 +20,8 @@ import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
   getAllOverview, ensureTodaySchedule, invalidateCache,
-  syncSleepingState, isTempWoken,
+  syncSleepingState, isTempWoken, isSleeping,
+  scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
@@ -746,22 +747,36 @@ router.post('/:id/wake-up-phone', async (req, res) => {
       return res.json({ success: false, message: 'already awake', attempts: char.wake_attempts });
     }
 
-    if (char.is_sleeping !== 1) {
+    // 统一判定（含日程 fallback）：DB 缓存列可能滞后于日程
+    const sleepState = isSleeping(characterId);
+    if (!sleepState.sleeping) {
       return res.json({ success: false, message: 'not sleeping' });
+    }
+    // DB 缓存列滞后 → 顺手同步，保证后续写库路径状态一致
+    // 同步可能重置叫醒列（新睡眠周期），重读最新值
+    let wakeAttemptsNow = char.wake_attempts || 0;
+    if (char.is_sleeping !== 1) {
+      syncSleepingState(characterId);
+      wakeAttemptsNow = db.prepare('SELECT wake_attempts FROM characters WHERE id = ?').get(characterId)?.wake_attempts || 0;
+    }
+
+    // 已到 3 次电话上限 → 短路，不再自增，只允许上门摇醒
+    if (wakeAttemptsNow >= 3) {
+      console.log(`[schedule] ${char.display_name} phone wake: capped at 3 → suggest door`);
+      return res.json({
+        success: false,
+        attempts: 3,
+        door_wake_available: true,
+      });
     }
 
     // 原子增 count（防快速双击竞态）
     db.prepare('UPDATE characters SET wake_attempts = wake_attempts + 1 WHERE id = ?').run(characterId);
     const attempts = db.prepare('SELECT wake_attempts FROM characters WHERE id = ?').get(characterId).wake_attempts || 1;
 
-    // 超过 3 次电话上限 → 只允许上门摇醒
-    if (attempts > 3) {
-      console.log(`[schedule] ${char.display_name} phone wake #${attempts}: capped at 3 → suggest door`);
-      return res.json({
-        success: false,
-        attempts: 3,
-        door_wake_available: true,
-      });
+    // 并发窗口内已被别处叫醒 → 幂等返回
+    if (isTempWoken(characterId)) {
+      return res.json({ success: false, message: 'already awake', attempts });
     }
 
     // 40% 概率叫醒
@@ -773,8 +788,19 @@ router.post('/:id/wake-up-phone', async (req, res) => {
       const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
         .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 
-      db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0 WHERE id = ?`)
-        .run(tempWakeUntil, 'phone', characterId);
+      // 原子写库：仅当角色不在有效临时唤醒中才生效（防多入口双触发）
+      const claimed = db.prepare(`
+        UPDATE characters SET is_sleeping = 0, sleep_until = NULL, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0
+        WHERE id = ? AND (temporary_wake_until IS NULL OR temporary_wake_until <= datetime('now'))
+      `).run(tempWakeUntil, 'phone', characterId);
+      if (claimed.changes === 0) {
+        return res.json({ success: false, message: 'already awake', attempts });
+      }
+
+      // 立即注册到期定时器（不依赖 processWakeUp 成功，避免状态卡死）
+      scheduleTempWakeExpiry(characterId, tempWakeUntil);
+      // 重置 groggy 一次性提示标记：本次唤醒周期内首条聊天消息注入一次
+      resetGroggyShown(characterId);
 
       // 异步处理叫醒（不阻塞响应）
       processWakeUp(characterId, 'phone', attempts).catch(err => {
@@ -817,12 +843,20 @@ router.post('/:id/wake-up-door', async (req, res) => {
       return res.json({ success: false, message: 'already awake' });
     }
 
-    if (char.is_sleeping !== 1) {
+    // 统一判定（含日程 fallback）：DB 缓存列可能滞后于日程
+    const sleepState = isSleeping(characterId);
+    if (!sleepState.sleeping) {
       return res.json({ success: false, message: 'not sleeping' });
+    }
+    // 同步可能重置叫醒列（新睡眠周期），重读最新值
+    let wasDoorWoken = char.was_door_woken;
+    if (char.is_sleeping !== 1) {
+      syncSleepingState(characterId);
+      wasDoorWoken = db.prepare('SELECT was_door_woken FROM characters WHERE id = ?').get(characterId)?.was_door_woken;
     }
 
     // 判定模式: 之前上门摇醒过 → 'shake'，否则 'door'
-    const mode = char.was_door_woken === 1 ? 'shake' : 'door';
+    const mode = wasDoorWoken === 1 ? 'shake' : 'door';
 
     console.log(`[schedule] ${char.display_name} door wake → mode=${mode}`);
 
@@ -831,8 +865,19 @@ router.post('/:id/wake-up-door', async (req, res) => {
     const tempWakeUntil = new Date(Date.now() + tempMinutes * 60000)
       .toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 
-    db.prepare(`UPDATE characters SET is_sleeping = 0, sleep_until = NULL, was_door_woken = 1, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0 WHERE id = ?`)
-      .run(tempWakeUntil, mode, characterId);
+    // 原子写库：仅当角色不在有效临时唤醒中才生效（防多入口双触发）
+    const claimed = db.prepare(`
+      UPDATE characters SET is_sleeping = 0, sleep_until = NULL, was_door_woken = 1, temporary_wake_until = ?, wake_mode = ?, wake_attempts = 0
+      WHERE id = ? AND (temporary_wake_until IS NULL OR temporary_wake_until <= datetime('now'))
+    `).run(tempWakeUntil, mode, characterId);
+    if (claimed.changes === 0) {
+      return res.json({ success: false, message: 'already awake' });
+    }
+
+    // 立即注册到期定时器（不依赖 processWakeUp 成功，避免状态卡死）
+    scheduleTempWakeExpiry(characterId, tempWakeUntil);
+    // 重置 groggy 一次性提示标记：本次唤醒周期内首条聊天消息注入一次
+    resetGroggyShown(characterId);
 
     // 异步处理叫醒
     processWakeUp(characterId, mode, null).catch(err => {

@@ -305,18 +305,6 @@ router.get('/loras-files', (req, res) => {
       scanDirs.add(defaultLoraDir);
     }
 
-    // 读取额外 LoRA 文件夹（launcher_config.json 中的 extra_lora_folders，多个用;分隔）
-    const extraFoldersStr = launcherConfig.extra_lora_folders;
-    if (extraFoldersStr && typeof extraFoldersStr === 'string') {
-      extraFoldersStr.split(';').map(s => s.trim()).filter(Boolean).forEach(folder => {
-        const absPath = path.resolve(folder);
-        if (fs.existsSync(absPath)) {
-          scanDirs.add(absPath);
-          dirSourceMap.set(absPath, 'custom');
-        }
-      });
-    }
-
     // 解析 extra_model_paths.yaml（可能在 rootDir 或 rootDir/ComfyUI 下）
     let yamlPath = path.join(rootDir, 'extra_model_paths.yaml');
     if (!fs.existsSync(yamlPath)) {

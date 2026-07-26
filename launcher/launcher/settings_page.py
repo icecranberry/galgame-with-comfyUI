@@ -137,8 +137,7 @@ class SettingsPage(QWidget):
     setting_changed = Signal(str, object)  # key, value — 实时自动保存
     open_comfyui_clicked = Signal()
     browse_comfyui_clicked = Signal()
-    lora_panel_toggled = Signal(bool)  # 展开/折叠
-    migrate_panel_toggled = Signal(bool)  # True=展开, False=折叠
+    migrate_panel_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -176,38 +175,6 @@ class SettingsPage(QWidget):
         comfy_row.addWidget(open_btn)
 
         layout.addLayout(comfy_row)
-
-        # --- 额外 LoRA 文件夹（可折叠） ---
-        self.lora_header_btn = QPushButton("▶ 单独设置Lora文件夹")
-        self.lora_header_btn.setStyleSheet(_collapsible_header_style())
-        self.lora_header_btn.setCursor(Qt.PointingHandCursor)
-        self.lora_header_btn.clicked.connect(self._on_toggle_lora)
-        layout.addWidget(self.lora_header_btn)
-
-        # 折叠内容区域
-        self.lora_content = QWidget()
-        self.lora_content.setStyleSheet("background: transparent;")
-        self.lora_content.hide()
-        lora_content_layout = QVBoxLayout(self.lora_content)
-        lora_content_layout.setContentsMargins(0, 4, 0, 0)
-        lora_content_layout.setSpacing(10)
-
-        lora_desc = QLabel(
-            "留空则自动从启动器路径的 ComfyUI/models/loras 目录读取；"
-            "设置后会额外读取指定文件夹中的LoRA文件（多个文件夹用 ; 分隔）。"
-        )
-        lora_desc.setWordWrap(True)
-        lora_desc.setStyleSheet("color: #756B65; font-size: 12px; background: transparent; border: none;")
-        lora_content_layout.addWidget(lora_desc)
-
-        self.lora_folders_input = QLineEdit()
-        self.lora_folders_input.setStyleSheet(_input_style())
-        self.lora_folders_input.setPlaceholderText(
-            "多个文件夹用;分隔  例如: D:\\my_loras;E:\\extra_loras"
-        )
-        lora_content_layout.addWidget(self.lora_folders_input)
-
-        layout.addWidget(self.lora_content)
 
         # ComfyUI 状态
         self.comfy_status_label = QLabel("")
@@ -400,34 +367,28 @@ class SettingsPage(QWidget):
         self.mirror_check.toggled.connect(
             lambda checked: self.setting_changed.emit("use_mirror", checked)
         )
-        self.lora_folders_input.textChanged.connect(
-            lambda text: self.setting_changed.emit("extra_lora_folders", text)
-        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def set_values(self, comfyui_exe: str, auto_browser: bool, check_comfyui: bool,
-                   use_mirror: bool = True, extra_lora_folders: str = ""):
+                   use_mirror: bool = True):
         # 阻断信号防止初始化时触发自动保存
         self.comfy_path_input.blockSignals(True)
         self.auto_browser_check.blockSignals(True)
         self.toast_check.blockSignals(True)
         self.mirror_check.blockSignals(True)
-        self.lora_folders_input.blockSignals(True)
 
         self.comfy_path_input.setText(comfyui_exe)
         self.auto_browser_check.setChecked(auto_browser)
         self.toast_check.setChecked(check_comfyui)
         self.mirror_check.setChecked(use_mirror)
-        self.lora_folders_input.setText(extra_lora_folders)
 
         self.comfy_path_input.blockSignals(False)
         self.auto_browser_check.blockSignals(False)
         self.toast_check.blockSignals(False)
         self.mirror_check.blockSignals(False)
-        self.lora_folders_input.blockSignals(False)
 
     def set_comfy_status(self, connected: bool):
         if connected:
@@ -469,17 +430,6 @@ class SettingsPage(QWidget):
             self.migrate_content.show()
             self.migrate_header_btn.setText("▼ 数据迁移")
             self.migrate_panel_toggled.emit(True)
-
-    def _on_toggle_lora(self):
-        """展开/折叠额外LoRA文件夹设置面板。"""
-        if self.lora_content.isVisible():
-            self.lora_content.hide()
-            self.lora_header_btn.setText("▶ 单独设置Lora文件夹")
-            self.lora_panel_toggled.emit(False)
-        else:
-            self.lora_content.show()
-            self.lora_header_btn.setText("▼ 单独设置Lora文件夹")
-            self.lora_panel_toggled.emit(True)
 
     def _on_select_migrate_source(self):
         """用户选择旧版本文件夹。"""

@@ -306,11 +306,6 @@ router.post('/characters/:id/chat', async (req, res) => {
         userMsgId = userMsg.lastInsertRowid;
       }
 
-      // sleeping 时标记角色为睡眠状态
-      if (delayInfo.delay === -1) {
-        db.prepare('UPDATE characters SET is_sleeping = 1 WHERE id = ?').run(characterId);
-      }
-
       db.prepare(`
         INSERT INTO reply_queue (character_id, conversation_id, user_raw_msg_id, user_msg_id, user_content, client_msg_id, scheduled_reply_at, current_activity, delay_minutes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -347,7 +342,8 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 日程系统可能因模板缺失/缓存过期/功能开关等原因未检测到睡眠，
     // 但 characters.is_sleeping 是 scheduleManager 定时同步的可靠标志
     const sleepingChar = db.prepare('SELECT is_sleeping, sleep_until, temporary_wake_until FROM characters WHERE id = ?').get(characterId);
-    if (sleepingChar && sleepingChar.is_sleeping === 1 && !sleepingChar.temporary_wake_until) {
+    // isTempWoken 检查"未过期"而非"值存在"——过期残留值不应使睡眠兜底失效
+    if (sleepingChar && sleepingChar.is_sleeping === 1 && !isTempWoken(characterId)) {
       const sleepUntil = sleepingChar.sleep_until
         || new Date(Date.now() + 8 * 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 

@@ -232,9 +232,14 @@
             <div v-if="recruit.step === 'preview'" class="modal-body" style="position:relative">
               <div class="preview-card">
                 <input
+                  v-model="recruit.result.name"
+                  class="preview-name-input"
+                  placeholder="角色标识（英文/拼音，唯一）"
+                />
+                <input
                   v-model="recruit.result.display_name"
                   class="preview-name-input"
-                  placeholder="角色名称"
+                  placeholder="展示名称"
                 />
                 <div class="preview-prompt-label">-</div>
                 <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>

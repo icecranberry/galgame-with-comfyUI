@@ -18,7 +18,7 @@ import { broadcast } from './unifiedStreamBus.js';
 // ── 缓存 ──
 // key: characterId, value: { activity, expireAt }
 const activityCache = new Map();
-const groggyShown = new Set();  // 已展示过groggy唤醒提示的角色（仅首条消息触发一次）
+const groggyShown = new Set();  // 已展示过groggy唤醒提示的角色（key 统一为 Number，每次唤醒周期仅首条消息触发一次）
 const CACHE_TTL = 60 * 1000; // 1 分钟
 
 // ── 时间工具 ──
@@ -281,9 +281,12 @@ export function getCurrentActivity(characterId, now = new Date()) {
  * 为 chat.js / momentScheduler / eventGenerator 生成日程上下文
  * @returns {string|null} 适合拼入 system prompt 的文字
  */
-export function formatScheduleContext(characterId, now = new Date()) {
+export function formatScheduleContext(characterId, now = new Date(), { consumeGroggy = true } = {}) {
+  characterId = Number(characterId);
   // 临时唤醒期间 → 覆盖睡眠提示
   if (isTempWoken(characterId, now)) {
+    // 非聊天调用方（如 mailboxScheduler）不消费一次性标记，避免偷走聊天首条的 groggy 提示
+    if (!consumeGroggy) return null;
     if (groggyShown.has(characterId)) return null;
     groggyShown.add(characterId);
     const db = getDb();
@@ -336,12 +339,18 @@ export function getReplyDelay(characterId, now = new Date()) {
   const activity = getCurrentActivity(characterId, now);
   if (!activity) return { delay: 0, activity: '未知', location: '' };
 
-  // 兜底：日程显示睡眠 but DB 中 is_sleeping=0（临时唤醒期间 temporary_wake_until 被意外清除）
+  // 日程显示睡眠 but DB 中 is_sleeping=0 → 区分两种情况：
+  //   a. 曾被叫醒（temporary_wake_until 有值，可能是过期残留）→ 视为清醒，秒回
+  //   b. 睡眠时段刚开始、cron 尚未同步 → 立即同步并按睡眠拦截
   if (activity.replyDelay === -1) {
     const db = getDb();
-    const char = db.prepare('SELECT is_sleeping FROM characters WHERE id = ?').get(characterId);
+    const char = db.prepare('SELECT is_sleeping, temporary_wake_until FROM characters WHERE id = ?').get(characterId);
     if (char && char.is_sleeping === 0) {
-      return { delay: 0, activity: '被叫醒了', location: '' };
+      if (char.temporary_wake_until) {
+        return { delay: 0, activity: '被叫醒了', location: '' };
+      }
+      syncSleepingState(characterId, now);
+      return { delay: -1, activity: activity.activity, location: activity.location };
     }
   }
 
@@ -418,7 +427,26 @@ export function extendTempWake(characterId) {
 
   console.log(`[scheduleMgr] Temp wake extended for ${characterId}, new expiry in ${minutes}min`);
   scheduleTempWakeExpiry(characterId, newUntil);
+
+  // 通知前端临时唤醒时间已续期，避免过期显示
+  const char = db.prepare('SELECT sleep_until, wake_mode FROM characters WHERE id = ?').get(characterId);
+  broadcast('schedule_state_change', {
+    character_id: characterId,
+    is_sleeping: false,
+    sleep_until: char?.sleep_until || null,
+    temporary_wake_until: newUntil,
+    wake_mode: char?.wake_mode || null,
+  });
   return true;
+}
+
+/**
+ * 重置 groggy 一次性提示标记
+ * 每次叫醒成功时由 wake 端点调用，保证"每次被唤醒都注入一次"的语义，
+ * 不依赖上一轮 revertTempWake 是否正常执行
+ */
+export function resetGroggyShown(characterId) {
+  groggyShown.delete(Number(characterId));
 }
 
 function clearTempWakeTimer(characterId) {
@@ -431,7 +459,7 @@ function clearTempWakeTimer(characterId) {
  * 临时唤醒到期 → 回退到睡眠或正常清醒
  */
 function revertTempWake(characterId) {
-  groggyShown.delete(characterId);
+  groggyShown.delete(Number(characterId));
   const db = getDb();
   const char = db.prepare('SELECT id, sleep_until FROM characters WHERE id = ?').get(characterId);
   if (!char) return;

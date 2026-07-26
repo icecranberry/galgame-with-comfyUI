@@ -15,7 +15,7 @@ import {
   affinityToPrompt, loadAffinity,
 } from './emotionEngine.js';
 import { broadcast } from './unifiedStreamBus.js';
-import { scheduleTempWakeExpiry, getTempWakeUntil } from './scheduleManager.js';
+import { getTempWakeUntil } from './scheduleManager.js';
 
 /**
  * 处理叫醒：构建 LLM 上下文 → 生成回复 → 写入 DB → 广播 SSE
@@ -70,10 +70,11 @@ export async function processWakeUp(characterId, mode, attempts = null) {
     });
   } catch (err) {
     // LLM 调用失败，恢复 reply_queue 条目状态
+    // 角色已被叫醒，不能再等原 sleep_until —— 改为 3 分钟后由 replyQueueScheduler 接手
     if (hasBacklog && pendingEntries.length > 0) {
       const ids = pendingEntries.map(e => e.id);
       const placeholders = ids.map(() => '?').join(',');
-      db.prepare(`UPDATE reply_queue SET status = 'waiting' WHERE id IN (${placeholders})`).run(...ids);
+      db.prepare(`UPDATE reply_queue SET status = 'waiting', scheduled_reply_at = datetime('now', '+3 minutes') WHERE id IN (${placeholders})`).run(...ids);
     }
     throw err;
   }
@@ -105,10 +106,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
     db.prepare(`DELETE FROM reply_queue WHERE id IN (${placeholders})`).run(...ids);
   }
 
-  // ── 调度临时唤醒过期 ──
-  if (tempWakeUntil) {
-    scheduleTempWakeExpiry(characterId, tempWakeUntil);
-  }
+  // 临时唤醒到期定时器已由 wake 端点在写库后立即注册（不依赖本函数成功）
 
   // ── 通过 SSE 广播回复 ──
   broadcast('delayed_reply', {

@@ -118,7 +118,9 @@
             </div>
 
             <div class="preview-card">
-              <label class="fl">展示名</label>
+              <label class="fl">角色标识</label>
+              <input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
+              <label class="fl" style="margin-top:12px">展示名</label>
               <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
               <label class="fl" style="margin-top:12px">人格提示词</label>
               <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
@@ -326,6 +328,7 @@ const isMobile = inject('isMobile')
 
 // ── 详情编辑状态 ──
 const detail = reactive({
+  editCharName: '',
   editName: '',
   editPrompt: '',
   relationships: [],
@@ -431,6 +434,7 @@ function refreshRelationships() {
 defineExpose({ refreshRelationships })
 
 function init(c) {
+  detail.editCharName = c.name || ''
   detail.editName = c.display_name || ''
   detail.editPrompt = c.base_prompt || ''
   detail.momentsDisabled = !!c.moments_disabled
@@ -473,12 +477,15 @@ async function saveCharDetail() {
   const c = props.character
   if (!c || !detail.dirty) return
   await api.updateCharacter(c.id, {
+    name: detail.editCharName,
     display_name: detail.editName,
     base_prompt: detail.editPrompt,
     moments_disabled: detail.momentsDisabled,
     proactive_disabled: detail.proactiveDisabled,
     events_disabled: detail.eventsDisabled,
   })
+  c.name = detail.editCharName
+  c.display_name = detail.editName
   detail.dirty = false
   emit('saved', c)
 }

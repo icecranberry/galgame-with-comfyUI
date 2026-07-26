@@ -274,7 +274,7 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
   // ── system 4: 当前日程 + timeLight ──
   const ctx4Parts = [];
 
-  const scheduleCtx = formatScheduleContext(charId);
+  const scheduleCtx = formatScheduleContext(charId, new Date(), { consumeGroggy: false });
   if (scheduleCtx) ctx4Parts.push(scheduleCtx);
 
   const tl = getTimeLight();
