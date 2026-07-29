@@ -39,7 +39,7 @@ def upsert_memory(chroma_id: str, embedding: list[float], metadata: dict, text: 
     )
 
 
-def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None, conversation_id: str = None) -> list[dict]:
+def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None, conversation_id=None) -> list[dict]:
     """
     向量相似检索。
 
@@ -47,7 +47,7 @@ def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = N
         embedding: 查询嵌入向量
         top_k: 返回结果数
         filter_type: 可选过滤 fragment_type ('fact'/'preference'/'emotion')
-        conversation_id: 可选过滤 conversation_id
+        conversation_id: 可选过滤 conversation_id（str 或 str 列表，列表走 $in）
 
     Returns:
         [{id, score, metadata, document}, ...]
@@ -58,7 +58,13 @@ def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = N
     if filter_type:
         conditions.append({"fragment_type": filter_type})
     if conversation_id:
-        conditions.append({"conversation_id": conversation_id})
+        if isinstance(conversation_id, list):
+            if len(conversation_id) == 1:
+                conditions.append({"conversation_id": conversation_id[0]})
+            elif len(conversation_id) > 1:
+                conditions.append({"conversation_id": {"$in": conversation_id}})
+        else:
+            conditions.append({"conversation_id": conversation_id})
     where = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if len(conditions) == 1 else None)
 
     results = col.query(

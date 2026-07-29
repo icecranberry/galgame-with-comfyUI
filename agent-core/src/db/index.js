@@ -52,6 +52,8 @@ function initSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id TEXT,
       source_msg_id INTEGER REFERENCES messages(id),
+      source_raw_start_id INTEGER,
+      source_raw_end_id INTEGER,
       fragment_type TEXT NOT NULL CHECK(fragment_type IN ('fact','preference','emotion')),
       content TEXT NOT NULL,
       entities TEXT DEFAULT '[]',
@@ -90,6 +92,7 @@ function initSchema(db) {
     CREATE TABLE IF NOT EXISTS image_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id TEXT,
+      source_msg_id INTEGER REFERENCES messages(id),
       prompt_original TEXT NOT NULL,
       prompt_refined TEXT,
       style TEXT,
@@ -333,7 +336,37 @@ function initSchema(db) {
       wind_speed TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- 群聊表（conversation_id = 'group_' || id，消息复用 raw_messages/messages 双表）
+    CREATE TABLE IF NOT EXISTS group_chats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      topic TEXT DEFAULT '',
+      created_by TEXT NOT NULL DEFAULT 'user' CHECK(created_by IN ('user','character')),
+      creator_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      idle_enabled INTEGER DEFAULT 1,
+      next_idle_at DATETIME,
+      idle_budget_date TEXT,
+      idle_budget_used INTEGER DEFAULT 0,
+      last_message_at DATETIME,
+      last_seen_at DATETIME,
+      rag_last_extracted_raw_id INTEGER DEFAULT 0,
+      rag_user_rounds_pending INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 群成员表
+    CREATE TABLE IF NOT EXISTS group_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL REFERENCES group_chats(id) ON DELETE CASCADE,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(group_id, character_id)
+    );
   `);
+
+  // 后台闲聊为群聊固定能力：兼容曾被手动关闭的历史群。
+  db.prepare(`UPDATE group_chats SET idle_enabled = 1 WHERE idle_enabled IS NULL OR idle_enabled = 0`).run();
 
   // FTS5 external content table — drop & recreate to handle schema changes
   db.exec(`
@@ -392,6 +425,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_rq_scheduled ON reply_queue(scheduled_reply_at, status);
     CREATE INDEX IF NOT EXISTS idx_rq_character ON reply_queue(character_id, status);
     CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather_hourly(weather_time);
+    CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_members_char ON group_members(character_id);
+    CREATE INDEX IF NOT EXISTS idx_group_chats_idle ON group_chats(next_idle_at, idle_enabled);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -476,6 +512,9 @@ function initSchema(db) {
 
   // 迁移: 交叉角色引用 — character_events 表新增 referenced_character_ids 列
   migrateEventCrossRef(db);
+
+  // 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
+  migrateGroupChatSchema(db);
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
@@ -1102,12 +1141,13 @@ export function getWorldSetting() {
     }
   }
 
+  // 只要存在激活项就以它为准：内容为空视为用户主动选择"无世界观"，不再回退旧表
   const active = getActiveWorldSetting();
-  if (active?.content?.trim()) {
-    return `<world_setting>\n${active.content}\n</world_setting>`;
+  if (active) {
+    return active.content?.trim() ? `<world_setting>\n${active.content}\n</world_setting>` : null;
   }
 
-  // 兼容旧表
+  // 兼容旧表（仅 world_settings 表无激活项时）
   const world = getGlobalRule('world_setting');
   if (world?.rule_content && world.is_active) {
     return world.rule_content;
@@ -1208,6 +1248,8 @@ const SETTING_TO_CONFIG = {
   feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
   feature_mergeMessages:             { obj: 'features', key: 'mergeMessages',             type: 'bool' },
   feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
+  feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
+  feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
   weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
   compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
   compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
@@ -1303,15 +1345,17 @@ function migrateWorldSettings(db) {
     const match = raw.match(/^<world_setting>\s*([\s\S]*?)\s*<\/world_setting>$/);
     const content = match ? match[1] : raw;
 
-    if (!content.trim()) return;
-
     const already = db.prepare(`SELECT id FROM world_settings`).get();
-    if (already) return;
+    if (content.trim() && !already) {
+      db.prepare(
+        `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 1, 0)`
+      ).run('默认世界观', content);
+      console.log('[db] migrateWorldSettings: moved existing world_setting to world_settings table');
+    }
 
-    db.prepare(
-      `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 1, 0)`
-    ).run('默认世界观', content);
-    console.log('[db] migrateWorldSettings: moved existing world_setting to world_settings table');
+    // 迁移后删除旧行：残留会导致 getWorldSetting 回退时读到过期世界观
+    db.prepare(`DELETE FROM global_rules WHERE rule_key = 'world_setting'`).run();
+    console.log('[db] migrateWorldSettings: removed legacy global_rules.world_setting row');
   } catch (err) {
     console.log('[db] migrateWorldSettings error:', err.message);
   }
@@ -1353,6 +1397,69 @@ function migrateOathSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateOathSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
+ * NULL = 用户消息或 1 对 1 旧数据；群聊中角色消息填角色 id
+ */
+function migrateGroupChatSchema(db) {
+  try {
+    const rawCols = db.prepare(`PRAGMA table_info(raw_messages)`).all();
+    if (!rawCols.find(c => c.name === 'speaker_character_id')) {
+      db.exec(`ALTER TABLE raw_messages ADD COLUMN speaker_character_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added raw_messages.speaker_character_id column');
+    }
+    const msgCols = db.prepare(`PRAGMA table_info(messages)`).all();
+    if (!msgCols.find(c => c.name === 'speaker_character_id')) {
+      db.exec(`ALTER TABLE messages ADD COLUMN speaker_character_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added messages.speaker_character_id column');
+    }
+
+    const fragmentCols = db.prepare(`PRAGMA table_info(memory_fragments)`).all();
+    if (!fragmentCols.find(c => c.name === 'source_raw_start_id')) {
+      db.exec(`ALTER TABLE memory_fragments ADD COLUMN source_raw_start_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added memory_fragments.source_raw_start_id column');
+    }
+    if (!fragmentCols.find(c => c.name === 'source_raw_end_id')) {
+      db.exec(`ALTER TABLE memory_fragments ADD COLUMN source_raw_end_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added memory_fragments.source_raw_end_id column');
+    }
+
+    const imageTaskCols = db.prepare(`PRAGMA table_info(image_tasks)`).all();
+    if (!imageTaskCols.find(c => c.name === 'source_msg_id')) {
+      db.exec(`ALTER TABLE image_tasks ADD COLUMN source_msg_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added image_tasks.source_msg_id column');
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_image_tasks_source_msg ON image_tasks(source_msg_id)`);
+
+    const groupCols = db.prepare(`PRAGMA table_info(group_chats)`).all();
+    let addedRagBoundary = false;
+    if (!groupCols.find(c => c.name === 'rag_last_extracted_raw_id')) {
+      db.exec(`ALTER TABLE group_chats ADD COLUMN rag_last_extracted_raw_id INTEGER DEFAULT 0`);
+      addedRagBoundary = true;
+      console.log('[db] Added group_chats.rag_last_extracted_raw_id column');
+    }
+    if (!groupCols.find(c => c.name === 'rag_user_rounds_pending')) {
+      db.exec(`ALTER TABLE group_chats ADD COLUMN rag_user_rounds_pending INTEGER DEFAULT 0`);
+      console.log('[db] Added group_chats.rag_user_rounds_pending column');
+    }
+
+    // 旧群若已经产出过记忆，用最后一条记忆的来源消息回填边界，避免升级后重复分析历史。
+    if (addedRagBoundary) {
+      db.exec(`
+        UPDATE group_chats
+        SET rag_last_extracted_raw_id = COALESCE((
+          SELECT MAX(m.raw_id)
+          FROM memory_fragments mf
+          JOIN messages m ON m.id = mf.source_msg_id
+          WHERE mf.conversation_id = 'group_' || group_chats.id
+        ), 0)
+      `);
+    }
+  } catch (err) {
+    console.log('[db] migrateGroupChatSchema error:', err.message);
   }
 }
 

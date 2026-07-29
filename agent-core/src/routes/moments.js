@@ -366,8 +366,6 @@ async function generateMomentPost(character, opts = {}) {
     { name: '洗衣/家务', desc: '普通家务中的小瞬间，晾衣服、整理房间、打扫后的满足感（配图是生活场景）' },
         // === 身体感受 / 状态 ===
     { name: '困倦/睡醒', desc: '刚睡醒、犯困、赖床、午睡后的状态（配图是床铺、窗边或慵懒氛围）' },
-    { name: '早晨', desc: '一天开始时的小记录，早餐、阳光、准备出门（配图是清晨氛围）' },
-    { name: '深夜', desc: '深夜独处时的状态，夜灯、房间、窗外景色（配图是安静夜晚氛围）' },
     { name: '洗澡/泡澡后', desc: '洗澡、泡澡、护肤后的放松时间（配图是浴室外或舒适生活氛围）' },
     { name: '换季', desc: '换衣服、整理季节用品、感受到季节变化（配图是衣物或环境变化）' },
         // === 兴趣与角色个性 ===
@@ -379,7 +377,6 @@ async function generateMomentPost(character, opts = {}) {
     { name: '今日小目标', desc: '完成或尝试完成一个很小的目标（配图是过程或成果）' },
     { name: '自己做饭', desc: '自己下厨做的一顿饭，不论成功还是翻车（配图是料理过程或成品）' },
     { name: '甜品', desc: '蛋糕、冰淇淋、布丁等让人心情变好的甜食（配图是甜品特写）' },
-    { name: '夜宵', desc: '深夜突然想吃点东西（配图是夜宵和夜晚氛围）' },
 
     // === 出门 ===
     { name: '散步', desc: '漫无目的走了一会儿，路上的风景、街道、小发现（配图是街景）' },
@@ -523,17 +520,21 @@ const MOTIVATIONS = [
     return items[items.length - 1].item;
   }
 
-  // ~5% 特殊叙事模式 / ~95% 二维 Topic × Motivation
+  // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% 二维 Topic × Motivation
   let pickedSpecialMode = null;
   let pickedTopic = null;
   let pickedMotivation = null;
   let combinedStyle = '';
   let isSpecialMode = false;
+  let isFreeMode = false;
 
-  if (Math.random() < 0.04) {
+  const modeRoll = Math.random();
+  if (modeRoll < 0.05) {
     pickedSpecialMode = SPECIAL_MODES[Math.floor(Math.random() * SPECIAL_MODES.length)];
     combinedStyle = pickedSpecialMode.name;
     isSpecialMode = true;
+  } else if (modeRoll < 0.15) {
+    isFreeMode = true;
   } else {
     pickedTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
     pickedMotivation = weightedPick(MOTIVATIONS, MOTIVATION_WEIGHTS);
@@ -638,7 +639,7 @@ const MOTIVATIONS = [
 
   const postingTask = (() => {
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（像角色本人随手发布的一条朋友圈，保持自然口语和角色个性）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}"}`;
+{"text":"朋友圈文案（自然口语化）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}"}`;
 
     const rules = `规则：
 - 只输出 JSON，不要解释
@@ -659,7 +660,7 @@ ${rules}`;
   // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
   let scheduleContext = '';
   try {
-    if (config.features.schedule !== false) {
+    if (!isFreeMode && config.features.schedule !== false) {
       const activity = getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
         scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}。朋友圈的内容应当反映这个时段角色的状态和见闻。`;
@@ -667,11 +668,13 @@ ${rules}`;
     }
   } catch { /* schedule not available, skip */ }
 
-  const styleDirective = isSpecialMode
-    ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
-    // 二维动机表现不佳，暂时去掉二维动机
-    // : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
-    : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】**`;
+  const styleDirective = isFreeMode
+    ? ''
+    : isSpecialMode
+      ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
+      // 二维动机表现不佳，暂时去掉二维动机
+      // : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
+      : `\n**本次发朋友圈你是正在做或者想到：【${pickedTopic.desc}】**`;
 
   const userMsg = multiPersons.length > 0
     ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`

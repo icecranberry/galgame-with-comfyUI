@@ -13,11 +13,13 @@ import TavernView from './views/TavernView.vue'
 import EventsView from './views/EventsView.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import MailboxView from './views/MailboxView.vue'
+import GroupChatView from './views/GroupChatView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
   { path: '/chat/:id', component: ChatView },
+  { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
   { path: '/schedule', component: ScheduleView },

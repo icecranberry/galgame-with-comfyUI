@@ -25,6 +25,7 @@ import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline }
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
+import { beginTurn } from '../services/llmTelemetry.js';
 
 const router = Router();
 
@@ -242,6 +243,9 @@ router.post('/characters/:id/chat', async (req, res) => {
   const db = getDb();
   const characterId = req.params.id;
   const conversationId = convId(characterId);
+
+  // 开启本轮 LLM 调用统计（异步后处理链继承此上下文，静默 10s 后输出汇总日志）
+  beginTurn(conversationId);
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {
@@ -743,7 +747,14 @@ ${coreRules}
     if (config.features.memory) {
       try {
         const excludeEntities = [character.display_name, chatUserName, 'user'];
-        const rawResults = await hybridSearch(message, { conversationId, topK: 10, excludeEntities });
+        // 跨库检索：私聊 + 该角色所在的所有群聊（角色"记得"群里发生的事）
+        const memberGroups = db.prepare(
+          `SELECT group_id FROM group_members WHERE character_id = ?`
+        ).all(characterId).map(g => `group_${g.group_id}`);
+        const rawResults = await hybridSearch(message, {
+          conversationIds: [conversationId, ...memberGroups],
+          topK: 10, excludeEntities,
+        });
         const hasKeywordOrEntityHit = rawResults.some(r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity')));
         if (!hasKeywordOrEntityHit) {
           console.log('[chat] RAG skipped: no keyword/entity hits for query');

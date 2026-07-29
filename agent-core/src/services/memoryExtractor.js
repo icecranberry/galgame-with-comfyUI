@@ -97,6 +97,23 @@ ${messagesText}
 
 // ── 主入口 ──
 
+export function selectMemorySourceRows(db, conversationId, { afterRawId = null, throughRawId = null } = {}) {
+  if (afterRawId !== null) {
+    const endRawId = throughRawId ?? Number.MAX_SAFE_INTEGER;
+    return db.prepare(`
+      SELECT id, role, content FROM raw_messages
+      WHERE conversation_id = ? AND id > ? AND id <= ? AND role IN ('user','assistant')
+      ORDER BY id ASC
+    `).all(conversationId, afterRawId, endRawId);
+  }
+
+  return db.prepare(`
+    SELECT id, role, content FROM raw_messages
+    WHERE conversation_id = ? AND role IN ('user','assistant')
+    ORDER BY id DESC LIMIT 20
+  `).all(conversationId).reverse();
+}
+
 /**
  * 从最近一轮对话中提取记忆碎片
  *
@@ -108,17 +125,26 @@ ${messagesText}
  * @param {string[]} options.participantNames - 对话参与方名字，会被排除出实体列表
  * @param {string} [options.characterName] - 角色显示名，用于替换对话中的 [assistant] 标签
  * @param {string} [options.userName] - 用户名，用于替换对话中的 [user] 标签
+ * @param {number|null} [options.afterRawId] - 仅分析该 raw id 之后的消息；null 时保持最近 20 条逻辑
+ * @param {number|null} [options.throughRawId] - 增量分析的结束 raw id（包含）
+ * @param {number|null} [options.sourceRawStartId] - 本次提取覆盖的第一条 raw id
+ * @param {number|null} [options.sourceRawEndId] - 本次提取覆盖的最后一条 raw id
+ * @param {boolean} [options.throwOnError=false] - 提取请求失败时是否向调用方抛错
  */
-export async function extractMemoryFragments(conversationId, userMsgId, assistantMsgId, { characterPrompt = '', participantNames = [], characterName = '', userName = '' } = {}) {
+export async function extractMemoryFragments(conversationId, userMsgId, assistantMsgId, {
+  characterPrompt = '',
+  participantNames = [],
+  characterName = '',
+  userName = '',
+  afterRawId = null,
+  throughRawId = null,
+  sourceRawStartId = null,
+  sourceRawEndId = null,
+  throwOnError = false,
+} = {}) {
   const db = getDb();
 
-  // 获取最近十轮对话作为提取上下文（从 raw_messages 取完整消息）
-  // 每 10 条用户消息触发一次提取，取 20 行 = 10 轮（user + assistant 各一条）
-  const recent = db.prepare(`
-    SELECT role, content FROM raw_messages
-    WHERE conversation_id = ?
-    ORDER BY id DESC LIMIT 20
-  `).all(conversationId).reverse();
+  const recent = selectMemorySourceRows(db, conversationId, { afterRawId, throughRawId });
 
   if (recent.length === 0) return [];
 
@@ -148,6 +174,7 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
     if (!Array.isArray(fragments)) fragments = [];
   } catch (err) {
     console.error('[memoryExtractor] extraction failed:', err.message);
+    if (throwOnError) throw err;
     return [];
   }
 
@@ -217,9 +244,14 @@ export async function extractMemoryFragments(conversationId, userMsgId, assistan
 
       // 存入 SQLite
       db.prepare(`
-        INSERT INTO memory_fragments (conversation_id, source_msg_id, fragment_type, content, entities, chroma_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(conversationId, userMsgId, frag.type, frag.content, entities, chromaId);
+        INSERT INTO memory_fragments (
+          conversation_id, source_msg_id, source_raw_start_id, source_raw_end_id,
+          fragment_type, content, entities, chroma_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        conversationId, userMsgId, sourceRawStartId, sourceRawEndId,
+        frag.type, frag.content, entities, chromaId
+      );
 
       saved.push({ type: frag.type, content: frag.content, chromaId });
     } catch (err) {

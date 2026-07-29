@@ -82,6 +82,9 @@ function _connect() {
     schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
     schedule_state_change: d => _dispatch('schedule_state_change', d),
     image_compress_progress: d => _dispatch('image_compress_progress', d),
+    group_message:     d => _dispatch('group_message', d),
+    group_created:     d => _dispatch('group_created', d),
+    group_image_done:  d => _dispatch('group_image_done', d),
   }, {
     onClose: _scheduleReconnect,
   })

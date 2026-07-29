@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
+import { recordLlmCall } from '../services/llmTelemetry.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
@@ -57,6 +58,24 @@ function isRetryableError(err) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 打印 token 用量与前缀缓存命中率。
+ * DeepSeek 官方返回 prompt_cache_hit_tokens；OpenAI 风格渠道返回 prompt_tokens_details.cached_tokens。
+ * 两者都没有时只打印用量，不打印命中率。
+ */
+function logUsage(label, usage) {
+  if (!usage) return;
+  const prompt = usage.prompt_tokens ?? 0;
+  const completion = usage.completion_tokens ?? 0;
+  const hit = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens;
+  if (hit != null && prompt > 0) {
+    const pct = ((hit / prompt) * 100).toFixed(0);
+    console.log(`[cache] ${label}: 命中 ${hit}/${prompt} prompt tokens (${pct}%) | 输出 ${completion}`);
+  } else {
+    console.log(`[usage] ${label}: prompt ${prompt} | 输出 ${completion}`);
+  }
 }
 
 /**
@@ -135,6 +154,8 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}]`);
       console.log((content || '').slice(0, 2000));
+      logUsage(label, res.usage);
+      recordLlmCall(label, res.usage);
       console.log('═══════════════════════════════════════════════\n');
 
       return content;
@@ -154,6 +175,7 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       // 不可重试或已耗尽重试次数 → 抛出
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}] ❌ 最终失败: status=${status}, code=${code}, msg=${msg}`);
+      recordLlmCall(label, null, { failed: true });
       console.log('═══════════════════════════════════════════════\n');
       throw err;
     }
@@ -204,6 +226,12 @@ export async function* chatStream(messages, {
       params.thinking = thinking;
     }
 
+    // 流式 usage（缓存命中率）：末尾 chunk 携带。同 thinking，仅对官方 API 发送，
+    // 第三方渠道可能不认识 stream_options 直接报错
+    if (isDeepseek()) {
+      params.stream_options = { include_usage: true };
+    }
+
     // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
     const extraBody = config.llm.extraBody;
     if (extraBody && Object.keys(extraBody).length > 0) {
@@ -214,7 +242,9 @@ export async function* chatStream(messages, {
 
     console.log(`[${providerLabel()} ← ${label} start]`);
 
+    let usage = null;
     for await (const chunk of stream) {
+      if (chunk.usage) usage = chunk.usage;
       const delta = chunk.choices?.[0]?.delta?.content;
       if (delta) {
         total += delta;
@@ -225,9 +255,12 @@ export async function* chatStream(messages, {
     console.log(`[${providerLabel()} ← ${label} end]`);
     console.log((total || '(empty)').slice(0, 2000));
     if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
+    logUsage(label, usage);
+    recordLlmCall(label, usage);
     console.log('═══════════════════════════════════════════════\n');
   } catch (err) {
     console.error(`[${providerLabel()} ← ${label}] stream error:`, err.message);
+    recordLlmCall(label, null, { failed: true });
     throw err;
   } finally {
     if (_limitEnabled()) releaseSlot();

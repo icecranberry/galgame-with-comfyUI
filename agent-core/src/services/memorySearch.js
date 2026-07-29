@@ -25,17 +25,23 @@ const TYPE_WEIGHT = { fact: 1.5, preference: 1.0, emotion: 0.6 };
  *
  * @param {string} query - 用户查询文本
  * @param {object} options
- * @param {string} options.conversationId - 可选，限定会话范围
+ * @param {string} options.conversationId - 可选，限定单一会话范围
+ * @param {string[]} options.conversationIds - 可选，限定多个会话范围（跨库检索：私聊 + 群聊）
  * @param {number} options.topK - 最终返回数量
  * @param {string[]} options.excludeEntities - 实体搜索中排除的实体名（如对话参与方）
  * @returns {Promise<Array<{id, content, score, fragment_type, entities}>>}
  */
-export async function hybridSearch(query, { conversationId = null, topK = FUSION_TOP_K, excludeEntities = [] } = {}) {
+export async function hybridSearch(query, { conversationId = null, conversationIds = null, topK = FUSION_TOP_K, excludeEntities = [] } = {}) {
+  // 归一化为数组（null = 不限范围）
+  const convIds = conversationIds && conversationIds.length > 0
+    ? [...new Set(conversationIds)]
+    : (conversationId ? [conversationId] : null);
+
   // 三路召回并行执行
   const [keywordResults, vectorResults, entityResults] = await Promise.all([
-    keywordSearch(query, conversationId, CANDIDATES_PER_CHANNEL),
-    semanticSearch(query, conversationId, CANDIDATES_PER_CHANNEL),
-    entitySearch(query, conversationId, CANDIDATES_PER_CHANNEL, excludeEntities),
+    keywordSearch(query, convIds, CANDIDATES_PER_CHANNEL),
+    semanticSearch(query, convIds, CANDIDATES_PER_CHANNEL),
+    entitySearch(query, convIds, CANDIDATES_PER_CHANNEL, excludeEntities),
   ]);
 
   console.log(`[hybridSearch] query="${query}" kw=${keywordResults.length} vec=${vectorResults.length} ent=${entityResults.length}`);
@@ -59,7 +65,7 @@ export async function hybridSearch(query, { conversationId = null, topK = FUSION
  * FTS5 默认 tokenizer (unicode61) 对中文分词支持很差，
  * 这里用 LIKE 做关键词匹配，简单可靠。
  */
-function keywordSearch(query, conversationId, limit) {
+function keywordSearch(query, convIds, limit) {
   const db = getDb();
 
   // 拆分为关键词
@@ -93,9 +99,9 @@ function keywordSearch(query, conversationId, limit) {
       params.push(`%${kw}%`, `%${kw}%`);
     }
 
-    if (conversationId) {
-      sql += ` AND m.conversation_id = ?`;
-      params.push(conversationId);
+    if (convIds) {
+      sql += ` AND m.conversation_id IN (${convIds.map(() => '?').join(',')})`;
+      params.push(...convIds);
     }
 
     // 只返回有关联 memory_fragments 的行，排除纯消息匹配（消息会命中自己的分词）
@@ -122,30 +128,55 @@ function keywordSearch(query, conversationId, limit) {
 
 /**
  * 通道 2: 向量语义召回
+ *
+ * Chroma 命中后用 chroma_id 反查 memory_fragments，统一以 SQLite id 作为
+ * RRF key——否则本通道 key 是 chroma_id 字符串，与 keyword/entity 通道的
+ * 整数 id 永远无法合并去重。SQLite 中已不存在的孤儿向量直接丢弃
+ * （对应"已删除的记忆从向量通道复活"问题）。
  */
-async function semanticSearch(query, conversationId, limit) {
+async function semanticSearch(query, convIds, limit) {
   try {
     // 请求更多候选，用 conversation_id 限定范围 + 最小分数阈值过滤
-    const results = await vectorSearch(query, { topK: limit * 2, conversationId });
+    // convIds 为数组时透传，vector-service 侧走 Chroma $in 过滤
+    const results = await vectorSearch(query, { topK: limit * 2, conversationId: convIds });
 
     // 提取查询关键词（复用 segmentChinese 分词），用于过滤向量结果
     const queryKeywords = segmentChinese(
       query.split(/[\s,，。！？、（）\(\)]+/).filter(w => w.length > 0)
     );
 
-    return results
+    const passed = results
       .filter(r => r.score >= MIN_VECTOR_SCORE)
       .filter(r => queryKeywords.some(kw => (r.document || '').includes(kw)))
-      .slice(0, limit)
-      .map(r => ({
-      id: r.id,
-      frag_id: r.id,
-      fragment_type: r.metadata?.fragment_type || 'fact',
-      content: r.document || '',
-      entities: r.metadata?.entities || [],
-      score: r.score,
-      source: 'vector',
-    }));
+      .slice(0, limit);
+    if (passed.length === 0) return [];
+
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT id, chroma_id, fragment_type, content, entities
+      FROM memory_fragments
+      WHERE chroma_id IN (${passed.map(() => '?').join(',')})
+    `).all(...passed.map(r => r.id));
+    const byChromaId = new Map(rows.map(row => [row.chroma_id, row]));
+
+    const mapped = [];
+    for (const r of passed) {
+      const row = byChromaId.get(r.id);
+      if (!row) {
+        console.warn(`[memorySearch] orphan vector skipped (SQLite 中不存在): ${r.id}`);
+        continue;
+      }
+      mapped.push({
+        id: row.id,
+        frag_id: row.id,
+        fragment_type: row.fragment_type,
+        content: row.content,
+        entities: parseEntities(row.entities),
+        score: r.score,
+        source: 'vector',
+      });
+    }
+    return mapped;
   } catch (err) {
     console.error('[memorySearch] vector search error:', err.message);
     return [];
@@ -157,7 +188,7 @@ async function semanticSearch(query, conversationId, limit) {
  *
  * 先用 LIKE 找到包含关键词的记忆碎片，提取实体后再做二次扩展。
  */
-function entitySearch(query, conversationId, limit, excludeEntities = []) {
+function entitySearch(query, convIds, limit, excludeEntities = []) {
   const db = getDb();
 
   const keywords = segmentChinese(
@@ -174,9 +205,9 @@ function entitySearch(query, conversationId, limit, excludeEntities = []) {
     let sql = `SELECT mf.* FROM memory_fragments mf WHERE (${likeConditions})`;
     const params = [...likeParams];
 
-    if (conversationId) {
-      sql += ` AND mf.conversation_id = ?`;
-      params.push(conversationId);
+    if (convIds) {
+      sql += ` AND mf.conversation_id IN (${convIds.map(() => '?').join(',')})`;
+      params.push(...convIds);
     }
 
     sql += ` LIMIT 5`;
@@ -197,7 +228,7 @@ function entitySearch(query, conversationId, limit, excludeEntities = []) {
 
       // 用这些实体再做一次扩展搜索
       if (uniqueEntities.length > 0) {
-        const entityResults = expandByEntities(uniqueEntities, conversationId, limit);
+        const entityResults = expandByEntities(uniqueEntities, convIds, limit);
         const merged = dedupAndRank(
           [...rows.map(r => formatFragmentRow(r, 'entity')), ...entityResults],
           keywords,
@@ -217,15 +248,15 @@ function entitySearch(query, conversationId, limit, excludeEntities = []) {
   }
 }
 
-function expandByEntities(entities, conversationId, limit) {
+function expandByEntities(entities, convIds, limit) {
   const db = getDb();
   const placeholders = entities.map(() => 'mf.entities LIKE ?').join(' OR ');
   const params = entities.map(e => `%${e}%`);
 
   let sql = `SELECT mf.* FROM memory_fragments mf WHERE (${placeholders})`;
-  if (conversationId) {
-    sql += ` AND mf.conversation_id = ?`;
-    params.push(conversationId);
+  if (convIds) {
+    sql += ` AND mf.conversation_id IN (${convIds.map(() => '?').join(',')})`;
+    params.push(...convIds);
   }
   sql += ` LIMIT ?`;
   params.push(limit);

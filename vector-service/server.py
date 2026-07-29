@@ -33,7 +33,7 @@ class SearchRequest(BaseModel):
     text: str = Field(..., description="查询文本")
     top_k: int = Field(default=20, ge=1, le=100)
     filter_type: str | None = Field(default=None, pattern="^(fact|preference|emotion)$")
-    conversation_id: str | None = Field(default=None, description="可选，限定会话范围")
+    conversation_id: str | list[str] | None = Field(default=None, description="可选，限定会话范围（str 或 str 列表）")
 
 
 class SearchResult(BaseModel):

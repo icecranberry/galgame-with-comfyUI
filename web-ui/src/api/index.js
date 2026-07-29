@@ -254,6 +254,116 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
   return { stream, abort: () => controller.abort() }
 }
 
+// ── Groups（群聊）──
+export async function listGroups() {
+  const res = await fetch(`${BASE}/groups`)
+  return res.json()
+}
+
+export async function createGroup({ name, topic, member_ids }) {
+  const res = await fetch(`${BASE}/groups`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, topic, member_ids }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `建群失败 (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function updateGroup(id, data) {
+  const res = await fetch(`${BASE}/groups/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function deleteGroup(id) {
+  const res = await fetch(`${BASE}/groups/${id}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export async function undoLastGroupRound(id) {
+  const res = await fetch(`${BASE}/groups/${id}/messages/last-round`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `撤回失败 (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function getGroupMessages(id) {
+  const res = await fetch(`${BASE}/groups/${id}/messages`)
+  return res.json()
+}
+
+export async function markGroupSeen(id) {
+  const res = await fetch(`${BASE}/groups/${id}/seen`, { method: 'POST' })
+  return res.json()
+}
+
+/** 冷场续聊：用户停留但没人说话时触发角色继续聊（消息经统一 SSE 到达） */
+export async function nudgeGroup(id) {
+  const res = await fetch(`${BASE}/groups/${id}/nudge`, { method: 'POST' })
+  return res.json()
+}
+
+/** 群聊发言：SSE 流式返回本轮剧本（解析格式与 chatStream 一致）
+ * @param {Array<{text, client_msg_id}>} items - 支持一次携带多条聚合消息
+ * @param {number|null} truncateAfterMsgId - 打断播放时抛弃该 id 之后未上屏的分句
+ */
+export function groupChatStream(groupId, items, truncateAfterMsgId = null) {
+  const controller = new AbortController()
+  const stream = new ReadableStream({
+    async start(outerController) {
+      let res
+      try {
+        res = await fetch(`${BASE}/groups/${groupId}/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: items, truncate_after_msg_id: truncateAfterMsgId }),
+          signal: controller.signal,
+        })
+      } catch (err) {
+        if (err.name === 'AbortError') { outerController.close(); return }
+        outerController.error(err)
+        return
+      }
+      if (!res.ok) {
+        outerController.error(new Error(`Server returned ${res.status}`))
+        return
+      }
+      try {
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let lastEvent = null
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) { outerController.close(); break }
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              lastEvent = line.slice(7).trim()
+            } else if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                outerController.enqueue({ type: 'data', event: lastEvent, data })
+              } catch { /* ignore parse errors */ }
+            }
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') outerController.error(err)
+      }
+    },
+  })
+  return { stream, abort: () => controller.abort() }
+}
+
 // ── Config ──
 export async function getConfig() {
   const res = await fetch(`${BASE}/config`)

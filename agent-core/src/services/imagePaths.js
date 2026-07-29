@@ -55,6 +55,20 @@ export function saveBase64Image(category, filename, dataUri) {
   return buildImageUrl(category, filename);
 }
 
+export function deleteImageFileByUrl(url) {
+  const cleanUrl = String(url || '').replace(/\?.*$/, '');
+  const category = extractCategoryFromUrl(cleanUrl);
+  if (!category) return false;
+
+  const filename = cleanUrl.split('/').pop();
+  if (!filename || path.basename(filename) !== filename) return false;
+
+  const filePath = path.join(getImageDir(category), filename);
+  if (!fs.existsSync(filePath)) return false;
+  fs.unlinkSync(filePath);
+  return true;
+}
+
 export function getAllImageDirs() {
   const dirs = [{ category: LEGACY_CATEGORY, dir: LEGACY_DIR, urlPrefix: LEGACY_URL_PREFIX }];
   for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { hybridSearch } from '../services/memorySearch.js';
+import { deleteVector } from '../services/vectorClient.js';
 
 const router = Router();
 
@@ -52,10 +53,15 @@ router.get('/fragments', (req, res) => {
   res.json({ fragments, total: count });
 });
 
-// DELETE /api/memory/fragments/:id — 删除碎片
+// DELETE /api/memory/fragments/:id — 删除碎片（同步删除 ChromaDB 向量，防止从向量通道"复活"）
 router.delete('/fragments/:id', (req, res) => {
   const db = getDb();
+  const row = db.prepare(`SELECT chroma_id FROM memory_fragments WHERE id = ?`).get(req.params.id);
   db.prepare(`DELETE FROM memory_fragments WHERE id = ?`).run(req.params.id);
+  if (row?.chroma_id) {
+    deleteVector(row.chroma_id).catch(err =>
+      console.warn(`[memory] chroma delete failed for ${row.chroma_id}:`, err.message));
+  }
   res.json({ ok: true });
 });
 

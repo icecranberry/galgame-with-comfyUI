@@ -1,6 +1,41 @@
 <template>
   <aside class="sidebar" :class="{ 'mobile-open': isMobile && mobileOpen }">
     <div ref="charListEl" class="char-list">
+      <!-- 群聊分区 -->
+      <div class="group-section-header">
+        <span>群聊</span>
+        <button class="group-create-btn" type="button" title="发起群聊" aria-label="发起群聊" @click.stop="openCreateGroup">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+      <div
+        v-for="g in groups.groups"
+        :key="'g' + g.id"
+        class="char-item"
+        :class="{ active: g.id === groups.activeGroupId && route.path.startsWith('/group') }"
+        @click="onGroupClick(g)"
+      >
+        <div class="char-avatar-wrap">
+          <div class="group-avatar-grid">
+            <div
+              v-for="m in g.members.slice(0, 4)"
+              :key="m.id"
+              class="group-avatar-cell"
+              :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: '#e07b6c' }"
+            >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+          </div>
+        </div>
+        <div class="char-info">
+          <div class="char-name">{{ g.name }}</div>
+          <div class="char-preview">{{ g.members.length }} 位成员{{ g.topic ? ' · ' + g.topic : '' }}</div>
+        </div>
+        <div class="char-meta">
+          <span class="char-time">{{ formatTime(g.last_message_at) }}</span>
+        </div>
+        <span v-if="g.unread > 0" class="proactive-dot"></span>
+      </div>
+
+      <div v-if="groups.groups.length > 0" class="group-section-header"><span>角色</span></div>
       <div
         v-for="c in chat.characters"
         :key="c.id"
@@ -101,6 +136,99 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 建群弹窗 -->
+    <Transition name="menu-slide">
+      <div v-if="showCreateGroup && isMobile" class="more-menu-overlay" @click.self="showCreateGroup = false">
+        <div class="more-menu-panel create-group-panel">
+          <h4 class="cg-title">发起群聊</h4>
+          <input v-model="cgName" class="cg-input" type="text" maxlength="24" placeholder="群名称（留空自动生成）" />
+          <input v-model="cgTopic" class="cg-input" type="text" maxlength="60" placeholder="群主题（可选）" />
+          <div class="cg-members">
+            <div
+              v-for="c in sortedCgCharacters"
+              :key="c.id"
+              class="cg-member"
+              :class="{ picked: cgMemberIds.includes(c.id) }"
+              @click="toggleCgMember(c.id)"
+            >
+              <div
+                class="cg-member-avatar"
+                :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
+              >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+              <span>{{ c.display_name }}</span>
+            </div>
+          </div>
+          <button class="cg-submit" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
+            {{ cgSubmitting ? '创建中…' : `创建群聊（已选 ${cgMemberIds.length} 人，至少 2 人）` }}
+          </button>
+        </div>
+      </div>
+    </Transition>
+
+    <Teleport to="body">
+      <Transition name="cg-pop">
+        <div v-if="showCreateGroup && !isMobile" class="cg-overlay" @click.self="showCreateGroup = false">
+          <section class="cg-dialog" role="dialog" aria-modal="true" aria-labelledby="create-group-title">
+            <div class="cg-dialog-header">
+              <h3 id="create-group-title" class="cg-dialog-title">发起群聊</h3>
+              <button class="cg-close-btn" type="button" aria-label="关闭" @click="showCreateGroup = false">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="cg-dialog-body">
+              <div class="cg-form-col">
+                <label class="cg-field">
+                  <span class="cg-label">群名称</span>
+                  <input v-model="cgName" class="cg-input cg-input-desktop" type="text" maxlength="24" placeholder="留空自动生成" />
+                </label>
+                <label class="cg-field">
+                  <span class="cg-label">群主题</span>
+                  <input v-model="cgTopic" class="cg-input cg-input-desktop" type="text" maxlength="60" placeholder="可选，比如今晚一起聊点轻松的" />
+                </label>
+              </div>
+
+              <div class="cg-member-col">
+                <div class="cg-member-head">
+                  <span>选择成员</span>
+                  <span>{{ cgMemberIds.length }} / {{ chat.characters.length }}</span>
+                </div>
+                <div class="cg-members cg-members-desktop">
+                  <button
+                    v-for="c in sortedCgCharacters"
+                    :key="c.id"
+                    type="button"
+                    class="cg-member cg-member-desktop"
+                    :class="{ picked: cgMemberIds.includes(c.id) }"
+                    @click="toggleCgMember(c.id)"
+                  >
+                    <div
+                      class="cg-member-avatar"
+                      :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
+                    >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+                    <span>{{ c.display_name }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="cg-dialog-footer">
+              <span class="cg-hint">至少选择 2 位角色</span>
+              <div class="cg-actions">
+                <button class="cg-cancel" type="button" @click="showCreateGroup = false">取消</button>
+                <button class="cg-submit cg-submit-desktop" type="button" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
+                  {{ cgSubmitting ? '创建中...' : `创建群聊（已选 ${cgMemberIds.length} 人）` }}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
   </aside>
 </template>
 
@@ -113,6 +241,7 @@ import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
+import { useGroupsStore } from '../stores/groups.js'
 
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
@@ -129,8 +258,54 @@ const events = useEventsStore()
 const proactive = useProactiveStore()
 const schedule = useScheduleStore()
 const mailbox = useMailboxStore()
+const groups = useGroupsStore()
 const showMoreMenu = ref(false)
 const charListEl = ref(null)
+
+// ── 建群弹窗 ──
+const showCreateGroup = ref(false)
+const cgName = ref('')
+const cgTopic = ref('')
+const cgMemberIds = ref([])
+const cgSubmitting = ref(false)
+const sortedCgCharacters = computed(() => [...chat.characters].sort((left, right) => (
+  (left.display_name || '').localeCompare(right.display_name || '', 'zh-CN-u-co-pinyin', { sensitivity: 'base' })
+)))
+
+function openCreateGroup() {
+  cgName.value = ''
+  cgTopic.value = ''
+  cgMemberIds.value = []
+  showCreateGroup.value = true
+}
+
+function toggleCgMember(id) {
+  const idx = cgMemberIds.value.indexOf(id)
+  if (idx >= 0) cgMemberIds.value.splice(idx, 1)
+  else cgMemberIds.value.push(id)
+}
+
+async function submitCreateGroup() {
+  if (cgMemberIds.value.length < 2 || cgSubmitting.value) return
+  cgSubmitting.value = true
+  try {
+    const group = await groups.createGroup({
+      name: cgName.value, topic: cgTopic.value, member_ids: cgMemberIds.value,
+    })
+    showCreateGroup.value = false
+    router.push('/group/' + group.id)
+    if (props.isMobile) emit('charSelected')
+  } catch (e) {
+    alert(e.message || '建群失败')
+  } finally {
+    cgSubmitting.value = false
+  }
+}
+
+function onGroupClick(g) {
+  router.push('/group/' + g.id)
+  if (props.isMobile) emit('charSelected')
+}
 
 // 从 schedule store 构建 id → current_activity 映射
 const scheduleMap = computed(() => {
@@ -153,6 +328,8 @@ watch(() => chat.sidebarScrollSignal, () => {
 onMounted(() => {
   // SSE 连接由 NavBar 统一管理（NavBar 在移动端 CSS 隐藏但组件仍挂载，onMounted 正常触发）
   schedule.fetchOverview(true) // silent: 不触发 loading 闪烁
+  groups.connectSSE()
+  groups.loadGroups()
 })
 
 onUnmounted(() => {})
@@ -293,6 +470,263 @@ function formatTime(iso) {
 .char-time { font-size: 11px; color: var(--text-secondary); }
 
 .char-empty { color: var(--text-secondary); font-size: 13px; text-align: center; padding: 40px 16px; }
+
+/* ── 群聊分区 ── */
+.group-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 20px 4px;
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  letter-spacing: 1px;
+}
+.group-create-btn {
+  border: none; background: rgba(255,255,255,0.35);
+  width: 22px; height: 22px; min-width: 22px; padding: 0; border-radius: 7px;
+  line-height: 0; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.15s;
+}
+.group-create-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+.group-create-btn:hover { background: rgb(226 166 122 / 40%); color: var(--text-bright); }
+
+.group-avatar-grid {
+  width: 44px; height: 44px; border-radius: 12px; overflow: hidden;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: rgba(255,255,255,0.5);
+}
+.group-avatar-cell {
+  background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 600;
+  min-height: 21px;
+}
+
+/* ── 建群弹窗 ── */
+.create-group-panel { display: flex; flex-direction: column; gap: 10px; max-height: 80vh; }
+.cg-title { margin: 0 0 2px; font-size: 16px; color: var(--text-bright); }
+.cg-input {
+  border: 1px solid rgba(0,0,0,0.1); border-radius: 10px;
+  padding: 9px 12px; font-size: 14px; outline: none;
+  background: rgba(255,255,255,0.85);
+}
+.cg-members {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px; overflow-y: auto; max-height: 40vh; padding: 4px 0;
+}
+.cg-member {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px; border-radius: 12px; cursor: pointer;
+  font-size: 12px; color: var(--text-primary, #333);
+  border: 2px solid transparent;
+  transition: all 0.15s;
+}
+.cg-member.picked {
+  border-color: rgb(226 166 122);
+  background: rgb(226 166 122 / 15%);
+}
+.cg-member-avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  background-size: cover; background-position: center;
+  color: #fff; font-size: 16px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.cg-submit {
+  border: none; border-radius: 12px; padding: 12px 0;
+  background: rgb(226 166 122); color: #fff;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.cg-submit:disabled { opacity: 0.45; cursor: default; }
+
+.cg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(42, 36, 30, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.cg-dialog {
+  width: min(880px, calc(100vw - 64px));
+  max-height: min(780px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(224, 123, 108, 0.16);
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2), 0 2px 8px rgba(224, 123, 108, 0.08);
+}
+.cg-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 28px;
+  border-bottom: 1px solid rgba(224, 123, 108, 0.12);
+  background: #fff;
+}
+.cg-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-bright, #2f2927);
+}
+.cg-close-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(224, 123, 108, 0.14);
+  border-radius: 10px;
+  background: #fff7f5;
+  color: var(--accent, #e07b6c);
+}
+.cg-close-btn:hover {
+  color: #fff;
+  background: var(--accent, #e07b6c);
+}
+.cg-dialog-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 28px;
+  min-height: 0;
+  padding: 24px 28px;
+  background: #fff;
+}
+.cg-form-col,
+.cg-member-col {
+  min-width: 0;
+}
+.cg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+.cg-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #514845);
+}
+.cg-input {
+  width: 100%;
+}
+.cg-input-desktop {
+  min-height: 44px;
+  border-color: rgba(224, 123, 108, 0.22);
+  border-radius: 10px;
+  background: #fff;
+}
+.cg-input-desktop:focus {
+  border-color: var(--accent, #e07b6c);
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12);
+}
+.cg-member-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #514845);
+}
+.cg-members-desktop {
+  max-height: 450px;
+  padding: 2px 4px 2px 0;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  scrollbar-width: thin;
+  scrollbar-color: rgba(224, 123, 108, 0.35) transparent;
+}
+.cg-member-desktop {
+  min-height: 88px;
+  padding: 9px 6px 8px;
+  background: #fff;
+  border-width: 1px;
+  border-color: #eee9e7;
+}
+.cg-member-desktop:hover {
+  background: #fff8f6;
+  border-color: rgba(224, 123, 108, 0.38);
+}
+.cg-member-desktop.picked {
+  border-color: var(--accent, #e07b6c);
+  background: rgba(224, 123, 108, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(224, 123, 108, 0.14);
+}
+.cg-member-desktop span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cg-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px 22px;
+  border-top: 1px solid rgba(224, 123, 108, 0.12);
+  background: #fff;
+}
+.cg-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #8b817d);
+}
+.cg-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cg-cancel,
+.cg-submit-desktop {
+  min-width: 110px;
+  min-height: 40px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cg-cancel {
+  border: 1px solid #e8e2df;
+  background: #fff;
+  color: var(--text-primary, #514845);
+}
+.cg-cancel:hover {
+  border-color: rgba(224, 123, 108, 0.42);
+  background: #fff8f6;
+  color: var(--accent, #e07b6c);
+}
+.cg-submit-desktop {
+  background: var(--accent, #e07b6c);
+  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.24);
+}
+.cg-submit-desktop:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.cg-pop-enter-active,
+.cg-pop-leave-active {
+  transition: opacity 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.cg-pop-enter-active .cg-dialog,
+.cg-pop-leave-active .cg-dialog {
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.cg-pop-enter-from,
+.cg-pop-leave-to {
+  opacity: 0;
+}
+.cg-pop-enter-from .cg-dialog,
+.cg-pop-leave-to .cg-dialog {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
 
 /* ── 移动端底部 ── */
 .sidebar-footer {
