@@ -597,6 +597,49 @@ router.post('/characters/:id/chat', async (req, res) => {
       userInfoParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
+    // ============================================================
+    // 聊天上下文结构（chat-context-v3）
+    //
+    // stableBlocks [0] system:
+    //   破限词 (system_rules) + 世界观 (world_setting)
+    //
+    // stableBlocks [1] system:
+    //   角色基础人格 (character.base_prompt)
+    //
+    // stableBlocks [2] system:
+    //   用户上下文 + 关系 + 输出格式规则
+    //   ├─ <user_relation>
+    //   ├─ <oath_bond>
+    //   ├─ <user_info>
+    //   ├─ <character_relations>
+    //   └─ <dialogue_format_rules>
+    //
+    // summaryBlock system:
+    //   最新滚动摘要（getRecentSummaries，仅 1 条）
+    //
+    // checkpointHistory（作为 user/assistant 消息注入，冻结）：
+    //   WHERE id ≤ afterId → 末尾 10 条 assistant 及其中间 user
+    //   仅摘要触发时更新 afterId，两次摘要之间完全不变
+    //
+    // 当前 user 消息 + <dynamic_context>（按此顺序注入）：
+    //   1. <mailbox_history>
+    //   2. <event_history>
+    //   3. <recent_moments>
+    //   4. 好感度文本
+    //   5. <user_portrait>
+    //   6. <group_histories>（角色所在群聊的最新摘要，自然提及）
+    //   7. <active_chat_history>  ← WHERE id > afterId, ≤10 条 assistant
+    //   8. <schedule_context>
+    //   9. 情绪状态 (emotionPrompt)
+    //  10. <current_event>
+    //  11. <rag_memories>
+    //  12. 重逢提示（streak ≥ 2）
+    //  13. <cross_reference>
+    //  14. <dialogue_rules>（回复长度提示）
+    //  15. <time_context>
+    //
+    // 生图触发：路径 A（强匹配正则）/ B（模型自主 <needImage>）/ C（静默判断）
+    // ============================================================
     // 固定格式规则保持在稳定前缀；随好感度/本轮生图意图变化的长度提示放到动态尾部。
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     userInfoParts.push(`<dialogue_format_rules>
@@ -712,6 +755,31 @@ ${coreRules}
       if (grouped.personality) portraitStrs.push('性格特征：' + grouped.personality.join('、'));
       if (grouped.preference) portraitStrs.push('偏好习惯：' + grouped.preference.join('、'));
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
+    }
+
+    // 5.5 群聊历史摘要注入（角色"记得"群里发生的事）
+    const memberGroupRows = db.prepare(`
+      SELECT gm.group_id, gc.name AS group_name
+      FROM group_members gm
+      JOIN group_chats gc ON gc.id = gm.group_id
+      WHERE gm.character_id = ?
+    `).all(characterId);
+    if (memberGroupRows.length > 0) {
+      const groupSummaryLines = [];
+      for (const g of memberGroupRows) {
+        const gConvId = `group_${g.group_id}`;
+        const gSummary = db.prepare(`
+          SELECT summary FROM rolling_summaries
+          WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
+          ORDER BY end_msg_id DESC, id DESC LIMIT 1
+        `).get(gConvId);
+        if (gSummary?.summary) {
+          groupSummaryLines.push(`【${g.group_name}】${gSummary.summary}`);
+        }
+      }
+      if (groupSummaryLines.length > 0) {
+        dynamicBlocks.push(`<group_histories>\n你参与的群聊中近期发生的事（你可以在对话中自然提及）：\n${groupSummaryLines.join('\n\n')}\n</group_histories>`);
+      }
     }
 
     // 6. 活跃聊天历史（滑动窗口 0~10 轮）

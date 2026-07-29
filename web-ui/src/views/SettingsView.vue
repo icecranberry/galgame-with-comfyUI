@@ -45,7 +45,7 @@
         <div class="sa">
           <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
           <span v-if="saved" class="smsg">已保存</span>
-          <div style="flex:1"></div>
+          <div class="sa-spacer"></div>
           <button class="btn-ghost wf-action-btn" style="font-size:12px;display:flex" @click="globalLoraModalVisible = true">
             全局LoRA
             <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
@@ -1006,7 +1006,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
-      workflowScene.value = { chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
+      workflowScene.value = { chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
   } catch {}
@@ -1225,7 +1225,8 @@ const workflowModeOptions = [
   { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，切换时需要加载模型导致首图较慢' },
 ]
 const sceneOptions = [
-  { key: 'chat', label: '对话' },
+  { key: 'chat', label: '私聊' },
+  { key: 'group', label: '群聊' },
   { key: 'moments', label: '朋友圈' },
   { key: 'events', label: '奇遇' },
   { key: 'schedule', label: '日程' },
@@ -1233,14 +1234,14 @@ const sceneOptions = [
 ]
 
 const workflowMode = ref('turbo')
-const workflowScene = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const workflowScene = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
-const wfSceneDraft = ref({ chat: 'turbo', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const wfSceneDraft = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value
@@ -1553,6 +1554,7 @@ function resetTestPrompts() {
 }
 
 .sa { display: flex; align-items: center; gap: 12px; margin-top: auto; }
+.sa-spacer { flex: 1; }
 .smsg { color: var(--success); font-size: 13px; }
 
 .toggle-row { display: flex; gap: 14px; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
@@ -1906,6 +1908,11 @@ function resetTestPrompts() {
   .settings-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
+  /* 画师串操作按钮行：允许换行，避免挤压 */
+  .sa { flex-wrap: wrap; gap: 8px; }
+  .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
+  .sa .btn-primary { padding-left: 18px; padding-right: 18px; }
+  .sa .wf-action-btn { flex: 1 1 0; justify-content: center; padding: 8px 6px; }
 }
 
 /* ── 工作流模式弹窗 ── */

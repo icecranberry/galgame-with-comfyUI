@@ -5,8 +5,8 @@
  * 上下文布局按变更频率升序排列，最大化 DeepSeek 前缀缓存命中：
  *   [system] 舞台块（破限词 + 世界观）        ← 全局不变，与 1 对 1 同串
  *   [system] 输出协议（行协议/活人感规则）  ← 全局不变，所有群共享前缀
- *   [system] 群名片（主题/花名册/关系）      ← 每群稳定，改群设置才变
- *   [system] 群滚动摘要                       ← 每 ~10 轮推进
+ *   [system] 群信息（成员资料/关系/用户）    ← 每群稳定，改群设置才变
+ *   [system] 群滚动摘要                       ← 每 2 条用户发言推进
  *   [user]   群聊天记录 transcript             ← append-only
  *   [user]   本轮指令（动态尾部）
  *
@@ -30,7 +30,7 @@ import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { resolveGroupImageLoras } from './groupImageLoraMatcher.js';
+import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
 import { deleteVector } from './vectorClient.js';
 
 export function groupConvId(groupId) { return `group_${groupId}`; }
@@ -39,6 +39,8 @@ const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底：checkpoint 之后 transcript
 const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数（留出再增长空间，降低跳变频率）
 const MAX_ROUND_MESSAGES = 15;     // 每轮剧本最多 10 条消息（按剧本行计，分句后的气泡数不受限）
 const IMAGE_NUDGE_PROBABILITY = 0.5;  // 每轮抽卡鼓励发图的概率
+// 临时关闭群聊 RAG：不检索注入记忆，也不提取新的记忆碎片；群聊历史摘要仍独立保留。
+const GROUP_RAG_ENABLED = false;
 
 // ── 群数据读取 ──
 
@@ -76,19 +78,19 @@ export function detectMentions(text, members) {
  */
 function buildProtocolBlock() {
   const chatUserName = config.user.nickname || '用户';
-  const imageRule = getGlobalRule('image_prompt')?.rule_content || '';
+  const imageRule = getGlobalRule('image_prompt')?.rule_content || '完整英文画面描述';
+  const imagePromptFieldGuide = JSON.stringify(`\n${imageRule}`);
   return `<group_chat_rules>
 你一个人扮演群聊中的【全部角色】，根据聊天记录续写接下来的群聊消息。
 
 输出协议（严格遵守）：
-- 每条消息独占一行，格式为「角色名: 消息内容」，角色名必须是花名册中的名字
+- 每条消息独占一行，格式为「角色名: 消息内容」，角色名必须是 <group_info> 中的群成员名字
 - 每轮最多 ${MAX_ROUND_MESSAGES} 条消息，全部说完后最后单独一行输出 [END]
 - **禁止替用户「${chatUserName}」发言**
-- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {"prompt":"完整英文画面描述"}」
+- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {"prompt":${imagePromptFieldGuide}}」；实际输出时，必须将 prompt 里的撰写要求替换成符合这些规则的英文画面描述，禁止照抄规则
 - 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替 prompt JSON；出现发图意图就必须输出合法 prompt 行
 - 聊天记录中的 {"prompt":"..."} 表示该角色过去发过图片，同时也是合法的发图格式示例；本轮发图时必须沿用该 JSON 结构，并将示例文字替换为实际的完整英文画面描述
-- 【最高优先级】图片中出现任何角色时，英文 prompt 必须逐字包含该角色在花名册中的“英文标识”；不能只写 a girl、she、the character 或外观描述。多角色同图必须逐字写出每个人的英文标识
-- 输出 prompt 前自行检查：人物数量、每个人的英文标识、双引号 JSON 格式缺一不可；不满足就先修正再输出
+- 输出 prompt 前自行检查：人物数量和双引号 JSON 格式必须正确；不满足就先修正再输出
 
 像真人一样聊天：
 - 口语化、短句，长短错落：很多消息只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；禁止每条都是完整、工整的书面句
@@ -114,51 +116,27 @@ function buildProtocolBlock() {
 - 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思
 - 爱发图：聊到正在做的事、看到的东西、吃的喝的、去过的地方、自拍表情包时，主动配一张图
 - 禁止括号动作描写、禁止方括号动作描写、禁止旁白、禁止总结式客套发言；颜文字可以正常使用，但不能把动作藏进括号
-${imageRule ? `\n图片 prompt 撰写规则：\n${imageRule}` : ''}
 </group_chat_rules>`;
 }
 
-/** 稳定块 [2]：群名片（成员/主题变更前恒定，利于前缀缓存） */
+/** 稳定块 [2]：群信息（成员资料/关系/用户信息变更前恒定，利于前缀缓存） */
 function buildGroupCard(group) {
   const chatUserName = config.user.nickname || '用户';
   const db = getDb();
   const parts = [];
 
-  parts.push(`<group_info>\n这是一个多人群聊：「${group.name}」${group.topic ? `\n群主题：${group.topic}` : ''}\n群成员：${group.members.map(m => m.display_name).join('、')}，以及用户「${chatUserName}」。\n</group_info>`);
+  parts.push(`群聊名称：${group.name}${group.topic ? `\n群主题：${group.topic}` : ''}\n群成员：${group.members.map(m => m.display_name).join('、')}，以及用户「${chatUserName}」。`);
 
-  // 花名册：short_prompt + base_prompt 外观段（"你"→角色名，与朋友圈/奇遇的跨角色注入方式一致）
+  // 群成员资料：仅 short_prompt + base_prompt 外观段（"你"→角色名）
   const roster = group.members.map(m => {
     const short = (m.short_prompt || '').trim();
     const base = m.base_prompt || '';
     const appMatch = base.match(/##\s*你的外观/);
     const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, m.display_name) : '';
-    const persona = [short, appSection].filter(Boolean).join('\n') || base.slice(0, 400);
-    return `### ${m.display_name}\n英文标识：${m.name || 'unknown'}\n${persona}`;
+    const persona = [short, appSection].filter(Boolean).join('\n');
+    return `### ${m.display_name}\n${persona}`;
   }).join('\n\n');
-  parts.push(`<member_roster>\n${roster}\n</member_roster>`);
-
-  const imageNameMappings = group.members
-    .filter(m => m.name)
-    .map(m => `- ${m.display_name} => ${m.name}`)
-    .join('\n');
-  const imageExampleMember = group.members.find(m => m.name);
-  if (imageNameMappings && imageExampleMember) {
-    parts.push(`<group_image_identity_rules priority="highest">
-群聊图片角色英文标识映射（prompt 中必须逐字复制右侧英文标识）：
-${imageNameMappings}
-
-合法示例：
-${imageExampleMember.display_name}: 我刚拍的，别笑我
-${imageExampleMember.display_name}: {"prompt":"${imageExampleMember.name}, a candid selfie of ${imageExampleMember.name} standing on a sunny street, detailed appearance, natural pose and warm daylight"}
-
-非法示例：
-- {"prompt":"a shy young girl standing on a sunny street"}  ← 缺少英文标识，LoRA 无法触发
-- ${imageExampleMember.display_name}: [举起手机拍了一张照片]  ← 不是 prompt JSON，绝对禁止
-- ${imageExampleMember.display_name}: （发来一张自拍）  ← 不是 prompt JSON，绝对禁止
-
-硬性检查：画面出现谁，prompt 就必须写谁的英文标识；同一角色在 prompt 中可重复出现，绝不能省略第一次明确点名。
-</group_image_identity_rules>`);
-  }
+  parts.push(`群成员资料：\n${roster}`);
 
   // 成员间关系（有向边，只取群内成员之间的）
   const memberIds = group.members.map(m => m.id);
@@ -175,7 +153,7 @@ ${imageExampleMember.display_name}: {"prompt":"${imageExampleMember.name}, a can
     `).all(...memberIds, ...memberIds);
     if (rels.length > 0) {
       const relLines = rels.map(r => `- ${r.to_name}是${r.from_name}的${r.relationship_text}`).join('\n');
-      parts.push(`<member_relations>\n成员之间的关系：\n${relLines}\n发言时自然体现这些关系（称呼、语气、互动方式），不必刻意说明。\n</member_relations>`);
+      parts.push(`成员之间的关系：\n${relLines}\n发言时自然体现这些关系（称呼、语气、互动方式），不必刻意说明。`);
     }
   }
 
@@ -191,9 +169,9 @@ ${imageExampleMember.display_name}: {"prompt":"${imageExampleMember.name}, a can
     ORDER BY ur.character_id ASC
   `).all(...memberIds) : [];
   const relToUser = memberUserRels.map(r => `- 对${chatUserName}而言，${r.display_name}的身份是其${r.relationship_text}`).join('\n');
-  parts.push(`<user_info>\n群里标记为「${chatUserName}」的发言来自真实用户。${userInfoLines.length ? '\n' + userInfoLines.join('。') : ''}${relToUser ? '\n' + relToUser : ''}\n</user_info>`);
+  parts.push(`用户信息：\n群里标记为「${chatUserName}」的发言来自真实用户。${userInfoLines.length ? '\n' + userInfoLines.join('。') : ''}${relToUser ? '\n用户与角色之间的关系：\n' + relToUser : ''}`);
 
-  return parts.join('\n\n');
+  return `<group_info>\n${parts.join('\n\n')}\n</group_info>`;
 }
 
 /**
@@ -369,7 +347,7 @@ function parseScriptLine(line, membersByName) {
 
 // ── 群内生图 ──
 
-async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
+async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, workflowOptions = {}) {
   const db = getDb();
   const conversationId = groupConvId(group.id);
   const taskResult = db.prepare(
@@ -383,27 +361,26 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
     const loraOpts = {};
     if (speaker.custom_workflow) loraOpts.customWorkflow = speaker.custom_workflow;
 
-    // 群聊图片按 prompt 中实际出现的角色英文名选择 LoRA，支持一张图命中多个角色。
+    // 按 prompt 中的英文名匹配其他角色 LoRA，再强制注入发图角色自身的 LoRA。
     const {
-      prompt: effectivePrompt,
-      fallbackApplied,
       matchedCharacters,
-      loras,
-    } = resolveGroupImageLoras(prompt, { fallbackCharacter: speaker });
-    if (effectivePrompt !== prompt) {
-      db.prepare(`UPDATE image_tasks SET prompt_refined = ? WHERE id = ?`).run(effectivePrompt, taskId);
-    }
-    if (loras.length > 0) loraOpts.loras = loras;
+      loras: matchedLoras,
+    } = resolveGroupImageLoras(prompt);
+
+    // 强制注入发送者 LoRA（去重合并）
+    const speakerLoras = parseCharacterLoras(speaker);
+    const seenPaths = new Set(speakerLoras.map(l => l.path));
+    const allLoras = [...speakerLoras, ...matchedLoras.filter(l => !seenPaths.has(l.path))];
+    if (allLoras.length > 0) loraOpts.loras = allLoras;
+
     if (matchedCharacters.length > 0) {
       const matchedNames = matchedCharacters.map(char => `${char.display_name}(${char.name})`).join(', ');
-      console.log(`[group] image character matches: ${matchedNames}; LoRAs: ${loras.map(lora => lora.path).join(', ') || 'none'}`);
+      console.log(`[group] image character matches: ${matchedNames}; LoRAs: ${allLoras.map(lora => lora.path).join(', ') || 'none'}`);
     }
-    if (fallbackApplied) {
-      console.warn(`[group] image prompt omitted every character English name; prefixed speaker tag "${speaker.name}" before ComfyUI submission`);
-    }
+    console.log(`[group] forced speaker LoRA for ${speaker.display_name}(${speaker.name}): ${speakerLoras.map(l => l.path).join(', ') || 'none'}`);
 
-    const result = await generateImage(effectivePrompt, {
-      scene: 'chat',
+    const result = await generateImage(prompt, {
+      ...workflowOptions,
       onProgress: (p) => {
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
@@ -597,7 +574,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   }
 
   // RAG 记忆（跨库：本群 + 全体成员的私聊）
-  if (config.features.memory && trigger === 'user' && userMessage) {
+  if (GROUP_RAG_ENABLED && config.features.memory && trigger === 'user' && userMessage) {
     try {
       const convIds = [conversationId, ...group.members.map(m => `char_${m.id}`)];
       const excludeEntities = [chatUserName, 'user', ...group.members.map(m => m.display_name)];
@@ -673,7 +650,14 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       }
       target.hasImage = true;
       rawLines.push(`[${parsed.speaker.display_name}]: {"prompt":"${parsed.imagePrompt.replace(/"/g, '\\"')}"}`);
-      imagePromises.push(generateGroupImage(group, parsed.speaker, parsed.imagePrompt, target.id, emit));
+      imagePromises.push(generateGroupImage(
+        group,
+        parsed.speaker,
+        parsed.imagePrompt,
+        target.id,
+        emit,
+        trigger === 'user' ? { scene: 'chat', workflowScene: 'group' } : {},
+      ));
       return;
     }
 
@@ -735,19 +719,28 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     await Promise.allSettled(imagePromises);
   }
 
-  // ── 后处理：摘要 + 记忆提取（异步，不阻塞返回） ──
+  // ── 后处理：历史摘要保留；群聊 RAG 提取由 GROUP_RAG_ENABLED 暂时关闭 ──
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {
-      try {
-        await maybeExtractGroupMemory(group, { incrementUserRound: trigger === 'user' });
-      } catch (err) {
-        console.error('[group] memory post-processing error:', err.message);
+      if (GROUP_RAG_ENABLED) {
+        try {
+          await maybeExtractGroupMemory(group, { incrementUserRound: trigger === 'user' });
+        } catch (err) {
+          console.error('[group] memory post-processing error:', err.message);
+        }
       }
-      try {
-        await maybeSummarize(conversationId, { characterName: '群聊记录', userName: chatUserName });
-      } catch (err) {
-        console.error('[group] summarization error:', err.message);
+      if (trigger === 'user') {
+        try {
+          await maybeSummarize(conversationId, {
+            characterName: '群聊记录',
+            userName: chatUserName,
+            triggerRole: 'user',
+            interval: 2,
+          });
+        } catch (err) {
+          console.error('[group] summarization error:', err.message);
+        }
       }
     } finally {
       markGroupPostProcessing(group.id, -1);

@@ -43,7 +43,7 @@ export { checkWorkflowHealth };
 
 /**
  * 根据全局模式和场景选择工作流文件
- * @param {'chat'|'moments'|'events'|'schedule'|'mailbox'} [scene]
+ * @param {'chat'|'group'|'moments'|'events'|'schedule'|'mailbox'} [scene]
  * @returns {string} 工作流文件路径
  */
 function resolveWorkflowPath(scene) {
@@ -81,14 +81,16 @@ const NODE_TITLES = {
  * @param {number}   [overrides.height]
  * @param {Array}    [overrides.loras]  - [{path, weight, triggerWord}]
  * @param {string}   [overrides.customWorkflow] - 自定义工作流文件名（单人时替代基础工作流）
- * @param {string}   [overrides.scene] - 'chat'|'moments'|'events'|'schedule'|'mailbox'，hybrid 模式下用于选择工作流
+ * @param {string}   [overrides.scene] - 全局 LoRA 的场景过滤；未指定 workflowScene 时也用于选择工作流
+ * @param {string}   [overrides.workflowScene] - hybrid 模式下单独用于选择工作流
  */
 function buildWorkflow(promptText, overrides = {}) {
+  const workflowScene = overrides.workflowScene ?? overrides.scene;
   let wfPath = overrides.customWorkflow
     ? (fs.existsSync(path.join(WORKFLOW_DIR, overrides.customWorkflow))
         ? path.join(WORKFLOW_DIR, overrides.customWorkflow)
-        : resolveWorkflowPath(overrides.scene))
-    : resolveWorkflowPath(overrides.scene);
+        : resolveWorkflowPath(workflowScene))
+    : resolveWorkflowPath(workflowScene);
   // 全局 LoRA 前置 + 角色 LoRA，按 path 去重（全局优先），关闭的 LoRA 跳过
   // scenes 限制：空数组或无 scenes 字段=所有场景，overrides.scene 为空时也加载全部
   const currentScene = overrides.scene;
@@ -330,7 +332,8 @@ const MAX_SUBMIT_RETRIES = 2;
  * @param {object}   [opts]
  * @param {Array}    [opts.loras]              - [{path, weight, triggerWord}]
  * @param {string}   [opts.customWorkflow]       - 自定义工作流文件名（单人兼容）
- * @param {string}   [opts.scene]                - 'chat'|'moments'|'events'
+ * @param {string}   [opts.scene]                - 全局 LoRA 的场景过滤；默认也用于工作流选择
+ * @param {string}   [opts.workflowScene]        - hybrid 模式下单独用于工作流选择
  * @param {string}   [opts.artist]
  * @param {number}   [opts.width]
  * @param {number}   [opts.height]
@@ -340,14 +343,16 @@ const MAX_SUBMIT_RETRIES = 2;
  */
 async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
-  loras, customWorkflow, scene,
+  loras, customWorkflow, scene, workflowScene,
 } = {}) {
   // 1. 最终阀门
   let finalPrompt = finalizeCountTags(rawPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 2. 构建 workflow
-  const { wf, wfMode } = buildWorkflow(finalPrompt, { artist, width, height, loras, customWorkflow, scene });
+  const { wf, wfMode } = buildWorkflow(finalPrompt, {
+    artist, width, height, loras, customWorkflow, scene, workflowScene,
+  });
   if (onProgress) onProgress({ stage: 'submitting' });
 
   // 3. 提交 ComfyUI，带重试循环

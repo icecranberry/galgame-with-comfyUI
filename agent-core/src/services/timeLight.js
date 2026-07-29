@@ -189,7 +189,7 @@ export function getTimeLight(now = new Date()) {
 
 /**
  * 生成时间标签（用于主聊天流）含季节和天气。
- * [当前时间 周三 07/03 14:30 / 夏日下午 — 多云、挺热]
+ * [当前时间 周三 07/03 14:30 / 夏/下午 — 多云、挺热]
  * @param {Date} [now]
  * @param {boolean} [needWeather=true] 是否附加天气
  * @returns {string}
@@ -204,9 +204,9 @@ export function getTimeTag(now = new Date(), needWeather = true) {
   if (weather && weather.weather) {
     const wParts = [weather.weather];
     if (weather.temperature) wParts.push(weather.temperature);
-    return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}${timeDesc} — ${wParts.join('、')}]`;
+    return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc} — ${wParts.join('、')}]`;
   }
-  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}${timeDesc}]`;
+  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc}]`;
 }
 
 /**
@@ -225,21 +225,21 @@ export function getTimeLightTag(now = new Date()) {
   if (weather && weather.weather) {
     const parts = [weather.weather];
     if (weather.temperature) parts.push(weather.temperature);
-    return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}${timeDesc} — 外面${parts.join('、')}]`;
+    return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc} — 外面${parts.join('、')}]`;
   }
-  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}${timeDesc}]`;
+  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc}]`;
 }
 
 /**
  * 根据月份获取季节
  * @param {number} month 1-12
- * @returns {'春'|'夏'|'秋'|'冬'}
+ * @returns {'春天'|'夏天'|'秋天'|'冬天'}
  */
 export function getSeason(month) {
-  if (month >= 3 && month <= 5) return '春';
-  if (month >= 6 && month <= 8) return '夏';
-  if (month >= 9 && month <= 11) return '秋';
-  return '冬';
+  if (month >= 3 && month <= 5) return '春天';
+  if (month >= 6 && month <= 8) return '夏天';
+  if (month >= 9 && month <= 11) return '秋天';
+  return '冬天';
 }
 
 /**

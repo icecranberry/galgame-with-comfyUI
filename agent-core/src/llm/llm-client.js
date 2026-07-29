@@ -153,7 +153,8 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}]`);
-      console.log((content || '').slice(0, 2000));
+      const outputLimit = label.startsWith('schedule-gen:') ? 300 : 2000;
+      console.log((content || '').slice(0, outputLimit));
       logUsage(label, res.usage);
       recordLlmCall(label, res.usage);
       console.log('═══════════════════════════════════════════════\n');

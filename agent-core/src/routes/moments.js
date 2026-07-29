@@ -533,7 +533,7 @@ const MOTIVATIONS = [
     pickedSpecialMode = SPECIAL_MODES[Math.floor(Math.random() * SPECIAL_MODES.length)];
     combinedStyle = pickedSpecialMode.name;
     isSpecialMode = true;
-  } else if (modeRoll < 0.15) {
+  } else if (modeRoll < 0.9) {
     isFreeMode = true;
   } else {
     pickedTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)];

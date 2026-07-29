@@ -1069,6 +1069,7 @@ ${worldPenetrationLine}
 export async function generateNextBranch(character, event, choice) {
   const db = getDb();
   const now = new Date();
+  const branchTimeExtensionMinutes = 5;
 
   // 0. 原子性标记处理中（CAS：仅 processing=0 时置 1），防止并发重复提交
   // 如果已有其他请求在处理中，直接抛出错误，避免：
@@ -1088,6 +1089,16 @@ export async function generateNextBranch(character, event, choice) {
     await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
     return null;
   }
+
+  // 用户已成功提交一个有效分支选择，立即延长倒计时，避免分支生成期间事件到期。
+  db.prepare(`
+    UPDATE character_events
+    SET expires_at = datetime(expires_at, '+' || ? || ' minutes')
+    WHERE id = ?
+  `).run(branchTimeExtensionMinutes, event.id);
+  event.expires_at = db.prepare(
+    `SELECT expires_at FROM character_events WHERE id = ?`
+  ).get(event.id).expires_at;
 
   // 2. 加载关系网
   const relationships = db.prepare(`

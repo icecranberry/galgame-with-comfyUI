@@ -8,7 +8,7 @@ function normalizeEnglishName(value) {
   return tokens ? tokens.join(' ') : '';
 }
 
-function parseCharacterLoras(character) {
+export function parseCharacterLoras(character) {
   if (!character?.loras) return [];
   try {
     const parsed = typeof character.loras === 'string'
@@ -27,20 +27,7 @@ function parseCharacterLoras(character) {
   }
 }
 
-const PERSON_PROMPT_RE = /\b(girl|girls|woman|women|boy|boys|man|men|person|people|character|characters|female|male|selfie|portrait|she|her|hers|he|him|his|adult|teen|teenager|child)\b/i;
 
-export function applyGroupImageNameFallback(prompt, matchedCharacters, fallbackCharacter) {
-  const cleanPrompt = String(prompt || '').trim();
-  if (matchedCharacters.length > 0) return { prompt: cleanPrompt, fallbackApplied: false };
-  if (!fallbackCharacter?.name || !PERSON_PROMPT_RE.test(cleanPrompt)) {
-    return { prompt: cleanPrompt, fallbackApplied: false };
-  }
-
-  return {
-    prompt: `${fallbackCharacter.name}, ${cleanPrompt}`,
-    fallbackApplied: true,
-  };
-}
 
 export function matchCharactersInImagePrompt(prompt, characters) {
   const normalizedPrompt = normalizeEnglishName(prompt);
@@ -98,22 +85,17 @@ export function collectCharacterLoras(characters) {
   return loras;
 }
 
-export function resolveGroupImageLoras(prompt, { fallbackCharacter = null } = {}) {
+export function resolveGroupImageLoras(prompt) {
   const characters = getDb().prepare(`
     SELECT id, name, display_name, loras
     FROM characters
     WHERE name IS NOT NULL AND trim(name) != ''
     ORDER BY id ASC
   `).all();
-  let matchedCharacters = matchCharactersInImagePrompt(prompt, characters);
-  const prepared = applyGroupImageNameFallback(prompt, matchedCharacters, fallbackCharacter);
-  if (prepared.fallbackApplied) {
-    matchedCharacters = matchCharactersInImagePrompt(prepared.prompt, characters);
-  }
+  const matchedCharacters = matchCharactersInImagePrompt(prompt, characters);
 
   return {
-    prompt: prepared.prompt,
-    fallbackApplied: prepared.fallbackApplied,
+    prompt: String(prompt || '').trim(),
     matchedCharacters,
     loras: collectCharacterLoras(matchedCharacters),
   };

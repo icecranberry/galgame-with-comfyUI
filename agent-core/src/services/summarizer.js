@@ -37,11 +37,15 @@ const SUMMARY_PROMPT = `[系统指令] 你是一个纯信息提取工具，不�
  */
 /**
  * @param {string} conversationId
- * @param {{ characterName?: string, userName?: string }} [nameHints]
+ * @param {{ characterName?: string, userName?: string, triggerRole?: 'user'|'assistant', interval?: number }} [nameHints]
  */
 export async function maybeSummarize(conversationId, nameHints = {}) {
   const userName = nameHints.userName || 'user';
   const characterName = nameHints.characterName || 'assistant';
+  const triggerRole = nameHints.triggerRole === 'user' ? 'user' : 'assistant';
+  const interval = Number.isInteger(nameHints.interval) && nameHints.interval > 0
+    ? nameHints.interval
+    : SUMMARIZE_INTERVAL;
   const db = getDb();
 
   // 最新摘要即 compaction checkpoint；只统计 checkpoint 之后的消息。
@@ -51,13 +55,13 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     ORDER BY end_msg_id DESC, id DESC LIMIT 1
   `).get(conversationId);
   const checkpointEndId = lastSummary?.end_msg_id || 0;
-  // 统计 checkpoint 之后的 assistant 消息数量（含主动聊天）
+  // 默认按 assistant 消息计数；群聊可改为按用户发言轮次计数。
   const { count } = db.prepare(`
     SELECT COUNT(*) as count FROM raw_messages
-    WHERE conversation_id = ? AND id > ? AND role = 'assistant'
-  `).get(conversationId, checkpointEndId);
+    WHERE conversation_id = ? AND id > ? AND role = ?
+  `).get(conversationId, checkpointEndId, triggerRole);
 
-  if (count < SUMMARIZE_INTERVAL) return null;
+  if (count < interval) return null;
 
   const previousSummary = lastSummary?.summary || '（新对话开始）';
   // 获取所有未摘要消息
@@ -67,13 +71,13 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     ORDER BY id ASC
   `).all(conversationId, checkpointEndId);
 
-  // 取最后 10 条 assistant 覆盖的消息段，afterId 推到末尾截断全部旧数据
-  let asstCount = 0;
+  // 取最后 interval 条触发角色消息覆盖的消息段，afterId 推到末尾截断全部旧数据。
+  let triggerCount = 0;
   let batchStart = 0;
   for (let i = allUnsummarized.length - 1; i >= 0; i--) {
-    if (allUnsummarized[i].role === 'assistant') {
-      asstCount++;
-      if (asstCount >= SUMMARIZE_INTERVAL) { batchStart = i; break; }
+    if (allUnsummarized[i].role === triggerRole) {
+      triggerCount++;
+      if (triggerCount >= interval) { batchStart = i; break; }
     }
   }
   const recentMessages = allUnsummarized.slice(batchStart);

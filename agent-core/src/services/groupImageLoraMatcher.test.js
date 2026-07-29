@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  appendGroupImageSpeakerName,
   applyGroupImageNameFallback,
   collectCharacterLoras,
   matchCharactersInImagePrompt,
@@ -11,6 +12,30 @@ const characters = [
   { id: 2, name: 'elysia pink', display_name: 'Elysia' },
   { id: 3, name: 'mei', display_name: 'Other Mei' },
 ];
+
+test('appends only the speaker English name and ignores the appearance section', () => {
+  const prompt = appendGroupImageSpeakerName(
+    'a candid selfie in a cafe',
+    {
+      name: 'raiden_mei',
+      base_prompt: '## 你的外观\n旧外观\n##你的外观\npurple eyes, long dark hair\nwearing a white dress',
+    },
+  );
+
+  assert.equal(
+    prompt,
+    'a candid selfie in a cafe, raiden_mei',
+  );
+});
+
+test('appends the English name when the character has no base prompt', () => {
+  const prompt = appendGroupImageSpeakerName(
+    'a city night scene',
+    { name: 'elysia pink' },
+  );
+
+  assert.equal(prompt, 'a city night scene, elysia pink');
+});
 
 test('matches underscored and spaced names across prompt separators', () => {
   const matches = matchCharactersInImagePrompt(

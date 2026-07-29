@@ -47,7 +47,7 @@
             </div>
             <!-- 本次会话内的生图任务：与私聊同款遮罩/进度/错误气泡；历史图片直接展示 -->
             <ImageGenBubble
-              v-if="msg.genStatus"
+              v-if="msg.genStatus && !msg.hideImagePending"
               :msg="genMsgOf(msg)"
               :emit-loaded-when-initially-done="true"
               @preview="url => previewUrl = url"
@@ -90,7 +90,7 @@
         v-model="draft"
         class="chat-input"
         rows="1"
-        placeholder="发消息… 输入 @ 可以点名角色"
+        placeholder="输入消息… "
         @input="onInput"
         @keydown.enter.exact.prevent="onSend"
         @keydown.enter.shift.exact="draft += '\n'"

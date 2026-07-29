@@ -22,6 +22,8 @@ const IDLE_CHECK_INTERVAL = 10 * 60 * 1000;       // 10 分钟
 const CREATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 小时
 const CREATE_PROBABILITY = 0.3;
 const MAX_AUTO_GROUPS = 3;                        // 自发建群总数上限
+// 临时关闭角色自发创建群聊；保留完整流程，后续恢复时改为 true 即可。
+const AUTO_GROUP_CREATION_ENABLED = false;
 
 let idleTimer = null;
 let createTimer = null;
@@ -101,6 +103,7 @@ async function idleTick() {
 // ── 角色自发建群 ──
 
 async function maybeCreateGroup() {
+  if (!AUTO_GROUP_CREATION_ENABLED) return;
   if (!config.features.groupChat) return;
   if (Math.random() > CREATE_PROBABILITY) return;
 
@@ -195,11 +198,15 @@ export function startGroupIdleScheduler() {
     idleTick();
     idleTimer = setInterval(idleTick, IDLE_CHECK_INTERVAL);
   }, 60_000);
-  // 启动 5 分钟后首次判定自发建群，之后每 6 小时
-  setTimeout(() => {
-    maybeCreateGroup();
-    createTimer = setInterval(maybeCreateGroup, CREATE_CHECK_INTERVAL);
-  }, 5 * 60_000);
+  if (AUTO_GROUP_CREATION_ENABLED) {
+    // 启动 5 分钟后首次判定自发建群，之后每 6 小时。
+    setTimeout(() => {
+      maybeCreateGroup();
+      createTimer = setInterval(maybeCreateGroup, CREATE_CHECK_INTERVAL);
+    }, 5 * 60_000);
+  } else {
+    console.log('[groupIdle] Character auto group creation is temporarily disabled');
+  }
 }
 
 export function stopGroupIdleScheduler() {
