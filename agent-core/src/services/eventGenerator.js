@@ -18,10 +18,11 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
+import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { saveBase64Image } from './imagePaths.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
-import { upsertVector } from './vectorClient.js';
+import { applyMemoryActions, softDeleteMemory } from './memory/memoryRepository.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
 import { matchAll } from './characterSearch.js';
@@ -982,6 +983,7 @@ ${worldPenetrationLine}
   }
   const allLoras = [...selfLoras, ...otherLoras];
 
+  const originalEventPrompt = eventData.prompt;
   let imageUrl = null;
   try {
     const genResult = await generateImageRaw(eventData.prompt, {
@@ -994,9 +996,20 @@ ${worldPenetrationLine}
       ...(!multiPerson && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
+      eventData.prompt = genResult.promptRefined || eventData.prompt;
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
       imageUrl = saveBase64Image('events', filename, img.base64);
+      recordCompletedImageTask({
+        conversationId: `char_${character.id}_events`,
+        promptOriginal: originalEventPrompt,
+        promptRefined: eventData.prompt,
+        outputPaths: [imageUrl],
+        style: config.comfyui.eventArtist,
+        resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
+        workflowTemplate: genResult.wfMode,
+        db,
+      });
       console.log(`[eventGen] Image generated for ${character.display_name}: ${imageUrl}`);
     } else {
       console.warn(`[eventGen] Image generation returned no images for ${character.display_name}`);
@@ -1341,6 +1354,7 @@ ${worldPenetrationLine2}
     return true;
   });
 
+  const originalBranchPrompt = branchData.prompt;
   let imageUrl = null;
   try {
     const genResult = await generateImageRaw(branchData.prompt, {
@@ -1352,9 +1366,20 @@ ${worldPenetrationLine2}
       ...(!multiPerson2 && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
+      branchData.prompt = genResult.promptRefined || branchData.prompt;
       const img = genResult.images[0];
       const filename = `event_${Date.now()}_${img.filename || 'comfy.png'}`;
       imageUrl = saveBase64Image('events', filename, img.base64);
+      recordCompletedImageTask({
+        conversationId: `char_${character.id}_event_${event.id}_branch_${event.current_branch + 1}`,
+        promptOriginal: originalBranchPrompt,
+        promptRefined: branchData.prompt,
+        outputPaths: [imageUrl],
+        style: config.comfyui.eventArtist,
+        resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
+        workflowTemplate: genResult.wfMode,
+        db,
+      });
       console.log(`[eventGen] Branch image generated: ${imageUrl}`);
     }
   } catch (err) {
@@ -1495,56 +1520,37 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
 
   // 2. 存入记忆
   const conversationId = `char_${character.id}`;
-  const fragmentType = 'fact';
 
   try {
-    const entities = JSON.stringify([character.display_name, event.title]);
-
-    // 摘要文本：仅结论（用于 memory_fragments + 聊天注入，避免全量分支撑爆上下文）
-    const summaryText = `【事件】${event.title}\n${conclusionData.summary}`;
-
-    // 完整文本：全部分支（用于 ChromaDB 向量检索，使事件细节也可被语义召回）
     const parsedHistory = JSON.parse(event.choice_history || '[]');
-    let fullVectorText = `【事件】${event.title}\n开始：${event.description}`;
-    for (const h of parsedHistory) {
-      if (h.branch === 0) continue;
-      fullVectorText += `\n选择了：「${h.choice_label}」→ ${h.summary}`;
-    }
-    fullVectorText += `\n结局：${conclusionData.summary}`;
-
+    const branchReasoning = parsedHistory
+      .filter(item => item.branch !== 0)
+      .map(item => `选择「${item.choice_label}」后：${item.summary}`)
+      .join('；');
     if (!event.engaged) {
-      db.prepare(`
-        DELETE FROM memory_fragments
-        WHERE conversation_id = ? AND fragment_type = 'fact' AND content LIKE '【未互动的事件】%'
-      `).run(conversationId);
-      console.log(`[eventGen] Replaced old unengaged event memory for ${character.display_name}`);
+      const oldRows = db.prepare(`
+        SELECT memory_id FROM memory_fragments
+        WHERE conversation_id = ? AND memory_type = 'event' AND subject = 'character'
+          AND status = 'active' AND judgment LIKE '未互动事件：%'
+      `).all(conversationId);
+      for (const row of oldRows) softDeleteMemory(row.memory_id);
     }
-
-    const contentWithTag = event.engaged
-      ? `【事件·已完成】${summaryText}`
-      : `【未互动的事件】${summaryText}`;
-
-    const insertResult = db.prepare(`
-      INSERT INTO memory_fragments (conversation_id, fragment_type, content, entities)
-      VALUES (?, ?, ?, ?)
-    `).run(conversationId, fragmentType, contentWithTag, entities);
-
-    // 向量化存入 RAG
-    try {
-      await upsertVector({
-        id: `event_${insertResult.lastInsertRowid}`,
-        text: fullVectorText, // 向量检索用完整分支文本，提高召回
-        metadata: {
-          conversation_id: conversationId,
-          fragment_type: 'event',
-          character_name: character.display_name,
-          event_title: event.title,
-          engaged: event.engaged,
+    applyMemoryActions({
+      conversationId,
+      sourceRawStartId: null,
+      sourceRawEndId: null,
+      actions: [{
+        action: 'create',
+        sourceMemoryIds: [],
+        memory: {
+          memoryType: 'event',
+          subject: 'character',
+          judgment: `${event.engaged ? '已完成事件' : '未互动事件'}：${event.title}。${conclusionData.summary}`,
+          reasoning: [event.description, branchReasoning].filter(Boolean).join('；'),
+          tags: [character.display_name, event.title, '事件'],
         },
-      });
-    } catch (vecErr) {
-      console.warn(`[eventGen] Vector upsert failed for event memory:`, vecErr.message);
-    }
+      }],
+    });
   } catch (memErr) {
     console.error(`[eventGen] Memory save failed:`, memErr.message);
   }

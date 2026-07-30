@@ -365,6 +365,48 @@ export async function syncActiveLlmProfile() {
   await fetch(`${BASE}/config/llm/profiles/active/sync`, { method: 'PUT' })
 }
 
+// ── Chat Memory ──
+async function jsonRequest(url, options) {
+  const res = await fetch(url, options)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  return data
+}
+
+export function getMemoryConfig() {
+  return jsonRequest(`${BASE}/config/memory`)
+}
+
+export function updateMemoryConfig(data) {
+  return jsonRequest(`${BASE}/config/memory`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function testMemoryEmbedding(data) {
+  return jsonRequest(`${BASE}/config/memory/test-embedding`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function testMemoryReranker(data) {
+  return jsonRequest(`${BASE}/config/memory/test-reranker`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function getMemoryStats() {
+  return jsonRequest(`${BASE}/memory/stats`)
+}
+
+export function reindexMemories() {
+  return jsonRequest(`${BASE}/memory/reindex`, { method: 'POST' })
+}
+
+export function retryFailedMemories() {
+  return jsonRequest(`${BASE}/memory/retry-failed`, { method: 'POST' })
+}
+
 // ── World Settings ──
 export async function getWorldSettings() {
   const res = await fetch(`${BASE}/config/world-settings`)

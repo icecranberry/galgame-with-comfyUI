@@ -4,6 +4,7 @@ import './assets/fonts/fonts.css'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
+import MemorySettingsView from './views/MemorySettingsView.vue'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -25,6 +26,7 @@ const routes = [
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },
   { path: '/settings', component: SettingsView },
+  { path: '/settings/memory', component: MemorySettingsView },
 ]
 
 const router = createRouter({ history: createWebHashHistory(), routes })

@@ -326,11 +326,12 @@
           </label>
         </div>
 
-        <div class="toggle-row">
-          <div>
-            <div class="tl">记忆碎片提取</div>
-            <div class="td">从对话中提取事实/偏好/情绪碎片存入向量数据库</div>
+        <div class="toggle-row memory-settings-row">
+          <div class="memory-settings-copy" @click="router.push('/settings/memory')">
+            <div class="tl">聊天记忆</div>
+            <div class="td">PAI 风格记忆整理；不配置嵌入模型也可使用文本召回</div>
           </div>
+          <button class="disturb-setup-btn" title="聊天记忆设置" @click="router.push('/settings/memory')">⚙</button>
           <label class="switch">
             <input type="checkbox" v-model="features.memory" @change="saveFeature('memory', features.memory)" />
             <span class="slider"></span>
@@ -631,6 +632,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
@@ -638,6 +640,7 @@ import DropdownSelect from '../components/DropdownSelect.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 
 const settingsStore = useSettingsStore()
+const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
@@ -1369,6 +1372,8 @@ function resetTestPrompts() {
 .hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.memory-settings-copy { flex: 1; cursor: pointer; }
+.memory-settings-row .disturb-setup-btn { margin-left: 8px; }
 
 /* ── 保存按钮加宽 ── */
 .btn-primary { padding-left: 28px; padding-right: 28px; }

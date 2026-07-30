@@ -313,7 +313,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
         if (imageUrl) {
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run('schedule_peek_retake', prompt, prompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(`char_${character.id}_schedule_peek_retake`, prompt, result.promptRefined || prompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
         }
         broadcast('schedule_peek_ready', {
           character_id: character.id,
@@ -569,7 +569,7 @@ router.post('/:characterId/peek', async (req, res) => {
         if (imageUrl) {
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run('schedule_peek', generatedPrompt, generatedPrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(`char_${character.id}_schedule_peek`, generatedPrompt, result.promptRefined || generatedPrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
         }
         broadcast('schedule_peek_ready', {
           character_id: character.id,

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 import { seedAll } from './seedData.js';
+import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
 import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let db;
@@ -101,6 +102,34 @@ function initSchema(db) {
       error_message TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       finished_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS image_prompt_preparations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scene TEXT NOT NULL DEFAULT 'chat',
+      prompt_original TEXT NOT NULL,
+      prompt_refined TEXT NOT NULL,
+      knowledge_ids TEXT NOT NULL DEFAULT '[]',
+      knowledge_version TEXT,
+      retrieval_mode TEXT NOT NULL DEFAULT 'fallback',
+      retrieval_snapshot TEXT NOT NULL DEFAULT '{}',
+      optimization_status TEXT NOT NULL DEFAULT 'fallback',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 生图提示词知识库（独立于聊天记忆，仅供生图 prompt 生产链检索）
+    CREATE TABLE IF NOT EXISTS image_prompt_knowledge (
+      knowledge_id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      search_terms TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      scenes TEXT NOT NULL DEFAULT '[]',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      priority INTEGER NOT NULL DEFAULT 0,
+      version TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 全局规则表（追加到每个角色的 system prompt 末尾）
@@ -376,6 +405,8 @@ function initSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_image_tasks_conv ON image_tasks(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_image_tasks_status ON image_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_image_prompt_knowledge_category ON image_prompt_knowledge(category, is_active);
+    CREATE INDEX IF NOT EXISTS idx_image_prompt_knowledge_priority ON image_prompt_knowledge(priority DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(status);
@@ -444,6 +475,9 @@ function initSchema(db) {
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
+  // 迁移: PAI 风格聊天记忆单元、全文索引、提取 checkpoint 与索引任务
+  migrateChatMemoryV2Schema(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -480,6 +514,9 @@ function initSchema(db) {
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
+  // 图片提示词知识使用独立版本化种子；版本升级时只覆盖内置同 ID 条目，保留用户自建条目。
+  seedImagePromptKnowledge(db);
+
   // 系统设置: 从 DB 加载覆盖 config 内存（DB 优先于代码默认值）
   loadSystemSettings(db);
 
@@ -510,6 +547,60 @@ function initSchema(db) {
       throw writeErr;
     }
   }
+}
+
+export function seedImagePromptKnowledge(db) {
+  const currentVersion = db.prepare(
+    `SELECT setting_value FROM system_settings WHERE setting_key = 'image_prompt_knowledge_version'`
+  ).pluck().get();
+  if (currentVersion === IMAGE_PROMPT_KNOWLEDGE_VERSION) return;
+
+  const upsert = db.prepare(`
+    INSERT INTO image_prompt_knowledge (
+      knowledge_id, category, title, search_terms, content, scenes,
+      is_default, priority, version, is_active, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(knowledge_id) DO UPDATE SET
+      category = excluded.category,
+      title = excluded.title,
+      search_terms = excluded.search_terms,
+      content = excluded.content,
+      scenes = excluded.scenes,
+      is_default = excluded.is_default,
+      priority = excluded.priority,
+      version = excluded.version,
+      is_active = 1,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  const seed = db.transaction(() => {
+    for (const item of IMAGE_PROMPT_KNOWLEDGE) {
+      upsert.run(
+        item.knowledgeId,
+        item.category,
+        item.title,
+        item.searchTerms,
+        item.content,
+        JSON.stringify(item.scenes),
+        item.isDefault ? 1 : 0,
+        item.priority,
+        IMAGE_PROMPT_KNOWLEDGE_VERSION,
+      );
+    }
+    db.prepare(`
+      UPDATE image_prompt_knowledge
+      SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE knowledge_id LIKE 'ipk.lib.%' AND version <> ?
+    `).run(IMAGE_PROMPT_KNOWLEDGE_VERSION);
+    db.prepare(`
+      INSERT INTO system_settings (setting_key, setting_value, updated_at)
+      VALUES ('image_prompt_knowledge_version', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(setting_key) DO UPDATE SET
+        setting_value = excluded.setting_value,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(IMAGE_PROMPT_KNOWLEDGE_VERSION);
+  });
+  seed();
+  console.log(`[db] image prompt knowledge seeded: ${IMAGE_PROMPT_KNOWLEDGE.length} items, version=${IMAGE_PROMPT_KNOWLEDGE_VERSION}`);
 }
 
 /**
@@ -1169,6 +1260,7 @@ const DB_ONLY_KEYS = new Set([
   'last_events_seen_at',
   'llm_profiles',
   'active_llm_profile_id',
+  'memory_settings',
 ]);
 
 /** 写入单条系统设置 */
@@ -1435,6 +1527,123 @@ export function activateWorldSetting(id) {
   database.prepare(`UPDATE world_settings SET is_active = 0`).run();
   database.prepare(`UPDATE world_settings SET is_active = 1, updated_at = datetime('now') WHERE id = ?`).run(id);
   return getWorldSettingById(id);
+}
+
+// 迁移: PAI 风格聊天记忆 v2。保留旧字段供现有管理界面兼容，新增字段作为权威语义。
+function migrateChatMemoryV2Schema(db) {
+  try {
+    const columns = new Set(db.prepare(`PRAGMA table_info(memory_fragments)`).all().map(c => c.name));
+    const additions = [
+      ['memory_id', 'TEXT'],
+      ['memory_type', "TEXT NOT NULL DEFAULT 'knowledge'"],
+      ['subject', "TEXT NOT NULL DEFAULT 'user'"],
+      ['judgment', "TEXT NOT NULL DEFAULT ''"],
+      ['reasoning', "TEXT NOT NULL DEFAULT ''"],
+      ['tags', "TEXT NOT NULL DEFAULT '[]'"],
+      ['content_hash', 'TEXT'],
+      ['status', "TEXT NOT NULL DEFAULT 'active'"],
+      ['source_raw_start_id', 'INTEGER'],
+      ['source_raw_end_id', 'INTEGER'],
+      ['embedding_profile', 'TEXT'],
+      ['embedding_state', "TEXT NOT NULL DEFAULT 'disabled'"],
+      ['embedding_error', 'TEXT'],
+      ['updated_at', 'DATETIME'],
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) db.exec(`ALTER TABLE memory_fragments ADD COLUMN ${name} ${definition}`);
+    }
+
+    db.exec(`
+      UPDATE memory_fragments
+      SET memory_id = COALESCE(memory_id, 'legacy_' || id),
+          memory_type = CASE fragment_type WHEN 'emotion' THEN 'emotion' ELSE 'knowledge' END,
+          judgment = CASE WHEN judgment = '' THEN content ELSE judgment END,
+          tags = CASE WHEN tags = '[]' THEN COALESCE(entities, '[]') ELSE tags END,
+          status = COALESCE(status, 'active'),
+          updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
+      WHERE memory_id IS NULL OR judgment = '' OR updated_at IS NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_fragments_memory_id ON memory_fragments(memory_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_fragments_active_conv ON memory_fragments(conversation_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_fragments_source_raw ON memory_fragments(conversation_id, source_raw_start_id, source_raw_end_id);
+
+      CREATE TABLE IF NOT EXISTS memory_extraction_checkpoints (
+        conversation_id TEXT PRIMARY KEY,
+        last_raw_msg_id INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'idle',
+        last_error TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_memory_id TEXT NOT NULL,
+        to_memory_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('update','merge','rollback')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_index_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_type TEXT NOT NULL,
+        memory_id TEXT,
+        profile TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_retrieval_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT,
+        query TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        candidate_sources TEXT NOT NULL DEFAULT '{}',
+        memory_ids TEXT NOT NULL DEFAULT '[]',
+        fallback_reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS memory_fragments_fts USING fts5(
+        judgment, reasoning, tags,
+        content='memory_fragments', content_rowid='id'
+      );
+      CREATE TRIGGER IF NOT EXISTS memory_fragments_fts_ai AFTER INSERT ON memory_fragments BEGIN
+        INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags)
+        VALUES (new.id, new.judgment, new.reasoning, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS memory_fragments_fts_ad AFTER DELETE ON memory_fragments BEGIN
+        INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags)
+        VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS memory_fragments_fts_au AFTER UPDATE OF judgment, reasoning, tags ON memory_fragments BEGIN
+        INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags)
+        VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags);
+        INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags)
+        VALUES (new.id, new.judgment, new.reasoning, new.tags);
+      END;
+    `);
+    const ftsCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments_fts`).get().count;
+    const memoryCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments`).get().count;
+    if (ftsCount !== memoryCount) {
+      db.prepare(`INSERT INTO memory_fragments_fts(memory_fragments_fts) VALUES ('rebuild')`).run();
+    }
+    db.prepare(`
+      INSERT OR IGNORE INTO system_settings(setting_key, setting_value, updated_at)
+      VALUES ('memory_settings', ?, CURRENT_TIMESTAMP)
+    `).run(JSON.stringify({
+      enabled: true,
+      topK: 7,
+      textCandidates: 24,
+      vectorCandidates: 24,
+      embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000 },
+      reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000 },
+    }));
+  } catch (err) {
+    console.error('[db] migrateChatMemoryV2Schema error:', err.message);
+    throw err;
+  }
 }
 
 // 清理历史遗留的 system_settings 键（idempotent）

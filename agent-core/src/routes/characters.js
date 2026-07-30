@@ -9,6 +9,7 @@ import { searchCharacterInfo } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
+import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
@@ -315,7 +316,7 @@ router.delete('/:id', (req, res, next) => {
     // user_portraits.source_msg_id → messages.id
 
     // 1. 清理引用 messages 的系统数据（必须在 DELETE messages 之前）
-    db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+    clearConversationMemories(conversationId);
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
 
@@ -618,6 +619,7 @@ router.post('/:id/gift', async (req, res) => {
     // 异步生图：不阻塞响应，完成后补图片到消息气泡
     if (result.imagePrompt) {
       generateImage(result.imagePrompt, {
+        promptScene: 'gift',
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
         onProgress: (p) => {
@@ -630,7 +632,7 @@ router.post('/:id/gift', async (req, res) => {
           const imageUrl = saveBase64Image('gifts', filename, img.base64);
           db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
             VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-            .run(conversationId, result.imagePrompt, result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
+            .run(conversationId, result.imagePrompt, imgResult.promptRefined || result.imagePrompt, JSON.stringify([imageUrl]), getLastWorkflowMode());
           db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
             .run(JSON.stringify([imageUrl]), msgId);
           console.log(`[gift] image attached to msg #${msgId}: ${imageUrl}`);
@@ -778,6 +780,7 @@ ${char.base_prompt}
     console.log(`[generate-avatar] Step 2/2: generating image at 1024x1024...`);
     const charLoras = _parseCharLoras(char.loras);
     const result = await generateImageRaw(promptText, {
+      promptScene: 'avatar',
       artist: config.comfyui.momentsArtist,
       width: 768,
       height: 768,
@@ -802,7 +805,7 @@ ${char.base_prompt}
 
       db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
         VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-        .run(`char_${char.id}_avatar`, promptText, promptText, JSON.stringify(savedPaths), getLastWorkflowMode());
+        .run(`char_${char.id}_avatar`, promptText, result.promptRefined || promptText, JSON.stringify(savedPaths), getLastWorkflowMode());
 
       // 使相册缓存失效
       invalidateGalleryCache();

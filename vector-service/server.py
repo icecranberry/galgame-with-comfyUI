@@ -13,7 +13,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 
 from embedding import embed, embed_single
-from chroma_store import upsert_memory, search_similar, delete_by_id, delete_by_metadata, collection_count
+from chroma_store import upsert_memory, upsert_memories, search_similar, delete_by_id, delete_by_metadata, collection_count
 from config import MODEL_PATH
 
 app = FastAPI(title="Vector Service", version="1.0.0")
@@ -31,9 +31,11 @@ class EmbedResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     text: str = Field(..., description="查询文本")
+    embedding: list[float] | None = Field(default=None, description="可选外部查询向量；聊天记忆模型使用")
     top_k: int = Field(default=20, ge=1, le=100)
     filter_type: str | None = Field(default=None, pattern="^(fact|preference|emotion)$")
     conversation_id: str | None = Field(default=None, description="可选，限定会话范围")
+    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
 
 
 class SearchResult(BaseModel):
@@ -53,18 +55,38 @@ class UpsertRequest(BaseModel):
     embedding: list[float] | None = None
     metadata: dict = Field(default_factory=dict)
     fragment_type: str | None = None
+    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
 
 
 class UpsertResponse(BaseModel):
     chroma_id: str
 
 
+class UpsertBatchItem(BaseModel):
+    chroma_id: str
+    text: str
+    embedding: list[float] | None = None
+    metadata: dict = Field(default_factory=dict)
+    fragment_type: str | None = None
+
+
+class UpsertBatchRequest(BaseModel):
+    items: list[UpsertBatchItem] = Field(..., min_length=1, max_length=100)
+    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+
+
+class UpsertBatchResponse(BaseModel):
+    count: int
+
+
 class DeleteRequest(BaseModel):
     chroma_id: str
+    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
 
 
 class DeleteByConversationRequest(BaseModel):
     conversation_id: str = Field(..., description="会话 ID，如 char_5")
+    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
 
 
 # ── Routes ──
@@ -74,6 +96,7 @@ async def health():
     return {
         "status": "ok",
         "collection_count": collection_count(),
+        "image_prompt_knowledge_count": collection_count("image_prompt_knowledge"),
     }
 
 
@@ -90,8 +113,14 @@ async def embed_route(req: EmbedRequest):
 @app.post("/search", response_model=SearchResponse)
 async def search_route(req: SearchRequest):
     try:
-        vec = embed_single(req.text)
-        items = search_similar(vec, top_k=req.top_k, filter_type=req.filter_type, conversation_id=req.conversation_id)
+        vec = req.embedding if req.embedding is not None else embed_single(req.text)
+        items = search_similar(
+            vec,
+            top_k=req.top_k,
+            filter_type=req.filter_type,
+            conversation_id=req.conversation_id,
+            corpus=req.corpus,
+        )
         return SearchResponse(
             results=[SearchResult(**item) for item in items]
         )
@@ -112,8 +141,27 @@ async def upsert_route(req: UpsertRequest):
         if req.fragment_type:
             metadata["fragment_type"] = req.fragment_type
 
-        upsert_memory(chroma_id, vec, metadata, req.text)
+        upsert_memory(chroma_id, vec, metadata, req.text, corpus=req.corpus)
         return UpsertResponse(chroma_id=chroma_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/upsert-batch", response_model=UpsertBatchResponse)
+async def upsert_batch_route(req: UpsertBatchRequest):
+    try:
+        missing_indexes = [index for index, item in enumerate(req.items) if item.embedding is None]
+        generated = embed([req.items[index].text for index in missing_indexes]) if missing_indexes else []
+        generated_by_index = dict(zip(missing_indexes, generated))
+        embeddings = [item.embedding if item.embedding is not None else generated_by_index[index] for index, item in enumerate(req.items)]
+        items = []
+        for item in req.items:
+            metadata = {**item.metadata}
+            if item.fragment_type:
+                metadata["fragment_type"] = item.fragment_type
+            items.append({"chroma_id": item.chroma_id, "text": item.text, "metadata": metadata})
+        upsert_memories(items, embeddings, corpus=req.corpus)
+        return UpsertBatchResponse(count=len(items))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -121,7 +169,7 @@ async def upsert_route(req: UpsertRequest):
 @app.post("/delete")
 async def delete_route(req: DeleteRequest):
     try:
-        delete_by_id(req.chroma_id)
+        delete_by_id(req.chroma_id, corpus=req.corpus)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -129,10 +177,10 @@ async def delete_route(req: DeleteRequest):
 
 @app.post("/delete-by-conversation")
 async def delete_by_conversation_route(req: DeleteByConversationRequest):
-    """按 conversation_id 批量清理向量"""
+    """按 conversation_id 和 corpus 批量清理向量"""
     try:
-        deleted = delete_by_metadata({"conversation_id": req.conversation_id})
-        print(f"[delete-by-conversation] removed {deleted} vectors for {req.conversation_id}")
+        deleted = delete_by_metadata({"conversation_id": req.conversation_id}, corpus=req.corpus)
+        print(f"[delete-by-conversation] removed {deleted} vectors for {req.conversation_id} in {req.corpus}")
         return {"ok": True, "deleted": deleted}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

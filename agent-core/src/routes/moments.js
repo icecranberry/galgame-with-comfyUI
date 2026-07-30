@@ -4,6 +4,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
+import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 import { appendOathRing } from '../services/oathUtils.js';
@@ -759,6 +760,7 @@ ${rules}`;
       console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
     }
 
+    const originalImagePrompt = imagePrompt;
     const genResult = await generateImageRaw(imagePrompt, {
       artist: config.comfyui.momentsArtist,
       width: config.comfyui.momentsWidth,
@@ -769,12 +771,23 @@ ${rules}`;
     });
 
     if (genResult.success && genResult.images.length > 0) {
+      imagePrompt = genResult.promptRefined || imagePrompt;
       for (const img of genResult.images) {
         const ts = Date.now();
         const filename = `moment_${ts}_${img.filename || 'comfy.png'}`;
         const url = saveBase64Image('moments', filename, img.base64);
         imageUrls.push(url);
       }
+      recordCompletedImageTask({
+        conversationId: `char_${character.id}_moments`,
+        promptOriginal: originalImagePrompt,
+        promptRefined: imagePrompt,
+        outputPaths: imageUrls,
+        style: config.comfyui.momentsArtist,
+        resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
+        workflowTemplate: genResult.wfMode,
+        db,
+      });
     }
   } catch (err) {
     console.error(`[moments] Image generation failed for post ${postId}:`, err.message);
