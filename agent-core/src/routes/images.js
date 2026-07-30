@@ -163,13 +163,13 @@ router.post('/generate', async (req, res) => {
   const taskId = taskResult.lastInsertRowid;
 
   // 异步执行，立即返回 taskId
-  generateImage(prompt)
+  generateImage(prompt, { promptScene: 'standalone' })
     .then(result => {
       if (result.success) {
         db.prepare(`
-          UPDATE image_tasks SET status = 'done', output_paths = ?, workflow_template = ?, finished_at = datetime('now')
+          UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now')
           WHERE id = ?
-        `).run(JSON.stringify(result.images.map(i => i.filename)), result.wfMode, taskId);
+        `).run(result.promptRefined || prompt, JSON.stringify(result.images.map(i => i.filename)), result.wfMode, taskId);
       } else {
         db.prepare(`
           UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now')
@@ -237,6 +237,7 @@ router.post('/test-style', async (req, res) => {
       width: finalWidth,
       height: finalHeight,
       scene: mode,
+      persistPreparation: false,
       onProgress: (p) => {
         // 捕获各阶段时间戳用于 timing breakdown
         if (p.stage === 'submitting') timing.submitting = performance.now();
@@ -309,6 +310,8 @@ router.post('/regenerate', async (req, res) => {
   // 查找 prompt：优先 image_tasks，其次 moment_posts，再 raw_messages，最后 character_events
   const db = getDb();
   let promptText = null;
+  let taskStyle = null;
+  let taskResolution = null;
   let charLoras = null;
   let charCustomWorkflow = null;
 
@@ -329,10 +332,13 @@ router.post('/regenerate', async (req, res) => {
 
   // 1. image_tasks
   const task = db.prepare(
-    `SELECT prompt_original, conversation_id FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
+    `SELECT prompt_original, prompt_refined, conversation_id, style, resolution
+     FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
   ).get(`%${filename}%`);
-  if (task?.prompt_original) {
-    promptText = task.prompt_original;
+  if (task?.prompt_refined || task?.prompt_original) {
+    promptText = task.prompt_refined || task.prompt_original;
+    taskStyle = task.style;
+    taskResolution = task.resolution || null;
     if (task.conversation_id) tryGetCharConfig(task.conversation_id);
   }
 
@@ -399,13 +405,32 @@ router.post('/regenerate', async (req, res) => {
   };
 
   const opts = categoryConfig[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
+  if (taskStyle !== null) opts.artist = taskStyle;
+  if (taskStyle !== null && taskResolution) {
+    const resolutionMatch = taskResolution.match(/^(\d+)x(\d+)$/);
+    if (resolutionMatch) {
+      opts.width = Number(resolutionMatch[1]);
+      opts.height = Number(resolutionMatch[2]);
+    }
+  }
 
   try {
+    const sceneByCategory = {
+      chat: 'chat',
+      moments: 'moments',
+      events: 'schedule',
+      peek: 'schedule',
+      mailbox: 'chat',
+      gifts: 'chat',
+      avatargen: 'chat',
+    };
     const genOpts = {
       artist: opts.artist,
       width: opts.width,
       height: opts.height,
-      scene: category === 'moments' ? 'moments' : (category === 'events' || category === 'peek' ? 'schedule' : 'chat'),
+      scene: sceneByCategory[category] || 'chat',
+      alreadyPrepared: true,
+      persistPreparation: false,
     };
     if (charLoras?.length > 0) genOpts.loras = charLoras;
     if (charCustomWorkflow) genOpts.customWorkflow = charCustomWorkflow;

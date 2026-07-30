@@ -3,8 +3,10 @@ import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex }
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { hybridSearch } from '../services/memorySearch.js';
-import { extractMemoryFragments } from '../services/memoryExtractor.js';
+import { curateChatMemories } from '../services/memoryExtractor.js';
 import { deleteByConversation } from '../services/vectorClient.js';
+import { clearConversationMemories, rollbackMemoriesFromRawId } from '../services/memory/memoryRepository.js';
+import { extractImagePromptResponse, requestNonEmptyImagePrompt } from '../services/imagePromptResponse.js';
 import { maybeSummarize, getRecentSummaries } from '../services/summarizer.js';
 import { maybeExtractPortrait } from '../services/portraitExtractor.js';
 import {
@@ -25,7 +27,6 @@ import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline }
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
-import { beginTurn } from '../services/llmTelemetry.js';
 
 const router = Router();
 
@@ -58,8 +59,8 @@ router.delete('/characters/:id/messages', (req, res, next) => {
 
   const doDelete = () => {
     const charId = parseInt(req.params.id, 10);
-    // 先删子表（有 FK 指向 messages.id），再删主表
-    db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
+    // 先统一清理聊天长期记忆及其版本、checkpoint、审计和独立向量索引
+    clearConversationMemories(conversationId);
     db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
 
@@ -129,6 +130,7 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
       }
       const lastRawId = lastAssistantRaw.id;
       const msgCount = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE raw_id = ?`).get(lastRawId).c;
+      rollbackMemoriesFromRawId(conversationId, lastRawId);
       db.pragma('foreign_keys = OFF');
       try {
         db.prepare(`DELETE FROM messages WHERE raw_id = ?`).run(lastRawId);
@@ -154,7 +156,8 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
       WHERE conversation_id = ? AND raw_id >= ?
     `).get(conversationId, lastUserRawId).c;
 
-    // 3. 临时关闭外键检查，仅删两张表（其他表如 memory_fragments 的 FK 引用不做处理）
+    // 3. 先回滚来源覆盖该轮的记忆版本，再删除原始消息
+    rollbackMemoriesFromRawId(conversationId, lastUserRawId);
     db.pragma('foreign_keys = OFF');
     try {
       db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ? AND end_msg_id >= ?`)
@@ -243,9 +246,6 @@ router.post('/characters/:id/chat', async (req, res) => {
   const db = getDb();
   const characterId = req.params.id;
   const conversationId = convId(characterId);
-
-  // 开启本轮 LLM 调用统计（异步后处理链继承此上下文，静默 10s 后输出汇总日志）
-  beginTurn(conversationId);
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {
@@ -597,49 +597,6 @@ router.post('/characters/:id/chat', async (req, res) => {
       userInfoParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
-    // ============================================================
-    // 聊天上下文结构（chat-context-v3）
-    //
-    // stableBlocks [0] system:
-    //   破限词 (system_rules) + 世界观 (world_setting)
-    //
-    // stableBlocks [1] system:
-    //   角色基础人格 (character.base_prompt)
-    //
-    // stableBlocks [2] system:
-    //   用户上下文 + 关系 + 输出格式规则
-    //   ├─ <user_relation>
-    //   ├─ <oath_bond>
-    //   ├─ <user_info>
-    //   ├─ <character_relations>
-    //   └─ <dialogue_format_rules>
-    //
-    // summaryBlock system:
-    //   最新滚动摘要（getRecentSummaries，仅 1 条）
-    //
-    // checkpointHistory（作为 user/assistant 消息注入，冻结）：
-    //   WHERE id ≤ afterId → 末尾 10 条 assistant 及其中间 user
-    //   仅摘要触发时更新 afterId，两次摘要之间完全不变
-    //
-    // 当前 user 消息 + <dynamic_context>（按此顺序注入）：
-    //   1. <mailbox_history>
-    //   2. <event_history>
-    //   3. <recent_moments>
-    //   4. 好感度文本
-    //   5. <user_portrait>
-    //   6. <group_histories>（角色所在群聊的最新摘要，自然提及）
-    //   7. <active_chat_history>  ← WHERE id > afterId, ≤10 条 assistant
-    //   8. <schedule_context>
-    //   9. 情绪状态 (emotionPrompt)
-    //  10. <current_event>
-    //  11. <rag_memories>
-    //  12. 重逢提示（streak ≥ 2）
-    //  13. <cross_reference>
-    //  14. <dialogue_rules>（回复长度提示）
-    //  15. <time_context>
-    //
-    // 生图触发：路径 A（强匹配正则）/ B（模型自主 <needImage>）/ C（静默判断）
-    // ============================================================
     // 固定格式规则保持在稳定前缀；随好感度/本轮生图意图变化的长度提示放到动态尾部。
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     userInfoParts.push(`<dialogue_format_rules>
@@ -757,31 +714,6 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 5.5 群聊历史摘要注入（角色"记得"群里发生的事）
-    const memberGroupRows = db.prepare(`
-      SELECT gm.group_id, gc.name AS group_name
-      FROM group_members gm
-      JOIN group_chats gc ON gc.id = gm.group_id
-      WHERE gm.character_id = ?
-    `).all(characterId);
-    if (memberGroupRows.length > 0) {
-      const groupSummaryLines = [];
-      for (const g of memberGroupRows) {
-        const gConvId = `group_${g.group_id}`;
-        const gSummary = db.prepare(`
-          SELECT summary FROM rolling_summaries
-          WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
-          ORDER BY end_msg_id DESC, id DESC LIMIT 1
-        `).get(gConvId);
-        if (gSummary?.summary) {
-          groupSummaryLines.push(`【${g.group_name}】${gSummary.summary}`);
-        }
-      }
-      if (groupSummaryLines.length > 0) {
-        dynamicBlocks.push(`<group_histories>\n你参与的群聊中近期发生的事（你可以在对话中自然提及）：\n${groupSummaryLines.join('\n\n')}\n</group_histories>`);
-      }
-    }
-
     // 6. 活跃聊天历史（滑动窗口 0~10 轮）
     if (activeChatText) {
       dynamicBlocks.push(activeChatText);
@@ -814,35 +746,24 @@ ${coreRules}
     // 10. RAG 三路召回记忆
     if (config.features.memory) {
       try {
-        const excludeEntities = [character.display_name, chatUserName, 'user'];
-        // 跨库检索：私聊 + 该角色所在的所有群聊（角色"记得"群里发生的事）
-        const memberGroups = db.prepare(
-          `SELECT group_id FROM group_members WHERE character_id = ?`
-        ).all(characterId).map(g => `group_${g.group_id}`);
-        const rawResults = await hybridSearch(message, {
-          conversationIds: [conversationId, ...memberGroups],
-          topK: 10, excludeEntities,
+        const groupConversationIds = db.prepare(`
+          SELECT 'group_' || group_id AS conversation_id
+          FROM group_members WHERE character_id = ? ORDER BY group_id
+        `).pluck().all(characterId);
+        const memoryResults = await hybridSearch(message, {
+          conversationIds: [conversationId, ...groupConversationIds],
+          topK: 7,
         });
-        const hasKeywordOrEntityHit = rawResults.some(r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity')));
-        if (!hasKeywordOrEntityHit) {
-          console.log('[chat] RAG skipped: no keyword/entity hits for query');
-        } else {
-          const memoryResults = rawResults.filter(m => {
-            if (!m.entities || m.entities.length === 0) return false;
-            if (m.content && /【(事件|奇遇)/.test(m.content)) return false;
-            return true;
-          });
-          if (memoryResults.length >= 1) {
-            const memoryLines = memoryResults.map((m, i) => `${i + 1}. [${m.fragment_type}] ${m.content}`).join('\n');
-            memorySnapshot.push(...memoryResults.map(m => ({
-              id: m.id ?? null,
-              fragmentType: m.fragment_type,
-              content: m.content,
-              entities: m.entities ?? [],
-              sources: m.sources ?? [],
-            })));
-            dynamicBlocks.push(`<rag_memories>\n${memoryLines}\n</rag_memories>`);
-          }
+        if (memoryResults.length > 0) {
+          const memoryLines = memoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
+          memorySnapshot.push(...memoryResults.map(m => ({
+            id: m.memory_id,
+            memoryType: m.memory_type,
+            judgment: m.judgment,
+            tags: m.tags ?? [],
+            sources: m.sources ?? [],
+          })));
+          dynamicBlocks.push(`<rag_memories>\n${memoryLines}\n</rag_memories>`);
         }
       } catch (err) { console.error('[chat] memory search failed:', err.message); }
     }
@@ -1192,19 +1113,13 @@ ${coreRules}
         }
 
         if (config.features.memory) {
-          const userMsgCount = db.prepare(`
-            SELECT COUNT(*) as count FROM raw_messages
-            WHERE conversation_id = ? AND role = 'user'
-          `).get(conversationId).count;
-          if (userMsgCount % 10 === 0) {
-            console.log('[chat] memory extract triggered at user message #' + userMsgCount);
-            await extractMemoryFragments(conversationId, userMsgId, lastInsertRowid, {
-              characterPrompt: character.base_prompt,
-              participantNames: [character.display_name, chatUserName, 'user'],
-              characterName: character.display_name,
-              userName: chatUserName,
-            });
-          }
+          await curateChatMemories({
+            conversationId,
+            throughRawMsgId: rawMsgId,
+            characterPrompt: character.base_prompt,
+            characterName: character.display_name,
+            userName: chatUserName,
+          });
         }
         // 用户画像提取（每 10 条用户消息触发，无 feature flag 始终开启）
         await maybeExtractPortrait(conversationId, characterId);
@@ -1298,6 +1213,15 @@ function createPreparingTask(conversationId) {
   const result = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, '', '', 'pending')`)
     .run(conversationId);
   return result.lastInsertRowid;
+}
+
+function failPreparingTask(taskId, errorMessage) {
+  if (taskId == null) return;
+  getDb().prepare(`
+    UPDATE image_tasks
+    SET status = 'failed', error_message = ?, finished_at = datetime('now')
+    WHERE id = ? AND status IN ('pending', 'running')
+  `).run(errorMessage, taskId);
 }
 
 /**
@@ -1413,8 +1337,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         .run(JSON.stringify(urls), assistantMsgId);
       console.log(`[chat] images saved to message id=${assistantMsgId}, rows updated=${updateResult.changes}`);
 
-      db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
-        .run(JSON.stringify(urls), result.wfMode, taskId);
+      db.prepare(`UPDATE image_tasks SET status='done', prompt_refined=?, output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
+        .run(result.promptRefined || prompt, JSON.stringify(urls), result.wfMode, taskId);
 
       send('generate_done', { taskId, images: result.images, source: result.source });
 
@@ -1628,30 +1552,28 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
   let fullContent = '';
   try {
-    fullContent = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '生图' });
+    fullContent = await requestNonEmptyImagePrompt(
+      () => chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '生图' }),
+      {
+        emptyRetries: 1,
+        onEmpty: () => console.warn('[chat] needImage follow-up returned empty content, retrying once...'),
+      }
+    );
     console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
   } catch (err) {
     console.error('[chat] needImage follow-up error:', err.message);
+    failPreparingTask(preExistingTaskId, `生图请求失败: ${err.message}`);
     send('generate_error', { taskId: preExistingTaskId, error: '生图请求失败' });
     return;
   }
 
-  // 4. 提取 prompt：纯文本优先，JSON 格式向后兼容
-  let prompt = null;
-  // 先尝试直接作为纯文本
-  let text = fullContent.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  if (text.length >= 5) {
-    prompt = text;
-  }
-  // 兜底：如果 LLM 仍输出了 {"prompt":"..."} JSON 格式（历史兼容），解析其 prompt 值
-  if (!prompt) {
-    const jsonMatch = text.match(/\{[“”"]?prompt[“”"]?\s*:\s*[“”"]([^]*?)[“”"]?\s*\}/i);
-    if (jsonMatch) {
-      prompt = jsonMatch[1].trim();
-    }
-  }
+  // 4. 先验证 prompt，再写入 raw_messages/messages，避免空 assistant 消息。
+  const prompt = extractImagePromptResponse(fullContent);
   if (!prompt) {
     console.warn('[chat] needImage: failed to extract prompt, raw:', fullContent.slice(0, 120));
+    failPreparingTask(preExistingTaskId, '模型未返回图像描述');
+    send('generate_error', { taskId: preExistingTaskId, error: '模型未返回图像描述' });
+    return;
   }
   const tags = { prompt };
 
@@ -2013,8 +1935,8 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
           .run(JSON.stringify(urls), zzzMsgId);
       }
 
-      db.prepare(`UPDATE image_tasks SET status = 'done', output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?`)
-        .run(JSON.stringify(urls), result.wfMode || null, genTaskId);
+      db.prepare(`UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?`)
+        .run(result.promptRefined || generatedPrompt, JSON.stringify(urls), result.wfMode || null, genTaskId);
 
       invalidateGalleryCache();
 

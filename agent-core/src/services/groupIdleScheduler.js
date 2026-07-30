@@ -35,7 +35,7 @@ function todayStr() {
 
 /** 消耗一次预算；预算耗尽返回 false */
 function consumeIdleBudget(db, group) {
-  const budget = config.features.groupIdleBudget ?? 5;
+  const budget = config.features.groupIdleBudget ?? 0;
   if (budget <= 0) return false;
   const today = todayStr();
   const used = group.idle_budget_date === today ? (group.idle_budget_used || 0) : 0;
@@ -53,7 +53,7 @@ function scheduleNextIdle(db, groupId, minHours = 1, maxHours = 4) {
 
 async function idleTick() {
   if (!config.features.groupChat) return;
-  if ((config.features.groupIdleBudget ?? 5) <= 0) return;
+  if ((config.features.groupIdleBudget ?? 0) <= 0) return;
   if (processing) return;
 
   const db = getDb();
@@ -193,7 +193,7 @@ async function maybeCreateGroup() {
 }
 
 export function startGroupIdleScheduler() {
-  console.log('[groupIdle] Starting (idle interval:', IDLE_CHECK_INTERVAL / 60000, 'min, budget:', config.features.groupIdleBudget ?? 5, '/day)');
+  console.log('[groupIdle] Starting (idle interval:', IDLE_CHECK_INTERVAL / 60000, 'min, budget:', config.features.groupIdleBudget ?? 0, '/day)');
   setTimeout(() => {
     idleTick();
     idleTimer = setInterval(idleTick, IDLE_CHECK_INTERVAL);

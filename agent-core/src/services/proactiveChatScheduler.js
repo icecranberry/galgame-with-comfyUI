@@ -23,6 +23,7 @@ import {
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
+import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -656,11 +657,13 @@ ${motiveName}
     const loraOpts = {};
     if (charLoras.length > 0) loraOpts.loras = charLoras;
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
-    const result = await generateImage(prompt, { priority: 'low', ...loraOpts });
+    const result = await generateImage(prompt, { promptScene: 'proactive', priority: 'low', ...loraOpts });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;
     }
+    getDb().prepare('UPDATE raw_messages SET prompt = ? WHERE id = ?')
+      .run(result.promptRefined || prompt, rawId);
 
     // 3. 落盘 base64 图片到 data/images/chat/ + 更新 messages 表
     const urls = [];
@@ -673,6 +676,16 @@ ${motiveName}
     const db = getDb();
     db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
       .run(JSON.stringify(urls), msgId);
+    recordCompletedImageTask({
+      conversationId: `char_${character.id}`,
+      promptOriginal: prompt,
+      promptRefined: result.promptRefined || prompt,
+      outputPaths: urls,
+      style: config.comfyui.artist,
+      resolution: `${config.comfyui.width}x${config.comfyui.height}`,
+      workflowTemplate: result.wfMode,
+      db,
+    });
 
     // 使相册缓存失效
     invalidateGalleryCache();

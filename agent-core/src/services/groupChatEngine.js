@@ -25,13 +25,13 @@ import { config } from '../config.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
-import { extractMemoryFragments } from './memoryExtractor.js';
+import { curateChatMemories } from './memoryExtractor.js';
+import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
 import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
-import { deleteVector } from './vectorClient.js';
 
 export function groupConvId(groupId) { return `group_${groupId}`; }
 
@@ -39,8 +39,7 @@ const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底：checkpoint 之后 transcript
 const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数（留出再增长空间，降低跳变频率）
 const MAX_ROUND_MESSAGES = 15;     // 每轮剧本最多 10 条消息（按剧本行计，分句后的气泡数不受限）
 const IMAGE_NUDGE_PROBABILITY = 0.5;  // 每轮抽卡鼓励发图的概率
-// 临时关闭群聊 RAG：不检索注入记忆，也不提取新的记忆碎片；群聊历史摘要仍独立保留。
-const GROUP_RAG_ENABLED = false;
+// ── 群聊记忆与召回统一使用 paimon 记忆 v2 ──
 
 // ── 群数据读取 ──
 
@@ -347,7 +346,7 @@ function parseScriptLine(line, membersByName) {
 
 // ── 群内生图 ──
 
-async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, workflowOptions = {}) {
+async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
   const db = getDb();
   const conversationId = groupConvId(group.id);
   const taskResult = db.prepare(
@@ -355,17 +354,18 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, wor
      VALUES (?, ?, ?, ?, 'running')`
   ).run(conversationId, targetMsgId, prompt, prompt);
   const taskId = taskResult.lastInsertRowid;
-  emit('generate_start', { taskId, prompt, speaker_character_id: speaker.id, msg_id: targetMsgId });
+  emit('generate_start', { group_id: group.id, taskId, prompt, speaker_character_id: speaker.id, msg_id: targetMsgId });
 
   try {
     const loraOpts = {};
-    if (speaker.custom_workflow) loraOpts.customWorkflow = speaker.custom_workflow;
 
     // 按 prompt 中的英文名匹配其他角色 LoRA，再强制注入发图角色自身的 LoRA。
     const {
+      prompt: preparedPrompt,
+      fallbackApplied,
       matchedCharacters,
       loras: matchedLoras,
-    } = resolveGroupImageLoras(prompt);
+    } = resolveGroupImageLoras(prompt, speaker);
 
     // 强制注入发送者 LoRA（去重合并）
     const speakerLoras = parseCharacterLoras(speaker);
@@ -379,14 +379,22 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, wor
     }
     console.log(`[group] forced speaker LoRA for ${speaker.display_name}(${speaker.name}): ${speakerLoras.map(l => l.path).join(', ') || 'none'}`);
 
-    const result = await generateImage(prompt, {
-      ...workflowOptions,
+    if (fallbackApplied) {
+      console.log(`[group] image prompt added speaker name fallback: ${speaker.name}`);
+    }
+    const result = await generateImage(preparedPrompt, {
+      scene: 'group',
+      workflowScene: 'group',
+      promptScene: 'chat',
       onProgress: (p) => {
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
       },
       ...loraOpts,
     });
+    if (result.promptRefined) {
+      db.prepare(`UPDATE image_tasks SET prompt_refined = ? WHERE id = ?`).run(result.promptRefined, taskId);
+    }
     if (!result.success || result.images.length === 0) {
       throw new Error(result.error || 'No images generated');
     }
@@ -403,13 +411,13 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, wor
       const { invalidateGalleryCache } = await import('../routes/images.js');
       invalidateGalleryCache();
     } catch { /* gallery 缓存失效失败不影响主流程 */ }
-    emit('generate_done', { taskId, msg_id: targetMsgId, images: urls, speaker_character_id: speaker.id });
+    emit('generate_done', { group_id: group.id, taskId, msg_id: targetMsgId, images: urls, speaker_character_id: speaker.id });
     console.log(`[group] image done for ${speaker.display_name} in group ${group.id}: ${urls[0]}`);
   } catch (err) {
     console.error(`[group] image failed for group ${group.id}:`, err.message);
     db.prepare(`UPDATE image_tasks SET status='failed', error_message=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
       .run(err.message, getLastWorkflowMode(), taskId);
-    emit('generate_error', { taskId, msg_id: targetMsgId, error: err.message });
+    emit('generate_error', { group_id: group.id, taskId, msg_id: targetMsgId, error: err.message });
   }
 }
 
@@ -438,6 +446,24 @@ export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
   return { rawId: raw.lastInsertRowid, msgId: msg.lastInsertRowid, duplicate: false };
 }
 
+function countCompletedGroupRoundsAfter(db, conversationId, afterRawId) {
+  const rows = db.prepare(`
+    SELECT role FROM raw_messages
+    WHERE conversation_id = ? AND id > ? AND role IN ('user', 'assistant')
+    ORDER BY id ASC
+  `).all(conversationId, afterRawId);
+  let waitingForAssistant = false;
+  let rounds = 0;
+  for (const row of rows) {
+    if (row.role === 'user') waitingForAssistant = true;
+    else if (waitingForAssistant) {
+      rounds++;
+      waitingForAssistant = false;
+    }
+  }
+  return rounds;
+}
+
 /**
  * 截断被用户打断的剧本尾巴：前端播放中途用户发言时，未上屏的分句被抛弃，
  * 这里同步删掉 afterMsgId 之后的 assistant 分句，并按剩余分句重建 raw 剧本，
@@ -452,33 +478,62 @@ export function truncateRoundAfter(groupId, afterMsgId) {
   `).all(conversationId, afterMsgId);
   if (doomed.length === 0) return 0;
 
-  const rawIds = [...new Set(doomed.map(d => d.raw_id).filter(Boolean))];
-  const doomedMsgIds = doomed.map(d => d.id);
-  const doomedImageUrls = doomed.flatMap(d => {
+  const rawIds = [...new Set(doomed.map(row => row.raw_id).filter(Boolean))];
+  const rollbackRawId = rawIds.length > 0 ? Math.min(...rawIds) : null;
+  const doomedMsgIds = doomed.map(row => row.id);
+  const doomedImageUrls = [...new Set(doomed.flatMap(row => {
     try {
-      const urls = JSON.parse(d.images || '[]');
-      return Array.isArray(urls) ? urls : [];
+      const urls = JSON.parse(row.images || '[]');
+      return Array.isArray(urls) ? urls.filter(Boolean) : [];
     } catch {
       return [];
     }
-  });
-  if (doomedMsgIds.length > 0) {
-    const fragments = db.prepare(`
-      SELECT id, chroma_id FROM memory_fragments
-      WHERE source_msg_id IN (${doomedMsgIds.map(() => '?').join(',')})
-    `).all(...doomedMsgIds);
-    if (fragments.length > 0) {
-      db.prepare(`DELETE FROM memory_fragments WHERE id IN (${fragments.map(() => '?').join(',')})`)
-        .run(...fragments.map(fragment => fragment.id));
-      for (const fragment of fragments) {
-        if (fragment.chroma_id) deleteVector(fragment.chroma_id).catch(() => {});
+  }))];
+
+  // raw 剧本即将变化，先恢复所有由该 raw 及其后续内容派生的记忆版本。
+  if (rollbackRawId !== null) rollbackMemoriesFromRawId(conversationId, rollbackRawId);
+  const checkpointBoundary = getCheckpoint(conversationId).last_raw_msg_id || 0;
+
+  const transaction = db.transaction(() => {
+    if (doomedMsgIds.length > 0) {
+      const placeholders = doomedMsgIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ? AND source_msg_id IN (${placeholders})`)
+        .run(conversationId, ...doomedMsgIds);
+    }
+    if (rollbackRawId !== null) {
+      db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ? AND end_msg_id >= ?`)
+        .run(conversationId, rollbackRawId);
+    }
+    db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND role = 'assistant' AND id > ?`)
+      .run(conversationId, afterMsgId);
+
+    // 重建受影响的 raw：只保留已上屏分句。若整条剧本都未上屏，则删除 raw。
+    for (const rawId of rawIds) {
+      const rest = db.prepare(`
+        SELECT m.content, c.display_name FROM messages m
+        LEFT JOIN characters c ON c.id = m.speaker_character_id
+        WHERE m.raw_id = ? ORDER BY m.seq ASC, m.id ASC
+      `).all(rawId);
+      const lines = rest
+        .filter(row => row.content && row.content.trim())
+        .map(row => `[${row.display_name || '?'}]: ${row.content.replace(/\n/g, ' ')}`);
+      if (lines.length > 0) {
+        db.prepare(`UPDATE raw_messages SET content = ? WHERE id = ?`).run(lines.join('\n'), rawId);
+      } else {
+        db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(rawId);
       }
     }
-    db.prepare(`DELETE FROM image_tasks WHERE source_msg_id IN (${doomedMsgIds.map(() => '?').join(',')})`)
-      .run(...doomedMsgIds);
-  }
-  db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND role = 'assistant' AND id > ?`)
-    .run(conversationId, afterMsgId);
+
+    const pendingRounds = countCompletedGroupRoundsAfter(db, conversationId, checkpointBoundary);
+    const lastMessageAt = db.prepare(`SELECT MAX(created_at) AS value FROM messages WHERE conversation_id = ?`)
+      .get(conversationId).value;
+    db.prepare(`
+      UPDATE group_chats
+      SET rag_user_rounds_pending = ?, last_message_at = ?
+      WHERE id = ?
+    `).run(pendingRounds, lastMessageAt, groupId);
+  });
+  transaction();
 
   for (const url of doomedImageUrls) {
     const stillReferenced = db.prepare(`SELECT 1 FROM messages WHERE images LIKE ? LIMIT 1`).get(`%${url}%`);
@@ -486,23 +541,12 @@ export function truncateRoundAfter(groupId, afterMsgId) {
       try { deleteImageFileByUrl(url); } catch { /* 文件清理失败不影响消息截断 */ }
     }
   }
-
-  // 重建受影响的 raw：剩余分句逐行 [名字]: 内容（纯图片占位气泡无法恢复 prompt 行，直接丢弃）
-  for (const rawId of rawIds) {
-    const rest = db.prepare(`
-      SELECT m.content, c.display_name FROM messages m
-      LEFT JOIN characters c ON c.id = m.speaker_character_id
-      WHERE m.raw_id = ? ORDER BY m.seq ASC, m.id ASC
-    `).all(rawId);
-    const lines = rest
-      .filter(r => r.content && r.content.trim())
-      .map(r => `[${r.display_name || '?'}]: ${r.content.replace(/\n/g, ' ')}`);
-    if (lines.length > 0) {
-      db.prepare(`UPDATE raw_messages SET content = ? WHERE id = ?`).run(lines.join('\n'), rawId);
-    } else {
-      db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(rawId);
-    }
+  if (doomedImageUrls.length > 0) {
+    import('../routes/images.js')
+      .then(({ invalidateGalleryCache }) => invalidateGalleryCache())
+      .catch(() => {});
   }
+
   console.log(`[group] truncated ${doomed.length} undelivered segments after msg #${afterMsgId} for group ${groupId}`);
   return doomed.length;
 }
@@ -573,17 +617,13 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     directiveBlocks.push(`群里冷场了一会儿，角色们自然地把话题接下去（延伸刚才的话题、开个新话头），不要重复已经说过的话。`);
   }
 
-  // RAG 记忆（跨库：本群 + 全体成员的私聊）
-  if (GROUP_RAG_ENABLED && config.features.memory && trigger === 'user' && userMessage) {
+  // 记忆召回范围：本群 + 全体成员各自私聊。
+  if (config.features.memory && trigger === 'user' && userMessage) {
     try {
-      const convIds = [conversationId, ...group.members.map(m => `char_${m.id}`)];
-      const excludeEntities = [chatUserName, 'user', ...group.members.map(m => m.display_name)];
-      const rag = await hybridSearch(userMessage, { conversationIds: convIds, topK: 6, excludeEntities });
-      const hits = rag
-        .filter(r => r.sources && (r.sources.includes('keyword') || r.sources.includes('entity')))
-        .filter(r => !(r.content && /【(事件|奇遇)/.test(r.content)));
-      if (hits.length > 0) {
-        const lines = hits.map((m, i) => `${i + 1}. [${m.fragment_type}] ${m.content}`).join('\n');
+      const conversationIds = [conversationId, ...group.members.map(member => `char_${member.id}`)];
+      const memories = await hybridSearch(userMessage, { conversationIds, topK: 6 });
+      if (memories.length > 0) {
+        const lines = memories.map((memory, index) => `${index + 1}. [${memory.memory_type}] ${memory.judgment}`).join('\n');
         directiveBlocks.push(`<rag_memories>\n相关记忆（角色们可能记得的事）：\n${lines}\n</rag_memories>`);
       }
     } catch (err) {
@@ -656,7 +696,6 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         parsed.imagePrompt,
         target.id,
         emit,
-        trigger === 'user' ? { scene: 'chat', workflowScene: 'group' } : {},
       ));
       return;
     }
@@ -719,16 +758,14 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     await Promise.allSettled(imagePromises);
   }
 
-  // ── 后处理：历史摘要保留；群聊 RAG 提取由 GROUP_RAG_ENABLED 暂时关闭 ──
+  // ── 后处理：用户轮次按两轮节奏整理 v2 记忆，同时推进群聊摘要 ──
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {
-      if (GROUP_RAG_ENABLED) {
-        try {
-          await maybeExtractGroupMemory(group, { incrementUserRound: trigger === 'user' });
-        } catch (err) {
-          console.error('[group] memory post-processing error:', err.message);
-        }
+      try {
+        await maybeExtractGroupMemory(group, { incrementUserRound: trigger === 'user' });
+      } catch (err) {
+        console.error('[group] memory post-processing error:', err.message);
       }
       if (trigger === 'user') {
         try {
@@ -777,7 +814,7 @@ export function isGroupPostProcessing(groupId) {
   return (groupPostProcessingCounts.get(Number(groupId)) || 0) > 0;
 }
 
-/** 每累计 2 轮用户发言，增量分析尚未上传过的群聊 raw。 */
+/** 每累计 2 轮用户发言，使用 v2 checkpoint 增量整理群聊 raw。 */
 async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {}) {
   if (!config.features.memory) return;
   const db = getDb();
@@ -793,7 +830,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
 
   if (groupMemoryExtractionRunning.has(group.id)) return;
   const initialState = db.prepare(`
-    SELECT rag_user_rounds_pending AS pendingRounds
+    SELECT COALESCE(rag_user_rounds_pending, 0) AS pendingRounds
     FROM group_chats WHERE id = ?
   `).get(group.id);
   if (!initialState || initialState.pendingRounds < 2) return;
@@ -801,57 +838,48 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
   groupMemoryExtractionRunning.add(group.id);
   try {
     while (true) {
-      const state = db.prepare(`
-        SELECT COALESCE(rag_last_extracted_raw_id, 0) AS lastRawId,
-               COALESCE(rag_user_rounds_pending, 0) AS pendingRounds
+      const groupState = db.prepare(`
+        SELECT COALESCE(rag_user_rounds_pending, 0) AS pendingRounds
         FROM group_chats WHERE id = ?
       `).get(group.id);
-      if (!state || state.pendingRounds < 2) break;
+      if (!groupState || groupState.pendingRounds < 2) break;
 
-      // 只截到已经完成并回填 content 的 assistant raw，避免上传下一轮尚未回复的用户消息。
+      const checkpoint = getCheckpoint(conversationId);
       const endRow = db.prepare(`
         SELECT MAX(id) AS id FROM raw_messages
         WHERE conversation_id = ? AND role = 'assistant' AND content != '' AND id > ?
-      `).get(conversationId, state.lastRawId);
+      `).get(conversationId, checkpoint.last_raw_msg_id);
       const throughRawId = endRow?.id || 0;
-      if (throughRawId <= state.lastRawId) break;
+      if (throughRawId <= checkpoint.last_raw_msg_id) break;
 
-      const sourceMsg = db.prepare(`
-        SELECT id FROM messages
-        WHERE conversation_id = ? AND raw_id <= ?
-        ORDER BY id DESC LIMIT 1
-      `).get(conversationId, throughRawId);
-      const sourceRaw = db.prepare(`
-        SELECT MIN(id) AS id FROM raw_messages
-        WHERE conversation_id = ? AND id > ? AND id <= ?
-      `).get(conversationId, state.lastRawId, throughRawId);
+      const roundsBeingProcessed = groupState.pendingRounds;
       const chatUserName = config.user.nickname || '用户';
-      const roundsBeingProcessed = state.pendingRounds;
+      console.log(`[group] curate v2 memory for group ${group.id}: raw (${checkpoint.last_raw_msg_id}, ${throughRawId}], user rounds=${roundsBeingProcessed}`);
 
-      console.log(`[group] incremental memory extract for group ${group.id}: raw (${state.lastRawId}, ${throughRawId}], user rounds=${roundsBeingProcessed}`);
-      await extractMemoryFragments(conversationId, sourceMsg?.id || null, sourceMsg?.id || null, {
-        characterPrompt: `这是群聊「${group.name}」的聊天记录，每行开头 [名字] 标记了发言人。`,
-        participantNames: [...group.members.map(m => m.display_name), chatUserName, 'user'],
-        characterName: '群聊记录',
+      await curateChatMemories({
+        conversationId,
+        throughRawMsgId: throughRawId,
+        characterPrompt: `这是群聊「${group.name}」的聊天记录；assistant raw 内每行开头的 [名字] 是真实发言角色。`,
+        characterName: '群聊角色',
         userName: chatUserName,
-        afterRawId: state.lastRawId,
-        throughRawId,
-        sourceRawStartId: sourceRaw?.id || null,
-        sourceRawEndId: throughRawId,
-        throwOnError: true,
       });
 
-      // 只扣除本批开始时已经计入的轮数；提取期间新增的用户轮次继续保留。
+      const completedCheckpoint = getCheckpoint(conversationId);
+      if (completedCheckpoint.last_raw_msg_id < throughRawId || completedCheckpoint.status !== 'idle') {
+        console.error(`[group] memory checkpoint did not advance for group ${group.id}: status=${completedCheckpoint.status}, raw=${completedCheckpoint.last_raw_msg_id}`);
+        break;
+      }
+
+      // 只扣除本批开始时已计入的轮数；整理期间新增的用户轮次继续保留。
       db.prepare(`
         UPDATE group_chats
-        SET rag_last_extracted_raw_id = ?,
-            rag_user_rounds_pending = MAX(0, COALESCE(rag_user_rounds_pending, 0) - ?)
+        SET rag_user_rounds_pending = MAX(0, COALESCE(rag_user_rounds_pending, 0) - ?)
         WHERE id = ?
-      `).run(throughRawId, roundsBeingProcessed, group.id);
+      `).run(roundsBeingProcessed, group.id);
     }
   } catch (err) {
-    // 失败时不推进 raw 边界，也不清 pending 轮数；下次用户轮次后会重试同一增量批次。
-    console.error(`[group] incremental memory extract failed for group ${group.id}:`, err.message);
+    // checkpoint 失败时不推进，pending 也不扣减；后续用户轮次会重试同一批。
+    console.error(`[group] memory curation failed for group ${group.id}:`, err.message);
   } finally {
     groupMemoryExtractionRunning.delete(group.id);
   }

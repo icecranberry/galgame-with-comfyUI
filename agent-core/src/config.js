@@ -54,7 +54,7 @@ export const config = {
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板
     weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
     groupChat: process.env.FEATURE_GROUP_CHAT !== 'false', // 默认开：群聊系统
-    groupIdleBudget: parseInt(process.env.GROUP_IDLE_BUDGET, 10) || 5, // 每群每日后台闲聊轮数上限，0=关闭后台闲聊
+    groupIdleBudget: Math.max(0, parseInt(process.env.GROUP_IDLE_BUDGET ?? '0', 10) || 0), // 默认关闭；显式设为正数后启用每群每日后台闲聊预算
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',

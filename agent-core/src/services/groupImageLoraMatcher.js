@@ -27,7 +27,24 @@ export function parseCharacterLoras(character) {
   }
 }
 
+export function appendGroupImageSpeakerName(prompt, speaker) {
+  const text = String(prompt || '').trim();
+  const name = String(speaker?.name || '').trim();
+  if (!name) return text;
+  return text ? `${text}, ${name}` : name;
+}
 
+function describesPeople(prompt) {
+  return /\b(girl|woman|lady|female|boy|man|male|person|people|couple|group|portrait|selfie|character|cosplay|waitress|student)\b/i.test(String(prompt || ''));
+}
+
+export function applyGroupImageNameFallback(prompt, matchedCharacters, speaker) {
+  const text = String(prompt || '').trim();
+  if ((matchedCharacters || []).length > 0 || !speaker?.name || !describesPeople(text)) {
+    return { prompt: text, fallbackApplied: false };
+  }
+  return { prompt: `${speaker.name}, ${text}`, fallbackApplied: true };
+}
 
 export function matchCharactersInImagePrompt(prompt, characters) {
   const normalizedPrompt = normalizeEnglishName(prompt);
@@ -85,7 +102,7 @@ export function collectCharacterLoras(characters) {
   return loras;
 }
 
-export function resolveGroupImageLoras(prompt) {
+export function resolveGroupImageLoras(prompt, speaker = null) {
   const characters = getDb().prepare(`
     SELECT id, name, display_name, loras
     FROM characters
@@ -93,9 +110,11 @@ export function resolveGroupImageLoras(prompt) {
     ORDER BY id ASC
   `).all();
   const matchedCharacters = matchCharactersInImagePrompt(prompt, characters);
+  const prepared = applyGroupImageNameFallback(prompt, matchedCharacters, speaker);
 
   return {
-    prompt: String(prompt || '').trim(),
+    prompt: prepared.prompt,
+    fallbackApplied: prepared.fallbackApplied,
     matchedCharacters,
     loras: collectCharacterLoras(matchedCharacters),
   };

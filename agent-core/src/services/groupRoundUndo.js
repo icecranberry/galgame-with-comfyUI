@@ -1,5 +1,5 @@
 import { getDb } from '../db/index.js';
-import { deleteVector } from './vectorClient.js';
+import { rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
 import { deleteImageFileByUrl } from './imagePaths.js';
 
 function parseImageUrls(value) {
@@ -52,10 +52,7 @@ function countCompletedUserRounds(db, conversationId, afterRawId) {
 export async function undoLastGroupRound(groupId) {
   const db = getDb();
   const conversationId = `group_${groupId}`;
-  const group = db.prepare(`
-    SELECT id, COALESCE(rag_last_extracted_raw_id, 0) AS rag_last_extracted_raw_id
-    FROM group_chats WHERE id = ?
-  `).get(groupId);
+  const group = db.prepare(`SELECT id FROM group_chats WHERE id = ?`).get(groupId);
   if (!group) return { notFound: true };
 
   const raws = db.prepare(`
@@ -74,15 +71,11 @@ export async function undoLastGroupRound(groupId) {
   const imageUrls = [...new Set(messageRows.flatMap(row => parseImageUrls(row.images)))];
   const messageIdClause = messageIds.length > 0 ? messageIds.map(() => '?').join(',') : null;
 
-  const fragmentRows = db.prepare(`
-    SELECT id, chroma_id, source_msg_id, source_raw_start_id, source_raw_end_id
-    FROM memory_fragments
-    WHERE conversation_id = ? AND (
-      (source_raw_start_id IS NOT NULL AND source_raw_end_id IS NOT NULL
-        AND source_raw_start_id <= ? AND source_raw_end_id >= ?)
-      ${messageIdClause ? `OR source_msg_id IN (${messageIdClause})` : ''}
-    )
-  `).all(conversationId, round.endRawId, round.startRawId, ...messageIds);
+  const rolledBackMemories = rollbackMemoriesFromRawId(conversationId, round.startRawId);
+  const checkpointBoundary = db.prepare(`
+    SELECT COALESCE(last_raw_msg_id, 0) AS id
+    FROM memory_extraction_checkpoints WHERE conversation_id = ?
+  `).get(conversationId)?.id || 0;
 
   const linkedTaskRows = messageIdClause
     ? db.prepare(`SELECT id FROM image_tasks WHERE conversation_id = ? AND source_msg_id IN (${messageIdClause})`)
@@ -100,10 +93,6 @@ export async function undoLastGroupRound(groupId) {
   }
 
   const transaction = db.transaction(() => {
-    if (fragmentRows.length > 0) {
-      const ids = fragmentRows.map(row => row.id);
-      db.prepare(`DELETE FROM memory_fragments WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
-    }
     if (linkedTaskIds.size > 0) {
       const ids = [...linkedTaskIds];
       db.prepare(`DELETE FROM image_tasks WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
@@ -116,42 +105,20 @@ export async function undoLastGroupRound(groupId) {
     db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ? AND id BETWEEN ? AND ?`)
       .run(conversationId, round.startRawId, round.endRawId);
 
-    const previousRawId = db.prepare(`
-      SELECT COALESCE(MAX(id), 0) AS id FROM raw_messages
-      WHERE conversation_id = ? AND id < ?
-    `).get(conversationId, round.startRawId).id;
-    let ragBoundary = group.rag_last_extracted_raw_id >= round.startRawId
-      ? previousRawId
-      : group.rag_last_extracted_raw_id;
-
-    const rangedStarts = fragmentRows.map(row => row.source_raw_start_id).filter(Number.isInteger);
-    if (rangedStarts.length > 0) {
-      const firstAffectedRawId = Math.min(...rangedStarts);
-      ragBoundary = db.prepare(`
-        SELECT COALESCE(MAX(id), 0) AS id FROM raw_messages
-        WHERE conversation_id = ? AND id < ?
-      `).get(conversationId, firstAffectedRawId).id;
-    } else if (fragmentRows.some(row => !row.source_raw_start_id)) {
-      ragBoundary = 0;
-    }
-
-    const pendingRounds = countCompletedUserRounds(db, conversationId, ragBoundary);
+    const pendingRounds = countCompletedUserRounds(db, conversationId, checkpointBoundary);
     const lastMessageAt = db.prepare(`
       SELECT MAX(created_at) AS value FROM messages WHERE conversation_id = ?
     `).get(conversationId).value;
     db.prepare(`
       UPDATE group_chats
-      SET rag_last_extracted_raw_id = ?, rag_user_rounds_pending = ?, last_message_at = ?
+      SET rag_user_rounds_pending = ?, last_message_at = ?
       WHERE id = ?
-    `).run(ragBoundary, pendingRounds, lastMessageAt, groupId);
+    `).run(pendingRounds, lastMessageAt, groupId);
 
-    return { ragBoundary, pendingRounds, lastMessageAt };
+    return { ragBoundary: checkpointBoundary, pendingRounds, lastMessageAt };
   });
 
   const state = transaction();
-  await Promise.allSettled(
-    fragmentRows.filter(row => row.chroma_id).map(row => deleteVector(row.chroma_id))
-  );
 
   for (const url of imageUrls) {
     const stillReferenced = db.prepare(`SELECT 1 FROM messages WHERE images LIKE ? LIMIT 1`).get(`%${url}%`);
@@ -175,7 +142,7 @@ export async function undoLastGroupRound(groupId) {
       type: round.type,
       raws: raws.filter(row => row.id >= round.startRawId && row.id <= round.endRawId).length,
       messages: messageRows.length,
-      memories: fragmentRows.length,
+      memories: rolledBackMemories,
       images: imageUrls.length,
     },
     lastMessageAt: state.lastMessageAt,

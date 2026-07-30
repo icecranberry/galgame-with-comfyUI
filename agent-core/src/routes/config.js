@@ -15,8 +15,58 @@ import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 import { restartWeatherScheduler } from '../services/weatherService.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { getMemorySettings, saveMemorySettings, normalizeMemorySettings, getEmbeddingProfile } from '../services/memory/memoryConfig.js';
+import { testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
+import { reindexAllMemories } from '../services/memory/memoryRepository.js';
 
 const router = Router();
+
+// GET/PUT /api/config/memory — 聊天记忆模型配置（Key 仅保存，不回显）
+router.get('/memory', (_req, res) => {
+  res.json({ ...getMemorySettings(), enabled: config.features.memory });
+});
+
+router.put('/memory', (req, res) => {
+  try {
+    const previous = getMemorySettings({ includeSecrets: true });
+    const previousProfile = getEmbeddingProfile(previous)?.fingerprint || null;
+    if (req.body?.enabled !== undefined) updateFeatureFlag('memory', Boolean(req.body.enabled));
+    const saved = saveMemorySettings(req.body || {});
+    const nextProfile = getEmbeddingProfile(saved)?.fingerprint || null;
+    if (previousProfile !== nextProfile) {
+      getDb().prepare(`UPDATE memory_fragments SET embedding_state = ?, embedding_error = NULL WHERE status = 'active'`)
+        .run(nextProfile ? 'stale' : 'disabled');
+      setImmediate(() => reindexAllMemories().catch(error => console.error('[memory] profile reindex failed:', error.message)));
+    }
+    res.json({ ok: true, ...getMemorySettings(), enabled: config.features.memory });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/memory/test-embedding', async (req, res) => {
+  try {
+    const current = getMemorySettings({ includeSecrets: true });
+    const embedding = { ...current.embedding, ...(req.body || {}) };
+    if (!embedding.apiKey) embedding.apiKey = current.embedding.apiKey;
+    const candidate = normalizeMemorySettings({ ...current, embedding }, current);
+    res.json(await testEmbeddingProvider(candidate));
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/memory/test-reranker', async (req, res) => {
+  try {
+    const current = getMemorySettings({ includeSecrets: true });
+    const reranker = { ...current.reranker, ...(req.body || {}) };
+    if (!reranker.apiKey) reranker.apiKey = current.reranker.apiKey;
+    const candidate = normalizeMemorySettings({ ...current, reranker }, current);
+    res.json(await testRerankerProvider(candidate));
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
 
 // GET /api/config — 获取全部配置
 router.get('/', (req, res) => {

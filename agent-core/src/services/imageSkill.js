@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui } from './comfyClient.js';
 import { config } from '../config.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
+import { prepareImagePrompt } from './imagePromptPreparer.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth } from './workflowTemplates.js';
@@ -401,14 +402,34 @@ let lastHighTime = 0;
 const QUIET = 180_000;        // 高优任务后 180s 内不派发低优
 
 async function _execute(rawPrompt, opts) {
-  if (_limitEnabled()) await acquireSlot();
   activeTaskCount++;
+  let slotAcquired = false;
   try {
-    return await submitWithRetry(rawPrompt, opts);
+    const preparation = await prepareImagePrompt(rawPrompt, {
+      scene: opts.promptScene || opts.scene || 'chat',
+      alreadyPrepared: opts.alreadyPrepared === true,
+      skipOptimization: opts.skipOptimization === true,
+      persist: opts.persistPreparation !== false,
+    });
+    if (_limitEnabled()) {
+      await acquireSlot();
+      slotAcquired = true;
+    }
+    const result = await submitWithRetry(preparation.promptRefined, opts);
+    return {
+      ...result,
+      promptOriginal: preparation.promptOriginal,
+      promptRefined: preparation.promptRefined,
+      promptPreparationId: preparation.preparationId,
+      promptKnowledgeIds: preparation.retrieval.knowledgeIds,
+      promptKnowledgeVersion: preparation.retrieval.knowledgeVersion,
+      promptRetrievalMode: preparation.retrieval.mode,
+      promptOptimizationStatus: preparation.status,
+    };
   } finally {
     activeTaskCount--;
     if (activeTaskCount === 0) processLowQueue();
-    if (_limitEnabled()) releaseSlot();
+    if (slotAcquired) releaseSlot();
   }
 }
 

@@ -1,88 +1,71 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { hybridSearch } from '../services/memorySearch.js';
-import { deleteVector } from '../services/vectorClient.js';
+import { listActiveMemories, softDeleteMemory, memoryStats, reindexAllMemories, retryFailedIndexJobs } from '../services/memory/memoryRepository.js';
 
 const router = Router();
 
-// GET /api/memory/search — 三路召回 + RRF 融合
 router.get('/search', async (req, res) => {
   try {
     const { q, conversation_id, top_k } = req.query;
     if (!q) return res.status(400).json({ error: 'q is required' });
-
-    const results = await hybridSearch(q, {
-      conversationId: conversation_id || null,
-      topK: parseInt(top_k, 10) || 10,
-    });
-
+    const results = await hybridSearch(q, { conversationId: conversation_id || null, topK: Number.parseInt(top_k, 10) || undefined });
     res.json({ results, query: q });
-  } catch (err) {
-    console.error('[memory/search] error:', err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/memory/fragments — 获取记忆碎片
 router.get('/fragments', (req, res) => {
-  const db = getDb();
-  const { conversation_id, type, limit = '20', offset = '0' } = req.query;
-
-  let sql = `SELECT * FROM memory_fragments WHERE 1=1`;
+  const { conversation_id, memory_type, type, status = 'active', limit = '20', offset = '0' } = req.query;
+  const normalizedStatus = status === 'all' ? null : (status || null);
+  const fragments = listActiveMemories({
+    conversationId: conversation_id || null,
+    memoryType: memory_type || type || null,
+    status: normalizedStatus,
+    limit: Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20)),
+    offset: Math.max(0, Number.parseInt(offset, 10) || 0),
+  });
+  let sql = `SELECT COUNT(*) AS count FROM memory_fragments WHERE 1=1`;
   const params = [];
-
-  if (conversation_id) {
-    sql += ` AND conversation_id = ?`;
-    params.push(conversation_id);
-  }
-  if (type) {
-    sql += ` AND fragment_type = ?`;
-    params.push(type);
-  }
-
-  sql += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  params.push(parseInt(limit, 10), parseInt(offset, 10));
-
-  const fragments = db.prepare(sql).all(...params);
-
-  const { count } = db.prepare(`
-    SELECT COUNT(*) as count FROM memory_fragments
-    ${conversation_id ? 'WHERE conversation_id = ?' : ''}
-  `).get(...(conversation_id ? [conversation_id] : []));
-
-  res.json({ fragments, total: count });
+  if (conversation_id) { sql += ` AND conversation_id = ?`; params.push(conversation_id); }
+  if (normalizedStatus) { sql += ` AND status = ?`; params.push(normalizedStatus); }
+  if (memory_type || type) { sql += ` AND memory_type = ?`; params.push(memory_type || type); }
+  res.json({ fragments, total: getDb().prepare(sql).get(...params).count });
 });
 
-// DELETE /api/memory/fragments/:id — 删除碎片（同步删除 ChromaDB 向量，防止从向量通道"复活"）
 router.delete('/fragments/:id', (req, res) => {
-  const db = getDb();
-  const row = db.prepare(`SELECT chroma_id FROM memory_fragments WHERE id = ?`).get(req.params.id);
-  db.prepare(`DELETE FROM memory_fragments WHERE id = ?`).run(req.params.id);
-  if (row?.chroma_id) {
-    deleteVector(row.chroma_id).catch(err =>
-      console.warn(`[memory] chroma delete failed for ${row.chroma_id}:`, err.message));
-  }
+  const deleted = softDeleteMemory(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'memory not found' });
   res.json({ ok: true });
 });
 
-// GET /api/memory/emotion/history — 情绪历史
-router.get('/emotion/history', (req, res) => {
-  const db = getDb();
-  const { conversation_id, limit = '50' } = req.query;
+router.get('/stats', (_req, res) => {
+  res.json(memoryStats());
+});
 
+router.post('/reindex', async (_req, res) => {
+  try { res.json({ ok: true, ...(await reindexAllMemories()) }); }
+  catch (error) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/retry-failed', async (_req, res) => {
+  try { res.json({ ok: true, ...(await retryFailedIndexJobs()) }); }
+  catch (error) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.get('/index-jobs', (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
+  res.json({ jobs: getDb().prepare(`SELECT * FROM memory_index_jobs ORDER BY id DESC LIMIT ?`).all(limit) });
+});
+
+router.get('/emotion/history', (req, res) => {
+  const { conversation_id, limit = '50' } = req.query;
   let sql = `SELECT * FROM emotion_snapshots`;
   const params = [];
-
-  if (conversation_id) {
-    sql += ` WHERE conversation_id = ?`;
-    params.push(conversation_id);
-  }
-
-  sql += ` ORDER BY id DESC LIMIT ?`;
-  params.push(parseInt(limit, 10));
-
-  const snapshots = db.prepare(sql).all(...params);
-  res.json({ snapshots: snapshots.reverse() });
+  if (conversation_id) { sql += ` WHERE conversation_id = ?`; params.push(conversation_id); }
+  sql += ` ORDER BY id DESC LIMIT ?`; params.push(Number.parseInt(limit, 10));
+  res.json({ snapshots: getDb().prepare(sql).all(...params).reverse() });
 });
 
 export default router;

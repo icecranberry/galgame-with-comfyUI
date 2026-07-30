@@ -17,7 +17,7 @@ import {
   truncateRoundAfter, invalidateGroupTranscriptBoundary, isGroupPostProcessing,
 } from '../services/groupChatEngine.js';
 import { undoLastGroupRound } from '../services/groupRoundUndo.js';
-import { deleteByConversation } from '../services/vectorClient.js';
+import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { beginTurn } from '../services/llmTelemetry.js';
 
@@ -163,17 +163,30 @@ router.delete('/:id/messages/last-round', async (req, res, next) => {
 router.delete('/:id', (req, res, next) => {
   const db = getDb();
   const groupId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(groupId)) return res.status(400).json({ error: '无效的群聊 ID' });
+  if (isGroupRoundRunning(groupId)) {
+    return res.status(409).json({ error: '当前回复或图片还没有生成完成，请稍后再解散' });
+  }
+  if (isGroupPostProcessing(groupId)) {
+    return res.status(409).json({ error: '正在整理本轮记忆，请稍后再解散' });
+  }
+
   const conversationId = groupConvId(groupId);
   try {
-    db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM group_chats WHERE id = ?`).run(groupId);
+    const group = db.prepare(`SELECT id FROM group_chats WHERE id = ?`).get(groupId);
+    if (!group) return res.status(404).json({ error: '群不存在' });
+
+    // SQLite 记忆正文、版本关系、checkpoint、审计、索引任务及所有 profile/legacy 向量统一清理。
+    clearConversationMemories(conversationId);
+    const transaction = db.transaction(() => {
+      db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+      db.prepare(`DELETE FROM image_tasks WHERE conversation_id = ?`).run(conversationId);
+      db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
+      db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+      db.prepare(`DELETE FROM group_chats WHERE id = ?`).run(groupId);
+    });
+    transaction();
     invalidateGroupTranscriptBoundary(groupId);
-    deleteByConversation(conversationId).catch(err =>
-      console.error(`[groups] chroma cleanup failed for ${conversationId}:`, err.message));
     res.json({ ok: true });
   } catch (err) {
     next(err);

@@ -27,6 +27,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const _imageGate = createGroupImagePlaybackGate()
   let _playing = false
   let _unsubs = []
+  let _selectRequestId = 0
 
   const totalUnread = computed(() => groups.value.reduce((s, g) => s + (g.unread || 0), 0))
 
@@ -65,6 +66,7 @@ export const useGroupsStore = defineStore('groups', () => {
   // ── 进入群聊 ──
 
   async function selectGroup(id) {
+    const requestId = ++_selectRequestId
     _flushAggNow()   // 切群前把上一个群未发送的聚合消息立即发出
     _clearImageGates()
     activeGroupId.value = id
@@ -72,16 +74,19 @@ export const useGroupsStore = defineStore('groups', () => {
     _seenMsgIds.clear()
     _playQueue.length = 0
     const data = await api.getGroupMessages(id)
+    if (requestId !== _selectRequestId || activeGroupId.value !== id) return
     messages.value = (data.messages || []).map(m => ({ ...m, images: parseImages(m.images) }))
     for (const m of messages.value) _seenMsgIds.add(m.id)
     scrollSignal.value++
     api.markGroupSeen(id).then(() => {
+      if (requestId !== _selectRequestId || activeGroupId.value !== id) return
       const g = groups.value.find(g => g.id === id)
       if (g) g.unread = 0
     })
   }
 
   function leaveGroup() {
+    _selectRequestId++
     _flushAggNow()
     _clearImageGates()
     if (activeGroupId.value) api.markGroupSeen(activeGroupId.value)
@@ -257,9 +262,9 @@ export const useGroupsStore = defineStore('groups', () => {
         } else if (event === 'group_msg_update') {
           _applyContentUpdate(data)
         } else if (event === 'generate_start' || event === 'generate_progress' || event === 'generate_retrying' || event === 'generate_error') {
-          _applyGenState(event, data)
+          _applyGenState(event, { ...data, group_id: groupId })
         } else if (event === 'generate_done') {
-          _applyImages(data)
+          _applyImages({ ...data, group_id: groupId })
         } else if (event === 'error') {
           console.warn('[groups] chat error:', data.message)
         }
@@ -334,6 +339,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   /** 图片生成状态 → 挂到消息对象上，供 ImageGenBubble 渲染遮罩/进度/错误（与私聊对齐） */
   function _applyGenState(event, data) {
+    if (data.group_id !== undefined && data.group_id !== activeGroupId.value) return
     const m = _findMsg(data.msg_id)
     if (event === 'generate_start') {
       if (!m) return
@@ -361,6 +367,7 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   function _applyImages(data) {
+    if (data.group_id !== undefined && data.group_id !== activeGroupId.value) return
     const msgId = data.msg_id
     const m = messages.value.find(m => m.id === msgId)
     if (m) {
@@ -409,9 +416,15 @@ export const useGroupsStore = defineStore('groups', () => {
       if (data.group_id === activeGroupId.value && !undoing.value) selectGroup(data.group_id)
       loadGroups()
     }))
-    _unsubs.push(onEvent('group_image_start', (data) => _applyGenState('generate_start', data)))
-    _unsubs.push(onEvent('group_image_done', (data) => _applyImages(data)))
-    _unsubs.push(onEvent('group_image_error', (data) => _applyGenState('generate_error', data)))
+    _unsubs.push(onEvent('group_image_start', (data) => {
+      if (data.group_id === activeGroupId.value) _applyGenState('generate_start', data)
+    }))
+    _unsubs.push(onEvent('group_image_done', (data) => {
+      if (data.group_id === activeGroupId.value) _applyImages(data)
+    }))
+    _unsubs.push(onEvent('group_image_error', (data) => {
+      if (data.group_id === activeGroupId.value) _applyGenState('generate_error', data)
+    }))
   }
 
   function disconnectSSE() {

@@ -98,7 +98,7 @@ function mergeConsecutiveRoles(messages) {
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
-export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, forceThinking = false, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
@@ -115,7 +115,7 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
     params.response_format = response_format;
   }
   // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
-  if (thinking !== null && isDeepseek()) {
+  if (thinking !== null && (isDeepseek() || forceThinking)) {
     params.thinking = thinking;
   }
   // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）

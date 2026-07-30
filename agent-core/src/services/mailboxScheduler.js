@@ -2,6 +2,7 @@ import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImage } from './imageSkill.js';
+import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { saveBase64Image } from './imagePaths.js';
 import { hybridSearch } from './memorySearch.js';
@@ -110,9 +111,27 @@ async function processReply(db, letter) {
 
     // ── 步骤3: 保存 ──
     const ts = Date.now();
-    const paperPath = saveBase64Image('mailbox', `paper_${letterId}_${ts}.png`, paperResult.base64);
-    const portraitPath = saveBase64Image('mailbox', `portrait_${letterId}_${ts}.png`, portraitResult.base64);
-    const illustrationPath = saveBase64Image('mailbox', `illustration_${letterId}_${ts}.png`, illustrationResult.base64);
+    const paperPath = saveBase64Image('mailbox', `paper_${letterId}_${ts}.png`, paperResult.image.base64);
+    const portraitPath = saveBase64Image('mailbox', `portrait_${letterId}_${ts}.png`, portraitResult.image.base64);
+    const illustrationPath = saveBase64Image('mailbox', `illustration_${letterId}_${ts}.png`, illustrationResult.image.base64);
+
+    const mailboxTasks = [
+      ['paper', data.paperPrompt, paperResult, paperPath, '1200x900'],
+      ['portrait', data.portraitPrompt, portraitResult, portraitPath, '900x1200'],
+      ['illustration', data.illustrationPrompt, illustrationResult, illustrationPath, '1200x900'],
+    ];
+    for (const [kind, originalPrompt, generated, outputPath, resolution] of mailboxTasks) {
+      recordCompletedImageTask({
+        conversationId: `char_${charId}_mailbox_${kind}`,
+        promptOriginal: originalPrompt,
+        promptRefined: generated.promptRefined || originalPrompt,
+        outputPaths: [outputPath],
+        style: config.comfyui.momentsArtist,
+        resolution,
+        workflowTemplate: generated.wfMode,
+        db,
+      });
+    }
 
     db.prepare(`
       UPDATE mailbox_letters
@@ -211,7 +230,7 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
 
   const memories = await hybridSearch(userContent, { conversationId: convId, topK: 3 }).catch(() => []);
   if (memories.length > 0) {
-    mat2Parts.push('【相关记忆碎片】\n' + memories.map(m => `- [${m.fragment_type || '记忆'}] ${m.content}`).join('\n'));
+    mat2Parts.push('【相关长期记忆】\n' + memories.map(m => `- [${m.memory_type || '记忆'}] ${m.judgment}`).join('\n'));
   }
 
   const latestSummary = db.prepare(`
@@ -221,7 +240,9 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
 
   // 关键记忆碎片
   const topMemory = db.prepare(`
-    SELECT content FROM memory_fragments WHERE conversation_id = ? ORDER BY id DESC LIMIT 1
+    SELECT judgment FROM memory_fragments
+    WHERE conversation_id = ? AND status = 'active'
+    ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1
   `).pluck().get(convId);
   if (topMemory) mat2Parts.push(`【关键记忆】${topMemory}`);
 
@@ -399,7 +420,13 @@ async function generateImageSafe(prompt, charLoras, charCustomWorkflow, override
       scene: 'mailbox',
       ...overrides,
     });
-    if (result.success && result.images && result.images.length > 0) return result.images[0]; // { base64, filename }
+    if (result.success && result.images && result.images.length > 0) {
+      return {
+        image: result.images[0],
+        promptRefined: result.promptRefined || prompt,
+        wfMode: result.wfMode,
+      };
+    }
     console.error(`[mailboxScheduler] image fail: ${result?.error || 'unknown'}`);
     return null;
   } catch (err) {

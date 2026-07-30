@@ -3,12 +3,11 @@
  *
  * 每个会话每 10 条 assistant 消息触发一次摘要生成（含主动聊天消息）。
  * 新摘要 = LLM(上一段摘要 + 最近 10 轮对话)。
- * 生成后自动向量化存入 ChromaDB，纳入 RAG 召回。
+ * 滚动摘要只用于上下文压缩，不进入长期记忆索引。
  */
 
 import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
-import { upsertVector } from './vectorClient.js';
 
 /** 去掉消息中的 {"prompt":"..."} JSON 标签（可能在开头/中间/末尾），避免长篇英文生图 prompt 干扰摘要提取 */
 export function stripPromptJson(content) {
@@ -123,26 +122,6 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     INSERT INTO rolling_summaries (conversation_id, start_msg_id, end_msg_id, summary, checkpoint_version)
     VALUES (?, ?, ?, ?, 1)
   `).run(conversationId, firstMsg.id, lastMsg.id, summary);
-
-  // 异步向量化摘要并存入 ChromaDB（不阻塞返回）
-  setImmediate(async () => {
-    try {
-      const chromaId = `summary_${conversationId}_${summaryIndex}`;
-      await upsertVector(
-        chromaId,
-        summary,
-        {
-          conversation_id: conversationId,
-          fragment_type: 'summary',
-          summary_index: summaryIndex,
-        },
-        'summary'
-      );
-      console.log(`[summarizer] vectorized summary #${summaryIndex} for conv ${conversationId}`);
-    } catch (err) {
-      console.error(`[summarizer] vectorize failed:`, err.message);
-    }
-  });
 
   console.log(`[summarizer] generated summary #${summaryIndex} for conv ${conversationId} (${recentMessages.length} msgs)`);
 
