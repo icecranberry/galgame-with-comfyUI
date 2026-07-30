@@ -2,7 +2,9 @@ package com.linshe.shell
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -77,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        configureTaskDescription()
 
         webView = findViewById(R.id.webView)
         setupPanel = findViewById(R.id.setupPanel)
@@ -147,6 +150,7 @@ class MainActivity : AppCompatActivity() {
             SseNotificationService.ensureChannels(this)
             runCatching {
                 startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                     putExtra(Settings.EXTRA_CHANNEL_ID, SseNotificationService.SERVICE_CHANNEL_ID)
                 })
@@ -159,7 +163,7 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:$packageName")
-                ))
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
 
@@ -172,7 +176,7 @@ class MainActivity : AppCompatActivity() {
                     // 设置页按返回：已有保存地址则回到网页
                     setupPanel.visibility == View.VISIBLE && savedUrl != null
                             && webView.url != null -> showWeb()
-                    webView.visibility == View.VISIBLE && webView.canGoBack() -> webView.goBack()
+                    webView.visibility == View.VISIBLE -> handleWebBack()
                     else -> confirmExit()
                 }
             }
@@ -222,6 +226,33 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         inForeground = false
         super.onPause()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun configureTaskDescription() {
+        val label = getString(R.string.app_title)
+        val color = getColor(R.color.page_bg)
+        setTaskDescription(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ActivityManager.TaskDescription(label, R.mipmap.ic_launcher, color)
+        } else {
+            val icon = BitmapFactory.decodeResource(resources, R.drawable.ic_launcher_image)
+            ActivityManager.TaskDescription(label, icon, color)
+        })
+    }
+
+    private fun handleWebBack() {
+        webView.evaluateJavascript(
+            """(function() {
+                try {
+                    return typeof window.__linsheHandleAndroidBack === 'function'
+                        && window.__linsheHandleAndroidBack();
+                } catch (_) {
+                    return false;
+                }
+            })();""".trimIndent()
+        ) { handled ->
+            if (handled != "true") moveTaskToBack(true)
+        }
     }
 
     // ── 上滑确认（代替保存按钮：滑动过程即执行保存动作）──
@@ -324,7 +355,7 @@ class MainActivity : AppCompatActivity() {
                     Intent(
                         Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                         Uri.parse("package:$packageName")
-                    )
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
         }

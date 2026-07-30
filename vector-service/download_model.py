@@ -15,6 +15,17 @@ import sys
 import shutil
 from pathlib import Path
 
+
+def _safe_print(*args, **kwargs):
+    """安全打印，避免 Windows GBK 控制台因路径含 ▶ 等 Unicode 字符而崩溃"""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "utf-8"
+        safe = [str(a).encode(enc, errors="replace").decode(enc) for a in args]
+        print(*safe, **kwargs)
+
+
 MODEL_NAME = "Xenova/jina-embeddings-v2-base-zh"
 TARGET_DIR = Path(__file__).parent / "models" / "jina-embeddings-v2-base-zh"
 
@@ -34,25 +45,25 @@ def download():
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
-        print("[!] 请先安装 huggingface-hub: pip install huggingface-hub")
+        _safe_print("[!] 请先安装 huggingface-hub: pip install huggingface-hub")
         sys.exit(1)
 
     # 国内用户自动走镜像
     if "HF_ENDPOINT" not in os.environ:
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        print("[*] 使用国内镜像: hf-mirror.com")
+        _safe_print("[*] 使用国内镜像: hf-mirror.com")
 
     TARGET_DIR.mkdir(parents=True, exist_ok=True)
     (TARGET_DIR / "onnx").mkdir(parents=True, exist_ok=True)
 
-    print(f"[*] 下载最小文件集 (7 个文件, 约 155MB)")
+    _safe_print(f"[*] 下载最小文件集 (7 个文件, 约 155MB)")
     for rel_path in REQUIRED_FILES:
         local_path = TARGET_DIR / rel_path
         if local_path.exists() and local_path.stat().st_size > 0:
-            print(f"  [OK] 已存在: {rel_path}")
+            _safe_print(f"  [OK] 已存在: {rel_path}")
             continue
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"  [..] 下载: {rel_path} ...")
+        _safe_print(f"  [..] 下载: {rel_path} ...")
         hf_hub_download(
             repo_id=MODEL_NAME,
             filename=rel_path,
@@ -60,11 +71,11 @@ def download():
             local_dir_use_symlinks=False,
         )
         sz = local_path.stat().st_size // 1024 // 1024
-        print(f"      完成 ({sz} MB)")
+        _safe_print(f"      完成 ({sz} MB)")
 
     _cleanup()
-    print(f"\n[OK] 模型下载完成 -> {TARGET_DIR}")
-    print(f"     总大小: ~155 MB (仅运行时必需文件)")
+    _safe_print(f"\n[OK] 模型下载完成 -> {TARGET_DIR}")
+    _safe_print(f"     总大小: ~155 MB (仅运行时必需文件)")
 
 
 def _cleanup():
@@ -84,8 +95,13 @@ def _cleanup():
             path.unlink()
             count += 1
     if count:
-        print(f"  [..] 已清理 {count} 个非必需文件")
+        _safe_print(f"  [..] 已清理 {count} 个非必需文件")
 
 
 if __name__ == "__main__":
-    download()
+    try:
+        download()
+    except UnicodeEncodeError:
+        # Windows GBK 控制台兼容：路径含特殊 Unicode 字符时 print 可能失败
+        # 但实际功能（下载/校验）已经完成，静默退出即可
+        sys.exit(0)

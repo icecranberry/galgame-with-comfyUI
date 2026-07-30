@@ -9,6 +9,8 @@
     "tag": "node scripts/tag.mjs",
     "release": "node scripts/build-release.mjs",
     "apk": "node scripts/build-apk.mjs",
+    "install-apk": "node scripts/install-apk.mjs",
+    "install-apk:n": "node scripts/install-apk.mjs -n",
     "build": "node scripts/build.mjs",
     "lasttag": "node scripts/lasttag.mjs",
     "restart-core": "node scripts/restart-core.mjs",

@@ -121,9 +121,9 @@ export const useGroupsStore = defineStore('groups', () => {
         _currentPlaying = msg
         // 出队时已切群 → 丢弃（DB 已持久化，回到该群时 selectGroup 会重新加载）
         if (msg.group_id !== activeGroupId.value) continue
-        // 分句节奏：700~1800ms 按长度递增，逐条推出
+        // 分句节奏：900~3000ms 按长度递增，逐条推出
         // 流式逐条到达时队列经常被消费空、drain 反复重启，故"首条"按上屏间隔判定而非 drain 会话
-        const delay = (Date.now() - _lastPushAt > ROUND_GAP) ? 0 : 700 + Math.min(1100, (msg.content?.length || 0) * 30)
+        const delay = (Date.now() - _lastPushAt > ROUND_GAP) ? 0 : 900 + Math.min(2100, (msg.content?.length || 0) * 30)
         if (delay > 0) await new Promise(r => setTimeout(r, delay))
         // 延迟期间，已经上屏的上一条消息可能刚收到 prompt；此时暂停当前分句。
         await _imageGate.waitUntilClear()

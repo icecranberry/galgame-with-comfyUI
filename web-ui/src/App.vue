@@ -106,12 +106,19 @@ function closeMobileSidebar() {
   mobileSidebarOpen.value = false
 }
 
+function handleAndroidBack() {
+  if (!isMobile.value || mobileSidebarOpen.value) return false
+  mobileSidebarOpen.value = true
+  return true
+}
+
 provide('isMobile', isMobile)
 provide('toggleMobileSidebar', toggleMobileSidebar)
 
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  window.__linsheHandleAndroidBack = handleAndroidBack
 
   settings.loadComfyConfig()
   loadUserConfig()  // 应用启动即加载，不阻塞渲染
@@ -174,6 +181,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
+  if (window.__linsheHandleAndroidBack === handleAndroidBack) {
+    delete window.__linsheHandleAndroidBack
+  }
   proactive.disconnectSSE()
 })
 </script>

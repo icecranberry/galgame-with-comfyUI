@@ -3,7 +3,7 @@
 单 Activity + WebView 套壳应用：
 
 - 首次启动输入后端地址（如 `http://192.168.1.100:3099`），保存到 SharedPreferences
-- 返回键走网页历史（`webView.goBack()`），历史到底时弹出「退出 / 修改地址」对话框
+- 网页内按返回键先打开角色列表，再按一次把 App 退到桌面；地址设置页保留退出确认
 - 支持 `<input type="file">` 文件上传（头像上传）
 - 允许明文 HTTP（局域网地址）
 - release 构建使用仓库内固定 keystore（`release.keystore`，v1.8 起）签名，

@@ -9,8 +9,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
-        android:label="邻舍"
+        android:label="@string/app_title"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
@@ -18,6 +19,8 @@
 
         <activity
             android:name=".MainActivity"
+            android:label="@string/app_title"
+            android:icon="@mipmap/ic_launcher"
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
