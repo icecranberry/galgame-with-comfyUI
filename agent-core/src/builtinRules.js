@@ -29,7 +29,7 @@ export const SYSTEM_RULES_CONTENT = `<system_context>
 
 export const IMAGE_PROMPT_RULE = {
   rule_key: 'image_prompt',
-  rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph. No Danbooru tags or comma-separated tag blocks.
+  rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph.
 
 Follow this progression:
 

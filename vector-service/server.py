@@ -34,7 +34,7 @@ class SearchRequest(BaseModel):
     embedding: list[float] | None = Field(default=None, description="可选外部查询向量；聊天记忆模型使用")
     top_k: int = Field(default=20, ge=1, le=100)
     filter_type: str | None = Field(default=None, pattern="^(fact|preference|emotion)$")
-    conversation_id: str | None = Field(default=None, description="可选，限定会话范围")
+    conversation_id: str | list[str] | None = Field(default=None, description="可选，限定一个或多个会话范围")
     corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
 
 

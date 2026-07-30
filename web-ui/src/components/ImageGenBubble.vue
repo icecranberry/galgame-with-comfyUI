@@ -58,7 +58,10 @@ import { useSettingsStore } from '../stores/settings.js'
 
 const settings = useSettingsStore()
 
-const props = defineProps({ msg: { type: Object, required: true } })
+const props = defineProps({
+  msg: { type: Object, required: true },
+  emitLoadedWhenInitiallyDone: { type: Boolean, default: false },
+})
 const emit = defineEmits(['preview', 'loaded'])
 
 // ── 根据系统设置的宽高比计算占位容器尺寸，与 igb-img 的 max-width/max-height 对齐 ──
@@ -88,8 +91,8 @@ const genBoxStyle = computed(() => {
 // 跟踪图片加载失败和完成
 const imgError = reactive(new Set())
 const imgLoadCount = ref(0)
-// 挂载时 genStatus 已经是 done → 历史图片，不需要 loaded 通知
-let loadedEmitted = props.msg.genStatus === 'done'
+// 群聊队列可能在组件挂载前已收到 done，仍需等待浏览器实际加载后解除分句门控。
+let loadedEmitted = props.msg.genStatus === 'done' && !props.emitLoadedWhenInitiallyDone
 
 function onImgError(i) { imgError.add(i) }
 function onImgLoad() {
@@ -109,7 +112,7 @@ function checkAllLoaded() {
 watch(() => props.msg.genId, () => {
   imgError.clear()
   imgLoadCount.value = 0
-  loadedEmitted = props.msg.genStatus === 'done'
+  loadedEmitted = props.msg.genStatus === 'done' && !props.emitLoadedWhenInitiallyDone
 })
 
 const circumference = 2 * Math.PI * 34

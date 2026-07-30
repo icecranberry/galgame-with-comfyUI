@@ -8,11 +8,11 @@ const RRF_K = 60;
 
 export async function hybridSearch(query, options = {}) {
   const settings = getMemorySettings({ includeSecrets: true });
-  const conversationId = options.conversationId || null;
+  const conversationIds = normalizeConversationIds(options.conversationId, options.conversationIds);
   const topK = clamp(options.topK ?? settings.topK, 1, 20);
   const textLimit = clamp(options.textCandidates ?? settings.textCandidates, topK, 100);
   const vectorLimit = clamp(options.vectorCandidates ?? settings.vectorCandidates, topK, 100);
-  const textResults = textSearch(query, conversationId, textLimit);
+  const textResults = textSearch(query, conversationIds, textLimit);
   const profile = getEmbeddingProfile(settings);
   let vectorResults = [];
   let fallbackReason = null;
@@ -20,8 +20,16 @@ export async function hybridSearch(query, options = {}) {
   if (profile) {
     try {
       const { embedding } = await embedMemoryText(query, settings);
-      const raw = await vectorSearch(query, { embedding, topK: vectorLimit, conversationId, corpus: profile.corpus });
-      vectorResults = hydrateVectorResults(raw, conversationId);
+      const vectorConversationScope = conversationIds.length === 0
+        ? null
+        : (conversationIds.length === 1 ? conversationIds[0] : conversationIds);
+      const raw = await vectorSearch(query, {
+        embedding,
+        topK: vectorLimit,
+        conversationId: vectorConversationScope,
+        corpus: profile.corpus,
+      });
+      vectorResults = hydrateVectorResults(raw, conversationIds);
     } catch (error) {
       fallbackReason = `embedding: ${error.message}`;
     }
@@ -36,19 +44,20 @@ export async function hybridSearch(query, options = {}) {
     }
   }
   const final = candidates.slice(0, topK);
-  writeAudit({ conversationId, query, mode: profile ? 'hybrid' : 'text', textCount: textResults.length, vectorCount: vectorResults.length, memoryIds: final.map(item => item.memory_id), fallbackReason });
+  writeAudit({ conversationIds, query, mode: profile ? 'hybrid' : 'text', textCount: textResults.length, vectorCount: vectorResults.length, memoryIds: final.map(item => item.memory_id), fallbackReason });
   return final;
 }
 
-export function textSearch(query, conversationId = null, limit = 20) {
+export function textSearch(query, conversationScope = null, limit = 20) {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
-  const ftsResults = ftsSearch(tokens, conversationId, limit);
-  const ngramResults = ngramSearch(tokens, conversationId, limit);
+  const conversationIds = normalizeConversationIds(null, conversationScope);
+  const ftsResults = ftsSearch(tokens, conversationIds, limit);
+  const ngramResults = ngramSearch(tokens, conversationIds, limit);
   return rrfFusion([ftsResults, ngramResults], limit);
 }
 
-function ftsSearch(tokens, conversationId, limit) {
+function ftsSearch(tokens, conversationIds, limit) {
   const db = getDb();
   const matchQuery = tokens.map(token => `"${token.replace(/"/g, '""')}"*`).join(' OR ');
   const params = [matchQuery];
@@ -58,7 +67,7 @@ function ftsSearch(tokens, conversationId, limit) {
     JOIN memory_fragments mf ON mf.id = memory_fragments_fts.rowid
     WHERE memory_fragments_fts MATCH ? AND mf.status = 'active'
   `;
-  if (conversationId) { sql += ` AND mf.conversation_id = ?`; params.push(conversationId); }
+  sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` ORDER BY bm25_score ASC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
   params.push(limit);
   try {
@@ -69,7 +78,7 @@ function ftsSearch(tokens, conversationId, limit) {
   }
 }
 
-function ngramSearch(tokens, conversationId, limit) {
+function ngramSearch(tokens, conversationIds, limit) {
   const db = getDb();
   const conditions = tokens.map(() => `(mf.judgment LIKE ? OR mf.reasoning LIKE ? OR mf.tags LIKE ?)`).join(' OR ');
   const scoreParts = tokens.map(() => `(CASE WHEN mf.judgment LIKE ? THEN 4 ELSE 0 END + CASE WHEN mf.tags LIKE ? THEN 3 ELSE 0 END + CASE WHEN mf.reasoning LIKE ? THEN 1 ELSE 0 END)`).join(' + ');
@@ -81,24 +90,36 @@ function ngramSearch(tokens, conversationId, limit) {
     FROM memory_fragments mf
     WHERE mf.status = 'active' AND (${conditions})
   `;
-  if (conversationId) { sql += ` AND mf.conversation_id = ?`; params.push(conversationId); }
+  sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` ORDER BY text_score DESC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
   params.push(limit);
   return db.prepare(sql).all(...params).map(row => formatRow(row, 'ngram', Number(row.text_score || 0)));
 }
 
-function hydrateVectorResults(results, conversationId) {
+function hydrateVectorResults(results, conversationIds) {
   const db = getDb();
   const hydrated = [];
   for (const result of results) {
     const memoryId = result.metadata?.memory_id || result.id;
-    let sql = `SELECT * FROM memory_fragments WHERE memory_id = ? AND status = 'active'`;
     const params = [memoryId];
-    if (conversationId) { sql += ` AND conversation_id = ?`; params.push(conversationId); }
+    let sql = `SELECT * FROM memory_fragments WHERE memory_id = ? AND status = 'active'`;
+    sql = appendConversationFilter(sql, params, conversationIds, 'conversation_id');
     const row = db.prepare(sql).get(...params);
     if (row) hydrated.push(formatRow(row, 'vector', Number(result.score || 0)));
   }
   return hydrated;
+}
+
+function appendConversationFilter(sql, params, conversationIds, column = 'mf.conversation_id') {
+  if (conversationIds.length === 0) return sql;
+  sql += ` AND ${column} IN (${conversationIds.map(() => '?').join(',')})`;
+  params.push(...conversationIds);
+  return sql;
+}
+
+function normalizeConversationIds(conversationId, conversationIds) {
+  const values = [conversationId, ...(Array.isArray(conversationIds) ? conversationIds : [conversationIds])];
+  return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
 }
 
 function rrfFusion(resultSets, limit) {
@@ -124,6 +145,7 @@ function formatRow(row, source, score) {
   return {
     id: row.memory_id,
     memory_id: row.memory_id,
+    conversation_id: row.conversation_id,
     memory_type: row.memory_type || (row.fragment_type === 'emotion' ? 'emotion' : 'knowledge'),
     subject: row.subject || 'user',
     judgment: row.judgment || row.content,
@@ -149,12 +171,13 @@ function queryTokens(query) {
   return [...tokens].slice(0, 24);
 }
 
-function writeAudit({ conversationId, query, mode, textCount, vectorCount, memoryIds, fallbackReason }) {
+function writeAudit({ conversationIds, query, mode, textCount, vectorCount, memoryIds, fallbackReason }) {
   try {
+    const conversationScope = conversationIds.length <= 1 ? (conversationIds[0] || null) : JSON.stringify(conversationIds);
     getDb().prepare(`
       INSERT INTO memory_retrieval_audits(conversation_id, query, mode, candidate_sources, memory_ids, fallback_reason)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(conversationId, String(query).slice(0, 1000), mode, JSON.stringify({ text: textCount, vector: vectorCount }), JSON.stringify(memoryIds), fallbackReason);
+    `).run(conversationScope, String(query).slice(0, 1000), mode, JSON.stringify({ text: textCount, vector: vectorCount }), JSON.stringify(memoryIds), fallbackReason);
   } catch (error) {
     console.error('[memorySearch] audit failed:', error.message);
   }

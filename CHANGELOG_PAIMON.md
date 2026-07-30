@@ -1,6 +1,16 @@
 # Paimon 分支更新说明（2026-07-30）
 
-本版本集中更新聊天记忆 RAG、绘图提示词知识库和聊天生图链路。运行数据库、聊天记录、API Key、Chroma 落盘数据与本地生成图片均不包含在提交中。
+本版本集中更新聊天记忆 RAG、绘图提示词知识库、聊天生图链路，并以 `upstream/paimon@932b76b` 为基底整合 `upstream/main@dd5016d` 的 v2.4.0 群聊能力。运行数据库、聊天记录、API Key、Chroma 落盘数据与本地生成图片均不包含在提交中。
+
+## v2.4.0 群聊整合
+
+- 群聊成为聊天记忆 v2 的一等会话类型，固定使用 `group_<groupId>`；不再运行 main 的旧碎片记忆旁路。
+- 私聊召回范围为当前私聊与角色参与的群聊；群聊召回范围为当前群与成员私聊。FTS5、中文 n-gram、向量过滤和结果回填使用同一去重会话范围。
+- 群聊记忆整理使用 `curateChatMemories` 与 `memory_extraction_checkpoints`；main beta 的 `rag_last_extracted_raw_id` 只用于幂等迁移回填，不再是运行时权威。
+- 撤回与播放截断先执行版本化记忆回滚，再清理消息、摘要和图片任务；群解散统一清理 SQLite 记忆、checkpoint、审计、索引任务及各 profile/legacy 向量。
+- 群聊生图固定使用 `scene: group`、`workflowScene: group`，绘图知识暂复用 `promptScene: chat`；多人 LoRA 按路径去重，并保存实际 `prompt_refined`。
+- 前端保留 `/group/:id` 与 `/settings/memory`，统一事件按群 ID/消息 ID 隔离；快速切群使用请求序列门控，避免旧请求覆盖新群消息。
+- 后台群聊闲聊默认关闭（预算 `0`），避免升级后自动产生真实消息；需要启用时显式设置 `GROUP_IDLE_BUDGET` 为正整数。角色自发建群继续关闭。
 
 ## 主要更新
 
@@ -89,7 +99,7 @@ API Key 只保存，不通过配置读取接口回显明文。硅基流动的固
 - `POST /api/memory/reindex`
 - `POST /api/memory/retry-failed`
 
-当前前端设置页展示记忆数量和索引状态；逐条记忆内容、来源对话和召回审计尚未做成可视化管理面板，可暂时通过上述 API 查看。
+当前“系统设置 → 聊天记忆”二级页面已提供记忆正文列表、会话/类型/状态筛选、分页、真实召回测试、软删除和最近索引任务查看；重建索引与失败任务重试也在同一页面完成。
 
 ## 数据迁移与兼容性
 

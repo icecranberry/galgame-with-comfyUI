@@ -90,6 +90,128 @@
         <p>这些配置只用于聊天记忆。绘图库 RAG 继续固定使用本地 Jina ONNX 和 <code>image_prompt_knowledge</code> corpus，不会随这里的模型切换。</p>
       </section>
 
+      <section class="card memory-manager">
+        <div class="manager-heading">
+          <div>
+            <h3>记忆管理</h3>
+            <p>查看 SQLite 中的记忆正文。删除采用软删除，并同步安排向量删除任务。</p>
+          </div>
+          <button class="ghost compact" :disabled="memoriesLoading" @click="loadMemories">刷新</button>
+        </div>
+        <div class="memory-filters">
+          <label>限定会话
+            <select v-model="memoryFilters.conversationId" @change="applyMemoryFilters">
+              <option value="">全部会话</option>
+              <optgroup v-if="characterConversations.length" label="角色私聊">
+                <option v-for="item in characterConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </optgroup>
+              <optgroup v-if="groupConversations.length" label="群聊">
+                <option v-for="item in groupConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </optgroup>
+            </select>
+          </label>
+          <label>记忆类型
+            <select v-model="memoryFilters.memoryType" @change="applyMemoryFilters">
+              <option value="">全部类型</option>
+              <option value="knowledge">知识</option>
+              <option value="skill">技能</option>
+              <option value="emotion">情绪</option>
+              <option value="event">事件</option>
+            </select>
+          </label>
+          <label>状态
+            <select v-model="memoryFilters.status" @change="applyMemoryFilters">
+              <option value="active">有效</option>
+              <option value="superseded">已被替代</option>
+              <option value="deleted">已删除</option>
+              <option value="all">全部状态</option>
+            </select>
+          </label>
+          <button class="primary filter-button" :disabled="memoriesLoading" @click="applyMemoryFilters">筛选</button>
+        </div>
+
+        <div v-if="memoriesLoading" class="inline-state">正在加载记忆…</div>
+        <div v-else-if="memories.length === 0" class="inline-state">没有符合条件的记忆。</div>
+        <div v-else class="memory-list">
+          <article v-for="item in memories" :key="item.memory_id" class="memory-item">
+            <div class="memory-item-main">
+              <div class="memory-meta">
+                <span class="type-pill">{{ memoryTypeLabel(item.memory_type) }}</span>
+                <span :class="['status-pill', item.status]">{{ memoryStatusLabel(item.status) }}</span>
+                <span class="conversation-label" :title="item.conversation_id || '无会话 ID'">
+                  {{ conversationName(item.conversation_id) }}
+                  <code>{{ item.conversation_id || '无会话' }}</code>
+                </span>
+                <span>{{ formatDate(item.updated_at || item.created_at) }}</span>
+              </div>
+              <div class="memory-judgment">{{ item.judgment || item.content }}</div>
+              <div v-if="item.reasoning" class="memory-reasoning">依据：{{ item.reasoning }}</div>
+              <div v-if="item.tags?.length" class="memory-tags">
+                <span v-for="tag in item.tags" :key="tag">{{ tag }}</span>
+              </div>
+              <div class="memory-index-state">
+                索引：{{ embeddingStateLabel(item.embedding_state) }}
+                <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
+              </div>
+            </div>
+            <button v-if="item.status !== 'deleted'" class="danger-link" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
+              {{ deletingMemoryId === item.memory_id ? '删除中…' : '软删除' }}
+            </button>
+          </article>
+        </div>
+        <div class="pagination">
+          <span>共 {{ memoryTotal }} 条 · 第 {{ memoryPage }} / {{ memoryPageCount }} 页</span>
+          <div>
+            <button class="ghost compact" :disabled="memoryPage <= 1 || memoriesLoading" @click="changeMemoryPage(-1)">上一页</button>
+            <button class="ghost compact" :disabled="memoryPage >= memoryPageCount || memoriesLoading" @click="changeMemoryPage(1)">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="management-grid">
+        <section class="card recall-tester">
+          <div class="manager-heading">
+            <div><h3>召回测试</h3><p>使用当前文本、向量和重排序配置执行一次真实召回。</p></div>
+          </div>
+          <label>查询内容<input v-model.trim="recallQuery" placeholder="输入想验证的记忆线索" @keyup.enter="runRecallTest"></label>
+          <label>限定会话（可空）
+            <select v-model="recallConversationId">
+              <option value="">全部会话</option>
+              <optgroup v-if="characterConversations.length" label="角色私聊">
+                <option v-for="item in characterConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </optgroup>
+              <optgroup v-if="groupConversations.length" label="群聊">
+                <option v-for="item in groupConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </optgroup>
+            </select>
+          </label>
+          <button class="ghost" :disabled="recallLoading || !recallQuery" @click="runRecallTest">{{ recallLoading ? '召回中…' : '测试召回' }}</button>
+          <div v-if="recallResults.length" class="recall-results">
+            <div v-for="(item, index) in recallResults" :key="item.memory_id || index" class="recall-item">
+              <div><strong>{{ index + 1 }}. {{ item.judgment || item.content }}</strong></div>
+              <small>{{ conversationName(item.conversation_id) }} <code>{{ item.conversation_id }}</code> · {{ memoryTypeLabel(item.memory_type) }} · 分数 {{ formatScore(item.score) }} · {{ (item.sources || []).join(' + ') }}</small>
+            </div>
+          </div>
+          <div v-else-if="recallTested && !recallLoading" class="inline-state">没有召回到相关记忆。</div>
+        </section>
+
+        <section class="card index-jobs">
+          <div class="manager-heading">
+            <div><h3>最近索引任务</h3><p>显示最近 30 条向量写入和删除任务。</p></div>
+            <button class="ghost compact" :disabled="jobsLoading" @click="loadIndexJobs">刷新</button>
+          </div>
+          <div v-if="jobsLoading" class="inline-state">正在加载任务…</div>
+          <div v-else-if="indexJobs.length === 0" class="inline-state">暂无索引任务。</div>
+          <div v-else class="job-list">
+            <div v-for="job in indexJobs" :key="job.id" class="job-item">
+              <div><code>#{{ job.id }}</code> {{ job.job_type === 'delete' ? '删除' : '写入' }} · <span :class="['job-status', job.status]">{{ jobStatusLabel(job.status) }}</span></div>
+              <small :title="job.memory_id">{{ shortMemoryId(job.memory_id) }} · {{ formatDate(job.updated_at || job.created_at) }}</small>
+              <div v-if="job.error" class="job-error" :title="job.error">{{ job.error }}</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div class="actions">
         <button class="ghost" :disabled="maintaining" @click="retryFailed">重试失败项</button>
         <button class="ghost" :disabled="maintaining" @click="reindex">重建聊天索引</button>
@@ -101,9 +223,23 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { getMemoryConfig, updateMemoryConfig, testMemoryEmbedding, testMemoryReranker, getMemoryStats, reindexMemories, retryFailedMemories } from '../api/index.js'
+import {
+  deleteMemoryFragment,
+  getMemoryConfig,
+  getMemoryFragments,
+  getMemoryIndexJobs,
+  getMemoryStats,
+  listCharacters,
+  listGroups,
+  reindexMemories,
+  retryFailedMemories,
+  searchMemories,
+  testMemoryEmbedding,
+  testMemoryReranker,
+  updateMemoryConfig,
+} from '../api/index.js'
 
 const embeddingProviders = [
   { id: 'openai', name: 'OpenAI', baseURL: 'https://api.openai.com/v1', model: 'text-embedding-3-small', dimensions: 1536 },
@@ -120,6 +256,7 @@ const rerankerProviders = [
 ]
 
 const router = useRouter()
+const confirmDialog = inject('confirm', null)
 const loading = ref(true)
 const saving = ref(false)
 const maintaining = ref(false)
@@ -128,6 +265,39 @@ const testingReranker = ref(false)
 const message = ref('')
 const messageType = ref('ok')
 const stats = reactive({ rows: [], profile: null, mode: 'text' })
+
+const MEMORY_PAGE_SIZE = 20
+const memories = ref([])
+const memoryTotal = ref(0)
+const memoryPage = ref(1)
+const memoriesLoading = ref(false)
+const deletingMemoryId = ref(null)
+const memoryFilters = reactive({ conversationId: '', memoryType: '', status: 'active' })
+const memoryPageCount = computed(() => Math.max(1, Math.ceil(memoryTotal.value / MEMORY_PAGE_SIZE)))
+const characters = ref([])
+const groups = ref([])
+const characterConversations = computed(() => characters.value.map(character => ({
+  id: `char_${character.id}`,
+  name: character.display_name || character.name || `角色 ${character.id}`,
+})))
+const groupConversations = computed(() => groups.value.map(group => ({
+  id: `group_${group.id}`,
+  name: group.name || `群聊 ${group.id}`,
+})))
+const conversationLabels = computed(() => new Map([
+  ...characterConversations.value.map(item => [item.id, `私聊 · ${item.name}`]),
+  ...groupConversations.value.map(item => [item.id, `群聊 · ${item.name}`]),
+]))
+
+const recallQuery = ref('')
+const recallConversationId = ref('')
+const recallResults = ref([])
+const recallLoading = ref(false)
+const recallTested = ref(false)
+
+const indexJobs = ref([])
+const jobsLoading = ref(false)
+
 const form = reactive({
   enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24,
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
@@ -166,6 +336,109 @@ function applyProviderPreset(target, providers) {
 function applyEmbeddingProvider() { applyProviderPreset(form.embedding, embeddingProviders) }
 function applyRerankerProvider() { applyProviderPreset(form.reranker, rerankerProviders) }
 
+function memoryTypeLabel(type) {
+  return ({ knowledge: '知识', skill: '技能', emotion: '情绪', event: '事件' })[type] || type || '未知'
+}
+function memoryStatusLabel(status) {
+  return ({ active: '有效', superseded: '已被替代', deleted: '已删除' })[status] || status || '未知'
+}
+function embeddingStateLabel(state) {
+  return ({ indexed: '已索引', pending: '等待中', failed: '失败', stale: '待重建', disabled: '文本模式' })[state] || state || '未知'
+}
+function jobStatusLabel(status) {
+  return ({ pending: '等待中', completed: '完成', failed: '失败' })[status] || status || '未知'
+}
+function formatDate(value) {
+  if (!value) return '未知时间'
+  const parsed = new Date(String(value).includes('T') ? value : `${String(value).replace(' ', 'T')}Z`)
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('zh-CN', { hour12: false })
+}
+function formatScore(value) { return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—' }
+function shortMemoryId(value) {
+  const text = String(value || '无 memory_id')
+  return text.length > 24 ? `${text.slice(0, 12)}…${text.slice(-8)}` : text
+}
+function conversationName(conversationId) {
+  if (!conversationId) return '无会话'
+  return conversationLabels.value.get(conversationId)
+    || (conversationId.startsWith('char_') ? '已删除角色的私聊' : conversationId.startsWith('group_') ? '已解散的群聊' : '未知会话')
+}
+
+async function loadConversationDirectory() {
+  try {
+    const [characterResult, groupResult] = await Promise.all([listCharacters(), listGroups()])
+    characters.value = characterResult.characters || []
+    groups.value = groupResult.groups || []
+  } catch (error) { notify(`会话名称加载失败：${error.message}`, 'error') }
+}
+
+async function loadMemories() {
+  memoriesLoading.value = true
+  try {
+    const result = await getMemoryFragments({
+      conversation_id: memoryFilters.conversationId,
+      memory_type: memoryFilters.memoryType,
+      status: memoryFilters.status,
+      limit: MEMORY_PAGE_SIZE,
+      offset: (memoryPage.value - 1) * MEMORY_PAGE_SIZE,
+    })
+    memories.value = result.fragments || []
+    memoryTotal.value = result.total || 0
+    if (memoryPage.value > memoryPageCount.value) {
+      memoryPage.value = memoryPageCount.value
+      return await loadMemories()
+    }
+  } catch (error) { notify(error.message, 'error') }
+  finally { memoriesLoading.value = false }
+}
+function applyMemoryFilters() {
+  memoryPage.value = 1
+  loadMemories()
+}
+function changeMemoryPage(delta) {
+  memoryPage.value = Math.min(memoryPageCount.value, Math.max(1, memoryPage.value + delta))
+  loadMemories()
+}
+async function removeMemory(item) {
+  const prompt = `确定软删除这条记忆吗？\n\n${item.judgment || item.content}`
+  const confirmed = confirmDialog
+    ? await confirmDialog({ title: '软删除记忆', message: prompt, okText: '删除', danger: true })
+    : window.confirm(prompt)
+  if (!confirmed) return
+  deletingMemoryId.value = item.memory_id
+  try {
+    await deleteMemoryFragment(item.memory_id)
+    notify('记忆已软删除，向量删除任务已安排')
+    await Promise.all([loadMemories(), loadIndexJobs(), refreshStats()])
+  } catch (error) { notify(error.message, 'error') }
+  finally { deletingMemoryId.value = null }
+}
+
+async function runRecallTest() {
+  if (!recallQuery.value || recallLoading.value) return
+  recallLoading.value = true
+  recallTested.value = true
+  try {
+    const result = await searchMemories(recallQuery.value, { conversationId: recallConversationId.value, topK: 20 })
+    recallResults.value = result.results || []
+  } catch (error) {
+    recallResults.value = []
+    notify(error.message, 'error')
+  } finally { recallLoading.value = false }
+}
+
+async function loadIndexJobs() {
+  jobsLoading.value = true
+  try { indexJobs.value = (await getMemoryIndexJobs(30)).jobs || [] }
+  catch (error) { notify(error.message, 'error') }
+  finally { jobsLoading.value = false }
+}
+
+async function refreshStats() {
+  try { Object.assign(stats, await getMemoryStats()) }
+  catch (error) { notify(error.message, 'error') }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -199,18 +472,26 @@ async function testReranker() {
 }
 async function reindex() {
   maintaining.value = true
-  try { const result = await reindexMemories(); notify(`索引处理完成：${result.indexed}/${result.total}`); await load() }
+  try {
+    const result = await reindexMemories()
+    notify(`索引处理完成：${result.indexed}/${result.total}`)
+    await Promise.all([load(), loadMemories(), loadIndexJobs()])
+  }
   catch (error) { notify(error.message, 'error') }
   finally { maintaining.value = false }
 }
 async function retryFailed() {
   maintaining.value = true
-  try { const result = await retryFailedMemories(); notify(`重试完成：${result.indexed}/${result.total}`); await load() }
+  try {
+    const result = await retryFailedMemories()
+    notify(`重试完成：${result.indexed}/${result.total}`)
+    await Promise.all([load(), loadMemories(), loadIndexJobs()])
+  }
   catch (error) { notify(error.message, 'error') }
   finally { maintaining.value = false }
 }
 
-onMounted(load)
+onMounted(() => Promise.all([load(), loadConversationDirectory(), loadMemories(), loadIndexJobs()]))
 </script>
 
 <style scoped>
@@ -241,6 +522,41 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .params, .warning { margin-top: 16px; }
 .disabled-note { padding: 16px; background: rgba(85, 130, 180, .08); border-radius: 10px; }
 .warning { border-color: rgba(224, 123, 108, .35); }
+.memory-manager { margin-top: 16px; }
+.manager-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.memory-filters { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, .75fr) minmax(130px, .75fr) auto; gap: 12px; align-items: end; }
+.memory-filters label { margin-bottom: 0; }
+.filter-button { height: 38px; margin-bottom: 0; white-space: nowrap; }
+.inline-state { padding: 22px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.memory-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.memory-item { display: flex; align-items: flex-start; gap: 16px; padding: 15px; border: 1px solid rgba(125, 105, 85, .14); border-radius: 12px; background: rgba(255,255,255,.36); }
+.memory-item-main { min-width: 0; flex: 1; }
+.memory-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--text-secondary); font-size: 11px; }
+.memory-meta code { overflow-wrap: anywhere; }
+.conversation-label { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--text-bright); }
+.conversation-label code { color: var(--text-secondary); font-size: 10px; font-weight: 400; }
+.type-pill, .status-pill { padding: 3px 7px; border-radius: 999px; font-weight: 700; }
+.type-pill { color: #4677a8; background: rgba(85, 130, 180, .12); }
+.status-pill.active { color: #3f8759; background: rgba(77, 150, 102, .12); }
+.status-pill.superseded { color: #9a742e; background: rgba(190, 145, 55, .13); }
+.status-pill.deleted { color: #a75555; background: rgba(195, 79, 79, .11); }
+.memory-judgment { margin-top: 9px; font-size: 14px; font-weight: 650; line-height: 1.55; overflow-wrap: anywhere; }
+.memory-reasoning { margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.memory-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 11px; }
+.memory-index-state { margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
+.index-error { color: #c34f4f; display: inline-block; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.danger-link { flex-shrink: 0; padding: 6px 8px; border: 0; background: transparent; color: #c34f4f; cursor: pointer; font-size: 12px; }
+.pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; color: var(--text-secondary); font-size: 12px; }
+.pagination > div { display: flex; gap: 8px; }
+button.compact { padding: 7px 11px; font-size: 12px; }
+.management-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.recall-results, .job-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: 420px; overflow-y: auto; }
+.recall-item, .job-item { padding: 11px 12px; border-radius: 10px; background: rgba(255,255,255,.38); border: 1px solid rgba(125, 105, 85, .12); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.recall-item small, .job-item small { color: var(--text-secondary); }
+.job-item { display: grid; gap: 3px; }
+.job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.failed { color: #c34f4f; }
+.job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 button.primary, button.ghost { border-radius: 9px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
 button.primary { border: 0; background: var(--accent); color: white; }
@@ -253,5 +569,17 @@ button:disabled { opacity: .55; cursor: default; }
 .switch span::after { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: white; transition: .2s; }
 .switch input:checked + span { background: var(--accent); }.switch input:checked + span::after { transform: translateX(18px); }
 code { font-family: ui-monospace, monospace; }
-@media (max-width: 800px) { .memory-page { padding: 16px; }.grid { grid-template-columns: 1fr; }.overview { flex-direction: column; }.stats { justify-content: space-around; }.three-col { grid-template-columns: 1fr; }.actions { flex-wrap: wrap; }.mode-badge { display: none; } }
+@media (max-width: 800px) {
+  .memory-page { padding: 16px; }
+  .grid, .management-grid { grid-template-columns: 1fr; }
+  .overview { flex-direction: column; }
+  .stats { justify-content: space-around; }
+  .three-col, .memory-filters { grid-template-columns: 1fr; }
+  .filter-button { width: 100%; }
+  .memory-item { flex-direction: column; }
+  .danger-link { align-self: flex-end; }
+  .pagination { align-items: flex-start; flex-direction: column; }
+  .actions { flex-wrap: wrap; }
+  .mode-badge { display: none; }
+}
 </style>

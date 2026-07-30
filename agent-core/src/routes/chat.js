@@ -746,7 +746,14 @@ ${coreRules}
     // 10. RAG 三路召回记忆
     if (config.features.memory) {
       try {
-        const memoryResults = await hybridSearch(message, { conversationId, topK: 7 });
+        const groupConversationIds = db.prepare(`
+          SELECT 'group_' || group_id AS conversation_id
+          FROM group_members WHERE character_id = ? ORDER BY group_id
+        `).pluck().all(characterId);
+        const memoryResults = await hybridSearch(message, {
+          conversationIds: [conversationId, ...groupConversationIds],
+          topK: 7,
+        });
         if (memoryResults.length > 0) {
           const memoryLines = memoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
           memorySnapshot.push(...memoryResults.map(m => ({

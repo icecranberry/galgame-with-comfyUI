@@ -231,16 +231,18 @@
             <!-- 步骤 1：预览确认 -->
             <div v-if="recruit.step === 'preview'" class="modal-body" style="position:relative">
               <div class="preview-card">
-                <input
-                  v-model="recruit.result.name"
-                  class="preview-name-input"
-                  placeholder="角色标识（英文/拼音，唯一）"
-                />
-                <input
-                  v-model="recruit.result.display_name"
-                  class="preview-name-input"
-                  placeholder="展示名称"
-                />
+                <div class="preview-name-row">
+                  <input
+                    v-model="recruit.result.display_name"
+                    class="preview-name-input"
+                    placeholder="角色名"
+                  />
+                  <input
+                    v-model="recruit.result.name"
+                    class="preview-name-input"
+                    placeholder="英文名（英文/拼音，唯一）"
+                  />
+                </div>
                 <div class="preview-prompt-label">-</div>
                 <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
 
@@ -1615,12 +1617,15 @@ onMounted(async () => {
 }
 
 /* ── 预览姓名可编辑 ── */
+.preview-name-row {
+  display: flex; gap: 10px;
+}
 .preview-name-input {
   font-size: 20px; font-weight: 700; color: var(--text-bright);
   background: #f0ece8;
   border: 1px dashed rgba(224, 123, 108, 0.25);
   border-radius: 8px; padding: 4px 10px;
-  width: 100%; outline: none; font-family: inherit;
+  flex: 1; min-width: 0; outline: none; font-family: inherit;
   transition: border-color 0.2s, background 0.2s;
   cursor: text;
 }
@@ -2030,9 +2035,12 @@ onMounted(async () => {
   .preview-card {
     padding: 14px;
   }
+  .preview-name-row {
+    flex-direction: column; gap: 6px;
+  }
   .preview-name-input {
     font-size: 18px;
-    padding: 4px 8px; margin: -4px -8px;
+    padding: 4px 8px;
   }
   .preview-prompt {
     font-size: 14px;

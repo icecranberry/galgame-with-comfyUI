@@ -110,13 +110,22 @@ export function softDeleteMemory(idOrMemoryId) {
 
 export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
   const db = getDb();
+  const currentCheckpoint = db.prepare(`
+    SELECT COALESCE(last_raw_msg_id, 0) AS last_raw_msg_id
+    FROM memory_extraction_checkpoints WHERE conversation_id = ?
+  `).get(conversationId)?.last_raw_msg_id || 0;
   const affected = db.prepare(`SELECT * FROM memory_fragments WHERE conversation_id = ? AND source_raw_end_id >= ? AND status != 'deleted'`).all(conversationId, rawStartId);
+  const affectedStarts = affected.map(row => row.source_raw_start_id).filter(Number.isInteger);
+  const firstAffectedRawId = affectedStarts.length > 0 ? Math.min(...affectedStarts) : rawStartId;
+  const rollbackBoundary = Math.min(currentCheckpoint, Math.max(0, firstAffectedRawId - 1));
+  const affectedIds = new Set(affected.map(row => row.memory_id));
   const restored = new Set();
   const transaction = db.transaction(() => {
     for (const row of affected) {
-      db.prepare(`UPDATE memory_fragments SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
+      db.prepare(`UPDATE memory_fragments SET status = 'deleted', source_msg_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
       const predecessors = db.prepare(`SELECT from_memory_id FROM memory_relations WHERE to_memory_id = ?`).all(row.memory_id);
       for (const predecessor of predecessors) {
+        if (affectedIds.has(predecessor.from_memory_id)) continue;
         db.prepare(`UPDATE memory_fragments SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'superseded'`).run(predecessor.from_memory_id);
         enqueueIndexJob(db, 'upsert', predecessor.from_memory_id, null);
         restored.add(predecessor.from_memory_id);
@@ -127,7 +136,7 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
       INSERT INTO memory_extraction_checkpoints(conversation_id, last_raw_msg_id, status, last_error, updated_at)
       VALUES (?, ?, 'idle', NULL, CURRENT_TIMESTAMP)
       ON CONFLICT(conversation_id) DO UPDATE SET last_raw_msg_id = excluded.last_raw_msg_id, status = 'idle', last_error = NULL, updated_at = CURRENT_TIMESTAMP
-    `).run(conversationId, Math.max(0, rawStartId - 1));
+    `).run(conversationId, rollbackBoundary);
   });
   transaction();
   for (const row of affected) void removeMemoryVector(row);
@@ -150,6 +159,7 @@ export function clearConversationMemories(conversationId) {
   });
   transaction();
   const corpora = [...new Set(rows.map(row => row.embedding_profile).filter(Boolean).map(profile => `memory_v2_${profile}`))];
+  void deleteByConversation(conversationId).catch(() => {});
   for (const corpus of corpora) void deleteByConversation(conversationId, corpus).catch(() => {});
   return rows.length;
 }

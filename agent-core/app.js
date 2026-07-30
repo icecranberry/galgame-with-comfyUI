@@ -22,6 +22,7 @@ import streamRoutes from './src/routes/stream.js';
 import scheduleRoutes from './src/routes/schedule.js';
 import workflowsRoutes from './src/routes/workflows.js';
 import mailboxRoutes from './src/routes/mailbox.js';
+import groupsRoutes from './src/routes/groups.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
@@ -32,6 +33,7 @@ import { initialize as initScheduleManager } from './src/services/scheduleManage
 import { startScheduler as startImageCompressor } from './src/services/imageCompressor.js';
 import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { startWeatherScheduler } from './src/services/weatherService.js';
+import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 
@@ -81,6 +83,7 @@ app.use('/api/stream', streamRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/mailbox', mailboxRoutes);
+app.use('/api/groups', groupsRoutes);
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
@@ -140,6 +143,9 @@ startMailboxScheduler();
 
 // 启动天气调度器（每日 08:00 后更新小时级天气缓存）
 startWeatherScheduler();
+
+// 启动群聊后台调度器（预算制闲聊 + 角色自发建群，由 config.features.groupChat 控制）
+startGroupIdleScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

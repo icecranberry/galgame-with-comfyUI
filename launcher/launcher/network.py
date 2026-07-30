@@ -47,6 +47,9 @@ def _is_standard_private_ip(ip: str) -> bool:
     # 172.16.x.x - 172.31.x.x
     if octets[0] == 172 and 16 <= octets[1] <= 31:
         return True
+    # 100.64.x.x - 100.127.x.x (CGNAT，运营商级 NAT，相当于可路由的局域网段)
+    if octets[0] == 100 and 64 <= octets[1] <= 127:
+        return True
 
     return False
 

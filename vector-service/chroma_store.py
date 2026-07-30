@@ -69,7 +69,7 @@ def upsert_memories(items: list[dict], embeddings: list[list[float]], corpus: st
     )
 
 
-def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None, conversation_id: str = None, corpus: str = DEFAULT_CORPUS) -> list[dict]:
+def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = None, conversation_id: str | list[str] | None = None, corpus: str = DEFAULT_CORPUS) -> list[dict]:
     """
     向量相似检索。
 
@@ -90,7 +90,11 @@ def search_similar(embedding: list[float], top_k: int = 20, filter_type: str = N
     if filter_type:
         conditions.append({"fragment_type": filter_type})
     if conversation_id:
-        conditions.append({"conversation_id": conversation_id})
+        conversation_ids = [conversation_id] if isinstance(conversation_id, str) else list(dict.fromkeys(conversation_id))
+        if len(conversation_ids) == 1:
+            conditions.append({"conversation_id": conversation_ids[0]})
+        elif conversation_ids:
+            conditions.append({"conversation_id": {"$in": conversation_ids}})
     where = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if len(conditions) == 1 else None)
 
     results = col.query(

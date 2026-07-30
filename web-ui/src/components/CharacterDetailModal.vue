@@ -118,10 +118,16 @@
             </div>
 
             <div class="preview-card">
-              <label class="fl">角色标识</label>
-              <input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
-              <label class="fl" style="margin-top:12px">展示名</label>
-              <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+              <div class="detail-name-row">
+                <div class="detail-name-col">
+                  <label class="fl">角色名</label>
+                  <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+                </div>
+                <div class="detail-name-col">
+                  <label class="fl">英文名</label>
+                  <input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
+                </div>
+              </div>
               <label class="fl" style="margin-top:12px">人格提示词</label>
               <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
             </div>
@@ -781,6 +787,9 @@ async function saveLora() {
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
 .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+
+.detail-name-row { display: flex; gap: 12px; }
+.detail-name-col { flex: 1; min-width: 0; }
 
 .detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .detail-avatar {

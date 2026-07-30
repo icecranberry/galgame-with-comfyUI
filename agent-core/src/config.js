@@ -53,7 +53,8 @@ export const config = {
     backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板
     weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
-
+    groupChat: process.env.FEATURE_GROUP_CHAT !== 'false', // 默认开：群聊系统
+    groupIdleBudget: Math.max(0, parseInt(process.env.GROUP_IDLE_BUDGET ?? '0', 10) || 0), // 默认关闭；显式设为正数后启用每群每日后台闲聊预算
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',
@@ -70,6 +71,7 @@ export const config = {
     mode: 'turbo',     // 'base' | 'turbo' | 'hybrid'
     scene: {           // hybrid 模式下的场景→工作流映射
       chat: 'turbo',
+      group: 'base',
       moments: 'base',
       events: 'base',
       schedule: 'base',
@@ -335,7 +337,7 @@ export function updateWorkflowScene(scene) {
     return { ok: false, error: 'scene must be an object' };
   }
   for (const [k, v] of Object.entries(scene)) {
-    if (['chat', 'moments', 'events', 'schedule', 'mailbox'].includes(k) && ['base', 'turbo'].includes(v)) {
+    if (['chat', 'group', 'moments', 'events', 'schedule', 'mailbox'].includes(k) && ['base', 'turbo'].includes(v)) {
       config.workflow.scene[k] = v;
     }
   }

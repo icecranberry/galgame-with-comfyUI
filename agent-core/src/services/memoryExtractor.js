@@ -16,15 +16,22 @@ export function curateChatMemories(options) {
   return tracked;
 }
 
+export function selectMemorySourceRows(db, conversationId, { afterRawId = 0, throughRawId }) {
+  return db.prepare(`
+    SELECT id, role, content FROM raw_messages
+    WHERE conversation_id = ? AND id > ? AND id <= ?
+    ORDER BY id ASC
+  `).all(conversationId, afterRawId, throughRawId);
+}
+
 async function curateNow({ conversationId, throughRawMsgId, characterPrompt = '', characterName = '', userName = '' }) {
   const db = getDb();
   const checkpoint = getCheckpoint(conversationId);
   if (throughRawMsgId <= checkpoint.last_raw_msg_id) return [];
-  const messages = db.prepare(`
-    SELECT id, role, content FROM raw_messages
-    WHERE conversation_id = ? AND id > ? AND id <= ?
-    ORDER BY id ASC
-  `).all(conversationId, checkpoint.last_raw_msg_id, throughRawMsgId);
+  const messages = selectMemorySourceRows(db, conversationId, {
+    afterRawId: checkpoint.last_raw_msg_id,
+    throughRawId: throughRawMsgId,
+  });
   if (!messages.some(item => item.role === 'user') || !messages.some(item => item.role === 'assistant')) return [];
 
   const startId = messages[0].id;

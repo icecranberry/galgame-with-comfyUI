@@ -18,17 +18,19 @@ router.get('/search', async (req, res) => {
 
 router.get('/fragments', (req, res) => {
   const { conversation_id, memory_type, type, status = 'active', limit = '20', offset = '0' } = req.query;
+  const normalizedStatus = status === 'all' ? null : (status || null);
   const fragments = listActiveMemories({
     conversationId: conversation_id || null,
     memoryType: memory_type || type || null,
-    status: status || null,
+    status: normalizedStatus,
     limit: Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20)),
     offset: Math.max(0, Number.parseInt(offset, 10) || 0),
   });
   let sql = `SELECT COUNT(*) AS count FROM memory_fragments WHERE 1=1`;
   const params = [];
   if (conversation_id) { sql += ` AND conversation_id = ?`; params.push(conversation_id); }
-  if (status) { sql += ` AND status = ?`; params.push(status); }
+  if (normalizedStatus) { sql += ` AND status = ?`; params.push(normalizedStatus); }
+  if (memory_type || type) { sql += ` AND memory_type = ?`; params.push(memory_type || type); }
   res.json({ fragments, total: getDb().prepare(sql).get(...params).count });
 });
 
