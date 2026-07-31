@@ -15,6 +15,22 @@ function parseScenes(value) {
   try { return JSON.parse(value || '[]'); } catch { return []; }
 }
 
+function parseExecutableTags(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(item => ({
+        tag: String(item?.tag || '').trim(),
+        label: String(item?.label || '').trim(),
+        group: String(item?.group || '').trim(),
+      }))
+      .filter(item => item.tag);
+  } catch {
+    return [];
+  }
+}
+
 function tokenize(text) {
   const normalized = String(text || '').toLowerCase();
   const latin = normalized.match(/[a-z0-9_()-]{2,}/g) || [];
@@ -28,6 +44,8 @@ function rowToItem(row) {
     category: row.category,
     title: row.title,
     content: row.content,
+    executableTags: parseExecutableTags(row.executable_tags),
+    searchTerms: row.search_terms || '',
     scenes: parseScenes(row.scenes),
     isDefault: Boolean(row.is_default),
     priority: row.priority,

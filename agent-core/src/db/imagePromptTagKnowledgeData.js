@@ -315,6 +315,7 @@ function makeKnowledgeItem(section, category, topic, entries, chunkIndex) {
     scenes: ALL_SCENES,
     isDefault: false,
     priority: category.startsWith('adult_') ? 42 : 55,
+    executableTags: entries.map(entry => ({ tag: entry.tag, label: entry.label, group: entry.group })),
     content: `标签词汇菜单（来自 ${sourceGroups.join('、')}；按当前画面语义选择少量匹配项，不要整组堆叠）：${menu}`,
   };
 }

@@ -127,6 +127,7 @@ function initSchema(db) {
       title TEXT NOT NULL,
       search_terms TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL,
+      executable_tags TEXT NOT NULL DEFAULT '[]',
       scenes TEXT NOT NULL DEFAULT '[]',
       is_default INTEGER NOT NULL DEFAULT 0,
       priority INTEGER NOT NULL DEFAULT 0,
@@ -511,6 +512,9 @@ function initSchema(db) {
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
 
+  // 迁移: 绘图知识词库保留可直接注入的结构化 tag。
+  migrateImagePromptKnowledgeSchema(db);
+
   // 迁移: PAI 风格聊天记忆单元、全文索引、提取 checkpoint 与索引任务
   migrateChatMemoryV2Schema(db);
 
@@ -596,14 +600,15 @@ export function seedImagePromptKnowledge(db) {
 
   const upsert = db.prepare(`
     INSERT INTO image_prompt_knowledge (
-      knowledge_id, category, title, search_terms, content, scenes,
+      knowledge_id, category, title, search_terms, content, executable_tags, scenes,
       is_default, priority, version, is_active, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(knowledge_id) DO UPDATE SET
       category = excluded.category,
       title = excluded.title,
       search_terms = excluded.search_terms,
       content = excluded.content,
+      executable_tags = excluded.executable_tags,
       scenes = excluded.scenes,
       is_default = excluded.is_default,
       priority = excluded.priority,
@@ -619,6 +624,7 @@ export function seedImagePromptKnowledge(db) {
         item.title,
         item.searchTerms,
         item.content,
+        JSON.stringify(item.executableTags || []),
         JSON.stringify(item.scenes),
         item.isDefault ? 1 : 0,
         item.priority,
@@ -688,6 +694,18 @@ function migrateEmotionSnapshotsUnique(db) {
     }
   } catch (err) {
     console.log('[db] migrateEmotionSnapshotsUnique error:', err.message);
+  }
+}
+
+function migrateImagePromptKnowledgeSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(image_prompt_knowledge)`).all();
+    if (!cols.some(column => column.name === 'executable_tags')) {
+      db.exec(`ALTER TABLE image_prompt_knowledge ADD COLUMN executable_tags TEXT NOT NULL DEFAULT '[]'`);
+      console.log('[db] Added image_prompt_knowledge.executable_tags column');
+    }
+  } catch (err) {
+    console.log('[db] migrateImagePromptKnowledgeSchema error:', err.message);
   }
 }
 

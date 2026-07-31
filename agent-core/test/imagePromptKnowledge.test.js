@@ -9,7 +9,7 @@ import {
   IMAGE_PROMPT_TAG_SOURCE_SHA256,
 } from '../src/db/imagePromptTagKnowledgeData.js';
 import { keywordSearchImagePromptKnowledge } from '../src/services/imagePromptKnowledge.js';
-import { prepareImagePrompt } from '../src/services/imagePromptPreparer.js';
+import { composeImagePrompt, prepareImagePrompt } from '../src/services/imagePromptPreparer.js';
 import { recordCompletedImageTask } from '../src/services/imageTaskRecorder.js';
 
 function createDb() {
@@ -20,12 +20,25 @@ function createDb() {
       setting_value TEXT NOT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE image_prompt_preparations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scene TEXT NOT NULL DEFAULT 'chat',
+      prompt_original TEXT NOT NULL,
+      prompt_refined TEXT NOT NULL,
+      knowledge_ids TEXT NOT NULL DEFAULT '[]',
+      knowledge_version TEXT,
+      retrieval_mode TEXT NOT NULL DEFAULT 'fallback',
+      retrieval_snapshot TEXT NOT NULL DEFAULT '{}',
+      optimization_status TEXT NOT NULL DEFAULT 'fallback',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE image_prompt_knowledge (
       knowledge_id TEXT PRIMARY KEY,
       category TEXT NOT NULL,
       title TEXT NOT NULL,
       search_terms TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL,
+      executable_tags TEXT NOT NULL DEFAULT '[]',
       scenes TEXT NOT NULL DEFAULT '[]',
       is_default INTEGER NOT NULL DEFAULT 0,
       priority INTEGER NOT NULL DEFAULT 0,
@@ -52,6 +65,9 @@ test('image prompt knowledge seed is idempotent, deactivates stale built-ins, an
   assert.equal(db.prepare(`SELECT is_active FROM image_prompt_knowledge WHERE knowledge_id = 'ipk.lib.legacy.old.001'`).pluck().get(), 0);
   assert.equal(db.prepare(`SELECT count(*) FROM image_prompt_knowledge WHERE knowledge_id = 'ipk.custom' AND is_active = 1`).pluck().get(), 1);
   assert.equal(db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'image_prompt_knowledge_version'`).pluck().get(), IMAGE_PROMPT_KNOWLEDGE_VERSION);
+  const executableTags = JSON.parse(db.prepare(`SELECT executable_tags FROM image_prompt_knowledge WHERE knowledge_id LIKE 'ipk.lib.%' AND is_active = 1 LIMIT 1`).pluck().get());
+  assert.ok(executableTags.length > 0);
+  assert.ok(executableTags[0].tag);
   db.close();
 });
 
@@ -72,6 +88,10 @@ test('custom tag library is reproducible, chunked, deduplicated, and safety-filt
     assert.match(item.knowledgeId, /^ipk\.lib\.[a-z0-9-]+\.[a-z0-9-]+\.\d{3}$/);
     assert.ok((item.content.match(/→/g) || []).length <= 20);
     assert.ok(item.content.length <= 1600);
+  }
+  for (const item of IMAGE_PROMPT_TAG_KNOWLEDGE) {
+    assert.ok(item.executableTags.length > 0);
+    assert.ok(item.executableTags.every(entry => entry.tag && entry.label !== undefined));
   }
   assert.match(serialized, /锁骨 → collarbone/);
   assert.match(serialized, /叹气 → sigh/);
@@ -120,6 +140,48 @@ test('keyword retrieval selects scene-relevant conflict knowledge', () => {
   assert.ok(ids.has('ipk.gaze.sleep'));
   assert.ok(ids.has('ipk.camera.closeup'));
   assert.ok(ids.has('ipk.conflict.core'));
+  db.close();
+});
+
+test('deterministic prompt composition injects tags without appending rule prose', () => {
+  const result = composeImagePrompt(
+    'Furina sleeping in a cyberpunk city at night, looking at the viewer, close-up, full body, neon lights, rainy night',
+    [
+      { id: 'ipk.gaze.sleep', category: 'gaze', priority: 100, executableTags: [], content: '中文规则不应直接进入提示词' },
+      { id: 'ipk.camera.fullbody', category: 'camera', priority: 96, executableTags: [], content: '中文规则不应直接进入提示词' },
+      {
+        id: 'ipk.lib.scene.test.001',
+        category: 'scene_vocabulary',
+        priority: 55,
+        score: 1,
+        executableTags: [{ tag: 'cyberpunk_city_lights, neon_lights, rainy_night', label: '赛博霓虹雨夜', group: '城市' }],
+        content: '标签词汇菜单（中文说明）',
+      },
+    ],
+  );
+
+  assert.match(result.promptRefined, /closed_eyes/);
+  assert.match(result.promptRefined, /cyberpunk_city_lights, neon_lights, rainy_night/);
+  assert.doesNotMatch(result.promptRefined, /中文规则|标签词汇菜单/);
+  assert.doesNotMatch(result.promptRefined, /looking at the viewer/);
+  assert.doesNotMatch(result.promptRefined, /close-up/);
+  assert.equal(result.selectedTags.filter(item => item.tag === 'closed_eyes').length, 1);
+  assert.ok(result.appliedRules.includes('ipk.gaze.sleep'));
+});
+
+test('prepareImagePrompt persists deterministic selection audit', async () => {
+  const db = createDb();
+  seedImagePromptKnowledge(db);
+  const result = await prepareImagePrompt('cyberpunk neon lights rainy night', { db });
+  assert.equal(result.status, 'deterministic');
+  assert.ok(result.selection.selectedTags.length > 0);
+  const row = db.prepare('SELECT prompt_original, prompt_refined, retrieval_snapshot, optimization_status FROM image_prompt_preparations ORDER BY id DESC LIMIT 1').get();
+  const snapshot = JSON.parse(row.retrieval_snapshot);
+  assert.equal(row.prompt_original, 'cyberpunk neon lights rainy night');
+  assert.equal(row.prompt_refined, result.promptRefined);
+  assert.equal(row.optimization_status, 'deterministic');
+  assert.deepEqual(snapshot.selectedTags, result.selection.selectedTags);
+  assert.ok(Array.isArray(snapshot.appliedRules));
   db.close();
 });
 
