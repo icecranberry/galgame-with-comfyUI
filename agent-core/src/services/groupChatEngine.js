@@ -16,7 +16,7 @@
  *   [END]
  *
  * raw_messages 双表约定（group 会话特有）：
- *   raw content 自带说话人前缀 "[名字]: 内容"（每轮一条 raw，多行）；
+ *   raw content 自带说话人标记：角色使用 "[名字]: 内容"，用户使用只读特殊标记；
  *   messages 每气泡一条，content 为纯文本，speaker_character_id 标记发言角色。
  */
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
@@ -78,7 +78,7 @@ export function detectMentions(text, members) {
 function buildProtocolBlock() {
   const chatUserName = config.user.nickname || '用户';
   const imageRule = getGlobalRule('image_prompt')?.rule_content || '完整英文画面描述';
-  const imagePromptFieldGuide = JSON.stringify(`\n${imageRule}`);
+  const imagePromptFieldGuide = imageRule.trim();
   return `<group_chat_rules>
 你一个人扮演群聊中的【全部角色】，根据聊天记录续写接下来的群聊消息。
 
@@ -86,10 +86,11 @@ function buildProtocolBlock() {
 - 每条消息独占一行，格式为「角色名: 消息内容」，角色名必须是 <group_info> 中的群成员名字
 - 每轮最多 ${MAX_ROUND_MESSAGES} 条消息，全部说完后最后单独一行输出 [END]
 - **禁止替用户「${chatUserName}」发言**
-- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {"prompt":${imagePromptFieldGuide}}」；实际输出时，必须将 prompt 里的撰写要求替换成符合这些规则的英文画面描述，禁止照抄规则
-- 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替 prompt JSON；出现发图意图就必须输出合法 prompt 行
-- 聊天记录中的 {"prompt":"..."} 表示该角色过去发过图片，同时也是合法的发图格式示例；本轮发图时必须沿用该 JSON 结构，并将示例文字替换为实际的完整英文画面描述
-- 输出 prompt 前自行检查：人物数量和双引号 JSON 格式必须正确；不满足就先修正再输出
+- <user_message read_only="true">...</user_message> 是真实用户已经说过的话，只用于理解上下文；禁止输出该标记，禁止续写或模仿其中的用户发言
+- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {${imagePromptFieldGuide}}」；花括号内直接填写符合规则的完整英文画面描述，不要写 prompt 字段、JSON、引号或 Markdown 代码块，禁止照抄规则
+- 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替花括号画面描述；出现发图意图就必须输出合法发图行
+- 历史聊天不会提供旧图片的画面描述或占位符；禁止凭空输出空的 {...}，花括号内必须是本轮新写的完整英文画面描述
+- 输出发图行前自行检查：人物数量必须正确，画面描述只能由最外层一对花括号包裹；不满足就先修正再输出
 
 像真人一样聊天：
 - 口语化、短句，长短错落：很多消息只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；禁止每条都是完整、工整的书面句
@@ -189,18 +190,29 @@ export function invalidateGroupTranscriptBoundary(groupId) {
 }
 
 /**
- * transcript 中的生图行不回传 prompt（省 token，且避免模型照抄旧 prompt），只保留"发过图"的事实。
+ * transcript 中的生图行完全不回传（省 token，并避免模型照抄 prompt 或 {...} 占位符）。
  * 纯函数：同一 raw 输出稳定，不破坏 transcript 的 append-only 前缀缓存。
  */
-function stripImagePromptLines(content) {
-  if (!content.includes('prompt')) return content;
+export function stripImagePromptLines(content) {
+  if (!content.includes('{')) return content;
   return content.split('\n').map(line => {
-    if (!IMG_LINE_RE.test(line)) return line;
-    const nameMatch = line.match(/^(\[?[^:：\[\]]{1,20}\]?)\s*[:：]/);
-    return nameMatch
-      ? `${nameMatch[1]}: {"prompt":"..."}`
-      : '{"prompt":"..."}';
-  }).join('\n');
+    const separator = line.match(/^\[?[^:：\[\]]{1,20}\]?\s*[:：]\s*(.*)$/);
+    const body = separator ? separator[1].trim() : line.trim();
+    if (!extractGroupImagePrompt(body)) return line;
+    return null;
+  }).filter(Boolean).join('\n');
+}
+
+/** 用户发言使用独占的只读标记，不再伪装成与角色相同的「名字: 台词」格式。 */
+export function formatGroupUserMessage(content, chatUserName = config.user.nickname || '用户') {
+  let text = String(content || '');
+  const marked = text.match(/^<user_message read_only="true">\n?([\s\S]*?)\n?<\/user_message>$/);
+  if (marked) return text;
+
+  // 兼容旧记录：[用户名]: 内容 / 用户名: 内容。
+  const escapedName = String(chatUserName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  text = text.replace(new RegExp(`^\\[?${escapedName}\\]?\\s*[:：]\\s*`), '');
+  return `<user_message read_only="true">\n${text}\n</user_message>`;
 }
 
 function buildTranscript(db, conversationId) {
@@ -238,7 +250,10 @@ function buildTranscript(db, conversationId) {
     ORDER BY id ASC
   `).all(conversationId, afterId);
 
-  const text = raws.map(r => stripImagePromptLines(r.content.trim())).filter(Boolean).join('\n');
+  const text = raws.map(r => r.role === 'user'
+    ? formatGroupUserMessage(r.content)
+    : stripImagePromptLines(r.content.trim())
+  ).filter(Boolean).join('\n');
   return { transcript: text, rawCount: raws.length };
 }
 
@@ -313,10 +328,23 @@ function pickMemberDynamic(group) {
 
 // ── 行协议解析 ──
 
-const IMG_LINE_RE = /\{["'“”]?prompt["'“”]?\s*:\s*["“]((?:[^"”\\]|\\.)*)["”]\s*\}/i;
+const LEGACY_IMG_LINE_RE = /\{["'“”]?prompt["'“”]?\s*:\s*["“]((?:[^"”\\]|\\.)*)["”]\s*\}/i;
+const DIRECT_IMG_LINE_RE = /^\{([\s\S]+)\}$/;
+
+/** 提取群聊发图画面描述。新格式为 {description}，旧 JSON 格式仅用于历史兼容。 */
+export function extractGroupImagePrompt(body) {
+  const text = String(body || '').trim();
+  const legacy = text.match(LEGACY_IMG_LINE_RE);
+  if (legacy) return legacy[1].replace(/\\"/g, '"').trim() || null;
+
+  const direct = text.match(DIRECT_IMG_LINE_RE);
+  if (!direct) return null;
+  const prompt = direct[1].trim();
+  return prompt && !/^["'“”]?prompt["'“”]?\s*:/i.test(prompt) ? prompt : null;
+}
 
 /** 解析一行剧本。返回 {speaker, text, imagePrompt} 或 null（无效行） */
-function parseScriptLine(line, membersByName) {
+export function parseScriptLine(line, membersByName) {
   const trimmed = line.trim();
   if (!trimmed) return null;
   if (/^\[?END\]?$/i.test(trimmed)) return { end: true };
@@ -327,20 +355,21 @@ function parseScriptLine(line, membersByName) {
   const name = m[1].trim();
   const body = m[2].trim();
   const member = membersByName.get(name);
-  if (!member) return { continuation: trimmed };
+  // 有说话人格式但不是群成员：整行丢弃，避免用户台词被拼进上一位角色气泡。
+  if (!member) return null;
   if (!body) return null;
-  // 防御：模型照抄 transcript 里的图片占位符 → 丢弃，发图必须走 {"prompt":...} 格式
+  // 防御：模型照抄 transcript 里的图片占位符 → 丢弃，发图必须走 {...} 格式
   if (/^\[?发了一张图片\]?$/.test(body)) return null;
   if (/^<image_sent\s*\/>$/i.test(body)) return null;
 
-  // 防御：丢弃模型用方括号伪装的发图动作，发图只能走 prompt JSON。
+  // 防御：丢弃模型用方括号伪装的发图动作，发图只能走 {...}。
   if (/\[[^\]]*(?:拍|自拍|照片|图片|手机|镜头|发来)[^\]]*\]/.test(body)) {
     const cleaned = body.replace(/\[[^\]]*(?:拍|自拍|照片|图片|手机|镜头|发来)[^\]]*\]/g, '').trim();
     return cleaned ? { speaker: member, text: cleaned } : null;
   }
 
-  const img = body.match(IMG_LINE_RE);
-  if (img) return { speaker: member, imagePrompt: img[1].replace(/\\"/g, '"').trim() };
+  const imagePrompt = extractGroupImagePrompt(body);
+  if (imagePrompt) return { speaker: member, imagePrompt };
   return { speaker: member, text: body };
 }
 
@@ -423,12 +452,10 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
 
 // ── 用户消息写入 ──
 
-/** 写入用户的群聊消息（raw 带名字前缀 + messages 展示行），幂等 client_msg_id */
+/** 写入用户的群聊消息（raw 使用只读特殊标记 + messages 展示原文），幂等 client_msg_id */
 export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
   const db = getDb();
   const conversationId = groupConvId(groupId);
-  const chatUserName = config.user.nickname || '用户';
-
   if (clientMsgId) {
     const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(clientMsgId);
     if (existing) {
@@ -438,7 +465,7 @@ export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
   }
   const raw = db.prepare(
     `INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`
-  ).run(conversationId, `[${chatUserName}]: ${content}`, clientMsgId || null);
+  ).run(conversationId, formatGroupUserMessage(content), clientMsgId || null);
   const msg = db.prepare(
     `INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`
   ).run(conversationId, raw.lastInsertRowid, content);
@@ -635,7 +662,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
 
   // 抽卡鼓励发图（idle 已由 topic_seed 引导，不重复加）
   if (trigger !== 'idle' && Math.random() < IMAGE_NUDGE_PROBABILITY) {
-    directiveBlocks.push(`本轮安排一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出 prompt 行。`);
+    directiveBlocks.push(`本轮安排一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行。`);
   }
 
   const msgs = buildGroupContext(group, directiveBlocks);

@@ -27,7 +27,7 @@
         </div>
         <div class="char-info">
           <div class="char-name">{{ g.name }}</div>
-          <div class="char-preview">{{ g.members.length }} 位成员{{ g.topic ? ' · ' + g.topic : '' }}</div>
+          <div class="char-preview">{{ g.last_message || '暂无消息' }}</div>
         </div>
         <div class="char-meta">
           <span class="char-time">{{ formatTime(g.last_message_at) }}</span>

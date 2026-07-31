@@ -27,9 +27,19 @@
     </div>
 
     <!-- 消息区（与私聊 message-list 同款） -->
-    <div ref="scrollEl" class="message-list">
-      <div ref="msgListInner" class="msg-list-inner">
-        <template v-for="(msg, idx) in store.messages" :key="msg.id">
+    <div class="message-area">
+      <div
+        ref="scrollEl"
+        class="message-list"
+        @scroll="onMessageScroll"
+        @wheel="onUserScrollIntent"
+        @touchstart="onUserScrollIntent"
+        @pointerdown="onUserScrollIntent"
+      >
+        <div v-if="store.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
+
+        <div ref="msgListInner" class="msg-list-inner">
+          <template v-for="(msg, idx) in store.visibleMessages" :key="msg.id">
           <!-- 时间分隔符（与私聊同款：间隔超 10 分钟显示） -->
           <div v-if="showTimeDivider(idx)" class="time-divider">{{ timeLabel(msg.created_at) }}</div>
           <div
@@ -64,12 +74,28 @@
             </div>
           </div>
           </div>
-        </template>
+          </template>
 
-        <div v-if="store.messages.length === 0" class="gc-empty">
-          群聊已建立，发条消息热热场吧～
+          <div v-if="store.messages.length === 0" class="gc-empty">
+            群聊已建立，发条消息热热场吧～
+          </div>
         </div>
       </div>
+
+      <Transition name="new-message">
+        <button
+          v-if="hasNewMessages"
+          type="button"
+          class="new-message-bubble"
+          aria-label="有新消息，回到底部"
+          @click="returnToLatest"
+        >
+          <span>有新消息</span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </Transition>
     </div>
 
     <!-- 输入区（与私聊 input-area 同款） -->
@@ -198,6 +224,8 @@ const draft = ref('')
 const showMentionPicker = ref(false)
 const showSettings = ref(false)
 const previewUrl = ref(null)
+const isFollowingLatest = ref(true)
+const hasNewMessages = ref(false)
 
 const editName = ref('')
 const editTopic = ref('')
@@ -247,24 +275,23 @@ function genMsgOf(msg) {
 
 function onGroupImageLoaded(msgId) {
   store.markGroupImageLoaded(msgId)
-  scrollToBottom()
 }
 /** 连续同一发言人 → 隐藏头像和名字（与私聊 msg-same-role 一致）；跨时间分隔符时重新显示 */
 function isSameSpeaker(idx) {
   if (idx === 0) return false
   if (showTimeDivider(idx)) return false
-  const cur = store.messages[idx]
-  const prev = store.messages[idx - 1]
+  const cur = store.visibleMessages[idx]
+  const prev = store.visibleMessages[idx - 1]
   return cur.role === prev.role && cur.speaker_character_id === prev.speaker_character_id
 }
 
 // ── 时间分隔符（与私聊同款规则：相邻消息间隔超 10 分钟显示一条时间） ──
 
 function showTimeDivider(idx) {
-  const cur = store.messages[idx]
+  const cur = store.visibleMessages[idx]
   if (!cur?.created_at) return false
   if (idx === 0) return true
-  const prev = store.messages[idx - 1]
+  const prev = store.visibleMessages[idx - 1]
   if (!prev?.created_at) return false
   return Math.abs(new Date(cur.created_at) - new Date(prev.created_at)) > 10 * 60 * 1000
 }
@@ -289,6 +316,8 @@ function timeLabel(iso) {
 
 async function enterGroup(id) {
   if (!id) return
+  isFollowingLatest.value = true
+  hasNewMessages.value = false
   await store.loadGroups()
   await store.selectGroup(parseInt(id, 10))
   scrollToBottom(true)   // 进群直接定位底部，不要缓动
@@ -296,8 +325,17 @@ async function enterGroup(id) {
   armLullTimer()
 }
 
+let observedMessageCount = 0
+
 watch(() => route.params.id, (id) => { if (route.path.startsWith('/group/')) enterGroup(id) })
-watch(() => store.scrollSignal, () => { scrollToBottom(); armLullTimer() })
+watch(() => store.scrollSignal, () => {
+  const messageCount = store.messages.length
+  const receivedNewMessage = messageCount > observedMessageCount
+  observedMessageCount = messageCount
+  if (isFollowingLatest.value) scrollToBottom()
+  else if (receivedNewMessage) hasNewMessages.value = true
+  armLullTimer()
+})
 
 watch(showSettings, (open) => {
   if (open && store.activeGroup) {
@@ -318,6 +356,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearLullTimer()
   clearSendPressTimer()
+  clearTimeout(autoScrollTimer)
   teardownResizeObserver()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   store.leaveGroup()
@@ -329,6 +368,47 @@ let resizeRaf = null
 let lastObservedSH = 0
 let resizeObserverTimer = null
 const RESIZE_OBSERVER_TTL = 2000
+const BOTTOM_THRESHOLD = 16
+let autoScrollTimer = null
+let isAutoScrolling = false
+
+function isNearBottom(el = scrollEl.value) {
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
+}
+
+function syncFollowingState() {
+  const atBottom = isNearBottom()
+  isFollowingLatest.value = atBottom
+  if (atBottom) hasNewMessages.value = false
+}
+
+function onMessageScroll() {
+  if (isAutoScrolling) return
+  syncFollowingState()
+
+  const el = scrollEl.value
+  if (el?.scrollTop < 40 && store.hasMoreOlder) {
+    const prevHeight = el.scrollHeight
+    store.expandWindow()
+    nextTick(() => {
+      if (scrollEl.value) scrollEl.value.scrollTop += scrollEl.value.scrollHeight - prevHeight
+    })
+  }
+}
+
+function onUserScrollIntent() {
+  isAutoScrolling = false
+  clearTimeout(autoScrollTimer)
+  autoScrollTimer = null
+  requestAnimationFrame(syncFollowingState)
+}
+
+function returnToLatest() {
+  isFollowingLatest.value = true
+  hasNewMessages.value = false
+  scrollToBottom()
+}
 
 function setupResizeObserver() {
   teardownResizeObserver()
@@ -345,10 +425,12 @@ function setupResizeObserver() {
         if (!el2 || store.playing) return
         const newSH = el2.scrollHeight
         if (newSH === lastObservedSH) return
-        // 用旧 scrollHeight 算距底距离，用户上翻时不打扰
+        // 必须用变化前的高度判断：进群时异步内容撑高，不等于用户主动离开底部。
         const distBefore = lastObservedSH - el2.scrollTop - el2.clientHeight
         lastObservedSH = newSH
-        if (distBefore > 60) return
+        if (distBefore > BOTTOM_THRESHOLD) return
+        isFollowingLatest.value = true
+        hasNewMessages.value = false
         el2.scrollTop = el2.scrollHeight
         // 完成一次追底后延迟自毁：给剩余图片 500ms 缓冲
         clearTimeout(resizeObserverTimer)
@@ -375,8 +457,28 @@ function scrollToBottom(force = false) {
   nextTick(() => {
     const el = scrollEl.value
     if (!el) return
-    if (force) el.scrollTop = el.scrollHeight
-    else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    isAutoScrolling = true
+    clearTimeout(autoScrollTimer)
+    autoScrollTimer = null
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (force || reduceMotion) {
+      el.scrollTop = el.scrollHeight
+      // 首次渲染的字体/图片可能在同一帧继续改变高度，再校正一次后才开放用户滚动判定。
+      autoScrollTimer = setTimeout(() => {
+        if (!isAutoScrolling) return
+        el.scrollTop = el.scrollHeight
+        isAutoScrolling = false
+        autoScrollTimer = null
+        syncFollowingState()
+      }, force ? 50 : 0)
+      return
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    autoScrollTimer = setTimeout(() => {
+      isAutoScrolling = false
+      autoScrollTimer = null
+      syncFollowingState()
+    }, 450)
   })
 }
 
@@ -439,6 +541,8 @@ async function onSend() {
   showMentionPicker.value = false
   if (inputEl.value) inputEl.value.style.height = 'auto'
   clearLullTimer()
+  isFollowingLatest.value = true
+  hasNewMessages.value = false
   store.sendMessage(text)
   armLullTimer()
 }
@@ -599,11 +703,31 @@ async function onDissolve() {
 }
 
 /* ── 消息区 ── */
+.message-area { position:relative; flex:1; min-height:0; }
 .message-list {
-  flex:1; overflow-y:auto; padding:16px 24px;
+  box-sizing:border-box; width:100%; height:100%; overflow-y:auto; padding:16px 24px;
   background: transparent;
 }
 .msg-list-inner { display:flex; flex-direction:column; gap:4px; }
+.load-older { text-align:center; padding:8px 0; font-size:12px; color:var(--text-secondary); user-select:none; }
+.load-older-hint { opacity:0.6; }
+
+.new-message-bubble {
+  position:absolute; right:24px; bottom:16px; z-index:10;
+  min-height:44px; padding:0 14px 0 16px;
+  display:flex; align-items:center; justify-content:center; gap:6px;
+  border:1px solid rgba(224,123,108,0.34); border-radius:22px;
+  background:rgba(255,255,255,0.96); color:var(--accent);
+  box-shadow:0 6px 22px rgba(92,55,45,0.16);
+  font-size:13px; font-weight:600; cursor:pointer;
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  transition:background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.new-message-bubble:hover { background:#fff8f6; border-color:var(--accent); box-shadow:0 8px 26px rgba(92,55,45,0.2); }
+.new-message-bubble:active { transform:scale(0.96); }
+.new-message-bubble:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.new-message-enter-active, .new-message-leave-active { transition:opacity 0.2s ease, transform 0.2s ease; }
+.new-message-enter-from, .new-message-leave-to { opacity:0; transform:translateY(8px); }
 
 .message { display:flex; margin:3px 0; align-items:flex-end; gap:8px; }
 .message.user { flex-direction:row-reverse; }
@@ -809,7 +933,14 @@ async function onDissolve() {
 @media (max-width: 767px) {
   .chat-header { padding: 12px 16px; }
   .message-list { padding: 5px 10px; }
+  .new-message-bubble { right:14px; bottom:12px; }
   .input-area { padding: 8px 16px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .mention-panel { left: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-message-bubble,
+  .new-message-enter-active,
+  .new-message-leave-active { transition:none; }
 }
 </style>

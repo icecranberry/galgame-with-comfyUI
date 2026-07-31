@@ -7,7 +7,7 @@
  * - 消息 id 去重：直连流 + 统一流会重复收到同一条消息
  */
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 
@@ -16,27 +16,92 @@ export const useGroupsStore = defineStore('groups', () => {
   const activeGroupId = ref(null)
   const activeGroup = computed(() => groups.value.find(g => g.id === activeGroupId.value) || null)
   const messages = ref([])          // 已上屏消息
+  // 与私聊一致：历史消息保留在内存中，初次只渲染末尾 50 条，上滑每次展开 30 条。
+  const INITIAL_COUNT = 50
+  const EXPAND_COUNT = 30
+  const renderStart = ref(0)
+  const visibleMessages = computed(() => messages.value.slice(renderStart.value))
+  const hasMoreOlder = computed(() => renderStart.value > 0)
   const playing = ref(false)        // 播放队列是否正在逐条上屏
   const sending = ref(false)
   const undoing = ref(false)
   const scrollSignal = ref(0)       // 消息上屏后通知视图滚动到底
   const lullCount = ref(0)          // 前台冷场自动触发计数：跨群/跨路由不重置，仅用户发言时归零
 
-  const _seenMsgIds = new Set()
-  const _playQueue = []
-  const _imageGate = createGroupImagePlaybackGate()
-  let _playing = false
+  const _sessions = new Map()
   let _unsubs = []
   let _selectRequestId = 0
+
+  function _createSession(groupId) {
+    return {
+      groupId,
+      messages: reactive([]),
+      seenMsgIds: new Set(),
+      playQueue: [],
+      imageGate: createGroupImagePlaybackGate(),
+      playing: false,
+      currentPlaying: null,
+      lastPushAt: 0,
+      renderStart: 0,
+      loaded: false,
+    }
+  }
+
+  function _getSession(groupId, create = false) {
+    let session = _sessions.get(groupId)
+    if (!session && create) {
+      session = _createSession(groupId)
+      _sessions.set(groupId, session)
+    }
+    return session
+  }
+
+  function _activeSession() {
+    return activeGroupId.value ? _sessions.get(activeGroupId.value) : null
+  }
 
   const totalUnread = computed(() => groups.value.reduce((s, g) => s + (g.unread || 0), 0))
 
   // ── 群列表 ──
 
+  function _speakerName(group, data) {
+    if (data.role === 'user') return '我'
+    return data.speaker_name
+      || group?.members?.find(m => m.id === data.speaker_character_id)?.display_name
+      || '角色'
+  }
+
+  function _setGroupPreview(data, { image = false } = {}) {
+    const group = groups.value.find(g => g.id === data.group_id)
+    if (!group) return false
+    if (image && group.last_message_id !== data.msg_id) return false
+
+    const content = String(data.content || '').trim()
+    group.last_message = `${_speakerName(group, data)}：${image || !content ? '[图片]' : content.slice(0, 80)}`
+    if (!image) group.last_message_id = data.id
+    if (data.created_at) group.last_message_at = data.created_at
+    return true
+  }
+
+  function _sortGroups() {
+    groups.value.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
+  }
+
   async function loadGroups() {
     try {
       const data = await api.listGroups()
-      groups.value = data.groups || []
+      const previous = new Map(groups.value.map(group => [group.id, group]))
+      groups.value = (data.groups || []).map(group => {
+        const old = previous.get(group.id)
+        const session = _getSession(group.id)
+        if (!old || !session?.loaded) return group
+        return {
+          ...group,
+          last_message: old.last_message,
+          last_message_id: old.last_message_id,
+          last_message_at: old.last_message_at,
+        }
+      })
     } catch (e) {
       console.warn('[groups] loadGroups failed:', e.message)
     }
@@ -56,9 +121,11 @@ export const useGroupsStore = defineStore('groups', () => {
 
   async function deleteGroup(id) {
     await api.deleteGroup(id)
+    _sessions.delete(id)
     if (activeGroupId.value === id) {
       activeGroupId.value = null
       messages.value = []
+      renderStart.value = 0
     }
     await loadGroups()
   }
@@ -68,15 +135,35 @@ export const useGroupsStore = defineStore('groups', () => {
   async function selectGroup(id) {
     const requestId = ++_selectRequestId
     _flushAggNow()   // 切群前把上一个群未发送的聚合消息立即发出
-    _clearImageGates()
+    const previous = _activeSession()
+    if (previous) {
+      previous.renderStart = renderStart.value
+      if (previous.groupId !== id) previous.imageGate.clear()
+    }
     activeGroupId.value = id
-    messages.value = []
-    _seenMsgIds.clear()
-    _playQueue.length = 0
+    const session = _getSession(id, true)
+    messages.value = session.messages
+    renderStart.value = session.renderStart
+    playing.value = session.playing
+
+    if (session.loaded) {
+      scrollSignal.value++
+      api.markGroupSeen(id).then(() => {
+        if (activeGroupId.value !== id) return
+        const g = groups.value.find(g => g.id === id)
+        if (g) g.unread = 0
+      })
+      return
+    }
+
     const data = await api.getGroupMessages(id)
     if (requestId !== _selectRequestId || activeGroupId.value !== id) return
-    messages.value = (data.messages || []).map(m => ({ ...m, images: parseImages(m.images) }))
-    for (const m of messages.value) _seenMsgIds.add(m.id)
+    session.messages.splice(0, session.messages.length, ...(data.messages || []).map(m => ({ ...m, images: parseImages(m.images) })))
+    session.renderStart = Math.max(0, session.messages.length - INITIAL_COUNT)
+    renderStart.value = session.renderStart
+    session.seenMsgIds.clear()
+    for (const m of session.messages) session.seenMsgIds.add(m.id)
+    session.loaded = true
     scrollSignal.value++
     api.markGroupSeen(id).then(() => {
       if (requestId !== _selectRequestId || activeGroupId.value !== id) return
@@ -88,63 +175,81 @@ export const useGroupsStore = defineStore('groups', () => {
   function leaveGroup() {
     _selectRequestId++
     _flushAggNow()
-    _clearImageGates()
+    const session = _activeSession()
+    if (session) {
+      session.renderStart = renderStart.value
+      session.imageGate.clear()
+    }
     if (activeGroupId.value) api.markGroupSeen(activeGroupId.value)
     activeGroupId.value = null
     messages.value = []
-    _playQueue.length = 0
+    renderStart.value = 0
+    playing.value = false
+  }
+
+  function expandWindow() {
+    if (!hasMoreOlder.value) return
+    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+    const session = _activeSession()
+    if (session) session.renderStart = renderStart.value
   }
 
   // ── 播放队列（动态上屏） ──
 
   function _enqueue(msg) {
-    // 不属于当前群的消息不入队（切群后直连流仍在推送）；不记 seen，统一流到达时走未读计数
-    if (!msg || msg.group_id !== activeGroupId.value) return
-    if (_seenMsgIds.has(msg.id)) return
-    _seenMsgIds.add(msg.id)
-    _playQueue.push(msg)
-    _drainQueue()
+    if (!msg) return false
+    const session = _getSession(msg.group_id)
+    if (!session || !session.loaded) return false
+    if (session.seenMsgIds.has(msg.id)) return true
+    session.seenMsgIds.add(msg.id)
+    session.playQueue.push(msg)
+    _drainQueue(session)
+    return true
   }
-
-  let _currentPlaying = null  // 正在延迟中、即将上屏的那条（打断时作为"+1"保留）
-  let _lastPushAt = 0         // 上一条分句上屏时刻：距上条超 5s 视为新一轮首条，免延迟
   const ROUND_GAP = 5000
 
-  function _clearImageGates() {
-    _imageGate.clear()
+  function _clearImageGates(session = _activeSession()) {
+    session?.imageGate.clear()
   }
 
-  async function _drainQueue() {
-    if (_playing) return
-    _playing = true
-    playing.value = true
+  async function _drainQueue(session) {
+    if (session.playing) return
+    session.playing = true
+    if (activeGroupId.value === session.groupId) playing.value = true
     try {
-      while (_playQueue.length > 0) {
+      while (session.playQueue.length > 0) {
         // 只有已经上屏的图片消息才能暂停后续分句；提前收到 prompt 不阻塞前面的文本。
-        await _imageGate.waitUntilClear()
-        const msg = _playQueue.shift()
-        _currentPlaying = msg
-        // 出队时已切群 → 丢弃（DB 已持久化，回到该群时 selectGroup 会重新加载）
-        if (msg.group_id !== activeGroupId.value) continue
+        await session.imageGate.waitUntilClear()
+        const msg = session.playQueue.shift()
+        session.currentPlaying = msg
         // 分句节奏：900~3000ms 按长度递增，逐条推出
         // 流式逐条到达时队列经常被消费空、drain 反复重启，故"首条"按上屏间隔判定而非 drain 会话
-        const delay = (Date.now() - _lastPushAt > ROUND_GAP) ? 0 : 900 + Math.min(2100, (msg.content?.length || 0) * 30)
+        const delay = (Date.now() - session.lastPushAt > ROUND_GAP) ? 0 : 900 + Math.min(2100, (msg.content?.length || 0) * 30)
         if (delay > 0) await new Promise(r => setTimeout(r, delay))
         // 延迟期间，已经上屏的上一条消息可能刚收到 prompt；此时暂停当前分句。
-        await _imageGate.waitUntilClear()
-        // 延迟期间可能切了群，上屏前二次校验；快速切走又切回时 selectGroup 已从 DB 载入，按 id 去重
-        if (msg.group_id !== activeGroupId.value) continue
-        if (messages.value.some(m => m.id === msg.id)) continue
-        messages.value.push({ ...msg, images: parseImages(msg.images) })
+        await session.imageGate.waitUntilClear()
+        if (session.messages.some(m => m.id === msg.id)) continue
+        session.messages.push({ ...msg, images: parseImages(msg.images) })
+        const hasImage = parseImages(msg.images).length > 0
+          || ['pending', 'generating', 'retrying', 'done'].includes(msg.genStatus)
+        if (hasImage) {
+          // 当前群的侧栏预览跟随气泡播放，不跟随提前到达的 SSE。
+          const group = groups.value.find(g => g.id === msg.group_id)
+          if (group) group.last_message_id = msg.id
+          _setGroupPreview({ ...msg, msg_id: msg.id }, { image: true })
+        } else {
+          _setGroupPreview(msg)
+        }
+        _sortGroups()
         // 图片任务若提前开始或已经生成，此刻才激活门控；图片完成时会直接展示，不经过遮罩。
-        _imageGate.markVisible(msg.id)
-        _lastPushAt = Date.now()
-        scrollSignal.value++
+        session.imageGate.markVisible(msg.id)
+        session.lastPushAt = Date.now()
+        if (activeGroupId.value === session.groupId) scrollSignal.value++
       }
     } finally {
-      _currentPlaying = null
-      _playing = false
-      playing.value = false
+      session.currentPlaying = null
+      session.playing = false
+      if (activeGroupId.value === session.groupId) playing.value = false
     }
   }
 
@@ -153,13 +258,15 @@ export const useGroupsStore = defineStore('groups', () => {
    * 返回截断边界 msg id（后端据此删库）；无需截断时返回 null
    */
   function _interruptPlayback() {
-    const discarded = _playQueue.splice(0)
+    const session = _activeSession()
+    if (!session) return null
+    const discarded = session.playQueue.splice(0)
     for (const msg of discarded) {
-      _imageGate.discard(msg.id)
+      session.imageGate.discard(msg.id)
     }
     if (discarded.length === 0) return null
-    if (_currentPlaying) return _currentPlaying.id
-    const lastShown = [...messages.value].reverse().find(m => m.role === 'assistant' && typeof m.id === 'number')
+    if (session.currentPlaying) return session.currentPlaying.id
+    const lastShown = [...session.messages].reverse().find(m => m.role === 'assistant' && typeof m.id === 'number')
     return lastShown ? lastShown.id : null
   }
 
@@ -176,6 +283,8 @@ export const useGroupsStore = defineStore('groups', () => {
   function sendMessage(text) {
     const groupId = activeGroupId.value
     if (!groupId || !text.trim()) return
+    const session = _getSession(groupId)
+    if (!session) return
     lullCount.value = 0   // 用户发言 → 重置冷场自动触发额度
     const clientMsgId = `g${groupId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -184,7 +293,9 @@ export const useGroupsStore = defineStore('groups', () => {
       id: `temp_${clientMsgId}`, role: 'user', content: text,
       speaker_character_id: null, created_at: new Date().toISOString(), images: [],
     }
-    messages.value.push(tempMsg)
+    session.messages.push(tempMsg)
+    _setGroupPreview({ ...tempMsg, group_id: groupId })
+    _sortGroups()
     scrollSignal.value++
 
     const item = { text, client_msg_id: clientMsgId, tempMsg, groupId }
@@ -223,7 +334,12 @@ export const useGroupsStore = defineStore('groups', () => {
     _lastSentAt = 0
     const pending = _aggItems.splice(0)
     const pendingMessages = new Set(pending.map(item => item.tempMsg))
-    messages.value = messages.value.filter(message => !pendingMessages.has(message))
+    const session = _activeSession()
+    if (session) {
+      for (let i = session.messages.length - 1; i >= 0; i--) {
+        if (pendingMessages.has(session.messages[i])) session.messages.splice(i, 1)
+      }
+    }
     scrollSignal.value++
     return {
       ok: true,
@@ -255,10 +371,16 @@ export const useGroupsStore = defineStore('groups', () => {
         const { event, data } = value
         if (event === 'msg_saved' && data.role === 'user') {
           const matched = items.find(i => i.client_msg_id === data.client_msg_id)
-          if (matched) matched.tempMsg.id = data.id
-          _seenMsgIds.add(data.id)
+          if (matched) {
+            const tempId = matched.tempMsg.id
+            matched.tempMsg.id = data.id
+            const group = groups.value.find(g => g.id === groupId)
+            if (group?.last_message_id === tempId) group.last_message_id = data.id
+          }
+          _getSession(groupId)?.seenMsgIds.add(data.id)
         } else if (event === 'group_msg') {
-          _enqueue({ ...data, group_id: groupId })
+          const msg = { ...data, group_id: groupId }
+          _enqueue(msg)
         } else if (event === 'group_msg_update') {
           _applyContentUpdate(data)
         } else if (event === 'generate_start' || event === 'generate_progress' || event === 'generate_retrying' || event === 'generate_error') {
@@ -269,8 +391,8 @@ export const useGroupsStore = defineStore('groups', () => {
           console.warn('[groups] chat error:', data.message)
         }
       }
-      // 刷新群列表排序（last_message_at 变了）
-      loadGroups()
+      // 群列预览由 _drainQueue 在气泡真正上屏时逐条更新，
+      // 此处不立即重载 DB 最后一句，否则会越过播放队列抢跑。
     } catch (e) {
       console.warn('[groups] sendMessage failed:', e.message)
     } finally {
@@ -308,13 +430,18 @@ export const useGroupsStore = defineStore('groups', () => {
       const localResult = _undoPendingAggregation()
       if (localResult) return localResult
 
-      _playQueue.length = 0
-      _currentPlaying = null
-      _playing = false
+      const session = _activeSession()
+      if (session) {
+        session.playQueue.length = 0
+        session.currentPlaying = null
+        session.playing = false
+      }
       playing.value = false
-      _clearImageGates()
+      _clearImageGates(session)
 
       const result = await api.undoLastGroupRound(groupId)
+      _sessions.delete(groupId)
+      activeGroupId.value = null
       await selectGroup(groupId)
       await loadGroups()
       return result
@@ -324,30 +451,42 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   function _applyContentUpdate(data) {
-    const m = messages.value.find(m => m.id === data.id)
+    const groupId = data.group_id ?? activeGroupId.value
+    const session = _getSession(groupId)
+    if (!session) return
+    const m = session.messages.find(m => m.id === data.id)
     if (m) m.content = data.content
-    const q = _playQueue.find(m => m.id === data.id)
+    const q = session.playQueue.find(m => m.id === data.id)
     if (q) q.content = data.content
+    const group = groups.value.find(g => g.id === groupId)
+    if (group?.last_message_id === data.id) {
+      _setGroupPreview({ ...(m || q || data), ...data, group_id: groupId })
+    }
   }
 
   /** 按 msg_id 在已上屏消息、播放队列或正在延迟中的那条里找到目标（队列对象上屏时展开会带上字段） */
-  function _findMsg(msgId) {
-    return messages.value.find(m => m.id === msgId)
-      || _playQueue.find(m => m.id === msgId)
-      || (_currentPlaying && _currentPlaying.id === msgId ? _currentPlaying : null)
+  function _findMsg(session, msgId) {
+    return session.messages.find(m => m.id === msgId)
+      || session.playQueue.find(m => m.id === msgId)
+      || (session.currentPlaying && session.currentPlaying.id === msgId ? session.currentPlaying : null)
   }
 
   /** 图片生成状态 → 挂到消息对象上，供 ImageGenBubble 渲染遮罩/进度/错误（与私聊对齐） */
   function _applyGenState(event, data) {
-    if (data.group_id !== undefined && data.group_id !== activeGroupId.value) return
-    const m = _findMsg(data.msg_id)
+    const groupId = data.group_id ?? activeGroupId.value
+    const session = _getSession(groupId)
+    if (!session) return
+    const m = _findMsg(session, data.msg_id)
     if (event === 'generate_start') {
       if (!m) return
       if (m.genStatus === 'done' && parseImages(m.images).length > 0) return
-      const mode = _imageGate.start(data.msg_id, messages.value.some(message => message.id === data.msg_id))
+      const mode = session.imageGate.start(data.msg_id, session.messages.some(message => message.id === data.msg_id))
       m.genStatus = 'pending'
       // prompt 提前到达时不展示等待遮罩；等图片完成后直接显示成图。
       m.hideImagePending = mode === 'deferred'
+      if (session.messages.some(message => message.id === data.msg_id)) {
+        _setGroupPreview(data, { image: true })
+      }
     } else if (event === 'generate_progress') {
       if (!m) return
       m.genStatus = 'generating'
@@ -361,34 +500,38 @@ export const useGroupsStore = defineStore('groups', () => {
         m.genError = data.error
         m.hideImagePending = false
       }
-      _imageGate.finish(data.msg_id)
+      session.imageGate.finish(data.msg_id)
     }
-    scrollSignal.value++
+    if (activeGroupId.value === groupId) scrollSignal.value++
   }
 
   function _applyImages(data) {
-    if (data.group_id !== undefined && data.group_id !== activeGroupId.value) return
+    const groupId = data.group_id ?? activeGroupId.value
+    const session = _getSession(groupId)
+    if (!session) return
     const msgId = data.msg_id
-    const m = messages.value.find(m => m.id === msgId)
+    const m = session.messages.find(m => m.id === msgId)
     if (m) {
       m.images = data.images || []
       m.genStatus = 'done'
       m.hideImagePending = false
+      _setGroupPreview(data, { image: true })
     } else {
-      const q = _findMsg(msgId)
+      const q = _findMsg(session, msgId)
       if (q) {
         q.images = JSON.stringify(data.images || [])
         q.genStatus = 'done'
         q.hideImagePending = false
       }
     }
-    if (!data.images?.length) _imageGate.finish(msgId)
-    scrollSignal.value++
+    // 离开该群后没有 ImageGenBubble 会回报浏览器加载完成，后台队列直接解锁。
+    if (!data.images?.length || activeGroupId.value !== groupId) session.imageGate.finish(msgId)
+    if (activeGroupId.value === groupId) scrollSignal.value++
   }
 
   /** ImageGenBubble 确认图片已完成浏览器加载后，恢复后续分句播放。 */
   function markGroupImageLoaded(msgId) {
-    _imageGate.finish(msgId)
+    _activeSession()?.imageGate.finish(msgId)
     scrollSignal.value++
   }
 
@@ -397,33 +540,40 @@ export const useGroupsStore = defineStore('groups', () => {
   function connectSSE() {
     if (_unsubs.length > 0) return
     _unsubs.push(onEvent('group_message', (data) => {
+      const queued = _enqueue(data)
       if (data.group_id === activeGroupId.value) {
-        _enqueue(data)
         api.markGroupSeen(data.group_id)
       } else {
         const g = groups.value.find(g => g.id === data.group_id)
         if (g) {
+          if (!queued && _setGroupPreview(data)) _sortGroups()
           g.unread = (g.unread || 0) + 1
-          g.last_message_at = data.created_at
-          groups.value.sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0))
         } else {
           loadGroups()
         }
       }
     }))
+    _unsubs.push(onEvent('group_message_update', _applyContentUpdate))
     _unsubs.push(onEvent('group_created', () => loadGroups()))
     _unsubs.push(onEvent('group_round_undone', (data) => {
-      if (data.group_id === activeGroupId.value && !undoing.value) selectGroup(data.group_id)
+      const wasActive = data.group_id === activeGroupId.value
+      _sessions.delete(data.group_id)
+      if (wasActive && !undoing.value) {
+        activeGroupId.value = null
+        selectGroup(data.group_id)
+      }
       loadGroups()
     }))
     _unsubs.push(onEvent('group_image_start', (data) => {
-      if (data.group_id === activeGroupId.value) _applyGenState('generate_start', data)
+      if (_getSession(data.group_id)) _applyGenState('generate_start', data)
+      else _setGroupPreview(data, { image: true })
     }))
     _unsubs.push(onEvent('group_image_done', (data) => {
-      if (data.group_id === activeGroupId.value) _applyImages(data)
+      if (_getSession(data.group_id)) _applyImages(data)
+      else _setGroupPreview(data, { image: true })
     }))
     _unsubs.push(onEvent('group_image_error', (data) => {
-      if (data.group_id === activeGroupId.value) _applyGenState('generate_error', data)
+      if (_getSession(data.group_id)) _applyGenState('generate_error', data)
     }))
   }
 
@@ -433,9 +583,10 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   return {
-    groups, activeGroupId, activeGroup, messages, playing, sending, undoing, scrollSignal, totalUnread, lullCount,
+    groups, activeGroupId, activeGroup, messages, visibleMessages, hasMoreOlder,
+    playing, sending, undoing, scrollSignal, totalUnread, lullCount,
     loadGroups, createGroup, updateGroup, deleteGroup,
-    selectGroup, leaveGroup, sendMessage, nudge, undoLastRound,
+    selectGroup, leaveGroup, expandWindow, sendMessage, nudge, undoLastRound,
     connectSSE, disconnectSSE, markGroupImageLoaded,
   }
 })

@@ -28,6 +28,33 @@ function toISODate(sqliteDT) {
   return sqliteDT.replace(' ', 'T') + '.000Z';
 }
 
+function getLastMessagePreview(groupId) {
+  const db = getDb();
+  const last = db.prepare(`
+    SELECT m.id, m.role, m.content, m.images, c.display_name AS speaker_name
+    FROM messages m
+    LEFT JOIN characters c ON c.id = m.speaker_character_id
+    WHERE m.conversation_id = ?
+    ORDER BY m.created_at DESC, m.id DESC
+    LIMIT 1
+  `).get(groupConvId(groupId));
+
+  if (!last) return { last_message: null, last_message_id: null };
+
+  let hasImages = false;
+  try {
+    const images = JSON.parse(last.images || '[]');
+    hasImages = Array.isArray(images) && images.length > 0;
+  } catch { /* invalid legacy image data is treated as no image */ }
+
+  const speaker = last.role === 'user' ? '我' : (last.speaker_name || '角色');
+  const content = String(last.content || '').trim();
+  return {
+    last_message: `${speaker}：${hasImages || !content ? '[图片]' : content.slice(0, 80)}`,
+    last_message_id: last.id,
+  };
+}
+
 function serializeGroup(group) {
   const db = getDb();
   const unread = db.prepare(`
@@ -44,6 +71,7 @@ function serializeGroup(group) {
     last_message_at: toISODate(group.last_message_at),
     created_at: toISODate(group.created_at),
     unread,
+    ...getLastMessagePreview(group.id),
     members: group.members.map(m => ({
       id: m.id, display_name: m.display_name, avatar_path: m.avatar_path,
     })),
@@ -233,6 +261,7 @@ router.post('/:id/nudge', async (req, res) => {
       trigger: 'lull',
       emit: (event, data) => {
         if (event === 'group_msg') broadcast('group_message', data);
+        if (event === 'group_msg_update') broadcast('group_message_update', { ...data, group_id: groupId });
         if (event === 'generate_start') broadcast('group_image_start', data);
         if (event === 'generate_done') broadcast('group_image_done', data);
         if (event === 'generate_error') broadcast('group_image_error', data);
@@ -295,6 +324,7 @@ router.post('/:id/chat', async (req, res) => {
         send(event, data);
         // 同步广播到统一 SSE 总线：其他页面（未打开该群）也能收到红点/新消息/图片
         if (event === 'group_msg') broadcast('group_message', data);
+        if (event === 'group_msg_update') broadcast('group_message_update', { ...data, group_id: groupId });
         if (event === 'generate_start') broadcast('group_image_start', data);
         if (event === 'generate_done') broadcast('group_image_done', data);
         if (event === 'generate_error') broadcast('group_image_error', data);
