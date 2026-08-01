@@ -1319,6 +1319,7 @@ const DB_ONLY_KEYS = new Set([
   'llm_profiles',
   'active_llm_profile_id',
   'memory_settings',
+  'workflow_mode_auto_detected',
 ]);
 
 /** 写入单条系统设置 */

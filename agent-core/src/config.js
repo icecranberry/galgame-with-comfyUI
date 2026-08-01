@@ -514,3 +514,83 @@ export function syncActiveLlmProfile() {
   };
   writeProfilesToDb(profiles);
 }
+
+/**
+ * 项目初始化时自动检测工作流模式（仅执行一次）
+ *
+ * 读取 launcher_config.json → comfyui_exe → 推导 ComfyUI/models/diffusion_models 目录：
+ *   - 含 anima_turboV10 → 保持 turbo（默认即 turbo，无需操作）
+ *   - 含 anima_baseV10（且无 turbo）→ 切换到 base
+ *   - 目录不存在 / 无匹配模型 → 不操作
+ *
+ * 用 DB 标记位 workflow_mode_auto_detected 保证"仅首次检测一次"：
+ *   - 路径找不到时不标记（给用户装好 ComfyUI 后重启再检测的机会）
+ *   - 一旦成功读到 diffusion_models 目录就标记，后续重启永久跳过
+ *   - 用户在设置页手动切换的模式不会被覆盖
+ *
+ * 必须在 getDb()（loadSystemSettings 已把 DB 配置加载进内存）之后调用。
+ */
+export function autoDetectWorkflowMode() {
+  const MARKER_KEY = 'workflow_mode_auto_detected';
+  if (getSetting(MARKER_KEY) === 'true') {
+    // 已检测过，不再自动干预
+    return { skipped: true, reason: 'already_detected' };
+  }
+
+  try {
+    // 推导项目根目录：config.js 位于 agent-core/src/，往上两级到项目根（launcher_config.json 所在）
+    const projectRoot = resolve(__dirname, '..', '..');
+    const launcherConfigPath = resolve(projectRoot, 'launcher_config.json');
+
+    if (!fs.existsSync(launcherConfigPath)) {
+      return { skipped: true, reason: 'launcher_config_not_found' };
+    }
+
+    const launcherConfig = JSON.parse(fs.readFileSync(launcherConfigPath, 'utf-8'));
+    const comfyuiExe = launcherConfig.comfyui_exe;
+    if (!comfyuiExe) {
+      return { skipped: true, reason: 'comfyui_exe_not_configured' };
+    }
+
+    // comfyui_exe 是启动器 exe 路径，其所在目录即为 ComfyUI 安装根目录
+    const comfyuiRoot = dirname(comfyuiExe);
+    const diffusionModelsDir = resolve(comfyuiRoot, 'ComfyUI', 'models', 'diffusion_models');
+
+    if (!fs.existsSync(diffusionModelsDir)) {
+      // 路径不存在 → 不操作也不标记，下次启动再试
+      return { skipped: true, reason: 'diffusion_models_dir_not_found' };
+    }
+
+    // 扫描目录下的模型文件（不递归，仅顶层）
+    const entries = fs.readdirSync(diffusionModelsDir, { withFileTypes: true });
+    const modelFiles = entries
+      .filter(e => e.isFile())
+      .map(e => e.name.toLowerCase());
+
+    const hasTurbo = modelFiles.some(n => n.includes('anima_turbo'));
+    const hasBase = modelFiles.some(n => n.includes('anima_base'));
+
+    // 成功读到目录 → 标记已检测，后续不再自动干预
+    setSetting(MARKER_KEY, 'true');
+
+    if (hasTurbo) {
+      // 有 turbo 保持 turbo（默认即 turbo，无需改）
+      console.log('[config] autoDetectWorkflowMode: found anima_turboV10, keep turbo');
+      return { detected: true, mode: 'turbo', changed: false };
+    }
+    if (hasBase) {
+      // 有 base 无 turbo → 切换到 base
+      config.workflow.mode = 'base';
+      persistSettingSync('workflow_mode', 'base');
+      console.log('[config] autoDetectWorkflowMode: found anima_baseV10 (no turbo), switch to base');
+      return { detected: true, mode: 'base', changed: true };
+    }
+
+    // 目录存在但无匹配模型 → 不操作，但已标记（避免每次启动都扫描）
+    console.log('[config] autoDetectWorkflowMode: no anima_turbo/base model found, keep current mode');
+    return { detected: true, changed: false, reason: 'no_matching_model' };
+  } catch (err) {
+    console.warn('[config] autoDetectWorkflowMode failed:', err.message);
+    return { skipped: true, reason: 'error', error: err.message };
+  }
+}

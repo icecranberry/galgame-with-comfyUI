@@ -3,7 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config } from './src/config.js';
+import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
@@ -107,6 +107,9 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 初始化时根据 ComfyUI/models/diffusion_models 下的模型自动检测工作流模式（仅首次执行一次）
+autoDetectWorkflowMode();
 
 // 初始化角色名称注册表（交叉引用检索）
 refreshCharSearch();
