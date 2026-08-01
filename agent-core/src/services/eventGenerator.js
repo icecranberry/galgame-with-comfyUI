@@ -23,6 +23,7 @@ import { saveBase64Image } from './imagePaths.js';
 import { config } from '../config.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { applyMemoryActions, softDeleteMemory } from './memory/memoryRepository.js';
+import { getMemorySettings } from './memory/memoryConfig.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
 import { matchAll } from './characterSearch.js';
@@ -1546,22 +1547,25 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
       `).all(conversationId);
       for (const row of oldRows) softDeleteMemory(row.memory_id);
     }
-    applyMemoryActions({
-      conversationId,
-      sourceRawStartId: null,
-      sourceRawEndId: null,
-      actions: [{
-        action: 'create',
-        sourceMemoryIds: [],
-        memory: {
-          memoryType: 'event',
-          subject: 'character',
-          judgment: `${event.engaged ? '已完成事件' : '未互动事件'}：${event.title}。${conclusionData.summary}`,
-          reasoning: [event.description, branchReasoning].filter(Boolean).join('；'),
-          tags: [character.display_name, event.title, '事件'],
-        },
-      }],
-    });
+    const skipUnengaged = !event.engaged && !getMemorySettings().recordUnengagedEvents;
+    if (!skipUnengaged) {
+      applyMemoryActions({
+        conversationId,
+        sourceRawStartId: null,
+        sourceRawEndId: null,
+        actions: [{
+          action: 'create',
+          sourceMemoryIds: [],
+          memory: {
+            memoryType: 'event',
+            subject: 'character',
+            judgment: `${event.engaged ? '已完成事件' : '未互动事件'}：${event.title}。${conclusionData.summary}`,
+            reasoning: [event.description, branchReasoning].filter(Boolean).join('；'),
+            tags: [character.display_name, event.title, '事件'],
+          },
+        }],
+      });
+    }
   } catch (memErr) {
     console.error(`[eventGen] Memory save failed:`, memErr.message);
   }

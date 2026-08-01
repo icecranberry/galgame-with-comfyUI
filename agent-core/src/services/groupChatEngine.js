@@ -330,6 +330,7 @@ function pickMemberDynamic(group) {
 
 const LEGACY_IMG_LINE_RE = /\{["'“”]?prompt["'“”]?\s*:\s*["“]((?:[^"”\\]|\\.)*)["”]\s*\}/i;
 const DIRECT_IMG_LINE_RE = /^\{([\s\S]+)\}$/;
+const EMBEDDED_IMG_RE = /\{([^{}]*)\}/g;
 
 /** 提取群聊发图画面描述。新格式为 {description}，旧 JSON 格式仅用于历史兼容。 */
 export function extractGroupImagePrompt(body) {
@@ -343,14 +344,54 @@ export function extractGroupImagePrompt(body) {
   return prompt && !/^["'“”]?prompt["'“”]?\s*:/i.test(prompt) ? prompt : null;
 }
 
+/**
+ * 兜底提取任意位置的 {...}。群聊协议将花括号保留给生图，因此即使模型把它
+ * 单独换行或粘在台词后面，也不能让其中内容进入聊天气泡。
+ */
+export function extractEmbeddedGroupImagePrompt(body) {
+  const source = String(body || '');
+  const matches = [...source.matchAll(EMBEDDED_IMG_RE)];
+  if (matches.length === 0) return null;
+
+  const prompts = matches.map((match) => {
+    let prompt = match[1].trim();
+    const fieldWrapped = prompt.match(/^["'“”]?prompt["'“”]?\s*:\s*([\s\S]+)$/i);
+    if (fieldWrapped) prompt = fieldWrapped[1].trim().replace(/^["'“]|["'”]$/g, '').trim();
+    return prompt && !/^\.{3}$/.test(prompt) ? prompt : null;
+  }).filter(Boolean);
+
+  // 同一行出现多个花括号块时合并为一次图片任务，并确保所有块都不会泄漏到气泡。
+  const text = source.replace(EMBEDDED_IMG_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { prompt: prompts.length > 0 ? prompts.join(', ') : null, text };
+}
+
+/** 将纠错后的图片指令统一写回当前群聊协议格式。 */
+export function formatGroupImageLine(speakerName, prompt) {
+  return `[${String(speakerName || '').trim()}]: {${String(prompt || '').trim()}}`;
+}
+
 /** 解析一行剧本。返回 {speaker, text, imagePrompt} 或 null（无效行） */
 export function parseScriptLine(line, membersByName) {
   const trimmed = line.trim();
   if (!trimmed) return null;
   if (/^\[?END\]?$/i.test(trimmed)) return { end: true };
 
-  const m = trimmed.match(/^\[?([^:：\[\]]{1,20})\]?\s*[:：]\s*(.*)$/);
-  if (!m) return { continuation: trimmed };
+  const m = trimmed.match(/^\[?([^:：\[\]]{1,20})\]?\s*[:：]\s*([\s\S]*)$/);
+  if (!m) {
+    const embeddedImage = extractEmbeddedGroupImagePrompt(trimmed);
+    if (embeddedImage) {
+      if (!embeddedImage.prompt) {
+        return embeddedImage.text ? { continuation: embeddedImage.text } : null;
+      }
+      return {
+        continuation: embeddedImage.text || null,
+        imagePrompt: embeddedImage.prompt,
+      };
+    }
+    return { continuation: trimmed };
+  }
 
   const name = m[1].trim();
   const body = m[2].trim();
@@ -362,14 +403,24 @@ export function parseScriptLine(line, membersByName) {
   if (/^\[?发了一张图片\]?$/.test(body)) return null;
   if (/^<image_sent\s*\/>$/i.test(body)) return null;
 
+  const embeddedImage = extractEmbeddedGroupImagePrompt(body);
+  if (embeddedImage) {
+    const visibleText = embeddedImage.text
+      .replace(/\[[^\]]*(?:拍|自拍|照片|图片|手机|镜头|发来)[^\]]*\]/g, '')
+      .trim();
+    if (!embeddedImage.prompt) return visibleText ? { speaker: member, text: visibleText } : null;
+    return {
+      speaker: member,
+      text: visibleText || null,
+      imagePrompt: embeddedImage.prompt,
+    };
+  }
+
   // 防御：丢弃模型用方括号伪装的发图动作，发图只能走 {...}。
   if (/\[[^\]]*(?:拍|自拍|照片|图片|手机|镜头|发来)[^\]]*\]/.test(body)) {
     const cleaned = body.replace(/\[[^\]]*(?:拍|自拍|照片|图片|手机|镜头|发来)[^\]]*\]/g, '').trim();
     return cleaned ? { speaker: member, text: cleaned } : null;
   }
-
-  const imagePrompt = extractGroupImagePrompt(body);
-  if (imagePrompt) return { speaker: member, imagePrompt };
   return { speaker: member, text: body };
 }
 
@@ -674,9 +725,10 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const rawId = rawResult.lastInsertRowid;
 
   const written = [];       // 已写入的 messages 行（含 speaker；分句后每段一条）
-  const rawLines = [];      // 回填 raw 用（每个剧本行一条，含图片 JSON 行）
+  const rawLines = [];      // 回填 raw 用（每个剧本行一条，图片行已补齐角色前缀）
   const imagePromises = [];
   let buffer = '';
+  let pendingBraceLine = '';
   let ended = false;
   let seq = 0;
   let lineCount = 0;        // 剧本行计数（MAX_ROUND_MESSAGES 按行限制，不受分句膨胀影响）
@@ -688,6 +740,14 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const handleParsed = (parsed) => {
     if (!parsed || ended) return;
     if (parsed.end) { ended = true; return; }
+
+    // 模型偶尔把台词和 {...} 粘在同一行：台词照常落库，花括号内容单独生图。
+    if (parsed.imagePrompt && parsed.text) {
+      handleParsed({ speaker: parsed.speaker, text: parsed.text });
+      handleParsed({ speaker: parsed.speaker, imagePrompt: parsed.imagePrompt });
+      return;
+    }
+
     if (parsed.continuation) {
       // 无法识别说话人的行：拼到上一条消息（模型换行续写）
       const last = written[written.length - 1];
@@ -697,18 +757,25 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         rawLines[last.rawLineIdx] += ' ' + parsed.continuation.replace(/\n/g, ' ');
         emit('group_msg_update', { id: last.id, content: last.content });
       }
-      return;
+      if (!parsed.imagePrompt) return;
     }
     if (lineCount >= MAX_ROUND_MESSAGES && parsed.text) return;
 
     if (parsed.imagePrompt) {
+      // 独立的 {...} 行继承最近发言角色；若它出现在本轮开头，则归到首位群成员。
+      const recent = written[written.length - 1];
+      const speaker = parsed.speaker
+        || group.members.find(member => member.id === recent?.speaker_character_id)
+        || group.members[0];
+      if (!speaker) return;
+
       // 图片行：优先挂到该角色本轮最后一条消息；没有则新建空文本气泡承载图片
-      let target = [...written].reverse().find(w => w.speaker_character_id === parsed.speaker.id && !w.hasImage);
+      let target = [...written].reverse().find(w => w.speaker_character_id === speaker.id && !w.hasImage);
       if (!target) {
-        const r = insertMsg.run(conversationId, rawId, '', seq, parsed.speaker.id);
+        const r = insertMsg.run(conversationId, rawId, '', seq, speaker.id);
         target = {
           id: r.lastInsertRowid, content: '', seq, rawLineIdx: rawLines.length,
-          speaker_character_id: parsed.speaker.id, speaker_name: parsed.speaker.display_name,
+          speaker_character_id: speaker.id, speaker_name: speaker.display_name,
         };
         rawLines.push('');
         written.push(target);
@@ -716,10 +783,10 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         emit('group_msg', serializeMsg(target, groupId));
       }
       target.hasImage = true;
-      rawLines.push(`[${parsed.speaker.display_name}]: {"prompt":"${parsed.imagePrompt.replace(/"/g, '\\"')}"}`);
+      rawLines.push(formatGroupImageLine(speaker.display_name, parsed.imagePrompt));
       imagePromises.push(generateGroupImage(
         group,
-        parsed.speaker,
+        speaker,
         parsed.imagePrompt,
         target.id,
         emit,
@@ -752,13 +819,30 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       while ((nl = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        handleParsed(parseScriptLine(line, membersByName));
+        const candidate = pendingBraceLine ? `${pendingBraceLine}\n${line}` : line;
+        const openCount = (candidate.match(/\{/g) || []).length;
+        const closeCount = (candidate.match(/\}/g) || []).length;
+        if (openCount > closeCount) {
+          // 不完整的多行图片提示词先缓存，绝不能把半截 prompt 写进聊天气泡。
+          pendingBraceLine = candidate;
+          continue;
+        }
+        pendingBraceLine = '';
+        handleParsed(parseScriptLine(candidate, membersByName));
         if (ended) break;
       }
       if (ended) break;
     }
-    if (!ended && buffer.trim()) {
-      handleParsed(parseScriptLine(buffer, membersByName));
+    if (!ended) {
+      const tail = pendingBraceLine
+        ? `${pendingBraceLine}${buffer ? `\n${buffer}` : ''}`
+        : buffer;
+      const openCount = (tail.match(/\{/g) || []).length;
+      const closeCount = (tail.match(/\}/g) || []).length;
+      // 流结束仍未闭合的 {prompt 直接丢弃，优先避免提示词泄漏到聊天区。
+      if (tail.trim() && openCount <= closeCount) {
+        handleParsed(parseScriptLine(tail, membersByName));
+      }
     }
   } catch (err) {
     // 流中断：已写入的消息保留，回填已有内容

@@ -24,7 +24,7 @@
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
     <div v-if="mobileToast.visible" class="mobile-toast">
-      <span class="toast-text">手机端可访问 <b>{{ mobileToast.url }}</b> 打开邻舍</span>
+      <span class="toast-text">手机网页访问 <b>{{ mobileToast.url }}</b>打开邻舍</span>
     </div>
   </Transition>
 </template>

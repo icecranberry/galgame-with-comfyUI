@@ -216,6 +216,7 @@ const router = useRouter()
 const store = useGroupsStore()
 const chat = useChatStore()
 const confirmFn = inject('confirm', null)
+const toast = inject('toast', null)
 
 const scrollEl = ref(null)
 const msgListInner = ref(null)
@@ -595,12 +596,12 @@ async function requestUndoLastRound() {
 
   try {
     const result = await store.undoLastRound()
-    if (!result?.deleted) alert('当前没有可撤回的群聊记录')
+    if (!result?.deleted) toast?.('当前没有可撤回的群聊记录', 'warning')
     showSettings.value = false
     scrollToBottom(true)
     armLullTimer()
   } catch (err) {
-    alert(err.message || '撤回失败，请稍后重试')
+    toast?.(err.message || '撤回失败，请稍后重试', 'error')
   }
 }
 
@@ -618,7 +619,7 @@ function toggleMember(id) {
 
 async function onSaveSettings() {
   if (editMemberIds.value.length < 2) {
-    alert('群聊至少保留 2 个角色成员')
+    toast?.('群聊至少保留 2 个角色成员', 'warning')
     return
   }
   await store.updateGroup(store.activeGroupId, {

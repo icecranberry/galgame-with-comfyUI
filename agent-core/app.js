@@ -36,6 +36,7 @@ import { startWeatherScheduler } from './src/services/weatherService.js';
 import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
+import { ensureDefaultMemoryIndexes } from './src/services/memory/memoryRepository.js';
 
 const app = express();
 
@@ -163,6 +164,7 @@ server.keepAliveTimeout = 5000;
     const ok = await vectorHealth();
     if (ok) {
       console.log('[vector] connected');
+      setImmediate(() => ensureDefaultMemoryIndexes().catch(error => console.warn('[memory] default index initialization failed:', error.message)));
       break;
     }
     retries++;

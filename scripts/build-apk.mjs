@@ -12,7 +12,7 @@
 import { spawn } from "node:child_process";
 import {
   existsSync, mkdirSync, rmSync, createWriteStream,
-  readdirSync, renameSync, writeFileSync, statSync,
+  readdirSync, renameSync, readFileSync, writeFileSync, statSync,
 } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,8 +25,19 @@ const ROOT = resolve(__dirname, "..");
 const ANDROID_DIR = resolve(ROOT, "android-shell");
 const CACHE_DIR = resolve(ROOT, "launcher", "build_cache");
 const TOOLCHAIN = resolve(CACHE_DIR, "android-toolchain");
+const APP_BUILD_FILE = resolve(ANDROID_DIR, "app", "build.gradle.kts");
 
 const GRADLE_VER = "8.7";
+
+/** 读取 Android 构建配置中的应用版本名，作为 APK 发布文件名的唯一版本来源。 */
+export function getAndroidVersionName() {
+  const buildConfig = readFileSync(APP_BUILD_FILE, "utf8");
+  const match = buildConfig.match(/\bversionName\s*=\s*"([^"]+)"/);
+  if (!match) {
+    throw new Error(`未在 ${APP_BUILD_FILE} 中找到 versionName`);
+  }
+  return match[1];
+}
 
 // ── 终端颜色 ──
 const C = {

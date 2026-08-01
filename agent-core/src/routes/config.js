@@ -15,8 +15,8 @@ import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 import { restartWeatherScheduler } from '../services/weatherService.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
-import { getMemorySettings, saveMemorySettings, normalizeMemorySettings, getEmbeddingProfile } from '../services/memory/memoryConfig.js';
-import { testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
+import { getMemorySettings, saveMemorySettings, normalizeMemorySettings } from '../services/memory/memoryConfig.js';
+import { getPreferredMemoryEmbeddingProfile, testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
 import { reindexAllMemories } from '../services/memory/memoryRepository.js';
 
 const router = Router();
@@ -29,10 +29,10 @@ router.get('/memory', (_req, res) => {
 router.put('/memory', (req, res) => {
   try {
     const previous = getMemorySettings({ includeSecrets: true });
-    const previousProfile = getEmbeddingProfile(previous)?.fingerprint || null;
+    const previousProfile = getPreferredMemoryEmbeddingProfile(previous).fingerprint;
     if (req.body?.enabled !== undefined) updateFeatureFlag('memory', Boolean(req.body.enabled));
     const saved = saveMemorySettings(req.body || {});
-    const nextProfile = getEmbeddingProfile(saved)?.fingerprint || null;
+    const nextProfile = getPreferredMemoryEmbeddingProfile(saved).fingerprint;
     if (previousProfile !== nextProfile) {
       getDb().prepare(`UPDATE memory_fragments SET embedding_state = ?, embedding_error = NULL WHERE status = 'active'`)
         .run(nextProfile ? 'stale' : 'disabled');

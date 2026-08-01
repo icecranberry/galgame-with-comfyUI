@@ -1,138 +1,170 @@
 <template>
   <div class="memory-page">
     <header class="page-header">
-      <button class="back" @click="router.push('/settings')">‹</button>
+      <button class="back" aria-label="返回系统设置" @click="router.push('/settings')">‹</button>
       <div>
         <h2>聊天记忆</h2>
-        <p>独立于绘图知识库；未配置嵌入模型时使用本地文本召回。</p>
+        <p>角色会整理你们聊过的重要内容，并在之后的对话中自然想起来。</p>
       </div>
-      <span :class="['mode-badge', form.embedding.enabled ? 'hybrid' : 'text']">
-        {{ form.embedding.enabled ? '混合模式' : '文本模式' }}
-      </span>
+      <span class="mode-badge hybrid">自动选择模型</span>
     </header>
 
     <div v-if="loading" class="state-card">正在加载…</div>
     <template v-else>
       <section class="card overview">
         <div>
-          <h3>工作方式</h3>
-          <p>每个完整对话轮次后台判断是否值得记忆，并以判断句、依据和标签保存。嵌入和重排序失败时自动回退，不影响聊天和记忆写入。</p>
+          <h3>它会记住什么</h3>
+          <p>系统会从聊天中挑选值得保留的内容，例如重要经历、喜好、约定和情绪。即使智能查找暂时不可用，也不会影响正常聊天和保存记忆。</p>
         </div>
         <div class="stats">
-          <div><strong>{{ activeCount }}</strong><span>有效记忆</span></div>
-          <div><strong>{{ indexedCount }}</strong><span>已索引</span></div>
-          <div><strong>{{ failedCount }}</strong><span>索引失败</span></div>
+          <div><strong>{{ activeCount }}</strong><span>已保存</span></div>
+          <div><strong>{{ indexedCount }}</strong><span>智能查找可用</span></div>
+          <div><strong>{{ failedCount }}</strong><span>需要处理</span></div>
         </div>
       </section>
 
+      <details ref="advancedRef" class="advanced-settings" open :class="{ 'is-open': advancedOpen }">
+        <summary @click.prevent="toggleAdvanced">
+          <span>高级设置</span>
+          <small>智能匹配、结果优化和查找数量</small>
+        </summary>
+        <div class="advanced-content" :class="{ collapsing: advancedCollapsing }">
       <div class="grid">
         <section class="card">
           <div class="section-title">
-            <div><h3>嵌入模型</h3><p>OpenAI-compatible <code>/embeddings</code></p></div>
-            <label class="switch"><input v-model="form.embedding.enabled" type="checkbox"><span></span></label>
+            <div><h3>自定义智能匹配（可选）</h3><p>系统已有默认模型；开启并完整填写后，会优先使用你的模型。</p></div>
+            <label class="switch"><input v-model="form.embedding.enabled" type="checkbox" aria-label="使用自定义智能匹配模型"><span></span></label>
           </div>
-          <template v-if="form.embedding.enabled">
-            <label>供应商
-              <select v-model="form.embedding.provider" @change="applyEmbeddingProvider">
-                <option v-for="item in embeddingProviders" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </select>
+          <CollapseTransition :show="form.embedding.enabled">
+            <div class="collapse-body">
+            <label>服务商
+              <DropdownSelect
+                class="memory-select"
+                :model-value="form.embedding.provider"
+                :options="embeddingProviderOptions"
+                placeholder="请选择服务商"
+                @update:model-value="selectEmbeddingProvider"
+              />
             </label>
             <label>服务地址<input v-model.trim="form.embedding.baseURL" placeholder="https://api.openai.com/v1"></label>
-            <label>模型<input v-model.trim="form.embedding.model" placeholder="text-embedding-3-small"></label>
-            <label>API Key<input v-model="form.embedding.apiKey" type="password" :placeholder="embeddingKeyHint"></label>
+            <label>模型名称<input v-model.trim="form.embedding.model" placeholder="text-embedding-3-small"></label>
+            <label>访问密钥（API Key）<input v-model="form.embedding.apiKey" type="password" :placeholder="embeddingKeyHint"></label>
             <div class="two-col">
-              <label>向量维度（可空）<input v-model.number="form.embedding.dimensions" type="number" min="1"></label>
-              <label>超时 ms<input v-model.number="form.embedding.timeoutMs" type="number" min="1000"></label>
+              <label>结果维度（可不填）<input v-model.number="form.embedding.dimensions" type="number" min="1"></label>
+              <label>最长等待时间（毫秒）<input v-model.number="form.embedding.timeoutMs" type="number" min="1000"></label>
             </div>
-            <label>附加请求头 JSON<textarea v-model="embeddingHeaders" rows="3"></textarea></label>
-            <button class="ghost" :disabled="testingEmbedding" @click="testEmbedding">{{ testingEmbedding ? '测试中…' : '测试嵌入连接' }}</button>
-          </template>
-          <p v-else class="disabled-note">不配置也可完整工作：SQLite 文本索引负责召回。</p>
+            <label>高级请求设置（JSON）<textarea v-model="embeddingHeaders" rows="3"></textarea></label>
+            <button class="ghost" :disabled="testingEmbedding" @click="testEmbedding">{{ testingEmbedding ? '测试中…' : '测试智能匹配' }}</button>
+            </div>
+          </CollapseTransition>
+          <p v-if="!form.embedding.enabled" class="disabled-note">当前使用系统默认模型；默认服务当天失败 5 次后，会自动切换到本地模型。</p>
         </section>
 
         <section class="card">
           <div class="section-title">
-            <div><h3>重排序模型</h3><p>Jina / Cohere-compatible <code>/rerank</code></p></div>
-            <label class="switch"><input v-model="form.reranker.enabled" type="checkbox"><span></span></label>
+            <div><h3>自定义结果排序（可选）</h3><p>系统已有默认排序模型；开启并完整填写后，会优先使用你的模型。</p></div>
+            <label class="switch"><input v-model="form.reranker.enabled" type="checkbox" aria-label="使用自定义结果排序模型"><span></span></label>
           </div>
-          <template v-if="form.reranker.enabled">
-            <label>供应商
-              <select v-model="form.reranker.provider" @change="applyRerankerProvider">
-                <option v-for="item in rerankerProviders" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </select>
+          <CollapseTransition :show="form.reranker.enabled">
+            <div class="collapse-body">
+            <label>服务商
+              <DropdownSelect
+                class="memory-select"
+                :model-value="form.reranker.provider"
+                :options="rerankerProviderOptions"
+                placeholder="请选择服务商"
+                @update:model-value="selectRerankerProvider"
+              />
             </label>
             <label>服务地址<input v-model.trim="form.reranker.baseURL" placeholder="https://api.jina.ai/v1"></label>
-            <label>模型<input v-model.trim="form.reranker.model" placeholder="jina-reranker-v2-base-multilingual"></label>
-            <label>API Key<input v-model="form.reranker.apiKey" type="password" :placeholder="rerankerKeyHint"></label>
+            <label>模型名称<input v-model.trim="form.reranker.model" placeholder="jina-reranker-v2-base-multilingual"></label>
+            <label>访问密钥（API Key）<input v-model="form.reranker.apiKey" type="password" :placeholder="rerankerKeyHint"></label>
             <div class="two-col">
-              <label>返回数量<input v-model.number="form.reranker.topN" type="number" min="1" max="50"></label>
-              <label>超时 ms<input v-model.number="form.reranker.timeoutMs" type="number" min="1000"></label>
+              <label>保留几条结果<input v-model.number="form.reranker.topN" type="number" min="1" max="50"></label>
+              <label>最长等待时间（毫秒）<input v-model.number="form.reranker.timeoutMs" type="number" min="1000"></label>
             </div>
-            <label>附加请求头 JSON<textarea v-model="rerankerHeaders" rows="3"></textarea></label>
-            <button class="ghost" :disabled="testingReranker" @click="testReranker">{{ testingReranker ? '测试中…' : '测试重排序连接' }}</button>
-          </template>
-          <p v-else class="disabled-note">关闭时使用文本排序或文本＋向量融合排序。</p>
+            <label>高级请求设置（JSON）<textarea v-model="rerankerHeaders" rows="3"></textarea></label>
+            <button class="ghost" :disabled="testingReranker" @click="testReranker">{{ testingReranker ? '测试中…' : '测试结果优化' }}</button>
+            </div>
+          </CollapseTransition>
+          <p v-if="!form.reranker.enabled" class="disabled-note">当前使用系统默认排序模型；默认服务当天失败 5 次后，会自动切换到本地模型。</p>
         </section>
       </div>
 
-      <section class="card params">
-        <h3>召回参数</h3>
-        <div class="three-col">
-          <label>最终注入数量<input v-model.number="form.topK" type="number" min="1" max="20"></label>
-          <label>文本候选数<input v-model.number="form.textCandidates" type="number" min="5" max="100"></label>
-          <label>向量候选数<input v-model.number="form.vectorCandidates" type="number" min="5" max="100"></label>
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>未互动奇遇记忆</h3><p>关闭后，角色经历但用户未参与的奇遇在结束总结时不再写入聊天记忆（RAG），但仍会归档到往期奇遇。</p></div>
+          <label class="switch"><input v-model="form.recordUnengagedEvents" type="checkbox" aria-label="RAG不记录未互动奇遇"><span></span></label>
         </div>
-        <p>当前 profile：<code>{{ stats.profile || '无（文本模式）' }}</code></p>
+      </section>
+
+      <section class="card params">
+        <h3>查找范围</h3>
+        <div class="three-col">
+          <label>每次最多使用几条记忆<input v-model.number="form.topK" type="number" min="1" max="20"></label>
+          <label>按文字查找的数量<input v-model.number="form.textCandidates" type="number" min="5" max="100"></label>
+          <label>按意思查找的数量<input v-model.number="form.vectorCandidates" type="number" min="5" max="100"></label>
+        </div>
+        <p>当前方式：优先使用完整的自定义配置，否则自动使用系统默认或本地模型。</p>
       </section>
 
       <section class="card warning">
-        <h3>隔离说明</h3>
-        <p>这些配置只用于聊天记忆。绘图库 RAG 继续固定使用本地 Jina ONNX 和 <code>image_prompt_knowledge</code> corpus，不会随这里的模型切换。</p>
+        <h3>不会影响绘图功能</h3>
+        <p>这里的设置只影响聊天记忆，不会改变绘图知识库或图片生成效果。</p>
       </section>
+
+      <div class="actions">
+        <button class="ghost" :disabled="maintaining" @click="retryFailed">重新处理失败项</button>
+        <button class="ghost" :disabled="maintaining" @click="reindex">重新整理全部记忆</button>
+        <button class="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+      </div>
+        </div>
+      </details>
 
       <section class="card memory-manager">
         <div class="manager-heading">
           <div>
             <h3>记忆管理</h3>
-            <p>查看 SQLite 中的记忆正文。删除采用软删除，并同步安排向量删除任务。</p>
+            <p>查看角色保存的聊天记忆，也可以删除不希望角色继续记住的内容。</p>
           </div>
-          <button class="ghost compact" :disabled="memoriesLoading" @click="loadMemories">刷新</button>
+          <button v-if="memoriesQueried" class="ghost compact" :disabled="memoriesLoading" @click="loadMemories">刷新</button>
         </div>
         <div class="memory-filters">
-          <label>限定会话
-            <select v-model="memoryFilters.conversationId" @change="applyMemoryFilters">
-              <option value="">全部会话</option>
-              <optgroup v-if="characterConversations.length" label="角色私聊">
-                <option v-for="item in characterConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </optgroup>
-              <optgroup v-if="groupConversations.length" label="群聊">
-                <option v-for="item in groupConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </optgroup>
-            </select>
+          <label>选择角色
+            <DropdownSelect
+              class="memory-select"
+              :model-value="memoryFilters.conversationId"
+              :options="characterOptions"
+              placeholder="输入角色名称"
+              aria-label="选择或搜索角色"
+              searchable
+              @update:model-value="selectMemoryConversation"
+            />
           </label>
           <label>记忆类型
-            <select v-model="memoryFilters.memoryType" @change="applyMemoryFilters">
-              <option value="">全部类型</option>
-              <option value="knowledge">知识</option>
-              <option value="skill">技能</option>
-              <option value="emotion">情绪</option>
-              <option value="event">事件</option>
-            </select>
+            <DropdownSelect
+              class="memory-select"
+              :model-value="memoryFilters.memoryType"
+              :options="memoryTypeOptions"
+              @update:model-value="selectMemoryType"
+            />
           </label>
-          <label>状态
-            <select v-model="memoryFilters.status" @change="applyMemoryFilters">
-              <option value="active">有效</option>
-              <option value="superseded">已被替代</option>
-              <option value="deleted">已删除</option>
-              <option value="all">全部状态</option>
-            </select>
+          <label>使用状态
+            <DropdownSelect
+              class="memory-select"
+              :model-value="memoryFilters.status"
+              :options="memoryStatusOptions"
+              @update:model-value="selectMemoryStatus"
+            />
           </label>
-          <button class="primary filter-button" :disabled="memoriesLoading" @click="applyMemoryFilters">筛选</button>
+          <button class="primary filter-button" :disabled="memoriesLoading" @click="queryMemories">{{ memoriesLoading ? '查询中…' : '查询记忆' }}</button>
         </div>
 
-        <div v-if="memoriesLoading" class="inline-state">正在加载记忆…</div>
-        <div v-else-if="memories.length === 0" class="inline-state">没有符合条件的记忆。</div>
-        <div v-else class="memory-list">
+        <Transition name="fade" mode="out-in">
+        <div v-if="!memoriesQueried" key="empty" class="inline-state">选择角色和条件，然后点击“查询记忆”。</div>
+        <div v-else-if="memoriesLoading" key="loading" class="inline-state">正在加载记忆…</div>
+        <div v-else-if="memories.length === 0" key="none" class="inline-state">没有符合条件的记忆。</div>
+        <TransitionGroup v-else key="list" name="list" tag="div" class="memory-list">
           <article v-for="item in memories" :key="item.memory_id" class="memory-item">
             <div class="memory-item-main">
               <div class="memory-meta">
@@ -145,21 +177,22 @@
                 <span>{{ formatDate(item.updated_at || item.created_at) }}</span>
               </div>
               <div class="memory-judgment">{{ item.judgment || item.content }}</div>
-              <div v-if="item.reasoning" class="memory-reasoning">依据：{{ item.reasoning }}</div>
+              <div v-if="item.reasoning" class="memory-reasoning">记住原因：{{ item.reasoning }}</div>
               <div v-if="item.tags?.length" class="memory-tags">
                 <span v-for="tag in item.tags" :key="tag">{{ tag }}</span>
               </div>
               <div class="memory-index-state">
-                索引：{{ embeddingStateLabel(item.embedding_state) }}
+                整理状态：{{ embeddingStateLabel(item.embedding_state) }}
                 <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
               </div>
             </div>
             <button v-if="item.status !== 'deleted'" class="danger-link" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
-              {{ deletingMemoryId === item.memory_id ? '删除中…' : '软删除' }}
+              {{ deletingMemoryId === item.memory_id ? '删除中…' : '删除' }}
             </button>
           </article>
-        </div>
-        <div class="pagination">
+        </TransitionGroup>
+        </Transition>
+        <div v-if="memoriesQueried" class="pagination">
           <span>共 {{ memoryTotal }} 条 · 第 {{ memoryPage }} / {{ memoryPageCount }} 页</span>
           <div>
             <button class="ghost compact" :disabled="memoryPage <= 1 || memoriesLoading" @click="changeMemoryPage(-1)">上一页</button>
@@ -171,53 +204,68 @@
       <div class="management-grid">
         <section class="card recall-tester">
           <div class="manager-heading">
-            <div><h3>召回测试</h3><p>使用当前文本、向量和重排序配置执行一次真实召回。</p></div>
+            <div><h3>测试能否想起</h3><p>输入一段聊天内容，看看角色会找到哪些相关记忆。</p></div>
           </div>
-          <label>查询内容<input v-model.trim="recallQuery" placeholder="输入想验证的记忆线索" @keyup.enter="runRecallTest"></label>
-          <label>限定会话（可空）
-            <select v-model="recallConversationId">
-              <option value="">全部会话</option>
-              <optgroup v-if="characterConversations.length" label="角色私聊">
-                <option v-for="item in characterConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </optgroup>
-              <optgroup v-if="groupConversations.length" label="群聊">
-                <option v-for="item in groupConversations" :key="item.id" :value="item.id">{{ item.name }}</option>
-              </optgroup>
-            </select>
+          <label>聊天内容<input v-model.trim="recallQuery" placeholder="例如：我最喜欢什么食物？" @keyup.enter="runRecallTest"></label>
+          <label>选择角色（可不选）
+            <div class="recall-inline">
+              <DropdownSelect
+                v-model="recallConversationId"
+                class="memory-select"
+                :options="characterOptions"
+                placeholder="输入角色名称"
+                aria-label="选择或搜索角色"
+                searchable
+              />
+              <button class="primary" :disabled="recallLoading || !recallQuery" @click="runRecallTest">{{ recallLoading ? '查找中…' : '开始测试' }}</button>
+            </div>
           </label>
-          <button class="ghost" :disabled="recallLoading || !recallQuery" @click="runRecallTest">{{ recallLoading ? '召回中…' : '测试召回' }}</button>
-          <div v-if="recallResults.length" class="recall-results">
+          <Transition name="fade" mode="out-in">
+          <TransitionGroup v-if="recallResults.length" key="results" name="list" tag="div" class="recall-results">
             <div v-for="(item, index) in recallResults" :key="item.memory_id || index" class="recall-item">
               <div><strong>{{ index + 1 }}. {{ item.judgment || item.content }}</strong></div>
-              <small>{{ conversationName(item.conversation_id) }} <code>{{ item.conversation_id }}</code> · {{ memoryTypeLabel(item.memory_type) }} · 分数 {{ formatScore(item.score) }} · {{ (item.sources || []).join(' + ') }}</small>
+              <small>{{ conversationName(item.conversation_id) }} · {{ memoryTypeLabel(item.memory_type) }} · 相关度 {{ formatScore(item.score) }} · {{ sourceLabels(item.sources) }}</small>
             </div>
-          </div>
-          <div v-else-if="recallTested && !recallLoading" class="inline-state">没有召回到相关记忆。</div>
+          </TransitionGroup>
+          <div v-else-if="recallTested && !recallLoading" key="none" class="inline-state">没有找到相关记忆。</div>
+          </Transition>
         </section>
 
         <section class="card index-jobs">
           <div class="manager-heading">
-            <div><h3>最近索引任务</h3><p>显示最近 30 条向量写入和删除任务。</p></div>
+            <div><h3>最近处理记录</h3><p>显示最近 30 条记忆整理和删除记录。</p></div>
             <button class="ghost compact" :disabled="jobsLoading" @click="loadIndexJobs">刷新</button>
           </div>
-          <div v-if="jobsLoading" class="inline-state">正在加载任务…</div>
-          <div v-else-if="indexJobs.length === 0" class="inline-state">暂无索引任务。</div>
+          <div v-if="jobsLoading" class="inline-state">正在加载记录…</div>
+          <div v-else-if="indexJobs.length === 0" class="inline-state">暂无处理记录。</div>
           <div v-else class="job-list">
             <div v-for="job in indexJobs" :key="job.id" class="job-item">
-              <div><code>#{{ job.id }}</code> {{ job.job_type === 'delete' ? '删除' : '写入' }} · <span :class="['job-status', job.status]">{{ jobStatusLabel(job.status) }}</span></div>
-              <small :title="job.memory_id">{{ shortMemoryId(job.memory_id) }} · {{ formatDate(job.updated_at || job.created_at) }}</small>
+              <div class="job-heading">
+                <strong>{{ job.job_type === 'delete' ? '删除记忆' : '整理记忆' }}</strong>
+                <span :class="['job-status', job.status]">{{ jobStatusLabel(job.status) }}</span>
+              </div>
+              <div class="job-meta">
+                <span v-if="job.memory_type" class="type-pill">{{ memoryTypeLabel(job.memory_type) }}</span>
+                <span v-if="job.conversation_id">{{ conversationName(job.conversation_id) }}</span>
+                <span>{{ formatDate(job.updated_at || job.created_at) }}</span>
+              </div>
+              <details v-if="job.memory_content" class="job-details">
+                <summary>
+                  <span class="job-preview">{{ job.memory_content }}</span>
+                  <span class="job-detail-action" aria-hidden="true"></span>
+                </summary>
+                <div v-if="job.memory_reasoning" class="job-reasoning">记住原因：{{ job.memory_reasoning }}</div>
+                <div v-if="job.tags.length" class="job-tags">
+                  <span v-for="tag in job.tags" :key="tag">{{ tag }}</span>
+                </div>
+              </details>
+              <div v-else class="job-unavailable">这条记录的记忆内容已不可用。</div>
               <div v-if="job.error" class="job-error" :title="job.error">{{ job.error }}</div>
             </div>
           </div>
         </section>
       </div>
 
-      <div class="actions">
-        <button class="ghost" :disabled="maintaining" @click="retryFailed">重试失败项</button>
-        <button class="ghost" :disabled="maintaining" @click="reindex">重建聊天索引</button>
-        <button class="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
-      </div>
-      <p v-if="message" :class="['message', messageType]">{{ message }}</p>
     </template>
   </div>
 </template>
@@ -225,6 +273,8 @@
 <script setup>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import DropdownSelect from '../components/DropdownSelect.vue'
+import CollapseTransition from '../components/CollapseTransition.vue'
 import {
   deleteMemoryFragment,
   getMemoryConfig,
@@ -254,16 +304,61 @@ const rerankerProviders = [
   { id: 'voyage', name: 'Voyage AI', baseURL: 'https://api.voyageai.com/v1', model: 'rerank-2.5' },
   { id: 'custom', name: '自定义（Jina/Cohere-compatible）' },
 ]
+const embeddingProviderOptions = embeddingProviders.map(item => ({ value: item.id, label: item.name }))
+const rerankerProviderOptions = rerankerProviders.map(item => ({ value: item.id, label: item.name }))
+const memoryTypeOptions = [
+  { value: '', label: '全部类型' },
+  { value: 'knowledge', label: '信息' },
+  { value: 'skill', label: '技能' },
+  { value: 'emotion', label: '情绪' },
+  { value: 'event', label: '经历' },
+]
+const memoryStatusOptions = [
+  { value: 'active', label: '正在使用' },
+  { value: 'superseded', label: '已有更新' },
+  { value: 'deleted', label: '已删除' },
+  { value: 'all', label: '全部状态' },
+]
 
 const router = useRouter()
 const confirmDialog = inject('confirm', null)
+const toast = inject('toast', null)
 const loading = ref(true)
 const saving = ref(false)
 const maintaining = ref(false)
 const testingEmbedding = ref(false)
 const testingReranker = ref(false)
-const message = ref('')
-const messageType = ref('ok')
+const advancedOpen = ref(false)
+const advancedCollapsing = ref(false)
+const advancedRef = ref(null)
+
+function toggleAdvanced() {
+  const content = advancedRef.value?.querySelector('.advanced-content')
+  if (!content) return
+  if (!advancedOpen.value) {
+    // 展开：先设 max-height 为当前 scrollHeight，触发过渡
+    content.style.maxHeight = content.scrollHeight + 'px'
+    advancedOpen.value = true
+    // 过渡结束后放开 max-height 以适应内部交互（如下拉框展开）
+    content.addEventListener('transitionend', function handler() {
+      content.style.maxHeight = 'none'
+      content.removeEventListener('transitionend', handler)
+    })
+  } else {
+    // 收拢：先把 none 转成具体 px 值（触发 reflow），再降为 0
+    content.style.maxHeight = content.scrollHeight + 'px'
+    advancedCollapsing.value = true
+    requestAnimationFrame(() => {
+      content.style.maxHeight = '0px'
+      content.addEventListener('transitionend', function handler() {
+        advancedCollapsing.value = false
+        advancedOpen.value = false
+        content.style.maxHeight = ''
+        content.removeEventListener('transitionend', handler)
+      })
+    })
+  }
+}
 const stats = reactive({ rows: [], profile: null, mode: 'text' })
 
 const MEMORY_PAGE_SIZE = 20
@@ -271,6 +366,7 @@ const memories = ref([])
 const memoryTotal = ref(0)
 const memoryPage = ref(1)
 const memoriesLoading = ref(false)
+const memoriesQueried = ref(false)
 const deletingMemoryId = ref(null)
 const memoryFilters = reactive({ conversationId: '', memoryType: '', status: 'active' })
 const memoryPageCount = computed(() => Math.max(1, Math.ceil(memoryTotal.value / MEMORY_PAGE_SIZE)))
@@ -288,6 +384,10 @@ const conversationLabels = computed(() => new Map([
   ...characterConversations.value.map(item => [item.id, `私聊 · ${item.name}`]),
   ...groupConversations.value.map(item => [item.id, `群聊 · ${item.name}`]),
 ]))
+const characterOptions = computed(() => [
+  { value: '', label: '全部角色' },
+  ...characterConversations.value.map(item => ({ value: item.id, label: item.name })),
+])
 
 const recallQuery = ref('')
 const recallConversationId = ref('')
@@ -299,7 +399,7 @@ const indexJobs = ref([])
 const jobsLoading = ref(false)
 
 const form = reactive({
-  enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24,
+  enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
   reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000, hasApiKey: false },
 })
@@ -320,12 +420,15 @@ function providerPayload(provider, headersText) {
 }
 function payload() {
   return {
-    enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates,
+    enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
     embedding: providerPayload(form.embedding, embeddingHeaders.value),
     reranker: providerPayload(form.reranker, rerankerHeaders.value),
   }
 }
-function notify(text, type = 'ok') { message.value = text; messageType.value = type }
+function notify(text, type = 'ok') {
+  const toastType = type === 'error' ? 'error' : 'success'
+  toast?.(text, toastType)
+}
 function applyProviderPreset(target, providers) {
   const preset = providers.find(item => item.id === target.provider)
   if (!preset || preset.id === 'custom') return
@@ -333,20 +436,26 @@ function applyProviderPreset(target, providers) {
   target.model = preset.model
   if (Object.prototype.hasOwnProperty.call(preset, 'dimensions')) target.dimensions = preset.dimensions
 }
-function applyEmbeddingProvider() { applyProviderPreset(form.embedding, embeddingProviders) }
-function applyRerankerProvider() { applyProviderPreset(form.reranker, rerankerProviders) }
+function selectEmbeddingProvider(value) {
+  form.embedding.provider = value
+  applyProviderPreset(form.embedding, embeddingProviders)
+}
+function selectRerankerProvider(value) {
+  form.reranker.provider = value
+  applyProviderPreset(form.reranker, rerankerProviders)
+}
 
 function memoryTypeLabel(type) {
-  return ({ knowledge: '知识', skill: '技能', emotion: '情绪', event: '事件' })[type] || type || '未知'
+  return ({ knowledge: '信息', skill: '技能', emotion: '情绪', event: '经历' })[type] || type || '未知'
 }
 function memoryStatusLabel(status) {
-  return ({ active: '有效', superseded: '已被替代', deleted: '已删除' })[status] || status || '未知'
+  return ({ active: '正在使用', superseded: '已有更新', deleted: '已删除' })[status] || status || '未知'
 }
 function embeddingStateLabel(state) {
-  return ({ indexed: '已索引', pending: '等待中', failed: '失败', stale: '待重建', disabled: '文本模式' })[state] || state || '未知'
+  return ({ indexed: '已整理', pending: '等待整理', failed: '整理失败', stale: '需要重新整理', disabled: '等待智能整理' })[state] || state || '未知'
 }
 function jobStatusLabel(status) {
-  return ({ pending: '等待中', completed: '完成', failed: '失败' })[status] || status || '未知'
+  return ({ pending: '等待处理', completed: '已完成', failed: '处理失败' })[status] || status || '未知'
 }
 function formatDate(value) {
   if (!value) return '未知时间'
@@ -354,9 +463,9 @@ function formatDate(value) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('zh-CN', { hour12: false })
 }
 function formatScore(value) { return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—' }
-function shortMemoryId(value) {
-  const text = String(value || '无 memory_id')
-  return text.length > 24 ? `${text.slice(0, 12)}…${text.slice(-8)}` : text
+function sourceLabels(sources) {
+  const labels = { fts: '文字匹配', ngram: '相近文字', vector: '意思匹配' }
+  return (sources || []).map(source => labels[source] || source).join(' + ')
 }
 function conversationName(conversationId) {
   if (!conversationId) return '无会话'
@@ -369,7 +478,7 @@ async function loadConversationDirectory() {
     const [characterResult, groupResult] = await Promise.all([listCharacters(), listGroups()])
     characters.value = characterResult.characters || []
     groups.value = groupResult.groups || []
-  } catch (error) { notify(`会话名称加载失败：${error.message}`, 'error') }
+  } catch (error) { notify(`角色列表加载失败：${error.message}`, 'error') }
 }
 
 async function loadMemories() {
@@ -391,24 +500,43 @@ async function loadMemories() {
   } catch (error) { notify(error.message, 'error') }
   finally { memoriesLoading.value = false }
 }
-function applyMemoryFilters() {
+function queryMemories() {
+  memoriesQueried.value = true
   memoryPage.value = 1
   loadMemories()
+}
+function resetMemoryQuery() {
+  memoriesQueried.value = false
+  memories.value = []
+  memoryTotal.value = 0
+  memoryPage.value = 1
+}
+function selectMemoryConversation(value) {
+  memoryFilters.conversationId = value
+  resetMemoryQuery()
+}
+function selectMemoryType(value) {
+  memoryFilters.memoryType = value
+  resetMemoryQuery()
+}
+function selectMemoryStatus(value) {
+  memoryFilters.status = value
+  resetMemoryQuery()
 }
 function changeMemoryPage(delta) {
   memoryPage.value = Math.min(memoryPageCount.value, Math.max(1, memoryPage.value + delta))
   loadMemories()
 }
 async function removeMemory(item) {
-  const prompt = `确定软删除这条记忆吗？\n\n${item.judgment || item.content}`
+  const prompt = `删除后，这条内容不会再被角色想起。确定删除吗？\n\n${item.judgment || item.content}`
   const confirmed = confirmDialog
-    ? await confirmDialog({ title: '软删除记忆', message: prompt, okText: '删除', danger: true })
+    ? await confirmDialog({ title: '删除记忆', message: prompt, okText: '删除', danger: true })
     : window.confirm(prompt)
   if (!confirmed) return
   deletingMemoryId.value = item.memory_id
   try {
     await deleteMemoryFragment(item.memory_id)
-    notify('记忆已软删除，向量删除任务已安排')
+    notify('这条记忆已删除，角色不会再想起它')
     await Promise.all([loadMemories(), loadIndexJobs(), refreshStats()])
   } catch (error) { notify(error.message, 'error') }
   finally { deletingMemoryId.value = null }
@@ -429,9 +557,22 @@ async function runRecallTest() {
 
 async function loadIndexJobs() {
   jobsLoading.value = true
-  try { indexJobs.value = (await getMemoryIndexJobs(30)).jobs || [] }
+  try {
+    const jobs = (await getMemoryIndexJobs(30)).jobs || []
+    indexJobs.value = jobs.map(job => ({ ...job, tags: parseJobTags(job.memory_tags) }))
+  }
   catch (error) { notify(error.message, 'error') }
   finally { jobsLoading.value = false }
+}
+
+function parseJobTags(value) {
+  if (Array.isArray(value)) return value
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
 async function refreshStats() {
@@ -439,34 +580,36 @@ async function refreshStats() {
   catch (error) { notify(error.message, 'error') }
 }
 
+async function applyConfig() {
+  const [config, stat] = await Promise.all([getMemoryConfig(), getMemoryStats()])
+  Object.assign(form, config)
+  form.embedding = { ...form.embedding, ...config.embedding }
+  form.reranker = { ...form.reranker, ...config.reranker }
+  embeddingHeaders.value = JSON.stringify(config.embedding.headers || {}, null, 2)
+  rerankerHeaders.value = JSON.stringify(config.reranker.headers || {}, null, 2)
+  Object.assign(stats, stat)
+}
 async function load() {
   loading.value = true
-  try {
-    const [config, stat] = await Promise.all([getMemoryConfig(), getMemoryStats()])
-    Object.assign(form, config)
-    form.embedding = { ...form.embedding, ...config.embedding }
-    form.reranker = { ...form.reranker, ...config.reranker }
-    embeddingHeaders.value = JSON.stringify(config.embedding.headers || {}, null, 2)
-    rerankerHeaders.value = JSON.stringify(config.reranker.headers || {}, null, 2)
-    Object.assign(stats, stat)
-  } catch (error) { notify(error.message, 'error') }
+  try { await applyConfig() }
+  catch (error) { notify(error.message, 'error') }
   finally { loading.value = false }
 }
 async function save() {
   saving.value = true
-  try { await updateMemoryConfig(payload()); await load(); notify('聊天记忆设置已保存') }
+  try { await updateMemoryConfig(payload()); await applyConfig(); notify('聊天记忆设置已保存') }
   catch (error) { notify(error.message, 'error') }
   finally { saving.value = false }
 }
 async function testEmbedding() {
   testingEmbedding.value = true
-  try { const result = await testMemoryEmbedding(providerPayload(form.embedding, embeddingHeaders.value)); notify(`嵌入连接正常，维度 ${result.dimensions}`) }
+  try { const result = await testMemoryEmbedding(providerPayload(form.embedding, embeddingHeaders.value)); notify(`智能匹配连接正常，结果维度 ${result.dimensions}`) }
   catch (error) { notify(error.message, 'error') }
   finally { testingEmbedding.value = false }
 }
 async function testReranker() {
   testingReranker.value = true
-  try { await testMemoryReranker(providerPayload(form.reranker, rerankerHeaders.value)); notify('重排序连接正常') }
+  try { await testMemoryReranker(providerPayload(form.reranker, rerankerHeaders.value)); notify('结果优化连接正常') }
   catch (error) { notify(error.message, 'error') }
   finally { testingReranker.value = false }
 }
@@ -474,8 +617,8 @@ async function reindex() {
   maintaining.value = true
   try {
     const result = await reindexMemories()
-    notify(`索引处理完成：${result.indexed}/${result.total}`)
-    await Promise.all([load(), loadMemories(), loadIndexJobs()])
+    notify(`记忆整理完成：${result.indexed}/${result.total}`)
+    await Promise.all([applyConfig(), memoriesQueried.value ? loadMemories() : Promise.resolve(), loadIndexJobs()])
   }
   catch (error) { notify(error.message, 'error') }
   finally { maintaining.value = false }
@@ -484,14 +627,14 @@ async function retryFailed() {
   maintaining.value = true
   try {
     const result = await retryFailedMemories()
-    notify(`重试完成：${result.indexed}/${result.total}`)
-    await Promise.all([load(), loadMemories(), loadIndexJobs()])
+    notify(`重新处理完成：${result.indexed}/${result.total}`)
+    await Promise.all([applyConfig(), memoriesQueried.value ? loadMemories() : Promise.resolve(), loadIndexJobs()])
   }
   catch (error) { notify(error.message, 'error') }
   finally { maintaining.value = false }
 }
 
-onMounted(() => Promise.all([load(), loadConversationDirectory(), loadMemories(), loadIndexJobs()]))
+onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs()]))
 </script>
 
 <style scoped>
@@ -499,12 +642,22 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadMemories()
 .page-header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
 .page-header h2 { margin: 0 0 4px; font-size: 24px; }
 .page-header p, .card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
-.back { width: 38px; height: 38px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); color: var(--text-bright); font-size: 28px; cursor: pointer;display: flex;align-items: center; }
+.back { width: 38px; height: 38px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); color: var(--text-bright); font-size: 28px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .mode-badge { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .mode-badge.text { background: rgba(85, 130, 180, .14); color: #4677a8; }
 .mode-badge.hybrid { background: rgba(224, 123, 108, .16); color: var(--accent); }
 .card, .state-card { background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: 16px; padding: 22px; box-shadow: var(--glass-shadow); }
 .card h3 { margin: 0 0 6px; font-size: 15px; }
+.advanced-settings { position: relative; z-index: 40; margin-bottom: 16px; border: 1px solid var(--glass-border); border-radius: 16px; background: var(--glass-bg); box-shadow: var(--glass-shadow); }
+.advanced-settings summary { min-height: 52px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 14px 18px; cursor: pointer; list-style: none; }
+.advanced-settings summary::-webkit-details-marker { display: none; }
+.advanced-settings summary::after { content: '›'; margin-left: auto; color: var(--text-secondary); font-size: 24px; line-height: 1; transform: rotate(90deg); transition: transform .3s ease; }
+.advanced-settings.is-open summary::after { transform: rotate(-90deg); }
+.advanced-settings summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 14px; }
+.advanced-settings summary span { font-size: 15px; font-weight: 700; }
+.advanced-settings summary small { color: var(--text-secondary); font-size: 12px; }
+.advanced-content { padding: 0 16px 16px; overflow: hidden; max-height: 0; transition: max-height .3s cubic-bezier(0.22, 0.61, 0.36, 1), padding .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.advanced-content.collapsing { padding-top: 0; padding-bottom: 0; }
 .overview { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
 .stats { display: flex; gap: 24px; flex-shrink: 0; }
 .stats div { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
@@ -513,22 +666,23 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadMemories()
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .section-title { display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px; }
 label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 12px; }
-input, textarea, select { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid #e2d6c7; border-radius: 8px; background: rgba(255,255,255,.9); color: var(--text-bright); font: inherit; }
-select { cursor: pointer; }
+input, textarea { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid #e2d6c7; border-radius: 8px; background: rgba(255,255,255,.9); color: var(--text-bright); font: inherit; }
+.memory-select { margin-top: 6px; }
 textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .two-col, .three-col { display: grid; gap: 12px; }
 .two-col { grid-template-columns: 1fr 1fr; }
 .three-col { grid-template-columns: repeat(3, 1fr); }
 .params, .warning { margin-top: 16px; }
 .disabled-note { padding: 16px; background: rgba(85, 130, 180, .08); border-radius: 10px; }
+.collapse-body { padding-top: 4px; }
 .warning { border-color: rgba(224, 123, 108, .35); }
-.memory-manager { margin-top: 16px; }
+.memory-manager { position: relative; z-index: 30; margin-top: 16px; }
 .manager-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .memory-filters { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, .75fr) minmax(130px, .75fr) auto; gap: 12px; align-items: end; }
 .memory-filters label { margin-bottom: 0; }
 .filter-button { height: 38px; margin-bottom: 0; white-space: nowrap; }
 .inline-state { padding: 22px; text-align: center; color: var(--text-secondary); font-size: 13px; }
-.memory-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.memory-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; position: relative; }
 .memory-item { display: flex; align-items: flex-start; gap: 16px; padding: 15px; border: 1px solid rgba(125, 105, 85, .14); border-radius: 12px; background: rgba(255,255,255,.36); }
 .memory-item-main { min-width: 0; flex: 1; }
 .memory-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--text-secondary); font-size: 11px; }
@@ -550,11 +704,31 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; color: var(--text-secondary); font-size: 12px; }
 .pagination > div { display: flex; gap: 8px; }
 button.compact { padding: 7px 11px; font-size: 12px; }
-.management-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-.recall-results, .job-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: 420px; overflow-y: auto; }
+.management-grid { position: relative; z-index: 20; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.recall-tester { position: relative; z-index: 2; }
+.recall-inline { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.recall-inline .memory-select { flex: 1; margin-top: 0; }
+.recall-inline .primary { flex-shrink: 0; height: 38px; }
+.index-jobs { position: relative; z-index: 1; }
+.recall-results, .job-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: 420px; overflow-y: auto; position: relative; }
 .recall-item, .job-item { padding: 11px 12px; border-radius: 10px; background: rgba(255,255,255,.38); border: 1px solid rgba(125, 105, 85, .12); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .recall-item small, .job-item small { color: var(--text-secondary); }
-.job-item { display: grid; gap: 3px; }
+.job-item { display: grid; gap: 8px; }
+.job-heading, .job-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.job-heading { justify-content: space-between; font-size: 13px; }
+.job-meta { color: var(--text-secondary); font-size: 11px; }
+.job-details { border-top: 1px solid rgba(125, 105, 85, .12); padding-top: 7px; }
+.job-details summary { min-height: 44px; display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; cursor: pointer; list-style: none; color: var(--text-bright); }
+.job-details summary::-webkit-details-marker { display: none; }
+.job-preview { min-width: 0; flex: 1; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.6; }
+.job-details[open] .job-preview { display: block; overflow: visible; }
+.job-detail-action { flex-shrink: 0; color: var(--accent); font-size: 11px; white-space: nowrap; }
+.job-detail-action::after { content: '查看详情'; }
+.job-details[open] .job-detail-action::after { content: '收起'; }
+.job-reasoning { margin-top: 4px; padding: 8px 10px; border-radius: 7px; background: rgba(85, 130, 180, .07); color: var(--text-secondary); line-height: 1.6; }
+.job-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 10px; }
+.job-unavailable { color: var(--text-secondary); font-size: 11px; }
 .job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.failed { color: #c34f4f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
@@ -562,9 +736,17 @@ button.primary, button.ghost { border-radius: 9px; padding: 10px 18px; font-weig
 button.primary { border: 0; background: var(--accent); color: white; }
 button.ghost { border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-bright); }
 button:disabled { opacity: .55; cursor: default; }
-.message { text-align: right; margin-top: 10px; font-size: 13px; }
-.message.ok { color: #4d9666; }.message.error { color: #c34f4f; }
-.switch { margin: 0; position: relative; width: 42px; height: 24px; }
+
+/* ── 列表/状态切换过渡 ── */
+.fade-enter-active, .fade-leave-active { transition: opacity .25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+.list-enter-active { transition: all .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.list-leave-active { transition: all .25s ease; position: absolute; left: 0; right: 0; }
+.list-move { transition: transform .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.list-enter-from { opacity: 0; transform: translateY(-8px); }
+.list-leave-to { opacity: 0; transform: translateX(12px); }
+code { font-family: ui-monospace, monospace; }
+.switch { margin: 0; position: relative; width: 42px; height: 24px; cursor: pointer; }
 .switch input { display: none; }.switch span { position: absolute; inset: 0; border-radius: 14px; background: #c9c3ba; transition: .2s; }
 .switch span::after { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: white; transition: .2s; }
 .switch input:checked + span { background: var(--accent); }.switch input:checked + span::after { transform: translateX(18px); }

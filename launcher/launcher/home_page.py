@@ -323,7 +323,7 @@ class HomePage(QWidget):
             self._cached_ip = get_local_ip()
         if self._cached_ip:
             self._banner_text.setText(
-                f'手机端可访问 '
+                f'手机网页访问 '
                 f'<span style="color:#E07B6C;font-weight:bold;">http://{self._cached_ip}:3099</span>'
                 f' 打开邻舍'
             )

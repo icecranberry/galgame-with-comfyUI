@@ -56,7 +56,21 @@ router.post('/retry-failed', async (_req, res) => {
 
 router.get('/index-jobs', (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
-  res.json({ jobs: getDb().prepare(`SELECT * FROM memory_index_jobs ORDER BY id DESC LIMIT ?`).all(limit) });
+  const jobs = getDb().prepare(`
+    SELECT
+      mij.*,
+      mf.conversation_id,
+      mf.memory_type,
+      mf.status AS memory_status,
+      COALESCE(mf.judgment, mf.content) AS memory_content,
+      mf.reasoning AS memory_reasoning,
+      mf.tags AS memory_tags
+    FROM memory_index_jobs mij
+    LEFT JOIN memory_fragments mf ON mf.memory_id = mij.memory_id
+    ORDER BY mij.id DESC
+    LIMIT ?
+  `).all(limit);
+  res.json({ jobs });
 });
 
 router.get('/emotion/history', (req, res) => {

@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/index.js';
-import { getMemorySettings, getEmbeddingProfile } from './memoryConfig.js';
-import { embedMemoryText } from './memoryProviders.js';
+import { getMemorySettings } from './memoryConfig.js';
+import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
 
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
@@ -40,7 +40,7 @@ export function validateMemoryAction(input = {}) {
 export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions }) {
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
-  const profile = getEmbeddingProfile();
+  const profile = getPreferredMemoryEmbeddingProfile();
   const created = [];
   const superseded = [];
   const transaction = db.transaction(() => {
@@ -158,7 +158,7 @@ export function clearConversationMemories(conversationId) {
     db.prepare(`DELETE FROM memory_retrieval_audits WHERE conversation_id = ?`).run(conversationId);
   });
   transaction();
-  const corpora = [...new Set(rows.map(row => row.embedding_profile).filter(Boolean).map(profile => `memory_v2_${profile}`))];
+  const corpora = [...new Set(rows.map(row => row.embedding_profile).filter(profile => profile && profile !== 'local_builtin').map(profile => `memory_v2_${profile}`))];
   void deleteByConversation(conversationId).catch(() => {});
   for (const corpus of corpora) void deleteByConversation(conversationId, corpus).catch(() => {});
   return rows.length;
@@ -180,21 +180,28 @@ export async function indexMemory(memoryId) {
   const row = getDb().prepare(`SELECT * FROM memory_fragments WHERE memory_id = ?`).get(memoryId);
   if (!row || row.status !== 'active') return false;
   const settings = getMemorySettings({ includeSecrets: true });
-  const profile = getEmbeddingProfile(settings);
-  if (!profile) {
-    getDb().prepare(`UPDATE memory_fragments SET embedding_state = 'disabled', embedding_profile = NULL, embedding_error = NULL WHERE memory_id = ?`).run(memoryId);
-    finishIndexJobs(memoryId, 'upsert', 'completed');
-    return false;
-  }
   try {
     const text = memoryText(row);
-    const { embedding } = await embedMemoryText(text, settings);
-    await upsertVector(memoryId, text, {
+    const metadata = {
       memory_id: memoryId,
       conversation_id: row.conversation_id,
       memory_type: row.memory_type,
       tags: JSON.stringify(parseTags(row.tags)),
-    }, null, profile.corpus, embedding);
+    };
+    let localReady = false;
+    try {
+      await upsertVector(memoryId, text, metadata);
+      localReady = true;
+    } catch (error) {
+      console.warn('[memory-index] local backup failed:', error.message);
+    }
+
+    const { embedding, profile } = await embedMemoryText(text, settings);
+    if (profile.corpus !== 'memory_fragments') {
+      await upsertVector(memoryId, text, metadata, null, profile.corpus, embedding);
+    } else if (!localReady) {
+      await upsertVector(memoryId, text, metadata);
+    }
     getDb().prepare(`UPDATE memory_fragments SET chroma_id = ?, embedding_profile = ?, embedding_state = 'indexed', embedding_error = NULL WHERE memory_id = ?`).run(memoryId, profile.fingerprint, memoryId);
     finishIndexJobs(memoryId, 'upsert', 'completed');
     return true;
@@ -209,11 +216,40 @@ export async function reindexAllMemories() {
   const rows = getDb().prepare(`SELECT memory_id FROM memory_fragments WHERE status = 'active'`).all();
   const jobIds = [];
   for (const row of rows) {
-    enqueueIndexJob(getDb(), 'upsert', row.memory_id, getEmbeddingProfile()?.fingerprint || null);
+    enqueueIndexJob(getDb(), 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
     jobIds.push(row.memory_id);
   }
-  const results = await Promise.all(jobIds.map(indexMemory));
+  const results = [];
+  for (const memoryId of jobIds) results.push(await indexMemory(memoryId));
   return { total: results.length, indexed: results.filter(Boolean).length };
+}
+
+export async function ensureDefaultMemoryIndexes() {
+  const db = getDb();
+  const settingKey = 'memory_default_models_indexed_v1';
+  const existing = db.prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(settingKey);
+  if (existing?.setting_value === '1') return { skipped: true };
+
+  db.prepare(`UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL WHERE status = 'active' AND embedding_state = 'disabled'`).run();
+
+  const rows = db.prepare(`
+    SELECT memory_id FROM memory_fragments
+    WHERE status = 'active' AND embedding_state IN ('failed', 'pending', 'stale', 'disabled')
+  `).all();
+  const results = [];
+  for (const row of rows) {
+    enqueueIndexJob(db, 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
+    results.push(await indexMemory(row.memory_id));
+  }
+
+  const result = { total: results.length, indexed: results.filter(Boolean).length };
+  db.prepare(`
+    INSERT INTO system_settings(setting_key, setting_value, updated_at)
+    VALUES (?, '1', CURRENT_TIMESTAMP)
+    ON CONFLICT(setting_key) DO UPDATE SET setting_value = '1', updated_at = CURRENT_TIMESTAMP
+  `).run(settingKey);
+  console.log(`[memory] default index initialization complete: total=${result.total}, indexed=${result.indexed}, failed=${result.total - result.indexed}`);
+  return result;
 }
 
 export async function retryFailedIndexJobs() {
@@ -224,9 +260,10 @@ export async function retryFailedIndexJobs() {
   `).all();
   for (const row of upserts) {
     const pending = db.prepare(`SELECT 1 FROM memory_index_jobs WHERE memory_id = ? AND job_type = 'upsert' AND status = 'pending' LIMIT 1`).get(row.memory_id);
-    if (!pending) enqueueIndexJob(db, 'upsert', row.memory_id, getEmbeddingProfile()?.fingerprint || null);
+    if (!pending) enqueueIndexJob(db, 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
   }
-  const upsertResults = await Promise.all(upserts.map(row => indexMemory(row.memory_id)));
+  const upsertResults = [];
+  for (const row of upserts) upsertResults.push(await indexMemory(row.memory_id));
 
   const deletes = db.prepare(`
     SELECT DISTINCT mf.* FROM memory_index_jobs mij
@@ -265,12 +302,12 @@ function finishIndexJobs(memoryId, jobType, status, error = null) {
 }
 
 async function removeMemoryVector(row) {
-  if (!row.embedding_profile) {
-    finishIndexJobs(row.memory_id, 'delete', 'completed');
-    return true;
-  }
   try {
-    await deleteVector(row.memory_id || row.chroma_id, `memory_v2_${row.embedding_profile}`);
+    const corpora = ['memory_fragments'];
+    if (row.embedding_profile && row.embedding_profile !== 'local_builtin') corpora.push(`memory_v2_${row.embedding_profile}`);
+    const results = await Promise.allSettled(corpora.map(corpus => deleteVector(row.memory_id || row.chroma_id, corpus)));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
     finishIndexJobs(row.memory_id, 'delete', 'completed');
     return true;
   } catch (error) {

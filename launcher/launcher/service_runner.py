@@ -112,6 +112,7 @@ SERVICES = {
             "0.0.0.0",
             "--port",
             "8765",
+            "--no-access-log",
         ],
     },
     "agent_core": {

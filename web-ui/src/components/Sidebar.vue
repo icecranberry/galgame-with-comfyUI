@@ -233,7 +233,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { useMomentsStore } from '../stores/moments.js'
@@ -259,6 +259,7 @@ const proactive = useProactiveStore()
 const schedule = useScheduleStore()
 const mailbox = useMailboxStore()
 const groups = useGroupsStore()
+const toast = inject('toast', null)
 const showMoreMenu = ref(false)
 const charListEl = ref(null)
 
@@ -296,7 +297,7 @@ async function submitCreateGroup() {
     router.push('/group/' + group.id)
     if (props.isMobile) emit('charSelected')
   } catch (e) {
-    alert(e.message || '建群失败')
+    toast?.(e.message || '建群失败', 'error')
   } finally {
     cgSubmitting.value = false
   }

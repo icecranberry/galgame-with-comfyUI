@@ -6,6 +6,7 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   topK: 7,
   textCandidates: 24,
   vectorCandidates: 24,
+  recordUnengagedEvents: true,
   embedding: {
     enabled: false,
     provider: 'custom',
@@ -48,6 +49,7 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     topK: clampInt(input.topK, base.topK, 1, 20),
     textCandidates: clampInt(input.textCandidates, base.textCandidates, 5, 100),
     vectorCandidates: clampInt(input.vectorCandidates, base.vectorCandidates, 5, 100),
+    recordUnengagedEvents: input.recordUnengagedEvents === undefined ? base.recordUnengagedEvents : Boolean(input.recordUnengagedEvents),
     embedding: {
       ...base.embedding,
       ...embedding,
@@ -120,7 +122,7 @@ export function getEmbeddingProfile(settings = getMemorySettings({ includeSecret
 }
 
 export function getMemoryMode(settings = getMemorySettings({ includeSecrets: true })) {
-  return getEmbeddingProfile(settings) ? 'hybrid' : 'text';
+  return 'hybrid';
 }
 
 function maskSecrets(settings) {

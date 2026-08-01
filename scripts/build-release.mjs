@@ -583,8 +583,10 @@ async function main() {
 
   // 构建逻辑在 build-apk.mjs 中，可通过 npm run apk 单独执行
   let apkBuilt = null;   // 构建成功后的 APK 绝对路径
+  let apkVersionName = null; // 独立于桌面端 VERSION，来源于 Android versionName
   try {
-    const { buildApk } = await import("./build-apk.mjs");
+    const { buildApk, getAndroidVersionName } = await import("./build-apk.mjs");
+    apkVersionName = getAndroidVersionName();
     apkBuilt = await buildApk();
   } catch (e) {
     warn(`APK 构建异常: ${e.message}`);
@@ -678,7 +680,9 @@ async function main() {
   }
 
   // 安卓 APK 壳
-  const APK_NAME = `邻舍-安卓-v${VERSION}.apk`;
+  const APK_NAME = apkVersionName
+    ? `【非刚需，但体验明显提高】邻舍-v${apkVersionName}.apk`
+    : "【非刚需，但体验明显提高】邻舍.apk";
   if (apkBuilt) {
     const { copyFileSync } = await import("node:fs");
     copyFileSync(apkBuilt, resolve(RELEASE_DIR, APK_NAME));
@@ -703,7 +707,7 @@ async function main() {
     "4. 浏览器访问 http://localhost:3099 支持手机端网页访问，网页地址在日志中显示",
     "",
     "【手机端（安卓）】",
-    "压缩包内附带 邻舍-安卓-vX.apk，安装后输入电脑端显示的局域网地址即可使用",
+    `压缩包内附带 ${APK_NAME}，安装后输入电脑端显示的局域网地址即可使用`,
     "（相比手机浏览器：按返回键会返回上一页，而不是退出到桌面）",
     "",
     "【版本更新】",

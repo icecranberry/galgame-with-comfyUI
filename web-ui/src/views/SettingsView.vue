@@ -529,7 +529,7 @@
         <div class="memory-settings-header">
           <div>
             <h3>聊天记忆</h3>
-            <p>PAI 风格记忆整理；不配置嵌入模型也可使用文本召回</p>
+            <p>PAI风格记忆整理：让角色记住你们聊过的重要事情，并在之后的聊天中自然想起来</p>
           </div>
         </div>
 
@@ -551,7 +551,7 @@
         <button
           type="button"
           class="memory-settings-entry"
-          aria-label="打开聊天记忆详细设置：召回模型与记忆内容"
+          aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
@@ -560,8 +560,8 @@
             </svg>
           </span>
           <span class="memory-entry-copy">
-            <span class="memory-entry-title">详细设置</span>
-            <span class="memory-entry-desc">召回模型与记忆内容</span>
+            <span class="memory-entry-title">管理聊天记忆</span>
+            <span class="memory-entry-desc">查看、删除记忆，调整记忆的查找方式</span>
           </span>
           <span class="memory-entry-arrow" aria-hidden="true">
             <svg viewBox="0 0 24 24">

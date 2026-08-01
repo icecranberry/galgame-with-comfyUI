@@ -1,50 +1,73 @@
 import { getDb } from '../db/index.js';
 import { vectorSearch } from './vectorClient.js';
-import { getMemorySettings, getEmbeddingProfile } from './memory/memoryConfig.js';
+import { getMemorySettings } from './memory/memoryConfig.js';
 import { embedMemoryText, rerankMemories } from './memory/memoryProviders.js';
 import { parseTags } from './memory/memoryRepository.js';
 
 const RRF_K = 60;
 
 export async function hybridSearch(query, options = {}) {
+  const startedAt = Date.now();
   const settings = getMemorySettings({ includeSecrets: true });
   const conversationIds = normalizeConversationIds(options.conversationId, options.conversationIds);
   const topK = clamp(options.topK ?? settings.topK, 1, 20);
   const textLimit = clamp(options.textCandidates ?? settings.textCandidates, topK, 100);
   const vectorLimit = clamp(options.vectorCandidates ?? settings.vectorCandidates, topK, 100);
   const textResults = textSearch(query, conversationIds, textLimit);
-  const profile = getEmbeddingProfile(settings);
+  let profile = null;
+  let embeddingSource = 'unknown';
+  let embeddingElapsedMs = null;
+  let rerankerSource = 'skipped';
+  let rerankerElapsedMs = null;
   let vectorResults = [];
   let fallbackReason = null;
 
-  if (profile) {
-    try {
-      const { embedding } = await embedMemoryText(query, settings);
-      const vectorConversationScope = conversationIds.length === 0
-        ? null
-        : (conversationIds.length === 1 ? conversationIds[0] : conversationIds);
-      const raw = await vectorSearch(query, {
-        embedding,
-        topK: vectorLimit,
-        conversationId: vectorConversationScope,
-        corpus: profile.corpus,
-      });
-      vectorResults = hydrateVectorResults(raw, conversationIds);
-    } catch (error) {
-      fallbackReason = `embedding: ${error.message}`;
-    }
+  try {
+    const embeddingResult = await embedMemoryText(query, settings);
+    profile = embeddingResult.profile;
+    embeddingSource = embeddingResult.source;
+    embeddingElapsedMs = embeddingResult.elapsedMs;
+    const vectorConversationScope = conversationIds.length === 0
+      ? null
+      : (conversationIds.length === 1 ? conversationIds[0] : conversationIds);
+    const raw = await vectorSearch(query, {
+      embedding: embeddingResult.embedding,
+      topK: vectorLimit,
+      conversationId: vectorConversationScope,
+      corpus: profile.corpus,
+    });
+    vectorResults = hydrateVectorResults(raw, conversationIds);
+    if (embeddingResult.source === 'local') fallbackReason = 'embedding: using local built-in model';
+  } catch (error) {
+    fallbackReason = `embedding: ${error.message}`;
   }
 
   let candidates = profile ? rrfFusion([textResults, vectorResults], Math.max(topK, settings.reranker.topN || topK)) : textResults;
-  if (settings.reranker.enabled && candidates.length > 1) {
+  if (candidates.length > 1) {
     try {
       candidates = await rerankMemories(query, candidates, settings);
+      rerankerSource = candidates[0]?.rerank_source || 'skipped';
+      rerankerElapsedMs = candidates[0]?.rerank_elapsed_ms ?? null;
     } catch (error) {
+      rerankerSource = 'failed';
       fallbackReason = [fallbackReason, `reranker: ${error.message}`].filter(Boolean).join('; ');
     }
   }
   const final = candidates.slice(0, topK);
-  writeAudit({ conversationIds, query, mode: profile ? 'hybrid' : 'text', textCount: textResults.length, vectorCount: vectorResults.length, memoryIds: final.map(item => item.memory_id), fallbackReason });
+  const mode = profile ? 'hybrid' : 'text';
+  writeAudit({ conversationIds, query, mode, textCount: textResults.length, vectorCount: vectorResults.length, memoryIds: final.map(item => item.memory_id), fallbackReason });
+  logRagResult({
+    query,
+    conversationIds,
+    mode,
+    embeddingSource,
+    embeddingElapsedMs,
+    rerankerSource,
+    rerankerElapsedMs,
+    elapsedMs: Date.now() - startedAt,
+    results: final,
+    fallbackReason,
+  });
   return final;
 }
 
@@ -181,6 +204,29 @@ function writeAudit({ conversationIds, query, mode, textCount, vectorCount, memo
   } catch (error) {
     console.error('[memorySearch] audit failed:', error.message);
   }
+}
+
+function logRagResult({ query, conversationIds, mode, embeddingSource, embeddingElapsedMs, rerankerSource, rerankerElapsedMs, elapsedMs, results, fallbackReason }) {
+  const scope = conversationIds.length ? conversationIds.join(',') : 'all';
+  const summary = results.length
+    ? results.map((item, index) => `${index + 1}:${singleLine(item.judgment || item.content, 36)}`).join(' | ')
+    : '-';
+  const fallback = fallbackReason ? ` fallback="${singleLine(fallbackReason, 80)}"` : '';
+  console.log(`[RAG] q="${singleLine(query, 60)}" scope=${singleLine(scope, 120)} retrieval=${mode === 'hybrid' ? '混合检索(hybrid)' : '文字检索(text)'} embedding=${sourceWithElapsed(embeddingSource, embeddingElapsedMs)} rerank=${sourceWithElapsed(rerankerSource, rerankerElapsedMs)} cost=${elapsedMs}ms hits=${results.length}${fallback} results=${summary}`);
+}
+
+function sourceLabel(source) {
+  return ({ user: '自定义', builtin: '系统内置', local: '本地', skipped: '未执行', failed: '失败', unknown: '未知' })[source] || source || '未知';
+}
+
+function sourceWithElapsed(source, elapsedMs) {
+  const elapsed = Number.isFinite(elapsedMs) ? `(${elapsedMs}ms)` : '';
+  return `${sourceLabel(source)}${elapsed}`;
+}
+
+function singleLine(value, maxLength) {
+  const text = String(value || '').replace(/[\r\n\t|]+/g, ' ').replace(/"/g, "'").replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
 function clamp(value, min, max) {
