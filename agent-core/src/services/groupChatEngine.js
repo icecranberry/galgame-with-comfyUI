@@ -813,7 +813,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   };
 
   try {
-    for await (const chunk of chatStream(msgs, { temperature: 0.8, max_tokens: 800, label: `群聊#${groupId}` })) {
+    for await (const chunk of chatStream(msgs, { temperature: 0.8, max_tokens: 4096, label: `群聊#${groupId}` })) {
       buffer += chunk;
       let nl;
       while ((nl = buffer.indexOf('\n')) >= 0) {
