@@ -303,6 +303,8 @@ export async function prepareImagePrompt(prompt, {
   const database = db || getDb();
   const retrieval = await retrieveImagePromptKnowledge(original, { scene, db: database });
   const selection = composeImagePrompt(original, retrieval.items);
+  const foundTags = selection.selectedTags.map(item => item.tag);
+  console.log(`[imagePromptKnowledge] mode=${retrieval.mode} duration=${retrieval.durationMs}ms tags=${JSON.stringify(foundTags)}`);
   const status = selection.promptRefined === original ? 'fallback' : 'deterministic';
   const result = { promptOriginal: original, promptRefined: selection.promptRefined, status, scene, retrieval, selection };
   if (persist) result.preparationId = persistPreparation(result, database);

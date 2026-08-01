@@ -156,6 +156,7 @@ function applyCategoryQuota(items, defaults, limit) {
 }
 
 export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limit = 9, db = getDb() } = {}) {
+  const startedAt = performance.now();
   const rows = db.prepare(`SELECT * FROM image_prompt_knowledge WHERE is_active = 1`).all();
   const sceneRows = rows.filter(row => sceneMatches(row, scene) && queryAllowsCategory(query, row.category));
   const rowsById = new Map(sceneRows.map(row => [row.knowledge_id, rowToItem(row)]));
@@ -179,6 +180,7 @@ export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limi
   const items = applyCategoryQuota(fused, defaults, limit);
   return {
     mode,
+    durationMs: Math.round(performance.now() - startedAt),
     scene,
     query,
     items,

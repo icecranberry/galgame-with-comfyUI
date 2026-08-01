@@ -16,6 +16,9 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
     baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
     model: process.env.LLM_MODEL || 'deepseek-v4-flash',
+    thinkingMode: ['enabled', 'disabled', 'omit'].includes(process.env.LLM_THINKING_MODE)
+      ? process.env.LLM_THINKING_MODE
+      : 'disabled',
     headers: (() => { try { return JSON.parse(process.env.LLM_HEADERS || '{}'); } catch { return {}; } })(),
     extraBody: (() => { try { return JSON.parse(process.env.LLM_EXTRA_BODY || '{}'); } catch { return {}; } })(),
   },
@@ -216,12 +219,13 @@ export function getLlmConfig() {
     preview,
     baseURL: config.llm.baseURL,
     model: config.llm.model,
+    thinkingMode: config.llm.thinkingMode || 'disabled',
     headers: config.llm.headers || {},
     extraBody: config.llm.extraBody || {},
   };
 }
 
-export function updateLlmConfig({ apiKey, baseURL, model, headers, extraBody }) {
+export function updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers, extraBody }) {
   if (apiKey !== undefined) {
     if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
       return { ok: false, error: 'API Key cannot be empty' };
@@ -236,6 +240,13 @@ export function updateLlmConfig({ apiKey, baseURL, model, headers, extraBody }) 
   if (model !== undefined) {
     config.llm.model = model;
     persistEnv('LLM_MODEL', model);
+  }
+  if (thinkingMode !== undefined) {
+    if (!['enabled', 'disabled', 'omit'].includes(thinkingMode)) {
+      return { ok: false, error: 'thinkingMode must be enabled, disabled, or omit' };
+    }
+    config.llm.thinkingMode = thinkingMode;
+    persistEnv('LLM_THINKING_MODE', thinkingMode);
   }
   if (headers !== undefined) {
     config.llm.headers = typeof headers === 'string' ? JSON.parse(headers) : headers;
@@ -403,6 +414,7 @@ export function addLlmProfile(name) {
     apiKey: config.llm.apiKey || '',
     baseURL: config.llm.baseURL || 'https://api.deepseek.com',
     model: config.llm.model || 'deepseek-v4-flash',
+    thinkingMode: config.llm.thinkingMode || 'disabled',
     headers: config.llm.headers || {},
     extraBody: config.llm.extraBody || {},
     serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
@@ -449,6 +461,10 @@ function _applyProfileToConfig(profile) {
     config.llm.model = profile.model;
     persistEnv('LLM_MODEL', profile.model);
   }
+  config.llm.thinkingMode = ['enabled', 'disabled', 'omit'].includes(profile.thinkingMode)
+    ? profile.thinkingMode
+    : 'disabled';
+  persistEnv('LLM_THINKING_MODE', config.llm.thinkingMode);
   config.llm.headers = profile.headers || {};
   persistEnv('LLM_HEADERS', JSON.stringify(config.llm.headers));
   config.llm.extraBody = profile.extraBody || {};
@@ -489,6 +505,7 @@ export function syncActiveLlmProfile() {
     apiKey: config.llm.apiKey || '',
     baseURL: config.llm.baseURL || '',
     model: config.llm.model || '',
+    thinkingMode: config.llm.thinkingMode || 'disabled',
     headers: config.llm.headers || {},
     extraBody: config.llm.extraBody || {},
     serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,

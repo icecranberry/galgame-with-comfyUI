@@ -18,6 +18,11 @@ function providerLabel() {
   }
 }
 
+function configuredThinking() {
+  if (config.llm.thinkingMode === 'omit') return null;
+  return { type: config.llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+}
+
 // 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
 // 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
 let _client = null;
@@ -98,7 +103,7 @@ function mergeConsecutiveRoles(messages) {
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
-export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking = { type: "disabled" }, forceThinking = false, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
@@ -114,9 +119,11 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
   if (response_format) {
     params.response_format = response_format;
   }
-  // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
-  if (thinking !== null && (isDeepseek() || forceThinking)) {
-    params.thinking = thinking;
+  // 全局三态配置默认注入 disabled；选择“不传”时完全省略。
+  // 调用方显式传入 thinking/null 时仍可覆盖全局设置。
+  const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
+  if (effectiveThinking !== null) {
+    params.thinking = effectiveThinking;
   }
   // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
   const extraBody = config.llm.extraBody;
@@ -195,7 +202,7 @@ export async function* chatStream(messages, {
   model = config.llm.model || 'deepseek-v4-flash',
   max_tokens = 4096,
   temperature = 0.7,
-  thinking = { type: 'disabled' },
+  thinking,
   label = 'stream',
 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
@@ -222,13 +229,13 @@ export async function* chatStream(messages, {
       stream: true,
     };
 
-    // thinking 仅 DeepSeek 官方 API 支持，第三方渠道发送此参数可能被拒绝
-    if (thinking !== null && isDeepseek()) {
-      params.thinking = thinking;
+    const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
+    if (effectiveThinking !== null) {
+      params.thinking = effectiveThinking;
     }
 
-    // 流式 usage（缓存命中率）：末尾 chunk 携带。同 thinking，仅对官方 API 发送，
-    // 第三方渠道可能不认识 stream_options 直接报错
+    // 流式 usage（缓存命中率）：末尾 chunk 携带。仅对官方 API 发送，
+    // 第三方渠道可能不认识 stream_options 直接报错。
     if (isDeepseek()) {
       params.stream_options = { include_usage: true };
     }

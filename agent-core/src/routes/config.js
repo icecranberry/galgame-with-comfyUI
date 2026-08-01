@@ -174,8 +174,8 @@ router.put('/background-llm-concurrency', (req, res) => {
 
 // PUT /api/config/llm — 更新 LLM 配置
 router.put('/llm', (req, res) => {
-  const { apiKey, baseURL, model, headers, extraBody } = req.body;
-  const result = updateLlmConfig({ apiKey, baseURL, model, headers, extraBody });
+  const { apiKey, baseURL, model, thinkingMode, headers, extraBody } = req.body;
+  const result = updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers, extraBody });
   if (!result.ok) {
     return res.status(400).json(result);
   }
@@ -191,6 +191,64 @@ router.put('/llm', (req, res) => {
   syncActiveLlmProfile();
 
   res.json({ ok: true, ...getLlmConfig() });
+});
+
+// POST /api/config/llm/models — 从 OpenAI-compatible 接口获取可用模型
+router.post('/llm/models', async (req, res) => {
+  const baseURL = String(req.body?.baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
+  if (!baseURL) return res.status(400).json({ error: '请先填写 API 地址' });
+
+  let modelsURL;
+  try {
+    modelsURL = new URL(`${baseURL}/models`);
+    if (!['http:', 'https:'].includes(modelsURL.protocol)) throw new Error('unsupported protocol');
+  } catch {
+    return res.status(400).json({ error: 'API 地址格式无效' });
+  }
+
+  const apiKey = String(req.body?.apiKey || config.llm.apiKey || '').trim();
+  const customHeaders = req.body?.headers && typeof req.body.headers === 'object' && !Array.isArray(req.body.headers)
+    ? req.body.headers
+    : {};
+  const requestHeaders = {
+    Accept: 'application/json',
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    ...customHeaders,
+  };
+
+  try {
+    const response = await fetch(modelsURL, {
+      method: 'GET',
+      headers: requestHeaders,
+      signal: AbortSignal.timeout(15000),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+      return res.status(502).json({ error: `模型列表请求失败：${detail}` });
+    }
+
+    const rows = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : Array.isArray(payload)
+          ? payload
+          : [];
+    const models = [...new Set(rows
+      .map(item => typeof item === 'string' ? item : item?.id || item?.name)
+      .filter(Boolean)
+      .map(id => String(id).replace(/^models\//, '')))]
+      .sort((a, b) => a.localeCompare(b));
+
+    if (!models.length) {
+      return res.status(502).json({ error: '接口未返回可识别的模型列表' });
+    }
+    res.json({ ok: true, models, endpoint: modelsURL.toString() });
+  } catch (error) {
+    const message = error?.name === 'TimeoutError' ? '请求超时' : error.message;
+    res.status(502).json({ error: `获取模型失败：${message}` });
+  }
 });
 
 // ── LLM Profile 管理 ──

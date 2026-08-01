@@ -241,36 +241,127 @@
         <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl" style="margin-top:14px">模型</label>
-        <input v-model="llmModel" class="fi" placeholder="deepseek-v4-flash" @input="markLlmDirty" />
+        <label class="fl" style="margin-top:14px">模型（建议deepseek-v4-flash）</label>
+        <div ref="llmModelPicker" class="llm-model-picker">
+          <div class="llm-model-row">
+            <div class="llm-model-combobox">
+              <input
+                v-model="llmModel"
+                class="fi"
+                autocomplete="off"
+                placeholder="deepseek-v4-flash"
+                role="combobox"
+                aria-label="模型"
+                aria-autocomplete="list"
+                aria-controls="llm-model-options"
+                :aria-expanded="llmModelsOpen"
+                @focus="openLlmModelOptions"
+                @click="openLlmModelOptions"
+                @input="onLlmModelInput"
+                @keydown="onLlmModelKeydown"
+              />
+              <div
+                v-if="llmModelsOpen && llmModels.length"
+                id="llm-model-options"
+                class="llm-model-options"
+                role="listbox"
+                aria-label="可用模型"
+              >
+                <button
+                  v-for="(model, index) in filteredLlmModels"
+                  :id="`llm-model-option-${index}`"
+                  :key="model"
+                  type="button"
+                  role="option"
+                  class="llm-model-option"
+                  :class="{ selected: model === llmModel, active: index === llmModelActiveIndex }"
+                  :aria-selected="model === llmModel"
+                  :title="model"
+                  @mouseenter="llmModelActiveIndex = index"
+                  @mousedown.prevent="selectLlmModel(model)"
+                >
+                  <span>{{ model }}</span>
+                  <svg v-if="model === llmModel" class="llm-model-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                </button>
+                <div v-if="filteredLlmModels.length === 0" class="llm-model-empty">未找到匹配模型</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="model-fetch-btn"
+              :disabled="llmModelsLoading || !llmBaseURL.trim()"
+              :aria-expanded="llmModelsOpen"
+              aria-controls="llm-model-options"
+              @click="loadAvailableModels"
+            >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</button>
+          </div>
+          <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
+        </div>
+
+        <div class="toggle-row thinking-setting">
+          <div>
+            <div class="tl">思考模式</div>
+            <div class="td">“关”默认禁用思考；“不传”会从请求体中省略 thinking 参数</div>
+          </div>
+          <div :class="['thinking-options', `is-${llmThinkingMode}`]" role="radiogroup" aria-label="思考模式">
+            <label v-for="option in thinkingModeOptions" :key="option.value" class="thinking-option">
+              <input v-model="llmThinkingMode" type="radio" name="llm-thinking-mode" :value="option.value" @change="markLlmDirty" />
+              <span>{{ option.label }}</span>
+            </label>
+          </div>
+        </div>
 
         <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
         <template v-if="isCustomBaseURL">
-          <label class="fl" style="margin-top:14px">自定义请求头 <span class="pl">(JSON，可选，例如 OpenRouter: {"HTTP-Referer":"https://example.com","X-Title":"MyApp"}）</span></label>
-          <textarea
-            v-model="llmHeadersText"
-            class="fi"
-            style="min-height:60px;font-family:monospace;font-size:12px;resize:vertical"
-            :class="{ 'fi-error': !llmHeadersValid }"
-            placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
-            @input="markLlmDirty"
-          ></textarea>
-          <p v-if="!llmHeadersValid" class="gen-error">JSON 格式无效</p>
+          <div class="toggle-row llm-custom-toggle">
+            <div>
+              <div class="tl">自定义请求头</div>
+              <div class="td">为 OpenRouter 等中转服务附加 HTTP 请求头</div>
+            </div>
+            <label class="switch" title="启用自定义请求头">
+              <input v-model="llmHeadersEnabled" type="checkbox" aria-label="启用自定义请求头" @change="markLlmDirty" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div v-if="llmHeadersEnabled" class="llm-custom-editor">
+            <label class="fl" for="llm-custom-headers">请求头 JSON</label>
+            <textarea
+              id="llm-custom-headers"
+              v-model="llmHeadersText"
+              class="fi llm-json-textarea"
+              :class="{ 'fi-error': !llmHeadersValid }"
+              placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
+              @input="markLlmDirty"
+            ></textarea>
+            <p v-if="!llmHeadersValid" class="gen-error" role="alert">JSON 格式无效</p>
+          </div>
 
           <!-- 自定义请求体参数（仅自定义API时显示，用于注入 body 级参数如 thinking / agent 等） -->
-          <label class="fl" style="margin-top:14px">自定义请求体参数 <span class="pl">(JSON，强烈建议加上 {"thinking":{"type":"disabled"}}，不然思考链挤占了正文，正文无输出)</span></label>
-          <textarea
-            v-model="llmExtraBodyText"
-            class="fi"
-            style="min-height:60px;font-family:monospace;font-size:12px;resize:vertical"
-            :class="{ 'fi-error': !llmExtraBodyValid }"
-            placeholder='{"thinking":{"type":"enabled"},"agent":"my-agent","agentName":"Nova"}'
-            @input="markLlmDirty"
-          ></textarea>
-          <p v-if="!llmExtraBodyValid" class="gen-error">JSON 格式无效</p>
+          <div class="toggle-row llm-custom-toggle">
+            <div>
+              <div class="tl">自定义请求体</div>
+              <div class="td">注入 agent 等额外 body 参数；同名字段会覆盖内置参数</div>
+            </div>
+            <label class="switch" title="启用自定义请求体">
+              <input v-model="llmExtraBodyEnabled" type="checkbox" aria-label="启用自定义请求体" @change="markLlmDirty" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div v-if="llmExtraBodyEnabled" class="llm-custom-editor">
+            <label class="fl" for="llm-custom-body">请求体 JSON</label>
+            <textarea
+              id="llm-custom-body"
+              v-model="llmExtraBodyText"
+              class="fi llm-json-textarea"
+              :class="{ 'fi-error': !llmExtraBodyValid }"
+              placeholder='{"agent":"my-agent","agentName":"Nova"}'
+              @input="markLlmDirty"
+            ></textarea>
+            <p v-if="!llmExtraBodyValid" class="gen-error" role="alert">JSON 格式无效</p>
+          </div>
 
           <!-- 后台 LLM 任务队列（仅自定义 API 时显示） -->
-          <div class="toggle-row" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border)">
+          <div class="toggle-row llm-option-row" style="margin-top:14px; padding-top:14px">
             <div>
               <div class="tl">后台 LLM 任务队列</div>
               <div class="td">限制LLM并发数量，避免本地 LLM 过载导致雪崩</div>
@@ -280,7 +371,7 @@
               <span class="slider"></span>
             </label>
           </div>
-          <div v-if="features.serializeBackgroundLLM" class="toggle-row freq-row" style="margin-top:8px">
+          <div v-if="features.serializeBackgroundLLM" class="toggle-row freq-row llm-option-row" style="margin-top:8px">
             <div>
               <div class="tl">最大并发后台请求数</div>
               <div class="td">同时运行的后台 LLM 任务数上限</div>
@@ -292,7 +383,7 @@
             </div>
           </div>
 
-          <div class="toggle-row" style="margin-top:14px; padding-bottom:4px">
+          <div class="toggle-row llm-option-row" style="margin-top:14px; padding-bottom:4px">
             <div>
               <div class="tl">合并消息兼容更多llm模板</div>
               <div class="td">合并连续Assistant或User消息，解决 LM Studio本地模型或其他llm的模板冲突</div>
@@ -305,7 +396,7 @@
         </template>
 
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!llmDirty" @click="saveLlmConfig">保存</button>
+          <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
           <span v-if="llmSaved" class="smsg">已保存</span>
         </div>
       </div>
@@ -322,18 +413,6 @@
           </div>
           <label class="switch">
             <input type="checkbox" v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="toggle-row memory-settings-row">
-          <div class="memory-settings-copy" @click="router.push('/settings/memory')">
-            <div class="tl">聊天记忆</div>
-            <div class="td">PAI 风格记忆整理；不配置嵌入模型也可使用文本召回</div>
-          </div>
-          <button class="disturb-setup-btn" title="聊天记忆设置" @click="router.push('/settings/memory')">⚙</button>
-          <label class="switch">
-            <input type="checkbox" v-model="features.memory" @change="saveFeature('memory', features.memory)" />
             <span class="slider"></span>
           </label>
         </div>
@@ -443,6 +522,54 @@
           <span v-if="connSaved" class="smsg">已保存</span>
           <button class="btn-ghost" @click="checkHealth">刷新连接</button>
         </div>
+      </div>
+
+      <!-- 聊天记忆 -->
+      <div class="card memory-settings-card">
+        <div class="memory-settings-header">
+          <div>
+            <h3>聊天记忆</h3>
+            <p>让角色记住重要的人与事，在之后的聊天中自然想起。</p>
+          </div>
+        </div>
+
+        <div class="toggle-row memory-settings-row">
+          <div class="memory-settings-copy">
+            <div class="tl">在聊天中使用记忆</div>
+            <div class="td">关闭后将暂停整理和召回新的聊天记忆</div>
+          </div>
+          <label class="switch" title="在聊天中使用记忆">
+            <input
+              type="checkbox"
+              v-model="features.memory"
+              aria-label="在聊天中使用记忆"
+              @change="saveFeature('memory', features.memory)"
+            />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <button
+          type="button"
+          class="memory-settings-entry"
+          aria-label="管理聊天记忆，打开整理方式、召回模型与记忆内容设置"
+          @click="router.push('/settings/memory')"
+        >
+          <span class="memory-entry-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 7h10M18 7h2M4 17h2M10 17h10M9 4v6M15 14v6" />
+            </svg>
+          </span>
+          <span class="memory-entry-copy">
+            <span class="memory-entry-title">管理聊天记忆</span>
+            <span class="memory-entry-desc">整理方式、召回模型与记忆内容</span>
+          </span>
+          <span class="memory-entry-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </button>
       </div>
 
     </div>
@@ -631,9 +758,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, fetchLlmModels, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -808,6 +935,24 @@ const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', mo
 const llmApiKey = ref('')
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
+const llmModels = ref([])
+const llmModelsLoading = ref(false)
+const llmModelsOpen = ref(false)
+const llmModelsError = ref('')
+const llmModelPicker = ref(null)
+const llmModelQuery = ref('')
+const llmModelActiveIndex = ref(-1)
+const filteredLlmModels = computed(() => {
+  const query = llmModelQuery.value.trim().toLowerCase()
+  if (!query) return llmModels.value
+  return llmModels.value.filter(model => model.toLowerCase().includes(query))
+})
+const llmThinkingMode = ref('disabled')
+const thinkingModeOptions = [
+  { value: 'enabled', label: '开' },
+  { value: 'disabled', label: '关' },
+  { value: 'omit', label: '不传' },
+]
 const isCustomBaseURL = ref(false)
 const presetURLs = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
 const llmBaseURLOptions = computed(() => [
@@ -826,6 +971,8 @@ const llmBaseURLSelectVal = computed({
     } else {
       isCustomBaseURL.value = false
       llmBaseURL.value = val
+      llmHeadersEnabled.value = false
+      llmExtraBodyEnabled.value = false
       llmHeadersText.value = '{}'
       llmExtraBodyText.value = '{}'
       features.serializeBackgroundLLM = false
@@ -835,18 +982,106 @@ const llmBaseURLSelectVal = computed({
     markLlmDirty()
   }
 })
+const llmHeadersEnabled = ref(false)
 const llmHeadersText = ref('{}')
 const llmHeadersValid = computed(() => {
+  if (!llmHeadersEnabled.value) return true
   try { JSON.parse(llmHeadersText.value); return true } catch { return false }
 })
+const llmExtraBodyEnabled = ref(false)
 const llmExtraBodyText = ref('{}')
 const llmExtraBodyValid = computed(() => {
+  if (!llmExtraBodyEnabled.value) return true
   try { JSON.parse(llmExtraBodyText.value); return true } catch { return false }
 })
 const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
+
+async function loadAvailableModels() {
+  if (llmModelsLoading.value || !llmBaseURL.value.trim()) return
+  if (llmHeadersEnabled.value && !llmHeadersValid.value) {
+    llmModelsError.value = '请先修正自定义请求头 JSON'
+    return
+  }
+
+  llmModelsLoading.value = true
+  llmModelsOpen.value = false
+  llmModelsError.value = ''
+  llmModels.value = []
+  try {
+    const headers = llmHeadersEnabled.value ? JSON.parse(llmHeadersText.value) : {}
+    const result = await fetchLlmModels({
+      baseURL: llmBaseURL.value.trim(),
+      apiKey: llmApiKey.value.trim() || undefined,
+      headers,
+    })
+    llmModels.value = result.models || []
+    llmModelQuery.value = ''
+    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
+    llmModelsOpen.value = llmModels.value.length > 0
+  } catch (error) {
+    llmModelsError.value = error.message || '获取模型失败'
+    toastFn?.(llmModelsError.value, 'error')
+  } finally {
+    llmModelsLoading.value = false
+  }
+}
+
+function openLlmModelOptions() {
+  if (!llmModels.value.length) return
+  if (!llmModelsOpen.value) {
+    llmModelQuery.value = ''
+    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
+  }
+  llmModelsOpen.value = true
+}
+
+function onLlmModelInput() {
+  llmModelQuery.value = llmModel.value
+  llmModelActiveIndex.value = -1
+  llmModelsOpen.value = llmModels.value.length > 0
+  markLlmDirty()
+}
+
+function onLlmModelKeydown(event) {
+  if (event.key === 'Escape') {
+    llmModelsOpen.value = false
+    return
+  }
+  if (!llmModels.value.length) return
+  if (!llmModelsOpen.value && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+    event.preventDefault()
+    openLlmModelOptions()
+    return
+  }
+  const models = filteredLlmModels.value
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    llmModelActiveIndex.value = Math.min(llmModelActiveIndex.value + 1, models.length - 1)
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    llmModelActiveIndex.value = Math.max(llmModelActiveIndex.value - 1, -1)
+  } else if (event.key === 'Enter' && llmModelActiveIndex.value >= 0) {
+    event.preventDefault()
+    selectLlmModel(models[llmModelActiveIndex.value])
+  }
+}
+
+function selectLlmModel(model) {
+  llmModel.value = model
+  llmModelQuery.value = ''
+  llmModelActiveIndex.value = -1
+  llmModelsOpen.value = false
+  markLlmDirty()
+}
+
+function closeLlmModelsOnOutsideClick(event) {
+  if (llmModelPicker.value && !llmModelPicker.value.contains(event.target)) {
+    llmModelsOpen.value = false
+  }
+}
 
 // ── LLM Profile 切换 ──
 const llmProfiles = ref([])
@@ -884,9 +1119,12 @@ async function switchProfile(id) {
         llmPreview.value = { ...result.llmConfig }
         llmBaseURL.value = result.llmConfig.baseURL || 'https://api.deepseek.com'
         llmModel.value = result.llmConfig.model || 'deepseek-chat'
+        llmThinkingMode.value = result.llmConfig.thinkingMode || 'disabled'
         const hasCustom = (result.llmConfig.headers && Object.keys(result.llmConfig.headers).length > 0)
           || (result.llmConfig.extraBody && Object.keys(result.llmConfig.extraBody).length > 0)
         isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
+        llmHeadersEnabled.value = Boolean(result.llmConfig.headers && Object.keys(result.llmConfig.headers).length)
+        llmExtraBodyEnabled.value = Boolean(result.llmConfig.extraBody && Object.keys(result.llmConfig.extraBody).length)
         llmHeadersText.value = result.llmConfig.headers && Object.keys(result.llmConfig.headers).length
           ? JSON.stringify(result.llmConfig.headers, null, 2) : '{}'
         llmExtraBodyText.value = result.llmConfig.extraBody && Object.keys(result.llmConfig.extraBody).length
@@ -946,10 +1184,13 @@ async function removeProfile(id) {
       llmPreview.value = { ...cfg.llm }
       llmBaseURL.value = cfg.llm.baseURL || 'https://api.deepseek.com'
       llmModel.value = cfg.llm.model || 'deepseek-chat'
+      llmThinkingMode.value = cfg.llm.thinkingMode || 'disabled'
       const hasCustom = (cfg.llm.headers && Object.keys(cfg.llm.headers).length > 0)
         || (cfg.llm.extraBody && Object.keys(cfg.llm.extraBody).length > 0)
         || cfg.features?.mergeMessages
       isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
+      llmHeadersEnabled.value = Boolean(cfg.llm.headers && Object.keys(cfg.llm.headers).length)
+      llmExtraBodyEnabled.value = Boolean(cfg.llm.extraBody && Object.keys(cfg.llm.extraBody).length)
       llmHeadersText.value = cfg.llm.headers && Object.keys(cfg.llm.headers).length
         ? JSON.stringify(cfg.llm.headers, null, 2) : '{}'
       llmExtraBodyText.value = cfg.llm.extraBody && Object.keys(cfg.llm.extraBody).length
@@ -965,6 +1206,9 @@ async function removeProfile(id) {
     console.error('[llm] delete profile failed:', err)
   }
 }
+
+onMounted(() => document.addEventListener('pointerdown', closeLlmModelsOnOutsideClick))
+onUnmounted(() => document.removeEventListener('pointerdown', closeLlmModelsOnOutsideClick))
 
 onMounted(async () => {
   try {
@@ -999,10 +1243,13 @@ onMounted(async () => {
     llmPreview.value = { ...data.llm }
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
+    llmThinkingMode.value = data.llm.thinkingMode || 'disabled'
     const hasCustom = (data.llm.headers && Object.keys(data.llm.headers).length > 0)
       || (data.llm.extraBody && Object.keys(data.llm.extraBody).length > 0)
       || data.features?.mergeMessages
     isCustomBaseURL.value = !presetURLs.includes(llmBaseURL.value) || hasCustom
+    llmHeadersEnabled.value = Boolean(data.llm.headers && Object.keys(data.llm.headers).length)
+    llmExtraBodyEnabled.value = Boolean(data.llm.extraBody && Object.keys(data.llm.extraBody).length)
     llmHeadersText.value = data.llm.headers && Object.keys(data.llm.headers).length
       ? JSON.stringify(data.llm.headers, null, 2) : '{}'
     llmExtraBodyText.value = data.llm.extraBody && Object.keys(data.llm.extraBody).length
@@ -1051,22 +1298,22 @@ async function saveLlmConfig() {
     if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
     if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
     if (llmModel.value) payload.model = llmModel.value
-    if (isCustomBaseURL.value && llmHeadersText.value.trim() && llmHeadersText.value.trim() !== '{}') {
-      try { payload.headers = JSON.parse(llmHeadersText.value) } catch {}
-    } else if (!isCustomBaseURL.value) {
-      payload.headers = {}
-    }
-    if (isCustomBaseURL.value && llmExtraBodyText.value.trim() && llmExtraBodyText.value.trim() !== '{}') {
-      try { payload.extraBody = JSON.parse(llmExtraBodyText.value) } catch {}
-    } else if (!isCustomBaseURL.value) {
-      payload.extraBody = {}
-    }
+    payload.thinkingMode = llmThinkingMode.value
+    payload.headers = isCustomBaseURL.value && llmHeadersEnabled.value
+      ? JSON.parse(llmHeadersText.value)
+      : {}
+    payload.extraBody = isCustomBaseURL.value && llmExtraBodyEnabled.value
+      ? JSON.parse(llmExtraBodyText.value)
+      : {}
     const result = await updateLlmConfig(payload)
     if (result.ok) {
       settingsStore.setHasApiKey(result.hasApiKey)
       llmPreview.value = { ...result }
       llmBaseURL.value = result.baseURL || llmBaseURL.value
       llmModel.value = result.model || llmModel.value
+      llmThinkingMode.value = result.thinkingMode || 'disabled'
+      llmHeadersEnabled.value = Boolean(result.headers && Object.keys(result.headers).length)
+      llmExtraBodyEnabled.value = Boolean(result.extraBody && Object.keys(result.extraBody).length)
       llmHeadersText.value = result.headers && Object.keys(result.headers).length
         ? JSON.stringify(result.headers, null, 2) : '{}'
       llmExtraBodyText.value = result.extraBody && Object.keys(result.extraBody).length
@@ -1373,8 +1620,64 @@ function resetTestPrompts() {
 .hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.memory-settings-copy { flex: 1; cursor: pointer; }
-.memory-settings-row .disturb-setup-btn { margin-left: 8px; }
+.memory-settings-card { gap: 0; }
+.memory-settings-header h3 { margin-bottom: 4px; }
+.memory-settings-header p {
+  max-width: 560px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.memory-settings-copy { flex: 1; min-width: 0; }
+.memory-settings-row { margin-top: 6px; }
+.memory-settings-row .switch { height: 44px; }
+.memory-settings-row .slider { top: 10px; bottom: 10px; }
+.memory-settings-row .switch input:focus-visible + .slider {
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.2);
+}
+.memory-settings-entry {
+  width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
+  display: flex; align-items: center; gap: 12px;
+  color: var(--text-primary); text-align: left;
+  background: rgba(224, 123, 108, 0.07);
+  border: 1px solid rgba(224, 123, 108, 0.16);
+  border-radius: 12px;
+  touch-action: manipulation;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.memory-settings-entry:hover {
+  background: rgba(224, 123, 108, 0.12);
+  border-color: rgba(224, 123, 108, 0.38);
+  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.1);
+}
+.memory-settings-entry:active { background: rgba(224, 123, 108, 0.16); }
+.memory-settings-entry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.memory-entry-icon {
+  width: 40px; height: 40px; flex: 0 0 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  background: rgba(224, 123, 108, 0.12);
+  border-radius: 10px;
+}
+.memory-entry-icon svg,
+.memory-entry-arrow svg {
+  width: 20px; height: 20px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.memory-entry-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
+.memory-entry-title { color: var(--text-bright); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.memory-entry-desc { color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.memory-entry-arrow {
+  width: 32px; height: 40px; flex: 0 0 32px;
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  color: var(--text-secondary);
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+.memory-settings-entry:hover .memory-entry-arrow { color: var(--accent); transform: translateX(2px); }
 
 /* ── 保存按钮加宽 ── */
 .btn-primary { padding-left: 28px; padding-right: 28px; }
@@ -1774,6 +2077,127 @@ function resetTestPrompts() {
 .key-ok { color: var(--success); }
 .key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
 .key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
+.llm-model-picker { position: relative; }
+.llm-model-row { display: flex; align-items: stretch; gap: 8px; }
+.llm-model-combobox { position: relative; min-width: 0; flex: 1; }
+.llm-model-row .fi { width: 100%; min-width: 0; margin-bottom: 0; }
+.model-fetch-btn {
+  min-width: 82px;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.model-fetch-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.model-fetch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.model-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-fetch-error { margin-top: 6px; color: var(--danger); font-size: 12px; line-height: 1.5; }
+.llm-model-options {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 220px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid #e2d6c7;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
+  transform-origin: top center;
+  animation: llm-model-drop-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.llm-model-option {
+  width: 100%;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-bright);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.llm-model-option:hover { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
+.llm-model-option.selected,
+.llm-model-option.active { background: rgba(224, 123, 108, 0.06); color: var(--accent); font-weight: 600; }
+.llm-model-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.llm-model-check { flex-shrink: 0; color: var(--accent); }
+.llm-model-empty { padding: 16px 10px; color: var(--text-secondary); font-size: 13px; text-align: center; }
+@keyframes llm-model-drop-in {
+  from { opacity: 0; transform: scaleY(0.9) translateY(-6px); }
+  to { opacity: 1; transform: scaleY(1) translateY(0); }
+}
+.thinking-setting { min-width: 0; margin-top: 14px; }
+.thinking-options {
+  position: relative;
+  width: 144px;
+  flex: 0 0 144px;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-bg-strong);
+}
+.thinking-options::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 3);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.2);
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+.thinking-options.is-enabled::before { transform: translateX(0); }
+.thinking-options.is-disabled::before { transform: translateX(100%); }
+.thinking-options.is-omit::before { transform: translateX(200%); }
+.thinking-option { position: relative; z-index: 1; cursor: pointer; }
+.thinking-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.thinking-option span {
+  min-height: 30px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 0.18s ease;
+}
+.thinking-option:hover span { color: var(--text-bright); }
+.thinking-option input:checked + span {
+  color: #fff;
+}
+.thinking-option input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thinking-setting,
+.llm-custom-toggle,
+.llm-option-row { border-bottom: none; }
+.llm-custom-toggle { margin-top: 14px; }
+.llm-custom-toggle .switch { height: 44px; }
+.llm-custom-toggle .slider { top: 10px; bottom: 10px; }
+.llm-custom-editor { padding: 4px 0 2px; }
+.llm-json-textarea { min-height: 72px; font-family: monospace; font-size: 12px; resize: vertical; }
 
 /* ── LLM Profile 切换 ── */
 .llm-profiles-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
@@ -1918,6 +2342,15 @@ function resetTestPrompts() {
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
   .sa .btn-primary { padding-left: 18px; padding-right: 18px; }
   .sa .wf-action-btn { flex: 1 1 0; justify-content: center; padding: 8px 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-settings-entry,
+  .memory-entry-arrow,
+  .thinking-option span,
+  .thinking-options::before { transition: none; }
+  .llm-model-options { animation: none; }
+  .memory-settings-entry:hover .memory-entry-arrow { transform: none; }
 }
 
 /* ── 工作流模式弹窗 ── */

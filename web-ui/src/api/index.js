@@ -446,6 +446,16 @@ export async function updateLlmConfig(data) {
   return res.json()
 }
 
+export async function fetchLlmModels(data) {
+  const res = await fetch(`${BASE}/config/llm/models`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || `获取模型失败 (${res.status})`)
+  return result
+}
+
 // ── LLM Profile 管理 ──
 
 export async function getLlmProfiles() {
