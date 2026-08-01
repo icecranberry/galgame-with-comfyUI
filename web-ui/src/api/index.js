@@ -882,10 +882,10 @@ export async function comfyuiHealth() {
 }
 
 // ── Gift 送礼 ──
-export async function sendGift(characterId, giftType) {
+export async function sendGift(characterId, giftType, giftLine = '') {
   const res = await fetch(`${BASE}/characters/${characterId}/gift`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ giftType }),
+    body: JSON.stringify({ giftType, giftLine }),
   })
   return res.json()
 }

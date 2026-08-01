@@ -7,7 +7,7 @@
             <svg class="gift-title-icon" viewBox="0 0 24 24" width="18" height="18" fill="var(--accent)"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             送个礼物
           </span>
-          <button class="gift-close" :disabled="loading" @click="$emit('close')">✕</button>
+          <button class="gift-close" type="button" aria-label="关闭送礼面板" :disabled="loading" @click="$emit('close')">✕</button>
         </div>
 
         <Transition name="step-slide" mode="out-in">
@@ -80,7 +80,23 @@
               准备把<span class="confirm-gift-label">「{{ giftLabel }}」</span>送给{{ characterName }}吗？
             </p>
             <p class="confirm-hint">{{ confirmHint }}</p>
-            <div v-if="error" class="gift-error">{{ error }}</div>
+            <div class="gift-line-field">
+              <div class="gift-line-heading">
+                <label for="gift-line">送出时想说的话 <span>选填</span></label>
+                <span class="gift-line-count">{{ giftLine.length }}/{{ GIFT_LINE_MAX }}</span>
+              </div>
+              <textarea
+                id="gift-line"
+                v-model="giftLine"
+                class="gift-line-input"
+                :maxlength="GIFT_LINE_MAX"
+                :disabled="loading"
+                rows="2"
+                placeholder="比如：看到它的时候，就觉得很适合你。"
+              ></textarea>
+              <p class="gift-line-help">这句话会随礼物一起送出，并显示在聊天中。</p>
+            </div>
+            <div v-if="error" class="gift-error" role="alert">{{ error }}</div>
             <div class="confirm-actions">
               <button class="confirm-back" :disabled="loading" @click="step = 'select'">再想想</button>
               <button class="confirm-send" :class="{ 'is-ring': selectedType === 'ring' }" :disabled="loading" @click="doSend">
@@ -121,6 +137,8 @@ const ringCardClass = computed(() => ({
   'is-available': !props.isOath && props.affinity >= 85,
 }))
 const selectedType = ref(null)
+const GIFT_LINE_MAX = 120
+const giftLine = ref('')
 const loading = ref(false)
 const error = ref('')
 let countdownTimer = null
@@ -215,7 +233,7 @@ async function doSend() {
   loading.value = true
   error.value = ''
   try {
-    const res = await sendGift(props.characterId, selectedType.value)
+    const res = await sendGift(props.characterId, selectedType.value, giftLine.value.trim())
     if (res.success) {
       cooldowns.small = res.cooldowns?.small ?? cooldowns.small
       cooldowns.large = res.cooldowns?.large ?? cooldowns.large
@@ -250,6 +268,8 @@ async function doSend() {
   padding: 22px 24px 24px;
   width: 480px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 132px);
+  overflow-y: auto;
   box-shadow: 0 12px 48px rgba(46, 42, 39, 0.18);
   animation: giftUp 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -526,7 +546,41 @@ async function doSend() {
 .confirm-hint {
   font-size: 13px; color: #b0a89c;
   text-align: center; line-height: 1.5;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
+}
+.gift-line-field {
+  width: 100%; margin-bottom: 16px;
+}
+.gift-line-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 7px;
+}
+.gift-line-heading label {
+  color: #5d554d; font-size: 13px; font-weight: 600;
+}
+.gift-line-heading label span {
+  color: #aaa097; font-size: 11px; font-weight: 400; margin-left: 4px;
+}
+.gift-line-count {
+  color: #aaa097; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.gift-line-input {
+  box-sizing: border-box; width: 100%; min-height: 70px;
+  resize: vertical; padding: 10px 12px;
+  border: 1.5px solid #e8e2da; border-radius: 12px;
+  background: #fff; color: #3d3935;
+  font: inherit; font-size: 14px; line-height: 1.5;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.gift-line-input::placeholder { color: #b8afa6; }
+.gift-line-input:hover:not(:disabled) { border-color: #ddd1c8; }
+.gift-line-input:focus {
+  border-color: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(224,123,108,0.1);
+}
+.gift-line-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.gift-line-help {
+  margin: 5px 2px 0; color: #aaa097; font-size: 11px; line-height: 1.4;
 }
 .confirm-actions {
   display: flex; gap: 10px; width: 100%;

@@ -220,7 +220,7 @@ class SseNotificationService : Service() {
             "new_comment" -> CAT_COMMENTS
             "group_message", "group_created" -> CAT_GROUP
             "reply_ready" -> CAT_MAILBOX
-            "new_event", "event_urgency", "event_concluded", "event_expired" -> CAT_EVENTS
+            "new_event", "event_concluded", "event_expired" -> CAT_EVENTS
             else -> return   // connected / 各类进度事件不弹通知
         }
 
@@ -282,10 +282,14 @@ class SseNotificationService : Service() {
                 route = "/mailbox"
                 notifyId = "letter${json.opt("letter_id")}".hashCode()
             }
+            "new_event" -> {
+                title = str(json, "title").ifEmpty { "新事件发生" }
+                text = str(json, "description", "content").ifEmpty { "点击查看" }
+                route = "/events"
+                notifyId = "event${json.opt("id")}$event".hashCode()
+            }
             else -> {   // 事件系统
                 title = when (event) {
-                    "new_event" -> "新事件发生"
-                    "event_urgency" -> "事件有新进展"
                     "event_concluded" -> "事件已结束"
                     else -> "事件已过期"
                 }

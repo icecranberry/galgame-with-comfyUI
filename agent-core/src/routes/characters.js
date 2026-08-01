@@ -583,20 +583,27 @@ ${searchContext}` : ''}
 });
 
 // POST /api/characters/:id/gift — 向角色赠送礼物
-// Body: { giftType: 'small' | 'large' }
+// Body: { giftType: 'small' | 'large' | 'ring', giftLine?: string }
 router.post('/:id/gift', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
 
-  const { giftType } = req.body;
+  const { giftType, giftLine = '' } = req.body;
   if (!['small', 'large', 'ring'].includes(giftType)) {
     return res.status(400).json({ error: 'giftType must be "small", "large" or "ring"' });
+  }
+  if (typeof giftLine !== 'string') {
+    return res.status(400).json({ error: 'giftLine must be a string' });
+  }
+  const normalizedGiftLine = giftLine.trim();
+  if (normalizedGiftLine.length > 120) {
+    return res.status(400).json({ error: '送出台词不能超过 120 个字符' });
   }
 
   try {
     const userName = config.user.nickname || '你';
-    const result = await giveGift(char.id, giftType, char, userName);
+    const result = await giveGift(char.id, giftType, char, userName, normalizedGiftLine);
 
     if (!result.success) {
       return res.status(409).json({
@@ -608,6 +615,16 @@ router.post('/:id/gift', async (req, res) => {
 
     // 先写入文字消息，异步生图完成后补图片
     const conversationId = `char_${char.id}`;
+    let userMsgId = null;
+    if (normalizedGiftLine) {
+      const userRawResult = db.prepare(
+        `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'user', ?)`
+      ).run(conversationId, normalizedGiftLine);
+      const userMsgResult = db.prepare(
+        `INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'user', ?, NULL, 0)`
+      ).run(conversationId, userRawResult.lastInsertRowid, normalizedGiftLine);
+      userMsgId = userMsgResult.lastInsertRowid;
+    }
     const rawResult = db.prepare(
       `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
     ).run(conversationId, result.reaction);
@@ -653,6 +670,8 @@ router.post('/:id/gift', async (req, res) => {
       affinityDelta: result.affinityDelta,
       affinity: result.newAffinity,
       reaction: result.reaction,
+      giftLine: normalizedGiftLine || null,
+      userMsgId,
       msgId,
       cooldowns: getGiftCooldowns(),
       is_oath: giftType === 'ring' ? 1 : loadOath(char.id),

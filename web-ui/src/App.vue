@@ -118,6 +118,7 @@ provide('toggleMobileSidebar', toggleMobileSidebar)
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  window.addEventListener('linshe:notification-opened', closeMobileSidebar)
   window.__linsheHandleAndroidBack = handleAndroidBack
 
   settings.loadComfyConfig()
@@ -181,6 +182,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
+  window.removeEventListener('linshe:notification-opened', closeMobileSidebar)
   if (window.__linsheHandleAndroidBack === handleAndroidBack) {
     delete window.__linsheHandleAndroidBack
   }

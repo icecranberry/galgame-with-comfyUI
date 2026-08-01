@@ -211,8 +211,27 @@ class MainActivity : AppCompatActivity() {
         showWeb()
         val current = webView.url
         if (current != null && current.startsWith(base.trimEnd('/'))) {
-            // SPA 已加载：原地改 hash 触发 vue-router 跳转，避免整页刷新
-            webView.evaluateJavascript("window.location.hash = '#$route';", null)
+            // SPA 已加载：原地改 hash 触发 vue-router 跳转，避免整页刷新。
+            // 所有通知点击都先通知前端收起移动端角色列表。
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new Event('linshe:notification-opened'));",
+                null
+            )
+            // 重复点击朋友圈通知时 hash 不会变化，额外通知前端执行与 Navbar 重复点击相同的刷新动作。
+            if (route == "/moments") {
+                webView.evaluateJavascript(
+                    """
+                    if (window.location.hash === '#/moments') {
+                        window.dispatchEvent(new CustomEvent('linshe:route-reselected', { detail: { route: '/moments' } }));
+                    } else {
+                        window.location.hash = '#/moments';
+                    }
+                    """.trimIndent(),
+                    null
+                )
+            } else {
+                webView.evaluateJavascript("window.location.hash = '#$route';", null)
+            }
         } else {
             webView.loadUrl(base.trimEnd('/') + "/#" + route)
         }

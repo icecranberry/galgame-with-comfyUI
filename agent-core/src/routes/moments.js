@@ -7,7 +7,6 @@ import { generateImageRaw } from '../services/imageSkill.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
-import { appendOathRing } from '../services/oathUtils.js';
 import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
@@ -634,19 +633,28 @@ const MOTIVATIONS = [
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
 
+  // 誓约只作为配图中的视觉信息，不影响朋友圈正文。
+  const isOath = Boolean(db.prepare(
+    'SELECT is_oath FROM user_relationships WHERE character_id = ?'
+  ).pluck().get(character.id));
+  const oathImageNote = isOath
+    ? '\n- **誓约画面特征**：imagePrompt 必须明确描述角色左手无名指戴着一枚清晰可见的银白细戒指；只在画面中体现，text 不提及戒指。'
+    : '';
+
   const now = new Date();
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
 
   const postingTask = (() => {
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（自然口语化）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}"}`;
+{"text":"朋友圈文案（自然口语化）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"}`;
 
     const rules = `规则：
 - 只输出 JSON，不要解释
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在上述世界观中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（80-200字），imagePrompt 用英文
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
+${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
 - text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
 
     return `${postingTaskIntro}
@@ -682,14 +690,10 @@ ${rules}`;
     : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 任务 → msgs[2] 角色 → msgs[3] 交互(多人) → user
-  // 誓约角色：银白细戒指外观细节
-  const ringUserName = config.user.nickname || 'user';
-  const basePromptWithRing = appendOathRing(character.base_prompt, character.id, ringUserName, { isFirstPerson: true });
-
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: postingTask });
-  msgs.push({ role: 'system', content: basePromptWithRing });
+  msgs.push({ role: 'system', content: character.base_prompt });
   if (multiPersons.length > 0) {
     for (const mp of multiPersons) {
       msgs.push({

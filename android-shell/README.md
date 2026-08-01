@@ -21,7 +21,7 @@ App 退到后台/锁屏后仍能收事件并弹系统通知，点击通知跳转
 | 朋友圈 | new_post, new_comment | /moments |
 | 群聊 | group_message, group_created | /group/:id |
 | 信箱 | reply_ready | /mailbox |
-| 事件 | new_event, event_urgency, event_concluded, event_expired | /events |
+| 事件 | new_event, event_concluded, event_expired | /events |
 
 - 分类开关：App 内设置页（地址输入页）有 5 个复选框；系统设置的通知渠道里也能按类关闭
 - App 在前台时不弹通知（页面内已有红点/实时追加）

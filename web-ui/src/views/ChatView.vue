@@ -629,7 +629,17 @@ function onGiftSent(result) {
     if (char) char.is_oath = 1
   }
 
-  // 1. 文字气泡
+  // 1. 自定义送出台词（选填）
+  if (result.giftLine) {
+    chat.messages.push({
+      id: result.userMsgId || Date.now(),
+      role: 'user',
+      content: result.giftLine,
+      created_at: new Date().toISOString(),
+    })
+  }
+
+  // 2. 角色文字气泡
   chat.messages.push({
     id: result.msgId,
     role: 'assistant',
@@ -637,7 +647,7 @@ function onGiftSent(result) {
     created_at: new Date().toISOString(),
   })
 
-  // 2. 生图气泡（pending → 遮罩 + 进度条，和普通生图完全一致）
+  // 3. 生图气泡（pending → 遮罩 + 进度条，和普通生图完全一致）
   const genId = `gift_${result.msgId}`
   const genMsg = {
     id: Date.now(),
@@ -651,7 +661,7 @@ function onGiftSent(result) {
   chat.messages.push(genMsg)
   nextTick(() => scrollToBottom(true))
 
-  // 3. 轮询图片就绪，更新 image_gen 气泡
+  // 4. 轮询图片就绪，更新 image_gen 气泡
   let polls = 0
   const timer = setInterval(async () => {
     polls++

@@ -105,6 +105,10 @@ function handleMomentsClick() {
   }
 }
 
+function handleRouteReselected(event) {
+  if (event.detail?.route === '/moments') handleMomentsClick()
+}
+
 function handleEventsClick() {
   if (route.path === '/events') {
     events.requestScrollToTop()
@@ -123,6 +127,7 @@ function handleScheduleClick() {
 }
 
 onMounted(() => {
+  window.addEventListener('linshe:route-reselected', handleRouteReselected)
   startUnifiedStream()
   moments.connectSSE()
   events.connectSSE()
@@ -130,6 +135,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('linshe:route-reselected', handleRouteReselected)
   stopUnifiedStream()
   moments.disconnectSSE()
   events.disconnectSSE()
