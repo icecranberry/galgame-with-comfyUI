@@ -241,7 +241,7 @@
         <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl" style="margin-top:14px">模型（建议deepseek-v4-flash）</label>
+        <label class="fl">模型（建议deepseek-v4-flash）</label>
         <div ref="llmModelPicker" class="llm-model-picker">
           <div class="llm-model-row">
             <div class="llm-model-combobox">
@@ -298,7 +298,7 @@
           <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
         </div>
 
-        <div class="toggle-row thinking-setting">
+        <div v-if="isCustomBaseURL" class="toggle-row thinking-setting">
           <div>
             <div class="tl">思考模式</div>
             <div class="td">“关”默认禁用思考；“不传”会从请求体中省略 thinking 参数</div>
@@ -361,7 +361,7 @@
           </div>
 
           <!-- 后台 LLM 任务队列（仅自定义 API 时显示） -->
-          <div class="toggle-row llm-option-row" style="margin-top:14px; padding-top:14px">
+          <div class="toggle-row llm-option-row" style="padding-top:14px">
             <div>
               <div class="tl">后台 LLM 任务队列</div>
               <div class="td">限制LLM并发数量，避免本地 LLM 过载导致雪崩</div>
@@ -383,7 +383,7 @@
             </div>
           </div>
 
-          <div class="toggle-row llm-option-row" style="margin-top:14px; padding-bottom:4px">
+          <div class="toggle-row llm-option-row" style="padding-bottom:4px">
             <div>
               <div class="tl">合并消息兼容更多llm模板</div>
               <div class="td">合并连续Assistant或User消息，解决 LM Studio本地模型或其他llm的模板冲突</div>
@@ -529,20 +529,19 @@
         <div class="memory-settings-header">
           <div>
             <h3>聊天记忆</h3>
-            <p>让角色记住重要的人与事，在之后的聊天中自然想起。</p>
+            <p>PAI 风格记忆整理；不配置嵌入模型也可使用文本召回</p>
           </div>
         </div>
 
         <div class="toggle-row memory-settings-row">
           <div class="memory-settings-copy">
-            <div class="tl">在聊天中使用记忆</div>
-            <div class="td">关闭后将暂停整理和召回新的聊天记忆</div>
+            <div class="tl">启用聊天记忆</div>
           </div>
-          <label class="switch" title="在聊天中使用记忆">
+          <label class="switch" title="启用聊天记忆">
             <input
               type="checkbox"
               v-model="features.memory"
-              aria-label="在聊天中使用记忆"
+              aria-label="启用聊天记忆"
               @change="saveFeature('memory', features.memory)"
             />
             <span class="slider"></span>
@@ -552,7 +551,7 @@
         <button
           type="button"
           class="memory-settings-entry"
-          aria-label="管理聊天记忆，打开整理方式、召回模型与记忆内容设置"
+          aria-label="打开聊天记忆详细设置：召回模型与记忆内容"
           @click="router.push('/settings/memory')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
@@ -561,8 +560,8 @@
             </svg>
           </span>
           <span class="memory-entry-copy">
-            <span class="memory-entry-title">管理聊天记忆</span>
-            <span class="memory-entry-desc">整理方式、召回模型与记忆内容</span>
+            <span class="memory-entry-title">详细设置</span>
+            <span class="memory-entry-desc">召回模型与记忆内容</span>
           </span>
           <span class="memory-entry-arrow" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -2077,7 +2076,7 @@ function resetTestPrompts() {
 .key-ok { color: var(--success); }
 .key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
 .key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
-.llm-model-picker { position: relative; }
+.llm-model-picker { position: relative; margin-bottom: 14px;}
 .llm-model-row { display: flex; align-items: stretch; gap: 8px; }
 .llm-model-combobox { position: relative; min-width: 0; flex: 1; }
 .llm-model-row .fi { width: 100%; min-width: 0; margin-bottom: 0; }
@@ -2142,7 +2141,7 @@ function resetTestPrompts() {
   from { opacity: 0; transform: scaleY(0.9) translateY(-6px); }
   to { opacity: 1; transform: scaleY(1) translateY(0); }
 }
-.thinking-setting { min-width: 0; margin-top: 14px; }
+.thinking-setting { min-width: 0; }
 .thinking-options {
   position: relative;
   width: 144px;
@@ -2193,7 +2192,6 @@ function resetTestPrompts() {
 .thinking-setting,
 .llm-custom-toggle,
 .llm-option-row { border-bottom: none; }
-.llm-custom-toggle { margin-top: 14px; }
 .llm-custom-toggle .switch { height: 44px; }
 .llm-custom-toggle .slider { top: 10px; bottom: 10px; }
 .llm-custom-editor { padding: 4px 0 2px; }
