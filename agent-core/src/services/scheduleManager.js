@@ -13,6 +13,7 @@ import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { getLocalDateKey } from '../utils/localDate.js';
 
 
 // ── 缓存 ──
@@ -54,10 +55,10 @@ function isInTimeSlot(startTime, endTime, now) {
 export function initialize() {
   const db = getDb();
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = getLocalDateKey(now);
 
   // 全量清理超过 2 天的旧日程快照
-  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', '-2 days')`).run();
+  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', 'localtime', '-2 days')`).run();
 
   // 检查所有启用日程的角色
   const chars = db.prepare(`
@@ -172,7 +173,7 @@ function calcSleepUntil(endTime, now) {
  */
 function getTodayScheduleRaw(characterId) {
   const db = getDb();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateKey();
 
   // 优先查 daily_schedules
   let row = db.prepare(
@@ -192,7 +193,7 @@ function getTodayScheduleRaw(characterId) {
       `).run(characterId, today, template.schedule_json);
       // 清理超过 2 天的旧快照
       db.prepare(
-        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', '-2 days')`
+        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', 'localtime', '-2 days')`
       ).run(characterId);
       row = { schedule_json: template.schedule_json };
     }

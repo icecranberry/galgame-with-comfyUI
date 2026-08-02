@@ -455,7 +455,7 @@ function embeddingStateLabel(state) {
   return ({ indexed: '已整理', pending: '等待整理', failed: '整理失败', stale: '需要重新整理', disabled: '等待智能整理' })[state] || state || '未知'
 }
 function jobStatusLabel(status) {
-  return ({ pending: '等待处理', completed: '已完成', failed: '处理失败' })[status] || status || '未知'
+  return ({ pending: '等待处理', processing: '正在处理', completed: '已完成', failed: '处理失败' })[status] || status || '未知'
 }
 function formatDate(value) {
   if (!value) return '未知时间'
@@ -617,7 +617,7 @@ async function reindex() {
   maintaining.value = true
   try {
     const result = await reindexMemories()
-    notify(`记忆整理完成：${result.indexed}/${result.total}`)
+    notify(`已加入后台整理队列：${result.queued}/${result.total}`)
     await Promise.all([applyConfig(), memoriesQueried.value ? loadMemories() : Promise.resolve(), loadIndexJobs()])
   }
   catch (error) { notify(error.message, 'error') }
@@ -627,7 +627,7 @@ async function retryFailed() {
   maintaining.value = true
   try {
     const result = await retryFailedMemories()
-    notify(`重新处理完成：${result.indexed}/${result.total}`)
+    notify(`失败项已重新加入队列：${result.queued}/${result.total}`)
     await Promise.all([applyConfig(), memoriesQueried.value ? loadMemories() : Promise.resolve(), loadIndexJobs()])
   }
   catch (error) { notify(error.message, 'error') }
@@ -729,7 +729,7 @@ button.compact { padding: 7px 11px; font-size: 12px; }
 .job-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 10px; }
 .job-unavailable { color: var(--text-secondary); font-size: 11px; }
-.job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.failed { color: #c34f4f; }
+.job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.processing { color: #367aa3; }.job-status.failed { color: #c34f4f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 button.primary, button.ghost { border-radius: 9px; padding: 10px 18px; font-weight: 600; cursor: pointer; }

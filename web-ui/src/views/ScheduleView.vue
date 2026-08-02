@@ -665,9 +665,18 @@ const peekFilmStyle = computed(() => {
 })
 
 // ── 生命周期 ──
+let _overviewRefreshTimer: ReturnType<typeof setInterval> | null = null
+
+function refreshOverviewWhenVisible() {
+  if (document.visibilityState === 'visible') store.fetchOverview(true)
+}
+
 onMounted(async () => {
   store.fetchOverview()
   settingsStore.loadComfyConfig()
+  _overviewRefreshTimer = setInterval(refreshOverviewWhenVisible, 60_000)
+  document.addEventListener('visibilitychange', refreshOverviewWhenVisible)
+  window.addEventListener('focus', refreshOverviewWhenVisible)
 
   // 页面刷新恢复：查询后端是否有正在进行的重置任务
   try {
@@ -702,6 +711,9 @@ onMounted(async () => {
   } catch { /* */ }
 })
 onUnmounted(() => {
+  if (_overviewRefreshTimer) { clearInterval(_overviewRefreshTimer); _overviewRefreshTimer = null }
+  document.removeEventListener('visibilitychange', refreshOverviewWhenVisible)
+  window.removeEventListener('focus', refreshOverviewWhenVisible)
   if (_phraseTimer) { clearInterval(_phraseTimer); _phraseTimer = null }
   stopSidebarTips()
   if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = null }

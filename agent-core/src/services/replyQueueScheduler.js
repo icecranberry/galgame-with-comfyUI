@@ -76,9 +76,16 @@ async function maybeRefreshOneSchedule() {
   const candidate = db.prepare(`
     SELECT id, display_name, base_prompt FROM characters
     WHERE schedule_enabled = 1
-      AND next_schedule_refresh_at IS NOT NULL
-      AND next_schedule_refresh_at <= datetime('now')
-    ORDER BY next_schedule_refresh_at ASC
+      AND (
+        next_schedule_refresh_at IS NULL
+        OR next_schedule_refresh_at <= datetime('now')
+        OR NOT EXISTS (
+          SELECT 1 FROM schedule_templates st WHERE st.character_id = characters.id
+        )
+      )
+    ORDER BY
+      CASE WHEN next_schedule_refresh_at IS NULL THEN 0 ELSE 1 END,
+      next_schedule_refresh_at ASC
     LIMIT 1
   `).get();
 
@@ -90,6 +97,10 @@ async function maybeRefreshOneSchedule() {
     snapshotTodaySchedule(candidate.id);
     syncSleepingState(candidate.id);
     assignNextRefreshTime(candidate.id);
+    broadcast('schedule_state_change', {
+      character_id: candidate.id,
+      reason: 'schedule_refreshed',
+    });
     console.log(`[replyQueue] Schedule refreshed for ${candidate.display_name}`);
   } catch (err) {
     console.error(`[replyQueue] Schedule refresh failed for ${candidate.display_name}:`, err.message);

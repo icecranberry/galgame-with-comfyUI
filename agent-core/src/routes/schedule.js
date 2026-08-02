@@ -15,6 +15,7 @@
 
 import { Router } from 'express';
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { config } from '../config.js';
 import {
@@ -30,6 +31,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { getTimeLightInline } from '../services/timeLight.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { processWakeUp } from '../services/wakeService.js';
+import { getLocalDateKey } from '../utils/localDate.js';
 
 const router = Router();
 
@@ -206,7 +208,7 @@ router.get('/:characterId', (req, res) => {
       character_id: character.id,
       display_name: character.display_name,
       avatar_path: character.avatar_path,
-      schedule_date: new Date().toISOString().slice(0, 10),
+      schedule_date: getLocalDateKey(),
       activities: schedule || [],
       template_version: template?.version || 0,
       template_generated_at: template?.generated_at || null,
@@ -404,13 +406,7 @@ router.post('/:characterId/peek', async (req, res) => {
     // system1: 世界观强化 + 人像摄影师指令
     let system1 = '';
     if (worldSetting) {
-      system1 = `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则。照片必须在这个世界观的框架内拍摄：
-
-1. 照片中的场景、服饰、氛围必须符合世界观。角色的穿着、所处的环境、互动方式，都必须自然地反映这个世界特有的元素。
-2. 角色的表情和身体语言以世界观定义的行为基准为参照——什么情绪在这个世界里是"日常"的、什么行为是"出格"的，都由世界观决定。
-3. 画面中的每一个视觉元素都应该一致地属于这个世界。世界观不是背景，是地基。
-</world_integration>\n\n`;
+      system1 = `${getWorldIntegrationRule('photo')}\n\n`;
     }
     // 睡眠中：强制强调闭眼（优先检查临时叫醒，因为日程 replyDelay 即使叫醒后仍为 -1）
     const tempWoken = isTempWoken(characterId);

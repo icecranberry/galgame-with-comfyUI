@@ -411,7 +411,7 @@ async def scrape_moegirl(req: ScrapeRequest):
 
 @app.on_event("startup")
 async def startup():
-    # 检查模型文件是否存在
+    # 只检查模型文件；ONNX 在网络服务连续失败并实际降级时再按需加载。
     model_file = f"{MODEL_PATH}/onnx/model_int8.onnx"
     if not os.path.exists(model_file):
         print()
@@ -430,13 +430,7 @@ async def startup():
         print()
         return
 
-    print("[vector-service] startup — warming up embedding model...")
-    try:
-        embed_single("预热")
-        print("[vector-service] embedding model warm-up complete")
-    except Exception as e:
-        print(f"[vector-service] warm-up failed: {e}")
-        # 不阻止启动，首次请求时会有延迟
+    print("[vector-service] local embedding model ready (lazy load)")
 
 
 if __name__ == "__main__":

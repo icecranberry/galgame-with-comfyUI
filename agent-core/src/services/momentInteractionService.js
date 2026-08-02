@@ -15,6 +15,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { cropPersonalityForEmotion } from './emotionEngine.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 
 // Sigmoid 参数（与 moments.js 多人模式一致）
 const MULTI_P_MIN = 0.30;
@@ -89,9 +90,7 @@ async function generateFriendInitialComment(friend, posterChar, post, relDesc) {
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则。以下所有创作必须在这个世界观的框架内展开。
-</world_integration>`
+    ? getWorldIntegrationRule('interaction')
     : null;
 
   // 关系描述转自然语言（发帖人视角 → 朋友视角）
@@ -140,9 +139,7 @@ async function generatePosterReplyToFriend(posterChar, friend, post, friendComme
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则。以下所有创作必须在这个世界观的框架内展开。
-</world_integration>`
+    ? getWorldIntegrationRule('interaction')
     : null;
 
   const posterName = posterChar.display_name || posterChar.name;
@@ -194,9 +191,7 @@ async function generateFriendContinuation(friend, posterChar, post, threadContex
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则。以下所有创作必须在这个世界观的框架内展开。
-</world_integration>`
+    ? getWorldIntegrationRule('interaction')
     : null;
 
   const posterName = posterChar.display_name || posterChar.name;

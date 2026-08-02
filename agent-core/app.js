@@ -36,7 +36,7 @@ import { startWeatherScheduler } from './src/services/weatherService.js';
 import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
-import { ensureDefaultMemoryIndexes } from './src/services/memory/memoryRepository.js';
+import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
 
 const app = express();
 
@@ -163,7 +163,7 @@ server.keepAliveTimeout = 5000;
 (async () => {
   console.log('[vector] checking connection to', config.vectorService.url);
   let retries = 0;
-  while (retries < 6) {
+  while (true) {
     const ok = await vectorHealth();
     if (ok) {
       console.log('[vector] connected');
@@ -171,10 +171,10 @@ server.keepAliveTimeout = 5000;
       break;
     }
     retries++;
-    await new Promise(r => setTimeout(r, 3000));
-  }
-  if (retries >= 6) {
-    console.warn('[vector] WARNING: not reachable — vector search, memory extraction degraded');
+    if (retries === 6) {
+      console.warn('[vector] WARNING: not reachable — vector search, memory extraction degraded; retrying every 30 seconds');
+    }
+    await new Promise(r => setTimeout(r, retries < 6 ? 3000 : 30000));
   }
 })();
 
@@ -207,6 +207,7 @@ const shutdown = () => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log('\n[agent-core] shutting down...');
+  stopMemoryIndexWorker();
 
   // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
   try {

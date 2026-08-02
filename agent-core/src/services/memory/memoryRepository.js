@@ -4,9 +4,24 @@ import { getDb } from '../../db/index.js';
 import { getMemorySettings } from './memoryConfig.js';
 import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
+import { createMemoryIndexWorker } from './memoryIndexWorker.js';
 
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
+const INDEX_CONCURRENCY = 2;
+const INDEX_JOB_DELAY_MS = 100;
+const PRIORITY_LIVE = 0;
+const PRIORITY_RETRY = 5;
+const PRIORITY_HISTORY = 10;
+
+const memoryIndexWorker = createMemoryIndexWorker({
+  concurrency: INDEX_CONCURRENCY,
+  delayMs: INDEX_JOB_DELAY_MS,
+  claimJob: claimNextIndexJob,
+  runJob: processIndexJob,
+  onError: (error, job) => console.error(`[memory-index] worker failed for job ${job?.id}:`, error.message),
+});
+let memoryIndexWorkerStarted = false;
 
 export function parseTags(value) {
   if (Array.isArray(value)) return value;
@@ -42,7 +57,6 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   const normalized = actions.map(validateMemoryAction);
   const profile = getPreferredMemoryEmbeddingProfile();
   const created = [];
-  const superseded = [];
   const transaction = db.transaction(() => {
     for (const item of normalized) {
       const sources = item.sourceMemoryIds.length
@@ -69,16 +83,14 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
       for (const source of sources) {
         db.prepare(`UPDATE memory_fragments SET status = 'superseded', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ?`).run(source.memory_id);
         db.prepare(`INSERT INTO memory_relations(from_memory_id, to_memory_id, action) VALUES (?, ?, ?)`).run(source.memory_id, memoryId, item.action);
-        enqueueIndexJob(db, 'delete', source.memory_id, source.embedding_profile);
-        superseded.push(source);
+        enqueueIndexJob(db, 'delete', source.memory_id, source.embedding_profile, PRIORITY_LIVE);
       }
-      enqueueIndexJob(db, 'upsert', memoryId, profile?.fingerprint || null);
+      enqueueIndexJob(db, 'upsert', memoryId, profile?.fingerprint || null, PRIORITY_LIVE);
       created.push(memoryId);
     }
   });
   transaction();
-  for (const row of superseded) void removeMemoryVector(row);
-  for (const memoryId of created) void indexMemory(memoryId);
+  wakeMemoryIndexWorker();
   return created.map(memoryId => getMemoryById(memoryId));
 }
 
@@ -103,8 +115,8 @@ export function softDeleteMemory(idOrMemoryId) {
   const row = db.prepare(`SELECT * FROM memory_fragments WHERE memory_id = ? OR id = ?`).get(String(idOrMemoryId), Number(idOrMemoryId) || -1);
   if (!row) return false;
   db.prepare(`UPDATE memory_fragments SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
-  enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile);
-  void removeMemoryVector(row);
+  enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile, PRIORITY_LIVE);
+  wakeMemoryIndexWorker();
   return true;
 }
 
@@ -119,7 +131,6 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
   const firstAffectedRawId = affectedStarts.length > 0 ? Math.min(...affectedStarts) : rawStartId;
   const rollbackBoundary = Math.min(currentCheckpoint, Math.max(0, firstAffectedRawId - 1));
   const affectedIds = new Set(affected.map(row => row.memory_id));
-  const restored = new Set();
   const transaction = db.transaction(() => {
     for (const row of affected) {
       db.prepare(`UPDATE memory_fragments SET status = 'deleted', source_msg_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
@@ -127,10 +138,9 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
       for (const predecessor of predecessors) {
         if (affectedIds.has(predecessor.from_memory_id)) continue;
         db.prepare(`UPDATE memory_fragments SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'superseded'`).run(predecessor.from_memory_id);
-        enqueueIndexJob(db, 'upsert', predecessor.from_memory_id, null);
-        restored.add(predecessor.from_memory_id);
+        enqueueIndexJob(db, 'upsert', predecessor.from_memory_id, null, PRIORITY_LIVE);
       }
-      enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile);
+      enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile, PRIORITY_LIVE);
     }
     db.prepare(`
       INSERT INTO memory_extraction_checkpoints(conversation_id, last_raw_msg_id, status, last_error, updated_at)
@@ -139,8 +149,7 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
     `).run(conversationId, rollbackBoundary);
   });
   transaction();
-  for (const row of affected) void removeMemoryVector(row);
-  for (const memoryId of restored) void indexMemory(memoryId);
+  wakeMemoryIndexWorker();
   return affected.length;
 }
 
@@ -188,97 +197,89 @@ export async function indexMemory(memoryId) {
       memory_type: row.memory_type,
       tags: JSON.stringify(parseTags(row.tags)),
     };
-    let localReady = false;
-    try {
-      await upsertVector(memoryId, text, metadata);
-      localReady = true;
-    } catch (error) {
-      console.warn('[memory-index] local backup failed:', error.message);
-    }
-
     const { embedding, profile } = await embedMemoryText(text, settings);
-    if (profile.corpus !== 'memory_fragments') {
-      await upsertVector(memoryId, text, metadata, null, profile.corpus, embedding);
-    } else if (!localReady) {
-      await upsertVector(memoryId, text, metadata);
+    const current = getDb().prepare(`SELECT status FROM memory_fragments WHERE memory_id = ?`).get(memoryId);
+    if (current?.status !== 'active') return false;
+    await upsertVector(memoryId, text, metadata, null, profile.corpus, embedding);
+    const updated = getDb().prepare(`
+      UPDATE memory_fragments
+      SET chroma_id = ?, embedding_profile = ?, embedding_state = 'indexed', embedding_error = NULL
+      WHERE memory_id = ? AND status = 'active'
+    `).run(memoryId, profile.fingerprint, memoryId);
+    if (updated.changes === 0) {
+      await deleteVector(memoryId, profile.corpus);
+      return false;
     }
-    getDb().prepare(`UPDATE memory_fragments SET chroma_id = ?, embedding_profile = ?, embedding_state = 'indexed', embedding_error = NULL WHERE memory_id = ?`).run(memoryId, profile.fingerprint, memoryId);
-    finishIndexJobs(memoryId, 'upsert', 'completed');
     return true;
   } catch (error) {
     getDb().prepare(`UPDATE memory_fragments SET embedding_state = 'failed', embedding_error = ? WHERE memory_id = ?`).run(String(error.message).slice(0, 500), memoryId);
-    finishIndexJobs(memoryId, 'upsert', 'failed', error.message);
-    return false;
+    throw error;
   }
 }
 
 export async function reindexAllMemories() {
-  const rows = getDb().prepare(`SELECT memory_id FROM memory_fragments WHERE status = 'active'`).all();
-  const jobIds = [];
-  for (const row of rows) {
-    enqueueIndexJob(getDb(), 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
-    jobIds.push(row.memory_id);
-  }
-  const results = [];
-  for (const memoryId of jobIds) results.push(await indexMemory(memoryId));
-  return { total: results.length, indexed: results.filter(Boolean).length };
+  const db = getDb();
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments WHERE status = 'active'`).get().count;
+  db.prepare(`UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL WHERE status = 'active'`).run();
+  enqueueFollowUpsForProcessingUpserts(db, PRIORITY_RETRY);
+  wakeMemoryIndexWorker();
+  return { total, queued: total };
 }
 
 export async function ensureDefaultMemoryIndexes() {
   const db = getDb();
   const settingKey = 'memory_default_models_indexed_v1';
+  startMemoryIndexWorker();
   const existing = db.prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(settingKey);
-  if (existing?.setting_value === '1') return { skipped: true };
+  if (existing?.setting_value === '1') {
+    wakeMemoryIndexWorker();
+    return { skipped: true, pending: pendingIndexJobCount(db) };
+  }
 
   db.prepare(`UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL WHERE status = 'active' AND embedding_state = 'disabled'`).run();
 
-  const rows = db.prepare(`
-    SELECT memory_id FROM memory_fragments
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count FROM memory_fragments
     WHERE status = 'active' AND embedding_state IN ('failed', 'pending', 'stale', 'disabled')
-  `).all();
-  const results = [];
-  for (const row of rows) {
-    enqueueIndexJob(db, 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
-    results.push(await indexMemory(row.memory_id));
-  }
+  `).get().count;
+  db.prepare(`
+    UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL
+    WHERE status = 'active' AND embedding_state IN ('failed', 'pending', 'stale', 'disabled')
+  `).run();
+  enqueueFollowUpsForProcessingUpserts(db, PRIORITY_HISTORY);
 
-  const result = { total: results.length, indexed: results.filter(Boolean).length };
   db.prepare(`
     INSERT INTO system_settings(setting_key, setting_value, updated_at)
     VALUES (?, '1', CURRENT_TIMESTAMP)
     ON CONFLICT(setting_key) DO UPDATE SET setting_value = '1', updated_at = CURRENT_TIMESTAMP
   `).run(settingKey);
-  console.log(`[memory] default index initialization complete: total=${result.total}, indexed=${result.indexed}, failed=${result.total - result.indexed}`);
-  return result;
+  wakeMemoryIndexWorker();
+  console.log(`[memory] default index initialization scheduled: total=${total}, concurrency=${INDEX_CONCURRENCY}`);
+  return { total, queued: total };
 }
 
 export async function retryFailedIndexJobs() {
   const db = getDb();
-  const upserts = db.prepare(`
-    SELECT memory_id FROM memory_fragments
+  const upsertCount = db.prepare(`
+    SELECT COUNT(*) AS count FROM memory_fragments
     WHERE status = 'active' AND embedding_state IN ('failed', 'pending', 'stale')
-  `).all();
-  for (const row of upserts) {
-    const pending = db.prepare(`SELECT 1 FROM memory_index_jobs WHERE memory_id = ? AND job_type = 'upsert' AND status = 'pending' LIMIT 1`).get(row.memory_id);
-    if (!pending) enqueueIndexJob(db, 'upsert', row.memory_id, getPreferredMemoryEmbeddingProfile().fingerprint);
-  }
-  const upsertResults = [];
-  for (const row of upserts) upsertResults.push(await indexMemory(row.memory_id));
+  `).get().count;
+  db.prepare(`
+    UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL
+    WHERE status = 'active' AND embedding_state IN ('failed', 'pending', 'stale')
+  `).run();
+  enqueueFollowUpsForProcessingUpserts(db, PRIORITY_RETRY);
 
-  const deletes = db.prepare(`
-    SELECT DISTINCT mf.* FROM memory_index_jobs mij
-    JOIN memory_fragments mf ON mf.memory_id = mij.memory_id
-    WHERE mij.job_type = 'delete' AND mij.status = 'failed'
-  `).all();
+  const deletes = db.prepare(`SELECT DISTINCT memory_id, profile FROM memory_index_jobs WHERE job_type = 'delete' AND status = 'failed'`).all();
   for (const row of deletes) {
-    db.prepare(`UPDATE memory_index_jobs SET status = 'pending', error = NULL, updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND job_type = 'delete' AND status = 'failed'`).run(row.memory_id);
+    retryOrEnqueueIndexJob(db, 'delete', row.memory_id, row.profile, PRIORITY_RETRY);
   }
-  const deleteResults = await Promise.all(deletes.map(removeMemoryVector));
+  wakeMemoryIndexWorker();
   return {
-    total: upserts.length,
-    indexed: upsertResults.filter(Boolean).length,
+    total: upsertCount,
+    queued: upsertCount,
     deleteTotal: deletes.length,
-    deleted: deleteResults.filter(Boolean).length,
+    deleteQueued: deletes.length,
   };
 }
 
@@ -293,27 +294,152 @@ function containsSensitiveSecret(text) {
   return /(?:password|passwd|密码|api[_ -]?key|access[_ -]?token|secret[_ -]?key|bearer)\s*[:=：]\s*\S{6,}|\b(?:sk|ghp|glpat)-[A-Za-z0-9_-]{12,}\b|\b\d{15,19}\b/i.test(text);
 }
 
-function enqueueIndexJob(db, jobType, memoryId, profile) {
-  db.prepare(`INSERT INTO memory_index_jobs(job_type, memory_id, profile, status) VALUES (?, ?, ?, 'pending')`).run(jobType, memoryId, profile);
-}
-
-function finishIndexJobs(memoryId, jobType, status, error = null) {
-  getDb().prepare(`UPDATE memory_index_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND job_type = ? AND status = 'pending'`).run(status, error, memoryId, jobType);
-}
-
-async function removeMemoryVector(row) {
-  try {
-    const corpora = ['memory_fragments'];
-    if (row.embedding_profile && row.embedding_profile !== 'local_builtin') corpora.push(`memory_v2_${row.embedding_profile}`);
-    const results = await Promise.allSettled(corpora.map(corpus => deleteVector(row.memory_id || row.chroma_id, corpus)));
-    const failure = results.find(result => result.status === 'rejected');
-    if (failure) throw failure.reason;
-    finishIndexJobs(row.memory_id, 'delete', 'completed');
-    return true;
-  } catch (error) {
-    finishIndexJobs(row.memory_id, 'delete', 'failed', error.message);
-    return false;
+function enqueueIndexJob(db, jobType, memoryId, profile, priority = PRIORITY_HISTORY) {
+  const pending = db.prepare(`
+    SELECT id, priority FROM memory_index_jobs
+    WHERE job_type = ? AND memory_id = ? AND status = 'pending'
+    ORDER BY id DESC LIMIT 1
+  `).get(jobType, memoryId);
+  if (pending) {
+    db.prepare(`UPDATE memory_index_jobs SET profile = ?, priority = MIN(priority, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(profile, priority, pending.id);
+    return pending.id;
   }
+  // A running job has already captured its inputs. Keep one pending follow-up so
+  // profile changes, rollbacks, or deletes that arrive mid-flight are not lost.
+  return db.prepare(`INSERT INTO memory_index_jobs(job_type, memory_id, profile, priority, status) VALUES (?, ?, ?, ?, 'pending')`)
+    .run(jobType, memoryId, profile, priority).lastInsertRowid;
+}
+
+function retryOrEnqueueIndexJob(db, jobType, memoryId, profile, priority) {
+  const existing = db.prepare(`
+    SELECT id FROM memory_index_jobs
+    WHERE job_type = ? AND memory_id = ? AND status IN ('pending', 'processing', 'failed')
+    ORDER BY CASE status WHEN 'processing' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, id DESC
+    LIMIT 1
+  `).get(jobType, memoryId);
+  if (!existing) return enqueueIndexJob(db, jobType, memoryId, profile, priority);
+  db.prepare(`
+    UPDATE memory_index_jobs
+    SET profile = ?, priority = ?, status = CASE WHEN status = 'processing' THEN status ELSE 'pending' END,
+        error = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(profile, priority, existing.id);
+  return existing.id;
+}
+
+function enqueueFollowUpsForProcessingUpserts(db, priority) {
+  const profile = getPreferredMemoryEmbeddingProfile().fingerprint;
+  const rows = db.prepare(`
+    SELECT DISTINCT memory_id FROM memory_index_jobs
+    WHERE job_type = 'upsert' AND status = 'processing' AND memory_id IS NOT NULL
+  `).all();
+  for (const row of rows) enqueueIndexJob(db, 'upsert', row.memory_id, profile, priority);
+}
+
+function claimNextIndexJob() {
+  const db = getDb();
+  return db.transaction(() => {
+    let job = db.prepare(`
+      SELECT queued.* FROM memory_index_jobs queued
+      WHERE queued.status = 'pending'
+        AND NOT EXISTS (
+          SELECT 1 FROM memory_index_jobs active
+          WHERE active.status = 'processing' AND active.memory_id = queued.memory_id
+        )
+      ORDER BY queued.priority ASC, queued.id ASC
+      LIMIT 1
+    `).get();
+    if (!job) {
+      const stale = db.prepare(`
+        SELECT mf.memory_id FROM memory_fragments mf
+        WHERE mf.status = 'active' AND mf.embedding_state IN ('stale', 'pending')
+          AND NOT EXISTS (
+            SELECT 1 FROM memory_index_jobs queued
+            WHERE queued.memory_id = mf.memory_id AND queued.job_type = 'upsert'
+              AND queued.status IN ('pending', 'processing')
+          )
+        ORDER BY COALESCE(mf.updated_at, mf.created_at) ASC, mf.id ASC
+        LIMIT 1
+      `).get();
+      if (stale) {
+        const id = enqueueIndexJob(
+          db,
+          'upsert',
+          stale.memory_id,
+          getPreferredMemoryEmbeddingProfile().fingerprint,
+          PRIORITY_HISTORY,
+        );
+        job = db.prepare(`SELECT * FROM memory_index_jobs WHERE id = ?`).get(id);
+      }
+    }
+    if (!job) return null;
+    const claimed = db.prepare(`
+      UPDATE memory_index_jobs SET status = 'processing', error = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'pending'
+    `).run(job.id);
+    return claimed.changes === 1 ? { ...job, status: 'processing' } : null;
+  })();
+}
+
+async function processIndexJob(job) {
+  try {
+    if (job.job_type === 'upsert') {
+      const row = getDb().prepare(`SELECT status FROM memory_fragments WHERE memory_id = ?`).get(job.memory_id);
+      if (row?.status === 'active') await indexMemory(job.memory_id);
+    } else if (job.job_type === 'delete') {
+      await removeMemoryVector(job.memory_id, job.profile);
+    } else {
+      throw new Error(`unsupported memory index job type: ${job.job_type}`);
+    }
+    finishIndexJob(job.id, 'completed');
+  } catch (error) {
+    finishIndexJob(job.id, 'failed', error.message);
+    throw error;
+  }
+}
+
+function finishIndexJob(jobId, status, error = null) {
+  getDb().prepare(`UPDATE memory_index_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .run(status, error ? String(error).slice(0, 500) : null, jobId);
+}
+
+async function removeMemoryVector(memoryId, embeddingProfile) {
+  const corpora = ['memory_fragments'];
+  if (embeddingProfile && embeddingProfile !== 'local_builtin') corpora.push(`memory_v2_${embeddingProfile}`);
+  const results = await Promise.allSettled(corpora.map(corpus => deleteVector(memoryId, corpus)));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+function pendingIndexJobCount(db = getDb()) {
+  return db.prepare(`SELECT COUNT(*) AS count FROM memory_index_jobs WHERE status IN ('pending', 'processing')`).get().count;
+}
+
+function wakeMemoryIndexWorker() {
+  memoryIndexWorker.wake();
+}
+
+export function startMemoryIndexWorker() {
+  if (memoryIndexWorkerStarted) {
+    memoryIndexWorker.wake();
+    return { concurrency: INDEX_CONCURRENCY, pending: pendingIndexJobCount() };
+  }
+  const db = getDb();
+  const recovered = db.prepare(`
+    UPDATE memory_index_jobs
+    SET status = 'pending', error = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE status = 'processing'
+  `).run().changes;
+  if (recovered > 0) console.log(`[memory-index] recovered ${recovered} interrupted job(s)`);
+  memoryIndexWorkerStarted = true;
+  memoryIndexWorker.start();
+  return { concurrency: INDEX_CONCURRENCY, pending: pendingIndexJobCount(db) };
+}
+
+export function stopMemoryIndexWorker() {
+  memoryIndexWorkerStarted = false;
+  memoryIndexWorker.stop();
 }
 
 function memoryText(row) {

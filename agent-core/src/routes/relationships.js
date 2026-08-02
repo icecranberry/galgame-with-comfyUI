@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb, getSystemRules, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 
 const router = Router();
 
@@ -93,14 +94,7 @@ router.post('/deduce', async (req, res) => {
 
     // msgs[2] — 世界观穿透指令（仅 boost 且已设置世界观时注入）
     if (worldSetting) {
-      const worldIntegrationBlock = `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有推演必须在这个世界观的框架内展开：
-
-1. 角色之间的关系必须反映世界观下的社会结构和互动规则。在这个世界里，何种关系是"理所当然"的、何种关系是"不可思议"的，由世界观决定，不由现实世界的常识决定。
-2. 角色对另一个角色的态度（尊敬、敌意、亲近、漠然）应以世界观定义的行为基准线来推断。世界观塑造了角色的常识和三观——角色觉得谁值得尊敬、谁危险、谁亲密，都受世界观规则的支配。
-3. 跨作品角色的关系建立要有内在逻辑。即使两个角色来自不同IP，你也要找到他们在当前世界观下可能的交集点——可能是身份共鸣、价值观冲突、利益关联、或命运相似性。发散的同时必须有说服力。
-4. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到每一条关系描述中。世界观不是背景，是地基。
-</world_integration>`;
+      const worldIntegrationBlock = getWorldIntegrationRule('relationships');
       messages.push({ role: 'system', content: worldIntegrationBlock });
     }
 

@@ -27,6 +27,7 @@ import { getMemorySettings } from './memory/memoryConfig.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
 import { matchAll } from './characterSearch.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 
 // ── 生活片段类型库 ──
 // 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
@@ -814,16 +815,9 @@ export async function generateEvent(character, options = {}) {
   personaText = appendOathRing(personaText, character.id, ringUserName1, { isFirstPerson: false, charName: displayName });
 
   // [0] 第三人称叙事声明 + jailbreak + 世界观（有世界观时注入整合指令，无世界观时跳过）
-  const worldIntegrationBlock = worldSetting ? `
-<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有创作必须在这个世界观的框架内展开：
-
-1. 角色的所有行为、反应和判断，都必须以世界观为基准线。世界观塑造了角色的常识和三观——角色觉得什么理所当然、什么值得惊讶、什么不可接受，都由世界观决定，不由现实世界的常识决定。
-2. 事件中"异常"的判定标准来自世界观。一个事件是否奇怪、是否危险、是否值得在意，取决于它在这个世界里的相对位置——在现实世界显得离奇的事，在这个世界里可能稀松平常，反之亦然。
-3. 环境描写要自然地渗透世界观的细节。场景中的每一个元素——空间、物品、氛围、人群——都应该一致地属于这个世界，不能出现与世界观矛盾的描写。
-4. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到叙事中的每一个感官细节、每一个角色反应、每一个情节转折。世界观不是背景，是地基。
-</world_integration>
-` : '';
+  const worldIntegrationBlock = worldSetting
+    ? getWorldIntegrationRule('event')
+    : '';
 
   // 日程注入：获取角色当前活动，让事件起点与当前活动自然衔接
   let scheduleContextLine = '';
@@ -1168,16 +1162,9 @@ export async function generateNextBranch(character, event, choice) {
   const ringUserName2 = config.user?.nickname || 'user';
   personaText2 = appendOathRing(personaText2, character.id, ringUserName2, { isFirstPerson: false, charName: displayName2 });
 
-  const worldIntegrationBlock2 = worldSetting2 ? `
-<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有创作必须在这个世界观的框架内展开：
-
-1. 角色的所有行为、反应和判断，都必须以世界观为基准线。世界观塑造了角色的常识和三观——角色觉得什么理所当然、什么值得惊讶、什么不可接受，都由世界观决定，不由现实世界的常识决定。
-2. 事件中"异常"的判定标准来自世界观。一个事件是否奇怪、是否危险、是否值得在意，取决于它在这个世界里的相对位置——在现实世界显得离奇的事，在这个世界里可能稀松平常，反之亦然。
-3. 环境描写要自然地渗透世界观的细节。场景中的每一个元素——空间、物品、氛围、人群——都应该一致地属于这个世界，不能出现与世界观矛盾的描写。
-4. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到叙事中的每一个感官细节、每一个角色反应、每一个情节转折。世界观不是背景，是地基。
-</world_integration>
-` : '';
+  const worldIntegrationBlock2 = worldSetting2
+    ? getWorldIntegrationRule('event')
+    : '';
 
   const worldPenetrationLine2 = worldSetting2
     ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
@@ -1469,9 +1456,7 @@ export async function concludeEvent(character, event, outcome) {
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting3
-    ? `<world_integration priority="highest">
-上述世界观设定是最高优先级的创作框架。结局叙述和记忆摘要必须在这个世界观的框架下展开——角色的行为逻辑、事件的因果链条、环境的细节描写，都要忠实于世界观的基本法则。世界观定义了角色判断"正常"与"异常"的基准线，结局的收束方式不能偏离这条基准线。
-</world_integration>`
+    ? getWorldIntegrationRule('eventConclusion')
     : null;
 
   const choiceHistory = JSON.parse(event.choice_history || '[]');

@@ -10,7 +10,7 @@ import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from 
 import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
-import { getCoreDialogueRules } from '../builtinRules.js';
+import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
 
 const router = Router();
 
@@ -613,14 +613,7 @@ const MOTIVATIONS = [
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有创作必须在这个世界观的框架内展开：
-
-1. 朋友圈的内容必须反映世界观下的真实生活。角色分享的日常、感悟、见闻、吐槽，都应该自然地带出这个世界特有的元素——无论是街头景象、社交方式、人际关系，还是这个世界的"理所当然"。
-2. 角色的行为模式和互动方式的"正常"与"异常"，由世界观定义。在这个世界里理所当然的事情，在现实世界可能不可思议——朋友圈的语气和内容应该自信地反映这种理所当然，不需要向读者解释。
-3. 朋友圈的配图（imagePrompt）也要渗透世界观的视觉细节。场景、氛围、人物的互动方式、身体语言，都要符合这个世界的视觉规则。画面中的每一个元素都应该一致地属于这个世界。
-4. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到朋友圈的每一个字和每一帧画面中。世界观不是背景，是地基。
-</world_integration>`
+    ? getWorldIntegrationRule('moments')
     : null;
 
   const multiPersonImageNote = multiPersons.length > 0 ? `
@@ -933,13 +926,7 @@ async function generateCharacterReply(post, historyComments) {
     ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNoteReply = worldSettingReply
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有创作必须在这个世界观的框架内展开：
-
-1. 角色回复评论时的语言风格、互动方式、情感表达，都必须以世界观为基准线。角色觉得什么理所当然、什么值得惊讶、什么不可接受，都由世界观决定。
-2. 评论中涉及的日常细节、社交礼仪、场景描述，都应该自然地反映这个世界的规则——不需要刻意解释，自信地呈现这个世界里的"日常"即可。
-3. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到回复的每一个字中。世界观不是背景，是地基。
-</world_integration>`
+    ? getWorldIntegrationRule('momentReply')
     : null;
 
   // 加载情绪状态 + 好感度（提前，用于 msgs[1] 和 msgs[2]）

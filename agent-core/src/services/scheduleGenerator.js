@@ -12,6 +12,8 @@
 
 import { getDb, getWorldSetting, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
+import { getLocalDateKey } from '../utils/localDate.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 
 /**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
@@ -33,18 +35,12 @@ export async function generateSchedule(character, direction) {
   const persona = cropPersonaForSchedule(character.base_prompt);
 
   // ── 舞台：破限词 + 世界观 ──
-  const jailbreak = getSystemRules();
+  const jailbreak = getSystemRules({ roleplay: false });
   const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
 
   // ── 世界观穿透指令（参照朋友圈生成）──
   const worldIntegrationNote = worldSetting
-    ? `<world_integration priority="highest">
-上述世界观设定不是可有可无的背景说明——它是这个虚构世界的基本法则，定义了这个世界里什么是正常的、人与人之间如何互动、社会如何运转。以下所有日程创作必须在这个世界观的框架内展开：
-
-1. 日程中的活动类型、地点、行为模式必须反映世界观下的真实生活。角色的一天应该自然地带出这个世界特有的元素——街头景象、社交方式、工作内容、生活节奏。
-2. 角色的职业、作息、行为习惯的"正常"与"异常"，由世界观定义。在这个世界里理所当然的事情，在现实世界可能不可思议——角色的日程应该自信地反映这种理所当然，不需要向读者解释。
-3. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到日程的每一个活动条目中。世界观不是背景，是地基。
-</world_integration>`
+    ? getWorldIntegrationRule('schedule')
     : null;
 
   // ── 角色人格（裁剪到外观之前）──
@@ -454,7 +450,7 @@ export function snapshotTodaySchedule(characterId) {
   const template = db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id = ?').get(characterId);
   if (!template) return null;
 
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = getLocalDateKey();
 
   db.prepare(`
     INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
@@ -463,7 +459,7 @@ export function snapshotTodaySchedule(characterId) {
 
   // 清理超过 2 天的旧快照
   db.prepare(
-    `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', '-2 days')`
+    `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', 'localtime', '-2 days')`
   ).run(characterId);
 
   return template.schedule_json;

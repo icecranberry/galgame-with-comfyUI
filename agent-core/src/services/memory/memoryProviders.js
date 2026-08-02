@@ -115,6 +115,10 @@ function recordBuiltinFailure(kind) {
   return state[kind];
 }
 
+export function shouldUseLocalMemoryFallback(failureCount) {
+  return Number(failureCount) >= DAILY_FAILURE_LIMIT;
+}
+
 async function postJson(url, body, provider) {
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -171,7 +175,10 @@ export async function embedMemoryTexts(texts, settings = getMemorySettings({ inc
       return result;
     } catch (error) {
       const failures = recordBuiltinFailure('embedding');
-      console.warn(`[memory-provider] built-in embedding failed (${failures}/${DAILY_FAILURE_LIMIT}), using local model:`, error.message);
+      if (!shouldUseLocalMemoryFallback(failures)) {
+        throw new Error(`系统内置嵌入服务失败 (${failures}/${DAILY_FAILURE_LIMIT}): ${error.message}`);
+      }
+      console.warn(`[memory-provider] built-in embedding failed (${failures}/${DAILY_FAILURE_LIMIT}), switching to local model:`, error.message);
     }
   }
 
@@ -228,7 +235,10 @@ export async function rerankMemories(query, candidates, settings = getMemorySett
       return result;
     } catch (error) {
       const failures = recordBuiltinFailure('reranker');
-      console.warn(`[memory-provider] built-in reranker failed (${failures}/${DAILY_FAILURE_LIMIT}), using local model:`, error.message);
+      if (!shouldUseLocalMemoryFallback(failures)) {
+        throw new Error(`系统内置重排服务失败 (${failures}/${DAILY_FAILURE_LIMIT}): ${error.message}`);
+      }
+      console.warn(`[memory-provider] built-in reranker failed (${failures}/${DAILY_FAILURE_LIMIT}), switching to local model:`, error.message);
     }
   }
   return localRerank(query, candidates, settings.reranker.topN || settings.topK || 7);

@@ -1727,6 +1727,7 @@ function migrateChatMemoryV2Schema(db) {
         job_type TEXT NOT NULL,
         memory_id TEXT,
         profile TEXT,
+        priority INTEGER NOT NULL DEFAULT 10,
         status TEXT NOT NULL DEFAULT 'pending',
         error TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1763,6 +1764,11 @@ function migrateChatMemoryV2Schema(db) {
         VALUES (new.id, new.judgment, new.reasoning, new.tags);
       END;
     `);
+    const indexJobColumns = new Set(db.prepare(`PRAGMA table_info(memory_index_jobs)`).all().map(c => c.name));
+    if (!indexJobColumns.has('priority')) {
+      db.exec(`ALTER TABLE memory_index_jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 10`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_index_jobs_queue ON memory_index_jobs(status, priority, id)`);
     const ftsCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments_fts`).get().count;
     const memoryCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments`).get().count;
     if (ftsCount !== memoryCount) {
