@@ -714,23 +714,32 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 6. 活跃聊天历史（滑动窗口 0~10 轮）
+    // 6. 回复长度提示（随好感度变化）
+    const sentenceHint = (() => {
+      if (explicitImageIntent) return '15个汉字以内';
+      if (affinity == null || affinity < 60) return '10~30个汉字';
+      if (affinity < 80) return '10~40个汉字';
+      return '10~60个汉字';
+    })();
+    dynamicBlocks.push(`<dialogue_rules>\n- **回复控制在${sentenceHint}，保持口语化轻快节奏**\n</dialogue_rules>`);
+
+    // 7. VAD 三维情绪描述
+    if (config.features.emotion && emotionPrompt) {
+      dynamicBlocks.push(emotionPrompt);
+    }
+
+    // 8. 活跃聊天历史（滑动窗口 0~10 轮）
     if (activeChatText) {
       dynamicBlocks.push(activeChatText);
     }
 
-    // 7. 日程上下文（当前在做什么 / 睡醒等）
+    // 9. 日程上下文（当前在做什么 / 睡醒等）
     const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
     if (scheduleCtx) {
       dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
     }
 
-    // 8. VAD 三维情绪描述
-    if (config.features.emotion && emotionPrompt) {
-      dynamicBlocks.push(emotionPrompt);
-    }
-
-    // 9. 活跃奇遇（仅首轮强调时出现）
+    // 10. 活跃奇遇（仅首轮强调时出现）
     if (activeEvent) {
       const isFirstEmphasis = !activeEvent.emphasis_delivered;
       if (isFirstEmphasis) {
@@ -743,7 +752,7 @@ ${coreRules}
       }
     }
 
-    // 10. RAG 三路召回记忆
+    // 11. RAG 三路召回记忆
     if (config.features.memory) {
       try {
         const groupConversationIds = db.prepare(`
@@ -754,9 +763,16 @@ ${coreRules}
           conversationIds: [conversationId, ...groupConversationIds],
           topK: 7,
         });
-        if (memoryResults.length > 0) {
-          const memoryLines = memoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
-          memorySnapshot.push(...memoryResults.map(m => ({
+        // 临时排除事件/奇遇/未互动事件类记忆，避免它们通过主聊天流的 <rag_memories> 重复注入。
+        const chatMemoryResults = memoryResults.filter(m => {
+          const judgment = String(m.judgment ?? '');
+          return !judgment.includes('【事件')
+            && !judgment.includes('【奇遇')
+            && !judgment.includes('未互动事件');
+        });
+        if (chatMemoryResults.length > 0) {
+          const memoryLines = chatMemoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
+          memorySnapshot.push(...chatMemoryResults.map(m => ({
             id: m.memory_id,
             memoryType: m.memory_type,
             judgment: m.judgment,
@@ -768,7 +784,7 @@ ${coreRules}
       } catch (err) { console.error('[chat] memory search failed:', err.message); }
     }
 
-    // 11. 重逢提示（streak ≥ 2 时注入）
+    // 12. 重逢提示（streak ≥ 2 时注入）
     const streak = getUnansweredStreak(characterId);
     if (streak >= 2) {
       dynamicBlocks.push(`【⚠️ 重逢提示 — 仅本次生成可见，不存入对话记录】${character.display_name} 之前连续发了 ${streak} 条主动消息 ${chatUserName} 都没回——现在 ${chatUserName} 终于回复了。${character.display_name} 应在接下来的回复中自然地流露一点"终于等到你"的情绪——不质问、不委屈、不阴阳怪气。嘴硬的用别扭的方式，温柔的用直接的方式，搞怪的用段子。让 ${chatUserName} 感觉到：ta 回来聊天这件事，对 ${character.display_name} 来说很重要。`);
@@ -777,22 +793,13 @@ ${coreRules}
       resetUnansweredStreak(characterId);
     }
 
-    // 12. 交叉角色 short_prompt 注入
+    // 13. 交叉角色 short_prompt 注入
     if (crossChars.length > 0) {
       const crossLines = crossChars.map(c =>
         `角色「${c.display_name}」: ${c.short_prompt || (c.base_prompt || '').slice(0, 200)}`
       ).join('\n\n');
       dynamicBlocks.push(`<cross_reference>\n当前对话中涉及以下其他角色，你应当了解他们的基本信息，在对话中自然互动时保持其人格的一致性：\n\n${crossLines}\n</cross_reference>`);
     }
-
-    // 13. 回复长度提示（随好感度变化）
-    const sentenceHint = (() => {
-      if (explicitImageIntent) return '15个汉字以内';
-      if (affinity == null || affinity < 60) return '10~30个汉字';
-      if (affinity < 80) return '10~40个汉字';
-      return '10~60个汉字';
-    })();
-    dynamicBlocks.push(`<dialogue_rules>\n- **回复控制在${sentenceHint}，保持口语化轻快节奏**\n</dialogue_rules>`);
 
     // 14. 时间上下文（当前时间 + 距上次聊天间隔）
     const now = new Date();
@@ -1463,9 +1470,21 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     : (weatherHint || scheduleCtx ? (weatherHint || '') + (scheduleCtx ? '\n\n' + scheduleCtx : '') : '');
 
   const userName = config.user.nickname || '用户';
+  const lastTurnDialogue = (() => {
+    const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
+    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+    const lines = [];
+    if (lastUserMsg) lines.push(`${userName}: ${extractRealContent(lastUserMsg.content)}`);
+    if (lastAssistantMsg) lines.push(`${character?.display_name || '角色'}: ${extractRealContent(lastAssistantMsg.content)}`);
+    return lines.join('\n');
+  })();
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + '【上一次画面描述·最高优先级】仅用于保持连续性，不得覆盖或限制【最后一轮对话】及其必然产生的画面结果。对于最后一轮对话直接或间接导致的状态变化（如衣着、姿势、动作、物品、环境等），必须描述变化完成后的最终状态。' },
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + `【当前画面生成规则·最高优先级】
+【最后一轮对话】是当前配图的唯一任务来源，必须先独立判断它实际要求描述变化完成后的最终状态。
+【上一次画面环境描述】仅是可选的连续性参考，不是当前画面的默认模板，也不代表其中任何环境、构图或人物状态需要继续保留。
+先根据最后一轮对话完整确定当前画面，再检查上一次画面；只有与当前意图明确相关、没有冲突且确有连续性价值的细节才可保留。无法确定是否需要保留时，一律不保留。
+最后一轮对话直接或间接产生任何变化时，必须采用变化完成后的最终状态，彻底舍弃被替换的旧状态；禁止把新旧画面折中、叠加或并列描述。` },
     // ── 用户形象（建立 user↔用户名的映射，紧随最高指令之后让 LLM 明确画面对象）──
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
@@ -1486,7 +1505,9 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
     ...(formatGuideWithWeather ? [{ role: 'system', content: formatGuideWithWeather }] : []),
     // ── 人格（让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
-    // ── 对话上下文（不含最后一轮对话，避免重复；先铺背景，让模型理解对话脉络）──
+    // ── 交叉角色生图上下文（在历史上下文之前，确保最后一个 system 聚焦对话）──
+    ...crossRefImageMsgs,
+    // ── 对话上下文（仅历史背景；最后一轮对话放入最终 user 消息）──
     // 同时剥离历史 prompt JSON 避免 token 浪费，并提取最近一轮 prompt 作为【上一次画面描述】
     ...(() => {
 	    // 移除消息中任意位置的 {"prompt":"..."} JSON 块（支持弯引号变体，不锚定 $）
@@ -1524,29 +1545,20 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
           const userName = config.user.nickname || '用户';
           const label = m.role === 'user' ? userName : (character?.display_name || '角色');
           return `${label}: ${m.content}`;
-        }).join('\n\n') + '\n\n' + (() => {
-          const la = [...history].reverse().find(m => m.role === 'assistant');
-          const lu = [...history].reverse().find(m => m.role === 'user');
-          const p = [];
-          const un = config.user.nickname || '用户';
-          if (lu) p.push(un + ': ' + lu.content);
-          if (la) p.push((character?.display_name || '角色') + ': ' + la.content);
-          return p.length ? '【最后一轮对话】\n' + p.join('\n') : '';
-        })()
+        }).join('\n\n')
         };
 
-      // 如果存在上一轮画面，追加独立块用于画面连续性
+      // 如果存在上一轮画面，将它与历史对话合并为同一条 system 消息。
       if (lastScenePrompt) {
-        return [
-          { role: 'system', content: `【上一次画面环境描述】：\n${lastScenePrompt}` },
-          contextBlock,
-        ];
+        contextBlock.content = `【上一次画面环境描述·仅供参考环境】：
+下面是上一张图片的描述，不是本轮必须继承的状态。不要复述或照搬它。只有当【最后一轮对话】明确延续同一画面时，才选择性保留未被改变的必要细节；如果最后一轮能够独立构成新画面，或没有明确要求延续，则忽略下面的全部内容：
+${lastScenePrompt}
+
+${contextBlock.content}`;
       }
       return [contextBlock];
     })(),
-    // ── 交叉角色生图上下文（在格式说明之后，让 LLM 知道画面中还有谁）──
-    ...crossRefImageMsgs,
-    { role: 'user', content: `直接输出英文画面描述来描述【最后一轮对话】对应的配图。仅当最后一轮对话对应的画面需要出现${userName}时，才描述并使用${userName}的外观；否则不要让${userName}出现在画面中，也不要描述其特征。不要任何格式包装或额外文字。` },
+    { role: 'user', content: `${lastTurnDialogue ? `【最后一轮对话】\n${lastTurnDialogue}\n\n` : ''}【当前任务】\n直接输出英文画面描述来描述【最后一轮对话】对应的配图。仅当最后一轮对话对应的画面需要出现${userName}时，才描述并使用${userName}的外观；否则不要让${userName}出现在画面中，也不要描述其特征。不要任何格式包装或额外文字。` },
   ];
 
   // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
