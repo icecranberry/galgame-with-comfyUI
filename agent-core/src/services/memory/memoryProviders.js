@@ -4,7 +4,7 @@ import { embedBatch } from '../vectorClient.js';
 import { getMemorySettings } from './memoryConfig.js';
 
 const DAILY_FAILURE_LIMIT = 5;
-const SLOW_REQUEST_THRESHOLD_MS = 3000;
+const SLOW_REQUEST_THRESHOLD_MS = 2500;
 const FAILURE_SETTING_KEY = 'memory_builtin_provider_failures';
 const LOCAL_PROFILE = Object.freeze({
   fingerprint: 'local_builtin',

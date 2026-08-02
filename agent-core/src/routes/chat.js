@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
-import { hybridSearch } from '../services/memorySearch.js';
+import { recallChatMemories, CHAT_RAG_TIMEOUT_MS } from '../services/memory/chatMemoryRecall.js';
 import { curateChatMemories } from '../services/memoryExtractor.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories, rollbackMemoriesFromRawId } from '../services/memory/memoryRepository.js';
@@ -759,10 +759,13 @@ ${coreRules}
           SELECT 'group_' || group_id AS conversation_id
           FROM group_members WHERE character_id = ? ORDER BY group_id
         `).pluck().all(characterId);
-        const memoryResults = await hybridSearch(message, {
+        const { results: memoryResults, timedOut: ragTimedOut } = await recallChatMemories(message, {
           conversationIds: [conversationId, ...groupConversationIds],
           topK: 7,
         });
+        if (ragTimedOut) {
+          console.warn(`[chat] memory search exceeded ${CHAT_RAG_TIMEOUT_MS}ms; continuing without RAG memories`);
+        }
         // 临时排除事件/奇遇/未互动事件类记忆，避免它们通过主聊天流的 <rag_memories> 重复注入。
         const chatMemoryResults = memoryResults.filter(m => {
           const judgment = String(m.judgment ?? '');

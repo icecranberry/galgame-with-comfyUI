@@ -4,7 +4,7 @@ import { config } from '../config.js';
  * 向量服务 HTTP 客户端
  */
 const BASE = config.vectorService.url;
-const FETCH_TIMEOUT = 5000; // 5 秒超时
+const FETCH_TIMEOUT = 2500; // 2.5 秒超时
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT) {
   const controller = new AbortController();
