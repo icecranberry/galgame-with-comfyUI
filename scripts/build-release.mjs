@@ -348,21 +348,42 @@ async function main() {
 
   const npmCmd = resolve(NODE_DIR, "npm.cmd");
 
-  // agent-core — 始终重新安装，确保原生模块（better-sqlite3等）编译目标与捆绑 Node.js 一致
+  // agent-core — 始终安装，确保依赖与 package.json 一致。
+  // 不要预先删除或无条件重建原生模块：开发服务运行时 Windows 会锁住 .node 文件。
   log("agent-core npm install (~3-8min)...");
-  // 先清理旧原生模块编译产物，防止残留 incompatible 的 .node 文件
-  if (existsSync(resolve(AGENT_CORE, "node_modules"))) {
-    const { rmSync } = await import("node:fs");
-    const prebuilds = resolve(AGENT_CORE, "node_modules", ".cache");
-    const sqlite3Build = resolve(AGENT_CORE, "node_modules", "better-sqlite3", "build");
-    try { if (existsSync(prebuilds)) rmSync(prebuilds, { recursive: true, force: true }); } catch {}
-    try { if (existsSync(sqlite3Build)) rmSync(sqlite3Build, { recursive: true, force: true }); } catch {}
-    log("  已清理原生模块编译缓存");
-  }
   {
     const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: AGENT_CORE, print: true });
     if (!r.ok) { fail("agent-core npm install 失败!"); process.exit(1); }
-    ok("agent-core 完成");
+
+    // 先验证现有绑定。大多数情况下 npm install 已经准备好依赖，且正在运行的
+    // agent-core 可能持有这个文件；验证通过就不要碰它。
+    const bundledNode = resolve(NODE_DIR, "node.exe");
+    const sqliteTestArgs = [
+      "-e",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('SELECT 1').get();db.close();",
+    ];
+    let sqliteSmokeTest = await exec(bundledNode, sqliteTestArgs, { cwd: AGENT_CORE, shell: false });
+
+    // 只有缺失或 ABI 不兼容时才重建。
+    if (!sqliteSmokeTest.ok) {
+      log("  现有 better-sqlite3 绑定不可用，尝试重建...");
+      const rebuild = await exec(npmCmd, ["rebuild", "better-sqlite3"], {
+        cwd: AGENT_CORE,
+        print: true,
+      });
+      if (!rebuild.ok) {
+        fail("better-sqlite3 原生绑定重建失败；请先关闭正在运行的 agent-core 后重试。");
+        process.exit(1);
+      }
+      sqliteSmokeTest = await exec(bundledNode, sqliteTestArgs, { cwd: AGENT_CORE, shell: false });
+    }
+
+    if (!sqliteSmokeTest.ok) {
+      fail("better-sqlite3 发布环境验证失败!");
+      if (sqliteSmokeTest.stderr) log(`  ${sqliteSmokeTest.stderr.slice(-1000)}`);
+      process.exit(1);
+    }
+    ok("agent-core 完成（better-sqlite3 已通过捆绑 Node.js 验证）");
   }
 
   // web-ui — 同样始终安装，确保依赖与 package.json 一致
@@ -644,7 +665,20 @@ async function main() {
       [".cache"]
     );
     if (!rcOk) { fail("node_modules 复制失败!"); process.exit(1); }
-    ok("agent-core\\node_modules");
+
+    // 对最终复制结果再验证一次，防止复制规则或文件锁导致原生绑定遗漏。
+    const releaseNode = resolve(RELEASE_DIR, "runtime", "nodejs", "node.exe");
+    const releaseCore = resolve(RELEASE_DIR, "agent-core");
+    const releaseSqliteTest = await exec(releaseNode, [
+      "-e",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('SELECT 1').get();db.close();",
+    ], { cwd: releaseCore, shell: false });
+    if (!releaseSqliteTest.ok) {
+      fail("release 中的 better-sqlite3 验证失败，终止打包!");
+      if (releaseSqliteTest.stderr) log(`  ${releaseSqliteTest.stderr.slice(-1000)}`);
+      process.exit(1);
+    }
+    ok("agent-core\\node_modules（发布目录验证通过）");
   }
 
   // agent-core/public
