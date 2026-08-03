@@ -503,6 +503,17 @@ const MOTIVATIONS = [
   { name: '冒个泡', desc: '很久没发了，简单更新一下。' },
 ];
 
+// 发布形态池：决定"怎么发"，与"发什么"(Topic)和"为什么发"(Motivation)正交。
+// weight 基础权重；nightBoost=true 的形态在深夜(22-5点)权重 ×1.8，让发圈时刻更有状态感。
+const MOMENT_FORMS = [
+  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 1.0, nightBoost: false },
+  { name: '碎碎念', desc: '两三行短句，想到哪说到哪，像随手记', len: '20-60字', weight: 1.2, nightBoost: false },
+  { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
+  { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
+  { name: '认真长文', desc: '认真记录一件事，可以展开细节（带格式）', len: '80-200字', weight: 0.8, nightBoost: false },
+  { name: '自言自语', desc: '像没写完的心里话，带点欲言又止', len: '10-40字', weight: 1.0, nightBoost: true },
+];
+
   // 加权映射：部分高辨识度动机提高 roll 到概率
   const MOTIVATION_WEIGHTS = {};
 
@@ -533,12 +544,26 @@ const MOTIVATIONS = [
     pickedSpecialMode = SPECIAL_MODES[Math.floor(Math.random() * SPECIAL_MODES.length)];
     combinedStyle = pickedSpecialMode.name;
     isSpecialMode = true;
-  } else if (modeRoll < 0.9) {
+  } else if (modeRoll < 0.15) {
     isFreeMode = true;
   } else {
     pickedTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
     pickedMotivation = weightedPick(MOTIVATIONS, MOTIVATION_WEIGHTS);
     combinedStyle = `${pickedTopic.name}|${pickedMotivation.name}`;
+  }
+
+  // 1.5 发布形态抽取：做梦/幻想 → 叙事长文（讲故事需要空间）；自由模式 → 不设形态；
+  //     主路径 → 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
+  let pickedForm = null;
+  if (isSpecialMode) {
+    pickedForm = { name: '叙事长文', desc: '像在讲一个故事或一场梦，可以自由展开', len: '80-200字' };
+  } else if (!isFreeMode) {
+    const _hour = new Date().getHours();
+    const _isNight = _hour >= 22 || _hour < 5;
+    const formWeights = {};
+    for (const f of MOMENT_FORMS) formWeights[f.name] = f.weight * (_isNight && f.nightBoost ? 1.8 : 1.0);
+    const picked = weightedPick(MOMENT_FORMS, formWeights);
+    pickedForm = { name: picked.name, desc: picked.desc, len: picked.len };
   }
 
   // 2. 创建 pending 记录
@@ -638,6 +663,26 @@ const MOTIVATIONS = [
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
 
+  // 续集感：取最近一条已完成朋友圈，供"回应/后续"动机写续集，或自然呼应
+  let prevMomentText = '';
+  try {
+    prevMomentText = db.prepare(
+      `SELECT content FROM moment_posts WHERE character_id = ? AND status = 'done' AND content != '' ORDER BY created_at DESC LIMIT 1`
+    ).get(character.id)?.content || '';
+  } catch { /* ignore */ }
+
+  // 不完美注入：5% 概率允许 1 处轻微口语瑕疵，打破"标准小作文"感
+  const imperfectionNote = Math.random() < 0.05
+    ? '\n- 这条朋友圈可以有 1 处轻微的口语瑕疵：比如打错一个字不修、句尾多个语气词、写了一半改用别的说法。最多 1 处，不要刻意。'
+    : '';
+
+  // 续集注入：动机是"回应/后续"时强制续集；其他情况 10% 概率弱呼应（自由模式不注入）
+  const continuationNote = (pickedMotivation && (pickedMotivation.name === '后续' || pickedMotivation.name === '回应') && prevMomentText)
+    ? `\n- 你上次发过：「${prevMomentText.slice(0, 60)}...」。这次发的是这件事的后续/回应，让看到的人能想起上一条，但不要复述太多。`
+    : (Math.random() < 0.10 && prevMomentText && !isFreeMode
+      ? `\n- 你最近一条朋友圈是：「${prevMomentText.slice(0, 60)}...」。可以自然地呼应它（比如"上次说的事有后续了"），但不要硬蹭。`
+      : '');
+
   const postingTask = (() => {
     const jsonFmt = `输出格式（严格 JSON）：
 {"text":"朋友圈文案（自然口语化）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"}`;
@@ -645,10 +690,13 @@ const MOTIVATIONS = [
     const rules = `规则：
 - 只输出 JSON，不要解释
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在上述世界观中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
-- text用中文（50-200字），imagePrompt 用英文
+- text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
+${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
+${imperfectionNote}
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
-- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
+- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。
+${continuationNote}`;
 
     return `${postingTaskIntro}
 
