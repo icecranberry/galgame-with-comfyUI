@@ -9,6 +9,9 @@ import { createMemoryIndexWorker } from './memoryIndexWorker.js';
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
 const INDEX_CONCURRENCY = 2;
+// 记忆整理嵌入走用户自定义 → 系统内置 API（120s）→ 本地 ONNX 的优先级，
+// 独立失败计数 embedding_index，当日失败满 5 次才降级本地。
+const INDEX_EMBED_TIMEOUT_MS = 120000;
 const INDEX_JOB_DELAY_MS = 100;
 const PRIORITY_LIVE = 0;
 const PRIORITY_RETRY = 5;
@@ -197,7 +200,7 @@ export async function indexMemory(memoryId) {
       memory_type: row.memory_type,
       tags: JSON.stringify(parseTags(row.tags)),
     };
-    const { embedding, profile } = await embedMemoryText(text, settings);
+    const { embedding, profile } = await embedMemoryText(text, settings, { timeoutMs: INDEX_EMBED_TIMEOUT_MS, failureKind: 'embedding_index', slowThresholdMs: null });
     const current = getDb().prepare(`SELECT status FROM memory_fragments WHERE memory_id = ?`).get(memoryId);
     if (current?.status !== 'active') return false;
     await upsertVector(memoryId, text, metadata, null, profile.corpus, embedding);
@@ -329,7 +332,7 @@ function retryOrEnqueueIndexJob(db, jobType, memoryId, profile, priority) {
 }
 
 function enqueueFollowUpsForProcessingUpserts(db, priority) {
-  const profile = getPreferredMemoryEmbeddingProfile().fingerprint;
+  const profile = getPreferredMemoryEmbeddingProfile(undefined, 'embedding_index').fingerprint;
   const rows = db.prepare(`
     SELECT DISTINCT memory_id FROM memory_index_jobs
     WHERE job_type = 'upsert' AND status = 'processing' AND memory_id IS NOT NULL
@@ -367,7 +370,7 @@ function claimNextIndexJob() {
           db,
           'upsert',
           stale.memory_id,
-          getPreferredMemoryEmbeddingProfile().fingerprint,
+          getPreferredMemoryEmbeddingProfile(undefined, 'embedding_index').fingerprint,
           PRIORITY_HISTORY,
         );
         job = db.prepare(`SELECT * FROM memory_index_jobs WHERE id = ?`).get(id);

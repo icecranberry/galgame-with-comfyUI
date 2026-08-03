@@ -85,11 +85,11 @@ function readFailureState() {
   try {
     const row = getDb().prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(FAILURE_SETTING_KEY);
     const parsed = row ? JSON.parse(row.setting_value) : null;
-    if (parsed?.date === date) return { date, embedding: Number(parsed.embedding) || 0, reranker: Number(parsed.reranker) || 0 };
+    if (parsed?.date === date) return { date, embedding: Number(parsed.embedding) || 0, reranker: Number(parsed.reranker) || 0, embedding_index: Number(parsed.embedding_index) || 0 };
   } catch (error) {
     console.warn('[memory-provider] unable to read daily failure state:', error.message);
   }
-  return { date, embedding: 0, reranker: 0 };
+  return { date, embedding: 0, reranker: 0, embedding_index: 0 };
 }
 
 function writeFailureState(state) {
@@ -147,9 +147,9 @@ async function requestEmbeddings(texts, provider, source) {
   return { profile: profileFor(provider, source), embeddings, source, elapsedMs };
 }
 
-export function getPreferredMemoryEmbeddingProfile(settings = getMemorySettings({ includeSecrets: true })) {
+export function getPreferredMemoryEmbeddingProfile(settings = getMemorySettings({ includeSecrets: true }), kind = 'embedding') {
   if (isCompleteUserProvider(settings.embedding)) return profileFor(settings.embedding, 'user');
-  if (builtinAvailable('embedding')) return profileFor(builtinProvider('embedding'), 'builtin');
+  if (builtinAvailable(kind)) return profileFor(builtinProvider('embedding'), 'builtin');
   return LOCAL_PROFILE;
 }
 
@@ -158,23 +158,24 @@ export function getBuiltinMemoryProviderStatus() {
   return { date: state.date, failureLimit: DAILY_FAILURE_LIMIT, slowThresholdMs: SLOW_REQUEST_THRESHOLD_MS, embeddingFailures: state.embedding, rerankerFailures: state.reranker };
 }
 
-export async function embedMemoryTexts(texts, settings = getMemorySettings({ includeSecrets: true })) {
+export async function embedMemoryTexts(texts, settings = getMemorySettings({ includeSecrets: true }), options = {}) {
+  const { timeoutMs, failureKind = 'embedding', slowThresholdMs = SLOW_REQUEST_THRESHOLD_MS } = options;
   const userProvider = settings.embedding;
   if (isCompleteUserProvider(userProvider)) {
     try {
-      return await requestEmbeddings(texts, userProvider, 'user');
+      return await requestEmbeddings(texts, { ...userProvider, timeoutMs: timeoutMs || userProvider.timeoutMs }, 'user');
     } catch (error) {
       console.warn('[memory-provider] user embedding failed, using system default:', error.message);
     }
   }
 
-  if (builtinAvailable('embedding')) {
+  if (builtinAvailable(failureKind)) {
     try {
-      const result = await requestEmbeddings(texts, builtinProvider('embedding'), 'builtin');
-      if (result.elapsedMs > SLOW_REQUEST_THRESHOLD_MS) recordBuiltinFailure('embedding');
+      const result = await requestEmbeddings(texts, { ...builtinProvider('embedding'), timeoutMs: timeoutMs || 8000 }, 'builtin');
+      if (slowThresholdMs && result.elapsedMs > slowThresholdMs) recordBuiltinFailure(failureKind);
       return result;
     } catch (error) {
-      const failures = recordBuiltinFailure('embedding');
+      const failures = recordBuiltinFailure(failureKind);
       if (!shouldUseLocalMemoryFallback(failures)) {
         throw new Error(`系统内置嵌入服务失败 (${failures}/${DAILY_FAILURE_LIMIT}): ${error.message}`);
       }
@@ -186,8 +187,8 @@ export async function embedMemoryTexts(texts, settings = getMemorySettings({ inc
   return { profile: LOCAL_PROFILE, embeddings: texts.map(() => null), source: 'local', elapsedMs: null };
 }
 
-export async function embedMemoryText(text, settings) {
-  const result = await embedMemoryTexts([text], settings);
+export async function embedMemoryText(text, settings, options) {
+  const result = await embedMemoryTexts([text], settings, options);
   return { profile: result.profile, embedding: result.embeddings[0], source: result.source, elapsedMs: result.elapsedMs };
 }
 

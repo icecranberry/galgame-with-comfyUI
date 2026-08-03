@@ -4,9 +4,11 @@ import { config } from '../config.js';
  * 向量服务 HTTP 客户端
  */
 const BASE = config.vectorService.url;
-const FETCH_TIMEOUT = 2500; // 2.5 秒超时
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT) {
+// 主聊天流的 RAG 已由 chatMemoryRecall 用 2.5s race 限时；
+// 这里统一使用宽松默认超时，避免后台记忆索引（upsert/delete）等被误杀。
+const DEFAULT_TIMEOUT = config.vectorService.defaultTimeoutMs;
+const HEALTH_TIMEOUT = 2500;
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -86,7 +88,7 @@ export async function upsertVectors(items, corpus = 'memory_fragments') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items, corpus }),
-  }, 30000);
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Batch upsert error: ${err.detail || res.status}`);
@@ -124,7 +126,7 @@ export async function deleteByConversation(conversationId, corpus = 'memory_frag
 
 export async function healthCheck() {
   try {
-    const res = await fetchWithTimeout(`${BASE}/health`);
+    const res = await fetchWithTimeout(`${BASE}/health`, {}, HEALTH_TIMEOUT);
     const data = await res.json();
     return data.status === 'ok';
   } catch {

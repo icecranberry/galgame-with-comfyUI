@@ -24,6 +24,9 @@ export const config = {
   },
   vectorService: {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
+    // 默认宽松超时：主聊天流 RAG 的 2.5s 限时在 chatMemoryRecall 层单独处理，
+    // 后台记忆索引（upsert/delete）、画像提取等不受此限制。
+defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
   },
   comfyui: {
     url: (process.env.COMFYUI_URL || 'http://localhost:8188').replace(/\/+$/, ''),

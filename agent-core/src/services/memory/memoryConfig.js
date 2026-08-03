@@ -3,7 +3,7 @@ import { getDb } from '../../db/index.js';
 
 export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   enabled: true,
-  topK: 7,
+  topK: 5,
   textCandidates: 24,
   vectorCandidates: 24,
   recordUnengagedEvents: true,

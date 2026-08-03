@@ -110,6 +110,17 @@ async def embed_route(req: EmbedRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/embed-index", response_model=EmbedResponse)
+async def embed_index_route(req: EmbedRequest):
+    """记忆整理专用嵌入（index 会话，与聊天流 /embed 隔离）。"""
+    texts = req.text if isinstance(req.text, list) else [req.text]
+    try:
+        embeddings = embed(texts, "index")
+        return EmbedResponse(embeddings=embeddings)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/search", response_model=SearchResponse)
 async def search_route(req: SearchRequest):
     try:
@@ -134,7 +145,7 @@ async def upsert_route(req: UpsertRequest):
         if req.embedding is not None:
             vec = req.embedding
         else:
-            vec = embed_single(req.text)
+            vec = embed_single(req.text, "index")
         chroma_id = req.chroma_id or str(uuid.uuid4())
 
         metadata = {**req.metadata}
@@ -151,7 +162,7 @@ async def upsert_route(req: UpsertRequest):
 async def upsert_batch_route(req: UpsertBatchRequest):
     try:
         missing_indexes = [index for index, item in enumerate(req.items) if item.embedding is None]
-        generated = embed([req.items[index].text for index in missing_indexes]) if missing_indexes else []
+        generated = embed([req.items[index].text for index in missing_indexes], "index") if missing_indexes else []
         generated_by_index = dict(zip(missing_indexes, generated))
         embeddings = [item.embedding if item.embedding is not None else generated_by_index[index] for index, item in enumerate(req.items)]
         items = []

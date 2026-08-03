@@ -32,6 +32,14 @@ const router = Router();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// ── 打字节奏：按分句文字长度随机 300~900ms，模拟真人打字（短句快、长句慢、带随机抖动） ──
+const typingDelay = (text = '') => {
+  const len = Math.min(30, (text || '').length || 1); // 长度封顶 30 字，避免超长句停顿过久
+  const base = 300 + (len / 30) * 300;                // 长度映射 300~600ms
+  const jitter = Math.random() * 300;                 // 随机抖动 0~300ms
+  return Math.min(900, Math.round(base + jitter));    // 最终落在 300~900ms
+};
+
 // ── 回复猜想冷却：每个 conversation 生成一次后进入 20s 冷却，用户新消息到达时重置 ──
 const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 
@@ -860,7 +868,7 @@ ${coreRules}
         send('token', { content: segText });
         collectedSegments.push(segText);
         send('bubble_break', {});
-        await sleep(500);
+        await sleep(typingDelay(segText));
       }
       // stopped=true 后 feed() 不再产出 segment，但 fullContent 继续累积
     }
@@ -1637,7 +1645,7 @@ ${contextBlock.content}`;
       for (const segText of allSegments) {
         send('token', { content: segText });
         send('bubble_break', {});
-        await sleep(500);
+        await sleep(typingDelay(segText));
       }
       // 更新 displayContent 为清洗后的分段文本，供下方 messages 表写入
       displayContent = allSegments.join('\n\n');
