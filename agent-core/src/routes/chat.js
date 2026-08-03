@@ -40,6 +40,20 @@ const typingDelay = (text = '') => {
   return Math.min(900, Math.round(base + jitter));    // 最终落在 300~900ms
 };
 
+// ── 临时表达风格池：小概率注入，让"怎么说"像真人一样随心情/话题变化 ──
+// 只影响本次回复，不改变性格底色；放历史聊天之后，越靠近"现在要回复"越容易被接住。
+const TEMP_STYLE_POOL = [
+  '先吐槽一句，再正常接话',
+  '这次带点懒散随意的语气',
+  '用一句玩笑话开场，再认真说',
+  '这次说话稍微正经一点',
+];
+const TEMP_STYLE_POOL_OATH = [
+  ...TEMP_STYLE_POOL,
+  '这次带点撒娇的意味',
+  '语气软一点，带点想念',
+];
+
 // ── 回复猜想冷却：每个 conversation 生成一次后进入 20s 冷却，用户新消息到达时重置 ──
 const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 
@@ -741,6 +755,14 @@ ${coreRules}
       dynamicBlocks.push(activeChatText);
     }
 
+    // 8.5 临时表达风格：小概率注入，紧跟历史聊天之后，只影响本轮回复
+    //     誓约状态时偏向更亲近的风格（俏皮/撒娇），一般时用基础池
+    if (Math.random() < 0.12) {
+      const pool = (userRel && userRel.is_oath) ? TEMP_STYLE_POOL_OATH : TEMP_STYLE_POOL;
+      const style = pool[Math.floor(Math.random() * pool.length)];
+      dynamicBlocks.push(`<style_override>\n${style}。只影响这次回复，不要改变你的性格底色。\n</style_override>`);
+    }
+
     // 9. 日程上下文（当前在做什么 / 睡醒等）
     const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
     if (scheduleCtx) {
@@ -827,7 +849,8 @@ ${coreRules}
       const gapMinutes = (now - prevDate) / 60000;
       if (gapMinutes > 10) {
         const prevWeekDay = ['周日','周一','周二','周三','周四','周五','周六'][prevDate.getDay()];
-        timeBlocks.push(`[上次对话时间 ${prevWeekDay} ${String(prevDate.getMonth() + 1).padStart(2, '0')}/${String(prevDate.getDate()).padStart(2, '0')} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`);
+        const prevDateStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
+        timeBlocks.push(`[上次对话 ${prevDateStr} ${prevWeekDay} ${String(prevDate.getHours()).padStart(2, '0')}:${String(prevDate.getMinutes()).padStart(2, '0')}]`);
       }
     }
     dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);

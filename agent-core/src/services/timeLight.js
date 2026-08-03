@@ -189,24 +189,27 @@ export function getTimeLight(now = new Date()) {
 
 /**
  * 生成时间标签（用于主聊天流）含季节和天气。
- * [当前时间 周三 07/03 14:30 / 夏/下午 — 多云、挺热]
+ * 格式尽量系统化、中性化：像系统状态栏一样客观呈现时间与环境信息，
+ * 避免"当前时间/夏日下午"这类叙事化措辞诱导模型在回复中复述或展开环境描写。
+ * [2026-08-04 周二 04:54 | 夏天·深夜 | 天气:多云、挺热]
  * @param {Date} [now]
  * @param {boolean} [needWeather=true] 是否附加天气
  * @returns {string}
  */
 export function getTimeTag(now = new Date(), needWeather = true) {
   const weekDay = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
-  const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const { timeDesc } = getTimeLight(now);
   const season = getSeason(now.getMonth() + 1);
+  const envParts = [`${season}·${timeDesc}`];
   const weather = needWeather ? getCurrentWeather(now.getHours()) : null;
   if (weather && weather.weather) {
     const wParts = [weather.weather];
     if (weather.temperature) wParts.push(weather.temperature);
-    return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc} — ${wParts.join('、')}]`;
+    envParts.push(`天气:${wParts.join('、')}`);
   }
-  return `[当前时间 ${weekDay} ${dateStr} ${timeStr} / ${season}/${timeDesc}]`;
+  return `[${dateStr} ${weekDay} ${timeStr} | ${envParts.join(' | ')}]`;
 }
 
 /**
