@@ -506,12 +506,15 @@ const MOTIVATIONS = [
 // 发布形态池：决定"怎么发"，与"发什么"(Topic)和"为什么发"(Motivation)正交。
 // weight 基础权重；nightBoost=true 的形态在深夜(22-5点)权重 ×1.8，让发圈时刻更有状态感。
 const MOMENT_FORMS = [
-  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 1.0, nightBoost: false },
+  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 0.8, nightBoost: false },
   { name: '碎碎念', desc: '两三行短句，想到哪说到哪，像随手记', len: '20-60字', weight: 1.2, nightBoost: false },
   { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
   { name: '认真长文', desc: '认真记录一件事，可以展开细节（带格式）', len: '80-200字', weight: 0.8, nightBoost: false },
   { name: '自言自语', desc: '像没写完的心里话，带点欲言又止', len: '10-40字', weight: 1.0, nightBoost: true },
+  { name: '冷幽默', desc: '一句或几句自嘲冷幽默，结尾抖个小包袱', len: '15-50字', weight: 0.7, nightBoost: false },
+  { name: '清单体', desc: '用列表逐条列出来，像在写一张清单，条目感强', len: '30-100字', weight: 0.7, nightBoost: false },
+  { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.6, nightBoost: false },
 ];
 
   // 加权映射：部分高辨识度动机提高 roll 到概率
