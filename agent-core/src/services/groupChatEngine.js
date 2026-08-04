@@ -38,7 +38,7 @@ export function groupConvId(groupId) { return `group_${groupId}`; }
 
 const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底：checkpoint 之后 transcript 超过此数触发边界推进
 const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数（留出再增长空间，降低跳变频率）
-const MAX_ROUND_MESSAGES = 15;     // 每轮剧本最多 10 条消息（按剧本行计，分句后的气泡数不受限）
+const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
 const IMAGE_NUDGE_PROBABILITY = 0.5;  // 每轮抽卡鼓励发图的概率
 // ── 群聊记忆与召回统一使用 paimon 记忆 v2 ──
 
@@ -57,6 +57,19 @@ export function getGroupWithMembers(groupId) {
 }
 
 // ── @点名 / 提及检测 ──
+/**
+ * 每轮剧本消息上限：按群人数与话题动态计算。
+ * 基础值 = 3 + 成员数 × 3（2 人 = 9 条起步，封顶 MAX_ROUND_MESSAGES）；
+ * 有明确话题（群主题或本轮话题引子）时放宽 3 条（仍封顶 MAX_ROUND_MESSAGES）。
+ * 该上限只是“最多”，不是“必须凑满”——话题自然聊完即可输出 [END]。
+ */
+function computeRoundMessageLimit(group, { hasTopicSeed = false } = {}) {
+  const memberCount = Math.max(1, (group.members || []).length);
+  const base = Math.min(MAX_ROUND_MESSAGES, Math.max(9, 3 + memberCount * 3));
+  const hasTopic = Boolean(group.topic || hasTopicSeed);
+  return hasTopic ? Math.min(MAX_ROUND_MESSAGES, base + 3) : base;
+}
+
 
 export function detectMentions(text, members) {
   const hits = [];
@@ -85,7 +98,7 @@ function buildProtocolBlock() {
 
 输出协议（严格遵守）：
 - 每条消息独占一行，格式为「角色名: 消息内容」，角色名必须是 <group_info> 中的群成员名字
-- 每轮最多 ${MAX_ROUND_MESSAGES} 条消息，全部说完后最后单独一行输出 [END]
+- 每轮有消息条数上限（按群人数与话题动态设定，见本轮指令中的“消息上限”）；上限只是最多条数、不是必须凑满，全部说完后最后单独一行输出 [END]
 - **禁止替用户「${chatUserName}」发言**
 - <user_message read_only="true">...</user_message> 是真实用户已经说过的话，只用于理解上下文；禁止输出该标记，禁止续写或模仿其中的用户发言
 - 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {${imagePromptFieldGuide}}」；花括号内直接填写符合规则的完整英文画面描述，不要写 prompt 字段、JSON、引号或 Markdown 代码块，禁止照抄规则
@@ -679,6 +692,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const directiveBlocks = [];
   directiveBlocks.push(`<time_context>${getTimeTag(new Date())}</time_context>`);
 
+  let dyn = null;   // 本轮话题引子（idle 轮从成员动态中抽取）
   if (trigger === 'user') {
     directiveBlocks.push(`「${chatUserName}」刚刚发了消息，接下来角色们要接话。`);
     const mentions = detectMentions(userMessage, group.members);
@@ -688,7 +702,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   } else if (trigger === 'idle') {
     directiveBlocks.push(`用户「${chatUserName}」现在不在线。角色们自发闲聊几句，氛围自然随意，不要频繁@用户。`);
     // 必带一条成员动态作为话题引子（奇遇/朋友圈/日程），避免凭空尬聊
-    const dyn = pickMemberDynamic(group);
+    dyn = pickMemberDynamic(group);
     if (dyn) {
       directiveBlocks.push(`<topic_seed>\n话题引子：${dyn.text}。\n让「${dyn.member.display_name}」自然地主动聊起这件事（分享/吐槽/炫耀都行，很适合配一张图），其他人围绕它接话。\n</topic_seed>`);
     }
@@ -707,15 +721,26 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         new Promise(resolve => setTimeout(() => resolve(null), RAG_TIMEOUT_FAST_MS)),
       ]);
       if (memories && memories.length > 0) {
-        const lines = memories.map((memory, index) => `${index + 1}. [${memory.memory_type}] ${memory.judgment}`).join('\n');
-        directiveBlocks.push(`<rag_memories>\n相关记忆（角色们可能记得的事）：\n${lines}\n</rag_memories>`);
+        // 临时排除事件/奇遇/未互动事件类记忆，避免它们通过群聊的 <rag_memories> 重复注入（与主聊天流一致）。
+        const groupMemoryResults = memories.filter(m => {
+          const judgment = String(m.judgment ?? '');
+          return !judgment.includes('【事件')
+            && !judgment.includes('【奇遇')
+            && !judgment.includes('未互动事件');
+        });
+        if (groupMemoryResults.length > 0) {
+          const lines = groupMemoryResults.map((memory, index) => `${index + 1}. [${memory.memory_type}] ${memory.judgment}`).join('\n');
+          directiveBlocks.push(`<rag_memories>\n相关记忆（角色们可能记得的事）：\n${lines}\n</rag_memories>`);
+        }
       }
     } catch (err) {
       console.error('[group] RAG failed:', err.message);
     }
   }
 
-  // 行数/[END] 限制已入驻稳定协议块，动态尾部不再重复
+  // ── 每轮消息上限：按群人数与话题动态设定；上限只是最多条数，不是必须凑满 ──
+  const roundMessageLimit = computeRoundMessageLimit(group, { hasTopicSeed: !!dyn });
+  directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
 
   // 抽卡鼓励发图（idle 已由 topic_seed 引导，不重复加）
   if (trigger !== 'idle' && Math.random() < IMAGE_NUDGE_PROBABILITY) {
@@ -765,7 +790,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       }
       if (!parsed.imagePrompt) return;
     }
-    if (lineCount >= MAX_ROUND_MESSAGES && parsed.text) return;
+    if (lineCount >= roundMessageLimit && parsed.text) return;
 
     if (parsed.imagePrompt) {
       // 独立的 {...} 行继承最近发言角色；若它出现在本轮开头，则归到首位群成员。
