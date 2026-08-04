@@ -468,6 +468,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
       workflowScene: 'group',
       promptScene: 'chat',
       ragTimeoutMs: options.ragTimeoutMs,
+      priority: options.priority,
       onProgress: (p) => {
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
@@ -795,7 +796,10 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         parsed.imagePrompt,
         target.id,
         emit,
-        { ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined },
+        {
+          ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined,
+          priority: (trigger === 'idle' || trigger === 'opening') ? 'low' : undefined,
+        },
       ));
       return;
     }

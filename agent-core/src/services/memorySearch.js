@@ -7,6 +7,8 @@ import { parseTags } from './memory/memoryRepository.js';
 const RRF_K = 60;
 
 export async function hybridSearch(query, options = {}) {
+  const timeoutMs = options.timeoutMs;
+  const run = (async () => {
   const startedAt = Date.now();
   const settings = getMemorySettings({ includeSecrets: true });
   const conversationIds = normalizeConversationIds(options.conversationId, options.conversationIds);
@@ -69,6 +71,14 @@ export async function hybridSearch(query, options = {}) {
     fallbackReason,
   });
   return final;
+  })();
+  if (timeoutMs) {
+    return Promise.race([
+      run,
+      new Promise(resolve => setTimeout(() => resolve([]), timeoutMs)),
+    ]);
+  }
+  return run;
 }
 
 export function textSearch(query, conversationScope = null, limit = 20) {

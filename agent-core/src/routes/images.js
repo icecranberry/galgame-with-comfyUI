@@ -7,6 +7,7 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
+import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -163,7 +164,7 @@ router.post('/generate', async (req, res) => {
   const taskId = taskResult.lastInsertRowid;
 
   // 异步执行，立即返回 taskId
-  generateImage(prompt, { promptScene: 'standalone' })
+  generateImage(prompt, { promptScene: 'standalone', ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
     .then(result => {
       if (result.success) {
         db.prepare(`
@@ -233,6 +234,7 @@ router.post('/test-style', async (req, res) => {
 
   try {
     const result = await generateImageRaw(prompt, {
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,

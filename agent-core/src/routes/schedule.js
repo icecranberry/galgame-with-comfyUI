@@ -26,6 +26,7 @@ import {
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
 import { getTimeLightInline } from '../services/timeLight.js';
@@ -292,6 +293,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
         height: config.comfyui.eventHeight,
         scene: 'schedule',
         priority: 'high',
+        ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
         ...(() => {
           const chLoras = _parseLoras(character.loras);
           const opts = {};

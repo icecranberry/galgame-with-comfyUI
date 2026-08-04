@@ -12,6 +12,7 @@ import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
@@ -637,6 +638,7 @@ router.post('/:id/gift', async (req, res) => {
     if (result.imagePrompt) {
       generateImage(result.imagePrompt, {
         promptScene: 'gift',
+        ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
         onProgress: (p) => {
@@ -800,6 +802,7 @@ ${char.base_prompt}
     const charLoras = _parseCharLoras(char.loras);
     const result = await generateImageRaw(promptText, {
       promptScene: 'avatar',
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       artist: config.comfyui.momentsArtist,
       width: 768,
       height: 768,

@@ -452,6 +452,10 @@ function processLowQueue() {
   });
 }
 
+export function isUserQuiet(quietMs = QUIET) {
+  return Date.now() - lastHighTime >= quietMs;
+}
+
 export async function generateImage(rawPrompt, opts = {}) {
   if (opts.priority === 'low') {
     return new Promise((resolve, reject) => {

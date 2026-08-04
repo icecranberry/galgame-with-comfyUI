@@ -101,7 +101,7 @@ async def health():
 
 
 @app.post("/embed", response_model=EmbedResponse)
-async def embed_route(req: EmbedRequest):
+def embed_route(req: EmbedRequest):
     texts = req.text if isinstance(req.text, list) else [req.text]
     try:
         embeddings = embed(texts)
@@ -111,7 +111,7 @@ async def embed_route(req: EmbedRequest):
 
 
 @app.post("/embed-index", response_model=EmbedResponse)
-async def embed_index_route(req: EmbedRequest):
+def embed_index_route(req: EmbedRequest):
     """记忆整理专用嵌入（index 会话，与聊天流 /embed 隔离）。"""
     texts = req.text if isinstance(req.text, list) else [req.text]
     try:
@@ -122,7 +122,7 @@ async def embed_index_route(req: EmbedRequest):
 
 
 @app.post("/search", response_model=SearchResponse)
-async def search_route(req: SearchRequest):
+def search_route(req: SearchRequest):
     try:
         vec = req.embedding if req.embedding is not None else embed_single(req.text)
         items = search_similar(
@@ -140,7 +140,7 @@ async def search_route(req: SearchRequest):
 
 
 @app.post("/upsert", response_model=UpsertResponse)
-async def upsert_route(req: UpsertRequest):
+def upsert_route(req: UpsertRequest):
     try:
         if req.embedding is not None:
             vec = req.embedding
@@ -159,7 +159,7 @@ async def upsert_route(req: UpsertRequest):
 
 
 @app.post("/upsert-batch", response_model=UpsertBatchResponse)
-async def upsert_batch_route(req: UpsertBatchRequest):
+def upsert_batch_route(req: UpsertBatchRequest):
     try:
         missing_indexes = [index for index, item in enumerate(req.items) if item.embedding is None]
         generated = embed([req.items[index].text for index in missing_indexes], "index") if missing_indexes else []
@@ -178,7 +178,7 @@ async def upsert_batch_route(req: UpsertBatchRequest):
 
 
 @app.post("/delete")
-async def delete_route(req: DeleteRequest):
+def delete_route(req: DeleteRequest):
     try:
         delete_by_id(req.chroma_id, corpus=req.corpus)
         return {"ok": True}
@@ -187,7 +187,7 @@ async def delete_route(req: DeleteRequest):
 
 
 @app.post("/delete-by-conversation")
-async def delete_by_conversation_route(req: DeleteByConversationRequest):
+def delete_by_conversation_route(req: DeleteByConversationRequest):
     """按 conversation_id 和 corpus 批量清理向量"""
     try:
         deleted = delete_by_metadata({"conversation_id": req.conversation_id}, corpus=req.corpus)

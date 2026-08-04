@@ -792,7 +792,6 @@ ${coreRules}
         `).pluck().all(characterId);
         const { results: memoryResults, timedOut: ragTimedOut } = await recallChatMemories(message, {
           conversationIds: [conversationId, ...groupConversationIds],
-          topK: 7,
         });
         if (ragTimedOut) {
           console.warn(`[chat] memory search exceeded ${CHAT_RAG_TIMEOUT_MS}ms; continuing without RAG memories`);

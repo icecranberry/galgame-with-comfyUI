@@ -115,6 +115,14 @@ function recordBuiltinFailure(kind) {
   return state[kind];
 }
 
+function recordBuiltinSuccess(kind) {
+  const state = readFailureState();
+  if (state[kind] > 0) {
+    state[kind] = 0;
+    writeFailureState(state);
+  }
+}
+
 export function shouldUseLocalMemoryFallback(failureCount) {
   return Number(failureCount) >= DAILY_FAILURE_LIMIT;
 }
@@ -172,7 +180,11 @@ export async function embedMemoryTexts(texts, settings = getMemorySettings({ inc
   if (builtinAvailable(failureKind)) {
     try {
       const result = await requestEmbeddings(texts, { ...builtinProvider('embedding'), timeoutMs: timeoutMs || 8000 }, 'builtin');
-      if (slowThresholdMs && result.elapsedMs > slowThresholdMs) recordBuiltinFailure(failureKind);
+      if (slowThresholdMs && result.elapsedMs > slowThresholdMs) {
+        recordBuiltinFailure(failureKind);
+      } else {
+        recordBuiltinSuccess(failureKind);
+      }
       return result;
     } catch (error) {
       const failures = recordBuiltinFailure(failureKind);
@@ -232,7 +244,11 @@ export async function rerankMemories(query, candidates, settings = getMemorySett
   if (builtinAvailable('reranker')) {
     try {
       const result = await requestRerank(query, candidates, builtinProvider('reranker'), 'builtin');
-      if (result[0]?.rerank_elapsed_ms > SLOW_REQUEST_THRESHOLD_MS) recordBuiltinFailure('reranker');
+      if (result[0]?.rerank_elapsed_ms > SLOW_REQUEST_THRESHOLD_MS) {
+        recordBuiltinFailure('reranker');
+      } else {
+        recordBuiltinSuccess('reranker');
+      }
       return result;
     } catch (error) {
       const failures = recordBuiltinFailure('reranker');

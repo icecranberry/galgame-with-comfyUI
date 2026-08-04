@@ -228,7 +228,7 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
     ).join('\n'));
   }
 
-  const memories = await hybridSearch(userContent, { conversationId: convId, topK: 3 }).catch(() => []);
+  const memories = await hybridSearch(userContent, { conversationId: convId, topK: 3, timeoutMs: 15000 }).catch(() => []);
   if (memories.length > 0) {
     mat2Parts.push('【相关长期记忆】\n' + memories.map(m => `- [${m.memory_type || '记忆'}] ${m.judgment}`).join('\n'));
   }

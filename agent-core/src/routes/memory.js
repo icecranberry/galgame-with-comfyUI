@@ -9,7 +9,7 @@ router.get('/search', async (req, res) => {
   try {
     const { q, conversation_id, top_k } = req.query;
     if (!q) return res.status(400).json({ error: 'q is required' });
-    const results = await hybridSearch(q, { conversationId: conversation_id || null, topK: Number.parseInt(top_k, 10) || undefined });
+    const results = await hybridSearch(q, { conversationId: conversation_id || null, topK: Number.parseInt(top_k, 10) || undefined, timeoutMs: 10000 });
     res.json({ results, query: q });
   } catch (error) {
     res.status(500).json({ error: error.message });

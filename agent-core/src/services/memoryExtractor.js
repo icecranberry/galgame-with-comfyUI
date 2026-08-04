@@ -41,7 +41,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterPrompt = ''
   setCheckpoint(conversationId, checkpoint.last_raw_msg_id, 'processing', null);
 
   try {
-    const related = await hybridSearch(transcript, { conversationId, topK: 12 });
+    const related = await hybridSearch(transcript, { conversationId, topK: 12, timeoutMs: 20000 });
     const prompt = buildMemoryCurationPrompt({ transcript, characterPrompt, related });
     let raw = await chatSync([{ role: 'user', content: prompt }], {
       temperature: 0.2,

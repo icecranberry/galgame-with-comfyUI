@@ -34,6 +34,7 @@ import { startScheduler as startImageCompressor } from './src/services/imageComp
 import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { startWeatherScheduler } from './src/services/weatherService.js';
 import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
+import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
@@ -150,6 +151,9 @@ startWeatherScheduler();
 
 // 启动群聊后台调度器（预算制闲聊 + 角色自发建群，由 config.features.groupChat 控制）
 startGroupIdleScheduler();
+
+// 启动图片知识库同步调度器（用户安静时才执行同步，不阻塞生图）
+startKnowledgeSyncScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
