@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getGlobalRule, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
@@ -374,45 +375,9 @@ router.delete('/:id', (req, res, next) => {
 
 });
 
-// POST /api/characters/generate — AI 扩写角色人格
-// Body: { description: "芙宁娜|芙宁娜（原神）|原神游戏里的芙宁娜" }
-// Body: { description: "...", save: false } — 预览模式：只生成不入库，由前端确认后再调 POST /api/characters 入库
-// 默认 save=true，返回生成的完整角色数据，同时写入数据库
-router.post('/generate', async (req, res) => {
-  const { description, save } = req.body;
-  const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
-  if (!description || typeof description !== 'string' || description.trim().length < 2) {
-    return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
-  }
-
-  try {
-    const model = config.llm.model || 'deepseek-chat';
-
-    // ── 联网搜索角色资料 ──────────────────────────────
-    let searchContext = '';
-    console.log(`[characters] searching web for: "${description.trim()}"`);
-    try {
-      searchContext = await searchCharacterInfo(description.trim());
-      if (searchContext) {
-        console.log(`[characters] web search returned ${searchContext.length} chars`);
-      } else {
-        console.log('[characters] web search returned no results');
-      }
-    } catch (err) {
-      console.warn('[characters] web search failed, continuing without:', err.message);
-    }
-
-    const searchFound = !!(searchContext && searchContext.length >= 600);
-
-    // 温度策略：有参考资料 → 低温忠实还原；原创设定 → 中等温度兼顾创造力与格式
-    const temperature = searchFound ? 0.3 : 0.7;
-    console.log(`[characters] search_found=${searchFound}, temperature=${temperature}`);
-
-    // msgs[0] — 舞台：破限词 + 世界观
-    const stageRules = getSystemRulesWithWorld({ roleplay: false });
-
-    // msgs[1] — 任务：角色生成指令 + 模板 + 输出要求
-    const systemPrompt = `你是一个角色人格生成器。用户会输入一个简短的描述（格式可能是"角色名"、"角色名（作品名）"、"作品名里的角色名"等）。
+// 共享：构建人格生成指令（标准模板 + 参考资料）
+function buildPersonaSystemPrompt({ searchContext, extraContext, extraContextLabel }) {
+  return `你是一个角色人格生成器。用户会输入一个简短的描述（格式可能是"角色名"、"角色名（作品名）"、"作品名里的角色名"等）。
 
 你的任务：
 1. 如果是知名 IP 角色（游戏/动漫/影视），务必融入角色在原作中的身份、背景故事、性格特点。如果是原创角色，根据名字和描述自行发挥。
@@ -454,7 +419,11 @@ ${searchContext ? `
 以下是从萌娘百科获取的角色参考资料，用于完善角色设定：
 - 参考资料中【萌娘百科 · 基本信息框】内的字段（发色、瞳色、身高、萌点等）来自页面信息框，是高度精确的结构化数据，**写入角色设定时必须优先采用**。
 - 【正文描述】部分来自页面正文，作为背景故事和性格描写的补充参考。
-${searchContext}` : ''}
+${searchContext}` : ''}${extraContext ? `
+
+---
+以下是从${extraContextLabel}导入的角色原始资料，是你整理角色设定的**第一手素材**：必须完整吸收其中所有具体细节、台词、设定与背景，只做视角转换（她/他→你）与结构化整理，不删减、不架空、不凭空新增与资料冲突的设定。当与网络资料冲突时，以本资料为准。
+${extraContext}` : ''}
 
 ---
 
@@ -469,47 +438,102 @@ ${searchContext}` : ''}
 	  * arousal (唤醒度): 0~1，活泼好动 >0.6，沉静内敛 0.3~0.5，慵懒 <0.3
 	  * dominance (支配度): 0~1，自信强势 >0.6，温和中性 0.4~0.6，顺从弱势 <0.35
 	- 第4行起：完整的 base_prompt 模板内容（你就是她/他——用第二人称"你"贯穿全文，不出现"扮演""模仿"等旁观字眼）`;
+}
 
-    const msgs = [];
-    if (stageRules) msgs.push({ role: 'system', content: stageRules });
-    msgs.push({ role: 'system', content: systemPrompt });
-    msgs.push({ role: 'user', content: description.trim() });
+// 共享：联网搜索 + LLM 人格生成 + 解析。
+// description 为用户输入（用于联网搜索与作为 user 消息）；extraContext 为额外第一手资料（如角色卡全文）。
+// 返回 { displayName, charName, emotionBaseline, basePrompt, searchFound }，失败时抛错。
+async function runPersonaGeneration({ description, extraContext = '', extraContextLabel = '参考资料', skipWebSearch = false }) {
+  const model = config.llm.model || 'deepseek-chat';
 
-    const result = await chatSync(msgs, { model, temperature, max_tokens: 4096, label: '创造角色' });
-
-    // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
-    const lines = result.split('\n');
-    let displayName = '';
-    let charName = '';
-    let emotionBaseline = '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
-    let promptStart = 0;
-
-    // 防御：如果 AI 错误地输出了 "display_name" / "name" 等标签行，跳过它们
-    const SKIP_LABELS = /^(display_name|name|emotion_baseline|vad|vad_baseline)$/i;
-
-    // 找 display_name（第一个有效非空行）
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line || SKIP_LABELS.test(line)) continue;
-      if (!displayName) { displayName = line; continue; }
-      if (!charName) { charName = line.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'char_' + Date.now(); continue; }
-      // 第三行尝试解析 JSON
-      try { emotionBaseline = JSON.stringify(JSON.parse(line)); promptStart = i + 1; break; }
-      catch { emotionBaseline = JSON.stringify({ valence: 0.5, arousal: 0.5, dominance: 0.5 }); promptStart = i; break; }
+  // ── 联网搜索角色资料（可跳过：导入角色卡时以卡片为第一手资料，无需联网）──────
+  let searchContext = '';
+  let searchFound = false;
+  if (skipWebSearch) {
+    console.log(`[characters] web search skipped (source: ${extraContextLabel})`);
+  } else {
+    console.log(`[characters] searching web for: "${description.trim()}"`);
+    try {
+      searchContext = await searchCharacterInfo(description.trim());
+      if (searchContext) {
+        console.log(`[characters] web search returned ${searchContext.length} chars`);
+      } else {
+        console.log('[characters] web search returned no results');
+      }
+    } catch (err) {
+      console.warn('[characters] web search failed, continuing without:', err.message);
     }
-    if (promptStart === 0) promptStart = lines.length;
+    searchFound = !!(searchContext && searchContext.length >= 600);
+  }
 
-    const basePrompt = lines.slice(promptStart).join('\n').trim();
+  // 温度策略：有参考资料（网络/卡片）→ 低温忠实还原；原创设定 → 中等温度兼顾创造力与格式
+  const temperature = (searchFound || skipWebSearch) ? 0.3 : 0.7;
+  console.log(`[characters] search_found=${searchFound}, skipWebSearch=${skipWebSearch}, temperature=${temperature}`);
 
-    if (!displayName || basePrompt.length < 100) {
-      return res.status(500).json({ error: 'AI 生成的角色人格不完整，请重试' });
-    }
+  // msgs[0] — 舞台：破限词 + 世界观
+  const stageRules = getSystemRulesWithWorld({ roleplay: false });
+
+  // msgs[1] — 任务：角色生成指令 + 模板 + 参考资料（含角色卡原始资料）
+  const systemPrompt = buildPersonaSystemPrompt({ searchContext, extraContext, extraContextLabel });
+
+  const msgs = [];
+  if (stageRules) msgs.push({ role: 'system', content: stageRules });
+  msgs.push({ role: 'system', content: systemPrompt });
+  msgs.push({ role: 'user', content: description.trim() });
+
+  const result = await chatSync(msgs, { model, temperature, max_tokens: 4096, label: '创造角色' });
+
+  // 解析输出：第1行 display_name，第2行 name，第3行起 base_prompt
+  const lines = result.split('\n');
+  let displayName = '';
+  let charName = '';
+  let emotionBaseline = '{"valence":0.5,"arousal":0.5,"dominance":0.5}';
+  let promptStart = 0;
+
+  // 防御：如果 AI 错误地输出了 "display_name" / "name" 等标签行，跳过它们
+  const SKIP_LABELS = /^(display_name|name|emotion_baseline|vad|vad_baseline)$/i;
+
+  // 找 display_name（第一个有效非空行）
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || SKIP_LABELS.test(line)) continue;
+    if (!displayName) { displayName = line; continue; }
+    if (!charName) { charName = line.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'char_' + Date.now(); continue; }
+    // 第三行尝试解析 JSON
+    try { emotionBaseline = JSON.stringify(JSON.parse(line)); promptStart = i + 1; break; }
+    catch { emotionBaseline = JSON.stringify({ valence: 0.5, arousal: 0.5, dominance: 0.5 }); promptStart = i; break; }
+  }
+  if (promptStart === 0) promptStart = lines.length;
+
+  const basePrompt = lines.slice(promptStart).join('\n').trim();
+
+  if (!displayName || basePrompt.length < 100) {
+    throw new Error('AI 生成的角色人格不完整，请重试');
+  }
+
+  // 确保 name 不重复
+  const db = getDb();
+  const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
+  if (exists) charName = charName + '_' + Date.now();
+
+  return { displayName, charName, emotionBaseline, basePrompt, searchFound };
+}
+
+// POST /api/characters/generate — AI 扩写角色人格
+// Body: { description: "芙宁娜|芙宁娜（原神）|原神游戏里的芙宁娜" }
+// Body: { description: "...", save: false } — 预览模式：只生成不入库，由前端确认后再调 POST /api/characters 入库
+// 默认 save=true，返回生成的完整角色数据，同时写入数据库
+router.post('/generate', async (req, res) => {
+  const { description, save } = req.body;
+  const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
+  if (!description || typeof description !== 'string' || description.trim().length < 2) {
+    return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
+  }
+
+  try {
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound } = await runPersonaGeneration({ description });
 
     const db = getDb();
-
-    // 确保 name 不重复
-    const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
-    if (exists) charName = charName + '_' + Date.now();
 
     if (shouldSave) {
       // 直接写入数据库
@@ -580,6 +604,153 @@ ${searchContext}` : ''}
   } catch (err) {
     console.error('[characters] generate failed:', err.message);
     res.status(500).json({ error: '生成失败: ' + err.message });
+  }
+});
+
+// ── 酒馆角色卡导入 ──────────────────────────────────────────
+// 从 PNG 文件中提取 chara 文本块（tEXt / zTXt / iTXt），返回角色卡 JSON 对象
+function extractCardFromPng(buffer) {
+  const SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (buffer.length < 8 || !buffer.subarray(0, 8).equals(SIG)) {
+    throw new Error('不是有效的 PNG 文件');
+  }
+  let offset = 8;
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString('latin1');
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd > buffer.length) break;
+    const chunk = buffer.subarray(dataStart, dataEnd);
+
+    if (type === 'tEXt' || type === 'zTXt') {
+      const nul = chunk.indexOf(0);
+      if (nul !== -1) {
+        const keyword = chunk.subarray(0, nul).toString('latin1');
+        if (keyword === 'chara') {
+          let text;
+          if (type === 'tEXt') {
+            text = chunk.subarray(nul + 1).toString('latin1');
+          } else {
+            // zTXt：1 字节压缩方式（0=zlib），其后为压缩数据
+            const compMethod = chunk[nul + 1];
+            if (compMethod !== 0) throw new Error('不支持的 zTXt 压缩方式');
+            text = zlib.inflateSync(chunk.subarray(nul + 2)).toString('latin1');
+          }
+          // chara 文本为 base64 编码的 JSON
+          return JSON.parse(Buffer.from(text, 'base64').toString('utf8'));
+        }
+      }
+    } else if (type === 'iTXt') {
+      const nul = chunk.indexOf(0);
+      if (nul !== -1) {
+        const keyword = chunk.subarray(0, nul).toString('utf8');
+        if (keyword === 'chara') {
+          let rest = chunk.subarray(nul + 1);
+          const compFlag = rest[0];
+          rest = rest.subarray(2); // 跳过压缩标志 + 压缩方式
+          const nul2 = rest.indexOf(0); // 语言标签结尾
+          if (nul2 !== -1) {
+            rest = rest.subarray(nul2 + 1);
+            const nul3 = rest.indexOf(0); // 翻译关键词结尾
+            if (nul3 !== -1) {
+              let textBytes = rest.subarray(nul3 + 1);
+              if (compFlag === 1) textBytes = zlib.inflateSync(textBytes);
+              return JSON.parse(textBytes.toString('utf8'));
+            }
+          }
+        }
+      }
+    }
+    offset = dataEnd + 4; // 跳过 CRC
+  }
+  throw new Error('PNG 中未找到角色卡数据（chara 文本块）');
+}
+
+// 把酒馆角色卡（V1 顶层字段 / V2 data 字段）的全部数据整理成供人格生成器消化的原始资料文本
+function cardToContextText(card) {
+  const src = (card && card.data && typeof card.data === 'object') ? card.data : card;
+  if (!src || typeof src !== 'object') throw new Error('角色卡格式无效');
+  const out = [];
+  const push = (label, v) => {
+    if (v != null && String(v).trim()) out.push(`【${label}】\n${String(v).trim()}`);
+  };
+  push('名称', src.name || (card && card.name));
+  push('描述/设定', src.description);
+  push('性格', src.personality);
+  push('情境', src.scenario);
+  push('开场白', src.first_mes);
+  push('对话示例', src.mes_example);
+  push('创作者备注', src.creator_notes);
+  push('系统提示词', src.system_prompt);
+  push('后记/附言', src.post_history_instructions);
+  if (Array.isArray(src.tags) && src.tags.length) {
+    push('标签', src.tags.map(t => String(t)).filter(Boolean).join('、'));
+  }
+  if (Array.isArray(src.alternate_greetings) && src.alternate_greetings.length) {
+    out.push(`【备用开场白】\n${src.alternate_greetings.map((g, i) => `#${i + 1}:\n${String(g).trim()}`).join('\n\n')}`);
+  }
+  push('创造者', src.creator);
+  push('角色版本', src.character_version);
+  return out.join('\n\n');
+}
+
+// POST /api/characters/import-card — 导入酒馆角色卡（PNG 内嵌 chara 块 / JSON 卡）
+// 解析后把角色卡全部资料交给邻舍自己的人格生成器整理一遍，返回预览数据（不入库，由前端确认招募）
+// Body: { data: <base64 或 dataURL>, mimetype?, filename? }
+router.post('/import-card', async (req, res) => {
+  try {
+    const { data, mimetype, filename } = req.body;
+    if (!data || typeof data !== 'string') {
+      return res.status(400).json({ error: '缺少文件数据' });
+    }
+    const base64 = data.replace(/^data:[^;]+;base64,/, '');
+    const buf = Buffer.from(base64, 'base64');
+    if (buf.length === 0) return res.status(400).json({ error: '文件为空' });
+
+    const looksJson = (mimetype && mimetype.includes('json'))
+      || (filename && /\.json$/i.test(filename))
+      || buf[0] === 0x7B; // '{'
+
+    let card;
+    if (looksJson) {
+      try {
+        card = JSON.parse(buf.toString('utf8'));
+      } catch {
+        return res.status(400).json({ error: '角色卡 JSON 解析失败：文件不是有效的角色卡 JSON' });
+      }
+    } else {
+      card = extractCardFromPng(buf);
+    }
+
+    const src = (card && card.data && typeof card.data === 'object') ? card.data : card;
+    const cardName = String(src.name || (card && card.name) || '').trim();
+    if (!cardName) return res.status(400).json({ error: '角色卡缺少 name 字段' });
+
+    const extraContext = cardToContextText(card);
+    console.log(`[characters] importing card "${cardName}" (${extraContext.length} chars) → persona generator`);
+
+    // 用邻舍自己的人格生成器整理一遍：角色卡全文作为第一手资料，联网搜索作为补充
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound } = await runPersonaGeneration({
+      description: cardName,
+      extraContext,
+      extraContextLabel: '角色卡',
+      skipWebSearch: true,
+    });
+
+    console.log(`[characters] card organized by generator: "${displayName}" (${charName}) — not saved`);
+    res.json({
+      name: charName,
+      display_name: displayName,
+      base_prompt: basePrompt,
+      emotion_baseline: emotionBaseline,
+      search_found: searchFound,
+      source: 'card',
+    });
+  } catch (err) {
+    console.error('[characters] import-card failed:', err.message);
+    const isClientError = /角色卡|PNG|JSON|name 字段|格式|文件/.test(err.message);
+    res.status(isClientError ? 400 : 500).json({ error: '角色卡导入失败: ' + err.message });
   }
 });
 

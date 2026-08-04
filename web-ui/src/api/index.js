@@ -46,6 +46,14 @@ export async function generateCharacterPreview(description) {
   return res.json()
 }
 
+/** 导入酒馆角色卡（PNG 内嵌 chara / JSON 卡），返回预览数据，直接进入招募预览步骤 */
+export async function importCharacterCard({ data, mimetype, filename }) {
+  const res = await fetch(`${BASE}/characters/import-card`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, mimetype, filename }),
+  })
+  return res.json()
+}
 /** 直接创建角色（确认入库） */
 export async function createCharacter(data) {
   const res = await fetch(`${BASE}/characters`, {

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="tavern-view" @scroll="onScroll">
     <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">酒馆</h2>
@@ -211,6 +211,11 @@
                 @keydown.enter.exact="doGenerate"
               ></textarea>
               <div class="modal-actions">
+                <label class="import-card-btn" :class="{ disabled: recruit.loading }" title="导入酒馆ai角色卡">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <span>导入酒馆ai角色卡</span>
+                  <input ref="cardInputRef" type="file" accept=".png,.json,image/png,application/json" :disabled="recruit.loading" @change="onCardSelected" hidden />
+                </label>
                 <button class="btn-ghost" @click="closeRecruit">取消</button>
                 <button
                   class="btn-primary"
@@ -220,7 +225,7 @@
                   {{ recruit.loading ? '正在酒馆招募...' : '✨ 招募角色' }}
                 </button>
               </div>
-              <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
+<div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
               <!-- 招募加载遮罩 -->
               <div v-if="recruit.loading" class="scan-overlay">
                 <div class="scan-line"></div>
@@ -734,6 +739,49 @@ async function confirmRecruit() {
     recruit.error = '入库失败: ' + (err.message || '网络错误')
   } finally {
     recruit.saving = false
+  }
+}
+
+const cardInputRef = ref(null)
+
+async function onCardSelected(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  if (file.size > 7 * 1024 * 1024) {
+    recruit.error = '角色卡文件过大（>7MB），请使用更小的文件'
+    e.target.value = ''
+    return
+  }
+  recruit.loading = true
+  recruit.error = ''
+  startLoadingTips()
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader()
+      fr.onload = () => resolve(fr.result)
+      fr.onerror = () => reject(new Error('读取文件失败'))
+      fr.readAsDataURL(file)
+    })
+    const result = await api.importCharacterCard({
+      data: dataUrl,
+      mimetype: file.type,
+      filename: file.name,
+    })
+    if (result.error) {
+      recruit.error = result.error
+      return
+    }
+    recruit.result = { ...result }
+    // 保留角色名作为描述，便于"重新招募"用 LLM 重写
+    recruit.desc = result.display_name || ''
+    recruit.step = 'preview'
+    showToast('角色卡已整理完成，请检查后确认招募', 'success')
+  } catch (err) {
+    recruit.error = '导入失败: ' + (err.message || '网络错误')
+  } finally {
+    recruit.loading = false
+    stopLoadingTips()
+    if (cardInputRef.value) cardInputRef.value.value = ''
   }
 }
 
@@ -1577,6 +1625,31 @@ onMounted(async () => {
 }
 
 .recruit-textarea { width: 100%; resize: vertical; min-height: 80px; font-family: inherit; }
+.import-card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+}
+.import-card-btn:hover {
+  background: rgba(224, 123, 108, 0.1);
+  border-color: var(--accent);
+}
+.import-card-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
 .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 

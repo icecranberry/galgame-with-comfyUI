@@ -305,39 +305,48 @@ export function buildGroupContext(group, directiveBlocks = []) {
   return messages;
 }
 
-// ── 成员动态话题引子（后台闲聊用：奇遇/朋友圈/日程三源采集，随机抽一条） ──
+// ── 后台闲聊上下文：注入全体群员当前日程 + 上次群聊后的新朋友圈 ──
 
-function pickMemberDynamic(group) {
+function buildIdleContextBlock(group) {
   const db = getDb();
-  const candidates = [];
+  const conversationId = groupConvId(group.id);
+
+  // 上次群聊时间 = 群里最后一条消息的时间
+  const lastMsg = db.prepare(`
+    SELECT created_at FROM messages
+    WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+  `).get(conversationId);
+  const lastChatAt = lastMsg?.created_at || null;
+
+  const scheduleLines = [];
+  const momentLines = [];
+
   for (const m of group.members) {
-    // 奇遇：活跃事件
-    const ev = db.prepare(`
-      SELECT title, description FROM character_events
-      WHERE character_id = ? AND status IN ('open','engaged') ORDER BY id DESC LIMIT 1
-    `).get(m.id);
-    if (ev?.title) {
-      candidates.push({ member: m, text: `「${m.display_name}」最近正在经历一场奇遇：「${ev.title}」${ev.description ? '——' + ev.description.slice(0, 80) : ''}` });
-    }
-    // 朋友圈：24 小时内最新一条
-    const post = db.prepare(`
-      SELECT content FROM moment_posts
-      WHERE character_id = ? AND status = 'done' AND created_at > datetime('now', '-1 day')
-      ORDER BY id DESC LIMIT 1
-    `).get(m.id);
-    if (post?.content) {
-      candidates.push({ member: m, text: `「${m.display_name}」刚发了一条朋友圈：「${post.content.slice(0, 80)}」` });
-    }
-    // 日程：当前活动（跳过睡觉和自由时间）
+    // 当前日程（跳过自由时间）
     try {
       const act = getCurrentActivity(m.id);
       if (act && act.activity && act.activity !== '自由时间' && act.replyDelay !== -1) {
-        candidates.push({ member: m, text: `「${m.display_name}」现在正在【${act.location}】${act.activity}${act.description ? '（' + act.description + '）' : ''}` });
+        scheduleLines.push(`「${m.display_name}」正在【${act.location}】${act.activity}${act.description ? `（${act.description}）` : ''}`);
       }
     } catch { /* 日程未生成时跳过 */ }
+
+    // 上次群聊之后该群员最新一条朋友圈（没有则不传）
+    if (lastChatAt) {
+      const post = db.prepare(`
+        SELECT content FROM moment_posts
+        WHERE character_id = ? AND status = 'done' AND created_at > ?
+        ORDER BY id DESC LIMIT 1
+      `).get(m.id, lastChatAt);
+      if (post?.content) {
+        momentLines.push(`「${m.display_name}」发了朋友圈：「${post.content.slice(0, 100)}」`);
+      }
+    }
   }
-  if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+
+  const parts = [];
+  if (scheduleLines.length > 0) parts.push(`群员当前日程：\n${scheduleLines.join('\n')}`);
+  if (momentLines.length > 0) parts.push(`上次群聊后群友的新朋友圈：\n${momentLines.join('\n')}`);
+  return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
 // ── 行协议解析 ──
@@ -537,6 +546,9 @@ export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
     `INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`
   ).run(conversationId, raw.lastInsertRowid, content);
   db.prepare(`UPDATE group_chats SET last_message_at = datetime('now') WHERE id = ?`).run(groupId);
+  // 用户在群里发言后重置当日后台闲聊预算
+  const today = new Date().toISOString().slice(0, 10);
+  db.prepare(`UPDATE group_chats SET idle_budget_date = ?, idle_budget_used = 0 WHERE id = ?`).run(today, groupId);
   return { rawId: raw.lastInsertRowid, msgId: msg.lastInsertRowid, duplicate: false };
 }
 
@@ -700,11 +712,12 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       directiveBlocks.push(`「${mentions[0].display_name}」被点名/提到了，必须第一个回应。`);
     }
   } else if (trigger === 'idle') {
-    directiveBlocks.push(`用户「${chatUserName}」现在不在线。角色们自发闲聊几句，氛围自然随意，不要频繁@用户。`);
-    // 必带一条成员动态作为话题引子（奇遇/朋友圈/日程），避免凭空尬聊
-    dyn = pickMemberDynamic(group);
-    if (dyn) {
-      directiveBlocks.push(`<topic_seed>\n话题引子：${dyn.text}。\n让「${dyn.member.display_name}」自然地主动聊起这件事（分享/吐槽/炫耀都行，很适合配一张图），其他人围绕它接话。\n</topic_seed>`);
+    directiveBlocks.push(`群里安静了一会儿，角色们自然地聊起天来。`);
+    // 注入全体群员当前日程 + 上次群聊后的新朋友圈，作为自然话题来源
+    const idleCtx = buildIdleContextBlock(group);
+    if (idleCtx) {
+      dyn = idleCtx;
+      directiveBlocks.push(`<member_context>\n${idleCtx}\n</member_context>`);
     }
   } else if (trigger === 'opening') {
     directiveBlocks.push(`群聊刚刚建立${group.topic ? `，主题是「${group.topic}」` : ''}。角色们打个招呼、暖个场，可以对建群这件事发表点评论。`);
