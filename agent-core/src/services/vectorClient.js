@@ -48,12 +48,12 @@ export async function embedBatch(texts) {
   return data.embeddings;
 }
 
-export async function vectorSearch(text, { topK = 20, filterType = null, conversationId = null, corpus = 'memory_fragments', embedding = null } = {}) {
+export async function vectorSearch(text, { topK = 20, filterType = null, conversationId = null, corpus = 'memory_fragments', embedding = null, timeoutMs = DEFAULT_TIMEOUT } = {}) {
   const res = await fetchWithTimeout(`${BASE}/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }),
-  });
+  }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Search error: ${err.detail || res.status}`);
@@ -83,12 +83,12 @@ export async function upsertVector(chromaId, text, metadata = {}, fragmentType =
   return data.chroma_id;
 }
 
-export async function upsertVectors(items, corpus = 'memory_fragments') {
+export async function upsertVectors(items, corpus = 'memory_fragments', timeoutMs = DEFAULT_TIMEOUT) {
   const res = await fetchWithTimeout(`${BASE}/upsert-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items, corpus }),
-  });
+  }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(`Batch upsert error: ${err.detail || res.status}`);
@@ -122,6 +122,17 @@ export async function deleteByConversation(conversationId, corpus = 'memory_frag
   }
   const data = await res.json();
   return data.deleted;
+}
+
+export async function getImageKnowledgeCount() {
+  try {
+    const res = await fetchWithTimeout(`${BASE}/health`, {}, HEALTH_TIMEOUT);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Number.isInteger(data.image_prompt_knowledge_count) ? data.image_prompt_knowledge_count : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function healthCheck() {

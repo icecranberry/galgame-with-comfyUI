@@ -23,6 +23,7 @@ import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/ind
 import { chatStream } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
+import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
 import { curateChatMemories } from './memoryExtractor.js';
@@ -426,7 +427,7 @@ export function parseScriptLine(line, membersByName) {
 
 // ── 群内生图 ──
 
-async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
+async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, options = {}) {
   const db = getDb();
   const conversationId = groupConvId(group.id);
   const taskResult = db.prepare(
@@ -466,6 +467,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit) {
       scene: 'group',
       workflowScene: 'group',
       promptScene: 'chat',
+      ragTimeoutMs: options.ragTimeoutMs,
       onProgress: (p) => {
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
@@ -699,8 +701,11 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   if (config.features.memory && trigger === 'user' && userMessage) {
     try {
       const conversationIds = [conversationId, ...group.members.map(member => `char_${member.id}`)];
-      const memories = await hybridSearch(userMessage, { conversationIds, topK: 6 });
-      if (memories.length > 0) {
+      const memories = await Promise.race([
+        hybridSearch(userMessage, { conversationIds, topK: 6 }),
+        new Promise(resolve => setTimeout(() => resolve(null), RAG_TIMEOUT_FAST_MS)),
+      ]);
+      if (memories && memories.length > 0) {
         const lines = memories.map((memory, index) => `${index + 1}. [${memory.memory_type}] ${memory.judgment}`).join('\n');
         directiveBlocks.push(`<rag_memories>\n相关记忆（角色们可能记得的事）：\n${lines}\n</rag_memories>`);
       }
@@ -790,6 +795,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         parsed.imagePrompt,
         target.id,
         emit,
+        { ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined },
       ));
       return;
     }

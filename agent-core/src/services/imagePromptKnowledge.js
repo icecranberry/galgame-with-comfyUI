@@ -1,6 +1,6 @@
 import { getDb } from '../db/index.js';
 import { containsExplicitAdultContent } from '../db/imagePromptKnowledgePolicy.js';
-import { vectorSearch, upsertVectors, deleteVector } from './vectorClient.js';
+import { vectorSearch, upsertVectors, deleteVector, getImageKnowledgeCount } from './vectorClient.js';
 
 export const IMAGE_PROMPT_CORPUS = 'image_prompt_knowledge';
 const RRF_K = 60;
@@ -8,6 +8,14 @@ const VECTOR_THRESHOLD = 0.22;
 const MAX_PER_CATEGORY = 2;
 const FRAMEWORK_KEYWORD_BOOST = 15;
 const VECTOR_SYNC_BATCH_SIZE = 32;
+export const RAG_TIMEOUT_DEFAULT_MS = 8000;
+export const RAG_TIMEOUT_FAST_MS = 2500;
+const VECTOR_FAILURE_LIMIT = 5;
+const VECTOR_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+let vectorFailureCount = 0;
+let vectorDisabledUntil = 0;
+const SYNC_VERSION_SETTING_KEY = 'image_prompt_knowledge_synced_version';
+let persistedVersionLoaded = false;
 let syncedVersion = null;
 let syncPromise = null;
 
@@ -86,7 +94,29 @@ export function keywordSearchImagePromptKnowledge(query, { scene = 'chat', limit
     .slice(0, limit);
 }
 
-async function syncKnowledgeVectors(db = getDb()) {
+function loadPersistedVersion(db) {
+  persistedVersionLoaded = true;
+  try {
+    syncedVersion = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = ?`
+    ).pluck().get(SYNC_VERSION_SETTING_KEY) || null;
+  } catch (error) {
+    syncedVersion = null;
+  }
+}
+
+function persistSyncVersion(db, version) {
+  db.prepare(`
+    INSERT INTO system_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(setting_key) DO UPDATE SET
+      setting_value = excluded.setting_value,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(SYNC_VERSION_SETTING_KEY, version);
+  syncedVersion = version;
+}
+
+async function syncKnowledgeVectors(db = getDb(), timeoutMs = RAG_TIMEOUT_DEFAULT_MS) {
   const rows = db.prepare(`SELECT * FROM image_prompt_knowledge WHERE is_active = 1 ORDER BY knowledge_id`).all();
   const staleIds = db.prepare(`
     SELECT knowledge_id FROM image_prompt_knowledge
@@ -97,10 +127,19 @@ async function syncKnowledgeVectors(db = getDb()) {
     ...rows.map(row => `${row.knowledge_id}:${row.version}:${row.updated_at}`),
     ...staleIds.map(id => `stale:${id}`),
   ].join('|');
+  if (!persistedVersionLoaded) loadPersistedVersion(db);
   if (syncedVersion === version) return;
   if (syncPromise) return syncPromise;
 
   syncPromise = (async () => {
+    // 首次运行（无持久化版本）且向量库已有完整数据 → 直接标记已同步，避免全量重同步
+    if (!syncedVersion) {
+      const knownCount = await getImageKnowledgeCount();
+      if (Number.isInteger(knownCount) && knownCount >= rows.length) {
+        persistSyncVersion(db, version);
+        return;
+      }
+    }
     for (const id of staleIds) {
       await deleteVector(id, IMAGE_PROMPT_CORPUS);
     }
@@ -115,9 +154,9 @@ async function syncKnowledgeVectors(db = getDb()) {
       fragment_type: null,
     }));
     for (let offset = 0; offset < vectorItems.length; offset += VECTOR_SYNC_BATCH_SIZE) {
-      await upsertVectors(vectorItems.slice(offset, offset + VECTOR_SYNC_BATCH_SIZE), IMAGE_PROMPT_CORPUS);
+      await upsertVectors(vectorItems.slice(offset, offset + VECTOR_SYNC_BATCH_SIZE), IMAGE_PROMPT_CORPUS, timeoutMs);
     }
-    syncedVersion = version;
+    persistSyncVersion(db, version);
   })().finally(() => { syncPromise = null; });
   return syncPromise;
 }
@@ -155,7 +194,7 @@ function applyCategoryQuota(items, defaults, limit) {
   return selected;
 }
 
-export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limit = 9, db = getDb() } = {}) {
+export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limit = 9, db = getDb(), timeoutMs = RAG_TIMEOUT_DEFAULT_MS } = {}) {
   const startedAt = performance.now();
   const rows = db.prepare(`SELECT * FROM image_prompt_knowledge WHERE is_active = 1`).all();
   const sceneRows = rows.filter(row => sceneMatches(row, scene) && queryAllowsCategory(query, row.category));
@@ -163,16 +202,32 @@ export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limi
   const keywordItems = keywordSearchImagePromptKnowledge(query, { scene, limit: limit * 3, db });
   let vectorItems = [];
   let mode = 'keyword';
+  let degraded = null;
+  const vectorDisabled = Date.now() < vectorDisabledUntil;
 
   try {
-    await syncKnowledgeVectors(db);
-    const results = await vectorSearch(query, { topK: limit * 3, corpus: IMAGE_PROMPT_CORPUS });
-    vectorItems = results
-      .filter(result => result.score >= VECTOR_THRESHOLD && rowsById.has(result.id))
-      .map(result => ({ ...rowsById.get(result.id), score: result.score }));
-    mode = 'hybrid';
+    if (vectorDisabled) {
+      degraded = 'cooldown';
+    } else {
+      await syncKnowledgeVectors(db, timeoutMs);
+      const results = await vectorSearch(query, { topK: limit * 3, corpus: IMAGE_PROMPT_CORPUS, timeoutMs });
+      vectorItems = results
+        .filter(result => result.score >= VECTOR_THRESHOLD && rowsById.has(result.id))
+        .map(result => ({ ...rowsById.get(result.id), score: result.score }));
+      mode = 'hybrid';
+      if (vectorFailureCount > 0) vectorFailureCount = 0;
+    }
   } catch (error) {
-    console.warn(`[imagePromptKnowledge] vector fallback: ${error.message}`);
+    vectorFailureCount += 1;
+    console.warn(`[imagePromptKnowledge] vector fallback (${vectorFailureCount}/${VECTOR_FAILURE_LIMIT}): ${error.message}`);
+    if (vectorFailureCount >= VECTOR_FAILURE_LIMIT) {
+      vectorFailureCount = 0;
+      vectorDisabledUntil = Date.now() + VECTOR_FAILURE_COOLDOWN_MS;
+      degraded = 'disabled';
+      console.warn(`[imagePromptKnowledge] vector search disabled for ${VECTOR_FAILURE_COOLDOWN_MS / 1000}s`);
+    } else {
+      degraded = degraded || 'fallback';
+    }
   }
 
   const fused = fuseRrf(keywordItems, vectorItems, rowsById);
@@ -180,6 +235,7 @@ export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limi
   const items = applyCategoryQuota(fused, defaults, limit);
   return {
     mode,
+    degraded,
     durationMs: Math.round(performance.now() - startedAt),
     scene,
     query,

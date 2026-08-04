@@ -289,6 +289,7 @@ export async function prepareImagePrompt(prompt, {
   skipOptimization = false,
   persist = true,
   db = null,
+  ragTimeoutMs = undefined,
 } = {}) {
   const sceneAliases = { event: 'events', peek: 'schedule', gifts: 'gift', avatargen: 'avatar' };
   scene = sceneAliases[scene] || scene;
@@ -301,7 +302,7 @@ export async function prepareImagePrompt(prompt, {
   }
 
   const database = db || getDb();
-  const retrieval = await retrieveImagePromptKnowledge(original, { scene, db: database });
+  const retrieval = await retrieveImagePromptKnowledge(original, { scene, db: database, timeoutMs: ragTimeoutMs });
   const selection = composeImagePrompt(original, retrieval.items);
   const foundTags = selection.selectedTags.map(item => item.tag);
   console.log(`[imagePromptKnowledge] mode=${retrieval.mode} duration=${retrieval.durationMs}ms tags=${JSON.stringify(foundTags)}`);

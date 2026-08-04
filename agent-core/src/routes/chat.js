@@ -15,6 +15,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
@@ -1351,6 +1352,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   try {
     const result = await generateImage(prompt, {
       scene: 'chat',
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       onProgress: (p) => {
         if (p.stage === 'retrying') {
           send('generate_retrying', { taskId, attempt: p.attempt, maxRetries: p.maxRetries });
@@ -1952,6 +1954,7 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
 
     const result = await generateImage(generatedPrompt, {
       scene: 'chat',
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       onProgress: (p) => {
         if (p.stage === 'retrying') {
           send('generate_retrying', { taskId: genTaskId, attempt: p.attempt, maxRetries: p.maxRetries });
