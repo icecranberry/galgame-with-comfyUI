@@ -9,6 +9,8 @@ const envPath = resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 export const config = {
+  // 开发环境检测：生产启动（launcher / PM2）会注入 NODE_ENV=production；npm run dev 等开发启动不设置
+  isDev: process.env.NODE_ENV !== 'production',
   port: parseInt(process.env.PORT, 10) || 3099,
   dbPath: process.env.DB_PATH || './data/agent.db',
   llm: {

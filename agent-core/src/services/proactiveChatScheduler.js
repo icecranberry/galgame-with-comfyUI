@@ -951,6 +951,12 @@ function startStartupLine() {
   const freq = config.features.proactiveChatFreq;
   if (freq <= 0) return;
 
+  // 开发环境不执行启动暖场（开发期重启频繁，避免每次启动都强制触发一次主动消息）
+  if (config.isDev) {
+    console.log('⚡ [Line C·Startup] skipped (dev mode: startup warmup disabled)');
+    return null;
+  }
+
   startupRunning = true;
 
   // 单次首发：1~3min 后触发一次即结束（只做启动暖场）
@@ -1005,17 +1011,21 @@ export function startProactiveChatScheduler() {
   }
   setTimeout(() => startFreqLine(), 60_000);
 
-  // 线路 C：启动强制线（和 B 线一样 60s 后启动，首发之后按 startupToMinutes 间隔）
+  // 线路 C：启动强制线（和 B 线一样 60s 后启动；开发环境跳过，只做生产启动暖场）
   setTimeout(() => {
     const firstMin = startStartupLine();
     if (firstMin != null) {
       console.log(`⚡ [Line C·Startup] next trigger in ${fmtIn(firstMin)} (interval ${fmtIn(startupToMinutes(freq))}±3min)`);
     } else {
-      console.log('⚡ [Line C·Startup] disabled (freq=0)');
+      console.log('⚡ [Line C·Startup] not scheduled (freq=0 or dev mode)');
     }
   }, 60_000);
   if (freq > 0) {
-    console.log(`⚡ [Line C·Startup] first trigger in ${fmtIn(1 + startupToMinutes(freq))} (after DB init, interval ${fmtIn(startupToMinutes(freq))}±3min)`);
+    if (config.isDev) {
+      console.log('⚡ [Line C·Startup] disabled (dev mode: startup warmup off)');
+    } else {
+      console.log(`⚡ [Line C·Startup] first trigger in ${fmtIn(1 + startupToMinutes(freq))} (after DB init, interval ${fmtIn(startupToMinutes(freq))}±3min)`);
+    }
   } else {
     console.log('⚡ [Line C·Startup] disabled (freq=0)');
   }
