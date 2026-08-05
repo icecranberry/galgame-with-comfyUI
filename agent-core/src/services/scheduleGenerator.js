@@ -49,7 +49,7 @@ export async function generateSchedule(character, direction) {
 以上人格只用于辨认角色的性格、说话习惯与气质。世界观是最高优先级：人格中的身份、职业、组织、地点与经历属于角色原设，一律作废，不得沿用进日程；日程中的职业、地点、活动与作息必须由当前世界观重新定义。`;
 
   // ── 日程生成指令 ──
-  const scheduleInst = `你是一个日程编排助手。基于角色的职业和人格，生成该角色典型一天的完整日程。
+  const scheduleInst = `你是一个日程编排助手。在世界观的影响下生成职业，基于角色的职业和人格，生成该角色典型一天的完整日程。
 
 ## 职业驱动原则
 角色的职业是日程的核心骨架。所有主要活动必须围绕职业展开。职业决定了角色一天中大部分时间的去向和活动类型。
@@ -119,12 +119,15 @@ ${direction}**
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   // msgs[2]: 核心生成指令（第三层 system，缓存友好）
   msgs.push({ role: 'system', content: scheduleInst });
-  // msgs[3]: 用户方向（如果有，置于指令之后，随角色变化）
-  if (directionMsg) msgs.push({ role: 'system', content: directionMsg });
-  // msgs[4]: 角色人格（随角色变化，不影响前缀缓存）
+  // msgs[3]: 角色人格（随角色变化，不影响前缀缓存）
   msgs.push({ role: 'system', content: personaMsg });
-  // msgs[5]: 触发消息
-  msgs.push({ role: 'user', content: `请为 ${character.display_name} 生成完整的今日日程安排。` });
+  // msgs[4]: 触发消息（融合用户指定的日程方向）
+  const triggerContent = directionMsg
+    ? `请为 ${character.display_name} 生成完整的今日日程安排。
+
+${directionMsg}`
+    : `请为 ${character.display_name} 生成完整的今日日程安排。`;
+  msgs.push({ role: 'user', content: triggerContent });
 
   let rawResult = '';
   for (let attempt = 0; attempt < 2; attempt++) {
