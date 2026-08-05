@@ -300,7 +300,10 @@ export function buildGroupContext(group, directiveBlocks = []) {
   });
 
   const directive = directiveBlocks.filter(Boolean).join('\n');
-  messages.push({ role: 'user', content: `<round_directive>\n${directive}\n</round_directive>\n\n现在按输出协议续写群聊：` });
+  const worldRulePrefix = getWorldSetting()
+    ? '请遵循当前世界观来参与群聊，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    : '';
+  messages.push({ role: 'user', content: worldRulePrefix + `<round_directive>\n${directive}\n</round_directive>\n\n现在按输出协议续写群聊：` });
 
   return messages;
 }

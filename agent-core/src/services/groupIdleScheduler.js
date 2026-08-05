@@ -4,7 +4,8 @@
  * 线路 A · 预算制后台闲聊：
  *   - 每 10 分钟扫描 next_idle_at <= now 且 idle_enabled=1 的群，每次只处理一个（串行）
  *   - 每群每日轮数预算 config.features.groupIdleBudget（0 = 关闭），跨天自动重置
- *   - 闲聊后随机设定 1~4 小时后的下次时间，消息经统一 SSE 总线广播
+ *   - 预算当天用满后不再触发，直到用户发言重置或跨天自动恢复
+ *   - 闲聊后随机设定 0~24 小时内的下次时间（全天候随机，任意时刻都可能），消息经统一 SSE 总线广播
  *
  * 线路 B · 角色自发建群：
  *   - 每 6 小时判定一次，30% 概率触发
@@ -45,7 +46,7 @@ function consumeIdleBudget(db, group) {
   return true;
 }
 
-function scheduleNextIdle(db, groupId, minHours = 1, maxHours = 4) {
+function scheduleNextIdle(db, groupId, minHours = 0, maxHours = 24) {
   const delayMs = minHours * 3600_000 + Math.random() * (maxHours - minHours) * 3600_000;
   const next = new Date(Date.now() + delayMs).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
   db.prepare(`UPDATE group_chats SET next_idle_at = ? WHERE id = ?`).run(next, groupId);
@@ -67,11 +68,10 @@ async function idleTick() {
     `).get();
     if (!candidate) return;
 
-    // 预算检查（耗尽 → 推迟到明天早上再试）
+    // 预算检查（当天已满 → 本次不触发，随机推迟 0~24 小时；跨天或用户发言重置后自动恢复）
     if (!consumeIdleBudget(db, candidate)) {
-      db.prepare(`UPDATE group_chats SET next_idle_at = datetime('now', 'start of day', '+1 day', '+' || (8 + abs(random()) % 4) || ' hours') WHERE id = ?`)
-        .run(candidate.id);
-      console.log(`[groupIdle] budget exhausted for group ${candidate.id}, deferred to tomorrow`);
+      scheduleNextIdle(db, candidate.id);
+      console.log(`[groupIdle] budget exhausted for group ${candidate.id}, deferred 0-24h (resume on user reset or next day)`);
       return;
     }
 

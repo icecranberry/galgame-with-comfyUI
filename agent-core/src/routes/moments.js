@@ -746,7 +746,10 @@ ${rules}`;
       });
     }
   }
-  msgs.push({ role: 'user', content: userMsg });
+  const worldRulePrefix = worldSetting
+    ? '请遵循当前世界观来发朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
 
   let text = '', imagePrompt = '', imageUrls = [];
   try {

@@ -947,8 +947,13 @@ ${worldPenetrationLine}
   // [4] Character persona — stable per character
   msgs.push({ role: 'system', content: personaMsg });
 
-  // [user] Event-specific creation task — changes per event
-  msgs.push({ role: 'user', content: directorPrompt });
+  // [user] Event-specific creation task — changes per event（有世界观时开头注入遵循规则）
+  const eventUserContent = worldSetting
+    ? `请遵循当前世界观来生成奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。
+
+${directorPrompt}`
+    : directorPrompt;
+  msgs.push({ role: 'user', content: eventUserContent });
 
   let eventData;
   let rawResult = '';
@@ -1297,8 +1302,13 @@ ${worldPenetrationLine2}
   // [4] Character persona — stable per character
   msgs.push({ role: 'system', content: personaMsg2 });
 
-  // [user] Branch task
-  msgs.push({ role: 'user', content: directorPrompt2 + prevSceneBlock });
+  // [user] Branch task（有世界观时开头注入遵循规则）
+  const branchUserContent = worldSetting2
+    ? `请遵循当前世界观来推进奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。
+
+${directorPrompt2}${prevSceneBlock}`
+    : directorPrompt2 + prevSceneBlock;
+  msgs.push({ role: 'user', content: branchUserContent });
 
   let branchData;
   let rawBranchResult = '';
@@ -1491,11 +1501,17 @@ ${worldConsistencyLine}- 结局叙述 80-150 字
 **重要：输出严格 JSON 格式**
 {"conclusion":"结局叙述","summary":"记忆摘要（第三人称）"}`;
 
+  const conclusionUserContent = worldSetting3
+    ? `请遵循当前世界观来收束奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。
+
+${taskPrompt}`
+    : taskPrompt;
+
   const msgs = [
     { role: 'system', content: permissionPrompt },
     ...(worldIntegrationNote ? [{ role: 'system', content: worldIntegrationNote }] : []),
     { role: 'system', content: character.base_prompt },
-    { role: 'user', content: taskPrompt },
+    { role: 'user', content: conclusionUserContent },
   ];
 
   let conclusionData;

@@ -124,7 +124,10 @@ ${post.content}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
-  msgs.push({ role: 'user', content: '去评论区留个言吧：' });
+  const worldRulePrefix = worldSetting
+    ? '请遵循当前世界观来评论朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + '去评论区留个言吧：' });
 
   const result = await chatSync(msgs, { temperature: 0.8, max_tokens: 128, label: '朋友首评' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
@@ -176,7 +179,10 @@ ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
-  msgs.push({ role: 'user', content: `回复${friendName}的最后一条评论：` });
+  const worldRulePrefix = worldSetting
+    ? '请遵循当前世界观来回复朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + `回复${friendName}的最后一条评论：` });
 
   const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '发帖人回朋友' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
@@ -230,7 +236,10 @@ ${threadText}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
-  msgs.push({ role: 'user', content: '继续聊天：' });
+  const worldRulePrefix = worldSetting
+    ? '请遵循当前世界观来继续朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + '继续聊天：' });
 
   const result = await chatSync(msgs, { temperature: 0.8, max_tokens: 128, label: '朋友续评' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);

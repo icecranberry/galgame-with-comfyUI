@@ -13,7 +13,7 @@
  */
 
 import { invalidateGalleryCache } from '../routes/images.js';
-import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld, getGlobalRule, getWorldSetting } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -466,7 +466,10 @@ ${proactiveRules}
     const msgs = [];
     msgs.push({ role: 'system', content: systemRules || '你是一个角色扮演 AI。' });
     msgs.push({ role: 'system', content: msgIdentity });
-    msgs.push({ role: 'user', content: msgTask });
+    const worldRulePrefix = getWorldSetting()
+      ? '请遵循当前世界观来主动发起聊天，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+      : '';
+    msgs.push({ role: 'user', content: worldRulePrefix + msgTask });
 
     const result = await chatSync(
       msgs,

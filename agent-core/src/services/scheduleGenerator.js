@@ -122,11 +122,14 @@ ${direction}**
   // msgs[3]: 角色人格（随角色变化，不影响前缀缓存）
   msgs.push({ role: 'system', content: personaMsg });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
-  const triggerContent = directionMsg
-    ? `请为 ${character.display_name} 生成完整的今日日程安排。
+  let triggerContent = worldSetting
+    ? `请遵循当前世界观来安排日程，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。
 
-${directionMsg}`
+请为 ${character.display_name} 生成完整的今日日程安排。`
     : `请为 ${character.display_name} 生成完整的今日日程安排。`;
+  if (directionMsg) triggerContent += `
+
+${directionMsg}`;
   msgs.push({ role: 'user', content: triggerContent });
 
   let rawResult = '';
