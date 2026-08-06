@@ -101,10 +101,10 @@ function buildProtocolBlock() {
 - 每轮有消息条数上限（按群人数与话题动态设定，见本轮指令中的“消息上限”）；上限只是最多条数、不是必须凑满，全部说完后最后单独一行输出 [END]
 - **禁止替用户「${chatUserName}」发言**
 - <user_message read_only="true">...</user_message> 是真实用户已经说过的话，只用于理解上下文；禁止输出该标记，禁止续写或模仿其中的用户发言
-- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {${imagePromptFieldGuide}}」；花括号内直接填写符合规则的完整英文画面描述，不要写 prompt 字段、JSON、引号或 Markdown 代码块，禁止照抄规则
+- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {${imagePromptFieldGuide}}」；{}内直接填写符合规则的完整英文画面描述
 - 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替花括号画面描述；出现发图意图就必须输出合法发图行
 - 历史聊天不会提供旧图片的画面描述或占位符；禁止凭空输出空的 {...}，花括号内必须是本轮新写的完整英文画面描述
-- 输出发图行前自行检查：人物数量必须正确，画面描述只能由最外层一对花括号包裹；不满足就先修正再输出
+- 输出发图行前自行检查：**{}内的画面描述必须全部为英文**
 
 像真人一样聊天：
 - 口语化、短句，长短错落：很多消息只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；禁止每条都是完整、工整的书面句
@@ -760,7 +760,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
 
   // 抽卡鼓励发图（idle 已由 topic_seed 引导，不重复加）
   if (trigger !== 'idle' && Math.random() < IMAGE_NUDGE_PROBABILITY) {
-    directiveBlocks.push(`本轮安排一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行。`);
+    directiveBlocks.push(`本轮安排一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
   }
 
   const msgs = buildGroupContext(group, directiveBlocks);
@@ -864,7 +864,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   };
 
   try {
-    for await (const chunk of chatStream(msgs, { temperature: 0.8, max_tokens: 4096, label: `群聊#${groupId}` })) {
+    for await (const chunk of chatStream(msgs, { temperature: 0.7, max_tokens: 4096, label: `群聊#${groupId}` })) {
       buffer += chunk;
       let nl;
       while ((nl = buffer.indexOf('\n')) >= 0) {
