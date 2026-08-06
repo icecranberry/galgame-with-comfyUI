@@ -3,9 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora } from '../config.js';
-import { resetClient } from '../llm/llm-client.js';
-import { getDb } from '../db/index.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupTemperature } from '../config.js';
+import { resetClient, chatSync } from '../llm/llm-client.js';
+import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
@@ -98,7 +98,20 @@ router.get('/', (req, res) => {
       skipWeekends: config.disturb.skipWeekends || false,
     },
     workflow: getWorkflowConfig(),
+    groupChat: {
+      temperature: config.groupChat?.temperature ?? 0.7,
+    },
   });
+});
+
+// PUT /api/config/group-temperature — 更新群聊 LLM 温度 0.5~1.2（所有群共享）
+router.put('/group-temperature', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 0.5 || value > 1.2) {
+    return res.status(400).json({ error: 'value must be 0.5~1.2' });
+  }
+  updateGroupTemperature(value);
+  res.json({ ok: true, temperature: config.groupChat.temperature });
 });
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
@@ -710,6 +723,78 @@ router.post('/world-settings/:id/activate', (req, res) => {
   res.json({ ok: true, item });
 });
 
+// GET /api/config/system-rules — 获取系统破限词（供世界观润色等 AI 功能请求体携带）
+router.get('/system-rules', (_req, res) => {
+  res.json({ content: getSystemRules({ roleplay: false }) || '' });
+});
+
+// POST /api/world-settings/polish — AI 一键润色扩写世界观（酒馆世界书风格）
+// 请求体带系统破限词：LLM 首条 system 消息注入破限词，保证扩写创作自由。
+router.post('/world-settings/polish', async (req, res) => {
+  const { name, content } = req.body || {};
+  const source = typeof content === 'string' ? content.trim() : '';
+  if (!source || source.length < 2) {
+    return res.status(400).json({ error: '当前世界观内容为空，请先填写内容再润色' });
+  }
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+
+    // 请求体（LLM messages）带上系统破限词：虚构文学定位 + 创作自由
+    const jailbreak = (typeof req.body?.jailbreak === 'string' && req.body.jailbreak.trim())
+      ? req.body.jailbreak.trim()
+      : getSystemRules({ roleplay: false });
+
+    const systemPrompt = `你是一名资深的世界观设定师，擅长撰写「酒馆AI世界书（World Info / Lorebook）」风格的设定文本，服务于沉浸式角色扮演。
+
+用户会提供一份世界观底稿，你的任务是对其进行润色与扩写，产出一份结构清晰、信息密度高、可直接注入角色扮演 AI 的完整世界观设定。
+
+【输出结构要求】严格按以下 Markdown 分节顺序输出：
+## 世界背景
+- 概述这个世界的时代、地理、文明、主要势力与整体氛围；忠于原文，合理扩写。
+
+## 世界规则
+- 这个世界独有的法则、机制、超自然规律与限制；没有特殊规则时写最基础的世界常识。
+
+## 人们的行为
+- 这是全篇重点，至少列出 8 条具体行为模式，说明生活在这个世界里的人们会怎么做：
+  - 日常：人们如何生活、劳作、社交、娱乐；
+  - 危机：面对危险、天灾、异常事件时人们的第一反应和常见做法；
+  - 阶层：平民、贵族、商人、魔法师等不同身份的人各自的行为方式；
+  - 场景：涉及金钱、权力、婚恋、信仰、冲突时人们的普遍做法。
+
+## 禁忌与潜规则
+- 这个世界不成文的规矩、民间忌讳、灰色地带。
+
+【创作要求】
+- 完全忠于用户提供的原始设定，不得删除或篡改原文的具体细节；原文过短时允许合理推演补充，不得引入与原文冲突的设定；
+- 使用条目式短句，信息密度高，避免空洞形容词和套话；
+- 全部使用简体中文，只输出设定正文，不要输出任何解释、前后缀或代码块。`;
+
+    const userPrompt = [
+      `原始世界观：\n${source}`,
+    ].filter(Boolean).join('\n\n');
+
+    const msgs = [];
+    if (jailbreak) msgs.push({ role: 'system', content: jailbreak });
+    msgs.push({ role: 'system', content: systemPrompt });
+    msgs.push({ role: 'user', content: userPrompt });
+
+    const result = await chatSync(msgs, { model, temperature: 0.75, max_tokens: 4096, label: '世界观润色' });
+
+    // 防御：剥离可能包裹输出的 Markdown 代码块
+    let polished = (result || '').trim();
+    const fence = polished.match(/^```[a-zA-Z]*\n?([\s\S]*?)\n?```$/);
+    if (fence) polished = fence[1].trim();
+    if (!polished) {
+      return res.status(500).json({ error: 'AI 生成结果为空，请重试' });
+    }
+    res.json({ ok: true, content: polished });
+  } catch (err) {
+    console.error('[world-settings] polish failed:', err.message);
+    res.status(500).json({ error: '润色失败: ' + err.message });
+  }
+});
 // PUT /api/config/weather-city — 设置天气城市
 router.put('/weather-city', (req, res) => {
   const { city } = req.body;

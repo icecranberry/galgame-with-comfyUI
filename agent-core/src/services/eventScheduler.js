@@ -41,7 +41,7 @@ function toSQLiteDate(iso) {
   return iso.replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 }
 
-async function tick() {
+async function tick(opts = {}) {
   if (processing) {
     console.log('[eventScheduler] Previous event still generating, skip this tick');
     return;
@@ -80,6 +80,11 @@ async function tick() {
     }
 
     // ── 3. 新事件生成 ──
+    // 开发环境：启动首检只做到期结案/僵尸清理，不自动生成新事件（避免每次重启都触发奇遇）
+    if (opts.skipGeneration) {
+      console.log('[eventScheduler] Dev mode: startup tick skips auto-generation');
+      return;
+    }
     // 全局上限：活跃事件最多 4 个（用户强制触发不受此限，走路由直接调用 generateEvent）
     const activeCount = db.prepare(
       `SELECT COUNT(*) AS count FROM character_events WHERE status IN ('pending','open','engaged')`
@@ -354,9 +359,10 @@ export function startEventScheduler() {
   cleanupStuckEvents();
 
   // 启动后先等 30 秒再首次检查（追踪 timeout ID 防止 restart 时泄漏旧回调）
+  // 开发环境：首检跳过新事件生成，仅保留到期结案/僵尸清理
   startupTimer = setTimeout(() => {
     startupTimer = null;
-    tick();
+    tick({ skipGeneration: config.isDev });
     timer = setInterval(tick, intervalMs);
   }, 30_000);
 

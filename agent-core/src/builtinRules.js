@@ -52,6 +52,8 @@ Follow this progression:
 5. Atmosphere — End with the emotional tone: comfort, chaos, intimacy, etc.
    e.g. "conveying an atmosphere of joyful chaos and shared leisure".
 
+6. Scene-appropriate clothing — The outfit is a binary choice: either fully switch to what the scenario calls for, or keep the character's original appearance exactly as established; never a half-changed state. When the scenario calls for a swap, change completely: bathing or showering means no clothing; sleeping in bed means pajamas or a nightgown; swimming or soaking in a hot spring means a swimsuit or a bath towel; exercising or playing sports means sportswear or gym clothes. These are only examples, not an exhaustive list — many other special scenarios exist (such as cooking, rainy or snowy weather, holidays, ceremonies, or anything else the scene calls for), so judge the right outfit from the context and explicitly describe the changed outfit. Never show partial swaps like half-undressed states or the original outfit with only one piece changed.
+
 Hard Rules:
 - When an existing IP character appears, write the character as 'Character \\(Series\\)' (e.g. 'Furina \\(Genshin Impact\\)'). The first mention of each character MUST also include ≥6 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, build, distinctive features) in parentheses after the series.
 - If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together.'

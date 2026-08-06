@@ -715,7 +715,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       directiveBlocks.push(`「${mentions[0].display_name}」被点名/提到了，必须第一个回应。`);
     }
   } else if (trigger === 'idle') {
-    directiveBlocks.push(`群里安静了一会儿，角色们自然地聊起天来。`);
+    directiveBlocks.push(`角色们自然地聊起天来。`);
     // 注入全体群员当前日程 + 上次群聊后的新朋友圈，作为自然话题来源
     const idleCtx = buildIdleContextBlock(group);
     if (idleCtx) {
@@ -725,7 +725,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   } else if (trigger === 'opening') {
     directiveBlocks.push(`群聊刚刚建立${group.topic ? `，主题是「${group.topic}」` : ''}。角色们打个招呼、暖个场，可以对建群这件事发表点评论。`);
   } else if (trigger === 'lull') {
-    directiveBlocks.push(`群里冷场了一会儿，角色们自然地把话题接下去（延伸刚才的话题、开个新话头），不要重复已经说过的话。`);
+    directiveBlocks.push(`角色们自然地把话题接下去（延伸刚才的话题或者开个新话头），不要重复已经说过的话。`);
   }
 
   // 记忆召回范围：本群 + 全体成员各自私聊。
@@ -758,9 +758,11 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const roundMessageLimit = computeRoundMessageLimit(group, { hasTopicSeed: !!dyn });
   directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
 
-  // 抽卡鼓励发图（idle 已由 topic_seed 引导，不重复加）
-  if (trigger !== 'idle' && Math.random() < IMAGE_NUDGE_PROBABILITY) {
-    directiveBlocks.push(`本轮安排一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
+  // 发图指令：主动群聊（idle）发起时强制要求配一张图，作为话题引子；user/lull 维持抽卡鼓励
+  if (trigger === 'idle') {
+    directiveBlocks.push(`本轮是角色们主动发起的群聊，安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
+  } else if (Math.random() < IMAGE_NUDGE_PROBABILITY) {
+    directiveBlocks.push(`本轮安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
   }
 
   const msgs = buildGroupContext(group, directiveBlocks);
@@ -864,7 +866,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   };
 
   try {
-    for await (const chunk of chatStream(msgs, { temperature: 0.7, max_tokens: 4096, label: `群聊#${groupId}` })) {
+    for await (const chunk of chatStream(msgs, { temperature: Math.max(0.5, Math.min(1.2, config.groupChat?.temperature ?? 0.7)), max_tokens: 4096, label: `群聊#${groupId}` })) {
       buffer += chunk;
       let nl;
       while ((nl = buffer.indexOf('\n')) >= 0) {

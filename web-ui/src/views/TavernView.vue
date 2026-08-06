@@ -298,11 +298,17 @@
          ═══════════════════════════════════════════ -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="showWorldModal" class="modal-overlay">
-          <div class="modal-panel">
-            <div class="modal-header">
-              <h3>世界观设置</h3>
-              <button class="modal-close" @click="closeWorldSetting">✕</button>
+        <div v-if="showWorldModal" class="modal-overlay" @mousedown.self="closeWorldSetting">
+          <div class="modal-panel world-modal-panel">
+            <div class="modal-header world-modal-header">
+              <div class="world-modal-title">
+                <h3>世界观设置</h3>
+                <span class="world-modal-subtitle">定义所有角色共处的世界背景</span>
+              </div>
+              <div class="world-header-right">
+                <span v-if="activeWorldName" class="world-active-badge" :title="`当前激活：${activeWorldName}`">● {{ activeWorldName }}</span>
+                <button class="modal-close" @click="closeWorldSetting">✕</button>
+              </div>
             </div>
             <div class="modal-body">
               <!-- 新建名称输入 -->
@@ -352,14 +358,41 @@
                 <div class="world-tag world-tag-add" @click="startNew">+</div>
               </div>
 
-              <p class="modal-hint">定义角色们所处的共同世界背景，留空则不追加。</p>
-              <textarea
-                v-model="worldContent"
-                class="fi world-textarea"
-                rows="10"
-                placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
-                @input="worldDirty = true"
-              ></textarea>
+              <!-- 内容编辑区 -->
+              <div class="world-editor">
+                <div class="world-editor-bar">
+                  <span class="world-editor-label">世界观内容</span>
+                  <div class="world-editor-tools">
+                    <button
+                      class="btn-polish"
+                      :disabled="polishLoading || !worldContent.trim()"
+                      title="AI 按酒馆世界书风格润色扩写当前世界观"
+                      @click="openPolish"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/>
+                        <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>
+                      </svg>
+                      一键润色
+                    </button>
+                  </div>
+                </div>
+                <div class="world-editor-body">
+                  <textarea
+                    ref="worldTextareaRef"
+                    v-model="worldContent"
+                    class="fi world-textarea"
+                    rows="10"
+                    placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
+                    @input="worldDirty = true"
+                  ></textarea>
+                </div>
+                <div class="world-editor-meta">
+                  <span class="world-char-count"></span>
+                  <span v-if="worldSaved" class="world-saved-hint">✓ 已保存</span>
+                </div>
+              </div>
+
               <div class="modal-actions">
                 <button class="btn-ghost" @click="closeWorldSetting">取消</button>
                 <button
@@ -370,7 +403,59 @@
                   {{ worldSaving ? '保存中...' : '保存' }}
                 </button>
               </div>
-              <div v-if="worldSaved" class="world-saved-hint">✓ 已保存</div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         AI 润色扩写弹窗（世界观）
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="showPolishModal" class="modal-overlay" @mousedown.self="closePolishModal">
+          <div class="modal-panel polish-modal-panel">
+            <div class="modal-header">
+              <h3>撰写世界观</h3>
+              <button class="modal-close" @click="closePolishModal">✕</button>
+            </div>
+            <div class="modal-body">
+              <p v-if="!polishLoading && !polishContent && !polishError" class="polish-tip">
+                将按酒馆世界书风格润色扩写当前世界观，重点补充「这个世界里的人们会怎么做」。
+              </p>
+
+              <!-- 加载中 -->
+              <div v-if="polishLoading" class="polish-loading">
+                <div class="polish-spinner"></div>
+                <p>正在为这个世界起草招募帖…</p>
+              </div>
+
+              <!-- 失败重试 -->
+              <div v-else-if="polishError" class="polish-error">
+                <p class="polish-error-text">{{ polishError }}</p>
+                <div class="modal-actions polish-error-actions">
+                  <button class="btn-primary btn-sm" @click="runPolish">重新生成</button>
+                  <button class="btn-ghost btn-sm" @click="closePolishModal">关闭</button>
+                </div>
+              </div>
+
+              <!-- 结果预览 -->
+              <template v-else-if="polishContent">
+                <div class="polish-preview-head">
+                  <span class="polish-preview-label">润色结果预览</span>
+                </div>
+                <div class="polish-preview">
+                  <pre v-html="polishHighlightHtml"></pre>
+                </div>
+                <div class="modal-actions">
+                  <button class="btn-ghost" @click="runPolish">↻ 再次生成</button>
+                  <div class="modal-actions-right">
+                    <button class="btn-ghost" @click="closePolishModal">取消</button>
+                    <button class="btn-primary" @click="confirmPolish">确认并覆写</button>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
         </div>
@@ -825,6 +910,26 @@ const newNameInput = ref(null)
 const editingNameId = ref(null)
 const editNameValue = ref('')
 const editNameInput = ref(null)
+const worldTextareaRef = ref(null)
+
+// 纯文本世界观 → 带层级标记的展示 HTML（不改变原始文本内容）
+function toWorldHighlightHtml(text) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => {
+      const safe = esc(line)
+      if (/^\s*【[^】]*】\s*$/.test(safe)) {
+        return `<span class="world-sec-title">${safe}</span>`
+      }
+      if (/^\s*[-•·*]\s+/.test(safe) || /^\s*\d+[\.、．]/.test(safe)) {
+        return `<span class="world-sec-item">${safe}</span>`
+      }
+      return safe.replace(/^(\s*)(【[^】]*】)/, (m, indent, tag) => `${indent}<span class="world-sec-tag">${tag}</span>`)
+    })
+    .join('\n')
+}
+const polishHighlightHtml = computed(() => toWorldHighlightHtml(polishContent.value))
 
 async function loadWorldSettings() {
   try {
@@ -964,6 +1069,73 @@ async function renameWorld(item) {
   } catch (err) {
     console.error('[world] rename failed:', err)
   }
+}
+
+// ═══════════════════════════════════════
+// 世界观 AI 一键润色（酒馆世界书风格扩写）
+// ═══════════════════════════════════════
+const showPolishModal = ref(false)
+const polishLoading = ref(false)
+const polishError = ref('')
+const polishContent = ref('')
+
+function openPolish() {
+  const source = worldContent.value.trim()
+  if (!source || polishLoading.value) return
+  polishError.value = ''
+  polishContent.value = ''
+  showPolishModal.value = true
+  runPolish()
+}
+
+function closePolishModal() {
+  showPolishModal.value = false
+  polishLoading.value = false
+  polishError.value = ''
+  polishContent.value = ''
+}
+
+async function runPolish() {
+  if (polishLoading.value) return
+  const source = worldContent.value.trim()
+  if (!source) {
+    polishError.value = '当前世界观内容为空，请先填写内容再润色'
+    return
+  }
+  polishLoading.value = true
+  polishError.value = ''
+  polishContent.value = ''
+  try {
+    const item = worldItems.value.find(w => w.id === selectedWorldId.value)
+    // 请求体带上系统破限词，保证扩写创作自由
+    let jailbreak = ''
+    try {
+      const rules = await api.getSystemRules()
+      jailbreak = rules?.content || ''
+    } catch {}
+    const result = await api.polishWorldSetting({
+      name: item?.name || '',
+      content: source,
+      jailbreak,
+    })
+    if (!result?.ok || !result.content) {
+      throw new Error(result?.error || '润色失败，请稍后重试')
+    }
+    polishContent.value = result.content
+  } catch (err) {
+    polishError.value = err?.message || '润色失败，请稍后重试'
+  } finally {
+    polishLoading.value = false
+  }
+}
+
+async function confirmPolish() {
+  if (!polishContent.value) return
+  worldContent.value = polishContent.value
+  worldDirty.value = true
+  worldSaved.value = false
+  closePolishModal()
+  await saveWorld()
 }
 
 async function openCharDetail(c) {
@@ -1259,40 +1431,53 @@ onMounted(async () => {
 
 /* ── 世界观入口卡片 ── */
 .world-icon {
-  background: rgba(120, 140, 200, 0.1);
-  color: #788cc8;
+  background: rgba(224, 123, 108, 0.08);
+  color: #c06a52;
 }
 
-/* ── 世界观标签行 ── */
+/* ── 世界观标签行（档案页签导航） ── */
 .world-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 2px;
+  align-items: flex-end;
+  padding: 2px 8px 0;
+  border-bottom: 1px solid rgba(120, 90, 60, 0.14);
 }
 
 .world-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 14px;
+  gap: 5px;
+  padding: 8px 15px 9px;
+  border-radius: 11px 11px 0 0;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  background: rgba(255,255,255,0.06);
-  color: var(--text-secondary);
+  background: transparent;
+  color: rgba(90, 70, 55, 0.62);
   border: 1px solid transparent;
-  transition: all 0.2s;
+  border-bottom: none;
+  margin-bottom: -1px;
+  opacity: 0.62;
+  transition: all 0.18s ease;
   user-select: none;
+  white-space: nowrap;
 }
-.world-tag:hover {
-  background: rgba(255,255,255,0.1);
-  color: var(--text-bright);
+.world-tag:hover:not(.world-tag-selected) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.5);
+  color: #5a4638;
 }
 .world-tag-selected {
-  background: rgba(224, 123, 108, 0.18);
-  color: var(--accent);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, #fffdf8 0%, #fdfaf3 100%);
+  color: #a9573d;
+  font-weight: 700;
+  border-color: rgba(120, 90, 60, 0.16);
+  border-bottom-color: #fdfaf3;
+  border-radius: 12px 12px 0 0;
+  opacity: 1;
+  box-shadow: 0 -3px 10px rgba(90, 60, 40, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .world-tag-act {
@@ -1318,37 +1503,47 @@ onMounted(async () => {
 }
 
 .world-tag-edit:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: var(--text-bright);
+  background: rgba(224, 123, 108, 0.12);
+  color: #b8664d;
 }
 
 .world-tag-del:hover {
   color: #dc3c3c !important;
-  background: rgba(220, 60, 60, 0.25);
+  background: rgba(220, 60, 60, 0.16);
 }
 
 .world-tag-rename-input {
-  width: 80px;
-  padding: 0 4px;
+  width: 90px;
+  padding: 3px 6px;
   font-size: 13px;
   color: var(--text-bright);
-  background: rgba(255,255,255,0.08);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  background: #fffdf8;
+  border: 1px solid rgba(224, 123, 108, 0.4);
+  border-radius: 6px;
   outline: none;
   font-family: inherit;
 }
 
 .world-tag-add {
   padding: 0;
-  width: 28px; height: 28px;
+  width: 26px; height: 26px;
   justify-content: center;
-  opacity: 0.7;
-  font-weight: 600;
-  font-size: 18px;
+  align-self: flex-end;
+  margin: 0 3px 9px;
+  opacity: 0.4;
+  font-weight: 300;
+  font-size: 19px;
+  line-height: 1;
+  color: #8a6f5c;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  transition: all 0.18s ease;
 }
 .world-tag-add:hover {
   opacity: 1;
+  background: rgba(224, 123, 108, 0.1);
+  color: #b8664d;
 }
 
 /* ── 新建名称行 ── */
@@ -1356,31 +1551,378 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(224, 123, 108, 0.05);
+  border: 1px solid rgba(224, 123, 108, 0.12);
+  border-radius: 12px;
+  animation: world-new-pop 0.2s ease;
+}
+@keyframes world-new-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .world-name-input {
   flex: 1;
+  background: #fffdf8;
+  border: 1px solid rgba(224, 123, 108, 0.28);
+  border-radius: 8px;
 }
 
 .btn-sm {
-  padding: 4px 12px;
+  padding: 5px 12px;
   font-size: 13px;
   white-space: nowrap;
 }
 
-/* ── 世界观编辑弹窗 ── */
-.world-textarea {
-  min-height: 200px;
-  resize: vertical;
-  font-family: inherit;
+/* ── 世界观编辑弹窗（档案面板） ── */
+.world-modal-panel {
+  position: relative;
+  width: min(760px, 96vw);
+  background: #f5f0e8;
+  border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(58, 42, 30, 0.22), 0 3px 12px rgba(58, 42, 30, 0.06);
+}
+.world-modal-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 150px;
+  background: radial-gradient(120% 100% at 22% 0%, rgba(224, 123, 108, 0.11) 0%, rgba(224, 123, 108, 0.04) 55%, transparent 100%);
+  pointer-events: none;
+}
+.world-modal-panel .world-modal-header {
+  padding: 26px 30px 14px;
+  border-bottom: none;
+}
+.world-modal-panel .world-modal-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.world-modal-panel .world-modal-title h3 {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #3b2f26;
+}
+.world-modal-subtitle {
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: rgba(90, 70, 55, 0.55);
+}
+.world-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.world-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  color: #c06a52;
+  background: rgba(224, 123, 108, 0.08);
+  border: 1px solid rgba(224, 123, 108, 0.18);
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.world-modal-panel .modal-close {
+  background: transparent;
+  opacity: 0.4;
+  color: rgba(90, 70, 55, 0.6);
+}
+.world-modal-panel .modal-close:hover {
+  background: rgba(120, 90, 60, 0.08);
+  opacity: 1;
+  color: #5a4638;
 }
 
+.world-modal-panel .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 30px 24px;
+}
+.world-modal-panel .modal-body > * {
+  flex-shrink: 0;
+}
+
+/* 文档编辑面板 */
+.world-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  background: #fdfaf3;
+  border: 1px solid rgba(120, 90, 60, 0.1);
+  border-top: none;
+  border-radius: 0 0 16px 16px;
+  box-shadow: 0 12px 28px rgba(90, 60, 40, 0.06);
+  margin-bottom: 28px;
+}
+.world-editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 0;
+  background: transparent;
+}
+.world-editor-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  color: rgba(120, 90, 60, 0.4);
+}
+.world-editor-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-polish {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(224, 123, 108, 0.06);
+  border: 1px solid rgba(224, 123, 108, 0.13);
+  color: rgba(176, 94, 71, 0.85);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s ease;
+}
+.btn-polish:hover:not(:disabled) {
+  background: rgba(224, 123, 108, 0.11);
+  border-color: rgba(224, 123, 108, 0.26);
+  color: #b8664d;
+}
+.btn-polish:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.world-editor-body {
+  position: relative;
+}
+.world-editor .world-textarea {
+  position: relative;
+  z-index: 1;
+  min-height: 520px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 2.1;
+  letter-spacing: 0.2px;
+  color: #4a4038;
+  padding: 32px 42px 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(176, 130, 90, 0.3) transparent;
+}
+.world-editor .world-textarea::-webkit-scrollbar {
+  width: 6px; height: 6px;
+}
+.world-editor .world-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.world-editor .world-textarea::-webkit-scrollbar-thumb {
+  background: rgba(176, 130, 90, 0.16);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+.world-editor-body:hover .world-textarea::-webkit-scrollbar-thumb {
+  background: rgba(176, 130, 90, 0.34);
+}
+.world-editor-body:hover .world-textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(176, 130, 90, 0.52);
+}
+.world-editor .world-textarea::placeholder {
+  color: rgba(90, 70, 55, 0.35);
+}
+.world-editor .world-textarea::selection {
+  background: rgba(224, 123, 108, 0.2);
+}
+.world-editor .world-textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+.world-editor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 42px 12px;
+  background: transparent;
+}
+.world-char-count {
+  font-size: 12px;
+  color: rgba(90, 70, 55, 0.55);
+}
 .world-saved-hint {
-  margin-top: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #4caf84;
   font-weight: 500;
+}
+
+/* Footer 操作区 */
+.world-modal-panel .modal-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 10px -30px -24px;
+  padding: 8px 30px 12px;
+  border-top: 1px solid rgba(120, 90, 60, 0.08);
+}
+.world-modal-panel .modal-actions .btn-primary {
+  padding: 8px 24px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #e07b6c;
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(186, 90, 66, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.world-modal-panel .modal-actions .btn-primary:hover:not(:disabled) {
+  background: #cf6248;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 16px rgba(186, 90, 66, 0.3);
+}
+.world-modal-panel .modal-actions .btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(90, 70, 55, 0.55);
+  font-weight: 500;
+}
+.world-modal-panel .modal-actions .btn-ghost:hover:not(:disabled) {
+  background: rgba(120, 90, 60, 0.06);
+  color: #5a4638;
+}
+
+/* ── 世界观 AI 润色弹窗 ── */
+.polish-modal-panel {
+  width: min(720px, 96vw);
+}
+.polish-tip {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(224, 123, 108, 0.05);
+  border: 1px dashed rgba(224, 123, 108, 0.28);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.polish-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 60px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.polish-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(224, 123, 108, 0.18);
+  border-top-color: var(--accent);
+  animation: polish-spin 0.8s linear infinite;
+}
+@keyframes polish-spin {
+  to { transform: rotate(360deg); }
+}
+.polish-error {
+  padding: 18px;
+  border-radius: 12px;
+  background: rgba(255, 77, 79, 0.07);
+  border: 1px solid rgba(255, 77, 79, 0.18);
+}
+.polish-error-text {
+  margin: 0 0 14px;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.polish-error-actions {
+  margin-top: 0 !important;
+}
+.polish-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.polish-preview-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.polish-preview {
+  max-height: 48vh;
+  overflow-y: auto;
+  background: #fdfaf3;
+  border: 1px solid rgba(120, 90, 60, 0.1);
+  border-radius: 12px;
+  padding: 24px 30px;
+  scrollbar-width: none;
+}
+.polish-preview::-webkit-scrollbar { width: 6px; height: 6px; }
+.polish-preview:hover { scrollbar-width: thin; }
+.polish-preview::-webkit-scrollbar-track { background: transparent; }
+.polish-preview::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+.polish-preview:hover::-webkit-scrollbar-thumb { background: rgba(176, 130, 90, 0.22); }
+.polish-preview pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.95;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.polish-preview :deep(.world-sec-title) {
+  display: block;
+  margin: 22px 0 9px;
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #8f4a33;
+  border-left: 3px solid rgba(224, 123, 108, 0.4);
+  padding: 1px 0 1px 9px;
+}
+.polish-preview :deep(.world-sec-title:first-child) {
+  margin-top: 0;
+}
+.polish-preview :deep(.world-sec-tag) {
+  font-weight: 700;
+  color: #a05740;
+  background: rgba(224, 123, 108, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.polish-preview :deep(.world-sec-item) {
+  display: block;
+  margin: 4px 0;
+  color: #4a4038;
 }
 
 .inline-input {
@@ -2103,6 +2645,17 @@ onMounted(async () => {
   .modal-actions-right {
     flex-wrap: wrap; gap: 8px; justify-content: flex-end;
   }
+
+  /* 世界观 / 润色弹窗移动端 */
+  .world-modal-panel .world-modal-header { padding: 14px 16px 12px; padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+  .world-modal-subtitle { display: none; }
+  .world-active-badge { max-width: 110px; padding: 3px 9px; }
+  .world-modal-panel .modal-body { padding: 0 14px 20px; }
+  .world-tags { padding: 2px 4px 0; gap: 2px; }
+  .world-editor { border-radius: 0 0 12px 12px; }
+  .world-editor .world-textarea { min-height: 320px; padding: 20px 20px 16px; }
+  .world-modal-panel .modal-actions { margin: 10px -14px -20px; padding: 8px 14px 12px; }
+  .polish-preview { max-height: 55vh; }
 
   /* 招募预览卡片 */
   .preview-card {

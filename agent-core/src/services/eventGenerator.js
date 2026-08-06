@@ -834,7 +834,9 @@ export async function generateEvent(character, options = {}) {
   } catch { /* schedule not available */ }
 
   const worldPenetrationLine = worldSetting
-    ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
+    ? (eventType.key === 'custom'
+        ? '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。用户指定的事件方向是本次事件的核心，必须直接发生；世界观重塑的是它的呈现方式，而不是替换它。\n'
+        : '- **世界观穿透**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n')
     : '';
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
@@ -895,11 +897,19 @@ ${multiPerson.otherPersona}`;
     ? `\n\n${displayName}面对这类处境时可能出现的反应倾向：${eventType.reactions.join('、')}。仅供参考——请根据角色人格和当下场景，选择最自然、最贴合的一个方向来展开叙事和选项设计。`
     : '';
 
-  const directorPrompt = `事件方向：**${eventType.name}**——${eventType.desc}${funFromNote}${reactionsNote}
+  const customDirectionHeader = eventType.key === 'custom'
+    ? `【用户指定事件方向·最高优先级】**${eventType.desc}**`
+    : `事件方向：**${eventType.name}**——${eventType.desc}`;
+
+  const customKeyUnderstanding = eventType.key === 'custom'
+    ? `**关键理解**：**「${eventType.desc}」是本次事件的核心，不是可选的出发点**——开场必须让${displayName}直接身处这件事之中，让它在正文里具体地发生（场景、动作、对话都围绕它展开）。世界观、日程、人设决定这件事在${displayName}身上如何发生，但不能把用户点名的事替换成别的活动。`
+    : `**关键理解**：上面的事件方向只是一个出发点——不是剧本，里面没有具体场景。把方向翻译成${displayName}今天此刻实际遇到的、不可复制到别人身上的生活切片。`;
+
+  const directorPrompt = `${customDirectionHeader}${funFromNote}${reactionsNote}
 ${timeTag}${multiPersonNote}
 ${scheduleContextLine ? scheduleContextLine : ''}${scheduleSystemBlock || ''}${contextBlock ? '\n关联线索：' + contextBlock.trim() : ''}
 
-**关键理解**：上面的事件方向只是一个出发点——不是剧本，里面没有具体场景。把方向翻译成${displayName}今天此刻实际遇到的、不可复制到别人身上的生活切片。
+${customKeyUnderstanding}
 
 请以紧密第三人称创作这个事件的开场。场景长度 80-150 字。`;
 
@@ -947,9 +957,23 @@ ${worldPenetrationLine}
   // [4] Character persona — stable per character
   msgs.push({ role: 'system', content: personaMsg });
 
+  // [4.5] 自定义事件：用户方向锁定——独立成段，防止方向被淹没在长上下文中
+  if (eventType.key === 'custom') {
+    msgs.push({ role: 'system', content: `【用户指定事件方向·最高优先级】
+本次奇遇由用户手动指定方向：**${eventType.desc}**。
+
+- 开场必须直接落在方向这件事本身上：${displayName}此刻正在做、或正要开始这件事，正文让这件事具体发生（场景、动作、对话全部围绕它展开）。
+- 方向里的每个要素都要真实呈现：不能只擦边、暗示、用比喻带过，更不能把用户点名的事替换成别的活动。
+- 世界观和日程决定"这件事在${displayName}身上如何发生"，但不能淡化或替换"发生的这件事本身"。
+- 若方向与世界观有冲突：保留方向的核心行为，只把它的表现方式融入世界观。` });
+  }
+
   // [user] Event-specific creation task — changes per event（有世界观时开头注入遵循规则）
+  const customPreamble = eventType.key === 'custom'
+    ? '\n用户手动指定的事件方向必须直接发生——世界观负责塑造它的表现方式，不负责替换它。'
+    : '';
   const eventUserContent = worldSetting
-    ? `请遵循当前世界观来生成奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。
+    ? `请遵循当前世界观来生成奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。${customPreamble}
 
 ${directorPrompt}`
     : directorPrompt;
@@ -1145,7 +1169,6 @@ export async function generateNextBranch(character, event, choice) {
   }
   // choice.customText 仅在非 C 选项时作为补充说明；C 选项的 label 已等于 customText
   const choiceExtra = choice.choice !== 'C' && choice.customText ? '——' + choice.customText : '';
-  historyText += `\n剧情推进：${choice.label}${choiceExtra}`;
 
   // 4. LLM 生成下一步（try-catch 确保失败时清除 processing 标记）
   try {
@@ -1273,11 +1296,13 @@ ${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
 
 **重要提醒**：场景必须忠实于「${displayName2}」的人格——ta的反应方式、内心活动、决策逻辑，都应该让读者觉得"换了别人就不会这样"。
 
+**剧情推进（必须发生）**：${choice.label}${choiceExtra}
+
 请以紧密第三人称创作选择之后发生的下一个场景。场景长度 80-150 字。`;
 
   // 上一幕画面注入：视觉参考帮助 LLM 保持画面连贯（叙事已有 historyText，此处仅补充视觉信息）
   const prevSceneBlock = event.prompt
-    ? `\n\n【上一幕画面 · 视觉参考】\n${event.prompt}`
+    ? `\n\n【上一幕画面 · 环境参考】\n${event.prompt}`
     : '';
 
   const msgs = [];
@@ -1294,7 +1319,7 @@ ${timeTag2}${historyText}${multiNote2}${funFromNote2}${reactionsNote2}
   msgs.push({ role: 'system', content: formatPrompt2 });
 
   // [3] Branch continuation instructions — stable per character
-  msgs.push({ role: 'system', content: `你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情。
+  msgs.push({ role: 'system', content: `你正在为「${displayName2}」的特殊事件生成下一幕——一段紧密第三人称叙事。上一幕中角色做出了选择，现在展现选择之后发生的事情，选择已经完成，描述的是选择的结果。
 
 ${worldPenetrationLine2}
 【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间` });

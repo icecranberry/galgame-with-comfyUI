@@ -161,6 +161,19 @@
             <span>群主题</span>
             <input v-model="editTopic" type="text" maxlength="60" placeholder="（可选）大家围绕什么话题聊" />
           </label>
+          <div class="gc-field">
+            <div class="gc-member-title">
+              <span>温度设置</span>
+              <span class="gc-temp-val">{{ Number(editTemperature).toFixed(1) }}</span>
+            </div>
+            <input
+              class="gc-range"
+              type="range" min="0.5" max="1.2" step="0.1"
+              v-model.number="editTemperature"
+              @change="onTemperatureChange"
+            />
+            <span class="gc-member-hint">群聊生成温度（所有群共享），越低越稳定、越高越有创意，默认 0.7。</span>
+          </div>
           <div class="gc-field gc-member-field">
             <div class="gc-member-title">
               <span>群成员</span>
@@ -207,6 +220,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from '
 import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
 import { useChatStore } from '../stores/chat.js'
+import { getConfig, updateGroupTemperature } from '../api/index.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
@@ -231,6 +245,7 @@ const hasNewMessages = ref(false)
 const editName = ref('')
 const editTopic = ref('')
 const editMemberIds = ref([])
+const editTemperature = ref(0.7)
 const canUndo = computed(() => (
   store.messages.length > 0 && !store.sending && !store.playing && !store.undoing
 ))
@@ -343,8 +358,36 @@ watch(showSettings, (open) => {
     editName.value = store.activeGroup.name
     editTopic.value = store.activeGroup.topic || ''
     editMemberIds.value = store.activeGroup.members.map(m => m.id)
+    loadGroupTemperature()
   }
 })
+
+// ── 温度设置（全局共享，写入 system_settings） ──
+
+let temperatureLoading = false
+
+async function loadGroupTemperature() {
+  if (temperatureLoading) return
+  temperatureLoading = true
+  try {
+    const cfg = await getConfig()
+    const t = cfg?.groupChat?.temperature
+    if (typeof t === 'number') editTemperature.value = Math.max(0.5, Math.min(1.2, t))
+  } catch { /* 拉取失败保留当前值 */ }
+  finally { temperatureLoading = false }
+}
+
+async function onTemperatureChange() {
+  const v = Math.max(0.5, Math.min(1.2, Number(editTemperature.value) || 0.7))
+  editTemperature.value = v
+  try {
+    const res = await updateGroupTemperature(v)
+    if (typeof res?.temperature === 'number') editTemperature.value = res.temperature
+    toast?.('温度设置已保存', 'success')
+  } catch (err) {
+    toast?.(err.message || '温度设置保存失败', 'error')
+  }
+}
 
 onMounted(() => {
   store.connectSSE()
@@ -909,6 +952,25 @@ async function onDissolve() {
   color: #fff; font-size: 16px; font-weight: 600;
 }
 .gc-member-hint { font-size: 12px; color: var(--text-secondary); }
+.gc-temp-val { font-size: 13px; font-weight: 600; color: var(--accent); }
+.gc-range {
+  width: 100%; height: 6px; margin: 4px 0 2px;
+  -webkit-appearance: none; appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f0d5cd, var(--accent));
+  outline: none; cursor: pointer;
+}
+.gc-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.gc-range::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
 .gc-record-actions { flex-shrink: 0; }
 .gc-drawer-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .gc-btn {

@@ -92,6 +92,12 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     appearance: process.env.USER_APPEARANCE || '',
     persona: process.env.USER_PERSONA || '',
   },
+  groupChat: {
+    // 群聊 LLM 温度（0.5~1.2），所有群共享；DB system_settings 持久化，启动时覆盖默认值
+    temperature: parseFloat(process.env.GROUP_CHAT_TEMPERATURE) >= 0.5 && parseFloat(process.env.GROUP_CHAT_TEMPERATURE) <= 1.2
+      ? parseFloat(process.env.GROUP_CHAT_TEMPERATURE)
+      : 0.7,
+  },
   weather: {
     city: process.env.WEATHER_CITY || '',
   },
@@ -203,6 +209,17 @@ export function updateBackgroundConcurrency(value) {
   config.features.backgroundLLMMaxConcurrency = n;
   persistSettingSync('feature_backgroundLLMMaxConcurrency', String(n));
   console.log(`[config] backgroundLLMMaxConcurrency = ${n}`);
+}
+
+/**
+ * 更新群聊 LLM 温度（0.5~1.2，所有群共享）
+ */
+export function updateGroupTemperature(value) {
+  const t = Math.max(0.5, Math.min(1.2, parseFloat(value) || 0.7));
+  config.groupChat.temperature = t;
+  persistSettingSync('group_temperature', String(t));
+  console.log(`[config] groupChat temperature = ${t}`);
+  return t;
 }
 
 export function getLlmConfig() {

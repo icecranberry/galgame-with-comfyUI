@@ -408,6 +408,18 @@ export async function updateProactiveFreq(value) {
   })
 }
 
+/** 更新群聊 LLM 温度 0.5~1.2（所有群共享） */
+export async function updateGroupTemperature(value) {
+  const res = await fetch(`${BASE}/config/group-temperature`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || '温度设置保存失败')
+  }
+  return res.json()
+}
+
 /** 更新奇遇触发频率 0~1 */
 export async function updateEventFreq(value) {
   await fetch(`${BASE}/config/event-freq`, {
@@ -581,6 +593,18 @@ export async function updateWorldSetting(id, data) {
 export async function deleteWorldSetting(id) {
   const res = await fetch(`${BASE}/config/world-settings/${id}`, {
     method: 'DELETE',
+  })
+  return res.json()
+}
+
+export async function getSystemRules() {
+  const res = await fetch(`${BASE}/config/system-rules`)
+  return res.json()
+}
+
+export async function polishWorldSetting(data) {
+  const res = await fetch(`${BASE}/config/world-settings/polish`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
   })
   return res.json()
 }
