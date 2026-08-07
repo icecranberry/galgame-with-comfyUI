@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { containsExplicitAdultContent } from '../db/imagePromptKnowledgePolicy.js';
 import { vectorSearch, upsertVectors, deleteVector, getImageKnowledgeCount } from './vectorClient.js';
@@ -166,7 +167,7 @@ function computeKnowledgeVersion(db) {
   ].join('|');
 }
 
-async function syncKnowledgeVectors(db = getDb(), timeoutMs = RAG_TIMEOUT_DEFAULT_MS) {
+async function syncKnowledgeVectors(db = getDb(), timeoutMs = config.vectorService.defaultTimeoutMs) {
   const rows = db.prepare(`SELECT * FROM image_prompt_knowledge WHERE is_active = 1 ORDER BY knowledge_id`).all();
   const staleIds = db.prepare(`
     SELECT knowledge_id FROM image_prompt_knowledge
@@ -346,7 +347,7 @@ async function syncTick() {
     }
     if (syncedVersion === computeKnowledgeVersion(db)) return;
     if (!isUserQuiet()) return;
-    await syncKnowledgeVectors(db, RAG_TIMEOUT_DEFAULT_MS);
+    await syncKnowledgeVectors(db);
   } catch (error) {
     console.warn(`[imagePromptKnowledge] background sync failed: ${error.message}`);
   } finally {
