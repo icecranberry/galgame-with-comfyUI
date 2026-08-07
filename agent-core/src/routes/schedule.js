@@ -26,6 +26,7 @@ import {
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../llm/llm-client.js';
@@ -271,7 +272,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
     }
 
     const db = getDb();
-    const character = db.prepare('SELECT id, display_name, custom_workflow, loras FROM characters WHERE id = ?').get(characterId);
+    const character = db.prepare('SELECT id, display_name, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
     if (!character) {
       return res.status(404).json({ error: 'character not found' });
     }
@@ -299,6 +300,8 @@ router.post('/:characterId/peek/retake', async (req, res) => {
           const opts = {};
           if (character.custom_workflow) opts.customWorkflow = character.custom_workflow;
           if (chLoras.length > 0) opts.loras = chLoras;
+          const charArtist = charArtistOverride(character);
+          if (charArtist !== null) opts.artist = charArtist;
           return opts;
         })(),
         onProgress: (p) => {
@@ -359,7 +362,7 @@ router.post('/:characterId/peek', async (req, res) => {
     }
 
     const db = getDb();
-    const character = db.prepare('SELECT id, display_name, base_prompt, custom_workflow, loras FROM characters WHERE id = ?').get(characterId);
+    const character = db.prepare('SELECT id, display_name, base_prompt, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
     if (!character) {
       return res.status(404).json({ error: 'character not found' });
     }
@@ -548,6 +551,8 @@ router.post('/:characterId/peek', async (req, res) => {
           const opts = {};
           if (character.custom_workflow) opts.customWorkflow = character.custom_workflow;
           if (chLoras.length > 0) opts.loras = chLoras;
+          const charArtist = charArtistOverride(character);
+          if (charArtist !== null) opts.artist = charArtist;
           return opts;
         })(),
         onProgress: (p) => {

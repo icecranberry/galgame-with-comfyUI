@@ -241,6 +241,7 @@ function initSchema(db) {
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
       moments_disabled INTEGER DEFAULT 0,
       short_prompt TEXT,
+      artist_override TEXT,
       handwriting_font TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -526,6 +527,9 @@ function initSchema(db) {
 
   // characters 表新增 loras JSON 列
   migrateLorasArraySchema(db);
+
+  // characters 表新增角色单独画师串列
+  migrateArtistOverrideSchema(db);
 
   // 迁移: 将 global_rules.world_setting 移至 world_settings 表（多套世界观）
   migrateWorldSettings(db);
@@ -1412,6 +1416,21 @@ function migrateLorasArraySchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateLorasArraySchema error:', err.message);
+  }
+}
+
+/**
+ * characters 表 artist_override 列（角色单独画师串，非空时覆盖系统画师串）
+ */
+function migrateArtistOverrideSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'artist_override')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN artist_override TEXT`);
+      console.log('[db] Added characters.artist_override column');
+    }
+  } catch (err) {
+    console.log('[db] migrateArtistOverrideSchema error:', err.message);
   }
 }
 

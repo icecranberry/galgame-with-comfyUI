@@ -4,6 +4,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
+import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
@@ -794,10 +795,8 @@ ${rules}`;
     // 构建 lora 参数：合并自身 + 对方们的 lora
     let loraOpts = {};
     const selfLoras = _parseCharLoras(character.loras);
-    const otherLoras = multiPersons.flatMap(mp => {
-      const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(mp.otherId);
-      return otherChar ? _parseCharLoras(otherChar.loras) : [];
-    });
+    const otherChars = multiPersons.map(mp => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(mp.otherId)).filter(Boolean);
+    const otherLoras = otherChars.flatMap(c => _parseCharLoras(c.loras));
     const allLoras = [...selfLoras, ...otherLoras];
     const seen = new Set();
     const uniqueLoras = allLoras.filter(l => {
@@ -815,8 +814,9 @@ ${rules}`;
     }
 
     const originalImagePrompt = imagePrompt;
+    const charArtist = charArtistOverrideWithFallback(character, otherChars);
     const genResult = await generateImageRaw(imagePrompt, {
-      artist: config.comfyui.momentsArtist,
+      artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
       width: config.comfyui.momentsWidth,
       height: config.comfyui.momentsHeight,
       scene: 'moments',
@@ -837,7 +837,7 @@ ${rules}`;
         promptOriginal: originalImagePrompt,
         promptRefined: imagePrompt,
         outputPaths: imageUrls,
-        style: config.comfyui.momentsArtist,
+        style: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
         resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
         workflowTemplate: genResult.wfMode,
         db,

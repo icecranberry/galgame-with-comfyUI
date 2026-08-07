@@ -23,6 +23,7 @@ import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/ind
 import { chatStream } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
+import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
@@ -49,7 +50,7 @@ export function getGroupWithMembers(groupId) {
   const group = db.prepare('SELECT * FROM group_chats WHERE id = ?').get(groupId);
   if (!group) return null;
   const members = db.prepare(`
-    SELECT c.id, c.name, c.display_name, c.short_prompt, c.base_prompt, c.avatar_path, c.loras, c.custom_workflow
+    SELECT c.id, c.name, c.display_name, c.short_prompt, c.base_prompt, c.avatar_path, c.loras, c.custom_workflow, c.artist_override
     FROM group_members gm JOIN characters c ON c.id = gm.character_id
     WHERE gm.group_id = ? ORDER BY gm.id ASC
   `).all(groupId);
@@ -478,6 +479,8 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
     const seenPaths = new Set(speakerLoras.map(l => l.path));
     const allLoras = [...speakerLoras, ...matchedLoras.filter(l => !seenPaths.has(l.path))];
     if (allLoras.length > 0) loraOpts.loras = allLoras;
+    const speakerArtist = charArtistOverrideWithFallback(speaker, matchedCharacters || []);
+    if (speakerArtist !== null) loraOpts.artist = speakerArtist;
 
     if (matchedCharacters.length > 0) {
       const matchedNames = matchedCharacters.map(char => `${char.display_name}(${char.name})`).join(', ');

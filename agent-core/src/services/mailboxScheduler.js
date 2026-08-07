@@ -2,6 +2,7 @@ import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImage } from './imageSkill.js';
+import { charArtistOverride } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -44,7 +45,7 @@ async function checkAndProcess() {
     const db = getDb();
     const pending = db.prepare(`
       SELECT ml.*, c.id AS char_id, c.display_name, c.name, c.base_prompt,
-             c.emotion_baseline, c.avatar_path, c.custom_workflow, c.loras
+             c.emotion_baseline, c.avatar_path, c.custom_workflow, c.loras, c.artist_override
       FROM mailbox_letters ml
       LEFT JOIN characters c ON ml.character_id = c.id
       WHERE ml.direction = 'user_to_char'
@@ -95,10 +96,13 @@ async function processReply(db, letter) {
     if (!data || !data.text) throw new Error('LLM reply generation returned empty');
 
     // ── 步骤2: 并发生成3张图（使用 LLM 输出的 prompt，朋友圈画师串） ──
+    const genOverrides = {};
+    const charArtist = charArtistOverride(letter);
+    if (charArtist !== null) genOverrides.artist = charArtist;
     const [paperResult, portraitResult, illustrationResult] = await Promise.all([
-      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900 }),
-      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200 }),
-      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900 }),
+      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, ...genOverrides }),
+      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200, ...genOverrides }),
+      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, ...genOverrides }),
     ]);
 
     if (!paperResult || !portraitResult || !illustrationResult) {

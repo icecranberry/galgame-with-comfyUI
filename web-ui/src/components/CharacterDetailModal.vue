@@ -282,6 +282,25 @@
                   </div>
                 </Transition>
               </div>
+
+              <!-- ── 单独画师串 ── -->
+              <div class="form-group">
+                <label class="lora-check-label" @click.stop>
+                  <span class="lora-checkbox-wrap">
+                    <input type="checkbox" v-model="artistOverrideEnabled" class="lora-checkbox" />
+                    <span class="lora-checkmark">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                  </span>
+                  <span class="lora-check-text">单独设置画师串</span>
+                </label>
+                <Transition name="lora-expand">
+                  <div v-if="artistOverrideEnabled" class="lora-workflow-select">
+                    <input v-model="artistOverride" class="fi" placeholder="该角色专属画师串，留空则不注入画师串" />
+                    <p class="form-hint">勾选后，遇到该角色生成图片时会无条件覆盖系统设置里注入的画师串；留空则用空画师串覆盖，不注入任何画师串。</p>
+                  </div>
+                </Transition>
+              </div>
             </div>
 
             <div class="modal-actions" style="margin-top:16px">
@@ -353,6 +372,8 @@ const showLoraModal = ref(false)
 const customWorkflows = ref([])
 const customWorkflowEnabled = ref(false)
 const editingCustomWorkflow = ref('')
+const artistOverrideEnabled = ref(false)
+const artistOverride = ref('')
 const loraLoading = ref(false)
 const loraItems = ref([])
 const lorasFiles = ref([])
@@ -402,7 +423,7 @@ const civitaiDisplayName = computed(() => {
 const hasLoraSetup = computed(() => {
   const c = props.character
   if (!c) return false
-  return (_parseCharLoras(c.loras).length > 0) || !!c.custom_workflow
+  return (_parseCharLoras(c.loras).length > 0) || !!c.custom_workflow || c.artist_override != null
 })
 
 // ── Lora 辅助 ──
@@ -650,6 +671,8 @@ function openLoraModal() {
   const c = props.character
   customWorkflowEnabled.value = !!c.custom_workflow
   editingCustomWorkflow.value = c.custom_workflow || ''
+  artistOverrideEnabled.value = c.artist_override != null
+  artistOverride.value = c.artist_override || ''
   const loras = _parseCharLoras(c.loras)
   loraItems.value = loras.length > 0
     ? JSON.parse(JSON.stringify(loras))
@@ -668,14 +691,17 @@ async function saveLora() {
   const c = props.character
   const customWf = (customWorkflowEnabled.value && editingCustomWorkflow.value) ? editingCustomWorkflow.value : ''
   const validLoras = loraItems.value.filter(l => l.path && l.path.trim())
+  const artistVal = artistOverrideEnabled.value ? (artistOverride.value || '').trim() : null
   loraLoading.value = true
   try {
     await api.updateCharacter(c.id, {
       custom_workflow: customWf || null,
       loras: validLoras,
+      artist_override: artistVal,
     })
     c.custom_workflow = customWf || null
     c.loras = validLoras.length > 0 ? JSON.stringify(validLoras) : null
+    c.artist_override = artistVal
     showLoraModal.value = false
     emit('lora-saved', c)
   } catch (e) {
@@ -937,6 +963,7 @@ async function saveLora() {
 .form-group .fl { display: block; margin-bottom: 6px; }
 .form-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 .lora-workflow-select { margin-top: 8px; }
+.lora-workflow-select .fi { width: 100%; }
 .lora-separator { border-top: 1px solid var(--border); margin: 24px 0 20px; }
 .lora-check-label { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .lora-checkbox { position: absolute; opacity: 0; width: 0; height: 0; }

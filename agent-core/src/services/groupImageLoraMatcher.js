@@ -104,7 +104,7 @@ export function collectCharacterLoras(characters) {
 
 export function resolveGroupImageLoras(prompt, speaker = null) {
   const characters = getDb().prepare(`
-    SELECT id, name, display_name, loras
+    SELECT id, name, display_name, loras, artist_override
     FROM characters
     WHERE name IS NOT NULL AND trim(name) != ''
     ORDER BY id ASC

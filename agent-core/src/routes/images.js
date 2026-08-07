@@ -4,6 +4,7 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
@@ -316,12 +317,13 @@ router.post('/regenerate', async (req, res) => {
   let taskResolution = null;
   let charLoras = null;
   let charCustomWorkflow = null;
+  let charArtist = null;
 
   // 辅助：从 conversation_id 提取角色 lora/workflow
   function tryGetCharConfig(conversationId) {
     const m = conversationId?.match(/^char_(\d+)/);
     if (!m) return;
-    const char = db.prepare(`SELECT loras, custom_workflow FROM characters WHERE id = ?`).get(parseInt(m[1]));
+    const char = db.prepare(`SELECT loras, custom_workflow, artist_override FROM characters WHERE id = ?`).get(parseInt(m[1], 10));
     if (char) {
       if (!charLoras && char.loras) {
         try { charLoras = JSON.parse(char.loras); } catch {}
@@ -329,6 +331,7 @@ router.post('/regenerate', async (req, res) => {
       if (!charCustomWorkflow && char.custom_workflow) {
         charCustomWorkflow = char.custom_workflow;
       }
+      if (charArtist == null) charArtist = charArtistOverride(char);
     }
   }
 
@@ -436,6 +439,7 @@ router.post('/regenerate', async (req, res) => {
     };
     if (charLoras?.length > 0) genOpts.loras = charLoras;
     if (charCustomWorkflow) genOpts.customWorkflow = charCustomWorkflow;
+    if (charArtist !== null) genOpts.artist = charArtist;
     const result = await generateImageRaw(promptText, genOpts);
 
     if (!result.success || !result.images?.length) {

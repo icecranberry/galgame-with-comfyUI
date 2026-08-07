@@ -18,6 +18,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
+import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { saveBase64Image } from './imagePaths.js';
 import { config } from '../config.js';
@@ -1000,18 +1001,20 @@ ${directorPrompt}`
 
   // 5. 生图（多人时合并两人 LoRA）
   const selfLoras = _parseCharLoras(character.loras);
-  let otherLoras = [];
+  let otherChars = [];
   if (multiPerson) {
-    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson.otherId);
-    if (otherChar) otherLoras = _parseCharLoras(otherChar.loras);
+    const otherChar = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(multiPerson.otherId);
+    if (otherChar) otherChars = [otherChar];
   }
+  const otherLoras = otherChars.flatMap(c => _parseCharLoras(c.loras));
   const allLoras = [...selfLoras, ...otherLoras];
 
   const originalEventPrompt = eventData.prompt;
   let imageUrl = null;
   try {
+    const charArtist = charArtistOverrideWithFallback(character, otherChars);
     const genResult = await generateImageRaw(eventData.prompt, {
-      artist: config.comfyui.eventArtist,
+      artist: charArtist !== null ? charArtist : config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
       scene: 'events',
@@ -1029,7 +1032,7 @@ ${directorPrompt}`
         promptOriginal: originalEventPrompt,
         promptRefined: eventData.prompt,
         outputPaths: [imageUrl],
-        style: config.comfyui.eventArtist,
+        style: charArtist !== null ? charArtist : config.comfyui.eventArtist,
         resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
         workflowTemplate: genResult.wfMode,
         db,
@@ -1367,16 +1370,18 @@ ${directorPrompt2}${prevSceneBlock}`
 
   // 5. 生图（合并主角色 + 多人 + 交叉引用角色的 LoRA）
   const branchSelfLoras = _parseCharLoras(character.loras);
+  const branchOtherChars = [];
   let branchOtherLoras = [];
   if (multiPerson2) {
-    const otherChar = db.prepare('SELECT loras FROM characters WHERE id = ?').get(multiPerson2.otherId);
-    if (otherChar) branchOtherLoras = _parseCharLoras(otherChar.loras);
+    const otherChar = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(multiPerson2.otherId);
+    if (otherChar) { branchOtherChars.push(otherChar); branchOtherLoras = _parseCharLoras(otherChar.loras); }
   }
   let branchCrossRefLoras = [];
   const crossRefIdsForLora = JSON.parse(event.referenced_character_ids || '[]');
   if (crossRefIdsForLora.length > 0) {
     branchCrossRefLoras = crossRefIdsForLora.flatMap(id => {
-      const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
+      const c = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id);
+      if (c) branchOtherChars.push(c);
       return c ? _parseCharLoras(c.loras) : [];
     });
   }
@@ -1391,8 +1396,9 @@ ${directorPrompt2}${prevSceneBlock}`
   const originalBranchPrompt = branchData.prompt;
   let imageUrl = null;
   try {
+    const charArtist = charArtistOverrideWithFallback(character, branchOtherChars);
     const genResult = await generateImageRaw(branchData.prompt, {
-      artist: config.comfyui.eventArtist,
+      artist: charArtist !== null ? charArtist : config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight, scene: 'events',
       priority: 'high',
@@ -1409,7 +1415,7 @@ ${directorPrompt2}${prevSceneBlock}`
         promptOriginal: originalBranchPrompt,
         promptRefined: branchData.prompt,
         outputPaths: [imageUrl],
-        style: config.comfyui.eventArtist,
+        style: charArtist !== null ? charArtist : config.comfyui.eventArtist,
         resolution: `${config.comfyui.eventWidth}x${config.comfyui.eventHeight}`,
         workflowTemplate: genResult.wfMode,
         db,

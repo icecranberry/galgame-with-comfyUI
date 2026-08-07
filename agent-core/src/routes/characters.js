@@ -13,6 +13,7 @@ import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image } from '../services/imagePaths.js';
@@ -157,7 +158,7 @@ router.get('/migrate-short-prompts', (_req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
@@ -176,6 +177,7 @@ router.put('/:id', (req, res) => {
   if (events_disabled !== undefined) { updates.push('events_disabled = ?'); params.push(events_disabled ? 1 : 0); }
   if (custom_workflow !== undefined) { updates.push('custom_workflow = ?'); params.push(custom_workflow || null); }
   if (loras !== undefined) { updates.push('loras = ?'); params.push(Array.isArray(loras) ? JSON.stringify(loras) : (loras || '[]')); }
+  if (artist_override !== undefined) { updates.push('artist_override = ?'); params.push(typeof artist_override === 'string' ? artist_override.trim() : null); }
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
@@ -807,11 +809,13 @@ router.post('/:id/gift', async (req, res) => {
 
     // 异步生图：不阻塞响应，完成后补图片到消息气泡
     if (result.imagePrompt) {
+      const giftArtist = charArtistOverride(char);
       generateImage(result.imagePrompt, {
         promptScene: 'gift',
         ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
+        ...(giftArtist !== null ? { artist: giftArtist } : {}),
         onProgress: (p) => {
           console.log(`[gift] image gen progress for ${char.display_name}:`, p.stage || p);
         }
@@ -971,10 +975,11 @@ ${char.base_prompt}
     // Step 2: 调用 ComfyUI 生图（1024x1024）
     console.log(`[generate-avatar] Step 2/2: generating image at 1024x1024...`);
     const charLoras = _parseCharLoras(char.loras);
+    const avatarArtist = charArtistOverride(char);
     const result = await generateImageRaw(promptText, {
       promptScene: 'avatar',
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
-      artist: config.comfyui.momentsArtist,
+      artist: avatarArtist !== null ? avatarArtist : config.comfyui.momentsArtist,
       width: 768,
       height: 768,
       loras: charLoras.length > 0 ? charLoras : undefined,

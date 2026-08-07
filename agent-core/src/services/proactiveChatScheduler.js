@@ -23,6 +23,7 @@ import {
 } from './emotionEngine.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
+import { charArtistOverride } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './timeLight.js';
@@ -660,6 +661,8 @@ ${motiveName}
     const loraOpts = {};
     if (charLoras.length > 0) loraOpts.loras = charLoras;
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
+    const charArtist = charArtistOverride(character);
+    if (charArtist !== null) loraOpts.artist = charArtist;
     const result = await generateImage(prompt, { promptScene: 'proactive', priority: 'low', ...loraOpts });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
@@ -684,7 +687,7 @@ ${motiveName}
       promptOriginal: prompt,
       promptRefined: result.promptRefined || prompt,
       outputPaths: urls,
-      style: config.comfyui.artist,
+      style: loraOpts.artist !== undefined ? loraOpts.artist : config.comfyui.artist,
       resolution: `${config.comfyui.width}x${config.comfyui.height}`,
       workflowTemplate: result.wfMode,
       db,

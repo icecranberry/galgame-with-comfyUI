@@ -15,6 +15,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
@@ -1314,13 +1315,15 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   try {
     const charId = parseInt(String(conversationId).replace(/^char_/, ''), 10);
     if (!Number.isNaN(charId)) {
-      const char = db.prepare('SELECT custom_workflow, loras FROM characters WHERE id = ?').get(charId);
+      const char = db.prepare('SELECT custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(charId);
       if (char) {
         const loras = _parseLoras(char);
-        if (loras.length > 0 || char.custom_workflow) {
+        if (loras.length > 0 || char.custom_workflow || charArtistOverride(char) !== null) {
           const opts = {};
           if (char.custom_workflow) opts.customWorkflow = char.custom_workflow;
           if (loras.length > 0) opts.loras = loras;
+          const charArtist = charArtistOverride(char);
+          if (charArtist !== null) opts.artist = charArtist;
           loraOpts = opts;
           console.log(`[chat] Lora enabled for char ${charId}:${opts.customWorkflow ? ' custom=' + opts.customWorkflow : ''}${opts.loras ? ` ${opts.loras.length} lora(s) — ${opts.loras.map(l => l.path).join(', ')}` : ''}`);
         }
@@ -1332,10 +1335,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   // 合并交叉引用角色 LoRA（去重，主角色优先）
   if (crossRefCharIds.length > 0) {
-    const crossLoras = crossRefCharIds.flatMap(id => {
-      const c = db.prepare('SELECT loras FROM characters WHERE id = ?').get(id);
-      return c ? _parseLoras(c) : [];
-    });
+    const crossChars = crossRefCharIds.map(id => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id)).filter(Boolean);
+    const crossLoras = crossChars.flatMap(c => _parseLoras(c));
     if (crossLoras.length > 0) {
       const allLoras = [...(loraOpts.loras || []), ...crossLoras];
       const seen = new Set();
@@ -1345,6 +1346,11 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
         return true;
       });
       console.log(`[chat] Cross-ref loras merged: +${crossLoras.length} from chars [${crossRefCharIds.join(',')}], total ${loraOpts.loras.length}`);
+    }
+    // 主角色未设置单独画师串时，回退到第一个设置了画师串的交叉引用角色
+    if (loraOpts.artist === undefined) {
+      const fallbackChar = crossChars.find(c => charArtistOverride(c) !== null);
+      if (fallbackChar) loraOpts.artist = charArtistOverride(fallbackChar);
     }
   }
 
@@ -1950,6 +1956,8 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
     const loraOpts = {};
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
     if (loras.length > 0) loraOpts.loras = loras;
+    const charArtist = charArtistOverride(character);
+    if (charArtist !== null) loraOpts.artist = charArtist;
 
     const result = await generateImage(generatedPrompt, {
       scene: 'chat',
