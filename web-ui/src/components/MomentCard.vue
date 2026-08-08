@@ -181,7 +181,7 @@ const confirmFn = inject('confirm')
 
 const MAX_VISIBLE = 2
 const showReplyInput = ref(false)
-const expanded = ref(false)
+const expanded = ref(true)
 const showMenu = ref(false)
 const imgErrors = reactive(new Set())
 // 点击菜单外自动关闭
