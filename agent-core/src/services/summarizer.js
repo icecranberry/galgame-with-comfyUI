@@ -8,10 +8,38 @@
 
 import { getDb, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
+import { DIRECT_IMG_LINE_RE, stripLegacyPromptJson } from '../utils/groupImagePrompt.js';
 
-/** 去掉消息中的 {"prompt":"..."} JSON 标签（可能在开头/中间/末尾），避免长篇英文生图 prompt 干扰摘要提取 */
-export function stripPromptJson(content) {
-  return content.replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '');
+/**
+ * 摘要前过滤生图 prompt：
+ * - 旧格式 {"prompt":"..."} JSON 块：只移除块本身，保留同一行里的对话文本；
+ * - 群聊新格式 {description} 或 [名字]: {description}：整行剔除。
+ */
+export function stripPromptJson(content, { groupFormat = false } = {}) {
+  let text = stripLegacyPromptJson(content);
+  return text.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    const separator = trimmed.match(/^\[?[^:：\[\]]{1,20}\]?\s*[:：]\s*([\s\S]*)$/);
+    const body = (separator ? separator[1] : trimmed).trim();
+    if (!body) return null;
+    if (groupFormat) {
+      const direct = body.match(DIRECT_IMG_LINE_RE);
+      if (direct) {
+        const prompt = direct[1].trim();
+        if (prompt && !/^["'“”]?prompt["'“”]?\s*:/i.test(prompt)) return null;
+      }
+    }
+    return line;
+  }).filter(line => line !== null && line.trim() !== '').join('\n');
+}
+
+/** 去掉末尾还没有 assistant 回复的 user 消息（群聊流式回复未完成的一轮）。 */
+export function trimUnrepliedUserMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let end = list.length;
+  while (end > 0 && list[end - 1].role === 'user') end--;
+  return list.slice(0, end);
 }
 
 const SUMMARIZE_INTERVAL = 10; // 每 10 条 assistant 消息触发一次
@@ -70,22 +98,27 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     ORDER BY id ASC
   `).all(conversationId, checkpointEndId);
 
+  // 群聊按用户轮次计数时，用户消息在 LLM 流式回复开始前就已写库；
+  // 末尾若还有未收到 assistant 回复的 user，说明该轮还没输出完，不参与摘要。
+  const completedMessages = trimUnrepliedUserMessages(allUnsummarized);
+
   // 取最后 interval 条触发角色消息覆盖的消息段，afterId 推到末尾截断全部旧数据。
   let triggerCount = 0;
   let batchStart = 0;
-  for (let i = allUnsummarized.length - 1; i >= 0; i--) {
-    if (allUnsummarized[i].role === triggerRole) {
+  for (let i = completedMessages.length - 1; i >= 0; i--) {
+    if (completedMessages[i].role === triggerRole) {
       triggerCount++;
       if (triggerCount >= interval) { batchStart = i; break; }
     }
   }
-  const recentMessages = allUnsummarized.slice(batchStart);
+  if (triggerCount < interval) return null;
+  const recentMessages = completedMessages.slice(batchStart);
   if (recentMessages.length === 0) return null;
 
   const recentText = recentMessages
     .map(m => {
       const label = m.role === 'user' ? userName : characterName;
-      return `[${label}]: ${stripPromptJson(m.content)}`;
+      return `[${label}]: ${stripPromptJson(m.content, { groupFormat: conversationId.startsWith('group_') })}`;
     })
     .join('\n');
 

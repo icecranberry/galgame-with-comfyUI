@@ -420,6 +420,18 @@ export async function updateGroupTemperature(value) {
   return res.json()
 }
 
+/** 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享） */
+export async function updateGroupSummaryInterval(value) {
+  const res = await fetch(`${BASE}/config/group-summary-interval`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || '记忆总结轮次保存失败')
+  }
+  return res.json()
+}
+
 /** 更新奇遇触发频率 0~1 */
 export async function updateEventFreq(value) {
   await fetch(`${BASE}/config/event-freq`, {

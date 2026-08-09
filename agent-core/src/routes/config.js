@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -100,6 +100,7 @@ router.get('/', (req, res) => {
     workflow: getWorkflowConfig(),
     groupChat: {
       temperature: config.groupChat?.temperature ?? 0.7,
+      summaryInterval: config.groupChat?.summaryInterval ?? 4,
     },
   });
 });
@@ -112,6 +113,16 @@ router.put('/group-temperature', (req, res) => {
   }
   updateGroupTemperature(value);
   res.json({ ok: true, temperature: config.groupChat.temperature });
+});
+
+// PUT /api/config/group-summary-interval — 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享）
+router.put('/group-summary-interval', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 2 || value > 10) {
+    return res.status(400).json({ error: 'value must be 2~10' });
+  }
+  updateGroupSummaryInterval(value);
+  res.json({ ok: true, summaryInterval: config.groupChat.summaryInterval });
 });
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数

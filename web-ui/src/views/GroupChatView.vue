@@ -174,6 +174,19 @@
             />
             <span class="gc-member-hint">群聊生成温度（所有群共享），越低越稳定、越高越有创意，默认 0.7。</span>
           </div>
+          <div class="gc-field">
+            <div class="gc-member-title">
+              <span>携带上下文消息记忆轮数</span>
+              <span class="gc-temp-val">{{ editSummaryInterval }} 轮</span>
+            </div>
+            <input
+              class="gc-range"
+              type="range" min="2" max="10" step="1"
+              v-model.number="editSummaryInterval"
+              @change="onSummaryIntervalChange"
+            />
+            <span class="gc-member-hint">达到设置轮数之后将上下文压缩成总结，默认 4 轮。</span>
+          </div>
           <div class="gc-field gc-member-field">
             <div class="gc-member-title">
               <span>群成员</span>
@@ -220,7 +233,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from '
 import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
 import { useChatStore } from '../stores/chat.js'
-import { getConfig, updateGroupTemperature } from '../api/index.js'
+import { getConfig, updateGroupSummaryInterval, updateGroupTemperature } from '../api/index.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
@@ -246,6 +259,7 @@ const editName = ref('')
 const editTopic = ref('')
 const editMemberIds = ref([])
 const editTemperature = ref(0.7)
+const editSummaryInterval = ref(4)
 const canUndo = computed(() => (
   store.messages.length > 0 && !store.sending && !store.playing && !store.undoing
 ))
@@ -359,6 +373,7 @@ watch(showSettings, (open) => {
     editTopic.value = store.activeGroup.topic || ''
     editMemberIds.value = store.activeGroup.members.map(m => m.id)
     loadGroupTemperature()
+    loadGroupSummaryInterval()
   }
 })
 
@@ -386,6 +401,33 @@ async function onTemperatureChange() {
     toast?.('温度设置已保存', 'success')
   } catch (err) {
     toast?.(err.message || '温度设置保存失败', 'error')
+  }
+}
+
+// ── 记忆总结轮次（全局共享，写入 system_settings） ──
+
+let summaryIntervalLoading = false
+
+async function loadGroupSummaryInterval() {
+  if (summaryIntervalLoading) return
+  summaryIntervalLoading = true
+  try {
+    const cfg = await getConfig()
+    const n = cfg?.groupChat?.summaryInterval
+    if (Number.isInteger(n)) editSummaryInterval.value = Math.max(2, Math.min(10, n))
+  } catch { /* 拉取失败保留当前值 */ }
+  finally { summaryIntervalLoading = false }
+}
+
+async function onSummaryIntervalChange() {
+  const v = Math.max(2, Math.min(10, Math.round(Number(editSummaryInterval.value) || 4)))
+  editSummaryInterval.value = v
+  try {
+    const res = await updateGroupSummaryInterval(v)
+    if (Number.isInteger(res?.summaryInterval)) editSummaryInterval.value = res.summaryInterval
+    toast?.('记忆总结轮次已保存', 'success')
+  } catch (err) {
+    toast?.(err.message || '记忆总结轮次保存失败', 'error')
   }
 }
 

@@ -6,7 +6,7 @@
  *   [system] 舞台块（破限词 + 世界观）        ← 全局不变，与 1 对 1 同串
  *   [system] 输出协议（行协议/活人感规则）  ← 全局不变，所有群共享前缀
  *   [system] 群信息（成员资料/关系/用户）    ← 每群稳定，改群设置才变
- *   [system] 群滚动摘要                       ← 每 2 条用户发言推进
+ *   [system] 群滚动摘要                       ← 每 N 条用户发言推进（默认 4，可配置 2~10）
  *   [user]   群聊天记录 transcript             ← append-only
  *   [user]   本轮指令（动态尾部）
  *
@@ -32,15 +32,39 @@ import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryReposit
 import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
+import { stripImagePromptLines } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
 
 export function groupConvId(groupId) { return `group_${groupId}`; }
 
-const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底：checkpoint 之后 transcript 超过此数触发边界推进
+const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底基准：checkpoint 之后 transcript 超过阈值触发边界推进（随配置轮次扩大）
 const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数（留出再增长空间，降低跳变频率）
 const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
 const IMAGE_NUDGE_PROBABILITY = 0.5;  // 每轮抽卡鼓励发图的概率
+
+/** 群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享；默认 4） */
+function getGroupSummaryInterval() {
+  const n = config.groupChat?.summaryInterval;
+  return Number.isInteger(n) ? Math.max(2, Math.min(10, n)) : 4;
+}
+
+/**
+ * 摘要未落库时保留 checkpoint 之后的完整聊天记录；若此前兜底已截断过，则尊重粘性边界。
+ */
+export function pickGroupTranscriptBoundary({ checkpointEndId = 0, summaryInterval, completedRounds, stickyBoundary = 0 } = {}) {
+  const summaryPending = completedRounds >= summaryInterval;
+  const afterId = summaryPending && stickyBoundary <= checkpointEndId
+    ? checkpointEndId
+    : Math.max(checkpointEndId, stickyBoundary);
+  return { afterId, summaryPending };
+}
+
+/** 摘要未落库时放宽兜底阈值到两倍，给摘要落库留时间。 */
+export function groupTranscriptCap(summaryPending, summaryInterval) {
+  const baseCap = Math.max(MAX_TRANSCRIPT_RAWS, summaryInterval * (MAX_ROUND_MESSAGES + 1));
+  return summaryPending ? baseCap * 2 : baseCap;
+}
 // ── 群聊记忆与召回统一使用 paimon 记忆 v2 ──
 
 // ── 群数据读取 ──
@@ -204,19 +228,6 @@ export function invalidateGroupTranscriptBoundary(groupId) {
   transcriptBoundaries.delete(groupConvId(groupId));
 }
 
-/**
- * transcript 中的生图行完全不回传（省 token，并避免模型照抄 prompt 或 {...} 占位符）。
- * 纯函数：同一 raw 输出稳定，不破坏 transcript 的 append-only 前缀缓存。
- */
-export function stripImagePromptLines(content) {
-  if (!content.includes('{')) return content;
-  return content.split('\n').map(line => {
-    const separator = line.match(/^\[?[^:：\[\]]{1,20}\]?\s*[:：]\s*(.*)$/);
-    const body = separator ? separator[1].trim() : line.trim();
-    if (!extractGroupImagePrompt(body)) return line;
-    return null;
-  }).filter(Boolean).join('\n');
-}
 
 /** 用户发言使用独占的只读标记，不再伪装成与角色相同的「名字: 台词」格式。 */
 export function formatGroupUserMessage(content, chatUserName = config.user.nickname || '用户') {
@@ -236,15 +247,28 @@ function buildTranscript(db, conversationId) {
     WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
     ORDER BY end_msg_id DESC, id DESC LIMIT 1
   `).get(conversationId);
-  // 边界取 checkpoint 与粘性边界中更靠后的一个（checkpoint 推进后自动接管）
-  let afterId = Math.max(checkpoint?.end_msg_id || 0, transcriptBoundaries.get(conversationId) || 0);
+  const checkpointEndId = checkpoint?.end_msg_id || 0;
+  const summaryInterval = getGroupSummaryInterval();
+  // 兜底：checkpoint 之后已凑满配置轮次，但摘要 checkpoint 还没推进，说明上一轮总结尚未落库。
+  // 此时必须保留 checkpoint 之后的完整聊天记录（前几轮完整对话 + 用户最新输入），不能提前滚动窗口。
+  const completedRounds = countCompletedGroupRoundsAfter(db, conversationId, checkpointEndId);
+  // 总结未落库时从 checkpoint 重带全量历史；若此前兜底已截断过，则尊重粘性边界避免无限增长。
+  const { afterId, summaryPending } = pickGroupTranscriptBoundary({
+    checkpointEndId,
+    summaryInterval,
+    completedRounds,
+    stickyBoundary: transcriptBoundaries.get(conversationId) || 0,
+  });
 
   const count = db.prepare(`
     SELECT COUNT(*) AS c FROM raw_messages
     WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
   `).get(conversationId, afterId).c;
 
-  if (count > MAX_TRANSCRIPT_RAWS) {
+  // 兜底阈值随配置轮次放大：保证在配置轮次内由记忆总结 checkpoint 正常推进；
+  // 总结未落库时放宽到两倍，给摘要落库留出时间，避免第 N+1 轮请求时提前截掉前 N 轮完整记录。
+  const maxTranscriptRaws = groupTranscriptCap(summaryPending, summaryInterval);
+  if (count > maxTranscriptRaws) {
     // 块状推进：跳过最旧的 (count - TRIM_KEEP_RAWS) 条，新边界 = 保留段第一条的前一条
     const skip = count - TRIM_KEEP_RAWS;
     const firstKept = db.prepare(`
@@ -355,21 +379,7 @@ function buildIdleContextBlock(group) {
 
 // ── 行协议解析 ──
 
-const LEGACY_IMG_LINE_RE = /\{["'“”]?prompt["'“”]?\s*:\s*["“]((?:[^"”\\]|\\.)*)["”]\s*\}/i;
-const DIRECT_IMG_LINE_RE = /^\{([\s\S]+)\}$/;
 const EMBEDDED_IMG_RE = /\{([^{}]*)\}/g;
-
-/** 提取群聊发图画面描述。新格式为 {description}，旧 JSON 格式仅用于历史兼容。 */
-export function extractGroupImagePrompt(body) {
-  const text = String(body || '').trim();
-  const legacy = text.match(LEGACY_IMG_LINE_RE);
-  if (legacy) return legacy[1].replace(/\\"/g, '"').trim() || null;
-
-  const direct = text.match(DIRECT_IMG_LINE_RE);
-  if (!direct) return null;
-  const prompt = direct[1].trim();
-  return prompt && !/^["'“”]?prompt["'“”]?\s*:/i.test(prompt) ? prompt : null;
-}
 
 /**
  * 兜底提取任意位置的 {...}。群聊协议将花括号保留给生图，因此即使模型把它
@@ -925,7 +935,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     await Promise.allSettled(imagePromises);
   }
 
-  // ── 后处理：用户轮次按两轮节奏整理 v2 记忆，同时推进群聊摘要 ──
+  // ── 后处理：用户轮次按配置轮次整理 v2 记忆，同时推进群聊摘要 ──
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {
@@ -940,7 +950,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
             characterName: '群聊记录',
             userName: chatUserName,
             triggerRole: 'user',
-            interval: 2,
+            interval: getGroupSummaryInterval(),
           });
         } catch (err) {
           console.error('[group] summarization error:', err.message);
@@ -981,11 +991,12 @@ export function isGroupPostProcessing(groupId) {
   return (groupPostProcessingCounts.get(Number(groupId)) || 0) > 0;
 }
 
-/** 每累计 2 轮用户发言，使用 v2 checkpoint 增量整理群聊 raw。 */
+/** 每累计配置轮次用户发言，使用 v2 checkpoint 增量整理群聊 raw。 */
 async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {}) {
   if (!config.features.memory) return;
   const db = getDb();
   const conversationId = groupConvId(group.id);
+  const summaryInterval = getGroupSummaryInterval();
 
   if (incrementUserRound) {
     db.prepare(`
@@ -1000,7 +1011,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
     SELECT COALESCE(rag_user_rounds_pending, 0) AS pendingRounds
     FROM group_chats WHERE id = ?
   `).get(group.id);
-  if (!initialState || initialState.pendingRounds < 2) return;
+  if (!initialState || initialState.pendingRounds < summaryInterval) return;
 
   groupMemoryExtractionRunning.add(group.id);
   try {
@@ -1009,7 +1020,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
         SELECT COALESCE(rag_user_rounds_pending, 0) AS pendingRounds
         FROM group_chats WHERE id = ?
       `).get(group.id);
-      if (!groupState || groupState.pendingRounds < 2) break;
+      if (!groupState || groupState.pendingRounds < summaryInterval) break;
 
       const checkpoint = getCheckpoint(conversationId);
       const endRow = db.prepare(`

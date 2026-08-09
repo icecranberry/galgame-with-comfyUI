@@ -289,7 +289,7 @@ router.post('/:id/chat', async (req, res) => {
   const group = getGroupWithMembers(groupId);
   if (!group) return res.status(404).json({ error: '群不存在' });
 
-  // 开启本轮 LLM 调用统计（剧本生成 + 生图 prompt + 每两轮用户发言一次的历史摘要）
+  // 开启本轮 LLM 调用统计（剧本生成 + 生图 prompt + 按配置轮次推进的历史摘要）
   beginTurn(groupConvId(groupId));
 
   res.writeHead(200, {

@@ -1376,6 +1376,7 @@ const SETTING_TO_CONFIG = {
   feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
+  group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
   weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
   compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
   compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
