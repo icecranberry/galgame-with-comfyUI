@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>邻舍桥接 · 人格管理</title>
+<style>
+  :root {
+    color-scheme: light;
+    --retro-paper: #f6ecd6;
+    --retro-paper-deep: #eedabc;
+    --retro-paper-soft: #faf3e2;
+    --retro-ink: #0a4550;
+    --retro-ink-soft: rgb(13 70 80 / 0.68);
+    --retro-rust: #c24d24;
+    --retro-rust-dark: #913a1d;
+    --retro-gold: #c99a3e;
+    --retro-success: #16a34a;
+    --retro-danger: #b4232f;
+    --retro-line: rgb(13 70 80 / 0.82);
+    --retro-stroke: 2px;
+    --retro-recessed: rgb(73 48 22 / 0.05);
+    --retro-shadow: rgb(73 48 22 / 0.12);
+    --retro-font: 'MaiRetroText', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+    --retro-paper-texture: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22180%22%20height%3D%22180%22%20viewBox%3D%220%200%20180%20180%22%3E%3Cfilter%20id%3D%22n%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%221.05%22%20numOctaves%3D%224%22%20seed%3D%2211%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22%20opacity%3D%220.3%22%2F%3E%3Cg%20fill%3D%22%23c24d24%22%20opacity%3D%220.16%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2221%22%20r%3D%220.7%22%2F%3E%3Ccircle%20cx%3D%2267%22%20cy%3D%2243%22%20r%3D%220.55%22%2F%3E%3Ccircle%20cx%3D%22139%22%20cy%3D%2216%22%20r%3D%220.65%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+    --retro-paper-brightness: linear-gradient(rgb(255 252 242 / 0.24), rgb(255 252 242 / 0.24));
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --retro-paper: #16100a;
+      --retro-paper-deep: #201811;
+      --retro-paper-soft: #2a211a;
+      --retro-ink: #d2c0a9;
+      --retro-ink-soft: rgb(210 192 169 / 0.6);
+      --retro-rust: #c04d27;
+      --retro-rust-dark: #b86f4a;
+      --retro-gold: #9f8450;
+      --retro-success: #4ade80;
+      --retro-danger: #f87171;
+      --retro-line: rgb(210 192 169 / 0.38);
+      --retro-stroke: 1.25px;
+      --retro-recessed: rgb(210 192 169 / 0.04);
+    --retro-shadow: rgb(0 0 0 / 0.18);
+      --retro-paper-texture: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22180%22%20height%3D%22180%22%20viewBox%3D%220%200%20180%20180%22%3E%3Cfilter%20id%3D%22n%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%221.05%22%20numOctaves%3D%224%22%20seed%3D%2211%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22%20opacity%3D%220.3%22%2F%3E%3Cg%20fill%3D%22%23c04d27%22%20opacity%3D%220.16%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2221%22%20r%3D%220.7%22%2F%3E%3Ccircle%20cx%3D%2267%22%20cy%3D%2243%22%20r%3D%220.55%22%2F%3E%3Ccircle%20cx%3D%22139%22%20cy%3D%2216%22%20r%3D%220.65%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+      --retro-paper-brightness: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scrollbar-gutter: stable; }
+  body {
+    margin: 0;
+    padding: 28px;
+    font-family: var(--retro-font);
+    background-color: var(--retro-paper);
+    background-image: var(--retro-paper-brightness), var(--retro-paper-texture);
+    background-size: auto, 180px 180px;
+    background-attachment: fixed;
+    color: var(--retro-ink);
+    line-height: 1.6;
+  }
+  ::selection { background: var(--retro-rust); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--retro-paper-deep); }
+  ::-webkit-scrollbar-thumb { background: var(--retro-ink); border: 2px solid var(--retro-paper-deep); border-radius: 0; }
+
+  .page-head {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+    padding-bottom: 14px;
+    border-bottom: var(--retro-stroke) solid var(--retro-ink);
+  }
+  .page-head::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    height: 1px;
+    background: var(--retro-line);
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: 0;
+    margin: 0 0 4px;
+    line-height: 1.2;
+  }
+  .subtitle { color: var(--retro-ink-soft); font-size: 13px; margin: 0; }
+  .back-link {
+    color: var(--retro-rust);
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .back-link:hover { text-decoration: underline; }
+
+  section {
+    position: relative;
+    isolation: isolate;
+    border: var(--retro-stroke) solid var(--retro-ink);
+    border-radius: 0;
+    background: var(--retro-paper-soft);
+    padding: 18px 20px 20px;
+    margin-bottom: 18px;
+    box-shadow: 4px 4px 0 var(--retro-shadow);
+  }
+  section::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 8px;
+    background: var(--retro-ink);
+  }
+  section::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0 0 18px 18px;
+    border-color: transparent transparent var(--retro-ink) transparent;
+    pointer-events: none;
+  }
+  section > * { position: relative; z-index: 1; }
+
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 0 0 14px;
+  }
+  h2::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    background: var(--retro-rust);
+    transform: rotate(45deg);
+  }
+  h3 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 18px 0 8px;
+  }
+
+  label {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    margin: 9px 0;
+    font-size: 13px;
+  }
+  /* Keep form labels in a consistent column while allowing controls to grow. */
+  label.flag-label { display: flex; }
+  label > input[type="text"],
+  label > input[type="password"],
+  label > input[type="number"] {
+    flex: 1;
+    min-width: 0;
+  }
+  label > input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--retro-rust);
+  }
+
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  textarea {
+    background: var(--retro-paper);
+    color: var(--retro-ink);
+    border: var(--retro-stroke) solid var(--retro-line);
+    border-radius: 2px;
+    padding: 8px 10px;
+    font-size: 13px;
+    width: 100%;
+    font-family: inherit;
+    box-shadow: none;
+  }
+  input::placeholder,
+  textarea::placeholder { color: var(--retro-ink-soft); opacity: 0.55; }
+  input:focus,
+  textarea:focus {
+    outline: 2px solid var(--retro-gold);
+    outline-offset: 0;
+    border-color: var(--retro-ink);
+  }
+  .select-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+    /* 下拉框样式对齐 MaiBot「推理过程」页（future-retro 主题）的 shadcn Select：纸张底菜单、金色选中项、复古边框、无阴影 */
+  .select-trigger {
+    appearance: none;
+    -webkit-appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    height: 36px;
+    margin: 0;
+    background-color: var(--retro-recessed);
+    color: var(--retro-ink);
+    border: var(--retro-stroke) solid var(--retro-line);
+    border-radius: 2px;
+    padding: 0 12px;
+    font-size: 13px;
+    width: 100%;
+    font-family: inherit;
+    box-shadow: none;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .select-trigger:hover,
+  .select-trigger:focus {
+    background-color: var(--retro-recessed);
+    color: var(--retro-ink);
+    border-color: var(--retro-line);
+    box-shadow: none;
+    outline: none;
+  }
+  .select-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .select-chevron {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    opacity: 0.5;
+  }
+  .select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 100%;
+    z-index: 999;
+    border: var(--retro-stroke) solid var(--retro-line);
+    border-radius: 8px;
+    background-color: var(--retro-paper);
+    background-image: var(--retro-paper-brightness), var(--retro-paper-texture);
+    background-size: auto, 165px 165px;
+    color: var(--retro-ink);
+    padding: 4px;
+    max-height: 260px;
+    overflow: auto;
+    box-shadow: none;
+  }
+  .select-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    border-radius: 2px;
+    padding: 8px 32px 8px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .select-option:hover,
+  .select-option:focus-visible { background: var(--retro-gold); color: var(--retro-paper-deep); outline: none; }
+  .select-option.selected { font-weight: 500; }
+  .select-option .select-check {
+    position: absolute;
+    right: 8px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: currentColor;
+  }
+  .select-option.selected .select-check { display: flex; }
+
+  label.select-open { z-index: 40; }label.select-open { z-index: 40; }
+  /* section 设了 isolation: isolate，会把内部 z-index 困在本节内；菜单打开时把整节抬到后续节之上 */
+  section.select-open { z-index: 40; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row input, .row .select-wrap { flex: 1; }
+
+  button {
+    background: var(--retro-paper-deep);
+    color: var(--retro-ink);
+    border: var(--retro-stroke) solid var(--retro-ink);
+    border-radius: 2px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 10px;
+    transition: background .15s, color .15s;
+  }
+  .row button { margin-top: 0; }
+  button:hover { background: var(--retro-ink); color: var(--retro-paper-soft); }
+  button.primary { background: var(--retro-rust); border-color: var(--retro-rust-dark); color: #fdf3e2; }
+  button.primary:hover { background: var(--retro-rust-dark); color: #fff; }
+  button.danger { background: transparent; border-color: var(--retro-danger); color: var(--retro-danger); }
+  button.danger:hover { background: var(--retro-danger); color: #fff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .box {
+    background: var(--retro-recessed);
+    border: 1px solid var(--retro-line);
+    border-radius: 2px;
+    padding: 12px;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow: auto;
+    margin: 8px 0;
+  }
+  .box.empty { color: var(--retro-ink-soft); font-style: italic; }
+
+  details {
+    margin-top: 12px;
+    border-top: 1px dashed var(--retro-line);
+    padding-top: 12px;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--retro-rust);
+    user-select: none;
+  }
+  summary:hover { text-decoration: underline; }
+  details[open] summary { color: var(--retro-ink); }
+
+  .hint { color: var(--retro-ink-soft); font-size: 12px; margin: 6px 0 0; }
+  .flag-hint { margin-top: 12px; }
+  .flag-hint b { color: var(--retro-rust); }
+  .flag-card {
+    position: relative;
+    border: var(--retro-stroke) solid var(--retro-gold);
+    background: var(--retro-paper);
+    padding: 12px 14px;
+    margin: 12px 0;
+    box-shadow: 3px 3px 0 var(--retro-shadow);
+  }
+  .flag-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 6px;
+    background: var(--retro-gold);
+  }
+  .flag-card label { margin: 0; }
+  .flag-card .hint { margin-top: 8px; }
+  .flag-switch {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    accent-color: var(--retro-rust);
+  }
+  .persona-warn { border-color: var(--retro-rust); }
+  .persona-warn::before { background: var(--retro-rust); }
+  .persona-warn .warn-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--retro-rust); }
+  .persona-warn .hint { margin-top: 0; }
+
+  #status {
+    position: fixed;
+    left: 50%;
+    top: 20px;
+    transform: translateX(-50%);
+    z-index: 20;
+    padding: 10px 14px;
+    border-radius: 2px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--retro-paper-soft);
+    border: var(--retro-stroke) solid var(--retro-ink);
+    box-shadow: 4px 4px 0 var(--retro-shadow);
+    color: var(--retro-ink);
+    opacity: 0;
+    transition: opacity .2s;
+    max-width: 60vw;
+  }
+  #status.show { opacity: 1; }
+  #status.ok { border-color: var(--retro-success); color: var(--retro-success); }
+  #status.err { border-color: var(--retro-rust); color: var(--retro-rust); }
+
+
+  @media (max-width: 640px) {
+    body { padding: 16px; }
+    h1 { font-size: 20px; }
+    label:not(.flag-label) {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="page-head">
+  <div>
+    <h1>邻舍桥接 · 人格管理</h1>
+    <p class="subtitle">管理注入到 MaiBot 主聊天流的人格信息（base_prompt / 风格 / 记忆）与全部插件参数。</p>
+  </div>
+  <a class="back-link" id="back-link" href="http://127.0.0.1:8001/" target="_blank">返回 MaiBot WebUI ↗</a>
+</div>
+<div id="status"></div>
+
+
+
+<section>
+  <h2>① 插件配置</h2>
+  <label>邻舍服务地址
+    <input type="text" id="base-url" placeholder="http://127.0.0.1:3099">
+  </label>
+  <label>注入角色
+    <span class="select-wrap" id="character-select">
+      <button type="button" class="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="注入角色">
+        <span class="select-label">（加载中…）</span>
+      <span class="select-chevron" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </button>
+      <div class="select-menu" role="listbox" hidden></div>
+    </span>
+  </label>
+  <p class="hint flag-hint">桥接<b>默认开启</b>，人格注入与行为 / 表达风格提炼为<b>始终开启</b>：每次回复都会把 system 人格整条替换为所选角色的 base_prompt，并由 LLM 依据 base_prompt 生成行为风格与表达风格一并注入请求，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。</p>
+  <div class="flag-card">
+    <label class="flag-label">
+      <input type="checkbox" id="memory-curation" class="flag-switch">
+      <span><b>启用对话记忆摘要（同步回邻舍）</b></span>
+    </label>
+    <p class="hint">每 40 句真实聊天内容整理一份摘要，注入 MaiBot 主聊天流历史，并同步回邻舍；关闭后不再整理，并删除已保存的记忆摘要。</p>
+  </div>
+  <label>配图模式
+    <span class="select-wrap" id="image-mode-select">
+      <button type="button" class="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="配图模式">
+        <span class="select-label">auto（由邻舍判断）</span>
+      <span class="select-chevron" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </button>
+      <div class="select-menu" role="listbox" hidden></div>
+    </span>
+  </label>
+  <details>
+    <summary>高级参数</summary>
+    <label>传给邻舍判断的上下文条数
+      <input type="number" id="context-max-messages" min="1" step="1">
+    </label>
+    <label>生图任务轮询间隔（秒）
+      <input type="number" id="poll-interval" min="0.5" step="0.5">
+    </label>
+    <label>生图任务轮询超时（秒）
+      <input type="number" id="poll-timeout" min="10" step="10">
+    </label>
+  </details>
+</section>
+
+<section>
+  <h2>② 人格信息</h2>
+  <div class="flag-card persona-warn">
+    <p class="warn-title">⚠ 人格覆盖提示</p>
+    <p class="hint">启用桥接后，所选角色的 <b>人格卡片</b> 将<b>整条临时覆盖</b> MaiBot 当前 system 人格（覆盖MaiBot设置里的「人格设定」）；提炼的<b>行为风格 / 表达风格</b>也会作为请求指令注入，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。<b>不改变MaiBot原有人格，仅做临时替换</b></p>
+  </div>
+  <p class="hint">以下三项数据保存在插件本地，不写入邻舍数据库，按角色独立；修改后点「保存到插件本地」立即生效，点「重新提炼并保存」会依据当前 base_prompt 重新生成行为/表达风格并保存；切换角色时若该角色还没有行为/表达风格，会自动提炼并保存。</p>
+  <label>人格卡片
+    <textarea id="base-prompt-input" rows="20"></textarea>
+  </label>
+  <label>行为风格
+    <textarea id="behavior-style-input" rows="3"></textarea>
+  </label>
+  <label>表达风格
+    <textarea id="reply-style-input" rows="3"></textarea>
+  </label>
+  <div class="row">
+    <button id="btn-derive" class="primary">重新提炼风格</button>
+    <button id="btn-save-persona" class="primary">保存</button>
+  </div>
+</section>
+
+<section>
+  <h2>③ 最新记忆整理</h2>
+  <p class="hint">只保留一份最新记忆，插件注入时也只带回去这一条；这里直接展示最近更新的一份，无需手动查询。</p>
+  <div id="memory" class="box empty">（加载中…）</div>
+  <div class="row">
+    <button id="btn-memory-del" class="danger" disabled>删除该记忆摘要</button>
+  </div>
+</section>
+
+<section>
+  <h2>④ 连接设置</h2>
+  <label>WebUI Token
+    <input type="password" id="webui-token" placeholder="填写 MaiBot WebUI 的访问 Token">
+  </label>
+  <div class="row">
+    <button id="btn-save-settings" class="primary">保存连接设置</button>
+    <button id="btn-test">测试连接</button>
+  </div>
+  <p class="hint">WebUI 地址固定为本机 8001 端口，无需配置；Token 只保存在邻舍本地数据库，用于代你调用 MaiBot WebUI 接口修改插件配置与人格数据。</p>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+let statusTimer = null;
+function showStatus(text, ok = true) {
+  statusEl.textContent = text;
+  statusEl.className = "show " + (ok ? "ok" : "err");
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => { statusEl.className = ""; }, 3500);
+}
+async function api(path, options = {}) {
+  const headers = {};
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(path, { ...options, headers, body: options.body !== undefined ? JSON.stringify(options.body) : undefined });
+  let data = null;
+  try { data = await response.json(); } catch (_) { data = null; }
+  if (!response.ok) {
+    throw new Error((data && data.error) || ("HTTP " + response.status));
+  }
+  return data;
+}
+
+let characters = [];
+let personaData = { characters: {} };
+let pluginConfig = null;
+let latestMemorySessionId = null;
+
+function mountSelect(wrap, { placeholder = "", onChange = null } = {}) {
+  const trigger = wrap.querySelector(".select-trigger");
+  const label = wrap.querySelector(".select-label");
+  const menu = wrap.querySelector(".select-menu");
+  const optionByValue = new Map();
+  let items = [];
+  let value = "";
+
+  function refresh() {
+    items.forEach((item) => {
+      const option = optionByValue.get(item.value);
+      if (option) option.classList.toggle("selected", item.value === value);
+    });
+    const current = items.find((item) => item.value === value);
+    label.textContent = current ? current.text : placeholder;
+  }
+
+  function render(list) {
+    items = list || [];
+    optionByValue.clear();
+    menu.innerHTML = "";
+    items.forEach((item) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "select-option";
+      option.dataset.value = item.value;
+      option.setAttribute("role", "option");
+      const text = document.createElement("span");
+      text.className = "select-text";
+      text.textContent = item.text;
+      const check = document.createElement("span");
+      check.className = "select-check";
+      check.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+      option.append(text, check);
+      option.addEventListener("click", () => { setValue(item.value); close(); trigger.focus(); });
+      optionByValue.set(item.value, option);
+      menu.appendChild(option);
+    });
+    refresh();
+  }
+
+  function setValue(next, fireChange = true) {
+    value = next;
+    refresh();
+    if (fireChange && onChange) onChange(next);
+  }
+  function getValue() { return value; }
+  function setOpenState(isOpen) {
+    menu.hidden = !isOpen;
+    trigger.setAttribute("aria-expanded", String(isOpen));
+    wrap.classList.toggle("select-open", isOpen);
+    const host = wrap.closest("label");
+    if (host) host.classList.toggle("select-open", isOpen);
+    const sectionHost = wrap.closest("section");
+    if (sectionHost) {
+      // 同一节内可能有多个下拉框，任一菜单仍打开时都要保持整节抬升，避免互相把类摘掉
+      const anyOpen = [...sectionHost.querySelectorAll(".select-menu")].some((menuEl) => !menuEl.hidden);
+      sectionHost.classList.toggle("select-open", anyOpen);
+    }
+  }
+  function open() { setOpenState(true); }
+  function close() { setOpenState(false); }
+
+  trigger.addEventListener("click", () => (menu.hidden ? open() : close()));
+  document.addEventListener("click", (event) => { if (!wrap.contains(event.target)) close(); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) { close(); trigger.focus(); }
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (menu.hidden) { open(); return; }
+    const options = Array.from(menu.querySelectorAll(".select-option"));
+    if (!options.length) return;
+    if (event.key === "ArrowDown") options[0].focus();
+    else if (event.key === "ArrowUp") options[options.length - 1].focus();
+  });
+  menu.addEventListener("keydown", (event) => {
+    const options = Array.from(menu.querySelectorAll(".select-option"));
+    if (!options.length) return;
+    const index = options.indexOf(document.activeElement);
+    if (event.key === "ArrowDown") { event.preventDefault(); options[(index + 1) % options.length].focus(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); options[(index - 1 + options.length) % options.length].focus(); }
+    else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (document.activeElement && document.activeElement.classList.contains("select-option")) {
+        document.activeElement.click();
+      }
+    }
+  });
+
+  refresh();
+  return { render, setValue, getValue, open, close };
+}
+
+function onCharacterChange() {
+  savePluginConfig();
+  renderSavedStyles();
+  // 切换角色后重新拉取插件本地数据，展示该角色已保存/提炼的最新内容
+  loadPersona().then(maybeAutoDerive);
+}
+const characterSelect = mountSelect($("character-select"), { placeholder: "（未选择角色）", onChange: onCharacterChange });
+const imageSelect = mountSelect($("image-mode-select"), { placeholder: "auto（由邻舍判断）", onChange: () => savePluginConfig() });
+imageSelect.render([
+  { value: "auto", text: "auto（由邻舍判断）" },
+  { value: "off", text: "off（关闭配图）" },
+  { value: "always", text: "always（总是配图）" },
+]);
+imageSelect.setValue("auto", false);
+
+async function loadAll() {
+  try {
+    const settings = await api("/api/maibot/webui-settings");
+    $("webui-token").value = settings.token || "";
+    $("back-link").href = "http://127.0.0.1:8001/";
+  } catch (err) { showStatus("读取连接设置失败: " + err.message, false); }
+
+  try {
+    const chars = await api("/api/maibot/characters");
+    characters = chars.characters || [];
+    // 角色列表按显示名称首字母（拼音）排序
+    const collator = new Intl.Collator("zh-Hans-CN-u-co-pinyin", { sensitivity: "base" });
+    const sortedCharacters = characters.slice().sort((a, b) =>
+      collator.compare(a.display_name || a.name, b.display_name || b.name)
+    );
+    characterSelect.render(sortedCharacters.map((c) => ({ value: c.name, text: c.display_name || c.name })));
+  } catch (err) { showStatus("读取邻舍角色失败: " + err.message, false); }
+
+  try {
+    await loadConfig();
+  } catch (err) { showStatus("读取插件配置失败: " + err.message + "（请先配置连接设置）", false); }
+
+  await loadPersona();
+  maybeAutoDerive();
+
+  await loadLatestMemory();
+}
+
+async function loadPersona() {
+  try {
+    const data = await api("/api/maibot/plugin-persona");
+    personaData = (data && data.characters) ? { characters: data.characters } : { characters: {} };
+  } catch (err) {
+    showStatus("读取插件本地人格数据失败: " + err.message, false);
+  }
+  renderSavedStyles();
+}
+
+async function loadConfig() {
+  const data = await api("/api/maibot/plugin-config");
+  pluginConfig = data.config || {};
+  const plugin = pluginConfig.plugin || {};
+  const bridge = pluginConfig.bridge || {};
+  const memory = pluginConfig.memory || {};
+  const image = pluginConfig.image || {};
+  $("base-url").value = bridge.base_url || "http://127.0.0.1:3099";
+  const charName = bridge.character_name || "";
+  if (charName) {
+    const byName = characters.find((c) => c.name === charName);
+    characterSelect.setValue(byName ? byName.name : "", false);
+  }
+  $("memory-curation").checked = memory.memory_curation !== false;
+  if (image.image_mode) imageSelect.setValue(image.image_mode, false);
+  $("context-max-messages").value = image.context_max_messages ?? 12;
+  $("poll-interval").value = image.poll_interval_sec ?? 2;
+  $("poll-timeout").value = image.poll_timeout_sec ?? 180;
+}
+
+function currentPersonaEntry() {
+  const char = selectedCharacter();
+  if (!char) return null;
+  return (personaData.characters || {})[char.name] || {};
+}
+
+function renderSavedStyles() {
+  const char = selectedCharacter();
+  if (!char) return;
+  const entry = currentPersonaEntry() || {};
+  $("base-prompt-input").value = (entry.base_prompt || "").trim() || char.base_prompt || "";
+  $("behavior-style-input").value = (entry.behavior_style || "").trim();
+  $("reply-style-input").value = (entry.reply_style || "").trim();
+}
+
+function selectedCharacter() {
+  return characters.find((c) => c.name === characterSelect.getValue()) || null;
+}
+
+function effectiveBasePrompt() {
+  const char = selectedCharacter();
+  if (!char) return "";
+  const entry = (personaData.characters || {})[char.name] || {};
+  return (entry.base_prompt || "").trim() || char.base_prompt || "";
+}
+
+$("btn-save-settings").addEventListener("click", async () => {
+  try {
+    await api("/api/maibot/webui-settings", {
+      method: "POST",
+      body: { token: $("webui-token").value.trim() },
+    });
+    showStatus("连接设置已保存");
+  } catch (err) { showStatus("保存失败: " + err.message, false); }
+});
+
+$("btn-test").addEventListener("click", async () => {
+  try {
+    await api("/api/maibot/webui-settings", {
+      method: "POST",
+      body: { token: $("webui-token").value.trim() },
+    });
+    await api("/api/maibot/plugin-config");
+    showStatus("连接成功，已读取插件配置");
+    await loadConfig();
+  } catch (err) { showStatus("连接失败: " + err.message, false); }
+});
+
+// 插件配置改动即存：任一字段变化时直接 PUT，成功后不提示，失败时在状态栏展示错误
+let pluginConfigSaving = false;
+let pluginConfigSaveAgain = false;
+function buildPluginConfigBody() {
+  return {
+    config: {
+      plugin: { enabled: true },
+      bridge: {
+        base_url: $("base-url").value.trim() || "http://127.0.0.1:3099",
+        character_name: characterSelect.getValue(),
+      },
+      memory: { memory_curation: $("memory-curation").checked },
+      image: {
+        image_mode: imageSelect.getValue(),
+        context_max_messages: Math.max(Number($("context-max-messages").value) || 12, 1),
+        poll_interval_sec: Math.max(Number($("poll-interval").value) || 2, 0.5),
+        poll_timeout_sec: Math.max(Number($("poll-timeout").value) || 180, 10),
+      },
+    },
+  };
+}
+async function savePluginConfig() {
+  if (pluginConfigSaving) { pluginConfigSaveAgain = true; return; }
+  pluginConfigSaving = true;
+  try {
+    await api("/api/maibot/plugin-config", { method: "PUT", body: buildPluginConfigBody() });
+  } catch (err) {
+    showStatus("插件配置保存失败: " + err.message, false);
+  } finally {
+    pluginConfigSaving = false;
+    if (pluginConfigSaveAgain) { pluginConfigSaveAgain = false; savePluginConfig(); }
+  }
+}
+["base-url", "context-max-messages", "poll-interval", "poll-timeout"].forEach((id) => {
+  $(id).addEventListener("change", savePluginConfig);
+});
+$("memory-curation").addEventListener("change", savePluginConfig);
+
+async function savePersona(characterName, entry) {
+  const payload = { character_name: characterName };
+  if (entry.base_prompt !== undefined) payload.base_prompt = entry.base_prompt;
+  if (entry.behavior_style !== undefined) payload.behavior_style = entry.behavior_style;
+  if (entry.reply_style !== undefined) payload.reply_style = entry.reply_style;
+  await api("/api/maibot/plugin-persona", { method: "PUT", body: payload });
+  if (!personaData.characters) personaData.characters = {};
+  const existing = personaData.characters[characterName] || {};
+  personaData.characters[characterName] = { ...existing, ...entry };
+}
+
+// 提炼并保存：调用邻舍 derive-style 生成行为/表达风格，并写入插件本地 persona_store.json
+async function deriveAndSave(characterName, basePrompt) {
+  const data = await api("/api/maibot/derive-style", { method: "POST", body: { base_prompt: basePrompt } });
+  const entry = {
+    base_prompt: basePrompt.trim(),
+    behavior_style: data.behavior_style || "",
+    reply_style: data.reply_style || "",
+  };
+  await savePersona(characterName, entry);
+  return entry;
+}
+
+async function derive() {
+  const char = selectedCharacter();
+  const base = effectiveBasePrompt();
+  if (!base) { showStatus("没有可提炼的 base_prompt", false); return; }
+  showStatus("正在提炼行为 / 表达风格…");
+  const prevBehavior = $("behavior-style-input").value;
+  const prevReply = $("reply-style-input").value;
+  $("behavior-style-input").value = "正在提炼行为风格…";
+  $("reply-style-input").value = "正在提炼表达风格…";
+  try {
+    const entry = await deriveAndSave(char.name, $("base-prompt-input").value.trim() || base);
+    if (selectedCharacter() && selectedCharacter().name === char.name) {
+      $("behavior-style-input").value = entry.behavior_style;
+      $("reply-style-input").value = entry.reply_style;
+    }
+    showStatus("已重新提炼并保存到插件本地");
+  } catch (err) {
+    if (selectedCharacter() && selectedCharacter().name === char.name) {
+      $("behavior-style-input").value = prevBehavior;
+      $("reply-style-input").value = prevReply;
+    }
+    showStatus("提炼失败: " + err.message, false);
+  }
+}
+$("btn-derive").addEventListener("click", derive);
+
+// 自动提炼：切换/选中角色时，若缺少行为/表达风格，自动依据 base_prompt 提炼并保存
+const autoDeriveInFlight = new Set();
+async function maybeAutoDerive() {
+  const char = selectedCharacter();
+  if (!char) return;
+  const base = effectiveBasePrompt();
+  if (!base) return;
+  const entry = (personaData.characters || {})[char.name] || {};
+  if ((entry.behavior_style || "").trim() && (entry.reply_style || "").trim()) return;
+  if (autoDeriveInFlight.has(char.name)) return;
+  autoDeriveInFlight.add(char.name);
+  const isCurrent = () => selectedCharacter() && selectedCharacter().name === char.name;
+  const prevBehavior = $("behavior-style-input").value;
+  const prevReply = $("reply-style-input").value;
+  if (isCurrent()) {
+    $("behavior-style-input").value = "正在自动提炼行为风格…";
+    $("reply-style-input").value = "正在自动提炼表达风格…";
+  }
+  showStatus("正在为「" + (char.display_name || char.name) + "」自动提炼行为 / 表达风格…");
+  try {
+    const derived = await deriveAndSave(char.name, base);
+    if (isCurrent()) {
+      $("behavior-style-input").value = derived.behavior_style;
+      $("reply-style-input").value = derived.reply_style;
+      showStatus("已自动提炼并保存到插件本地");
+    }
+  } catch (err) {
+    if (isCurrent()) {
+      $("behavior-style-input").value = prevBehavior;
+      $("reply-style-input").value = prevReply;
+    }
+    showStatus("自动提炼失败: " + err.message, false);
+  } finally {
+    autoDeriveInFlight.delete(char.name);
+  }
+}
+
+$("btn-save-persona").addEventListener("click", async () => {
+  const char = selectedCharacter();
+  if (!char) { showStatus("请先选择角色", false); return; }
+  if (autoDeriveInFlight.has(char.name)) { showStatus("该角色正在自动提炼中，请稍候再保存", false); return; }
+  try {
+    const entry = {
+      base_prompt: $("base-prompt-input").value.trim(),
+      behavior_style: $("behavior-style-input").value.trim(),
+      reply_style: $("reply-style-input").value.trim(),
+    };
+    await savePersona(char.name, entry);
+    renderSavedStyles();
+    showStatus("已保存到插件本地（persona_store.json）");
+  } catch (err) { showStatus("保存失败: " + err.message, false); }
+});
+
+async function loadLatestMemory() {
+  try {
+    const data = await api("/api/maibot/latest-memory");
+    latestMemorySessionId = data.session_id || null;
+    $("btn-memory-del").disabled = !latestMemorySessionId;
+    if (data.content) {
+      $("memory").textContent = data.content + "\n\n（更新于 " + (data.updated_at || "-") + "）";
+      $("memory").classList.remove("empty");
+    } else {
+      $("memory").textContent = "（暂无记忆整理）";
+      $("memory").classList.add("empty");
+    }
+  } catch (err) { showStatus("读取最新记忆失败: " + err.message, false); }
+}
+
+$("btn-memory-del").addEventListener("click", async () => {
+  if (!latestMemorySessionId) { showStatus("当前没有可删除的记忆摘要", false); return; }
+  try {
+    const data = await api("/api/maibot/latest-memory?session_id=" + encodeURIComponent(latestMemorySessionId), { method: "DELETE" });
+    showStatus("已删除 " + data.deleted + " 条记忆摘要");
+    await loadLatestMemory();
+  } catch (err) { showStatus("删除失败: " + err.message, false); }
+});
+
+loadAll();
+</script>
+</body>
+</html>

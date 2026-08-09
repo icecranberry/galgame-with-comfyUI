@@ -48,6 +48,14 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+
+    -- MaiBot 桥接：最新一份记忆整理（覆盖式，供 MaiBot 主聊天流注入）
+    CREATE TABLE IF NOT EXISTS maibot_latest_memory (
+      session_id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 记忆碎片表（事实/偏好/情绪）
     CREATE TABLE IF NOT EXISTS memory_fragments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1324,6 +1332,8 @@ const DB_ONLY_KEYS = new Set([
   'active_llm_profile_id',
   'memory_settings',
   'workflow_mode_auto_detected',
+  'maibot_webui_url',
+  'maibot_webui_token',
 ]);
 
 /** 写入单条系统设置 */
@@ -1518,6 +1528,7 @@ function migrateHandwritingFont(db) {
     console.log('[db] migrateHandwritingFont error:', err.message);
   }
 }
+
 
 function migrateOathSchema(db) {
   try {

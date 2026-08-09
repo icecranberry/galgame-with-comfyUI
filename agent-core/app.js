@@ -23,6 +23,7 @@ import scheduleRoutes from './src/routes/schedule.js';
 import workflowsRoutes from './src/routes/workflows.js';
 import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
+import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
@@ -87,6 +88,7 @@ app.use('/api/workflows', workflowsRoutes);
 app.use('/api/mailbox', mailboxRoutes);
 app.use('/api/groups', groupsRoutes);
 
+app.use('/api/maibot', maibotBridgeRoutes);
 // 健康检查
 app.get('/api/health', async (req, res) => {
   const vectorOk = await vectorHealth();
