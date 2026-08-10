@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -215,6 +215,15 @@ router.put('/llm', (req, res) => {
   syncActiveLlmProfile();
 
   res.json({ ok: true, ...getLlmConfig() });
+});
+
+// GET /api/config/llm/key — 获取当前 LLM API Key（前端复制用）
+router.get('/llm/key', (_req, res) => {
+  const apiKey = getLlmApiKey();
+  if (!apiKey) {
+    return res.status(404).json({ ok: false, error: '未设置 API Key' });
+  }
+  res.json({ ok: true, apiKey });
 });
 
 // POST /api/config/llm/models — 从 OpenAI-compatible 接口获取可用模型

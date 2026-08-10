@@ -238,7 +238,7 @@ export function updateGroupSummaryInterval(value) {
   return n;
 }
 
-export function getLlmConfig() {
+function resolveLlmApiKey() {
   // 实时读取 .env 中的 API Key（兼容用户手动编辑 .env 不重启的场景）
   let envKey = '';
   try {
@@ -249,7 +249,15 @@ export function getLlmConfig() {
     }
   } catch {}
   // 优先用内存值（可能通过 UI 刚保存但还没写盘），回退到 .env 文件值
-  const key = config.llm.apiKey || envKey || '';
+  return config.llm.apiKey || envKey || '';
+}
+
+export function getLlmApiKey() {
+  return resolveLlmApiKey();
+}
+
+export function getLlmConfig() {
+  const key = resolveLlmApiKey();
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
   return {
     provider: config.llm.provider,

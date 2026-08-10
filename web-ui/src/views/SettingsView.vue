@@ -225,13 +225,14 @@
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
             @input="markLlmDirty"
           />
+          <button class="sp-btn-small" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</button>
           <button class="sp-btn-small" style="flex-shrink:0" @click="showApiKey = !showApiKey">
             {{ showApiKey ? '隐藏' : '显示' }}
           </button>
         </div>
         <div v-if="llmPreview.hasApiKey" class="key-status">
           <span class="key-ok">🔑 当前:</span>
-          <code class="key-preview">{{ llmPreview.preview }}</code>
+          <code class="key-preview" role="button" tabindex="0" title="点击复制完整 API Key" @click="copyLlmApiKey" @keydown.enter="copyLlmApiKey">{{ llmPreview.preview }}</code>
         </div>
         <div v-else class="key-status key-missing">⚠️ 未设置，AI 对话功能不可用</div>
 
@@ -759,7 +760,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, fetchLlmModels, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -997,6 +998,45 @@ const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text)
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return Promise.resolve()
+}
+
+async function copyLlmApiKey() {
+  let key = llmApiKey.value.trim()
+  if (!key) {
+    try {
+      const data = await fetchLlmApiKey()
+      key = data.apiKey || ''
+    } catch (err) {
+      const msg = err.message || '未知错误'
+      toastFn?.(msg === '未设置 API Key' ? '暂无 API Key 可复制' : '获取 API Key 失败: ' + msg, msg === '未设置 API Key' ? 'warning' : 'error')
+      return
+    }
+  }
+  if (!key) {
+    toastFn?.('暂无 API Key 可复制', 'warning')
+    return
+  }
+  try {
+    await copyTextToClipboard(key)
+    toastFn?.('API Key 已复制', 'success')
+  } catch (err) {
+    toastFn?.('复制失败: ' + (err.message || '未知错误'), 'error')
+  }
+}
 
 async function loadAvailableModels() {
   if (llmModelsLoading.value || !llmBaseURL.value.trim()) return
@@ -2072,10 +2112,12 @@ function resetTestPrompts() {
 
 /* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
+.apikey-row .fi { flex: 1; min-width: 0; }
 .key-status { margin-top: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .key-ok { color: var(--success); }
 .key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
-.key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); }
+.key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); cursor: pointer; transition: border-color 0.15s; }
+.key-preview:hover { border-color: var(--accent); }
 .llm-model-picker { position: relative; margin-bottom: 14px;}
 .llm-model-row { display: flex; align-items: stretch; gap: 8px; }
 .llm-model-combobox { position: relative; min-width: 0; flex: 1; }

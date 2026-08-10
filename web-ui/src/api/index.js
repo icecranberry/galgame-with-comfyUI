@@ -478,6 +478,13 @@ export async function updateLlmConfig(data) {
   return res.json()
 }
 
+export async function fetchLlmApiKey() {
+  const res = await fetch(`${BASE}/config/llm/key`)
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || '获取 API Key 失败')
+  return result
+}
+
 export async function fetchLlmModels(data) {
   const res = await fetch(`${BASE}/config/llm/models`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
