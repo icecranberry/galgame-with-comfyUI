@@ -28,7 +28,7 @@ export async function saveConversation({ character, user_name = '', user_message
 
   // 只累积清洗后的真实发言，不写入聊天库
   const userText = cleanChatText(user_message);
-  const replyText = cleanChatText(reply_text);
+  const replyText = cleanChatText(reply_text, { assistant: true });
   // 群聊中用户昵称/ID 天然来自消息前缀，无需缺省值；为空时不写发言者前缀
   const speakerTag = user_name ? `[${user_name}] ` : '';
   const line = `${speakerTag}${userText}\n[${character.display_name || '角色'}] ${replyText}`;

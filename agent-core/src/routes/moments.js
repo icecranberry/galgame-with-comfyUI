@@ -12,6 +12,7 @@ import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
+import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
 
 const router = Router();
 
@@ -123,6 +124,7 @@ router.get('/', (req, res) => {
     ORDER BY mp.id DESC
   `).all().map(p => ({
     ...p,
+    content: sanitizeMomentContent(p.content),
     liked: !!p.liked,
     images: JSON.parse(p.images || '[]'),
     created_at: toISO(p.created_at),
@@ -166,6 +168,7 @@ router.get('/:id', (req, res) => {
 
   res.json({
     ...post,
+    content: sanitizeMomentContent(post.content),
     images: JSON.parse(post.images || '[]'),
     created_at: toISO(post.created_at),
     comments: comments.map(c => ({ ...c, created_at: toISO(c.created_at) })),
@@ -754,38 +757,18 @@ ${rules}`;
 
   let text = '', imagePrompt = '', imageUrls = [];
   try {
-  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
+  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 2048, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
-  // 解析 LLM 输出
-  try {
-    const jsonMatch = result.match(/\{[^{}]*"text"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*"imagePrompt"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*\}/s);
-    if (jsonMatch) {
-      text = jsonMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
-      imagePrompt = jsonMatch[2].replace(/\\"/g, '"').replace(/\\n/g, '\n');
-    }
-    if (!text || !imagePrompt) {
-      const parsed = JSON.parse(result.trim());
-      text = parsed.text || '';
-      imagePrompt = parsed.imagePrompt || '';
-    }
-  } catch {
-    // 修复：尝试补全可能被截断的 JSON（如末尾缺少 "}）
-    try {
-      const repaired = result.trim() + '"}';
-      const parsed = JSON.parse(repaired);
-      text = parsed.text || '';
-      imagePrompt = parsed.imagePrompt || '';
-      console.log('[moments] JSON completed with closing "} and parsed successfully');
-    } catch {
-      // fallback: 用整个回复作为文案，尝试提取 prompt
-      text = result.trim().slice(0, 200);
-      imagePrompt = 'scenic view, beautiful lighting, detailed';
-    }
-  }
+  // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content
+  const parsed = parseMomentResponse(result);
+  text = parsed.text;
+  imagePrompt = parsed.imagePrompt;
 
   if (!text) {
     text = '今天天气真好～';
-    imagePrompt = imagePrompt || 'scenic view, beautiful lighting, detailed';
+  }
+  if (!imagePrompt) {
+    imagePrompt = DEFAULT_MOMENT_IMAGE_PROMPT;
   }
 
   console.log(`[moments] Generated post for ${character.display_name}: "${text.slice(0, 40)}..."`);

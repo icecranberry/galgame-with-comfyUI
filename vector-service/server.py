@@ -9,6 +9,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import uuid
 import os
+import time
+import requests
 import cloudscraper
 from bs4 import BeautifulSoup
 
@@ -209,6 +211,41 @@ class ScrapeResponse(BaseModel):
     source: str = ''
 
 _scraper = cloudscraper.create_scraper()
+_scraper.trust_env = False  # 不走系统代理，避免加速器/代理把萌娘百科连接掐掉
+
+_SCRAPE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+}
+
+_direct_session = requests.Session()
+_direct_session.trust_env = False
+
+def _fetch_moegirl_page(url):
+    candidates = [url]
+    if 'zh.moegirl.org.cn' in url:
+        candidates.append(url.replace('zh.moegirl.org.cn', 'mzh.moegirl.org.cn'))
+
+    last_error = None
+    for candidate in candidates:
+        for attempt in range(2):
+            try:
+                resp = _scraper.get(candidate, headers=_SCRAPE_HEADERS, timeout=15)
+                resp.raise_for_status()
+                return resp
+            except Exception as e:
+                last_error = e
+                print(f"[scrape] cloudscraper fetch failed ({candidate}, attempt {attempt + 1}/2): {e}")
+                try:
+                    resp = _direct_session.get(candidate, headers=_SCRAPE_HEADERS, timeout=15)
+                    resp.raise_for_status()
+                    return resp
+                except Exception as e2:
+                    last_error = e2
+                    print(f"[scrape] requests fallback failed ({candidate}): {e2}")
+                time.sleep(0.8)
+    raise last_error
 
 @app.post("/scrape", response_model=ScrapeResponse)
 async def scrape_moegirl(req: ScrapeRequest):
@@ -217,7 +254,7 @@ async def scrape_moegirl(req: ScrapeRequest):
     print(f"[scrape] fetching {fetch_url}")
 
     try:
-        resp = _scraper.get(fetch_url, timeout=12)
+        resp = _fetch_moegirl_page(fetch_url)
         resp.raise_for_status()
         print(f"[scrape] status: {resp.status_code}, bytes: {len(resp.content)}")
     except Exception as e:

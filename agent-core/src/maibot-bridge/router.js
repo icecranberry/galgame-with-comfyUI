@@ -135,7 +135,7 @@ router.post('/chat', async (req, res) => {
     reason = 'image_mode_always';
   } else if (image_mode !== 'off') {
     try {
-      image_needed = await judgeImageNeed({ user_message, reply_text, context });
+      image_needed = await judgeImageNeed({ user_message, reply_text, context, user_name });
       reason = image_needed ? 'judge_yes' : 'judge_no';
     } catch (err) {
       console.error('[maibot-bridge] judge error:', err.message);
@@ -147,7 +147,7 @@ router.post('/chat', async (req, res) => {
   let task_id = null;
   if (image_needed) {
     try {
-      const prompt = await extractImagePrompt({ character, user_message, reply_text, context });
+      const prompt = await extractImagePrompt({ character, user_message, reply_text, context, user_name });
       if (prompt) {
         task_id = startImageTask({
           character,

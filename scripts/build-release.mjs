@@ -442,6 +442,7 @@ async function main() {
         "uvicorn[standard]",
         "pydantic",
         "httpx",
+        "requests",
         "onnxruntime",
         "huggingface-hub",
         "transformers",

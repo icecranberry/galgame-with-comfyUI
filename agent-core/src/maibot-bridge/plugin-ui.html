@@ -474,7 +474,7 @@
   </label>
   <details>
     <summary>高级参数</summary>
-    <label>传给邻舍判断的上下文条数
+    <label>传给邻舍判断/生图的上下文条数（默认 2）
       <input type="number" id="context-max-messages" min="1" step="1">
     </label>
     <label>生图任务轮询间隔（秒）
@@ -719,7 +719,7 @@ async function loadConfig() {
   }
   $("memory-curation").checked = memory.memory_curation !== false;
   if (image.image_mode) imageSelect.setValue(image.image_mode, false);
-  $("context-max-messages").value = image.context_max_messages ?? 12;
+  $("context-max-messages").value = image.context_max_messages ?? 2;
   $("poll-interval").value = image.poll_interval_sec ?? 2;
   $("poll-timeout").value = image.poll_timeout_sec ?? 180;
 }
@@ -786,7 +786,7 @@ function buildPluginConfigBody() {
       memory: { memory_curation: $("memory-curation").checked },
       image: {
         image_mode: imageSelect.getValue(),
-        context_max_messages: Math.max(Number($("context-max-messages").value) || 12, 1),
+        context_max_messages: Math.max(Number($("context-max-messages").value) || 2, 1),
         poll_interval_sec: Math.max(Number($("poll-interval").value) || 2, 0.5),
         poll_timeout_sec: Math.max(Number($("poll-timeout").value) || 180, 10),
       },

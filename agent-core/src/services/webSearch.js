@@ -15,9 +15,9 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const FETCH_TIMEOUT = 5000; // 萌娘百科/通用单次请求 5s 超时
 const BING_TIMEOUT = 8000;  // Bing 抓取（含 HTML 解析，给更长时间）
 
-function fetchWithTimeout(url, opts = {}) {
+function fetchWithTimeout(url, opts = {}, timeoutMs = FETCH_TIMEOUT) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
@@ -105,6 +105,15 @@ export async function searchCharacterInfo(query) {
         } catch (err) {
           console.warn(`[webSearch] infobox scrape failed: ${err.message}`);
         }
+        // Python 深度抓取失败或内容太短时，改用 MediaWiki API 拉全文兜底
+        if (!best.content || best.content.length < 600) {
+          const apiFallback = await fetchFullPageExtract('https://mzh.moegirl.org.cn/api.php', best.title);
+          if (apiFallback && apiFallback.content) {
+            best.content = apiFallback.content;
+            best.source = apiFallback.source;
+            console.log(`[webSearch] API full extract fallback used for "${best.title}" (${apiFallback.content.length} chars)`);
+          }
+        }
         moe.length = 0; moe.push(best);
       } else {
         console.log(`[webSearch] no results matched context "${context}", keeping all`);
@@ -187,6 +196,42 @@ async function tryDirectPageResolve(baseUrl, query) {
     };
   } catch (err) {
     console.warn(`[webSearch] direct page resolve failed for "${query}": ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * 用 MediaWiki extracts API 拉取完整纯文本，Python 爬虫失败时的兜底
+ */
+async function fetchFullPageExtract(baseUrl, query) {
+  try {
+    const url = `${baseUrl}?${new URLSearchParams({
+      action: 'query',
+      titles: query,
+      redirects: '1',
+      prop: 'extracts',
+      explaintext: '1',
+      format: 'json',
+      origin: '*',
+    })}`;
+
+    const res = await fetchWithTimeout(url, {
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    }, 10000);
+    const data = await res.json();
+
+    const pages = data.query?.pages || {};
+    const pageData = Object.values(pages)[0];
+    if (!pageData || pageData.missing || !pageData.extract || pageData.extract.trim().length < 100) {
+      return null;
+    }
+
+    const content = pageData.extract.trim();
+    const pageUrl = `https://zh.moegirl.org.cn/${encodeURIComponent(pageData.title)}`;
+    console.log(`[webSearch] full page extract fallback: "${query}" → "${pageData.title}" (${content.length} chars)`);
+    return { title: pageData.title, content: content.slice(0, 8000), source: pageUrl };
+  } catch (err) {
+    console.warn(`[webSearch] full page extract fallback failed for "${query}": ${err.message}`);
     return null;
   }
 }
