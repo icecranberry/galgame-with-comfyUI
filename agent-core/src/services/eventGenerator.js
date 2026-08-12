@@ -983,7 +983,7 @@ ${directorPrompt}`
   let eventData;
   let rawResult = '';
   try {
-    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '奇遇生成' });
+    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '奇遇生成' });
     const jsonStr = extractFirstJson(rawResult);
     if (!jsonStr) throw new Error('No JSON found in LLM response');
     eventData = JSON.parse(repairJson(jsonStr));
@@ -1340,18 +1340,33 @@ ${directorPrompt2}${prevSceneBlock}`
 
   let branchData;
   let rawBranchResult = '';
-  try {
-    rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件分支' });
-    const jsonStr = extractFirstJson(rawBranchResult);
-    if (!jsonStr) throw new Error('No JSON found in LLM response');
-    branchData = JSON.parse(repairJson(jsonStr));
-    const branchPromptText = branchData.prompt || branchData.imagePrompt;
-    if (!branchData.description) throw new Error('Incomplete branch data');
-    branchData.prompt = branchPromptText || event.prompt;
-  } catch (err) {
-    console.error(`[eventGen] Branch generation failed:`, err.message);
-    console.log(`[eventGen] Raw branch LLM response:\n${rawBranchResult}`);
-    throw err;
+  // 分支结果必须是完整可解析的 JSON；失败最多重试 3 次
+  const MAX_BRANCH_ATTEMPTS = 3;
+  let lastBranchError = null;
+  for (let attempt = 1; attempt <= MAX_BRANCH_ATTEMPTS; attempt++) {
+    rawBranchResult = '';
+    try {
+      rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件分支' });
+      const jsonStr = extractFirstJson(rawBranchResult);
+      if (!jsonStr) throw new Error('No JSON found in LLM response');
+      branchData = JSON.parse(repairJson(jsonStr));
+      const branchPromptText = branchData.prompt || branchData.imagePrompt;
+      if (!branchData.description || !branchData.choiceA || !branchData.choiceB) throw new Error('Incomplete branch data');
+      branchData.prompt = branchPromptText || event.prompt;
+      break;
+    } catch (err) {
+      lastBranchError = err;
+      console.warn(`[eventGen] Branch generation attempt ${attempt}/${MAX_BRANCH_ATTEMPTS} failed:`, err.message);
+      console.log(`[eventGen] Raw branch LLM response (attempt ${attempt}):\n${rawBranchResult}`);
+    }
+  }
+
+  if (!branchData) {
+    // 3 次都无法产出有效分支：清除生成中状态，回到用户选择分支之前的状态
+    console.error('[eventGen] Branch generation failed after 3 attempts, reverting to pre-choice state:', lastBranchError?.message);
+    db.prepare(`UPDATE character_events SET processing = 0 WHERE id = ?`).run(event.id);
+    const resetEvent = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(event.id);
+    return resetEvent;
   }
 
   // 4.5 检测当前事件描述和分支描述中是否提及其他角色
