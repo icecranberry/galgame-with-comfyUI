@@ -125,7 +125,7 @@ ${post.content}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来评论朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    ? '请遵循当前世界观来评论朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '去评论区留个言吧：' });
 
@@ -180,7 +180,7 @@ ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来回复朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    ? '请遵循当前世界观来回复朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + `回复${friendName}的最后一条评论：` });
 
@@ -237,7 +237,7 @@ ${threadText}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来继续朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    ? '请遵循当前世界观来继续朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '继续聊天：' });
 

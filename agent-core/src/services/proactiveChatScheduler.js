@@ -468,7 +468,7 @@ ${proactiveRules}
     msgs.push({ role: 'system', content: systemRules || '你是一个角色扮演 AI。' });
     msgs.push({ role: 'system', content: msgIdentity });
     const worldRulePrefix = getWorldSetting()
-      ? '请遵循当前世界观来主动发起聊天，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+      ? '请遵循当前世界观来主动发起聊天，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
       : '';
     msgs.push({ role: 'user', content: worldRulePrefix + msgTask });
 

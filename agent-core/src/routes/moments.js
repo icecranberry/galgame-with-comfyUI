@@ -342,47 +342,7 @@ async function generateMomentPost(character, opts = {}) {
     { name: '做梦/幻想', desc: '分享昨晚的怪梦或白日梦——内容完全自由，不受现实逻辑约束。可以描述梦境场景、超现实体验、天马行空的脑洞。配图是超现实或梦幻风格' },
   ];
 
-const MOTIVATIONS = [
-  // === 记录 ===
-  { name: '记录', desc: '觉得这一刻值得留下来。' },
-  { name: '纪念', desc: '今天有值得纪念的事情。' },
-  { name: '第一次', desc: '第一次经历这样的事，想留作纪念。' },
-  { name: '更新近况', desc: '想告诉大家最近发生了什么。' },
-
-  // === 分享 ===
-  { name: '分享', desc: '觉得这件事值得和别人分享。' },
-  { name: '推荐', desc: '发现了好东西，想推荐给别人。' },
-  { name: '开心', desc: '心情很好，想把快乐分享出去。' },
-  { name: '惊喜', desc: '发生了意料之外的好事。' },
-
-  // === 表达 ===
-  { name: '吐槽', desc: '有点想吐槽，不说出来难受。' },
-  { name: '感慨', desc: '看到什么，让自己有了一点感触。' },
-  { name: '怀念', desc: '忽然想起了过去的人或事。' },
-  { name: '感谢', desc: '想感谢某个人或某件事。' },
-  { name: '庆祝', desc: '完成了一件值得高兴的小事。' },
-
-  // === 求助 / 互动 ===
-  { name: '求助', desc: '希望有人能给自己一点帮助。' },
-  { name: '求建议', desc: '遇到了选择，希望听听大家意见。' },
-  { name: '寻找共鸣', desc: '想知道有没有人也和自己一样。' },
-
-  // === 情绪 ===
-  { name: '放松', desc: '只是想随手发一点日常。' },
-  { name: '治愈', desc: '这一刻让自己的心情轻松了不少。' },
-  { name: '疲惫', desc: '今天有点累，想发出来缓一缓。' },
-  { name: '惊讶', desc: '看到或遇到了一件意想不到的事情。' },
-
-  // === 后续 ===
-  { name: '后续', desc: '之前提过的事情，有了新的进展。' },
-  { name: '回应', desc: '回应别人之前关心或提到的话题。' },
-
-  // === 随性 ===
-  { name: '突然想发', desc: '没有特别的原因，只是这一刻想记录一下。' },
-  { name: '冒个泡', desc: '很久没发了，简单更新一下。' },
-];
-
-// 发布形态池：决定"怎么发"，与"发什么"(Topic)和"为什么发"(Motivation)正交。
+// 发布形态池：决定"怎么发"，与"发什么"(Topic)正交。
 // weight 基础权重；nightBoost=true 的形态在深夜(22-5点)权重 ×1.8，让发圈时刻更有状态感。
 const MOMENT_FORMS = [
   { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 0.8, nightBoost: false },
@@ -395,9 +355,6 @@ const MOMENT_FORMS = [
   { name: '清单体', desc: '用列表逐条列出来，像在写一张清单，条目感强', len: '30-100字', weight: 0.7, nightBoost: false },
   { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.6, nightBoost: false },
 ];
-
-  // 加权映射：部分高辨识度动机提高 roll 到概率
-  const MOTIVATION_WEIGHTS = {};
 
   function weightedPick(arr, weightMap = {}) {
     const items = arr.map(item => ({
@@ -413,10 +370,9 @@ const MOMENT_FORMS = [
     return items[items.length - 1].item;
   }
 
-  // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% 二维 Topic × Motivation
+  // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% Topic 模式
   let pickedSpecialMode = null;
   let pickedTopic = null;
-  let pickedMotivation = null;
   let combinedStyle = '';
   let isSpecialMode = false;
   let isFreeMode = false;
@@ -435,8 +391,7 @@ const MOMENT_FORMS = [
       isFreeMode = true; // 库被清空时兜底自由发挥
     } else {
       pickedTopic = topics[Math.floor(Math.random() * topics.length)];
-      pickedMotivation = weightedPick(MOTIVATIONS, MOTIVATION_WEIGHTS);
-      combinedStyle = `${pickedTopic.name}|${pickedMotivation.name}`;
+      combinedStyle = pickedTopic.name;
     }
   }
 
@@ -564,12 +519,10 @@ const MOMENT_FORMS = [
     ? '\n- 这条朋友圈可以有 1 处轻微的口语瑕疵：比如打错一个字不修、句尾多个语气词、写了一半改用别的说法。最多 1 处，不要刻意。'
     : '';
 
-  // 续集注入：动机是"回应/后续"时强制续集；其他情况 10% 概率弱呼应（自由模式不注入）
-  const continuationNote = (pickedMotivation && (pickedMotivation.name === '后续' || pickedMotivation.name === '回应') && prevMomentText)
-    ? `\n- 你上次发过：「${prevMomentText.slice(0, 60)}...」。这次发的是这件事的后续/回应，让看到的人能想起上一条，但不要复述太多。`
-    : (Math.random() < 0.10 && prevMomentText && !isFreeMode
-      ? `\n- 你最近一条朋友圈是：「${prevMomentText.slice(0, 60)}...」。可以自然地呼应它（比如"上次说的事有后续了"），但不要硬蹭。`
-      : '');
+  // 10% 概率弱呼应最近一条朋友圈（自由模式不注入）
+  const continuationNote = Math.random() < 0.10 && prevMomentText && !isFreeMode
+    ? `\n- 你最近一条朋友圈是：「${prevMomentText.slice(0, 60)}...」。可以自然地呼应它（比如"上次说的事有后续了"），但不要硬蹭。`
+    : '';
 
   const postingTask = (() => {
     const jsonFmt = `输出格式（严格 JSON）：
@@ -579,6 +532,7 @@ const MOMENT_FORMS = [
 - 只输出 JSON，不要解释
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在上述世界观中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
+- **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
 ${imperfectionNote}
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
@@ -610,8 +564,6 @@ ${rules}`;
     ? ''
     : isSpecialMode
       ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
-      // 二维动机表现不佳，暂时去掉二维动机
-      // : `\n**本次发朋友圈是正在做或者想到：【${pickedTopic.desc}】，倾向的动机是：【${pickedMotivation.desc}】**`;
       : `\n**本次发朋友圈你是正在做或者想到：【${pickedTopic.desc}】**`;
 
   const userMsg = multiPersons.length > 0
@@ -632,7 +584,7 @@ ${rules}`;
     }
   }
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来发朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，将人设融入世界观。\n\n'
+    ? '请遵循当前世界观来发朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
 

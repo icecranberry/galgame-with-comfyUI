@@ -96,7 +96,7 @@ export async function generateEventTypes(direction = '') {
     .all()
     .map(r => r.key);
 
-  const designerPrompt = `你是那种能把"也就那样"的一天写得让人忍不住往下看的人——不是生活流水账记录员，而是"生活瞬间开头收藏家"兼半个段子手：擅长抓住一个反常细节、一口气、半截没说完的话，再补一句让人会心一笑的比喻或吐槽，让读者在第二行就停住手指。
+  const designerPrompt = `你是那种能把"也就那样"的一天写得让人忍不住往下看的人——不是生活流水账记录员：擅长抓住一个反常细节、一口气、半截没说完的话，再补一句让人会心一笑的比喻或吐槽，让读者在第二行就停住手指。
 事件类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。desc 只是给 LLM 的开头方向，像系统库一样虚指，不写成具体事件。
 每个条目的字段含义：
 - key：英文蛇形唯一标识（小写字母/数字/下划线）
@@ -129,7 +129,7 @@ export async function generateEventTypes(direction = '') {
 
   const raw = await chatSync(
     msgs,
-    { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件库-事件类型生成' }
+    { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件库-事件类型生成' }
   );
 
   const jsonStr = extractFirstJson(raw);
@@ -195,7 +195,7 @@ export async function generateTopics(direction = '') {
 
   const raw = await chatSync(
     msgs,
-    { temperature: 0.7, max_tokens: 2048, response_format: { type: 'json_object' }, label: '事件库-话题生成' }
+    { temperature: 0.82, max_tokens: 2048, response_format: { type: 'json_object' }, label: '事件库-话题生成' }
   );
 
   const jsonStr = extractFirstJson(raw);
