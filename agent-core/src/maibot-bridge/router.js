@@ -21,6 +21,14 @@ import {
   updatePluginPersona,
 } from './webui.js';
 
+const BASE_PROMPT_IMAGE_ABILITY_LINE = "## 你拥有画图的能力，只要你想象画面，你就可以发送出来图片";
+
+function ensureBasePromptImageAbility(basePrompt) {
+  const text = String(basePrompt || "").trim();
+  if (!text || text.includes(BASE_PROMPT_IMAGE_ABILITY_LINE)) return text;
+  return `${text}\n${BASE_PROMPT_IMAGE_ABILITY_LINE}`;
+}
+
 const router = Router();
 
 function resolveCharacter(characterId, characterName) {
@@ -49,6 +57,9 @@ router.get('/characters', (req, res) => {
   const characters = db.prepare(
     `SELECT id, name, display_name, base_prompt, short_prompt, avatar_path FROM characters ORDER BY id`
   ).all();
+  for (const character of characters) {
+    character.base_prompt = ensureBasePromptImageAbility(character.base_prompt);
+  }
   res.json({ characters });
 });
 

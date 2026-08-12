@@ -6,6 +6,18 @@ let _seq = Date.now()
 function uid() { return ++_seq }
 
 export const useChatStore = defineStore('chat', () => {
+  let streamSeq = 0
+  let activeStream = null  // { charId, id, abort } | null
+
+  function cancelActiveStream() {
+    if (!activeStream) return
+    try { activeStream.abort() } catch {}
+    activeStream = null
+  }
+
+  function isCurrentStream(sessionId) {
+    return !!activeStream && activeStream.id === sessionId
+  }
   const characters = ref([])
   const activeCharId = ref(null)
   const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
@@ -98,6 +110,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectChar(charId) {
+    if (activeStream) {
+      cancelActiveStream()
+      streaming.value = false
+      streamingContent.value = ''
+      showTypingDots.value = false
+    }
     activeCharId.value = charId
     messages.value = []
     renderStart.value = 0
@@ -123,6 +141,10 @@ export const useChatStore = defineStore('chat', () => {
   async function clearActiveMessages() {
     const id = activeCharId.value
     if (!id) return
+    cancelActiveStream()
+    streaming.value = false
+    streamingContent.value = ''
+    showTypingDots.value = false
     await api.clearMessages(id)
     messages.value = []
     renderStart.value = 0
@@ -207,6 +229,10 @@ export const useChatStore = defineStore('chat', () => {
     const id = activeCharId.value
     const char = characters.value.find(c => c.id === id)
     if (!id || char?.name === 'default') return
+    cancelActiveStream()
+    streaming.value = false
+    streamingContent.value = ''
+    showTypingDots.value = false
     await api.deleteCharacter(id)
     messages.value = []
     renderStart.value = 0
@@ -221,6 +247,10 @@ export const useChatStore = defineStore('chat', () => {
     const charId = activeCharId.value
     if (!charId) return
 
+    const sessionId = ++streamSeq
+    let abort = () => {}
+    activeStream = { charId, id: sessionId, abort: () => abort() }
+
     guesses.value = null  // 用户主动发送 → 清除候选词
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
@@ -234,7 +264,6 @@ export const useChatStore = defineStore('chat', () => {
     const TEXT_SAFETY_MS = 30_000
     const IMAGE_SAFETY_MS = 600_000
     let safetyFired = false
-    let abort = () => {}
     let safetyTimer = null
     let safetyMs = TEXT_SAFETY_MS
 
@@ -247,6 +276,7 @@ export const useChatStore = defineStore('chat', () => {
       safetyTimer = setTimeout(onSafetyFire, safetyMs)
     }
     function onSafetyFire() {
+      if (!isCurrentStream(sessionId)) return
       if (!streaming.value) return
       // 检查是否有正在进行的生图任务
       const hasActiveGen = messages.value.some(m => m.type === 'image_gen' && m.genStatus !== 'done' && m.genStatus !== 'error')
@@ -299,6 +329,7 @@ export const useChatStore = defineStore('chat', () => {
     let fullResponse = ''
 
     for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
+      if (!isCurrentStream(sessionId)) break
       if (safetyFired) break
       let thisAttemptHadBubble = false      // 收到完整气泡（bubble_break）
       let thisAttemptHadMsgSaved = false    // 服务端已保存消息（msg_saved assistant）
@@ -329,6 +360,7 @@ export const useChatStore = defineStore('chat', () => {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
+          if (!isCurrentStream(sessionId)) break
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
             const d = value.data
@@ -466,6 +498,7 @@ export const useChatStore = defineStore('chat', () => {
 
         // stream 正常结束（done=true）
         // 有完整气泡或服务端已保存 → 成功
+        if (!isCurrentStream(sessionId)) break
         if (thisAttemptHadBubble || thisAttemptHadMsgSaved) break
         // 无意义空流（连接后立即关闭，无数据）→ 可重试
         if (streamAttempt < MAX_STREAM_RETRIES) {
@@ -484,6 +517,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         break
       } catch (err) {
+        if (!isCurrentStream(sessionId)) break
         if (safetyFired) { break }
         if (err.name === 'AbortError') { break }
 
@@ -521,6 +555,10 @@ export const useChatStore = defineStore('chat', () => {
       } finally {
         if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
         reader.releaseLock()
+        if (!isCurrentStream(sessionId)) {
+          clearSafetyTimer()
+          return
+        }
 
         // 判断此次尝试是否将重试（气泡已在 retry 路径中被清理，避免 finally 再次清理/兜底）
         const isRetrying = !safetyFired && !thisAttemptHadBubble && !thisAttemptHadMsgSaved && streamAttempt < MAX_STREAM_RETRIES
@@ -563,8 +601,11 @@ export const useChatStore = defineStore('chat', () => {
     } // end retry loop
 
     clearSafetyTimer()
-    streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
-    await loadCharacters()
+    if (isCurrentStream(sessionId)) {
+      streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
+      activeStream = null
+      await loadCharacters()
+    }
   }
 
   /**

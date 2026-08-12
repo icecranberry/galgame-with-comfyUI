@@ -438,7 +438,19 @@
 
 
 <section>
-  <h2>① 插件配置</h2>
+  <h2>① 连接设置</h2>
+  <label>MaiBot WebUI Token
+    <input type="password" id="webui-token" placeholder="填写 MaiBot WebUI 的访问 Token">
+  </label>
+  <div class="row">
+    <button id="btn-save-settings" class="primary">保存连接设置</button>
+    <button id="btn-test">测试连接</button>
+  </div>
+  <p class="hint">WebUI 地址固定为本机 8001 端口，无需配置；Token 只保存在邻舍本地数据库，用于代你调用 MaiBot WebUI 接口修改插件配置与人格数据。</p>
+</section>
+
+<section>
+  <h2>② 插件配置</h2>
   <label>邻舍服务地址
     <input type="text" id="base-url" placeholder="http://127.0.0.1:3099">
   </label>
@@ -453,7 +465,7 @@
       <div class="select-menu" role="listbox" hidden></div>
     </span>
   </label>
-  <p class="hint flag-hint">桥接<b>默认开启</b>，人格注入与行为 / 表达风格提炼为<b>始终开启</b>：每次回复都会把 system 人格整条替换为所选角色的 base_prompt，并由 LLM 依据 base_prompt 生成行为风格与表达风格一并注入请求，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。</p>
+  <p class="hint flag-hint">人格注入与行为 / 表达风格提炼为<b>始终开启</b>：每次回复都会把 system 人格整条替换为所选角色的人格，并由 LLM 依据人格生成行为风格与表达风格一并注入请求，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。</p>
   <div class="flag-card">
     <label class="flag-label">
       <input type="checkbox" id="memory-curation" class="flag-switch">
@@ -487,7 +499,7 @@
 </section>
 
 <section>
-  <h2>② 人格信息</h2>
+  <h2>③ 人格信息</h2>
   <div class="flag-card persona-warn">
     <p class="warn-title">⚠ 人格覆盖提示</p>
     <p class="hint">启用桥接后，所选角色的 <b>人格卡片</b> 将<b>整条临时覆盖</b> MaiBot 当前 system 人格（覆盖MaiBot设置里的「人格设定」）；提炼的<b>行为风格 / 表达风格</b>也会作为请求指令注入，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。<b>不改变MaiBot原有人格，仅做临时替换</b></p>
@@ -503,13 +515,14 @@
     <textarea id="reply-style-input" rows="3"></textarea>
   </label>
   <div class="row">
+    <button id="btn-refresh-persona">更新人格</button>
     <button id="btn-derive" class="primary">重新提炼风格</button>
     <button id="btn-save-persona" class="primary">保存</button>
   </div>
 </section>
 
 <section>
-  <h2>③ 最新记忆整理</h2>
+  <h2>④ 最新记忆整理</h2>
   <p class="hint">只保留一份最新记忆，插件注入时也只带回去这一条；这里直接展示最近更新的一份，无需手动查询。</p>
   <div id="memory" class="box empty">（加载中…）</div>
   <div class="row">
@@ -517,17 +530,6 @@
   </div>
 </section>
 
-<section>
-  <h2>④ 连接设置</h2>
-  <label>WebUI Token
-    <input type="password" id="webui-token" placeholder="填写 MaiBot WebUI 的访问 Token">
-  </label>
-  <div class="row">
-    <button id="btn-save-settings" class="primary">保存连接设置</button>
-    <button id="btn-test">测试连接</button>
-  </div>
-  <p class="hint">WebUI 地址固定为本机 8001 端口，无需配置；Token 只保存在邻舍本地数据库，用于代你调用 MaiBot WebUI 接口修改插件配置与人格数据。</p>
-</section>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -911,6 +913,29 @@ $("btn-save-persona").addEventListener("click", async () => {
     showStatus("已保存到插件本地（persona_store.json）");
   } catch (err) { showStatus("保存失败: " + err.message, false); }
 });
+
+// 重新拉取人格：用邻舍角色库里的最新 base_prompt 覆盖插件本地副本
+async function refreshPersona() {
+  const char = selectedCharacter();
+  if (!char) { showStatus("请先选择角色", false); return; }
+  if (autoDeriveInFlight.has(char.name)) { showStatus("该角色正在自动提炼中，请稍候再更新人格", false); return; }
+  showStatus("正在从邻舍重新拉取人格…");
+  try {
+    const chars = await api("/api/maibot/characters");
+    const fresh = (chars.characters || []).find((c) => c.name === char.name);
+    if (!fresh) { showStatus("邻舍角色库中找不到该角色", false); return; }
+    const basePrompt = (fresh.base_prompt || "").trim();
+    if (!basePrompt) { showStatus("邻舍角色库中没有可用的 base_prompt", false); return; }
+    await savePersona(char.name, { base_prompt: basePrompt });
+    const index = characters.findIndex((c) => c.name === char.name);
+    if (index >= 0) characters[index] = fresh; else characters.push(fresh);
+    await loadPersona();
+    showStatus("已重新拉取并保存人格（persona_store.json）");
+  } catch (err) {
+    showStatus("更新人格失败: " + err.message, false);
+  }
+}
+$("btn-refresh-persona").addEventListener("click", refreshPersona);
 
 async function loadLatestMemory() {
   try {

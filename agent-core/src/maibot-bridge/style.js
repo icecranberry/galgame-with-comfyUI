@@ -4,6 +4,8 @@
  */
 import { chatSync } from '../llm/llm-client.js';
 
+const REPLY_STYLE_LENGTH_LIMIT = "**回复限制在30字内**";
+
 const STYLE_EXTRACTION_PROMPT = `你是角色设定分析师。根据下面给出的人物设定（base_prompt），提炼两段用于 AI 聊天机器人的配置文本：
 
 1. behavior_style（行为风格）：以第二人称“你”的视角描述该角色参与群聊/私聊时的行动准则，例如你何时回复、如何观察局面、何时保持安静，不超过 100 字。
@@ -37,6 +39,9 @@ export async function deriveStyles(basePrompt) {
     behavior_style: String(parsed.behavior_style || '').trim(),
     reply_style: String(parsed.reply_style || '').trim(),
   };
+  if (styles.reply_style && !styles.reply_style.includes(REPLY_STYLE_LENGTH_LIMIT)) {
+    styles.reply_style += `\n${REPLY_STYLE_LENGTH_LIMIT}`;
+  }
   console.log(`[maibot-bridge] derive-style done (behavior=${styles.behavior_style.length}ch, reply=${styles.reply_style.length}ch)`);
   return styles;
 }
