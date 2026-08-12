@@ -3,9 +3,12 @@
     <!-- 顶栏 -->
     <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
-      <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="genPending">
-        {{ genPending ? '扰动中' : '🎬 扰动世界线' }}
-      </button>
+      <div class="topbar-actions">
+        <button class="lib-gear" @click="libraryOpen = true" title="话题库管理">⚙</button>
+        <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="genPending">
+          {{ genPending ? '扰动中' : '🎬 扰动世界线' }}
+        </button>
+      </div>
     </div>
 
     <!-- 角色选择器 -->
@@ -26,6 +29,9 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 话题库管理弹窗 -->
+    <LibraryModal v-model="libraryOpen" type="topics" />
 
     <!-- 内容区 -->
     <div ref="scrollContainer" class="moments-feed" @scroll="onScroll">
@@ -108,6 +114,7 @@ import { loadUserConfig } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import LibraryModal from '../components/LibraryModal.vue'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
@@ -117,6 +124,7 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 const showPicker = ref(false)
 const pickerRef = ref(null)
 const genPending = ref(false)
+const libraryOpen = ref(false)
 const previewImage = ref(null)
 const sharePost = ref(null)
 const scrollContainer = ref(null)
@@ -247,6 +255,24 @@ async function triggerGenerate(c) {
   font-size: 18px; font-weight: 700; color: var(--text-bright);
 }
 .is-clickable { cursor: pointer; }
+
+/* 顶栏右侧按钮组（齿轮 + 扰动世界线） */
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.lib-gear {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid transparent;
+  background: rgba(224, 123, 108, 0.08);
+  color: #c06a5a;
+  font-size: 18px; line-height: 1;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.lib-gear:hover {
+  border-color: rgba(224, 123, 108, 0.55);
+  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  transform: rotate(30deg);
+}
 
 .btn-post {
   padding: 8px 22px;

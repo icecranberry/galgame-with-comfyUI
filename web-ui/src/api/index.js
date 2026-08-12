@@ -1435,3 +1435,71 @@ export async function deleteLetter(id) {
   const res = await fetch(`${BASE}/mailbox/${id}`, { method: 'DELETE' })
   return res.json()
 }
+
+// ── 事件库管理（奇遇事件类型 / 朋友圈话题）──
+
+export async function listEventTypes() {
+  const res = await fetch(`${BASE}/library/event-types`)
+  return res.json()
+}
+
+export function createEventType(data) {
+  return jsonRequest(`${BASE}/library/event-types`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function updateEventType(id, data) {
+  return jsonRequest(`${BASE}/library/event-types/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function deleteEventType(id) {
+  return jsonRequest(`${BASE}/library/event-types/${id}`, { method: 'DELETE' })
+}
+
+export function generateEventTypes(direction) {
+  return jsonRequest(`${BASE}/library/event-types/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
+  })
+}
+
+export function saveEventTypeBatch(items) {
+  return jsonRequest(`${BASE}/library/event-types/save-batch`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+  })
+}
+
+export async function listTopics() {
+  const res = await fetch(`${BASE}/library/topics`)
+  return res.json()
+}
+
+export function createTopic(data) {
+  return jsonRequest(`${BASE}/library/topics`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function updateTopic(id, data) {
+  return jsonRequest(`${BASE}/library/topics/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+}
+
+export function deleteTopic(id) {
+  return jsonRequest(`${BASE}/library/topics/${id}`, { method: 'DELETE' })
+}
+
+export function generateTopics(direction) {
+  return jsonRequest(`${BASE}/library/topics/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
+  })
+}
+
+export function saveTopicBatch(items) {
+  return jsonRequest(`${BASE}/library/topics/save-batch`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+  })
+}

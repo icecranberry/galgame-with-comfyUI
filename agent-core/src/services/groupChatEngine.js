@@ -6,7 +6,7 @@
  *   [system] 舞台块（破限词 + 世界观）        ← 全局不变，与 1 对 1 同串
  *   [system] 输出协议（行协议/活人感规则）  ← 全局不变，所有群共享前缀
  *   [system] 群信息（成员资料/关系/用户）    ← 每群稳定，改群设置才变
- *   [system] 群滚动摘要                       ← 每 N 条用户发言推进（默认 4，可配置 2~10）
+ *   [system] 群滚动摘要                       ← 每 N 轮群聊推进（用户/主动/冷场都算一轮，默认 4）
  *   [user]   群聊天记录 transcript             ← append-only
  *   [user]   本轮指令（动态尾部）
  *
@@ -22,6 +22,7 @@
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatStream } from '../llm/llm-client.js';
 import { config } from '../config.js';
+import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
@@ -41,7 +42,7 @@ export function groupConvId(groupId) { return `group_${groupId}`; }
 const MAX_TRANSCRIPT_RAWS = 40;   // 摘要兜底基准：checkpoint 之后 transcript 超过阈值触发边界推进（随配置轮次扩大）
 const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数（留出再增长空间，降低跳变频率）
 const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
-const IMAGE_NUDGE_PROBABILITY = 0.5;  // 每轮抽卡鼓励发图的概率
+const IMAGE_NUDGE_PROBABILITY = 0.75;  // 每轮抽卡鼓励发图的概率
 
 /** 群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享；默认 4） */
 function getGroupSummaryInterval() {
@@ -253,7 +254,7 @@ function buildTranscript(db, conversationId) {
   // 此时必须保留 checkpoint 之后的完整聊天记录（前几轮完整对话 + 用户最新输入），不能提前滚动窗口。
   const completedRounds = countCompletedGroupRoundsAfter(db, conversationId, checkpointEndId);
   // 总结未落库时从 checkpoint 重带全量历史；若此前兜底已截断过，则尊重粘性边界避免无限增长。
-  const { afterId, summaryPending } = pickGroupTranscriptBoundary({
+  let { afterId, summaryPending } = pickGroupTranscriptBoundary({
     checkpointEndId,
     summaryInterval,
     completedRounds,
@@ -569,21 +570,14 @@ export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
 }
 
 function countCompletedGroupRoundsAfter(db, conversationId, afterRawId) {
+  // 每一轮群聊都会写一条 assistant raw（用户轮/主动轮/冷场轮都一样），
+  // 统计 checkpoint 之后已完成的 assistant raw 就是群聊轮数。
   const rows = db.prepare(`
-    SELECT role FROM raw_messages
-    WHERE conversation_id = ? AND id > ? AND role IN ('user', 'assistant')
+    SELECT role, content FROM raw_messages
+    WHERE conversation_id = ? AND id > ? AND role = 'assistant'
     ORDER BY id ASC
   `).all(conversationId, afterRawId);
-  let waitingForAssistant = false;
-  let rounds = 0;
-  for (const row of rows) {
-    if (row.role === 'user') waitingForAssistant = true;
-    else if (waitingForAssistant) {
-      rounds++;
-      waitingForAssistant = false;
-    }
-  }
-  return rounds;
+  return countCompletedGroupRounds(rows);
 }
 
 /**
@@ -935,26 +929,24 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     await Promise.allSettled(imagePromises);
   }
 
-  // ── 后处理：用户轮次按配置轮次整理 v2 记忆，同时推进群聊摘要 ──
+  // ── 后处理：每轮群聊按配置轮次整理 v2 记忆，同时推进群聊摘要 ──
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {
       try {
-        await maybeExtractGroupMemory(group, { incrementUserRound: trigger === 'user' });
+        await maybeExtractGroupMemory(group, { incrementRound: true });
       } catch (err) {
         console.error('[group] memory post-processing error:', err.message);
       }
-      if (trigger === 'user') {
-        try {
-          await maybeSummarize(conversationId, {
-            characterName: '群聊记录',
-            userName: chatUserName,
-            triggerRole: 'user',
-            interval: getGroupSummaryInterval(),
-          });
-        } catch (err) {
-          console.error('[group] summarization error:', err.message);
-        }
+      try {
+        await maybeSummarize(conversationId, {
+          characterName: '群聊记录',
+          userName: chatUserName,
+          triggerRole: 'assistant',
+          interval: getGroupSummaryInterval(),
+        });
+      } catch (err) {
+        console.error('[group] summarization error:', err.message);
       }
     } finally {
       markGroupPostProcessing(group.id, -1);
@@ -991,14 +983,15 @@ export function isGroupPostProcessing(groupId) {
   return (groupPostProcessingCounts.get(Number(groupId)) || 0) > 0;
 }
 
-/** 每累计配置轮次用户发言，使用 v2 checkpoint 增量整理群聊 raw。 */
-async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {}) {
+/** 每累计配置轮次群聊轮，使用 v2 checkpoint 增量整理群聊 raw。 */
+async function maybeExtractGroupMemory(group, { incrementRound = false } = {}) {
   if (!config.features.memory) return;
   const db = getDb();
   const conversationId = groupConvId(group.id);
   const summaryInterval = getGroupSummaryInterval();
 
-  if (incrementUserRound) {
+  if (incrementRound) {
+    // 该字段沿用旧名 rag_user_rounds_pending，现在按群聊总轮数计（用户/主动/冷场都算一轮）。
     db.prepare(`
       UPDATE group_chats
       SET rag_user_rounds_pending = COALESCE(rag_user_rounds_pending, 0) + 1
@@ -1032,7 +1025,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
 
       const roundsBeingProcessed = groupState.pendingRounds;
       const chatUserName = config.user.nickname || '用户';
-      console.log(`[group] curate v2 memory for group ${group.id}: raw (${checkpoint.last_raw_msg_id}, ${throughRawId}], user rounds=${roundsBeingProcessed}`);
+      console.log(`[group] curate v2 memory for group ${group.id}: raw (${checkpoint.last_raw_msg_id}, ${throughRawId}], rounds=${roundsBeingProcessed}`);
 
       await curateChatMemories({
         conversationId,
@@ -1048,7 +1041,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
         break;
       }
 
-      // 只扣除本批开始时已计入的轮数；整理期间新增的用户轮次继续保留。
+      // 只扣除本批开始时已计入的轮数；整理期间新增的群聊轮次继续保留。
       db.prepare(`
         UPDATE group_chats
         SET rag_user_rounds_pending = MAX(0, COALESCE(rag_user_rounds_pending, 0) - ?)
@@ -1056,7 +1049,7 @@ async function maybeExtractGroupMemory(group, { incrementUserRound = false } = {
       `).run(roundsBeingProcessed, group.id);
     }
   } catch (err) {
-    // checkpoint 失败时不推进，pending 也不扣减；后续用户轮次会重试同一批。
+    // checkpoint 失败时不推进，pending 也不扣减；后续群聊轮次会重试同一批。
     console.error(`[group] memory curation failed for group ${group.id}:`, err.message);
   } finally {
     groupMemoryExtractionRunning.delete(group.id);

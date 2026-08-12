@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
 import { seedAll } from './seedData.js';
+import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
+import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
 import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
@@ -402,6 +404,32 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(group_id, character_id)
     );
+
+    -- 奇遇事件类型库（系统 default + 用户自定义 custom）
+    CREATE TABLE IF NOT EXISTS event_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      duration_min INTEGER NOT NULL DEFAULT 20,
+      urgency INTEGER NOT NULL DEFAULT 1,
+      fun_from TEXT NOT NULL DEFAULT '[]',
+      desc TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 朋友圈话题库（系统 default + 用户自定义 custom）
+    CREATE TABLE IF NOT EXISTS moment_topics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      desc TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // 只补齐历史 NULL；保留用户显式关闭后台闲聊的 idle_enabled=0。
@@ -569,6 +597,9 @@ function initSchema(db) {
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
 
+  // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
+  seedEventLibraries(db);
+
   // 图片提示词知识使用独立版本化种子；版本升级时只覆盖内置同 ID 条目，保留用户自建条目。
   seedImagePromptKnowledge(db);
 
@@ -602,6 +633,40 @@ function initSchema(db) {
       throw writeErr;
     }
   }
+}
+
+/**
+ * 种子：奇遇事件类型库 + 朋友圈话题库
+ * 仅插入缺失的系统条目（INSERT OR IGNORE），不覆盖用户对已有条目的编辑；
+ * 软删除（is_active=0）的条目行仍存在，因此不会在下次启动时复活。
+ */
+function seedEventLibraries(db) {
+  // 事件类型库
+  const seedEventType = db.prepare(`
+    INSERT OR IGNORE INTO event_types (key, name, duration_min, urgency, fun_from, desc, source, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, 'default', 1)
+  `);
+  let eventCount = 0;
+  for (const e of DEFAULT_EVENT_TYPES) {
+    const result = seedEventType.run(
+      e.key, e.name, e.durationMin ?? 20, e.urgency ?? 1,
+      JSON.stringify(e.funFrom ?? []), e.desc ?? ''
+    );
+    if (result.changes > 0) eventCount++;
+  }
+  if (eventCount > 0) console.log(`[seed] event_types: ${eventCount} seeded`);
+
+  // 朋友圈话题库
+  const seedTopic = db.prepare(`
+    INSERT OR IGNORE INTO moment_topics (name, desc, source, is_active)
+    VALUES (?, ?, 'default', 1)
+  `);
+  let topicCount = 0;
+  for (const t of DEFAULT_MOMENT_TOPICS) {
+    const result = seedTopic.run(t.name, t.desc ?? '');
+    if (result.changes > 0) topicCount++;
+  }
+  if (topicCount > 0) console.log(`[seed] moment_topics: ${topicCount} seeded`);
 }
 
 export function seedImagePromptKnowledge(db) {

@@ -5,9 +5,12 @@
       <div class="topbar-title" @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">
         <span>奇遇</span>
       </div>
-      <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="stirring">
-        {{ stirring ? '扰动中' : '🎬 扰动世界线' }}
-      </button>
+      <div class="topbar-actions">
+        <button class="lib-gear" @click="libraryOpen = true" title="事件库管理">⚙</button>
+        <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="stirring">
+          {{ stirring ? '扰动中' : '🎬 扰动世界线' }}
+        </button>
+      </div>
     </div>
 
     <!-- 角色选择器 -->
@@ -48,6 +51,9 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 事件库管理弹窗 -->
+    <LibraryModal v-model="libraryOpen" type="event-types" />
 
     <!-- 可滚动内容区 -->
     <div class="events-scroll" @scroll.passive="onScroll" @wheel.passive="onPageWheel" @touchmove.passive="onPageTouchMove" ref="scrollEl">
@@ -137,11 +143,13 @@ import { useEventsStore } from '../stores/events.js'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import EventCard from '../components/EventCard.vue'
+import LibraryModal from '../components/LibraryModal.vue'
 
 const store = useEventsStore()
 const chat = useChatStore()
 const showHistory = ref(false)
 const showPicker = ref(false)
+const libraryOpen = ref(false)
 const pickerRef = ref(null)
 const stirring = ref(false)
 const pageEl = ref(null)
@@ -344,6 +352,24 @@ function onScroll() {
   padding-bottom: 40px;
 }
 .topbar-badge { font-size: 12px; background: var(--danger); color: #fff; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
+
+/* 顶栏右侧按钮组（齿轮 + 扰动世界线） */
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.lib-gear {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid transparent;
+  background: rgba(224, 123, 108, 0.08);
+  color: var(--accent);
+  font-size: 18px; line-height: 1;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.lib-gear:hover {
+  border-color: rgba(224, 123, 108, 0.55);
+  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  transform: rotate(30deg);
+}
 
 /* 扰动世界线按钮 — 和朋友圈一致 */
 .btn-post {

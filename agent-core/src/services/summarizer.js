@@ -82,7 +82,7 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
     ORDER BY end_msg_id DESC, id DESC LIMIT 1
   `).get(conversationId);
   const checkpointEndId = lastSummary?.end_msg_id || 0;
-  // 默认按 assistant 消息计数；群聊可改为按用户发言轮次计数。
+  // 默认按 assistant 消息计数；群聊按每轮一条 assistant raw 计数（用户/主动/冷场都算一轮）。
   const { count } = db.prepare(`
     SELECT COUNT(*) as count FROM raw_messages
     WHERE conversation_id = ? AND id > ? AND role = ?
