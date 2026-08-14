@@ -657,7 +657,9 @@ function onCharacterChange() {
   savePluginConfig();
   renderSavedStyles();
   // 切换角色后重新拉取插件本地数据，展示该角色已保存/提炼的最新内容
-  loadPersona().then(maybeAutoDerive);
+  loadPersona().then((loaded) => {
+    if (loaded) maybeAutoDerive();
+  });
 }
 const characterSelect = mountSelect($("character-select"), { placeholder: "（未选择角色）", onChange: onCharacterChange });
 const imageSelect = mountSelect($("image-mode-select"), { placeholder: "auto（由邻舍判断）", onChange: () => savePluginConfig() });
@@ -690,8 +692,8 @@ async function loadAll() {
     await loadConfig();
   } catch (err) { showStatus("读取插件配置失败: " + err.message + "（请先配置连接设置）", false); }
 
-  await loadPersona();
-  maybeAutoDerive();
+  const personaLoaded = await loadPersona();
+  if (personaLoaded) maybeAutoDerive();
 
   await loadLatestMemory();
 }
@@ -700,10 +702,13 @@ async function loadPersona() {
   try {
     const data = await api("/api/maibot/plugin-persona");
     personaData = (data && data.characters) ? { characters: data.characters } : { characters: {} };
+    renderSavedStyles();
+    return true;
   } catch (err) {
     showStatus("读取插件本地人格数据失败: " + err.message, false);
+    renderSavedStyles();
+    return false;
   }
-  renderSavedStyles();
 }
 
 async function loadConfig() {
@@ -716,8 +721,8 @@ async function loadConfig() {
   $("base-url").value = bridge.base_url || "http://127.0.0.1:3099";
   const charName = bridge.character_name || "";
   if (charName) {
-    const byName = characters.find((c) => c.name === charName);
-    characterSelect.setValue(byName ? byName.name : "", false);
+    const byCharacter = characters.find((c) => c.name === charName || c.display_name === charName);
+    characterSelect.setValue(byCharacter ? byCharacter.name : "", false);
   }
   $("memory-curation").checked = memory.memory_curation !== false;
   if (image.image_mode) imageSelect.setValue(image.image_mode, false);

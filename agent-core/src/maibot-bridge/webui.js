@@ -1,12 +1,13 @@
 /**
  * maibot-bridge/webui.js
- * 通过 MaiBot WebUI API 代理读取/更新邻舍桥接插件配置，供人格管理页调用。
+ * 插件配置通过 MaiBot WebUI API 读写；人格数据通过桥接插件的本机控制接口读写。
  * 连接设置（WebUI 地址与 Token）存放在邻舍 system_settings 中。
  */
 import { getSetting, setSetting } from '../db/index.js';
 
 const PLUGIN_ID = 'github.icecranberry.linshe-bridge';
 const COOKIE_TTL_MS = 6 * 60 * 60 * 1000;
+const PERSONA_CONTROL_URL = 'http://127.0.0.1:3199';
 
 let cachedCookie = null;
 let cachedAt = 0;
@@ -85,19 +86,24 @@ export async function updatePluginConfig(config) {
   return webuiFetch('PUT', `/api/webui/plugins/config/${PLUGIN_ID}`, { config });
 }
 
-async function callPluginApi(apiName, args = {}) {
-  const data = await webuiFetch('POST', `/api/webui/plugins/runtime/plugins/${PLUGIN_ID}/apis/call`, {
-    api_name: apiName,
-    version: '1',
-    args,
+async function personaControlFetch(method, path, body) {
+  const response = await fetch(`${PERSONA_CONTROL_URL}${path}`, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   });
-  return data.result || {};
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(`桥接插件人格接口 ${method} ${path} 失败: HTTP ${response.status} ${data.error || ''}`.trim());
+  }
+  return data;
 }
 
 export async function getPluginPersona() {
-  return callPluginApi('persona.get');
+  return personaControlFetch('GET', '/persona');
 }
 
 export async function updatePluginPersona(persona) {
-  return callPluginApi('persona.update', persona);
+  return personaControlFetch('PUT', '/persona', persona);
 }
