@@ -45,6 +45,7 @@
                 <span class="admin-link-name">MaiBot 后台</span>
                 <span class="admin-link-meta">
                   <span class="admin-link-tag">QQ 机器人</span>
+                  <span class="admin-link-token">默认 Token：<b>MaiBot.admin</b></span>
                   <span class="admin-link-url">127.0.0.1:8001</span>
                 </span>
               </span>
@@ -58,6 +59,7 @@
                 <span class="admin-link-name">Snowluma 后台</span>
                 <span class="admin-link-meta">
                   <span class="admin-link-tag">消息接收器</span>
+                  <span class="admin-link-token">默认 Token：<b>Snowluma.admin</b></span>
                   <span class="admin-link-url">127.0.0.1:5099</span>
                 </span>
               </span>
@@ -602,6 +604,13 @@ textarea.fi { font-family: inherit; resize: vertical; }
   background: rgba(224, 123, 108, 0.14);
 }
 .admin-link-url { font-size: 11px; color: var(--text-secondary); font-family: ui-monospace, monospace; white-space: nowrap; }
+.admin-link-token {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  background: rgba(224, 123, 108, 0.12);
+  border: 1px solid rgba(224, 123, 108, 0.24);
+}
+.admin-link-token b { color: var(--accent); font-family: ui-monospace, monospace; font-weight: 700; }
 .admin-link-open {
   margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
   padding: 6px 10px; border-radius: 999px;
