@@ -16,7 +16,13 @@
       :mobile-open="mobileSidebarOpen"
       @char-selected="closeMobileSidebar"
     />
-    <router-view />
+    <div class="page-host">
+      <router-view v-slot="{ Component }">
+        <Transition name="page">
+          <component v-if="Component" :is="Component" :key="route.path" />
+        </Transition>
+      </router-view>
+    </div>
   </div>
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
@@ -228,6 +234,21 @@ html, body { background: var(--bg-primary); }
 #app { background: transparent; display: flex; flex-direction: column; }
 
 .app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
+.page-host { position: relative; flex: 1; min-width: 0; }
+/* Route transition: 0.25s fade between pages */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.25s ease;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
 #app { position: relative; z-index: 1; }
 
 button {

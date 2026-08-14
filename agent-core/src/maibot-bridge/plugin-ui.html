@@ -451,9 +451,6 @@
 
 <section>
   <h2>② 插件配置</h2>
-  <label>邻舍服务地址
-    <input type="text" id="base-url" placeholder="http://127.0.0.1:3099">
-  </label>
   <label>注入角色
     <span class="select-wrap" id="character-select">
       <button type="button" class="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="注入角色">
@@ -718,7 +715,6 @@ async function loadConfig() {
   const bridge = pluginConfig.bridge || {};
   const memory = pluginConfig.memory || {};
   const image = pluginConfig.image || {};
-  $("base-url").value = bridge.base_url || "http://127.0.0.1:3099";
   const charName = bridge.character_name || "";
   if (charName) {
     const byCharacter = characters.find((c) => c.name === charName || c.display_name === charName);
@@ -787,7 +783,7 @@ function buildPluginConfigBody() {
     config: {
       plugin: { enabled: true },
       bridge: {
-        base_url: $("base-url").value.trim() || "http://127.0.0.1:3099",
+        base_url: (pluginConfig.bridge && pluginConfig.bridge.base_url) || "http://127.0.0.1:3099",
         character_name: characterSelect.getValue(),
       },
       memory: { memory_curation: $("memory-curation").checked },
@@ -812,7 +808,7 @@ async function savePluginConfig() {
     if (pluginConfigSaveAgain) { pluginConfigSaveAgain = false; savePluginConfig(); }
   }
 }
-["base-url", "context-max-messages", "poll-interval", "poll-timeout"].forEach((id) => {
+["context-max-messages", "poll-interval", "poll-timeout"].forEach((id) => {
   $(id).addEventListener("change", savePluginConfig);
 });
 $("memory-curation").addEventListener("change", savePluginConfig);

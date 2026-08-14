@@ -1503,3 +1503,49 @@ export function saveTopicBatch(items) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
   })
 }
+
+// ── MaiBot 桥接（供系统设置内「MaiBot 桥接」页面调用）──
+async function maibotFetch(path, options = {}) {
+  const headers = {}
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+  const res = await fetch(`${BASE}/maibot${path}`, {
+    ...options,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  })
+  let data = null
+  try { data = await res.json() } catch { data = null }
+  if (!res.ok) throw new Error((data && data.error) || (`HTTP ${res.status}`))
+  return data
+}
+
+export function maibotGetWebuiSettings() {
+  return maibotFetch('/webui-settings')
+}
+export function maibotSaveWebuiSettings(token) {
+  return maibotFetch('/webui-settings', { method: 'POST', body: { token } })
+}
+export function maibotListCharacters() {
+  return maibotFetch('/characters')
+}
+export function maibotGetPluginConfig() {
+  return maibotFetch('/plugin-config')
+}
+export function maibotUpdatePluginConfig(config) {
+  return maibotFetch('/plugin-config', { method: 'PUT', body: { config } })
+}
+export function maibotGetPluginPersona() {
+  return maibotFetch('/plugin-persona')
+}
+export function maibotUpdatePluginPersona(payload) {
+  return maibotFetch('/plugin-persona', { method: 'PUT', body: payload })
+}
+export function maibotDeriveStyle(basePrompt) {
+  return maibotFetch('/derive-style', { method: 'POST', body: { base_prompt: basePrompt } })
+}
+export function maibotGetLatestMemory() {
+  return maibotFetch('/latest-memory')
+}
+export function maibotDeleteLatestMemory(sessionId) {
+  return maibotFetch(`/latest-memory?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}

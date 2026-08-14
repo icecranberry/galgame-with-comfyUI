@@ -572,6 +572,38 @@
         </button>
       </div>
 
+      <!-- MaiBot 桥接：入口卡片（复用「聊天记忆」入口样式） -->
+      <div class="card memory-settings-card maibot-settings-card">
+        <div class="memory-settings-header">
+          <div>
+            <h3>MaiBot 桥接</h3>
+            <p>管理注入到 MaiBot 主聊天流的人格信息（角色卡 / 风格 / 记忆）与全部插件参数</p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="memory-settings-entry"
+          aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
+          @click="router.push('/settings/maibot')"
+        >
+          <span class="memory-entry-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 6h16v14H4zM9 3h6M10 3v3M14 3v3M7 11h2M7 14h4M15 11h2M15 14h2" />
+            </svg>
+          </span>
+          <span class="memory-entry-copy">
+            <span class="memory-entry-title">人格管理</span>
+            <span class="memory-entry-desc">连接设置 · 插件配置 · 人格信息 · 最新记忆整理</span>
+          </span>
+          <span class="memory-entry-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </button>
+      </div>
+
     </div>
 
   </div>
@@ -1770,37 +1802,22 @@ function resetTestPrompts() {
   box-shadow: 0 2px 10px rgba(224, 123, 108, 0.35);
 }
 
-/* ── Tab 切换滑动动画 ── */
 .comfy-form-stage {
   overflow: hidden;
   position: relative;
 }
-/* forward: 新内容从右侧滑入，旧内容向左滑出 */
+/* ── Tab 切换过渡：0.25s 纯淡入淡出 ── */
 .tab-slide-forward-enter-active,
-.tab-slide-forward-leave-active {
-  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.tab-slide-forward-enter-from {
-  opacity: 0;
-  transform: translateX(30px);
-}
-.tab-slide-forward-leave-to {
-  opacity: 0;
-  transform: translateX(-30px);
-}
-
-/* back: 新内容从左侧滑入，旧内容向右滑出 */
+.tab-slide-forward-leave-active,
 .tab-slide-back-enter-active,
 .tab-slide-back-leave-active {
-  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.25s ease;
 }
-.tab-slide-back-enter-from {
-  opacity: 0;
-  transform: translateX(-30px);
-}
+.tab-slide-forward-enter-from,
+.tab-slide-forward-leave-to,
+.tab-slide-back-enter-from,
 .tab-slide-back-leave-to {
   opacity: 0;
-  transform: translateX(30px);
 }
 
 .fi:focus { border-color: var(--accent); }

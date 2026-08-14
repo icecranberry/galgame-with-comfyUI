@@ -5,6 +5,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import MemorySettingsView from './views/MemorySettingsView.vue'
+import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -29,9 +30,11 @@ const routes = [
   { path: '/mailbox', component: MailboxView },
   { path: '/settings', component: SettingsView },
   { path: '/settings/memory', component: MemorySettingsView },
+  { path: '/settings/maibot', component: MaibotBridgeView },
 ]
 
 const router = createRouter({ history: createWebHashHistory(), routes })
 const pinia = createPinia()
 
-createApp(App).use(router).use(pinia).mount('#app')
+const app = createApp(App).use(router).use(pinia)
+router.isReady().then(() => app.mount('#app'))

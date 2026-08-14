@@ -740,11 +740,10 @@ button:disabled { opacity: .55; cursor: default; }
 /* ── 列表/状态切换过渡 ── */
 .fade-enter-active, .fade-leave-active { transition: opacity .25s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-.list-enter-active { transition: all .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
-.list-leave-active { transition: all .25s ease; position: absolute; left: 0; right: 0; }
+.list-enter-active, .list-leave-active { transition: opacity .25s ease; }
+.list-leave-active { position: absolute; left: 0; right: 0; }
 .list-move { transition: transform .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
-.list-enter-from { opacity: 0; transform: translateY(-8px); }
-.list-leave-to { opacity: 0; transform: translateX(12px); }
+.list-enter-from, .list-leave-to { opacity: 0; }
 code { font-family: ui-monospace, monospace; }
 .switch { margin: 0; position: relative; width: 42px; height: 24px; cursor: pointer; }
 .switch input { display: none; }.switch span { position: absolute; inset: 0; border-radius: 14px; background: #c9c3ba; transition: .2s; }

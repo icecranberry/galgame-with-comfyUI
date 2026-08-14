@@ -8,6 +8,7 @@ import { getSetting, setSetting } from '../db/index.js';
 const PLUGIN_ID = 'github.icecranberry.linshe-bridge';
 const COOKIE_TTL_MS = 6 * 60 * 60 * 1000;
 const PERSONA_CONTROL_URL = 'http://127.0.0.1:3199';
+const DEFAULT_TOKEN = 'MaiBot.admin';
 
 let cachedCookie = null;
 let cachedAt = 0;
@@ -19,7 +20,7 @@ function getWebuiUrl() {
 export function getWebuiSettings() {
   return {
     url: getSetting('maibot_webui_url') || 'http://127.0.0.1:8001',
-    token: getSetting('maibot_webui_token') || '',
+    token: getSetting('maibot_webui_token') || DEFAULT_TOKEN,
   };
 }
 
@@ -31,7 +32,7 @@ export function setWebuiSettings({ url, token } = {}) {
 }
 
 async function login() {
-  const token = String(getSetting('maibot_webui_token') || '').trim();
+  const token = String(getSetting('maibot_webui_token') || DEFAULT_TOKEN).trim();
   if (!token) {
     throw new Error('未配置 MaiBot WebUI Token，请先在人格管理页填写并保存');
   }
