@@ -1,40 +1,48 @@
 <template>
   <Teleport v-if="ready" to="body">
-    <div class="toast-container __toast__root" aria-live="polite" style="z-index: 99999; isolation: isolate;">
-      <TransitionGroup name="toast-item">
+    <div class="live-toast-host __toast__root" aria-live="polite" style="z-index: 99999; isolation: isolate;">
+      <TransitionGroup name="lt" @before-leave="pinLeaving">
         <div
           v-for="item in toasts"
           :key="item.id"
-          class="toast-card"
-          :class="'toast-' + item.type"
+          class="live-toast"
+          :class="'live-toast--' + item.type"
+          :style="{ '--lt-life': item.duration + 'ms' }"
+          @mouseenter="pauseItem(item)"
+          @mouseleave="resumeItem(item)"
           @click="dismiss(item.id)"
         >
-          <svg class="toast-icon" viewBox="0 0 24 24" fill="none">
-            <!-- error -->
-            <template v-if="item.type === 'error'">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
-              <line x1="15" y1="9" x2="9" y2="15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <svg class="live-toast-mark" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <!-- success -->
+            <template v-if="item.type === 'success'">
+              <path d="M4.6 10.2 8 13.6l7.4-7.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </template>
             <!-- warning -->
             <template v-else-if="item.type === 'warning'">
-              <path d="M12 2L2 22h20L12 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <line x1="12" y1="10" x2="12" y2="15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <circle cx="12" cy="18.5" r="1" fill="currentColor" stroke="none"/>
+              <path d="M10 3.6 16.85 15.7H3.15L10 3.6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="M10 8.9v3.2M10 14.1h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </template>
-            <!-- success -->
-            <template v-else-if="item.type === 'success'">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- error -->
+            <template v-else-if="item.type === 'error'">
+              <circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.6"/>
+              <path d="m7.7 7.7 4.6 4.6M12.3 7.7l-4.6 4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </template>
             <!-- info -->
             <template v-else>
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/>
-              <line x1="12" y1="8" x2="12" y2="13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/>
+              <circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M10 8.7V13M10 5.9h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </template>
           </svg>
-          <span class="toast-text">{{ item.message }}</span>
+          <div class="live-toast-body">
+            <p class="live-toast-message" :class="{ 'is-title': item.description }">{{ item.message }}</p>
+            <p v-if="item.description" class="live-toast-note">{{ item.description }}</p>
+          </div>
+          <button class="live-toast-close" type="button" aria-label="关闭" @click.stop="dismiss(item.id)">
+            <svg viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M1.6 1.6l6.8 6.8M8.4 1.6 1.6 8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <span class="live-toast-life" aria-hidden="true"></span>
         </div>
       </TransitionGroup>
     </div>
@@ -44,22 +52,81 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
+const MAX_VISIBLE = 4
+
 let _id = 0
 const toasts = ref([])
 const ready = ref(false)
 
-function show(message, type = 'info', duration) {
+// 兼容旧签名 show(message, type, duration),也接受 show({ message, description, type, duration })
+function show(message, type = 'info', duration, description) {
+  if (message && typeof message === 'object') {
+    const opts = message
+    message = opts.message
+    type = opts.type ?? type
+    duration = opts.duration ?? duration
+    description = opts.description ?? description
+  }
   if (duration === undefined) {
     duration = type === 'error' ? 4500 : 3000
   }
-  const id = ++_id
-  toasts.value.push({ id, message, type })
-  setTimeout(() => dismiss(id), duration)
+  const item = {
+    id: ++_id,
+    message: String(message ?? ''),
+    description: description || '',
+    type,
+    duration,
+    elapsed: 0,
+    startedAt: performance.now(),
+    timer: null,
+  }
+  item.timer = setTimeout(() => dismiss(item.id), duration)
+  // 新 Toast 落在最上方
+  toasts.value.unshift(item)
+  // 超出上限时最早的先离场
+  while (toasts.value.length > MAX_VISIBLE) {
+    dismiss(toasts.value[toasts.value.length - 1].id)
+  }
 }
 
 function dismiss(id) {
   const idx = toasts.value.findIndex(t => t.id === id)
-  if (idx !== -1) toasts.value.splice(idx, 1)
+  if (idx === -1) return
+  const [item] = toasts.value.splice(idx, 1)
+  clearTimeout(item.timer)
+}
+
+// 悬停暂停:冻结剩余时长,与底部生命周期线的 animation-play-state 同步
+function pauseItem(item) {
+  if (!item.timer) return
+  clearTimeout(item.timer)
+  item.timer = null
+  item.elapsed += performance.now() - item.startedAt
+}
+
+function resumeItem(item) {
+  if (item.timer) return
+  if (!toasts.value.some(t => t.id === item.id)) return
+  const remaining = item.duration - item.elapsed
+  if (remaining <= 60) {
+    dismiss(item.id)
+    return
+  }
+  item.startedAt = performance.now()
+  item.timer = setTimeout(() => dismiss(item.id), remaining)
+}
+
+// 退场时先把卡片钉在原位,让堆叠中的其余卡片平滑上移
+// 钉位以宿主右缘为基准:宿主右缘固定(right: 24px),不会因失去唯一子元素而塌缩
+function pinLeaving(el) {
+  const host = el.parentElement
+  if (!host) return
+  const hostRect = host.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  el.style.right = `${hostRect.right - rect.right}px`
+  el.style.top = `${rect.top - hostRect.top}px`
+  el.style.width = `${rect.width}px`
+  el.style.height = `${rect.height}px`
 }
 
 onMounted(() => {
@@ -77,93 +144,172 @@ defineExpose({ show })
 </style>
 
 <style scoped>
-.toast-container {
+/* ── 宿主:固定右上角,不占布局空间 ── */
+.live-toast-host {
   position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 24px;
+  right: 24px;
   z-index: 99999;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 12px;
   pointer-events: none;
 }
 
-.toast-card {
+/* ── 卡片:暖灰纸张质感的状态卡 ── */
+.live-toast {
+  position: relative;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
-  border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.45;
-  pointer-events: auto;
+  gap: 12px;
+  width: max-content;
+  min-width: 280px;
+  max-width: 380px;
+  padding: 15px 14px 15px 18px;
+  background: #F7F4EF;
+  border: 1px solid rgba(224, 123, 108, 0.18);
+  /* 边框染上低透明度状态色,与图标、生命周期线呼应;color-mix 不支持时退回上面的暖色边 */
+  border-color: color-mix(in srgb, var(--lt-status, #E07B6C) 30%, transparent);
+  border-radius: 18px;
+  box-shadow: 0 12px 35px rgba(50, 40, 35, 0.12);
+  overflow: hidden;
   cursor: pointer;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
-  max-width: min(480px, calc(100vw - 32px));
+  pointer-events: auto;
   word-break: break-word;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.live-toast:hover {
+  box-shadow: 0 14px 38px rgba(50, 40, 35, 0.15);
+  border-color: color-mix(in srgb, var(--lt-status, #E07B6C) 50%, transparent);
 }
 
-.toast-icon {
-  width: 20px;
-  height: 20px;
+/* 状态色只落在标记与生命周期线上,不染整张卡;四态色相彼此拉开 */
+.live-toast--success { --lt-status: #4E9C72; }  /* 茶绿 */
+.live-toast--info    { --lt-status: #E07B6C; }  /* 品牌:珊瑚 */
+.live-toast--warning { --lt-status: #D8A03A; }  /* 琥珀 */
+.live-toast--error   { --lt-status: #C24A3E; }  /* 绯红 */
+
+.live-toast-mark {
+  width: 21px;
+  height: 21px;
   flex-shrink: 0;
+  color: var(--lt-status, #E07B6C);
 }
 
-/* ── type styles ── */
-.toast-error {
-  background: #fff0f0;
-  border: 1px solid #f5c0c0;
-  color: #d9363e;
+.live-toast-body {
+  flex: 1;
+  min-width: 0;
 }
-.toast-error .toast-icon { color: #d9363e; }
+.live-toast-message {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: #3E3A36;
+}
+.live-toast-message.is-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.live-toast-note {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #8B8179;
+}
 
-.toast-warning {
-  background: #fff8e8;
-  border: 1px solid #f0d080;
-  color: #b8860b;
+.live-toast-close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #B4AA9E;
+  opacity: 0.55;
+  transition: opacity 0.18s ease, color 0.18s ease, background-color 0.18s ease;
 }
-.toast-warning .toast-icon { color: #b8860b; }
+.live-toast:hover .live-toast-close { opacity: 0.9; }
+.live-toast-close:hover {
+  opacity: 1;
+  color: #6F655C;
+  background: rgba(62, 58, 54, 0.06);
+}
+.live-toast-close svg {
+  width: 10px;
+  height: 10px;
+}
 
-.toast-success {
-  background: #f0faf0;
-  border: 1px solid #b8d8b8;
-  color: #389e0d;
+/* ── 生命周期进度线:随剩余时间从右向左收缩 ── */
+.live-toast-life {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--lt-status, #E07B6C);
+  transform-origin: right center;
+  animation: lt-life var(--lt-life, 3000ms) linear forwards;
 }
-.toast-success .toast-icon { color: #389e0d; }
+.live-toast:hover .live-toast-life {
+  animation-play-state: paused;
+}
+@keyframes lt-life {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
 
-.toast-info {
-  background: #faf6f4;
-  border: 1px solid #e0d0c8;
-  color: var(--text-bright);
+/* ── 进场:从右侧轻轻探出来 ── */
+.lt-enter-active {
+  animation: lt-pop-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.toast-info .toast-icon { color: var(--accent); }
+@keyframes lt-pop-in {
+  0%   { opacity: 0; transform: translateX(28px) scale(0.97); }
+  58%  { opacity: 1; transform: translateX(-1.5px) scale(1.004); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
 
-/* ── TransitionGroup animations ── */
-.toast-item-enter-active {
-  transition: all 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+/* ── 退场:比进场更快,轻轻向右缩回 ── */
+.lt-leave-active {
+  position: absolute;
+  pointer-events: none;
+  transition: opacity 200ms cubic-bezier(0.45, 0, 0.85, 0.6),
+              transform 200ms cubic-bezier(0.45, 0, 0.85, 0.6);
 }
-.toast-item-leave-active {
-  transition: all 0.22s cubic-bezier(0.55, 0.06, 0.68, 0.19);
-}
-.toast-item-enter-from {
+.lt-leave-to {
   opacity: 0;
-  transform: translateY(-16px) scale(0.96);
+  transform: translateX(12px) translateY(-4px);
 }
-.toast-item-leave-to {
-  opacity: 0;
-  transform: translateY(-8px) scale(0.97);
+
+/* ── 堆叠中的既有卡片平滑让位 ── */
+.lt-move {
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast-item-enter-active,
-  .toast-item-leave-active {
-    transition: opacity 0.15s ease;
+  .lt-enter-active { animation: lt-fade-in 160ms ease both; }
+  .lt-leave-active { transition: opacity 120ms ease; }
+  .lt-leave-to { transform: none; }
+  .lt-move { transition: transform 160ms ease; }
+}
+@keyframes lt-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── 移动端:收紧边距,宽度不越界 ── */
+@media (max-width: 640px) {
+  .live-toast-host {
+    top: max(12px, env(safe-area-inset-top, 12px));
+    right: 12px;
   }
-  .toast-item-enter-from,
-  .toast-item-leave-to {
-    transform: none;
+  .live-toast {
+    min-width: min(280px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
   }
 }
 </style>

@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
-import { resetClient, chatSync } from '../llm/llm-client.js';
+import { resetClient, chatSync, resetFreeEggFailureCount } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
@@ -235,6 +235,7 @@ router.put('/llm/free-egg', (req, res) => {
     return res.status(400).json({ error: 'enabled must be boolean' });
   }
   updateFreeEggEnabled(enabled);
+  resetFreeEggFailureCount();
   resetClient();
   res.json({ ok: true, ...getLlmConfig() });
 });

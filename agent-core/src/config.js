@@ -19,7 +19,7 @@ export const config = {
   dbPath: process.env.DB_PATH || './data/agent.db',
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
-    // 每日免费鸡蛋开关（DB system_settings 的 llm_free_egg 持久化）。
+    // 每日免费鸡蛋开关（仅内存，不做持久化：重启后默认关闭）。
     // 开启后通过下方 getter 覆盖生效值：免 Key 走免费端点 + 强制关闭思考；
     // 用户自有的 Key/地址/模型保存在 _* 字段中，关闭开关即原样恢复。
     freeEgg: false,
@@ -314,12 +314,12 @@ export function getLlmConfig() {
 
 /**
  * 每日免费鸡蛋开关：开启后 LLM 请求走 opencode zen 免费端点（免 Key、强制关闭思考），
- * 用户自有的 Key/地址/模型配置保持原样，关闭后立即恢复
+ * 用户自有的 Key/地址/模型配置保持原样，关闭后立即恢复。
+ * 仅内存状态，不写 DB/.env：重启后回到关闭状态。
  */
 export function updateFreeEggEnabled(enabled) {
   const boolVal = enabled === true || enabled === 'true';
   config.llm.freeEgg = boolVal;
-  persistSettingSync('llm_free_egg', String(boolVal));
   console.log(`[config] freeEgg = ${boolVal}`);
   return { ok: true };
 }

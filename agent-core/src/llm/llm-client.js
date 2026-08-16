@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { config } from '../config.js';
+import { config, updateFreeEggEnabled } from '../config.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 
@@ -49,6 +49,39 @@ function getClient() {
 
 export function resetClient() {
   _client = null;
+}
+
+// ── 免费鸡蛋自动熔断：连续 2 次失败尝试（含重试中间态）即触发，
+//    关闭鸡蛋并用恢复的自有配置立即重发当前请求 ──
+const FREE_EGG_MAX_FAILURES = 2;
+let _freeEggFailures = 0;
+
+/** 手动开关鸡蛋时清零计数 */
+export function resetFreeEggFailureCount() {
+  _freeEggFailures = 0;
+}
+
+function recordFreeEggSuccess() {
+  if (_freeEggFailures > 0) _freeEggFailures = 0;
+}
+
+/**
+ * 每次失败尝试都计数；连续达到上限立即熔断（关闭鸡蛋 + 重置客户端）。
+ * @returns {boolean} 本次调用是否触发了熔断；true 时调用方应改用恢复后的自有配置重发
+ */
+function recordFreeEggFailure(err) {
+  if (!config.llm.freeEgg) return false;
+  _freeEggFailures++;
+  const msg = err?.message || String(err || '');
+  if (_freeEggFailures < FREE_EGG_MAX_FAILURES) {
+    console.warn(`[free-egg] 连续失败 ${_freeEggFailures}/${FREE_EGG_MAX_FAILURES}：${msg}`);
+    return false;
+  }
+  updateFreeEggEnabled(false);
+  resetClient();
+  _freeEggFailures = 0;
+  console.warn(`[free-egg] 连续失败达到 ${FREE_EGG_MAX_FAILURES} 次，已自动关闭每日免费鸡蛋，改用自有 LLM 配置（最后错误：${msg}）`);
+  return true;
 }
 
 /**
@@ -106,10 +139,24 @@ function mergeConsecutiveRoles(messages) {
 
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
+ * 外层包装：免费鸡蛋熔断触发时（错误带 __freeEggFailover 标记），
+ * 立即用恢复后的自有配置把本次请求重发一遍（model/thinking 等默认值重新求值）
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
-export async function chatSync(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+export async function chatSync(messages, opts = {}) {
+  try {
+    return await _chatSyncInner(messages, opts);
+  } catch (err) {
+    if (err && err.__freeEggFailover) {
+      console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'sync'})`);
+      return await _chatSyncInner(messages, opts);
+    }
+    throw err;
+  }
+}
+
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
@@ -170,7 +217,8 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       console.log((content || '').slice(0, outputLimit));
       logUsage(label, res.usage);
       recordLlmCall(label, res.usage);
-      console.log('═══════════════════════════════════════════════\n');
+      console.log('═════════════════════════════════════════════\n');
+      recordFreeEggSuccess();
 
       return content;
     } catch (err) {
@@ -178,6 +226,16 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       const status = err?.status || err?.response?.status;
       const code = err?.code || err?.error?.code || '';
       const msg = err?.message || '';
+
+      // 每次失败尝试都计数；熔断触发时不再用免费端点继续重试，
+      // 标记后抛给外层立即改用自有配置重发
+      if (recordFreeEggFailure(err)) {
+        console.log(requestLog);
+        console.log(`[${providerLabel()} ← ${label}] ❌ 免费鸡蛋熔断: status=${status}, code=${code}, msg=${msg}`);
+        console.log('═════════════════════════════════════════════\n');
+        err.__freeEggFailover = true;
+        throw err;
+      }
 
       if (attempt < retries && isRetryableError(err)) {
         console.warn(
@@ -190,7 +248,7 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}] ❌ 最终失败: status=${status}, code=${code}, msg=${msg}`);
       recordLlmCall(label, null, { failed: true });
-      console.log('═══════════════════════════════════════════════\n');
+      console.log('═════════════════════════════════════════════\n');
       throw err;
     }
   }
@@ -202,9 +260,27 @@ export async function chatSync(messages, { model = config.llm.model || 'deepseek
 
 /**
  * 流式聊天（用于对话）
+ * 外层包装：免费鸡蛋熔断触发且尚未输出任何内容时，立即用恢复后的自有配置重发一遍；
+ * 已输出过内容则不重发（避免重复输出），直接抛错
  * @returns {AsyncGenerator<string>}
  */
-export async function* chatStream(messages, {
+export async function* chatStream(messages, opts = {}) {
+  let anyYielded = false;
+  try {
+    for await (const delta of _chatStreamInner(messages, opts)) {
+      anyYielded = true;
+      yield delta;
+    }
+  } catch (err) {
+    if (!(err && err.__freeEggFailover && !anyYielded)) throw err;
+    console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'stream'})`);
+    for await (const delta of _chatStreamInner(messages, opts)) {
+      yield delta;
+    }
+  }
+}
+
+async function* _chatStreamInner(messages, {
   model = config.llm.model || 'deepseek-v4-flash',
   max_tokens = 4096,
   temperature = 0.7,
@@ -265,6 +341,7 @@ export async function* chatStream(messages, {
         yield delta;
       }
     }
+    recordFreeEggSuccess();
 
     console.log(`[${providerLabel()} ← ${label} end]`);
     console.log((total || '(empty)').slice(0, 2000));
@@ -275,6 +352,10 @@ export async function* chatStream(messages, {
   } catch (err) {
     console.error(`[${providerLabel()} ← ${label}] stream error:`, err.message);
     recordLlmCall(label, null, { failed: true });
+    // 熔断触发时标记错误，交给外层用自有配置重发
+    if (recordFreeEggFailure(err)) {
+      err.__freeEggFailover = true;
+    }
     throw err;
   } finally {
     if (_limitEnabled()) releaseSlot();

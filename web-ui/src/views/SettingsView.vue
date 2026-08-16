@@ -420,6 +420,7 @@
           <div class="free-egg-copy">
             <div class="free-egg-title">正在使用opencode go的deepseek-v4-flash-free</div>
             <div class="free-egg-desc">每5小时每个IP限额200次请求</div>
+            <div class="free-egg-hint">接口连续失败 2 次会自动关闭鸡蛋，改用自有配置重试</div>
           </div>
         </div>
       </div>
@@ -2222,6 +2223,7 @@ function resetTestPrompts() {
 .free-egg-copy { min-width: 0; }
 .free-egg-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .free-egg-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.free-egg-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.75; margin-top: 2px; }
 .llm-model-picker { position: relative; margin-bottom: 14px;}
 .llm-model-row { display: flex; align-items: stretch; gap: 8px; }
 .llm-model-combobox { position: relative; min-width: 0; flex: 1; }

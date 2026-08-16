@@ -282,17 +282,6 @@
       </Transition>
     </Teleport>
 
-    <!-- 搜索提示 Toast -->
-    <Teleport to="body">
-      <Transition name="toast-slide">
-        <div v-if="toast.show" class="search-toast" :class="toast.type">
-          <span class="toast-icon">{{ toast.type === 'success' ? '📚' : '🔍' }}</span>
-          <span class="toast-msg">{{ toast.message }}</span>
-          <button class="toast-close" @click="toast.show = false">✕</button>
-        </div>
-      </Transition>
-    </Teleport>
-
     <!-- ═══════════════════════════════════════════
          世界观设置弹窗
          ═══════════════════════════════════════════ -->
@@ -738,22 +727,9 @@ function stopLoadingTips() {
   if (_tipTimer) { clearInterval(_tipTimer); _tipTimer = null }
 }
 
-// Toast 冒泡提示
-const toast = reactive({
-  show: false,
-  message: '',
-  type: 'info', // 'info' | 'success'
-  timer: null,
-})
-
+// Toast 冒泡提示 —— 统一走全局 Live Toast,长文案停留 5s
 function showToast(message, type = 'info') {
-  if (toast.timer) clearTimeout(toast.timer)
-  toast.message = message
-  toast.type = type
-  toast.show = true
-  toast.timer = setTimeout(() => {
-    toast.show = false
-  }, 5000)
+  toastFn?.(message, type, 5000)
 }
 
 function openRecruit() {
@@ -2771,73 +2747,4 @@ onMounted(async () => {
   }
 }
 
-/* ═══════════════════════════════════════
-   Toast 冒泡提示
-   ═══════════════════════════════════════ */
-.search-toast {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10001;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 20px;
-  border-radius: 12px;
-  font-size: 14px;
-  max-width: 520px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(12px);
-  border: 1px solid;
-}
-.search-toast.info {
-  background: rgba(30, 40, 60, 0.92);
-  border-color: rgba(120, 140, 200, 0.3);
-  color: #c8d6f8;
-}
-.search-toast.success {
-  background: rgba(20, 50, 30, 0.92);
-  border-color: rgba(80, 180, 100, 0.35);
-  color: #b8e8c8;
-}
-.toast-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-}
-.toast-msg {
-  flex: 1;
-  line-height: 1.5;
-}
-.toast-close {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: inherit;
-  opacity: 0.5;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  transition: opacity 0.2s;
-}
-.toast-close:hover {
-  opacity: 1;
-}
-
-/* Toast transition */
-.toast-slide-enter-active {
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.toast-slide-leave-active {
-  transition: all 0.25s ease-in;
-}
-.toast-slide-enter-from {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-20px);
-}
-.toast-slide-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-12px);
-}
 </style>
