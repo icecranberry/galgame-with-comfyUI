@@ -485,6 +485,17 @@ export async function updateLlmConfig(data) {
   return res.json()
 }
 
+/** 每日免费鸡蛋开关（opencode zen 免费端点，免 Key） */
+export async function setLlmFreeEgg(enabled) {
+  const res = await fetch(`${BASE}/config/llm/free-egg`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || '切换免费鸡蛋失败')
+  return result
+}
+
 export async function fetchLlmApiKey() {
   const res = await fetch(`${BASE}/config/llm/key`)
   const result = await res.json().catch(() => ({}))

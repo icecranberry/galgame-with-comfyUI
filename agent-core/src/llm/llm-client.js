@@ -36,6 +36,12 @@ function getClient() {
     if (headers && Object.keys(headers).length > 0) {
       opts.defaultHeaders = headers;
     }
+    // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用占位符绕过），
+    // 且值为 null 的请求头会被 SDK 从请求中删除 → 真正不发送 Authorization
+    if (config.llm.freeEgg) {
+      opts.apiKey = 'free-egg';
+      opts.defaultHeaders = { Authorization: null, ...(opts.defaultHeaders || {}) };
+    }
     _client = new OpenAI(opts);
   }
   return _client;

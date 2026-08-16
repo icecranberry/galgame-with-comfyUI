@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -225,6 +225,17 @@ router.put('/llm', (req, res) => {
 
   syncActiveLlmProfile();
 
+  res.json({ ok: true, ...getLlmConfig() });
+});
+
+// PUT /api/config/llm/free-egg — 每日免费鸡蛋开关（opencode zen 免费端点，免 Key）
+router.put('/llm/free-egg', (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be boolean' });
+  }
+  updateFreeEggEnabled(enabled);
+  resetClient();
   res.json({ ok: true, ...getLlmConfig() });
 });
 

@@ -162,7 +162,19 @@
 
       <!-- LLM API 设置 -->
       <div class="card">
-        <h3>LLM API 设置</h3>
+        <div class="llm-card-header">
+          <h3>LLM API 设置</h3>
+          <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
+          <button
+            type="button"
+            :class="['free-egg-btn', { active: freeEgg }]"
+            :disabled="freeEggBusy"
+            :title="freeEgg ? '点击关闭，恢复自有 LLM 配置' : '点击开启：免 Key 使用 opencode 免费模型，每5小时每IP限200次'"
+            @click="toggleFreeEgg"
+          >{{ freeEgg ? '🥚 免费鸡蛋享用中' : '🥚 每日免费鸡蛋' }}</button>
+        </div>
+
+        <template v-if="!freeEgg">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
 
@@ -399,6 +411,16 @@
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
           <span v-if="llmSaved" class="smsg">已保存</span>
+        </div>
+        </template>
+
+        <!-- 免费鸡蛋模式：隐藏全部 LLM 配置项，仅显示说明 -->
+        <div v-else class="free-egg-notice">
+          <span class="free-egg-icon" aria-hidden="true">🥚</span>
+          <div class="free-egg-copy">
+            <div class="free-egg-title">正在使用opencode go的deepseek-v4-flash-free</div>
+            <div class="free-egg-desc">每5小时每个IP限额200次请求</div>
+          </div>
         </div>
       </div>
 
@@ -792,7 +814,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -965,6 +987,7 @@ async function removeFavorite(id) {
 
 // ── LLM API ──
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
+const freeEgg = ref(false)
 const llmApiKey = ref('')
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
@@ -1031,6 +1054,30 @@ const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
+
+// 每日免费鸡蛋：点击按钮开/关；开 = 走 opencode zen 免费端点（免 Key、强制关思考），关 = 恢复自有配置
+const freeEggBusy = ref(false)
+async function toggleFreeEgg() {
+  if (freeEggBusy.value) return
+  freeEggBusy.value = true
+  freeEgg.value = !freeEgg.value
+  try {
+    const result = await setLlmFreeEgg(freeEgg.value)
+    if (result.ok) {
+      llmPreview.value = { ...result }
+      settingsStore.setHasApiKey(result.hasApiKey)
+      llmApiKey.value = ''
+      llmDirty.value = false
+      llmSaved.value = false
+      toastFn?.(freeEgg.value ? '已开启每日免费鸡蛋 🥚' : '已恢复自有 LLM 配置', 'success')
+    }
+  } catch (err) {
+    freeEgg.value = !freeEgg.value
+    toastFn?.('切换免费鸡蛋失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    freeEggBusy.value = false
+  }
+}
 
 function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
@@ -1314,6 +1361,7 @@ onMounted(async () => {
     }
     weatherCity.value = data.weather?.city || ''
     llmPreview.value = { ...data.llm }
+    freeEgg.value = data.llm?.freeEgg === true
     llmBaseURL.value = data.llm.baseURL || 'https://api.deepseek.com'
     llmModel.value = data.llm.model || 'deepseek-chat'
     llmThinkingMode.value = data.llm.thinkingMode || 'disabled'
@@ -2138,6 +2186,42 @@ function resetTestPrompts() {
 .key-missing { color: var(--danger); padding: 6px 10px; border-radius: 6px; background: rgba(255, 77, 79, 0.06); }
 .key-preview { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); color: var(--text-secondary); cursor: pointer; transition: border-color 0.15s; }
 .key-preview:hover { border-color: var(--accent); }
+
+/* ── 每日免费鸡蛋（LLM 卡片右上角按钮） ── */
+.llm-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.llm-card-header h3 { margin-bottom: 0; }
+.free-egg-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.free-egg-btn:hover:not(:disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
+.free-egg-btn.active { border-color: #facc15; background: rgba(250, 204, 21, 0.16); color: #facc15; }
+.free-egg-btn:disabled { opacity: 0.6; cursor: wait; }
+.free-egg-notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  margin-top: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(250, 204, 21, 0.28);
+  background: rgba(250, 204, 21, 0.07);
+}
+.free-egg-icon { font-size: 30px; line-height: 1; flex-shrink: 0; }
+.free-egg-copy { min-width: 0; }
+.free-egg-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.free-egg-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 .llm-model-picker { position: relative; margin-bottom: 14px;}
 .llm-model-row { display: flex; align-items: stretch; gap: 8px; }
 .llm-model-combobox { position: relative; min-width: 0; flex: 1; }

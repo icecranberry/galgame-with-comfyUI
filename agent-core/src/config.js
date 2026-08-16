@@ -8,6 +8,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
+// 每日免费鸡蛋：opencode zen 免费端点（无需 API Key，按 IP 限流）
+const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
+const FREE_EGG_MODEL = 'deepseek-v4-flash-free';
+
 export const config = {
   // 开发环境检测：生产启动（launcher / PM2）会注入 NODE_ENV=production；npm run dev 等开发启动不设置
   isDev: process.env.NODE_ENV !== 'production',
@@ -15,14 +19,30 @@ export const config = {
   dbPath: process.env.DB_PATH || './data/agent.db',
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
-    apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
-    baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-    model: process.env.LLM_MODEL || 'deepseek-v4-flash',
-    thinkingMode: ['enabled', 'disabled', 'omit'].includes(process.env.LLM_THINKING_MODE)
+    // 每日免费鸡蛋开关（DB system_settings 的 llm_free_egg 持久化）。
+    // 开启后通过下方 getter 覆盖生效值：免 Key 走免费端点 + 强制关闭思考；
+    // 用户自有的 Key/地址/模型保存在 _* 字段中，关闭开关即原样恢复。
+    freeEgg: false,
+    _apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
+    _baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    _model: process.env.LLM_MODEL || 'deepseek-v4-flash',
+    _thinkingMode: ['enabled', 'disabled', 'omit'].includes(process.env.LLM_THINKING_MODE)
       ? process.env.LLM_THINKING_MODE
       : 'disabled',
-    headers: (() => { try { return JSON.parse(process.env.LLM_HEADERS || '{}'); } catch { return {}; } })(),
-    extraBody: (() => { try { return JSON.parse(process.env.LLM_EXTRA_BODY || '{}'); } catch { return {}; } })(),
+    _headers: (() => { try { return JSON.parse(process.env.LLM_HEADERS || '{}'); } catch { return {}; } })(),
+    _extraBody: (() => { try { return JSON.parse(process.env.LLM_EXTRA_BODY || '{}'); } catch { return {}; } })(),
+    get apiKey() { return this.freeEgg ? '' : this._apiKey; },
+    set apiKey(v) { this._apiKey = v; },
+    get baseURL() { return this.freeEgg ? FREE_EGG_BASE_URL : this._baseURL; },
+    set baseURL(v) { this._baseURL = v; },
+    get model() { return this.freeEgg ? FREE_EGG_MODEL : this._model; },
+    set model(v) { this._model = v; },
+    get thinkingMode() { return this.freeEgg ? 'disabled' : this._thinkingMode; },
+    set thinkingMode(v) { this._thinkingMode = v; },
+    get headers() { return this.freeEgg ? {} : this._headers; },
+    set headers(v) { this._headers = v; },
+    get extraBody() { return this.freeEgg ? {} : this._extraBody; },
+    set extraBody(v) { this._extraBody = v; },
   },
   vectorService: {
     url: process.env.VECTOR_SERVICE_URL || 'http://localhost:8765',
@@ -275,11 +295,14 @@ export function getLlmApiKey() {
 }
 
 export function getLlmConfig() {
+  const freeEgg = config.llm.freeEgg === true;
   const key = resolveLlmApiKey();
   const preview = !key ? '' : (key.length <= 12 ? '***' : `${key.slice(0, 5)}...${key.slice(-4)}`);
   return {
     provider: config.llm.provider,
-    hasApiKey: !!key,
+    freeEgg,
+    // 免费鸡蛋模式下无需 Key 即可用，视为已配置，避免前端"未设置 Key"横幅误报
+    hasApiKey: freeEgg ? true : !!key,
     preview,
     baseURL: config.llm.baseURL,
     model: config.llm.model,
@@ -287,6 +310,18 @@ export function getLlmConfig() {
     headers: config.llm.headers || {},
     extraBody: config.llm.extraBody || {},
   };
+}
+
+/**
+ * 每日免费鸡蛋开关：开启后 LLM 请求走 opencode zen 免费端点（免 Key、强制关闭思考），
+ * 用户自有的 Key/地址/模型配置保持原样，关闭后立即恢复
+ */
+export function updateFreeEggEnabled(enabled) {
+  const boolVal = enabled === true || enabled === 'true';
+  config.llm.freeEgg = boolVal;
+  persistSettingSync('llm_free_egg', String(boolVal));
+  console.log(`[config] freeEgg = ${boolVal}`);
+  return { ok: true };
 }
 
 export function updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers, extraBody }) {
