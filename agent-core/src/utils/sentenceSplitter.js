@@ -3,7 +3,7 @@
  *
  * 字符先进 3 字闸门检测 {" 和 {p（兜底），安全的再逐字进入分句逻辑。
  * 分句规则:
- *    1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，。 断句并去掉标点
+ *    1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，空格 断句并去掉该字符
  *    2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
  *    3. 。无论队列长度都触发分句，去掉句号，重置计数器
  *    4. \n 作为段落分隔，触发分句并丢弃（上游已将 \n\n+ 归一化为单 \n）
@@ -39,6 +39,7 @@ export class SentenceSplitter {
     '’': '‘',   // ‘ →
   };
   static TOGGLE_PAIRS = new Set(['"', '\'']);  // ASCII 引号，开=闭，遇同类切换
+  static COMMA_SPACE_RE = /[， ]/;  // 空格与逗号同类，队列超过 20 字后触发分句
 
   constructor() {
     this.gate = '';          // {" 检测窗口（最多 3 字）
@@ -139,7 +140,7 @@ export class SentenceSplitter {
               } else if (/[！？～~]/.test(safe) || (safe === '.' && this.buffer.endsWith('...'))) {
                 emit(this.buffer);
                 this.buffer = '';
-              } else if (/[，]/.test(safe)) {
+              } else if (SentenceSplitter.COMMA_SPACE_RE.test(safe)) {
                 emit(this.buffer.slice(0, -1));
                 this.buffer = '';
               }
@@ -156,7 +157,7 @@ export class SentenceSplitter {
             if (this._canSplit()) {
               this.pendingSplit = n;
             }
-          } else if (/[，]/.test(safe)) {
+          } else if (SentenceSplitter.COMMA_SPACE_RE.test(safe)) {
             if (this._canSplit()) {
               emit(this.buffer.slice(0, -1));
               this.buffer = '';
@@ -226,7 +227,7 @@ export class SentenceSplitter {
       this._trackPair(safe);
       const n = this.buffer.length;
       if (n > 20) {
-        if (/[，。]/.test(safe)) {
+        if (/[，。 ]/.test(safe)) {
           this.buffer = this.buffer.slice(0, -1);
         }
       }

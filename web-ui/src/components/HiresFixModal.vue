@@ -3,14 +3,30 @@
     <div v-if="modelValue" class="modal-overlay" @click.self="close">
       <div class="modal-panel modal-wide">
         <div class="modal-header">
-          <h3>LoRA 设置（全局画风）</h3>
+          <h3>HiresFix 细化设置</h3>
           <button class="modal-close" @click="close">✕</button>
         </div>
-        <p class="lora-tab-hint">全局画风 LoRA，按适用范围生效（注意去掉画师串或者和画师串并存）</p>
         <div class="modal-body">
+          <p class="hires-hint">图片进一步高清细化设置，点击图片上的「放大细化」时生效</p>
+
+          <div class="hires-params">
+            <div class="form-group">
+              <label class="fl">步数<span class="fl-sub">（推荐30~40）越高越精细，耗时越久</span></label>
+              <input v-model.number="steps" type="number" min="1" max="100" step="1" class="fi" />
+            </div>
+            <div class="form-group">
+              <label class="fl">重绘幅度<span class="fl-sub">（推荐0.3~0.5）</span></label>
+              <input v-model.number="denoise" type="number" min="0" max="1" step="0.01" class="fi" />
+            </div>
+            <div class="form-group">
+              <label class="fl">CFG<span class="fl-sub">（推荐7~10）</span></label>
+              <input v-model.number="cfg" type="number" min="0" max="20" step="0.1" class="fi" />
+            </div>
+          </div>
+
           <div class="lora-body-card">
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
-              <div v-for="(item, idx) in activeItems" :key="'global-' + idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
+              <div v-for="(item, idx) in items" :key="idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
                 <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
@@ -63,20 +79,7 @@
                   <label class="fl lora-inline-label">触发词</label>
                   <input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
                 </div>
-                <div class="lora-scenes-row">
-                  <span class="fl lora-inline-label">适用范围</span>
-                    <div class="lora-scenes-chips">
-                      <button
-                        v-for="s in sceneOptions"
-                        :key="s.value"
-                        :class="['scene-chip', { active: item.scenes && item.scenes.includes(s.value) }]"
-                        @click="toggleScene(item, s.value)"
-                      >
-                        <span v-if="item.scenes && item.scenes.includes(s.value)" class="scene-check">✓</span>
-                        {{ s.label }}
-                      </button>
-                    </div>
-                  <div style="flex:1;min-width:0"></div>
+                <div class="lora-enable-row">
                   <label class="lora-enable-toggle" @click.stop>
                     <span class="lora-enable-status">{{ item.enabled ? '已启用' : '已禁用' }}</span>
                     <span class="lora-toggle-switch">
@@ -88,8 +91,8 @@
               </div>
             </TransitionGroup>
 
-            <div v-if="activeItems.length === 0" class="lora-empty-hint">
-              尚未配置任何全局 LoRA，点击下方按钮添加
+            <div v-if="items.length === 0" class="lora-empty-hint">
+              尚未配置任何强化HiresFix细化的LoRA，点击下方按钮添加
             </div>
 
             <button class="lora-add-btn" @click="addLoraGroup">
@@ -100,10 +103,9 @@
 
           <div class="modal-actions" style="margin-top:16px">
             <span class="lora-civitai-label">LoRA 获取：</span>
-            <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=style" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Style</a>
+            <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
             <span class="lora-civitai-label">或</span>
-            <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=style" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索Style</a>
-            <span class="lora-civitai-label">（但实际上作者并不会都以Style为画风LoRA取名，可以自行寻找其他关键词）</span>
+            <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
             <div style="flex:1"></div>
             <button class="btn-primary" @click="save" :disabled="loraLoading">
               {{ loraLoading ? '保存中…' : '保存' }}
@@ -116,29 +118,25 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, inject } from 'vue'
+import { ref, watch, inject } from 'vue'
 import * as api from '../api/index.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   initialLoras: { type: Array, default: () => [] },
+  initialSteps: { type: Number, default: 35 },
+  initialCfg: { type: Number, default: 5 },
+  initialDenoise: { type: Number, default: 0.5 },
 })
 
 const emit = defineEmits(['update:modelValue', 'saved'])
 
 const toastFn = inject('toast')
 
-const globalItems = ref([])
-const activeItems = computed(() => globalItems.value)
-
-const sceneOptions = [
-  { value: 'chat', label: '聊天' },
-  { value: 'moments', label: '朋友圈' },
-  { value: 'events', label: '奇遇' },
-  { value: 'mailbox', label: '信件' },
-  { value: 'schedule', label: '日程' },
-]
-
+const items = ref([])
+const steps = ref(35)
+const cfg = ref(5)
+const denoise = ref(0.5)
 const lorasFiles = ref([])
 const activeLoraFileIdx = ref(null)
 const loraDropdownIdx = ref(-1)
@@ -148,16 +146,14 @@ const loraLoading = ref(false)
 
 watch(() => props.modelValue, (v) => {
   if (v) {
-    const normalize = (list) => {
-      const raw = list.length > 0 ? JSON.parse(JSON.stringify(list)) : []
-      for (const item of raw) {
-        if (item.enabled === undefined) item.enabled = true
-        if (!Array.isArray(item.scenes)) item.scenes = ['chat', 'moments', 'events', 'mailbox', 'schedule']
-        // 已有数据的 scenes=[] 保持原样（后端视为全部场景）
-      }
-      return raw
+    const raw = props.initialLoras.length > 0 ? JSON.parse(JSON.stringify(props.initialLoras)) : []
+    for (const item of raw) {
+      if (item.enabled === undefined) item.enabled = true
     }
-    globalItems.value = normalize(props.initialLoras)
+    items.value = raw
+    steps.value = Number.isFinite(props.initialSteps) ? props.initialSteps : 35
+    cfg.value = Number.isFinite(props.initialCfg) ? props.initialCfg : 5
+    denoise.value = Number.isFinite(props.initialDenoise) ? props.initialDenoise : 0.5
     fetchLorasFiles()
   }
 })
@@ -167,21 +163,11 @@ function close() {
 }
 
 function addLoraGroup() {
-  activeItems.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true, scenes: ['chat', 'moments', 'events', 'mailbox', 'schedule'] })
+  items.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true })
 }
 
 function removeLoraGroup(idx) {
-  activeItems.value.splice(idx, 1)
-}
-
-function toggleScene(item, scene) {
-  if (!Array.isArray(item.scenes)) item.scenes = []
-  const idx = item.scenes.indexOf(scene)
-  if (idx >= 0) {
-    item.scenes.splice(idx, 1)
-  } else {
-    item.scenes.push(scene)
-  }
+  items.value.splice(idx, 1)
 }
 
 async function fetchLorasFiles() {
@@ -209,13 +195,13 @@ function filterLoras(query) {
 function onLoraInputFocus(idx) {
   activeLoraFileIdx.value = idx
   loraDropdownIdx.value = -1
-  loraSuggestions.value = filterLoras(activeItems.value[idx]?.path || '')
+  loraSuggestions.value = filterLoras(items.value[idx]?.path || '')
 }
 
 function onLoraInput(idx) {
   activeLoraFileIdx.value = idx
   loraDropdownIdx.value = -1
-  loraSuggestions.value = filterLoras(activeItems.value[idx]?.path || '')
+  loraSuggestions.value = filterLoras(items.value[idx]?.path || '')
 }
 
 function onLoraInputBlur() {
@@ -223,38 +209,41 @@ function onLoraInputBlur() {
 }
 
 function selectLoraFile(idx, file) {
-  activeItems.value[idx].path = file.name
+  items.value[idx].path = file.name
   activeLoraFileIdx.value = null
 }
 
 function onLoraKeydown(e, idx) {
   if (activeLoraFileIdx.value !== idx) return
-  const items = loraSuggestions.value
+  const list = loraSuggestions.value
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    loraDropdownIdx.value = Math.min(loraDropdownIdx.value + 1, items.length - 1)
+    loraDropdownIdx.value = Math.min(loraDropdownIdx.value + 1, list.length - 1)
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
     loraDropdownIdx.value = Math.max(loraDropdownIdx.value - 1, -1)
   } else if (e.key === 'Enter' && loraDropdownIdx.value >= 0) {
     e.preventDefault()
-    selectLoraFile(idx, items[loraDropdownIdx.value])
+    selectLoraFile(idx, list[loraDropdownIdx.value])
   } else if (e.key === 'Escape') {
     activeLoraFileIdx.value = null
   }
 }
 
 async function save() {
-  const validGlobal = globalItems.value.filter(l => l.path && l.path.trim())
+  const validLoras = items.value.filter(l => l.path && l.path.trim())
+  const savedSteps = Math.max(1, Math.min(100, parseInt(steps.value, 10) || 35))
+  const savedCfg = Math.max(0, Math.min(20, parseFloat(cfg.value) || 5))
+  const savedDenoise = Math.max(0, Math.min(1, parseFloat(denoise.value) || 0.5))
   loraLoading.value = true
   try {
-    await api.updateGlobalLora(validGlobal)
-    emit('saved', validGlobal)
+    await api.updateHiresSettings({ loras: validLoras, steps: savedSteps, cfg: savedCfg, denoise: savedDenoise })
+    emit('saved', { loras: validLoras, steps: savedSteps, cfg: savedCfg, denoise: savedDenoise })
     emit('update:modelValue', false)
-    if (toastFn) toastFn('LoRA 设置已保存', 'success')
+    if (toastFn) toastFn('HiresFix 设置已保存', 'success')
   } catch (e) {
-    console.error('saveLoraConfig failed:', e)
-    if (toastFn) toastFn('保存失败', 'error')
+    console.error('saveHiresSettings failed:', e)
+    if (toastFn) toastFn(e.message || '保存失败', 'error')
   } finally {
     loraLoading.value = false
   }
@@ -294,34 +283,10 @@ async function save() {
 .modal-body { padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
 .modal-actions { display: flex; align-items: center; gap: 10px; }
 
-/* ── 标签切换：文字 + 下划线（低调风格，仅文字变色） ── */
-.lora-tab-bar {
-  display: flex; gap: 20px; margin: 8px 24px 0; flex-shrink: 0;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.lora-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 2px 8px; font-size: 13px; font-weight: 500;
-  background: transparent; border: none; cursor: pointer;
-  color: var(--text-secondary); font-family: inherit;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
-  transition: color 0.18s ease, border-color 0.18s ease;
-}
-.lora-tab:hover:not(.active) { color: var(--text-primary); }
-.lora-tab.active {
-  color: var(--accent);
-  font-weight: 600;
-  border-bottom-color: var(--accent);
-}
-.lora-tab-count {
-  min-width: 16px; padding: 0 5px; border-radius: 8px;
-  background: rgba(0,0,0,0.07); color: inherit;
-  font-size: 11px; line-height: 1.5; text-align: center;
-}
-.lora-tab-hint {
-  margin: 10px 24px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5;
-}
+.hires-hint { margin: 0 0 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.hires-params { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.hires-params .form-group { margin-bottom: 0; }
+.hires-params .fi { margin-bottom: 0; }
 
 .lora-body-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
 .lora-list { display: flex; flex-direction: column; gap: 10px; }
@@ -372,7 +337,6 @@ async function save() {
   padding: 4px;
   margin: 0;
   box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
-  transform-origin: top center;
 }
 .lora-dropdown-item {
   display: flex; align-items: center;
@@ -397,23 +361,13 @@ async function save() {
 .lora-item-card .fi { background: var(--glass-bg); width: 100%; }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 8px; }
-.lora-scenes-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
-.lora-scenes-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.scene-chip {
-  padding: 3px 10px; border-radius: 6px; border: 1px solid transparent;
-  background: var(--bg-muted, #f0f0f0); color: var(--text-secondary);
-  font-size: 11px; cursor: pointer; user-select: none;
-  transition: all 180ms ease; line-height: 1.5;
-}
-.scene-chip:hover { background: rgba(0,0,0,0.06); transform: scale(1.02); }
-.scene-chip.active {
-  background: rgba(224,123,108,0.1); border-color: var(--accent);
-  color: var(--accent); font-weight: 500;
-}
-.scene-chip.active:hover { background: rgba(224,123,108,0.16); }
-.scene-check { margin-right: 2px; font-size: 10px; }
+.lora-enable-row { margin-top: 8px; display: flex; justify-content: flex-end; }
 .form-group { margin-bottom: 16px; }
 .form-group .fl { display: block; margin-bottom: 6px; }
+.fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; }
+.fl-sub { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--text-secondary); line-height: 1.45; }
+.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
+.fi:focus { border-color: var(--accent); }
 .lora-card-enter-active, .lora-card-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
@@ -440,6 +394,6 @@ async function save() {
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   .modal-body { padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
   .modal-wide .fi { font-size: 16px; }
+  .hires-params { grid-template-columns: 1fr; }
 }
 </style>
-

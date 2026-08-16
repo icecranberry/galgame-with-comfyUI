@@ -5,15 +5,15 @@
  *   1. 读取原图文件 → 上传到 ComfyUI input 目录
  *   2. 加载 workflow/放大细化工作流.json（仅 ComfyUI 官方节点，像素放大而非 latent 放大）:
  *      LoadImage → ImageScaleToMaxDimension(按长边像素放大，默认 lanczos/长边2400，不固定倍数)
- *      → VAEEncode → KSampler(图生图低重绘, 默认 40步/cfg3.0/denoise0.35) → VAEDecode → PreviewImage
+ *      → VAEEncode → KSampler(图生图低重绘, 默认 35步/cfg5.0/denoise0.5) → VAEDecode → PreviewImage
  *   3. 继承原图的模型加载器(UNET/CLIP/VAE)、负面提示词、提示词链(画面描述/质量提示词/画师串/lora触发词)，
  *      以及与原图一致的 LoRA 链（全局画风 LoRA 按场景过滤 + 角色 LoRA），
  *      再追加 HiresFix 细化专用 LoRA（设置页单独配置）到链尾
  *   4. 提交 ComfyUI → 下载结果 → 原子覆盖原文件
  *
- * KSampler 采样参数（步数/cfg/denoise/采样器）与放大长边均以细化工作流文件中的设定为准，
- * 可直接在 ComfyUI 中编辑该文件调整；不从原图工作流继承（原图 denoise=1 全重绘，步数/cfg
- * 也按细化调优而非沿用生图值）。
+ * KSampler 采样参数（步数/cfg/denoise/采样器）与放大长边以细化工作流文件为基础，
+ * 步数/cfg/denoise 可被系统参数中的 HiresFix 设置覆盖；不从原图工作流继承（原图 denoise=1
+ * 全重绘，步数/cfg 也按细化调优而非沿用生图值）。
  */
 
 import fs from 'fs';
@@ -152,11 +152,14 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
       continue;
     }
 
-    // KSampler: 种子随机；步数/cfg/denoise 等采样参数以细化工作流文件设定为准（不继承原图）
+    // KSampler: 种子随机；步数/cfg/denoise 使用系统参数中的 HiresFix 设置（不继承原图）
     if (node.type === 'KSampler') {
       if (node.widgets_values[1] === 'randomize') {
         node.widgets_values[0] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
       }
+      node.widgets_values[2] = config.comfyui.hiresSteps ?? 35;
+      node.widgets_values[3] = config.comfyui.hiresCfg ?? 5.0;
+      node.widgets_values[6] = config.comfyui.hiresDenoise ?? 0.5;
       continue;
     }
 

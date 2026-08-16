@@ -36,10 +36,11 @@ from .qa_page import QAPage
 
 
 # 窗口尺寸
-WINDOW_W = 900
-WINDOW_H = 600
+WINDOW_W = 990
+WINDOW_H = 660
 NAV_W = 72  # 左侧导航宽度
 SHADOW_MARGIN = 12  # 窗口投影留白
+RESIZE_MARGIN = 8  # 边缘缩放热区伸入内容区的宽度
 
 
 def _exe_dir() -> str:
@@ -111,6 +112,75 @@ class Toast(QWidget):
             lambda: QTimer.singleShot(duration_ms, self._fade_out.start)
         )
         self._fade_in.start()
+
+
+def _cursor_for_edges(edges: Qt.Edge) -> Qt.CursorShape:
+    """根据边/角组合返回对应的缩放光标。"""
+    has_h = bool(edges & Qt.LeftEdge) or bool(edges & Qt.RightEdge)
+    has_v = bool(edges & Qt.TopEdge) or bool(edges & Qt.BottomEdge)
+    if has_h and has_v:
+        # 左上/右下为 ↘，右上/左下为 ↙
+        return Qt.SizeFDiagCursor if bool(edges & Qt.LeftEdge) == bool(edges & Qt.TopEdge) else Qt.SizeBDiagCursor
+    if has_h:
+        return Qt.SizeHorCursor
+    if has_v:
+        return Qt.SizeVerCursor
+    return Qt.ArrowCursor
+
+
+class _EdgeGrip(QWidget):
+    """覆盖窗口边缘的透明手柄：悬停显示缩放光标，按住左键拖动调整窗口大小。
+
+    无边框窗口没有 WS_THICKFRAME 样式，startSystemResize 会被系统忽略，
+    因此参照 QSizeGrip 的回退做法手动计算几何。
+    """
+
+    def __init__(self, window, edges):
+        super().__init__(window)
+        self.edges = edges
+        self.setCursor(_cursor_for_edges(edges))
+        self._start_pos = None
+        self._start_rect = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.edges:
+            self._start_pos = event.globalPosition().toPoint()
+            self._start_rect = self.window().geometry()
+            event.accept()  # 不上抛，避免顶边按住时误触发标题栏拖动
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._start_pos is not None and event.buttons() & Qt.LeftButton:
+            self._resize_to(event.globalPosition().toPoint())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._start_pos = None
+        self._start_rect = None
+        event.accept()
+
+    def _resize_to(self, global_pos):
+        """按手柄时的窗口几何加鼠标位移计算新几何，收缩时不超过 minimumSize。"""
+        win = self.window()
+        delta = global_pos - self._start_pos
+        x, y, w, h = self._start_rect.getRect()
+        min_w, min_h = win.minimumWidth(), win.minimumHeight()
+        if self.edges & Qt.LeftEdge:
+            dx = min(delta.x(), w - min_w)
+            x += dx
+            w -= dx
+        if self.edges & Qt.TopEdge:
+            dy = min(delta.y(), h - min_h)
+            y += dy
+            h -= dy
+        if self.edges & Qt.RightEdge:
+            w = max(min_w, w + delta.x())
+        if self.edges & Qt.BottomEdge:
+            h = max(min_h, h + delta.y())
+        win.setGeometry(x, y, w, h)
 
 
 class MainWindow(QMainWindow):
@@ -206,6 +276,21 @@ class MainWindow(QMainWindow):
         self._grip = QSizeGrip(self._content)
         self._grip.setFixedSize(16, 16)
         self._grip.setStyleSheet("background: transparent;")
+
+        # 四边 + 四角透明手柄：鼠标移到任意边缘即可拖拽调整大小
+        self._edge_grips: list[_EdgeGrip] = []
+        for edges in (
+            Qt.LeftEdge,
+            Qt.RightEdge,
+            Qt.TopEdge,
+            Qt.BottomEdge,
+            Qt.LeftEdge | Qt.TopEdge,
+            Qt.RightEdge | Qt.TopEdge,
+            Qt.LeftEdge | Qt.BottomEdge,
+            Qt.RightEdge | Qt.BottomEdge,
+        ):
+            self._edge_grips.append(_EdgeGrip(self, edges))
+        self._update_edge_grips_geometry()
 
     # ==================================================================
     # 标题栏按钮（右上角）
@@ -899,6 +984,24 @@ class MainWindow(QMainWindow):
         else:
             self._stack.setGeometry(NAV_W, 0, w - NAV_W, h)
 
+    def _update_edge_grips_geometry(self):
+        """边缘手柄铺在窗口四边/四角：覆盖投影留白并向内容区延伸 RESIZE_MARGIN。"""
+        t = SHADOW_MARGIN + RESIZE_MARGIN
+        w, h = self.width(), self.height()
+        zones = {
+            Qt.LeftEdge: (0, t, t, h - 2 * t),
+            Qt.RightEdge: (w - t, t, t, h - 2 * t),
+            Qt.TopEdge: (t, 0, w - 2 * t, t),
+            Qt.BottomEdge: (t, h - t, w - 2 * t, t),
+            Qt.LeftEdge | Qt.TopEdge: (0, 0, t, t),
+            Qt.RightEdge | Qt.TopEdge: (w - t, 0, t, t),
+            Qt.LeftEdge | Qt.BottomEdge: (0, h - t, t, t),
+            Qt.RightEdge | Qt.BottomEdge: (w - t, h - t, t, t),
+        }
+        for grip in self._edge_grips:
+            grip.setGeometry(*zones[grip.edges])
+            grip.raise_()
+
     def _update_nav_geometry(self):
         h = self._content.height()
         self._nav.setGeometry(0, 0, NAV_W, h)
@@ -915,6 +1018,8 @@ class MainWindow(QMainWindow):
         cw, ch = self._content.width(), self._content.height()
         self._grip.move(cw - 20, ch - 20)
         self._grip.raise_()
+        # 四边/四角缩放手柄
+        self._update_edge_grips_geometry()
         self._apply_rounded_mask()
 
     def _apply_rounded_mask(self):

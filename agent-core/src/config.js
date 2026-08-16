@@ -65,6 +65,9 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     tlsVerify: process.env.COMFYUI_TLS_VERIFY !== 'false',
     globalLora: [],
     hiresLora: [],   // HiresFix 放大细化专用 LoRA（仅注入细化工作流，追加在 LoRA 链末尾）
+    hiresSteps: 35,  // HiresFix 细化步数
+    hiresCfg: 5.0,   // HiresFix 细化 CFG
+    hiresDenoise: 0.5,  // HiresFix 细化重绘幅度
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
@@ -200,17 +203,50 @@ export function updateGlobalLora(loras) {
  * 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流，追加在 LoRA 链末尾；
  * 与全局/角色 LoRA 同 path 时以细化配置的权重为准）
  */
+/**
+ * 更新 HiresFix 细化设置（专用 LoRA + 步数/重绘幅度/CFG），
+ * 细化 LoRA 仅作用于放大细化工作流，追加在 LoRA 链末尾；
+ * 与全局/角色 LoRA 同 path 时以细化配置的权重为准
+ */
+export function updateHiresSettings({ loras, steps, cfg, denoise } = {}) {
+  if (loras !== undefined) {
+    if (!Array.isArray(loras)) loras = [];
+    const cleaned = loras.filter(l => l.path && typeof l.path === 'string').map(l => ({
+      path: l.path,
+      weight: typeof l.weight === 'number' ? l.weight : 0.6,
+      triggerWord: l.triggerWord || '',
+      enabled: l.enabled !== false,
+    }));
+    config.comfyui.hiresLora = cleaned;
+    persistSettingSync('comfy_hires_lora', JSON.stringify(cleaned));
+  }
+  if (steps !== undefined) {
+    const n = parseInt(steps, 10);
+    if (Number.isInteger(n)) {
+      config.comfyui.hiresSteps = Math.max(1, Math.min(100, n));
+      persistSettingSync('comfy_hires_steps', String(config.comfyui.hiresSteps));
+    }
+  }
+  if (cfg !== undefined) {
+    const f = parseFloat(cfg);
+    if (!Number.isNaN(f)) {
+      config.comfyui.hiresCfg = Math.max(0, Math.min(20, f));
+      persistSettingSync('comfy_hires_cfg', String(config.comfyui.hiresCfg));
+    }
+  }
+  if (denoise !== undefined) {
+    const f = parseFloat(denoise);
+    if (!Number.isNaN(f)) {
+      config.comfyui.hiresDenoise = Math.max(0, Math.min(1, f));
+      persistSettingSync('comfy_hires_denoise', String(config.comfyui.hiresDenoise));
+    }
+  }
+  console.log(`[config] HiresFix settings updated: lora=${config.comfyui.hiresLora.length}, steps=${config.comfyui.hiresSteps}, cfg=${config.comfyui.hiresCfg}, denoise=${config.comfyui.hiresDenoise}`);
+}
+
+/** 兼容旧接口：仅更新 HiresFix 细化专用 LoRA */
 export function updateHiresLora(loras) {
-  if (!Array.isArray(loras)) loras = [];
-  const cleaned = loras.filter(l => l.path && typeof l.path === 'string').map(l => ({
-    path: l.path,
-    weight: typeof l.weight === 'number' ? l.weight : 0.6,
-    triggerWord: l.triggerWord || '',
-    enabled: l.enabled !== false,
-  }));
-  config.comfyui.hiresLora = cleaned;
-  persistSettingSync('comfy_hires_lora', JSON.stringify(cleaned));
-  console.log(`[config] Hires lora updated: ${cleaned.length} item(s)`);
+  updateHiresSettings({ loras });
 }
 
 export function updateFeatureFlag(key, value) {

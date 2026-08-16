@@ -15,11 +15,20 @@ const WORKFLOW_DIR = path.join(__dirname, '..', '..', 'workflow');
 function isolateLoraConfig(t, globalLoras = [], hiresLoras = []) {
   const savedGlobal = config.comfyui.globalLora;
   const savedHires = config.comfyui.hiresLora;
+  const savedSteps = config.comfyui.hiresSteps;
+  const savedCfg = config.comfyui.hiresCfg;
+  const savedDenoise = config.comfyui.hiresDenoise;
   config.comfyui.globalLora = globalLoras;
   config.comfyui.hiresLora = hiresLoras;
+  config.comfyui.hiresSteps = 35;
+  config.comfyui.hiresCfg = 5.0;
+  config.comfyui.hiresDenoise = 0.5;
   t.after(() => {
     config.comfyui.globalLora = savedGlobal;
     config.comfyui.hiresLora = savedHires;
+    config.comfyui.hiresSteps = savedSteps;
+    config.comfyui.hiresCfg = savedCfg;
+    config.comfyui.hiresDenoise = savedDenoise;
   });
 }
 
@@ -72,12 +81,12 @@ test('构建细化工作流（turbo 源）→ API 结构完整且参数继承正
   assert.ok(sampler, '应有 KSampler 节点');
   assert.deepEqual(sampler.node.inputs.latent_image, [String(encode.id), 0]);
 
-  // KSampler 采样参数以细化工作流为准（40步/cfg3.0/denoise0.35），不继承原图 turbo 的 12步/cfg1
-  assert.equal(sampler.node.inputs.steps, 40);
-  assert.equal(sampler.node.inputs.cfg, 3);
+  // KSampler 采样参数以 HiresFix 设置为准（35步/cfg5.0/denoise0.5），不继承原图 turbo 的 12步/cfg1
+  assert.equal(sampler.node.inputs.steps, 35);
+  assert.equal(sampler.node.inputs.cfg, 5);
   assert.equal(sampler.node.inputs.sampler_name, 'er_sde');
   assert.equal(sampler.node.inputs.scheduler, 'beta');
-  assert.equal(sampler.node.inputs.denoise, 0.35);
+  assert.equal(sampler.node.inputs.denoise, 0.5);
 
   // 模型加载器继承自 turbo 模板
   const unet = byType.UNETLoader?.[0];
@@ -125,10 +134,10 @@ test('构建细化工作流（base 源 + lora）→ 采样参数切换且 lora �
     byType[node.class_type].push({ id, node });
   }
 
-  // KSampler 采样参数不继承 base 源(31步/cfg5)，保持细化模板的 40步/cfg3.0
+  // KSampler 采样参数不继承 base 源(31步/cfg5)，保持细化设置 35步/cfg5.0
   const sampler = byType.KSampler?.[0];
-  assert.equal(sampler.node.inputs.steps, 40);
-  assert.equal(sampler.node.inputs.cfg, 3);
+  assert.equal(sampler.node.inputs.steps, 35);
+  assert.equal(sampler.node.inputs.cfg, 5);
 
   // base 模型继承
   const baseWf = JSON.parse(fs.readFileSync(path.join(WORKFLOW_DIR, '制图工作流-pro.json'), 'utf8'));
@@ -191,4 +200,31 @@ test('LoRA 链合并：全局(场景过滤) → 角色 → HiresFix细化 追加
     const trigger = Object.values(api).find(n => n._meta?.title === 'lora触发词');
     assert.ok(trigger.inputs.value.includes('hires_detail'), '细化 LoRA 触发词应注入');
   }
+});
+
+test('HiresFix 采样参数跟随系统设置（步数/CFG/重绘幅度）', (t) => {
+  const saved = {
+    hiresSteps: config.comfyui.hiresSteps,
+    hiresCfg: config.comfyui.hiresCfg,
+    hiresDenoise: config.comfyui.hiresDenoise,
+  };
+  config.comfyui.hiresSteps = 60;
+  config.comfyui.hiresCfg = 5.5;
+  config.comfyui.hiresDenoise = 0.5;
+  t.after(() => {
+    config.comfyui.hiresSteps = saved.hiresSteps;
+    config.comfyui.hiresCfg = saved.hiresCfg;
+    config.comfyui.hiresDenoise = saved.hiresDenoise;
+  });
+
+  const { wf } = buildHiresWorkflow('params test', {
+    uploadFilename: 'x.png',
+    sourceMode: 'turbo',
+    loras: [],
+  });
+  const api = guiToApi(wf);
+  const sampler = Object.values(api).find(n => n.class_type === 'KSampler');
+  assert.equal(sampler.inputs.steps, 60);
+  assert.equal(sampler.inputs.cfg, 5.5);
+  assert.equal(sampler.inputs.denoise, 0.5);
 });

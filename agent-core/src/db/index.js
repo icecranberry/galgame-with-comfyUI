@@ -1452,6 +1452,9 @@ const SETTING_TO_CONFIG = {
   workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
   comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
   comfy_hires_lora:               { obj: 'comfyui',  key: 'hiresLora',        type: 'json' },
+  comfy_hires_steps:              { obj: 'comfyui',  key: 'hiresSteps',       type: 'int' },  
+  comfy_hires_cfg:                { obj: 'comfyui',  key: 'hiresCfg',         type: 'float' },
+  comfy_hires_denoise:            { obj: 'comfyui',  key: 'hiresDenoise',     type: 'float' },
 };
 
 function castValue(raw, type) {

@@ -396,10 +396,16 @@ export async function updateGlobalLora(loras) {
 }
 
 /** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */
-export async function updateHiresLora(loras) {
-  await fetch(`${BASE}/config/hires-lora`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras }),
+/** 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG） */
+export async function updateHiresSettings({ loras, steps, cfg, denoise }) {
+  const res = await fetch(`${BASE}/config/hires`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras, steps, cfg, denoise }),
   })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || 'HiresFix 设置保存失败')
+  }
+  return res.json()
 }
 
 export async function updateFeatureFlag(key, value) {

@@ -142,10 +142,9 @@
     <ImageLightbox
       :visible="!!previewUrl"
       :imgs="previewUrl || ''"
-      :show-regenerate="false"
-      :show-delete="false"
       @hide="previewUrl = null"
       @update:visible="v => { if (!v) previewUrl = null }"
+      @deleted="onGroupImageDeleted"
     />
 
     <!-- 群设置抽屉 -->
@@ -305,6 +304,19 @@ function genMsgOf(msg) {
 
 function onGroupImageLoaded(msgId) {
   store.markGroupImageLoaded(msgId)
+}
+
+function onGroupImageDeleted(deletedUrl) {
+  const base = String(deletedUrl || '').replace(/\?.*$/, '')
+  if (!base) return
+  for (const msg of store.messages) {
+    if (!Array.isArray(msg.images)) continue
+    msg.images = msg.images.filter(img => {
+      const url = typeof img === 'string' ? img : img?.url
+      return !url || url.replace(/\?.*$/, '') !== base
+    })
+  }
+  previewUrl.value = null
 }
 /** 连续同一发言人 → 隐藏头像和名字（与私聊 msg-same-role 一致）；跨时间分隔符时重新显示 */
 function isSameSpeaker(idx) {

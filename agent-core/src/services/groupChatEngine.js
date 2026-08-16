@@ -765,8 +765,8 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const roundMessageLimit = computeRoundMessageLimit(group, { hasTopicSeed: !!dyn });
   directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
 
-  // 发图指令：主动群聊（idle）发起时强制要求配一张图，作为话题引子；user/lull 维持抽卡鼓励
-  if (trigger === 'idle') {
+  // 发图指令：主动/自动发起的群聊轮（idle 后台闲聊、lull 冷场续聊）强制要求配一张图；user/opening 维持抽卡鼓励
+  if (trigger === 'idle' || trigger === 'lull') {
     directiveBlocks.push(`本轮是角色们主动发起的群聊，安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
   } else if (Math.random() < IMAGE_NUDGE_PROBABILITY) {
     directiveBlocks.push(`本轮安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);

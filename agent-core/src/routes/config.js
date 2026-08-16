@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -85,6 +85,9 @@ router.get('/', (req, res) => {
       tlsVerify: config.comfyui.tlsVerify,
       globalLora: config.comfyui.globalLora || [],
       hiresLora: config.comfyui.hiresLora || [],
+      hiresSteps: config.comfyui.hiresSteps ?? 35,
+      hiresCfg: config.comfyui.hiresCfg ?? 5.0,
+      hiresDenoise: config.comfyui.hiresDenoise ?? 0.5,
     },
     features: config.features,
     weather: { city: config.weather.city || '' },
@@ -155,6 +158,22 @@ router.put('/hires-lora', (req, res) => {
   }
   updateHiresLora(loras);
   res.json({ ok: true, hiresLora: config.comfyui.hiresLora });
+});
+
+// PUT /api/config/hires — 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG）
+router.put('/hires', (req, res) => {
+  const { loras, steps, cfg, denoise } = req.body || {};
+  if (loras === undefined && steps === undefined && cfg === undefined && denoise === undefined) {
+    return res.status(400).json({ error: 'at least one hires setting is required' });
+  }
+  updateHiresSettings({ loras, steps, cfg, denoise });
+  res.json({
+    ok: true,
+    hiresLora: config.comfyui.hiresLora,
+    hiresSteps: config.comfyui.hiresSteps,
+    hiresCfg: config.comfyui.hiresCfg,
+    hiresDenoise: config.comfyui.hiresDenoise,
+  });
 });
 
 // PUT /api/config/features — 更新功能开关

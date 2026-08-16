@@ -7,7 +7,7 @@
 
     <div class="settings-grid">
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
-      <div class="card">
+      <div class="card comfy-params-card">
         <h3>画师串 & 分辨率</h3>
         <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
@@ -24,38 +24,59 @@
                 <input v-model="form[activeFields.artist]" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
                 <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites(comfyTab)" :disabled="!form[activeFields.artist].trim()">☆</button>
               </div>
-              <div v-if="artistFavorites.length" class="fav-chips">
+              <template v-if="artistFavorites.length">
+                <div class="fav-section-title">已选择的画师 / 风格</div>
+                <div class="fav-chips">
                 <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form[activeFields.artist] }" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
                   {{ fav.label }}
                   <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
                 </button>
-              </div>
+                </div>
+              </template>
               <div class="fr">
                 <div class="fh"><label class="fl">宽度</label><input v-model.number="form[activeFields.width]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
                 <div class="fh"><label class="fl">高度</label><input v-model.number="form[activeFields.height]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
               </div>
+              <div class="fpresets-head">
+                <span class="resolution-title">分辨率</span>
+                <span class="resolution-hint">不建议超过 1536×1536 个像素，人体崩坏概率会上升</span>
+              </div>
               <div class="fpresets">
                 <span class="pl">预设：</span>
-                <button v-for="p in presets" :key="p.label" class="pbtn" @click="applyPreset(p, comfyTab)">{{ p.label }}</button>
+                <button v-for="p in presets" :key="p.label" class="pbtn" :class="{ active: isPresetActive(p) }" @click="applyPreset(p, comfyTab)">{{ p.label }}</button>
               </div>
             </div>
           </Transition>
         </div>
 
+        <div class="hiresfix-section">
+          <div class="hiresfix-header">
+            <span class="hiresfix-title">HiresFix 细化</span>
+          </div>
+          <div class="hiresfix-row">
+            <div class="hiresfix-copy">
+              <div class="hiresfix-subtitle">HiresFix 细化设置</div>
+              <div class="hiresfix-desc">图片进一步高清细化设置</div>
+            </div>
+            <span class="hiresfix-summary">{{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
+            <button class="hiresfix-link" @click="openHiresFixSettings">设置 →</button>
+          </div>
+        </div>
         <div class="sa">
           <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
           <span v-if="saved" class="smsg">已保存</span>
           <div class="sa-spacer"></div>
-          <button class="btn-ghost wf-action-btn" style="font-size:12px;display:flex" @click="globalLoraModalVisible = true">
+          <button class="btn-ghost wf-action-btn wf-lora-btn" @click="openGlobalLora">
             全局LoRA
-            <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}{{ hiresLoraCount > 0 ? ` + 细化${hiresLoraCount}` : '' }}</span>
+            <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
           </button>
-          <button class="btn-ghost wf-action-btn" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
-          <button class="btn-ghost wf-action-btn" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
+          <button class="btn-ghost wf-action-btn wf-reset-btn" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
+          <button class="btn-ghost wf-action-btn wf-mode-btn" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
 
-      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" :initialHiresLoras="hiresLoras" @saved="onLoraSaved" />
+      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" @saved="onGlobalLoraSaved" />
+      <HiresFixModal v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" @saved="onHiresFixSaved" />
 
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
@@ -175,8 +196,8 @@
         </div>
 
         <template v-if="!freeEgg">
-        <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口(deepseek官方之外不保证有效)</p>
-        <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少，邻舍.EXE玩一整天大概五六毛</p>
+        <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
+        <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
 
         <!-- LLM Profile 切换 -->
         <div class="llm-profiles-bar">
@@ -820,6 +841,7 @@ import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
+import HiresFixModal from '../components/HiresFixModal.vue'
 
 const settingsStore = useSettingsStore()
 const router = useRouter()
@@ -848,8 +870,12 @@ function onSettingsScroll() {
 const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', momentsWidth: 1600, momentsHeight: 1200, eventArtist: '', eventWidth: 1600, eventHeight: 1200 })
 const globalLoras = ref([])
 const globalLoraModalVisible = ref(false)
+const hiresFixModalVisible = ref(false)
 const globalLoraCount = computed(() => (globalLoras.value || []).filter(l => l.path && l.enabled !== false).length)
 const hiresLoras = ref([])
+const hiresSteps = ref(35)
+const hiresCfg = ref(5)
+const hiresDenoise = ref(0.5)
 const hiresLoraCount = computed(() => (hiresLoras.value || []).filter(l => l.path && l.enabled !== false).length)
 const comfyTab = ref('chat')
 const comfyTabs = [
@@ -1344,6 +1370,9 @@ onMounted(async () => {
     }
     globalLoras.value = data.comfy.globalLora || []
     hiresLoras.value = data.comfy.hiresLora || []
+    hiresSteps.value = data.comfy.hiresSteps ?? 35
+    hiresCfg.value = data.comfy.hiresCfg ?? 5
+    hiresDenoise.value = data.comfy.hiresDenoise ?? 0.5
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -1401,9 +1430,23 @@ async function saveComfy() {
   setTimeout(() => saved.value = false, 2000)
 }
 
-function onLoraSaved(globalList, hiresList) {
+function onGlobalLoraSaved(globalList) {
   if (Array.isArray(globalList)) globalLoras.value = globalList
-  if (Array.isArray(hiresList)) hiresLoras.value = hiresList
+}
+
+function onHiresFixSaved({ loras, steps, cfg, denoise }) {
+  if (Array.isArray(loras)) hiresLoras.value = loras
+  if (steps !== undefined) hiresSteps.value = steps
+  if (cfg !== undefined) hiresCfg.value = cfg
+  if (denoise !== undefined) hiresDenoise.value = denoise
+}
+
+function openGlobalLora() {
+  globalLoraModalVisible.value = true
+}
+
+function openHiresFixSettings() {
+  hiresFixModalVisible.value = true
 }
 
 async function saveComfyUrl() {
@@ -1467,6 +1510,11 @@ async function saveLlmConfig() {
   } catch (err) {
     console.error('[llm] save failed:', err)
   }
+}
+
+function isPresetActive(p) {
+  const f = activeFields.value
+  return form.value[f.width] === p.width && form.value[f.height] === p.height
 }
 
 function applyPreset(p, mode = 'chat') {
@@ -1802,12 +1850,39 @@ function resetTestPrompts() {
 }
 .memory-settings-entry:hover .memory-entry-arrow { color: var(--accent); transform: translateX(2px); }
 
-/* ── 保存按钮加宽 ── */
-.btn-primary { padding-left: 28px; padding-right: 28px; }
-.wf-action-btn { border-color: var(--accent); border-style: dashed; border-width: 2px; }
-.wf-action-btn:hover:not(:disabled) { border-color: var(--accent-light); }
-.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); margin-left: 4px; }
-.float-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
+/* ── 保存为 Primary，工作流操作为 Secondary ── */
+.comfy-params-card .sa { gap: 10px; }
+.comfy-params-card .sa .btn-primary {
+  height: 36px; padding: 0 22px; border-radius: 10px; font-size: 13px;
+}
+.wf-action-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; font-size: 12px; font-weight: 500;
+  border-radius: 10px; border-style: dashed; border-width: 1px;
+  background: transparent; white-space: nowrap;
+}
+.wf-lora-btn {
+  color: #E07B6C; border-color: rgba(224, 123, 108, 0.30);
+}
+.wf-mode-btn {
+  color: #6F675F; border-color: #E5D8CE;
+}
+.wf-reset-btn {
+  color: #A9A099; border-color: #ECE5DD; opacity: 0.9;
+}
+.wf-action-btn:hover:not(:disabled) {
+  background: rgba(224, 123, 108, 0.08);
+  border-color: rgba(224, 123, 108, 0.45); color: #E07B6C;
+}
+.wf-reset-btn:hover:not(:disabled) {
+  background: transparent; color: #8B8074; border-color: #D8CEC3;
+}
+.float-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(224, 123, 108, 0.10); color: #E07B6C; margin-left: 4px;
+  white-space: nowrap;
+}
+.float-badge.active { background: rgba(224, 123, 108, 0.14); color: #E07B6C; }
 
 /* ── 毛玻璃卡片 ── */
 .card {
@@ -1828,30 +1903,45 @@ function resetTestPrompts() {
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
-/* ── 画师串 Tab 切换：暗轨道 + 亮滑块（iOS 风格） ── */
+/* ── 画师串参数卡：轻量 Tab + 紧凑表单节奏 ── */
+.comfy-params-card { padding: 22px; }
+.comfy-params-card h3 { margin-bottom: 18px; }
+.comfy-params-card .fd { margin-bottom: 14px; line-height: 1.55; }
+.comfy-params-card .fr { margin-bottom: 18px; }
+.comfy-params-card .fpresets { margin: 0 0 24px; }
+
 .comfy-tabs {
-  display: flex; gap: 0; margin-bottom: 18px;
+  display: flex; gap: 4px; margin-bottom: 20px;
   border-radius: 12px;
-  background: #e8e2d8;
-  padding: 4px;
-  box-shadow: inset 0 1px 4px rgba(0,0,0,0.08);
+  background: #F5F1EC;
+  padding: 3px;
 }
 .comfy-tab {
-  flex: 1; padding: 12px 0; font-size: 13px; font-weight: 600;
+  flex: 1; padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
   text-align: center; cursor: pointer;
   border-radius: 9px;
-  background: transparent; color: #8b8479;
+  background: transparent; color: #8B8074;
   border: none;
   font-family: inherit;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 .comfy-tab:hover:not(.active) {
-  color: #6b6459;
+  background: rgba(255, 255, 255, 0.55);
+  color: #6F675F;
 }
 .comfy-tab.active {
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.35);
+  background: rgba(224, 123, 108, 0.10);
+  color: #E07B6C;
+  font-weight: 600;
+}
+.comfy-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 50%; bottom: 4px; width: 18px; height: 2px;
+  border-radius: 2px; transform: translateX(-50%);
+  background: #E07B6C;
 }
 
 .comfy-form-stage {
@@ -1875,12 +1965,84 @@ function resetTestPrompts() {
 .fi:focus { border-color: var(--accent); }
 .fi-error { border-color: var(--danger, #ff4d4f) !important; }
 .gen-error { margin-top: 6px; font-size: 12px; color: var(--danger, #ff4d4f); }
-.fr { display: flex; gap: 14px; }
-.fh { flex: 1; }
-.fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 4px 0 16px; }
-.pl { font-size: 12px; color: var(--text-secondary); }
-.pbtn { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; transition: all 0.15s; }
-.pbtn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.fr { display: flex; gap: 12px; }
+.fh { flex: 1; min-width: 0; }
+.fr .fl {
+  display: block; margin-bottom: 6px;
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.fr .fi {
+  width: 100%; height: 38px; padding: 0 12px; margin: 0;
+  font-size: 13px; border-radius: 10px; box-shadow: none;
+  border: 1px solid #E5D8CE; background: #FFFEFC; color: var(--text-bright);
+}
+.fr .fi:focus {
+  border-color: #E07B6C;
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+}
+.fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fpresets-head {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 2px 10px; margin-bottom: 6px;
+}
+.resolution-title {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.resolution-hint {
+  font-size: 12px; color: #9A9189;
+}
+/* ── 全局细化 / HiresFix 独立层级 ── */
+.hiresfix-section {
+  margin: 8px 0 20px; padding: 16px 0;
+  border-top: 1px solid #EDE5DC;
+  border-bottom: 1px solid #EDE5DC;
+}
+.hiresfix-header {
+  display: flex; align-items: baseline;
+  justify-content: space-between; margin-bottom: 10px;
+}
+.hiresfix-title {
+  font-size: 14px; font-weight: 600; color: var(--text-bright);
+}
+.hiresfix-tag {
+  font-size: 12px; font-weight: 500; color: #8B8074;
+  background: #F5F1EC; border-radius: 8px; padding: 3px 9px;
+}
+.hiresfix-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.hiresfix-copy { flex: 1; min-width: 200px; }
+.hiresfix-subtitle {
+  font-size: 13px; font-weight: 500; color: var(--text-bright);
+}
+.hiresfix-desc {
+  font-size: 12px; color: #9A9189; margin-top: 2px;
+}
+.hiresfix-summary { font-size: 12px; color: #6F675F; }
+.hiresfix-link {
+  padding: 6px 10px; border: none; border-radius: 8px;
+  background: transparent; color: #E07B6C;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.hiresfix-link:hover {
+  background: rgba(224, 123, 108, 0.10); color: #CC6A5C;
+}
+.pl { font-size: 12px; color: #9A9189; margin-right: 2px; }
+.pbtn {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
+  font-size: 12px; font-weight: 500; border-radius: 9px;
+  border: 1px solid transparent; background: #F5F1EC; color: #6F675F;
+  cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.pbtn:hover {
+  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
+  border-color: rgba(224, 123, 108, 0.18);
+}
+.pbtn.active {
+  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
+  border-color: rgba(224, 123, 108, 0.18);
+}
 .cb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: -6px 0 12px; cursor: pointer; user-select: none; }
 .cb input { width: 14px; height: 14px; cursor: pointer; }
 
@@ -1894,29 +2056,56 @@ function resetTestPrompts() {
 }
 .ext-link:hover { color: var(--accent-hover); }
 
-/* ── 画师串收藏夹 ── */
-.fav-input-row { display: flex; gap: 8px; align-items: flex-start; }
-.fav-input { flex: 1; margin-bottom: 8px; }
+/* ── 画师串收藏夹：输入框一体 + 轻量文字标签 ── */
+.fav-input-row {
+  display: flex; align-items: center; gap: 2px;
+  padding: 0 4px 0 12px; margin-bottom: 8px;
+  background: #FFFEFC; border: 1px solid #E5D8CE; border-radius: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.fav-input-row:focus-within {
+  border-color: #E07B6C;
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+}
+.fav-input {
+  flex: 1; min-width: 0; height: 38px; padding: 0; margin: 0;
+  font-size: 13px; background: transparent; border: none; box-shadow: none;
+}
+.fav-input:focus { box-shadow: none; }
 .fav-star-btn {
-  width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--glass-border);
-  background: var(--glass-bg-strong); color: var(--text-secondary); cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 0; transition: all 0.15s; flex-shrink: 0;
+  width: 34px; height: 34px; flex-shrink: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: #A9A099;
+  font-size: 16px; line-height: 1; cursor: pointer;
+  transition: color 0.15s ease;
 }
-.fav-star-btn:hover:not(:disabled) { border-color: #e2a83e; color: #e2a83e; }
+.fav-star-btn:hover:not(:disabled) { color: #E2A83E; }
 .fav-star-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.fav-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.fav-section-title {
+  font-size: 12px; color: #9A9189; margin-bottom: 6px;
+}
+.fav-chips {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px;
+}
 .fav-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 12px; padding: 4px 8px; border-radius: 14px;
-  border: 1px solid var(--glass-border); background: var(--glass-bg-strong);
-  color: var(--text-primary); cursor: pointer; transition: all 0.15s;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px; font-size: 14px; font-weight: 400;
+  border-radius: 12px; border: 1px solid transparent;
+  background: #F5F1EC; color: #6F675F; cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.fav-chip:hover { border-color: var(--accent); }
-.fav-chip.active { border-color: var(--accent); background: rgba(239, 137, 74, 0.1); color: var(--accent); }
+.fav-chip:hover {
+  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
+  border-color: rgba(224, 123, 108, 0.18);
+}
+.fav-chip.active {
+  background: rgba(224, 123, 108, 0.10); color: #E07B6C; font-weight: 500;
+  border-color: rgba(224, 123, 108, 0.18);
+}
 .fav-chip-x {
-  font-size: 14px; line-height: 1; color: var(--text-secondary); margin-left: 2px;
+  font-size: 12px; line-height: 1; color: #A9A099;
 }
-.fav-chip-x:hover { color: var(--danger); }
+.fav-chip-x:hover { color: #E07B6C; }
 
 /* ── 收藏弹窗 ── */
 .fav-dialog-overlay {
@@ -2198,7 +2387,7 @@ function resetTestPrompts() {
   font-size: 12px;
   font-weight: 600;
   border-radius: 999px;
-  border: 1px solid rgba(250, 204, 21, 0.45);
+  border: 2px solid rgba(250, 204, 21, 0.45);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
