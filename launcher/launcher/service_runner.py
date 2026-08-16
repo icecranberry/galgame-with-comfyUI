@@ -236,6 +236,9 @@ class ServiceWorker(QObject):
         env = self._proc.processEnvironment()
         env.insert("PYTHONUNBUFFERED", "1")
         env.insert("NODE_ENV", "production")
+        # 服务定义中的额外环境变量（如 MaiBot 的 PYTHONUTF8）
+        for _key, _value in self._def.get("env", {}).items():
+            env.insert(_key, _value)
         # 确保路径和用户目录变量存在
         for _key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
                       "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
@@ -498,6 +501,17 @@ class ServiceRunner(QObject):
     def is_any_running(self) -> bool:
         return any(
             w.status == ServiceWorker.STATUS_RUNNING for w in self._workers.values()
+        )
+
+    def any_active(self) -> bool:
+        """是否有进程仍存活或正在启停（ERROR/STOPPED 视为不活跃）。"""
+        return any(
+            w.status in (
+                ServiceWorker.STATUS_STARTING,
+                ServiceWorker.STATUS_RUNNING,
+                ServiceWorker.STATUS_STOPPING,
+            )
+            for w in self._workers.values()
         )
 
     def is_all_running(self) -> bool:

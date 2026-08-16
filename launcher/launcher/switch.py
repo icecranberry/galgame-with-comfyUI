@@ -71,6 +71,8 @@ class Switch(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.45)
 
         # 轨道
         track_color = _lerp_color(self._track_off, self._track_on, self._anim_value)

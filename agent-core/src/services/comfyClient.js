@@ -258,7 +258,7 @@ export function apiToGui(api) {
   };
 }
 
-function guiToApi(workflow) {
+export function guiToApi(workflow) {
   if (!Array.isArray(workflow.nodes)) {
     throw new Error('Invalid workflow: missing or malformed "nodes" array. Please check your workflow JSON file.');
   }
@@ -760,6 +760,24 @@ export async function downloadImageAsBase64(filename, subfolder = '', type = 'ou
   const buffer = Buffer.from(await res.arrayBuffer());
   const ext = path.extname(filename).slice(1) || 'png';
   return `data:image/${ext};base64,${buffer.toString('base64')}`;
+}
+
+/**
+ * 上传图片到 ComfyUI input 目录（供 LoadImage 节点引用）
+ * @returns {Promise<string>} ComfyUI 实际保存的文件名
+ */
+export async function uploadImage(buffer, filename) {
+  const form = new FormData();
+  form.append('image', new Blob([buffer]), filename);
+  form.append('type', 'input');
+  form.append('overwrite', 'true');
+  const res = await fetch(`${getBase()}/upload/image`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Upload failed (${res.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.name || filename;
 }
 
 export function findLatestImageInFolder(folderPath, subfolder = 'bot') {

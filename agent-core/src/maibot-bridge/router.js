@@ -123,6 +123,9 @@ router.post('/chat', async (req, res) => {
     return res.status(400).json({ error: 'reply_text is required' });
   }
 
+  // MaiBot 会话使用独立命名空间，避免与主流程 char_*/group_* 冲突
+  const bridgeConversationId = session_id ? `maibot_${session_id}` : null;
+
   // 1. 记忆整理（memory_enabled=false 时不累积，并删除该会话已保存的记忆摘要）
   let saveResult = { skipped: true, memory_saved: false };
   if (memory_enabled) {
@@ -157,23 +160,27 @@ router.post('/chat', async (req, res) => {
   // 3. 需要配图 → 抽 prompt + 起任务（异步生图，插件轮询 /tasks/:id）
   let task_id = null;
   if (image_needed) {
-    try {
-      const prompt = await extractImagePrompt({ character, user_message, reply_text, context, user_name });
-      if (prompt) {
-        task_id = startImageTask({
-          character,
-          conversationId: saveResult.conversationId,
-          prompt,
-          assistantMsgId: saveResult.assistantMsgId,
-        });
-      } else {
-        reason = 'prompt_extract_failed';
+    if (!bridgeConversationId) {
+      reason = 'missing_session_id';
+      image_needed = false;
+    } else {
+      try {
+        const prompt = await extractImagePrompt({ character, user_message, reply_text, context, user_name });
+        if (prompt) {
+          task_id = startImageTask({
+            character,
+            conversationId: bridgeConversationId,
+            prompt,
+          });
+        } else {
+          reason = 'prompt_extract_failed';
+          image_needed = false;
+        }
+      } catch (err) {
+        console.error('[maibot-bridge] start image task error:', err.message);
+        reason = 'image_task_error';
         image_needed = false;
       }
-    } catch (err) {
-      console.error('[maibot-bridge] start image task error:', err.message);
-      reason = 'image_task_error';
-      image_needed = false;
     }
   }
 
@@ -184,7 +191,7 @@ router.post('/chat', async (req, res) => {
     reason,
     task_id,
     character_id: character.id,
-    conversation_id: saveResult.conversationId,
+    conversation_id: bridgeConversationId,
   });
 });
 

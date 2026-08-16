@@ -4,6 +4,7 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { refineImage } from '../services/imageRefine.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
@@ -289,35 +290,36 @@ router.post('/test-style', async (req, res) => {
   }
 });
 
-// POST /api/images/regenerate — 用原 prompt 重新生图，覆盖原文件
-router.post('/regenerate', async (req, res) => {
-  const { url: imageUrl } = req.body;
-  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+// ── 图片参数反查（regenerate / upscale 放大细化共用）──
 
-  // 解析 URL 提取 category 和 filename（忽略查询参数）
-  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+/** 解析图片 URL → { category, filename }（失败返回 null） */
+function parseImageTarget(cleanUrl) {
   const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
-  if (!match) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
-
-  const folder = match[1];
-  const filename = match[2];
-
-  // 映射 folder → category
-  let category = null;
-  for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {
-    if (info.dir === folder) { category = cat; break; }
+  if (match) {
+    const folder = match[1];
+    const filename = match[2];
+    for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {
+      if (info.dir === folder) return { category: cat, filename };
+    }
+    return null;
   }
-  if (!category && folder === '') category = LEGACY_CATEGORY;
-  if (!category) return res.status(400).json({ error: `unknown folder: ${folder}` });
+  const legacyMatch = cleanUrl.match(/^\/images\/([^/]+)$/);
+  if (legacyMatch) {
+    return { category: LEGACY_CATEGORY, filename: legacyMatch[1] };
+  }
+  return null;
+}
 
-  // 查找 prompt：优先 image_tasks，其次 moment_posts，再 raw_messages，最后 character_events
+/**
+ * 按文件名反查这张图片的完整生成参数（prompt / 画风 / 分辨率 / 工作流模式 / 角色配置）
+ * 查找顺序: image_tasks → moment_posts → raw_messages → character_events → choice_history
+ */
+function lookupImageGenerationParams(filename) {
   const db = getDb();
-  let promptText = null;
-  let taskStyle = null;
-  let taskResolution = null;
-  let charLoras = null;
-  let charCustomWorkflow = null;
-  let charArtist = null;
+  const params = {
+    promptText: null, taskStyle: null, taskResolution: null, taskWorkflowTemplate: null,
+    charLoras: null, charCustomWorkflow: null, charArtist: null,
+  };
 
   // 辅助：从 conversation_id 提取角色 lora/workflow
   function tryGetCharConfig(conversationId) {
@@ -325,82 +327,81 @@ router.post('/regenerate', async (req, res) => {
     if (!m) return;
     const char = db.prepare(`SELECT loras, custom_workflow, artist_override FROM characters WHERE id = ?`).get(parseInt(m[1], 10));
     if (char) {
-      if (!charLoras && char.loras) {
-        try { charLoras = JSON.parse(char.loras); } catch {}
+      if (!params.charLoras && char.loras) {
+        try { params.charLoras = JSON.parse(char.loras); } catch {}
       }
-      if (!charCustomWorkflow && char.custom_workflow) {
-        charCustomWorkflow = char.custom_workflow;
+      if (!params.charCustomWorkflow && char.custom_workflow) {
+        params.charCustomWorkflow = char.custom_workflow;
       }
-      if (charArtist == null) charArtist = charArtistOverride(char);
+      if (params.charArtist == null) params.charArtist = charArtistOverride(char);
     }
   }
 
   // 1. image_tasks
   const task = db.prepare(
-    `SELECT prompt_original, prompt_refined, conversation_id, style, resolution
+    `SELECT prompt_original, prompt_refined, conversation_id, style, resolution, workflow_template
      FROM image_tasks WHERE output_paths LIKE ? ORDER BY created_at DESC LIMIT 1`
   ).get(`%${filename}%`);
   if (task?.prompt_refined || task?.prompt_original) {
-    promptText = task.prompt_refined || task.prompt_original;
-    taskStyle = task.style;
-    taskResolution = task.resolution || null;
+    params.promptText = task.prompt_refined || task.prompt_original;
+    params.taskStyle = task.style;
+    params.taskResolution = task.resolution || null;
+    params.taskWorkflowTemplate = task.workflow_template || null;
     if (task.conversation_id) tryGetCharConfig(task.conversation_id);
   }
 
   // 2. moment_posts
-  if (!promptText) {
+  if (!params.promptText) {
     const mp = db.prepare(
       `SELECT prompt, character_id FROM moment_posts WHERE images LIKE ? ORDER BY created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
     if (mp?.prompt) {
-      promptText = mp.prompt;
+      params.promptText = mp.prompt;
       if (mp.character_id) tryGetCharConfig(`char_${mp.character_id}`);
     }
   }
 
   // 3. raw_messages (主动聊天配图)
-  if (!promptText) {
+  if (!params.promptText) {
     const rm = db.prepare(
       `SELECT raw.prompt, raw.conversation_id FROM raw_messages raw
        JOIN messages msg ON msg.raw_id = raw.id
        WHERE msg.images LIKE ? ORDER BY raw.created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
     if (rm?.prompt) {
-      promptText = rm.prompt;
+      params.promptText = rm.prompt;
       if (rm.conversation_id) tryGetCharConfig(rm.conversation_id);
     }
   }
 
   // 4. character_events (奇遇)
-  if (!promptText) {
+  if (!params.promptText) {
     const ceMatch = db.prepare(
       `SELECT prompt, character_id FROM character_events WHERE image LIKE ? ORDER BY created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
     if (ceMatch?.prompt) {
-      promptText = ceMatch.prompt;
+      params.promptText = ceMatch.prompt;
       if (ceMatch.character_id) tryGetCharConfig(`char_${ceMatch.character_id}`);
     }
   }
 
   // 5. character_events.choice_history JSON (奇遇分支)
-  if (!promptText) {
+  if (!params.promptText) {
     const ch = db.prepare(
       `SELECT id, prompt, character_id FROM character_events WHERE choice_history LIKE ? ORDER BY created_at DESC LIMIT 1`
     ).get(`%${filename}%`);
     if (ch) {
-      promptText = ch.prompt;
+      params.promptText = ch.prompt;
       if (ch.character_id) tryGetCharConfig(`char_${ch.character_id}`);
     }
   }
 
-  if (!promptText || promptText.trim().length === 0) {
-    return res.status(404).json({ error: 'prompt not found for this image' });
-  }
+  return params;
+}
 
-  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."${charLoras?.length ? ` loras=${charLoras.length}` : ''}${charCustomWorkflow ? ` workflow=${charCustomWorkflow}` : ''}`);
-
-  // 根据 category 选择生图参数
-  const categoryConfig = {
+// 根据 category 的生图参数（画风/分辨率）与场景映射（运行时读取，配置修改即时生效）
+function categoryGenConfig(category) {
+  const map = {
     chat:      { artist: config.comfyui.artist,        width: config.comfyui.width,        height: config.comfyui.height },
     moments:   { artist: config.comfyui.momentsArtist,  width: config.comfyui.momentsWidth,  height: config.comfyui.momentsHeight },
     events:    { artist: config.comfyui.eventArtist,    width: config.comfyui.eventWidth,    height: config.comfyui.eventHeight },
@@ -408,11 +409,47 @@ router.post('/regenerate', async (req, res) => {
     gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
     avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
   };
+  return map[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
+}
 
-  const opts = categoryConfig[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
-  if (taskStyle !== null) opts.artist = taskStyle;
-  if (taskStyle !== null && taskResolution) {
-    const resolutionMatch = taskResolution.match(/^(\d+)x(\d+)$/);
+const CATEGORY_SCENE = {
+  chat: 'chat',
+  moments: 'moments',
+  events: 'schedule',
+  peek: 'schedule',
+  mailbox: 'chat',
+  gifts: 'chat',
+  avatargen: 'chat',
+};
+
+/** 画风优先级：角色覆盖 > 任务记录 > 分类默认 */
+function resolveArtist(category, params) {
+  if (params.charArtist !== null) return params.charArtist;
+  if (params.taskStyle !== null) return params.taskStyle;
+  return categoryGenConfig(category).artist;
+}
+
+// POST /api/images/regenerate — 用原 prompt 重新生图，覆盖原文件
+router.post('/regenerate', async (req, res) => {
+  const { url: imageUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+
+  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+  const target = parseImageTarget(cleanUrl);
+  if (!target) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+  const { category, filename } = target;
+
+  const params = lookupImageGenerationParams(filename);
+  const promptText = params.promptText;
+  if (!promptText || promptText.trim().length === 0) {
+    return res.status(404).json({ error: 'prompt not found for this image' });
+  }
+
+  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."${params.charLoras?.length ? ` loras=${params.charLoras.length}` : ''}${params.charCustomWorkflow ? ` workflow=${params.charCustomWorkflow}` : ''}`);
+
+  const opts = { ...categoryGenConfig(category) };
+  if (params.taskStyle !== null && params.taskResolution) {
+    const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
     if (resolutionMatch) {
       opts.width = Number(resolutionMatch[1]);
       opts.height = Number(resolutionMatch[2]);
@@ -420,26 +457,16 @@ router.post('/regenerate', async (req, res) => {
   }
 
   try {
-    const sceneByCategory = {
-      chat: 'chat',
-      moments: 'moments',
-      events: 'schedule',
-      peek: 'schedule',
-      mailbox: 'chat',
-      gifts: 'chat',
-      avatargen: 'chat',
-    };
     const genOpts = {
-      artist: opts.artist,
+      artist: resolveArtist(category, params),
       width: opts.width,
       height: opts.height,
-      scene: sceneByCategory[category] || 'chat',
+      scene: CATEGORY_SCENE[category] || 'chat',
       alreadyPrepared: true,
       persistPreparation: false,
     };
-    if (charLoras?.length > 0) genOpts.loras = charLoras;
-    if (charCustomWorkflow) genOpts.customWorkflow = charCustomWorkflow;
-    if (charArtist !== null) genOpts.artist = charArtist;
+    if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
+    if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
     const result = await generateImageRaw(promptText, genOpts);
 
     if (!result.success || !result.images?.length) {
@@ -468,6 +495,52 @@ router.post('/regenerate', async (req, res) => {
   } catch (err) {
     console.error('[regenerate] error:', err.message);
     res.status(500).json({ error: 'Regenerate failed: ' + err.message });
+  }
+});
+
+// POST /api/images/upscale — HiresFix 放大细化（像素放大×2 → 图生图低重绘），覆盖原文件
+// 细化工作流: workflow/放大细化工作流.json（仅官方节点），参数继承自原图生成时的工作流
+router.post('/upscale', async (req, res) => {
+  const { url: imageUrl } = req.body;
+  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+
+  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+  const target = parseImageTarget(cleanUrl);
+  if (!target) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+  const { category, filename } = target;
+
+  const params = lookupImageGenerationParams(filename);
+  if (!params.promptText || params.promptText.trim().length === 0) {
+    return res.status(404).json({ error: '未找到该图片的生成参数，无法放大细化' });
+  }
+
+  const filePath = path.join(getImageDir(category), filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'file not found' });
+  }
+
+  console.log(`[upscale] category="${category}" file="${filename}" prompt="${params.promptText.slice(0, 80)}..." sourceWorkflow=${params.charCustomWorkflow || params.taskWorkflowTemplate || 'default'}${params.charLoras?.length ? ` loras=${params.charLoras.length}` : ''}`);
+
+  try {
+    const result = await refineImage({
+      filePath,
+      promptText: params.promptText,
+      artist: resolveArtist(category, params),
+      loras: params.charLoras || [],
+      customWorkflow: params.charCustomWorkflow,
+      sourceMode: params.taskWorkflowTemplate,
+      scene: CATEGORY_SCENE[category] || 'chat',
+    });
+
+    invalidateGalleryCache();
+    res.json({
+      success: true,
+      url: `${cleanUrl}?t=${Date.now()}`,
+      workflow: path.basename(result.wfPath),
+    });
+  } catch (err) {
+    console.error('[upscale] error:', err.message);
+    res.status(500).json({ error: '放大细化失败: ' + err.message });
   }
 });
 

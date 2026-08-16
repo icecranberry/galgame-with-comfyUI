@@ -395,6 +395,13 @@ export async function updateGlobalLora(loras) {
   })
 }
 
+/** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */
+export async function updateHiresLora(loras) {
+  await fetch(`${BASE}/config/hires-lora`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras }),
+  })
+}
+
 export async function updateFeatureFlag(key, value) {
   await fetch(`${BASE}/config/features`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }),
@@ -991,6 +998,20 @@ export async function regenerateImage(imageUrl) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || `Regenerate failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 放大细化指定图片（HiresFix ×2 图生图，携带原参数覆盖原文件） */
+export async function upscaleImage(imageUrl) {
+  const res = await fetch(`${BASE}/images/upscale`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: imageUrl }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `放大细化失败 (${res.status})`)
   }
   return res.json()
 }

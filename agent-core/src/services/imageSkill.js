@@ -64,7 +64,7 @@ function resolveWorkflowPath(scene) {
 const PROMPT_PLACEHOLDER = '请输入画面描述';
 
 // 按节点 title 注入参数（而非硬编码节点 ID）
-const NODE_TITLES = {
+export const NODE_TITLES = {
   artist: '画师串',
   width:  '图片的宽',
   height: '图片的长',
@@ -192,8 +192,9 @@ function buildWorkflow(promptText, overrides = {}) {
  * 在工作流中动态插入 LoraLoaderModelOnly 节点
  * 链路: UNETLoader → Lora1 → Lora2 → ... → 原始下游节点
  * 自动适配：无论 UNETLoader 直连 KSampler 还是中间有用户插入的节点，都正确链入。
+ * （放大细化 imageRefine.js 复用同一注入逻辑）
  */
-function injectLoraNodes(wf, loras) {
+export function injectLoraNodes(wf, loras) {
   const unetNode = wf.nodes.find(n => n.type === 'UNETLoader');
   const samplerNode = wf.nodes.find(n => n.type === 'KSampler');
 

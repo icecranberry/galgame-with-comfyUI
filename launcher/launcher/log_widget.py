@@ -19,6 +19,8 @@ class LogWidget(QPlainTextEdit):
         (["✓", "ok", "done", "ready", "healthy", "success", "🎉"], "green"),
         (["[向量服务]"], "cyan"),
         (["[主控后端]"], "lime"),
+        (["[maibot]"], "cyan"),
+        (["[snowluma]"], "lime"),
         (["[构建]"], "dodgerblue"),
     ]
 

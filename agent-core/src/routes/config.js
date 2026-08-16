@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
 import { resetClient, chatSync } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -84,6 +84,7 @@ router.get('/', (req, res) => {
       eventHeight: config.comfyui.eventHeight,
       tlsVerify: config.comfyui.tlsVerify,
       globalLora: config.comfyui.globalLora || [],
+      hiresLora: config.comfyui.hiresLora || [],
     },
     features: config.features,
     weather: { city: config.weather.city || '' },
@@ -144,6 +145,16 @@ router.put('/global-lora', (req, res) => {
   }
   updateGlobalLora(loras);
   res.json({ ok: true, globalLora: config.comfyui.globalLora });
+});
+
+// PUT /api/config/hires-lora — 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流）
+router.put('/hires-lora', (req, res) => {
+  const { loras } = req.body;
+  if (loras === undefined) {
+    return res.status(400).json({ error: 'loras is required' });
+  }
+  updateHiresLora(loras);
+  res.json({ ok: true, hiresLora: config.comfyui.hiresLora });
 });
 
 // PUT /api/config/features — 更新功能开关

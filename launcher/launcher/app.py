@@ -26,8 +26,10 @@ from .git_manager import GitManager
 from .build_manager import BuildManager
 from .service_runner import ServiceRunner, ServiceWorker
 from .network import get_local_ip
+from .maibot_runner import MaiBotRunner
 from .home_page import HomePage
 from .log_page import LogPage
+from .maibot_page import MaiBotPage, MAIBOT_ADMIN_URL, SNOWLUMA_ADMIN_URL
 from .version_page import VersionPage
 from .settings_page import SettingsPage
 from .qa_page import QAPage
@@ -116,9 +118,10 @@ class MainWindow(QMainWindow):
 
     PAGE_HOME = 0
     PAGE_LOG = 1
-    PAGE_VERSION = 2
-    PAGE_SETTINGS = 3
-    PAGE_QA = 4
+    PAGE_MAIBOT = 2
+    PAGE_VERSION = 3
+    PAGE_SETTINGS = 4
+    PAGE_QA = 5
 
     def __init__(self):
         super().__init__()
@@ -131,6 +134,7 @@ class MainWindow(QMainWindow):
         self._git = GitManager(self._project_path, self._config.get("repo_url"))
         self._build = BuildManager(self._project_path)
         self._runner = ServiceRunner(self._project_path)
+        self._maibot_runner = MaiBotRunner(self._project_path)
 
         self._is_built = False
         self._switching_version = False
@@ -151,6 +155,11 @@ class MainWindow(QMainWindow):
         self._load_settings_to_form()
         self._home_page.update_version_info()
         QTimer.singleShot(1000, self._lazy_git_init)
+
+        # MaiBot 随邻舍自动启动（勾选且已安装时）
+        self._load_maibot_settings()
+        if self._config.get("maibot_autostart") and self._maibot_page.is_installed():
+            QTimer.singleShot(1500, self._auto_start_maibot)
 
     # ==================================================================
     # 窗口
@@ -247,6 +256,9 @@ class MainWindow(QMainWindow):
         self._log_page = LogPage()
         self._stack.addWidget(self._log_page)
 
+        self._maibot_page = MaiBotPage(self._exe_dir)
+        self._stack.addWidget(self._maibot_page)
+
         self._version_page = VersionPage()
         self._stack.addWidget(self._version_page)
 
@@ -300,7 +312,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()  # 把按钮推到底部
 
         self._nav_btns: list[QPushButton] = []
-        labels = ["首页", "日志", "版本", "设置", "Q&A"]
+        labels = ["首页", "日志", "MaiBot", "版本", "设置", "Q&A"]
 
         for i, label in enumerate(labels):
             btn = QPushButton(label, self._nav)
@@ -349,6 +361,17 @@ class MainWindow(QMainWindow):
 
         self._runner.output.connect(self._on_service_output)
         self._runner.status_summary.connect(self._on_service_status)
+
+        self._maibot_page.start_clicked.connect(self._on_maibot_start)
+        self._maibot_page.stop_clicked.connect(self._on_maibot_stop)
+        self._maibot_page.open_admin_requested.connect(self._on_maibot_open_admin)
+        self._maibot_page.setting_changed.connect(
+            lambda key, value: self._config.set(key, value)
+        )
+
+        self._maibot_runner.output.connect(self._on_maibot_output)
+        self._maibot_runner.status_changed.connect(self._on_maibot_status)
+        self._maibot_runner.health_changed.connect(self._on_maibot_health)
 
     # ==================================================================
     # 页面切换
@@ -662,6 +685,75 @@ class MainWindow(QMainWindow):
             self._log_page.append_log(f"[系统] 🌐 浏览器已打开 {url}")
 
     # ==================================================================
+    # MaiBot 服务
+    # ==================================================================
+
+    def _load_maibot_settings(self):
+        self._maibot_page.set_values(
+            autostart=self._config.get("maibot_autostart"),
+            browser_maibot=self._config.get("maibot_browser_maibot"),
+            browser_snowluma=self._config.get("maibot_browser_snowluma"),
+        )
+
+    def _auto_start_maibot(self):
+        if self._closing or self._maibot_runner.any_active():
+            return
+        self._maibot_page.append_log(
+            "system", "[系统] 检测到「启动邻舍时自动启动 MaiBot」已开启，正在自动启动..."
+        )
+        self._start_maibot()
+
+    def _start_maibot(self):
+        if not self._maibot_page.is_installed():
+            self._switch_page(self.PAGE_MAIBOT)
+            return
+        ok, errors = self._maibot_runner.start_all()
+        if not ok:
+            self._maibot_page.mark_launch_failed(errors)
+            if self._stack.currentIndex() != self.PAGE_MAIBOT:
+                toast = Toast(self._content, "MaiBot 启动失败，请到 MaiBot 页面查看原因")
+                toast.show_toast(3000)
+
+    def _on_maibot_start(self):
+        self._start_maibot()
+
+    def _on_maibot_stop(self):
+        self._maibot_page.append_log("system", "[系统] 正在停止 MaiBot 与 SnowLuma ...")
+        self._maibot_runner.stop_all()
+
+    def _on_maibot_open_admin(self, service_key: str):
+        url = SNOWLUMA_ADMIN_URL if service_key == "snowluma" else MAIBOT_ADMIN_URL
+        webbrowser.open(url)
+        self._maibot_page.append_log(service_key, f"[系统] 🌐 浏览器已打开 {url}")
+
+    def _on_maibot_output(self, service_key: str, text: str):
+        self._maibot_page.append_log(service_key, text)
+
+    def _on_maibot_status(self, service_key: str, status: str, pid):
+        self._maibot_page.update_status(service_key, status, pid)
+
+    def _on_maibot_health(self, service_key: str, healthy: bool):
+        """服务就绪后按勾选情况打开后台页面。
+
+        替代 start.bat 中的 curl 轮询监听：在启动器内用健康检查静默完成，
+        不产生任何命令行窗口。
+        """
+        if not healthy:
+            return
+        if service_key == "snowluma":
+            if self._config.get("maibot_browser_snowluma"):
+                webbrowser.open(SNOWLUMA_ADMIN_URL)
+                self._maibot_page.append_log(
+                    "snowluma", f"[系统] 🌐 SnowLuma 已就绪，浏览器已打开 {SNOWLUMA_ADMIN_URL}"
+                )
+        else:
+            if self._config.get("maibot_browser_maibot"):
+                webbrowser.open(MAIBOT_ADMIN_URL)
+                self._maibot_page.append_log(
+                    "maibot", f"[系统] 🌐 MaiBot 已就绪，浏览器已打开 {MAIBOT_ADMIN_URL}"
+                )
+
+    # ==================================================================
     # 设置
     # ==================================================================
 
@@ -844,8 +936,11 @@ class MainWindow(QMainWindow):
         super().mouseReleaseEvent(event)
 
     def closeEvent(self, event):
-        """窗口关闭时后台静默停止所有服务，不阻塞用户。"""
-        if not self._runner.is_any_running():
+        """窗口关闭时后台静默停止所有服务（含 MaiBot），不阻塞用户。"""
+        if (
+            not self._runner.any_active()
+            and not self._maibot_runner.any_active()
+        ):
             event.accept()
             return
 
@@ -860,16 +955,25 @@ class MainWindow(QMainWindow):
         QApplication.setQuitOnLastWindowClosed(False)
 
         self._runner.stop_all()
+        self._maibot_runner.stop_all()
 
-        def on_all_stopped(vs, acs, overall):
-            if overall == "all_stopped":
-                try:
-                    self._runner.status_summary.disconnect(on_all_stopped)
-                except RuntimeError:
-                    pass
-                self._final_quit()
+        def on_maybe_all_stopped(*_args):
+            if self._runner.any_active() or self._maibot_runner.any_active():
+                return
+            try:
+                self._runner.status_summary.disconnect(on_maybe_all_stopped)
+            except RuntimeError:
+                pass
+            try:
+                self._maibot_runner.all_stopped.disconnect(on_maybe_all_stopped)
+            except RuntimeError:
+                pass
+            self._final_quit()
 
-        self._runner.status_summary.connect(on_all_stopped)
+        self._runner.status_summary.connect(on_maybe_all_stopped)
+        self._maibot_runner.all_stopped.connect(on_maybe_all_stopped)
+        # 立即检查一次（stop_all 时可能部分服务本就已停止）
+        on_maybe_all_stopped()
 
         # 硬超时兜底：15 秒后强制退出
         QTimer.singleShot(15000, self._final_quit)
@@ -880,7 +984,12 @@ class MainWindow(QMainWindow):
             self._runner.status_summary.disconnect()
         except RuntimeError:
             pass
+        try:
+            self._maibot_runner.all_stopped.disconnect()
+        except RuntimeError:
+            pass
         self._runner._force_kill_all()
+        self._maibot_runner.force_kill_all()
         QApplication.quit()
 
 
@@ -926,8 +1035,8 @@ def _nav_btn_style(active: bool = False) -> str:
                 font-weight: bold;
                 border: none;
                 border-radius: 6px;
-                text-align: left;
-                padding-left: 12px;
+                text-align: center;
+                padding: 0 2px;
             }
         """
     return """
@@ -937,8 +1046,8 @@ def _nav_btn_style(active: bool = False) -> str:
             font-size: 13px;
             border: none;
             border-radius: 6px;
-            text-align: left;
-            padding-left: 12px;
+            text-align: center;
+            padding: 0 2px;
         }
         QPushButton:hover {
             background: rgba(255,255,255,0.12);

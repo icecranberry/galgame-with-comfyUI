@@ -3,13 +3,24 @@
     <div v-if="modelValue" class="modal-overlay" @click.self="close">
       <div class="modal-panel modal-wide">
         <div class="modal-header">
-          <h3>全局画风 LoRA 设置(注意去掉画师串或者和画师串并存)</h3>
+          <h3>LoRA 设置（全局画风 & HiresFix细化）</h3>
           <button class="modal-close" @click="close">✕</button>
         </div>
+        <div class="lora-tab-bar">
+          <button :class="['lora-tab', { active: activeTab === 'global' }]" @click="activeTab = 'global'">
+            全局画风
+            <span v-if="globalCount > 0" class="lora-tab-count">{{ globalCount }}</span>
+          </button>
+          <button :class="['lora-tab', { active: activeTab === 'hires' }]" @click="switchTab('hires')">
+            HiresFix细化
+            <span v-if="hiresCount > 0" class="lora-tab-count">{{ hiresCount }}</span>
+          </button>
+        </div>
+        <p class="lora-tab-hint">{{ activeTab === 'hires' ? '仅作用于放大细化工作流，追加在 LoRA 链末尾（普通生图不受影响）' : '全局画风 LoRA，按适用范围生效（注意去掉画师串或者和画师串并存）' }}</p>
         <div class="modal-body">
           <div class="lora-body-card">
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
-              <div v-for="(item, idx) in loraItems" :key="idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
+              <div v-for="(item, idx) in activeItems" :key="`${activeTab}-${idx}`" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
                 <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
@@ -63,18 +74,20 @@
                   <input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
                 </div>
                 <div class="lora-scenes-row">
-                  <span class="fl lora-inline-label">适用范围</span>
-                  <div class="lora-scenes-chips">
-                    <button
-                      v-for="s in sceneOptions"
-                      :key="s.value"
-                      :class="['scene-chip', { active: item.scenes && item.scenes.includes(s.value) }]"
-                      @click="toggleScene(item, s.value)"
-                    >
-                      <span v-if="item.scenes && item.scenes.includes(s.value)" class="scene-check">✓</span>
-                      {{ s.label }}
-                    </button>
-                  </div>
+                  <template v-if="activeTab === 'global'">
+                    <span class="fl lora-inline-label">适用范围</span>
+                    <div class="lora-scenes-chips">
+                      <button
+                        v-for="s in sceneOptions"
+                        :key="s.value"
+                        :class="['scene-chip', { active: item.scenes && item.scenes.includes(s.value) }]"
+                        @click="toggleScene(item, s.value)"
+                      >
+                        <span v-if="item.scenes && item.scenes.includes(s.value)" class="scene-check">✓</span>
+                        {{ s.label }}
+                      </button>
+                    </div>
+                  </template>
                   <div style="flex:1;min-width:0"></div>
                   <label class="lora-enable-toggle" @click.stop>
                     <span class="lora-enable-status">{{ item.enabled ? '已启用' : '已禁用' }}</span>
@@ -87,8 +100,8 @@
               </div>
             </TransitionGroup>
 
-            <div v-if="loraItems.length === 0" class="lora-empty-hint">
-              尚未配置任何全局 LoRA，点击下方按钮添加
+            <div v-if="activeItems.length === 0" class="lora-empty-hint">
+              {{ activeTab === 'hires' ? '尚未配置任何细化 LoRA，点击下方按钮添加' : '尚未配置任何全局 LoRA，点击下方按钮添加' }}
             </div>
 
             <button class="lora-add-btn" @click="addLoraGroup">
@@ -115,17 +128,31 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, inject } from 'vue'
+import { ref, computed, watch, nextTick, inject } from 'vue'
 import * as api from '../api/index.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   initialLoras: { type: Array, default: () => [] },
+  initialHiresLoras: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:modelValue', 'saved'])
 
 const toastFn = inject('toast')
+
+// 标签页: 'global' = 全局画风 LoRA（带场景过滤）；'hires' = HiresFix 细化专用 LoRA（仅细化工作流生效）
+const activeTab = ref('global')
+const globalItems = ref([])
+const hiresItems = ref([])
+const activeItems = computed(() => (activeTab.value === 'hires' ? hiresItems.value : globalItems.value))
+const globalCount = computed(() => globalItems.value.filter(l => l.path && l.enabled !== false).length)
+const hiresCount = computed(() => hiresItems.value.filter(l => l.path && l.enabled !== false).length)
+
+function switchTab(tab) {
+  activeTab.value = tab
+  activeLoraFileIdx.value = null
+}
 
 const sceneOptions = [
   { value: 'chat', label: '聊天' },
@@ -135,7 +162,6 @@ const sceneOptions = [
   { value: 'schedule', label: '日程' },
 ]
 
-const loraItems = ref([])
 const lorasFiles = ref([])
 const activeLoraFileIdx = ref(null)
 const loraDropdownIdx = ref(-1)
@@ -145,15 +171,18 @@ const loraLoading = ref(false)
 
 watch(() => props.modelValue, (v) => {
   if (v) {
-    const raw = props.initialLoras.length > 0
-      ? JSON.parse(JSON.stringify(props.initialLoras))
-      : []
-    for (const item of raw) {
-      if (item.enabled === undefined) item.enabled = true
-      if (!Array.isArray(item.scenes)) item.scenes = ['chat', 'moments', 'events', 'mailbox', 'schedule']
-      // 已有数据的 scenes=[] 保持原样（后端视为全部场景）
+    const normalize = (list) => {
+      const raw = list.length > 0 ? JSON.parse(JSON.stringify(list)) : []
+      for (const item of raw) {
+        if (item.enabled === undefined) item.enabled = true
+        if (!Array.isArray(item.scenes)) item.scenes = ['chat', 'moments', 'events', 'mailbox', 'schedule']
+        // 已有数据的 scenes=[] 保持原样（后端视为全部场景）
+      }
+      return raw
     }
-    loraItems.value = raw
+    globalItems.value = normalize(props.initialLoras)
+    hiresItems.value = normalize(props.initialHiresLoras)
+    activeTab.value = 'global'
     fetchLorasFiles()
   }
 })
@@ -163,11 +192,11 @@ function close() {
 }
 
 function addLoraGroup() {
-  loraItems.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true, scenes: ['chat', 'moments', 'events', 'mailbox', 'schedule'] })
+  activeItems.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true, scenes: ['chat', 'moments', 'events', 'mailbox', 'schedule'] })
 }
 
 function removeLoraGroup(idx) {
-  loraItems.value.splice(idx, 1)
+  activeItems.value.splice(idx, 1)
 }
 
 function toggleScene(item, scene) {
@@ -205,13 +234,13 @@ function filterLoras(query) {
 function onLoraInputFocus(idx) {
   activeLoraFileIdx.value = idx
   loraDropdownIdx.value = -1
-  loraSuggestions.value = filterLoras(loraItems.value[idx]?.path || '')
+  loraSuggestions.value = filterLoras(activeItems.value[idx]?.path || '')
 }
 
 function onLoraInput(idx) {
   activeLoraFileIdx.value = idx
   loraDropdownIdx.value = -1
-  loraSuggestions.value = filterLoras(loraItems.value[idx]?.path || '')
+  loraSuggestions.value = filterLoras(activeItems.value[idx]?.path || '')
 }
 
 function onLoraInputBlur() {
@@ -219,7 +248,7 @@ function onLoraInputBlur() {
 }
 
 function selectLoraFile(idx, file) {
-  loraItems.value[idx].path = file.name
+  activeItems.value[idx].path = file.name
   activeLoraFileIdx.value = null
 }
 
@@ -241,15 +270,19 @@ function onLoraKeydown(e, idx) {
 }
 
 async function save() {
-  const validLoras = loraItems.value.filter(l => l.path && l.path.trim())
+  const validGlobal = globalItems.value.filter(l => l.path && l.path.trim())
+  const validHires = hiresItems.value.filter(l => l.path && l.path.trim())
   loraLoading.value = true
   try {
-    await api.updateGlobalLora(validLoras)
-    emit('saved', validLoras)
+    await Promise.all([
+      api.updateGlobalLora(validGlobal),
+      api.updateHiresLora(validHires),
+    ])
+    emit('saved', validGlobal, validHires)
     emit('update:modelValue', false)
-    if (toastFn) toastFn('全局 LoRA 已保存', 'success')
+    if (toastFn) toastFn('LoRA 设置已保存', 'success')
   } catch (e) {
-    console.error('saveGlobalLora failed:', e)
+    console.error('saveLoraConfig failed:', e)
     if (toastFn) toastFn('保存失败', 'error')
   } finally {
     loraLoading.value = false
@@ -289,6 +322,35 @@ async function save() {
 .modal-close:hover { background: rgba(0,0,0,0.06); color: var(--text-primary); }
 .modal-body { padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
 .modal-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ── 标签切换：文字 + 下划线（低调风格，仅文字变色） ── */
+.lora-tab-bar {
+  display: flex; gap: 20px; margin: 8px 24px 0; flex-shrink: 0;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.lora-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 2px 8px; font-size: 13px; font-weight: 500;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-secondary); font-family: inherit;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.lora-tab:hover:not(.active) { color: var(--text-primary); }
+.lora-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.lora-tab-count {
+  min-width: 16px; padding: 0 5px; border-radius: 8px;
+  background: rgba(0,0,0,0.07); color: inherit;
+  font-size: 11px; line-height: 1.5; text-align: center;
+}
+.lora-tab-hint {
+  margin: 10px 24px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+}
 
 .lora-body-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
 .lora-list { display: flex; flex-direction: column; gap: 10px; }
@@ -409,3 +471,4 @@ async function save() {
   .modal-wide .fi { font-size: 16px; }
 }
 </style>
+

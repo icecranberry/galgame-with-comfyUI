@@ -1451,6 +1451,7 @@ const SETTING_TO_CONFIG = {
   user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
   workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
   comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
+  comfy_hires_lora:               { obj: 'comfyui',  key: 'hiresLora',        type: 'json' },
 };
 
 function castValue(raw, type) {

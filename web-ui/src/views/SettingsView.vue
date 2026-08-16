@@ -48,14 +48,14 @@
           <div class="sa-spacer"></div>
           <button class="btn-ghost wf-action-btn" style="font-size:12px;display:flex" @click="globalLoraModalVisible = true">
             全局LoRA
-            <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
+            <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}{{ hiresLoraCount > 0 ? ` + 细化${hiresLoraCount}` : '' }}</span>
           </button>
           <button class="btn-ghost wf-action-btn" style="font-size:12px" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
           <button class="btn-ghost wf-action-btn" style="font-size:12px" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
 
-      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" @saved="onGlobalLoraSaved" />
+      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" :initialHiresLoras="hiresLoras" @saved="onLoraSaved" />
 
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
@@ -826,6 +826,8 @@ const form = ref({ artist: '', width: 1600, height: 1200, momentsArtist: '', mom
 const globalLoras = ref([])
 const globalLoraModalVisible = ref(false)
 const globalLoraCount = computed(() => (globalLoras.value || []).filter(l => l.path && l.enabled !== false).length)
+const hiresLoras = ref([])
+const hiresLoraCount = computed(() => (hiresLoras.value || []).filter(l => l.path && l.enabled !== false).length)
 const comfyTab = ref('chat')
 const comfyTabs = [
   { mode: 'chat', label: '对话配图' },
@@ -887,7 +889,6 @@ const presets = [
   { label: '1280×720', width: 1280, height: 720 },
   { label: '1200×900', width: 1200, height: 900 },
   { label: '1600×1200', width: 1600, height: 1200 },
-  { label: '1920×1080', width: 1920, height: 1080 },
 ]
 
 // ── 画师串收藏夹 ──
@@ -1294,6 +1295,7 @@ onMounted(async () => {
       eventHeight: data.comfy.eventHeight || 1200,
     }
     globalLoras.value = data.comfy.globalLora || []
+    hiresLoras.value = data.comfy.hiresLora || []
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -1350,8 +1352,9 @@ async function saveComfy() {
   setTimeout(() => saved.value = false, 2000)
 }
 
-function onGlobalLoraSaved(loras) {
-  globalLoras.value = loras
+function onLoraSaved(globalList, hiresList) {
+  if (Array.isArray(globalList)) globalLoras.value = globalList
+  if (Array.isArray(hiresList)) hiresLoras.value = hiresList
 }
 
 async function saveComfyUrl() {

@@ -16,12 +16,13 @@ from .network import get_local_ip
 class ServiceIndicator(QWidget):
     """单个服务状态指示器：圆点 + 名称 + PID。"""
 
-    def __init__(self, name: str, port: int, parent=None):
+    def __init__(self, name: str, port: int, parent=None, show_port: bool = True):
         super().__init__(parent)
         self._name = name
         self._port = port
         self._running = False
         self._pid = None
+        self._show_port = show_port
         self._setup_ui()
 
     def _setup_ui(self):
@@ -33,7 +34,8 @@ class ServiceIndicator(QWidget):
         self._dot.setFixedWidth(16)
         self._update_dot()
 
-        self._text = QLabel(f"{self._name} (:{self._port})")
+        text = f"{self._name} (:{self._port})" if self._show_port else self._name
+        self._text = QLabel(text)
         self._text.setStyleSheet("color: #2E2A27; font-size: 13px;")
 
         self._pid_label = QLabel("")

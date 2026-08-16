@@ -16,6 +16,10 @@ DEFAULT_CONFIG = {
     "last_fetch_date": "",
     "version_display": "",  # 持久化版本信息，启动即可显示
     "use_mirror": True,  # 使用国内镜像源加速 npm/pip 依赖下载
+    # --- MaiBot ---
+    "maibot_autostart": False,  # 启动邻舍时自动启动 MaiBot
+    "maibot_browser_maibot": True,  # MaiBot 就绪后自动打开后台 (8001)
+    "maibot_browser_snowluma": True,  # SnowLuma 就绪后自动打开后台 (5099)
 }
 
 
