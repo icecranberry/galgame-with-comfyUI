@@ -350,6 +350,7 @@ class MainWindow(QMainWindow):
             lambda key, value: self._config.set(key, value)
         )
         self._settings_page.open_comfyui_clicked.connect(self._on_open_comfyui)
+        self._settings_page.lora_panel_toggled.connect(self._on_lora_panel_toggled)
         self._settings_page.migrate_panel_toggled.connect(self._on_migrate_panel_toggled)
 
         self._git.output.connect(self._on_git_output)
@@ -762,6 +763,13 @@ class MainWindow(QMainWindow):
             self._config.set(key, value)
         self._log_page.append_log("[系统] 设置已保存")
 
+    def _on_lora_panel_toggled(self, expanded: bool):
+        """LoRA文件夹面板展开/折叠时，调整窗口高度。"""
+        delta = 80 if expanded else -80
+        new_h = self.height() + delta
+        new_h = max(500, min(new_h, 900))
+        self.resize(self.width(), new_h)
+
     def _on_migrate_panel_toggled(self, expanded: bool):
         """数据迁移面板展开/折叠时，调整窗口高度。"""
         delta = 40 if expanded else -40
@@ -804,6 +812,7 @@ class MainWindow(QMainWindow):
             auto_browser=self._config.get("auto_open_browser"),
             check_comfyui=self._config.get("check_comfyui_before_start"),
             use_mirror=self._config.get("use_mirror"),
+            extra_lora_folders=self._config.get("extra_lora_folders"),
         )
 
     # ==================================================================
