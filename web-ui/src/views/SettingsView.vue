@@ -206,15 +206,23 @@
           <h3>LLM API 设置</h3>
           <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
           <button
+            ref="freeEggBtn"
             type="button"
             :class="['free-egg-btn', { active: freeEgg }]"
             :disabled="freeEggBusy"
             :title="freeEgg ? '点击关闭，恢复自有 LLM 配置' : '点击开启：免 Key 使用 opencode 免费模型，每5小时每IP限200次'"
-            @click="toggleFreeEgg"
-          >{{ freeEgg ? '🥚 免费鸡蛋享用中' : '🥚 每日免费鸡蛋' }}</button>
+            @click="onFreeEggClick"
+          >
+            <span class="free-egg-label">{{ freeEgg ? '🥚 免费鸡蛋享用中' : '🥚 每日免费鸡蛋' }}</span>
+            <span v-if="eggSplash" :key="eggSplash.id" class="egg-splash" aria-hidden="true">
+              <i v-for="drop in eggSplash.drops" :key="drop.id" class="egg-drop" :style="drop.style"></i>
+              <i v-for="shard in eggSplash.shards" :key="shard.id" class="egg-shard" :style="shard.style"></i>
+            </span>
+          </button>
         </div>
 
-        <template v-if="!freeEgg">
+        <Transition name="egg-page" mode="out-in">
+        <div v-if="!freeEgg" key="llm-custom" class="llm-api-switch-body">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
         <p class="fd">词元跳动的key获取地址：<a href="https://tokendance.space/keys" target="_blank" rel="noopener" class="ext-link">https://tokendance.space/keys</a> ，仍然提供v4flash预览版，所以没有涨价</p>
@@ -453,10 +461,10 @@
           <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
           <span v-if="llmSaved" class="smsg">已保存</span>
         </div>
-        </template>
+        </div>
 
         <!-- 免费鸡蛋模式：隐藏全部 LLM 配置项，仅显示说明 -->
-        <div v-else class="free-egg-notice">
+        <div v-else key="llm-free" class="free-egg-notice">
           <span class="free-egg-icon" aria-hidden="true">🥚</span>
           <div class="free-egg-copy">
             <div class="free-egg-title">正在使用opencode go的deepseek-v4-flash-free</div>
@@ -464,6 +472,7 @@
             <div class="free-egg-hint">接口连续失败 2 次会自动关闭鸡蛋，改用自有配置重试</div>
           </div>
         </div>
+        </Transition>
       </div>
 
 
@@ -1108,6 +1117,78 @@ function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 
 // 每日免费鸡蛋：点击按钮开/关；开 = 走 opencode zen 免费端点（免 Key、强制关思考），关 = 恢复自有配置
 const freeEggBusy = ref(false)
+const freeEggBtn = ref(null)
+const eggSplash = ref(null)
+let eggSplashSeq = 0
+
+function burstEggSplash() {
+  const btn = freeEggBtn.value
+  if (btn) {
+    btn.animate(
+      [
+        { transform: 'scale(1.02, 0.8) rotate(-2deg)', boxShadow: 'inset 0 0 0 5px rgba(255, 214, 70, 0.95)', filter: 'brightness(1.5)' },
+        { transform: 'scale(1.12, 1.24) rotate(2deg)', boxShadow: 'inset 0 0 0 2px rgba(255, 214, 70, 0.45)', filter: 'brightness(1.2)', offset: 0.35 },
+        { transform: 'scale(0.96, 1.04) rotate(0deg)', boxShadow: 'inset 0 0 0 0 rgba(255, 214, 70, 0)', filter: 'brightness(1.02)', offset: 0.68 },
+        { transform: 'scale(1, 1) rotate(0deg)', boxShadow: 'inset 0 0 0 0 rgba(255, 214, 70, 0)', filter: 'brightness(1)' }
+      ],
+      { duration: 460, easing: 'cubic-bezier(0.22, 0.9, 0.3, 1.35)' }
+    )
+  }
+
+  const drops = []
+  const dropColors = ['#ffd83d', '#ffc61a', '#fff3c4', '#ffb02e', '#ffe38a']
+  for (let i = 0; i < 16; i++) {
+    const angle = (Math.PI * 2 * i) / 16 + (Math.random() - 0.5) * 0.55
+    const dist = 52 + Math.random() * 88
+    const x = Math.cos(angle) * dist
+    const y = Math.sin(angle) * dist
+    const size = 4 + Math.random() * 7
+    drops.push({
+      id: i,
+      style: {
+        '--x': `${x.toFixed(1)}px`,
+        '--y': `${y.toFixed(1)}px`,
+        '--mx': `${(x * 0.6).toFixed(1)}px`,
+        '--my': `${(y * 0.6).toFixed(1)}px`,
+        '--fall': `${(16 + Math.random() * 44).toFixed(1)}px`,
+        '--size': `${size.toFixed(1)}px`,
+        '--rot': `${(angle * 180 / Math.PI + 90).toFixed(1)}deg`,
+        '--dur': `${(540 + Math.random() * 340).toFixed(0)}ms`,
+        '--delay': `${(Math.random() * 40).toFixed(0)}ms`,
+        '--color': dropColors[i % dropColors.length]
+      }
+    })
+  }
+
+  const shards = []
+  for (let i = 0; i < 7; i++) {
+    const angle = (Math.PI * 2 * i) / 7 + (Math.random() - 0.5) * 0.7
+    const dist = 66 + Math.random() * 60
+    const x = Math.cos(angle) * dist
+    const y = Math.sin(angle) * dist
+    const size = 7 + Math.random() * 6
+    shards.push({
+      id: i,
+      style: {
+        '--x': `${x.toFixed(1)}px`,
+        '--y': `${y.toFixed(1)}px`,
+        '--mx': `${(x * 0.55).toFixed(1)}px`,
+        '--my': `${(y * 0.55).toFixed(1)}px`,
+        '--size': `${size.toFixed(1)}px`,
+        '--rot': `${(angle * 180 / Math.PI).toFixed(1)}deg`,
+        '--dur': `${(620 + Math.random() * 260).toFixed(0)}ms`,
+        '--delay': `${(Math.random() * 35).toFixed(0)}ms`
+      }
+    })
+  }
+
+  eggSplash.value = { id: ++eggSplashSeq, drops, shards }
+}
+
+function onFreeEggClick() {
+  burstEggSplash()
+  toggleFreeEgg()
+}
 async function toggleFreeEgg() {
   if (freeEggBusy.value) return
   freeEggBusy.value = true
@@ -2445,10 +2526,64 @@ function resetTestPrompts() {
   transition: all 0.15s;
   flex-shrink: 0;
   white-space: nowrap;
+  position: relative;
 }
 .free-egg-btn:hover:not(:disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
 .free-egg-btn.active { border-color: #facc15; background: rgba(250, 204, 21, 0.16); color: #facc15; }
 .free-egg-btn:disabled { opacity: 0.6; cursor: wait; }
+.free-egg-label { position: relative; z-index: 3; }
+
+/* LLM API 面板切换：退出淡出上收，进入弹性下压 */
+.egg-page-leave-active { transition: opacity 0.16s ease, transform 0.18s ease; }
+.egg-page-enter-active { transition: opacity 0.22s ease, transform 0.38s cubic-bezier(0.2, 0.9, 0.3, 1.25); }
+.egg-page-leave-to { opacity: 0; transform: translateY(-8px) scale(0.995); }
+.egg-page-enter-from { opacity: 0; transform: translateY(14px) scale(0.98); }
+.egg-splash {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.egg-drop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--size);
+  height: calc(var(--size) * 1.35);
+  margin: calc(var(--size) * -0.675) 0 0 calc(var(--size) * -0.5);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0 10%, var(--color) 42%, rgba(190, 118, 10, 0.9) 100%);
+  box-shadow: 0 0 6px rgba(255, 190, 40, 0.5);
+  animation: egg-drop-fly var(--dur) cubic-bezier(0.14, 0.62, 0.36, 1) var(--delay) both;
+}
+@keyframes egg-drop-fly {
+  0% { transform: translate(0, 0) rotate(var(--rot)) scale(0.15, 0.15); opacity: 0; }
+  8% { opacity: 1; }
+  32% { transform: translate(var(--mx), var(--my)) rotate(var(--rot)) scale(0.85, 1.45); }
+  68% { transform: translate(var(--x), var(--y)) rotate(var(--rot)) scale(0.6, 0.9); opacity: 0.95; }
+  100% { transform: translate(var(--x), calc(var(--y) + var(--fall))) rotate(var(--rot)) scale(1.3, 0.08); opacity: 0; }
+}
+.egg-shard {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--size) * 1.7);
+  height: var(--size);
+  margin: calc(var(--size) * -0.5) 0 0 calc(var(--size) * -0.85);
+  background: linear-gradient(135deg, #fffdf5 0%, #ead9b0 55%, #cbb177 100%);
+  clip-path: polygon(18% 0, 100% 28%, 84% 100%, 0 74%, 10% 22%);
+  box-shadow: inset 0 0 2px rgba(255, 255, 255, 0.75);
+  animation: egg-shard-fly var(--dur) cubic-bezier(0.18, 0.7, 0.28, 1) var(--delay) both;
+}
+@keyframes egg-shard-fly {
+  0% { transform: translate(0, 0) rotate(0deg) scale(0.2); opacity: 0; }
+  12% { opacity: 1; }
+  55% { transform: translate(var(--mx), var(--my)) rotate(calc(var(--rot) + 150deg)) scale(1.05); }
+  100% { transform: translate(var(--x), var(--y)) rotate(calc(var(--rot) + 290deg)) scale(0.5); opacity: 0; }
+}
 .free-egg-notice {
   display: flex;
   align-items: center;
