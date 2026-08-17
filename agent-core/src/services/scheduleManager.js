@@ -30,6 +30,20 @@ function timeToMinutes(hhmm) {
   return h * 60 + (m || 0);
 }
 
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags.map(tag => String(tag).trim()).filter(Boolean);
+  if (typeof tags === 'string') {
+    const trimmed = tags.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) || typeof parsed === 'string') return normalizeTags(parsed);
+    } catch {}
+    return trimmed.split(/[,，、\n]/).map(tag => tag.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 /**
  * 判断当前时间是否在给定的 [startTime, endTime) 区间内
  * 正确处理跨午夜（如 startTime="23:00", endTime="07:00"）
@@ -218,6 +232,7 @@ export function getTodaySchedule(characterId) {
   const now = new Date();
   const enriched = schedule.map(act => ({
     ...act,
+    tags: normalizeTags(act.tags),
     isCurrent: isInTimeSlot(act.startTime, act.endTime, now),
   }));
 
@@ -254,7 +269,7 @@ export function getCurrentActivity(characterId, now = new Date()) {
         description: act.description || '',
         startTime: act.startTime,
         endTime: act.endTime,
-        tags: act.tags || [],
+        tags: normalizeTags(act.tags),
       };
       activityCache.set(characterId, { activity: result, expireAt: Date.now() + CACHE_TTL });
       return result;
@@ -632,7 +647,7 @@ export function getAllOverview() {
       is_sleeping: sleeping,
       sleep_until: sleepUntil,
       _desc: activity?.description || '',
-      tags: activity?.tags || [],
+      tags: normalizeTags(activity?.tags),
       wake_attempts: char.wake_attempts,
       was_door_woken: char.was_door_woken,
       temporary_wake_until: char.temporary_wake_until,

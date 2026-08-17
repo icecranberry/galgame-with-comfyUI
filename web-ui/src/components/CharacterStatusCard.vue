@@ -18,9 +18,9 @@
         <div class="name-row">
           <span class="char-name">{{ char.display_name }}</span>
           <span v-if="statusLabel" class="status-badge" :class="badgeClass">{{ statusLabel }}</span>
-          <template v-if="!char.is_sleeping && char.tags && char.tags.length > 0">
+          <template v-if="!char.is_sleeping && tagList.length > 0">
             <span
-              v-for="(tag, i) in char.tags.slice(0, 2).reverse()"
+              v-for="(tag, i) in displayedTags"
               :key="i"
               class="tag-badge"
               :class="i === 0 ? 'tag-green' : 'tag-orange'"
@@ -42,7 +42,7 @@
       </div>
 
       <!-- 右上角相机按钮（有日程才显示） -->
-      <button v-if="char.tags?.length" class="peek-btn" @click.stop="$emit('peek')">
+      <button v-if="tagList.length" class="peek-btn" @click.stop="$emit('peek')">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
           <circle cx="12" cy="13" r="4"/>
@@ -54,7 +54,7 @@
         v-if="char.is_sleeping && !char.is_temp_woken"
         class="wake-btn"
         :class="{ shaking: wakeShaking }"
-        :style="{ top: char.tags?.length ? '56px' : '10px' }"
+        :style="{ top: tagList.length ? '56px' : '10px' }"
         @click.stop="onWake"
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -125,6 +125,23 @@ const computedStatus = computed(() => {
 
 const statusLabel = computed(() => statusMap[computedStatus.value]?.label || '')
 const badgeClass = computed(() => statusMap[computedStatus.value]?.cls || '')
+
+function normalizeTags(raw) {
+  if (Array.isArray(raw)) return raw.map(tag => String(tag).trim()).filter(Boolean)
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed) || typeof parsed === 'string') return normalizeTags(parsed)
+    } catch {}
+    return trimmed.split(/[,，、\n]/).map(tag => tag.trim()).filter(Boolean)
+  }
+  return []
+}
+
+const tagList = computed(() => normalizeTags(props.char?.tags))
+const displayedTags = computed(() => tagList.value.slice(0, 2).reverse())
 
 const footnote = computed(() => {
   if (props.char.is_sleeping && !props.char.is_temp_woken) {

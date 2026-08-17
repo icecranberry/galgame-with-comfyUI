@@ -100,7 +100,7 @@ class LogPage(QWidget):
         self._update_hint.hide()
         status_layout.addWidget(self._update_hint)
 
-        self.stop_btn = QPushButton("■ 停止所有")
+        self.stop_btn = QPushButton("■ 停止邻舍")
         self.stop_btn.setStyleSheet("""
             QPushButton {
                 background: #E07B6C; color: #FCFAF8; font-size: 12px;

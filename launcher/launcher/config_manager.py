@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "use_mirror": True,  # 使用国内镜像源加速 npm/pip 依赖下载
     "extra_lora_folders": "",  # 额外 LoRA 文件夹路径，多个用;分隔；留空则仅从 ComfyUI/models/loras 读取
     # --- MaiBot ---
-    "maibot_autostart": False,  # 启动邻舍时自动启动 MaiBot
+    "maibot_autostart": False,  # 点击一键启动邻舍时同时启动 MaiBot
     "maibot_browser_maibot": True,  # MaiBot 就绪后自动打开后台 (8001)
     "maibot_browser_snowluma": True,  # SnowLuma 就绪后自动打开后台 (5099)
 }

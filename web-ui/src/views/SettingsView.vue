@@ -620,7 +620,7 @@
       <div class="card memory-settings-card maibot-settings-card">
         <div class="memory-settings-header">
           <div>
-            <h3>MaiBot 桥接</h3>
+            <h3>MaiBot 桥接（需要邻舍v3.0.0以上支持）</h3>
             <p>管理注入到 MaiBot 主聊天流的人格信息（角色卡 / 风格 / 记忆）与全部插件参数</p>
           </div>
         </div>

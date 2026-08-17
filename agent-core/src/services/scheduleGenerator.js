@@ -24,6 +24,20 @@ function cropPersonaForSchedule(basePrompt) {
   return idx > -1 ? basePrompt.slice(0, idx).trim() : basePrompt.slice(0, 800);
 }
 
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags.map(tag => String(tag).trim()).filter(Boolean);
+  if (typeof tags === 'string') {
+    const trimmed = tags.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) || typeof parsed === 'string') return normalizeTags(parsed);
+    } catch {}
+    return trimmed.split(/[,，、\n]/).map(tag => tag.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 /**
  * 为角色生成日程模板
  * @param {object} character - { id, display_name, base_prompt }
@@ -280,7 +294,7 @@ function parseAndValidateSchedule(raw, displayName) {
 
   // 补充 tags 和 description 默认值
   for (const act of activities) {
-    if (!act.tags) act.tags = [];
+    act.tags = normalizeTags(act.tags);
     if (!act.description) act.description = '';
   }
 

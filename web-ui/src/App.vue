@@ -26,6 +26,7 @@
   </div>
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
+  <InstallGuideDialog ref="guideDialog" />
 
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
@@ -49,6 +50,8 @@ import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import Toast from './components/Toast.vue'
+import InstallGuideDialog from './components/InstallGuideDialog.vue'
+import { MAIBOT_AFTER_START_STEPS, MAIBOT_INSTALL_STEPS, MAIBOT_INTRO_TEXT } from './data/maibotTutorial.js'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
@@ -57,6 +60,7 @@ const mailbox = useMailboxStore()
 const route = useRoute()
 const confirmDialog = ref(null)
 const toastEl = ref(null)
+const guideDialog = ref(null)
 
 // ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
 const mobileToast = ref({ visible: false, url: '' })
@@ -89,8 +93,21 @@ function confirm(opts) {
 function toast(message, type = 'info', duration) {
   toastEl.value?.show(message, type, duration)
 }
+function showGuide(opts) {
+  return guideDialog.value?.show(opts) ?? Promise.resolve()
+}
+function showInstallGuide() {
+  return showGuide({
+    title: 'MaiBot 安装教程',
+    intro: MAIBOT_INTRO_TEXT,
+    steps: MAIBOT_INSTALL_STEPS,
+    afterStartSteps: MAIBOT_AFTER_START_STEPS,
+  })
+}
 provide('confirm', confirm)
 provide('toast', toast)
+provide('showGuide', showGuide)
+provide('showInstallGuide', showInstallGuide)
 
 // ══════════════════════════════════════════════════
 // 移动端响应式 — Sidebar 抽屉状态

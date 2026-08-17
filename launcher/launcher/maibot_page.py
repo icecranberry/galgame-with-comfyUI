@@ -288,7 +288,7 @@ class MaiBotPage(QWidget):
             card_layout.addLayout(row)
 
         self.autostart_switch = Switch("以后随着邻舍自动启动")
-        self.autostart_switch.setToolTip("之后启动邻舍时自动启动 MaiBot")
+        self.autostart_switch.setToolTip("点击一键启动邻舍时同时启动 MaiBot 与 SnowLuma")
         self.autostart_switch.toggled.connect(
             lambda checked: self.setting_changed.emit("maibot_autostart", checked)
         )

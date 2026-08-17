@@ -177,6 +177,13 @@ import {
 const router = useRouter()
 const toast = inject('toast', null)
 function notify(text, type = 'success') { toast?.(text, type) }
+const showInstallGuide = inject('showInstallGuide', null)
+let installGuideShown = false
+function promptInstallGuide() {
+  if (installGuideShown) return
+  installGuideShown = true
+  showInstallGuide?.()
+}
 
 // ── 连接设置 ──
 const webuiToken = ref('MaiBot.admin')
@@ -277,7 +284,10 @@ async function loadAll() {
   try {
     const settings = await maibotGetWebuiSettings()
     webuiToken.value = settings.token || 'MaiBot.admin'
-  } catch (err) { notify('读取连接设置失败: ' + err.message, 'error') }
+  } catch (err) {
+    notify('读取连接设置失败: ' + err.message, 'error')
+    promptInstallGuide()
+  }
 
   try {
     const chars = await maibotListCharacters()
@@ -285,13 +295,20 @@ async function loadAll() {
     // 角色列表按显示名称首字母（拼音）排序
     const collator = new Intl.Collator('zh-Hans-CN-u-co-pinyin', { sensitivity: 'base' })
     characters.value.sort((a, b) => collator.compare(a.display_name || a.name, b.display_name || b.name))
-  } catch (err) { notify('读取邻舍角色失败: ' + err.message, 'error') }
+  } catch (err) {
+    notify('读取邻舍角色失败: ' + err.message, 'error')
+    promptInstallGuide()
+  }
 
   try {
     await loadConfig()
-  } catch (err) { notify('读取插件配置失败: ' + err.message + '（请先配置连接设置）', 'error') }
+  } catch (err) {
+    notify('读取插件配置失败: ' + err.message + '（请先配置连接设置）', 'error')
+    promptInstallGuide()
+  }
 
   const personaLoaded = await loadPersona()
+  if (!personaLoaded) promptInstallGuide()
   if (personaLoaded) maybeAutoDerive()
 
   await loadLatestMemory()

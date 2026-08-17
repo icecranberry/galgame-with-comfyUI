@@ -226,10 +226,7 @@ class MainWindow(QMainWindow):
         self._home_page.update_version_info()
         QTimer.singleShot(1000, self._lazy_git_init)
 
-        # MaiBot 随邻舍自动启动（勾选且已安装时）
         self._load_maibot_settings()
-        if self._config.get("maibot_autostart") and self._maibot_page.is_installed():
-            QTimer.singleShot(1500, self._auto_start_maibot)
 
     # ==================================================================
     # 窗口
@@ -536,7 +533,7 @@ class MainWindow(QMainWindow):
             self._start_services()
 
     def _on_stop_all(self):
-        self._log_page.append_log("[系统] 正在停止所有服务...")
+        self._log_page.append_log("[系统] 正在停止邻舍服务...")
         self._runner.stop_all()
 
     def _start_services(self):
@@ -547,6 +544,7 @@ class MainWindow(QMainWindow):
         self._home_page.set_launch_state("starting")
         self._log_page.set_busy_state(True, "⏳ 启动中...")
         self._runner.start_all()
+        self._maybe_start_maibot_with_core()
 
     # ==================================================================
     # 版本管理
@@ -781,11 +779,17 @@ class MainWindow(QMainWindow):
             browser_snowluma=self._config.get("maibot_browser_snowluma"),
         )
 
-    def _auto_start_maibot(self):
-        if self._closing or self._maibot_runner.any_active():
+    def _maybe_start_maibot_with_core(self):
+        """点击「启动邻舍」时按勾选状态同步拉起 MaiBot/SnowLuma。"""
+        if not self._config.get("maibot_autostart"):
+            return
+        if not self._maibot_page.is_installed():
+            self._log_page.append_log(
+                "[系统] 已勾选随邻舍自动启动 MaiBot，但未检测到 MaiBot 文件夹，已跳过"
+            )
             return
         self._maibot_page.append_log(
-            "system", "[系统] 检测到「启动邻舍时自动启动 MaiBot」已开启，正在自动启动..."
+            "system", "[系统] 检测到「随邻舍自动启动 MaiBot」已开启，正在自动启动..."
         )
         self._start_maibot()
 
