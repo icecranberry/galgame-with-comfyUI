@@ -18,17 +18,26 @@ function isolateLoraConfig(t, globalLoras = [], hiresLoras = []) {
   const savedSteps = config.comfyui.hiresSteps;
   const savedCfg = config.comfyui.hiresCfg;
   const savedDenoise = config.comfyui.hiresDenoise;
+  const savedMaxSize = config.comfyui.hiresMaxSize;
+  const savedArtistMode = config.comfyui.hiresArtistMode;
+  const savedArtist = config.comfyui.hiresArtist;
   config.comfyui.globalLora = globalLoras;
   config.comfyui.hiresLora = hiresLoras;
   config.comfyui.hiresSteps = 35;
   config.comfyui.hiresCfg = 5.0;
-  config.comfyui.hiresDenoise = 0.5;
+  config.comfyui.hiresDenoise = 0.35;
+  config.comfyui.hiresMaxSize = 2000;
+  config.comfyui.hiresArtistMode = 'empty';
+  config.comfyui.hiresArtist = '';
   t.after(() => {
     config.comfyui.globalLora = savedGlobal;
     config.comfyui.hiresLora = savedHires;
     config.comfyui.hiresSteps = savedSteps;
     config.comfyui.hiresCfg = savedCfg;
     config.comfyui.hiresDenoise = savedDenoise;
+    config.comfyui.hiresMaxSize = savedMaxSize;
+    config.comfyui.hiresArtistMode = savedArtistMode;
+    config.comfyui.hiresArtist = savedArtist;
   });
 }
 
@@ -46,6 +55,7 @@ test('放大细化工作流文件存在且可被自动恢复', () => {
 
 test('构建细化工作流（turbo 源）→ API 结构完整且参数继承正确', (t) => {
   isolateLoraConfig(t);
+  config.comfyui.hiresArtistMode = 'inherit';
   const { wf } = buildHiresWorkflow('1girl, solo, test scene, classroom', {
     uploadFilename: 'linshe-hires-test.png',
     artist: '@testArtist',
@@ -69,7 +79,7 @@ test('构建细化工作流（turbo 源）→ API 结构完整且参数继承正
   const scale = byType.ImageScaleToMaxDimension?.[0];
   assert.ok(scale, '应有 ImageScaleToMaxDimension 节点');
   assert.equal(scale.node.inputs.upscale_method, 'lanczos');
-  assert.equal(scale.node.inputs.largest_size, 2400);
+  assert.equal(scale.node.inputs.largest_size, 2000);
 
   // VAEEncode ← ImageScaleToMaxDimension（像素域放大后再编码，不经 LatentUpscale）
   const encode = byType.VAEEncode?.[0];
@@ -81,12 +91,12 @@ test('构建细化工作流（turbo 源）→ API 结构完整且参数继承正
   assert.ok(sampler, '应有 KSampler 节点');
   assert.deepEqual(sampler.node.inputs.latent_image, [String(encode.id), 0]);
 
-  // KSampler 采样参数以 HiresFix 设置为准（35步/cfg5.0/denoise0.5），不继承原图 turbo 的 12步/cfg1
+  // KSampler 采样参数以 HiresFix 设置为准（35步/cfg5.0/denoise0.35），不继承原图 turbo 的 12步/cfg1
   assert.equal(sampler.node.inputs.steps, 35);
   assert.equal(sampler.node.inputs.cfg, 5);
   assert.equal(sampler.node.inputs.sampler_name, 'er_sde');
   assert.equal(sampler.node.inputs.scheduler, 'beta');
-  assert.equal(sampler.node.inputs.denoise, 0.5);
+  assert.equal(sampler.node.inputs.denoise, 0.35);
 
   // 模型加载器继承自 turbo 模板
   const unet = byType.UNETLoader?.[0];
@@ -227,4 +237,48 @@ test('HiresFix 采样参数跟随系统设置（步数/CFG/重绘幅度）', (t)
   assert.equal(sampler.inputs.steps, 60);
   assert.equal(sampler.inputs.cfg, 5.5);
   assert.equal(sampler.inputs.denoise, 0.5);
+});
+
+test('HiresFix 最长边与画师串指定模式跟随系统设置', (t) => {
+  const saved = {
+    hiresMaxSize: config.comfyui.hiresMaxSize,
+    hiresArtistMode: config.comfyui.hiresArtistMode,
+    hiresArtist: config.comfyui.hiresArtist,
+  };
+  config.comfyui.hiresMaxSize = 2048;
+  config.comfyui.hiresArtistMode = 'specified';
+  config.comfyui.hiresArtist = '@customArtist';
+  t.after(() => {
+    config.comfyui.hiresMaxSize = saved.hiresMaxSize;
+    config.comfyui.hiresArtistMode = saved.hiresArtistMode;
+    config.comfyui.hiresArtist = saved.hiresArtist;
+  });
+
+  const { wf } = buildHiresWorkflow('artist test', {
+    uploadFilename: 'x.png',
+    sourceMode: 'turbo',
+    loras: [],
+    artist: '@original',
+  });
+  const api = guiToApi(wf);
+  const scale = Object.values(api).find(n => n.class_type === 'ImageScaleToMaxDimension');
+  assert.equal(scale.inputs.largest_size, 2048);
+  const artistNode = Object.values(api).find(n => n._meta?.title === '画师串');
+  assert.equal(artistNode.inputs.value, '@customArtist');
+});
+
+test('HiresFix 画师串留空模式清空画师串', (t) => {
+  const saved = config.comfyui.hiresArtistMode;
+  config.comfyui.hiresArtistMode = 'empty';
+  t.after(() => { config.comfyui.hiresArtistMode = saved; });
+
+  const { wf } = buildHiresWorkflow('empty artist', {
+    uploadFilename: 'x.png',
+    sourceMode: 'turbo',
+    loras: [],
+    artist: '@original',
+  });
+  const api = guiToApi(wf);
+  const artistNode = Object.values(api).find(n => n._meta?.title === '画师串');
+  assert.equal(artistNode.inputs.value, '');
 });

@@ -397,9 +397,9 @@ export async function updateGlobalLora(loras) {
 
 /** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */
 /** 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG） */
-export async function updateHiresSettings({ loras, steps, cfg, denoise }) {
+export async function updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist }) {
   const res = await fetch(`${BASE}/config/hires`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras, steps, cfg, denoise }),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras, steps, cfg, denoise, maxSize, artistMode, artist }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
@@ -723,6 +723,12 @@ export async function testStyle(artist, width, height, mode = 'chat', prompt = '
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  return res.json();
+}
+
+/** 测试细化（最近一张图，HiresFix 参数流程，不落盘，返回原图+细化图） */
+export async function testHires() {
+  const res = await fetch(`${BASE}/images/test-hires`, { method: 'POST' });
   return res.json();
 }
 

@@ -4,8 +4,8 @@
  * 流程:
  *   1. 读取原图文件 → 上传到 ComfyUI input 目录
  *   2. 加载 workflow/放大细化工作流.json（仅 ComfyUI 官方节点，像素放大而非 latent 放大）:
- *      LoadImage → ImageScaleToMaxDimension(按长边像素放大，默认 lanczos/长边2400，不固定倍数)
- *      → VAEEncode → KSampler(图生图低重绘, 默认 35步/cfg5.0/denoise0.5) → VAEDecode → PreviewImage
+ *      LoadImage → ImageScaleToMaxDimension(按长边像素放大，默认 lanczos/长边2000，不固定倍数)
+ *      → VAEEncode → KSampler(图生图低重绘, 默认 35步/cfg5.0/denoise0.35) → VAEDecode → PreviewImage
  *   3. 继承原图的模型加载器(UNET/CLIP/VAE)、负面提示词、提示词链(画面描述/质量提示词/画师串/lora触发词)，
  *      以及与原图一致的 LoRA 链（全局画风 LoRA 按场景过滤 + 角色 LoRA），
  *      再追加 HiresFix 细化专用 LoRA（设置页单独配置）到链尾
@@ -135,7 +135,10 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   if (globalLoras.length || charLoras.length || hiresLoras.length) {
     console.log(`[imageRefine] LoRA chain: ${globalLoras.length} global + ${charLoras.length} char + ${hiresLoras.length} hires → ${loras.length} after dedup`);
   }
-  const artist = overrides.artist ?? config.comfyui.artist;
+  // 画师串三模式：inherit 沿用原图/empty 留空/specified 使用 HiresFix 指定的画师串
+  const baseArtist = overrides.artist ?? config.comfyui.artist;
+  const artistMode = config.comfyui.hiresArtistMode || 'empty';
+  const artist = artistMode === 'empty' ? '' : artistMode === 'specified' ? (config.comfyui.hiresArtist || '') : baseArtist;
 
   const loaderCopies = {
     UNETLoader: srcLoader('UNETLoader'),
@@ -152,6 +155,12 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
       continue;
     }
 
+    // 放大最长边使用 HiresFix 设置（不固定倍数，按最长边像素缩放）
+    if (node.type === 'ImageScaleToMaxDimension') {
+      node.widgets_values[1] = config.comfyui.hiresMaxSize ?? 2000;
+      continue;
+    }
+
     // KSampler: 种子随机；步数/cfg/denoise 使用系统参数中的 HiresFix 设置（不继承原图）
     if (node.type === 'KSampler') {
       if (node.widgets_values[1] === 'randomize') {
@@ -159,7 +168,7 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
       }
       node.widgets_values[2] = config.comfyui.hiresSteps ?? 35;
       node.widgets_values[3] = config.comfyui.hiresCfg ?? 5.0;
-      node.widgets_values[6] = config.comfyui.hiresDenoise ?? 0.5;
+      node.widgets_values[6] = config.comfyui.hiresDenoise ?? 0.35;
       continue;
     }
 
@@ -207,11 +216,12 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
 }
 
 /**
- * 执行放大细化并覆盖保存
+ * 执行放大细化（默认覆盖保存，测试模式可仅返回内存结果）
  *
  * @param {object} opts
  * @param {string} opts.filePath      - 原图绝对路径（细化结果将覆盖此文件）
  * @param {string} [opts.outPath]     - 输出路径覆盖（测试用，默认 filePath）
+ * @param {Buffer} [opts.buffer]       - 原图 Buffer（与 filePath 二选一，测试细化不落盘时用）
  * @param {string} opts.promptText    - 原图最终提示词
  * @param {string} [opts.artist]
  * @param {Array}  [opts.loras]       - 角色 LoRA（全局画风 LoRA 与 HiresFix 细化 LoRA 由配置自动合并）
@@ -219,15 +229,19 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
  * @param {string} [opts.sourceMode]
  * @param {string} [opts.scene]         - 全局 LoRA 场景过滤 + 无模式记录时的场景兜底
  * @param {function} [opts.onProgress]
+ * @param {string} [opts.ext]          - 上传文件扩展名（buffer 模式且无 filePath 时使用）
+ * @param {string} [opts.output]       - 'file' 写文件（默认）| 'buffer' 仅返回 base64
  * @returns {Promise<{success: boolean, wfPath: string, filename: string}>}
  */
 export async function refineImage({
   filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, onProgress,
+  buffer, ext, output = 'file',
 }) {
-  const buf = fs.readFileSync(filePath);
-  const ext = (path.extname(filePath) || '.png').toLowerCase();
-  const uploadFilename = await uploadImage(buf, `linshe-hires-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${ext}`);
-  console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(buf.length / 1024).toFixed(0)}KB)`);
+  const sourceBuf = buffer || (filePath ? fs.readFileSync(filePath) : null);
+  if (!sourceBuf) throw new Error('filePath or buffer is required');
+  const fileExt = (ext || (filePath ? path.extname(filePath) : '') || '.png').toLowerCase();
+  const uploadFilename = await uploadImage(sourceBuf, `linshe-hires-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${fileExt}`);
+  console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(sourceBuf.length / 1024).toFixed(0)}KB)`);
 
   const { wf } = buildHiresWorkflow(promptText, {
     uploadFilename, artist, loras, customWorkflow, sourceMode, scene,
@@ -241,6 +255,11 @@ export async function refineImage({
 
   const img = result.images[0];
   const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+
+  if (output === 'buffer') {
+    console.log('[imageRefine] Refined image returned in memory (not saved)');
+    return { success: true, wfPath: hiresPath(), filename: img.filename, base64: img.base64 };
+  }
   const target = outPath || filePath;
   const tmpPath = target + '.refining';
   fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));

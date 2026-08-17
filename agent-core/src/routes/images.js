@@ -23,6 +23,9 @@ const FOLDER_LABEL = {
   ...Object.fromEntries(Object.entries(IMAGE_CATEGORIES).map(([k, v]) => [k, v.label])),
 };
 
+// 最近一次测试画风成功结果（仅内存，不落盘），供测试细化选取“最近一张图”
+let lastStyleTest = null;
+
 // ── 相册缓存（避免每次请求都 readdir + stat 阻塞事件循环）──
 const galleryCache = {
   data: null,       // { images: [...], total: number }
@@ -270,6 +273,16 @@ router.post('/test-style', async (req, res) => {
     }
 
     if (result.success) {
+      lastStyleTest = {
+        at: Date.now(),
+        images: result.images,
+        prompt: result.promptRefined || prompt,
+        artist: finalArtist,
+        width: finalWidth,
+        height: finalHeight,
+        mode,
+        wfMode: result.wfMode,
+      };
       res.json({
         success: true, images: result.images, promptId: result.promptId, elapsed,
         timing: {
@@ -287,6 +300,126 @@ router.post('/test-style', async (req, res) => {
     const elapsed = Math.round(performance.now() - t0);
     console.error('[test-style] error:', err.message);
     res.status(500).json({ success: false, error: err.message, elapsed });
+  }
+});
+
+/** 最近一张可测试细化的图：优先内存中的测试画风结果，否则最近一条 done 任务 */
+async function pickLatestTestImage() {
+  const db = getDb();
+  const task = db.prepare(`
+    SELECT conversation_id, prompt_original, prompt_refined, style, resolution,
+           workflow_template, output_paths, finished_at, created_at
+    FROM image_tasks
+    WHERE status = 'done' AND output_paths IS NOT NULL AND output_paths != '[]'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get();
+
+  let saved = null;
+  if (task) {
+    let urls = [];
+    try { urls = JSON.parse(task.output_paths || '[]'); } catch {}
+    const url = urls.find(u => parseImageTarget(String(u).replace(/\?.*$/, '')));
+    if (url) {
+      const cleanUrl = String(url).replace(/\?.*$/, '');
+      const target = parseImageTarget(cleanUrl);
+      const filePath = target ? path.join(getImageDir(target.category), target.filename) : null;
+      if (filePath && fs.existsSync(filePath)) {
+        saved = {
+          type: 'saved',
+          url: cleanUrl,
+          at: fs.statSync(filePath).mtimeMs,
+          promptFallback: task.prompt_refined || task.prompt_original || '',
+          workflowTemplateFallback: task.workflow_template || null,
+        };
+      }
+    }
+  }
+
+  if (!saved) {
+    if (!galleryCache.data || Date.now() - galleryCache.mtime > galleryCache.ttl) {
+      await refreshGalleryCache();
+    }
+    const latest = galleryCache.data?.images?.[0];
+    if (latest) {
+      saved = { type: 'saved', url: latest.url, at: latest.mtime, promptFallback: '' };
+    }
+  }
+
+  if (lastStyleTest && (!saved || lastStyleTest.at >= saved.at)) {
+    return { type: 'test', ...lastStyleTest };
+  }
+  return saved;
+}
+
+// POST /api/images/test-hires — 测试细化（最近一张图，HiresFix 参数流程，不落盘）
+router.post('/test-hires', async (req, res) => {
+  const t0 = performance.now();
+  try {
+    const source = await pickLatestTestImage();
+    if (!source) {
+      return res.status(404).json({ success: false, error: '暂时没有可细化的图片' });
+    }
+
+    let buffer;
+    let original;
+    const refineOpts = {};
+
+    if (source.type === 'test') {
+      const img = source.images?.[0];
+      if (!img?.base64) {
+        return res.status(404).json({ success: false, error: '最近一次测试画风结果不可用，请先发送测试' });
+      }
+      original = img.base64;
+      buffer = Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+      refineOpts.promptText = source.prompt;
+      refineOpts.artist = source.artist;
+      refineOpts.loras = [];
+      refineOpts.sourceMode = source.wfMode;
+      refineOpts.scene = source.mode;
+      refineOpts.ext = path.extname(img.filename || '') || '.png';
+    } else {
+      const cleanUrl = source.url.replace(/\?.*$/, '');
+      const target = parseImageTarget(cleanUrl);
+      if (!target) {
+        return res.status(400).json({ success: false, error: `invalid image url format: ${source.url}` });
+      }
+      const { category, filename } = target;
+      const filePath = path.join(getImageDir(category), filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ success: false, error: 'file not found' });
+      }
+      const params = lookupImageGenerationParams(filename);
+      const promptText = params.promptText || source.promptFallback;
+      if (!promptText || promptText.trim().length === 0) {
+        return res.status(404).json({ success: false, error: '未找到该图片的生成参数，无法测试细化' });
+      }
+      original = cleanUrl;
+      buffer = fs.readFileSync(filePath);
+      refineOpts.promptText = promptText;
+      refineOpts.artist = resolveArtist(category, params);
+      refineOpts.loras = params.charLoras || [];
+      refineOpts.customWorkflow = params.charCustomWorkflow;
+      refineOpts.sourceMode = params.taskWorkflowTemplate || source.workflowTemplateFallback;
+      refineOpts.scene = CATEGORY_SCENE[category] || 'chat';
+      refineOpts.ext = path.extname(filename) || '.png';
+    }
+
+    const result = await refineImage({ ...refineOpts, buffer, output: 'buffer' });
+    if (!result.success || !result.base64) {
+      throw new Error(result.error || '细化失败');
+    }
+
+    res.json({
+      success: true,
+      original,
+      refined: result.base64,
+      elapsed: Math.round(performance.now() - t0),
+      source: source.type,
+    });
+  } catch (err) {
+    console.error('[test-hires] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

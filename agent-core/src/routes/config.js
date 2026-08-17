@@ -87,7 +87,10 @@ router.get('/', (req, res) => {
       hiresLora: config.comfyui.hiresLora || [],
       hiresSteps: config.comfyui.hiresSteps ?? 35,
       hiresCfg: config.comfyui.hiresCfg ?? 5.0,
-      hiresDenoise: config.comfyui.hiresDenoise ?? 0.5,
+      hiresDenoise: config.comfyui.hiresDenoise ?? 0.35,
+      hiresMaxSize: config.comfyui.hiresMaxSize ?? 2000,
+      hiresArtistMode: config.comfyui.hiresArtistMode ?? 'empty',
+      hiresArtist: config.comfyui.hiresArtist ?? '',
     },
     features: config.features,
     weather: { city: config.weather.city || '' },
@@ -160,19 +163,22 @@ router.put('/hires-lora', (req, res) => {
   res.json({ ok: true, hiresLora: config.comfyui.hiresLora });
 });
 
-// PUT /api/config/hires — 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG）
+// PUT /api/config/hires — 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG/最长边/画师串）
 router.put('/hires', (req, res) => {
-  const { loras, steps, cfg, denoise } = req.body || {};
-  if (loras === undefined && steps === undefined && cfg === undefined && denoise === undefined) {
+  const { loras, steps, cfg, denoise, maxSize, artistMode, artist } = req.body || {};
+  if (loras === undefined && steps === undefined && cfg === undefined && denoise === undefined && maxSize === undefined && artistMode === undefined && artist === undefined) {
     return res.status(400).json({ error: 'at least one hires setting is required' });
   }
-  updateHiresSettings({ loras, steps, cfg, denoise });
+  updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist });
   res.json({
     ok: true,
     hiresLora: config.comfyui.hiresLora,
     hiresSteps: config.comfyui.hiresSteps,
     hiresCfg: config.comfyui.hiresCfg,
     hiresDenoise: config.comfyui.hiresDenoise,
+    hiresMaxSize: config.comfyui.hiresMaxSize,
+    hiresArtistMode: config.comfyui.hiresArtistMode,
+    hiresArtist: config.comfyui.hiresArtist,
   });
 });
 

@@ -58,7 +58,7 @@
               <div class="hiresfix-subtitle">HiresFix 细化设置</div>
               <div class="hiresfix-desc">图片进一步高清细化设置</div>
             </div>
-            <span class="hiresfix-summary">{{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
+            <span class="hiresfix-summary">最长边 {{ hiresMaxSize }} · {{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
             <button class="hiresfix-link" @click="openHiresFixSettings">设置 →</button>
           </div>
         </div>
@@ -76,7 +76,7 @@
       </div>
 
       <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" @saved="onGlobalLoraSaved" />
-      <HiresFixModal v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" @saved="onHiresFixSaved" />
+      <HiresFixModal v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" :initial-max-size="hiresMaxSize" :initial-artist-mode="hiresArtistMode" :initial-artist="hiresArtist" @saved="onHiresFixSaved" />
 
 
       <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
@@ -109,6 +109,13 @@
             :disabled="styleTesting"
             @click="testMode = 'event'"
           >奇遇配图</button>
+          <button
+            class="btn-primary style-test-btn hires-test-btn"
+            :disabled="hireTesting"
+            @click="runHiresTest"
+          >
+            {{ hireTesting ? '细化中...' : '测试HiresFix细化' }}
+          </button>
           <button class="test-prompt-btn" @click="openPromptEditor">测试提示词</button>
         </div>
 
@@ -138,6 +145,18 @@
             @click="openLightbox(i)"
             alt="测试画风结果"
           />
+        </div>
+
+        <div v-if="hiresError" class="style-error">{{ hiresError }}</div>
+
+        <div v-if="hireTesting" class="style-loading">
+          <span class="style-spinner"></span>
+          <span>正在按 HiresFix 参数细化最近一张图...</span>
+        </div>
+
+        <div v-if="hiresCompare" class="style-result">
+          <div class="style-elapsed">细化耗时 {{ formatElapsed(hiresCompare.elapsed) }}</div>
+          <BeforeAfterSlider :before="hiresCompare.original" :after="hiresCompare.refined" />
         </div>
 
         <!-- 全屏预览 -->
@@ -836,9 +855,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
@@ -875,7 +895,10 @@ const globalLoraCount = computed(() => (globalLoras.value || []).filter(l => l.p
 const hiresLoras = ref([])
 const hiresSteps = ref(35)
 const hiresCfg = ref(5)
-const hiresDenoise = ref(0.5)
+const hiresDenoise = ref(0.35)
+const hiresMaxSize = ref(2000)
+const hiresArtistMode = ref('empty')
+const hiresArtist = ref('')
 const hiresLoraCount = computed(() => (hiresLoras.value || []).filter(l => l.path && l.enabled !== false).length)
 const comfyTab = ref('chat')
 const comfyTabs = [
@@ -1372,7 +1395,10 @@ onMounted(async () => {
     hiresLoras.value = data.comfy.hiresLora || []
     hiresSteps.value = data.comfy.hiresSteps ?? 35
     hiresCfg.value = data.comfy.hiresCfg ?? 5
-    hiresDenoise.value = data.comfy.hiresDenoise ?? 0.5
+    hiresDenoise.value = data.comfy.hiresDenoise ?? 0.35
+    hiresMaxSize.value = data.comfy.hiresMaxSize ?? 2000
+    hiresArtistMode.value = data.comfy.hiresArtistMode ?? 'empty'
+    hiresArtist.value = data.comfy.hiresArtist ?? ''
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -1434,11 +1460,14 @@ function onGlobalLoraSaved(globalList) {
   if (Array.isArray(globalList)) globalLoras.value = globalList
 }
 
-function onHiresFixSaved({ loras, steps, cfg, denoise }) {
+function onHiresFixSaved({ loras, steps, cfg, denoise, maxSize, artistMode, artist }) {
   if (Array.isArray(loras)) hiresLoras.value = loras
   if (steps !== undefined) hiresSteps.value = steps
   if (cfg !== undefined) hiresCfg.value = cfg
   if (denoise !== undefined) hiresDenoise.value = denoise
+  if (maxSize !== undefined) hiresMaxSize.value = maxSize
+  if (artistMode !== undefined) hiresArtistMode.value = artistMode
+  if (artist !== undefined) hiresArtist.value = artist
 }
 
 function openGlobalLora() {
@@ -1638,6 +1667,9 @@ const styleError = ref('')
 const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
 const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
+const hireTesting = ref(false)
+const hiresError = ref('')
+const hiresCompare = ref(null)
 
 // ── 工作流 ──
 const workflowModeOptions = [
@@ -1741,6 +1773,24 @@ async function runStyleTest() {
     styleError.value = '请求失败: ' + (err.message || '网络错误')
   } finally {
     styleTesting.value = false
+  }
+}
+
+async function runHiresTest() {
+  hireTesting.value = true
+  hiresError.value = ''
+  hiresCompare.value = null
+  try {
+    const result = await testHires()
+    if (result.success && result.original && result.refined) {
+      hiresCompare.value = { original: result.original, refined: result.refined, elapsed: result.elapsed }
+    } else {
+      hiresError.value = result.error || '测试细化失败，请检查 ComfyUI 连接'
+    }
+  } catch (err) {
+    hiresError.value = '请求失败: ' + (err.message || '网络错误')
+  } finally {
+    hireTesting.value = false
   }
 }
 
@@ -2607,6 +2657,8 @@ function resetTestPrompts() {
 /* ── 测试画风 ── */
 .style-test-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .style-test-btn { border-radius: 8px; margin: 0; }
+.hires-test-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+.hires-test-btn:hover:not(:disabled) { background: rgba(224, 123, 108, 0.1); box-shadow: none; color: var(--accent-hover); }
 .test-mode-btn {
   padding: 7px 14px; font-size: 12px; font-weight: 500;
   border-radius: 8px; border: 1px solid var(--glass-border);

@@ -67,7 +67,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     hiresLora: [],   // HiresFix 放大细化专用 LoRA（仅注入细化工作流，追加在 LoRA 链末尾）
     hiresSteps: 35,  // HiresFix 细化步数
     hiresCfg: 5.0,   // HiresFix 细化 CFG
-    hiresDenoise: 0.5,  // HiresFix 细化重绘幅度
+    hiresDenoise: 0.35,  // HiresFix 细化重绘幅度
+    hiresMaxSize: 2000,  // HiresFix 细化最长边像素
+    hiresArtistMode: 'empty', // HiresFix 画师串: inherit沿用/empty留空/specified指定
+    hiresArtist: '',     // HiresFix 指定模式下的画师串
   },
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
@@ -204,11 +207,11 @@ export function updateGlobalLora(loras) {
  * 与全局/角色 LoRA 同 path 时以细化配置的权重为准）
  */
 /**
- * 更新 HiresFix 细化设置（专用 LoRA + 步数/重绘幅度/CFG），
+ * 更新 HiresFix 细化设置（专用 LoRA + 步数/重绘幅度/CFG/最长边/画师串模式），
  * 细化 LoRA 仅作用于放大细化工作流，追加在 LoRA 链末尾；
  * 与全局/角色 LoRA 同 path 时以细化配置的权重为准
  */
-export function updateHiresSettings({ loras, steps, cfg, denoise } = {}) {
+export function updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist } = {}) {
   if (loras !== undefined) {
     if (!Array.isArray(loras)) loras = [];
     const cleaned = loras.filter(l => l.path && typeof l.path === 'string').map(l => ({
@@ -241,7 +244,24 @@ export function updateHiresSettings({ loras, steps, cfg, denoise } = {}) {
       persistSettingSync('comfy_hires_denoise', String(config.comfyui.hiresDenoise));
     }
   }
-  console.log(`[config] HiresFix settings updated: lora=${config.comfyui.hiresLora.length}, steps=${config.comfyui.hiresSteps}, cfg=${config.comfyui.hiresCfg}, denoise=${config.comfyui.hiresDenoise}`);
+  if (maxSize !== undefined) {
+    const n = parseInt(maxSize, 10);
+    if (Number.isInteger(n)) {
+      config.comfyui.hiresMaxSize = Math.max(256, Math.min(8192, n));
+      persistSettingSync('comfy_hires_max_size', String(config.comfyui.hiresMaxSize));
+    }
+  }
+  if (artistMode !== undefined) {
+    if (['inherit', 'empty', 'specified'].includes(artistMode)) {
+      config.comfyui.hiresArtistMode = artistMode;
+      persistSettingSync('comfy_hires_artist_mode', artistMode);
+    }
+  }
+  if (artist !== undefined) {
+    config.comfyui.hiresArtist = typeof artist === 'string' ? artist : '';
+    persistSettingSync('comfy_hires_artist', config.comfyui.hiresArtist);
+  }
+  console.log(`[config] HiresFix settings updated: lora=${config.comfyui.hiresLora.length}, steps=${config.comfyui.hiresSteps}, cfg=${config.comfyui.hiresCfg}, denoise=${config.comfyui.hiresDenoise}, maxSize=${config.comfyui.hiresMaxSize}, artistMode=${config.comfyui.hiresArtistMode}`);
 }
 
 /** 兼容旧接口：仅更新 HiresFix 细化专用 LoRA */

@@ -1,0 +1,144 @@
+<template>
+  <div
+    ref="rootEl"
+    class="ba-slider"
+    role="slider"
+    aria-label="细化前后对比"
+    aria-valuemin="0"
+    aria-valuemax="100"
+    :aria-valuenow="Math.round(pos)"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
+  >
+    <img class="ba-img ba-before" :src="before" alt="细化前" draggable="false" />
+    <img
+      class="ba-img ba-after"
+      :src="after"
+      alt="细化后"
+      draggable="false"
+      :style="{ clipPath: `inset(0 0 0 ${pos}%)` }"
+    />
+    <div class="ba-divider" :style="{ left: `${pos}%` }">
+      <span class="ba-handle"></span>
+    </div>
+    <span class="ba-label ba-label-before">细化前</span>
+    <span class="ba-label ba-label-after">细化后</span>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+
+defineProps({
+  before: { type: String, required: true },
+  after: { type: String, required: true },
+})
+
+const rootEl = ref(null)
+const pos = ref(50)
+let dragging = false
+
+function updateFromEvent(e) {
+  const el = rootEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const pct = ((e.clientX - rect.left) / rect.width) * 100
+  pos.value = Math.min(100, Math.max(0, pct))
+}
+
+function onPointerDown(e) {
+  dragging = true
+  rootEl.value?.setPointerCapture?.(e.pointerId)
+  updateFromEvent(e)
+}
+
+function onPointerMove(e) {
+  if (!dragging) return
+  updateFromEvent(e)
+}
+
+function onPointerUp(e) {
+  dragging = false
+  rootEl.value?.releasePointerCapture?.(e.pointerId)
+}
+</script>
+
+<style scoped>
+.ba-slider {
+  position: relative;
+  width: 100%;
+  max-width: 760px;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  cursor: col-resize;
+}
+.ba-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  background: var(--glass-bg-strong);
+}
+.ba-after { will-change: clip-path; }
+.ba-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.ba-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.ba-handle::before,
+.ba-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 2px;
+  background: #333;
+  transform: translateY(-50%);
+}
+.ba-handle::before { left: 7px; }
+.ba-handle::after { right: 7px; }
+.ba-label {
+  position: absolute;
+  top: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.ba-label-before { left: 12px; }
+.ba-label-after { right: 12px; }
+
+@media (max-width: 767px) {
+  .ba-slider { aspect-ratio: 1 / 1; }
+}
+</style>

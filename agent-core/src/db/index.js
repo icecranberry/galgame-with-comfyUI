@@ -1455,6 +1455,9 @@ const SETTING_TO_CONFIG = {
   comfy_hires_steps:              { obj: 'comfyui',  key: 'hiresSteps',       type: 'int' },  
   comfy_hires_cfg:                { obj: 'comfyui',  key: 'hiresCfg',         type: 'float' },
   comfy_hires_denoise:            { obj: 'comfyui',  key: 'hiresDenoise',     type: 'float' },
+  comfy_hires_max_size:           { obj: 'comfyui',  key: 'hiresMaxSize',     type: 'int' },
+  comfy_hires_artist_mode:        { obj: 'comfyui',  key: 'hiresArtistMode',  type: 'string' },
+  comfy_hires_artist:             { obj: 'comfyui',  key: 'hiresArtist',      type: 'string' },
 };
 
 function castValue(raw, type) {
