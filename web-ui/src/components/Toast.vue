@@ -187,7 +187,7 @@ defineExpose({ show })
 
 /* 状态色只落在标记与生命周期线上,不染整张卡;四态色相彼此拉开 */
 .live-toast--success { --lt-status: #4E9C72; }  /* 茶绿 */
-.live-toast--info    { --lt-status: #E07B6C; }  /* 品牌:珊瑚 */
+.live-toast--info    { --lt-status: #7FA9CC; }  /* 信息:淡蓝 */
 .live-toast--warning { --lt-status: #D8A03A; }  /* 琥珀 */
 .live-toast--error   { --lt-status: #C24A3E; }  /* 绯红 */
 

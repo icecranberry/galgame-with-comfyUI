@@ -32,7 +32,8 @@
 import { ref, computed, watch, nextTick, inject, onMounted, onUnmounted } from 'vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
-import { regenerateImage, upscaleImage, deleteImage } from '../api/index.js'
+import { deleteImage } from '../api/index.js'
+import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -61,6 +62,7 @@ const props = defineProps({
 const emit = defineEmits(['hide', 'update:visible', 'regenerated', 'upscaled', 'deleted'])
 const toastFn = inject('toast', null)
 const confirmFn = inject('confirm', null)
+const imageEditTasks = useImageEditTasksStore()
 
 const cacheBump = ref(0)
 const lightboxKey = ref(0)
@@ -83,6 +85,7 @@ onMounted(() => {
   _mql = window.matchMedia('(max-width: 767px)')
   isMobile.value = _mql.matches
   _mql.addEventListener('change', _onMqlChange)
+  window.addEventListener('image-overwritten', _onImageOverwritten)
 })
 
 // ── 操作按钮：注入到 .vel-modal 内部（与 vel-toolbar 同层级策略）──
@@ -173,6 +176,7 @@ watch([regenerating, upscaling, deleting], syncActionBar)
 onUnmounted(() => {
   removeActionBar()
   _mql?.removeEventListener('change', _onMqlChange)
+  window.removeEventListener('image-overwritten', _onImageOverwritten)
 })
 
 function bumpUrl(url) {
@@ -228,9 +232,30 @@ function refreshAllThumbnails(oldUrl) {
   })
 }
 
-onUnmounted(() => {
-  _mql?.removeEventListener('change', _onMqlChange)
-})
+/** 后台任务确认覆盖后，刷新本灯箱命中的图片 */
+function _onImageOverwritten(e) {
+  const { url, base, action } = e.detail || {}
+  if (!url || !base) return
+  if (!_hasUrlInImgs(base)) return
+  cacheBump.value = Date.now()
+  lightboxKey.value++
+  refreshAllThumbnails(base)
+  emit(action === 'upscale' ? 'upscaled' : 'regenerated', url)
+}
+
+function _hasUrlInImgs(base) {
+  const v = props.imgs
+  if (typeof v === 'string') return v.replace(/\?.*$/, '') === base
+  if (Array.isArray(v)) {
+    return v.some(item => {
+      const u = typeof item === 'string' ? item : item?.src
+      return !!u && u.replace(/\?.*$/, '') === base
+    })
+  }
+  if (v && typeof v === 'object' && v.src) return v.src.replace(/\?.*$/, '') === base
+  return false
+}
+
 
 function onHide() {
   emit('hide')
@@ -243,13 +268,10 @@ async function onRegenerate() {
   if (!url) return
   regenerating.value = true
   try {
-    const result = await regenerateImage(url)
-    if (result.success) {
-      cacheBump.value = Date.now()
-      lightboxKey.value++
-      refreshAllThumbnails(url)
-      emit('regenerated', result.url)
-    }
+    await imageEditTasks.start('regenerate', url)
+    toastFn?.('已转入后台执行，完成后在右下角确认', 'info')
+    emit('hide')
+    emit('update:visible', false)
   } catch (err) {
     console.error('[ImageLightbox] regenerate failed:', err.message)
     toastFn?.('重新生成失败: ' + err.message, 'error')
@@ -264,14 +286,10 @@ async function onUpscale() {
   if (!url) return
   upscaling.value = true
   try {
-    const result = await upscaleImage(url)
-    if (result.success) {
-      cacheBump.value = Date.now()
-      lightboxKey.value++
-      refreshAllThumbnails(url)
-      toastFn?.('放大细化完成，已覆盖原图', 'success')
-      emit('upscaled', result.url)
-    }
+    await imageEditTasks.start('upscale', url)
+    toastFn?.('已转入后台执行，完成后在右下角确认', 'info')
+    emit('hide')
+    emit('update:visible', false)
   } catch (err) {
     console.error('[ImageLightbox] upscale failed:', err.message)
     toastFn?.('放大细化失败: ' + err.message, 'error')

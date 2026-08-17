@@ -217,6 +217,7 @@
         <template v-if="!freeEgg">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
+        <p class="fd">词元跳动的key获取地址：<a href="https://tokendance.space/keys" target="_blank" rel="noopener" class="ext-link">https://tokendance.space/keys</a> ，仍然提供v4flash预览版，所以没有涨价</p>
 
         <!-- LLM Profile 切换 -->
         <div class="llm-profiles-bar">

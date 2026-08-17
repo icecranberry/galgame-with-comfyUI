@@ -88,6 +88,10 @@ function _connect() {
     group_image_start: d => _dispatch('group_image_start', d),
     group_image_done:  d => _dispatch('group_image_done', d),
     group_image_error: d => _dispatch('group_image_error', d),
+    image_edit_task_start:    d => _dispatch('image_edit_task_start', d),
+    image_edit_task_progress: d => _dispatch('image_edit_task_progress', d),
+    image_edit_task_done:     d => _dispatch('image_edit_task_done', d),
+    image_edit_task_error:    d => _dispatch('image_edit_task_error', d),
   }, {
     onClose: _scheduleReconnect,
   })

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
+import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
@@ -562,119 +563,138 @@ function resolveArtist(category, params) {
   return categoryGenConfig(category).artist;
 }
 
-// POST /api/images/regenerate — 用原 prompt 重新生图，覆盖原文件
-router.post('/regenerate', async (req, res) => {
-  const { url: imageUrl } = req.body;
-  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
 
-  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+
+// ── 图片编辑任务（重新生成 / HiresFix 细化：后台执行，确认后覆盖）──
+
+function taskHttpError(message, status) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function dataUriExt(dataUri) {
+  const m = String(dataUri || '').match(/^data:image\/(png|jpe?g|webp|avif|gif);/i);
+  if (!m) return '.png';
+  return m[1].toLowerCase() === 'jpeg' ? '.jpg' : `.${m[1].toLowerCase()}`;
+}
+
+async function startImageEditTask(action, url) {
+  if (!url) throw taskHttpError('url is required', 400);
+  const cleanUrl = String(url).replace(/\?.*$/, '');
   const target = parseImageTarget(cleanUrl);
-  if (!target) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+  if (!target) throw taskHttpError(`invalid image url format: ${url}`, 400);
   const { category, filename } = target;
 
   const params = lookupImageGenerationParams(filename);
   const promptText = params.promptText;
   if (!promptText || promptText.trim().length === 0) {
-    return res.status(404).json({ error: 'prompt not found for this image' });
+    throw taskHttpError('prompt not found for this image', 404);
   }
-
-  console.log(`[regenerate] category="${category}" file="${filename}" prompt="${promptText.slice(0, 80)}..."${params.charLoras?.length ? ` loras=${params.charLoras.length}` : ''}${params.charCustomWorkflow ? ` workflow=${params.charCustomWorkflow}` : ''}`);
-
-  const opts = { ...categoryGenConfig(category) };
-  if (params.taskStyle !== null && params.taskResolution) {
-    const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
-    if (resolutionMatch) {
-      opts.width = Number(resolutionMatch[1]);
-      opts.height = Number(resolutionMatch[2]);
-    }
-  }
-
-  try {
-    const genOpts = {
-      artist: resolveArtist(category, params),
-      width: opts.width,
-      height: opts.height,
-      scene: CATEGORY_SCENE[category] || 'chat',
-      alreadyPrepared: true,
-      persistPreparation: false,
-    };
-    if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
-    if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
-    const result = await generateImageRaw(promptText, genOpts);
-
-    if (!result.success || !result.images?.length) {
-      return res.status(500).json({ error: result.error || 'Image generation failed' });
-    }
-
-    const img = result.images[0];
-    const dir = getImageDir(category);
-    const filePath = path.join(dir, filename);
-
-    // 原子写入：先写临时文件，再 rename
-    const tmpPath = filePath + '.regenerating';
-    const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
-    fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
-    fs.renameSync(tmpPath, filePath);
-
-    console.log(`[regenerate] overwrote ${filePath}`);
-
-    // 失效相册缓存
-    invalidateGalleryCache();
-
-    res.json({
-      success: true,
-      url: `${cleanUrl}?t=${Date.now()}`,
-    });
-  } catch (err) {
-    console.error('[regenerate] error:', err.message);
-    res.status(500).json({ error: 'Regenerate failed: ' + err.message });
-  }
-});
-
-// POST /api/images/upscale — HiresFix 放大细化（像素放大×2 → 图生图低重绘），覆盖原文件
-// 细化工作流: workflow/放大细化工作流.json（仅官方节点），参数继承自原图生成时的工作流
-router.post('/upscale', async (req, res) => {
-  const { url: imageUrl } = req.body;
-  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
-
-  const cleanUrl = imageUrl.replace(/\?.*$/, '');
-  const target = parseImageTarget(cleanUrl);
-  if (!target) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
-  const { category, filename } = target;
-
-  const params = lookupImageGenerationParams(filename);
-  if (!params.promptText || params.promptText.trim().length === 0) {
-    return res.status(404).json({ error: '未找到该图片的生成参数，无法放大细化' });
-  }
-
   const filePath = path.join(getImageDir(category), filename);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'file not found' });
-  }
 
-  console.log(`[upscale] category="${category}" file="${filename}" prompt="${params.promptText.slice(0, 80)}..." sourceWorkflow=${params.charCustomWorkflow || params.taskWorkflowTemplate || 'default'}${params.charLoras?.length ? ` loras=${params.charLoras.length}` : ''}`);
+  const run = async ({ stageBase, onProgress }) => {
+    if (action === 'regenerate') {
+      const opts = { ...categoryGenConfig(category) };
+      if (params.taskStyle !== null && params.taskResolution) {
+        const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
+        if (resolutionMatch) {
+          opts.width = Number(resolutionMatch[1]);
+          opts.height = Number(resolutionMatch[2]);
+        }
+      }
+      const genOpts = {
+        artist: resolveArtist(category, params),
+        width: opts.width,
+        height: opts.height,
+        scene: CATEGORY_SCENE[category] || 'chat',
+        alreadyPrepared: true,
+        persistPreparation: false,
+        onProgress,
+      };
+      if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
+      if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
+      const result = await generateImageRaw(promptText, genOpts);
+      if (!result.success || !result.images?.length) {
+        throw new Error(result.error || 'Image generation failed');
+      }
+      const img = result.images[0];
+      const ext = dataUriExt(img.base64);
+      const stagedName = path.basename(stageBase) + ext;
+      const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+      fs.writeFileSync(stageBase + ext, Buffer.from(base64, 'base64'));
+      return { filename: stagedName };
+    }
 
-  try {
-    const result = await refineImage({
+    if (!fs.existsSync(filePath)) throw taskHttpError('file not found', 404);
+    const ext = path.extname(filePath) || '.png';
+    const outPath = stageBase + ext;
+    await refineImage({
       filePath,
-      promptText: params.promptText,
+      outPath,
+      promptText,
       artist: resolveArtist(category, params),
       loras: params.charLoras || [],
       customWorkflow: params.charCustomWorkflow,
       sourceMode: params.taskWorkflowTemplate,
       scene: CATEGORY_SCENE[category] || 'chat',
+      onProgress,
     });
+    return { filename: path.basename(outPath) };
+  };
 
-    invalidateGalleryCache();
-    res.json({
-      success: true,
-      url: `${cleanUrl}?t=${Date.now()}`,
-      workflow: path.basename(result.wfPath),
-    });
-  } catch (err) {
-    console.error('[upscale] error:', err.message);
-    res.status(500).json({ error: '放大细化失败: ' + err.message });
-  }
+  return startEditTask({ action, url: cleanUrl, targetPath: filePath, run });
+}
+
+function sendTaskError(res, err) {
+  console.error('[image-edit-task] error:', err?.message || err);
+  res.status(err?.status || 500).json({ error: err?.message || '任务操作失败' });
+}
+
+// POST /api/images/regenerate — 提交后台重新生成任务（确认后才覆盖原图）
+router.post('/regenerate', async (req, res) => {
+  try {
+    const task = await startImageEditTask('regenerate', req.body?.url);
+    res.status(202).json({ success: true, task_id: task.id, status: 'running' });
+  } catch (err) { sendTaskError(res, err); }
+});
+
+// POST /api/images/upscale — 提交后台 HiresFix 细化任务（确认后才覆盖原图）
+router.post('/upscale', async (req, res) => {
+  try {
+    const task = await startImageEditTask('upscale', req.body?.url);
+    res.status(202).json({ success: true, task_id: task.id, status: 'running' });
+  } catch (err) { sendTaskError(res, err); }
+});
+
+// GET /api/images/edit-tasks — 运行中 / 待确认 / 失败的任务
+router.get('/edit-tasks', (req, res) => {
+  res.json({ tasks: listEditTasks() });
+});
+
+// POST /api/images/edit-tasks/:id/apply — 确认覆盖：暂存文件原子替换原图
+router.post('/edit-tasks/:id/apply', async (req, res) => {
+  try {
+    const task = await applyEditTask(req.params.id, req.body?.token);
+    const cleanUrl = task.url.replace(/\?.*$/, '');
+    res.json({ success: true, url: `${cleanUrl}?t=${Date.now()}`, task_id: task.id });
+  } catch (err) { sendTaskError(res, err); }
+});
+
+// POST /api/images/edit-tasks/:id/rerun — 按原动作 + 原图重新跑一次
+router.post('/edit-tasks/:id/rerun', async (req, res) => {
+  try {
+    const task = await rerunEditTask(req.params.id, req.body?.token, async ({ action, url }) => startImageEditTask(action, url));
+    res.status(202).json({ success: true, task_id: task.id, status: 'running' });
+  } catch (err) { sendTaskError(res, err); }
+});
+
+// POST /api/images/edit-tasks/:id/discard — 保留原图，删除暂存
+router.post('/edit-tasks/:id/discard', (req, res) => {
+  try {
+    discardEditTask(req.params.id, req.body?.token);
+    res.json({ success: true });
+  } catch (err) { sendTaskError(res, err); }
 });
 
 // DELETE /api/images/delete — 删除图片文件，不清理 DB 引用

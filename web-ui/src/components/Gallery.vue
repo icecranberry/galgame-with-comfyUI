@@ -62,6 +62,7 @@
       :index="lightboxIndex"
       @hide="lightboxVisible = false"
       @regenerated="onRegenerated"
+      @upscaled="onRegenerated"
       @deleted="onDeleted"
     />
   </div>

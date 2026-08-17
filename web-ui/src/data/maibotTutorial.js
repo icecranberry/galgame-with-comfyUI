@@ -10,7 +10,7 @@ export const MAIBOT_INSTALL_STEPS = [
   },
   {
     title: '② 解压到邻舍根目录',
-    body: '将压缩包解压到邻舍根目录（与 邻舍.EXE.exe 同级），确保根目录下出现 MaiBot 文件夹。',
+    body: '将压缩包解压到邻舍根目录（与 邻舍.EXE.exe 同级），确保根目录下出现 MaiBot 文件夹（里面包含MaiBot和Snowluma）。',
   },
   {
     title: '③ 观看安装视频',
@@ -18,7 +18,7 @@ export const MAIBOT_INSTALL_STEPS = [
   },
   {
     title: '④ 完成安装',
-    body: '回到邻舍启动器的 MaiBot 页面，点击「我已安装，重新检测」，之后即可在本页一键启动（也可以直接双击 MaiBot\\start.bat）。',
+    body: '回到邻舍启动器的 MaiBot 页面，点击「我已安装，重新检测」，之后即可在启动器一键启动（也可以直接双击 MaiBot\\start.bat）。',
   },
 ]
 

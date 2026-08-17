@@ -50,6 +50,9 @@ app.use(express.json({ limit: '10mb' }));
 // 静态文件（Vue 前端，构建后）
 app.use(express.static('public'));
 
+// 图片编辑任务暂存预览（重新生成 / HiresFix 细化确认前）
+app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
+
 // 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
 app.use('/images', (req, res, next) => {
   const pngMatch = req.path.match(/\.png$/i);

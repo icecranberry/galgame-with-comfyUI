@@ -176,6 +176,8 @@
       :visible="!!previewImage"
       :imgs="previewImage"
       @hide="previewImage = null"
+      @regenerated="onChatImageRegenerated"
+      @upscaled="onChatImageRegenerated"
       @deleted="onChatImageDeleted"
     />
 
@@ -786,6 +788,20 @@ function onChatImageDeleted(deletedUrl) {
     return true
   })
   previewImage.value = null
+}
+
+function onChatImageRegenerated(newUrl) {
+  const base = newUrl.replace(/\?.*$/, '')
+  for (const msg of chat.messages) {
+    if (msg.type !== 'image_gen' || !Array.isArray(msg.images)) continue
+    for (const img of msg.images) {
+      const imgUrl = typeof img === 'string' ? img : img?.url
+      if (imgUrl && imgUrl.replace(/\?.*$/, '') === base) {
+        if (typeof img === 'string') msg.images[msg.images.indexOf(img)] = newUrl
+        else img.url = newUrl
+      }
+    }
+  }
 }
 
 // ── 角色设置面板 ──

@@ -160,7 +160,7 @@
 
   <!-- 图片预览：Teleport 到 body 并置于遮罩层之上 -->
   <Teleport to="body">
-    <ImageLightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" @regenerated="onRegenerated" @deleted="onDeleted" />
+    <ImageLightbox :visible="!!previewImg" :imgs="previewImg ? [previewImg] : []" :z-index="400" @hide="previewImg = null" @regenerated="onRegenerated" @upscaled="onRegenerated" @deleted="onDeleted" />
   </Teleport>
 </template>
 

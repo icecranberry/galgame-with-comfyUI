@@ -109,6 +109,20 @@ export const useChatStore = defineStore('chat', () => {
     renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
   }
 
+  // 后台图片编辑任务确认覆盖后，刷新消息里的图片 URL（避免浏览器缓存旧图）
+  function bumpImageUrls(base, newUrl) {
+    for (const msg of messages.value) {
+      if (msg.type !== 'image_gen' || !Array.isArray(msg.images)) continue
+      for (const img of msg.images) {
+        const imgUrl = typeof img === 'string' ? img : img?.url
+        if (imgUrl && imgUrl.replace(/\?.*$/, '') === base) {
+          if (typeof img === 'string') msg.images[msg.images.indexOf(img)] = newUrl
+          else img.url = newUrl
+        }
+      }
+    }
+  }
+
   async function selectChar(charId) {
     if (activeStream) {
       cancelActiveStream()
@@ -723,5 +737,5 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply }
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

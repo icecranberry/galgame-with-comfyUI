@@ -27,6 +27,7 @@
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
   <InstallGuideDialog ref="guideDialog" />
+  <ImageEditTaskFloater />
 
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
@@ -51,6 +52,7 @@ import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import Toast from './components/Toast.vue'
 import InstallGuideDialog from './components/InstallGuideDialog.vue'
+import ImageEditTaskFloater from './components/ImageEditTaskFloater.vue'
 import { MAIBOT_AFTER_START_STEPS, MAIBOT_INSTALL_STEPS, MAIBOT_INTRO_TEXT } from './data/maibotTutorial.js'
 
 const chat = useChatStore()

@@ -19,6 +19,12 @@ export const LEGACY_CATEGORY = 'history';
 export const LEGACY_DIR = DATA_DIR;
 export const LEGACY_URL_PREFIX = '/images';
 
+export const PENDING_DIR = path.join(DATA_DIR, '.pending');
+
+export function getPendingDir() {
+  return PENDING_DIR;
+}
+
 export function getImageDir(category) {
   if (category === LEGACY_CATEGORY) return LEGACY_DIR;
   const cat = IMAGE_CATEGORIES[category];

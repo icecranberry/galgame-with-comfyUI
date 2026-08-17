@@ -381,6 +381,21 @@ export const useEventsStore = defineStore('events', () => {
 
   }
 
+  // 后台图片编辑任务确认覆盖后，刷新事件图片 URL
+  function bumpImageUrls(base, newUrl) {
+    const patchEvent = (e) => {
+      if (!e) return
+      if (e.image && e.image.replace(/\?.*$/, '') === base) e.image = newUrl
+      if (Array.isArray(e.choice_history)) {
+        for (const step of e.choice_history) {
+          if (step.image && step.image.replace(/\?.*$/, '') === base) step.image = newUrl
+        }
+      }
+    }
+    for (const e of activeEvents.value) patchEvent(e)
+    for (const e of history.value) patchEvent(e)
+  }
+
   return {
     activeEvents, history, loading, historyPage, historyHasMore, visibleHistory,
     filterCharacterId, filterEngaged, newEventCount, isViewingEvents,
@@ -389,6 +404,6 @@ export const useEventsStore = defineStore('events', () => {
     loadEvents, loadMoreHistory, makeChoice, cancelQueuedChoice, undoChoice, dismissEvent, deleteEvent,
     setFilter, toggleFilterEngaged,
     refreshUnreadCount, markSeen,
-    connectSSE, disconnectSSE, requestScrollToTop,
+    connectSSE, disconnectSSE, requestScrollToTop, bumpImageUrls,
   }
 })

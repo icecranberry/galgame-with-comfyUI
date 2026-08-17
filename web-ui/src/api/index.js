@@ -1011,7 +1011,7 @@ export async function listGalleryImages(limit = 100, offset = 0, folder = '') {
   return res.json()
 }
 
-/** 重新生成指定图片（用原 prompt 覆盖原文件） */
+/** 提交后台重新生成任务（完成后需确认才覆盖原图） */
 export async function regenerateImage(imageUrl) {
   const res = await fetch(`${BASE}/images/regenerate`, {
     method: 'POST',
@@ -1025,7 +1025,7 @@ export async function regenerateImage(imageUrl) {
   return res.json()
 }
 
-/** 放大细化指定图片（HiresFix ×2 图生图，携带原参数覆盖原文件） */
+/** 提交后台 HiresFix 细化任务（完成后需确认才覆盖原图） */
 export async function upscaleImage(imageUrl) {
   const res = await fetch(`${BASE}/images/upscale`, {
     method: 'POST',
@@ -1039,6 +1039,57 @@ export async function upscaleImage(imageUrl) {
   return res.json()
 }
 
+/** 运行中 / 待确认 / 失败的图片编辑任务 */
+export async function listImageEditTasks() {
+  const res = await fetch(`${BASE}/images/edit-tasks`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `获取图片编辑任务失败 (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 确认覆盖：用暂存结果原子替换原图 */
+export async function applyImageEditTask(taskId, token) {
+  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `确认覆盖失败 (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 重新生成：按原动作 + 原图再跑一次 */
+export async function rerunImageEditTask(taskId, token) {
+  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/rerun`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `重新生成失败 (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 保留原图：删除暂存结果 */
+export async function discardImageEditTask(taskId, token) {
+  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `丢弃暂存失败 (${res.status})`)
+  }
+  return res.json()
+}
 /** 删除指定图片（物理文件） */
 export async function deleteImage(imageUrl) {
   const res = await fetch(`${BASE}/images/delete`, {

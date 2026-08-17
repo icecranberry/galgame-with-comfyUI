@@ -3,7 +3,7 @@
     ref="rootEl"
     class="ba-slider"
     role="slider"
-    aria-label="细化前后对比"
+    aria-label="Before After 图片对比"
     aria-valuemin="0"
     aria-valuemax="100"
     :aria-valuenow="Math.round(pos)"
@@ -21,10 +21,17 @@
       :style="{ clipPath: `inset(0 0 0 ${pos}%)` }"
     />
     <div class="ba-divider" :style="{ left: `${pos}%` }">
-      <span class="ba-handle"></span>
+      <span class="ba-handle">
+        <svg class="ba-chevron ba-chevron-left" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+          <path d="M6.5 1.5 3 5l3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg class="ba-chevron ba-chevron-right" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+          <path d="M3.5 1.5 7 5l-3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
     </div>
-    <span class="ba-label ba-label-before">细化前</span>
-    <span class="ba-label ba-label-after">细化后</span>
+    <span class="ba-label ba-label-before">Before</span>
+    <span class="ba-label ba-label-after">After</span>
   </div>
 </template>
 
@@ -111,19 +118,17 @@ function onPointerUp(e) {
   background: #fff;
   border: 2px solid rgba(0, 0, 0, 0.35);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
 }
-.ba-handle::before,
-.ba-handle::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: 8px;
-  height: 2px;
-  background: #333;
-  transform: translateY(-50%);
+.ba-chevron {
+  width: 9px;
+  height: 9px;
+  color: #333;
+  flex-shrink: 0;
 }
-.ba-handle::before { left: 7px; }
-.ba-handle::after { right: 7px; }
 .ba-label {
   position: absolute;
   top: 12px;

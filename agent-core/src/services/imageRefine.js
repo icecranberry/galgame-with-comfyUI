@@ -220,7 +220,7 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
  *
  * @param {object} opts
  * @param {string} opts.filePath      - 原图绝对路径（细化结果将覆盖此文件）
- * @param {string} [opts.outPath]     - 输出路径覆盖（测试用，默认 filePath）
+ * @param {string} [opts.outPath]     - 输出路径覆盖（默认 filePath；图片编辑任务传入暂存路径，确认后才覆盖原图）
  * @param {Buffer} [opts.buffer]       - 原图 Buffer（与 filePath 二选一，测试细化不落盘时用）
  * @param {string} opts.promptText    - 原图最终提示词
  * @param {string} [opts.artist]
