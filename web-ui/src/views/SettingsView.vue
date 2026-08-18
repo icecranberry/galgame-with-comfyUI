@@ -225,7 +225,6 @@
         <div v-if="!freeEgg" key="llm-custom" class="llm-api-switch-body">
         <p class="fd">配置 AI 对话和角色生成所使用的 LLM 接口</p>
         <p class="fd">deepseek的key获取地址：<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">https://platform.deepseek.com/api_keys</a> ，充多少用多少</p>
-        <p class="fd">词元跳动的key获取地址：<a href="https://tokendance.space/keys" target="_blank" rel="noopener" class="ext-link">https://tokendance.space/keys</a> ，仍然提供v4flash预览版，所以没有涨价</p>
 
         <!-- LLM Profile 切换 -->
         <div class="llm-profiles-bar">
@@ -258,7 +257,7 @@
             <div v-if="showAddProfile" class="add-profile-overlay" @click.self="showAddProfile = false">
               <div class="add-profile-dialog">
                 <h4>新增配置</h4>
-                <p class="fd">将当前 LLM 配置（地址、模型、Key、自定义开关等）保存为一个新的配置快照</p>
+                <p class="fd">将当前 LLM 配置（地址、模型、自定义开关等）保存为一个新的配置快照（不含 API Key）</p>
                 <input
                   v-model="newProfileName"
                   class="fi"
@@ -276,7 +275,7 @@
         </Teleport>
 
         <!-- API Key -->
-        <label class="fl">API Key</label>
+        <label class="fl llm-label">API Key</label>
         <div class="apikey-row">
           <input
             v-model="llmApiKey"
@@ -298,12 +297,12 @@
         <div v-else class="key-status key-missing">⚠️ 未设置，AI 对话功能不可用</div>
 
         <!-- API 地址 -->
-        <label class="fl" style="margin-top:14px">API 地址</label>
+        <label class="fl llm-label" style="margin-top:14px">API 地址</label>
         <DropdownSelect v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
         <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl">模型（建议deepseek-v4-flash）</label>
+        <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
         <div ref="llmModelPicker" class="llm-model-picker">
           <div class="llm-model-row">
             <div class="llm-model-combobox">
@@ -362,7 +361,7 @@
 
         <div v-if="isCustomBaseURL" class="toggle-row thinking-setting">
           <div>
-            <div class="tl">思考模式</div>
+            <div class="tl llm-label">思考模式</div>
             <div class="td">“关”默认禁用思考；“不传”会从请求体中省略 thinking 参数</div>
           </div>
           <div :class="['thinking-options', `is-${llmThinkingMode}`]" role="radiogroup" aria-label="思考模式">
@@ -373,8 +372,14 @@
           </div>
         </div>
 
-        <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
         <template v-if="isCustomBaseURL">
+          <button type="button" class="llm-advanced-toggle" :aria-expanded="llmAdvancedOpen" @click="toggleLlmAdvanced">
+            <span class="llm-advanced-label llm-label">高级设置</span>
+            <svg class="llm-advanced-chevron" :class="{ open: llmAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+          </button>
+          <CollapseTransition :show="llmAdvancedOpen">
+            <div class="llm-advanced-body">
+              <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
           <div class="toggle-row llm-custom-toggle">
             <div>
               <div class="tl">自定义请求头</div>
@@ -455,11 +460,14 @@
               <span class="slider"></span>
             </label>
           </div>
+            </div>
+          </CollapseTransition>
         </template>
 
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
           <span v-if="llmSaved" class="smsg">已保存</span>
+          <button type="button" class="relay-intro-btn relay-intro-footer" @click="showRelayModal = true">推荐中转站</button>
         </div>
         </div>
 
@@ -474,6 +482,35 @@
         </div>
         </Transition>
       </div>
+
+      <!-- 推荐中转站弹窗 -->
+      <Teleport to="body">
+        <Transition name="relay-modal-fade">
+          <div v-if="showRelayModal" class="relay-modal-overlay" @click.self="showRelayModal = false">
+            <div class="relay-modal" role="dialog" aria-modal="true" aria-label="推荐中转站">
+              <div class="relay-modal-header">
+                <h3>推荐中转站</h3>
+                <button type="button" class="relay-modal-close" aria-label="关闭" @click="showRelayModal = false">✕</button>
+              </div>
+              <div class="relay-modal-body">
+                <p class="relay-modal-tip">以下为第三方 LLM 中转站，API Key 请在其官网获取</p>
+                <div v-for="station in relayStations" :key="station.name" class="relay-station">
+                  <div class="relay-station-head">
+                    <span class="relay-station-name">{{ station.name }}</span>
+                    <button type="button" class="relay-quick-btn" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
+                      <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+                      <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
+                    </button>
+                  </div>
+                  <p class="relay-station-desc">{{ station.desc }}</p>
+                  <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
+                </div>
+                <p class="relay-sponsor-note">可以注意到以上中转均未支付赞助费，看到请及时支付 <strong>**广告位招租**</strong></p>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
 
 
       <!-- 功能开关 -->
@@ -870,6 +907,7 @@ import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
+import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
 
@@ -1114,6 +1152,74 @@ const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
+
+// 高级设置抽屉
+const llmAdvancedOpen = ref(false)
+function toggleLlmAdvanced() { llmAdvancedOpen.value = !llmAdvancedOpen.value }
+
+// 推荐第三方 LLM 中转站
+const showRelayModal = ref(false)
+const relayStations = [
+  { name: '词元跳动', keysUrl: 'https://tokendance.space/keys', url: 'https://tokendance.space/gateway/v1', desc: '仍然提供v4flash预览版，所以没有涨价' },
+  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_diFEv6PmFUprNAYDqV6mK3Zs', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
+]
+
+const relayConfigBusy = ref(false)
+
+function uniqueProfileName(baseName) {
+  const names = new Set(llmProfiles.value.map(p => p.name))
+  if (!names.has(baseName)) return baseName
+  const now = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+  let candidate = `${baseName}-${date}`
+  let index = 2
+  while (names.has(candidate)) {
+    candidate = `${baseName}-${date}-${index}`
+    index += 1
+  }
+  return candidate
+}
+
+async function applyRelayConfig(station) {
+  if (relayConfigBusy.value) return
+  relayConfigBusy.value = true
+  try {
+    isCustomBaseURL.value = true
+    llmBaseURL.value = station.url
+    llmModel.value = 'deepseek-v4-flash'
+    llmThinkingMode.value = 'disabled'
+    llmHeadersEnabled.value = false
+    llmHeadersText.value = '{}'
+    llmExtraBodyEnabled.value = false
+    llmExtraBodyText.value = '{}'
+    const name = uniqueProfileName(station.name)
+    const result = await addLlmProfile(name, {
+      apiKey: '',
+      baseURL: station.url,
+      model: 'deepseek-v4-flash',
+      thinkingMode: 'disabled',
+      headers: {},
+      extraBody: {},
+      serializeBackgroundLLM: false,
+      mergeMessages: false,
+      backgroundConcurrency: 3,
+    })
+    if (!result.ok) throw new Error(result.error || '新增配置失败')
+    const profiles = result.profiles || []
+    llmProfiles.value = profiles
+    const created = profiles.find(p => p.name === name)
+    if (!created) throw new Error('未找到新增配置')
+    await switchProfile(created.id)
+    if (activeLlmProfileId.value !== created.id) throw new Error('启用新配置失败')
+    showRelayModal.value = false
+    toastFn?.(`已新增并启用「${name}」`, 'success')
+  } catch (err) {
+    toastFn?.('快速配置失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    relayConfigBusy.value = false
+  }
+}
 
 // 每日免费鸡蛋：点击按钮开/关；开 = 走 opencode zen 免费端点（免 Key、强制关思考），关 = 恢复自有配置
 const freeEggBusy = ref(false)
@@ -2510,7 +2616,7 @@ function resetTestPrompts() {
 .key-preview:hover { border-color: var(--accent); }
 
 /* ── 每日免费鸡蛋（LLM 卡片右上角按钮） ── */
-.llm-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.llm-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .llm-card-header h3 { margin-bottom: 0; }
 .free-egg-btn {
   display: inline-flex;
@@ -2532,6 +2638,98 @@ function resetTestPrompts() {
 .free-egg-btn.active { border-color: #facc15; background: rgba(250, 204, 21, 0.16); color: #facc15; }
 .free-egg-btn:disabled { opacity: 0.6; cursor: wait; }
 .free-egg-label { position: relative; z-index: 3; }
+
+/* ── 推荐中转站入口与弹窗 ── */
+.relay-intro-btn {
+  padding: 0; border: none; background: none;
+  font-size: 12px; font-weight: 500; color: var(--accent);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.relay-intro-btn:hover { color: var(--accent-hover); }
+.relay-intro-footer { margin-left: auto; }
+.relay-modal-overlay {
+  position: fixed; inset: 0; z-index: 2100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  padding: 20px;
+}
+.relay-modal {
+  width: min(540px, 100%);
+  max-height: min(660px, 90vh);
+  overflow: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 44px rgba(0, 0, 0, 0.18);
+}
+.relay-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px 0;
+}
+.relay-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-bright); }
+.relay-modal-close {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: transparent; color: var(--text-secondary); font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.relay-modal-close:hover { background: rgba(0,0,0,0.06); color: #333; }
+.relay-modal-body { padding: 10px 20px 18px; }
+.relay-modal-tip { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+.relay-station {
+  border: 1px solid #eee3d9; border-radius: 12px; padding: 14px; margin-bottom: 12px;
+  background: #fffcf9;
+}
+.relay-station-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;
+}
+.relay-station-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+.relay-quick-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid rgba(224, 123, 108, 0.35);
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(224, 123, 108, 0.18);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.relay-quick-btn:hover:not(:disabled) {
+  background: var(--accent-hover); border-color: var(--accent-hover);
+  box-shadow: 0 4px 12px rgba(224, 123, 108, 0.28);
+  transform: translateY(-1px);
+}
+.relay-quick-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(224, 123, 108, 0.18); }
+.relay-quick-btn:disabled { opacity: 0.6; cursor: wait; }
+.relay-quick-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.relay-quick-icon { flex-shrink: 0; }
+.relay-station-desc {
+  font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 10px;
+}
+.relay-station-line {
+  font-size: 12px; color: var(--text-secondary); margin: 4px 0; line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.relay-station-link { overflow-wrap: anywhere; }
+.relay-sponsor-note {
+  margin: 4px 0 0; text-align: right; font-size: 11px;
+  color: var(--text-muted, #b3aca4); opacity: 0.55;
+}
+.relay-sponsor-note strong { font-weight: 600; color: var(--text-muted, #b3aca4); }
+.relay-modal-fade-enter-active { transition: opacity 0.2s ease; }
+.relay-modal-fade-leave-active { transition: opacity 0.15s ease; }
+.relay-modal-fade-enter-active .relay-modal { animation: relay-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
+.relay-modal-fade-leave-active .relay-modal { transition: transform 0.15s ease, opacity 0.15s ease; }
+.relay-modal-fade-enter-from,
+.relay-modal-fade-leave-to { opacity: 0; }
+.relay-modal-fade-leave-to .relay-modal { transform: scale(0.95); opacity: 0; }
+@keyframes relay-pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (max-width: 640px) {
+  .relay-modal-overlay { padding: 12px; }
+  .relay-station-head { align-items: flex-start; }
+}
 
 /* LLM API 面板切换：退出淡出上收，进入弹性下压 */
 .egg-page-leave-active { transition: opacity 0.16s ease, transform 0.18s ease; }
@@ -2719,6 +2917,21 @@ function resetTestPrompts() {
 .llm-custom-toggle .slider { top: 10px; bottom: 10px; }
 .llm-custom-editor { padding: 4px 0 2px; }
 .llm-json-textarea { min-height: 72px; font-family: monospace; font-size: 12px; resize: vertical; }
+.llm-label { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.llm-advanced-toggle {
+  display: flex; align-items: center; justify-content: flex-start; gap: 6px;
+  width: 100%; margin-top: 4px; padding: 12px 0 10px;
+  border: none; border-bottom: 1px solid var(--glass-border);
+  background: none; color: var(--text-bright);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s;
+}
+.llm-advanced-label { min-width: 0; }
+.llm-advanced-chevron { flex-shrink: 0; color: var(--text-secondary); transition: color 0.15s, transform 0.25s ease; }
+.llm-advanced-toggle:hover .llm-advanced-chevron { color: var(--accent); }
+.llm-advanced-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.llm-advanced-chevron.open { transform: rotate(180deg); }
+.llm-advanced-body { padding-top: 2px; }
 
 /* ── LLM Profile 切换 ── */
 .llm-profiles-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }

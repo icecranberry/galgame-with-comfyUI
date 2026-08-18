@@ -559,22 +559,22 @@ export function getActiveProfileId() {
   return getSetting('active_llm_profile_id') || null;
 }
 
-export function addLlmProfile(name) {
+export function addLlmProfile(name, overrides = {}) {
   const profiles = readProfilesFromDb();
   const id = 'p_' + Date.now();
   const now = new Date().toISOString();
   const profile = {
     id,
     name: name.trim(),
-    apiKey: config.llm.apiKey || '',
-    baseURL: config.llm.baseURL || 'https://api.deepseek.com',
-    model: config.llm.model || 'deepseek-v4-flash',
-    thinkingMode: config.llm.thinkingMode || 'disabled',
-    headers: config.llm.headers || {},
-    extraBody: config.llm.extraBody || {},
-    serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
-    mergeMessages: config.features.mergeMessages || false,
-    backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,
+    apiKey: overrides.apiKey !== undefined ? overrides.apiKey : '',
+    baseURL: overrides.baseURL !== undefined ? overrides.baseURL : (config.llm.baseURL || 'https://api.deepseek.com'),
+    model: overrides.model !== undefined ? overrides.model : (config.llm.model || 'deepseek-v4-flash'),
+    thinkingMode: overrides.thinkingMode !== undefined ? overrides.thinkingMode : (config.llm.thinkingMode || 'disabled'),
+    headers: overrides.headers !== undefined ? overrides.headers : (config.llm.headers || {}),
+    extraBody: overrides.extraBody !== undefined ? overrides.extraBody : (config.llm.extraBody || {}),
+    serializeBackgroundLLM: overrides.serializeBackgroundLLM !== undefined ? overrides.serializeBackgroundLLM : (config.features.serializeBackgroundLLM || false),
+    mergeMessages: overrides.mergeMessages !== undefined ? overrides.mergeMessages : (config.features.mergeMessages || false),
+    backgroundConcurrency: overrides.backgroundConcurrency !== undefined ? overrides.backgroundConcurrency : (config.features.backgroundLLMMaxConcurrency || 3),
     createdAt: now,
   };
   profiles.push(profile);
@@ -604,10 +604,8 @@ export function deleteLlmProfile(id) {
 }
 
 function _applyProfileToConfig(profile) {
-  if (profile.apiKey) {
-    config.llm.apiKey = profile.apiKey;
-    persistEnv('LLM_API_KEY', profile.apiKey);
-  }
+  config.llm.apiKey = profile.apiKey || '';
+  persistEnv('LLM_API_KEY', config.llm.apiKey);
   if (profile.baseURL !== undefined) {
     config.llm.baseURL = profile.baseURL;
     persistEnv('LLM_BASE_URL', profile.baseURL);

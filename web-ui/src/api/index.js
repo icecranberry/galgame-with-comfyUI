@@ -526,10 +526,10 @@ export async function getLlmProfiles() {
   return res.json()
 }
 
-export async function addLlmProfile(name) {
+export async function addLlmProfile(name, config = {}) {
   const res = await fetch(`${BASE}/config/llm/profiles`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, ...config }),
   })
   return res.json()
 }

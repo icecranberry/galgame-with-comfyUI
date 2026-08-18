@@ -339,13 +339,13 @@ router.get('/llm/profiles', (req, res) => {
   res.json({ profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
 });
 
-// POST /api/config/llm/profiles — 新增 profile（快照当前 LLM 配置）
+// POST /api/config/llm/profiles — 新增 profile（默认快照当前 LLM 配置，可传字段覆盖）
 router.post('/llm/profiles', (req, res) => {
-  const { name } = req.body;
+  const { name, ...overrides } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'name is required' });
   }
-  const result = addLlmProfile(name);
+  const result = addLlmProfile(name, overrides);
   res.json({ ok: true, profiles: getLlmProfiles(), activeProfileId: getActiveProfileId() });
 });
 
