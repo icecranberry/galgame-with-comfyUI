@@ -86,6 +86,7 @@
       <!-- 加载更多 -->
       <div v-if="moments.loading" class="load-more">加载中...</div>
       <div v-else-if="moments.filterLiked && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— 还没有赞过的帖子 —</div>
+      <div v-else-if="moments.filterCharacterId !== null && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— ta还没有发朋友圈 —</div>
       <div v-else-if="!moments.hasMore && moments.posts.length > 0" class="load-more">— 没有更多了 —</div>
     </div>
 
@@ -110,6 +111,7 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useMomentsStore } from '../stores/moments.js'
 import { useChatStore } from '../stores/chat.js'
+import { useRoute } from 'vue-router'
 import { loadUserConfig } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
@@ -118,6 +120,7 @@ import LibraryModal from '../components/LibraryModal.vue'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
+const route = useRoute()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 
@@ -157,6 +160,8 @@ function onShareClose() {
 onMounted(async () => {
   moments.isViewingMoments = true
   moments.resetFilters()
+  const characterId = Number(route.query.character_id) || null
+  if (characterId) moments.setFilter(characterId)
   await chat.loadCharacters()
   await loadUserConfig()
   await moments.loadPosts()
@@ -178,6 +183,13 @@ watch(() => moments.scrollToTopSignal, async () => {
   if (scrollContainer.value) {
     scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
   }
+})
+
+// 从群聊头像进入时按角色筛选；手动进入朋友圈则恢复全部
+watch(() => route.query.character_id, (val) => {
+  const id = val ? Number(val) : null
+  if (id) moments.setFilter(id)
+  else moments.resetFilters()
 })
 
 function onDocumentClick(e) {

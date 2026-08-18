@@ -344,6 +344,8 @@ async function onCharClick(c) {
 
 function onMomentsClick() {
   if (route.path === '/moments') {
+    moments.resetFilters()
+    router.replace({ path: '/moments', query: {} })
     moments.requestScrollToTop()
   } else {
     router.push('/moments')

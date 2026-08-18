@@ -767,7 +767,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
 
   // 发图指令：主动/自动发起的群聊轮（idle 后台闲聊、lull 冷场续聊）强制要求配一张图；user/opening 维持抽卡鼓励
   if (trigger === 'idle' || trigger === 'lull') {
-    directiveBlocks.push(`本轮是角色们主动发起的群聊，安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
+    directiveBlocks.push(`本轮是角色们主动发起的群聊，群聊生成方向建议有一个小的主题，要么围绕某个人的朋友圈讨论，要么大家围绕某个话题、某件事讨论，聊天有个中心，不要各聊各的。安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
   } else if (Math.random() < IMAGE_NUDGE_PROBABILITY) {
     directiveBlocks.push(`本轮安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
   }

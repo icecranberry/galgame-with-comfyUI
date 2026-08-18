@@ -9,8 +9,9 @@
         <div
           v-for="m in (store.activeGroup?.members || []).slice(0, 4)"
           :key="m.id"
-          class="group-avatar-cell"
+          class="group-avatar-cell avatar-clickable"
           :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: '#e07b6c' }"
+          @click.stop="openAvatarMenu(m, $event)"
         >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
       </div>
       <div class="chat-header-center">
@@ -48,7 +49,9 @@
           >
           <div
             class="msg-avatar"
+            :class="{ 'avatar-clickable': msg.role !== 'user' && memberOf(msg) }"
             :style="msg.role === 'user' ? userAvatarStyle : speakerAvatarStyle(msg)"
+            @click="openMsgAvatarMenu(msg, $event)"
           ><span v-if="avatarFallback(msg)" class="avatar-fallback">{{ avatarFallback(msg) }}</span></div>
           <div class="msg-col">
             <div v-if="msg.role !== 'user' && !isSameSpeaker(idx)" class="speaker-name">{{ msg.speaker_name || '?' }}</div>
@@ -224,6 +227,35 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 点头像弹出的成员操作小窗 -->
+    <Teleport to="body">
+      <Transition name="avatar-pop">
+        <div v-if="avatarMenu" class="avatar-pop-layer" @click.self="avatarMenu = null">
+          <div class="avatar-pop-card" :style="avatarMenuStyle" role="dialog" aria-label="成员操作">
+            <div class="avatar-pop-head">
+              <div class="avatar-pop-avatar" :style="memberAvatarStyle(avatarMenu.member)">
+                <span v-if="!avatarMenu.member.avatar_path" class="avatar-pop-fallback">{{ avatarMenu.member.display_name?.charAt(0) || '?' }}</span>
+              </div>
+              <div class="avatar-pop-info">
+                <div class="avatar-pop-name">{{ avatarMenu.member.display_name }}</div>
+                <div class="avatar-pop-sub">群聊成员</div>
+              </div>
+            </div>
+            <div class="avatar-pop-actions">
+              <button class="avatar-pop-btn" type="button" @click="startPrivateChat(avatarMenu.member)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>私聊</span>
+              </button>
+              <button class="avatar-pop-btn" type="button" @click="viewMemberMoments(avatarMenu.member)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+                <span>查看ta的朋友圈</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -232,6 +264,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from '
 import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
 import { useChatStore } from '../stores/chat.js'
+import { useMomentsStore } from '../stores/moments.js'
 import { getConfig, updateGroupSummaryInterval, updateGroupTemperature } from '../api/index.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
@@ -241,6 +274,7 @@ const route = useRoute()
 const router = useRouter()
 const store = useGroupsStore()
 const chat = useChatStore()
+const momentsStore = useMomentsStore()
 const confirmFn = inject('confirm', null)
 const toast = inject('toast', null)
 
@@ -253,6 +287,7 @@ const showSettings = ref(false)
 const previewUrl = ref(null)
 const isFollowingLatest = ref(true)
 const hasNewMessages = ref(false)
+const avatarMenu = ref(null)
 
 const editName = ref('')
 const editTopic = ref('')
@@ -276,6 +311,8 @@ const userAvatarStyle = computed(() => {
 
 function memberOf(msg) {
   return (store.activeGroup?.members || []).find(m => m.id === msg.speaker_character_id)
+    || chat.characters.find(c => c.id === msg.speaker_character_id)
+    || null
 }
 function speakerAvatarStyle(msg) {
   const path = memberOf(msg)?.avatar_path || msg.speaker_avatar
@@ -289,6 +326,49 @@ function avatarFallback(msg) {
   }
   const path = memberOf(msg)?.avatar_path || msg.speaker_avatar
   return path ? '' : (msg.speaker_name || '?').charAt(0)
+}
+
+const AVATAR_POP_W = 320
+const AVATAR_POP_H = 168
+const avatarMenuStyle = computed(() => {
+  const menu = avatarMenu.value
+  if (!menu) return {}
+  const gap = 12
+  const viewportW = window.innerWidth
+  const viewportH = window.innerHeight
+  let left = Math.min(menu.x + gap, viewportW - AVATAR_POP_W - gap)
+  let top = menu.y + gap
+  if (top + AVATAR_POP_H > viewportH - gap) top = menu.y - AVATAR_POP_H - gap
+  left = Math.max(gap, Math.min(left, viewportW - AVATAR_POP_W - gap))
+  top = Math.max(gap, Math.min(top, viewportH - AVATAR_POP_H - gap))
+  return { left: `${left}px`, top: `${top}px` }
+})
+
+function memberAvatarStyle(member) {
+  return member?.avatar_path
+    ? { backgroundImage: `url(${member.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : { background: '#e07b6c' }
+}
+
+function openAvatarMenu(member, event) {
+  if (!member?.id) return
+  avatarMenu.value = { member, x: event?.clientX ?? 0, y: event?.clientY ?? 0 }
+}
+
+function openMsgAvatarMenu(msg, event) {
+  const member = memberOf(msg)
+  if (member) openAvatarMenu(member, event)
+}
+
+function startPrivateChat(member) {
+  avatarMenu.value = null
+  router.push(`/chat/${member.id}`)
+}
+
+function viewMemberMoments(member) {
+  avatarMenu.value = null
+  momentsStore.setFilter(member.id)
+  router.push({ path: '/moments', query: { character_id: member.id } })
 }
 
 /** 适配 ImageGenBubble 的 msg 结构：群聊 images 存 url 字符串数组，组件期望 [{url}] */
@@ -840,6 +920,54 @@ async function onDissolve() {
 }
 .msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
 .avatar-fallback { color:#fff; font-size:14px; font-weight:700; user-select:none; }
+.avatar-clickable { cursor:pointer; transition:filter 0.15s ease, transform 0.15s ease; }
+.avatar-clickable:hover { filter:brightness(0.93); }
+.avatar-clickable:active { transform:scale(0.96); }
+
+/* ── 点头像弹出的成员操作小窗 ── */
+.avatar-pop-layer {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(28, 20, 16, 0.14);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.avatar-pop-card {
+  position: fixed; width: 320px; max-width: calc(100vw - 24px); min-height: 150px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  box-shadow: 0 14px 42px rgba(60, 34, 25, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  padding: 14px;
+}
+.avatar-pop-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.avatar-pop-avatar {
+  width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background-size: cover; background-position: center;
+  color: #fff;
+}
+.avatar-pop-fallback { font-size: 17px; font-weight: 700; user-select: none; }
+.avatar-pop-info { min-width: 0; }
+.avatar-pop-name {
+  font-size: 15px; font-weight: 600; color: var(--text-bright);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.avatar-pop-sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+.avatar-pop-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.avatar-pop-btn {
+  min-height: 42px; padding: 8px 4px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid rgba(224, 123, 108, 0.26); border-radius: 12px;
+  background: #fff; color: var(--text-primary);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.avatar-pop-btn:hover { background: #fff8f6; border-color: var(--accent); color: var(--accent); }
+.avatar-pop-btn:active { transform: scale(0.97); }
+.avatar-pop-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+.avatar-pop-enter-active, .avatar-pop-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.avatar-pop-enter-from, .avatar-pop-leave-to { opacity: 0; transform: translateY(-4px) scale(0.97); }
+
 
 .msg-col { display:flex; flex-direction:column; max-width:75%; }
 .message.user .msg-col { align-items:flex-end; }

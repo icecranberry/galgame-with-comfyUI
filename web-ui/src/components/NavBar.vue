@@ -99,6 +99,8 @@ const mailbox = useMailboxStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {
+    moments.resetFilters()
+    router.replace({ path: '/moments', query: {} })
     moments.requestScrollToTop()
   } else {
     router.push('/moments')
