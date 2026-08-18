@@ -2,10 +2,10 @@
 MaiBot 运行器 —— 管理 MaiBot 与 SnowLuma 两个外部服务进程。
 
 目录结构（项目根目录下的一键包）:
-  MaiBot/
+  MaiBot-Container/
     MaiBot/            # MaiBot 本体（自带 .venv）
       bot.py
-    snowluma/          # SnowLuma 连接器（自带 node.exe）
+    Snowluma/          # SnowLuma 连接器（自带 node.exe）
       index.mjs
     start.bat          # 独立启动脚本（用户也可手动双击）
 
@@ -25,7 +25,7 @@ SNOWLUMA_PORT = 5099
 
 
 def maibot_root(project_path: str) -> str:
-    return os.path.join(project_path, "MaiBot")
+    return os.path.join(project_path, "MaiBot-Container")
 
 
 def maibot_installed(project_path: str) -> bool:
@@ -39,9 +39,9 @@ def _maibot_services() -> dict:
             "display": "MaiBot",
             "port": MAIBOT_PORT,
             "health_path": "/",
-            "cwd": os.path.join("MaiBot", "MaiBot"),
+            "cwd": os.path.join("MaiBot-Container", "MaiBot"),
             "get_cmd": lambda p: os.path.join(
-                p, "MaiBot", "MaiBot", ".venv", "Scripts", "python.exe"
+                p, "MaiBot-Container", "MaiBot", ".venv", "Scripts", "python.exe"
             ),
             "get_args": lambda: ["bot.py"],
             "env": {"PYTHONUTF8": "1"},
@@ -51,8 +51,8 @@ def _maibot_services() -> dict:
             "display": "SnowLuma",
             "port": SNOWLUMA_PORT,
             "health_path": "/",
-            "cwd": os.path.join("MaiBot", "snowluma"),
-            "get_cmd": lambda p: os.path.join(p, "MaiBot", "snowluma", "node.exe"),
+            "cwd": os.path.join("MaiBot-Container", "Snowluma"),
+            "get_cmd": lambda p: os.path.join(p, "MaiBot-Container", "Snowluma", "node.exe"),
             "get_args": lambda: ["index.mjs"],
         },
     }

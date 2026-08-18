@@ -37,3 +37,4 @@ android-shell/*.iml
 android-shell/app/src/main/res/drawable-nodpi/ic_launcher_image.*
 
 MaiBot/
+MaiBot-Container/

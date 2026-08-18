@@ -1,5 +1,5 @@
 """
-MaiBot 页面 —— 根目录未检测到 MaiBot 文件夹时展示安装教程；
+MaiBot 页面 —— 根目录未检测到 MaiBot-Container 文件夹时展示安装教程；
 已安装时提供一键启动、双服务控制台（MaiBot / SnowLuma 标签页可切换）与后台入口。
 """
 import os
@@ -42,7 +42,7 @@ INSTALL_STEPS = [
     ),
     (
         "② 解压到邻舍根目录",
-        "将压缩包解压到邻舍根目录（与 邻舍.EXE.exe 同级），确保根目录下出现 MaiBot 文件夹（里面包含MaiBot和Snowluma）。",
+        "将压缩包解压到邻舍根目录（与 邻舍.EXE.exe 同级），确保根目录下出现 MaiBot-Container 文件夹（里面包含 MaiBot 和 Snowluma）。",
     ),
     (
         "③ 观看安装视频",
@@ -52,7 +52,7 @@ INSTALL_STEPS = [
     (
         "④ 完成安装",
         "点击下方「我已安装，重新检测」，之后即可在本页一键启动"
-        "（也可以直接双击 MaiBot\\start.bat）。",
+        "（也可以直接双击 MaiBot-Container\\start.bat）。",
     ),
 ]
 
@@ -201,7 +201,7 @@ class MaiBotPage(QWidget):
         outer.addWidget(scroll)
 
         # 重新检测失败时的常驻提示（位于滚动区下方）
-        self._detect_hint = QLabel("仍未检测到 MaiBot 文件夹，请确认已解压到邻舍根目录（与 邻舍.EXE.exe 同级）")
+        self._detect_hint = QLabel("仍未检测到 MaiBot-Container 文件夹，请确认已解压到邻舍根目录（与 邻舍.EXE.exe 同级）")
         self._detect_hint.setStyleSheet("color: #C88700; font-size: 12px;")
         self._detect_hint.hide()
         outer.addWidget(self._detect_hint)
@@ -410,8 +410,8 @@ class MaiBotPage(QWidget):
         return self._installed
 
     def detect(self) -> bool:
-        """检测根目录是否存在 MaiBot 文件夹，切换教程/控制面板。"""
-        self._installed = os.path.isdir(os.path.join(self._project_path, "MaiBot"))
+        """检测根目录是否存在 MaiBot-Container 文件夹，切换教程/控制面板。"""
+        self._installed = os.path.isdir(os.path.join(self._project_path, "MaiBot-Container"))
         self._stack.setCurrentWidget(
             self._control_panel if self._installed else self._tutorial_panel
         )
@@ -476,7 +476,7 @@ class MaiBotPage(QWidget):
     def _on_redetect(self):
         if self.detect():
             self._detect_hint.hide()
-            self.append_log("system", "[系统] ✓ 已检测到 MaiBot 文件夹")
+            self.append_log("system", "[系统] ✓ 已检测到 MaiBot-Container 文件夹")
         else:
             self._detect_hint.show()
 

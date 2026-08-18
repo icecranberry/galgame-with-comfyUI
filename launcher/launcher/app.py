@@ -544,7 +544,8 @@ class MainWindow(QMainWindow):
         self._home_page.set_launch_state("starting")
         self._log_page.set_busy_state(True, "⏳ 启动中...")
         self._runner.start_all()
-        self._maybe_start_maibot_with_core()
+        # 先启动邻舍主服务，3 秒后再拉起 MaiBot/SnowLuma
+        QTimer.singleShot(3000, self._maybe_start_maibot_with_core)
 
     # ==================================================================
     # 版本管理
@@ -780,12 +781,14 @@ class MainWindow(QMainWindow):
         )
 
     def _maybe_start_maibot_with_core(self):
-        """点击「启动邻舍」时按勾选状态同步拉起 MaiBot/SnowLuma。"""
+        """主服务启动 3 秒后，按勾选状态拉起 MaiBot/SnowLuma。"""
+        if self._closing:
+            return
         if not self._config.get("maibot_autostart"):
             return
         if not self._maibot_page.is_installed():
             self._log_page.append_log(
-                "[系统] 已勾选随邻舍自动启动 MaiBot，但未检测到 MaiBot 文件夹，已跳过"
+                "[系统] 已勾选随邻舍自动启动 MaiBot，但未检测到 MaiBot-Container 文件夹，已跳过"
             )
             return
         self._maibot_page.append_log(
