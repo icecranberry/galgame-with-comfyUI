@@ -25,6 +25,7 @@ import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
+import luckyWheelRoutes from './src/routes/luckyWheel.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
@@ -92,6 +93,7 @@ app.use('/api/workflows', workflowsRoutes);
 app.use('/api/mailbox', mailboxRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/library', libraryRoutes);   // /api/library/event-types, /api/library/topics
+app.use('/api/lucky-wheel', luckyWheelRoutes);
 
 app.use('/api/maibot', maibotBridgeRoutes);
 // 健康检查
