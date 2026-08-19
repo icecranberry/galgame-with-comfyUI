@@ -23,7 +23,7 @@ export const MAIBOT_INSTALL_STEPS = [
 ]
 
 export const MAIBOT_AFTER_START_STEPS = [
-  '默认 Token：MaiBot 后台为 MaiBot.admin，SnowLuma 后台为 Snowluma.admin',
+  '默认 Token：MaiBot 后台为 MaiBot.admin，SnowLuma 后台为 SnowLuma.admin',
   '先去 Snowluma 后台连接已登录、用作机器人的 QQ 客户端，消息才能被截取和注入',
   '在后台「模型列表」配置 LLM 模型',
   '麦麦设置 → 核心设置 → 填写机器人 QQ 号',

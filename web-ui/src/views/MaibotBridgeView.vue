@@ -59,7 +59,7 @@
                 <span class="admin-link-name">Snowluma 后台</span>
                 <span class="admin-link-meta">
                   <span class="admin-link-tag">消息接收器</span>
-                  <span class="admin-link-token">默认 Token：<b>Snowluma.admin</b></span>
+                  <span class="admin-link-token">默认 Token：<b>SnowLuma.admin</b></span>
                   <span class="admin-link-url">127.0.0.1:5099</span>
                 </span>
               </span>
