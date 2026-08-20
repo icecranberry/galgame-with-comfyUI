@@ -49,13 +49,27 @@ def maibot_python(project_path: str) -> str | None:
     embedded = os.path.join(project_path, MAIBOT_EMBEDDED_PY)
     if os.path.isfile(embedded):
         return embedded
+    venv_py = os.path.join(project_path, MAIBOT_VENV_PY)
+    if os.path.isfile(venv_py) and _venv_base_ready(venv_py):
+        return venv_py
     bundled = find_bundled_python(project_path)
     if bundled:
         return bundled
-    venv_py = os.path.join(project_path, MAIBOT_VENV_PY)
-    if os.path.isfile(venv_py):
-        return venv_py
     return None
+
+
+def _venv_base_ready(venv_py: str) -> bool:
+    """检查旧 venv 指向的 Python 是否真的存在，兼容老用户已装 C:\\Python313 的情况。"""
+    cfg = os.path.join(os.path.dirname(os.path.dirname(venv_py)), "pyvenv.cfg")
+    try:
+        with open(cfg, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.lower().startswith("home"):
+                    home = line.split("=", 1)[1].strip()
+                    return os.path.isfile(os.path.join(home, "python.exe"))
+    except Exception:
+        return False
+    return False
 
 
 def maibot_uv_available() -> bool:
@@ -339,7 +353,12 @@ class MaiBotRunner(QObject):
                 return False
         python_exe = maibot_python(self._project_path)
         req = maibot_requirements(self._project_path)
-        return bool(python_exe and os.path.isfile(req))
+        if not python_exe:
+            return False
+        venv_py = os.path.join(self._project_path, MAIBOT_VENV_PY)
+        if os.path.normcase(python_exe) == os.path.normcase(venv_py):
+            return False
+        return os.path.isfile(req)
 
     def _start_env_check(self):
         python_exe = maibot_python(self._project_path)
