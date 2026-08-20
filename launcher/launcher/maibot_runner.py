@@ -84,10 +84,14 @@ def maibot_deps_ready(python_exe: str) -> bool:
     """快速检查 MaiBot 关键依赖是否已装入指定 Python。"""
     try:
         import subprocess as _sp
+        _kwargs = {}
+        if os.name == "nt":
+            _kwargs["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0)
         result = _sp.run(
             [python_exe, "-c", _MAIBOT_DEPS_CHECK],
             capture_output=True,
             timeout=30,
+            **_kwargs,
         )
         return result.returncode == 0
     except Exception:
@@ -104,7 +108,7 @@ def _maibot_services(project_path: str) -> dict:
             "cwd": MAIBOT_SOURCE_DIR,
             "get_cmd": lambda p: maibot_launch_command(p)[0],
             "get_args": lambda: maibot_launch_command(project_path)[1],
-            "env": {"PYTHONUTF8": "1"},
+            "env": {"PYTHONUTF8": "1", "MAIBOT_WEBUI_USE_LOCAL_DASHBOARD": "1"},
         },
         "snowluma": {
             "name": "snowluma",
@@ -192,6 +196,19 @@ class _PortCleaner(QObject):
 
     def _report(self, text: str):
         self.output.emit("system", text)
+
+
+class _MaiBotEnvCheckWorker(QObject):
+    """后台线程执行 MaiBot 依赖检查，避免阻塞 GUI。"""
+
+    result = Signal(bool)
+
+    def __init__(self, python_exe: str):
+        super().__init__()
+        self._python_exe = python_exe
+
+    def run(self):
+        self.result.emit(maibot_deps_ready(self._python_exe))
 
 
 class MaiBotRunner(QObject):
@@ -309,25 +326,43 @@ class MaiBotRunner(QObject):
 
     def _on_ports_cleaned(self):
         self.output.emit("system", "端口清理完成，正在启动 MaiBot 与 SnowLuma ...")
-        if self._needs_maibot_env_setup():
-            self.output.emit(
-                "maibot",
-                "[MaiBot] 首次运行：正在向邻舍捆绑 Python 安装 MaiBot 依赖，请稍候 ...",
-            )
-            self._install_maibot_deps()
+        if self._env_check_needed():
+            self.output.emit("maibot", "[MaiBot] 正在检查依赖环境 ...")
+            self._start_env_check()
         else:
             self._start_services()
 
-    def _needs_maibot_env_setup(self) -> bool:
-        """MaiBot Python 缺少依赖时，先自动补装。"""
+    def _env_check_needed(self) -> bool:
+        """是否需要后台检查 MaiBot 依赖（仅文件判断，不阻塞 GUI）。"""
         if not find_bundled_python(self._project_path):
             if not os.path.isfile(os.path.join(self._project_path, MAIBOT_EMBEDDED_PY)):
                 return False
         python_exe = maibot_python(self._project_path)
         req = maibot_requirements(self._project_path)
-        if not python_exe or not os.path.isfile(req):
-            return False
-        return not maibot_deps_ready(python_exe)
+        return bool(python_exe and os.path.isfile(req))
+
+    def _start_env_check(self):
+        python_exe = maibot_python(self._project_path)
+        thread = QThread(self)
+        worker = _MaiBotEnvCheckWorker(python_exe)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.result.connect(self._on_env_check_done)
+        worker.result.connect(thread.quit)
+        self._env_check_thread = thread
+        self._env_check_worker = worker
+        thread.start()
+
+    def _on_env_check_done(self, ready: bool):
+        if ready:
+            self.output.emit("maibot", "[MaiBot] 依赖环境正常，正在启动 ...")
+            self._start_services()
+        else:
+            self.output.emit(
+                "maibot",
+                "[MaiBot] 首次运行：正在向邻舍捆绑 Python 安装 MaiBot 依赖，请稍候 ...",
+            )
+            self._install_maibot_deps()
 
     def _install_maibot_deps(self):
         python_exe = maibot_python(self._project_path)

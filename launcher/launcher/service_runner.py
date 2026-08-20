@@ -274,26 +274,29 @@ class ServiceWorker(QObject):
 
         self._health_retries += 1
         url = f"http://localhost:{self.port}{self._def['health_path']}"
+        manager = QNetworkAccessManager(self)
+        req = QNetworkRequest(QUrl(url))
+        req.setTransferTimeout(2000)
+        reply = manager.get(req)
+        reply.finished.connect(lambda: self._on_health_reply(reply))
+        self._health_manager = manager
+        self._health_reply = reply
 
-        # 用简单的 socket 检测更可靠
-        import socket
-
-        try:
-            s = socket.create_connection(("localhost", self.port), timeout=2)
-            s.close()
-            # 端口已监听 → 认为 healthy
+    def _on_health_reply(self, reply):
+        reply.deleteLater()
+        self._health_manager = None
+        self._health_reply = None
+        if self._status not in (self.STATUS_STARTING,):
+            return
+        if reply.error() == QNetworkReply.NoError:
             self._set_status(self.STATUS_RUNNING)
             self.health_changed.emit(self.name, True)
             self.output.emit(self.name, f"[{self.display}] ✓ :{self.port} healthy")
             return
-        except (socket.error, OSError):
-            pass
-
         if self._health_retries >= self._health_max_retries:
             self.output.emit(self.name, f"[WARN] [{self.display}] 健康检查超时，但进程仍在运行")
             self._set_status(self.STATUS_TIMEOUT)
             return
-
         QTimer.singleShot(2000, self._health_check)
 
     # ------------------------------------------------------------------
