@@ -527,23 +527,6 @@ async function main() {
   }
 
   {
-    // 优先使用捆绑 Python 安装 PyInstaller 依赖（与脚本其他步骤保持一致）
-    const check = await exec(pyExe, ["-m", "pip", "show", "PySide6"]);
-    if (!check.ok) {
-      log("安装 PyInstaller 依赖...");
-      const r = await exec(pyExe, ["-m", "pip", "install", "PySide6", "psutil", "pyinstaller",
-        "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-        "--trusted-host", "pypi.tuna.tsinghua.edu.cn"], { print: true, timeout: 300000 });
-      if (!r.ok) {
-        // 捆绑 Python 失败则回退到系统 pip（构建机可能有完整 Python 环境）
-        warn("捆绑 Python 安装失败，尝试系统 pip...");
-        const r2 = await exec("pip", ["install", "PySide6", "psutil", "pyinstaller"], { print: true });
-        if (!r2.ok) { fail("PyInstaller 依赖安装失败!"); process.exit(1); }
-      }
-    }
-  }
-
-  {
     // 删除旧 .spec 文件，避免缓存导致 --add-data 不生效
     const specFile = resolve(launcherDir, "邻舍.EXE.spec");
     if (existsSync(specFile)) {
@@ -552,8 +535,33 @@ async function main() {
       log("已删除旧的 .spec 文件");
     }
 
-    // 优先使用捆绑 Python 运行 PyInstaller，失败则回退系统 pyinstaller
-    let r = await exec(pyExe, ["-m", "PyInstaller",
+    const BUILD_VENV = resolve(launcherDir, "build_cache", "pyinstaller-venv");
+    const BUILD_VENV_PY = resolve(BUILD_VENV, "Scripts", "python.exe");
+    if (!existsSync(BUILD_VENV_PY)) {
+      log("创建 PyInstaller 构建 venv（不污染 runtime）...");
+      const venvOk = await exec("python", ["-m", "venv", BUILD_VENV], { print: true });
+      if (!venvOk.ok) {
+        warn("系统 python 创建 venv 失败，尝试 py -3...");
+        const venvOk2 = await exec("py", ["-3", "-m", "venv", BUILD_VENV], { print: true });
+        if (!venvOk2.ok) { fail("无法创建 PyInstaller 构建 venv!"); process.exit(1); }
+      }
+    }
+
+    const buildDepsCheck = await exec(BUILD_VENV_PY, ["-m", "pip", "show", "PySide6"]);
+    if (!buildDepsCheck.ok) {
+      log("安装 PyInstaller 依赖到构建 venv...");
+      const r = await exec(BUILD_VENV_PY, ["-m", "pip", "install", "PySide6", "psutil", "pyinstaller",
+        "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+        "--trusted-host", "pypi.tuna.tsinghua.edu.cn"], { print: true, timeout: 300000 });
+      if (!r.ok) {
+        warn("构建 venv 安装失败，尝试系统 pip...");
+        const r2 = await exec("pip", ["install", "PySide6", "psutil", "pyinstaller"], { print: true });
+        if (!r2.ok) { fail("PyInstaller 依赖安装失败!"); process.exit(1); }
+      }
+    }
+
+    // 优先使用构建 venv 运行 PyInstaller，失败则回退系统 pyinstaller
+    let r = await exec(BUILD_VENV_PY, ["-m", "PyInstaller",
       "--onefile", "--windowed",
       "--name", "邻舍.EXE",
       "--icon", "assets/icon.ico",

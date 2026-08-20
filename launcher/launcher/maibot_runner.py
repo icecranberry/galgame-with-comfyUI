@@ -3,7 +3,7 @@ MaiBot 运行器 —— 管理 MaiBot 与 SnowLuma 两个外部服务进程。
 
 目录结构（项目根目录下的一键包）:
   MaiBot-Container/
-    MaiBot/            # MaiBot 本体（自带 .venv）
+    MaiBot/            # MaiBot 本体（自带 python/ 便携环境）
       bot.py
     Snowluma/          # SnowLuma 连接器（自带 node.exe）
       index.mjs
@@ -15,10 +15,11 @@ MaiBot 运行器 —— 管理 MaiBot 与 SnowLuma 两个外部服务进程。
 """
 import os
 import re
+import shutil
 
-from PySide6.QtCore import QObject, Signal, QThread, QTimer
+from PySide6.QtCore import QObject, QProcess, Signal, QThread, QTimer
 
-from .service_runner import ServiceWorker
+from .service_runner import ServiceWorker, _decode_output, find_bundled_python
 
 MAIBOT_PORT = 8001
 SNOWLUMA_PORT = 5099
@@ -32,18 +33,77 @@ def maibot_installed(project_path: str) -> bool:
     return os.path.isdir(maibot_root(project_path))
 
 
-def _maibot_services() -> dict:
+MAIBOT_SOURCE_DIR = os.path.join("MaiBot-Container", "MaiBot")
+MAIBOT_VENV_PY = os.path.join(MAIBOT_SOURCE_DIR, ".venv", "Scripts", "python.exe")
+MAIBOT_REQUIREMENTS = os.path.join(MAIBOT_SOURCE_DIR, "requirements.txt")
+MAIBOT_EMBEDDED_PY = os.path.join(MAIBOT_SOURCE_DIR, "python", "python.exe")
+
+_MAIBOT_DEPS_CHECK = (
+    "import aiohttp, fastapi, numpy, pydantic, "
+    "maim_message, maibot_dashboard, faiss, pyarrow, playwright"
+)
+
+
+def maibot_python(project_path: str) -> str | None:
+    """优先使用 MaiBot 包内便携 Python，其次邻舍捆绑 Python，最后回退 venv。"""
+    embedded = os.path.join(project_path, MAIBOT_EMBEDDED_PY)
+    if os.path.isfile(embedded):
+        return embedded
+    bundled = find_bundled_python(project_path)
+    if bundled:
+        return bundled
+    venv_py = os.path.join(project_path, MAIBOT_VENV_PY)
+    if os.path.isfile(venv_py):
+        return venv_py
+    return None
+
+
+def maibot_uv_available() -> bool:
+    return shutil.which("uv") is not None
+
+
+def maibot_launch_command(project_path: str) -> tuple[str | None, list[str]]:
+    """返回 MaiBot 启动命令与参数；没有本地 Python 时用官方 uv 兜底。"""
+    python_exe = maibot_python(project_path)
+    if python_exe:
+        return python_exe, ["bot.py"]
+    if maibot_uv_available():
+        return shutil.which("uv"), ["run", "python", "bot.py"]
+    return None, ["bot.py"]
+
+
+def maibot_source_dir(project_path: str) -> str:
+    return os.path.join(project_path, MAIBOT_SOURCE_DIR)
+
+
+def maibot_requirements(project_path: str) -> str:
+    return os.path.join(project_path, MAIBOT_REQUIREMENTS)
+
+
+def maibot_deps_ready(python_exe: str) -> bool:
+    """快速检查 MaiBot 关键依赖是否已装入指定 Python。"""
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            [python_exe, "-c", _MAIBOT_DEPS_CHECK],
+            capture_output=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _maibot_services(project_path: str) -> dict:
     return {
         "maibot": {
             "name": "maibot",
             "display": "MaiBot",
             "port": MAIBOT_PORT,
             "health_path": "/",
-            "cwd": os.path.join("MaiBot-Container", "MaiBot"),
-            "get_cmd": lambda p: os.path.join(
-                p, "MaiBot-Container", "MaiBot", ".venv", "Scripts", "python.exe"
-            ),
-            "get_args": lambda: ["bot.py"],
+            "cwd": MAIBOT_SOURCE_DIR,
+            "get_cmd": lambda p: maibot_launch_command(p)[0],
+            "get_args": lambda: maibot_launch_command(project_path)[1],
             "env": {"PYTHONUTF8": "1"},
         },
         "snowluma": {
@@ -90,6 +150,7 @@ def kill_maibot_port_processes(project_path: str, report=None):
     except ImportError:
         return
     base = maibot_root(project_path).lower()
+    runtime_base = os.path.join(project_path, "runtime", "python").lower()
     try:
         for conn in psutil.net_connections(kind="inet"):
             if conn.laddr.port not in (MAIBOT_PORT, SNOWLUMA_PORT):
@@ -100,7 +161,8 @@ def kill_maibot_port_processes(project_path: str, report=None):
                 proc = psutil.Process(conn.pid)
                 if proc.name().lower() not in ("python.exe", "pythonw.exe", "node.exe"):
                     continue
-                if base not in " ".join(proc.cmdline()).lower():
+                cmdline = " ".join(proc.cmdline()).lower()
+                if base not in cmdline and runtime_base not in cmdline and "bot.py" not in cmdline:
                     continue
                 proc.kill()
                 if report:
@@ -146,7 +208,7 @@ class MaiBotRunner(QObject):
         self._workers: dict[str, ServiceWorker] = {}
         self._cleaner_thread: QThread | None = None
 
-        for key, svc_def in _maibot_services().items():
+        for key, svc_def in _maibot_services(project_path).items():
             worker = ServiceWorker(svc_def, project_path, self)
             worker.output.connect(self._on_worker_output)
             worker.status_changed.connect(self._on_worker_status)
@@ -168,12 +230,15 @@ class MaiBotRunner(QObject):
     def check_prerequisites(self) -> list[str]:
         """返回缺失项描述（空列表 = 可以启动）。"""
         missing = []
-        maibot_py = self._workers["maibot"]._def["get_cmd"](self._project_path)
-        if not os.path.isfile(maibot_py):
-            missing.append(f"MaiBot 环境缺失: {maibot_py}")
-        snowluma_node = self._workers["snowluma"]._def["get_cmd"](self._project_path)
-        if not os.path.isfile(snowluma_node):
-            missing.append(f"SnowLuma 缺失: {snowluma_node}")
+        source_dir = maibot_source_dir(self._project_path)
+        bot_py = os.path.join(source_dir, "bot.py")
+        if not os.path.isfile(bot_py):
+            missing.append(f"MaiBot 源码缺失: {bot_py}")
+        maibot_py = maibot_python(self._project_path)
+        if not maibot_py and not maibot_uv_available():
+            missing.append(
+                "未找到可用 Python 或 uv：既没有 MaiBot 自带环境，也没有邻舍 runtime\\python 或系统 uv"
+            )
         return missing
 
     def start_all(self) -> tuple[bool, list[str]]:
@@ -201,6 +266,7 @@ class MaiBotRunner(QObject):
 
     def stop_all(self):
         """停止两个服务，稍后连同子进程树一起补刀，防止孤儿进程残留端口。"""
+        self._kill_install_process()
         any_stopping = False
         for worker in self._workers.values():
             if worker.status != ServiceWorker.STATUS_STOPPED:
@@ -211,6 +277,7 @@ class MaiBotRunner(QObject):
 
     def force_kill_all(self):
         """立即强制清理（应用退出路径使用）。"""
+        self._kill_install_process()
         for worker in self._workers.values():
             if worker.status != ServiceWorker.STATUS_STOPPED:
                 worker._kill_process()
@@ -242,6 +309,96 @@ class MaiBotRunner(QObject):
 
     def _on_ports_cleaned(self):
         self.output.emit("system", "端口清理完成，正在启动 MaiBot 与 SnowLuma ...")
+        if self._needs_maibot_env_setup():
+            self.output.emit(
+                "maibot",
+                "[MaiBot] 首次运行：正在向邻舍捆绑 Python 安装 MaiBot 依赖，请稍候 ...",
+            )
+            self._install_maibot_deps()
+        else:
+            self._start_services()
+
+    def _needs_maibot_env_setup(self) -> bool:
+        """MaiBot Python 缺少依赖时，先自动补装。"""
+        if not find_bundled_python(self._project_path):
+            if not os.path.isfile(os.path.join(self._project_path, MAIBOT_EMBEDDED_PY)):
+                return False
+        python_exe = maibot_python(self._project_path)
+        req = maibot_requirements(self._project_path)
+        if not python_exe or not os.path.isfile(req):
+            return False
+        return not maibot_deps_ready(python_exe)
+
+    def _install_maibot_deps(self):
+        python_exe = maibot_python(self._project_path)
+        req = maibot_requirements(self._project_path)
+        if not python_exe or not os.path.isfile(req):
+            self.output.emit("maibot", "[ERROR] [MaiBot] 缺少 Python 或 requirements.txt")
+            self._workers["maibot"]._set_status(ServiceWorker.STATUS_ERROR)
+            self.health_changed.emit("maibot", False)
+            return
+        proc = QProcess(self)
+        self._install_cancelled = False
+        env = proc.processEnvironment()
+        env.insert("PYTHONUTF8", "1")
+        env.insert("PYTHONUNBUFFERED", "1")
+        for key in (
+            "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
+            "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA",
+        ):
+            if key in os.environ and key not in env.keys():
+                env.insert(key, os.environ[key])
+        proc.setProcessEnvironment(env)
+        proc.setWorkingDirectory(maibot_source_dir(self._project_path))
+        proc.setProcessChannelMode(QProcess.SeparateChannels)
+        proc.readyReadStandardOutput.connect(self._on_install_stdout)
+        proc.readyReadStandardError.connect(self._on_install_stderr)
+        proc.finished.connect(self._on_install_finished)
+        self._install_proc = proc
+        self._workers["maibot"]._set_status(ServiceWorker.STATUS_STARTING)
+        self.status_changed.emit("maibot", ServiceWorker.STATUS_STARTING, None)
+        proc.start(
+            python_exe,
+            [
+                "-m", "pip", "install", "-r", req,
+                "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                "--trusted-host", "pypi.tuna.tsinghua.edu.cn",
+            ],
+        )
+
+    def _on_install_stdout(self):
+        if self._install_proc:
+            self._forward_install_output(self._install_proc.readAllStandardOutput())
+
+    def _on_install_stderr(self):
+        if self._install_proc:
+            self._forward_install_output(self._install_proc.readAllStandardError())
+
+    def _forward_install_output(self, data):
+        text = _decode_output(data.data())
+        if text.strip():
+            self.output.emit("maibot", f"[MaiBot] {text.strip()}")
+
+    def _on_install_finished(self, exit_code, exit_status):
+        self._install_proc = None
+        if getattr(self, "_install_cancelled", False):
+            self._install_cancelled = False
+            self._workers["maibot"]._set_status(ServiceWorker.STATUS_STOPPED)
+            self.health_changed.emit("maibot", False)
+            return
+        if exit_code == 0 and exit_status == QProcess.NormalExit:
+            self.output.emit("maibot", "[MaiBot] 依赖安装完成，正在启动 ...")
+            self._start_services()
+        else:
+            self.output.emit(
+                "maibot",
+                f"[ERROR] [MaiBot] 依赖安装失败 (code: {exit_code})，请检查网络后重试",
+            )
+            self._workers["maibot"]._set_status(ServiceWorker.STATUS_ERROR)
+            self.status_changed.emit("maibot", ServiceWorker.STATUS_ERROR, None)
+            self.health_changed.emit("maibot", False)
+
+    def _start_services(self):
         self._workers["maibot"].start()
         self._workers["snowluma"].start()
 
@@ -260,6 +417,7 @@ class MaiBotRunner(QObject):
 
     def _kill_worker_trees(self):
         """psutil 连同子进程一起终止（bot.py 可能派生子进程）。"""
+        self._kill_install_process()
         try:
             import psutil
         except ImportError:
@@ -279,3 +437,9 @@ class MaiBotRunner(QObject):
                     proc.kill()
             except psutil.Error:
                 pass
+
+    def _kill_install_process(self):
+        proc = getattr(self, "_install_proc", None)
+        if proc and proc.state() != QProcess.NotRunning:
+            self._install_cancelled = True
+            proc.kill()
