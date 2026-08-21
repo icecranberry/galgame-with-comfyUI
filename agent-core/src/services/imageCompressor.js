@@ -14,7 +14,7 @@ import sharp from 'sharp';
 import { readdir, stat, unlink, rename } from 'fs/promises';
 import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { broadcast } from './unifiedStreamBus.js';
 import { config, updateCompressConfig } from '../config.js';
 import { getAllImageDirs } from './imagePaths.js';
@@ -60,6 +60,7 @@ function loadState() {
         state = { ...DEFAULT_STATE, ...loaded };
         if (!state.groups) state.groups = {};
       }
+      validateCursorsAgainstDisk();
       batchTask = null;
     }
   } catch (e) {
@@ -83,6 +84,32 @@ function ensureGroup(groupKey) {
   }
 }
 
+/**
+ * 数据复制/迁移后，文件创建时间会变成复制时间，旧 cursor 指向的文件不再是同一物理文件。
+ * 如果 cursor 文件的创建时间晚于状态里最后一次运行时间，说明状态来自旧安装，丢弃该组 cursor。
+ */
+function validateCursorsAgainstDisk() {
+  const lastRunMs = state.lastRun ? Date.parse(state.lastRun) : 0;
+  if (!lastRunMs) return;
+  const dirs = new Map(getAllImageDirs().map(d => [d.category, d.dir]));
+  for (const [folder, group] of Object.entries(state.groups)) {
+    if (!group?.lastProcessedFile) continue;
+    const dir = dirs.get(folder);
+    if (!dir) continue;
+    const filePath = join(dir, group.lastProcessedFile);
+    let currentBirthtimeMs = 0;
+    if (existsSync(filePath)) {
+      try { currentBirthtimeMs = statSync(filePath).birthtimeMs; } catch {}
+    }
+    if (isCursorFileStaleAfterCopy(lastRunMs, currentBirthtimeMs)) {
+      const staleTotal = group.totalProcessed || 0;
+      state.groups[folder] = { lastProcessedFile: null, totalProcessed: 0 };
+      state.totalProcessed = Math.max(0, (state.totalProcessed || 0) - staleTotal);
+      console.warn(`[imageCompressor] Cursor for ${folder} invalidated after data copy/migration`);
+    }
+  }
+}
+
 // ── 文件列表（多目录扫描）──
 
 async function listAllPngFiles() {
@@ -102,7 +129,7 @@ async function listAllPngFiles() {
           const fullPath = join(dir, name);
           try {
             const s = await stat(fullPath);
-            return { name, fullPath, folder: category, birthtime: s.birthtimeMs, size: s.size };
+            return { name, fullPath, folder: category, mtime: s.mtimeMs, size: s.size };
           } catch { return null; }
         })
       );
@@ -110,7 +137,7 @@ async function listAllPngFiles() {
     }
   }
 
-  allFiles.sort((a, b) => a.birthtime - b.birthtime);
+  allFiles.sort((a, b) => a.mtime - b.mtime);
   return allFiles;
 }
 
@@ -199,7 +226,35 @@ async function compressOne(fileInfo) {
 
 // ── 获取待处理文件列表 ──
 
-async function getPendingFiles(limit, cursorOnly = false) {
+function isCursorFileStaleAfterCopy(lastRunMs, fileBirthtimeMs) {
+  return !fileBirthtimeMs || fileBirthtimeMs > lastRunMs;
+}
+
+function selectPendingFilesAfterCursors(candidates, folderCursors) {
+  const folderFileMap = {};
+  for (const file of candidates) {
+    if (!folderFileMap[file.folder]) folderFileMap[file.folder] = [];
+    folderFileMap[file.folder].push(file);
+  }
+
+  const pending = [];
+  for (const [folder, files] of Object.entries(folderFileMap)) {
+    files.sort((a, b) => a.mtime - b.mtime);
+    const cursor = folderCursors[folder];
+    if (cursor) {
+      const cursorIdx = files.findIndex(f => f.name === cursor);
+      const startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
+      pending.push(...files.slice(startIdx));
+    } else {
+      pending.push(...files);
+    }
+  }
+
+  pending.sort((a, b) => a.mtime - b.mtime);
+  return pending;
+}
+
+async function getPendingFiles(limit, cursorOnly = false, includeRecent = false, ignoreCursor = false) {
   const allFiles = await listAllPngFiles();
   if (allFiles.length === 0) return [];
 
@@ -214,33 +269,18 @@ async function getPendingFiles(limit, cursorOnly = false) {
 
   const candidates = [];
   for (const file of allFiles) {
-    if (file.birthtime >= safeBoundary) continue;
+    if (!includeRecent && file.mtime >= safeBoundary) continue;
 
     candidates.push(file);
   }
 
-  // 过滤：对每个 folder，找到 cursor 在该 folder 内文件序列中的位置
-  const folderFileMap = {};
-  for (const file of candidates) {
-    if (!folderFileMap[file.folder]) folderFileMap[file.folder] = [];
-    folderFileMap[file.folder].push(file);
+  if (ignoreCursor) {
+    const pending = [...candidates];
+    pending.sort((a, b) => a.mtime - b.mtime);
+    return limit > 0 && !cursorOnly ? pending.slice(0, limit) : pending;
   }
 
-  // 对每个 folder，按 birthtime 排序，跳过 cursor 及之前的文件
-  const pending = [];
-  for (const [folder, files] of Object.entries(folderFileMap)) {
-    files.sort((a, b) => a.birthtime - b.birthtime);
-    const cursor = folderCursors[folder];
-    if (cursor) {
-      const cursorIdx = files.findIndex(f => f.name === cursor);
-      const startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
-      pending.push(...files.slice(startIdx));
-    } else {
-      pending.push(...files);
-    }
-  }
-
-  pending.sort((a, b) => a.birthtime - b.birthtime);
+  const pending = selectPendingFilesAfterCursors(candidates, folderCursors);
 
   if (limit > 0 && !cursorOnly) {
     return pending.slice(0, limit);
@@ -326,7 +366,7 @@ async function runFullCompression() {
     return;
   }
 
-  const pending = await getPendingFiles(0, true);
+  const pending = await getPendingFiles(0, true, true, true);
 
   if (pending.length === 0) {
     batchTask = { phase: 'complete', current: 0, total: 0, processing: false };
@@ -444,3 +484,9 @@ export function startScheduler() {
   console.log(`[imageCompressor] Loaded: enabled=${config.compression.enabled}, type=${config.compression.type}, total=${state.totalProcessed}`);
   reschedule();
 }
+
+// 仅测试用：暴露纯逻辑，避免测试直接依赖真实 data 目录。
+export const __test = {
+  isCursorFileStaleAfterCopy,
+  selectPendingFilesAfterCursors,
+};

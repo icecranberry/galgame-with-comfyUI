@@ -37,6 +37,11 @@ MIGRATE_ITEMS = [
     ("file", "agent-core/.env"),
 ]
 
+# 图片压缩 cursor 只对原安装有效；迁移后复制它会让新版本误以为旧 PNG 已处理完。
+MIGRATE_EXCLUDE_RELATIVE_PATHS = {
+    os.path.join("agent-core", "data", "image-compressor-state.json"),
+}
+
 
 # ==================================================================
 # 后台迁移线程
@@ -73,6 +78,8 @@ class MigrateWorker(QThread):
                         for f in files:
                             src_file = os.path.join(root, f)
                             rel_file = os.path.relpath(src_file, self._source)
+                            if os.path.normpath(rel_file) in MIGRATE_EXCLUDE_RELATIVE_PATHS:
+                                continue
                             dst_file = os.path.join(self._target, rel_file)
                             file_list.append((rel_path, src_file, dst_file))
                             total_files += 1

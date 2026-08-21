@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { config, updateFreeEggEnabled } from '../config.js';
+import { config, updateFreeEggEnabled, FREE_EGG_MODELS } from '../config.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 
@@ -51,37 +51,37 @@ export function resetClient() {
   _client = null;
 }
 
-// ── 免费鸡蛋自动熔断：连续 2 次失败尝试（含重试中间态）即触发，
-//    关闭鸡蛋并用恢复的自有配置立即重发当前请求 ──
-const FREE_EGG_MAX_FAILURES = 2;
-let _freeEggFailures = 0;
+// ── 免费鸡蛋模型轮换：按 deepseek → MiMo → Hy3 依次请求，每个模型只请求一次；
+//    本轮（本次开启期间）失败过的模型记在内存里，后续请求直接跳过。
+//    全部模型都失败后关闭鸡蛋，并用恢复后的自有配置立即重发当前请求 ──
+let _freeEggFailedModels = new Set();
 
-/** 手动开关鸡蛋时清零计数 */
+/** 手动开关鸡蛋时清空本轮失败模型记录，下次开启重新从 deepseek 开始 */
 export function resetFreeEggFailureCount() {
-  _freeEggFailures = 0;
+  _freeEggFailedModels.clear();
 }
 
-function recordFreeEggSuccess() {
-  if (_freeEggFailures > 0) _freeEggFailures = 0;
+function freeEggCandidates() {
+  return FREE_EGG_MODELS.filter(model => !_freeEggFailedModels.has(model));
 }
 
 /**
- * 每次失败尝试都计数；连续达到上限立即熔断（关闭鸡蛋 + 重置客户端）。
- * @returns {boolean} 本次调用是否触发了熔断；true 时调用方应改用恢复后的自有配置重发
+ * 记录本轮免费鸡蛋中失败的模型；全部模型都失败时关闭鸡蛋并重置客户端。
+ * @returns {boolean} true 表示本轮可用模型已全部失败，调用方应改用自有配置重发
  */
-function recordFreeEggFailure(err) {
+function recordFreeEggFailure(model, err) {
   if (!config.llm.freeEgg) return false;
-  _freeEggFailures++;
+  _freeEggFailedModels.add(model);
   const msg = err?.message || String(err || '');
-  if (_freeEggFailures < FREE_EGG_MAX_FAILURES) {
-    console.warn(`[free-egg] 连续失败 ${_freeEggFailures}/${FREE_EGG_MAX_FAILURES}：${msg}`);
-    return false;
+  console.warn(`[free-egg] 模型 ${model} 失败，本轮免费鸡蛋不再使用：${msg}`);
+  if (_freeEggFailedModels.size >= FREE_EGG_MODELS.length) {
+    updateFreeEggEnabled(false);
+    resetClient();
+    _freeEggFailedModels.clear();
+    console.warn(`[free-egg] 本轮可用免费模型已全部失败，已自动关闭每日免费鸡蛋，改用自有 LLM 配置（最后错误：${msg}）`);
+    return true;
   }
-  updateFreeEggEnabled(false);
-  resetClient();
-  _freeEggFailures = 0;
-  console.warn(`[free-egg] 连续失败达到 ${FREE_EGG_MAX_FAILURES} 次，已自动关闭每日免费鸡蛋，改用自有 LLM 配置（最后错误：${msg}）`);
-  return true;
+  return false;
 }
 
 /**
@@ -137,15 +137,50 @@ function mergeConsecutiveRoles(messages) {
   return merged;
 }
 
+/** 免费鸡蛋同步请求：依次尝试本轮尚未失败过的免费模型，每个模型只请求一次 */
+async function _chatSyncFreeEgg(messages, opts) {
+  const candidates = freeEggCandidates();
+  if (candidates.length === 0) {
+    const err = new Error('free egg: all models already failed in this session');
+    err.__freeEggFailover = true;
+    throw err;
+  }
+  let lastError = null;
+  for (const model of candidates) {
+    if (!config.llm.freeEgg) {
+      lastError = lastError || new Error('free egg disabled');
+      lastError.__freeEggFailover = true;
+      throw lastError;
+    }
+    try {
+      return await _chatSyncInner(messages, { ...opts, model, retries: 0 });
+    } catch (err) {
+      lastError = err;
+      if (recordFreeEggFailure(model, err)) {
+        err.__freeEggFailover = true;
+        throw err;
+      }
+    }
+  }
+  if (config.llm.freeEgg) {
+    updateFreeEggEnabled(false);
+    resetClient();
+    _freeEggFailedModels.clear();
+  }
+  lastError.__freeEggFailover = true;
+  throw lastError;
+}
+
 /**
  * 非流式聊天（用于摘要、实体抽取、情绪评估等任务）
- * 外层包装：免费鸡蛋熔断触发时（错误带 __freeEggFailover 标记），
+ * 外层包装：免费鸡蛋全部模型失败触发时（错误带 __freeEggFailover 标记），
  * 立即用恢复后的自有配置把本次请求重发一遍（model/thinking 等默认值重新求值）
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
  */
 export async function chatSync(messages, opts = {}) {
   try {
+    if (config.llm.freeEgg) return await _chatSyncFreeEgg(messages, opts);
     return await _chatSyncInner(messages, opts);
   } catch (err) {
     if (err && err.__freeEggFailover) {
@@ -218,7 +253,6 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       logUsage(label, res.usage);
       recordLlmCall(label, res.usage);
       console.log('═════════════════════════════════════════════\n');
-      recordFreeEggSuccess();
 
       return content;
     } catch (err) {
@@ -227,15 +261,6 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       const code = err?.code || err?.error?.code || '';
       const msg = err?.message || '';
 
-      // 每次失败尝试都计数；熔断触发时不再用免费端点继续重试，
-      // 标记后抛给外层立即改用自有配置重发
-      if (recordFreeEggFailure(err)) {
-        console.log(requestLog);
-        console.log(`[${providerLabel()} ← ${label}] ❌ 免费鸡蛋熔断: status=${status}, code=${code}, msg=${msg}`);
-        console.log('═════════════════════════════════════════════\n');
-        err.__freeEggFailover = true;
-        throw err;
-      }
 
       if (attempt < retries && isRetryableError(err)) {
         console.warn(
@@ -258,18 +283,66 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   }
 }
 
+/** 免费鸡蛋流式请求：依次尝试本轮尚未失败过的免费模型，每个模型只请求一次 */
+async function* _chatStreamFreeEgg(messages, opts) {
+  const candidates = freeEggCandidates();
+  if (candidates.length === 0) {
+    const err = new Error('free egg: all models already failed in this session');
+    err.__freeEggFailover = true;
+    throw err;
+  }
+  let lastError = null;
+  for (const model of candidates) {
+    if (!config.llm.freeEgg) {
+      lastError = lastError || new Error('free egg disabled');
+      lastError.__freeEggFailover = true;
+      throw lastError;
+    }
+    try {
+      let attemptYielded = false;
+      for await (const delta of _chatStreamInner(messages, { ...opts, model })) {
+        attemptYielded = true;
+        yield delta;
+      }
+      return;
+    } catch (err) {
+      lastError = err;
+      if (recordFreeEggFailure(model, err)) {
+        err.__freeEggFailover = true;
+        throw err;
+      }
+      // 已输出过内容时不再换模型，避免同一回复拼接两段不同模型的输出
+      if (attemptYielded) throw err;
+    }
+  }
+  if (config.llm.freeEgg) {
+    updateFreeEggEnabled(false);
+    resetClient();
+    _freeEggFailedModels.clear();
+  }
+  lastError.__freeEggFailover = true;
+  throw lastError;
+}
+
 /**
  * 流式聊天（用于对话）
- * 外层包装：免费鸡蛋熔断触发且尚未输出任何内容时，立即用恢复后的自有配置重发一遍；
+ * 外层包装：免费鸡蛋全部模型失败且尚未输出任何内容时，立即用恢复后的自有配置重发一遍；
  * 已输出过内容则不重发（避免重复输出），直接抛错
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, opts = {}) {
   let anyYielded = false;
   try {
-    for await (const delta of _chatStreamInner(messages, opts)) {
-      anyYielded = true;
-      yield delta;
+    if (config.llm.freeEgg) {
+      for await (const delta of _chatStreamFreeEgg(messages, opts)) {
+        anyYielded = true;
+        yield delta;
+      }
+    } else {
+      for await (const delta of _chatStreamInner(messages, opts)) {
+        anyYielded = true;
+        yield delta;
+      }
     }
   } catch (err) {
     if (!(err && err.__freeEggFailover && !anyYielded)) throw err;
@@ -341,7 +414,6 @@ async function* _chatStreamInner(messages, {
         yield delta;
       }
     }
-    recordFreeEggSuccess();
 
     console.log(`[${providerLabel()} ← ${label} end]`);
     console.log((total || '(empty)').slice(0, 2000));
@@ -352,10 +424,6 @@ async function* _chatStreamInner(messages, {
   } catch (err) {
     console.error(`[${providerLabel()} ← ${label}] stream error:`, err.message);
     recordLlmCall(label, null, { failed: true });
-    // 熔断触发时标记错误，交给外层用自有配置重发
-    if (recordFreeEggFailure(err)) {
-      err.__freeEggFailover = true;
-    }
     throw err;
   } finally {
     if (_limitEnabled()) releaseSlot();

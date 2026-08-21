@@ -475,9 +475,9 @@
         <div v-else key="llm-free" class="free-egg-notice">
           <span class="free-egg-icon" aria-hidden="true">🥚</span>
           <div class="free-egg-copy">
-            <div class="free-egg-title">正在使用opencode go的deepseek-v4-flash-free</div>
+            <div class="free-egg-title">正在使用 opencode go 免费模型</div>
             <div class="free-egg-desc">每5小时每个IP限额200次请求</div>
-            <div class="free-egg-hint">接口连续失败 2 次会自动关闭鸡蛋，改用自有配置重试</div>
+            <div class="free-egg-hint">免费模型失败会自动切换；本轮全部失败会自动关闭鸡蛋，改用自有配置重试</div>
           </div>
         </div>
         </Transition>
