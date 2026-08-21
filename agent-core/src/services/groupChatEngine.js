@@ -563,8 +563,9 @@ export function writeGroupUserMessage(groupId, content, clientMsgId = null) {
     `INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`
   ).run(conversationId, raw.lastInsertRowid, content);
   db.prepare(`UPDATE group_chats SET last_message_at = datetime('now') WHERE id = ?`).run(groupId);
-  // 用户在群里发言后重置当日后台闲聊预算
-  const today = new Date().toISOString().slice(0, 10);
+  // 用户在群里发言后重置当日后台闲聊预算（本地日期，与 groupIdleScheduler.todayStr 一致）
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   db.prepare(`UPDATE group_chats SET idle_budget_date = ?, idle_budget_used = 0 WHERE id = ?`).run(today, groupId);
   return { rawId: raw.lastInsertRowid, msgId: msg.lastInsertRowid, duplicate: false };
 }

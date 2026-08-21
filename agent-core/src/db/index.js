@@ -387,6 +387,7 @@ function initSchema(db) {
       creator_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
       idle_enabled INTEGER DEFAULT 1,
       next_idle_at DATETIME,
+      idle_budget INTEGER DEFAULT 2,
       idle_budget_date TEXT,
       idle_budget_used INTEGER DEFAULT 0,
       last_message_at DATETIME,
@@ -1658,6 +1659,12 @@ function migrateGroupChatSchema(db) {
       db.exec(`ALTER TABLE group_chats ADD COLUMN rag_user_rounds_pending INTEGER DEFAULT 0`);
       console.log('[db] Added group_chats.rag_user_rounds_pending column');
     }
+    // 每群每日后台闲聊预算（默认 2），独立计数；用户发言或跨天重置
+    if (!groupCols.find(c => c.name === 'idle_budget')) {
+      db.exec(`ALTER TABLE group_chats ADD COLUMN idle_budget INTEGER DEFAULT 2`);
+      console.log('[db] Added group_chats.idle_budget column (default 2)');
+    }
+    db.exec(`UPDATE group_chats SET idle_budget = 2 WHERE idle_budget IS NULL OR idle_budget <= 0`);
 
     // main v2.4 beta 曾将群聊提取边界保存在 group_chats；升级后只回填到 v2 checkpoint。
     // 同时兼容更早仅通过 source_msg_id 关联 raw 的记忆，且绝不回退已有 checkpoint。
