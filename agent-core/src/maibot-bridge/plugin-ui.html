@@ -470,22 +470,10 @@
     </label>
     <p class="hint">每 40 句真实聊天内容整理一份摘要，注入 MaiBot 主聊天流历史，并同步回邻舍；关闭后不再整理，并删除已保存的记忆摘要。</p>
   </div>
-  <label>配图模式
-    <span class="select-wrap" id="image-mode-select">
-      <button type="button" class="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="配图模式">
-        <span class="select-label">auto（由邻舍判断）</span>
-      <span class="select-chevron" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-        </span>
-      </button>
-      <div class="select-menu" role="listbox" hidden></div>
-    </span>
-  </label>
+  <p class="hint">配图由 MaiBot Planner 调用邻舍生图工具触发，异步生成后自动发送，不再按回复自动判断配图。</p>
   <details>
     <summary>高级参数</summary>
-    <label>传给邻舍判断/生图的上下文条数（默认 2）
-      <input type="number" id="context-max-messages" min="1" step="1">
-    </label>
+
     <label>生图任务轮询间隔（秒）
       <input type="number" id="poll-interval" min="0.5" step="0.5">
     </label>
@@ -659,13 +647,6 @@ function onCharacterChange() {
   });
 }
 const characterSelect = mountSelect($("character-select"), { placeholder: "（未选择角色）", onChange: onCharacterChange });
-const imageSelect = mountSelect($("image-mode-select"), { placeholder: "auto（由邻舍判断）", onChange: () => savePluginConfig() });
-imageSelect.render([
-  { value: "auto", text: "auto（由邻舍判断）" },
-  { value: "off", text: "off（关闭配图）" },
-  { value: "always", text: "always（总是配图）" },
-]);
-imageSelect.setValue("auto", false);
 
 async function loadAll() {
   try {
@@ -721,8 +702,7 @@ async function loadConfig() {
     characterSelect.setValue(byCharacter ? byCharacter.name : "", false);
   }
   $("memory-curation").checked = memory.memory_curation !== false;
-  if (image.image_mode) imageSelect.setValue(image.image_mode, false);
-  $("context-max-messages").value = image.context_max_messages ?? 2;
+
   $("poll-interval").value = image.poll_interval_sec ?? 2;
   $("poll-timeout").value = image.poll_timeout_sec ?? 180;
 }
@@ -788,8 +768,6 @@ function buildPluginConfigBody() {
       },
       memory: { memory_curation: $("memory-curation").checked },
       image: {
-        image_mode: imageSelect.getValue(),
-        context_max_messages: Math.max(Number($("context-max-messages").value) || 2, 1),
         poll_interval_sec: Math.max(Number($("poll-interval").value) || 2, 0.5),
         poll_timeout_sec: Math.max(Number($("poll-timeout").value) || 180, 10),
       },
@@ -808,7 +786,7 @@ async function savePluginConfig() {
     if (pluginConfigSaveAgain) { pluginConfigSaveAgain = false; savePluginConfig(); }
   }
 }
-["context-max-messages", "poll-interval", "poll-timeout"].forEach((id) => {
+["poll-interval", "poll-timeout"].forEach((id) => {
   $(id).addEventListener("change", savePluginConfig);
 });
 $("memory-curation").addEventListener("change", savePluginConfig);

@@ -94,20 +94,11 @@
           @update:model-value="onCharacterChange"
         />        <p class="fd hint-line">人格注入与行为 / 表达风格提炼为<b>始终开启</b>：每次回复都会把 system 人格整条替换为所选角色的人格，并由 LLM 依据人格生成行为风格与表达风格一并注入请求，<b>覆盖</b>麦麦设置里的「行为风格」与「表达风格」。</p>
 
-        <label class="fl" for="image-mode-select">配图模式</label>
-        <DropdownSelect
-          id="image-mode-select"
-          v-model="imageMode"
-          class="mb-select"
-          :options="imageModeOptions"
-          @update:model-value="onImageModeChange"
-        />
 
         <details class="advanced">
           <summary>高级参数</summary>
           <div class="advanced-body">
-            <label class="fl" for="context-max-messages">传给邻舍判断/生图的上下文条数（默认 2）</label>
-            <input id="context-max-messages" v-model.number="contextMaxMessages" type="number" class="fi" min="1" step="1" @change="savePluginConfig">
+
             <label class="fl" for="poll-interval">生图任务轮询间隔（秒）</label>
             <input id="poll-interval" v-model.number="pollInterval" type="number" class="fi" min="0.5" step="0.5" @change="savePluginConfig">
             <label class="fl" for="poll-timeout">生图任务轮询超时（秒）</label>
@@ -194,15 +185,10 @@ const savingSettings = ref(false)
 const baseUrl = ref('http://127.0.0.1:3099')
 const characterName = ref('')
 const memoryCuration = ref(false)
-const imageMode = ref('auto')
-const contextMaxMessages = ref(2)
+
 const pollInterval = ref(2)
 const pollTimeout = ref(180)
-const imageModeOptions = [
-  { value: 'auto', label: 'auto（由邻舍判断）' },
-  { value: 'off', label: 'off（关闭配图）' },
-  { value: 'always', label: 'always（总是配图）' },
-]
+
 
 // ── 角色与人格 ──
 const characters = ref([])
@@ -261,8 +247,7 @@ async function loadConfig() {
     characterName.value = byCharacter ? byCharacter.name : ''
   }
   memoryCuration.value = memory.memory_curation === true
-  if (image.image_mode) imageMode.value = image.image_mode
-  contextMaxMessages.value = image.context_max_messages ?? 2
+
   pollInterval.value = image.poll_interval_sec ?? 2
   pollTimeout.value = image.poll_timeout_sec ?? 180
 }
@@ -338,8 +323,6 @@ function buildPluginConfigBody() {
       },
       memory: { memory_curation: memoryCuration.value },
       image: {
-        image_mode: imageMode.value,
-        context_max_messages: Math.max(Number(contextMaxMessages.value) || 2, 1),
         poll_interval_sec: Math.max(Number(pollInterval.value) || 2, 0.5),
         poll_timeout_sec: Math.max(Number(pollTimeout.value) || 180, 10),
       },
@@ -371,10 +354,6 @@ function onCharacterChange(value) {
   })
 }
 
-function onImageModeChange(value) {
-  if (value !== undefined) imageMode.value = value
-  savePluginConfig()
-}
 
 // ── 人格保存 / 提炼 ──
 async function savePersonaToStore(characterName, entry) {

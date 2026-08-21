@@ -195,6 +195,46 @@ router.post('/chat', async (req, res) => {
   });
 });
 
+// POST /api/maibot/generate — 供 MaiBot Planner 生图工具调用：接收画面需求，按发图助手固定格式提炼 prompt 后起异步生图任务
+router.post('/generate', async (req, res) => {
+  const {
+    character_id = null,
+    character_name = '',
+    requirement = '',
+    session_id = '',
+    context = [],
+  } = req.body || {};
+
+  const character = resolveCharacter(character_id, character_name);
+  if (!character) {
+    return res.status(404).json({ error: 'character not found', hint: '使用 GET /api/maibot/characters 查看可用角色名' });
+  }
+  if (typeof requirement !== 'string' || !requirement.trim()) {
+    return res.status(400).json({ error: 'requirement is required' });
+  }
+  const conversationId = session_id ? `maibot_${session_id}` : null;
+  if (!conversationId) {
+    return res.status(400).json({ error: 'session_id is required' });
+  }
+  try {
+    const imagePrompt = await extractImagePrompt({
+      character,
+      user_message: requirement.trim(),
+      reply_text: '',
+      context: Array.isArray(context) ? context : [],
+      user_name: '',
+    });
+    if (!imagePrompt) {
+      return res.status(502).json({ error: 'image prompt extraction failed' });
+    }
+    const task_id = startImageTask({ character, conversationId, prompt: imagePrompt });
+    res.json({ ok: true, task_id, prompt: imagePrompt, character_id: character.id, conversation_id: conversationId });
+  } catch (err) {
+    console.error('[maibot-bridge] generate prompt extraction error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/maibot/tasks/:id — 生图任务状态（插件轮询）
 router.get('/tasks/:id', (req, res) => {
   const task = getTask(req.params.id);

@@ -7,6 +7,14 @@ import { IMAGE_PROMPT_RULE } from '../builtinRules.js';
 import { getTimeLightInline } from '../services/timeLight.js';
 import { buildChatLines } from './textCleaner.js';
 
+function buildCharacterAppearance(character) {
+  const shortPrompt = String(character?.short_prompt || '').trim();
+  const basePrompt = String(character?.base_prompt || '');
+  const appMatch = basePrompt.match(/##\s*你的外观/);
+  const appSection = appMatch ? basePrompt.slice(appMatch.index).trim() : '';
+  return [shortPrompt, appSection].filter(Boolean).join('\n');
+}
+
 function cleanDirectPrompt(raw) {
   // 只做最外层清洗，不再解析 JSON
   return String(raw || '')
@@ -33,9 +41,9 @@ export function buildEnvironmentReference() {
  * 构造生图 prompt 请求：环境参考并入 system，末尾只保留一条 user 消息。
  */
 export function buildImagePromptMessages({ character, user_message, reply_text, context, user_name = '' }) {
-  const personality = character?.base_prompt || '';
+  const personality = buildCharacterAppearance(character) || character?.base_prompt || '';
   const systemParts = [];
-  systemParts.push(`你是角色「${character?.display_name || '默认角色'}」的生图描述器。请结合对话内容，为最近这轮回复设计一张配图的画面描述。`);
+  systemParts.push(`你是角色「${character?.display_name || '默认角色'}」的生图描述器。请结合对话上下文，将画面需求改写成一张配图的画面描述。`);
   systemParts.push(`角色设定：\n${personality.slice(0, 2000)}`);
 
   const environmentRef = buildEnvironmentReference();
@@ -43,7 +51,12 @@ export function buildImagePromptMessages({ character, user_message, reply_text, 
   systemParts.push(environmentRef ? `${rulePart}\n\n${environmentRef}` : rulePart);
   systemParts.push('直接输出英文画面描述本身，不要输出 JSON、不要代码块、不要引号，也不要输出任何其他内容。');
 
-  const ctxText = buildChatLines({ user_message, reply_text, context, user_name }).join('\n');
+  const contextLines = buildChatLines({ user_message: '', reply_text: '', context, user_name }).join('\n');
+  const userParts = [];
+  if (contextLines) userParts.push(`【历史聊天记录】\n${contextLines}`);
+  const requirementText = String(user_message || '').trim();
+  if (requirementText) userParts.push(`【现在需要的图片需求】\n${requirementText}`);
+  const ctxText = userParts.join('\n\n');
   return [
     { role: 'system', content: systemParts.join('\n\n') },
     { role: 'user', content: ctxText },
