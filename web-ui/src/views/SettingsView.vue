@@ -79,45 +79,55 @@
       <HiresFixModal v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" :initial-max-size="hiresMaxSize" :initial-artist-mode="hiresArtistMode" :initial-artist="hiresArtist" @saved="onHiresFixSaved" />
 
 
-      <!-- 测试画风：选择对话配图/朋友圈配图，发送固定提示词测试 -->
+      <!-- 测试画风：自由画面描述（LLM 完善提示词）或固定提示词测试 -->
       <div class="card">
-        <h3>测试画风&速度</h3>
-        <p class="fd">使用对应画师串和分辨率，以固定提示词发送生图请求，图片仅作预览不保存</p>
+        <h3>图片实验室</h3>
+        <p class="fd">可测试ComfyUI是否正常，使用对应画师串和分辨率发送生图请求，图片仅作预览不保存</p>
         <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
         <p class="fd">切换模型之后首次生图需要加载模型所以会慢一点</p>
 
-        <div class="style-test-row">
+        <div class="free-scene-row">
+          <div class="free-scene-input-wrap">
+            <textarea
+              ref="sceneDescRef"
+              v-model="freeSceneDesc"
+              class="free-scene-textarea"
+              placeholder="（可为空）自由填写任意测试用的画面，邻舍会自动完善提示词"
+              @focus="sceneDescFocused = true"
+              @blur="onSceneDescBlur"
+            ></textarea>
+            <!-- 收起态的单行省略展示（textarea 不支持 ellipsis，用覆盖层实现），点击展开编辑 -->
+            <div
+              v-if="freeSceneDesc && !sceneDescFocused"
+              class="free-scene-ellipsis"
+              title="点击展开编辑"
+              @mousedown.prevent="focusSceneDesc"
+            >{{ freeSceneDesc }}</div>
+          </div>
           <button
-            class="btn-primary style-test-btn"
-            :disabled="styleTesting"
-            @click="runStyleTest"
+            class="btn-primary free-scene-btn"
+            :disabled="styleTesting || !freeSceneDesc.trim()"
+            @click="runFreeSceneTest"
           >
-            {{ styleTesting ? '生成中...' : '🎨 发送测试' }}
+            {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成' }}
           </button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'chat' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'chat'"
-          >对话配图</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'moments' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'moments'"
-          >朋友圈配图</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'event' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'event'"
-          >奇遇配图</button>
-          <button
-            class="btn-primary style-test-btn hires-test-btn"
-            :disabled="hireTesting"
-            @click="runHiresTest"
-          >
-            {{ hireTesting ? '细化中...' : '测试HiresFix细化' }}
-          </button>
-          <button class="test-prompt-btn" @click="openPromptEditor">测试提示词</button>
         </div>
+
+        <div
+          v-if="generatedPrompt && !promptEditing"
+          class="generated-prompt-box editable"
+          title="点击编辑提示词"
+          @click="startPromptEdit"
+        >{{ generatedPrompt }}</div>
+        <textarea
+          v-else-if="generatedPrompt"
+          ref="promptEditRef"
+          v-model="generatedPrompt"
+          class="generated-prompt-box generated-prompt-editor"
+          rows="3"
+          @keydown.esc="promptEditing = false"
+          @blur="promptEditing = false"
+        ></textarea>
 
         <div v-if="styleError" class="style-error">{{ styleError }}</div>
 
@@ -147,6 +157,39 @@
           />
         </div>
 
+        <div class="style-test-row">
+          <button
+            class="btn-primary style-test-btn"
+            :disabled="styleTesting"
+            @click="runStyleTest"
+          >
+            {{ styleTesting ? '生成中...' : '🎨 生成画面' }}
+          </button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'chat' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'chat'"
+          >对话参数</button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'moments' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'moments'"
+          >朋友圈参数</button>
+          <button
+            :class="['test-mode-btn', { active: testMode === 'event' }]"
+            :disabled="styleTesting"
+            @click="testMode = 'event'"
+          >奇遇参数</button>
+          <button
+            class="btn-primary style-test-btn hires-test-btn"
+            :disabled="hireTesting"
+            @click="runHiresTest"
+          >
+            {{ hireTesting ? '细化中...' : '测试HiresFix细化' }}
+          </button>
+          <button class="test-prompt-btn" @click="openPromptEditor">默认测试提示词</button>
+        </div>
+
         <div v-if="hiresError" class="style-error">{{ hiresError }}</div>
 
         <div v-if="hireTesting" class="style-loading">
@@ -159,12 +202,15 @@
           <BeforeAfterSlider :before="hiresCompare.original" :after="hiresCompare.refined" />
         </div>
 
-        <!-- 全屏预览 -->
+        <!-- 全屏预览（纯预览，无删除/重生成/放大操作栏） -->
         <Teleport to="body">
           <ImageLightbox
             :visible="lightboxVisible"
             :imgs="lightboxImgs"
             :index="lightboxIndex"
+            :show-delete="false"
+            :show-regenerate="false"
+            :show-upscale="false"
             @hide="lightboxVisible = false"
           />
         </Teleport>
@@ -1855,6 +1901,41 @@ const styleError = ref('')
 const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
 const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
+const freeSceneDesc = ref('')  // 自由画面描述（LLM 完善提示词）
+const generatedPrompt = ref('')  // 自由画面描述生成的 prompt 展示
+const promptEditing = ref(false)  // prompt 展示框的点击编辑态
+const promptEditRef = ref(null)
+
+// 点击 prompt 框进入编辑：textarea 保持点击前的展示高度，光标定位到末尾
+async function startPromptEdit(e) {
+  const boxHeight = e?.currentTarget?.offsetHeight
+  promptEditing.value = true
+  await nextTick()
+  const el = promptEditRef.value
+  if (el) {
+    if (boxHeight) el.style.height = `${boxHeight}px`
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }
+}
+
+// 画面描述框：收起态单行省略展示 ↔ 聚焦展开编辑
+const sceneDescFocused = ref(false)
+const sceneDescRef = ref(null)
+
+// 点击收起态的省略展示 → 展开编辑，光标到末尾
+function focusSceneDesc() {
+  const el = sceneDescRef.value
+  if (!el) return
+  el.focus()
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
+// 失焦收起：清掉手动拖高的内联高度，回到单行
+function onSceneDescBlur(e) {
+  sceneDescFocused.value = false
+  e.target.style.height = ''
+}
 const hireTesting = ref(false)
 const hiresError = ref('')
 const hiresCompare = ref(null)
@@ -1936,20 +2017,27 @@ function formatElapsed(ms) {
   return `${min}min ${sec}s`
 }
 
-async function runStyleTest() {
+async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras = false } = {}) {
   styleTesting.value = true
   styleError.value = ''
   styleImages.value = []
   styleElapsed.value = null
+  styleTiming.value = null
+  promptEditing.value = false
 
   try {
-    const result = await testStyle(
-      testMode.value === 'moments' ? form.value.momentsArtist : testMode.value === 'event' ? form.value.eventArtist : form.value.artist,
-      testMode.value === 'moments' ? form.value.momentsWidth : testMode.value === 'event' ? form.value.eventWidth : form.value.width,
-      testMode.value === 'moments' ? form.value.momentsHeight : testMode.value === 'event' ? form.value.eventHeight : form.value.height,
-      testMode.value,
-      testPrompts.value[testMode.value] || '',
-    )
+    const isMoments = testMode.value === 'moments'
+    const isEvent = testMode.value === 'event'
+    const result = await testStyle({
+      artist: isMoments ? form.value.momentsArtist : isEvent ? form.value.eventArtist : form.value.artist,
+      width: isMoments ? form.value.momentsWidth : isEvent ? form.value.eventWidth : form.value.width,
+      height: isMoments ? form.value.momentsHeight : isEvent ? form.value.eventHeight : form.value.height,
+      mode: testMode.value,
+      prompt,
+      sceneDesc,
+      reuseSceneLoras,
+    })
+    if (sceneDesc && result.generatedPrompt) generatedPrompt.value = result.generatedPrompt
     if (result.elapsed != null) styleElapsed.value = result.elapsed
     if (result.timing) styleTiming.value = result.timing
     if (result.success && result.images?.length > 0) {
@@ -1962,6 +2050,23 @@ async function runStyleTest() {
   } finally {
     styleTesting.value = false
   }
+}
+
+function runStyleTest() {
+  // textarea 有内容且已生成过提示词 → 直接复用（含匹配角色 lora），不再走 LLM
+  if (freeSceneDesc.value.trim() && generatedPrompt.value) {
+    return executeStyleTest({ prompt: generatedPrompt.value, reuseSceneLoras: true })
+  }
+  generatedPrompt.value = ''
+  return executeStyleTest({ prompt: testPrompts.value[testMode.value] || '' })
+}
+
+// 自由画面描述 → 后端分层 LLM 链路完善提示词后生图
+function runFreeSceneTest() {
+  const desc = freeSceneDesc.value.trim()
+  if (!desc || styleTesting.value) return
+  generatedPrompt.value = ''
+  return executeStyleTest({ sceneDesc: desc })
 }
 
 async function runHiresTest() {
@@ -3004,7 +3109,42 @@ function resetTestPrompts() {
 @keyframes profile-pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* ── 测试画风 ── */
-.style-test-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.style-test-row { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; flex-wrap: wrap; }
+.free-scene-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.free-scene-input-wrap { position: relative; flex: 1; min-width: 0; }
+.free-scene-textarea {
+  width: 100%; display: block; padding: 9px 12px; font-size: 13px; line-height: 1.5;
+  font-family: inherit; border-radius: 8px; background: rgba(255,255,255,0.9);
+  border: 1px solid #e2d6c7; color: var(--text-bright); outline: none;
+  resize: none; overflow: hidden;
+  height: 38px;  /* 默认单行，聚焦展开 */
+  transition: height 0.18s ease;
+}
+.free-scene-textarea:focus { height: 58px; min-height: 58px; resize: vertical; overflow: auto; border-color: var(--accent); }
+.free-scene-ellipsis {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  padding: 0 12px; font-size: 13px;
+  border-radius: 8px; background: rgba(255,255,255,0.9);
+  border: 1px solid #e2d6c7; color: var(--text-bright);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: text; transition: border-color 0.15s;
+}
+.free-scene-ellipsis:hover { border-color: var(--accent); }
+.free-scene-btn { border-radius: 8px; margin: 0; flex-shrink: 0; }
+.generated-prompt-box {
+  padding: 10px 14px; margin-bottom: 12px; border-radius: 12px;
+  background: var(--glass-bg-strong); border: 1px solid var(--glass-border);
+  color: var(--text-secondary); font-size: 13px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+}
+.generated-prompt-box.editable { cursor: text; transition: border-color 0.15s; }
+.generated-prompt-box.editable:hover { border-color: var(--accent); }
+.generated-prompt-editor {
+  resize: vertical; overflow: auto; outline: none; font-family: inherit;
+  color: var(--text-bright); margin-bottom: 12px;
+}
+.generated-prompt-editor:focus { border-color: var(--accent); }
 .style-test-btn { border-radius: 8px; margin: 0; }
 .hires-test-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
 .hires-test-btn:hover:not(:disabled) { background: rgba(224, 123, 108, 0.1); box-shadow: none; color: var(--accent-hover); }
@@ -3073,6 +3213,9 @@ function resetTestPrompts() {
   .settings-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
+  /* 自由画面测试：textarea 与按钮纵向堆叠 */
+  .free-scene-row { flex-direction: column; }
+  .free-scene-btn { width: 100%; }
   /* 画师串操作按钮行：允许换行，避免挤压 */
   .sa { flex-wrap: wrap; gap: 8px; }
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }

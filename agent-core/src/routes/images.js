@@ -2,15 +2,20 @@ import { Router } from 'express';
 import { readdir, stat } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { getDb } from '../db/index.js';
+import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
-import { charArtistOverride } from '../services/characterImageOpts.js';
+import { charArtistOverride, extractImageCrossRefInfo } from '../services/characterImageOpts.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
+import { chatSync } from '../llm/llm-client.js';
+import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
+import { matchAll } from '../services/characterSearch.js';
+import { parseLoras } from '../maibot-bridge/generate.js';
+import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -216,8 +221,49 @@ router.get('/tasks/:id/status', (req, res) => {
 
 // POST /api/images/test-style — 测试画风（固定提示词，不写DB，仅返回展示用图）
 // mode: 'chat' (对话配图) | 'moments' (朋友圈配图) | 'event' (奇遇配图)，默认 'chat'
+// sceneDesc: 自由画面描述（可选）→ 分层 LLM 生图链路完善为 prompt 后再生图
 router.post('/test-style', async (req, res) => {
-  const { artist, width, height, mode = 'chat', prompt: customPrompt } = req.body;
+  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras } = req.body;
+
+  /**
+   * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
+   *   system0 = 破甲 + 世界观 / system1 = 世界观强化 / system2 = 生图规则
+   *   system3 = 画面描述中匹配到的角色（注入外观描述，返回值附带其 loras）
+   */
+  const generateScenePrompt = async (desc) => {
+    const msgs = [{ role: 'system', content: getSystemRulesWithWorld() || '你是一个角色扮演 AI。' }];
+    try {
+      if (getWorldSetting()) msgs.push({ role: 'system', content: getWorldIntegrationRule('photo') });
+    } catch { /* 规则缺失非致命 */ }
+    msgs.push({ role: 'system', content: `【生图规则】\n${IMAGE_PROMPT_RULE.rule_content}` });
+
+    const loras = [];
+    const matched = matchAll(desc);
+    if (matched.length > 0) {
+      const db = getDb();
+      const chars = matched.map(m =>
+        db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
+      ).filter(Boolean);
+      if (chars.length > 0) {
+        const blocks = chars.map(c => `[${c.display_name}]\n${extractImageCrossRefInfo(c)}`).join('\n\n');
+        msgs.push({
+          role: 'system',
+          content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${blocks}`,
+        });
+        loras.push(...chars.flatMap(c => parseLoras(c)));
+      }
+    }
+
+    msgs.push({
+      role: 'user',
+      content: `【画面描述】\n${desc}\n\n【当前任务】\n根据上面的画面描述，直接输出对应的英文生图 prompt（严格遵循【生图规则】）。不要任何格式包装或额外文字。`,
+    });
+
+    const raw = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, label: '画风测试' });
+    const prompt = extractImagePromptResponse(raw);
+    if (!prompt) throw new Error('模型未返回有效的提示词');
+    return { prompt, loras };
+  };
 
   const CHAT_PROMPT_DEFAULT = `1girl, solo, kiana kaslana(honkai impact 3rd), herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`;
 
@@ -227,13 +273,36 @@ router.post('/test-style', async (req, res) => {
 
   const isMoments = mode === 'moments';
   const isEvent = mode === 'event';
-  // 自定义 prompt 优先，否则用默认
-  const prompt = customPrompt || (isEvent ? EVENT_PROMPT_DEFAULT : (isMoments ? MOMENTS_PROMPT_DEFAULT : CHAT_PROMPT_DEFAULT));
   const finalArtist = artist || (isEvent ? config.comfyui.eventArtist : (isMoments ? config.comfyui.momentsArtist : config.comfyui.artist));
   const finalWidth = width || (isEvent ? config.comfyui.eventWidth : (isMoments ? config.comfyui.momentsWidth : config.comfyui.width));
   const finalHeight = height || (isEvent ? config.comfyui.eventHeight : (isMoments ? config.comfyui.momentsHeight : config.comfyui.height));
 
-  console.log(`[test-style] mode="${mode}" artist="${finalArtist}" ${finalWidth}x${finalHeight}`);
+  // 自由画面描述 → LLM 分层链路生成 prompt（匹配到的角色 lora 一并带入生图）
+  const freeScene = typeof sceneDesc === 'string' ? sceneDesc.trim() : '';
+  let prompt;
+  let generatedPrompt = null;
+  let sceneLoras = [];
+  if (freeScene) {
+    const tPrompt = performance.now();
+    try {
+      ({ prompt, loras: sceneLoras } = await generateScenePrompt(freeScene));
+    } catch (err) {
+      console.error('[test-style] scene prompt generation error:', err.message);
+      return res.status(500).json({ success: false, error: '提示词生成失败: ' + err.message });
+    }
+    generatedPrompt = prompt;
+    console.log(`[test-style] sceneDesc → prompt in ${Math.round(performance.now() - tPrompt)}ms${sceneLoras.length > 0 ? ` (+${sceneLoras.length} lora(s))` : ''}: ${prompt.slice(0, 80)}...`);
+  } else {
+    // 自定义 prompt 优先，否则用默认
+    prompt = customPrompt || (isEvent ? EVENT_PROMPT_DEFAULT : (isMoments ? MOMENTS_PROMPT_DEFAULT : CHAT_PROMPT_DEFAULT));
+    // 复用提示词重测（前端拿已生成的 prompt 再点发送测试）→ 上次匹配到的角色 lora 继续生效
+    if (reuseSceneLoras && Array.isArray(lastStyleTest?.sceneLoras)) {
+      sceneLoras = lastStyleTest.sceneLoras;
+      if (sceneLoras.length > 0) console.log(`[test-style] reusing ${sceneLoras.length} scene lora(s) from last test`);
+    }
+  }
+
+  console.log(`[test-style] mode="${mode}" artist="${finalArtist}" ${finalWidth}x${finalHeight}${freeScene ? ' scene=free' : ''}`);
 
   const t0 = performance.now();
   const timing = {};
@@ -246,6 +315,7 @@ router.post('/test-style', async (req, res) => {
       height: finalHeight,
       scene: mode,
       persistPreparation: false,
+      ...(sceneLoras.length > 0 ? { loras: sceneLoras } : {}),
       onProgress: (p) => {
         // 捕获各阶段时间戳用于 timing breakdown
         if (p.stage === 'submitting') timing.submitting = performance.now();
@@ -283,9 +353,11 @@ router.post('/test-style', async (req, res) => {
         height: finalHeight,
         mode,
         wfMode: result.wfMode,
+        sceneLoras,
       };
       res.json({
         success: true, images: result.images, promptId: result.promptId, elapsed,
+        generatedPrompt,
         timing: {
           total_ms: elapsed,
           comfyui_ms: breakdown.comfyui,

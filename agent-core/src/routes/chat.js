@@ -15,7 +15,7 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
-import { charArtistOverride } from '../services/characterImageOpts.js';
+import { charArtistOverride, extractImageCrossRefInfo } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
@@ -1436,8 +1436,8 @@ async function handleNeedImageFlow(conversationId, character, send, preExistingT
   let crossRefCharIdsForImage = [];
   let crossRefImageMsgs = [];
   if (crossMatches.length > 0) {
-    const crossChars = crossMatches.slice(0, 3).map(m =>
-      db.prepare('SELECT id, display_name, short_prompt, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
+    const crossChars = crossMatches.map(m =>
+      db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
     ).filter(Boolean);
 
     const crossBlocks = crossChars.map(c => {
@@ -1992,36 +1992,6 @@ function formatRelativeDay(days) {
   if (days === 1) return '昨天';
   if (days === 2) return '前天';
   return `${days}天前`;
-}
-
-function extractImageCrossRefInfo(char) {
-  const parts = [];
-  const short = char.short_prompt || '';
-  if (short) {
-    let found = false;
-    let start = 0;
-    for (let i = 0; i < short.length; i++) {
-      if (short[i] === '，' || short[i] === '。' || short[i] === '\n') {
-        const seg = short.slice(start, i).trim();
-        if (seg && seg.includes('来自')) {
-          parts.push(short.slice(0, i));
-          found = true;
-          break;
-        }
-        start = i + 1;
-      }
-    }
-    if (!found) {
-      parts.push(short);
-    }
-  }
-  const base = char.base_prompt || '';
-  const m = base.match(/##\s*你的外观/);
-  if (m) {
-    const name = char.display_name || '';
-    parts.push(base.slice(m.index).replace(/你/g, name));
-  }
-  return parts.join('\n');
 }
 
 export default router;

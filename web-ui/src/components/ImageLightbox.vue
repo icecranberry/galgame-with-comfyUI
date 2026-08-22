@@ -106,6 +106,8 @@ function removeActionBar() {
 
 function injectActionBar() {
   if (_actionBar || !props.visible) return
+  // 三个操作按钮全关 → 不注入操作栏（纯预览模式）
+  if (!props.showDelete && !props.showRegenerate && !props.showUpscale) return
   const modal = document.querySelector('.vel-modal')
   if (!modal) return
 

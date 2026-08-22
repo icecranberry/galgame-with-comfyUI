@@ -93,7 +93,6 @@ export function initialize() {
     db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
       .run(sleepUntil, char.id);
     sleepers++;
-    console.log(`[scheduleMgr] ${char.display_name} is sleeping until ${sleepUntil}`);
   } else {
       // 确保非睡眠状态
       db.prepare('UPDATE characters SET is_sleeping = 0, sleep_until = NULL WHERE id = ? AND is_sleeping = 1')
