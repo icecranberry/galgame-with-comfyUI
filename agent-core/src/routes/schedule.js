@@ -487,8 +487,8 @@ router.post('/:characterId/peek', async (req, res) => {
       });
     }
     llmMsgs.push(
-      { role: 'system', content: personaText },
       { role: 'system', content: system3 },
+      { role: 'system', content: personaText },
       { role: 'user', content: userMsg },
     );
 

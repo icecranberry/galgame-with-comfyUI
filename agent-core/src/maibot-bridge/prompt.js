@@ -51,7 +51,7 @@ export function buildImagePromptMessages({ character, user_message, reply_text, 
   systemParts.push(environmentRef ? `${rulePart}\n\n${environmentRef}` : rulePart);
   systemParts.push('直接输出英文画面描述本身，不要输出 JSON、不要代码块、不要引号，也不要输出任何其他内容。');
 
-  const contextLines = buildChatLines({ user_message: '', reply_text: '', context, user_name }).join('\n');
+  const contextLines = buildChatLines({ user_message: '', reply_text: '', context, user_name, maxLines: 4 }).join('\n');
   const userParts = [];
   if (contextLines) userParts.push(`【历史聊天记录】\n${contextLines}`);
   const requirementText = String(user_message || '').trim();

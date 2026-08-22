@@ -470,6 +470,13 @@
     </label>
     <p class="hint">每 40 句真实聊天内容整理一份摘要，注入 MaiBot 主聊天流历史，并同步回邻舍；关闭后不再整理，并删除已保存的记忆摘要。</p>
   </div>
+  <div class="flag-card">
+    <label class="flag-label">
+      <input type="checkbox" id="permanent-config-write" class="flag-switch">
+      <span><b>永久写入MaiBot配置代替临时覆盖</b></span>
+    </label>
+    <p class="hint">不再只是临时桥接配置，而是直接写入 MaiBot 的 bot_config.toml（含机器人昵称）；勾选后 MaiBot 单独启动也能使用邻舍人物卡。</p>
+  </div>
   <p class="hint">配图由 MaiBot Planner 调用邻舍生图工具触发，异步生成后自动发送，不再按回复自动判断配图。</p>
   <details>
     <summary>高级参数</summary>
@@ -702,6 +709,7 @@ async function loadConfig() {
     characterSelect.setValue(byCharacter ? byCharacter.name : "", false);
   }
   $("memory-curation").checked = memory.memory_curation !== false;
+  $("permanent-config-write").checked = bridge.permanent_config_write === true;
 
   $("poll-interval").value = image.poll_interval_sec ?? 2;
   $("poll-timeout").value = image.poll_timeout_sec ?? 180;
@@ -765,6 +773,7 @@ function buildPluginConfigBody() {
       bridge: {
         base_url: (pluginConfig.bridge && pluginConfig.bridge.base_url) || "http://127.0.0.1:3099",
         character_name: characterSelect.getValue(),
+        permanent_config_write: $("permanent-config-write").checked,
       },
       memory: { memory_curation: $("memory-curation").checked },
       image: {
@@ -790,16 +799,19 @@ async function savePluginConfig() {
   $(id).addEventListener("change", savePluginConfig);
 });
 $("memory-curation").addEventListener("change", savePluginConfig);
+$("permanent-config-write").addEventListener("change", savePluginConfig);
 
 async function savePersona(characterName, entry) {
   const payload = { character_name: characterName };
   if (entry.base_prompt !== undefined) payload.base_prompt = entry.base_prompt;
   if (entry.behavior_style !== undefined) payload.behavior_style = entry.behavior_style;
   if (entry.reply_style !== undefined) payload.reply_style = entry.reply_style;
-  await api("/api/maibot/plugin-persona", { method: "PUT", body: payload });
+  const result = await api("/api/maibot/plugin-persona", { method: "PUT", body: payload });
+  const savedEntry = (result && result.entry) || entry;
   if (!personaData.characters) personaData.characters = {};
   const existing = personaData.characters[characterName] || {};
-  personaData.characters[characterName] = { ...existing, ...entry };
+  personaData.characters[characterName] = { ...existing, ...savedEntry };
+  return savedEntry;
 }
 
 // 提炼并保存：调用邻舍 derive-style 生成行为/表达风格，并写入插件本地 persona_store.json
@@ -810,8 +822,7 @@ async function deriveAndSave(characterName, basePrompt) {
     behavior_style: data.behavior_style || "",
     reply_style: data.reply_style || "",
   };
-  await savePersona(characterName, entry);
-  return entry;
+  return await savePersona(characterName, entry);
 }
 
 async function derive() {

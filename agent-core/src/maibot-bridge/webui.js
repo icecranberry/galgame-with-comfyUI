@@ -87,6 +87,10 @@ export async function updatePluginConfig(config) {
   return webuiFetch('PUT', `/api/webui/plugins/config/${PLUGIN_ID}`, { config });
 }
 
+export async function updateBotConfigSection(sectionName, sectionData) {
+  return webuiFetch('POST', `/api/webui/config/bot/section/${sectionName}`, sectionData);
+}
+
 async function personaControlFetch(method, path, body) {
   const response = await fetch(`${PERSONA_CONTROL_URL}${path}`, {
     method,

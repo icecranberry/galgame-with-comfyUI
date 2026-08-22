@@ -13,6 +13,14 @@ from PySide6.QtCore import QObject, Signal, QProcess
 # Windows 下隐藏 subprocess 弹出的命令行窗口
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
 _CACHE_TTL = 2.0  # 同一次初始化链内去重，2 秒内复用缓存
+# 部分 Windows 网络环境（防火墙/杀软/代理拦截）无法访问 CRL/OCSP 服务器，
+# schannel 证书吊销检查失败会导致 TLS 握手报错 CRYPT_E_NO_REVOCATION_CHECK。
+# 通过单次调用参数禁用该检查，不写入用户全局配置。
+_TLS_NO_REVOKE_ARGS = ["-c", "http.schannelCheckRevoke=false"]
+# 统一的 fetch 参数：--update-shallow 兼容 release 包的 shallow clone；
+# --prune --prune-tags 清理远程已删除的旧 tag，避免用户切到废弃版本。
+_FETCH_ARGS = ["fetch", "--update-shallow", "--prune", "--prune-tags",
+               "origin", "--tags"]
 
 
 def _cached(ttl: float = _CACHE_TTL):
@@ -56,6 +64,41 @@ def _is_proxy_connection_error(stderr_lines: list[str]) -> str | None:
     if "connection refused" in joined or "could not connect to server" in joined:
         return "refused"   # 代理客户端未运行
     return None
+
+
+def _is_schannel_revocation_error(stderr_lines: list[str]) -> bool:
+    """检测是否为 Windows schannel 后端的证书吊销检查失败。
+
+    典型 stderr:
+      fatal: unable to access 'https://github.com/.../': schannel: next
+      InitializeSecurityContext failed: CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
+    """
+    joined = " ".join(stderr_lines).lower()
+    return ("schannel" in joined or "revocation check" in joined
+            or "no_revocation_check" in joined)
+
+
+def _find_ca_bundle(git_exe: str) -> str:
+    """定位随 Git 分发的 ca-bundle.crt（切换 OpenSSL 后端时依赖）。
+
+    从 git.exe 位置向上探测常见布局，找不到返回空字符串
+    （此时交给 git 使用其编译内置路径）。
+    """
+    base = os.path.dirname(os.path.abspath(git_exe))   # .../Git/cmd 或 .../Git/bin
+    roots = [base, os.path.dirname(base)]              # cmd/、Git/
+    rels = [
+        ("mingw64", "etc", "ssl", "certs", "ca-bundle.crt"),
+        ("mingw32", "etc", "ssl", "certs", "ca-bundle.crt"),
+        ("usr", "ssl", "certs", "ca-bundle.crt"),
+        ("etc", "ssl", "certs", "ca-bundle.crt"),
+        ("mingw64", "share", "ca-bundle.crt"),
+    ]
+    for root in roots:
+        for rel in rels:
+            candidate = os.path.join(root, *rel)
+            if os.path.isfile(candidate):
+                return candidate
+    return ""
 
 
 def _probe_github_reachable(timeout: float = 2.5) -> bool:
@@ -122,6 +165,7 @@ class GitManager(QObject):
         self._stderr_lines: list[str] = []     # 累积当前操作的 stderr
         self._proxy_retried = False     # 当前网络操作是否已尝试过绕过代理重试
         self._auto_proxy_tried = False  # 当前网络操作是否已尝试过自动探测本地代理
+        self._ssl_backend_retried = False  # 当前网络操作是否已尝试过切换 OpenSSL 后端
 
     @property
     def project_path(self) -> str:
@@ -285,11 +329,18 @@ class GitManager(QObject):
     def get_latest_remote_tag(self) -> str | None:
         """获取远程最新 tag（需要先 fetch）。
 
-        先使用系统代理设置尝试；若检测到本地代理连接失败则自动直连重试。
+        先使用系统代理设置尝试；若检测到本地代理连接失败则自动直连重试；
+        最后再尝试切换 OpenSSL 后端（规避 Windows 吊销检查故障）。
         """
-        for attempt in (0, 1):
-            bypass = (attempt == 1)
-            cmd = [self._resolve_git()]
+        for attempt in (0, 1, 2):
+            bypass = (attempt >= 1)
+            use_openssl = (attempt == 2)
+            cmd = [self._resolve_git()] + _TLS_NO_REVOKE_ARGS
+            if use_openssl:
+                cmd += ["-c", "http.sslBackend=openssl"]
+                ca_bundle = _find_ca_bundle(self._resolve_git())
+                if ca_bundle:
+                    cmd += ["-c", f"http.sslCAInfo={ca_bundle}"]
             if bypass:
                 cmd += ["-c", "http.proxy=", "-c", "https.proxy="]
             cmd += ["ls-remote", "--tags", "--sort=-creatordate", "origin"]
@@ -311,8 +362,9 @@ class GitManager(QObject):
                     return None  # 命令成功但无 tag，无需重试
 
                 # 失败：检查是否需要绕过代理重试
+                # text=True 时 stderr 已是 str，不能再调用 .decode()
                 if not bypass and _is_proxy_connection_error(
-                    result.stderr.decode("utf-8", errors="replace").splitlines()
+                    result.stderr.splitlines()
                 ) is not None:
                     continue  # 重试直连
                 return None  # 非代理错误，不再重试
@@ -323,10 +375,20 @@ class GitManager(QObject):
         return None
 
     def has_updates(self) -> bool | None:
-        """检查远程是否有更新的 tag（语义化版本比较）。返回 None 表示无法判断。"""
+        """检查远程是否有更新的 tag（语义化版本比较）。返回 None 表示无法判断。
+
+        fetch 成功后本地 refs/tags 已是最新，优先用本地 tag 比较（零网络，
+        避免在 UI 主线程同步跑 ls-remote 造成最长约 30 秒卡顿）；
+        本地无任何 tag 时才回退到 ls-remote 联网查询。
+        """
         current = self.get_current_tag()
-        latest = self.get_latest_remote_tag()
-        if current is None or latest is None:
+        if current is None:
+            return None
+        # fetch 后 get_tags 的 2 秒缓存可能还存着旧数据，强制失效重读
+        self._git_cache.pop("get_tags", None)
+        tags = self.get_tags()
+        latest = tags[0]["name"] if tags else self.get_latest_remote_tag()
+        if latest is None:
             return None
         return _version_greater(latest, current)
 
@@ -370,8 +432,8 @@ class GitManager(QObject):
         self._pending_op = "fetch"
         self._proxy_retried = False
         self._auto_proxy_tried = False
-        # --update-shallow: 兼容 release 包的 shallow clone，非 shallow repo 上无操作
-        self._run_git(["fetch", "--update-shallow", "origin", "--tags"])
+        self._ssl_backend_retried = False
+        self._run_git(_FETCH_ARGS)
         return None
 
     def checkout_tag(self, tag: str) -> str | None:
@@ -403,6 +465,7 @@ class GitManager(QObject):
         self._pending_op = "init_repo"
         self._proxy_retried = False
         self._auto_proxy_tried = False
+        self._ssl_backend_retried = False
         self._init_repo_steps = [
             (["init"], "git init"),
             (["remote", "add", "origin", self._repo_url], "git remote add"),
@@ -422,12 +485,20 @@ class GitManager(QObject):
     # Internal
     # ------------------------------------------------------------------
 
-    def _run_git(self, args: list[str], bypass_proxy: bool = False):
+    def _run_git(self, args: list[str], bypass_proxy: bool = False,
+                 ssl_backend: str = ""):
         if self._proc is not None:
             self._proc.kill()
             self._proc.deleteLater()
 
         self._stderr_lines.clear()
+        args = _TLS_NO_REVOKE_ARGS + args
+        if ssl_backend:
+            # 切换 TLS 后端（如 openssl）；显式指定 CA 包，兼容便携版 Git
+            args = ["-c", f"http.sslBackend={ssl_backend}"] + args
+            ca_bundle = _find_ca_bundle(self._resolve_git())
+            if ca_bundle:
+                args = ["-c", f"http.sslCAInfo={ca_bundle}"] + args
 
         self._proc = QProcess(self)
         self._proc.setWorkingDirectory(self._project_path)
@@ -506,6 +577,26 @@ class GitManager(QObject):
             # 全部完成
             self._init_repo_steps = []
 
+        # ---- schannel 证书吊销检查失败 → 自动切换 OpenSSL 后端重试 ----
+        # 注意：必须放在代理重试之前，schannel 错误同样含 "unable to access"，
+        # 否则会被下方的直连阻断逻辑误判并触发无意义的代理探测。
+        # TCP/代理链路是通的（错误发生在 TLS 握手阶段），换后端即可修复。
+        if (not ok and not self._ssl_backend_retried
+                and _is_schannel_revocation_error(self._stderr_lines)):
+            self._ssl_backend_retried = True
+            self.output.emit("[tls] 检测到 Windows 证书吊销检查失败，自动切换 OpenSSL 后端重试...")
+            if self._pending_op == "fetch":
+                self._run_git(_FETCH_ARGS, ssl_backend="openssl")
+            elif self._pending_op == "init_repo":
+                steps = getattr(self, '_init_repo_steps', [])
+                idx = getattr(self, '_init_repo_step_idx', 0)
+                if steps and idx < len(steps):
+                    self._run_git(steps[idx][0], ssl_backend="openssl")
+                else:
+                    self._run_git(["fetch", "origin", "--tags"], ssl_backend="openssl")
+            return
+        # ----------------------------------------------------
+
         # ---- 代理连接失败 → 探测直连可行性 → 自动重试或提示 ----
         if not ok and not self._proxy_retried:
             proxy_err = _is_proxy_connection_error(self._stderr_lines)
@@ -521,13 +612,13 @@ class GitManager(QObject):
                 if _probe_github_reachable():
                     self.output.emit("[proxy] 直连 github.com 正常，继续下载...")
                     if self._pending_op == "fetch":
-                        self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
+                        self._run_git(_FETCH_ARGS, bypass_proxy=True)
                     elif self._pending_op == "init_repo":
                         steps = getattr(self, '_init_repo_steps', [])
                         if steps:
                             self._run_git(steps[-1][0], bypass_proxy=True)
                         else:
-                            self._run_git(["fetch", "--update-shallow", "origin", "--tags"], bypass_proxy=True)
+                            self._run_git(_FETCH_ARGS, bypass_proxy=True)
                     return
                 else:
                     self.output.emit("[proxy] 直连 github.com 也不通，请开启 VPN 后重试")
@@ -564,9 +655,7 @@ class GitManager(QObject):
                             f"[proxy] git 代理已自动设为 http://127.0.0.1:{proxy_port}，重试中..."
                         )
                         if self._pending_op == "fetch":
-                            self._run_git(
-                                ["fetch", "--update-shallow", "origin", "--tags"]
-                            )
+                            self._run_git(_FETCH_ARGS)
                         elif self._pending_op == "init_repo":
                             steps = getattr(self, "_init_repo_steps", [])
                             if steps and self._init_repo_step_idx < len(steps):
@@ -607,13 +696,25 @@ class GitManager(QObject):
                     hint = " — 直连被断开（可能网络不稳定），请开启 VPN 后重试"
                 else:
                     hint = " — 连接被断开（可能是网络干扰），请开启 VPN"
+            # 证书/TLS 拦截类错误必须排在通用 "unable to access" 之前：
+            # 所有 HTTPS 错误都含该字符串，放后面会导致专属提示永远匹配不到
+            elif ("revocation check" in stderr_lower or "no_revocation_check" in stderr_lower
+                  or "schannel" in stderr_lower):
+                hint = (" — 加密连接被安全软件或网络设备扫描拦截，"
+                        "请关闭杀毒软件的「加密连接扫描 / HTTPS 检查」功能后重试，"
+                        "也可用手机热点对照测试")
+            elif ("peer certificate" in stderr_lower or "remote key was not ok" in stderr_lower
+                  or "ssl certificate" in stderr_lower or "certificate verify" in stderr_lower
+                  or "unable to get local issuer certificate" in stderr_lower
+                  or "self signed certificate" in stderr_lower):
+                hint = (" — GitHub 安全证书校验未通过（网络中存在解密拦截设备，"
+                        "常见于杀毒软件的 HTTPS 扫描），"
+                        "请关闭相关扫描功能，或改用手机热点重试")
             elif "unable to access" in stderr_lower:
                 if self._proxy_retried:
                     hint = " — 直连不上 GitHub，请检查网络或开启 VPN"
                 else:
                     hint = " — 无法连接 GitHub，请检查网络或开启 VPN"
-            elif "ssl certificate" in stderr_lower or "certificate verify" in stderr_lower or "unable to get local issuer certificate" in stderr_lower:
-                hint = " — 安全连接被阻止（可能是系统时间不对或杀毒软件拦截），请校准系统时间后重试"
             elif "gnutls_handshake" in stderr_lower:
                 hint = " — 连接方式不兼容，请将 Git 更新到最新版本"
             elif "the remote end hung up" in stderr_lower or "early eof" in stderr_lower or "transfer closed" in stderr_lower:
@@ -655,19 +756,34 @@ def _version_greater(a: str, b: str) -> bool:
 
     例如: _version_greater("v1.0.22", "v1.0.21") → True
           _version_greater("v1.0.9", "v1.0.21")  → False
+
+    预发布版本规则（避免给用户推送 rc/beta 更新提示）:
+      a 为预发布、b 为正式版  → 永远不算更新（等正式版再推）
+      a 为正式版、b 为预发布  → 数字相同也算更新（正式版覆盖同号 rc）
     """
     import re
 
     def parse(v: str):
-        nums = re.findall(r"\d+", v.lstrip("vV"))
+        # 只取主版本号部分，避免 "-rc1" 等预发布后缀的数字污染比较
+        core = v.split("-", 1)[0]
+        nums = re.findall(r"\d+", core.lstrip("vV"))
         return tuple(int(n) for n in nums)
+
+    def is_prerelease(v: str) -> bool:
+        # v1.0.2-rc1 / v1.0.2-beta.1 等带连字符后缀的视为预发布
+        return "-" in v
 
     try:
         pa = parse(a)
         pb = parse(b)
         if not pa or not pb:
             return a != b
-        return pa > pb
+        if pa != pb:
+            if is_prerelease(a) and not is_prerelease(b):
+                return False  # 预发布不作为正式更新推送
+            return pa > pb
+        # 数字部分相同：正式版 > 预发布
+        return not is_prerelease(a) and is_prerelease(b)
     except Exception:
         return a != b
 

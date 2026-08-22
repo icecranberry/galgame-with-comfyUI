@@ -83,6 +83,17 @@
           </span>
         </label>
 
+        <label class="memory-check">
+          <input type="checkbox" v-model="permanentConfigWrite" @change="savePluginConfig">
+          <span class="memory-check-box" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+          </span>
+          <span class="memory-check-copy">
+            <span class="memory-check-title">永久写入MaiBot配置代替临时覆盖</span>
+            <span class="memory-check-desc">不再只是临时桥接配置，而是直接写入 MaiBot 的 bot_config.toml（含机器人昵称）；勾选后 MaiBot 单独启动也能使用邻舍人物卡。</span>
+          </span>
+        </label>
+
         <label class="fl" for="character-select">注入角色</label>
         <DropdownSelect
           id="character-select"
@@ -185,6 +196,7 @@ const savingSettings = ref(false)
 const baseUrl = ref('http://127.0.0.1:3099')
 const characterName = ref('')
 const memoryCuration = ref(false)
+const permanentConfigWrite = ref(false)
 
 const pollInterval = ref(2)
 const pollTimeout = ref(180)
@@ -247,6 +259,7 @@ async function loadConfig() {
     characterName.value = byCharacter ? byCharacter.name : ''
   }
   memoryCuration.value = memory.memory_curation === true
+  permanentConfigWrite.value = bridge.permanent_config_write === true
 
   pollInterval.value = image.poll_interval_sec ?? 2
   pollTimeout.value = image.poll_timeout_sec ?? 180
@@ -320,6 +333,7 @@ function buildPluginConfigBody() {
       bridge: {
         base_url: baseUrl.value.trim() || 'http://127.0.0.1:3099',
         character_name: characterName.value,
+        permanent_config_write: permanentConfigWrite.value,
       },
       memory: { memory_curation: memoryCuration.value },
       image: {
@@ -361,10 +375,12 @@ async function savePersonaToStore(characterName, entry) {
   if (entry.base_prompt !== undefined) payload.base_prompt = entry.base_prompt
   if (entry.behavior_style !== undefined) payload.behavior_style = entry.behavior_style
   if (entry.reply_style !== undefined) payload.reply_style = entry.reply_style
-  await maibotUpdatePluginPersona(payload)
+  const result = await maibotUpdatePluginPersona(payload)
+  const savedEntry = (result && result.entry) || entry
   if (!personaData.value.characters) personaData.value.characters = {}
   const existing = personaData.value.characters[characterName] || {}
-  personaData.value.characters[characterName] = { ...existing, ...entry }
+  personaData.value.characters[characterName] = { ...existing, ...savedEntry }
+  return savedEntry
 }
 
 // 提炼并保存：调用邻舍 derive-style 生成行为/表达风格，并写入插件本地 persona_store.json
@@ -375,8 +391,7 @@ async function deriveAndSave(characterName, basePrompt) {
     behavior_style: data.behavior_style || '',
     reply_style: data.reply_style || '',
   }
-  await savePersonaToStore(characterName, entry)
-  return entry
+  return await savePersonaToStore(characterName, entry)
 }
 
 async function derive() {

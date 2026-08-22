@@ -17,17 +17,10 @@ import {
   getPluginPersona,
   getWebuiSettings,
   setWebuiSettings,
+  updateBotConfigSection,
   updatePluginConfig,
   updatePluginPersona,
 } from './webui.js';
-
-const BASE_PROMPT_IMAGE_ABILITY_LINE = "## 你拥有画图的能力，只要你想象画面，你就可以发送出来图片";
-
-function ensureBasePromptImageAbility(basePrompt) {
-  const text = String(basePrompt || "").trim();
-  if (!text || text.includes(BASE_PROMPT_IMAGE_ABILITY_LINE)) return text;
-  return `${text}\n${BASE_PROMPT_IMAGE_ABILITY_LINE}`;
-}
 
 const router = Router();
 
@@ -57,9 +50,6 @@ router.get('/characters', (req, res) => {
   const characters = db.prepare(
     `SELECT id, name, display_name, base_prompt, short_prompt, avatar_path FROM characters ORDER BY id`
   ).all();
-  for (const character of characters) {
-    character.base_prompt = ensureBasePromptImageAbility(character.base_prompt);
-  }
   res.json({ characters });
 });
 
@@ -232,6 +222,30 @@ router.post('/generate', async (req, res) => {
   } catch (err) {
     console.error('[maibot-bridge] generate prompt extraction error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/maibot/permanent-persona — 永久写入 MaiBot bot_config.toml（人格/行为风格/表达风格/机器人昵称）
+router.post('/permanent-persona', async (req, res) => {
+  const { base_prompt = '', behavior_style = '', reply_style = '', display_name = '' } = req.body || {};
+  if (typeof base_prompt !== 'string' || !base_prompt.trim()) {
+    return res.status(400).json({ error: 'base_prompt is required' });
+  }
+  try {
+    const personalityResult = await updateBotConfigSection('personality', {
+      personality: base_prompt.trim(),
+      behavior_style: String(behavior_style || '').trim(),
+      reply_style: String(reply_style || '').trim(),
+    });
+    let nicknameResult = null;
+    const nickname = String(display_name || '').trim();
+    if (nickname) {
+      nicknameResult = await updateBotConfigSection('bot', { nickname });
+    }
+    res.json({ ok: true, personality: personalityResult, nickname: nicknameResult });
+  } catch (err) {
+    console.error('[maibot-bridge] permanent persona write error:', err.message);
+    res.status(502).json({ error: err.message });
   }
 });
 
