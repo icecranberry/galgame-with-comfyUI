@@ -64,6 +64,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     eventArtist: process.env.COMFYUI_EVENT_ARTIST || process.env.COMFYUI_MOMENTS_ARTIST || process.env.COMFYUI_ARTIST || '@ebora',
     eventWidth: parseInt(process.env.COMFYUI_EVENT_WIDTH, 10) || 1600,
     eventHeight: parseInt(process.env.COMFYUI_EVENT_HEIGHT, 10) || 1200,
+    qualityPrompt: process.env.COMFYUI_QUALITY_PROMPT || '',  // 质量提示词覆盖（留空=沿用工作流默认）
     tlsVerify: process.env.COMFYUI_TLS_VERIFY !== 'false',
     globalLora: [],
     hiresLora: [],   // HiresFix 放大细化专用 LoRA（仅注入细化工作流，追加在 LoRA 链末尾）
@@ -167,8 +168,12 @@ function persistSettingSync(key, value) {
   }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify }) {
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt }) {
   if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
+  if (qualityPrompt !== undefined) {
+    config.comfyui.qualityPrompt = typeof qualityPrompt === 'string' ? qualityPrompt.trim() : '';
+    persistSettingSync('comfy_quality_prompt', config.comfyui.qualityPrompt);
+  }
   if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
   if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }
   if (url !== undefined) { const n = String(url).replace(/\/+$/, ''); config.comfyui.url = n; persistEnv('COMFYUI_URL', n); }

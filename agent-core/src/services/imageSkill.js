@@ -66,6 +66,7 @@ const PROMPT_PLACEHOLDER = '请输入画面描述';
 // 按节点 title 注入参数（而非硬编码节点 ID）
 export const NODE_TITLES = {
   artist: '画师串',
+  quality: '质量提示词',
   width:  '图片的宽',
   height: '图片的长',
   prompt: '画面描述',
@@ -137,6 +138,9 @@ function buildWorkflow(promptText, overrides = {}) {
     [NODE_TITLES.width]:  overrides.width  ?? config.comfyui.width,
     [NODE_TITLES.height]: overrides.height ?? config.comfyui.height,
   };
+  // 质量提示词：非空才覆盖工作流节点里的默认值，留空不注入
+  const qualityPrompt = typeof config.comfyui.qualityPrompt === 'string' ? config.comfyui.qualityPrompt.trim() : '';
+  if (qualityPrompt) defaults[NODE_TITLES.quality] = qualityPrompt;
 
   for (const node of wf.nodes || []) {
     if (!Array.isArray(node.widgets_values)) continue;

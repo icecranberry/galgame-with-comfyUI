@@ -1459,6 +1459,7 @@ const SETTING_TO_CONFIG = {
   comfy_event_artist:      { obj: 'comfyui',   key: 'eventArtist',     type: 'string'  },
   comfy_event_width:       { obj: 'comfyui',   key: 'eventWidth',      type: 'int'     },
   comfy_event_height:      { obj: 'comfyui',   key: 'eventHeight',     type: 'int'     },
+  comfy_quality_prompt:    { obj: 'comfyui',   key: 'qualityPrompt',   type: 'string'  },
   feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },

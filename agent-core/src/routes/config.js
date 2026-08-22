@@ -82,6 +82,7 @@ router.get('/', (req, res) => {
       eventArtist: config.comfyui.eventArtist,
       eventWidth: config.comfyui.eventWidth,
       eventHeight: config.comfyui.eventHeight,
+      qualityPrompt: config.comfyui.qualityPrompt ?? '',
       tlsVerify: config.comfyui.tlsVerify,
       globalLora: config.comfyui.globalLora || [],
       hiresLora: config.comfyui.hiresLora || [],
@@ -134,8 +135,8 @@ router.put('/group-summary-interval', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify } = req.body;
-  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify });
+  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt } = req.body;
+  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt });
   // URL 或 TLS 设置变更后立即重启 ComfyUI 客户端连接（使新地址/证书策略立即生效）
   if (url !== undefined || tlsVerify !== undefined) {
     restartComfyClient();

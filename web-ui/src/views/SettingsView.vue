@@ -55,11 +55,20 @@
           </div>
           <div class="hiresfix-row">
             <div class="hiresfix-copy">
-              <div class="hiresfix-subtitle">HiresFix 细化设置</div>
               <div class="hiresfix-desc">图片进一步高清细化设置</div>
             </div>
             <span class="hiresfix-summary">最长边 {{ hiresMaxSize }} · {{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
             <button class="hiresfix-link" @click="openHiresFixSettings">设置 →</button>
+          </div>
+        </div>
+        <div class="quality-section">
+          <div class="quality-row">
+            <div class="quality-copy">
+              <div class="quality-subtitle">质量提示词</div>
+              <div class="quality-desc">生图时注入的画质增强词，留空使用系统默认</div>
+            </div>
+            <span class="quality-summary" :class="{ 'is-default': !qualityPrompt }" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt ? qualityPrompt : '系统默认' }}</span>
+            <button class="quality-link" @click="openQualityDialog">更改 →</button>
           </div>
         </div>
         <div class="sa">
@@ -70,7 +79,7 @@
             全局LoRA
             <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
           </button>
-          <button class="btn-ghost wf-action-btn wf-reset-btn" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
+          <button class="btn-ghost wf-action-btn wf-mode-btn" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
           <button class="btn-ghost wf-action-btn wf-mode-btn" @click="openWfModeDialog">切换工作流模式</button>
         </div>
       </div>
@@ -92,7 +101,7 @@
               ref="sceneDescRef"
               v-model="freeSceneDesc"
               class="free-scene-textarea"
-              placeholder="（可为空）自由填写任意测试用的画面，邻舍会自动完善提示词"
+              placeholder="（置空使用默认）自由描述任意想要的画面，邻舍会自动完善提示词"
               @focus="sceneDescFocused = true"
               @blur="onSceneDescBlur"
             ></textarea>
@@ -762,187 +771,214 @@
 
     </div>
 
-  </div>
-
-  <!-- 收藏画师串弹窗 -->
-  <Teleport to="body">
-    <Transition name="fav-dialog-fade">
-      <div v-if="favDialog.show" class="fav-dialog-overlay">
-        <div class="fav-dialog">
-          <div class="fav-dialog-header">
-            <span>收藏画师串</span>
-            <button class="fav-dialog-close" @click="cancelAddFavorite">✕</button>
-          </div>
-          <div class="fav-dialog-body">
-            <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
-            <input
-              ref="favDialogInput"
-              v-model="favDialog.label"
-              class="fav-dialog-input"
-              placeholder="输入收藏名称"
-              maxlength="30"
-              @keyup.enter="confirmAddFavorite"
-            />
-            <div class="fav-dialog-actions">
-              <button class="btn-ghost" @click="cancelAddFavorite">取消</button>
-              <button class="btn-primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</button>
+    <!-- 收藏画师串弹窗 -->
+    <Teleport to="body">
+      <Transition name="fav-dialog-fade">
+        <div v-if="favDialog.show" class="fav-dialog-overlay">
+          <div class="fav-dialog">
+            <div class="fav-dialog-header">
+              <span>收藏画师串</span>
+              <button class="fav-dialog-close" @click="cancelAddFavorite">✕</button>
             </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
-
-  <!-- 防打扰模式设置弹窗 -->
-  <Teleport to="body">
-    <Transition name="disturb-dialog-fade">
-      <div v-if="disturbDialog.show" class="disturb-dialog-overlay" @click.self="cancelDisturbDialog">
-        <div class="disturb-dialog">
-          <div class="disturb-dialog-header">
-            <span>防打扰设置</span>
-            <button class="fav-dialog-close" @click="cancelDisturbDialog">✕</button>
-          </div>
-          <div class="disturb-dialog-body">
-            <!-- 时间段设置 -->
-            <div class="disturb-dialog-section">
-              <span class="disturb-dialog-label">⏰ 静默时段</span>
-              <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
-              <div class="disturb-time-row">
-                <input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
-                <span class="disturb-time-sep">—</span>
-                <input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
+            <div class="fav-dialog-body">
+              <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
+              <input
+                ref="favDialogInput"
+                v-model="favDialog.label"
+                class="fav-dialog-input"
+                placeholder="输入收藏名称"
+                maxlength="30"
+                @keyup.enter="confirmAddFavorite"
+              />
+              <div class="fav-dialog-actions">
+                <button class="btn-ghost" @click="cancelAddFavorite">取消</button>
+                <button class="btn-primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</button>
               </div>
             </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
-            <!-- 角色选择 -->
-            <div class="disturb-dialog-section disturb-char-scroll">
-              <span class="disturb-dialog-label">👤 适用角色</span>
-              <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
-              <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
-              <div v-else class="disturb-char-grid">
-                <label
-                  v-for="ch in allCharacters"
-                  :key="ch.id"
-                  class="disturb-char-chip"
-                  :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
-                  @click="toggleDisturbDialogChar(ch.id)"
-                >
-                  <div
-                    class="disturb-char-avatar"
-                    :style="ch.avatar_path
-                      ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                      : { background: '#e07b6c' }"
-                  >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
-                  <span class="disturb-char-name">{{ ch.display_name }}</span>
-                </label>
+    <!-- 质量提示词弹窗 -->
+    <Teleport to="body">
+      <Transition name="fav-dialog-fade">
+        <div v-if="qualityDialog.show" class="fav-dialog-overlay">
+          <div class="fav-dialog">
+            <div class="fav-dialog-header">
+              <span>质量提示词</span>
+              <button class="fav-dialog-close" @click="qualityDialog.show = false">✕</button>
+            </div>
+            <div class="fav-dialog-body">
+              <p class="fav-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
+              <textarea
+                v-model="qualityDialog.text"
+                class="quality-dialog-textarea"
+                placeholder="masterpiece, best quality..."
+                rows="4"
+                maxlength="500"
+              ></textarea>
+              <div class="fav-dialog-actions">
+                <button class="btn-ghost" @click="qualityDialog.show = false">取消</button>
+                <button class="btn-primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</button>
               </div>
             </div>
-
-            <!-- 额外选项 -->
-            <div class="disturb-dialog-section disturb-dialog-toggles">
-              <label class="disturb-option-row">
-                <span class="disturb-option-label">隐藏世界观</span>
-                <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
-                <label class="switch">
-                  <input type="checkbox" v-model="disturbDialog.hideWorld" />
-                  <span class="slider"></span>
-                </label>
-              </label>
-              <label class="disturb-option-row">
-                <span class="disturb-option-label">跳过周末</span>
-                <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
-                <label class="switch">
-                  <input type="checkbox" v-model="disturbDialog.skipWeekends" />
-                  <span class="slider"></span>
-                </label>
-              </label>
-            </div>
-
-            <div class="disturb-dialog-actions">
-              <button class="btn-ghost" @click="cancelDisturbDialog">取消</button>
-              <button class="btn-primary" @click="confirmDisturbDialog">保存设置</button>
-            </div>
           </div>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+      </Transition>
+    </Teleport>
 
-  <!-- 天气城市设置弹窗 -->
-  <Teleport to="body">
-    <Transition name="disturb-dialog-fade">
-      <div v-if="weatherCityDialog.show" class="disturb-dialog-overlay" @click.self="weatherCityDialog.show = false">
-        <div class="disturb-dialog" style="max-width:360px;">
-          <div class="disturb-dialog-header">
-            <span>天气城市设置</span>
-            <button class="fav-dialog-close" @click="weatherCityDialog.show = false">✕</button>
-          </div>
-          <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
-            <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
-            <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
-            <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
-              <button class="btn-primary" @click="confirmWeatherCity">保存</button>
+    <!-- 防打扰模式设置弹窗 -->
+    <Teleport to="body">
+      <Transition name="disturb-dialog-fade">
+        <div v-if="disturbDialog.show" class="disturb-dialog-overlay" @click.self="cancelDisturbDialog">
+          <div class="disturb-dialog">
+            <div class="disturb-dialog-header">
+              <span>防打扰设置</span>
+              <button class="fav-dialog-close" @click="cancelDisturbDialog">✕</button>
             </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
-
-  <!-- 工作流模式弹窗 -->
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="showWfModeDialog" class="wf-mode-overlay" @click.self="showWfModeDialog = false">
-        <div class="wf-mode-modal">
-          <h3>工作流模式</h3>
-          <div class="wf-mode-options">
-            <button v-for="m in workflowModeOptions" :key="m.value"
-              :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
-              @click="wfModeDraft = m.value">
-              <span class="wf-mo-title">{{ m.label }}</span>
-              <span class="wf-mo-desc" v-html="m.desc"></span>
-            </button>
-          </div>
-
-          <div class="wf-mode-downloads">
-            <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
-            <div class="wf-dl-item">
-              <span class="wf-dl-label">Anima-turbo：</span>
-              <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>
-              <span class="wf-dl-sep">|</span>
-              <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
-            </div>
-            <div class="wf-dl-item">
-              <span class="wf-dl-label">Anima-base：</span>
-              <a href="https://civitai.com/api/download/models/2945208?fileId=2824391" target="_blank" rel="noopener">Civitai 下载</a>
-              <span class="wf-dl-sep">|</span>
-              <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
-            </div>
-          </div>
-
-          <Transition name="expand">
-            <div v-if="wfModeDraft === 'hybrid'" class="wf-mode-scenes">
-              <p class="wf-mode-hint">hybrid 模式下可为不同场景分配不同工作流，默认生图用 turbo</p>
-              <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
-                <span class="wf-scene-name">{{ s.label }}</span>
-                <div class="wf-scene-toggle">
-                  <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'turbo' }]"
-                    @click="wfSceneDraft[s.key] = 'turbo'">turbo</button>
-                  <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'base' }]"
-                    @click="wfSceneDraft[s.key] = 'base'">base</button>
+            <div class="disturb-dialog-body">
+              <!-- 时间段设置 -->
+              <div class="disturb-dialog-section">
+                <span class="disturb-dialog-label">⏰ 静默时段</span>
+                <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
+                <div class="disturb-time-row">
+                  <input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
+                  <span class="disturb-time-sep">—</span>
+                  <input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
                 </div>
               </div>
-            </div>
-          </Transition>
 
-          <div class="wf-mode-actions">
-            <button class="btn-ghost" @click="showWfModeDialog = false">取消</button>
-            <button class="btn-primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</button>
+              <!-- 角色选择 -->
+              <div class="disturb-dialog-section disturb-char-scroll">
+                <span class="disturb-dialog-label">👤 适用角色</span>
+                <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
+                <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
+                <div v-else class="disturb-char-grid">
+                  <label
+                    v-for="ch in allCharacters"
+                    :key="ch.id"
+                    class="disturb-char-chip"
+                    :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
+                    @click="toggleDisturbDialogChar(ch.id)"
+                  >
+                    <div
+                      class="disturb-char-avatar"
+                      :style="ch.avatar_path
+                        ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                        : { background: '#e07b6c' }"
+                    >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
+                    <span class="disturb-char-name">{{ ch.display_name }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 额外选项 -->
+              <div class="disturb-dialog-section disturb-dialog-toggles">
+                <label class="disturb-option-row">
+                  <span class="disturb-option-label">隐藏世界观</span>
+                  <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
+                  <label class="switch">
+                    <input type="checkbox" v-model="disturbDialog.hideWorld" />
+                    <span class="slider"></span>
+                  </label>
+                </label>
+                <label class="disturb-option-row">
+                  <span class="disturb-option-label">跳过周末</span>
+                  <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
+                  <label class="switch">
+                    <input type="checkbox" v-model="disturbDialog.skipWeekends" />
+                    <span class="slider"></span>
+                  </label>
+                </label>
+              </div>
+
+              <div class="disturb-dialog-actions">
+                <button class="btn-ghost" @click="cancelDisturbDialog">取消</button>
+                <button class="btn-primary" @click="confirmDisturbDialog">保存设置</button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+      </Transition>
+    </Teleport>
+
+    <!-- 天气城市设置弹窗 -->
+    <Teleport to="body">
+      <Transition name="disturb-dialog-fade">
+        <div v-if="weatherCityDialog.show" class="disturb-dialog-overlay" @click.self="weatherCityDialog.show = false">
+          <div class="disturb-dialog" style="max-width:360px;">
+            <div class="disturb-dialog-header">
+              <span>天气城市设置</span>
+              <button class="fav-dialog-close" @click="weatherCityDialog.show = false">✕</button>
+            </div>
+            <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
+              <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
+              <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
+              <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
+                <button class="btn-primary" @click="confirmWeatherCity">保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 工作流模式弹窗 -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="showWfModeDialog" class="wf-mode-overlay" @click.self="showWfModeDialog = false">
+          <div class="wf-mode-modal">
+            <h3>工作流模式</h3>
+            <div class="wf-mode-options">
+              <button v-for="m in workflowModeOptions" :key="m.value"
+                :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
+                @click="wfModeDraft = m.value">
+                <span class="wf-mo-title">{{ m.label }}</span>
+                <span class="wf-mo-desc" v-html="m.desc"></span>
+              </button>
+            </div>
+
+            <div class="wf-mode-downloads">
+              <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
+              <div class="wf-dl-item">
+                <span class="wf-dl-label">Anima-turbo：</span>
+                <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>
+                <span class="wf-dl-sep">|</span>
+                <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+              </div>
+              <div class="wf-dl-item">
+                <span class="wf-dl-label">Anima-base：</span>
+                <a href="https://civitai.com/api/download/models/2945208?fileId=2824391" target="_blank" rel="noopener">Civitai 下载</a>
+                <span class="wf-dl-sep">|</span>
+                <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+              </div>
+            </div>
+
+            <Transition name="expand">
+              <div v-if="wfModeDraft === 'hybrid'" class="wf-mode-scenes">
+                <p class="wf-mode-hint">hybrid 模式下可为不同场景分配不同工作流，默认生图用 turbo</p>
+                <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
+                  <span class="wf-scene-name">{{ s.label }}</span>
+                  <div class="wf-scene-toggle">
+                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'turbo' }]"
+                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</button>
+                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'base' }]"
+                      @click="wfSceneDraft[s.key] = 'base'">base</button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+
+            <div class="wf-mode-actions">
+              <button class="btn-ghost" @click="showWfModeDialog = false">取消</button>
+              <button class="btn-primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+  </div>
 </template>
 
 <script setup>
@@ -994,6 +1030,10 @@ const hiresMaxSize = ref(2000)
 const hiresArtistMode = ref('empty')
 const hiresArtist = ref('')
 const hiresLoraCount = computed(() => (hiresLoras.value || []).filter(l => l.path && l.enabled !== false).length)
+// ── 质量提示词（非空覆盖工作流默认，留空不改） ──
+const qualityPrompt = ref('')
+const qualityDialog = reactive({ show: false, text: '' })
+const qualitySaving = ref(false)
 const comfyTab = ref('chat')
 const comfyTabs = [
   { mode: 'chat', label: '对话配图' },
@@ -1633,6 +1673,7 @@ onMounted(async () => {
     hiresMaxSize.value = data.comfy.hiresMaxSize ?? 2000
     hiresArtistMode.value = data.comfy.hiresArtistMode ?? 'empty'
     hiresArtist.value = data.comfy.hiresArtist ?? ''
+    qualityPrompt.value = data.comfy.qualityPrompt ?? ''
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
@@ -1710,6 +1751,27 @@ function openGlobalLora() {
 
 function openHiresFixSettings() {
   hiresFixModalVisible.value = true
+}
+
+function openQualityDialog() {
+  qualityDialog.text = qualityPrompt.value
+  qualityDialog.show = true
+}
+
+async function saveQualityPrompt() {
+  qualitySaving.value = true
+  try {
+    const text = qualityDialog.text.trim()
+    await updateComfyConfig({ qualityPrompt: text })
+    qualityPrompt.value = text
+    qualityDialog.show = false
+    toastFn(text ? '质量提示词已更新，下张图生效' : '已恢复系统默认质量提示词', 'success')
+  } catch (e) {
+    console.error('saveQualityPrompt failed:', e)
+    toastFn(e.message || '保存失败', 'error')
+  } finally {
+    qualitySaving.value = false
+  }
 }
 
 async function saveComfyUrl() {
@@ -2336,7 +2398,7 @@ function resetTestPrompts() {
 }
 /* ── 全局细化 / HiresFix 独立层级 ── */
 .hiresfix-section {
-  margin: 8px 0 20px; padding: 16px 0;
+  margin: 8px 0 0; padding: 16px 0;
   border-top: 1px solid #EDE5DC;
   border-bottom: 1px solid #EDE5DC;
 }
@@ -2355,22 +2417,33 @@ function resetTestPrompts() {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .hiresfix-copy { flex: 1; min-width: 200px; }
-.hiresfix-subtitle {
-  font-size: 13px; font-weight: 500; color: var(--text-bright);
-}
 .hiresfix-desc {
   font-size: 12px; color: #9A9189; margin-top: 2px;
 }
 .hiresfix-summary { font-size: 12px; color: #6F675F; }
-.hiresfix-link {
+.hiresfix-link, .quality-link {
   padding: 6px 10px; border: none; border-radius: 8px;
   background: transparent; color: #E07B6C;
   font-size: 13px; font-weight: 500; cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.hiresfix-link:hover {
+.hiresfix-link:hover, .quality-link:hover {
   background: rgba(224, 123, 108, 0.10); color: #CC6A5C;
 }
+/* ── 质量提示词 ── */
+.quality-section {
+  margin: 0 0 20px; padding: 16px 0;
+  border-bottom: 1px solid #EDE5DC;
+}
+.quality-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.quality-copy { flex: 1; min-width: 180px; }
+.quality-subtitle { font-size: 13px; font-weight: 700; color: var(--text-bright); }
+.quality-desc { font-size: 12px; color: #9A9189; margin-top: 2px; }
+.quality-summary {
+  font-size: 12px; color: #6F675F;
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.quality-summary.is-default { color: #9A9189; }
 .pl { font-size: 12px; color: #9A9189; margin-right: 2px; }
 .pbtn {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
@@ -2486,6 +2559,14 @@ function resetTestPrompts() {
 }
 .fav-dialog-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 .fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.quality-dialog-textarea {
+  width: 100%; padding: 10px 12px; font-size: 13px; font-family: inherit;
+  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
+  resize: vertical; min-height: 88px; line-height: 1.6; color: var(--text-bright);
+  transition: border-color 0.2s;
+}
+.quality-dialog-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.quality-dialog-textarea::placeholder { color: #b3aca4; }
 
 /* ── 弹窗过渡动画 ── */
 .fav-dialog-fade-enter-active { transition: opacity 0.2s ease; }
@@ -3221,6 +3302,9 @@ function resetTestPrompts() {
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
   .sa .btn-primary { padding-left: 18px; padding-right: 18px; }
   .sa .wf-action-btn { flex: 1 1 0; justify-content: center; padding: 8px 6px; }
+  /* 质量提示词行：窄屏摘要占满整行 */
+  .quality-summary { max-width: 100%; flex-basis: 100%; order: 2; }
+  .quality-row .quality-link { order: 3; margin-left: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

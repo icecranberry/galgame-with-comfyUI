@@ -101,7 +101,6 @@
         </div>
       </aside>
     </div>
-  </div>
 
     <!-- ═══ 角色详情抽屉 ═══ -->
     <CharacterDetailDrawer
@@ -343,6 +342,7 @@
         </div>
       </Transition>
     </Teleport>
+  </div>
 </template>
 
 <script setup lang="ts">

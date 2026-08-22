@@ -139,6 +139,8 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   const baseArtist = overrides.artist ?? config.comfyui.artist;
   const artistMode = config.comfyui.hiresArtistMode || 'empty';
   const artist = artistMode === 'empty' ? '' : artistMode === 'specified' ? (config.comfyui.hiresArtist || '') : baseArtist;
+  // 质量提示词覆盖（与生图工作流共用一份系统参数）
+  const qualityPrompt = typeof config.comfyui.qualityPrompt === 'string' ? config.comfyui.qualityPrompt.trim() : '';
 
   const loaderCopies = {
     UNETLoader: srcLoader('UNETLoader'),
@@ -203,6 +205,11 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
     // 画师串：替换第一个 widget
     if (node.title === NODE_TITLES.artist && node.widgets_values.length > 0) {
       node.widgets_values[0] = artist;
+    }
+
+    // 质量提示词：系统参数非空才覆盖，留空沿用细化工作流默认
+    if (node.title === NODE_TITLES.quality && qualityPrompt && node.widgets_values.length > 0) {
+      node.widgets_values[0] = qualityPrompt;
     }
   }
 
