@@ -66,8 +66,7 @@ const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不�
 
 你是一个用户特征分析器。从以下对话中，提取关于"用户（user）"的特征描述。
 
-从三个维度分析：
-- appearance: 用户的**外貌特征**（发色、发型、体型、穿着风格、气质等）
+从两个维度分析：
 - personality: 用户的**性格特征**（开朗、冷淡、温柔、毒舌、急性子等）
 - preference: 用户的**偏好习惯**（喜欢的食物、爱好、口头禅、习惯性行为等）
 
@@ -82,7 +81,7 @@ const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不�
 5. 每个维度最多输出一个，优先最有特点的
 
 输出格式：
-{"traits":[{"type":"appearance","content":"白发，身高大约170cm"},{"type":"personality","content":"性格冷静，喜欢理性分析"}]}
+{"traits":[{"type":"personality","content":"性格冷静，喜欢理性分析"}]}
 
 对话内容：
 {{messages}}`;
@@ -220,7 +219,6 @@ export async function maybeExtractPortrait(conversationId, characterId) {
 
 function normalizeType(type) {
   const t = (type || '').toLowerCase();
-  if (t === 'appearance') return 'appearance';
   if (t === 'personality' || t === 'persona') return 'personality';
   if (t === 'preference' || t === 'pref') return 'preference';
   return null;

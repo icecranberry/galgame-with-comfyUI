@@ -142,7 +142,7 @@ RRF 融合排序（关键词/实体通道 k=60，向量通道 k=120 权重减半
 
 角色视角下的用户特征提取，每个角色独立维护其"眼中"的用户画像。
 
-- **异步提取** (`portraitExtractor.js`): 每 10 条用户消息触发一次，LLM 从对话中提取三大维度（appearance/personality/preference），写入 `user_portraits` 表（`UNIQUE(character_id, trait_type, content)` 防重复）。
+- **异步提取** (`portraitExtractor.js`): 每 10 条用户消息触发一次，LLM 从对话中提取两大维度（personality/preference），写入 `user_portraits` 表（`UNIQUE(character_id, trait_type, content)` 防重复）。appearance 维度已移除——用户外观由 `config.user.appearance` 自述，启动时会幂等清理历史 appearance 行。
 - **向量相似度去重**: 新 trait 与已有 portrait 批量嵌入 → 余弦相似度 > 0.85 判定为语义重复，跳过写入。向量服务不可用时静默回退到 UNIQUE 约束。
 - **手动管理**: 前端 TavernView 中可查看/添加/编辑/删除画像，支持一键清空某角色的全部画像。
 

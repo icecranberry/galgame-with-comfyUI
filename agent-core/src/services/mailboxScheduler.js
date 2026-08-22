@@ -281,7 +281,7 @@ async function generateReplyData(charId, charName, charBasePrompt, userContent, 
   if (portraits.length > 0) {
     const groups = {};
     for (const p of portraits) { (groups[p.trait_type] ||= []).push(p.content); }
-    const label = { appearance: '外貌', personality: '性格', preference: '偏好' };
+    const label = { personality: '性格', preference: '偏好' };
     const lines = Object.entries(groups).map(([k, v]) => `- ${label[k] || k}：${v.join('；')}`);
     rel3Parts.push(`【你眼中 ${userName} 的画像】\n${lines.join('\n')}`);
   }

@@ -16,7 +16,7 @@ router.get('/:characterId', (req, res) => {
   `).all(characterId);
 
   // 按类型分组
-  const grouped = { appearance: [], personality: [], preference: [] };
+  const grouped = { personality: [], preference: [] };
   for (const p of portraits) {
     grouped[p.trait_type] = grouped[p.trait_type] || [];
     grouped[p.trait_type].push(p);
@@ -55,8 +55,8 @@ router.post('/', (req, res) => {
   const db = getDb();
   const { characterId, traitType, content } = req.body;
   if (!characterId) return res.status(400).json({ error: 'characterId is required' });
-  if (!['appearance', 'personality', 'preference'].includes(traitType)) {
-    return res.status(400).json({ error: 'traitType must be appearance/personality/preference' });
+  if (!['personality', 'preference'].includes(traitType)) {
+    return res.status(400).json({ error: 'traitType must be personality/preference' });
   }
   if (!content || typeof content !== 'string' || content.trim().length < 2) {
     return res.status(400).json({ error: 'content must be a string with at least 2 characters' });

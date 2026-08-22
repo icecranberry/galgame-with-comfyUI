@@ -348,6 +348,25 @@ function initSchema(db) {
       ended_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 梦境表（睡眠会话内共享；talk_schedule 为本次睡眠已排定的梦话时刻 ISO 数组）
+    CREATE TABLE IF NOT EXISTS character_dreams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      dream_type TEXT,
+      content TEXT NOT NULL,
+      image_prompt TEXT,
+      image_path TEXT,
+      dream_talks TEXT DEFAULT '[]',
+      talk_schedule TEXT DEFAULT '[]',
+      talks_emitted INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'generating' CHECK(status IN ('generating','ready','failed')),
+      sleep_until DATETIME,
+      shared_at DATETIME,
+      shared_via TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_dreams_char_created ON character_dreams(character_id, created_at DESC);
+
     -- 信箱信件表
     CREATE TABLE IF NOT EXISTS mailbox_letters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -594,6 +613,22 @@ function initSchema(db) {
 
   // 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
   migrateGroupChatSchema(db);
+
+  // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
+  // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
+  try {
+    const r = db.prepare(`DELETE FROM user_portraits WHERE trait_type = 'appearance'`).run();
+    if (r.changes > 0) console.log(`[db] migration: removed ${r.changes} appearance portrait row(s)`);
+  } catch (err) {
+    console.log('[db] appearance portrait cleanup skipped:', err.message);
+  }
+
+  // 迁移: 梦境系统已改为常驻逻辑（无开关），清理残留的 flag 设置行
+  try {
+    db.prepare(`DELETE FROM system_settings WHERE setting_key = 'feature_dreams'`).run();
+  } catch (err) {
+    console.log('[db] feature_dreams cleanup skipped:', err.message);
+  }
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);

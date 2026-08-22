@@ -21,6 +21,7 @@ import {
   stateToPrompt, affinityToPrompt, loadAffinity,
 } from './emotionEngine.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
@@ -150,6 +151,9 @@ async function processReplyQueue() {
 
   const isSleepWakeup = entry.delay_minutes === -1;
 
+  // 梦境系统：睡醒合并回复时注入未分享的梦（出口③）
+  const dream = isSleepWakeup ? getFreshUnsharedDream(entry.character_id) : null;
+
   console.log(`[replyQueue] Processing ${allPending.length} queued message(s) for ${entry.display_name}${isSleepWakeup ? ' (sleep wakeup)' : ''}`);
 
   try {
@@ -157,7 +161,7 @@ async function processReplyQueue() {
     const characterId = entry.character_id;
 
     // 构建 LLM 上下文（模拟 chat.js 的关键消息层）
-    const msgs = buildDelayedReplyContext(entry, allPending, isSleepWakeup);
+    const msgs = buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream);
 
     // 调用 LLM 生成回复
     const fullReply = await chatSync(msgs, {
@@ -219,6 +223,11 @@ async function processReplyQueue() {
     });
 
     console.log(`[replyQueue] Reply sent for ${entry.display_name}: ${segments.length} bubble(s), ${allPending.length} message(s) merged`);
+
+    // 梦境系统：睡醒回复已生成 → 标记梦为已分享（出口③）
+    if (dream?.id) {
+      try { markDreamShared(dream.id, 'wake_reply'); } catch { /* 非关键路径 */ }
+    }
   } catch (err) {
     console.error(`[replyQueue] Failed for ${entry.display_name}:`, err.message);
     // 失败：第一条重置为 waiting，3 分钟后重试
@@ -239,7 +248,7 @@ async function processReplyQueue() {
  * 为延迟回复构建 LLM 上下文
  * 复用 chat.js 的关键消息层结构，但不走流式
  */
-function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
+function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null) {
   const db = getDb();
   const characterId = entry.character_id;
   const conversationId = entry.conversation_id;
@@ -370,6 +379,14 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup) {
   }
 
   msgs.push({ role: 'system', content: delayNote });
+
+  // 梦境注入：刚睡醒，昨晚做了个梦，可以自然提一句（不强求）
+  if (isSleepWakeup && dream?.content) {
+    msgs.push({
+      role: 'system',
+      content: `[系统说明] 你刚睡醒，昨晚做了个梦：「${dream.content}」。回复时可以自然提一句，不强求。`,
+    });
+  }
 
   // 历史消息（最近的对话上下文）
   const history = db.prepare(`

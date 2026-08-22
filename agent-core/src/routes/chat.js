@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -25,7 +25,8 @@ import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
-import { getTimeTag, getLightHint, getLightNoteWithWeather, getTimeLightInline } from '../services/timeLight.js';
+import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
+import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
@@ -61,9 +62,6 @@ const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 
 // ── 智能配图计数器（per-conversation）：每轮用户发言 -1，生图成功后重置为 3，归零时跳过 LLM 判断直接生图 ──
 const imageJudgeCounters = new Map();  // conversationId -> count
-
-// ── 睡眠瞄一眼 prompt 缓存（per-character，内存级，服务重启后重置）──
-const sleepPromptCache = new Map();  // characterId -> prompt string
 
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
@@ -350,7 +348,8 @@ router.post('/characters/:id/chat', async (req, res) => {
       if (delayInfo.delay === -1) {
         const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
         if (character) {
-          await handleSleepMode(res, characterId, conversationId, userMsgId, character, finalScheduledAt);
+          // 梦境系统：睡中被叫 → 当场造梦 + 梦话应答 + 现场生图（用户消息仍照常进回复队列，醒后合并回复）
+          await handleDreamTalkReply(res, characterId, conversationId, userMsgId, character, message);
           return;
         }
       }
@@ -420,7 +419,8 @@ router.post('/characters/:id/chat', async (req, res) => {
 
       const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
       if (character) {
-        await handleSleepMode(res, characterId, conversationId, userMsgId, character, sleepUntil);
+        // 梦境系统：睡中被叫 → 当场造梦 + 梦话应答（同上，回复队列不受影响）
+        await handleDreamTalkReply(res, characterId, conversationId, userMsgId, character, message);
         return;
       }
 
@@ -732,7 +732,6 @@ ${coreRules}
       const grouped = {};
       for (const row of portraitRows) { (grouped[row.trait_type] = grouped[row.trait_type] || []).push(row.content); }
       const portraitStrs = [];
-      if (grouped.appearance) portraitStrs.push('外貌特征：' + grouped.appearance.join('、'));
       if (grouped.personality) portraitStrs.push('性格特征：' + grouped.personality.join('、'));
       if (grouped.preference) portraitStrs.push('偏好习惯：' + grouped.preference.join('、'));
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
@@ -1827,77 +1826,14 @@ export function clearImageJudgeCounter(charId) {
 }
 
 /**
- * 使用 LLM 生成睡眠场景的生图 prompt
- * 复用日程瞄一眼的 prompt 工程模式：人格 + 时间光线 + 睡眠约束 + image_prompt 规则
+ * 睡眠模式替代响应：角色没有醒，被消息声搅了一下 —— 用户触发即当场造梦：
+ * 1. 按需生成一场梦（幂等，已有本会话梦则复用；失败不阻塞）；
+ * 2. 当场 LLM 现编一句新鲜梦话应答（上下文=刚生成的梦 + user 消息「声音渗进梦里」）；
+ * 3. 梦话文字先推送（token），随后现场 ComfyUI 生成梦境配图，
+ *    走完整 generate_start/progress/done 推送流（前端渲染生图气泡的遮罩与进度）。
+ * SSE 事件契约与原睡眠路径一致；用户消息已照常写入 reply_queue，醒后仍会合并回复。
  */
-async function generateSleepPrompt(character) {
-  const charName = character.display_name;
-
-  // 命中缓存
-  const cached = sleepPromptCache.get(character.id);
-  if (cached) {
-    console.log(`[chat] sleep prompt cache hit for ${charName}`);
-    return cached;
-  }
-
-  const timeLightInline = getTimeLightInline();
-  const sleepNote = '【极其重要】角色正在睡觉，双眼必须紧闭，**房间里没有灯光，睡觉时候不开灯**，不能睁眼。表情安详放松，呈现深度睡眠的自然状态，盖被子。睡姿、床、被子、**睡衣（睡觉时候绝对不会穿本来的衣服）**等细节贴合角色性格。';
-
-  const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
-  let personaText = character.base_prompt
-    ? character.base_prompt.replace(/你/g, charName)
-    : `角色名：${charName}`;
-
-  // 誓约角色：银白细戒指外观细节
-  const oathRingUserName = config.user.nickname || 'user';
-  personaText = appendOathRing(personaText, character.id, oathRingUserName, { isFirstPerson: false, charName });
-
-  const msgs = [
-    { role: 'system', content: `你是一个专业的人像摄影师，现在需要给「${charName}」拍一张睡颜照。照片里的角色正在睡觉。${timeLightInline}。${sleepNote}` },
-    { role: 'system', content: personaText },
-    { role: 'system', content: `直接输出英文画面描述，不要任何格式包装或额外文字。${imageRulesText ? '\n\n输出要求：\n' + imageRulesText : ''}` },
-    { role: 'user', content: `请为「${charName}」拍一张正在睡觉的照片。` },
-  ];
-
-  let prompt = '';
-
-  try {
-    const rawResult = await chatSync(msgs, {
-      temperature: 0.7,
-      max_tokens: 512,
-      label: '睡眠瞄一眼prompt生成',
-    });
-
-    prompt = rawResult.trim()
-      .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-
-    if (prompt.length < 5) {
-      const promptMatch = rawResult.match(/"prompt"\s*:\s*"([^"]+)"/);
-      prompt = promptMatch ? promptMatch[1] : '';
-    }
-
-    if (!prompt || prompt.length < 5) {
-      prompt = `${charName} sleeping peacefully in bed, eyes closed, covered with blanket, dark room, night time, soft moonlight through window, anime style`;
-    }
-  } catch (err) {
-    console.error(`[chat] generateSleepPrompt failed for ${charName}:`, err.message);
-    prompt = `${charName} sleeping peacefully in bed, eyes closed, covered with blanket, dark room, night time, anime style`;
-  }
-
-  // 写入缓存
-  if (prompt) {
-    sleepPromptCache.set(character.id, prompt);
-    console.log(`[chat] sleep prompt cached for ${charName}: "${prompt.slice(0, 80)}..."`);
-  }
-
-  return prompt;
-}
-
-/**
- * 睡眠模式响应：建立 SSE 流，推送 Zzz 消息 + 瞄一眼睡眠图片
- * 不写入 raw_messages（完整消息库），仅作用于 messages（分句展示库）
- */
-async function handleSleepMode(res, characterId, conversationId, userMsgId, character, sleepUntil) {
+async function handleDreamTalkReply(res, characterId, conversationId, userMsgId, character, userMessage) {
   const db = getDb();
 
   res.writeHead(200, {
@@ -1912,102 +1848,122 @@ async function handleSleepMode(res, characterId, conversationId, userMsgId, char
     try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {}
   };
 
-  let zzzMsgId = null;
+  let msgRowId = null;
   let genTaskId = null;
+  let dream = null;
 
   try {
-    // 通知前端日程系统角色已进入睡眠
+    // 通知前端日程系统当前处于睡眠（与原睡眠路径一致）
     broadcast('schedule_state_change', {
       character_id: characterId,
       is_sleeping: true,
-      sleep_until: sleepUntil,
+      sleep_until: character.sleep_until || null,
       temporary_wake_until: null,
       wake_mode: null,
     });
 
-    // 1. 发送用户消息保存确认（不发送 bubble_break，让 Zzz 直接填充 initAttemptState 占位泡，避免空行）
+    // 1. 用户消息保存确认（先于 LLM 调用发送）
     send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
 
-    // 2. 在 messages 表中写入 Zzz 消息（不写入 raw_messages，raw_id = NULL）
-    const zzzResult = db.prepare(
-      'INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, NULL, ?, ?, 0)'
-    ).run(conversationId, 'assistant', '(Zzz...)');
-    zzzMsgId = zzzResult.lastInsertRowid;
+    // 2. 用户触发 → 当场造一场梦（幂等；已有本会话梦直接复用；失败不阻塞，梦话退化为无梦境上下文）
+    dream = await ensureDreamOnDemand(characterId, character.sleep_until || null);
 
-    // 3. 通过 SSE 发送 Zzz 文字气泡
-    send('token', { content: '(Zzz...)' });
+    // 3. 当场 LLM 现编新鲜梦话（无预置）；失败抛错 → 走 Zzz 兜底
+    const murmured = await generateLiveDreamMurmur(characterId, userMessage);
+    if (!murmured) throw new Error('live dream murmur generation failed');
+    const { talk, imagePrompt } = murmured;
+
+    // 3. 双表写入（raw 带语境包裹，LLM 后续知道"我说过这个？我不记得了"；messages 展示纯文本），
+    //    梦话文字先发出去
+    const rawResult = db.prepare(
+      `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
+    ).run(conversationId, `（睡梦中的梦话）${talk}`);
+    const msgResult = db.prepare(
+      `INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`
+    ).run(conversationId, rawResult.lastInsertRowid, talk);
+    msgRowId = msgResult.lastInsertRowid;
+
+    send('token', { content: talk });
     send('bubble_break', {});
 
-    // 4. 创建生图任务并发送 generate_start
-    const taskResult = db.prepare(
-      'INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, ?)'
-    ).run(conversationId, '', '', 'running');
-    genTaskId = taskResult.lastInsertRowid;
+    // 4. 现场生成梦境配图：完整 generate_start/progress/done 推送流（用户正在等图，走高优先级队列）
+    const finalPrompt = decorateDreamImagePrompt(imagePrompt);
+    if (finalPrompt) {
+      genTaskId = db.prepare(
+        'INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, ?)'
+      ).run(conversationId, '', '', 'running').lastInsertRowid;
 
-    send('generate_start', { taskId: genTaskId });
+      send('generate_start', { taskId: genTaskId });
 
-    // 5. LLM 生成睡眠画面 prompt
-    const generatedPrompt = await generateSleepPrompt(character);
-    db.prepare('UPDATE image_tasks SET prompt_original = ?, prompt_refined = ? WHERE id = ?')
-      .run(generatedPrompt, generatedPrompt, genTaskId);
+      const loras = _parseLoras(character);
+      const loraOpts = {};
+      if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
+      if (loras.length > 0) loraOpts.loras = loras;
+      const charArtist = charArtistOverride(character);
+      if (charArtist !== null) loraOpts.artist = charArtist;
 
-    // 6. 提交 ComfyUI 生图
-    const loras = _parseLoras(character);
-    const loraOpts = {};
-    if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
-    if (loras.length > 0) loraOpts.loras = loras;
-    const charArtist = charArtistOverride(character);
-    if (charArtist !== null) loraOpts.artist = charArtist;
+      const result = await generateImage(finalPrompt, {
+        scene: 'chat',
+        ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+        onProgress: (p) => {
+          if (p.stage === 'retrying') {
+            send('generate_retrying', { taskId: genTaskId, attempt: p.attempt, maxRetries: p.maxRetries });
+          }
+          if (p.progress != null) {
+            send('generate_progress', { taskId: genTaskId, progress: p.progress, totalSteps: p.totalSteps });
+          }
+        },
+        ...loraOpts,
+      });
 
-    const result = await generateImage(generatedPrompt, {
-      scene: 'chat',
-      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
-      onProgress: (p) => {
-        if (p.stage === 'retrying') {
-          send('generate_retrying', { taskId: genTaskId, attempt: p.attempt, maxRetries: p.maxRetries });
-        }
-        if (p.progress != null) {
-          send('generate_progress', { taskId: genTaskId, progress: p.progress, totalSteps: p.totalSteps });
-        }
-      },
-      ...loraOpts,
-    });
+      if (!result.success || !result.images?.length) {
+        throw new Error(result.error || 'dream image generation failed');
+      }
 
-    // 7. 保存图片并更新 messages 表
-    if (result.success && result.images?.length > 0) {
+      // 5. 落盘并挂到梦话气泡；同步回填为梦境档案配图（醒后主动分享出口复用）
       const urls = [];
       for (const img of result.images) {
-        const ts = Date.now();
-        const filename = `${ts}_${img.filename || 'comfy.png'}`;
+        const filename = `${Date.now()}_${img.filename || 'dream.png'}`;
         const url = saveBase64Image('chat', filename, img.base64);
-        if (url) {
-          urls.push(url);
-          img.url = url;
+        if (url) urls.push(url);
+      }
+      if (urls.length > 0) {
+        db.prepare('UPDATE messages SET images = ? WHERE id = ?')
+          .run(JSON.stringify(urls), msgRowId);
+        if (dream?.id) {
+          try {
+            db.prepare('UPDATE character_dreams SET image_path = ? WHERE id = ? AND image_path IS NULL')
+              .run(urls[0], dream.id);
+          } catch { /* 非关键路径 */ }
         }
       }
 
-      if (urls.length > 0) {
-        db.prepare('UPDATE messages SET images = ? WHERE id = ?')
-          .run(JSON.stringify(urls), zzzMsgId);
-      }
-
-      db.prepare(`UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?`)
-        .run(result.promptRefined || generatedPrompt, JSON.stringify(urls), result.wfMode || null, genTaskId);
+      db.prepare(`UPDATE image_tasks SET status = 'done', prompt_original = ?, prompt_refined = ?, output_paths = ?, finished_at = datetime('now') WHERE id = ?`)
+        .run(finalPrompt, result.promptRefined || finalPrompt, JSON.stringify(urls), genTaskId);
 
       invalidateGalleryCache();
 
-      send('generate_done', { taskId: genTaskId, images: result.images, source: result.source });
-    } else {
-      throw new Error(result.error || 'No images generated');
+      send('generate_done', { taskId: genTaskId, images: result.images.map(img => ({ ...img, url: img.url })) , source: result.source });
     }
+
+    console.log(`[dream] ${character.display_name} 睡中被叫，现编了一句梦话: "${talk}"${finalPrompt ? ' + 现场梦境图' : ''}`);
   } catch (err) {
-    console.error('[chat] sleep peek error:', err.message);
+    console.error('[chat] dream talk reply error:', err.message);
     if (genTaskId) {
       try {
         db.prepare(`UPDATE image_tasks SET status = 'failed', error_message = ?, finished_at = datetime('now') WHERE id = ?`)
           .run(err.message, genTaskId);
       } catch {}
       send('generate_error', { taskId: genTaskId, error: err.message });
+    }
+    if (!msgRowId) {
+      // 梦话文本都没发出去 → 兜底退回最简 Zzz 气泡，保证前端流正常收尾
+      try {
+        db.prepare('INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, NULL, ?, ?, 0)')
+          .run(conversationId, 'assistant', '(Zzz...)');
+        send('token', { content: '(Zzz...)' });
+        send('bubble_break', {});
+      } catch {}
     }
   } finally {
     send('done', {});

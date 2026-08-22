@@ -824,7 +824,7 @@ watch(showRelationGraph, (val) => {
 const showImpression = ref(false)
 const impressionLoading = ref(false)
 const impressionError = ref('')
-const impressionGrouped = ref({ appearance: [], personality: [], preference: [] })
+const impressionGrouped = ref({ personality: [], preference: [] })
 const impressionVad = ref(null)      // { instant, mood, dominantEmotion }
 const impressionAffinity = ref(50)
 const impressionLastDelta = ref(null)
@@ -1022,12 +1022,12 @@ async function openImpression() {
   showImpression.value = true
   impressionLoading.value = true
   impressionError.value = ''
-  impressionGrouped.value = { appearance: [], personality: [], preference: [] }
+  impressionGrouped.value = { personality: [], preference: [] }
   impressionVad.value = null
   impressionAffinity.value = 50
   try {
     const data = await getCharacterPortrait(chat.activeChar.id)
-    impressionGrouped.value = data.grouped || { appearance: [], personality: [], preference: [] }
+    impressionGrouped.value = data.grouped || { personality: [], preference: [] }
     impressionVad.value = data.vad || null
     impressionAffinity.value = data.affinity ?? 50
     impressionLastDelta.value = data.lastAffinityDelta ?? null
@@ -1138,11 +1138,11 @@ function formatTime(dateStr) {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-const typeLabel = { appearance: '外貌特征', personality: '性格特征', preference: '偏好习惯' }
-const typeIcon = { appearance: '🎨', personality: '🧠', preference: '❤️' }
-const typeColor = { appearance: '#e07b6c', personality: '#9b7fd4', preference: '#e05a7a' }
+const typeLabel = { personality: '性格特征', preference: '偏好习惯' }
+const typeIcon = { personality: '🧠', preference: '❤️' }
+const typeColor = { personality: '#9b7fd4', preference: '#e05a7a' }
 
-const groupKeys = ['appearance', 'personality', 'preference']
+const groupKeys = ['personality', 'preference']
 
 function confidenceLevel(confidence, index = 0) {
   const val = confidence ?? 0.5

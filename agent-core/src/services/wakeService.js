@@ -16,6 +16,7 @@ import {
 } from './emotionEngine.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { getTempWakeUntil } from './scheduleManager.js';
+import { getCurrentDream, markDreamShared } from './dreamService.js';
 
 /**
  * 处理叫醒：构建 LLM 上下文 → 生成回复 → 写入 DB → 广播 SSE
@@ -30,7 +31,9 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   const tempWakeUntil = getTempWakeUntil(characterId);
 
   // ── 构建 LLM 上下文 ──
-  const msgs = buildWakeContext(char, conversationId, userName, mode, attempts);
+  // 梦境系统：被吵醒前正做着的梦（叫醒注入出口②）
+  const dream = getCurrentDream(characterId);
+  const msgs = buildWakeContext(char, conversationId, userName, mode, attempts, dream);
 
   // ── 原子性抢占 reply_queue 中的积压消息 ──
   // 使用 UPDATE + AND status='waiting' 确保与 replyQueueScheduler 互斥
@@ -136,13 +139,18 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   });
 
   console.log(`[wakeService] Woke ${char.display_name} (${mode}), ${segments.length} bubble(s), backlog: ${pendingEntries.length}`);
+
+  // 梦境系统：叫醒回复已生成 → 标记梦为已分享（出口②）
+  if (dream?.id) {
+    try { markDreamShared(dream.id, 'wake'); } catch { /* 非关键路径 */ }
+  }
 }
 
 /**
  * 构建叫醒 LLM 上下文
  * 复用 replyQueueScheduler.buildDelayedReplyContext 的结构
  */
-function buildWakeContext(char, conversationId, userName, mode, attempts) {
+function buildWakeContext(char, conversationId, userName, mode, attempts, dream = null) {
   const db = getDb();
   const msgs = [];
 
@@ -218,6 +226,14 @@ function buildWakeContext(char, conversationId, userName, mode, attempts) {
       userActionMsg = `（你感觉到有人在叫你...慢慢睁开眼，看到了${userName}）`;
   }
   msgs.push({ role: 'system', content: wakePrompt });
+
+  // [层 2.5] 梦境注入：被吵醒前正做着的梦（梦被打断，可迷糊提到碎片/影响语气）
+  if (dream?.content) {
+    msgs.push({
+      role: 'system',
+      content: `[系统说明] 被吵醒前你正做着一个梦：「${dream.content}」。梦被打断了，你可以迷迷糊糊地提到梦的碎片，也可以因为梦的内容（害羞/后怕/懊恼）影响你此刻的语气。`,
+    });
+  }
 
   // [层 3] 历史对话上下文
   //   3a. 上一轮对话参考（assistant 最后回复 + 之前 2 条，含 user 提问）

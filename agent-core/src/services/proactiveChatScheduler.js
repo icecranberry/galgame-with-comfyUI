@@ -30,6 +30,7 @@ import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './tim
 import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getCoreDialogueRules } from '../builtinRules.js';
+import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
 
@@ -219,6 +220,9 @@ function pickMotive(affinity, streak = 0, isOath = false) {
       pool.push(...MOTIVES_NSFW);
     }
   }
+
+  // 梦境系统常驻：过滤掉现编的「做了个梦」动机（真梦由 dreamService 提供，避免自相矛盾）
+  pool = pool.filter(m => m.name !== '做了个梦');
 
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -831,9 +835,24 @@ async function tick() {
 
     // 5.5 随机选取聊天动机（按好感度分档）+ 加载角色人际关系 + 用户画像
     const isOath = !!loadOath(candidate.id);
-    const motive = pickMotive(affinity, streak, isOath);
+    let motive = pickMotive(affinity, streak, isOath);
     const relationshipContext = loadRelationshipContext(candidate.id);
     const userProfile = loadUserProfile();
+
+    // 5.6 梦境系统：存在未分享的真梦且好感度足够 → 概率覆盖为真实梦境分享动机（出口④）
+    let sharedDream = null;
+    {
+      const freshDream = getFreshUnsharedDream(candidate.id);
+      if (freshDream && affinity >= 60 && Math.random() < 0.6) {
+        motive = {
+          name: '做了个梦',
+          desc: `你昨晚真的做了这样一个梦：「${freshDream.content}」，你想讲给对方听`,
+          imageGen: true,
+        };
+        sharedDream = freshDream;
+        console.log(`⚡ ${candidate.display_name}: motive overridden by real dream #${freshDream.id}`);
+      }
+    }
 
     // 6. 生成开场白
     const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
@@ -843,6 +862,7 @@ async function tick() {
     const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
 
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
+    // 梦境动机同样走标准配图管线——现场生成全新配图，绝不复用睡中应答时用户已看过的图（防重复配图）
     let imageUrls = null;
     if (motive.imageGen) {
       imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
@@ -861,6 +881,11 @@ async function tick() {
       images: imageUrls || [],
       created_at: new Date().toISOString(),
     });
+
+    // 梦境系统：梦已正式分享（出口④）
+    if (sharedDream?.id) {
+      try { markDreamShared(sharedDream.id, 'proactive'); } catch { /* 非关键路径 */ }
+    }
 
     // 7.7 递增未回复连续计数（DB 持久化）
     db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
@@ -1108,9 +1133,23 @@ export async function forceProactiveNow(targetCharacterId) {
 
   const streak = candidate.proactive_streak || 0;
   const isOath = !!loadOath(candidate.id);
-  const motive = pickMotive(affinity, streak, isOath);
+  let motive = pickMotive(affinity, streak, isOath);
   const relationshipContext = loadRelationshipContext(candidate.id);
   const userProfile = loadUserProfile();
+
+  // 梦境系统：存在未分享的真梦且好感度足够 → 概率覆盖为真实梦境分享动机（出口④）
+  let sharedDream = null;
+  {
+    const freshDream = getFreshUnsharedDream(candidate.id);
+    if (freshDream && affinity >= 60 && Math.random() < 0.6) {
+      motive = {
+        name: '做了个梦',
+        desc: `你昨晚真的做了这样一个梦：「${freshDream.content}」，你想讲给对方听`,
+        imageGen: true,
+      };
+      sharedDream = freshDream;
+    }
+  }
   const greeting = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
   const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
@@ -1119,6 +1158,7 @@ export async function forceProactiveNow(targetCharacterId) {
     .run(streak + 1, candidate.id);
 
   // 如果需要配图，先生成图片再一起推送；否则直接推送
+  // 梦境动机同样走标准配图管线——现场生成全新配图，绝不复用睡中应答时用户已看过的图（防重复配图）
   let imageUrls = null;
   if (motive.imageGen) {
     imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
@@ -1137,6 +1177,11 @@ export async function forceProactiveNow(targetCharacterId) {
     images: imageUrls || [],
     created_at: new Date().toISOString(),
   });
+
+  // 梦境系统：梦已正式分享（出口④）
+  if (sharedDream?.id) {
+    try { markDreamShared(sharedDream.id, 'proactive'); } catch { /* 非关键路径 */ }
+  }
 
   updateNextProactiveAt(candidate.id, score);
 

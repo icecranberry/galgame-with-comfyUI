@@ -14,6 +14,7 @@ import { config } from '../config.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { getLocalDateKey } from '../utils/localDate.js';
+import { onCharacterWake } from './dreamService.js';
 
 
 // ── 缓存 ──
@@ -85,15 +86,15 @@ export function initialize() {
     const schedule = getTodayScheduleRaw(char.id);
     if (!schedule) continue;
 
-    const sleepingBlock = schedule.find(a => a.replyDelay === -1 && isInTimeSlot(a.startTime, a.endTime, now));
-    if (sleepingBlock) {
-      // 计算醒来时间
-      const sleepUntil = calcSleepUntil(sleepingBlock.endTime, now);
-      db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
-        .run(sleepUntil, char.id);
-      sleepers++;
-      console.log(`[scheduleMgr] ${char.display_name} is sleeping until ${sleepUntil}`);
-    } else {
+  const sleepingBlock = schedule.find(a => a.replyDelay === -1 && isInTimeSlot(a.startTime, a.endTime, now));
+  if (sleepingBlock) {
+    // 正在睡眠时段
+    const sleepUntil = calcSleepUntil(sleepingBlock.endTime, now);
+    db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
+      .run(sleepUntil, char.id);
+    sleepers++;
+    console.log(`[scheduleMgr] ${char.display_name} is sleeping until ${sleepUntil}`);
+  } else {
       // 确保非睡眠状态
       db.prepare('UPDATE characters SET is_sleeping = 0, sleep_until = NULL WHERE id = ? AND is_sleeping = 1')
         .run(char.id);
@@ -613,6 +614,13 @@ export function syncSleepingState(characterId, now = new Date()) {
         temporary_wake_until: null,
         wake_mode: null,
       });
+
+      // 梦境系统：自然醒 → 清理剩余梦话定时器 + 醒后加速主动推送
+      try {
+        onCharacterWake(characterId);
+      } catch (err) {
+        console.warn(`[scheduleMgr] onCharacterWake failed for ${characterId}:`, err.message);
+      }
     }
   }
 }
