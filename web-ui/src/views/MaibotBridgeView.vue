@@ -133,10 +133,10 @@
           <textarea id="base-prompt-input" v-model="basePromptInput" class="fi persona-textarea" rows="22"></textarea>
         </div>
         <div class="persona-side">
-          <label class="fl" for="behavior-style-input">行为风格</label>
-          <textarea id="behavior-style-input" v-model="behaviorStyleInput" class="fi persona-textarea-sm" rows="6"></textarea>
           <label class="fl" for="reply-style-input">表达风格</label>
           <textarea id="reply-style-input" v-model="replyStyleInput" class="fi persona-textarea-sm" rows="6"></textarea>
+          <label class="fl" for="behavior-style-input">行为风格</label>
+          <textarea id="behavior-style-input" v-model="behaviorStyleInput" class="fi persona-textarea-sm" rows="6"></textarea>
         </div>
       </div>
       <div class="card-actions">
