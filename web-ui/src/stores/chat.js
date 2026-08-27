@@ -4,6 +4,9 @@ import * as api from '../api/index.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
+function isEmojiImageUrl(url) {
+  return typeof url === 'string' && url.includes('/images/emoji/')
+}
 
 export const useChatStore = defineStore('chat', () => {
   let streamSeq = 0
@@ -64,11 +67,14 @@ export const useChatStore = defineStore('chat', () => {
     const result = [];
     let genSeq = 0;
     for (const msg of raw) {
-      // 清除历史消息中残留的 <br> 气泡分割标记，跳过清理后为空的消息
       const content = msg.content?.replace(/<br\s*\/?>/gi, '').trim();
-      if (!content) continue;   // 跳过空气泡（buggy 版本遗留的空 DB 记录）
+      let allImages = [];
+      try { allImages = JSON.parse(msg.images || '[]'); } catch {}
+      const imageUrls = Array.isArray(allImages) ? allImages : [];
+      const emojiImages = imageUrls.filter(isEmojiImageUrl);
+      const genImages = imageUrls.filter(u => !isEmojiImageUrl(u));
+      if (!content && emojiImages.length === 0) continue;
 
-      // 奇遇分享卡片：raw_id 为 null 且 event_id 不为 null
       if (msg.raw_id === null && msg.event_id != null) {
         let eventData = null;
         try { eventData = JSON.parse(msg.content); } catch {}
@@ -82,25 +88,25 @@ export const useChatStore = defineStore('chat', () => {
         continue;
       }
 
-      result.push({ ...msg, content, type: msg.type || 'text' });
-      if (msg.role === 'assistant' && msg.images) {
-        try {
-          const imageUrls = JSON.parse(msg.images);
-          if (Array.isArray(imageUrls) && imageUrls.length > 0) {
-            result.push({
-              id: uid(),
-              role: 'assistant',
-              type: 'image_gen',
-              genId: `hist_${msg.id}_${genSeq++}`,
-              genStatus: 'done',
-              images: imageUrls.map(url => ({ url, base64: null })),
-              created_at: msg.created_at,
-            });
-          }
-        } catch {}
+      result.push({
+        ...msg,
+        content,
+        type: msg.type || 'text',
+        sticker_images: emojiImages.map(url => ({ url, base64: null })),
+      });
+      if (msg.role === 'assistant' && genImages.length > 0) {
+        result.push({
+          id: uid(),
+          role: 'assistant',
+          type: 'image_gen',
+          genId: `hist_${msg.id}_${genSeq++}`,
+          genStatus: 'done',
+          images: genImages.map(url => ({ url, base64: null })),
+          created_at: msg.created_at,
+        });
       }
-    }
-    return result;
+      }
+      return result;
   }
 
   // 向上展开渲染窗口（无需网络请求，数据已全量在内存中）
@@ -256,7 +262,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content, forceImageGen = false) {
+  async function sendMessage(content, imageMode = 'smart') {
     if (streaming.value || !content.trim()) return
     const charId = activeCharId.value
     if (!charId) return
@@ -269,7 +275,7 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
-    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now })
+    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
 
@@ -354,7 +360,7 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       // ── 每轮尝试的状态 ──
-      let bubbleIds, bubbleText, msgSavedIdx, lastEvent, _bufTimer
+      let bubbleIds, bubbleText, msgSavedIdx, lastEvent, _bufTimer, pendingStickerTimers, pendingTextTimers
       function initAttemptState() {
         const firstBubbleId = uid()
         bubbleIds = [firstBubbleId]
@@ -362,11 +368,38 @@ export const useChatStore = defineStore('chat', () => {
         msgSavedIdx = 0
         lastEvent = null
         _bufTimer = null
+        pendingStickerTimers = new Map()
+        pendingTextTimers = new Map()
         messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
       }
       initAttemptState()
+      const scheduleSticker = (target, urls, leadingSticker = false) => {
+        if (!target || !Array.isArray(urls) || urls.length === 0) return
+        const existing = pendingStickerTimers.get(target)
+        if (existing) clearTimeout(existing)
+        const delay = leadingSticker ? 0 : 450
+        pendingStickerTimers.set(target, setTimeout(() => {
+          pendingStickerTimers.delete(target)
+          target.sticker_images = urls.map(url => ({ url, base64: null }))
+        }, delay))
+      }
+      const scheduleLeadingText = (target, text, delay = 450) => {
+        if (!target) return
+        const existing = pendingTextTimers.get(target)
+        if (existing) clearTimeout(existing)
+        pendingTextTimers.set(target, setTimeout(() => {
+          pendingTextTimers.delete(target)
+          target.content = stripPromptBlock(text)
+        }, delay))
+      }
+      const clearPendingEmojiTimers = () => {
+        for (const timer of pendingStickerTimers.values()) clearTimeout(timer)
+        for (const timer of pendingTextTimers.values()) clearTimeout(timer)
+        pendingStickerTimers.clear()
+        pendingTextTimers.clear()
+      }
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, forceImageGen)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode)
       abort = streamAbort
       const reader = stream.getReader()
 
@@ -378,28 +411,38 @@ export const useChatStore = defineStore('chat', () => {
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
             const d = value.data
-            // ── token ──
-            if (d.content) {
-              if (showTypingDots.value) showTypingDots.value = false
-              fullResponse += d.content
-              bubbleText += d.content
-              const curId = bubbleIds[bubbleIds.length - 1]
-              let m = messages.value.find(x => x.id === curId)
-              if (!m) {
-                m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
-                messages.value.push(m)
-              }
-              m.content = bubbleText
+             //  token（只有 token 事件才写入回复气泡，避免 msg_saved 等带 content 的事件串入）
+             if (lastEvent === 'token' && (d.content || (Array.isArray(d.images) && d.images.length))) {
+               if (showTypingDots.value) showTypingDots.value = false
+               if (d.content) {
+                 fullResponse += d.content
+                 bubbleText += d.content
+               }
+               const curId = bubbleIds[bubbleIds.length - 1]
+               let m = messages.value.find(x => x.id === curId)
+               if (!m) {
+                 m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
+                 messages.value.push(m)
+               }
+                const hasImages = Array.isArray(d.images) && d.images.length
+                const leadingSticker = hasImages && !!d.leadingSticker
+                if (d.content) {
+                  if (leadingSticker) scheduleLeadingText(m, bubbleText)
+                  else m.content = bubbleText
+                }
+                if (hasImages) {
+                  scheduleSticker(m, d.images, leadingSticker)
+                }
 
-              if (!_bufTimer) {
-                _bufTimer = setTimeout(() => {
-                  _bufTimer = null
-                  const nowId = bubbleIds[bubbleIds.length - 1]
-                  const dm = messages.value.find(x => x.id === nowId)
-                  if (dm) dm.content = stripPromptBlock(bubbleText)
-                }, 300)
-              }
-            }
+                if (d.content && !_bufTimer && !leadingSticker) {
+                  _bufTimer = setTimeout(() => {
+                    _bufTimer = null
+                    const nowId = bubbleIds[bubbleIds.length - 1]
+                    const dm = messages.value.find(x => x.id === nowId)
+                    if (dm) dm.content = stripPromptBlock(bubbleText)
+                  }, 300)
+                }
+             }
             // ── bubble_break ──
             if (lastEvent === 'bubble_break') {
               thisAttemptHadBubble = true
@@ -413,8 +456,9 @@ export const useChatStore = defineStore('chat', () => {
             // ── context_update ──
             if (lastEvent === 'context_update' && d.content) {
               fullResponse = d.content
-              if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-              const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
+               if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+               clearPendingEmojiTimers()
+               const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
               for (let i = 0; i < parts.length; i++) {
                 if (i < bubbleIds.length) {
                   let m = messages.value.find(x => x.id === bubbleIds[i])
@@ -477,8 +521,9 @@ export const useChatStore = defineStore('chat', () => {
               }
               streaming.value = false
               showTypingDots.value = false
-              if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
-              const delayMins = d.delayMinutes || 0
+               if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+               clearPendingEmojiTimers()
+               const delayMins = d.delayMinutes || 0
               const activity = d.currentActivity || '某件事'
               if (delayMins === -1) {
                 const est = d.estimatedReplyAt ? new Date(d.estimatedReplyAt) : null
@@ -499,14 +544,29 @@ export const useChatStore = defineStore('chat', () => {
               }
               affinityKey.value++
             }
-            // ── msg_saved: 临时 ID → 真实 ID ──
-            if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
-              thisAttemptHadMsgSaved = true
-              const tempId = bubbleIds[msgSavedIdx]
-              const m = messages.value.find(x => x.id === tempId)
-              if (m) m.id = d.id
-              msgSavedIdx++
-            }
+             //  msg_saved: 临时 ID  真实 ID / 用户消息解析 
+             if (lastEvent === 'msg_saved' && d.role === 'assistant' && d.id && msgSavedIdx < bubbleIds.length) {
+               thisAttemptHadMsgSaved = true
+               const tempId = bubbleIds[msgSavedIdx]
+               const m = messages.value.find(x => x.id === tempId)
+               if (m) {
+                 m.id = d.id
+                  if (d.content !== undefined) m.content = d.content
+                  if (Array.isArray(d.images) && d.images.length && !m.sticker_images?.length && !pendingStickerTimers.has(m)) {
+                    scheduleSticker(m, d.images, !!d.leadingSticker)
+                  }
+               }
+               msgSavedIdx++
+             }
+              if (lastEvent === 'msg_saved' && d.role === 'user' && d.client_msg_id) {
+                const m = messages.value.find(x => x.role === 'user' && x.clientMsgId === d.client_msg_id)
+                if (m) {
+                  if (d.content !== undefined) m.content = d.content
+                  if (Array.isArray(d.images) && d.images.length) {
+                    scheduleSticker(m, d.images, !!d.leadingSticker)
+                  }
+               }
+             }
           }
         } // end while(true)
 

@@ -63,6 +63,83 @@ export async function createCharacter(data) {
   return res.json()
 }
 
+// ── 表情包管理 ──
+export async function getEmojiOverview() {
+  const res = await fetch(`${BASE}/characters/emoji/overview`)
+  return res.json()
+}
+
+export async function getEmojiCategories() {
+  const res = await fetch(`${BASE}/characters/emoji/categories`)
+  return res.json()
+}
+
+export async function updateEmojiCategories(keys) {
+  const res = await fetch(`${BASE}/characters/emoji/categories`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  })
+  return res.json()
+}
+
+export async function getEmojiFixedTags() {
+  const res = await fetch(`${BASE}/characters/emoji/tags`)
+  return res.json()
+}
+
+export async function updateEmojiFixedTags(tags, styleMode) {
+  const res = await fetch(`${BASE}/characters/emoji/tags`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags, styleMode }),
+  })
+  return res.json()
+}
+
+export async function generateEmojiPrompts(character_ids, style = '') {
+  const res = await fetch(`${BASE}/characters/emoji/prompts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_ids, style }),
+  })
+  return res.json()
+}
+
+export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora') {
+  const res = await fetch(`${BASE}/characters/emoji/images`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_ids, keys, artist }),
+  })
+  return res.json()
+}
+
+export async function regenerateEmojiPrompt(characterId, key, style = '') {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/prompt`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ style }),
+  })
+  return res.json()
+}
+
+export async function regenerateEmojiImage(characterId, key, artist = '@ebora') {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/image`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist }),
+  })
+  return res.json()
+}
+
+export async function uploadEmojiImage(characterId, key, base64) {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  return res.json()
+}
+
+export async function deleteEmoji(characterId, key) {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function deleteCharacter(id) {
   const res = await fetch(`${BASE}/characters/${id}`, { method: 'DELETE' })
   return res.json()
@@ -171,7 +248,7 @@ export async function deleteUserRelationship(id) {
   return res.json()
 }
 
-export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart') {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -192,7 +269,7 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, force_image_gen: forceImageGen }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force' }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
@@ -489,6 +566,16 @@ export async function updateLlmConfig(data) {
     body: JSON.stringify(data),
   })
   return res.json()
+}
+
+export async function testLlmConnection(data) {
+  const res = await fetch(`${BASE}/config/llm/test`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || `LLM 连接测试失败 (${res.status})`)
+  return result
 }
 
 /** 每日免费鸡蛋开关（opencode zen 免费端点，免 Key） */

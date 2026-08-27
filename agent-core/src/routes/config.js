@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
-import { resetClient, chatSync, resetFreeEggFailureCount } from '../llm/llm-client.js';
+import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
@@ -276,6 +276,28 @@ router.get('/llm/key', (_req, res) => {
 });
 
 // POST /api/config/llm/models — 从 OpenAI-compatible 接口获取可用模型
+// POST /api/config/llm/test — 使用当前或表单 LLM 配置测试一次最小对话请求
+router.post('/llm/test', async (req, res) => {
+  try {
+    const result = await testLlmConnection({
+      baseURL: req.body?.baseURL || config.llm.baseURL,
+      apiKey: req.body?.apiKey || config.llm.apiKey,
+      model: req.body?.model || config.llm.model,
+      headers: req.body?.headers || config.llm.headers,
+      extraBody: req.body?.extraBody || config.llm.extraBody,
+    });
+    res.json(result);
+  } catch (error) {
+    const status = error?.status || error?.response?.status || 502;
+    const rawDetail = error?.error?.message || error?.message || 'LLM 连接测试失败';
+    const unstablePattern = /no body|status code|fetch failed|timeout|abort|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ENOTFOUND/i;
+    const detail = status >= 500 || unstablePattern.test(rawDetail)
+      ? `${rawDetail}。这通常是上游服务未响应或暂时超时，建议稍后重试。`
+      : rawDetail;
+    res.status(status >= 400 && status < 600 ? status : 502).json({ ok: false, error: detail });
+  }
+});
+
 router.post('/llm/models', async (req, res) => {
   const baseURL = String(req.body?.baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
   if (!baseURL) return res.status(400).json({ error: '请先填写 API 地址' });

@@ -11,6 +11,7 @@ import chatRoutes from './src/routes/chat.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
+import emojiRoutes from './src/routes/emoji.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
@@ -78,6 +79,7 @@ app.use('/avatars', express.static('data/avatars'));
 app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/memory', memoryRoutes);
 app.use('/api/images', imagesRoutes);
+app.use('/api/characters/emoji', emojiRoutes);  // 表情包管理（必须早于 /api/characters 挂载）
 app.use('/api/characters', charactersRoutes);  // /api/characters CRUD
 app.use('/api/config', configRoutes);
 app.use('/api/moments', momentsRoutes);

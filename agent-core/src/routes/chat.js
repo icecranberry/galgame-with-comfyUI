@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
@@ -23,6 +23,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from './images.js';
 import { saveBase64Image } from '../services/imagePaths.js';
+import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
@@ -260,7 +261,8 @@ router.get('/messages/:id', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', async (req, res) => {
-  const { message, client_msg_id, force_image_gen } = req.body;
+  const { message, client_msg_id, force_image_gen, image_mode } = req.body;
+  const imageMode = ['off', 'smart', 'force'].includes(image_mode) ? image_mode : (force_image_gen ? 'force' : 'smart');
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
@@ -268,6 +270,9 @@ router.post('/characters/:id/chat', async (req, res) => {
   const db = getDb();
   const characterId = req.params.id;
   const conversationId = convId(characterId);
+  const emojiMap = getCharacterEmojiMap(characterId, db);
+  const emojiNote = buildEmojiNote([...emojiMap.keys()]);
+  const parsedUserMessage = parseEmojiText(message, emojiMap);
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {
@@ -327,8 +332,8 @@ router.post('/characters/:id/chat', async (req, res) => {
         const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
           .run(conversationId, message, client_msg_id || null);
         userRawId = userRaw.lastInsertRowid;
-        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-          .run(conversationId, userRawId, message);
+        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'user', ?, ?, 0)`)
+            .run(conversationId, userRawId, parsedUserMessage.content, parsedUserMessage.images.length > 0 ? JSON.stringify(parsedUserMessage.images) : null);
         userMsgId = userMsg.lastInsertRowid;
       }
 
@@ -401,8 +406,8 @@ router.post('/characters/:id/chat', async (req, res) => {
         const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
           .run(conversationId, message, client_msg_id || null);
         userRawId = userRaw.lastInsertRowid;
-        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-          .run(conversationId, userRawId, message);
+        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'user', ?, ?, 0)`)
+            .run(conversationId, userRawId, parsedUserMessage.content, parsedUserMessage.images.length > 0 ? JSON.stringify(parsedUserMessage.images) : null);
         userMsgId = userMsg.lastInsertRowid;
       }
 
@@ -464,19 +469,22 @@ router.post('/characters/:id/chat', async (req, res) => {
       const userRaw = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, client_msg_id) VALUES (?, 'user', ?, ?)`)
         .run(conversationId, message, client_msg_id || null);
       userRawMsgId = userRaw.lastInsertRowid;
-      const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'user', ?, 0)`)
-        .run(conversationId, userRawMsgId, message);
-      userMsgId = userMsg.lastInsertRowid;
-      send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
-    }
+        const userMsg = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'user', ?, ?, 0)`)
+          .run(conversationId, userRawMsgId, parsedUserMessage.content, parsedUserMessage.images.length > 0 ? JSON.stringify(parsedUserMessage.images) : null);
+        userMsgId = userMsg.lastInsertRowid;
+        send('msg_saved', { id: userMsgId, role: 'user', client_msg_id: client_msg_id || null, content: parsedUserMessage.content, images: parsedUserMessage.images.length > 0 ? parsedUserMessage.images : undefined, leadingSticker: parsedUserMessage.leadingSticker, created_at: new Date().toISOString() });
+      }
+
 
     // 1.5 用户发送新消息 → 重置回复猜想冷却，本轮的 assistant 回复可以触发一次猜想
     guessCooldowns.delete(conversationId);
 
-    // 1.6 智能配图计数器 -1（per-conversation）
-    const counter = imageJudgeCounters.get(conversationId) ?? 3;
-    imageJudgeCounters.set(conversationId, Math.max(0, counter - 1));
-    console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);
+    // 1.6 智能配图计数器 -1（per-conversation；关闭配图时不消耗计数，也不触发归零强制生图）
+    if (imageMode !== 'off') {
+      const counter = imageJudgeCounters.get(conversationId) ?? 3;
+      imageJudgeCounters.set(conversationId, Math.max(0, counter - 1));
+      console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);
+    }
 
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
@@ -862,6 +870,7 @@ ${coreRules}
       summaryBlock,
       history: checkpointHistory,
       dynamicBlocks,
+        userPrefix: emojiNote,
     });
 
     // ── 副作用：首轮强调标记（event 已在 dynamicBlocks 中注入） ──
@@ -888,7 +897,12 @@ ${coreRules}
       const { segments, stopped } = splitter.feed(cleanChunk);
 
       for (const segText of segments) {
-        send('token', { content: segText });
+        const parsedSeg = parseEmojiText(segText, emojiMap);
+        send('token', {
+          content: parsedSeg.content,
+          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
+          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
+        });
         collectedSegments.push(segText);
         send('bubble_break', {});
         await sleep(typingDelay(segText));
@@ -900,7 +914,12 @@ ${coreRules}
     const { segments: lastSegs, stopped: wasStopped } = splitter.flushAll();
     if (lastSegs.length > 0) {
       for (const segText of lastSegs) {
-        send('token', { content: segText });
+        const parsedSeg = parseEmojiText(segText, emojiMap);
+        send('token', {
+          content: parsedSeg.content,
+          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
+          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
+        });
         collectedSegments.push(segText);
         send('bubble_break', {});
       }
@@ -919,7 +938,12 @@ ${coreRules}
           .map(s => stripBracketActions(s).trim())
           .filter(Boolean);
         for (const segText of lateSegments) {
-          send('token', { content: segText });
+          const parsedSeg = parseEmojiText(segText, emojiMap);
+          send('token', {
+            content: parsedSeg.content,
+            ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
+            ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
+          });
           collectedSegments.push(segText);
           send('bubble_break', {});
         }
@@ -933,46 +957,50 @@ ${coreRules}
     //    stripTags 兜底清洗；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-    const segments = collectedSegments
-      .map(s => stripTags(stripBracketActions(s)).trim())
-      .filter(Boolean);
-    const displayContent = segments.join('\n\n');
+      const parsedSegments = collectedSegments
+        .map(s => {
+          const cleaned = stripTags(stripBracketActions(s)).trim();
+          return { raw: cleaned, ...parseEmojiText(cleaned, emojiMap) };
+        })
+        .filter(p => p.content || p.images.length > 0);
+      const displayContent = parsedSegments.map(p => p.content).filter(Boolean).join('\n\n');
 
-    // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
-    if (wasStopped || tags.prompt || hasNeedImageTag) {
-      send('context_update', { content: displayContent });
-    }
-    // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
-    const rawContent = fullContent
-      .replace(/<needImage>/gi, '')
-      .trim();
-    const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
-      .run(conversationId, rawContent, tags.prompt || null);
-    const rawMsgId = rawResult.lastInsertRowid;
+      // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
+      if (wasStopped || tags.prompt || hasNeedImageTag) {
+        send('context_update', { content: displayContent });
+      }
+      // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
+      const rawContent = fullContent
+        .replace(/<needImage>/gi, '')
+        .trim();
+      const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
+        .run(conversationId, rawContent, tags.prompt || null);
+      const rawMsgId = rawResult.lastInsertRowid;
 
-    const savedIds = [];
-    for (let i = 0; i < segments.length; i++) {
-      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, ?)`)
-        .run(conversationId, rawMsgId, segments[i], i);
-      savedIds.push(r.lastInsertRowid);
-      send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
-    }
-    if (segments.length === 0) {
-      // 兜底：AI 没有返回有效文本
-      const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
-        .run(conversationId, '...');
-      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-        .run(conversationId, rawEmpty.lastInsertRowid, '...');
-      savedIds.push(r.lastInsertRowid);
-      send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
-    }
-    const lastInsertRowid = savedIds[savedIds.length - 1];
+      const savedIds = [];
+      for (let i = 0; i < parsedSegments.length; i++) {
+        const p = parsedSegments[i];
+        const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'assistant', ?, ?, ?)`)
+          .run(conversationId, rawMsgId, p.content, p.images.length > 0 ? JSON.stringify(p.images) : null, i);
+        savedIds.push(r.lastInsertRowid);
+        send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
+      }
+      if (parsedSegments.length === 0) {
+        // 兜底：AI 没有返回有效文本
+        const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
+          .run(conversationId, '...');
+        const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
+          .run(conversationId, rawEmpty.lastInsertRowid, '...');
+        savedIds.push(r.lastInsertRowid);
+        send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
+        }
+      const lastInsertRowid = savedIds[savedIds.length - 1];
 
     // 8.8 回复猜想 ← 启动（不 await，与情绪评估并行发起 LLM 调用）
     //      每次用户消息到达时重置冷却 → 每轮对话最多触发一次 → 写入 20s 冷却
     let guessPromise = null;
     let guessCooldownStart = 0;
-    if (config.features.replyGuesses && displayContent && segments.length > 0) {
+    if (config.features.replyGuesses && displayContent && parsedSegments.length > 0) {
       const now = Date.now();
       const cooldownUntil = guessCooldowns.get(conversationId);
       if (!cooldownUntil || now >= cooldownUntil) {
@@ -1049,7 +1077,9 @@ ${coreRules}
 
     // 10. 生图判断 ← 同步决策 + 异步发射（与预测、情绪三路并行发射 LLM 调用）
     let imageGenPromise = null;
-    if (tags.prompt) {
+    if (imageMode === 'off') {
+      console.log('[chat] image gen disabled: skipping image pipeline');
+    } else if (tags.prompt) {
       // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
       const db2 = getDb();
       const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
@@ -1224,6 +1254,8 @@ function stripTags(content) {
  */
 function stripBracketActions(text) {
   if (!text) return text;
+  // 暂时不需要清洗括号动作描写，直接返回原文
+  return text;
   // 匹配（...）内含动作/表情/语气/神态描写的括号块
   // 关键词: 地/着/一/眼/音/气/情/笑/脸/手/头/身/过/到/说/道/想/觉/动/跳/摇/点/看/回/转/愣/露/叹/拍/挥/伸/退/走/跑/坐/站/低/抬/转/指/瞪/闭/睁/留
   // 包含这些词且括号内字符数 ≥ 3 的视为动作描写
@@ -1380,9 +1412,13 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       invalidateGalleryCache();
 
       // 更新消息：挂上图片 URL
-      const updateResult = db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
-        .run(JSON.stringify(urls), assistantMsgId);
-      console.log(`[chat] images saved to message id=${assistantMsgId}, rows updated=${updateResult.changes}`);
+      const existingImages = db.prepare(`SELECT images FROM messages WHERE id = ?`).get(assistantMsgId);
+        let existingImageUrls = [];
+        try { existingImageUrls = JSON.parse(existingImages?.images || '[]'); } catch {}
+        const mergedImages = [...new Set([...(Array.isArray(existingImageUrls) ? existingImageUrls : []), ...urls])];
+        const updateResult = db.prepare(`UPDATE messages SET images = ? WHERE id = ?`)
+          .run(JSON.stringify(mergedImages), assistantMsgId);
+        console.log(`[chat] images saved to message id=${assistantMsgId}, rows updated=${updateResult.changes}`);
 
       db.prepare(`UPDATE image_tasks SET status='done', prompt_refined=?, output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
         .run(result.promptRefined || prompt, JSON.stringify(urls), result.wfMode, taskId);
@@ -1672,7 +1708,12 @@ ${contextBlock.content}`;
         .filter(Boolean);
 
       for (const segText of allSegments) {
-        send('token', { content: segText });
+        const parsedSeg = parseEmojiText(segText, emojiMap);
+        send('token', {
+          content: parsedSeg.content,
+          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
+          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
+        });
         send('bubble_break', {});
         await sleep(typingDelay(segText));
       }

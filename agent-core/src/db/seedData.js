@@ -21,6 +21,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_memory: 'true',
   feature_replyGuesses: 'true',
   feature_forceImageGen: 'false',
+  feature_imageGenMode: 'smart',
   feature_realtimeAffinityDisplay: 'true',
   feature_proactiveChat: 'true',
   feature_proactiveChatFreq: '1',
@@ -96,6 +97,7 @@ const DEFAULT_ARTIST_FAVORITES = [
   { label: '水彩风', artist: 'A vibrant yet subtly muted watercolor-style illustration in a loose, expressive hand-drawn aesthetic with soft blended gradients and visible brushstroke textures', sort_order: 7 },
   { label: '@mika_pikazo', artist: '@mika_pikazo', sort_order: 8 },
   { label: '@hiten', artist: '@hiten', sort_order: 9 },
+  { label: '@sincos', artist: '@sincos', sort_order: 10 }
 ];
 
 /**

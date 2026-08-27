@@ -101,7 +101,7 @@
               ref="sceneDescRef"
               v-model="freeSceneDesc"
               class="free-scene-textarea"
-              placeholder="（置空使用默认）自由描述任意想要的画面，邻舍会自动完善提示词"
+              placeholder="（置空使用默认）自由描述任意画面"
               @focus="sceneDescFocused = true"
               @blur="onSceneDescBlur"
             ></textarea>
@@ -522,6 +522,9 @@
         <div class="sa" style="margin-top:12px">
           <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
           <span v-if="llmSaved" class="smsg">已保存</span>
+          <button class="btn-ghost llm-test-btn" :disabled="llmTesting || !llmHeadersValid || !llmExtraBodyValid" @click="runLlmConnectionTest">
+            {{ llmTesting ? '测试中…' : '测试连接' }}
+          </button>
           <button type="button" class="relay-intro-btn relay-intro-footer" @click="showRelayModal = true">推荐中转站</button>
         </div>
         </div>
@@ -984,7 +987,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
@@ -1237,6 +1240,7 @@ const llmExtraBodyValid = computed(() => {
 const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
+const llmTesting = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 
 // 高级设置抽屉
@@ -1247,7 +1251,7 @@ function toggleLlmAdvanced() { llmAdvancedOpen.value = !llmAdvancedOpen.value }
 const showRelayModal = ref(false)
 const relayStations = [
   { name: '词元跳动', keysUrl: 'https://tokendance.space/keys', url: 'https://tokendance.space/gateway/v1', desc: '仍然提供v4flash预览版，所以没有涨价' },
-  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_diFEv6PmFUprNAYDqV6mK3Zs', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
+  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_sFVpaGViDHbVQrjGtHKXT2in', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
 ]
 
 const relayConfigBusy = ref(false)
@@ -1783,19 +1787,50 @@ async function saveComfyUrl() {
   await checkHealth()
 }
 
-async function saveLlmConfig() {
+function buildLlmPayload() {
+  const payload = {}
+  if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+  if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
+  if (llmModel.value) payload.model = llmModel.value
+  payload.thinkingMode = llmThinkingMode.value
+  payload.headers = isCustomBaseURL.value && llmHeadersEnabled.value
+    ? JSON.parse(llmHeadersText.value)
+    : {}
+  payload.extraBody = isCustomBaseURL.value && llmExtraBodyEnabled.value
+    ? JSON.parse(llmExtraBodyText.value)
+    : {}
+  return payload
+}
+
+async function runLlmConnectionTest() {
+  if (llmTesting.value) return
+  if (!llmHeadersValid.value || !llmExtraBodyValid.value) {
+    toastFn?.('请先修正 LLM 自定义请求头或请求体 JSON', 'warning')
+    return
+  }
+  if (!llmBaseURL.value.trim()) {
+    toastFn?.('请先填写 API 地址', 'warning')
+    return
+  }
+
+  llmTesting.value = true
   try {
-    const payload = {}
-    if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
-    if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
-    if (llmModel.value) payload.model = llmModel.value
-    payload.thinkingMode = llmThinkingMode.value
-    payload.headers = isCustomBaseURL.value && llmHeadersEnabled.value
-      ? JSON.parse(llmHeadersText.value)
-      : {}
-    payload.extraBody = isCustomBaseURL.value && llmExtraBodyEnabled.value
-      ? JSON.parse(llmExtraBodyText.value)
-      : {}
+    const result = await testLlmConnection(buildLlmPayload())
+    const parts = ['LLM 连接成功']
+    if (result.model) parts.push(result.model)
+    if (result.latencyMs != null) parts.push(`${result.latencyMs}ms`)
+    toastFn?.(parts.join(' · '), 'success')
+  } catch (err) {
+    toastFn?.('LLM 连接失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    llmTesting.value = false
+  }
+}
+
+async function saveLlmConfig() {
+
+  try {
+    const payload = buildLlmPayload()
     const result = await updateLlmConfig(payload)
     if (result.ok) {
       settingsStore.setHasApiKey(result.hasApiKey)

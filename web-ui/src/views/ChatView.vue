@@ -72,7 +72,7 @@
                 <span v-if="item.msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
+              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -83,6 +83,14 @@
                 <circle cx="52" cy="5" r="3" class="dot dot-4" />
                 <circle cx="64" cy="5" r="3" class="dot dot-5" />
               </svg>
+              <!-- 表情包：独立 100×100 气泡，不再并入文本气泡 -->
+              <div v-else-if="item.piece.kind === 'sticker'" class="msg-bubble msg-sticker-bubble">
+                <img
+                  :src="item.msg.sticker_images[item.piece.index]?.url || item.msg.sticker_images[item.piece.index]"
+                  class="msg-sticker-img"
+                  loading="lazy"
+                />
+              </div>
               <div v-else-if="item.msg.content" class="msg-bubble">
                 <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
               </div>
@@ -118,11 +126,16 @@
 
       <div class="input-area">
         <div class="force-img-wrap">
-          <label class="force-img-toggle" :class="{ active: forceImageGen }">
-            <input type="checkbox" :checked="forceImageGen" @change="onForceImageGenChange" />
-            <span class="force-img-icon">🎨</span>
-          </label>
-          <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
+          <button
+            type="button"
+            class="force-img-toggle"
+            :class="{ active: imageGenMode === 'force', off: imageGenMode === 'off' }"
+            :title="imageGenModeLabel"
+            @click="cycleImageGenMode"
+          >
+            <span class="force-img-icon">{{ imageGenModeIcon }}</span>
+          </button>
+          <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ imageGenModeLabel }}</span>
         </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
@@ -603,14 +616,27 @@ const isCharSleeping = computed(() => {
   const s = charSleepState.value
   return s ? (s.is_sleeping && !s.is_temp_woken) : false
 })
-const forceImageGen = computed(() => settings.forceImageGen)
+const imageGenMode = computed(() => settings.imageGenMode)
+const imageGenModeLabel = computed(() => {
+  if (imageGenMode.value === 'off') return '关闭配图'
+  if (imageGenMode.value === 'force') return '强制配图'
+  return '灵性配图'
+})
+const imageGenModeIcon = computed(() => {
+  if (imageGenMode.value === 'off') return '🚫'
+  if (imageGenMode.value === 'force') return '✨'
+  return '🎨'
+})
 const realtimeAffinityEnabled = computed({
   get: () => settings.realtimeAffinityDisplay,
   set: (v) => settings.setRealtimeAffinityDisplay(v),
 })
 
-function onForceImageGenChange(e) {
-  settings.setForceImageGen(e.target.checked)
+const IMAGE_GEN_MODE_CYCLE = ['smart', 'force', 'off']
+
+function cycleImageGenMode() {
+  const idx = IMAGE_GEN_MODE_CYCLE.indexOf(imageGenMode.value)
+  settings.setImageGenMode(IMAGE_GEN_MODE_CYCLE[(idx + 1) % IMAGE_GEN_MODE_CYCLE.length])
   showForceTip()
 }
 
@@ -1285,10 +1311,21 @@ const flatItems = computed(() => {
 const items = []
 for (const group of messageGroups.value) {
 items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
-for (let mi = 0; mi < group.msgs.length; mi++) {
-const msg = group.msgs[mi]
-const sameRole = mi > 0 && group.msgs[mi - 1].role === msg.role
-items.push({ type: 'message', msg, id: msg.id, sameRole })
+let prevRole = null
+for (const msg of group.msgs) {
+// 表情包拆成独立气泡，文本和表情包分开展示
+const pieces = []
+if (msg.sticker_images?.length) {
+for (let i = 0; i < msg.sticker_images.length; i++) pieces.push({ kind: 'sticker', index: i })
+}
+if (msg.content) pieces.push({ kind: 'text' })
+if (pieces.length === 0) pieces.push({ kind: 'text' })
+for (const piece of pieces) {
+const sameRole = prevRole !== null && prevRole === msg.role
+const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
+items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
+prevRole = msg.role
+}
 }
 }
 return items
@@ -1497,6 +1534,17 @@ watch(() => chat.messages.length, (newLen) => {
     scrollToBottom()  // 流式分句：平滑滚动
   }
 })
+// 表情包是追加到当前分句气泡上的，不改变 messages.length；单独监听贴图数量触发滚底
+watch(
+  () => {
+    const last = chat.messages[chat.messages.length - 1]
+    return `${last?.sticker_images?.length || 0}:${last?.content ? 1 : 0}`
+  },
+  () => {
+    if (pendingCharSwitch) return
+    scrollToBottom()
+  }
+)
 
 // 候选词出现时平滑滚底（此时 streaming 已结束，scrollTo 不与气泡插入竞争）
 watch(() => chat.guesses, (val) => {
@@ -1574,7 +1622,7 @@ async function send() {
   const text = inputText.value.trim()
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text, forceImageGen.value)
+  await chat.sendMessage(text, imageGenMode.value)
   await scrollToBottom(true)
 }
 
@@ -1656,7 +1704,7 @@ function renderContent(text) {
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
 
 /* ── 消息气泡保持不变 ── */
-.message { display:flex; margin:3px 0; align-items:flex-end; gap:8px; }
+.message { display:flex; margin:3px 0; align-items:flex-start; gap:8px; }
 .message.user { flex-direction:row-reverse; }
 .message.assistant { flex-direction:row; }
 
@@ -1701,6 +1749,15 @@ function renderContent(text) {
 }
 
 .msg-text { font-size:14px; line-height:1.6; }
+/* 表情包独立气泡：高度固定 120px，宽度随图片比例自适应，柔和圆角白底 */
+.msg-sticker-bubble {
+  height:120px; width:auto; padding:0; border-radius:8px; overflow:hidden; flex-shrink:0;
+  background:rgba(255,255,255,0.6); border:none; box-sizing:border-box;
+}
+.message.user .msg-sticker-bubble, .message.assistant .msg-sticker-bubble {
+  background:rgba(255,255,255,0.6); border:none;
+}
+.msg-sticker-bubble .msg-sticker-img { height:120px; width:auto; object-fit:contain; border-radius:8px; background:transparent; padding:0; display:block; }
 .msg-text :deep(code) { background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:13px; }
 .msg-text :deep(strong) { font-weight:600; }
 
@@ -1714,10 +1771,11 @@ function renderContent(text) {
   border-radius: 12px; cursor: pointer;
   background: rgba(255, 255, 255, 0.7);
   border: 1.5px solid rgba(255, 255, 255, 0.35);
+  font: inherit; color: inherit; padding: 0;
+  -webkit-tap-highlight-color: transparent; user-select: none;
   transition: all 0.25s ease;
   opacity: 0.5;
 }
-.force-img-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .force-img-icon { font-size: 18px; line-height: 1; transition: transform 0.25s ease; }
 .force-img-toggle:hover { opacity: 0.8; border-color: rgba(224, 123, 108, 0.3); }
 .force-img-toggle.active {
@@ -1727,6 +1785,14 @@ function renderContent(text) {
   box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12), 0 0 16px rgba(224, 123, 108, 0.08);
 }
 .force-img-toggle.active .force-img-icon { transform: scale(1.1); }
+.force-img-toggle.off {
+  opacity: 0.55;
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: none;
+}
+.force-img-toggle.off:hover { opacity: 0.75; border-color: rgba(0, 0, 0, 0.2); }
+.force-img-toggle.off .force-img-icon { transform: scale(0.92); }
 
 .force-img-tip {
   position: absolute;

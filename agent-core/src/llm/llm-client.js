@@ -191,6 +191,55 @@ export async function chatSync(messages, opts = {}) {
   }
 }
 
+/**
+ * 用当前或表单中的 LLM 配置发一次最小对话请求，用于设置页的连接测试。
+ * 不修改全局 config，也不走免费鸡蛋/并发队列，避免影响真实聊天请求。
+ */
+export async function testLlmConnection({ baseURL, apiKey, model, headers = {}, extraBody = {} } = {}) {
+  const effectiveBaseURL = String(baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
+  if (!effectiveBaseURL) throw new Error('API 地址未配置');
+  try {
+    const parsed = new URL(effectiveBaseURL);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+  } catch {
+    throw new Error('API 地址格式无效');
+  }
+
+  const effectiveModel = model || config.llm.model || 'deepseek-v4-flash';
+  const effectiveApiKey = apiKey || config.llm.apiKey || '';
+  const effectiveHeaders = headers && typeof headers === 'object' && !Array.isArray(headers) ? headers : {};
+  const effectiveExtraBody = extraBody && typeof extraBody === 'object' && !Array.isArray(extraBody) ? extraBody : {};
+
+  const clientOptions = {
+    baseURL: effectiveBaseURL,
+    apiKey: effectiveApiKey || 'free-egg',
+    timeout: 15000,
+    maxRetries: 0,
+  };
+  if (Object.keys(effectiveHeaders).length) clientOptions.defaultHeaders = effectiveHeaders;
+  if (!effectiveApiKey) {
+    clientOptions.defaultHeaders = { Authorization: null, ...(clientOptions.defaultHeaders || {}) };
+  }
+  const client = new OpenAI(clientOptions);
+
+  const params = {
+    model: effectiveModel,
+    messages: [{ role: 'user', content: 'ping' }],
+    max_tokens: 8,
+  };
+  Object.assign(params, effectiveExtraBody);
+
+  const startedAt = Date.now();
+  const response = await client.chat.completions.create(params);
+  return {
+    ok: true,
+    model: effectiveModel,
+    endpoint: effectiveBaseURL,
+    latencyMs: Date.now() - startedAt,
+    reply: response?.choices?.[0]?.message?.content?.slice(0, 80) || '',
+  };
+}
+
 async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();

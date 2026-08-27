@@ -80,6 +80,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     memory: process.env.FEATURE_MEMORY !== 'false',
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
+    imageGenMode: process.env.FEATURE_FORCE_IMAGE_GEN === 'true' ? 'force' : 'smart', // 'off' | 'smart' | 'force'
     realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
     proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
@@ -277,6 +278,14 @@ export function updateHiresLora(loras) {
 }
 
 export function updateFeatureFlag(key, value) {
+  // 三态字符串开关：'off' | 'smart' | 'force'，不走布尔强转
+  if (key === 'imageGenMode') {
+    const mode = ['off', 'smart', 'force'].includes(value) ? value : 'smart';
+    config.features.imageGenMode = mode;
+    persistSettingSync('feature_imageGenMode', mode);
+    console.log(`[config] imageGenMode = ${mode}`);
+    return;
+  }
   const boolVal = value === true || value === 'true';
   config.features[key] = boolVal;
   persistSettingSync(`feature_${key}`, String(boolVal));

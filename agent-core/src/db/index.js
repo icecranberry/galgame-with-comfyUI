@@ -21,8 +21,31 @@ export function getDb() {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     initSchema(db);
+    cleanupOrphanedInFlight(db);
   }
   return db;
+}
+
+// ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
+// moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
+function cleanupOrphanedInFlight(database) {
+  const tasks = [
+    // 表名, 中断状态, 回收为（interrupted 后可重新生成的状态）
+    ['character_emojis', `status = 'generating'`, `status = 'failed', error_message = '服务重启导致生成中断，请重新生成'`],
+    ['image_tasks', `status IN ('pending','running')`, `status = 'failed', error_message = '服务重启导致任务中断', finished_at = datetime('now')`],
+    ['reply_queue', `status = 'processing'`, `status = 'waiting'`],
+    ['character_dreams', `status = 'generating'`, `status = 'failed'`],
+  ];
+  for (const [table, where, set] of tasks) {
+    try {
+      const result = database.prepare(`UPDATE ${table} SET ${set} WHERE ${where}`).run();
+      if (result.changes > 0) {
+        console.log(`[db] 启动清理: ${table} ${result.changes} 条中断状态已回收`);
+      }
+    } catch (err) {
+      console.warn(`[db] 启动清理 ${table} 失败:`, err.message);
+    }
+  }
 }
 
 function initSchema(db) {
@@ -255,6 +278,30 @@ function initSchema(db) {
       handwriting_font TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+      -- 角色表情包表（每个角色每种表情一条，prompt 生成与图片生成分离）
+      CREATE TABLE IF NOT EXISTS character_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        emoji_key TEXT NOT NULL,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(character_id, emoji_key)
+      );
+
+      -- 表情类别表（可编辑的 15 个默认类别，按 sort_order 排序）
+      CREATE TABLE IF NOT EXISTS emoji_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
 
     -- 画师串收藏夹
     CREATE TABLE IF NOT EXISTS artist_favorites (
@@ -507,6 +554,8 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_portraits_type ON user_portraits(trait_type);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
+      CREATE INDEX IF NOT EXISTS idx_character_emojis_character ON character_emojis(character_id, status);
+      CREATE INDEX IF NOT EXISTS idx_emoji_categories_sort ON emoji_categories(sort_order, id);
     CREATE INDEX IF NOT EXISTS idx_ce_char_status ON character_events(character_id, status);
     CREATE INDEX IF NOT EXISTS idx_ce_expires ON character_events(expires_at);
     CREATE INDEX IF NOT EXISTS idx_eh_char ON event_history(character_id, created_at DESC);
@@ -632,6 +681,9 @@ function initSchema(db) {
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
+  // 种子: 表情类别（仅首次运行插入默认 15 类）
+  seedEmojiCategories(db);
+  migrateEmojiCategoriesV2(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
@@ -676,6 +728,31 @@ function initSchema(db) {
  * 仅插入缺失的系统条目（INSERT OR IGNORE），不覆盖用户对已有条目的编辑；
  * 软删除（is_active=0）的条目行仍存在，因此不会在下次启动时复活。
  */
+/** 种子：默认表情类别（仅当 emoji_categories 为空时插入） */
+function seedEmojiCategories(db) {
+  const row = db.prepare('SELECT COUNT(*) AS c FROM emoji_categories').get();
+  if (row?.c > 0) return;
+  const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+  const keys = ['开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心', '无语', '嫌弃', '心虚'];
+  for (let i = 0; i < keys.length; i++) insert.run(keys[i], i + 1);
+}
+
+/** 迁移：给旧默认 12 类追加新增的 3 个默认类别，不打扰已自定义的列表 */
+function migrateEmojiCategoriesV2(db) {
+  try {
+    const existing = new Set(db.prepare('SELECT emoji_key FROM emoji_categories').all().map(r => r.emoji_key));
+    const legacyDefaults = ['开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心'];
+    if (!legacyDefaults.every(k => existing.has(k))) return;
+    const newKeys = ['无语', '嫌弃', '心虚'].filter(k => !existing.has(k));
+    if (newKeys.length === 0) return;
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM emoji_categories').get().m;
+    const insert = db.prepare('INSERT OR IGNORE INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+    newKeys.forEach((k, i) => insert.run(k, maxOrder + i + 1));
+    console.log(`[db] migrateEmojiCategoriesV2: appended ${newKeys.join('、')}`);
+  } catch (err) {
+    console.log('[db] migrateEmojiCategoriesV2 error:', err.message);
+  }
+}
 function seedEventLibraries(db) {
   // 事件类型库
   const seedEventType = db.prepare(`
@@ -1435,6 +1512,8 @@ const DB_ONLY_KEYS = new Set([
   'workflow_mode_auto_detected',
   'maibot_webui_url',
   'maibot_webui_token',
+  'emoji_fixed_tags',
+  'emoji_style_mode',
 ]);
 
 /** 写入单条系统设置 */
@@ -1464,6 +1543,7 @@ const SETTING_TO_CONFIG = {
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
+  feature_imageGenMode:                { obj: 'features', key: 'imageGenMode',             type: 'string' },
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
   feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
   feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },

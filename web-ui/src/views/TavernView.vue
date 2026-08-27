@@ -140,6 +140,17 @@
       <span class="relation-entry-arrow">›</span>
     </div>
     <div class="char-grid">
+        <!-- 表情包管理入口：永远在招募前 -->
+        <div class="char-card emoji-manage-card" @click="showEmojiManager = true">
+          <div class="emoji-manage-icon">
+            <svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true">
+              <path d="M334.711467 160.290133a413.013333 413.013333 0 0 1 239.547733-48.674133 37.614933 37.614933 0 0 1-7.509333 74.683733A338.056533 338.056533 0 0 0 197.973333 567.022933a337.92 337.92 0 0 0 672.9728-42.5984v-37.546666a37.546667 37.546667 0 1 1 75.093334 0v37.751466a413.013333 413.013333 0 1 1-611.328-364.3392z"/>
+              <path d="M653.312 576.853333a37.546667 37.546667 0 0 1 59.938133 45.192534l-0.2048 0.273066-0.273066 0.341334-0.8192 1.024a141.585067 141.585067 0 0 1-11.946667 13.5168 261.12 261.12 0 0 1-34.679467 30.242133c-29.9008 21.777067-75.093333 44.714667-132.3008 44.714667-57.344 0-102.4-22.9376-132.437333-44.714667a261.256533 261.256533 0 0 1-43.895467-40.5504l-2.730666-3.208533-0.682667-1.024a19.0464 19.0464 0 0 0-0.341333-0.341334v-0.136533l-0.2048-0.136533a37.546667 37.546667 0 0 1 60.074666-45.056h0.068267l1.297067 1.6384a186.1632 186.1632 0 0 0 30.72 28.0576c21.572267 15.7696 51.541333 30.446933 88.064 30.446933 36.6592 0 66.628267-14.677333 88.2688-30.446933a186.026667 186.026667 0 0 0 30.583466-27.989334l1.297067-1.6384 0.2048-0.2048zM420.727467 374.237867a37.546667 37.546667 0 0 1 0 75.093333h-0.341334a37.546667 37.546667 0 0 1 0-75.093333h0.341334z m225.28 0a37.546667 37.546667 0 0 1 0 75.093333h-0.4096a37.546667 37.546667 0 0 1 0-75.093333h0.4096z m112.298666 0v-75.093334h-75.093333a37.546667 37.546667 0 0 1 0-75.093333h75.093333v-75.093333a37.546667 37.546667 0 0 1 75.093334 0v75.093333h75.093333a37.546667 37.546667 0 0 1 0 75.093333h-75.093333v75.093334a37.546667 37.546667 0 1 1-75.093334 0z"/>
+            </svg>
+          </div>
+          <span>表情包管理</span>
+        </div>
+
       <!-- 招募卡片：永远在第一格 -->
       <div class="char-card recruit-card" @click="openRecruit">
         <div class="recruit-plus">+</div>
@@ -534,6 +545,8 @@
          信箱弹窗
          ═══════════════════════════════════════════ -->
     <MailboxModal :visible="showMailbox" :characters="sortedCharacters" @close="showMailbox = false" />
+
+      <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
   </div>
 </template>
 
@@ -549,6 +562,7 @@ import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
+import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 
 const router = useRouter()
@@ -556,6 +570,7 @@ const chat = useChatStore()
 const mailboxStore = useMailboxStore()
 
 const showMailbox = ref(false)
+const showEmojiManager = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
 
 // 按 display_name 首字母排序（中文按拼音）
@@ -2055,6 +2070,32 @@ onMounted(async () => {
 }
 .recruit-card span {
   font-size: 13px; color: var(--accent); font-weight: 500;
+}
+
+/* ── 表情包管理入口卡片 ── */
+.emoji-manage-card {
+  border-style: dashed;
+  border-color: rgba(255, 184, 0, 0.35);
+  justify-content: center;
+  min-height: 160px;
+}
+.emoji-manage-card:hover {
+  border-color: var(--accent);
+  background: rgba(224, 123, 108, 0.06);
+}
+.emoji-manage-icon {
+  width: 34px; height: 34px;
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.emoji-manage-icon svg {
+  width: 100%; height: 100%;
+  display: block;
+}
+.emoji-manage-card span {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
 }
 
 /* ── 弹窗共用 ── */
