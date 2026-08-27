@@ -733,7 +733,7 @@ function seedEmojiCategories(db) {
   const row = db.prepare('SELECT COUNT(*) AS c FROM emoji_categories').get();
   if (row?.c > 0) return;
   const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
-  const keys = ['开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心', '无语', '嫌弃', '心虚'];
+  const keys = ['开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心', '无语', '嫌弃', '心虚'];
   for (let i = 0; i < keys.length; i++) insert.run(keys[i], i + 1);
 }
 

@@ -6,7 +6,7 @@ import { saveBase64Image } from './imagePaths.js';
 import { invalidateGalleryCache } from '../routes/images.js';
 
 export const DEFAULT_EMOJI_KEYS = [
-  '开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒',
+  '开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒',
   '害羞', '惊讶', '委屈', '得意', '比心',
   '无语', '嫌弃', '心虚',
 ];

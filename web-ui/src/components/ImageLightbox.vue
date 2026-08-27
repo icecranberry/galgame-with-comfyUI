@@ -22,7 +22,7 @@
     @hide="onHide"
     @on-prev="(old, n) => $emit('on-prev', old, n)"
     @on-next="(old, n) => $emit('on-next', old, n)"
-    @on-index-change="(old, n) => $emit('on-index-change', old, n)"
+    @on-index-change="(old, n) => { activeIndex = n; $emit('on-index-change', old, n) }"
     @on-error="(e) => $emit('on-error', e)"
     @on-rotate="(deg) => $emit('on-rotate', deg)"
   />
@@ -42,6 +42,7 @@ const props = defineProps({
   showRegenerate: { type: Boolean, default: true },
   showUpscale: { type: Boolean, default: true },
   showDelete: { type: Boolean, default: true },
+  showDownload: { type: Boolean, default: true },
   maxZoom: { type: Number, default: 6 },
   minZoom: { type: Number, default: 0.1 },
   zoomScale: { type: Number, default: 0.12 },
@@ -69,6 +70,10 @@ const lightboxKey = ref(0)
 const regenerating = ref(false)
 const upscaling = ref(false)
 const deleting = ref(false)
+const downloading = ref(false)
+// vel 内部翻页后 props.index 不会回传，用影子索引记录当前展示的图（下载/删除等操作以此为准）
+const activeIndex = ref(props.index)
+watch(() => props.index, (v) => { activeIndex.value = v })
 
 // 响应式布局：手机端 = 底部居中一行圆形按钮；电脑端 = 遮罩右侧竖排操作栏
 const isMobile = ref(false)
@@ -97,6 +102,7 @@ const BTN_SVGS = {
   delete: '<svg class="vel-del-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
   regen: '<svg class="vel-reg-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>',
   ups: '<svg class="vel-ups-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>',
+  dl: '<svg class="vel-dl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
 }
 
 function removeActionBar() {
@@ -106,8 +112,8 @@ function removeActionBar() {
 
 function injectActionBar() {
   if (_actionBar || !props.visible) return
-  // 三个操作按钮全关 → 不注入操作栏（纯预览模式）
-  if (!props.showDelete && !props.showRegenerate && !props.showUpscale) return
+  // 四个操作按钮全关 → 不注入操作栏（纯预览模式）
+  if (!props.showDelete && !props.showRegenerate && !props.showUpscale && !props.showDownload) return
   const modal = document.querySelector('.vel-modal')
   if (!modal) return
 
@@ -125,12 +131,14 @@ function injectActionBar() {
   }
 
   if (mobile) {
+    if (props.showDownload) bar.appendChild(mkBtn('dl', '', { 'data-vel-download': '', title: '下载图片' }, null, onDownload))
     if (props.showDelete) bar.appendChild(mkBtn('delete', '', { 'data-vel-delete': '', title: '删除图片' }, null, onDelete))
     if (props.showRegenerate) bar.appendChild(mkBtn('regen', '', { 'data-vel-regenerate': '', title: '重新生成' }, null, onRegenerate))
     if (props.showUpscale) bar.appendChild(mkBtn('ups', '', { 'data-vel-upscale': '', title: '放大细化（高清放大重绘）' }, null, onUpscale))
   } else {
+    if (props.showDownload) bar.appendChild(mkBtn('dl', 'vel-rail-btn dl', { type: 'button' }, '下载', onDownload))
     if (props.showDelete) bar.appendChild(mkBtn('delete', 'vel-rail-btn danger', { type: 'button' }, '删除', onDelete))
-    if (props.showRegenerate) bar.appendChild(mkBtn('regen', 'vel-rail-btn', { type: 'button' }, '重新生成', onRegenerate))
+    if (props.showRegenerate) bar.appendChild(mkBtn('regen', 'vel-rail-btn regen', { type: 'button' }, '重新生成', onRegenerate))
     if (props.showUpscale) bar.appendChild(mkBtn('ups', 'vel-rail-btn accent', { type: 'button' }, '放大细化', onUpscale))
   }
 
@@ -160,8 +168,14 @@ function syncActionBar() {
     if (label && !mobile) label.textContent = busy ? busyLabel : idleLabel
   }
   set('[data-vel-delete], .vel-rail-btn.danger', deleting.value, '删除中...', '删除图片', '删除中…', '删除')
-  set('[data-vel-regenerate], .vel-rail-btn:not(.danger):not(.accent)', regenerating.value, '重新生成中...', '重新生成', '重新生成中…', '重新生成')
+  set('[data-vel-regenerate], .vel-rail-btn.regen', regenerating.value, '重新生成中...', '重新生成', '重新生成中…', '重新生成')
   set('[data-vel-upscale], .vel-rail-btn.accent', upscaling.value, '放大细化中（高清重绘，可能需要几分钟）...', '放大细化（高清放大重绘）', '细化中…', '放大细化')
+  const dlBtn = _actionBar.querySelector('[data-vel-download], .vel-rail-btn.dl')
+  if (dlBtn) {
+    dlBtn.disabled = downloading.value
+    dlBtn.title = downloading.value ? '下载中...' : '下载图片'
+    dlBtn.querySelector('svg')?.classList.toggle('vel-dl-bounce', downloading.value)
+  }
 }
 
 watch(() => props.visible, async (v) => {
@@ -173,7 +187,7 @@ watch(() => props.visible, async (v) => {
   }
 })
 
-watch([regenerating, upscaling, deleting], syncActionBar)
+watch([regenerating, upscaling, deleting, downloading], syncActionBar)
 
 onUnmounted(() => {
   removeActionBar()
@@ -203,11 +217,86 @@ function getCurrentUrl() {
   const v = props.imgs
   if (typeof v === 'string') return v
   if (Array.isArray(v) && v.length > 0) {
-    const item = v[Math.min(props.index, v.length - 1)]
+    const item = v[Math.min(activeIndex.value, v.length - 1)]
     return typeof item === 'string' ? item : item?.src || ''
   }
   if (v && typeof v === 'object' && v.src) return v.src
   return ''
+}
+
+// ── 下载 ──
+// 浏览器：fetch → blob → <a download>；Android 壳内 WebView 不处理下载，
+// 检测到注入的 AndroidBridge 时改为 base64 交给原生存相册（见 android-shell MainActivity）。
+
+function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function deriveFilename(url, blob) {
+  let name = ''
+  if (!String(url).startsWith('data:')) {
+    try { name = decodeURIComponent(new URL(url, location.href).pathname.split('/').pop() || '') } catch { /* 解析失败用默认名 */ }
+  }
+  if (!/\.[a-z0-9]{2,5}$/i.test(name)) {
+    const extMap = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
+    const ext = extMap[blob?.type] || String(url).match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toLowerCase() || 'png'
+    name = (name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || 'image') + '.' + ext
+  }
+  return name
+}
+
+async function fetchImageBlob(url) {
+  const res = await fetch(bumpUrl(url))
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  if (!blob.size) throw new Error('图片数据为空')
+  return blob
+}
+
+async function onDownload() {
+  if (downloading.value) return
+  const url = getCurrentUrl()
+  if (!url) return
+  downloading.value = true
+  try {
+    const blob = await fetchImageBlob(url)
+    const filename = deriveFilename(url, blob)
+    const bridge = window.AndroidBridge
+    if (bridge && typeof bridge.saveImage === 'function') {
+      const res = bridge.saveImage(filename, await blobToDataURL(blob))
+      if (res === 'ok') toastFn?.('已保存到相册', 'success')
+      else if (res === 'permission_pending') toastFn?.('已请求存储权限，授权后将自动保存', 'info')
+      else toastFn?.('保存失败: ' + (res || '未知错误'), 'error')
+    } else {
+      const objUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(objUrl), 4000)
+      toastFn?.('已开始下载', 'success')
+    }
+  } catch (err) {
+    console.error('[ImageLightbox] download failed:', err.message)
+    // 拉取失败（多为跨域图片）：退化为直链，支持则直接下载，否则新标签打开手动保存
+    const a = document.createElement('a')
+    a.href = url
+    a.download = deriveFilename(url, null)
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } finally {
+    downloading.value = false
+  }
 }
 
 /** 扫描页面上所有 img / background-image，把旧图 URL 替换为带 cache-bust 的新 URL */
@@ -369,6 +458,7 @@ async function onDelete() {
 }
 .vel-action-row [data-vel-delete],
 .vel-action-row [data-vel-regenerate],
+.vel-action-row [data-vel-download],
 .vel-action-row [data-vel-upscale] {
   display: inline-flex; align-items: center; justify-content: center;
   width: 40px; height: 40px; border-radius: 50%;
@@ -396,6 +486,25 @@ async function onDelete() {
 }
 [data-vel-regenerate]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #fff; }
 [data-vel-regenerate]:disabled { cursor: not-allowed; }
+
+[data-vel-download] {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.2); background: #2d2d2d;
+  color: #ccc; cursor: pointer;
+  padding: 10px;
+  transition: background 0.2s, color 0.2s;
+}
+[data-vel-download]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #fff; }
+[data-vel-download]:disabled { cursor: not-allowed; }
+
+.vel-dl-bounce {
+  animation: vel-dl-bounce 0.9s ease-in-out infinite;
+}
+@keyframes vel-dl-bounce {
+  0%, 100% { transform: translateY(-1.5px); }
+  50% { transform: translateY(2px); }
+}
 
 .vel-reg-spinning {
   animation: vel-reg-spin 1s linear infinite;
