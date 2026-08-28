@@ -5,7 +5,16 @@
         <div class="modal-panel modal-wide emoji-manager-modal">
           <div class="modal-header">
             <h3>表情包管理</h3>
-            <button class="modal-close" @click="close"></button>
+            <span
+              class="modal-close"
+              role="button"
+              tabindex="0"
+              aria-label="关闭"
+              title="关闭"
+              @click="close"
+              @keydown.enter.prevent="close"
+              @keydown.space.prevent="close"
+            >✕</span>
           </div>
 
           <div class="emoji-body">
@@ -39,20 +48,49 @@
                   >{{ c.avatar_path ? '' : (c.display_name || c.name || '?').charAt(0) }}</div>
                    <div class="emoji-char-meta">
                      <div class="emoji-char-name">{{ c.display_name || c.name }}</div>
-                     <div class="emoji-char-count">
-                       <span v-if="charGenerating(c.id)" class="emoji-spinner"></span>
-                       <span>{{ doneCount(c.id) }}/{{ emojiKeys.length }}</span>
+                     <div class="emoji-char-count" :class="{ full: isCharFull(c.id), generating: charGenerating(c.id) }">
+                       <span v-if="charGenerating(c.id)" class="emoji-gen-badge">
+                         <span class="emoji-spinner emoji-count-spinner"></span>
+                         <span>生成中</span>
+                       </span>
+                       <span class="emoji-count-num">{{ doneCount(c.id) }}</span>
+                       <span class="emoji-count-total">/{{ emojiKeys.length }}</span>
+                       <span v-if="isCharFull(c.id) && !charGenerating(c.id)" class="emoji-full-icon" title="全部表情包已生成">
+                         <svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true">
+                           <path d="M1017.1264 367.6928L861.4784 122.3424c-13.7216-21.632-42.2144-27.968-63.3216-14.2464L21.4912 599.296C-0.1408 613.0304-6.4768 641.536 7.2448 662.6304l155.648 245.3504c13.7216 21.1072 42.2144 27.4304 63.3088 14.2464L1002.88 431.0016c21.0944-13.184 27.4304-41.6768 14.2464-63.3088zM985.984 404.608L209.3184 895.8464a14.5664 14.5664 0 0 1-20.0448-4.7488L33.6256 646.272a14.5664 14.5664 0 0 1 4.736-20.0448l776.1536-491.7504a14.5664 14.5664 0 0 1 20.0448 4.736l155.648 245.3632a13.9904 13.9904 0 0 1-4.224 20.0448z m-669.5552-155.648l12.672 31.1296 16.8832-29.0176 33.2416-2.6368-22.6944-24.8064 7.9104-32.704-30.592 13.7088-28.4928-17.408 3.6864 33.2416-25.3184 21.632 32.704 6.8608z m197.8624-91.8144L498.4576 127.616l-13.7088 30.592-33.2416 6.3488 24.7936 22.144-4.224 33.2544 29.0304-16.896 30.08 14.2592-6.8736-32.7168 23.2192-24.2688-33.2416-3.1744zM815.5648 650.496l-26.368-20.5824v33.2416l-27.9808 18.9952 32.192 10.56 9.4976 32.1792 20.0448-26.9056 33.7664 1.0496-19.52-27.4304 11.6096-31.1296-33.2416 10.0224z m-108.16 132.9664l-12.672-31.1296-16.8704 29.0176-33.2416 2.6368 22.144 24.7936-7.8976 32.7168 30.592-13.184 28.4928 17.92-3.1616-33.2288 25.3312-21.632-32.7168-7.9104z m-198.4 90.752l15.8336 29.5424 13.7216-30.592 33.2416-5.8112-24.7936-22.6944 4.736-33.2416-29.0048 16.3584-30.08-14.7712 6.8608 32.7168-23.2192 24.2688 32.7168 4.224zM211.4432 378.752L237.824 399.36l0.5376-33.2416 27.9552-18.4704-31.6544-10.5472-8.96-32.192-20.0576 26.9184-33.7664-2.112 19.52 27.4304-11.6096 31.6544c-0.5248 0 31.6544-10.0224 31.6544-10.0224zM93.7728 523.3408c-3.6992-141.9392 65.4208-281.7536 193.6384-363.008 128.2176-81.2544 284.3904-83.3664 411.5456-20.0576l30.6048-19.52c-37.4656-21.1072-78.08-36.4032-120.2944-45.9008a449.408 449.408 0 0 0-172.0064-4.7488c-59.0976 10.0224-115.0208 31.1296-166.208 63.8464-51.712 32.1792-94.976 73.856-129.2672 122.9312a442.2656 442.2656 0 0 0-69.12 157.2352 456.4096 456.4096 0 0 0-10.0224 128.2176c0 0.512 31.1296-18.9952 31.1296-18.9952z m833.6512-21.632c3.6992 141.9264-65.4208 281.7536-193.6384 363.008-128.2176 81.2544-284.3904 83.3536-411.5456 20.0448l-30.6048 19.52c37.4656 21.1072 78.08 36.4032 120.2944 45.9008a449.408 449.408 0 0 0 172.0064 4.7488 452.5952 452.5952 0 0 0 166.208-63.3088 446.9504 446.9504 0 0 0 128.7424-122.944 442.2656 442.2656 0 0 0 69.12-157.2224c9.4976-42.752 12.6592-85.4784 10.0224-128.2176l-30.6048 18.4704zM379.7504 306.4832a245.1072 245.1072 0 0 1 115.0208-37.4656l47.488-30.08a272.8576 272.8576 0 0 0-179.392 41.1648c-53.824 34.304-93.3888 84.9408-113.4464 144.5632l47.488-30.08c19.52-34.816 46.9632-65.408 82.8416-88.1024z m261.696 412.0704a245.1072 245.1072 0 0 1-115.0208 37.4656l-47.488 30.08c62.7968 7.3856 125.056-6.8608 179.392-41.1648 53.824-34.2912 93.3888-84.9408 113.4464-144.5632l-47.488 30.08a240.3072 240.3072 0 0 1-82.8416 88.1024z" />
+                           <path d="M287.936 634.2144l-33.5488-53.6832-99.456 62.1312c-2.7136 1.7024-4.9792 3.8144-6.784 6.336l-11.6224-6.1696c4.4544-1.792 8.256-3.6736 11.4048-5.632l98.1632-61.3376c-0.9472-10.752-1.408-16.6016-1.3824-17.5104 0.0256-0.9088 0.6144-1.728 1.7536-2.432 1.152-0.7296 3.6864-1.1136 7.6288-1.1904 3.9296-0.064 10.0096 0.0128 18.2272 0.256 8.2176 0.256 13.1072 0.512 14.6944 0.8192 1.5872 0.3072 2.688 0.96 3.328 1.9584 1.2416 2.0096 0.128 5.4912-3.3408 10.4448l24.2944 38.8736c3.1232 5.0176 5.7984 9.1264 8 12.3264l5.7984 8.32c0.896 1.4336 0.896 3.1744-0.0128 5.248-0.9088 2.048-3.0848 4.6976-6.528 7.9488-3.456 3.2512-6.912 5.9648-10.432 8.1664-3.5072 2.176-5.8752 3.264-7.0912 3.2256-1.216-0.0384-2.2272-0.6912-3.0336-1.984l-5.632-9.024-83.328 52.0704 40.256 64.4352c2.7776 4.4416 6.0416 7.1296 9.8176 8.064 3.7632 0.9216 9.4208-0.128 16.9856-3.1616 7.552-3.0336 17.3568-8.3072 29.3888-15.8208 30.4896-19.0592 48.9344-32.0768 55.3344-39.0528 6.3872-6.976 9.5744-14.464 9.5744-22.4128 0-7.9744-2.6368-19.8528-7.936-35.6608-0.7296-2.1248-0.6656-3.456 0.192-3.9936 0.8576-0.5376 2.1376 0.7936 3.84 4.0064 1.7152 3.2128 3.5968 6.4768 5.6576 9.7664 4.8256 7.7312 9.2288 12.6976 13.184 14.8992 3.968 2.2016 8.96 3.328 14.9504 3.3536 3.712-0.128 6.6048 1.4976 8.704 4.864 2.112 3.3664 2.0096 8.8576-0.3072 16.4736-2.304 7.616-8.8064 15.6928-19.4816 24.256-10.6752 8.576-27.2512 19.8784-49.728 33.92-28.7872 17.984-49.792 29.7728-63.0272 35.3536-13.2352 5.5808-23.36 7.2192-30.3616 4.928-7.0016-2.2912-13.9136-8.8704-20.7104-19.7504l-46.848-74.9568a431.6672 431.6672 0 0 0-15.6672-23.6544 216.832 216.832 0 0 1 21.7088-9.2416c7.1552-2.56 11.392-3.8272 12.7232-3.7632 1.3312 0.064 2.2656 0.512 2.816 1.3824 1.152 1.856 0.3328 4.3648-2.4832 7.5136l6.976 11.1744 83.328-52.0832zM441.3696 423.0656c8.5888-5.3632 16.0512-8.0768 22.3744-8.1536 6.3232-0.0768 11.0976 2.4704 14.3232 7.6288 2.3296 3.712 2.9184 8.1792 1.792 13.3632-1.152 5.1968-3.1872 8.704-6.1184 10.5344-2.944 1.8432-5.632 2.8672-8.064 3.1104a12.7872 12.7872 0 0 1-6.5792-0.9728 9.7024 9.7024 0 0 1-4.3904-3.6736l-2.4704-4.4288c-4.288-6.8736-8.704-9.792-13.2352-8.7552-3.4304 0.5504-5.504 0.256-6.2208-0.896-0.7168-1.1392 2.1376-3.7248 8.576-7.7568z m-17.1136 55.7824l86.5664-54.08a486.7968 486.7968 0 0 0-1.28-18.7648c-0.2944-2.7008 0.3456-4.544 1.92-5.5296 1.5744-0.9856 5.824-1.0496 12.7232-0.192l18.9824 2.176c5.4528 0.768 8.6144 1.8432 9.472 3.2 0.8448 1.3568-0.2432 2.9824-3.2384 4.864l-59.9296 37.44a7.8848 7.8848 0 0 1-1.28 5.5808l9.1136 14.6048 20.4032-12.7488c-0.3584-10.1248-0.4736-16.128-0.3456-17.9968a5.0816 5.0816 0 0 1 2.4448-4.224c1.5104-0.9344 7.808-0.896 18.9056 0.1408 11.0976 1.024 17.152 2.368 18.176 4.0192 1.024 1.6512 0.0512 3.4048-2.9568 5.2864l-52.1984 32.6144 11.5456 18.4704 20.8384-13.0176c-0.2688-3.6224-0.384-7.3856-0.3328-11.2896 0.0384-3.9168 0.192-6.2976 0.448-7.1552a3.712 3.712 0 0 1 1.6768-2.0992c1.8688-1.152 8.2816-1.3312 19.2384-0.512 10.9568 0.8064 16.9088 1.9712 17.856 3.4688 0.9344 1.5104-0.1024 3.2-3.1104 5.0816l-52.1856 32.6144 11.136 17.8176 33.728-21.0688a229.8368 229.8368 0 0 1-0.3328-16.064c0.0896-4.1472 0.64-6.528 1.6512-7.1552 1.5744-0.9856 5.6064-1.216 12.1088-0.6912l18.496 1.8816c5.7344 0.5888 9.0368 1.5616 9.8816 2.9184 0.8576 1.3696-0.1536 2.944-3.0208 4.736l-82.688 51.6608c8.96-3.2 14.208-4.736 15.7696-4.6336 1.5744 0.128 2.624 0.6144 3.1616 1.472 1.152 1.856 0.192 3.968-2.9312 6.3104l4.9664 7.936 53.2736-33.28c-0.1664-2.4832-0.1536-6.6816 0.0512-12.5696 0.192-5.9008 0.4864-9.2672 0.8576-10.0992a3.9296 3.9296 0 0 1 1.4208-1.792c1.28-0.7936 7.6416-0.4352 19.0464 1.1008 11.4176 1.536 17.6256 3.1104 18.6624 4.7616 1.024 1.6512 0.1152 3.3664-2.752 5.1584l-79.4752 49.664c12.1984 1.3312 21.9904 1.728 29.4144 1.1776 7.424-0.5632 15.3088-2.5088 23.68-5.8368 8.3712-3.3408 20.736-9.1264 37.0816-17.3568 2.624-1.2288 4.0832-1.6 4.3904-1.1008 0.32 0.512-0.4736 2.176-2.3552 5.056-1.8944 2.88-3.2384 6.848-4.0448 11.9424a39.04 39.04 0 0 0 0.6656 15.3984c0.64 2.5984 0.0896 4.4288-1.6384 5.504-1.7152 1.0752-9.8304 2.816-24.3584 5.2224-14.528 2.4064-26.6752 2.4832-36.4416 0.2304-9.7792-2.2656-20.736-7.552-32.9088-15.872l20.5312 32.8576c3.4944 5.5808 5.9776 9.408 7.4624 11.4688l3.84 5.6576a5.4272 5.4272 0 0 1 0.384 5.1456c-0.7424 1.856-2.6496 4.5312-5.7344 8.064a45.824 45.824 0 0 1-10.2016 8.7552c-3.712 2.3296-6.2464 2.4192-7.5904 0.256l-4.9408-8.8448c-2.2784-3.968-5.12-8.6528-8.512-14.1056l-15.4368-24.704a153.0112 153.0112 0 0 1-11.9168 33.7408c-5.1584 10.3936-13.2608 22.912-24.2944 37.5808-11.0464 14.6688-17.6512 22.6688-19.7888 24.0128-0.4352 0.256-0.6912 0.3328-0.7808 0.192-0.2688-0.4352 0.6144-2.688 2.6624-6.7456 9.4208-18.048 15.9872-33.024 19.6608-44.992a175.488 175.488 0 0 0 7.04-38.8992l-53.888 33.6896c-2.8672 1.792-4.9536 4.1856-6.272 7.1936l-11.8784-6.6048c3.6992-1.7152 7.424-3.7376 11.136-6.0672l78.3872-48.9856a504.6784 504.6784 0 0 0-11.0848-17.2672l-28.992 18.1248c2.4704 3.6352 1.7536 7.6672-2.1504 12.096-3.904 4.4288-7.4624 7.6416-10.688 9.664-3.2128 2.0096-5.5424 1.8688-6.976-0.4224l-14.656-24.8832-26.7008-42.752c-2.3552 9.6384-5.7728 19.6864-10.2784 30.1696-4.4928 10.4832-7.2448 16.0256-8.256 16.6528-0.1408 0.0896-0.256 0.064-0.3456-0.0768-0.3584-0.576-0.1024-3.0208 0.768-7.36 6.08-31.0656 3.6608-64.0896-7.2576-99.072 20.5312-6.656 32.3712-10.1888 35.52-10.56 3.1488-0.384 5.1456 0.128 6.0032 1.4848 0.8448 1.3568 0.4352 2.7648-1.2544 4.2112a13.696 13.696 0 0 0-3.8656 6.0032c-0.896 2.5472-1.6768 6.2208-2.3552 11.0208-0.6912 4.8128-1.152 7.808-1.4336 8.96 1.6896 0.1408 3.072 0.4608 4.1856 0.96z m37.0816-13.312l-32.8576 20.544a11.0976 11.0976 0 0 1-1.1904 1.92l10.752 17.1904 34.56-21.6064-11.264-18.048z m15.7056 25.1392l-34.5856 21.6064 11.5456 18.4704 34.5728-21.6064-11.5328-18.4704z m27.1104 43.392l-11.136-17.8432-34.5856 21.6192 11.136 17.8176 34.5856-21.6064zM676.16 274.2656c21.632-13.5168 35.84-14.8224 42.624-3.9424 2.88 4.5824 3.9424 9.3952 3.2 14.4256-0.7296 5.0432-3.328 8.9472-7.7568 11.7248a18.432 18.432 0 0 1-8.0896 2.816c-2.816 0.256-5.0944-0.1024-6.8224-1.1136-1.728-1.024-3.4816-2.944-5.2736-5.8112-2.24-3.584-5.9136-6.528-11.008-8.7936-5.12-2.2912-9.2672-2.88-12.4672-1.7792s-4.928 1.4336-5.1968 1.0112c-0.5376-0.8576 3.072-3.712 10.7904-8.5376z m-4.7488 61.2096l-33.728 21.0688c-2.8672 1.792-4.9408 4.1856-6.2592 7.1936l-11.8912-6.6048c3.712-1.7152 7.424-3.7376 11.136-6.0672l137.472-85.888-1.152-22.8736c-0.0768-2.3552 0.384-3.84 1.3952-4.4672 0.9984-0.6144 5.7856-0.6784 14.3744-0.1664 8.576 0.512 15.8464 1.2928 21.7856 2.368 5.9392 1.0624 9.2928 2.2016 10.048 3.4176 0.768 1.216-0.1408 2.6368-2.7264 4.2368l-35.2128 22.016c8.7424-1.28 13.6192-1.152 14.592 0.4352 0.8064 1.28-0.3968 2.944-3.6224 4.9536a12.48 12.48 0 0 0-5.9008 8.4608 195.584 195.584 0 0 1-15.8976 45.7728 269.6064 269.6064 0 0 0 76.5056-32.8832l9.536-6.2464c1.28-0.8064 2.112-0.9216 2.4704-0.3456 0.3584 0.5632-0.128 1.8688-1.4464 3.8912-2.7904 4.1344-4.48 9.7152-5.0688 16.7424-0.576 7.04 0.2048 13.0688 2.3552 18.0992 0.7808 1.8944 0.256 3.4304-1.6128 4.5952-3.1488 1.9584-15.2192 5.5168-36.1856 10.6624-20.992 5.1456-40.8448 8-59.6096 8.576-7.7568 12.416-17.536 25.2928-29.312 38.6176 14.4256-6.2208 22.3616-9.536 23.808-9.9328 1.4336-0.4096 2.5344 0 3.2896 1.216 0.768 1.216 0.6656 2.7264-0.3072 4.5184a7.424 7.424 0 0 0-0.7296 5.5296c0.4864 1.8944 1.92 5.376 4.3008 10.4576 2.3808 5.0944 4.736 11.8784 7.0528 20.3776 2.3296 8.512 3.712 15.8976 4.16 22.1952a61.6448 61.6448 0 0 1-2.176 20.1728 89.792 89.792 0 0 1-9.1392 21.6832c-4.1984 7.296-9.792 14.848-16.7936 22.592-7.0016 7.7568-11.7888 12.4416-14.3616 14.0544-1.0112 0.6272-1.7024 0.6144-2.112-0.0256-0.3968-0.64-0.0896-1.5872 0.9216-2.816 8.3584-10.2016 14.0032-20.0448 16.9344-29.5424a68.5312 68.5312 0 0 0 2.4448-29.312c-1.2928-10.0352-3.5328-18.7904-6.7072-26.2656-3.1744-7.4624-9.664-19.2-19.456-35.1744a373.9264 373.9264 0 0 1-29.1456 27.1744c-9.6256 8.0128-15.3472 12.5696-17.1264 13.696-1.792 1.1136-2.7392 1.6-2.816 1.4592-0.2816-0.4352 0.9728-2.112 3.7248-5.0176 29.056-30.912 49.664-59.6096 61.7856-86.0928a155.9552 155.9552 0 0 1-59.5968-16.512z m75.8144-47.3856l-70.656 44.16c18.688 4.4416 39.0912 5.2352 61.1968 2.368 5.2864-15.4496 8.4352-30.9504 9.4592-46.528z m32.0384 71.36c13.184-7.2448 22.3616-11.776 27.4944-13.5936 5.1328-1.8176 8.128-2.048 8.9856-0.6784 0.8448 1.3568 0.192 3.8144-1.9712 7.36l32.3328 51.7504c4.3904 7.0144 7.5008 11.84 9.344 14.464l5.184 7.8208c0.7168 1.152 0.704 2.496-0.0128 4.0448-0.7296 1.536-3.1104 4.1856-7.168 7.8976-4.032 3.7248-7.488 6.4896-10.3552 8.2688-2.8672 1.792-4.736 2.7136-5.5936 2.752-0.8704 0.0512-1.7536-0.64-2.6496-2.0736l-43.2128-69.1584c-4.48-7.168-8.6016-13.44-12.3776-18.8544z" />
+                         </svg>
+                       </span>
+                     </div>
+                     <div class="emoji-char-progress" :class="{ full: isCharFull(c.id), generating: charGenerating(c.id) }">
+                       <i :style="{ width: charPercent(c.id) + '%' }"></i>
                      </div>
                   </div>
                 </div>
               </div>
-              <button
-                class="emoji-batch-btn"
-                :disabled="batchRunning || generating || characters.length === 0"
-                @click="openBatchDialog"
-              >
-                {{ batchRunning ? `生成中 ${batchIndex + 1}/${characters.length}` : '全部生成' }}
-              </button>
+              <div class="emoji-batch-row">
+                <button
+                  class="emoji-batch-btn"
+                  :class="{ paused: batchRunning && batchPaused }"
+                  :disabled="characters.length === 0 || (batchRunning && !batchPaused) || (!batchRunning && generating)"
+                  @click="batchRunning && batchPaused ? resumeBatch() : openBatchDialog()"
+                >
+                  <span v-if="batchRunning && !batchPaused" class="emoji-spinner emoji-batch-spinner"></span>
+                  {{ batchRunning && batchPaused ? '继续生成' : (batchRunning ? `生成中 ${batchIndex + 1}/${characters.length}` : '全部生成') }}
+                </button>
+                <button
+                  v-if="batchRunning && !batchPaused"
+                  class="emoji-pause-btn"
+                  type="button"
+                  title="暂停全部生成"
+                  @click="pauseBatch"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="4" width="4" height="16" rx="1.2" />
+                    <rect x="14" y="4" width="4" height="16" rx="1.2" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <!-- 右侧：生成控制 + 表情包网格 -->
@@ -61,16 +99,19 @@
                 <button class="emoji-gear" title="高级设置" @click="showAdvancedSettings = true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
-                <span
+                <button
                   class="emoji-mode-badge"
+                  type="button"
                   :class="styleMode"
-                  title="当前表情包风格，可在高级设置中切换"
-                >{{ styleMode === 'half_body' ? '半身' : '猪鼻大头' }}</span>
+                  :disabled="styleModeSaving"
+                  @click="toggleStyleMode"
+                  title="点击切换表情包风格"
+                >{{ styleMode === 'half_body' ? '半身LINE' : '猪鼻大头' }}</button>
                 <input
                   v-model="style"
                   class="fi emoji-style-input"
                   type="text"
-                  placeholder="自定义表情包整体风格（可选，留空则不注入）"
+                  placeholder="自定义表情包额外需求（可选，留空则不注入）"
                 />
                 <button
                   class="btn-primary"
@@ -81,9 +122,10 @@
                 </button>
               </div>
 
-              <div v-if="batchRunning" class="emoji-progress-strip">
-                <span class="emoji-spinner"></span>
-                <span class="emoji-progress-label">正在为「{{ batchCurrentName }}」提炼表情脚本（{{ batchIndex + 1 }}/{{ characters.length }}）</span>
+              <div v-if="batchRunning" class="emoji-progress-strip" :class="{ paused: batchPaused }">
+                <span v-if="!batchPaused" class="emoji-spinner"></span>
+                <span v-else class="emoji-paused-mark"></span>
+                <span class="emoji-progress-label">{{ batchProgressText }}</span>
               </div>
               <div v-if="imageProgressVisible" class="emoji-progress-strip">
                 <span class="emoji-spinner"></span>
@@ -125,6 +167,9 @@
                       <div class="emoji-image-wrap">
                         <img v-if="isDone(selectedCharId, key) && rowImage(selectedCharId, key)" :src="rowImage(selectedCharId, key)" class="emoji-image" />
                         <div v-else class="emoji-image-placeholder">+</div>
+                        <div v-if="isCardLoading(selectedCharId, key)" class="emoji-scan-overlay">
+                          <span class="emoji-spinner"></span>
+                        </div>
                       </div>
                       <div class="emoji-card-actions">
                         <button
@@ -143,15 +188,11 @@
 
                     <template v-else>
                       <div class="emoji-empty-slot" @click="openUpload(selectedCharId, key)">
-                        <span v-if="isGenerating(selectedCharId, key)" class="emoji-spinner"></span>
+                        <span v-if="isGenerating(selectedCharId, key) || isCardLoading(selectedCharId, key)" class="emoji-spinner"></span>
                         <span v-else class="emoji-empty-plus">+</span>
                       </div>
                       <div v-if="rowError(selectedCharId, key)" class="emoji-error">{{ rowError(selectedCharId, key) }}</div>
                     </template>
-
-                    <div v-if="busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key" class="emoji-scan-overlay">
-                      <span class="emoji-spinner"></span>
-                    </div>
                   </div>
                 </TransitionGroup>
               </div>
@@ -167,10 +208,20 @@
         <div class="modal-panel advanced-panel">
           <div class="modal-header">
             <h3>高级设置</h3>
-            <button class="modal-close" @click="showAdvancedSettings = false"></button>
+            <span
+              class="modal-close"
+              role="button"
+              tabindex="0"
+              aria-label="关闭"
+              title="关闭"
+              @click="showAdvancedSettings = false"
+              @keydown.enter.prevent="showAdvancedSettings = false"
+              @keydown.space.prevent="showAdvancedSettings = false"
+            >✕</span>
           </div>
 
           <div class="advanced-body">
+            <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">画师串</div>
               <input v-model="artist" class="fi advanced-artist-input" type="text" placeholder="@ebora" />
@@ -191,7 +242,7 @@
             <div class="advanced-section">
               <div class="advanced-label">表情包风格</div>
               <div class="emoji-style-segmented">
-                <button type="button" :class="['emoji-style-chip', { active: styleMode === 'half_body' }]" @click="styleMode = 'half_body'">半身</button>
+                <button type="button" :class="['emoji-style-chip', { active: styleMode === 'half_body' }]" @click="styleMode = 'half_body'">半身LINE风格</button>
                 <button type="button" :class="['emoji-style-chip', { active: styleMode === 'chibi_head' }]" @click="styleMode = 'chibi_head'">猪鼻大头</button>
               </div>
               <div class="advanced-hint">{{ styleModeHint }}</div>
@@ -208,6 +259,7 @@
               <div class="advanced-hint">生成 prompt 后由系统硬编码前置到每条表情 prompt 开头（英文，逗号分隔，已存在的 tag 自动去重）。</div>
               <div v-if="fixedTagsError" class="emoji-error">{{ fixedTagsError }}</div>
             </div>
+            </div>
           </div>
 
           <div class="advanced-footer">
@@ -223,10 +275,20 @@
         <div class="modal-panel batch-panel">
           <div class="modal-header">
             <h3>全部生成</h3>
-            <button class="modal-close" @click="showBatchDialog = false"></button>
+            <span
+              class="modal-close"
+              role="button"
+              tabindex="0"
+              aria-label="关闭"
+              title="关闭"
+              @click="showBatchDialog = false"
+              @keydown.enter.prevent="showBatchDialog = false"
+              @keydown.space.prevent="showBatchDialog = false"
+            >✕</span>
           </div>
 
           <div class="advanced-body">
+            <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">自定义整体风格</div>
               <input
@@ -237,6 +299,7 @@
                 @keyup.enter="startBatchGenerate"
               />
               <div class="advanced-hint">将按角色列表顺序，为全部 {{ characters.length }} 个角色逐个生成表情包。</div>
+            </div>
             </div>
           </div>
 
@@ -280,7 +343,8 @@ const categorySaving = ref(false)
 const categoryError = ref('')
 const fixedTagsDraft = ref('')
 const fixedTagsError = ref('')
-const styleMode = ref('chibi_head')
+const styleMode = ref('half_body')
+const styleModeSaving = ref(false)
 const styleModeHint = computed(() => styleMode.value === 'half_body'
   ? '起手式 tag 将额外追加 half body。'
   : '按 chibi character, big head 风格生成表情包，并禁止模型添加角色服装描述。')
@@ -288,6 +352,10 @@ const showBatchDialog = ref(false)
 const batchStyle = ref('')
 const batchRunning = ref(false)
 const batchIndex = ref(0)
+const batchPaused = ref(false)
+const batchCompleted = ref(0)
+// 正在生成 prompt（LLM 阶段）的角色：此阶段行状态还没变 generating，卡片模糊层靠它驱动
+const promptPendingCharIds = ref([])
 let pollTimer = null
 const scanTipIndex = ref(0)
 let scanTipTimer = null
@@ -295,6 +363,8 @@ let scanTipTimer = null
 function close() {
   show.value = false
   batchRunning.value = false
+  batchPaused.value = false
+  batchCompleted.value = 0
   stopPolling()
   setTimeout(() => emit('close'), 180)
 }
@@ -326,10 +396,26 @@ function rowError(charId, key) {
 function doneCount(charId) {
   return emojiRows.value.filter(r => r.character_id === charId && r.status === 'done' && r.image_path).length
 }
+function isCharFull(charId) {
+  return emojiKeys.value.length > 0 && doneCount(charId) >= emojiKeys.value.length
+}
+function charPercent(charId) {
+  if (emojiKeys.value.length === 0) return 0
+  return Math.min(100, Math.round((doneCount(charId) / emojiKeys.value.length) * 100))
+}
 function charGenerating(charId) {
   if (starting.value && selectedCharId.value === charId) return true
+  if (promptPendingCharIds.value.includes(charId)) return true
   if (uploadingKey.value.startsWith(charId + ':')) return true
   return busyKey.value.startsWith(charId + ':') || emojiRows.value.some(r => r.character_id === charId && r.status === 'generating')
+}
+
+/** 卡片模糊层：单卡重生成/上传、图片生成中、或该角色 prompt 提炼中 */
+function isCardLoading(charId, key) {
+  if (busyKey.value === charId + ':' + key) return true
+  if (uploadingKey.value === charId + ':' + key) return true
+  if (isGenerating(charId, key)) return true
+  return promptPendingCharIds.value.includes(charId)
 }
 
 const generatingRowsCount = computed(() => emojiRows.value.filter(r => r.status === 'generating').length)
@@ -339,6 +425,22 @@ const imageProgressVisible = computed(() => !starting.value && !batchRunning.val
 const batchCurrentName = computed(() => {
   const c = props.characters[batchIndex.value]
   return c?.display_name || c?.name || ''
+})
+const batchPhaseLabel = computed(() => {
+  const charId = props.characters[batchIndex.value]?.id
+  return promptPendingCharIds.value.includes(charId) ? '提炼表情脚本' : '生成表情图片'
+})
+const batchProgressText = computed(() => {
+  const currentCharId = props.characters[batchIndex.value]?.id
+  const currentStillRunning = currentCharId !== undefined && (
+    promptPendingCharIds.value.includes(currentCharId) ||
+    emojiRows.value.some(r => r.character_id === currentCharId && r.status === 'generating')
+  )
+  if (batchPaused.value) {
+    if (currentStillRunning) return `已请求暂停，等待「${batchCurrentName.value}」完成…`
+    return `已暂停 · 已完成 ${batchCompleted.value}/${props.characters.length} 个角色`
+  }
+  return `正在为「${batchCurrentName.value}」${batchPhaseLabel.value}（${batchIndex.value + 1}/${props.characters.length}）`
 })
 const imageProgressText = computed(() => {
   if (busyKey.value) return `正在重新生成「${busyKey.value.split(':')[1]}」...`
@@ -386,19 +488,43 @@ async function loadCategories() {
   try {
     const t = await api.getEmojiFixedTags()
     fixedTagsDraft.value = t.tags || ''
-    styleMode.value = t.styleMode === 'half_body' ? 'half_body' : 'chibi_head'
+    styleMode.value = t.styleMode === 'chibi_head' ? 'chibi_head' : 'half_body'
   } catch {
     fixedTagsDraft.value = ''
   }
 }
 
+async function toggleStyleMode() {
+  if (styleModeSaving.value) return
+
+  const previousMode = styleMode.value
+  const nextMode = previousMode === 'half_body' ? 'chibi_head' : 'half_body'
+  styleMode.value = nextMode
+  styleModeSaving.value = true
+
+  try {
+    const t = await api.updateEmojiFixedTags(String(fixedTagsDraft.value || '').trim(), nextMode)
+    if (t.error) throw new Error(t.error)
+    fixedTagsDraft.value = t.tags || fixedTagsDraft.value
+    styleMode.value = t.styleMode || nextMode
+    toast?.(`表情包风格已切换为${nextMode === 'half_body' ? '半身LINE' : '猪鼻大头'}`, 'success')
+  } catch (err) {
+    styleMode.value = previousMode
+    toast?.('切换表情包风格失败: ' + err.message, 'error')
+  } finally {
+    styleModeSaving.value = false
+  }
+}
 /** 一键生成：先创造 prompt，再立即提交 ComfyUI 生成图片 */
 async function generateAll() {
   if (selectedCharId.value === null || generating.value) return
+  const charId = selectedCharId.value
   starting.value = true
+  promptPendingCharIds.value.push(charId)
   try {
-    await api.generateEmojiPrompts([selectedCharId.value], style.value.trim())
-    await api.generateEmojiImages([selectedCharId.value], [], artist.value)
+    await api.generateEmojiPrompts([charId], style.value.trim())
+    promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== charId)
+    await api.generateEmojiImages([charId], [], artist.value)
     await loadOverview()
     if (generatingRowsCount.value > 0) startPolling()
     toast?.('表情包已开始生成', 'success')
@@ -406,6 +532,7 @@ async function generateAll() {
     toast?.('生成表情包失败: ' + err.message, 'error')
   } finally {
     starting.value = false
+    promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== charId)
   }
 }
 
@@ -415,38 +542,90 @@ function openBatchDialog() {
   showBatchDialog.value = true
 }
 
-/** 全部生成：按角色列表顺序逐个生成 prompt 并提交图片任务，关闭弹窗可中止剩余角色 */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function pauseBatch() {
+  if (!batchRunning.value || batchPaused.value) return
+  batchPaused.value = true
+  toast?.('已暂停，当前角色完成后停止', 'info')
+}
+
+function resumeBatch() {
+  if (!batchRunning.value || !batchPaused.value) return
+  batchPaused.value = false
+  toast?.('继续全部生成', 'success')
+}
+
+async function waitBatchResume() {
+  while (batchRunning.value && batchPaused.value) await sleep(300)
+}
+
+/** 串行关键：等当前角色全部表情图落定（无 generating 行）再进入下一个角色；关闭弹窗可提前中止 */
+async function waitForCharImages(charId) {
+  while (batchRunning.value) {
+    await loadOverview()
+    if (!emojiRows.value.some(r => r.character_id === charId && r.status === 'generating')) return true
+    await sleep(2000)
+  }
+  return false
+}
+
+/** 全部生成：严格串行——一个角色 prompt + 全部图片完成后，才开始下一个角色 */
 async function startBatchGenerate() {
   if (batchRunning.value || generating.value) return
   const chars = [...props.characters]
   if (chars.length === 0) return
   showBatchDialog.value = false
   batchRunning.value = true
+  batchPaused.value = false
+  batchCompleted.value = 0
   const styleText = batchStyle.value.trim()
   let okCount = 0
   try {
     for (let i = 0; i < chars.length; i++) {
       if (!batchRunning.value) return
+      if (batchPaused.value) {
+        await waitBatchResume()
+        if (!batchRunning.value) return
+      }
       batchIndex.value = i
       const c = chars[i]
       const name = c.display_name || c.name || `角色 #${c.id}`
       try {
+        promptPendingCharIds.value.push(c.id)
         const p = await api.generateEmojiPrompts([c.id], styleText)
         if (p?.error) throw new Error(p.error)
+        promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== c.id)
+        if (batchPaused.value) {
+          await waitBatchResume()
+          if (!batchRunning.value) return
+        }
         const g = await api.generateEmojiImages([c.id], [], artist.value)
         if (g?.error) throw new Error(g.error)
+        if (batchPaused.value) {
+          await waitBatchResume()
+          if (!batchRunning.value) return
+        }
+        const finished = await waitForCharImages(c.id)
+        if (!finished) return
         okCount++
+        batchCompleted.value = okCount
       } catch (err) {
+        promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== c.id)
         toast?.(`「${name}」生成失败: ${err.message}`, 'error')
       }
       await loadOverview()
-      if (emojiRows.value.some(r => r.status === 'generating')) startPolling()
     }
     if (batchRunning.value && okCount > 0) {
-      toast?.(`已为 ${okCount}/${chars.length} 个角色提交表情包生成`, 'success')
+      toast?.(`已为 ${okCount}/${chars.length} 个角色完成表情包生成`, 'success')
     }
   } finally {
     batchRunning.value = false
+    batchPaused.value = false
+    batchCompleted.value = 0
+    promptPendingCharIds.value = []
   }
 }
 
@@ -620,6 +799,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   batchRunning.value = false
+  batchPaused.value = false
+  batchCompleted.value = 0
   stopPolling()
   stopScanTips()
 })
@@ -633,7 +814,8 @@ onBeforeUnmount(() => {
   z-index: 10000;
 }
 .modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
+  background: #f4f1eeed;
+  border-radius: 18px;
   width: min(880px, 96vw); max-height: 90vh;
   display: flex; flex-direction: column;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
@@ -651,12 +833,17 @@ onBeforeUnmount(() => {
 .modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
 .modal-close {
   width: 30px; height: 30px; border-radius: 50%;
+  flex-shrink: 0;
+  box-sizing: border-box;
   border: none; background: var(--glass-bg-strong);
   color: var(--text-secondary); font-size: 15px;
+  font-family: inherit; line-height: 1;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
+  user-select: none;
   transition: all 0.15s;
 }
 .modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
+.modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 .modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
@@ -667,7 +854,7 @@ onBeforeUnmount(() => {
 }
 
 .emoji-manager-modal {
-  width: min(1180px, 94vw);
+  width: min(1287px, 94vw);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -680,7 +867,6 @@ onBeforeUnmount(() => {
   padding: 16px 20px 20px;
   overflow: hidden;
   background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
   border-radius: 14px;
   margin: 0 20px 20px;
 }
@@ -752,7 +938,7 @@ onBeforeUnmount(() => {
   transform: translateY(14px); opacity: 0;
 }
 .emoji-left {
-  width: 200px;
+  width: 230px;
   flex-shrink: 0;
   border-right: 1px solid var(--glass-border);
   padding: 0 12px 0 4px;
@@ -809,16 +995,98 @@ onBeforeUnmount(() => {
   background-size: cover;
   background-position: center;
 }
-.emoji-char-meta { min-width: 0; }
 .emoji-char-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-bright);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.emoji-char-count { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; }
-.emoji-batch-btn {
+.emoji-char-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.emoji-char-count {
+  min-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.emoji-count-num {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-bright);
+}
+.emoji-count-total {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+.emoji-char-count.full .emoji-count-num { color: var(--accent); }
+.emoji-char-count.full .emoji-count-total { color: rgba(224, 123, 108, 0.72); }
+.emoji-full-icon {
+  margin-left: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.emoji-full-icon svg {
+  width: 25px;
+  height: 25px;
+  display: block;
+}
+.emoji-gen-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 3px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  background: rgba(224, 123, 108, 0.1);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: emoji-gen-badge-pulse 1.5s ease-in-out infinite;
+}
+@keyframes emoji-gen-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(224, 123, 108, 0.12), 0 0 0 0 rgba(224, 123, 108, 0); }
+  50% { box-shadow: 0 0 0 1px rgba(224, 123, 108, 0.34), 0 0 12px rgba(224, 123, 108, 0.28); }
+}
+.emoji-char-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  margin-top: 2px;
+}
+.emoji-char-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(224, 123, 108, 0.42);
+  transition: width 0.25s ease;
+}
+.emoji-char-progress.full i { background: var(--accent); }
+.emoji-char-progress.generating i { animation: emoji-progress-pulse 1.2s ease-in-out infinite; }
+@keyframes emoji-progress-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.emoji-batch-row {
   margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.emoji-batch-btn {
+  flex: 1;
+  min-width: 0;
   padding: 7px 10px;
   border-radius: 10px;
   border: 1px dashed rgba(224, 123, 108, 0.35);
@@ -827,7 +1095,10 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   transition: all 0.15s;
 }
 .emoji-batch-btn:hover:not(:disabled) {
@@ -835,9 +1106,41 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
   background: rgba(224, 123, 108, 0.08);
 }
+.emoji-batch-btn.paused {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.emoji-batch-btn.paused:hover:not(:disabled) { background: var(--accent-hover); }
 .emoji-batch-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.emoji-batch-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+.emoji-pause-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(224, 123, 108, 0.35);
+  background: rgba(224, 123, 108, 0.08);
+  color: var(--accent);
+  transition: all 0.15s;
+}
+.emoji-pause-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.25);
 }
 
 .emoji-right {
@@ -883,16 +1186,24 @@ onBeforeUnmount(() => {
 }
 .emoji-mode-badge {
   flex-shrink: 0;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
   padding: 7px 12px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-  cursor: default;
 }
 .emoji-mode-badge.half_body { background: #FBEAE6; color: #D96A59; }
 .emoji-mode-badge.chibi_head { background: #E8F1EA; color: #5B8C6E; }
+.emoji-mode-badge:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(125, 105, 85, 0.12);
+}
+.emoji-mode-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emoji-style-input {
   flex: 1;
   min-width: 240px;
@@ -910,6 +1221,31 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(224, 123, 108, 0.16);
   color: var(--accent); font-size: 13px; font-weight: 600;
 }
+.emoji-progress-strip.paused {
+  background: rgba(224, 123, 108, 0.05);
+  border-color: rgba(224, 123, 108, 0.14);
+  color: var(--text-secondary);
+}
+.emoji-paused-mark {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.emoji-paused-mark::before,
+.emoji-paused-mark::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
+.emoji-paused-mark::before { left: 4px; }
+.emoji-paused-mark::after { right: 4px; }
 .emoji-spinner {
   display: inline-block; flex-shrink: 0;
   width: 14px; height: 14px;
@@ -921,9 +1257,9 @@ onBeforeUnmount(() => {
 @keyframes emoji-spin {
   to { transform: rotate(360deg); }
 }
-.emoji-char-count .emoji-spinner {
-  width: 11px; height: 11px; border-width: 1.5px;
-  margin-right: 4px; vertical-align: -1px;
+.emoji-gen-badge .emoji-count-spinner {
+  width: 12px; height: 12px; border-width: 2px;
+  box-shadow: 0 0 8px rgba(224, 123, 108, 0.4);
 }
 .emoji-scan-overlay .emoji-spinner {
   width: 22px; height: 22px; border-width: 2.5px;
@@ -1122,12 +1458,21 @@ onBeforeUnmount(() => {
   width: min(460px, 94vw);
 }
 .advanced-body {
-  padding: 16px 20px;
+  padding: 0px 24px;
   overflow-y: auto;
   flex: 1;
 }
 .advanced-section {
-  margin-bottom: 18px;
+  margin-bottom: 0;
+}
+.advanced-content {
+  background: #FFFFFF;
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 4px 18px rgba(72, 55, 44, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 .advanced-label {
   font-size: 14px;
@@ -1139,16 +1484,16 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 9px 12px;
   border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(42, 26, 16, 0.12);
+  background: #FCFAF7;
   font-size: 13px;
 }
 .advanced-tags-input {
   width: 100%;
   padding: 9px 12px;
   border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(42, 26, 16, 0.12);
+  background: #FCFAF7;
   font-size: 13px;
   line-height: 1.6;
   resize: vertical;
@@ -1157,9 +1502,9 @@ onBeforeUnmount(() => {
 .emoji-style-segmented {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 3px;
+  gap: 4px;
   padding: 3px;
-  background: #F5F1EC;
+  background: #F7F2EC;
   border-radius: 10px;
 }
 .emoji-style-chip {
@@ -1211,18 +1556,22 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 7px 8px;
   border-radius: 8px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(42, 26, 16, 0.12);
+  background: #FCFAF7;
   font-size: 13px;
 }
 .advanced-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--glass-border);
+  padding: 16px 24px;
+  border-top: 1px solid rgba(42, 26, 16, 0.07);
 }
 @media (max-width: 767px) {
+  .advanced-body { padding: 16px; }
+  .advanced-content { padding: 16px; border-radius: 12px; }
+  .advanced-cat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .advanced-footer { padding: 14px 16px; }
   .emoji-body { flex-direction: column; }
   .emoji-left { width: 100%; border-right: none; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; }
   .emoji-char-list { flex-direction: row; overflow-x: auto; }

@@ -141,10 +141,10 @@ export const EMOJI_STYLE_MODES = {
   CHIBI_HEAD: 'chibi_head',
 };
 
-/** 当前表情包风格；未设置时默认猪鼻大头（与现网行为一致） */
+/** 当前表情包风格；未设置时默认半身LINE */
 export function getEmojiStyleMode() {
   const saved = getSetting(EMOJI_STYLE_MODE_SETTING_KEY);
-  return saved === EMOJI_STYLE_MODES.HALF_BODY ? EMOJI_STYLE_MODES.HALF_BODY : EMOJI_STYLE_MODES.CHIBI_HEAD;
+  return saved === EMOJI_STYLE_MODES.CHIBI_HEAD ? EMOJI_STYLE_MODES.CHIBI_HEAD : EMOJI_STYLE_MODES.HALF_BODY;
 }
 
 /** 保存表情包风格 */

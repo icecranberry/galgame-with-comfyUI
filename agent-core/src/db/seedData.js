@@ -40,6 +40,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   // 图片压缩
   compression_enabled: 'false',
   compression_type: 'oxipng',
+  // 表情包
+  emoji_style_mode: 'half_body',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',
