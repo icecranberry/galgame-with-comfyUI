@@ -968,13 +968,18 @@ async function confirmNew() {
   worldSaving.value = true
   try {
     const result = await api.createWorldSetting({ name, content: '' })
+    if (!result?.ok) throw new Error(result?.error || '创建失败')
     showNewInput.value = false
     worldNewName.value = ''
     await loadWorldSettings()
     selectedWorldId.value = result.item.id
     worldContent.value = ''
     worldDirty.value = false
-    activateWorld(result.item.id)
+    activateWorld(result.item.id, { silent: true })
+    showToast(`已创建世界观「${name}」`, 'success')
+  } catch (err) {
+    console.error('[world] create failed:', err)
+    showToast(`创建世界观失败: ${err?.message || '未知错误'}`, 'error')
   } finally {
     worldSaving.value = false
   }
@@ -984,24 +989,30 @@ async function saveWorld() {
   if (worldSaving.value || !selectedWorldId.value) return
   worldSaving.value = true
   try {
-    await api.updateWorldSetting(selectedWorldId.value, { content: worldContent.value.trim() })
+    const result = await api.updateWorldSetting(selectedWorldId.value, { content: worldContent.value.trim() })
+    if (!result?.ok) throw new Error(result?.error || '保存失败')
     worldDirty.value = false
     worldSaved.value = true
     setTimeout(() => worldSaved.value = false, 2000)
     await loadWorldSettings()
+    showToast('世界观已保存', 'success')
   } catch (err) {
     console.error('[world] save failed:', err)
+    showToast(`世界观保存失败: ${err?.message || '未知错误'}`, 'error')
   } finally {
     worldSaving.value = false
   }
 }
 
-async function activateWorld(id) {
+async function activateWorld(id, { silent = false } = {}) {
   try {
-    await api.activateWorldSetting(id)
+    const result = await api.activateWorldSetting(id)
+    if (!result?.ok) throw new Error(result?.error || '切换失败')
     await loadWorldSettings()
+    if (!silent) showToast(`已激活世界观「${result.item?.name || ''}」`, 'success')
   } catch (err) {
     console.error('[world] activate failed:', err)
+    showToast(`切换世界观失败: ${err?.message || '未知错误'}`, 'error')
   }
 }
 
@@ -1018,7 +1029,8 @@ async function handleDelete(item) {
   })
   if (!ok) return
   try {
-    await api.deleteWorldSetting(item.id)
+    const result = await api.deleteWorldSetting(item.id)
+    if (!result?.ok) throw new Error(result?.error || '删除失败')
     if (selectedWorldId.value === item.id) {
       selectedWorldId.value = null
       worldContent.value = ''
@@ -1032,8 +1044,10 @@ async function handleDelete(item) {
         worldContent.value = first.content || ''
       }
     }
+    showToast(`已删除世界观「${item.name}」`, 'success')
   } catch (err) {
     console.error('[world] delete failed:', err)
+    showToast(`删除世界观失败: ${err?.message || '未知错误'}`, 'error')
   }
 }
 
@@ -1055,10 +1069,13 @@ async function renameWorld(item) {
   editingNameId.value = null
   if (!name || name === item.name) return
   try {
-    await api.updateWorldSetting(item.id, { name })
+    const result = await api.updateWorldSetting(item.id, { name })
+    if (!result?.ok) throw new Error(result?.error || '重命名失败')
     await loadWorldSettings()
+    showToast(`已重命名为「${name}」`, 'success')
   } catch (err) {
     console.error('[world] rename failed:', err)
+    showToast(`重命名失败: ${err?.message || '未知错误'}`, 'error')
   }
 }
 

@@ -207,8 +207,23 @@ export function parseEmojiPromptJson(raw, char, keys = DEFAULT_EMOJI_KEYS, fixed
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    console.warn('[emoji] JSON.parse failed, trying key-wise regex fallback:', err.message);
-    parsed = {};
+    // 常见失败：模型把角色写法的 \( 原样写进 JSON 字符串，\X 不在 JSON 合法转义（" \ / b f n r t u）内；
+    // 按连续反斜杠整段修复：奇数个反斜杠且其后是白名单外字符时补一个反斜杠（\( → \\(），其余不动；
+    // 救回全部内容，而不是整体退到兜底 prompt
+    const repaired = text.replace(/(\\+)([\s\S])?/g, (m, run, c) => {
+      if (!c || run.length % 2 === 0 || /["\\\/bfnrtu]/.test(c)) return m;
+      return `${run}\\${c}`;
+    });
+    if (repaired !== text) {
+      try {
+        parsed = JSON.parse(repaired);
+        console.warn('[emoji] JSON.parse failed, recovered after repairing invalid escapes:', err.message);
+      } catch (err2) {
+        console.warn('[emoji] JSON.parse failed after escape repair, using fallback prompts:', err2.message);
+      }
+    } else {
+      console.warn('[emoji] JSON.parse failed, using fallback prompts:', err.message);
+    }
   }
 
   const out = {};
@@ -263,13 +278,19 @@ export async function generateEmojiPrompts(char, style = '', keys = null) {
   ];
   requirements.push(`不要写背景、画风、构图类描述（${tagsText}）。这些固定 tag 由系统在生成后自动前置到每条 prompt 开头，你重复输出只会浪费 token。`);
   requirements.push('输出严格 JSON object：键是上面的中文表情名，值是对应 prompt 字符串。不要 Markdown 代码块，不要解释。');
+  // 输出示例演示双重转义：JSON 源码里的 \\( 解析后即生图规则要求的 \(；单个 \( 是非法 JSON 转义
+  const outputExample = '{"开心": "Name \\\\(Series\\\\) \\\\(hair color, eye color, signature outfit\\\\) happy grin, smile", "难过": "Name \\\\(Series\\\\) \\\\(hair color, eye color, signature outfit\\\\) teary eyes, sad frown"}';
   const system2 = `你是 LINE 表情包提示词生成助手。
 请为角色生成 ${emojiKeys.length} 种表情的 SDXL 英文提示词。
 
 表情列表：${emojiKeys.join('、')}
 
 固定要求：
-${requirements.map((r, i) => `${i + 1}. ${r}`).join('\n')}`;
+${requirements.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+输出格式示例（只演示格式与转义写法，示例仅展示前 2 个键，实际必须输出全部 ${emojiKeys.length} 个键；角色名与外观锚点必须来自角色资料，不得照抄示例内容）：
+${outputExample}
+注意：生图规则中的角色写法 \\( 是指最终 prompt 文本；写进 JSON 字符串时必须把每个反斜杠写成两个，即 \\\\(，只写一个反斜杠属于非法 JSON 转义，会导致解析失败。`;
   const system3 = `${char.short_prompt || ''}\n\n角色外观：\n${appearance || '以 short_prompt 为准，保持角色原有辨识度'}`;
 
   const displayName = char.display_name || char.name || '目标角色';
