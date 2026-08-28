@@ -222,6 +222,15 @@ _SCRAPE_HEADERS = {
 _direct_session = requests.Session()
 _direct_session.trust_env = False
 
+_ALLOWED_SCRAPE_HOSTS = {'zh.moegirl.org.cn', 'mzh.moegirl.org.cn'}
+
+def _validate_scrape_url(url: str) -> None:
+    """仅允许 https 协议 + 萌娘百科域名，防止 SSRF（内网/元数据服务等）"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or parsed.hostname not in _ALLOWED_SCRAPE_HOSTS:
+        raise ValueError(f'url host not allowed: {url}')
+
 def _fetch_moegirl_page(url):
     candidates = [url]
     if 'zh.moegirl.org.cn' in url:
