@@ -127,7 +127,7 @@ export function extractAppearanceSection(basePrompt) {
  * 可在表情包管理「高级设置」中修改（存 DB system_settings，key=emoji_fixed_tags）。
  */
 export const DEFAULT_EMOJI_FIXED_TAGS = [
-  'chibi character, big head',
+  'solo',
   'LINE sticker style, clean bold outlines, simple flat colors, expressive face',
   'white background',
 ];
@@ -227,13 +227,13 @@ function buildEmojiImageRule(styleMode) {
   const chibi = styleMode === EMOJI_STYLE_MODES.CHIBI_HEAD;
   const anchors = chibi
     ? '发型、发色、瞳色、瞳孔/眼球特征、嘴巴、表情、头部配饰等至少 3 项'
-    : '发型、发色、瞳色、标志性服装、配饰、体型、辨识特征等至少 5 项';
+    : '发型、发色、瞳色、标志性服装（上半身）、头部配饰、辨识特征等至少 6 项；不要写鞋袜、腿部、体型（如 shoes, boots, stockings, tall figure，会拖成全身构图）';
   const example = chibi
-    ? "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, star-shaped pupils, gold hair ornament\\) happy grin'"
-    : "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, blue top hat and tailcoat, gold trim\\) waving with a soft smile'";
+    ? "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, star-shaped pupils, gold hair ornament\\) happy grin, smile'"
+    : "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, blue top hat, lace gloves\\) happy grin, smile'";
   const modeRule = chibi
     ? '猪鼻大头风格只保留大头与表情, 角色必须转成 Q版大头。允许项：发型、发色、瞳色、眼球/瞳孔特征、眉毛、嘴巴、表情、脸型、头部配饰。禁止项：任何服装、衣着、脖颈以下身体、胸部、腹部、腰部、臀部、腿部、鞋袜、choker/项链；禁止词包括但不限于 suit, midriff, exposed midriff, build, figure, chest, breast, waist, hips, legs, boots, stockings, skirt, pants, shorts, shoes, choker, necklace, torso, clothing, outfit。'
-    : '半身构图（half body 由系统前置追加），角色服装保持原设定即可，无需为场景换装。';
+    : '半身构图LINE风格表情包（构图由系统前置 tag 固定：half body, upper body, close-up），只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图被拖成全身；不要写 chibi character、big head 等 Q版描述，半身模式保持角色原有头身比例；角色服装保持原设定即可，无需为场景换装。';
   return [
     '本任务生成 SDXL 表情包提示词，适用以下专用生图规则（替代通用生图规则）：',
     `1. 角色写法（核心）：每个 prompt 中的角色一律写成 'Name \\(Series\\)'，作品名后用括号注明${anchors}，随后接角色在该表情下的表情与肢体动作。示例：${example}。`,
@@ -249,12 +249,13 @@ export async function generateEmojiPrompts(char, style = '', keys = null) {
   const appearance = extractAppearanceSection(char.base_prompt);
   const styleMode = getEmojiStyleMode();
   const system1 = buildEmojiImageRule(styleMode);
-  let tagsText = getEmojiFixedTagsText();
-  if (styleMode === EMOJI_STYLE_MODES.HALF_BODY) {
-    tagsText = `${tagsText}, half body`;
-  } else {
-    tagsText = `${tagsText}, only head`;
-  }
+  // 构图 tag 放最前吃最高权重，是半身/大头构图稳定性的关键
+  const MODE_FRAMING_TOKENS = {
+    [EMOJI_STYLE_MODES.HALF_BODY]: ['half body', 'upper body', 'close-up'],
+    [EMOJI_STYLE_MODES.CHIBI_HEAD]: ['only head', 'chibi character', 'big head'],
+  };
+  const baseTags = getEmojiFixedTagsText().split(',').map(t => t.trim()).filter(Boolean);
+  const tagsText = [...(MODE_FRAMING_TOKENS[styleMode] || []), ...baseTags].join(', ');
   // 高缓存分层：稳定指令、角色信息拆成独立 system，用户方向单独放最后
   const requirements = [
     `prompt 生成格式遵循前面生图规则中的角色写法，${emojiKeys.length} 条 prompt 中的角色写法必须保持一致。`,
@@ -263,7 +264,7 @@ export async function generateEmojiPrompts(char, style = '', keys = null) {
   requirements.push(`不要写背景、画风、构图类描述（${tagsText}）。这些固定 tag 由系统在生成后自动前置到每条 prompt 开头，你重复输出只会浪费 token。`);
   requirements.push('输出严格 JSON object：键是上面的中文表情名，值是对应 prompt 字符串。不要 Markdown 代码块，不要解释。');
   const system2 = `你是 LINE 表情包提示词生成助手。
-请为角色生成 ${emojiKeys.length} 种表情的 ComfyUI 英文提示词。
+请为角色生成 ${emojiKeys.length} 种表情的 SDXL 英文提示词。
 
 表情列表：${emojiKeys.join('、')}
 
@@ -292,7 +293,7 @@ ${requirements.map((r, i) => `${i + 1}. ${r}`).join('\n')}`;
       temperature: 0.75,
       max_tokens: 4096,
       response_format: { type: 'json_object' },
-      label: 'emoji-prompt',
+      label: '表情包生成',
     }
   );
 

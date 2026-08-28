@@ -14,7 +14,7 @@ export const MAIBOT_INSTALL_STEPS = [
   },
   {
     title: '③ 观看安装视频',
-    body: 'B 站 <a href="https://space.bilibili.com/632137" target="_blank" rel="noopener">@琪猫猫来了全秒了</a> 有完整的安装演示，跟着做即可。',
+    body: 'B 站 <a href="https://www.bilibili.com/video/BV1y3h36pEXU?t=106.5" target="_blank" rel="noopener">@琪猫猫来了全秒了</a> 有完整的安装演示，跟着做即可。',
   },
   {
     title: '④ 完成安装',

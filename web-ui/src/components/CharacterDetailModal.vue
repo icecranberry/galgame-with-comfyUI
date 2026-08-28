@@ -253,7 +253,7 @@
 
               <!-- ── 空状态 ── -->
               <div v-if="loraItems.length === 0" class="lora-empty-hint">
-                尚未配置任何 LoRA，点击下方按钮添加
+                尚未配置任何 LoRA，点击下方按钮添加<a href="https://www.bilibili.com/video/BV1wsNu61EX6?t=204.1" target="_blank" rel="noopener noreferrer" class="lora-tutorial-link">添加LoRA教程</a>
               </div>
 
               <!-- ── 添加 Lora 按钮 ── -->
@@ -1027,8 +1027,9 @@ async function saveLora() {
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
-.lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
-.lora-civitai-link:hover { opacity: 1; text-decoration: underline; }
+.lora-civitai-link, .lora-tutorial-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
+.lora-civitai-link:hover, .lora-tutorial-link:hover { opacity: 1; text-decoration: underline; }
+.lora-tutorial-link { margin-left: 6px; }
 
 /* ═══ 移动端 ═══ */
 @media (max-width: 767px) {

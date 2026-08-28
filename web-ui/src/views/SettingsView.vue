@@ -25,7 +25,7 @@
                 <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites(comfyTab)" :disabled="!form[activeFields.artist].trim()">☆</button>
               </div>
               <template v-if="artistFavorites.length">
-                <div class="fav-section-title">已选择的画师 / 风格</div>
+                <div class="fav-section-title">收藏的画师 / 风格</div>
                 <div class="fav-chips">
                 <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form[activeFields.artist] }" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
                   {{ fav.label }}
@@ -113,13 +113,17 @@
               @mousedown.prevent="focusSceneDesc"
             >{{ freeSceneDesc }}</div>
           </div>
-          <button
-            class="btn-primary free-scene-btn"
-            :disabled="styleTesting || !freeSceneDesc.trim()"
-            @click="runFreeSceneTest"
-          >
-            {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成' }}
-          </button>
+          <!-- 有输入内容时才出现，渐入渐出 -->
+          <Transition name="gen-btn-fade">
+            <button
+              v-if="freeSceneDesc.trim() || styleTesting"
+              class="btn-primary free-scene-btn"
+              :disabled="styleTesting || !freeSceneDesc.trim()"
+              @click="runFreeSceneTest"
+            >
+              {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成提示词' }}
+            </button>
+          </Transition>
         </div>
 
         <div
@@ -358,61 +362,25 @@
 
         <!-- 模型 -->
         <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
-        <div ref="llmModelPicker" class="llm-model-picker">
-          <div class="llm-model-row">
-            <div class="llm-model-combobox">
-              <input
-                v-model="llmModel"
-                class="fi"
-                autocomplete="off"
-                placeholder="deepseek-v4-flash"
-                role="combobox"
-                aria-label="模型"
-                aria-autocomplete="list"
-                aria-controls="llm-model-options"
-                :aria-expanded="llmModelsOpen"
-                @focus="openLlmModelOptions"
-                @click="openLlmModelOptions"
-                @input="onLlmModelInput"
-                @keydown="onLlmModelKeydown"
-              />
-              <div
-                v-if="llmModelsOpen && llmModels.length"
-                id="llm-model-options"
-                class="llm-model-options"
-                role="listbox"
-                aria-label="可用模型"
-              >
-                <button
-                  v-for="(model, index) in filteredLlmModels"
-                  :id="`llm-model-option-${index}`"
-                  :key="model"
-                  type="button"
-                  role="option"
-                  class="llm-model-option"
-                  :class="{ selected: model === llmModel, active: index === llmModelActiveIndex }"
-                  :aria-selected="model === llmModel"
-                  :title="model"
-                  @mouseenter="llmModelActiveIndex = index"
-                  @mousedown.prevent="selectLlmModel(model)"
-                >
-                  <span>{{ model }}</span>
-                  <svg v-if="model === llmModel" class="llm-model-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                </button>
-                <div v-if="filteredLlmModels.length === 0" class="llm-model-empty">未找到匹配模型</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="model-fetch-btn"
-              :disabled="llmModelsLoading || !llmBaseURL.trim()"
-              :aria-expanded="llmModelsOpen"
-              aria-controls="llm-model-options"
-              @click="loadAvailableModels"
-            >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</button>
-          </div>
-          <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
+        <div class="llm-model-row">
+          <DropdownSelect
+            ref="llmModelSelect"
+            v-model="llmModelSelectVal"
+            class="llm-model-select"
+            :options="llmModelOptions"
+            searchable
+            allow-free-input
+            placeholder="deepseek-v4-flash"
+            aria-label="模型"
+          />
+          <button
+            type="button"
+            class="model-fetch-btn"
+            :disabled="llmModelsLoading || !llmBaseURL.trim()"
+            @click="loadAvailableModels"
+          >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</button>
         </div>
+        <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
 
         <div v-if="isCustomBaseURL" class="toggle-row thinking-setting">
           <div>
@@ -985,7 +953,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
@@ -1180,15 +1148,15 @@ const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
 const llmModels = ref([])
 const llmModelsLoading = ref(false)
-const llmModelsOpen = ref(false)
 const llmModelsError = ref('')
-const llmModelPicker = ref(null)
-const llmModelQuery = ref('')
-const llmModelActiveIndex = ref(-1)
-const filteredLlmModels = computed(() => {
-  const query = llmModelQuery.value.trim().toLowerCase()
-  if (!query) return llmModels.value
-  return llmModels.value.filter(model => model.toLowerCase().includes(query))
+const llmModelSelect = ref(null)
+const llmModelOptions = computed(() => llmModels.value.map(model => ({ value: model, label: model })))
+const llmModelSelectVal = computed({
+  get: () => llmModel.value,
+  set: (val) => {
+    llmModel.value = val
+    markLlmDirty()
+  },
 })
 const llmThinkingMode = ref('disabled')
 const thinkingModeOptions = [
@@ -1454,7 +1422,6 @@ async function loadAvailableModels() {
   }
 
   llmModelsLoading.value = true
-  llmModelsOpen.value = false
   llmModelsError.value = ''
   llmModels.value = []
   try {
@@ -1465,68 +1432,12 @@ async function loadAvailableModels() {
       headers,
     })
     llmModels.value = result.models || []
-    llmModelQuery.value = ''
-    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
-    llmModelsOpen.value = llmModels.value.length > 0
+    if (llmModels.value.length) llmModelSelect.value?.open()
   } catch (error) {
     llmModelsError.value = error.message || '获取模型失败'
     toastFn?.(llmModelsError.value, 'error')
   } finally {
     llmModelsLoading.value = false
-  }
-}
-
-function openLlmModelOptions() {
-  if (!llmModels.value.length) return
-  if (!llmModelsOpen.value) {
-    llmModelQuery.value = ''
-    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
-  }
-  llmModelsOpen.value = true
-}
-
-function onLlmModelInput() {
-  llmModelQuery.value = llmModel.value
-  llmModelActiveIndex.value = -1
-  llmModelsOpen.value = llmModels.value.length > 0
-  markLlmDirty()
-}
-
-function onLlmModelKeydown(event) {
-  if (event.key === 'Escape') {
-    llmModelsOpen.value = false
-    return
-  }
-  if (!llmModels.value.length) return
-  if (!llmModelsOpen.value && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-    event.preventDefault()
-    openLlmModelOptions()
-    return
-  }
-  const models = filteredLlmModels.value
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    llmModelActiveIndex.value = Math.min(llmModelActiveIndex.value + 1, models.length - 1)
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    llmModelActiveIndex.value = Math.max(llmModelActiveIndex.value - 1, -1)
-  } else if (event.key === 'Enter' && llmModelActiveIndex.value >= 0) {
-    event.preventDefault()
-    selectLlmModel(models[llmModelActiveIndex.value])
-  }
-}
-
-function selectLlmModel(model) {
-  llmModel.value = model
-  llmModelQuery.value = ''
-  llmModelActiveIndex.value = -1
-  llmModelsOpen.value = false
-  markLlmDirty()
-}
-
-function closeLlmModelsOnOutsideClick(event) {
-  if (llmModelPicker.value && !llmModelPicker.value.contains(event.target)) {
-    llmModelsOpen.value = false
   }
 }
 
@@ -1653,9 +1564,6 @@ async function removeProfile(id) {
     console.error('[llm] delete profile failed:', err)
   }
 }
-
-onMounted(() => document.addEventListener('pointerdown', closeLlmModelsOnOutsideClick))
-onUnmounted(() => document.removeEventListener('pointerdown', closeLlmModelsOnOutsideClick))
 
 onMounted(async () => {
   try {
@@ -3018,10 +2926,8 @@ function resetTestPrompts() {
 .free-egg-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .free-egg-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 .free-egg-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.75; margin-top: 2px; }
-.llm-model-picker { position: relative; margin-bottom: 14px;}
-.llm-model-row { display: flex; align-items: stretch; gap: 8px; }
-.llm-model-combobox { position: relative; min-width: 0; flex: 1; }
-.llm-model-row .fi { width: 100%; min-width: 0; margin-bottom: 0; }
+.llm-model-row { display: flex; align-items: stretch; gap: 8px; margin-bottom: 14px; }
+.llm-model-row .dds-wrapper { flex: 1; min-width: 0; }
 .model-fetch-btn {
   min-width: 82px;
   padding: 0 12px;
@@ -3037,52 +2943,7 @@ function resetTestPrompts() {
 .model-fetch-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .model-fetch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .model-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.model-fetch-error { margin-top: 6px; color: var(--danger); font-size: 12px; line-height: 1.5; }
-.llm-model-options {
-  position: absolute;
-  z-index: 80;
-  top: calc(100% + 4px);
-  right: 0;
-  left: 0;
-  max-height: 220px;
-  padding: 4px;
-  overflow-y: auto;
-  border: 1px solid #e2d6c7;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
-  transform-origin: top center;
-  animation: llm-model-drop-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.llm-model-option {
-  width: 100%;
-  padding: 9px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-bright);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.llm-model-option:hover { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.llm-model-option.selected,
-.llm-model-option.active { background: rgba(224, 123, 108, 0.06); color: var(--accent); font-weight: 600; }
-.llm-model-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.llm-model-check { flex-shrink: 0; color: var(--accent); }
-.llm-model-empty { padding: 16px 10px; color: var(--text-secondary); font-size: 13px; text-align: center; }
-@keyframes llm-model-drop-in {
-  from { opacity: 0; transform: scaleY(0.9) translateY(-6px); }
-  to { opacity: 1; transform: scaleY(1) translateY(0); }
-}
+.model-fetch-error { margin-top: -8px; margin-bottom: 14px; color: var(--danger); font-size: 12px; line-height: 1.5; }
 .thinking-setting { min-width: 0; }
 .thinking-options {
   position: relative;
@@ -3248,6 +3109,9 @@ function resetTestPrompts() {
 }
 .free-scene-ellipsis:hover { border-color: var(--accent); }
 .free-scene-btn { border-radius: 8px; margin: 0; flex-shrink: 0; }
+/* 生成提示词按钮：随输入内容渐入渐出 */
+.gen-btn-fade-enter-active, .gen-btn-fade-leave-active { transition: opacity 0.25s ease; }
+.gen-btn-fade-enter-from, .gen-btn-fade-leave-to { opacity: 0; }
 .generated-prompt-box {
   padding: 10px 14px; margin-bottom: 12px; border-radius: 12px;
   background: var(--glass-bg-strong); border: 1px solid var(--glass-border);
@@ -3329,9 +3193,14 @@ function resetTestPrompts() {
   .settings-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
-  /* 自由画面测试：textarea 与按钮纵向堆叠 */
-  .free-scene-row { flex-direction: column; }
+  /* 自由画面测试：textarea 与按钮纵向堆叠，输入区占满卡片宽度 */
+  .free-scene-row { flex-direction: column; align-items: stretch; }
+  .free-scene-input-wrap { width: 100%; }
   .free-scene-btn { width: 100%; }
+  /* 图片实验室操作区：生成画面/细化按钮占满一行，三个参数切换共占一行 */
+  .style-test-row .style-test-btn { width: 100%; }
+  .style-test-row .test-mode-btn { flex: 1 1 0; padding-left: 6px; padding-right: 6px; }
+  .test-prompt-btn { margin-left: 0; }
   /* 画师串操作按钮行：允许换行，避免挤压 */
   .sa { flex-wrap: wrap; gap: 8px; }
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
@@ -3347,7 +3216,6 @@ function resetTestPrompts() {
   .memory-entry-arrow,
   .thinking-option span,
   .thinking-options::before { transition: none; }
-  .llm-model-options { animation: none; }
   .memory-settings-entry:hover .memory-entry-arrow { transform: none; }
 }
 

@@ -61,11 +61,16 @@
                 <button class="emoji-gear" title="高级设置" @click="showAdvancedSettings = true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
+                <span
+                  class="emoji-mode-badge"
+                  :class="styleMode"
+                  title="当前表情包风格，可在高级设置中切换"
+                >{{ styleMode === 'half_body' ? '半身' : '猪鼻大头' }}</span>
                 <input
                   v-model="style"
                   class="fi emoji-style-input"
                   type="text"
-                  placeholder="表情包整体风格（留空则不注入）"
+                  placeholder="自定义表情包整体风格（可选，留空则不注入）"
                 />
                 <button
                   class="btn-primary"
@@ -223,12 +228,12 @@
 
           <div class="advanced-body">
             <div class="advanced-section">
-              <div class="advanced-label">表情包整体风格</div>
+              <div class="advanced-label">自定义整体风格</div>
               <input
                 v-model="batchStyle"
                 class="fi advanced-artist-input"
                 type="text"
-                placeholder="留空则不注入整体风格"
+                placeholder="可选，留空则不注入整体风格"
                 @keyup.enter="startBatchGenerate"
               />
               <div class="advanced-hint">将按角色列表顺序，为全部 {{ characters.length }} 个角色逐个生成表情包。</div>
@@ -876,6 +881,18 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
   transform: rotate(60deg);
 }
+.emoji-mode-badge {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+}
+.emoji-mode-badge.half_body { background: #FBEAE6; color: #D96A59; }
+.emoji-mode-badge.chibi_head { background: #E8F1EA; color: #5B8C6E; }
 .emoji-style-input {
   flex: 1;
   min-width: 240px;
