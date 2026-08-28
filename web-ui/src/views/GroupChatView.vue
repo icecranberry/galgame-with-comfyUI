@@ -73,7 +73,7 @@
                 :src="url"
                 class="msg-image"
                 :class="{ 'msg-emoji-img': isEmojiSticker(url) }"
-                @click="previewUrl = url"
+                @click="onImageClick(url)"
               />
             </div>
           </div>
@@ -328,9 +328,14 @@ function avatarFallback(msg) {
   const path = memberOf(msg)?.avatar_path || msg.speaker_avatar
   return path ? '' : (msg.speaker_name || '?').charAt(0)
 }
-// 表情包贴纸（/images/emoji/）按 100px 渲染，与私聊 .msg-sticker-img 同款
+// 表情包贴纸（/images/emoji/）按 140px 渲染，与私聊 .msg-sticker-img 同款
 function isEmojiSticker(url) {
   return typeof url === 'string' && url.includes('/images/emoji/')
+}
+// 表情包与私聊一致不可点击放大，仅普通图片打开大图预览
+function onImageClick(url) {
+  if (isEmojiSticker(url)) return
+  previewUrl.value = url
 }
 
 const AVATAR_POP_W = 320
@@ -994,8 +999,8 @@ async function onDissolve() {
   width: auto; height: auto;
   border-radius: 20px; cursor: pointer; object-fit: contain;
 }
-/* 表情包贴纸高度固定 120px，宽度随图片比例自适应，与私聊 .msg-sticker-img 同款 */
-.msg-image.msg-emoji-img { height:120px; width:auto; max-width:none; max-height:none; border-radius:8px; }
+/* 表情包贴纸高度固定 140px，宽度随图片比例自适应，与私聊 .msg-sticker-img 同款；不可点击放大 */
+.msg-image.msg-emoji-img { height:140px; width:auto; max-width:none; max-height:none; border-radius:8px; cursor:default; }
 
 .gc-empty { text-align:center; color:var(--text-secondary); font-size:13px; padding:60px 0; }
 

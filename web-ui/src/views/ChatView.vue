@@ -1749,15 +1749,15 @@ function renderContent(text) {
 }
 
 .msg-text { font-size:14px; line-height:1.6; }
-/* 表情包独立气泡：高度固定 120px，宽度随图片比例自适应，柔和圆角白底 */
+/* 表情包独立气泡：高度固定 140px，宽度随图片比例自适应，柔和圆角白底 */
 .msg-sticker-bubble {
-  height:120px; width:auto; padding:0; border-radius:8px; overflow:hidden; flex-shrink:0;
+  height:140px; width:auto; padding:0; border-radius:8px; overflow:hidden; flex-shrink:0;
   background:rgba(255,255,255,0.6); border:none; box-sizing:border-box;
 }
 .message.user .msg-sticker-bubble, .message.assistant .msg-sticker-bubble {
   background:rgba(255,255,255,0.6); border:none;
 }
-.msg-sticker-bubble .msg-sticker-img { height:120px; width:auto; object-fit:contain; border-radius:8px; background:transparent; padding:0; display:block; }
+.msg-sticker-bubble .msg-sticker-img { height:140px; width:auto; object-fit:contain; border-radius:8px; background:transparent; padding:0; display:block; }
 .msg-text :deep(code) { background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:13px; }
 .msg-text :deep(strong) { font-weight:600; }
 

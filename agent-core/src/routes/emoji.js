@@ -105,15 +105,17 @@ router.post('/prompts', async (req, res) => {
 
 /** POST /api/characters/emoji/images — 批量把 prompt_ready/failed 的行提交 ComfyUI（后台执行） */
 router.post('/images', (req, res) => {
-  const { character_ids, keys, artist } = req.body || {};
+  const { character_ids, keys, artist, includeDone } = req.body || {};
   if (!Array.isArray(character_ids) || character_ids.length === 0) {
     return res.status(400).json({ error: 'character_ids is required (non-empty array)' });
   }
 
   const db = getDb();
   const placeholders = character_ids.map(() => '?').join(',');
-  const params = [...character_ids];
-  let where = `ce.character_id IN (${placeholders}) AND ce.status IN ('prompt_ready','failed') AND ce.prompt != ''`;
+  // includeDone 时把已生成完成的行也纳入重画（仍要求已有 prompt）；generating 行始终排除，避免重复提交
+  const statuses = includeDone ? ['done', 'prompt_ready', 'failed'] : ['prompt_ready', 'failed'];
+  const params = [...character_ids, ...statuses];
+  let where = `ce.character_id IN (${placeholders}) AND ce.status IN (${statuses.map(() => '?').join(',')}) AND ce.prompt != ''`;
   if (Array.isArray(keys) && keys.length > 0) {
     where += ` AND ce.emoji_key IN (${keys.map(() => '?').join(',')})`;
     params.push(...keys);
@@ -126,7 +128,7 @@ router.post('/images', (req, res) => {
   `).all(...params);
 
   if (rows.length === 0) {
-    return res.json({ started: true, count: 0, message: '没有待生成的表情包' });
+    return res.json({ started: true, count: 0, message: includeDone ? '没有可重新生成的表情包' : '没有待生成的表情包' });
   }
 
   // 先全部置为 generating，再后台串行生成

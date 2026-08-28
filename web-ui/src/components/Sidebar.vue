@@ -60,6 +60,28 @@
         <span v-if="proactive.hasUnread(c.id)" class="proactive-dot"></span>
       </div>
 
+      <!-- 新手引导：仅剩默认助手时显示，点击前往酒馆创建角色 -->
+      <button
+        v-if="chat.characters.length === 1"
+        type="button"
+        class="char-onboard"
+        @click="goTavern"
+      >
+        <span class="char-onboard-icon">
+          <svg viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
+            <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z"/>
+            <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z"/>
+          </svg>
+        </span>
+        <span class="char-onboard-text">
+          <span class="char-onboard-title">移步酒馆</span>
+          <span class="char-onboard-desc">完善你的设定，邀请更多伙伴前来</span>
+        </span>
+        <svg class="char-onboard-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/>
+        </svg>
+      </button>
+
       <div v-if="chat.characters.length === 0" class="char-empty">
         加载中...
       </div>
@@ -342,6 +364,11 @@ async function onCharClick(c) {
   if (props.isMobile) emit('charSelected')
 }
 
+function goTavern() {
+  router.push('/tavern')
+  if (props.isMobile) emit('charSelected')
+}
+
 function onMomentsClick() {
   if (route.path === '/moments') {
     moments.resetFilters()
@@ -474,6 +501,45 @@ function formatTime(iso) {
 
 .char-empty { color: var(--text-secondary); font-size: 13px; text-align: center; padding: 40px 16px; }
 
+/* ── 新手引导：仅剩默认助手时 ── */
+.char-onboard {
+  display: flex; align-items: center; gap: 12px;
+  width: calc(100% - 16px);
+  margin: 10px 8px 4px; padding: 12px 14px;
+  border: none; border-radius: 14px;
+  background: rgba(224, 123, 108, 0.09);
+  font-family: inherit; text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.char-onboard:hover { background: rgba(224, 123, 108, 0.15); }
+.char-onboard:active { transform: scale(0.99); }
+
+.char-onboard-icon {
+  width: 36px; height: 36px; flex-shrink: 0;
+  border-radius: 12px;
+  background: rgba(224, 123, 108, 0.16);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.char-onboard-icon svg { flex-shrink: 0; }
+
+.char-onboard-text {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.char-onboard-title { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.char-onboard-desc {
+  font-size: 12px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.char-onboard-arrow {
+  flex-shrink: 0;
+  color: var(--accent); opacity: 0.7;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.char-onboard:hover .char-onboard-arrow { transform: translateX(2px); opacity: 1; }
+
 /* ── 群聊分区 ── */
 .group-section-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -482,15 +548,16 @@ function formatTime(iso) {
   letter-spacing: 1px;
 }
 .group-create-btn {
-  border: none; background: rgba(255,255,255,0.35);
-  width: 22px; height: 22px; min-width: 22px; padding: 0; border-radius: 7px;
+  border: none; background: rgb(224 123 108 / 12%);
+  width: 24px; height: 24px; min-width: 24px; padding: 0; border-radius: 8px;
   line-height: 0; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-secondary); cursor: pointer;
+  color: var(--accent); cursor: pointer;
   transition: all 0.15s;
 }
 .group-create-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.group-create-btn:hover { background: rgb(226 166 122 / 40%); color: var(--text-bright); }
+.group-create-btn:hover { background: rgb(224 123 108 / 24%); }
+.group-create-btn:active { transform: scale(0.94); }
 
 .group-avatar-grid {
   width: 44px; height: 44px; border-radius: 12px; overflow: hidden;
@@ -843,6 +910,10 @@ function formatTime(iso) {
    移动端：媒体查询控制起始位置，CSS 层天生无闪动
    ══════════════════════════════════════════════════ */
 @media (max-width: 767px) {
+  .group-create-btn {
+    width: 30px; height: 30px; min-width: 30px; border-radius: 9px;
+  }
+  .group-create-btn svg { width: 16px; height: 16px; }
   .sidebar {
     position: fixed;
     top: 0; left: 0;

@@ -33,18 +33,32 @@
             </div>
             <!-- 左侧：角色头像列表（单选） -->
             <div class="emoji-left">
-              <div class="emoji-left-title">角色列表</div>
-              <div class="emoji-char-list">
+             <div class="emoji-char-picker">
+              <div v-if="!isMobile" class="emoji-left-title">角色列表</div>
+                <button v-if="isMobile" class="emoji-char-trigger" type="button" aria-haspopup="listbox" :aria-expanded="charPickerOpen" @click="charPickerOpen = !charPickerOpen" @keydown.escape.prevent="charPickerOpen = false">
+                  <div class="emoji-char-avatar" :style="characterAvatarStyle(selectedCharacter)">{{ selectedCharacter?.avatar_path ? '' : selectedCharacterName.charAt(0) }}</div>
+                  <span class="emoji-char-trigger-meta">
+                    <span class="emoji-char-trigger-name">{{ selectedCharacterName }}</span>
+                    <span class="emoji-char-trigger-count">{{ selectedCountText }}</span>
+                  </span>
+                  <svg class="emoji-char-trigger-chevron" :class="{ open: charPickerOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <Transition name="emoji-picker-fade">
+                <div v-show="!isMobile || charPickerOpen" class="emoji-char-layer" :class="{ open: isMobile && charPickerOpen }">
+                  <button v-if="isMobile" class="emoji-picker-scrim" type="button" tabindex="-1" aria-label="关闭角色列表" @click="charPickerOpen = false" @keydown.escape.prevent="charPickerOpen = false"></button>
+                  <div class="emoji-char-dropdown" role="listbox" aria-label="选择角色" @keydown.escape.prevent="charPickerOpen = false">
+                    <div v-if="isMobile" class="emoji-dropdown-head">选择角色</div>
+                    <div class="emoji-char-list">
                 <div
                   v-for="c in characters"
                   :key="c.id"
                   class="emoji-char-item"
                   :class="{ active: selectedCharId === c.id }"
-                  @click="selectedCharId = c.id"
+                  @click="selectCharacter(c.id)"
                 >
                   <div
                     class="emoji-char-avatar"
-                    :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : {}"
+                    :style="characterAvatarStyle(c)"
                   >{{ c.avatar_path ? '' : (c.display_name || c.name || '?').charAt(0) }}</div>
                    <div class="emoji-char-meta">
                      <div class="emoji-char-name">{{ c.display_name || c.name }}</div>
@@ -67,6 +81,10 @@
                      </div>
                   </div>
                 </div>
+                    </div>
+                  </div>
+                </div>
+                </Transition>
               </div>
               <div class="emoji-batch-row">
                 <button
@@ -114,12 +132,29 @@
                   placeholder="自定义表情包额外需求（可选，留空则不注入）"
                 />
                 <button
+                  v-if="selectedCharHasPrompts"
+                  class="btn-primary"
+                  :disabled="generating || selectedCharId === null"
+                  title="不重新提炼提示词，直接用现有提示词重新生成全部表情图片"
+                  @click="regenerateAllImages"
+                >
+                  {{ generating ? '生成中...' : '重新生成' }}
+                </button>
+                <button
+                  v-if="!selectedCharHasPrompts"
                   class="btn-primary"
                   :disabled="generating || selectedCharId === null"
                   @click="generateAll"
                 >
                   {{ generating ? '生成中...' : '生成表情包' }}
                 </button>
+                <button
+                  v-else
+                  class="btn-ghost emoji-redo-btn"
+                  :disabled="generating || selectedCharId === null"
+                  title="重新提炼表情提示词，并用新提示词生成全部表情图片"
+                  @click="generateAll"
+                >完全重做</button>
               </div>
 
               <div v-if="batchRunning" class="emoji-progress-strip" :class="{ paused: batchPaused }">
@@ -165,7 +200,7 @@
 
                     <template v-if="rowFor(selectedCharId, key)">
                       <div class="emoji-image-wrap">
-                        <img v-if="isDone(selectedCharId, key) && rowImage(selectedCharId, key)" :src="rowImage(selectedCharId, key)" class="emoji-image" />
+<img v-if="isDone(selectedCharId, key) && rowImage(selectedCharId, key)" :src="rowImage(selectedCharId, key)" class="emoji-image" loading="lazy" decoding="async" />
                         <div v-else class="emoji-image-placeholder">+</div>
                         <div v-if="isCardLoading(selectedCharId, key)" class="emoji-scan-overlay">
                           <span class="emoji-spinner"></span>
@@ -327,6 +362,8 @@ const toast = inject('toast')
 const confirmFn = inject('confirm', null)
 const show = ref(true)
 const selectedCharId = ref(null)
+const isMobile = inject('isMobile', ref(false))
+const charPickerOpen = ref(false)
 const style = ref('')
 const artist = ref('@ebora')
 const emojiRows = ref([])
@@ -362,6 +399,7 @@ let scanTipTimer = null
 
 function close() {
   show.value = false
+  charPickerOpen.value = false
   batchRunning.value = false
   batchPaused.value = false
   batchCompleted.value = 0
@@ -371,6 +409,23 @@ function close() {
 
 function charName(id) {
   return props.characters.find(c => c.id === id)?.display_name || `角色 #${id}`
+}
+
+const selectedCharacter = computed(() => props.characters.find(c => c.id === selectedCharId.value) || null)
+const selectedCharacterName = computed(() => selectedCharacter.value?.display_name || selectedCharacter.value?.name || '请选择角色')
+const selectedCountText = computed(() => selectedCharId.value === null
+  ? '点击选择'
+  : `${doneCount(selectedCharId.value)}/${emojiKeys.value.length}`)
+
+function characterAvatarStyle(character) {
+  return character?.avatar_path
+    ? { backgroundImage: `url(${character.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : {}
+}
+
+function selectCharacter(id) {
+  selectedCharId.value = id
+  charPickerOpen.value = false
 }
 
 function rowFor(charId, key) {
@@ -420,6 +475,11 @@ function isCardLoading(charId, key) {
 
 const generatingRowsCount = computed(() => emojiRows.value.filter(r => r.status === 'generating').length)
 const selectedGeneratingCount = computed(() => emojiRows.value.filter(r => r.character_id === selectedCharId.value && r.status === 'generating').length)
+/** 当前角色是否已有提示词：决定工具栏显示「重新生成 + 完全重做」还是仅「完全重做」 */
+const selectedCharHasPrompts = computed(() =>
+  selectedCharId.value !== null &&
+  emojiRows.value.some(r => r.character_id === selectedCharId.value && r.prompt)
+)
 const generating = computed(() => starting.value || busyKey.value !== '' || uploadingKey.value !== '' || deletingKey.value !== '' || generatingRowsCount.value > 0 || batchRunning.value)
 const imageProgressVisible = computed(() => !starting.value && !batchRunning.value && (busyKey.value !== '' || generatingRowsCount.value > 0))
 const batchCurrentName = computed(() => {
@@ -533,6 +593,22 @@ async function generateAll() {
   } finally {
     starting.value = false
     promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== charId)
+  }
+}
+
+/** 重新生成：跳过提示词提炼，直接用现有提示词重画全部表情图片 */
+async function regenerateAllImages() {
+  if (selectedCharId.value === null || generating.value) return
+  const charId = selectedCharId.value
+  try {
+    const d = await api.generateEmojiImages([charId], [], artist.value, true)
+    if (d.error) throw new Error(d.error)
+    await loadOverview()
+    if (generatingRowsCount.value > 0) startPolling()
+    if (d.count > 0) toast?.(`已开始重新生成 ${d.count} 张表情图片`, 'success')
+    else toast?.('没有可重新生成的表情，请先「完全重做」提炼提示词', 'info')
+  } catch (err) {
+    toast?.('重新生成失败: ' + err.message, 'error')
   }
 }
 
@@ -790,6 +866,10 @@ watch(starting, (active) => {
   else stopScanTips()
 }, { immediate: true })
 
+watch(isMobile, (mobile) => {
+  if (!mobile) charPickerOpen.value = false
+})
+
 onMounted(async () => {
   if (props.characters.length > 0) selectedCharId.value = props.characters[0].id
   loadCategories()
@@ -820,8 +900,6 @@ onBeforeUnmount(() => {
   display: flex; flex-direction: column;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
   overflow: hidden;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 .modal-wide { width: min(1100px, 97vw); }
 .modal-header {
@@ -875,8 +953,6 @@ onBeforeUnmount(() => {
 .emoji-gen-overlay {
   position: absolute; inset: 0; z-index: 20;
   background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
@@ -947,11 +1023,15 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .emoji-left-title {
+  order: -1;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 10px;
 }
+.emoji-char-picker { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.emoji-char-layer { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.emoji-char-dropdown { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .emoji-char-list {
   flex: 1;
   min-height: 0;
@@ -1423,9 +1503,7 @@ onBeforeUnmount(() => {
 .emoji-scan-overlay {
   position: absolute;
   inset: 0;
-  background: transparent;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.68);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -1575,6 +1653,146 @@ onBeforeUnmount(() => {
   .emoji-body { flex-direction: column; }
   .emoji-left { width: 100%; border-right: none; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; }
   .emoji-char-list { flex-direction: row; overflow-x: auto; }
-  .emoji-char-item { flex-shrink: 0; }
+  .emoji-char-item { flex-shrink: 0; width: 100%; box-sizing: border-box; }
+  .emoji-char-meta { flex: 1; width: 100%; }
+
+  .modal-overlay { align-items: flex-start; }
+  .emoji-manager-modal {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    background: #f4f1ee;
+    border-radius: 0;
+  }
+  .modal-header {
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+  }
+  .modal-header h3 { font-size: 16px; }
+  .emoji-body {
+    gap: 8px;
+    margin: 0;
+    padding: 6px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+  }
+  .emoji-left {
+    width: 100%;
+    border-right: none;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+  .emoji-left-title { display: none; }
+  .emoji-char-picker { display: block; flex: 0 0 auto; }
+  .emoji-char-trigger {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--text-bright);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .emoji-char-trigger-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .emoji-char-trigger-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .emoji-char-trigger-count { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .emoji-char-trigger-chevron { color: var(--text-secondary); transition: transform 0.2s ease; }
+  .emoji-char-trigger-chevron.open { transform: rotate(180deg); color: var(--accent); }
+  .emoji-char-layer.open {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: block;
+  }
+  .emoji-picker-scrim {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    border: 0;
+    background: rgba(43, 31, 24, 0.24);
+    cursor: default;
+  }
+  .emoji-char-dropdown {
+    position: absolute;
+    top: calc(90px + env(safe-area-inset-top, 0px));
+    left: 0;
+    right: 0;
+    padding: 10px;
+    max-height: min(72dvh, 540px);
+    overflow: hidden;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 10px 32px rgba(72, 55, 44, 0.18);
+  }
+  .emoji-dropdown-head { padding: 10px 12px 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .emoji-char-list {
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 2px 4px 6px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+  .emoji-char-item { transition: none; }
+  .emoji-batch-row { margin-top: 8px; flex: 0 0 auto; }
+  .emoji-batch-btn { padding: 8px 10px; font-size: 12px; }
+  .emoji-toolbar-row {
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 10px;
+    box-shadow: 0 1px 5px rgba(72, 55, 44, 0.06);
+  }
+  .emoji-gear { width: 32px; height: 32px; }
+  .emoji-mode-badge { padding: 8px 8px; font-size: 11px; }
+  .emoji-style-input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 12px; }
+  .emoji-toolbar-row .btn-primary { flex: 0 0 auto; min-width: 76px; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  .emoji-toolbar-row .emoji-redo-btn { flex: 0 0 auto; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  .emoji-progress-strip { padding: 6px 10px; font-size: 12px; }
+  .emoji-char-section {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+  .emoji-card {
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
+  }
+  .emoji-grid { grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 8px; padding-left: 0; }
+  .emoji-char-title { display: none; }
+  .emoji-card { padding: 8px; border-radius: 10px; gap: 6px; }
+  .emoji-card-delete { opacity: 1; transform: none; }
+  .emoji-card-actions { flex-wrap: nowrap; }
+  .emoji-card-actions .btn-sm {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    padding: 5px 6px;
+  }
+
+  .emoji-picker-fade-enter-active,
+  .emoji-picker-fade-leave-active { transition: opacity 0.18s ease; }
+  .emoji-picker-fade-enter-from,
+  .emoji-picker-fade-leave-to { opacity: 0; }
+  .emoji-picker-fade-enter-active .emoji-char-dropdown,
+  .emoji-picker-fade-leave-active .emoji-char-dropdown { transition: transform 0.18s ease; }
+  .emoji-picker-fade-enter-from .emoji-char-dropdown,
+  .emoji-picker-fade-leave-to .emoji-char-dropdown { transform: translateY(-6px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .emoji-picker-fade-enter-active,
+    .emoji-picker-fade-leave-active,
+    .emoji-picker-fade-enter-active .emoji-char-dropdown,
+    .emoji-picker-fade-leave-active .emoji-char-dropdown { transition: none; }
+  }
 }
 </style>

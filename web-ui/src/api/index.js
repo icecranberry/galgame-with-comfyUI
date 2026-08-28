@@ -103,10 +103,10 @@ export async function generateEmojiPrompts(character_ids, style = '') {
   return res.json()
 }
 
-export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora') {
+export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
   const res = await fetch(`${BASE}/characters/emoji/images`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_ids, keys, artist }),
+    body: JSON.stringify({ character_ids, keys, artist, includeDone: !!includeDone }),
   })
   return res.json()
 }
