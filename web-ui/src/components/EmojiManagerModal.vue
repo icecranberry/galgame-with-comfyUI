@@ -134,7 +134,7 @@
                   @keydown.enter.prevent="toggleStyleMode"
                   @keydown.space.prevent="toggleStyleMode"
                   title="点击切换表情包风格"
-                >{{ styleMode === 'half_body' ? '半身LINE' : '猪鼻大头' }}</div>
+                >{{ STYLE_MODE_LABELS[styleMode] || '半身LINE' }}</div>
                 <input
                   v-model="style"
                   class="fi emoji-style-input"
@@ -296,8 +296,9 @@
             <div class="advanced-section">
               <div class="advanced-label">表情包风格</div>
               <div class="emoji-style-segmented">
-                <linshe-button variant="chip" :active="styleMode === 'half_body'" @click="styleMode = 'half_body'">半身LINE风格</linshe-button>
-                <linshe-button variant="chip" :active="styleMode === 'chibi_head'" @click="styleMode = 'chibi_head'">猪鼻大头</linshe-button>
+                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'half_body' }]" @click="styleMode = 'half_body'" @keydown.enter.prevent="styleMode = 'half_body'" @keydown.space.prevent="styleMode = 'half_body'">半身LINE</div>
+                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'half_body_chibi' }]" @click="styleMode = 'half_body_chibi'" @keydown.enter.prevent="styleMode = 'half_body_chibi'" @keydown.space.prevent="styleMode = 'half_body_chibi'">半身Q版</div>
+                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'chibi_head' }]" @click="styleMode = 'chibi_head'" @keydown.enter.prevent="styleMode = 'chibi_head'" @keydown.space.prevent="styleMode = 'chibi_head'">猪鼻大头</div>
               </div>
               <div class="advanced-hint">{{ styleModeHint }}</div>
             </div>
@@ -402,9 +403,19 @@ const fixedTagsDraft = ref('')
 const fixedTagsError = ref('')
 const styleMode = ref('half_body')
 const styleModeSaving = ref(false)
-const styleModeHint = computed(() => styleMode.value === 'half_body'
-  ? '起手式 tag 将额外追加 half body。'
-  : '按 chibi character, big head 风格生成表情包，并禁止模型添加角色服装描述。')
+/** 表情包风格三种：徽章点击按此顺序循环切换 */
+const STYLE_MODE_ORDER = ['half_body', 'half_body_chibi', 'chibi_head']
+const STYLE_MODE_LABELS = { half_body: '半身LINE', half_body_chibi: '半身Q版', chibi_head: '猪鼻大头' }
+const styleModeHint = computed(() => {
+  switch (styleMode.value) {
+    case 'half_body_chibi':
+      return '起手式 tag 将额外追加 chibi, big head, upper body，Q版大头 + 上半身构图，保留角色服装描述。'
+    case 'chibi_head':
+      return '按 chibi character, big head 风格生成表情包，并禁止模型添加角色服装描述。'
+    default:
+      return '起手式 tag 将额外追加 half body。'
+  }
+})
 const showBatchDialog = ref(false)
 const batchStyle = ref('')
 const batchRunning = ref(false)
@@ -568,7 +579,7 @@ async function loadCategories() {
   try {
     const t = await api.getEmojiFixedTags()
     fixedTagsDraft.value = t.tags || ''
-    styleMode.value = t.styleMode === 'chibi_head' ? 'chibi_head' : 'half_body'
+    styleMode.value = STYLE_MODE_ORDER.includes(t.styleMode) ? t.styleMode : 'half_body'
   } catch {
     fixedTagsDraft.value = ''
   }
@@ -578,7 +589,7 @@ async function toggleStyleMode() {
   if (styleModeSaving.value) return
 
   const previousMode = styleMode.value
-  const nextMode = previousMode === 'half_body' ? 'chibi_head' : 'half_body'
+  const nextMode = STYLE_MODE_ORDER[(STYLE_MODE_ORDER.indexOf(previousMode) + 1) % STYLE_MODE_ORDER.length]
   styleMode.value = nextMode
   styleModeSaving.value = true
 
@@ -587,7 +598,7 @@ async function toggleStyleMode() {
     if (t.error) throw new Error(t.error)
     fixedTagsDraft.value = t.tags || fixedTagsDraft.value
     styleMode.value = t.styleMode || nextMode
-    toast?.(`表情包风格已切换为${nextMode === 'half_body' ? '半身LINE' : '猪鼻大头'}`, 'success')
+    toast?.(`表情包风格已切换为${STYLE_MODE_LABELS[styleMode.value] || nextMode}`, 'success')
   } catch (err) {
     styleMode.value = previousMode
     toast?.('切换表情包风格失败: ' + err.message, 'error')
@@ -1310,6 +1321,7 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 .emoji-mode-badge.half_body { background: #FBEAE6; color: #D96A59; }
+.emoji-mode-badge.half_body_chibi { background: #FBF2DD; color: #B8873B; }
 .emoji-mode-badge.chibi_head { background: #E8F1EA; color: #5B8C6E; }
 .emoji-mode-badge:hover:not(.is-disabled) {
   transform: translateY(-1px);
@@ -1597,11 +1609,33 @@ onBeforeUnmount(() => {
 }
 .emoji-style-segmented {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 3px;
   background: #F7F2EC;
   border-radius: 10px;
+}
+.emoji-style-chip {
+  padding: 8px 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #6F675F;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+}
+.emoji-style-chip:hover { color: #E07B6C; }
+.emoji-style-chip.active {
+  background: #FFFEFC;
+  color: #E07B6C;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
 .advanced-hint {
   font-size: 12px;

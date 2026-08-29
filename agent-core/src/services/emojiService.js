@@ -128,29 +128,30 @@ export function extractAppearanceSection(basePrompt) {
  */
 export const DEFAULT_EMOJI_FIXED_TAGS = [
   'solo',
-  'LINE sticker style, clean bold outlines, simple flat colors, expressive face',
+  'LINE sticker style, simple flat colors, expressive face',
   'white background',
 ];
 
 const EMOJI_TAGS_SETTING_KEY = 'emoji_fixed_tags';
 const EMOJI_STYLE_MODE_SETTING_KEY = 'emoji_style_mode';
 
-/** 表情包风格模式：half_body=半身（起手式额外追加 half body）/ chibi_head=猪鼻大头（禁服装描述） */
+/** 表情包风格模式：half_body=半身（起手式额外追加 half body）/ half_body_chibi=半身Q版（半身构图+Q版大头）/ chibi_head=猪鼻大头（禁服装描述） */
 export const EMOJI_STYLE_MODES = {
   HALF_BODY: 'half_body',
+  HALF_BODY_CHIBI: 'half_body_chibi',
   CHIBI_HEAD: 'chibi_head',
 };
 
-/** 当前表情包风格；未设置时默认半身LINE */
+/** 当前表情包风格；未设置或非法时默认半身LINE */
 export function getEmojiStyleMode() {
   const saved = getSetting(EMOJI_STYLE_MODE_SETTING_KEY);
-  return saved === EMOJI_STYLE_MODES.CHIBI_HEAD ? EMOJI_STYLE_MODES.CHIBI_HEAD : EMOJI_STYLE_MODES.HALF_BODY;
+  return Object.values(EMOJI_STYLE_MODES).includes(saved) ? saved : EMOJI_STYLE_MODES.HALF_BODY;
 }
 
 /** 保存表情包风格 */
 export function saveEmojiStyleMode(mode) {
-  if (mode !== EMOJI_STYLE_MODES.HALF_BODY && mode !== EMOJI_STYLE_MODES.CHIBI_HEAD) {
-    throw new Error('表情包风格仅支持 half_body / chibi_head');
+  if (!Object.values(EMOJI_STYLE_MODES).includes(mode)) {
+    throw new Error('表情包风格仅支持 half_body / half_body_chibi / chibi_head');
   }
   setSetting(EMOJI_STYLE_MODE_SETTING_KEY, mode);
   return mode;
@@ -248,7 +249,9 @@ function buildEmojiImageRule(styleMode) {
     : "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, blue top hat, lace gloves\\) happy grin, smile'";
   const modeRule = chibi
     ? '猪鼻大头风格只保留大头与表情, 角色必须转成 Q版大头。允许项：发型、发色、瞳色、眼球/瞳孔特征、眉毛、嘴巴、表情、脸型、头部配饰。禁止项：任何服装、衣着、脖颈以下身体、胸部、腹部、腰部、臀部、腿部、鞋袜、choker/项链；禁止词包括但不限于 suit, midriff, exposed midriff, build, figure, chest, breast, waist, hips, legs, boots, stockings, skirt, pants, shorts, shoes, choker, necklace, torso, clothing, outfit。'
-    : '半身构图LINE风格表情包（构图由系统前置 tag 固定：half body, upper body, close-up），只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图被拖成全身；不要写 chibi character、big head 等 Q版描述，半身模式保持角色原有头身比例；角色服装保持原设定即可，无需为场景换装。';
+    : styleMode === EMOJI_STYLE_MODES.HALF_BODY_CHIBI
+      ? '半身Q版风格表情包（构图由系统前置 tag 固定：chibi, big head, upper body），角色画成Q版大头小身体、上半身入镜，只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图变成真实头身比例或完整全身；角色服装保持原设定即可，无需为场景换装。'
+      : '半身构图LINE风格表情包（构图由系统前置 tag 固定：half body, upper body, close-up），只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图被拖成全身；不要写 chibi character、big head 等 Q版描述，半身模式保持角色原有头身比例；角色服装保持原设定即可，无需为场景换装。';
   return [
     '本任务生成 SDXL 表情包提示词，适用以下专用生图规则（替代通用生图规则）：',
     `1. 角色写法（核心）：每个 prompt 中的角色一律写成 'Name \\(Series\\)'，作品名后用括号注明${anchors}，随后接角色在该表情下的表情与肢体动作。示例：${example}。`,
@@ -267,6 +270,7 @@ export async function generateEmojiPrompts(char, style = '', keys = null) {
   // 构图 tag 放最前吃最高权重，是半身/大头构图稳定性的关键
   const MODE_FRAMING_TOKENS = {
     [EMOJI_STYLE_MODES.HALF_BODY]: ['half body', 'upper body', 'close-up'],
+    [EMOJI_STYLE_MODES.HALF_BODY_CHIBI]: ['(chibi:2)', '(big head:2)', '(upper body:2)'],
     [EMOJI_STYLE_MODES.CHIBI_HEAD]: ['only head', 'chibi character', 'big head'],
   };
   const baseTags = getEmojiFixedTagsText().split(',').map(t => t.trim()).filter(Boolean);
