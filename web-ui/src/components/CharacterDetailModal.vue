@@ -58,66 +58,66 @@
               </div>
             </div>
 
-            <!-- 角色关系 -->
-            <div class="detail-rel-section">
-              <div class="detail-rel-header">
-                <span class="detail-rel-title">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                    <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                  </svg>
-                  角色关系网
-                </span>
-                <div class="detail-rel-btns">
-                <button
-                  v-if="detail.relationships.length > 0"
-                  class="detail-rel-btn subtle"
-                  @click="$emit('open-deduction', character)"
-                >推演关系</button>
-                <button
-                  v-if="detail.relationships.length > 0"
-                  class="detail-rel-btn subtle"
-                  @click="$emit('open-relation-graph', character)"
-                >管理关系图 &rarr;</button>
-                </div>
-              </div>
-              <div v-if="detail.relationships.length > 0" class="detail-rel-list">
-                <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
-                  <span class="rel-from">{{ character?.display_name }}</span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                  <span class="rel-to">{{ rel.to_display_name }}</span>
-                  <span class="rel-text">{{ rel.relationship_text }}</span>
-                </div>
-                <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="$emit('open-relation-graph', character)">
-                  共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
-                </div>
-              </div>
-              <div v-else class="detail-rel-empty">
-                <template v-if="detail.relationshipsLoading">
-                  <span class="rel-empty-spinner"></span> 加载中…
-                </template>
-                <template v-else>
-                  <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
-                  <div class="detail-rel-ctas">
-                  <button class="detail-rel-btn cta" @click="$emit('open-deduction', character)">
+            <div class="preview-card">
+              <!-- 角色关系 -->
+              <div class="detail-rel-section">
+                <div class="detail-rel-header">
+                  <span class="detail-rel-title">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                    </svg>
-                    推演关系
-                  </button>
-                  <button class="detail-rel-btn cta" @click="$emit('open-relation-graph', character)">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
                       <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
                     </svg>
-                    手动设置关系
-                  </button>
+                    角色关系网
+                  </span>
+                  <div class="detail-rel-btns">
+                    <button
+                      v-if="detail.relationships.length > 0"
+                      class="detail-rel-btn subtle"
+                      @click="$emit('open-deduction', character)"
+                    >推演关系</button>
+                    <button
+                      v-if="detail.relationships.length > 0"
+                      class="detail-rel-btn subtle"
+                      @click="$emit('open-relation-graph', character)"
+                    >管理关系图 &rarr;</button>
                   </div>
-                </template>
+                </div>
+                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
+                  <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
+                    <span class="rel-from">{{ character?.display_name }}</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    <span class="rel-to">{{ rel.to_display_name }}</span>
+                    <span class="rel-text">{{ rel.relationship_text }}</span>
+                  </div>
+                  <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="$emit('open-relation-graph', character)">
+                    共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
+                  </div>
+                </div>
+                <div v-else class="detail-rel-empty">
+                  <template v-if="detail.relationshipsLoading">
+                    <span class="rel-empty-spinner"></span> 加载中…
+                  </template>
+                  <template v-else>
+                    <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
+                    <div class="detail-rel-ctas">
+                      <button class="detail-rel-btn cta" @click="$emit('open-deduction', character)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        推演关系
+                      </button>
+                      <button class="detail-rel-btn cta" @click="$emit('open-relation-graph', character)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                          <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                        </svg>
+                        手动设置关系
+                      </button>
+                    </div>
+                  </template>
+                </div>
               </div>
-            </div>
 
-            <div class="preview-card">
               <div class="detail-name-row">
                 <div class="detail-name-col">
                   <label class="fl">角色名</label>
@@ -148,33 +148,43 @@
           </div>
         </div>
 
-        <!-- 悬浮侧边栏（桌面端） -->
+        <!-- 悬浮侧边栏（桌面端）：功能整合为一张卡片 -->
         <div class="detail-float" v-if="!isMobile">
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不看ta的朋友圈</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不主动聊天</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不发生奇遇</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-btn" @click="openLoraModal">
-            <span class="float-label">设置 Lora</span>
-            <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
-            <span v-else class="float-badge">未配置</span>
+          <div class="float-panel">
+            <div class="float-panel-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+              </svg>
+              更多设置
+            </div>
+            <div class="float-panel-body">
+              <div class="float-row">
+                <span class="float-label">不看ta的朋友圈</span>
+                <label class="toggle-switch float-switch">
+                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="float-row">
+                <span class="float-label">不主动聊天</span>
+                <label class="toggle-switch float-switch">
+                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="float-row">
+                <span class="float-label">不发生奇遇</span>
+                <label class="toggle-switch float-switch">
+                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="float-row float-row-action" @click="openLoraModal">
+                <span class="float-label">设置 Lora</span>
+                <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
+                <span v-else class="float-badge">未配置</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -722,6 +732,7 @@ async function saveLora() {
 }
 
 .modal-panel {
+  position: relative; z-index: 1;
   background: #f4f1eeed; border-radius: 18px;
   width: min(880px, 96vw); max-height: 90vh;
   display: flex; flex-direction: column;
@@ -827,15 +838,10 @@ async function saveLora() {
 .detail-avatar.clickable:hover { opacity: 0.85; }
 
 /* ═══ 角色关系区块 ═══ */
-.detail-rel-section {
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.1);
-}
+.detail-rel-section { margin-bottom: 18px; }
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
+.detail-rel-title svg { color: var(--accent); }
 .detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
 .detail-rel-btn.subtle { background: rgba(224, 123, 108, 0.06); border: 1px solid rgba(224, 123, 108, 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
 .detail-rel-btn.subtle:hover { background: rgba(224, 123, 108, 0.14); border-color: rgba(224, 123, 108, 0.3); color: #d06a5a; }
@@ -844,7 +850,7 @@ async function saveLora() {
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
-.detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.6); font-size: 12px; }
+.detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: var(--bg-primary); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }
 .rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(224, 123, 108, 0.1); }
 .detail-rel-more { font-size: 12px; color: var(--accent); font-weight: 500; cursor: pointer; text-align: center; padding: 4px 0; transition: opacity 0.15s; }
@@ -881,27 +887,53 @@ async function saveLora() {
 .detail-float {
   position: absolute;
   left: calc(50% + min(450px, 48.5vw) + 16px);
-  top: 70px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 20px;
+  top: 2.5vh;
+  width: 228px;
+  height: 95vh;
+  z-index: 0;
 }
-.float-card {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; border-radius: 14px;
-  background: rgba(255,255,255,0.85);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(0,0,0,0.06);
-  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-  transition: all 0.15s; width: 220px;
+.float-panel {
+  display: flex; flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  border-radius: 18px;
+  background: #f4f1eeed;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.08);
+  /* 主面板 modal-pop(0.28s) 结束后，再从面板背后向右弹出；
+     初始多藏 60px，避免面板 0.92 缩放阶段露出右缘 */
+  animation: float-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.32s both;
 }
-.float-card-toggle { justify-content: space-between; gap: 0; }
-.float-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+@keyframes float-emerge {
+  0%   { transform: translateX(calc(-100% - 60px)); }
+  100% { transform: translateX(0); }
+}
+.float-panel-header {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: var(--text-muted, #999);
+  margin: 2px 2px 10px;
+}
+.float-panel-body {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 4px;
+}
+.float-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 8px 10px;
+}
+.float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
 .float-switch { flex-shrink: 0; }
-.float-card-btn { cursor: pointer; justify-content: space-between; gap: 0; }
-.float-card-btn:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(224, 123, 108, 0.12); }
-.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); }
+.float-row-action {
+  margin-top: 2px; padding: 8px 10px;
+  border-radius: 10px; cursor: pointer;
+  transition: background 0.15s;
+}
+.float-row-action:hover { background: rgba(224, 123, 108, 0.08); }
+.float-row-action:hover .float-label { color: var(--accent); }
+.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
 .float-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
 
 /* ═══ 操作栏 ═══ */
@@ -1049,7 +1081,7 @@ async function saveLora() {
   .modal-body-detail .preview-card { flex: none; }
   .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
   .modal-wide .fi { font-size: 16px; }
-  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+  .detail-rel-section { margin-bottom: 14px; }
   .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
 
   .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }

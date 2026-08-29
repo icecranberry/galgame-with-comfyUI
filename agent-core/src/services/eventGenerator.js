@@ -1036,24 +1036,30 @@ export async function concludeEvent(character, event, outcome) {
     : '';
 
   const taskPrompt = event.engaged
-    ? `为以下特殊事件生成结局叙述和记忆摘要。
+    ? `为以下特殊事件写一段结局。
 事件标题：${event.title}
 ${historyText}
 当前场景：${event.description}
 
-要求：
-${worldConsistencyLine}- 结局叙述 80-150 字，收束整个事件的来龙去脉，给故事一个自然的结果
-- 记忆摘要 150-300 字，用第三人称视角客观记录整个事件的起因、经过、转折和结果，作为角色长期记忆的一部分
+这是写给读者看的小说结尾，不是事件总结。要求：
+${worldConsistencyLine}- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁从早到晚按时间顺序复述全程的流水账写法
+- 至少三分之一篇幅是"人味"：角色的内心吐槽、和环境的一点小摩擦、或一个出乎意料的小细节
+- 结尾用一句台词或一个小动作收束，留点余韵；禁止"就这样结束了"式的总结句
+- 结局叙述 100~180 字，将直接展示在页面上，作为事件的正式收尾, 用第三人称视角
+- 记忆摘要 100~180 字，只存入角色长期记忆、不会展示给用户，用第三人称视角客观记录整个事件的起因、经过、转折和结果（保持客观简洁即可，无需文学性）
 
 **重要：输出严格 JSON 格式**
-{"conclusion":"结局叙述","summary":"记忆摘要（第三人称，包含完整的事件经过）"}`
-    : `角色刚刚经历了一场无人参与的特殊事件。请基于事件描述想象它会如何自然结束。
+{"conclusion":"结局叙述(用第三人称视角)","summary":"记忆摘要（第三人称，包含完整的事件经过）"}`
+    : `角色刚刚经历了一场无人参与的特殊事件。请基于事件描述，想象一个最有趣、最自然的收尾画面。
 事件标题：${event.title}
 ${historyText}
 
-要求：
-${worldConsistencyLine}- 结局叙述 80-150 字
-- 记忆摘要 150-300 字，用第三人称视角客观记录事件
+这是写给读者看的小说结尾，不是事件总结。要求：
+${worldConsistencyLine}- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁按时间顺序复述全程的流水账写法
+- 至少三分之一篇幅是"人味"：角色的内心吐槽、和环境的一点小摩擦、或一个出乎意料的小细节
+- 结尾用一句台词或一个小动作收束，留点余韵；禁止"就这样结束了"式的总结句
+- 结局叙述 100~180 字，将直接展示在页面上，作为事件的正式收尾
+- 记忆摘要 100~180 字，只存入角色长期记忆、不会展示给用户，用第三人称视角客观记录事件
 
 **重要：输出严格 JSON 格式**
 {"conclusion":"结局叙述","summary":"记忆摘要（第三人称）"}`;
@@ -1073,7 +1079,7 @@ ${taskPrompt}`
 
   let conclusionData;
   try {
-    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件结局' });
+    const result = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件结局' });
     const jsonStr = extractFirstJson(result);
     if (!jsonStr) throw new Error('No JSON found');
     conclusionData = JSON.parse(repairJson(jsonStr));
@@ -1130,13 +1136,14 @@ ${taskPrompt}`
 
   // 3. 移到 event_history（保留原始 ID，确保分享卡片等引用不失效）
   db.prepare(`
-    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome, referenced_character_ids)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, conclusion, choice_history, total_branches, engaged, outcome, referenced_character_ids)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.id,
     character.id, event.event_type_key,
     event.title, event.description, event.image,
     conclusionData.summary,
+    conclusionData.conclusion || null,
     event.choice_history, event.current_branch || 0,
     event.engaged, outcome,
     event.referenced_character_ids || '[]'

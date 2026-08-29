@@ -244,6 +244,11 @@ class ServiceWorker(QObject):
                       "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
             if _key in os.environ and _key not in env.keys():
                 env.insert(_key, os.environ[_key])
+        # 捆绑 Git 目录前置进 PATH：子进程（如 MaiBot 插件安装）只通过
+        # shutil.which("git") 按 PATH 找 git，不会走 launcher 的显式路径解析
+        bundled_git = find_bundled_git(self._project_path)
+        if bundled_git:
+            env.insert("PATH", os.path.dirname(bundled_git) + os.pathsep + env.value("PATH"))
         self._proc.setProcessEnvironment(env)
 
         self._proc.setWorkingDirectory(cwd)

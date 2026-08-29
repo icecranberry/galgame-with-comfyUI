@@ -124,7 +124,7 @@
                 v-for="eh in col"
                 :key="'h_' + eh.id"
                 :event="eh"
-                :conclusion="eh._conclusion"
+                :conclusion="eh.conclusion"
                 compact
               />
             </div>

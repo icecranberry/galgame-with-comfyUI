@@ -387,6 +387,7 @@ function initSchema(db) {
       description TEXT NOT NULL DEFAULT '',
       final_image TEXT,
       summary TEXT NOT NULL DEFAULT '',
+      conclusion TEXT,
       choice_history TEXT DEFAULT '[]',
       total_branches INTEGER DEFAULT 0,
       engaged INTEGER DEFAULT 0,
@@ -1825,6 +1826,10 @@ function migrateEventCrossRef(db) {
     if (!ehCols.find(c => c.name === 'referenced_character_ids')) {
       db.exec(`ALTER TABLE event_history ADD COLUMN referenced_character_ids TEXT DEFAULT '[]'`);
       console.log('[db] Added event_history.referenced_character_ids column');
+    }
+    if (!ehCols.find(c => c.name === 'conclusion')) {
+      db.exec(`ALTER TABLE event_history ADD COLUMN conclusion TEXT`);
+      console.log('[db] Added event_history.conclusion column');
     }
   } catch (err) {
     console.log('[db] migrateEventCrossRef error:', err.message);

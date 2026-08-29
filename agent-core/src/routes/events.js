@@ -277,13 +277,14 @@ router.post('/:id/dismiss', async (req, res) => {
 
   // 移到 history（不生成结局，不存记忆；保留原始 ID）
   db.prepare(`
-    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, choice_history, total_branches, engaged, outcome, referenced_character_ids)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled', ?)
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, conclusion, choice_history, total_branches, engaged, outcome, referenced_character_ids)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cancelled', ?)
   `).run(
     event.id,
     event.character_id, event.event_type_key,
     event.title, event.description, event.image,
     event.summary || event.description,
+    null,
     event.choice_history, event.current_branch || 0,
     event.engaged,
     event.referenced_character_ids || '[]'

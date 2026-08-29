@@ -95,11 +95,12 @@
               </div>
             </div>
 
-            <!-- 结局（已过期） -->
-            <div v-if="isExpired" class="branch-card is-ending">
+            <!-- 结局（已过期，需真实结局/摘要生成后展示） -->
+            <div v-if="isExpired && conclusionText" class="branch-card is-ending">
               <div class="branch-text ending-text">
                 <div class="branch-label">📖 事件结束</div>
                 <div class="branch-desc">{{ conclusionText }}</div>
+                <div v-if="event.ended_at" class="ending-time">结束于 {{ formatTime(event.ended_at) }}</div>
               </div>
             </div>
 
@@ -276,9 +277,8 @@ const previewText = computed(() => {
   return props.event.description || ''
 })
 
-const conclusionText = computed(() =>
-  props.conclusion || props.event.summary || props.event.description || '事件已自然结束。'
-)
+// 有真实结局显示结局；旧历史数据回退到记忆摘要；两者皆无时保持为空，模板据此隐藏"事件结束"块
+const conclusionText = computed(() => props.conclusion || props.event.summary || '')
 
 const avatarStyle = computed(() => {
   const a = props.event.avatar_path
@@ -692,8 +692,10 @@ watch(isExpired, (val) => {
 .branch-card.is-current { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 4px rgba(224,123,108,0.5); }
 .branch-card.is-ending {
   justify-content: center;
-  background: linear-gradient(160deg, #faf8f6 0%, #f5f0ed 40%, #f8f4f0 100%);
-  border: 2px solid rgba(180,160,140,0.25);
+  background:
+    radial-gradient(120% 80% at 18% 0%, rgba(224,123,108,0.07) 0%, rgba(224,123,108,0) 55%),
+    linear-gradient(170deg, #fdfaf7 0%, #f7f1ec 55%, #fbf6f1 100%);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(224,123,108,0.14);
 }
 .branch-card.is-current .branch-text { justify-content: center; }
 .branch-img-wrap {
@@ -872,20 +874,34 @@ watch(isExpired, (val) => {
 }
 
 .ending-text {
-  justify-content: flex-start;
-  align-items: center;
-  text-align: center;
-  padding: 40px 32px;
+  justify-content: center;
+  align-items: flex-start;
+  text-align: left;
+  padding: 44px 36px;
+  gap: 12px;
 }
 .ending-text .branch-label {
-  font-size: 14px;
-  color: rgba(0,0,0,0.35);
-  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(224,123,108,0.09);
+  padding: 6px 14px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
 }
 .ending-text .branch-desc {
-  font-size: 17px;
-  line-height: 1.8;
+  font-size: 16px;
+  line-height: 1.9;
+  letter-spacing: 0.2px;
+  text-align: left;
+  color: var(--text-bright);
   max-width: 480px;
+}
+.ending-time {
+  font-size: 12px;
+  color: rgba(0,0,0,0.35);
+  letter-spacing: 0.3px;
+  margin-top: 22px;
 }
 
 /* transition */
