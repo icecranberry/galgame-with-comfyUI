@@ -13,16 +13,16 @@
 
     <!-- 文件夹筛选按钮（常驻） -->
     <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
-      <button
+      <linshe-button
         v-for="f in folderButtons"
         :key="f.key"
-        class="folder-btn"
-        :class="{ active: activeFolder === f.key }"
+        variant="chip"
+        :active="activeFolder === f.key"
         @click="onFolderChange(f.key)"
       >
         <span class="folder-label">{{ f.label }}</span>
         <span class="folder-count">{{ f.count }}</span>
-      </button>
+      </linshe-button>
     </div>
 
     <!-- 按时间分组的图片网格 -->
@@ -72,6 +72,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const PAGE_SIZE = 60
 
@@ -256,32 +257,6 @@ defineExpose({ refresh })
   margin-bottom: 16px;
 }
 
-.folder-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.folder-btn:hover {
-  background: rgba(224, 123, 108, 0.08);
-  border-color: rgba(224, 123, 108, 0.2);
-}
-
-.folder-btn.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
 .folder-label {
   font-weight: 500;
 }
@@ -386,10 +361,6 @@ defineExpose({ refresh })
     gap: 6px;
     padding: 2px 0 12px;
     margin-bottom: 12px;
-  }
-  .folder-btn {
-    padding: 5px 10px;
-    font-size: 12px;
   }
 }
 </style>

@@ -12,9 +12,14 @@
         <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
         <div class="comfy-tabs">
-          <button v-for="t in comfyTabs" :key="t.mode"
+          <div v-for="t in comfyTabs" :key="t.mode"
+            role="button"
+            tabindex="0"
             :class="['comfy-tab', { active: comfyTab === t.mode }]"
-            @click="switchComfyTab(t.mode)">{{ t.label }}</button>
+            @click="switchComfyTab(t.mode)"
+            @keydown.enter.prevent="switchComfyTab(t.mode)"
+            @keydown.space.prevent="switchComfyTab(t.mode)"
+          >{{ t.label }}</div>
         </div>
 
         <div class="comfy-form-stage">
@@ -22,15 +27,25 @@
             <div :key="comfyTab" class="comfy-form-inner">
               <div class="fav-input-row">
                 <input v-model="form[activeFields.artist]" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
-                <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites(comfyTab)" :disabled="!form[activeFields.artist].trim()">☆</button>
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="fav-star-btn"
+                  :class="{ 'is-disabled': !form[activeFields.artist].trim() }"
+                  :aria-disabled="!form[activeFields.artist].trim()"
+                  title="收藏当前画师串"
+                  @click="addToFavorites(comfyTab)"
+                  @keydown.enter.prevent="addToFavorites(comfyTab)"
+                  @keydown.space.prevent="addToFavorites(comfyTab)"
+                >☆</div>
               </div>
               <template v-if="artistFavorites.length">
                 <div class="fav-section-title">收藏的画师 / 风格</div>
                 <div class="fav-chips">
-                <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form[activeFields.artist] }" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
+                <linshe-button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" variant="chip" :active="fav.artist === form[activeFields.artist]" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
                   {{ fav.label }}
                   <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
-                </button>
+                </linshe-button>
                 </div>
               </template>
               <div class="fr">
@@ -43,7 +58,7 @@
               </div>
               <div class="fpresets">
                 <span class="pl">预设：</span>
-                <button v-for="p in presets" :key="p.label" class="pbtn" :class="{ active: isPresetActive(p) }" @click="applyPreset(p, comfyTab)">{{ p.label }}</button>
+                <linshe-button v-for="p in presets" :key="p.label" class="pbtn" variant="chip" :active="isPresetActive(p)" @click="applyPreset(p, comfyTab)">{{ p.label }}</linshe-button>
               </div>
             </div>
           </Transition>
@@ -58,7 +73,7 @@
               <div class="hiresfix-desc">图片进一步高清细化设置</div>
             </div>
             <span class="hiresfix-summary">最长边 {{ hiresMaxSize }} · {{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
-            <button class="hiresfix-link" @click="openHiresFixSettings">设置 →</button>
+            <linshe-button class="hiresfix-link" variant="link" @click="openHiresFixSettings">设置 →</linshe-button>
           </div>
         </div>
         <div class="quality-section">
@@ -68,19 +83,19 @@
               <div class="quality-desc">生图时注入的画质增强词，留空使用系统默认</div>
             </div>
             <span class="quality-summary" :class="{ 'is-default': !qualityPrompt }" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt ? qualityPrompt : '系统默认' }}</span>
-            <button class="quality-link" @click="openQualityDialog">更改 →</button>
+            <linshe-button class="quality-link" variant="link" @click="openQualityDialog">更改 →</linshe-button>
           </div>
         </div>
         <div class="sa">
-          <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
+          <linshe-button variant="primary" :disabled="!dirty" @click="saveComfy">保存</linshe-button>
           <span v-if="saved" class="smsg">已保存</span>
           <div class="sa-spacer"></div>
-          <button class="btn-ghost wf-action-btn wf-lora-btn" @click="openGlobalLora">
+          <linshe-button class="wf-action-btn wf-lora-btn" variant="secondary" @click="openGlobalLora">
             全局LoRA
             <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
-          </button>
-          <button class="btn-ghost wf-action-btn wf-mode-btn" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
-          <button class="btn-ghost wf-action-btn wf-mode-btn" @click="openWfModeDialog">切换工作流模式</button>
+          </linshe-button>
+          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</linshe-button>
+          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" @click="openWfModeDialog">切换工作流模式</linshe-button>
         </div>
       </div>
 
@@ -115,14 +130,15 @@
           </div>
           <!-- 有输入内容时才出现，渐入渐出 -->
           <Transition name="gen-btn-fade">
-            <button
+            <linshe-button
               v-if="freeSceneDesc.trim() || styleTesting"
-              class="btn-primary free-scene-btn"
+              class="free-scene-btn"
+              variant="primary"
               :disabled="styleTesting || !freeSceneDesc.trim()"
               @click="runFreeSceneTest"
             >
               {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成提示词' }}
-            </button>
+            </linshe-button>
           </Transition>
         </div>
 
@@ -171,36 +187,52 @@
         </div>
 
         <div class="style-test-row">
-          <button
-            class="btn-primary style-test-btn"
+          <linshe-button
+            class="style-test-btn"
+            variant="primary"
             :disabled="styleTesting"
             @click="runStyleTest"
           >
             {{ styleTesting ? '生成中...' : '🎨 生成画面' }}
-          </button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'chat' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'chat'"
-          >对话参数</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'moments' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'moments'"
-          >朋友圈参数</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'event' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'event'"
-          >奇遇参数</button>
-          <button
-            class="btn-primary style-test-btn hires-test-btn"
+          </linshe-button>
+          <div class="test-mode-segmented">
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'chat', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'chat')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'chat')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'chat')"
+            >对话参数</div>
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'moments', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'moments')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'moments')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'moments')"
+            >朋友圈参数</div>
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'event', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'event')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'event')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'event')"
+            >奇遇参数</div>
+          </div>
+          <linshe-button
+            class="style-test-btn hires-test-btn"
+            variant="primary"
             :disabled="hireTesting"
             @click="runHiresTest"
           >
             {{ hireTesting ? '细化中...' : '测试HiresFix细化' }}
-          </button>
-          <button class="test-prompt-btn" @click="openPromptEditor">默认测试提示词</button>
+          </linshe-button>
+          <linshe-button class="test-prompt-btn" variant="link" @click="openPromptEditor">默认测试提示词</linshe-button>
         </div>
 
         <div v-if="hiresError" class="style-error">{{ hiresError }}</div>
@@ -235,7 +267,7 @@
           <div class="prompt-editor-modal">
             <div class="prompt-editor-header">
               <h3>编辑测试提示词</h3>
-              <button class="prompt-editor-close" @click="showPromptEditor = false">✕</button>
+              <linshe-button class="prompt-editor-close" variant="icon" @click="showPromptEditor = false">✕</linshe-button>
             </div>
             <div class="prompt-editor-body">
               <div class="prompt-editor-field">
@@ -252,8 +284,8 @@
               </div>
             </div>
             <div class="prompt-editor-actions">
-              <button class="btn-ghost" @click="resetTestPrompts">恢复默认</button>
-              <button class="btn-primary" @click="saveTestPrompts">保存</button>
+              <linshe-button variant="secondary" @click="resetTestPrompts">恢复默认</linshe-button>
+              <linshe-button variant="primary" @click="saveTestPrompts">保存</linshe-button>
             </div>
           </div>
         </div>
@@ -264,20 +296,23 @@
         <div class="llm-card-header">
           <h3>LLM API 设置</h3>
           <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
-          <button
+          <div
             ref="freeEggBtn"
-            type="button"
-            :class="['free-egg-btn', { active: freeEgg }]"
-            :disabled="freeEggBusy"
+            role="button"
+            tabindex="0"
+            :class="['free-egg-btn', { active: freeEgg, 'is-disabled': freeEggBusy }]"
+            :aria-disabled="freeEggBusy"
             :title="freeEgg ? '点击关闭，恢复自有 LLM 配置' : '点击开启：免 Key 使用 opencode 免费模型，每5小时每IP限200次'"
             @click="onFreeEggClick"
+            @keydown.enter.prevent="onFreeEggClick"
+            @keydown.space.prevent="onFreeEggClick"
           >
             <span class="free-egg-label">{{ freeEgg ? '🥚 免费鸡蛋享用中' : '🥚 每日免费鸡蛋' }}</span>
             <span v-if="eggSplash" :key="eggSplash.id" class="egg-splash" aria-hidden="true">
               <i v-for="drop in eggSplash.drops" :key="drop.id" class="egg-drop" :style="drop.style"></i>
               <i v-for="shard in eggSplash.shards" :key="shard.id" class="egg-shard" :style="shard.style"></i>
             </span>
-          </button>
+          </div>
         </div>
 
         <Transition name="egg-page" mode="out-in">
@@ -288,26 +323,34 @@
         <!-- LLM Profile 切换 -->
         <div class="llm-profiles-bar">
           <div v-for="p in llmProfiles" :key="p.id" class="profile-item-row">
-            <button
+            <div
+              role="button"
+              tabindex="0"
               :class="['profile-tag', { active: p.id === activeLlmProfileId }]"
               @click="switchProfile(p.id)"
+              @keydown.enter.prevent="switchProfile(p.id)"
+              @keydown.space.prevent="switchProfile(p.id)"
               :title="(p.preview || '未设置Key') + ' · ' + (p.model || '?')"
             >
               <span class="profile-name">{{ p.name }}</span>
               <span v-if="p.id === activeLlmProfileId" class="profile-dot"></span>
-            </button>
-            <button
+            </div>
+            <div
               v-if="llmProfiles.length > 1 && p.id !== activeLlmProfileId"
+              role="button"
+              tabindex="0"
               class="profile-tag profile-delete-btn"
               @click="removeProfile(p.id)"
+              @keydown.enter.prevent="removeProfile(p.id)"
+              @keydown.space.prevent="removeProfile(p.id)"
               title="删除该配置"
             >
               <span class="profile-x">×</span>
-            </button>
+            </div>
           </div>
-          <button class="profile-tag profile-add" @click="showAddProfile = true">
+          <div role="button" tabindex="0" class="profile-tag profile-add" @click="showAddProfile = true" @keydown.enter.prevent="showAddProfile = true" @keydown.space.prevent="showAddProfile = true">
             <span>+ 新增配置</span>
-          </button>
+          </div>
         </div>
 
         <!-- 新增 Profile 弹窗 -->
@@ -325,8 +368,8 @@
                   ref="newProfileInput"
                 />
                 <div class="add-profile-actions">
-                  <button class="btn-ghost" @click="showAddProfile = false">取消</button>
-                  <button class="btn-primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</button>
+                  <linshe-button variant="secondary" @click="showAddProfile = false">取消</linshe-button>
+                  <linshe-button variant="primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</linshe-button>
                 </div>
               </div>
             </div>
@@ -344,10 +387,10 @@
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
             @input="markLlmDirty"
           />
-          <button class="sp-btn-small" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</button>
-          <button class="sp-btn-small" style="flex-shrink:0" @click="showApiKey = !showApiKey">
+          <linshe-button class="sp-btn-small" size="sm" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
+          <linshe-button class="sp-btn-small" variant="ghost" size="sm" style="flex-shrink:0" @click="showApiKey = !showApiKey">
             {{ showApiKey ? '隐藏' : '显示' }}
-          </button>
+          </linshe-button>
         </div>
         <div v-if="llmPreview.hasApiKey" class="key-status">
           <span class="key-ok">🔑 当前:</span>
@@ -373,12 +416,12 @@
             placeholder="deepseek-v4-flash"
             aria-label="模型"
           />
-          <button
-            type="button"
+          <linshe-button
             class="model-fetch-btn"
+            variant="secondary"
             :disabled="llmModelsLoading || !llmBaseURL.trim()"
             @click="loadAvailableModels"
-          >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</button>
+          >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</linshe-button>
         </div>
         <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
 
@@ -396,10 +439,18 @@
         </div>
 
         <template v-if="isCustomBaseURL">
-          <button type="button" class="llm-advanced-toggle" :aria-expanded="llmAdvancedOpen" @click="toggleLlmAdvanced">
+          <div
+            role="button"
+            tabindex="0"
+            class="llm-advanced-toggle"
+            :aria-expanded="llmAdvancedOpen"
+            @click="toggleLlmAdvanced"
+            @keydown.enter.prevent="toggleLlmAdvanced"
+            @keydown.space.prevent="toggleLlmAdvanced"
+          >
             <span class="llm-advanced-label llm-label">高级设置</span>
             <svg class="llm-advanced-chevron" :class="{ open: llmAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-          </button>
+          </div>
           <CollapseTransition :show="llmAdvancedOpen">
             <div class="llm-advanced-body">
               <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
@@ -488,12 +539,19 @@
         </template>
 
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
+          <linshe-button variant="primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</linshe-button>
           <span v-if="llmSaved" class="smsg">已保存</span>
-          <button class="btn-ghost llm-test-btn" :disabled="llmTesting || !llmHeadersValid || !llmExtraBodyValid" @click="runLlmConnectionTest">
+          <linshe-button class="llm-test-btn" variant="secondary" :disabled="llmTesting || !llmHeadersValid || !llmExtraBodyValid" @click="runLlmConnectionTest">
             {{ llmTesting ? '测试中…' : '测试连接' }}
-          </button>
-          <button type="button" class="relay-intro-btn relay-intro-footer" @click="showRelayModal = true">推荐中转站</button>
+          </linshe-button>
+          <div
+            role="button"
+            tabindex="0"
+            class="relay-intro-btn relay-intro-footer"
+            @click="showRelayModal = true"
+            @keydown.enter.prevent="showRelayModal = true"
+            @keydown.space.prevent="showRelayModal = true"
+          >推荐中转站</div>
         </div>
         </div>
 
@@ -516,17 +574,17 @@
             <div class="relay-modal" role="dialog" aria-modal="true" aria-label="推荐中转站">
               <div class="relay-modal-header">
                 <h3>推荐中转站</h3>
-                <button type="button" class="relay-modal-close" aria-label="关闭" @click="showRelayModal = false">✕</button>
+                <linshe-button class="relay-modal-close" variant="icon" aria-label="关闭" @click="showRelayModal = false">✕</linshe-button>
               </div>
               <div class="relay-modal-body">
                 <p class="relay-modal-tip">以下为第三方 LLM 中转站，API Key 请在其官网获取</p>
                 <div v-for="station in relayStations" :key="station.name" class="relay-station">
                   <div class="relay-station-head">
                     <span class="relay-station-name">{{ station.name }}</span>
-                    <button type="button" class="relay-quick-btn" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
+                    <linshe-button class="relay-quick-btn" variant="secondary" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
                       <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
                       <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
-                    </button>
+                    </linshe-button>
                   </div>
                   <p class="relay-station-desc">{{ station.desc }}</p>
                   <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
@@ -615,7 +673,7 @@
             class="disturb-setup-btn"
             title="防打扰设置"
             @click="openDisturbDialog"
-          >⚙</div>
+          ><gear-icon :size="17" /></div>
           <label class="switch">
             <input type="checkbox" v-model="disturbMode" @change="onDisturbModeToggle" />
             <span class="slider"></span>
@@ -633,7 +691,7 @@
             class="disturb-setup-btn"
             title="设置城市"
             @click="openWeatherCityDialog"
-          >⚙</div>
+          ><gear-icon :size="17" /></div>
           <label class="switch">
             <input type="checkbox" v-model="features.weather" @change="saveFeature('weather', features.weather)" />
             <span class="slider"></span>
@@ -655,9 +713,9 @@
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
         </div>
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!connDirty" @click="saveComfyUrl">保存</button>
+          <linshe-button variant="primary" :disabled="!connDirty" @click="saveComfyUrl">保存</linshe-button>
           <span v-if="connSaved" class="smsg">已保存</span>
-          <button class="btn-ghost" @click="checkHealth">刷新连接</button>
+          <linshe-button variant="secondary" @click="checkHealth">刷新连接</linshe-button>
         </div>
       </div>
 
@@ -685,11 +743,14 @@
           </label>
         </div>
 
-        <button
-          type="button"
+        <div
+          role="button"
+          tabindex="0"
           class="memory-settings-entry"
           aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
+          @keydown.enter.prevent="router.push('/settings/memory')"
+          @keydown.space.prevent="router.push('/settings/memory')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -705,7 +766,7 @@
               <path d="m9 18 6-6-6-6" />
             </svg>
           </span>
-        </button>
+        </div>
       </div>
 
       <!-- MaiBot 桥接：入口卡片（复用「聊天记忆」入口样式） -->
@@ -717,11 +778,14 @@
           </div>
         </div>
 
-        <button
-          type="button"
+        <div
+          role="button"
+          tabindex="0"
           class="memory-settings-entry"
           aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
           @click="router.push('/settings/maibot')"
+          @keydown.enter.prevent="router.push('/settings/maibot')"
+          @keydown.space.prevent="router.push('/settings/maibot')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -737,7 +801,7 @@
               <path d="m9 18 6-6-6-6" />
             </svg>
           </span>
-        </button>
+        </div>
       </div>
 
     </div>
@@ -749,7 +813,7 @@
           <div class="fav-dialog">
             <div class="fav-dialog-header">
               <span>收藏画师串</span>
-              <button class="fav-dialog-close" @click="cancelAddFavorite">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelAddFavorite">✕</linshe-button>
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
@@ -762,8 +826,8 @@
                 @keyup.enter="confirmAddFavorite"
               />
               <div class="fav-dialog-actions">
-                <button class="btn-ghost" @click="cancelAddFavorite">取消</button>
-                <button class="btn-primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</button>
+                <linshe-button variant="secondary" @click="cancelAddFavorite">取消</linshe-button>
+                <linshe-button variant="primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</linshe-button>
               </div>
             </div>
           </div>
@@ -778,7 +842,7 @@
           <div class="fav-dialog">
             <div class="fav-dialog-header">
               <span>质量提示词</span>
-              <button class="fav-dialog-close" @click="qualityDialog.show = false">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="qualityDialog.show = false">✕</linshe-button>
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
@@ -790,8 +854,8 @@
                 maxlength="500"
               ></textarea>
               <div class="fav-dialog-actions">
-                <button class="btn-ghost" @click="qualityDialog.show = false">取消</button>
-                <button class="btn-primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</button>
+                <linshe-button variant="secondary" @click="qualityDialog.show = false">取消</linshe-button>
+                <linshe-button variant="primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</linshe-button>
               </div>
             </div>
           </div>
@@ -806,7 +870,7 @@
           <div class="disturb-dialog">
             <div class="disturb-dialog-header">
               <span>防打扰设置</span>
-              <button class="fav-dialog-close" @click="cancelDisturbDialog">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelDisturbDialog">✕</linshe-button>
             </div>
             <div class="disturb-dialog-body">
               <!-- 时间段设置 -->
@@ -865,8 +929,8 @@
               </div>
 
               <div class="disturb-dialog-actions">
-                <button class="btn-ghost" @click="cancelDisturbDialog">取消</button>
-                <button class="btn-primary" @click="confirmDisturbDialog">保存设置</button>
+                <linshe-button variant="secondary" @click="cancelDisturbDialog">取消</linshe-button>
+                <linshe-button variant="primary" @click="confirmDisturbDialog">保存设置</linshe-button>
               </div>
             </div>
           </div>
@@ -881,13 +945,13 @@
           <div class="disturb-dialog" style="max-width:360px;">
             <div class="disturb-dialog-header">
               <span>天气城市设置</span>
-              <button class="fav-dialog-close" @click="weatherCityDialog.show = false">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="weatherCityDialog.show = false">✕</linshe-button>
             </div>
             <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
               <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
               <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
               <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
-                <button class="btn-primary" @click="confirmWeatherCity">保存</button>
+                <linshe-button variant="primary" @click="confirmWeatherCity">保存</linshe-button>
               </div>
             </div>
           </div>
@@ -902,12 +966,16 @@
           <div class="wf-mode-modal">
             <h3>工作流模式</h3>
             <div class="wf-mode-options">
-              <button v-for="m in workflowModeOptions" :key="m.value"
+              <div v-for="m in workflowModeOptions" :key="m.value"
+                role="button"
+                tabindex="0"
                 :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
-                @click="wfModeDraft = m.value">
+                @click="wfModeDraft = m.value"
+                @keydown.enter.prevent="wfModeDraft = m.value"
+                @keydown.space.prevent="wfModeDraft = m.value">
                 <span class="wf-mo-title">{{ m.label }}</span>
                 <span class="wf-mo-desc" v-html="m.desc"></span>
-              </button>
+              </div>
             </div>
 
             <div class="wf-mode-downloads">
@@ -932,18 +1000,20 @@
                 <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
                   <span class="wf-scene-name">{{ s.label }}</span>
                   <div class="wf-scene-toggle">
-                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'turbo' }]"
-                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</button>
-                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'base' }]"
-                      @click="wfSceneDraft[s.key] = 'base'">base</button>
+                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                      :active="wfSceneDraft[s.key] === 'turbo'"
+                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</linshe-button>
+                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                      :active="wfSceneDraft[s.key] === 'base'"
+                      @click="wfSceneDraft[s.key] = 'base'">base</linshe-button>
                   </div>
                 </div>
               </div>
             </Transition>
 
             <div class="wf-mode-actions">
-              <button class="btn-ghost" @click="showWfModeDialog = false">取消</button>
-              <button class="btn-primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</button>
+              <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
+              <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
             </div>
           </div>
         </div>
@@ -963,6 +1033,8 @@ import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import LinsheButton from '../components/LinsheButton.vue'
+import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()
 const router = useRouter()
@@ -1350,6 +1422,7 @@ function burstEggSplash() {
 }
 
 function onFreeEggClick() {
+  if (freeEggBusy.value) return
   burstEggSplash()
   toggleFreeEgg()
 }
@@ -2161,6 +2234,8 @@ function resetTestPrompts() {
   background: rgba(224, 123, 108, 0.07);
   border: 1px solid rgba(224, 123, 108, 0.16);
   border-radius: 12px;
+  cursor: pointer;
+  user-select: none;
   touch-action: manipulation;
   transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -2200,30 +2275,10 @@ function resetTestPrompts() {
 
 /* ── 保存为 Primary，工作流操作为 Secondary ── */
 .comfy-params-card .sa { gap: 10px; }
-.comfy-params-card .sa .btn-primary {
-  height: 36px; padding: 0 22px; border-radius: 10px; font-size: 13px;
-}
 .wf-action-btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 34px; padding: 0 14px; font-size: 12px; font-weight: 500;
-  border-radius: 10px; border-style: dashed; border-width: 1px;
-  background: transparent; white-space: nowrap;
-}
-.wf-lora-btn {
-  color: #E07B6C; border-color: rgba(224, 123, 108, 0.30);
-}
-.wf-mode-btn {
-  color: #6F675F; border-color: #E5D8CE;
-}
-.wf-reset-btn {
-  color: #A9A099; border-color: #ECE5DD; opacity: 0.9;
-}
-.wf-action-btn:hover:not(:disabled) {
-  background: rgba(224, 123, 108, 0.08);
-  border-color: rgba(224, 123, 108, 0.45); color: #E07B6C;
-}
-.wf-reset-btn:hover:not(:disabled) {
-  background: transparent; color: #8B8074; border-color: #D8CEC3;
+  white-space: nowrap;
 }
 .float-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 10px;
@@ -2265,7 +2320,8 @@ function resetTestPrompts() {
   padding: 3px;
 }
 .comfy-tab {
-  flex: 1; padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
+  flex: 1; min-width: 0;
+  padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
   text-align: center; cursor: pointer;
   border-radius: 9px;
   background: transparent; color: #8B8074;
@@ -2274,6 +2330,7 @@ function resetTestPrompts() {
   position: relative;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background-color 0.2s ease, color 0.2s ease;
+  user-select: none;
 }
 .comfy-tab:hover:not(.active) {
   background: rgba(255, 255, 255, 0.55);
@@ -2365,13 +2422,7 @@ function resetTestPrompts() {
 }
 .hiresfix-summary { font-size: 12px; color: #6F675F; }
 .hiresfix-link, .quality-link {
-  padding: 6px 10px; border: none; border-radius: 8px;
-  background: transparent; color: #E07B6C;
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.hiresfix-link:hover, .quality-link:hover {
-  background: rgba(224, 123, 108, 0.10); color: #CC6A5C;
+  font-size: 13px;
 }
 /* ── 质量提示词 ── */
 .quality-section {
@@ -2390,17 +2441,7 @@ function resetTestPrompts() {
 .pl { font-size: 12px; color: #9A9189; margin-right: 2px; }
 .pbtn {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
-  font-size: 12px; font-weight: 500; border-radius: 9px;
-  border: 1px solid transparent; background: #F5F1EC; color: #6F675F;
-  cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.pbtn:hover {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
-}
-.pbtn.active {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
+  font-size: 12px;
 }
 .cb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: -6px 0 12px; cursor: pointer; user-select: none; }
 .cb input { width: 14px; height: 14px; cursor: pointer; }
@@ -2437,9 +2478,10 @@ function resetTestPrompts() {
   border: none; background: transparent; color: #A9A099;
   font-size: 16px; line-height: 1; cursor: pointer;
   transition: color 0.15s ease;
+  user-select: none;
 }
-.fav-star-btn:hover:not(:disabled) { color: #E2A83E; }
-.fav-star-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fav-star-btn:hover:not(.is-disabled) { color: #E2A83E; }
+.fav-star-btn.is-disabled { opacity: 0.35; cursor: not-allowed; }
 .fav-section-title {
   font-size: 12px; color: #9A9189; margin-bottom: 6px;
 }
@@ -2448,18 +2490,7 @@ function resetTestPrompts() {
 }
 .fav-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 10px; font-size: 14px; font-weight: 400;
-  border-radius: 12px; border: 1px solid transparent;
-  background: #F5F1EC; color: #6F675F; cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.fav-chip:hover {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
-}
-.fav-chip.active {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C; font-weight: 500;
-  border-color: rgba(224, 123, 108, 0.18);
+  height: 28px; padding: 0 10px; font-size: 14px;
 }
 .fav-chip-x {
   font-size: 12px; line-height: 1; color: #A9A099;
@@ -2487,12 +2518,10 @@ function resetTestPrompts() {
   font-size: 15px; font-weight: 600; color: var(--text-bright);
 }
 .fav-dialog-close {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: transparent; color: var(--text-secondary); font-size: 14px;
+  width: 28px; height: 28px;
+  font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
 }
-.fav-dialog-close:hover { background: rgba(0,0,0,0.06); color: #333; }
 .fav-dialog-body { padding: 12px 20px 20px; }
 .fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .fav-dialog-input {
@@ -2732,8 +2761,7 @@ function resetTestPrompts() {
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
 
-.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
-.sp-btn-small:hover { border-color:var(--accent); }
+.sp-btn-small { padding:6px 14px; font-size:12px; margin-right:6px; }
 
 /* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
@@ -2758,14 +2786,15 @@ function resetTestPrompts() {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  user-select: none;
   transition: all 0.15s;
   flex-shrink: 0;
   white-space: nowrap;
   position: relative;
 }
-.free-egg-btn:hover:not(:disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
+.free-egg-btn:hover:not(.is-disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
 .free-egg-btn.active { border-color: #facc15; background: rgba(250, 204, 21, 0.16); color: #facc15; }
-.free-egg-btn:disabled { opacity: 0.6; cursor: wait; }
+.free-egg-btn.is-disabled { opacity: 0.6; cursor: wait; }
 .free-egg-label { position: relative; z-index: 3; }
 
 /* ── 推荐中转站入口与弹窗 ── */
@@ -2773,6 +2802,7 @@ function resetTestPrompts() {
   padding: 0; border: none; background: none;
   font-size: 12px; font-weight: 500; color: var(--accent);
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  user-select: none;
   white-space: nowrap;
   transition: color 0.15s;
 }
@@ -2800,12 +2830,10 @@ function resetTestPrompts() {
 }
 .relay-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-bright); }
 .relay-modal-close {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: transparent; color: var(--text-secondary); font-size: 14px;
+  width: 28px; height: 28px;
+  font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
 }
-.relay-modal-close:hover { background: rgba(0,0,0,0.06); color: #333; }
 .relay-modal-body { padding: 10px 20px 18px; }
 .relay-modal-tip { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
 .relay-station {
@@ -2818,21 +2846,9 @@ function resetTestPrompts() {
 .relay-station-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
 .relay-quick-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 12px; border-radius: 8px;
-  border: 1px solid rgba(224, 123, 108, 0.35);
-  background: var(--accent); color: #fff;
-  font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
-  box-shadow: 0 2px 8px rgba(224, 123, 108, 0.18);
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  padding: 6px 12px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
 }
-.relay-quick-btn:hover:not(:disabled) {
-  background: var(--accent-hover); border-color: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(224, 123, 108, 0.28);
-  transform: translateY(-1px);
-}
-.relay-quick-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(224, 123, 108, 0.18); }
-.relay-quick-btn:disabled { opacity: 0.6; cursor: wait; }
-.relay-quick-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .relay-quick-icon { flex-shrink: 0; }
 .relay-station-desc {
   font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 10px;
@@ -2931,18 +2947,10 @@ function resetTestPrompts() {
 .model-fetch-btn {
   min-width: 82px;
   padding: 0 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  background: var(--glass-bg-strong);
-  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  cursor: pointer;
 }
-.model-fetch-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.model-fetch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.model-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .model-fetch-error { margin-top: -8px; margin-bottom: 14px; color: var(--danger); font-size: 12px; line-height: 1.5; }
 .thinking-setting { min-width: 0; }
 .thinking-options {
@@ -3006,6 +3014,7 @@ function resetTestPrompts() {
   border: none; border-bottom: 1px solid var(--glass-border);
   background: none; color: var(--text-bright);
   font-size: 13px; font-weight: 600; cursor: pointer;
+  user-select: none;
   transition: color 0.15s;
 }
 .llm-advanced-label { min-width: 0; }
@@ -3030,6 +3039,9 @@ function resetTestPrompts() {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  border-radius: 8px;
+  font-family: inherit;
+  user-select: none;
 }
 .profile-item-row .profile-tag { border-radius: 0; }
 .profile-item-row .profile-tag:first-child { border-radius: 9999px 0 0 9999px; }
@@ -3108,7 +3120,7 @@ function resetTestPrompts() {
   cursor: text; transition: border-color 0.15s;
 }
 .free-scene-ellipsis:hover { border-color: var(--accent); }
-.free-scene-btn { border-radius: 8px; margin: 0; flex-shrink: 0; }
+.free-scene-btn { margin: 0; flex-shrink: 0; }
 /* 生成提示词按钮：随输入内容渐入渐出 */
 .gen-btn-fade-enter-active, .gen-btn-fade-leave-active { transition: opacity 0.25s ease; }
 .gen-btn-fade-enter-from, .gen-btn-fade-leave-to { opacity: 0; }
@@ -3125,28 +3137,28 @@ function resetTestPrompts() {
   color: var(--text-bright); margin-bottom: 12px;
 }
 .generated-prompt-editor:focus { border-color: var(--accent); }
-.style-test-btn { border-radius: 8px; margin: 0; }
-.hires-test-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
-.hires-test-btn:hover:not(:disabled) { background: rgba(224, 123, 108, 0.1); box-shadow: none; color: var(--accent-hover); }
+.style-test-btn { margin: 0; }
+.test-mode-segmented {
+  display: inline-flex; gap: 3px;
+  padding: 3px; background: #F5F1EC; border-radius: 10px;
+}
 .test-mode-btn {
-  padding: 7px 14px; font-size: 12px; font-weight: 500;
-  border-radius: 8px; border: 1px solid var(--glass-border);
-  background: transparent; color: var(--text-secondary);
-  cursor: pointer; transition: all 0.2s ease;
+  flex: 1;
+  padding: 6px 14px; font-size: 12px; font-weight: 500;
+  border-radius: 7px; border: none;
+  background: transparent; color: #6F675F;
+  cursor: pointer; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  font-family: inherit; text-align: center; white-space: nowrap; user-select: none;
 }
-.test-mode-btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.test-mode-btn:hover { color: #E07B6C; }
 .test-mode-btn.active {
-  background: var(--accent); color: #fff; border-color: var(--accent);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  background: #FFFEFC; color: #E07B6C; font-weight: 600;
+  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
-.test-mode-btn:disabled { opacity: 0.5; pointer-events: none; }
+.test-mode-btn.is-disabled { opacity: 0.5; pointer-events: none; }
 .test-prompt-btn {
   margin-left: auto; padding: 0; font-size: 12px;
-  background: none; border: none; color: var(--text-secondary);
-  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
-  transition: color 0.15s;
 }
-.test-prompt-btn:hover { color: var(--accent); }
 .style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; white-space: pre-wrap; line-height: 1.5; }
 .style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
 .style-spinner { width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
@@ -3171,10 +3183,8 @@ function resetTestPrompts() {
 .prompt-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .prompt-editor-header h3 { font-size: 16px; font-weight: 600; color: var(--text-bright); }
 .prompt-editor-close {
-  width: 28px; height: 28px; border-radius: 50%; border: none;
-  background: var(--glass-bg-strong); color: var(--text-secondary);
-  font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
+  width: 28px; height: 28px;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
 }
 .prompt-editor-body { flex: 1; overflow-y: auto; }
 .prompt-editor-field { margin-bottom: 16px; }
@@ -3199,12 +3209,12 @@ function resetTestPrompts() {
   .free-scene-btn { width: 100%; }
   /* 图片实验室操作区：生成画面/细化按钮占满一行，三个参数切换共占一行 */
   .style-test-row .style-test-btn { width: 100%; }
-  .style-test-row .test-mode-btn { flex: 1 1 0; padding-left: 6px; padding-right: 6px; }
+  .style-test-row .test-mode-segmented { flex: 1 1 0; }
+  .style-test-row .test-mode-btn { padding-left: 6px; padding-right: 6px; }
   .test-prompt-btn { margin-left: 0; }
   /* 画师串操作按钮行：允许换行，避免挤压 */
   .sa { flex-wrap: wrap; gap: 8px; }
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
-  .sa .btn-primary { padding-left: 18px; padding-right: 18px; }
   .sa .wf-action-btn { flex: 1 1 0; justify-content: center; padding: 8px 6px; }
   /* 质量提示词行：窄屏摘要占满整行 */
   .quality-summary { max-width: 100%; flex-basis: 100%; order: 2; }
@@ -3248,6 +3258,7 @@ function resetTestPrompts() {
   border-radius: 12px;
   padding: 14px 12px;
   cursor: pointer;
+  user-select: none;
   transition: all 0.2s;
   display: flex; flex-direction: column; gap: 6px;
   text-align: center;
@@ -3301,18 +3312,10 @@ function resetTestPrompts() {
   font-size: 13px; color: var(--text-primary);
 }
 .wf-scene-toggle {
-  display: flex; gap: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px; overflow: hidden;
+  display: flex; gap: 4px;
 }
 .wf-toggle-btn {
   padding: 3px 14px; font-size: 12px;
-  background: var(--bg-secondary); color: var(--text-secondary);
-  border: none; border-radius: 0; cursor: pointer; transition: all 0.15s;
-}
-.wf-toggle-btn:hover { color: var(--text-bright); }
-.wf-toggle-btn.active {
-  background: var(--accent); color: #fff;
 }
 /* hybrid 场景展开/收起动画 */
 .expand-enter-active, .expand-leave-active {

@@ -20,7 +20,7 @@
         </div>
         <Transition name="menu-pop">
           <div v-if="showMenu" class="moment-dropdown">
-            <button class="moment-dropdown-item danger" @click.stop="onDelete">🗑️ 删除</button>
+            <div class="moment-dropdown-item danger" role="button" tabindex="0" @click.stop="onDelete" @keydown.enter.prevent="onDelete" @keydown.space.prevent="onDelete">🗑️ 删除</div>
           </div>
         </Transition>
       </div>
@@ -45,19 +45,19 @@
 
     <!-- 底部操作栏 -->
     <div class="moment-actions">
-      <button class="action-btn" :class="{ active: post.liked }" @click="onLike">
+      <div class="action-btn" :class="{ active: post.liked }" role="button" tabindex="0" @click="onLike" @keydown.enter.prevent="onLike" @keydown.space.prevent="onLike">
         <svg viewBox="0 0 24 24" width="18" height="18" :fill="post.liked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </svg>
         <!-- <span v-if="post.like_count > 0">{{ post.like_count }}</span> -->
-      </button>
-      <button class="action-btn" :class="{ active: showReplyInput }" @click="onReplyClick">
+      </div>
+      <div class="action-btn" :class="{ active: showReplyInput }" role="button" tabindex="0" @click="onReplyClick" @keydown.enter.prevent="onReplyClick" @keydown.space.prevent="onReplyClick">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
         </svg>
         <span v-if="(post.comment_count || 0) > 0">{{ post.comment_count }}</span>
-      </button>
-      <button class="action-btn share-btn" @click="$emit('share', post)">
+      </div>
+      <div class="action-btn share-btn" role="button" tabindex="0" @click="$emit('share', post)" @keydown.enter.prevent="$emit('share', post)" @keydown.space.prevent="$emit('share', post)">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="18" cy="5" r="3" />
           <circle cx="6" cy="12" r="3" />
@@ -65,7 +65,7 @@
           <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
           <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
         </svg>
-      </button>
+      </div>
     </div>
 
     <!-- 评论区域 -->
@@ -125,11 +125,15 @@
       </div>
 
       <!-- 展开按钮：点它 = 展开评论区 + 打开输入框 -->
-      <button
+      <div
         v-if="hiddenCount > 0 && !expanded"
         class="comment-expand-btn"
+        role="button"
+        tabindex="0"
         @click="expandAndReply"
-      >展开剩余 {{ hiddenCount }} 条评论</button>
+        @keydown.enter.prevent="expandAndReply"
+        @keydown.space.prevent="expandAndReply"
+      >展开剩余 {{ hiddenCount }} 条评论</div>
     </div>
 
     <!-- 回复输入 -->
@@ -144,19 +148,16 @@
           @keydown.escape.exact="closeReplyInput"
           :disabled="sending"
         />
-        <button
+        <linshe-button
+          variant="primary"
+          size="sm"
           class="comment-send"
-          :class="{ waiting: sending }"
-          :disabled="!commentText.trim() || sending"
+          :disabled="!commentText.trim()"
+          :loading="sending"
           @click="sendComment"
         >
           <template v-if="!sending">发送</template>
-          <svg v-else class="waiting-dots" viewBox="0 0 24 6" width="24" height="6">
-            <circle cx="3" cy="3" r="2" fill="#fff" class="wdot wdot-0"/>
-            <circle cx="12" cy="3" r="2" fill="#fff" class="wdot wdot-1"/>
-            <circle cx="21" cy="3" r="2" fill="#fff" class="wdot wdot-2"/>
-          </svg>
-        </button>
+        </linshe-button>
       </div>
     </div>
   </div>
@@ -167,6 +168,7 @@ import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { userNickname } from '../userConfig.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -410,10 +412,11 @@ function formatTime(iso) {
   padding: 10px 14px;
   border: none; border-radius: 0;
   background: transparent;
-  font-size: 13px; color: var(--text-primary);
+  font-size: 13px; font-weight: 500; color: var(--text-primary);
   cursor: pointer;
   transition: background 0.12s;
   text-align: left;
+  user-select: none;
 }
 .moment-dropdown-item:hover { background: rgba(0,0,0,0.05); }
 .moment-dropdown-item.danger { color: var(--danger); }
@@ -467,9 +470,10 @@ function formatTime(iso) {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 13px; font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 .action-btn:hover { background: rgba(255, 255, 255, 0.28); color: var(--text-bright); }
 .action-btn.active { color: var(--accent); }
@@ -525,8 +529,9 @@ function formatTime(iso) {
   border: none; border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px; cursor: pointer;
+  font-size: 12px; font-weight: 500; cursor: pointer;
   transition: all 0.15s;
+  text-align: center; user-select: none;
 }
 .comment-expand-btn:hover { color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
@@ -545,21 +550,10 @@ function formatTime(iso) {
   transition: border-color 0.15s;
 }
 .comment-input:focus { border-color: var(--accent); }
+/* 发送按钮皮肤由 LinsheButton(variant="primary" size="sm") 提供，这里只保留布局属性 */
 .comment-send {
-  padding: 8px 16px;
-  height: 36px;
-  border-radius: 10px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px; font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
   flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
 }
-.comment-send:hover:not(:disabled) { background: var(--accent-hover); }
-.comment-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .reply-input-wrapper {
   overflow: hidden;
@@ -574,14 +568,5 @@ function formatTime(iso) {
   max-height: 56px;
   opacity: 1;
   margin-top: 12px;
-}
-
-.waiting-dots { display: block; }
-.wdot { animation: dotBounce 1.0s ease-in-out infinite; }
-.wdot-1 { animation-delay: 0.15s; }
-.wdot-2 { animation-delay: 0.30s; }
-@keyframes dotBounce {
-  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-2px); }
 }
 </style>

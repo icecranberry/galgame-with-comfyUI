@@ -1,7 +1,7 @@
 <template>
     <div class="maibot-page">
     <header class="page-header">
-      <button class="back" aria-label="返回系统设置" @click="router.push('/settings')">‹</button>
+      <linshe-button variant="icon" class="back" aria-label="返回系统设置" @click="router.push('/settings')">‹</linshe-button>
       <div>
         <h2>MaiBot 桥接</h2>
         <p>管理注入到 MaiBot 主聊天流的人格信息（角色卡 / 风格 / 记忆）与全部插件参数。</p>
@@ -23,8 +23,9 @@
             @change="saveSettings"
             @keyup.enter="saveSettings"
           >
-          <button
-            type="button"
+          <linshe-button
+            variant="icon"
+            size="sm"
             class="token-toggle"
             :aria-label="showWebuiToken ? '隐藏 Token' : '显示 Token'"
             :title="showWebuiToken ? '隐藏 Token' : '显示 Token'"
@@ -32,7 +33,7 @@
           >
             <svg v-if="showWebuiToken" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
+          </linshe-button>
         </div>
         <div class="admin-links">
           <span class="admin-links-title">后台入口</span>
@@ -140,9 +141,9 @@
         </div>
       </div>
       <div class="card-actions">
-        <button class="btn-ghost" :disabled="refreshingPersona || autoDeriving" @click="refreshPersona">{{ refreshingPersona ? '更新中…' : '更新人格' }}</button>
-        <button class="btn-primary" :disabled="deriving || autoDeriving" @click="derive">{{ deriving ? '提炼中…' : '重新提炼风格' }}</button>
-        <button class="btn-primary" :disabled="savingPersona || autoDeriving" @click="savePersona">{{ savingPersona ? '保存中…' : '保存' }}</button>
+        <linshe-button variant="secondary" :disabled="refreshingPersona || autoDeriving" @click="refreshPersona">{{ refreshingPersona ? '更新中…' : '更新人格' }}</linshe-button>
+        <linshe-button variant="primary" :disabled="deriving || autoDeriving" @click="derive">{{ deriving ? '提炼中…' : '重新提炼风格' }}</linshe-button>
+        <linshe-button variant="primary" :disabled="savingPersona || autoDeriving" @click="savePersona">{{ savingPersona ? '保存中…' : '保存' }}</linshe-button>
       </div>
       </section>
 
@@ -152,7 +153,7 @@
       <p class="fd hint-line">只保留一份最新记忆，插件注入时也只带回去这一条；这里直接展示最近更新的一份，无需手动查询。</p>
       <div class="memory-box" :class="{ empty: !memoryContent }">{{ memoryContent || '（暂无记忆整理）' }}</div>
       <div class="card-actions">
-        <button class="btn-danger" :disabled="!latestMemorySessionId || deletingMemory" @click="deleteMemory">{{ deletingMemory ? '删除中…' : '删除该记忆摘要' }}</button>
+        <linshe-button variant="danger" :disabled="!latestMemorySessionId || deletingMemory" @click="deleteMemory">{{ deletingMemory ? '删除中…' : '删除该记忆摘要' }}</linshe-button>
       </div>
       </section>
     </div>
@@ -163,6 +164,7 @@
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 import {
   maibotDeleteLatestMemory,
   maibotDeriveStyle,
@@ -530,10 +532,7 @@ onMounted(loadAll)
 .page-header p, .card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 .back {
   width: 38px; height: 38px; flex-shrink: 0;
-  border: 1px solid var(--glass-border); border-radius: 12px;
-  background: var(--glass-bg); color: var(--text-bright);
-  font-size: 28px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; padding: 0;
+  font-size: 28px; line-height: 1;
 }
 
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; width: 100%; }
@@ -570,16 +569,13 @@ textarea.fi { font-family: inherit; resize: vertical; }
 .token-field .fi { margin-bottom: 0; padding-right: 42px; }
 .token-toggle {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  background: transparent; border: none; border-radius: 8px; padding: 0;
-  color: var(--text-secondary); cursor: pointer;
+  width: 30px; height: 30px;
 }
-.token-toggle:hover { color: var(--accent); background: rgba(224, 123, 108, 0.08); }
 .token-toggle svg { width: 18px; height: 18px; }
 
 .mb-select { position: relative; z-index: 40; margin-bottom: 14px; }
 .card-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
-.card-actions .btn-primary { padding-left: 18px; padding-right: 18px; }
+.card-actions .ls-btn { padding-left: 18px; padding-right: 18px; }
 
 /* ── 后台入口链接 ── */
 .admin-links { margin: 0 0 16px; }
@@ -692,12 +688,6 @@ textarea.fi { font-family: inherit; resize: vertical; }
   max-height: 260px; overflow: auto; margin-top: 8px; line-height: 1.6;
 }
 .memory-box.empty { color: var(--text-secondary); font-style: italic; }
-
-.btn-danger {
-  background: transparent; border: 1px solid var(--danger); color: var(--danger);
-  border-radius: 9px; padding: 10px 18px; font-weight: 600;
-}
-.btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
 
 @media (max-width: 767px) {
   .maibot-page { padding: 16px; }

@@ -37,11 +37,11 @@
             <p class="live-toast-message" :class="{ 'is-title': item.description }">{{ item.message }}</p>
             <p v-if="item.description" class="live-toast-note">{{ item.description }}</p>
           </div>
-          <button class="live-toast-close" type="button" aria-label="关闭" @click.stop="dismiss(item.id)">
+          <div class="live-toast-close" role="button" aria-label="关闭" @click.stop="dismiss(item.id)">
             <svg viewBox="0 0 10 10" fill="none" aria-hidden="true">
               <path d="M1.6 1.6l6.8 6.8M8.4 1.6 1.6 8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-          </button>
+          </div>
           <span class="live-toast-life" aria-hidden="true"></span>
         </div>
       </TransitionGroup>
@@ -231,6 +231,8 @@ defineExpose({ show })
   border-radius: 8px;
   color: #B4AA9E;
   opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
   transition: opacity 0.18s ease, color 0.18s ease, background-color 0.18s ease;
 }
 .live-toast:hover .live-toast-close { opacity: 0.9; }

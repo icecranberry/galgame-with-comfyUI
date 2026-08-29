@@ -9,6 +9,8 @@ __pycache__/
 .venv/
 .reasonix
 .codegraph
+.zcode/
+
 venv/
 vector-service/models/
 vector-service/chroma_data/

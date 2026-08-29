@@ -23,8 +23,8 @@
             <div class="confirm-message">{{ message }}</div>
           </div>
           <div class="confirm-actions">
-            <button class="confirm-btn confirm-btn-cancel" @click="onCancel">{{ cancelText }}</button>
-            <button class="confirm-btn confirm-btn-ok" :class="{ danger }" @click="onOk">{{ okText }}</button>
+            <linshe-button class="confirm-btn" @click="onCancel">{{ cancelText }}</linshe-button>
+            <linshe-button class="confirm-btn" :variant="danger ? 'danger' : 'primary'" @click="onOk">{{ okText }}</linshe-button>
           </div>
         </div>
       </div>
@@ -34,6 +34,7 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
+import LinsheButton from './LinsheButton.vue'
 
 const visible = ref(false)
 const title = ref('')
@@ -141,53 +142,10 @@ defineExpose({ show })
 .confirm-actions {
   display: flex; gap: 12px; margin-top: 4px; width: 100%;
 }
+/* 皮肤交给 LinsheButton，这里只保留布局 */
 .confirm-btn {
   flex: 1;
   min-height: 44px;  /* touch target: ≥44px */
-  padding: 11px 0;
-  border-radius: 12px;
-  font-size: 14px; font-weight: 500; cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* 次要按钮：清晰但从属 */
-.confirm-btn-cancel {
-  background: var(--bg-tertiary);
-  border: 1px solid transparent;
-  color: var(--text-secondary);
-}
-.confirm-btn-cancel:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
-.confirm-btn-cancel:active {
-  transform: scale(0.97);
-}
-
-/* 主要按钮 */
-.confirm-btn-ok {
-  background: var(--accent);
-  border: none; color: #fff;
-  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.22);
-}
-.confirm-btn-ok:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 4px 16px rgba(224, 123, 108, 0.30);
-  transform: translateY(-1px);
-}
-.confirm-btn-ok:active {
-  transform: scale(0.97);
-}
-
-/* 危险操作 */
-.confirm-btn-ok.danger {
-  background: var(--danger);
-  box-shadow: 0 2px 10px rgba(255, 77, 79, 0.20);
-}
-.confirm-btn-ok.danger:hover {
-  background: #e04848;
-  box-shadow: 0 4px 16px rgba(255, 77, 79, 0.28);
 }
 
 /* ── Transition：进入弹性，退出更快 ── */

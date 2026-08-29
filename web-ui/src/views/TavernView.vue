@@ -29,7 +29,7 @@
               placeholder="给自己起个名字"
             />
             <span v-else class="field-value" @click="startEditNickname">{{ userNickname || '给自己起个名字' }}</span>
-            <button v-if="!editingNickname" class="edit-pen" @click="startEditNickname" title="编辑称呼">✎</button>
+            <div v-if="!editingNickname" class="edit-pen" role="button" tabindex="0" @click="startEditNickname" @keydown.enter.prevent="startEditNickname" @keydown.space.prevent="startEditNickname" title="编辑称呼">✎</div>
           </div>
         </div>
         <!-- 性别 -->
@@ -46,7 +46,7 @@
               placeholder="男 / 女 / ..."
             />
             <span v-else class="field-value" @click="startEditGender">{{ userGender || '点击设置性别...' }}</span>
-            <button v-if="!editingGender" class="edit-pen" @click="startEditGender" title="编辑性别">✎</button>
+            <div v-if="!editingGender" class="edit-pen" role="button" tabindex="0" @click="startEditGender" @keydown.enter.prevent="startEditGender" @keydown.space.prevent="startEditGender" title="编辑性别">✎</div>
           </div>
         </div>
         <!-- 外观特征 -->
@@ -65,7 +65,7 @@
               placeholder="外观描述越紧密越不容易和其他角色串，示例：小明（←改成你的名字）来自原创角色，小明（←改成你的名字）是长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔"
             ></textarea>
             <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
-            <button v-if="!editingAppearance" class="edit-pen" @click="startEditAppearance" title="编辑外观">✎</button>
+            <div v-if="!editingAppearance" class="edit-pen" role="button" tabindex="0" @click="startEditAppearance" @keydown.enter.prevent="startEditAppearance" @keydown.space.prevent="startEditAppearance" title="编辑外观">✎</div>
           </div>
         </div>
         <!-- 其他说明 -->
@@ -84,7 +84,7 @@
               placeholder="性格、身份、经历等补充信息"
             ></textarea>
             <span v-else class="field-value" @click="startEditPersona">{{ userPersona || '点击补充其他信息...' }}</span>
-            <button v-if="!editingPersona" class="edit-pen" @click="startEditPersona" title="编辑其他说明">✎</button>
+            <div v-if="!editingPersona" class="edit-pen" role="button" tabindex="0" @click="startEditPersona" @keydown.enter.prevent="startEditPersona" @keydown.space.prevent="startEditPersona" title="编辑其他说明">✎</div>
           </div>
         </div>
       </div>
@@ -207,7 +207,7 @@
           <div class="modal-panel modal-wide">
             <div class="modal-header">
               <h3>招募新角色</h3>
-              <button class="modal-close" @click="closeRecruit">✕</button>
+              <linshe-button class="modal-close" variant="icon" @click="closeRecruit">✕</linshe-button>
             </div>
 
             <!-- 步骤 0：输入描述 -->
@@ -227,14 +227,14 @@
                   <span>导入酒馆ai角色卡</span>
                   <input ref="cardInputRef" type="file" accept=".png,.json,image/png,application/json" :disabled="recruit.loading" @change="onCardSelected" hidden />
                 </label>
-                <button class="btn-ghost" @click="closeRecruit">取消</button>
-                <button
-                  class="btn-primary"
+                <linshe-button variant="secondary" @click="closeRecruit">取消</linshe-button>
+                <linshe-button
+                  variant="primary"
                   :disabled="!recruit.desc.trim() || recruit.loading"
                   @click="doGenerate"
                 >
                   {{ recruit.loading ? '正在酒馆招募...' : '✨ 招募角色' }}
-                </button>
+                </linshe-button>
               </div>
 <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
               <!-- 招募加载遮罩 -->
@@ -265,16 +265,16 @@
                 <!-- 朋友圈开关 -->
               </div>
               <div class="modal-actions modal-actions-between">
-                <button
-                  class="btn-ghost"
+                <linshe-button
+                  variant="secondary"
                   :disabled="recruit.loading"
                   @click="doGenerate"
-                >重新招募</button>
+                >重新招募</linshe-button>
                 <div class="modal-actions-right">
-                  <button class="btn-ghost" @click="recruit.step = 'input'; recruit.error = ''">返回修改</button>
-                  <button class="btn-primary" :disabled="recruit.saving" @click="confirmRecruit">
+                  <linshe-button variant="secondary" @click="recruit.step = 'input'; recruit.error = ''">返回修改</linshe-button>
+                  <linshe-button variant="primary" :disabled="recruit.saving" @click="confirmRecruit">
                     {{ recruit.saving ? '招募中...' : '确认招募' }}
-                  </button>
+                  </linshe-button>
                 </div>
               </div>
               <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
@@ -307,7 +307,7 @@
               </div>
               <div class="world-header-right">
                 <span v-if="activeWorldName" class="world-active-badge" :title="`当前激活：${activeWorldName}`">● {{ activeWorldName }}</span>
-                <button class="modal-close" @click="closeWorldSetting">✕</button>
+                <linshe-button class="modal-close" variant="icon" @click="closeWorldSetting">✕</linshe-button>
               </div>
             </div>
             <div class="modal-body">
@@ -320,8 +320,8 @@
                   placeholder="输入新世界观名称"
                   @keyup.enter="confirmNew"
                 />
-                <button class="btn-primary btn-sm" :disabled="!worldNewName.trim()" @click="confirmNew">创建</button>
-                <button class="btn-ghost btn-sm" @click="showNewInput = false">取消</button>
+                <linshe-button variant="primary" size="sm" :disabled="!worldNewName.trim()" @click="confirmNew">创建</linshe-button>
+                <linshe-button variant="secondary" size="sm" @click="showNewInput = false">取消</linshe-button>
               </div>
 
               <!-- 标签行 -->
@@ -363,8 +363,9 @@
                 <div class="world-editor-bar">
                   <span class="world-editor-label">世界观内容</span>
                   <div class="world-editor-tools">
-                    <button
+                    <linshe-button
                       class="btn-polish"
+                      variant="secondary"
                       :disabled="polishLoading || !worldContent.trim()"
                       title="AI 按酒馆世界书风格润色扩写当前世界观"
                       @click="openPolish"
@@ -374,7 +375,7 @@
                         <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>
                       </svg>
                       一键润色
-                    </button>
+                    </linshe-button>
                   </div>
                 </div>
                 <div class="world-editor-body">
@@ -394,14 +395,14 @@
               </div>
 
               <div class="modal-actions">
-                <button class="btn-ghost" @click="closeWorldSetting">取消</button>
-                <button
-                  class="btn-primary"
+                <linshe-button variant="secondary" @click="closeWorldSetting">取消</linshe-button>
+                <linshe-button
+                  variant="primary"
                   :disabled="!worldDirty || worldSaving"
                   @click="saveWorld"
                 >
                   {{ worldSaving ? '保存中...' : '保存' }}
-                </button>
+                </linshe-button>
               </div>
             </div>
           </div>
@@ -418,7 +419,7 @@
           <div class="modal-panel polish-modal-panel">
             <div class="modal-header">
               <h3>撰写世界观</h3>
-              <button class="modal-close" @click="closePolishModal">✕</button>
+              <linshe-button class="modal-close" variant="icon" @click="closePolishModal">✕</linshe-button>
             </div>
             <div class="modal-body">
               <p v-if="!polishLoading && !polishContent && !polishError" class="polish-tip">
@@ -435,8 +436,8 @@
               <div v-else-if="polishError" class="polish-error">
                 <p class="polish-error-text">{{ polishError }}</p>
                 <div class="modal-actions polish-error-actions">
-                  <button class="btn-primary btn-sm" @click="runPolish">重新生成</button>
-                  <button class="btn-ghost btn-sm" @click="closePolishModal">关闭</button>
+                  <linshe-button variant="primary" size="sm" @click="runPolish">重新生成</linshe-button>
+                  <linshe-button variant="secondary" size="sm" @click="closePolishModal">关闭</linshe-button>
                 </div>
               </div>
 
@@ -449,10 +450,10 @@
                   <pre v-html="polishHighlightHtml"></pre>
                 </div>
                 <div class="modal-actions">
-                  <button class="btn-ghost" @click="runPolish">↻ 再次生成</button>
+                  <linshe-button variant="secondary" @click="runPolish">↻ 再次生成</linshe-button>
                   <div class="modal-actions-right">
-                    <button class="btn-ghost" @click="closePolishModal">取消</button>
-                    <button class="btn-primary" @click="confirmPolish">确认并覆写</button>
+                    <linshe-button variant="secondary" @click="closePolishModal">取消</linshe-button>
+                    <linshe-button variant="primary" @click="confirmPolish">确认并覆写</linshe-button>
                   </div>
                 </div>
               </template>
@@ -563,6 +564,7 @@ import RelationshipDeductionModal from '../components/RelationshipDeductionModal
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 
 const router = useRouter()
@@ -1363,6 +1365,7 @@ onMounted(async () => {
   cursor: pointer; font-size: 14px; padding: 2px 4px;
   opacity: 0; transition: opacity 0.15s;
   flex-shrink: 0;
+  user-select: none;
 }
 .user-field-row:hover .edit-pen { opacity: 1; }
 .edit-pen:hover { color: var(--accent); }
@@ -1578,12 +1581,6 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
-.btn-sm {
-  padding: 5px 12px;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
 /* ── 世界观编辑弹窗（档案面板） ── */
 .world-modal-panel {
   position: relative;
@@ -1644,17 +1641,6 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.world-modal-panel .modal-close {
-  background: transparent;
-  opacity: 0.4;
-  color: rgba(90, 70, 55, 0.6);
-}
-.world-modal-panel .modal-close:hover {
-  background: rgba(120, 90, 60, 0.08);
-  opacity: 1;
-  color: #5a4638;
-}
-
 .world-modal-panel .modal-body {
   display: flex;
   flex-direction: column;
@@ -1702,24 +1688,6 @@ onMounted(async () => {
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border-radius: 8px;
-  background: rgba(224, 123, 108, 0.06);
-  border: 1px solid rgba(224, 123, 108, 0.13);
-  color: rgba(176, 94, 71, 0.85);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.18s ease;
-}
-.btn-polish:hover:not(:disabled) {
-  background: rgba(224, 123, 108, 0.11);
-  border-color: rgba(224, 123, 108, 0.26);
-  color: #b8664d;
-}
-.btn-polish:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .world-editor-body {
@@ -1798,30 +1766,6 @@ onMounted(async () => {
   margin: 10px -30px -24px;
   padding: 8px 30px 12px;
   border-top: 1px solid rgba(120, 90, 60, 0.08);
-}
-.world-modal-panel .modal-actions .btn-primary {
-  padding: 8px 24px;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  background: #e07b6c;
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(186, 90, 66, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16);
-}
-.world-modal-panel .modal-actions .btn-primary:hover:not(:disabled) {
-  background: #cf6248;
-  transform: translateY(-1px);
-  box-shadow: 0 5px 16px rgba(186, 90, 66, 0.3);
-}
-.world-modal-panel .modal-actions .btn-ghost {
-  background: transparent;
-  border: 1px solid transparent;
-  color: rgba(90, 70, 55, 0.55);
-  font-weight: 500;
-}
-.world-modal-panel .modal-actions .btn-ghost:hover:not(:disabled) {
-  background: rgba(120, 90, 60, 0.06);
-  color: #5a4638;
 }
 
 /* ── 世界观 AI 润色弹窗 ── */
@@ -2141,13 +2085,8 @@ onMounted(async () => {
 .modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
 
 .modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: var(--glass-bg-strong);
-  color: var(--text-secondary); font-size: 15px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
+  width: 30px; height: 30px;
 }
-.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
 
 .modal-body {
   padding: 0px 22px 22px;
@@ -2569,11 +2508,6 @@ onMounted(async () => {
 .detail-layout { display: block; }
 .detail-sidebar { display: none; }
 
-.sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
-.sp-btn-small:hover { border-color: var(--accent); }
-.sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
-.sp-btn-subtle:hover { color: var(--danger); border-color: transparent; }
-
 .prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
 /* 角色详情 input/textarea — 与招募预览卡片统一 */
@@ -2612,8 +2546,6 @@ onMounted(async () => {
   display: flex; align-items: center; margin-top: 0; gap: 10px;
 }
 .detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
-.btn-ghost.danger { color: var(--danger); }
-.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 
 /* ── 弹窗动画 ── */
 .modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }

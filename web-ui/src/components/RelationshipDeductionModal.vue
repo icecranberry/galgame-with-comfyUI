@@ -5,7 +5,7 @@
         <div class="modal-panel ded-modal">
           <div class="modal-header">
             <h3>推演{{ mode === 'user' ? '用户' : '角色' }}关系 — {{ mode === 'user' ? userName : character?.display_name }}</h3>
-            <button class="modal-close" @click="$emit('close')">&times;</button>
+            <linshe-button variant="icon" @click="$emit('close')">&times;</linshe-button>
           </div>
           <div class="modal-body">
             <Transition name="ded-collapse" mode="out-in">
@@ -43,10 +43,10 @@
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
                         <div class="ded-act-row">
-                          <button class="ded-act trash" title="排除此角色" @click="excludeCharacter(idx)">&#128465;</button>
-                          <button class="ded-act edit" title="编辑" @click="startEdit(idx, 'left', item.relationship_text)">&#9998;</button>
+                          <div class="ded-act trash" role="button" tabindex="0" title="排除此角色" @click="excludeCharacter(idx)" @keydown.enter.prevent="excludeCharacter(idx)" @keydown.space.prevent="excludeCharacter(idx)">&#128465;</div>
+                          <div class="ded-act edit" role="button" tabindex="0" title="编辑" @click="startEdit(idx, 'left', item.relationship_text)" @keydown.enter.prevent="startEdit(idx, 'left', item.relationship_text)" @keydown.space.prevent="startEdit(idx, 'left', item.relationship_text)">&#9998;</div>
                         </div>
-                        <button class="ded-act push" title="确认添加" @click="addToConfirmed(idx)">&rarr;</button>
+                        <div class="ded-act push" role="button" tabindex="0" title="确认添加" @click="addToConfirmed(idx)" @keydown.enter.prevent="addToConfirmed(idx)" @keydown.space.prevent="addToConfirmed(idx)">&rarr;</div>
                       </div>
                     </div>
                     <div v-if="suggestions.length === 0" class="ded-empty">
@@ -55,12 +55,12 @@
                   </div>
                 </div>
                 <div class="ded-col-ctrl">
-                  <button class="ded-ctrl-btn ded-ctrl-right" title="全部导入右侧" :disabled="suggestions.length === 0" @click="importAll">
+                  <linshe-button variant="icon" size="sm" class="ded-ctrl-right" title="全部导入右侧" :disabled="suggestions.length === 0" @click="importAll">
                     <svg class="ded-ctrl-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M415.744 937.179429a43.885714 43.885714 0 0 1 0-62.098286l363.154286-363.154286-363.154286-363.154286a43.885714 43.885714 0 0 1 62.025143-62.025142l394.24 394.166857a43.885714 43.885714 0 0 1 0 62.025143l-394.24 394.24a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path><path d="M261.558857 762.441143a43.885714 43.885714 0 0 1 0-62.098286L449.974857 512 261.558857 323.584a43.885714 43.885714 0 0 1 62.025143-62.098286l219.428571 219.428572a43.885714 43.885714 0 0 1 0 62.098285l-219.428571 219.428572a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path></svg>
-                  </button>
-                  <button class="ded-ctrl-btn ded-ctrl-left" title="全部推回左侧" :disabled="confirmed.length === 0" @click="pushAllBack">
+                  </linshe-button>
+                  <linshe-button variant="icon" size="sm" class="ded-ctrl-left" title="全部推回左侧" :disabled="confirmed.length === 0" @click="pushAllBack">
                     <svg class="ded-ctrl-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M415.744 937.179429a43.885714 43.885714 0 0 1 0-62.098286l363.154286-363.154286-363.154286-363.154286a43.885714 43.885714 0 0 1 62.025143-62.025142l394.24 394.166857a43.885714 43.885714 0 0 1 0 62.025143l-394.24 394.24a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path><path d="M261.558857 762.441143a43.885714 43.885714 0 0 1 0-62.098286L449.974857 512 261.558857 323.584a43.885714 43.885714 0 0 1 62.025143-62.098286l219.428571 219.428572a43.885714 43.885714 0 0 1 0 62.098285l-219.428571 219.428572a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path></svg>
-                  </button>
+                  </linshe-button>
                 </div>
                 <div class="ded-col ded-col-right">
                   <div class="ded-col-header">
@@ -85,8 +85,8 @@
                         <input v-model="editText" class="fi" @keyup.enter="saveEdit(idx, 'right')" @blur="saveEdit(idx, 'right')" />
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
-                        <button class="ded-act remove" title="移回左侧" @click="removeFromConfirmed(idx)">&larr;</button>
-                        <button class="ded-act edit" title="编辑" @click="startEdit(idx, 'right', item.relationship_text)">&#9998;</button>
+                        <div class="ded-act remove" role="button" tabindex="0" title="移回左侧" @click="removeFromConfirmed(idx)" @keydown.enter.prevent="removeFromConfirmed(idx)" @keydown.space.prevent="removeFromConfirmed(idx)">&larr;</div>
+                        <div class="ded-act edit" role="button" tabindex="0" title="编辑" @click="startEdit(idx, 'right', item.relationship_text)" @keydown.enter.prevent="startEdit(idx, 'right', item.relationship_text)" @keydown.space.prevent="startEdit(idx, 'right', item.relationship_text)">&#9998;</div>
                       </div>
                     </div>
                     <div v-if="confirmed.length === 0" class="ded-empty">
@@ -97,14 +97,13 @@
               </div>
               <div class="ded-footer">
                 <div class="ded-footer-row">
-                  <button class="ded-btn boost" :disabled="loading || saving" @click="boostDeduce">加大药量</button>
-                  <button class="ded-btn normal" :disabled="loading || saving" @click="normalDeduce">常规推理</button>
+                  <linshe-button variant="secondary" class="ded-btn" :disabled="loading || saving" @click="boostDeduce">加大药量</linshe-button>
+                  <linshe-button variant="secondary" class="ded-btn" :disabled="loading || saving" @click="normalDeduce">常规推理</linshe-button>
                 </div>
                 <div class="ded-footer-row">
-                  <button class="ded-btn confirm" :disabled="loading || saving || confirmed.length === 0" @click="confirmAll">
-                    <span v-if="saving" class="ded-spinner-small"></span>
+                  <linshe-button variant="primary" class="ded-btn" :loading="saving" :disabled="loading || saving || confirmed.length === 0" @click="confirmAll">
                     {{ saving ? '保存中...' : '确定关系' }}
-                  </button>
+                  </linshe-button>
                 </div>
               </div>
               </div>
@@ -120,6 +119,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -329,10 +329,6 @@ watch(() => props.visible, (val) => {
   border-bottom: 1px solid var(--glass-border, #e5e0db);
 }
 .modal-header h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--text-primary, #3e3a37); }
-.modal-close {
-  border: none; background: none; font-size: 22px; cursor: pointer;
-  color: var(--text-secondary, #8b817c); line-height: 1; padding: 0 4px;
-}
 
 .modal-body {
   flex: 1; overflow-y: auto; padding: 16px 22px 22px;
@@ -349,10 +345,6 @@ watch(() => props.visible, (val) => {
   animation: ded-spin 0.7s linear infinite;
 }
 @keyframes ded-spin { to { transform: rotate(360deg); } }
-@keyframes waterflow {
-  0%, 100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
-}
 .ded-loading p {
   font-size: 14px; color: var(--text-secondary, #8b817c); margin: 0;
 }
@@ -371,22 +363,10 @@ watch(() => props.visible, (val) => {
   display: flex; flex-direction: column; justify-content: center; gap: 6px;
   flex-shrink: 0; padding: 0 2px;
 }
-.ded-ctrl-btn {
-  width: 28px; height: 28px; border: 1px solid var(--glass-border, #e5e0db);
-  border-radius: 6px; background: var(--bg-primary, #fff);
-  color: var(--text-secondary, #8b817c);
-  cursor: pointer; transition: all 0.15s; padding: 0; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-}
 .ded-ctrl-icon { display: block; }
 
 .ded-ctrl-right .ded-ctrl-icon { transform: rotate(0deg); }
 .ded-ctrl-left .ded-ctrl-icon { transform: rotate(180deg); }
-.ded-ctrl-btn:hover:not(:disabled) {
-  border-color: var(--accent, #e07b6c); color: var(--accent, #e07b6c);
-  background: rgba(224,123,108,0.06);
-}
-.ded-ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .ded-col-header {
   display: flex; justify-content: space-between; align-items: flex-start;
@@ -448,15 +428,16 @@ watch(() => props.visible, (val) => {
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   font-size: 14px; line-height: 1; padding: 0;
   transition: all 0.15s;
+  user-select: none;
 }
 .ded-act.push { width: auto; background: rgba(224, 123, 108, 0.1); color: var(--accent, #e07b6c); font-size: 16px; }
 .ded-act.push:hover { background: var(--accent, #e07b6c); color: #fff; }
-.ded-act.remove { background: rgba(255, 77, 79, 0.08); color: #ff4d4f; }
-.ded-act.remove:hover { background: #ff4d4f; color: #fff; }
+.ded-act.remove { background: rgba(255, 77, 79, 0.08); color: var(--danger); }
+.ded-act.remove:hover { background: var(--danger); color: #fff; }
 .ded-act.edit { background: rgba(0, 0, 0, 0.05); color: var(--text-secondary, #8b817c); font-size: 13px; }
 .ded-act.edit:hover { background: rgba(0, 0, 0, 0.1); color: var(--text-primary, #3e3a37); }
-.ded-act.trash { background: rgba(255, 77, 79, 0.06); color: #ff4d4f; font-size: 13px; }
-.ded-act.trash:hover { background: #ff4d4f; color: #fff; }
+.ded-act.trash { background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; }
+.ded-act.trash:hover { background: var(--danger); color: #fff; }
 
 /* ── 底部按钮区（两行）── */
 .ded-footer {
@@ -467,38 +448,7 @@ watch(() => props.visible, (val) => {
 .ded-footer-row {
   display: flex; gap: 8px; justify-content: center;
 }
-.ded-btn {
-  flex: 1; padding: 10px 0; border: none; border-radius: 10px;
-  font-size: 13px; font-weight: 700; cursor: pointer;
-  transition: all 0.15s;
-}
-.ded-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.ded-btn.boost {
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
-  background-size: 200% 200%;
-  color: #c06a5a;
-}
-.ded-btn.boost:hover:not(:disabled) {
-  animation: waterflow 1s ease-in-out infinite;
-  box-shadow: 0 3px 20px rgba(224,123,108,0.10);
-}
-.ded-btn.normal {
-  background: var(--bg-primary, #fff); color: #c06a5a;
-  border: 1.5px solid var(--glass-border, #e5e0db);
-}
-.ded-btn.normal:hover:not(:disabled) { border-color: var(--accent, #e07b6c); color: var(--accent, #e07b6c); }
-.ded-btn.confirm {
-  background: var(--accent, #e07b6c); color: #fff;
-}
-.ded-btn.confirm:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
-
-.ded-spinner-small {
-  display: inline-block; width: 14px; height: 14px; margin-right: 6px;
-  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
-  border-radius: 50%; animation: ded-spin 0.6s linear infinite;
-  vertical-align: middle;
-}
+.ded-btn { flex: 1; }
 
 /* ── Transition ── */
 .modal-fade-enter-active  { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }

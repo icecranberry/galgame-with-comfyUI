@@ -14,11 +14,11 @@
               <h3>{{ title }}</h3>
               <p v-if="intro">{{ intro }}</p>
             </div>
-            <button class="guide-close" type="button" aria-label="关闭" @click="close">
+            <linshe-button variant="icon" size="sm" class="guide-close" aria-label="关闭" @click="close">
               <svg viewBox="0 0 10 10" fill="none" aria-hidden="true">
                 <path d="M1.6 1.6l6.8 6.8M8.4 1.6 1.6 8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               </svg>
-            </button>
+            </linshe-button>
           </header>
 
           <div class="guide-body">
@@ -41,7 +41,7 @@
           </div>
 
           <footer class="guide-foot">
-            <button class="guide-ok" type="button" @click="close">我已了解</button>
+            <linshe-button variant="primary" class="guide-ok" @click="close">我已了解</linshe-button>
           </footer>
         </section>
       </div>
@@ -51,6 +51,7 @@
 
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
+import LinsheButton from './LinsheButton.vue'
 
 const visible = ref(false)
 const title = ref('安装教程')
@@ -156,22 +157,9 @@ defineExpose({ show, close })
   color: #8B8179;
 }
 
+/* 皮肤交给 LinsheButton，仅保留布局与图标尺寸 */
 .guide-close {
   flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: #B4AA9E;
-  transition: color 0.18s ease, background-color 0.18s ease;
-}
-.guide-close:hover {
-  color: #6F655C;
-  background: rgba(62, 58, 54, 0.06);
 }
 .guide-close svg {
   width: 10px;
@@ -255,24 +243,10 @@ defineExpose({ show, close })
   padding: 12px 22px 18px;
   border-top: 1px solid rgba(224, 123, 108, 0.14);
 }
+/* 皮肤交给 LinsheButton，仅保留尺寸 */
 .guide-ok {
   min-width: 112px;
   min-height: 38px;
-  padding: 0 20px;
-  background: #E07B6C;
-  border: none;
-  border-radius: 10px;
-  color: #FCFAF8;
-  font-size: 14px;
-  font-weight: 600;
-  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-.guide-ok:hover {
-  background: #D96D5D;
-  box-shadow: 0 6px 18px rgba(224, 123, 108, 0.24);
-}
-.guide-ok:active {
-  transform: scale(0.98);
 }
 
 .guide-enter-active {

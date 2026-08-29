@@ -7,7 +7,7 @@
           <h3 class="lib-title">{{ title }}</h3>
           <div class="lib-header-right">
             <span class="lib-count">{{ items.length }} 条</span>
-            <button class="lib-close" @click="close">✕</button>
+            <linshe-button variant="icon" @click="close">✕</linshe-button>
           </div>
         </div>
 
@@ -29,9 +29,9 @@
                   <div class="scan-text">幻想中…</div>
                 </div>
               </div>
-              <button class="gen-btn" @click="doGenerate" :disabled="generating || saving">
+              <linshe-button variant="primary" @click="doGenerate" :disabled="generating || saving">
                 {{ generating ? '幻想中…' : '开始幻想' }}
-              </button>
+              </linshe-button>
             </div>
 
             <!-- 生成结果预览 -->
@@ -39,10 +39,10 @@
               <div class="preview-header">
                 <span class="preview-title">生成预览（{{ previewItems.length }} 条）— 可逐条编辑，确认后入库</span>
                 <div class="preview-actions">
-                  <button class="preview-btn primary" @click="savePreview" :disabled="saving">
+                  <linshe-button variant="primary" @click="savePreview" :disabled="saving">
                     {{ saving ? '保存中…' : '保存到自定义库' }}
-                  </button>
-                  <button class="preview-btn" @click="discardPreview" :disabled="saving">丢弃</button>
+                  </linshe-button>
+                  <linshe-button variant="secondary" @click="discardPreview" :disabled="saving">丢弃</linshe-button>
                 </div>
               </div>
               <TransitionGroup
@@ -84,10 +84,10 @@
                     </div>
                   </CardHeightTransition>
                   <div class="card-actions">
-                    <button v-if="!item._editing" class="mini-btn primary" @click="savePreviewItem(i)" :disabled="saving">单独入库</button>
-                    <button class="mini-btn" @click="togglePreviewEdit(i)">{{ item._editing ? '取消' : '编辑' }}</button>
-                    <button v-if="item._editing" class="mini-btn primary" @click="previewItems[i]._editing = false">完成</button>
-                    <button v-else class="mini-btn danger" @click="removePreview(i)">删除</button>
+                    <linshe-button v-if="!item._editing" variant="primary" size="sm" @click="savePreviewItem(i)" :disabled="saving">单独入库</linshe-button>
+                    <linshe-button size="sm" @click="togglePreviewEdit(i)">{{ item._editing ? '取消' : '编辑' }}</linshe-button>
+                    <linshe-button v-if="item._editing" variant="primary" size="sm" @click="previewItems[i]._editing = false">完成</linshe-button>
+                    <linshe-button v-else variant="danger" size="sm" @click="removePreview(i)">删除</linshe-button>
                   </div>
                 </div>
               </TransitionGroup>
@@ -131,7 +131,7 @@
             </div>
             <CollapseTransition :show="customOpen">
               <TransitionGroup name="custom-card" tag="div" class="card-grid">
-                <button key="add-card" class="add-card" @click="addItem">＋ 手动新增</button>
+                <div key="add-card" class="add-card" role="button" tabindex="0" @click="addItem" @keydown.enter.prevent="addItem" @keydown.space.prevent="addItem">＋ 手动新增</div>
                 <LibraryItemCard
                   v-for="item in customItems"
                   :key="item.id || item._tempKey"
@@ -158,6 +158,7 @@ import * as api from '../api/index.js'
 import LibraryItemCard from './LibraryItemCard.vue'
 import CollapseTransition from './CollapseTransition.vue'
 import CardHeightTransition from './CardHeightTransition.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -457,12 +458,6 @@ function addItem() {
 .lib-title { font-size: 17px; font-weight: 700; color: var(--text-bright, #2b2b2b); margin: 0; }
 .lib-header-right { display: flex; align-items: center; gap: 12px; }
 .lib-count { font-size: 12px; color: var(--text-secondary, #888); }
-.lib-close {
-  background: none; border: none; font-size: 18px;
-  color: var(--text-secondary, #888); cursor: pointer;
-  padding: 4px 8px; border-radius: 6px; transition: all 0.15s;
-}
-.lib-close:hover { background: rgba(0,0,0,0.05); color: var(--text-primary, #333); }
 
 .lib-body {
   flex: 1; overflow-y: auto;
@@ -516,19 +511,6 @@ function addItem() {
   0%, 100% { opacity: 0.4; transform: scale(0.97); }
   50%      { opacity: 1;   transform: scale(1); }
 }
-.gen-btn {
-  padding: 0 20px; border-radius: 12px; border: none;
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
-  background-size: 200% 200%;
-  color: #c06a5a; font-size: 13px; font-weight: 600; cursor: pointer;
-  white-space: nowrap; transition: all 0.2s;
-}
-.gen-btn:hover:not(:disabled) { animation: waterflow 1s ease-in-out infinite; box-shadow: 0 3px 20px rgba(224,123,108,0.10); }
-.gen-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-@keyframes waterflow {
-  0%, 100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
-}
 
 /* 生成预览 */
 .preview-section {
@@ -542,16 +524,6 @@ function addItem() {
 }
 .preview-title { font-size: 13px; font-weight: 600; color: #c06a5a; }
 .preview-actions { display: flex; gap: 8px; }
-.preview-btn {
-  padding: 6px 14px; border-radius: 9px; border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  background: #fff; color: var(--text-primary, #333); font-size: 12px; cursor: pointer; transition: all 0.15s;
-}
-.preview-btn:hover:not(:disabled) { border-color: var(--accent, #e07b6c); color: #c06a5a; }
-.preview-btn.primary {
-  border: none; background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
-  color: #c06a5a; font-weight: 600;
-}
-.preview-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 分组 */
 .group-section { margin-bottom: 22px; }
@@ -571,6 +543,7 @@ function addItem() {
   background: transparent; color: var(--accent, #e07b6c);
   font-size: 13px; font-family: inherit; cursor: pointer; transition: all 0.15s;
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 .add-card:hover { background: rgba(224,123,108,0.06); }
 
@@ -605,13 +578,6 @@ function addItem() {
   background: rgba(224,123,108,0.1); color: #c06a5a;
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
-.mini-btn {
-  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  background: #fff; color: var(--text-primary, #555); font-size: 12px; cursor: pointer; transition: all 0.15s;
-}
-.mini-btn:hover { border-color: var(--accent, #e07b6c); color: #c06a5a; }
-.mini-btn.primary { border: none; background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%); color: #c06a5a; font-weight: 600; }
-.mini-btn.danger:hover { border-color: var(--danger, #e05050); color: var(--danger, #e05050); }
 
 /* 编辑表单 */
 .edit-form { display: flex; flex-direction: column; gap: 8px; }

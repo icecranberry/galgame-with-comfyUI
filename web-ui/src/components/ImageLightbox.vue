@@ -122,7 +122,8 @@ function injectActionBar() {
   bar.className = mobile ? 'vel-action-row' : 'vel-action-rail'
 
   const mkBtn = (key, cls, attrs, label, onClick) => {
-    const btn = document.createElement('button')
+    const btn = document.createElement('div')
+    btn.setAttribute('role', 'button')
     for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, v)
     if (cls) btn.className = cls
     btn.innerHTML = BTN_SVGS[key] + (label != null ? `<span>${label}</span>` : '')
@@ -136,10 +137,10 @@ function injectActionBar() {
     if (props.showRegenerate) bar.appendChild(mkBtn('regen', '', { 'data-vel-regenerate': '', title: '重新生成' }, null, onRegenerate))
     if (props.showUpscale) bar.appendChild(mkBtn('ups', '', { 'data-vel-upscale': '', title: '放大细化（高清放大重绘）' }, null, onUpscale))
   } else {
-    if (props.showDownload) bar.appendChild(mkBtn('dl', 'vel-rail-btn dl', { type: 'button' }, '下载', onDownload))
-    if (props.showDelete) bar.appendChild(mkBtn('delete', 'vel-rail-btn danger', { type: 'button' }, '删除', onDelete))
-    if (props.showRegenerate) bar.appendChild(mkBtn('regen', 'vel-rail-btn regen', { type: 'button' }, '重新生成', onRegenerate))
-    if (props.showUpscale) bar.appendChild(mkBtn('ups', 'vel-rail-btn accent', { type: 'button' }, '放大细化', onUpscale))
+    if (props.showDownload) bar.appendChild(mkBtn('dl', 'vel-rail-btn dl', {}, '下载', onDownload))
+    if (props.showDelete) bar.appendChild(mkBtn('delete', 'vel-rail-btn danger', {}, '删除', onDelete))
+    if (props.showRegenerate) bar.appendChild(mkBtn('regen', 'vel-rail-btn regen', {}, '重新生成', onRegenerate))
+    if (props.showUpscale) bar.appendChild(mkBtn('ups', 'vel-rail-btn accent', {}, '放大细化', onUpscale))
   }
 
   // 插入在图片节点之前 → 层级低于图片；容器本身不带 z-index
@@ -156,7 +157,8 @@ function syncActionBar() {
   const set = (selector, busy, busyTitle, idleTitle, busyLabel, idleLabel) => {
     const btn = _actionBar.querySelector(selector)
     if (!btn) return
-    btn.disabled = busy
+    btn.classList.toggle('is-disabled', busy)
+    btn.setAttribute('aria-disabled', busy ? 'true' : 'false')
     btn.title = busy ? busyTitle : idleTitle
     const svg = btn.querySelector('svg')
     if (svg) {
@@ -172,7 +174,8 @@ function syncActionBar() {
   set('[data-vel-upscale], .vel-rail-btn.accent', upscaling.value, '放大细化中（高清重绘，可能需要几分钟）...', '放大细化（高清放大重绘）', '细化中…', '放大细化')
   const dlBtn = _actionBar.querySelector('[data-vel-download], .vel-rail-btn.dl')
   if (dlBtn) {
-    dlBtn.disabled = downloading.value
+    dlBtn.classList.toggle('is-disabled', downloading.value)
+    dlBtn.setAttribute('aria-disabled', downloading.value ? 'true' : 'false')
     dlBtn.title = downloading.value ? '下载中...' : '下载图片'
     dlBtn.querySelector('svg')?.classList.toggle('vel-dl-bounce', downloading.value)
   }
@@ -431,20 +434,21 @@ async function onDelete() {
   background: rgba(28,28,30,0.82);
   color: #d6d6d6; font-size: 13px; font-weight: 500;
   cursor: pointer; white-space: nowrap;
+  user-select: none;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.15s;
 }
-.vel-rail-btn:hover:not(:disabled) {
+.vel-rail-btn:hover:not(.is-disabled) {
   background: rgba(48,48,52,0.92);
   color: #fff;
   transform: translateX(-2px);
 }
-.vel-rail-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.vel-rail-btn.is-disabled { opacity: 0.6; cursor: not-allowed; }
 .vel-rail-btn.accent { color: #8db6f9; border-color: rgba(96,165,250,0.32); }
-.vel-rail-btn.accent:hover:not(:disabled) { color: #b3d0fc; }
+.vel-rail-btn.accent:hover:not(.is-disabled) { color: #b3d0fc; }
 .vel-rail-btn.danger { color: #f87a7a; border-color: rgba(239,68,68,0.3); }
-.vel-rail-btn.danger:hover:not(:disabled) { color: #fda4a4; }
+.vel-rail-btn.danger:hover:not(.is-disabled) { color: #fda4a4; }
 .vel-rail-btn svg { width: 17px; height: 17px; flex-shrink: 0; }
 
 /* ── 手机端：底部居中一行圆形按钮（bottom:70px，z-index 由内联样式动态设定） ── */
@@ -464,16 +468,23 @@ async function onDelete() {
   width: 40px; height: 40px; border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.2); background: rgba(45,45,45,0.88);
   color: #ccc; cursor: pointer; padding: 8px;
+  user-select: none;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   transition: background 0.2s, color 0.2s, opacity 0.2s;
 }
 .vel-action-row [data-vel-upscale] { color: #60a5fa; border-color: rgba(96,165,250,0.3); }
 .vel-action-row [data-vel-delete] { color: #ef4444; border-color: rgba(239,68,68,0.3); }
-.vel-action-row button:hover:not(:disabled) { background: rgba(60,60,60,0.92); color: #fff; }
-.vel-action-row [data-vel-upscale]:hover:not(:disabled) { color: #93c5fd; }
-.vel-action-row [data-vel-delete]:hover:not(:disabled) { color: #f87171; }
-.vel-action-row button:disabled { cursor: not-allowed; opacity: 0.7; }
+.vel-action-row [data-vel-download]:hover:not(.is-disabled),
+.vel-action-row [data-vel-delete]:hover:not(.is-disabled),
+.vel-action-row [data-vel-regenerate]:hover:not(.is-disabled),
+.vel-action-row [data-vel-upscale]:hover:not(.is-disabled) { background: rgba(60,60,60,0.92); color: #fff; }
+.vel-action-row [data-vel-upscale]:hover:not(.is-disabled) { color: #93c5fd; }
+.vel-action-row [data-vel-delete]:hover:not(.is-disabled) { color: #f87171; }
+.vel-action-row [data-vel-download].is-disabled,
+.vel-action-row [data-vel-delete].is-disabled,
+.vel-action-row [data-vel-regenerate].is-disabled,
+.vel-action-row [data-vel-upscale].is-disabled { cursor: not-allowed; opacity: 0.7; }
 .vel-action-row svg { width: 24px; height: 24px; }
 
 [data-vel-regenerate] {
@@ -482,10 +493,11 @@ async function onDelete() {
   border: 1px solid rgba(255,255,255,0.2); background: #2d2d2d;
   color: #ccc; cursor: pointer;
   padding: 10px;
+  user-select: none;
   transition: background 0.2s, color 0.2s;
 }
-[data-vel-regenerate]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #fff; }
-[data-vel-regenerate]:disabled { cursor: not-allowed; }
+[data-vel-regenerate]:hover:not(.is-disabled) { background: rgba(45,45,45,0.7); color: #fff; }
+[data-vel-regenerate].is-disabled { cursor: not-allowed; }
 
 [data-vel-download] {
   display: inline-flex; align-items: center; justify-content: center;
@@ -493,10 +505,11 @@ async function onDelete() {
   border: 1px solid rgba(255,255,255,0.2); background: #2d2d2d;
   color: #ccc; cursor: pointer;
   padding: 10px;
+  user-select: none;
   transition: background 0.2s, color 0.2s;
 }
-[data-vel-download]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #fff; }
-[data-vel-download]:disabled { cursor: not-allowed; }
+[data-vel-download]:hover:not(.is-disabled) { background: rgba(45,45,45,0.7); color: #fff; }
+[data-vel-download].is-disabled { cursor: not-allowed; }
 
 .vel-dl-bounce {
   animation: vel-dl-bounce 0.9s ease-in-out infinite;
@@ -518,10 +531,11 @@ async function onDelete() {
   border: 1px solid rgba(96,165,250,0.3); background: #2d2d2d;
   color: #60a5fa; cursor: pointer;
   padding: 10px;
+  user-select: none;
   transition: background 0.2s, color 0.2s;
 }
-[data-vel-upscale]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #93c5fd; }
-[data-vel-upscale]:disabled { cursor: not-allowed; }
+[data-vel-upscale]:hover:not(.is-disabled) { background: rgba(45,45,45,0.7); color: #93c5fd; }
+[data-vel-upscale].is-disabled { cursor: not-allowed; }
 
 .vel-ups-pulsing {
   animation: vel-ups-pulse 1.2s ease-in-out infinite;
@@ -538,10 +552,11 @@ async function onDelete() {
   border: 1px solid rgba(239,68,68,0.3); background: #2d2d2d;
   color: #ef4444; cursor: pointer;
   padding: 10px;
+  user-select: none;
   transition: background 0.2s, color 0.2s;
 }
-[data-vel-delete]:hover:not(:disabled) { background: rgba(45,45,45,0.7); color: #f87171; }
-[data-vel-delete]:disabled { cursor: not-allowed; }
+[data-vel-delete]:hover:not(.is-disabled) { background: rgba(45,45,45,0.7); color: #f87171; }
+[data-vel-delete].is-disabled { cursor: not-allowed; }
 
 .vel-del-spinning {
   animation: vel-del-spin 1s linear infinite;

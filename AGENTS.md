@@ -11,6 +11,16 @@
 
 除非任务明确要求，不要随意重做已有设计或引入新的 UI 体系。
 
+## 按钮（LinsheButton）
+
+web-ui 中所有常规按钮必须使用统一组件 `web-ui/src/components/LinsheButton.vue`，禁止写裸 `<button>` 标签或全局 button 样式。
+
+1. 引入：`import LinsheButton from '.../components/LinsheButton.vue'`，模板中写 `<linshe-button>`
+2. 按层级选 variant：`primary`（珊瑚实心，每屏至多一个主操作）/ `secondary`（白底珊瑚描边，默认）/ `danger`（红色）/ `ghost`（暖白糖纸，弱操作）/ `icon`（圆形图标钮，如弹窗关闭 ✕）/ `chip`（胶囊选择、页签，配 `:active`）/ `link`（文字链接）；尺寸用 `size="sm|md|lg"`
+3. 禁用与加载用 `:disabled` / `loading` prop，不要手写禁用样式
+4. 特殊交互元素（长按手势、动态配色、整卡热区、下拉菜单项、已有独立设计的控件）不套组件：用 `<div role="button" tabindex="0">` + 自包含样式，补齐 `cursor/text-align` 等基础属性，禁用态用 `.is-disabled` class + `aria-disabled` + 点击守卫
+5. 调整按钮风格只改 `LinsheButton.vue`，不要在各页面里覆盖组件皮肤
+
 ## LLM 输出
 
 编写或修改 LLM 生成相关的 prompt 时：

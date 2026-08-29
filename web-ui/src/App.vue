@@ -232,7 +232,7 @@ onUnmounted(() => {
   --accent-light: #f0a89a;
   --success: #52c41a;
   --warning: #faad14;
-  --danger: #ff4d4f;
+  --danger: #e25c5c;
 
   /* Glassmorphism tokens */
   --glass-bg: rgba(255, 255, 255, 0.6);
@@ -270,22 +270,8 @@ html, body { background: var(--bg-primary); }
 }
 #app { position: relative; z-index: 1; }
 
-button {
-  cursor: pointer; border: none; border-radius: 8px;
-  padding: 7px 14px; font-size: 13px; font-weight: 500;
-  transition: all 0.2s ease;
-}
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
-.btn-ghost {
-  background: rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(12px);
-  color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-}
-.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
+/* 按钮统一使用 LinsheButton 组件（web-ui/src/components/LinsheButton.vue），
+   不再提供全局 button 标签样式，避免样式污染。 */
 
 input, textarea, select {
   background: rgba(255, 255, 255, 0.9); border: 1px solid #d5d0ca;

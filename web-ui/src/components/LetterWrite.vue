@@ -32,12 +32,11 @@
 
     <!-- Actions -->
     <div class="write-actions">
-      <button class="btn btn-ghost" @click="$emit('cancel')">取消</button>
-      <button class="btn btn-primary" :disabled="!content.trim() || sending" @click="send">
+      <linshe-button variant="secondary" @click="$emit('cancel')">取消</linshe-button>
+      <linshe-button variant="primary" :disabled="!content.trim()" :loading="sending" @click="send">
         <svg v-if="!sending" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9"/></svg>
-        <span class="loading-spinner" v-if="sending"></span>
         {{ sending ? '寄送中...' : '寄出' }}
-      </button>
+      </linshe-button>
     </div>
   </div>
 </template>
@@ -46,6 +45,7 @@
 import { ref } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { getWriteFontFamily } from '../composables/useHandwritingFont.js'
+import LinsheButton from './LinsheButton.vue'
 
 const WRITE_FONT = getWriteFontFamily()
 
@@ -138,29 +138,4 @@ async function send() {
   display: flex; justify-content: flex-end; gap: 10px;
   flex-shrink: 0; padding: 0 4px;
 }
-.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 20px; border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-  transition: all 0.2s; border: none;
-}
-.btn-primary {
-  background: linear-gradient(135deg, #e07b6c, #d4695a);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(224,123,108,0.25);
-}
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(224,123,108,0.35); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-ghost {
-  background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.08);
-  color: #6a5a4a;
-}
-.btn-ghost:hover { background: rgba(0,0,0,0.06); }
-
-.loading-spinner {
-  display: inline-block; width: 14px; height: 14px;
-  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
-  border-radius: 50%; animation: spin 0.6s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -35,17 +35,17 @@
             <div class="emoji-left">
              <div class="emoji-char-picker">
               <div v-if="!isMobile" class="emoji-left-title">角色列表</div>
-                <button v-if="isMobile" class="emoji-char-trigger" type="button" aria-haspopup="listbox" :aria-expanded="charPickerOpen" @click="charPickerOpen = !charPickerOpen" @keydown.escape.prevent="charPickerOpen = false">
+                <div v-if="isMobile" class="emoji-char-trigger" role="button" tabindex="0" aria-haspopup="listbox" :aria-expanded="charPickerOpen" @click="charPickerOpen = !charPickerOpen" @keydown.enter.prevent="charPickerOpen = !charPickerOpen" @keydown.space.prevent="charPickerOpen = !charPickerOpen" @keydown.escape.prevent="charPickerOpen = false">
                   <div class="emoji-char-avatar" :style="characterAvatarStyle(selectedCharacter)">{{ selectedCharacter?.avatar_path ? '' : selectedCharacterName.charAt(0) }}</div>
                   <span class="emoji-char-trigger-meta">
                     <span class="emoji-char-trigger-name">{{ selectedCharacterName }}</span>
                     <span class="emoji-char-trigger-count">{{ selectedCountText }}</span>
                   </span>
                   <svg class="emoji-char-trigger-chevron" :class="{ open: charPickerOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                </button>
+                </div>
                 <Transition name="emoji-picker-fade">
                 <div v-show="!isMobile || charPickerOpen" class="emoji-char-layer" :class="{ open: isMobile && charPickerOpen }">
-                  <button v-if="isMobile" class="emoji-picker-scrim" type="button" tabindex="-1" aria-label="关闭角色列表" @click="charPickerOpen = false" @keydown.escape.prevent="charPickerOpen = false"></button>
+                  <div v-if="isMobile" class="emoji-picker-scrim" tabindex="-1" aria-label="关闭角色列表" @click="charPickerOpen = false" @keydown.escape.prevent="charPickerOpen = false"></div>
                   <div class="emoji-char-dropdown" role="listbox" aria-label="选择角色" @keydown.escape.prevent="charPickerOpen = false">
                     <div v-if="isMobile" class="emoji-dropdown-head">选择角色</div>
                     <div class="emoji-char-list">
@@ -87,74 +87,85 @@
                 </Transition>
               </div>
               <div class="emoji-batch-row">
-                <button
+                <div
                   class="emoji-batch-btn"
-                  :class="{ paused: batchRunning && batchPaused }"
-                  :disabled="characters.length === 0 || (batchRunning && !batchPaused) || (!batchRunning && generating)"
-                  @click="batchRunning && batchPaused ? resumeBatch() : openBatchDialog()"
+                  role="button"
+                  tabindex="0"
+                  :class="{ paused: batchRunning && batchPaused, 'is-disabled': characters.length === 0 || (batchRunning && !batchPaused) || (!batchRunning && generating) }"
+                  :aria-disabled="characters.length === 0 || (batchRunning && !batchPaused) || (!batchRunning && generating)"
+                  @click="onBatchTrigger"
+                  @keydown.enter.prevent="onBatchTrigger"
+                  @keydown.space.prevent="onBatchTrigger"
                 >
                   <span v-if="batchRunning && !batchPaused" class="emoji-spinner emoji-batch-spinner"></span>
                   {{ batchRunning && batchPaused ? '继续生成' : (batchRunning ? `生成中 ${batchIndex + 1}/${characters.length}` : '全部生成') }}
-                </button>
-                <button
+                </div>
+                <div
                   v-if="batchRunning && !batchPaused"
                   class="emoji-pause-btn"
-                  type="button"
+                  role="button"
+                  tabindex="0"
                   title="暂停全部生成"
                   @click="pauseBatch"
+                  @keydown.enter.prevent="pauseBatch"
+                  @keydown.space.prevent="pauseBatch"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <rect x="6" y="4" width="4" height="16" rx="1.2" />
                     <rect x="14" y="4" width="4" height="16" rx="1.2" />
                   </svg>
-                </button>
+                </div>
               </div>
             </div>
 
             <!-- 右侧：生成控制 + 表情包网格 -->
             <div class="emoji-right">
               <div class="emoji-toolbar-row">
-                <button class="emoji-gear" title="高级设置" @click="showAdvancedSettings = true">
+                <div class="emoji-gear" role="button" tabindex="0" title="高级设置" @click="showAdvancedSettings = true" @keydown.enter.prevent="showAdvancedSettings = true" @keydown.space.prevent="showAdvancedSettings = true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                </button>
-                <button
+                </div>
+                <div
                   class="emoji-mode-badge"
-                  type="button"
-                  :class="styleMode"
-                  :disabled="styleModeSaving"
+                  role="button"
+                  tabindex="0"
+                  :class="[styleMode, { 'is-disabled': styleModeSaving }]"
+                  :aria-disabled="styleModeSaving"
                   @click="toggleStyleMode"
+                  @keydown.enter.prevent="toggleStyleMode"
+                  @keydown.space.prevent="toggleStyleMode"
                   title="点击切换表情包风格"
-                >{{ styleMode === 'half_body' ? '半身LINE' : '猪鼻大头' }}</button>
+                >{{ styleMode === 'half_body' ? '半身LINE' : '猪鼻大头' }}</div>
                 <input
                   v-model="style"
                   class="fi emoji-style-input"
                   type="text"
                   placeholder="自定义表情包额外需求（可选，留空则不注入）"
                 />
-                <button
+                <linshe-button
                   v-if="selectedCharHasPrompts"
-                  class="btn-primary"
+                  variant="primary"
                   :disabled="generating || selectedCharId === null"
                   title="不重新提炼提示词，直接用现有提示词重新生成全部表情图片"
                   @click="regenerateAllImages"
                 >
                   {{ generating ? '生成中...' : '重新生成' }}
-                </button>
-                <button
+                </linshe-button>
+                <linshe-button
                   v-if="!selectedCharHasPrompts"
-                  class="btn-primary"
+                  variant="primary"
                   :disabled="generating || selectedCharId === null"
                   @click="generateAll"
                 >
                   {{ generating ? '生成中...' : '生成表情包' }}
-                </button>
-                <button
+                </linshe-button>
+                <linshe-button
                   v-else
-                  class="btn-ghost emoji-redo-btn"
+                  variant="secondary"
+                  class="emoji-redo-btn"
                   :disabled="generating || selectedCharId === null"
                   title="重新提炼表情提示词，并用新提示词生成全部表情图片"
                   @click="generateAll"
-                >完全重做</button>
+                >完全重做</linshe-button>
               </div>
 
               <div v-if="batchRunning" class="emoji-progress-strip" :class="{ paused: batchPaused }">
@@ -187,36 +198,44 @@
                       </span>
                     </div>
 
-                    <button
+                    <div
                       v-if="isDone(selectedCharId, key)"
                       class="emoji-card-delete"
-                      type="button"
+                      role="button"
+                      tabindex="0"
                       :title="deletingKey === selectedCharId + ':' + key ? '删除中...' : '删除'"
-                      :disabled="busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key || deletingKey === selectedCharId + ':' + key"
+                      :class="{ 'is-disabled': busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key || deletingKey === selectedCharId + ':' + key }"
+                      :aria-disabled="busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key || deletingKey === selectedCharId + ':' + key"
                       @click.stop="removeEmoji(selectedCharId, key)"
+                      @keydown.enter.prevent="removeEmoji(selectedCharId, key)"
+                      @keydown.space.prevent="removeEmoji(selectedCharId, key)"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                    </button>
+                    </div>
 
                     <template v-if="rowFor(selectedCharId, key)">
                       <div class="emoji-image-wrap">
 <img v-if="isDone(selectedCharId, key) && rowImage(selectedCharId, key)" :src="rowImage(selectedCharId, key)" class="emoji-image" loading="lazy" decoding="async" />
-                        <div v-else class="emoji-image-placeholder">+</div>
+                        <div v-else-if="!isCardLoading(selectedCharId, key)" class="emoji-image-placeholder">+</div>
                         <div v-if="isCardLoading(selectedCharId, key)" class="emoji-scan-overlay">
                           <span class="emoji-spinner"></span>
                         </div>
                       </div>
                       <div class="emoji-card-actions">
-                        <button
-                          class="btn-ghost btn-sm"
+                        <linshe-button
+                          variant="secondary"
+                          size="sm"
+                          class="btn-sm"
                           :disabled="busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key || isGenerating(selectedCharId, key)"
                           @click="openUpload(selectedCharId, key)"
-                        >上传</button>
-                        <button
-                          class="btn-ghost btn-sm"
+                        >上传</linshe-button>
+                        <linshe-button
+                          variant="secondary"
+                          size="sm"
+                          class="btn-sm"
                           :disabled="busyKey === selectedCharId + ':' + key || uploadingKey === selectedCharId + ':' + key || isGenerating(selectedCharId, key)"
                           @click="generateOneImage(selectedCharId, key)"
-                        >重新生成</button>
+                        >重新生成</linshe-button>
                       </div>
                       <div v-if="rowError(selectedCharId, key)" class="emoji-error">{{ rowError(selectedCharId, key) }}</div>
                     </template>
@@ -277,8 +296,8 @@
             <div class="advanced-section">
               <div class="advanced-label">表情包风格</div>
               <div class="emoji-style-segmented">
-                <button type="button" :class="['emoji-style-chip', { active: styleMode === 'half_body' }]" @click="styleMode = 'half_body'">半身LINE风格</button>
-                <button type="button" :class="['emoji-style-chip', { active: styleMode === 'chibi_head' }]" @click="styleMode = 'chibi_head'">猪鼻大头</button>
+                <linshe-button variant="chip" :active="styleMode === 'half_body'" @click="styleMode = 'half_body'">半身LINE风格</linshe-button>
+                <linshe-button variant="chip" :active="styleMode === 'chibi_head'" @click="styleMode = 'chibi_head'">猪鼻大头</linshe-button>
               </div>
               <div class="advanced-hint">{{ styleModeHint }}</div>
             </div>
@@ -298,8 +317,8 @@
           </div>
 
           <div class="advanced-footer">
-            <button class="btn-ghost" @click="showAdvancedSettings = false">取消</button>
-            <button class="btn-primary" :disabled="categorySaving" @click="saveAdvancedSettings">保存</button>
+            <linshe-button variant="secondary" @click="showAdvancedSettings = false">取消</linshe-button>
+            <linshe-button variant="primary" :disabled="categorySaving" @click="saveAdvancedSettings">保存</linshe-button>
           </div>
         </div>
       </div>
@@ -339,8 +358,8 @@
           </div>
 
           <div class="advanced-footer">
-            <button class="btn-ghost" @click="showBatchDialog = false">取消</button>
-            <button class="btn-primary" @click="startBatchGenerate">开始生成</button>
+            <linshe-button variant="secondary" @click="showBatchDialog = false">取消</linshe-button>
+            <linshe-button variant="primary" @click="startBatchGenerate">开始生成</linshe-button>
           </div>
         </div>
       </div>
@@ -352,6 +371,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   characters: { type: Array, default: () => [] },
@@ -616,6 +636,13 @@ function openBatchDialog() {
   if (generating.value || props.characters.length === 0) return
   batchStyle.value = style.value
   showBatchDialog.value = true
+}
+
+/** 批量生成按钮（div）统一入口：先按原 disabled 条件守卫，再按运行状态继续/打开弹窗 */
+function onBatchTrigger() {
+  if (props.characters.length === 0 || (batchRunning.value && !batchPaused.value) || (!batchRunning.value && generating.value)) return
+  if (batchRunning.value && batchPaused.value) resumeBatch()
+  else openBatchDialog()
 }
 
 function sleep(ms) {
@@ -1180,8 +1207,9 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 6px;
   transition: all 0.15s;
+  user-select: none;
 }
-.emoji-batch-btn:hover:not(:disabled) {
+.emoji-batch-btn:hover:not(.is-disabled) {
   border-style: solid;
   border-color: var(--accent);
   background: rgba(224, 123, 108, 0.08);
@@ -1192,8 +1220,8 @@ onBeforeUnmount(() => {
   background: var(--accent);
   color: #fff;
 }
-.emoji-batch-btn.paused:hover:not(:disabled) { background: var(--accent-hover); }
-.emoji-batch-btn:disabled {
+.emoji-batch-btn.paused:hover:not(.is-disabled) { background: var(--accent-hover); }
+.emoji-batch-btn.is-disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1214,7 +1242,9 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(224, 123, 108, 0.35);
   background: rgba(224, 123, 108, 0.08);
   color: var(--accent);
+  cursor: pointer;
   transition: all 0.15s;
+  user-select: none;
 }
 .emoji-pause-btn:hover {
   background: var(--accent);
@@ -1258,6 +1288,7 @@ onBeforeUnmount(() => {
   font-size: 17px;
   display: flex; align-items: center; justify-content: center;
   transition: all 0.2s ease;
+  user-select: none;
 }
 .emoji-gear:hover {
   color: var(--accent);
@@ -1276,10 +1307,11 @@ onBeforeUnmount(() => {
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
+  user-select: none;
 }
 .emoji-mode-badge.half_body { background: #FBEAE6; color: #D96A59; }
 .emoji-mode-badge.chibi_head { background: #E8F1EA; color: #5B8C6E; }
-.emoji-mode-badge:hover:not(:disabled) {
+.emoji-mode-badge:hover:not(.is-disabled) {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(125, 105, 85, 0.12);
 }
@@ -1427,17 +1459,18 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translateY(-3px);
   transition: opacity 0.16s ease, transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
 }
 .emoji-card:hover .emoji-card-delete {
   opacity: 1;
   transform: translateY(0);
 }
-.emoji-card-delete:hover:not(:disabled) {
+.emoji-card-delete:hover:not(.is-disabled) {
   background: #e07b6c;
   border-color: #e07b6c;
   color: #fff;
 }
-.emoji-card-delete:disabled {
+.emoji-card-delete.is-disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -1493,8 +1526,6 @@ onBeforeUnmount(() => {
 }
 .emoji-card-actions .btn-sm {
   flex: 1;
-  font-size: 12px;
-  padding: 5px 8px;
 }
 .emoji-error {
   font-size: 11px;
@@ -1511,19 +1542,6 @@ onBeforeUnmount(() => {
   z-index: 10;
   overflow: hidden;
   pointer-events: none;
-}
-
-.btn-sm {
-  padding: 6px 10px;
-  font-size: 12px;
-  border-radius: 8px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-}
-.btn-sm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .advanced-overlay {
@@ -1584,27 +1602,6 @@ onBeforeUnmount(() => {
   padding: 3px;
   background: #F7F2EC;
   border-radius: 10px;
-}
-.emoji-style-chip {
-  padding: 8px 6px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: #6F675F;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  text-align: center;
-  white-space: nowrap;
-}
-.emoji-style-chip:hover { color: #E07B6C; }
-.emoji-style-chip.active {
-  background: #FFFEFC;
-  color: #E07B6C;
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
 .advanced-hint {
   font-size: 12px;
@@ -1696,6 +1693,7 @@ onBeforeUnmount(() => {
     font-family: inherit;
     text-align: left;
     cursor: pointer;
+    user-select: none;
   }
   .emoji-char-trigger-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .emoji-char-trigger-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1751,8 +1749,7 @@ onBeforeUnmount(() => {
   .emoji-gear { width: 32px; height: 32px; }
   .emoji-mode-badge { padding: 8px 8px; font-size: 11px; }
   .emoji-style-input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 12px; }
-  .emoji-toolbar-row .btn-primary { flex: 0 0 auto; min-width: 76px; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
-  .emoji-toolbar-row .emoji-redo-btn { flex: 0 0 auto; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  .emoji-toolbar-row .emoji-redo-btn { flex: 0 0 auto; }
   .emoji-progress-strip { padding: 6px 10px; font-size: 12px; }
   .emoji-char-section {
     -webkit-overflow-scrolling: touch;
@@ -1775,8 +1772,6 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
-    padding: 5px 6px;
   }
 
   .emoji-picker-fade-enter-active,

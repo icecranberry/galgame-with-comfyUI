@@ -4,12 +4,12 @@
     <div class="avpicker-panel">
       <div class="avpicker-header">
         <span>{{ title }}</span>
-        <button class="avpicker-close" :disabled="isGenerating" @click="tryClose">&times;</button>
+        <linshe-button variant="icon" :disabled="isGenerating" @click="tryClose">&times;</linshe-button>
       </div>
       <div v-if="showRecentTab || showGenerateTab" class="avpicker-tabs">
-        <button :class="['avtab', { active: avTab === 'upload' }]" :disabled="isGenerating" @click="avTab = 'upload'">上传图片</button>
-        <button v-if="showRecentTab" :class="['avtab', { active: avTab === 'recent' }]" :disabled="isGenerating" @click="switchToRecent">最近图片</button>
-        <button v-if="showGenerateTab" :class="['avtab', { active: avTab === 'generate' }]" :disabled="isGenerating" @click="avTab = 'generate'">生成头像</button>
+        <div role="button" tabindex="0" :class="['avtab', { active: avTab === 'upload', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && (avTab = 'upload')" @keydown.enter.prevent="!isGenerating && (avTab = 'upload')" @keydown.space.prevent="!isGenerating && (avTab = 'upload')">上传图片</div>
+        <div v-if="showRecentTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'recent', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && switchToRecent()" @keydown.enter.prevent="!isGenerating && switchToRecent()" @keydown.space.prevent="!isGenerating && switchToRecent()">最近图片</div>
+        <div v-if="showGenerateTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'generate', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && (avTab = 'generate')" @keydown.enter.prevent="!isGenerating && (avTab = 'generate')" @keydown.space.prevent="!isGenerating && (avTab = 'generate')">生成头像</div>
       </div>
 
       <!-- 上传 tab -->
@@ -43,16 +43,16 @@
         <div v-if="genError" class="gen-error">
           <div class="gen-error-icon">⚠️</div>
           <div class="gen-error-text">{{ genError }}</div>
-          <button class="gen-retry-btn" @click="startGenerate">重新生成</button>
+          <linshe-button variant="secondary" class="gen-retry-btn" @click="startGenerate">重新生成</linshe-button>
         </div>
 
         <div v-else-if="genStatus === 'idle'" class="gen-idle">
           <div class="gen-label">生成角色头像</div>
           <div class="gen-desc">给角色拍个大头贴⭐~</div>
           <div class="gen-meta">尺寸 1024×1024 · 约需等待30秒</div>
-          <button class="gen-start-btn" @click="startGenerate" :disabled="!characterId">
+          <linshe-button variant="primary" class="gen-start-btn" @click="startGenerate" :disabled="!characterId">
             {{ characterId ? '开始生成' : '缺少角色数据' }}
-          </button>
+          </linshe-button>
         </div>
 
         <div v-else-if="genStatus === 'generating'" class="gen-running">
@@ -72,7 +72,7 @@
     <div class="crop-panel">
       <div class="crop-header">
         <span>裁剪头像 — 拖拽移动图片、滚轮缩放</span>
-        <button class="crop-close" @click="cancelCrop">&times;</button>
+        <linshe-button variant="icon" @click="cancelCrop">&times;</linshe-button>
       </div>
       <div class="crop-body">
         <canvas ref="cropCanvas" class="crop-canvas"
@@ -92,8 +92,8 @@
         </div>
       </div>
       <div class="crop-actions">
-        <button class="btn-cancel" @click="regenerateAvatar" :disabled="isGenerating">重新生成</button>
-        <button class="btn-primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</button>
+        <linshe-button variant="secondary" @click="regenerateAvatar" :disabled="isGenerating">重新生成</linshe-button>
+        <linshe-button variant="primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</linshe-button>
       </div>
     </div>
   </div>
@@ -102,6 +102,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   title: { type: String, default: '选择头像' },
@@ -458,14 +459,11 @@ async function saveCrop() {
 
 .avpicker-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .avpicker-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
-.avpicker-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.avpicker-close:hover:not(:disabled) { color:var(--text-bright); background:rgba(0,0,0,0.06); }
-.avpicker-close:disabled { opacity:0.3; cursor:not-allowed; }
 
 .avpicker-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.2); }
-.avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; }
-.avtab:hover:not(:disabled) { color:var(--text-bright); }
-.avtab:disabled { opacity:0.35; cursor:not-allowed; }
+.avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; font-weight:500; font-family:inherit; text-align:center; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; user-select:none; }
+.avtab:hover:not(.is-disabled) { color:var(--text-bright); }
+.avtab.is-disabled { opacity:0.35; cursor:not-allowed; }
 .avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
 .avtab-body { padding:16px; overflow-y:auto; max-height:380px; }
@@ -499,8 +497,6 @@ async function saveCrop() {
 }
 .crop-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .crop-header span { font-size:14px; font-weight:600; color:var(--text-bright); }
-.crop-close { width:28px; height:28px; border-radius:6px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.crop-close:hover { color:var(--text-bright); background:rgba(0,0,0,0.06); }
 
 .crop-body { display:flex; gap:20px; padding:20px; align-items:flex-start; }
 .crop-canvas { display:block; border-radius:8px; cursor:grab; max-width:400px; }
@@ -511,11 +507,6 @@ async function saveCrop() {
 .crop-zoom-info { font-size:12px; color:var(--text-secondary); }
 
 .crop-actions { padding:14px 20px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-.btn-cancel { padding:8px 18px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); font-size:13px; cursor:pointer; }
-.btn-cancel:hover { background:var(--bg-hover); }
-.btn-primary { background:var(--accent); color:#fff; padding:8px 18px; border-radius:6px; border:none; font-size:13px; cursor:pointer; }
-.btn-primary:hover:not(:disabled) { background:var(--accent-hover); }
-.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
 
 /* ── 生成头像 Tab ── */
 .gen-idle {
@@ -529,20 +520,7 @@ async function saveCrop() {
 .gen-label { font-size: 15px; font-weight: 600; color: var(--text-bright); }
 .gen-desc { font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.5; }
 .gen-meta { font-size: 12px; color: var(--text-muted, #999); }
-.gen-start-btn {
-  margin-top: 12px;
-  padding: 10px 28px;
-  border-radius: 8px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.gen-start-btn:hover:not(:disabled) { background: var(--accent-hover); }
-.gen-start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gen-start-btn { margin-top: 12px; }
 
 /* 生成中动画 */
 .gen-running {
@@ -579,16 +557,5 @@ async function saveCrop() {
 }
 .gen-error-icon { font-size: 36px; }
 .gen-error-text { font-size: 13px; color: #e07b6c; text-align: center; }
-.gen-retry-btn {
-  margin-top: 8px;
-  padding: 8px 20px;
-  border-radius: 6px;
-  border: 1px solid var(--accent);
-  background: transparent;
-  color: var(--accent);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.gen-retry-btn:hover { background: rgba(var(--accent-rgb, 100, 140, 255), 0.1); }
+.gen-retry-btn { margin-top: 8px; }
 </style>

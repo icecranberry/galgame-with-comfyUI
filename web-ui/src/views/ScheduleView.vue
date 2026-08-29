@@ -15,16 +15,20 @@
                   placeholder="搜索..."
                   @keydown.esc="searchQuery = ''"
                 />
-                <button
+                <div
                   class="btn-reset"
-                  :class="{ 'is-resetting': store.resetTask?.processing }"
+                  :class="{ 'is-resetting': store.resetTask?.processing, 'is-disabled': store.resetTask?.processing && !store.resetTask?.backgrounded }"
+                  role="button"
+                  tabindex="0"
+                  :aria-disabled="store.resetTask?.processing && !store.resetTask?.backgrounded"
                   @click.stop="handleResetClick"
-                  :disabled="store.resetTask?.processing && !store.resetTask?.backgrounded"
+                  @keydown.enter.prevent="handleResetClick"
+                  @keydown.space.prevent="handleResetClick"
                 >
                   <svg v-if="!store.resetTask?.processing" class="btn-reset-icon" viewBox="0 0 1024 1024" width="16" height="16"><path d="M1017.6 595.2c19.2-134.4-6.4-256-89.6-364.8C832 89.6 588.8-19.2 480 25.6c6.4 25.6 6.4 44.8 12.8 70.4 262.4 0 428.8 185.6 448 371.2 19.2 179.2-89.6 371.2-249.6 428.8v-179.2c0-25.6-12.8-38.4-32-38.4-38.4 0-51.2 12.8-38.4 57.6 12.8 70.4 6.4 140.8 0 211.2 0 38.4 19.2 32 64 32h160c83.2 0 96 12.8 96-32 0-25.6-6.4-38.4-38.4-38.4H832c96-76.8 166.4-179.2 185.6-313.6zM76.8 512c0-153.6 115.2-345.6 224-364.8v153.6c0 32 6.4 38.4 38.4 38.4s38.4-6.4 38.4-38.4V64c0-32-6.4-38.4-38.4-38.4H102.4C70.4 25.6 64 32 64 64s0 38.4 38.4 38.4h102.4c-230.4 185.6-243.2 467.2-128 659.2 108.8 185.6 326.4 256 460.8 236.8-6.4-25.6-6.4-44.8-12.8-70.4-275.2 6.4-448-217.6-448-416z"/></svg>
                   <svg v-else class="btn-reset-icon spinning" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                   <span>{{ store.resetTask?.processing ? (store.resetTask?.backgrounded ? `重置中 ${store.resetTask.current}/${store.resetTask.total}` : '重置中...') : '全部重置' }}</span>
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -52,7 +56,7 @@
           <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <p>今天还没有角色日程</p>
           <span class="ph-hint">生成日程后，这里会显示每位角色的今日动向。</span>
-          <button class="btn-glass" @click="regenerateAll">为所有角色生成日程</button>
+          <linshe-button class="btn-glass" variant="secondary" @click="regenerateAll">为所有角色生成日程</linshe-button>
         </div>
       </div>
 
@@ -151,7 +155,7 @@
                 </div>
               </template>
               <template v-else-if="peekError">
-                <div class="pk-err"><p>生成失败</p><span>{{ peekError }}</span><button class="btn-glass" @click="retryPeek">重试</button></div>
+                <div class="pk-err"><p>生成失败</p><span>{{ peekError }}</span><linshe-button class="btn-glass" variant="secondary" @click="retryPeek">重试</linshe-button></div>
               </template>
               <div v-else-if="peekImage" class="pk-shutter-stage">
                 <div class="pk-shutter-flash"></div>
@@ -178,13 +182,13 @@
                 <div><b>{{ peekAct?.activity || '瞄一眼' }}</b><span v-if="peekAct?.location">{{ peekAct.location }}</span></div>
               </div>
               <div class="pk-actions">
-                <button v-if="peekImage && !peekLoading" class="pk-retake-btn" :disabled="peekBusy" @click="retakePeek">
+                <linshe-button v-if="peekImage && !peekLoading" class="pk-retake-btn" variant="secondary" size="sm" :disabled="peekBusy" @click="retakePeek">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="23,4 23,10 17,10" />
                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                   </svg>
                   <span class="pk-retake-label">{{ peekBusy ? '拍摄中...' : '再拍一张' }}</span>
-                </button>
+                </linshe-button>
               </div>
             </div>
           </div>
@@ -227,9 +231,9 @@
                 <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
               </svg>
               <span>为 {{ detailChar?.display_name || '...' }} 编排日程</span>
-              <button class="reset-header-clear" title="清空日程" @click="onClearFromModal">
+              <linshe-button class="reset-header-clear" variant="icon" size="sm" tone="danger" title="清空日程" @click="onClearFromModal">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
+              </linshe-button>
             </div>
             <div class="reset-dialog-desc">
               <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则正常随机规划。</p>
@@ -243,8 +247,8 @@
               ></textarea>
             </div>
             <div class="reset-dialog-actions">
-              <button class="reset-btn-bg" style="flex: 1; border-style: solid;" @click="confirmRegenerateRandom">随机日程规划</button>
-              <button class="reset-btn-confirm" @click="confirmRegenerateWithDirection" :disabled="!regenerateDirection.trim()">按此方向生成</button>
+              <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmRegenerateRandom">随机日程规划</linshe-button>
+              <linshe-button class="reset-btn-confirm" variant="primary" @click="confirmRegenerateWithDirection" :disabled="!regenerateDirection.trim()">按此方向生成</linshe-button>
             </div>
           </div>
         </div>
@@ -275,8 +279,8 @@
               ></textarea>
             </div>
             <div class="reset-dialog-actions">
-              <button class="reset-btn-bg" style="flex: 1; border-style: solid;" @click="confirmResetRandom">随机日程规划</button>
-              <button class="reset-btn-confirm" @click="confirmResetAll" :disabled="!resetDirection.trim()">按此方向生成</button>
+              <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmResetRandom">随机日程规划</linshe-button>
+              <linshe-button class="reset-btn-confirm" variant="primary" @click="confirmResetAll" :disabled="!resetDirection.trim()">按此方向生成</linshe-button>
             </div>
           </div>
         </div>
@@ -331,11 +335,11 @@
             <!-- 操作按钮 -->
             <div class="reset-dialog-actions">
               <template v-if="store.resetTask.phase === 'running'">
-                <button class="reset-btn-cancel" @click="cancelReset" :disabled="resetCancelling">{{ resetCancelling ? '取消中...' : '取消重置' }}</button>
-                <button class="reset-btn-bg" @click="dismissResetProgress" :disabled="resetCancelling">后台静默生成</button>
+                <linshe-button class="reset-btn-cancel" variant="secondary" @click="cancelReset" :disabled="resetCancelling">{{ resetCancelling ? '取消中...' : '取消重置' }}</linshe-button>
+                <linshe-button class="reset-btn-bg" variant="secondary" @click="dismissResetProgress" :disabled="resetCancelling">后台静默生成</linshe-button>
               </template>
               <template v-else>
-                <button class="reset-btn-confirm" @click="finishReset">完成</button>
+                <linshe-button class="reset-btn-confirm" variant="primary" @click="finishReset">完成</linshe-button>
               </template>
             </div>
           </div>
@@ -355,6 +359,7 @@ import * as api from '../api/index.js'
 import CharacterStatusCard from '../components/CharacterStatusCard.vue'
 import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 
 const store = useScheduleStore()
 const settingsStore = useSettingsStore()
@@ -1017,6 +1022,8 @@ async function regenerateAll() {
 }
 
 function handleResetClick() {
+  // 对应 is-disabled 态：重置进行中且未转后台时不可点击
+  if (store.resetTask?.processing && !store.resetTask?.backgrounded) return
   // 如果后台有正在进行的重置任务，点击重新打开进度弹窗
   if (store.resetTask?.backgrounded) {
     store.showResetTask()
@@ -1144,9 +1151,10 @@ function finishReset() {
   cursor: pointer;
   transition: all 0.3s ease;
   white-space: nowrap;
+  user-select: none;
 }
 .btn-reset-icon { flex-shrink: 0; fill: currentColor; }
-.btn-reset:hover:not(:disabled) {
+.btn-reset:hover:not(.is-disabled) {
   border: 2px solid rgba(224, 123, 108, 0.55);
   box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
   color: #a85545;
@@ -1156,7 +1164,7 @@ function finishReset() {
   0%, 100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
 }
-.btn-reset:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-reset.is-disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-reset.is-resetting {
   border-color: rgba(224, 123, 108, 0.35);
   color: var(--accent);
@@ -1186,12 +1194,8 @@ function finishReset() {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .btn-glass {
-  display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
-  padding: 8px 18px; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--glass-bg); color: var(--text-secondary);
-  font-size: 0.85rem; cursor: pointer; transition: 0.15s;
+  margin-top: 6px;
 }
-.btn-glass:hover { background: var(--bg-hover); color: var(--text-bright); }
 
 /* ═══════════════════════════════════════════
    扫描特效侧边栏（仅生成时显示）
@@ -1482,21 +1486,14 @@ function finishReset() {
   font-size: 16px; font-weight: 600; color: var(--accent);
 }
 .pk-err { text-align: center; padding: 36px; }
-.pk-err p { color: #ff4d4f; margin: 0 0 4px; font-size: 0.9rem; }
+.pk-err p { color: var(--danger); margin: 0 0 4px; font-size: 0.9rem; }
 .pk-err span { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 12px; }
 .pk-img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
 .pk-retake-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 16px; border: 1px solid rgba(224,123,108,0.2); border-radius: 999px;
-  background: transparent; color: var(--accent);
-  font-size: 0.8rem; cursor: pointer; transition: 0.15s;
+  gap: 5px;
+  padding: 6px 16px;
   white-space: nowrap;
 }
-.pk-retake-btn:hover:not(:disabled) {
-  background: rgba(224,123,108,0.06);
-  border-color: rgba(224,123,108,0.4);
-}
-.pk-retake-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .modal-enter-active, .modal-leave-active { transition: opacity 0.2s; }
 .modal-enter-active .peek-film, .modal-leave-active .peek-film { transition: transform 0.2s cubic-bezier(0.4,0,0.2,1); }
@@ -1558,36 +1555,17 @@ function finishReset() {
   border-top: 1px solid var(--glass-border);
 }
 .reset-btn-cancel {
-  flex: 1; padding: 10px 0;
-  border: 1px solid var(--border); border-radius: 12px;
-  background: var(--glass-bg); color: var(--text-secondary);
-  font-size: 0.88rem; cursor: pointer; transition: 0.15s;
+  flex: 1;
 }
-.reset-btn-cancel:hover { background: var(--bg-hover); color: var(--text-bright); }
 .reset-btn-confirm {
-  flex: 1; padding: 10px 0;
-  border: none; border-radius: 12px;
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
-  background-size: 200% 200%;
-  color: #c06a5a;
-  font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: 0.3s;
-}
-.reset-btn-confirm:hover {
-  animation: waterflow 1s ease-in-out infinite;
-  box-shadow: 0 3px 20px rgba(224,123,108,0.10);
+  flex: 1;
 }
 .reset-btn-bg {
-  flex: 1; padding: 10px 0;
-  border: 1px dashed var(--border); border-radius: 12px;
-  background: transparent; color: var(--text-secondary);
-  font-size: 0.85rem; cursor: pointer; transition: 0.15s;
+  flex: 1;
 }
-.reset-btn-bg:hover { border-color: var(--accent); color: var(--accent); }
 .reset-header-clear {
-  margin-left: auto; background: none; border: none; cursor: pointer;
-  color: #e8453c; opacity: 0.5; transition: 0.15s; padding: 4px; border-radius: 4px; line-height: 0;
+  margin-left: auto;
 }
-.reset-header-clear:hover { opacity: 1; background: rgba(232,69,60,0.08); }
 
 /* 进度条 */
 .reset-progress-bar-wrap {
@@ -1636,7 +1614,7 @@ function finishReset() {
   display: flex; gap: 8px; padding: 3px 0;
   font-size: 0.78rem;
 }
-.reset-error-name { color: #ff4d4f; flex-shrink: 0; font-weight: 600; }
+.reset-error-name { color: var(--danger); flex-shrink: 0; font-weight: 600; }
 .reset-error-msg { color: var(--text-secondary); word-break: break-all; }
 
 /* ── Responsive ── */

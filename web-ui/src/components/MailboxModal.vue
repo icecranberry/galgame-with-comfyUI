@@ -16,8 +16,8 @@
               </div>
             </div>
             <div class="header-actions">
-              <button class="btn-compose" @click="startWrite">开始写一封信</button>
-              <button class="btn-close" @click="close" title="关闭">&times;</button>
+              <linshe-button variant="primary" @click="startWrite">开始写一封信</linshe-button>
+              <linshe-button variant="icon" @click="close" title="关闭">&times;</linshe-button>
             </div>
           </div>
 
@@ -32,7 +32,7 @@
                 </svg>
                 <p class="sidebar-empty-title">还没有任何通信</p>
                 <p class="sidebar-empty-hint">写下第一封信吧</p>
-                <button class="btn-compose" @click="startWrite">开始写信</button>
+                <linshe-button variant="primary" @click="startWrite">开始写信</linshe-button>
               </div>
 
               <div v-if="store.loading && store.letters.length === 0" class="loading-state">
@@ -111,7 +111,7 @@
                         <div class="detail-header-meta" :class="statusTimeClass(activeLetter)">{{ statusTimeText(activeLetter) }}</div>
                       </div>
                     </div>
-                    <button class="btn-delete" @click="onDeleteLetter(activeLetter.id)">删除信件</button>
+                    <linshe-button variant="danger" @click="onDeleteLetter(activeLetter.id)">删除信件</linshe-button>
                   </div>
 
                   <!-- Reading card -->
@@ -169,7 +169,7 @@
               <div class="char-picker-dialog">
                 <div class="char-picker-header">
                   <span>选择收信人</span>
-                  <button class="btn-close" @click="showCharPicker = false">&times;</button>
+                  <linshe-button variant="icon" @click="showCharPicker = false">&times;</linshe-button>
                 </div>
                 <div class="char-grid">
                   <div
@@ -213,6 +213,7 @@ import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily }
 import LetterViewer from './LetterViewer.vue'
 import LetterWrite from './LetterWrite.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -438,23 +439,6 @@ async function onDeleteLetter(id) {
 .header-subtitle { margin: 1px 0 0; font-size: 11px; color: #aaa; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 
-.btn-compose {
-  display: inline-flex; align-items: center;
-  padding: 6px 16px; border-radius: 8px;
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  background: #f0ebe4; color: #5a4a3a;
-  border: 1px solid rgba(0,0,0,0.06);
-  transition: all 0.15s ease;
-}
-.btn-compose:hover { background: #e6dfd6; }
-
-.btn-close {
-  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.06); border-radius: 7px;
-  color: #8a7a6a; font-size: 16px; cursor: pointer; transition: all 0.15s;
-}
-.btn-close:hover { background: rgba(0,0,0,0.06); color: #4a3a2a; }
-
 /* ── Body ── */
 .mailbox-body { display: flex; flex: 1; min-height: 0; }
 .mailbox-body *::-webkit-scrollbar { display: none; }
@@ -603,15 +587,6 @@ async function onDeleteLetter(id) {
 .detail-header-meta.status-completed { color: #7FA88A; }
 .detail-header-meta.status-pending   { color: #B89A68; }
 .detail-header-meta.status-processing { color: #7D98B8; }
-
-.btn-delete {
-  background: none; border: none;
-  color: #c0392b; font-size: 12px; cursor: pointer;
-  padding: 4px 8px; border-radius: 6px;
-  transition: background 0.15s;
-  white-space: nowrap; flex-shrink: 0;
-}
-.btn-delete:hover { background: rgba(192,57,43,0.06); }
 
 /* ── Reading Card ── */
 .reading-card {

@@ -1,7 +1,7 @@
 <template>
   <div class="memory-page">
     <header class="page-header">
-      <button class="back" aria-label="返回系统设置" @click="router.push('/settings')">‹</button>
+      <linshe-button class="back" variant="icon" size="lg" aria-label="返回系统设置" @click="router.push('/settings')">‹</linshe-button>
       <div>
         <h2>聊天记忆</h2>
         <p>角色会整理你们聊过的重要内容，并在之后的对话中自然想起来。</p>
@@ -54,7 +54,7 @@
               <label>最长等待时间（毫秒）<input v-model.number="form.embedding.timeoutMs" type="number" min="1000"></label>
             </div>
             <label>高级请求设置（JSON）<textarea v-model="embeddingHeaders" rows="3"></textarea></label>
-            <button class="ghost" :disabled="testingEmbedding" @click="testEmbedding">{{ testingEmbedding ? '测试中…' : '测试智能匹配' }}</button>
+            <linshe-button variant="secondary" :disabled="testingEmbedding" @click="testEmbedding">{{ testingEmbedding ? '测试中…' : '测试智能匹配' }}</linshe-button>
             </div>
           </CollapseTransition>
           <p v-if="!form.embedding.enabled" class="disabled-note">当前使用系统默认模型；默认服务当天失败 5 次后，会自动切换到本地模型。</p>
@@ -84,7 +84,7 @@
               <label>最长等待时间（毫秒）<input v-model.number="form.reranker.timeoutMs" type="number" min="1000"></label>
             </div>
             <label>高级请求设置（JSON）<textarea v-model="rerankerHeaders" rows="3"></textarea></label>
-            <button class="ghost" :disabled="testingReranker" @click="testReranker">{{ testingReranker ? '测试中…' : '测试结果优化' }}</button>
+            <linshe-button variant="secondary" :disabled="testingReranker" @click="testReranker">{{ testingReranker ? '测试中…' : '测试结果优化' }}</linshe-button>
             </div>
           </CollapseTransition>
           <p v-if="!form.reranker.enabled" class="disabled-note">当前使用系统默认排序模型；默认服务当天失败 5 次后，会自动切换到本地模型。</p>
@@ -114,9 +114,9 @@
       </section>
 
       <div class="actions">
-        <button class="ghost" :disabled="maintaining" @click="retryFailed">重新处理失败项</button>
-        <button class="ghost" :disabled="maintaining" @click="reindex">重新整理全部记忆</button>
-        <button class="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+        <linshe-button variant="secondary" :disabled="maintaining" @click="retryFailed">重新处理失败项</linshe-button>
+        <linshe-button variant="secondary" :disabled="maintaining" @click="reindex">重新整理全部记忆</linshe-button>
+        <linshe-button variant="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</linshe-button>
       </div>
         </div>
       </details>
@@ -127,7 +127,7 @@
             <h3>记忆管理</h3>
             <p>查看角色保存的聊天记忆，也可以删除不希望角色继续记住的内容。</p>
           </div>
-          <button v-if="memoriesQueried" class="ghost compact" :disabled="memoriesLoading" @click="loadMemories">刷新</button>
+          <linshe-button v-if="memoriesQueried" variant="secondary" size="sm" :disabled="memoriesLoading" @click="loadMemories">刷新</linshe-button>
         </div>
         <div class="memory-filters">
           <label>选择角色
@@ -157,7 +157,7 @@
               @update:model-value="selectMemoryStatus"
             />
           </label>
-          <button class="primary filter-button" :disabled="memoriesLoading" @click="queryMemories">{{ memoriesLoading ? '查询中…' : '查询记忆' }}</button>
+          <linshe-button class="filter-button" variant="primary" :disabled="memoriesLoading" @click="queryMemories">{{ memoriesLoading ? '查询中…' : '查询记忆' }}</linshe-button>
         </div>
 
         <Transition name="fade" mode="out-in">
@@ -186,17 +186,17 @@
                 <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
               </div>
             </div>
-            <button v-if="item.status !== 'deleted'" class="danger-link" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
+            <linshe-button v-if="item.status !== 'deleted'" class="danger-link" variant="link" tone="danger" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
               {{ deletingMemoryId === item.memory_id ? '删除中…' : '删除' }}
-            </button>
+            </linshe-button>
           </article>
         </TransitionGroup>
         </Transition>
         <div v-if="memoriesQueried" class="pagination">
           <span>共 {{ memoryTotal }} 条 · 第 {{ memoryPage }} / {{ memoryPageCount }} 页</span>
           <div>
-            <button class="ghost compact" :disabled="memoryPage <= 1 || memoriesLoading" @click="changeMemoryPage(-1)">上一页</button>
-            <button class="ghost compact" :disabled="memoryPage >= memoryPageCount || memoriesLoading" @click="changeMemoryPage(1)">下一页</button>
+            <linshe-button variant="secondary" size="sm" :disabled="memoryPage <= 1 || memoriesLoading" @click="changeMemoryPage(-1)">上一页</linshe-button>
+            <linshe-button variant="secondary" size="sm" :disabled="memoryPage >= memoryPageCount || memoriesLoading" @click="changeMemoryPage(1)">下一页</linshe-button>
           </div>
         </div>
       </section>
@@ -217,7 +217,7 @@
                 aria-label="选择或搜索角色"
                 searchable
               />
-              <button class="primary" :disabled="recallLoading || !recallQuery" @click="runRecallTest">{{ recallLoading ? '查找中…' : '开始测试' }}</button>
+              <linshe-button class="recall-go-btn" variant="primary" :disabled="recallLoading || !recallQuery" @click="runRecallTest">{{ recallLoading ? '查找中…' : '开始测试' }}</linshe-button>
             </div>
           </label>
           <Transition name="fade" mode="out-in">
@@ -234,7 +234,7 @@
         <section class="card index-jobs">
           <div class="manager-heading">
             <div><h3>最近处理记录</h3><p>显示最近 30 条记忆整理和删除记录。</p></div>
-            <button class="ghost compact" :disabled="jobsLoading" @click="loadIndexJobs">刷新</button>
+            <linshe-button variant="secondary" size="sm" :disabled="jobsLoading" @click="loadIndexJobs">刷新</linshe-button>
           </div>
           <div v-if="jobsLoading" class="inline-state">正在加载记录…</div>
           <div v-else-if="indexJobs.length === 0" class="inline-state">暂无处理记录。</div>
@@ -275,6 +275,7 @@ import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 import {
   deleteMemoryFragment,
   getMemoryConfig,
@@ -642,7 +643,7 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs(
 .page-header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
 .page-header h2 { margin: 0 0 4px; font-size: 24px; }
 .page-header p, .card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
-.back { width: 38px; height: 38px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); color: var(--text-bright); font-size: 28px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.page-header .back { font-size: 26px; }
 .mode-badge { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .mode-badge.text { background: rgba(85, 130, 180, .14); color: #4677a8; }
 .mode-badge.hybrid { background: rgba(224, 123, 108, .16); color: var(--accent); }
@@ -700,15 +701,14 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 11px; }
 .memory-index-state { margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
 .index-error { color: #c34f4f; display: inline-block; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.danger-link { flex-shrink: 0; padding: 6px 8px; border: 0; background: transparent; color: #c34f4f; cursor: pointer; font-size: 12px; }
+.danger-link { flex-shrink: 0; padding: 6px 8px; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; color: var(--text-secondary); font-size: 12px; }
 .pagination > div { display: flex; gap: 8px; }
-button.compact { padding: 7px 11px; font-size: 12px; }
 .management-grid { position: relative; z-index: 20; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
 .recall-tester { position: relative; z-index: 2; }
 .recall-inline { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .recall-inline .memory-select { flex: 1; margin-top: 0; }
-.recall-inline .primary { flex-shrink: 0; height: 38px; }
+.recall-go-btn { flex-shrink: 0; height: 38px; }
 .index-jobs { position: relative; z-index: 1; }
 .recall-results, .job-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: 420px; overflow-y: auto; position: relative; }
 .recall-item, .job-item { padding: 11px 12px; border-radius: 10px; background: rgba(255,255,255,.38); border: 1px solid rgba(125, 105, 85, .12); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -732,10 +732,6 @@ button.compact { padding: 7px 11px; font-size: 12px; }
 .job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.processing { color: #367aa3; }.job-status.failed { color: #c34f4f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
-button.primary, button.ghost { border-radius: 9px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
-button.primary { border: 0; background: var(--accent); color: white; }
-button.ghost { border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-bright); }
-button:disabled { opacity: .55; cursor: default; }
 
 /* ── 列表/状态切换过渡 ── */
 .fade-enter-active, .fade-leave-active { transition: opacity .25s ease; }

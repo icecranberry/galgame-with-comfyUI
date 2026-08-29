@@ -30,9 +30,9 @@
     </CardHeightTransition>
 
     <div class="card-actions">
-      <button class="mini-btn" @click="onToggleEdit">{{ item._editing ? '取消' : '编辑' }}</button>
-      <button v-if="item._editing" class="mini-btn primary" @click="emit('save', item)">保存</button>
-      <button v-else class="mini-btn danger" @click="emit('remove', item)">删除</button>
+      <linshe-button size="sm" @click="onToggleEdit">{{ item._editing ? '取消' : '编辑' }}</linshe-button>
+      <linshe-button v-if="item._editing" variant="primary" size="sm" @click="emit('save', item)">保存</linshe-button>
+      <linshe-button v-else variant="danger" size="sm" @click="emit('remove', item)">删除</linshe-button>
     </div>
   </div>
 </template>
@@ -40,6 +40,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import CardHeightTransition from './CardHeightTransition.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -89,13 +90,6 @@ function onToggleEdit() {
   background: rgba(224,123,108,0.1); color: #c06a5a;
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
-.mini-btn {
-  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  background: #fff; color: var(--text-primary, #555); font-size: 12px; cursor: pointer; transition: all 0.15s;
-}
-.mini-btn:hover { border-color: var(--accent, #e07b6c); color: #c06a5a; }
-.mini-btn.primary { border: none; background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%); color: #c06a5a; font-weight: 600; }
-.mini-btn.danger:hover { border-color: var(--danger, #e05050); color: var(--danger, #e05050); }
 .edit-form { display: flex; flex-direction: column; gap: 8px; }
 .edit-field { display: flex; flex-direction: column; gap: 4px; }
 .edit-label { font-size: 11px; color: var(--text-secondary, #888); }

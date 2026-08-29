@@ -19,10 +19,22 @@
       >
       <svg class="dds-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
-    <button v-else class="dds-trigger" :aria-label="ariaLabel || placeholder" :aria-expanded="open" aria-haspopup="listbox" @click="toggle" @keydown="onKey" type="button">
+    <div
+      v-else
+      class="dds-trigger"
+      role="combobox"
+      tabindex="0"
+      :aria-label="ariaLabel || placeholder"
+      :aria-expanded="open"
+      aria-haspopup="listbox"
+      @click="toggle"
+      @keydown="onKey"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
+    >
       <span class="dds-label" :class="{ placeholder: !selectedLabel }">{{ selectedLabel || placeholder }}</span>
       <svg class="dds-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
+    </div>
     <Teleport to="body">
       <Transition name="dds-drop">
         <div
@@ -34,21 +46,21 @@
           role="listbox"
           @click.stop
         >
-          <button
+          <div
             v-for="(opt, index) in visibleOptions"
             :key="opt.value"
             class="dds-option"
             :class="{ active: modelValue === opt.value, highlighted: inputMode && activeIndex === index }"
             role="option"
+            tabindex="-1"
             :aria-selected="modelValue === opt.value"
             :title="opt.label"
             @mouseenter="activeIndex = index"
             @click="select(opt.value)"
-            type="button"
           >
             <span>{{ opt.label }}</span>
             <svg v-if="modelValue === opt.value" class="dds-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </button>
+          </div>
           <div v-if="visibleOptions.length === 0" class="dds-empty">没有匹配的选项</div>
         </div>
       </Transition>
@@ -287,9 +299,9 @@ defineExpose({ open: openPanel })
 .dds-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 
 .dds-trigger {
-  width: 100%; padding: 9px 32px 9px 12px;
-  font-size: 13px; font-family: inherit;
-  border-radius: 8px; cursor: pointer;
+  box-sizing: border-box; width: 100%; padding: 9px 32px 9px 12px;
+  font-size: 13px; font-weight: 500; font-family: inherit;
+  border-radius: 8px; cursor: pointer; user-select: none;
   background: rgba(255,255,255,0.9);
   border: 1px solid #d5d0ca;
   color: var(--text-bright);
@@ -329,13 +341,14 @@ defineExpose({ open: openPanel })
 .dds-dropdown.up { transform-origin: bottom center; }
 
 .dds-option {
+  box-sizing: border-box;
   display: flex; align-items: center; justify-content: space-between;
   width: 100%; padding: 9px 10px;
-  font-size: 13px; font-family: inherit;
+  font-size: 13px; font-weight: 500; font-family: inherit;
   border: none; border-radius: 6px;
   background: transparent;
   color: var(--text-bright);
-  cursor: pointer;
+  cursor: pointer; user-select: none;
   text-align: left;
   transition: background 0.15s, color 0.15s;
 }

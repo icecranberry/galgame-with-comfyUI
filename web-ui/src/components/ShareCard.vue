@@ -60,7 +60,7 @@
 
         <!-- 操作栏（在截图目标外部） -->
         <div class="share-actions">
-          <button class="share-btn copy-btn" :class="{ copied }" :disabled="copying" @click="copyScreenshot" title="复制截图">
+          <linshe-button class="share-btn copy-btn" variant="secondary" size="sm" :disabled="copying" :class="{ copied }" @click="copyScreenshot" title="复制截图">
             <template v-if="!copying && !copied">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -80,13 +80,13 @@
               </svg>
               <span class="btn-label">已复制</span>
             </template>
-          </button>
-          <button class="share-btn close-btn" @click="close" title="关闭">
+          </linshe-button>
+          <linshe-button class="share-btn" variant="icon" @click="close" title="关闭">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
             <span class="btn-label">关闭</span>
-          </button>
+          </linshe-button>
         </div>
       </div>
     </Transition>
@@ -96,6 +96,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import html2canvas from 'html2canvas'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -415,49 +416,14 @@ watch(() => props.visible, v => {
   gap: 12px;
   flex-shrink: 0;           /* 不被卡片挤窄 */
 }
-.share-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 56px;
-  height: 56px;                 /* PC 端正方形按钮 */
-  border-radius: 16px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: #555;                  /* 图标颜色 */
-}
-/* 桌面端隐藏文字 */
-.btn-label {
-  display: none;
-}
-.copy-btn {
-  background: rgba(255, 255, 255, 0.92);
-  color: #333;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-.copy-btn:hover:not(:disabled) {
-  background: #fff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
-}
-.copy-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
+/* 皮肤交给 LinsheButton，仅保留复制成功状态色 */
 .copy-btn.copied {
   background: #e8f5e9;
   color: #2e7d32;
 }
-.close-btn {
-  background: rgba(255, 255, 255, 0.7);
-  color: #666;
-}
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.9);
-  color: #333;
+/* 桌面端隐藏文字 */
+.btn-label {
+  display: none;
 }
 
 /* ── 动画 ── */
@@ -534,15 +500,7 @@ watch(() => props.visible, v => {
     width: 100%;
   }
   .share-btn {
-    flex: 1;
-    flex-direction: row;
-    width: auto;
-    height: auto;
-    justify-content: center;
-    padding: 14px 20px;
-    border-radius: 14px;
-    font-size: 14px;
-    font-weight: 600;
+    flex: 1;   /* 手机端横向平分操作栏宽度 */
     gap: 6px;
   }
   .btn-label {

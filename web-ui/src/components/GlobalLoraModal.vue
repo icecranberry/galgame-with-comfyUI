@@ -4,16 +4,16 @@
       <div class="modal-panel modal-wide">
         <div class="modal-header">
           <h3>LoRA 设置（全局画风）</h3>
-          <button class="modal-close" @click="close">✕</button>
+          <linshe-button variant="icon" @click="close">✕</linshe-button>
         </div>
         <p class="lora-tab-hint">全局画风 LoRA，按适用范围生效（注意去掉画师串或者和画师串并存）</p>
         <div class="modal-body">
           <div class="lora-body-card">
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
               <div v-for="(item, idx) in activeItems" :key="'global-' + idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
-                <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
+                <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                </button>
+                </linshe-button>
                 <div class="lora-item-row">
                   <div class="form-group lora-path-group">
                     <label class="fl lora-inline-label">文件路径</label>
@@ -66,15 +66,16 @@
                 <div class="lora-scenes-row">
                   <span class="fl lora-inline-label">适用范围</span>
                     <div class="lora-scenes-chips">
-                      <button
+                      <linshe-button
                         v-for="s in sceneOptions"
                         :key="s.value"
-                        :class="['scene-chip', { active: item.scenes && item.scenes.includes(s.value) }]"
+                        variant="chip"
+                        :active="item.scenes && item.scenes.includes(s.value)"
                         @click="toggleScene(item, s.value)"
                       >
                         <span v-if="item.scenes && item.scenes.includes(s.value)" class="scene-check">✓</span>
                         {{ s.label }}
-                      </button>
+                      </linshe-button>
                     </div>
                   <div style="flex:1;min-width:0"></div>
                   <label class="lora-enable-toggle" @click.stop>
@@ -92,10 +93,10 @@
               尚未配置任何全局 LoRA，点击下方按钮添加
             </div>
 
-            <button class="lora-add-btn" @click="addLoraGroup">
+            <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               添加 LoRA
-            </button>
+            </div>
           </div>
 
           <div class="modal-actions" style="margin-top:16px">
@@ -105,9 +106,9 @@
             <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=style" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索Style</a>
             <span class="lora-civitai-label">（但实际上作者并不会都以Style为画风LoRA取名，可以自行寻找其他关键词）</span>
             <div style="flex:1"></div>
-            <button class="btn-primary" @click="save" :disabled="loraLoading">
+            <linshe-button variant="primary" @click="save" :disabled="loraLoading">
               {{ loraLoading ? '保存中…' : '保存' }}
-            </button>
+            </linshe-button>
           </div>
         </div>
       </div>
@@ -118,6 +119,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -283,42 +285,9 @@ async function save() {
   border-bottom: 1px solid rgba(0,0,0,0.06);
 }
 .modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: transparent;
-  font-size: 16px; color: var(--text-secondary);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-}
-.modal-close:hover { background: rgba(0,0,0,0.06); color: var(--text-primary); }
 .modal-body { padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
 .modal-actions { display: flex; align-items: center; gap: 10px; }
 
-/* ── 标签切换：文字 + 下划线（低调风格，仅文字变色） ── */
-.lora-tab-bar {
-  display: flex; gap: 20px; margin: 8px 24px 0; flex-shrink: 0;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.lora-tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 2px 8px; font-size: 13px; font-weight: 500;
-  background: transparent; border: none; cursor: pointer;
-  color: var(--text-secondary); font-family: inherit;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
-  transition: color 0.18s ease, border-color 0.18s ease;
-}
-.lora-tab:hover:not(.active) { color: var(--text-primary); }
-.lora-tab.active {
-  color: var(--accent);
-  font-weight: 600;
-  border-bottom-color: var(--accent);
-}
-.lora-tab-count {
-  min-width: 16px; padding: 0 5px; border-radius: 8px;
-  background: rgba(0,0,0,0.07); color: inherit;
-  font-size: 11px; line-height: 1.5; text-align: center;
-}
 .lora-tab-hint {
   margin: 10px 24px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5;
 }
@@ -344,17 +313,7 @@ async function save() {
 .lora-toggle-switch input:checked + .lora-toggle-slider { background: var(--accent); }
 .lora-toggle-switch input:checked + .lora-toggle-slider::before { transform: translateX(14px); }
 .lora-remove-btn {
-  position: absolute; top: 6px; right: 6px;
-  width: 22px; height: 22px; border-radius: 50%; border: none;
-  background: transparent; color: var(--text-muted, #bbb);
-  font-size: 11px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 180ms ease; padding: 0; z-index: 1;
-}
-.lora-remove-btn:hover {
-  background: rgba(255, 77, 79, 0.1);
-  color: var(--danger);
-  transform: scale(1.03);
+  position: absolute; top: 6px; right: 6px; z-index: 1;
 }
 .lora-item-row { display: flex; gap: 10px; align-items: flex-end; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
@@ -399,18 +358,6 @@ async function save() {
 .lora-trigger-row { margin-top: 8px; }
 .lora-scenes-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
 .lora-scenes-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.scene-chip {
-  padding: 3px 10px; border-radius: 6px; border: 1px solid transparent;
-  background: var(--bg-muted, #f0f0f0); color: var(--text-secondary);
-  font-size: 11px; cursor: pointer; user-select: none;
-  transition: all 180ms ease; line-height: 1.5;
-}
-.scene-chip:hover { background: rgba(0,0,0,0.06); transform: scale(1.02); }
-.scene-chip.active {
-  background: rgba(224,123,108,0.1); border-color: var(--accent);
-  color: var(--accent); font-weight: 500;
-}
-.scene-chip.active:hover { background: rgba(224,123,108,0.16); }
 .scene-check { margin-right: 2px; font-size: 10px; }
 .form-group { margin-bottom: 16px; }
 .form-group .fl { display: block; margin-bottom: 6px; }
@@ -418,7 +365,7 @@ async function save() {
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
@@ -430,10 +377,6 @@ async function save() {
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
 @keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-
-.btn-primary { background: var(--accent); color: white; padding: 8px 20px; border-radius: 10px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 767px) {
   .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }

@@ -28,13 +28,13 @@
 
     <!-- 筛选胶囊 -->
     <div class="panel-chips">
-      <button
+      <linshe-button
         v-for="f in filters"
         :key="f.key"
-        class="chip"
-        :class="{ active: activeFilter === f.key }"
+        variant="chip"
+        :active="activeFilter === f.key"
         @click="$emit('filter', f.key)"
-      >{{ f.label }}</button>
+      >{{ f.label }}</linshe-button>
     </div>
 
     <!-- 角色状态列表 -->
@@ -71,6 +71,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps<{
   characters: any[]
@@ -183,16 +184,6 @@ function activitySummary(c: any) {
 .panel-chips {
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 6px 14px 10px;
-}
-.chip {
-  padding: 4px 11px; border: 1px solid var(--border);
-  border-radius: 999px; background: var(--glass-bg);
-  font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;
-  transition: all 0.15s;
-}
-.chip:hover { background: var(--bg-hover); color: var(--text-bright); }
-.chip.active {
-  background: var(--accent); color: #fff; border-color: var(--accent);
 }
 
 /* ── Character List ── */

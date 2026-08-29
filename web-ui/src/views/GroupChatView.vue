@@ -2,9 +2,9 @@
   <div class="chat-view">
     <!-- 头部（与私聊 chat-header 同款） -->
     <div class="chat-header">
-      <button v-if="isMobile" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
+      <linshe-button v-if="isMobile" variant="icon" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
+      </linshe-button>
       <div class="group-avatar-grid header-avatar">
         <div
           v-for="m in (store.activeGroup?.members || []).slice(0, 4)"
@@ -87,18 +87,21 @@
       </div>
 
       <Transition name="new-message">
-        <button
+        <div
           v-if="hasNewMessages"
-          type="button"
+          role="button"
+          tabindex="0"
           class="new-message-bubble"
           aria-label="有新消息，回到底部"
+          @keydown.enter.prevent="returnToLatest"
+          @keydown.space.prevent="returnToLatest"
           @click="returnToLatest"
         >
           <span>有新消息</span>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M6 9l6 6 6-6" />
           </svg>
-        </button>
+        </div>
       </Transition>
     </div>
 
@@ -125,9 +128,14 @@
         @keydown.enter.exact.prevent="onSend"
         @keydown.enter.shift.exact="draft += '\n'"
       ></textarea>
-      <button
+      <div
+        role="button"
+        tabindex="0"
         class="send-btn"
-        :class="{ 'send-disabled': !draft.trim() }"
+        :class="{ 'is-disabled': !draft.trim() }"
+        :aria-disabled="!draft.trim()"
+        @keydown.enter.prevent="onSendClick"
+        @keydown.space.prevent="onSendClick"
         @click="onSendClick"
         @pointerdown="onSendPressStart"
         @pointerup="onSendPressEnd"
@@ -139,7 +147,7 @@
         <svg class="send-icon" viewBox="0 0 1024 1024" fill="#fff">
           <path d="M659.655431 521.588015q23.970037-6.71161 46.022472-13.423221 19.17603-5.752809 39.310861-11.505618t33.558052-10.546816l-13.423221 50.816479q-5.752809 21.093633-10.546816 31.640449-9.588015 25.88764-22.531835 47.940075t-24.449438 38.35206q-13.423221 19.17603-27.805243 35.475655l-117.932584 35.475655 96.838951 17.258427q-19.17603 16.299625-41.228464 33.558052-19.17603 14.382022-43.625468 30.202247t-51.29588 29.243446-59.925094 13.902622-62.801498-4.314607q-34.516854-4.794007-69.033708-16.299625 10.546816-16.299625 23.011236-36.434457 10.546816-17.258427 25.40824-40.749064t31.161049-52.254682q46.022472-77.662921 89.168539-152.449438t77.662921-135.191011q39.310861-69.992509 75.745318-132.314607-45.06367 51.775281-94.921348 116.014981-43.146067 54.651685-95.88015 129.917603t-107.385768 164.434457q-11.505618 18.217228-25.88764 42.187266t-30.202247 50.816479-32.599251 55.131086-33.078652 55.131086q-38.35206 62.322097-78.621723 130.397004 0.958801-20.134831 7.670412-51.775281 5.752809-26.846442 19.17603-67.116105t38.35206-94.921348q16.299625-34.516854 24.928839-53.692884t13.423221-29.722846q4.794007-11.505618 7.670412-15.340824-4.794007-5.752809-1.917603-23.011236 1.917603-15.340824 11.026217-44.58427t31.161049-81.977528q22.052434-53.692884 58.007491-115.535581t81.018727-122.726592 97.797753-117.932584 107.865169-101.153558 110.262172-72.389513 106.906367-32.11985q0.958801 33.558052-6.71161 88.689139t-19.17603 117.932584-25.88764 127.520599-27.805243 117.453184z"/>
         </svg>
-      </button>
+      </div>
     </div>
 
     <!-- 图片预览 -->
@@ -196,13 +204,16 @@
               <span>{{ editMemberIds.length }} / {{ sortedCharacters.length }}</span>
             </div>
             <div class="gc-member-edit">
-              <button
+              <div
                 v-for="c in sortedCharacters"
                 :key="c.id"
-                type="button"
+                role="button"
+                tabindex="0"
                 class="gc-member-check"
                 :class="{ picked: editMemberIds.includes(c.id) }"
                 :aria-pressed="editMemberIds.includes(c.id)"
+                @keydown.enter.prevent="toggleMember(c.id)"
+                @keydown.space.prevent="toggleMember(c.id)"
                 @click="toggleMember(c.id)"
               >
                 <div
@@ -210,20 +221,21 @@
                   :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
                 >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
                 <span>{{ c.display_name }}</span>
-              </button>
+              </div>
             </div>
             <span class="gc-member-hint">至少选择 2 位角色</span>
           </div>
           <div class="gc-record-actions">
-            <button
+            <linshe-button
               class="gc-btn gc-btn-undo"
+              variant="secondary"
               :disabled="!canUndo"
               @click="requestUndoLastRound"
-            >撤回上一轮对话</button>
+            >撤回上一轮对话</linshe-button>
           </div>
           <div class="gc-drawer-actions">
-            <button class="gc-btn gc-btn-danger" @click="onDissolve">解散群聊</button>
-            <button class="gc-btn gc-btn-primary" :disabled="editMemberIds.length < 2" @click="onSaveSettings">保存</button>
+            <linshe-button class="gc-btn" variant="danger" @click="onDissolve">解散群聊</linshe-button>
+            <linshe-button class="gc-btn" variant="primary" :disabled="editMemberIds.length < 2" @click="onSaveSettings">保存</linshe-button>
           </div>
         </div>
       </div>
@@ -244,14 +256,14 @@
               </div>
             </div>
             <div class="avatar-pop-actions">
-              <button class="avatar-pop-btn" type="button" @click="startPrivateChat(avatarMenu.member)">
+              <div class="avatar-pop-btn" role="button" tabindex="0" @keydown.enter.prevent="startPrivateChat(avatarMenu.member)" @keydown.space.prevent="startPrivateChat(avatarMenu.member)" @click="startPrivateChat(avatarMenu.member)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 <span>私聊</span>
-              </button>
-              <button class="avatar-pop-btn" type="button" @click="viewMemberMoments(avatarMenu.member)">
+              </div>
+              <div class="avatar-pop-btn" role="button" tabindex="0" @keydown.enter.prevent="viewMemberMoments(avatarMenu.member)" @keydown.space.prevent="viewMemberMoments(avatarMenu.member)" @click="viewMemberMoments(avatarMenu.member)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
                 <span>查看ta的朋友圈</span>
-              </button>
+              </div>
             </div>
           </div>
         </div>
@@ -270,6 +282,7 @@ import { getConfig, updateGroupSummaryInterval, updateGroupTemperature } from '.
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -761,6 +774,7 @@ function onSendPressEnd() {
 }
 
 function onSendClick() {
+  if (!draft.value.trim()) return
   if (longPressFired) {
     longPressFired = false
     return
@@ -855,16 +869,7 @@ async function onDissolve() {
 
 .btn-mobile-back {
   width: 44px; height: 44px; flex-shrink: 0;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.28);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s ease;
 }
-.btn-mobile-back:hover { color: var(--text-bright); border-color: var(--accent); }
-.btn-mobile-back:active { transform: scale(0.94); }
 
 .btn-header-settings {
   width:32px; height:32px; border-radius:10px;
@@ -910,6 +915,7 @@ async function onDissolve() {
   font-size:13px; font-weight:600; cursor:pointer;
   backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
   transition:background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  user-select: none;
 }
 .new-message-bubble:hover { background:#fff8f6; border-color:var(--accent); box-shadow:0 8px 26px rgba(92,55,45,0.2); }
 .new-message-bubble:active { transform:scale(0.96); }
@@ -971,6 +977,7 @@ async function onDissolve() {
   background: #fff; color: var(--text-primary);
   font-size: 12px; font-weight: 600; cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  user-select: none;
 }
 .avatar-pop-btn:hover { background: #fff8f6; border-color: var(--accent); color: var(--accent); }
 .avatar-pop-btn:active { transform: scale(0.97); }
@@ -1055,16 +1062,17 @@ async function onDissolve() {
     box-shadow 0.3s ease, transform 0.2s ease;
   touch-action: manipulation;
   -webkit-touch-callout: none;
+  user-select: none;
 }
 .send-icon { width: 18px; height: 18px; display: block; transition: transform 0.2s ease; }
-.send-btn:not(.send-disabled):hover {
+.send-btn:not(.is-disabled):hover {
   box-shadow:
     0 4px 18px rgba(224, 123, 108, 0.35),
     0 0 32px rgba(224, 123, 108, 0.10);
   transform: scale(1.06);
 }
-.send-btn:not(.send-disabled):active { transform: scale(0.94); }
-.send-btn.send-disabled { opacity: 0.35; box-shadow: none; cursor: default; }
+.send-btn:not(.is-disabled):active { transform: scale(0.94); }
+.send-btn.is-disabled { opacity: 0.35; box-shadow: none; cursor: default; }
 
 /* @点名面板 */
 .mention-panel {
@@ -1132,6 +1140,7 @@ async function onDissolve() {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   border: 1px solid #eee9e7; border-radius: 12px; background: #fff; cursor: pointer;
   font-size: 12px; color: var(--text-primary); transition: all 0.15s ease;
+  user-select: none;
 }
 .gc-member-check:hover { background: #fff8f6; border-color: rgba(224,123,108,0.4); }
 .gc-member-check.picked {
@@ -1168,19 +1177,11 @@ async function onDissolve() {
 .gc-record-actions { flex-shrink: 0; }
 .gc-drawer-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .gc-btn {
-  flex: 1; padding: 11px 0; border-radius: 12px; border: none;
-  font-size: 14px; font-weight: 600; cursor: pointer;
+  flex: 1; padding: 11px 0;
 }
-.gc-btn-primary { background: var(--accent); color: #fff; }
-.gc-btn-primary:hover { background: var(--accent-hover); }
-.gc-btn-primary:disabled { opacity: 0.45; cursor: default; }
 .gc-btn-undo {
-  width: 100%; background: #fff; color: var(--accent);
-  border: 1px solid rgba(224,123,108,0.42);
+  width: 100%;
 }
-.gc-btn-undo:hover:not(:disabled) { background: rgba(224,123,108,0.08); }
-.gc-btn-undo:disabled { opacity: 0.42; cursor: default; }
-.gc-btn-danger { background: rgba(255, 77, 79, 0.12); color: var(--danger, #ff4d4f); }
 
 .drawer-enter-active, .drawer-leave-active { transition: opacity 0.22s ease; }
 .drawer-enter-from, .drawer-leave-to { opacity: 0; }

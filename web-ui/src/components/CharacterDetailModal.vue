@@ -6,7 +6,7 @@
         <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
-            <button class="modal-close" @click="$emit('close')">✕</button>
+            <linshe-button variant="icon" class="modal-close" @click="$emit('close')">✕</linshe-button>
           </div>
 
           <div class="modal-body modal-body-detail">
@@ -47,8 +47,8 @@
                 @click="$emit('open-avatar-editor', character)"
               >{{ character?.avatar_path ? '' : character?.display_name?.charAt(0) }}</div>
               <div>
-                <button class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</button>
-                <button v-if="character?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="$emit('remove-avatar', character)">移除</button>
+                <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
+                <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
               </div>
               <div v-if="character?.is_oath" class="detail-avatar-oath">
                 <span class="oath-badge" @click="removeOath">
@@ -70,16 +70,18 @@
                     角色关系网
                   </span>
                   <div class="detail-rel-btns">
-                    <button
+                    <linshe-button
                       v-if="detail.relationships.length > 0"
-                      class="detail-rel-btn subtle"
+                      variant="secondary"
+                      class="detail-rel-btn"
                       @click="$emit('open-deduction', character)"
-                    >推演关系</button>
-                    <button
+                    >推演关系</linshe-button>
+                    <linshe-button
                       v-if="detail.relationships.length > 0"
-                      class="detail-rel-btn subtle"
+                      variant="secondary"
+                      class="detail-rel-btn"
                       @click="$emit('open-relation-graph', character)"
-                    >管理关系图 &rarr;</button>
+                    >管理关系图 &rarr;</linshe-button>
                   </div>
                 </div>
                 <div v-if="detail.relationships.length > 0" class="detail-rel-list">
@@ -100,19 +102,19 @@
                   <template v-else>
                     <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
                     <div class="detail-rel-ctas">
-                      <button class="detail-rel-btn cta" @click="$emit('open-deduction', character)">
+                      <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-deduction', character)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                         </svg>
                         推演关系
-                      </button>
-                      <button class="detail-rel-btn cta" @click="$emit('open-relation-graph', character)">
+                      </linshe-button>
+                      <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-relation-graph', character)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                           <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
                           <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
                         </svg>
                         手动设置关系
-                      </button>
+                      </linshe-button>
                     </div>
                   </template>
                 </div>
@@ -136,13 +138,13 @@
           <!-- 操作栏 sticky footer -->
           <div class="modal-footer">
             <div class="detail-actions">
-              <button class="btn-ghost danger" @click="deleteChar">&#x1F5D1; 删除角色</button>
+              <linshe-button variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
               <div class="detail-actions-right">
                 <div class="recruit-appearance-hint">
                   外观描述补充tag查阅
                   <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
                 </div>
-                <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
+                <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
               </div>
             </div>
           </div>
@@ -196,16 +198,16 @@
         <div class="modal-panel modal-wide">
           <div class="modal-header">
             <h3>LoRA 设置 — {{ character?.display_name }}</h3>
-            <button class="modal-close" @click="closeLoraModal">✕</button>
+            <linshe-button variant="icon" class="modal-close" @click="closeLoraModal">✕</linshe-button>
           </div>
           <div class="modal-body">
             <div class="lora-body-card">
               <!-- ── Lora 列表 ── -->
               <TransitionGroup name="lora-card" tag="div" class="lora-list">
                 <div v-for="(item, idx) in loraItems" :key="idx" class="lora-item-card">
-                  <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
+                  <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                  </button>
+                  </linshe-button>
                   <div class="lora-item-row">
                     <div class="form-group lora-path-group">
                       <label class="fl lora-inline-label">文件路径</label>
@@ -267,10 +269,10 @@
               </div>
 
               <!-- ── 添加 Lora 按钮 ── -->
-              <button class="lora-add-btn" @click="addLoraGroup">
+              <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 添加 LoRA
-              </button>
+              </div>
 
               <div class="lora-separator"></div>
 
@@ -323,9 +325,9 @@
                 CivitAI.red 搜索：{{ civitaiDisplayName }}
               </a>
               <div style="flex:1"></div>
-              <button class="btn-primary" @click="saveLora" :disabled="loraLoading">
+              <linshe-button variant="primary" @click="saveLora" :disabled="loraLoading">
                 {{ loraLoading ? '保存中…' : '保存' }}
-              </button>
+              </linshe-button>
             </div>
           </div>
         </div>
@@ -339,6 +341,7 @@ import { ref, reactive, computed, watch, inject } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -749,15 +752,6 @@ async function saveLora() {
 }
 .modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
 
-.modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: var(--glass-bg-strong);
-  color: var(--text-secondary); font-size: 15px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-}
-.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
-
 .modal-body {
   padding: 0px 22px 22px;
   overflow-y: auto; flex: 1;
@@ -842,11 +836,7 @@ async function saveLora() {
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
 .detail-rel-title svg { color: var(--accent); }
-.detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.detail-rel-btn.subtle { background: rgba(224, 123, 108, 0.06); border: 1px solid rgba(224, 123, 108, 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
-.detail-rel-btn.subtle:hover { background: rgba(224, 123, 108, 0.14); border-color: rgba(224, 123, 108, 0.3); color: #d06a5a; }
-.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
-.detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(224, 123, 108, 0.35); transform: translateY(-1px); }
+.detail-rel-btn { display: flex; align-items: center; gap: 5px; }
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
@@ -954,8 +944,6 @@ async function saveLora() {
   color: var(--text-muted, #999);
   text-decoration: underline;
 }
-.btn-ghost.danger { color: var(--danger); }
-.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 
 /* ═══ 弹窗动画 ═══ */
 .modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -965,21 +953,13 @@ async function saveLora() {
 @keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
 /* ═══ 通用 ═══ */
-.sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
-.sp-btn-small:hover { border-color: var(--accent); }
-.sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
-.sp-btn-subtle:hover { color: var(--danger); border-color: transparent; }
+.sp-btn-small { margin-right: 6px; }
 
 .prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
 .modal-wide .fi { background: var(--bg-primary); border: 1px solid var(--glass-border); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .modal-wide .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1); }
 .modal-wide .prompt-textarea { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.7; color: var(--text-primary); }
-
-.btn-primary { background: var(--accent); color: white; padding: 8px 20px; border-radius: 10px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-ghost { background: transparent; border: none; color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
 
@@ -1007,8 +987,7 @@ async function saveLora() {
 .lora-check-text { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .lora-list { display: flex; flex-direction: column; gap: 10px; }
 .lora-item-card { position: relative; background: var(--bg-primary); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px 32px 10px 12px; }
-.lora-remove-btn { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(255, 77, 79, 0.08); color: var(--danger); font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; z-index: 1; padding: 0; }
-.lora-remove-btn:hover { background: rgba(255, 77, 79, 0.2); }
+.lora-remove-btn { position: absolute; top: 6px; right: 6px; z-index: 1; }
 .lora-item-row { display: flex; gap: 10px; align-items: flex-end; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
 .lora-path-group { flex: 2; min-width: 0; }
@@ -1055,7 +1034,7 @@ async function saveLora() {
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
@@ -1082,7 +1061,6 @@ async function saveLora() {
   .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
   .modal-wide .fi { font-size: 16px; }
   .detail-rel-section { margin-bottom: 14px; }
-  .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
 
   .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
   .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(224, 123, 108, 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }

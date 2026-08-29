@@ -4,9 +4,9 @@
       <!-- 群聊分区 -->
       <div class="group-section-header">
         <span>群聊</span>
-        <button class="group-create-btn" type="button" title="发起群聊" aria-label="发起群聊" @click.stop="openCreateGroup">
+        <div class="group-create-btn" role="button" tabindex="0" title="发起群聊" aria-label="发起群聊" @click.stop="openCreateGroup" @keydown.enter.prevent="openCreateGroup" @keydown.space.prevent="openCreateGroup">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
+        </div>
       </div>
       <div
         v-for="g in groups.groups"
@@ -61,11 +61,14 @@
       </div>
 
       <!-- 新手引导：仅剩默认助手时显示，点击前往酒馆创建角色 -->
-      <button
+      <div
         v-if="chat.characters.length === 1"
-        type="button"
+        role="button"
+        tabindex="0"
         class="char-onboard"
         @click="goTavern"
+        @keydown.enter.prevent="goTavern"
+        @keydown.space.prevent="goTavern"
       >
         <span class="char-onboard-icon">
           <svg viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
@@ -80,7 +83,7 @@
         <svg class="char-onboard-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/>
         </svg>
-      </button>
+      </div>
 
       <div v-if="chat.characters.length === 0" class="char-empty">
         加载中...
@@ -108,11 +111,11 @@
         </div>
         <span>奇遇</span>
       </div>
-      <button class="footer-more-btn" @click="showMoreMenu = !showMoreMenu">
+      <div class="footer-more-btn" role="button" tabindex="0" @click="showMoreMenu = !showMoreMenu" @keydown.enter.prevent="showMoreMenu = !showMoreMenu" @keydown.space.prevent="showMoreMenu = !showMoreMenu">
         <svg viewBox="0 0 1024 1024" width="22" height="22" fill="currentColor">
           <path d="M436 128H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V168a40 40 0 0 0-40-40z m-32 276H200V200h204z m32 144H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H200V620h204z m452-276H588a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H620V620h204zM716 118c-104.9 0-190 85.1-190 190s85.1 190 190 190 190-85.1 190-190-85.1-190-190-190z m83.4 273.4A117.8 117.8 0 1 1 834 308a117 117 0 0 1-34.6 83.4z"/>
         </svg>
-      </button>
+      </div>
     </div>
 
     <!-- 更多菜单弹窗 -->
@@ -150,9 +153,7 @@
             <span>信箱</span>
           </router-link>
           <router-link to="/settings" class="more-menu-item" @click="onMenuItemClick">
-            <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
-              <path d="M416.4 958h191.2V849.7c0-12.7 6.4-25.5 19.1-31.9 31.9-12.7 63.7-31.9 89.2-51 12.7-6.4 25.5-6.4 38.2 0l95.6 57.3 95.6-165.7-95.6-57.3C837 588.5 830.6 575.7 837 563c0-19.1 6.4-31.9 6.4-51s0-31.9-6.4-51c0-12.7 6.4-25.5 12.7-31.9l95.6-57.3-95.6-165.7-95.6 57.3c-12.7 6.4-25.5 6.4-38.2 0-25.5-19.1-57.3-38.2-89.2-51-12.7-12.7-19.1-25.5-19.1-38.2V66H416.4v108.3c0 12.7-6.4 25.5-19.1 31.9-31.9 12.7-63.7 31.9-89.2 51-12.7 6.4-25.5 6.4-38.2 0l-95.6-51-95.6 165.6 95.6 57.3c12.7 6.4 19.1 19.1 12.7 31.9 0 19.1-6.4 31.9-6.4 51s0 31.9 6.4 51c6.4 12.7 0 25.5-12.7 31.9l-95.6 57.3 95.6 165.7 95.6-57.3c12.7-6.4 25.5-6.4 38.2 0 25.5 19.1 57.3 38.2 89.2 51 12.7 6.4 19.1 19.1 19.1 31.9V958z m223 63.7H384.6c-19.1 0-31.9-12.7-31.9-31.9v-121c-25.5-12.7-51-25.5-70.1-38.2l-101.9 63.7c-12.7 6.4-31.9 6.4-44.6-12.7L8.6 658.6c-12.7-19.1-6.4-38.2 12.7-44.6l101.9-63.7v-76.5L21.4 410.1c-19.1-6.4-25.5-25.5-12.7-44.6l127.4-223c6.4-12.7 25.5-19.1 44.6-6.4l101.9 63.7c19.1-12.7 44.6-31.9 70.1-38.2V34.1c0-19.1 12.7-31.9 31.9-31.9h254.9c19.1 0 31.9 12.7 31.9 31.9v121.1c25.5 12.7 51 25.5 70.1 38.2l101.9-63.7c12.7-6.4 31.9-6.4 44.6 12.7l127.4 223c12.7 19.1 6.4 38.2-12.7 44.6l-101.9 63.7v76.5l101.9 63.7c12.7 6.4 19.1 25.5 12.7 44.6L888 881.5c-6.4 12.7-25.5 19.1-44.6 12.7l-101.9-63.7c-19.1 12.7-44.6 31.9-70.1 38.2v121.1c-0.1 19.2-12.8 31.9-32 31.9zM512 703.2c-108.3 0-191.2-82.8-191.2-191.2S403.7 320.8 512 320.8 703.2 403.7 703.2 512 620.3 703.2 512 703.2z m0-318.6c-70.1 0-127.4 57.3-127.4 127.4S441.9 639.4 512 639.4 639.4 582.1 639.4 512 582.1 384.6 512 384.6z"/>
-            </svg>
+            <gear-icon :size="20" />
             <span>系统设置</span>
           </router-link>
         </div>
@@ -181,9 +182,9 @@
               <span>{{ c.display_name }}</span>
             </div>
           </div>
-          <button class="cg-submit" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
+          <linshe-button class="cg-submit" variant="primary" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
             {{ cgSubmitting ? '创建中…' : `创建群聊（已选 ${cgMemberIds.length} 人，至少 2 人）` }}
-          </button>
+          </linshe-button>
         </div>
       </div>
     </Transition>
@@ -194,12 +195,12 @@
           <section class="cg-dialog" role="dialog" aria-modal="true" aria-labelledby="create-group-title">
             <div class="cg-dialog-header">
               <h3 id="create-group-title" class="cg-dialog-title">发起群聊</h3>
-              <button class="cg-close-btn" type="button" aria-label="关闭" @click="showCreateGroup = false">
+              <linshe-button class="cg-close-btn" variant="icon" aria-label="关闭" @click="showCreateGroup = false">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-              </button>
+              </linshe-button>
             </div>
 
             <div class="cg-dialog-body">
@@ -220,20 +221,23 @@
                   <span>{{ cgMemberIds.length }} / {{ chat.characters.length }}</span>
                 </div>
                 <div class="cg-members cg-members-desktop">
-                  <button
+                  <div
                     v-for="c in sortedCgCharacters"
                     :key="c.id"
-                    type="button"
+                    role="button"
+                    tabindex="0"
                     class="cg-member cg-member-desktop"
                     :class="{ picked: cgMemberIds.includes(c.id) }"
                     @click="toggleCgMember(c.id)"
+                    @keydown.enter.prevent="toggleCgMember(c.id)"
+                    @keydown.space.prevent="toggleCgMember(c.id)"
                   >
                     <div
                       class="cg-member-avatar"
                       :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
                     >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
                     <span>{{ c.display_name }}</span>
-                  </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -241,10 +245,10 @@
             <div class="cg-dialog-footer">
               <span class="cg-hint">至少选择 2 位角色</span>
               <div class="cg-actions">
-                <button class="cg-cancel" type="button" @click="showCreateGroup = false">取消</button>
-                <button class="cg-submit cg-submit-desktop" type="button" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
+                <linshe-button class="cg-cancel" variant="secondary" @click="showCreateGroup = false">取消</linshe-button>
+                <linshe-button class="cg-submit cg-submit-desktop" variant="primary" :disabled="cgMemberIds.length < 2 || cgSubmitting" @click="submitCreateGroup">
                   {{ cgSubmitting ? '创建中...' : `创建群聊（已选 ${cgMemberIds.length} 人）` }}
-                </button>
+                </linshe-button>
               </div>
             </div>
           </section>
@@ -264,6 +268,8 @@ import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useGroupsStore } from '../stores/groups.js'
+import LinsheButton from './LinsheButton.vue'
+import GearIcon from './GearIcon.vue'
 
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
@@ -511,6 +517,7 @@ function formatTime(iso) {
   font-family: inherit; text-align: left;
   cursor: pointer;
   transition: background 0.2s ease;
+  user-select: none;
 }
 .char-onboard:hover { background: rgba(224, 123, 108, 0.15); }
 .char-onboard:active { transform: scale(0.99); }
@@ -554,6 +561,7 @@ function formatTime(iso) {
   display: flex; align-items: center; justify-content: center;
   color: var(--accent); cursor: pointer;
   transition: all 0.15s;
+  user-select: none;
 }
 .group-create-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 .group-create-btn:hover { background: rgb(224 123 108 / 24%); }
@@ -588,7 +596,9 @@ function formatTime(iso) {
   padding: 8px 4px; border-radius: 12px; cursor: pointer;
   font-size: 12px; color: var(--text-primary, #333);
   border: 2px solid transparent;
+  background: transparent;
   transition: all 0.15s;
+  user-select: none;
 }
 .cg-member.picked {
   border-color: rgb(226 166 122);
@@ -601,11 +611,8 @@ function formatTime(iso) {
   display: flex; align-items: center; justify-content: center;
 }
 .cg-submit {
-  border: none; border-radius: 12px; padding: 12px 0;
-  background: rgb(226 166 122); color: #fff;
-  font-size: 14px; font-weight: 600; cursor: pointer;
+  padding: 12px 0;
 }
-.cg-submit:disabled { opacity: 0.45; cursor: default; }
 
 .cg-overlay {
   position: fixed;
@@ -646,21 +653,7 @@ function formatTime(iso) {
   color: var(--text-bright, #2f2927);
 }
 .cg-close-btn {
-  width: 34px;
-  height: 34px;
-  padding: 0;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(224, 123, 108, 0.14);
-  border-radius: 10px;
-  background: #fff7f5;
-  color: var(--accent, #e07b6c);
-}
-.cg-close-btn:hover {
-  color: #fff;
-  background: var(--accent, #e07b6c);
 }
 .cg-dialog-body {
   display: grid;
@@ -759,26 +752,6 @@ function formatTime(iso) {
   min-width: 110px;
   min-height: 40px;
   padding: 10px 18px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.cg-cancel {
-  border: 1px solid #e8e2df;
-  background: #fff;
-  color: var(--text-primary, #514845);
-}
-.cg-cancel:hover {
-  border-color: rgba(224, 123, 108, 0.42);
-  background: #fff8f6;
-  color: var(--accent, #e07b6c);
-}
-.cg-submit-desktop {
-  background: var(--accent, #e07b6c);
-  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.24);
-}
-.cg-submit-desktop:hover:not(:disabled) {
-  background: var(--accent-hover);
 }
 .cg-pop-enter-active,
 .cg-pop-leave-active {
@@ -835,6 +808,7 @@ function formatTime(iso) {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
+  user-select: none;
 }
 .footer-more-btn:hover { background: rgba(255, 255, 255, 0.35); color: var(--text-bright); }
 

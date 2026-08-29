@@ -2,17 +2,17 @@
   <div class="mailbox-view">
     <!-- ══ Top Bar ══ -->
     <div class="mailbox-topbar" :class="{ 'topbar-hidden': isMobile && !headerVisible }">
-      <button class="topbar-btn topbar-back" @click="onBack">
+      <linshe-button variant="icon" class="topbar-btn" @click="onBack">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6"/>
         </svg>
-      </button>
+      </linshe-button>
       <span class="topbar-title">信箱</span>
-      <button class="topbar-btn topbar-compose" @click="startWrite">
+      <linshe-button variant="icon" class="topbar-btn" @click="startWrite">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
         </svg>
-      </button>
+      </linshe-button>
     </div>
 
     <!-- ══ Sliding Panels ══ -->
@@ -30,7 +30,7 @@
           </svg>
           <p class="empty-title">还没有任何通信</p>
           <p class="empty-hint">写下第一封信吧</p>
-          <button class="btn-compose-empty" @click="startWrite">开始写信</button>
+          <linshe-button variant="primary" class="btn-compose-empty" @click="startWrite">开始写信</linshe-button>
         </div>
 
         <div v-else class="letter-list">
@@ -80,7 +80,7 @@
                 <div class="detail-header-meta" :class="statusTimeClass(activeLetter)">{{ statusTimeText(activeLetter) }}</div>
               </div>
             </div>
-            <button class="btn-delete" @click="onDeleteLetter(activeLetter.id)">删除信件</button>
+            <linshe-button variant="danger" class="btn-delete" @click="onDeleteLetter(activeLetter.id)">删除信件</linshe-button>
           </div>
 
           <!-- Content -->
@@ -132,7 +132,7 @@
         <div class="picker-dialog">
           <div class="picker-header">
             <span>选择收信人</span>
-            <button class="picker-close" @click="showCharPicker = false">&times;</button>
+            <linshe-button variant="icon" class="picker-close" @click="showCharPicker = false">&times;</linshe-button>
           </div>
           <div class="picker-grid">
             <div
@@ -155,12 +155,12 @@
       <Transition name="compose-slide">
         <div v-if="writing && selectedChar" class="compose-panel" :style="composePanelStyle">
           <div class="compose-header">
-            <button class="compose-back" @click="cancelWrite">
+            <linshe-button variant="ghost" class="compose-back" @click="cancelWrite">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6"/>
               </svg>
               返回
-            </button>
+            </linshe-button>
             <span class="compose-title">致 {{ selectedChar.display_name || selectedChar.name }}</span>
             <div class="compose-spacer"></div>
           </div>
@@ -181,11 +181,10 @@
             </div>
           </div>
           <div class="compose-actions">
-            <button class="btn btn-cancel" @click="cancelWrite">取消</button>
-            <button class="btn btn-send" :disabled="!composeContent.trim() || sending" @click="doSend">
-              <span v-if="sending" class="spinner-sm"></span>
+            <linshe-button variant="secondary" @click="cancelWrite">取消</linshe-button>
+            <linshe-button variant="primary" :disabled="!composeContent.trim() || sending" :loading="sending" @click="doSend">
               {{ sending ? '寄送中...' : '寄出' }}
-            </button>
+            </linshe-button>
           </div>
         </div>
       </Transition>
@@ -223,6 +222,7 @@ import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily }
 import LetterViewer from '../components/LetterViewer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import LinsheButton from '../components/LinsheButton.vue'
 
 const router = useRouter()
 const chatStore = useChatStore()
@@ -523,14 +523,8 @@ onUnmounted(() => {
 .topbar-btn {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
-  border: none; background: none;
-  color: #3a2a1a; cursor: pointer;
-  border-radius: 10px;
-  transition: background 0.15s;
   flex-shrink: 0;
 }
-.topbar-btn:hover { background: rgba(0,0,0,0.04); }
-.topbar-btn:active { background: rgba(0,0,0,0.08); }
 
 .topbar-title {
   font-size: 17px; font-weight: 600; color: #2a1a10;
@@ -580,14 +574,7 @@ onUnmounted(() => {
 .empty-hint { font-size: 12px; color: #9a8a7a; margin: 0 0 6px; }
 .btn-compose-empty {
   margin-top: 6px;
-  display: inline-flex; align-items: center;
-  padding: 8px 20px; border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-  background: #f0ebe4; color: #5a4a3a;
-  border: 1px solid rgba(0,0,0,0.06);
-  transition: all 0.15s;
 }
-.btn-compose-empty:hover { background: #e6dfd6; }
 
 .letter-list {
   display: flex; flex-direction: column;
@@ -683,13 +670,8 @@ onUnmounted(() => {
 .detail-header-meta.status-processing { color: #7D98B8; }
 
 .btn-delete {
-  background: none; border: none;
-  color: #c0392b; font-size: 12px; cursor: pointer;
-  padding: 4px 8px; border-radius: 6px;
-  transition: background 0.15s; white-space: nowrap; flex-shrink: 0;
+  white-space: nowrap; flex-shrink: 0;
 }
-.btn-delete:hover { background: rgba(192,57,43,0.06); }
-.btn-delete:active { background: rgba(192,57,43,0.12); }
 
 /* Content card */
 .detail-card {
@@ -791,9 +773,8 @@ onUnmounted(() => {
   margin-bottom: 16px; font-size: 15px; font-weight: 600; color: #2a1a10;
 }
 .picker-close {
-  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 7px; color: #8a7a6a; font-size: 16px; cursor: pointer;
+  width: 30px; height: 30px;
+  font-size: 16px;
 }
 .picker-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px;
@@ -828,12 +809,10 @@ onUnmounted(() => {
   background: #FCFAF7;
 }
 .compose-back {
-  display: flex; align-items: center; gap: 2px;
-  border: none; background: none;
-  color: #3a2a1a; font-size: 14px; cursor: pointer;
-  padding: 8px 10px; border-radius: 8px;
+  gap: 2px;
+  padding: 8px 10px;
+  font-size: 14px;
 }
-.compose-back:active { background: rgba(0,0,0,0.06); }
 .compose-title { font-size: 15px; font-weight: 600; color: #2a1a10; }
 .compose-spacer { width: 60px; }
 
@@ -875,25 +854,6 @@ onUnmounted(() => {
   border-top: 1px solid rgba(0,0,0,0.04);
   background: #FCFAF7;
   padding-bottom: max(10px, env(safe-area-inset-bottom));
-}
-.btn {
-  padding: 10px 24px; border-radius: 10px;
-  font-size: 14px; font-weight: 600; cursor: pointer;
-  border: none; transition: all 0.15s;
-  display: flex; align-items: center; gap: 6px;
-}
-.btn-cancel { background: rgba(0,0,0,0.04); color: #6a5a4a; }
-.btn-cancel:hover { background: rgba(0,0,0,0.08); }
-.btn-send {
-  background: linear-gradient(135deg, #e07b6c, #d4695a);
-  color: #fff; box-shadow: 0 2px 8px rgba(224,123,108,0.25);
-}
-.btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-send:active:not(:disabled) { transform: scale(0.97); }
-.spinner-sm {
-  width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3);
-  border-top-color: #fff; border-radius: 50%;
-  animation: spin 0.6s linear infinite;
 }
 
 /* ═══════════════════════════════════════
@@ -938,10 +898,6 @@ onUnmounted(() => {
   }
   .paper-textarea {
     font-size: 18px; line-height: 2; padding: 16px;
-  }
-  .compose-actions .btn {
-    padding: 12px 28px; font-size: 15px;
-    border-radius: 12px;
   }
 }
 </style>

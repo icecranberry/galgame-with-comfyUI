@@ -4,7 +4,7 @@
       <div class="modal-panel modal-wide">
         <div class="modal-header">
           <h3>HiresFix 细化设置</h3>
-          <button class="modal-close" @click="close">✕</button>
+          <linshe-button variant="icon" @click="close">✕</linshe-button>
         </div>
         <div class="modal-body">
           <p class="hires-hint">图片进一步高清细化设置，点击图片上的「放大细化」时生效</p>
@@ -36,9 +36,9 @@
           <div class="hires-section hires-artist-section">
             <div class="hires-section-title">画师串</div>
             <div class="artist-segmented">
-              <button :class="['artist-mode-chip', { active: artistMode === 'inherit' }]" @click="artistMode = 'inherit'">沿用原图</button>
-              <button :class="['artist-mode-chip', { active: artistMode === 'empty' }]" @click="artistMode = 'empty'">留空</button>
-              <button :class="['artist-mode-chip', { active: artistMode === 'specified' }]" @click="artistMode = 'specified'">指定</button>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'inherit' }]" @click="artistMode = 'inherit'" @keydown.enter.prevent="artistMode = 'inherit'" @keydown.space.prevent="artistMode = 'inherit'">沿用原图</div>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'empty' }]" @click="artistMode = 'empty'" @keydown.enter.prevent="artistMode = 'empty'" @keydown.space.prevent="artistMode = 'empty'">留空</div>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'specified' }]" @click="artistMode = 'specified'" @keydown.enter.prevent="artistMode = 'specified'" @keydown.space.prevent="artistMode = 'specified'">指定</div>
             </div>
             <div class="artist-mode-hint">{{ artistModeHint }}</div>
             <Transition name="artist-block">
@@ -55,9 +55,9 @@
             <div class="lora-body-card">
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
               <div v-for="(item, idx) in items" :key="idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
-                <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
+                <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                </button>
+                </linshe-button>
                 <div class="lora-item-row">
                   <div class="form-group lora-path-group">
                     <label class="fl lora-inline-label">文件路径</label>
@@ -121,10 +121,10 @@
               尚未配置任何强化HiresFix细化的LoRA，点击下方按钮添加
             </div>
 
-            <button class="lora-add-btn" @click="addLoraGroup">
+            <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               添加 LoRA
-            </button>
+            </div>
             </div>
           </div>
           </div>
@@ -135,9 +135,9 @@
             <span class="lora-civitai-label">或</span>
             <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
             <div style="flex:1"></div>
-            <button class="btn-primary" @click="save" :disabled="loraLoading">
+            <linshe-button variant="primary" @click="save" :disabled="loraLoading">
               {{ loraLoading ? '保存中…' : '保存' }}
-            </button>
+            </linshe-button>
           </div>
         </div>
       </div>
@@ -148,6 +148,7 @@
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheButton from './LinsheButton.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -317,14 +318,6 @@ async function save() {
   border-bottom: 1px solid rgba(0,0,0,0.06);
 }
 .modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: transparent;
-  font-size: 16px; color: var(--text-secondary);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-}
-.modal-close:hover { background: rgba(0,0,0,0.06); color: var(--text-primary); }
 .modal-body { padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
 .modal-actions { display: flex; align-items: center; gap: 10px; }
 
@@ -358,6 +351,7 @@ async function save() {
   background: transparent; color: #6F675F; font-size: 12px; font-weight: 500;
   cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   text-align: center; white-space: nowrap;
+  user-select: none;
 }
 .artist-mode-chip:hover { color: #E07B6C; }
 .artist-mode-chip.active {
@@ -399,17 +393,7 @@ async function save() {
 .lora-toggle-switch input:checked + .lora-toggle-slider { background: var(--accent); }
 .lora-toggle-switch input:checked + .lora-toggle-slider::before { transform: translateX(14px); }
 .lora-remove-btn {
-  position: absolute; top: 6px; right: 6px;
-  width: 22px; height: 22px; border-radius: 50%; border: none;
-  background: transparent; color: var(--text-muted, #bbb);
-  font-size: 11px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 180ms ease; padding: 0; z-index: 1;
-}
-.lora-remove-btn:hover {
-  background: rgba(255, 77, 79, 0.1);
-  color: var(--danger);
-  transform: scale(1.03);
+  position: absolute; top: 6px; right: 6px; z-index: 1;
 }
 .lora-item-row { display: flex; gap: 8px; align-items: flex-end; padding-right: 24px; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
@@ -463,7 +447,7 @@ async function save() {
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 14px 0 8px; margin-bottom: 0; }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
@@ -475,10 +459,6 @@ async function save() {
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
 @keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-
-.btn-primary { background: var(--accent); color: white; padding: 8px 20px; border-radius: 10px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 767px) {
   .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }

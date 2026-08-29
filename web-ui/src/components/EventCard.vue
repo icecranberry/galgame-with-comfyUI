@@ -29,7 +29,7 @@
         </div>
         <Transition name="menu-pop">
           <div v-if="showMenu" class="card-dropdown">
-            <button class="card-dropdown-item danger" @click.stop="onDelete">🗑️ 删除</button>
+            <div class="card-dropdown-item danger" role="button" tabindex="0" @click.stop="onDelete" @keydown.enter.prevent="onDelete" @keydown.space.prevent="onDelete">🗑️ 删除</div>
           </div>
         </Transition>
       </div>
@@ -60,9 +60,9 @@
     <Transition name="detail-fade">
       <div v-if="detailOpen" class="detail-overlay">
         <!-- 关闭按钮 -->
-        <button class="detail-close" @click="closeDetail">
+        <linshe-button variant="icon" size="lg" class="detail-close" @click="closeDetail">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+        </linshe-button>
         <!-- 标题浮层 -->
         <div class="detail-title-bar">
           <span class="detail-title-name">{{ event.display_name }}</span>
@@ -117,41 +117,46 @@
                 <div v-else-if="event._queued" class="choice-loading is-queued">
                   <div class="loading-spinner"></div>
                   <span>故事推进中…</span>
-                  <button class="queued-back-btn" @click.stop="onCancelQueue">← 返回重选</button>
+                  <div class="queued-back-btn" role="button" tabindex="0" @click.stop="onCancelQueue" @keydown.enter.prevent="onCancelQueue" @keydown.space.prevent="onCancelQueue">← 返回重选</div>
                 </div>
                 <div v-else class="vn-choices">
-                  <button class="vn-choice" @click="onChoose('A')">
+                  <div class="vn-choice" role="button" tabindex="0" @click="onChoose('A')" @keydown.enter.prevent="onChoose('A')" @keydown.space.prevent="onChoose('A')">
                     <span class="vn-choice-bar"></span>
                     <span>{{ event.choice_a }}</span>
-                  </button>
-                  <button class="vn-choice" @click="onChoose('B')">
+                  </div>
+                  <div class="vn-choice" role="button" tabindex="0" @click="onChoose('B')" @keydown.enter.prevent="onChoose('B')" @keydown.space.prevent="onChoose('B')">
                     <span class="vn-choice-bar"></span>
                     <span>{{ event.choice_b }}</span>
-                  </button>
+                  </div>
                   <label class="vn-choice-c">
                     <span class="vn-input-bar">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                     </span>
                     <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自定义行动…'" @keyup.enter="onChoose('C')" />
-                    <button class="vn-submit" @click="onChoose('C')" :disabled="!customText.trim()" title="确定">
+                    <div class="vn-submit" role="button" tabindex="0" :class="{ 'is-disabled': !customText.trim() }" :aria-disabled="!customText.trim()" @click="onChoose('C')" @keydown.enter.prevent="onChoose('C')" @keydown.space.prevent="onChoose('C')" title="确定">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19,12 12,19 5,12"/></svg>
-                    </button>
+                    </div>
                   </label>
                 </div>
               </div>
               <!-- 撤回按钮：只有选择过至少一次才显示 -->
-              <button
+              <div
                 v-if="choiceHistory.length > 1"
                 class="undo-btn"
-                :disabled="event.processing"
+                :class="{ 'is-disabled': event.processing }"
+                :aria-disabled="event.processing"
+                role="button"
+                tabindex="0"
                 @click.stop="onUndo"
+                @keydown.enter.prevent="onUndo"
+                @keydown.space.prevent="onUndo"
                 title="回到上一次选择"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="15,18 9,12 15,6"/>
                 </svg>
                 <span>回到上一次选择</span>
-              </button>
+              </div>
             </div>
           </div>
         </div>
@@ -171,6 +176,7 @@ import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import LinsheButton from './LinsheButton.vue'
 
 const confirmFn = inject('confirm')
 const router = useRouter()
@@ -336,6 +342,8 @@ function onWheelScroll(e) {
 
 async function onChoose(choice) {
   if (choosing.value) return
+  // vn-submit 改为 div 后的禁用守卫（原 :disabled="!customText.trim()"）
+  if (choice === 'C' && !customText.trim()) return
   const eventId = props.event.id
   choosing.value = true
   const customTextValue = customText.value
@@ -541,8 +549,8 @@ watch(isExpired, (val) => {
   display: block; width: 100%;
   padding: 8px 12px; border-radius: 8px; border: none;
   background: transparent;
-  font-size: 13px; color: var(--text-bright);
-  cursor: pointer; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--text-bright);
+  cursor: pointer; text-align: left; user-select: none;
   transition: background 0.1s;
 }
 .card-dropdown-item:hover { background: rgba(0,0,0,0.05); }
@@ -610,13 +618,7 @@ watch(isExpired, (val) => {
 
 .detail-close {
   position: fixed; top: 16px; right: 16px; z-index: 210;
-  width: 44px; height: 44px; border-radius: 50%;
-  border: none; background: rgba(255,255,255,0.15);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(255,255,255,0.9);
-  transition: all 0.2s;
 }
-.detail-close:hover { background: rgba(255,255,255,0.25); }
 
 .detail-title-bar {
   position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 205;
@@ -759,9 +761,9 @@ watch(isExpired, (val) => {
   padding: 0;
   border: 1.5px solid rgba(0,0,0,0.06);
   background: rgba(255,255,255,0.5);
-  cursor: pointer; text-align: left;
+  cursor: pointer; text-align: left; user-select: none;
   transition: all 0.25s ease;
-  font-size: 15px; color: var(--text-bright);
+  font-size: 15px; font-weight: 500; color: var(--text-bright);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -810,9 +812,10 @@ watch(isExpired, (val) => {
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
   border-left: 1px dashed rgba(0,0,0,0.15);
+  user-select: none;
 }
-.vn-submit:hover:not(:disabled) { background: rgba(0,0,0,0.05); color: var(--text-primary); }
-.vn-submit:disabled { opacity: 0.2; cursor: default; }
+.vn-submit:hover:not(.is-disabled) { background: rgba(0,0,0,0.05); color: var(--text-primary); }
+.vn-submit.is-disabled { opacity: 0.2; cursor: default; }
 
 .choice-loading {
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -825,7 +828,9 @@ watch(isExpired, (val) => {
 .queued-back-btn {
   padding: 4px 14px; border: 1px solid rgba(0,0,0,0.12); border-radius: 14px;
   background: rgba(255,255,255,0.7); color: var(--text-secondary);
-  font-size: 11px; cursor: pointer; transition: all 0.2s;
+  font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+  text-align: center; user-select: none;
 }
 .queued-back-btn:hover {
   background: rgba(0,0,0,0.04); color: var(--text-primary); border-color: rgba(0,0,0,0.2);
@@ -843,18 +848,19 @@ watch(isExpired, (val) => {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 11px; font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  user-select: none;
   z-index: 5;
 }
-.undo-btn:hover:not(:disabled) {
+.undo-btn:hover:not(.is-disabled) {
   background: rgba(255,255,255,0.9);
   color: var(--accent);
   border-color: rgba(224,123,108,0.25);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
-.undo-btn:disabled {
+.undo-btn.is-disabled {
   opacity: 0.35;
   cursor: default;
 }
