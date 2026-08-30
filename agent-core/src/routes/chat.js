@@ -83,20 +83,20 @@ router.delete('/characters/:id/messages', (req, res, next) => {
     const charId = parseInt(req.params.id, 10);
     // 先统一清理聊天长期记忆及其版本、checkpoint、审计和独立向量索引
     clearConversationMemories(conversationId);
-    db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+    db.prepare('DELETE FROM emotion_snapshots WHERE conversation_id = ?').run(conversationId);
+    db.prepare('DELETE FROM rolling_summaries WHERE conversation_id = ?').run(conversationId);
 
-    db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
+    db.prepare('DELETE FROM user_portraits WHERE character_id = ?').run(charId);
     // 删除奇遇数据
-    db.prepare(`DELETE FROM character_events WHERE character_id = ?`).run(charId);
-    db.prepare(`DELETE FROM event_history WHERE character_id = ?`).run(charId);
+    db.prepare('DELETE FROM character_events WHERE character_id = ?').run(charId);
+    db.prepare('DELETE FROM event_history WHERE character_id = ?').run(charId);
     // 重置好感度到默认值
-    db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE character_id = ?`).run(charId);
+    db.prepare('UPDATE user_relationships SET affinity = 50 WHERE character_id = ?').run(charId);
     // 重置主动聊天连胜计数
-    db.prepare(`UPDATE characters SET proactive_streak = 0 WHERE id = ?`).run(charId);
+    db.prepare('UPDATE characters SET proactive_streak = 0 WHERE id = ?').run(charId);
     // 主表
-    db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+    db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conversationId);
+    db.prepare('DELETE FROM raw_messages WHERE conversation_id = ?').run(conversationId);
     // 清理 ChromaDB 中该 conversation 的向量
     deleteByConversation(conversationId).then(
       n => { if (n > 0) console.log(`[chat] chroma deleted ${n} vectors for ${conversationId}`); },

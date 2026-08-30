@@ -191,16 +191,8 @@ export async function searchCharacterInfo(query) {
  */
 async function tryDirectPageResolve(baseUrl, query) {
   try {
-    const url = `${baseUrl}?${new URLSearchParams({
-      action: 'query',
-      titles: query,
-      redirects: '1',       // 跟随重定向页面
-      prop: 'extracts',
-      exintro: '1',
-      explaintext: '1',
-      format: 'json',
-      origin: '*',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*`;
 
     const res = await fetchWithTimeout(url, {
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
@@ -242,15 +234,8 @@ async function tryDirectPageResolve(baseUrl, query) {
  */
 async function fetchFullPageExtract(baseUrl, query) {
   try {
-    const url = `${baseUrl}?${new URLSearchParams({
-      action: 'query',
-      titles: query,
-      redirects: '1',
-      prop: 'extracts',
-      explaintext: '1',
-      format: 'json',
-      origin: '*',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&explaintext=1&format=json&origin=*`;
 
     const res = await fetchWithTimeout(url, {
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
@@ -330,12 +315,8 @@ async function searchMoegirl(query, context = '') {
   let urls = [];
 
   for (const q of searchQueries) {
-    const searchUrl = `${BASE}?${new URLSearchParams({
-      action: 'opensearch',
-      search: q,
-      format: 'json',
-      limit: '5',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const searchUrl = `${BASE}?action=opensearch&search=${encodeURIComponent(q)}&format=json&limit=5`;
 
     let searchData;
     try {
@@ -360,15 +341,7 @@ async function searchMoegirl(query, context = '') {
     const title = titles[i];
     const pageUrl = urls[i] || '';
     try {
-      const extractUrl = `${BASE}?${new URLSearchParams({
-        action: 'query',
-        prop: 'extracts',
-        exintro: '1',
-        explaintext: '1',
-        titles: title,
-        format: 'json',
-        origin: '*',
-      })}`;
+      const extractUrl = `${BASE}?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
 
       const extractRes = await fetchWithTimeout(extractUrl, {
         headers: { 'User-Agent': UA, 'Accept': 'application/json' },

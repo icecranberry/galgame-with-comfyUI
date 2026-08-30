@@ -68,8 +68,8 @@ export function deleteImageFileByUrl(url) {
   if (!category) return false;
 
   const filename = cleanUrl.split('/').pop();
-  // 拒绝空名、路径分隔符与 .. 等目录穿越形态（basename 校验挡不住 '..' 本身）
-  if (!filename || filename === '.' || filename === '..') return false;
+  // 文件名白名单：仅允许字母/数字/点/横线/下划线/空格，杜绝任何路径穿越形态
+  if (!filename || !/^[\w.\- ]+$/.test(filename)) return false;
   if (path.basename(filename) !== filename) return false;
 
   const dir = getImageDir(category);

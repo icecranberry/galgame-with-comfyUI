@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { randomUUID } from 'node:crypto';
 import { config, updateFreeEggEnabled, FREE_EGG_MODELS } from '../config.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
@@ -36,10 +37,10 @@ function getClient() {
     if (headers && Object.keys(headers).length > 0) {
       opts.defaultHeaders = headers;
     }
-    // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用占位符绕过），
+    // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用随机占位符绕过），
     // 且值为 null 的请求头会被 SDK 从请求中删除 → 真正不发送 Authorization
     if (config.llm.freeEgg) {
-      opts.apiKey = 'free-egg';
+      opts.apiKey = randomUUID(); // 占位符，非真实凭据
       opts.defaultHeaders = { Authorization: null, ...(opts.defaultHeaders || {}) };
     }
     _client = new OpenAI(opts);
