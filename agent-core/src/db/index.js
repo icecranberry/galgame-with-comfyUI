@@ -2,11 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import { initSettingsHandle, loadSystemSettings } from './settings.js';
+import { initWorldRepository } from './worldRepository.js';
 import { seedAll } from './seedData.js';
 import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
 import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
-import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let db;
 
@@ -642,8 +643,10 @@ function initSchema(db) {
   // 图片提示词知识使用独立版本化种子；版本升级时只覆盖内置同 ID 条目，保留用户自建条目。
   seedImagePromptKnowledge(db);
 
-  // 系统设置: 从 DB 加载覆盖 config 内存（DB 优先于代码默认值）
+  // 系统设置: 注入句柄并从 DB 加载覆盖 config 内存（DB 优先于代码默认值）
+  initSettingsHandle(db);
   loadSystemSettings(db);
+  initWorldRepository(db);
 
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
@@ -1320,196 +1323,27 @@ export function repairFtsIndex() {
   console.log('[db] repairFtsIndex: done');
 }
 
-/**
- * 获取所有激活的全局规则内容（拼接为一个字符串）
- */
-// image_intent / image_prompt 是元规则（非 LLM system prompt 内容），不拼入
-// world_setting 单独追加到末尾，不在批量拼接中
-// BUILTIN_RULE_KEYS 从 builtinRules.js 导入，统一管理所有硬编码规则
+// ── 世界观 / 全局规则仓储已下沉到 db/worldRepository.js（缩小本模块体积）──
+// 函数由 worldRepository 提供，此处兼容再导出；db 句柄在 getDb() 打开时注入。
+export {
+  getActiveGlobalRules,
+  getWorldSetting,
+  getSystemRulesWithWorld,
+  getGlobalRule,
+  getSystemRules,
+  listWorldSettings,
+  getActiveWorldSetting,
+  getWorldSettingById,
+  createWorldSetting,
+  updateWorldSetting,
+  deleteWorldSetting,
+  activateWorldSetting,
+} from './worldRepository.js';
 
-export function getActiveGlobalRules() {
-  const database = getDb();
-  const excludeKeys = [...BUILTIN_RULE_KEYS, 'world_setting'];
-  const rules = database.prepare(
-    `SELECT rule_content FROM global_rules WHERE is_active = 1 AND rule_key NOT IN (${excludeKeys.map(() => '?').join(',')})`
-  ).all(...excludeKeys);
-  return rules.map(r => r.rule_content).join('\n\n');
-}
-
-/** 判断当前时间是否在指定时间段内（24 小时制，支持跨午夜） */
-function isInDisturbTimeRange(now, startTime, endTime) {
-  const toMinutes = (hhmm) => {
-    const parts = String(hhmm).split(':');
-    return parseInt(parts[0], 10) * 60 + (parseInt(parts[1], 10) || 0);
-  };
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const startMin = toMinutes(startTime);
-  const endMin = toMinutes(endTime);
-  if (startMin <= endMin) {
-    return nowMin >= startMin && nowMin < endMin;
-  } else {
-    return nowMin >= startMin || nowMin < endMin;
-  }
-}
-
-/** 获取世界观（独立消息注入，不拼入全局规则）
- *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值
- *  优先从 world_settings 表读取激活项，兼容旧 global_rules.world_setting */
-export function getWorldSetting() {
-  // 防打扰隐藏世界观：不改 DB，仅在 prompt 构建时返回 null
-  if (config.features.disturbMode && config.disturb.hideWorld) {
-    const now = new Date();
-    if (isInDisturbTimeRange(now, config.disturb.startTime, config.disturb.endTime)) {
-      if (!config.disturb.skipWeekends || (now.getDay() !== 0 && now.getDay() !== 6)) {
-        return null;
-      }
-    }
-  }
-
-  // 只要存在激活项就以它为准：内容为空视为用户主动选择"无世界观"，不再回退旧表
-  const active = getActiveWorldSetting();
-  if (active) {
-    return active.content?.trim() ? `<world_setting>\n${active.content}\n</world_setting>` : null;
-  }
-
-  // 兼容旧表（仅 world_settings 表无激活项时）
-  const world = getGlobalRule('world_setting');
-  if (world?.rule_content && world.is_active) {
-    return world.rule_content;
-  }
-  return null;
-}
-
-/** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用 */
-export function getSystemRulesWithWorld(opts = {}) {
-  const rules = getSystemRules(opts);
-  const world = getWorldSetting();
-  return [rules, world].filter(Boolean).join('\n\n');
-}
-
-/** 获取单条全局规则（用于元规则如 judge_prompt）。内置规则直接返回硬编码常量。 */
-export function getGlobalRule(key) {
-  if (BUILTIN_RULE_KEYS.has(key)) {
-    return key === 'image_prompt' ? IMAGE_PROMPT_RULE : null;
-  }
-  const database = getDb();
-  return database.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(key);
-}
-
-/**
- * 获取系统规则（破限词：system_context + core_rules），统一各场景的 jailbreak。
- *
- * @param {object} [options]
- * @param {boolean} [options.roleplay=true] - 是否包含 `<roleplay>` 内的角色扮演激活指令。
- *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
- */
-export function getSystemRules({ roleplay = true } = {}) {
-  const content = SYSTEM_RULES_CONTENT;
-
-  // 基础内容
-  let base = '';
-  const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
-  if (!rpMatch) {
-    base = content;  // 无标签（旧数据），向下兼容
-  } else {
-    const before = content.slice(0, rpMatch.index).trim();
-    // 基础上下文始终保留，roleplay 指令按需包含
-    base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
-  }
-
-  return base;
-}
-
-// ── 系统设置（替代 .env 中的画师串/分辨率/功能开关） ──
-
-/** 按 key 读取系统设置 */
-export function getSetting(key) {
-  const database = getDb();
-  return database.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = ?`).pluck().get(key) ?? null;
-}
-
-// 有意不纳入 SETTING_TO_CONFIG 的 DB-only 键（用于存储时间戳等运行时状态，不走 config 加载路径）
-const DB_ONLY_KEYS = new Set([
-  'last_moments_seen_at',
-  'last_events_seen_at',
-  'llm_profiles',
-  'active_llm_profile_id',
-  'memory_settings',
-  'workflow_mode_auto_detected',
-  'maibot_webui_url',
-  'maibot_webui_token',
-]);
-
-/** 写入单条系统设置 */
-export function setSetting(key, value) {
-  const database = getDb();
-  database.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
-    .run(key, String(value));
-  // 写入时校验：如果 key 不在映射表、也不在 disturb 前缀、也不在 DB-only 白名单，说明重启后会丢失
-  if (!(key in SETTING_TO_CONFIG) && !key.startsWith('disturb_') && !DB_ONLY_KEYS.has(key)) {
-    console.warn(`[config] setSetting("${key}"): key is not registered in SETTING_TO_CONFIG — value will NOT survive restart. Add it to the mapping in db/index.js.`);
-  }
-}
-
-// 需要从 DB 迁移到 config 的字段映射
-const SETTING_TO_CONFIG = {
-  comfy_artist:            { obj: 'comfyui',   key: 'artist',          type: 'string'  },
-  comfy_width:             { obj: 'comfyui',   key: 'width',           type: 'int'     },
-  comfy_height:            { obj: 'comfyui',   key: 'height',          type: 'int'     },
-  comfy_moments_artist:    { obj: 'comfyui',   key: 'momentsArtist',   type: 'string'  },
-  comfy_moments_width:     { obj: 'comfyui',   key: 'momentsWidth',    type: 'int'     },
-  comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
-  comfy_event_artist:      { obj: 'comfyui',   key: 'eventArtist',     type: 'string'  },
-  comfy_event_width:       { obj: 'comfyui',   key: 'eventWidth',      type: 'int'     },
-  comfy_event_height:      { obj: 'comfyui',   key: 'eventHeight',     type: 'int'     },
-  comfy_quality_prompt:    { obj: 'comfyui',   key: 'qualityPrompt',   type: 'string'  },
-  feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
-  feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
-  feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
-  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
-  feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
-  feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
-  feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
-  feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
-  feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
-  feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
-  feature_serializeBackgroundLLM:     { obj: 'features', key: 'serializeBackgroundLLM',    type: 'bool' },
-  feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
-  feature_mergeMessages:             { obj: 'features', key: 'mergeMessages',             type: 'bool' },
-  feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
-  feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
-  feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
-  group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
-  group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
-  weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
-  compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
-  compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
-  user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
-  user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
-  user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
-  user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
-  workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
-  comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
-  comfy_hires_lora:               { obj: 'comfyui',  key: 'hiresLora',        type: 'json' },
-  comfy_hires_steps:              { obj: 'comfyui',  key: 'hiresSteps',       type: 'int' },  
-  comfy_hires_cfg:                { obj: 'comfyui',  key: 'hiresCfg',         type: 'float' },
-  comfy_hires_denoise:            { obj: 'comfyui',  key: 'hiresDenoise',     type: 'float' },
-  comfy_hires_max_size:           { obj: 'comfyui',  key: 'hiresMaxSize',     type: 'int' },
-  comfy_hires_artist_mode:        { obj: 'comfyui',  key: 'hiresArtistMode',  type: 'string' },
-  comfy_hires_artist:             { obj: 'comfyui',  key: 'hiresArtist',      type: 'string' },
-};
-
-function castValue(raw, type) {
-  if (raw == null) return undefined;
-  switch (type) {
-    case 'int':  { const v = parseInt(raw, 10); return Number.isNaN(v) ? undefined : v; }
-    case 'float': { const v = parseFloat(raw); return Number.isNaN(v) ? undefined : v; }
-    case 'bool': return raw === 'true' || raw === '1';
-    case 'json': { try { const v = JSON.parse(raw); return v; } catch { return undefined; } }
-    default:     return raw;
-  }
-}
+// ── 系统设置已下沉到 db/settings.js（打破 config↔db 循环依赖）──
+// getSetting/setSetting/SETTING_TO_CONFIG/loadSystemSettings 均由 settings.js 提供，
+// 此处仅做兼容再导出，既有 import 路径不受影响。
+export { getSetting, setSetting, SETTING_TO_CONFIG } from './settings.js';
 
 /**
  * 迁移: characters 表新增 lora 列（仅保留 custom_workflow 和 loras）
@@ -1769,69 +1603,7 @@ function migrateEventCrossRef(db) {
   }
 }
 
-// ── 世界观收藏 CRUD ──
-
-export function listWorldSettings() {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings ORDER BY sort_order, id`).all();
-}
-
-export function getActiveWorldSetting() {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings WHERE is_active = 1`).get() || null;
-}
-
-export function getWorldSettingById(id) {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings WHERE id = ?`).get(id);
-}
-
-export function createWorldSetting({ name, content }) {
-  const database = getDb();
-  const maxOrder = database.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_settings`).get().m;
-  const result = database.prepare(
-    `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 0, ?)`
-  ).run(name, content, maxOrder + 1);
-  return getWorldSettingById(result.lastInsertRowid);
-}
-
-export function updateWorldSetting(id, { name, content }) {
-  const database = getDb();
-  const sets = [];
-  const params = [];
-  if (name !== undefined) { sets.push('name = ?'); params.push(name); }
-  if (content !== undefined) { sets.push('content = ?'); params.push(content); }
-  if (sets.length === 0) return null;
-  sets.push("updated_at = datetime('now')");
-  params.push(id);
-  database.prepare(`UPDATE world_settings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-  return getWorldSettingById(id);
-}
-
-export function deleteWorldSetting(id) {
-  const database = getDb();
-  const count = database.prepare(`SELECT COUNT(*) AS c FROM world_settings`).get().c;
-  if (count <= 1) return { ok: false, error: '不可删除最后一套世界观' };
-  const target = getWorldSettingById(id);
-  if (!target) return { ok: false, error: '世界观不存在' };
-  database.prepare(`DELETE FROM world_settings WHERE id = ?`).run(id);
-  if (target.is_active) {
-    const first = database.prepare(`SELECT id FROM world_settings LIMIT 1`).get();
-    if (first) {
-      database.prepare(`UPDATE world_settings SET is_active = 1 WHERE id = ?`).run(first.id);
-    }
-  }
-  return { ok: true };
-}
-
-export function activateWorldSetting(id) {
-  const database = getDb();
-  const target = getWorldSettingById(id);
-  if (!target) return null;
-  database.prepare(`UPDATE world_settings SET is_active = 0`).run();
-  database.prepare(`UPDATE world_settings SET is_active = 1, updated_at = datetime('now') WHERE id = ?`).run(id);
-  return getWorldSettingById(id);
-}
+// ── 世界观收藏 CRUD 已下沉到 db/worldRepository.js ──
 
 // 迁移: PAI 风格聊天记忆 v2。保留旧字段供现有管理界面兼容，新增字段作为权威语义。
 function migrateChatMemoryV2Schema(db) {
@@ -1986,52 +1758,5 @@ function migrateSystemSettings(db) {
   }
 }
 
-// 从 DB 读取 system_settings 覆盖 config 内存（DB 优先于代码默认值）
-function loadSystemSettings(db) {
-  const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
-  let applied = 0;
-  for (const row of rows) {
-    const mapping = SETTING_TO_CONFIG[row.setting_key];
-    if (mapping) {
-      const value = castValue(row.setting_value, mapping.type);
-      if (value !== undefined) {
-        config[mapping.obj][mapping.key] = value;
-        applied++;
-      }
-      continue;
-    }
-    // 额外处理 disturb 配置（不在 SETTING_TO_CONFIG 映射中）
-    if (row.setting_key === 'disturb_start_time') {
-      config.disturb.startTime = row.setting_value;
-      applied++;
-    } else if (row.setting_key === 'disturb_end_time') {
-      config.disturb.endTime = row.setting_value;
-      applied++;
-    } else if (row.setting_key === 'disturb_character_ids') {
-      try {
-        config.disturb.characterIds = JSON.parse(row.setting_value);
-      } catch {
-        config.disturb.characterIds = [];
-      }
-      applied++;
-    } else if (row.setting_key === 'disturb_hide_world') {
-      config.disturb.hideWorld = row.setting_value === 'true' || row.setting_value === '1';
-      applied++;
-    } else if (row.setting_key === 'disturb_skip_weekends') {
-      config.disturb.skipWeekends = row.setting_value === 'true' || row.setting_value === '1';
-      applied++;
-    }
-    // workflow_scene JSON 配置
-    if (row.setting_key === 'workflow_scene') {
-      try {
-        config.workflow.scene = { ...config.workflow.scene, ...JSON.parse(row.setting_value) };
-      } catch {
-        /* keep defaults */
-      }
-      applied++;
-    }
-  }
-  if (applied > 0) {
-    console.log(`[db] system_settings: ${applied} keys applied to config`);
-  }
-}
+// loadSystemSettings 已移至 db/settings.js（config 作为参数传入，避免反向依赖 config 之外的耦合）
+
