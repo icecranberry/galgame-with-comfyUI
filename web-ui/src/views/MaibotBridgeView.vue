@@ -96,7 +96,7 @@
         </label>
 
         <label class="fl" for="character-select">注入角色</label>
-        <DropdownSelect
+        <linshe-select
           id="character-select"
           v-model="characterName"
           class="mb-select"
@@ -163,7 +163,7 @@
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from '../components/LinsheSelect.vue'
 import LinsheButton from '../components/LinsheButton.vue'
 import LinsheInput from '../components/LinsheInput.vue'
 import {

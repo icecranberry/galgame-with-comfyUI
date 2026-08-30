@@ -331,14 +331,6 @@ textarea { resize: vertical; font-family: inherit; }
 }
 .banner-link:hover { opacity: 0.8; }
 
-/* ── 全局 toggle switch（ChatView / SettingsView 共用）── */
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; inset: 0; background: var(--bg-hover); border-radius: 24px; cursor: pointer; transition: 0.2s; }
-.slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(20px); }
-
 /* ── 手机端访问 Toast（底部浮窗，2s 自动消失）── */
 .mobile-toast {
   position: fixed;

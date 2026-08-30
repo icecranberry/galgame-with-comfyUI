@@ -1,10 +1,11 @@
 <template>
-  <div ref="wrapper" class="dds-wrapper" :class="{ 'is-open': open }">
-    <div v-if="inputMode" class="dds-search-trigger">
+  <div ref="wrapper" class="ls-select-wrapper" :class="[`ls-select--${size}`, { 'is-open': open, 'is-disabled': disabled }]">
+    <div v-if="inputMode" class="ls-select-search-trigger">
       <linshe-input
         ref="searchInput"
         v-model="searchText"
-        class="dds-search-input"
+        class="ls-select-search-input"
+        :size="size"
         type="text"
         role="combobox"
         aria-autocomplete="list"
@@ -12,35 +13,37 @@
         :aria-expanded="open"
         :placeholder="placeholder"
         autocomplete="off"
+        :disabled="disabled || undefined"
         @focus="openSearch"
         @click.stop="openSearch"
         @input="handleSearchInput"
         @keydown="onSearchKey"
       />
-      <svg class="dds-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <svg class="ls-select-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div
       v-else
-      class="dds-trigger"
+      class="ls-select-trigger"
       role="combobox"
       tabindex="0"
       :aria-label="ariaLabel || placeholder"
       :aria-expanded="open"
       aria-haspopup="listbox"
+      :aria-disabled="disabled || undefined"
       @click="toggle"
       @keydown="onKey"
       @keydown.enter.prevent="toggle"
       @keydown.space.prevent="toggle"
     >
-      <span class="dds-label" :class="{ placeholder: !selectedLabel }">{{ selectedLabel || placeholder }}</span>
-      <svg class="dds-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="ls-select-label" :class="{ placeholder: !selectedLabel }">{{ selectedLabel || placeholder }}</span>
+      <svg class="ls-select-chevron" :class="{ open }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <Teleport to="body">
-      <Transition name="dds-drop">
+      <Transition name="ls-select-drop">
         <div
           v-if="open"
           ref="panel"
-          class="dds-dropdown"
+          class="ls-select-dropdown"
           :class="{ up: isUp }"
           :style="panelStyle"
           role="listbox"
@@ -49,7 +52,7 @@
           <div
             v-for="(opt, index) in visibleOptions"
             :key="opt.value"
-            class="dds-option"
+            class="ls-select-option"
             :class="{ active: modelValue === opt.value, highlighted: inputMode && activeIndex === index }"
             role="option"
             tabindex="-1"
@@ -59,9 +62,9 @@
             @click="select(opt.value)"
           >
             <span>{{ opt.label }}</span>
-            <svg v-if="modelValue === opt.value" class="dds-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg v-if="modelValue === opt.value" class="ls-select-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
-          <div v-if="visibleOptions.length === 0" class="dds-empty">没有匹配的选项</div>
+          <div v-if="visibleOptions.length === 0" class="ls-select-empty">没有匹配的选项</div>
         </div>
       </Transition>
     </Teleport>
@@ -72,10 +75,15 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import LinsheInput from './LinsheInput.vue'
 
+defineOptions({ name: 'LinsheSelect' })
+
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
   options: { type: Array, default: () => [] },
   placeholder: { type: String, default: '请选择…' },
+  /** sm / md / lg，与 LinsheButton / LinsheInput 尺寸对齐 */
+  size: { type: String, default: 'md' },
+  disabled: { type: Boolean, default: false },
   searchable: { type: Boolean, default: false },
   /** 自由输入模式（输入即值，选项仅作联想建议），需配合可输入 UI 使用 */
   allowFreeInput: { type: Boolean, default: false },
@@ -151,11 +159,13 @@ function positionPanel() {
 }
 
 function toggle() {
+  if (props.disabled) return
   open.value = !open.value
 }
 
 /** 供父组件程序化展开（如获取模型列表后自动弹出） */
 function openPanel() {
+  if (props.disabled) return
   if (!props.searchable && !props.allowFreeInput) {
     open.value = true
     return
@@ -169,6 +179,7 @@ function openPanel() {
 }
 
 function select(val) {
+  if (props.disabled) return
   emit('update:modelValue', val)
   const empty = val === '' || val === null || val === undefined
   const option = props.options.find(item => item.value === val)
@@ -179,6 +190,7 @@ function select(val) {
 }
 
 function onKey(e) {
+  if (props.disabled) return
   if (e.key === 'Escape' && open.value) {
     open.value = false
     e.stopPropagation()
@@ -186,7 +198,7 @@ function onKey(e) {
 }
 
 function openSearch() {
-  if (!inputMode.value) return
+  if (props.disabled || !inputMode.value) return
   openPanel()
   if (open.value) nextTick(() => searchInput.value?.select())
 }
@@ -281,47 +293,85 @@ defineExpose({ open: openPanel })
 </script>
 
 <style scoped>
-.dds-wrapper { position: relative; width: 100%; }
+/* ── 软糖凹陷选择框 ──
+   触发器与 LinsheInput 同一皮肤（糖纸凹痕，聚焦时被珊瑚色照亮），
+   选项面板是轻量浮层：白底暖描边 + 珊瑚色选中态 */
+.ls-select-wrapper { position: relative; width: 100%; }
 
-.dds-search-trigger { position: relative; }
-.dds-search-input {
+.ls-select-search-trigger { position: relative; }
+.ls-select-search-trigger .ls-select-search-input {
   box-sizing: border-box;
-  width: 100%; padding: 9px 32px 9px 12px;
+  width: 100%; padding: 6px 30px 6px 12px;
 }
 
-.dds-trigger {
-  box-sizing: border-box; width: 100%; padding: 9px 32px 9px 12px;
-  font-size: 13px; font-weight: 500; font-family: inherit;
-  border-radius: 8px; cursor: pointer; user-select: none;
-  background: rgba(255,255,255,0.9);
-  border: 1px solid #d5d0ca;
+.ls-select-trigger {
+  box-sizing: border-box; width: 100%;
+  font-family: inherit; line-height: 1.4;
   color: var(--text-bright);
+  background: #fffdfb;
+  border: 1.5px solid #e3dcd2;
+  border-radius: 10px;
+  cursor: pointer; user-select: none;
   outline: none;
   text-align: left;
   position: relative;
-  transition: border-color 0.25s, box-shadow 0.25s;
+  box-shadow: inset 0 1px 2px rgba(96, 66, 46, 0.05);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
-.dds-trigger:hover { border-color: #c5bfb5; }
-.dds-trigger:focus-visible,
-.dds-wrapper:focus-within .dds-trigger { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.ls-select--md .ls-select-trigger { min-height: 36px; padding: 6px 30px 6px 12px; font-size: 13px; }
 
-.dds-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dds-label.placeholder { color: #b0a89c; }
+/* ── 尺寸（与 LinsheButton / LinsheInput 对齐） ── */
+.ls-select--sm .ls-select-trigger { min-height: 26px; padding: 3px 26px 3px 9px; font-size: 12px; border-radius: 8px; }
+.ls-select--lg .ls-select-trigger { min-height: 42px; padding: 10px 32px 10px 14px; font-size: 14px; border-radius: 12px; }
 
-.dds-chevron {
+.ls-select-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-select-label.placeholder { color: #b8afa5; }
+
+/* ── 悬停：边框加深一点（同 LinsheInput） ── */
+.ls-select-trigger:hover { border-color: #d5cabb; }
+
+/* ── 展开 / 聚焦：凹痕被珊瑚色照亮 ── */
+.ls-select-trigger:focus-visible,
+.ls-select-wrapper.is-open:not(.is-disabled) .ls-select-trigger {
+  background: #fff;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px rgba(224, 123, 108, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.ls-select-chevron {
   position: absolute; right: 10px; top: 50%;
   transform: translateY(-50%);
-  color: #b0a89c;
+  color: #b8afa5;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s;
   pointer-events: none;
 }
-.dds-chevron.open { transform: translateY(-50%) rotate(180deg); color: var(--accent); }
+.ls-select--sm .ls-select-chevron { right: 8px; }
+.ls-select--lg .ls-select-chevron { right: 12px; }
+.ls-select-chevron.open { transform: translateY(-50%) rotate(180deg); color: var(--accent); }
 
-.dds-dropdown {
+/* ── 禁用：同 LinsheInput ── */
+.ls-select-wrapper.is-disabled .ls-select-trigger {
+  background: #f6f3ee;
+  border-color: #eae4da;
+  color: #b3aca4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.ls-select-wrapper.is-disabled .ls-select-trigger:hover { border-color: #eae4da; }
+.ls-select-wrapper.is-disabled .ls-select-label.placeholder { color: #c4bdb2; }
+.ls-select-wrapper.is-disabled .ls-select-chevron { color: #c4bdb2; }
+
+/* ── 选项面板：轻量浮层 ── */
+.ls-select-dropdown {
   position: fixed;
   background: #fff;
-  border: 1px solid #e2d6c7;
-  border-radius: 8px;
+  border: 1px solid #e3dcd2;
+  border-radius: 10px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
   z-index: 11000;
   max-height: 220px;
@@ -329,13 +379,13 @@ defineExpose({ open: openPanel })
   padding: 4px;
   transform-origin: top center;
 }
-.dds-dropdown.up { transform-origin: bottom center; }
+.ls-select-dropdown.up { transform-origin: bottom center; }
 
-.dds-option {
+.ls-select-option {
   box-sizing: border-box;
   display: flex; align-items: center; justify-content: space-between;
   width: 100%; padding: 9px 10px;
-  font-size: 13px; font-weight: 500; font-family: inherit;
+  font-size: 13px; font-weight: 400; font-family: inherit;
   border: none; border-radius: 6px;
   background: transparent;
   color: var(--text-bright);
@@ -343,29 +393,36 @@ defineExpose({ open: openPanel })
   text-align: left;
   transition: background 0.15s, color 0.15s;
 }
-.dds-option:hover { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.dds-option.highlighted { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.dds-option.active { background: rgba(224, 123, 108, 0.06); color: var(--accent); font-weight: 600; }
+.ls-select-option:hover,
+.ls-select-option.highlighted { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
+.ls-select-option.active { background: rgba(224, 123, 108, 0.1); color: var(--accent-hover); font-weight: 600; }
 
-.dds-check { flex-shrink: 0; color: var(--accent); }
+.ls-select-check { flex-shrink: 0; color: var(--accent); }
 
-.dds-empty { padding: 16px; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.ls-select-empty { padding: 16px; text-align: center; font-size: 13px; color: var(--text-secondary); }
 
-.dds-drop-enter-active {
+.ls-select-drop-enter-active {
   transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
               transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.dds-drop-leave-active {
+.ls-select-drop-leave-active {
   transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
               transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.dds-drop-enter-from,
-.dds-drop-leave-to {
+.ls-select-drop-enter-from,
+.ls-select-drop-leave-to {
   opacity: 0;
   transform: scaleY(0.9) translateY(-6px);
 }
-.dds-dropdown.up.dds-drop-enter-from,
-.dds-dropdown.up.dds-drop-leave-to {
+.ls-select-dropdown.up.ls-select-drop-enter-from,
+.ls-select-dropdown.up.ls-select-drop-leave-to {
   transform: scaleY(0.9) translateY(6px);
+}
+
+/* ── 减弱动效 ── */
+@media (prefers-reduced-motion: reduce) {
+  .ls-select-trigger,
+  .ls-select-chevron,
+  .ls-select-option { transition: none; }
 }
 </style>

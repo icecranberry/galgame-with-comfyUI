@@ -64,6 +64,11 @@
               />
             </div>
 
+            <!-- 深度思考块（可折叠） -->
+            <div v-else-if="item.msg.type === 'thinking'" class="thinking-row">
+              <ThinkingBlock :msg="item.msg" />
+            </div>
+
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
               <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
@@ -141,6 +146,21 @@
             <span class="force-img-icon">{{ imageGenModeIcon }}</span>
           </div>
           <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ imageGenModeLabel }}</span>
+        </div>
+        <div class="force-img-wrap">
+          <div
+            role="button"
+            tabindex="0"
+            class="force-img-toggle"
+            :class="{ active: deepThinkMode }"
+            :title="deepThinkLabel"
+            @keydown.enter.prevent="toggleDeepThink"
+            @keydown.space.prevent="toggleDeepThink"
+            @click="toggleDeepThink"
+          >
+            <span class="force-img-icon">🧠</span>
+          </div>
+          <span v-if="deepThinkTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ deepThinkLabel }}</span>
         </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
@@ -489,10 +509,7 @@
                     <!-- 实时显示开关 -->
                     <div class="affinity-realtime-toggle">
                       <span class="affinity-realtime-label">实时显示</span>
-                      <label class="switch">
-                        <input type="checkbox" v-model="realtimeAffinityEnabled" />
-                        <span class="slider"></span>
-                      </label>
+                      <linshe-switch v-model="realtimeAffinityEnabled" size="sm" aria-label="实时显示好感度" />
                     </div>
                   </div>
                 </template>
@@ -537,6 +554,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from '
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import ThinkingBlock from '../components/ThinkingBlock.vue'
 import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
 import GearIcon from '../components/GearIcon.vue'
@@ -546,6 +564,7 @@ import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheSwitch from '../components/LinsheSwitch.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
@@ -647,6 +666,18 @@ function cycleImageGenMode() {
   const idx = IMAGE_GEN_MODE_CYCLE.indexOf(imageGenMode.value)
   settings.setImageGenMode(IMAGE_GEN_MODE_CYCLE[(idx + 1) % IMAGE_GEN_MODE_CYCLE.length])
   showForceTip()
+}
+
+// ── 深度思考开关（planner 预规划媒介组合，思考过程流式小字 + 默认折叠）──
+const deepThinkMode = computed(() => settings.deepThinkMode)
+const deepThinkLabel = computed(() => deepThinkMode.value ? '深度思考：已开启' : '深度思考：未开启')
+const deepThinkTipVisible = ref(false)
+let deepThinkTipTimer = null
+function toggleDeepThink() {
+  settings.setDeepThinkMode(!settings.deepThinkMode)
+  deepThinkTipVisible.value = true
+  clearTimeout(deepThinkTipTimer)
+  deepThinkTipTimer = setTimeout(() => { deepThinkTipVisible.value = false }, 2000)
 }
 
 function onGiftSent(result) {
@@ -1642,7 +1673,7 @@ async function send() {
   const text = inputText.value.trim()
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text, imageGenMode.value)
+  await chat.sendMessage(text, imageGenMode.value, deepThinkMode.value)
   await scrollToBottom(true)
 }
 
@@ -1708,6 +1739,7 @@ function renderContent(text) {
 .message { display:flex; margin:3px 0; align-items:flex-start; gap:8px; }
 .message.user { flex-direction:row-reverse; }
 .message.assistant { flex-direction:row; }
+.thinking-row { margin:2px 0; }
 
 .msg-avatar {
   width:42px; height:42px; border-radius:50%; flex-shrink:0;
@@ -2157,45 +2189,6 @@ function renderContent(text) {
   background: var(--text-primary);
 }
 
-/* ── Toggle Switch ── */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #c5c0ba;
-  border-radius: 22px;
-  transition: background 0.25s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px;
-  width: 18px;
-  left: 2px;
-  bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s;
-}
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--accent);
-}
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(18px);
-}
-
 /* ── 详情编辑弹窗 ── */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 
@@ -2326,9 +2319,6 @@ function renderContent(text) {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   white-space: nowrap;
 }
-.float-switch {
-  flex-shrink: 0;
-}
 
 /* ── 预览卡片 ── */
 .preview-card {
@@ -2456,18 +2446,6 @@ function renderContent(text) {
     background: rgba(0, 0, 0, 0.04);
     color: var(--text-secondary);
     font-weight: 500;
-  }
-  .toolbar-switch {
-    width: 34px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-  .toolbar-switch .toggle-slider::before {
-    height: 14px;
-    width: 14px;
-  }
-  .toolbar-switch input:checked + .toggle-slider::before {
-    transform: translateX(16px);
   }
 
   .detail-actions { flex-wrap: wrap; gap: 8px; }
@@ -3036,24 +3014,4 @@ function renderContent(text) {
   .btn-header-settings { flex-shrink: 0; }
 }
 
-</style>
-
-<style>
-/* ── 印象弹窗内的实时显示开关缩小版 ── */
-.affinity-realtime-toggle .switch {
-  width: 32px;
-  height: 18px;
-}
-.affinity-realtime-toggle .slider {
-  border-radius: 18px;
-}
-.affinity-realtime-toggle .slider::before {
-  height: 14px;
-  width: 14px;
-  left: 2px;
-  bottom: 2px;
-}
-.affinity-realtime-toggle .switch input:checked + .slider::before {
-  transform: translateX(14px);
-}
 </style>

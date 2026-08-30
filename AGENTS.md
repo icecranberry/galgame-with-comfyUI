@@ -30,7 +30,25 @@ web-ui 中所有文本输入框 / 文本域统一使用组件 `web-ui/src/compon
 3. 尺寸用 `size="sm|md|lg"`（与 LinsheButton 对齐）；校验错误态用 `invalid` prop（红色描边），不要手写 `.xx-error` 样式；禁用用 `:disabled`
 4. 组件上遗留的 `class="fi"` 只承担部分页面的表单间距（margin/width）布局，新页面不要依赖它
 5. 特殊输入界面不套组件，保持自包含样式：聊天主输入框（`.chat-input`）、信纸 textarea（`.paper-textarea`）、透明嵌入输入（`.vn-input`、`.fav-input`、日程筛选胶囊搜索）、深色玻璃输入（TavernView `.inline-input`）、测试画风折叠输入（`.free-scene-textarea`）、提示词预览盒（`.generated-prompt-box`）
-6. 调整输入框风格只改 `LinsheInput.vue`；`App.vue` 里的全局 `input, textarea` 样式只是 select 等未组件化控件的兜底
+6. 调整输入框风格只改 `LinsheInput.vue`；`App.vue` 里的全局 `input, textarea` 样式只是少数未组件化控件的兜底
+
+## 选择框（LinsheSelect）
+
+web-ui 中所有下拉选择统一使用组件 `web-ui/src/components/LinsheSelect.vue`（原 `DropdownSelect.vue` 已改名收编），禁止手写 `<select>` 或下拉皮肤样式。
+
+1. 引入：`import LinsheSelect from '.../components/LinsheSelect.vue'`，模板中写 `<linshe-select>`；`v-model` 绑定选中值，`options` 为 `{ label, value }` 数组
+2. 触发器与 LinsheInput 同皮肤（软糖凹陷）；尺寸用 `size="sm|md|lg"`（与按钮/输入框对齐）；禁用用 `:disabled`
+3. `searchable` 开启搜索过滤；`allow-free-input` 允许自由输入（输入即值，选项仅作联想）；`ref` 拿到组件实例，已 expose `open()`（程序化展开，如获取模型列表后自动弹出）
+4. 特殊下拉界面（已有独立设计的胶囊搜索等）不套组件；调整选择框风格只改 `LinsheSelect.vue`，不要在各页面里覆盖组件皮肤
+
+## 开关（LinsheSwitch）
+
+web-ui 中所有拨动开关（toggle switch）统一使用组件 `web-ui/src/components/LinsheSwitch.vue`，禁止手写 `input[type=checkbox]` + slider 的开关皮肤（全局 `.switch`、`.toggle-switch`、`.lora-toggle-switch`、`.lora-enable-toggle`、MemorySettingsView 局部 `.switch` 等旧实现已全部收口删除）。
+
+1. 引入：`import LinsheSwitch from '.../components/LinsheSwitch.vue'`，模板中写 `<linshe-switch>`；`v-model` 绑定布尔值
+2. `@change` 在值更新后触发（参数为新布尔值）；`title` / `aria-label` 等属性透传到内部 input；禁用用 `:disabled`；需要「已启用/已禁用」这类状态文字用 `on-text` / `off-text`（传其一即显示，文字在开关左侧，不要在外面再包一层 label）
+3. 尺寸用 `size="sm|md|lg"`（默认 md），与 LinsheButton / LinsheInput 尺寸档位对齐
+4. 调整开关风格只改 `LinsheSwitch.vue`，不要在各页面里覆盖组件皮肤
 
 ## LLM 输出
 

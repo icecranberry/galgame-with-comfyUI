@@ -106,13 +106,7 @@
                 <div class="lora-trigger-row">
                   <label class="fl lora-inline-label">触发词</label>
                   <linshe-input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
-                  <label class="lora-enable-toggle" @click.stop>
-                    <span class="lora-enable-status">{{ item.enabled ? '已启用' : '已禁用' }}</span>
-                    <span class="lora-toggle-switch">
-                      <input type="checkbox" v-model="item.enabled" />
-                      <span class="lora-toggle-slider"></span>
-                    </span>
-                  </label>
+                  <linshe-switch v-model="item.enabled" size="sm" on-text="已启用" off-text="已禁用" />
                 </div>
               </div>
             </TransitionGroup>
@@ -150,6 +144,7 @@ import { ref, computed, watch, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
 import LinsheInput from './LinsheInput.vue'
+import LinsheSwitch from './LinsheSwitch.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -377,22 +372,6 @@ async function save() {
 .lora-list { display: flex; flex-direction: column; gap: 8px; }
 .lora-item-card { position: relative; background: var(--bg-primary); border: 1px solid var(--glass-border); border-radius: 12px; padding: 9px 10px 9px 12px; }
 .lora-disabled { opacity: 0.45; }
-.lora-enable-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; flex-shrink: 0; }
-.lora-enable-status { font-size: 11px; color: var(--text-secondary); letter-spacing: 0.2px; }
-.lora-toggle-switch { position: relative; width: 32px; height: 18px; flex-shrink: 0; }
-.lora-toggle-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-.lora-toggle-slider {
-  position: absolute; inset: 0; cursor: pointer;
-  background: #ccc; border-radius: 18px;
-  transition: background 180ms ease;
-}
-.lora-toggle-slider::before {
-  content: ''; position: absolute; left: 2px; top: 2px;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: #fff; transition: transform 180ms ease;
-}
-.lora-toggle-switch input:checked + .lora-toggle-slider { background: var(--accent); }
-.lora-toggle-switch input:checked + .lora-toggle-slider::before { transform: translateX(14px); }
 .lora-remove-btn {
   position: absolute; top: 6px; right: 6px; z-index: 1;
 }

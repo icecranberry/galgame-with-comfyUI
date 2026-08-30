@@ -400,13 +400,13 @@
 
         <!-- API 地址 -->
         <label class="fl llm-label" style="margin-top:14px">API 地址</label>
-        <DropdownSelect v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
+        <linshe-select v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
         <linshe-input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
         <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
         <div class="llm-model-row">
-          <DropdownSelect
+          <linshe-select
             ref="llmModelSelect"
             v-model="llmModelSelectVal"
             class="llm-model-select"
@@ -459,10 +459,7 @@
               <div class="tl">自定义请求头</div>
               <div class="td">为 OpenRouter 等中转服务附加 HTTP 请求头</div>
             </div>
-            <label class="switch" title="启用自定义请求头">
-              <input v-model="llmHeadersEnabled" type="checkbox" aria-label="启用自定义请求头" @change="markLlmDirty" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="llmHeadersEnabled" title="启用自定义请求头" aria-label="启用自定义请求头" @change="markLlmDirty" />
           </div>
           <div v-if="llmHeadersEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-headers">请求头 JSON</label>
@@ -484,10 +481,7 @@
               <div class="tl">自定义请求体</div>
               <div class="td">注入 agent 等额外 body 参数；同名字段会覆盖内置参数</div>
             </div>
-            <label class="switch" title="启用自定义请求体">
-              <input v-model="llmExtraBodyEnabled" type="checkbox" aria-label="启用自定义请求体" @change="markLlmDirty" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="llmExtraBodyEnabled" title="启用自定义请求体" aria-label="启用自定义请求体" @change="markLlmDirty" />
           </div>
           <div v-if="llmExtraBodyEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-body">请求体 JSON</label>
@@ -509,10 +503,7 @@
               <div class="tl">后台 LLM 任务队列</div>
               <div class="td">限制LLM并发数量，避免本地 LLM 过载导致雪崩</div>
             </div>
-            <label class="switch">
-              <input type="checkbox" v-model="features.serializeBackgroundLLM" @change="markLlmDirty()" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="features.serializeBackgroundLLM" @change="markLlmDirty()" />
           </div>
           <div v-if="features.serializeBackgroundLLM" class="toggle-row freq-row llm-option-row" style="margin-top:8px">
             <div>
@@ -531,10 +522,7 @@
               <div class="tl">合并消息兼容更多llm模板</div>
               <div class="td">合并连续Assistant或User消息，解决 LM Studio本地模型或其他llm的模板冲突</div>
             </div>
-            <label class="switch">
-              <input type="checkbox" v-model="features.mergeMessages" @change="markLlmDirty()" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="features.mergeMessages" @change="markLlmDirty()" />
           </div>
             </div>
           </CollapseTransition>
@@ -608,10 +596,7 @@
             <div class="tl">好感度系统</div>
             <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
         </div>
 
         <div class="toggle-row">
@@ -619,10 +604,7 @@
             <div class="tl">聊天候选词</div>
             <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
         </div>
 
         <div class="toggle-row">
@@ -630,10 +612,7 @@
             <div class="tl">实时显示好感度</div>
             <div class="td">在聊天顶部实时显示当前好感度数值和最近变化原因</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
         </div>
 
         <div class="toggle-row freq-row">
@@ -676,10 +655,7 @@
             title="防打扰设置"
             @click="openDisturbDialog"
           ><gear-icon :size="17" /></div>
-          <label class="switch">
-            <input type="checkbox" v-model="disturbMode" @change="onDisturbModeToggle" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="disturbMode" @change="onDisturbModeToggle" />
         </div>
 
         <!-- 实时天气 -->
@@ -694,10 +670,7 @@
             title="设置城市"
             @click="openWeatherCityDialog"
           ><gear-icon :size="17" /></div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.weather" @change="saveFeature('weather', features.weather)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.weather" @change="saveFeature('weather', features.weather)" />
         </div>
       </div>
 
@@ -734,15 +707,7 @@
           <div class="memory-settings-copy">
             <div class="tl">启用聊天记忆</div>
           </div>
-          <label class="switch" title="启用聊天记忆">
-            <input
-              type="checkbox"
-              v-model="features.memory"
-              aria-label="启用聊天记忆"
-              @change="saveFeature('memory', features.memory)"
-            />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.memory" title="启用聊天记忆" aria-label="启用聊天记忆" @change="saveFeature('memory', features.memory)" />
         </div>
 
         <div
@@ -914,18 +879,12 @@
                 <label class="disturb-option-row">
                   <span class="disturb-option-label">隐藏世界观</span>
                   <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
-                  <label class="switch">
-                    <input type="checkbox" v-model="disturbDialog.hideWorld" />
-                    <span class="slider"></span>
-                  </label>
+                  <linshe-switch v-model="disturbDialog.hideWorld" aria-label="隐藏世界观" />
                 </label>
                 <label class="disturb-option-row">
                   <span class="disturb-option-label">跳过周末</span>
                   <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
-                  <label class="switch">
-                    <input type="checkbox" v-model="disturbDialog.skipWeekends" />
-                    <span class="slider"></span>
-                  </label>
+                  <linshe-switch v-model="disturbDialog.skipWeekends" aria-label="跳过周末" />
                 </label>
               </div>
 
@@ -1030,12 +989,13 @@ import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLl
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from '../components/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
 import LinsheButton from '../components/LinsheButton.vue'
 import LinsheInput from '../components/LinsheInput.vue'
+import LinsheSwitch from '../components/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()
@@ -2224,11 +2184,6 @@ function resetTestPrompts() {
 }
 .memory-settings-copy { flex: 1; min-width: 0; }
 .memory-settings-row { margin-top: 6px; }
-.memory-settings-row .switch { height: 44px; }
-.memory-settings-row .slider { top: 10px; bottom: 10px; }
-.memory-settings-row .switch input:focus-visible + .slider {
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.2);
-}
 .memory-settings-entry {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;
@@ -2911,7 +2866,7 @@ function resetTestPrompts() {
 .free-egg-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 .free-egg-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.75; margin-top: 2px; }
 .llm-model-row { display: flex; align-items: stretch; gap: 8px; margin-bottom: 14px; }
-.llm-model-row .dds-wrapper { flex: 1; min-width: 0; }
+.llm-model-row .ls-select-wrapper { flex: 1; min-width: 0; }
 .model-fetch-btn {
   min-width: 82px;
   padding: 0 12px;
@@ -2971,8 +2926,6 @@ function resetTestPrompts() {
 .thinking-setting,
 .llm-custom-toggle,
 .llm-option-row { border-bottom: none; }
-.llm-custom-toggle .switch { height: 44px; }
-.llm-custom-toggle .slider { top: 10px; bottom: 10px; }
 .llm-custom-editor { padding: 4px 0 2px; }
 .llm-json-textarea { min-height: 72px; font-family: monospace; font-size: 12px; resize: vertical; }
 .llm-label { font-size: 13px; font-weight: 600; color: var(--text-bright); }

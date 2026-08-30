@@ -33,12 +33,12 @@
         <section class="card">
           <div class="section-title">
             <div><h3>自定义智能匹配（可选）</h3><p>系统已有默认模型；开启并完整填写后，会优先使用你的模型。</p></div>
-            <label class="switch"><input v-model="form.embedding.enabled" type="checkbox" aria-label="使用自定义智能匹配模型"><span></span></label>
+            <linshe-switch v-model="form.embedding.enabled" aria-label="使用自定义智能匹配模型" />
           </div>
           <CollapseTransition :show="form.embedding.enabled">
             <div class="collapse-body">
             <label>服务商
-              <DropdownSelect
+              <linshe-select
                 class="memory-select"
                 :model-value="form.embedding.provider"
                 :options="embeddingProviderOptions"
@@ -63,12 +63,12 @@
         <section class="card">
           <div class="section-title">
             <div><h3>自定义结果排序（可选）</h3><p>系统已有默认排序模型；开启并完整填写后，会优先使用你的模型。</p></div>
-            <label class="switch"><input v-model="form.reranker.enabled" type="checkbox" aria-label="使用自定义结果排序模型"><span></span></label>
+            <linshe-switch v-model="form.reranker.enabled" aria-label="使用自定义结果排序模型" />
           </div>
           <CollapseTransition :show="form.reranker.enabled">
             <div class="collapse-body">
             <label>服务商
-              <DropdownSelect
+              <linshe-select
                 class="memory-select"
                 :model-value="form.reranker.provider"
                 :options="rerankerProviderOptions"
@@ -94,7 +94,7 @@
       <section class="card" style="margin-top: 16px;">
         <div class="section-title">
           <div><h3>未互动奇遇记忆</h3><p>关闭后，角色经历但用户未参与的奇遇在结束总结时不再写入聊天记忆（RAG），但仍会归档到往期奇遇。</p></div>
-          <label class="switch"><input v-model="form.recordUnengagedEvents" type="checkbox" aria-label="RAG不记录未互动奇遇"><span></span></label>
+          <linshe-switch v-model="form.recordUnengagedEvents" aria-label="RAG不记录未互动奇遇" />
         </div>
       </section>
 
@@ -131,7 +131,7 @@
         </div>
         <div class="memory-filters">
           <label>选择角色
-            <DropdownSelect
+            <linshe-select
               class="memory-select"
               :model-value="memoryFilters.conversationId"
               :options="characterOptions"
@@ -142,7 +142,7 @@
             />
           </label>
           <label>记忆类型
-            <DropdownSelect
+            <linshe-select
               class="memory-select"
               :model-value="memoryFilters.memoryType"
               :options="memoryTypeOptions"
@@ -150,7 +150,7 @@
             />
           </label>
           <label>使用状态
-            <DropdownSelect
+            <linshe-select
               class="memory-select"
               :model-value="memoryFilters.status"
               :options="memoryStatusOptions"
@@ -209,7 +209,7 @@
           <label>聊天内容<linshe-input v-model.trim="recallQuery" placeholder="例如：我最喜欢什么食物？" @keyup.enter="runRecallTest" /></label>
           <label>选择角色（可不选）
             <div class="recall-inline">
-              <DropdownSelect
+              <linshe-select
                 v-model="recallConversationId"
                 class="memory-select"
                 :options="characterOptions"
@@ -273,10 +273,11 @@
 <script setup>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from '../components/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import LinsheButton from '../components/LinsheButton.vue'
 import LinsheInput from '../components/LinsheInput.vue'
+import LinsheSwitch from '../components/LinsheSwitch.vue'
 import {
   deleteMemoryFragment,
   getMemoryConfig,
@@ -742,11 +743,6 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .list-leave-active { position: absolute; left: 0; right: 0; }
 .list-move { transition: transform .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
 .list-enter-from, .list-leave-to { opacity: 0; }
-code { font-family: ui-monospace, monospace; }
-.switch { margin: 0; position: relative; width: 42px; height: 24px; cursor: pointer; }
-.switch input { display: none; }.switch span { position: absolute; inset: 0; border-radius: 14px; background: #c9c3ba; transition: .2s; }
-.switch span::after { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: white; transition: .2s; }
-.switch input:checked + span { background: var(--accent); }.switch input:checked + span::after { transform: translateX(18px); }
 code { font-family: ui-monospace, monospace; }
 @media (max-width: 800px) {
   .memory-page { padding: 16px; }

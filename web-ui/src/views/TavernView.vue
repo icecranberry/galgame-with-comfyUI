@@ -2255,55 +2255,6 @@ onMounted(async () => {
   text-decoration: underline;
 }
 
-/* ── Toggle Switch ── */
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.toggle-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-bright);
-}
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #c5c0ba;
-  border-radius: 22px;
-  transition: background 0.25s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px;
-  width: 18px;
-  left: 2px;
-  bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s;
-}
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--accent);
-}
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(18px);
-}
-
 /* ── 角色详情弹窗 ── */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 
@@ -2477,9 +2428,6 @@ onMounted(async () => {
 .float-label {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   white-space: nowrap;
-}
-.float-switch {
-  flex-shrink: 0;
 }
 .float-card-btn {
   cursor: pointer;
@@ -2674,18 +2622,6 @@ onMounted(async () => {
     background: rgba(0, 0, 0, 0.04);
     color: var(--text-secondary);
     font-weight: 500;
-  }
-  .toolbar-switch {
-    width: 34px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-  .toolbar-switch .toggle-slider::before {
-    height: 14px;
-    width: 14px;
-  }
-  .toolbar-switch input:checked + .toggle-slider::before {
-    transform: translateX(16px);
   }
   .toolbar-badge {
     font-size: 10px;

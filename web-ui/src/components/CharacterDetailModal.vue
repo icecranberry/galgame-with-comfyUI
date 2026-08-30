@@ -14,24 +14,15 @@
             <div class="mobile-detail-toolbar" v-if="isMobile">
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
               </div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不主动聊天</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.proactiveDisabled" size="sm" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
               </div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不发生奇遇</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
               </div>
               <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
                 <span>设置 Lora</span>
@@ -168,24 +159,15 @@
             <div class="float-panel-body">
               <div class="float-row">
                 <span class="float-label">不看ta的朋友圈</span>
-                <label class="toggle-switch float-switch">
-                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.momentsDisabled" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
               </div>
               <div class="float-row">
                 <span class="float-label">不主动聊天</span>
-                <label class="toggle-switch float-switch">
-                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.proactiveDisabled" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
               </div>
               <div class="float-row">
                 <span class="float-label">不发生奇遇</span>
-                <label class="toggle-switch float-switch">
-                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.eventsDisabled" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
               </div>
               <div class="float-row float-row-action" @click="openLoraModal">
                 <span class="float-label">设置 Lora</span>
@@ -302,7 +284,7 @@
               </label>
                 <Transition name="lora-expand">
                   <div v-if="customWorkflowEnabled" class="lora-workflow-select">
-                    <DropdownSelect v-model="editingCustomWorkflow" :options="customWorkflowOptions" placeholder="请选择自定义工作流（放在workflows文件夹下）" />
+                    <linshe-select v-model="editingCustomWorkflow" :options="customWorkflowOptions" placeholder="请选择自定义工作流（放在workflows文件夹下）" />
                     <p class="form-hint">单人图片才会启用自定工作流，可以给某个角色单独设置完全自由的工作流，同样会默认注入长、宽、画师串、画面描述、lora（如果设置了），不需要的节点可以去掉。</p>
                   </div>
                 </Transition>
@@ -417,9 +399,10 @@
 import { ref, reactive, computed, watch, inject } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from '../components/LinsheSelect.vue'
 import LinsheButton from './LinsheButton.vue'
 import LinsheInput from './LinsheInput.vue'
+import LinsheSwitch from './LinsheSwitch.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -966,35 +949,6 @@ async function saveOutfits() {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;align-items: center;
 }
 
-/* ═══ Toggle Switch ═══ */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #c5c0ba;
-  border-radius: 22px;
-  transition: background 0.25s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px; width: 18px;
-  left: 2px; bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s;
-}
-.toggle-switch input:checked + .toggle-slider { background: var(--accent); }
-.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
-
 /* ═══ 详情编辑 ═══ */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 
@@ -1094,7 +1048,6 @@ async function saveOutfits() {
   gap: 12px; padding: 8px 10px;
 }
 .float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
-.float-switch { flex-shrink: 0; }
 .float-row-action {
   margin-top: 2px; padding: 8px 10px;
   border-radius: 10px; cursor: pointer;
@@ -1252,9 +1205,6 @@ async function saveOutfits() {
   .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(224, 123, 108, 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
   .toolbar-item:active { background: rgba(224, 123, 108, 0.16); }
   .toolbar-item-toggle { cursor: default; justify-content: space-between; background: rgba(0, 0, 0, 0.04); color: var(--text-secondary); font-weight: 500; }
-  .toolbar-switch { width: 34px; height: 18px; flex-shrink: 0; }
-  .toolbar-switch .toggle-slider::before { height: 14px; width: 14px; }
-  .toolbar-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
   .toolbar-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); flex-shrink: 0; }
   .toolbar-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
 
