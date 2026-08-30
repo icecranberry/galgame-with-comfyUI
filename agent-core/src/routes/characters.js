@@ -27,33 +27,47 @@ const router = Router();
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
   const db = getDb();
-  const characters = db.prepare(`SELECT * FROM characters`).all();
+  const characters = db.prepare('SELECT * FROM characters').all();
+
+  // 聚合查询代替每角色 4 条子查询（N+1 → 固定 4 条，规模不随角色数增长）
+  const lastByConv = db.prepare(`
+    SELECT conversation_id, content, created_at FROM (
+      SELECT conversation_id, content, created_at,
+             ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY id DESC) AS rn
+      FROM messages
+      WHERE raw_id IS NOT NULL AND conversation_id LIKE 'char_%'
+    ) WHERE rn = 1
+  `).all();
+  const countsByConv = db.prepare(`
+    SELECT conversation_id, COUNT(*) AS c FROM raw_messages
+    WHERE conversation_id LIKE 'char_%' GROUP BY conversation_id
+  `).all();
+  const relCounts = db.prepare(`
+    SELECT id, COUNT(*) AS relationship_count FROM (
+      SELECT from_character_id AS id FROM character_relationships
+      UNION ALL
+      SELECT to_character_id AS id FROM character_relationships
+    ) GROUP BY id
+  `).all();
+  const userRels = db.prepare(
+    'SELECT character_id, affinity, is_oath FROM user_relationships'
+  ).all();
+
+  const lastMap = new Map(lastByConv.map(r => [r.conversation_id, r]));
+  const countMap = new Map(countsByConv.map(r => [r.conversation_id, r.c]));
+  const relMap = new Map(relCounts.map(r => [r.id, r.relationship_count]));
+  const userRelMap = new Map(userRels.map(r => [r.character_id, r]));
 
   const enriched = characters.map(c => {
     const convId = `char_${c.id}`;
-    const last = db.prepare(`
-      SELECT role, content, created_at FROM messages
-      WHERE conversation_id = ? AND raw_id IS NOT NULL
-      ORDER BY id DESC LIMIT 1
-    `).get(convId);
-
-    const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ?`).get(convId);
-
-    const relCount = db.prepare(`
-      SELECT COUNT(*) as c FROM character_relationships
-      WHERE from_character_id = ? OR to_character_id = ?
-    `).pluck().get(c.id, c.id);
-
-    const userRel = db.prepare(
-      'SELECT affinity, is_oath FROM user_relationships WHERE character_id = ?'
-    ).get(c.id);
-
+    const last = lastMap.get(convId);
+    const userRel = userRelMap.get(c.id);
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
       last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
-      message_count: count?.c || 0,
-      relationship_count: relCount || 0,
+      message_count: countMap.get(convId) || 0,
+      relationship_count: relMap.get(c.id) || 0,
       affinity: userRel?.affinity ?? 50,
       is_oath: userRel?.is_oath ?? 0,
     };

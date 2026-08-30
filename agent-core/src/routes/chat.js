@@ -946,23 +946,30 @@ ${coreRules}
     const rawContent = fullContent
       .replace(/<needImage>/gi, '')
       .trim();
-    const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
-      .run(conversationId, rawContent, tags.prompt || null);
+    // prepare 提到循环外 + 事务包裹：语句只编译一次，段落数增长时仍常数开销
+    const insertRawStmt = db.prepare('INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, ?, ?, ?)');
+    const insertMsgStmt = db.prepare('INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, ?, ?, ?)');
+    const saveSegments = db.transaction((segs, rawId) => {
+      const ids = [];
+      for (let i = 0; i < segs.length; i++) {
+        const r = insertMsgStmt.run(conversationId, rawId, 'assistant', segs[i], i);
+        ids.push(r.lastInsertRowid);
+      }
+      return ids;
+    });
+
+    const rawResult = insertRawStmt.run(conversationId, 'assistant', rawContent, tags.prompt || null);
     const rawMsgId = rawResult.lastInsertRowid;
 
     const savedIds = [];
-    for (let i = 0; i < segments.length; i++) {
-      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, ?)`)
-        .run(conversationId, rawMsgId, segments[i], i);
-      savedIds.push(r.lastInsertRowid);
-      send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
+    for (const id of saveSegments(segments, rawMsgId)) {
+      savedIds.push(id);
+      send('msg_saved', { id, role: 'assistant', created_at: new Date().toISOString() });
     }
     if (segments.length === 0) {
       // 兜底：AI 没有返回有效文本
-      const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
-        .run(conversationId, '...');
-      const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-        .run(conversationId, rawEmpty.lastInsertRowid, '...');
+      const rawEmpty = insertRawStmt.run(conversationId, 'assistant', '...', null);
+      const r = insertMsgStmt.run(conversationId, rawEmpty.lastInsertRowid, 'assistant', '...', 0);
       savedIds.push(r.lastInsertRowid);
       send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
     }

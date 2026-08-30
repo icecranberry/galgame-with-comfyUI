@@ -52,7 +52,14 @@ app.use(compression()); // 聊天历史等大 JSON 响应启用 gzip
 app.use(express.json({ limit: '10mb' }));
 
 // 静态文件（Vue 前端，构建后）
-app.use(express.static('public'));
+// 带内容哈希的资源（/assets/*、/fonts/* 切片）可长缓存；index.html 保持可即时更新
+app.use(express.static('public', {
+  setHeaders(res, filePath) {
+    if (filePath.includes(`${path.sep}assets${path.sep}`) || filePath.includes(`${path.sep}fonts${path.sep}`)) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000'); // 30d
+    }
+  },
+}));
 
 // 图片编辑任务暂存预览（重新生成 / HiresFix 细化确认前）
 app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
