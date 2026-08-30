@@ -34,12 +34,13 @@
             <span>为 {{ selectedCharacter?.display_name }} 触发奇遇</span>
             <linshe-button variant="icon" class="custom-modal-close" @click="showCustomModal = false">✕</linshe-button>
           </div>
-          <textarea
+          <linshe-input
+            type="textarea"
             v-model="customEventText"
             class="custom-modal-input"
             placeholder="输入事件动机，让角色按你的想法展开故事…（留空直接点「随机奇遇」）"
             rows="4"
-          ></textarea>
+          />
           <div class="custom-modal-actions">
             <linshe-button variant="secondary" class="btn-random" @click="confirmGenerate(false)" :disabled="stirring">
               🎲 随机奇遇
@@ -145,6 +146,7 @@ import * as api from '../api/index.js'
 import EventCard from '../components/EventCard.vue'
 import LibraryModal from '../components/LibraryModal.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const store = useEventsStore()
@@ -463,16 +465,9 @@ function onScroll() {
 }
 .custom-modal-input {
   width: 100%; box-sizing: border-box;
-  border: 1px solid var(--glass-border);
-  border-radius: 12px; padding: 14px;
-  font-size: 14px; font-family: inherit;
-  color: var(--text-primary);
-  background: rgba(0,0,0,0.02);
-  resize: vertical; min-height: 80px;
-  outline: none; transition: border-color 0.2s;
+  padding: 14px;
+  min-height: 80px;
 }
-.custom-modal-input:focus { border-color: var(--accent); }
-.custom-modal-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
 .custom-modal-actions {
   display: flex; gap: 12px; margin-top: 18px;
 }

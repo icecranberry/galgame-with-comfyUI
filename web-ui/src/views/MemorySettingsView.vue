@@ -46,14 +46,14 @@
                 @update:model-value="selectEmbeddingProvider"
               />
             </label>
-            <label>服务地址<input v-model.trim="form.embedding.baseURL" placeholder="https://api.openai.com/v1"></label>
-            <label>模型名称<input v-model.trim="form.embedding.model" placeholder="text-embedding-3-small"></label>
-            <label>访问密钥（API Key）<input v-model="form.embedding.apiKey" type="password" :placeholder="embeddingKeyHint"></label>
+            <label>服务地址<linshe-input v-model.trim="form.embedding.baseURL" placeholder="https://api.openai.com/v1" /></label>
+            <label>模型名称<linshe-input v-model.trim="form.embedding.model" placeholder="text-embedding-3-small" /></label>
+            <label>访问密钥（API Key）<linshe-input v-model="form.embedding.apiKey" type="password" :placeholder="embeddingKeyHint" /></label>
             <div class="two-col">
-              <label>结果维度（可不填）<input v-model.number="form.embedding.dimensions" type="number" min="1"></label>
-              <label>最长等待时间（毫秒）<input v-model.number="form.embedding.timeoutMs" type="number" min="1000"></label>
+              <label>结果维度（可不填）<linshe-input v-model.number="form.embedding.dimensions" type="number" min="1" /></label>
+              <label>最长等待时间（毫秒）<linshe-input v-model.number="form.embedding.timeoutMs" type="number" min="1000" /></label>
             </div>
-            <label>高级请求设置（JSON）<textarea v-model="embeddingHeaders" rows="3"></textarea></label>
+            <label>高级请求设置（JSON）<linshe-input type="textarea" v-model="embeddingHeaders" rows="3" /></label>
             <linshe-button variant="secondary" :disabled="testingEmbedding" @click="testEmbedding">{{ testingEmbedding ? '测试中…' : '测试智能匹配' }}</linshe-button>
             </div>
           </CollapseTransition>
@@ -76,14 +76,14 @@
                 @update:model-value="selectRerankerProvider"
               />
             </label>
-            <label>服务地址<input v-model.trim="form.reranker.baseURL" placeholder="https://api.jina.ai/v1"></label>
-            <label>模型名称<input v-model.trim="form.reranker.model" placeholder="jina-reranker-v2-base-multilingual"></label>
-            <label>访问密钥（API Key）<input v-model="form.reranker.apiKey" type="password" :placeholder="rerankerKeyHint"></label>
+            <label>服务地址<linshe-input v-model.trim="form.reranker.baseURL" placeholder="https://api.jina.ai/v1" /></label>
+            <label>模型名称<linshe-input v-model.trim="form.reranker.model" placeholder="jina-reranker-v2-base-multilingual" /></label>
+            <label>访问密钥（API Key）<linshe-input v-model="form.reranker.apiKey" type="password" :placeholder="rerankerKeyHint" /></label>
             <div class="two-col">
-              <label>保留几条结果<input v-model.number="form.reranker.topN" type="number" min="1" max="50"></label>
-              <label>最长等待时间（毫秒）<input v-model.number="form.reranker.timeoutMs" type="number" min="1000"></label>
+              <label>保留几条结果<linshe-input v-model.number="form.reranker.topN" type="number" min="1" max="50" /></label>
+              <label>最长等待时间（毫秒）<linshe-input v-model.number="form.reranker.timeoutMs" type="number" min="1000" /></label>
             </div>
-            <label>高级请求设置（JSON）<textarea v-model="rerankerHeaders" rows="3"></textarea></label>
+            <label>高级请求设置（JSON）<linshe-input type="textarea" v-model="rerankerHeaders" rows="3" /></label>
             <linshe-button variant="secondary" :disabled="testingReranker" @click="testReranker">{{ testingReranker ? '测试中…' : '测试结果优化' }}</linshe-button>
             </div>
           </CollapseTransition>
@@ -101,9 +101,9 @@
       <section class="card params">
         <h3>查找范围</h3>
         <div class="three-col">
-          <label>每次最多使用几条记忆<input v-model.number="form.topK" type="number" min="1" max="20"></label>
-          <label>按文字查找的数量<input v-model.number="form.textCandidates" type="number" min="5" max="100"></label>
-          <label>按意思查找的数量<input v-model.number="form.vectorCandidates" type="number" min="5" max="100"></label>
+          <label>每次最多使用几条记忆<linshe-input v-model.number="form.topK" type="number" min="1" max="20" /></label>
+          <label>按文字查找的数量<linshe-input v-model.number="form.textCandidates" type="number" min="5" max="100" /></label>
+          <label>按意思查找的数量<linshe-input v-model.number="form.vectorCandidates" type="number" min="5" max="100" /></label>
         </div>
         <p>当前方式：优先使用完整的自定义配置，否则自动使用系统默认或本地模型。</p>
       </section>
@@ -206,7 +206,7 @@
           <div class="manager-heading">
             <div><h3>测试能否想起</h3><p>输入一段聊天内容，看看角色会找到哪些相关记忆。</p></div>
           </div>
-          <label>聊天内容<input v-model.trim="recallQuery" placeholder="例如：我最喜欢什么食物？" @keyup.enter="runRecallTest"></label>
+          <label>聊天内容<linshe-input v-model.trim="recallQuery" placeholder="例如：我最喜欢什么食物？" @keyup.enter="runRecallTest" /></label>
           <label>选择角色（可不选）
             <div class="recall-inline">
               <DropdownSelect
@@ -276,6 +276,7 @@ import { useRouter } from 'vue-router'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 import {
   deleteMemoryFragment,
   getMemoryConfig,
@@ -667,9 +668,10 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs(
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .section-title { display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px; }
 label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 12px; }
-input, textarea { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid #e2d6c7; border-radius: 8px; background: rgba(255,255,255,.9); color: var(--text-bright); font: inherit; }
+/* .ls-input 提升特异性：确保能压过 LinsheInput 组件自身的类选择器 */
+input.ls-input, textarea.ls-input { margin-top: 6px; }
 .memory-select { margin-top: 6px; }
-textarea { resize: vertical; font-family: ui-monospace, monospace; }
+textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .two-col, .three-col { display: grid; gap: 12px; }
 .two-col { grid-template-columns: 1fr 1fr; }
 .three-col { grid-template-columns: repeat(3, 1fr); }

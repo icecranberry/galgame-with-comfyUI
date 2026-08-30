@@ -139,7 +139,7 @@
     <!-- 回复输入 -->
     <div class="reply-input-wrapper" :class="{ open: showReplyInput }">
       <div class="comment-input-row">
-        <input
+        <linshe-input
           ref="commentInput"
           v-model="commentText"
           class="comment-input"
@@ -169,6 +169,7 @@ import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { userNickname } from '../userConfig.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -541,15 +542,7 @@ function formatTime(iso) {
 .comment-input {
   flex: 1;
   padding: 8px 12px;
-  font-size: 13px;
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid var(--glass-border);
-  border-radius: 10px;
-  color: var(--text-bright);
-  outline: none;
-  transition: border-color 0.15s;
 }
-.comment-input:focus { border-color: var(--accent); }
 /* 发送按钮皮肤由 LinsheButton(variant="primary" size="sm") 提供，这里只保留布局属性 */
 .comment-send {
   flex-shrink: 0;

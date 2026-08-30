@@ -16,14 +16,15 @@
           <div class="gen-section">
             <div class="gen-row">
               <div class="gen-input-wrap">
-                <textarea
+                <linshe-input
                   ref="directionInput"
                   @keydown.enter.exact.prevent="onDirectionEnter"
                   v-model="direction"
                   class="gen-input"
+                  type="textarea"
                   rows="2"
                   :placeholder="isEvents ? '输入想要生成的方向，如「校园生活」「赛博都市日常」「雨季独处」…（留空生成通用类型）' : '输入想要生成的方向，如「校园」「美食探店」「深夜emo」…（留空生成通用话题）'"
-                ></textarea>
+                />
                 <div v-if="generating" class="scan-overlay">
                   <div class="scan-line"></div>
                   <div class="scan-text">幻想中…</div>
@@ -62,15 +63,15 @@
                     <div v-if="item._editing" class="edit-form">
                       <label class="edit-field">
                         <span class="edit-label">名称</span>
-                        <input v-model.trim="item.name" class="edit-input" placeholder="名称" />
+                        <linshe-input v-model.trim="item.name" class="edit-input" size="sm" placeholder="名称" />
                       </label>
                       <label v-if="isEvents" class="edit-field">
                         <span class="edit-label">标签（逗号分隔）</span>
-                        <input v-model="item.funFromText" class="edit-input" placeholder="如 小确幸, 日常感" />
+                        <linshe-input v-model="item.funFromText" class="edit-input" size="sm" placeholder="如 小确幸, 日常感" />
                       </label>
                       <label class="edit-field">
                         <span class="edit-label">描述</span>
-                        <textarea v-model.trim="item.desc" class="edit-input edit-textarea" rows="6"></textarea>
+                        <linshe-input v-model.trim="item.desc" class="edit-input edit-textarea" type="textarea" rows="6" />
                       </label>
                     </div>
                     <div v-else class="card-main">
@@ -159,6 +160,7 @@ import LibraryItemCard from './LibraryItemCard.vue'
 import CollapseTransition from './CollapseTransition.vue'
 import CardHeightTransition from './CardHeightTransition.vue'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -470,14 +472,9 @@ function addItem() {
 .gen-input-wrap { position: relative; flex: 1; min-width: 0; }
 .gen-input-wrap .gen-input { width: 100%; box-sizing: border-box; }
 .gen-input {
-  flex: 1; resize: vertical; min-height: 48px;
-  border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  border-radius: 12px; padding: 10px 12px;
-  font-size: 13px; font-family: inherit; color: var(--text-primary, #333);
-  background: rgba(0,0,0,0.02); outline: none;
+  flex: 1; min-height: 48px;
+  padding: 10px 12px;
 }
-.gen-input:focus { border-color: var(--accent, #e07b6c); }
-.gen-input::placeholder { color: var(--text-secondary, #888); opacity: 0.6; }
 
 /* ── 生成中扫描线（酒馆同款）── */
 .scan-overlay {
@@ -584,13 +581,9 @@ function addItem() {
 .edit-field { display: flex; flex-direction: column; gap: 4px; }
 .edit-label { font-size: 11px; color: var(--text-secondary, #888); }
 .edit-input {
-  border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  border-radius: 8px; padding: 6px 8px;
-  font-size: 12px; font-family: inherit; color: var(--text-primary, #333);
-  background: rgba(0,0,0,0.02); outline: none; box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px; box-sizing: border-box;
 }
-.edit-input:focus { border-color: var(--accent, #e07b6c); }
-.edit-textarea { resize: vertical; }
 
 .empty-hint {
   grid-column: 1 / -1;

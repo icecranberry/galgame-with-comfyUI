@@ -14,7 +14,7 @@
         <h3>连接设置</h3>
         <label class="fl" for="webui-token">MaiBot WebUI Token</label>
         <div class="token-field">
-          <input
+          <linshe-input
             id="webui-token"
             v-model.trim="webuiToken"
             :type="showWebuiToken ? 'text' : 'password'"
@@ -22,7 +22,7 @@
             placeholder="填写 MaiBot WebUI 的访问 Token"
             @change="saveSettings"
             @keyup.enter="saveSettings"
-          >
+          />
           <linshe-button
             variant="icon"
             size="sm"
@@ -112,9 +112,9 @@
           <div class="advanced-body">
 
             <label class="fl" for="poll-interval">生图任务轮询间隔（秒）</label>
-            <input id="poll-interval" v-model.number="pollInterval" type="number" class="fi" min="0.5" step="0.5" @change="savePluginConfig">
+            <linshe-input id="poll-interval" v-model.number="pollInterval" type="number" class="fi" min="0.5" step="0.5" @change="savePluginConfig" />
             <label class="fl" for="poll-timeout">生图任务轮询超时（秒）</label>
-            <input id="poll-timeout" v-model.number="pollTimeout" type="number" class="fi" min="10" step="10" @change="savePluginConfig">
+            <linshe-input id="poll-timeout" v-model.number="pollTimeout" type="number" class="fi" min="10" step="10" @change="savePluginConfig" />
           </div>
         </details>
       </section>
@@ -131,13 +131,13 @@
       <div class="persona-grid">
         <div class="persona-main">
           <label class="fl" for="base-prompt-input">人格卡片</label>
-          <textarea id="base-prompt-input" v-model="basePromptInput" class="fi persona-textarea" rows="22"></textarea>
+          <linshe-input id="base-prompt-input" type="textarea" v-model="basePromptInput" class="fi persona-textarea" rows="22" />
         </div>
         <div class="persona-side">
           <label class="fl" for="reply-style-input">表达风格</label>
-          <textarea id="reply-style-input" v-model="replyStyleInput" class="fi persona-textarea-sm" rows="6"></textarea>
+          <linshe-input id="reply-style-input" type="textarea" v-model="replyStyleInput" class="fi persona-textarea-sm" rows="6" />
           <label class="fl" for="behavior-style-input">行为风格</label>
-          <textarea id="behavior-style-input" v-model="behaviorStyleInput" class="fi persona-textarea-sm" rows="6"></textarea>
+          <linshe-input id="behavior-style-input" type="textarea" v-model="behaviorStyleInput" class="fi persona-textarea-sm" rows="6" />
         </div>
       </div>
       <div class="card-actions">
@@ -165,6 +165,7 @@ import { computed, inject, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 import {
   maibotDeleteLatestMemory,
   maibotDeriveStyle,
@@ -556,13 +557,7 @@ onMounted(loadAll)
 .fd b { color: var(--accent); font-weight: 600; }
 .hint-line { margin-top: 10px; }
 
-.fi {
-  width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px;
-  border-radius: 8px; background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #e2d6c7; color: var(--text-bright); outline: none;
-}
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
-textarea.fi { font-family: inherit; resize: vertical; }
+.fi { margin-bottom: 14px; }
 
 /* ── Token 显示/隐藏 ── */
 .token-field { position: relative; margin-bottom: 14px; }

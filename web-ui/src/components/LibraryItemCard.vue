@@ -6,15 +6,15 @@
       <div v-if="item._editing" class="edit-form">
         <label class="edit-field">
           <span class="edit-label">名称</span>
-          <input v-model.trim="item.name" class="edit-input" placeholder="名称" />
+          <linshe-input v-model.trim="item.name" class="edit-input" size="sm" placeholder="名称" />
         </label>
         <label v-if="isEvents" class="edit-field">
           <span class="edit-label">标签（逗号分隔）</span>
-          <input v-model="funFromText" class="edit-input" placeholder="如 小确幸, 日常感" />
+          <linshe-input v-model="funFromText" class="edit-input" size="sm" placeholder="如 小确幸, 日常感" />
         </label>
         <label class="edit-field">
           <span class="edit-label">描述</span>
-          <textarea v-model.trim="item.desc" class="edit-input edit-textarea" rows="6"></textarea>
+          <linshe-input v-model.trim="item.desc" class="edit-input edit-textarea" type="textarea" rows="6" />
         </label>
       </div>
 
@@ -41,6 +41,7 @@
 import { ref, watch } from 'vue'
 import CardHeightTransition from './CardHeightTransition.vue'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -94,11 +95,7 @@ function onToggleEdit() {
 .edit-field { display: flex; flex-direction: column; gap: 4px; }
 .edit-label { font-size: 11px; color: var(--text-secondary, #888); }
 .edit-input {
-  border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  border-radius: 8px; padding: 6px 8px;
-  font-size: 12px; font-family: inherit; color: var(--text-primary, #333);
-  background: rgba(0,0,0,0.02); outline: none; box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px; box-sizing: border-box;
 }
-.edit-input:focus { border-color: var(--accent, #e07b6c); }
-.edit-textarea { resize: vertical; }
 </style>

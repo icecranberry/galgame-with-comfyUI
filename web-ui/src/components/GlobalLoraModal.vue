@@ -18,7 +18,7 @@
                   <div class="form-group lora-path-group">
                     <label class="fl lora-inline-label">文件路径</label>
                     <div class="lora-autocomplete-wrap">
-                      <input
+                      <linshe-input
                         v-model="item.path"
                         class="fi"
                         autocomplete="off"
@@ -48,7 +48,7 @@
                   </div>
                   <div class="form-group lora-weight-group">
                     <label class="fl lora-inline-label">权重</label>
-                    <input
+                    <linshe-input
                       v-model.number="item.weight"
                       type="number"
                       step="0.05"
@@ -61,7 +61,7 @@
                 </div>
                 <div class="lora-trigger-row">
                   <label class="fl lora-inline-label">触发词</label>
-                  <input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
+                  <linshe-input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
                 </div>
                 <div class="lora-scenes-row">
                   <span class="fl lora-inline-label">适用范围</span>
@@ -120,6 +120,7 @@
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -353,7 +354,6 @@ async function save() {
 }
 .lora-weight-group { flex: 0 0 72px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
-.lora-item-card .fi { background: var(--glass-bg); width: 100%; }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 8px; }
 .lora-scenes-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }

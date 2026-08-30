@@ -49,8 +49,8 @@
                 </div>
               </template>
               <div class="fr">
-                <div class="fh"><label class="fl">宽度</label><input v-model.number="form[activeFields.width]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-                <div class="fh"><label class="fl">高度</label><input v-model.number="form[activeFields.height]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+                <div class="fh"><label class="fl">宽度</label><linshe-input v-model.number="form[activeFields.width]" type="number" min="256" max="4096" @input="markDirty" /></div>
+                <div class="fh"><label class="fl">高度</label><linshe-input v-model.number="form[activeFields.height]" type="number" min="256" max="4096" @input="markDirty" /></div>
               </div>
               <div class="fpresets-head">
                 <span class="resolution-title">分辨率</span>
@@ -272,15 +272,15 @@
             <div class="prompt-editor-body">
               <div class="prompt-editor-field">
                 <label class="fl">对话配图提示词</label>
-                <textarea v-model="testPrompts.chat" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.chat" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
               <div class="prompt-editor-field">
                 <label class="fl">朋友圈配图提示词</label>
-                <textarea v-model="testPrompts.moments" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.moments" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
               <div class="prompt-editor-field">
                 <label class="fl">奇遇配图提示词</label>
-                <textarea v-model="testPrompts.event" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.event" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
             </div>
             <div class="prompt-editor-actions">
@@ -360,7 +360,7 @@
               <div class="add-profile-dialog">
                 <h4>新增配置</h4>
                 <p class="fd">将当前 LLM 配置（地址、模型、自定义开关等）保存为一个新的配置快照（不含 API Key）</p>
-                <input
+                <linshe-input
                   v-model="newProfileName"
                   class="fi"
                   placeholder="输入配置名称，如：我的OpenAI、本地LLM"
@@ -379,7 +379,7 @@
         <!-- API Key -->
         <label class="fl llm-label">API Key</label>
         <div class="apikey-row">
-          <input
+          <linshe-input
             v-model="llmApiKey"
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
@@ -401,7 +401,7 @@
         <!-- API 地址 -->
         <label class="fl llm-label" style="margin-top:14px">API 地址</label>
         <DropdownSelect v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
-        <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
+        <linshe-input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
         <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
@@ -466,14 +466,15 @@
           </div>
           <div v-if="llmHeadersEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-headers">请求头 JSON</label>
-            <textarea
+            <linshe-input
               id="llm-custom-headers"
               v-model="llmHeadersText"
               class="fi llm-json-textarea"
-              :class="{ 'fi-error': !llmHeadersValid }"
+              type="textarea"
+              :invalid="!llmHeadersValid"
               placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
               @input="markLlmDirty"
-            ></textarea>
+            />
             <p v-if="!llmHeadersValid" class="gen-error" role="alert">JSON 格式无效</p>
           </div>
 
@@ -490,14 +491,15 @@
           </div>
           <div v-if="llmExtraBodyEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-body">请求体 JSON</label>
-            <textarea
+            <linshe-input
               id="llm-custom-body"
               v-model="llmExtraBodyText"
               class="fi llm-json-textarea"
-              :class="{ 'fi-error': !llmExtraBodyValid }"
+              type="textarea"
+              :invalid="!llmExtraBodyValid"
               placeholder='{"agent":"my-agent","agentName":"Nova"}'
               @input="markLlmDirty"
-            ></textarea>
+            />
             <p v-if="!llmExtraBodyValid" class="gen-error" role="alert">JSON 格式无效</p>
           </div>
 
@@ -703,7 +705,7 @@
       <div class="card">
         <h3>ComfyUI 连接</h3>
         <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
-        <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
+        <linshe-input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
         <label class="cb">
           <input type="checkbox" v-model="comfySkipTls" @change="markConnDirty" />
           <span>跳过 TLS 证书验证（连接云端 HTTPS ComfyUI 失败时勾选）</span>
@@ -817,10 +819,9 @@
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
-              <input
+              <linshe-input
                 ref="favDialogInput"
                 v-model="favDialog.label"
-                class="fav-dialog-input"
                 placeholder="输入收藏名称"
                 maxlength="30"
                 @keyup.enter="confirmAddFavorite"
@@ -846,13 +847,13 @@
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
-              <textarea
+              <linshe-input
                 v-model="qualityDialog.text"
-                class="quality-dialog-textarea"
-                placeholder="masterpiece, best quality..."
+                type="textarea"
                 rows="4"
                 maxlength="500"
-              ></textarea>
+                placeholder="masterpiece, best quality..."
+              />
               <div class="fav-dialog-actions">
                 <linshe-button variant="secondary" @click="qualityDialog.show = false">取消</linshe-button>
                 <linshe-button variant="primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</linshe-button>
@@ -878,9 +879,9 @@
                 <span class="disturb-dialog-label">⏰ 静默时段</span>
                 <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
                 <div class="disturb-time-row">
-                  <input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
+                  <linshe-input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
                   <span class="disturb-time-sep">—</span>
-                  <input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
+                  <linshe-input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
                 </div>
               </div>
 
@@ -949,7 +950,7 @@
             </div>
             <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
               <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
-              <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
+              <linshe-input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
               <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
                 <linshe-button variant="primary" @click="confirmWeatherCity">保存</linshe-button>
               </div>
@@ -1034,6 +1035,7 @@ import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()
@@ -2305,7 +2307,7 @@ function resetTestPrompts() {
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
+.fi { margin-bottom: 14px; }
 /* ── 画师串参数卡：轻量 Tab + 紧凑表单节奏 ── */
 .comfy-params-card { padding: 22px; }
 .comfy-params-card h3 { margin-bottom: 18px; }
@@ -2367,23 +2369,12 @@ function resetTestPrompts() {
   opacity: 0;
 }
 
-.fi:focus { border-color: var(--accent); }
-.fi-error { border-color: var(--danger, #ff4d4f) !important; }
 .gen-error { margin-top: 6px; font-size: 12px; color: var(--danger, #ff4d4f); }
 .fr { display: flex; gap: 12px; }
 .fh { flex: 1; min-width: 0; }
 .fr .fl {
   display: block; margin-bottom: 6px;
   font-size: 14px; font-weight: 600; color: var(--text-bright);
-}
-.fr .fi {
-  width: 100%; height: 38px; padding: 0 12px; margin: 0;
-  font-size: 13px; border-radius: 10px; box-shadow: none;
-  border: 1px solid #E5D8CE; background: #FFFEFC; color: var(--text-bright);
-}
-.fr .fi:focus {
-  border-color: #E07B6C;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
 }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fpresets-head {
@@ -2524,21 +2515,7 @@ function resetTestPrompts() {
 }
 .fav-dialog-body { padding: 12px 20px 20px; }
 .fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
-.fav-dialog-input {
-  width: 100%; padding: 10px 12px; font-size: 14px;
-  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
-  transition: border-color 0.2s;
-}
-.fav-dialog-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 .fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-.quality-dialog-textarea {
-  width: 100%; padding: 10px 12px; font-size: 13px; font-family: inherit;
-  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
-  resize: vertical; min-height: 88px; line-height: 1.6; color: var(--text-bright);
-  transition: border-color 0.2s;
-}
-.quality-dialog-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
-.quality-dialog-textarea::placeholder { color: #b3aca4; }
 
 /* ── 弹窗过渡动画 ── */
 .fav-dialog-fade-enter-active { transition: opacity 0.2s ease; }
@@ -2662,18 +2639,9 @@ function resetTestPrompts() {
   display: flex; align-items: center; gap: 10px;
 }
 .disturb-time-input {
-  font-family: inherit;
-  padding: 8px 12px;
-  border: 1px solid #d5d0ca;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-bright);
   font-size: 14px;
   width: 130px;
-  outline: none;
-  transition: border-color 0.2s;
 }
-.disturb-time-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 .disturb-time-sep { color: var(--text-secondary); }
 .disturb-no-chars {
   font-size: 13px; color: var(--text-secondary); margin: 8px 0;
@@ -3101,21 +3069,27 @@ function resetTestPrompts() {
 .style-test-row { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; flex-wrap: wrap; }
 .free-scene-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
 .free-scene-input-wrap { position: relative; flex: 1; min-width: 0; }
+/* 折叠/展开输入框：独立设计（单行收起 + 省略覆盖层），皮肤与 LinsheInput 对齐 */
 .free-scene-textarea {
   width: 100%; display: block; padding: 9px 12px; font-size: 13px; line-height: 1.5;
-  font-family: inherit; border-radius: 8px; background: rgba(255,255,255,0.9);
-  border: 1px solid #e2d6c7; color: var(--text-bright); outline: none;
+  font-family: inherit; border-radius: 10px; background: #fffdfb;
+  border: 1.5px solid #e3dcd2; color: var(--text-bright); outline: none;
+  caret-color: var(--accent);
   resize: none; overflow: hidden;
   height: 38px;  /* 默认单行，聚焦展开 */
-  transition: height 0.18s ease;
+  transition: height 0.18s ease, border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
-.free-scene-textarea:focus { height: 58px; min-height: 58px; resize: vertical; overflow: auto; border-color: var(--accent); }
+.free-scene-textarea:focus {
+  height: 58px; min-height: 58px; resize: vertical; overflow: auto;
+  border-color: var(--accent); background: #fff;
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
+}
 .free-scene-ellipsis {
   position: absolute; inset: 0;
   display: flex; align-items: center;
   padding: 0 12px; font-size: 13px;
-  border-radius: 8px; background: rgba(255,255,255,0.9);
-  border: 1px solid #e2d6c7; color: var(--text-bright);
+  border-radius: 10px; background: #fffdfb;
+  border: 1.5px solid #e3dcd2; color: var(--text-bright);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text; transition: border-color 0.15s;
 }

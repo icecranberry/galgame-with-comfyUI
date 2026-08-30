@@ -165,8 +165,8 @@
       <div v-if="showCreateGroup && isMobile" class="more-menu-overlay" @click.self="showCreateGroup = false">
         <div class="more-menu-panel create-group-panel">
           <h4 class="cg-title">发起群聊</h4>
-          <input v-model="cgName" class="cg-input" type="text" maxlength="24" placeholder="群名称（留空自动生成）" />
-          <input v-model="cgTopic" class="cg-input" type="text" maxlength="60" placeholder="群主题（可选）" />
+          <linshe-input v-model="cgName" class="cg-input" type="text" maxlength="24" placeholder="群名称（留空自动生成）" />
+          <linshe-input v-model="cgTopic" class="cg-input" type="text" maxlength="60" placeholder="群主题（可选）" />
           <div class="cg-members">
             <div
               v-for="c in sortedCgCharacters"
@@ -207,11 +207,11 @@
               <div class="cg-form-col">
                 <label class="cg-field">
                   <span class="cg-label">群名称</span>
-                  <input v-model="cgName" class="cg-input cg-input-desktop" type="text" maxlength="24" placeholder="留空自动生成" />
+                  <linshe-input v-model="cgName" class="cg-input cg-input-desktop" type="text" maxlength="24" placeholder="留空自动生成" />
                 </label>
                 <label class="cg-field">
                   <span class="cg-label">群主题</span>
-                  <input v-model="cgTopic" class="cg-input cg-input-desktop" type="text" maxlength="60" placeholder="可选，比如今晚一起聊点轻松的" />
+                  <linshe-input v-model="cgTopic" class="cg-input cg-input-desktop" type="text" maxlength="60" placeholder="可选，比如今晚一起聊点轻松的" />
                 </label>
               </div>
 
@@ -269,6 +269,7 @@ import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useGroupsStore } from '../stores/groups.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 import GearIcon from './GearIcon.vue'
 
 const props = defineProps({
@@ -583,9 +584,7 @@ function formatTime(iso) {
 .create-group-panel { display: flex; flex-direction: column; gap: 10px; max-height: 80vh; }
 .cg-title { margin: 0 0 2px; font-size: 16px; color: var(--text-bright); }
 .cg-input {
-  border: 1px solid rgba(0,0,0,0.1); border-radius: 10px;
-  padding: 9px 12px; font-size: 14px; outline: none;
-  background: rgba(255,255,255,0.85);
+  padding: 9px 12px; font-size: 14px;
 }
 .cg-members {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
@@ -683,13 +682,6 @@ function formatTime(iso) {
 }
 .cg-input-desktop {
   min-height: 44px;
-  border-color: rgba(224, 123, 108, 0.22);
-  border-radius: 10px;
-  background: #fff;
-}
-.cg-input-desktop:focus {
-  border-color: var(--accent, #e07b6c);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12);
 }
 .cg-member-head {
   display: flex;

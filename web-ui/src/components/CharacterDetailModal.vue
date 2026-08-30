@@ -123,15 +123,15 @@
               <div class="detail-name-row">
                 <div class="detail-name-col">
                   <label class="fl">角色名</label>
-                  <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+                  <linshe-input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
                 </div>
                 <div class="detail-name-col">
                   <label class="fl">英文名</label>
-                  <input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
+                  <linshe-input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
                 </div>
               </div>
               <label class="fl" style="margin-top:12px">人格提示词</label>
-              <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
+              <linshe-input v-model="detail.editPrompt" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
             </div>
           </div>
 
@@ -212,7 +212,7 @@
                     <div class="form-group lora-path-group">
                       <label class="fl lora-inline-label">文件路径</label>
                       <div class="lora-autocomplete-wrap">
-                        <input
+                        <linshe-input
                           v-model="item.path"
                           class="fi"
                           placeholder="在ComfyUI-aki-v3(或其他名称)\ComfyUI\models\loras下搜索..."
@@ -241,7 +241,7 @@
                     </div>
                     <div class="form-group lora-weight-group">
                       <label class="fl lora-inline-label">权重</label>
-                      <input
+                      <linshe-input
                         v-model.number="item.weight"
                         type="number"
                         step="0.05"
@@ -253,12 +253,13 @@
                   </div>
                   <div class="lora-trigger-row">
                     <label class="fl lora-inline-label">触发词</label>
-                    <textarea
+                    <linshe-input
                       v-model="item.triggerWord"
+                      type="textarea"
                       class="fi"
                       rows="3"
                       placeholder="可选，用于增强 lora 效果的提示词"
-                    ></textarea>
+                    />
                   </div>
                 </div>
               </TransitionGroup>
@@ -308,7 +309,7 @@
                 </label>
                 <Transition name="lora-expand">
                   <div v-if="artistOverrideEnabled" class="lora-workflow-select">
-                    <input v-model="artistOverride" class="fi" placeholder="该角色专属画师串，留空则不注入画师串" />
+                    <linshe-input v-model="artistOverride" class="fi" placeholder="该角色专属画师串，留空则不注入画师串" />
                     <p class="form-hint">勾选后，遇到该角色生成图片时会无条件覆盖系统设置里注入的画师串；留空则用空画师串覆盖，不注入任何画师串。</p>
                   </div>
                 </Transition>
@@ -342,6 +343,7 @@ import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -816,8 +818,6 @@ async function saveLora() {
 
 /* ═══ 详情编辑 ═══ */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 
 .detail-name-row { display: flex; gap: 12px; }
 .detail-name-col { flex: 1; min-width: 0; }
@@ -955,10 +955,8 @@ async function saveLora() {
 /* ═══ 通用 ═══ */
 .sp-btn-small { margin-right: 6px; }
 
-.prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
+.prompt-textarea { min-height: 500px; }
 
-.modal-wide .fi { background: var(--bg-primary); border: 1px solid var(--glass-border); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-.modal-wide .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1); }
 .modal-wide .prompt-textarea { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.7; color: var(--text-primary); }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
@@ -1026,10 +1024,9 @@ async function saveLora() {
 }
 .lora-weight-group { flex: 0 0 72px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
-.lora-item-card .fi { background: var(--glass-bg); }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 8px; }
-.lora-trigger-row textarea { resize: vertical; min-height: 60px; width: 100%; }
+.lora-trigger-row textarea { min-height: 60px; width: 100%; }
 .lora-card-enter-active, .lora-card-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }

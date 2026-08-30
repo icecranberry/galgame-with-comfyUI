@@ -213,14 +213,15 @@
             <!-- 步骤 0：输入描述 -->
             <div v-if="recruit.step === 'input'" class="modal-body" style="position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:14px;padding:18px;margin:0 20px 20px">
               <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
-              <textarea
+              <linshe-input
+                type="textarea"
                 v-model="recruit.desc"
-                class="fi recruit-textarea"
+                class="recruit-textarea"
                 rows="4"
                 placeholder="例：安比·德玛拉（绝区零）/ 流萤，星穹铁道/ 御坂美琴《某科学的超电磁炮》/ 傲娇的猫娘女仆 / 金发双马尾大小姐，品学兼优，爱好摇滚，穿着涩谷辣妹风"
                 :disabled="recruit.loading"
                 @keydown.enter.exact="doGenerate"
-              ></textarea>
+              />
               <div class="modal-actions">
                 <label class="import-card-btn" :class="{ disabled: recruit.loading }" title="导入酒馆ai角色卡">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -260,7 +261,7 @@
                   />
                 </div>
                 <div class="preview-prompt-label">-</div>
-                <textarea v-model="recruit.result.base_prompt" class="fi prompt-textarea" rows="12"></textarea>
+                <linshe-input type="textarea" v-model="recruit.result.base_prompt" class="prompt-textarea" rows="12" />
 
                 <!-- 朋友圈开关 -->
               </div>
@@ -313,10 +314,10 @@
             <div class="modal-body">
               <!-- 新建名称输入 -->
               <div v-if="showNewInput" class="world-new-row">
-                <input
+                <linshe-input
                   ref="newNameInput"
                   v-model="worldNewName"
-                  class="fi world-name-input"
+                  class="world-name-input"
                   placeholder="输入新世界观名称"
                   @keyup.enter="confirmNew"
                 />
@@ -379,14 +380,15 @@
                   </div>
                 </div>
                 <div class="world-editor-body">
-                  <textarea
+                  <linshe-input
                     ref="worldTextareaRef"
                     v-model="worldContent"
-                    class="fi world-textarea"
+                    type="textarea"
+                    class="world-textarea"
                     rows="10"
                     placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
                     @input="worldDirty = true"
-                  ></textarea>
+                  />
                 </div>
                 <div class="world-editor-meta">
                   <span class="world-char-count"></span>
@@ -565,6 +567,7 @@ import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 
 const router = useRouter()
@@ -1576,9 +1579,6 @@ onMounted(async () => {
 
 .world-name-input {
   flex: 1;
-  background: #fffdf8;
-  border: 1px solid rgba(224, 123, 108, 0.28);
-  border-radius: 8px;
 }
 
 /* ── 世界观编辑弹窗（档案面板） ── */
@@ -2139,7 +2139,7 @@ onMounted(async () => {
   gap: 10px;
 }
 
-.recruit-textarea { width: 100%; resize: vertical; min-height: 80px; font-family: inherit; }
+.recruit-textarea { width: 100%; min-height: 80px; }
 .import-card-btn {
   display: inline-flex;
   align-items: center;
@@ -2165,8 +2165,6 @@ onMounted(async () => {
   cursor: not-allowed;
   pointer-events: none;
 }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 
 .gen-error { margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,77,79,0.06); color: var(--danger); font-size: 13px; white-space: pre-wrap; line-height: 1.5; }
 
@@ -2508,24 +2506,12 @@ onMounted(async () => {
 .detail-layout { display: block; }
 .detail-sidebar { display: none; }
 
-.prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
+.prompt-textarea { min-height: 500px; }
 
 /* 角色详情 input/textarea — 与招募预览卡片统一 */
-.modal-wide .fi {
-  background: var(--bg-primary);
-  border: 1px solid var(--glass-border);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.modal-wide .fi:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1);
-}
 .modal-wide .prompt-textarea {
   padding: 12px;
-  border-radius: 10px;
   font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-primary);
   scrollbar-width: auto;
   scrollbar-color: var(--text-secondary) transparent;
 }
@@ -2732,7 +2718,7 @@ onMounted(async () => {
   .modal-wide .prompt-textarea {
     font-size: 16px;
   }
-  .modal-wide .fi {
+  .modal-wide .recruit-textarea {
     font-size: 16px;
   }
 }

@@ -273,14 +273,17 @@ html, body { background: var(--bg-primary); }
 /* 按钮统一使用 LinsheButton 组件（web-ui/src/components/LinsheButton.vue），
    不再提供全局 button 标签样式，避免样式污染。 */
 
+/* 文本输入框统一使用 LinsheInput 组件（web-ui/src/components/LinsheInput.vue）。
+   以下全局样式仅作为 select 等未组件化控件及特殊输入界面的兜底，观感与 LinsheInput 保持一致。 */
 input, textarea, select {
-  background: rgba(255, 255, 255, 0.9); border: 1px solid #d5d0ca;
-  border-radius: 8px; color: var(--text-bright); padding: 8px 12px;
-  font-size: 13px; outline: none; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  background: #fffdfb; border: 1.5px solid #e3dcd2;
+  border-radius: 10px; color: var(--text-bright); padding: 8px 12px;
+  font-size: 13px; outline: none; caret-color: var(--accent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12);
+  border-color: var(--accent); background: #fff;
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
 }
 textarea { resize: vertical; font-family: inherit; }
 

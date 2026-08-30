@@ -135,9 +135,9 @@
                   @keydown.space.prevent="toggleStyleMode"
                   title="点击切换表情包风格"
                 >{{ STYLE_MODE_LABELS[styleMode] || '半身LINE' }}</div>
-                <input
+                <linshe-input
                   v-model="style"
-                  class="fi emoji-style-input"
+                  class="emoji-style-input"
                   type="text"
                   placeholder="自定义表情包额外需求（可选，留空则不注入）"
                 />
@@ -278,7 +278,7 @@
             <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">画师串</div>
-              <input v-model="artist" class="fi advanced-artist-input" type="text" placeholder="@ebora" />
+              <linshe-input v-model="artist" class="advanced-artist-input" type="text" placeholder="@ebora" />
               <div class="advanced-hint">生成表情包时固定使用该画师串，不再沿用对话画师串。</div>
             </div>
 
@@ -287,7 +287,7 @@
               <div class="advanced-cat-list">
                 <div v-for="(k, i) in categoryDrafts" :key="i" class="advanced-cat-row">
                   <span class="advanced-cat-index">{{ i + 1 }}</span>
-                  <input v-model="categoryDrafts[i]" class="fi advanced-cat-input" type="text" />
+                  <linshe-input v-model="categoryDrafts[i]" class="advanced-cat-input" type="text" />
                 </div>
                 </div>
               <div v-if="categoryError" class="emoji-error">{{ categoryError }}</div>
@@ -305,12 +305,13 @@
 
             <div class="advanced-section">
               <div class="advanced-label">表情包起手式Tag</div>
-              <textarea
+              <linshe-input
                 v-model="fixedTagsDraft"
-                class="fi advanced-tags-input"
+                class="advanced-tags-input"
+                type="textarea"
                 rows="3"
                 placeholder="chibi character, big head, ...（逗号分隔）"
-              ></textarea>
+              />
               <div class="advanced-hint">生成 prompt 后由系统硬编码前置到每条表情 prompt 开头（英文，逗号分隔，已存在的 tag 自动去重）。</div>
               <div v-if="fixedTagsError" class="emoji-error">{{ fixedTagsError }}</div>
             </div>
@@ -346,9 +347,9 @@
             <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">自定义整体风格</div>
-              <input
+              <linshe-input
                 v-model="batchStyle"
-                class="fi advanced-artist-input"
+                class="advanced-artist-input"
                 type="text"
                 placeholder="可选，留空则不注入整体风格"
                 @keyup.enter="startBatchGenerate"
@@ -373,6 +374,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   characters: { type: Array, default: () => [] },
@@ -1332,10 +1334,6 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 240px;
   padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
 }
 .emoji-progress-strip {
   display: flex; align-items: center; gap: 8px;
@@ -1591,20 +1589,10 @@ onBeforeUnmount(() => {
 .advanced-artist-input {
   width: 100%;
   padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(42, 26, 16, 0.12);
-  background: #FCFAF7;
-  font-size: 13px;
 }
 .advanced-tags-input {
   width: 100%;
   padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(42, 26, 16, 0.12);
-  background: #FCFAF7;
-  font-size: 13px;
-  line-height: 1.6;
-  resize: vertical;
   word-break: break-all;
 }
 .emoji-style-segmented {
@@ -1664,10 +1652,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   width: 100%;
   padding: 7px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(42, 26, 16, 0.12);
-  background: #FCFAF7;
-  font-size: 13px;
 }
 .advanced-footer {
   display: flex;

@@ -39,7 +39,7 @@
                         <div class="ded-item-text">{{ item.relationship_text }}</div>
                       </div>
                       <div class="ded-item-edit" v-else>
-                        <input v-model="editText" class="fi" @keyup.enter="saveEdit(idx, 'left')" @blur="saveEdit(idx, 'left')" />
+                        <linshe-input v-model="editText" class="fi" size="sm" @keyup.enter="saveEdit(idx, 'left')" @blur="saveEdit(idx, 'left')" />
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
                         <div class="ded-act-row">
@@ -82,7 +82,7 @@
                         <div class="ded-item-text">{{ item.relationship_text }}</div>
                       </div>
                       <div class="ded-item-edit" v-else>
-                        <input v-model="editText" class="fi" @keyup.enter="saveEdit(idx, 'right')" @blur="saveEdit(idx, 'right')" />
+                        <linshe-input v-model="editText" class="fi" size="sm" @keyup.enter="saveEdit(idx, 'right')" @blur="saveEdit(idx, 'right')" />
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
                         <div class="ded-act remove" role="button" tabindex="0" title="移回左侧" @click="removeFromConfirmed(idx)" @keydown.enter.prevent="removeFromConfirmed(idx)" @keydown.space.prevent="removeFromConfirmed(idx)">&larr;</div>
@@ -120,6 +120,7 @@
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

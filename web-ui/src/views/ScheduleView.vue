@@ -9,7 +9,7 @@
             <div class="topbar-row">
               <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">日程</h2>
               <div class="topbar-actions">
-                <input
+                <linshe-input
                   v-model="searchQuery"
                   class="search-input"
                   placeholder="搜索..."
@@ -237,14 +237,15 @@
             </div>
             <div class="reset-dialog-desc">
               <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则正常随机规划。</p>
-              <textarea
+              <linshe-input
+                type="textarea"
                 v-model="regenerateDirection"
                 class="regenerate-textarea"
                 placeholder="例如：今天去游乐园、安排出差的一天、宅在家里打游戏..."
                 rows="3"
                 ref="regenerateTextareaRef"
                 @keydown.enter.exact="confirmRegenerateWithDirection"
-              ></textarea>
+              />
             </div>
             <div class="reset-dialog-actions">
               <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmRegenerateRandom">随机日程规划</linshe-button>
@@ -269,14 +270,15 @@
             </div>
             <div class="reset-dialog-desc">
               <p>将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。可输入方向来影响生成结果，留空则随机生成。</p>
-              <textarea
+              <linshe-input
+                type="textarea"
                 v-model="resetDirection"
                 class="regenerate-textarea"
                 placeholder="例如：今天全员的日程围绕夏日祭展开、让所有人过一天悠闲的周末..."
                 rows="3"
                 ref="resetDirectionTextareaRef"
                 @keydown.enter.exact="confirmResetAll"
-              ></textarea>
+              />
             </div>
             <div class="reset-dialog-actions">
               <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmResetRandom">随机日程规划</linshe-button>
@@ -360,6 +362,7 @@ import CharacterStatusCard from '../components/CharacterStatusCard.vue'
 import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 
 const store = useScheduleStore()
 const settingsStore = useSettingsStore()
@@ -474,13 +477,13 @@ const lightboxDescription = computed(() => {
 // ── 重置世界线 ──
 const showResetConfirm = ref(false)
 const resetDirection = ref('')
-const resetDirectionTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const resetDirectionTextareaRef = ref<any>(null)
 const resetCancelling = ref(false)
 
 // ── 日程方向输入弹窗 ──
 const showRegenerateModal = ref(false)
 const regenerateDirection = ref('')
-const regenerateTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const regenerateTextareaRef = ref<any>(null)
 
 watch(showRegenerateModal, (v) => {
   if (v) {
@@ -1130,12 +1133,7 @@ function finishReset() {
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .search-input {
   width: 140px; padding: 7px 12px;
-  border: 1px solid var(--glass-border); border-radius: 10px;
-  background: rgba(255,255,255,0.65); color: var(--text-primary);
-  font-size: 0.82rem; outline: none; transition: border-color 0.2s;
 }
-.search-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
-.search-input:focus { border-color: var(--accent); }
 
 /* 重置世界线按钮 — 和朋友圈 btn-post 同款 */
 .btn-reset {
@@ -1531,24 +1529,7 @@ function finishReset() {
 .regenerate-textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: 10px;
-  background: var(--glass-bg);
-  color: var(--text-primary);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  resize: vertical;
-  outline: none;
-  transition: border-color 0.2s;
-  font-family: inherit;
   box-sizing: border-box;
-}
-.regenerate-textarea:focus {
-  border-color: var(--accent);
-}
-.regenerate-textarea::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.5;
 }
 .reset-dialog-actions {
   display: flex; gap: 12px; padding: 16px 20px;

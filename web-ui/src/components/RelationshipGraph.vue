@@ -60,7 +60,7 @@
                     : `${centerCharacter.display_name} → ${inputDialog.targetName}`)
                     + `：${inputDialog.targetName}是${centerCharacter.display_name}的什么人？`}}
                 </p>
-                <input
+                <linshe-input
                   ref="inputRef"
                   v-model="inputDialog.text"
                   class="rel-input"
@@ -94,6 +94,7 @@ import '@vue-flow/core/dist/theme-default.css'
 import * as api from '../api/index.js'
 import CharacterNode from './CharacterNode.vue'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -523,13 +524,9 @@ async function deleteEdge() {
 }
 .rel-input {
   width: 100%; padding: 10px 12px;
-  font-size: 14px; border-radius: 10px;
-  border: 1px solid #d5d0ca; outline: none;
-  background: #fafaf9; color: #333;
+  font-size: 14px;
   box-sizing: border-box;
-  font-family: inherit;
 }
-.rel-input:focus { border-color: #e07b6c; box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1); }
 .rel-dialog-actions {
   display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }

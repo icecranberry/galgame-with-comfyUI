@@ -16,19 +16,19 @@
             <div class="hires-params">
               <div class="form-group">
                 <label class="fl">步数<span class="fl-sub">（推荐30~40）越高越精细，耗时越久</span></label>
-                <input v-model.number="steps" type="number" min="1" max="100" step="1" class="fi" />
+                <linshe-input v-model.number="steps" type="number" min="1" max="100" step="1" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">CFG<span class="fl-sub">（推荐3~5）</span></label>
-                <input v-model.number="cfg" type="number" min="0" max="20" step="0.1" class="fi" />
+                <linshe-input v-model.number="cfg" type="number" min="0" max="20" step="0.1" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">重绘幅度<span class="fl-sub">（推荐0.3~0.5）</span></label>
-                <input v-model.number="denoise" type="number" min="0" max="1" step="0.01" class="fi" />
+                <linshe-input v-model.number="denoise" type="number" min="0" max="1" step="0.01" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">最长边<span class="fl-sub">（像素，默认2000）</span></label>
-                <input v-model.number="maxSize" type="number" min="256" max="8192" step="100" class="fi" />
+                <linshe-input v-model.number="maxSize" type="number" min="256" max="8192" step="100" class="fi" />
               </div>
             </div>
           </div>
@@ -43,7 +43,7 @@
             <div class="artist-mode-hint">{{ artistModeHint }}</div>
             <Transition name="artist-block">
             <div v-if="artistMode === 'specified'" class="artist-specified-block">
-              <input v-model="artist" class="fi artist-input" placeholder="输入画师串" />
+              <linshe-input v-model="artist" class="fi artist-input" placeholder="输入画师串" />
               <p class="artist-input-hint">用于 HiresFix 的画师风格，可覆盖原图画师串</p>
             </div>
             </Transition>
@@ -62,7 +62,7 @@
                   <div class="form-group lora-path-group">
                     <label class="fl lora-inline-label">文件路径</label>
                     <div class="lora-autocomplete-wrap">
-                      <input
+                      <linshe-input
                         v-model="item.path"
                         class="fi"
                         autocomplete="off"
@@ -92,7 +92,7 @@
                   </div>
                   <div class="form-group lora-weight-group">
                     <label class="fl lora-inline-label">权重</label>
-                    <input
+                    <linshe-input
                       v-model.number="item.weight"
                       type="number"
                       step="0.05"
@@ -105,7 +105,7 @@
                 </div>
                 <div class="lora-trigger-row">
                   <label class="fl lora-inline-label">触发词</label>
-                  <input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
+                  <linshe-input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
                   <label class="lora-enable-toggle" @click.stop>
                     <span class="lora-enable-status">{{ item.enabled ? '已启用' : '已禁用' }}</span>
                     <span class="lora-toggle-switch">
@@ -149,6 +149,7 @@
 import { ref, computed, watch, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -432,7 +433,6 @@ async function save() {
 }
 .lora-weight-group { flex: 0 0 64px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
-.lora-item-card .fi { background: var(--glass-bg); width: 100%; }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
 .lora-trigger-row .lora-inline-label { margin: 0; flex: 0 0 auto; }
@@ -441,8 +441,6 @@ async function save() {
 .form-group .fl { display: block; margin-bottom: 6px; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; }
 .fl-sub { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--text-secondary); line-height: 1.45; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); }
 .lora-card-enter-active, .lora-card-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }

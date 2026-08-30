@@ -21,6 +21,17 @@ web-ui 中所有常规按钮必须使用统一组件 `web-ui/src/components/Lins
 4. 特殊交互元素（长按手势、动态配色、整卡热区、下拉菜单项、已有独立设计的控件）不套组件：用 `<div role="button" tabindex="0">` + 自包含样式，补齐 `cursor/text-align` 等基础属性，禁用态用 `.is-disabled` class + `aria-disabled` + 点击守卫
 5. 调整按钮风格只改 `LinsheButton.vue`，不要在各页面里覆盖组件皮肤
 
+## 输入框（LinsheInput）
+
+web-ui 中所有文本输入框 / 文本域统一使用组件 `web-ui/src/components/LinsheInput.vue`，禁止手写 input/textarea 皮肤样式（背景、边框、圆角、focus 光环等）。
+
+1. 引入：`import LinsheInput from '.../components/LinsheInput.vue'`，模板中写 `<linshe-input>`；文本域用 `type="textarea"`（配 `rows`）
+2. `v-model` 与原生一致，支持 `.number` / `.trim` 修饰符；`id`、`min/max/step`、`maxlength`、`autocomplete`、`@keyup.enter` 等原生属性和事件直接透传；`ref` 拿到组件实例，已 expose `focus()` / `blur()` / `select()`
+3. 尺寸用 `size="sm|md|lg"`（与 LinsheButton 对齐）；校验错误态用 `invalid` prop（红色描边），不要手写 `.xx-error` 样式；禁用用 `:disabled`
+4. 组件上遗留的 `class="fi"` 只承担部分页面的表单间距（margin/width）布局，新页面不要依赖它
+5. 特殊输入界面不套组件，保持自包含样式：聊天主输入框（`.chat-input`）、信纸 textarea（`.paper-textarea`）、透明嵌入输入（`.vn-input`、`.fav-input`、日程筛选胶囊搜索）、深色玻璃输入（TavernView `.inline-input`）、测试画风折叠输入（`.free-scene-textarea`）、提示词预览盒（`.generated-prompt-box`）
+6. 调整输入框风格只改 `LinsheInput.vue`；`App.vue` 里的全局 `input, textarea` 样式只是 select 等未组件化控件的兜底
+
 ## LLM 输出
 
 编写或修改 LLM 生成相关的 prompt 时：

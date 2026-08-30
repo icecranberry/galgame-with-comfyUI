@@ -2198,8 +2198,6 @@ function renderContent(text) {
 
 /* ── 详情编辑弹窗 ── */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
 
 .detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .detail-avatar {
@@ -2341,15 +2339,6 @@ function renderContent(text) {
 .prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
 /* 详情 input/textarea */
-.modal-wide .fi {
-  background: var(--bg-primary);
-  border: 1px solid var(--glass-border);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.modal-wide .fi:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1);
-}
 .modal-wide .prompt-textarea {
   padding: 12px;
   border-radius: 10px;
@@ -2488,7 +2477,6 @@ function renderContent(text) {
   }
   .prompt-textarea { min-height: 350px; font-size: 16px; }
   .modal-wide .prompt-textarea { font-size: 16px; }
-  .modal-wide .fi { font-size: 16px; }
 }
 
 /* ── 印象弹窗 ── */

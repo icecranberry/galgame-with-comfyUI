@@ -112,15 +112,16 @@
                 <label for="gift-line">送出时想说的话 <span>选填</span></label>
                 <span class="gift-line-count">{{ giftLine.length }}/{{ GIFT_LINE_MAX }}</span>
               </div>
-              <textarea
+              <linshe-input
                 id="gift-line"
                 v-model="giftLine"
                 class="gift-line-input"
+                type="textarea"
                 :maxlength="GIFT_LINE_MAX"
                 :disabled="loading"
                 rows="2"
                 placeholder="比如：看到它的时候，就觉得很适合你。"
-              ></textarea>
+              />
               <p class="gift-line-help">这句话会随礼物一起送出，并显示在聊天中。</p>
             </div>
             <div v-if="error" class="gift-error" role="alert">{{ error }}</div>
@@ -144,6 +145,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { sendGift, getGiftCooldowns } from '../api/index.js'
 import LinsheButton from './LinsheButton.vue'
+import LinsheInput from './LinsheInput.vue'
 
 const props = defineProps({
   characterId: { type: Number, required: true },
@@ -590,19 +592,9 @@ async function doSend() {
 }
 .gift-line-input {
   box-sizing: border-box; width: 100%; min-height: 70px;
-  resize: vertical; padding: 10px 12px;
-  border: 1.5px solid #e8e2da; border-radius: 12px;
-  background: #fff; color: #3d3935;
-  font: inherit; font-size: 14px; line-height: 1.5;
-  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  padding: 10px 12px;
+  font-size: 14px;
 }
-.gift-line-input::placeholder { color: #b8afa6; }
-.gift-line-input:hover:not(:disabled) { border-color: #ddd1c8; }
-.gift-line-input:focus {
-  border-color: var(--accent-light);
-  box-shadow: 0 0 0 3px rgba(224,123,108,0.1);
-}
-.gift-line-input:disabled { opacity: 0.6; cursor: not-allowed; }
 .gift-line-help {
   margin: 5px 2px 0; color: #aaa097; font-size: 11px; line-height: 1.4;
 }

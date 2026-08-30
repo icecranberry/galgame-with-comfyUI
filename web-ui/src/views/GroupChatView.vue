@@ -166,11 +166,11 @@
           <h3>群设置</h3>
           <label class="gc-field">
             <span>群名称</span>
-            <input v-model="editName" type="text" maxlength="24" />
+            <linshe-input v-model="editName" type="text" maxlength="24" />
           </label>
           <label class="gc-field">
             <span>群主题</span>
-            <input v-model="editTopic" type="text" maxlength="60" placeholder="（可选）大家围绕什么话题聊" />
+            <linshe-input v-model="editTopic" type="text" maxlength="60" placeholder="（可选）大家围绕什么话题聊" />
           </label>
           <div class="gc-field">
             <div class="gc-member-title">
@@ -283,6 +283,7 @@ import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import LinsheButton from '../components/LinsheButton.vue'
+import LinsheInput from '../components/LinsheInput.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1118,12 +1119,6 @@ async function onDissolve() {
 }
 .gc-drawer h3 { margin: 0 0 4px; font-size: 17px; color: var(--text-bright); }
 .gc-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
-.gc-field input[type="text"] {
-  border: 1px solid rgba(0,0,0,0.1); border-radius: 10px;
-  padding: 9px 12px; font-size: 14px; outline: none;
-  background: rgba(255,255,255,0.8);
-  color: var(--text-bright);
-}
 .gc-member-title {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 13px; color: var(--text-secondary);
