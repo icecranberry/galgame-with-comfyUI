@@ -1,6 +1,5 @@
-// HarmonyOS Sans — 全局字体
-import './assets/fonts/fonts.css'
 // 全局样式体系：token → 基础 → 组件类 → 动效
+// （HarmonyOS Sans 已子集化，经 index.html 的 /fonts/fonts-split.css 加载，不再打包全量字体）
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/components.css'
