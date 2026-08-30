@@ -399,10 +399,10 @@
 import { ref, reactive, computed, watch, inject } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
-import LinsheSelect from '../components/LinsheSelect.vue'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
-import LinsheSwitch from './LinsheSwitch.vue'
+import LinsheSelect from './ui/LinsheSelect.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
+import LinsheSwitch from './ui/LinsheSwitch.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

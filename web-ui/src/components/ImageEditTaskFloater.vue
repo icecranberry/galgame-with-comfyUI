@@ -55,7 +55,7 @@
 import { computed, inject, ref, watch } from 'vue'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import BeforeAfterSlider from './BeforeAfterSlider.vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const store = useImageEditTasksStore()
 const toastFn = inject('toast', null)

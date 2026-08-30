@@ -34,7 +34,7 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const visible = ref(false)
 const title = ref('')

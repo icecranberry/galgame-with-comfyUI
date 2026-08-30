@@ -160,7 +160,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps<{
   open: boolean

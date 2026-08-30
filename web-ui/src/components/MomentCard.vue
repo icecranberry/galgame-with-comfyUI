@@ -168,8 +168,8 @@ import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
 import { userNickname } from '../userConfig.js'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },

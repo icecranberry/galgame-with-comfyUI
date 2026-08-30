@@ -566,8 +566,8 @@ import RelationshipDeductionModal from '../components/RelationshipDeductionModal
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 
 const router = useRouter()

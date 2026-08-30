@@ -136,7 +136,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import Gallery from '../components/Gallery.vue'
-import LinsheButton from '../components/LinsheButton.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 

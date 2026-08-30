@@ -273,11 +273,11 @@
 <script setup>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import LinsheSelect from '../components/LinsheSelect.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
-import LinsheSwitch from '../components/LinsheSwitch.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import {
   deleteMemoryFragment,
   getMemoryConfig,

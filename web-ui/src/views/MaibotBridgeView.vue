@@ -163,9 +163,9 @@
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import LinsheSelect from '../components/LinsheSelect.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
 import {
   maibotDeleteLatestMemory,
   maibotDeriveStyle,

@@ -361,8 +361,8 @@ import * as api from '../api/index.js'
 import CharacterStatusCard from '../components/CharacterStatusCard.vue'
 import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
 
 const store = useScheduleStore()
 const settingsStore = useSettingsStore()

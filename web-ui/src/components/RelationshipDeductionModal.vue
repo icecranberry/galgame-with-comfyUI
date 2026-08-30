@@ -119,8 +119,8 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

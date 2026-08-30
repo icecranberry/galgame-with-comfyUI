@@ -282,8 +282,8 @@ import { getConfig, updateGroupSummaryInterval, updateGroupTemperature } from '.
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
 
 const route = useRoute()
 const router = useRouter()

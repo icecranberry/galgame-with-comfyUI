@@ -77,7 +77,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   letter: { type: Object, required: true },

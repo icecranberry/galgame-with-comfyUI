@@ -373,8 +373,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue'
 import * as api from '../api/index.js'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   characters: { type: Array, default: () => [] },

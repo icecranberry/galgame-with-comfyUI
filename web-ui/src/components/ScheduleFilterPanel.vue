@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps<{
   characters: any[]

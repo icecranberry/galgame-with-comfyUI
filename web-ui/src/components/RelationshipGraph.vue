@@ -93,8 +93,8 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import * as api from '../api/index.js'
 import CharacterNode from './CharacterNode.vue'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

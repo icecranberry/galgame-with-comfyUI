@@ -72,7 +72,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const PAGE_SIZE = 60
 

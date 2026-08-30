@@ -102,7 +102,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   title: { type: String, default: '选择头像' },

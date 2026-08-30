@@ -144,8 +144,8 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { sendGift, getGiftCooldowns } from '../api/index.js'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   characterId: { type: Number, required: true },

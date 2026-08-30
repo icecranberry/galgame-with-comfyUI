@@ -213,7 +213,7 @@ import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily }
 import LetterViewer from './LetterViewer.vue'
 import LetterWrite from './LetterWrite.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

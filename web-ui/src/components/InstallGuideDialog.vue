@@ -51,7 +51,7 @@
 
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const visible = ref(false)
 const title = ref('安装教程')

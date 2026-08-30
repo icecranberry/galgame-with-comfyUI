@@ -16,13 +16,13 @@ Toast、世界观、信箱是当前设计语言的主要参考，新功能和新
 
 * 主操作：珊瑚色实心；次要操作降低视觉权重。
 * 不同重要性的按钮必须有明确层级。
-* 按钮统一使用 `LinsheButton` 组件（`web-ui/src/components/LinsheButton.vue`），不写全局 button 标签样式，不留裸 `<button>`：
+* 按钮统一使用 `LinsheButton` 组件（`web-ui/src/components/ui/LinsheButton.vue`），不写全局 button 标签样式，不留裸 `<button>`：
   * 变体：`primary`（珊瑚实心主操作，每屏至多一个）/ `secondary`（奶油白次要，默认）/ `danger` / `ghost`（描边幽灵）/ `icon`（圆形小图标钮，如弹窗关闭 ✕）/ `chip`（胶囊选择、页签，配 `active`）/ `link`（文字链接）。
   * 按钮风格为「软糖立体」：亮面填充 + 同色系深色厚底（硬投影），按下整体下沉、厚底压扁；禁用态厚底压平、降透明。
   * 特殊交互元素（长按发送键、礼物卡片、视觉小说选项、下拉菜单项、整卡入口等已有独立设计的）用 `<div role="button">` + 自包含样式实现，不套通用组件，也不使用 `<button>` 标签。
-* 文本输入框 / 文本域统一使用 `LinsheInput` 组件（`web-ui/src/components/LinsheInput.vue`）：暖白底、暖灰描边、珊瑚色 caret，聚焦时珊瑚描边 + 柔和光环。样式为「软糖凹陷」——与按钮的「软糖立体」互补：按钮是凸起的糖，输入框是糖被按进糖纸后留下的凹痕，聚焦时被珊瑚色照亮。特殊输入界面（聊天输入框、信纸、透明嵌入输入、深色玻璃输入等）保留独立设计，但皮肤色值应与 LinsheInput 对齐。
-* 下拉选择框统一使用 `LinsheSelect` 组件（`web-ui/src/components/LinsheSelect.vue`）：触发器与 LinsheInput 同为「软糖凹陷」皮肤（暖白底、暖灰描边、聚焦珊瑚光环），尺寸 `sm/md/lg` 对齐按钮与输入框；选项面板是 Teleport 到 body 的轻量浮层，白底暖描边、珊瑚色选中态，空间不足自动向上翻转。
-* 拨动开关统一使用 `LinsheSwitch` 组件（`web-ui/src/components/LinsheSwitch.vue`）：两态同为「凸起的糖」，仅换糖色——关＝暖灰软糖，开＝珊瑚糖；硬底厚投影 + 顶部高光两态等高，拨动时不跳变，与按钮的软糖语言同源。尺寸 `sm / md / lg` 与按钮对齐；`aria-label`、`title` 等透传到内部 input，不写裸 checkbox 开关样式。
+* 文本输入框 / 文本域统一使用 `LinsheInput` 组件（`web-ui/src/components/ui/LinsheInput.vue`）：暖白底、暖灰描边、珊瑚色 caret，聚焦时珊瑚描边 + 柔和光环。样式为「软糖凹陷」——与按钮的「软糖立体」互补：按钮是凸起的糖，输入框是糖被按进糖纸后留下的凹痕，聚焦时被珊瑚色照亮。特殊输入界面（聊天输入框、信纸、透明嵌入输入、深色玻璃输入等）保留独立设计，但皮肤色值应与 LinsheInput 对齐。
+* 下拉选择框统一使用 `LinsheSelect` 组件（`web-ui/src/components/ui/LinsheSelect.vue`）：触发器与 LinsheInput 同为「软糖凹陷」皮肤（暖白底、暖灰描边、聚焦珊瑚光环），尺寸 `sm/md/lg` 对齐按钮与输入框；选项面板是 Teleport 到 body 的轻量浮层，白底暖描边、珊瑚色选中态，空间不足自动向上翻转。
+* 拨动开关统一使用 `LinsheSwitch` 组件（`web-ui/src/components/ui/LinsheSwitch.vue`）：两态同为「凸起的糖」，仅换糖色——关＝暖灰软糖，开＝珊瑚糖；硬底厚投影 + 顶部高光两态等高，拨动时不跳变，与按钮的软糖语言同源。尺寸 `sm / md / lg` 与按钮对齐；`aria-label`、`title` 等透传到内部 input，不写裸 checkbox 开关样式。
 * Toast 是轻量浮层的核心参考。
 * Modal / Dialog 应视为 Toast 的扩展，而不是另一套设计。面板内衬参考表情包管理弹窗：近实心的半透明暖底（如 `#f4f1eeed`），不叠 backdrop-filter——模糊背板在弹窗内容滚动时需逐帧重新合成，是滚动卡顿的常见来源。
 * 弹窗遮罩用 `rgba(0, 0, 0, 0.45)`；弹窗内的加载 / 生成过程遮罩用半透明白（`rgba(255, 255, 255, 0.55)` ~ `0.68`）。层级靠透明度表达，不靠模糊。

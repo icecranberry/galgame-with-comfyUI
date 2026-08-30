@@ -989,13 +989,13 @@ import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLl
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
-import LinsheSelect from '../components/LinsheSelect.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
-import LinsheSwitch from '../components/LinsheSwitch.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()

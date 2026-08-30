@@ -145,8 +145,8 @@ import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import EventCard from '../components/EventCard.vue'
 import LibraryModal from '../components/LibraryModal.vue'
-import LinsheButton from '../components/LinsheButton.vue'
-import LinsheInput from '../components/LinsheInput.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const store = useEventsStore()

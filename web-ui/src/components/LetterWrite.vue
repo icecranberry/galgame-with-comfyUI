@@ -45,7 +45,7 @@
 import { ref } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { getWriteFontFamily } from '../composables/useHandwritingFont.js'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const WRITE_FONT = getWriteFontFamily()
 

@@ -222,7 +222,7 @@ import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily }
 import LetterViewer from '../components/LetterViewer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import LinsheButton from '../components/LinsheButton.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
 
 const router = useRouter()
 const chatStore = useChatStore()

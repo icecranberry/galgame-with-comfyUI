@@ -270,10 +270,10 @@ html, body { background: var(--bg-primary); }
 }
 #app { position: relative; z-index: 1; }
 
-/* 按钮统一使用 LinsheButton 组件（web-ui/src/components/LinsheButton.vue），
+/* 按钮统一使用 LinsheButton 组件（web-ui/src/components/ui/LinsheButton.vue），
    不再提供全局 button 标签样式，避免样式污染。 */
 
-/* 文本输入框统一使用 LinsheInput 组件（web-ui/src/components/LinsheInput.vue）。
+/* 文本输入框统一使用 LinsheInput 组件（web-ui/src/components/ui/LinsheInput.vue）。
    以下全局样式仅作为 select 等未组件化控件及特殊输入界面的兜底，观感与 LinsheInput 保持一致。 */
 input, textarea, select {
   background: #fffdfb; border: 1.5px solid #e3dcd2;

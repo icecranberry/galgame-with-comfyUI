@@ -159,8 +159,8 @@ import * as api from '../api/index.js'
 import LibraryItemCard from './LibraryItemCard.vue'
 import CollapseTransition from './CollapseTransition.vue'
 import CardHeightTransition from './CardHeightTransition.vue'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

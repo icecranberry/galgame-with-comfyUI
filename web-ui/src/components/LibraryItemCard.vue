@@ -40,8 +40,8 @@
 <script setup>
 import { ref, watch } from 'vue'
 import CardHeightTransition from './CardHeightTransition.vue'
-import LinsheButton from './LinsheButton.vue'
-import LinsheInput from './LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },

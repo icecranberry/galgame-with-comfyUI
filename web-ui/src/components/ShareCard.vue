@@ -96,7 +96,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import html2canvas from 'html2canvas'
-import LinsheButton from './LinsheButton.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },
