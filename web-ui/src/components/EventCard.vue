@@ -342,8 +342,8 @@ function onWheelScroll(e) {
 
 async function onChoose(choice) {
   if (choosing.value) return
-  // vn-submit 改为 div 后的禁用守卫（原 :disabled="!customText.trim()"）
-  if (choice === 'C' && !customText.trim()) return
+  // vn-submit 改为 div 后的禁用守卫（原 :disabled="!customText.trim()"，模板中 ref 自动解包，脚本内需 .value）
+  if (choice === 'C' && !customText.value.trim()) return
   const eventId = props.event.id
   choosing.value = true
   const customTextValue = customText.value

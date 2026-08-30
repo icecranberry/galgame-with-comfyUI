@@ -66,6 +66,7 @@ export const useChatStore = defineStore('chat', () => {
   function rawToMessages(raw) {
     const result = [];
     let genSeq = 0;
+    const seenThinking = new Set();  // 深度思考按 raw_id 去重（thinking 只挂在 raw 组第一条消息上）
     for (const msg of raw) {
       const content = msg.content?.replace(/<br\s*\/?>/gi, '').trim();
       let allImages = [];
@@ -73,7 +74,27 @@ export const useChatStore = defineStore('chat', () => {
       const imageUrls = Array.isArray(allImages) ? allImages : [];
       const emojiImages = imageUrls.filter(isEmojiImageUrl);
       const genImages = imageUrls.filter(u => !isEmojiImageUrl(u));
-      if (!content && emojiImages.length === 0) continue;
+      if (!content && emojiImages.length === 0 && genImages.length === 0) continue;
+
+      // 深度思考块：插到该 raw 组第一条消息（可能是文本气泡或生图气泡）之前
+      if (msg.role === 'assistant' && msg.thinking && !seenThinking.has(msg.raw_id)) {
+        seenThinking.add(msg.raw_id);
+        let thinkData = null;
+        try { thinkData = typeof msg.thinking === 'string' ? JSON.parse(msg.thinking) : msg.thinking; } catch {}
+        if (thinkData?.think || thinkData?.plan) {
+          result.push({
+            id: uid(),
+            role: 'assistant',
+            type: 'thinking',
+            status: 'done',
+            content: thinkData.think || '',
+            summary: thinkData.plan?.summary || '',
+            elapsedMs: 0,
+            raw_id: msg.raw_id,
+            created_at: msg.created_at,
+          });
+        }
+      }
 
       if (msg.raw_id === null && msg.event_id != null) {
         let eventData = null;
@@ -88,12 +109,16 @@ export const useChatStore = defineStore('chat', () => {
         continue;
       }
 
-      result.push({
-        ...msg,
-        content,
-        type: msg.type || 'text',
-        sticker_images: emojiImages.map(url => ({ url, base64: null })),
-      });
+      // 图即回复（深度思考 standalone）：空文本消息只是图片载体，不渲染文本气泡，仅出图
+      const isImageCarrier = !content && emojiImages.length === 0 && genImages.length > 0;
+      if (!isImageCarrier) {
+        result.push({
+          ...msg,
+          content,
+          type: msg.type || 'text',
+          sticker_images: emojiImages.map(url => ({ url, base64: null })),
+        });
+      }
       if (msg.role === 'assistant' && genImages.length > 0) {
         result.push({
           id: uid(),
@@ -262,7 +287,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content, imageMode = 'smart') {
+  async function sendMessage(content, imageMode = 'smart', deepThink = false) {
     if (streaming.value || !content.trim()) return
     const charId = activeCharId.value
     if (!charId) return
@@ -311,6 +336,11 @@ export const useChatStore = defineStore('chat', () => {
       abort()
       streaming.value = false
       streamingContent.value = ''
+      // 移除未完成的深度思考块
+      if (thinkingMsg) {
+        messages.value = messages.value.filter(m => m !== thinkingMsg)
+        thinkingMsg = null
+      }
       // 清理当前重试窗口中的空泡
       for (let i = messages.value.length - 1; i >= 0; i--) {
         const m = messages.value[i]
@@ -347,6 +377,8 @@ export const useChatStore = defineStore('chat', () => {
     //    这比 "收到任何 token" 更严格 —— 防止只收到几个残字就不重试的问题
     const MAX_STREAM_RETRIES = 2
     let fullResponse = ''
+    let thinkingMsg = null   // 深度思考块（本请求的，跨重试清理重建）
+    let sawImageGen = false  // 本轮是否出现过生图任务（图即回复时禁止 "..." 兜底）
 
     for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
       if (!isCurrentStream(sessionId)) break
@@ -362,6 +394,11 @@ export const useChatStore = defineStore('chat', () => {
       // ── 每轮尝试的状态 ──
       let bubbleIds, bubbleText, msgSavedIdx, lastEvent, _bufTimer, pendingStickerTimers, pendingTextTimers
       function initAttemptState() {
+        // 上一次尝试遗留的深度思考块一并清理（重试时服务端会重新规划）
+        if (thinkingMsg) {
+          messages.value = messages.value.filter(m => m !== thinkingMsg)
+          thinkingMsg = null
+        }
         const firstBubbleId = uid()
         bubbleIds = [firstBubbleId]
         bubbleText = ''
@@ -373,6 +410,22 @@ export const useChatStore = defineStore('chat', () => {
         messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
       }
       initAttemptState()
+
+      // 深度思考块：插到本轮首个 assistant 气泡之前，流式追加内容
+      const ensureThinkingMsg = () => {
+        if (thinkingMsg) return thinkingMsg
+        const raw = {
+          id: uid(), role: 'assistant', type: 'thinking', status: 'streaming',
+          content: '', summary: '', elapsedMs: 0, created_at: new Date().toISOString(),
+        }
+        const firstBubbleIdx = messages.value.findIndex(m => m.id === bubbleIds[0])
+        if (firstBubbleIdx >= 0) messages.value.splice(firstBubbleIdx, 0, raw)
+        else messages.value.push(raw)
+        // 关键：从 reactive 数组取回代理对象。若直接持有 raw 引用，
+        // 后续 tm.content += ... 绕过 Proxy set 陷阱，Vue 不会触发更新（内容只在刷新后可见）
+        thinkingMsg = messages.value.find(m => m.id === raw.id) || raw
+        return thinkingMsg
+      }
       const scheduleSticker = (target, urls, leadingSticker = false) => {
         if (!target || !Array.isArray(urls) || urls.length === 0) return
         const existing = pendingStickerTimers.get(target)
@@ -399,7 +452,7 @@ export const useChatStore = defineStore('chat', () => {
         pendingTextTimers.clear()
       }
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink)
       abort = streamAbort
       const reader = stream.getReader()
 
@@ -479,10 +532,34 @@ export const useChatStore = defineStore('chat', () => {
               }
               bubbleIds.length = parts.length
             }
+            // ── 深度思考 plan 事件（发生在正式回复之前）──
+            if (lastEvent === 'plan_start') {
+              resetSafetyTimer(TEXT_SAFETY_MS)
+              ensureThinkingMsg()
+            }
+            if (lastEvent === 'plan_delta' && d.text) {
+              resetSafetyTimer(TEXT_SAFETY_MS)
+              const tm = ensureThinkingMsg()
+              tm.content += d.text
+            }
+            if (lastEvent === 'plan_end') {
+              const tm = thinkingMsg
+              if (tm) {
+                tm.status = 'done'
+                tm.summary = d.summary || ''
+                tm.elapsedMs = d.elapsedMs || 0
+                if (!tm.content?.trim()) {
+                  // 没有任何思考内容 → 移除空块
+                  messages.value = messages.value.filter(m => m !== tm)
+                  thinkingMsg = null
+                }
+              }
+            }
             // ── 生图事件 ──
             if (lastEvent === 'generate_start') {
               // 生图开始，延长安全超时到 10 分钟（匹配 ComfyUI 后端超时）
               resetSafetyTimer(IMAGE_SAFETY_MS)
+              sawImageGen = true
               messages.value.push({
                 id: uid(), role: 'assistant', type: 'image_gen',
                 genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
@@ -587,7 +664,7 @@ export const useChatStore = defineStore('chat', () => {
         for (const bid of bubbleIds) {
           let m = messages.value.find(x => x.id === bid)
           if (!m) continue  // 延迟创建未触发，无需填充
-          if (!m.content) m.content = '...'
+          if (!m.content && !sawImageGen) m.content = '...'
         }
         break
       } catch (err) {
@@ -665,8 +742,8 @@ export const useChatStore = defineStore('chat', () => {
               break
             }
           }
-          // 兜底：完全无回复
-          if (!fullResponse && bubbleIds.length === 1) {
+          // 兜底：完全无回复（图即回复时正文为空是预期，不补 "..."）
+          if (!fullResponse && !sawImageGen && bubbleIds.length === 1) {
             const m = messages.value.find(x => x.id === bubbleIds[0])
             if (m && !m.content) m.content = '...'
           }

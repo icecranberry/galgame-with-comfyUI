@@ -615,6 +615,14 @@
           <linshe-switch v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
         </div>
 
+        <div class="toggle-row">
+          <div>
+            <div class="tl">深度思考<span class="beta-tag">测试版</span></div>
+            <div class="td">私聊回复前 AI 先在内心盘算用什么形式表达（文字/表情包/照片），思考过程默认折叠显示。</div>
+          </div>
+          <linshe-switch :model-value="deepThinkMode" @change="onDeepThinkChange" />
+        </div>
+
         <div class="toggle-row freq-row">
           <div>
             <div class="tl">主动聊天频率</div>
@@ -1835,6 +1843,16 @@ async function saveFeature(key, val) {
   await updateFeatureFlag(key, val)
 }
 
+// ── 深度思考（测试版）：开关在 settings store 持久化，聊天页实时读取 ──
+const deepThinkMode = computed(() => settingsStore.deepThinkMode)
+function onDeepThinkChange(v) {
+  settingsStore.setDeepThinkMode(v)
+  // 深度思考接管灵性生图判断：开启时「灵性配图」档位收编为「强制配图」
+  if (v && settingsStore.imageGenMode === 'smart') {
+    settingsStore.setImageGenMode('force')
+  }
+}
+
 // 滑块松手时触发，持久化到后端并更新 features
 async function onFreqChange() {
   const v = freqSlider.value
@@ -2493,6 +2511,19 @@ function resetTestPrompts() {
 .toggle-row { display: flex; gap: 14px; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
 .toggle-row:last-child { border-bottom: none; }
 .tl { font-size: 14px; font-weight: 500; color: var(--text-bright); }
+/* 测试版小标签：珊瑚描边弱强调 */
+.beta-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--accent);
+  border: 1px solid var(--accent-light);
+  vertical-align: 1px;
+}
 .td { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 .freq-control {

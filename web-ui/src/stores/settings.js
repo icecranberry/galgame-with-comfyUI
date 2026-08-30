@@ -8,6 +8,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const eventWidth = ref(1600)
   const eventHeight = ref(1200)
   const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
+  const deepThinkMode = ref(false)  // 私聊深度思考：planner 先规划媒介组合（文字/表情包/图片）再回复
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
@@ -34,6 +35,9 @@ export const useSettingsStore = defineStore('settings', () => {
         imageGenMode.value = data.features.imageGenMode
       } else if (data.features?.forceImageGen !== undefined) {
         imageGenMode.value = data.features.forceImageGen ? 'force' : 'smart'
+      }
+      if (data.features?.deepThinkMode !== undefined) {
+        deepThinkMode.value = !!data.features.deepThinkMode
       }
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
@@ -68,6 +72,14 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateFeatureFlag('imageGenMode', mode)
   }
 
+  /**
+   * 切换私聊深度思考模式（planner 预规划）
+   */
+  async function setDeepThinkMode(v) {
+    deepThinkMode.value = !!v
+    await api.updateFeatureFlag('deepThinkMode', !!v)
+  }
+
   async function setRealtimeAffinityDisplay(v) {
     realtimeAffinityDisplay.value = v
     await api.updateFeatureFlag('realtimeAffinityDisplay', v)
@@ -80,5 +92,5 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateWeatherCity(city)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, realtimeAffinityDisplay, hasApiKey, weatherCity, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, hasApiKey, weatherCity, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
 })

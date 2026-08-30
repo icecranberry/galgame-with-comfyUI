@@ -31,6 +31,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_serializeBackgroundLLM: 'false',
   feature_backgroundLLMMaxConcurrency: '3',
   feature_mergeMessages: 'false',
+  feature_deepThinkMode: 'false',
   feature_weather: 'true',
   disturb_start_time: '22:00',
   disturb_end_time: '08:00',

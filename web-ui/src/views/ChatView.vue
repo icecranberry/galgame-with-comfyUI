@@ -147,21 +147,6 @@
           </div>
           <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ imageGenModeLabel }}</span>
         </div>
-        <div class="force-img-wrap">
-          <div
-            role="button"
-            tabindex="0"
-            class="force-img-toggle"
-            :class="{ active: deepThinkMode }"
-            :title="deepThinkLabel"
-            @keydown.enter.prevent="toggleDeepThink"
-            @keydown.space.prevent="toggleDeepThink"
-            @click="toggleDeepThink"
-          >
-            <span class="force-img-icon">🧠</span>
-          </div>
-          <span v-if="deepThinkTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ deepThinkLabel }}</span>
-        </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
           @keydown.enter.exact.prevent="send"
@@ -661,24 +646,19 @@ const realtimeAffinityEnabled = computed({
 })
 
 const IMAGE_GEN_MODE_CYCLE = ['smart', 'force', 'off']
+// 深度思考接管了灵性判断（planner 即决策者），生图档位只剩 强制 ↔ 关闭
+const IMAGE_GEN_MODE_CYCLE_DEEP_THINK = ['force', 'off']
+const imageGenCycle = computed(() => deepThinkMode.value ? IMAGE_GEN_MODE_CYCLE_DEEP_THINK : IMAGE_GEN_MODE_CYCLE)
 
 function cycleImageGenMode() {
-  const idx = IMAGE_GEN_MODE_CYCLE.indexOf(imageGenMode.value)
-  settings.setImageGenMode(IMAGE_GEN_MODE_CYCLE[(idx + 1) % IMAGE_GEN_MODE_CYCLE.length])
+  const cycle = imageGenCycle.value
+  const idx = cycle.indexOf(imageGenMode.value)
+  settings.setImageGenMode(cycle[(idx + 1) % cycle.length])
   showForceTip()
 }
 
-// ── 深度思考开关（planner 预规划媒介组合，思考过程流式小字 + 默认折叠）──
+// ── 深度思考（开关已移至系统设置 → 功能开关，标注测试版）──
 const deepThinkMode = computed(() => settings.deepThinkMode)
-const deepThinkLabel = computed(() => deepThinkMode.value ? '深度思考：已开启' : '深度思考：未开启')
-const deepThinkTipVisible = ref(false)
-let deepThinkTipTimer = null
-function toggleDeepThink() {
-  settings.setDeepThinkMode(!settings.deepThinkMode)
-  deepThinkTipVisible.value = true
-  clearTimeout(deepThinkTipTimer)
-  deepThinkTipTimer = setTimeout(() => { deepThinkTipVisible.value = false }, 2000)
-}
 
 function onGiftSent(result) {
   showGiftPanel.value = false
@@ -1371,12 +1351,13 @@ for (let i = 0; i < msg.sticker_images.length; i++) pieces.push({ kind: 'sticker
 }
 if (msg.content) pieces.push({ kind: 'text' })
 if (pieces.length === 0) pieces.push({ kind: 'text' })
-for (const piece of pieces) {
-const sameRole = prevRole !== null && prevRole === msg.role
-const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
-items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
-prevRole = msg.role
-}
+  for (const piece of pieces) {
+    const sameRole = prevRole !== null && prevRole === msg.role
+    const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
+    items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
+    // 深度思考块不参与连发头像合并——否则它后面第一条回复的头像会被当作"同角色连发"隐藏
+    if (msg.type !== 'thinking') prevRole = msg.role
+  }
 }
 }
 return items
