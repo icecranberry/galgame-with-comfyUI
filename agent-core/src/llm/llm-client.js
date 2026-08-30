@@ -360,6 +360,7 @@ async function* _chatStreamInner(messages, {
   temperature = 0.7,
   thinking,
   label = 'stream',
+  signal, // AbortSignal：客户端断开时中止上游请求，避免空烧 token
 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
@@ -402,12 +403,17 @@ async function* _chatStreamInner(messages, {
       Object.assign(params, extraBody);
     }
 
-    const stream = await getClient().chat.completions.create(params);
+    const stream = await getClient().chat.completions.create(params, { signal });
 
     console.log(`[${providerLabel()} ← ${label} start]`);
 
     let usage = null;
     for await (const chunk of stream) {
+      if (signal?.aborted) {
+        // 客户端已断开：主动终止上游流，不再消耗后续 token
+        stream.controller?.abort?.();
+        break;
+      }
       if (chunk.usage) usage = chunk.usage;
       const delta = chunk.choices?.[0]?.delta?.content;
       if (delta) {
@@ -423,6 +429,11 @@ async function* _chatStreamInner(messages, {
     recordLlmCall(label, usage);
     console.log('═══════════════════════════════════════════════\n');
   } catch (err) {
+    // 客户端主动中断不是错误，静默返回
+    if (signal?.aborted || err.name === 'AbortError') {
+      console.log(`[${providerLabel()} ← ${label}] aborted by client`);
+      return;
+    }
     console.error(`[${providerLabel()} ← ${label}] stream error:`, err.message);
     recordLlmCall(label, null, { failed: true });
     throw err;

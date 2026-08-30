@@ -21,7 +21,7 @@ import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
-import { invalidateGalleryCache } from './images.js';
+import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
@@ -77,10 +77,14 @@ function toISODate(sqliteDT) {
 // DELETE /api/characters/:id/messages — 清空角色对话记录
 router.delete('/characters/:id/messages', (req, res, next) => {
   const db = getDb();
-  const conversationId = convId(req.params.id);
+  // 入口即校验：id 必须是正整数，conversationId 由校验后的数字构造（不直接拼接原始输入）
+  const charId = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(charId) || charId <= 0) {
+    return res.status(400).json({ error: 'invalid character id' });
+  }
+  const conversationId = `char_${charId}`;
 
   const doDelete = () => {
-    const charId = parseInt(req.params.id, 10);
     // 先统一清理聊天长期记忆及其版本、checkpoint、审计和独立向量索引
     clearConversationMemories(conversationId);
     db.prepare('DELETE FROM emotion_snapshots WHERE conversation_id = ?').run(conversationId);
@@ -875,9 +879,14 @@ ${coreRules}
     const collectedSegments = [];
     let fullContent = '';
 
+    // 客户端断开 SSE 时中止上游 LLM 请求，避免继续空烧 token
+    const upstreamAbort = new AbortController();
+    req.on('close', () => upstreamAbort.abort());
+
     const streamOpts = {
       temperature: 0.72,
       label: '主聊天流',
+      signal: upstreamAbort.signal,
     };
 
     send('response_start', {});
