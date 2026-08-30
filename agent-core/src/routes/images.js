@@ -797,7 +797,17 @@ router.delete('/delete', async (req, res) => {
     dirPath = getImageDir(LEGACY_CATEGORY);
   }
 
+  // 防目录穿越：文件名不允许路径分隔符与 .. 形态，且解析后必须仍在目录内
+  if (!filename || filename === '.' || filename === '..') {
+    return res.status(400).json({ error: 'invalid filename' });
+  }
+  if (path.basename(filename) !== filename) {
+    return res.status(400).json({ error: 'invalid filename' });
+  }
   const filePath = path.join(dirPath, filename);
+  if (!path.resolve(filePath).startsWith(path.resolve(dirPath) + path.sep)) {
+    return res.status(400).json({ error: 'invalid path' });
+  }
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'file not found' });
   }

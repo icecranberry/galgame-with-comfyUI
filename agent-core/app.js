@@ -1,3 +1,4 @@
+import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better-sqlite3 加载崩溃
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import memoryRoutes from './src/routes/memory.js';
@@ -74,35 +76,35 @@ app.use('/images', (req, res, next) => {
 app.use('/images', express.static('data/images'));
 app.use('/avatars', express.static('data/avatars'));
 
-// API 路由
-app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
-app.use('/api/memory', memoryRoutes);
-app.use('/api/images', imagesRoutes);
-app.use('/api/characters', charactersRoutes);  // /api/characters CRUD
-app.use('/api/config', configRoutes);
-app.use('/api/moments', momentsRoutes);
-app.use('/api/relationships', relationshipsRoutes);
-app.use('/api/user-relationships', userRelationshipsRoutes);
-app.use('/api/portraits', portraitsRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/events', eventsRoutes);
-app.use('/api/stream', streamRoutes);
-app.use('/api/schedule', scheduleRoutes);
-app.use('/api/workflows', workflowsRoutes);
-app.use('/api/mailbox', mailboxRoutes);
-app.use('/api/groups', groupsRoutes);
-app.use('/api/library', libraryRoutes);   // /api/library/event-types, /api/library/topics
+// API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
+app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
+app.use('/api/memory', wrapRouterAsync(memoryRoutes));
+app.use('/api/images', wrapRouterAsync(imagesRoutes));
+app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
+app.use('/api/config', wrapRouterAsync(configRoutes));
+app.use('/api/moments', wrapRouterAsync(momentsRoutes));
+app.use('/api/relationships', wrapRouterAsync(relationshipsRoutes));
+app.use('/api/user-relationships', wrapRouterAsync(userRelationshipsRoutes));
+app.use('/api/portraits', wrapRouterAsync(portraitsRoutes));
+app.use('/api/notifications', wrapRouterAsync(notificationsRoutes));
+app.use('/api/events', wrapRouterAsync(eventsRoutes));
+app.use('/api/stream', wrapRouterAsync(streamRoutes));
+app.use('/api/schedule', wrapRouterAsync(scheduleRoutes));
+app.use('/api/workflows', wrapRouterAsync(workflowsRoutes));
+app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
+app.use('/api/groups', wrapRouterAsync(groupsRoutes));
+app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
 
-app.use('/api/maibot', maibotBridgeRoutes);
+app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 // 健康检查
-app.get('/api/health', async (req, res) => {
+app.get('/api/health', asyncHandler(async (req, res) => {
   const vectorOk = await vectorHealth();
   res.json({
     status: 'ok',
     vector_service: vectorOk ? 'ok' : 'down',
     timestamp: new Date().toISOString(),
   });
-});
+}));
 
 // 错误处理
 app.use(errorHandler);
@@ -243,8 +245,15 @@ process.on('SIGTERM', shutdown);
 // 周期性 WAL checkpoint 已把脏窗口缩到 ≤5 分钟，最坏情况损失 < 5 分钟的写入）
 process.on('SIGBREAK', shutdown);
 
-// 供 dev.mjs 在 taskkill 前触发优雅退出
+// 供 dev.mjs 在 taskkill 前触发优雅退出（仅限本机调用，防局域网内其他设备远程关停）
+const isLoopbackRequest = (req) => {
+  const addr = req.socket?.remoteAddress || '';
+  return addr === '::1' || addr === '127.0.0.1' || addr === '::ffff:127.0.0.1';
+};
 app.post('/api/shutdown', (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    return res.status(403).json({ error: 'shutdown 仅允许本机调用' });
+  }
   res.json({ ok: true });
   shutdown();
 });

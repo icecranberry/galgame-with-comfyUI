@@ -47,6 +47,7 @@ import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
 import { playNotificationSound } from './utils/sound.js'
 import { useMailboxStore } from './stores/mailbox.js'
+import { onEvent as onStreamEvent } from './stores/unifiedStream.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -163,17 +164,14 @@ onMounted(async () => {
   })
 
   // 订阅日程延迟回复 SSE 事件
-  try {
-    const { onEvent } = await import('./stores/unifiedStream.js')
-    onEvent('delayed_reply', (data) => {
-      chat.handleDelayedReply(data)
-      // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
-      if (data.character_id !== chat.activeCharId) {
-        playNotificationSound()
-        proactive.addProactive(data)
-      }
-    })
-  } catch { /* unifiedStream may not be ready */ }
+  onStreamEvent('delayed_reply', (data) => {
+    chat.handleDelayedReply(data)
+    // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
+    if (data.character_id !== chat.activeCharId) {
+      playNotificationSound()
+      proactive.addProactive(data)
+    }
+  })
 
   // 信箱新回信 → 播放提示音
   watch(() => mailbox.unreadCount, (newVal, oldVal) => {

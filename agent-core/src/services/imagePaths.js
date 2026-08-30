@@ -68,9 +68,15 @@ export function deleteImageFileByUrl(url) {
   if (!category) return false;
 
   const filename = cleanUrl.split('/').pop();
-  if (!filename || path.basename(filename) !== filename) return false;
+  // 拒绝空名、路径分隔符与 .. 等目录穿越形态（basename 校验挡不住 '..' 本身）
+  if (!filename || filename === '.' || filename === '..') return false;
+  if (path.basename(filename) !== filename) return false;
 
-  const filePath = path.join(getImageDir(category), filename);
+  const dir = getImageDir(category);
+  const filePath = path.join(dir, filename);
+  // 双保险：解析后的真实路径必须仍位于目录内
+  if (path.resolve(filePath) !== path.resolve(dir, filename)) return false;
+  if (!path.resolve(filePath).startsWith(path.resolve(dir) + path.sep)) return false;
   if (!fs.existsSync(filePath)) return false;
   fs.unlinkSync(filePath);
   return true;
