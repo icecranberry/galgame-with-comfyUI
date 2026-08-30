@@ -8,6 +8,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed, reactive } from 'vue'
+import { useMessageWindow, MESSAGE_WINDOW_INITIAL, MESSAGE_WINDOW_EXPAND } from '../composables/useMessageWindow.js'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 
@@ -16,12 +17,8 @@ export const useGroupsStore = defineStore('groups', () => {
   const activeGroupId = ref(null)
   const activeGroup = computed(() => groups.value.find(g => g.id === activeGroupId.value) || null)
   const messages = ref([])          // 已上屏消息
-  // 与私聊一致：历史消息保留在内存中，初次只渲染末尾 50 条，上滑每次展开 30 条。
-  const INITIAL_COUNT = 50
-  const EXPAND_COUNT = 30
-  const renderStart = ref(0)
-  const visibleMessages = computed(() => messages.value.slice(renderStart.value))
-  const hasMoreOlder = computed(() => renderStart.value > 0)
+  // 与私聊一致：历史消息保留在内存中，窗口策略统一由 useMessageWindow 提供
+  const { renderStart, visibleMessages, hasMoreOlder, resetToLatest } = useMessageWindow(messages)
   const playing = ref(false)        // 播放队列是否正在逐条上屏
   const sending = ref(false)
   const undoing = ref(false)
@@ -159,7 +156,7 @@ export const useGroupsStore = defineStore('groups', () => {
     const data = await api.getGroupMessages(id)
     if (requestId !== _selectRequestId || activeGroupId.value !== id) return
     session.messages.splice(0, session.messages.length, ...(data.messages || []).map(m => ({ ...m, images: parseImages(m.images) })))
-    session.renderStart = Math.max(0, session.messages.length - INITIAL_COUNT)
+    session.renderStart = Math.max(0, session.messages.length - MESSAGE_WINDOW_INITIAL)
     renderStart.value = session.renderStart
     session.seenMsgIds.clear()
     for (const m of session.messages) session.seenMsgIds.add(m.id)
@@ -189,7 +186,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   function expandWindow() {
     if (!hasMoreOlder.value) return
-    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+    renderStart.value = Math.max(0, renderStart.value - MESSAGE_WINDOW_EXPAND)
     const session = _activeSession()
     if (session) session.renderStart = renderStart.value
   }

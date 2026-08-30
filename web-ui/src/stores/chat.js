@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
+import { useMessageWindow } from '../composables/useMessageWindow.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -30,12 +31,9 @@ export const useChatStore = defineStore('chat', () => {
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
-  // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
-  const INITIAL_COUNT = 50
-  const EXPAND_COUNT = 30
-  const renderStart = ref(0)
-  const visibleMessages = computed(() => messages.value.slice(renderStart.value))
-  const hasMoreOlder = computed(() => renderStart.value > 0)
+  // 客户端渲染窗口：messages 已全量加载，窗口策略统一由 useMessageWindow 提供
+  const { renderStart, visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
+    useMessageWindow(messages)
 
   async function loadCharacters() {
     try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
@@ -47,7 +45,7 @@ export const useChatStore = defineStore('chat', () => {
       const raw = d.messages || [];
       const result = rawToMessages(raw);
       messages.value = result;
-      renderStart.value = Math.max(0, result.length - INITIAL_COUNT);
+      anchorToLatest();
       // 恢复好感度快照（切角色后 reatimeAffinity 被清空，从 DB 恢复）
       if (d.affinity && !realtimeAffinity.value) {
         realtimeAffinity.value = {
@@ -105,8 +103,7 @@ export const useChatStore = defineStore('chat', () => {
 
   // 向上展开渲染窗口（无需网络请求，数据已全量在内存中）
   function expandWindow() {
-    if (!hasMoreOlder.value) return
-    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+    expandOlder()
   }
 
   // 后台图片编辑任务确认覆盖后，刷新消息里的图片 URL（避免浏览器缓存旧图）
@@ -132,7 +129,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     activeCharId.value = charId
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
     guesses.value = null  // 切角色时清除候选词
     realtimeAffinity.value = null  // 切角色时清除实时好感度
     // 标记主动消息已读（DB 持久化），Sidebar 的 onCharClick 也会调，这里兜底
@@ -161,7 +158,7 @@ export const useChatStore = defineStore('chat', () => {
     showTypingDots.value = false
     await api.clearMessages(id)
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
   }
 
   // 撤回上一轮对话（用户最后一条消息 + 之后的所有 assistant 消息）
@@ -213,9 +210,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 调整渲染窗口
-    if (renderStart.value > messages.value.length - INITIAL_COUNT) {
-      renderStart.value = Math.max(0, messages.value.length - INITIAL_COUNT)
-    }
+    keepTailPinned()
   }
 
   // 在设置页面调用：AI 生成角色并直接入库
@@ -249,7 +244,7 @@ export const useChatStore = defineStore('chat', () => {
     showTypingDots.value = false
     await api.deleteCharacter(id)
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
     activeCharId.value = null
     await loadCharacters()
   }
