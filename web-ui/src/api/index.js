@@ -93,6 +93,28 @@ export async function generateAvatar(characterId) {
   return res.json()
 }
 
+/** 上传/清除角色聊天背景（base64，空串 = 恢复默认） */
+export async function uploadChatBg(characterId, base64) {
+  const res = await fetch(`${BASE}/characters/${characterId}/chat-bg`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  return res.json()
+}
+
+/** AI 生成角色聊天背景（依据角色设定与可选场景提示，横版无人物） */
+export async function generateChatBg(characterId, prompt = '') {
+  const res = await fetch(`${BASE}/characters/${characterId}/generate-chat-bg`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Chat background generation failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ── Workflows ──
 export async function getWorkflows() {
   const res = await fetch(`${BASE}/workflows`)

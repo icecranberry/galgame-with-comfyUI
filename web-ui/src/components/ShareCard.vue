@@ -117,7 +117,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 
 function formatTime(iso) {
@@ -243,7 +243,7 @@ watch(() => props.visible, v => {
   /* 不再限制高度、不再 overflow: auto — 卡片内容全量展示，超长由 overlay 层滚动 */
   position: relative;
 
-  /* 暖色渐变底色 — 与品牌色 #e07b6c 呼应但更柔和 */
+  /* 暖色渐变底色 — 与品牌色 var(--accent) 呼应但更柔和 */
   background: linear-gradient(
     145deg,
     #fef5f3 0%,
@@ -272,7 +272,7 @@ watch(() => props.visible, v => {
 .blob-1 {
   width: 180px; height: 180px;
   top: -30px; right: -40px;
-  background: radial-gradient(circle, rgba(224, 123, 108, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.12) 0%, transparent 70%);
 }
 .blob-2 {
   width: 140px; height: 140px;
@@ -301,7 +301,7 @@ watch(() => props.visible, v => {
 /* 顶部渐变装饰条 */
 .share-decorator {
   height: 5px;
-  background: linear-gradient(90deg, #e07b6c 0%, #f0a58f 45%, #e8c4a0 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-light) 45%, var(--accent-2-light) 100%);
   border-radius: 16px 16px 0 0;
 }
 

@@ -1,5 +1,14 @@
 // HarmonyOS Sans — 全局字体
 import './assets/fonts/fonts.css'
+// 全局样式体系：token → 基础 → 组件类 → 动效
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/components.css'
+import './styles/animations.css'
+import { initTheme } from './theme.js'
+
+// 挂载前同步应用本地主题，避免首帧闪烁
+initTheme()
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

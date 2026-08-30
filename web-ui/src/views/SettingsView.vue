@@ -6,6 +6,25 @@
     </div>
 
     <div class="settings-grid">
+      <!-- 外观：主题选择（即时生效，保存在本设备） -->
+      <div class="card appearance-card">
+        <h3>外观</h3>
+        <p class="fd">选择界面配色主题，点击立即生效，偏好保存在本设备</p>
+        <div class="theme-grid">
+          <button v-for="t in themes" :key="t.id"
+            class="theme-tile" :class="{ active: settingsStore.theme === t.id }"
+            @click="settingsStore.setTheme(t.id)">
+            <span class="theme-swatch">
+              <i v-for="(c, i) in t.swatches" :key="i" :style="{ background: c }"></i>
+            </span>
+            <span class="theme-meta">
+              <span class="theme-name">{{ t.name }}<span v-if="settingsStore.theme === t.id" class="theme-check">✓</span></span>
+              <span class="theme-desc">{{ t.desc }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card comfy-params-card">
         <h3>画师串 & 分辨率</h3>
@@ -716,7 +735,8 @@
 
         <button
           type="button"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
+          style="--entry-hue: var(--fun-teal)"
           aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
         >
@@ -748,7 +768,8 @@
 
         <button
           type="button"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
+          style="--entry-hue: var(--fun-violet)"
           aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
           @click="router.push('/settings/maibot')"
         >
@@ -866,7 +887,7 @@
                       class="disturb-char-avatar"
                       :style="ch.avatar_path
                         ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                        : { background: '#e07b6c' }"
+                        : { background: 'var(--accent)' }"
                     >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
                     <span class="disturb-char-name">{{ ch.display_name }}</span>
                   </label>
@@ -986,6 +1007,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTic
 import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
+import { THEMES } from '../theme.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
@@ -994,6 +1016,7 @@ import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
 
 const settingsStore = useSettingsStore()
+const themes = THEMES
 const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -2209,24 +2232,25 @@ function resetTestPrompts() {
 .memory-settings-row .switch { height: 44px; }
 .memory-settings-row .slider { top: 10px; bottom: 10px; }
 .memory-settings-row .switch input:focus-visible + .slider {
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.2);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2);
 }
 .memory-settings-entry {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;
   color: var(--text-primary); text-align: left;
-  background: rgba(224, 123, 108, 0.07);
-  border: 1px solid rgba(224, 123, 108, 0.16);
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--entry-hue, var(--accent)) 18%, transparent);
   border-radius: 12px;
   touch-action: manipulation;
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease-out);
 }
 .memory-settings-entry:hover {
-  background: rgba(224, 123, 108, 0.12);
-  border-color: rgba(224, 123, 108, 0.38);
-  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.1);
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--entry-hue, var(--accent)) 40%, transparent);
+  box-shadow: var(--shadow-sm), var(--shadow-hard-sm);
+  transform: translateY(-2px);
 }
-.memory-settings-entry:active { background: rgba(224, 123, 108, 0.16); }
+.memory-settings-entry:active { background: rgba(var(--accent-rgb), 0.16); }
 .memory-settings-entry:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -2234,9 +2258,10 @@ function resetTestPrompts() {
 .memory-entry-icon {
   width: 40px; height: 40px; flex: 0 0 40px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent);
-  background: rgba(224, 123, 108, 0.12);
-  border-radius: 10px;
+  color: var(--entry-hue, var(--accent));
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 13%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--entry-hue, var(--accent)) 20%, transparent);
+  border-radius: 12px;
 }
 .memory-entry-icon svg,
 .memory-entry-arrow svg {
@@ -2267,7 +2292,7 @@ function resetTestPrompts() {
   background: transparent; white-space: nowrap;
 }
 .wf-lora-btn {
-  color: #E07B6C; border-color: rgba(224, 123, 108, 0.30);
+  color: var(--accent); border-color: rgba(var(--accent-rgb), 0.30);
 }
 .wf-mode-btn {
   color: #6F675F; border-color: #E5D8CE;
@@ -2276,33 +2301,25 @@ function resetTestPrompts() {
   color: #A9A099; border-color: #ECE5DD; opacity: 0.9;
 }
 .wf-action-btn:hover:not(:disabled) {
-  background: rgba(224, 123, 108, 0.08);
-  border-color: rgba(224, 123, 108, 0.45); color: #E07B6C;
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.45); color: var(--accent);
 }
 .wf-reset-btn:hover:not(:disabled) {
   background: transparent; color: #8B8074; border-color: #D8CEC3;
 }
 .float-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 10px;
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C; margin-left: 4px;
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent); margin-left: 4px;
   white-space: nowrap;
 }
-.float-badge.active { background: rgba(224, 123, 108, 0.14); color: #E07B6C; }
+.float-badge.active { background: rgba(var(--accent-rgb), 0.14); color: var(--accent); }
 
-/* ── 毛玻璃卡片 ── */
+/* ── 卡片：视觉样式走全局 .card，这里只保留布局 ── */
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
   padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: box-shadow 0.2s ease;
   display: flex;
   flex-direction: column;
 }
-.card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
@@ -2337,8 +2354,8 @@ function resetTestPrompts() {
   color: #6F675F;
 }
 .comfy-tab.active {
-  background: rgba(224, 123, 108, 0.10);
-  color: #E07B6C;
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
   font-weight: 600;
 }
 .comfy-tab.active::after {
@@ -2346,7 +2363,7 @@ function resetTestPrompts() {
   position: absolute;
   left: 50%; bottom: 4px; width: 18px; height: 2px;
   border-radius: 2px; transform: translateX(-50%);
-  background: #E07B6C;
+  background: var(--accent);
 }
 
 .comfy-form-stage {
@@ -2382,8 +2399,8 @@ function resetTestPrompts() {
   border: 1px solid #E5D8CE; background: #FFFEFC; color: var(--text-bright);
 }
 .fr .fi:focus {
-  border-color: #E07B6C;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10);
 }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fpresets-head {
@@ -2423,12 +2440,12 @@ function resetTestPrompts() {
 .hiresfix-summary { font-size: 12px; color: #6F675F; }
 .hiresfix-link, .quality-link {
   padding: 6px 10px; border: none; border-radius: 8px;
-  background: transparent; color: #E07B6C;
+  background: transparent; color: var(--accent);
   font-size: 13px; font-weight: 500; cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .hiresfix-link:hover, .quality-link:hover {
-  background: rgba(224, 123, 108, 0.10); color: #CC6A5C;
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent-hover);
 }
 /* ── 质量提示词 ── */
 .quality-section {
@@ -2452,12 +2469,12 @@ function resetTestPrompts() {
   cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .pbtn:hover {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.18);
 }
 .pbtn.active {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.18);
 }
 .cb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: -6px 0 12px; cursor: pointer; user-select: none; }
 .cb input { width: 14px; height: 14px; cursor: pointer; }
@@ -2480,8 +2497,8 @@ function resetTestPrompts() {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .fav-input-row:focus-within {
-  border-color: #E07B6C;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10);
 }
 .fav-input {
   flex: 1; min-width: 0; height: 38px; padding: 0; margin: 0;
@@ -2511,17 +2528,17 @@ function resetTestPrompts() {
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .fav-chip:hover {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C;
-  border-color: rgba(224, 123, 108, 0.18);
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.18);
 }
 .fav-chip.active {
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C; font-weight: 500;
-  border-color: rgba(224, 123, 108, 0.18);
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent); font-weight: 500;
+  border-color: rgba(var(--accent-rgb), 0.18);
 }
 .fav-chip-x {
   font-size: 12px; line-height: 1; color: #A9A099;
 }
-.fav-chip-x:hover { color: #E07B6C; }
+.fav-chip-x:hover { color: var(--accent); }
 
 /* ── 收藏弹窗 ── */
 .fav-dialog-overlay {
@@ -2554,18 +2571,18 @@ function resetTestPrompts() {
 .fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .fav-dialog-input {
   width: 100%; padding: 10px 12px; font-size: 14px;
-  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
+  border-radius: 8px; border: 1px solid var(--border); outline: none;
   transition: border-color 0.2s;
 }
-.fav-dialog-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.fav-dialog-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .quality-dialog-textarea {
   width: 100%; padding: 10px 12px; font-size: 13px; font-family: inherit;
-  border-radius: 8px; border: 1px solid #d5d0ca; outline: none;
+  border-radius: 8px; border: 1px solid var(--border); outline: none;
   resize: vertical; min-height: 88px; line-height: 1.6; color: var(--text-bright);
   transition: border-color 0.2s;
 }
-.quality-dialog-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.quality-dialog-textarea:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .quality-dialog-textarea::placeholder { color: #b3aca4; }
 
 /* ── 弹窗过渡动画 ── */
@@ -2692,7 +2709,7 @@ function resetTestPrompts() {
 .disturb-time-input {
   font-family: inherit;
   padding: 8px 12px;
-  border: 1px solid #d5d0ca;
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
   color: var(--text-bright);
@@ -2701,7 +2718,7 @@ function resetTestPrompts() {
   outline: none;
   transition: border-color 0.2s;
 }
-.disturb-time-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.disturb-time-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .disturb-time-sep { color: var(--text-secondary); }
 .disturb-no-chars {
   font-size: 13px; color: var(--text-secondary); margin: 8px 0;
@@ -2722,12 +2739,12 @@ function resetTestPrompts() {
   min-width: 70px;
 }
 .disturb-char-chip:hover {
-  border-color: #d5d0ca;
+  border-color: var(--border);
   background: #eeebe5;
 }
 .disturb-char-chip.selected {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .disturb-char-avatar {
   width: 42px; height: 42px; border-radius: 50%;
@@ -2876,18 +2893,18 @@ function resetTestPrompts() {
 .relay-quick-btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 12px; border-radius: 8px;
-  border: 1px solid rgba(224, 123, 108, 0.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   background: var(--accent); color: #fff;
   font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
-  box-shadow: 0 2px 8px rgba(224, 123, 108, 0.18);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.18);
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 .relay-quick-btn:hover:not(:disabled) {
   background: var(--accent-hover); border-color: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(224, 123, 108, 0.28);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
   transform: translateY(-1px);
 }
-.relay-quick-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(224, 123, 108, 0.18); }
+.relay-quick-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.18); }
 .relay-quick-btn:disabled { opacity: 0.6; cursor: wait; }
 .relay-quick-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .relay-quick-icon { flex-shrink: 0; }
@@ -3038,9 +3055,9 @@ function resetTestPrompts() {
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.llm-model-option:hover { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
+.llm-model-option:hover { background: rgba(var(--accent-rgb), 0.08); color: var(--accent); }
 .llm-model-option.selected,
-.llm-model-option.active { background: rgba(224, 123, 108, 0.06); color: var(--accent); font-weight: 600; }
+.llm-model-option.active { background: rgba(var(--accent-rgb), 0.06); color: var(--accent); font-weight: 600; }
 .llm-model-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .llm-model-check { flex-shrink: 0; color: var(--accent); }
 .llm-model-empty { padding: 16px 10px; color: var(--text-secondary); font-size: 13px; text-align: center; }
@@ -3070,7 +3087,7 @@ function resetTestPrompts() {
   width: calc((100% - 4px) / 3);
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.2);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.2);
   transform: translateX(100%);
   transition: transform 0.2s ease;
 }
@@ -3143,8 +3160,8 @@ function resetTestPrompts() {
 .profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
 .profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
 .profile-tag.active {
-  background: #e07b6c;
-  border-color: #e07b6c;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -3228,7 +3245,7 @@ function resetTestPrompts() {
 .generated-prompt-editor:focus { border-color: var(--accent); }
 .style-test-btn { border-radius: 8px; margin: 0; }
 .hires-test-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
-.hires-test-btn:hover:not(:disabled) { background: rgba(224, 123, 108, 0.1); box-shadow: none; color: var(--accent-hover); }
+.hires-test-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.1); box-shadow: none; color: var(--accent-hover); }
 .test-mode-btn {
   padding: 7px 14px; font-size: 12px; font-weight: 500;
   border-radius: 8px; border: 1px solid var(--glass-border);
@@ -3352,7 +3369,7 @@ function resetTestPrompts() {
 .wf-mode-option:hover { border-color: var(--accent); }
 .wf-mode-option.active {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .wf-mo-title {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
@@ -3385,8 +3402,8 @@ function resetTestPrompts() {
   margin-bottom: 10px; text-align: center;
 }
 .wf-mode-scenes {
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   border-radius: 8px; padding: 12px 16px;
 }
 .wf-scene-row-h {
@@ -3432,4 +3449,50 @@ function resetTestPrompts() {
 .modal-fade-enter-active { transition: opacity 0.3s ease; }
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+
+/* ── 外观：主题选择 ── */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.theme-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-secondary);
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.theme-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06); }
+.theme-tile.active {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.theme-swatch {
+  display: flex;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.theme-swatch i { flex: 1; }
+.theme-meta { display: flex; flex-direction: column; gap: 2px; }
+.theme-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.theme-check {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.theme-desc { font-size: 11.5px; color: var(--text-secondary); }
 </style>

@@ -9,65 +9,93 @@
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link href="https://fonts.googleapis.cn/css2?family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
   <style>
-    /* ── 背景几何柔光图形 ── */
+    /* ── 背景几何柔光图形 ──
+       颜色来自 tokens.css 各主题的 --geo-N-bg 变量（随主题切换），
+       此处回退值为默认 violet 主题，用于样式加载前首帧。
+       三个主光斑带缓慢漂移动画（prefers-reduced-motion 由 base.css 全局兜底）。 */
     .bg-geo {
       position: fixed; pointer-events: none; z-index: 0;
-      will-change: transform;
       border-radius: 50%;
       filter: blur(100px);
+      transition: background 0.4s ease;
     }
-    /* 顶部弥漫暖光 — 铺满上半屏 */
+    @keyframes geo-drift-a {
+      0%   { transform: translate(0, 0) scale(1); }
+      50%  { transform: translate(3vw, 2.5vh) scale(1.06); }
+      100% { transform: translate(-1.5vw, 1vh) scale(0.98); }
+    }
+    @keyframes geo-drift-b {
+      0%   { transform: translate(0, 0) scale(1); }
+      50%  { transform: translate(-2.5vw, -2vh) scale(1.05); }
+      100% { transform: translate(2vw, 1.5vh) scale(0.97); }
+    }
+    @keyframes geo-drift-c {
+      0%   { transform: translate(0, 0); }
+      50%  { transform: translate(2vw, -2.5vh); }
+      100% { transform: translate(-1vw, 1.5vh); }
+    }
+    /* 极淡波点纹理（halftone），赛璐璐质感底层 */
+    .bg-pattern {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image: radial-gradient(var(--dot-color, rgba(108, 92, 231, 0.08)) 1.2px, transparent 1.4px);
+      background-size: 22px 22px;
+      transition: background 0.4s ease;
+    }
+    /* 顶部弥漫主色光 — 铺满上半屏 */
     .bg-geo-1 {
       width: 90vw; height: 55vh; max-width: 1200px; max-height: 500px;
       top: -12%; left: 5%;
-      background: radial-gradient(ellipse at 50% 40%, rgba(238, 200, 170, 0.70) 0%, rgba(230, 190, 160, 0.35) 30%, transparent 55%);
+      background: var(--geo-1-bg, radial-gradient(ellipse at 50% 40%, rgba(178, 168, 248, 0.70) 0%, rgba(178, 168, 248, 0.34) 30%, transparent 55%));
       opacity: 0.90;
+      animation: geo-drift-a 52s ease-in-out infinite alternate;
     }
-    /* 右下暖桃色大光晕 */
+    /* 右下点睛色大光晕 */
     .bg-geo-2 {
       width: 65vw; height: 50vh; max-width: 850px; max-height: 450px;
       bottom: -10%; right: -10%;
-      background: radial-gradient(ellipse at 40% 50%, rgba(240, 195, 170, 0.65) 0%, rgba(225, 180, 155, 0.30) 30%, transparent 55%);
+      background: var(--geo-2-bg, radial-gradient(ellipse at 40% 50%, rgba(255, 186, 152, 0.66) 0%, rgba(255, 186, 152, 0.32) 30%, transparent 55%));
       opacity: 0.85;
+      animation: geo-drift-b 64s ease-in-out infinite alternate;
     }
-    /* 左侧中段暖米色漫射 */
+    /* 左侧中段淡色漫射 */
     .bg-geo-3 {
       width: 50vw; height: 60vh; max-width: 650px; max-height: 550px;
       top: 15%; left: -8%;
-      background: radial-gradient(ellipse at 60% 45%, rgba(235, 210, 185, 0.60) 0%, rgba(220, 195, 170, 0.28) 30%, transparent 55%);
+      background: var(--geo-3-bg, radial-gradient(ellipse at 60% 45%, rgba(198, 190, 252, 0.60) 0%, rgba(198, 190, 252, 0.30) 30%, transparent 55%));
       opacity: 0.85;
     }
-    /* 中部微暖玫瑰调 */
+    /* 中部微粉调 */
     .bg-geo-4 {
       width: 55vw; height: 45vh; max-width: 720px; max-height: 420px;
       top: 35%; left: 25%;
-      background: radial-gradient(ellipse at 50% 50%, rgba(240, 200, 190, 0.55) 0%, rgba(225, 185, 175, 0.25) 30%, transparent 55%);
+      background: var(--geo-4-bg, radial-gradient(ellipse at 50% 50%, rgba(255, 202, 216, 0.52) 0%, rgba(255, 202, 216, 0.26) 30%, transparent 55%));
       opacity: 0.80;
     }
-    /* 底部暖杏色横漫 */
+    /* 底部横漫 */
     .bg-geo-5 {
       width: 80vw; height: 30vh; max-width: 1050px; max-height: 280px;
       bottom: -6%; left: 10%;
-      background: radial-gradient(ellipse at 50% 40%, rgba(228, 195, 170, 0.58) 0%, rgba(215, 180, 158, 0.26) 30%, transparent 55%);
+      background: var(--geo-5-bg, radial-gradient(ellipse at 50% 40%, rgba(186, 196, 250, 0.55) 0%, rgba(186, 196, 250, 0.28) 30%, transparent 55%));
       opacity: 0.82;
     }
-    /* 右中偏上淡紫灰微光 */
+    /* 右中偏上天蓝微光 */
     .bg-geo-6 {
       width: 40vw; height: 40vh; max-width: 520px; max-height: 380px;
       top: 10%; right: 10%;
-      background: radial-gradient(ellipse at 45% 50%, rgba(218, 195, 205, 0.50) 0%, rgba(205, 182, 190, 0.22) 32%, transparent 58%);
+      background: var(--geo-6-bg, radial-gradient(ellipse at 45% 50%, rgba(168, 208, 252, 0.52) 0%, rgba(168, 208, 252, 0.26) 30%, transparent 58%));
       opacity: 0.72;
+      animation: geo-drift-c 58s ease-in-out infinite alternate;
     }
-    /* 中央顶部微暖灰调 */
+    /* 中央顶部微调 */
     .bg-geo-7 {
       width: 70vw; height: 20vh; max-width: 920px; max-height: 180px;
       top: 0; left: 15%;
-      background: radial-gradient(ellipse at 50% 55%, rgba(225, 208, 195, 0.52) 0%, rgba(210, 195, 182, 0.22) 32%, transparent 60%);
+      background: var(--geo-7-bg, radial-gradient(ellipse at 50% 55%, rgba(222, 210, 254, 0.55) 0%, rgba(222, 210, 254, 0.26) 32%, transparent 60%));
       opacity: 0.75;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-0o2bNkdi.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-j62aOgpo.css">
+  <script type="module" crossorigin src="/assets/index-PrGtu8r5.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BSZJO05P.css">
 </head>
 <body>
   <!-- 柔光几何背景层 -->
@@ -78,6 +106,7 @@
   <div class="bg-geo bg-geo-5"></div>
   <div class="bg-geo bg-geo-6"></div>
   <div class="bg-geo bg-geo-7"></div>
-  <div id="app"></div>
+  <div class="bg-pattern"></div>
+  <div id="app"></div>
 </body>
 </html>

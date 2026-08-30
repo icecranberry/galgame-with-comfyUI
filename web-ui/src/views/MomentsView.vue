@@ -23,7 +23,7 @@
         >
           <div
             class="picker-avatar"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
           >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
           <span>{{ c.display_name }}</span>
         </div>
@@ -66,14 +66,14 @@
             :class="{ active: moments.filterCharacterId === ch.character_id }"
             :style="ch.avatar_path
               ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' }
-              : { background: '#e07b6c' }"
+              : { background: 'var(--accent)' }"
             @click="moments.setFilter(ch.character_id)"
           >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
         </div>
       </div>
 
-      <!-- 帖子列表 -->
-      <TransitionGroup name="post-enter" tag="div" class="moments-list">
+      <!-- 帖子列表（stagger：首屏卡片错峰浮现） -->
+      <TransitionGroup name="post-enter" tag="div" class="moments-list stagger">
         <MomentCard
           v-for="post in moments.visiblePosts"
           :key="post.id"
@@ -273,16 +273,16 @@ async function triggerGenerate(c) {
 .lib-gear {
   width: 34px; height: 34px; border-radius: 50%;
   border: 2px solid transparent;
-  background: rgba(224, 123, 108, 0.08);
-  color: #c06a5a;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-hover);
   font-size: 18px; line-height: 1;
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex; align-items: center; justify-content: center;
 }
 .lib-gear:hover {
-  border-color: rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   transform: rotate(30deg);
 }
 
@@ -290,15 +290,9 @@ async function triggerGenerate(c) {
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
-  background: linear-gradient(
-    120deg,
-    #f8edea 0%,
-    #f2eaf4 35%,
-    #eaf0f8 65%,
-    #f8edea 100%
-  );
+  background: var(--grad-soft);
   background-size: 220% 100%;
-  color: #c06a5a;
+  color: var(--accent-hover);
   font-size: 13px; font-weight: 600;
   cursor: pointer;
   letter-spacing: 1px;
@@ -309,8 +303,8 @@ async function triggerGenerate(c) {
 }
 
 .btn-post:hover:not(:disabled) {
-  border: 2px solid rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
   animation: waterflow 1s ease-in-out infinite;
 }
@@ -352,7 +346,7 @@ async function triggerGenerate(c) {
   font-size: 14px; color: var(--text-primary);
   transition: background 0.15s;
 }
-.picker-item:hover { background: rgba(224, 123, 108, 0.08); }
+.picker-item:hover { background: rgba(var(--accent-rgb), 0.08); }
 .picker-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -414,7 +408,7 @@ async function triggerGenerate(c) {
   opacity: 1;
   border-color: var(--accent);
   transform: scale(1.08);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 .filter-avatar:hover:not(.active) {
   opacity: 0.85;

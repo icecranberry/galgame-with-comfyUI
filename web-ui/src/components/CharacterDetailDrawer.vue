@@ -9,7 +9,7 @@
             <div class="dr-row1">
               <div
                 class="dr-avatar"
-                :style="char?.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+                :style="char?.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
               >
                 <span v-if="!char?.avatar_path" class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
               </div>
@@ -77,7 +77,7 @@
               <div class="dr-scan-content">
                 <div class="dr-scan-icon">
                   <svg viewBox="0 0 80 80" class="dr-scan-ring">
-                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(var(--accent-rgb),0.12)" stroke-width="2.5"/>
                     <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                       stroke-width="2.5" stroke-linecap="round"
                       stroke-dasharray="214"
@@ -377,7 +377,7 @@ onUnmounted(() => {
   cursor: pointer; transition: 0.15s;
 }
 .dr-btn svg { flex-shrink: 0; }
-.dr-btn:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
+.dr-btn:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
 .dr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 
@@ -410,13 +410,13 @@ onUnmounted(() => {
   height: 2px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(224,123,108,0.3) 15%,
+    rgba(var(--accent-rgb),0.3) 15%,
     var(--accent) 50%,
-    rgba(224,123,108,0.3) 85%,
+    rgba(var(--accent-rgb),0.3) 85%,
     transparent 100%
   );
   animation: dr-scan-sweep 2.4s ease-in-out infinite;
-  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb),0.55), 0 0 10px rgba(var(--accent-rgb),0.25);
   z-index: 2;
   pointer-events: none;
 }
@@ -436,8 +436,8 @@ onUnmounted(() => {
   left: 20%; right: 20%;
   height: 60px;
   background: radial-gradient(ellipse at center,
-    rgba(224,123,108,0.12) 0%,
-    rgba(224,123,108,0.04) 40%,
+    rgba(var(--accent-rgb),0.12) 0%,
+    rgba(var(--accent-rgb),0.04) 40%,
     transparent 70%
   );
   animation: dr-glow-follow 2.4s ease-in-out infinite;
@@ -567,7 +567,7 @@ onUnmounted(() => {
   margin-left: auto; padding: 0;
 }
 .tl-item:hover .tl-peek-btn { opacity: 0.35; }
-.tl-peek-btn:hover { opacity: 1 !important; background: rgba(224,123,108,0.1); color: var(--accent); }
+.tl-peek-btn:hover { opacity: 1 !important; background: rgba(var(--accent-rgb),0.1); color: var(--accent); }
 .tl-loc { font-size: 0.75rem; color: var(--text-secondary); margin-top: 3px; }
 
 .tl-mark {

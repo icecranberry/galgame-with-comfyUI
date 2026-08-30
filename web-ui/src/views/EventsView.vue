@@ -18,7 +18,7 @@
       <div v-if="showPicker" ref="pickerRef" class="picker-dropdown" @click.stop>
         <div class="picker-title">选择触发奇遇的角色：</div>
         <div v-for="c in characters" :key="c.id" class="picker-item" @click="triggerGenerate(c)">
-          <div class="picker-avatar" :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }">
+          <div class="picker-avatar" :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }">
             {{ c.avatar_path ? '' : c.display_name?.charAt(0) }}
           </div>
           <span>{{ c.display_name }}</span>
@@ -67,7 +67,7 @@
 
       <template v-else-if="store.filteredActive.length > 0">
         <div class="waterfall-row" :style="{ '--cols': colCount }">
-          <div v-for="(col, ci) in activeColumns" :key="ci" class="waterfall-col">
+          <div v-for="(col, ci) in activeColumns" :key="ci" class="waterfall-col stagger">
             <EventCard
               v-for="evt in col"
               :key="evt.id"
@@ -113,7 +113,7 @@
                 :key="ch.character_id"
                 class="filter-avatar"
                 :class="{ active: store.filterCharacterId === ch.character_id && !store.filterEngaged }"
-                :style="ch.avatar_path ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+                :style="ch.avatar_path ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
                 @click="store.setFilter(ch.character_id)"
               >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
             </div>
@@ -358,7 +358,7 @@ function onScroll() {
 .lib-gear {
   width: 34px; height: 34px; border-radius: 50%;
   border: 2px solid transparent;
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   color: var(--accent);
   font-size: 18px; line-height: 1;
   cursor: pointer;
@@ -366,8 +366,8 @@ function onScroll() {
   display: flex; align-items: center; justify-content: center;
 }
 .lib-gear:hover {
-  border-color: rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   transform: rotate(30deg);
 }
 
@@ -376,7 +376,7 @@ function onScroll() {
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
+  background: var(--grad-soft);
   background-size: 200% 200%;
   color: var(--accent);
   font-size: 13px;
@@ -385,8 +385,8 @@ function onScroll() {
   transition: all 0.3s ease;
 }
 .btn-post:hover:not(:disabled) {
-  border: 2px solid rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
   animation: waterflow 1s ease-in-out infinite;
 }
@@ -419,7 +419,7 @@ function onScroll() {
   cursor: pointer; font-size: 14px; color: var(--text-primary);
   transition: background 0.15s;
 }
-.picker-item:hover { background: rgba(224,123,108,0.08); }
+.picker-item:hover { background: rgba(var(--accent-rgb),0.08); }
 .picker-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -480,18 +480,18 @@ function onScroll() {
   cursor: pointer; transition: all 0.2s;
 }
 .btn-random {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
-.btn-random:hover:not(:disabled) { background: rgba(224,123,108,0.15); }
+.btn-random:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.15); }
 .btn-custom {
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
+  background: var(--grad-soft);
   background-size: 200% 200%;
-  color: #c06a5a;
+  color: var(--accent-hover);
 }
 .btn-custom:hover:not(:disabled) {
   animation: waterflow 1s ease-in-out infinite;
-  box-shadow: 0 3px 20px rgba(224,123,108,0.10);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb),0.10);
 }
 .btn-random:disabled, .btn-custom:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -527,7 +527,7 @@ function onScroll() {
   opacity: 1;
   border-color: var(--accent);
   transform: scale(1.08);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 .filter-avatar:hover:not(.active) {
   opacity: 0.85;
@@ -574,7 +574,7 @@ function onScroll() {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 80px 20px; color: var(--text-secondary);
 }
-.loading-spinner-lg { width: 32px; height: 32px; border: 3px solid rgba(224,123,108,0.15); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.loading-spinner-lg { width: 32px; height: 32px; border: 3px solid rgba(var(--accent-rgb),0.15); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .events-empty {

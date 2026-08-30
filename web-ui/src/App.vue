@@ -216,92 +216,9 @@ onUnmounted(() => {
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-:root {
-  --bg-primary: #f0ece8;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #ebebeb;
-  --bg-hover: #e0e0e0;
-  --border: #e0dcd6;
-  --text-primary: #333333;
-  --text-secondary: #8c8074;
-  --text-bright: #111111;
-  --accent: #e07b6c;
-  --accent-hover: #cc6a5c;
-  --accent-light: #f0a89a;
-  --success: #52c41a;
-  --warning: #faad14;
-  --danger: #ff4d4f;
-
-  /* Glassmorphism tokens */
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-bg-strong: rgba(255, 255, 255, 0.38);
-  --glass-border: rgba(255, 255, 255, 0.28);
-  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
-  --glass-blur: blur(18px);
-}
-
-html, body, #app {
-  height: 100%;
-  min-height: 100vh; min-height: 100dvh;
-  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  color: var(--text-primary);
-  overflow: hidden;
-}
-html, body { background: var(--bg-primary); }
-#app { background: transparent; display: flex; flex-direction: column; }
-
 .app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
 .page-host { position: relative; flex: 1; min-width: 0; }
-/* Route transition: 0.25s fade between pages */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 0.25s ease;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-}
 #app { position: relative; z-index: 1; }
-
-button {
-  cursor: pointer; border: none; border-radius: 8px;
-  padding: 7px 14px; font-size: 13px; font-weight: 500;
-  transition: all 0.2s ease;
-}
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
-.btn-ghost {
-  background: rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(12px);
-  color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-}
-.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
-
-input, textarea, select {
-  background: rgba(255, 255, 255, 0.9); border: 1px solid #d5d0ca;
-  border-radius: 8px; color: var(--text-bright); padding: 8px 12px;
-  font-size: 13px; outline: none; transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12);
-}
-textarea { resize: vertical; font-family: inherit; }
-
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
 
 /* ── 移动端 Sidebar 遮罩 ── */
 .mobile-scrim {
@@ -342,14 +259,6 @@ textarea { resize: vertical; font-family: inherit; }
 }
 .banner-link:hover { opacity: 0.8; }
 
-/* ── 全局 toggle switch（ChatView / SettingsView 共用）── */
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; inset: 0; background: var(--bg-hover); border-radius: 24px; cursor: pointer; transition: 0.2s; }
-.slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(20px); }
-
 /* ── 手机端访问 Toast（底部浮窗，2s 自动消失）── */
 .mobile-toast {
   position: fixed;
@@ -371,7 +280,7 @@ textarea { resize: vertical; font-family: inherit; }
   pointer-events: none;
 }
 .mobile-toast b {
-  color: #F0A89A;
+  color: var(--accent-light);
   font-weight: 600;
 }
 .toast-icon { font-size: 18px; flex-shrink: 0; }
@@ -392,9 +301,4 @@ textarea { resize: vertical; font-family: inherit; }
   opacity: 0;
   transform: translateX(-50%) translateY(12px);
 }
-
-.modal-fade-enter-active { transition: opacity 0.3s ease; }
-.modal-fade-leave-active { transition: opacity 0.2s ease; }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-
 </style>

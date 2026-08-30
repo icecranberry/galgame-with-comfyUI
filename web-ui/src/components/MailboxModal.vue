@@ -513,7 +513,7 @@ async function onDeleteLetter(id) {
 .unread-dot {
   position: absolute; top: 10px; right: 10px;
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--danger, #e07b6c);
+  background: var(--danger, var(--accent));
 }
 
 /* Avatar → Envelope + mini avatar */
@@ -534,7 +534,7 @@ async function onDeleteLetter(id) {
 }
 .card-avatar-mini-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 10px; font-weight: 700;
 }
 
@@ -593,7 +593,7 @@ async function onDeleteLetter(id) {
 }
 .detail-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 18px; font-weight: 700;
   flex-shrink: 0;
 }
@@ -752,7 +752,7 @@ async function onDeleteLetter(id) {
 }
 .char-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 22px; font-weight: 700;
 }
 .char-name { font-size: 12px; font-weight: 500; color: #3a2a1a; text-align: center; }

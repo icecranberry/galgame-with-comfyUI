@@ -297,15 +297,9 @@ onUnmounted(() => {
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
-  background: linear-gradient(
-    120deg,
-    #f8edea 0%,
-    #f2eaf4 35%,
-    #eaf0f8 65%,
-    #f8edea 100%
-  );
+  background: var(--grad-soft);
   background-size: 220% 100%;
-  color: #c06a5a;
+  color: var(--accent-hover);
   font-size: 13px; font-weight: 600;
   cursor: pointer;
   letter-spacing: 1px;
@@ -315,8 +309,8 @@ onUnmounted(() => {
     color 0.3s ease;
 }
 .btn-compress:hover {
-  border: 2px solid rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
   animation: waterflow 1s ease-in-out infinite;
 }
@@ -325,52 +319,16 @@ onUnmounted(() => {
   50%      { background-position: 100% 50%; }
 }
 
-/* ── 弹窗 ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+/* ── 弹窗：视觉样式走全局 modal 家族，这里只保留布局差异 ── */
 .modal-panel {
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
   width: 550px;
-  max-width: 90vw;
   max-height: 95vh;
   overflow-y: auto;
 }
 
 .modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 18px 20px 12px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-bright);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 18px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-.modal-close:hover { background: rgba(0, 0, 0, 0.06); }
 
 .modal-body {
   padding: 16px 20px 20px;
@@ -412,7 +370,7 @@ onUnmounted(() => {
   font-weight: 600;
 }
 .toggle-btn:not(.active):hover {
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .type-desc {
@@ -500,18 +458,18 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 6px 0;
   font-size: 12px;
-  color: #e07b6c;
+  color: var(--accent);
   cursor: pointer;
   width: 100%;
 }
-.btn-cancel:hover { background: rgba(224, 123, 108, 0.06); }
+.btn-cancel:hover { background: rgba(var(--accent-rgb), 0.06); }
 
 .progress-done {
   font-size: 13px;
   color: #4caf50;
   text-align: center;
 }
-.progress-done.is-error { color: #e07b6c; }
+.progress-done.is-error { color: var(--accent); }
 
 /* ── 立刻压缩按钮 ── */
 .btn-start-inline {
@@ -519,8 +477,8 @@ onUnmounted(() => {
   padding: 7px 0;
   border: none;
   border-radius: 10px;
-  background: rgba(224, 123, 108, 0.08);
-  color: #c06a5a;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-hover);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;

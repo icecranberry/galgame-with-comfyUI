@@ -152,7 +152,7 @@ const statusText = computed(() => {
 })
 
 // 重试时 ring 变为橙色
-const ringColor = computed(() => genStatus.value === 'retrying' ? '#f0a040' : '#e07b6c')
+const ringColor = computed(() => genStatus.value === 'retrying' ? '#f0a040' : 'var(--accent)')
 
 function scheduleTick() {
   timer = setTimeout(() => {
@@ -211,9 +211,9 @@ onUnmounted(() => clearTimeout(timer))
   border-radius: 20px; overflow: hidden; position: relative;
   background-color: #8b8b8b2c;
   /* Subtle border for shape definition */
-  border: 1px solid rgba(224, 123, 108, 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
   /* Inner depth — avoids the flat cardboard look */
-  box-shadow: inset 0 0 80px rgba(224, 123, 108, 0.03);
+  box-shadow: inset 0 0 80px rgba(var(--accent-rgb), 0.03);
 }
 
 .igb-placeholder {
@@ -267,9 +267,9 @@ onUnmounted(() => clearTimeout(timer))
   position: absolute; inset: 0;
   background: linear-gradient(180deg,
     transparent 0%,
-    rgba(224, 123, 108, 0.04) 35%,
-    rgba(224, 123, 108, 0.10) 50%,
-    rgba(224, 123, 108, 0.04) 65%,
+    rgba(var(--accent-rgb), 0.04) 35%,
+    rgba(var(--accent-rgb), 0.10) 50%,
+    rgba(var(--accent-rgb), 0.04) 65%,
     transparent 100%
   );
   animation: beamScan 3s ease-in-out infinite;

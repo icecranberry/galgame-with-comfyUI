@@ -201,21 +201,21 @@ onUnmounted(() => {
   font-size: 13px; font-family: inherit;
   border-radius: 8px;
   background: rgba(255,255,255,0.9);
-  border: 1px solid #d5d0ca;
+  border: 1px solid var(--border);
   color: var(--text-bright);
   outline: none;
   transition: border-color 0.25s, box-shadow 0.25s;
 }
 .dds-search-input::placeholder { color: #b0a89c; }
 .dds-search-input:hover { border-color: #c5bfb5; }
-.dds-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.dds-search-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 
 .dds-trigger {
   width: 100%; padding: 9px 32px 9px 12px;
   font-size: 13px; font-family: inherit;
   border-radius: 8px; cursor: pointer;
   background: rgba(255,255,255,0.9);
-  border: 1px solid #d5d0ca;
+  border: 1px solid var(--border);
   color: var(--text-bright);
   outline: none;
   text-align: left;
@@ -224,7 +224,7 @@ onUnmounted(() => {
 }
 .dds-trigger:hover { border-color: #c5bfb5; }
 .dds-trigger:focus-visible,
-.dds-wrapper:focus-within .dds-trigger { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.dds-wrapper:focus-within .dds-trigger { border-color: var(--accent); box-shadow: var(--focus-ring); }
 
 .dds-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dds-label.placeholder { color: #b0a89c; }
@@ -262,9 +262,9 @@ onUnmounted(() => {
   text-align: left;
   transition: background 0.15s, color 0.15s;
 }
-.dds-option:hover { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.dds-option.highlighted { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.dds-option.active { background: rgba(224, 123, 108, 0.06); color: var(--accent); font-weight: 600; }
+.dds-option:hover { background: rgba(var(--accent-rgb), 0.08); color: var(--accent); }
+.dds-option.highlighted { background: rgba(var(--accent-rgb), 0.08); color: var(--accent); }
+.dds-option.active { background: rgba(var(--accent-rgb), 0.06); color: var(--accent); font-weight: 600; }
 
 .dds-check { flex-shrink: 0; color: var(--accent); }
 

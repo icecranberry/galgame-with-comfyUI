@@ -645,7 +645,7 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs(
 .back { width: 38px; height: 38px; border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg); color: var(--text-bright); font-size: 28px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .mode-badge { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .mode-badge.text { background: rgba(85, 130, 180, .14); color: #4677a8; }
-.mode-badge.hybrid { background: rgba(224, 123, 108, .16); color: var(--accent); }
+.mode-badge.hybrid { background: rgba(var(--accent-rgb), .16); color: var(--accent); }
 .card, .state-card { background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: 16px; padding: 22px; box-shadow: var(--glass-shadow); }
 .card h3 { margin: 0 0 6px; font-size: 15px; }
 .advanced-settings { position: relative; z-index: 40; margin-bottom: 16px; border: 1px solid var(--glass-border); border-radius: 16px; background: var(--glass-bg); box-shadow: var(--glass-shadow); }
@@ -675,7 +675,7 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .params, .warning { margin-top: 16px; }
 .disabled-note { padding: 16px; background: rgba(85, 130, 180, .08); border-radius: 10px; }
 .collapse-body { padding-top: 4px; }
-.warning { border-color: rgba(224, 123, 108, .35); }
+.warning { border-color: rgba(var(--accent-rgb), .35); }
 .memory-manager { position: relative; z-index: 30; margin-top: 16px; }
 .manager-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .memory-filters { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, .75fr) minmax(130px, .75fr) auto; gap: 12px; align-items: end; }
@@ -697,7 +697,7 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; }
 .memory-judgment { margin-top: 9px; font-size: 14px; font-weight: 650; line-height: 1.55; overflow-wrap: anywhere; }
 .memory-reasoning { margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 .memory-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 11px; }
+.memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(var(--accent-rgb), .09); color: var(--accent); font-size: 11px; }
 .memory-index-state { margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
 .index-error { color: #c34f4f; display: inline-block; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .danger-link { flex-shrink: 0; padding: 6px 8px; border: 0; background: transparent; color: #c34f4f; cursor: pointer; font-size: 12px; }
@@ -727,7 +727,7 @@ button.compact { padding: 7px 11px; font-size: 12px; }
 .job-details[open] .job-detail-action::after { content: '收起'; }
 .job-reasoning { margin-top: 4px; padding: 8px 10px; border-radius: 7px; background: rgba(85, 130, 180, .07); color: var(--text-secondary); line-height: 1.6; }
 .job-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 10px; }
+.job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(var(--accent-rgb), .09); color: var(--accent); font-size: 10px; }
 .job-unavailable { color: var(--text-secondary); font-size: 11px; }
 .job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.processing { color: #367aa3; }.job-status.failed { color: #c34f4f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }

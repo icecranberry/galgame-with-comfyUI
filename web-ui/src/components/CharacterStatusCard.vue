@@ -11,7 +11,7 @@
       <div class="card-top">
         <div
           class="avatar-box"
-          :style="char.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+          :style="char.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
         >
           <span v-if="!char.avatar_path" class="avatar-text">{{ char.display_name.charAt(0) }}</span>
         </div>
@@ -195,7 +195,7 @@ const footnote = computed(() => {
 }
 .status-card:hover .wake-btn { opacity: 1; }
 .wake-btn:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 .wake-btn.shaking {
@@ -223,7 +223,7 @@ const footnote = computed(() => {
 }
 .status-card:hover .peek-btn { opacity: 1; }
 .peek-btn:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 
@@ -257,7 +257,7 @@ const footnote = computed(() => {
   font-weight: 600; white-space: nowrap; flex-shrink: 0;
 }
 
-.badge-busy   { background: rgba(224,123,108,0.1);  color: #c06858; }
+.badge-busy   { background: rgba(var(--accent-rgb),0.1);  color: #c06858; }
 .badge-sleep  { background: rgba(149,128,204,0.1);  color: #7c6db8; }
 .badge-drowsy { background: rgba(140,160,190,0.1);  color: #6d84a8; }
 

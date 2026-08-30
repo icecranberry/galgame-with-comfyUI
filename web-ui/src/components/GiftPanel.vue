@@ -325,14 +325,14 @@ async function doSend() {
 }
 .gift-card::before {
   content: ''; position: absolute; inset: 0;
-  background: radial-gradient(ellipse at 50% 0%, rgba(224,123,108,0.04) 0%, transparent 70%);
+  background: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-rgb),0.04) 0%, transparent 70%);
   opacity: 0; transition: opacity 0.3s;
 }
 .gift-card:not(:disabled):hover {
   border-color: #e8d8d0;
   background: #fefcfb;
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(224,123,108,0.08);
+  box-shadow: 0 4px 16px rgba(var(--accent-rgb),0.08);
 }
 .gift-card:not(:disabled):hover::before { opacity: 1; }
 .gift-card:not(:disabled):active { transform: scale(0.97); }
@@ -340,7 +340,7 @@ async function doSend() {
 .gift-card.selected {
   border-color: var(--accent);
   background: #fef6f3;
-  box-shadow: 0 0 0 3px rgba(224,123,108,0.1), 0 4px 16px rgba(224,123,108,0.1);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.1), 0 4px 16px rgba(var(--accent-rgb),0.1);
   transform: translateY(-2px);
 }
 .gift-card.selected::before { opacity: 1; }
@@ -405,10 +405,10 @@ async function doSend() {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   width: 100%; padding: 13px 18px;
   border-radius: 14px; border: none;
-  background: linear-gradient(135deg, rgba(224,123,108,0.85), rgba(208,110,94,0.78));
+  background: linear-gradient(135deg, rgba(var(--accent-rgb),0.85), rgba(208,110,94,0.78));
   color: #fff; font-size: 14.5px; font-weight: 500;
   cursor: pointer; letter-spacing: 0.4px;
-  box-shadow: 0 2px 14px rgba(224,123,108,0.12), inset 0 1px 0 rgba(255,255,255,0.15);
+  box-shadow: 0 2px 14px rgba(var(--accent-rgb),0.12), inset 0 1px 0 rgba(255,255,255,0.15);
   transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.3s ease;
   position: relative; overflow: hidden;
   isolation: isolate;
@@ -439,7 +439,7 @@ async function doSend() {
 }
 
 .gift-next-btn:hover:not(:disabled) {
-  box-shadow: 0 4px 20px rgba(224,123,108,0.22), inset 0 1px 0 rgba(255,255,255,0.2);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb),0.22), inset 0 1px 0 rgba(255,255,255,0.2);
   transform: translateY(-2px);
 }
 .gift-next-btn:hover:not(:disabled)::before {
@@ -450,7 +450,7 @@ async function doSend() {
 }
 .gift-next-btn:active:not(:disabled) {
   transform: scale(0.97);
-  box-shadow: 0 1px 6px rgba(224,123,108,0.1);
+  box-shadow: 0 1px 6px rgba(var(--accent-rgb),0.1);
 }
 
 /* ── SVG decorations ── */
@@ -477,11 +477,11 @@ async function doSend() {
 
 /* ── Gift type: 特别准备 — brighter + subtle gold ── */
 .gift-next-btn.is-large-next {
-  background: linear-gradient(135deg, rgba(224,123,108,0.82), rgba(218,140,100,0.78));
-  box-shadow: 0 2px 14px rgba(224,123,108,0.1), inset 0 1px 0 rgba(255,255,255,0.18);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb),0.82), rgba(218,140,100,0.78));
+  box-shadow: 0 2px 14px rgba(var(--accent-rgb),0.1), inset 0 1px 0 rgba(255,255,255,0.18);
 }
 .gift-next-btn.is-large-next:hover:not(:disabled) {
-  box-shadow: 0 4px 20px rgba(224,123,108,0.2), inset 0 1px 0 rgba(255,255,255,0.22);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb),0.2), inset 0 1px 0 rgba(255,255,255,0.22);
 }
 
 /* ── Gift type: 誓约之戒 — champagne / gold ── */
@@ -576,7 +576,7 @@ async function doSend() {
 .gift-line-input:hover:not(:disabled) { border-color: #ddd1c8; }
 .gift-line-input:focus {
   border-color: var(--accent-light);
-  box-shadow: 0 0 0 3px rgba(224,123,108,0.1);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.1);
 }
 .gift-line-input:disabled { opacity: 0.6; cursor: not-allowed; }
 .gift-line-help {
@@ -593,7 +593,7 @@ async function doSend() {
   cursor: pointer; transition: all 0.2s;
 }
 .confirm-back:hover:not(:disabled) {
-  border-color: #d5d0ca; color: #666;
+  border-color: var(--border); color: #666;
   background: #f8f6f4;
 }
 .confirm-back:active:not(:disabled) { transform: scale(0.97); }
@@ -601,7 +601,7 @@ async function doSend() {
 .confirm-send {
   flex: 2; padding: 12px;
   border-radius: 12px; border: none;
-  background: linear-gradient(135deg, var(--accent), #d06e5e);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: #fff; font-size: 15px; font-weight: 600;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -618,7 +618,7 @@ async function doSend() {
   100% { background-position: -200% 0; }
 }
 .confirm-send:hover:not(:disabled) {
-  box-shadow: 0 6px 20px rgba(224,123,108,0.35);
+  box-shadow: 0 6px 20px rgba(var(--accent-rgb),0.35);
   transform: translateY(-2px);
 }
 .confirm-send:active:not(:disabled) { transform: scale(0.97); }

@@ -43,7 +43,7 @@
             <div class="detail-avatar-row">
               <div
                 class="detail-avatar clickable"
-                :style="character?.avatar_path ? { backgroundImage: `url(${character.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+                :style="character?.avatar_path ? { backgroundImage: `url(${character.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
                 @click="$emit('open-avatar-editor', character)"
               >{{ character?.avatar_path ? '' : character?.display_name?.charAt(0) }}</div>
               <div>
@@ -713,43 +713,10 @@ async function saveLora() {
 </script>
 
 <style scoped>
-/* ═══ 弹窗共用 ═══ */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-
-.modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden; backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-.modal-wide { width: min(900px, 97vw); }
-
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
-
-.modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: var(--glass-bg-strong);
-  color: var(--text-secondary); font-size: 15px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-}
-.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
-
+/* ═══ 弹窗骨架已迁移至全局 .modal-*（styles/components.css）═══
+   此处仅保留本组件的布局覆写 */
 .modal-body {
   padding: 0px 22px 22px;
-  overflow-y: auto; flex: 1;
 }
 
 .modal-body-detail {
@@ -811,8 +778,8 @@ async function saveLora() {
 
 /* ═══ 详情编辑 ═══ */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #d5d0ca; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid var(--border); color: var(--text-bright); outline: none; }
+.fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 
 .detail-name-row { display: flex; gap: 12px; }
 .detail-name-col { flex: 1; min-width: 0; }
@@ -831,27 +798,27 @@ async function saveLora() {
   margin-bottom: 16px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
 }
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
 .detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.detail-rel-btn.subtle { background: rgba(224, 123, 108, 0.06); border: 1px solid rgba(224, 123, 108, 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
-.detail-rel-btn.subtle:hover { background: rgba(224, 123, 108, 0.14); border-color: rgba(224, 123, 108, 0.3); color: #d06a5a; }
-.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25); }
-.detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(224, 123, 108, 0.35); transform: translateY(-1px); }
+.detail-rel-btn.subtle { background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
+.detail-rel-btn.subtle:hover { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.3); color: var(--accent-hover); }
+.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
+.detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35); transform: translateY(-1px); }
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
 .detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.6); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }
-.rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(224, 123, 108, 0.1); }
+.rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(var(--accent-rgb), 0.1); }
 .detail-rel-more { font-size: 12px; color: var(--accent); font-weight: 500; cursor: pointer; text-align: center; padding: 4px 0; transition: opacity 0.15s; }
 .detail-rel-more:hover { opacity: 0.7; }
 .detail-rel-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 8px 8px; text-align: center; }
 .rel-empty-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 360px; }
-.rel-empty-spinner { width: 14px; height: 14px; border: 2px solid rgba(224, 123, 108, 0.2); border-top-color: var(--accent); border-radius: 50%; animation: rel-spin 0.6s linear infinite; }
+.rel-empty-spinner { width: 14px; height: 14px; border: 2px solid rgba(var(--accent-rgb), 0.2); border-top-color: var(--accent); border-radius: 50%; animation: rel-spin 0.6s linear infinite; }
 @keyframes rel-spin { to { transform: rotate(360deg); } }
 
 /* ═══ 誓约状态（头像行内） ═══ */
@@ -900,9 +867,9 @@ async function saveLora() {
 .float-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
 .float-switch { flex-shrink: 0; }
 .float-card-btn { cursor: pointer; justify-content: space-between; gap: 0; }
-.float-card-btn:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(224, 123, 108, 0.12); }
+.float-card-btn:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.12); }
 .float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); }
-.float-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
+.float-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
 /* ═══ 操作栏 ═══ */
 .modal-footer {
@@ -925,12 +892,7 @@ async function saveLora() {
 .btn-ghost.danger { color: var(--danger); }
 .btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 
-/* ═══ 弹窗动画 ═══ */
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-@keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+/* ═══ 弹窗动画已迁移至全局 animations.css（modal-fade + modal-pop）═══ */
 
 /* ═══ 通用 ═══ */
 .sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
@@ -941,13 +903,8 @@ async function saveLora() {
 .prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
 .modal-wide .fi { background: var(--bg-primary); border: 1px solid var(--glass-border); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-.modal-wide .fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1); }
+.modal-wide .fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .modal-wide .prompt-textarea { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.7; color: var(--text-primary); }
-
-.btn-primary { background: var(--accent); color: white; padding: 8px 20px; border-radius: 10px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-ghost { background: transparent; border: none; color: var(--text-secondary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
 
@@ -1005,11 +962,11 @@ async function saveLora() {
   transition: background 0.15s, color 0.15s;
 }
 .lora-dropdown-item:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 .lora-dropdown-item.active {
-  background: rgba(224,123,108,0.06);
+  background: rgba(var(--accent-rgb),0.06);
   color: var(--accent);
   font-weight: 600;
 }
@@ -1024,7 +981,7 @@ async function saveLora() {
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
 .lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; }
-.lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
+.lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
 .lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
@@ -1052,14 +1009,14 @@ async function saveLora() {
   .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
 
   .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
-  .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(224, 123, 108, 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
-  .toolbar-item:active { background: rgba(224, 123, 108, 0.16); }
+  .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.16); }
   .toolbar-item-toggle { cursor: default; justify-content: space-between; background: rgba(0, 0, 0, 0.04); color: var(--text-secondary); font-weight: 500; }
   .toolbar-switch { width: 34px; height: 18px; flex-shrink: 0; }
   .toolbar-switch .toggle-slider::before { height: 14px; width: 14px; }
   .toolbar-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
   .toolbar-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); flex-shrink: 0; }
-  .toolbar-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
+  .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
   .form-group .fl { font-size: 12px; }
   .form-hint { font-size: 10px; }

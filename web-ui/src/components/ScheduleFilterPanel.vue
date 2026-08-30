@@ -49,7 +49,7 @@
         <div class="li-avatar">
           <div
             class="li-avatar-img"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
           >
             <span v-if="!c.avatar_path" class="li-avatar-text">{{ c.display_name.charAt(0) }}</span>
           </div>
@@ -179,20 +179,10 @@ function activitySummary(c: any) {
 }
 .panel-search input::placeholder { color: #bfbbb6; }
 
-/* ── Filter Chips ── */
+/* ── Filter Chips：chip 样式走全局，这里只保留容器布局 ── */
 .panel-chips {
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 6px 14px 10px;
-}
-.chip {
-  padding: 4px 11px; border: 1px solid var(--border);
-  border-radius: 999px; background: var(--glass-bg);
-  font-size: 0.72rem; color: var(--text-secondary); cursor: pointer;
-  transition: all 0.15s;
-}
-.chip:hover { background: var(--bg-hover); color: var(--text-bright); }
-.chip.active {
-  background: var(--accent); color: #fff; border-color: var(--accent);
 }
 
 /* ── Character List ── */
@@ -207,7 +197,7 @@ function activitySummary(c: any) {
 }
 .list-item:hover { background: var(--bg-hover); }
 .list-item.active {
-  background: rgba(224,123,108,0.06);
+  background: rgba(var(--accent-rgb),0.06);
   border-left-color: var(--accent);
 }
 

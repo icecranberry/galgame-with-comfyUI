@@ -92,7 +92,7 @@
         </div>
       </div>
       <div class="crop-actions">
-        <button class="btn-cancel" @click="regenerateAvatar" :disabled="isGenerating">重新生成</button>
+        <button class="btn-ghost" @click="regenerateAvatar" :disabled="isGenerating">重新生成</button>
         <button class="btn-primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</button>
       </div>
     </div>
@@ -511,11 +511,6 @@ async function saveCrop() {
 .crop-zoom-info { font-size:12px; color:var(--text-secondary); }
 
 .crop-actions { padding:14px 20px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
-.btn-cancel { padding:8px 18px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); font-size:13px; cursor:pointer; }
-.btn-cancel:hover { background:var(--bg-hover); }
-.btn-primary { background:var(--accent); color:#fff; padding:8px 18px; border-radius:6px; border:none; font-size:13px; cursor:pointer; }
-.btn-primary:hover:not(:disabled) { background:var(--accent-hover); }
-.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
 
 /* ── 生成头像 Tab ── */
 .gen-idle {
@@ -578,7 +573,7 @@ async function saveCrop() {
   gap: 10px;
 }
 .gen-error-icon { font-size: 36px; }
-.gen-error-text { font-size: 13px; color: #e07b6c; text-align: center; }
+.gen-error-text { font-size: 13px; color: var(--accent); text-align: center; }
 .gen-retry-btn {
   margin-top: 8px;
   padding: 8px 20px;

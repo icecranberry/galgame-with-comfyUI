@@ -16,7 +16,7 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
-import { saveBase64Image } from '../services/imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
@@ -158,7 +158,7 @@ router.get('/migrate-short-prompts', (_req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
@@ -171,6 +171,7 @@ router.put('/:id', (req, res) => {
   }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
+  if (chat_bg_path !== undefined) { updates.push('chat_bg_path = ?'); params.push(chat_bg_path || null); }
 
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
   if (proactive_disabled !== undefined) { updates.push('proactive_disabled = ?'); params.push(proactive_disabled ? 1 : 0); }
@@ -1020,6 +1021,129 @@ ${char.base_prompt}
     }
   } catch (err) {
     console.error('[generate-avatar] error:', err.message);
+    res.status(500).json({ error: '生成失败: ' + err.message });
+  }
+});
+
+// POST /api/characters/:id/chat-bg — 上传聊天背景图（base64），空 base64 = 恢复默认
+router.post('/:id/chat-bg', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, chat_bg_path FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const { base64 } = req.body;
+  if (!base64) {
+    if (char.chat_bg_path) {
+      try { deleteImageFileByUrl(char.chat_bg_path); } catch {}
+    }
+    db.prepare('UPDATE characters SET chat_bg_path = NULL WHERE id = ?').run(req.params.id);
+    return res.json({ ok: true, chat_bg_path: null });
+  }
+
+  const filename = `chatbg_${req.params.id}_${Date.now()}.png`;
+  const url = saveBase64Image('chatbg', filename, base64);
+
+  if (char.chat_bg_path) {
+    try { deleteImageFileByUrl(char.chat_bg_path); } catch {}
+  }
+
+  db.prepare('UPDATE characters SET chat_bg_path = ? WHERE id = ?').run(url, req.params.id);
+  invalidateGalleryCache();
+  res.json({ ok: true, chat_bg_path: url });
+});
+
+// POST /api/characters/:id/generate-chat-bg — AI 生成聊天背景（依据角色设定与可选的场景提示，横版无人物）
+router.post('/:id/generate-chat-bg', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const userHint = String(req.body?.prompt || '').trim().slice(0, 300);
+  const imagePromptRule = getGlobalRule('image_prompt');
+  const imageRuleContent = imagePromptRule?.rule_content || '';
+
+  const systemPrompt = `你是专业的场景背景生成提示词助手。根据角色的人格设定${userHint ? '和用户的场景提示' : ''}，生成一张用作聊天界面背景的场景画面描述。
+
+${imageRuleContent ? `【画面描述要求】
+${imageRuleContent}
+` : ''}
+
+【聊天背景额外要求】
+- 画面中绝对不能出现任何人物、人影、角色、手部或面部（no humans, no characters, scenery only）
+- 横版构图（landscape orientation），主体内容集中在画面中部，上下留有呼吸感的留白
+- 色调柔和明亮，不要过暗或高对比，方便在其上叠加聊天气泡
+- 画面描述控制在 60 个英文单词以内
+- 直接输出英文画面描述，不要任何格式包装或额外文字`;
+
+  const userMsg = `请根据以下角色设定，生成一张 TA 的聊天界面背景场景描述${userHint ? `。用户希望的场景：${userHint}` : ''}（可从角色的生活环境、性格气质出发想象 TA 的房间或常去的地方）：
+
+---角色设定---
+${char.base_prompt}
+---`;
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[generate-chat-bg] Step 1/2: generating scene prompt for character "${char.display_name}"...`);
+
+    const llmResult = await chatSync([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ], { model, temperature: 0.7, max_tokens: 512, label: '生成聊天背景提示词' });
+
+    let promptText = llmResult.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (!promptText || promptText.length < 10) {
+      return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+    }
+    // 双保险：剥离可能残留的人物类标签
+    promptText = promptText.replace(/\b(1girl|2girls|solo|girl|boy|portrait|face focus|close-up( on face)?)\b\s*,?\s*/gi, '');
+    promptText = promptText.replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '');
+
+    console.log(`[generate-chat-bg] Prompt generated: "${promptText.slice(0, 80)}..."`);
+
+    // Step 2: ComfyUI 横版生图（SDXL 横版标准分辨率）
+    console.log('[generate-chat-bg] Step 2/2: generating image at 1216x704...');
+    const charLoras = _parseCharLoras(char.loras);
+    const bgArtist = charArtistOverride(char);
+    const result = await generateImageRaw(`${promptText}, no humans, scenery only`, {
+      promptScene: 'standalone',
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+      skipOptimization: true,
+      artist: bgArtist !== null ? bgArtist : config.comfyui.momentsArtist,
+      width: 1216,
+      height: 704,
+      loras: charLoras.length > 0 ? charLoras : undefined,
+      ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
+      onProgress: (p) => {
+        if (p.stage) console.log(`[generate-chat-bg] ComfyUI: ${p.stage}`);
+      },
+    });
+
+    if (result.success && result.images.length > 0) {
+      const savedPaths = [];
+      for (const img of result.images) {
+        const filename = `chatbg_gen_${req.params.id}_${Date.now()}_${img.filename || 'comfy.png'}`;
+        const url = saveBase64Image('chatbg', filename, img.base64);
+        savedPaths.push(url);
+        img.url = url;
+      }
+
+      db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+        VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+        .run(`char_${char.id}_chatbg`, promptText, result.promptRefined || promptText, JSON.stringify(savedPaths), getLastWorkflowMode());
+
+      invalidateGalleryCache();
+
+      res.json({
+        success: true,
+        images: result.images,
+        savedPaths,
+        promptText,
+      });
+    } else {
+      res.status(500).json({ error: result.error || '图像生成失败，请重试' });
+    }
+  } catch (err) {
+    console.error('[generate-chat-bg] error:', err.message);
     res.status(500).json({ error: '生成失败: ' + err.message });
   }
 });

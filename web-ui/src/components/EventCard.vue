@@ -497,7 +497,7 @@ watch(isExpired, (val) => {
 }
 .preview-avatar:hover {
   transform: scale(1.08);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 .preview-header-info { flex: 1; min-width: 0; }
 .preview-name { font-size: 14px; font-weight: 600; color: var(--text-bright); display: block; }
@@ -577,8 +577,8 @@ watch(isExpired, (val) => {
 .event-preview.is-compact .countdown-bar-wrap { display: none; }
 
 .event-preview.is-engaged {
-  box-shadow: 0 0 14px rgba(224, 123, 108, 0.2), 0 0 13px 5px rgb(224 123 108 / 51%);
-  border-color: rgba(224,123,108,0.2);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.2), 0 0 13px 5px rgb(224 123 108 / 51%);
+  border-color: rgba(var(--accent-rgb),0.2);
 }
 
 /* narrow 移动端：compact 模式 header 防挤压 — 隐藏不重要元素 */
@@ -682,14 +682,14 @@ watch(isExpired, (val) => {
   transition: box-shadow 0.3s;
 }
 .branch-card.is-latest {
-  box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(224,123,108,0.35);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(var(--accent-rgb),0.35);
   animation: highlight-pulse 2.5s ease-in-out infinite;
 }
 @keyframes highlight-pulse {
-  0%, 100% { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(224,123,108,0.4); }
-  50% { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 8px rgba(224,123,108,0.12); }
+  0%, 100% { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(var(--accent-rgb),0.4); }
+  50% { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 8px rgba(var(--accent-rgb),0.12); }
 }
-.branch-card.is-current { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 4px rgba(224,123,108,0.5); }
+.branch-card.is-current { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 4px rgba(var(--accent-rgb),0.5); }
 .branch-card.is-ending {
   justify-content: center;
   background: linear-gradient(160deg, #faf8f6 0%, #f5f0ed 40%, #f8f4f0 100%);
@@ -724,9 +724,9 @@ watch(isExpired, (val) => {
 }
 .branch-text::-webkit-scrollbar { width: 6px; }
 .branch-text::-webkit-scrollbar-track { background: transparent; }
-.branch-text::-webkit-scrollbar-thumb { background: rgba(224,123,108,0.25); border-radius: 3px; }
-.branch-text::-webkit-scrollbar-thumb:hover { background: rgba(224,123,108,0.45); }
-.branch-text { scrollbar-width: thin; scrollbar-color: rgba(224,123,108,0.25) transparent; }
+.branch-text::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.25); border-radius: 3px; }
+.branch-text::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb),0.45); }
+.branch-text { scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb),0.25) transparent; }
 
 .branch-desc {
   font-size: 15px; line-height: 1.75; color: var(--text-bright);
@@ -734,9 +734,9 @@ watch(isExpired, (val) => {
 
 /* ── "选择了" 框体 ── */
 .choice-made-box {
-  border: 1.5px solid rgba(224,123,108,0.25);
+  border: 1.5px solid rgba(var(--accent-rgb),0.25);
   border-radius: 10px;
-  background: rgba(224,123,108,0.03);
+  background: rgba(var(--accent-rgb),0.03);
   padding: 10px 14px;
 }
 .choice-made-label {
@@ -763,7 +763,7 @@ watch(isExpired, (val) => {
   border-radius: 12px;
   overflow: hidden;
 }
-.vn-choice:hover { background: rgba(224,123,108,0.04); border-color: rgba(224,123,108,0.2); }
+.vn-choice:hover { background: rgba(var(--accent-rgb),0.04); border-color: rgba(var(--accent-rgb),0.2); }
 .vn-choice:hover .vn-choice-bar { background: var(--accent); width: 4px; }
 .vn-choice-bar {
   width: 3px; min-width: 3px;
@@ -849,7 +849,7 @@ watch(isExpired, (val) => {
 .undo-btn:hover:not(:disabled) {
   background: rgba(255,255,255,0.9);
   color: var(--accent);
-  border-color: rgba(224,123,108,0.25);
+  border-color: rgba(var(--accent-rgb),0.25);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 .undo-btn:disabled {
@@ -861,7 +861,7 @@ watch(isExpired, (val) => {
 }
 .loading-spinner {
   width: 18px; height: 18px;
-  border: 2px solid rgba(224,123,108,0.15); border-top-color: var(--accent);
+  border: 2px solid rgba(var(--accent-rgb),0.15); border-top-color: var(--accent);
   border-radius: 50%; animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }

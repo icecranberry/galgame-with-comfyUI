@@ -217,21 +217,9 @@ function onImgError() {
   flex-shrink: 0;
 }
 
-/* ── 骨架屏 ── */
-.skeleton {
-  background: linear-gradient(110deg, #e8e4dc 30%, #f0ede6 50%, #e8e4dc 70%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
+/* ── 骨架屏：波纹样式走全局 .skeleton，这里只保留布局 ── */
 .skeleton-line {
   border-radius: 4px;
-  background: linear-gradient(110deg, #e8e4dc 30%, #f0ede6 50%, #e8e4dc 70%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
   height: 12px;
 }
 .skeleton-title { width: 75%; }

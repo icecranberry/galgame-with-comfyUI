@@ -68,7 +68,7 @@
                   @keydown.enter="confirmInput"
                 />
                 <div class="rel-dialog-actions">
-                  <button v-if="inputDialog.isEdit" class="btn-ghost danger" @click="deleteEdge">🗑 删除</button>
+                  <button v-if="inputDialog.isEdit" class="btn-danger btn-ghost-danger" @click="deleteEdge">🗑 删除</button>
                   <div class="rel-dialog-actions-right">
                     <button class="btn-ghost" @click="cancelInput">取消</button>
                     <button class="btn-primary" :disabled="!inputDialog.text.trim()" @click="confirmInput">
@@ -241,13 +241,13 @@ async function buildGraph() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: rel.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
         labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
     })
 
@@ -403,13 +403,13 @@ async function confirmInput() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: created.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
         labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
       addEdges([newEdge])
       existingRels.value.push(created)
@@ -473,7 +473,7 @@ async function deleteEdge() {
 .rel-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 18px 24px;
-  border-bottom: 1px solid rgba(224,123,108,0.1);
+  border-bottom: 1px solid rgba(var(--accent-rgb),0.1);
   flex-shrink: 0;
   background: rgba(248,245,241,0.55);
 }
@@ -497,7 +497,7 @@ async function deleteEdge() {
 /* ── Hint ── */
 .rel-hint {
   padding: 12px 24px;
-  border-top: 1px solid rgba(224,123,108,0.1);
+  border-top: 1px solid rgba(var(--accent-rgb),0.1);
   font-size: 12px; color: #9a8a7a;
   flex-shrink: 0;
   text-align: center;
@@ -538,39 +538,18 @@ async function deleteEdge() {
 .rel-input {
   width: 100%; padding: 10px 12px;
   font-size: 14px; border-radius: 10px;
-  border: 1px solid #d5d0ca; outline: none;
+  border: 1px solid var(--border); outline: none;
   background: #fafaf9; color: #333;
   box-sizing: border-box;
   font-family: inherit;
 }
-.rel-input:focus { border-color: #e07b6c; box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.1); }
+.rel-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .rel-dialog-actions {
   display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }
 .rel-dialog-actions-right {
   display: flex; gap: 8px; margin-left: auto;
 }
-
-/* ── Reuse button styles ── */
-.btn-primary {
-  padding: 8px 18px; font-size: 13px; font-weight: 600;
-  border-radius: 10px; border: none;
-  background: #e07b6c; color: #fff;
-  cursor: pointer; transition: all 0.15s;
-  font-family: inherit;
-}
-.btn-primary:hover { background: #d06a5a; }
-.btn-primary:disabled { background: #c5c0ba; cursor: not-allowed; }
-.btn-ghost {
-  padding: 8px 18px; font-size: 13px;
-  border-radius: 10px; border: 1px solid rgba(0,0,0,0.1);
-  background: transparent; color: #666;
-  cursor: pointer; transition: all 0.15s;
-  font-family: inherit;
-}
-.btn-ghost:hover { background: rgba(0,0,0,0.04); color: #333; }
-.btn-ghost.danger { color: #e05555; border-color: rgba(224,85,85,0.25); }
-.btn-ghost.danger:hover { background: rgba(224,85,85,0.06); color: #cc3a3a; }
 
 /* ── Modal transition ── */
 .modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }

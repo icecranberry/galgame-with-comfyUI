@@ -538,13 +538,7 @@ onMounted(loadAll)
 
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; width: 100%; }
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
   padding: 24px;
-  box-shadow: var(--glass-shadow);
   display: flex;
   flex-direction: column;
 }
@@ -562,7 +556,7 @@ onMounted(loadAll)
   border-radius: 8px; background: rgba(255, 255, 255, 0.9);
   border: 1px solid #e2d6c7; color: var(--text-bright); outline: none;
 }
-.fi:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12); }
+.fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 textarea.fi { font-family: inherit; resize: vertical; }
 
 /* ── Token 显示/隐藏 ── */
@@ -574,7 +568,7 @@ textarea.fi { font-family: inherit; resize: vertical; }
   background: transparent; border: none; border-radius: 8px; padding: 0;
   color: var(--text-secondary); cursor: pointer;
 }
-.token-toggle:hover { color: var(--accent); background: rgba(224, 123, 108, 0.08); }
+.token-toggle:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 .token-toggle svg { width: 18px; height: 18px; }
 
 .mb-select { position: relative; z-index: 40; margin-bottom: 14px; }
@@ -588,22 +582,22 @@ textarea.fi { font-family: inherit; resize: vertical; }
 .admin-link {
   display: flex; align-items: center; gap: 12px; min-width: 0;
   padding: 12px 14px;
-  background: rgba(224, 123, 108, 0.08);
-  border: 1.5px solid rgba(224, 123, 108, 0.32); border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.32); border-radius: 12px;
   text-decoration: none; color: var(--text-primary);
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.08);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.08);
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 .admin-link:hover {
   transform: translateY(-1px);
-  border-color: var(--accent); background: rgba(224, 123, 108, 0.14);
-  box-shadow: 0 8px 20px rgba(224, 123, 108, 0.18);
+  border-color: var(--accent); background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: 0 8px 20px rgba(var(--accent-rgb), 0.18);
 }
 .admin-link-icon {
   width: 36px; height: 36px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   border-radius: 10px; background: var(--accent); color: #fff;
-  box-shadow: 0 4px 12px rgba(224, 123, 108, 0.28);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
 }
 .admin-link-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .admin-link-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -612,24 +606,24 @@ textarea.fi { font-family: inherit; resize: vertical; }
 .admin-link-tag {
   font-size: 11px; font-weight: 600; color: var(--accent);
   padding: 2px 8px; border-radius: 999px;
-  background: rgba(224, 123, 108, 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
 }
 .admin-link-url { font-size: 11px; color: var(--text-secondary); font-family: ui-monospace, monospace; white-space: nowrap; }
 .admin-link-token {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   padding: 3px 8px; border-radius: 999px; white-space: nowrap;
-  background: rgba(224, 123, 108, 0.12);
-  border: 1px solid rgba(224, 123, 108, 0.24);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
 }
 .admin-link-token b { color: var(--accent); font-family: ui-monospace, monospace; font-weight: 700; }
 .admin-link-open {
   margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
   padding: 6px 10px; border-radius: 999px;
   background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
-  box-shadow: 0 3px 10px rgba(224, 123, 108, 0.28);
+  box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.28);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.admin-link:hover .admin-link-open { transform: translateX(2px); box-shadow: 0 5px 14px rgba(224, 123, 108, 0.36); }
+.admin-link:hover .admin-link-open { transform: translateX(2px); box-shadow: 0 5px 14px rgba(var(--accent-rgb), 0.36); }
 .admin-link-open svg { width: 14px; height: 14px; }
 
 /* ── 记忆摘要开关 ── */
@@ -637,8 +631,8 @@ textarea.fi { font-family: inherit; resize: vertical; }
 .memory-check {
   position: relative; display: flex; align-items: flex-start; gap: 10px;
   margin: 0 0 16px; padding: 12px 14px; cursor: pointer;
-  border: 1px solid rgba(224, 123, 108, 0.22); border-radius: 10px;
-  background: rgba(224, 123, 108, 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.22); border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.04);
 }
 .memory-check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .memory-check-box {
@@ -655,7 +649,7 @@ textarea.fi { font-family: inherit; resize: vertical; }
 }
 .memory-check input:checked + .memory-check-box { background: var(--accent); border-color: var(--accent); }
 .memory-check input:checked + .memory-check-box svg { opacity: 1; }
-.memory-check input:focus-visible + .memory-check-box { box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.2); }
+.memory-check input:focus-visible + .memory-check-box { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2); }
 .memory-check-copy { min-width: 0; }
 .memory-check-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-bright); line-height: 1.5; }
 .memory-check-desc { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px; line-height: 1.5; }
@@ -674,8 +668,8 @@ textarea.fi { font-family: inherit; resize: vertical; }
 /* ── 人格信息 ── */
 .warn-box {
   padding: 14px 16px; margin-bottom: 12px;
-  border: 1px solid rgba(224, 123, 108, 0.35);
-  border-radius: 10px; background: rgba(224, 123, 108, 0.05);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 10px; background: rgba(var(--accent-rgb), 0.05);
 }
 .warn-title { font-size: 13px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
 .persona-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 12px; }

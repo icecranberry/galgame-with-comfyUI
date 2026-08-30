@@ -599,6 +599,9 @@ function initSchema(db) {
   // 迁移: 手写字体 — characters 表新增 handwriting_font 列
   migrateHandwritingFont(db);
 
+  // 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
+  migrateChatBgSchema(db);
+
   // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
   migrateEventEmphasisSchema(db);
 
@@ -1636,6 +1639,21 @@ function migrateHandwritingFont(db) {
     }
   } catch (err) {
     console.log('[db] migrateHandwritingFont error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
+ */
+function migrateChatBgSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'chat_bg_path')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN chat_bg_path TEXT`);
+      console.log('[db] Added characters.chat_bg_path column');
+    }
+  } catch (err) {
+    console.log('[db] migrateChatBgSchema error:', err.message);
   }
 }
 

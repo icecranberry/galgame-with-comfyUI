@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api/index.js'
+import { getSavedTheme, applyTheme } from '../theme.js'
 
 export const useSettingsStore = defineStore('settings', () => {
   const comfyWidth = ref(1600)
@@ -11,6 +12,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
+  const theme = ref(getSavedTheme()) // main.js 已在挂载前应用过，这里只是同步状态
   let loaded = false
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
@@ -77,5 +79,11 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateWeatherCity(city)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, weatherCity, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
+  // 切换主题：立即应用到 <html data-theme>，持久化在 localStorage（设备级 UI 偏好，不进后端）
+  function setTheme(id) {
+    theme.value = id
+    applyTheme(id)
+  }
+
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, weatherCity, theme, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity, setTheme }
 })

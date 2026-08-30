@@ -136,7 +136,7 @@ onMounted(() => {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 16px;
   background: rgba(255,255,255,0.6);
-  border: 1px solid rgba(224,123,108,0.08);
+  border: 1px solid rgba(var(--accent-rgb),0.08);
   border-radius: 14px;
 }
 .context-avatar {
@@ -144,7 +144,7 @@ onMounted(() => {
 }
 .context-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #e07b6c, #d4695a);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: #fff; font-size: 18px; font-weight: 700;
 }
 .context-info { flex: 1; min-width: 0; }
@@ -166,7 +166,7 @@ onMounted(() => {
 /* ── Content Card ── */
 .letter-content-card {
   background: rgba(255,255,255,0.7);
-  border: 1px solid rgba(224,123,108,0.08);
+  border: 1px solid rgba(var(--accent-rgb),0.08);
   border-radius: 14px;
   padding: 22px 26px;
 }
@@ -185,7 +185,7 @@ onMounted(() => {
 /* ── Original Card ── */
 .original-card {
   background: rgba(255,255,255,0.5);
-  border: 1px solid rgba(224,123,108,0.06);
+  border: 1px solid rgba(var(--accent-rgb),0.06);
   border-radius: 12px; overflow: hidden;
 }
 .original-toggle {
@@ -200,14 +200,14 @@ onMounted(() => {
   padding: 0 16px 14px;
   font-size: 13px; line-height: 1.7; color: #5a4a3a;
   white-space: pre-wrap; word-break: break-word;
-  border-top: 1px solid rgba(224,123,108,0.06);
+  border-top: 1px solid rgba(var(--accent-rgb),0.06);
   margin-top: 4px; padding-top: 12px;
 }
 
 /* ── Images Card ── */
 .images-card {
   background: rgba(255,255,255,0.6);
-  border: 1px solid rgba(224,123,108,0.08);
+  border: 1px solid rgba(var(--accent-rgb),0.08);
   border-radius: 14px; padding: 16px;
 }
 .images-grid {
