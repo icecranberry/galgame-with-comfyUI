@@ -67,10 +67,11 @@ export function deleteImageFileByUrl(url) {
   const category = extractCategoryFromUrl(cleanUrl);
   if (!category) return false;
 
-  const filename = cleanUrl.split('/').pop();
-  // 文件名白名单：仅允许字母/数字/点/横线/下划线/空格，杜绝任何路径穿越形态
-  if (!filename || !/^[\w.\- ]+$/.test(filename)) return false;
-  if (path.basename(filename) !== filename) return false;
+  // 文件名白名单提取：仅接受字母/数字/点/横线/下划线/空格的纯文件名，
+  // 从源头杜绝任何路径穿越形态（`..`、路径分隔符都会匹配失败直接返回 false）
+  const m = /^([\w.\- ]+)$/.exec(cleanUrl.split('/').pop() || '');
+  if (!m) return false;
+  const filename = m[1];
 
   const dir = getImageDir(category);
   const filePath = path.join(dir, filename);

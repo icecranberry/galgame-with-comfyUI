@@ -230,7 +230,12 @@ router.put('/:id', (req, res) => {
 // POST /api/characters/:id/avatar — 上传裁剪后的头像（base64 png）
 router.post('/:id/avatar', (req, res) => {
   const db = getDb();
-  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  // :id 会被拼进头像文件名，必须先归一化为正整数，防止 %2F 编码绕过造成目录穿越
+  const avatarCharId = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(avatarCharId) || avatarCharId <= 0) {
+    return res.status(400).json({ error: 'invalid character id' });
+  }
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(avatarCharId);
   if (!char) return res.status(404).json({ error: 'Character not found' });
 
   const { base64 } = req.body;
@@ -252,7 +257,7 @@ router.post('/:id/avatar', (req, res) => {
   const avatarsDir = path.join(projectRoot, 'data', 'avatars');
   fs.mkdirSync(avatarsDir, { recursive: true });
 
-  const filename = `avatar_${req.params.id}_${Date.now()}.png`;
+  const filename = `avatar_${avatarCharId}_${Date.now()}.png`;
   const filePath = path.join(avatarsDir, filename);
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
   fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
