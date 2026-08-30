@@ -38,10 +38,14 @@
             class="gallery-item sheen"
             @click="onPreview(img.flatIndex)"
           >
-            <div
+            <!-- 用 img + loading=lazy 取代 background-image：浏览器可延迟加载视口外缩略图 -->
+            <img
               class="img-wrapper"
-              :style="{ backgroundImage: `url(${img.url})` }"
-            ></div>
+              :src="img.url"
+              loading="lazy"
+              decoding="async"
+              alt=""
+            >
           </div>
         </div>
       </div>
@@ -344,14 +348,13 @@ defineExpose({ refresh })
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 }
 
-.img-wrapper {
+.gallery-item .img-wrapper {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   overflow: hidden;
   background-color: rgba(0, 0, 0, 0.04);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  object-fit: cover;
   transition: transform 0.3s ease, background-color 0.2s ease;
 }
 .gallery-item:hover .img-wrapper {

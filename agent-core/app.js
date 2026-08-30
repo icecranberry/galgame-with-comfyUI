@@ -1,6 +1,7 @@
 import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better-sqlite3 加载崩溃
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -47,6 +48,7 @@ const app = express();
 
 // 中间件
 app.use(cors());
+app.use(compression()); // 聊天历史等大 JSON 响应启用 gzip
 app.use(express.json({ limit: '10mb' }));
 
 // 静态文件（Vue 前端，构建后）
@@ -56,25 +58,30 @@ app.use(express.static('public'));
 app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
 
 // 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
+// 只缓存「AVIF 已存在」这一终态探测（压缩后不会再变），其余保持实时探测，
+// 避免压缩器单向转换（png 删除 + avif 生成）时读到陈旧结果
+const avifPresentCache = new Set();
 app.use('/images', (req, res, next) => {
   const pngMatch = req.path.match(/\.png$/i);
   if (!pngMatch) return next();
 
-  const pngPath = path.join('data/images', req.path);
-  // 原 PNG 存在 → 直接走 static 兜底
-  if (fs.existsSync(pngPath)) return next();
-
   // PNG 不存在（已被 AVIF 压缩后删除），检查同名 .avif
   const avifPath = path.join('data/images', req.path.replace(/\.png$/i, '.avif'));
+  if (avifPresentCache.has(avifPath)) {
+    res.setHeader('Content-Type', 'image/avif');
+    return res.sendFile(path.resolve(avifPath));
+  }
   if (fs.existsSync(avifPath)) {
+    avifPresentCache.add(avifPath);
     res.setHeader('Content-Type', 'image/avif');
     return res.sendFile(path.resolve(avifPath));
   }
 
+  // AVIF 不存在 → 原 PNG 仍可能存在，直接走 static 兜底
   next();
 });
-app.use('/images', express.static('data/images'));
-app.use('/avatars', express.static('data/avatars'));
+app.use('/images', express.static('data/images', { maxAge: '7d' }));
+app.use('/avatars', express.static('data/avatars', { maxAge: '30d' }));
 
 // API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages

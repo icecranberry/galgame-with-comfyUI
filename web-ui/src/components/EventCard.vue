@@ -83,7 +83,7 @@
               }"
             >
               <div class="branch-img-wrap">
-                <img v-if="step.image" :src="step.image" class="branch-img" @click.stop="previewImg = step.image" />
+                <img v-if="step.image" :src="step.image" class="branch-img" loading="lazy" decoding="async" @click.stop="previewImg = step.image" />
                 <div v-else class="branch-img-empty">配图生成中…</div>
               </div>
               <div class="branch-text">

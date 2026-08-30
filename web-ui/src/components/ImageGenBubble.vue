@@ -31,6 +31,8 @@
           v-if="!imgError.has(i)"
           :src="img.url || img.base64"
           class="igb-img"
+          loading="lazy"
+          decoding="async"
           @click="$emit('preview', img.url || img.base64)"
           @error="onImgError(i)"
           @load="onImgLoad"
