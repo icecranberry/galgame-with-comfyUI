@@ -803,11 +803,7 @@ async function saveLora() {
 }
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
-.detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.detail-rel-btn.subtle { background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
-.detail-rel-btn.subtle:hover { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.3); color: var(--accent-hover); }
-.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
-.detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35); transform: translateY(-1px); }
+/* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
@@ -1006,7 +1002,7 @@ async function saveLora() {
   .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
   .modal-wide .fi { font-size: 16px; }
   .detail-rel-section { padding: 12px; margin-bottom: 14px; }
-  .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
+  /* .detail-rel-btn 移动端覆写已在全局 components.css */
 
   .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
   .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }

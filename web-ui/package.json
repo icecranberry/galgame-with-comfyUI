@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint src",
     "split-fonts": "node split-fonts.mjs"
   },
   "dependencies": {
@@ -19,8 +20,14 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/parser": "^8.68.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "cn-font-split": "^7.4.3",
+    "eslint": "^10.9.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.11.0",
+    "typescript": "^6.0.3",
     "vite": "^6.1.0"
   }
 }

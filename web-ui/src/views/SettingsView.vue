@@ -6,24 +6,8 @@
     </div>
 
     <div class="settings-grid">
-      <!-- 外观：主题选择（即时生效，保存在本设备） -->
-      <div class="card appearance-card">
-        <h3>外观</h3>
-        <p class="fd">选择界面配色主题，点击立即生效，偏好保存在本设备</p>
-        <div class="theme-grid">
-          <button v-for="t in themes" :key="t.id"
-            class="theme-tile" :class="{ active: settingsStore.theme === t.id }"
-            @click="settingsStore.setTheme(t.id)">
-            <span class="theme-swatch">
-              <i v-for="(c, i) in t.swatches" :key="i" :style="{ background: c }"></i>
-            </span>
-            <span class="theme-meta">
-              <span class="theme-name">{{ t.name }}<span v-if="settingsStore.theme === t.id" class="theme-check">✓</span></span>
-              <span class="theme-desc">{{ t.desc }}</span>
-            </span>
-          </button>
-        </div>
-      </div>
+      <!-- 外观：主题选择（已抽为独立组件，作为 SettingsView 功能域拆分的范本） -->
+      <ThemeSettingsCard />
 
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card comfy-params-card">
@@ -1007,16 +991,15 @@ import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTic
 import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
-import { THEMES } from '../theme.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
 import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import ThemeSettingsCard from '../components/settings/ThemeSettingsCard.vue'
 
 const settingsStore = useSettingsStore()
-const themes = THEMES
 const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -3450,49 +3433,5 @@ function resetTestPrompts() {
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 
-/* ── 外观：主题选择 ── */
-.theme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-.theme-tile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1.5px solid var(--border);
-  background: var(--bg-secondary);
-  text-align: left;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
-.theme-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06); }
-.theme-tile.active {
-  border-color: var(--accent);
-  box-shadow: var(--focus-ring);
-}
-.theme-swatch {
-  display: flex;
-  height: 44px;
-  border-radius: 10px;
-  overflow: hidden;
-}
-.theme-swatch i { flex: 1; }
-.theme-meta { display: flex; flex-direction: column; gap: 2px; }
-.theme-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-bright);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.theme-check {
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-}
-.theme-desc { font-size: 11.5px; color: var(--text-secondary); }
+/* ── 外观/主题样式已随 ThemeSettingsCard 组件迁出 ── */
 </style>

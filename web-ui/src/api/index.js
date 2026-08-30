@@ -1319,7 +1319,7 @@ async function maibotFetch(path, options = {}) {
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   })
   let data = null
-  try { data = await res.json() } catch { data = null }
+  try { data = await res.json() } catch { /* 非 JSON 响应按 null 处理 */ }
   if (!res.ok) throw new Error((data && data.error) || (`HTTP ${res.status}`))
   return data
 }

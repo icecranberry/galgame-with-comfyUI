@@ -32,7 +32,7 @@ export const useChatStore = defineStore('chat', () => {
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
   // 客户端渲染窗口：messages 已全量加载，窗口策略统一由 useMessageWindow 提供
-  const { renderStart, visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
+  const { visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
     useMessageWindow(messages)
 
   async function loadCharacters() {
@@ -566,6 +566,7 @@ export const useChatStore = defineStore('chat', () => {
         reader.releaseLock()
         if (!isCurrentStream(sessionId)) {
           clearSafetyTimer()
+          // eslint-disable-next-line no-unsafe-finally -- 流已被新会话接管时静默退出是既定语义，不吞异常路径之外的逻辑
           return
         }
 

@@ -899,7 +899,7 @@ function toWorldHighlightHtml(text) {
       if (/^\s*【[^】]*】\s*$/.test(safe)) {
         return `<span class="world-sec-title">${safe}</span>`
       }
-      if (/^\s*[-•·*]\s+/.test(safe) || /^\s*\d+[\.、．]/.test(safe)) {
+      if (/^\s*[-•·*]\s+/.test(safe) || /^\s*\d+[.、．]/.test(safe)) {
         return `<span class="world-sec-item">${safe}</span>`
       }
       return safe.replace(/^(\s*)(【[^】]*】)/, (m, indent, tag) => `${indent}<span class="world-sec-tag">${tag}</span>`)
@@ -2306,47 +2306,7 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
 }
-.detail-rel-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.detail-rel-btn.subtle {
-  background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid rgba(var(--accent-rgb), 0.15);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 10px;
-}
-.detail-rel-btn.subtle:hover {
-  background: rgba(var(--accent-rgb), 0.14);
-  border-color: rgba(var(--accent-rgb), 0.3);
-  color: var(--accent-hover);
-}
-/* 空状态 CTA 按钮——更醒目 */
-.detail-rel-btn.cta {
-  padding: 10px 22px;
-  font-size: 14px;
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25);
-}
-.detail-rel-btn.cta:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
-  transform: translateY(-1px);
-}
-
-/* 已有关系的条目列表 */
+/* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-list {
   display: flex;
   flex-direction: column;
@@ -2611,10 +2571,7 @@ onMounted(async () => {
     padding: 12px;
     margin-bottom: 14px;
   }
-  .detail-rel-btn {
-    padding: 5px 10px;
-    font-size: 11px;
-  }
+  /* .detail-rel-btn 移动端覆写已在全局 components.css */
   .detail-layout { flex-direction: column; }
 
   /* 移动端详情工具栏 */

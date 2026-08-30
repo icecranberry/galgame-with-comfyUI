@@ -21,16 +21,8 @@
     <!-- 内容区 -->
     <Gallery ref="galleryRef" @loaded="onLoaded" />
 
-    <!-- 压缩弹窗 -->
-    <Transition name="modal-fade">
-      <div v-if="showModal" class="modal-overlay" @click.self="onOverlayClick">
-        <div class="modal-panel" @click.stop>
-          <div class="modal-header">
-            <span>图片压缩</span>
-            <button class="modal-close" @click="showModal = false">✕</button>
-          </div>
-
-          <div class="modal-body">
+    <!-- 压缩弹窗（统一 BaseModal 基座） -->
+    <BaseModal :visible="showModal" title="图片压缩" @close="showModal = false">
             <!-- 压缩类型 -->
             <div class="section">
               <div class="section-label">压缩类型</div>
@@ -118,19 +110,14 @@
                 <span v-if="task.errors > 0">，{{ task.errors }} 个错误</span>
               </div>
             </div>
-
-            <!-- 立刻压缩按钮 -->
-
-          </div>
-        </div>
-      </div>
-    </Transition>
+    </BaseModal>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import Gallery from '../components/Gallery.vue'
+import BaseModal from '../components/BaseModal.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 
@@ -219,10 +206,7 @@ function onBackground() {
   showModal.value = false
 }
 
-function onOverlayClick() {
-  // 如果有进行中的任务，关闭弹窗 = 后台处理
-  showModal.value = false
-}
+// BaseModal 点击遮罩直接关闭；有进行中任务时关闭即等于后台处理
 
 // SSE 监听压缩进度
 onMounted(() => {
