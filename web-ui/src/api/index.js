@@ -19,6 +19,33 @@ export async function updateCharacter(id, data) {
   return res.json()
 }
 
+// ── 角色专属外观/形态 ──
+export async function listCharacterOutfits(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/outfits`)
+  return res.json()
+}
+
+export async function createCharacterOutfit(characterId, data) {
+  const res = await fetch(`${BASE}/characters/${characterId}/outfits`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function updateCharacterOutfit(characterId, outfitId, data) {
+  const res = await fetch(`${BASE}/characters/${characterId}/outfits/${outfitId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+export async function deleteCharacterOutfit(characterId, outfitId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/outfits/${outfitId}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function clearMessages(characterId) {
   const res = await fetch(`${BASE}/characters/${characterId}/messages`, { method: 'DELETE' })
   return res.json()
@@ -248,7 +275,7 @@ export async function deleteUserRelationship(id) {
   return res.json()
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart') {
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -269,7 +296,7 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force' }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功

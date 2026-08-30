@@ -3,6 +3,7 @@ import { appendOathRing } from './oathUtils.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImage } from './imageSkill.js';
 import { charArtistOverride } from './characterImageOpts.js';
+import { buildCharacterPersona } from './characterPersona.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -70,7 +71,11 @@ async function processReply(db, letter) {
   const letterId = letter.id;
   const charId = letter.char_id || letter.character_id;
   const charName = letter.display_name || letter.name;
-  const charBasePrompt = letter.base_prompt || '';
+  // 整卡人格（统一入口，含生效外观注入）；JOIN 行的 id 是信件 id，重映射为角色 id 供外观查询
+  const charBasePrompt = buildCharacterPersona(
+    { id: charId, base_prompt: letter.base_prompt, short_prompt: letter.short_prompt },
+    { variant: 'full' }
+  );
   const charLoras = safeJSON(letter.loras, []);
   const charCustomWorkflow = letter.custom_workflow || null;
 

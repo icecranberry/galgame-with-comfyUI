@@ -1,7 +1,7 @@
 import { getDb, getSystemRules, getSetting, setSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
-import { extractImageCrossRefInfo } from './characterImageOpts.js';
+import { buildImageCrossRefInfo, buildCharacterAppearanceSection } from './characterPersona.js';
 import { saveBase64Image } from './imagePaths.js';
 import { invalidateGalleryCache } from '../routes/images.js';
 
@@ -112,17 +112,7 @@ export function getCharacterEmojiMap(characterId, db = getDb()) {
   return new Map(rows.map(r => [r.emoji_key, r.image_path]));
 }
 
-/** 从 base_prompt 中提取「## 你的外观」段（到下一个 ## 或结尾） */
-export function extractAppearanceSection(basePrompt) {
-  const base = String(basePrompt || '');
-  const m = base.match(/##\s*你的外观([\s\S]*)$/);
-  if (!m) return '';
-  const next = m[1].indexOf('\n## ');
-  return (next >= 0 ? m[1].slice(0, next) : m[1]).trim();
-}
-
-/**
- * 表情包固定 tag 默认值：由代码硬编码到每条 prompt 开头，不再依赖 LLM 输出（省 token 且不会丢 tag）。
+/** 表情包固定 tag 默认值：由代码硬编码到每条 prompt 开头，不再依赖 LLM 输出（省 token 且不会丢 tag）。
  * 前置还能抬高权重：主体构图 → 风格 → 背景，后接表情内容。
  * 可在表情包管理「高级设置」中修改（存 DB system_settings，key=emoji_fixed_tags）。
  */
@@ -185,7 +175,7 @@ function prependFixedEmojiTags(prompt, tagsText) {
 
 /** 兜底 prompt：当创造助手返回 JSON 缺某个 key 时使用，固定 tag 由 prependFixedEmojiTags 统一前置 */
 function fallbackEmojiPrompt(char, key) {
-  const cross = extractImageCrossRefInfo(char);
+  const cross = buildImageCrossRefInfo(char);
   const identity = cross.split('\n')[0] || char.display_name || 'character';
   return [
     `${key} expression`,
@@ -264,7 +254,9 @@ function buildEmojiImageRule(styleMode) {
 export async function generateEmojiPrompts(char, style = '', keys = null) {
   const emojiKeys = keys || getEmojiCategories();
   const system0 = getSystemRules({ roleplay: false });
-  const appearance = extractAppearanceSection(char.base_prompt);
+  // 完整外观段（含生效外观注入）剥掉「## 你的外观」标题行，由下方「角色外观：」标签替代
+  const appearanceSection = buildCharacterAppearanceSection(char);
+  const appearance = appearanceSection ? appearanceSection.replace(/^##[^\n]*\n?/, '').trim() : '';
   const styleMode = getEmojiStyleMode();
   const system1 = buildEmojiImageRule(styleMode);
   // 构图 tag 放最前吃最高权重，是半身/大头构图稳定性的关键

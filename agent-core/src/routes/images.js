@@ -6,7 +6,8 @@ import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js'
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
-import { charArtistOverride, extractImageCrossRefInfo } from '../services/characterImageOpts.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
+import { buildImageCrossRefInfo } from '../services/characterPersona.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
@@ -245,7 +246,7 @@ router.post('/test-style', async (req, res) => {
         db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
       ).filter(Boolean);
       if (chars.length > 0) {
-        const blocks = chars.map(c => `[${c.display_name}]\n${extractImageCrossRefInfo(c)}`).join('\n\n');
+        const blocks = chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`).join('\n\n');
         msgs.push({
           role: 'system',
           content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${blocks}`,

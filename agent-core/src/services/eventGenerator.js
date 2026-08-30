@@ -27,6 +27,7 @@ import { getMemorySettings } from './memory/memoryConfig.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
 import { matchAll } from './characterSearch.js';
+import { buildCharacterPersona } from './characterPersona.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 
 // ── 生活片段类型库（事件类型存于 event_types 表，见 db/index.js 的 seedEventLibraries）──
@@ -296,11 +297,10 @@ export async function generateEvent(character, options = {}) {
       `).all(character.id);
 
       const picked = allRels[Math.floor(Math.random() * allRels.length)];
-      const otherShort = picked.other_short || '';
-      const base = picked.other_prompt || '';
-      const appMatch = base.match(/##\s*你的外观/);
-      const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, picked.other_name) : '';
-      const otherPersona = [otherShort, appSection].filter(Boolean).join('\n');
+      const otherPersona = buildCharacterPersona(
+        { id: picked.other_id, short_prompt: picked.other_short, base_prompt: picked.other_prompt },
+        { variant: 'short', person: picked.other_name }
+      );
 
       // 查反向关系，双向注入
       const reverseRel = db.prepare(`
@@ -338,9 +338,9 @@ export async function generateEvent(character, options = {}) {
     contextBlock += `\n关联线索——${character.display_name}一小时前刚发了朋友圈："${recentMoment.content}"。事件素材可以与此呼应，提高关联性。\n`;
   }
 
-  // 将角色人格中的"你"替换为角色名（保留引号内对话不变，简单正则处理）
+  // 将角色人格中的"你"替换为角色名（保留引号内对话不变，简单正则处理）；统一入口含生效外观注入
   const displayName = character.display_name;
-  let personaText = character.base_prompt.replace(/你/g, displayName);
+  let personaText = buildCharacterPersona(character, { variant: 'full', person: displayName });
 
   // 誓约角色：银白细戒指外观细节
   const ringUserName1 = config.user?.nickname || 'user';
@@ -710,7 +710,7 @@ export async function generateNextBranch(character, event, choice) {
   const timeTag2 = getTimeTag(now, false);
 
   const displayName2 = character.display_name;
-  let personaText2 = character.base_prompt.replace(/你/g, displayName2);
+  let personaText2 = buildCharacterPersona(character, { variant: 'full', person: displayName2 });
 
   // 誓约角色：银白细戒指外观细节
   const ringUserName2 = config.user?.nickname || 'user';
@@ -744,11 +744,7 @@ ${multiPerson2.otherPersona}`;
     if (crossChars.length > 0) {
       crossRefNames = crossChars.map(c => c.display_name);
       const crossBlocks = crossChars.map(c => {
-        const parts = [];
-        if (c.short_prompt) parts.push(c.short_prompt);
-        const base = c.base_prompt || '';
-        const m = base.match(/##\s*你的外观/);
-        if (m) parts.push(base.slice(m.index).replace(/你/g, c.display_name));
+        const parts = [buildCharacterPersona(c, { variant: 'short', person: c.display_name })].filter(Boolean);
         // 查询角色间关系
         const relParts = [];
         const fwd = db.prepare(

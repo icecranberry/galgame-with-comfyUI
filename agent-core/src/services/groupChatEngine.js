@@ -25,6 +25,7 @@ import { config } from '../config.js';
 import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
+import { buildCharacterPersona } from './characterPersona.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
@@ -168,15 +169,10 @@ function buildGroupCard(group) {
 
   parts.push(`群聊名称：${group.name}${group.topic ? `\n群主题：${group.topic}` : ''}\n群成员：${group.members.map(m => m.display_name).join('、')}，以及用户「${chatUserName}」。`);
 
-  // 群成员资料：仅 short_prompt + base_prompt 外观段（"你"→角色名）
-  const roster = group.members.map(m => {
-    const short = (m.short_prompt || '').trim();
-    const base = m.base_prompt || '';
-    const appMatch = base.match(/##\s*你的外观/);
-    const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, m.display_name) : '';
-    const persona = [short, appSection].filter(Boolean).join('\n');
-    return `### ${m.display_name}\n${persona}`;
-  }).join('\n\n');
+  // 群成员资料：仅 short_prompt + base_prompt 外观段（"你"→角色名，含生效外观注入）
+  const roster = group.members.map(m =>
+    `### ${m.display_name}\n${buildCharacterPersona(m, { variant: 'short', person: m.display_name })}`
+  ).join('\n\n');
   parts.push(`群成员资料：\n${roster}`);
 
   // 成员间关系（有向边，只取群内成员之间的）

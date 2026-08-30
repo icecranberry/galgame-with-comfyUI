@@ -303,6 +303,28 @@ function initSchema(db) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+    -- 角色专属外观/形态/装甲/衣服（每个角色可定义多套，同时只启用一套，启用互斥由服务层保证）
+    CREATE TABLE IF NOT EXISTS character_outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_character_outfits_char ON character_outfits(character_id);
+
+    -- 通用限时服饰（如一套女仆装的 tag 组合，非角色专属、谁都能用，可多套同时生效）。
+    -- 注入数据库的管理方式暂未定，本期只建表 + 读取；condition_json 预留注入条件（时间/指令等），当前不解析
+    CREATE TABLE IF NOT EXISTS global_outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      condition_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 画师串收藏夹
     CREATE TABLE IF NOT EXISTS artist_favorites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -663,6 +685,9 @@ function initSchema(db) {
 
   // 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
   migrateGroupChatSchema(db);
+
+  // 迁移: 深度思考 — raw_messages 新增 thinking 列（存 planner 思考+计划原文，历史回看用）
+  migrateDeepThinkSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
@@ -1129,6 +1154,22 @@ function migrateProactiveSchema(db) {
 }
 
 /**
+ * 迁移: 深度思考 — raw_messages 新增 thinking 列（nullable）
+ * 存 planner 的思考+计划原文 JSON（{think, plan}），GET messages 带出供前端历史回看折叠块
+ */
+function migrateDeepThinkSchema(db) {
+  try {
+    const rawCols = db.prepare(`PRAGMA table_info(raw_messages)`).all();
+    if (!rawCols.find(c => c.name === 'thinking')) {
+      db.exec(`ALTER TABLE raw_messages ADD COLUMN thinking TEXT DEFAULT NULL`);
+      console.log('[db] Added raw_messages.thinking column');
+    }
+  } catch (err) {
+    console.log('[db] migrateDeepThinkSchema error:', err.message);
+  }
+}
+
+/**
  * 迁移: 好感度回归系统
  * - user_relationships 表新增 last_interaction_at（记录最近一次互动时间）
  * - 新建 gift_history 表（送礼记录，含冷却检查）
@@ -1558,6 +1599,7 @@ const SETTING_TO_CONFIG = {
   feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
   feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
+  feature_deepThinkMode:             { obj: 'features', key: 'deepThinkMode',          type: 'bool' },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
   group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
   weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },

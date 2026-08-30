@@ -36,35 +36,5 @@ export function charArtistOverrideWithFallback(mainChar, otherChars = []) {
   return null;
 }
 
-/**
- * 生图交叉参考信息（私聊 / 测试画风共用）：从 base_prompt 截取。
- * 身份行 = 首行截到首个含「来自」的分段（去「你是」前缀），
- * 外观   = 「## 你的外观」段到末尾（「你」→角色名替换）。
- * @param {object} char - characters 表行（至少含 base_prompt, display_name）
- * @returns {string}
- */
-export function extractImageCrossRefInfo(char) {
-  const base = char?.base_prompt || '';
-  const parts = [];
-
-  const nl = base.indexOf('\n');
-  const firstLine = (nl >= 0 ? base.slice(0, nl) : base).trim();
-  if (firstLine) {
-    let cut = -1;
-    let start = 0;
-    for (let i = 0; i < firstLine.length; i++) {
-      if (firstLine[i] === '，' || firstLine[i] === '。') {
-        if (firstLine.slice(start, i).includes('来自')) { cut = i; break; }
-        start = i + 1;
-      }
-    }
-    const identity = (cut >= 0 ? firstLine.slice(0, cut) : firstLine).replace(/^你是/, '').replace(/。$/, '').trim();
-    if (identity) parts.push(identity);
-  }
-
-  const m = base.match(/##\s*你的外观/);
-  if (m) {
-    parts.push(base.slice(m.index).replace(/你/g, char.display_name || ''));
-  }
-  return parts.join('\n');
-}
+// 生图交叉参考信息已迁至 services/characterPersona.js 的 buildImageCrossRefInfo
+// （统一入口，支持角色外观系统注入），原 extractImageCrossRefInfo 移除。

@@ -5,15 +5,8 @@
 import { chatSync } from '../llm/llm-client.js';
 import { IMAGE_PROMPT_RULE } from '../builtinRules.js';
 import { getTimeLightInline } from '../services/timeLight.js';
+import { buildCharacterPersona } from '../services/characterPersona.js';
 import { buildChatLines } from './textCleaner.js';
-
-function buildCharacterAppearance(character) {
-  const shortPrompt = String(character?.short_prompt || '').trim();
-  const basePrompt = String(character?.base_prompt || '');
-  const appMatch = basePrompt.match(/##\s*你的外观/);
-  const appSection = appMatch ? basePrompt.slice(appMatch.index).trim() : '';
-  return [shortPrompt, appSection].filter(Boolean).join('\n');
-}
 
 function cleanDirectPrompt(raw) {
   // 只做最外层清洗，不再解析 JSON
@@ -41,7 +34,7 @@ export function buildEnvironmentReference() {
  * 构造生图 prompt 请求：环境参考并入 system，末尾只保留一条 user 消息。
  */
 export function buildImagePromptMessages({ character, user_message, reply_text, context, user_name = '' }) {
-  const personality = buildCharacterAppearance(character) || character?.base_prompt || '';
+  const personality = buildCharacterPersona(character, { variant: 'short' });
   const systemParts = [];
   systemParts.push(`你是角色「${character?.display_name || '默认角色'}」的生图描述器。请结合对话上下文，将画面需求改写成一张配图的画面描述。`);
   systemParts.push(`角色设定：\n${personality.slice(0, 2000)}`);

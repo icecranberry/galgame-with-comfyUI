@@ -40,3 +40,26 @@ web-ui 中所有文本输入框 / 文本域统一使用组件 `web-ui/src/compon
 2. 示例中每个字段的值要写明该字段的内容要求与约束（如字数、语气、格式、禁止项），让模型照着填，参考 `agent-core/src/services/eventGenerator.js` 中 `formatPrompt` 的写法
 3. 必须明确要求模型严格按示例格式输出，不要输出任何解释或 JSON 以外的文字
 4. 新增或修改输出字段时，同步更新 prompt 中的 JSON 示例与解析代码，保持两者一致
+
+## 角色生图人格组装（characterPersona）
+
+所有「配合生图」的角色人格拼接——整卡 `base_prompt`，或 `short_prompt + ## 你的外观` 段——必须统一走 `agent-core/src/services/characterPersona.js`，禁止在各模块内写 `match(/##\s*你的外观/)` 之类的正则自行截取（历史上 16+ 处内联实现口径不一，已全部收口）。
+
+**什么时候用哪种：**
+
+1. `buildCharacterPersona(character, opts)` 是主入口：
+   - `variant: 'short'`（默认）＝ `short_prompt + 外观段`，用于多角色参考（事件/朋友圈 otherPersona）、群聊成员资料卡、梦境 system3、maibot 桥生图描述器等紧凑场景
+   - `variant: 'full'` ＝ 整卡 `base_prompt`（缺失回退 `short_prompt`），用于角色以完整人格出场的生图：私聊 needImage 配图、主动聊天、日程拍照、事件一/二期、礼物反应、信件、AI 头像、发帖 LLM
+   - `person`：把「你」替换为指定名（`display_name`、`'角色'` 等），`null` 保持第一人称；short 只替换外观段（short_prompt 本就是第三人称），full 替换整卡
+   - `outfits`：默认 `'auto'` 自动注入生效外观并附优先级说明；传 `null` 显式关闭；单测可显式传 `{limited, exclusive}`
+2. 只要外观段（不含人格，如表情包 system3、主动聊天配图的外观块）用 `buildCharacterAppearanceSection(character, opts)`（含 `## 你的外观` 标题行与注入，标题自行取舍）；画面交叉参考（图中出现其他角色）用 `buildImageCrossRefInfo(char, opts)`，不要再引用已删除的 `extractImageCrossRefInfo`
+3. **传入对象的 `id` 必须是角色 id**（自动注入按它查外观）。JOIN/别名行要先重映射：如 mailboxScheduler 传 `{ id: letter.char_id, base_prompt: letter.base_prompt, short_prompt: ... }`
+
+**什么时候不用：** 非生图用途不套本入口，保持原逻辑——聊天人格稳定块（chat.js 身份块）、记忆整理、关系图谱、日程模板与字体分配（取外观段之前/之后文本）、`cropPersonalityForEmotion` 等 short_prompt 维护逻辑。`appendOathRing` 仍由各调用方在组装结果之后追加，职责不并入本入口。
+
+**角色外观系统：**
+
+1. 数据源两张表：`character_outfits`（角色专属形态/装甲/衣服，每角色同时只启用一套，启用互斥由 `outfitService` 保证；详情卡 UI 入口暂注释隐藏在 `CharacterDetailModal.vue`，搜「暂时隐藏」）、`global_outfits`（通用限时服饰如女仆装 tag 组合，可多套叠加；管理方式未定，`condition_json` 预留注入条件，当前 `enabled` 即生效）
+2. 查询生效外观只走 `outfitService.getActiveOutfits(characterId)`；注入文本格式与着装优先级说明（两者都有 / 只有限时 / 只有专属三种）只改 `buildOutfitInjectionBlocks`，不要在调用点拼
+3. 修改拼接口径（正则、连接符、注入格式）只改 `characterPersona.js`，并同步维护 `agent-core/test/characterPersona.test.js`（含无外观时与旧口径逐字节一致的回归断言）
+

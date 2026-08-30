@@ -5,6 +5,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
+import { buildCharacterPersona } from '../services/characterPersona.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
@@ -453,11 +454,10 @@ const MOMENT_FORMS = [
       const shuffled = [...allRels].sort(() => Math.random() - 0.5);
       for (const rel of shuffled) {
         if (multiPersons.length >= 3) break;
-        const otherShort = rel.other_short || '';
-        const base = rel.other_prompt || '';
-        const appMatch = base.match(/##\s*你的外观/);
-        const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, rel.other_name) : '';
-        const otherPersona = [otherShort, appSection].filter(Boolean).join('\n');
+        const otherPersona = buildCharacterPersona(
+          { id: rel.other_id, short_prompt: rel.other_short, base_prompt: rel.other_prompt },
+          { variant: 'short', person: rel.other_name }
+        );
 
         multiPersons.push({
           otherId: rel.other_id,
@@ -574,7 +574,8 @@ ${rules}`;
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: postingTask });
-  msgs.push({ role: 'system', content: character.base_prompt });
+  // 整卡人格（统一入口，含生效外观注入；输出含 imagePrompt，配图需体现当前外观）
+  msgs.push({ role: 'system', content: buildCharacterPersona(character, { variant: 'full' }) });
   if (multiPersons.length > 0) {
     for (const mp of multiPersons) {
       msgs.push({

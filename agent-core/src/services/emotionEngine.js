@@ -18,6 +18,7 @@
 
 import { getDb, getSystemRulesWithWorld, getGlobalRule } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
+import { buildCharacterPersona } from './characterPersona.js';
 import { chatSync } from '../llm/llm-client.js';
 
 // ── 常量 ──
@@ -878,7 +879,8 @@ export async function giveGift(characterId, giftType, character, userName = '你
 
   // 4. LLM 生成角色反应 + 生图描述
   const systemRules = getSystemRulesWithWorld();
-  const basePrompt = character.base_prompt || character.short_prompt || '';
+  // 整卡人格（统一入口，含生效外观注入；base_prompt 缺失时回退 short_prompt）
+  const basePrompt = buildCharacterPersona(character, { variant: 'full' });
   const affinityDesc = affinityToPrompt(currentAffinity);
   const giftDesc = giftType === 'small'
     ? '一份日常小礼物。请根据你的性格和你们之间的关系，想象这是一份什么具体的小东西（如一盒你爱的甜点、一支精致的花、一个有趣的小挂件……），然后自然地反应。'

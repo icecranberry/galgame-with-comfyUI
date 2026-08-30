@@ -2,7 +2,7 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <div v-if="visible && !showLoraModal && !showOutfitModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -38,6 +38,12 @@
                 <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
                 <span v-else class="toolbar-badge">未配置</span>
               </div>
+              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
+              <!-- <div class="toolbar-item toolbar-item-btn" @click="openOutfitModal">
+                <span>外观 / 形态</span>
+                <span v-if="activeOutfitName" class="toolbar-badge active">{{ activeOutfitName }}</span>
+                <span v-else class="toolbar-badge">未启用</span>
+              </div> -->
             </div>
             <!-- 头像 -->
             <div class="detail-avatar-row">
@@ -186,6 +192,12 @@
                 <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
                 <span v-else class="float-badge">未配置</span>
               </div>
+              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
+              <!-- <div class="float-row float-row-action" @click="openOutfitModal">
+                <span class="float-label">外观 / 形态</span>
+                <span v-if="activeOutfitName" class="float-badge active float-badge-name">{{ activeOutfitName }}</span>
+                <span v-else class="float-badge">未启用</span>
+              </div> -->
             </div>
           </div>
         </div>
@@ -334,6 +346,70 @@
         </div>
       </div>
     </Transition>
+
+    <!-- ── 外观 / 形态设置弹窗 ── -->
+    <Transition name="modal-fade">
+      <div v-if="showOutfitModal" class="modal-overlay" @click.self="closeOutfitModal">
+        <div class="modal-panel modal-wide">
+          <div class="modal-header">
+            <h3>外观 / 形态 — {{ character?.display_name }}</h3>
+            <linshe-button variant="icon" class="modal-close" @click="closeOutfitModal">✕</linshe-button>
+          </div>
+          <div class="modal-body">
+            <div class="lora-body-card">
+              <p class="outfit-intro">
+                配置该角色专属的额外形态、装甲或服装。启用后，角色生图时会优先穿着这里的外观，
+                人物卡里的原有外观用于填补未提及的部位；同一时间只启用一套。
+              </p>
+              <TransitionGroup name="lora-card" tag="div" class="lora-list">
+                <div v-for="(item, idx) in outfitItems" :key="item.id ?? `new-${idx}`" class="lora-item-card" :class="{ 'outfit-deleted': item._deleted }">
+                  <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeOutfit(idx)" title="移除">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                  </linshe-button>
+                  <div class="lora-item-row">
+                    <div class="form-group lora-path-group">
+                      <label class="fl lora-inline-label">名称</label>
+                      <linshe-input v-model="item.name" class="fi" placeholder="如：机甲形态 / 女仆装 / 常服" />
+                    </div>
+                    <label class="outfit-enabled-label">
+                      <input type="checkbox" v-model="item.enabled" @change="onOutfitEnabledChange(idx)" />
+                      <span>启用中</span>
+                    </label>
+                  </div>
+                  <div class="lora-trigger-row">
+                    <label class="fl lora-inline-label">外观描述</label>
+                    <linshe-input
+                      v-model="item.description"
+                      type="textarea"
+                      class="fi"
+                      rows="3"
+                      placeholder="可用逗号分隔的 tag 组合（如 maid headdress, black maid dress, white apron），也可以用自然语言描述形态变化"
+                    />
+                  </div>
+                </div>
+              </TransitionGroup>
+
+              <div v-if="activeOutfitCount === 0" class="lora-empty-hint">
+                尚未配置专属外观，点击下方按钮添加
+              </div>
+
+              <linshe-button variant="secondary" size="sm" class="lora-add-btn" @click="addOutfit">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                添加形态
+              </linshe-button>
+            </div>
+
+            <div class="modal-actions" style="margin-top:16px">
+              <span class="outfit-save-hint">启用中的形态会注入到所有生图链路，优先级高于人物卡原有外观</span>
+              <div style="flex:1"></div>
+              <linshe-button variant="primary" @click="saveOutfits" :disabled="outfitLoading">
+                {{ outfitLoading ? '保存中…' : '保存' }}
+              </linshe-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -397,6 +473,11 @@ const loraDropdownIdx = ref(-1)
 const loraSuggestions = ref([])
 const loraFetching = ref(false)
 
+// ── 外观/形态设置状态 ──
+const showOutfitModal = ref(false)
+const outfitLoading = ref(false)
+const outfitItems = ref([]) // 本地编辑副本：{ id, name, description, enabled, _deleted }
+
 const clickShouldClose = ref(false)
 
 function onOverlayMouseDown(e) {
@@ -440,6 +521,12 @@ const hasLoraSetup = computed(() => {
   if (!c) return false
   return (_parseCharLoras(c.loras).length > 0) || !!c.custom_workflow || c.artist_override != null
 })
+
+const activeOutfit = computed(() =>
+  outfitItems.value.find(o => o.enabled && !o._deleted && (o.name || '').trim())
+)
+const activeOutfitName = computed(() => activeOutfit.value?.name || '')
+const activeOutfitCount = computed(() => outfitItems.value.filter(o => !o._deleted).length)
 
 // ── Lora 辅助 ──
 function _parseCharLoras(raw) {
@@ -485,6 +572,7 @@ function init(c) {
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
+  fetchOutfits()
   api.getRelationships(c.id).then(res => {
     detail.relationships = res.relationships || []
   }).catch(() => {
@@ -723,6 +811,97 @@ async function saveLora() {
     console.error('saveLora failed:', e)
   } finally {
     loraLoading.value = false
+  }
+}
+
+// ═══════════════════════════════════════
+// 外观 / 形态弹窗
+// ═══════════════════════════════════════
+
+async function fetchOutfits() {
+  if (!props.character) return
+  try {
+    const list = await api.listCharacterOutfits(props.character.id)
+    outfitItems.value = (Array.isArray(list) ? list : []).map(o => ({ ...o, _deleted: false }))
+  } catch {
+    outfitItems.value = []
+  }
+}
+
+function openOutfitModal() {
+  if (!props.character) return
+  showOutfitModal.value = true
+  fetchOutfits()
+}
+
+function closeOutfitModal() {
+  showOutfitModal.value = false
+}
+
+function addOutfit() {
+  outfitItems.value.push({ id: null, name: '', description: '', enabled: false, _deleted: false })
+}
+
+async function removeOutfit(idx) {
+  const item = outfitItems.value[idx]
+  if (!item) return
+  if (item.id) {
+    const ok = await confirmFn({
+      title: '移除外观',
+      message: `确定移除「${item.name || '未命名外观'}」吗？`,
+      okText: '移除',
+    })
+    if (!ok) return
+    item._deleted = true
+  } else {
+    outfitItems.value.splice(idx, 1)
+  }
+}
+
+// 启用互斥（同角色同时只启用一套，与服务端规则一致）；全部取消勾选 = 不启用任何形态
+function onOutfitEnabledChange(idx) {
+  const target = outfitItems.value[idx]
+  if (target.enabled) {
+    outfitItems.value.forEach((o, i) => { if (i !== idx) o.enabled = false })
+  }
+}
+
+async function saveOutfits() {
+  if (!props.character) return
+  const c = props.character
+  const invalid = outfitItems.value.find(o => !o._deleted && (!(o.name || '').trim() || !(o.description || '').trim()))
+  if (invalid) {
+    toastFn('外观的名称和描述不能为空', 'warning')
+    return
+  }
+  outfitLoading.value = true
+  try {
+    for (const o of outfitItems.value) {
+      if (o._deleted) {
+        await api.deleteCharacterOutfit(c.id, o.id)
+        continue
+      }
+      const name = o.name.trim()
+      const description = o.description.trim()
+      if (o.id) {
+        await api.updateCharacterOutfit(c.id, o.id, { name, description, enabled: !!o.enabled })
+      } else {
+        const created = await api.createCharacterOutfit(c.id, { name, description })
+        const wantEnabled = !!o.enabled
+        Object.assign(o, created)
+        o.enabled = wantEnabled
+        if (wantEnabled) await api.updateCharacterOutfit(c.id, created.id, { enabled: true })
+      }
+    }
+    outfitItems.value = outfitItems.value.filter(o => !o._deleted)
+    outfitItems.value.forEach(o => { delete o._deleted })
+    toastFn('外观已保存', 'success')
+    showOutfitModal.value = false
+  } catch (e) {
+    console.error('saveOutfits failed:', e)
+    toastFn('外观保存失败', 'error')
+  } finally {
+    outfitLoading.value = false
   }
 }
 </script>
@@ -1031,6 +1210,16 @@ async function saveLora() {
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
+
+/* ═══ 外观 / 形态设置 ═══ */
+.outfit-intro { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.outfit-enabled-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; flex-shrink: 0; padding-bottom: 6px; }
+.outfit-enabled-label input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+.outfit-enabled-label span { font-weight: 600; }
+.outfit-deleted { opacity: 0.4; }
+.outfit-deleted input, .outfit-deleted textarea { text-decoration: line-through; }
+.float-badge-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outfit-save-hint { font-size: 11px; color: var(--text-secondary); }
 .lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 

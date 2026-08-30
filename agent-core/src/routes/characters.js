@@ -21,6 +21,8 @@ import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
+import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
+import { buildCharacterPersona } from '../services/characterPersona.js';
 
 const router = Router();
 
@@ -923,7 +925,7 @@ ${imageRuleContent ? `【画面描述要求】\n${imageRuleContent}\n` : ''}
 const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述：
 
 ---角色设定---
-${char.base_prompt}
+${buildCharacterPersona(char, { variant: 'full' })}
 ---
 
 要求：脸部特写，表情跟随人格但是表情幅度很小。`;
@@ -1032,5 +1034,50 @@ function _parseCharLoras(raw) {
   }
   return [];
 }
+
+// ── 角色专属外观/形态（角色外观系统，生图注入见 services/characterPersona.js）──
+
+// GET /api/characters/:id/outfits — 列出角色全部专属外观
+router.get('/:id/outfits', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  res.json(listCharacterOutfits(char.id));
+});
+
+// POST /api/characters/:id/outfits — 新增专属外观 Body: { name, description }
+router.post('/:id/outfits', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const name = String(req.body?.name || '').trim();
+  const description = String(req.body?.description || '').trim();
+  if (!name) return res.status(400).json({ error: '外观名称不能为空' });
+  if (!description) return res.status(400).json({ error: '外观描述不能为空' });
+  if (name.length > 60 || description.length > 2000) {
+    return res.status(400).json({ error: '名称不能超过 60 字，描述不能超过 2000 字' });
+  }
+  const outfit = createCharacterOutfit(char.id, { name, description });
+  res.status(201).json(outfit);
+});
+
+// PUT /api/characters/:id/outfits/:outfitId — 更新专属外观 Body: { name?, description?, enabled? }
+// enabled 置 1 时同角色其余外观自动取消启用（每角色同时只启用一套）
+router.put('/:id/outfits/:outfitId', (req, res) => {
+  const { name, description, enabled } = req.body || {};
+  if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: '外观名称不能为空' });
+  if (description !== undefined && !String(description).trim()) return res.status(400).json({ error: '外观描述不能为空' });
+  const outfit = updateCharacterOutfit(req.params.id, req.params.outfitId, { name, description, enabled });
+  if (!outfit) return res.status(404).json({ error: 'Outfit not found' });
+  res.json(outfit);
+});
+
+// DELETE /api/characters/:id/outfits/:outfitId — 删除专属外观
+router.delete('/:id/outfits/:outfitId', (req, res) => {
+  const removed = deleteCharacterOutfit(req.params.id, req.params.outfitId);
+  if (!removed) return res.status(404).json({ error: 'Outfit not found' });
+  res.json({ success: true });
+});
 
 export default router;
