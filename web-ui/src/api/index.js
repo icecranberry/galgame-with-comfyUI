@@ -1,84 +1,94 @@
 const BASE = '/api'
 
+// 统一请求基元：非 2xx 自动抛出服务端 error 信息，成功返回解析后的 JSON
+async function request(path, { method = 'GET', body, headers, signal } = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json', ...headers } : headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+  return result
+}
+
+// 统一 SSE 解析循环：按行解析 event:/data: 帧，每帧回调 onEvent(event, data)。
+// data 帧回调 JSON 解析后的对象；仅 event 行时 data 为 undefined。
+// 读取错误向上抛（由调用方决定静默断开还是向下游报错），流自然结束则正常返回。
+async function consumeSSE(res, onEvent) {
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let eventType = null
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7).trim()
+        onEvent(eventType, undefined)
+      } else if (line.startsWith('data: ')) {
+        try {
+          onEvent(eventType, JSON.parse(line.slice(6)))
+        } catch { /* ignore parse errors */ }
+      }
+    }
+  }
+}
+
 // ── Characters ──
 export async function listCharacters() {
-  const res = await fetch(`${BASE}/characters`)
-  return res.json()
+  return request(`/characters`)
 }
 
 export async function getMessages(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/messages`)
-  return res.json()
+  return request(`/characters/${characterId}/messages`)
 }
 
 export async function updateCharacter(id, data) {
-  const res = await fetch(`${BASE}/characters/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/characters/${id}`, { method: 'PUT', body: data })
 }
 
 export async function clearMessages(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/messages`, { method: 'DELETE' })
-  return res.json()
+  return request(`/characters/${characterId}/messages`, { method: 'DELETE' })
 }
 
 export async function undoLastRound(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/messages/last-round`, { method: 'DELETE' })
-  return res.json()
+  return request(`/characters/${characterId}/messages/last-round`, { method: 'DELETE' })
 }
 
 export async function generateCharacter(description) {
-  const res = await fetch(`${BASE}/characters/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ description }),
-  })
-  return res.json()
+  return request(`/characters/generate`, { method: 'POST', body: { description } })
 }
 
 /** 预览模式生成角色：只生成不入库，由前端确认后再调 createCharacter */
 export async function generateCharacterPreview(description) {
-  const res = await fetch(`${BASE}/characters/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ description, save: false }),
-  })
-  return res.json()
+  return request(`/characters/generate`, { method: 'POST', body: { description, save: false } })
 }
 
 /** 导入酒馆角色卡（PNG 内嵌 chara / JSON 卡），返回预览数据，直接进入招募预览步骤 */
 export async function importCharacterCard({ data, mimetype, filename }) {
-  const res = await fetch(`${BASE}/characters/import-card`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data, mimetype, filename }),
-  })
-  return res.json()
+  return request(`/characters/import-card`, { method: 'POST', body: { data, mimetype, filename } })
 }
 /** 直接创建角色（确认入库） */
 export async function createCharacter(data) {
-  const res = await fetch(`${BASE}/characters`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/characters`, { method: 'POST', body: data })
 }
 
 export async function deleteCharacter(id) {
-  const res = await fetch(`${BASE}/characters/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/characters/${id}`, { method: 'DELETE' })
 }
 
 export async function uploadAvatar(characterId, base64) {
-  const res = await fetch(`${BASE}/characters/${characterId}/avatar`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64 }),
-  })
-  return res.json()
+  return request(`/characters/${characterId}/avatar`, { method: 'POST', body: { base64 } })
 }
 
 export async function getRecentImages(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/recent-images`)
-  return res.json()
+  return request(`/characters/${characterId}/recent-images`)
 }
 
 /** AI 生成角色头像（脸部特写，表情跟随人格） */
@@ -95,11 +105,7 @@ export async function generateAvatar(characterId) {
 
 /** 上传/清除角色聊天背景（base64，空串 = 恢复默认） */
 export async function uploadChatBg(characterId, base64) {
-  const res = await fetch(`${BASE}/characters/${characterId}/chat-bg`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64 }),
-  })
-  return res.json()
+  return request(`/characters/${characterId}/chat-bg`, { method: 'POST', body: { base64 } })
 }
 
 /** AI 生成角色聊天背景（依据角色设定与可选场景提示，横版无人物） */
@@ -117,80 +123,49 @@ export async function generateChatBg(characterId, prompt = '') {
 
 // ── Workflows ──
 export async function getWorkflows() {
-  const res = await fetch(`${BASE}/workflows`)
-  return res.json()
+  return request(`/workflows`)
 }
 
 // ── Character Relationships ──
 export async function getRelationships(characterId) {
-  const res = await fetch(`${BASE}/relationships?character_id=${characterId}`)
-  return res.json()
+  return request(`/relationships?character_id=${characterId}`)
 }
 
 export async function createRelationship(from_character_id, to_character_id, relationship_text) {
-  const res = await fetch(`${BASE}/relationships`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from_character_id, to_character_id, relationship_text }),
-  })
-  return res.json()
+  return request(`/relationships`, { method: 'POST', body: { from_character_id, to_character_id, relationship_text } })
 }
 
 export async function updateRelationship(id, relationship_text) {
-  const res = await fetch(`${BASE}/relationships/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ relationship_text }),
-  })
-  return res.json()
+  return request(`/relationships/${id}`, { method: 'PUT', body: { relationship_text } })
 }
 
 export async function deleteRelationship(id) {
-  const res = await fetch(`${BASE}/relationships/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/relationships/${id}`, { method: 'DELETE' })
 }
 
 export async function deduceRelationships(characterId, boost, excludeNames) {
-  const res = await fetch(`${BASE}/relationships/deduce`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ characterId, boost, excludeNames }),
-  })
-  return res.json()
+  return request(`/relationships/deduce`, { method: 'POST', body: { characterId, boost, excludeNames } })
 }
 
 export async function deduceUserRelationships(boost, excludeNames) {
-  const res = await fetch(`${BASE}/relationships/deduce`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: 'user', boost, excludeNames }),
-  })
-  return res.json()
+  return request(`/relationships/deduce`, { method: 'POST', body: { mode: 'user', boost, excludeNames } })
 }
 
 // ── User Relationships ──
 export async function getUserRelationships() {
-  const res = await fetch(`${BASE}/user-relationships`)
-  return res.json()
+  return request(`/user-relationships`)
 }
 
 export async function createUserRelationship(character_id, relationship_text) {
-  const res = await fetch(`${BASE}/user-relationships`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_id, relationship_text }),
-  })
-  return res.json()
+  return request(`/user-relationships`, { method: 'POST', body: { character_id, relationship_text } })
 }
 
 export async function updateUserRelationship(id, relationship_text) {
-  const res = await fetch(`${BASE}/user-relationships/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ relationship_text }),
-  })
-  return res.json()
+  return request(`/user-relationships/${id}`, { method: 'PUT', body: { relationship_text } })
 }
 
 export async function deleteUserRelationship(id) {
-  const res = await fetch(`${BASE}/user-relationships/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
 export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
@@ -253,29 +228,14 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
 
       // ── 流式读取 ──
       try {
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let lastEvent = null
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) { outerController.close(); break }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              lastEvent = line.slice(7).trim()
-              outerController.enqueue({ type: 'event', event: lastEvent })
-            } else if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6))
-                outerController.enqueue({ type: 'data', event: lastEvent, data })
-              } catch { /* ignore parse errors */ }
-            }
+        await consumeSSE(res, (event, data) => {
+          if (data === undefined) {
+            outerController.enqueue({ type: 'event', event })
+          } else {
+            outerController.enqueue({ type: 'data', event, data })
           }
-        }
+        })
+        outerController.close()
       } catch (err) {
         if (err.name !== 'AbortError') outerController.error(err)
       }
@@ -286,8 +246,7 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
 
 // ── Groups（群聊）──
 export async function listGroups() {
-  const res = await fetch(`${BASE}/groups`)
-  return res.json()
+  return request(`/groups`)
 }
 
 export async function createGroup({ name, topic, member_ids }) {
@@ -303,20 +262,15 @@ export async function createGroup({ name, topic, member_ids }) {
 }
 
 export async function updateGroup(id, data) {
-  const res = await fetch(`${BASE}/groups/${id}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/groups/${id}`, { method: 'PATCH', body: data })
 }
 
 export async function deleteGroup(id) {
-  const res = await fetch(`${BASE}/groups/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/groups/${id}`, { method: 'DELETE' })
 }
 
 export async function undoLastGroupRound(id) {
-  const res = await fetch(`${BASE}/groups/${id}/messages/last-round`, { method: 'DELETE' })
+  const res = await request(`/groups/${id}/messages/last-round`, { method: 'DELETE' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || `撤回失败 (${res.status})`)
@@ -325,19 +279,16 @@ export async function undoLastGroupRound(id) {
 }
 
 export async function getGroupMessages(id) {
-  const res = await fetch(`${BASE}/groups/${id}/messages`)
-  return res.json()
+  return request(`/groups/${id}/messages`)
 }
 
 export async function markGroupSeen(id) {
-  const res = await fetch(`${BASE}/groups/${id}/seen`, { method: 'POST' })
-  return res.json()
+  return request(`/groups/${id}/seen`, { method: 'POST' })
 }
 
 /** 冷场续聊：用户停留但没人说话时触发角色继续聊（消息经统一 SSE 到达） */
 export async function nudgeGroup(id) {
-  const res = await fetch(`${BASE}/groups/${id}/nudge`, { method: 'POST' })
-  return res.json()
+  return request(`/groups/${id}/nudge`, { method: 'POST' })
 }
 
 /** 群聊发言：SSE 流式返回本轮剧本（解析格式与 chatStream 一致）
@@ -365,27 +316,12 @@ export function groupChatStream(groupId, items, truncateAfterMsgId = null) {
         return
       }
       try {
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let lastEvent = null
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) { outerController.close(); break }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              lastEvent = line.slice(7).trim()
-            } else if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6))
-                outerController.enqueue({ type: 'data', event: lastEvent, data })
-              } catch { /* ignore parse errors */ }
-            }
+        await consumeSSE(res, (event, data) => {
+          if (data !== undefined) {
+            outerController.enqueue({ type: 'data', event, data })
           }
-        }
+        })
+        outerController.close()
       } catch (err) {
         if (err.name !== 'AbortError') outerController.error(err)
       }
@@ -396,33 +332,25 @@ export function groupChatStream(groupId, items, truncateAfterMsgId = null) {
 
 // ── Config ──
 export async function getConfig() {
-  const res = await fetch(`${BASE}/config`)
-  return res.json()
+  return request(`/config`)
 }
 
 export async function updateComfyConfig(data) {
-  await fetch(`${BASE}/config/comfy`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  await request(`/config/comfy`, { method: 'PUT', body: data })
 }
 
 export async function fetchLorasFiles() {
-  const res = await fetch(`${BASE}/config/loras-files`)
-  return res.json()
+  return request(`/config/loras-files`)
 }
 
 export async function updateGlobalLora(loras) {
-  await fetch(`${BASE}/config/global-lora`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras }),
-  })
+  await request(`/config/global-lora`, { method: 'PUT', body: { loras } })
 }
 
 /** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */
 /** 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG） */
 export async function updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist }) {
-  const res = await fetch(`${BASE}/config/hires`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loras, steps, cfg, denoise, maxSize, artistMode, artist }),
-  })
+  const res = await request(`/config/hires`, { method: 'PUT', body: { loras, steps, cfg, denoise, maxSize, artistMode, artist } })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.error || 'HiresFix 设置保存失败')
@@ -431,23 +359,17 @@ export async function updateHiresSettings({ loras, steps, cfg, denoise, maxSize,
 }
 
 export async function updateFeatureFlag(key, value) {
-  await fetch(`${BASE}/config/features`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }),
-  })
+  await request(`/config/features`, { method: 'PUT', body: { key, value } })
 }
 
 /** 更新主动聊天频率 0~1 */
 export async function updateProactiveFreq(value) {
-  await fetch(`${BASE}/config/proactive-freq`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
+  await request(`/config/proactive-freq`, { method: 'PUT', body: { value } })
 }
 
 /** 更新群聊 LLM 温度 0.5~1.2（所有群共享） */
 export async function updateGroupTemperature(value) {
-  const res = await fetch(`${BASE}/config/group-temperature`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
+  const res = await request(`/config/group-temperature`, { method: 'PUT', body: { value } })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.error || '温度设置保存失败')
@@ -457,9 +379,7 @@ export async function updateGroupTemperature(value) {
 
 /** 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享） */
 export async function updateGroupSummaryInterval(value) {
-  const res = await fetch(`${BASE}/config/group-summary-interval`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
+  const res = await request(`/config/group-summary-interval`, { method: 'PUT', body: { value } })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.error || '记忆总结轮次保存失败')
@@ -469,48 +389,31 @@ export async function updateGroupSummaryInterval(value) {
 
 /** 更新奇遇触发频率 0~1 */
 export async function updateEventFreq(value) {
-  await fetch(`${BASE}/config/event-freq`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
+  await request(`/config/event-freq`, { method: 'PUT', body: { value } })
 }
 
 /** 更新后台 LLM 并发数 1~10 */
 export async function updateBackgroundConcurrency(value) {
-  await fetch(`${BASE}/config/background-llm-concurrency`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
+  await request(`/config/background-llm-concurrency`, { method: 'PUT', body: { value } })
 }
 
 /** 更新防打扰模式总开关 */
 export async function updateDisturbMode(value) {
-  const res = await fetch(`${BASE}/config/disturb-mode`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
-  })
-  return res.json()
+  return request(`/config/disturb-mode`, { method: 'PUT', body: { value } })
 }
 
 /** 更新防打扰时间段和角色列表 */
 export async function updateDisturbSettings(data) {
-  const res = await fetch(`${BASE}/config/disturb-settings`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/disturb-settings`, { method: 'PUT', body: data })
 }
 
 /** 设置天气城市 */
 export async function updateWeatherCity(city) {
-  const res = await fetch(`${BASE}/config/weather-city`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city }),
-  })
-  return res.json()
+  return request(`/config/weather-city`, { method: 'PUT', body: { city } })
 }
 
 export async function updateLlmConfig(data) {
-  const res = await fetch(`${BASE}/config/llm`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/llm`, { method: 'PUT', body: data })
 }
 
 /** 每日免费鸡蛋开关（opencode zen 免费端点，免 Key） */
@@ -544,26 +447,19 @@ export async function fetchLlmModels(data) {
 // ── LLM Profile 管理 ──
 
 export async function getLlmProfiles() {
-  const res = await fetch(`${BASE}/config/llm/profiles`)
-  return res.json()
+  return request(`/config/llm/profiles`)
 }
 
 export async function addLlmProfile(name, config = {}) {
-  const res = await fetch(`${BASE}/config/llm/profiles`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, ...config }),
-  })
-  return res.json()
+  return request(`/config/llm/profiles`, { method: 'POST', body: { name, ...config } })
 }
 
 export async function deleteLlmProfile(id) {
-  const res = await fetch(`${BASE}/config/llm/profiles/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/config/llm/profiles/${id}`, { method: 'DELETE' })
 }
 
 export async function activateLlmProfile(id) {
-  const res = await fetch(`${BASE}/config/llm/profiles/${id}/activate`, { method: 'POST' })
-  return res.json()
+  return request(`/config/llm/profiles/${id}/activate`, { method: 'POST' })
 }
 
 export async function syncActiveLlmProfile() {
@@ -637,103 +533,68 @@ export function retryFailedMemories() {
 
 // ── World Settings ──
 export async function getWorldSettings() {
-  const res = await fetch(`${BASE}/config/world-settings`)
-  return res.json()
+  return request(`/config/world-settings`)
 }
 
 export async function createWorldSetting(data) {
-  const res = await fetch(`${BASE}/config/world-settings`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/world-settings`, { method: 'POST', body: data })
 }
 
 export async function updateWorldSetting(id, data) {
-  const res = await fetch(`${BASE}/config/world-settings/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/world-settings/${id}`, { method: 'PUT', body: data })
 }
 
 export async function deleteWorldSetting(id) {
-  const res = await fetch(`${BASE}/config/world-settings/${id}`, {
-    method: 'DELETE',
-  })
-  return res.json()
+  return request(`/config/world-settings/${id}`, { method: 'DELETE' })
 }
 
 export async function getSystemRules() {
-  const res = await fetch(`${BASE}/config/system-rules`)
-  return res.json()
+  return request(`/config/system-rules`)
 }
 
 export async function polishWorldSetting(data) {
-  const res = await fetch(`${BASE}/config/world-settings/polish`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/world-settings/polish`, { method: 'POST', body: data })
 }
 
 export async function activateWorldSetting(id) {
-  const res = await fetch(`${BASE}/config/world-settings/${id}/activate`, {
-    method: 'POST',
-  })
-  return res.json()
+  return request(`/config/world-settings/${id}/activate`, { method: 'POST' })
 }
 
 // ── Global Rules ──
 export async function getGlobalRules() {
-  const res = await fetch(`${BASE}/config/rules`)
-  return res.json()
+  return request(`/config/rules`)
 }
 
 export async function updateGlobalRule(key, data) {
-  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/rules/${encodeURIComponent(key)}`, { method: 'PUT', body: data })
 }
 
 /** 获取单条规则的默认值（不修改，仅供预览） */
 export async function getDefaultRule(key) {
-  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}/default`)
-  return res.json()
+  return request(`/config/rules/${encodeURIComponent(key)}/default`)
 }
 
 /** 重置单条全局规则为默认值 */
 export async function resetGlobalRule(key) {
-  const res = await fetch(`${BASE}/config/rules/${encodeURIComponent(key)}/reset`, {
-    method: 'POST',
-  })
-  return res.json()
+  return request(`/config/rules/${encodeURIComponent(key)}/reset`, { method: 'POST' })
 }
 
 // ── User Avatar ──
 export async function getUserAvatar() {
-  const res = await fetch(`${BASE}/config/user-avatar`)
-  return res.json()
+  return request(`/config/user-avatar`)
 }
 
 export async function uploadUserAvatar(base64) {
-  const res = await fetch(`${BASE}/config/user-avatar`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64 }),
-  })
-  return res.json()
+  return request(`/config/user-avatar`, { method: 'POST', body: { base64 } })
 }
 
 // ── User config (nickname + persona) ──
 export async function getUserConfig() {
-  const res = await fetch(`${BASE}/config/user`)
-  return res.json()
+  return request(`/config/user`)
 }
 
 export async function updateUserConfig(data) {
-  const res = await fetch(`${BASE}/config/user`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/user`, { method: 'PUT', body: data })
 }
 
 // ── 测试画风（固定提示词，不存 DB；mode: 'chat' | 'moments'；prompt 可选覆盖默认；
@@ -743,24 +604,18 @@ export async function testStyle({ artist, width, height, mode = 'chat', prompt =
   if (prompt) body.prompt = prompt;
   if (sceneDesc) body.sceneDesc = sceneDesc;
   if (reuseSceneLoras) body.reuseSceneLoras = true;
-  const res = await fetch(`${BASE}/images/test-style`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  return request(`/images/test-style`, { method: 'POST', body: body })
 }
 
 /** 测试细化（最近一张图，HiresFix 参数流程，不落盘，返回原图+细化图） */
 export async function testHires() {
-  const res = await fetch(`${BASE}/images/test-hires`, { method: 'POST' });
+  const res = await request(`/images/test-hires`, { method: 'POST' });
   return res.json();
 }
 
 // ── Moments 朋友圈 ──
 export async function listMoments() {
-  const res = await fetch(`${BASE}/moments`)
-  return res.json()
+  return request(`/moments`)
 }
 
 /**
@@ -784,33 +639,11 @@ export function connectMomentsStream(onNewPost) {
         conn._closed = true
         return
       }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        let done, value
-        try {
-          ({ done, value } = await reader.read())
-        } catch { break }
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        let eventType = ''
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ') && eventType === 'new_post') {
-            try {
-              const post = JSON.parse(line.slice(6))
-              onNewPost(post)
-            } catch { /* ignore parse errors */ }
-          }
-        }
-      }
+      try {
+        await consumeSSE(res, (event, data) => {
+          if (data !== undefined && event === 'new_post') onNewPost(data)
+        })
+      } catch { /* 连接中断，交给上层重连逻辑 */ }
       conn._closed = true
     })
     .catch(err => {
@@ -844,33 +677,11 @@ export function connectNotificationsStream(onProactiveMessage) {
         conn._closed = true
         return
       }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        let done, value
-        try {
-          ({ done, value } = await reader.read())
-        } catch { break }
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        let eventType = ''
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ') && eventType === 'proactive_message') {
-            try {
-              const data = JSON.parse(line.slice(6))
-              onProactiveMessage(data)
-            } catch { /* ignore parse errors */ }
-          }
-        }
-      }
+      try {
+        await consumeSSE(res, (event, data) => {
+          if (data !== undefined && event === 'proactive_message') onProactiveMessage(data)
+        })
+      } catch { /* 连接中断，交给上层重连逻辑 */ }
       conn._closed = true
     })
     .catch(err => {
@@ -885,73 +696,56 @@ export function connectNotificationsStream(onProactiveMessage) {
 
 /** 获取有未读主动消息的角色列表 */
 export async function getProactiveUnread() {
-  const res = await fetch(`${BASE}/notifications/unread`)
-  return res.json()
+  return request(`/notifications/unread`)
 }
 
 /** 标记某角色的主动消息已读 */
 export async function markProactiveRead(characterId) {
-  await fetch(`${BASE}/notifications/mark-read/${characterId}`, { method: 'POST' })
+  await request(`/notifications/mark-read/${characterId}`, { method: 'POST' })
 }
 
 /** 调试：强制随机角色发起一次主动聊天 */
 export async function forceProactive() {
-  const res = await fetch(`${BASE}/notifications/force-proactive`, { method: 'POST' })
-  return res.json()
+  return request(`/notifications/force-proactive`, { method: 'POST' })
 }
 
 export async function getMoment(id) {
-  const res = await fetch(`${BASE}/moments/${id}`)
-  return res.json()
+  return request(`/moments/${id}`)
 }
 
 /** 获取朋友圈未读计数 */
 export async function getMomentsUnread() {
-  const res = await fetch(`${BASE}/moments/unread-count`)
-  return res.json()
+  return request(`/moments/unread-count`)
 }
 
 /** 清零朋友圈未读计数 */
 export async function markMomentsRead() {
-  const res = await fetch(`${BASE}/moments/mark-read`, { method: 'POST' })
-  return res.json()
+  return request(`/moments/mark-read`, { method: 'POST' })
 }
 
 export async function generateMoment(characterId) {
-  const res = await fetch(`${BASE}/moments/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_id: characterId }),
-  })
-  return res.json()
+  return request(`/moments/generate`, { method: 'POST', body: { character_id: characterId } })
 }
 
 export async function deleteMoment(id) {
-  const res = await fetch(`${BASE}/moments/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/moments/${id}`, { method: 'DELETE' })
 }
 
 export async function commentMoment(postId, content) {
-  const res = await fetch(`${BASE}/moments/${postId}/comments`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
-  return res.json()
+  return request(`/moments/${postId}/comments`, { method: 'POST', body: { content } })
 }
 
 export async function deleteMomentComment(postId, commentId) {
-  const res = await fetch(`${BASE}/moments/${postId}/comments/${commentId}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/moments/${postId}/comments/${commentId}`, { method: 'DELETE' })
 }
 
 export async function likeMoment(postId) {
-  const res = await fetch(`${BASE}/moments/${postId}/like`, { method: 'POST' })
-  return res.json()
+  return request(`/moments/${postId}/like`, { method: 'POST' })
 }
 
 // ── 角色对用户的画像（user_portraits）──
 export async function getCharacterPortrait(characterId) {
-  const res = await fetch(`${BASE}/portraits/${characterId}`)
-  return res.json()
+  return request(`/portraits/${characterId}`)
 }
 
 export async function addPortrait(characterId, traitType, content) {
@@ -981,7 +775,7 @@ export async function updatePortrait(id, content) {
 }
 
 export async function deletePortrait(id) {
-  const res = await fetch(`${BASE}/portraits/${id}`, { method: 'DELETE' })
+  const res = await request(`/portraits/${id}`, { method: 'DELETE' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || '删除失败')
@@ -999,33 +793,25 @@ export async function comfyuiHealth() {
 
 // ── Gift 送礼 ──
 export async function sendGift(characterId, giftType, giftLine = '') {
-  const res = await fetch(`${BASE}/characters/${characterId}/gift`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ giftType, giftLine }),
-  })
-  return res.json()
+  return request(`/characters/${characterId}/gift`, { method: 'POST', body: { giftType, giftLine } })
 }
 
 export async function getGiftCooldowns() {
-  const res = await fetch(`${BASE}/characters/gift/cooldowns`)
-  return res.json()
+  return request(`/characters/gift/cooldowns`)
 }
 
 export async function resetGiftCooldowns() {
-  const res = await fetch(`${BASE}/characters/gift/cooldowns`, { method: 'DELETE' })
-  return res.json()
+  return request(`/characters/gift/cooldowns`, { method: 'DELETE' })
 }
 
 // ── 誓约系统 ──
 
 export async function getOathStatus(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/oath`)
-  return res.json()
+  return request(`/characters/${characterId}/oath`)
 }
 
 export async function removeOath(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/oath`, { method: 'DELETE' })
-  return res.json()
+  return request(`/characters/${characterId}/oath`, { method: 'DELETE' })
 }
 
 // ── Gallery 相册 ──
@@ -1131,68 +917,45 @@ export async function deleteImage(imageUrl) {
 
 // ── 图片压缩 ──
 export async function getCompressStatus() {
-  const res = await fetch(`${BASE}/images/compress/status`)
-  return res.json()
+  return request(`/images/compress/status`)
 }
 
 export async function updateCompressConfig(data) {
-  const res = await fetch(`${BASE}/images/compress/config`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/images/compress/config`, { method: 'PUT', body: data })
 }
 
 export async function startCompress() {
-  const res = await fetch(`${BASE}/images/compress/start`, { method: 'POST' })
-  return res.json()
+  return request(`/images/compress/start`, { method: 'POST' })
 }
 
 export async function cancelCompress() {
-  const res = await fetch(`${BASE}/images/compress/cancel`, { method: 'POST' })
-  return res.json()
+  return request(`/images/compress/cancel`, { method: 'POST' })
 }
 
 // ── 画师串收藏夹 ──
 export async function getArtistFavorites() {
-  const res = await fetch(`${BASE}/config/artist-favorites`)
-  return res.json()
+  return request(`/config/artist-favorites`)
 }
 
 export async function addArtistFavorite({ label, artist }) {
-  const res = await fetch(`${BASE}/config/artist-favorites`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, artist }),
-  })
-  return res.json()
+  return request(`/config/artist-favorites`, { method: 'POST', body: { label, artist } })
 }
 
 export async function updateArtistFavorite(id, data) {
-  const res = await fetch(`${BASE}/config/artist-favorites/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  return res.json()
+  return request(`/config/artist-favorites/${id}`, { method: 'PUT', body: data })
 }
 
 export async function deleteArtistFavorite(id) {
-  const res = await fetch(`${BASE}/config/artist-favorites/${id}`, {
-    method: 'DELETE',
-  })
-  return res.json()
+  return request(`/config/artist-favorites/${id}`, { method: 'DELETE' })
 }
 
 // ── Events 奇遇 ──
 export async function listEvents() {
-  const res = await fetch(`${BASE}/events`)
-  return res.json()
+  return request(`/events`)
 }
 
 export async function getActiveEvent(characterId) {
-  const res = await fetch(`${BASE}/events/active/${characterId}`)
-  return res.json()
+  return request(`/events/active/${characterId}`)
 }
 
 export async function getEventById(eventId) {
@@ -1207,53 +970,38 @@ export async function chooseEventOption(eventId, choice, customText) {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 120_000)
   try {
-    const res = await fetch(`${BASE}/events/${eventId}/choose`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ choice, customText }),
-      signal: controller.signal,
-    })
-    return res.json()
+    return request(`/events/${eventId}/choose`, { method: 'POST', body: { choice, customText }, signal: controller.signal })
   } finally {
     clearTimeout(timeoutId)
   }
 }
 
 export async function undoEventOption(eventId) {
-  const res = await fetch(`${BASE}/events/${eventId}/undo`, { method: 'POST' })
-  return res.json()
+  return request(`/events/${eventId}/undo`, { method: 'POST' })
 }
 
 export async function dismissEvent(eventId) {
-  const res = await fetch(`${BASE}/events/${eventId}/dismiss`, { method: 'POST' })
-  return res.json()
+  return request(`/events/${eventId}/dismiss`, { method: 'POST' })
 }
 
 export async function concludeEvent(eventId) {
-  const res = await fetch(`${BASE}/events/${eventId}/conclude`, { method: 'POST' })
-  return res.json()
+  return request(`/events/${eventId}/conclude`, { method: 'POST' })
 }
 
 export async function deleteEvent(eventId) {
-  const res = await fetch(`${BASE}/events/${eventId}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/events/${eventId}`, { method: 'DELETE' })
 }
 
 export async function getEventsUnread() {
-  const res = await fetch(`${BASE}/events/unread-count`)
-  return res.json()
+  return request(`/events/unread-count`)
 }
 
 export async function markEventsRead() {
-  const res = await fetch(`${BASE}/events/mark-read`, { method: 'POST' })
-  return res.json()
+  return request(`/events/mark-read`, { method: 'POST' })
 }
 
 export async function generateEvent(characterId, eventTypeKey, customPrompt) {
-  const res = await fetch(`${BASE}/events/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ characterId, eventTypeKey, customPrompt }),
-  })
-  return res.json()
+  return request(`/events/generate`, { method: 'POST', body: { characterId, eventTypeKey, customPrompt } })
 }
 
 /**
@@ -1289,32 +1037,13 @@ export function connectUnifiedStream(handlers = {}, { onClose } = {}) {
         _handleClose()
         return
       }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let eventType = ''
-
-      while (true) {
-        let done, value
-        try { ({ done, value } = await reader.read()) } catch { break }
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              const fn = handlers[eventType]
-              if (fn) fn(data)
-            } catch { /* ignore parse errors */ }
-          }
-        }
-      }
+      try {
+        await consumeSSE(res, (event, data) => {
+          if (data === undefined) return
+          const fn = handlers[event]
+          if (fn) fn(data)
+        })
+      } catch { /* 连接中断，交给上层重连逻辑 */ }
       _handleClose()
     })
     .catch(err => {
@@ -1344,34 +1073,15 @@ export function connectEventsStream(handlers = {}) {
         conn._closed = true
         return
       }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let eventType = ''
-
-      while (true) {
-        let done, value
-        try { ({ done, value } = await reader.read()) } catch { break }
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              if (eventType === 'new_event') handlers.onNewEvent?.(data)
-              else if (eventType === 'event_update') handlers.onUpdate?.(data)
-              else if (eventType === 'event_concluded') handlers.onConclusion?.(data)
-              else if (eventType === 'event_expired') handlers.onExpired?.(data)
-            } catch { /* ignore parse errors */ }
-          }
-        }
-      }
+      try {
+        await consumeSSE(res, (event, data) => {
+          if (data === undefined) return
+          if (event === 'new_event') handlers.onNewEvent?.(data)
+          else if (event === 'event_update') handlers.onUpdate?.(data)
+          else if (event === 'event_concluded') handlers.onConclusion?.(data)
+          else if (event === 'event_expired') handlers.onExpired?.(data)
+        })
+      } catch { /* 连接中断，交给上层重连逻辑 */ }
       conn._closed = true
     })
     .catch(err => {
@@ -1457,8 +1167,7 @@ export async function regenerateAllSchedules(direction) {
 
 /** 取消正在进行的重置世界线任务 */
 export async function cancelRegenerateAll() {
-  const res = await fetch(`${BASE}/schedule/regenerate-all/cancel`, { method: 'POST' })
-  return res.json()
+  return request(`/schedule/regenerate-all/cancel`, { method: 'POST' })
 }
 
 /** 查询当前重置世界线任务状态（页面刷新恢复用） */
@@ -1470,7 +1179,7 @@ export async function getResetStatus() {
 
 /** 清空指定角色的所有日程（模板、快照、禁用自动生成） */
 export async function clearSchedule(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/clear`, { method: 'POST' })
+  const res = await request(`/schedule/${characterId}/clear`, { method: 'POST' })
   if (!res.ok) throw new Error(`clear schedule: ${res.status}`)
   return res.json()
 }
@@ -1479,88 +1188,65 @@ export async function clearSchedule(characterId) {
 
 /** 电话叫醒（40% 概率成功） */
 export async function wakeUpByPhone(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/wake-up-phone`, { method: 'POST' })
+  const res = await request(`/schedule/${characterId}/wake-up-phone`, { method: 'POST' })
   if (!res.ok) throw new Error(`wake up phone: ${res.status}`)
   return res.json()
 }
 
 /** 上门摇醒（必定成功） */
 export async function wakeUpByDoor(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/wake-up-door`, { method: 'POST' })
+  const res = await request(`/schedule/${characterId}/wake-up-door`, { method: 'POST' })
   if (!res.ok) throw new Error(`wake up door: ${res.status}`)
   return res.json()
 }
 
 // ── 工作流管理 ──
 export async function checkWorkflowStatus() {
-  const res = await fetch(`${BASE}/workflows/status`)
-  return res.json()
+  return request(`/workflows/status`)
 }
 
 export async function restoreWorkflow() {
-  const res = await fetch(`${BASE}/workflows/restore`, { method: 'POST' })
-  return res.json()
+  return request(`/workflows/restore`, { method: 'POST' })
 }
 
 export async function updateWorkflowMode(mode) {
-  const res = await fetch(`${BASE}/config/workflow-mode`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
-  })
-  return res.json()
+  return request(`/config/workflow-mode`, { method: 'PUT', body: { mode } })
 }
 
 export async function updateWorkflowScene(scene) {
-  const res = await fetch(`${BASE}/config/workflow-scene`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scene }),
-  })
-  return res.json()
+  return request(`/config/workflow-scene`, { method: 'PUT', body: { scene } })
 }
 
 // ── 信箱 ──
 
 export async function listLetters(page = 1, limit = 20) {
-  const res = await fetch(`${BASE}/mailbox?page=${page}&limit=${limit}`)
-  return res.json()
+  return request(`/mailbox?page=${page}&limit=${limit}`)
 }
 
 export async function getUnreadCount() {
-  const res = await fetch(`${BASE}/mailbox/unread`)
-  return res.json()
+  return request(`/mailbox/unread`)
 }
 
 export async function sendLetter(characterId, title, content) {
-  const res = await fetch(`${BASE}/mailbox/send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_id: characterId, title, content }),
-  })
-  return res.json()
+  return request(`/mailbox/send`, { method: 'POST', body: { character_id: characterId, title, content } })
 }
 
 export async function getLetter(id) {
-  const res = await fetch(`${BASE}/mailbox/${id}`)
-  return res.json()
+  return request(`/mailbox/${id}`)
 }
 
 export async function markLetterRead(id) {
-  const res = await fetch(`${BASE}/mailbox/${id}/mark-read`, { method: 'PUT' })
-  return res.json()
+  return request(`/mailbox/${id}/mark-read`, { method: 'PUT' })
 }
 
 export async function deleteLetter(id) {
-  const res = await fetch(`${BASE}/mailbox/${id}`, { method: 'DELETE' })
-  return res.json()
+  return request(`/mailbox/${id}`, { method: 'DELETE' })
 }
 
 // ── 事件库管理（奇遇事件类型 / 朋友圈话题）──
 
 export async function listEventTypes() {
-  const res = await fetch(`${BASE}/library/event-types`)
-  return res.json()
+  return request(`/library/event-types`)
 }
 
 export function createEventType(data) {
@@ -1592,8 +1278,7 @@ export function saveEventTypeBatch(items) {
 }
 
 export async function listTopics() {
-  const res = await fetch(`${BASE}/library/topics`)
-  return res.json()
+  return request(`/library/topics`)
 }
 
 export function createTopic(data) {
