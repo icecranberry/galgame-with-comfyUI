@@ -522,7 +522,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
@@ -530,7 +530,8 @@ import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ChatBgPanel from '../components/ChatBgPanel.vue'
-import RelationshipGraph from '../components/RelationshipGraph.vue'
+// 关系图依赖 @vue-flow（重），仅在打开弹窗时加载
+const RelationshipGraph = defineAsyncComponent(() => import('../components/RelationshipGraph.vue'))
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'

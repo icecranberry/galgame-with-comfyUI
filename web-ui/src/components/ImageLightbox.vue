@@ -29,9 +29,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, inject, onMounted, onUnmounted } from 'vue'
-import VueEasyLightbox from 'vue-easy-lightbox'
-import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
+import { ref, computed, watch, nextTick, inject, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+// vue-easy-lightbox 较重，按需加载（连带其样式）
+const VueEasyLightbox = defineAsyncComponent(async () => {
+  await import('vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css')
+  return (await import('vue-easy-lightbox')).default
+})
 import { deleteImage } from '../api/index.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 

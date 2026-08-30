@@ -95,7 +95,6 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import html2canvas from 'html2canvas'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -168,6 +167,8 @@ async function copyScreenshot() {
     await nextTick()
     await new Promise(r => setTimeout(r, 100))
 
+    // html2canvas 体积大且仅在生成分享图时需要，按需加载
+    const { default: html2canvas } = await import('html2canvas')
     const canvas = await html2canvas(el, {
       backgroundColor: null,
       scale: 2,
@@ -190,6 +191,7 @@ async function copyScreenshot() {
     console.error('[ShareCard] copy screenshot failed:', err)
     // fallback: 降级下载
     try {
+      const { default: html2canvas } = await import('html2canvas')
       const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false })
       canvas.toBlob(blob => {
         if (!blob) return

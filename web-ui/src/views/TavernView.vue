@@ -538,14 +538,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, inject, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, inject, nextTick, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
-import RelationshipGraph from '../components/RelationshipGraph.vue'
-import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
+// 关系图依赖 @vue-flow（重），仅在打开时加载
+const RelationshipGraph = defineAsyncComponent(() => import('../components/RelationshipGraph.vue'))
+const UserRelationshipGraph = defineAsyncComponent(() => import('../components/UserRelationshipGraph.vue'))
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
