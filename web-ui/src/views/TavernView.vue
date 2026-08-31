@@ -97,6 +97,15 @@
         <span class="mailbox-label">信箱</span>
         <span v-if="mailboxUnread > 0" class="mailbox-badge">{{ mailboxUnread > 99 ? '99+' : mailboxUnread }}</span>
       </div>
+      <div v-if="!isMobile" class="backpack-card card" @click="showBackpack = true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 9a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v1H4V9z"/>
+          <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z"/>
+          <path d="M10 13h4"/>
+        </svg>
+        <span class="mailbox-label">背包</span>
+        <span v-if="backpackChestReady" class="mailbox-badge backpack-dot" title="宝箱已就绪"></span>
+      </div>
     </div>
 
     <!-- ═══════════════════════════════════════════
@@ -549,6 +558,11 @@
          ═══════════════════════════════════════════ -->
     <MailboxModal :visible="showMailbox" :characters="sortedCharacters" @close="showMailbox = false" />
 
+    <!-- ═══════════════════════════════════════════
+         背包弹窗
+         ═══════════════════════════════════════════ -->
+    <BackpackModal :visible="showBackpack" :characters="sortedCharacters" @close="showBackpack = false" />
+
       <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
   </div>
 </template>
@@ -565,18 +579,23 @@ import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
+import BackpackModal from '../components/BackpackModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import { useMailboxStore } from '../stores/mailbox.js'
+import { useBackpackStore } from '../stores/backpack.js'
 
 const router = useRouter()
 const chat = useChatStore()
 const mailboxStore = useMailboxStore()
+const backpackStore = useBackpackStore()
 
 const showMailbox = ref(false)
+const showBackpack = ref(false)
 const showEmojiManager = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
+const backpackChestReady = computed(() => backpackStore.chestReady)
 
 // 按 display_name 首字母排序（中文按拼音）
 const sortedCharacters = computed(() =>
@@ -1253,6 +1272,8 @@ onMounted(async () => {
   userAppearanceInput.value = userAppearance.value
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
+  // 拉一次宝箱状态，驱动入口卡上的「可开启」小圆点
+  backpackStore.fetchItems()
 })
 </script>
 
@@ -1296,7 +1317,8 @@ onMounted(async () => {
   gap: 18px;
   flex: 1;
 }
-.mailbox-card {
+.mailbox-card,
+.backpack-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1311,6 +1333,13 @@ onMounted(async () => {
 .mailbox-label {
   font-size: 13px;
   font-weight: 600;
+}
+.backpack-dot {
+  min-width: 10px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border-radius: 50%;
 }
 .mailbox-badge {
   position: absolute;

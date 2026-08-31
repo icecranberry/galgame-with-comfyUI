@@ -109,13 +109,13 @@ export async function generateSchedule(character, direction) {
   "startTime": "HH:MM",
   "endTime": "HH:MM",
   "activity": "简短活动名（含上下文，如「早课——高等数学」）",
-  "location": "地点",
+  "location": "地点（比如「公寓书房」）",
   "replyDelay": 数字（0 / -1）,
   "tags": ["标签1", "标签2"],
   "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }
 
-只输出 JSON 对象，不要任何额外文字。格式：{"activities":[{...},{...}]}`;
+只输出 JSON 对象，不要任何额外文字。格式：{"activities":[{...},{...}]},activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式，24 小时制，数组里每个对象都是上述的活动对象格式。`;
 
   // ── 用户指定的日程方向 ──
   const directionMsg = direction ? `## 用户指定的日程方向
@@ -137,7 +137,7 @@ ${direction}**
   msgs.push({ role: 'system', content: personaMsg });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
-    ? `请遵循当前世界观来安排日程，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。
+    ? `请遵循<world_setting>来安排日程，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。
 
 请为 ${character.display_name} 生成完整的今日日程安排。`
     : `请为 ${character.display_name} 生成完整的今日日程安排。`;

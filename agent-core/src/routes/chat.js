@@ -17,6 +17,7 @@ import {
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo } from '../services/characterPersona.js';
+import { getActiveBuffBlock } from '../services/itemService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
@@ -593,8 +594,10 @@ router.post('/characters/:id/chat', async (req, res) => {
     const worldSetting = getWorldSetting();
     const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
 
-    // ── 稳定块 [1]：角色基础人格（不含日程、不含奇遇） ──
-    const charBaseContent = character?.base_prompt || getDefaultPrompt();
+    // ── 稳定块 [1]：角色基础人格（不含日程、不含奇遇）+ 道具临时状态 ──
+    let charBaseContent = character?.base_prompt || getDefaultPrompt();
+    const buffBlock = getActiveBuffBlock(characterId);
+    if (buffBlock) charBaseContent = `${charBaseContent}\n\n${buffBlock}`;
 
     // ── 稳定块 [2]：用户上下文 + 关系 + 固定格式规则 ──
     const chatUserName = config.user.nickname || '用户';

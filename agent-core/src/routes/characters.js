@@ -861,10 +861,10 @@ router.post('/:id/gift', async (req, res) => {
   }
 });
 
-// DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用）
+// DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用；chest 冷却同表，不在清理范围）
 router.delete('/gift/cooldowns', (_req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM gift_history').run();
+  db.prepare(`DELETE FROM gift_history WHERE gift_type != 'chest'`).run();
   console.log('[gift] cooldown reset (global)');
   res.json({ ok: true, cooldowns: { small: 0, large: 0 } });
 });

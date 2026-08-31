@@ -14,6 +14,7 @@ export const IMAGE_CATEGORIES = {
   peek:      { dir: 'peek',      label: '日程' },
   mailbox:   { dir: 'mailbox',   label: '信箱' },
   emoji:     { dir: 'emoji',     label: '表情包' },
+  items:     { dir: 'items',     label: '道具' },
 };
 
 export const LEGACY_CATEGORY = 'history';

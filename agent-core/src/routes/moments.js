@@ -488,7 +488,7 @@ const MOMENT_FORMS = [
 - **多人画面**：imagePrompt 中必须包含你和${multiPersons.map(p => p.otherName).join('、')}共${multiPersons.length + 1}人。描述各自外观、互动方式、肢体距离和表情，贴合你们的关系。用句号分隔每人描述` : '';
 
   const postingTaskIntro = worldSetting
-    ? '你正在发朋友圈。你的人设生存在上述世界观中，融入世界观，把世界观当做常识，生成一条自然的朋友圈动态。'
+    ? '你正在发朋友圈。你的人设生存在<world_setting>中，融入世界观，把世界观当做常识，生成一条自然的朋友圈动态。'
     : '你正在发朋友圈。请根据你的人设，生成一条自然的朋友圈动态。';
 
   const imagePromptRule = getGlobalRule('image_prompt');
@@ -530,7 +530,7 @@ const MOMENT_FORMS = [
 
     const rules = `规则：
 - 只输出 JSON，不要解释
-${worldSetting ? '- **世界观驱动**：你的朋友圈发生在上述世界观中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
+${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 - **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
@@ -555,7 +555,8 @@ ${rules}`;
     if (!isFreeMode && config.features.schedule !== false) {
       const activity = getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
-        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}。朋友圈的内容应当反映这个时段角色的状态和见闻。`;
+        const descPart = activity.description ? `（${activity.description}）` : '';
+        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}${descPart}。朋友圈的内容应当反映这个时段角色的状态和见闻。`;
       }
     }
   } catch { /* schedule not available, skip */ }
@@ -585,7 +586,7 @@ ${rules}`;
     }
   }
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来发朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
+    ? '请遵循<world_setting>来发朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
 

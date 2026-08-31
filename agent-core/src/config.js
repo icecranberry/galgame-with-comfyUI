@@ -129,10 +129,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     temperature: parseFloat(process.env.GROUP_CHAT_TEMPERATURE) >= 0.5 && parseFloat(process.env.GROUP_CHAT_TEMPERATURE) <= 1.2
       ? parseFloat(process.env.GROUP_CHAT_TEMPERATURE)
       : 0.7,
-    // 群聊记忆总结/滑动窗口推进轮次（2~10），所有群共享；DB system_settings 持久化，启动时覆盖默认值
+    // 群聊记忆总结/滑动窗口推进轮次（2~6），所有群共享；DB system_settings 持久化，启动时覆盖默认值
     summaryInterval: (() => {
       const n = parseInt(process.env.GROUP_CHAT_SUMMARY_INTERVAL, 10);
-      return Number.isInteger(n) ? Math.max(2, Math.min(10, n)) : 4;
+      return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
     })(),
   },
   weather: {
@@ -339,10 +339,10 @@ export function updateGroupTemperature(value) {
 }
 
 /**
- * 更新群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享）
+ * 更新群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享）
  */
 export function updateGroupSummaryInterval(value) {
-  const n = Math.max(2, Math.min(10, parseInt(value, 10) || 4));
+  const n = Math.max(2, Math.min(6, parseInt(value, 10) || 4));
   config.groupChat.summaryInterval = n;
   persistSettingSync('group_summary_interval', String(n));
   console.log(`[config] groupChat summaryInterval = ${n}`);

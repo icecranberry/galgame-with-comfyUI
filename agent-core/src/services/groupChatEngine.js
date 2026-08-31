@@ -46,10 +46,10 @@ const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数�
 const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
 const IMAGE_NUDGE_PROBABILITY = 0.75;  // 每轮抽卡鼓励发图的概率
 
-/** 群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享；默认 4） */
+/** 群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享；默认 4） */
 function getGroupSummaryInterval() {
   const n = config.groupChat?.summaryInterval;
-  return Number.isInteger(n) ? Math.max(2, Math.min(10, n)) : 4;
+  return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
 }
 
 /**

@@ -46,6 +46,19 @@ function cleanupOrphanedInFlight(database) {
       console.warn(`[db] 启动清理 ${table} 失败:`, err.message);
     }
   }
+
+  // 宝箱道具：中断的 generating 未完成图片，也不应占用冷却；直接清掉，允许下次重新开箱
+  try {
+    const interruptedItems = database.prepare(
+      `SELECT COUNT(*) AS c FROM backpack_items WHERE status = 'generating'`
+    ).get().c;
+    if (interruptedItems > 0) {
+      database.prepare(`DELETE FROM backpack_items WHERE status = 'generating'`).run();
+      console.log(`[db] 启动清理: backpack_items ${interruptedItems} 条中断生成任务已清理`);
+    }
+  } catch (err) {
+    console.warn(`[db] 启动清理 backpack_items 失败:`, err.message);
+  }
 }
 
 function initSchema(db) {
@@ -303,27 +316,61 @@ function initSchema(db) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
-    -- 角色专属外观/形态/装甲/衣服（每个角色可定义多套，同时只启用一套，启用互斥由服务层保证）
+    -- 角色专属外观/形态/装甲/衣服（每个角色可定义多套，同时只启用一套，启用互斥由服务层保证）。
+    -- expires_at：道具变身卡写入的临时形态到期时间（空 = 永久），由 getActiveOutfits 惰性过滤
     CREATE TABLE IF NOT EXISTS character_outfits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 0,
+      expires_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_character_outfits_char ON character_outfits(character_id);
 
-    -- 通用限时服饰（如一套女仆装的 tag 组合，非角色专属、谁都能用，可多套同时生效）。
-    -- 注入数据库的管理方式暂未定，本期只建表 + 读取；condition_json 预留注入条件（时间/指令等），当前不解析
+    -- 通用限时服饰（如一套女仆装的 tag 组合）。character_id 为空 = 全员可见的全局服饰；
+    -- 指定角色 = 道具系统写入的该角色专属限时服饰。expires_at 为过期时间（空 = 永久生效），
+    -- 两者均由 outfitService.getActiveOutfits 惰性过滤。condition_json 预留未来更复杂的注入条件，当前不解析
     CREATE TABLE IF NOT EXISTS global_outfits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 0,
+      character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+      expires_at DATETIME,
       condition_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- 背包道具（宝箱开出的道具；status: generating → ready → used；
+    -- collected_at 为空 = 待收下，未收下的道具不进背包列表、不可使用）
+    CREATE TABLE IF NOT EXISTS backpack_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      effect_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      rarity TEXT NOT NULL DEFAULT 'common',
+      image_url TEXT,
+      status TEXT NOT NULL DEFAULT 'generating',
+      payload_json TEXT,
+      collected_at DATETIME,
+      acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      used_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_backpack_items_status ON backpack_items(status);
+
+    -- 道具生效中的效果（buff 到期失效；变身卡靠 payload 恢复原专属形态）
+    CREATE TABLE IF NOT EXISTS item_effects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES backpack_items(id) ON DELETE CASCADE,
+      character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+      effect_key TEXT NOT NULL,
+      payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_item_effects_char ON item_effects(character_id);
 
     -- 画师串收藏夹
     CREATE TABLE IF NOT EXISTS artist_favorites (
@@ -1172,7 +1219,7 @@ function migrateDeepThinkSchema(db) {
 /**
  * 迁移: 好感度回归系统
  * - user_relationships 表新增 last_interaction_at（记录最近一次互动时间）
- * - 新建 gift_history 表（送礼记录，含冷却检查）
+ * - 新建 gift_history 表（全局冷却记录，含送礼与宝箱开箱的冷却检查）
  */
 function migrateAffinityRegressionSchema(db) {
   try {
@@ -1183,14 +1230,15 @@ function migrateAffinityRegressionSchema(db) {
       console.log('[db] Added user_relationships.last_interaction_at column');
     }
 
-    // gift_history 表：全局冷却（跟系统不跟角色），仅需 gift_type + created_at
+    // gift_history 表：全局冷却（跟系统不跟角色），仅需 gift_type + created_at。
+    // chest = 每日宝箱开箱冷却（与送礼同构的惰性冷却记录，见 itemService.getChestState）
     const ghCols = db.prepare(`PRAGMA table_info(gift_history)`).all();
     const hasCharId = ghCols.some(c => c.name === 'character_id');
     if (ghCols.length === 0) {
       db.exec(`
         CREATE TABLE IF NOT EXISTS gift_history (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')),
+          gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')),
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
       `);
@@ -1198,21 +1246,34 @@ function migrateAffinityRegressionSchema(db) {
     } else if (hasCharId) {
       // 迁移：去掉 character_id，改为全局冷却，每种礼物只保留最新一条
       db.exec(`DROP TABLE IF EXISTS gift_history_new`);
-      db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.exec(`INSERT INTO gift_history_new (gift_type, created_at) SELECT gift_type, MAX(created_at) FROM gift_history GROUP BY gift_type`);
       db.exec(`DROP TABLE gift_history`);
       db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
       console.log('[db] gift_history migrated to global cooldown (removed character_id, deduplicated)');
     }
 
-    // 启动时去重：每种礼物只保留最新一条
-    for (const type of ['small', 'large']) {
+    // 启动时去重：每种类型只保留最新一条（冷却只看最近一次）
+    for (const type of ['small', 'large', 'chest']) {
       const rows = db.prepare(`SELECT id FROM gift_history WHERE gift_type = ? ORDER BY id DESC`).all(type);
       if (rows.length > 1) {
         const keepId = rows[0].id;
         db.prepare(`DELETE FROM gift_history WHERE gift_type = ? AND id != ?`).run(type, keepId);
         console.log(`[db] gift_history pruned ${rows.length - 1} old ${type} row(s), kept #${keepId}`);
       }
+    }
+
+    // chest_opens 已并入本表（gift_type='chest'）：搬最后一次开箱时间（保住进行中的冷却）后删表
+    const hasChestOpens = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='chest_opens'`).get();
+    if (hasChestOpens) {
+      const lastOpen = db.prepare(`SELECT opened_at FROM chest_opens ORDER BY id DESC LIMIT 1`).get();
+      const lastChest = db.prepare(`SELECT created_at FROM gift_history WHERE gift_type = 'chest' ORDER BY id DESC LIMIT 1`).get();
+      if (lastOpen && (!lastChest || String(lastOpen.opened_at) > String(lastChest.created_at))) {
+        db.prepare(`DELETE FROM gift_history WHERE gift_type = 'chest'`).run();
+        db.prepare(`INSERT INTO gift_history (gift_type, created_at) VALUES ('chest', ?)`).run(lastOpen.opened_at);
+      }
+      db.exec(`DROP TABLE chest_opens`);
+      console.log('[db] chest_opens merged into gift_history (gift_type=chest) and dropped');
     }
   } catch (err) {
     console.log('[db] migrateAffinityRegressionSchema error:', err.message);
@@ -2102,8 +2163,10 @@ function loadSystemSettings(db) {
   for (const row of rows) {
     const mapping = SETTING_TO_CONFIG[row.setting_key];
     if (mapping) {
-      const value = castValue(row.setting_value, mapping.type);
+      let value = castValue(row.setting_value, mapping.type);
       if (value !== undefined) {
+        // 群聊记忆轮数历史遗留值收敛到 2~6
+        if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(6, value));
         config[mapping.obj][mapping.key] = value;
         applied++;
       }

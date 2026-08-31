@@ -192,7 +192,7 @@
             </div>
             <input
               class="gc-range"
-              type="range" min="2" max="10" step="1"
+              type="range" min="2" max="6" step="1"
               v-model.number="editSummaryInterval"
               @change="onSummaryIntervalChange"
             />
@@ -530,13 +530,13 @@ async function loadGroupSummaryInterval() {
   try {
     const cfg = await getConfig()
     const n = cfg?.groupChat?.summaryInterval
-    if (Number.isInteger(n)) editSummaryInterval.value = Math.max(2, Math.min(10, n))
+    if (Number.isInteger(n)) editSummaryInterval.value = Math.max(2, Math.min(6, n))
   } catch { /* 拉取失败保留当前值 */ }
   finally { summaryIntervalLoading = false }
 }
 
 async function onSummaryIntervalChange() {
-  const v = Math.max(2, Math.min(10, Math.round(Number(editSummaryInterval.value) || 4)))
+  const v = Math.max(2, Math.min(6, Math.round(Number(editSummaryInterval.value) || 4)))
   editSummaryInterval.value = v
   try {
     const res = await updateGroupSummaryInterval(v)

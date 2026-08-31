@@ -25,6 +25,7 @@ import workflowsRoutes from './src/routes/workflows.js';
 import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
+import itemsRoutes from './src/routes/items.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -38,6 +39,7 @@ import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { startWeatherScheduler } from './src/services/weatherService.js';
 import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge.js';
+import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
@@ -94,6 +96,7 @@ app.use('/api/workflows', workflowsRoutes);
 app.use('/api/mailbox', mailboxRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/library', libraryRoutes);   // /api/library/event-types, /api/library/topics
+app.use('/api/items', itemsRoutes);
 
 app.use('/api/maibot', maibotBridgeRoutes);
 // 健康检查
@@ -163,6 +166,9 @@ startGroupIdleScheduler();
 
 // 启动图片知识库同步调度器（用户安静时才执行同步，不阻塞生图）
 startKnowledgeSyncScheduler();
+
+// 启动道具系统调度器（每 10 分钟清理到期效果、恢复变身、标记卡死的生成中道具）
+startItemScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

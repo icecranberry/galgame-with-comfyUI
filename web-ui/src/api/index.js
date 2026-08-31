@@ -537,7 +537,7 @@ export async function updateGroupTemperature(value) {
   return res.json()
 }
 
-/** 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享） */
+/** 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享） */
 export async function updateGroupSummaryInterval(value) {
   const res = await fetch(`${BASE}/config/group-summary-interval`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
@@ -1760,4 +1760,40 @@ export function maibotGetLatestMemory() {
 }
 export function maibotDeleteLatestMemory(sessionId) {
   return maibotFetch(`/latest-memory?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+// ── 背包 / 道具系统 ──
+
+// 背包内容（已收下）+ 待收下道具 + 宝箱冷却状态 + 生效中的效果
+export function listItems() {
+  return jsonRequest(`${BASE}/items`)
+}
+
+// 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
+export function openChest() {
+  return jsonRequest(`${BASE}/items/chest/open`, { method: 'POST' })
+}
+
+// 收下道具（开箱后需收下才出现在背包）
+export function collectItem(itemId) {
+  return jsonRequest(`${BASE}/items/${itemId}/collect`, { method: 'POST' })
+}
+
+// 使用道具
+export function useItem(itemId, characterId) {
+  return jsonRequest(`${BASE}/items/${itemId}/use`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: characterId }),
+  })
+}
+
+// 丢弃道具
+export function discardItem(itemId) {
+  return jsonRequest(`${BASE}/items/${itemId}`, { method: 'DELETE' })
+}
+
+// 提前移除已生效的效果（服饰/变身会同步撤销临时外观）
+export function removeActiveEffect(effectId) {
+  return jsonRequest(`${BASE}/items/effects/${effectId}`, { method: 'DELETE' })
 }

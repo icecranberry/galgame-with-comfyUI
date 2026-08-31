@@ -70,7 +70,7 @@ export function parseEmojiText(text, emojiMap = new Map()) {
 export function buildEmojiNote(keys) {
   const list = [...new Set(keys.filter(Boolean))];
   if (list.length === 0) return '';
-  return `<emoji_stickers>\n你只拥有[${list.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
+  return `<emoji_stickers>\n你只拥有[${list.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
 }
 
 /**
@@ -83,7 +83,7 @@ export function buildGroupEmojiNote(members, db = getDb()) {
   if (owners.length * 2 < members.length) return '';
   const keys = getEmojiCategories(db);
   if (keys.length === 0) return '';
-  return `<emoji_stickers>\n群成员可以调用[${keys.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包发送频率不能过高，隔几句话才发一次。方括号只允许用于调用上述表情包，不得用方括号描写动作。\n</emoji_stickers>`;
+  return `<emoji_stickers>\n群成员可以调用[${keys.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
 }
 
 /**

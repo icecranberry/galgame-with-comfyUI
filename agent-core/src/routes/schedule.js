@@ -450,7 +450,7 @@ router.post('/:characterId/peek', async (req, res) => {
       }
     }
 
-    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，${timeLightInline}。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
+    system1 += `你是一个专业的人像摄影师，你现在需要给角色拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。`;
 
     // system2: 角色完整人格（统一入口，含生效外观注入），"你"替换为角色姓名
     let personaText = buildCharacterPersona(character, { variant: 'full', person: charName });
@@ -472,7 +472,7 @@ router.post('/:characterId/peek', async (req, res) => {
     `).get(characterId);
 
     // user: 拍摄指令
-    const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}`;
+    const userMsg = `牢记<world_setting>世界观里的环境描述和人物行为和着装，然后给「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },

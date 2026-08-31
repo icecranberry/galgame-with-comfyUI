@@ -123,11 +123,11 @@ router.put('/group-temperature', (req, res) => {
   res.json({ ok: true, temperature: config.groupChat.temperature });
 });
 
-// PUT /api/config/group-summary-interval — 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享）
+// PUT /api/config/group-summary-interval — 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享）
 router.put('/group-summary-interval', (req, res) => {
   const { value } = req.body;
-  if (value == null || typeof value !== 'number' || value < 2 || value > 10) {
-    return res.status(400).json({ error: 'value must be 2~10' });
+  if (value == null || typeof value !== 'number' || value < 2 || value > 6) {
+    return res.status(400).json({ error: 'value must be 2~6' });
   }
   updateGroupSummaryInterval(value);
   res.json({ ok: true, summaryInterval: config.groupChat.summaryInterval });
