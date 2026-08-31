@@ -2,11 +2,10 @@
   <div class="moment-card">
     <!-- 头部：角色信息 -->
     <div class="moment-header">
-      <div
-        class="moment-avatar"
-        :style="avatarStyle"
-        @click="goToChat"
-      ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
+      <div class="moment-avatar" @click="goToChat">
+        <img v-if="post.avatar_path" :src="post.avatar_path" class="moment-avatar-img" alt="" />
+        <span v-else>{{ post.display_name?.charAt(0) }}</span>
+      </div>
       <div class="moment-header-info">
         <span class="moment-name">{{ post.display_name }}</span>
         <span class="moment-time">{{ formatTime(post.created_at) }}</span>
@@ -210,11 +209,6 @@ const alwaysVisible = computed(() => comments.value.slice(0, MAX_VISIBLE))
 const hiddenComments = computed(() => comments.value.slice(MAX_VISIBLE))
 const hiddenCount = computed(() => Math.max(0, comments.value.length - MAX_VISIBLE))
 
-const avatarStyle = computed(() => {
-  const p = props.post
-  if (p.avatar_path) return { backgroundImage: `url(${p.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#e07b6c' }
-})
 
 const visibleImages = computed(() => {
   return (props.post.images || []).filter((_, i) => !imgErrors.has(i))
@@ -368,10 +362,18 @@ function formatTime(iso) {
 }
 .moment-avatar {
   width: 50px; height: 50px; border-radius: 50%;
+  background: #e07b6c;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.moment-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .moment-avatar:hover {
   transform: scale(1.08);

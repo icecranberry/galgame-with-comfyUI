@@ -114,9 +114,11 @@
                 :key="ch.character_id"
                 class="filter-avatar"
                 :class="{ active: store.filterCharacterId === ch.character_id && !store.filterEngaged }"
-                :style="ch.avatar_path ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
                 @click="store.setFilter(ch.character_id)"
-              >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
+              >
+                <img v-if="ch.avatar_path" :src="ch.avatar_path" class="filter-avatar-img" alt="" />
+                <span v-else>{{ ch.display_name?.charAt(0) || '?' }}</span>
+              </div>
             </div>
           </div>
           <div class="waterfall-row" :style="{ '--cols': colCount }">
@@ -500,8 +502,14 @@ function onScroll() {
   color: #fff;
   transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   user-select: none;
-  background-size: cover;
-  background-position: center;
+  background: #e07b6c;
+}
+.filter-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .filter-avatar.active {
   opacity: 1;

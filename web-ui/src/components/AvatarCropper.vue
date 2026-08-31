@@ -408,7 +408,7 @@ function regenerateAvatar() {
   nextTick(() => startGenerate())
 }
 
-// ── 保存：直接从原图裁剪（无缩放精度损失） ──
+// ── 保存：从原图裁剪，输出方形高清头像 ──
 async function saveCrop() {
   if (cropSaving.value || !cropImage.value) return
   cropSaving.value = true
@@ -418,15 +418,14 @@ async function saveCrop() {
     const srcX = (CROP_CX - CROP_R - cropVars.imgX) / s
     const srcY = (CROP_CY - CROP_R - cropVars.imgY) / s
     const srcLen = (CROP_R * 2) / s
-    const outSize = 200
+    const outSize = 512
 
     const tmpCanvas = document.createElement('canvas')
     tmpCanvas.width = outSize
     tmpCanvas.height = outSize
     const ctx = tmpCanvas.getContext('2d')
-    ctx.beginPath()
-    ctx.arc(outSize / 2, outSize / 2, outSize / 2, 0, Math.PI * 2)
-    ctx.clip()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, srcX, srcY, srcLen, srcLen, 0, 0, outSize, outSize)
     const base64 = tmpCanvas.toDataURL('image/png')
     emit('save', base64)

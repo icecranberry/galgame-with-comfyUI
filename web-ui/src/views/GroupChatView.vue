@@ -10,9 +10,12 @@
           v-for="m in (store.activeGroup?.members || []).slice(0, 4)"
           :key="m.id"
           class="group-avatar-cell avatar-clickable"
-          :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: '#e07b6c' }"
+          :style="m.avatar_path ? {} : { background: '#e07b6c' }"
           @click.stop="openAvatarMenu(m, $event)"
-        >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+        >
+          <img v-if="m.avatar_path" :src="m.avatar_path" class="group-avatar-img" alt="" />
+          <span v-else>{{ m.display_name.charAt(0) }}</span>
+        </div>
       </div>
       <div class="chat-header-center">
         <div class="chat-header-title-row">
@@ -894,6 +897,12 @@ async function onDissolve() {
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 10px; font-weight: 600;
   min-height: 20px;
+}
+.group-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* ── 消息区 ── */

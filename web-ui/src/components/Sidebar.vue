@@ -21,8 +21,10 @@
               v-for="m in g.members.slice(0, 4)"
               :key="m.id"
               class="group-avatar-cell"
-              :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: '#e07b6c' }"
-            >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+            >
+              <img v-if="m.avatar_path" :src="m.avatar_path" class="group-avatar-img" alt="" />
+              <span v-else>{{ m.display_name.charAt(0) }}</span>
+            </div>
           </div>
         </div>
         <div class="char-info">
@@ -46,8 +48,10 @@
         <div class="char-avatar-wrap">
           <div
             class="char-avatar"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-          >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+          >
+            <img v-if="c.avatar_path" :src="c.avatar_path" class="char-avatar-img" alt="" />
+            <span v-else>{{ c.display_name.charAt(0) }}</span>
+          </div>
         </div>
         <div class="char-info">
           <div class="char-name">{{ c.display_name }}</div>
@@ -467,9 +471,17 @@ function formatTime(iso) {
 
 .char-avatar {
   width: 44px; height: 44px; border-radius: 50%;
+  background: #e07b6c;
   color: white;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 600; flex-shrink: 0;
+}
+.char-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 
 .proactive-dot {
@@ -574,10 +586,15 @@ function formatTime(iso) {
   background: rgba(255,255,255,0.5);
 }
 .group-avatar-cell {
-  background-size: cover; background-position: center;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 10px; font-weight: 600;
   min-height: 21px;
+}
+.group-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* ── 建群弹窗 ── */

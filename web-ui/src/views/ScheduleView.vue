@@ -175,10 +175,10 @@
             <!-- 底部信息栏（原 pk-top + footer 合并） -->
             <div class="pk-bar">
               <div class="pk-char">
-                <div
-                  class="pk-char-avatar"
-                  :style="peekChar?.avatar_path ? { backgroundImage: `url(${peekChar.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-                ><span v-if="!peekChar?.avatar_path" class="pk-char-avatar-text">{{ peekChar?.display_name?.charAt(0) || '' }}</span></div>
+                <div class="pk-char-avatar">
+                  <img v-if="peekChar?.avatar_path" :src="peekChar.avatar_path" class="pk-char-avatar-img" alt="" />
+                  <span v-else class="pk-char-avatar-text">{{ peekChar?.display_name?.charAt(0) || '' }}</span>
+                </div>
                 <div><b>{{ peekAct?.activity || '瞄一眼' }}</b><span v-if="peekAct?.location">{{ peekAct.location }}</span></div>
               </div>
               <div class="pk-actions">
@@ -1381,7 +1381,8 @@ function finishReset() {
   position: relative;
 }
 .pk-char { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; background: #e07b6c; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pk-char-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .pk-char-avatar-text { color: #fff; font-size: 13px; font-weight: 600; line-height: 1; user-select: none; }
 .pk-char b { display: block; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pk-char span { font-size: 0.72rem; color: var(--text-secondary); }

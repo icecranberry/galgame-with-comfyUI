@@ -10,10 +10,9 @@
       <!-- 顶部：头像 + 名字 -->
       <div class="card-top">
         <div
-          class="avatar-box"
-          :style="char.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-        >
-          <span v-if="!char.avatar_path" class="avatar-text">{{ char.display_name.charAt(0) }}</span>
+        <div class="avatar-box">
+          <img v-if="char.avatar_path" :src="char.avatar_path" class="avatar-img" alt="" />
+          <span v-else class="avatar-text">{{ char.display_name.charAt(0) }}</span>
         </div>
         <div class="name-row">
           <span class="char-name">{{ char.display_name }}</span>
@@ -248,10 +247,17 @@ const footnote = computed(() => {
 
 .avatar-box {
   width: 42px; height: 42px;
+  background: #e07b6c;
   border-radius: 50%; overflow: hidden;
   flex-shrink: 0;
   box-shadow: 0 2px 6px rgba(0,0,0,0.06);
   display: flex; align-items: center; justify-content: center;
+}
+.avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .avatar-text {
   color: #fff; font-size: 18px; font-weight: 600;

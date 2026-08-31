@@ -8,10 +8,9 @@
             <!-- Row 1: 头像 + 信息 + 关闭 -->
             <div class="dr-row1">
               <div
-                class="dr-avatar"
-                :style="char?.avatar_path ? { backgroundImage: `url(${char.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-              >
-                <span v-if="!char?.avatar_path" class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
+              <div class="dr-avatar">
+                <img v-if="char?.avatar_path" :src="char.avatar_path" class="dr-avatar-img" alt="" />
+                <span v-else class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
               </div>
               <div class="dr-info">
                 <h3>{{ char?.display_name || '' }}</h3>
@@ -322,10 +321,17 @@ onUnmounted(() => {
 
 .dr-avatar {
   width: 52px; height: 52px; border-radius: 50%;
+  background: #e07b6c;
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
+}
+.dr-avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .dr-avatar-text {
   color: #fff; font-size: 22px; font-weight: 600;
