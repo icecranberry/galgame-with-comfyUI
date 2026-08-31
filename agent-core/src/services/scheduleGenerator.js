@@ -104,7 +104,7 @@ export async function generateSchedule(character, direction) {
 不留任何空白分钟。所有时间必须被完整覆盖。如果日程从 03:00 开始，
 那么 00:00~03:00 也必须有一个活动覆盖（可以是睡眠或深夜活动）。
 
-每个活动对象格式：
+每个活动对象格式（description 必填，20-40 字，禁止空字符串或只写标点）：
 {
   "startTime": "HH:MM",
   "endTime": "HH:MM",
@@ -115,7 +115,10 @@ export async function generateSchedule(character, direction) {
   "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }
 
-只输出 JSON 对象，不要任何额外文字。格式：{"activities":[{...},{...}]},activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式，24 小时制，数组里每个对象都是上述的活动对象格式。`;
+完整 JSON 结构示例（示例仅 2 个活动，实际必须输出 8~15 个活动）：
+{"activities":[{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗——整理长发","location":"公寓浴室","replyDelay":0,"tags":["日常","晨间"],"description":"甘雨站在镜前慢慢理顺长发，水汽沾湿额发，动作安静而认真。"},{"startTime":"22:00","endTime":"07:00","activity":"就寝安眠","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"甘雨裹好被子沉入睡眠，角上铃兰微光映着窗帘，呼吸逐渐平稳。"}]}
+
+只输出 JSON 对象，不要输出任何解释、Markdown 代码块或 JSON 以外的文字。activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式、24 小时制，数组里每个对象都必须严格包含并输出上述七个字段。`;
 
   // ── 用户指定的日程方向 ──
   const directionMsg = direction ? `## 用户指定的日程方向
@@ -192,7 +195,7 @@ ${directionMsg}`;
 /**
  * 解析并校验 LLM 输出的日程 JSON
  */
-function parseAndValidateSchedule(raw, displayName) {
+export function parseAndValidateSchedule(raw, displayName) {
   let activities;
 
   // 优先尝试完整 JSON 解析（兼容 json_object 模式的 {"activities":[...]} 和旧格式 [...]）
@@ -225,13 +228,17 @@ function parseAndValidateSchedule(raw, displayName) {
   }
 
   // 校验每个活动
-  const required = ['startTime', 'endTime', 'activity', 'location', 'replyDelay'];
+  const required = ['startTime', 'endTime', 'activity', 'location', 'replyDelay', 'description'];
   for (const act of activities) {
     for (const key of required) {
       if (!(key in act)) {
         console.warn(`[scheduleGen] Missing key "${key}" in activity for ${displayName}`);
         return null;
       }
+    }
+    if (typeof act.description !== 'string' || !act.description.trim()) {
+      console.warn(`[scheduleGen] Empty or invalid description in activity for ${displayName}: "${act.activity}"`);
+      return null;
     }
     if (typeof act.replyDelay !== 'number') {
       console.warn(`[scheduleGen] replyDelay is not a number for ${displayName}`);
@@ -292,10 +299,10 @@ function parseAndValidateSchedule(raw, displayName) {
     console.log(`[scheduleGen] Converted ${toConvert.length} activities to immediate for 80% rule (${displayName})`);
   }
 
-  // 补充 tags 和 description 默认值
+  // tags 允许规范化；description 已通过非空校验，只做 trim。
   for (const act of activities) {
     act.tags = normalizeTags(act.tags);
-    if (!act.description) act.description = '';
+    act.description = String(act.description).trim();
   }
 
   return activities;

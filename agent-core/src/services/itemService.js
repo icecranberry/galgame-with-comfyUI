@@ -50,10 +50,10 @@ let chestOpening = false;
 
 
 /** 世界观原创服装在「服装类别内」的概率；没有世界观时不进入该判定 */
-const WORLD_OUTFIT_CHANCE = 1;
+const WORLD_OUTFIT_CHANCE = 0.4;
 
-/** 整体掉落权重：服装卡 45 / 发型卡 25 / 功能道具卡 20 / 变身形态卡 10 */
-export const DROP_WEIGHTS = { clothes: 100, hairstyle: 0, item: 0, transform: 0 };
+/** 整体掉落权重：服装卡 45 / 发型卡 20 / 功能道具卡 15 / 变身形态卡 20 */
+export const DROP_WEIGHTS = { clothes: 50, hairstyle: 20, item: 10, transform: 20 };
 
 /** 类别 → 道具池过滤（clothes = 常规服饰外观卡；transform = 变身形态；item = 功能道具） */
 const DROP_POOL_FILTERS = {

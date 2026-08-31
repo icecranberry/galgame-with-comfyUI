@@ -667,7 +667,16 @@ ${motiveName}
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
     const charArtist = charArtistOverride(character);
     if (charArtist !== null) loraOpts.artist = charArtist;
-    const result = await generateImage(prompt, { promptScene: 'proactive', priority: 'low', ...loraOpts });
+
+    // 后台主动私聊的配图属于角色自发生活记录，与朋友圈保持同一观感，因为后台运行，所以无所谓时间，
+    // 因此这里借用朋友圈分辨率，而不是普通聊天配图分辨率。
+    const result = await generateImage(prompt, {
+      promptScene: 'proactive',
+      priority: 'low',
+      ...loraOpts,
+      width: config.comfyui.momentsWidth,
+      height: config.comfyui.momentsHeight,
+    });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;
@@ -692,7 +701,7 @@ ${motiveName}
       promptRefined: result.promptRefined || prompt,
       outputPaths: urls,
       style: loraOpts.artist !== undefined ? loraOpts.artist : config.comfyui.artist,
-      resolution: `${config.comfyui.width}x${config.comfyui.height}`,
+      resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
       workflowTemplate: result.wfMode,
       db,
     });

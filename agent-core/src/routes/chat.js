@@ -491,8 +491,8 @@ router.post('/characters/:id/chat', async (req, res) => {
     // 1.5 用户发送新消息 → 重置回复猜想冷却，本轮的 assistant 回复可以触发一次猜想
     guessCooldowns.delete(conversationId);
 
-    // 1.6 智能配图计数器 -1（per-conversation；关闭配图时不消耗计数，也不触发归零强制生图）
-    if (imageMode !== 'off') {
+    // 1.6 智能配图计数器 -1（仅普通灵性模式使用；深度思考由 planner 决策，不消耗也不触发保底）
+    if (imageMode === 'smart' && !deepThink) {
       const counter = imageJudgeCounters.get(conversationId) ?? 3;
       imageJudgeCounters.set(conversationId, Math.max(0, counter - 1));
       console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);

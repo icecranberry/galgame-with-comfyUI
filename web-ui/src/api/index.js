@@ -65,10 +65,10 @@ export async function generateCharacter(description) {
 }
 
 /** 预览模式生成角色：只生成不入库，由前端确认后再调 createCharacter */
-export async function generateCharacterPreview(description) {
+export async function generateCharacterPreview(description, { searchContext = '' } = {}) {
   const res = await fetch(`${BASE}/characters/generate`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ description, save: false }),
+    body: JSON.stringify({ description, save: false, searchContext }),
   })
   return res.json()
 }

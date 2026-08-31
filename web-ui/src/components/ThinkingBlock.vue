@@ -8,7 +8,6 @@
       @keydown.enter.prevent="expanded = !expanded"
       @keydown.space.prevent="expanded = !expanded"
     >
-      <span class="thinking-icon">{{ isStreaming ? '💭' : '🧠' }}</span>
       <span class="thinking-title">{{ headerTitle }}</span>
       <span v-if="!isStreaming && msg.summary" class="thinking-summary">{{ msg.summary }}</span>
       <svg
@@ -42,8 +41,7 @@ const bodyVisible = computed(() => isStreaming.value || expanded.value)
 
 const headerTitle = computed(() => {
   if (isStreaming.value) return '深度思考中…'
-  const secs = props.msg.elapsedMs > 0 ? ` · ${(props.msg.elapsedMs / 1000).toFixed(1)}s` : ''
-  return `已深度思考${secs}`
+  return `已深度思考`
 })
 </script>
 

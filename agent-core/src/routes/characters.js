@@ -444,16 +444,26 @@ ${extraContext}` : ''}
 	- 第4行起：完整的 base_prompt 模板内容（你就是她/他——用第二人称"你"贯穿全文，不出现"扮演""模仿"等旁观字眼）`;
 }
 
-// 共享：联网搜索 + LLM 人格生成 + 解析。
+// 共享：联网搜索 + LLM 人格生成 + 解析。cachedSearchContext 用于复用上次搜索结果，避免重新爬取。
 // description 为用户输入（用于联网搜索与作为 user 消息）；extraContext 为额外第一手资料（如角色卡全文）。
-// 返回 { displayName, charName, emotionBaseline, basePrompt, searchFound }，失败时抛错。
-async function runPersonaGeneration({ description, extraContext = '', extraContextLabel = '参考资料', skipWebSearch = false }) {
+// 返回 { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext }，失败时抛错。
+async function runPersonaGeneration({
+  description,
+  extraContext = '',
+  extraContextLabel = '参考资料',
+  skipWebSearch = false,
+  cachedSearchContext = '',
+}) {
   const model = config.llm.model || 'deepseek-chat';
 
   // ── 联网搜索角色资料（可跳过：导入角色卡时以卡片为第一手资料，无需联网）──────
   let searchContext = '';
   let searchFound = false;
-  if (skipWebSearch) {
+  if (cachedSearchContext) {
+    searchContext = cachedSearchContext;
+    searchFound = searchContext.length >= 600;
+    console.log(`[characters] reusing cached web search (${searchContext.length} chars)`);
+  } else if (skipWebSearch) {
     console.log(`[characters] web search skipped (source: ${extraContextLabel})`);
   } else {
     console.log(`[characters] searching web for: "${description.trim()}"`);
@@ -520,7 +530,7 @@ async function runPersonaGeneration({ description, extraContext = '', extraConte
   const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
   if (exists) charName = charName + '_' + Date.now();
 
-  return { displayName, charName, emotionBaseline, basePrompt, searchFound };
+  return { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext };
 }
 
 // POST /api/characters/generate — AI 扩写角色人格
@@ -528,14 +538,20 @@ async function runPersonaGeneration({ description, extraContext = '', extraConte
 // Body: { description: "...", save: false } — 预览模式：只生成不入库，由前端确认后再调 POST /api/characters 入库
 // 默认 save=true，返回生成的完整角色数据，同时写入数据库
 router.post('/generate', async (req, res) => {
-  const { description, save } = req.body;
+  const { description, save, searchContext: cachedSearchContext = '' } = req.body;
   const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
   if (!description || typeof description !== 'string' || description.trim().length < 2) {
     return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
   }
+  if (typeof cachedSearchContext !== 'string') {
+    return res.status(400).json({ error: 'searchContext 必须是字符串' });
+  }
 
   try {
-    const { displayName, charName, emotionBaseline, basePrompt, searchFound } = await runPersonaGeneration({ description });
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext } = await runPersonaGeneration({
+      description,
+      cachedSearchContext,
+    });
 
     const db = getDb();
 
@@ -561,6 +577,7 @@ router.post('/generate', async (req, res) => {
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
+        search_context: searchContext,
       });
       refreshCharSearch();
 
@@ -603,6 +620,7 @@ router.post('/generate', async (req, res) => {
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
+        search_context: searchContext,
       });
     }
   } catch (err) {

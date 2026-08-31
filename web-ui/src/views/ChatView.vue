@@ -646,18 +646,13 @@ const realtimeAffinityEnabled = computed({
 })
 
 const IMAGE_GEN_MODE_CYCLE = ['smart', 'force', 'off']
-// 深度思考接管了灵性判断（planner 即决策者），生图档位只剩 强制 ↔ 关闭
-const IMAGE_GEN_MODE_CYCLE_DEEP_THINK = ['force', 'off']
-const imageGenCycle = computed(() => deepThinkMode.value ? IMAGE_GEN_MODE_CYCLE_DEEP_THINK : IMAGE_GEN_MODE_CYCLE)
 
 function cycleImageGenMode() {
-  const cycle = imageGenCycle.value
-  const idx = cycle.indexOf(imageGenMode.value)
-  settings.setImageGenMode(cycle[(idx + 1) % cycle.length])
+  const idx = IMAGE_GEN_MODE_CYCLE.indexOf(imageGenMode.value)
+  settings.setImageGenMode(IMAGE_GEN_MODE_CYCLE[(idx + 1) % IMAGE_GEN_MODE_CYCLE.length])
   showForceTip()
 }
 
-// ── 深度思考（开关已移至系统设置 → 功能开关，标注测试版）──
 const deepThinkMode = computed(() => settings.deepThinkMode)
 
 function onGiftSent(result) {

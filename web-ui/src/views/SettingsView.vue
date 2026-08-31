@@ -1847,10 +1847,6 @@ async function saveFeature(key, val) {
 const deepThinkMode = computed(() => settingsStore.deepThinkMode)
 function onDeepThinkChange(v) {
   settingsStore.setDeepThinkMode(v)
-  // 深度思考接管灵性生图判断：开启时「灵性配图」档位收编为「强制配图」
-  if (v && settingsStore.imageGenMode === 'smart') {
-    settingsStore.setImageGenMode('force')
-  }
 }
 
 // 滑块松手时触发，持久化到后端并更新 features

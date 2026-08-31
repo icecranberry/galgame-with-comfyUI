@@ -275,11 +275,19 @@
                 <!-- 朋友圈开关 -->
               </div>
               <div class="modal-actions modal-actions-between">
-                <linshe-button
-                  variant="secondary"
-                  :disabled="recruit.loading"
-                  @click="doGenerate"
-                >重新招募</linshe-button>
+                <div class="modal-actions-left">
+                  <linshe-button
+                    variant="secondary"
+                    :disabled="recruit.loading"
+                    @click="doGenerate"
+                  >{{ recruit.loading && recruit.task === 'search' ? '正在重新搜索...' : '重新搜索' }}</linshe-button>
+                  <linshe-button
+                    variant="secondary"
+                    title="不重新联网，使用上次搜索资料重新归纳角色卡"
+                    :disabled="!recruit.searchContext || recruit.loading"
+                    @click="regenerateFromSearchResult"
+                  >{{ recruit.loading && recruit.task === 'regenerate' ? '正在重新归纳...' : '再次生成' }}</linshe-button>
+                </div>
                 <div class="modal-actions-right">
                   <linshe-button variant="secondary" @click="recruit.step = 'input'; recruit.error = ''">返回修改</linshe-button>
                   <linshe-button variant="primary" :disabled="recruit.saving" @click="confirmRecruit">
@@ -731,6 +739,8 @@ const recruit = reactive({
   saving: false,
   error: '',
   result: null,    // 生成结果
+  task: null,      // 'search' | 'regenerate'
+  searchContext: '', // 首次联网搜索得到的原始资料，用于重新归纳
 })
 
 // 招募加载提示语轮播
@@ -779,6 +789,8 @@ function openRecruit() {
   recruit.result = null
   recruit.loading = false
   recruit.saving = false
+  recruit.task = null
+  recruit.searchContext = ''
 }
 
 function closeRecruit() {
@@ -792,6 +804,7 @@ async function doGenerate() {
 
   recruit.loading = true
   recruit.error = ''
+  recruit.task = 'search'
   startLoadingTips()
 
   try {
@@ -800,6 +813,7 @@ async function doGenerate() {
       recruit.error = result.error
       return
     }
+    recruit.searchContext = result.search_context || ''
     recruit.result = { ...result }
     recruit.step = 'preview'
     // 冒泡提示搜索结果
@@ -812,6 +826,34 @@ async function doGenerate() {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
   } finally {
     recruit.loading = false
+    recruit.task = null
+    stopLoadingTips()
+  }
+}
+
+async function regenerateFromSearchResult() {
+  const desc = recruit.desc.trim()
+  if (!desc || !recruit.searchContext || recruit.loading) return
+
+  recruit.loading = true
+  recruit.error = ''
+  recruit.task = 'regenerate'
+  startLoadingTips()
+
+  try {
+    const result = await api.generateCharacterPreview(desc, { searchContext: recruit.searchContext })
+    if (result.error) {
+      recruit.error = result.error
+      return
+    }
+    if (result.search_context) recruit.searchContext = result.search_context
+    recruit.result = { ...result }
+    showToast('已根据原搜索资料重新整理角色卡', 'success')
+  } catch (err) {
+    recruit.error = '重新生成失败: ' + (err.message || '网络错误')
+  } finally {
+    recruit.loading = false
+    recruit.task = null
     stopLoadingTips()
   }
 }
@@ -872,9 +914,11 @@ async function onCardSelected(e) {
       return
     }
     recruit.result = { ...result }
-    // 保留角色名作为描述，便于"重新招募"用 LLM 重写
+    // 保留角色名作为描述，便于"重新搜索"用联网资料重写
     recruit.desc = result.display_name || ''
     recruit.step = 'preview'
+    recruit.task = null
+    recruit.searchContext = ''
     showToast('角色卡已整理完成，请检查后确认招募', 'success')
   } catch (err) {
     recruit.error = '导入失败: ' + (err.message || '网络错误')
@@ -2163,6 +2207,10 @@ onMounted(async () => {
 .modal-actions-between {
   justify-content: space-between;
 }
+.modal-actions-left {
+  display: flex;
+  gap: 10px;
+}
 .modal-actions-right {
   display: flex;
   gap: 10px;
@@ -2570,6 +2618,9 @@ onMounted(async () => {
   }
   .modal-actions-between {
     flex-direction: column; gap: 10px;
+  }
+  .modal-actions-left {
+    flex-wrap: wrap; gap: 8px;
   }
   .modal-actions-right {
     flex-wrap: wrap; gap: 8px; justify-content: flex-end;

@@ -411,6 +411,20 @@ export function formatGroupImageLine(speakerName, prompt) {
   return `[${String(speakerName || '').trim()}]: {${String(prompt || '').trim()}}`;
 }
 
+/**
+ * 将无说话人的续写行合并到上一条群聊气泡，并按该说话人的表情包名册解析标记。
+ */
+export function mergeGroupContinuationEmoji(rec, continuation, emojiMap = new Map(), categoryKeys = []) {
+  const parsed = parseGroupEmojiText(continuation, emojiMap, categoryKeys);
+  if (parsed.invalidEmoji) return null;
+
+  const images = [...new Set([...(rec.images || []), ...parsed.images])];
+  const content = parsed.content
+    ? (rec.content ? `${rec.content}\n${parsed.content}` : parsed.content)
+    : (rec.content || '');
+  return { content, images, hasImage: images.length > 0 };
+}
+
 /** 解析一行剧本。返回 {speaker, text, imagePrompt} 或 null（无效行） */
 export function parseScriptLine(line, membersByName) {
   const trimmed = line.trim();
@@ -503,6 +517,12 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
     if (fallbackApplied) {
       console.log(`[group] image prompt added speaker name fallback: ${speaker.name}`);
     }
+
+    // 后台主动群聊（idle 后台闲聊 / opening 自动建群）的图更像角色生活记录，
+    // 统一借用朋友圈分辨率；用户触发的群聊图仍走默认聊天分辨率。
+    const resolutionOverrides = options.useMomentsResolution
+      ? { width: config.comfyui.momentsWidth, height: config.comfyui.momentsHeight }
+      : {};
     const result = await generateImage(preparedPrompt, {
       scene: 'group',
       workflowScene: 'group',
@@ -513,6 +533,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
       },
+      ...resolutionOverrides,
       ...loraOpts,
     });
     if (result.promptRefined) {
@@ -815,10 +836,21 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       // 无法识别说话人的行：拼到上一条消息（模型换行续写）
       const last = written[written.length - 1];
       if (last && !last.hasImage) {
-        last.content += '\n' + parsed.continuation;
-        db.prepare(`UPDATE messages SET content = ? WHERE id = ?`).run(last.content, last.id);
-        rawLines[last.rawLineIdx] += ' ' + parsed.continuation.replace(/\n/g, ' ');
-        emit('group_msg_update', { id: last.id, content: last.content });
+        const merged = mergeGroupContinuationEmoji(
+          last,
+          parsed.continuation,
+          memberEmojiMaps.get(last.speaker_character_id),
+          emojiCategories,
+        );
+        if (merged) {
+          last.content = merged.content;
+          last.images = merged.images;
+          last.hasImage = merged.hasImage;
+          db.prepare(`UPDATE messages SET content = ?, images = ? WHERE id = ?`)
+            .run(last.content, last.images.length > 0 ? JSON.stringify(last.images) : null, last.id);
+          rawLines[last.rawLineIdx] += ' ' + parsed.continuation.replace(/\n/g, ' ');
+          emit('group_msg_update', serializeMsg(last, groupId));
+        }
       }
       if (!parsed.imagePrompt) return;
     }
@@ -856,6 +888,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         {
           ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined,
           priority: (trigger === 'idle' || trigger === 'opening') ? 'low' : undefined,
+          useMomentsResolution: trigger === 'idle' || trigger === 'opening',
         },
       ));
       return;
