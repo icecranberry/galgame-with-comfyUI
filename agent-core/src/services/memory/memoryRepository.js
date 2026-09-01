@@ -31,6 +31,47 @@ export function parseTags(value) {
   try { return JSON.parse(value || '[]'); } catch { return []; }
 }
 
+const ENTITY_ROLES = new Set(['subject', 'object', 'mention']);
+const MEMORY_NOTE_LIMIT = 400;
+
+function clampText(value, maxLength) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function clampInt(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+// v3 可选实体列表：字符串条目视为 mention，畸形条目静默丢弃（宁可少存不要报错）
+export function normalizeMemoryEntities(input) {
+  const list = Array.isArray(input) ? input : parseTags(input);
+  const seen = new Set();
+  const entities = [];
+  for (const entry of list) {
+    const item = typeof entry === 'string' ? { name: entry, role: 'mention' } : (entry && typeof entry === 'object' ? entry : null);
+    if (!item) continue;
+    const name = clampText(item.name, 64);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    entities.push({ name, role: ENTITY_ROLES.has(item.role) ? item.role : 'mention' });
+    if (entities.length >= 6) break;
+  }
+  return entities;
+}
+
+// v3 可选三元组：主谓宾任一缺失即整体丢弃（阶段二 query-to-triple 匹配用）
+function normalizeTriple(triple) {
+  if (!triple || typeof triple !== 'object' || Array.isArray(triple)) return null;
+  const subject = clampText(triple.subject, 64);
+  const predicate = clampText(triple.predicate, 32);
+  const object = clampText(triple.object, 64);
+  if (!subject || !predicate || !object) return null;
+  return { subject, predicate, object };
+}
+
 export function normalizeMemory(memory = {}) {
   const memoryType = String(memory.memoryType || memory.memory_type || 'knowledge').toLowerCase();
   if (!MEMORY_TYPES.has(memoryType)) throw new Error(`无效 memoryType: ${memoryType}`);
@@ -39,10 +80,21 @@ export function normalizeMemory(memory = {}) {
   const judgment = String(memory.judgment || '').replace(/\s+/g, ' ').trim();
   if (!judgment) throw new Error('judgment 不能为空');
   const reasoning = String(memory.reasoning || '').replace(/\s+/g, ' ').trim();
-  if (containsSensitiveSecret(`${judgment}\n${reasoning}`)) throw new Error('记忆疑似包含密码、密钥或敏感凭据，已拒绝保存');
+  // v3 多重表示（MMS）：检索单元（keywords/perspectives/episodicNote）+ 注入单元（semanticNote）。
+  // 全部允许缺失，缺失时保持 v2 兼容形态。
+  const keywords = [...new Set(parseTags(memory.keywords).map(k => String(k).trim()).filter(Boolean))].slice(0, 8);
+  const perspectives = [...new Set(parseTags(memory.perspectives).map(p => String(p).trim()).filter(Boolean))].slice(0, 5);
+  const episodicNote = clampText(memory.episodicNote ?? memory.episodic_note, MEMORY_NOTE_LIMIT);
+  const semanticNote = clampText(memory.semanticNote ?? memory.semantic_note, MEMORY_NOTE_LIMIT);
+  const importance = clampInt(memory.importance, 3, 1, 5);
+  const entities = normalizeMemoryEntities(memory.entities);
+  const triple = normalizeTriple(memory.triple);
+  if (containsSensitiveSecret(`${judgment}\n${reasoning}\n${episodicNote}\n${semanticNote}`)) {
+    throw new Error('记忆疑似包含密码、密钥或敏感凭据，已拒绝保存');
+  }
   const tags = [...new Set(parseTags(memory.tags).map(tag => String(tag).trim()).filter(Boolean))].slice(0, 12);
   if (tags.length === 0) throw new Error('tags 至少需要一个检索锚点');
-  return { memoryType, subject, judgment, reasoning, tags };
+  return { memoryType, subject, judgment, reasoning, tags, keywords, perspectives, episodicNote, semanticNote, importance, entities, triple };
 }
 
 export function validateMemoryAction(input = {}) {
@@ -55,7 +107,7 @@ export function validateMemoryAction(input = {}) {
   return { action, sourceMemoryIds, memory: normalizeMemory(input.memory) };
 }
 
-export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions }) {
+export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions, eventTime = null }) {
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
   const profile = getPreferredMemoryEmbeddingProfile();
@@ -75,17 +127,34 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
         INSERT INTO memory_fragments(
           conversation_id, source_msg_id, fragment_type, content, entities, chroma_id,
           memory_id, memory_type, subject, judgment, reasoning, tags, content_hash, status,
-          source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at,
+          keywords, perspectives, episodic_note, semantic_note,
+          event_time, valid_from, valid_to, importance, strength, retrieval_count
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                  ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0)
       `).run(
         conversationId, sourceMessageId, legacyType, item.memory.judgment, JSON.stringify(item.memory.tags),
         memoryId, item.memory.memoryType, item.memory.subject, item.memory.judgment, item.memory.reasoning,
         JSON.stringify(item.memory.tags), contentHash, sourceRawStartId, sourceRawEndId,
-        profile?.fingerprint || null, profile ? 'pending' : 'disabled'
+        profile?.fingerprint || null, profile ? 'pending' : 'disabled',
+        JSON.stringify(item.memory.keywords), JSON.stringify(item.memory.perspectives),
+        item.memory.episodicNote, item.memory.semanticNote,
+        eventTime, item.memory.importance
       );
+      for (const entity of item.memory.entities) {
+        const entityId = upsertMemoryEntity(db, entity.name);
+        if (entityId) {
+          db.prepare(`INSERT OR IGNORE INTO memory_entity_links(memory_id, entity_id, role) VALUES (?, ?, ?)`).run(memoryId, entityId, entity.role);
+        }
+      }
+      if (item.memory.triple) {
+        insertMemoryTriple(db, { memoryId, triple: item.memory.triple, eventTime });
+      }
       for (const source of sources) {
-        db.prepare(`UPDATE memory_fragments SET status = 'superseded', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ?`).run(source.memory_id);
+        // v3 双时态演化：置失效（valid_to）而非仅 supersede，历史仍可检索（查询侧用 valid_to 过滤可见性）
+        db.prepare(`UPDATE memory_fragments SET status = 'superseded', valid_to = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE memory_id = ?`).run(source.memory_id);
         db.prepare(`INSERT INTO memory_relations(from_memory_id, to_memory_id, action) VALUES (?, ?, ?)`).run(source.memory_id, memoryId, item.action);
+        invalidateMemoryTriples(db, source.memory_id);
         enqueueIndexJob(db, 'delete', source.memory_id, source.embedding_profile, PRIORITY_LIVE);
       }
       enqueueIndexJob(db, 'upsert', memoryId, profile?.fingerprint || null, PRIORITY_LIVE);
@@ -95,6 +164,36 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   transaction();
   wakeMemoryIndexWorker();
   return created.map(memoryId => getMemoryById(memoryId));
+}
+
+// 实体 upsert（Mem0 平行实体集合）：命中则计数，未命中则新建；过短名字（代词类）直接拒绝
+export function upsertMemoryEntity(db, name) {
+  const trimmed = clampText(name, 64);
+  if (trimmed.length < 2) return null;
+  const existing = db.prepare(`SELECT id FROM memory_entities WHERE name = ?`).get(trimmed);
+  if (existing) {
+    db.prepare(`UPDATE memory_entities SET mention_count = mention_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(existing.id);
+    return existing.id;
+  }
+  const info = db.prepare(`INSERT INTO memory_entities(name, mention_count) VALUES (?, 1)`).run(trimmed);
+  return Number(info.lastInsertRowid);
+}
+
+export function insertMemoryTriple(db, { memoryId, triple, eventTime = null }) {
+  const subjectEntityId = findEntityIdByName(db, triple.subject);
+  const objectEntityId = findEntityIdByName(db, triple.object);
+  return db.prepare(`
+    INSERT INTO memory_triples(memory_id, subject_entity_id, subject_text, predicate, object_entity_id, object_text, event_time, valid_from)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `).run(memoryId, subjectEntityId, triple.subject, triple.predicate, objectEntityId, triple.object, eventTime);
+}
+
+function findEntityIdByName(db, name) {
+  return db.prepare(`SELECT id FROM memory_entities WHERE name = ?`).get(clampText(name, 64))?.id ?? null;
+}
+
+function invalidateMemoryTriples(db, memoryId) {
+  db.prepare(`UPDATE memory_triples SET valid_to = CURRENT_TIMESTAMP WHERE memory_id = ? AND valid_to IS NULL`).run(memoryId);
 }
 
 export function getMemoryById(memoryId) {
@@ -137,10 +236,14 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
   const transaction = db.transaction(() => {
     for (const row of affected) {
       db.prepare(`UPDATE memory_fragments SET status = 'deleted', source_msg_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
+      db.prepare(`DELETE FROM memory_entity_links WHERE memory_id = ?`).run(row.memory_id);
+      db.prepare(`DELETE FROM memory_triples WHERE memory_id = ?`).run(row.memory_id);
       const predecessors = db.prepare(`SELECT from_memory_id FROM memory_relations WHERE to_memory_id = ?`).all(row.memory_id);
       for (const predecessor of predecessors) {
         if (affectedIds.has(predecessor.from_memory_id)) continue;
-        db.prepare(`UPDATE memory_fragments SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'superseded'`).run(predecessor.from_memory_id);
+        // 回滚恢复前驱记忆：连带清除 v3 双时态失效标记与三元组失效标记
+        db.prepare(`UPDATE memory_fragments SET status = 'active', valid_to = NULL, updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'superseded'`).run(predecessor.from_memory_id);
+        db.prepare(`UPDATE memory_triples SET valid_to = NULL WHERE memory_id = ? AND valid_to IS NOT NULL`).run(predecessor.from_memory_id);
         enqueueIndexJob(db, 'upsert', predecessor.from_memory_id, null, PRIORITY_LIVE);
       }
       enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile, PRIORITY_LIVE);
@@ -162,8 +265,11 @@ export function clearConversationMemories(conversationId) {
   const transaction = db.transaction(() => {
     const ids = rows.map(row => row.memory_id).filter(Boolean);
     if (ids.length) {
-      db.prepare(`DELETE FROM memory_relations WHERE from_memory_id IN (${ids.map(() => '?').join(',')}) OR to_memory_id IN (${ids.map(() => '?').join(',')})`).run(...ids, ...ids);
-      db.prepare(`DELETE FROM memory_index_jobs WHERE memory_id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+      const placeholders = `(${ids.map(() => '?').join(',')})`;
+      db.prepare(`DELETE FROM memory_relations WHERE from_memory_id IN ${placeholders} OR to_memory_id IN ${placeholders}`).run(...ids, ...ids);
+      db.prepare(`DELETE FROM memory_index_jobs WHERE memory_id IN ${placeholders}`).run(...ids);
+      db.prepare(`DELETE FROM memory_entity_links WHERE memory_id IN ${placeholders}`).run(...ids);
+      db.prepare(`DELETE FROM memory_triples WHERE memory_id IN ${placeholders}`).run(...ids);
     }
     db.prepare(`DELETE FROM memory_fragments WHERE conversation_id = ?`).run(conversationId);
     db.prepare(`DELETE FROM memory_extraction_checkpoints WHERE conversation_id = ?`).run(conversationId);
@@ -193,7 +299,7 @@ export async function indexMemory(memoryId) {
   if (!row || row.status !== 'active') return false;
   const settings = getMemorySettings({ includeSecrets: true });
   try {
-    const text = memoryText(row);
+    const text = settings.v3?.enabled ? retrievalText(row) : memoryText(row);
     const metadata = {
       memory_id: memoryId,
       conversation_id: row.conversation_id,
@@ -290,7 +396,9 @@ export function memoryStats() {
   const db = getDb();
   const counts = db.prepare(`SELECT status, embedding_state, COUNT(*) AS count FROM memory_fragments GROUP BY status, embedding_state`).all();
   const settings = getMemorySettings();
-  return { mode: settings.mode, profile: settings.profile, rows: counts };
+  const entities = db.prepare(`SELECT COUNT(*) AS count FROM memory_entities`).get().count;
+  const triples = db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
+  return { mode: settings.mode, profile: settings.profile, rows: counts, entities, activeTriples: triples };
 }
 
 function containsSensitiveSecret(text) {
@@ -450,6 +558,28 @@ function memoryText(row) {
   return [row.judgment, row.reasoning, tags].filter(Boolean).join('\n');
 }
 
+// v3 检索单元文本（MMS 检索形态）：供向量索引使用；reasoning 刻意不进（证据性文字稀释语义），
+// 存量记忆缺新字段时回退 v2 文本，保证新旧记忆可共存于同一向量语料。
+export function retrievalText(row) {
+  const keywords = parseTags(row.keywords);
+  const perspectives = parseTags(row.perspectives);
+  if (!keywords.length && !perspectives.length && !row.episodic_note) return memoryText(row);
+  return [
+    row.judgment,
+    keywords.join(' '),
+    perspectives.join(' '),
+    row.episodic_note || '',
+  ].filter(Boolean).join('\n');
+}
+
 function formatMemory(row) {
-  return { ...row, tags: parseTags(row.tags), entities: parseTags(row.entities), content: row.judgment || row.content, fragment_type: row.memory_type || row.fragment_type };
+  return {
+    ...row,
+    tags: parseTags(row.tags),
+    entities: parseTags(row.entities),
+    keywords: parseTags(row.keywords),
+    perspectives: parseTags(row.perspectives),
+    content: row.judgment || row.content,
+    fragment_type: row.memory_type || row.fragment_type,
+  };
 }

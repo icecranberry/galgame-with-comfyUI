@@ -7,6 +7,8 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   textCandidates: 24,
   vectorCandidates: 24,
   recordUnengagedEvents: true,
+  // v3：记忆多重表示 + 实体检索通道 + 语义注入（docs/memory-upgrade-plan.md 阶段一开关）
+  v3: { enabled: true },
   embedding: {
     enabled: false,
     provider: 'custom',
@@ -44,12 +46,16 @@ export function normalizeMemorySettings(input = {}, previous = null) {
   const base = previous || cloneDefaults();
   const embedding = objectOrEmpty(input.embedding);
   const reranker = objectOrEmpty(input.reranker);
+  const v3 = objectOrEmpty(input.v3);
   const merged = {
     enabled: input.enabled === undefined ? base.enabled : Boolean(input.enabled),
     topK: clampInt(input.topK, base.topK, 1, 20),
     textCandidates: clampInt(input.textCandidates, base.textCandidates, 5, 100),
     vectorCandidates: clampInt(input.vectorCandidates, base.vectorCandidates, 5, 100),
     recordUnengagedEvents: input.recordUnengagedEvents === undefined ? base.recordUnengagedEvents : Boolean(input.recordUnengagedEvents),
+    v3: {
+      enabled: v3.enabled === undefined ? (base.v3?.enabled ?? true) : Boolean(v3.enabled),
+    },
     embedding: {
       ...base.embedding,
       ...embedding,
@@ -87,6 +93,15 @@ export function getMemorySettings({ includeSecrets = false } = {}) {
   const settings = normalizeMemorySettings(stored);
   if (includeSecrets) return settings;
   return maskSecrets(settings);
+}
+
+// 记忆 v3 总开关（多重表示/实体通道/语义注入）。DB 未就绪时按默认开启处理。
+export function isMemoryV3Enabled() {
+  try {
+    return getMemorySettings().v3.enabled !== false;
+  } catch {
+    return true;
+  }
 }
 
 export function saveMemorySettings(input) {

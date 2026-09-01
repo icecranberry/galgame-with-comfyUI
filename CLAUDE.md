@@ -129,14 +129,24 @@ project-root/
 - **送礼系统**: 小礼物 (+5, 冷却 1h) / 大礼物 (+15, 冷却 12h)。全局冷却（跨角色共享），`gift_history` 表持久化。
 - **前端实时推送**: 对话 SSE 流中通过 `affinity_update` 事件推送变化量，ChatView 触发 roll 数值动画。
 
-### 记忆系统：三路召回 + RRF 融合
+### 记忆系统：四路召回 + RRF 融合（Memory v3）
 
-每轮对话后异步提取记忆碎片（fact/preference/emotion）→ 向量化 → ChromaDB + SQLite。检索时三路并行：
-1. **Keyword** — SQLite LIKE 多关键词匹配
-2. **Vector** — ChromaDB 余弦相似度
-3. **Entity** — 关键词匹配到的实体 → 二次 JOIN 扩展
+每轮对话后异步提取记忆碎片（knowledge/skill/emotion/event，每 40 条 raw 消息触发一次 curation 单遍 LLM 整理）→ 向量化 → ChromaDB + SQLite。检索时四路并行：
+1. **FTS5** — bm25 全文（六列：judgment/reasoning/tags/keywords/perspectives/episodic_note）
+2. **Ngram** — 中文 bigram LIKE 多列匹配
+3. **Vector** — ChromaDB 余弦相似度
+4. **Entity**（v3 新增）— 查询命中 `memory_entities` 实体名/别名 → `memory_entity_links` 反查关联记忆
 
-RRF 融合排序（关键词/实体通道 k=60，向量通道 k=120 权重减半，fact 类型 1.5× 加权）取 Top 10 注入 system prompt。向量通道不能独立主导：必须有关键词或实体命中才会纳入融合。
+RRF 融合（K=60）后可选 rerank，取 Top-K 注入 `<rag_memories>`。所有检索通道带 `status='active' AND valid_to IS NULL` 现行有效性过滤。
+
+**Memory v3 多重表示**（docs/memory-upgrade-plan.md，`memory_settings.v3.enabled` 开关）：
+- **检索单元**（进 FTS/向量/LIKE）：`keywords`（检索关键词）+ `perspectives`（认知视角标签）+ `episodic_note`（情景备注），由 curation LLM 单遍产出
+- **注入单元**（只进 `<rag_memories>`，刻意不进检索通道）：`semantic_note` 语义转述，缺失时回退 judgment
+- **双时态演化**：`valid_from/valid_to/event_time`——update/merge 把旧记忆置 `superseded + valid_to`（历史可查）而非物理覆盖；回滚时自动清失效标记
+- **实体/三元组索引层**：`memory_entities`（平行实体表）+ `memory_entity_links` + `memory_triples`（主谓宾，供阶段二 query-to-triple 主动回想），全部平行表、无图数据库
+- **强度模型**：`importance(1-5)/strength/last_reinforced_at/retrieval_count`，供阶段三遗忘曲线衰减归档（尚未接线）
+
+curation prompt v3 的新字段全部可选——LLM 不输出时落库自动降级为 v2 形态（judgment/tags 仍必填），`memory_settings.v3.enabled=false` 可整体回退旧行为。`memory_retrieval_audits` 的 candidate_sources 记录四路各自命中数。
 
 ### 用户画像系统 (User Portrait)
 

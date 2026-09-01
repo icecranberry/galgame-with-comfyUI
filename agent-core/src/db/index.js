@@ -576,6 +576,9 @@ function initSchema(db) {
   // 迁移: PAI 风格聊天记忆单元、全文索引、提取 checkpoint 与索引任务
   migrateChatMemoryV2Schema(db);
 
+  // 迁移: 记忆 v3 —— 多重表示 + 双时态演化 + 实体/三元组索引层（见 docs/memory-upgrade-plan.md）
+  migrateChatMemoryV3Schema(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -1726,6 +1729,150 @@ function migrateChatMemoryV2Schema(db) {
     console.error('[db] migrateChatMemoryV2Schema error:', err.message);
     throw err;
   }
+}
+
+// 迁移: 记忆 v3 —— MMS 多重表示（keywords/perspectives/episodic_note 为检索单元，semantic_note
+// 为注入单元）、双时态演化列（valid_from/valid_to，替换改为"置失效+保留历史"）、实体与三元组
+// 索引层（平行表，不上图数据库）。设计依据 docs/memory-upgrade-plan.md。
+// 导出供迁移回归测试使用（test/memoryV3Migration.test.js）。
+export function migrateChatMemoryV3Schema(db) {
+  try {
+    const columns = new Set(db.prepare(`PRAGMA table_info(memory_fragments)`).all().map(c => c.name));
+    const additions = [
+      // 检索单元字段（进 FTS / 向量 / LIKE 通道）
+      ['keywords', "TEXT NOT NULL DEFAULT '[]'"],
+      ['perspectives', "TEXT NOT NULL DEFAULT '[]'"],
+      ['episodic_note', "TEXT NOT NULL DEFAULT ''"],
+      // 注入单元字段（只进 <rag_memories>，刻意不进任何检索通道）
+      ['semantic_note', "TEXT NOT NULL DEFAULT ''"],
+      // 双时态演化
+      ['event_time', 'DATETIME'],
+      ['valid_from', 'DATETIME'],
+      ['valid_to', 'DATETIME'],
+      // 强度模型（遗忘曲线，阶段三整理 daemon 消费）
+      ['importance', 'INTEGER NOT NULL DEFAULT 3'],
+      ['strength', 'REAL NOT NULL DEFAULT 1.0'],
+      ['last_reinforced_at', 'DATETIME'],
+      ['retrieval_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) db.prepare(`ALTER TABLE memory_fragments ADD COLUMN ${name} ${definition}`).run();
+    }
+
+    const relationColumns = new Set(db.prepare(`PRAGMA table_info(memory_relations)`).all().map(c => c.name));
+    if (!relationColumns.has('relation_meta')) {
+      db.prepare(`ALTER TABLE memory_relations ADD COLUMN relation_meta TEXT`).run();
+    }
+
+    const ddlStatements = [
+      // 存量记忆回填 valid_from（双时态起点）
+      `UPDATE memory_fragments SET valid_from = COALESCE(valid_from, updated_at, created_at, CURRENT_TIMESTAMP) WHERE valid_from IS NULL`,
+
+      // 实体索引层（Mem0 平行实体集合思路：不上图数据库，检索时 boost）
+      `CREATE TABLE IF NOT EXISTS memory_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        aliases TEXT NOT NULL DEFAULT '[]',
+        mention_count INTEGER NOT NULL DEFAULT 0,
+        embedding_state TEXT NOT NULL DEFAULT 'disabled',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_entities_name ON memory_entities(name)`,
+
+      `CREATE TABLE IF NOT EXISTS memory_entity_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        role TEXT NOT NULL DEFAULT 'mention',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(memory_id, entity_id, role)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_entity_links_entity ON memory_entity_links(entity_id, memory_id)`,
+
+      // 三元组索引层（阶段二主动回想 query-to-triple 匹配用）
+      `CREATE TABLE IF NOT EXISTS memory_triples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id TEXT NOT NULL,
+        subject_entity_id INTEGER,
+        subject_text TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object_entity_id INTEGER,
+        object_text TEXT NOT NULL,
+        event_time DATETIME,
+        valid_from DATETIME,
+        valid_to DATETIME,
+        embedding_state TEXT NOT NULL DEFAULT 'disabled',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_triples_memory ON memory_triples(memory_id)`,
+
+      // 整理任务队列（阶段三 daemon 用；先建表占位，调度器后续接入）
+      `CREATE TABLE IF NOT EXISTS memory_consolidation_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_type TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // 画像升华建议（阶段三 T4 半自动通道）
+      `CREATE TABLE IF NOT EXISTS portrait_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER,
+        field TEXT NOT NULL,
+        current_value TEXT,
+        suggestion TEXT NOT NULL,
+        source_memory_ids TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+    ];
+    for (const sql of ddlStatements) db.prepare(sql).run();
+
+    upgradeMemoryFtsToV3(db);
+  } catch (err) {
+    console.error('[db] migrateChatMemoryV3Schema error:', err.message);
+    throw err;
+  }
+}
+
+// FTS 扩列 3 → 6 列：外部内容表无法 ALTER，需删表重建 + 全量 rebuild。
+// semantic_note 刻意不进 FTS（高层语义提炼与提问语言形态脱节，混入降低召回，见方案 §2）。
+function upgradeMemoryFtsToV3(db) {
+  const ftsSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fragments_fts'`).get();
+  if (!ftsSql || /keywords/i.test(ftsSql.sql || '')) return;
+  const ddlStatements = [
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_ai`,
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_ad`,
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_au`,
+    `DROP TABLE IF EXISTS memory_fragments_fts`,
+    `CREATE VIRTUAL TABLE memory_fragments_fts USING fts5(
+      judgment, reasoning, tags, keywords, perspectives, episodic_note,
+      content='memory_fragments', content_rowid='id'
+    )`,
+    `CREATE TRIGGER memory_fragments_fts_ai AFTER INSERT ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES (new.id, new.judgment, new.reasoning, new.tags, new.keywords, new.perspectives, new.episodic_note);
+    END`,
+    `CREATE TRIGGER memory_fragments_fts_ad AFTER DELETE ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags, old.keywords, old.perspectives, old.episodic_note);
+    END`,
+    `CREATE TRIGGER memory_fragments_fts_au AFTER UPDATE OF judgment, reasoning, tags, keywords, perspectives, episodic_note ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags, old.keywords, old.perspectives, old.episodic_note);
+      INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES (new.id, new.judgment, new.reasoning, new.tags, new.keywords, new.perspectives, new.episodic_note);
+    END`,
+    `INSERT INTO memory_fragments_fts(memory_fragments_fts) VALUES ('rebuild')`,
+  ];
+  for (const sql of ddlStatements) db.prepare(sql).run();
+  console.log('[db] memory_fragments_fts upgraded to v3 (6-column) and rebuilt');
 }
 
 // 清理历史遗留的 system_settings 键（idempotent）

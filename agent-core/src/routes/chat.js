@@ -3,6 +3,7 @@ import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex }
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { recallChatMemories, CHAT_RAG_TIMEOUT_MS } from '../services/memory/chatMemoryRecall.js';
+import { isMemoryV3Enabled } from '../services/memory/memoryConfig.js';
 import { curateChatMemories } from '../services/memoryExtractor.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories, rollbackMemoriesFromRawId } from '../services/memory/memoryRepository.js';
@@ -808,7 +809,15 @@ ${coreRules}
             && !judgment.includes('未互动事件');
         });
         if (chatMemoryResults.length > 0) {
-          const memoryLines = chatMemoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
+          // v3 注入单元（MMS）：语义转述（semantic_note）优先、judgment 兜底；首个视角标签进 [类型|视角] 前缀。
+          // v3 关闭时完全回退旧行为（纯 judgment）。
+          const useV3Injection = isMemoryV3Enabled();
+          const memoryLines = chatMemoryResults.map((m, i) => {
+            const perspectives = Array.isArray(m.perspectives) ? m.perspectives.filter(Boolean) : [];
+            const label = perspectives.length ? `${m.memory_type}|${perspectives[0]}` : m.memory_type;
+            const text = (useV3Injection && m.semantic_note) || m.judgment;
+            return `${i + 1}. [${label}] ${text}`;
+          }).join('\n');
           memorySnapshot.push(...chatMemoryResults.map(m => ({
             id: m.memory_id,
             memoryType: m.memory_type,
