@@ -1,11 +1,9 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import memoryRoutes from './src/routes/memory.js';
@@ -57,23 +55,7 @@ app.use(express.static('public'));
 app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
 
 // 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
-app.use('/images', (req, res, next) => {
-  const pngMatch = req.path.match(/\.png$/i);
-  if (!pngMatch) return next();
-
-  const pngPath = path.join('data/images', req.path);
-  // 原 PNG 存在 → 直接走 static 兜底
-  if (fs.existsSync(pngPath)) return next();
-
-  // PNG 不存在（已被 AVIF 压缩后删除），检查同名 .avif
-  const avifPath = path.join('data/images', req.path.replace(/\.png$/i, '.avif'));
-  if (fs.existsSync(avifPath)) {
-    res.setHeader('Content-Type', 'image/avif');
-    return res.sendFile(path.resolve(avifPath));
-  }
-
-  next();
-});
+app.use('/images', imageAvifFallback('data/images'));
 app.use('/images', express.static('data/images'));
 app.use('/avatars', express.static('data/avatars'));
 

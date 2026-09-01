@@ -146,6 +146,17 @@
             </svg>
             <span>相册</span>
           </router-link>
+          <router-link to="/backpack" class="more-menu-item" @click="onMenuItemClick">
+            <div class="nav-icon-wrap">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 9a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v1H4V9z"/>
+                <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z"/>
+                <path d="M10 13h4"/>
+              </svg>
+              <span v-if="backpack.chestReady" class="nav-dot"></span>
+            </div>
+            <span>背包</span>
+          </router-link>
           <router-link to="/mailbox" class="more-menu-item" @click="onMenuItemClick">
             <div class="nav-icon-wrap">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -272,6 +283,7 @@ import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useGroupsStore } from '../stores/groups.js'
+import { useBackpackStore } from '../stores/backpack.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import GearIcon from './GearIcon.vue'
@@ -292,6 +304,7 @@ const proactive = useProactiveStore()
 const schedule = useScheduleStore()
 const mailbox = useMailboxStore()
 const groups = useGroupsStore()
+const backpack = useBackpackStore()
 const toast = inject('toast', null)
 const showMoreMenu = ref(false)
 const charListEl = ref(null)
@@ -359,11 +372,17 @@ watch(() => chat.sidebarScrollSignal, () => {
   }
 })
 
+// 「更多」菜单里的背包红点：挂载与每次展开菜单时刷新宝箱就绪状态
+watch(showMoreMenu, (v) => {
+  if (v) backpack.fetchItems()
+})
+
 onMounted(() => {
   // SSE 连接由 NavBar 统一管理（NavBar 在移动端 CSS 隐藏但组件仍挂载，onMounted 正常触发）
   schedule.fetchOverview(true) // silent: 不触发 loading 闪烁
   groups.connectSSE()
   groups.loadGroups()
+  backpack.fetchItems()
 })
 
 onUnmounted(() => {})

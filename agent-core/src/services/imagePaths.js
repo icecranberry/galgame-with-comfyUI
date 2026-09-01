@@ -72,9 +72,20 @@ export function deleteImageFileByUrl(url) {
   if (!filename || path.basename(filename) !== filename) return false;
 
   const filePath = path.join(getImageDir(category), filename);
-  if (!fs.existsSync(filePath)) return false;
-  fs.unlinkSync(filePath);
-  return true;
+  let removed = false;
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+    removed = true;
+  }
+  // AVIF 压缩会把原 PNG 换成同名 .avif；按 .png URL 删除时把孪生文件一并清掉
+  if (/\.png$/i.test(filename)) {
+    const avifTwin = filePath.replace(/\.png$/i, '.avif');
+    if (fs.existsSync(avifTwin)) {
+      try { fs.unlinkSync(avifTwin); } catch {}
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 export function getAllImageDirs() {

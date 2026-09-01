@@ -281,6 +281,23 @@
               <linshe-input v-model="artist" class="advanced-artist-input" type="text" placeholder="@ebora" />
               <div class="advanced-hint">生成表情包时固定使用该画师串，不再沿用对话画师串。</div>
             </div>
+            
+            <div class="advanced-section">
+              <div class="advanced-label">生成分辨率</div>
+              <div class="advanced-res-row">
+                <input
+                  v-model.number="resolutionSize"
+                  class="advanced-res-slider"
+                  type="range"
+                  min="512"
+                  max="1024"
+                  step="64"
+                  aria-label="生成分辨率"
+                />
+                <span class="advanced-res-val">{{ resolutionSize }} × {{ resolutionSize }}</span>
+              </div>
+              <div class="advanced-hint">表情包图片的生成边长（宽高相同），默认 512×512，范围 512–1024，步长 64。</div>
+            </div>
 
             <div class="advanced-section">
               <div class="advanced-label">表情类别</div>
@@ -405,6 +422,7 @@ const fixedTagsDraft = ref('')
 const fixedTagsError = ref('')
 const styleMode = ref('half_body')
 const styleModeSaving = ref(false)
+const resolutionSize = ref(512)
 /** 表情包风格三种：徽章点击按此顺序循环切换 */
 const STYLE_MODE_ORDER = ['half_body', 'half_body_chibi', 'chibi_head']
 const STYLE_MODE_LABELS = { half_body: '半身LINE', half_body_chibi: '半身Q版', chibi_head: '猪鼻大头' }
@@ -582,6 +600,7 @@ async function loadCategories() {
     const t = await api.getEmojiFixedTags()
     fixedTagsDraft.value = t.tags || ''
     styleMode.value = STYLE_MODE_ORDER.includes(t.styleMode) ? t.styleMode : 'half_body'
+    resolutionSize.value = t.resolution?.width ?? 512
   } catch {
     fixedTagsDraft.value = ''
   }
@@ -849,16 +868,18 @@ async function saveAdvancedSettings() {
     fixedTagsError.value = '固定 tag 不能为空'
     return
   }
+  const size = Math.round(Number(resolutionSize.value)) || 512
   categorySaving.value = true
   try {
     const d = await api.updateEmojiCategories(keys)
     if (d.error) throw new Error(d.error)
     emojiKeys.value = d.keys || []
     categoryDrafts.value = [...emojiKeys.value]
-    const t = await api.updateEmojiFixedTags(tagsText, styleMode.value)
+    const t = await api.updateEmojiFixedTags(tagsText, styleMode.value, { width: size, height: size })
     if (t.error) throw new Error(t.error)
     fixedTagsDraft.value = t.tags || tagsText
     if (t.styleMode) styleMode.value = t.styleMode
+    if (t.resolution) resolutionSize.value = t.resolution.width
     showAdvancedSettings.value = false
     toast?.('高级设置已保存', 'success')
   } catch (err) {
@@ -1594,6 +1615,66 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 9px 12px;
   word-break: break-all;
+}
+.advanced-res-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.advanced-res-slider {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  border: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.advanced-res-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #F7F2EC;
+  box-shadow: inset 0 1px 2px rgba(125, 105, 85, 0.12);
+}
+.advanced-res-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #F7F2EC;
+  box-shadow: inset 0 1px 2px rgba(125, 105, 85, 0.12);
+}
+.advanced-res-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: -6px;
+  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.35);
+  cursor: pointer;
+}
+.advanced-res-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.35);
+  cursor: pointer;
+}
+.advanced-res-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.advanced-res-val {
+  flex-shrink: 0;
+  min-width: 76px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
 }
 .emoji-style-segmented {
   display: grid;

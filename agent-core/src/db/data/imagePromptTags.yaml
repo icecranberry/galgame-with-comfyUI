@@ -467,85 +467,6 @@
         wet shirt: 湿衬衫
         clothes theft: 偷衣服
 
-    - name: 外套
-      color: rgba(230, 84, 128, .4)
-      tags:
-# --- [大衣与长款 - Coats & Longwear] ---
-        overcoat: 大衣
-        long coat: 长外套/长款大衣
-        trench coat: 风衣
-        winter coat: 冬季大衣
-        duffel coat: 粗呢大衣/牛角扣大衣
-        hooded coat: 连帽大衣
-        fur-trimmed coat: 镶边皮草大衣
-        double-breasted coat: 双排扣大衣
-        
-        # --- [夹克与短款 - Jackets] ---
-        jacket: 夹克衫/短外套
-        blazer: 西装外套/学院风外套
-        bomber jacket: 飞行员夹克
-        track jacket: 运动夹克
-        hooded track jacket: 连帽运动夹克
-        denim jacket: 牛仔夹克
-        leather jacket: 皮夹克
-        military jacket: 军装夹克
-        camouflage jacket: 迷彩夹克
-        letterman jacket: 棒球夹克/莱特曼夹克
-        puffer jacket: 羽绒服/面包服 (down jacket 合并至此)
-        parka: 派克大衣
-        windbreaker: 冲锋衣/风衣夹克
-        cropped jacket: 短款夹克 (露腰款)
-        two-tone jacket: 双色夹克
-        
-        # --- [毛衣与针织 - Sweaters & Knitwear] ---
-        sweater: 毛衣/针织衫
-        pullover: 套头毛衣
-        cardigan: 开襟毛衣/针织开衫
-        ribbed sweater: 罗纹毛衣
-        sweater vest: 毛衣背心
-        turtleneck sweater: 高领毛衣
-        off-shoulder sweater: 露肩毛衣
-        backless sweater: 露背毛衣
-        virgin killer sweater: 处男杀手毛衣
-        aran sweater: 阿兰毛衣/粗针毛衣
-        hooded sweater: 连帽毛衣
-        
-        # --- [披肩、斗篷与特殊服饰 - Capes & Traditional] ---
-        cape: 斗篷/披风
-        capelet: 短披肩
-        poncho: 斗篷式外套/庞乔斗篷
-        shrug: 护肩/小外搭
-        haori: 羽织 (和服外套)
-        furisode: 振袖 (长袖和服)
-        hagoromo: 羽衣 (仙女披帛)
-        tunic: 束腰外衣
-        fishnet top: 渔网上衣
-        
-        # --- [动态与穿着状态 - State & Style] ---
-        open jacket: 开襟夹克 (不系扣)
-        open coat: 开襟大衣
-        jacket on shoulders: 披在肩上的外套
-        jacket at elbows: 褪至肘部的外套
-        jacket partially removed: 脱掉一半的外套
-        jacket around waist: 系在腰间的夹克
-        off-shoulder jacket: 露肩穿的外套
-        coat over shoulders: 大衣披肩穿
-        
-        # --- [材质与细节 - Material & Detail] ---
-        fur coat: 皮草大衣
-        fur collar: 毛领
-        shearling jacket: 羊羔绒夹克
-        raincoat: 雨衣
-        quilted jacket: 绗缝夹克
-        studded jacket: 铆钉夹克
-
-        # --- [更细腻的穿着状态 - Advanced States] ---
-        one shoulder down: 外套半脱 (露出一边肩膀)
-        clutched jacket: 紧紧拽着/裹着外套 (表现寒冷或害羞)
-        adjusting jacket: 整理外套
-        holding jacket: 手持外套 (拎在手里)
-        fastening buttons: 扣纽扣中
-        unbuttoned: 未扣纽扣的
 
     - name: 其他
       color: rgba(230, 84, 128, .4)
@@ -1654,6 +1575,10 @@
       tags:
         # --- [生活与日常 - Daily Life] ---
         walking: 走路
+        complete nude, showering: 洗澡
+        complete nude, bathing: 沐浴
+        complete nude, soaking: 泡澡
+        complete nude, taking a shower: 冲澡
         running: 奔跑
         jumping: 跳跃
         sleeping: 睡觉

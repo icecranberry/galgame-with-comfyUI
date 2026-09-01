@@ -114,10 +114,10 @@ export async function getEmojiFixedTags() {
   return res.json()
 }
 
-export async function updateEmojiFixedTags(tags, styleMode) {
+export async function updateEmojiFixedTags(tags, styleMode, resolution) {
   const res = await fetch(`${BASE}/characters/emoji/tags`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tags, styleMode }),
+    body: JSON.stringify({ tags, styleMode, ...(resolution ? { resolution } : {}) }),
   })
   return res.json()
 }
