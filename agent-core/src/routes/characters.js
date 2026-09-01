@@ -832,6 +832,7 @@ router.post('/:id/gift', async (req, res) => {
       const giftArtist = charArtistOverride(char);
       generateImage(result.imagePrompt, {
         promptScene: 'gift',
+        disableRAG: true,
         ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
@@ -998,6 +999,7 @@ ${buildCharacterPersona(char, { variant: 'full' })}
     const avatarArtist = charArtistOverride(char);
     const result = await generateImageRaw(promptText, {
       promptScene: 'avatar',
+      disableRAG: true,
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       artist: avatarArtist !== null ? avatarArtist : config.comfyui.momentsArtist,
       width: 768,

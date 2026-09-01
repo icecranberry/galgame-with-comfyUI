@@ -299,7 +299,7 @@ const KIND_LABELS = {
   unknown: '神秘道具',
 }
 
-const EFFECT_KIND_LABELS = { outfit: '服饰', world_outfit: '世界观', hairstyle: '发型', transform: '变身', buff: '状态', mood: '心情', favor: '心意', unknown: '未知' }
+const EFFECT_KIND_LABELS = { outfit: '服饰', world_outfit: '特殊服饰', hairstyle: '发型', transform: '变身', buff: '状态', mood: '心情', favor: '心意', unknown: '未知' }
 const EFFECT_ICON_PATHS = {
   outfit: 'M12 3l4 2 5-1-1 5-3 1v9H7v-9L4 9 3 4l5 1z',
   world_outfit: 'M12 3l4 2 5-1-1 5-3 1v9H7v-9L4 9 3 4l5 1z',

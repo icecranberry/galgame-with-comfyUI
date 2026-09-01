@@ -348,7 +348,7 @@ export async function generateEmojiImage(row, char, artist = '@ebora') {
   const result = await generateImageRaw(row.prompt, {
     scene: 'chat',                 // LoRA 场景过滤沿用私聊
     workflowScene: 'emoji',        // hybrid 模式下允许为表情包单独配置工作流
-    skipOptimization: true,        // prompt 已由创造助手定稿，不再走 RAG 改写
+    disableRAG: true,        // prompt 已由创造助手定稿，不再走 RAG 改写
     persistPreparation: false,
     width: 512,
     height: 512,

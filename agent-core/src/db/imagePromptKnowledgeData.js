@@ -1,6 +1,6 @@
 import { IMAGE_PROMPT_TAG_KNOWLEDGE } from './imagePromptTagKnowledgeData.js';
 
-export const IMAGE_PROMPT_KNOWLEDGE_VERSION = '2026-07-31.1';
+export const IMAGE_PROMPT_KNOWLEDGE_VERSION = '2026-09-01.2';
 
 const ALL_SCENES = ['chat', 'moments', 'events', 'schedule', 'mailbox', 'avatar', 'gift', 'proactive', 'standalone'];
 

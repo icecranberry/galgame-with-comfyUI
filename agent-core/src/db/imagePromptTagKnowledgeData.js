@@ -8,8 +8,6 @@ const ALL_SCENES = ['chat', 'moments', 'events', 'schedule', 'mailbox', 'avatar'
 const SOURCE_PATH = fileURLToPath(new URL('./data/imagePromptTags.yaml', import.meta.url));
 const MAX_CHUNK_SIZE = 20;
 const MAX_CHUNK_CONTENT_LENGTH = 1600;
-const MAX_TAG_LENGTH = 240;
-const MAX_TAG_PARTS = 28;
 
 const SKIPPED_SECTIONS = new Set(['反向提示词']);
 const SKIPPED_GROUPS = new Set(['人物/年龄', '人物/二次元角色']);
@@ -252,7 +250,6 @@ function shouldSkipTag(section, group, tag, label) {
   const combined = `${tag} ${label}`;
   if (SKIPPED_SECTIONS.has(section) || SKIPPED_GROUPS.has(`${section}/${group}`)) return 'section';
   if (!tag || INVALID_ONLY_PATTERN.test(tag)) return 'invalid';
-  if (tag.length > MAX_TAG_LENGTH || tag.split(',').length > MAX_TAG_PARTS) return 'oversized';
   if (MINOR_PATTERN.test(combined)) return 'minor';
   if (MODEL_DIRECTIVE_PATTERN.test(combined)) return 'model_directive';
   if (BLOCKED_EXACT_TAGS.has(tag.toLowerCase()) || LOW_QUALITY_POSITIVE_TAGS.has(tag.toLowerCase())) return 'low_quality';
@@ -301,7 +298,10 @@ function splitBalanced(entries) {
 function makeKnowledgeItem(section, category, topic, entries, chunkIndex) {
   const sourceGroups = [...new Set(entries.map(entry => entry.group))];
   const menu = entries.map(entry => `${entry.label || entry.tag} → ${entry.tag}`).join('；');
-  const searchTerms = [section, topic, ...sourceGroups, ...entries.flatMap(entry => [entry.label, entry.tag])]
+  const labels = entries.map(entry => entry.label).filter(Boolean);
+  const tags = entries.map(entry => entry.tag).filter(Boolean);
+  // 中文描述优先作为检索面，英文 tag 只保留给最终提示词执行。
+  const searchTerms = [section, topic, ...sourceGroups, ...labels, ...tags]
     .filter(Boolean)
     .join(' ')
     .slice(0, 4000);
@@ -323,7 +323,7 @@ function makeKnowledgeItem(section, category, topic, entries, chunkIndex) {
 export function buildImagePromptTagKnowledge(rawData) {
   const buckets = new Map();
   const seenTags = new Set();
-  const skipped = { section: 0, invalid: 0, oversized: 0, minor: 0, model_directive: 0, low_quality: 0, duplicate: 0 };
+  const skipped = { section: 0, invalid: 0, minor: 0, model_directive: 0, low_quality: 0, duplicate: 0 };
   let sourceTags = 0;
 
   for (const sectionData of Array.isArray(rawData) ? rawData : []) {

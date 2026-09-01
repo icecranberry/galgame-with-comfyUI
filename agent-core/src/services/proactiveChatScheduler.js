@@ -671,6 +671,7 @@ ${motiveName}
     // 后台主动私聊的配图属于角色自发生活记录，与朋友圈保持同一观感，因为后台运行，所以无所谓时间，
     // 因此这里借用朋友圈分辨率，而不是普通聊天配图分辨率。
     const result = await generateImage(prompt, {
+      ragQuery: greeting,
       promptScene: 'proactive',
       priority: 'low',
       ...loraOpts,

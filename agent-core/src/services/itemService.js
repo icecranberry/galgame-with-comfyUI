@@ -391,7 +391,7 @@ async function generateItemImageAsync(itemId, imagePrompt) {
   try {
     const result = await generateImageRaw(imagePrompt, {
       scene: 'chat',
-      skipOptimization: true,
+      disableRAG: true,
       persistPreparation: false,
       width: 512,
       height: 512,

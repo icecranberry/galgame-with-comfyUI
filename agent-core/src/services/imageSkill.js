@@ -409,6 +409,8 @@ async function _execute(rawPrompt, opts) {
   let slotAcquired = false;
   try {
     const preparation = await prepareImagePrompt(rawPrompt, {
+      ragQuery: opts.ragQuery,
+      disableRAG: opts.disableRAG === true,
       scene: opts.promptScene || opts.scene || 'chat',
       alreadyPrepared: opts.alreadyPrepared === true,
       skipOptimization: opts.skipOptimization === true,
@@ -423,6 +425,7 @@ async function _execute(rawPrompt, opts) {
     return {
       ...result,
       promptOriginal: preparation.promptOriginal,
+      promptRagQuery: preparation.ragQuery,
       promptRefined: preparation.promptRefined,
       promptPreparationId: preparation.preparationId,
       promptKnowledgeIds: preparation.retrieval.knowledgeIds,

@@ -158,6 +158,7 @@ router.post('/chat', async (req, res) => {
         const prompt = await extractImagePrompt({ character, user_message, reply_text, context, user_name });
         if (prompt) {
           task_id = startImageTask({
+            ragQuery: user_message || reply_text,
             character,
             conversationId: bridgeConversationId,
             prompt,
@@ -217,7 +218,7 @@ router.post('/generate', async (req, res) => {
     if (!imagePrompt) {
       return res.status(502).json({ error: 'image prompt extraction failed' });
     }
-    const task_id = startImageTask({ character, conversationId, prompt: imagePrompt });
+    const task_id = startImageTask({ character, conversationId, prompt: imagePrompt, ragQuery: requirement });
     res.json({ ok: true, task_id, prompt: imagePrompt, character_id: character.id, conversation_id: conversationId });
   } catch (err) {
     console.error('[maibot-bridge] generate prompt extraction error:', err.message);

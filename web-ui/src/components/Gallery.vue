@@ -39,10 +39,9 @@
             class="gallery-item"
             @click="onPreview(img.flatIndex)"
           >
-            <div
-              class="img-wrapper"
-              :style="{ backgroundImage: `url(${img.url})` }"
-            ></div>
+            <div class="img-wrapper">
+              <img :src="img.url" class="gallery-img" alt="" loading="lazy" decoding="async" />
+            </div>
           </div>
         </div>
       </div>
@@ -327,10 +326,13 @@ defineExpose({ refresh })
   aspect-ratio: 1;
   overflow: hidden;
   background-color: rgba(0, 0, 0, 0.04);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
   transition: transform 0.3s ease, background-color 0.2s ease;
+}
+.gallery-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .gallery-item:hover .img-wrapper {
   transform: scale(1.05);

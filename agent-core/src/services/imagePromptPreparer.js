@@ -51,7 +51,33 @@ function normalizeTagKey(value) {
 function phraseInPrompt(promptText, phrase) {
   const normalized = normalizeForMatch(phrase);
   if (!normalized) return false;
+  if (/[\p{Script=Han}]/u.test(normalized)) {
+    return promptText.includes(normalized);
+  }
   return ` ${promptText} `.includes(` ${normalized} `);
+}
+
+function chineseHanBigrams(text) {
+  const words = String(text || '').match(/[\u3400-\u9fff]+/g) || [];
+  const grams = new Set();
+  for (const word of words) {
+    if (word.length === 1) grams.add(word);
+    for (let index = 0; index < word.length - 1; index += 1) {
+      grams.add(word.slice(index, index + 2));
+    }
+  }
+  return [...grams];
+}
+
+// 中文不像英文可以用空格分词；用保守的 Han bigram 重叠容忍“地雷女/地雷系”这类近义措辞。
+function scoreChineseLabelOverlap(labelText, matchText) {
+  if (!/[\p{Script=Han}]/u.test(labelText || '') || !/[\p{Script=Han}]/u.test(matchText || '')) return 0;
+  const labelGrams = chineseHanBigrams(labelText);
+  if (labelGrams.length < 2) return 0;
+  const matchGrams = new Set(chineseHanBigrams(matchText));
+  const matched = labelGrams.filter(gram => matchGrams.has(gram)).length;
+  if (matched < 2 || matched / labelGrams.length < 0.5) return 0;
+  return matched === labelGrams.length ? 16 : 14;
 }
 
 function scoreExecutableTag(promptText, entry) {
@@ -71,6 +97,10 @@ function scoreExecutableTag(promptText, entry) {
   }
 
   if (score === 0) {
+    score = scoreChineseLabelOverlap(label, promptText);
+  }
+
+  if (score === 0) {
     const parts = normalizedTag.split(' ').filter(part => part.length > 1);
     const matched = parts.filter(part => phraseInPrompt(promptText, part)).length;
     if (parts.length >= 2 && matched === parts.length) score = 12;
@@ -85,8 +115,10 @@ function exactPromptSegments(prompt) {
     .filter(Boolean));
 }
 
-function selectExecutableTags(prompt, items) {
+function selectExecutableTags(prompt, items, ragQuery = '') {
   const promptText = normalizeForMatch(prompt);
+  const ragQueryText = normalizeForMatch(ragQuery);
+  const matchText = [promptText, ragQueryText].filter(Boolean).join('\n');
   const existingSegments = exactPromptSegments(prompt);
   const candidates = [];
 
@@ -94,9 +126,8 @@ function selectExecutableTags(prompt, items) {
     for (const entry of item.executableTags || []) {
       const tag = String(entry?.tag || '').trim();
       const tagParts = tag.split(',').map(part => part.trim()).filter(Boolean);
-      const score = scoreExecutableTag(promptText, entry);
+      const score = scoreExecutableTag(matchText, entry);
       if (score === 0) continue;
-      if (tagParts.length > 4 && score < 20) continue;
       candidates.push({
         tag,
         key: normalizeTagKey(tag),
@@ -147,16 +178,18 @@ function removeSelectedTags(selected, keys, knowledgeId, reason, removedTags) {
   }
 }
 
-function applyKnowledgeRules(prompt, items, selected) {
+function applyKnowledgeRules(prompt, items, selected, ragQuery = '') {
   const promptText = normalizeForMatch(prompt);
+  const ragQueryText = normalizeForMatch(ragQuery);
+  const matchText = [promptText, ragQueryText].filter(Boolean).join('\n');
   const knowledgeIds = new Set(items.map(item => item.id));
   const removedTags = [];
   const removedPhrases = [];
   const appliedRules = [];
 
   if (knowledgeIds.has('ipk.count.solo')) {
-    const multiPerson = /\b(two|three|duo|couple|group|crowd|multiple|2girls|2boys|3girls|3boys)\b/.test(promptText)
-      || /\b1girl\s+1boy\b/.test(promptText);
+    const multiPerson = /\b(two|three|duo|couple|group|crowd|multiple|2girls|2boys|3girls|3boys)\b/.test(matchText)
+      || /\b1girl\s+1boy\b/.test(matchText);
     if (!multiPerson) {
       addRuleTag(selected, 'solo', 'ipk.count.solo', 'count_identity', 'single-subject default', promptText);
       removeSelectedTags(selected, ['2girls', '2boys', '3girls', '3boys', 'multiple_girls', 'multiple_boys'], 'ipk.count.solo', 'conflicts with solo', removedTags);
@@ -164,38 +197,38 @@ function applyKnowledgeRules(prompt, items, selected) {
     }
   }
 
-  if (knowledgeIds.has('ipk.gaze.sleep') && /\b(sleep|sleeping|asleep|unconscious|nap|napping)\b/.test(promptText)) {
+  if (knowledgeIds.has('ipk.gaze.sleep') && /\b(sleep|sleeping|asleep|unconscious|nap|napping)\b/.test(matchText)) {
     addRuleTag(selected, 'closed_eyes', 'ipk.gaze.sleep', 'gaze', 'sleep requires closed eyes', promptText);
     removeSelectedTags(selected, ['looking_at_viewer', 'direct_eye_contact', 'open_eyes'], 'ipk.gaze.sleep', 'conflicts with sleeping', removedTags);
     removedPhrases.push(/\blooking at (?:the )?viewer\b/gi, /\bdirect eye contact\b/gi, /\beye contact\b/gi);
     appliedRules.push('ipk.gaze.sleep');
   }
 
-  if (knowledgeIds.has('ipk.camera.closeup') && /\b(close up|closeup|headshot|face focus)\b/.test(promptText)) {
+  if (knowledgeIds.has('ipk.camera.closeup') && /\b(close up|closeup|headshot|face focus)\b/.test(matchText)) {
     addRuleTag(selected, 'close-up', 'ipk.camera.closeup', 'camera', 'explicit close-up framing', promptText);
     removeSelectedTags(selected, ['full_body', 'wide_shot'], 'ipk.camera.closeup', 'conflicts with close-up', removedTags);
     removedPhrases.push(/\bfull body\b/gi, /\bwide shot\b/gi);
     appliedRules.push('ipk.camera.closeup');
-  } else if (knowledgeIds.has('ipk.camera.fullbody') && /\b(full body|whole body)\b/.test(promptText)) {
+  } else if (knowledgeIds.has('ipk.camera.fullbody') && /\b(full body|whole body)\b/.test(matchText)) {
     addRuleTag(selected, 'full_body', 'ipk.camera.fullbody', 'camera', 'explicit full-body framing', promptText);
     removeSelectedTags(selected, ['close-up', 'close_up', 'headshot'], 'ipk.camera.fullbody', 'conflicts with full body', removedTags);
     removedPhrases.push(/\bclose[ -]?up\b/gi, /\bheadshot\b/gi);
     appliedRules.push('ipk.camera.fullbody');
   }
 
-  if (knowledgeIds.has('ipk.gaze.away') && /\b(from behind|back view|facing away)\b/.test(promptText) && !/\bover shoulder\b/.test(promptText)) {
+  if (knowledgeIds.has('ipk.gaze.away') && /\b(from behind|back view|facing away)\b/.test(matchText) && !/\bover shoulder\b/.test(matchText)) {
     removeSelectedTags(selected, ['looking_at_viewer'], 'ipk.gaze.away', 'conflicts with facing away', removedTags);
     removedPhrases.push(/\blooking at (?:the )?viewer\b/gi, /\bdirect eye contact\b/gi);
     appliedRules.push('ipk.gaze.away');
   }
 
-  if (knowledgeIds.has('ipk.environment.night') && /\b(night|nighttime|evening)\b/.test(promptText)) {
+  if (knowledgeIds.has('ipk.environment.night') && /\b(night|nighttime|evening)\b/.test(matchText)) {
     addRuleTag(selected, 'night', 'ipk.environment.night', 'environment', 'explicit night scene', promptText);
     removeSelectedTags(selected, ['bright_sunlight', 'daytime'], 'ipk.environment.night', 'conflicts with night', removedTags);
     appliedRules.push('ipk.environment.night');
   }
 
-  if (knowledgeIds.has('ipk.environment.day') && /\b(day|daytime|morning|afternoon)\b/.test(promptText)) {
+  if (knowledgeIds.has('ipk.environment.day') && /\b(day|daytime|morning|afternoon)\b/.test(matchText)) {
     removeSelectedTags(selected, ['night', 'moonlight'], 'ipk.environment.day', 'conflicts with daytime', removedTags);
     appliedRules.push('ipk.environment.day');
   }
@@ -229,9 +262,9 @@ function cleanOriginalPrompt(prompt, removedPhrases) {
     .trim();
 }
 
-export function composeImagePrompt(prompt, items = []) {
-  const selected = selectExecutableTags(prompt, items);
-  const ruleResult = applyKnowledgeRules(prompt, items, selected);
+export function composeImagePrompt(prompt, items = [], { ragQuery = '' } = {}) {
+  const selected = selectExecutableTags(prompt, items, ragQuery);
+  const ruleResult = applyKnowledgeRules(prompt, items, selected, ragQuery);
   resolveSelectedConflicts(selected, ruleResult.removedTags);
   selected.sort((a, b) => b.score - a.score || b.priority - a.priority);
 
@@ -249,7 +282,7 @@ export function composeImagePrompt(prompt, items = []) {
 function persistPreparation(result, db = getDb()) {
   const snapshot = {
     scene: result.scene,
-    query: result.promptOriginal,
+    query: result.ragQuery,
     selectedTags: result.selection.selectedTags,
     removedTags: result.selection.removedTags,
     appliedRules: result.selection.appliedRules,
@@ -283,8 +316,23 @@ function emptySelection() {
   return { selectedTags: [], removedTags: [], appliedRules: [] };
 }
 
+function emptyRetrieval() {
+  return { mode: 'none', items: [], knowledgeIds: [], knowledgeVersion: '' };
+}
+
+/**
+ * 业务侧传入的中文描述优先作为 RAG query；没有中文时回退英文 prompt。
+ */
+export function resolveImageRagQuery(prompt, ragQuery) {
+  const original = String(prompt || '').trim();
+  const provided = String(ragQuery || '').trim();
+  return /[\p{Script=Han}]/u.test(provided) ? provided : original;
+}
+
 export async function prepareImagePrompt(prompt, {
   scene = 'chat',
+  ragQuery = '',
+  disableRAG = false,
   alreadyPrepared = false,
   skipOptimization = false,
   persist = true,
@@ -295,19 +343,23 @@ export async function prepareImagePrompt(prompt, {
   scene = sceneAliases[scene] || scene;
   const original = String(prompt || '').trim();
   if (!original) {
-    return { promptOriginal: original, promptRefined: original, status: 'empty', scene, retrieval: { mode: 'none', items: [], knowledgeIds: [], knowledgeVersion: '' }, selection: emptySelection() };
+    return { promptOriginal: original, promptRefined: original, ragQuery: original, status: 'empty', scene, retrieval: emptyRetrieval(), selection: emptySelection() };
+  }
+  if (disableRAG) {
+    return { promptOriginal: original, promptRefined: original, ragQuery: original, status: 'rag_disabled', scene, retrieval: { mode: 'rag_disabled', items: [], knowledgeIds: [], knowledgeVersion: '' }, selection: emptySelection() };
   }
   if (alreadyPrepared || skipOptimization) {
-    return { promptOriginal: original, promptRefined: original, status: 'skipped', scene, retrieval: { mode: 'none', items: [], knowledgeIds: [], knowledgeVersion: '' }, selection: emptySelection() };
+    return { promptOriginal: original, promptRefined: original, ragQuery: original, status: 'skipped', scene, retrieval: emptyRetrieval(), selection: emptySelection() };
   }
 
+  const retrievalQuery = resolveImageRagQuery(original, ragQuery);
   const database = db || getDb();
-  const retrieval = await retrieveImagePromptKnowledge(original, { scene, db: database, timeoutMs: ragTimeoutMs });
-  const selection = composeImagePrompt(original, retrieval.items);
+  const retrieval = await retrieveImagePromptKnowledge(retrievalQuery, { scene, db: database, timeoutMs: ragTimeoutMs });
+  const selection = composeImagePrompt(original, retrieval.items, { ragQuery: retrievalQuery });
   const foundTags = selection.selectedTags.map(item => item.tag);
-  console.log(`[imagePromptKnowledge] mode=${retrieval.mode} duration=${retrieval.durationMs}ms tags=${JSON.stringify(foundTags)}`);
+  console.log(`[imagePromptKnowledge] query=${JSON.stringify(retrievalQuery.slice(0, 160))} mode=${retrieval.mode} duration=${retrieval.durationMs}ms tags=${JSON.stringify(foundTags)}`);
   const status = selection.promptRefined === original ? 'fallback' : 'deterministic';
-  const result = { promptOriginal: original, promptRefined: selection.promptRefined, status, scene, retrieval, selection };
+  const result = { promptOriginal: original, ragQuery: retrievalQuery, promptRefined: selection.promptRefined, status, scene, retrieval, selection };
   if (persist) result.preparationId = persistPreparation(result, database);
   return result;
 }

@@ -634,6 +634,7 @@ ${rules}`;
     const originalImagePrompt = imagePrompt;
     const charArtist = charArtistOverrideWithFallback(character, otherChars);
     const genResult = await generateImageRaw(imagePrompt, {
+      ragQuery: text,
       artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
       width: config.comfyui.momentsWidth,
       height: config.comfyui.momentsHeight,

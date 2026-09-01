@@ -105,9 +105,9 @@ async function processReply(db, letter) {
     const charArtist = charArtistOverride(letter);
     if (charArtist !== null) genOverrides.artist = charArtist;
     const [paperResult, portraitResult, illustrationResult] = await Promise.all([
-      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, ...genOverrides }),
-      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200, ...genOverrides }),
-      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, ...genOverrides }),
+      generateImageSafe(data.paperPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, disableRAG: true, ...genOverrides }),
+      generateImageSafe(data.portraitPrompt, charLoras, charCustomWorkflow, { width: 900, height: 1200, disableRAG: true, ...genOverrides }),
+      generateImageSafe(data.illustrationPrompt, charLoras, charCustomWorkflow, { width: 1200, height: 900, disableRAG: true, ...genOverrides }),
     ]);
 
     if (!paperResult || !portraitResult || !illustrationResult) {

@@ -541,6 +541,7 @@ router.post('/:characterId/peek', async (req, res) => {
 
       // 用日程事件参数生图
       const result = await generateImage(generatedPrompt, {
+        ragQuery: `${charName}在${activity.location}${effectiveActivity}，具体表现是${effectiveDescription}`,
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,

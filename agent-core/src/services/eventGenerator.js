@@ -537,6 +537,7 @@ ${directorPrompt}`
   try {
     const charArtist = charArtistOverrideWithFallback(character, otherChars);
     const genResult = await generateImageRaw(eventData.prompt, {
+      ragQuery: eventData.description,
       artist: charArtist !== null ? charArtist : config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
@@ -920,6 +921,7 @@ ${directorPrompt2}${prevSceneBlock}`
   try {
     const charArtist = charArtistOverrideWithFallback(character, branchOtherChars);
     const genResult = await generateImageRaw(branchData.prompt, {
+      ragQuery: branchData.description || event.description,
       artist: charArtist !== null ? charArtist : config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight, scene: 'events',

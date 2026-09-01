@@ -524,6 +524,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
       ? { width: config.comfyui.momentsWidth, height: config.comfyui.momentsHeight }
       : {};
     const result = await generateImage(preparedPrompt, {
+      ragQuery: options.ragQuery,
       scene: 'group',
       workflowScene: 'group',
       promptScene: 'chat',
@@ -888,6 +889,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         {
           ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined,
           priority: (trigger === 'idle' || trigger === 'opening') ? 'low' : undefined,
+          ragQuery: parsed.text || [...written].reverse().find(w => w.speaker_character_id === speaker.id && w.content)?.content || '',
           useMomentsResolution: trigger === 'idle' || trigger === 'opening',
         },
       ));

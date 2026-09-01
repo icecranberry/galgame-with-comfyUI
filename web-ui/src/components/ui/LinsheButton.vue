@@ -8,12 +8,17 @@
         'ls-btn--block': block,
         'ls-btn--active': active,
         'ls-btn--tone-danger': tone === 'danger',
+        'ls-btn--jelly-enter': jellyPhase === 'enter',
+        'ls-btn--jelly-leave': jellyPhase === 'leave',
         'ls-btn--loading': loading,
       },
     ]"
     :type="type"
     :disabled="disabled || loading"
     :aria-busy="loading || undefined"
+    @mouseenter="startJelly('enter')"
+    @mouseleave="startJelly('leave')"
+    @animationend="endJelly"
   >
     <span v-if="loading" class="ls-btn__spinner" aria-hidden="true"></span>
     <slot></slot>
@@ -21,6 +26,8 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
+
 defineProps({
   /** primary 主操作 / secondary 次要 / danger 危险 / ghost 幽灵 / icon 圆形图标钮 / chip 胶囊选择 / link 链接 */
   variant: { type: String, default: 'secondary' },
@@ -36,14 +43,40 @@ defineProps({
   /** 色调覆盖：danger 时 link/ghost 等变体转红色 */
   tone: { type: String, default: 'default' },
 })
+
+const jellyPhase = ref('')
+
+const startJelly = (phase) => {
+  jellyPhase.value = phase
+}
+
+const endJelly = (event) => {
+  if (event.target === event.currentTarget) {
+    jellyPhase.value = ''
+  }
+}
 </script>
 
 <style scoped>
 /* ── 软糖立体按钮 ──
    结构：亮面填充 + 同色系深色厚底(硬投影) + 顶部高光
    按压：整体下沉、厚底压扁                          */
+@property --ls-jelly-x {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --ls-jelly-y {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
 .ls-btn {
   --depth: 3px;
+  --ls-jelly-x: 1;
+  --ls-jelly-y: 1;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -58,6 +91,7 @@ defineProps({
   line-height: 1.2;
   white-space: nowrap;
   user-select: none;
+  transform: scale(var(--ls-jelly-x), var(--ls-jelly-y));
   -webkit-tap-highlight-color: transparent;
   border-radius: 10px;
   transition:
@@ -71,6 +105,23 @@ defineProps({
 }
 
 /* ── 尺寸 ── */
+/* 移入/移出各触发一次完整果冻弹动 */
+.ls-btn--jelly-enter { animation: ls-btn-jelly-enter 0.3s cubic-bezier(0.3, 1.15, 0.4, 1) both; }
+.ls-btn--jelly-leave { animation: ls-btn-jelly-leave 0.3s cubic-bezier(0.3, 1.15, 0.4, 1) both; }
+
+@keyframes ls-btn-jelly-enter {
+  0% { --ls-jelly-x: 1; --ls-jelly-y: 1; }
+  45% { --ls-jelly-x: 1.04; --ls-jelly-y: 0.96; }
+  72% { --ls-jelly-x: 0.992; --ls-jelly-y: 1.008; }
+  100% { --ls-jelly-x: 1; --ls-jelly-y: 1; }
+}
+
+@keyframes ls-btn-jelly-leave {
+  0% { --ls-jelly-x: 1; --ls-jelly-y: 1; }
+  45% { --ls-jelly-x: 1.04; --ls-jelly-y: 0.96; }
+  72% { --ls-jelly-x: 0.992; --ls-jelly-y: 1.008; }
+  100% { --ls-jelly-x: 1; --ls-jelly-y: 1; }
+}
 .ls-btn--sm { --depth: 2px; min-height: 26px; padding: 4px 10px; font-size: 12px; border-radius: 8px; gap: 4px; }
 .ls-btn--md { --depth: 3px; min-height: 32px; padding: 7px 14px; font-size: 13px; }
 .ls-btn--lg { --depth: 4px; min-height: 42px; padding: 11px 20px; font-size: 14px; border-radius: 12px; }
@@ -203,6 +254,8 @@ defineProps({
 /* ── 减弱动效 ── */
 @media (prefers-reduced-motion: reduce) {
   .ls-btn { transition: none; }
+  .ls-btn--jelly-enter,
+  .ls-btn--jelly-leave { animation: none; }
   .ls-btn__spinner { animation-duration: 1.5s; }
 }
 </style>

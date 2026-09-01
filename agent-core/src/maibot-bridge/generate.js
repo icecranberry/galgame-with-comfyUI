@@ -25,7 +25,7 @@ export function parseLoras(char) {
   }
 }
 
-export function startImageTask({ character, conversationId, prompt, assistantMsgId = null }) {
+export function startImageTask({ character, conversationId, prompt, assistantMsgId = null, ragQuery = "" }) {
   const db = getDb();
   const taskResult = db.prepare(
     `INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status)
@@ -40,7 +40,7 @@ export function startImageTask({ character, conversationId, prompt, assistantMsg
   const charArtist = charArtistOverride(character);
   if (charArtist !== null) loraOpts.artist = charArtist;
 
-  generateImage(prompt, { scene: 'chat', ragTimeoutMs: RAG_TIMEOUT_FAST_MS, ...loraOpts })
+  generateImage(prompt, { ragQuery, scene: 'chat', ragTimeoutMs: RAG_TIMEOUT_FAST_MS, ...loraOpts })
     .then((result) => {
       if (result.success && result.images.length > 0) {
         const urls = [];

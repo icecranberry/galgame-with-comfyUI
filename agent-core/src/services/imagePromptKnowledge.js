@@ -47,7 +47,18 @@ function parseExecutableTags(value) {
 function tokenize(text) {
   const normalized = String(text || '').toLowerCase();
   const latin = normalized.match(/[a-z0-9_()-]{2,}/g) || [];
-  const han = normalized.match(/[\u3400-\u9fff]{1,4}/g) || [];
+  // 中文按固定 4 字切块会错过语料 key（如“穿地雷系...”错过“地雷系”）。
+  // 使用滑动 n-gram 才能命中标签里的连续子串。
+  const han = [...normalized.matchAll(/[\u3400-\u9fff]+/g)].flatMap(([word]) => {
+    if (word.length === 1) return [word];
+    const grams = [];
+    for (let size = Math.min(4, word.length); size >= 2; size -= 1) {
+      for (let index = 0; index <= word.length - size; index += 1) {
+        grams.push(word.slice(index, index + size));
+      }
+    }
+    return grams;
+  });
   return [...new Set([...latin, ...han])];
 }
 

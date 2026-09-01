@@ -39,10 +39,10 @@
             <!-- 头像 -->
             <div class="detail-avatar-row">
               <div
-                class="detail-avatar clickable"
-                :style="character?.avatar_path ? { backgroundImage: `url(${character.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
-                @click="$emit('open-avatar-editor', character)"
-              >{{ character?.avatar_path ? '' : character?.display_name?.charAt(0) }}</div>
+              <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
+                <img v-if="character?.avatar_path" :src="character.avatar_path" class="detail-avatar-img" alt="" />
+                <span v-else>{{ character?.display_name?.charAt(0) }}</span>
+              </div>
               <div>
                 <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
                 <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
@@ -958,8 +958,15 @@ async function saveOutfits() {
 .detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .detail-avatar {
   width: 64px; height: 64px; border-radius: 50%;
+  background: #e07b6c;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 26px; font-weight: 700; flex-shrink: 0;
+}
+.detail-avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
 .detail-avatar.clickable:hover { opacity: 0.85; }

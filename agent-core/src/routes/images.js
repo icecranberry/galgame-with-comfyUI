@@ -163,7 +163,7 @@ router.get('/tasks/:id', (req, res) => {
 
 // POST /api/images/generate — 直接调用生图（独立于聊天之外的触发方式）
 router.post('/generate', async (req, res) => {
-  const { conversation_id, prompt } = req.body;
+  const { conversation_id, prompt, rag_query } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt is required' });
 
   const db = getDb();
@@ -176,7 +176,7 @@ router.post('/generate', async (req, res) => {
   const taskId = taskResult.lastInsertRowid;
 
   // 异步执行，立即返回 taskId
-  generateImage(prompt, { promptScene: 'standalone', ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
+  generateImage(prompt, { promptScene: 'standalone', ragQuery: rag_query, ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
     .then(result => {
       if (result.success) {
         db.prepare(`
@@ -310,6 +310,7 @@ router.post('/test-style', async (req, res) => {
 
   try {
     const result = await generateImageRaw(prompt, {
+      ragQuery: freeScene || '',
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       artist: finalArtist,
       width: finalWidth,
@@ -682,6 +683,7 @@ async function startImageEditTask(action, url) {
         height: opts.height,
         scene: CATEGORY_SCENE[category] || 'chat',
         alreadyPrepared: true,
+        disableRAG: true,
         persistPreparation: false,
         onProgress,
       };
