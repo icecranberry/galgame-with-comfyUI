@@ -70,14 +70,18 @@ function chineseHanBigrams(text) {
 }
 
 // 中文不像英文可以用空格分词；用保守的 Han bigram 重叠容忍“地雷女/地雷系”这类近义措辞。
+// 短 query 往往只与 label 共享一个 2 字词（如「初音未来口交」×「蹲姿口交」只共享「口交」），
+// 单 gram 命中给中间分而不是一票否决，否则带注解/修饰的 label 永远无法被选为可执行 tag。
 function scoreChineseLabelOverlap(labelText, matchText) {
   if (!/[\p{Script=Han}]/u.test(labelText || '') || !/[\p{Script=Han}]/u.test(matchText || '')) return 0;
   const labelGrams = chineseHanBigrams(labelText);
-  if (labelGrams.length < 2) return 0;
+  if (labelGrams.length === 0) return 0;
   const matchGrams = new Set(chineseHanBigrams(matchText));
   const matched = labelGrams.filter(gram => matchGrams.has(gram)).length;
-  if (matched < 2 || matched / labelGrams.length < 0.5) return 0;
-  return matched === labelGrams.length ? 16 : 14;
+  if (matched === 0) return 0;
+  if (matched === labelGrams.length) return 16;
+  if (matched / labelGrams.length >= 0.5) return 14;
+  return 10;
 }
 
 function scoreExecutableTag(promptText, entry) {

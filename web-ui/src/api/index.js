@@ -830,11 +830,12 @@ export async function updateUserConfig(data) {
 
 // ── 测试画风（固定提示词，不存 DB；mode: 'chat' | 'moments'；prompt 可选覆盖默认；
 // sceneDesc 可选自由画面描述 → LLM 完善；reuseSceneLoras 复用上次自由画面测试匹配到的角色 lora）──
-export async function testStyle({ artist, width, height, mode = 'chat', prompt = '', sceneDesc = '', reuseSceneLoras = false } = {}) {
+export async function testStyle({ artist, width, height, mode = 'chat', prompt = '', sceneDesc = '', reuseSceneLoras = false, alreadyPrepared = false } = {}) {
   const body = { artist, width, height, mode };
   if (prompt) body.prompt = prompt;
   if (sceneDesc) body.sceneDesc = sceneDesc;
   if (reuseSceneLoras) body.reuseSceneLoras = true;
+  if (alreadyPrepared) body.alreadyPrepared = true;
   const res = await fetch(`${BASE}/images/test-style`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

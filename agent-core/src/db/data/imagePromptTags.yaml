@@ -9,115 +9,6 @@
         futanari,testicles:1.2,penis,pussy: 扶她
         huge testicles,futanari,massive erect penis,veiny penis,thick shaft: 粗牛子
         huge penis:1.2,huge testicles:1.2: 大牛子
-        erection: 硬起来
-        precum: 前列腺液
-        flaccid: 软牛子
-        hetero: 异性恋
-        1girl: 1女孩
-        1boy: 1男孩
-        2girls: 2女孩
-        2boys: 2男孩
-        3girls: 3女孩
-        3boys: 3男孩
-        girl: 女孩
-        boy: 男孩
-        solo: 单人
-        multiple girls: 多个女孩
-        little girl: 小女孩
-        little boy: 小男孩
-        shota: 正太
-        loli: 萝莉
-        kawaii: 可爱
-        mesugaki: 雌小鬼
-        adorable girl: 可爱的女孩
-        bishoujo: 美少女
-        gyaru: 辣妹
-        sisters: 姐妹
-        ojousama: 大小姐
-        female: 女性
-        mature female: 成熟女性
-        mature: 成熟
-        female pervert: 痴女
-        male: 男性
-        milf: 熟女
-        otoko no ko: 伪娘
-        crossdressing: 伪娘
-
-    - name: 头发
-      color: rgba(255, 123, 2, .4)
-      tags:
-        floating hair: 飞舞的头发
-        curl inside hair,naturally wavy hair: 卷曲的头发
-        straight hair: 直发
-        short hair: 短发
-        curly hair: 卷发
-        long hair: 长发
-        pony-tail: 马尾
-        bunches: 双马尾
-        streaked hair: 挑染
-        grey gradient hair: 灰色渐变
-        light brown hair: 亮棕
-        two-tone hair: 双色
-        multicolored hair: 五颜六色
-        high ponytail: 高马尾
-        twintails: 双马尾二
-        braided ponytail: 马尾编发
-        ponytail: 马尾辫
-        short ponytail: 短马尾
-        twin braids: 双辫子
-        medium hair: 中发
-        very long hair: 超长发
-        braided bangs: 辫子刘海
-        swept bangs: 侧扫刘海
-        hair between eyes: 眼间头发
-        bob cut: 妹妹切
-        hime cut: 公主切
-        crossed bangs: 交叉刘海
-        bangs: 刘海
-        blunt bangs: 齐刘海
-        air bangs: 空气刘海
-        hair wings: 翼状头发
-        long bangs: 长刘海
-        side blunt bangs: 侧面空气刘海
-        centre parting bangs: 中分刘海
-        asymmetric bangs: 不对称刘海
-        disheveled hair: 蓬发
-        wavy hair: 波浪形头发
-        hair in takes: 收拢
-        hair pink flowers: 粉色花
-        ahoge: 呆毛
-        antenna hair: 多根呆毛
-        Side ponytail: 侧马尾
-        forehead: 露额头
-        drill hair: 钻头卷公主卷
-        hair bun: 包子头
-        double bun: 俩包子头
-        messy hair: 凌乱发型
-        hair flaps: 发翼
-        high bun: 高盘发
-        low bun: 低盘发
-        messy bun: 凌乱盘发
-        crown braid, hair bun: 皇冠式盘发
-
-    - name: 眉毛
-      color: rgba(255, 123, 2, .4)
-      tags:
-        frown: 皱眉/蹙额
-        thick eyebrows: 浓眉
-        cocked eyebrow: 眉毛翘起
-        short eyebrows: 短眉毛
-        v-shaped eyebrows: V字眉
-        furrowed brow: 眉头紧锁 (表现忧虑或极度愤怒)
-        one eyebrow raised: 单撇眉 (怀疑或戏谑)
-        raised eyebrows: 扬眉 (惊讶或兴奋)
-        slanted eyebrows: 斜眉 (通常指发怒时的倒八字)
-        knitted eyebrows: 攒眉 (由于痛苦或思考紧锁)
-        disbelieving eyebrow: 怀疑的眉毛 (一边高一边低)
-        quivering eyebrows: 眉毛颤抖 (极度隐忍或想哭)
-        angrily raised eyebrows: 怒目圆睁 (眉头向上挑起)
-        worried eyebrows: 忧虑的眉毛 (八字眉，眉头高、眉尾低)
-        lowered eyebrows: 低眉 (表现沮丧、阴沉或思考)
-        eyebrows visible through hair: 眉毛透发 (强调为了表达动态，眉毛穿透刘海显示)
 
     - name: 眼睛
       color: rgba(255, 123, 2, .4)
@@ -257,26 +148,10 @@
         nippleless clothes: 无乳头衣服设计（但胸部可见）
         bare shoulders: 露肩
 
-    - name: 腰部
-      color: rgba(255, 123, 2, .4)
-      tags:
-        narrow waist: 细腰
-        slender waist: 纤细的腰
-
     - name: 腹部
       color: rgba(255, 123, 2, .4)
       tags:
-        pubic hair: 阴毛,
-        cleft of venus: 一线天
         big clitoris,clitoral foreskin,cute pussy,enlarged labia,developed inner labia,vagina: 夸张的小穴
-        pussy,clitoris,labia: 详细的小穴
-        midriff: 腹部
-        belly: 肚子
-        absolute territory: 腹肌
-        inflation: 隆起的腹部
-        navel: 肚脐
-        groin: 腹股沟
-        pregnant: 怀孕
 
 - name: 服饰
   groups:
@@ -330,36 +205,6 @@
     - name: 风格
       color: rgba(230, 84, 128, .4)
       tags:
-        china dress: 中国服饰
-        chinese style: 中国风
-        traditional clothes: 传统服装|民族服装
-        japanese clothes: 日式服装
-        hanten (clothes): 袢缠(日式
-        hanbok: 韩服
-        korean clothes: 朝鲜服饰
-        western: 西部风格
-        german clothes: 德国服装
-        gothic: 哥特风格
-        lolita: 洛丽塔风格
-        gothic lolita: 哥特洛丽塔风格
-        byzantine fashion: 拜占庭风格
-        Tropical: 热带特征的
-        indian style: 印度风格
-        Ao Dai: 越南校服（奥黛）
-        ainu clothes: 阿伊努人的服饰
-        arabian clothes: 阿拉伯服饰
-        egyptian clothes: 埃及风格服饰
-        costume: 套装
-        animal costume: 动物系套装(皮套)
-        bunny costume: 兔子服装
-        adapted costume: 原设服装改编
-        cat costume: 猫系服装
-        dog costume: 皮套狗
-        bear costume: 熊套装
-        embellished costume: 经润饰的服装
-        santa costume: 圣诞风格服装
-        halloween costume: 万圣节服装
-        kourindou tengu costume: 香霖堂天狗装束
         alternate costume: 与原设不同衣服
         costume switch: 换衣play
         meme attire: 模因服装
@@ -388,9 +233,6 @@
       color: rgba(230, 84, 128, .4)
       tags:
         tied shirt,micro bikini,plaid skirt,pleated micro skirt,midriff,loose belt,belt buckle: 系带衬衣里漏比基尼
-        swimsuit: 泳装
-        swimwear: 泳衣
-        wet swimsuit: 湿泳衣
         school swimsuit: 学校泳装（死库水）
         new school swimsuit: 新式死库水
         old school swimsuit: 旧式死库水
@@ -401,7 +243,6 @@
         highleg swimsuit: 高开衩的泳衣
         one-piece swimsuit: 一体式泳衣
         swimsuit of perpetual summer: 常夏的泳衣(fgo学妹灵衣)
-        bikini: 比基尼
         highleg bikini: 高腰比基尼
         lowleg bikini: 低腰比基尼
         slingshot swimsuit: V字泳衣
@@ -441,10 +282,6 @@
         swimsuit under clothes: 衣服里面穿着泳衣
         torn swimsuit: 破损的泳衣
         bikini skirt: 比基尼裙
-        swim briefs: 泳裤
-        swim cap: 泳帽
-        swim trunks: 泳裤
-        male swimwear: 男用泳裤
 
     - name: 色气衣服
       color: rgba(230, 84, 128, .4)
@@ -521,7 +358,6 @@
         dress shirt: 西服衬衫
         sailor shirt: 水手服衬衫
         cropped shirt: 短衬衫
-        t-shirt: T恤
         casual T-shirts: 日常T恤
         short sleeve T-shirts: 短袖T恤
         off-shoulder shirt: 露肩衬衫(搭肩衫)
@@ -537,7 +373,6 @@
         plaid shirt: 格子衬衫
         polo shirt: 马球衫
         print shirt: 印花衬衫
-        shirt: 衬衫
         sleeveless hoodie: 无袖连帽衫
         sleeveless shirt: 无袖衬衫
         striped shirt: 条纹衬衫
@@ -611,7 +446,6 @@
         shirt tug: 拖拽衬衫
         untucked shirt: 解开的衬衫
         lifted by self: 掀自己衣服
-        untied: 掀自己衣服
         open clothes: 敞开的衣服
         unbuttoned shirt: 解开纽扣的衬衫
         button gap: 纽扣之间的缝隙(没解开
@@ -621,7 +455,6 @@
         shirt removed: 脱下衬衫
         wardrobe error: 衣服滑落
         undersized clothes: 穿衣方式错了
-        tight: 衣物紧紧的
         wedgie: 嵌入(拉裆部衣物所致)
         wardrobe malfunction: 衣服出了意外(如崩开)
         taut shirt: 绷紧的衬衫
@@ -875,7 +708,6 @@
         dressing another: 着装
         shorts under skirt: 短裙里穿着短裤
 # --- [短裤类 - Shorts & Hotpants] ---
-        shorts: 短裤
         short shorts: 超短裤 (热裤)
         micro shorts: 微型短裤 (极短)
         hot pants: 热裤
@@ -899,7 +731,6 @@
         spats: 紧身运动短裤 (通常穿在裙下)
         
         # --- [长裤与特定款式 - Pants & Trousers] ---
-        pants: 长裤
         jeans: 牛仔裤
         cargo pants: 工装裤
         camouflage pants: 迷彩裤
@@ -958,7 +789,6 @@
       color: rgba(230, 84, 128, .4)
       tags:
         # --- [胸罩款式 - Bras & Tops] ---
-        bra: 胸罩
         sports bra: 运动内衣
         front buckle bra: 前扣式胸罩
         strapless bra: 无肩带胸罩
@@ -971,7 +801,6 @@
         sheer bra: 半透明胸罩
         
         # --- [内裤款式 - Panties & Bottoms] ---
-        panties: 内裤
         low waist panties: 低腰内裤
         high leg panties: 高叉内裤
         side-tie panties: 系带内裤 (绳子勒肉感)
@@ -2365,7 +2194,6 @@
         thigh squeeze: 大腿挤压 (紧张/发情夹紧)
         leg rub: 腿摩擦 (不安/发情摩擦)
         leg tremble: 腿颤抖 (高潮后/快感腿抖)
-        between legs: (强调)两腿之间 (视角/焦点)
         view between legs: 从腿间视角 (upskirt/下体特写)
         crotch focus: 裆部焦点 (腿开+阴部强调)
         cameltoe: 骆驼趾 (内裤轮廓极明显)
@@ -2423,109 +2251,6 @@
         cumdrip,dripping pussy juices: 滴出的精液
         lactating: 喷奶
         ejaculating: 射精
-# --- [亲密前戏与互动 - Intimacy & Foreplay] ---
-        eye contact: 眼对眼 (对视)
-        facing another: 面对另一个
-        back-to-back: 背对背
-        holding hands: 牵手
-        interlocked fingers: 紧扣的双手
-        hug: 拥抱
-        princess carry: 公主抱
-        lap pillow: 膝枕
-        kabedon: 壁咚
-        mimikaki: 掏耳勺 (采耳)
-        sharing food: 共享食物 (嘴对嘴喂)
-        feeding: 喂食
-        shared bathing: 共浴 (鸳鸯浴)
-        mixed bathing: 混浴
-        imminent kiss: 即将接吻
-        french kiss: 法式湿吻
-        deep kiss: 深吻 (舌头缠绕)
-        tongue kiss: 舌吻 (舌头外露)
-        neck kiss: 吻脖子
-        ear biting: 咬耳朵
-        nibbling: 轻咬 (耳朵/脖子/乳头)
-        saliva trail: 口水拉丝 (吻后/色气)
-        biting lip: 咬唇 (诱惑/忍耐)
-        
-        # --- [口部与液体细节 - Oral & Fluids] ---
-        tongue: 舌头
-        tongue out: 吐舌头
-        long tongue: 长舌头
-        uvula: 小舌头 (悬雍垂/喉咙深处特写)
-        oral invitation: 迎接射精而伸出舌头
-        tongue out drooling: 吐舌流口水
-        drooling: 流口水
-        gasping: 喘息
-        heavy breathing: 剧烈喘息
-        moaning: 呻吟
-        sound effects: 拟声词 (画面中的特效字)
-        bukkake: 颜射
-        cum on face: 颜射 (特写)
-        cum on body: 身体射精
-        cum on tongue: 舌上射精
-        cum in mouth: 口内射精
-        swallowing: 吞精
-        cum string: 精液拉丝
-        cumdrip: 滴出的精液 (dripping pussy juices)
-        creampie: 内射 (中出)
-        internal cumshot: 体内射精
-        cum overflow: 精液溢出
-        
-        # --- [体位与核心性交 - Positions & Core Sex] ---
-        missionary: 正常位 (传教士)
-        mating press: 传教士压腿 (腿压胸极深插入)
-        doggystyle: 后入式
-        cowgirl position: 女上位
-        reverse cowgirl: 反向女上位
-        spooning: 侧卧后入
-        lotus position sex: 莲花位 (面对面坐插)
-        standing sex: 站立插入
-        against wall: 靠墙插入
-        lifted by another: 被抱起插入
-        carrying sex: 公主抱插入
-        against glass: 挤压玻璃插入
-        sixty nine: 69体位
-        piledriver: 倒立插入 (腿过头)
-        full nelson: 全ネルソン (从后抱头+插入)
-        public sex: 公然性交
-        hidden sex: 隐藏性交 (裙下/衣服遮挡)
-        group sex: 群交
-        gangbang: 轮奸
-        tentacle sex: 触手性交
-        monster sex: 怪物性交
-        
-        # --- [性器官与器械互动 - Organs & Toys] ---
-        fellatio: 口交 (泛用)
-        blowjob: 口交 (更直观)
-        deepthroat: 深喉
-        irrumatio: 主动口交 (对方插入嘴)
-        licking penis: 舔阴茎
-        double fellatio: 双人口交
-        triple fellatio: 三人口交
-        face fuck: 脸部抽插
-        paizuri: 乳交
-        asymmetrical docking: 胸部互碰 (胸顶着胸)
-        symmetrical docking: 胸挤胸
-        thighjob: 大腿交
-        footjob: 足交
-        handjob: 手交
-        fingering: 指交
-        cunnilingus: 舔阴
-        fingering ass: 指交肛门
-        anal fingering: 肛门指交
-        anilingus: 舔肛 (rimming)
-        double penetration: 双重插入 (阴道+肛门)
-        triple penetration: 三重插入 (嘴+阴+肛)
-        facesitting: 坐脸
-        queening: 女王坐 (坐脸变体)
-        tribadism: 阴部互磨 (女女)
-        scissoring: 剪刀式 (女女阴部摩擦)
-        yuri, dildo: 双头龙 (vaginal object insertion)
-        vibrator: 跳蛋/震动器
-        remote control vibrator: 遥控跳蛋
-        anal beads: 肛珠
-        dildo insertion: 假阳具插入
         
         # --- [特殊状态与高潮细节 - States & Climax] ---
         ahegao: 阿黑颜 (高潮脸)
@@ -2546,14 +2271,7 @@
     - name: 组别1
       color: rgba(255, 145, 147, .4)
       tags:
-        sex: 性行为
-        anal sex: 肛交
-        doggy style,sex: 后入式
-        fellatio: 口交
-        foot job,penis: 足交
-        hand job,penis: 手交
         girl on top,sex from behind: 女上位后入式
-        masturbation: 自慰
         paizuri,penis,cleavage++,cum,breasts press: 乳交
         gangbang,sex: 轮奸
         leaning forward,ass,after anal,cum,sundress,white dress,gaping,spread anus,thighhighs,table,window,small breasts,frills,lace trim,layered dress: 裙装肛交余韵
@@ -2634,15 +2352,10 @@
         penis,sex,pubic hair,group sex,threesome,hetero,nude,vaginal,nipples,multiple penises,uncensored,double penetration,pussy,anal,long hair,testicles,open mouth,completely nude,lips,female pubic hair,grabbing,navel,spread legs,solo focus,realistic,breasts,indoors,small breasts,brown hair,flat chest: 双穴同插
         double penetration,double sex,pussy object insertion,penis in anal,overflow,tearing up: 含泪双插
         squatting,( nude),penis,hetero,oral,ass,fellatio: 蹲姿口交
-        deepthroat:1.3: 深喉
 
     - name: 组别2
       color: rgba(255, 145, 147, .4)
       tags:
-        fellatio:1.3: 口交
-        sucking penis: 吮吸阴茎
-        Blowjob,penis,fellatio: 口交
-        cockbiting,vampirebiting: 吸血鬼咬屌
         fellatio,all fours,full body: 跪爬口交
         large breasts,thick thighs,blush,humiliation,blowjobselfies,penis,saliva,testicles,fellatio: 自拍口交
         cheek bulge,from side,fellatio,cum on mouth: 鼓腮含精
@@ -2745,7 +2458,6 @@
       color: rgba(255, 145, 147, .4)
       tags:
         female ejaculation,front view,spread legs,pussy: 张腿潮吹
-        masturbation: 自慰
         fingering,schlick,masturbation: 指交自慰
         female masturbation,spread legs,pussy,thighhighs: 过膝袜自慰
         (female masturbation:1.5),closed eyes,open mouth,orgasm,object insertion,vibrator,dildo,sitting,((looking at viewer)),detailed pussy,wet pussy,((pee)),pleasured expression: 振动自慰
@@ -2765,7 +2477,6 @@
         pov,pov crotch,unaligned breasts,motion lines,breast lift,asymmetrical breasts,motion blur,saliva,saliva trail,smirk,hetero,penis,large breasts,nipples nude,close-up,open mouth,tongue: 揉动乳交
         hetero,spiked hair,uncensored,breasts,black hair,penis,nude,blush,clothed female nude male,sweat,oral,tube top,fellatio,purple pants,crop top,strapless,pants,large breasts: 穿衣乳交
         naked girl,beautiful breasts,chest,penis in the middle of the breasts,beautiful chest,naked,beautiful girl,sweat,full of semen,sweatingchest masturbating penis,penis on chest: 乳沟射精
-        paizuri,fellatio: 乳交口交
         hentai reverse suspended congress(sex position),full body,1man,sex: 反悬挂式
         solo,proneposition,prone bone,ass,lying,sex from behind,pillow,pillow hug: 抱枕后入
         fpov photo with tattoo,large penis,press pussy,pussy,large breasts,nipples: 压阴特写

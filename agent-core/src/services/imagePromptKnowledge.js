@@ -9,6 +9,7 @@ const RRF_K = 60;
 const VECTOR_THRESHOLD = 0.22;
 const MAX_PER_CATEGORY = 2;
 const FRAMEWORK_KEYWORD_BOOST = 15;
+const ADULT_RESCUE_SLOTS = 2;
 const VECTOR_SYNC_BATCH_SIZE = 12;
 export const RAG_TIMEOUT_DEFAULT_MS = 8000;
 export const RAG_TIMEOUT_FAST_MS = 2500;
@@ -263,7 +264,27 @@ function fuseRrf(keywordItems, vectorItems, rowsById) {
     .sort((a, b) => b.score - a.score || b.priority - a.priority);
 }
 
-function applyCategoryQuota(items, defaults, limit) {
+// 成人 query 下，角色词（如「初音未来」）的 n-gram 命中常把无关组顶进 topN，而体位等
+// 纯 keyword 召回的 adult 组可能被向量侧条目 + priority 决胜整体挤出配额。
+// 对融合结果中完全缺席的成人类目，从 keyword 召回里补一个最佳条目作保底位。
+export function collectAdultRescueItems(query, fused, keywordItems, { maxSlots = ADULT_RESCUE_SLOTS } = {}) {
+  if (!containsExplicitAdultContent(query)) return [];
+  const fusedAdultCategories = new Set(
+    fused.filter(item => String(item.category || '').startsWith('adult_')).map(item => item.category)
+  );
+  const rescuedCategories = new Set();
+  const rescued = [];
+  for (const item of keywordItems) {
+    if (!String(item.category || '').startsWith('adult_')) continue;
+    if (fusedAdultCategories.has(item.category) || rescuedCategories.has(item.category)) continue;
+    rescuedCategories.add(item.category);
+    rescued.push(item);
+    if (rescued.length >= maxSlots) break;
+  }
+  return rescued;
+}
+
+function applyCategoryQuota(items, defaults, limit, reservedItems = []) {
   const selected = [];
   const ids = new Set();
   const counts = new Map();
@@ -276,6 +297,7 @@ function applyCategoryQuota(items, defaults, limit) {
     counts.set(item.category, count + 1);
   };
 
+  reservedItems.forEach(add);
   items.forEach(add);
   defaults.sort((a, b) => b.priority - a.priority).forEach(add);
   return selected;
@@ -323,7 +345,8 @@ export async function retrieveImagePromptKnowledge(query, { scene = 'chat', limi
 
   const fused = fuseRrf(keywordItems, vectorItems, rowsById);
   const defaults = sceneRows.filter(row => row.is_default).map(rowToItem);
-  const items = applyCategoryQuota(fused, defaults, limit);
+  const rescueItems = collectAdultRescueItems(query, fused, keywordItems);
+  const items = applyCategoryQuota(fused, defaults, limit, rescueItems);
   return {
     mode,
     degraded,

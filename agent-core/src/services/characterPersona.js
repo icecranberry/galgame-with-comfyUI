@@ -9,9 +9,11 @@
  *   - 'full'：整卡 base_prompt（缺失时回退 short_prompt）。needImage 配图/日程拍照/事件/礼物/信件等用。
  *
  * 外观注入（角色外观系统）：当角色存在生效中的限时服饰（通用，可多套叠加）或
- * 角色专属形态（同时至多一套）时，注入块安插在「## 你的外观」标题之后、
- * 原外观正文之前，并附着装优先级说明：限时服饰 > 角色专属形态 > 基础外观，
- * 未提及的部位由基础外观填补。无特殊外观时输出与旧逻辑一致。
+ * 角色专属形态（同时至多一套）时，外观段重组为三段式：
+ *   标题行 → 【限时服饰/角色专属形态】清单 → 【基础外观】原正文（降级为填补参考）→ 【着装裁定】收尾。
+ * 裁定放在末尾（收尾位置权重最高），逐条明确「整体替换、禁止混搭、被覆盖的原发型/原发色
+ * 必须消失」——历史问题：基础外观的 danbooru 标签（如 pink hair）会把限时服饰已改写的部位
+ * 又带回生成画面，仅靠一句优先级说明压不住。无特殊外观时输出与旧逻辑一致。
  */
 
 import { getActiveOutfits } from './outfitService.js';
@@ -33,55 +35,69 @@ export function extractAppearanceSection(basePrompt) {
 
 /**
  * 由生效外观生成注入文本块（纯函数，便于测试）。
- * 着装优先级说明按生效组合分三种（两者都有 / 只有限时 / 只有专属）；无任何生效外观时整段不生成。
+ * 返回三段，由 injectOutfitsIntoAppearance 组装：
+ *   - lead：特殊外观清单，安插在「## 你的外观」标题之后、原正文之前；
+ *   - baseLabel：原正文的降级标注（写明冲突描述无效）；
+ *   - tail：着装裁定，安插在原正文之后收尾（收尾位置权重最高，压制基础外观标签带偏）。
+ * 着装裁定按生效外观组合分三种（两者都有 / 只有限时 / 只有专属）；无任何生效外观时返回 null。
  * @param {{limited?: Array<{name,description}>, exclusive?: {name,description}|null}} outfits
- * @returns {string} 无任何生效外观时返回 ''
+ * @returns {{lead: string, baseLabel: string, tail: string}|null} 无任何生效外观时返回 null
  */
 export function buildOutfitInjectionBlocks(outfits) {
   const limited = Array.isArray(outfits?.limited) ? outfits.limited : [];
   const exclusive = outfits?.exclusive || null;
-  if (limited.length === 0 && !exclusive) return '';
+  if (limited.length === 0 && !exclusive) return null;
 
-  const blocks = [];
+  const leadParts = [];
   if (limited.length > 0) {
     const lines = limited.map((o, i) => `${i + 1}. ${o.name}：${o.description}`);
-    blocks.push(`【限时服饰（当前生效，优先级最高，多套同时叠加）】\n${lines.join('\n')}`);
+    leadParts.push(`【限时服饰（当前生效，优先级最高，多套同时叠加）——画面必须完整呈现以下全部要素】\n${lines.join('\n')}`);
   }
   if (exclusive) {
     // 只有专属形态时没有更高优先级，标注为最高
     const rank = limited.length > 0 ? '优先级次之' : '优先级最高';
-    blocks.push(`【角色专属形态（当前生效，${rank}）】\n1. ${exclusive.name}：${exclusive.description}`);
+    leadParts.push(`【角色专属形态（当前生效，${rank}）——画面必须完整呈现以下全部要素】\n1. ${exclusive.name}：${exclusive.description}`);
   }
 
-  // 着装优先级说明按生效外观组合三选一：两者都有 / 只有限时 / 只有专属（都无时本函数返回 ''，整段不注入）
-  const fallbackRule = '未提及的部位（发型、瞳色、五官、体型等）沿用基础外观，冲突描述一律以特殊外观为准。';
-  let priorityNote;
-  if (limited.length > 0 && exclusive) {
-    priorityNote = `着装优先级：限时服饰 > 角色专属形态 > 基础外观。形象必须首先满足限时服饰，其次满足角色专属形态；两者${fallbackRule}`;
-  } else if (limited.length > 0) {
-    priorityNote = `着装优先级：限时服饰 > 基础外观。形象必须首先满足限时服饰；限时服饰${fallbackRule}`;
-  } else {
-    priorityNote = `着装优先级：角色专属形态 > 基础外观。形象必须首先满足角色专属形态；角色专属形态${fallbackRule}`;
-  }
-  return [...blocks, priorityNote].join('\n\n');
+  // 特殊外观指代与优先级说明按生效外观组合三选一（都无时本函数已返回 null，整段不注入）
+  const both = limited.length > 0 && exclusive;
+  const special = both ? '限时服饰与角色专属形态' : (limited.length > 0 ? '限时服饰' : '角色专属形态');
+  const order = both
+    ? '限时服饰 > 角色专属形态 > 基础外观'
+    : (limited.length > 0 ? '限时服饰 > 基础外观' : '角色专属形态 > 基础外观');
+  const baseLabel = `【基础外观（仅用于填补${special}未提及的部位，与${special}冲突的描述无效）】`;
+
+  const replaceRule = both
+    ? `- 限时服饰与角色专属形态描写到的每个部位（发型、发色、服装、饰品、鞋袜等），其全部属性（颜色、长度、款式、材质）按上述优先级取最高者的描写，必须完全照此描绘——这是对基础外观对应部位的整体替换，不是叠加。`
+    : `- ${special}描写到的每个部位（发型、发色、服装、饰品、鞋袜等），其全部属性（颜色、长度、款式、材质）必须完全按${special}描绘——这是对基础外观对应部位的整体替换，不是叠加。`;
+  const tail = [
+    `【着装裁定（优先级：${order}，逐条执行）】`,
+    replaceRule,
+    `- 基础外观中与上述特殊外观同部位或相冲突的描述一律作废，禁止出现在画面与提示词中；尤其当特殊外观改变了发型或发色时，基础外观的原发型、原发色必须完全消失，不得再出现。`,
+    // 刻意不把「发型」列进沿用基础外观的部位举例（发型/发色是最常被限时服饰改写的部位）
+    `- 只有特殊外观完全未提及的部位（瞳色、五官、体型等）才沿用基础外观。`,
+  ].join('\n');
+
+  return { lead: leadParts.join('\n\n'), baseLabel, tail };
 }
 
 /**
- * 把注入块安插进外观段：标题行之后、原正文之前；正文包进「基础外观」标注。
- * 原文没有外观段时补一个「## 你的外观」段。
+ * 把注入块安插进外观段，重组为三段式：标题行 → 特殊外观清单 → 基础外观（降级标注）→ 着装裁定。
+ * 原文没有外观段时补一个「## 你的外观」段（此时无基础外观正文，不加 baseLabel）。
  * @param {string} appearance extractAppearanceSection 的返回值（可为 ''）
- * @param {string} blocks buildOutfitInjectionBlocks 的返回值（'' 时不做任何事）
+ * @param {{lead, baseLabel, tail}|null} blocks buildOutfitInjectionBlocks 的返回值（null 时不做任何事）
  * @returns {string}
  */
 export function injectOutfitsIntoAppearance(appearance, blocks) {
   if (!blocks) return appearance;
-  if (!appearance.trim()) return `## 你的外观\n${blocks}`;
+  const { lead, baseLabel, tail } = blocks;
+  if (!appearance.trim()) return `## 你的外观\n${lead}\n\n${tail}`;
   const headingEnd = appearance.indexOf('\n');
-  if (headingEnd === -1) return `${appearance}\n${blocks}`;
+  if (headingEnd === -1) return `${appearance}\n${lead}\n\n${tail}`;
   const heading = appearance.slice(0, headingEnd);
   const body = appearance.slice(headingEnd + 1);
-  if (!body.trim()) return `${heading}\n${blocks}`;
-  return `${heading}\n${blocks}\n\n【基础外观（仅用于填补以上未提及的部位）】\n${body}`;
+  if (!body.trim()) return `${heading}\n${lead}\n\n${tail}`;
+  return `${heading}\n${lead}\n\n${baseLabel}\n${body}\n\n${tail}`;
 }
 
 /**

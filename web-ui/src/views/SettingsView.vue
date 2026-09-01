@@ -117,7 +117,9 @@
               v-model="freeSceneDesc"
               class="free-scene-textarea"
               placeholder="（置空使用默认）自由描述任意画面"
-              @focus="sceneDescFocused = true"
+              @focus="onSceneDescFocus"
+              @input="resizeSceneDesc"
+              @keydown.enter.exact="submitOnEnter($event, runFreeSceneTest)"
               @blur="onSceneDescBlur"
             ></textarea>
             <!-- 收起态的单行省略展示（textarea 不支持 ellipsis，用覆盖层实现），点击展开编辑 -->
@@ -154,6 +156,8 @@
           v-model="generatedPrompt"
           class="generated-prompt-box generated-prompt-editor"
           rows="3"
+          @input="resizePromptEditor"
+          @keydown.enter.exact="submitOnEnter($event, runGeneratedPromptTest)"
           @keydown.esc="promptEditing = false"
           @blur="promptEditing = false"
         ></textarea>
@@ -1956,18 +1960,40 @@ const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
 const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
 const freeSceneDesc = ref('')  // 自由画面描述（LLM 完善提示词）
-const generatedPrompt = ref('')  // 自由画面描述生成的 prompt 展示
+const generatedPrompt = ref('')  // RAG 召回合并后的最终 prompt 展示
 const promptEditing = ref(false)  // prompt 展示框的点击编辑态
 const promptEditRef = ref(null)
 
-// 点击 prompt 框进入编辑：textarea 保持点击前的展示高度，光标定位到末尾
-async function startPromptEdit(e) {
-  const boxHeight = e?.currentTarget?.offsetHeight
+// textarea 自动增高，避免内容溢出时出现滚动条
+function resizeTextareaElement(el) {
+  if (!el) return
+  const style = getComputedStyle(el)
+  const borderHeight = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  el.style.height = 'auto'
+  el.style.height = `${Math.max(el.scrollHeight, el.clientHeight) + borderHeight}px`
+}
+
+function submitOnEnter(event, action) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  action()
+}
+
+function resizeSceneDesc() {
+  resizeTextareaElement(sceneDescRef.value)
+}
+
+function resizePromptEditor() {
+  resizeTextareaElement(promptEditRef.value)
+}
+
+// 点击 prompt 框进入编辑：textarea 按完整内容增高，光标定位到末尾
+async function startPromptEdit() {
   promptEditing.value = true
   await nextTick()
+  resizePromptEditor()
   const el = promptEditRef.value
   if (el) {
-    if (boxHeight) el.style.height = `${boxHeight}px`
     el.focus()
     el.setSelectionRange(el.value.length, el.value.length)
   }
@@ -1985,11 +2011,17 @@ function focusSceneDesc() {
   el.setSelectionRange(el.value.length, el.value.length)
 }
 
+function onSceneDescFocus() {
+  sceneDescFocused.value = true
+  nextTick(resizeSceneDesc)
+}
+
 // 失焦收起：清掉手动拖高的内联高度，回到单行
 function onSceneDescBlur(e) {
   sceneDescFocused.value = false
   e.target.style.height = ''
 }
+
 const hireTesting = ref(false)
 const hiresError = ref('')
 const hiresCompare = ref(null)
@@ -2071,7 +2103,7 @@ function formatElapsed(ms) {
   return `${min}min ${sec}s`
 }
 
-async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras = false } = {}) {
+async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras = false, alreadyPrepared = false } = {}) {
   styleTesting.value = true
   styleError.value = ''
   styleImages.value = []
@@ -2090,8 +2122,9 @@ async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras =
       prompt,
       sceneDesc,
       reuseSceneLoras,
+      alreadyPrepared,
     })
-    if (sceneDesc && result.generatedPrompt) generatedPrompt.value = result.generatedPrompt
+    if (result.generatedPrompt) generatedPrompt.value = result.generatedPrompt
     if (result.elapsed != null) styleElapsed.value = result.elapsed
     if (result.timing) styleTiming.value = result.timing
     if (result.success && result.images?.length > 0) {
@@ -2121,6 +2154,17 @@ function runFreeSceneTest() {
   if (!desc || styleTesting.value) return
   generatedPrompt.value = ''
   return executeStyleTest({ sceneDesc: desc })
+}
+
+// 最终 prompt 已包含 RAG 合并结果；回车重生成时跳过重复合并
+function runGeneratedPromptTest() {
+  const prompt = generatedPrompt.value.trim()
+  if (!prompt || styleTesting.value) return
+  return executeStyleTest({
+    prompt,
+    reuseSceneLoras: Boolean(freeSceneDesc.value.trim()),
+    alreadyPrepared: true,
+  })
 }
 
 async function runHiresTest() {
@@ -3060,7 +3104,7 @@ function resetTestPrompts() {
   transition: height 0.18s ease, border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 .free-scene-textarea:focus {
-  height: 58px; min-height: 58px; resize: vertical; overflow: auto;
+  height: auto; min-height: 58px; resize: none; overflow: hidden;
   border-color: var(--accent); background: #fff;
   box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
 }
@@ -3087,7 +3131,7 @@ function resetTestPrompts() {
 .generated-prompt-box.editable { cursor: text; transition: border-color 0.15s; }
 .generated-prompt-box.editable:hover { border-color: var(--accent); }
 .generated-prompt-editor {
-  resize: vertical; overflow: auto; outline: none; font-family: inherit;
+  resize: none; overflow: hidden; outline: none; font-family: inherit;
   color: var(--text-bright); margin-bottom: 12px;
 }
 .generated-prompt-editor:focus { border-color: var(--accent); }

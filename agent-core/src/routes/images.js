@@ -224,7 +224,7 @@ router.get('/tasks/:id/status', (req, res) => {
 // mode: 'chat' (对话配图) | 'moments' (朋友圈配图) | 'event' (奇遇配图)，默认 'chat'
 // sceneDesc: 自由画面描述（可选）→ 分层 LLM 生图链路完善为 prompt 后再生图
 router.post('/test-style', async (req, res) => {
-  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras } = req.body;
+  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras, alreadyPrepared } = req.body;
 
   /**
    * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
@@ -312,6 +312,7 @@ router.post('/test-style', async (req, res) => {
     const result = await generateImageRaw(prompt, {
       ragQuery: freeScene || '',
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+      alreadyPrepared: alreadyPrepared === true,
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
@@ -344,6 +345,8 @@ router.post('/test-style', async (req, res) => {
     if (timing.done) {
       breakdown.overhead = Math.round(elapsed - (timing.done - t0));
     }
+
+    if (result.promptRefined) generatedPrompt = result.promptRefined;
 
     if (result.success) {
       lastStyleTest = {

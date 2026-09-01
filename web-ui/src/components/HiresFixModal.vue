@@ -7,8 +7,6 @@
           <linshe-button variant="icon" @click="close">✕</linshe-button>
         </div>
         <div class="modal-body">
-          <p class="hires-hint">图片进一步高清细化设置，点击图片上的「放大细化」时生效</p>
-
           <div class="hires-main-body">
 
           <div class="hires-section hires-params-section">
@@ -120,19 +118,19 @@
               添加 LoRA
             </div>
             </div>
+            </div>
           </div>
           </div>
 
-          <div class="modal-actions" style="margin-top:16px">
-            <span class="lora-civitai-label">LoRA 获取：</span>
-            <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
-            <span class="lora-civitai-label">或</span>
-            <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
-            <div style="flex:1"></div>
-            <linshe-button variant="primary" @click="save" :disabled="loraLoading">
-              {{ loraLoading ? '保存中…' : '保存' }}
-            </linshe-button>
-          </div>
+        <div class="modal-actions">
+          <span class="lora-civitai-label">LoRA 获取：</span>
+          <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
+          <span class="lora-civitai-label">或</span>
+          <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
+          <div style="flex:1"></div>
+          <linshe-button variant="primary" @click="save" :disabled="loraLoading">
+            {{ loraLoading ? '保存中…' : '保存' }}
+          </linshe-button>
         </div>
       </div>
     </div>
@@ -314,8 +312,14 @@ async function save() {
   border-bottom: 1px solid rgba(0,0,0,0.06);
 }
 .modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.modal-body { padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
-.modal-actions { display: flex; align-items: center; gap: 10px; }
+.modal-body { padding: 16px 22px; overflow-y: auto; flex: 1; scrollbar-width: none; -ms-overflow-style: none; }
+.modal-body::-webkit-scrollbar { display: none; }
+.modal-actions {
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+  padding: 12px 22px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
 
 .hires-hint { margin: 0 0 16px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
 .hires-main-body {
@@ -323,7 +327,6 @@ async function save() {
   border: 1px solid rgba(125, 105, 85, 0.10);
   border-radius: 14px;
   padding: 16px;
-  margin-bottom: 14px;
 }
 .hires-section { margin-bottom: 16px; }
 .hires-section:last-child { margin-bottom: 0; }
@@ -440,7 +443,8 @@ async function save() {
 @media (max-width: 767px) {
   .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .modal-body { padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .modal-body { padding: 14px 16px; }
+  .modal-actions { padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   .modal-wide .fi { font-size: 16px; }
   .hires-params { grid-template-columns: 1fr; }
 }

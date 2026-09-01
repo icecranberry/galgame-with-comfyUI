@@ -61,12 +61,10 @@
                         </svg>
                       </span>
                       <div class="effects-title-copy">
-                        <p class="effects-eyebrow">酒馆状态簿</p>
                         <div class="effects-title-row">
                           <h4 id="active-effects-title" class="effects-title">此刻的角色状态</h4>
-                          <span class="effects-count">{{ store.activeEffects.length }}</span>
                         </div>
-                        <p class="effects-subtitle">服饰与临时效果都记录在这里</p>
+                        <p class="effects-subtitle">芭芭拉魔法~呼啦啦呜~魔仙变~</p>
                       </div>
                     </div>
                   </div>
@@ -1134,6 +1132,7 @@ async function onRemoveEffect(effect) {
 }
 
 .fs-content {
+  user-select: none;
   position: relative;
   height: 100%;
   display: flex;
