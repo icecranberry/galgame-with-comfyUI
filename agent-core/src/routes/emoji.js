@@ -9,6 +9,8 @@ import {
   saveEmojiFixedTagsText,
   getEmojiStyleMode,
   saveEmojiStyleMode,
+  getEmojiResolution,
+  saveEmojiResolution,
 } from '../services/emojiService.js';
 import { deleteImageFileByUrl, saveBase64Image } from '../services/imagePaths.js';
 
@@ -44,17 +46,20 @@ router.put('/categories', (req, res) => {
   }
 });
 
-/** GET /api/characters/emoji/tags — 当前固定 tag 文本（逗号分隔）+ 表情包风格 */
+/** GET /api/characters/emoji/tags — 当前固定 tag 文本（逗号分隔）+ 表情包风格 + 生成分辨率 */
 router.get('/tags', (_req, res) => {
-  res.json({ tags: getEmojiFixedTagsText(), styleMode: getEmojiStyleMode() });
+  res.json({ tags: getEmojiFixedTagsText(), styleMode: getEmojiStyleMode(), resolution: getEmojiResolution() });
 });
 
-/** PUT /api/characters/emoji/tags — 更新固定 tag 文本与表情包风格（styleMode 可选） */
+/** PUT /api/characters/emoji/tags — 更新固定 tag 文本、表情包风格与生成分辨率（styleMode / resolution 可选） */
 router.put('/tags', (req, res) => {
   try {
     const tags = saveEmojiFixedTagsText(req.body?.tags);
     const styleMode = req.body?.styleMode !== undefined ? saveEmojiStyleMode(req.body.styleMode) : getEmojiStyleMode();
-    res.json({ ok: true, tags, styleMode });
+    const resolution = req.body?.resolution !== undefined
+      ? saveEmojiResolution(req.body.resolution?.width, req.body.resolution?.height)
+      : getEmojiResolution();
+    res.json({ ok: true, tags, styleMode, resolution });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

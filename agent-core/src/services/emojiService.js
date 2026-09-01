@@ -147,6 +147,41 @@ export function saveEmojiStyleMode(mode) {
   return mode;
 }
 
+const EMOJI_WIDTH_SETTING_KEY = 'emoji_width';
+const EMOJI_HEIGHT_SETTING_KEY = 'emoji_height';
+
+/** 表情包生成分辨率：默认 512×512，范围 512–1024，步长 64（对齐 SDXL 常用档位） */
+export const EMOJI_RESOLUTION_MIN = 512;
+export const EMOJI_RESOLUTION_MAX = 1024;
+export const EMOJI_RESOLUTION_STEP = 64;
+export const DEFAULT_EMOJI_RESOLUTION = { width: 512, height: 512 };
+
+function normalizeEmojiResolutionValue(value, fallback) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  const clamped = Math.min(EMOJI_RESOLUTION_MAX, Math.max(EMOJI_RESOLUTION_MIN, n));
+  return Math.round(clamped / EMOJI_RESOLUTION_STEP) * EMOJI_RESOLUTION_STEP;
+}
+
+/** 当前表情包生成分辨率；未设置或非法时回落 512×512 */
+export function getEmojiResolution() {
+  return {
+    width: normalizeEmojiResolutionValue(getSetting(EMOJI_WIDTH_SETTING_KEY), DEFAULT_EMOJI_RESOLUTION.width),
+    height: normalizeEmojiResolutionValue(getSetting(EMOJI_HEIGHT_SETTING_KEY), DEFAULT_EMOJI_RESOLUTION.height),
+  };
+}
+
+/** 保存表情包生成分辨率（自动夹取范围并对齐步长档位），返回归一化后的值 */
+export function saveEmojiResolution(width, height) {
+  const next = {
+    width: normalizeEmojiResolutionValue(width, DEFAULT_EMOJI_RESOLUTION.width),
+    height: normalizeEmojiResolutionValue(height, DEFAULT_EMOJI_RESOLUTION.height),
+  };
+  setSetting(EMOJI_WIDTH_SETTING_KEY, String(next.width));
+  setSetting(EMOJI_HEIGHT_SETTING_KEY, String(next.height));
+  return next;
+}
+
 /** 当前固定 tag 文本（逗号分隔）；未自定义时回落默认值 */
 export function getEmojiFixedTagsText() {
   const saved = getSetting(EMOJI_TAGS_SETTING_KEY);
@@ -350,8 +385,7 @@ export async function generateEmojiImage(row, char, artist = '@ebora') {
     workflowScene: 'emoji',        // hybrid 模式下允许为表情包单独配置工作流
     disableRAG: true,        // prompt 已由创造助手定稿，不再走 RAG 改写
     persistPreparation: false,
-    width: 512,
-    height: 512,
+    ...getEmojiResolution(),
     artist: finalArtist,
     ...(loras.length > 0 ? { loras } : {}),
     ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
