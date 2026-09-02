@@ -1251,6 +1251,23 @@ function migrateAffinityRegressionSchema(db) {
       db.exec(`DROP TABLE gift_history`);
       db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
       console.log('[db] gift_history migrated to global cooldown (removed character_id, deduplicated)');
+    } else {
+      // 兜底：v3.2.0 前建的全局表 CHECK 不含 chest 且无 character_id，走不到上面两个分支——
+      // 开箱冷却 INSERT 会 CHECK 失败并被 recordChestOpen 静默吞掉 → 可无限开箱，按建表 SQL 检测后重建
+      const tableSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gift_history'`).get()?.sql || '';
+      if (!tableSql.includes(`'chest'`)) {
+        db.exec(`DROP TABLE IF EXISTS gift_history_new`);
+        db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+        db.exec(`INSERT INTO gift_history_new (gift_type, created_at) SELECT gift_type, MAX(created_at) FROM gift_history WHERE gift_type IN ('small','large','chest') GROUP BY gift_type`);
+        db.exec(`DROP TABLE gift_history`);
+        db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
+        // backpack_items 只由开箱写入，用最近一次开箱时间回填冷却（无开箱记录则不回填）
+        const lastItem = db.prepare(`SELECT MAX(acquired_at) AS acquired_at FROM backpack_items`).get();
+        if (lastItem?.acquired_at) {
+          db.prepare(`INSERT INTO gift_history (gift_type, created_at) VALUES ('chest', ?)`).run(lastItem.acquired_at);
+        }
+        console.log(`[db] gift_history CHECK 缺 chest，已重建补齐${lastItem?.acquired_at ? `（开箱冷却回填至 ${lastItem.acquired_at}）` : ''}`);
+      }
     }
 
     // 启动时去重：每种类型只保留最新一条（冷却只看最近一次）
