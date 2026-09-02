@@ -231,7 +231,7 @@ ${eventRules}`;
           { role: 'system', content: event.base_prompt },
           { role: 'system', content: userInfoMsg },
           { role: 'user', content: greetingPrompt },
-        ], { temperature: 0.8, max_tokens: 128, label: '奇遇紧急联络' });
+        ], { temperature: 0.7, max_tokens: 128, label: '奇遇紧急联络' });
 
         // 写入消息（分句）
         const conversationId = `char_${event.character_id}`;
