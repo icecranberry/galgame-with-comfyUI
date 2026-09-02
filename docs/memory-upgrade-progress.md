@@ -8,7 +8,7 @@
 | 阶段 | 内容 | 状态 | 提交 |
 |---|---|---|---|
 | 一 | 安放层：多重表示 + 双时态演化 + 实体/三元组索引 + 四路检索 | ✅ 已完成 | `2b508f3` |
-| 二 | 主动回想：`@memory` 文本协议 + activeSearch | ⬜ 未开始 | — |
+| 二 | 主动回想：`@memory` 文本协议 + activeSearch | ✅ 已完成 | `6b9b3eb` |
 | 三 | 整理 daemon：冲突消解/泛化升华/衰减归档/核心升华/回填/墓碑 | ⬜ 未开始 | — |
 | 四 | 存储与预算：token 预算分配器 + archived 管理 | ⬜ 未开始 | — |
 
@@ -61,23 +61,52 @@
 
 ---
 
+## ✅ 已完成：阶段二（主动回想）
+
+**提交**：`6b9b3eb`（main，10 文件，+809/−52）
+**验证**：单元/集成测试 54/54（新增 `test/activeSearch.test.js` 10 例：行协议解析、时态检测、注入块四种形态、三元组嵌入文本、配置归一化、activeMemorySearch 全链路依赖注入集成 + 超时降级）
+
+### 落地内容
+
+**前置：三元组嵌入**（`memoryRepository.js` + `memoryIndexWorker` + `vector-service/chroma_store.py`）：
+- `processIndexJob` 支持 `triple_upsert/triple_delete` 分支；嵌入文本 = `subject_text + predicate + object_text`（`tripleEmbeddingText`），向量 id `trip_<tripleId>`，corpus `memory_triples_v1`
+- `insertMemoryTriple` 返回 tripleId 且 `embedding_state='pending'`，写入后即时入队 `PRIORITY_LIVE` 任务；`invalidateMemoryTriple/rollback/clearConversationMemories` 均联动入队 triple_delete
+- `chroma_store.py` 新增 corpus `memory_triples_v1` → 集合 `<CHROMA_COLLECTION>_memory_triples`
+
+**检索层**（新建 `services/memory/activeSearch.js`）：
+- `detectTemporalPattern`（以前/曾经/第一次/上次/小时候…）命中 → 历史模式（`hybridSearch includeHistorical` 放宽双时态过滤，结果带过时徽标）
+- 主检索（同被动召回 topK=8）+ 三元组联想扩展（query 嵌入 → 三元组向量库 top5 → JOIN 关联记忆，空库/嵌入失败自动跳过）+ 实体 1 跳扩展（top3 种子 → 共享实体反查，排除已命中）→ RRF 融合
+- `annotateResult`：v3 开启时注入文本优先 `semantic_note`；历史项查 `memory_relations` 血缘标注后继版本
+- `formatMemoryRecallBlock`：`<memory_recall_result>` 块，含 `[现行]`/`[历史·已于 X 过时]（后来更新为：…）` 徽标 + 不编造/禁止再输出 @memory 防呆收尾
+- 审计：`memory_retrieval_audits` 记 `mode='active'`，candidate_sources 含 text/vector/entity/triple/entity_hop 五路计数
+
+**对话层**（`routes/chat.js` + `stores/chat.js`）：
+- stableBlocks 尾部注入 `<recall_tool>` 说明（开关开启时）；首行行闸门在 `splitter.feed` 之前命中即 abort 上游 → `activeMemorySearch`（带 timeoutMs 竞速）→ dynamicBlocks 追加结果块 → 二次 `buildChatContext` + 重置流状态（含 SSE `context_update` 清空气泡）→ 二次流式续写
+- 指令行不进气泡不落库；SSE 事件 `memory_recall_start/end`；前端 `memoryRecalling` 状态 + ChatView“回想着…”毛玻璃状态条（复用 guesses-fade 过渡与 tokens 变量）
+- 流中断静默重试与二次续写兼容：memory_recall_start 时刷新 30s 安全超时
+
+**配置与 UI**：
+- `memory_settings.activeSearch = { enabled: false（默认关）, timeoutMs: 4000 }` + `normalizeMemorySettings` 布尔归一 + timeoutMs 钳制 1000~30000；`getActiveSearchConfig()` DB 异常时零影响回退
+- MemorySettingsView 新增“主动回想”开关卡片（CollapseTransition 内含超时配置项）
+
+### 实施期决策修订（与方案文档的差异）
+
+1. **trip_ 任务键前缀**：三元组任务与记忆碎片共用 `memory_index_jobs` 表，键 `trip_<tripleId>` 前缀隔离，避免与碎片任务的 NOT EXISTS processing 同 memory_id 去重/互斥逻辑互相干扰。
+2. **vector-service 需要扩展**：方案文档称“vector-service 侧无需改动”仅针对阶段一；新 corpus `memory_triples_v1` 若不在 `_collection_name()` 白名单会直接 raise，故已加分支。
+3. **双重嵌入的取舍**：主检索 hybridSearch 内部自嵌 query，三元组扩展单独 `embedMemoryText` 一次——接受约百 ms 重复成本，换取对现有检索路径零侵入。
+4. **依赖注入测试化**：`activeMemorySearch` 支持 `deps` 覆盖（hybridSearch/getDb/embed/vectorSearch/getMemorySettings/isMemoryV3Enabled/writeAudit），生产路径默认值不变，单测不触真实 DB/向量服务。
+5. **群聊排除**：主动回想仅在 1v1 聊天流接入，群聊不注入 `<recall_tool>`（行协议复杂度后评）。
+
+### 遗留（非阻塞）
+
+- 方案 §5 的验收清单（20 例人工触发率 ≥80%、闲聊误用 <10%、P95 延迟增量 <5s）待功能开关灰度开启后人工跑一遍。
+- 三元组联想扩展的会话过滤目前按 `mf.conversation_id` 限定；跨角色共享三元组留待阶段三评估。
+
+---
+
 ## ⬜ 待完成
 
-### 阶段二：主动回想（`@memory` 文本协议）
-
-设计基准：方案文档 §5。要点与现状衔接：
-
-- **协议**：1v1 聊天 stableBlocks 尾部追加 `<recall_tool>` 说明；模型在回复**第一行**输出 `@memory <查询>`；每轮限 1 次
-- **拦截**：`routes/chat.js` 流式分支加行闸门（复用 SentenceSplitter 前的 fullContent 累积，模式同现有 `{"` 三字闸门）——首行匹配 `@memory` 且行完整 → abort 当前流 → 检索 → 二次 `buildChatContext`（dynamicBlocks 追加 `<memory_recall_result>`，含现行/历史徽标）→ 二次流式续写；指令行不进气泡不落库
-- **检索**：新建 `services/memory/activeSearch.js`——时态模式检测（"以前/曾经/第一次…"→ 放宽 valid_to 过滤 + 血缘查后继版本标注历史徽标）；三元组联想扩展（query 嵌入 → `vectorSearch(corpus='memory_triples_v1')` → 关联记忆）；实体 1 跳扩展；RRF 融合
-- **前置依赖（本次未做，阶段二第一步）**：三元组嵌入——扩展 `memoryIndexWorker` 支持 `job_type='triple_upsert'/'triple_delete'`（`processIndexJob` switch 加分支），嵌入文本 = `subject_text + predicate + object_text`，metadata 含 memory_id/conversation_id/predicate，corpus `memory_triples_v1`；三元组库为空时步骤自动跳过（存量自然降级）
-- **UI**（实现前先读 `docs/design-system.md`）：ChatView"回想着…"状态条；MemorySettingsView 开关卡片
-- **配置**：`memory_settings.activeSearch = { enabled: false（默认关，灰度）, timeoutMs: 4000 }` + `normalizeMemorySettings` 兼容
-- **审计**：`memory_retrieval_audits` 记 `mode='active'`
-- **验收**：20 例人工清单触发率 ≥80%、闲聊误用 <10%、触发轮次 P95 延迟增量 <5s、未触发时行为与现状一致
-- **明确排除**：群聊主动搜索（行协议复杂度，后评）
-
-### 阶段三：整理 daemon（记忆的"睡眠期"）
+### 阶段三：整理 daemon（记忆的“睡眠期”）
 
 设计基准：方案文档 §6。要点：
 
@@ -113,6 +142,6 @@
 ## 快速上手（新会话接续开发）
 
 1. 读 `docs/memory-upgrade-plan.md`（设计）+ 本文件（进度）
-2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 44/44）
-3. 阶段二从三元组嵌入（memoryIndexWorker 扩展）开始，再做 activeSearch，最后接 chat.js 流式拦截与 UI
+2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 54/54）
+3. 阶段三从整理 daemon（`consolidationScheduler.js`）开始，六任务建议顺序：T3（纯 SQL，最安全）→ T6 墓碑扫描 → T1 冲突消解 → T2 泛化升华 → T4 核心升华 → T5 回填
 4. 遇 Mimosa 钩子误报见上方"已知注意事项"；UI 改动先读 `docs/design-system.md`
