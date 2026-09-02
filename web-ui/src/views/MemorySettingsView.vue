@@ -111,6 +111,36 @@
         </CollapseTransition>
       </section>
 
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>记忆整理（睡眠期）</h3><p>用户不聊天时，后台自动整理记忆：冲突消解、泛化归纳、强度衰减归档、画像建议。</p></div>
+          <label class="switch"><input v-model="form.consolidation.enabled" type="checkbox" aria-label="记忆整理"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.consolidation.enabled">
+          <div class="collapse-body">
+            <label>空闲判定（分钟，距最后一条消息）<input v-model.number="form.consolidation.idleDelayMinutes" type="number" min="5" max="720"></label>
+            <label>单轮整理模型调用上限<input v-model.number="form.consolidation.dailyMaxLlmCalls" type="number" min="0" max="30"></label>
+            <div style="margin-top: 8px;">
+              <button class="ghost compact" :disabled="consolidating" @click="triggerConsolidation">{{ consolidating ? '整理中…' : '立即整理一次' }}</button>
+            </div>
+            <p class="disabled-note">整理永远避开聊天进行中；模型调用预算用尽时，剩余任务留到下轮继续。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>上下文预算</h3><p>限制随每轮消息注入的动态上下文总量，超出时按“历史减半 → 记忆裁剪 → 整块丢弃”逐级降级。</p></div>
+          <label class="switch"><input v-model="form.contextBudget.enabled" type="checkbox" aria-label="上下文预算"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.contextBudget.enabled">
+          <div class="collapse-body">
+            <label>动态上下文 token 预算<input v-model.number="form.contextBudget.dynamicTokens" type="number" min="2000" max="100000"></label>
+            <p class="disabled-note">稳定人设部分不参与预算；降级过程会记录在服务端日志，不会静默截断。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
       <section class="card params">
         <h3>查找范围</h3>
         <div class="three-col">
@@ -199,6 +229,9 @@
                 <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
               </div>
             </div>
+            <button v-if="item.status === 'archived'" class="ghost compact" :disabled="restoringMemoryId === item.memory_id" @click="restoreMemory(item)">
+              {{ restoringMemoryId === item.memory_id ? '恢复中…' : '恢复' }}
+            </button>
             <button v-if="item.status !== 'deleted'" class="danger-link" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
               {{ deletingMemoryId === item.memory_id ? '删除中…' : '删除' }}
             </button>
@@ -290,6 +323,7 @@ import DropdownSelect from '../components/DropdownSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import {
   deleteMemoryFragment,
+  getConsolidationJobs,
   getMemoryConfig,
   getMemoryFragments,
   getMemoryIndexJobs,
@@ -297,7 +331,9 @@ import {
   listCharacters,
   listGroups,
   reindexMemories,
+  restoreMemoryFragment,
   retryFailedMemories,
+  runConsolidationNow,
   searchMemories,
   testMemoryEmbedding,
   testMemoryReranker,
@@ -328,6 +364,7 @@ const memoryTypeOptions = [
 ]
 const memoryStatusOptions = [
   { value: 'active', label: '正在使用' },
+  { value: 'archived', label: '已归档' },
   { value: 'superseded', label: '已有更新' },
   { value: 'deleted', label: '已删除' },
   { value: 'all', label: '全部状态' },
@@ -410,10 +447,14 @@ const recallTested = ref(false)
 
 const indexJobs = ref([])
 const jobsLoading = ref(false)
+const restoringMemoryId = ref(null)
+const consolidating = ref(false)
 
 const form = reactive({
   enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
   activeSearch: { enabled: false, timeoutMs: 4000 },
+  consolidation: { enabled: true, idleDelayMinutes: 30, dailyMaxLlmCalls: 6 },
+  contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
   reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000, hasApiKey: false },
 })
@@ -436,6 +477,8 @@ function payload() {
   return {
     enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
     activeSearch: { enabled: form.activeSearch.enabled, timeoutMs: form.activeSearch.timeoutMs },
+    consolidation: { enabled: form.consolidation.enabled, idleDelayMinutes: form.consolidation.idleDelayMinutes, dailyMaxLlmCalls: form.consolidation.dailyMaxLlmCalls },
+    contextBudget: { enabled: form.contextBudget.enabled, dynamicTokens: form.contextBudget.dynamicTokens },
     embedding: providerPayload(form.embedding, embeddingHeaders.value),
     reranker: providerPayload(form.reranker, rerankerHeaders.value),
   }
@@ -464,7 +507,7 @@ function memoryTypeLabel(type) {
   return ({ knowledge: '信息', skill: '技能', emotion: '情绪', event: '经历' })[type] || type || '未知'
 }
 function memoryStatusLabel(status) {
-  return ({ active: '正在使用', superseded: '已有更新', deleted: '已删除' })[status] || status || '未知'
+  return ({ active: '正在使用', archived: '已归档', superseded: '已有更新', deleted: '已删除' })[status] || status || '未知'
 }
 function embeddingStateLabel(state) {
   return ({ indexed: '已整理', pending: '等待整理', failed: '整理失败', stale: '需要重新整理', disabled: '等待智能整理' })[state] || state || '未知'
@@ -542,6 +585,31 @@ function changeMemoryPage(delta) {
   memoryPage.value = Math.min(memoryPageCount.value, Math.max(1, memoryPage.value + delta))
   loadMemories()
 }
+// 阶段四：archived 记忆恢复（恢复后 stale 触发重嵌入，重新可见于检索）
+async function restoreMemory(item) {
+  restoringMemoryId.value = item.memory_id
+  try {
+    await restoreMemoryFragment(item.memory_id)
+    notify('这条记忆已恢复，角色可以重新想起它')
+    await Promise.all([loadMemories(), refreshStats()])
+  } catch (error) { notify(`恢复失败：${error.message}`, 'error') }
+  finally { restoringMemoryId.value = null }
+}
+// 阶段三：手动触发一轮记忆整理（聊天进行中服务端会拒绝）
+async function triggerConsolidation() {
+  consolidating.value = true
+  try {
+    const result = await runConsolidationNow()
+    if (result.skipped) {
+      notify(result.skipped === 'chat-active' ? '正在聊天中，稍后再整理' : '本轮未满足整理条件')
+    } else {
+      const calls = result.llmCallsUsed ?? 0
+      notify(`整理完成，本轮调用 ${calls} 次记忆整理模型`)
+    }
+    await loadIndexJobs()
+  } catch (error) { notify(`整理失败：${error.message}`, 'error') }
+  finally { consolidating.value = false }
+}
 async function removeMemory(item) {
   const prompt = `删除后，这条内容不会再被角色想起。确定删除吗？\n\n${item.judgment || item.content}`
   const confirmed = confirmDialog
@@ -601,6 +669,8 @@ async function applyConfig() {
   form.embedding = { ...form.embedding, ...config.embedding }
   form.reranker = { ...form.reranker, ...config.reranker }
   form.activeSearch = { ...form.activeSearch, ...(config.activeSearch || {}) }
+  form.consolidation = { ...form.consolidation, ...(config.consolidation || {}) }
+  form.contextBudget = { ...form.contextBudget, ...(config.contextBudget || {}) }
   embeddingHeaders.value = JSON.stringify(config.embedding.headers || {}, null, 2)
   rerankerHeaders.value = JSON.stringify(config.reranker.headers || {}, null, 2)
   Object.assign(stats, stat)

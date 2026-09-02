@@ -171,6 +171,64 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   return created.map(memoryId => getMemoryById(memoryId));
 }
 
+// ── 阶段三 T2：派生记忆插入（泛化升华专用）──
+// 与 applyMemoryActions 的 update/merge 不同：原记忆保留不失效，只降 importance，
+// 血缘写 memory_relations(action=relationAction, relation_meta=relationMeta)。
+export function insertGeneralizedMemory({ conversationId, memory, sourceMemoryIds, relationAction = 'merge', relationMeta = null, db = getDb(), profile = getPreferredMemoryEmbeddingProfile(), wake = wakeMemoryIndexWorker }) {
+  const normalized = normalizeMemory(memory);
+  const sources = db.prepare(`
+    SELECT * FROM memory_fragments
+    WHERE conversation_id = ? AND memory_id IN (${sourceMemoryIds.map(() => '?').join(',')}) AND status = 'active'
+  `).all(conversationId, ...sourceMemoryIds);
+  if (sources.length !== sourceMemoryIds.length) throw new Error('泛化引用的旧记忆不存在、已失效或不属于当前会话');
+  const contentHash = crypto.createHash('sha256').update(`${conversationId}\n${normalized.memoryType}\n${normalized.judgment}`).digest('hex');
+  const duplicate = db.prepare(`SELECT memory_id FROM memory_fragments WHERE conversation_id = ? AND content_hash = ? AND status = 'active'`).get(conversationId, contentHash);
+  if (duplicate) return null;
+  const memoryId = `mem_${randomUUID()}`;
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO memory_fragments(
+        conversation_id, source_msg_id, fragment_type, content, entities, chroma_id,
+        memory_id, memory_type, subject, judgment, reasoning, tags, content_hash, status,
+        source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at,
+        keywords, perspectives, episodic_note, semantic_note,
+        event_time, valid_from, valid_to, importance, strength, retrieval_count
+      ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0)
+    `).run(
+      conversationId, null, 'fact', normalized.judgment, JSON.stringify(normalized.tags),
+      memoryId, normalized.memoryType, normalized.subject, normalized.judgment, normalized.reasoning,
+      JSON.stringify(normalized.tags), contentHash,
+      Math.min(...sources.map(row => row.source_raw_start_id ?? 0)) || null,
+      Math.max(...sources.map(row => row.source_raw_end_id ?? 0)) || null,
+      profile?.fingerprint || null, profile ? 'pending' : 'disabled',
+      JSON.stringify(normalized.keywords), JSON.stringify(normalized.perspectives),
+      normalized.episodicNote, normalized.semanticNote,
+      normalized.importance
+    );
+    for (const entity of normalized.entities) {
+      const entityId = upsertMemoryEntity(db, entity.name);
+      if (entityId) {
+        db.prepare(`INSERT OR IGNORE INTO memory_entity_links(memory_id, entity_id, role) VALUES (?, ?, ?)`).run(memoryId, entityId, entity.role);
+      }
+    }
+    if (normalized.triple) {
+      const tripleId = insertMemoryTriple(db, { memoryId, triple: normalized.triple, eventTime: null });
+      enqueueTripleIndexJob(db, 'triple_upsert', tripleId, PRIORITY_LIVE);
+    }
+    for (const source of sources) {
+      // 原记忆保留：仅降 importance（遗忘曲线输入），血缘记录泛化关系
+      db.prepare(`UPDATE memory_fragments SET importance = MAX(1, importance - 1), updated_at = CURRENT_TIMESTAMP WHERE memory_id = ?`).run(source.memory_id);
+      db.prepare(`INSERT INTO memory_relations(from_memory_id, to_memory_id, action, relation_meta) VALUES (?, ?, ?, ?)`)
+        .run(source.memory_id, memoryId, relationAction, relationMeta ? JSON.stringify(relationMeta) : null);
+    }
+    enqueueIndexJob(db, 'upsert', memoryId, profile?.fingerprint || null, PRIORITY_LIVE);
+  });
+  tx();
+  wake();
+  return memoryId;
+}
+
 // 实体 upsert（Mem0 平行实体集合）：命中则计数，未命中则新建；过短名字（代词类）直接拒绝
 export function upsertMemoryEntity(db, name) {
   const trimmed = clampText(name, 64);
@@ -274,6 +332,31 @@ export function softDeleteMemory(idOrMemoryId) {
   enqueueIndexJob(db, 'delete', row.memory_id, row.embedding_profile, PRIORITY_LIVE);
   wakeMemoryIndexWorker();
   return true;
+}
+
+// ── 阶段四：archived 记忆恢复（管理界面可查可恢复；恢复即重新嵌入）──
+export function restoreArchivedMemory(idOrMemoryId) {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM memory_fragments WHERE memory_id = ? OR id = ?`).get(String(idOrMemoryId), Number(idOrMemoryId) || -1);
+  if (!row || row.status !== 'archived') return false;
+  db.prepare(`UPDATE memory_fragments SET status = 'active', embedding_state = 'stale', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
+  // stale 状态由 index worker 的兑底扫描自动重嵌入，无需额外入队
+  wakeMemoryIndexWorker();
+  return true;
+}
+
+// ── 阶段三：向量墓碑入队辅助（daemon T3/T6 使用，调度器传入回调）──
+export function enqueueMemoryDeleteJob(memoryId, row = null) {
+  const db = getDb();
+  const profile = row?.embedding_profile ?? db.prepare(`SELECT embedding_profile FROM memory_fragments WHERE memory_id = ?`).get(memoryId)?.embedding_profile ?? null;
+  enqueueIndexJob(db, 'delete', memoryId, profile, PRIORITY_LIVE);
+  wakeMemoryIndexWorker();
+}
+
+export function enqueueTripleDeleteJob(tripleId) {
+  const db = getDb();
+  enqueueTripleIndexJob(db, 'triple_delete', tripleId, PRIORITY_LIVE);
+  wakeMemoryIndexWorker();
 }
 
 export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
@@ -462,7 +545,25 @@ export function memoryStats() {
   const settings = getMemorySettings();
   const entities = db.prepare(`SELECT COUNT(*) AS count FROM memory_entities`).get().count;
   const triples = db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
-  return { mode: settings.mode, profile: settings.profile, rows: counts, entities, activeTriples: triples };
+  // 阶段四：分层计数 + 强度概览（archived 占比供存储管理视图用）
+  const layerRow = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived, SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) AS superseded FROM memory_fragments`).get();
+  const strengthRow = db.prepare(`SELECT AVG(strength) AS avgStrength, SUM(CASE WHEN strength < 0.15 THEN 1 ELSE 0 END) AS nearThreshold FROM memory_fragments WHERE status = 'active'`).get();
+  return {
+    mode: settings.mode,
+    profile: settings.profile,
+    rows: counts,
+    entities,
+    activeTriples: triples,
+    layers: {
+      total: layerRow.total || 0,
+      active: layerRow.active || 0,
+      archived: layerRow.archived || 0,
+      superseded: layerRow.superseded || 0,
+      archivedRatio: layerRow.total ? Math.round(((layerRow.archived || 0) / layerRow.total) * 1000) / 1000 : 0,
+    },
+    avgStrength: strengthRow.avgStrength != null ? Math.round(strengthRow.avgStrength * 1000) / 1000 : null,
+    nearThresholdCount: strengthRow.nearThreshold || 0,
+  };
 }
 
 function containsSensitiveSecret(text) {
@@ -599,6 +700,11 @@ function pendingIndexJobCount(db = getDb()) {
 
 function wakeMemoryIndexWorker() {
   memoryIndexWorker.wake();
+}
+
+// 供外部模块（consolidationScheduler 的 stale 回填）唤起 index worker
+export function notifyMemoryIndexWorker() {
+  wakeMemoryIndexWorker();
 }
 
 export function startMemoryIndexWorker() {

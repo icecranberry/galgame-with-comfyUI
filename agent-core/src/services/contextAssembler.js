@@ -229,4 +229,123 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 10, maxChe
   };
 }
 
+// ── 阶段四：dynamicBlocks token 预算（docs/memory-upgrade-plan.md §7.1）──
+//
+// stableBlocks 不预算（必留，前缀缓存友好性不动）；只对 dynamicBlocks 生效。
+// 降级顺序（逐级生效，全程有 degraded 记录，无静默截断）：
+//   1. <active_chat_history> 轮数减半（保留较新的后半）
+//   2. <rag_memories>/<memory_recall_result> 条目裁到 3 条（重新编号）
+//   3. 按优先级从尾部整块丢弃（低优先级先丢；rag 类块永不丢弃）
+
+export function estimateTokens(text = '') {
+  const s = String(text ?? '');
+  if (!s) return 0;
+  let cjk = 0;
+  let other = '';
+  for (const ch of s) {
+    if (/[\u3000-\u9fff\uff00-\uffef\u3040-\u30ff\u2018\u2019\u201c\u201d]/.test(ch)) cjk++;
+    else other += ch;
+  }
+  const words = other.trim() ? other.trim().split(/\s+/).length : 0;
+  return Math.ceil(cjk / 1.6 + words * 1.3);
+}
+
+// 块优先级：数值越小越重要（rag 类永不整块丢弃）
+const BLOCK_PRIORITY = Object.freeze({
+  rag_memories: 1,
+  memory_recall_result: 1,
+  time_context: 2,
+  active_chat_history: 3,
+});
+const DEFAULT_BLOCK_PRIORITY = 4;
+
+export function blockTag(block) {
+  const match = String(block || '').match(/^\s*<([a-z_]+)>/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+// <active_chat_history> 内层行减半：保留较新的后半（历史行格式 `[名字]: 内容`）
+function halveActiveHistory(block) {
+  const lines = String(block).split('\n');
+  if (lines.length < 3 || !lines[0].includes('<active_chat_history>')) return null;
+  const closing = lines[lines.length - 1].includes('</active_chat_history>') ? lines.pop() : null;
+  const inner = lines.slice(1);
+  if (inner.length < 2) return null;
+  const kept = inner.slice(Math.floor(inner.length / 2));
+  const next = ['<active_chat_history>', ...kept];
+  if (closing) next.push(closing);
+  return next.join('\n');
+}
+
+// rag 类块条目裁剪：只保留前 maxItems 条编号行（重新编号），非编号行（收尾防呆语）原样保留
+function trimNumberedBlock(block, maxItems = 3) {
+  const lines = String(block).split('\n');
+  const bodyStart = lines.findIndex(line => /^\d+\.\s/.test(line));
+  if (bodyStart < 0) return null;
+  const numbered = [];
+  const tail = [];
+  for (let i = bodyStart; i < lines.length; i++) {
+    if (/^\d+\.\s/.test(lines[i])) numbered.push(lines[i]);
+    else tail.push(lines[i]);
+  }
+  if (numbered.length <= maxItems) return null;
+  const kept = numbered.slice(0, maxItems).map((line, index) => line.replace(/^\d+\./, `${index + 1}.`));
+  const next = [...lines.slice(0, bodyStart), ...kept, ...tail];
+  return next.join('\n');
+}
+
+/**
+ * 对 dynamicBlocks 应用 token 预算。纯函数（不修改入参数组）。
+ * @returns {{ blocks: string[], tokensBefore: number, tokensAfter: number, degraded: string[] }}
+ */
+export function applyContextBudget({ blocks = [], budgetTokens = 8000 } = {}) {
+  const working = blocks.map(String);
+  const totalOf = (arr) => arr.reduce((sum, block) => sum + estimateTokens(block), 0);
+  const tokensBefore = totalOf(working);
+  const degraded = [];
+  if (tokensBefore <= budgetTokens) {
+    return { blocks: working, tokensBefore, tokensAfter: tokensBefore, degraded };
+  }
+
+  // 降级 1：活跃历史轮数减半
+  const historyIdx = working.findIndex(block => blockTag(block) === 'active_chat_history');
+  if (historyIdx >= 0) {
+    const halved = halveActiveHistory(working[historyIdx]);
+    if (halved) {
+      working[historyIdx] = halved;
+      degraded.push('active_chat_history 轮数减半');
+    }
+  }
+  let tokensAfter = totalOf(working);
+  if (tokensAfter <= budgetTokens) return { blocks: working, tokensBefore, tokensAfter, degraded };
+
+  // 降级 2：rag 类块条目裁到 3 条
+  for (let i = 0; i < working.length; i++) {
+    const tag = blockTag(working[i]);
+    if (tag === 'rag_memories' || tag === 'memory_recall_result') {
+      const trimmed = trimNumberedBlock(working[i], 3);
+      if (trimmed) {
+        working[i] = trimmed;
+        degraded.push(`${tag} 条目裁至 3 条`);
+      }
+    }
+  }
+  tokensAfter = totalOf(working);
+  if (tokensAfter <= budgetTokens) return { blocks: working, tokensBefore, tokensAfter, degraded };
+
+  // 降级 3：按优先级从尾部整块丢弃（低优先级先丢；同优先级靠后的先丢；rag 类不丢）
+  const droppable = working
+    .map((block, index) => ({ index, priority: BLOCK_PRIORITY[blockTag(block)] ?? DEFAULT_BLOCK_PRIORITY, tag: blockTag(block) }))
+    .filter(item => item.priority > 1)
+    .sort((a, b) => a.priority - b.priority || b.index - a.index);
+  const dropped = new Set();
+  for (const item of droppable) {
+    tokensAfter -= estimateTokens(working[item.index]);
+    dropped.add(item.index);
+    degraded.push(`整块丢弃 <${item.tag || '无标签块'}>`);
+    if (tokensAfter <= budgetTokens) break;
+  }
+  return { blocks: working.filter((_, index) => !dropped.has(index)), tokensBefore, tokensAfter, degraded };
+}
+
 

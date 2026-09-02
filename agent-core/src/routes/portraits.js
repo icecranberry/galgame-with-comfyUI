@@ -111,4 +111,49 @@ router.delete('/character/:characterId/all', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── 阶段三 T4：核心记忆升华的半自动通道 ──
+// daemon 只往 portrait_suggestions 写 pending 建议；这里提供人工确认/忽略。
+
+// GET /api/portraits/:characterId/suggestions — 待确认建议列表
+router.get('/:characterId/suggestions', (req, res) => {
+  const db = getDb();
+  const suggestions = db.prepare(`
+    SELECT * FROM portrait_suggestions
+    WHERE character_id = ? AND status = 'pending'
+    ORDER BY id DESC LIMIT 20
+  `).all(req.params.characterId).map(row => ({
+    ...row,
+    source_memory_ids: JSON.parse(row.source_memory_ids || '[]'),
+  }));
+  res.json({ suggestions });
+});
+
+// POST /api/portraits/suggestions/:id/confirm — 采纳建议 → 写入 user_portraits
+router.post('/suggestions/:id/confirm', (req, res) => {
+  const db = getDb();
+  const suggestion = db.prepare(`SELECT * FROM portrait_suggestions WHERE id = ? AND status = 'pending'`).get(req.params.id);
+  if (!suggestion) return res.status(404).json({ error: 'suggestion not found or already handled' });
+  const result = db.prepare(`
+    INSERT OR IGNORE INTO user_portraits (character_id, trait_type, content, confidence)
+    VALUES (?, ?, ?, 1.0)
+  `).run(suggestion.character_id, suggestion.field, suggestion.suggestion);
+  if (result.changes === 0) {
+    db.prepare(`UPDATE portrait_suggestions SET status = 'duplicate', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(suggestion.id);
+    return res.status(409).json({ error: '该特征已存在' });
+  }
+  db.prepare(`UPDATE portrait_suggestions SET status = 'applied', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(suggestion.id);
+  res.json({ ok: true });
+});
+
+// POST /api/portraits/suggestions/:id/reject — 忽略建议（不写画像）
+router.post('/suggestions/:id/reject', (req, res) => {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE portrait_suggestions SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'pending'
+  `).run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'suggestion not found or already handled' });
+  res.json({ ok: true });
+});
+
 export default router;

@@ -43,6 +43,7 @@ import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
+import { startConsolidationScheduler, stopConsolidationScheduler } from './src/services/memory/consolidationScheduler.js';
 
 const app = express();
 
@@ -178,6 +179,9 @@ startGroupIdleScheduler();
 // 启动图片知识库同步调度器（用户安静时才执行同步，不阻塞生图）
 startKnowledgeSyncScheduler();
 
+// 启动记忆整理 daemon（记忆的"睡眠期"：空闲触发，内部自带开关与预算判断）
+startConsolidationScheduler();
+
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
   console.log(`[agent-core] http://localhost:${config.port}`);
@@ -235,6 +239,7 @@ const shutdown = () => {
   shuttingDown = true;
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
+  stopConsolidationScheduler();
 
   // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
   try {

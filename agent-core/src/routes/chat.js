@@ -31,11 +31,22 @@ import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt 
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
-import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
+import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
+import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
+import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 
 const router = Router();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// 阶段四：dynamicBlocks 预算降级包装（降级过程有日志，无静默截断）
+function applyBudgetToBlocks(blocks, budgetTokens) {
+  const result = applyContextBudget({ blocks, budgetTokens });
+  if (result.degraded.length > 0) {
+    console.log(`[chat] context budget: ${result.tokensBefore} → ${result.tokensAfter} tokens（预算 ${budgetTokens}）；${result.degraded.join('；')}`);
+  }
+  return result.blocks;
+}
 
 // ── 打字节奏：按分句文字长度随机 300~900ms，模拟真人打字（短句快、长句慢、带随机抖动） ──
 const typingDelay = (text = '') => {
@@ -270,6 +281,11 @@ router.post('/characters/:id/chat', async (req, res) => {
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
+
+  // 登记活跃聊天流：整理 daemon 的空闲判定信号。
+  // 用 res 'close' 注销——无论哪条 early return / 异常路径都恰好触发一次，计数不泄漏。
+  chatStreamStarted();
+  res.on('close', () => chatStreamEnded());
 
   const db = getDb();
   const characterId = req.params.id;
@@ -888,12 +904,17 @@ ${coreRules}
     dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);
 
     // 生图仍由原有路径 A/B/C/D/E 决策；固定格式规则已在稳定前缀中，不额外改变主回复行为。
+    // ── 阶段四：dynamicBlocks token 预算（默认关；降级顺序有日志，无静默截断）──
+    const budgetConfig = config.features.memory ? getContextBudgetConfig() : { enabled: false, dynamicTokens: 8000 };
+    const budgetedBlocks = budgetConfig.enabled
+      ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens)
+      : dynamicBlocks;
     // ── 通过 buildChatContext 组装最终请求 ──
     const { messages: msgs, metadata } = buildChatContext({
       stableBlocks,
       summaryBlock,
       history: checkpointHistory,
-      dynamicBlocks,
+      dynamicBlocks: budgetedBlocks,
     });
 
     // ── 副作用：首轮强调标记（event 已在 dynamicBlocks 中注入） ──
@@ -1009,7 +1030,7 @@ ${coreRules}
         stableBlocks,
         summaryBlock,
         history: checkpointHistory,
-        dynamicBlocks,
+        dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
       });
 
       // 重置流状态：指令行不进气泡不落库；闸门前已发出的零散片段用 context_update 清空

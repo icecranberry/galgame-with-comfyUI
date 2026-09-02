@@ -129,24 +129,33 @@ project-root/
 - **送礼系统**: 小礼物 (+5, 冷却 1h) / 大礼物 (+15, 冷却 12h)。全局冷却（跨角色共享），`gift_history` 表持久化。
 - **前端实时推送**: 对话 SSE 流中通过 `affinity_update` 事件推送变化量，ChatView 触发 roll 数值动画。
 
-### 记忆系统：四路召回 + RRF 融合（Memory v3）
+### 记忆系统（Memory v3，四阶段已全部落地）
 
-每轮对话后异步提取记忆碎片（knowledge/skill/emotion/event，每 40 条 raw 消息触发一次 curation 单遍 LLM 整理）→ 向量化 → ChromaDB + SQLite。检索时四路并行：
-1. **FTS5** — bm25 全文（六列：judgment/reasoning/tags/keywords/perspectives/episodic_note）
-2. **Ngram** — 中文 bigram LIKE 多列匹配
-3. **Vector** — ChromaDB 余弦相似度
-4. **Entity**（v3 新增）— 查询命中 `memory_entities` 实体名/别名 → `memory_entity_links` 反查关联记忆
+设计基准 [docs/memory-upgrade-plan.md](docs/memory-upgrade-plan.md)，实施进度与各阶段提交见 [docs/memory-upgrade-progress.md](docs/memory-upgrade-progress.md)。核心文件全部在 `agent-core/src/services/memory/`：
 
-RRF 融合（K=60）后可选 rerank，取 Top-K 注入 `<rag_memories>`。所有检索通道带 `status='active' AND valid_to IS NULL` 现行有效性过滤。
+| 文件 | 职责 |
+|---|---|
+| `memoryConfig.js` | memory_settings 读写/归一化（v3 / activeSearch / consolidation / contextBudget 四组开关） |
+| `memoryRepository.js` | 碎片落库 + 向量索引任务队列（memory_index_jobs + worker，含 triple_upsert/triple_delete 与 trip_ 前缀隔离） |
+| `memoryProviders.js` | 嵌入/重排序 provider（自定义 API → 内置 → 本地 ONNX 降级链） |
+| `memoryConsolidation.js` | 阶段三六任务实现（T1~T6，全部依赖可注入） |
+| `consolidationScheduler.js` | 阶段三 daemon 调度（空闲触发/LLM 预算/任务队列 kill 续跑） |
+| `activeSearch.js` | 阶段二 @memory 主动回想检索（时态检测 + 三元组联想 + 实体 1 跳 + RRF） |
+| `chatMemoryRecall.js` | 聊天流被动召回入口 |
 
-**Memory v3 多重表示**（docs/memory-upgrade-plan.md，`memory_settings.v3.enabled` 开关）：
-- **检索单元**（进 FTS/向量/LIKE）：`keywords`（检索关键词）+ `perspectives`（认知视角标签）+ `episodic_note`（情景备注），由 curation LLM 单遍产出
-- **注入单元**（只进 `<rag_memories>`，刻意不进检索通道）：`semantic_note` 语义转述，缺失时回退 judgment
-- **双时态演化**：`valid_from/valid_to/event_time`——update/merge 把旧记忆置 `superseded + valid_to`（历史可查）而非物理覆盖；回滚时自动清失效标记
-- **实体/三元组索引层**：`memory_entities`（平行实体表）+ `memory_entity_links` + `memory_triples`（主谓宾，供阶段二 query-to-triple 主动回想），全部平行表、无图数据库
-- **强度模型**：`importance(1-5)/strength/last_reinforced_at/retrieval_count`，供阶段三遗忘曲线衰减归档（尚未接线）
+上级目录相关文件：`memoryExtractor.js`（curation prompt v3 + 异步碎片提取）、`memorySearch.js`（四路召回 + RRF）、`contextAssembler.js`（上下文组装 + 阶段四 token 预算）、`chatActivity.js`（活跃聊天流登记，供 daemon 空闲判定）。
 
-curation prompt v3 的新字段全部可选——LLM 不输出时落库自动降级为 v2 形态（judgment/tags 仍必填），`memory_settings.v3.enabled=false` 可整体回退旧行为。`memory_retrieval_audits` 的 candidate_sources 记录四路各自命中数。
+**检索主线（写入 → 召回）**：每轮对话后异步 curation 提取碎片（每 40 条 raw 触发）→ 向量化。检索四路并行（FTS5 bm25 六列权重 5.0/1.0/3.0/4.0/2.5/1.5 / ngram bigram / 向量 / 实体反查）→ RRF(K=60) → Top-K 注入 `<rag_memories>`；所有通道现行过滤 `status='active' AND valid_to IS NULL`。
+
+**多重表示与双时态**：检索单元 keywords/perspectives/episodic_note 进 FTS/向量/LIKE；注入单元 semantic_note 只进 `<rag_memories>`（缺失回退 judgment）；update/merge 把旧记忆置 `superseded + valid_to`（历史可查）；实体/三元组全部平行表。`memory_settings.v3.enabled` 总开关，关闭整体回退 v2 形态。
+
+**主动回想（阶段二，`activeSearch.enabled` 默认关，灰度）**：1v1 stableBlocks 注入 `<recall_tool>`；模型回复首行输出 `@memory <查询>` → chat.js 流式行闸门 abort → activeMemorySearch（含时态检测：命中"以前/曾经/第一次…"放宽历史过滤并带过时徽标）→ dynamicBlocks 追加 `<memory_recall_result>` → 二次 buildChatContext 续写；指令行不进气泡不落库。群聊不接入。
+
+**整理 daemon（阶段三，`consolidation.enabled` 默认开）**：每 5 分钟扫描，空闲判定（无活跃聊天流 + 距最后一条消息 ≥ idleDelayMinutes）或 >22h 兑底，聊天进行中永不触发；单轮 LLM 调用 ≤ dailyMaxLlmCalls；任务表 memory_consolidation_jobs（启动时 processing→pending 续跑，attempts≥3 落 failed）。六任务：T1 冲突消解（矛盾→update 双时态失效，重复→merge）；T2 泛化升华（同实体同主体 event/emotion ≥3 条跨 14 天 → 归纳 knowledge，原记忆保留 importance-1，血缘 relation_meta=generalize）；T3 强度衰减（纯 SQL，strength=(importance/5)×exp(-Δd/halfLife)×(1+0.1·ln(1+召回数))，<0.15 → archived + 向量墓碑，halfLife：event 14/emotion 60/knowledge·skill 180 天，锚点=召回>事件>创建时间，刻意排除 updated_at）；T4 画像建议（importance≥4 knowledge → portrait_suggestions 待确认，ChatView 印象弹窗采纳/忽略）；T5 v3 字段回填（缺 keywords/perspectives/semantic_note 的旧记忆每批 10 条补齐 → stale 重嵌入）；T6 向量墓碑扫描（幂等补发漏删的向量 delete）。
+
+**上下文预算（阶段四，`contextBudget.enabled` 默认关）**：`contextAssembler.applyContextBudget` 只作用于 dynamicBlocks（stableBlocks 不预算），降级顺序：活跃历史轮数减半 → rag 条目裁到 3 条 → 按优先级从尾部整块丢弃（rag 类永不丢），全程 degraded 日志无静默截断。
+
+**archived 管理**：T3 归档的记忆不进任何检索通道；MemorySettingsView 状态筛"已归档"可一键恢复（restore = active + stale 重嵌入）。备份为整库 .db 文件拷贝，自动包含全部新表（无按表导出机制）。
 
 ### 用户画像系统 (User Portrait)
 
@@ -265,7 +274,7 @@ AI 角色自动发朋友圈，用户可评论、点赞，角色 AI 自动回复�
 | Flag | 默认 | 说明 |
 |------|------|------|
 | `emotion` | 开 | VAD 情绪引擎 |
-| `memory` | 开 | 记忆系统（RAG 三路召回 + 异步碎片提取） |
+| `memory` | 开 | 记忆系统（Memory v3 四阶段：召回/主动回想/整理 daemon/上下文预算） |
 | `promptOptimize` | 关 | 生图时用 LLM 润色 prompt |
 | `replyGuesses` | 关 | 回复猜想（AI 回复后生成用户可能的下一句回复） |
 | `forceImageGen` | 关 | 灵性生图（每 3 轮强制一张） |

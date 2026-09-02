@@ -500,6 +500,20 @@ export function getMemoryStats() {
   return jsonRequest(`${BASE}/memory/stats`)
 }
 
+// 阶段四：archived 记忆恢复
+export function restoreMemoryFragment(id) {
+  return jsonRequest(`${BASE}/memory/fragments/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+}
+
+// 阶段三：整理 daemon 任务队列与手动触发
+export function getConsolidationJobs(limit = 30) {
+  return jsonRequest(`${BASE}/memory/consolidation/jobs?limit=${encodeURIComponent(limit)}`)
+}
+
+export function runConsolidationNow() {
+  return jsonRequest(`${BASE}/memory/consolidation/run`, { method: 'POST' })
+}
+
 export function getMemoryFragments(params = {}) {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -779,6 +793,29 @@ export async function deletePortrait(id) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || '删除失败')
+  }
+  return res.json()
+}
+
+// ── 阶段三 T4：画像升华建议（daemon 产出，人工确认）──
+export async function getPortraitSuggestions(characterId) {
+  return request(`/portraits/${characterId}/suggestions`)
+}
+
+export async function confirmPortraitSuggestion(id) {
+  const res = await fetch(`${BASE}/portraits/suggestions/${id}/confirm`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || '采纳失败')
+  }
+  return res.json()
+}
+
+export async function rejectPortraitSuggestion(id) {
+  const res = await fetch(`${BASE}/portraits/suggestions/${id}/reject`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || '忽略失败')
   }
   return res.json()
 }

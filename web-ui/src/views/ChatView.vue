@@ -499,6 +499,20 @@
               </div>
             </div>
           </div>  <!-- impression-content -->
+
+          <!-- 阶段三 T4：记忆升华产生的画像建议（半自动，人工确认后生效） -->
+          <div v-if="impressionSuggestions.length" class="impression-suggestions">
+            <div class="impression-suggestions-title">记忆整理的新发现</div>
+            <p class="impression-suggestions-hint">从重要记忆中归纳的特征，确认后才会加入印象</p>
+            <div v-for="s in impressionSuggestions" :key="s.id" class="impression-suggestion-item">
+              <span class="impression-suggestion-field" :style="{ color: typeColor[s.field] || 'var(--text-secondary)' }">{{ typeLabel[s.field] || s.field }}</span>
+              <span class="impression-suggestion-text">{{ s.suggestion }}</span>
+              <div class="impression-suggestion-actions">
+                <button class="impression-btn impression-btn-save" :disabled="handlingSuggestionId === s.id" @click="acceptSuggestion(s)">{{ handlingSuggestionId === s.id ? '…' : '采纳' }}</button>
+                <button class="impression-btn impression-btn-cancel" :disabled="handlingSuggestionId === s.id" @click="dismissSuggestion(s)">忽略</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -548,7 +562,7 @@ import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
-import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
+import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait, getPortraitSuggestions, confirmPortraitSuggestion, rejectPortraitSuggestion } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useEventsStore } from '../stores/events.js'
 import { useScheduleStore } from '../stores/schedule.js'
@@ -848,6 +862,8 @@ const impressionLoading = ref(false)
 const impressionError = ref('')
 const impressionGrouped = ref({ personality: [], preference: [] })
 const impressionVad = ref(null)      // { instant, mood, dominantEmotion }
+const impressionSuggestions = ref([]) // 阶段三 T4：待确认画像建议
+const handlingSuggestionId = ref(null)
 const impressionAffinity = ref(50)
 const impressionLastDelta = ref(null)
 const impressionLastReason = ref('')
@@ -1048,17 +1064,47 @@ async function openImpression() {
   impressionVad.value = null
   impressionAffinity.value = 50
   try {
-    const data = await getCharacterPortrait(chat.activeChar.id)
+    const [data, suggestionData] = await Promise.all([
+      getCharacterPortrait(chat.activeChar.id),
+      getPortraitSuggestions(chat.activeChar.id).catch(() => ({ suggestions: [] })),
+    ])
     impressionGrouped.value = data.grouped || { personality: [], preference: [] }
     impressionVad.value = data.vad || null
     impressionAffinity.value = data.affinity ?? 50
     impressionLastDelta.value = data.lastAffinityDelta ?? null
     impressionLastReason.value = data.lastReason || ''
+    impressionSuggestions.value = suggestionData.suggestions || []
   } catch (err) {
     impressionError.value = err.message
   } finally {
     impressionLoading.value = false
   }
+}
+
+// ── 印象建议（阶段三 T4）：采纳 → 写入画像；忽略 → 仅关闭 ──
+async function acceptSuggestion(suggestion) {
+  handlingSuggestionId.value = suggestion.id
+  try {
+    await confirmPortraitSuggestion(suggestion.id)
+    impressionSuggestions.value = impressionSuggestions.value.filter(item => item.id !== suggestion.id)
+    impressionGrouped.value = {
+      ...impressionGrouped.value,
+      [suggestion.field]: [
+        ...(impressionGrouped.value[suggestion.field] || []),
+        { id: `local_${suggestion.id}`, trait_type: suggestion.field, content: suggestion.suggestion, confidence: 1.0, created_at: new Date().toISOString() },
+      ],
+    }
+  } catch (err) { impressionError.value = err.message }
+  finally { handlingSuggestionId.value = null }
+}
+
+async function dismissSuggestion(suggestion) {
+  handlingSuggestionId.value = suggestion.id
+  try {
+    await rejectPortraitSuggestion(suggestion.id)
+    impressionSuggestions.value = impressionSuggestions.value.filter(item => item.id !== suggestion.id)
+  } catch (err) { impressionError.value = err.message }
+  finally { handlingSuggestionId.value = null }
 }
 
 // ── 印象编辑/删除 ──
@@ -2593,6 +2639,47 @@ function renderContent(text) {
 }
 .impression-add-link:hover {
   background: rgba(0,0,0,0.04);
+}
+
+/* 阶段三 T4：画像升华建议区（毛玻璃小节，复用 tokens 变量） */
+.impression-suggestions {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--glass-bg, rgba(255,255,255,0.5));
+  border: 1px solid var(--glass-border, rgba(0,0,0,0.06));
+  border-radius: var(--radius-lg, 12px);
+}
+.impression-suggestions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+.impression-suggestions-hint {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+}
+.impression-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--glass-border, rgba(0,0,0,0.06));
+}
+.impression-suggestion-field {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.impression-suggestion-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary, #333);
+}
+.impression-suggestion-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* 卡片列表 */
