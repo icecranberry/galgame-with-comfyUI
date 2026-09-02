@@ -152,7 +152,7 @@ async function maybeCreateGroup() {
     try {
       const raw = await chatSync([
         { role: 'user', content: `${initiator.display_name}想拉${chars.filter(c => c.id !== initiator.id).map(c => c.display_name).join('、')}和${chatUserName}建一个微信群闲聊。请给这个群起一个 8 字以内、俏皮自然的群名。只输出群名本身，不要引号和解释。` },
-      ], { temperature: 1.0, max_tokens: 24, label: '群名生成' });
+      ], { temperature: 0.7, max_tokens: 24, label: '群名生成' });
       groupName = (raw || '').trim().replace(/^["'「」『』]|["'「」『』]$/g, '').slice(0, 16);
     } catch { /* fallback below */ }
     if (!groupName) groupName = chars.map(c => c.display_name).slice(0, 3).join('、') + '的小群';

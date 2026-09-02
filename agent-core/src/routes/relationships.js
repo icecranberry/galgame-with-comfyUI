@@ -118,7 +118,7 @@ router.post('/deduce', async (req, res) => {
     messages.push({ role: 'user', content: userPrompt });
 
     const raw = await chatSync(messages, {
-      temperature: boost ? 1.1 : 0.8,
+      temperature: boost ? 0.8 : 0.6,
       max_tokens: 2048,
       response_format: { type: 'json_object' },
       label: '关系推演' + (isUserMode ? '-user' : '') + (boost ? '-boost' : ''),

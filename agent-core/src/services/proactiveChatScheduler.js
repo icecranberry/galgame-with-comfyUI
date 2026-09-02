@@ -479,7 +479,7 @@ ${proactiveRules}
 
     const result = await chatSync(
       msgs,
-      { temperature: 0.85, max_tokens: 128, label: '主动聊天' }
+      { temperature: 0.7, max_tokens: 128, label: '主动聊天' }
     );
 
     let greeting = (result || '').trim();

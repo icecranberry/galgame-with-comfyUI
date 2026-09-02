@@ -592,7 +592,7 @@ ${rules}`;
 
   let text = '', imagePrompt = '', imageUrls = [];
   try {
-  const result = await chatSync(msgs, { temperature: 0.82, max_tokens: 2048, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
+  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 2048, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content
   const parsed = parseMomentResponse(result);
@@ -857,7 +857,7 @@ ${commentHistory}
 回复这条评论：`;
   msgs.push({ role: 'user', content: userMsg });
 
-  const result = await chatSync(msgs, { temperature: 0.75, max_tokens: 128, label: '回评' });
+  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '回评' });
 
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }

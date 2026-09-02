@@ -364,7 +364,7 @@ ${userContent}
 
   // ── 调用 LLM ──
   try {
-    const raw = await chatSync(msgs, { temperature: 0.82, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '信箱回信助手' });
+    const raw = await chatSync(msgs, { temperature: 0.7, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '信箱回信助手' });
     return parseReplyJSON(raw, userContent);
   } catch (err) {
     console.error('[mailboxScheduler] LLM reply error:', err.message);
