@@ -9,8 +9,8 @@
 |---|---|---|---|
 | 一 | 安放层：多重表示 + 双时态演化 + 实体/三元组索引 + 四路检索 | ✅ 已完成 | `2b508f3` |
 | 二 | 主动回想：`@memory` 文本协议 + activeSearch | ✅ 已完成 | `6b9b3eb` |
-| 三 | 整理 daemon：冲突消解/泛化升华/衰减归档/核心升华/回填/墓碑 | ⬜ 未开始 | — |
-| 四 | 存储与预算：token 预算分配器 + archived 管理 | ⬜ 未开始 | — |
+| 三 | 整理 daemon：冲突消解/泛化升华/衰减归档/核心升华/回填/墓碑 | ✅ 已完成 | 本次提交 |
+| 四 | 存储与预算：token 预算分配器 + archived 管理 | ✅ 已完成 | 本次提交 |
 
 ---
 
@@ -104,36 +104,53 @@
 
 ---
 
-## ⬜ 待完成
+## ✅ 已完成：阶段三（整理 daemon）+ 阶段四（存储与上下文预算）
 
-### 阶段三：整理 daemon（记忆的“睡眠期”）
+**验证**：单元/集成测试 77/77（新增 `test/consolidation.test.js` 16 例 + `test/contextBudget.test.js` 7 例）
 
-设计基准：方案文档 §6。要点：
+### 阶段三落地内容
 
-- 新建 `services/memory/consolidationScheduler.js`（模式对齐 `proactiveChatScheduler.js`）；空闲触发（无活跃 SSE + N 分钟无消息，默认 30 分钟）或每日兜底；可选结合角色 `schedule_templates` 作息（"她睡着后在整理记忆"）
-- 预算：单次 LLM 调用 ≤ `dailyMaxLlmCalls`（默认 6）；任务表 `memory_consolidation_jobs`（**阶段一已建表**），启动时 processing→pending 恢复
-- 六任务：
-  - T1 冲突消解：近 7 天新记忆按共享实体聚类 → LLM 判断矛盾/包含 → 双时态失效或 merge
-  - T2 泛化升华：同实体同 subject 的 event/emotion ≥3 条且跨 14 天 → 归纳 knowledge 语义记忆，血缘 `action='merge' + relation_meta={"kind":"generalize"}`
-  - T3 强度衰减（纯 SQL 零 LLM）：先聚合 `memory_retrieval_audits` 更新 `retrieval_count/last_reinforced_at`，再按 `strength = (importance/5) × exp(-Δdays/halfLife) × (1+0.1·ln(1+retrieval_count))`（halfLife：event 14d / emotion 60d / knowledge·skill 180d），`strength < 0.15` → `archived` + 向量墓碑
-  - T4 核心记忆升华：importance≥4 的 knowledge → `portrait_suggestions`（**阶段一已建表**）→ TavernView 人工确认后应用；好感度系统不碰
-  - T5 存量表示回填：无新字段的 active 记忆每批 10 条 LLM 补齐 → 标 stale 触发重嵌入（**注意：corpus 不换名，同 corpus upsert 覆盖**）
-  - T6 向量墓碑一致性：幂等扫描 archived/superseded/deleted 残留向量
-- 可选项（默认不做，观察 curation 稳定性一个月后议）：summarizer 与 curation 的 40 条边界合并（省 1 次 LLM/40 条，风险是故障域耦合）
-- **配置**：`memory_settings.consolidation = { enabled: true, idleDelayMinutes: 30, dailyMaxLlmCalls: 6 }`
-- **验收**：kill 后续跑；"讨厌狗→收养狗"用例端到端；strength 可解释；daemon 永不在聊天中触发
+**调度器**（新建 `services/memory/consolidationScheduler.js`）：
+- 每 5 分钟扫描；空闲判定 = 无活跃聊天流（新增 `services/chatActivity.js` 计数器，chat.js 流式路由以 `res.on('close')` 恰好注销一次）且距最后一条消息 ≥ `idleDelayMinutes`；距上次运行 >22h 兜底；聊天进行中永不触发 LLM
+- 预算：单轮 LLM 调用 ≤ `dailyMaxLlmCalls`（0 = 禁 LLM 任务，SQL 任务照跑）；预算耗尽时任务退回 pending 下轮续跑，未完成的 LLM 任务自动补后续任务
+- 任务表 `memory_consolidation_jobs`：候选发现入队（同类型去重）、SQL 任务先于 LLM 任务领取、启动/每轮 processing→pending 恢复、attempts≥3 落 failed；运行状态写 `system_settings('memory_consolidation_state')`
 
-### 阶段四：存储与上下文预算
+**任务实现**（新建 `services/memory/memoryConsolidation.js`，全部依赖可注入）：
+- T1 冲突消解：近 7 天新记忆按共享实体聚类 → LLM 矛盾→`applyMemoryActions('update')` 双时态失效 / 重复→merge
+- T2 泛化升华：同会话同实体同主体 event/emotion ≥3 条跨 14 天 → 归纳 knowledge；原记忆保留 importance-1，血缘 `relation_meta={kind:generalize}`；新增 `memoryRepository.insertGeneralizedMemory`（不失效 sources 的派生记忆插入）
+- T3 强度衰减（纯 SQL）：`json_each` 展开 `memory_retrieval_audits.memory_ids` 幂等回写 `retrieval_count/last_reinforced_at`；`strength=(importance/5)×exp(-Δd/halfLife)×(1+0.1·ln(1+召回数))`，<0.15 → archived + 向量/三元组墓碑；归档明细含完整强度构成（可解释）；锚点 = 召回>事件>创建时间，**刻意排除 updated_at**（非内容写入不重置遗忘曲线）
+- T4 画像建议：importance≥4 knowledge 按会话 → LLM 提炼 → `portrait_suggestions(pending)`（与已有画像/待确认建议去重）；确认/忽略接口在 `routes/portraits.js`，ChatView 印象弹窗新增"记忆整理的新发现"区块，采纳后本地即时入列
+- T5 回填：缺 keywords/perspectives/semantic_note 的旧记忆每批 10 条一次 LLM → 置 stale 由 index worker 兜底自动重嵌入
+- T6 墓碑扫描：碎片看"存在晚于状态变更的 completed delete 任务"幂等跳过；三元组入队后置 embedding_state=disabled
+- v3 总开关关闭时 T2/T4/T5 自动跳过（`taskEnabledByV3`）
 
-设计基准：方案文档 §7。要点：
+**配置与 UI**：`memory_settings.consolidation={enabled:true, idleDelayMinutes:30, dailyMaxLlmCalls:6}`；MemorySettingsView 新增"记忆整理（睡眠期）"卡片（开关+空闲分钟+预算+"立即整理一次"按钮）
 
-- `contextAssembler.js` 加 `estimateTokens`（中文 字数/1.6 + 英文词数×1.3）与 dynamicBlocks 预算分配：优先级 rag_memories/recall_result > time_context > active_chat_history > schedule > 其他；降级顺序：历史轮数减半 → RAG topK 5→3 → 尾部整块丢弃
-- `memory_settings.contextBudget = { enabled: false, dynamicTokens: 8000 }`
-- `routes/memory.js` 碎片列表默认排除 archived（筛选参数透出）；MemorySettingsView 加 archived 视图与恢复按钮（status='active' + 重嵌入）
-- 检查项：现有备份/导出机制确认包含五张新表
-- **验收**：超长 base_prompt + 14 dynamic 块极端 case 下降级顺序逐级生效、无静默截断
+### 阶段四落地内容
 
-### 长期备选（未排期）
+- `contextAssembler.estimateTokens`（中文字数/1.6 + 英文词数×1.3）与 `applyContextBudget`（纯函数，不改写入参）：降级顺序 ①`<active_chat_history>` 轮数减半（保留较新后半）→ ②rag 类条目裁至 3 条并重新编号（防呆收尾保留）→ ③按优先级从尾部整块丢弃（rag 类永不丢）；全程 degraded 记录，chat.js 打预算日志，无静默截断
+- `memory_settings.contextBudget={enabled:false, dynamicTokens:8000}`；MemorySettingsView 新增"上下文预算"卡片
+- archived 管理：`POST /api/memory/fragments/:id/restore`（active + stale 重嵌入）；MemorySettingsView 状态筛"已归档"+ 行内恢复按钮；`memoryStats()` 扩展 layers/avgStrength/nearThresholdCount
+- 整理 daemon 可观测：`GET /api/memory/consolidation/jobs`、`POST /api/memory/consolidation/run`
+- 备份检查结论：项目无按表导出机制，备份为整库 .db 文件拷贝，五张新表自动包含
+
+### 实施期决策修订
+
+1. **整理任务拆两文件**：任务实现（memoryConsolidation.js，纯逻辑可注入）与调度/预算/队列（consolidationScheduler.js）分离，单测用 :memory: 库不触真实 DB/LLM。
+2. **衰减锚点排除 updated_at**：强度回写/回填等非内容写入会刷新 updated_at，若作锚点会让老记忆永不衰减；锚点只看 last_reinforced_at > event_time > created_at。
+3. **T2 不走 applyMemoryActions**：其 merge 语义会 supersede 源记忆，与"原记忆保留"冲突，故新增 `insertGeneralizedMemory`。
+4. **T4 落点改 ChatView 印象弹窗**：当前代码库画像 UI 已从 TavernView 迁至 ChatView"对你的印象"，建议区块跟随。
+5. **上下文预算 RAG 降级实现**：方案写"topK 5→3"，实现为对已注入块内条目直接裁剪重编号——效果等价且免去重跑检索。
+
+### 遗留（非阻塞）
+
+- 方案 §6.4 验收（"讨厌狗→收养狗"端到端、kill 续跑实测）与 §7.3 极端 case 人工验收待灰度跑；单测已覆盖各任务逻辑与预算降级路径。
+- 可选项（summarizer/curation 40 条边界合并）按方案建议暂不做。
+- 结合角色作息（schedule_templates）的整理时段产品化未做，daemon 当前只看全局空闲。
+
+---
+
+## 长期备选（未排期）
 
 - 群聊 `@memory` 主动搜索、记忆操作模型（SFT/RL，先积累 `memory_retrieval_audits` 作训练资产）、LongMemEval 子集汉化自测、表情差分/TTS（角色侧另线）
 
@@ -141,7 +158,7 @@
 
 ## 快速上手（新会话接续开发）
 
-1. 读 `docs/memory-upgrade-plan.md`（设计）+ 本文件（进度）
-2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 54/54）
-3. 阶段三从整理 daemon（`consolidationScheduler.js`）开始，六任务建议顺序：T3（纯 SQL，最安全）→ T6 墓碑扫描 → T1 冲突消解 → T2 泛化升华 → T4 核心升华 → T5 回填
+1. 读 `docs/memory-upgrade-plan.md`（设计）+ 本文件（进度）+ CLAUDE.md 记忆系统章节（模块地图）
+2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 77/77）
+3. 记忆系统四阶段已全部落地，`memory/` 目录阅读顺序：memoryConfig（四组开关）→ memoryRepository（落库+索引队列）→ memorySearch/chatMemoryRecall（被动召回）→ activeSearch（@memory 主动回想）→ memoryConsolidation + consolidationScheduler（整理 daemon）→ contextAssembler.applyContextBudget（上下文预算）
 4. 遇 Mimosa 钩子误报见上方"已知注意事项"；UI 改动先读 `docs/design-system.md`
