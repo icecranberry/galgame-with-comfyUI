@@ -15,9 +15,9 @@ export async function hybridSearch(query, options = {}) {
   const topK = clamp(options.topK ?? settings.topK, 1, 20);
   const textLimit = clamp(options.textCandidates ?? settings.textCandidates, topK, 100);
   const vectorLimit = clamp(options.vectorCandidates ?? settings.vectorCandidates, topK, 100);
-  const textResults = textSearch(query, conversationIds, textLimit);
+  const textResults = textSearch(query, conversationIds, textLimit, { includeHistorical: options.includeHistorical });
   // v3 实体通道（Mem0 平行实体集合思路）：查询词命中实体名/别名 → 反查关联记忆，作为独立信号参与 RRF
-  const entityResults = isMemoryV3Enabled() ? entitySearch(query, conversationIds, textLimit) : [];
+  const entityResults = isMemoryV3Enabled() ? entitySearch(query, conversationIds, textLimit, { includeHistorical: options.includeHistorical }) : [];
   let profile = null;
   let embeddingSource = 'unknown';
   let embeddingElapsedMs = null;
@@ -40,7 +40,7 @@ export async function hybridSearch(query, options = {}) {
       conversationId: vectorConversationScope,
       corpus: profile.corpus,
     });
-    vectorResults = hydrateVectorResults(raw, conversationIds);
+    vectorResults = hydrateVectorResults(raw, conversationIds, { includeHistorical: options.includeHistorical });
     if (embeddingResult.source === 'local') fallbackReason = 'embedding: using local built-in model';
   } catch (error) {
     fallbackReason = `embedding: ${error.message}`;
@@ -89,16 +89,25 @@ export async function hybridSearch(query, options = {}) {
   return run;
 }
 
-export function textSearch(query, conversationScope = null, limit = 20) {
+export function textSearch(query, conversationScope = null, limit = 20, { includeHistorical = false } = {}) {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
   const conversationIds = normalizeConversationIds(null, conversationScope);
-  const ftsResults = ftsSearch(tokens, conversationIds, limit);
-  const ngramResults = ngramSearch(tokens, conversationIds, limit);
+  const ftsResults = ftsSearch(tokens, conversationIds, limit, { includeHistorical });
+  const ngramResults = ngramSearch(tokens, conversationIds, limit, { includeHistorical });
   return rrfFusion([ftsResults, ngramResults], limit);
 }
 
-function ftsSearch(tokens, conversationIds, limit) {
+// 现行可见性过滤：默认只看 active 且未失效（双时态现行）；历史模式（@memory 时态查询）
+// 放宽到 superseded 也可见，结果由调用方标注 [历史·过时] 徽标（docs/memory-upgrade-plan.md §5.3）
+function visibilityFilter(includeHistorical, column = 'mf') {
+  const c = column ? `${column}.` : '';
+  return includeHistorical
+    ? `${c}status IN ('active', 'superseded')`
+    : `${c}status = 'active' AND ${c}valid_to IS NULL`;
+}
+
+function ftsSearch(tokens, conversationIds, limit, { includeHistorical = false } = {}) {
   const db = getDb();
   const matchQuery = tokens.map(token => `"${token.replace(/"/g, '""')}"*`).join(' OR ');
   const params = [matchQuery];
@@ -108,7 +117,7 @@ function ftsSearch(tokens, conversationIds, limit) {
     SELECT mf.*, bm25(memory_fragments_fts, 5.0, 1.0, 3.0, 4.0, 2.5, 1.5) AS bm25_score
     FROM memory_fragments_fts
     JOIN memory_fragments mf ON mf.id = memory_fragments_fts.rowid
-    WHERE memory_fragments_fts MATCH ? AND mf.status = 'active' AND mf.valid_to IS NULL
+    WHERE memory_fragments_fts MATCH ? AND ${visibilityFilter(includeHistorical)}
   `;
   sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` ORDER BY bm25_score ASC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
@@ -132,7 +141,7 @@ const NGRAM_COLUMNS = [
   ['reasoning', 1],
 ];
 
-function ngramSearch(tokens, conversationIds, limit) {
+function ngramSearch(tokens, conversationIds, limit, { includeHistorical = false } = {}) {
   const db = getDb();
   const conditions = tokens.map(() => `(${NGRAM_COLUMNS.map(([column]) => `mf.${column} LIKE ?`).join(' OR ')})`).join(' OR ');
   const scoreParts = tokens.map(() => `(${NGRAM_COLUMNS.map(([column, weight]) => `CASE WHEN mf.${column} LIKE ? THEN ${weight} ELSE 0 END`).join(' + ')})`).join(' + ');
@@ -146,7 +155,7 @@ function ngramSearch(tokens, conversationIds, limit) {
   let sql = `
     SELECT mf.*, (${scoreParts}) AS text_score
     FROM memory_fragments mf
-    WHERE mf.status = 'active' AND mf.valid_to IS NULL AND (${conditions})
+    WHERE ${visibilityFilter(includeHistorical)} AND (${conditions})
   `;
   sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` ORDER BY text_score DESC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
@@ -156,7 +165,7 @@ function ngramSearch(tokens, conversationIds, limit) {
 
 // 实体通道：查询 token 命中实体（名字相等 > 互相包含 > 别名）→ 反查关联记忆，
 // 按实体命中分 × 链接角色权重（subject 3 / object 2 / mention 1）排序。
-function entitySearch(query, conversationIds, limit) {
+function entitySearch(query, conversationIds, limit, { includeHistorical = false } = {}) {
   const db = getDb();
   const tokens = queryTokens(query);
   if (tokens.length === 0) return [];
@@ -168,7 +177,7 @@ function entitySearch(query, conversationIds, limit) {
     SELECT mf.*, SUM(CASE mel.entity_id ${entityScoreCase} ELSE 0 END * CASE mel.role WHEN 'subject' THEN 3 WHEN 'object' THEN 2 ELSE 1 END) AS entity_score
     FROM memory_entity_links mel
     JOIN memory_fragments mf ON mf.memory_id = mel.memory_id
-    WHERE mel.entity_id IN (${matched.map(() => '?').join(',')}) AND mf.status = 'active' AND mf.valid_to IS NULL
+    WHERE mel.entity_id IN (${matched.map(() => '?').join(',')}) AND ${visibilityFilter(includeHistorical)}
   `;
   sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` GROUP BY mf.memory_id ORDER BY entity_score DESC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
@@ -208,13 +217,13 @@ function matchEntities(db, tokens) {
   }
 }
 
-function hydrateVectorResults(results, conversationIds) {
+function hydrateVectorResults(results, conversationIds, { includeHistorical = false } = {}) {
   const db = getDb();
   const hydrated = [];
   for (const result of results) {
     const memoryId = result.metadata?.memory_id || result.id;
     const params = [memoryId];
-    let sql = `SELECT * FROM memory_fragments WHERE memory_id = ? AND status = 'active' AND valid_to IS NULL`;
+    let sql = `SELECT * FROM memory_fragments WHERE memory_id = ? AND ${visibilityFilter(includeHistorical, '')}`;
     sql = appendConversationFilter(sql, params, conversationIds, 'conversation_id');
     const row = db.prepare(sql).get(...params);
     if (row) hydrated.push(formatRow(row, 'vector', Number(result.score || 0)));
@@ -234,7 +243,8 @@ function normalizeConversationIds(conversationId, conversationIds) {
   return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
 }
 
-function rrfFusion(resultSets, limit) {
+// RRF 融合（K=60）：供 hybridSearch 内部与阶段二 activeSearch 共用
+export function rrfFusion(resultSets, limit) {
   const map = new Map();
   for (const results of resultSets) {
     for (let index = 0; index < results.length; index++) {
@@ -252,7 +262,8 @@ function rrfFusion(resultSets, limit) {
   return [...map.values()].sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-function formatRow(row, source, score) {
+// 导出给 activeSearch（阶段二主动回想）复用统一的结果形态
+export function formatRow(row, source, score) {
   const tags = parseTags(row.tags);
   return {
     id: row.memory_id,
@@ -263,6 +274,7 @@ function formatRow(row, source, score) {
     judgment: row.judgment || row.content,
     reasoning: row.reasoning || '',
     tags,
+    status: row.status || 'active',
     content: row.judgment || row.content,
     fragment_type: row.memory_type || row.fragment_type,
     entities: tags,

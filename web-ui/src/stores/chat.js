@@ -25,6 +25,7 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
+const memoryRecalling = ref(false)  // Memory v3 阶段二：@memory 主动回想进行中（回想状态条）
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
   const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增
@@ -266,7 +267,7 @@ export const useChatStore = defineStore('chat', () => {
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
     messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now })
 
-    streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
+    streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
 
     // ── 安全超时：自适应时长，防止 streaming 永久锁死发送键 ──
     //     纯文本场景 30s，生图场景延长到 600s（匹配 ComfyUI 后端超时）
@@ -406,7 +407,7 @@ export const useChatStore = defineStore('chat', () => {
               bubbleIds.push(newId)
             }
             // ── context_update ──
-            if (lastEvent === 'context_update' && d.content) {
+            if (lastEvent === 'context_update' && d.content !== undefined && d.content !== null) {
               fullResponse = d.content
               if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
               const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
@@ -429,6 +430,15 @@ export const useChatStore = defineStore('chat', () => {
                 messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
               }
               bubbleIds.length = parts.length
+            }
+            // ── @memory 主动回想：状态条 ──
+            if (lastEvent === 'memory_recall_start') {
+              // Memory v3 阶段二：角色发起主动回想，显示状态条并刷新安全超时
+              memoryRecalling.value = true
+              resetSafetyTimer(TEXT_SAFETY_MS)
+            }
+            if (lastEvent === 'memory_recall_end') {
+              memoryRecalling.value = false
             }
             // ── 生图事件 ──
             if (lastEvent === 'generate_start') {
@@ -563,6 +573,7 @@ export const useChatStore = defineStore('chat', () => {
         break
       } finally {
         if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+        memoryRecalling.value = false
         reader.releaseLock()
         if (!isCurrentStream(sessionId)) {
           clearSafetyTimer()
@@ -732,6 +743,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

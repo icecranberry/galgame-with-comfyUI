@@ -98,6 +98,19 @@
         </div>
       </section>
 
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>主动回想</h3><p>角色会在需要时主动检索自己的记忆（可能略微增加回复等待）。</p></div>
+          <label class="switch"><input v-model="form.activeSearch.enabled" type="checkbox" aria-label="主动回想"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.activeSearch.enabled">
+          <div class="collapse-body">
+            <label>回想最长等待时间（毫秒）<input v-model.number="form.activeSearch.timeoutMs" type="number" min="1000" max="30000"></label>
+            <p class="disabled-note">开启后，角色遇到“你应该记得”的话题时会自主发起一次记忆检索，结果只用于当轮回复。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
       <section class="card params">
         <h3>查找范围</h3>
         <div class="three-col">
@@ -400,6 +413,7 @@ const jobsLoading = ref(false)
 
 const form = reactive({
   enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
+  activeSearch: { enabled: false, timeoutMs: 4000 },
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
   reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000, hasApiKey: false },
 })
@@ -421,6 +435,7 @@ function providerPayload(provider, headersText) {
 function payload() {
   return {
     enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
+    activeSearch: { enabled: form.activeSearch.enabled, timeoutMs: form.activeSearch.timeoutMs },
     embedding: providerPayload(form.embedding, embeddingHeaders.value),
     reranker: providerPayload(form.reranker, rerankerHeaders.value),
   }
@@ -585,6 +600,7 @@ async function applyConfig() {
   Object.assign(form, config)
   form.embedding = { ...form.embedding, ...config.embedding }
   form.reranker = { ...form.reranker, ...config.reranker }
+  form.activeSearch = { ...form.activeSearch, ...(config.activeSearch || {}) }
   embeddingHeaders.value = JSON.stringify(config.embedding.headers || {}, null, 2)
   rerankerHeaders.value = JSON.stringify(config.reranker.headers || {}, null, 2)
   Object.assign(stats, stat)

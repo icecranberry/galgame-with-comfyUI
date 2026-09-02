@@ -9,6 +9,10 @@ import { createMemoryIndexWorker } from './memoryIndexWorker.js';
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
 const INDEX_CONCURRENCY = 2;
+// Memory v3 阶段二：三元组向量语料（query-to-triple 联想扩展，docs/memory-upgrade-plan.md §5.3）
+export const MEMORY_TRIPLES_CORPUS = 'memory_triples_v1';
+// 三元组向量 id 前缀：与记忆碎片 id 共用 memory_index_jobs 表，前缀隔离避免任务去重/互斥互相干扰
+export const TRIPLE_JOB_PREFIX = 'trip_';
 // 记忆整理嵌入走用户自定义 → 系统内置 API（120s）→ 本地 ONNX 的优先级，
 // 独立失败计数 embedding_index，当日失败满 5 次才降级本地。
 const INDEX_EMBED_TIMEOUT_MS = 120000;
@@ -148,7 +152,8 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
         }
       }
       if (item.memory.triple) {
-        insertMemoryTriple(db, { memoryId, triple: item.memory.triple, eventTime });
+        const tripleId = insertMemoryTriple(db, { memoryId, triple: item.memory.triple, eventTime });
+        enqueueTripleIndexJob(db, 'triple_upsert', tripleId, PRIORITY_LIVE);
       }
       for (const source of sources) {
         // v3 双时态演化：置失效（valid_to）而非仅 supersede，历史仍可检索（查询侧用 valid_to 过滤可见性）
@@ -182,18 +187,67 @@ export function upsertMemoryEntity(db, name) {
 export function insertMemoryTriple(db, { memoryId, triple, eventTime = null }) {
   const subjectEntityId = findEntityIdByName(db, triple.subject);
   const objectEntityId = findEntityIdByName(db, triple.object);
-  return db.prepare(`
-    INSERT INTO memory_triples(memory_id, subject_entity_id, subject_text, predicate, object_entity_id, object_text, event_time, valid_from)
-    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  const info = db.prepare(`
+    INSERT INTO memory_triples(memory_id, subject_entity_id, subject_text, predicate, object_entity_id, object_text, event_time, valid_from, embedding_state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
   `).run(memoryId, subjectEntityId, triple.subject, triple.predicate, objectEntityId, triple.object, eventTime);
+  return Number(info.lastInsertRowid);
 }
 
 function findEntityIdByName(db, name) {
   return db.prepare(`SELECT id FROM memory_entities WHERE name = ?`).get(clampText(name, 64))?.id ?? null;
 }
 
+// 三元组向量索引任务：以 trip_ 前缀隔离 memory_id 键，processIndexJob 按 job_type 分支处理
+function enqueueTripleIndexJob(db, jobType, tripleId, priority = PRIORITY_HISTORY) {
+  return enqueueIndexJob(db, jobType, `${TRIPLE_JOB_PREFIX}${tripleId}`, null, priority);
+}
+
+function parseTripleIdFromJobKey(memoryId) {
+  const match = String(memoryId || '').match(/^trip_(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+// 三元组嵌入文本（query-to-triple 匹配形态）：主语 + 谓词 + 宾语拼接
+export function tripleEmbeddingText(row) {
+  return [row.subject_text, row.predicate, row.object_text].filter(Boolean).join(' ');
+}
+
+async function indexMemoryTriple(tripleId) {
+  const row = getDb().prepare(`SELECT * FROM memory_triples WHERE id = ?`).get(tripleId);
+  if (!row || row.valid_to != null) return false;
+  const settings = getMemorySettings({ includeSecrets: true });
+  const vectorId = `${TRIPLE_JOB_PREFIX}${tripleId}`;
+  try {
+    const text = tripleEmbeddingText(row);
+    const fragment = getDb().prepare(`SELECT conversation_id FROM memory_fragments WHERE memory_id = ?`).get(row.memory_id);
+    const metadata = {
+      memory_id: row.memory_id,
+      conversation_id: fragment?.conversation_id || null,
+      predicate: row.predicate,
+    };
+    const { embedding } = await embedMemoryText(text, settings, { timeoutMs: INDEX_EMBED_TIMEOUT_MS, failureKind: 'embedding_index', slowThresholdMs: null });
+    const current = getDb().prepare(`SELECT valid_to FROM memory_triples WHERE id = ?`).get(tripleId);
+    if (!current || current.valid_to != null) return false;
+    await upsertVector(vectorId, text, metadata, null, MEMORY_TRIPLES_CORPUS, embedding);
+    getDb().prepare(`UPDATE memory_triples SET embedding_state = 'indexed' WHERE id = ?`).run(tripleId);
+    return true;
+  } catch (error) {
+    getDb().prepare(`UPDATE memory_triples SET embedding_state = 'failed' WHERE id = ?`).run(tripleId);
+    throw error;
+  }
+}
+
+async function removeMemoryTripleVector(tripleId) {
+  await deleteVector(`${TRIPLE_JOB_PREFIX}${tripleId}`, MEMORY_TRIPLES_CORPUS);
+}
+
 function invalidateMemoryTriples(db, memoryId) {
+  const rows = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ? AND valid_to IS NULL`).all(memoryId);
+  if (rows.length === 0) return;
   db.prepare(`UPDATE memory_triples SET valid_to = CURRENT_TIMESTAMP WHERE memory_id = ? AND valid_to IS NULL`).run(memoryId);
+  // 双时态失效的三元组同步出向量库（阶段二联想扩展只用现行三元组）
+  for (const row of rows) enqueueTripleIndexJob(db, 'triple_delete', row.id, PRIORITY_LIVE);
 }
 
 export function getMemoryById(memoryId) {
@@ -237,7 +291,10 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
     for (const row of affected) {
       db.prepare(`UPDATE memory_fragments SET status = 'deleted', source_msg_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
       db.prepare(`DELETE FROM memory_entity_links WHERE memory_id = ?`).run(row.memory_id);
+      // 回滚删除的三元组同步出向量库（trip_ 前缀任务不受本事务中碎片任务清理影响）
+      const tripleRows = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ?`).all(row.memory_id);
       db.prepare(`DELETE FROM memory_triples WHERE memory_id = ?`).run(row.memory_id);
+      for (const tripleRow of tripleRows) enqueueTripleIndexJob(db, 'triple_delete', tripleRow.id, PRIORITY_LIVE);
       const predecessors = db.prepare(`SELECT from_memory_id FROM memory_relations WHERE to_memory_id = ?`).all(row.memory_id);
       for (const predecessor of predecessors) {
         if (affectedIds.has(predecessor.from_memory_id)) continue;
@@ -262,8 +319,12 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
 export function clearConversationMemories(conversationId) {
   const db = getDb();
   const rows = db.prepare(`SELECT memory_id, embedding_profile FROM memory_fragments WHERE conversation_id = ?`).all(conversationId);
+  // 先收出现行三元组 id：清空后需补发 triple_delete 任务出向量库
+  const ids = rows.map(row => row.memory_id).filter(Boolean);
+  const tripleIds = ids.length
+    ? db.prepare(`SELECT id FROM memory_triples WHERE memory_id IN (${ids.map(() => '?').join(',')})`).all(...ids).map(row => row.id)
+    : [];
   const transaction = db.transaction(() => {
-    const ids = rows.map(row => row.memory_id).filter(Boolean);
     if (ids.length) {
       const placeholders = `(${ids.map(() => '?').join(',')})`;
       db.prepare(`DELETE FROM memory_relations WHERE from_memory_id IN ${placeholders} OR to_memory_id IN ${placeholders}`).run(...ids, ...ids);
@@ -276,8 +337,11 @@ export function clearConversationMemories(conversationId) {
     db.prepare(`DELETE FROM memory_retrieval_audits WHERE conversation_id = ?`).run(conversationId);
   });
   transaction();
+  for (const tripleId of tripleIds) enqueueTripleIndexJob(db, 'triple_delete', tripleId, PRIORITY_LIVE);
+  wakeMemoryIndexWorker();
   const corpora = [...new Set(rows.map(row => row.embedding_profile).filter(profile => profile && profile !== 'local_builtin').map(profile => `memory_v2_${profile}`))];
   void deleteByConversation(conversationId).catch(() => {});
+  void deleteByConversation(conversationId, MEMORY_TRIPLES_CORPUS).catch(() => {});
   for (const corpus of corpora) void deleteByConversation(conversationId, corpus).catch(() => {});
   return rows.length;
 }
@@ -500,6 +564,12 @@ async function processIndexJob(job) {
       if (row?.status === 'active') await indexMemory(job.memory_id);
     } else if (job.job_type === 'delete') {
       await removeMemoryVector(job.memory_id, job.profile);
+    } else if (job.job_type === 'triple_upsert') {
+      const tripleId = parseTripleIdFromJobKey(job.memory_id);
+      if (tripleId) await indexMemoryTriple(tripleId);
+    } else if (job.job_type === 'triple_delete') {
+      const tripleId = parseTripleIdFromJobKey(job.memory_id);
+      if (tripleId) await removeMemoryTripleVector(tripleId);
     } else {
       throw new Error(`unsupported memory index job type: ${job.job_type}`);
     }

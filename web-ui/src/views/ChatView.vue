@@ -106,6 +106,17 @@
         </div>
       </div>
 
+      <!-- @memory 回想状态条（Memory v3 阶段二）：角色主动检索记忆期间轻量提示，完成后收起 -->
+      <Transition name="guesses-fade">
+        <div v-if="chat.memoryRecalling" class="recall-status" role="status">
+          <svg class="recall-status-spinner cel-spin" viewBox="0 0 20 20" width="14" height="14" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" stroke="var(--accent)" stroke-opacity="0.25" stroke-width="2.5" />
+            <path d="M18 10a8 8 0 0 0-8-8" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" />
+          </svg>
+          <span>回想着过去的记忆…</span>
+        </div>
+      </Transition>
+
       <!-- 回复候选词：v-if 控制 DOM 存在 + 仅 opacity 动画，避免移动端与滚动竞争 compositor -->
       <Transition name="guesses-fade">
         <div v-if="chat.guesses" class="guesses-row">
@@ -1795,6 +1806,21 @@ function renderContent(text) {
 .force-img-tip.is-mobile {
   left: calc(50% + 20px);
 }
+
+/* ── @memory 回想状态条（Memory v3 阶段二）：毛玻璃小胶囊，贴候选词行上方 ── */
+.recall-status {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 24px 6px;
+  padding: 6px 12px;
+  width: fit-content;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  border: 1.5px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(8px);
+}
+.recall-status-spinner { flex-shrink: 0; }
 
 /* ── 回复候选词（AI 猜想用户回复）── */
 .guesses-row {

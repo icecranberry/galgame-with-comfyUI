@@ -9,6 +9,8 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   recordUnengagedEvents: true,
   // v3：记忆多重表示 + 实体检索通道 + 语义注入（docs/memory-upgrade-plan.md 阶段一开关）
   v3: { enabled: true },
+  // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
+  activeSearch: { enabled: false, timeoutMs: 4000 },
   embedding: {
     enabled: false,
     provider: 'custom',
@@ -47,6 +49,7 @@ export function normalizeMemorySettings(input = {}, previous = null) {
   const embedding = objectOrEmpty(input.embedding);
   const reranker = objectOrEmpty(input.reranker);
   const v3 = objectOrEmpty(input.v3);
+  const activeSearch = objectOrEmpty(input.activeSearch);
   const merged = {
     enabled: input.enabled === undefined ? base.enabled : Boolean(input.enabled),
     topK: clampInt(input.topK, base.topK, 1, 20),
@@ -55,6 +58,10 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     recordUnengagedEvents: input.recordUnengagedEvents === undefined ? base.recordUnengagedEvents : Boolean(input.recordUnengagedEvents),
     v3: {
       enabled: v3.enabled === undefined ? (base.v3?.enabled ?? true) : Boolean(v3.enabled),
+    },
+    activeSearch: {
+      enabled: activeSearch.enabled === undefined ? (base.activeSearch?.enabled ?? false) : Boolean(activeSearch.enabled),
+      timeoutMs: clampInt(activeSearch.timeoutMs, base.activeSearch?.timeoutMs ?? 4000, 1000, 30000),
     },
     embedding: {
       ...base.embedding,
@@ -102,6 +109,20 @@ export function isMemoryV3Enabled() {
   } catch {
     return true;
   }
+}
+
+// 阶段二 @memory 主动回想配置（enabled 默认关）。DB 未就绪时按默认关闭处理，零影响。
+export function getActiveSearchConfig() {
+  try {
+    const { enabled, timeoutMs } = getMemorySettings().activeSearch || {};
+    return { enabled: enabled === true, timeoutMs: clampInt(timeoutMs, 4000, 1000, 30000) };
+  } catch {
+    return { enabled: false, timeoutMs: 4000 };
+  }
+}
+
+export function isMemoryActiveSearchEnabled() {
+  return getActiveSearchConfig().enabled;
 }
 
 export function saveMemorySettings(input) {
