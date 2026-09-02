@@ -10,7 +10,7 @@
  *
  * 任务队列：memory_consolidation_jobs（job_type/payload/status/attempts）。
  *   - 扫描时按候选发现结果入队（同类型已有 pending/processing 则不重复入队）；
- *   - SQL 任务（decay/tombstone）优先领取，LLM 任务受单轮预算 dailyMaxLlmCalls 约束；
+ *   - SQL 任务（decay/tombstone）优先领取，LLM 任务受单轮预算 llmCallsPerRun 约束；
  *   - 预算耗尽而任务未完成 → 留在 pending（或补一个后续任务），下次扫描自然续跑；
  *   - 启动时 processing → pending 恢复（kill 后续跑）；attempts ≥ 3 → failed 不再自动重试。
  *
@@ -224,13 +224,13 @@ export async function runConsolidationOnce({ force = false } = {}) {
   const summary = {};
   try {
     recoverInterruptedJobs(db);
-    discoverAndEnqueueJobs(db, cfg.dailyMaxLlmCalls);
+    discoverAndEnqueueJobs(db, cfg.llmCallsPerRun);
     let llmCallsUsed = 0;
     while (true) {
       const job = claimNextJob(db);
       if (!job) break;
       const isLlmJob = LLM_JOB_TYPES.has(job.job_type);
-      const budgetRemaining = Math.max(0, cfg.dailyMaxLlmCalls - llmCallsUsed);
+      const budgetRemaining = Math.max(0, cfg.llmCallsPerRun - llmCallsUsed);
       if (isLlmJob && budgetRemaining === 0) {
         // 预算耗尽：任务退回 pending，下轮扫描续跑
         db.prepare(`UPDATE memory_consolidation_jobs SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(job.id);
@@ -240,7 +240,7 @@ export async function runConsolidationOnce({ force = false } = {}) {
         const result = await executeJob(job, { llmBudgetRemaining: budgetRemaining, db });
         llmCallsUsed += result.llmCalls || 0;
         // LLM 任务因预算中途让位 → 补一个后续任务（下轮接着跑剩余候选）
-        if (isLlmJob && result.done === false && cfg.dailyMaxLlmCalls - llmCallsUsed <= 0) {
+        if (isLlmJob && result.done === false && cfg.llmCallsPerRun - llmCallsUsed <= 0) {
           enqueueJob(db, job.job_type, { continuation: true });
         }
         finishJob(db, job.id, 'completed');

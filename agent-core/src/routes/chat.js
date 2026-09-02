@@ -1044,7 +1044,20 @@ ${coreRules}
 
       const recallAbort = new AbortController();
       req.on('close', () => recallAbort.abort());
-      await consumeStream(recallMsgs, recallAbort.signal);
+      try {
+        await consumeStream(recallMsgs, recallAbort.signal);
+      } catch (err) {
+        // 二次续写失败兜底：指令行已被吞、气泡已清空，不能让用户面对沉默。
+        // 无任何内容时补一条角色化短文本并走正常落库；已有部分内容则保留半截回复。
+        console.warn('[chat] @memory recall continuation failed:', err.message);
+        if (streamState.collectedSegments.length === 0) {
+          const fallbackText = '……抱歉，刚刚走了一下神。你想说的是？';
+          streamState.fullContent = fallbackText;
+          streamState.collectedSegments.push(fallbackText);
+          send('token', { content: fallbackText });
+          send('bubble_break', {});
+        }
+      }
     }
 
     // 补救：LLM 偶尔把 {"prompt":"..."} 放在正文前面（而非末尾），

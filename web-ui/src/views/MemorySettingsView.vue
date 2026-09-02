@@ -119,7 +119,7 @@
         <CollapseTransition :show="form.consolidation.enabled">
           <div class="collapse-body">
             <label>空闲判定（分钟，距最后一条消息）<input v-model.number="form.consolidation.idleDelayMinutes" type="number" min="5" max="720"></label>
-            <label>单轮整理模型调用上限<input v-model.number="form.consolidation.dailyMaxLlmCalls" type="number" min="0" max="30"></label>
+            <label>单轮整理模型调用上限<input v-model.number="form.consolidation.llmCallsPerRun" type="number" min="0" max="30"></label>
             <div style="margin-top: 8px;">
               <button class="ghost compact" :disabled="consolidating" @click="triggerConsolidation">{{ consolidating ? '整理中…' : '立即整理一次' }}</button>
             </div>
@@ -453,7 +453,7 @@ const consolidating = ref(false)
 const form = reactive({
   enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
   activeSearch: { enabled: false, timeoutMs: 4000 },
-  consolidation: { enabled: true, idleDelayMinutes: 30, dailyMaxLlmCalls: 6 },
+  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
   reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000, hasApiKey: false },
@@ -477,7 +477,7 @@ function payload() {
   return {
     enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
     activeSearch: { enabled: form.activeSearch.enabled, timeoutMs: form.activeSearch.timeoutMs },
-    consolidation: { enabled: form.consolidation.enabled, idleDelayMinutes: form.consolidation.idleDelayMinutes, dailyMaxLlmCalls: form.consolidation.dailyMaxLlmCalls },
+    consolidation: { enabled: form.consolidation.enabled, idleDelayMinutes: form.consolidation.idleDelayMinutes, llmCallsPerRun: form.consolidation.llmCallsPerRun },
     contextBudget: { enabled: form.contextBudget.enabled, dynamicTokens: form.contextBudget.dynamicTokens },
     embedding: providerPayload(form.embedding, embeddingHeaders.value),
     reranker: providerPayload(form.reranker, rerankerHeaders.value),

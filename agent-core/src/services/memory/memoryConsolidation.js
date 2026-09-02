@@ -175,7 +175,9 @@ export function findConflictClusters(db, { sinceDays = 7, limit = 4, now = new D
   const clusters = [];
   const usedIds = new Set();
   for (const row of recent) {
-    if (usedIds.has(row.memory_id) || clusters.length >= limit) break;
+    if (clusters.length >= limit) break;
+    // 已被前面簇消费的记忆跳过继续找（不能 break——否则少收簇）
+    if (usedIds.has(row.memory_id)) continue;
     const entityIds = db.prepare(`SELECT entity_id FROM memory_entity_links WHERE memory_id = ?`).all(row.memory_id).map(r => r.entity_id);
     if (entityIds.length === 0) continue;
     const placeholders = entityIds.map(() => '?').join(',');
@@ -192,6 +194,20 @@ export function findConflictClusters(db, { sinceDays = 7, limit = 4, now = new D
     clusters.push({ conversationId: row.conversation_id, memories: [...olds, row] });
   }
   return clusters;
+}
+
+// 组内任一成员已存在存活的泛化后代（knowledge 子记忆仍 active）→ 该组已升华过，跳过。
+// 没有这道去重，同一实体组会随 daemon 每轮扫描反复生成泛化记忆（content_hash 各不相同，无法靠去重兜住）。
+function hasLivingGeneralization(db, memberIds) {
+  const placeholders = memberIds.map(() => '?').join(',');
+  return !!db.prepare(`
+    SELECT 1 FROM memory_relations r
+    JOIN memory_fragments mf ON mf.memory_id = r.to_memory_id
+    WHERE r.from_memory_id IN (${placeholders})
+      AND r.relation_meta LIKE '%"kind":"generalize"%'
+      AND mf.status = 'active'
+    LIMIT 1
+  `).get(...memberIds);
 }
 
 // T2：同会话同实体同 subject 的 event/emotion ≥3 条且跨度 > 14 天 → 泛化候选组
@@ -218,7 +234,9 @@ export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limi
         AND mf.subject = ? AND mf.memory_type IN ('event', 'emotion')
       ORDER BY COALESCE(mf.event_time, mf.created_at) ASC LIMIT 6
     `).all(group.conversation_id, group.entity_id, group.subject);
-    if (members.length >= minCount) result.push({ ...group, members });
+    if (members.length < minCount) continue;
+    if (hasLivingGeneralization(db, members.map(m => m.memory_id))) continue;
+    result.push({ ...group, members });
   }
   return result;
 }
@@ -301,8 +319,9 @@ ${listing}
 - 矛盾：后一条事实与前一条不能同时成立（如"讨厌狗"→"收养了流浪狗"），输出 type=conflict，给出替代旧记忆的新事实
 - 重复/包含：几条说的其实是同一件事，输出 type=duplicate，合并成一条
 - 无关（只是共享实体但各说各事）不要输出
+- 新产出（updatedFact/mergedFact）尽量带上 keywords（3~8 个检索词）和 semanticNote（一句可转述的口语版），便于直接按完整形态入库
 
-只返回严格 JSON：{"resolutions":[{"type":"conflict","outdatedMemoryId":"被替代的记忆ID","updatedFact":"一句独立清楚的新判断句","memoryType":"knowledge|event|emotion|skill","subject":"user|character|relationship|assistant","reasoning":"判断依据","tags":["标签"]} 或 {"type":"duplicate","sourceMemoryIds":["要合并的记忆ID"],"mergedFact":"合并后的一句话","reasoning":"判断依据","tags":["标签"]}]}`;
+只返回严格 JSON：{"resolutions":[{"type":"conflict","outdatedMemoryId":"被替代的记忆ID","updatedFact":"一句独立清楚的新判断句","memoryType":"knowledge|event|emotion|skill","subject":"user|character|relationship|assistant","reasoning":"判断依据","tags":["标签"],"keywords":["检索词"],"semanticNote":"口语版转述"} 或 {"type":"duplicate","sourceMemoryIds":["要合并的记忆ID"],"mergedFact":"合并后的一句话","reasoning":"判断依据","tags":["标签"],"keywords":["检索词"],"semanticNote":"口语版转述"}]}`;
     llmCalls++;
     let resolutions = [];
     try {
@@ -329,6 +348,9 @@ ${listing}
                 judgment: String(resolution.updatedFact).slice(0, 300),
                 reasoning: String(resolution.reasoning || '整理 daemon 冲突消解').slice(0, 300),
                 tags: Array.isArray(resolution.tags) ? resolution.tags.map(String).slice(0, 8) : ['整理'],
+                // v3 检索/注入字段：决议直接带上，避免替代记忆降级为 v2 形态再等 T5 回填
+                keywords: resolution.keywords,
+                semanticNote: resolution.semanticNote,
               },
             }],
           });
@@ -349,6 +371,8 @@ ${listing}
                 judgment: String(resolution.mergedFact || resolution.updatedFact || validIds.length + '条记忆合并').slice(0, 300),
                 reasoning: String(resolution.reasoning || '整理 daemon 重复合并').slice(0, 300),
                 tags: Array.isArray(resolution.tags) ? resolution.tags.map(String).slice(0, 8) : ['整理'],
+                keywords: resolution.keywords,
+                semanticNote: resolution.semanticNote,
               },
             }],
           });

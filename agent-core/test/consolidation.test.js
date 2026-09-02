@@ -454,3 +454,40 @@ test('runBackfillTask：预算为 0 时直接让位', async () => {
   assert.equal(result.done, false);
   assert.equal(result.llmCalls, 0);
 });
+
+test('findGeneralizationGroups：已有存活泛化后代的组被跳过（防反复升华）', () => {
+  const db = createDb();
+  for (const [id, days] of [['mem_ev0', 30], ['mem_ev1', 18], ['mem_ev2', 5]]) {
+    insertFragment(db, { memoryId: id, type: 'event', judgment: `情景记录${id}`, eventTime: daysAgo(days), conversationId: 'char_1' });
+    linkEntity(db, id, '感冒');
+  }
+  const groups = findGeneralizationGroups(db);
+  assert.equal(groups.length, 1);
+  // 模拟上一轮 daemon 已为该组生成泛化后代（active）——本轮应整体跳过，不再重复升华
+  db.prepare(`INSERT INTO memory_relations(from_memory_id, to_memory_id, action, relation_meta) VALUES ('mem_ev0', 'mem_gen1', 'merge', '{"kind":"generalize"}')`).run();
+  insertFragment(db, { memoryId: 'mem_gen1', type: 'knowledge', judgment: '他体质偏弱，换季容易感冒', conversationId: 'char_1' });
+  assert.equal(findGeneralizationGroups(db).length, 0);
+  // 泛化后代被删除（如 rollback）后，组重新成为候选
+  db.prepare(`UPDATE memory_fragments SET status = 'deleted' WHERE memory_id = 'mem_gen1'`).run();
+  assert.equal(findGeneralizationGroups(db).length, 1);
+  db.close();
+});
+
+test('findConflictClusters：已消费的旧记忆不中断簇发现（continue 而非 break）', () => {
+  const db = createDb();
+  // 时间线：C1(今天,X) → O1(2天前,X) 形成簇1；C2(3天前,Y) → O2(5天前,Y) 形成簇2。
+  // 旧行为在遍历到已消费的 O1 时 break，会丢掉簇2；修复后应找到两个簇。
+  insertFragment(db, { memoryId: 'mem_c1', judgment: '最近的事情C1', conversationId: 'char_1', createdAt: daysAgo(0) });
+  insertFragment(db, { memoryId: 'mem_o1', judgment: '较早的事情O1', conversationId: 'char_1', createdAt: daysAgo(2) });
+  insertFragment(db, { memoryId: 'mem_c2', judgment: '更早的事情C2', conversationId: 'char_1', createdAt: daysAgo(3) });
+  insertFragment(db, { memoryId: 'mem_o2', judgment: '最早的事情O2', conversationId: 'char_1', createdAt: daysAgo(5) });
+  linkEntity(db, 'mem_c1', '话题X');
+  linkEntity(db, 'mem_o1', '话题X');
+  linkEntity(db, 'mem_c2', '话题Y');
+  linkEntity(db, 'mem_o2', '话题Y');
+  const clusters = findConflictClusters(db, { sinceDays: 7, limit: 4 });
+  assert.equal(clusters.length, 2);
+  const clusterIds = clusters.map(cluster => cluster.memories.map(m => m.memory_id).sort().join(',')).sort();
+  assert.deepEqual(clusterIds, ['mem_c1,mem_o1', 'mem_c2,mem_o2']);
+  db.close();
+});

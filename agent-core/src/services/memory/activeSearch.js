@@ -49,8 +49,8 @@ export async function activeMemorySearch(query, options = {}, deps = {}) {
       includeHistorical: historical,
       topK: options.topK ?? DEFAULT_TOP_K,
     });
-    // 2. 三元组联想扩展（空库/嵌入失败自动跳过，存量数据自然降级）
-    const tripleResults = await tripleExpansion(query, conversationIds, { v3Enabled, getDepsDb, getSettings, embed: deps.embed, searchVectors: deps.vectorSearch });
+    // 2. 三元组联想扩展（空库/嵌入失败自动跳过，存量数据自然降级）；历史模式连已失效三元组一起联想
+    const tripleResults = await tripleExpansion(query, conversationIds, { v3Enabled, getDepsDb, getSettings, embed: deps.embed, searchVectors: deps.vectorSearch, historical });
     // 3. 实体 1 跳扩展
     const entityHopResults = entityHopExpansion(primary, conversationIds, { v3Enabled, getDepsDb });
 
@@ -84,12 +84,16 @@ export async function activeMemorySearch(query, options = {}, deps = {}) {
   }
 }
 
-// 三元组联想扩展：query 嵌入 → memory_triples_v1 向量库 top5 → 命中三元组的关联记忆（去重、限 5 条）
-async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3Enabled, getDepsDb = getDb, getSettings = getMemorySettings, embed = embedMemoryText, searchVectors = vectorSearch } = {}) {
+// 三元组联想扩展：query 嵌入 → memory_triples_v1 向量库 top5 → 命中三元组的关联记忆（去重、限 5 条）。
+// 历史模式（时态查询）：已失效的三元组与其 superseded 记忆也参与联想，结果由上层标历史徽标——
+// 否则"她以前讨厌什么"在旧事实已演化时会联想不到任何东西。
+async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3Enabled, getDepsDb = getDb, getSettings = getMemorySettings, embed = embedMemoryText, searchVectors = vectorSearch, historical = false } = {}) {
   try {
     if (!v3Enabled()) return [];
     const db = getDepsDb();
-    const tripleCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
+    const tripleCount = historical
+      ? db.prepare(`SELECT COUNT(*) AS count FROM memory_triples`).get().count
+      : db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
     if (tripleCount === 0) return [];
     const settings = getSettings({ includeSecrets: true });
     const { embedding } = await embed(query, settings);
@@ -109,12 +113,17 @@ async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3E
     if (tripleIds.length === 0) return [];
 
     const params = tripleIds;
+    // 历史模式：三元组不筛 valid_to，关联记忆放宽到 superseded；现行模式维持双时态现行过滤
+    const tripleFilter = historical ? '' : ' AND t.valid_to IS NULL';
+    const fragmentFilter = historical
+      ? `mf.status IN ('active', 'superseded')`
+      : `mf.status = 'active' AND mf.valid_to IS NULL`;
     let sql = `
       SELECT mf.*, t.id AS triple_id
       FROM memory_triples t
       JOIN memory_fragments mf ON mf.memory_id = t.memory_id
-      WHERE t.id IN (${tripleIds.map(() => '?').join(',')}) AND t.valid_to IS NULL
-        AND mf.status = 'active' AND mf.valid_to IS NULL
+      WHERE t.id IN (${tripleIds.map(() => '?').join(',')})${tripleFilter}
+        AND ${fragmentFilter}
     `;
     sql = appendConversationFilter(sql, params, conversationIds);
     const rows = db.prepare(sql).all(...params);

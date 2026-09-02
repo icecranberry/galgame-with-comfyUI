@@ -112,7 +112,7 @@
 
 **调度器**（新建 `services/memory/consolidationScheduler.js`）：
 - 每 5 分钟扫描；空闲判定 = 无活跃聊天流（新增 `services/chatActivity.js` 计数器，chat.js 流式路由以 `res.on('close')` 恰好注销一次）且距最后一条消息 ≥ `idleDelayMinutes`；距上次运行 >22h 兜底；聊天进行中永不触发 LLM
-- 预算：单轮 LLM 调用 ≤ `dailyMaxLlmCalls`（0 = 禁 LLM 任务，SQL 任务照跑）；预算耗尽时任务退回 pending 下轮续跑，未完成的 LLM 任务自动补后续任务
+- 预算：单轮 LLM 调用 ≤ `llmCallsPerRun`（0 = 禁 LLM 任务，SQL 任务照跑；旧键 `dailyMaxLlmCalls` 兼容读取，改名修正"实为每轮预算而非每日"的语义）；预算耗尽时任务退回 pending 下轮续跑，未完成的 LLM 任务自动补后续任务
 - 任务表 `memory_consolidation_jobs`：候选发现入队（同类型去重）、SQL 任务先于 LLM 任务领取、启动/每轮 processing→pending 恢复、attempts≥3 落 failed；运行状态写 `system_settings('memory_consolidation_state')`
 
 **任务实现**（新建 `services/memory/memoryConsolidation.js`，全部依赖可注入）：
@@ -124,7 +124,7 @@
 - T6 墓碑扫描：碎片看"存在晚于状态变更的 completed delete 任务"幂等跳过；三元组入队后置 embedding_state=disabled
 - v3 总开关关闭时 T2/T4/T5 自动跳过（`taskEnabledByV3`）
 
-**配置与 UI**：`memory_settings.consolidation={enabled:true, idleDelayMinutes:30, dailyMaxLlmCalls:6}`；MemorySettingsView 新增"记忆整理（睡眠期）"卡片（开关+空闲分钟+预算+"立即整理一次"按钮）
+**配置与 UI**：`memory_settings.consolidation={enabled:true, idleDelayMinutes:30, llmCallsPerRun:6}`；MemorySettingsView 新增"记忆整理（睡眠期）"卡片（开关+空闲分钟+预算+"立即整理一次"按钮）
 
 ### 阶段四落地内容
 
@@ -148,6 +148,20 @@
 - 可选项（summarizer/curation 40 条边界合并）按方案建议暂不做。
 - 结合角色作息（schedule_templates）的整理时段产品化未做，daemon 当前只看全局空闲。
 
+### 四阶段全量审查修复（2026-09-02）
+
+阶段二~四完成后做了逐文件审查（发现 2 中 + 4 低 + 1 风格 + 2 信息级），全部修复：
+
+- **【中】T2 泛化反复升华**：同一实体组每轮 daemon 都重新生成泛化记忆（content_hash 各异无法去重兜住）→ `findGeneralizationGroups` 增加 `hasLivingGeneralization` 检查，组内已有存活泛化后代（relation_meta=generalize 且子记忆 active）即跳过；后代被 rollback 后组自动重新成为候选。
+- **【中】配置键正名**：`dailyMaxLlmCalls` 实为"每轮整理"预算（每 5 分钟一轮、每轮重置）而非每日总量 → 改名 `llmCallsPerRun`，`normalizeMemorySettings` 兼容旧键（新键优先、保存后旧键自然淘汰），前端表单/payload 同步。
+- **【低】@memory 二次续写失败兜底**：`chat.js` 续写调用加 try-catch，无任何内容时补一条角色化短文本（"……抱歉，刚刚走了一下神"）走正常落库；已有部分内容则保留半截回复——不再让用户面对沉默。
+- **【低】T1 替代记忆 v2 形态**：决议 prompt 增加可选 keywords/semanticNote 字段并透传 `applyMemoryActions`，替代记忆直接完整入库，不必再等 T5 回填。
+- **【低】findConflictClusters 提前中断**：遍历到已消费旧记忆时 `break` 会跳过后面未处理的簇代表 → 拆分条件为 limit 用 `break`、已消费用 `continue`。
+- **【低】恢复归档与 pending delete 竞态**：复核确认 stale 兜底（PRIORITY_HISTORY）保证排在 pending delete（PRIORITY_LIVE）后、不会丢向量；`restoreArchivedMemory` 仍撤销 pending delete 任务，消除"删了再嵌"的无谓开销。
+- **【信息】历史模式三元组联想**：时态查询（"以前/曾经…"）时已失效三元组与其 superseded 记忆也参与联想并标历史徽标——否则旧事实演化后"她以前讨厌什么"联想不到任何东西；现行模式维持双时态现行过滤。
+- **【风格】** `stores/chat.js` 新增行缩进对齐。
+- 新增 5 个测试用例（改名兼容、T2 去重含后代失效恢复、簇发现 continue 场景、历史/现行模式三元组联想），全量 82/82 通过。
+
 ---
 
 ## 长期备选（未排期）
@@ -159,6 +173,6 @@
 ## 快速上手（新会话接续开发）
 
 1. 读 `docs/memory-upgrade-plan.md`（设计）+ 本文件（进度）+ CLAUDE.md 记忆系统章节（模块地图）
-2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 77/77）
+2. 跑测试确认基线：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"`（应 82/82）
 3. 记忆系统四阶段已全部落地，`memory/` 目录阅读顺序：memoryConfig（四组开关）→ memoryRepository（落库+索引队列）→ memorySearch/chatMemoryRecall（被动召回）→ activeSearch（@memory 主动回想）→ memoryConsolidation + consolidationScheduler（整理 daemon）→ contextAssembler.applyContextBudget（上下文预算）
 4. 遇 Mimosa 钩子误报见上方"已知注意事项"；UI 改动先读 `docs/design-system.md`

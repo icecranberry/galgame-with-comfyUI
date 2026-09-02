@@ -25,7 +25,7 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
-const memoryRecalling = ref(false)  // Memory v3 阶段二：@memory 主动回想进行中（回想状态条）
+  const memoryRecalling = ref(false)  // Memory v3 阶段二：@memory 主动回想进行中（回想状态条）
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
   const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增

@@ -339,9 +339,16 @@ export function restoreArchivedMemory(idOrMemoryId) {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM memory_fragments WHERE memory_id = ? OR id = ?`).get(String(idOrMemoryId), Number(idOrMemoryId) || -1);
   if (!row || row.status !== 'archived') return false;
+  // 撤销归档时排队的向量 delete 任务：虽然 stale 兜底（PRIORITY_HISTORY）保证排在
+  // pending delete（PRIORITY_LIVE）之后、不会丢向量，但留着会白跑一趟"删了再嵌"。
+  const canceled = db.prepare(`
+    DELETE FROM memory_index_jobs
+    WHERE memory_id = ? AND job_type = 'delete' AND status = 'pending'
+  `).run(row.memory_id).changes;
   db.prepare(`UPDATE memory_fragments SET status = 'active', embedding_state = 'stale', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
   // stale 状态由 index worker 的兑底扫描自动重嵌入，无需额外入队
   wakeMemoryIndexWorker();
+  if (canceled > 0) console.log(`[memory] restore ${row.memory_id}: canceled ${canceled} pending delete job(s)`);
   return true;
 }
 

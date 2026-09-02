@@ -223,3 +223,54 @@ test('activeMemorySearch 超时返回空结果并标记 timedOut', async () => {
   assert.ok(elapsedMs >= 50, `resolved too early: ${elapsedMs}ms`);
   assert.ok(elapsedMs < 2000, `resolved too late: ${elapsedMs}ms`);
 });
+
+test('normalizeMemorySettings 兼容旧键 dailyMaxLlmCalls → llmCallsPerRun', () => {
+  // 旧配置文件只有 dailyMaxLlmCalls：读入新键并保留值
+  const legacy = normalizeMemorySettings({ consolidation: { dailyMaxLlmCalls: 9 } });
+  assert.equal(legacy.consolidation.llmCallsPerRun, 9);
+  // 新旧键并存时新键优先；输出不再包含旧键（下次保存后彻底迁移）
+  const both = normalizeMemorySettings({ consolidation: { dailyMaxLlmCalls: 2, llmCallsPerRun: 4 } });
+  assert.equal(both.consolidation.llmCallsPerRun, 4);
+  assert.equal(both.consolidation.dailyMaxLlmCalls, undefined);
+  // 无任何键时取默认 6
+  const fresh = normalizeMemorySettings({});
+  assert.equal(fresh.consolidation.llmCallsPerRun, 6);
+});
+
+test('activeMemorySearch 历史模式：已失效三元组与其 superseded 记忆参与联想并标历史徽标', async () => {
+  const db = createSearchDb();
+  // 三元组 1 已随记忆演化置失效，关联记忆 mem_a 已被 update 置 superseded
+  db.prepare(`UPDATE memory_triples SET valid_to = '2026-08-30 10:00:00' WHERE id = 1`).run();
+  db.prepare(`UPDATE memory_fragments SET status = 'superseded', valid_to = '2026-08-30 10:00:00' WHERE memory_id = 'mem_a'`).run();
+  const result = await activeMemorySearch('她以前讨厌香菜吗', { conversationId: 'c1' }, {
+    hybridSearch: async () => [],
+    isMemoryV3Enabled: () => true,
+    getMemorySettings: () => ({ v3: { enabled: true } }),
+    getDb: () => db,
+    embed: async () => ({ embedding: [0.1, 0.2] }),
+    vectorSearch: async () => [{ id: 'trip_1', score: 0.9 }],
+    writeAudit: () => {},
+  });
+  const historical = result.results.find(item => item.memory_id === 'mem_a');
+  // 历史模式放宽后三元组联想命中已失效记忆并标注历史徽标
+  assert.ok(historical, '历史模式应通过失效三元组联想召回 superseded 记忆');
+  assert.equal(historical.isHistorical, true);
+  db.close();
+});
+
+test('activeMemorySearch 现行模式：失效三元组不参与联想', async () => {
+  const db = createSearchDb();
+  db.prepare(`UPDATE memory_triples SET valid_to = '2026-08-30 10:00:00' WHERE id = 1`).run();
+  db.prepare(`UPDATE memory_fragments SET status = 'superseded', valid_to = '2026-08-30 10:00:00' WHERE memory_id = 'mem_a'`).run();
+  const result = await activeMemorySearch('她讨厌香菜吗', { conversationId: 'c1' }, {
+    hybridSearch: async () => [],
+    isMemoryV3Enabled: () => true,
+    getMemorySettings: () => ({ v3: { enabled: true } }),
+    getDb: () => db,
+    embed: async () => ({ embedding: [0.1, 0.2] }),
+    vectorSearch: async () => [{ id: 'trip_1', score: 0.9 }],
+    writeAudit: () => {},
+  });
+  assert.equal(result.results.length, 0);
+  db.close();
+});

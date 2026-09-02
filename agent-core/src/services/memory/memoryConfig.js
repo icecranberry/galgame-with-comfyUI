@@ -23,8 +23,10 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   v3: { enabled: true },
   // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
   activeSearch: { enabled: false, timeoutMs: 4000 },
-  // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）
-  consolidation: { enabled: true, idleDelayMinutes: 30, dailyMaxLlmCalls: 6 },
+  // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）。
+  // llmCallsPerRun 是"每轮整理"的调用预算（每 5 分钟一轮、每轮重置），并非每日总量；
+  // 旧配置键 dailyMaxLlmCalls 由 normalizeMemorySettings 兼容读取。
+  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
   // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
@@ -84,7 +86,12 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     consolidation: {
       enabled: consolidation.enabled === undefined ? (base.consolidation?.enabled ?? true) : Boolean(consolidation.enabled),
       idleDelayMinutes: clampInt(consolidation.idleDelayMinutes, base.consolidation?.idleDelayMinutes ?? 30, 5, 720),
-      dailyMaxLlmCalls: clampInt(consolidation.dailyMaxLlmCalls, base.consolidation?.dailyMaxLlmCalls ?? 6, 0, 30),
+      // 旧键 dailyMaxLlmCalls 兼容读取（实际语义是每轮预算，改名以正名）
+      llmCallsPerRun: clampInt(
+        consolidation.llmCallsPerRun ?? consolidation.dailyMaxLlmCalls,
+        base.consolidation?.llmCallsPerRun ?? base.consolidation?.dailyMaxLlmCalls ?? 6,
+        0, 30,
+      ),
     },
     contextBudget: {
       enabled: contextBudget.enabled === undefined ? (base.contextBudget?.enabled ?? false) : Boolean(contextBudget.enabled),
@@ -155,14 +162,14 @@ export function isMemoryActiveSearchEnabled() {
 // 阶段三整理 daemon 配置。DB 未就绪时按默认开启处理（daemon 内部还有空闲判定双重保险）。
 export function getConsolidationConfig() {
   try {
-    const { enabled, idleDelayMinutes, dailyMaxLlmCalls } = getMemorySettings().consolidation || {};
+    const { enabled, idleDelayMinutes, llmCallsPerRun } = getMemorySettings().consolidation || {};
     return {
       enabled: enabled !== false,
       idleDelayMinutes: clampInt(idleDelayMinutes, 30, 5, 720),
-      dailyMaxLlmCalls: clampInt(dailyMaxLlmCalls, 6, 0, 30),
+      llmCallsPerRun: clampInt(llmCallsPerRun, 6, 0, 30),
     };
   } catch {
-    return { enabled: true, idleDelayMinutes: 30, dailyMaxLlmCalls: 6 };
+    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 };
   }
 }
 
