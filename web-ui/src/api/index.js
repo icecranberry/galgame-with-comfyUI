@@ -96,6 +96,33 @@ export async function getEmojiOverview() {
   return res.json()
 }
 
+// ── 表情包配置单（多套切换） ──
+export async function createEmojiSet(characterId, name = '') {
+  const res = await fetch(`${BASE}/characters/emoji/sets`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: characterId, name }),
+  })
+  return res.json()
+}
+
+export async function activateEmojiSet(setId) {
+  const res = await fetch(`${BASE}/characters/emoji/sets/${setId}/activate`, { method: 'POST' })
+  return res.json()
+}
+
+export async function renameEmojiSet(setId, name) {
+  const res = await fetch(`${BASE}/characters/emoji/sets/${setId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return res.json()
+}
+
+export async function deleteEmojiSet(setId) {
+  const res = await fetch(`${BASE}/characters/emoji/sets/${setId}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function getEmojiCategories() {
   const res = await fetch(`${BASE}/characters/emoji/categories`)
   return res.json()
@@ -122,48 +149,49 @@ export async function updateEmojiFixedTags(tags, styleMode, resolution) {
   return res.json()
 }
 
-export async function generateEmojiPrompts(character_ids, style = '') {
+export async function generateEmojiPrompts(character_ids, style = '', setId = null) {
   const res = await fetch(`${BASE}/characters/emoji/prompts`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_ids, style }),
+    body: JSON.stringify({ character_ids, style, set_id: setId }),
   })
   return res.json()
 }
 
-export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
+export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false, setId = null) {
   const res = await fetch(`${BASE}/characters/emoji/images`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_ids, keys, artist, includeDone: !!includeDone }),
+    body: JSON.stringify({ character_ids, keys, artist, includeDone: !!includeDone, set_id: setId }),
   })
   return res.json()
 }
 
-export async function regenerateEmojiPrompt(characterId, key, style = '') {
+export async function regenerateEmojiPrompt(characterId, key, style = '', setId = null) {
   const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/prompt`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ style }),
+    body: JSON.stringify({ style, set_id: setId }),
   })
   return res.json()
 }
 
-export async function regenerateEmojiImage(characterId, key, artist = '@ebora') {
+export async function regenerateEmojiImage(characterId, key, artist = '@ebora', setId = null) {
   const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/image`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist }),
+    body: JSON.stringify({ artist, set_id: setId }),
   })
   return res.json()
 }
 
-export async function uploadEmojiImage(characterId, key, base64) {
+export async function uploadEmojiImage(characterId, key, base64, setId = null) {
   const res = await fetch(`${BASE}/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64 }),
+    body: JSON.stringify({ base64, set_id: setId }),
   })
   return res.json()
 }
 
-export async function deleteEmoji(characterId, key) {
-  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
+export async function deleteEmoji(characterId, key, setId = null) {
+  const query = setId ? `?set_id=${setId}` : ''
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}${query}`, { method: 'DELETE' })
   return res.json()
 }
 

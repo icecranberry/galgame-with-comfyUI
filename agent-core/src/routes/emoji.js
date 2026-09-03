@@ -11,22 +11,40 @@ import {
   saveEmojiStyleMode,
   getEmojiResolution,
   saveEmojiResolution,
+  createEmojiSet,
+  activateEmojiSet,
+  renameEmojiSet,
+  deleteEmojiSet,
+  resolveOrCreateEmojiSet,
 } from '../services/emojiService.js';
 import { deleteImageFileByUrl, saveBase64Image } from '../services/imagePaths.js';
 
 const router = Router();
 
-/** GET /api/characters/emoji/overview — 所有角色 + 全部表情包行 */
+/** 解析单条操作的目标配置单：显式 set_id 优先（校验归属），否则该角色启用中的配置单；都没有返回 null */
+function resolveSetId(db, characterId, requested) {
+  if (requested !== null && requested !== undefined && requested !== '') {
+    const set = db.prepare('SELECT id FROM emoji_sets WHERE id = ? AND character_id = ?').get(parseInt(requested, 10), characterId);
+    return set?.id || null;
+  }
+  const active = db.prepare('SELECT id FROM emoji_sets WHERE character_id = ? AND is_active = 1 ORDER BY id LIMIT 1').get(characterId);
+  return active?.id || null;
+}
+
+/** GET /api/characters/emoji/overview — 所有角色 + 全部配置单 + 全部表情包行 */
 router.get('/overview', (req, res) => {
   const db = getDb();
   const characters = db.prepare(`
     SELECT id, display_name, name, short_prompt, base_prompt, artist_override, custom_workflow, loras
     FROM characters ORDER BY id
   `).all();
-  const emojis = db.prepare(`
-    SELECT * FROM character_emojis ORDER BY character_id, id
+  const sets = db.prepare(`
+    SELECT id, character_id, name, is_active, created_at FROM emoji_sets ORDER BY character_id, id
   `).all();
-  res.json({ characters, emojis });
+  const emojis = db.prepare(`
+    SELECT * FROM character_emojis ORDER BY set_id, id
+  `).all();
+  res.json({ characters, sets, emojis });
 });
 
 /** GET /api/characters/emoji/categories — 当前表情类别列表 */
@@ -65,9 +83,63 @@ router.put('/tags', (req, res) => {
   }
 });
 
-/** POST /api/characters/emoji/prompts — 为单个或多个角色生成全部表情类别 prompt */
+/** POST /api/characters/emoji/sets — 新建一张空白配置单（零行记录，不启用） */
+router.post('/sets', (req, res) => {
+  const db = getDb();
+  const characterId = parseInt(req.body?.character_id, 10);
+  if (!Number.isInteger(characterId)) {
+    return res.status(400).json({ error: 'character_id is required' });
+  }
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(characterId);
+  if (!char) return res.status(404).json({ error: '角色不存在' });
+  try {
+    const set = createEmojiSet(characterId, req.body?.name, db);
+    res.json({ ok: true, set });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/characters/emoji/sets/:setId/activate — 启用配置单（同角色互斥），切换后聊天即发这张配置单 */
+router.post('/sets/:setId/activate', (req, res) => {
+  const db = getDb();
+  try {
+    const set = activateEmojiSet(parseInt(req.params.setId, 10), db);
+    if (!set) return res.status(404).json({ error: '表情包组不存在' });
+    res.json({ ok: true, set });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** PUT /api/characters/emoji/sets/:setId — 重命名配置单 */
+router.put('/sets/:setId', (req, res) => {
+  const db = getDb();
+  try {
+    const set = renameEmojiSet(parseInt(req.params.setId, 10), req.body?.name, db);
+    if (!set) return res.status(404).json({ error: '表情包组不存在' });
+    res.json({ ok: true, set });
+  } catch (err) {
+    const status = err.message === '表情包组名称不能为空' ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+/** DELETE /api/characters/emoji/sets/:setId — 删除配置单（仅删配置，不动已生成的图片文件） */
+router.delete('/sets/:setId', (req, res) => {
+  const db = getDb();
+  try {
+    const result = deleteEmojiSet(parseInt(req.params.setId, 10), db);
+    if (!result) return res.status(404).json({ error: '表情包组不存在' });
+    res.json({ ok: true, activated_set_id: result.activatedSetId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/characters/emoji/prompts — 为单个或多个角色生成全部表情类别 prompt（作用于各自启用中的配置单，或指定的 set_id） */
 router.post('/prompts', async (req, res) => {
-  const { character_ids, style } = req.body || {};
+  const { character_ids, style, set_id } = req.body || {};
   if (!Array.isArray(character_ids) || character_ids.length === 0) {
     return res.status(400).json({ error: 'character_ids is required (non-empty array)' });
   }
@@ -84,11 +156,12 @@ router.post('/prompts', async (req, res) => {
 
       try {
         const emojiKeys = getEmojiCategories(db);
+        const set = resolveOrCreateEmojiSet(characterId, set_id ?? null, db);
         const prompts = await generateEmojiPrompts(char, typeof style === 'string' ? style.trim() : '', emojiKeys);
         const upsert = db.prepare(`
-          INSERT INTO character_emojis (character_id, emoji_key, prompt, style, status, updated_at)
-          VALUES (?, ?, ?, ?, 'prompt_ready', datetime('now'))
-          ON CONFLICT(character_id, emoji_key)
+          INSERT INTO character_emojis (character_id, set_id, emoji_key, prompt, style, status, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'prompt_ready', datetime('now'))
+          ON CONFLICT(set_id, emoji_key)
           DO UPDATE SET
             prompt = excluded.prompt,
             style = excluded.style,
@@ -97,9 +170,9 @@ router.post('/prompts', async (req, res) => {
             updated_at = datetime('now')
         `);
         for (const key of emojiKeys) {
-          upsert.run(characterId, key, prompts[key], style || '');
+          upsert.run(characterId, set.id, key, prompts[key], style || '');
         }
-        results.push({ character_id: characterId, ok: true, count: emojiKeys.length });
+        results.push({ character_id: characterId, set_id: set.id, ok: true, count: emojiKeys.length });
         } catch (err) {
           results.push({ character_id: characterId, ok: false, error: err.message });
         }
@@ -108,9 +181,10 @@ router.post('/prompts', async (req, res) => {
   res.json({ ok: true, results });
 });
 
-/** POST /api/characters/emoji/images — 批量把 prompt_ready/failed 的行提交 ComfyUI（后台执行） */
+/** POST /api/characters/emoji/images — 批量把 prompt_ready/failed 的行提交 ComfyUI（后台执行）；
+ * 未指定 set_id 时只作用于各角色启用中的配置单 */
 router.post('/images', (req, res) => {
-  const { character_ids, keys, artist, includeDone } = req.body || {};
+  const { character_ids, keys, artist, includeDone, set_id } = req.body || {};
   if (!Array.isArray(character_ids) || character_ids.length === 0) {
     return res.status(400).json({ error: 'character_ids is required (non-empty array)' });
   }
@@ -121,6 +195,12 @@ router.post('/images', (req, res) => {
   const statuses = includeDone ? ['done', 'prompt_ready', 'failed'] : ['prompt_ready', 'failed'];
   const params = [...character_ids, ...statuses];
   let where = `ce.character_id IN (${placeholders}) AND ce.status IN (${statuses.map(() => '?').join(',')}) AND ce.prompt != ''`;
+  if (set_id !== null && set_id !== undefined && set_id !== '') {
+    where += ' AND ce.set_id = ?';
+    params.push(parseInt(set_id, 10));
+  } else {
+    where += ' AND ce.set_id IN (SELECT id FROM emoji_sets WHERE is_active = 1)';
+  }
   if (Array.isArray(keys) && keys.length > 0) {
     where += ` AND ce.emoji_key IN (${keys.map(() => '?').join(',')})`;
     params.push(...keys);
@@ -184,10 +264,12 @@ router.post('/:characterId/:key/prompt', async (req, res) => {
   const characterId = parseInt(req.params.characterId, 10);
   const emojiKey = req.params.key;
   const db = getDb();
+  const setId = resolveSetId(db, characterId, req.body?.set_id);
+  if (!setId) return res.status(404).json({ error: '表情包不存在' });
 
   const row = db.prepare(`
-    SELECT * FROM character_emojis WHERE character_id = ? AND emoji_key = ?
-  `).get(characterId, emojiKey);
+    SELECT * FROM character_emojis WHERE set_id = ? AND emoji_key = ?
+  `).get(setId, emojiKey);
   if (!row) return res.status(404).json({ error: '表情包不存在' });
 
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
@@ -218,10 +300,12 @@ router.post('/:characterId/:key/image', async (req, res) => {
   const characterId = parseInt(req.params.characterId, 10);
   const emojiKey = req.params.key;
   const db = getDb();
+  const setId = resolveSetId(db, characterId, req.body?.set_id);
+  if (!setId) return res.status(404).json({ error: '表情包不存在' });
 
   const row = db.prepare(`
-    SELECT * FROM character_emojis WHERE character_id = ? AND emoji_key = ?
-  `).get(characterId, emojiKey);
+    SELECT * FROM character_emojis WHERE set_id = ? AND emoji_key = ?
+  `).get(setId, emojiKey);
   if (!row) return res.status(404).json({ error: '表情包不存在' });
   if (!row.prompt) return res.status(400).json({ error: '该表情还没有 prompt，请先生成 prompt' });
 
@@ -281,31 +365,39 @@ router.post('/:characterId/:key/upload', (req, res) => {
   if (buf.length > 6 * 1024 * 1024) {
     return res.status(400).json({ error: '图片不能超过 6MB' });
   }
+  let set;
+  try {
+    set = resolveOrCreateEmojiSet(characterId, req.body?.set_id ?? null, db);
+  } catch (err) {
+    return res.status(404).json({ error: err.message });
+  }
   const extMap = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp' };
   const safeKey = emojiKey.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
-  const filename = `char_${characterId}_${safeKey}_${Date.now()}.${extMap[mimeMatch[1]]}`;
+  const filename = `char_${characterId}_set${set.id}_${safeKey}_${Date.now()}.${extMap[mimeMatch[1]]}`;
   const imagePath = saveBase64Image('emoji', filename, base64);
   db.prepare(`
-    INSERT INTO character_emojis (character_id, emoji_key, prompt, image_path, status, updated_at)
-    VALUES (?, ?, '', ?, 'done', datetime('now'))
-    ON CONFLICT(character_id, emoji_key) DO UPDATE SET
+    INSERT INTO character_emojis (character_id, set_id, emoji_key, prompt, image_path, status, updated_at)
+    VALUES (?, ?, ?, '', ?, 'done', datetime('now'))
+    ON CONFLICT(set_id, emoji_key) DO UPDATE SET
       image_path = excluded.image_path,
       status = 'done',
       error_message = NULL,
       updated_at = datetime('now')
-  `).run(characterId, emojiKey, imagePath);
+  `).run(characterId, set.id, emojiKey, imagePath);
   res.json({ ok: true, image_path: imagePath });
 });
 
-/** DELETE /api/characters/emoji/:characterId/:key — 清空表情包图片（保留 prompt 和栏位） */
+/** DELETE /api/characters/emoji/:characterId/:key — 清空表情包图片（保留 prompt 和栏位；set_id 走 query） */
 router.delete('/:characterId/:key', (req, res) => {
   const characterId = parseInt(req.params.characterId, 10);
   const emojiKey = req.params.key;
   const db = getDb();
+  const setId = resolveSetId(db, characterId, req.query?.set_id);
+  if (!setId) return res.status(404).json({ error: '表情包不存在' });
 
   const row = db.prepare(`
-    SELECT * FROM character_emojis WHERE character_id = ? AND emoji_key = ?
-  `).get(characterId, emojiKey);
+    SELECT * FROM character_emojis WHERE set_id = ? AND emoji_key = ?
+  `).get(setId, emojiKey);
   if (!row) return res.status(404).json({ error: '表情包不存在' });
 
   if (row.image_path) {

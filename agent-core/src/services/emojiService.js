@@ -70,7 +70,7 @@ export function parseEmojiText(text, emojiMap = new Map()) {
 export function buildEmojiNote(keys) {
   const list = [...new Set(keys.filter(Boolean))];
   if (list.length === 0) return '';
-  return `<emoji_stickers>\n你只拥有[${list.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
+  return `<emoji_stickers>\n你只拥有[${list.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包以丰富情感、表情包要轮换着用不要重复，发出去的表情包会变成实际的图片，而图片其实和表情包名字的含义弱相关，所以表情包可以混着发不用和句子强绑定。表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
 }
 
 /**
@@ -83,7 +83,7 @@ export function buildGroupEmojiNote(members, db = getDb()) {
   if (owners.length * 2 < members.length) return '';
   const keys = getEmojiCategories(db);
   if (keys.length === 0) return '';
-  return `<emoji_stickers>\n群成员可以调用[${keys.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
+  return `<emoji_stickers>\n群成员可以调用[${keys.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包以丰富情感，表情包要轮换着用不要重复。发出去的表情包会变成实际的图片，而图片其实和表情包名字的含义弱相关，所以表情包可以混着发不用和句子强绑定。表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
 }
 
 /**
@@ -103,13 +103,109 @@ export function parseGroupEmojiText(text, emojiMap = new Map(), categoryKeys = [
   return { ...parseEmojiText(raw, emojiMap), invalidEmoji };
 }
 
-/** 读取角色所有 done 且已落盘的 emoji：key -> image_path */
+/** 读取角色「启用中配置单」里所有 done 且已落盘的 emoji：key -> image_path。
+ * 没有配置单或启用的是空白配置单 → 空 Map = 角色当前没有表情包可发 */
 export function getCharacterEmojiMap(characterId, db = getDb()) {
   const rows = db.prepare(`
-    SELECT emoji_key, image_path FROM character_emojis
-    WHERE character_id = ? AND status = 'done' AND image_path IS NOT NULL
+    SELECT ce.emoji_key, ce.image_path
+    FROM character_emojis ce
+    JOIN emoji_sets es ON es.id = ce.set_id AND es.is_active = 1
+    WHERE ce.character_id = ? AND ce.status = 'done' AND ce.image_path IS NOT NULL
   `).all(characterId);
   return new Map(rows.map(r => [r.emoji_key, r.image_path]));
+}
+
+// ── 表情包配置单（多套切换） ──
+
+export const DEFAULT_EMOJI_SET_NAME = '默认表情包';
+
+const EMOJI_SET_COLUMNS = 'id, character_id, name, is_active, created_at';
+
+/** 角色的全部配置单（启用中的排最前，其余按创建顺序） */
+export function listEmojiSets(characterId, db = getDb()) {
+  return db.prepare(`
+    SELECT ${EMOJI_SET_COLUMNS} FROM emoji_sets
+    WHERE character_id = ?
+    ORDER BY is_active DESC, id
+  `).all(characterId);
+}
+
+/** 角色当前启用的配置单；没有则返回 null */
+export function getActiveEmojiSet(characterId, db = getDb()) {
+  return db.prepare(`
+    SELECT ${EMOJI_SET_COLUMNS} FROM emoji_sets
+    WHERE character_id = ? AND is_active = 1
+    ORDER BY id LIMIT 1
+  `).get(characterId) || null;
+}
+
+/** 按 id 取配置单；characterId 传入时校验归属，不存在或不属于该角色返回 null */
+export function getEmojiSetById(setId, characterId = null, db = getDb()) {
+  const id = parseInt(setId, 10);
+  if (!Number.isInteger(id)) return null;
+  const row = characterId === null
+    ? db.prepare(`SELECT ${EMOJI_SET_COLUMNS} FROM emoji_sets WHERE id = ?`).get(id)
+    : db.prepare(`SELECT ${EMOJI_SET_COLUMNS} FROM emoji_sets WHERE id = ? AND character_id = ?`).get(id, characterId);
+  return row || null;
+}
+
+/** 新建空白配置单（零行记录，不启用）；名称留空回落「默认表情包」 */
+export function createEmojiSet(characterId, name, db = getDb()) {
+  const clean = String(name || '').trim() || DEFAULT_EMOJI_SET_NAME;
+  const info = db.prepare('INSERT INTO emoji_sets (character_id, name, is_active) VALUES (?, ?, 0)').run(characterId, clean);
+  return getEmojiSetById(info.lastInsertRowid, null, db);
+}
+
+/** 启用某张配置单（事务内同角色互斥）。切换后聊天即改发这张配置单的表情包 */
+export function activateEmojiSet(setId, db = getDb()) {
+  const target = getEmojiSetById(setId, null, db);
+  if (!target) return null;
+  db.transaction(() => {
+    db.prepare('UPDATE emoji_sets SET is_active = 0 WHERE character_id = ?').run(target.character_id);
+    db.prepare('UPDATE emoji_sets SET is_active = 1 WHERE id = ?').run(target.id);
+  })();
+  return { ...target, is_active: 1 };
+}
+
+/** 重命名配置单；名称不能为空 */
+export function renameEmojiSet(setId, name, db = getDb()) {
+  const target = getEmojiSetById(setId, null, db);
+  if (!target) return null;
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('表情包组名称不能为空');
+  db.prepare('UPDATE emoji_sets SET name = ? WHERE id = ?').run(clean, target.id);
+  return { ...target, name: clean };
+}
+
+/** 删除配置单：仅删配置行（表情行级联清理），磁盘图片一律不动，历史消息贴图照常回放。
+ * 删的是启用中的单时自动启用该角色剩余最新的一张（没有则角色回到「无表情包」状态） */
+export function deleteEmojiSet(setId, db = getDb()) {
+  const target = getEmojiSetById(setId, null, db);
+  if (!target) return null;
+  db.prepare('DELETE FROM emoji_sets WHERE id = ?').run(setId);
+  let activatedSetId = null;
+  if (target.is_active) {
+    const remaining = db.prepare('SELECT id FROM emoji_sets WHERE character_id = ? ORDER BY id DESC LIMIT 1').get(target.character_id);
+    if (remaining) {
+      db.prepare('UPDATE emoji_sets SET is_active = 1 WHERE id = ?').run(remaining.id);
+      activatedSetId = remaining.id;
+    }
+  }
+  return { ...target, is_active: 0, activatedSetId };
+}
+
+/** 解析生成目标配置单：显式 set_id 优先（校验归属），否则启用中的单；
+ * 都没有时建一张默认单并直接启用（首次生成即视为「拥有表情包」，与多套化之前行为一致） */
+export function resolveOrCreateEmojiSet(characterId, setId = null, db = getDb()) {
+  if (setId !== null && setId !== undefined && setId !== '') {
+    const existing = getEmojiSetById(setId, characterId, db);
+    if (!existing) throw new Error('表情包组不存在');
+    return existing;
+  }
+  const active = getActiveEmojiSet(characterId, db);
+  if (active) return active;
+  const created = createEmojiSet(characterId, DEFAULT_EMOJI_SET_NAME, db);
+  return activateEmojiSet(created.id, db);
 }
 
 /** 表情包固定 tag 默认值：由代码硬编码到每条 prompt 开头，不再依赖 LLM 输出（省 token 且不会丢 tag）。
@@ -396,7 +492,7 @@ export async function generateEmojiImage(row, char, artist = '@ebora') {
   }
 
   const img = result.images[0];
-  const filename = `char_${characterId}_${emojiKey}_${Date.now()}.png`;
+  const filename = `char_${characterId}_set${row.set_id}_${emojiKey}_${Date.now()}.png`;
   const url = saveBase64Image('emoji', filename, img.base64);
   try { invalidateGalleryCache(); } catch {}
   return { ok: true, url };

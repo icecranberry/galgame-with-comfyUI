@@ -292,10 +292,22 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-      -- 角色表情包表（每个角色每种表情一条，prompt 生成与图片生成分离）
+      -- 表情包配置单（一个角色可建多张，聊天只使用启用中的那张；启用互斥由服务层在事务里保证。
+      -- 删除配置单仅删数据库行，不清理磁盘图片文件，历史消息贴图不受影响）
+      CREATE TABLE IF NOT EXISTS emoji_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_emoji_sets_char ON emoji_sets(character_id);
+
+      -- 角色表情包表（每张配置单每种表情一条，prompt 生成与图片生成分离）
       CREATE TABLE IF NOT EXISTS character_emojis (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        set_id INTEGER NOT NULL REFERENCES emoji_sets(id) ON DELETE CASCADE,
         emoji_key TEXT NOT NULL,
         prompt TEXT NOT NULL DEFAULT '',
         image_path TEXT,
@@ -305,7 +317,7 @@ function initSchema(db) {
         error_message TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(character_id, emoji_key)
+        UNIQUE(set_id, emoji_key)
       );
 
       -- 表情类别表（可编辑的 15 个默认类别，按 sort_order 排序）
@@ -757,6 +769,8 @@ function initSchema(db) {
   // 种子: 表情类别（仅首次运行插入默认 15 类）
   seedEmojiCategories(db);
   migrateEmojiCategoriesV2(db);
+  // 迁移: 表情包多配置单（emoji_sets + character_emojis.set_id，旧数据回填默认配置单）
+  migrateEmojiSetsSchema(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
@@ -826,6 +840,65 @@ function migrateEmojiCategoriesV2(db) {
     console.log('[db] migrateEmojiCategoriesV2 error:', err.message);
   }
 }
+/** 迁移：表情包多配置单 — character_emojis 加 set_id 列（唯一约束从 character_id+emoji_key
+ * 换成 set_id+emoji_key，SQLite 改约束需整表重建），并为已有表情的角色各回填一张启用中的
+ * 「默认表情包」配置单；从没生成过表情的角色不建单，首次生成时由服务层自动补建 */
+function migrateEmojiSetsSchema(db) {
+  try {
+    const tableExists = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'character_emojis'`).get();
+    if (!tableExists) return; // 全新库：initSchema 已按新结构建表，只需确保索引
+    const cols = db.prepare('PRAGMA table_info(character_emojis)').all();
+    if (cols.some(c => c.name === 'set_id')) {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_character_emojis_set ON character_emojis(set_id, status)`);
+      return;
+    }
+
+    // 1) 为已有表情的角色各回填一张启用中的默认配置单。
+    //    先清掉孤儿表情行（角色已删但行残留）：否则回填默认组会因 FK 校验失败中断整个迁移，
+    //    新代码就会对着旧表结构跑（查 set_id 直接报错）
+    const orphanRemoved = db.prepare(`
+      DELETE FROM character_emojis WHERE character_id NOT IN (SELECT id FROM characters)
+    `).run();
+    if (orphanRemoved.changes > 0) {
+      console.log(`[db] migrateEmojiSetsSchema: removed ${orphanRemoved.changes} orphaned character_emojis row(s)`);
+    }
+    const charIds = db.prepare('SELECT DISTINCT character_id FROM character_emojis ORDER BY character_id').all().map(r => r.character_id);
+    const insertSet = db.prepare(`INSERT INTO emoji_sets (character_id, name, is_active) VALUES (?, '默认表情包', 1)`);
+    db.transaction(() => { for (const cid of charIds) insertSet.run(cid); })();
+
+    // 2) 重建 character_emojis，把存量行挂到各自角色的默认配置单上
+    db.exec(`DROP TABLE IF EXISTS character_emojis_new`);
+    db.exec(`
+      CREATE TABLE character_emojis_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        set_id INTEGER NOT NULL REFERENCES emoji_sets(id) ON DELETE CASCADE,
+        emoji_key TEXT NOT NULL,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(set_id, emoji_key)
+      );
+      INSERT INTO character_emojis_new (id, character_id, set_id, emoji_key, prompt, image_path, style, status, error_message, created_at, updated_at)
+        SELECT ce.id, ce.character_id, es.id, ce.emoji_key, ce.prompt, ce.image_path, ce.style, ce.status, ce.error_message, ce.created_at, ce.updated_at
+        FROM character_emojis ce
+        JOIN emoji_sets es ON es.character_id = ce.character_id AND es.is_active = 1;
+      DROP TABLE character_emojis;
+      ALTER TABLE character_emojis_new RENAME TO character_emojis;
+      CREATE INDEX IF NOT EXISTS idx_character_emojis_character ON character_emojis(character_id, status);
+      CREATE INDEX IF NOT EXISTS idx_character_emojis_set ON character_emojis(set_id, status);
+    `);
+    console.log(`[db] migrateEmojiSetsSchema: character_emojis rebuilt with set_id, ${charIds.length} default emoji set(s) backfilled`);
+  } catch (err) {
+    console.log('[db] migrateEmojiSetsSchema error:', err.message);
+  }
+}
+
 function seedEventLibraries(db) {
   // 事件类型库
   const seedEventType = db.prepare(`
