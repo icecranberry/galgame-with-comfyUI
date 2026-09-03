@@ -156,14 +156,35 @@ export function useBackpackActions({ confirm, toast }) {
 
   // ── 开箱：全屏蓄力 → 等图片生成完毕 → 开盖揭示 ──
 
-  async function onOpenChest() {
-    if (!store.chest.canOpen || fullscreen.value) return
+  /** 进入蓄力态：全屏演出、蓄力 6 秒后切强化档动画 */
+  function enterCharging() {
     chestProcessActive.value = true
     fullscreen.value = true
     chestAnim.value = 'charging'
     chargeBoost.value = false
     if (chargeBoostTimer) clearTimeout(chargeBoostTimer)
     chargeBoostTimer = setTimeout(() => { chargeBoost.value = true }, 6000)
+  }
+
+  /** 蓄力等待道具图片生成完毕才揭示（SSE item_ready 会实时更新 store，轮询兜底）；约 3 分钟超时先揭示 */
+  async function chargeAndWaitReveal(itemId) {
+    const seq = ++openSeq
+    const start = Date.now()
+    while (Date.now() - start < 180000) {
+      await sleep(2500)
+      if (seq !== openSeq || !fullscreen.value) return
+      const it = store.items.find((i) => i.id === itemId)
+        || store.pendingItems.find((i) => i.id === itemId)
+      if (it && it.status === 'ready') { burstReveal(seq); return }
+      store.fetchItems()
+    }
+    // 超时兜底：先揭示，图片完成后背包里自动更新
+    burstReveal(seq, true)
+  }
+
+  async function onOpenChest() {
+    if (!store.chest.canOpen || fullscreen.value) return
+    enterCharging()
 
     const seq = ++openSeq
     try {
@@ -175,24 +196,30 @@ export function useBackpackActions({ confirm, toast }) {
         return
       }
       revealedItemId.value = result.item.id
-
-      // 蓄力等待：道具图片生成完毕才揭示（SSE item_ready 会实时更新 store，轮询兜底）
-      const start = Date.now()
-      while (Date.now() - start < 180000) {
-        await sleep(2500)
-        if (seq !== openSeq || !fullscreen.value) return
-        const it = store.items.find((i) => i.id === revealedItemId.value)
-          || store.pendingItems.find((i) => i.id === revealedItemId.value)
-        if (it && it.status === 'ready') { burstReveal(seq); return }
-        store.fetchItems()
-      }
-      // 超时兜底（约 3 分钟）：先揭示，图片完成后背包里自动更新
-      burstReveal(seq, true)
+      await chargeAndWaitReveal(result.item.id)
     } catch (err) {
       if (seq !== openSeq) return
       toast?.(err.message || '宝箱开启失败', 'error')
       closeFullscreen()
     }
+  }
+
+  /** 断点续播：刷新/中途离开后重进背包，上一箱还没收下时续播揭示演出（已出图直接开盖，未出图续蓄力等待） */
+  async function resumePendingReveal() {
+    if (fullscreen.value || chestProcessActive.value) return
+    await store.fetchItems()
+    if (fullscreen.value || chestProcessActive.value) return
+    const pending = store.pendingItems[0]
+    if (!pending) return
+    revealedItemId.value = pending.id
+    chestProcessActive.value = true
+    fullscreen.value = true
+    if (pending.status !== 'ready') {
+      enterCharging()
+      await chargeAndWaitReveal(pending.id)
+      return
+    }
+    burstReveal(++openSeq)
   }
 
   function burstReveal(seq, timedOut = false) {
@@ -348,7 +375,7 @@ export function useBackpackActions({ confirm, toast }) {
     // 开箱演出
     fullscreen, chestAnim, chestProcessActive, chargeBoost, flashOn,
     revealedItem, revealVisible, collecting,
-    onOpenChest, onCollectFromReveal, closeFullscreen,
+    onOpenChest, onCollectFromReveal, closeFullscreen, resumePendingReveal,
     // 宝箱倒计时
     countdownText, showChestCooldown, chestButtonLabel,
     startCountdown, stopCountdown,

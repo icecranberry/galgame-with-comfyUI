@@ -243,7 +243,7 @@ const {
   store,
   fullscreen, chestAnim, chestProcessActive, chargeBoost, flashOn,
   revealedItem, collecting,
-  onOpenChest, onCollectFromReveal,
+  onOpenChest, onCollectFromReveal, resumePendingReveal,
   chestButtonLabel, startCountdown, stopCountdown,
   effectKindLabel, effectIconPath, effectRemainingText, isEffectUrgent,
   removingEffectId, onRemoveEffect,
@@ -259,6 +259,8 @@ watch(() => props.visible, (v) => {
   if (v) {
     store.startPolling()
     startCountdown()
+    // 中途离开留下的未收下道具：重开背包时续播揭示演出
+    resumePendingReveal()
   } else {
     store.stopPolling()
     stopCountdown()

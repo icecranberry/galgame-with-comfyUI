@@ -28,6 +28,22 @@
   />
 </template>
 
+<script>
+// ── 覆盖 cache-bust 登记表（模块级，跨灯箱实例 / 开合存活）──
+// 重新生成/细化确认覆盖后原图 URL 不变、内容已换，浏览器会继续用 HTTP 缓存里的旧图。
+// 记录 base URL → 最近覆盖时间戳，cachedImgs 展示命中图时统一追加 ?_t=，
+// 保证灯箱重开（哪怕组件已重建、父组件数据仍是旧 URL）也拿到新图。
+const overwriteBusts = new Map()
+const OVERWRITE_BUSTS_CAP = 200
+
+function recordOverwriteBust(base, ts) {
+  overwriteBusts.set(base, ts)
+  if (overwriteBusts.size > OVERWRITE_BUSTS_CAP) {
+    overwriteBusts.delete(overwriteBusts.keys().next().value)
+  }
+}
+</script>
+
 <script setup>
 import { ref, computed, watch, nextTick, inject, onMounted, onUnmounted } from 'vue'
 import VueEasyLightbox from 'vue-easy-lightbox'
@@ -65,7 +81,8 @@ const toastFn = inject('toast', null)
 const confirmFn = inject('confirm', null)
 const imageEditTasks = useImageEditTasksStore()
 
-const cacheBump = ref(0)
+// 覆盖登记表版本号：自增触发 cachedImgs 重算（登记表本身非响应式）
+const bustVersion = ref(0)
 const lightboxKey = ref(0)
 const regenerating = ref(false)
 const upscaling = ref(false)
@@ -199,13 +216,15 @@ onUnmounted(() => {
 })
 
 function bumpUrl(url) {
-  if (!url || !cacheBump.value) return url
-  return url.replace(/\?.*$/, '') + `?_t=${cacheBump.value}`
+  if (!url || !bustVersion.value) return url
+  const base = url.replace(/\?.*$/, '')
+  const ts = overwriteBusts.get(base)
+  return ts ? `${base}?_t=${ts}` : url
 }
 
 const cachedImgs = computed(() => {
   const v = props.imgs
-  if (!cacheBump.value) return v
+  if (!bustVersion.value || !overwriteBusts.size) return v
   if (typeof v === 'string') return bumpUrl(v)
   if (Array.isArray(v)) {
     return v.map(i => (typeof i === 'string' ? bumpUrl(i) : i?.src ? { ...i, src: bumpUrl(i.src) } : i))
@@ -304,9 +323,10 @@ async function onDownload() {
 
 /** 扫描页面上所有 img / background-image，把旧图 URL 替换为带 cache-bust 的新 URL */
 function refreshAllThumbnails(oldUrl) {
-  if (!cacheBump.value) return
   const base = oldUrl.replace(/\?.*$/, '')
-  const busted = base + `?_t=${cacheBump.value}`
+  const ts = overwriteBusts.get(base)
+  if (!ts) return
+  const busted = base + `?_t=${ts}`
 
   // 1. <img> 元素
   document.querySelectorAll('img').forEach(img => {
@@ -326,14 +346,18 @@ function refreshAllThumbnails(oldUrl) {
   })
 }
 
-/** 后台任务确认覆盖后，刷新本灯箱命中的图片 */
+/** 后台任务确认覆盖后：登记 cache-bust，按需刷新当前大图，并通知父组件更新数据源 */
 function _onImageOverwritten(e) {
   const { url, base, action } = e.detail || {}
   if (!url || !base) return
-  if (!_hasUrlInImgs(base)) return
-  cacheBump.value = Date.now()
-  lightboxKey.value++
-  refreshAllThumbnails(base)
+  recordOverwriteBust(base, Date.now())
+  bustVersion.value++
+  // 灯箱正展示这张图 → 重挂载立即换新图，并刷新页面上的缩略图
+  if (_hasUrlInImgs(base)) {
+    lightboxKey.value++
+    refreshAllThumbnails(base)
+  }
+  // 灯箱此刻多半已关闭（提交任务时即自动关闭），父组件依赖本事件把旧 URL 换成新地址
   emit(action === 'upscale' ? 'upscaled' : 'regenerated', url)
 }
 

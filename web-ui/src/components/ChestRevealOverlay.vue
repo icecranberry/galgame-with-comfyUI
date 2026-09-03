@@ -7,10 +7,17 @@
         <div class="fs-flash" :class="{ on: flashOn }"></div>
         <div class="fs-content">
           <div v-if="chestAnim === 'charging'" class="fs-status" aria-live="polite">
-            正在努力解锁宝箱…
+            <Transition name="fs-tip" mode="out-in">
+              <span :key="tip">{{ tip }}</span>
+            </Transition>
           </div>
           <div class="fs-stage">
-            <div class="fs-chest-wrap">
+            <div
+              class="fs-chest-wrap"
+              :class="{ 'is-pokable': chestAnim === 'charging', 'is-jelly': jellyOn }"
+              @click="pokeChest"
+              @animationend="jellyOn = false"
+            >
               <ChestSvg class="fs-chest" :state="chestAnim" :boost="chargeBoost"/>
             </div>
             <Transition name="fs-reveal">
@@ -40,7 +47,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import ChestSvg from './ChestSvg.vue'
 import ItemFallbackIcon from './ItemFallbackIcon.vue'
@@ -57,6 +64,54 @@ const props = defineProps({
 defineEmits(['collect'])
 
 const revealVisible = computed(() => props.chestAnim === 'opened' || props.chestAnim === 'exiting')
+
+// 蓄力等待期文案轮播（与酒馆招募加载同一节奏：2.2s 一换）
+const CHEST_TIPS = [
+  '正在努力解锁宝箱…',
+  '正在破解锁孔上的符文…',
+  '符文微微亮了一下…',
+  '箱缝里漏出了金色的光…',
+  '好像听到里面叮当作响…',
+  '正在跟锁芯讲道理…',
+  '封印松动了一点点…',
+  '偷偷摇了摇箱子…',
+  '正在给宝箱挠痒痒…',
+  '喝了口水',
+  '宝箱似乎更有精神了',
+  '宝箱今天不想上班…'
+]
+const tip = ref(CHEST_TIPS[0])
+let tipTimer = null
+
+watch(
+  () => props.show && props.chestAnim === 'charging',
+  (active) => { active ? startTips() : stopTips() },
+  { immediate: true },
+)
+
+function startTips() {
+  stopTips()
+  tip.value = CHEST_TIPS[0]
+  let idx = 0
+  tipTimer = setInterval(() => {
+    idx = (idx + 1) % CHEST_TIPS.length
+    tip.value = CHEST_TIPS[idx]
+  }, 2200)
+}
+
+function stopTips() {
+  if (tipTimer) { clearInterval(tipTimer); tipTimer = null }
+}
+
+// 蓄力期点击宝箱：果冻式弹动反馈
+const jellyOn = ref(false)
+function pokeChest() {
+  if (props.chestAnim !== 'charging') return
+  jellyOn.value = false
+  requestAnimationFrame(() => { jellyOn.value = true })
+}
+
+onUnmounted(stopTips)
 </script>
 
 <style scoped>
@@ -110,6 +165,18 @@ const revealVisible = computed(() => props.chestAnim === 'opened' || props.chest
 }
 .fs-chest-wrap {
   width: 100%;
+  transform-origin: 50% 100%;
+}
+/* 蓄力期可戳：点击宝箱果冻式弹动一下，作为等待期的即时正反馈 */
+.fs-chest-wrap.is-pokable { cursor: pointer; }
+.fs-chest-wrap.is-jelly { animation: fs-chest-jelly 0.62s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+@keyframes fs-chest-jelly {
+  0% { transform: scale(1, 1); }
+  18% { transform: scale(1.06, 0.9); }
+  38% { transform: scale(0.94, 1.07); }
+  58% { transform: scale(1.03, 0.97); }
+  78% { transform: scale(0.99, 1.015); }
+  100% { transform: scale(1, 1); }
 }
 .fs-item {
   position: absolute;
@@ -205,4 +272,15 @@ const revealVisible = computed(() => props.chestAnim === 'opened' || props.chest
 
 .fs-fade-enter-active, .fs-fade-leave-active { transition: opacity 0.3s ease; }
 .fs-fade-enter-from, .fs-fade-leave-to { opacity: 0; }
+
+/* 蓄力文案轮换：轻浮入轻浮出，不跳动布局 */
+.fs-tip-enter-active, .fs-tip-leave-active { transition: opacity 0.24s ease, transform 0.24s ease; }
+.fs-tip-enter-from { opacity: 0; transform: translateY(6px); }
+.fs-tip-leave-to { opacity: 0; transform: translateY(-6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-chest-wrap.is-jelly { animation: none; }
+  .fs-tip-enter-active, .fs-tip-leave-active { transition: none; }
+  .fs-tip-enter-from, .fs-tip-leave-to { transform: none; }
+}
 </style>
