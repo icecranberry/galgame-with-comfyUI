@@ -155,7 +155,6 @@ function buildWorkflow(promptText, overrides = {}) {
       const triggerWords = loras.map(l => l.triggerWord || '').filter(Boolean).join(', ');
       if (triggerWords) {
         node.widgets_values[0] = triggerWords;
-        console.log(`[imageSkill] lora trigger words injected: "${triggerWords}"`);
       }
       continue;
     }
@@ -170,7 +169,6 @@ function buildWorkflow(promptText, overrides = {}) {
       } else if (node.widgets_values.length > 0) {
         node.widgets_values[0] = promptText;
       }
-      console.log(`[imageSkill] Node "${node.title}" prompt injected`);
       continue;
     }
 
@@ -178,7 +176,6 @@ function buildWorkflow(promptText, overrides = {}) {
     const val = defaults[node.title];
     if (val !== undefined && node.widgets_values.length > 0) {
       node.widgets_values[0] = val;
-      console.log(`[imageSkill] Node "${node.title}" injected: ${val}`);
     }
   }
 
@@ -227,7 +224,9 @@ export function injectLoraNodes(wf, loras) {
   }
 
   const isDirectToSampler = downstreamNodeId === samplerNode.id;
-  console.log(`[imageSkill] UNETLoader MODEL → ${downstreamNode.type}#${downstreamNodeId}${isDirectToSampler ? ' (直连KSampler)' : ' (有中间节点，将保留)'}`);
+  if (!isDirectToSampler) {
+    console.log(`[imageSkill] UNETLoader MODEL has intermediate nodes before ${downstreamNode.type}#${downstreamNodeId}, lora chain will be inserted before them`);
+  }
 
   // 删除 UNETLoader → 下游节点的旧 link
   wf.links = wf.links.filter(l => l[0] !== oldLinkId);
@@ -235,7 +234,6 @@ export function injectLoraNodes(wf, loras) {
   // 清除下游节点的 model 输入 link
   const downstreamModelInput = downstreamNode.inputs.find(inp => inp.name === 'model');
   if (downstreamModelInput) downstreamModelInput.link = null;
-  console.log(`[imageSkill] Removed UNET→${downstreamNode.type}#${downstreamNodeId} link #${oldLinkId}`);
 
   // 生成新 ID（确保不冲突）
   let maxNodeId = Math.max(wf.last_node_id || 0, ...(wf.nodes || []).map(n => n.id));
@@ -279,7 +277,6 @@ export function injectLoraNodes(wf, loras) {
     };
 
     wf.nodes.push(loraNode);
-    console.log(`[imageSkill] LoraLoaderModelOnly node added: id=${nodeId}, title="lora${i + 1}", path="${lora.path}", weight=${lora.weight ?? 0.6}`);
 
     // 上游来源：UNETLoader(第一个lora) 或 上一个 lora 节点
     const sourceNodeId = i === 0 ? unetNode.id : loraNodeIds[i - 1];
@@ -380,6 +377,7 @@ async function submitWithRetry(rawPrompt, {
         if (onProgress) onProgress({ stage: 'generating', ...p });
       });
       if (result.images.length > 0) {
+        console.log(`\n🎨 [imageSkill] 图片生成完成: ${result.images.length} 张 (workflow: ${wfMode}, promptId: ${result.promptId})`);
         return { success: true, images: result.images, source: 'api', promptId: result.promptId, wfMode };
       }
       lastResult = result;
@@ -411,6 +409,8 @@ async function _execute(rawPrompt, opts) {
   let slotAcquired = false;
   try {
     const preparation = await prepareImagePrompt(rawPrompt, {
+      ragQuery: opts.ragQuery,
+      disableRAG: opts.disableRAG === true,
       scene: opts.promptScene || opts.scene || 'chat',
       alreadyPrepared: opts.alreadyPrepared === true,
       skipOptimization: opts.skipOptimization === true,
@@ -425,6 +425,7 @@ async function _execute(rawPrompt, opts) {
     return {
       ...result,
       promptOriginal: preparation.promptOriginal,
+      promptRagQuery: preparation.ragQuery,
       promptRefined: preparation.promptRefined,
       promptPreparationId: preparation.preparationId,
       promptKnowledgeIds: preparation.retrieval.knowledgeIds,

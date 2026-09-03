@@ -4,10 +4,10 @@
     <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
       <div class="topbar-actions">
-        <button class="lib-gear" @click="libraryOpen = true" title="话题库管理">⚙</button>
-        <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="genPending">
+        <div class="lib-gear" role="button" tabindex="0" @keydown.enter.prevent="libraryOpen = true" @keydown.space.prevent="libraryOpen = true" @click="libraryOpen = true" title="话题库管理"><gear-icon :size="18" /></div>
+        <div class="btn-post" role="button" tabindex="0" :class="{ 'is-disabled': genPending }" :aria-disabled="genPending" @click.stop="!genPending && (showPicker = !showPicker)" @keydown.enter.prevent.stop="!genPending && (showPicker = !showPicker)" @keydown.space.prevent.stop="!genPending && (showPicker = !showPicker)">
           {{ genPending ? '扰动中' : '🎬 扰动世界线' }}
-        </button>
+        </div>
       </div>
     </div>
 
@@ -64,11 +64,11 @@
             :key="ch.character_id"
             class="filter-avatar"
             :class="{ active: moments.filterCharacterId === ch.character_id }"
-            :style="ch.avatar_path
-              ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' }
-              : { background: 'var(--accent)' }"
             @click="moments.setFilter(ch.character_id)"
-          >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
+          >
+            <img v-if="ch.avatar_path" :src="ch.avatar_path" class="filter-avatar-img" alt="" />
+            <span v-else>{{ ch.display_name?.charAt(0) || '?' }}</span>
+          </div>
         </div>
       </div>
 
@@ -117,6 +117,7 @@ import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LibraryModal from '../components/LibraryModal.vue'
+import GearIcon from '../components/GearIcon.vue'
 
 const moments = useMomentsStore()
 const chat = useChatStore()
@@ -279,6 +280,7 @@ async function triggerGenerate(c) {
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 .lib-gear:hover {
   border-color: rgba(var(--accent-rgb), 0.55);
@@ -296,13 +298,16 @@ async function triggerGenerate(c) {
   font-size: 13px; font-weight: 600;
   cursor: pointer;
   letter-spacing: 1px;
+  font-family: inherit;
+  text-align: center;
+  user-select: none;
   transition:
     border-color 0.35s ease,
     box-shadow 0.35s ease,
     color 0.3s ease;
 }
 
-.btn-post:hover:not(:disabled) {
+.btn-post:hover:not(.is-disabled) {
   border: 2px solid rgba(var(--accent-rgb), 0.55);
   box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
@@ -314,7 +319,7 @@ async function triggerGenerate(c) {
   50%      { background-position: 100% 50%; }
 }
 
-.btn-post:disabled {
+.btn-post.is-disabled {
   opacity: 0.4; cursor: not-allowed;
 }
 
@@ -401,8 +406,14 @@ async function triggerGenerate(c) {
   color: #fff;
   transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   user-select: none;
-  background-size: cover;
-  background-position: center;
+  background: #e07b6c;
+}
+.filter-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .filter-avatar.active {
   opacity: 1;
@@ -474,11 +485,6 @@ async function triggerGenerate(c) {
 .empty-icon { font-size: 56px; margin-bottom: 16px; }
 .moments-empty p { font-size: 15px; margin-bottom: 6px; }
 .empty-hint { font-size: 13px; opacity: 0.7; }
-.btn-post-empty {
-  margin-top: 16px;
-  padding: 10px 24px;
-  font-size: 14px;
-}
 
 .load-more {
   text-align: center;

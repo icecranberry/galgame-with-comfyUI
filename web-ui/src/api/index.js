@@ -53,6 +53,23 @@ export async function updateCharacter(id, data) {
   return request(`/characters/${id}`, { method: 'PUT', body: data })
 }
 
+// ── 角色专属外观/形态 ──
+export function listCharacterOutfits(characterId) {
+  return request(`/characters/${characterId}/outfits`)
+}
+
+export function createCharacterOutfit(characterId, data) {
+  return request(`/characters/${characterId}/outfits`, { method: 'POST', body: data })
+}
+
+export function updateCharacterOutfit(characterId, outfitId, data) {
+  return request(`/characters/${characterId}/outfits/${outfitId}`, { method: 'PUT', body: data })
+}
+
+export function deleteCharacterOutfit(characterId, outfitId) {
+  return request(`/characters/${characterId}/outfits/${outfitId}`, { method: 'DELETE' })
+}
+
 export async function clearMessages(characterId) {
   return request(`/characters/${characterId}/messages`, { method: 'DELETE' })
 }
@@ -66,8 +83,8 @@ export async function generateCharacter(description) {
 }
 
 /** 预览模式生成角色：只生成不入库，由前端确认后再调 createCharacter */
-export async function generateCharacterPreview(description) {
-  return request(`/characters/generate`, { method: 'POST', body: { description, save: false } })
+export async function generateCharacterPreview(description, { searchContext = '' } = {}) {
+  return request(`/characters/generate`, { method: 'POST', body: { description, save: false, searchContext } })
 }
 
 /** 导入酒馆角色卡（PNG 内嵌 chara / JSON 卡），返回预览数据，直接进入招募预览步骤 */
@@ -77,6 +94,83 @@ export async function importCharacterCard({ data, mimetype, filename }) {
 /** 直接创建角色（确认入库） */
 export async function createCharacter(data) {
   return request(`/characters`, { method: 'POST', body: data })
+}
+
+// ── 表情包管理 ──
+export async function getEmojiOverview() {
+  const res = await fetch(`${BASE}/characters/emoji/overview`)
+  return res.json()
+}
+
+export async function getEmojiCategories() {
+  const res = await fetch(`${BASE}/characters/emoji/categories`)
+  return res.json()
+}
+
+export async function updateEmojiCategories(keys) {
+  const res = await fetch(`${BASE}/characters/emoji/categories`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  })
+  return res.json()
+}
+
+export async function getEmojiFixedTags() {
+  const res = await fetch(`${BASE}/characters/emoji/tags`)
+  return res.json()
+}
+
+export async function updateEmojiFixedTags(tags, styleMode, resolution) {
+  const res = await fetch(`${BASE}/characters/emoji/tags`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags, styleMode, ...(resolution ? { resolution } : {}) }),
+  })
+  return res.json()
+}
+
+export async function generateEmojiPrompts(character_ids, style = '') {
+  const res = await fetch(`${BASE}/characters/emoji/prompts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_ids, style }),
+  })
+  return res.json()
+}
+
+export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
+  const res = await fetch(`${BASE}/characters/emoji/images`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_ids, keys, artist, includeDone: !!includeDone }),
+  })
+  return res.json()
+}
+
+export async function regenerateEmojiPrompt(characterId, key, style = '') {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/prompt`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ style }),
+  })
+  return res.json()
+}
+
+export async function regenerateEmojiImage(characterId, key, artist = '@ebora') {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/image`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist }),
+  })
+  return res.json()
+}
+
+export async function uploadEmojiImage(characterId, key, base64) {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  return res.json()
+}
+
+export async function deleteEmoji(characterId, key) {
+  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
+  return res.json()
 }
 
 export async function deleteCharacter(id) {
@@ -168,7 +262,7 @@ export async function deleteUserRelationship(id) {
   return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
-export function chatStream(characterId, message, clientMsgId, forceImageGen = false) {
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -189,7 +283,7 @@ export function chatStream(characterId, message, clientMsgId, forceImageGen = fa
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, force_image_gen: forceImageGen }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
@@ -377,7 +471,7 @@ export async function updateGroupTemperature(value) {
   return res.json()
 }
 
-/** 更新群聊记忆总结/滑动窗口推进轮次 2~10（所有群共享） */
+/** 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享） */
 export async function updateGroupSummaryInterval(value) {
   const res = await request(`/config/group-summary-interval`, { method: 'PUT', body: { value } })
   if (!res.ok) {
@@ -414,6 +508,16 @@ export async function updateWeatherCity(city) {
 
 export async function updateLlmConfig(data) {
   return request(`/config/llm`, { method: 'PUT', body: data })
+}
+
+export async function testLlmConnection(data) {
+  const res = await fetch(`${BASE}/config/llm/test`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || `LLM 连接测试失败 (${res.status})`)
+  return result
 }
 
 /** 每日免费鸡蛋开关（opencode zen 免费端点，免 Key） */
@@ -613,18 +717,18 @@ export async function updateUserConfig(data) {
 
 // ── 测试画风（固定提示词，不存 DB；mode: 'chat' | 'moments'；prompt 可选覆盖默认；
 // sceneDesc 可选自由画面描述 → LLM 完善；reuseSceneLoras 复用上次自由画面测试匹配到的角色 lora）──
-export async function testStyle({ artist, width, height, mode = 'chat', prompt = '', sceneDesc = '', reuseSceneLoras = false } = {}) {
+export async function testStyle({ artist, width, height, mode = 'chat', prompt = '', sceneDesc = '', reuseSceneLoras = false, alreadyPrepared = false } = {}) {
   const body = { artist, width, height, mode };
   if (prompt) body.prompt = prompt;
   if (sceneDesc) body.sceneDesc = sceneDesc;
   if (reuseSceneLoras) body.reuseSceneLoras = true;
+  if (alreadyPrepared) body.alreadyPrepared = true;
   return request(`/images/test-style`, { method: 'POST', body: body })
 }
 
 /** 测试细化（最近一张图，HiresFix 参数流程，不落盘，返回原图+细化图） */
-export async function testHires() {
-  const res = await request(`/images/test-hires`, { method: 'POST' });
-  return res.json();
+export function testHires() {
+  return request(`/images/test-hires`, { method: 'POST' });
 }
 
 // ── Moments 朋友圈 ──
@@ -1390,4 +1494,40 @@ export function maibotGetLatestMemory() {
 }
 export function maibotDeleteLatestMemory(sessionId) {
   return maibotFetch(`/latest-memory?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+// ── 背包 / 道具系统 ──
+
+// 背包内容（已收下）+ 待收下道具 + 宝箱冷却状态 + 生效中的效果
+export function listItems() {
+  return jsonRequest(`${BASE}/items`)
+}
+
+// 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
+export function openChest() {
+  return jsonRequest(`${BASE}/items/chest/open`, { method: 'POST' })
+}
+
+// 收下道具（开箱后需收下才出现在背包）
+export function collectItem(itemId) {
+  return jsonRequest(`${BASE}/items/${itemId}/collect`, { method: 'POST' })
+}
+
+// 使用道具
+export function useItem(itemId, characterId) {
+  return jsonRequest(`${BASE}/items/${itemId}/use`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: characterId }),
+  })
+}
+
+// 丢弃道具
+export function discardItem(itemId) {
+  return jsonRequest(`${BASE}/items/${itemId}`, { method: 'DELETE' })
+}
+
+// 提前移除已生效的效果（服饰/变身会同步撤销临时外观）
+export function removeActiveEffect(effectId) {
+  return jsonRequest(`${BASE}/items/effects/${effectId}`, { method: 'DELETE' })
 }

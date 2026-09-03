@@ -1,6 +1,8 @@
-import { IMAGE_PROMPT_TAG_KNOWLEDGE } from './imagePromptTagKnowledgeData.js';
+import { IMAGE_PROMPT_TAG_KNOWLEDGE, IMAGE_PROMPT_TAG_SOURCE_SHA256 } from './imagePromptTagKnowledgeData.js';
 
-export const IMAGE_PROMPT_KNOWLEDGE_VERSION = '2026-07-31.1';
+// 版本号掺入 YAML 内容指纹：改 imagePromptTags.yaml 必然改变种子版本，
+// 避免忘 bump 手写字符串导致 seedImagePromptKnowledge 静默跳过、DB 残留旧知识。
+export const IMAGE_PROMPT_KNOWLEDGE_VERSION = `2026-09-02.1+${IMAGE_PROMPT_TAG_SOURCE_SHA256.slice(0, 8)}`;
 
 const ALL_SCENES = ['chat', 'moments', 'events', 'schedule', 'mailbox', 'avatar', 'gift', 'proactive', 'standalone'];
 

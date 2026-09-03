@@ -38,6 +38,7 @@ const routes = [
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },
+  { path: '/backpack', component: () => import('./views/BackpackView.vue') },
   { path: '/settings', component: SettingsView },
   { path: '/settings/memory', component: MemorySettingsView },
   { path: '/settings/maibot', component: MaibotBridgeView },

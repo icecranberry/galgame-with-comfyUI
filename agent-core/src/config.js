@@ -81,6 +81,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     memory: process.env.FEATURE_MEMORY !== 'false',
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
+    imageGenMode: process.env.FEATURE_FORCE_IMAGE_GEN === 'true' ? 'force' : 'smart', // 'off' | 'smart' | 'force'
     realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
     proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
@@ -91,6 +92,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     serializeBackgroundLLM: process.env.FEATURE_SERIALIZE_BG_LLM === 'true', // 默认关：后台LLM任务串行化
     backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板
+    deepThinkMode: false, // 默认关：私聊深度思考（planner 先规划媒介组合再回复），设置页/聊天页可开
     weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
     groupChat: process.env.FEATURE_GROUP_CHAT !== 'false', // 默认开：群聊系统
     groupIdleBudget: Math.max(0, parseInt(process.env.GROUP_IDLE_BUDGET ?? '0', 10) || 0), // 默认关闭；显式设为正数后启用每群每日后台闲聊预算
@@ -128,10 +130,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     temperature: parseFloat(process.env.GROUP_CHAT_TEMPERATURE) >= 0.5 && parseFloat(process.env.GROUP_CHAT_TEMPERATURE) <= 1.2
       ? parseFloat(process.env.GROUP_CHAT_TEMPERATURE)
       : 0.7,
-    // 群聊记忆总结/滑动窗口推进轮次（2~10），所有群共享；DB system_settings 持久化，启动时覆盖默认值
+    // 群聊记忆总结/滑动窗口推进轮次（2~6），所有群共享；DB system_settings 持久化，启动时覆盖默认值
     summaryInterval: (() => {
       const n = parseInt(process.env.GROUP_CHAT_SUMMARY_INTERVAL, 10);
-      return Number.isInteger(n) ? Math.max(2, Math.min(10, n)) : 4;
+      return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
     })(),
   },
   weather: {
@@ -278,6 +280,14 @@ export function updateHiresLora(loras) {
 }
 
 export function updateFeatureFlag(key, value) {
+  // 三态字符串开关：'off' | 'smart' | 'force'，不走布尔强转
+  if (key === 'imageGenMode') {
+    const mode = ['off', 'smart', 'force'].includes(value) ? value : 'smart';
+    config.features.imageGenMode = mode;
+    persistSettingSync('feature_imageGenMode', mode);
+    console.log(`[config] imageGenMode = ${mode}`);
+    return;
+  }
   const boolVal = value === true || value === 'true';
   config.features[key] = boolVal;
   persistSettingSync(`feature_${key}`, String(boolVal));
@@ -330,10 +340,10 @@ export function updateGroupTemperature(value) {
 }
 
 /**
- * 更新群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享）
+ * 更新群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享）
  */
 export function updateGroupSummaryInterval(value) {
-  const n = Math.max(2, Math.min(10, parseInt(value, 10) || 4));
+  const n = Math.max(2, Math.min(6, parseInt(value, 10) || 4));
   config.groupChat.summaryInterval = n;
   persistSettingSync('group_summary_interval', String(n));
   console.log(`[config] groupChat summaryInterval = ${n}`);

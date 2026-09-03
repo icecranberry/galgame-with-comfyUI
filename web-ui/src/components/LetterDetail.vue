@@ -66,10 +66,10 @@
 
     <!-- Actions -->
     <div class="detail-actions">
-      <button class="btn btn-danger" @click="$emit('delete', letter.id)">
+      <linshe-button variant="danger" @click="$emit('delete', letter.id)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6v14a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2v2"/></svg>
         删除信件
-      </button>
+      </linshe-button>
     </div>
   </div>
 </template>
@@ -77,6 +77,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   letter: { type: Object, required: true },
@@ -235,15 +236,4 @@ onMounted(() => {
 .detail-actions {
   display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px;
 }
-.btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 14px; border-radius: 8px;
-  font-size: 12px; font-weight: 600; cursor: pointer;
-  transition: all 0.15s; border: none;
-}
-.btn-danger {
-  background: rgba(244,67,54,0.06); border: 1px solid rgba(244,67,54,0.15);
-  color: #c0392b;
-}
-.btn-danger:hover { background: rgba(244,67,54,0.12); }
 </style>

@@ -6,21 +6,21 @@
           <div class="iet-modal-card">
             <div class="iet-modal-head">
               <div class="iet-modal-title">{{ actionLabel(modalTask.action) }}完成</div>
-              <button class="iet-icon-btn" title="保留原图" @click="onDiscard(modalTask)">
+              <linshe-button variant="icon" size="sm" class="iet-icon-btn" title="保留原图" @click="onDiscard(modalTask)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-              </button>
+              </linshe-button>
             </div>
             <div class="iet-modal-preview">
               <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" />
             </div>
             <p class="iet-modal-hint">新图已生成，确认后才会覆盖原图。</p>
             <div class="iet-modal-actions">
-              <button class="iet-btn iet-btn-ghost" :disabled="busy" @click="onRerun(modalTask)">
+              <linshe-button variant="secondary" class="iet-btn" :disabled="busy" @click="onRerun(modalTask)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                 重新生成
-              </button>
-              <button class="iet-btn iet-btn-danger" :disabled="busy" @click="onDiscard(modalTask)">保留原图</button>
-              <button class="iet-btn iet-btn-primary" :disabled="busy" @click="onApply(modalTask)">确认覆盖</button>
+              </linshe-button>
+              <linshe-button variant="danger" class="iet-btn" :disabled="busy" @click="onDiscard(modalTask)">保留原图</linshe-button>
+              <linshe-button variant="primary" class="iet-btn" :disabled="busy" @click="onApply(modalTask)">确认覆盖</linshe-button>
             </div>
           </div>
         </div>
@@ -41,9 +41,9 @@
             </div>
           </div>
           <div v-if="task.status === 'failed' || task.status === 'pending_confirm'" class="iet-card-actions">
-            <button v-if="task.status === 'failed'" @click="onRerun(task)">重试</button>
-            <button v-if="task.status === 'pending_confirm'" @click="showConfirm(task)">查看</button>
-            <button @click="onDiscard(task)">关闭</button>
+            <linshe-button v-if="task.status === 'failed'" size="sm" @click="onRerun(task)">重试</linshe-button>
+            <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
+            <linshe-button variant="icon" size="sm" @click="onDiscard(task)">关闭</linshe-button>
           </div>
         </div>
       </div>
@@ -55,6 +55,7 @@
 import { computed, inject, ref, watch } from 'vue'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import BeforeAfterSlider from './BeforeAfterSlider.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const store = useImageEditTasksStore()
 const toastFn = inject('toast', null)
@@ -215,16 +216,6 @@ async function onDiscard(task) {
 }
 
 .iet-card-actions { display: flex; gap: 8px; margin-top: 10px; }
-.iet-card-actions button {
-  border: 1px solid rgba(120, 90, 70, 0.2);
-  background: transparent;
-  color: #6f675f;
-  border-radius: 8px;
-  padding: 5px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.iet-card-actions button:hover { background: rgba(120, 90, 70, 0.06); }
 
 .iet-modal {
   position: fixed; inset: 0;
@@ -254,15 +245,9 @@ async function onDiscard(task) {
 
 .iet-modal-title { font-size: 15px; font-weight: 600; color: #3E3A36; }
 
-.iet-icon-btn {
-  width: 24px; height: 24px;
-  display: grid; place-items: center;
-  border: none; background: transparent;
-  color: #B4AA9E; border-radius: 8px; cursor: pointer;
-  opacity: 0.55;
-}
+.iet-icon-btn { opacity: 0.55; }
 .iet-icon-btn svg { width: 10px; height: 10px; }
-.iet-icon-btn:hover { opacity: 1; color: #6F655C; background: rgba(62, 58, 54, 0.06); }
+.iet-icon-btn:hover { opacity: 1; }
 
 .iet-modal-preview {
   padding: 0 18px;
@@ -287,24 +272,8 @@ async function onDiscard(task) {
 
 .iet-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: filter 0.15s ease, transform 0.1s ease;
 }
 .iet-btn svg { width: 15px; height: 15px; }
-.iet-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.iet-btn:not(:disabled):active { transform: translateY(1px); }
-
-.iet-btn-primary { background: var(--accent); color: #fff; }
-.iet-btn-primary:not(:disabled):hover { background: var(--accent-hover); box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.22); }
-.iet-btn-danger { background: rgba(var(--accent-rgb), 0.12); color: #C96A5C; border-color: transparent; }
-.iet-btn-danger:not(:disabled):hover { background: rgba(var(--accent-rgb), 0.18); }
-.iet-btn-ghost { background: rgba(62, 58, 54, 0.05); color: #6F655C; border-color: transparent; }
-.iet-btn-ghost:not(:disabled):hover { background: rgba(62, 58, 54, 0.08); }
 
 .iet-modal-enter-active, .iet-modal-leave-active { transition: opacity 0.18s ease; }
 .iet-modal-enter-active .iet-modal-card, .iet-modal-leave-active .iet-modal-card { transition: transform 0.18s ease; }

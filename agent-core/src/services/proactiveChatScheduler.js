@@ -15,6 +15,7 @@
 import { invalidateGalleryCache } from './galleryCache.js';
 import { getDb, getSystemRulesWithWorld, getGlobalRule, getWorldSetting } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
+import { buildCharacterAppearanceSection } from './characterPersona.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import {
@@ -582,12 +583,11 @@ async function generateImageForGreeting(character, greeting, motiveName, msgId, 
     // 提取角色名：从开头截取到"## 你的身份"之前
     const nameMatch = character.base_prompt.match(/^([\s\S]*?)## 你的身份/);
     const charName = nameMatch ? nameMatch[1].trim() : character.display_name;
-    // 提取外观：从"你的外观"截取到末尾
-    const appMatch = character.base_prompt.match(/你的外观[\s\S]*/);
-    const appearance = appMatch ? appMatch[0] : character.base_prompt;
+    // 提取外观：统一入口「## 你的外观」段（含生效外观注入），无外观段时兜底整卡
+    const appearanceSection = buildCharacterAppearanceSection(character);
     // 将"你"替换为"角色"（生图 prompt 需要第三人称描述）
     const nameBlock = charName.replace(/你/g, '角色');
-    let appearanceBlock = appearance.replace(/你/g, '角色');
+    let appearanceBlock = (appearanceSection || character.base_prompt || '').replace(/你/g, '角色');
 
     // 誓约角色：银白细戒指外观细节
     appearanceBlock = appendOathRing(appearanceBlock, character.id, 'user', { isFirstPerson: false, charName: '角色' });
@@ -667,7 +667,17 @@ ${motiveName}
     if (character.custom_workflow) loraOpts.customWorkflow = character.custom_workflow;
     const charArtist = charArtistOverride(character);
     if (charArtist !== null) loraOpts.artist = charArtist;
-    const result = await generateImage(prompt, { promptScene: 'proactive', priority: 'low', ...loraOpts });
+
+    // 后台主动私聊的配图属于角色自发生活记录，与朋友圈保持同一观感，因为后台运行，所以无所谓时间，
+    // 因此这里借用朋友圈分辨率，而不是普通聊天配图分辨率。
+    const result = await generateImage(prompt, {
+      ragQuery: greeting,
+      promptScene: 'proactive',
+      priority: 'low',
+      ...loraOpts,
+      width: config.comfyui.momentsWidth,
+      height: config.comfyui.momentsHeight,
+    });
     if (!result.success || !result.images?.length) {
       console.warn(`⚡ Image generation failed: ${result.error || 'no images'}`);
       return null;
@@ -692,7 +702,7 @@ ${motiveName}
       promptRefined: result.promptRefined || prompt,
       outputPaths: urls,
       style: loraOpts.artist !== undefined ? loraOpts.artist : config.comfyui.artist,
-      resolution: `${config.comfyui.width}x${config.comfyui.height}`,
+      resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
       workflowTemplate: result.wfMode,
       db,
     });

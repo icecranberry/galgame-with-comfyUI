@@ -21,6 +21,8 @@ import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
+import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
+import { buildCharacterPersona } from '../services/characterPersona.js';
 
 const router = Router();
 
@@ -462,16 +464,26 @@ ${extraContext}` : ''}
 	- 第4行起：完整的 base_prompt 模板内容（你就是她/他——用第二人称"你"贯穿全文，不出现"扮演""模仿"等旁观字眼）`;
 }
 
-// 共享：联网搜索 + LLM 人格生成 + 解析。
+// 共享：联网搜索 + LLM 人格生成 + 解析。cachedSearchContext 用于复用上次搜索结果，避免重新爬取。
 // description 为用户输入（用于联网搜索与作为 user 消息）；extraContext 为额外第一手资料（如角色卡全文）。
-// 返回 { displayName, charName, emotionBaseline, basePrompt, searchFound }，失败时抛错。
-async function runPersonaGeneration({ description, extraContext = '', extraContextLabel = '参考资料', skipWebSearch = false }) {
+// 返回 { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext }，失败时抛错。
+async function runPersonaGeneration({
+  description,
+  extraContext = '',
+  extraContextLabel = '参考资料',
+  skipWebSearch = false,
+  cachedSearchContext = '',
+}) {
   const model = config.llm.model || 'deepseek-chat';
 
   // ── 联网搜索角色资料（可跳过：导入角色卡时以卡片为第一手资料，无需联网）──────
   let searchContext = '';
   let searchFound = false;
-  if (skipWebSearch) {
+  if (cachedSearchContext) {
+    searchContext = cachedSearchContext;
+    searchFound = searchContext.length >= 600;
+    console.log(`[characters] reusing cached web search (${searchContext.length} chars)`);
+  } else if (skipWebSearch) {
     console.log(`[characters] web search skipped (source: ${extraContextLabel})`);
   } else {
     console.log(`[characters] searching web for: "${description.trim()}"`);
@@ -538,7 +550,7 @@ async function runPersonaGeneration({ description, extraContext = '', extraConte
   const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
   if (exists) charName = charName + '_' + Date.now();
 
-  return { displayName, charName, emotionBaseline, basePrompt, searchFound };
+  return { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext };
 }
 
 // POST /api/characters/generate — AI 扩写角色人格
@@ -546,14 +558,20 @@ async function runPersonaGeneration({ description, extraContext = '', extraConte
 // Body: { description: "...", save: false } — 预览模式：只生成不入库，由前端确认后再调 POST /api/characters 入库
 // 默认 save=true，返回生成的完整角色数据，同时写入数据库
 router.post('/generate', async (req, res) => {
-  const { description, save } = req.body;
+  const { description, save, searchContext: cachedSearchContext = '' } = req.body;
   const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
   if (!description || typeof description !== 'string' || description.trim().length < 2) {
     return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
   }
+  if (typeof cachedSearchContext !== 'string') {
+    return res.status(400).json({ error: 'searchContext 必须是字符串' });
+  }
 
   try {
-    const { displayName, charName, emotionBaseline, basePrompt, searchFound } = await runPersonaGeneration({ description });
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext } = await runPersonaGeneration({
+      description,
+      cachedSearchContext,
+    });
 
     const db = getDb();
 
@@ -579,6 +597,7 @@ router.post('/generate', async (req, res) => {
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
+        search_context: searchContext,
       });
       refreshCharSearch();
 
@@ -621,6 +640,7 @@ router.post('/generate', async (req, res) => {
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
+        search_context: searchContext,
       });
     }
   } catch (err) {
@@ -832,6 +852,7 @@ router.post('/:id/gift', async (req, res) => {
       const giftArtist = charArtistOverride(char);
       generateImage(result.imagePrompt, {
         promptScene: 'gift',
+        disableRAG: true,
         ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
         loras: _parseCharLoras(char.loras),
         ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
@@ -879,10 +900,10 @@ router.post('/:id/gift', async (req, res) => {
   }
 });
 
-// DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用）
+// DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用；chest 冷却同表，不在清理范围）
 router.delete('/gift/cooldowns', (_req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM gift_history').run();
+  db.prepare(`DELETE FROM gift_history WHERE gift_type != 'chest'`).run();
   console.log('[gift] cooldown reset (global)');
   res.json({ ok: true, cooldowns: { small: 0, large: 0 } });
 });
@@ -943,7 +964,7 @@ ${imageRuleContent ? `【画面描述要求】\n${imageRuleContent}\n` : ''}
 const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述：
 
 ---角色设定---
-${char.base_prompt}
+${buildCharacterPersona(char, { variant: 'full' })}
 ---
 
 要求：脸部特写，表情跟随人格但是表情幅度很小。`;
@@ -998,6 +1019,7 @@ ${char.base_prompt}
     const avatarArtist = charArtistOverride(char);
     const result = await generateImageRaw(promptText, {
       promptScene: 'avatar',
+      disableRAG: true,
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
       artist: avatarArtist !== null ? avatarArtist : config.comfyui.momentsArtist,
       width: 768,
@@ -1175,5 +1197,50 @@ function _parseCharLoras(raw) {
   }
   return [];
 }
+
+// ── 角色专属外观/形态（角色外观系统，生图注入见 services/characterPersona.js）──
+
+// GET /api/characters/:id/outfits — 列出角色全部专属外观
+router.get('/:id/outfits', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  res.json(listCharacterOutfits(char.id));
+});
+
+// POST /api/characters/:id/outfits — 新增专属外观 Body: { name, description }
+router.post('/:id/outfits', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const name = String(req.body?.name || '').trim();
+  const description = String(req.body?.description || '').trim();
+  if (!name) return res.status(400).json({ error: '外观名称不能为空' });
+  if (!description) return res.status(400).json({ error: '外观描述不能为空' });
+  if (name.length > 60 || description.length > 2000) {
+    return res.status(400).json({ error: '名称不能超过 60 字，描述不能超过 2000 字' });
+  }
+  const outfit = createCharacterOutfit(char.id, { name, description });
+  res.status(201).json(outfit);
+});
+
+// PUT /api/characters/:id/outfits/:outfitId — 更新专属外观 Body: { name?, description?, enabled? }
+// enabled 置 1 时同角色其余外观自动取消启用（每角色同时只启用一套）
+router.put('/:id/outfits/:outfitId', (req, res) => {
+  const { name, description, enabled } = req.body || {};
+  if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: '外观名称不能为空' });
+  if (description !== undefined && !String(description).trim()) return res.status(400).json({ error: '外观描述不能为空' });
+  const outfit = updateCharacterOutfit(req.params.id, req.params.outfitId, { name, description, enabled });
+  if (!outfit) return res.status(404).json({ error: 'Outfit not found' });
+  res.json(outfit);
+});
+
+// DELETE /api/characters/:id/outfits/:outfitId — 删除专属外观
+router.delete('/:id/outfits/:outfitId', (req, res) => {
+  const removed = deleteCharacterOutfit(req.params.id, req.params.outfitId);
+  if (!removed) return res.status(404).json({ error: 'Outfit not found' });
+  res.json({ success: true });
+});
 
 export default router;

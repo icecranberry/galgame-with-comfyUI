@@ -21,6 +21,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_memory: 'true',
   feature_replyGuesses: 'true',
   feature_forceImageGen: 'false',
+  feature_imageGenMode: 'smart',
   feature_realtimeAffinityDisplay: 'true',
   feature_proactiveChat: 'true',
   feature_proactiveChatFreq: '1',
@@ -30,6 +31,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_serializeBackgroundLLM: 'false',
   feature_backgroundLLMMaxConcurrency: '3',
   feature_mergeMessages: 'false',
+  feature_deepThinkMode: 'false',
   feature_weather: 'true',
   disturb_start_time: '22:00',
   disturb_end_time: '08:00',
@@ -39,6 +41,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   // 图片压缩
   compression_enabled: 'false',
   compression_type: 'oxipng',
+  // 表情包
+  emoji_style_mode: 'half_body',
   // 用户信息
   user_nickname: '用户',
   user_gender: '',
@@ -96,6 +100,7 @@ const DEFAULT_ARTIST_FAVORITES = [
   { label: '水彩风', artist: 'A vibrant yet subtly muted watercolor-style illustration in a loose, expressive hand-drawn aesthetic with soft blended gradients and visible brushstroke textures', sort_order: 7 },
   { label: '@mika_pikazo', artist: '@mika_pikazo', sort_order: 8 },
   { label: '@hiten', artist: '@hiten', sort_order: 9 },
+  { label: '@sincos', artist: '@sincos', sort_order: 10 }
 ];
 
 /**

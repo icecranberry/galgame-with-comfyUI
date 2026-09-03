@@ -8,11 +8,11 @@
       <div v-if="chatBgUrl" class="chat-bg" :style="{ backgroundImage: `url(${chatBgUrl})` }"></div>
       <div v-if="chatBgUrl" class="chat-bg-veil"></div>
       <div class="chat-header">
-        <button v-if="isMobile" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
+        <linshe-button v-if="isMobile" variant="icon" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
-        </button>
+        </linshe-button>
         <div class="chat-header-center">
           <div class="chat-header-title-row">
             <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
@@ -38,10 +38,8 @@
             </Transition>
           </span>
           <div class="btn-header-settings" title="角色设置" @click="openSettings">
-          <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
-            <path d="M416.4 958h191.2V849.7c0-12.7 6.4-25.5 19.1-31.9 31.9-12.7 63.7-31.9 89.2-51 12.7-6.4 25.5-6.4 38.2 0l95.6 57.3 95.6-165.7-95.6-57.3C837 588.5 830.6 575.7 837 563c0-19.1 6.4-31.9 6.4-51s0-31.9-6.4-51c0-12.7 6.4-25.5 12.7-31.9l95.6-57.3-95.6-165.7-95.6 57.3c-12.7 6.4-25.5 6.4-38.2 0-25.5-19.1-57.3-38.2-89.2-51-12.7-12.7-19.1-25.5-19.1-38.2V66H416.4v108.3c0 12.7-6.4 25.5-19.1 31.9-31.9 12.7-63.7 31.9-89.2 51-12.7 6.4-25.5 6.4-38.2 0l-95.6-51-95.6 165.6 95.6 57.3c12.7 6.4 19.1 19.1 12.7 31.9 0 19.1-6.4 31.9-6.4 51s0 31.9 6.4 51c6.4 12.7 0 25.5-12.7 31.9l-95.6 57.3 95.6 165.7 95.6-57.3c12.7-6.4 25.5-6.4 38.2 0 25.5 19.1 57.3 38.2 89.2 51 12.7 6.4 19.1 19.1 19.1 31.9V958z m223 63.7H384.6c-19.1 0-31.9-12.7-31.9-31.9v-121c-25.5-12.7-51-25.5-70.1-38.2l-101.9 63.7c-12.7 6.4-31.9 6.4-44.6-12.7L8.6 658.6c-12.7-19.1-6.4-38.2 12.7-44.6l101.9-63.7v-76.5L21.4 410.1c-19.1-6.4-25.5-25.5-12.7-44.6l127.4-223c6.4-12.7 25.5-19.1 44.6-6.4l101.9 63.7c19.1-12.7 44.6-31.9 70.1-38.2V34.1c0-19.1 12.7-31.9 31.9-31.9h254.9c19.1 0 31.9 12.7 31.9 31.9v121.1c25.5 12.7 51 25.5 70.1 38.2l101.9-63.7c12.7-6.4 31.9-6.4 44.6 12.7l127.4 223c12.7 19.1 6.4 38.2-12.7 44.6l-101.9 63.7v76.5l101.9 63.7c12.7 6.4 19.1 25.5 12.7 44.6L888 881.5c-6.4 12.7-25.5 19.1-44.6 12.7l-101.9-63.7c-19.1 12.7-44.6 31.9-70.1 38.2v121.1c-0.1 19.2-12.8 31.9-32 31.9zM512 703.2c-108.3 0-191.2-82.8-191.2-191.2S403.7 320.8 512 320.8 703.2 403.7 703.2 512 620.3 703.2 512 703.2z m0-318.6c-70.1 0-127.4 57.3-127.4 127.4S441.9 639.4 512 639.4 639.4 582.1 639.4 512 582.1 384.6 512 384.6z"/>
-          </svg>
-        </div>
+            <gear-icon :size="16" />
+          </div>
         </div>
       </div>
 
@@ -69,13 +67,18 @@
               />
             </div>
 
+            <!-- 深度思考块（可折叠） -->
+            <div v-else-if="item.msg.type === 'thinking'" class="thinking-row">
+              <ThinkingBlock :msg="item.msg" />
+            </div>
+
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
               <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
                 <span v-if="item.msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
+              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -86,6 +89,14 @@
                 <circle cx="52" cy="5" r="3" class="dot dot-4" />
                 <circle cx="64" cy="5" r="3" class="dot dot-5" />
               </svg>
+              <!-- 表情包：独立 100×100 气泡，不再并入文本气泡 -->
+              <div v-else-if="item.piece.kind === 'sticker'" class="msg-bubble msg-sticker-bubble">
+                <img
+                  :src="item.msg.sticker_images[item.piece.index]?.url || item.msg.sticker_images[item.piece.index]"
+                  class="msg-sticker-img"
+                  loading="lazy"
+                />
+              </div>
               <div v-else-if="item.msg.content" class="msg-bubble">
                 <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
               </div>
@@ -121,22 +132,34 @@
       <Transition name="guesses-fade">
         <div v-if="chat.guesses" class="guesses-row">
           <span class="guess-prefix">🔮</span>
-          <button
+          <div
             v-for="(text, key) in (chat.guesses || {})"
             :key="key"
+            role="button"
+            tabindex="0"
             class="guess-pill"
+            @keydown.enter.prevent="pickGuess(text)"
+            @keydown.space.prevent="pickGuess(text)"
             @click="pickGuess(text)"
-          >{{ text }}</button>
+          >{{ text }}</div>
         </div>
       </Transition>
 
       <div class="input-area">
         <div class="force-img-wrap">
-          <label class="force-img-toggle" :class="{ active: forceImageGen }">
-            <input type="checkbox" :checked="forceImageGen" @change="onForceImageGenChange" />
-            <span class="force-img-icon">🎨</span>
-          </label>
-          <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ forceImageGen ? '强制配图：开' : '灵性配图：开' }}</span>
+          <div
+            role="button"
+            tabindex="0"
+            class="force-img-toggle"
+            :class="{ active: imageGenMode === 'force', off: imageGenMode === 'off' }"
+            :title="imageGenModeLabel"
+            @keydown.enter.prevent="cycleImageGenMode"
+            @keydown.space.prevent="cycleImageGenMode"
+            @click="cycleImageGenMode"
+          >
+            <span class="force-img-icon">{{ imageGenModeIcon }}</span>
+          </div>
+          <span v-if="forceTipVisible" class="force-img-tip" :class="{ 'is-mobile': isMobile }">{{ imageGenModeLabel }}</span>
         </div>
         <textarea ref="inputEl" v-model="inputText" class="chat-input"
           placeholder="输入消息..." rows="1"
@@ -145,19 +168,21 @@
           @focus="inputFocused = true"
           @blur="inputFocused = false"
         ></textarea>
-        <button v-if="isCharSleeping" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @click="onWakeChar" title="叫醒角色">
+        <div v-if="isCharSleeping" role="button" tabindex="0" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @keydown.enter.prevent="onWakeChar" @keydown.space.prevent="onWakeChar" @click="onWakeChar" title="叫醒角色">
           <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-        </button>
-        <button v-else v-show="!(isMobile && inputFocused)" class="gift-btn" @click="showGiftPanel = true" title="送礼物">
+        </div>
+        <div v-else v-show="!(isMobile && inputFocused)" role="button" tabindex="0" class="gift-btn" @keydown.enter.prevent="showGiftPanel = true" @keydown.space.prevent="showGiftPanel = true" @click="showGiftPanel = true" title="送礼物">
           <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
-        </button>
+        </div>
         <!-- 撤回气泡：长按发送按钮浮现 -->
         <Transition name="undo-bubble">
-          <button v-if="showUndoBubble" class="undo-bubble-btn" @click.stop="undoLastRound">
+          <div v-if="showUndoBubble" role="button" tabindex="0" class="undo-bubble-btn" @keydown.enter.prevent="undoLastRound" @keydown.space.prevent="undoLastRound" @click.stop="undoLastRound">
             ↩ 撤回上一轮对话
-          </button>
+          </div>
         </Transition>
-        <button class="send-btn" :class="{ 'send-disabled': sendDisabled }"
+        <div role="button" tabindex="0" class="send-btn" :class="{ 'is-disabled': sendDisabled }" :aria-disabled="sendDisabled"
+          @keydown.enter.prevent="onSendClick"
+          @keydown.space.prevent="onSendClick"
           @click="onSendClick"
           :title="chat.streaming ? '发送中...' : (showUndoBubble ? '' : '发送（长按可撤回）')"
           @mousedown="onSendPressStart"
@@ -173,7 +198,7 @@
           <svg v-else class="send-icon sending" viewBox="0 0 20 20" fill="none">
             <circle cx="6" cy="10" r="1.5" fill="#fff" opacity="0.4"/><circle cx="10" cy="10" r="1.5" fill="#fff" opacity="0.65"/><circle cx="14" cy="10" r="1.5" fill="#fff" opacity="0.9"/>
           </svg>
-        </button>
+        </div>
       </div>
       <GiftPanel
         v-if="showGiftPanel"
@@ -213,8 +238,8 @@
               @click="openAvatarPicker"
             >{{ chat.activeChar?.avatar_path ? '' : chat.activeChar?.display_name?.charAt(0) }}</div>
             <div>
-              <button class="sp-btn-small" @click="openAvatarPicker">更换头像</button>
-              <button v-if="chat.activeChar?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="removeAvatar">移除</button>
+              <div role="button" tabindex="0" class="sp-btn-small" @click="openAvatarPicker" @keydown.enter.prevent="openAvatarPicker" @keydown.space.prevent="openAvatarPicker">更换头像</div>
+              <div v-if="chat.activeChar?.avatar_path" role="button" tabindex="0" class="sp-btn-small sp-btn-subtle" @click="removeAvatar" @keydown.enter.prevent="removeAvatar" @keydown.space.prevent="removeAvatar">移除</div>
             </div>
           </div>
         </div>
@@ -228,39 +253,39 @@
         <div class="sp-divider"></div>
 
         <!-- 编辑人格 → 二级弹窗 -->
-        <button class="sp-btn" @click="openCharEditor">
+        <div role="button" tabindex="0" class="sp-btn" @click="openCharEditor" @keydown.enter.prevent="openCharEditor" @keydown.space.prevent="openCharEditor">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M892.691692 30.72l77.981539 77.981538a73.491692 73.491692 0 0 1 0 103.975385l-584.861539 584.861539-228.036923 46.08 46.08-228.036924L788.716308 30.72a73.491692 73.491692 0 0 1 103.975384 0z m25.993846 129.969231l-77.981538-77.981539-569.186462 569.186462-19.692307 97.673846 97.673846-19.692308 569.186461-569.186461z" fill="currentColor"/><path d="M652.366769 167.699692l180.854154 182.035693 55.689846-55.689847-180.854154-182.114461zM73.491692 953.344h888.595693v-78.769231H73.570462z" fill="currentColor"/></svg>
           查看详细信息
-        </button>
+        </div>
 
         <!-- 查看角色对用户的印象 -->
-        <button class="sp-btn" @click="openImpression">
-          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M607.839811 895.957102H214.69447A86.82497 86.82497 0 0 1 127.880338 809.070721V214.784781A86.839419 86.839419 0 0 1 214.69447 127.880338h594.28594a86.33729 86.33729 0 0 1 61.436749 25.456857c16.400473 16.400473 25.362934 38.208767 25.373771 61.411462L894.439878 607.821749v0.10476a32.031496 32.031496 0 0 0 64.059379 0.101149L959.825022 214.889542v-0.104761A150.775976 150.775976 0 0 0 808.98041 63.940169H214.69447A150.638703 150.638703 0 0 0 63.940169 214.784781v594.28594a150.638703 150.638703 0 0 0 150.757914 150.82655h393.141728a31.970084 31.970084 0 0 0 0-63.940169z" fill="currentColor"/><path d="M950.544667 905.331381l-122.071536-122.071536a192.217875 192.217875 0 1 0-45.213286 45.213286l122.071536 122.071536a31.970084 31.970084 0 0 0 45.213286-45.213286z m-278.547941-105.302594a128.028448 128.028448 0 1 1 90.531332-37.497116 127.193975 127.193975 0 0 1-90.527719 37.497116zM768.004516 352.212795c17.653989 0 31.966472-14.402794 31.970084-32.056783s-14.308871-32.074845-31.966472-32.078457L256.002709 287.911382a32.020659 32.020659 0 0 0-31.970084 32.024271c0 17.657601 14.308871 32.092907 31.966472 32.092908L768.004516 352.212795zM448.000226 544.033302a31.96286 31.96286 0 1 0 0-63.940169h-192.001129a31.937573 31.937573 0 1 0 0 63.878758l192.001129 0.061411zM256.017159 671.91364a31.959247 31.959247 0 1 0 0 63.922107l127.999549 0.018062a31.941185 31.941185 0 1 0 0-63.878757z" fill="currentColor"/></svg>
+        <div role="button" tabindex="0" class="sp-btn" @click="openImpression" @keydown.enter.prevent="openImpression" @keydown.space.prevent="openImpression">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M607.839811 895.957102H214.69447A86.82497 86.82497 0 0 1 127.880338 809.070721V214.784781A86.839419 86.839419 0 0 1 214.69447 127.880338h594.28594a86.33729 86.33729 0 0 1 61.436749 25.456857c16.400473 16.400473 25.362934 38.208767 25.373771 61.411462L894.439878 607.821749v0.10476a32.031496 32.031496 0 0 0 64.059379 0.101149L959.825022 214.889542v-0.104761A150.775976 150.775976 0 0 0 808.98041 63.940169H214.69447A150.638703 150.638703 0 0 0 63.940169 214.784781v594.28594a150.638703 150.638703 0 0 0 150.757914 150.82655h393.141728a31.970084 31.970084 0 0 0 0-63.940169z" fill="currentColor"/><path d="M950.544667 905.331381l-122.071536-122.071536a192.217875 192.217875 0 1 0-45.213286 45.213286l122.071536 122.071536a31.970084 31.970084 0 0 1 45.213286-45.213286z m-278.547941-105.302594a128.028448 128.028448 0 1 1 90.531332-37.497116 127.193975 127.193975 0 0 1-90.527719 37.497116zM768.004516 352.212795c17.653989 0 31.966472-14.402794 31.970084-32.056783s-14.308871-32.074845-31.966472-32.078457L256.002709 287.911382a32.020659 32.020659 0 0 0-31.970084 32.024271c0 17.657601 14.308871 32.092907 31.966472 32.092908L768.004516 352.212795zM448.000226 544.033302a31.96286 31.96286 0 1 0 0-63.940169h-192.001129a31.937573 31.937573 0 1 0 0 63.878758l192.001129 0.061411zM256.017159 671.91364a31.959247 31.959247 0 1 0 0 63.922107l127.999549 0.018062a31.941185 31.941185 0 1 0 0-63.878757z" fill="currentColor"/></svg>
           对你的印象
-        </button>
+        </div>
 
         <div class="sp-divider sp-divider-strong"></div>
 
         <!-- 清空聊天记录 -->
-        <button class="sp-btn sp-btn-danger" @click="clearChatHistory" :disabled="clearing">
+        <div role="button" tabindex="0" class="sp-btn sp-btn-danger" :class="{ 'is-disabled': clearing }" :aria-disabled="clearing" @click="!clearing && clearChatHistory()" @keydown.enter.prevent="!clearing && clearChatHistory()" @keydown.space.prevent="!clearing && clearChatHistory()">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M687.6 96.4H336.4v91.2h351.1V96.4zM636.7 398v405.5h-73.9V398h73.9z m-175.5 0v405.5h-73.9V398h73.9z m332.1-119.2H230.7l27.9 648.8h506.7l28-648.8zM696.8 5.1c40.4 0 73.3 35.6 73.9 79.8v102.7h147.8c20.2 0 36.6 17.8 37 39.9v41.2c0 5.5-4 10-9 10.1h-70.1L848 941.6c-1.8 42.9-33.7 76.6-72.6 77.3H249.8c-39 0-71.3-33.4-73.7-76l-0.1-1.3-28.5-662.7H77.7c-5 0-9.1-4.4-9.2-9.8v-40.9c0-22.2 16.2-40.2 36.3-40.5h148.4V86.2c0-44.3 32.5-80.4 72.7-81.1h370.9z" fill="currentColor"/></svg>
           {{ clearing ? '清空中...' : '清空记忆' }}
-        </button>
+        </div>
 
         <!-- 撤回一轮对话 -->
-        <button class="sp-btn sp-btn-danger" @click="closeSettings(); undoLastRound()" :disabled="!chat.messages.length || chat.streaming">
+        <div role="button" tabindex="0" class="sp-btn sp-btn-danger" :class="{ 'is-disabled': !chat.messages.length || chat.streaming }" :aria-disabled="!chat.messages.length || chat.streaming" @click="onUndoRound" @keydown.enter.prevent="onUndoRound" @keydown.space.prevent="onUndoRound">
           <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M320 192h512v64H320zM320 448h512v64H320zM320 704h384v64H320zM160 256a32 32 0 1 0 0-64 32 32 0 0 0 0 64zM160 512a32 32 0 1 0 0-64 32 32 0 0 0 0 64zM160 768a32 32 0 1 0 0-64 32 32 0 0 0 0 64z" fill="currentColor"/></svg>
           撤回一轮对话
-        </button>
+        </div>
 
         <div class="sp-divider"></div>
 
         <!-- 删除角色 -->
-        <button class="sp-btn sp-btn-danger" @click="deleteChar" :disabled="deleting || chat.activeChar?.name === 'default'"
-          :title="chat.activeChar?.name === 'default' ? '不能删除默认Agent' : ''">
-          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 179.2l390.4 627.2H128l384-627.2m0-64c-19.2 0-44.8 12.8-51.2 32l-390.4 627.2c-25.6 44.8 6.4 96 51.2 96H896c51.2 0 83.2-57.6 51.2-96l-384-627.2c-6.4-19.2-32-32-51.2-32z" fill="#d81e06"/><path d="M512 640c-19.2 0-32-12.8-32-32v-192c0-19.2 12.8-32 32-32s32 12.8 32 32v192c0 19.2-12.8 32-32 32z" fill="#d81e06"/><path d="M512 723.2m-32 0a32 32 0 1 0 64 0 32 32 0 1 0-64 0Z" fill="#d81e06"/></svg>
+        <div role="button" tabindex="0" class="sp-btn sp-btn-danger" :class="{ 'is-disabled': deleting || chat.activeChar?.name === 'default' }" :aria-disabled="deleting || chat.activeChar?.name === 'default'"
+          :title="chat.activeChar?.name === 'default' ? '不能删除默认Agent' : ''" @click="deleteChar" @keydown.enter.prevent="deleteChar" @keydown.space.prevent="deleteChar">
+          <svg class="sp-btn-icon" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 179.2l390.4 627.2H128l384-627.2m0-64c-19.2 0-44.8 12.8-51.2 32l-390.4 627.2c-25.6 44.8 6.4 96 51.2 96H896c51.2 0 83.2-57.6 51.2-96l-384-627.2c-6.4-19.2-32-32-51.2-32z" fill="currentColor"/><path d="M512 640c-19.2 0-32-12.8-32-32v-192c0-19.2 12.8-32 32-32s32 12.8 32 32v192c0 19.2-12.8 32-32 32z" fill="currentColor"/><path d="M512 723.2m-32 0a32 32 0 1 0 64 0 32 32 0 1 0-64 0Z" fill="currentColor"/></svg>
           {{ deleting ? '删除中...' : '删除' + chat.activeChar?.display_name }}
-        </button>
+        </div>
       </div>
     </div>
     </Transition>
@@ -294,7 +319,7 @@
       <div class="editor-panel impression-panel">
         <div class="editor-header">
           <span>{{ chat.activeChar?.display_name }} 对你的印象</span>
-          <button class="editor-close" @click="showImpression = false">&times;</button>
+          <linshe-button variant="icon" class="editor-close" @click="showImpression = false">&times;</linshe-button>
         </div>
         <div class="impression-body">
           <!-- 加载中 -->
@@ -318,7 +343,7 @@
                   </span>
                   <span class="impression-group-title">{{ typeLabel[key] }}</span>
                   <span class="impression-group-count">{{ impressionGrouped[key]?.length || 0 }}</span>
-                  <button class="impression-add-btn" :style="{ color: typeColor[key] }" title="添加" @click="startAdd(key)">+</button>
+                  <div class="impression-add-btn" role="button" tabindex="0" :style="{ color: typeColor[key] }" title="添加" @keydown.enter.prevent="startAdd(key)" @keydown.space.prevent="startAdd(key)" @click="startAdd(key)">+</div>
                 </div>
 
                 <!-- 添加模式（该组为空或用户点击 + 后） -->
@@ -334,10 +359,10 @@
                       @keydown.enter.ctrl="saveAdd(key)"
                     ></textarea>
                     <div class="impression-edit-actions">
-                      <button class="impression-btn impression-btn-cancel" @click="cancelAdd" :disabled="savingAdd">取消</button>
-                      <button class="impression-btn impression-btn-save" :style="{ background: typeColor[key] }" @click="saveAdd(key)" :disabled="savingAdd || addingContent.trim().length < 2">
+                      <div role="button" tabindex="0" class="impression-btn impression-btn-cancel" :class="{ 'is-disabled': savingAdd }" :aria-disabled="savingAdd" @keydown.enter.prevent="cancelAdd" @keydown.space.prevent="cancelAdd" @click="cancelAdd">取消</div>
+                      <div role="button" tabindex="0" class="impression-btn impression-btn-save" :class="{ 'is-disabled': savingAdd || addingContent.trim().length < 2 }" :aria-disabled="savingAdd || addingContent.trim().length < 2" :style="{ background: typeColor[key] }" @keydown.enter.prevent="saveAdd(key)" @keydown.space.prevent="saveAdd(key)" @click="saveAdd(key)">
                         {{ savingAdd ? '添加中...' : '添加' }}
-                      </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -362,10 +387,10 @@
                         @keydown.enter.ctrl="saveEdit(trait)"
                       ></textarea>
                       <div class="impression-edit-actions">
-                        <button class="impression-btn impression-btn-cancel" @click="cancelEdit" :disabled="savingEdit">取消</button>
-                        <button class="impression-btn impression-btn-save" :style="{ background: typeColor[key] }" @click="saveEdit(trait)" :disabled="savingEdit || editingContent.trim().length < 2">
+                        <div role="button" tabindex="0" class="impression-btn impression-btn-cancel" :class="{ 'is-disabled': savingEdit }" :aria-disabled="savingEdit" @keydown.enter.prevent="cancelEdit" @keydown.space.prevent="cancelEdit" @click="cancelEdit">取消</div>
+                        <div role="button" tabindex="0" class="impression-btn impression-btn-save" :class="{ 'is-disabled': savingEdit || editingContent.trim().length < 2 }" :aria-disabled="savingEdit || editingContent.trim().length < 2" :style="{ background: typeColor[key] }" @keydown.enter.prevent="saveEdit(trait)" @keydown.space.prevent="saveEdit(trait)" @click="saveEdit(trait)">
                           {{ savingEdit ? '保存中...' : '保存' }}
-                        </button>
+                        </div>
                       </div>
                     </template>
                     <!-- 查看模式 -->
@@ -382,12 +407,12 @@
                         </div>
                       </div>
                       <div class="impression-card-actions">
-                        <button class="impression-action-btn" title="编辑" @click="startEdit(trait)">
+                        <div class="impression-action-btn" role="button" tabindex="0" title="编辑" @keydown.enter.prevent="startEdit(trait)" @keydown.space.prevent="startEdit(trait)" @click="startEdit(trait)">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        </button>
-                        <button class="impression-action-btn impression-action-btn-danger" title="删除" @click="removeTrait(trait)">
+                        </div>
+                        <div class="impression-action-btn impression-action-btn-danger" role="button" tabindex="0" title="删除" @keydown.enter.prevent="removeTrait(trait)" @keydown.space.prevent="removeTrait(trait)" @click="removeTrait(trait)">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        </button>
+                        </div>
                       </div>
                     </template>
                   </div>
@@ -396,7 +421,7 @@
                 <!-- 空组占位 -->
                 <div v-else-if="addingKey !== key" class="impression-empty-row">
                   <span class="impression-empty-row-text">暂无记录</span>
-                  <button class="impression-add-link" :style="{ color: typeColor[key] }" @click="startAdd(key)">+ 添加特征</button>
+                  <div class="impression-add-link" role="button" tabindex="0" :style="{ color: typeColor[key] }" @keydown.enter.prevent="startAdd(key)" @keydown.space.prevent="startAdd(key)" @click="startAdd(key)">+ 添加特征</div>
                 </div>
               </div>
             </div>
@@ -489,10 +514,7 @@
                     <!-- 实时显示开关 -->
                     <div class="affinity-realtime-toggle">
                       <span class="affinity-realtime-label">实时显示</span>
-                      <label class="switch">
-                        <input type="checkbox" v-model="realtimeAffinityEnabled" />
-                        <span class="slider"></span>
-                      </label>
+                      <linshe-switch v-model="realtimeAffinityEnabled" size="sm" aria-label="实时显示好感度" />
                     </div>
                   </div>
                 </template>
@@ -551,8 +573,10 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject, defineA
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import ThinkingBlock from '../components/ThinkingBlock.vue'
 import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
+import GearIcon from '../components/GearIcon.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ChatBgPanel from '../components/ChatBgPanel.vue'
 // 关系图依赖 @vue-flow（重），仅在打开弹窗时加载
@@ -560,6 +584,8 @@ const RelationshipGraph = defineAsyncComponent(() => import('../components/Relat
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
 import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait, getPortraitSuggestions, confirmPortraitSuggestion, rejectPortraitSuggestion } from '../api/index.js'
@@ -639,16 +665,31 @@ const isCharSleeping = computed(() => {
   const s = charSleepState.value
   return s ? (s.is_sleeping && !s.is_temp_woken) : false
 })
-const forceImageGen = computed(() => settings.forceImageGen)
+const imageGenMode = computed(() => settings.imageGenMode)
+const imageGenModeLabel = computed(() => {
+  if (imageGenMode.value === 'off') return '关闭配图'
+  if (imageGenMode.value === 'force') return '强制配图'
+  return '灵性配图'
+})
+const imageGenModeIcon = computed(() => {
+  if (imageGenMode.value === 'off') return '🚫'
+  if (imageGenMode.value === 'force') return '✨'
+  return '🎨'
+})
 const realtimeAffinityEnabled = computed({
   get: () => settings.realtimeAffinityDisplay,
   set: (v) => settings.setRealtimeAffinityDisplay(v),
 })
 
-function onForceImageGenChange(e) {
-  settings.setForceImageGen(e.target.checked)
+const IMAGE_GEN_MODE_CYCLE = ['smart', 'force', 'off']
+
+function cycleImageGenMode() {
+  const idx = IMAGE_GEN_MODE_CYCLE.indexOf(imageGenMode.value)
+  settings.setImageGenMode(IMAGE_GEN_MODE_CYCLE[(idx + 1) % IMAGE_GEN_MODE_CYCLE.length])
   showForceTip()
 }
+
+const deepThinkMode = computed(() => settings.deepThinkMode)
 
 function onGiftSent(result) {
   showGiftPanel.value = false
@@ -1117,12 +1158,13 @@ function startEdit(trait) {
   editingContent.value = trait.content
 }
 function cancelEdit() {
+  if (savingEdit.value) return
   editingId.value = null
   editingContent.value = ''
 }
 async function saveEdit(trait) {
+  if (savingEdit.value || editingContent.value.trim().length < 2) return
   const trimmed = editingContent.value.trim()
-  if (trimmed.length < 2) return
   savingEdit.value = true
   try {
     await updatePortrait(trait.id, trimmed)
@@ -1169,12 +1211,13 @@ function startAdd(key) {
   addingContent.value = ''
 }
 function cancelAdd() {
+  if (savingAdd.value) return
   addingKey.value = null
   addingContent.value = ''
 }
 async function saveAdd(key) {
+  if (savingAdd.value || addingContent.value.trim().length < 2) return
   const trimmed = addingContent.value.trim()
-  if (trimmed.length < 2) return
   savingAdd.value = true
   try {
     const row = await addPortrait(chat.activeChar.id, key, trimmed)
@@ -1268,7 +1311,16 @@ function onOpenAvatarEditor(c) {
 
 function onOpenRelationGraph(c) {
   showRelationGraph.value = true
-}async function clearChatHistory() {
+}
+
+// 设置面板中的撤回一轮（div 无 disabled 属性，点击前自行守卫）
+function onUndoRound() {
+  if (!chat.messages.length || chat.streaming) return
+  closeSettings()
+  undoLastRound()
+}
+
+async function clearChatHistory() {
 showSettings.value = false
 if (clearing.value) return
 const ok = await confirmFn({ title:'清空记忆', message:`确定要清空${chat.activeChar?.display_name}的所有记忆吗？\n此操作不可恢复。`, okText:'清空' })
@@ -1366,10 +1418,22 @@ const flatItems = computed(() => {
 const items = []
 for (const group of messageGroups.value) {
 items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
-for (let mi = 0; mi < group.msgs.length; mi++) {
-const msg = group.msgs[mi]
-const sameRole = mi > 0 && group.msgs[mi - 1].role === msg.role
-items.push({ type: 'message', msg, id: msg.id, sameRole })
+let prevRole = null
+for (const msg of group.msgs) {
+// 表情包拆成独立气泡，文本和表情包分开展示
+const pieces = []
+if (msg.sticker_images?.length) {
+for (let i = 0; i < msg.sticker_images.length; i++) pieces.push({ kind: 'sticker', index: i })
+}
+if (msg.content) pieces.push({ kind: 'text' })
+if (pieces.length === 0) pieces.push({ kind: 'text' })
+  for (const piece of pieces) {
+    const sameRole = prevRole !== null && prevRole === msg.role
+    const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
+    items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
+    // 深度思考块不参与连发头像合并——否则它后面第一条回复的头像会被当作"同角色连发"隐藏
+    if (msg.type !== 'thinking') prevRole = msg.role
+  }
 }
 }
 return items
@@ -1578,6 +1642,17 @@ watch(() => chat.messages.length, (newLen) => {
     scrollToBottom()  // 流式分句：平滑滚动
   }
 })
+// 表情包是追加到当前分句气泡上的，不改变 messages.length；单独监听贴图数量触发滚底
+watch(
+  () => {
+    const last = chat.messages[chat.messages.length - 1]
+    return `${last?.sticker_images?.length || 0}:${last?.content ? 1 : 0}`
+  },
+  () => {
+    if (pendingCharSwitch) return
+    scrollToBottom()
+  }
+)
 
 // 候选词出现时平滑滚底（此时 streaming 已结束，scrollTo 不与气泡插入竞争）
 watch(() => chat.guesses, (val) => {
@@ -1614,6 +1689,7 @@ function onSendPressEnd() {
 }
 
 function onSendClick() {
+  if (sendDisabled.value) return
   if (longPressFired) {
     // 长按刚触发，忽略本次 click（由 mouseup/touchend 之后的浏览器 click 事件产生）
     longPressFired = false
@@ -1624,7 +1700,6 @@ function onSendClick() {
     showUndoBubble.value = false
     return
   }
-  if (sendDisabled.value) return
   send()
 }
 
@@ -1655,7 +1730,7 @@ async function send() {
   const text = inputText.value.trim()
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text, forceImageGen.value)
+  await chat.sendMessage(text, imageGenMode.value, deepThinkMode.value)
   await scrollToBottom(true)
 }
 
@@ -1690,16 +1765,6 @@ function renderContent(text) {
 .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
 .empty-icon { font-size:56px; }
 .empty-state h2 { font-size:18px; color:var(--text-secondary); font-weight:400; }
-.btn-empty-pick {
-  margin-top: 12px; padding: 10px 28px;
-  border-radius: 12px;
-  border: 1px solid var(--glass-border);
-  background: var(--accent); color: #fff;
-  font-size: 15px; font-weight: 500; cursor: pointer;
-  transition: all 0.2s ease;
-}
-.btn-empty-pick:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.3); }
-.btn-empty-pick:active { transform: scale(0.96); }
 
 /* ── 毛玻璃顶部栏 ── */
 .chat-header {
@@ -1715,17 +1780,8 @@ function renderContent(text) {
 /* ── 移动端返回按钮（← 箭头） ── */
 .btn-mobile-back {
   width: 44px; height: 44px; flex-shrink: 0;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.28);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s ease;
   margin-right: 8px;
 }
-.btn-mobile-back:hover { color: var(--text-bright); border-color: var(--accent); }
-.btn-mobile-back:active { transform: scale(0.94); }
 
 .btn-header-settings {
   width:32px; height:32px; border-radius:10px;
@@ -1752,9 +1808,10 @@ function renderContent(text) {
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
 
 /* ── 消息气泡保持不变 ── */
-.message { display:flex; margin:3px 0; align-items:flex-end; gap:8px; }
+.message { display:flex; margin:3px 0; align-items:flex-start; gap:8px; }
 .message.user { flex-direction:row-reverse; }
 .message.assistant { flex-direction:row; }
+.thinking-row { margin:2px 0; }
 
 .msg-avatar {
   width:42px; height:42px; border-radius:50%; flex-shrink:0;
@@ -1808,6 +1865,15 @@ function renderContent(text) {
 }
 
 .msg-text { font-size:14px; line-height:1.6; }
+/* 表情包独立气泡：高度固定 140px，宽度随图片比例自适应，柔和圆角白底 */
+.msg-sticker-bubble {
+  height:140px; width:auto; padding:0; border-radius:8px; overflow:hidden; flex-shrink:0;
+  background:rgba(255,255,255,0.6); border:none; box-sizing:border-box;
+}
+.message.user .msg-sticker-bubble, .message.assistant .msg-sticker-bubble {
+  background:rgba(255,255,255,0.6); border:none;
+}
+.msg-sticker-bubble .msg-sticker-img { height:140px; width:auto; object-fit:contain; border-radius:8px; background:transparent; padding:0; display:block; }
 .msg-text :deep(code) { background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:13px; }
 .msg-text :deep(strong) { font-weight:600; }
 
@@ -1821,10 +1887,11 @@ function renderContent(text) {
   border-radius: 12px; cursor: pointer;
   background: rgba(255, 255, 255, 0.7);
   border: 1.5px solid rgba(255, 255, 255, 0.35);
+  font: inherit; color: inherit; padding: 0;
+  -webkit-tap-highlight-color: transparent; user-select: none;
   transition: all 0.25s ease;
   opacity: 0.5;
 }
-.force-img-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .force-img-icon { font-size: 18px; line-height: 1; transition: transform 0.25s ease; }
 .force-img-toggle:hover { opacity: 0.8; border-color: rgba(var(--accent-rgb), 0.3); }
 .force-img-toggle.active {
@@ -1834,6 +1901,14 @@ function renderContent(text) {
   box-shadow: var(--focus-ring), 0 0 16px rgba(var(--accent-rgb), 0.08);
 }
 .force-img-toggle.active .force-img-icon { transform: scale(1.1); }
+.force-img-toggle.off {
+  opacity: 0.55;
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: none;
+}
+.force-img-toggle.off:hover { opacity: 0.75; border-color: rgba(0, 0, 0, 0.2); }
+.force-img-toggle.off .force-img-icon { transform: scale(0.92); }
 
 .force-img-tip {
   position: absolute;
@@ -1900,6 +1975,7 @@ function renderContent(text) {
   white-space: normal; word-break: break-word;
   transition: all 0.15s ease;
   flex-shrink: 0;
+  user-select: none;
 }
 .guess-pill:hover {
   border-color: var(--accent-light);
@@ -1952,6 +2028,7 @@ function renderContent(text) {
   box-shadow: 0 2px 8px rgba(249, 194, 112, 0.25);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 .gift-btn-icon { font-size: 20px; transition: transform 0.2s ease; }
 .gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
@@ -1994,6 +2071,7 @@ function renderContent(text) {
     transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 /* 发送图标 */
 .send-icon { width: 18px; height: 18px; display: block; transition: transform 0.2s ease; }
@@ -2011,24 +2089,24 @@ function renderContent(text) {
   opacity: 0;
   transition: opacity 0.3s ease, inset 0.3s ease;
 }
-.send-btn:not(.send-disabled):hover {
+.send-btn:not(.is-disabled):hover {
   box-shadow:
     0 4px 18px rgba(var(--accent-rgb), 0.35),
     0 0 32px rgba(var(--accent-rgb), 0.10);
   transform: scale(1.06);
 }
-.send-btn:not(:disabled):hover .send-icon { transform: translateX(1.5px); }
-.send-btn:not(:disabled):hover::after {
+.send-btn:not(.is-disabled):hover .send-icon { transform: translateX(1.5px); }
+.send-btn:not(.is-disabled):hover::after {
   opacity: 1;
   inset: -8px;
 }
-.send-btn:not(:disabled):active {
+.send-btn:not(.is-disabled):active {
   transform: scale(0.94);
   box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.2);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 /* 禁用态 — 渐变保留仅降透明度 + 收光，靠 transition 实现 0.35s 缓入缓出 */
-.send-btn.send-disabled {
+.send-btn.is-disabled {
   opacity: 0.35;
   box-shadow: none;
 }
@@ -2052,6 +2130,7 @@ function renderContent(text) {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 1px 4px rgba(0, 0, 0, 0.04);
   z-index: 10;
   transition: background 0.2s ease, transform 0.15s ease;
+  user-select: none;
 }
 .undo-bubble-btn:hover {
   background: rgba(255, 255, 255, 1);
@@ -2085,8 +2164,6 @@ function renderContent(text) {
 .panel-slide-leave-to   { opacity:0; transform: translateX(16px); }
 .sph { padding:14px 16px; border-bottom:1px solid rgba(255, 255, 255, 0.2); display:flex; align-items:center; justify-content:space-between; }
 .sph span { font-size:14px; font-weight:600; color:var(--text-bright); }
-.settings-close { width:28px; height:28px; border-radius:8px; border:none; background:transparent; color:var(--text-secondary); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition: all 0.15s; }
-.settings-close:hover { color:var(--text-bright); background:rgba(0,0,0,0.06); }
 
 .sp-section { padding:14px 16px; }
 .sp-label { font-size:12px; color:var(--text-secondary); display:block; margin-bottom:10px; }
@@ -2101,11 +2178,11 @@ function renderContent(text) {
 
 .sp-divider { height:1px; background:rgba(255, 255, 255, 0.2); margin:0 16px; }
 .sp-divider-strong { height:2px; background:rgb(219 219 219 / 38%); margin:6px 16px; }
-.sp-btn { display:block; width:100%; text-align:left; padding:12px 16px; border:none; border-radius:0; background:transparent; color:var(--text-primary); font-size:13px; cursor:pointer; transition:background 0.15s ease; }
+.sp-btn { display:block; width:100%; text-align:left; padding:12px 16px; border:none; border-radius:0; background:transparent; color:var(--text-primary); font-size:13px; font-weight:500; cursor:pointer; transition:background 0.15s ease; user-select:none; }
 .sp-btn:hover { background:rgba(255, 255, 255, 0.2); }
-.sp-btn:disabled { opacity:0.4; cursor:not-allowed; }
+.sp-btn.is-disabled { opacity:0.4; cursor:not-allowed; }
 .sp-btn-danger { color:var(--danger); }
-.sp-btn-danger:hover:not(:disabled) { background:rgba(255, 77, 79, 0.06); }
+.sp-btn-danger:hover:not(.is-disabled) { background:rgba(255, 77, 79, 0.06); }
 .sp-btn-icon { width:16px; height:16px; vertical-align:middle; margin-right:6px; display:inline-block; }
 
 /* ── 毛玻璃编辑弹窗 ── */
@@ -2128,8 +2205,7 @@ function renderContent(text) {
 .editor-fade-leave-to   { opacity:0; transform: scale(0.95); }
 .editor-header { padding:16px 20px; border-bottom:1px solid rgba(255, 255, 255, 0.22); display:flex; align-items:center; justify-content:space-between; }
 .editor-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
-.editor-close { width:32px; height:32px; border-radius:8px; border:none; background:transparent; color:var(--text-secondary); font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition: all 0.15s; }
-.editor-close:hover { color:var(--text-bright); background:var(--bg-hover); }
+.editor-close { width:32px; height:32px; font-size:20px; }
 .editor-field { padding:12px 20px 0; display:flex; flex-direction:column; gap:6px; }
 .editor-field label { font-size:13px; color:var(--text-secondary); }
 .editor-input { padding:8px 12px; font-size:14px; background:rgba(255,255,255,0.9); border:1px solid var(--border); border-radius:8px; color:var(--text-bright); outline:none; transition: border-color 0.15s; }
@@ -2140,15 +2216,10 @@ function renderContent(text) {
 .editor-field-grow .editor-textarea { flex:1; min-height:120px; resize:none; overflow-y:auto; }
 .editor-actions { padding:16px 20px; border-top:1px solid rgba(255, 255, 255, 0.22); display:flex; justify-content:flex-end; align-items:center; }
 .editor-actions-right { display:flex; gap:10px; }
-.btn-cancel { padding:8px 18px; border-radius:8px; border:1px solid rgba(255, 255, 255, 0.22); background:rgba(255, 255, 255, 0.28); color:var(--text-primary); font-size:13px; cursor:pointer; transition: all 0.15s; }
-.btn-cancel:hover { background:var(--bg-hover); }
-.btn-danger { padding:8px 18px; border-radius:8px; border:1px solid var(--danger); background:transparent; color:var(--danger); font-size:13px; cursor:pointer; transition: all 0.15s; }
-.btn-danger:hover { background:var(--danger); color:#fff; }
-.btn-danger:disabled { opacity:0.5; cursor:not-allowed; }
 
 .avatar-preview.clickable { cursor:pointer; transition: opacity 0.15s; }
 .avatar-preview.clickable:hover { opacity:0.85; }
-.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.28); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
+.sp-btn-small { padding:6px 14px; font-size:12px; font-weight:500; border-radius:8px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.28); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; text-align:center; user-select:none; }
 .sp-btn-small:hover { border-color:var(--accent); }
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
@@ -2193,49 +2264,8 @@ function renderContent(text) {
   background: var(--text-primary);
 }
 
-/* ── Toggle Switch ── */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #c5c0ba;
-  border-radius: 22px;
-  transition: background 0.25s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px;
-  width: 18px;
-  left: 2px;
-  bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s;
-}
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--accent);
-}
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(18px);
-}
-
 /* ── 详情编辑弹窗 ── */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid var(--border); color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 
 .detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .detail-avatar {
@@ -2365,9 +2395,6 @@ function renderContent(text) {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   white-space: nowrap;
 }
-.float-switch {
-  flex-shrink: 0;
-}
 
 /* ── 预览卡片 ── */
 .preview-card {
@@ -2378,15 +2405,6 @@ function renderContent(text) {
 .prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
 
 /* 详情 input/textarea */
-.modal-wide .fi {
-  background: var(--bg-primary);
-  border: 1px solid var(--glass-border);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.modal-wide .fi:focus {
-  border-color: var(--accent);
-  box-shadow: var(--focus-ring);
-}
 .modal-wide .prompt-textarea {
   padding: 12px;
   border-radius: 10px;
@@ -2407,8 +2425,6 @@ function renderContent(text) {
   display: flex; align-items: center; margin-top: 0; gap: 10px;
 }
 .detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
-.btn-ghost.danger { color: var(--danger); }
-.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 
 /* ── 弹窗动画 ── */
 /* 弹窗动画已迁移至全局 animations.css */
@@ -2499,18 +2515,6 @@ function renderContent(text) {
     color: var(--text-secondary);
     font-weight: 500;
   }
-  .toolbar-switch {
-    width: 34px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-  .toolbar-switch .toggle-slider::before {
-    height: 14px;
-    width: 14px;
-  }
-  .toolbar-switch input:checked + .toggle-slider::before {
-    transform: translateX(16px);
-  }
 
   .detail-actions { flex-wrap: wrap; gap: 8px; }
   .detail-actions-right { margin-left: 0; flex-wrap: wrap; gap: 8px; }
@@ -2519,7 +2523,6 @@ function renderContent(text) {
   }
   .prompt-textarea { min-height: 350px; font-size: 16px; }
   .modal-wide .prompt-textarea { font-size: 16px; }
-  .modal-wide .fi { font-size: 16px; }
 }
 
 /* ── 印象弹窗 ── */
@@ -2608,6 +2611,7 @@ function renderContent(text) {
   opacity: 0.5;
   transition: opacity 0.15s;
   margin-left: 4px;
+  user-select: none;
 }
 .impression-add-btn:hover { opacity: 1; }
 
@@ -2636,6 +2640,7 @@ function renderContent(text) {
   border-radius: 5px;
   transition: background 0.15s;
   text-decoration: none;
+  user-select: none;
 }
 .impression-add-link:hover {
   background: rgba(0,0,0,0.04);
@@ -2782,6 +2787,7 @@ function renderContent(text) {
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
+  user-select: none;
 }
 .impression-action-btn:hover {
   background: rgba(0,0,0,0.06);
@@ -2824,8 +2830,9 @@ function renderContent(text) {
   cursor: pointer;
   transition: all 0.15s;
   font-family: inherit;
+  user-select: none;
 }
-.impression-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.impression-btn.is-disabled { opacity: 0.5; cursor: not-allowed; }
 .impression-btn-cancel {
   border-color: rgba(0,0,0,0.12);
   background: transparent;
@@ -3116,24 +3123,4 @@ function renderContent(text) {
   .btn-header-settings { flex-shrink: 0; }
 }
 
-</style>
-
-<style>
-/* ── 印象弹窗内的实时显示开关缩小版 ── */
-.affinity-realtime-toggle .switch {
-  width: 32px;
-  height: 18px;
-}
-.affinity-realtime-toggle .slider {
-  border-radius: 18px;
-}
-.affinity-realtime-toggle .slider::before {
-  height: 14px;
-  width: 14px;
-  left: 2px;
-  bottom: 2px;
-}
-.affinity-realtime-toggle .switch input:checked + .slider::before {
-  transform: translateX(14px);
-}
 </style>

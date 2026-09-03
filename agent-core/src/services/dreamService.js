@@ -21,6 +21,7 @@ import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js'
 import { chatSync } from '../llm/llm-client.js';
 import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
 import { loadEmotionState, getCompositeEmotion, loadOath, loadAffinity } from './emotionEngine.js';
+import { buildCharacterPersona } from './characterPersona.js';
 
 // 梦境配图风格后缀（dreamcore 超现实氛围，叠加在 LLM 生成的 imagePrompt 之后）
 const DREAM_STYLE_SUFFIX = ', dreamcore, surreal scenery, ethereal soft lighting, hazy dream atmosphere, soft focus, floating fragments';
@@ -205,17 +206,8 @@ function buildDreamSystemLayers(character) {
   // system2: 生图规则（两个调用都要求输出 imagePrompt）
   msgs.push({ role: 'system', content: `【生图规则】\n${IMAGE_PROMPT_RULE.rule_content}` });
 
-  // system3: 人物简介 + 外观
-  const parts = [];
-  if ((character.short_prompt || '').trim()) parts.push(character.short_prompt.trim());
-  const m = (character.base_prompt || '').match(/##\s*你的外观[\s\S]*/);
-  if (m) {
-    parts.push(m[0].trim());
-  } else if (parts.length === 0 && (character.base_prompt || '').trim()) {
-    // 无 short_prompt 且 base_prompt 无外观标题 → 整卡兜底
-    parts.push(character.base_prompt.trim());
-  }
-  msgs.push({ role: 'system', content: parts.join('\n\n') });
+  // system3: 人物简介 + 外观（short_prompt + base_prompt 的「## 你的外观」段到末尾，含生效外观注入）
+  msgs.push({ role: 'system', content: buildCharacterPersona(character, { variant: 'short', joiner: '\n\n' }) });
 
   return msgs;
 }

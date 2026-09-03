@@ -25,6 +25,7 @@ import { config } from '../config.js';
 import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
+import { buildCharacterPersona } from './characterPersona.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
@@ -37,6 +38,7 @@ import { stripImagePromptLines } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
 import { invalidateGalleryCache } from './galleryCache.js';
+import { buildGroupEmojiNote, getCharacterEmojiMap, parseGroupEmojiText, getEmojiCategories, parseEmojiText } from './emojiService.js';
 
 export function groupConvId(groupId) { return `group_${groupId}`; }
 
@@ -45,10 +47,10 @@ const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数�
 const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
 const IMAGE_NUDGE_PROBABILITY = 0.75;  // 每轮抽卡鼓励发图的概率
 
-/** 群聊记忆总结/滑动窗口推进轮次（2~10，所有群共享；默认 4） */
+/** 群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享；默认 4） */
 function getGroupSummaryInterval() {
   const n = config.groupChat?.summaryInterval;
-  return Number.isInteger(n) ? Math.max(2, Math.min(10, n)) : 4;
+  return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
 }
 
 /**
@@ -168,15 +170,10 @@ function buildGroupCard(group) {
 
   parts.push(`群聊名称：${group.name}${group.topic ? `\n群主题：${group.topic}` : ''}\n群成员：${group.members.map(m => m.display_name).join('、')}，以及用户「${chatUserName}」。`);
 
-  // 群成员资料：仅 short_prompt + base_prompt 外观段（"你"→角色名）
-  const roster = group.members.map(m => {
-    const short = (m.short_prompt || '').trim();
-    const base = m.base_prompt || '';
-    const appMatch = base.match(/##\s*你的外观/);
-    const appSection = appMatch ? base.slice(appMatch.index).replace(/你/g, m.display_name) : '';
-    const persona = [short, appSection].filter(Boolean).join('\n');
-    return `### ${m.display_name}\n${persona}`;
-  }).join('\n\n');
+  // 群成员资料：仅 short_prompt + base_prompt 外观段（"你"→角色名，含生效外观注入）
+  const roster = group.members.map(m =>
+    `### ${m.display_name}\n${buildCharacterPersona(m, { variant: 'short', person: m.display_name })}`
+  ).join('\n\n');
   parts.push(`群成员资料：\n${roster}`);
 
   // 成员间关系（有向边，只取群内成员之间的）
@@ -211,6 +208,10 @@ function buildGroupCard(group) {
   `).all(...memberIds) : [];
   const relToUser = memberUserRels.map(r => `- 对${chatUserName}而言，${r.display_name}的身份是其${r.relationship_text}`).join('\n');
   parts.push(`用户信息：\n群里标记为「${chatUserName}」的发言来自真实用户。${userInfoLines.length ? '\n' + userInfoLines.join('。') : ''}${relToUser ? '\n用户与角色之间的关系：\n' + relToUser : ''}`);
+
+  // 表情包：≥ 一半成员拥有时注入各自名单与调用方式（参考私聊 emoji_stickers）
+  const emojiNote = buildGroupEmojiNote(group.members, db);
+  if (emojiNote) parts.push(emojiNote);
 
   return `<group_info>\n${parts.join('\n\n')}\n</group_info>`;
 }
@@ -411,6 +412,20 @@ export function formatGroupImageLine(speakerName, prompt) {
   return `[${String(speakerName || '').trim()}]: {${String(prompt || '').trim()}}`;
 }
 
+/**
+ * 将无说话人的续写行合并到上一条群聊气泡，并按该说话人的表情包名册解析标记。
+ */
+export function mergeGroupContinuationEmoji(rec, continuation, emojiMap = new Map(), categoryKeys = []) {
+  const parsed = parseGroupEmojiText(continuation, emojiMap, categoryKeys);
+  if (parsed.invalidEmoji) return null;
+
+  const images = [...new Set([...(rec.images || []), ...parsed.images])];
+  const content = parsed.content
+    ? (rec.content ? `${rec.content}\n${parsed.content}` : parsed.content)
+    : (rec.content || '');
+  return { content, images, hasImage: images.length > 0 };
+}
+
 /** 解析一行剧本。返回 {speaker, text, imagePrompt} 或 null（无效行） */
 export function parseScriptLine(line, membersByName) {
   const trimmed = line.trim();
@@ -503,7 +518,14 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
     if (fallbackApplied) {
       console.log(`[group] image prompt added speaker name fallback: ${speaker.name}`);
     }
+
+    // 后台主动群聊（idle 后台闲聊 / opening 自动建群）的图更像角色生活记录，
+    // 统一借用朋友圈分辨率；用户触发的群聊图仍走默认聊天分辨率。
+    const resolutionOverrides = options.useMomentsResolution
+      ? { width: config.comfyui.momentsWidth, height: config.comfyui.momentsHeight }
+      : {};
     const result = await generateImage(preparedPrompt, {
+      ragQuery: options.ragQuery,
       scene: 'group',
       workflowScene: 'group',
       promptScene: 'chat',
@@ -513,6 +535,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
         if (p.stage === 'retrying') emit('generate_retrying', { taskId, msg_id: targetMsgId, attempt: p.attempt, maxRetries: p.maxRetries });
         else emit('generate_progress', { taskId, msg_id: targetMsgId, ...p });
       },
+      ...resolutionOverrides,
       ...loraOpts,
     });
     if (result.promptRefined) {
@@ -653,6 +676,8 @@ export function truncateRoundAfter(groupId, afterMsgId) {
   transaction();
 
   for (const url of doomedImageUrls) {
+    // 表情包是角色的共享资产，消息截断不删文件
+    if (String(url).includes('/images/emoji/')) continue;
     const stillReferenced = db.prepare(`SELECT 1 FROM messages WHERE images LIKE ? LIMIT 1`).get(`%${url}%`);
     if (!stillReferenced) {
       try { deleteImageFileByUrl(url); } catch { /* 文件清理失败不影响消息截断 */ }
@@ -708,6 +733,9 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const conversationId = groupConvId(groupId);
   const chatUserName = config.user.nickname || '用户';
   const membersByName = new Map(group.members.map(m => [m.display_name, m]));
+  // 表情包：按成员预取各自 emoji 映射（发送表情包的对象是谁，就用谁的名册检索图片）
+  const emojiCategories = getEmojiCategories();
+  const memberEmojiMaps = new Map(group.members.map(m => [m.id, getCharacterEmojiMap(m.id, db)]));
 
   // ── 动态指令块 ──
   const directiveBlocks = [];
@@ -789,7 +817,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   let lineCount = 0;        // 剧本行计数（MAX_ROUND_MESSAGES 按行限制，不受分句膨胀影响）
 
   const insertMsg = db.prepare(
-    `INSERT INTO messages (conversation_id, raw_id, role, content, seq, speaker_character_id) VALUES (?, ?, 'assistant', ?, ?, ?)`
+    `INSERT INTO messages (conversation_id, raw_id, role, content, images, seq, speaker_character_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)`
   );
 
   const handleParsed = (parsed) => {
@@ -807,10 +835,21 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       // 无法识别说话人的行：拼到上一条消息（模型换行续写）
       const last = written[written.length - 1];
       if (last && !last.hasImage) {
-        last.content += '\n' + parsed.continuation;
-        db.prepare(`UPDATE messages SET content = ? WHERE id = ?`).run(last.content, last.id);
-        rawLines[last.rawLineIdx] += ' ' + parsed.continuation.replace(/\n/g, ' ');
-        emit('group_msg_update', { id: last.id, content: last.content });
+        const merged = mergeGroupContinuationEmoji(
+          last,
+          parsed.continuation,
+          memberEmojiMaps.get(last.speaker_character_id),
+          emojiCategories,
+        );
+        if (merged) {
+          last.content = merged.content;
+          last.images = merged.images;
+          last.hasImage = merged.hasImage;
+          db.prepare(`UPDATE messages SET content = ?, images = ? WHERE id = ?`)
+            .run(last.content, last.images.length > 0 ? JSON.stringify(last.images) : null, last.id);
+          rawLines[last.rawLineIdx] += ' ' + parsed.continuation.replace(/\n/g, ' ');
+          emit('group_msg_update', serializeMsg(last, groupId));
+        }
       }
       if (!parsed.imagePrompt) return;
     }
@@ -827,7 +866,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       // 图片行：优先挂到该角色本轮最后一条消息；没有则新建空文本气泡承载图片
       let target = [...written].reverse().find(w => w.speaker_character_id === speaker.id && !w.hasImage);
       if (!target) {
-        const r = insertMsg.run(conversationId, rawId, '', seq, speaker.id);
+        const r = insertMsg.run(conversationId, rawId, '', null, seq, speaker.id);
         target = {
           id: r.lastInsertRowid, content: '', seq, rawLineIdx: rawLines.length,
           speaker_character_id: speaker.id, speaker_name: speaker.display_name,
@@ -848,23 +887,38 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
         {
           ragTimeoutMs: (trigger === 'user' || trigger === 'lull') ? RAG_TIMEOUT_FAST_MS : undefined,
           priority: (trigger === 'idle' || trigger === 'opening') ? 'low' : undefined,
+          ragQuery: parsed.text || [...written].reverse().find(w => w.speaker_character_id === speaker.id && w.content)?.content || '',
+          useMomentsResolution: trigger === 'idle' || trigger === 'opening',
         },
       ));
       return;
     }
 
     // 文本行：与私聊同款分句，每段一个气泡；raw 保留完整原行（LLM 视角不变）
-    lineCount++;
     const rawLineIdx = rawLines.length;
+    const speakerEmojiMap = memberEmojiMaps.get(parsed.speaker.id);
+    // 表情包异常检测：说话人调用了自己没有的表情 → 视为异常，跳过这条消息推送（raw 也不写，保持 LLM 视角与展示一致）
+    const lineEmoji = parseGroupEmojiText(parsed.text, speakerEmojiMap, emojiCategories);
+    if (lineEmoji.invalidEmoji) {
+      console.log(`[group] skip message: ${parsed.speaker.display_name} called an unowned emoji in group ${groupId}: ${parsed.text.slice(0, 40)}`);
+      return;
+    }
+    lineCount++;
     rawLines.push(`[${parsed.speaker.display_name}]: ${parsed.text}`);
     const segments = splitText(parsed.text);
     const segs = segments.length > 0 ? segments : [parsed.text];
     for (const seg of segs) {
-      const r = insertMsg.run(conversationId, rawId, seg, seq, parsed.speaker.id);
+      // 与私聊一致：句中/句首 [表情] 标记删除，命中说话人表情包的 URL 挂到本条气泡
+      const parsedSeg = parseEmojiText(seg, speakerEmojiMap);
+      if (!parsedSeg.content && parsedSeg.images.length === 0) continue;
+      const r = insertMsg.run(conversationId, rawId, parsedSeg.content, parsedSeg.images.length > 0 ? JSON.stringify(parsedSeg.images) : null, seq, parsed.speaker.id);
       const rec = {
-        id: r.lastInsertRowid, content: seg, seq, rawLineIdx,
+        id: r.lastInsertRowid, content: parsedSeg.content, seq, rawLineIdx,
+        images: parsedSeg.images,
         speaker_character_id: parsed.speaker.id, speaker_name: parsed.speaker.display_name,
       };
+      // 气泡已带表情包图：标记 hasImage，防止后续 {...} 生图行覆写同一气泡的 images
+      if (parsedSeg.images.length > 0) rec.hasImage = true;
       written.push(rec);
       seq++;
       emit('group_msg', serializeMsg(rec, groupId));
@@ -961,6 +1015,7 @@ function serializeMsg(rec, groupId) {
     group_id: groupId,
     role: 'assistant',
     content: rec.content,
+    ...(rec.images && rec.images.length > 0 ? { images: rec.images } : {}),
     seq: rec.seq,
     speaker_character_id: rec.speaker_character_id,
     speaker_name: rec.speaker_name,

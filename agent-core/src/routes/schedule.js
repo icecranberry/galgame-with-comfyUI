@@ -17,6 +17,7 @@ import { Router } from 'express';
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { appendOathRing } from '../services/oathUtils.js';
+import { buildCharacterPersona } from '../services/characterPersona.js';
 import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
@@ -449,12 +450,11 @@ router.post('/:characterId/peek', async (req, res) => {
       }
     }
 
-    system1 += `你是一个专业的人像摄影师，你现在需要给「${charName}」拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态、服饰根据角色人格来生成，要贴合角色气质。当前角色日程是：${effectiveActivity}，地点：${activity.location}，${timeLightInline}。照片里的角色要体现正在做的日程。${sleepNote}${wakeNote}`;
+    system1 += `你是一个专业的人像摄影师，你现在需要给角色拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态根据角色人格和正在做的事来生成，要贴合角色气质。画面输出用英文prompt`;
 
-    // system2: 角色完整人格，"你"替换为角色姓名
-    let personaText = character.base_prompt
-      ? character.base_prompt.replace(/你/g, charName)
-      : `角色名：${charName}`;
+    // system2: 角色完整人格（统一入口，含生效外观注入），"你"替换为角色姓名
+    let personaText = buildCharacterPersona(character, { variant: 'full', person: charName });
+    if (!personaText) personaText = `角色名：${charName}`;
 
     // 誓约角色：银白细戒指外观细节
     const ringUserName = config.user?.nickname || 'user';
@@ -462,7 +462,7 @@ router.post('/:characterId/peek', async (req, res) => {
 
     // system3: image_prompt 规则作为 prompt 画质指令
     const imageRulesText = getGlobalRule('image_prompt')?.rule_content || '';
-    const system3 = `直接输出英文画面描述，不要任何格式包装或额外文字。${imageRulesText ? '\n\n输出要求：\n' + imageRulesText : ''}`;
+    const system3 = `${imageRulesText ? imageRulesText : ''}`;
 
     // event: 角色当前奇遇注入
     const activeEvent = db.prepare(`
@@ -472,7 +472,7 @@ router.post('/:characterId/peek', async (req, res) => {
     `).get(characterId);
 
     // user: 拍摄指令
-    const userMsg = `请为「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}`;
+    const userMsg = `牢记<world_setting>世界观里的环境描述和人物行为和着装，然后给「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}直接输出为英文prompt`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },
@@ -541,6 +541,7 @@ router.post('/:characterId/peek', async (req, res) => {
 
       // 用日程事件参数生图
       const result = await generateImage(generatedPrompt, {
+        ragQuery: `${charName}在${activity.location}${effectiveActivity}，具体表现是${effectiveDescription}`,
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
         height: config.comfyui.eventHeight,

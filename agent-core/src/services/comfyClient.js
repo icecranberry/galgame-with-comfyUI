@@ -360,14 +360,6 @@ export function guiToApi(workflow) {
       }
     }
 
-    // 诊断日志：模型加载器节点输出完整的 widgets_values 和 inputs 对照
-    if (['CLIPLoader', 'UNETLoader', 'VAELoader'].includes(node.type)) {
-      console.log(`[comfyClient] ${node.type}(id=${node.id}) guiToApi result:`,
-        JSON.stringify(apiNode.inputs));
-      console.log(`[comfyClient] ${node.type}(id=${node.id}) raw widgets_values:`,
-        JSON.stringify(wvs), `| inputs count: ${(node.inputs || []).length}`);
-    }
-
     api[String(node.id)] = apiNode;
   }
 
@@ -463,24 +455,6 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
 
-  // 关键节点日志
-  const n28 = apiPrompt['28'];
-  const n93 = apiPrompt['93'];
-  const n106 = apiPrompt['106'];
-  const n63 = apiPrompt['63'];
-  console.log(`[comfyClient] API nodes: ${Object.keys(apiPrompt).length}`);
-  const logNode = (id, label, key) => {
-    if (!apiPrompt[id]) return;
-    const v = apiPrompt[id]?.inputs?.[key];
-    if (v !== undefined) console.log(`[comfyClient] ${id} (${label}): ${typeof v === 'string' ? `"${v.slice(0, 60)}"` : JSON.stringify(v)}`);
-  };
-  logNode('28', 'latent', 'width');
-  logNode('28', 'latent', 'height');
-  logNode('93', 'prompt', 'text');
-  logNode('106', 'text', 'text');
-  logNode('63', 'KSampler', 'steps');
-  logNode('63', 'KSampler', 'cfg');
-
   const body = {
     client_id: clientId,
     prompt: apiPrompt,
@@ -505,7 +479,6 @@ export async function submitWorkflow(guiWorkflow, onProgress) {
   }
 
   const promptId = data.prompt_id;
-  console.log(`[comfyClient] Submitted, promptId: ${promptId}`);
   if (onProgress) onProgress({ phase: 'submitted', promptId });
 
   // 优先走 WebSocket 实时进度，失败则回退到轮询
@@ -576,7 +549,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
     }
 
     ws.on('open', () => {
-      console.log(`[comfyClient] WS connected, listening for progress on ${promptId}`);
+      // 连接成功即可，无需日志；进度通过 message 事件转发给调用方
     });
 
     ws.on('message', (raw) => {
@@ -606,10 +579,8 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
               if (onProgress) onProgress({ phase: 'started', promptId });
             }
             if (onProgress) onProgress({ phase: 'executing', node, promptId });
-            console.log(`[comfyClient] ⚙️ executing node: ${node}`);
           } else if (!done) {
             // node === null → 全部执行完毕，立即结算
-            console.log(`[comfyClient] ✅ execution complete`);
             onExecutionComplete();
           }
         } else if (msg.type === 'execution_error') {
@@ -678,7 +649,6 @@ async function downloadImagesFromHistory(promptId, retries = 3) {
         }
 
         if (images.length > 0) {
-          console.log(`[comfyClient] Downloaded ${images.length} image(s) from history`);
           return images;
         }
         // outputs 存在但没有 image 数据——可能是 ComfyUI 还在写盘

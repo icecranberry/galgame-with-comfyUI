@@ -2,11 +2,11 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <div v-if="visible && !showLoraModal && !showOutfitModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
-            <button class="modal-close" @click="$emit('close')">✕</button>
+            <linshe-button variant="icon" class="modal-close" @click="$emit('close')">✕</linshe-button>
           </div>
 
           <div class="modal-body modal-body-detail">
@@ -14,41 +14,37 @@
             <div class="mobile-detail-toolbar" v-if="isMobile">
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
               </div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不主动聊天</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.proactiveDisabled" size="sm" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
               </div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不发生奇遇</span>
-                <label class="toggle-switch toolbar-switch">
-                  <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-                  <span class="toggle-slider"></span>
-                </label>
+                <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
               </div>
               <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
                 <span>设置 Lora</span>
                 <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
                 <span v-else class="toolbar-badge">未配置</span>
               </div>
+              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
+              <!-- <div class="toolbar-item toolbar-item-btn" @click="openOutfitModal">
+                <span>外观 / 形态</span>
+                <span v-if="activeOutfitName" class="toolbar-badge active">{{ activeOutfitName }}</span>
+                <span v-else class="toolbar-badge">未启用</span>
+              </div> -->
             </div>
             <!-- 头像 -->
             <div class="detail-avatar-row">
-              <div
-                class="detail-avatar clickable"
-                :style="character?.avatar_path ? { backgroundImage: `url(${character.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
-                @click="$emit('open-avatar-editor', character)"
-              >{{ character?.avatar_path ? '' : character?.display_name?.charAt(0) }}</div>
+              <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
+                <img v-if="character?.avatar_path" :src="character.avatar_path" class="detail-avatar-img" alt="" />
+                <span v-else>{{ character?.display_name?.charAt(0) }}</span>
+              </div>
               <div>
-                <button class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</button>
-                <button v-if="character?.avatar_path" class="sp-btn-small sp-btn-subtle" @click="$emit('remove-avatar', character)">移除</button>
+                <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
+                <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
               </div>
               <div v-if="character?.is_oath" class="detail-avatar-oath">
                 <span class="oath-badge" @click="removeOath">
@@ -58,123 +54,132 @@
               </div>
             </div>
 
-            <!-- 角色关系 -->
-            <div class="detail-rel-section">
-              <div class="detail-rel-header">
-                <span class="detail-rel-title">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                    <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
-                  </svg>
-                  角色关系网
-                </span>
-                <div class="detail-rel-btns">
-                <button
-                  v-if="detail.relationships.length > 0"
-                  class="detail-rel-btn subtle"
-                  @click="$emit('open-deduction', character)"
-                >推演关系</button>
-                <button
-                  v-if="detail.relationships.length > 0"
-                  class="detail-rel-btn subtle"
-                  @click="$emit('open-relation-graph', character)"
-                >管理关系图 &rarr;</button>
-                </div>
-              </div>
-              <div v-if="detail.relationships.length > 0" class="detail-rel-list">
-                <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
-                  <span class="rel-from">{{ character?.display_name }}</span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                  <span class="rel-to">{{ rel.to_display_name }}</span>
-                  <span class="rel-text">{{ rel.relationship_text }}</span>
-                </div>
-                <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="$emit('open-relation-graph', character)">
-                  共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
-                </div>
-              </div>
-              <div v-else class="detail-rel-empty">
-                <template v-if="detail.relationshipsLoading">
-                  <span class="rel-empty-spinner"></span> 加载中…
-                </template>
-                <template v-else>
-                  <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
-                  <div class="detail-rel-ctas">
-                  <button class="detail-rel-btn cta" @click="$emit('open-deduction', character)">
+            <div class="preview-card">
+              <!-- 角色关系 -->
+              <div class="detail-rel-section">
+                <div class="detail-rel-header">
+                  <span class="detail-rel-title">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                    </svg>
-                    推演关系
-                  </button>
-                  <button class="detail-rel-btn cta" @click="$emit('open-relation-graph', character)">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
                       <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
                     </svg>
-                    手动设置关系
-                  </button>
+                    角色关系网
+                  </span>
+                  <div class="detail-rel-btns">
+                    <linshe-button
+                      v-if="detail.relationships.length > 0"
+                      variant="secondary"
+                      class="detail-rel-btn"
+                      @click="$emit('open-deduction', character)"
+                    >推演关系</linshe-button>
+                    <linshe-button
+                      v-if="detail.relationships.length > 0"
+                      variant="secondary"
+                      class="detail-rel-btn"
+                      @click="$emit('open-relation-graph', character)"
+                    >管理关系图 &rarr;</linshe-button>
                   </div>
-                </template>
+                </div>
+                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
+                  <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
+                    <span class="rel-from">{{ character?.display_name }}</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    <span class="rel-to">{{ rel.to_display_name }}</span>
+                    <span class="rel-text">{{ rel.relationship_text }}</span>
+                  </div>
+                  <div v-if="detail.relationships.length > 5" class="detail-rel-more" @click="$emit('open-relation-graph', character)">
+                    共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
+                  </div>
+                </div>
+                <div v-else class="detail-rel-empty">
+                  <template v-if="detail.relationshipsLoading">
+                    <span class="rel-empty-spinner"></span> 加载中…
+                  </template>
+                  <template v-else>
+                    <p class="rel-empty-desc">定义角色之间的关联，所有动作中都会自动感知这些关系</p>
+                    <div class="detail-rel-ctas">
+                      <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-deduction', character)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        推演关系
+                      </linshe-button>
+                      <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-relation-graph', character)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
+                          <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                        </svg>
+                        手动设置关系
+                      </linshe-button>
+                    </div>
+                  </template>
+                </div>
               </div>
-            </div>
 
-            <div class="preview-card">
               <div class="detail-name-row">
                 <div class="detail-name-col">
                   <label class="fl">角色名</label>
-                  <input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+                  <linshe-input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
                 </div>
                 <div class="detail-name-col">
                   <label class="fl">英文名</label>
-                  <input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
+                  <linshe-input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
                 </div>
               </div>
               <label class="fl" style="margin-top:12px">人格提示词</label>
-              <textarea v-model="detail.editPrompt" class="fi prompt-textarea" @input="detail.dirty = true"></textarea>
+              <linshe-input v-model="detail.editPrompt" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
             </div>
           </div>
 
           <!-- 操作栏 sticky footer -->
           <div class="modal-footer">
             <div class="detail-actions">
-              <button class="btn-ghost danger" @click="deleteChar">&#x1F5D1; 删除角色</button>
+              <linshe-button variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
               <div class="detail-actions-right">
                 <div class="recruit-appearance-hint">
                   外观描述补充tag查阅
                   <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
                 </div>
-                <button class="btn-primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</button>
+                <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 悬浮侧边栏（桌面端） -->
+        <!-- 悬浮侧边栏（桌面端）：功能整合为一张卡片 -->
         <div class="detail-float" v-if="!isMobile">
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不看ta的朋友圈</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.momentsDisabled" @change="toggleMomentsDisabled" :disabled="detail.momentsToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不主动聊天</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.proactiveDisabled" @change="toggleProactiveDisabled" :disabled="detail.proactiveToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-toggle">
-            <span class="float-label">不发生奇遇</span>
-            <label class="toggle-switch float-switch">
-              <input type="checkbox" v-model="detail.eventsDisabled" @change="toggleEventsDisabled" :disabled="detail.eventsToggling" />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="float-card float-card-btn" @click="openLoraModal">
-            <span class="float-label">设置 Lora</span>
-            <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
-            <span v-else class="float-badge">未配置</span>
+          <div class="float-panel">
+            <div class="float-panel-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+              </svg>
+              更多设置
+            </div>
+            <div class="float-panel-body">
+              <div class="float-row">
+                <span class="float-label">不看ta的朋友圈</span>
+                <linshe-switch v-model="detail.momentsDisabled" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
+              </div>
+              <div class="float-row">
+                <span class="float-label">不主动聊天</span>
+                <linshe-switch v-model="detail.proactiveDisabled" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
+              </div>
+              <div class="float-row">
+                <span class="float-label">不发生奇遇</span>
+                <linshe-switch v-model="detail.eventsDisabled" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="float-row float-row-action" @click="openLoraModal">
+                <span class="float-label">设置 Lora</span>
+                <span v-if="hasLoraSetup" class="float-badge active">已配置</span>
+                <span v-else class="float-badge">未配置</span>
+              </div>
+              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
+              <!-- <div class="float-row float-row-action" @click="openOutfitModal">
+                <span class="float-label">外观 / 形态</span>
+                <span v-if="activeOutfitName" class="float-badge active float-badge-name">{{ activeOutfitName }}</span>
+                <span v-else class="float-badge">未启用</span>
+              </div> -->
+            </div>
           </div>
         </div>
       </div>
@@ -186,21 +191,21 @@
         <div class="modal-panel modal-wide">
           <div class="modal-header">
             <h3>LoRA 设置 — {{ character?.display_name }}</h3>
-            <button class="modal-close" @click="closeLoraModal">✕</button>
+            <linshe-button variant="icon" class="modal-close" @click="closeLoraModal">✕</linshe-button>
           </div>
           <div class="modal-body">
             <div class="lora-body-card">
               <!-- ── Lora 列表 ── -->
               <TransitionGroup name="lora-card" tag="div" class="lora-list">
                 <div v-for="(item, idx) in loraItems" :key="idx" class="lora-item-card">
-                  <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
+                  <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                  </button>
+                  </linshe-button>
                   <div class="lora-item-row">
                     <div class="form-group lora-path-group">
                       <label class="fl lora-inline-label">文件路径</label>
                       <div class="lora-autocomplete-wrap">
-                        <input
+                        <linshe-input
                           v-model="item.path"
                           class="fi"
                           placeholder="在ComfyUI-aki-v3(或其他名称)\ComfyUI\models\loras下搜索..."
@@ -229,7 +234,7 @@
                     </div>
                     <div class="form-group lora-weight-group">
                       <label class="fl lora-inline-label">权重</label>
-                      <input
+                      <linshe-input
                         v-model.number="item.weight"
                         type="number"
                         step="0.05"
@@ -241,26 +246,27 @@
                   </div>
                   <div class="lora-trigger-row">
                     <label class="fl lora-inline-label">触发词</label>
-                    <textarea
+                    <linshe-input
                       v-model="item.triggerWord"
+                      type="textarea"
                       class="fi"
                       rows="3"
                       placeholder="可选，用于增强 lora 效果的提示词"
-                    ></textarea>
+                    />
                   </div>
                 </div>
               </TransitionGroup>
 
               <!-- ── 空状态 ── -->
               <div v-if="loraItems.length === 0" class="lora-empty-hint">
-                尚未配置任何 LoRA，点击下方按钮添加
+                尚未配置任何 LoRA，点击下方按钮添加<a href="https://www.bilibili.com/video/BV1wsNu61EX6?t=204.1" target="_blank" rel="noopener noreferrer" class="lora-tutorial-link">添加LoRA教程</a>
               </div>
 
               <!-- ── 添加 Lora 按钮 ── -->
-              <button class="lora-add-btn" @click="addLoraGroup">
+              <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 添加 LoRA
-              </button>
+              </div>
 
               <div class="lora-separator"></div>
 
@@ -277,7 +283,7 @@
               </label>
                 <Transition name="lora-expand">
                   <div v-if="customWorkflowEnabled" class="lora-workflow-select">
-                    <DropdownSelect v-model="editingCustomWorkflow" :options="customWorkflowOptions" placeholder="请选择自定义工作流（放在workflows文件夹下）" />
+                    <linshe-select v-model="editingCustomWorkflow" :options="customWorkflowOptions" placeholder="请选择自定义工作流（放在workflows文件夹下）" />
                     <p class="form-hint">单人图片才会启用自定工作流，可以给某个角色单独设置完全自由的工作流，同样会默认注入长、宽、画师串、画面描述、lora（如果设置了），不需要的节点可以去掉。</p>
                   </div>
                 </Transition>
@@ -296,7 +302,7 @@
                 </label>
                 <Transition name="lora-expand">
                   <div v-if="artistOverrideEnabled" class="lora-workflow-select">
-                    <input v-model="artistOverride" class="fi" placeholder="该角色专属画师串，留空则不注入画师串" />
+                    <linshe-input v-model="artistOverride" class="fi" placeholder="该角色专属画师串，留空则不注入画师串" />
                     <p class="form-hint">勾选后，遇到该角色生成图片时会无条件覆盖系统设置里注入的画师串；留空则用空画师串覆盖，不注入任何画师串。</p>
                   </div>
                 </Transition>
@@ -313,9 +319,73 @@
                 CivitAI.red 搜索：{{ civitaiDisplayName }}
               </a>
               <div style="flex:1"></div>
-              <button class="btn-primary" @click="saveLora" :disabled="loraLoading">
+              <linshe-button variant="primary" @click="saveLora" :disabled="loraLoading">
                 {{ loraLoading ? '保存中…' : '保存' }}
-              </button>
+              </linshe-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- ── 外观 / 形态设置弹窗 ── -->
+    <Transition name="modal-fade">
+      <div v-if="showOutfitModal" class="modal-overlay" @click.self="closeOutfitModal">
+        <div class="modal-panel modal-wide">
+          <div class="modal-header">
+            <h3>外观 / 形态 — {{ character?.display_name }}</h3>
+            <linshe-button variant="icon" class="modal-close" @click="closeOutfitModal">✕</linshe-button>
+          </div>
+          <div class="modal-body">
+            <div class="lora-body-card">
+              <p class="outfit-intro">
+                配置该角色专属的额外形态、装甲或服装。启用后，角色生图时会优先穿着这里的外观，
+                人物卡里的原有外观用于填补未提及的部位；同一时间只启用一套。
+              </p>
+              <TransitionGroup name="lora-card" tag="div" class="lora-list">
+                <div v-for="(item, idx) in outfitItems" :key="item.id ?? `new-${idx}`" class="lora-item-card" :class="{ 'outfit-deleted': item._deleted }">
+                  <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeOutfit(idx)" title="移除">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                  </linshe-button>
+                  <div class="lora-item-row">
+                    <div class="form-group lora-path-group">
+                      <label class="fl lora-inline-label">名称</label>
+                      <linshe-input v-model="item.name" class="fi" placeholder="如：机甲形态 / 女仆装 / 常服" />
+                    </div>
+                    <label class="outfit-enabled-label">
+                      <input type="checkbox" v-model="item.enabled" @change="onOutfitEnabledChange(idx)" />
+                      <span>启用中</span>
+                    </label>
+                  </div>
+                  <div class="lora-trigger-row">
+                    <label class="fl lora-inline-label">外观描述</label>
+                    <linshe-input
+                      v-model="item.description"
+                      type="textarea"
+                      class="fi"
+                      rows="3"
+                      placeholder="可用逗号分隔的 tag 组合（如 maid headdress, black maid dress, white apron），也可以用自然语言描述形态变化"
+                    />
+                  </div>
+                </div>
+              </TransitionGroup>
+
+              <div v-if="activeOutfitCount === 0" class="lora-empty-hint">
+                尚未配置专属外观，点击下方按钮添加
+              </div>
+
+              <linshe-button variant="secondary" size="sm" class="lora-add-btn" @click="addOutfit">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                添加形态
+              </linshe-button>
+            </div>
+
+            <div class="modal-actions" style="margin-top:16px">
+              <span class="outfit-save-hint">启用中的形态会注入到所有生图链路，优先级高于人物卡原有外观</span>
+              <div style="flex:1"></div>
+              <linshe-button variant="primary" @click="saveOutfits" :disabled="outfitLoading">
+                {{ outfitLoading ? '保存中…' : '保存' }}
+              </linshe-button>
             </div>
           </div>
         </div>
@@ -328,7 +398,10 @@
 import { ref, reactive, computed, watch, inject } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from './ui/LinsheSelect.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
+import LinsheSwitch from './ui/LinsheSwitch.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -382,6 +455,11 @@ const loraDropdownIdx = ref(-1)
 const loraSuggestions = ref([])
 const loraFetching = ref(false)
 
+// ── 外观/形态设置状态 ──
+const showOutfitModal = ref(false)
+const outfitLoading = ref(false)
+const outfitItems = ref([]) // 本地编辑副本：{ id, name, description, enabled, _deleted }
+
 const clickShouldClose = ref(false)
 
 function onOverlayMouseDown(e) {
@@ -425,6 +503,12 @@ const hasLoraSetup = computed(() => {
   if (!c) return false
   return (_parseCharLoras(c.loras).length > 0) || !!c.custom_workflow || c.artist_override != null
 })
+
+const activeOutfit = computed(() =>
+  outfitItems.value.find(o => o.enabled && !o._deleted && (o.name || '').trim())
+)
+const activeOutfitName = computed(() => activeOutfit.value?.name || '')
+const activeOutfitCount = computed(() => outfitItems.value.filter(o => !o._deleted).length)
 
 // ── Lora 辅助 ──
 function _parseCharLoras(raw) {
@@ -470,6 +554,7 @@ function init(c) {
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
+  fetchOutfits()
   api.getRelationships(c.id).then(res => {
     detail.relationships = res.relationships || []
   }).catch(() => {
@@ -710,6 +795,97 @@ async function saveLora() {
     loraLoading.value = false
   }
 }
+
+// ═══════════════════════════════════════
+// 外观 / 形态弹窗
+// ═══════════════════════════════════════
+
+async function fetchOutfits() {
+  if (!props.character) return
+  try {
+    const list = await api.listCharacterOutfits(props.character.id)
+    outfitItems.value = (Array.isArray(list) ? list : []).map(o => ({ ...o, _deleted: false }))
+  } catch {
+    outfitItems.value = []
+  }
+}
+
+function openOutfitModal() {
+  if (!props.character) return
+  showOutfitModal.value = true
+  fetchOutfits()
+}
+
+function closeOutfitModal() {
+  showOutfitModal.value = false
+}
+
+function addOutfit() {
+  outfitItems.value.push({ id: null, name: '', description: '', enabled: false, _deleted: false })
+}
+
+async function removeOutfit(idx) {
+  const item = outfitItems.value[idx]
+  if (!item) return
+  if (item.id) {
+    const ok = await confirmFn({
+      title: '移除外观',
+      message: `确定移除「${item.name || '未命名外观'}」吗？`,
+      okText: '移除',
+    })
+    if (!ok) return
+    item._deleted = true
+  } else {
+    outfitItems.value.splice(idx, 1)
+  }
+}
+
+// 启用互斥（同角色同时只启用一套，与服务端规则一致）；全部取消勾选 = 不启用任何形态
+function onOutfitEnabledChange(idx) {
+  const target = outfitItems.value[idx]
+  if (target.enabled) {
+    outfitItems.value.forEach((o, i) => { if (i !== idx) o.enabled = false })
+  }
+}
+
+async function saveOutfits() {
+  if (!props.character) return
+  const c = props.character
+  const invalid = outfitItems.value.find(o => !o._deleted && (!(o.name || '').trim() || !(o.description || '').trim()))
+  if (invalid) {
+    toastFn('外观的名称和描述不能为空', 'warning')
+    return
+  }
+  outfitLoading.value = true
+  try {
+    for (const o of outfitItems.value) {
+      if (o._deleted) {
+        await api.deleteCharacterOutfit(c.id, o.id)
+        continue
+      }
+      const name = o.name.trim()
+      const description = o.description.trim()
+      if (o.id) {
+        await api.updateCharacterOutfit(c.id, o.id, { name, description, enabled: !!o.enabled })
+      } else {
+        const created = await api.createCharacterOutfit(c.id, { name, description })
+        const wantEnabled = !!o.enabled
+        Object.assign(o, created)
+        o.enabled = wantEnabled
+        if (wantEnabled) await api.updateCharacterOutfit(c.id, created.id, { enabled: true })
+      }
+    }
+    outfitItems.value = outfitItems.value.filter(o => !o._deleted)
+    outfitItems.value.forEach(o => { delete o._deleted })
+    toastFn('外观已保存', 'success')
+    showOutfitModal.value = false
+  } catch (e) {
+    console.error('saveOutfits failed:', e)
+    toastFn('外观保存失败', 'error')
+  } finally {
+    outfitLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -747,39 +923,8 @@ async function saveLora() {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;align-items: center;
 }
 
-/* ═══ Toggle Switch ═══ */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #c5c0ba;
-  border-radius: 22px;
-  transition: background 0.25s;
-}
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 18px; width: 18px;
-  left: 2px; bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s;
-}
-.toggle-switch input:checked + .toggle-slider { background: var(--accent); }
-.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
-
 /* ═══ 详情编辑 ═══ */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid var(--border); color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 
 .detail-name-row { display: flex; gap: 12px; }
 .detail-name-col { flex: 1; min-width: 0; }
@@ -787,8 +932,15 @@ async function saveLora() {
 .detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .detail-avatar {
   width: 64px; height: 64px; border-radius: 50%;
+  background: #e07b6c;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 26px; font-weight: 700; flex-shrink: 0;
+}
+.detail-avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .detail-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
 .detail-avatar.clickable:hover { opacity: 0.85; }
@@ -803,11 +955,12 @@ async function saveLora() {
 }
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
+.detail-rel-title svg { color: var(--accent); }
 /* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
-.detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.6); font-size: 12px; }
+.detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: var(--bg-primary); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }
 .rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(var(--accent-rgb), 0.1); }
 .detail-rel-more { font-size: 12px; color: var(--accent); font-weight: 500; cursor: pointer; text-align: center; padding: 4px 0; transition: opacity 0.15s; }
@@ -844,27 +997,52 @@ async function saveLora() {
 .detail-float {
   position: absolute;
   left: calc(50% + min(450px, 48.5vw) + 16px);
-  top: 70px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 20px;
+  top: 2.5vh;
+  width: 228px;
+  height: 95vh;
+  z-index: 0;
 }
-.float-card {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; border-radius: 14px;
-  background: rgba(255,255,255,0.85);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(0,0,0,0.06);
-  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-  transition: all 0.15s; width: 220px;
+.float-panel {
+  display: flex; flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  border-radius: 18px;
+  background: #f4f1eeed;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.08);
+  /* 主面板 modal-pop(0.28s) 结束后，再从面板背后向右弹出；
+     初始多藏 60px，避免面板 0.92 缩放阶段露出右缘 */
+  animation: float-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.32s both;
 }
-.float-card-toggle { justify-content: space-between; gap: 0; }
-.float-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
-.float-switch { flex-shrink: 0; }
-.float-card-btn { cursor: pointer; justify-content: space-between; gap: 0; }
-.float-card-btn:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.12); }
-.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); }
+@keyframes float-emerge {
+  0%   { transform: translateX(calc(-100% - 60px)); }
+  100% { transform: translateX(0); }
+}
+.float-panel-header {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: var(--text-muted, #999);
+  margin: 2px 2px 10px;
+}
+.float-panel-body {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 4px;
+}
+.float-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 8px 10px;
+}
+.float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+.float-row-action {
+  margin-top: 2px; padding: 8px 10px;
+  border-radius: 10px; cursor: pointer;
+  transition: background 0.15s;
+}
+.float-row-action:hover { background: rgba(var(--accent-rgb), 0.08); }
+.float-row-action:hover .float-label { color: var(--accent); }
+.float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
 .float-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
 /* ═══ 操作栏 ═══ */
@@ -885,21 +1063,14 @@ async function saveLora() {
   color: var(--text-muted, #999);
   text-decoration: underline;
 }
-.btn-ghost.danger { color: var(--danger); }
-.btn-ghost.danger:hover { background: rgba(255, 77, 79, 0.08); }
 
 /* ═══ 弹窗动画已迁移至全局 animations.css（modal-fade + modal-pop）═══ */
 
 /* ═══ 通用 ═══ */
-.sp-btn-small { padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg-strong); color: var(--text-primary); cursor: pointer; margin-right: 6px; transition: all 0.15s; }
-.sp-btn-small:hover { border-color: var(--accent); }
-.sp-btn-subtle { color: var(--text-secondary); border-color: transparent; background: transparent; }
-.sp-btn-subtle:hover { color: var(--danger); border-color: transparent; }
+.sp-btn-small { margin-right: 6px; }
 
-.prompt-textarea { min-height: 500px; resize: vertical; font-family: inherit; }
+.prompt-textarea { min-height: 500px; }
 
-.modal-wide .fi { background: var(--bg-primary); border: 1px solid var(--glass-border); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-.modal-wide .fi:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .modal-wide .prompt-textarea { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.7; color: var(--text-primary); }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
@@ -928,8 +1099,7 @@ async function saveLora() {
 .lora-check-text { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .lora-list { display: flex; flex-direction: column; gap: 10px; }
 .lora-item-card { position: relative; background: var(--bg-primary); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px 32px 10px 12px; }
-.lora-remove-btn { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(255, 77, 79, 0.08); color: var(--danger); font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; z-index: 1; padding: 0; }
-.lora-remove-btn:hover { background: rgba(255, 77, 79, 0.2); }
+.lora-remove-btn { position: absolute; top: 6px; right: 6px; z-index: 1; }
 .lora-item-row { display: flex; gap: 10px; align-items: flex-end; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
 .lora-path-group { flex: 2; min-width: 0; }
@@ -968,20 +1138,30 @@ async function saveLora() {
 }
 .lora-weight-group { flex: 0 0 72px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
-.lora-item-card .fi { background: var(--glass-bg); }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 8px; }
-.lora-trigger-row textarea { resize: vertical; min-height: 60px; width: 100%; }
+.lora-trigger-row textarea { min-height: 60px; width: 100%; }
 .lora-card-enter-active, .lora-card-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
+/* ═══ 外观 / 形态设置 ═══ */
+.outfit-intro { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.outfit-enabled-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; flex-shrink: 0; padding-bottom: 6px; }
+.outfit-enabled-label input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+.outfit-enabled-label span { font-weight: 600; }
+.outfit-deleted { opacity: 0.4; }
+.outfit-deleted input, .outfit-deleted textarea { text-decoration: line-through; }
+.float-badge-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outfit-save-hint { font-size: 11px; color: var(--text-secondary); }
+
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
-.lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
-.lora-civitai-link:hover { opacity: 1; text-decoration: underline; }
+.lora-civitai-link, .lora-tutorial-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
+.lora-civitai-link:hover, .lora-tutorial-link:hover { opacity: 1; text-decoration: underline; }
+.lora-tutorial-link { margin-left: 6px; }
 
 /* ═══ 移动端 ═══ */
 @media (max-width: 767px) {
@@ -1008,9 +1188,6 @@ async function saveLora() {
   .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
   .toolbar-item:active { background: rgba(var(--accent-rgb), 0.16); }
   .toolbar-item-toggle { cursor: default; justify-content: space-between; background: rgba(0, 0, 0, 0.04); color: var(--text-secondary); font-weight: 500; }
-  .toolbar-switch { width: 34px; height: 18px; flex-shrink: 0; }
-  .toolbar-switch .toggle-slider::before { height: 14px; width: 14px; }
-  .toolbar-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
   .toolbar-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); flex-shrink: 0; }
   .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 

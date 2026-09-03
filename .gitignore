@@ -9,6 +9,8 @@ __pycache__/
 .venv/
 .reasonix
 .codegraph
+.zcode/
+
 venv/
 vector-service/models/
 vector-service/chroma_data/
@@ -42,3 +44,4 @@ MaiBot-Container/
 # 本地会话产物与分发二进制
 .mimosa/
 *.apk
+promo-3.0/

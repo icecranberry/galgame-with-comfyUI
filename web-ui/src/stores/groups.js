@@ -452,9 +452,14 @@ export const useGroupsStore = defineStore('groups', () => {
     const session = _getSession(groupId)
     if (!session) return
     const m = session.messages.find(m => m.id === data.id)
-    if (m) m.content = data.content
     const q = session.playQueue.find(m => m.id === data.id)
-    if (q) q.content = data.content
+    const applyUpdate = (target) => {
+      if (!target) return
+      if (data.content !== undefined) target.content = data.content
+      if (data.images !== undefined) target.images = parseImages(data.images)
+    }
+    applyUpdate(m)
+    applyUpdate(q)
     const group = groups.value.find(g => g.id === groupId)
     if (group?.last_message_id === data.id) {
       _setGroupPreview({ ...(m || q || data), ...data, group_id: groupId })

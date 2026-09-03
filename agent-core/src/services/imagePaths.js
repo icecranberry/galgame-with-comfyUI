@@ -14,6 +14,8 @@ export const IMAGE_CATEGORIES = {
   peek:      { dir: 'peek',      label: '日程' },
   mailbox:   { dir: 'mailbox',   label: '信箱' },
   chatbg:    { dir: 'chatbg',    label: '聊天背景' },
+  emoji:     { dir: 'emoji',     label: '表情包' },
+  items:     { dir: 'items',     label: '道具' },
 };
 
 export const LEGACY_CATEGORY = 'history';
@@ -78,9 +80,20 @@ export function deleteImageFileByUrl(url) {
   // 双保险：解析后的真实路径必须仍位于目录内
   if (path.resolve(filePath) !== path.resolve(dir, filename)) return false;
   if (!path.resolve(filePath).startsWith(path.resolve(dir) + path.sep)) return false;
-  if (!fs.existsSync(filePath)) return false;
-  fs.unlinkSync(filePath);
-  return true;
+  let removed = false;
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+    removed = true;
+  }
+  // AVIF 压缩会把原 PNG 换成同名 .avif；按 .png URL 删除时把孪生文件一并清掉
+  if (/\.png$/i.test(filename)) {
+    const avifTwin = filePath.replace(/\.png$/i, '.avif');
+    if (fs.existsSync(avifTwin)) {
+      try { fs.unlinkSync(avifTwin); } catch {}
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 export function getAllImageDirs() {

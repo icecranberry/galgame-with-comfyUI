@@ -22,8 +22,44 @@ export function getDb() {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     initSchema(db);
+    cleanupOrphanedInFlight(db);
   }
   return db;
+}
+
+// ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
+// moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
+function cleanupOrphanedInFlight(database) {
+  const tasks = [
+    // 表名, 中断状态, 回收为（interrupted 后可重新生成的状态）
+    ['character_emojis', `status = 'generating'`, `status = 'failed', error_message = '服务重启导致生成中断，请重新生成'`],
+    ['image_tasks', `status IN ('pending','running')`, `status = 'failed', error_message = '服务重启导致任务中断', finished_at = datetime('now')`],
+    ['reply_queue', `status = 'processing'`, `status = 'waiting'`],
+    ['character_dreams', `status = 'generating'`, `status = 'failed'`],
+  ];
+  for (const [table, where, set] of tasks) {
+    try {
+      const result = database.prepare(`UPDATE ${table} SET ${set} WHERE ${where}`).run();
+      if (result.changes > 0) {
+        console.log(`[db] 启动清理: ${table} ${result.changes} 条中断状态已回收`);
+      }
+    } catch (err) {
+      console.warn(`[db] 启动清理 ${table} 失败:`, err.message);
+    }
+  }
+
+  // 宝箱道具：中断的 generating 未完成图片，也不应占用冷却；直接清掉，允许下次重新开箱
+  try {
+    const interruptedItems = database.prepare(
+      `SELECT COUNT(*) AS c FROM backpack_items WHERE status = 'generating'`
+    ).get().c;
+    if (interruptedItems > 0) {
+      database.prepare(`DELETE FROM backpack_items WHERE status = 'generating'`).run();
+      console.log(`[db] 启动清理: backpack_items ${interruptedItems} 条中断生成任务已清理`);
+    }
+  } catch (err) {
+    console.warn(`[db] 启动清理 backpack_items 失败:`, err.message);
+  }
 }
 
 function initSchema(db) {
@@ -257,6 +293,86 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+      -- 角色表情包表（每个角色每种表情一条，prompt 生成与图片生成分离）
+      CREATE TABLE IF NOT EXISTS character_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        emoji_key TEXT NOT NULL,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(character_id, emoji_key)
+      );
+
+      -- 表情类别表（可编辑的 15 个默认类别，按 sort_order 排序）
+      CREATE TABLE IF NOT EXISTS emoji_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+    -- 角色专属外观/形态/装甲/衣服（每个角色可定义多套，同时只启用一套，启用互斥由服务层保证）。
+    -- expires_at：道具变身卡写入的临时形态到期时间（空 = 永久），由 getActiveOutfits 惰性过滤
+    CREATE TABLE IF NOT EXISTS character_outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_character_outfits_char ON character_outfits(character_id);
+
+    -- 通用限时服饰（如一套女仆装的 tag 组合）。character_id 为空 = 全员可见的全局服饰；
+    -- 指定角色 = 道具系统写入的该角色专属限时服饰。expires_at 为过期时间（空 = 永久生效），
+    -- 两者均由 outfitService.getActiveOutfits 惰性过滤。condition_json 预留未来更复杂的注入条件，当前不解析
+    CREATE TABLE IF NOT EXISTS global_outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+      expires_at DATETIME,
+      condition_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 背包道具（宝箱开出的道具；status: generating → ready → used；
+    -- collected_at 为空 = 待收下，未收下的道具不进背包列表、不可使用）
+    CREATE TABLE IF NOT EXISTS backpack_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      effect_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      rarity TEXT NOT NULL DEFAULT 'common',
+      image_url TEXT,
+      status TEXT NOT NULL DEFAULT 'generating',
+      payload_json TEXT,
+      collected_at DATETIME,
+      acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      used_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_backpack_items_status ON backpack_items(status);
+
+    -- 道具生效中的效果（buff 到期失效；变身卡靠 payload 恢复原专属形态）
+    CREATE TABLE IF NOT EXISTS item_effects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES backpack_items(id) ON DELETE CASCADE,
+      character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+      effect_key TEXT NOT NULL,
+      payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_item_effects_char ON item_effects(character_id);
+
     -- 画师串收藏夹
     CREATE TABLE IF NOT EXISTS artist_favorites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,6 +457,7 @@ function initSchema(db) {
       description TEXT NOT NULL DEFAULT '',
       final_image TEXT,
       summary TEXT NOT NULL DEFAULT '',
+      conclusion TEXT,
       choice_history TEXT DEFAULT '[]',
       total_branches INTEGER DEFAULT 0,
       engaged INTEGER DEFAULT 0,
@@ -508,6 +625,8 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_portraits_type ON user_portraits(trait_type);
     CREATE INDEX IF NOT EXISTS idx_char_rels_from ON character_relationships(from_character_id);
     CREATE INDEX IF NOT EXISTS idx_char_rels_to ON character_relationships(to_character_id);
+      CREATE INDEX IF NOT EXISTS idx_character_emojis_character ON character_emojis(character_id, status);
+      CREATE INDEX IF NOT EXISTS idx_emoji_categories_sort ON emoji_categories(sort_order, id);
     CREATE INDEX IF NOT EXISTS idx_ce_char_status ON character_events(character_id, status);
     CREATE INDEX IF NOT EXISTS idx_ce_expires ON character_events(expires_at);
     CREATE INDEX IF NOT EXISTS idx_eh_char ON event_history(character_id, created_at DESC);
@@ -621,6 +740,9 @@ function initSchema(db) {
   // 迁移: 群聊系统 — raw_messages/messages 新增 speaker_character_id 列
   migrateGroupChatSchema(db);
 
+  // 迁移: 深度思考 — raw_messages 新增 thinking 列（存 planner 思考+计划原文，历史回看用）
+  migrateDeepThinkSchema(db);
+
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
   try {
@@ -639,6 +761,9 @@ function initSchema(db) {
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
+  // 种子: 表情类别（仅首次运行插入默认 15 类）
+  seedEmojiCategories(db);
+  migrateEmojiCategoriesV2(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
@@ -685,6 +810,31 @@ function initSchema(db) {
  * 仅插入缺失的系统条目（INSERT OR IGNORE），不覆盖用户对已有条目的编辑；
  * 软删除（is_active=0）的条目行仍存在，因此不会在下次启动时复活。
  */
+/** 种子：默认表情类别（仅当 emoji_categories 为空时插入） */
+function seedEmojiCategories(db) {
+  const row = db.prepare('SELECT COUNT(*) AS c FROM emoji_categories').get();
+  if (row?.c > 0) return;
+  const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+  const keys = ['开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心', '无语', '嫌弃', '心虚'];
+  for (let i = 0; i < keys.length; i++) insert.run(keys[i], i + 1);
+}
+
+/** 迁移：给旧默认 12 类追加新增的 3 个默认类别，不打扰已自定义的列表 */
+function migrateEmojiCategoriesV2(db) {
+  try {
+    const existing = new Set(db.prepare('SELECT emoji_key FROM emoji_categories').all().map(r => r.emoji_key));
+    const legacyDefaults = ['开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心'];
+    if (!legacyDefaults.every(k => existing.has(k))) return;
+    const newKeys = ['无语', '嫌弃', '心虚'].filter(k => !existing.has(k));
+    if (newKeys.length === 0) return;
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM emoji_categories').get().m;
+    const insert = db.prepare('INSERT OR IGNORE INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+    newKeys.forEach((k, i) => insert.run(k, maxOrder + i + 1));
+    console.log(`[db] migrateEmojiCategoriesV2: appended ${newKeys.join('、')}`);
+  } catch (err) {
+    console.log('[db] migrateEmojiCategoriesV2 error:', err.message);
+  }
+}
 function seedEventLibraries(db) {
   // 事件类型库
   const seedEventType = db.prepare(`
@@ -1060,9 +1210,25 @@ function migrateProactiveSchema(db) {
 }
 
 /**
+ * 迁移: 深度思考 — raw_messages 新增 thinking 列（nullable）
+ * 存 planner 的思考+计划原文 JSON（{think, plan}），GET messages 带出供前端历史回看折叠块
+ */
+function migrateDeepThinkSchema(db) {
+  try {
+    const rawCols = db.prepare(`PRAGMA table_info(raw_messages)`).all();
+    if (!rawCols.find(c => c.name === 'thinking')) {
+      db.exec(`ALTER TABLE raw_messages ADD COLUMN thinking TEXT DEFAULT NULL`);
+      console.log('[db] Added raw_messages.thinking column');
+    }
+  } catch (err) {
+    console.log('[db] migrateDeepThinkSchema error:', err.message);
+  }
+}
+
+/**
  * 迁移: 好感度回归系统
  * - user_relationships 表新增 last_interaction_at（记录最近一次互动时间）
- * - 新建 gift_history 表（送礼记录，含冷却检查）
+ * - 新建 gift_history 表（全局冷却记录，含送礼与宝箱开箱的冷却检查）
  */
 function migrateAffinityRegressionSchema(db) {
   try {
@@ -1073,14 +1239,15 @@ function migrateAffinityRegressionSchema(db) {
       console.log('[db] Added user_relationships.last_interaction_at column');
     }
 
-    // gift_history 表：全局冷却（跟系统不跟角色），仅需 gift_type + created_at
+    // gift_history 表：全局冷却（跟系统不跟角色），仅需 gift_type + created_at。
+    // chest = 每日宝箱开箱冷却（与送礼同构的惰性冷却记录，见 itemService.getChestState）
     const ghCols = db.prepare(`PRAGMA table_info(gift_history)`).all();
     const hasCharId = ghCols.some(c => c.name === 'character_id');
     if (ghCols.length === 0) {
       db.exec(`
         CREATE TABLE IF NOT EXISTS gift_history (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')),
+          gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')),
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
       `);
@@ -1088,21 +1255,51 @@ function migrateAffinityRegressionSchema(db) {
     } else if (hasCharId) {
       // 迁移：去掉 character_id，改为全局冷却，每种礼物只保留最新一条
       db.exec(`DROP TABLE IF EXISTS gift_history_new`);
-      db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.exec(`INSERT INTO gift_history_new (gift_type, created_at) SELECT gift_type, MAX(created_at) FROM gift_history GROUP BY gift_type`);
       db.exec(`DROP TABLE gift_history`);
       db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
       console.log('[db] gift_history migrated to global cooldown (removed character_id, deduplicated)');
+    } else {
+      // 兜底：v3.2.0 前建的全局表 CHECK 不含 chest 且无 character_id，走不到上面两个分支——
+      // 开箱冷却 INSERT 会 CHECK 失败并被 recordChestOpen 静默吞掉 → 可无限开箱，按建表 SQL 检测后重建
+      const tableSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gift_history'`).get()?.sql || '';
+      if (!tableSql.includes(`'chest'`)) {
+        db.exec(`DROP TABLE IF EXISTS gift_history_new`);
+        db.exec(`CREATE TABLE gift_history_new (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT NOT NULL CHECK(gift_type IN ('small','large','chest')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+        db.exec(`INSERT INTO gift_history_new (gift_type, created_at) SELECT gift_type, MAX(created_at) FROM gift_history WHERE gift_type IN ('small','large','chest') GROUP BY gift_type`);
+        db.exec(`DROP TABLE gift_history`);
+        db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
+        // backpack_items 只由开箱写入，用最近一次开箱时间回填冷却（无开箱记录则不回填）
+        const lastItem = db.prepare(`SELECT MAX(acquired_at) AS acquired_at FROM backpack_items`).get();
+        if (lastItem?.acquired_at) {
+          db.prepare(`INSERT INTO gift_history (gift_type, created_at) VALUES ('chest', ?)`).run(lastItem.acquired_at);
+        }
+        console.log(`[db] gift_history CHECK 缺 chest，已重建补齐${lastItem?.acquired_at ? `（开箱冷却回填至 ${lastItem.acquired_at}）` : ''}`);
+      }
     }
 
-    // 启动时去重：每种礼物只保留最新一条
-    for (const type of ['small', 'large']) {
+    // 启动时去重：每种类型只保留最新一条（冷却只看最近一次）
+    for (const type of ['small', 'large', 'chest']) {
       const rows = db.prepare(`SELECT id FROM gift_history WHERE gift_type = ? ORDER BY id DESC`).all(type);
       if (rows.length > 1) {
         const keepId = rows[0].id;
         db.prepare(`DELETE FROM gift_history WHERE gift_type = ? AND id != ?`).run(type, keepId);
         console.log(`[db] gift_history pruned ${rows.length - 1} old ${type} row(s), kept #${keepId}`);
       }
+    }
+
+    // chest_opens 已并入本表（gift_type='chest'）：搬最后一次开箱时间（保住进行中的冷却）后删表
+    const hasChestOpens = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='chest_opens'`).get();
+    if (hasChestOpens) {
+      const lastOpen = db.prepare(`SELECT opened_at FROM chest_opens ORDER BY id DESC LIMIT 1`).get();
+      const lastChest = db.prepare(`SELECT created_at FROM gift_history WHERE gift_type = 'chest' ORDER BY id DESC LIMIT 1`).get();
+      if (lastOpen && (!lastChest || String(lastOpen.opened_at) > String(lastChest.created_at))) {
+        db.prepare(`DELETE FROM gift_history WHERE gift_type = 'chest'`).run();
+        db.prepare(`INSERT INTO gift_history (gift_type, created_at) VALUES ('chest', ?)`).run(lastOpen.opened_at);
+      }
+      db.exec(`DROP TABLE chest_opens`);
+      console.log('[db] chest_opens merged into gift_history (gift_type=chest) and dropped');
     }
   } catch (err) {
     console.log('[db] migrateAffinityRegressionSchema error:', err.message);
@@ -1600,6 +1797,10 @@ function migrateEventCrossRef(db) {
     if (!ehCols.find(c => c.name === 'referenced_character_ids')) {
       db.exec(`ALTER TABLE event_history ADD COLUMN referenced_character_ids TEXT DEFAULT '[]'`);
       console.log('[db] Added event_history.referenced_character_ids column');
+    }
+    if (!ehCols.find(c => c.name === 'conclusion')) {
+      db.exec(`ALTER TABLE event_history ADD COLUMN conclusion TEXT`);
+      console.log('[db] Added event_history.conclusion column');
     }
   } catch (err) {
     console.log('[db] migrateEventCrossRef error:', err.message);

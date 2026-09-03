@@ -29,7 +29,7 @@
         </div>
         <Transition name="menu-pop">
           <div v-if="showMenu" class="card-dropdown">
-            <button class="card-dropdown-item danger" @click.stop="onDelete">🗑️ 删除</button>
+            <div class="card-dropdown-item danger" role="button" tabindex="0" @click.stop="onDelete" @keydown.enter.prevent="onDelete" @keydown.space.prevent="onDelete">🗑️ 删除</div>
           </div>
         </Transition>
       </div>
@@ -60,9 +60,9 @@
     <Transition name="detail-fade">
       <div v-if="detailOpen" class="detail-overlay">
         <!-- 关闭按钮 -->
-        <button class="detail-close" @click="closeDetail">
+        <linshe-button variant="icon" size="lg" class="detail-close" @click="closeDetail">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+        </linshe-button>
         <!-- 标题浮层 -->
         <div class="detail-title-bar">
           <span class="detail-title-name">{{ event.display_name }}</span>
@@ -95,11 +95,12 @@
               </div>
             </div>
 
-            <!-- 结局（已过期） -->
-            <div v-if="isExpired" class="branch-card is-ending">
+            <!-- 结局（已过期，需真实结局/摘要生成后展示） -->
+            <div v-if="isExpired && conclusionText" class="branch-card is-ending">
               <div class="branch-text ending-text">
                 <div class="branch-label">📖 事件结束</div>
                 <div class="branch-desc">{{ conclusionText }}</div>
+                <div v-if="event.ended_at" class="ending-time">结束于 {{ formatTime(event.ended_at) }}</div>
               </div>
             </div>
 
@@ -116,41 +117,46 @@
                 <div v-else-if="event._queued" class="choice-loading is-queued">
                   <div class="loading-spinner"></div>
                   <span>故事推进中…</span>
-                  <button class="queued-back-btn" @click.stop="onCancelQueue">← 返回重选</button>
+                  <div class="queued-back-btn" role="button" tabindex="0" @click.stop="onCancelQueue" @keydown.enter.prevent="onCancelQueue" @keydown.space.prevent="onCancelQueue">← 返回重选</div>
                 </div>
                 <div v-else class="vn-choices">
-                  <button class="vn-choice" @click="onChoose('A')">
+                  <div class="vn-choice" role="button" tabindex="0" @click="onChoose('A')" @keydown.enter.prevent="onChoose('A')" @keydown.space.prevent="onChoose('A')">
                     <span class="vn-choice-bar"></span>
                     <span>{{ event.choice_a }}</span>
-                  </button>
-                  <button class="vn-choice" @click="onChoose('B')">
+                  </div>
+                  <div class="vn-choice" role="button" tabindex="0" @click="onChoose('B')" @keydown.enter.prevent="onChoose('B')" @keydown.space.prevent="onChoose('B')">
                     <span class="vn-choice-bar"></span>
                     <span>{{ event.choice_b }}</span>
-                  </button>
+                  </div>
                   <label class="vn-choice-c">
                     <span class="vn-input-bar">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                     </span>
                     <input v-model="customText" class="vn-input" :placeholder="event.choice_c_label || '自定义行动…'" @keyup.enter="onChoose('C')" />
-                    <button class="vn-submit" @click="onChoose('C')" :disabled="!customText.trim()" title="确定">
+                    <div class="vn-submit" role="button" tabindex="0" :class="{ 'is-disabled': !customText.trim() }" :aria-disabled="!customText.trim()" @click="onChoose('C')" @keydown.enter.prevent="onChoose('C')" @keydown.space.prevent="onChoose('C')" title="确定">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19,12 12,19 5,12"/></svg>
-                    </button>
+                    </div>
                   </label>
                 </div>
               </div>
               <!-- 撤回按钮：只有选择过至少一次才显示 -->
-              <button
+              <div
                 v-if="choiceHistory.length > 1"
                 class="undo-btn"
-                :disabled="event.processing"
+                :class="{ 'is-disabled': event.processing }"
+                :aria-disabled="event.processing"
+                role="button"
+                tabindex="0"
                 @click.stop="onUndo"
+                @keydown.enter.prevent="onUndo"
+                @keydown.space.prevent="onUndo"
                 title="回到上一次选择"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="15,18 9,12 15,6"/>
                 </svg>
                 <span>回到上一次选择</span>
-              </button>
+              </div>
             </div>
           </div>
         </div>
@@ -170,6 +176,7 @@ import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const confirmFn = inject('confirm')
 const router = useRouter()
@@ -276,9 +283,8 @@ const previewText = computed(() => {
   return props.event.description || ''
 })
 
-const conclusionText = computed(() =>
-  props.conclusion || props.event.summary || props.event.description || '事件已自然结束。'
-)
+// 有真实结局显示结局；旧历史数据回退到记忆摘要；两者皆无时保持为空，模板据此隐藏"事件结束"块
+const conclusionText = computed(() => props.conclusion || props.event.summary || '')
 
 const avatarStyle = computed(() => {
   const a = props.event.avatar_path
@@ -336,6 +342,8 @@ function onWheelScroll(e) {
 
 async function onChoose(choice) {
   if (choosing.value) return
+  // vn-submit 改为 div 后的禁用守卫（原 :disabled="!customText.trim()"，模板中 ref 自动解包，脚本内需 .value）
+  if (choice === 'C' && !customText.value.trim()) return
   const eventId = props.event.id
   choosing.value = true
   const customTextValue = customText.value
@@ -541,8 +549,8 @@ watch(isExpired, (val) => {
   display: block; width: 100%;
   padding: 8px 12px; border-radius: 8px; border: none;
   background: transparent;
-  font-size: 13px; color: var(--text-bright);
-  cursor: pointer; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--text-bright);
+  cursor: pointer; text-align: left; user-select: none;
   transition: background 0.1s;
 }
 .card-dropdown-item:hover { background: rgba(0,0,0,0.05); }
@@ -610,13 +618,7 @@ watch(isExpired, (val) => {
 
 .detail-close {
   position: fixed; top: 16px; right: 16px; z-index: 210;
-  width: 44px; height: 44px; border-radius: 50%;
-  border: none; background: rgba(255,255,255,0.15);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: rgba(255,255,255,0.9);
-  transition: all 0.2s;
 }
-.detail-close:hover { background: rgba(255,255,255,0.25); }
 
 .detail-title-bar {
   position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 205;
@@ -692,8 +694,10 @@ watch(isExpired, (val) => {
 .branch-card.is-current { box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 4px rgba(var(--accent-rgb),0.5); }
 .branch-card.is-ending {
   justify-content: center;
-  background: linear-gradient(160deg, #faf8f6 0%, #f5f0ed 40%, #f8f4f0 100%);
-  border: 2px solid rgba(180,160,140,0.25);
+  background:
+    radial-gradient(120% 80% at 18% 0%, rgba(224,123,108,0.07) 0%, rgba(224,123,108,0) 55%),
+    linear-gradient(170deg, #fdfaf7 0%, #f7f1ec 55%, #fbf6f1 100%);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.15), 0 0 0 3px rgba(224,123,108,0.14);
 }
 .branch-card.is-current .branch-text { justify-content: center; }
 .branch-img-wrap {
@@ -757,9 +761,9 @@ watch(isExpired, (val) => {
   padding: 0;
   border: 1.5px solid rgba(0,0,0,0.06);
   background: rgba(255,255,255,0.5);
-  cursor: pointer; text-align: left;
+  cursor: pointer; text-align: left; user-select: none;
   transition: all 0.25s ease;
-  font-size: 15px; color: var(--text-bright);
+  font-size: 15px; font-weight: 500; color: var(--text-bright);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -808,9 +812,10 @@ watch(isExpired, (val) => {
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
   border-left: 1px dashed rgba(0,0,0,0.15);
+  user-select: none;
 }
-.vn-submit:hover:not(:disabled) { background: rgba(0,0,0,0.05); color: var(--text-primary); }
-.vn-submit:disabled { opacity: 0.2; cursor: default; }
+.vn-submit:hover:not(.is-disabled) { background: rgba(0,0,0,0.05); color: var(--text-primary); }
+.vn-submit.is-disabled { opacity: 0.2; cursor: default; }
 
 .choice-loading {
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -823,7 +828,9 @@ watch(isExpired, (val) => {
 .queued-back-btn {
   padding: 4px 14px; border: 1px solid rgba(0,0,0,0.12); border-radius: 14px;
   background: rgba(255,255,255,0.7); color: var(--text-secondary);
-  font-size: 11px; cursor: pointer; transition: all 0.2s;
+  font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+  text-align: center; user-select: none;
 }
 .queued-back-btn:hover {
   background: rgba(0,0,0,0.04); color: var(--text-primary); border-color: rgba(0,0,0,0.2);
@@ -841,18 +848,19 @@ watch(isExpired, (val) => {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 11px; font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  user-select: none;
   z-index: 5;
 }
-.undo-btn:hover:not(:disabled) {
+.undo-btn:hover:not(.is-disabled) {
   background: rgba(255,255,255,0.9);
   color: var(--accent);
   border-color: rgba(var(--accent-rgb),0.25);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
-.undo-btn:disabled {
+.undo-btn.is-disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -872,20 +880,34 @@ watch(isExpired, (val) => {
 }
 
 .ending-text {
-  justify-content: flex-start;
-  align-items: center;
-  text-align: center;
-  padding: 40px 32px;
+  justify-content: center;
+  align-items: flex-start;
+  text-align: left;
+  padding: 44px 36px;
+  gap: 12px;
 }
 .ending-text .branch-label {
-  font-size: 14px;
-  color: rgba(0,0,0,0.35);
-  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(224,123,108,0.09);
+  padding: 6px 14px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
 }
 .ending-text .branch-desc {
-  font-size: 17px;
-  line-height: 1.8;
+  font-size: 16px;
+  line-height: 1.9;
+  letter-spacing: 0.2px;
+  text-align: left;
+  color: var(--text-bright);
   max-width: 480px;
+}
+.ending-time {
+  font-size: 12px;
+  color: rgba(0,0,0,0.35);
+  letter-spacing: 0.3px;
+  margin-top: 22px;
 }
 
 /* transition */

@@ -6,15 +6,15 @@
       <div v-if="item._editing" class="edit-form">
         <label class="edit-field">
           <span class="edit-label">名称</span>
-          <input v-model.trim="item.name" class="edit-input" placeholder="名称" />
+          <linshe-input v-model.trim="item.name" class="edit-input" size="sm" placeholder="名称" />
         </label>
         <label v-if="isEvents" class="edit-field">
           <span class="edit-label">标签（逗号分隔）</span>
-          <input v-model="funFromText" class="edit-input" placeholder="如 小确幸, 日常感" />
+          <linshe-input v-model="funFromText" class="edit-input" size="sm" placeholder="如 小确幸, 日常感" />
         </label>
         <label class="edit-field">
           <span class="edit-label">描述</span>
-          <textarea v-model.trim="item.desc" class="edit-input edit-textarea" rows="6"></textarea>
+          <linshe-input v-model.trim="item.desc" class="edit-input edit-textarea" type="textarea" rows="6" />
         </label>
       </div>
 
@@ -30,9 +30,9 @@
     </CardHeightTransition>
 
     <div class="card-actions">
-      <button class="mini-btn" @click="onToggleEdit">{{ item._editing ? '取消' : '编辑' }}</button>
-      <button v-if="item._editing" class="mini-btn primary" @click="emit('save', item)">保存</button>
-      <button v-else class="mini-btn danger" @click="emit('remove', item)">删除</button>
+      <linshe-button size="sm" @click="onToggleEdit">{{ item._editing ? '取消' : '编辑' }}</linshe-button>
+      <linshe-button v-if="item._editing" variant="primary" size="sm" @click="emit('save', item)">保存</linshe-button>
+      <linshe-button v-else variant="danger" size="sm" @click="emit('remove', item)">删除</linshe-button>
     </div>
   </div>
 </template>
@@ -40,6 +40,8 @@
 <script setup>
 import { ref, watch } from 'vue'
 import CardHeightTransition from './CardHeightTransition.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -89,22 +91,11 @@ function onToggleEdit() {
   background: rgba(var(--accent-rgb),0.1); color: var(--accent-hover);
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
-.mini-btn {
-  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  background: #fff; color: var(--text-primary, #555); font-size: 12px; cursor: pointer; transition: all 0.15s;
-}
-.mini-btn:hover { border-color: var(--accent, var(--accent)); color: var(--accent-hover); }
-.mini-btn.primary { border: none; background: var(--grad-soft); color: var(--accent-hover); font-weight: 600; }
-.mini-btn.danger:hover { border-color: var(--danger, #e05050); color: var(--danger, #e05050); }
 .edit-form { display: flex; flex-direction: column; gap: 8px; }
 .edit-field { display: flex; flex-direction: column; gap: 4px; }
 .edit-label { font-size: 11px; color: var(--text-secondary, #888); }
 .edit-input {
-  border: 1px solid var(--glass-border, rgba(0,0,0,0.12));
-  border-radius: 8px; padding: 6px 8px;
-  font-size: 12px; font-family: inherit; color: var(--text-primary, #333);
-  background: rgba(0,0,0,0.02); outline: none; box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 12px; box-sizing: border-box;
 }
-.edit-input:focus { border-color: var(--accent, var(--accent)); }
-.edit-textarea { resize: vertical; }
 </style>

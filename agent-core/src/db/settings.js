@@ -33,6 +33,8 @@ const DB_ONLY_KEYS = new Set([
   'workflow_mode_auto_detected',
   'maibot_webui_url',
   'maibot_webui_token',
+  'emoji_fixed_tags',
+  'emoji_style_mode',
 ]);
 
 /** 写入单条系统设置 */
@@ -74,6 +76,7 @@ export const SETTING_TO_CONFIG = {
   feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
   feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
+  feature_deepThinkMode:             { obj: 'features', key: 'deepThinkMode',          type: 'bool' },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
   group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
   weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
@@ -112,8 +115,10 @@ export function loadSystemSettings(db) {
   for (const row of rows) {
     const mapping = SETTING_TO_CONFIG[row.setting_key];
     if (mapping) {
-      const value = castValue(row.setting_value, mapping.type);
+      let value = castValue(row.setting_value, mapping.type);
       if (value !== undefined) {
+        // 群聊记忆轮数历史遗留值收敛到 2~6
+        if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(6, value));
         config[mapping.obj][mapping.key] = value;
         applied++;
       }

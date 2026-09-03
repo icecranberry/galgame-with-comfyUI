@@ -6,10 +6,10 @@
         <span>奇遇</span>
       </div>
       <div class="topbar-actions">
-        <button class="lib-gear" @click="libraryOpen = true" title="事件库管理">⚙</button>
-        <button class="btn-post" @click.stop="showPicker = !showPicker" :disabled="stirring">
+        <div class="lib-gear" role="button" tabindex="0" @keydown.enter.prevent="libraryOpen = true" @keydown.space.prevent="libraryOpen = true" @click="libraryOpen = true" title="事件库管理"><gear-icon :size="18" /></div>
+        <div class="btn-post" role="button" tabindex="0" :class="{ 'is-disabled': stirring }" :aria-disabled="stirring" @click.stop="!stirring && (showPicker = !showPicker)" @keydown.enter.prevent.stop="!stirring && (showPicker = !showPicker)" @keydown.space.prevent.stop="!stirring && (showPicker = !showPicker)">
           {{ stirring ? '扰动中' : '🎬 扰动世界线' }}
-        </button>
+        </div>
       </div>
     </div>
 
@@ -32,21 +32,22 @@
         <div class="custom-modal">
           <div class="custom-modal-header">
             <span>为 {{ selectedCharacter?.display_name }} 触发奇遇</span>
-            <button class="custom-modal-close" @click="showCustomModal = false">✕</button>
+            <linshe-button variant="icon" class="custom-modal-close" @click="showCustomModal = false">✕</linshe-button>
           </div>
-          <textarea
+          <linshe-input
+            type="textarea"
             v-model="customEventText"
             class="custom-modal-input"
             placeholder="输入事件动机，让角色按你的想法展开故事…（留空直接点「随机奇遇」）"
             rows="4"
-          ></textarea>
+          />
           <div class="custom-modal-actions">
-            <button class="btn-random" @click="confirmGenerate(false)" :disabled="stirring">
+            <linshe-button variant="secondary" class="btn-random" @click="confirmGenerate(false)" :disabled="stirring">
               🎲 随机奇遇
-            </button>
-            <button class="btn-custom" @click="confirmGenerate(true)" :disabled="stirring || !customEventText.trim()">
+            </linshe-button>
+            <linshe-button variant="primary" class="btn-custom" @click="confirmGenerate(true)" :disabled="stirring || !customEventText.trim()">
               开始推演
-            </button>
+            </linshe-button>
           </div>
         </div>
       </div>
@@ -113,9 +114,11 @@
                 :key="ch.character_id"
                 class="filter-avatar"
                 :class="{ active: store.filterCharacterId === ch.character_id && !store.filterEngaged }"
-                :style="ch.avatar_path ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
                 @click="store.setFilter(ch.character_id)"
-              >{{ ch.avatar_path ? '' : ch.display_name?.charAt(0) || '?' }}</div>
+              >
+                <img v-if="ch.avatar_path" :src="ch.avatar_path" class="filter-avatar-img" alt="" />
+                <span v-else>{{ ch.display_name?.charAt(0) || '?' }}</span>
+              </div>
             </div>
           </div>
           <div class="waterfall-row" :style="{ '--cols': colCount }">
@@ -124,7 +127,7 @@
                 v-for="eh in col"
                 :key="'h_' + eh.id"
                 :event="eh"
-                :conclusion="eh._conclusion"
+                :conclusion="eh.conclusion"
                 compact
               />
             </div>
@@ -144,6 +147,9 @@ import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import EventCard from '../components/EventCard.vue'
 import LibraryModal from '../components/LibraryModal.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
+import GearIcon from '../components/GearIcon.vue'
 
 const store = useEventsStore()
 const chat = useChatStore()
@@ -364,6 +370,7 @@ function onScroll() {
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex; align-items: center; justify-content: center;
+  user-select: none;
 }
 .lib-gear:hover {
   border-color: rgba(var(--accent-rgb), 0.55);
@@ -381,10 +388,13 @@ function onScroll() {
   color: var(--accent);
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
+  text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
+  user-select: none;
 }
-.btn-post:hover:not(:disabled) {
+.btn-post:hover:not(.is-disabled) {
   border: 2px solid rgba(var(--accent-rgb), 0.55);
   box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
@@ -394,7 +404,7 @@ function onScroll() {
   0%, 100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
 }
-.btn-post:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-post.is-disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 角色选择器 — 和朋友圈一致 */
 .picker-dropdown {
@@ -452,48 +462,20 @@ function onScroll() {
   font-size: 16px; font-weight: 700; color: var(--text-bright);
 }
 .custom-modal-close {
-  background: none; border: none;
-  font-size: 18px; color: var(--text-secondary);
-  cursor: pointer; padding: 4px 8px; border-radius: 6px;
-  transition: all 0.15s;
+  padding: 4px 8px;
+  font-size: 18px;
 }
-.custom-modal-close:hover { background: rgba(0,0,0,0.05); color: var(--text-primary); }
 .custom-modal-input {
   width: 100%; box-sizing: border-box;
-  border: 1px solid var(--glass-border);
-  border-radius: 12px; padding: 14px;
-  font-size: 14px; font-family: inherit;
-  color: var(--text-primary);
-  background: rgba(0,0,0,0.02);
-  resize: vertical; min-height: 80px;
-  outline: none; transition: border-color 0.2s;
+  padding: 14px;
+  min-height: 80px;
 }
-.custom-modal-input:focus { border-color: var(--accent); }
-.custom-modal-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
 .custom-modal-actions {
   display: flex; gap: 12px; margin-top: 18px;
 }
 .btn-random, .btn-custom {
   flex: 1; padding: 12px 0;
-  border-radius: 12px; border: none;
-  font-size: 14px; font-weight: 600;
-  cursor: pointer; transition: all 0.2s;
 }
-.btn-random {
-  background: rgba(var(--accent-rgb),0.08);
-  color: var(--accent);
-}
-.btn-random:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.15); }
-.btn-custom {
-  background: var(--grad-soft);
-  background-size: 200% 200%;
-  color: var(--accent-hover);
-}
-.btn-custom:hover:not(:disabled) {
-  animation: waterflow 1s ease-in-out infinite;
-  box-shadow: 0 3px 20px rgba(var(--accent-rgb),0.10);
-}
-.btn-random:disabled, .btn-custom:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .modal-fade-enter-active { transition: all 0.2s cubic-bezier(0.4,0,0.2,1); }
 .modal-fade-leave-active { transition: all 0.15s cubic-bezier(0.4,0,0.2,1); }
@@ -520,8 +502,14 @@ function onScroll() {
   color: #fff;
   transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   user-select: none;
-  background-size: cover;
-  background-position: center;
+  background: #e07b6c;
+}
+.filter-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 .filter-avatar.active {
   opacity: 1;

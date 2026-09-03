@@ -1,92 +1,100 @@
 <template>
   <Teleport to="body">
     <Transition name="share-fade">
-      <div v-if="visible" class="share-overlay" @click.self="close">
-        <!-- 截图目标：彩色底板 + 卡片 + 装饰 -->
-        <div ref="cardRef" class="share-frame">
-          <!-- 背景装饰光斑 -->
-          <div class="share-blob blob-1" />
-          <div class="share-blob blob-2" />
-          <div class="share-blob blob-3" />
-
-          <!-- 白色卡片浮于底色之上 -->
-          <div class="share-card">
-            <!-- 顶部装饰条 -->
-            <div class="share-decorator" />
-
-            <!-- 头像 + 名称 + 时间 -->
-            <div class="share-header">
-              <div
-                class="share-avatar"
-                :style="avatarStyle"
-              ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
-              <div class="share-header-text">
-                <div class="share-name">{{ post.display_name }}</div>
-                <div class="share-time">{{ formatTime(post.created_at) }}</div>
-              </div>
+      <div
+        v-if="visible"
+        class="share-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="分享朋友圈"
+        @click.self="close"
+        @keydown.escape="close"
+      >
+        <div ref="panelRef" class="share-panel" tabindex="-1">
+          <div class="share-preview" @click.self="close">
+            <!-- 生成中骨架 -->
+            <div v-if="rendering" class="share-skeleton" aria-hidden="true">
+              <span class="share-skeleton-hint">正在生成分享图…</span>
             </div>
-
-            <!-- 正文 -->
-            <div class="share-content">{{ post.content }}</div>
-
-            <!-- 配图 -->
-            <div v-if="post.images?.length > 0" class="share-images" :class="{ 'single': post.images.length === 1, 'double': post.images.length === 2, 'multi': post.images.length >= 3 }">
-              <img
-                v-for="(img, i) in post.images"
-                :key="i"
-                :src="img"
-                class="share-img"
-                crossorigin="anonymous"
-                alt="配图"
-              />
-            </div>
-
-            <!-- 底部点赞/评论统计 -->
-            <div v-if="post.comment_count" class="share-stats">
-              <!-- <span v-if="post.like_count" class="share-stat-item">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                {{ post.like_count }}
-              </span> -->
-              <span v-if="post.comment_count" class="share-stat-item">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                {{ post.comment_count }}
-              </span>
-            </div>
+            <!-- 海报预览（1080×1920 竖版） -->
+            <img
+              v-else-if="previewUrl"
+              :src="previewUrl"
+              class="share-poster"
+              alt="朋友圈分享图预览"
+            />
           </div>
 
-          <!-- 底板底部水印 -->
-          <div class="share-frame-watermark">——来自邻舍.EXE</div>
-        </div>
+          <!-- 版式切换 -->
+          <div class="share-style-bar" role="radiogroup" aria-label="分享图版式">
+            <span class="share-style-label">版式</span>
+            <linshe-button
+              v-for="s in styles"
+              :key="s.id"
+              variant="chip"
+              size="md"
+              :active="activeStyle === s.id"
+              :disabled="rendering"
+              @click="switchStyle(s.id)"
+            >{{ s.label }}</linshe-button>
+          </div>
 
-        <!-- 操作栏（在截图目标外部） -->
-        <div class="share-actions">
-          <button class="share-btn copy-btn" :class="{ copied }" :disabled="copying" @click="copyScreenshot" title="复制截图">
-            <template v-if="!copying && !copied">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              <span class="btn-label">复制截图</span>
-            </template>
-            <template v-else-if="copying">
-              <svg class="spin-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-                <circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" />
-              </svg>
-              <span class="btn-label">生成中</span>
-            </template>
-            <template v-else>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span class="btn-label">已复制</span>
-            </template>
-          </button>
-          <button class="share-btn close-btn" @click="close" title="关闭">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            <span class="btn-label">关闭</span>
-          </button>
+          <footer class="share-panel-actions">
+            <linshe-button
+              class="share-action"
+              variant="primary"
+              size="lg"
+              block
+              :disabled="rendering"
+              :loading="copying"
+              @click="copyPoster"
+            >
+              <template v-if="!copying && !copied">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                <span>复制图片</span>
+              </template>
+              <template v-else-if="!copying">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>已复制</span>
+              </template>
+              <template v-else>
+                <span>生成中</span>
+              </template>
+            </linshe-button>
+
+            <linshe-button
+              class="share-action"
+              variant="secondary"
+              size="lg"
+              block
+              :disabled="rendering"
+              :loading="downloading"
+              @click="downloadPoster"
+            >
+              <template v-if="!downloading && !downloaded">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>下载</span>
+              </template>
+              <template v-else-if="!downloading">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>已下载</span>
+              </template>
+              <template v-else>
+                <span>生成中</span>
+              </template>
+            </linshe-button>
+          </footer>
         </div>
       </div>
     </Transition>
@@ -94,7 +102,11 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, inject } from 'vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import { renderMomentShareCard, MOMENT_SHARE_STYLES } from '../utils/momentShareRenderer.js'
+
+const toastFn = inject('toast', null)
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -103,377 +115,269 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 
-const cardRef = ref(null)
+const styles = MOMENT_SHARE_STYLES
+const panelRef = ref(null)
+const rendering = ref(false)
 const copying = ref(false)
+const downloading = ref(false)
 const copied = ref(false)
+const downloaded = ref(false)
+const activeStyle = ref('auto')
+const previewUrl = ref('')
+let previewBlob = null
+let renderSeq = 0
 
-const avatarStyle = computed(() => {
-  const p = props.post
-  if (p.avatar_path) {
-    return {
-      backgroundImage: `url(${p.avatar_path})`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
+function revokePreview() {
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = ''
+  }
+  previewBlob = null
+}
+
+/** 渲染当前版式的海报并转成可预览/可导出的 blob */
+async function renderPoster(styleId) {
+  const seq = ++renderSeq
+  rendering.value = true
+  try {
+    const { canvas } = await renderMomentShareCard(props.post, {
+      styleId: styleId === 'auto' ? undefined : styleId,
+    })
+    if (seq !== renderSeq) return // 已切换到其它版式，丢弃过期结果
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+    })
+    revokePreview()
+    previewBlob = blob
+    previewUrl.value = URL.createObjectURL(blob)
+  } catch (err) {
+    console.error('[ShareCard] render poster failed:', err)
+    if (seq === renderSeq) toastFn?.('分享图生成失败', 'error')
+  } finally {
+    if (seq === renderSeq) rendering.value = false
+  }
+}
+
+async function switchStyle(styleId) {
+  if (rendering.value || activeStyle.value === styleId) return
+  activeStyle.value = styleId
+  await renderPoster(styleId)
+}
+
+async function savePoster() {
+  if (!previewBlob) await renderPoster(activeStyle.value)
+  if (!previewBlob) throw new Error('poster blob is not ready')
+  const url = URL.createObjectURL(previewBlob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `moment_${props.post.id}.png`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadPoster() {
+  if (downloading.value || copying.value) return
+  downloading.value = true
+  copied.value = false
+  downloaded.value = false
+  try {
+    await savePoster()
+    downloaded.value = true
+    setTimeout(() => { downloaded.value = false }, 2000)
+  } catch (err) {
+    console.error('[ShareCard] download poster failed:', err)
+    toastFn?.('分享图下载失败', 'error')
+  } finally {
+    downloading.value = false
+  }
+}
+
+async function copyPoster() {
+  if (copying.value || downloading.value) return
+  copying.value = true
+  copied.value = false
+  downloaded.value = false
+  try {
+    if (!previewBlob) await renderPoster(activeStyle.value)
+    if (!previewBlob) throw new Error('poster blob is not ready')
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': previewBlob }),
+    ])
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch (err) {
+    console.error('[ShareCard] copy poster failed:', err)
+    // 剪贴板不可用时降级为下载，仍保证能拿到图片
+    try {
+      await savePoster()
+      copied.value = false
+      downloaded.value = true
+      toastFn?.('复制失败，已保存分享图到下载', 'info')
+    } catch (fallbackErr) {
+      console.error('[ShareCard] poster fallback failed:', fallbackErr)
+      toastFn?.('分享图生成失败', 'error')
     }
+  } finally {
+    copying.value = false
   }
-  return { background: 'var(--accent)' }
-})
+}
 
-function formatTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  const diff = now - d
-
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  if (d >= todayStart) {
-    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-  }
-  const yesterdayStart = new Date(todayStart.getTime() - 86400000)
-  if (d >= yesterdayStart) {
-    return '昨天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-  }
-  const twoDaysAgoStart = new Date(todayStart.getTime() - 2 * 86400000)
-  if (d >= twoDaysAgoStart) {
-    return '前天 ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-  }
-  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' +
-    d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+function focusPanel() {
+  requestAnimationFrame(() => panelRef.value?.focus({ preventScroll: true }))
 }
 
 function close() {
   emit('close')
 }
 
-async function copyScreenshot() {
-  if (copying.value) return
-  const el = cardRef.value
-  if (!el) return
-
-  copying.value = true
-  copied.value = false
-
-  try {
-    // 等待图片加载完成
-    const imgs = el.querySelectorAll('img')
-    await Promise.all(Array.from(imgs).map(img => {
-      if (img.complete) return Promise.resolve()
-      return new Promise(resolve => { img.onload = resolve; img.onerror = resolve })
-    }))
-
-    // 额外等一下确保渲染完成
-    await nextTick()
-    await new Promise(r => setTimeout(r, 100))
-
-    // html2canvas 体积大且仅在生成分享图时需要，按需加载
-    const { default: html2canvas } = await import('html2canvas')
-    const canvas = await html2canvas(el, {
-      backgroundColor: null,
-      scale: 2,
-      useCORS: true,
-      allowTaint: true,
-      logging: false,
-    })
-
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
-    })
-
-    await navigator.clipboard.write([
-      new ClipboardItem({ 'image/png': blob }),
-    ])
-
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
-  } catch (err) {
-    console.error('[ShareCard] copy screenshot failed:', err)
-    // fallback: 降级下载
-    try {
-      const { default: html2canvas } = await import('html2canvas')
-      const canvas = await html2canvas(el, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: true, logging: false })
-      canvas.toBlob(blob => {
-        if (!blob) return
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `moment_${props.post.id}.png`
-        a.click()
-        URL.revokeObjectURL(url)
-      }, 'image/png')
-      copied.value = true
-    } catch (_) { /* 彻底失败，静默 */ }
-  } finally {
-    copying.value = false
+// 组件以 v-if + visible=true 挂载（MomentsView），挂载即首渲；watch 兜底外部切换 visible
+onMounted(() => {
+  if (props.visible && !previewUrl.value && !rendering.value) {
+    focusPanel()
+    renderPoster(activeStyle.value)
   }
-}
+})
 
-// 关闭时重置状态
 watch(() => props.visible, v => {
-  if (!v) { copying.value = false; copied.value = false }
+  if (v) {
+    focusPanel()
+    activeStyle.value = 'auto'
+    renderPoster('auto')
+  } else {
+    copying.value = false
+    downloading.value = false
+    copied.value = false
+    downloaded.value = false
+    renderSeq++
+    rendering.value = false
+    revokePreview()
+  }
+})
+
+onBeforeUnmount(() => {
+  renderSeq++
+  revokePreview()
 })
 </script>
 
 <style scoped>
-/* ── Overlay ── */
 .share-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
-  flex-direction: row;              /* PC：卡片在左，按钮在右 */
-  align-items: center;           /* 按钮垂直居中于卡片 */
+  align-items: center;
   justify-content: center;
-  gap: 24px;
-  padding: 40px 24px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  padding: 24px;
+  overflow: hidden;
 }
 
-/* ============================================
-   底板（截图目标）- 彩色渐变底色包裹卡片
-   ============================================ */
-.share-frame {
-  width: 100%;
-  max-width: 750px;
-  box-sizing: border-box;           /* padding 不额外撑大宽度 */
-  /* 不再限制高度、不再 overflow: auto — 卡片内容全量展示，超长由 overlay 层滚动 */
-  position: relative;
-
-  /* 暖色渐变底色 — 与品牌色 var(--accent) 呼应但更柔和 */
-  background: linear-gradient(
-    145deg,
-    #fef5f3 0%,
-    #fdf0ed 18%,
-    #faf0ea 40%,
-    #f8f1ee 65%,
-    #fdf5f2 100%
-  );
-
-  border-radius: 20px;
-  padding: 40px 34px;
-
-  /* 底板自身的呼吸感 — 卡片再在其中浮起 */
+.share-panel {
+  width: min(640px, 100%);
+  height: min(92dvh, 940px);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 20px;
+  overflow: hidden;
+  background: #f4f1eeed;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  outline: none;
 }
 
-/* ── 背景装饰光斑（html2canvas 兼容：用真实 DOM 不用伪元素）── */
-.share-blob {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.blob-1 {
-  width: 180px; height: 180px;
-  top: -30px; right: -40px;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.12) 0%, transparent 70%);
-}
-.blob-2 {
-  width: 140px; height: 140px;
-  bottom: 60px; left: -50px;
-  background: radial-gradient(circle, rgba(240, 165, 143, 0.10) 0%, transparent 70%);
-}
-.blob-3 {
-  width: 200px; height: 200px;
-  top: 50%; left: 60%;
-  background: radial-gradient(circle, rgba(232, 196, 160, 0.08) 0%, transparent 70%);
-  transform: translate(-50%, -50%);
-}
-
-/* ============================================
-   白色卡片 — 浮在彩色底板上
-   ============================================ */
-.share-card {
-  width: 100%;
-  background: #ffffff;
-  border-radius: 16px;
-  position: relative;
-  z-index: 1;
-  overflow: hidden;  /* 配合 border-radius 裁边 */
-}
-
-/* 顶部渐变装饰条 */
-.share-decorator {
-  height: 5px;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-light) 45%, var(--accent-2-light) 100%);
-  border-radius: 16px 16px 0 0;
-}
-
-/* ── 头部 ── */
-.share-header {
+.share-preview {
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 24px 32px 0;
+  justify-content: center;
+  padding: 14px 22px 10px;
+  overflow: hidden;
 }
-.share-avatar {
-  width: 52px; height: 52px;
-  border-radius: 50%;
+
+/* 海报本身是 1080×1920，这里只做展示缩放，导出始终是原尺寸 */
+.share-poster {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  box-shadow: 0 10px 34px rgba(60, 42, 30, 0.18);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.share-skeleton {
+  width: min(46dvh, 88%);
+  aspect-ratio: 9 / 16;
+  max-width: 100%;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #ece5de 40%, #f6f1ec 50%, #ece5de 60%);
+  background-size: 200% 100%;
+  animation: shareShimmer 1.2s ease-in-out infinite;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 18px;
+}
+
+.share-skeleton-hint {
+  font-size: 13px;
+  color: #a3968b;
+}
+
+@keyframes shareShimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+
+/* ── 版式切换：与底部操作栏同级的控制条 ── */
+.share-style-bar {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 20px;
-  font-weight: 700;
-}
-.share-header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.share-name {
-  font-size: 17px;
-  font-weight: 700;
-  color: #1a1a1a;
-  letter-spacing: 0.3px;
-  line-height: 1.3;
-}
-.share-time {
-  font-size: 13px;
-  color: #aaa;
-  letter-spacing: 0.2px;
-}
-
-/* ── 正文 ── */
-.share-content {
-  padding: 18px 32px 0;
-  font-size: 16px;
-  line-height: 1.9;
-  color: #333;
-  white-space: pre-wrap;
-  word-break: break-word;
-  letter-spacing: 0.2px;
-}
-
-/* ── 图片 ── */
-.share-images {
-  display: grid;
-  gap: 8px;
-  padding: 20px 32px 0;
-}
-.share-images.single {
-  grid-template-columns: 1fr;
-}
-.share-images.double {
-  grid-template-columns: 1fr 1fr;
-}
-.share-images.multi {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-.share-img {
-  width: 100%;
-  /* 不再限制高度、不裁切 — 图片完整展示 */
-  display: block;
-  border-radius: 8px;
-}
-
-/* 确保卡片内部最后一个区域有足够的底部呼吸空间 */
-.share-card > :last-child {
-  padding-bottom: 28px;
-}
-
-/* ── 底部统计 ── */
-.share-stats {
-  display: flex;
-  gap: 20px;
-  padding: 18px 32px 28px;
-  border-top: 1px solid #f5f5f5;
-  margin-top: 20px;
-}
-.share-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 13px;
-  color: #999;
-}
-
-/* ── 底板水印 ── */
-.share-frame-watermark {
-  font-size: 12px;
-  color: rgba(180, 160, 155, 0.8);
-  letter-spacing: 0.6px;
-  text-align: right;
-  position: relative;
-  z-index: 1;
-  margin-left: auto;
-}
-
-/* ============================================
-   操作按钮
-   ============================================ */
-.share-actions {
-  display: flex;
-  flex-direction: column;   /* PC：按钮竖向排列在卡片右侧 */
+  flex-wrap: wrap;
   gap: 12px;
-  flex-shrink: 0;           /* 不被卡片挤窄 */
+  padding: 11px 22px;
+  background: rgba(255, 255, 255, 0.38);
+  border-top: 1px solid rgba(224, 216, 207, 0.45);
 }
-.share-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 56px;
-  height: 56px;                 /* PC 端正方形按钮 */
-  border-radius: 16px;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: #555;                  /* 图标颜色 */
+
+.share-style-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
 }
-/* 桌面端隐藏文字 */
-.btn-label {
-  display: none;
+
+/* ── 弹窗操作 ── */
+.share-panel-actions {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 12px;
+  padding: 10px 22px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.38);
+  border-top: 1px solid rgba(224, 216, 207, 0.45);
 }
-.copy-btn {
-  background: rgba(255, 255, 255, 0.92);
-  color: #333;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-}
-.copy-btn:hover:not(:disabled) {
-  background: #fff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
-}
-.copy-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-.copy-btn.copied {
-  background: #e8f5e9;
-  color: #2e7d32;
-}
-.close-btn {
-  background: rgba(255, 255, 255, 0.7);
-  color: #666;
-}
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.9);
-  color: #333;
+
+.share-action {
+  min-height: 42px;
 }
 
 /* ── 动画 ── */
 .share-fade-enter-active { transition: opacity 0.25s ease; }
 .share-fade-leave-active { transition: opacity 0.2s ease; }
 .share-fade-enter-from,
-.share-fade-leave-to   { opacity: 0; }
-.share-fade-enter-active .share-frame {
-  animation: cardUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+.share-fade-leave-to { opacity: 0; }
+.share-fade-enter-active .share-panel {
+  animation: cardUp 0.32s cubic-bezier(0.34, 1.3, 0.64, 1);
 }
+
 @keyframes cardUp {
   from {
     opacity: 0;
-    transform: translateY(30px) scale(0.96);
+    transform: translateY(22px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -481,74 +385,53 @@ watch(() => props.visible, v => {
   }
 }
 
-.spin-icon {
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@media (prefers-reduced-motion: reduce) {
+  .share-fade-enter-active,
+  .share-fade-leave-active { transition: opacity 0.15s ease; }
+  .share-fade-enter-active .share-panel { animation: none; }
+  .share-skeleton { animation: none; }
 }
 
 /* ── 移动端 ── */
 @media (max-width: 767px) {
   .share-overlay {
-    flex-direction: column;   /* 手机端恢复纵向布局 */
-    align-items: center;
-    justify-content: flex-start;  /* 从顶部开始，避免被浏览器顶栏裁掉 */
-    padding: max(24px, env(safe-area-inset-top)) 12px 12px;  /* 顶 padding 适配刘海/状态栏 */
-    gap: 14px;
+    padding: max(14px, env(safe-area-inset-top, 0px)) 12px 12px;
   }
-  .share-frame {
-    max-width: 100%;
-    /* 移动端也不限高 — 全量展示 */
-    padding: 24px 16px;
-    border-radius: 16px;
-    gap: 14px;
-  }
-  .share-card {
-    border-radius: 12px;
-  }
-  .share-decorator {
-    border-radius: 12px 12px 0 0;
-  }
-  .share-header {
-    padding: 20px 20px 0;
-  }
-  .share-name {
-    font-size: 15px;
-  }
-  .share-time {
-    font-size: 12px;
-  }
-  .share-content {
-    padding: 14px 20px 0;
-    font-size: 14px;
-  }
-  .share-images {
-    padding: 14px 20px 0;
-    gap: 5px;
-  }
-  .share-stats {
-    padding: 14px 20px 22px;
-    margin-top: 14px;
-  }
-  .share-actions {
-    flex-direction: row;   /* 手机端恢复横向排列 */
-    width: 100%;
-  }
-  .share-btn {
-    flex: 1;
-    flex-direction: row;
-    width: auto;
-    height: auto;
-    justify-content: center;
-    padding: 14px 20px;
+
+  .share-panel {
+    height: 96dvh;
     border-radius: 14px;
-    font-size: 14px;
-    font-weight: 600;
-    gap: 6px;
   }
-  .btn-label {
-    display: inline;              /* 手机端显示文字 */
+
+  .share-preview {
+    padding: 8px 14px 4px;
+  }
+
+  .share-poster {
+    border-radius: 10px;
+  }
+
+  .share-skeleton {
+    width: min(52dvh, 92%);
+  }
+
+  .share-style-bar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .share-style-label {
+    display: none;
+  }
+
+  .share-panel-actions {
+    grid-template-columns: 1.2fr 1fr;
+    gap: 9px;
+    padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .share-action {
+    min-height: 40px;
   }
 }
 </style>

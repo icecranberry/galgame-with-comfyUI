@@ -36,7 +36,7 @@ function cloneMessage(message) {
  * @param {string[]}  dynamicBlocks  本轮动态上下文块，会以 <dynamic_context> 标签附加到最新 user 消息尾部
  * @returns {{ messages: object[], metadata: object }}
  */
-export function buildChatContext({ stableBlocks = [], summaryBlock = null, history = [], dynamicBlocks = [] } = {}) {
+export function buildChatContext({ stableBlocks = [], summaryBlock = null, history = [], dynamicBlocks = [], userPrefix = '' } = {}) {
   const stableMessages = stableBlocks.filter(Boolean).map(content => ({ role: 'system', content: String(content) }));
   const historyMessages = history.map(cloneMessage);
 
@@ -53,14 +53,18 @@ export function buildChatContext({ stableBlocks = [], summaryBlock = null, histo
 
   // 动态上下文块附加到最新 user 消息
   const dynamicText = dynamicBlocks.filter(Boolean).join('\n\n');
-  if (dynamicText) {
+  const prefixText = String(userPrefix || '').trim();
+  if (dynamicText || prefixText) {
     const reverseIdx = [...messages].reverse().findIndex(m => m.role === 'user');
     if (reverseIdx >= 0) {
       const latestUserIdx = messages.length - 1 - reverseIdx;
       const originalContent = messages[latestUserIdx].content;
+      const dynamicPart = dynamicText
+        ? `<dynamic_context>\n${dynamicText}\n</dynamic_context>\n\n${originalContent}`
+        : originalContent;
       messages[latestUserIdx] = {
         role: 'user',
-        content: `<dynamic_context>\n${dynamicText}\n</dynamic_context>\n\n${originalContent}`,
+        content: prefixText ? `${prefixText}\n\n${dynamicPart}` : dynamicPart,
       };
     }
   }

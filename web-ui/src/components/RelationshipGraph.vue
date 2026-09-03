@@ -6,7 +6,7 @@
           <!-- Header -->
           <div class="rel-header">
             <h3>🔗 {{ centerCharacter.display_name }} 的关系图</h3>
-            <button class="rel-close" @click="$emit('close')">&times;</button>
+            <linshe-button variant="icon" @click="$emit('close')">&times;</linshe-button>
           </div>
 
           <!-- Canvas -->
@@ -51,7 +51,7 @@
             <div class="rel-dialog">
               <div class="rel-dialog-header">
                 <span>{{ inputDialog.isEdit ? '编辑关系' : '新建关系' }}</span>
-                <button class="rel-dialog-close" @click="cancelInput">✕</button>
+                <linshe-button variant="icon" @click="cancelInput">✕</linshe-button>
               </div>
               <div class="rel-dialog-body">
                 <p class="rel-dialog-desc">
@@ -60,7 +60,7 @@
                     : `${centerCharacter.display_name} → ${inputDialog.targetName}`)
                     + `：${inputDialog.targetName}是${centerCharacter.display_name}的什么人？`}}
                 </p>
-                <input
+                <linshe-input
                   ref="inputRef"
                   v-model="inputDialog.text"
                   class="rel-input"
@@ -68,12 +68,12 @@
                   @keydown.enter="confirmInput"
                 />
                 <div class="rel-dialog-actions">
-                  <button v-if="inputDialog.isEdit" class="btn-danger btn-ghost-danger" @click="deleteEdge">🗑 删除</button>
+                  <linshe-button v-if="inputDialog.isEdit" variant="danger" @click="deleteEdge">🗑 删除</linshe-button>
                   <div class="rel-dialog-actions-right">
-                    <button class="btn-ghost" @click="cancelInput">取消</button>
-                    <button class="btn-primary" :disabled="!inputDialog.text.trim()" @click="confirmInput">
+                    <linshe-button variant="secondary" @click="cancelInput">取消</linshe-button>
+                    <linshe-button variant="primary" :disabled="!inputDialog.text.trim()" @click="confirmInput">
                       {{ inputDialog.isEdit ? '保存' : '确认' }}
-                    </button>
+                    </linshe-button>
                   </div>
                 </div>
               </div>
@@ -93,6 +93,8 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import * as api from '../api/index.js'
 import CharacterNode from './CharacterNode.vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -478,14 +480,6 @@ async function deleteEdge() {
   background: rgba(248,245,241,0.55);
 }
 .rel-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: #3a2a1a; }
-.rel-close {
-  width: 32px; height: 32px; border-radius: 8px;
-  border: 1px solid rgba(0,0,0,0.08); background: rgba(0,0,0,0.04);
-  color: #8a7a6a; font-size: 18px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-}
-.rel-close:hover { background: rgba(0,0,0,0.08); color: #4a3a2a; }
 
 /* ── Canvas wrap ── */
 .rel-canvas-wrap {
@@ -524,26 +518,15 @@ async function deleteEdge() {
   border-bottom: 1px solid rgba(0,0,0,0.06);
   font-weight: 600; font-size: 15px; color: #333;
 }
-.rel-dialog-close {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: none; background: rgba(0,0,0,0.04);
-  color: #888; cursor: pointer; font-size: 13px;
-  display: flex; align-items: center; justify-content: center;
-}
-.rel-dialog-close:hover { background: rgba(0,0,0,0.08); color: #333; }
 .rel-dialog-body { padding: 16px 18px 18px; }
 .rel-dialog-desc {
   font-size: 13px; color: #888; margin: 0 0 10px;
 }
 .rel-input {
   width: 100%; padding: 10px 12px;
-  font-size: 14px; border-radius: 10px;
-  border: 1px solid var(--border); outline: none;
-  background: #fafaf9; color: #333;
+  font-size: 14px;
   box-sizing: border-box;
-  font-family: inherit;
 }
-.rel-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .rel-dialog-actions {
   display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }

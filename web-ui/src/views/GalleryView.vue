@@ -9,12 +9,12 @@
       >相册</span>
       <div class="header-right">
         <span class="gallery-count" v-if="totalCount > 0">共 {{ totalCount }} 张</span>
-        <button class="btn-compress" @click="showModal = true">
+        <linshe-button class="btn-compress" variant="secondary" @click="showModal = true">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
             <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
             <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
           </svg>图片压缩
-        </button>
+        </linshe-button>
       </div>
     </div>
 
@@ -27,25 +27,28 @@
             <div class="section">
               <div class="section-label">压缩类型</div>
               <div class="toggle-row">
-                <button
+                <linshe-button
                   class="toggle-btn"
-                  :class="{ active: compressType === 'oxipng' }"
+                  variant="chip"
+                  :active="compressType === 'oxipng'"
                   @click="onTypeChange('oxipng')"
-                >OxiPng 无损</button>
-                <button
+                >OxiPng 无损</linshe-button>
+                <linshe-button
                   class="toggle-btn"
-                  :class="{ active: compressType === 'avif' }"
+                  variant="chip"
+                  :active="compressType === 'avif'"
                   @click="onTypeChange('avif')"
-                >AVIF 有损</button>
+                >AVIF 有损</linshe-button>
               </div>
               <div class="type-desc">
                 {{ compressType === 'oxipng' ? '无损重编码 PNG，画质几乎不变，预计大小下降70%' : '转为 AVIF 格式（较新格式，过旧浏览器不支持） 有损压缩，小图压缩会微微失真，大图没区别，预计大小下降95%' }}
               </div>
-              <button
+              <linshe-button
                 class="btn-start-inline"
+                variant="primary"
                 @click="onStartCompress"
                 :disabled="task?.processing"
-              >{{ task?.processing ? '压缩中...' : '立刻压缩' }}</button>
+              >{{ task?.processing ? '压缩中...' : '立刻压缩' }}</linshe-button>
             </div>
 
             <div class="section-divider"></div>
@@ -54,16 +57,18 @@
             <div class="section">
               <div class="section-label">定时计划压缩</div>
               <div class="toggle-row">
-                <button
+                <linshe-button
                   class="toggle-btn"
-                  :class="{ active: scheduleEnabled }"
+                  variant="chip"
+                  :active="scheduleEnabled"
                   @click="onScheduleToggle(true)"
-                >开启</button>
-                <button
+                >开启</linshe-button>
+                <linshe-button
                   class="toggle-btn"
-                  :class="{ active: !scheduleEnabled }"
+                  variant="chip"
+                  :active="!scheduleEnabled"
                   @click="onScheduleToggle(false)"
-                >关闭</button>
+                >关闭</linshe-button>
               </div>
               <div class="type-desc" v-if="scheduleEnabled">
                 白天每 10 分钟压缩 3 张 · 凌晨 2-5 点每 10 分钟压缩 15 张
@@ -94,13 +99,13 @@
             <div class="section" v-if="task && task.processing">
               <div class="progress-header">
                 <span>压缩中 {{ task.current }}/{{ task.total }}</span>
-                <button class="btn-bg" @click="onBackground">后台处理</button>
+                <linshe-button class="btn-bg" variant="secondary" @click="onBackground">后台处理</linshe-button>
               </div>
               <div class="progress-bar">
                 <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
               </div>
               <div class="progress-file" v-if="task.currentFile">{{ task.currentFile }}</div>
-              <button class="btn-cancel" @click="onCancel" v-if="task.processing">取消压缩</button>
+              <linshe-button class="btn-cancel" variant="secondary" @click="onCancel" v-if="task.processing">取消压缩</linshe-button>
             </div>
 
             <!-- 立即压缩完成状态 -->
@@ -118,6 +123,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import Gallery from '../components/Gallery.vue'
 import BaseModal from '../components/BaseModal.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 
@@ -276,31 +282,9 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
-/* ── 压缩按钮（照搬扰动世界线样式）── */
+/* ── 压缩按钮 ── */
 .btn-compress {
   padding: 8px 22px;
-  border-radius: 14px;
-  border: 2px solid transparent;
-  background: var(--grad-soft);
-  background-size: 220% 100%;
-  color: var(--accent-hover);
-  font-size: 13px; font-weight: 600;
-  cursor: pointer;
-  letter-spacing: 1px;
-  transition:
-    border-color 0.35s ease,
-    box-shadow 0.35s ease,
-    color 0.3s ease;
-}
-.btn-compress:hover {
-  border: 2px solid rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
-  color: #a85545;
-  animation: waterflow 1s ease-in-out infinite;
-}
-@keyframes waterflow {
-  0%, 100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
 }
 
 /* ── 弹窗：视觉样式走全局 modal 家族，这里只保留布局差异 ── */
@@ -339,22 +323,6 @@ onUnmounted(() => {
 }
 .toggle-btn {
   flex: 1;
-  padding: 8px 0;
-  border: none;
-  background: rgba(0, 0, 0, 0.03);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.toggle-btn.active {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-.toggle-btn:not(.active):hover {
-  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .type-desc {
@@ -405,15 +373,8 @@ onUnmounted(() => {
   color: var(--text-bright);
 }
 .btn-bg {
-  background: none;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
   padding: 3px 10px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  cursor: pointer;
 }
-.btn-bg:hover { background: rgba(0, 0, 0, 0.04); }
 
 .progress-bar {
   height: 6px;
@@ -437,16 +398,8 @@ onUnmounted(() => {
 }
 
 .btn-cancel {
-  background: none;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-  padding: 6px 0;
-  font-size: 12px;
-  color: var(--accent);
-  cursor: pointer;
   width: 100%;
 }
-.btn-cancel:hover { background: rgba(var(--accent-rgb), 0.06); }
 
 .progress-done {
   font-size: 13px;
@@ -458,24 +411,7 @@ onUnmounted(() => {
 /* ── 立刻压缩按钮 ── */
 .btn-start-inline {
   margin-top: 8px;
-  padding: 7px 0;
-  border: none;
-  border-radius: 10px;
-  background: rgba(var(--accent-rgb), 0.08);
-  color: var(--accent-hover);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
   width: 100%;
-  transition: background 0.2s, color 0.2s;
-}
-.btn-start-inline:hover:not(:disabled) {
-  background: var(--accent);
-  color: #fff;
-}
-.btn-start-inline:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 /* ── 弹窗动画 ── */
@@ -492,7 +428,6 @@ onUnmounted(() => {
   }
   .btn-compress {
     padding: 6px 14px;
-    font-size: 12px;
   }
   .modal-panel {
     width: 92vw;

@@ -115,7 +115,7 @@ export const useEventsStore = defineStore('events', () => {
           ...e,
           outcome: 'expired',
           ended_at: e.expires_at,
-          summary: e.summary || e.description,
+          summary: e.summary || '',
           image: undefined,
           final_image: e.image,
         })),

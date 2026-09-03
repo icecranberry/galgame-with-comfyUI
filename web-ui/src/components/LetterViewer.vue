@@ -6,11 +6,12 @@
       :class="{ 'overlay-compact': compact, 'overlay-leave': leaving }"
       @click.self="requestClose"
     >
-      <button
+      <linshe-button
+        variant="icon"
         class="viewer-close"
         :class="{ 'viewer-close-compact': compact }"
         @click="requestClose"
-      >&times;</button>
+      >&times;</linshe-button>
 
       <!-- Compact portrait: rotation wrapper keeps paper-bg coordinate system clean -->
       <div v-if="compact" class="paper-rotate-wrap">
@@ -72,6 +73,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   letter: { type: Object, required: true },
@@ -415,14 +417,11 @@ onUnmounted(() => {
   animation: none;
 }
 
+/* 皮肤交给 LinsheButton，仅保留定位、入场/退场动画 */
 .viewer-close {
   position: fixed; top: 16px; right: 24px;
-  width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(255,255,255,0.85); border: 1px solid rgba(0,0,0,0.1);
-  color: #3a2a1a; font-size: 22px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
   z-index: 10;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  font-size: 22px;   /* &times; 字形尺寸 */
   animation: btn-in 0.25s ease 0.2s both;
 }
 @keyframes btn-in {
@@ -434,7 +433,6 @@ onUnmounted(() => {
   transition: opacity 0.15s ease, transform 0.15s ease;
   animation: none;
 }
-.viewer-close:hover { background: #fff; transform: scale(1.08); }
 
 /* Paper — fixed 4:3 ratio, fills within viewport */
 .paper-bg {
@@ -535,8 +533,6 @@ onUnmounted(() => {
 
 .viewer-close-compact {
   top: 8px; right: 8px;
-  width: 32px; height: 32px;
-  font-size: 18px;
 }
 
 /* Rotation wrapper — handles the rotate, paper inside has clean coords */

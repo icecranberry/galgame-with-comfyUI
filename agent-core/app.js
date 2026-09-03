@@ -9,11 +9,13 @@ import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
+import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
+import emojiRoutes from './src/routes/emoji.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
@@ -27,6 +29,7 @@ import workflowsRoutes from './src/routes/workflows.js';
 import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
+import itemsRoutes from './src/routes/items.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -40,6 +43,7 @@ import { startMailboxScheduler } from './src/services/mailboxScheduler.js';
 import { startWeatherScheduler } from './src/services/weatherService.js';
 import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge.js';
+import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
@@ -66,28 +70,7 @@ app.use(express.static('public', {
 app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
 
 // 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
-// 只缓存「AVIF 已存在」这一终态探测（压缩后不会再变），其余保持实时探测，
-// 避免压缩器单向转换（png 删除 + avif 生成）时读到陈旧结果
-const avifPresentCache = new Set();
-app.use('/images', (req, res, next) => {
-  const pngMatch = req.path.match(/\.png$/i);
-  if (!pngMatch) return next();
-
-  // PNG 不存在（已被 AVIF 压缩后删除），检查同名 .avif
-  const avifPath = path.join('data/images', req.path.replace(/\.png$/i, '.avif'));
-  if (avifPresentCache.has(avifPath)) {
-    res.setHeader('Content-Type', 'image/avif');
-    return res.sendFile(path.resolve(avifPath));
-  }
-  if (fs.existsSync(avifPath)) {
-    avifPresentCache.add(avifPath);
-    res.setHeader('Content-Type', 'image/avif');
-    return res.sendFile(path.resolve(avifPath));
-  }
-
-  // AVIF 不存在 → 原 PNG 仍可能存在，直接走 static 兜底
-  next();
-});
+app.use('/images', imageAvifFallback('data/images'));
 app.use('/images', express.static('data/images', { maxAge: '7d' }));
 app.use('/avatars', express.static('data/avatars', { maxAge: '30d' }));
 
@@ -95,6 +78,7 @@ app.use('/avatars', express.static('data/avatars', { maxAge: '30d' }));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
+app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/moments', wrapRouterAsync(momentsRoutes));
@@ -109,6 +93,7 @@ app.use('/api/workflows', wrapRouterAsync(workflowsRoutes));
 app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
 app.use('/api/groups', wrapRouterAsync(groupsRoutes));
 app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
+app.use('/api/items', wrapRouterAsync(itemsRoutes));
 
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 // 健康检查
@@ -181,6 +166,9 @@ startKnowledgeSyncScheduler();
 
 // 启动记忆整理 daemon（记忆的"睡眠期"：空闲触发，内部自带开关与预算判断）
 startConsolidationScheduler();
+
+// 启动道具系统调度器（每 10 分钟清理到期效果、恢复变身、标记卡死的生成中道具）
+startItemScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {

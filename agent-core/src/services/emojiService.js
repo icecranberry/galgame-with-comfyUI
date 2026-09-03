@@ -1,0 +1,403 @@
+import { getDb, getSystemRules, getSetting, setSetting } from '../db/index.js';
+import { chatSync } from '../llm/llm-client.js';
+import { generateImageRaw } from './imageSkill.js';
+import { buildImageCrossRefInfo, buildCharacterAppearanceSection } from './characterPersona.js';
+import { saveBase64Image } from './imagePaths.js';
+import { invalidateGalleryCache } from '../routes/images.js';
+
+export const DEFAULT_EMOJI_KEYS = [
+  '开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒',
+  '害羞', '惊讶', '委屈', '得意', '比心',
+  '无语', '嫌弃', '心虚',
+];
+
+/** 读取表情类别（可编辑，默认 15 类） */
+export function getEmojiCategories(db = getDb()) {
+  const rows = db.prepare('SELECT emoji_key FROM emoji_categories ORDER BY sort_order, id').all();
+  if (rows.length > 0) {
+    const keys = rows.map(r => r.emoji_key);
+    const existing = new Set(keys);
+    const legacyDefaults = DEFAULT_EMOJI_KEYS.slice(0, 12);
+    if (legacyDefaults.every(k => existing.has(k))) {
+      const missing = DEFAULT_EMOJI_KEYS.filter(k => !existing.has(k));
+      if (missing.length > 0) return [...keys, ...missing];
+    }
+    return keys;
+  }
+  return [...DEFAULT_EMOJI_KEYS];
+}
+
+/** 保存表情类别（固定 15 个，仅修改名称） */
+export function saveEmojiCategories(keys, db = getDb()) {
+  const list = Array.isArray(keys) ? keys.map(k => String(k || '').trim()).filter(Boolean) : [];
+  if (list.length !== 15) {
+    throw new Error('表情类别固定为 15 个');
+  }
+  if (new Set(list).size !== list.length) {
+    throw new Error('表情类别不能重复');
+  }
+
+  const replace = db.transaction(() => {
+    db.prepare('DELETE FROM emoji_categories').run();
+    const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+    list.forEach((k, i) => insert.run(k, i + 1));
+  });
+  replace();
+  return list;
+}
+
+/**
+ * 解析分句文本中的 [表情] / 【表情】：
+ * - 命中 emojiMap 的 → 文本中删除该标记，URL 放入 images
+ * - 未命中的 → 整个 [xxx] 直接舍弃
+ * raw_messages 不需要调用本函数，只用于分句消息表 / SSE 推流。
+ */
+export function parseEmojiText(text, emojiMap = new Map()) {
+  const raw = String(text || '');
+  const images = [];
+  const markerOffsets = [];
+  const cleaned = raw.replace(/[\[【]([^\]】]*)[\]】]/g, (match, key, offset) => {
+    const url = emojiMap.get(String(key || '').trim());
+    if (url) { images.push(url); markerOffsets.push(offset); }
+    return '';
+  }).replace(/\s{2,}/g, ' ').trim();
+  const firstVisible = raw.search(/[^\s\[【]/);
+  const leadingSticker = images.length > 0 && markerOffsets.some(offset => firstVisible < 0 || offset < firstVisible);
+  return { content: cleaned, images: [...new Set(images)], leadingSticker };
+}
+
+/** 构建注入 user 层最前面的表情包注明；没有可用表情时返回空字符串 */
+export function buildEmojiNote(keys) {
+  const list = [...new Set(keys.filter(Boolean))];
+  if (list.length === 0) return '';
+  return `<emoji_stickers>\n你只拥有[${list.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
+}
+
+/**
+ * 群聊表情包注入：拥有表情包的成员达到一半及以上时，注入系统默认表情包组别与调用形式
+ * （与私聊一致）；不按成员细分各自名册，发送时由说话人名册检索纠错，无图视为异常跳过。
+ */
+export function buildGroupEmojiNote(members, db = getDb()) {
+  if (!Array.isArray(members) || members.length === 0) return '';
+  const owners = members.filter(m => getCharacterEmojiMap(m.id, db).size > 0);
+  if (owners.length * 2 < members.length) return '';
+  const keys = getEmojiCategories(db);
+  if (keys.length === 0) return '';
+  return `<emoji_stickers>\n群成员可以调用[${keys.join('],[')}]这些表情包。对话中可以用“[开心]今天天气真好”、“好难受[委屈]吃坏了肚子疼”，“[卖萌]”这样的形式来调用表情包丰富情感，表情包要轮换着用不要重复，因为表情包会变成实际的图片，而图片其实和表情包表达的含义弱相关，所以表情包可以混着发不用和含义强相关，表情包发送频率不能过高，隔几句话才发一次，不得调用注明以外的表情。\n</emoji_stickers>`;
+}
+
+/**
+ * 群聊文本表情包解析（带异常检测）：
+ * - 命中说话人 emojiMap → 与 parseEmojiText 一致：删除标记、URL 进 images
+ * - 命中表情类别但说话人没有该表情 → invalidEmoji=true，调用方视为异常跳过这条消息
+ * - 其余方括号内容 → 按私聊规则直接舍弃
+ */
+export function parseGroupEmojiText(text, emojiMap = new Map(), categoryKeys = []) {
+  const raw = String(text || '');
+  const categories = categoryKeys instanceof Set ? categoryKeys : new Set(categoryKeys || []);
+  let invalidEmoji = false;
+  for (const match of raw.matchAll(/[\[【]([^\]】]*)[\]】]/g)) {
+    const key = String(match[1] || '').trim();
+    if (key && categories.has(key) && !emojiMap.has(key)) { invalidEmoji = true; break; }
+  }
+  return { ...parseEmojiText(raw, emojiMap), invalidEmoji };
+}
+
+/** 读取角色所有 done 且已落盘的 emoji：key -> image_path */
+export function getCharacterEmojiMap(characterId, db = getDb()) {
+  const rows = db.prepare(`
+    SELECT emoji_key, image_path FROM character_emojis
+    WHERE character_id = ? AND status = 'done' AND image_path IS NOT NULL
+  `).all(characterId);
+  return new Map(rows.map(r => [r.emoji_key, r.image_path]));
+}
+
+/** 表情包固定 tag 默认值：由代码硬编码到每条 prompt 开头，不再依赖 LLM 输出（省 token 且不会丢 tag）。
+ * 前置还能抬高权重：主体构图 → 风格 → 背景，后接表情内容。
+ * 可在表情包管理「高级设置」中修改（存 DB system_settings，key=emoji_fixed_tags）。
+ */
+export const DEFAULT_EMOJI_FIXED_TAGS = [
+  'solo',
+  'LINE sticker style, simple flat colors, expressive face',
+  'white background',
+];
+
+const EMOJI_TAGS_SETTING_KEY = 'emoji_fixed_tags';
+const EMOJI_STYLE_MODE_SETTING_KEY = 'emoji_style_mode';
+
+/** 表情包风格模式：half_body=半身（起手式额外追加 half body）/ half_body_chibi=半身Q版（半身构图+Q版大头）/ chibi_head=猪鼻大头（禁服装描述） */
+export const EMOJI_STYLE_MODES = {
+  HALF_BODY: 'half_body',
+  HALF_BODY_CHIBI: 'half_body_chibi',
+  CHIBI_HEAD: 'chibi_head',
+};
+
+/** 当前表情包风格；未设置或非法时默认半身LINE */
+export function getEmojiStyleMode() {
+  const saved = getSetting(EMOJI_STYLE_MODE_SETTING_KEY);
+  return Object.values(EMOJI_STYLE_MODES).includes(saved) ? saved : EMOJI_STYLE_MODES.HALF_BODY;
+}
+
+/** 保存表情包风格 */
+export function saveEmojiStyleMode(mode) {
+  if (!Object.values(EMOJI_STYLE_MODES).includes(mode)) {
+    throw new Error('表情包风格仅支持 half_body / half_body_chibi / chibi_head');
+  }
+  setSetting(EMOJI_STYLE_MODE_SETTING_KEY, mode);
+  return mode;
+}
+
+const EMOJI_WIDTH_SETTING_KEY = 'emoji_width';
+const EMOJI_HEIGHT_SETTING_KEY = 'emoji_height';
+
+/** 表情包生成分辨率：默认 512×512，范围 512–1024，步长 64（对齐 SDXL 常用档位） */
+export const EMOJI_RESOLUTION_MIN = 512;
+export const EMOJI_RESOLUTION_MAX = 1024;
+export const EMOJI_RESOLUTION_STEP = 64;
+export const DEFAULT_EMOJI_RESOLUTION = { width: 512, height: 512 };
+
+function normalizeEmojiResolutionValue(value, fallback) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  const clamped = Math.min(EMOJI_RESOLUTION_MAX, Math.max(EMOJI_RESOLUTION_MIN, n));
+  return Math.round(clamped / EMOJI_RESOLUTION_STEP) * EMOJI_RESOLUTION_STEP;
+}
+
+/** 当前表情包生成分辨率；未设置或非法时回落 512×512 */
+export function getEmojiResolution() {
+  return {
+    width: normalizeEmojiResolutionValue(getSetting(EMOJI_WIDTH_SETTING_KEY), DEFAULT_EMOJI_RESOLUTION.width),
+    height: normalizeEmojiResolutionValue(getSetting(EMOJI_HEIGHT_SETTING_KEY), DEFAULT_EMOJI_RESOLUTION.height),
+  };
+}
+
+/** 保存表情包生成分辨率（自动夹取范围并对齐步长档位），返回归一化后的值 */
+export function saveEmojiResolution(width, height) {
+  const next = {
+    width: normalizeEmojiResolutionValue(width, DEFAULT_EMOJI_RESOLUTION.width),
+    height: normalizeEmojiResolutionValue(height, DEFAULT_EMOJI_RESOLUTION.height),
+  };
+  setSetting(EMOJI_WIDTH_SETTING_KEY, String(next.width));
+  setSetting(EMOJI_HEIGHT_SETTING_KEY, String(next.height));
+  return next;
+}
+
+/** 当前固定 tag 文本（逗号分隔）；未自定义时回落默认值 */
+export function getEmojiFixedTagsText() {
+  const saved = getSetting(EMOJI_TAGS_SETTING_KEY);
+  const text = typeof saved === 'string' ? saved.trim() : '';
+  return text || DEFAULT_EMOJI_FIXED_TAGS.join(', ');
+}
+
+/** 保存固定 tag 文本（逗号分隔），空白折叠为单空格 */
+export function saveEmojiFixedTagsText(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) throw new Error('固定 tag 不能为空');
+  setSetting(EMOJI_TAGS_SETTING_KEY, clean);
+  return clean;
+}
+
+/** 给 prompt 前置缺失的固定 tag（已存在则跳过，大小写不敏感，保留原文大小写）；tagsText 缺省读当前配置 */
+function prependFixedEmojiTags(prompt, tagsText) {
+  const listText = typeof tagsText === 'string' && tagsText.trim() ? tagsText : getEmojiFixedTagsText();
+  const original = String(prompt || '').trim();
+  const lower = original.toLowerCase();
+  const tags = listText.split(',').map(t => t.trim()).filter(Boolean);
+  const missing = tags.filter(tag => !lower.includes(tag.toLowerCase()));
+  if (missing.length === 0) return original;
+  return original ? `${missing.join(', ')}, ${original}` : missing.join(', ');
+}
+
+/** 兜底 prompt：当创造助手返回 JSON 缺某个 key 时使用，固定 tag 由 prependFixedEmojiTags 统一前置 */
+function fallbackEmojiPrompt(char, key) {
+  const cross = buildImageCrossRefInfo(char);
+  const identity = cross.split('\n')[0] || char.display_name || 'character';
+  return [
+    `${key} expression`,
+    'centered composition, no background objects',
+    identity,
+  ].join(', ');
+}
+
+/** 解析创造助手返回的 JSON object，确保当前表情类别的 key 全部存在；fixedTagsText 为按模式组装后的起手式 tag */
+export function parseEmojiPromptJson(raw, char, keys = DEFAULT_EMOJI_KEYS, fixedTagsText = null) {
+  let text = String(raw || '').trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) text = fenced[1].trim();
+
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) text = text.slice(start, end + 1);
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    // 常见失败：模型把角色写法的 \( 原样写进 JSON 字符串，\X 不在 JSON 合法转义（" \ / b f n r t u）内；
+    // 按连续反斜杠整段修复：奇数个反斜杠且其后是白名单外字符时补一个反斜杠（\( → \\(），其余不动；
+    // 救回全部内容，而不是整体退到兜底 prompt
+    const repaired = text.replace(/(\\+)([\s\S])?/g, (m, run, c) => {
+      if (!c || run.length % 2 === 0 || /["\\\/bfnrtu]/.test(c)) return m;
+      return `${run}\\${c}`;
+    });
+    if (repaired !== text) {
+      try {
+        parsed = JSON.parse(repaired);
+        console.warn('[emoji] JSON.parse failed, recovered after repairing invalid escapes:', err.message);
+      } catch (err2) {
+        console.warn('[emoji] JSON.parse failed after escape repair, using fallback prompts:', err2.message);
+      }
+    } else {
+      console.warn('[emoji] JSON.parse failed, using fallback prompts:', err.message);
+    }
+  }
+
+  const out = {};
+  for (const key of keys) {
+    const val = typeof parsed?.[key] === 'string' ? parsed[key].trim() : '';
+    out[key] = prependFixedEmojiTags(val || fallbackEmojiPrompt(char, key), fixedTagsText);
+  }
+  return out;
+}
+
+/**
+ * 表情包专用生图规则（替代通用 image_prompt 全局规则）：
+ * 只保留角色写法核心，去掉多人/场景/光影/氛围等表情包用不到的要求；服饰约束按模式注入。
+ */
+function buildEmojiImageRule(styleMode) {
+  const chibi = styleMode === EMOJI_STYLE_MODES.CHIBI_HEAD;
+  const anchors = chibi
+    ? '发型、发色、瞳色、瞳孔/眼球特征、嘴巴、表情、头部配饰等至少 3 项'
+    : '发型、发色、瞳色、标志性服装（上半身）、头部配饰、辨识特征等至少 6 项；不要写鞋袜、腿部、体型（如 shoes, boots, stockings, tall figure，会拖成全身构图）';
+  const example = chibi
+    ? "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, star-shaped pupils, gold hair ornament\\) happy grin, smile'"
+    : "'Furina \\(Genshin Impact\\) \\(white hair with blue streaks, blue eyes, blue top hat, lace gloves\\) happy grin, smile'";
+  const modeRule = chibi
+    ? '猪鼻大头风格只保留大头与表情, 角色必须转成 Q版大头。允许项：发型、发色、瞳色、眼球/瞳孔特征、眉毛、嘴巴、表情、脸型、头部配饰。禁止项：任何服装、衣着、脖颈以下身体、胸部、腹部、腰部、臀部、腿部、鞋袜、choker/项链；禁止词包括但不限于 suit, midriff, exposed midriff, build, figure, chest, breast, waist, hips, legs, boots, stockings, skirt, pants, shorts, shoes, choker, necklace, torso, clothing, outfit。'
+    : styleMode === EMOJI_STYLE_MODES.HALF_BODY_CHIBI
+      ? '半身Q版风格表情包（构图由系统前置 tag 固定：chibi, big head, upper body），角色画成Q版大头小身体、上半身入镜，只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图变成真实头身比例或完整全身；角色服装保持原设定即可，无需为场景换装。'
+      : '半身构图LINE风格表情包（构图由系统前置 tag 固定：half body, upper body, close-up），只描写表情、头部与肩臂/手的动作；禁止描写腿部、站姿、奔跑、跳跃、转身等全身或下半身动作，避免构图被拖成全身；不要写 chibi character、big head 等 Q版描述，半身模式保持角色原有头身比例；角色服装保持原设定即可，无需为场景换装。';
+  return [
+    '本任务生成 SDXL 表情包提示词，适用以下专用生图规则（替代通用生图规则）：',
+    `1. 角色写法（核心）：每个 prompt 中的角色一律写成 'Name \\(Series\\)'，作品名后用括号注明${anchors}，随后接角色在该表情下的表情与肢体动作。示例：${example}。`,
+    `2. ${modeRule}`,
+    '3. 全英文，不出现中文；不使用未转义的双引号，需要引用时一律用单引号。',
+  ].join('\n');
+}
+
+/** 调创造助手生成表情 prompt（json_object，温度 0.75），keys 缺省读取 DB 中可编辑的类别 */
+export async function generateEmojiPrompts(char, style = '', keys = null) {
+  const emojiKeys = keys || getEmojiCategories();
+  const system0 = getSystemRules({ roleplay: false });
+  // 完整外观段（含生效外观注入）剥掉「## 你的外观」标题行，由下方「角色外观：」标签替代
+  const appearanceSection = buildCharacterAppearanceSection(char);
+  const appearance = appearanceSection ? appearanceSection.replace(/^##[^\n]*\n?/, '').trim() : '';
+  const styleMode = getEmojiStyleMode();
+  const system1 = buildEmojiImageRule(styleMode);
+  // 构图 tag 放最前吃最高权重，是半身/大头构图稳定性的关键
+  const MODE_FRAMING_TOKENS = {
+    [EMOJI_STYLE_MODES.HALF_BODY]: ['half body', 'upper body', 'close-up'],
+    [EMOJI_STYLE_MODES.HALF_BODY_CHIBI]: ['(chibi:2)', '(big head:2)', '(upper body:2)'],
+    [EMOJI_STYLE_MODES.CHIBI_HEAD]: ['only head', 'chibi character', 'big head'],
+  };
+  const baseTags = getEmojiFixedTagsText().split(',').map(t => t.trim()).filter(Boolean);
+  const tagsText = [...(MODE_FRAMING_TOKENS[styleMode] || []), ...baseTags].join(', ');
+  // 高缓存分层：稳定指令、角色信息拆成独立 system，用户方向单独放最后
+  const requirements = [
+    `prompt 生成格式遵循前面生图规则中的角色写法，${emojiKeys.length} 条 prompt 中的角色写法必须保持一致。`,
+    '在此前提下，每个 prompt 只描述该表情下的表情、神态与肢体动作，英文，不超过 80 词，不出现中文，不使用双引号（需要引用时一律用单引号）。',
+  ];
+  requirements.push(`不要写背景、画风、构图类描述（${tagsText}）。这些固定 tag 由系统在生成后自动前置到每条 prompt 开头，你重复输出只会浪费 token。`);
+  requirements.push('输出严格 JSON object：键是上面的中文表情名，值是对应 prompt 字符串。不要 Markdown 代码块，不要解释。');
+  // 输出示例演示双重转义：JSON 源码里的 \\( 解析后即生图规则要求的 \(；单个 \( 是非法 JSON 转义
+  const outputExample = '{"开心": "Name \\\\(Series\\\\) \\\\(hair color, eye color, signature outfit\\\\) happy grin, smile", "难过": "Name \\\\(Series\\\\) \\\\(hair color, eye color, signature outfit\\\\) teary eyes, sad frown"}';
+  const system2 = `你是 LINE 表情包提示词生成助手。
+请为角色生成 ${emojiKeys.length} 种表情的 SDXL 英文提示词。
+
+表情列表：${emojiKeys.join('、')}
+
+固定要求：
+${requirements.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+输出格式示例（只演示格式与转义写法，示例仅展示前 2 个键，实际必须输出全部 ${emojiKeys.length} 个键；角色名与外观锚点必须来自角色资料，不得照抄示例内容）：
+${outputExample}
+注意：生图规则中的角色写法 \\( 是指最终 prompt 文本；写进 JSON 字符串时必须把每个反斜杠写成两个，即 \\\\(，只写一个反斜杠属于非法 JSON 转义，会导致解析失败。`;
+  const system3 = `${char.short_prompt || ''}\n\n角色外观：\n${appearance || '以 short_prompt 为准，保持角色原有辨识度'}`;
+
+  const displayName = char.display_name || char.name || '目标角色';
+  // user 层明确指向角色资料，防止模型跑偏到别的角色或泛化形象
+  const charRef = `为上方角色资料中的角色「${displayName}」生成上述全部 ${emojiKeys.length} 种表情的 prompt。角色的名字、外观锚点与辨识特征严格以该角色资料为准，套用到每一种表情上，${emojiKeys.length} 条 prompt 必须保持同一个角色形象。`;
+  const userPromptParts = [charRef];
+  if (style) {
+    userPromptParts.push(`用户指定表情包整体风格：${style}。必须把该风格明确写入每个 prompt 中，与 LINE 表情包风格叠加。这是本次最重要的方向，优先级最高。`);
+  }
+  const userPrompt = userPromptParts.join('\n');
+
+  const raw = await chatSync(
+    [
+      { role: 'system', content: system0 },
+      { role: 'system', content: system1 },
+      { role: 'system', content: system2 },
+      { role: 'system', content: system3 },
+      { role: 'user', content: userPrompt },
+    ],
+    {
+      temperature: 0.75,
+      max_tokens: 4096,
+      response_format: { type: 'json_object' },
+      label: '表情包生成',
+    }
+  );
+
+  return parseEmojiPromptJson(raw, char, emojiKeys, tagsText);
+}
+
+/** 角色 loras 解析（与私聊生图保持一致） */
+export function parseCharacterLoras(char) {
+  if (!char?.loras) return [];
+  try {
+    const parsed = typeof char.loras === 'string' ? JSON.parse(char.loras) : char.loras;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(l => l.path && typeof l.path === 'string')
+      .map(l => ({
+        path: l.path,
+        weight: typeof l.weight === 'number' ? l.weight : 0.6,
+        triggerWord: l.triggerWord || '',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 提交 ComfyUI 生成单张表情包，并写入 data/images/emoji。
+ * @returns {Promise<{ok:boolean, url?:string, error?:string}>}
+ */
+export async function generateEmojiImage(row, char, artist = '@ebora') {
+  const characterId = row.character_id;
+  const emojiKey = row.emoji_key;
+  const finalArtist = typeof artist === 'string' && artist.trim() ? artist.trim() : '@ebora';
+  const loras = parseCharacterLoras(char);
+
+  const result = await generateImageRaw(row.prompt, {
+    scene: 'chat',                 // LoRA 场景过滤沿用私聊
+    workflowScene: 'emoji',        // hybrid 模式下允许为表情包单独配置工作流
+    disableRAG: true,        // prompt 已由创造助手定稿，不再走 RAG 改写
+    persistPreparation: false,
+    ...getEmojiResolution(),
+    artist: finalArtist,
+    ...(loras.length > 0 ? { loras } : {}),
+    ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
+  });
+
+  if (!result.success || result.images.length === 0) {
+    return { ok: false, error: result.error || 'ComfyUI 未返回图片' };
+  }
+
+  const img = result.images[0];
+  const filename = `char_${characterId}_${emojiKey}_${Date.now()}.png`;
+  const url = saveBase64Image('emoji', filename, img.base64);
+  try { invalidateGalleryCache(); } catch {}
+  return { ok: true, url };
+}

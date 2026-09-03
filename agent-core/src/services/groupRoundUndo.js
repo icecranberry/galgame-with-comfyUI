@@ -122,6 +122,8 @@ export async function undoLastGroupRound(groupId) {
   const state = transaction();
 
   for (const url of imageUrls) {
+    // 表情包是角色的共享资产，撤回消息不删文件
+    if (String(url).includes('/images/emoji/')) continue;
     const stillReferenced = db.prepare(`SELECT 1 FROM messages WHERE images LIKE ? LIMIT 1`).get(`%${url}%`);
     if (stillReferenced) continue;
     try {

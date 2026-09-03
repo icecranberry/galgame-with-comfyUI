@@ -8,7 +8,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const comfyHeight = ref(1200)
   const eventWidth = ref(1600)
   const eventHeight = ref(1200)
-  const forceImageGen = ref(false)
+  const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
+  const deepThinkMode = ref(false)  // 私聊深度思考：planner 先规划媒介组合（文字/表情包/图片）再回复
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
@@ -18,10 +19,10 @@ export const useSettingsStore = defineStore('settings', () => {
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
   const legacyForceImageGen = localStorage.getItem('forceImageGen')
   if (legacyForceImageGen !== null) {
-    forceImageGen.value = legacyForceImageGen === 'true'
+    imageGenMode.value = legacyForceImageGen === 'true' ? 'force' : 'smart'
     localStorage.removeItem('forceImageGen')
     // 异步持久化到后端（fire-and-forget）
-    api.updateFeatureFlag('forceImageGen', forceImageGen.value).catch(() => {})
+    api.updateFeatureFlag('imageGenMode', imageGenMode.value).catch(() => {})
   }
 
   async function loadComfyConfig() {
@@ -32,8 +33,13 @@ export const useSettingsStore = defineStore('settings', () => {
       comfyHeight.value = data.comfy?.height || 1200
       eventWidth.value = data.comfy?.eventWidth || 1600
       eventHeight.value = data.comfy?.eventHeight || 1200
-      if (data.features?.forceImageGen !== undefined) {
-        forceImageGen.value = data.features.forceImageGen
+      if (data.features?.imageGenMode !== undefined) {
+        imageGenMode.value = data.features.imageGenMode
+      } else if (data.features?.forceImageGen !== undefined) {
+        imageGenMode.value = data.features.forceImageGen ? 'force' : 'smart'
+      }
+      if (data.features?.deepThinkMode !== undefined) {
+        deepThinkMode.value = !!data.features.deepThinkMode
       }
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
@@ -60,11 +66,20 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 切换强制生图开关，持久化到后端
+   * 切换配图模式：'off'（关闭）/ 'smart'（灵性判断）/ 'force'（强制生图）
    */
-  async function setForceImageGen(v) {
-    forceImageGen.value = v
-    await api.updateFeatureFlag('forceImageGen', v)
+  async function setImageGenMode(mode) {
+    if (!['off', 'smart', 'force'].includes(mode)) return
+    imageGenMode.value = mode
+    await api.updateFeatureFlag('imageGenMode', mode)
+  }
+
+  /**
+   * 切换私聊深度思考模式（planner 预规划）
+   */
+  async function setDeepThinkMode(v) {
+    deepThinkMode.value = !!v
+    await api.updateFeatureFlag('deepThinkMode', !!v)
   }
 
   async function setRealtimeAffinityDisplay(v) {
@@ -85,5 +100,5 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(id)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, forceImageGen, realtimeAffinityDisplay, hasApiKey, weatherCity, theme, loadComfyConfig, setComfySize, setEventSize, setForceImageGen, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity, setTheme }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, hasApiKey, weatherCity, theme, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity, setTheme }
 })

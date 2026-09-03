@@ -25,7 +25,7 @@
 
       <div class="nav-item" data-nav="events" style="--hue: var(--fun-orange)" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
         <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
             <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
           </svg>
@@ -36,7 +36,7 @@
 
       <div class="nav-item" data-nav="schedule" style="--hue: var(--fun-teal)" :class="{ active: $route.path.startsWith('/schedule') }" title="日程" @click="handleScheduleClick">
         <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
@@ -51,8 +51,8 @@
 
       <router-link to="/gallery" data-nav="gallery" style="--hue: var(--fun-blue)" class="nav-item" :class="{ active: $route.path.startsWith('/gallery') }" title="相册">
         <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
-          <path stroke="currentColor" stroke-width="20" d="M898.8 748.4c-11.9 0-21.5-9.6-21.5-21.5V254.1c0-23.7-19.3-43-43-43H189.7c-23.7 0-43 19.3-43 43v515.7c0 23.7 19.3 43 43 43h537.2c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5H189.7c-47.4 0-86-38.5-86-86V254.1c0-47.4 38.5-86 86-86h644.7c47.4 0 86 38.6 86 86v472.8c0 11.8-9.6 21.4-21.5 21.4z"/>
-          <path stroke="currentColor" stroke-width="20" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z"/>
+          <path stroke="currentColor" stroke-width="35" d="M898.8 748.4c-11.9 0-21.5-9.6-21.5-21.5V254.1c0-23.7-19.3-43-43-43H189.7c-23.7 0-43 19.3-43 43v515.7c0 23.7 19.3 43 43 43h537.2c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5H189.7c-47.4 0-86-38.5-86-86V254.1c0-47.4 38.5-86 86-86h644.7c47.4 0 86 38.6 86 86v472.8c0 11.8-9.6 21.4-21.5 21.4z"/>
+          <path stroke="currentColor" stroke-width="35" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z"/>
         </svg>
         <span class="nav-label">相册</span>
       </router-link>
@@ -72,9 +72,7 @@
 
     <div class="nav-bottom">
       <router-link to="/settings" data-nav="settings" style="--hue: var(--fun-neutral)" class="nav-item" :class="{ active: $route.path === '/settings' }" title="设置">
-        <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
-          <path d="M416.4 958h191.2V849.7c0-12.7 6.4-25.5 19.1-31.9 31.9-12.7 63.7-31.9 89.2-51 12.7-6.4 25.5-6.4 38.2 0l95.6 57.3 95.6-165.7-95.6-57.3C837 588.5 830.6 575.7 837 563c0-19.1 6.4-31.9 6.4-51s0-31.9-6.4-51c0-12.7 6.4-25.5 12.7-31.9l95.6-57.3-95.6-165.7-95.6 57.3c-12.7 6.4-25.5 6.4-38.2 0-25.5-19.1-57.3-38.2-89.2-51-12.7-12.7-19.1-25.5-19.1-38.2V66H416.4v108.3c0 12.7-6.4 25.5-19.1 31.9-31.9 12.7-63.7 31.9-89.2 51-12.7 6.4-25.5 6.4-38.2 0l-95.6-51-95.6 165.6 95.6 57.3c12.7 6.4 19.1 19.1 12.7 31.9 0 19.1-6.4 31.9-6.4 51s0 31.9 6.4 51c6.4 12.7 0 25.5-12.7 31.9l-95.6 57.3 95.6 165.7 95.6-57.3c12.7-6.4 25.5-6.4 38.2 0 25.5 19.1 57.3 38.2 89.2 51 12.7 6.4 19.1 19.1 19.1 31.9V958z m223 63.7H384.6c-19.1 0-31.9-12.7-31.9-31.9v-121c-25.5-12.7-51-25.5-70.1-38.2l-101.9 63.7c-12.7 6.4-31.9 6.4-44.6-12.7L8.6 658.6c-12.7-19.1-6.4-38.2 12.7-44.6l101.9-63.7v-76.5L21.4 410.1c-19.1-6.4-25.5-25.5-12.7-44.6l127.4-223c6.4-12.7 25.5-19.1 44.6-6.4l101.9 63.7c19.1-12.7 44.6-31.9 70.1-38.2V34.1c0-19.1 12.7-31.9 31.9-31.9h254.9c19.1 0 31.9 12.7 31.9 31.9v121.1c25.5 12.7 51 25.5 70.1 38.2l101.9-63.7c12.7-6.4 31.9-6.4 44.6 12.7l127.4 223c12.7 19.1 6.4 38.2-12.7 44.6l-101.9 63.7v76.5l101.9 63.7c12.7 6.4 19.1 25.5 12.7 44.6L888 881.5c-6.4 12.7-25.5 19.1-44.6 12.7l-101.9-63.7c-19.1 12.7-44.6 31.9-70.1 38.2v121.1c-0.1 19.2-12.8 31.9-32 31.9zM512 703.2c-108.3 0-191.2-82.8-191.2-191.2S403.7 320.8 512 320.8 703.2 403.7 703.2 512 620.3 703.2 512 703.2z m0-318.6c-70.1 0-127.4 57.3-127.4 127.4S441.9 639.4 512 639.4 639.4 582.1 639.4 512 582.1 384.6 512 384.6z"/>
-        </svg>
+        <gear-icon :size="24" />
         <span class="nav-label">设置</span>
       </router-link>
     </div>
@@ -90,6 +88,7 @@ import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
+import GearIcon from './GearIcon.vue'
 
 const router = useRouter()
 const route = useRoute()

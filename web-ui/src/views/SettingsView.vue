@@ -15,9 +15,14 @@
         <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
         <div class="comfy-tabs">
-          <button v-for="t in comfyTabs" :key="t.mode"
+          <div v-for="t in comfyTabs" :key="t.mode"
+            role="button"
+            tabindex="0"
             :class="['comfy-tab', { active: comfyTab === t.mode }]"
-            @click="switchComfyTab(t.mode)">{{ t.label }}</button>
+            @click="switchComfyTab(t.mode)"
+            @keydown.enter.prevent="switchComfyTab(t.mode)"
+            @keydown.space.prevent="switchComfyTab(t.mode)"
+          >{{ t.label }}</div>
         </div>
 
         <div class="comfy-form-stage">
@@ -25,20 +30,30 @@
             <div :key="comfyTab" class="comfy-form-inner">
               <div class="fav-input-row">
                 <input v-model="form[activeFields.artist]" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
-                <button class="fav-star-btn" title="收藏当前画师串" @click="addToFavorites(comfyTab)" :disabled="!form[activeFields.artist].trim()">☆</button>
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="fav-star-btn"
+                  :class="{ 'is-disabled': !form[activeFields.artist].trim() }"
+                  :aria-disabled="!form[activeFields.artist].trim()"
+                  title="收藏当前画师串"
+                  @click="addToFavorites(comfyTab)"
+                  @keydown.enter.prevent="addToFavorites(comfyTab)"
+                  @keydown.space.prevent="addToFavorites(comfyTab)"
+                >☆</div>
               </div>
               <template v-if="artistFavorites.length">
-                <div class="fav-section-title">已选择的画师 / 风格</div>
+                <div class="fav-section-title">收藏的画师 / 风格</div>
                 <div class="fav-chips">
-                <button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" :class="{ active: fav.artist === form[activeFields.artist] }" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
+                <linshe-button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" variant="chip" :active="fav.artist === form[activeFields.artist]" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
                   {{ fav.label }}
                   <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
-                </button>
+                </linshe-button>
                 </div>
               </template>
               <div class="fr">
-                <div class="fh"><label class="fl">宽度</label><input v-model.number="form[activeFields.width]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
-                <div class="fh"><label class="fl">高度</label><input v-model.number="form[activeFields.height]" type="number" class="fi" min="256" max="4096" @input="markDirty" /></div>
+                <div class="fh"><label class="fl">宽度</label><linshe-input v-model.number="form[activeFields.width]" type="number" min="256" max="4096" @input="markDirty" /></div>
+                <div class="fh"><label class="fl">高度</label><linshe-input v-model.number="form[activeFields.height]" type="number" min="256" max="4096" @input="markDirty" /></div>
               </div>
               <div class="fpresets-head">
                 <span class="resolution-title">分辨率</span>
@@ -46,7 +61,7 @@
               </div>
               <div class="fpresets">
                 <span class="pl">预设：</span>
-                <button v-for="p in presets" :key="p.label" class="pbtn" :class="{ active: isPresetActive(p) }" @click="applyPreset(p, comfyTab)">{{ p.label }}</button>
+                <linshe-button v-for="p in presets" :key="p.label" class="pbtn" variant="chip" :active="isPresetActive(p)" @click="applyPreset(p, comfyTab)">{{ p.label }}</linshe-button>
               </div>
             </div>
           </Transition>
@@ -61,7 +76,7 @@
               <div class="hiresfix-desc">图片进一步高清细化设置</div>
             </div>
             <span class="hiresfix-summary">最长边 {{ hiresMaxSize }} · {{ hiresSteps }} 步 · 重绘 {{ hiresDenoise }} · CFG {{ hiresCfg }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
-            <button class="hiresfix-link" @click="openHiresFixSettings">设置 →</button>
+            <linshe-button class="hiresfix-link" variant="link" @click="openHiresFixSettings">设置 →</linshe-button>
           </div>
         </div>
         <div class="quality-section">
@@ -71,19 +86,19 @@
               <div class="quality-desc">生图时注入的画质增强词，留空使用系统默认</div>
             </div>
             <span class="quality-summary" :class="{ 'is-default': !qualityPrompt }" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt ? qualityPrompt : '系统默认' }}</span>
-            <button class="quality-link" @click="openQualityDialog">更改 →</button>
+            <linshe-button class="quality-link" variant="link" @click="openQualityDialog">更改 →</linshe-button>
           </div>
         </div>
         <div class="sa">
-          <button class="btn-primary" :disabled="!dirty" @click="saveComfy">保存</button>
+          <linshe-button variant="primary" :disabled="!dirty" @click="saveComfy">保存</linshe-button>
           <span v-if="saved" class="smsg">已保存</span>
           <div class="sa-spacer"></div>
-          <button class="btn-ghost wf-action-btn wf-lora-btn" @click="openGlobalLora">
+          <linshe-button class="wf-action-btn wf-lora-btn" variant="secondary" @click="openGlobalLora">
             全局LoRA
             <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
-          </button>
-          <button class="btn-ghost wf-action-btn wf-mode-btn" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</button>
-          <button class="btn-ghost wf-action-btn wf-mode-btn" @click="openWfModeDialog">切换工作流模式</button>
+          </linshe-button>
+          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</linshe-button>
+          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" @click="openWfModeDialog">切换工作流模式</linshe-button>
         </div>
       </div>
 
@@ -104,8 +119,10 @@
               ref="sceneDescRef"
               v-model="freeSceneDesc"
               class="free-scene-textarea"
-              placeholder="（置空使用默认）自由描述任意想要的画面，邻舍会自动完善提示词"
-              @focus="sceneDescFocused = true"
+              placeholder="（置空使用默认）自由描述任意画面"
+              @focus="onSceneDescFocus"
+              @input="resizeSceneDesc"
+              @keydown.enter.exact="submitOnEnter($event, runFreeSceneTest)"
               @blur="onSceneDescBlur"
             ></textarea>
             <!-- 收起态的单行省略展示（textarea 不支持 ellipsis，用覆盖层实现），点击展开编辑 -->
@@ -116,13 +133,18 @@
               @mousedown.prevent="focusSceneDesc"
             >{{ freeSceneDesc }}</div>
           </div>
-          <button
-            class="btn-primary free-scene-btn"
-            :disabled="styleTesting || !freeSceneDesc.trim()"
-            @click="runFreeSceneTest"
-          >
-            {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成' }}
-          </button>
+          <!-- 有输入内容时才出现，渐入渐出 -->
+          <Transition name="gen-btn-fade">
+            <linshe-button
+              v-if="freeSceneDesc.trim() || styleTesting"
+              class="free-scene-btn"
+              variant="primary"
+              :disabled="styleTesting || !freeSceneDesc.trim()"
+              @click="runFreeSceneTest"
+            >
+              {{ styleTesting ? '生成中...' : generatedPrompt ? '重新生成提示词' : '生成提示词' }}
+            </linshe-button>
+          </Transition>
         </div>
 
         <div
@@ -137,6 +159,8 @@
           v-model="generatedPrompt"
           class="generated-prompt-box generated-prompt-editor"
           rows="3"
+          @input="resizePromptEditor"
+          @keydown.enter.exact="submitOnEnter($event, runGeneratedPromptTest)"
           @keydown.esc="promptEditing = false"
           @blur="promptEditing = false"
         ></textarea>
@@ -170,36 +194,52 @@
         </div>
 
         <div class="style-test-row">
-          <button
-            class="btn-primary style-test-btn"
+          <linshe-button
+            class="style-test-btn"
+            variant="primary"
             :disabled="styleTesting"
             @click="runStyleTest"
           >
             {{ styleTesting ? '生成中...' : '🎨 生成画面' }}
-          </button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'chat' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'chat'"
-          >对话参数</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'moments' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'moments'"
-          >朋友圈参数</button>
-          <button
-            :class="['test-mode-btn', { active: testMode === 'event' }]"
-            :disabled="styleTesting"
-            @click="testMode = 'event'"
-          >奇遇参数</button>
-          <button
-            class="btn-primary style-test-btn hires-test-btn"
+          </linshe-button>
+          <div class="test-mode-segmented">
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'chat', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'chat')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'chat')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'chat')"
+            >对话参数</div>
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'moments', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'moments')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'moments')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'moments')"
+            >朋友圈参数</div>
+            <div
+              role="button"
+              tabindex="0"
+              :class="['test-mode-btn', { active: testMode === 'event', 'is-disabled': styleTesting }]"
+              :aria-disabled="styleTesting"
+              @click="!styleTesting && (testMode = 'event')"
+              @keydown.enter.prevent="!styleTesting && (testMode = 'event')"
+              @keydown.space.prevent="!styleTesting && (testMode = 'event')"
+            >奇遇参数</div>
+          </div>
+          <linshe-button
+            class="style-test-btn hires-test-btn"
+            variant="primary"
             :disabled="hireTesting"
             @click="runHiresTest"
           >
             {{ hireTesting ? '细化中...' : '测试HiresFix细化' }}
-          </button>
-          <button class="test-prompt-btn" @click="openPromptEditor">默认测试提示词</button>
+          </linshe-button>
+          <linshe-button class="test-prompt-btn" variant="link" @click="openPromptEditor">默认测试提示词</linshe-button>
         </div>
 
         <div v-if="hiresError" class="style-error">{{ hiresError }}</div>
@@ -234,25 +274,25 @@
           <div class="prompt-editor-modal">
             <div class="prompt-editor-header">
               <h3>编辑测试提示词</h3>
-              <button class="prompt-editor-close" @click="showPromptEditor = false">✕</button>
+              <linshe-button class="prompt-editor-close" variant="icon" @click="showPromptEditor = false">✕</linshe-button>
             </div>
             <div class="prompt-editor-body">
               <div class="prompt-editor-field">
                 <label class="fl">对话配图提示词</label>
-                <textarea v-model="testPrompts.chat" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.chat" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
               <div class="prompt-editor-field">
                 <label class="fl">朋友圈配图提示词</label>
-                <textarea v-model="testPrompts.moments" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.moments" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
               <div class="prompt-editor-field">
                 <label class="fl">奇遇配图提示词</label>
-                <textarea v-model="testPrompts.event" class="fi prompt-textarea" rows="5"></textarea>
+                <linshe-input v-model="testPrompts.event" class="fi prompt-textarea" type="textarea" rows="5" />
               </div>
             </div>
             <div class="prompt-editor-actions">
-              <button class="btn-ghost" @click="resetTestPrompts">恢复默认</button>
-              <button class="btn-primary" @click="saveTestPrompts">保存</button>
+              <linshe-button variant="secondary" @click="resetTestPrompts">恢复默认</linshe-button>
+              <linshe-button variant="primary" @click="saveTestPrompts">保存</linshe-button>
             </div>
           </div>
         </div>
@@ -263,20 +303,23 @@
         <div class="llm-card-header">
           <h3>LLM API 设置</h3>
           <!-- 每日免费鸡蛋：点击开启/关闭，免 Key 走 opencode zen 免费端点 -->
-          <button
+          <div
             ref="freeEggBtn"
-            type="button"
-            :class="['free-egg-btn', { active: freeEgg }]"
-            :disabled="freeEggBusy"
+            role="button"
+            tabindex="0"
+            :class="['free-egg-btn', { active: freeEgg, 'is-disabled': freeEggBusy }]"
+            :aria-disabled="freeEggBusy"
             :title="freeEgg ? '点击关闭，恢复自有 LLM 配置' : '点击开启：免 Key 使用 opencode 免费模型，每5小时每IP限200次'"
             @click="onFreeEggClick"
+            @keydown.enter.prevent="onFreeEggClick"
+            @keydown.space.prevent="onFreeEggClick"
           >
             <span class="free-egg-label">{{ freeEgg ? '🥚 免费鸡蛋享用中' : '🥚 每日免费鸡蛋' }}</span>
             <span v-if="eggSplash" :key="eggSplash.id" class="egg-splash" aria-hidden="true">
               <i v-for="drop in eggSplash.drops" :key="drop.id" class="egg-drop" :style="drop.style"></i>
               <i v-for="shard in eggSplash.shards" :key="shard.id" class="egg-shard" :style="shard.style"></i>
             </span>
-          </button>
+          </div>
         </div>
 
         <Transition name="egg-page" mode="out-in">
@@ -287,26 +330,34 @@
         <!-- LLM Profile 切换 -->
         <div class="llm-profiles-bar">
           <div v-for="p in llmProfiles" :key="p.id" class="profile-item-row">
-            <button
+            <div
+              role="button"
+              tabindex="0"
               :class="['profile-tag', { active: p.id === activeLlmProfileId }]"
               @click="switchProfile(p.id)"
+              @keydown.enter.prevent="switchProfile(p.id)"
+              @keydown.space.prevent="switchProfile(p.id)"
               :title="(p.preview || '未设置Key') + ' · ' + (p.model || '?')"
             >
               <span class="profile-name">{{ p.name }}</span>
               <span v-if="p.id === activeLlmProfileId" class="profile-dot"></span>
-            </button>
-            <button
+            </div>
+            <div
               v-if="llmProfiles.length > 1 && p.id !== activeLlmProfileId"
+              role="button"
+              tabindex="0"
               class="profile-tag profile-delete-btn"
               @click="removeProfile(p.id)"
+              @keydown.enter.prevent="removeProfile(p.id)"
+              @keydown.space.prevent="removeProfile(p.id)"
               title="删除该配置"
             >
               <span class="profile-x">×</span>
-            </button>
+            </div>
           </div>
-          <button class="profile-tag profile-add" @click="showAddProfile = true">
+          <div role="button" tabindex="0" class="profile-tag profile-add" @click="showAddProfile = true" @keydown.enter.prevent="showAddProfile = true" @keydown.space.prevent="showAddProfile = true">
             <span>+ 新增配置</span>
-          </button>
+          </div>
         </div>
 
         <!-- 新增 Profile 弹窗 -->
@@ -316,7 +367,7 @@
               <div class="add-profile-dialog">
                 <h4>新增配置</h4>
                 <p class="fd">将当前 LLM 配置（地址、模型、自定义开关等）保存为一个新的配置快照（不含 API Key）</p>
-                <input
+                <linshe-input
                   v-model="newProfileName"
                   class="fi"
                   placeholder="输入配置名称，如：我的OpenAI、本地LLM"
@@ -324,8 +375,8 @@
                   ref="newProfileInput"
                 />
                 <div class="add-profile-actions">
-                  <button class="btn-ghost" @click="showAddProfile = false">取消</button>
-                  <button class="btn-primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</button>
+                  <linshe-button variant="secondary" @click="showAddProfile = false">取消</linshe-button>
+                  <linshe-button variant="primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</linshe-button>
                 </div>
               </div>
             </div>
@@ -335,7 +386,7 @@
         <!-- API Key -->
         <label class="fl llm-label">API Key</label>
         <div class="apikey-row">
-          <input
+          <linshe-input
             v-model="llmApiKey"
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
@@ -343,10 +394,10 @@
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
             @input="markLlmDirty"
           />
-          <button class="sp-btn-small" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</button>
-          <button class="sp-btn-small" style="flex-shrink:0" @click="showApiKey = !showApiKey">
+          <linshe-button class="sp-btn-small" size="sm" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
+          <linshe-button class="sp-btn-small" variant="ghost" size="sm" style="flex-shrink:0" @click="showApiKey = !showApiKey">
             {{ showApiKey ? '隐藏' : '显示' }}
-          </button>
+          </linshe-button>
         </div>
         <div v-if="llmPreview.hasApiKey" class="key-status">
           <span class="key-ok">🔑 当前:</span>
@@ -356,66 +407,30 @@
 
         <!-- API 地址 -->
         <label class="fl llm-label" style="margin-top:14px">API 地址</label>
-        <DropdownSelect v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
-        <input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
+        <linshe-select v-model="llmBaseURLSelectVal" :options="llmBaseURLOptions" placeholder="请选择API地址" style="margin-bottom:6px" />
+        <linshe-input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
         <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
-        <div ref="llmModelPicker" class="llm-model-picker">
-          <div class="llm-model-row">
-            <div class="llm-model-combobox">
-              <input
-                v-model="llmModel"
-                class="fi"
-                autocomplete="off"
-                placeholder="deepseek-v4-flash"
-                role="combobox"
-                aria-label="模型"
-                aria-autocomplete="list"
-                aria-controls="llm-model-options"
-                :aria-expanded="llmModelsOpen"
-                @focus="openLlmModelOptions"
-                @click="openLlmModelOptions"
-                @input="onLlmModelInput"
-                @keydown="onLlmModelKeydown"
-              />
-              <div
-                v-if="llmModelsOpen && llmModels.length"
-                id="llm-model-options"
-                class="llm-model-options"
-                role="listbox"
-                aria-label="可用模型"
-              >
-                <button
-                  v-for="(model, index) in filteredLlmModels"
-                  :id="`llm-model-option-${index}`"
-                  :key="model"
-                  type="button"
-                  role="option"
-                  class="llm-model-option"
-                  :class="{ selected: model === llmModel, active: index === llmModelActiveIndex }"
-                  :aria-selected="model === llmModel"
-                  :title="model"
-                  @mouseenter="llmModelActiveIndex = index"
-                  @mousedown.prevent="selectLlmModel(model)"
-                >
-                  <span>{{ model }}</span>
-                  <svg v-if="model === llmModel" class="llm-model-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                </button>
-                <div v-if="filteredLlmModels.length === 0" class="llm-model-empty">未找到匹配模型</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="model-fetch-btn"
-              :disabled="llmModelsLoading || !llmBaseURL.trim()"
-              :aria-expanded="llmModelsOpen"
-              aria-controls="llm-model-options"
-              @click="loadAvailableModels"
-            >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</button>
-          </div>
-          <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
+        <div class="llm-model-row">
+          <linshe-select
+            ref="llmModelSelect"
+            v-model="llmModelSelectVal"
+            class="llm-model-select"
+            :options="llmModelOptions"
+            searchable
+            allow-free-input
+            placeholder="deepseek-v4-flash"
+            aria-label="模型"
+          />
+          <linshe-button
+            class="model-fetch-btn"
+            variant="secondary"
+            :disabled="llmModelsLoading || !llmBaseURL.trim()"
+            @click="loadAvailableModels"
+          >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</linshe-button>
         </div>
+        <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
 
         <div v-if="isCustomBaseURL" class="toggle-row thinking-setting">
           <div>
@@ -431,10 +446,18 @@
         </div>
 
         <template v-if="isCustomBaseURL">
-          <button type="button" class="llm-advanced-toggle" :aria-expanded="llmAdvancedOpen" @click="toggleLlmAdvanced">
+          <div
+            role="button"
+            tabindex="0"
+            class="llm-advanced-toggle"
+            :aria-expanded="llmAdvancedOpen"
+            @click="toggleLlmAdvanced"
+            @keydown.enter.prevent="toggleLlmAdvanced"
+            @keydown.space.prevent="toggleLlmAdvanced"
+          >
             <span class="llm-advanced-label llm-label">高级设置</span>
             <svg class="llm-advanced-chevron" :class="{ open: llmAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-          </button>
+          </div>
           <CollapseTransition :show="llmAdvancedOpen">
             <div class="llm-advanced-body">
               <!-- 自定义请求头（仅自定义API时显示，部分中转站如 OpenRouter 需要） -->
@@ -443,21 +466,19 @@
               <div class="tl">自定义请求头</div>
               <div class="td">为 OpenRouter 等中转服务附加 HTTP 请求头</div>
             </div>
-            <label class="switch" title="启用自定义请求头">
-              <input v-model="llmHeadersEnabled" type="checkbox" aria-label="启用自定义请求头" @change="markLlmDirty" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="llmHeadersEnabled" title="启用自定义请求头" aria-label="启用自定义请求头" @change="markLlmDirty" />
           </div>
           <div v-if="llmHeadersEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-headers">请求头 JSON</label>
-            <textarea
+            <linshe-input
               id="llm-custom-headers"
               v-model="llmHeadersText"
               class="fi llm-json-textarea"
-              :class="{ 'fi-error': !llmHeadersValid }"
+              type="textarea"
+              :invalid="!llmHeadersValid"
               placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
               @input="markLlmDirty"
-            ></textarea>
+            />
             <p v-if="!llmHeadersValid" class="gen-error" role="alert">JSON 格式无效</p>
           </div>
 
@@ -467,21 +488,19 @@
               <div class="tl">自定义请求体</div>
               <div class="td">注入 agent 等额外 body 参数；同名字段会覆盖内置参数</div>
             </div>
-            <label class="switch" title="启用自定义请求体">
-              <input v-model="llmExtraBodyEnabled" type="checkbox" aria-label="启用自定义请求体" @change="markLlmDirty" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="llmExtraBodyEnabled" title="启用自定义请求体" aria-label="启用自定义请求体" @change="markLlmDirty" />
           </div>
           <div v-if="llmExtraBodyEnabled" class="llm-custom-editor">
             <label class="fl" for="llm-custom-body">请求体 JSON</label>
-            <textarea
+            <linshe-input
               id="llm-custom-body"
               v-model="llmExtraBodyText"
               class="fi llm-json-textarea"
-              :class="{ 'fi-error': !llmExtraBodyValid }"
+              type="textarea"
+              :invalid="!llmExtraBodyValid"
               placeholder='{"agent":"my-agent","agentName":"Nova"}'
               @input="markLlmDirty"
-            ></textarea>
+            />
             <p v-if="!llmExtraBodyValid" class="gen-error" role="alert">JSON 格式无效</p>
           </div>
 
@@ -491,10 +510,7 @@
               <div class="tl">后台 LLM 任务队列</div>
               <div class="td">限制LLM并发数量，避免本地 LLM 过载导致雪崩</div>
             </div>
-            <label class="switch">
-              <input type="checkbox" v-model="features.serializeBackgroundLLM" @change="markLlmDirty()" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="features.serializeBackgroundLLM" @change="markLlmDirty()" />
           </div>
           <div v-if="features.serializeBackgroundLLM" class="toggle-row freq-row llm-option-row" style="margin-top:8px">
             <div>
@@ -513,19 +529,26 @@
               <div class="tl">合并消息兼容更多llm模板</div>
               <div class="td">合并连续Assistant或User消息，解决 LM Studio本地模型或其他llm的模板冲突</div>
             </div>
-            <label class="switch">
-              <input type="checkbox" v-model="features.mergeMessages" @change="markLlmDirty()" />
-              <span class="slider"></span>
-            </label>
+            <linshe-switch v-model="features.mergeMessages" @change="markLlmDirty()" />
           </div>
             </div>
           </CollapseTransition>
         </template>
 
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</button>
+          <linshe-button variant="primary" :disabled="!llmDirty || !llmHeadersValid || !llmExtraBodyValid" @click="saveLlmConfig">保存</linshe-button>
           <span v-if="llmSaved" class="smsg">已保存</span>
-          <button type="button" class="relay-intro-btn relay-intro-footer" @click="showRelayModal = true">推荐中转站</button>
+          <linshe-button class="llm-test-btn" variant="secondary" :disabled="llmTesting || !llmHeadersValid || !llmExtraBodyValid" @click="runLlmConnectionTest">
+            {{ llmTesting ? '测试中…' : '测试连接' }}
+          </linshe-button>
+          <div
+            role="button"
+            tabindex="0"
+            class="relay-intro-btn relay-intro-footer"
+            @click="showRelayModal = true"
+            @keydown.enter.prevent="showRelayModal = true"
+            @keydown.space.prevent="showRelayModal = true"
+          >推荐中转站</div>
         </div>
         </div>
 
@@ -548,17 +571,17 @@
             <div class="relay-modal" role="dialog" aria-modal="true" aria-label="推荐中转站">
               <div class="relay-modal-header">
                 <h3>推荐中转站</h3>
-                <button type="button" class="relay-modal-close" aria-label="关闭" @click="showRelayModal = false">✕</button>
+                <linshe-button class="relay-modal-close" variant="icon" aria-label="关闭" @click="showRelayModal = false">✕</linshe-button>
               </div>
               <div class="relay-modal-body">
                 <p class="relay-modal-tip">以下为第三方 LLM 中转站，API Key 请在其官网获取</p>
                 <div v-for="station in relayStations" :key="station.name" class="relay-station">
                   <div class="relay-station-head">
                     <span class="relay-station-name">{{ station.name }}</span>
-                    <button type="button" class="relay-quick-btn" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
+                    <linshe-button class="relay-quick-btn" variant="secondary" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
                       <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
                       <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
-                    </button>
+                    </linshe-button>
                   </div>
                   <p class="relay-station-desc">{{ station.desc }}</p>
                   <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
@@ -580,10 +603,7 @@
             <div class="tl">好感度系统</div>
             <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
         </div>
 
         <div class="toggle-row">
@@ -591,10 +611,7 @@
             <div class="tl">聊天候选词</div>
             <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
         </div>
 
         <div class="toggle-row">
@@ -602,10 +619,15 @@
             <div class="tl">实时显示好感度</div>
             <div class="td">在聊天顶部实时显示当前好感度数值和最近变化原因</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
+        </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="tl">深度思考<span class="beta-tag">测试版</span></div>
+            <div class="td">私聊回复前 AI 先在内心盘算用什么形式表达（文字/表情包/照片），思考过程默认折叠显示。</div>
+          </div>
+          <linshe-switch :model-value="deepThinkMode" @change="onDeepThinkChange" />
         </div>
 
         <div class="toggle-row freq-row">
@@ -647,11 +669,8 @@
             class="disturb-setup-btn"
             title="防打扰设置"
             @click="openDisturbDialog"
-          >⚙</div>
-          <label class="switch">
-            <input type="checkbox" v-model="disturbMode" @change="onDisturbModeToggle" />
-            <span class="slider"></span>
-          </label>
+          ><gear-icon :size="17" /></div>
+          <linshe-switch v-model="disturbMode" @change="onDisturbModeToggle" />
         </div>
 
         <!-- 实时天气 -->
@@ -665,11 +684,8 @@
             class="disturb-setup-btn"
             title="设置城市"
             @click="openWeatherCityDialog"
-          >⚙</div>
-          <label class="switch">
-            <input type="checkbox" v-model="features.weather" @change="saveFeature('weather', features.weather)" />
-            <span class="slider"></span>
-          </label>
+          ><gear-icon :size="17" /></div>
+          <linshe-switch v-model="features.weather" @change="saveFeature('weather', features.weather)" />
         </div>
       </div>
 
@@ -677,7 +693,7 @@
       <div class="card">
         <h3>ComfyUI 连接</h3>
         <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
-        <input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
+        <linshe-input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
         <label class="cb">
           <input type="checkbox" v-model="comfySkipTls" @change="markConnDirty" />
           <span>跳过 TLS 证书验证（连接云端 HTTPS ComfyUI 失败时勾选）</span>
@@ -687,9 +703,9 @@
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
         </div>
         <div class="sa" style="margin-top:12px">
-          <button class="btn-primary" :disabled="!connDirty" @click="saveComfyUrl">保存</button>
+          <linshe-button variant="primary" :disabled="!connDirty" @click="saveComfyUrl">保存</linshe-button>
           <span v-if="connSaved" class="smsg">已保存</span>
-          <button class="btn-ghost" @click="checkHealth">刷新连接</button>
+          <linshe-button variant="secondary" @click="checkHealth">刷新连接</linshe-button>
         </div>
       </div>
 
@@ -706,23 +722,18 @@
           <div class="memory-settings-copy">
             <div class="tl">启用聊天记忆</div>
           </div>
-          <label class="switch" title="启用聊天记忆">
-            <input
-              type="checkbox"
-              v-model="features.memory"
-              aria-label="启用聊天记忆"
-              @change="saveFeature('memory', features.memory)"
-            />
-            <span class="slider"></span>
-          </label>
+          <linshe-switch v-model="features.memory" title="启用聊天记忆" aria-label="启用聊天记忆" @change="saveFeature('memory', features.memory)" />
         </div>
 
-        <button
-          type="button"
+        <div
+          role="button"
+          tabindex="0"
           class="memory-settings-entry sheen"
           style="--entry-hue: var(--fun-teal)"
           aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
+          @keydown.enter.prevent="router.push('/settings/memory')"
+          @keydown.space.prevent="router.push('/settings/memory')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -738,7 +749,7 @@
               <path d="m9 18 6-6-6-6" />
             </svg>
           </span>
-        </button>
+        </div>
       </div>
 
       <!-- MaiBot 桥接：入口卡片（复用「聊天记忆」入口样式） -->
@@ -750,12 +761,15 @@
           </div>
         </div>
 
-        <button
-          type="button"
+        <div
+          role="button"
+          tabindex="0"
           class="memory-settings-entry sheen"
           style="--entry-hue: var(--fun-violet)"
           aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
           @click="router.push('/settings/maibot')"
+          @keydown.enter.prevent="router.push('/settings/maibot')"
+          @keydown.space.prevent="router.push('/settings/maibot')"
         >
           <span class="memory-entry-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -771,7 +785,7 @@
               <path d="m9 18 6-6-6-6" />
             </svg>
           </span>
-        </button>
+        </div>
       </div>
 
     </div>
@@ -783,21 +797,20 @@
           <div class="fav-dialog">
             <div class="fav-dialog-header">
               <span>收藏画师串</span>
-              <button class="fav-dialog-close" @click="cancelAddFavorite">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelAddFavorite">✕</linshe-button>
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
-              <input
+              <linshe-input
                 ref="favDialogInput"
                 v-model="favDialog.label"
-                class="fav-dialog-input"
                 placeholder="输入收藏名称"
                 maxlength="30"
                 @keyup.enter="confirmAddFavorite"
               />
               <div class="fav-dialog-actions">
-                <button class="btn-ghost" @click="cancelAddFavorite">取消</button>
-                <button class="btn-primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</button>
+                <linshe-button variant="secondary" @click="cancelAddFavorite">取消</linshe-button>
+                <linshe-button variant="primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</linshe-button>
               </div>
             </div>
           </div>
@@ -812,20 +825,20 @@
           <div class="fav-dialog">
             <div class="fav-dialog-header">
               <span>质量提示词</span>
-              <button class="fav-dialog-close" @click="qualityDialog.show = false">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="qualityDialog.show = false">✕</linshe-button>
             </div>
             <div class="fav-dialog-body">
               <p class="fav-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
-              <textarea
+              <linshe-input
                 v-model="qualityDialog.text"
-                class="quality-dialog-textarea"
-                placeholder="masterpiece, best quality..."
+                type="textarea"
                 rows="4"
                 maxlength="500"
-              ></textarea>
+                placeholder="masterpiece, best quality..."
+              />
               <div class="fav-dialog-actions">
-                <button class="btn-ghost" @click="qualityDialog.show = false">取消</button>
-                <button class="btn-primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</button>
+                <linshe-button variant="secondary" @click="qualityDialog.show = false">取消</linshe-button>
+                <linshe-button variant="primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</linshe-button>
               </div>
             </div>
           </div>
@@ -840,7 +853,7 @@
           <div class="disturb-dialog">
             <div class="disturb-dialog-header">
               <span>防打扰设置</span>
-              <button class="fav-dialog-close" @click="cancelDisturbDialog">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelDisturbDialog">✕</linshe-button>
             </div>
             <div class="disturb-dialog-body">
               <!-- 时间段设置 -->
@@ -848,9 +861,9 @@
                 <span class="disturb-dialog-label">⏰ 静默时段</span>
                 <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
                 <div class="disturb-time-row">
-                  <input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
+                  <linshe-input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
                   <span class="disturb-time-sep">—</span>
-                  <input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
+                  <linshe-input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
                 </div>
               </div>
 
@@ -883,24 +896,18 @@
                 <label class="disturb-option-row">
                   <span class="disturb-option-label">隐藏世界观</span>
                   <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
-                  <label class="switch">
-                    <input type="checkbox" v-model="disturbDialog.hideWorld" />
-                    <span class="slider"></span>
-                  </label>
+                  <linshe-switch v-model="disturbDialog.hideWorld" aria-label="隐藏世界观" />
                 </label>
                 <label class="disturb-option-row">
                   <span class="disturb-option-label">跳过周末</span>
                   <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
-                  <label class="switch">
-                    <input type="checkbox" v-model="disturbDialog.skipWeekends" />
-                    <span class="slider"></span>
-                  </label>
+                  <linshe-switch v-model="disturbDialog.skipWeekends" aria-label="跳过周末" />
                 </label>
               </div>
 
               <div class="disturb-dialog-actions">
-                <button class="btn-ghost" @click="cancelDisturbDialog">取消</button>
-                <button class="btn-primary" @click="confirmDisturbDialog">保存设置</button>
+                <linshe-button variant="secondary" @click="cancelDisturbDialog">取消</linshe-button>
+                <linshe-button variant="primary" @click="confirmDisturbDialog">保存设置</linshe-button>
               </div>
             </div>
           </div>
@@ -915,13 +922,13 @@
           <div class="disturb-dialog" style="max-width:360px;">
             <div class="disturb-dialog-header">
               <span>天气城市设置</span>
-              <button class="fav-dialog-close" @click="weatherCityDialog.show = false">✕</button>
+              <linshe-button class="fav-dialog-close" variant="icon" @click="weatherCityDialog.show = false">✕</linshe-button>
             </div>
             <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
               <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
-              <input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
+              <linshe-input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
               <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
-                <button class="btn-primary" @click="confirmWeatherCity">保存</button>
+                <linshe-button variant="primary" @click="confirmWeatherCity">保存</linshe-button>
               </div>
             </div>
           </div>
@@ -936,12 +943,16 @@
           <div class="wf-mode-modal">
             <h3>工作流模式</h3>
             <div class="wf-mode-options">
-              <button v-for="m in workflowModeOptions" :key="m.value"
+              <div v-for="m in workflowModeOptions" :key="m.value"
+                role="button"
+                tabindex="0"
                 :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
-                @click="wfModeDraft = m.value">
+                @click="wfModeDraft = m.value"
+                @keydown.enter.prevent="wfModeDraft = m.value"
+                @keydown.space.prevent="wfModeDraft = m.value">
                 <span class="wf-mo-title">{{ m.label }}</span>
                 <span class="wf-mo-desc" v-html="m.desc"></span>
-              </button>
+              </div>
             </div>
 
             <div class="wf-mode-downloads">
@@ -966,18 +977,20 @@
                 <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
                   <span class="wf-scene-name">{{ s.label }}</span>
                   <div class="wf-scene-toggle">
-                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'turbo' }]"
-                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</button>
-                    <button :class="['wf-toggle-btn', { active: wfSceneDraft[s.key] === 'base' }]"
-                      @click="wfSceneDraft[s.key] = 'base'">base</button>
+                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                      :active="wfSceneDraft[s.key] === 'turbo'"
+                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</linshe-button>
+                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                      :active="wfSceneDraft[s.key] === 'base'"
+                      @click="wfSceneDraft[s.key] = 'base'">base</linshe-button>
                   </div>
                 </div>
               </div>
             </Transition>
 
             <div class="wf-mode-actions">
-              <button class="btn-ghost" @click="showWfModeDialog = false">取消</button>
-              <button class="btn-primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</button>
+              <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
+              <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
             </div>
           </div>
         </div>
@@ -987,17 +1000,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
-import DropdownSelect from '../components/DropdownSelect.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
 import ThemeSettingsCard from '../components/settings/ThemeSettingsCard.vue'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
+import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()
 const router = useRouter()
@@ -1183,15 +1200,15 @@ const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
 const llmModels = ref([])
 const llmModelsLoading = ref(false)
-const llmModelsOpen = ref(false)
 const llmModelsError = ref('')
-const llmModelPicker = ref(null)
-const llmModelQuery = ref('')
-const llmModelActiveIndex = ref(-1)
-const filteredLlmModels = computed(() => {
-  const query = llmModelQuery.value.trim().toLowerCase()
-  if (!query) return llmModels.value
-  return llmModels.value.filter(model => model.toLowerCase().includes(query))
+const llmModelSelect = ref(null)
+const llmModelOptions = computed(() => llmModels.value.map(model => ({ value: model, label: model })))
+const llmModelSelectVal = computed({
+  get: () => llmModel.value,
+  set: (val) => {
+    llmModel.value = val
+    markLlmDirty()
+  },
 })
 const llmThinkingMode = ref('disabled')
 const thinkingModeOptions = [
@@ -1243,6 +1260,7 @@ const llmExtraBodyValid = computed(() => {
 const showApiKey = ref(false)
 const llmDirty = ref(false)
 const llmSaved = ref(false)
+const llmTesting = ref(false)
 function markLlmDirty() { llmDirty.value = true; llmSaved.value = false }
 
 // 高级设置抽屉
@@ -1253,7 +1271,7 @@ function toggleLlmAdvanced() { llmAdvancedOpen.value = !llmAdvancedOpen.value }
 const showRelayModal = ref(false)
 const relayStations = [
   { name: '词元跳动', keysUrl: 'https://tokendance.space/keys', url: 'https://tokendance.space/gateway/v1', desc: '仍然提供v4flash预览版，所以没有涨价' },
-  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_diFEv6PmFUprNAYDqV6mK3Zs', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
+  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_sFVpaGViDHbVQrjGtHKXT2in', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
 ]
 
 const relayConfigBusy = ref(false)
@@ -1384,6 +1402,7 @@ function burstEggSplash() {
 }
 
 function onFreeEggClick() {
+  if (freeEggBusy.value) return
   burstEggSplash()
   toggleFreeEgg()
 }
@@ -1456,7 +1475,6 @@ async function loadAvailableModels() {
   }
 
   llmModelsLoading.value = true
-  llmModelsOpen.value = false
   llmModelsError.value = ''
   llmModels.value = []
   try {
@@ -1467,68 +1485,12 @@ async function loadAvailableModels() {
       headers,
     })
     llmModels.value = result.models || []
-    llmModelQuery.value = ''
-    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
-    llmModelsOpen.value = llmModels.value.length > 0
+    if (llmModels.value.length) llmModelSelect.value?.open()
   } catch (error) {
     llmModelsError.value = error.message || '获取模型失败'
     toastFn?.(llmModelsError.value, 'error')
   } finally {
     llmModelsLoading.value = false
-  }
-}
-
-function openLlmModelOptions() {
-  if (!llmModels.value.length) return
-  if (!llmModelsOpen.value) {
-    llmModelQuery.value = ''
-    llmModelActiveIndex.value = llmModels.value.indexOf(llmModel.value)
-  }
-  llmModelsOpen.value = true
-}
-
-function onLlmModelInput() {
-  llmModelQuery.value = llmModel.value
-  llmModelActiveIndex.value = -1
-  llmModelsOpen.value = llmModels.value.length > 0
-  markLlmDirty()
-}
-
-function onLlmModelKeydown(event) {
-  if (event.key === 'Escape') {
-    llmModelsOpen.value = false
-    return
-  }
-  if (!llmModels.value.length) return
-  if (!llmModelsOpen.value && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-    event.preventDefault()
-    openLlmModelOptions()
-    return
-  }
-  const models = filteredLlmModels.value
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    llmModelActiveIndex.value = Math.min(llmModelActiveIndex.value + 1, models.length - 1)
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    llmModelActiveIndex.value = Math.max(llmModelActiveIndex.value - 1, -1)
-  } else if (event.key === 'Enter' && llmModelActiveIndex.value >= 0) {
-    event.preventDefault()
-    selectLlmModel(models[llmModelActiveIndex.value])
-  }
-}
-
-function selectLlmModel(model) {
-  llmModel.value = model
-  llmModelQuery.value = ''
-  llmModelActiveIndex.value = -1
-  llmModelsOpen.value = false
-  markLlmDirty()
-}
-
-function closeLlmModelsOnOutsideClick(event) {
-  if (llmModelPicker.value && !llmModelPicker.value.contains(event.target)) {
-    llmModelsOpen.value = false
   }
 }
 
@@ -1655,9 +1617,6 @@ async function removeProfile(id) {
     console.error('[llm] delete profile failed:', err)
   }
 }
-
-onMounted(() => document.addEventListener('pointerdown', closeLlmModelsOnOutsideClick))
-onUnmounted(() => document.removeEventListener('pointerdown', closeLlmModelsOnOutsideClick))
 
 onMounted(async () => {
   try {
@@ -1789,19 +1748,50 @@ async function saveComfyUrl() {
   await checkHealth()
 }
 
-async function saveLlmConfig() {
+function buildLlmPayload() {
+  const payload = {}
+  if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+  if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
+  if (llmModel.value) payload.model = llmModel.value
+  payload.thinkingMode = llmThinkingMode.value
+  payload.headers = isCustomBaseURL.value && llmHeadersEnabled.value
+    ? JSON.parse(llmHeadersText.value)
+    : {}
+  payload.extraBody = isCustomBaseURL.value && llmExtraBodyEnabled.value
+    ? JSON.parse(llmExtraBodyText.value)
+    : {}
+  return payload
+}
+
+async function runLlmConnectionTest() {
+  if (llmTesting.value) return
+  if (!llmHeadersValid.value || !llmExtraBodyValid.value) {
+    toastFn?.('请先修正 LLM 自定义请求头或请求体 JSON', 'warning')
+    return
+  }
+  if (!llmBaseURL.value.trim()) {
+    toastFn?.('请先填写 API 地址', 'warning')
+    return
+  }
+
+  llmTesting.value = true
   try {
-    const payload = {}
-    if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
-    if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
-    if (llmModel.value) payload.model = llmModel.value
-    payload.thinkingMode = llmThinkingMode.value
-    payload.headers = isCustomBaseURL.value && llmHeadersEnabled.value
-      ? JSON.parse(llmHeadersText.value)
-      : {}
-    payload.extraBody = isCustomBaseURL.value && llmExtraBodyEnabled.value
-      ? JSON.parse(llmExtraBodyText.value)
-      : {}
+    const result = await testLlmConnection(buildLlmPayload())
+    const parts = ['LLM 连接成功']
+    if (result.model) parts.push(result.model)
+    if (result.latencyMs != null) parts.push(`${result.latencyMs}ms`)
+    toastFn?.(parts.join(' · '), 'success')
+  } catch (err) {
+    toastFn?.('LLM 连接失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    llmTesting.value = false
+  }
+}
+
+async function saveLlmConfig() {
+
+  try {
+    const payload = buildLlmPayload()
     const result = await updateLlmConfig(payload)
     if (result.ok) {
       settingsStore.setHasApiKey(result.hasApiKey)
@@ -1861,6 +1851,12 @@ function applyPreset(p, mode = 'chat') {
 
 async function saveFeature(key, val) {
   await updateFeatureFlag(key, val)
+}
+
+// ── 深度思考（测试版）：开关在 settings store 持久化，聊天页实时读取 ──
+const deepThinkMode = computed(() => settingsStore.deepThinkMode)
+function onDeepThinkChange(v) {
+  settingsStore.setDeepThinkMode(v)
 }
 
 // 滑块松手时触发，持久化到后端并更新 features
@@ -1970,18 +1966,40 @@ const styleImages = ref([])
 const styleElapsed = ref(null)  // ms
 const styleTiming = ref(null)  // { comfyui_ms, download_ms, overhead_ms }
 const freeSceneDesc = ref('')  // 自由画面描述（LLM 完善提示词）
-const generatedPrompt = ref('')  // 自由画面描述生成的 prompt 展示
+const generatedPrompt = ref('')  // RAG 召回合并后的最终 prompt 展示
 const promptEditing = ref(false)  // prompt 展示框的点击编辑态
 const promptEditRef = ref(null)
 
-// 点击 prompt 框进入编辑：textarea 保持点击前的展示高度，光标定位到末尾
-async function startPromptEdit(e) {
-  const boxHeight = e?.currentTarget?.offsetHeight
+// textarea 自动增高，避免内容溢出时出现滚动条
+function resizeTextareaElement(el) {
+  if (!el) return
+  const style = getComputedStyle(el)
+  const borderHeight = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  el.style.height = 'auto'
+  el.style.height = `${Math.max(el.scrollHeight, el.clientHeight) + borderHeight}px`
+}
+
+function submitOnEnter(event, action) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  action()
+}
+
+function resizeSceneDesc() {
+  resizeTextareaElement(sceneDescRef.value)
+}
+
+function resizePromptEditor() {
+  resizeTextareaElement(promptEditRef.value)
+}
+
+// 点击 prompt 框进入编辑：textarea 按完整内容增高，光标定位到末尾
+async function startPromptEdit() {
   promptEditing.value = true
   await nextTick()
+  resizePromptEditor()
   const el = promptEditRef.value
   if (el) {
-    if (boxHeight) el.style.height = `${boxHeight}px`
     el.focus()
     el.setSelectionRange(el.value.length, el.value.length)
   }
@@ -1999,11 +2017,17 @@ function focusSceneDesc() {
   el.setSelectionRange(el.value.length, el.value.length)
 }
 
+function onSceneDescFocus() {
+  sceneDescFocused.value = true
+  nextTick(resizeSceneDesc)
+}
+
 // 失焦收起：清掉手动拖高的内联高度，回到单行
 function onSceneDescBlur(e) {
   sceneDescFocused.value = false
   e.target.style.height = ''
 }
+
 const hireTesting = ref(false)
 const hiresError = ref('')
 const hiresCompare = ref(null)
@@ -2085,7 +2109,7 @@ function formatElapsed(ms) {
   return `${min}min ${sec}s`
 }
 
-async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras = false } = {}) {
+async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras = false, alreadyPrepared = false } = {}) {
   styleTesting.value = true
   styleError.value = ''
   styleImages.value = []
@@ -2104,8 +2128,9 @@ async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras =
       prompt,
       sceneDesc,
       reuseSceneLoras,
+      alreadyPrepared,
     })
-    if (sceneDesc && result.generatedPrompt) generatedPrompt.value = result.generatedPrompt
+    if (result.generatedPrompt) generatedPrompt.value = result.generatedPrompt
     if (result.elapsed != null) styleElapsed.value = result.elapsed
     if (result.timing) styleTiming.value = result.timing
     if (result.success && result.images?.length > 0) {
@@ -2135,6 +2160,17 @@ function runFreeSceneTest() {
   if (!desc || styleTesting.value) return
   generatedPrompt.value = ''
   return executeStyleTest({ sceneDesc: desc })
+}
+
+// 最终 prompt 已包含 RAG 合并结果；回车重生成时跳过重复合并
+function runGeneratedPromptTest() {
+  const prompt = generatedPrompt.value.trim()
+  if (!prompt || styleTesting.value) return
+  return executeStyleTest({
+    prompt,
+    reuseSceneLoras: Boolean(freeSceneDesc.value.trim()),
+    alreadyPrepared: true,
+  })
 }
 
 async function runHiresTest() {
@@ -2212,11 +2248,6 @@ function resetTestPrompts() {
 }
 .memory-settings-copy { flex: 1; min-width: 0; }
 .memory-settings-row { margin-top: 6px; }
-.memory-settings-row .switch { height: 44px; }
-.memory-settings-row .slider { top: 10px; bottom: 10px; }
-.memory-settings-row .switch input:focus-visible + .slider {
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2);
-}
 .memory-settings-entry {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;
@@ -2224,6 +2255,8 @@ function resetTestPrompts() {
   background: color-mix(in srgb, var(--entry-hue, var(--accent)) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--entry-hue, var(--accent)) 18%, transparent);
   border-radius: 12px;
+  cursor: pointer;
+  user-select: none;
   touch-action: manipulation;
   transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease-out);
 }
@@ -2265,30 +2298,10 @@ function resetTestPrompts() {
 
 /* ── 保存为 Primary，工作流操作为 Secondary ── */
 .comfy-params-card .sa { gap: 10px; }
-.comfy-params-card .sa .btn-primary {
-  height: 36px; padding: 0 22px; border-radius: 10px; font-size: 13px;
-}
 .wf-action-btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 34px; padding: 0 14px; font-size: 12px; font-weight: 500;
-  border-radius: 10px; border-style: dashed; border-width: 1px;
-  background: transparent; white-space: nowrap;
-}
-.wf-lora-btn {
-  color: var(--accent); border-color: rgba(var(--accent-rgb), 0.30);
-}
-.wf-mode-btn {
-  color: #6F675F; border-color: #E5D8CE;
-}
-.wf-reset-btn {
-  color: #A9A099; border-color: #ECE5DD; opacity: 0.9;
-}
-.wf-action-btn:hover:not(:disabled) {
-  background: rgba(var(--accent-rgb), 0.08);
-  border-color: rgba(var(--accent-rgb), 0.45); color: var(--accent);
-}
-.wf-reset-btn:hover:not(:disabled) {
-  background: transparent; color: #8B8074; border-color: #D8CEC3;
+  white-space: nowrap;
 }
 .float-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 10px;
@@ -2307,7 +2320,7 @@ function resetTestPrompts() {
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; margin-bottom: 14px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
+.fi { margin-bottom: 14px; }
 /* ── 画师串参数卡：轻量 Tab + 紧凑表单节奏 ── */
 .comfy-params-card { padding: 22px; }
 .comfy-params-card h3 { margin-bottom: 18px; }
@@ -2322,7 +2335,8 @@ function resetTestPrompts() {
   padding: 3px;
 }
 .comfy-tab {
-  flex: 1; padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
+  flex: 1; min-width: 0;
+  padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
   text-align: center; cursor: pointer;
   border-radius: 9px;
   background: transparent; color: #8B8074;
@@ -2331,6 +2345,7 @@ function resetTestPrompts() {
   position: relative;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background-color 0.2s ease, color 0.2s ease;
+  user-select: none;
 }
 .comfy-tab:hover:not(.active) {
   background: rgba(255, 255, 255, 0.55);
@@ -2367,23 +2382,12 @@ function resetTestPrompts() {
   opacity: 0;
 }
 
-.fi:focus { border-color: var(--accent); }
-.fi-error { border-color: var(--danger, #ff4d4f) !important; }
 .gen-error { margin-top: 6px; font-size: 12px; color: var(--danger, #ff4d4f); }
 .fr { display: flex; gap: 12px; }
 .fh { flex: 1; min-width: 0; }
 .fr .fl {
   display: block; margin-bottom: 6px;
   font-size: 14px; font-weight: 600; color: var(--text-bright);
-}
-.fr .fi {
-  width: 100%; height: 38px; padding: 0 12px; margin: 0;
-  font-size: 13px; border-radius: 10px; box-shadow: none;
-  border: 1px solid #E5D8CE; background: #FFFEFC; color: var(--text-bright);
-}
-.fr .fi:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10);
 }
 .fpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fpresets-head {
@@ -2422,13 +2426,7 @@ function resetTestPrompts() {
 }
 .hiresfix-summary { font-size: 12px; color: #6F675F; }
 .hiresfix-link, .quality-link {
-  padding: 6px 10px; border: none; border-radius: 8px;
-  background: transparent; color: var(--accent);
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-.hiresfix-link:hover, .quality-link:hover {
-  background: rgba(var(--accent-rgb), 0.10); color: var(--accent-hover);
+  font-size: 13px;
 }
 /* ── 质量提示词 ── */
 .quality-section {
@@ -2447,17 +2445,7 @@ function resetTestPrompts() {
 .pl { font-size: 12px; color: #9A9189; margin-right: 2px; }
 .pbtn {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
-  font-size: 12px; font-weight: 500; border-radius: 9px;
-  border: 1px solid transparent; background: #F5F1EC; color: #6F675F;
-  cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.pbtn:hover {
-  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
-  border-color: rgba(var(--accent-rgb), 0.18);
-}
-.pbtn.active {
-  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
-  border-color: rgba(var(--accent-rgb), 0.18);
+  font-size: 12px;
 }
 .cb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin: -6px 0 12px; cursor: pointer; user-select: none; }
 .cb input { width: 14px; height: 14px; cursor: pointer; }
@@ -2494,9 +2482,10 @@ function resetTestPrompts() {
   border: none; background: transparent; color: #A9A099;
   font-size: 16px; line-height: 1; cursor: pointer;
   transition: color 0.15s ease;
+  user-select: none;
 }
-.fav-star-btn:hover:not(:disabled) { color: #E2A83E; }
-.fav-star-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fav-star-btn:hover:not(.is-disabled) { color: #E2A83E; }
+.fav-star-btn.is-disabled { opacity: 0.35; cursor: not-allowed; }
 .fav-section-title {
   font-size: 12px; color: #9A9189; margin-bottom: 6px;
 }
@@ -2505,18 +2494,7 @@ function resetTestPrompts() {
 }
 .fav-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 10px; font-size: 14px; font-weight: 400;
-  border-radius: 12px; border: 1px solid transparent;
-  background: #F5F1EC; color: #6F675F; cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.fav-chip:hover {
-  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
-  border-color: rgba(var(--accent-rgb), 0.18);
-}
-.fav-chip.active {
-  background: rgba(var(--accent-rgb), 0.10); color: var(--accent); font-weight: 500;
-  border-color: rgba(var(--accent-rgb), 0.18);
+  height: 28px; padding: 0 10px; font-size: 14px;
 }
 .fav-chip-x {
   font-size: 12px; line-height: 1; color: #A9A099;
@@ -2544,29 +2522,13 @@ function resetTestPrompts() {
   font-size: 15px; font-weight: 600; color: var(--text-bright);
 }
 .fav-dialog-close {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: transparent; color: var(--text-secondary); font-size: 14px;
+  width: 28px; height: 28px;
+  font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
 }
-.fav-dialog-close:hover { background: rgba(0,0,0,0.06); color: #333; }
 .fav-dialog-body { padding: 12px 20px 20px; }
 .fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
-.fav-dialog-input {
-  width: 100%; padding: 10px 12px; font-size: 14px;
-  border-radius: 8px; border: 1px solid var(--border); outline: none;
-  transition: border-color 0.2s;
-}
-.fav-dialog-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-.quality-dialog-textarea {
-  width: 100%; padding: 10px 12px; font-size: 13px; font-family: inherit;
-  border-radius: 8px; border: 1px solid var(--border); outline: none;
-  resize: vertical; min-height: 88px; line-height: 1.6; color: var(--text-bright);
-  transition: border-color 0.2s;
-}
-.quality-dialog-textarea:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
-.quality-dialog-textarea::placeholder { color: #b3aca4; }
 
 /* ── 弹窗过渡动画 ── */
 .fav-dialog-fade-enter-active { transition: opacity 0.2s ease; }
@@ -2589,6 +2551,19 @@ function resetTestPrompts() {
 .toggle-row { display: flex; gap: 14px; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
 .toggle-row:last-child { border-bottom: none; }
 .tl { font-size: 14px; font-weight: 500; color: var(--text-bright); }
+/* 测试版小标签：珊瑚描边弱强调 */
+.beta-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--accent);
+  border: 1px solid var(--accent-light);
+  vertical-align: 1px;
+}
 .td { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 .freq-control {
@@ -2690,18 +2665,9 @@ function resetTestPrompts() {
   display: flex; align-items: center; gap: 10px;
 }
 .disturb-time-input {
-  font-family: inherit;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-bright);
   font-size: 14px;
   width: 130px;
-  outline: none;
-  transition: border-color 0.2s;
 }
-.disturb-time-input:focus { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .disturb-time-sep { color: var(--text-secondary); }
 .disturb-no-chars {
   font-size: 13px; color: var(--text-secondary); margin: 8px 0;
@@ -2789,8 +2755,7 @@ function resetTestPrompts() {
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
 
-.sp-btn-small { padding:6px 14px; font-size:12px; border-radius:8px; border:1px solid var(--glass-border); background:var(--glass-bg-strong); color:var(--text-primary); cursor:pointer; margin-right:6px; transition: all 0.15s; }
-.sp-btn-small:hover { border-color:var(--accent); }
+.sp-btn-small { padding:6px 14px; font-size:12px; margin-right:6px; }
 
 /* ── LLM API ── */
 .apikey-row { display: flex; gap: 8px; align-items: center; }
@@ -2815,14 +2780,15 @@ function resetTestPrompts() {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  user-select: none;
   transition: all 0.15s;
   flex-shrink: 0;
   white-space: nowrap;
   position: relative;
 }
-.free-egg-btn:hover:not(:disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
+.free-egg-btn:hover:not(.is-disabled) { border-color: #facc15; background: rgba(250, 204, 21, 0.08); color: #facc15; }
 .free-egg-btn.active { border-color: #facc15; background: rgba(250, 204, 21, 0.16); color: #facc15; }
-.free-egg-btn:disabled { opacity: 0.6; cursor: wait; }
+.free-egg-btn.is-disabled { opacity: 0.6; cursor: wait; }
 .free-egg-label { position: relative; z-index: 3; }
 
 /* ── 推荐中转站入口与弹窗 ── */
@@ -2830,6 +2796,7 @@ function resetTestPrompts() {
   padding: 0; border: none; background: none;
   font-size: 12px; font-weight: 500; color: var(--accent);
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+  user-select: none;
   white-space: nowrap;
   transition: color 0.15s;
 }
@@ -2857,12 +2824,10 @@ function resetTestPrompts() {
 }
 .relay-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-bright); }
 .relay-modal-close {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: transparent; color: var(--text-secondary); font-size: 14px;
+  width: 28px; height: 28px;
+  font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
 }
-.relay-modal-close:hover { background: rgba(0,0,0,0.06); color: #333; }
 .relay-modal-body { padding: 10px 20px 18px; }
 .relay-modal-tip { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
 .relay-station {
@@ -2875,21 +2840,9 @@ function resetTestPrompts() {
 .relay-station-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
 .relay-quick-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 12px; border-radius: 8px;
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  background: var(--accent); color: #fff;
-  font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
-  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.18);
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  padding: 6px 12px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
 }
-.relay-quick-btn:hover:not(:disabled) {
-  background: var(--accent-hover); border-color: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
-  transform: translateY(-1px);
-}
-.relay-quick-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.18); }
-.relay-quick-btn:disabled { opacity: 0.6; cursor: wait; }
-.relay-quick-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .relay-quick-icon { flex-shrink: 0; }
 .relay-station-desc {
   font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 10px;
@@ -2983,71 +2936,16 @@ function resetTestPrompts() {
 .free-egg-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .free-egg-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 .free-egg-hint { font-size: 11px; color: var(--text-secondary); opacity: 0.75; margin-top: 2px; }
-.llm-model-picker { position: relative; margin-bottom: 14px;}
-.llm-model-row { display: flex; align-items: stretch; gap: 8px; }
-.llm-model-combobox { position: relative; min-width: 0; flex: 1; }
-.llm-model-row .fi { width: 100%; min-width: 0; margin-bottom: 0; }
+.llm-model-row { display: flex; align-items: stretch; gap: 8px; margin-bottom: 14px; }
+.llm-model-row .ls-select-wrapper { flex: 1; min-width: 0; }
 .model-fetch-btn {
   min-width: 82px;
   padding: 0 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  background: var(--glass-bg-strong);
-  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  cursor: pointer;
 }
-.model-fetch-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.model-fetch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.model-fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.model-fetch-error { margin-top: 6px; color: var(--danger); font-size: 12px; line-height: 1.5; }
-.llm-model-options {
-  position: absolute;
-  z-index: 80;
-  top: calc(100% + 4px);
-  right: 0;
-  left: 0;
-  max-height: 220px;
-  padding: 4px;
-  overflow-y: auto;
-  border: 1px solid #e2d6c7;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
-  transform-origin: top center;
-  animation: llm-model-drop-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.llm-model-option {
-  width: 100%;
-  padding: 9px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-bright);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.llm-model-option:hover { background: rgba(var(--accent-rgb), 0.08); color: var(--accent); }
-.llm-model-option.selected,
-.llm-model-option.active { background: rgba(var(--accent-rgb), 0.06); color: var(--accent); font-weight: 600; }
-.llm-model-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.llm-model-check { flex-shrink: 0; color: var(--accent); }
-.llm-model-empty { padding: 16px 10px; color: var(--text-secondary); font-size: 13px; text-align: center; }
-@keyframes llm-model-drop-in {
-  from { opacity: 0; transform: scaleY(0.9) translateY(-6px); }
-  to { opacity: 1; transform: scaleY(1) translateY(0); }
-}
+.model-fetch-error { margin-top: -8px; margin-bottom: 14px; color: var(--danger); font-size: 12px; line-height: 1.5; }
 .thinking-setting { min-width: 0; }
 .thinking-options {
   position: relative;
@@ -3099,8 +2997,6 @@ function resetTestPrompts() {
 .thinking-setting,
 .llm-custom-toggle,
 .llm-option-row { border-bottom: none; }
-.llm-custom-toggle .switch { height: 44px; }
-.llm-custom-toggle .slider { top: 10px; bottom: 10px; }
 .llm-custom-editor { padding: 4px 0 2px; }
 .llm-json-textarea { min-height: 72px; font-family: monospace; font-size: 12px; resize: vertical; }
 .llm-label { font-size: 13px; font-weight: 600; color: var(--text-bright); }
@@ -3110,6 +3006,7 @@ function resetTestPrompts() {
   border: none; border-bottom: 1px solid var(--glass-border);
   background: none; color: var(--text-bright);
   font-size: 13px; font-weight: 600; cursor: pointer;
+  user-select: none;
   transition: color 0.15s;
 }
 .llm-advanced-label { min-width: 0; }
@@ -3134,6 +3031,9 @@ function resetTestPrompts() {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  border-radius: 8px;
+  font-family: inherit;
+  user-select: none;
 }
 .profile-item-row .profile-tag { border-radius: 0; }
 .profile-item-row .profile-tag:first-child { border-radius: 9999px 0 0 9999px; }
@@ -3193,26 +3093,35 @@ function resetTestPrompts() {
 .style-test-row { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; flex-wrap: wrap; }
 .free-scene-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
 .free-scene-input-wrap { position: relative; flex: 1; min-width: 0; }
+/* 折叠/展开输入框：独立设计（单行收起 + 省略覆盖层），皮肤与 LinsheInput 对齐 */
 .free-scene-textarea {
   width: 100%; display: block; padding: 9px 12px; font-size: 13px; line-height: 1.5;
-  font-family: inherit; border-radius: 8px; background: rgba(255,255,255,0.9);
-  border: 1px solid #e2d6c7; color: var(--text-bright); outline: none;
+  font-family: inherit; border-radius: 10px; background: #fffdfb;
+  border: 1.5px solid #e3dcd2; color: var(--text-bright); outline: none;
+  caret-color: var(--accent);
   resize: none; overflow: hidden;
   height: 38px;  /* 默认单行，聚焦展开 */
-  transition: height 0.18s ease;
+  transition: height 0.18s ease, border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
-.free-scene-textarea:focus { height: 58px; min-height: 58px; resize: vertical; overflow: auto; border-color: var(--accent); }
+.free-scene-textarea:focus {
+  height: auto; min-height: 58px; resize: none; overflow: hidden;
+  border-color: var(--accent); background: #fff;
+  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
+}
 .free-scene-ellipsis {
   position: absolute; inset: 0;
   display: flex; align-items: center;
   padding: 0 12px; font-size: 13px;
-  border-radius: 8px; background: rgba(255,255,255,0.9);
-  border: 1px solid #e2d6c7; color: var(--text-bright);
+  border-radius: 10px; background: #fffdfb;
+  border: 1.5px solid #e3dcd2; color: var(--text-bright);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text; transition: border-color 0.15s;
 }
 .free-scene-ellipsis:hover { border-color: var(--accent); }
-.free-scene-btn { border-radius: 8px; margin: 0; flex-shrink: 0; }
+.free-scene-btn { margin: 0; flex-shrink: 0; }
+/* 生成提示词按钮：随输入内容渐入渐出 */
+.gen-btn-fade-enter-active, .gen-btn-fade-leave-active { transition: opacity 0.25s ease; }
+.gen-btn-fade-enter-from, .gen-btn-fade-leave-to { opacity: 0; }
 .generated-prompt-box {
   padding: 10px 14px; margin-bottom: 12px; border-radius: 12px;
   background: var(--glass-bg-strong); border: 1px solid var(--glass-border);
@@ -3222,32 +3131,32 @@ function resetTestPrompts() {
 .generated-prompt-box.editable { cursor: text; transition: border-color 0.15s; }
 .generated-prompt-box.editable:hover { border-color: var(--accent); }
 .generated-prompt-editor {
-  resize: vertical; overflow: auto; outline: none; font-family: inherit;
+  resize: none; overflow: hidden; outline: none; font-family: inherit;
   color: var(--text-bright); margin-bottom: 12px;
 }
 .generated-prompt-editor:focus { border-color: var(--accent); }
-.style-test-btn { border-radius: 8px; margin: 0; }
-.hires-test-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
-.hires-test-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.1); box-shadow: none; color: var(--accent-hover); }
+.style-test-btn { margin: 0; }
+.test-mode-segmented {
+  display: inline-flex; gap: 3px;
+  padding: 3px; background: #F5F1EC; border-radius: 10px;
+}
 .test-mode-btn {
-  padding: 7px 14px; font-size: 12px; font-weight: 500;
-  border-radius: 8px; border: 1px solid var(--glass-border);
-  background: transparent; color: var(--text-secondary);
-  cursor: pointer; transition: all 0.2s ease;
+  flex: 1;
+  padding: 6px 14px; font-size: 12px; font-weight: 500;
+  border-radius: 7px; border: none;
+  background: transparent; color: #6F675F;
+  cursor: pointer; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  font-family: inherit; text-align: center; white-space: nowrap; user-select: none;
 }
-.test-mode-btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+.test-mode-btn:hover { color: #E07B6C; }
 .test-mode-btn.active {
-  background: var(--accent); color: #fff; border-color: var(--accent);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  background: #FFFEFC; color: #E07B6C; font-weight: 600;
+  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
-.test-mode-btn:disabled { opacity: 0.5; pointer-events: none; }
+.test-mode-btn.is-disabled { opacity: 0.5; pointer-events: none; }
 .test-prompt-btn {
   margin-left: auto; padding: 0; font-size: 12px;
-  background: none; border: none; color: var(--text-secondary);
-  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
-  transition: color 0.15s;
 }
-.test-prompt-btn:hover { color: var(--accent); }
 .style-error { padding: 8px 12px; border-radius: 8px; background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; margin-bottom: 12px; white-space: pre-wrap; line-height: 1.5; }
 .style-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--text-secondary); font-size: 13px; }
 .style-spinner { width: 18px; height: 18px; border: 2px solid var(--glass-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
@@ -3272,10 +3181,8 @@ function resetTestPrompts() {
 .prompt-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .prompt-editor-header h3 { font-size: 16px; font-weight: 600; color: var(--text-bright); }
 .prompt-editor-close {
-  width: 28px; height: 28px; border-radius: 50%; border: none;
-  background: var(--glass-bg-strong); color: var(--text-secondary);
-  font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
+  width: 28px; height: 28px;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
 }
 .prompt-editor-body { flex: 1; overflow-y: auto; }
 .prompt-editor-field { margin-bottom: 16px; }
@@ -3294,13 +3201,18 @@ function resetTestPrompts() {
   .settings-grid { grid-template-columns: 1fr; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
-  /* 自由画面测试：textarea 与按钮纵向堆叠 */
-  .free-scene-row { flex-direction: column; }
+  /* 自由画面测试：textarea 与按钮纵向堆叠，输入区占满卡片宽度 */
+  .free-scene-row { flex-direction: column; align-items: stretch; }
+  .free-scene-input-wrap { width: 100%; }
   .free-scene-btn { width: 100%; }
+  /* 图片实验室操作区：生成画面/细化按钮占满一行，三个参数切换共占一行 */
+  .style-test-row .style-test-btn { width: 100%; }
+  .style-test-row .test-mode-segmented { flex: 1 1 0; }
+  .style-test-row .test-mode-btn { padding-left: 6px; padding-right: 6px; }
+  .test-prompt-btn { margin-left: 0; }
   /* 画师串操作按钮行：允许换行，避免挤压 */
   .sa { flex-wrap: wrap; gap: 8px; }
   .sa .sa-spacer { flex-basis: 100%; height: 0; margin: 0; }
-  .sa .btn-primary { padding-left: 18px; padding-right: 18px; }
   .sa .wf-action-btn { flex: 1 1 0; justify-content: center; padding: 8px 6px; }
   /* 质量提示词行：窄屏摘要占满整行 */
   .quality-summary { max-width: 100%; flex-basis: 100%; order: 2; }
@@ -3312,7 +3224,6 @@ function resetTestPrompts() {
   .memory-entry-arrow,
   .thinking-option span,
   .thinking-options::before { transition: none; }
-  .llm-model-options { animation: none; }
   .memory-settings-entry:hover .memory-entry-arrow { transform: none; }
 }
 
@@ -3345,6 +3256,7 @@ function resetTestPrompts() {
   border-radius: 12px;
   padding: 14px 12px;
   cursor: pointer;
+  user-select: none;
   transition: all 0.2s;
   display: flex; flex-direction: column; gap: 6px;
   text-align: center;
@@ -3398,18 +3310,10 @@ function resetTestPrompts() {
   font-size: 13px; color: var(--text-primary);
 }
 .wf-scene-toggle {
-  display: flex; gap: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px; overflow: hidden;
+  display: flex; gap: 4px;
 }
 .wf-toggle-btn {
   padding: 3px 14px; font-size: 12px;
-  background: var(--bg-secondary); color: var(--text-secondary);
-  border: none; border-radius: 0; cursor: pointer; transition: all 0.15s;
-}
-.wf-toggle-btn:hover { color: var(--text-bright); }
-.wf-toggle-btn.active {
-  background: var(--accent); color: #fff;
 }
 /* hybrid 场景展开/收起动画 */
 .expand-enter-active, .expand-leave-active {

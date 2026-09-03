@@ -3,16 +3,21 @@ package com.linshe.shell
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.ActivityManager
+import android.content.ContentValues
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.PowerManager
+import android.provider.MediaStore
 import android.provider.Settings
+import android.util.Base64
 import android.view.View
 import android.webkit.ValueCallback
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -22,16 +27,19 @@ import android.webkit.WebViewClient
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.graphics.Outline
+import android.media.MediaScannerConnection
 import android.view.MotionEvent
 import android.view.ViewOutlineProvider
 import android.widget.CompoundButton
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -75,6 +83,26 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* 拒绝也不阻塞，网页功能不受影响 */ }
 
+    // ── 网页相册保存（AndroidBridge.saveImage）──
+
+    /** API 26–28 缺存储权限时暂存待保存任务，授权后落盘 */
+    private var pendingSave: (() -> Unit)? = null
+
+    private val writePermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val job = pendingSave
+        pendingSave = null
+        if (granted && job != null) {
+            runCatching {
+                job()
+                Toast.makeText(this, "已保存到相册", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(this, "保存失败: ${it.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,6 +134,9 @@ class MainActivity : AppCompatActivity() {
             useWideViewPort = true
             loadWithOverviewMode = true
         }
+
+        // 网页调用的原生存储桥（图片详情「下载」按钮），见 web-ui ImageLightbox
+        webView.addJavascriptInterface(WebBridge(), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
@@ -381,6 +412,100 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── 视图切换 ──
+
+    /**
+     * 暴露给 WebView 的原生桥。返回值约定（同步）：
+     * "ok" 成功；"permission_pending" 已发起存储权限弹窗，授权后自动落盘；其余为错误信息。
+     */
+    inner class WebBridge {
+        @JavascriptInterface
+        fun saveImage(name: String?, dataUrl: String?): String {
+            val mime = Regex("^data:(image/[a-z0-9.+-]+);base64,").find(dataUrl ?: "")?.groupValues?.get(1)
+                ?: return "图片数据格式错误"
+            val base64 = (dataUrl ?: "").substringAfter(";base64,", "")
+            if (base64.isEmpty()) return "图片数据格式错误"
+            val bytes = try {
+                Base64.decode(base64, Base64.DEFAULT)
+            } catch (_: IllegalArgumentException) {
+                return "图片数据解码失败"
+            }
+            val cleanName = (name ?: "")
+                .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                .trim()
+                .ifEmpty { "image.${extForMime(mime)}" }
+
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    saveViaMediaStore(cleanName, mime, bytes)
+                } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED
+                ) {
+                    saveToPublicPictures(cleanName, mime, bytes)
+                } else {
+                    pendingSave = { saveToPublicPictures(cleanName, mime, bytes) }
+                    runOnUiThread {
+                        writePermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    }
+                    return "permission_pending"
+                }
+                "ok"
+            } catch (e: Exception) {
+                e.message ?: "保存失败"
+            }
+        }
+    }
+
+    private fun extForMime(mime: String): String = when (mime) {
+        "image/jpeg" -> "jpg"
+        "image/webp" -> "webp"
+        "image/gif" -> "gif"
+        else -> "png"
+    }
+
+    /** Android 10+：写入公共相册 Pictures/邻舍，无需存储权限 */
+    private fun saveViaMediaStore(displayName: String, mime: String, bytes: ByteArray) {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/邻舍")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: throw IllegalStateException("无法写入相册")
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: throw IllegalStateException("无法写入相册")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
+    /** Android 8–9：写公共 Pictures 目录并触发媒体扫描（需已授权 WRITE_EXTERNAL_STORAGE） */
+    private fun saveToPublicPictures(displayName: String, mime: String, bytes: ByteArray) {
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "邻舍")
+        if (!dir.exists() && !dir.mkdirs()) throw IllegalStateException("无法创建相册目录")
+        val file = uniqueFile(dir, displayName)
+        file.writeBytes(bytes)
+        MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf(mime), null)
+    }
+
+    private fun uniqueFile(dir: File, name: String): File {
+        var file = File(dir, name)
+        if (!file.exists()) return file
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var i = 1
+        while (file.exists()) {
+            file = File(dir, "$stem ($i)$ext")
+            i++
+        }
+        return file
+    }
 
     private fun showWeb() {
         // 状态栏跟随页面配色：网页为暖米白

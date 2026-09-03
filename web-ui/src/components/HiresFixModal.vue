@@ -4,11 +4,9 @@
       <div class="modal-panel modal-wide">
         <div class="modal-header">
           <h3>HiresFix 细化设置</h3>
-          <button class="modal-close" @click="close">✕</button>
+          <linshe-button variant="icon" @click="close">✕</linshe-button>
         </div>
         <div class="modal-body">
-          <p class="hires-hint">图片进一步高清细化设置，点击图片上的「放大细化」时生效</p>
-
           <div class="hires-main-body">
 
           <div class="hires-section hires-params-section">
@@ -16,19 +14,19 @@
             <div class="hires-params">
               <div class="form-group">
                 <label class="fl">步数<span class="fl-sub">（推荐30~40）越高越精细，耗时越久</span></label>
-                <input v-model.number="steps" type="number" min="1" max="100" step="1" class="fi" />
+                <linshe-input v-model.number="steps" type="number" min="1" max="100" step="1" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">CFG<span class="fl-sub">（推荐3~5）</span></label>
-                <input v-model.number="cfg" type="number" min="0" max="20" step="0.1" class="fi" />
+                <linshe-input v-model.number="cfg" type="number" min="0" max="20" step="0.1" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">重绘幅度<span class="fl-sub">（推荐0.3~0.5）</span></label>
-                <input v-model.number="denoise" type="number" min="0" max="1" step="0.01" class="fi" />
+                <linshe-input v-model.number="denoise" type="number" min="0" max="1" step="0.01" class="fi" />
               </div>
               <div class="form-group">
                 <label class="fl">最长边<span class="fl-sub">（像素，默认2000）</span></label>
-                <input v-model.number="maxSize" type="number" min="256" max="8192" step="100" class="fi" />
+                <linshe-input v-model.number="maxSize" type="number" min="256" max="8192" step="100" class="fi" />
               </div>
             </div>
           </div>
@@ -36,14 +34,14 @@
           <div class="hires-section hires-artist-section">
             <div class="hires-section-title">画师串</div>
             <div class="artist-segmented">
-              <button :class="['artist-mode-chip', { active: artistMode === 'inherit' }]" @click="artistMode = 'inherit'">沿用原图</button>
-              <button :class="['artist-mode-chip', { active: artistMode === 'empty' }]" @click="artistMode = 'empty'">留空</button>
-              <button :class="['artist-mode-chip', { active: artistMode === 'specified' }]" @click="artistMode = 'specified'">指定</button>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'inherit' }]" @click="artistMode = 'inherit'" @keydown.enter.prevent="artistMode = 'inherit'" @keydown.space.prevent="artistMode = 'inherit'">沿用原图</div>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'empty' }]" @click="artistMode = 'empty'" @keydown.enter.prevent="artistMode = 'empty'" @keydown.space.prevent="artistMode = 'empty'">留空</div>
+              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'specified' }]" @click="artistMode = 'specified'" @keydown.enter.prevent="artistMode = 'specified'" @keydown.space.prevent="artistMode = 'specified'">指定</div>
             </div>
             <div class="artist-mode-hint">{{ artistModeHint }}</div>
             <Transition name="artist-block">
             <div v-if="artistMode === 'specified'" class="artist-specified-block">
-              <input v-model="artist" class="fi artist-input" placeholder="输入画师串" />
+              <linshe-input v-model="artist" class="fi artist-input" placeholder="输入画师串" />
               <p class="artist-input-hint">用于 HiresFix 的画师风格，可覆盖原图画师串</p>
             </div>
             </Transition>
@@ -55,14 +53,14 @@
             <div class="lora-body-card">
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
               <div v-for="(item, idx) in items" :key="idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
-                <button class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
+                <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                </button>
+                </linshe-button>
                 <div class="lora-item-row">
                   <div class="form-group lora-path-group">
                     <label class="fl lora-inline-label">文件路径</label>
                     <div class="lora-autocomplete-wrap">
-                      <input
+                      <linshe-input
                         v-model="item.path"
                         class="fi"
                         autocomplete="off"
@@ -92,7 +90,7 @@
                   </div>
                   <div class="form-group lora-weight-group">
                     <label class="fl lora-inline-label">权重</label>
-                    <input
+                    <linshe-input
                       v-model.number="item.weight"
                       type="number"
                       step="0.05"
@@ -105,14 +103,8 @@
                 </div>
                 <div class="lora-trigger-row">
                   <label class="fl lora-inline-label">触发词</label>
-                  <input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
-                  <label class="lora-enable-toggle" @click.stop>
-                    <span class="lora-enable-status">{{ item.enabled ? '已启用' : '已禁用' }}</span>
-                    <span class="lora-toggle-switch">
-                      <input type="checkbox" v-model="item.enabled" />
-                      <span class="lora-toggle-slider"></span>
-                    </span>
-                  </label>
+                  <linshe-input v-model="item.triggerWord" class="fi" autocomplete="off" placeholder="可选，用于增强 lora 效果的提示词" />
+                  <linshe-switch v-model="item.enabled" size="sm" on-text="已启用" off-text="已禁用" />
                 </div>
               </div>
             </TransitionGroup>
@@ -121,24 +113,24 @@
               尚未配置任何强化HiresFix细化的LoRA，点击下方按钮添加
             </div>
 
-            <button class="lora-add-btn" @click="addLoraGroup">
+            <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               添加 LoRA
-            </button>
+            </div>
+            </div>
             </div>
           </div>
           </div>
 
-          <div class="modal-actions" style="margin-top:16px">
-            <span class="lora-civitai-label">LoRA 获取：</span>
-            <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
-            <span class="lora-civitai-label">或</span>
-            <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
-            <div style="flex:1"></div>
-            <button class="btn-primary" @click="save" :disabled="loraLoading">
-              {{ loraLoading ? '保存中…' : '保存' }}
-            </button>
-          </div>
+        <div class="modal-actions">
+          <span class="lora-civitai-label">LoRA 获取：</span>
+          <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
+          <span class="lora-civitai-label">或</span>
+          <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
+          <div style="flex:1"></div>
+          <linshe-button variant="primary" @click="save" :disabled="loraLoading">
+            {{ loraLoading ? '保存中…' : '保存' }}
+          </linshe-button>
         </div>
       </div>
     </div>
@@ -148,6 +140,9 @@
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheButton from './ui/LinsheButton.vue'
+import LinsheInput from './ui/LinsheInput.vue'
+import LinsheSwitch from './ui/LinsheSwitch.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -305,7 +300,6 @@ async function save() {
   border: 1px solid rgba(125, 105, 85, 0.10);
   border-radius: 14px;
   padding: 16px;
-  margin-bottom: 14px;
 }
 .hires-section { margin-bottom: 16px; }
 .hires-section:last-child { margin-bottom: 0; }
@@ -329,6 +323,7 @@ async function save() {
   background: transparent; color: #6F675F; font-size: 12px; font-weight: 500;
   cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   text-align: center; white-space: nowrap;
+  user-select: none;
 }
 .artist-mode-chip:hover { color: var(--accent); }
 .artist-mode-chip.active {
@@ -353,34 +348,8 @@ async function save() {
 .lora-list { display: flex; flex-direction: column; gap: 8px; }
 .lora-item-card { position: relative; background: var(--bg-primary); border: 1px solid var(--glass-border); border-radius: 12px; padding: 9px 10px 9px 12px; }
 .lora-disabled { opacity: 0.45; }
-.lora-enable-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; flex-shrink: 0; }
-.lora-enable-status { font-size: 11px; color: var(--text-secondary); letter-spacing: 0.2px; }
-.lora-toggle-switch { position: relative; width: 32px; height: 18px; flex-shrink: 0; }
-.lora-toggle-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-.lora-toggle-slider {
-  position: absolute; inset: 0; cursor: pointer;
-  background: #ccc; border-radius: 18px;
-  transition: background 180ms ease;
-}
-.lora-toggle-slider::before {
-  content: ''; position: absolute; left: 2px; top: 2px;
-  width: 14px; height: 14px; border-radius: 50%;
-  background: #fff; transition: transform 180ms ease;
-}
-.lora-toggle-switch input:checked + .lora-toggle-slider { background: var(--accent); }
-.lora-toggle-switch input:checked + .lora-toggle-slider::before { transform: translateX(14px); }
 .lora-remove-btn {
-  position: absolute; top: 6px; right: 6px;
-  width: 22px; height: 22px; border-radius: 50%; border: none;
-  background: transparent; color: var(--text-muted, #bbb);
-  font-size: 11px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 180ms ease; padding: 0; z-index: 1;
-}
-.lora-remove-btn:hover {
-  background: rgba(255, 77, 79, 0.1);
-  color: var(--danger);
-  transform: scale(1.03);
+  position: absolute; top: 6px; right: 6px; z-index: 1;
 }
 .lora-item-row { display: flex; gap: 8px; align-items: flex-end; padding-right: 24px; }
 .lora-item-row .form-group, .lora-trigger-row .form-group { margin-bottom: 0; }
@@ -419,7 +388,6 @@ async function save() {
 }
 .lora-weight-group { flex: 0 0 64px; }
 .lora-inline-label { font-size: 11px; margin-bottom: 3px; }
-.lora-item-card .fi { background: var(--glass-bg); width: 100%; }
 .lora-weight-input { text-align: center; padding: 9px 4px; }
 .lora-trigger-row { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
 .lora-trigger-row .lora-inline-label { margin: 0; flex: 0 0 auto; }
@@ -428,13 +396,11 @@ async function save() {
 .form-group .fl { display: block; margin-bottom: 6px; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; }
 .fl-sub { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--text-secondary); line-height: 1.45; }
-.fi { width: 100%; padding: 9px 12px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.9); border: 1px solid #e2d6c7; color: var(--text-bright); outline: none; }
-.fi:focus { border-color: var(--accent); }
 .lora-card-enter-active, .lora-card-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 14px 0 8px; margin-bottom: 0; }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; user-select: none; }
 .lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
@@ -443,12 +409,11 @@ async function save() {
 
 /* 弹窗动画已迁移至全局 animations.css */
 
-.btn-primary { padding: 8px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; }
-
 @media (max-width: 767px) {
   .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .modal-body { padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .modal-body { padding: 14px 16px; }
+  .modal-actions { padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   .modal-wide .fi { font-size: 16px; }
   .hires-params { grid-template-columns: 1fr; }
 }

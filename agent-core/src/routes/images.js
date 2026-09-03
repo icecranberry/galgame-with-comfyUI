@@ -5,7 +5,8 @@ import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js'
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
-import { charArtistOverride, extractImageCrossRefInfo } from '../services/characterImageOpts.js';
+import { charArtistOverride } from '../services/characterImageOpts.js';
+import { buildImageCrossRefInfo } from '../services/characterPersona.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
@@ -112,7 +113,7 @@ router.get('/tasks/:id', (req, res) => {
 
 // POST /api/images/generate — 直接调用生图（独立于聊天之外的触发方式）
 router.post('/generate', async (req, res) => {
-  const { conversation_id, prompt } = req.body;
+  const { conversation_id, prompt, rag_query } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt is required' });
 
   const db = getDb();
@@ -125,7 +126,7 @@ router.post('/generate', async (req, res) => {
   const taskId = taskResult.lastInsertRowid;
 
   // 异步执行，立即返回 taskId
-  generateImage(prompt, { promptScene: 'standalone', ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
+  generateImage(prompt, { promptScene: 'standalone', ragQuery: rag_query, ragTimeoutMs: RAG_TIMEOUT_FAST_MS })
     .then(result => {
       if (result.success) {
         db.prepare(`
@@ -173,7 +174,7 @@ router.get('/tasks/:id/status', (req, res) => {
 // mode: 'chat' (对话配图) | 'moments' (朋友圈配图) | 'event' (奇遇配图)，默认 'chat'
 // sceneDesc: 自由画面描述（可选）→ 分层 LLM 生图链路完善为 prompt 后再生图
 router.post('/test-style', async (req, res) => {
-  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras } = req.body;
+  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras, alreadyPrepared } = req.body;
 
   /**
    * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
@@ -195,7 +196,7 @@ router.post('/test-style', async (req, res) => {
         db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
       ).filter(Boolean);
       if (chars.length > 0) {
-        const blocks = chars.map(c => `[${c.display_name}]\n${extractImageCrossRefInfo(c)}`).join('\n\n');
+        const blocks = chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`).join('\n\n');
         msgs.push({
           role: 'system',
           content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${blocks}`,
@@ -259,7 +260,9 @@ router.post('/test-style', async (req, res) => {
 
   try {
     const result = await generateImageRaw(prompt, {
+      ragQuery: freeScene || '',
       ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+      alreadyPrepared: alreadyPrepared === true,
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
@@ -292,6 +295,8 @@ router.post('/test-style', async (req, res) => {
     if (timing.done) {
       breakdown.overhead = Math.round(elapsed - (timing.done - t0));
     }
+
+    if (result.promptRefined) generatedPrompt = result.promptRefined;
 
     if (result.success) {
       lastStyleTest = {
@@ -631,6 +636,7 @@ async function startImageEditTask(action, url) {
         height: opts.height,
         scene: CATEGORY_SCENE[category] || 'chat',
         alreadyPrepared: true,
+        disableRAG: true,
         persistPreparation: false,
         onProgress,
       };

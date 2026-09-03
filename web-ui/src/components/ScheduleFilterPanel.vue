@@ -28,13 +28,13 @@
 
     <!-- 筛选胶囊 -->
     <div class="panel-chips">
-      <button
+      <linshe-button
         v-for="f in filters"
         :key="f.key"
-        class="chip"
-        :class="{ active: activeFilter === f.key }"
+        variant="chip"
+        :active="activeFilter === f.key"
         @click="$emit('filter', f.key)"
-      >{{ f.label }}</button>
+      >{{ f.label }}</linshe-button>
     </div>
 
     <!-- 角色状态列表 -->
@@ -71,6 +71,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps<{
   characters: any[]
