@@ -29,19 +29,10 @@
 </template>
 
 <script>
-// ── 覆盖 cache-bust 登记表（模块级，跨灯箱实例 / 开合存活）──
-// 重新生成/细化确认覆盖后原图 URL 不变、内容已换，浏览器会继续用 HTTP 缓存里的旧图。
-// 记录 base URL → 最近覆盖时间戳，cachedImgs 展示命中图时统一追加 ?_t=，
-// 保证灯箱重开（哪怕组件已重建、父组件数据仍是旧 URL）也拿到新图。
-const overwriteBusts = new Map()
-const OVERWRITE_BUSTS_CAP = 200
-
-function recordOverwriteBust(base, ts) {
-  overwriteBusts.set(base, ts)
-  if (overwriteBusts.size > OVERWRITE_BUSTS_CAP) {
-    overwriteBusts.delete(overwriteBusts.keys().next().value)
-  }
-}
+// 覆盖登记表统一收口到 utils/imageUrlRefresh.js（模块级，跨灯箱实例 / 弹窗开合存活）。
+// 任务确认（imageEditTasks.apply）会先登记，灯箱重开哪怕组件已重建、父组件数据仍是旧 URL
+// 也能借 sharedOverwriteBusts 拿到带 ?_t= 的新地址；本组件自身在事件中再登记一次仅作兜底。
+import { recordOverwriteBust, bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 </script>
 
 <script setup>
@@ -81,8 +72,7 @@ const toastFn = inject('toast', null)
 const confirmFn = inject('confirm', null)
 const imageEditTasks = useImageEditTasksStore()
 
-// 覆盖登记表版本号：自增触发 cachedImgs 重算（登记表本身非响应式）
-const bustVersion = ref(0)
+// 灯箱 key：覆盖登记后自增，重挂载强制按新登记重算 cachedImgs（登记表本身非响应式）
 const lightboxKey = ref(0)
 const regenerating = ref(false)
 const upscaling = ref(false)
@@ -215,16 +205,15 @@ onUnmounted(() => {
   window.removeEventListener('image-overwritten', _onImageOverwritten)
 })
 
+// 命中共享覆盖登记表的 URL 追加 cache-bust 时间戳（依赖登记表 tick 保证响应式：
+// 实例重建后同样按表内记录 bust，避免「任务确认时光箱已销毁、重开后仍显示旧图」）
 function bumpUrl(url) {
-  if (!url || !bustVersion.value) return url
-  const base = url.replace(/\?.*$/, '')
-  const ts = overwriteBusts.get(base)
-  return ts ? `${base}?_t=${ts}` : url
+  return bustUrlIfOverwritten(url)
 }
 
 const cachedImgs = computed(() => {
+  overwriteBustTick.value
   const v = props.imgs
-  if (!bustVersion.value || !overwriteBusts.size) return v
   if (typeof v === 'string') return bumpUrl(v)
   if (Array.isArray(v)) {
     return v.map(i => (typeof i === 'string' ? bumpUrl(i) : i?.src ? { ...i, src: bumpUrl(i.src) } : i))
@@ -324,9 +313,8 @@ async function onDownload() {
 /** 扫描页面上所有 img / background-image，把旧图 URL 替换为带 cache-bust 的新 URL */
 function refreshAllThumbnails(oldUrl) {
   const base = oldUrl.replace(/\?.*$/, '')
-  const ts = overwriteBusts.get(base)
-  if (!ts) return
-  const busted = base + `?_t=${ts}`
+  const busted = bustUrlIfOverwritten(base)
+  if (busted === base) return
 
   // 1. <img> 元素
   document.querySelectorAll('img').forEach(img => {
@@ -351,7 +339,6 @@ function _onImageOverwritten(e) {
   const { url, base, action } = e.detail || {}
   if (!url || !base) return
   recordOverwriteBust(base, Date.now())
-  bustVersion.value++
   // 灯箱正展示这张图 → 重挂载立即换新图，并刷新页面上的缩略图
   if (_hasUrlInImgs(base)) {
     lightboxKey.value++

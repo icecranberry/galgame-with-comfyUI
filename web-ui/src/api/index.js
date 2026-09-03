@@ -225,6 +225,75 @@ export async function generateAvatar(characterId) {
   return res.json()
 }
 
+/** 生成角色立绘（requirement 为额外立绘需求，可空） */
+export async function generateStanding(characterId, requirement = '') {
+  const res = await fetch(`${BASE}/characters/${characterId}/generate-standing`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requirement }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Standing generation failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 删除角色立绘 */
+export async function deleteStanding(characterId) {
+  const res = await fetch(`${BASE}/characters/${characterId}/standing`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Standing deletion failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 上传本地图片作为角色立绘（base64 data URL，替换旧立绘） */
+export async function uploadStanding(characterId, base64) {
+  const res = await fetch(`${BASE}/characters/${characterId}/standing-upload`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64 }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Standing upload failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 用已有英文 prompt 直接重出立绘（不重新请求提示词） */
+export async function regenerateStandingImage(characterId, prompt) {
+  const res = await fetch(`${BASE}/characters/${characterId}/generate-standing-image`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Standing generation failed (${res.status})`)
+  }
+  return res.json()
+}
+
+/** 当前立绘姿势风格（normal / dynamic，全局设置） */
+export async function getStandingMode() {
+  const res = await fetch(`${BASE}/characters/standing-mode`)
+  if (!res.ok) throw new Error(`Failed to load standing mode (${res.status})`)
+  return res.json()
+}
+
+/** 切换立绘姿势风格（system_settings 持久化） */
+export async function updateStandingMode(mode) {
+  const res = await fetch(`${BASE}/characters/standing-mode`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `Failed to update standing mode (${res.status})`)
+  }
+  return res.json()
+}
+
 // ── Workflows ──
 export async function getWorkflows() {
   const res = await fetch(`${BASE}/workflows`)

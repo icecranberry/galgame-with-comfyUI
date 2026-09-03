@@ -12,14 +12,8 @@
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
   >
-    <img class="ba-img ba-before" :src="before" alt="细化前" draggable="false" />
-    <img
-      class="ba-img ba-after"
-      :src="after"
-      alt="细化后"
-      draggable="false"
-      :style="{ clipPath: `inset(0 0 0 ${pos}%)` }"
-    />
+    <img class="ba-img ba-before" :src="before" alt="细化前" draggable="false" @load="fit" />
+    <img ref="afterEl" class="ba-img ba-after" :src="after" alt="细化后" draggable="false" :style="{ clipPath: `inset(0 0 0 ${pos}%)` }" @load="fit" />
     <div class="ba-divider" :style="{ left: `${pos}%` }">
       <span class="ba-handle">
         <svg class="ba-chevron ba-chevron-left" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -36,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 defineProps({
   before: { type: String, required: true },
@@ -44,8 +38,13 @@ defineProps({
 })
 
 const rootEl = ref(null)
+const afterEl = ref(null)
 const pos = ref(50)
 let dragging = false
+
+// 展示高度上限（视口高度的占比）：宽度随图片比例自适应，高度受限，尽量大但不出弹窗/卡片
+const MAX_H_RATIO = 0.66
+let _ro = null
 
 function updateFromEvent(e) {
   const el = rootEl.value
@@ -70,11 +69,57 @@ function onPointerUp(e) {
   dragging = false
   rootEl.value?.releasePointerCapture?.(e.pointerId)
 }
+
+/** 按图片真实比例撑满可用空间：宽度 = min(原始宽, 容器宽)，高度上限 = 视口高度 * MAX_H_RATIO */
+function fit() {
+  const el = rootEl.value
+  const img = afterEl.value
+  if (!el || !img) return
+  if (!(img.naturalWidth > 0 && img.naturalHeight > 0)) {
+    // 图片未加载完：保持 CSS 兜底比例，等 @load 后再收敛
+    el.style.width = ''
+    el.style.height = ''
+    return
+  }
+  const ar = img.naturalWidth / img.naturalHeight
+  const parent = el.parentElement
+  const capW = Math.min(img.naturalWidth, parent && parent.clientWidth > 0 ? parent.clientWidth : window.innerWidth)
+  const capH = window.innerHeight * MAX_H_RATIO
+  let w = capW
+  let h = w / ar
+  if (h > capH) {
+    h = capH
+    w = h * ar
+  }
+  // 竖向图片宽可能 < 1px 的极端小图兜底
+  w = Math.max(1, Math.round(w))
+  h = Math.max(1, Math.round(h))
+  if (el.style.width !== `${w}px` || el.style.height !== `${h}px`) {
+    el.style.width = `${w}px`
+    el.style.height = `${h}px`
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('resize', fit)
+  if (afterEl.value?.complete && afterEl.value.naturalWidth > 0) fit()
+  else requestAnimationFrame(fit)
+  // 容器宽度变化（弹窗切换、卡片重排）后重新适配
+  _ro = rootEl.value?.parentElement ? new ResizeObserver(fit) : null
+  _ro?.observe(rootEl.value.parentElement)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', fit)
+  _ro?.disconnect()
+  _ro = null
+})
 </script>
 
 <style scoped>
 .ba-slider {
   position: relative;
+  /* 图片加载完成前兜底占位；加载后由 fit() 按图片真实比例内联覆盖宽高 */
   width: 100%;
   max-width: 760px;
   aspect-ratio: 4 / 3;
@@ -142,8 +187,4 @@ function onPointerUp(e) {
 }
 .ba-label-before { left: 12px; }
 .ba-label-after { right: 12px; }
-
-@media (max-width: 767px) {
-  .ba-slider { aspect-ratio: 1 / 1; }
-}
 </style>

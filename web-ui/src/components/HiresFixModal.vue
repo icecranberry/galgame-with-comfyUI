@@ -124,9 +124,7 @@
 
         <div class="modal-actions">
           <span class="lora-civitai-label">LoRA 获取：</span>
-          <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
-          <span class="lora-civitai-label">或</span>
-          <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
+          <a href="https://civitai.com/models/2619830/turbo-for-anima-less-steps" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Turbo-ANIMA（步数：12，CFG：1）</a>
           <div style="flex:1"></div>
           <linshe-button variant="primary" @click="save" :disabled="loraLoading">
             {{ loraLoading ? '保存中…' : '保存' }}
@@ -299,13 +297,12 @@ async function save() {
 }
 .modal-panel {
   background: #f4f1eeed; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
+  width: min(1080px, 94vw); height: 90dvh;
   display: flex; flex-direction: column;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden; backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  overflow: hidden;
 }
-.modal-wide { width: min(900px, 97vw); }
+.modal-wide { width: min(1080px, 94vw); }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 22px; flex-shrink: 0;
@@ -441,7 +438,7 @@ async function save() {
 @keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 
 @media (max-width: 767px) {
-  .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
+  .modal-panel, .modal-wide { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   .modal-body { padding: 14px 16px; }
   .modal-actions { padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }

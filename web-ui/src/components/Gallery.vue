@@ -40,7 +40,7 @@
             @click="onPreview(img.flatIndex)"
           >
             <div class="img-wrapper">
-              <img :src="img.url" class="gallery-img" alt="" loading="lazy" decoding="async" />
+              <img :src="bustUrlIfOverwritten(img.url)" class="gallery-img" alt="" loading="lazy" decoding="async" />
             </div>
           </div>
         </div>
@@ -72,6 +72,7 @@ import { ref, computed, onMounted } from 'vue'
 import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 
 const PAGE_SIZE = 60
 
@@ -157,7 +158,7 @@ const lightboxImgs = computed(() => {
   const urls = []
   for (const group of visibleDayGroups.value) {
     for (const img of group.images) {
-      urls.push(img.url)
+      urls.push(bustUrlIfOverwritten(img.url))
     }
   }
   return urls

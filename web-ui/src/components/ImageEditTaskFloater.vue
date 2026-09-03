@@ -2,7 +2,7 @@
   <Teleport to="body">
     <div v-if="visibleTasks.length" class="iet-root">
       <Transition name="iet-modal">
-        <div v-if="modalTask" class="iet-modal" @click.self="onDiscard(modalTask)">
+        <div v-if="modalTask" class="iet-modal">
           <div class="iet-modal-card">
             <div class="iet-modal-head">
               <div class="iet-modal-title">{{ actionLabel(modalTask.action) }}完成</div>
@@ -13,7 +13,6 @@
             <div class="iet-modal-preview">
               <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" />
             </div>
-            <p class="iet-modal-hint">新图已生成，确认后才会覆盖原图。</p>
             <div class="iet-modal-actions">
               <linshe-button variant="secondary" class="iet-btn" :disabled="busy" @click="onRerun(modalTask)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
@@ -228,14 +227,16 @@ async function onDiscard(task) {
 }
 
 .iet-modal-card {
-  width: min(720px, 100%);
+  width: min(1080px, 94vw);
   background: #F7F4EF;
   border: 1px solid rgba(224, 123, 108, 0.16);
   border-color: color-mix(in srgb, #E07B6C 24%, transparent);
   border-radius: 18px;
   box-shadow: 0 12px 35px rgba(50, 40, 35, 0.12);
-  max-height: 92vh;
+  max-height: 90dvh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .iet-modal-head {
@@ -251,9 +252,10 @@ async function onDiscard(task) {
 
 .iet-modal-preview {
   padding: 0 18px;
-  max-height: 62vh;
-  display: grid; place-items: center;
-  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
 }
 .iet-modal-preview :deep(.ba-slider) {
   border-color: transparent;
@@ -288,7 +290,7 @@ async function onDiscard(task) {
 
 @media (max-width: 767px) {
   .iet-cards { right: 12px; bottom: 12px; left: 12px; max-width: none; }
-  .iet-modal-card { max-height: 86vh; overflow: auto; }
+  .iet-modal-card { max-height: 90dvh; overflow: auto; }
   .iet-modal-actions { flex-wrap: wrap; }
   .iet-modal-actions .iet-btn { flex: 1 1 40%; }
 }

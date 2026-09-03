@@ -284,6 +284,7 @@ function initSchema(db) {
       display_name TEXT NOT NULL,
       base_prompt TEXT NOT NULL,
       avatar_path TEXT,
+      standing_url TEXT,
       emotion_baseline TEXT NOT NULL DEFAULT '{"valence":0.5,"arousal":0.5,"dominance":0.5}',
       moments_disabled INTEGER DEFAULT 0,
       short_prompt TEXT,
@@ -747,6 +748,9 @@ function initSchema(db) {
 
   // 迁移: 深度思考 — raw_messages 新增 thinking 列（存 planner 思考+计划原文，历史回看用）
   migrateDeepThinkSchema(db);
+
+  // 迁移: 角色立绘 — characters 表新增 standing_url 列
+  migrateStandingSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
@@ -1290,6 +1294,22 @@ function migrateDeepThinkSchema(db) {
 }
 
 /**
+ * 迁移: 角色立绘 — characters 表新增 standing_url 列
+ * 存放角色立绘图片 URL（/images/standing/...），NULL 表示尚未生成
+ */
+function migrateStandingSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'standing_url')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN standing_url TEXT`);
+      console.log('[db] Added characters.standing_url column');
+    }
+  } catch (err) {
+    console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
  * 迁移: 好感度回归系统
  * - user_relationships 表新增 last_interaction_at（记录最近一次互动时间）
  * - 新建 gift_history 表（全局冷却记录，含送礼与宝箱开箱的冷却检查）
@@ -1707,6 +1727,7 @@ const DB_ONLY_KEYS = new Set([
   'maibot_webui_token',
   'emoji_fixed_tags',
   'emoji_style_mode',
+  'standing_prompt_mode',
 ]);
 
 /** 写入单条系统设置 */

@@ -4,7 +4,7 @@ import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
 import { useChatStore } from './chat.js'
 import { useEventsStore } from './events.js'
-import { refreshImageUrls } from '../utils/imageUrlRefresh.js'
+import { refreshImageUrls, recordOverwriteBust } from '../utils/imageUrlRefresh.js'
 
 function normalizeTask(data) {
   return {
@@ -80,6 +80,8 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
     _remove(task.id)
     const base = (task.url || '').replace(/\?.*$/, '')
     const url = res.url || (base + '?t=' + Date.now())
+    // 先登记 cache-bust：详情卡/灯箱可能已关闭（实例销毁），登记表留到下次重开时取用
+    recordOverwriteBust(base, Date.now())
     window.dispatchEvent(new CustomEvent('image-overwritten', {
       detail: { url, base, action: task.action },
     }))

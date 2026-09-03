@@ -15,6 +15,7 @@ export const IMAGE_CATEGORIES = {
   mailbox:   { dir: 'mailbox',   label: '信箱' },
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },
+  standing:  { dir: 'standing',  label: '立绘' },
 };
 
 export const LEGACY_CATEGORY = 'history';

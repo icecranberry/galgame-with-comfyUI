@@ -619,6 +619,7 @@ function categoryGenConfig(category) {
     peek:      { artist: config.comfyui.eventArtist,    width: config.comfyui.eventWidth,    height: config.comfyui.eventHeight },
     gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
     avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
+    standing:  { artist: config.comfyui.momentsArtist,  width: 768,                         height: 1536 },
   };
   return map[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
 }
@@ -631,6 +632,7 @@ const CATEGORY_SCENE = {
   mailbox: 'chat',
   gifts: 'chat',
   avatargen: 'chat',
+  standing: 'chat',
 };
 
 /** 画风优先级：角色覆盖 > 任务记录 > 分类默认 */
