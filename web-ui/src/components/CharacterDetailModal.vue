@@ -253,7 +253,7 @@
                 <div class="standing-func-btns">
                   <template v-if="standingHasPrompt">
                     <linshe-button variant="secondary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">重新生成提示词</linshe-button>
-                    <linshe-button variant="primary" size="sm" :loading="standingReimageing" :disabled="standingBusy" @click="regenerateStanding">再次生成</linshe-button>
+                    <linshe-button variant="primary" size="sm" :loading="standingReimageing" :disabled="standingBusy" @click="regenerateStanding">再次Roll图</linshe-button>
                   </template>
                   <template v-else>
                     <linshe-button variant="primary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">生成立绘</linshe-button>
