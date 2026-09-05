@@ -121,7 +121,7 @@
             <label>空闲判定（分钟，距最后一条消息）<input v-model.number="form.consolidation.idleDelayMinutes" type="number" min="5" max="720"></label>
             <label>单轮整理模型调用上限<input v-model.number="form.consolidation.llmCallsPerRun" type="number" min="0" max="30"></label>
             <div style="margin-top: 8px;">
-              <button class="ghost compact" :disabled="consolidating" @click="triggerConsolidation">{{ consolidating ? '整理中…' : '立即整理一次' }}</button>
+              <linshe-button variant="ghost" size="sm" :disabled="consolidating" @click="triggerConsolidation">{{ consolidating ? '整理中…' : '立即整理一次' }}</linshe-button>
             </div>
             <p class="disabled-note">整理永远避开聊天进行中；模型调用预算用尽时，剩余任务留到下轮继续。</p>
           </div>
@@ -229,9 +229,9 @@
                 <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
               </div>
             </div>
-            <button v-if="item.status === 'archived'" class="ghost compact" :disabled="restoringMemoryId === item.memory_id" @click="restoreMemory(item)">
+            <linshe-button v-if="item.status === 'archived'" variant="ghost" size="sm" :disabled="restoringMemoryId === item.memory_id" @click="restoreMemory(item)">
               {{ restoringMemoryId === item.memory_id ? '恢复中…' : '恢复' }}
-            </button>
+            </linshe-button>
             <linshe-button v-if="item.status !== 'deleted'" class="danger-link" variant="link" tone="danger" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
               {{ deletingMemoryId === item.memory_id ? '删除中…' : '删除' }}
             </linshe-button>

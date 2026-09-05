@@ -97,80 +97,57 @@ export async function createCharacter(data) {
 }
 
 // ── 表情包管理 ──
-export async function getEmojiOverview() {
-  const res = await fetch(`${BASE}/characters/emoji/overview`)
-  return res.json()
+export function getEmojiOverview() {
+  return request(`/characters/emoji/overview`)
 }
 
-export async function getEmojiCategories() {
-  const res = await fetch(`${BASE}/characters/emoji/categories`)
-  return res.json()
+export function getEmojiCategories() {
+  return request(`/characters/emoji/categories`)
 }
 
-export async function updateEmojiCategories(keys) {
-  const res = await fetch(`${BASE}/characters/emoji/categories`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keys }),
+export function updateEmojiCategories(keys) {
+  return request(`/characters/emoji/categories`, { method: 'PUT', body: { keys } })
+}
+
+export function getEmojiFixedTags() {
+  return request(`/characters/emoji/tags`)
+}
+
+export function updateEmojiFixedTags(tags, styleMode, resolution) {
+  return request(`/characters/emoji/tags`, {
+    method: 'PUT',
+    body: { tags, styleMode, ...(resolution ? { resolution } : {}) },
   })
-  return res.json()
 }
 
-export async function getEmojiFixedTags() {
-  const res = await fetch(`${BASE}/characters/emoji/tags`)
-  return res.json()
+export function generateEmojiPrompts(character_ids, style = '') {
+  return request(`/characters/emoji/prompts`, { method: 'POST', body: { character_ids, style } })
 }
 
-export async function updateEmojiFixedTags(tags, styleMode, resolution) {
-  const res = await fetch(`${BASE}/characters/emoji/tags`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tags, styleMode, ...(resolution ? { resolution } : {}) }),
+export function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
+  return request(`/characters/emoji/images`, {
+    method: 'POST',
+    body: { character_ids, keys, artist, includeDone: !!includeDone },
   })
-  return res.json()
 }
 
-export async function generateEmojiPrompts(character_ids, style = '') {
-  const res = await fetch(`${BASE}/characters/emoji/prompts`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_ids, style }),
+export function regenerateEmojiPrompt(characterId, key, style = '') {
+  return request(`/characters/emoji/${characterId}/${key}/prompt`, { method: 'POST', body: { style } })
+}
+
+export function regenerateEmojiImage(characterId, key, artist = '@ebora') {
+  return request(`/characters/emoji/${characterId}/${key}/image`, { method: 'POST', body: { artist } })
+}
+
+export function uploadEmojiImage(characterId, key, base64) {
+  return request(`/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
+    method: 'POST',
+    body: { base64 },
   })
-  return res.json()
 }
 
-export async function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
-  const res = await fetch(`${BASE}/characters/emoji/images`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_ids, keys, artist, includeDone: !!includeDone }),
-  })
-  return res.json()
-}
-
-export async function regenerateEmojiPrompt(characterId, key, style = '') {
-  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/prompt`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ style }),
-  })
-  return res.json()
-}
-
-export async function regenerateEmojiImage(characterId, key, artist = '@ebora') {
-  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}/image`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist }),
-  })
-  return res.json()
-}
-
-export async function uploadEmojiImage(characterId, key, base64) {
-  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64 }),
-  })
-  return res.json()
-}
-
-export async function deleteEmoji(characterId, key) {
-  const res = await fetch(`${BASE}/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
-  return res.json()
+export function deleteEmoji(characterId, key) {
+  return request(`/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
 }
 
 export async function deleteCharacter(id) {
@@ -186,15 +163,8 @@ export async function getRecentImages(characterId) {
 }
 
 /** AI 生成角色头像（脸部特写，表情跟随人格） */
-export async function generateAvatar(characterId) {
-  const res = await fetch(`${BASE}/characters/${characterId}/generate-avatar`, {
-    method: 'POST',
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `Avatar generation failed (${res.status})`)
-  }
-  return res.json()
+export function generateAvatar(characterId) {
+  return request(`/characters/${characterId}/generate-avatar`, { method: 'POST' })
 }
 
 /** 上传/清除角色聊天背景（base64，空串 = 恢复默认） */
@@ -203,16 +173,8 @@ export async function uploadChatBg(characterId, base64) {
 }
 
 /** AI 生成角色聊天背景（依据角色设定与可选场景提示，横版无人物） */
-export async function generateChatBg(characterId, prompt = '') {
-  const res = await fetch(`${BASE}/characters/${characterId}/generate-chat-bg`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `Chat background generation failed (${res.status})`)
-  }
-  return res.json()
+export function generateChatBg(characterId, prompt = '') {
+  return request(`/characters/${characterId}/generate-chat-bg`, { method: 'POST', body: { prompt } })
 }
 
 // ── Workflows ──
@@ -343,16 +305,8 @@ export async function listGroups() {
   return request(`/groups`)
 }
 
-export async function createGroup({ name, topic, member_ids }) {
-  const res = await fetch(`${BASE}/groups`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, topic, member_ids }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `建群失败 (${res.status})`)
-  }
-  return res.json()
+export function createGroup({ name, topic, member_ids }) {
+  return request(`/groups`, { method: 'POST', body: { name, topic, member_ids } })
 }
 
 export async function updateGroup(id, data) {
@@ -363,13 +317,8 @@ export async function deleteGroup(id) {
   return request(`/groups/${id}`, { method: 'DELETE' })
 }
 
-export async function undoLastGroupRound(id) {
-  const res = await request(`/groups/${id}/messages/last-round`, { method: 'DELETE' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `撤回失败 (${res.status})`)
-  }
-  return res.json()
+export function undoLastGroupRound(id) {
+  return request(`/groups/${id}/messages/last-round`, { method: 'DELETE' })
 }
 
 export async function getGroupMessages(id) {
@@ -443,13 +392,8 @@ export async function updateGlobalLora(loras) {
 
 /** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */
 /** 更新 HiresFix 细化完整设置（LoRA + 步数/重绘幅度/CFG） */
-export async function updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist }) {
-  const res = await request(`/config/hires`, { method: 'PUT', body: { loras, steps, cfg, denoise, maxSize, artistMode, artist } })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || 'HiresFix 设置保存失败')
-  }
-  return res.json()
+export function updateHiresSettings({ loras, steps, cfg, denoise, maxSize, artistMode, artist }) {
+  return request(`/config/hires`, { method: 'PUT', body: { loras, steps, cfg, denoise, maxSize, artistMode, artist } })
 }
 
 export async function updateFeatureFlag(key, value) {
@@ -462,23 +406,13 @@ export async function updateProactiveFreq(value) {
 }
 
 /** 更新群聊 LLM 温度 0.5~1.2（所有群共享） */
-export async function updateGroupTemperature(value) {
-  const res = await request(`/config/group-temperature`, { method: 'PUT', body: { value } })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || '温度设置保存失败')
-  }
-  return res.json()
+export function updateGroupTemperature(value) {
+  return request(`/config/group-temperature`, { method: 'PUT', body: { value } })
 }
 
 /** 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享） */
-export async function updateGroupSummaryInterval(value) {
-  const res = await request(`/config/group-summary-interval`, { method: 'PUT', body: { value } })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || '记忆总结轮次保存失败')
-  }
-  return res.json()
+export function updateGroupSummaryInterval(value) {
+  return request(`/config/group-summary-interval`, { method: 'PUT', body: { value } })
 }
 
 /** 更新奇遇触发频率 0~1 */
@@ -510,42 +444,21 @@ export async function updateLlmConfig(data) {
   return request(`/config/llm`, { method: 'PUT', body: data })
 }
 
-export async function testLlmConnection(data) {
-  const res = await fetch(`${BASE}/config/llm/test`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || `LLM 连接测试失败 (${res.status})`)
-  return result
+export function testLlmConnection(data) {
+  return request(`/config/llm/test`, { method: 'POST', body: data })
 }
 
 /** 每日免费鸡蛋开关（opencode zen 免费端点，免 Key） */
-export async function setLlmFreeEgg(enabled) {
-  const res = await fetch(`${BASE}/config/llm/free-egg`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  })
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || '切换免费鸡蛋失败')
-  return result
+export function setLlmFreeEgg(enabled) {
+  return request(`/config/llm/free-egg`, { method: 'PUT', body: { enabled } })
 }
 
-export async function fetchLlmApiKey() {
-  const res = await fetch(`${BASE}/config/llm/key`)
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || '获取 API Key 失败')
-  return result
+export function fetchLlmApiKey() {
+  return request(`/config/llm/key`)
 }
 
-export async function fetchLlmModels(data) {
-  const res = await fetch(`${BASE}/config/llm/models`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || `获取模型失败 (${res.status})`)
-  return result
+export function fetchLlmModels(data) {
+  return request(`/config/llm/models`, { method: 'POST', body: data })
 }
 
 // ── LLM Profile 管理 ──
@@ -567,55 +480,42 @@ export async function activateLlmProfile(id) {
 }
 
 export async function syncActiveLlmProfile() {
-  await fetch(`${BASE}/config/llm/profiles/active/sync`, { method: 'PUT' })
+  await request(`/config/llm/profiles/active/sync`, { method: 'PUT' })
 }
 
 // ── Chat Memory ──
-async function jsonRequest(url, options) {
-  const res = await fetch(url, options)
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
-  return data
-}
-
 export function getMemoryConfig() {
-  return jsonRequest(`${BASE}/config/memory`)
+  return request(`/config/memory`)
 }
 
 export function updateMemoryConfig(data) {
-  return jsonRequest(`${BASE}/config/memory`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/config/memory`, { method: 'PUT', body: data })
 }
 
 export function testMemoryEmbedding(data) {
-  return jsonRequest(`${BASE}/config/memory/test-embedding`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/config/memory/test-embedding`, { method: 'POST', body: data })
 }
 
 export function testMemoryReranker(data) {
-  return jsonRequest(`${BASE}/config/memory/test-reranker`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/config/memory/test-reranker`, { method: 'POST', body: data })
 }
 
 export function getMemoryStats() {
-  return jsonRequest(`${BASE}/memory/stats`)
+  return request(`/memory/stats`)
 }
 
 // 阶段四：archived 记忆恢复
 export function restoreMemoryFragment(id) {
-  return jsonRequest(`${BASE}/memory/fragments/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+  return request(`/memory/fragments/${encodeURIComponent(id)}/restore`, { method: 'POST' })
 }
 
 // 阶段三：整理 daemon 任务队列与手动触发
 export function getConsolidationJobs(limit = 30) {
-  return jsonRequest(`${BASE}/memory/consolidation/jobs?limit=${encodeURIComponent(limit)}`)
+  return request(`/memory/consolidation/jobs?limit=${encodeURIComponent(limit)}`)
 }
 
 export function runConsolidationNow() {
-  return jsonRequest(`${BASE}/memory/consolidation/run`, { method: 'POST' })
+  return request(`/memory/consolidation/run`, { method: 'POST' })
 }
 
 export function getMemoryFragments(params = {}) {
@@ -623,30 +523,30 @@ export function getMemoryFragments(params = {}) {
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') query.set(key, value)
   }
-  return jsonRequest(`${BASE}/memory/fragments?${query}`)
+  return request(`/memory/fragments?${query}`)
 }
 
 export function searchMemories(queryText, options = {}) {
   const query = new URLSearchParams({ q: queryText })
   if (options.conversationId) query.set('conversation_id', options.conversationId)
   if (options.topK) query.set('top_k', options.topK)
-  return jsonRequest(`${BASE}/memory/search?${query}`)
+  return request(`/memory/search?${query}`)
 }
 
 export function deleteMemoryFragment(id) {
-  return jsonRequest(`${BASE}/memory/fragments/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  return request(`/memory/fragments/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export function getMemoryIndexJobs(limit = 30) {
-  return jsonRequest(`${BASE}/memory/index-jobs?limit=${encodeURIComponent(limit)}`)
+  return request(`/memory/index-jobs?limit=${encodeURIComponent(limit)}`)
 }
 
 export function reindexMemories() {
-  return jsonRequest(`${BASE}/memory/reindex`, { method: 'POST' })
+  return request(`/memory/reindex`, { method: 'POST' })
 }
 
 export function retryFailedMemories() {
-  return jsonRequest(`${BASE}/memory/retry-failed`, { method: 'POST' })
+  return request(`/memory/retry-failed`, { method: 'POST' })
 }
 
 // ── World Settings ──
@@ -866,39 +766,16 @@ export async function getCharacterPortrait(characterId) {
   return request(`/portraits/${characterId}`)
 }
 
-export async function addPortrait(characterId, traitType, content) {
-  const res = await fetch(`${BASE}/portraits`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ characterId, traitType, content }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '添加失败')
-  }
-  return res.json()
+export function addPortrait(characterId, traitType, content) {
+  return request(`/portraits`, { method: 'POST', body: { characterId, traitType, content } })
 }
 
-export async function updatePortrait(id, content) {
-  const res = await fetch(`${BASE}/portraits/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '更新失败')
-  }
-  return res.json()
+export function updatePortrait(id, content) {
+  return request(`/portraits/${id}`, { method: 'PUT', body: { content } })
 }
 
-export async function deletePortrait(id) {
-  const res = await request(`/portraits/${id}`, { method: 'DELETE' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '删除失败')
-  }
-  return res.json()
+export function deletePortrait(id) {
+  return request(`/portraits/${id}`, { method: 'DELETE' })
 }
 
 // ── 阶段三 T4：画像升华建议（daemon 产出，人工确认）──
@@ -906,29 +783,18 @@ export async function getPortraitSuggestions(characterId) {
   return request(`/portraits/${characterId}/suggestions`)
 }
 
-export async function confirmPortraitSuggestion(id) {
-  const res = await fetch(`${BASE}/portraits/suggestions/${id}/confirm`, { method: 'POST' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '采纳失败')
-  }
-  return res.json()
+export function confirmPortraitSuggestion(id) {
+  return request(`/portraits/suggestions/${id}/confirm`, { method: 'POST' })
 }
 
-export async function rejectPortraitSuggestion(id) {
-  const res = await fetch(`${BASE}/portraits/suggestions/${id}/reject`, { method: 'POST' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '忽略失败')
-  }
-  return res.json()
+export function rejectPortraitSuggestion(id) {
+  return request(`/portraits/suggestions/${id}/reject`, { method: 'POST' })
 }
 
 // ── ComfyUI health ──
 export async function comfyuiHealth() {
   try {
-    const res = await fetch(`${BASE}/images/comfyui-health`)
-    return await res.json()
+    return await request(`/images/comfyui-health`)
   } catch { return { connected: false } }
 }
 
@@ -956,104 +822,44 @@ export async function removeOath(characterId) {
 }
 
 // ── Gallery 相册 ──
-export async function listGalleryImages(limit = 100, offset = 0, folder = '') {
-  let url = `${BASE}/images/gallery?limit=${limit}&offset=${offset}`
-  if (folder) url += `&folder=${encodeURIComponent(folder)}`
-  const res = await fetch(url)
-  return res.json()
+export function listGalleryImages(limit = 100, offset = 0, folder = '') {
+  let path = `/images/gallery?limit=${limit}&offset=${offset}`
+  if (folder) path += `&folder=${encodeURIComponent(folder)}`
+  return request(path)
 }
 
 /** 提交后台重新生成任务（完成后需确认才覆盖原图） */
-export async function regenerateImage(imageUrl) {
-  const res = await fetch(`${BASE}/images/regenerate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: imageUrl }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `Regenerate failed (${res.status})`)
-  }
-  return res.json()
+export function regenerateImage(imageUrl) {
+  return request(`/images/regenerate`, { method: 'POST', body: { url: imageUrl } })
 }
 
 /** 提交后台 HiresFix 细化任务（完成后需确认才覆盖原图） */
-export async function upscaleImage(imageUrl) {
-  const res = await fetch(`${BASE}/images/upscale`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: imageUrl }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `放大细化失败 (${res.status})`)
-  }
-  return res.json()
+export function upscaleImage(imageUrl) {
+  return request(`/images/upscale`, { method: 'POST', body: { url: imageUrl } })
 }
 
 /** 运行中 / 待确认 / 失败的图片编辑任务 */
-export async function listImageEditTasks() {
-  const res = await fetch(`${BASE}/images/edit-tasks`)
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `获取图片编辑任务失败 (${res.status})`)
-  }
-  return res.json()
+export function listImageEditTasks() {
+  return request(`/images/edit-tasks`)
 }
 
 /** 确认覆盖：用暂存结果原子替换原图 */
-export async function applyImageEditTask(taskId, token) {
-  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/apply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `确认覆盖失败 (${res.status})`)
-  }
-  return res.json()
+export function applyImageEditTask(taskId, token) {
+  return request(`/images/edit-tasks/${taskId}/apply`, { method: 'POST', body: { token } })
 }
 
 /** 重新生成：按原动作 + 原图再跑一次 */
-export async function rerunImageEditTask(taskId, token) {
-  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/rerun`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `重新生成失败 (${res.status})`)
-  }
-  return res.json()
+export function rerunImageEditTask(taskId, token) {
+  return request(`/images/edit-tasks/${taskId}/rerun`, { method: 'POST', body: { token } })
 }
 
 /** 保留原图：删除暂存结果 */
-export async function discardImageEditTask(taskId, token) {
-  const res = await fetch(`${BASE}/images/edit-tasks/${taskId}/discard`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `丢弃暂存失败 (${res.status})`)
-  }
-  return res.json()
+export function discardImageEditTask(taskId, token) {
+  return request(`/images/edit-tasks/${taskId}/discard`, { method: 'POST', body: { token } })
 }
 /** 删除指定图片（物理文件） */
-export async function deleteImage(imageUrl) {
-  const res = await fetch(`${BASE}/images/delete`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: imageUrl }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `删除失败 (${res.status})`)
-  }
-  return res.json()
+export function deleteImage(imageUrl) {
+  return request(`/images/delete`, { method: 'DELETE', body: { url: imageUrl } })
 }
 
 // ── 图片压缩 ──
@@ -1099,10 +905,11 @@ export async function getActiveEvent(characterId) {
   return request(`/events/active/${characterId}`)
 }
 
+/** 按 id 取历史事件详情；未找到（非 2xx）返回 null 而不抛错 */
 export async function getEventById(eventId) {
-  const res = await fetch(`${BASE}/events/by-id/${eventId}`)
-  if (!res.ok) return null
-  return res.json()
+  try {
+    return await request(`/events/by-id/${eventId}`)
+  } catch { return null }
 }
 
 export async function chooseEventOption(eventId, choice, customText) {
@@ -1237,73 +1044,40 @@ export function connectEventsStream(handlers = {}) {
 
 // ── Schedule 日程系统 ──
 
-export async function getScheduleOverview() {
-  const res = await fetch(`${BASE}/schedule`)
-  if (!res.ok) throw new Error(`schedule overview: ${res.status}`)
-  return res.json()
+export function getScheduleOverview() {
+  return request(`/schedule`)
 }
 
-export async function getCharacterSchedule(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}`)
-  if (!res.ok) throw new Error(`character schedule: ${res.status}`)
-  return res.json()
+export function getCharacterSchedule(characterId) {
+  return request(`/schedule/${characterId}`)
 }
 
-export async function getCurrentActivity(characterId) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/current`)
-  if (!res.ok) throw new Error(`current activity: ${res.status}`)
-  return res.json()
+export function getCurrentActivity(characterId) {
+  return request(`/schedule/${characterId}/current`)
 }
 
-export async function peekSnapshot(characterId, genImage = true, activityContext = null) {
+export function peekSnapshot(characterId, genImage = true, activityContext = null) {
   const body = { gen_image: genImage };
   if (activityContext) body.activity = activityContext;
-  const res = await fetch(`${BASE}/schedule/${characterId}/peek`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`peek snapshot: ${res.status}`)
-  return res.json()
+  return request(`/schedule/${characterId}/peek`, { method: 'POST', body })
 }
 
 /** 瞄一眼再拍一张：使用已生成的 prompt 重新提交 ComfyUI 生图 */
-export async function retakePeekSnapshot(characterId, prompt) {
-  const res = await fetch(`${BASE}/schedule/${characterId}/peek/retake`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  })
-  if (!res.ok) throw new Error(`retake peek: ${res.status}`)
-  return res.json()
+export function retakePeekSnapshot(characterId, prompt) {
+  return request(`/schedule/${characterId}/peek/retake`, { method: 'POST', body: { prompt } })
 }
 
-export async function regenerateSchedule(characterId, direction) {
+export function regenerateSchedule(characterId, direction) {
   const body = {}
   if (direction) body.direction = direction
-  const res = await fetch(`${BASE}/schedule/${characterId}/regenerate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`regenerate schedule: ${res.status}`)
-  return res.json()
+  return request(`/schedule/${characterId}/regenerate`, { method: 'POST', body })
 }
 
 /** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */
-export async function regenerateAllSchedules(direction) {
+export function regenerateAllSchedules(direction) {
   const body = {}
   if (direction) body.direction = direction
-  const res = await fetch(`${BASE}/schedule/regenerate-all`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `regenerate all: ${res.status}`)
-  }
-  return res.json()
+  return request(`/schedule/regenerate-all`, { method: 'POST', body })
 }
 
 /** 取消正在进行的重置世界线任务 */
@@ -1312,33 +1086,25 @@ export async function cancelRegenerateAll() {
 }
 
 /** 查询当前重置世界线任务状态（页面刷新恢复用） */
-export async function getResetStatus() {
-  const res = await fetch(`${BASE}/schedule/reset-status`)
-  if (!res.ok) throw new Error(`reset status: ${res.status}`)
-  return res.json()
+export function getResetStatus() {
+  return request(`/schedule/reset-status`)
 }
 
 /** 清空指定角色的所有日程（模板、快照、禁用自动生成） */
-export async function clearSchedule(characterId) {
-  const res = await request(`/schedule/${characterId}/clear`, { method: 'POST' })
-  if (!res.ok) throw new Error(`clear schedule: ${res.status}`)
-  return res.json()
+export function clearSchedule(characterId) {
+  return request(`/schedule/${characterId}/clear`, { method: 'POST' })
 }
 
 // ── 叫醒系统 ──
 
 /** 电话叫醒（40% 概率成功） */
-export async function wakeUpByPhone(characterId) {
-  const res = await request(`/schedule/${characterId}/wake-up-phone`, { method: 'POST' })
-  if (!res.ok) throw new Error(`wake up phone: ${res.status}`)
-  return res.json()
+export function wakeUpByPhone(characterId) {
+  return request(`/schedule/${characterId}/wake-up-phone`, { method: 'POST' })
 }
 
 /** 上门摇醒（必定成功） */
-export async function wakeUpByDoor(characterId) {
-  const res = await request(`/schedule/${characterId}/wake-up-door`, { method: 'POST' })
-  if (!res.ok) throw new Error(`wake up door: ${res.status}`)
-  return res.json()
+export function wakeUpByDoor(characterId) {
+  return request(`/schedule/${characterId}/wake-up-door`, { method: 'POST' })
 }
 
 // ── 工作流管理 ──
@@ -1391,31 +1157,23 @@ export async function listEventTypes() {
 }
 
 export function createEventType(data) {
-  return jsonRequest(`${BASE}/library/event-types`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/library/event-types`, { method: 'POST', body: data })
 }
 
 export function updateEventType(id, data) {
-  return jsonRequest(`${BASE}/library/event-types/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/library/event-types/${id}`, { method: 'PUT', body: data })
 }
 
 export function deleteEventType(id) {
-  return jsonRequest(`${BASE}/library/event-types/${id}`, { method: 'DELETE' })
+  return request(`/library/event-types/${id}`, { method: 'DELETE' })
 }
 
 export function generateEventTypes(direction) {
-  return jsonRequest(`${BASE}/library/event-types/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
-  })
+  return request(`/library/event-types/generate`, { method: 'POST', body: { direction } })
 }
 
 export function saveEventTypeBatch(items) {
-  return jsonRequest(`${BASE}/library/event-types/save-batch`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
-  })
+  return request(`/library/event-types/save-batch`, { method: 'POST', body: { items } })
 }
 
 export async function listTopics() {
@@ -1423,31 +1181,23 @@ export async function listTopics() {
 }
 
 export function createTopic(data) {
-  return jsonRequest(`${BASE}/library/topics`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/library/topics`, { method: 'POST', body: data })
 }
 
 export function updateTopic(id, data) {
-  return jsonRequest(`${BASE}/library/topics/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  })
+  return request(`/library/topics/${id}`, { method: 'PUT', body: data })
 }
 
 export function deleteTopic(id) {
-  return jsonRequest(`${BASE}/library/topics/${id}`, { method: 'DELETE' })
+  return request(`/library/topics/${id}`, { method: 'DELETE' })
 }
 
 export function generateTopics(direction) {
-  return jsonRequest(`${BASE}/library/topics/generate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
-  })
+  return request(`/library/topics/generate`, { method: 'POST', body: { direction } })
 }
 
 export function saveTopicBatch(items) {
-  return jsonRequest(`${BASE}/library/topics/save-batch`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
-  })
+  return request(`/library/topics/save-batch`, { method: 'POST', body: { items } })
 }
 
 // ── MaiBot 桥接（供系统设置内「MaiBot 桥接」页面调用）──
@@ -1500,34 +1250,30 @@ export function maibotDeleteLatestMemory(sessionId) {
 
 // 背包内容（已收下）+ 待收下道具 + 宝箱冷却状态 + 生效中的效果
 export function listItems() {
-  return jsonRequest(`${BASE}/items`)
+  return request(`/items`)
 }
 
 // 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
 export function openChest() {
-  return jsonRequest(`${BASE}/items/chest/open`, { method: 'POST' })
+  return request(`/items/chest/open`, { method: 'POST' })
 }
 
 // 收下道具（开箱后需收下才出现在背包）
 export function collectItem(itemId) {
-  return jsonRequest(`${BASE}/items/${itemId}/collect`, { method: 'POST' })
+  return request(`/items/${itemId}/collect`, { method: 'POST' })
 }
 
 // 使用道具
 export function useItem(itemId, characterId) {
-  return jsonRequest(`${BASE}/items/${itemId}/use`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_id: characterId }),
-  })
+  return request(`/items/${itemId}/use`, { method: 'POST', body: { character_id: characterId } })
 }
 
 // 丢弃道具
 export function discardItem(itemId) {
-  return jsonRequest(`${BASE}/items/${itemId}`, { method: 'DELETE' })
+  return request(`/items/${itemId}`, { method: 'DELETE' })
 }
 
 // 提前移除已生效的效果（服饰/变身会同步撤销临时外观）
 export function removeActiveEffect(effectId) {
-  return jsonRequest(`${BASE}/items/effects/${effectId}`, { method: 'DELETE' })
+  return request(`/items/effects/${effectId}`, { method: 'DELETE' })
 }
