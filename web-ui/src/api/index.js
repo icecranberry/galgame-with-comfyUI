@@ -1895,3 +1895,29 @@ export function discardItem(itemId) {
 export function removeActiveEffect(effectId) {
   return jsonRequest(`${BASE}/items/effects/${effectId}`, { method: 'DELETE' })
 }
+
+// ── AI 小镇（世界页）──
+
+// 全量快照：地图/POI/agents/玩家/天气/活跃相遇
+export function fetchTownState() {
+  return jsonRequest(`${BASE}/town/state`)
+}
+
+// 玩家 token 移动（服务端寻路 + town_move 广播）
+export function moveTownPlayer(x, y) {
+  return jsonRequest(`${BASE}/town/player/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ x, y }),
+  })
+}
+
+// 相遇对话记录
+export function fetchTownEncounterMessages(encounterId) {
+  return jsonRequest(`${BASE}/town/encounters/${encounterId}/messages`)
+}
+
+// 小镇角色名单（在场状态）
+export function fetchTownCharacters() {
+  return jsonRequest(`${BASE}/town/characters`)
+}

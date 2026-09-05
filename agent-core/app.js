@@ -24,6 +24,7 @@ import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
+import townRoutes from './src/routes/town.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -39,6 +40,7 @@ import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge.js';
 import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
+import { startTownScheduler, stopTownScheduler } from './src/services/town/townService.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
 
@@ -79,6 +81,7 @@ app.use('/api/mailbox', mailboxRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/library', libraryRoutes);   // /api/library/event-types, /api/library/topics
 app.use('/api/items', itemsRoutes);
+app.use('/api/town', townRoutes);
 
 app.use('/api/maibot', maibotBridgeRoutes);
 // 健康检查
@@ -152,6 +155,9 @@ startKnowledgeSyncScheduler();
 // 启动道具系统调度器（每 10 分钟清理到期效果、恢复变身、标记卡死的生成中道具）
 startItemScheduler();
 
+// 启动小镇调度器（世界页：日程→地图投影、相遇对话、状态气泡，由 config.features.town 控制）
+startTownScheduler();
+
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
   console.log(`[agent-core] http://localhost:${config.port}`);
@@ -209,6 +215,7 @@ const shutdown = () => {
   shuttingDown = true;
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
+  stopTownScheduler();
 
   // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
   try {

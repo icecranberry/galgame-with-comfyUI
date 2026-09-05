@@ -16,6 +16,7 @@ import EventsView from './views/EventsView.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import MailboxView from './views/MailboxView.vue'
 import GroupChatView from './views/GroupChatView.vue'
+import TownView from './views/TownView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
@@ -24,6 +25,7 @@ const routes = [
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
+  { path: '/town', component: TownView },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },

@@ -65,7 +65,7 @@ function _connect() {
   if (_conn && !_conn._closed) _conn.close()
 
   _conn = api.connectUnifiedStream({
-    connected:         () => { _stableTimer = setTimeout(_onStable, 15000) },
+    connected:         () => { _dispatch('connected', {}); _stableTimer = setTimeout(_onStable, 15000) },
     new_event:         d => _dispatch('new_event', d),
     event_update:      d => _dispatch('event_update', d),
     event_concluded:   d => _dispatch('event_concluded', d),
@@ -92,6 +92,12 @@ function _connect() {
     image_edit_task_progress: d => _dispatch('image_edit_task_progress', d),
     image_edit_task_done:     d => _dispatch('image_edit_task_done', d),
     image_edit_task_error:    d => _dispatch('image_edit_task_error', d),
+    // AI 小镇（世界页）
+    town_move:            d => _dispatch('town_move', d),
+    town_bubble:          d => _dispatch('town_bubble', d),
+    town_encounter_start: d => _dispatch('town_encounter_start', d),
+    town_encounter_end:   d => _dispatch('town_encounter_end', d),
+    town_ping:            d => _dispatch('town_ping', d),
   }, {
     onClose: _scheduleReconnect,
   })

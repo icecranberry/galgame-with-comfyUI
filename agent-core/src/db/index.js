@@ -580,6 +580,77 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- ── AI 小镇（世界页）：地图 / POI / 参与名单 / 运行时状态 / 相遇对话 ──
+    CREATE TABLE IF NOT EXISTS town_maps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      image_path TEXT,                   -- 可选：data/town/ 下的整图插画；为空时前端程序化绘制
+      grid_cols INTEGER NOT NULL,
+      grid_rows INTEGER NOT NULL,
+      walk_grid TEXT NOT NULL DEFAULT '[]',  -- 二维 0/1 数组 JSON（1=可走）
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS town_locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,
+      key TEXT NOT NULL UNIQUE,          -- 'cafe'
+      name TEXT NOT NULL,                -- '临街咖啡厅'
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      kind TEXT NOT NULL DEFAULT 'place' CHECK(kind IN ('home','place','outdoor')),
+      grid_x INTEGER NOT NULL,
+      grid_y INTEGER NOT NULL,
+      radius INTEGER NOT NULL DEFAULT 2, -- 锚点周围可站立半径
+      ambient TEXT DEFAULT '',           -- 环境氛围描述（注入对话 prompt）
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS town_characters (
+      character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+      home_location_id INTEGER REFERENCES town_locations(id),
+      town_enabled INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS town_agent_state (
+      character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+      grid_x INTEGER,
+      grid_y INTEGER,
+      path_json TEXT DEFAULT '[]',
+      current_location_id INTEGER,
+      activity_text TEXT DEFAULT '',
+      mood_json TEXT,                    -- 从 emotion_snapshots 缓存的展示用情绪
+      updated_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS town_encounters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      map_id INTEGER NOT NULL,
+      char_a INTEGER NOT NULL,
+      char_b INTEGER NOT NULL,
+      location_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'chatting' CHECK(status IN ('chatting','done','cancelled')),
+      summary TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ended_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS town_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      encounter_id INTEGER NOT NULL REFERENCES town_encounters(id) ON DELETE CASCADE,
+      speaker_char_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS town_players (
+      id TEXT PRIMARY KEY,               -- 'me'（v1 单用户）
+      display_name TEXT NOT NULL,
+      grid_x INTEGER,
+      grid_y INTEGER,
+      updated_at DATETIME
+    );
   `);
 
   // 只补齐历史 NULL；保留用户显式关闭后台闲聊的 idle_enabled=0。
@@ -649,6 +720,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
     CREATE INDEX IF NOT EXISTS idx_group_members_char ON group_members(character_id);
     CREATE INDEX IF NOT EXISTS idx_group_chats_idle ON group_chats(next_idle_at, idle_enabled);
+    CREATE INDEX IF NOT EXISTS idx_town_locations_map ON town_locations(map_id);
+    CREATE INDEX IF NOT EXISTS idx_town_encounters_status ON town_encounters(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_town_chat_enc ON town_chat_messages(encounter_id, created_at);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
