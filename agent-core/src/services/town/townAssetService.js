@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
-import { postProcessAsset } from './assetPostProcess.js';
+import { postProcessAsset, detectTileAnchorY, flattenIsoTile } from './assetPostProcess.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,31 +21,36 @@ export const TOWN_ASSETS_DIR = path.resolve(__dirname, '..', '..', '..', 'data',
 /** 固定像素风基础串（整套素材共享 → 风格一致） */
 const PIXEL_BASE = 'pixel art, clean pixel edges, limited color palette, no anti-aliasing, no text, no watermark, no outline glow';
 
-/** kind 专属生成规格（2.1）：尺寸 / 专属串 / 像素化目标 */
+/** kind 专属生成规格（2.1）：尺寸 / 专属串 / 像素化目标
+ *  地砖/道路不带画师串（illustration 画师会把平铺纹理带偏成场景插画） */
 export const ASSET_SPECS = {
   ground: {
     size: { width: 512, height: 512 },
-    prompt: 'seamless tileable texture, flat top-down view',
+    // {desc} 会被插进「顶面完全被该材质覆盖」的句子里，避免模型画成花坛（顶面裸土、草只长边缘）
+    promptTemplate: 'isometric ground tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
     pixel: { w: 64, h: 64 },
+    artist: '',
   },
   road: {
     size: { width: 512, height: 512 },
-    prompt: 'seamless tileable path texture, top-down view, straight and even',
+    promptTemplate: 'isometric road tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
     pixel: { w: 64, h: 64 },
+    artist: '',
   },
   building: {
     size: { width: 768, height: 768 },   // 特殊建筑 768×1024
     tallSize: { width: 768, height: 1024 },
-    prompt: 'pure white background, front view, complete building exterior, full structure visible, game asset',
+    prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no terrain chunk, no fence, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
     removeBg: true,
-    // 像素密度按占格比例：横向每格 16px，纵向按源图比例
+    // 像素密度按等距占格比例：横向 (w+h)*16（渲染时按 (w+h)*HALF_W 放大 2 倍）
     pixelPerCell: 16,
+    pixelWidth: (fp) => (fp.w + fp.h) * 16,
   },
   prop: {
     size: { width: 512, height: 512 },
-    prompt: 'white background, single object, centered, game asset',
+    prompt: 'a single object sprite standing on an empty white background, small soft shadow right under it, nothing else in the image, isolated game sprite, slight three-quarter view from a bit above, complete object visible, centered',
     removeBg: true,
     pixel: { w: 48, h: 48 },
   },
@@ -71,13 +76,30 @@ const DIRECTION_PROMPT = {
   right: 'facing right, side view',
 };
 
-/** 组装素材 prompt（2.2） */
+/** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
+const TILE_STYLE_STRIP = /\b(village|town|city|street|hamlet|townsquare|buildings?)\b/gi;
+
+function styleTagsFor(kind, styleTags) {
+  if (kind !== 'ground' && kind !== 'road') return styleTags;
+  return String(styleTags || '').replace(TILE_STYLE_STRIP, ' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+/** 组装素材 prompt（2.2）；ground/road 用 promptTemplate 把 desc 插进材质覆盖句 */
 export function buildAssetPrompt({ kind, desc, styleTags = '', direction = null, special = false }) {
   const spec = ASSET_SPECS[kind];
   if (!spec) throw new Error(`unknown asset kind: ${kind}`);
+  const material = [desc, styleTagsFor(kind, styleTags)].filter(Boolean).join(', ');
+  if (spec.promptTemplate) {
+    return [
+      PIXEL_BASE,
+      spec.promptTemplate.replace('{desc}', material),
+      direction && DIRECTION_PROMPT[direction],
+      special ? 'landmark building, distinctive and detailed' : null,
+    ].filter(Boolean).join(', ');
+  }
   const parts = [
     PIXEL_BASE,
-    styleTags,
+    styleTagsFor(kind, styleTags),
     spec.prompt,
     direction && DIRECTION_PROMPT[direction],
     special ? 'landmark building, distinctive and detailed' : null,
@@ -136,7 +158,7 @@ async function generateIntoRow(row) {
     const result = await generateImageRaw(prompt, {
       scene: 'town',
       disableRAG: true,
-      artist: config.comfyui.artist,
+      artist: spec.artist !== undefined ? spec.artist : config.comfyui.artist,
       width: size.width,
       height: size.height,
     });
@@ -146,15 +168,19 @@ async function generateIntoRow(row) {
     const base64 = result.images[0].base64;
     const buffer = Buffer.from(base64.slice(base64.indexOf(',') + 1), 'base64');
 
-    // 像素化目标：固定规格，或建筑按占格宽推
-    let tw = spec.pixel?.w;
-    let th = spec.pixel?.h;
-    if (spec.pixelPerCell && meta.footprint?.w) {
-      tw = meta.footprint.w * spec.pixelPerCell;
+    // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
+    const isTile = row.kind === 'ground' || row.kind === 'road';
+    let work = buffer;
+    if (isTile) work = await flattenIsoTile(work);
+    let tw = isTile ? 64 : (spec.pixel?.w ?? 64);
+    let th = isTile ? 32 : (spec.pixel?.h ?? 64);
+    if (!isTile && spec.pixelWidth && meta.footprint?.w) {
+      // 建筑按等距占格宽 (w+h)*16
+      tw = spec.pixelWidth(meta.footprint);
       th = Math.max(1, Math.round(tw * size.height / size.width));
     }
 
-    const outBuffer = await postProcessAsset(buffer, {
+    const outBuffer = await postProcessAsset(work, {
       targetW: tw, targetH: th, removeBg: spec.removeBg,
     });
 
@@ -171,6 +197,11 @@ async function generateIntoRow(row) {
     const imagePath = `/town-assets/${path.basename(filePath)}`;
     meta.pixelSize = { w: tw, h: th };
     meta.styleTags = meta.styleTags || '';
+    meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
+    // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5
+    if (row.kind === 'ground' || row.kind === 'road') {
+      meta.groundAnchorY = (await detectTileAnchorY(outBuffer)) ?? 0.5;
+    }
     db.prepare(`
       UPDATE town_assets SET image_path = ?, meta_json = ?, status = 'ready' WHERE id = ?
     `).run(imagePath, JSON.stringify(meta), row.id);

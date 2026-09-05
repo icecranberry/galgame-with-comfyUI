@@ -81,7 +81,7 @@
             @click="selectAsset(asset)"
             @keydown.enter="selectAsset(asset)"
           >
-            <img v-if="asset.status === 'ready'" :src="asset.imagePath" alt="">
+            <img v-if="asset.status === 'ready'" :src="asset.imagePath + `?v=` + (asset.meta?.updatedAt ?? 0)" alt="">
             <span v-else class="tl-item-state">{{ asset.status === 'pending' ? '⏳' : '⚠️' }}</span>
             <span class="tl-item-name">{{ asset.name }}</span>
             <span v-if="asset.status === 'ready'" class="tl-item-ops">
@@ -186,6 +186,12 @@ const chat = useChatStore()
 const router = useRouter()
 const { map: mapMeta, locations, agents, player, weather, loaded, connected, initialized, renderMap } = storeToRefs(town)
 
+// ── 等距投影参数：菱形 2:1（宽 64 × 高 32 世界像素） ──
+const HW = 32   // 菱形半宽
+const HH = 16   // 菱形半高
+// 地砖贴图里菱形中心的纵向位置（占贴图高度比例；生成图菱形居中 → 0.5）
+const GROUND_ANCHOR_Y = 0.5
+
 // ── 画布与渲染状态 ──
 const viewEl = ref(null)
 const canvasEl = ref(null)
@@ -197,15 +203,13 @@ let cssW = 0
 let cssH = 0
 let resizeObserver = null
 
-// 摄像机（世界像素坐标；tileSize 世界像素/格）
-const TS = 32
+// 摄像机（世界像素坐标）
 const cam = reactive({ x: 0, y: 0, zoom: 1 })
 let followPlayer = true
 
 // 静态图层烘焙
 let staticCanvas = null
 let staticDirty = true
-let bakedKey = ''
 
 // 图片缓存
 const imgCache = new Map()
@@ -222,15 +226,58 @@ function getImg(url) {
   }
   return entry.ok ? entry.img : null
 }
-function assetImage(assetId) {
-  const asset = renderMap.value?.assets?.find(a => a.id === assetId)
-  return asset ? getImg(asset.imagePath) : null
-}
 function assetById(assetId) {
   return renderMap.value?.assets?.find(a => a.id === assetId) || null
 }
+function assetImage(assetId) {
+  const asset = assetById(assetId)
+  return asset ? getImg(assetUrl(asset)) : null
+}
 
-// 交互状态
+// 素材 URL 带更新时间戳：重生成同路径文件后穿透浏览器/页内缓存
+function assetUrl(asset) {
+  return `${asset.imagePath}?v=${asset.meta?.updatedAt ?? 0}`
+}
+
+// ── 等距坐标换算 ──
+// 逻辑格 (cx, cy) 的菱形顶点：((cx-cy)*HW, (cx+cy)*HH)；中心再 +HH
+
+function cellTopWorld(cx, cy) {
+  return { x: (cx - cy) * HW, y: (cx + cy) * HH }
+}
+
+function cellCenterWorld(cx, cy) {
+  return { x: (cx - cy) * HW, y: (cx + cy + 1) * HH }
+}
+
+/** 世界坐标 → 逻辑格（菱形含边界取整） */
+function worldToCell(wx, wy) {
+  const a = wx / HW
+  const b = wy / HH
+  return {
+    x: Math.floor((a + b) / 2),
+    y: Math.floor((b - a) / 2),
+  }
+}
+
+function screenToWorld(cssX, cssY) {
+  return {
+    x: (cssX - cssW / 2) / cam.zoom + cam.x,
+    y: (cssY - cssH / 2) / cam.zoom + cam.y,
+  }
+}
+
+function screenToCell(cssX, cssY) {
+  const w = screenToWorld(cssX, cssY)
+  return worldToCell(w.x, w.y)
+}
+
+function inBounds(c) {
+  const m = renderMap.value
+  return m && c.x >= 0 && c.y >= 0 && c.x < m.cols && c.y < m.rows
+}
+
+// ── 交互状态 ──
 const hoverAgentKey = ref(null)
 const selectedAgentKey = ref(null)
 const chatNpcId = ref(null)
@@ -239,7 +286,7 @@ const showAdmin = ref(false)
 const showWizard = ref(false)
 const dragging = ref(false)
 
-// 键盘移动
+// 键盘移动（等距屏幕方向 → 逻辑格对角）
 const keysDown = new Set()
 let moveTimer = null
 
@@ -253,19 +300,18 @@ const generating = ref(false)
 const savingMap = ref(false)
 const townAssets = ref([])
 
-// 编辑数据（本地副本，保存时提交）
-const editLayers = ref(null)     // {ground, road, objects, blockOverride}
-const editLocations = ref([])    // POI 副本
-const paintDrag = ref(null)      // {startCell} 矩形填充
-const ghostCell = ref(null)      // 放置预览
-const poiEdit = ref(null)        // {objectId?, key?, name, aliases, ambient, x, y, radius, kind}
+const editLayers = ref(null)
+const editLocations = ref([])
+const paintDrag = ref(null)
+const ghostCell = ref(null)
+const poiEdit = ref(null)
 
 const TOOLS = [
-  { id: 'ground', icon: '🟩', label: '地砖画笔（点涂/拖动；按住刷矩形）' },
+  { id: 'ground', icon: '🟩', label: '地砖画笔（点涂/拖动刷矩形）' },
   { id: 'road', icon: '🟨', label: '道路画笔' },
-  { id: 'place', icon: '🏠', label: '放置建筑/道具（选中素材后点地图）' },
+  { id: 'place', icon: '🏠', label: '放置建筑/道具（点击处为朝向镜头的底角格）' },
   { id: 'delete', icon: '🧨', label: '删除对象' },
-  { id: 'block', icon: '🚧', label: '阻挡涂刷（右键恢复可走）' },
+  { id: 'block', icon: '🚧', label: '阻挡涂刷（左键阻挡，右键恢复可走）' },
   { id: 'poi', icon: '📍', label: 'POI 绑定（点建筑）' },
 ]
 const LIB_TABS = [
@@ -333,31 +379,6 @@ function moodLabel(valence) {
   return '平静'
 }
 
-// ── 坐标换算 ──
-
-function screenToWorld(cssX, cssY) {
-  return {
-    x: (cssX - cssW / 2) / cam.zoom + cam.x,
-    y: (cssY - cssH / 2) / cam.zoom + cam.y,
-  }
-}
-
-function worldToCell(wx, wy) {
-  return {
-    x: Math.floor(wx / TS),
-    y: Math.floor(wy / TS),
-  }
-}
-
-function screenToCell(cssX, cssY) {
-  return worldToCell(screenToWorld(cssX, cssY).x, screenToWorld(cssX, cssY).y)
-}
-
-function inBounds(c) {
-  const m = renderMap.value
-  return m && c.x >= 0 && c.y >= 0 && c.x < m.cols && c.y < m.rows
-}
-
 // ── 实体拾取与插值 ──
 
 function agentDisplayPos(a) {
@@ -384,8 +405,12 @@ const facing = reactive({}) // agentKey -> 'down'|'up'|'left'|'right'
 
 function agentFacing(a, pos) {
   if (pos.moving) {
-    if (Math.abs(pos.dy) > Math.abs(pos.dx)) facing[a.agentKey] = pos.dy > 0 ? 'down' : 'up'
-    else if (pos.dx !== 0) facing[a.agentKey] = pos.dx > 0 ? 'right' : 'left'
+    // 屏幕方向：grid(-1,0)=左上 / (0,-1)=右上 / (1,0)=右下 / (0,1)=左下
+    const sum = pos.dx + pos.dy
+    const diff = pos.dx - pos.dy
+    if (diff > 0) facing[a.agentKey] = 'right'
+    else if (diff < 0) facing[a.agentKey] = 'left'
+    else facing[a.agentKey] = sum > 0 ? 'down' : 'up'
   }
   return facing[a.agentKey] || 'down'
 }
@@ -393,21 +418,20 @@ function agentFacing(a, pos) {
 function hitAgent(cssX, cssY) {
   for (const a of agents.value) {
     const pos = agentDisplayPos(a)
-    const px = (pos.x + 0.5) * TS
-    const py = (pos.y + 0.5) * TS
-    const sx = (px - cam.x) * cam.zoom + cssW / 2
-    const sy = (py - cam.y) * cam.zoom + cssH / 2
-    const h = TS * 1.6 * cam.zoom
+    const c = cellCenterWorld(pos.x, pos.y)
+    const sx = (c.x - cam.x) * cam.zoom + cssW / 2
+    const sy = (c.y - cam.y) * cam.zoom + cssH / 2
+    const h = 48 * cam.zoom
     const dx = cssX - sx
-    const dy = cssY - (sy - h * 0.45)
-    if (Math.abs(dx) < h * 0.35 && Math.abs(dy) < h * 0.55) return a
+    const dy = cssY - (sy - h * 0.42)
+    if (Math.abs(dx) < h * 0.38 && Math.abs(dy) < h * 0.55) return a
   }
   return null
 }
 
-// ── 点击交互 ──
+// ── 点击/拖拽交互 ──
 
-let downInfo = null // {x, y, button, moved}
+let downInfo = null
 
 function onCanvasDown(e) {
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false }
@@ -424,12 +448,10 @@ function onCanvasMove(e) {
   if (editing.value) {
     ghostCell.value = screenToCell(e.offsetX, e.offsetY)
     if (paintDrag.value) {
-      const cell = screenToCell(e.offsetX, e.offsetY)
-      paintDrag.value.lastCell = cell
-      paintLine(paintDrag.value.lastCell)
+      paintDrag.value.lastCell = screenToCell(e.offsetX, e.offsetY)
+      paintCell(paintDrag.value.lastCell)
     }
   }
-  // 拖拽平移（编辑模式仅右键/中键平移，左键留给画笔）
   if (downInfo && !downInfo.moved && (Math.abs(e.offsetX - downInfo.x) > 4 || Math.abs(e.offsetY - downInfo.y) > 4)) {
     downInfo.moved = true
     if (!editing.value || downInfo.button !== 0) dragging.value = true
@@ -447,7 +469,6 @@ function onCanvasMove(e) {
 }
 
 function onCanvasUp() {
-  // 左键矩形填充（编辑模式拖出一块）
   if (editing.value && paintDrag.value && downInfo?.moved) {
     fillRect(paintDrag.value.startCell, paintDrag.value.lastCell)
   }
@@ -464,7 +485,6 @@ function onCanvasLeave() {
 }
 
 function onCanvasClick(e) {
-  // 拖拽过的 click 忽略
   if (downInfo?.moved) return
   if (!loaded.value) return
   if (editing.value) {
@@ -503,7 +523,6 @@ function onDblClick() {
 function onWheel(e) {
   const factor = e.deltaY < 0 ? 1.12 : 0.89
   const newZoom = Math.min(2.5, Math.max(0.5, cam.zoom * factor))
-  // 缩放向鼠标位置聚焦
   const before = screenToWorld(e.offsetX, e.offsetY)
   cam.zoom = newZoom
   const after = screenToWorld(e.offsetX, e.offsetY)
@@ -512,13 +531,19 @@ function onWheel(e) {
   if (Math.abs(newZoom - 1) > 0.01) followPlayer = false
 }
 
-// ── 键盘移动 ──
+// ── 键盘移动：等距屏幕方向 → 逻辑格 ──
+
+const KEY_DIRS = {
+  KeyW: [-1, 0], ArrowUp: [-1, 0],      // 屏幕左上
+  KeyD: [0, -1], ArrowRight: [0, -1],   // 屏幕右上
+  KeyS: [1, 0], ArrowDown: [1, 0],      // 屏幕右下
+  KeyA: [0, 1], ArrowLeft: [0, 1],      // 屏幕左下
+}
 
 function onKeyDown(e) {
   if (editing.value || showAdmin.value || showWizard.value || chatNpcId.value != null) return
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
-  const map = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] }
-  if (map[e.code]) {
+  if (KEY_DIRS[e.code]) {
     e.preventDefault()
     keysDown.add(e.code)
     if (!moveTimer) {
@@ -538,8 +563,7 @@ function onKeyUp(e) {
 
 function stepByKey() {
   for (const code of keysDown) {
-    const map = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] }
-    const [dx, dy] = map[code] || [0, 0]
+    const [dx, dy] = KEY_DIRS[code] || [0, 0]
     if (dx || dy) {
       town.movePlayerDir(dx, dy).catch(() => {})
       break
@@ -550,11 +574,8 @@ function stepByKey() {
 // ── 编辑器操作 ──
 
 function toggleEdit() {
-  if (editing.value) {
-    cancelEdit()
-  } else {
-    beginEdit()
-  }
+  if (editing.value) cancelEdit()
+  else beginEdit()
 }
 
 function beginEdit() {
@@ -643,10 +664,6 @@ function paintCell(cell) {
   staticDirty = true
 }
 
-function paintLine(cell) {
-  paintCell(cell)
-}
-
 function fillRect(a, b) {
   const layer = ensureLayer(editTool.value === 'ground' ? 'ground' : 'road')
   if (!layer) return
@@ -667,6 +684,17 @@ function paintBlock(cell, value) {
   staticDirty = true
 }
 
+/** 建筑/道具 footprint 的逻辑矩形 [x0..x1] × [y0..y1]（obj.x = x0 左上列，obj.y = y1 底行） */
+function objRect(obj) {
+  const fp = assetById(obj.assetId)?.meta?.footprint || { w: 1, h: 1 }
+  return { x0: obj.x, y0: obj.y - fp.h + 1, x1: obj.x + fp.w - 1, y1: obj.y, fp }
+}
+
+function objectContainsCell(obj, cell) {
+  const r = objRect(obj)
+  return cell.x >= r.x0 && cell.x <= r.x1 && cell.y >= r.y0 && cell.y <= r.y1
+}
+
 function handleEditClick(e) {
   const cell = screenToCell(e.offsetX, e.offsetY)
   if (!inBounds(cell)) return
@@ -675,7 +703,7 @@ function handleEditClick(e) {
 
   if (['ground', 'road'].includes(editTool.value)) {
     if (!selectedAsset.value) return
-    fillRect(cell, cell) // 单击涂一格
+    fillRect(cell, cell)
     return
   }
 
@@ -710,7 +738,8 @@ function handleEditClick(e) {
         name: asset?.name || '',
         aliases: [],
         kind: 'place',
-        x: obj.x + Math.floor((fp?.w || 1) / 2),
+        // 锚点 = 朝向镜头的底角格（门前）
+        x: obj.x + (fp?.w || 1) - 1,
         y: obj.y,
         radius: 2,
         ambient: '',
@@ -719,19 +748,17 @@ function handleEditClick(e) {
   }
 }
 
-function objectContainsCell(obj, cell) {
-  const fp = assetById(obj.assetId)?.meta?.footprint || { w: 1, h: 1 }
-  return cell.x >= obj.x && cell.x < obj.x + fp.w && cell.y <= obj.y && cell.y > obj.y - fp.h
-}
-
 function placeObject(cell) {
   const asset = selectedAsset.value
   if (!asset || !['building', 'prop'].includes(asset.kind)) return
   const fp = asset.meta?.footprint || { w: 1, h: 1 }
-  const x = cell.x
-  const y = cell.y + fp.h - 1 // 点击处作为底部锚点
-  if (x < 0 || y < 0 || x + fp.w > renderMap.value.cols || y >= renderMap.value.rows) return
-  editLayers.value.objects.push({ assetId: asset.id, x, y, flip: false })
+  const m = renderMap.value
+  // 点击格 = 底角格（最靠近镜头的一格）
+  const x0 = cell.x - (fp.w - 1)
+  const y1 = cell.y
+  const y0 = y1 - fp.h + 1
+  if (x0 < 0 || y0 < 0 || x0 + fp.w > m.cols || y1 >= m.rows) return
+  editLayers.value.objects.push({ assetId: asset.id, x: x0, y: y1, flip: false })
   staticDirty = true
 }
 
@@ -755,7 +782,7 @@ async function saveEditor() {
       name: m.name,
       cols: m.cols,
       rows: m.rows,
-      tileSize: TS,
+      tileSize: HW * 2,
       layers: editLayers.value,
       locations: editLocations.value.map(l => ({
         key: l.key, name: l.name, aliases: l.aliases, kind: l.kind,
@@ -779,33 +806,57 @@ function onTownApplied() {
 
 // ── 渲染 ──
 
+/** 地砖贴图绘制尺寸：宽 = 菱形全宽 2*HW，高按贴图纵横比 */
+function groundTileDrawSize(img) {
+  const w = HW * 2
+  const h = img.naturalWidth ? w * (img.naturalHeight / img.naturalWidth) : w / 2
+  return { w, h }
+}
+
 function bakeStatic() {
   const m = renderMap.value
   if (!m) { staticCanvas = null; return }
-  const key = `${m.version}|${m.cols}x${m.rows}|${JSON.stringify(m.layers).length}`
+  const offX = m.rows * HW                       // 最西格的左顶点 x = -rows*HW → 平移到 0
+  const offY = 32                                // 顶部余量（贴图上沿超出菱形顶点）
+  const W = (m.cols + m.rows) * HW
+  const H = (m.cols + m.rows) * HH + 64
   staticCanvas = staticCanvas || document.createElement('canvas')
-  staticCanvas.width = m.cols * TS
-  staticCanvas.height = m.rows * TS
+  staticCanvas.width = W
+  staticCanvas.height = H
   const c = staticCanvas.getContext('2d')
   c.imageSmoothingEnabled = false
-  c.clearRect(0, 0, staticCanvas.width, staticCanvas.height)
+  c.clearRect(0, 0, W, H)
 
-  // ground → road 两层
-  for (const layerName of ['ground', 'road']) {
-    const layer = m.layers?.[layerName]
-    if (!Array.isArray(layer)) continue
-    for (let y = 0; y < m.rows; y++) {
-      const row = layer[y] || []
-      for (let x = 0; x < m.cols; x++) {
-        const assetId = row[x]
-        if (!assetId) continue
-        const img = assetImage(assetId)
-        if (img) c.drawImage(img, x * TS, y * TS, TS, TS)
+  const groundImgs = new Map() // assetId -> { img, anchorY }
+  let imgPending = false // 贴图尚未加载完 → 保持 dirty，下一帧重烘焙
+  // 按 (cx+cy) 从后往前涂：前排地砖的侧沿会盖住后排的
+  for (let s = 0; s <= m.cols + m.rows - 2; s++) {
+    for (let cx = Math.max(0, s - m.rows + 1); cx <= Math.min(m.cols - 1, s); cx++) {
+      const cy = s - cx
+      const top = cellTopWorld(cx, cy)
+      const px = top.x + offX
+      const py = top.y + offY
+      const groundId = m.layers?.ground?.[cy]?.[cx]
+      const roadId = m.layers?.road?.[cy]?.[cx]
+      for (const id of [groundId, roadId]) {
+        if (!id) continue
+        let entry = groundImgs.get(id)
+        if (entry === undefined) {
+          const asset = assetById(id)
+          const img = asset ? getImg(assetUrl(asset)) : null
+          if (!img) imgPending = true
+          entry = img ? { img, anchorY: asset?.meta?.groundAnchorY ?? GROUND_ANCHOR_Y } : null
+          groundImgs.set(id, entry)
+        }
+        if (!entry) continue
+        const { w, h } = groundTileDrawSize(entry.img)
+        c.drawImage(entry.img, px - HW, py + HH - h * entry.anchorY, w, h)
       }
     }
   }
-  staticDirty = false
-  bakedKey = key
+  staticCanvas._offX = offX
+  staticCanvas._offY = offY
+  staticDirty = imgPending // 贴图加载齐之前每帧重试烘焙
 }
 
 function wrapText(text, maxChars) {
@@ -826,6 +877,15 @@ function roundRect(c, x, y, w, h, r) {
   c.arcTo(x + w, y + h, x, y + h, r)
   c.arcTo(x, y + h, x, y, r)
   c.arcTo(x, y, x + w, y, r)
+  c.closePath()
+}
+
+function diamondPath(c, cx, cy, hw, hh) {
+  c.beginPath()
+  c.moveTo(cx, cy - hh)
+  c.lineTo(cx + hw, cy)
+  c.lineTo(cx, cy + hh)
+  c.lineTo(cx - hw, cy)
   c.closePath()
 }
 
@@ -874,59 +934,65 @@ function drawNameTag(c, px, py, name) {
   c.restore()
 }
 
+/** 建筑等距绘制：贴图底边对齐 footprint 菱形的南顶点 */
 function drawObject(c, obj, occluded) {
   const asset = assetById(obj.assetId)
-  const img = asset ? getImg(asset.imagePath) : null
-  const fp = asset?.meta?.footprint || { w: 1, h: 1 }
-  const bottomY = (obj.y + 1) * TS
-  const px = obj.x * TS
+  const img = asset ? getImg(assetUrl(asset)) : null
+  const r = objRect(obj)
+  const fp = r.fp
+  const north = cellTopWorld(r.x0, r.y0)
+  const southY = (r.x1 + r.y1 + 2) * HH
+  const westX = (r.x0 - r.y1 - 1) * HW
+  const eastX = (r.x1 - r.y0 + 1) * HW
+  const centerX = (north.x + ((r.x1 - r.y1) * HW)) / 2
+  const imgW = eastX - westX
   if (img) {
-    const w = fp.w * TS
-    const h = w * (img.naturalHeight && img.naturalWidth ? img.naturalHeight / img.naturalWidth : 1)
+    const imgH = imgW * (img.naturalHeight / Math.max(1, img.naturalWidth))
     c.save()
     c.globalAlpha = occluded ? 0.62 : 1
     if (obj.flip) {
-      c.translate(px + w, 0)
+      c.translate(centerX, 0)
       c.scale(-1, 1)
-      c.drawImage(img, 0, bottomY - h, w, h)
+      c.drawImage(img, -imgW / 2, southY - imgH, imgW, imgH)
     } else {
-      c.drawImage(img, px, bottomY - h, w, h)
+      c.drawImage(img, centerX - imgW / 2, southY - imgH, imgW, imgH)
     }
     c.restore()
   } else {
+    // 无贴图占位：footprint 菱形色块
     c.save()
-    c.fillStyle = occluded ? 'rgba(200,180,160,0.4)' : 'rgba(180,160,140,0.55)'
-    c.fillRect(px + 2, bottomY - TS, fp.w * TS - 4, TS - 2)
+    c.globalAlpha = occluded ? 0.4 : 0.55
+    c.fillStyle = '#b4a08c'
+    diamondPath(c, centerX, north.y + (southY - north.y) / 2, imgW / 2, (southY - north.y) / 2)
+    c.fill()
     c.restore()
   }
 }
 
-function drawAgent(c, a, nowMs) {
-  const pos = agentDisplayPos(a)
-  const px = (pos.x + 0.5) * TS
-  const baseY = (pos.y + 0.9) * TS
+function drawAgent(c, a, pos, nowMs) {
+  const center = cellCenterWorld(pos.x, pos.y)
+  const px = center.x
+  const feetY = center.y + HH
   const dir = agentFacing(a, pos)
   const spriteUrl = a.sprites?.[dir]
   const isPlayer = a.agentKey === 'me'
   const sleeping = a.sleeping
   const bob = pos.moving ? Math.abs(Math.sin(nowMs / 110)) * 2.2 : Math.sin(nowMs / 900 + (a.npcId || 0)) * 1.1
 
-  // 落影
+  // 落影（贴地小椭圆）
   c.save()
   c.globalAlpha = 0.22
   c.fillStyle = '#3c2f22'
   c.beginPath()
-  c.ellipse(px, baseY - 2, TS * 0.34, TS * 0.12, 0, 0, Math.PI * 2)
+  c.ellipse(px, feetY - 2, HW * 0.32, HH * 0.42, 0, 0, Math.PI * 2)
   c.fill()
   c.restore()
 
-  // 悬停/选中光环
   if (a.agentKey === hoverAgentKey.value || a.agentKey === selectedAgentKey.value) {
     c.save()
     c.strokeStyle = 'rgba(224,123,108,0.55)'
     c.lineWidth = 2
-    c.beginPath()
-    c.ellipse(px, baseY - 2, TS * 0.42, TS * 0.16, 0, 0, Math.PI * 2)
+    diamondPath(c, px, center.y, HW * 0.62, HH * 0.72)
     c.stroke()
     c.restore()
   }
@@ -935,31 +1001,30 @@ function drawAgent(c, a, nowMs) {
   const alpha = sleeping ? 0.85 : 1
   let drew = false
   if (sprite) {
-    const h = TS * 1.55
+    const h = 52
     const w = h * (sprite.naturalWidth && sprite.naturalHeight ? sprite.naturalWidth / sprite.naturalHeight : 0.66)
     const flip = dir === 'left'
     c.save()
     c.globalAlpha = alpha
-    c.translate(px, baseY - (sleeping ? 0 : bob))
+    c.translate(px, feetY - (sleeping ? 0 : bob))
     if (flip) c.scale(-1, 1)
     try { c.drawImage(sprite, -w / 2, -h, w, h); drew = true } catch { /* ignore */ }
     c.restore()
   }
   if (!drew) {
-    // 兜底：立绘 / 头像圆 token / 色块 token
     const standing = a.standingUrl ? getImg(a.standingUrl) : null
     const avatar = a.avatarPath ? getImg(a.avatarPath) : null
     if (standing) {
-      const h = TS * 2.1
+      const h = 68
       const w = h * (standing.naturalWidth / Math.max(1, standing.naturalHeight) || 0.7)
       c.save()
       c.globalAlpha = alpha
-      c.drawImage(standing, px - w / 2, baseY - h, w, h)
+      c.drawImage(standing, px - w / 2, feetY - h, w, h)
       c.restore()
       drew = true
     } else {
-      const r = TS * 0.5
-      const cy = baseY - r - bob
+      const r = HW * 0.5
+      const cy = feetY - r - bob
       c.save()
       c.globalAlpha = alpha
       c.beginPath()
@@ -976,7 +1041,7 @@ function drawAgent(c, a, nowMs) {
         try { c.drawImage(avatar, px - r, cy - r, r * 2, r * 2) } catch { /* ignore */ }
       } else {
         c.fillStyle = '#ffffff'
-        c.font = `700 ${Math.round(TS * 0.5)}px "HarmonyOS Sans SC", sans-serif`
+        c.font = `700 ${Math.round(HH * 1.1)}px "HarmonyOS Sans SC", sans-serif`
         c.textAlign = 'center'
         c.textBaseline = 'middle'
         c.fillText((a.displayName || '?').charAt(0), px, cy + 1)
@@ -986,33 +1051,37 @@ function drawAgent(c, a, nowMs) {
     }
   }
 
-  drawNameTag(c, px, baseY + TS * 0.34, a.displayName || '我')
+  drawNameTag(c, px, feetY + HH * 0.6, a.displayName || '我')
 
   if (sleeping) {
     c.save()
-    c.font = `${Math.round(TS * 0.6)}px "HarmonyOS Sans SC", sans-serif`
+    c.font = '16px "HarmonyOS Sans SC", sans-serif'
     c.textAlign = 'center'
     c.globalAlpha = 0.5 + 0.5 * Math.sin(nowMs / 500)
-    c.fillText('💤', px + TS * 0.6, baseY - TS * 1.5)
+    c.fillText('💤', px + HW * 0.55, feetY - 52)
     c.restore()
   } else if (a.encounterId) {
     c.save()
-    c.font = `${Math.round(TS * 0.55)}px "HarmonyOS Sans SC", sans-serif`
+    c.font = '15px "HarmonyOS Sans SC", sans-serif'
     c.textAlign = 'center'
-    c.fillText('💬', px + TS * 0.6, baseY - TS * 1.45)
+    c.fillText('💬', px + HW * 0.55, feetY - 50)
     c.restore()
   }
 
-  if (a.bubble?.text) drawBubble(c, a.bubble.text, a.bubble.until, px, baseY - TS * 1.9)
+  if (a.bubble?.text) drawBubble(c, a.bubble.text, a.bubble.until, px, feetY - 62)
 }
 
-/** 对象是否遮挡某居民（居民在建筑纵深内）→ 建筑半透明 */
-function objectOccludes(obj) {
-  for (const a of agents.value) {
-    const pos = agentDisplayPos(a)
-    const ay = pos.y + 0.5
-    const fp = assetById(obj.assetId)?.meta?.footprint || { w: 1, h: 1 }
-    if (ay <= obj.y && ay > obj.y - fp.h && pos.x + 0.5 >= obj.x && pos.x + 0.5 <= obj.x + fp.w) return true
+/** 居民是否被建筑挡住（站在建筑屏幕投影后方） */
+function objectOccludes(obj, agentPositions) {
+  const r = objRect(obj)
+  const north = cellTopWorld(r.x0, r.y0)
+  const southY = (r.x1 + r.y1 + 2) * HH
+  const westX = (r.x0 - r.y1 - 1) * HW
+  const eastX = (r.x1 - r.y0 + 1) * HW
+  for (const pos of agentPositions) {
+    const center = cellCenterWorld(pos.x, pos.y)
+    const feetY = center.y + HH
+    if (feetY < southY && feetY > north.y && center.x > westX && center.x < eastX) return true
   }
   return false
 }
@@ -1022,24 +1091,22 @@ function drawEditorOverlays(c) {
   const layers = editing.value ? editLayers.value : m?.layers
   if (!m || !layers) return
 
-  // 阻挡格红斜线
+  // 阻挡格：菱形红叉
   const override = layers.blockOverride
   if (Array.isArray(override)) {
     c.save()
-    c.strokeStyle = 'rgba(220, 90, 70, 0.5)'
+    c.strokeStyle = 'rgba(220, 90, 70, 0.55)'
     c.lineWidth = 1.5
     for (let y = 0; y < m.rows; y++) {
       for (let x = 0; x < m.cols; x++) {
-        const v = override[y]?.[x]
-        if (v === 1) {
+        if (override[y]?.[x] === 1) {
+          const t = cellTopWorld(x, y)
           c.beginPath()
-          c.moveTo(x * TS + 4, y * TS + 4)
-          c.lineTo((x + 1) * TS - 4, (y + 1) * TS - 4)
-          c.moveTo((x + 1) * TS - 4, y * TS + 4)
-          c.lineTo(x * TS + 4, (y + 1) * TS - 4)
+          c.moveTo(t.x, t.y + HH * 0.5)
+          c.lineTo(t.x + HW * 0.6, t.y + HH)
+          c.moveTo(t.x + HW * 0.6, t.y + HH * 0.5)
+          c.lineTo(t.x, t.y + HH)
           c.stroke()
-        } else if (v === -1) {
-          // 默认，不画
         }
       }
     }
@@ -1051,33 +1118,66 @@ function drawEditorOverlays(c) {
   if (cell && inBounds(cell) && ['ground', 'road', 'place'].includes(editTool.value) && selectedAsset.value) {
     const asset = selectedAsset.value
     const fp = asset.meta?.footprint || { w: 1, h: 1 }
-    const gx = editTool.value === 'place' ? cell.x : cell.x
-    const gy = editTool.value === 'place' ? cell.y + fp.h - 1 : cell.y
-    const img = getImg(asset.imagePath)
-    c.save()
-    c.globalAlpha = 0.55
-    if (img && editTool.value === 'place') {
-      const w = fp.w * TS
-      const h = w * (img.naturalHeight / Math.max(1, img.naturalWidth))
-      c.drawImage(img, gx * TS, (gy + 1) * TS - h, w, h)
+    if (editTool.value === 'place') {
+      const x0 = cell.x - (fp.w - 1)
+      const y1 = cell.y
+      const y0 = y1 - fp.h + 1
+      const north = cellTopWorld(x0, y0)
+      const southY = (cell.x + y1 + 2) * HH
+      const westX = (x0 - y1 - 1) * HW
+      const eastX = (cell.x - y0 + 1) * HW
+      const centerX = (north.x + ((cell.x - y0) * HW)) / 2
+      const img = getImg(assetUrl(asset))
+      c.save()
+      if (img) {
+        const imgW = eastX - westX
+        const imgH = imgW * (img.naturalHeight / Math.max(1, img.naturalWidth))
+        c.globalAlpha = 0.55
+        c.drawImage(img, centerX - imgW / 2, southY - imgH, imgW, imgH)
+      }
+      c.globalAlpha = 0.4
+      c.fillStyle = '#7fc48a'
+      diamondPath(c, centerX, (north.y + southY) / 2, (eastX - westX) / 2, (southY - north.y) / 2)
+      c.fill()
+      c.restore()
+    } else {
+      const img = getImg(assetUrl(asset))
+      const t = cellTopWorld(cell.x, cell.y)
+      c.save()
+      c.globalAlpha = 0.5
+      if (img) {
+        const { w, h } = groundTileDrawSize(img)
+        c.drawImage(img, t.x - HW, t.y + HH - h * (asset.meta?.groundAnchorY ?? GROUND_ANCHOR_Y), w, h)
+      }
+      c.globalAlpha = 0.4
+      c.fillStyle = editTool.value === 'road' ? '#e8c86a' : '#8ab6d6'
+      diamondPath(c, t.x, t.y + HH, HW, HH)
+      c.fill()
+      c.restore()
     }
-    c.globalAlpha = 0.4
-    c.fillStyle = editTool.value === 'place' ? '#7fc48a' : '#8ab6d6'
-    c.fillRect(gx * TS, (gy - fp.h + 1) * TS, fp.w * TS, fp.h * TS)
-    c.restore()
   }
 
-  // 矩形填充预览
+  // 矩形填充预览（逻辑矩形 → 屏幕菱形）
   if (paintDrag.value) {
     const { startCell, lastCell } = paintDrag.value
     const x0 = Math.min(startCell.x, lastCell.x)
     const y0 = Math.min(startCell.y, lastCell.y)
-    const w = Math.abs(lastCell.x - startCell.x) + 1
-    const h = Math.abs(lastCell.y - startCell.y) + 1
+    const x1 = Math.max(startCell.x, lastCell.x)
+    const y1 = Math.max(startCell.y, lastCell.y)
+    const n = cellTopWorld(x0, y0)
+    const e = cellTopWorld(x1, y0)
+    const s = cellTopWorld(x1, y1)
+    const w = cellTopWorld(x0, y1)
     c.save()
     c.globalAlpha = 0.3
     c.fillStyle = '#8ab6d6'
-    c.fillRect(x0 * TS, y0 * TS, w * TS, h * TS)
+    c.beginPath()
+    c.moveTo(n.x, n.y)
+    c.lineTo(e.x + HW, e.y + HH)
+    c.lineTo(s.x, s.y + 2 * HH)
+    c.lineTo(w.x - HW, w.y + HH)
+    c.closePath()
+    c.fill()
     c.restore()
   }
 
@@ -1086,14 +1186,13 @@ function drawEditorOverlays(c) {
   c.font = '10px "HarmonyOS Sans SC", sans-serif'
   c.textAlign = 'center'
   for (const loc of editLocations.value) {
-    const px = (loc.x + 0.5) * TS
-    const py = (loc.y + 1.6) * TS
+    const center = cellCenterWorld(loc.x, loc.y)
     c.fillStyle = 'rgba(224,123,108,0.85)'
     c.beginPath()
-    c.arc(px, py - 8, 4, 0, Math.PI * 2)
+    c.arc(center.x, center.y - 8, 4, 0, Math.PI * 2)
     c.fill()
     c.fillStyle = '#5c4a3a'
-    c.fillText(loc.name, px, py + 6)
+    c.fillText(loc.name, center.x, center.y + 8)
   }
   c.restore()
 }
@@ -1141,7 +1240,7 @@ function draw(nowMs) {
   const dpr = window.devicePixelRatio || 1
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
-  ctx.fillStyle = '#e9edda'
+  ctx.fillStyle = '#dfe5d0'
   ctx.fillRect(0, 0, cssW, cssH)
 
   const m = renderMap.value
@@ -1150,8 +1249,9 @@ function draw(nowMs) {
   // 跟随玩家
   if (player.value && followPlayer && !editing.value) {
     const pos = agentDisplayPos(player.value)
-    cam.x += ((pos.x + 0.5) * TS - cam.x) * 0.08
-    cam.y += ((pos.y + 0.5) * TS - cam.y) * 0.08
+    const center = cellCenterWorld(pos.x, pos.y)
+    cam.x += (center.x - cam.x) * 0.08
+    cam.y += (center.y - cam.y) * 0.08
   }
 
   if (m && staticCanvas) {
@@ -1161,28 +1261,32 @@ function draw(nowMs) {
     ctx.translate(-cam.x, -cam.y)
     ctx.imageSmoothingEnabled = false
 
-    ctx.drawImage(staticCanvas, 0, 0)
+    ctx.drawImage(staticCanvas, -staticCanvas._offX, -staticCanvas._offY)
 
-    // 对象 + 居民合并 y 排序（角色可走到建筑后面）
-    const drawables = []
+    // 对象 + 居民合并深度排序（等距深度 = 世界 y）
     const layers = editing.value ? editLayers.value : m.layers
+    const agentPositions = editing.value ? [] : [
+      ...agents.value.map(a => agentDisplayPos(a)),
+      ...(player.value ? [agentDisplayPos(player.value)] : []),
+    ]
+    const drawables = []
     for (const obj of layers?.objects || []) {
-      drawables.push({ kind: 'object', y: obj.y + 1, obj })
+      drawables.push({ kind: 'object', y: (objRect(obj).x1 + objRect(obj).y1 + 2) * HH, obj })
     }
     if (!editing.value) {
       for (const a of agents.value) {
         const pos = agentDisplayPos(a)
-        drawables.push({ kind: 'agent', y: pos.y + 0.5, a })
+        drawables.push({ kind: 'agent', y: (pos.x + pos.y + 2) * HH, a, pos })
       }
       if (player.value) {
         const pos = agentDisplayPos(player.value)
-        drawables.push({ kind: 'agent', y: pos.y + 0.5, a: player.value })
+        drawables.push({ kind: 'agent', y: (pos.x + pos.y + 2) * HH, a: player.value, pos })
       }
     }
     drawables.sort((p, q) => p.y - q.y)
     for (const d of drawables) {
-      if (d.kind === 'object') drawObject(ctx, d.obj, !editing.value && objectOccludes(d.obj))
-      else drawAgent(ctx, d.a, nowMs)
+      if (d.kind === 'object') drawObject(ctx, d.obj, !editing.value && objectOccludes(d.obj, agentPositions))
+      else drawAgent(ctx, d.a, d.pos, nowMs)
     }
 
     if (editing.value) drawEditorOverlays(ctx)
@@ -1216,9 +1320,10 @@ function relayout() {
 function centerCamera() {
   const m = renderMap.value
   if (!m) return
-  cam.x = (m.cols * TS) / 2
-  cam.y = (m.rows * TS) / 2
-  cam.zoom = Math.min(2.5, Math.max(0.5, Math.min(cssW / (m.cols * TS), cssH / (m.rows * TS))))
+  const center = cellCenterWorld(m.cols / 2, m.rows / 2)
+  cam.x = center.x
+  cam.y = center.y
+  cam.zoom = Math.min(2.5, Math.max(0.5, Math.min(cssW / ((m.cols + m.rows) * HW), cssH / ((m.cols + m.rows) * HH))))
   followPlayer = true
 }
 
@@ -1292,7 +1397,7 @@ async function goChat(characterId) {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #e9edda;
+  background: #dfe5d0;
 }
 
 .town-canvas {
@@ -1552,6 +1657,7 @@ async function goChat(characterId) {
 }
 
 .town-poi-form .row { display: flex; gap: 6px; justify-content: flex-end; }
+.poi-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
 
 /* ── 加载失败 ── */
 .town-loadstate {

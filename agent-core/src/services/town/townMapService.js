@@ -13,12 +13,12 @@
 import { getDb } from '../../db/index.js';
 import { broadcastTownMapUpdated } from './townBus.js';
 
-/** 对象占用的阻挡格：建筑 = footprint 全格 - 门前格；blocking 道具 = 锚点 1 格 */
+/** 对象占用的阻挡格：建筑 = footprint 全格 - 门前格（朝向镜头的底角格）；blocking 道具 = 锚点 1 格 */
 export function getObjectBlockingCells(obj, assetMeta) {
   const cells = [];
   const fp = assetMeta?.footprint;
   if (fp && fp.w > 0 && fp.h > 0) {
-    const door = assetMeta?.doorOffset || { dx: Math.floor(fp.w / 2), dy: fp.h - 1 };
+    const door = assetMeta?.doorOffset || { dx: fp.w - 1, dy: fp.h - 1 };
     for (let dy = 0; dy < fp.h; dy++) {
       for (let dx = 0; dx < fp.w; dx++) {
         if (dx === door.dx && dy === door.dy) continue; // 门前留空

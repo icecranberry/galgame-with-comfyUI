@@ -87,6 +87,139 @@ export async function removeWhiteBackground(buffer, tolerance = 28) {
 }
 
 /**
+ * 检测等距地砖贴图中菱形顶面的纵向中心（占图高比例）。
+ * 原理：菱形的横向对角线是整块内容最宽的一行，该行 y / 图高 = 菱形中心锚点。
+ * 用于渲染器把相邻地砖的菱形精确对齐（生成图的菱形位置每次都有漂移）。
+ * 检测失败返回 null（调用方回退 0.5）。
+ * @param {Buffer} buffer - PNG（地砖为不透明图）
+ * @returns {Promise<number|null>} 0~1
+ */
+export async function detectTileAnchorY(buffer) {
+  try {
+    const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
+    if (width < 4 || height < 4) return null;
+
+    // 背景色 = 四角像素的众数（地砖贴图四角是画布留白）
+    const cornerAt = (x, y) => {
+      const o = (y * width + x) * 4;
+      return [data[o], data[o + 1], data[o + 2], data[o + 3]];
+    };
+    const corners = [cornerAt(0, 0), cornerAt(width - 1, 0), cornerAt(0, height - 1), cornerAt(width - 1, height - 1)];
+    const bg = corners[0];
+    const isBg = (r, g, b, a) => {
+      if (a < 128) return true; // 透明也算背景
+      return corners.some(c => Math.abs(c[0] - r) <= 24 && Math.abs(c[1] - g) <= 24 && Math.abs(c[2] - b) <= 24);
+    };
+
+    let bestRow = -1;
+    let bestWidth = 0;
+    for (let y = 0; y < height; y++) {
+      let left = -1;
+      let right = -1;
+      for (let x = 0; x < width; x++) {
+        const o = (y * width + x) * 4;
+        if (!isBg(data[o], data[o + 1], data[o + 2], data[o + 3])) {
+          if (left === -1) left = x;
+          right = x;
+        }
+      }
+      const w = left === -1 ? 0 : right - left + 1;
+      if (w > bestWidth) {
+        bestWidth = w;
+        bestRow = y;
+      }
+    }
+    if (bestRow < 0 || bestWidth < width * 0.3) return null; // 内容太小，不可信
+    return Math.round((bestRow / height) * 100) / 100;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 等距地砖归一化：从生成图里裁出顶面菱形，输出刚好铺满画幅的 2:1 菱形贴图。
+ * 生成图的菱形位置/侧面厚度每次都不同，直接平铺会在接缝处露出毛刺；
+ * 裁掉侧面后所有地砖都是标准菱形，可完美互锁（侧面立体感交给建筑/道具）。
+ * 检测失败时原样返回（调用方按普通方图降级处理）。
+ * @param {Buffer} buffer - 原始生成图
+ * @returns {Promise<Buffer>} PNG，内容为 2:1 菱形顶面
+ */
+export async function flattenIsoTile(buffer) {
+  try {
+    const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
+
+    // 背景色 = 四角像素（留白），内容 = 与任一角显著不同或透明
+    const cornerAt = (x, y) => {
+      const o = (y * width + x) * 4;
+      return [data[o], data[o + 1], data[o + 2], data[o + 3]];
+    };
+    const corners = [cornerAt(0, 0), cornerAt(width - 1, 0), cornerAt(0, height - 1), cornerAt(width - 1, height - 1)];
+    const isContent = (x, y) => {
+      const o = (y * width + x) * 4;
+      const r = data[o], g = data[o + 1], b = data[o + 2], a = data[o + 3];
+      if (a < 128) return false;
+      return !corners.some(c => Math.abs(c[0] - r) <= 22 && Math.abs(c[1] - g) <= 22 && Math.abs(c[2] - b) <= 22);
+    };
+
+    // 找内容顶行 + 最宽行（= 菱形横向对角线）
+    let minY = -1;
+    let bestRow = -1;
+    let bestLeft = 0;
+    let bestRight = 0;
+    let bestWidth = 0;
+    for (let y = 0; y < height; y++) {
+      let left = -1;
+      let right = -1;
+      for (let x = 0; x < width; x++) {
+        if (isContent(x, y)) {
+          if (left === -1) left = x;
+          right = x;
+        }
+      }
+      if (left !== -1 && minY === -1) minY = y;
+      const w = left === -1 ? 0 : right - left + 1;
+      if (w > bestWidth) {
+        bestWidth = w;
+        bestLeft = left;
+        bestRight = right;
+        bestRow = y;
+      }
+    }
+    const diamondW = bestRight - bestLeft + 1;
+    if (minY < 0 || bestRow < 0 || diamondW < width * 0.35 || bestRow <= minY) return buffer;
+
+    const diamondH = Math.round(diamondW / 2); // 2:1 菱形
+    if (minY + diamondH > height) return buffer;
+
+    const cropped = await sharp(data, { raw: { width, height, channels: 4 } })
+      .extract({ left: bestLeft, top: minY, width: diamondW, height: diamondH })
+      .raw()
+      .toBuffer();
+
+    // 菱形 alpha 蒙版：2:1 菱形之外全透明（裁剪框四角是侧面/背景残留，互锁时会露出来）。
+    // 容差 +6%：边缘略外扩，避免相邻菱形之间出现发丝缝
+    const cx = diamondW / 2;
+    const cy = diamondH / 2;
+    const EPS = 1.06;
+    for (let y = 0; y < diamondH; y++) {
+      for (let x = 0; x < diamondW; x++) {
+        if (Math.abs(x + 0.5 - cx) / cx + Math.abs(y + 0.5 - cy) / cy > EPS) {
+          cropped[(y * diamondW + x) * 4 + 3] = 0;
+        }
+      }
+    }
+
+    return sharp(cropped, { raw: { width: diamondW, height: diamondH, channels: 4 } })
+      .png()
+      .toBuffer();
+  } catch {
+    return buffer;
+  }
+}
+
+/**
  * 素材统一后处理管线
  * @param {Buffer} buffer - 生图原始输出（JPEG/PNG）
  * @param {object} opts

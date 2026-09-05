@@ -62,8 +62,8 @@ app.use('/images', imageAvifFallback('data/images'));
 app.use('/images', express.static('data/images'));
 app.use('/avatars', express.static('data/avatars'));
 
-// 小镇像素素材（独立于 data/images，不进图库/压缩扫描）
-app.use('/town-assets', express.static('data/town/assets', { maxAge: '1h' }));
+// 小镇像素素材（独立于 data/images，不进图库/压缩扫描；不带强缓存，素材重生成后刷新即生效）
+app.use('/town-assets', express.static('data/town/assets'));
 
 // API 路由
 app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages

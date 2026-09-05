@@ -64,11 +64,12 @@ export function restoreInitJob() {
     const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
     if (!raw || typeof raw !== 'object') return;
     job = { ...defaultJob(), ...raw };
-    if (['blueprint', 'layout_pending'].includes(job.status)) {
-      // LLM 调用中断，无法续跑
+    if (job.status === 'blueprint') {
+      // 蓝图 LLM 调用中断，无法续跑
       job.status = 'failed';
-      job.error = '服务重启导致该步骤中断，请重新执行';
+      job.error = '服务重启导致蓝图生成中断，请重新开始';
     }
+    // batch_pending（批量可断点续跑）/ layout_pending（重新触发布图即可）原样保留
     persistJob();
     console.log(`[townInit] job restored: status=${job.status}`);
   } catch (err) {
@@ -511,9 +512,9 @@ function buildLayoutPrompt(cols, rows, bp, inventory) {
     '  ]',
     '}',
     '布局规则（务必遵守）：',
-    `- groundRects：先用一种地砖铺满整图（x=0,y=0,w=${cols},h=${rows}），再叠加广场/花田等特色区域矩形`,
-    '- roadPaths：点列之间按先横后纵的 L 形铺路；主路要纵横贯通（至少一横一纵），路网要连接所有建筑门口',
-    `- placedObjects：建筑 x = 建筑左上角列，y = 建筑最底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）；道具（树/长椅）散布 10~25 个，不要放在路上`,
+    `- groundRects：先用草地/泥土这类基础地砖铺满整图（x=0,y=0,w=${cols},h=${rows}），再叠加特色区域；广场/花田等特色区域合计只占全图 10%~20%（单块不超过 ${Math.floor(cols * 0.35)}×${Math.floor(rows * 0.35)}），不要让广场砖盖满全图`,
+    '- roadPaths：点列之间按先横后纵的 L 形铺路；主路要纵横贯通（至少一横一纵），路网要连接所有建筑门口；道路从地图边缘通到中心广场',
+    `- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）；道具（树/长椅）散布 10~25 个填充建筑之间的空地，不要放在路上`,
     '- locations：每栋 special 建筑都要绑定一个地点（objectRef = "key:instance"）；通用居民楼不用每个都绑；再挑 1~3 个开阔处设户外地点（广场/公园，给 x/y/radius）；aliases 是日程文本常用的同义词',
     `- npcSpawns：恰好 ${bp.npcs.length} 位居民，npcRef 用居民 displayName 原文，locationKey 用上面定义的地点 key`,
     '- 建筑之间留出步行空间，不要把地图塞满',
@@ -675,7 +676,7 @@ export function expandLayout(parsed, readyAssets, bp, cols, rows) {
       if (!obj) { warnings.push(`地点 ${loc.key} 引用了未放置的建筑 ${loc.objectRef}，跳过`); continue; }
       const asset = assetsById.get(obj.assetId);
       const fp = asset?.meta?.footprint;
-      const door = asset?.meta?.doorOffset || { dx: Math.floor((fp?.w || 1) / 2), dy: (fp?.h || 1) - 1 };
+      const door = asset?.meta?.doorOffset || { dx: (fp?.w || 1) - 1, dy: (fp?.h || 1) - 1 };
       const anchor = { x: obj.x + door.dx, y: obj.y - (fp ? fp.h - 1 - door.dy : 0) };
       locations.push({
         key: sanitizeKey(loc.key), name: String(loc.name).slice(0, 30),
@@ -741,6 +742,8 @@ export function confirmInit() {
     });
     db.exec("UPDATE town_characters SET home_location_id = NULL");
     db.exec('UPDATE town_npcs SET home_location_id = NULL');
+    db.exec('DELETE FROM town_npc_chat_messages');
+    db.exec('DELETE FROM town_npcs'); // 重新开镇：清掉旧居民（蓝图会重建，精灵素材按 key 复用不重生）
     db.exec('DELETE FROM town_locations');
     db.exec('DELETE FROM town_agent_state');
 
