@@ -2110,7 +2110,7 @@ onMounted(async () => {
 }
 .emoji-manage-card:hover {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 .emoji-manage-icon {
   width: 34px; height: 34px;

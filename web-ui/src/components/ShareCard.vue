@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #f4f1eeed;
+  background: color-mix(in srgb, var(--bg-secondary) 93%, transparent);
   border: 1px solid rgba(255, 255, 255, 0.58);
   border-radius: 18px;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
@@ -311,7 +311,7 @@ onBeforeUnmount(() => {
   aspect-ratio: 9 / 16;
   max-width: 100%;
   border-radius: 12px;
-  background: linear-gradient(100deg, #ece5de 40%, #f6f1ec 50%, #ece5de 60%);
+  background: linear-gradient(100deg, var(--bg-tertiary) 40%, var(--bg-secondary) 50%, var(--bg-tertiary) 60%);
   background-size: 200% 100%;
   animation: shareShimmer 1.2s ease-in-out infinite;
   display: flex;
@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
 
 .share-skeleton-hint {
   font-size: 13px;
-  color: #a3968b;
+  color: var(--text-secondary);
 }
 
 @keyframes shareShimmer {
@@ -340,7 +340,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 11px 22px;
   background: rgba(255, 255, 255, 0.38);
-  border-top: 1px solid rgba(224, 216, 207, 0.45);
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
 }
 
 .share-style-label {
@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 10px 22px calc(16px + env(safe-area-inset-bottom, 0px));
   background: rgba(255, 255, 255, 0.38);
-  border-top: 1px solid rgba(224, 216, 207, 0.45);
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
 }
 
 .share-action {

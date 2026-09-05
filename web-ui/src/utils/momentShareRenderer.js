@@ -23,7 +23,8 @@ export const MOMENT_SHARE_STYLES = [
 const STYLE_IDS = new Set(MOMENT_SHARE_STYLES.map(s => s.id))
 
 // ── 邻舍基础色板 ──
-const C = {
+// 海报跟随 Cel Glow 4 主题：渲染时从 CSS 变量读取，读不到（SSR/测试环境）回退上游暖纸色。
+const FALLBACK_PALETTE = {
   paperTop: '#fbf8f4',
   paper: '#f3ece3',
   card: '#fffdfb',
@@ -33,6 +34,30 @@ const C = {
   cream: '#f6f1ea',
   scrimDark: '24, 17, 13',
 }
+
+// token 映射：纸面层次对应主题表面层次，强调色对应主题主色
+const PALETTE_TOKENS = {
+  paperTop: '--bg-secondary',
+  paper: '--bg-primary',
+  card: '--bg-secondary',
+  ink: '--text-bright',
+  muted: '--text-secondary',
+  coral: '--accent',
+  cream: '--bg-tertiary',
+}
+
+function buildPalette() {
+  if (typeof document === 'undefined') return { ...FALLBACK_PALETTE }
+  const css = getComputedStyle(document.documentElement)
+  const palette = { ...FALLBACK_PALETTE }
+  for (const [key, token] of Object.entries(PALETTE_TOKENS)) {
+    const v = css.getPropertyValue(token).trim()
+    if (v) palette[key] = v
+  }
+  return palette
+}
+
+let C = buildPalette()
 
 // ════════════════════════ 基础工具 ════════════════════════
 
@@ -571,7 +596,7 @@ function drawAmbient(ctx, W, H, { tintHex } = {}) {
     ctx.fillStyle = g
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
   }
-  glow(W * 0.94, H * 0.05, W * 0.62, 'rgba(224, 123, 108, ALPHA)', 0.07)
+  glow(W * 0.94, H * 0.05, W * 0.62, rgba(C.coral, 'ALPHA'), 0.07)
   glow(W * 0.04, H * 0.985, W * 0.55, 'rgba(168, 186, 202, ALPHA)', 0.08)
 }
 
@@ -1545,6 +1570,7 @@ export function pickMomentStyle(post, { firstImageAspect = 1, rand = Math.random
 export async function renderMomentShareCard(post, options = {}) {
   const { styleId = 'auto', width = 1080, featureLayout = null } = options
   await ensureFonts()
+  C = buildPalette() // 每次渲染刷新主题色（用户可能已切换主题）
   const m = await buildModel(post)
   if (featureLayout) m.featureLayoutOverride = featureLayout
 
