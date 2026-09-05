@@ -116,11 +116,23 @@
       <div class="town-hint is-edit">{{ currentToolHint }}</div>
     </template>
 
-    <!-- 角色资料卡（入住角色） -->
+    <!-- 角色资料卡（入住角色；有立绘时立绘跳出展示） -->
     <Teleport to="body">
       <Transition name="town-modal">
         <div v-if="selectedChar" class="town-card-mask" @click.self="selectedAgentKey = null">
-          <div class="town-card" role="dialog" aria-label="邻居资料">
+          <div class="town-card is-portrait" role="dialog" aria-label="邻居资料">
+            <div
+              v-if="selectedChar.standingUrl"
+              class="tc-standing"
+              role="button"
+              tabindex="0"
+              aria-label="查看立绘"
+              @click="portraitPopupUrl = selectedChar.standingUrl"
+              @keydown.enter="portraitPopupUrl = selectedChar.standingUrl"
+            >
+              <img :src="selectedChar.standingUrl" alt="立绘">
+              <span class="tc-standing-hint">立绘 · 点击放大</span>
+            </div>
             <div class="tc-head">
               <div
                 class="tc-avatar"
@@ -151,6 +163,18 @@
               <linshe-button variant="primary" size="sm" @click="goChat(selectedChar.characterId)">去聊天</linshe-button>
               <linshe-button variant="ghost" size="sm" @click="selectedAgentKey = null">先不了</linshe-button>
             </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 立绘放大浮层 -->
+    <Teleport to="body">
+      <Transition name="town-modal">
+        <div v-if="portraitPopupUrl" class="town-card-mask" @click.self="portraitPopupUrl = null">
+          <div class="portrait-popup" role="dialog" aria-label="立绘">
+            <img :src="portraitPopupUrl" alt="立绘大图">
+            <linshe-button variant="icon" size="sm" aria-label="关闭" class="portrait-close" @click="portraitPopupUrl = null">✕</linshe-button>
           </div>
         </div>
       </Transition>
@@ -282,6 +306,7 @@ const hoverAgentKey = ref(null)
 const selectedAgentKey = ref(null)
 const chatNpcId = ref(null)
 const chatNpcName = ref('')
+const portraitPopupUrl = ref(null)
 const showAdmin = ref(false)
 const showWizard = ref(false)
 const dragging = ref(false)
@@ -405,12 +430,8 @@ const facing = reactive({}) // agentKey -> 'down'|'up'|'left'|'right'
 
 function agentFacing(a, pos) {
   if (pos.moving) {
-    // 屏幕方向：grid(-1,0)=左上 / (0,-1)=右上 / (1,0)=右下 / (0,1)=左下
-    const sum = pos.dx + pos.dy
-    const diff = pos.dx - pos.dy
-    if (diff > 0) facing[a.agentKey] = 'right'
-    else if (diff < 0) facing[a.agentKey] = 'left'
-    else facing[a.agentKey] = sum > 0 ? 'down' : 'up'
+    // 像素小人只有正/背两面：向上走显示背面，其余显示正面
+    facing[a.agentKey] = pos.dy < 0 ? 'up' : 'down'
   }
   return facing[a.agentKey] || 'down'
 }
@@ -1003,11 +1024,9 @@ function drawAgent(c, a, pos, nowMs) {
   if (sprite) {
     const h = 52
     const w = h * (sprite.naturalWidth && sprite.naturalHeight ? sprite.naturalWidth / sprite.naturalHeight : 0.66)
-    const flip = dir === 'left'
     c.save()
     c.globalAlpha = alpha
     c.translate(px, feetY - (sleeping ? 0 : bob))
-    if (flip) c.scale(-1, 1)
     try { c.drawImage(sprite, -w / 2, -h, w, h); drew = true } catch { /* ignore */ }
     c.restore()
   }
@@ -1735,6 +1754,59 @@ async function goChat(characterId) {
 .tc-tag.is-soft { background: rgba(240, 236, 232, 0.9); color: var(--text-secondary); }
 .tc-actions { display: flex; gap: 10px; margin-top: 18px; }
 .tc-actions > * { flex: 1; }
+
+/* 立绘跳出 */
+.town-card.is-portrait { width: 360px; }
+.tc-standing {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 280px;
+  padding: 0;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: #efe9de;
+  cursor: zoom-in;
+  overflow: hidden;
+  text-align: center;
+}
+.tc-standing img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom;
+}
+.tc-standing-hint {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: rgba(255, 253, 248, 0.9);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.portrait-popup {
+  position: relative;
+  height: min(86vh, 900px);
+  aspect-ratio: 9 / 16;
+  max-width: calc(100vw - 40px);
+  background: #efe9de;
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
+  overflow: hidden;
+}
+.portrait-popup img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom;
+}
+.portrait-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
 
 .town-modal-enter-active,
 .town-modal-leave-active { transition: opacity 0.2s ease; }

@@ -811,16 +811,20 @@ export function confirmInit() {
   });
 }
 
-/** 玩家四方向精灵（后台生成） */
+/** 玩家正/背像素精灵（LLM 出 prompt，后台生成） */
 function spawnPlayerSprites(appearance, styleTags) {
   (async () => {
-    for (const dir of ['down', 'up', 'left', 'right']) {
+    const { playerAppearanceInfo } = await import('./townNpcService.js');
+    const { generateSpritePrompt } = await import('./townPromptBuilder.js');
+    for (const dir of ['down', 'up']) {
       try {
         const existing = listAssets({}).find(a => a.key === `player_${dir}` && a.status === 'ready');
         if (existing) continue;
+        const prompt = await generateSpritePrompt({ appearanceInfo: playerAppearanceInfo(), direction: dir });
         await createAsset({
           kind: 'player', key: `player_${dir}`, name: `玩家 ${dir}`,
-          desc: appearance || 'a friendly villager', meta: { direction: dir, styleTags: styleTags || '' },
+          desc: appearance || 'a friendly villager',
+          meta: { direction: dir, styleTags: styleTags || '', promptOverride: prompt },
         });
       } catch (err) {
         console.warn(`[townInit] player sprite ${dir} failed:`, err?.message);

@@ -1464,6 +1464,12 @@ function migrateTownV2Schema(db) {
       db.exec(`ALTER TABLE town_locations ADD COLUMN object_id INTEGER`);
       console.log('[db] Added town_locations.object_id column');
     }
+    // 邀请入邻舍：NPC 对应的 characters.id（未邀请为 NULL）
+    const npcCols = db.prepare(`PRAGMA table_info(town_npcs)`).all();
+    if (npcCols.length > 0 && !npcCols.find(c => c.name === 'character_id')) {
+      db.exec(`ALTER TABLE town_npcs ADD COLUMN character_id INTEGER`);
+      console.log('[db] Added town_npcs.character_id column');
+    }
     const playerCols = db.prepare(`PRAGMA table_info(town_players)`).all();
     if (playerCols.length > 0 && !playerCols.find(c => c.name === 'sprite_asset_id')) {
       db.exec(`ALTER TABLE town_players ADD COLUMN sprite_asset_id INTEGER`);

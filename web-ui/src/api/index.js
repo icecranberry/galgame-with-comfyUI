@@ -2004,6 +2004,10 @@ export function fetchTownNpcs() {
   return jsonRequest(`${BASE}/town/npcs`)
 }
 
+export function fetchTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}`)
+}
+
 export function createTownNpc(payload) {
   return jsonRequest(`${BASE}/town/npcs`, townJson('POST', payload))
 }
@@ -2018,6 +2022,18 @@ export function deleteTownNpc(id) {
 
 export function generateTownNpcSprites(id) {
   return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', {}))
+}
+
+export function generateTownNpcPortrait(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', {}))
+}
+
+export function inviteTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/invite`, townJson('POST', {}))
+}
+
+export function generateTownCharacterPortrait(characterId) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/portrait`, townJson('POST', {}))
 }
 
 export function rerollTownNpc(id) {

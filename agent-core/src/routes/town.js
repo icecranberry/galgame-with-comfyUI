@@ -30,7 +30,8 @@ import {
 } from '../services/town/townInitService.js';
 import {
   listNpcs, getNpc, createNpc, updateNpc, deleteNpc,
-  generateNpcSprites, rerollNpc, getNpcChatHistory, chatWithNpc,
+  generateNpcSprites, generateNpcPortrait, generateCharacterPortrait,
+  rerollNpc, getNpcChatHistory, chatWithNpc, inviteNpcAsCharacter,
 } from '../services/town/townNpcService.js';
 
 const router = Router();
@@ -200,6 +201,12 @@ router.get('/npcs', (req, res) => {
   res.json({ npcs: listNpcs() });
 });
 
+router.get('/npcs/:id', (req, res) => {
+  const npc = getNpc(parseInt(req.params.id, 10));
+  if (!npc) return res.status(404).json({ error: 'NPC 不存在' });
+  res.json({ npc });
+});
+
 router.post('/npcs', (req, res) => {
   const { displayName, persona, appearanceDesc, job, traits } = req.body || {};
   if (!displayName) return res.status(400).json({ error: 'displayName 必填' });
@@ -226,6 +233,32 @@ router.post('/npcs/:id/sprites', async (req, res) => {
     res.json(await generateNpcSprites(parseInt(req.params.id, 10)));
   } catch (err) {
     res.status(500).json({ error: err?.message || '精灵生成失败' });
+  }
+});
+
+router.post('/npcs/:id/portrait', async (req, res) => {
+  try {
+    res.json(await generateNpcPortrait(parseInt(req.params.id, 10)));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '立绘生成失败' });
+  }
+});
+
+// 邀请居民入邻舍（NPC → 聊天侧角色）
+router.post('/npcs/:id/invite', async (req, res) => {
+  try {
+    res.json(await inviteNpcAsCharacter(parseInt(req.params.id, 10)));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '邀请失败' });
+  }
+});
+
+// 角色立绘（复用 characters.standing_url，没有才 LLM 生成）
+router.post('/characters/:id/portrait', async (req, res) => {
+  try {
+    res.json(await generateCharacterPortrait(parseInt(req.params.id, 10)));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '立绘生成失败' });
   }
 });
 

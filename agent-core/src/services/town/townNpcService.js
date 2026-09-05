@@ -4,13 +4,15 @@
  * 定位：世界观生成的轻量居民——不进 characters 表、没有日程/记忆/关系全套大脑，
  * 只在镇上生活与就地对话。作息（routine_json）由 LLM 初始化时一次性生成，此后永久本地执行。
  *
- * 精灵：四方向像素小人（npc_{id}_{down|up|left|right}），走 town_assets 素材管线。
+ * 素材：正/背两张像素小人（npc_{id}_{down|up}，600×800→36×48）+ 一张正式立绘
+ * （npc_{id}_portrait，900×1600 白底抠白）——全部走酒馆立绘同款 LLM 出 prompt 结构。
  * 就地聊天：persona + 现场语境 + 最近对话历史 → 单轮 LLM，历史存 town_npc_chat_messages。
  */
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { createAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS } from './townAssetService.js';
+import { generateSpritePrompt, generatePortraitPrompt } from './townPromptBuilder.js';
 import { getMapRow } from './townMapService.js';
 import { broadcastTownBubble } from './townBus.js';
 
@@ -37,6 +39,7 @@ function npcToDto(row) {
     sprites[dir] = getAssetsByKey([`npc_${row.id}_${dir}`])[0] || null;
   }
   const spriteReady = SPRITE_DIRECTIONS.every(d => sprites[d]?.status === 'ready');
+  const portrait = getAssetsByKey([`npc_${row.id}_portrait`])[0] || null;
   return {
     id: row.id,
     mapId: row.map_id,
@@ -49,6 +52,8 @@ function npcToDto(row) {
     traits,
     spriteReady,
     sprites,
+    portrait,
+    characterId: row.character_id || null, // 已邀请入邻舍时的角色 id
     townEnabled: !!row.town_enabled,
   };
 }
@@ -96,7 +101,7 @@ export function deleteNpc(id) {
   return { ok: r.changes > 0 };
 }
 
-// ── 精灵生成 ──
+// ── 精灵 / 立绘生成 ──
 
 /** 世界观 styleTags：优先取素材库中已存的（整套共享），保证精灵与小镇风格一致 */
 export function getWorldStyleTags() {
@@ -107,22 +112,45 @@ export function getWorldStyleTags() {
   try { return JSON.parse(row.meta_json || '{}').styleTags || ''; } catch { return ''; }
 }
 
-/** 生成一个 NPC 的四方向精灵（串行队列由素材服务保证），完成后回写 sprite_ready */
+/** 组装四层结构用的「角色外观信息」文本 */
+function npcAppearanceInfo(npcRow) {
+  return [
+    `【名字】${npcRow.display_name}`,
+    npcRow.job ? `【职业】${npcRow.job}（小镇居民）` : '【身份】小镇居民',
+    npcRow.persona ? `【人设】${npcRow.persona}` : '',
+    npcRow.appearance_desc ? `【外观描述（英文，必以此为准）】${npcRow.appearance_desc}` : '',
+    `【画风基调】${getWorldStyleTags() || 'cozy pixel town'}`,
+  ].filter(Boolean).join('\n');
+}
+
+export function playerAppearanceInfo() {
+  const u = config.user;
+  return [
+    `【名字】${u.nickname || '我'}（来到小镇的玩家）`,
+    u.gender ? `【性别】${u.gender}` : '',
+    u.appearance ? `【外观描述】${u.appearance}` : '',
+    u.persona ? `【人设】${u.persona}` : '',
+    `【画风基调】${getWorldStyleTags() || 'cozy pixel town'}`,
+  ].filter(Boolean).join('\n');
+}
+
+/** 生成一个 NPC 的正/背像素小人（600×800 → 36×48，LLM 出 prompt），完成后回写 sprite_ready */
 export async function generateNpcSprites(npcId) {
   const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
-  const styleTags = getWorldStyleTags();
-  const desc = npcRow.appearance_desc || npcRow.display_name;
+  const appearanceInfo = npcAppearanceInfo(npcRow);
 
   for (const dir of SPRITE_DIRECTIONS) {
-    const existing = getAssetsByKey([`npc_${npcId}_${dir}`])[0];
+    const key = `npc_${npcId}_${dir}`;
+    const existing = getAssetsByKey([key])[0];
     if (existing?.status === 'ready') continue;
+    if (existing) deleteAsset(existing.id);
     try {
-      // 已有失败/过期的行先删掉再建，避免素材库堆积坏行
-      if (existing) deleteAsset(existing.id);
+      const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
       await createAsset({
-        kind: 'npc', key: `npc_${npcId}_${dir}`, name: `${npcRow.display_name} ${dir}`,
-        desc, meta: { direction: dir, styleTags, npcId }, worldSettingId: null,
+        kind: 'npc', key, name: `${npcRow.display_name} ${dir}`,
+        desc: npcRow.appearance_desc || npcRow.display_name,
+        meta: { direction: dir, styleTags: getWorldStyleTags(), npcId, promptOverride: prompt },
       });
     } catch (err) {
       console.warn(`[townNpcs] sprite ${dir} failed:`, err?.message);
@@ -132,6 +160,87 @@ export async function generateNpcSprites(npcId) {
   const allReady = SPRITE_DIRECTIONS.every(d => getAssetsByKey([`npc_${npcId}_${d}`])[0]?.status === 'ready');
   getDb().prepare('UPDATE town_npcs SET sprite_ready = ? WHERE id = ?').run(allReady ? 1 : 0, npcId);
   return { ok: true, spriteReady: allReady };
+}
+
+/** 生成 NPC 正式立绘（900×1600 白底插画 → 抠白），交互时跳出展示 */
+export async function generateNpcPortrait(npcId) {
+  const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  if (!npcRow) throw new Error(`npc #${npcId} not found`);
+  const key = `npc_${npcId}_portrait`;
+  const existing = getAssetsByKey([key])[0];
+  if (existing) deleteAsset(existing.id);
+  const prompt = await generatePortraitPrompt({ appearanceInfo: npcAppearanceInfo(npcRow) });
+  const asset = await createAsset({
+    kind: 'portrait', key, name: `${npcRow.display_name} 立绘`,
+    desc: npcRow.appearance_desc || npcRow.display_name,
+    meta: { npcId, promptOverride: prompt, styleTags: getWorldStyleTags() },
+  });
+  return { ok: true, asset };
+}
+
+/** 角色立绘：复用 characters.standing_url；没有才走 LLM 生成（存素材库 char_{id}_portrait） */
+export async function generateCharacterPortrait(characterId) {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+  if (!char) throw new Error('角色不存在');
+  if (char.standing_url) {
+    return { ok: true, reused: true, asset: null, url: char.standing_url };
+  }
+  const { buildCharacterPersona } = await import('../characterPersona.js');
+  const appearanceInfo = [
+    `【名字】${char.display_name || char.name}`,
+    `【角色卡】\n${buildCharacterPersona(char, { variant: 'short', person: char.display_name || char.name })}`,
+    `【画风基调】${getWorldStyleTags() || 'cozy pixel town'}`,
+  ].filter(Boolean).join('\n');
+  const prompt = await generatePortraitPrompt({ appearanceInfo });
+  const key = `char_${characterId}_portrait`;
+  const existing = getAssetsByKey([key])[0];
+  if (existing) deleteAsset(existing.id);
+  const asset = await createAsset({
+    kind: 'portrait', key, name: `${char.display_name || char.name} 立绘`,
+    desc: char.short_prompt || char.base_prompt || char.name,
+    meta: { characterId, promptOverride: prompt },
+  });
+  return { ok: true, reused: false, asset, url: asset.image_path };
+}
+
+// ── 邀请入邻舍（NPC → 聊天侧角色） ──
+
+/** 把小镇居民邀请为邻舍角色：characters 建档（人设/外观沿用 NPC 卡），NPC 记住对应关系 */
+export async function inviteNpcAsCharacter(npcId) {
+  const db = getDb();
+  const npc = getNpc(npcId);
+  if (!npc) throw new Error('NPC 不存在');
+  if (npc.characterId) {
+    const exists = db.prepare('SELECT id, name FROM characters WHERE id = ?').get(npc.characterId);
+    if (exists) return { ok: true, characterId: exists.id, name: exists.name, already: true };
+  }
+
+  // 角色名唯一约束：重名时加后缀
+  let name = npc.displayName;
+  if (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) {
+    name = `${name}_镇`;
+    let i = 2;
+    while (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) name = `${npc.displayName}_镇${i++}`;
+  }
+
+  const basePrompt = [
+    `你是邻舍小镇的居民「${npc.displayName}」。`,
+    npc.job ? `职业：${npc.job}。` : '',
+    npc.persona ? `性格与人设：${npc.persona}` : '',
+    npc.appearanceDesc ? `外观：${npc.appearanceDesc}` : '',
+    '你日常在小镇里按作息生活（工作/闲逛/回家），与邻里熟络。与用户聊天时保持角色口吻，聊小镇的日常、眼下的生活。',
+  ].filter(Boolean).join('\n');
+
+  const r = db.prepare(`
+    INSERT INTO characters (name, display_name, base_prompt, short_prompt)
+    VALUES (?, ?, ?, ?)
+  `).run(name, npc.displayName, basePrompt, npc.persona || npc.displayName);
+  const characterId = Number(r.lastInsertRowid);
+
+  db.prepare('UPDATE town_npcs SET character_id = ? WHERE id = ?').run(characterId, npcId);
+  console.log(`[townNpcs] npc #${npcId} (${npc.displayName}) invited as character #${characterId}`);
+  return { ok: true, characterId, name, already: false };
 }
 
 // ── 作息生成（LLM 一次性） ──

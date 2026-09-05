@@ -3,47 +3,49 @@
     <div class="admin-mask" @click.self="$emit('close')">
       <div class="admin-panel" role="dialog" aria-label="小镇管理">
         <div class="ap-head">
-          <span class="ap-title">小镇管理</span>
-          <linshe-button variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
+          <linshe-button v-if="detail" variant="ghost" size="sm" @click="detail = null">← 返回</linshe-button>
+          <span class="ap-title">{{ detail ? (detail.type === 'npc' ? detailName : detailName) : '小镇管理' }}</span>
+          <linshe-button v-if="!detail" variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
+          <linshe-button v-else variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
         </div>
 
-        <div class="ap-tabs">
+        <div v-if="!detail" class="ap-tabs">
           <linshe-button variant="chip" size="sm" :active="tab === 'npcs'" @click="tab = 'npcs'">居民</linshe-button>
           <linshe-button variant="chip" size="sm" :active="tab === 'chars'" @click="tab = 'chars'">角色素材</linshe-button>
           <linshe-button variant="chip" size="sm" :active="tab === 'settings'" @click="tab = 'settings'">设置</linshe-button>
         </div>
 
-        <!-- ── 居民管理 ── -->
-        <div v-if="tab === 'npcs'" class="ap-body">
+        <!-- ── 居民列表 ── -->
+        <div v-if="!detail && tab === 'npcs'" class="ap-body">
           <div class="ap-actions">
             <linshe-button variant="secondary" size="sm" :loading="batchSprites" @click="generateAllMissingNpcSprites">
               一键补齐缺失精灵
             </linshe-button>
           </div>
           <div v-if="npcs.length === 0" class="ap-empty">镇上还没有居民，先完成世界初始化吧。</div>
-          <div v-for="npc in npcs" :key="npc.id" class="ap-npc">
-            <div class="ap-npc-sprites">
-              <div v-for="dir in ['down', 'up', 'left', 'right']" :key="dir" class="ap-sprite">
-                <img v-if="npc.sprites?.[dir]?.status === 'ready'" :src="npc.sprites[dir].image_path" :alt="dir">
-                <span v-else class="ap-sprite-missing">·</span>
-              </div>
+          <div
+            v-for="npc in npcs" :key="npc.id"
+            class="ap-row" role="button" tabindex="0"
+            @click="detail = { type: 'npc', id: npc.id }"
+            @keydown.enter="detail = { type: 'npc', id: npc.id }"
+          >
+            <div class="ap-row-thumb is-portrait">
+              <img v-if="npc.portrait?.status === 'ready'" :src="npc.portrait.image_path + '?v=' + (npc.portrait.meta?.updatedAt ?? 0)" alt="">
+              <img v-else-if="npc.sprites?.down?.status === 'ready'" :src="npc.sprites.down.image_path" alt="">
+              <span v-else class="ap-thumb-missing">·</span>
             </div>
             <div class="ap-npc-info">
               <div class="ap-npc-name">
                 {{ npc.displayName }}
                 <span v-if="npc.job" class="ap-npc-job">{{ npc.job }}</span>
               </div>
-              <div class="ap-npc-persona">{{ npc.persona || '（还没有人设）' }}</div>
               <div class="ap-npc-meta">
-                作息 {{ npc.routine?.length || 0 }} 段 · 精灵 {{ spriteCount(npc) }}/4
+                {{ npc.townEnabled ? (npc.sleepingHint || '在镇上活动') : '已暂停' }} · 精灵 {{ spriteCount(npc) }}/2
+                <template v-if="npc.characterId"> · 已入邻舍</template>
+                <template v-else> · 未邀请</template>
               </div>
             </div>
-            <div class="ap-npc-ops">
-              <linshe-switch v-model="npc.townEnabled" size="sm" :aria-label="`${npc.displayName} 启停`" @change="v => toggleNpc(npc, v)" />
-              <span class="ap-op" role="button" title="重新生成精灵" @click="regenSprites(npc)">🎨</span>
-              <span class="ap-op" role="button" title="重掷人设与作息" @click="rerollNpc(npc)">🎲</span>
-              <span class="ap-op is-danger" role="button" title="删除居民" @click="removeNpc(npc)">🗑️</span>
-            </div>
+            <span class="ap-row-arrow">›</span>
           </div>
 
           <div class="ap-add">
@@ -59,33 +61,145 @@
           </div>
         </div>
 
-        <!-- ── 角色素材 ── -->
-        <div v-if="tab === 'chars'" class="ap-body">
+        <!-- ── NPC 详情页 ── -->
+        <div v-if="detail && detail.type === 'npc'" class="ap-body">
+          <div v-if="detailNpc" class="ap-detail">
+            <div class="ap-detail-media">
+              <div class="ap-portrait-box">
+                <img v-if="detailNpc.portrait?.status === 'ready'" :src="detailNpc.portrait.image_path + '?v=' + (detailNpc.portrait.meta?.updatedAt ?? 0)" alt="立绘">
+                <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
+              </div>
+              <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
+                {{ detailNpc.portrait?.status === 'ready' ? '重生成立绘' : '生成 900×1600 立绘' }}
+              </linshe-button>
+            </div>
+
+            <div class="ap-detail-name">
+              {{ detailNpc.displayName }}
+              <span v-if="detailNpc.job" class="ap-npc-job">{{ detailNpc.job }}</span>
+              <linshe-switch
+                class="ap-detail-switch"
+                v-model="detailNpc.townEnabled"
+                size="sm"
+                :aria-label="`${detailNpc.displayName} 启停`"
+                @change="v => toggleNpc(detailNpc, v)"
+              />
+            </div>
+
+            <div class="ap-section">
+              <div class="ap-section-title">像素小人（正面 / 背面）</div>
+              <div class="ap-sprite-row">
+                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite">
+                  <img v-if="detailNpc.sprites?.[dir]?.status === 'ready'" :src="detailNpc.sprites[dir].image_path" :alt="dir">
+                  <span v-else class="ap-sprite-missing">·</span>
+                </div>
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
+                  生成 / 重生成（600×800）
+                </linshe-button>
+              </div>
+            </div>
+
+            <div class="ap-section">
+              <div class="ap-section-title">人设</div>
+              <p class="ap-persona">{{ detailNpc.persona || '（还没有人设）' }}</p>
+              <p class="ap-appearance" v-if="detailNpc.appearanceDesc">{{ detailNpc.appearanceDesc }}</p>
+            </div>
+
+            <div class="ap-section">
+              <div class="ap-section-title">作息（本地自动执行）</div>
+              <div v-if="(detailNpc.routine || []).length === 0" class="ap-empty is-small">还没有作息，重掷一次人设即可生成。</div>
+              <div v-for="(slot, i) in detailNpc.routine" :key="i" class="ap-routine-row">
+                <span class="ap-routine-time">{{ slot.start }}~{{ slot.end }}</span>
+                <span class="ap-routine-act">{{ slot.activity }}</span>
+              </div>
+            </div>
+
+            <div class="ap-actions is-column">
+              <linshe-button
+                v-if="!detailNpc.characterId"
+                variant="primary" size="sm" :loading="busyFlags[`invite${detailNpc.id}`]"
+                @click="invite(detailNpc)"
+              >邀请入邻舍（成为聊天角色）</linshe-button>
+              <div v-else class="ap-invited">已邀请入邻舍（角色 #{{ detailNpc.characterId }}，在聊天侧边栏可见）</div>
+              <linshe-button variant="secondary" size="sm" :loading="busyFlags[`reroll${detailNpc.id}`]" @click="rerollNpc(detailNpc)">
+                重掷人设与作息
+              </linshe-button>
+              <linshe-button variant="danger" size="sm" @click="removeNpc(detailNpc)">删除居民</linshe-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 角色列表 ── -->
+        <div v-if="!detail && tab === 'chars'" class="ap-body">
           <div class="ap-actions">
             <linshe-button variant="primary" size="sm" :loading="batchChars" @click="generateAllMissingCharSprites">
               一键生成所有缺失素材
             </linshe-button>
           </div>
-          <div v-for="c in chars" :key="c.id" class="ap-npc">
-            <div class="ap-npc-sprites">
-              <div v-for="dir in ['down', 'up', 'left', 'right']" :key="dir" class="ap-sprite">
-                <img v-if="c.sprites?.[dir]" :src="c.sprites[dir]" :alt="dir">
-                <span v-else class="ap-sprite-missing">·</span>
-              </div>
+          <div
+            v-for="c in chars" :key="c.id"
+            class="ap-row" role="button" tabindex="0"
+            @click="detail = { type: 'char', id: c.id }"
+            @keydown.enter="detail = { type: 'char', id: c.id }"
+          >
+            <div class="ap-row-thumb is-portrait">
+              <img v-if="c.portraitUrl || c.standingUrl" :src="c.portraitUrl || c.standingUrl" alt="">
+              <img v-else-if="c.sprites?.down" :src="c.sprites.down" alt="">
+              <span v-else class="ap-thumb-missing">·</span>
             </div>
             <div class="ap-npc-info">
               <div class="ap-npc-name">{{ c.displayName }}</div>
-              <div class="ap-npc-meta">精灵 {{ c.spriteCount }}/4 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
+              <div class="ap-npc-meta">精灵 {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
             </div>
-            <div class="ap-npc-ops">
-              <linshe-switch v-model="c.townEnabled" size="sm" :aria-label="`${c.displayName} 入住`" @change="v => toggleChar(c, v)" />
-              <span class="ap-op" role="button" title="重新生成精灵" @click="regenCharSprites(c)">🎨</span>
+            <span class="ap-row-arrow">›</span>
+          </div>
+        </div>
+
+        <!-- ── 角色详情页 ── -->
+        <div v-if="detail && detail.type === 'char'" class="ap-body">
+          <div v-if="detailChar" class="ap-detail">
+            <div class="ap-detail-media">
+              <div class="ap-portrait-box">
+                <img v-if="detailChar.portraitUrl || detailChar.standingUrl" :src="detailChar.portraitUrl || detailChar.standingUrl" alt="立绘">
+                <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
+              </div>
+              <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
+                {{ detailChar.standingUrl ? '复用已有立绘 ✓' : (detailChar.portraitUrl ? '重生成 900×1600 立绘' : '生成 900×1600 立绘') }}
+              </linshe-button>
+            </div>
+
+            <div class="ap-detail-name">
+              {{ detailChar.displayName }}
+              <linshe-switch
+                class="ap-detail-switch"
+                v-model="detailChar.townEnabled"
+                size="sm"
+                :aria-label="`${detailChar.displayName} 入住`"
+                @change="v => toggleChar(detailChar, v)"
+              />
+            </div>
+
+            <div class="ap-section">
+              <div class="ap-section-title">像素小人（正面 / 背面）</div>
+              <div class="ap-sprite-row">
+                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite">
+                  <img v-if="detailChar.sprites?.[dir]" :src="detailChar.sprites[dir]" :alt="dir">
+                  <span v-else class="ap-sprite-missing">·</span>
+                </div>
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
+                  生成 / 重生成（600×800）
+                </linshe-button>
+              </div>
+            </div>
+
+            <div class="ap-actions is-column">
+              <linshe-button variant="primary" size="sm" @click="$emit('close')">去小镇看看</linshe-button>
             </div>
           </div>
         </div>
 
         <!-- ── 小镇设置 ── -->
-        <div v-if="tab === 'settings'" class="ap-body">
+        <div v-if="!detail && tab === 'settings'" class="ap-body">
           <div v-for="f in SETTING_FIELDS" :key="f.key" class="ap-setting">
             <span class="ap-setting-label">{{ f.label }}</span>
             <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :min="f.min" :max="f.max" :step="f.step" />
@@ -111,7 +225,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
@@ -125,6 +239,8 @@ const tab = ref('npcs')
 const npcs = ref([])
 const chars = ref([])
 const settings = ref({})
+const detail = ref(null) // { type: 'npc' | 'char', id }
+const busyFlags = reactive({})
 const savingSettings = ref(false)
 const adding = ref(false)
 const batchSprites = ref(false)
@@ -144,8 +260,20 @@ const SETTING_FIELDS = [
   { key: 'statusBubbleIntervalMin', label: '状态气泡间隔（分）', min: 5, max: 240, step: 5 },
 ]
 
+const detailNpc = computed(() => {
+  if (detail.value?.type !== 'npc') return null
+  return npcs.value.find(n => n.id === detail.value.id) || null
+})
+
+const detailChar = computed(() => {
+  if (detail.value?.type !== 'char') return null
+  return chars.value.find(c => c.id === detail.value.id) || null
+})
+
+const detailName = computed(() => detailNpc.value?.displayName || detailChar.value?.displayName || '详情')
+
 function spriteCount(npc) {
-  return ['down', 'up', 'left', 'right'].filter(d => npc.sprites?.[d]?.status === 'ready').length
+  return ['down', 'up'].filter(d => npc.sprites?.[d]?.status === 'ready').length
 }
 
 async function loadNpcs() {
@@ -193,28 +321,72 @@ async function toggleChar(c, enabled) {
 }
 
 async function regenSprites(npc) {
-  npc.spriteReady = false
+  busyFlags[`sprites${npc.id}`] = true
   try {
     await api.generateTownNpcSprites(npc.id)
     await loadNpcs()
   } catch (err) {
     console.warn('[town-admin] sprites failed:', err?.message)
+  } finally {
+    busyFlags[`sprites${npc.id}`] = false
+  }
+}
+
+async function makePortrait(npc) {
+  busyFlags[`portrait${npc.id}`] = true
+  try {
+    await api.generateTownNpcPortrait(npc.id)
+    await loadNpcs()
+  } catch (err) {
+    console.warn('[town-admin] portrait failed:', err?.message)
+  } finally {
+    busyFlags[`portrait${npc.id}`] = false
+  }
+}
+
+async function makeCharPortrait(c) {
+  if (c.standingUrl) return // 已有立绘直接复用
+  busyFlags[`charportrait${c.id}`] = true
+  try {
+    await api.generateTownCharacterPortrait(c.id)
+    await loadChars()
+  } catch (err) {
+    console.warn('[town-admin] char portrait failed:', err?.message)
+  } finally {
+    busyFlags[`charportrait${c.id}`] = false
+  }
+}
+
+async function invite(npc) {
+  busyFlags[`invite${npc.id}`] = true
+  try {
+    await api.inviteTownNpc(npc.id)
+    await loadNpcs()
+    await loadChars()
+  } catch (err) {
+    console.warn('[town-admin] invite failed:', err?.message)
+  } finally {
+    busyFlags[`invite${npc.id}`] = false
   }
 }
 
 async function rerollNpc(npc) {
+  busyFlags[`reroll${npc.id}`] = true
   try {
     await api.rerollTownNpc(npc.id)
     await loadNpcs()
   } catch (err) {
     console.warn('[town-admin] reroll failed:', err?.message)
+  } finally {
+    busyFlags[`reroll${npc.id}`] = false
   }
 }
 
 async function removeNpc(npc) {
   try {
     await api.deleteTownNpc(npc.id)
-    npcs.value = npcs.value.filter(n => n.id !== npc.id)
+    detail.value = null
+    await loadNpcs()
   } catch (err) {
     console.warn('[town-admin] delete failed:', err?.message)
   }
@@ -243,7 +415,7 @@ async function addNpc() {
 async function generateAllMissingNpcSprites() {
   batchSprites.value = true
   try {
-    for (const npc of npcs.value.filter(n => spriteCount(n) < 4)) {
+    for (const npc of npcs.value.filter(n => spriteCount(n) < 2)) {
       try { await api.generateTownNpcSprites(npc.id) } catch (err) { console.warn('[town-admin]', err?.message) }
       await loadNpcs()
     }
@@ -253,18 +425,21 @@ async function generateAllMissingNpcSprites() {
 }
 
 async function regenCharSprites(c) {
+  busyFlags[`charsprites${c.id}`] = true
   try {
     await api.generateTownCharacterSprites(c.id)
     await loadChars()
   } catch (err) {
     console.warn('[town-admin] char sprites failed:', err?.message)
+  } finally {
+    busyFlags[`charsprites${c.id}`] = false
   }
 }
 
 async function generateAllMissingCharSprites() {
   batchChars.value = true
   try {
-    for (const c of chars.value.filter(x => x.spriteCount < 4)) {
+    for (const c of chars.value.filter(x => x.spriteCount < 2)) {
       try { await api.generateTownCharacterSprites(c.id) } catch (err) { console.warn('[town-admin]', err?.message) }
       await loadChars()
     }
@@ -288,6 +463,7 @@ async function doReset() {
   try {
     await api.resetTownWorld()
     resetting.value = false
+    detail.value = null
     town.fetchState().catch(() => {})
   } catch (err) {
     console.warn('[town-admin] reset failed:', err?.message)
@@ -313,7 +489,7 @@ onMounted(() => {
 }
 
 .admin-panel {
-  width: 420px;
+  width: 440px;
   max-width: 100vw;
   height: 100%;
   background: #f4f1eeed;
@@ -326,11 +502,11 @@ onMounted(() => {
 .ap-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 16px 18px 8px;
 }
 
-.ap-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
+.ap-title { flex: 1; font-size: 16px; font-weight: 700; color: var(--text-bright); }
 
 .ap-tabs { display: flex; gap: 6px; padding: 6px 18px 10px; }
 
@@ -344,6 +520,7 @@ onMounted(() => {
 }
 
 .ap-actions { display: flex; gap: 8px; }
+.ap-actions.is-column { flex-direction: column; }
 
 .ap-empty {
   font-size: 13px;
@@ -352,39 +529,48 @@ onMounted(() => {
   padding: 30px 0;
 }
 
-.ap-npc {
+.ap-empty.is-small { padding: 10px 0; font-size: 12px; }
+
+/* ── 列表行（整行热区 → 详情页） ── */
+.ap-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   background: #fbf8f3;
   border-radius: 14px;
   padding: 10px 12px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
 }
 
-.ap-npc-sprites {
-  display: grid;
-  grid-template-columns: repeat(2, 26px);
-  gap: 3px;
+.ap-row:hover { border-color: rgba(224, 123, 108, 0.3); }
+
+.ap-row-thumb {
+  width: 44px;
+  height: 56px;
+  border-radius: 8px;
+  background: #f1ebe1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
   flex-shrink: 0;
 }
 
-.ap-sprite {
-  width: 26px;
-  height: 34px;
-  border-radius: 6px;
-  background: #f1ebe1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.ap-sprite img {
+.ap-row-thumb img {
+  width: 100%;
   height: 100%;
+  object-fit: contain;
+  object-position: bottom;
   image-rendering: pixelated;
 }
 
-.ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
+.ap-row-thumb.is-portrait img { image-rendering: auto; }
+
+.ap-thumb-missing { color: #cfc4b4; font-size: 14px; padding-bottom: 8px; }
+.ap-thumb-missing.is-big { font-size: 13px; }
+
+.ap-row-arrow { color: #c9bda9; font-size: 18px; flex-shrink: 0; }
 
 .ap-npc-info { flex: 1; min-width: 0; }
 
@@ -406,40 +592,95 @@ onMounted(() => {
   border-radius: 999px;
 }
 
-.ap-npc-persona {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.ap-npc-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; opacity: 0.85; }
+
+/* ── 详情页 ── */
+.ap-detail { display: flex; flex-direction: column; gap: 14px; }
+
+.ap-detail-media { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+
+.ap-portrait-box {
+  width: 100%;
+  height: 300px;
+  border-radius: 14px;
+  background: #efe9de;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
   overflow: hidden;
 }
 
-.ap-npc-meta { font-size: 10px; color: var(--text-secondary); margin-top: 3px; opacity: 0.8; }
-
-.ap-npc-ops {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+.ap-portrait-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom;
 }
 
-.ap-op {
-  width: 26px;
-  height: 26px;
+.ap-detail-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.ap-detail-switch { margin-left: auto; }
+
+.ap-section { display: flex; flex-direction: column; gap: 8px; }
+.ap-section-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+
+.ap-sprite-row { display: flex; align-items: center; gap: 10px; }
+
+.ap-sprite {
+  width: 44px;
+  height: 58px;
   border-radius: 8px;
-  background: rgba(255, 253, 248, 0.9);
+  background: #f1ebe1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  cursor: pointer;
+  overflow: hidden;
 }
 
-.ap-op:hover { background: #fff; }
-.ap-op.is-danger:hover { background: rgba(192, 86, 74, 0.12); }
+.ap-sprite img { height: 100%; image-rendering: pixelated; }
+.ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
+.ap-sprite-row > :last-child { margin-left: auto; }
 
+.ap-persona, .ap-appearance {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin: 0;
+  background: #fbf8f3;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.ap-appearance { color: var(--text-secondary); font-style: italic; }
+
+.ap-routine-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: #fbf8f3;
+}
+
+.ap-routine-time { color: var(--accent-hover); min-width: 84px; font-variant-numeric: tabular-nums; }
+.ap-routine-act { color: var(--text-primary); }
+
+.ap-invited {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(124, 176, 116, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+/* ── 新增居民 ── */
 .ap-add {
   margin-top: 8px;
   padding: 12px;
@@ -455,15 +696,9 @@ onMounted(() => {
 .ap-add-grid > * { flex: 1; }
 .ap-add > :last-child { align-self: flex-end; }
 
-.ap-setting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.ap-setting-label { font-size: 12px; color: var(--text-primary); }
-.ap-setting .ap-setting-label { flex: 1; }
+/* ── 设置 ── */
+.ap-setting { display: flex; align-items: center; gap: 12px; }
+.ap-setting-label { flex: 1; font-size: 12px; color: var(--text-primary); }
 .ap-setting > :last-child { width: 90px; }
 
 .ap-danger-zone {

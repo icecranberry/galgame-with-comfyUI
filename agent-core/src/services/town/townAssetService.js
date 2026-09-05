@@ -13,7 +13,18 @@ import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
 import { postProcessAsset, detectTileAnchorY, flattenIsoTile } from './assetPostProcess.js';
+import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
+
+/** 建筑 LLM 出 prompt（酒馆立绘同款结构）；失败回退静态串 */
+async function buildBuildingPromptViaLlm(p) {
+  try {
+    return await generateBuildingPrompt(p);
+  } catch (err) {
+    console.warn('[townAssets] building llm prompt failed, use fallback:', err?.message);
+    return buildAssetPrompt({ kind: 'building', desc: p.desc, styleTags: p.styleTags, special: p.special });
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const TOWN_ASSETS_DIR = path.resolve(__dirname, '..', '..', '..', 'data', 'town', 'assets');
@@ -25,28 +36,28 @@ const PIXEL_BASE = 'pixel art, clean pixel edges, limited color palette, no anti
  *  地砖/道路不带画师串（illustration 画师会把平铺纹理带偏成场景插画） */
 export const ASSET_SPECS = {
   ground: {
-    size: { width: 512, height: 512 },
+    size: { width: 1536, height: 1536 },
     // {desc} 会被插进「顶面完全被该材质覆盖」的句子里，避免模型画成花坛（顶面裸土、草只长边缘）
     promptTemplate: 'isometric ground tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
-    pixel: { w: 64, h: 64 },
+    pixel: { w: 64, h: 32 },
     artist: '',
   },
   road: {
-    size: { width: 512, height: 512 },
+    size: { width: 1536, height: 1536 },
     promptTemplate: 'isometric road tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
-    pixel: { w: 64, h: 64 },
+    pixel: { w: 64, h: 32 },
     artist: '',
   },
   building: {
-    size: { width: 768, height: 768 },   // 特殊建筑 768×1024
-    tallSize: { width: 768, height: 1024 },
-    prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no terrain chunk, no fence, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
+    size: { width: 1536, height: 1536 },   // 特殊建筑 1536×2048
+    tallSize: { width: 1536, height: 2048 },
+    // 英文 prompt 由 LLM 按酒馆立绘同款四层结构生成（townNpcService.buildBuildingPromptMessages），此串仅兜底
+    prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no ground tiles, no pavement, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
     removeBg: true,
-    // 像素密度按等距占格比例：横向 (w+h)*16（渲染时按 (w+h)*HALF_W 放大 2 倍）
-    pixelPerCell: 16,
-    pixelWidth: (fp) => (fp.w + fp.h) * 16,
+    // 渲染按 (w+h)*HALF_W 画：像素宽做成同尺寸 → 1:1 绘制不模糊
+    pixelWidth: (fp) => (fp.w + fp.h) * 32,
   },
   prop: {
     size: { width: 512, height: 512 },
@@ -54,26 +65,32 @@ export const ASSET_SPECS = {
     removeBg: true,
     pixel: { w: 48, h: 48 },
   },
+  // 像素小人：600×800 制作 → 像素化 36×48（3:4），正/背两面
   npc: {
-    size: { width: 768, height: 768 },
-    prompt: 'white background, full body, chibi pixel sprite, single character, centered, game asset',
+    size: { width: 600, height: 800 },
+    prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
     removeBg: true,
-    pixel: { w: 32, h: 48 },
+    pixel: { w: 36, h: 48 },
+  },
+  // 居民/玩家正式立绘：900×1600 白底插画（生成后抠白），不做像素化
+  portrait: {
+    size: { width: 900, height: 1600 },
+    prompt: 'pure white background, simple background',
+    removeBg: true,
+    pixel: null,
   },
   player: {
-    size: { width: 768, height: 768 },
-    prompt: 'white background, full body, chibi pixel sprite, single character, centered, game asset',
+    size: { width: 600, height: 800 },
+    prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
     removeBg: true,
-    pixel: { w: 32, h: 48 },
+    pixel: { w: 36, h: 48 },
   },
 };
 
-export const SPRITE_DIRECTIONS = ['down', 'up', 'left', 'right'];
+export const SPRITE_DIRECTIONS = ['down', 'up']; // 像素小人只需正面/背面
 const DIRECTION_PROMPT = {
-  down: 'facing down toward the viewer',
-  up: 'facing up, back to the viewer',
-  left: 'facing left, side view',
-  right: 'facing right, side view',
+  down: 'facing the viewer, front view',
+  up: 'seen from behind, back view',
 };
 
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
@@ -144,13 +161,21 @@ async function generateIntoRow(row) {
     ? spec.tallSize
     : spec.size;
 
-  const prompt = buildAssetPrompt({
-    kind: row.kind,
-    desc: meta.desc || row.name,
-    styleTags: meta.styleTags || '',
-    direction: meta.direction || null,
-    special: !!meta.special,
-  });
+  // prompt 来源优先级：meta.promptOverride（立绘/精灵的 LLM 产物）→ 建筑 LLM → 静态组装
+  let prompt;
+  if (meta.promptOverride) {
+    prompt = meta.promptOverride;
+  } else if (row.kind === 'building' && meta.useLlmPrompt !== false) {
+    prompt = await buildBuildingPromptViaLlm({ name: row.name, desc: meta.desc, footprint: meta.footprint, special: !!meta.special, styleTags: meta.styleTags || '' });
+  } else {
+    prompt = buildAssetPrompt({
+      kind: row.kind,
+      desc: meta.desc || row.name,
+      styleTags: meta.styleTags || '',
+      direction: meta.direction || null,
+      special: !!meta.special,
+    });
+  }
 
   db.prepare(`UPDATE town_assets SET status = 'pending', source_prompt = ? WHERE id = ?`).run(prompt, row.id);
 
@@ -172,12 +197,19 @@ async function generateIntoRow(row) {
     const isTile = row.kind === 'ground' || row.kind === 'road';
     let work = buffer;
     if (isTile) work = await flattenIsoTile(work);
-    let tw = isTile ? 64 : (spec.pixel?.w ?? 64);
-    let th = isTile ? 32 : (spec.pixel?.h ?? 64);
-    if (!isTile && spec.pixelWidth && meta.footprint?.w) {
-      // 建筑按等距占格宽 (w+h)*16
+    let tw;
+    let th;
+    if (isTile) {
+      tw = 64; th = 32;
+    } else if (spec.pixelWidth && meta.footprint?.w) {
+      // 建筑按等距占格宽 (w+h)*32，渲染 1:1 不模糊
       tw = spec.pixelWidth(meta.footprint);
       th = Math.max(1, Math.round(tw * size.height / size.width));
+    } else if (spec.pixel) {
+      tw = spec.pixel.w;
+      th = spec.pixel.h;
+    } else {
+      tw = size.width; th = size.height; // portrait 保持原分辨率
     }
 
     const outBuffer = await postProcessAsset(work, {
@@ -199,7 +231,7 @@ async function generateIntoRow(row) {
     meta.styleTags = meta.styleTags || '';
     meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
     // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5
-    if (row.kind === 'ground' || row.kind === 'road') {
+    if (isTile) {
       meta.groundAnchorY = (await detectTileAnchorY(outBuffer)) ?? 0.5;
     }
     db.prepare(`
@@ -234,7 +266,7 @@ export function listAssets({ kind, worldSettingId, keys } = {}) {
     params.push(...keys);
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-  return db.prepare(`SELECT * FROM town_assets ${where} ORDER BY kind, id`).all().map(rowToAsset);
+  return db.prepare(`SELECT * FROM town_assets ${where} ORDER BY kind, id`).all(...params).map(rowToAsset);
 }
 
 export function getAssetsByKey(keys) {

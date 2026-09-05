@@ -22,6 +22,7 @@ import { getMapRow, buildWalkGridFromLayers } from './townMapService.js';
 import { buildLocationMatcher } from './townLocationMatch.js';
 import { findPath, isWalkable, pickStandingCell } from './townPathfinding.js';
 import { listAssets, createAsset, getAssetsByKey, deleteAsset } from './townAssetService.js';
+import { generateSpritePrompt } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection } from '../characterPersona.js';
 import {
   broadcastTownMove, broadcastTownBubble,
@@ -285,9 +286,9 @@ function loadState() {
   refreshMoods();
 }
 
-/** 素材库 → 四方向精灵 URL（齐备才有值） */
+/** 素材库 → 正/背精灵 URL（齐备才有值） */
 function spriteUrlsByKey(prefix, assets) {
-  const dirs = ['down', 'up', 'left', 'right'];
+  const dirs = ['down', 'up'];
   const byKey = new Map((assets || listAssets({})).map(a => [a.key, a]));
   const sprites = {};
   let ready = 0;
@@ -1291,19 +1292,22 @@ export function listTownCharacters() {
   return rows.map(r => {
     const sprites = {};
     let ready = 0;
-    for (const dir of ['down', 'up', 'left', 'right']) {
+    for (const dir of ['down', 'up']) {
       const a = byKey.get(`char_${r.id}_${dir}`);
       sprites[dir] = a?.status === 'ready' ? a.image_path : null;
       if (sprites[dir]) ready++;
     }
+    const portrait = byKey.get(`char_${r.id}_portrait`);
     const agentKey = `char:${r.id}`;
     const agent = state.agents.get(agentKey);
     return {
       id: r.id,
       displayName: r.display_name || r.name,
       avatarPath: r.avatar_path || null,
+      standingUrl: db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(r.id)?.standing_url || null,
+      portraitUrl: portrait?.status === 'ready' ? portrait.image_path : null,
       townEnabled: !!r.town_enabled,
-      spriteReady: ready === 4,
+      spriteReady: ready === 2,
       spriteCount: ready,
       sprites,
       locationName: agent ? state.locations.find(l => l.id === agent.targetLocId)?.name || null : null,
@@ -1321,7 +1325,7 @@ export function forceTick() {
 
 // ── 管理面板：角色精灵 / 小镇设置 / 重置世界 ──
 
-/** 生成一个入住角色的四方向像素精灵（外观走 characterPersona 统一入口） */
+/** 生成一个入住角色的正/背像素小人（600×800 → 36×48；外观走 characterPersona 统一入口 + 酒馆式 LLM 出 prompt） */
 export async function generateCharacterSprites(characterId) {
   const db = getDb();
   const row = db.prepare(`
@@ -1338,17 +1342,22 @@ export async function generateCharacterSprites(characterId) {
   } catch {
     appearance = row.short_prompt || row.base_prompt || row.display_name;
   }
+  const appearanceInfo = [
+    `【名字】${row.display_name || row.name}`,
+    `【外观描述（必以此为准）】${appearance || row.display_name}`,
+  ].join('\n');
 
-  for (const dir of ['down', 'up', 'left', 'right']) {
+  for (const dir of ['down', 'up']) {
     const key = `char_${characterId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
     if (existing?.status === 'ready') continue;
     if (existing) deleteAsset(existing.id);
     try {
+      const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
       await createAsset({
         kind: 'npc', key, name: `${row.display_name || row.name} ${dir}`,
         desc: appearance || row.display_name,
-        meta: { direction: dir, characterId, styleTags: '' },
+        meta: { direction: dir, characterId, promptOverride: prompt },
       });
     } catch (err) {
       console.warn(`[town] char #${characterId} sprite ${dir} failed:`, err?.message);
