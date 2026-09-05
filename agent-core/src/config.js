@@ -129,6 +129,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
       events: 'base',
       schedule: 'base',
       mailbox: 'base',
+      town: 'turbo',   // AI 小镇像素素材
     },
   },
   user: {
@@ -533,7 +534,7 @@ export function updateWorkflowScene(scene) {
     return { ok: false, error: 'scene must be an object' };
   }
   for (const [k, v] of Object.entries(scene)) {
-    if (['chat', 'group', 'moments', 'events', 'schedule', 'mailbox'].includes(k) && ['base', 'turbo'].includes(v)) {
+    if (['chat', 'group', 'moments', 'events', 'schedule', 'mailbox', 'town'].includes(k) && ['base', 'turbo'].includes(v)) {
       config.workflow.scene[k] = v;
     }
   }

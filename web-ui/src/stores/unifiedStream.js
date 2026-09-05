@@ -98,6 +98,9 @@ function _connect() {
     town_encounter_start: d => _dispatch('town_encounter_start', d),
     town_encounter_end:   d => _dispatch('town_encounter_end', d),
     town_ping:            d => _dispatch('town_ping', d),
+    town_init_progress:   d => _dispatch('town_init_progress', d),
+    town_map_updated:     d => _dispatch('town_map_updated', d),
+    town_assets_updated:  d => _dispatch('town_assets_updated', d),
   }, {
     onClose: _scheduleReconnect,
   })

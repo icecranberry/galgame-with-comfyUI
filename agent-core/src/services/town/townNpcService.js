@@ -1,0 +1,326 @@
+/**
+ * 轻量小镇居民（NPC）服务
+ *
+ * 定位：世界观生成的轻量居民——不进 characters 表、没有日程/记忆/关系全套大脑，
+ * 只在镇上生活与就地对话。作息（routine_json）由 LLM 初始化时一次性生成，此后永久本地执行。
+ *
+ * 精灵：四方向像素小人（npc_{id}_{down|up|left|right}），走 town_assets 素材管线。
+ * 就地聊天：persona + 现场语境 + 最近对话历史 → 单轮 LLM，历史存 town_npc_chat_messages。
+ */
+import { getDb } from '../../db/index.js';
+import { config } from '../../config.js';
+import { chatSync } from '../../llm/llm-client.js';
+import { createAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS } from './townAssetService.js';
+import { getMapRow } from './townMapService.js';
+import { broadcastTownBubble } from './townBus.js';
+
+// ── 查询 ──
+
+export function listNpcs() {
+  const db = getDb();
+  const npcs = db.prepare('SELECT * FROM town_npcs ORDER BY id').all();
+  return npcs.map(npcToDto);
+}
+
+export function getNpc(id) {
+  return npcToDto(getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(id));
+}
+
+function npcToDto(row) {
+  if (!row) return null;
+  let routine = [];
+  let traits = {};
+  try { routine = JSON.parse(row.routine_json || '[]'); } catch { /* 忽略坏数据 */ }
+  try { traits = JSON.parse(row.traits_json || '{}'); } catch { /* 忽略坏数据 */ }
+  const sprites = {};
+  for (const dir of SPRITE_DIRECTIONS) {
+    sprites[dir] = getAssetsByKey([`npc_${row.id}_${dir}`])[0] || null;
+  }
+  const spriteReady = SPRITE_DIRECTIONS.every(d => sprites[d]?.status === 'ready');
+  return {
+    id: row.id,
+    mapId: row.map_id,
+    displayName: row.display_name,
+    persona: row.persona || '',
+    appearanceDesc: row.appearance_desc || '',
+    job: row.job || '',
+    homeLocationId: row.home_location_id,
+    routine,
+    traits,
+    spriteReady,
+    sprites,
+    townEnabled: !!row.town_enabled,
+  };
+}
+
+export function npcCount() {
+  return getDb().prepare('SELECT COUNT(*) AS n FROM town_npcs').get().n;
+}
+
+// ── CRUD ──
+
+export function createNpc({ mapId, displayName, persona = '', appearanceDesc = '', job = '', traits = {}, routine = [], homeLocationId = null, townEnabled = 1 }) {
+  const db = getDb();
+  const r = db.prepare(`
+    INSERT INTO town_npcs (map_id, display_name, persona, appearance_desc, job, routine_json, traits_json, home_location_id, town_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(mapId ?? null, displayName, persona, appearanceDesc, job, JSON.stringify(routine), JSON.stringify(traits), homeLocationId, townEnabled ? 1 : 0);
+  return getNpc(Number(r.lastInsertRowid));
+}
+
+export function updateNpc(id, { displayName, persona, appearanceDesc, job, routine, traits, homeLocationId, townEnabled } = {}) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(id);
+  if (!row) return null;
+  db.prepare(`
+    UPDATE town_npcs SET
+      display_name = ?, persona = ?, appearance_desc = ?, job = ?,
+      routine_json = ?, traits_json = ?, home_location_id = ?, town_enabled = ?
+    WHERE id = ?
+  `).run(
+    displayName ?? row.display_name,
+    persona ?? row.persona,
+    appearanceDesc ?? row.appearance_desc,
+    job ?? row.job,
+    routine ? JSON.stringify(routine) : row.routine_json,
+    traits ? JSON.stringify(traits) : row.traits_json,
+    homeLocationId !== undefined ? homeLocationId : row.home_location_id,
+    townEnabled === undefined ? row.town_enabled : (townEnabled ? 1 : 0),
+    id,
+  );
+  return getNpc(id);
+}
+
+export function deleteNpc(id) {
+  const r = getDb().prepare('DELETE FROM town_npcs WHERE id = ?').run(id);
+  return { ok: r.changes > 0 };
+}
+
+// ── 精灵生成 ──
+
+/** 世界观 styleTags：优先取素材库中已存的（整套共享），保证精灵与小镇风格一致 */
+export function getWorldStyleTags() {
+  const row = getDb().prepare(`
+    SELECT meta_json FROM town_assets WHERE status = 'ready' AND kind IN ('ground','road','building','prop') ORDER BY id LIMIT 1
+  `).get();
+  if (!row) return '';
+  try { return JSON.parse(row.meta_json || '{}').styleTags || ''; } catch { return ''; }
+}
+
+/** 生成一个 NPC 的四方向精灵（串行队列由素材服务保证），完成后回写 sprite_ready */
+export async function generateNpcSprites(npcId) {
+  const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  if (!npcRow) throw new Error(`npc #${npcId} not found`);
+  const styleTags = getWorldStyleTags();
+  const desc = npcRow.appearance_desc || npcRow.display_name;
+
+  for (const dir of SPRITE_DIRECTIONS) {
+    const existing = getAssetsByKey([`npc_${npcId}_${dir}`])[0];
+    if (existing?.status === 'ready') continue;
+    try {
+      // 已有失败/过期的行先删掉再建，避免素材库堆积坏行
+      if (existing) deleteAsset(existing.id);
+      await createAsset({
+        kind: 'npc', key: `npc_${npcId}_${dir}`, name: `${npcRow.display_name} ${dir}`,
+        desc, meta: { direction: dir, styleTags, npcId }, worldSettingId: null,
+      });
+    } catch (err) {
+      console.warn(`[townNpcs] sprite ${dir} failed:`, err?.message);
+    }
+  }
+
+  const allReady = SPRITE_DIRECTIONS.every(d => getAssetsByKey([`npc_${npcId}_${d}`])[0]?.status === 'ready');
+  getDb().prepare('UPDATE town_npcs SET sprite_ready = ? WHERE id = ?').run(allReady ? 1 : 0, npcId);
+  return { ok: true, spriteReady: allReady };
+}
+
+// ── 作息生成（LLM 一次性） ──
+
+/**
+ * 生成 NPC 作息表。locationKeys：可用地点 key 列表（含 'home'）。
+ * @returns {Promise<Array>} routine 数组
+ */
+export async function generateRoutine(npc, locationKeys) {
+  const keys = locationKeys.filter(Boolean);
+  const content = await chatSync([
+    {
+      role: 'system',
+      content: [
+        `你是小镇的生活导演，为居民「${npc.displayName}」安排一天的作息。`,
+        npc.persona ? `人设：${npc.persona}` : '',
+        npc.job ? `职业：${npc.job}` : '',
+        '',
+        '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
+        '{',
+        '  "routine": [',
+        '    { "start": "06:30", "end": "08:00", "activity": "在后厨揉面准备开店", "locationKey": "home" },',
+        '    { "start": "08:00", "end": "12:00", "activity": "在店里烤面包招呼客人", "locationKey": "bakery" },',
+        '    { "start": "12:00", "end": "13:00", "activity": "吃午饭打个盹", "locationKey": "home" }',
+        '  ]',
+        '}',
+        '字段约束：',
+        '- start/end：24 小时制 "HH:MM"；从早上到深夜按时间升序、时间段首尾相接，覆盖全天 24 小时（最后一段 end 为 "24:00" 或次日 "06:30" 前的衔接段均可，但不能留空洞）',
+        `- locationKey：只能从这些取值里选：${keys.join('、')}`,
+        '- activity：中文、8~20 字、写具体在做什么，符合人设与职业；深夜段可以是睡觉',
+        '- 生成 4~7 个时间段，不要碎成一大堆',
+      ].filter(Boolean).join('\n'),
+    },
+    { role: 'user', content: `请为「${npc.displayName}」生成作息 JSON。` },
+  ], {
+    max_tokens: 900,
+    temperature: 0.8,
+    response_format: { type: 'json_object' },
+    label: '小镇NPC作息',
+  });
+
+  let parsed = null;
+  try { parsed = JSON.parse(String(content).replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* 走降级 */ }
+  const routine = Array.isArray(parsed?.routine) ? parsed.routine : null;
+  if (!routine || routine.length === 0) throw new Error('作息 JSON 解析失败');
+
+  const valid = routine
+    .map(r => ({
+      start: String(r.start || '').trim(),
+      end: String(r.end || '').trim(),
+      activity: String(r.activity || '').trim().slice(0, 40),
+      locationKey: keys.includes(r.locationKey) ? r.locationKey : keys[0],
+    }))
+    .filter(r => /^\d{1,2}:\d{2}$/.test(r.start) && /^\d{1,2}:\d{2}$/.test(r.end));
+  if (valid.length === 0) throw new Error('作息条目全部无效');
+  return valid;
+}
+
+// ── 重掷人设 + 作息（管理面板） ──
+
+/** 重掷一个 NPC 的人设/外观/职业，并重生成作息；返回更新后的 DTO */
+export async function rerollNpc(npcId) {
+  const row = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  if (!row) throw new Error('NPC 不存在');
+  const db = getDb();
+  const locations = db.prepare('SELECT key, name FROM town_locations ORDER BY id').all();
+
+  const content = await chatSync([
+    {
+      role: 'system',
+      content: [
+        '你是小镇的人事导演，为一位居民重新设计身份。',
+        '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
+        '{',
+        '  "displayName": "咕噜",',
+        '  "persona": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文 30~60 字）",',
+        '  "appearanceDesc": "short stout green orc baker wearing a white apron (英文，用于像素精灵生成)",',
+        '  "job": "面包师"',
+        '}',
+        '字段约束：displayName 中文 2~6 字；persona 中文 30~60 字；appearanceDesc 英文短语描述体型/肤色/服装；job 中文职业，要与小镇地点呼应（如咖啡厅/面包房/图书馆）。',
+        `小镇现有地点：${locations.map(l => l.name).join('、') || '（待定）'}`,
+      ].join('\n'),
+    },
+    { role: 'user', content: `请为小镇重新设计一位居民（原名字：${row.display_name}，可以保留或换新）。` },
+  ], {
+    max_tokens: 500,
+    temperature: 0.95,
+    response_format: { type: 'json_object' },
+    label: '小镇NPC重掷',
+  });
+
+  let parsed = null;
+  try { parsed = JSON.parse(stripFence(content)); } catch { /* 走降级 */ }
+  if (!parsed?.displayName) throw new Error('重掷 JSON 解析失败');
+
+  updateNpc(npcId, {
+    displayName: String(parsed.displayName).slice(0, 20),
+    persona: String(parsed.persona || '').slice(0, 120),
+    appearanceDesc: String(parsed.appearanceDesc || '').slice(0, 200),
+    job: String(parsed.job || '').slice(0, 20),
+  });
+
+  // 重掷作息（地点 key 列表 + home）
+  const fresh = getNpc(npcId);
+  try {
+    const routine = await generateRoutine(fresh, [...locations.map(l => l.key), 'home']);
+    db.prepare('UPDATE town_npcs SET routine_json = ? WHERE id = ?').run(JSON.stringify(routine), npcId);
+  } catch (err) {
+    console.warn(`[townNpcs] reroll routine failed:`, err?.message);
+  }
+
+  // 外观变了 → 精灵标记过期（四方向重生成由管理面板触发）
+  db.prepare('UPDATE town_npcs SET sprite_ready = 0 WHERE id = ?').run(npcId);
+  return getNpc(npcId);
+}
+
+function stripFence(content) {
+  return String(content || '').replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+}
+
+// ── 就地聊天 ──
+
+export function getNpcChatHistory(npcId, limit = 20) {
+  const rows = getDb().prepare(`
+    SELECT role, content, created_at AS createdAt FROM town_npc_chat_messages
+    WHERE npc_id = ? ORDER BY id DESC LIMIT ?
+  `).all(npcId, limit);
+  return rows.reverse();
+}
+
+/** 求当前作息描述（供现场语境） */
+export function currentRoutineLine(npc, now = new Date()) {
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const toMin = (t) => {
+    const [h, m] = String(t).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  for (const slot of npc.routine || []) {
+    const s = toMin(slot.start);
+    const e = toMin(slot.end) || 24 * 60; // "24:00"
+    if (minutes >= s && minutes < e) return `正在【${slot.activity}】`;
+  }
+  return '正在闲逛';
+}
+
+/**
+ * 玩家点击 NPC 就地聊天：单轮 LLM，历史注入，落库并广播气泡
+ * @returns {Promise<{reply: string}>}
+ */
+export async function chatWithNpc(npcId, message) {
+  const npc = getNpc(npcId);
+  if (!npc) throw new Error('NPC 不存在');
+  const db = getDb();
+
+  const history = getNpcChatHistory(npcId, 12);
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const scene = currentRoutineLine(npc, now);
+
+  const reply = await chatSync([
+    {
+      role: 'system',
+      content: [
+        `你是小镇居民「${npc.displayName}」，正在镇上和来访的玩家（${config.user.nickname}）面对面聊天。`,
+        npc.persona ? `你的人设：${npc.persona}` : '',
+        npc.job ? `你的职业：${npc.job}` : '',
+        `现在是 ${timeStr}，你${scene}。`,
+        '要求：用中文回复，1~2 句话（不超过 60 字），口语化、符合人设，可以聊眼前的生活；小动作用（括号）内嵌。不要输出旁白、不要自称 AI、不要列选项。',
+        '以下是你们之前在镇上的对话（可能为空）：',
+        history.length
+          ? history.map(h => `${h.role === 'user' ? '玩家' : npc.displayName}：${h.content}`).join('\n')
+          : '（第一次交谈）',
+      ].filter(Boolean).join('\n'),
+    },
+    { role: 'user', content: String(message).slice(0, 500) },
+  ], {
+    max_tokens: 300,
+    temperature: 0.9,
+    label: '小镇就地聊天',
+  });
+
+  const text = String(reply || '').trim().slice(0, 200);
+  if (!text) throw new Error('NPC 没有回应');
+
+  const ins = db.prepare('INSERT INTO town_npc_chat_messages (npc_id, role, content) VALUES (?, ?, ?)');
+  ins.run(npcId, 'user', String(message).slice(0, 500));
+  ins.run(npcId, 'npc', text);
+
+  // 顺带冒个泡，让旁观端也能看到
+  broadcastTownBubble({ charId: `npc:${npcId}`, text, ttl: 10 });
+  return { reply: text };
+}

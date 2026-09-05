@@ -7,6 +7,9 @@
  *   town_encounter_start {id, a, b, locationId, gridX, gridY}
  *   town_encounter_end   {id, summary}
  *   town_ping            {serverTime}                             → 客户端对时
+ *   town_init_progress   {status, stage, done, total, current}    → 初始化向导进度
+ *   town_map_updated     {mapId, version}                         → 地图保存/开镇，其他端重载
+ *   town_assets_updated  {asset|deleted}                          → 素材生成完成/失败/删除
  */
 import { broadcast } from '../unifiedStreamBus.js';
 
@@ -28,4 +31,16 @@ export function broadcastTownEncounterEnd(payload) {
 
 export function broadcastTownPing() {
   broadcast('town_ping', { serverTime: Date.now() });
+}
+
+export function broadcastTownInitProgress(payload) {
+  broadcast('town_init_progress', payload);
+}
+
+export function broadcastTownMapUpdated(payload) {
+  broadcast('town_map_updated', payload);
+}
+
+export function broadcastTownAssetsUpdated(payload) {
+  broadcast('town_assets_updated', payload);
 }

@@ -41,6 +41,7 @@ import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge
 import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { startTownScheduler, stopTownScheduler } from './src/services/town/townService.js';
+import { restoreInitJob } from './src/services/town/townInitService.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
 
@@ -60,6 +61,9 @@ app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: '
 app.use('/images', imageAvifFallback('data/images'));
 app.use('/images', express.static('data/images'));
 app.use('/avatars', express.static('data/avatars'));
+
+// 小镇像素素材（独立于 data/images，不进图库/压缩扫描）
+app.use('/town-assets', express.static('data/town/assets', { maxAge: '1h' }));
 
 // API 路由
 app.use('/api', chatRoutes);           // /api/characters/:id/chat, /api/characters/:id/messages
@@ -155,7 +159,8 @@ startKnowledgeSyncScheduler();
 // 启动道具系统调度器（每 10 分钟清理到期效果、恢复变身、标记卡死的生成中道具）
 startItemScheduler();
 
-// 启动小镇调度器（世界页：日程→地图投影、相遇对话、状态气泡，由 config.features.town 控制）
+// 启动小镇调度器（世界页：瓦片地图 + 轻量居民生态，由 config.features.town 控制）
+restoreInitJob();  // 恢复未完成的初始化向导（断点续跑）
 startTownScheduler();
 
 // 先启动 HTTP 服务，向量检查异步进行
