@@ -35,6 +35,7 @@ const DB_ONLY_KEYS = new Set([
   'maibot_webui_token',
   'emoji_fixed_tags',
   'emoji_style_mode',
+  'standing_prompt_mode',
 ]);
 
 /** 写入单条系统设置 */

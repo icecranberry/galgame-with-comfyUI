@@ -506,7 +506,7 @@ ${directorPrompt}`
   let eventData;
   let rawResult = '';
   try {
-    rawResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '奇遇生成' });
+    rawResult = await chatSync(msgs, { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '奇遇生成' });
     const jsonStr = extractFirstJson(rawResult);
     if (!jsonStr) throw new Error('No JSON found in LLM response');
     eventData = JSON.parse(repairJson(jsonStr));
@@ -854,7 +854,7 @@ ${directorPrompt2}${prevSceneBlock}`
   for (let attempt = 1; attempt <= MAX_BRANCH_ATTEMPTS; attempt++) {
     rawBranchResult = '';
     try {
-      rawBranchResult = await chatSync(msgs, { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件分支' });
+      rawBranchResult = await chatSync(msgs, { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件分支' });
       const jsonStr = extractFirstJson(rawBranchResult);
       if (!jsonStr) throw new Error('No JSON found in LLM response');
       branchData = JSON.parse(repairJson(jsonStr));
@@ -1033,6 +1033,14 @@ export async function concludeEvent(character, event, outcome) {
     ? '- **世界观一致性**：结局和记忆摘要必须反映世界观的基本规则。角色做出的选择及其后果、环境的反应、事件的收束方式，都必须在世界观框架内自然发生。\n'
     : '';
 
+  // 人格走统一入口把「你」替换为角色名；直接塞原始 base_prompt（第二人称）会把结局叙事带成第一人称
+  const displayName3 = character.display_name;
+  let personaText3 = buildCharacterPersona(character, { variant: 'full', person: displayName3 });
+  // 誓约角色：银白细戒指外观细节
+  const ringUserName3 = config.user?.nickname || 'user';
+  personaText3 = appendOathRing(personaText3, character.id, ringUserName3, { isFirstPerson: false, charName: displayName3 });
+  const personaMsg3 = `以下是角色「${displayName3}」的人格设定，供你参考角色的外貌、性格和行为模式：\n\n${personaText3}`;
+
   const taskPrompt = event.engaged
     ? `为以下特殊事件写一段结局。
 事件标题：${event.title}
@@ -1040,27 +1048,29 @@ ${historyText}
 当前场景：${event.description}
 
 这是写给读者看的小说结尾，不是事件总结。要求：
-${worldConsistencyLine}- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁从早到晚按时间顺序复述全程的流水账写法
+${worldConsistencyLine}- 【叙事视角·最高优先级】全程第三人称叙事：主语用「${displayName3}」或「她/他」，叙事部分严禁出现「我」「我的」「我们」等第一人称称谓（唯一例外是角色说出口的台词引号内），内心活动写成「她心想」而不是「我心想」
+- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁从早到晚按时间顺序复述全程的流水账写法
 - 至少三分之一篇幅是"人味"：角色的内心吐槽、和环境的一点小摩擦、或一个出乎意料的小细节
 - 结尾用一句台词或一个小动作收束，留点余韵；禁止"就这样结束了"式的总结句
-- 结局叙述 100~180 字，将直接展示在页面上，作为事件的正式收尾, 用第三人称视角
+- 结局叙述 100~180 字，将直接展示在页面上，作为事件的正式收尾
 - 记忆摘要 100~180 字，只存入角色长期记忆、不会展示给用户，用第三人称视角客观记录整个事件的起因、经过、转折和结果（保持客观简洁即可，无需文学性）
 
-**重要：输出严格 JSON 格式**
-{"conclusion":"结局叙述(用第三人称视角)","summary":"记忆摘要（第三人称，包含完整的事件经过）"}`
+**重要：输出严格 JSON 格式，不要输出任何解释或 JSON 以外的文字**
+{"conclusion":"结局叙述（全程第三人称，主语用${displayName3}或她/他，叙事部分禁止出现「我」，仅台词引号内可例外）","summary":"记忆摘要（第三人称，包含完整的事件经过）"}`
     : `角色刚刚经历了一场无人参与的特殊事件。请基于事件描述，想象一个最有趣、最自然的收尾画面。
 事件标题：${event.title}
 ${historyText}
 
 这是写给读者看的小说结尾，不是事件总结。要求：
-${worldConsistencyLine}- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁按时间顺序复述全程的流水账写法
+${worldConsistencyLine}- 【叙事视角·最高优先级】全程第三人称叙事：主语用「${displayName3}」或「她/他」，叙事部分严禁出现「我」「我的」「我们」等第一人称称谓（唯一例外是角色说出口的台词引号内），内心活动写成「她心想」而不是「我心想」
+- 只聚焦 1~2 个最有戏的瞬间展开，其余经过一笔带过或不写；严禁按时间顺序复述全程的流水账写法
 - 至少三分之一篇幅是"人味"：角色的内心吐槽、和环境的一点小摩擦、或一个出乎意料的小细节
 - 结尾用一句台词或一个小动作收束，留点余韵；禁止"就这样结束了"式的总结句
 - 结局叙述 100~180 字，将直接展示在页面上，作为事件的正式收尾
 - 记忆摘要 100~180 字，只存入角色长期记忆、不会展示给用户，用第三人称视角客观记录事件
 
-**重要：输出严格 JSON 格式**
-{"conclusion":"结局叙述","summary":"记忆摘要（第三人称）"}`;
+**重要：输出严格 JSON 格式，不要输出任何解释或 JSON 以外的文字**
+{"conclusion":"结局叙述（全程第三人称，主语用${displayName3}或她/他，叙事部分禁止出现「我」，仅台词引号内可例外）","summary":"记忆摘要（第三人称）"}`;
 
   const conclusionUserContent = worldSetting3
     ? `请遵循当前世界观来收束奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。
@@ -1071,13 +1081,13 @@ ${taskPrompt}`
   const msgs = [
     { role: 'system', content: permissionPrompt },
     ...(worldIntegrationNote ? [{ role: 'system', content: worldIntegrationNote }] : []),
-    { role: 'system', content: character.base_prompt },
+    { role: 'system', content: personaMsg3 },
     { role: 'user', content: conclusionUserContent },
   ];
 
   let conclusionData;
   try {
-    const result = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件结局' });
+    const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, response_format: { type: 'json_object' }, label: '事件结局' });
     const jsonStr = extractFirstJson(result);
     if (!jsonStr) throw new Error('No JSON found');
     conclusionData = JSON.parse(repairJson(jsonStr));
@@ -1177,6 +1187,15 @@ function toSQLite(iso) {
 // 修复 LLM 输出的非法 JSON 转义（image_prompt 规则中的 \( \) 等不是合法 JSON 转义）
 function repairJson(text) {
   return text.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+}
+
+// 结局第三人称守卫：剥掉台词引号后仍残留第一人称称谓即视为跑偏（「自我」「忘我」等词不算）
+function conclusionHasFirstPerson(text) {
+  if (!text) return false;
+  const stripped = String(text)
+    .replace(/[「『"'“”‘’][^」』"'“”‘’]*[」』"'“”‘’]/g, '')
+    .replace(/自我|忘我/g, '');
+  return /我|咱/.test(stripped);
 }
 
 // 从 LLM 原始输出中提取第一个完整 JSON 对象（括号计数，防 LLM 输出多段 JSON 拼在一起）

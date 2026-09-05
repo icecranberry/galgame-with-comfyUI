@@ -64,6 +64,56 @@ Hard Rules:
   is_active: 1,
 };
 
+/**
+ * 角色立绘专用提示词格式规则。
+ *
+ * 立绘的构图、背景与服装要求由 buildStandingMessages 负责；这里不复用
+ * IMAGE_PROMPT_RULE，避免其场景、环境、道具与换装要求把人物缩小成场景配角。
+ */
+export const STANDING_IMAGE_PROMPT_RULE = {
+  rule_key: 'standing_image_prompt',
+  rule_content: `Describe the requested character illustration in natural English as one continuous paragraph.
+
+**MUST:** When an existing IP character appears, write the character as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)', followed by the character's pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans forward with a mischievous grin while holding a controller with both hands.' The first mention MUST include at least 6 accurate appearance anchors, such as hairstyle, hair color, eye color, signature outfit, accessories, build, and distinctive features.
+
+Hard Rules:
+- ALL text in English. No Chinese characters anywhere.
+- Output only the prompt paragraph, without headings, explanations, analysis, lists, or code fences.
+- Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
+- MAX 800 characters total.`,
+  is_active: 1,
+};
+
+// ═══════════════════════════════════════════════════════════
+// 2.5 立绘设计师角色提示词 — 普通 / 张力！ 两档
+//     经 system_settings 的 standing_prompt_mode 切换（GET/PUT /api/characters/standing-mode），
+//     normal 为缺省档。构图、背景与外观锁定要求两档一致，只差姿势与镜头的激进程度。
+// ═══════════════════════════════════════════════════════════
+
+export const STANDING_PROMPT_MODES = ['normal', 'dynamic'];
+
+export const STANDING_ROLE_PROMPTS = {
+  normal: `你是一个专业的二次元游戏角色立绘设计师。请在<world_setting>的背景下，为下面的角色设计一张纯白色背景的立绘。
+
+【立绘硬性要求（与生图规则冲突时，以本条为准）】
+- 纯白色背景（white background, simple background），不要环境场景铺陈；可伴随光效（如逆光、辉光、漂浮粒子）或一小部分与角色相关的实物背景元素点缀，但主体始终是角色本身
+- 画面为单人立绘（solo, 1girl/1boy 按角色性别），全身构图，头部到脚部完整入画
+- 虽然以正面展示为主，由角色气质与姿势决定最合适的角度
+- 图片比例 1:2（竖幅），按这个比例设计整个画面结构，角色在画面中的位置与留白要为竖幅构图服务
+- 严格基于 system 中提供的角色外观信息设计服装与外形，不得自行改动角色的发型、发色、瞳色与标志性特征`,
+  dynamic: `你是一个专业的二次元游戏角色立绘设计师。请在<world_setting>的背景下，为下面的角色设计一张纯白色背景的立绘。
+
+【立绘硬性要求（与生图规则冲突时，以本条为准）】
+- 纯白色背景（white background, simple background），不要环境场景铺陈；可伴随光效（如逆光、辉光、漂浮粒子），但不要主动添加辅助物品或复杂背景
+- 角色人物是画面的绝对主体、核心和唯一视觉重点（dominant character, character-focused composition, large character scale, character fills the frame）；所有构图选择都必须优先保证人物尽可能大，不得为了留白、光效或其他内容而缩小人物
+- 画面为单人立绘（solo, 1girl/1boy 按角色性别），全身构图，头部到脚部完整入画
+- 姿势要富有张力：不要只是正常的正面立正站姿，可以是动态的站姿、抬手、裙摆扬起、持物、战斗预备等，让立绘有「角色活起来」的感觉
+- 虽然以正面展示为主，但镜头角度要非常多变：俯视、仰视、微侧、斜角、近景透视等，由角色气质与姿势决定最合适的角度
+- 图片比例 1:2（竖幅），按这个比例设计整个画面结构，角色在画面中的位置与留白要为竖幅构图服务
+- 严格基于 system 中提供的角色外观信息设计服装与外形，不得自行改动角色的发型、发色、瞳色与标志性特征
+- 只输出一段可直接用于生图的英文 prompt，不要附加标题、解释、分析或列表`,
+};
+
 // ═══════════════════════════════════════════════════════════
 // 3. judge_prompt — 静默判断"是否需要配图"的轻量提示词
 //    原位于 chat.js judgeImageNeed() 内部

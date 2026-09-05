@@ -129,7 +129,7 @@ export async function generateEventTypes(direction = '') {
 
   const raw = await chatSync(
     msgs,
-    { temperature: 0.82, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件库-事件类型生成' }
+    { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件库-事件类型生成' }
   );
 
   const jsonStr = extractFirstJson(raw);
@@ -195,7 +195,7 @@ export async function generateTopics(direction = '') {
 
   const raw = await chatSync(
     msgs,
-    { temperature: 0.82, max_tokens: 2048, response_format: { type: 'json_object' }, label: '事件库-话题生成' }
+    { temperature: 0.7, max_tokens: 2048, response_format: { type: 'json_object' }, label: '事件库-话题生成' }
   );
 
   const jsonStr = extractFirstJson(raw);

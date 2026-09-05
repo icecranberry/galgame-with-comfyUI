@@ -16,6 +16,7 @@ export const IMAGE_CATEGORIES = {
   chatbg:    { dir: 'chatbg',    label: '聊天背景' },
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },
+  standing:  { dir: 'standing',  label: '立绘' },
 };
 
 export const LEGACY_CATEGORY = 'history';

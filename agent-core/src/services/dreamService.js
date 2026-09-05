@@ -235,7 +235,7 @@ ${materialParts.length > 0 ? materialParts.join('\n') : '-（没有具体素材�
 其中 imagePrompt 用英文描述梦境的超现实画面。`,
   });
 
-  const raw = await chatSync(msgs, { temperature: 0.82, max_tokens: 1000, label: '梦境生成' });
+  const raw = await chatSync(msgs, { temperature: 0.7, max_tokens: 1000, label: '梦境生成' });
   const parsed = parseDreamJson(raw);
   if (!parsed || typeof parsed.content !== 'string' || parsed.content.trim().length < 10) {
     throw new Error('dream LLM output unparseable');
@@ -324,7 +324,7 @@ ${hasMsg ? `
 - imagePrompt：英文生图提示词，遵循【生图规则】，描绘你说这句梦话时的梦境画面（超现实、梦幻氛围）`,
     });
 
-    const raw = await chatSync(msgs, { temperature: 0.82, max_tokens: 1000, label: '梦话应答' });
+    const raw = await chatSync(msgs, { temperature: 0.7, max_tokens: 1000, label: '梦话应答' });
     const parsed = parseDreamJson(raw);
     const talk = (parsed && typeof parsed.talk === 'string') ? parsed.talk.trim().slice(0, 60) : '';
     if (!talk || talk.length < 4) return null;

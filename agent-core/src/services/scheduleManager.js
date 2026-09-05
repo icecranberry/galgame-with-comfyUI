@@ -332,7 +332,7 @@ export function formatScheduleContext(characterId, now = new Date(), { consumeGr
   } else if (activity.replyDelay > 0) {
     lines.push(`当前活动需要一定专注度，约 ${activity.replyDelay} 分钟后才能腾出手来回复消息。回复时自然提及刚才在${activity.location}的处境。`);
   } else {
-    lines.push('你现在可以随时回复消息，言行举止应与当前场景自然衔接。');
+    lines.push('你的言行举止应与当前场景自然衔接。');
   }
 
   return lines.join(' ');

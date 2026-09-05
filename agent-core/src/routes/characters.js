@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRulesWithWorld, getGlobalRule, repairFtsIndex } from '../db/index.js';
+import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule, getSetting, setSetting, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js'; // 出站已白名单化（见 webSearch.js assertAllowedOutboundUrl / toSafeMoegirlScrapeUrl）
@@ -23,6 +23,7 @@ import { assignFontForNewCharacter } from '../services/handwritingFontService.js
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 
 const router = Router();
 
@@ -171,6 +172,26 @@ router.get('/migrate-short-prompts', (_req, res) => {
   res.json(getMigrationStatus());
 });
 
+// ── 立绘姿势风格（普通 / 张力！）—— system_settings 全局持久化 ──
+// 必须注册在 put('/:id') 之前，避免被参数路由吞掉
+const STANDING_MODE_KEY = 'standing_prompt_mode';
+
+// GET /api/characters/standing-mode — 当前立绘风格（缺省 normal）
+router.get('/standing-mode', (_req, res) => {
+  const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
+  res.json({ mode });
+});
+
+// PUT /api/characters/standing-mode — 切换立绘风格
+router.put('/standing-mode', (req, res) => {
+  const mode = req.body?.mode;
+  if (!STANDING_PROMPT_MODES.includes(mode)) {
+    return res.status(400).json({ error: 'mode must be normal or dynamic' });
+  }
+  setSetting(STANDING_MODE_KEY, mode);
+  res.json({ ok: true, mode });
+});
+
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
@@ -276,7 +297,7 @@ router.post('/:id/avatar', (req, res) => {
   res.json({ ok: true, avatar_path: avatarPath });
 });
 
-// GET /api/characters/:id/recent-images — 获取该角色最近生成的图片（聊天配图 + 朋友圈配图）
+// GET /api/characters/:id/recent-images — 该角色全部渠道的图片（按新到旧、URL 去重；供头像/立绘选取）
 router.get('/:id/recent-images', (req, res) => {
   const db = getDb();
   const characterId = req.params.id;
@@ -284,37 +305,93 @@ router.get('/:id/recent-images', (req, res) => {
 
   const urls = [];
   const seen = new Set();
+  const push = (u) => {
+    if (typeof u === 'string' && u.trim() && !seen.has(u)) { seen.add(u); urls.push(u); }
+  };
 
-  // 1. 聊天配图
-  const chatRows = db.prepare(`
-    SELECT images FROM messages
-    WHERE conversation_id = ? AND images IS NOT NULL
-    ORDER BY id DESC LIMIT 30
-  `).all(conversationId);
-
-  for (const row of chatRows) {
+  // 1. 生图任务登记：所有以 char_{id} 为前缀的渠道（私聊配图 / 送礼 / 主动聊天 / 立绘 /
+  //    日程拍照 / AI 头像 / 奇遇 / 朋友圈 / 信箱 / 梦境等），新到旧统一收口
+  const taskRows = db.prepare(`
+    SELECT output_paths FROM image_tasks
+    WHERE status = 'done' AND output_paths IS NOT NULL
+      AND (conversation_id = ? OR conversation_id GLOB ?)
+    ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 120
+  `).all(conversationId, `${conversationId}_*`);
+  for (const row of taskRows) {
     try {
-      const arr = JSON.parse(row.images);
-      for (const u of arr) {
-        if (!seen.has(u)) { seen.add(u); urls.push(u); }
-      }
+      for (const u of JSON.parse(row.output_paths)) push(u);
     } catch {}
   }
 
-  // 2. 朋友圈配图
+  // 2. 私聊气泡配图（兜底：用户上传、未登记任务的图片）
+  const chatRows = db.prepare(`
+    SELECT images FROM messages
+    WHERE conversation_id = ? AND images IS NOT NULL
+    ORDER BY id DESC LIMIT 60
+  `).all(conversationId);
+  for (const row of chatRows) {
+    try {
+      for (const u of JSON.parse(row.images)) push(u);
+    } catch {}
+  }
+
+  // 3. 朋友圈配图（新图已入 image_tasks，这里兜底老数据）
   const momentRows = db.prepare(`
     SELECT images FROM moment_posts
     WHERE character_id = ? AND status = 'done' AND images IS NOT NULL
-    ORDER BY created_at DESC LIMIT 30
+    ORDER BY created_at DESC LIMIT 60
   `).all(characterId);
-
   for (const row of momentRows) {
     try {
-      const arr = JSON.parse(row.images);
-      for (const u of arr) {
-        if (!seen.has(u)) { seen.add(u); urls.push(u); }
-      }
+      for (const u of JSON.parse(row.images)) push(u);
     } catch {}
+  }
+
+  // 4. 表情包
+  const emojiRows = db.prepare(`
+    SELECT image_path FROM character_emojis
+    WHERE character_id = ? AND status = 'done' AND image_path IS NOT NULL AND image_path != ''
+    ORDER BY id DESC LIMIT 40
+  `).all(characterId);
+  for (const row of emojiRows) push(row.image_path);
+
+  // 5. 梦境配图
+  const dreamRows = db.prepare(`
+    SELECT image_path FROM character_dreams
+    WHERE character_id = ? AND image_path IS NOT NULL AND image_path != ''
+    ORDER BY id DESC LIMIT 20
+  `).all(characterId);
+  for (const row of dreamRows) push(row.image_path);
+
+  // 6. 奇遇事件图（当前事件 + 历史结案图）
+  const eventRows = db.prepare(`
+    SELECT image AS u, created_at AS t FROM character_events
+    WHERE character_id = ? AND image IS NOT NULL AND image != ''
+    UNION ALL
+    SELECT final_image AS u, ended_at AS t FROM event_history
+    WHERE character_id = ? AND final_image IS NOT NULL AND final_image != ''
+    ORDER BY t DESC LIMIT 40
+  `).all(characterId, characterId);
+  for (const row of eventRows) push(row.u);
+
+  // 7. 信箱信件（角色画像与插图；信纸底纹 paper_path 不属于角色图，不收录）
+  const mailRows = db.prepare(`
+    SELECT portrait_path, illustration_path FROM mailbox_letters
+    WHERE character_id = ?
+      AND ((portrait_path IS NOT NULL AND portrait_path != '')
+        OR (illustration_path IS NOT NULL AND illustration_path != ''))
+    ORDER BY created_at DESC LIMIT 40
+  `).all(characterId);
+  for (const row of mailRows) {
+    push(row.portrait_path);
+    push(row.illustration_path);
+  }
+
+  // 8. 角色当前头像与立绘
+  const char = db.prepare('SELECT avatar_path, standing_url FROM characters WHERE id = ?').get(characterId);
+  if (char) {
+    push(char.avatar_path);
+    push(char.standing_url);
   }
 
   res.json({ images: urls });
@@ -1098,7 +1175,6 @@ router.post('/:id/generate-chat-bg', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
-
   const userHint = String(req.body?.prompt || '').trim().slice(0, 300);
   const imagePromptRule = getGlobalRule('image_prompt');
   const imageRuleContent = imagePromptRule?.rule_content || '';
@@ -1187,6 +1263,202 @@ ${char.base_prompt}
     console.error('[generate-chat-bg] error:', err.message);
     res.status(500).json({ error: '生成失败: ' + err.message });
   }
+});
+
+
+// ── 角色立绘（纯白背景全身立绘，1:2，人设卡 short_prompt + 外观注入） ──
+
+/**
+ * 组装立绘生成的多层 system 消息（对齐全库规范，同 itemService/libraryGenerator）：
+ *   system0 = 破甲词 + 世界观（有世界观时拼接，否则仅破甲词，创作流程不带 roleplay）
+ *   system1 = 立绘设计师角色（普通 / 张力！两档，STANDING_ROLE_PROMPTS 按 mode 取词）
+ *   system2 = 立绘专用生图规则（只约束 IP 角色格式和英文 prompt 格式）
+ *   system3 = 角色 short_prompt + 外观段（buildCharacterPersona short variant，「你」→角色名）
+ * @param {object} char
+ * @param {string} requirement - 用户额外立绘需求（可空）
+ * @param {'normal'|'dynamic'} [mode='normal'] - 姿势风格档位
+ */
+function buildStandingMessages(char, requirement, mode = 'normal') {
+  const worldSetting = getWorldSetting();
+  const msgs = [
+    { role: 'system', content: worldSetting
+      ? getSystemRulesWithWorld({ roleplay: false })
+      : getSystemRules({ roleplay: false }) },
+    {
+      role: 'system',
+      content: STANDING_ROLE_PROMPTS[mode] || STANDING_ROLE_PROMPTS.normal,
+    },
+  ];
+  if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
+  msgs.push({ role: 'system', content: STANDING_IMAGE_PROMPT_RULE.rule_content });
+  msgs.push({
+    role: 'system',
+    content: `【角色外观信息】\n${buildCharacterPersona(char, { variant: 'short', person: char.display_name })}`,
+  });
+  msgs.push({
+    role: 'user',
+    content: requirement
+      ? `特别强调：用户指定了额外需求——“${requirement}”。请在<world_setting>下，结合用户需求，以用户需求为最高优先级，其他设计都需要先满足用户需求（与纯白背景、单人立绘、1:2 竖幅这些硬性要求不冲突的前提下），设计角色立绘并且以英文prompt输出。`
+      : `请在<world_setting>下设计角色立绘并且以英文prompt输出，自由发挥立绘的姿势与镜头角度，充分展现角色的魅力。`,
+  });
+  return msgs;
+}
+
+// POST /api/characters/:id/generate-standing — 生成角色立绘（LLM 出英文 prompt → ComfyUI 1:2 出图）
+router.post('/:id/generate-standing', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const requirement = typeof req.body?.requirement === 'string' ? req.body.requirement.trim().slice(0, 500) : '';
+  const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[generate-standing] Step 1/2: generating prompt for character "${char.display_name}" (mode: ${mode})${requirement ? ` (requirement: ${requirement.slice(0, 50)})` : ''}...`);
+
+    const llmResult = await chatSync(buildStandingMessages(char, requirement, mode), {
+      model,
+      temperature: 0.7,
+      max_tokens: 1024,
+      label: '生成立绘提示词',
+    });
+
+    // 提取 prompt：剥掉代码围栏与引号包装，只留英文 prompt 正文
+    const promptText = llmResult.trim()
+      .replace(/^```(?:[a-z]+)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .trim();
+
+    if (!promptText || promptText.length < 10) {
+      return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+    }
+
+    console.log(`[generate-standing] Prompt generated (${promptText.length} chars): "${promptText.slice(0, 80)}..."`);
+
+    const url = await renderStandingImage(char, promptText);
+    res.json({ ok: true, standing_url: url, promptText });
+  } catch (err) {
+    console.error('[generate-standing] error:', err.message);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : '生成失败: ' + err.message });
+  }
+});
+
+/**
+ * 用给定英文 prompt 渲染立绘并落库（ComfyUI 1:2 出图 → 替换旧文件 → 更新 characters.standing_url）。
+ * generate-standing（完整流程）与 generate-standing-image（复用 prompt 重出图）共用。
+ * @returns {string} standing_url
+ */
+async function renderStandingImage(char, promptText) {
+  // 出图：朋友圈画师串口径（角色单独画师串优先），固定 1:2 竖幅 768x1536
+  console.log(`[generate-standing] Step 2/2: generating image at 768x1536...`);
+  const charLoras = _parseCharLoras(char.loras);
+  const standingArtist = charArtistOverride(char);
+  let lastStage = '';
+  const result = await generateImageRaw(promptText, {
+    promptScene: 'avatar',
+    disableRAG: true,
+    ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+    artist: standingArtist !== null ? standingArtist : config.comfyui.momentsArtist,
+    width: 768,
+    height: 1536,
+    loras: charLoras.length > 0 ? charLoras : undefined,
+    ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
+    onProgress: (p) => {
+      // stage 只在切换时打印：WS 采样进度消息很密，逐条打印会刷屏
+      if (p.stage && p.stage !== lastStage) {
+        lastStage = p.stage;
+        console.log(`[generate-standing] ComfyUI: ${p.stage}`);
+      }
+    },
+  });
+
+  if (!result.success || result.images.length === 0) {
+    throw Object.assign(new Error(result.error || '图像生成失败，请重试'), { statusCode: 500 });
+  }
+
+  // 旧立绘文件先清掉，再保存新图
+  const db = getDb();
+  const old = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(char.id);
+  if (old?.standing_url) deleteImageFileByUrl(old.standing_url);
+
+  const ts = Date.now();
+  const img = result.images[0];
+  const filename = `standing_${char.id}_${ts}_${img.filename || 'comfy.png'}`;
+  const url = saveBase64Image('standing', filename, img.base64);
+  db.prepare('UPDATE characters SET standing_url = ? WHERE id = ?').run(url, char.id);
+
+  console.log(`[generate-standing] Image saved: ${url}`);
+
+  db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+    VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+    .run(`char_${char.id}_standing`, promptText, result.promptRefined || promptText, JSON.stringify([url]), getLastWorkflowMode());
+
+  invalidateGalleryCache();
+  return url;
+}
+
+// POST /api/characters/:id/generate-standing-image — 用已有英文 prompt 直接重出立绘（不重新请求 LLM）
+router.post('/:id/generate-standing-image', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const promptText = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  if (!promptText || promptText.length < 10) {
+    return res.status(400).json({ error: '缺少有效的立绘提示词，请先生成提示词' });
+  }
+
+  try {
+    const url = await renderStandingImage(char, promptText);
+    res.json({ ok: true, standing_url: url, promptText });
+  } catch (err) {
+    console.error('[generate-standing-image] error:', err.message);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : '生成失败: ' + err.message });
+  }
+});
+
+// POST /api/characters/:id/standing-upload — 上传本地图片作为立绘（base64 data URL，替换旧立绘并删旧文件）
+router.post('/:id/standing-upload', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, standing_url FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const { base64 } = req.body;
+  const mimeMatch = typeof base64 === 'string' && base64.match(/^data:image\/(png|jpeg|webp);base64,/i);
+  if (!mimeMatch) {
+    return res.status(400).json({ error: '请上传 PNG / JPG / WEBP 图片' });
+  }
+  // 前端已限 6MB；这里拦一道解码后超限的（base64 约为原大小 4/3）
+  if (base64.length > 8 * 1024 * 1024) {
+    return res.status(400).json({ error: '图片过大，请压缩后再上传（不超过 6MB）' });
+  }
+
+  try {
+    if (char.standing_url) deleteImageFileByUrl(char.standing_url);
+    const ext = mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase();
+    const filename = `standing_${char.id}_${Date.now()}_upload.${ext}`;
+    const url = saveBase64Image('standing', filename, base64);
+    db.prepare('UPDATE characters SET standing_url = ? WHERE id = ?').run(url, char.id);
+    invalidateGalleryCache();
+    res.json({ ok: true, standing_url: url });
+  } catch (err) {
+    console.error('[standing-upload] error:', err.message);
+    res.status(500).json({ error: '保存立绘失败: ' + err.message });
+  }
+});
+
+// DELETE /api/characters/:id/standing — 删除角色立绘（清库 + 删文件）
+router.delete('/:id/standing', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  if (char.standing_url) {
+    deleteImageFileByUrl(char.standing_url);
+    db.prepare('UPDATE characters SET standing_url = NULL WHERE id = ?').run(req.params.id);
+    invalidateGalleryCache();
+  }
+  res.json({ ok: true });
 });
 
 function _parseCharLoras(raw) {

@@ -243,7 +243,7 @@ const {
   store,
   fullscreen, chestAnim, chestProcessActive, chargeBoost, flashOn,
   revealedItem, collecting,
-  onOpenChest, onCollectFromReveal,
+  onOpenChest, onCollectFromReveal, resumePendingReveal,
   chestButtonLabel, countdownText, startCountdown, stopCountdown,
   effectKindLabel, effectIconPath, effectRemainingText, isEffectUrgent,
   removingEffectId, onRemoveEffect,
@@ -261,6 +261,8 @@ const sortedCharacters = computed(() =>
 onMounted(() => {
   store.startPolling()
   startCountdown()
+  // 刷新/中途离开留下的未收下道具：进页面时续播揭示演出
+  resumePendingReveal()
 })
 onUnmounted(() => {
   store.stopPolling()

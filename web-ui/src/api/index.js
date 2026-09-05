@@ -101,6 +101,23 @@ export function getEmojiOverview() {
   return request(`/characters/emoji/overview`)
 }
 
+// ── 表情包配置单（多套切换） ──
+export function createEmojiSet(characterId, name = '') {
+  return request(`/characters/emoji/sets`, { method: 'POST', body: { character_id: characterId, name } })
+}
+
+export function activateEmojiSet(setId) {
+  return request(`/characters/emoji/sets/${setId}/activate`, { method: 'POST' })
+}
+
+export function renameEmojiSet(setId, name) {
+  return request(`/characters/emoji/sets/${setId}`, { method: 'PUT', body: { name } })
+}
+
+export function deleteEmojiSet(setId) {
+  return request(`/characters/emoji/sets/${setId}`, { method: 'DELETE' })
+}
+
 export function getEmojiCategories() {
   return request(`/characters/emoji/categories`)
 }
@@ -120,34 +137,35 @@ export function updateEmojiFixedTags(tags, styleMode, resolution) {
   })
 }
 
-export function generateEmojiPrompts(character_ids, style = '') {
-  return request(`/characters/emoji/prompts`, { method: 'POST', body: { character_ids, style } })
+export function generateEmojiPrompts(character_ids, style = '', setId = null) {
+  return request(`/characters/emoji/prompts`, { method: 'POST', body: { character_ids, style, set_id: setId } })
 }
 
-export function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false) {
+export function generateEmojiImages(character_ids, keys = [], artist = '@ebora', includeDone = false, setId = null) {
   return request(`/characters/emoji/images`, {
     method: 'POST',
-    body: { character_ids, keys, artist, includeDone: !!includeDone },
+    body: { character_ids, keys, artist, includeDone: !!includeDone, set_id: setId },
   })
 }
 
-export function regenerateEmojiPrompt(characterId, key, style = '') {
-  return request(`/characters/emoji/${characterId}/${key}/prompt`, { method: 'POST', body: { style } })
+export function regenerateEmojiPrompt(characterId, key, style = '', setId = null) {
+  return request(`/characters/emoji/${characterId}/${key}/prompt`, { method: 'POST', body: { style, set_id: setId } })
 }
 
-export function regenerateEmojiImage(characterId, key, artist = '@ebora') {
-  return request(`/characters/emoji/${characterId}/${key}/image`, { method: 'POST', body: { artist } })
+export function regenerateEmojiImage(characterId, key, artist = '@ebora', setId = null) {
+  return request(`/characters/emoji/${characterId}/${key}/image`, { method: 'POST', body: { artist, set_id: setId } })
 }
 
-export function uploadEmojiImage(characterId, key, base64) {
+export function uploadEmojiImage(characterId, key, base64, setId = null) {
   return request(`/characters/emoji/${characterId}/${encodeURIComponent(key)}/upload`, {
     method: 'POST',
-    body: { base64 },
+    body: { base64, set_id: setId },
   })
 }
 
-export function deleteEmoji(characterId, key) {
-  return request(`/characters/emoji/${characterId}/${key}`, { method: 'DELETE' })
+export function deleteEmoji(characterId, key, setId = null) {
+  const query = setId ? `?set_id=${setId}` : ''
+  return request(`/characters/emoji/${characterId}/${key}${query}`, { method: 'DELETE' })
 }
 
 export async function deleteCharacter(id) {
@@ -175,6 +193,36 @@ export async function uploadChatBg(characterId, base64) {
 /** AI 生成角色聊天背景（依据角色设定与可选场景提示，横版无人物） */
 export function generateChatBg(characterId, prompt = '') {
   return request(`/characters/${characterId}/generate-chat-bg`, { method: 'POST', body: { prompt } })
+}
+
+/** 生成角色立绘（requirement 为额外立绘需求，可空） */
+export function generateStanding(characterId, requirement = '') {
+  return request(`/characters/${characterId}/generate-standing`, { method: 'POST', body: { requirement } })
+}
+
+/** 删除角色立绘 */
+export function deleteStanding(characterId) {
+  return request(`/characters/${characterId}/standing`, { method: 'DELETE' })
+}
+
+/** 上传本地图片作为角色立绘（base64 data URL，替换旧立绘） */
+export function uploadStanding(characterId, base64) {
+  return request(`/characters/${characterId}/standing-upload`, { method: 'POST', body: { base64 } })
+}
+
+/** 用已有英文 prompt 直接重出立绘（不重新请求提示词） */
+export function regenerateStandingImage(characterId, prompt) {
+  return request(`/characters/${characterId}/generate-standing-image`, { method: 'POST', body: { prompt } })
+}
+
+/** 当前立绘姿势风格（normal / dynamic，全局设置） */
+export function getStandingMode() {
+  return request(`/characters/standing-mode`)
+}
+
+/** 切换立绘姿势风格（system_settings 持久化） */
+export function updateStandingMode(mode) {
+  return request(`/characters/standing-mode`, { method: 'PUT', body: { mode } })
 }
 
 // ── Workflows ──

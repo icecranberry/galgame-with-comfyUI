@@ -124,9 +124,7 @@
 
         <div class="modal-actions">
           <span class="lora-civitai-label">LoRA 获取：</span>
-          <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索highres</a>
-          <span class="lora-civitai-label">或</span>
-          <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=highres" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索highres</a>
+          <a href="https://civitai.com/models/2619830/turbo-for-anima-less-steps" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Turbo-ANIMA（步数：12，CFG：1）</a>
           <div style="flex:1"></div>
           <linshe-button variant="primary" @click="save" :disabled="loraLoading">
             {{ loraLoading ? '保存中…' : '保存' }}
@@ -410,7 +408,7 @@ async function save() {
 /* 弹窗动画已迁移至全局 animations.css */
 
 @media (max-width: 767px) {
-  .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
+  .modal-panel, .modal-wide { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
   .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
   .modal-body { padding: 14px 16px; }
   .modal-actions { padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }

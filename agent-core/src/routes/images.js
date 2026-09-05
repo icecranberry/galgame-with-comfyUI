@@ -210,7 +210,7 @@ router.post('/test-style', async (req, res) => {
       content: `【画面描述】\n${desc}\n\n【当前任务】\n根据上面的画面描述，直接输出对应的英文生图 prompt（严格遵循【生图规则】）。不要任何格式包装或额外文字。`,
     });
 
-    const raw = await chatSync(msgs, { temperature: 0.85, max_tokens: 1024, label: '画风测试' });
+    const raw = await chatSync(msgs, { temperature: 0.7, max_tokens: 1024, label: '画风测试' });
     const prompt = extractImagePromptResponse(raw);
     if (!prompt) throw new Error('模型未返回有效的提示词');
     return { prompt, loras };
@@ -569,6 +569,7 @@ function categoryGenConfig(category) {
     peek:      { artist: config.comfyui.eventArtist,    width: config.comfyui.eventWidth,    height: config.comfyui.eventHeight },
     gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
     avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
+    standing:  { artist: config.comfyui.momentsArtist,  width: 768,                         height: 1536 },
   };
   return map[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
 }
@@ -581,6 +582,7 @@ const CATEGORY_SCENE = {
   mailbox: 'chat',
   gifts: 'chat',
   avatargen: 'chat',
+  standing: 'chat',
 };
 
 /** 画风优先级：角色覆盖 > 任务记录 > 分类默认 */

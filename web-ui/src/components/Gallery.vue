@@ -41,7 +41,7 @@
             <!-- 用 img + loading=lazy 取代 background-image：浏览器可延迟加载视口外缩略图 -->
             <img
               class="img-wrapper"
-              :src="img.url"
+              :src="bustUrlIfOverwritten(img.url)"
               loading="lazy"
               decoding="async"
               alt=""
@@ -77,6 +77,7 @@ import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 import EmptyState from './EmptyState.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 
 const PAGE_SIZE = 60
 
@@ -162,7 +163,7 @@ const lightboxImgs = computed(() => {
   const urls = []
   for (const group of visibleDayGroups.value) {
     for (const img of group.images) {
-      urls.push(img.url)
+      urls.push(bustUrlIfOverwritten(img.url))
     }
   }
   return urls

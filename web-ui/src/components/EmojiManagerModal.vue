@@ -168,6 +168,63 @@
                 >完全重做</linshe-button>
               </div>
 
+              <!-- 配置单栏：芯片 = 编辑目标，「使用中」= 聊天实际发送的那张 -->
+              <div v-if="selectedCharId !== null" class="emoji-setbar">
+                <template v-if="selectedSets.length > 0">
+                  <div class="emoji-set-chips">
+                    <linshe-button
+                      v-for="s in selectedSets"
+                      :key="s.id"
+                      variant="chip"
+                      size="sm"
+                      :active="selectedSetId === s.id"
+                      @click="selectSet(s.id)"
+                    >{{ s.name }}<span v-if="s.is_active" class="emoji-set-inuse">使用中</span></linshe-button>
+                    <linshe-button variant="chip" size="sm" :disabled="generating" @click="openSetCreate">+ 新建</linshe-button>
+                  </div>
+                  <div v-if="selectedSet" class="emoji-set-actions">
+                    <linshe-button
+                      v-if="!selectedSet.is_active"
+                      variant="secondary"
+                      size="sm"
+                      :disabled="setBusy || generating"
+                      title="切换后角色聊天将改发这套表情包"
+                      @click="activateSelectedSet"
+                    >启用此套</linshe-button>
+                    <linshe-button variant="ghost" size="sm" :disabled="setBusy || generating" @click="openSetRename">重命名</linshe-button>
+                    <linshe-button variant="danger" size="sm" :disabled="setBusy || generating" @click="removeSelectedSet">删除</linshe-button>
+                  </div>
+                </template>
+                <template v-else>
+                  <span class="emoji-set-hint">还没有表情包组，新建一组并生成表情包后即可启用</span>
+                  <linshe-button variant="secondary" size="sm" :disabled="generating" @click="openSetCreate">+ 新建表情包组</linshe-button>
+                </template>
+              </div>
+              <div v-if="setCreating && selectedCharId !== null" class="emoji-set-create">
+                <linshe-input
+                  v-model="newSetName"
+                  class="emoji-set-name-input"
+                  size="sm"
+                  type="text"
+                  placeholder="表情包组名称，如：圣诞Q版（留空为「默认表情包」）"
+                  @keyup.enter="confirmCreateSet"
+                />
+                <linshe-button variant="secondary" size="sm" :disabled="setBusy" @click="confirmCreateSet">创建</linshe-button>
+                <linshe-button variant="ghost" size="sm" :disabled="setBusy" @click="setCreating = false">取消</linshe-button>
+              </div>
+              <div v-if="setRenaming && selectedCharId !== null" class="emoji-set-create">
+                <linshe-input
+                  v-model="renameSetName"
+                  class="emoji-set-name-input"
+                  size="sm"
+                  type="text"
+                  placeholder="修改表情包组名称"
+                  @keyup.enter="confirmRenameSet"
+                />
+                <linshe-button variant="secondary" size="sm" :disabled="setBusy" @click="confirmRenameSet">保存</linshe-button>
+                <linshe-button variant="ghost" size="sm" :disabled="setBusy" @click="setRenaming = false">取消</linshe-button>
+              </div>
+
               <div v-if="batchRunning" class="emoji-progress-strip" :class="{ paused: batchPaused }">
                 <span v-if="!batchPaused" class="emoji-spinner"></span>
                 <span v-else class="emoji-paused-mark"></span>
@@ -182,7 +239,10 @@
               </div>
 
               <div v-if="selectedCharId !== null && emojiKeys.length > 0" class="emoji-char-section">
-                <div class="emoji-char-title">{{ charName(selectedCharId) }}</div>
+                <div class="emoji-char-title">{{ charName(selectedCharId) }}<template v-if="selectedSet"> · {{ selectedSet.name }}</template></div>
+                <div v-if="selectedSet && !selectedCharHasPrompts" class="emoji-set-blank-hint">
+                  {{ selectedSet.is_active ? '当前启用的是空白表情包组：角色聊天时不会发表情包' : '这组表情包还是空的，生成表情包后可「启用此套」' }}
+                </div>
                 <TransitionGroup name="emoji-reveal" tag="div" class="emoji-grid">
                   <div
                     v-for="key in emojiKeys"
@@ -402,6 +462,13 @@ const toast = inject('toast')
 const confirmFn = inject('confirm', null)
 const show = ref(true)
 const selectedCharId = ref(null)
+const emojiSets = ref([])
+const selectedSetId = ref(null)
+const setCreating = ref(false)
+const newSetName = ref('')
+const setRenaming = ref(false)
+const renameSetName = ref('')
+const setBusy = ref(false)
 const isMobile = inject('isMobile', ref(false))
 const charPickerOpen = ref(false)
 const style = ref('')
@@ -464,6 +531,10 @@ function charName(id) {
 
 const selectedCharacter = computed(() => props.characters.find(c => c.id === selectedCharId.value) || null)
 const selectedCharacterName = computed(() => selectedCharacter.value?.display_name || selectedCharacter.value?.name || '请选择角色')
+/** 当前角色的全部配置单（启用中的排最前） */
+const selectedSets = computed(() => emojiSets.value.filter(s => s.character_id === selectedCharId.value))
+/** 当前正在编辑的配置单（不等于启用中的那张） */
+const selectedSet = computed(() => selectedSets.value.find(s => s.id === selectedSetId.value) || null)
 const selectedCountText = computed(() => selectedCharId.value === null
   ? '点击选择'
   : `${doneCount(selectedCharId.value)}/${emojiKeys.value.length}`)
@@ -479,8 +550,32 @@ function selectCharacter(id) {
   charPickerOpen.value = false
 }
 
+function selectSet(id) {
+  selectedSetId.value = id
+}
+
+/** 保证编辑目标仍属于当前角色；失效（切换角色/被删除）时回落到启用中的那张 */
+function ensureSelectedSetValid() {
+  const sets = emojiSets.value.filter(s => s.character_id === selectedCharId.value)
+  if (!sets.some(s => s.id === selectedSetId.value)) {
+    selectedSetId.value = sets.find(s => s.is_active)?.id || sets[0]?.id || null
+  }
+}
+
+/** 角色启用中的配置单 id；没有则 null（聊天此时发不出表情包） */
+function activeSetIdOf(charId) {
+  return emojiSets.value.find(s => s.character_id === charId && s.is_active)?.id || null
+}
+
+/** 某张配置单的完成数 */
+function doneCountInSet(setId) {
+  if (!setId) return 0
+  return emojiRows.value.filter(r => r.set_id === setId && r.status === 'done' && r.image_path).length
+}
+
+/** 网格行：始终在「当前编辑的配置单」范围内查找 */
 function rowFor(charId, key) {
-  return emojiRows.value.find(r => r.character_id === charId && r.emoji_key === key)
+  return emojiRows.value.find(r => r.set_id === selectedSetId.value && r.character_id === charId && r.emoji_key === key)
 }
 
 function isDone(charId, key) {
@@ -499,8 +594,9 @@ function rowImage(charId, key) {
 function rowError(charId, key) {
   return rowFor(charId, key)?.error_message || ''
 }
+/** 左侧列表进度：按角色「启用中」配置单统计（聊天实际能发的那张） */
 function doneCount(charId) {
-  return emojiRows.value.filter(r => r.character_id === charId && r.status === 'done' && r.image_path).length
+  return doneCountInSet(activeSetIdOf(charId))
 }
 function isCharFull(charId) {
   return emojiKeys.value.length > 0 && doneCount(charId) >= emojiKeys.value.length
@@ -525,11 +621,11 @@ function isCardLoading(charId, key) {
 }
 
 const generatingRowsCount = computed(() => emojiRows.value.filter(r => r.status === 'generating').length)
-const selectedGeneratingCount = computed(() => emojiRows.value.filter(r => r.character_id === selectedCharId.value && r.status === 'generating').length)
-/** 当前角色是否已有提示词：决定工具栏显示「重新生成 + 完全重做」还是仅「完全重做」 */
+const selectedGeneratingCount = computed(() => emojiRows.value.filter(r => r.set_id === selectedSetId.value && r.status === 'generating').length)
+/** 当前编辑的配置单是否已有提示词：决定工具栏显示「重新生成 + 完全重做」还是仅「完全重做」 */
 const selectedCharHasPrompts = computed(() =>
-  selectedCharId.value !== null &&
-  emojiRows.value.some(r => r.character_id === selectedCharId.value && r.prompt)
+  selectedSetId.value !== null &&
+  emojiRows.value.some(r => r.set_id === selectedSetId.value && r.prompt)
 )
 const generating = computed(() => starting.value || busyKey.value !== '' || uploadingKey.value !== '' || deletingKey.value !== '' || generatingRowsCount.value > 0 || batchRunning.value)
 const imageProgressVisible = computed(() => !starting.value && !batchRunning.value && (busyKey.value !== '' || generatingRowsCount.value > 0))
@@ -557,7 +653,7 @@ const imageProgressText = computed(() => {
   if (busyKey.value) return `正在重新生成「${busyKey.value.split(':')[1]}」...`
   const gen = selectedGeneratingCount.value
   if (gen > 0) {
-    const done = doneCount(selectedCharId.value)
+    const done = doneCountInSet(selectedSetId.value)
     return done > 0 ? `已生成 ${done} 张 · 还有 ${gen} 张仍在生成中` : `正在生成 ${gen} 张表情包...`
   }
   if (generatingRowsCount.value > 0) return `其他角色还有 ${generatingRowsCount.value} 张表情包正在生成中`
@@ -578,11 +674,107 @@ async function loadOverview() {
   try {
     const d = await api.getEmojiOverview()
     emojiRows.value = d.emojis || []
+    emojiSets.value = d.sets || []
     if (selectedCharId.value === null && d.characters?.length) {
       selectedCharId.value = d.characters[0].id
     }
+    ensureSelectedSetValid()
   } catch (err) {
     toast?.('加载表情包数据失败: ' + err.message, 'error')
+  }
+}
+
+/** 新建空白配置单：展开命名输入行 */
+function openSetCreate() {
+  if (generating.value) return
+  newSetName.value = ''
+  setRenaming.value = false
+  setCreating.value = true
+}
+
+async function confirmCreateSet() {
+  if (selectedCharId.value === null || setBusy.value) return
+  setBusy.value = true
+  try {
+    const d = await api.createEmojiSet(selectedCharId.value, newSetName.value.trim())
+    if (d.error) throw new Error(d.error)
+    setCreating.value = false
+    setRenaming.value = false
+    await loadOverview()
+    if (d.set?.id) selectedSetId.value = d.set.id
+    toast?.(`已创建空白表情包组「${d.set?.name || '默认表情包'}」`, 'success')
+  } catch (err) {
+    toast?.('创建表情包组失败: ' + err.message, 'error')
+  } finally {
+    setBusy.value = false
+  }
+}
+
+/** 重命名当前编辑的配置单：展开命名输入行 */
+function openSetRename() {
+  if (generating.value || !selectedSet.value) return
+  renameSetName.value = selectedSet.value.name
+  setCreating.value = false
+  setRenaming.value = true
+}
+
+async function confirmRenameSet() {
+  const target = selectedSet.value
+  if (!target || setBusy.value) return
+  setBusy.value = true
+  try {
+    const d = await api.renameEmojiSet(target.id, renameSetName.value.trim())
+    if (d.error) throw new Error(d.error)
+    setRenaming.value = false
+    await loadOverview()
+    toast?.(`表情包组已重命名为「${d.set?.name || renameSetName.value.trim()}」`, 'success')
+  } catch (err) {
+    toast?.('重命名失败: ' + err.message, 'error')
+  } finally {
+    setBusy.value = false
+  }
+}
+
+/** 启用当前编辑的配置单：切换后角色聊天即改发这套表情包 */
+async function activateSelectedSet() {
+  if (!selectedSet.value || selectedSet.value.is_active || setBusy.value) return
+  setBusy.value = true
+  try {
+    const d = await api.activateEmojiSet(selectedSet.value.id)
+    if (d.error) throw new Error(d.error)
+    await loadOverview()
+    toast?.(`已切换到「${d.set?.name || selectedSet.value?.name}」，角色现在发这套表情包`, 'success')
+  } catch (err) {
+    toast?.('切换表情包组失败: ' + err.message, 'error')
+  } finally {
+    setBusy.value = false
+  }
+}
+
+/** 删除配置单：仅删配置本身，不动已生成的图片文件与聊天记录 */
+async function removeSelectedSet() {
+  const target = selectedSet.value
+  if (!target || setBusy.value || generating.value) return
+  let message = `确定删除表情包组「${target.name}」吗？仅删除该组配置，已生成的图片文件与聊天记录不受影响。`
+  if (target.is_active) {
+    message += selectedSets.value.length > 1
+      ? '删除后角色将自动改用剩余最新的表情包组。'
+      : '删除后该角色将没有任何表情包组，聊天时不会发表情包。'
+  }
+  const confirmed = confirmFn
+    ? await confirmFn({ title: '删除表情包组', message, okText: '删除', danger: true })
+    : window.confirm(message)
+  if (!confirmed) return
+  setBusy.value = true
+  try {
+    const d = await api.deleteEmojiSet(target.id)
+    if (d.error) throw new Error(d.error)
+    await loadOverview()
+    toast?.(`表情包组「${target.name}」已删除`, 'success')
+  } catch (err) {
+    toast?.('删除表情包组失败: ' + err.message, 'error')
+  } finally {
+    setBusy.value = false
   }
 }
 
@@ -634,9 +826,12 @@ async function generateAll() {
   starting.value = true
   promptPendingCharIds.value.push(charId)
   try {
-    await api.generateEmojiPrompts([charId], style.value.trim())
+    const p = await api.generateEmojiPrompts([charId], style.value.trim(), selectedSetId.value)
+    // 角色原本没有配置单时，后端会自动建默认单并启用，这里同步编辑目标
+    const newSetId = p?.results?.[0]?.set_id
+    if (newSetId) selectedSetId.value = newSetId
     promptPendingCharIds.value = promptPendingCharIds.value.filter(id => id !== charId)
-    await api.generateEmojiImages([charId], [], artist.value)
+    await api.generateEmojiImages([charId], [], artist.value, false, selectedSetId.value)
     await loadOverview()
     if (generatingRowsCount.value > 0) startPolling()
     toast?.('表情包已开始生成', 'success')
@@ -653,7 +848,7 @@ async function regenerateAllImages() {
   if (selectedCharId.value === null || generating.value) return
   const charId = selectedCharId.value
   try {
-    const d = await api.generateEmojiImages([charId], [], artist.value, true)
+    const d = await api.generateEmojiImages([charId], [], artist.value, true, selectedSetId.value)
     if (d.error) throw new Error(d.error)
     await loadOverview()
     if (generatingRowsCount.value > 0) startPolling()
@@ -773,7 +968,7 @@ async function generateOneImage(charId, key) {
   }
   busyKey.value = charId + ':' + key
   try {
-    const d = await api.regenerateEmojiImage(charId, key, artist.value)
+    const d = await api.regenerateEmojiImage(charId, key, artist.value, selectedSetId.value)
     if (d.error) throw new Error(d.error)
     if (d.ok) toast?.(`「${key}」图片已生成`, 'success')
     else toast?.(d.error || '生成失败', 'error')
@@ -824,7 +1019,7 @@ async function onUploadFileChange(e) {
   const keyId = target.charId + ':' + target.key
   uploadingKey.value = keyId
   try {
-    const d = await api.uploadEmojiImage(target.charId, target.key, base64)
+    const d = await api.uploadEmojiImage(target.charId, target.key, base64, selectedSetId.value)
     if (d.error) throw new Error(d.error)
     toast?.(`「${target.key}」图片已上传`, 'success')
     await loadOverview()
@@ -844,7 +1039,7 @@ async function removeEmoji(charId, key) {
   if (!confirmed) return
   deletingKey.value = keyId
   try {
-    const d = await api.deleteEmoji(charId, key)
+    const d = await api.deleteEmoji(charId, key, selectedSetId.value)
     if (d.error) throw new Error(d.error)
     await loadOverview()
     toast?.(`「${key}」图片已清空`, 'success')
@@ -930,6 +1125,11 @@ watch(starting, (active) => {
 watch(isMobile, (mobile) => {
   if (!mobile) charPickerOpen.value = false
 })
+
+// 切换角色时，编辑目标回落到该角色启用中的配置单
+watch(selectedCharId, () => ensureSelectedSetValid())
+// 切换编辑目标时收起新建/重命名输入行，避免输入框对着另一张套保存
+watch(selectedSetId, () => { setCreating.value = false; setRenaming.value = false })
 
 onMounted(async () => {
   if (props.characters.length > 0) selectedCharId.value = props.characters[0].id
@@ -1741,6 +1941,61 @@ onBeforeUnmount(() => {
   padding: 16px 24px;
   border-top: 1px solid rgba(42, 26, 16, 0.07);
 }
+/* ── 配置单栏（多套切换） ── */
+.emoji-setbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.emoji-set-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.emoji-set-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.emoji-set-inuse {
+  margin-left: 5px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.emoji-set-hint {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+.emoji-set-create {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.emoji-set-name-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 320px;
+}
+.emoji-set-blank-hint {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
 @media (max-width: 767px) {
   .advanced-body { padding: 16px; }
   .advanced-content { padding: 16px; border-radius: 12px; }

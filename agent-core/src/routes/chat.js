@@ -776,13 +776,19 @@ ${coreRules}
       dynamicBlocks.push(`<recent_moments>\n${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。\n</recent_moments>`);
     }
 
-    // 4. 好感度区间描述
+    // 4. 日程上下文（当前在做什么 / 睡醒等）
+    const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
+    if (scheduleCtx) {
+      dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
+    }
+
+    // 5. 好感度区间描述
     if (config.features.emotion && affinity != null) {
       const affinityMsg = affinityToPrompt(affinity);
       if (affinityMsg) dynamicBlocks.push(affinityMsg);
     }
 
-    // 5. 角色视角的用户画像
+    // 6. 角色视角的用户画像
     const portraitRows = db.prepare(`
       SELECT trait_type, content FROM user_portraits
       WHERE character_id = ?
@@ -797,7 +803,7 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 6. 回复长度提示（随好感度变化）
+    // 7. 回复长度提示（随好感度变化）
     const sentenceHint = (() => {
       if (explicitImageIntent) return '15个汉字以内';
       if (affinity == null || affinity < 60) return '10~30个汉字';
@@ -806,28 +812,22 @@ ${coreRules}
     })();
     dynamicBlocks.push(`<dialogue_rules>\n- **回复控制在${sentenceHint}，保持口语化轻快节奏**\n</dialogue_rules>`);
 
-    // 7. VAD 三维情绪描述
+    // 8. VAD 三维情绪描述
     if (config.features.emotion && emotionPrompt) {
       dynamicBlocks.push(emotionPrompt);
     }
 
-    // 8. 活跃聊天历史（滑动窗口 0~10 轮）
+    // 9. 活跃聊天历史（滑动窗口 0~10 轮）
     if (activeChatText) {
       dynamicBlocks.push(activeChatText);
     }
 
-    // 8.5 临时表达风格：小概率注入，紧跟历史聊天之后，只影响本轮回复
+    // 9.5 临时表达风格：小概率注入，紧跟历史聊天之后，只影响本轮回复
     //     誓约状态时偏向更亲近的风格（俏皮/撒娇），一般时用基础池
     if (Math.random() < 0.12) {
       const pool = (userRel && userRel.is_oath) ? TEMP_STYLE_POOL_OATH : TEMP_STYLE_POOL;
       const style = pool[Math.floor(Math.random() * pool.length)];
       dynamicBlocks.push(`<style_override>\n${style}。只影响这次回复，不要改变你的性格底色。\n</style_override>`);
-    }
-
-    // 9. 日程上下文（当前在做什么 / 睡醒等）
-    const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
-    if (scheduleCtx) {
-      dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
     }
 
     // 10. 活跃奇遇（仅首轮强调时出现）

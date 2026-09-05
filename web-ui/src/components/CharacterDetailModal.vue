@@ -182,6 +182,99 @@
             </div>
           </div>
         </div>
+
+        <!-- 悬浮立绘窗（桌面端）：延迟弹出；标题栏开合功能区，点击立绘查看大图 -->
+        <div class="detail-standing" v-if="!isMobile">
+          <div class="standing-panel">
+            <div
+              class="standing-panel-header"
+              role="button"
+              tabindex="0"
+              :title="standingFuncOpen ? '收起立绘操作' : '展开立绘操作'"
+              @click="toggleStandingFunc"
+              @keydown.enter.prevent="toggleStandingFunc"
+              @keydown.space.prevent="toggleStandingFunc"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+              </svg>
+              角色立绘
+              <svg class="standing-chevron" :class="{ open: standingFuncOpen }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+            <div
+              class="standing-stage"
+              role="button"
+              tabindex="0"
+              :title="standingFuncOpen && character?.standing_url ? '再点一次查看大图' : '点击展开立绘操作'"
+              @click="onStandingStageClick"
+              @keydown.enter.prevent="onStandingStageClick"
+              @keydown.space.prevent="onStandingStageClick"
+            >
+              <img v-if="character?.standing_url" :src="standingDisplayUrl" class="standing-img" alt="" />
+              <div v-else-if="!standingBusyForChar" class="standing-empty">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                </svg>
+                <p class="standing-empty-title">尚未生成立绘</p>
+                <p class="standing-empty-hint"></p>
+              </div>
+              <!-- 生成中：扫描线 + 轮播趣语（与角色招募同款） -->
+              <div v-if="standingBusyForChar" class="standing-loading">
+                <div class="standing-scan-line"></div>
+                <div class="standing-spinner"></div>
+                <span class="standing-loading-text">{{ standingReimageing ? '正在重绘立绘…' : '正在生成立绘…' }}</span>
+                <span class="standing-loading-tip">{{ standingTip }}</span>
+              </div>
+            </div>
+            <Transition name="standing-func">
+              <div v-if="standingFuncOpen" class="standing-func">
+                <div class="standing-func-input-row">
+                  <div
+                    class="standing-mode-badge"
+                    role="button"
+                    tabindex="0"
+                    :class="[standingMode, { 'is-disabled': standingBusy }]"
+                    :aria-disabled="standingBusy || undefined"
+                    title="切换立绘姿势风格（全局设置）"
+                    @click="toggleStandingMode"
+                    @keydown.enter.prevent="toggleStandingMode"
+                    @keydown.space.prevent="toggleStandingMode"
+                  >{{ standingMode === 'dynamic' ? '张力！' : '普通' }}</div>
+                  <linshe-input
+                    v-model="standingRequirement"
+                    size="sm"
+                    placeholder="额外立绘需求"
+                    @keyup.enter="generateStanding"
+                  />
+                </div>
+                <div class="standing-func-btns">
+                  <template v-if="standingHasPrompt">
+                    <linshe-button variant="secondary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">重新生成提示词</linshe-button>
+                    <linshe-button variant="primary" size="sm" :loading="standingReimageing" :disabled="standingBusy" @click="regenerateStanding">再次Roll图</linshe-button>
+                  </template>
+                  <template v-else>
+                    <linshe-button variant="primary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">生成立绘</linshe-button>
+                  </template>
+                </div>
+                <div class="standing-manage-btns">
+                  <linshe-button variant="secondary" size="sm" :disabled="standingBusy || standingUploading" @click="openStandingUpload">上传立绘</linshe-button>
+                  <linshe-button v-if="character?.standing_url" variant="ghost" size="sm" :disabled="standingBusy" @click="removeStanding">删除立绘</linshe-button>
+                </div>
+              </div>
+            </Transition>
+            <input ref="standingUploadInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onStandingUploadChange" />
+          </div>
+        </div>
+
+        <!-- ── 立绘大图查看（重新生成 / HiresFix 放大 / 下载；不放删除，面板里有）── 放在 overlay 内以复用其 10000 层级，盖过主面板 ── -->
+        <ImageLightbox
+          :visible="standingLightboxVisible"
+          :imgs="standingDisplayUrl"
+          :show-delete="false"
+          @hide="standingLightboxVisible = false"
+        />
       </div>
     </Transition>
 
@@ -395,13 +488,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, inject } from 'vue'
+import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import LinsheSelect from './ui/LinsheSelect.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
+import ImageLightbox from './ImageLightbox.vue'
+import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -554,6 +649,9 @@ function init(c) {
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
+  standingFuncOpen.value = false
+  standingRequirement.value = ''
+  standingPrompt.value = ''
   fetchOutfits()
   api.getRelationships(c.id).then(res => {
     detail.relationships = res.relationships || []
@@ -886,6 +984,221 @@ async function saveOutfits() {
     outfitLoading.value = false
   }
 }
+
+// ═══════════════════════════════════════
+// 立绘面板（左侧悬浮窗）
+// ═══════════════════════════════════════
+
+const standingFuncOpen = ref(false)
+const standingRequirement = ref('')
+// 本轮弹窗会话中已生成的立绘提示词：存在时功能区拆为「重新生成提示词 / 再次生成」
+const standingPrompt = ref('')
+const standingHasPrompt = computed(() => standingPrompt.value.trim().length > 0)
+// 生图请求以角色 id 记账：弹窗关闭再打开时，进行中的生成仍能接回画面
+const standingGenCharId = ref(null)
+const standingRegenCharId = ref(null)
+const standingGenerating = computed(() =>
+  standingGenCharId.value != null && standingGenCharId.value === props.character?.id
+)
+const standingReimageing = computed(() =>
+  standingRegenCharId.value != null && standingRegenCharId.value === props.character?.id
+)
+const standingBusy = computed(() => standingGenCharId.value != null || standingRegenCharId.value != null)
+const standingBusyForChar = computed(() => standingGenerating.value || standingReimageing.value)
+const standingLightboxVisible = ref(false)
+
+// 立绘展示 URL：大图「重新生成 / 放大细化」确认覆盖后原 URL 内容已换，
+// 经共享登记表补 ?_t= 防止浏览器缓存旧图（弹窗关闭期间确认覆盖也生效，重开即见新图）
+const standingDisplayUrl = computed(() => {
+  overwriteBustTick.value // 依赖登记表 tick：覆盖确认后即使弹窗开着也能立即换新图
+  return bustUrlIfOverwritten(props.character?.standing_url || '')
+})
+
+// 立绘姿势风格（普通 / 张力！）：全局设置，system_settings 持久化
+const standingMode = ref('normal')
+
+onMounted(() => {
+  api.getStandingMode()
+    .then(r => { standingMode.value = r.mode === 'dynamic' ? 'dynamic' : 'normal' })
+    .catch(() => {})
+})
+
+async function toggleStandingMode() {
+  if (standingBusy.value) return
+  const prev = standingMode.value
+  const next = prev === 'dynamic' ? 'normal' : 'dynamic'
+  standingMode.value = next
+  try {
+    await api.updateStandingMode(next)
+  } catch (e) {
+    standingMode.value = prev
+    console.error('toggleStandingMode failed:', e)
+    toastFn(e?.message || '风格切换保存失败', 'error')
+  }
+}
+
+// 生成中轮播趣语（与角色招募同款风格）
+const STANDING_TIPS = [
+  '正在铺开画布…',
+  '正在研磨颜料…',
+  '正在挑选最上镜的角度…',
+  '正在勾勒轮廓线…',
+  '正在为立绘打光…',
+  '正在邀请衣匠量体…',
+  '正在查阅公会画册…',
+  '正在与画师讨价还价…',
+  '正在等待颜料晾干…',
+  '正在擦拭相框…',
+  '正在向馆长申请展厅…',
+]
+const standingTip = ref(STANDING_TIPS[0])
+let _standingTipTimer = null
+
+function stopStandingTips() {
+  if (_standingTipTimer) {
+    clearInterval(_standingTipTimer)
+    _standingTipTimer = null
+  }
+}
+
+watch(standingBusyForChar, (busy) => {
+  stopStandingTips()
+  if (busy) {
+    standingTip.value = STANDING_TIPS[0]
+    let idx = 0
+    _standingTipTimer = setInterval(() => {
+      idx = (idx + 1) % STANDING_TIPS.length
+      standingTip.value = STANDING_TIPS[idx]
+    }, 2200)
+  }
+})
+
+onUnmounted(stopStandingTips)
+
+function toggleStandingFunc() {
+  standingFuncOpen.value = !standingFuncOpen.value
+}
+
+// 点击画面：第一下弹出功能区；功能区已展开且有立绘时，再点查看大图
+function onStandingStageClick() {
+  if (!standingFuncOpen.value) {
+    standingFuncOpen.value = true
+    return
+  }
+  if (props.character?.standing_url) {
+    standingLightboxVisible.value = true
+  } else {
+    standingFuncOpen.value = false
+  }
+}
+
+async function generateStanding() {
+  const c = props.character
+  if (!c || standingBusy.value) return
+  standingFuncOpen.value = true
+  standingGenCharId.value = c.id
+  try {
+    const res = await api.generateStanding(c.id, standingRequirement.value.trim())
+    c.standing_url = res.standing_url
+    standingPrompt.value = res.promptText || ''
+    toastFn('立绘已生成', 'success')
+  } catch (e) {
+    console.error('generateStanding failed:', e)
+    toastFn(e?.message || '立绘生成失败', 'error')
+  } finally {
+    standingGenCharId.value = null
+  }
+}
+
+// 用当前提示词直接重出图，不重新请求 LLM
+async function regenerateStanding() {
+  const c = props.character
+  const prompt = standingPrompt.value.trim()
+  if (!c || !prompt || standingBusy.value) return
+  standingFuncOpen.value = true
+  standingRegenCharId.value = c.id
+  try {
+    const res = await api.regenerateStandingImage(c.id, prompt)
+    c.standing_url = res.standing_url
+    toastFn('立绘已生成', 'success')
+  } catch (e) {
+    console.error('regenerateStanding failed:', e)
+    toastFn(e?.message || '立绘生成失败', 'error')
+  } finally {
+    standingRegenCharId.value = null
+  }
+}
+
+async function removeStanding() {
+  const c = props.character
+  if (!c?.standing_url || standingBusy.value) return
+  const ok = await confirmFn({
+    title: '删除立绘',
+    message: `确定删除「${c.display_name}」的立绘吗？\n删除后可以重新生成。`,
+    okText: '删除',
+  })
+  if (!ok) return
+  try {
+    await api.deleteStanding(c.id)
+    c.standing_url = null
+    toastFn('立绘已删除', 'success')
+  } catch (e) {
+    console.error('removeStanding failed:', e)
+    toastFn(e?.message || '立绘删除失败', 'error')
+  }
+}
+
+// 上传本地图片作为立绘：替换当前立绘（已生成立绘时也允许，AI 重绘会覆盖）
+const standingUploadInput = ref(null)
+const standingUploading = ref(false)
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function openStandingUpload() {
+  if (standingBusy.value || standingUploading.value) return
+  standingUploadInput.value?.click()
+}
+
+async function onStandingUploadChange(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
+    toastFn('请选择 PNG / JPG / WEBP 图片', 'error')
+    return
+  }
+  if (file.size > 6 * 1024 * 1024) {
+    toastFn('图片不能超过 6MB', 'error')
+    return
+  }
+  const c = props.character
+  if (!c) return
+  let base64
+  try {
+    base64 = await readFileAsDataURL(file)
+  } catch (err) {
+    toastFn('读取图片失败: ' + err.message, 'error')
+    return
+  }
+  standingUploading.value = true
+  try {
+    const res = await api.uploadStanding(c.id, base64)
+    c.standing_url = res.standing_url
+    toastFn('立绘已上传', 'success')
+  } catch (err) {
+    console.error('uploadStanding failed:', err)
+    toastFn(err?.message || '立绘上传失败', 'error')
+  } finally {
+    standingUploading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -1044,6 +1357,144 @@ async function saveOutfits() {
 .float-row-action:hover .float-label { color: var(--accent); }
 .float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
 .float-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
+
+/* ═══ 悬浮立绘窗（左侧，与右侧 float 面板镜像） ═══ */
+.detail-standing {
+  position: absolute;
+  right: calc(50% + min(450px, 48.5vw) + 16px);
+  top: 2.5vh;
+  width: 300px;
+  z-index: 0;
+}
+.standing-panel {
+  display: flex; flex-direction: column;
+  padding: 12px;
+  border-radius: 18px;
+  background: #f4f1eeed;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.08);
+  /* 主面板 modal-pop(0.28s) 结束后再延迟 0.5s，与右侧 float-emerge 镜像向左弹出；
+     初始多藏 60px，避免面板 0.92 缩放阶段露出左缘 */
+  animation: standing-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.5s both;
+}
+@keyframes standing-emerge {
+  0%   { transform: translateX(calc(100% + 60px)); }
+  100% { transform: translateX(0); }
+}
+.standing-panel-header {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: var(--text-muted, #999);
+  margin: 2px 2px 10px;
+  cursor: pointer; user-select: none;
+  border-radius: 8px; padding: 2px 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.standing-panel-header:hover { color: var(--accent); background: rgba(224, 123, 108, 0.06); }
+.standing-chevron { margin-left: auto; transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.standing-chevron.open { transform: rotate(180deg); }
+.standing-stage {
+  position: relative;
+  aspect-ratio: 1 / 2;
+  max-height: calc(95vh - 250px);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.standing-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.standing-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.standing-empty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 16px 14px; text-align: center;
+  color: var(--text-secondary);
+}
+.standing-empty svg { opacity: 0.3; color: var(--text-secondary); flex-shrink: 0; }
+.standing-empty-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0; }
+.standing-empty-hint { font-size: 11px; line-height: 1.6; color: var(--text-muted, #999); margin: 0; }
+/* 生成中遮罩：扫描线 + 轮播趣语（与角色招募同款） */
+.standing-loading {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 16px; text-align: center;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  overflow: hidden;
+}
+.standing-scan-line {
+  position: absolute; left: 10%; right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: standing-scan-sweep 2s ease-in-out infinite;
+  box-shadow: 0 0 24px rgba(224, 123, 108, 0.6), 0 0 8px rgba(224, 123, 108, 0.3);
+}
+@keyframes standing-scan-sweep {
+  0%   { top: 10%; opacity: 0.2; }
+  25%  { top: 90%; opacity: 1; }
+  50%  { top: 90%; opacity: 0.2; }
+  75%  { top: 10%; opacity: 1; }
+  100% { top: 10%; opacity: 0.2; }
+}
+.standing-spinner {
+  width: 22px; height: 22px;
+  border: 2.5px solid rgba(224, 123, 108, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: standing-spin 0.7s linear infinite;
+}
+@keyframes standing-spin { to { transform: rotate(360deg); } }
+.standing-loading-text {
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  animation: standing-tip-pulse 1.2s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(224, 123, 108, 0.3);
+}
+.standing-loading-tip {
+  font-size: 11px; line-height: 1.6; color: var(--text-secondary);
+  animation: standing-tip-pulse 1.2s ease-in-out infinite;
+}
+@keyframes standing-tip-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.97); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+.standing-func { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.standing-func-input-row { display: flex; align-items: center; gap: 8px; }
+.standing-func-input-row .ls-input { flex: 1; width: auto; min-width: 0; }
+/* 姿势风格切换徽标：与表情包管理 emoji-mode-badge 同款双色胶囊 */
+.standing-mode-badge {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.standing-mode-badge.normal { background: #E8F1EA; color: #5B8C6E; }
+.standing-mode-badge.dynamic { background: #FBEAE6; color: #D96A59; }
+.standing-mode-badge:hover:not(.is-disabled) { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(125, 105, 85, 0.12); }
+.standing-mode-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.standing-mode-badge.is-disabled { opacity: 0.5; cursor: default; }
+.standing-func-btns { display: flex; align-items: center; gap: 8px; }
+.standing-func-btns > :first-child { flex: 1; }
+/* 上传 / 删除立绘并排各占一半 */
+.standing-manage-btns { display: flex; align-items: center; gap: 8px; }
+.standing-manage-btns > * { flex: 1; min-width: 0; }
+.standing-func-enter-active { transition: all 0.32s cubic-bezier(0.3, 1.35, 0.55, 1); overflow: hidden; }
+.standing-func-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+.standing-func-enter-from, .standing-func-leave-to { opacity: 0; max-height: 0; transform: translateY(-8px); }
+.standing-func-enter-to, .standing-func-leave-from { opacity: 1; max-height: 150px; transform: translateY(0); }
 
 /* ═══ 操作栏 ═══ */
 .modal-footer {

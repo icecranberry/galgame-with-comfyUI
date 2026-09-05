@@ -67,7 +67,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   let fullReply;
   try {
     fullReply = await chatSync(msgs, {
-      temperature: 0.75,
+      temperature: 0.7,
       max_tokens: 512,
       label: `wake-up:${char.display_name}:${mode}`,
     });
