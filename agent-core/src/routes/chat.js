@@ -1129,6 +1129,7 @@ ${coreRules}
         summaryBlock,
         history: checkpointHistory,
         dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
+        userPrefix: emojiNote,
       });
 
       // 重置流状态：指令行不进气泡不落库；闸门前已发出的零散片段用 context_update 清空

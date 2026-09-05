@@ -2,9 +2,7 @@ import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
-import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
