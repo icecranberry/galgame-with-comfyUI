@@ -1047,6 +1047,9 @@ function drawAgent(c, a, pos, nowMs) {
     const w = h * (sprite.naturalWidth && sprite.naturalHeight ? sprite.naturalWidth / sprite.naturalHeight : 0.66)
     c.save()
     c.globalAlpha = alpha
+    // 小人是插画素材：单独开平滑缩放（世界层全局是 nearest，贴图锐利）
+    c.imageSmoothingEnabled = true
+    c.imageSmoothingQuality = 'high'
     c.translate(px, feetY - (sleeping ? 0 : bob))
     try { c.drawImage(sprite, -w / 2, -h, w, h); drew = true } catch { /* ignore */ }
     c.restore()
@@ -1059,6 +1062,8 @@ function drawAgent(c, a, pos, nowMs) {
       const w = h * (standing.naturalWidth / Math.max(1, standing.naturalHeight) || 0.7)
       c.save()
       c.globalAlpha = alpha
+      c.imageSmoothingEnabled = true
+      c.imageSmoothingQuality = 'high'
       c.drawImage(standing, px - w / 2, feetY - h, w, h)
       c.restore()
       drew = true

@@ -68,13 +68,13 @@ export const ASSET_SPECS = {
     cropContent: true,
     pixel: { w: 64, h: 64 },
   },
-  // 像素小人：600×800 制作 → 裁内容包围盒 → 像素化 48×64（3:4），正/背两面
+  // 像素小人：600×800 制作 → 抠白裁切 → 轻缩存储（保留生成图的画质，像素风由 prompt 控制）
   npc: {
     size: { width: 600, height: 800 },
-    prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
+    prompt: 'cute chibi character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean outlines, game character sprite asset',
     removeBg: true,
     cropContent: true,
-    pixel: { w: 48, h: 64 },
+    maxSide: 400,
   },
   // 居民/玩家正式立绘：900×1600 白底插画（生成后抠白），不做像素化
   portrait: {
@@ -85,10 +85,10 @@ export const ASSET_SPECS = {
   },
   player: {
     size: { width: 600, height: 800 },
-    prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
+    prompt: 'cute chibi character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean outlines, game character sprite asset',
     removeBg: true,
     cropContent: true,
-    pixel: { w: 48, h: 64 },
+    maxSide: 400,
   },
 };
 
@@ -219,21 +219,25 @@ async function generateIntoRow(row) {
     if (isTile) work = await flattenIsoTile(work);
     let tw;
     let th;
+    let smoothResize = false;
     if (isTile) {
       tw = 64; th = 32;
     } else if (spec.pixelWidth && meta.footprint?.w) {
       // 建筑按等距占格宽 (w+h)*32，渲染 1:1 不模糊
       tw = spec.pixelWidth(meta.footprint);
       th = Math.max(1, Math.round(tw * size.height / size.width));
-    } else if (spec.pixel) {
-      tw = spec.pixel.w;
-      th = spec.pixel.h;
+    } else if (spec.maxSide) {
+      // 插画小人：保留画质，仅轻缩存储（渲染时平滑缩放；像素风由生成 prompt 决定）
+      const ratio = Math.min(1, spec.maxSide / Math.max(size.width, size.height));
+      tw = Math.round(size.width * ratio);
+      th = Math.round(size.height * ratio);
+      smoothResize = true;
     } else {
       tw = size.width; th = size.height; // portrait 保持原分辨率
     }
 
     const outBuffer = await postProcessAsset(work, {
-      targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent,
+      targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent, smoothResize,
     });
 
     const filePath = assetFilePath(row.id, row.key);

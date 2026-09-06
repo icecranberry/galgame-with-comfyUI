@@ -258,19 +258,27 @@ export async function cropToContent(buffer, marginRatio = 0.04) {
  * 素材统一后处理管线
  * @param {Buffer} buffer - 生图原始输出（JPEG/PNG）
  * @param {object} opts
- * @param {number} opts.targetW - 像素化目标宽
- * @param {number} opts.targetH - 像素化目标高
+ * @param {number} [opts.targetW] - 像素化目标宽（不传 targetW 时不做像素化）
+ * @param {number} [opts.targetH] - 像素化目标高
  * @param {boolean} [opts.removeBg=false] - 是否抠白底（建筑/道具/精灵）
  * @param {number} [opts.tolerance=28] - 抠白容差
  * @param {boolean} [opts.cropContent=false] - 裁到内容包围盒（道具/精灵防「主体只占中间一小块」）
+ * @param {boolean} [opts.smoothResize=false] - 平滑缩放到 targetW/H（插画小人用，保留画质不做像素化）
  */
-export async function postProcessAsset(buffer, { targetW, targetH, removeBg = false, tolerance = 28, cropContent = false } = {}) {
+export async function postProcessAsset(buffer, { targetW, targetH, removeBg = false, tolerance = 28, cropContent = false, smoothResize = false } = {}) {
   if (removeBg) {
     buffer = await removeWhiteBackground(buffer, tolerance);
   }
   if (cropContent) {
     buffer = await cropToContent(buffer);
   }
-  // 先抠白再像素化：避免降采样把背景白边混进前景边缘
-  return pixelate(buffer, targetW, targetH);
+  if (smoothResize && targetW && targetH) {
+    // 平滑轻缩：保留插画画质（像素风的颗粒感应由生成 prompt 控制，不做破坏性压像素）
+    return sharp(buffer).resize(targetW, targetH, { fit: 'fill' }).png().toBuffer();
+  }
+  if (targetW && targetH) {
+    // 先抠白再像素化：避免降采样把背景白边混进前景边缘
+    return pixelate(buffer, targetW, targetH);
+  }
+  return sharp(buffer).png().toBuffer();
 }
