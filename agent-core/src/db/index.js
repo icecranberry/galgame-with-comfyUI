@@ -1470,6 +1470,33 @@ function migrateTownV2Schema(db) {
       db.exec(`ALTER TABLE town_npcs ADD COLUMN character_id INTEGER`);
       console.log('[db] Added town_npcs.character_id column');
     }
+    // 向导提前建档：map_id 需可空（建档时地图尚未生成）
+    const mapIdCol = npcCols.find(c => c.name === 'map_id');
+    if (mapIdCol && mapIdCol.notnull) {
+      const chatExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='town_npc_chat_messages'`).get();
+      if (chatExists) db.exec('DELETE FROM town_npc_chat_messages');
+      db.exec(`
+        CREATE TABLE town_npcs_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          map_id INTEGER,
+          display_name TEXT NOT NULL,
+          persona TEXT DEFAULT '',
+          appearance_desc TEXT DEFAULT '',
+          job TEXT DEFAULT '', home_location_id INTEGER,
+          routine_json TEXT DEFAULT '[]',
+          traits_json TEXT DEFAULT '{}',
+          sprite_ready INTEGER DEFAULT 0,
+          town_enabled INTEGER DEFAULT 1,
+          character_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO town_npcs_new (id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at)
+          SELECT id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at FROM town_npcs;
+        DROP TABLE town_npcs;
+        ALTER TABLE town_npcs_new RENAME TO town_npcs;
+      `);
+      console.log('[db] town_npcs.map_id made nullable (wizard early-create)');
+    }
     const playerCols = db.prepare(`PRAGMA table_info(town_players)`).all();
     if (playerCols.length > 0 && !playerCols.find(c => c.name === 'sprite_asset_id')) {
       db.exec(`ALTER TABLE town_players ADD COLUMN sprite_asset_id INTEGER`);

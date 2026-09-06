@@ -1949,6 +1949,11 @@ export function deleteTownAsset(id) {
   return jsonRequest(`${BASE}/town/assets/${id}`, { method: 'DELETE' })
 }
 
+// 保存前端编辑后的素材图（点击抠白 / 裁底，dataUrl PNG）
+export function saveTownAssetImage(id, dataUrl) {
+  return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
+}
+
 // 地图（编辑器保存 / 渲染载荷）
 export function fetchTownMap() {
   return jsonRequest(`${BASE}/town/map`)
@@ -1989,6 +1994,16 @@ export function generateTownLayout() {
 
 export function rerollTownLayout() {
   return jsonRequest(`${BASE}/town/init/reroll`, townJson('POST', {}))
+}
+
+// 向导居民步：按蓝图提前建档居民（稳定人格卡）
+export function commitTownWizardNpcs() {
+  return jsonRequest(`${BASE}/town/init/npcs`, townJson('POST', {}))
+}
+
+// 向导居民步：按数量重新生成名单（拉条）
+export function regenerateTownNpcRoster(count) {
+  return jsonRequest(`${BASE}/town/init/npc-roster`, townJson('POST', { count }))
 }
 
 export function confirmTownInit() {
@@ -2056,6 +2071,15 @@ export function setTownCharacterEnabled(characterId, townEnabled) {
 // 角色四方向精灵生成（管理面板）
 export function generateTownCharacterSprites(characterId) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST', {}))
+}
+
+// 玩家形象套装（立绘 + 正/背小人）
+export function fetchTownPlayerKit() {
+  return jsonRequest(`${BASE}/town/player/kit`)
+}
+
+export function regenerateTownPlayerKit() {
+  return jsonRequest(`${BASE}/town/player/kit`, townJson('POST', {}))
 }
 
 // 小镇设置 / 世界重置

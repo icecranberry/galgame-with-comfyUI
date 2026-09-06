@@ -21,17 +21,19 @@ import {
   generateCharacterSprites, getTownSettings, updateTownSettings, resetWorld,
 } from '../services/town/townService.js';
 import {
-  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch,
+  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage,
 } from '../services/town/townAssetService.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
-  generateLayout, rerollLayout, confirmInit, cancelInit, getInitPreview,
+  generateLayout, rerollLayout, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
+  regenerateNpcRoster,
 } from '../services/town/townInitService.js';
 import {
   listNpcs, getNpc, createNpc, updateNpc, deleteNpc,
   generateNpcSprites, generateNpcPortrait, generateCharacterPortrait,
   rerollNpc, getNpcChatHistory, chatWithNpc, inviteNpcAsCharacter,
+  getPlayerKit, regeneratePlayerKit,
 } from '../services/town/townNpcService.js';
 
 const router = Router();
@@ -92,6 +94,16 @@ router.post('/assets/:id/regenerate', async (req, res) => {
 
 router.delete('/assets/:id', (req, res) => {
   res.json(deleteAsset(parseInt(req.params.id, 10)));
+});
+
+// 保存前端编辑后的素材图（点击抠白 / 裁底等，dataUrl PNG）
+router.post('/assets/:id/image', async (req, res) => {
+  try {
+    const asset = await saveEditedAssetImage(parseInt(req.params.id, 10), req.body?.dataUrl);
+    res.json({ asset });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || '保存失败' });
+  }
 });
 
 router.post('/assets/batch', async (req, res) => {
@@ -178,6 +190,25 @@ router.post('/init/reroll', async (req, res) => {
     res.json(await rerollLayout());
   } catch (err) {
     res.status(500).json({ error: err?.message || '重掷失败' });
+  }
+});
+
+// 向导居民步：按蓝图提前建档居民（稳定人格卡），返回含素材的居民 DTO
+router.post('/init/npcs', async (req, res) => {
+  try {
+    await commitWizardNpcs();
+    res.json(getInitState());
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '居民建档失败' });
+  }
+});
+
+// 向导居民步：按数量重新生成名单（拉条）
+router.post('/init/npc-roster', async (req, res) => {
+  try {
+    res.json(await regenerateNpcRoster(req.body?.count));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '名册生成失败' });
   }
 });
 
@@ -320,7 +351,22 @@ router.put('/settings', (req, res) => {
 });
 
 router.delete('/world', (req, res) => {
-  res.json(resetWorld());
+  const r = resetWorld();
+  cancelInit(); // 世界重置后向导从头开始（避免残留 done 状态卡住入口）
+  res.json(r);
+});
+
+// 玩家形象套装（立绘 + 正/背小人）
+router.get('/player/kit', (req, res) => {
+  res.json(getPlayerKit());
+});
+
+router.post('/player/kit', async (req, res) => {
+  try {
+    res.json(await regeneratePlayerKit());
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '生成失败' });
+  }
 });
 
 export { router as default };

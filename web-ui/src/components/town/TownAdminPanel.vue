@@ -17,6 +17,18 @@
 
         <!-- ── 居民列表 ── -->
         <div v-if="!detail && tab === 'npcs'" class="ap-body">
+          <div class="ap-row" role="button" tabindex="0" @click="detail = { type: 'player' }" @keydown.enter="detail = { type: 'player' }">
+            <div class="ap-row-thumb is-portrait">
+              <img v-if="playerKit.portrait?.status === 'ready'" :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)" alt="">
+              <img v-else-if="playerKit.sprites?.down?.status === 'ready'" :src="playerKit.sprites.down.image_path" alt="">
+              <span v-else class="ap-thumb-missing">·</span>
+            </div>
+            <div class="ap-npc-info">
+              <div class="ap-npc-name">我（玩家）</div>
+              <div class="ap-npc-meta">确认我的立绘与像素小人形象</div>
+            </div>
+            <span class="ap-row-arrow">›</span>
+          </div>
           <div class="ap-actions">
             <linshe-button variant="secondary" size="sm" :loading="batchSprites" @click="generateAllMissingNpcSprites">
               一键补齐缺失精灵
@@ -129,6 +141,43 @@
           </div>
         </div>
 
+        <!-- ── 「我」详情页：立绘 + 像素小人确认与编辑 ── -->
+        <div v-if="detail && detail.type === 'player'" class="ap-body">
+          <div class="ap-detail">
+            <div class="ap-detail-name">我（玩家）的形象</div>
+            <div class="ap-section">
+              <div class="ap-section-title">立绘（900×1600，白底抠白）</div>
+              <TownImageEditor
+                v-if="playerKit.portrait?.status === 'ready'"
+                :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)"
+                :asset-id="playerKit.portrait.id"
+                :fit-height="300"
+                hint="点击白色继续抠白 · 拖动检查"
+              />
+              <div v-else class="ap-empty is-small">还没有立绘，点下方生成。</div>
+            </div>
+            <div class="ap-section">
+              <div class="ap-section-title">像素小人（正面 / 背面）</div>
+              <div class="ap-sprite-row">
+                <template v-if="playerKit.sprites?.down?.status === 'ready'">
+                  <div class="ap-player-sprite">
+                    <TownImageEditor :src="playerKit.sprites.down.image_path + '?v=' + (playerKit.sprites.down.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.down.id" :fit-height="170" hint="正面：脚底贴底" />
+                  </div>
+                  <div class="ap-player-sprite" v-if="playerKit.sprites?.up?.status === 'ready'">
+                    <TownImageEditor :src="playerKit.sprites.up.image_path + '?v=' + (playerKit.sprites.up.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.up.id" :fit-height="170" hint="背面" />
+                  </div>
+                </template>
+                <div v-else class="ap-empty is-small">还没有像素小人。</div>
+              </div>
+            </div>
+            <div class="ap-actions is-column">
+              <linshe-button variant="primary" size="sm" :loading="playerKitBusy" @click="regenPlayerKit">
+                重新生成整套形象（按我的用户配置）
+              </linshe-button>
+            </div>
+          </div>
+        </div>
+
         <!-- ── 角色列表 ── -->
         <div v-if="!detail && tab === 'chars'" class="ap-body">
           <div class="ap-actions">
@@ -231,6 +280,7 @@ import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSwitch from '../ui/LinsheSwitch.vue'
+import TownImageEditor from './TownImageEditor.vue'
 
 defineEmits(['close'])
 
@@ -247,6 +297,31 @@ const batchSprites = ref(false)
 const batchChars = ref(false)
 const resetting = ref(false)
 const newNpc = reactive({ name: '', job: '', persona: '' })
+const playerKit = reactive({ sprites: {}, portrait: null })
+const playerKitBusy = ref(false)
+
+async function loadPlayerKit() {
+  try {
+    const kit = await api.fetchTownPlayerKit()
+    playerKit.sprites = kit.sprites || {}
+    playerKit.portrait = kit.portrait || null
+  } catch (err) {
+    console.warn('[town-admin] player kit load failed:', err?.message)
+  }
+}
+
+async function regenPlayerKit() {
+  playerKitBusy.value = true
+  try {
+    const data = await api.regenerateTownPlayerKit()
+    playerKit.sprites = data.kit?.sprites || {}
+    playerKit.portrait = data.kit?.portrait || null
+  } catch (err) {
+    console.warn('[town-admin] player kit regen failed:', err?.message)
+  } finally {
+    playerKitBusy.value = false
+  }
+}
 
 const SETTING_FIELDS = [
   { key: 'tickSeconds', label: '模拟步长（秒）', min: 20, max: 300, step: 5 },
@@ -475,6 +550,7 @@ onMounted(() => {
   loadNpcs()
   loadChars()
   loadSettings()
+  loadPlayerKit()
 })
 </script>
 
@@ -647,6 +723,8 @@ onMounted(() => {
 .ap-sprite img { height: 100%; image-rendering: pixelated; }
 .ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
 .ap-sprite-row > :last-child { margin-left: auto; }
+
+.ap-player-sprite { width: 130px; }
 
 .ap-persona, .ap-appearance {
   font-size: 12px;

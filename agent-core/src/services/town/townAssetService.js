@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
@@ -247,6 +248,37 @@ async function generateIntoRow(row) {
     broadcastTownAssetsUpdated({ asset: getAssetById(row.id) });
     throw err;
   }
+}
+
+/**
+ * 保存前端编辑后的素材图片（点击抠白 / 裁底等编辑产物，dataUrl PNG）
+ * 覆盖原文件并 bump meta.updatedAt 供前端缓存穿透
+ */
+export async function saveEditedAssetImage(id, dataUrl) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    throw new Error('invalid image dataUrl');
+  }
+  const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  // 尺寸守卫：编辑产物不超过 2048px
+  const meta = await sharp(buffer).metadata();
+  if (!meta.width || !meta.height || meta.width > 2048 || meta.height > 2048) {
+    throw new Error('图片尺寸异常');
+  }
+  const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
+  fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
+  fs.writeFileSync(filePath, buffer);
+
+  const m = JSON.parse(row.meta_json || '{}');
+  m.updatedAt = Date.now();
+  m.editedAt = m.updatedAt;
+  db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ?, status = ? WHERE id = ?')
+    .run(`/town-assets/${path.basename(filePath)}`, JSON.stringify(m), 'ready', id);
+  const fresh = getAssetById(id);
+  broadcastTownAssetsUpdated({ asset: fresh });
+  return fresh;
 }
 
 // ── 对外 API ──

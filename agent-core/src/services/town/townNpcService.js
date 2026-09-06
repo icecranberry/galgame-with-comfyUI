@@ -204,6 +204,43 @@ export async function generateCharacterPortrait(characterId) {
   return { ok: true, reused: false, asset, url: asset.image_path };
 }
 
+// ── 玩家形象套装（立绘 + 正/背小人，「我」的确认窗口用） ──
+
+export function getPlayerKit() {
+  const sprites = {};
+  for (const dir of SPRITE_DIRECTIONS) {
+    sprites[dir] = getAssetsByKey([`player_${dir}`])[0] || null;
+  }
+  return {
+    sprites,
+    portrait: getAssetsByKey(['player_portrait'])[0] || null,
+  };
+}
+
+/** 重新生成玩家套装（LLM 出 prompt；串行队列内逐张完成，await 返回即全部 ready） */
+export async function regeneratePlayerKit() {
+  const info = playerAppearanceInfo();
+  const styleTags = getWorldStyleTags();
+  for (const dir of SPRITE_DIRECTIONS) {
+    const key = `player_${dir}`;
+    const existing = getAssetsByKey([key])[0];
+    if (existing) deleteAsset(existing.id);
+    const prompt = await generateSpritePrompt({ appearanceInfo: info, direction: dir });
+    await createAsset({
+      kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character',
+      meta: { direction: dir, styleTags, promptOverride: prompt },
+    });
+  }
+  const existingPortrait = getAssetsByKey(['player_portrait'])[0];
+  if (existingPortrait) deleteAsset(existingPortrait.id);
+  const portraitPrompt = await generatePortraitPrompt({ appearanceInfo: info });
+  const portrait = await createAsset({
+    kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character',
+    meta: { styleTags, promptOverride: portraitPrompt },
+  });
+  return { ok: true, kit: getPlayerKit(), portrait };
+}
+
 // ── 邀请入邻舍（NPC → 聊天侧角色） ──
 
 /** 把小镇居民邀请为邻舍角色：characters 建档（人设/外观沿用 NPC 卡），NPC 记住对应关系 */

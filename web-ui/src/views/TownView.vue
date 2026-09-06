@@ -81,7 +81,7 @@
             @click="selectAsset(asset)"
             @keydown.enter="selectAsset(asset)"
           >
-            <img v-if="asset.status === 'ready'" :src="asset.imagePath + `?v=` + (asset.meta?.updatedAt ?? 0)" alt="">
+            <img v-if="asset.status === 'ready'" :src="asset.image_path + `?v=` + (asset.meta?.updatedAt ?? 0)" alt="">
             <span v-else class="tl-item-state">{{ asset.status === 'pending' ? '⏳' : '⚠️' }}</span>
             <span class="tl-item-name">{{ asset.name }}</span>
             <span v-if="asset.status === 'ready'" class="tl-item-ops">
