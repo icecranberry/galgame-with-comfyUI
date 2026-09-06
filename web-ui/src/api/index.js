@@ -1949,6 +1949,10 @@ export function deleteTownAsset(id) {
   return jsonRequest(`${BASE}/town/assets/${id}`, { method: 'DELETE' })
 }
 
+export function fetchTownAsset(id) {
+  return jsonRequest(`${BASE}/town/assets/${id}`)
+}
+
 // 保存前端编辑后的素材图（点击抠白 / 裁底，dataUrl PNG）
 export function saveTownAssetImage(id, dataUrl) {
   return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
@@ -2035,12 +2039,12 @@ export function deleteTownNpc(id) {
   return jsonRequest(`${BASE}/town/npcs/${id}`, { method: 'DELETE' })
 }
 
-export function generateTownNpcSprites(id) {
-  return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', {}))
+export function generateTownNpcSprites(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', overrides))
 }
 
-export function generateTownNpcPortrait(id) {
-  return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', {}))
+export function generateTownNpcPortrait(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', overrides))
 }
 
 export function inviteTownNpc(id) {
@@ -2078,8 +2082,8 @@ export function fetchTownPlayerKit() {
   return jsonRequest(`${BASE}/town/player/kit`)
 }
 
-export function regenerateTownPlayerKit() {
-  return jsonRequest(`${BASE}/town/player/kit`, townJson('POST', {}))
+export function regenerateTownPlayerKit(overrides = {}) {
+  return jsonRequest(`${BASE}/town/player/kit`, townJson('POST', overrides))
 }
 
 // 小镇设置 / 世界重置

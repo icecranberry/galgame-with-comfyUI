@@ -135,7 +135,7 @@ export function playerAppearanceInfo() {
 }
 
 /** 生成一个 NPC 的正/背像素小人（600×800 → 36×48，LLM 出 prompt），完成后回写 sprite_ready */
-export async function generateNpcSprites(npcId) {
+export async function generateNpcSprites(npcId, overrides = {}) {
   const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
   const appearanceInfo = npcAppearanceInfo(npcRow);
@@ -143,14 +143,17 @@ export async function generateNpcSprites(npcId) {
   for (const dir of SPRITE_DIRECTIONS) {
     const key = `npc_${npcId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
-    if (existing?.status === 'ready') continue;
+    if (existing?.status === 'ready' && !overrides.force) continue;
     if (existing) deleteAsset(existing.id);
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
       await createAsset({
         kind: 'npc', key, name: `${npcRow.display_name} ${dir}`,
         desc: npcRow.appearance_desc || npcRow.display_name,
-        meta: { direction: dir, styleTags: getWorldStyleTags(), npcId, promptOverride: prompt },
+        meta: {
+          direction: dir, styleTags: getWorldStyleTags(), npcId, promptOverride: prompt,
+          promptPrefix: overrides.promptPrefix, loras: overrides.loras,
+        },
       });
     } catch (err) {
       console.warn(`[townNpcs] sprite ${dir} failed:`, err?.message);
@@ -163,7 +166,7 @@ export async function generateNpcSprites(npcId) {
 }
 
 /** 生成 NPC 正式立绘（900×1600 白底插画 → 抠白），交互时跳出展示 */
-export async function generateNpcPortrait(npcId) {
+export async function generateNpcPortrait(npcId, overrides = {}) {
   const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
   const key = `npc_${npcId}_portrait`;
@@ -173,7 +176,7 @@ export async function generateNpcPortrait(npcId) {
   const asset = await createAsset({
     kind: 'portrait', key, name: `${npcRow.display_name} 立绘`,
     desc: npcRow.appearance_desc || npcRow.display_name,
-    meta: { npcId, promptOverride: prompt, styleTags: getWorldStyleTags() },
+    meta: { npcId, promptOverride: prompt, styleTags: getWorldStyleTags(), promptPrefix: overrides.promptPrefix, loras: overrides.loras },
   });
   return { ok: true, asset };
 }
@@ -218,7 +221,7 @@ export function getPlayerKit() {
 }
 
 /** 重新生成玩家套装（LLM 出 prompt；串行队列内逐张完成，await 返回即全部 ready） */
-export async function regeneratePlayerKit() {
+export async function regeneratePlayerKit(overrides = {}) {
   const info = playerAppearanceInfo();
   const styleTags = getWorldStyleTags();
   for (const dir of SPRITE_DIRECTIONS) {
@@ -228,7 +231,7 @@ export async function regeneratePlayerKit() {
     const prompt = await generateSpritePrompt({ appearanceInfo: info, direction: dir });
     await createAsset({
       kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character',
-      meta: { direction: dir, styleTags, promptOverride: prompt },
+      meta: { direction: dir, styleTags, promptOverride: prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras },
     });
   }
   const existingPortrait = getAssetsByKey(['player_portrait'])[0];
@@ -236,9 +239,84 @@ export async function regeneratePlayerKit() {
   const portraitPrompt = await generatePortraitPrompt({ appearanceInfo: info });
   const portrait = await createAsset({
     kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character',
-    meta: { styleTags, promptOverride: portraitPrompt },
+    meta: { styleTags, promptOverride: portraitPrompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras },
   });
   return { ok: true, kit: getPlayerKit(), portrait };
+}
+
+// ── NPC 人格卡（对齐酒馆招募角色流程：四层 system + 结构化模板，跳过网络搜索） ──
+
+/**
+ * 为居民生成结构化人格卡（你就是她/他 第二人称模板，同 characters 人格生成器）。
+ * @param {object} p - { displayName, job, appearanceDesc, worldHint }
+ * @returns {Promise<{card: string, appearance: string}>} card 为完整人格卡；appearance 为从卡里提取的外观段
+ */
+export async function generateNpcPersonaCard({ displayName, job = '', appearanceDesc = '', worldHint = '' }) {
+  const { getSystemRulesWithWorld, getSystemRules, getWorldSetting } = await import('../../db/index.js');
+  const world = getWorldSetting();
+  const stageRules = world ? getSystemRulesWithWorld({ roleplay: false }) : getSystemRules({ roleplay: false });
+
+  const systemPrompt = `你是一个角色人格生成器。用户会给出小镇居民的名字与职业，你为他们生成一张完整的人格卡。
+
+你的任务：根据<world_setting>世界观，把这个居民写成有血有肉的角色。
+
+【核心创作原则 —— 必须遵守】
+A. 你就是她/他 —— 所有描述从"你"出发。全文不得出现"扮演""模仿"等旁观字眼。
+B. 过去化为直觉 —— 经历塑造性格，但对话中不主动提及过去。
+C. 自我认知而非外部评价 —— 写"我怎么看自己"。
+D. 生活感 —— 这是小镇的日常居民，写ta的工作日常、邻里关系、生活小习惯。
+
+【模板】
+你是[名字]。
+
+## 你的身份
+[2-3句话：职业背景、怎么来到这座小镇、生活的关键词]
+
+## 你的性格
+- [至少4条，以"你"的口吻自然写出：表层语调 / 内因驱动 / 言行反差 / 裂缝时刻]
+
+## 你的好恶
+- 你最喜欢的两三样东西
+- 你最排斥/最害怕的两三样东西
+
+## 你的外观
+- [一句话描述外貌（发型/瞳色/体型/种族特征），突出辨识度]
+- [一句话描述穿着和主要装饰品]
+
+${worldHint ? `\n---\n【画风基调】${worldHint}` : ''}
+
+---
+
+【输出要求】
+- 只输出人格卡本身（从"你是"开始），不要标题、解释或列表符号以外的格式
+- 你的外观 两段必须具体（发色/瞳色/服装颜色），后续生成像素小人与立绘都以此为准`;
+
+  const msgs = [];
+  if (stageRules) msgs.push({ role: 'system', content: stageRules });
+  msgs.push({ role: 'system', content: systemPrompt });
+  msgs.push({
+    role: 'user',
+    content: [
+      `居民名字：${displayName}`,
+      job ? `职业：${job}` : '',
+      appearanceDesc ? `外观参考（可吸收进卡里）：${appearanceDesc}` : '',
+      '请生成这位居民的人格卡。',
+    ].filter(Boolean).join('\n'),
+  });
+
+  const out = await chatSync(msgs, {
+    temperature: 0.5, // 有明确设定（名字/职业/世界观）→ 低温稳定特征
+    max_tokens: 1600,
+    label: '小镇居民人格卡',
+  });
+
+  const card = String(out || '').replace(/^\s*```(?:[a-z]+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  if (!card.startsWith('你是') && card.length < 100) throw new Error('人格卡生成不完整');
+
+  // 从卡里提取「你的外观」段给精灵/立绘 prompt 用
+  const m = card.match(/##\s*你的外观\s*\n([\s\S]*?)(?=\n##|\s*$)/);
+  const appearance = m ? m[1].replace(/^[-*]\s*/gm, '').replace(/\n+/g, ' ').trim() : '';
+  return { card, appearance };
 }
 
 // ── 邀请入邻舍（NPC → 聊天侧角色） ──

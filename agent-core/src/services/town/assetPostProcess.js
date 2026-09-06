@@ -220,6 +220,41 @@ export async function flattenIsoTile(buffer) {
 }
 
 /**
+ * 裁到内容包围盒（按 alpha）：生成图里的素材常只占画幅中间一小块，
+ * 直接整图像素化会把主体压糊。裁掉透明边、保留 margin 比例呼吸边后再像素化。
+ */
+export async function cropToContent(buffer, marginRatio = 0.04) {
+  try {
+    const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
+    let minY = height, maxY = -1, minX = width, maxX = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4 + 3] > 8) {
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+    if (maxY < 0) return buffer;
+    const pad = Math.round(Math.max(maxX - minX, maxY - minY) * marginRatio);
+    const left = Math.max(0, minX - pad);
+    const top = Math.max(0, minY - pad);
+    const w = Math.min(width - left, maxX - minX + 1 + pad * 2);
+    const h = Math.min(height - top, maxY - minY + 1 + pad * 2);
+    if (w >= width && h >= height) return buffer;
+    return sharp(data, { raw: { width, height, channels: 4 } })
+      .extract({ left, top, width: w, height: h })
+      .png()
+      .toBuffer();
+  } catch {
+    return buffer;
+  }
+}
+
+/**
  * 素材统一后处理管线
  * @param {Buffer} buffer - 生图原始输出（JPEG/PNG）
  * @param {object} opts
@@ -227,10 +262,14 @@ export async function flattenIsoTile(buffer) {
  * @param {number} opts.targetH - 像素化目标高
  * @param {boolean} [opts.removeBg=false] - 是否抠白底（建筑/道具/精灵）
  * @param {number} [opts.tolerance=28] - 抠白容差
+ * @param {boolean} [opts.cropContent=false] - 裁到内容包围盒（道具/精灵防「主体只占中间一小块」）
  */
-export async function postProcessAsset(buffer, { targetW, targetH, removeBg = false, tolerance = 28 } = {}) {
+export async function postProcessAsset(buffer, { targetW, targetH, removeBg = false, tolerance = 28, cropContent = false } = {}) {
   if (removeBg) {
     buffer = await removeWhiteBackground(buffer, tolerance);
+  }
+  if (cropContent) {
+    buffer = await cropToContent(buffer);
   }
   // 先抠白再像素化：避免降采样把背景白边混进前景边缘
   return pixelate(buffer, targetW, targetH);

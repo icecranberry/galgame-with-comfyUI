@@ -1291,10 +1291,12 @@ export function listTownCharacters() {
   const byKey = new Map(assets.map(a => [a.key, a]));
   return rows.map(r => {
     const sprites = {};
+    const spriteIds = {};
     let ready = 0;
     for (const dir of ['down', 'up']) {
       const a = byKey.get(`char_${r.id}_${dir}`);
       sprites[dir] = a?.status === 'ready' ? a.image_path : null;
+      spriteIds[dir] = a?.id ?? null;
       if (sprites[dir]) ready++;
     }
     const portrait = byKey.get(`char_${r.id}_portrait`);
@@ -1310,6 +1312,8 @@ export function listTownCharacters() {
       spriteReady: ready === 2,
       spriteCount: ready,
       sprites,
+      spriteIds,
+      portraitId: portrait?.id ?? null,
       locationName: agent ? state.locations.find(l => l.id === agent.targetLocId)?.name || null : null,
       activityText: agent?.activityText || '',
     };

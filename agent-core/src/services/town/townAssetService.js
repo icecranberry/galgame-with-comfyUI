@@ -54,9 +54,10 @@ export const ASSET_SPECS = {
   building: {
     size: { width: 1536, height: 1536 },   // 特殊建筑 1536×2048
     tallSize: { width: 1536, height: 2048 },
-    // 英文 prompt 由 LLM 按酒馆立绘同款四层结构生成（townNpcService.buildBuildingPromptMessages），此串仅兜底
+    // 英文 prompt 由 LLM 按酒馆立绘同款四层结构生成（townPromptBuilder），此串仅兜底
     prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no ground tiles, no pavement, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
     removeBg: true,
+    cropContent: true,
     // 渲染按 (w+h)*HALF_W 画：像素宽做成同尺寸 → 1:1 绘制不模糊
     pixelWidth: (fp) => (fp.w + fp.h) * 32,
   },
@@ -64,14 +65,16 @@ export const ASSET_SPECS = {
     size: { width: 512, height: 512 },
     prompt: 'a single object sprite standing on an empty white background, small soft shadow right under it, nothing else in the image, isolated game sprite, slight three-quarter view from a bit above, complete object visible, centered',
     removeBg: true,
-    pixel: { w: 48, h: 48 },
+    cropContent: true,
+    pixel: { w: 64, h: 64 },
   },
-  // 像素小人：600×800 制作 → 像素化 36×48（3:4），正/背两面
+  // 像素小人：600×800 制作 → 裁内容包围盒 → 像素化 48×64（3:4），正/背两面
   npc: {
     size: { width: 600, height: 800 },
     prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
     removeBg: true,
-    pixel: { w: 36, h: 48 },
+    cropContent: true,
+    pixel: { w: 48, h: 64 },
   },
   // 居民/玩家正式立绘：900×1600 白底插画（生成后抠白），不做像素化
   portrait: {
@@ -84,7 +87,8 @@ export const ASSET_SPECS = {
     size: { width: 600, height: 800 },
     prompt: 'cute chibi pixel art character sprite, full body from head to toe, standing pose, centered, empty pure white background, clean thick pixel outlines, limited color palette, game character sprite asset',
     removeBg: true,
-    pixel: { w: 36, h: 48 },
+    cropContent: true,
+    pixel: { w: 48, h: 64 },
   },
 };
 
@@ -92,6 +96,17 @@ export const SPRITE_DIRECTIONS = ['down', 'up']; // 像素小人只需正面/背
 const DIRECTION_PROMPT = {
   down: 'facing the viewer, front view',
   up: 'seen from behind, back view',
+};
+
+/** 各 kind 的默认硬逻辑前缀（用户可在向导/编辑器覆盖 meta.promptPrefix） */
+export const DEFAULT_PROMPT_PREFIX = {
+  building: 'pixel art, game sprite',
+  prop: 'pixel art, game sprite',
+  npc: 'pixel art, game sprite, mini human sized, full body',
+  player: 'pixel art, game sprite, mini human sized, full body',
+  portrait: '',
+  ground: '',
+  road: '',
 };
 
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
@@ -162,7 +177,7 @@ async function generateIntoRow(row) {
     ? spec.tallSize
     : spec.size;
 
-  // prompt 来源优先级：meta.promptOverride（立绘/精灵的 LLM 产物）→ 建筑 LLM → 静态组装
+  // prompt 来源优先级：meta.promptOverride（立绘/精灵/建筑 LLM 产物，或用户手改）→ 建筑 LLM → 静态组装
   let prompt;
   if (meta.promptOverride) {
     prompt = meta.promptOverride;
@@ -178,6 +193,9 @@ async function generateIntoRow(row) {
     });
   }
 
+  // 硬逻辑前缀（默认按 kind，用户可在向导/编辑器覆盖）：pixel art, game sprite 等
+  const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '');
+  if (prefix) prompt = `${prefix}, ${prompt}`;
   db.prepare(`UPDATE town_assets SET status = 'pending', source_prompt = ? WHERE id = ?`).run(prompt, row.id);
 
   try {
@@ -187,6 +205,7 @@ async function generateIntoRow(row) {
       artist: spec.artist !== undefined ? spec.artist : config.comfyui.artist,
       width: size.width,
       height: size.height,
+      loras: Array.isArray(meta.loras) && meta.loras.length ? meta.loras : undefined,
     });
     if (!result?.success || !result.images?.length) {
       throw new Error(result?.error || 'ComfyUI 未返回图片');
@@ -214,7 +233,7 @@ async function generateIntoRow(row) {
     }
 
     const outBuffer = await postProcessAsset(work, {
-      targetW: tw, targetH: th, removeBg: spec.removeBg,
+      targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent,
     });
 
     const filePath = assetFilePath(row.id, row.key);
@@ -326,7 +345,7 @@ export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId =
   return enqueueAssetJob(() => generateIntoRow(getDb().prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));
 }
 
-/** 重生成一张素材（沿用原 meta；可传 desc/styleTags 覆盖） */
+/** 重生成一张素材（沿用原 meta；可传 desc/styleTags/prompt/loras/promptPrefix 覆盖并保存） */
 export function regenerateAsset(id, overrides = {}) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
@@ -334,6 +353,9 @@ export function regenerateAsset(id, overrides = {}) {
   const meta = JSON.parse(row.meta_json || '{}');
   if (overrides.desc !== undefined) meta.desc = overrides.desc;
   if (overrides.styleTags !== undefined) meta.styleTags = overrides.styleTags;
+  if (overrides.prompt !== undefined && String(overrides.prompt).trim()) meta.promptOverride = String(overrides.prompt).trim();
+  if (Array.isArray(overrides.loras)) meta.loras = overrides.loras;
+  if (overrides.promptPrefix !== undefined) meta.promptPrefix = overrides.promptPrefix;
   db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
   return enqueueAssetJob(() => generateIntoRow(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));
 }

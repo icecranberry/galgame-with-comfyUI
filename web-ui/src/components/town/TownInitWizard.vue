@@ -62,7 +62,13 @@
             </div>
 
             <!-- ── 2/3. 素材步（地皮 / 建筑+道具 共用模板） ── -->
-            <div v-else-if="localStep === 'tiles' || localStep === 'buildings'" :key="localStep" class="wiz-asset-step">
+            <div v-else-if="localStep === 'tiles' || localStep === 'buildings'" :key="localStep" class="wiz-split">
+            <TownPromptPanel
+    v-model="stepParams[localStep]"
+    :step="localStep"
+    :style-tags="bpForm.styleTags"
+  />
+              <div class="wiz-right">
               <p class="wiz-desc">
                 {{ localStep === 'tiles'
                   ? '第一步：地皮资源。修改风格基调或单项描述后逐张生成，全部满意再进入下一步。'
@@ -128,10 +134,17 @@
                   {{ stepReadyCount < stepTotal ? `还差 ${stepTotal - stepReadyCount} 张` : '确认，下一步 →' }}
                 </linshe-button>
               </div>
+              </div>
             </div>
 
             <!-- ── 4. 居民 ── -->
-            <div v-else-if="localStep === 'npcs'" key="npcs" class="wiz-npc-step">
+            <div v-else-if="localStep === 'npcs'" key="npcs" class="wiz-split">
+            <TownPromptPanel
+    v-model="stepParams[localStep]"
+    :step="localStep"
+    :style-tags="bpForm.styleTags"
+  />
+              <div class="wiz-right">
               <p class="wiz-desc">第三步：招募居民。按世界观生成稳定的人格卡，素材满意后确认。</p>
 
               <div class="wiz-field">
@@ -209,6 +222,7 @@
                   @click="localStep = 'player'"
                 >{{ allNpcReady ? '3️⃣ 确认居民，确认「我」的形象 →' : `素材齐了才能继续（${npcReadyCount}/${bpForm.npcs.length}）` }}</linshe-button>
               </div>
+              </div>
             </div>
 
             <!-- ── 5. 布图 ── -->
@@ -221,7 +235,13 @@
             </div>
 
             <!-- ── 6. 「我」的确认 + 开镇 ── -->
-            <div v-else-if="localStep === 'player'" key="player">
+            <div v-else-if="localStep === 'player'" key="player" class="wiz-split">
+            <TownPromptPanel
+    v-model="stepParams[localStep]"
+    :step="localStep"
+    :style-tags="bpForm.styleTags"
+  />
+              <div class="wiz-right">
               <p class="wiz-desc">开镇前最后一步：确认「我」的形象。生成后可以拖动检查、点击抠白、脚底贴底。</p>
               <div class="wiz-player-kit">
                 <div class="wiz-player-portrait">
@@ -252,6 +272,7 @@
               <div class="wiz-actions">
                 <linshe-button variant="secondary" @click="localStep = 'layout'">← 去规划布局</linshe-button>
                 <linshe-button variant="primary" :loading="busy" @click="confirmInit">形象没问题，开镇！</linshe-button>
+              </div>
               </div>
             </div>
 
@@ -306,6 +327,7 @@ import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownImageEditor from './TownImageEditor.vue'
+import TownPromptPanel from './TownPromptPanel.vue'
 
 const emit = defineEmits(['close', 'applied'])
 
@@ -323,6 +345,14 @@ const assetsBusy = ref(false)
 const playerBusy = ref(false)
 const playerKit = reactive({ portrait: null, portraitId: null, down: null, downId: null, up: null, upId: null })
 const editor = reactive({ open: false, src: '', assetId: null, title: '', portrait: false, npc: null })
+// 每步生成的提示词硬逻辑前缀 + LoRA（空 prefix = 用后端默认）
+const stepParams = reactive({
+  tiles: { prefix: '', loras: [] },
+  buildings: { prefix: 'pixel art, game sprite', loras: [] },
+  npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', loras: [] },
+  player: { prefix: 'pixel art, game sprite, mini human sized, full body', loras: [] },
+})
+const loraFiles = ref([])
 const assets = ref([])
 
 const STEP_LIST = [
@@ -589,8 +619,9 @@ async function genNpcAssets(n) {
     await api.commitTownWizardNpcs()
     const npcId = (initState.value?.npcIds || [])[bpForm.npcs.indexOf(n)]
     if (!npcId) throw new Error('人格卡未建档')
-    await api.generateTownNpcSprites(npcId)
-    await api.generateTownNpcPortrait(npcId)
+    const params = { promptPrefix: stepParams.npcs.prefix, loras: stepParams.npcs.loras }
+    await api.generateTownNpcSprites(npcId, params)
+    await api.generateTownNpcPortrait(npcId, params)
     await town.fetchInitState()
     await refreshAssets()
   } catch (err) {
@@ -609,9 +640,10 @@ async function genAllNpcAssets() {
     for (let i = 0; i < ids.length; i++) {
       const n = bpForm.npcs[i]
       if (n) n.genBusy = true
+      const params = { promptPrefix: stepParams.npcs.prefix, loras: stepParams.npcs.loras }
       try {
-        await api.generateTownNpcSprites(ids[i])
-        await api.generateTownNpcPortrait(ids[i])
+        await api.generateTownNpcSprites(ids[i], params)
+        await api.generateTownNpcPortrait(ids[i], params)
       } catch (err) {
         console.warn('[wizard] npc assets failed:', err?.message)
       }
@@ -667,7 +699,7 @@ function reroll() {
 async function genPlayerKit() {
   playerBusy.value = true
   try {
-    const data = await api.regenerateTownPlayerKit()
+    const data = await api.regenerateTownPlayerKit({ promptPrefix: stepParams.player.prefix, loras: stepParams.player.loras })
     applyPlayerKit(data.kit)
   } catch (err) {
     console.warn('[wizard] player kit failed:', err?.message)
@@ -743,6 +775,10 @@ onMounted(async () => {
       .map(w => ({ label: w.name, value: w.id }))
     worldOptions.value = [{ label: '（跟随当前激活世界观）', value: null }, ...list]
   } catch { /* 列表拉不到就用默认项 */ }
+  try {
+    const lf = await api.fetchLorasFiles()
+    loraFiles.value = (lf.files || []).map(f => typeof f === 'string' ? { path: f, label: f.split(/[\/]/).pop() } : { path: f.path || f.name || '', label: (f.path || f.name || '').split(/[\/]/).pop() })
+  } catch { /* LoRA 列表拉不到就不启用 */ }
 
   await town.fetchInitState().catch(() => {})
   const s = initState.value?.status
@@ -850,6 +886,19 @@ onBeforeUnmount(stopPolling)
 }
 
 .wiz-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 12px; }
+
+.wiz-split {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.wiz-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 
 .wiz-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .wiz-label { font-size: 12px; color: var(--text-primary); }

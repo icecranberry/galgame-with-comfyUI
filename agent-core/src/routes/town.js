@@ -21,7 +21,7 @@ import {
   generateCharacterSprites, getTownSettings, updateTownSettings, resetWorld,
 } from '../services/town/townService.js';
 import {
-  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage,
+  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, getAssetById,
 } from '../services/town/townAssetService.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
 import {
@@ -70,6 +70,13 @@ router.post('/tick', (req, res) => {
 
 router.get('/assets', (req, res) => {
   res.json({ assets: listAssets({ kind: req.query.kind || undefined }) });
+});
+
+// 单张素材详情（含 source_prompt，供提示词编辑预填）
+router.get('/assets/:id', (req, res) => {
+  const asset = getAssetById(parseInt(req.params.id, 10));
+  if (!asset) return res.status(404).json({ error: '素材不存在' });
+  res.json({ asset });
 });
 
 router.post('/assets', async (req, res) => {
@@ -261,7 +268,7 @@ router.delete('/npcs/:id', (req, res) => {
 
 router.post('/npcs/:id/sprites', async (req, res) => {
   try {
-    res.json(await generateNpcSprites(parseInt(req.params.id, 10)));
+    res.json(await generateNpcSprites(parseInt(req.params.id, 10), req.body || {}));
   } catch (err) {
     res.status(500).json({ error: err?.message || '精灵生成失败' });
   }
@@ -269,7 +276,7 @@ router.post('/npcs/:id/sprites', async (req, res) => {
 
 router.post('/npcs/:id/portrait', async (req, res) => {
   try {
-    res.json(await generateNpcPortrait(parseInt(req.params.id, 10)));
+    res.json(await generateNpcPortrait(parseInt(req.params.id, 10), req.body || {}));
   } catch (err) {
     res.status(500).json({ error: err?.message || '立绘生成失败' });
   }

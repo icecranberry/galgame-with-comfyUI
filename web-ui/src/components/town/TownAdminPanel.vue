@@ -81,9 +81,14 @@
                 <img v-if="detailNpc.portrait?.status === 'ready'" :src="detailNpc.portrait.image_path + '?v=' + (detailNpc.portrait.meta?.updatedAt ?? 0)" alt="立绘">
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
-                {{ detailNpc.portrait?.status === 'ready' ? '重生成立绘' : '生成 900×1600 立绘' }}
-              </linshe-button>
+              <div class="ap-btn-row">
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
+                  {{ detailNpc.portrait?.status === 'ready' ? '重生成立绘' : '生成 900×1600 立绘' }}
+                </linshe-button>
+                <linshe-button v-if="detailNpc.portrait?.id" variant="ghost" size="sm" @click="openPromptEdit(detailNpc.portrait)">
+                  ✎ 提示词
+                </linshe-button>
+              </div>
             </div>
 
             <div class="ap-detail-name">
@@ -99,11 +104,13 @@
             </div>
 
             <div class="ap-section">
-              <div class="ap-section-title">像素小人（正面 / 背面）</div>
+              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可编辑提示词</div>
               <div class="ap-sprite-row">
-                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite">
-                  <img v-if="detailNpc.sprites?.[dir]?.status === 'ready'" :src="detailNpc.sprites[dir].image_path" :alt="dir">
-                  <span v-else class="ap-sprite-missing">·</span>
+                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
+                  <div class="ap-sprite" role="button" tabindex="0" title="点击编辑提示词并重生成" @click="detailNpc.sprites?.[dir]?.id && openPromptEdit(detailNpc.sprites[dir])">
+                    <img v-if="detailNpc.sprites?.[dir]?.status === 'ready'" :src="detailNpc.sprites[dir].image_path" :alt="dir">
+                    <span v-else class="ap-sprite-missing">·</span>
+                  </div>
                 </div>
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
                   生成 / 重生成（600×800）
@@ -212,9 +219,14 @@
                 <img v-if="detailChar.portraitUrl || detailChar.standingUrl" :src="detailChar.portraitUrl || detailChar.standingUrl" alt="立绘">
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
-                {{ detailChar.standingUrl ? '复用已有立绘 ✓' : (detailChar.portraitUrl ? '重生成 900×1600 立绘' : '生成 900×1600 立绘') }}
-              </linshe-button>
+              <div class="ap-btn-row">
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
+                  {{ detailChar.standingUrl ? '复用已有立绘 ✓' : (detailChar.portraitUrl ? '重生成 900×1600 立绘' : '生成 900×1600 立绘') }}
+                </linshe-button>
+                <linshe-button v-if="detailChar.portraitId" variant="ghost" size="sm" @click="openPromptEdit({ id: detailChar.portraitId, name: detailChar.displayName })">
+                  ✎ 提示词
+                </linshe-button>
+              </div>
             </div>
 
             <div class="ap-detail-name">
@@ -229,11 +241,13 @@
             </div>
 
             <div class="ap-section">
-              <div class="ap-section-title">像素小人（正面 / 背面）</div>
+              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可编辑提示词</div>
               <div class="ap-sprite-row">
-                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite">
-                  <img v-if="detailChar.sprites?.[dir]" :src="detailChar.sprites[dir]" :alt="dir">
-                  <span v-else class="ap-sprite-missing">·</span>
+                <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
+                  <div class="ap-sprite" role="button" tabindex="0" title="点击编辑提示词并重生成" @click="detailChar.spriteIds?.[dir] && openPromptEdit({ id: detailChar.spriteIds[dir], name: detailChar.displayName })">
+                    <img v-if="detailChar.sprites?.[dir]" :src="detailChar.sprites[dir]" :alt="dir">
+                    <span v-else class="ap-sprite-missing">·</span>
+                  </div>
                 </div>
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
                   生成 / 重生成（600×800）
@@ -269,6 +283,14 @@
           </div>
         </div>
       </div>
+
+      <TownAssetPromptDialog
+        :visible="promptEdit.open"
+        :asset-id="promptEdit.id"
+        :title="promptEdit.title"
+        @close="promptEdit.open = false"
+        @regenerated="onPromptRegenerated"
+      />
     </div>
   </Teleport>
 </template>
@@ -281,6 +303,7 @@ import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSwitch from '../ui/LinsheSwitch.vue'
 import TownImageEditor from './TownImageEditor.vue'
+import TownAssetPromptDialog from './TownAssetPromptDialog.vue'
 
 defineEmits(['close'])
 
@@ -299,6 +322,20 @@ const resetting = ref(false)
 const newNpc = reactive({ name: '', job: '', persona: '' })
 const playerKit = reactive({ sprites: {}, portrait: null })
 const playerKitBusy = ref(false)
+const promptEdit = reactive({ open: false, id: null, title: '' })
+
+function openPromptEdit(asset) {
+  if (!asset?.id) return
+  promptEdit.id = asset.id
+  promptEdit.title = asset.name ? `「${asset.name}」编辑提示词并重生成` : '编辑提示词并重生成'
+  promptEdit.open = true
+}
+
+function onPromptRegenerated() {
+  loadNpcs()
+  loadChars()
+  loadPlayerKit()
+}
 
 async function loadPlayerKit() {
   try {
@@ -674,6 +711,12 @@ onMounted(() => {
 .ap-detail { display: flex; flex-direction: column; gap: 14px; }
 
 .ap-detail-media { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+
+.ap-btn-row { display: flex; gap: 6px; }
+.ap-btn-row > :first-child { flex: 1; }
+
+.ap-sprite-wrap { cursor: pointer; }
+.ap-sprite-wrap:hover .ap-sprite { box-shadow: 0 0 0 2px rgba(224, 123, 108, 0.4); }
 
 .ap-portrait-box {
   width: 100%;

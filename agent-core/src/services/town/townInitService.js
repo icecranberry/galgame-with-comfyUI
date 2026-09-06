@@ -210,7 +210,7 @@ function buildBlueprintPrompt(worldName, worldContent, cfg) {
     '- styleTags：英文短语，描述整套素材统一的画风色调，所有素材生成都会拼进 prompt',
     '- groundAssets：3~5 种地砖（草地/广场/水边/花田等），desc 用英文写无缝平铺纹理；variants 是同款变体数 1~3（打散重复感）',
     '- roadAssets：1~2 种道路',
-    '- buildings：5~9 栋。一半是通用建筑（普通居民楼/公厕/公交站等，reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（3~6）；key 全部小写下划线且不重复',
+    '- buildings：5~9 栋。一半是通用建筑（普通居民楼/公厕/公交站等，reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（2~3，等距视角下 3×3 已很大）；key 全部小写下划线且不重复',
     '- props：4~8 种（树/长椅/路灯/花丛/水井等），blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
     `- npcs：恰好 ${cfg.npcCount} 位居民。persona 一句话人设+性格关键词（中文 30~60 字）；appearanceDesc 英文外观描述（chibi 像素小人用）；job 中文职业`,
     '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合世界观',
@@ -258,7 +258,7 @@ function normalizeBlueprint(parsed, cfg) {
       desc: String(b.desc || b.name).slice(0, 200),
       reusable: !!b.reusable,
       maxInstances: Math.max(1, Math.min(8, parseInt(b.maxInstances, 10) || 1)),
-      footprint: { w: Math.max(2, Math.min(8, parseInt(fp.w, 10) || 4)), h: Math.max(2, Math.min(8, parseInt(fp.h, 10) || 3)) },
+      footprint: { w: Math.max(2, Math.min(3, parseInt(fp.w, 10) || 3)), h: Math.max(2, Math.min(3, parseInt(fp.h, 10) || 2)) },
       special: !!b.special,
     });
   }
@@ -765,16 +765,35 @@ export function commitWizardNpcs() {
         updateNpc(existingId, { persona: n.persona, appearanceDesc: n.appearanceDesc, job: n.job });
         continue;
       }
+      // 酒馆招募式：先生成结构化人格卡（跳过网络搜索，低温稳定特征）
+      setStatus(job.status, `正在为「${n.displayName}」撰写人格卡…`);
+      let persona = n.persona;
+      let appearanceDesc = n.appearanceDesc;
+      try {
+        const { generateNpcPersonaCard } = await import('./townNpcService.js');
+        const { card, appearance } = await generateNpcPersonaCard({
+          displayName: n.displayName,
+          job: n.job,
+          appearanceDesc: n.appearanceDesc,
+          worldHint: job.blueprint.styleTags,
+        });
+        persona = card;
+        if (appearance) appearanceDesc = appearance;
+      } catch (err) {
+        console.warn(`[townInit] persona card for ${n.displayName} failed, keep simple persona:`, err?.message);
+      }
       const npc = createNpc({
         mapId: null,
         displayName: n.displayName,
-        persona: n.persona,
-        appearanceDesc: n.appearanceDesc,
+        persona,
+        appearanceDesc,
         job: n.job,
         traits: {},
         routine: [],
       });
       job.npcIds.push(npc.id);
+      n.persona = persona;         // 同步回蓝图（前端卡展示完整人格卡）
+      n.appearanceDesc = appearanceDesc;
       setStatus(job.status, `已建档居民「${n.displayName}」，正在生成作息…`);
       try {
         const routine = await generateRoutine(npc, allKeys);

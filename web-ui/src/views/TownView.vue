@@ -85,6 +85,7 @@
             <span v-else class="tl-item-state">{{ asset.status === 'pending' ? '⏳' : '⚠️' }}</span>
             <span class="tl-item-name">{{ asset.name }}</span>
             <span v-if="asset.status === 'ready'" class="tl-item-ops">
+              <span class="tl-op" role="button" title="编辑提示词并重生成" @click.stop="openPromptEdit(asset)">✎</span>
               <span class="tl-op" role="button" title="重新生成" @click.stop="regenAsset(asset)">↻</span>
               <span class="tl-op is-danger" role="button" title="删除" @click.stop="removeAsset(asset)">✕</span>
             </span>
@@ -189,6 +190,13 @@
     />
     <TownAdminPanel v-if="showAdmin" @close="showAdmin = false" />
     <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
+    <TownAssetPromptDialog
+      :visible="promptEdit.open"
+      :asset-id="promptEdit.id"
+      :title="promptEdit.title"
+      @close="promptEdit.open = false"
+      @regenerated="onPromptRegenerated"
+    />
   </div>
 </template>
 
@@ -204,6 +212,7 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
+import TownAssetPromptDialog from '../components/town/TownAssetPromptDialog.vue'
 
 const town = useTownStore()
 const chat = useChatStore()
@@ -324,6 +333,7 @@ const genDesc = ref('')
 const generating = ref(false)
 const savingMap = ref(false)
 const townAssets = ref([])
+const promptEdit = reactive({ open: false, id: null, title: '' })
 
 const editLayers = ref(null)
 const editLocations = ref([])
@@ -442,7 +452,7 @@ function hitAgent(cssX, cssY) {
     const c = cellCenterWorld(pos.x, pos.y)
     const sx = (c.x - cam.x) * cam.zoom + cssW / 2
     const sy = (c.y - cam.y) * cam.zoom + cssH / 2
-    const h = 48 * cam.zoom
+    const h = 64 * cam.zoom
     const dx = cssX - sx
     const dy = cssY - (sy - h * 0.42)
     if (Math.abs(dx) < h * 0.38 && Math.abs(dy) < h * 0.55) return a
@@ -647,6 +657,17 @@ async function regenAsset(asset) {
   } catch (err) {
     console.warn('[town] regen failed:', err?.message)
   }
+}
+
+function openPromptEdit(asset) {
+  promptEdit.id = asset.id
+  promptEdit.title = `「${asset.name}」编辑提示词并重生成`
+  promptEdit.open = true
+}
+
+function onPromptRegenerated() {
+  fetchAssetsList()
+  town.fetchMap().catch(() => {})
 }
 
 function removeAsset(asset) {
@@ -1022,7 +1043,7 @@ function drawAgent(c, a, pos, nowMs) {
   const alpha = sleeping ? 0.85 : 1
   let drew = false
   if (sprite) {
-    const h = 52
+    const h = 64
     const w = h * (sprite.naturalWidth && sprite.naturalHeight ? sprite.naturalWidth / sprite.naturalHeight : 0.66)
     c.save()
     c.globalAlpha = alpha
