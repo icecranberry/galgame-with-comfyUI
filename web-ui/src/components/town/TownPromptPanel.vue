@@ -68,7 +68,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'

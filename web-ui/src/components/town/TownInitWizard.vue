@@ -20,6 +20,8 @@
           <linshe-button variant="icon" size="sm" aria-label="关闭" @click="tryClose">✕</linshe-button>
         </div>
 
+        <!-- 白色内衬卡（对齐角色详情弹窗的 lora-body-card 风格） -->
+        <div class="wiz-inner">
         <!-- 步骤条 -->
         <div class="wiz-steps">
           <div
@@ -291,6 +293,7 @@
               <linshe-button variant="primary" class="wiz-go" @click="finish">进入小镇</linshe-button>
             </div>
           </Transition>
+        </div>
         </div>
       </div>
     </div>
@@ -836,11 +839,24 @@ onBeforeUnmount(stopPolling)
 .wiz-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
 .wiz-step-hint { flex: 1; font-size: 11px; color: var(--text-secondary); }
 
+.wiz-inner {
+  flex: 1;
+  min-height: 0;
+  margin: 4px 12px 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .wiz-steps {
   display: flex;
   gap: 6px;
-  padding: 4px 18px 12px;
+  padding: 12px 14px 10px;
   flex-wrap: wrap;
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .wiz-step {
@@ -881,8 +897,9 @@ onBeforeUnmount(stopPolling)
 
 .wiz-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 4px 18px 20px;
+  padding: 12px 14px 18px;
 }
 
 .wiz-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 12px; }
