@@ -1,6 +1,6 @@
 <template>
   <div class="img-editor">
-    <!-- 画布区：棋盘格透明底 + 可拖动图片（检查脚底是否贴底） + 点击白色继续抠白 -->
+    <!-- 画布区：棋盘格透明底 + 可拖动图片 + 点击颜色抠除连通区域 -->
     <div
       ref="frameEl"
       class="ie-frame"
@@ -16,13 +16,14 @@
     </div>
 
     <div class="ie-toolbar">
-      <div class="ie-hint">{{ hint || '拖动图片检查脚底是否贴底 · 点击残留白色继续抠白' }}</div>
+      <div class="ie-hint">{{ cropHint }}</div>
       <div class="ie-buttons">
         <linshe-button variant="chip" size="sm" :active="eraseMode" @click="eraseMode = !eraseMode">
-          {{ eraseMode ? '🖱️ 抠白中' : '🪄 抠白模式' }}
+          {{ eraseMode ? '🪄 抠白中' : '🪄 抠去多余白色' }}
         </linshe-button>
-        <linshe-button variant="chip" size="sm" @click="trimBottom">🦶 脚底贴底</linshe-button>
-        <linshe-button variant="primary" size="sm" :loading="saving" :disabled="!dirty" @click="save">保存编辑</linshe-button>
+
+        <linshe-button v-if="cropMode && !eraseMode" variant="primary" size="sm" :loading="cropping" @click="confirmCrop">确认裁剪</linshe-button>
+        <linshe-button v-else variant="primary" size="sm" :loading="saving" :disabled="!dirty" @click="save">保存编辑</linshe-button>
       </div>
     </div>
 
@@ -35,7 +36,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 
@@ -44,10 +45,14 @@ const props = defineProps({
   assetId: { type: Number, required: true },
   hint: { type: String, default: '' },
   loadingText: { type: String, default: '' },
-  /** 立绘类贴底显示；小人贴底即可 */
+  /** 编辑画布的显示高度 */
   fitHeight: { type: [Number, String], default: 360 },
+  /** 截取框模式：放大查看，拖动/缩放截取框划定最终成图范围 */
+  cropMode: { type: Boolean, default: false },
+  /** 截取框默认占画面比例 */
+  cropScale: { type: Number, default: 0.72 },
 })
-const emit = defineEmits(['saved'])
+const emit = defineEmits(['saved', 'cropped'])
 
 const frameEl = ref(null)
 const canvasEl = ref(null)
@@ -64,14 +69,79 @@ let offY = 0
 let downPt = null
 let ctx = null
 
-const WHITE_TOLERANCE = 42
+const ERASE_TOLERANCE = 42
+
+// ── 截取框（原图像素坐标，绘制时换算到画布）──
+const cropRect = ref(null) // { x, y, w, h }
+const cropping = ref(false)
+let cropDrag = null        // { mode: 'move'|'resize', dx, dy }
+
+function displayScale() {
+  if (!img) return { x: 1, y: 1 }
+  return {
+    x: (img._drawW || img.width) / img.width,
+    y: (img._drawH || img.height) / img.height,
+  }
+}
+
+function sourcePoint(px, py) {
+  const scale = displayScale()
+  return { x: (px - offX) / scale.x, y: (py - offY) / scale.y }
+}
+
+function cropDisplayRect() {
+  const scale = displayScale()
+  const r = cropRect.value
+  return {
+    x: offX + r.x * scale.x,
+    y: offY + r.y * scale.y,
+    w: r.w * scale.x,
+    h: r.h * scale.y,
+  }
+}
+
+const cropHint = computed(() => {
+  if (eraseMode.value) return props.hint || '点击要去除的白色或底色 · 拖动调整图片位置'
+  if (props.cropMode) return '拖动移动截取框 · 拖右下角手柄调大小 · 框内即最终成图范围'
+  return props.hint || '开启抠去多余白色后，点击要移除的白色或底色'
+})
 
 function draw() {
   if (!ctx || !img) return
   const frame = frameEl.value
   ctx.clearRect(0, 0, frame.clientWidth, frame.clientHeight)
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(img, offX, offY)
+  ctx.drawImage(img, offX, offY, img._drawW || img.width, img._drawH || img.height)
+
+  if (props.cropMode && cropRect.value && !eraseMode.value) {
+    const r = cropDisplayRect()
+    // 框外压暗
+    ctx.fillStyle = 'rgba(20, 14, 10, 0.45)'
+    ctx.beginPath()
+    ctx.rect(0, 0, frame.clientWidth, frame.clientHeight)
+    ctx.rect(r.x, r.y, r.w, r.h)
+    ctx.fill('evenodd')
+    // 框边
+    ctx.strokeStyle = '#e07b6c'
+    ctx.lineWidth = 2
+    ctx.strokeRect(r.x, r.y, r.w, r.h)
+    // 三分线
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+    ctx.lineWidth = 1
+    for (let i = 1; i <= 2; i++) {
+      ctx.beginPath()
+      ctx.moveTo(r.x + (r.w * i) / 3, r.y)
+      ctx.lineTo(r.x + (r.w * i) / 3, r.y + r.h)
+      ctx.moveTo(r.x, r.y + (r.h * i) / 3)
+      ctx.lineTo(r.x + r.w, r.y + (r.h * i) / 3)
+      ctx.stroke()
+    }
+    // 右下角手柄
+    ctx.fillStyle = '#e07b6c'
+    ctx.fillRect(r.x + r.w - 10, r.y + r.h - 10, 12, 12)
+    ctx.strokeStyle = '#fff'
+    ctx.strokeRect(r.x + r.w - 10, r.y + r.h - 10, 12, 12)
+  }
 }
 
 async function loadImage(src) {
@@ -89,6 +159,7 @@ async function loadImage(src) {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
   sizeCanvas()
   loaded.value = true
+  if (props.cropMode) resetCrop()
   draw()
 }
 
@@ -117,7 +188,23 @@ function onDown(e) {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   if (eraseMode.value) {
-    deWhiteAt(x, y)
+    eraseColorAt(x, y)
+    return
+  }
+  if (props.cropMode && cropRect.value) {
+    const dr = cropDisplayRect()
+    const point = sourcePoint(x, y)
+    // 右下角手柄 → 缩放
+    if (x >= dr.x + dr.w - 14 && x <= dr.x + dr.w + 4 && y >= dr.y + dr.h - 14 && y <= dr.y + dr.h + 4) {
+      cropDrag = { mode: 'resize' }
+      canvasEl.value.setPointerCapture?.(e.pointerId)
+      return
+    }
+    // 框内 → 移动
+    if (x >= dr.x && x <= dr.x + dr.w && y >= dr.y && y <= dr.y + dr.h) {
+      cropDrag = { mode: 'move', dx: point.x - cropRect.value.x, dy: point.y - cropRect.value.y }
+      canvasEl.value.setPointerCapture?.(e.pointerId)
+    }
     return
   }
   // 命中图片范围内才开始拖动
@@ -129,6 +216,20 @@ function onDown(e) {
 }
 
 function onMove(e) {
+  if (!eraseMode.value && props.cropMode && cropDrag && cropRect.value) {
+    const rect = canvasEl.value.getBoundingClientRect()
+    const point = sourcePoint(e.clientX - rect.left, e.clientY - rect.top)
+    const r = cropRect.value
+    if (cropDrag.mode === 'move') {
+      r.x = Math.max(0, Math.min(img.width - r.w, point.x - cropDrag.dx))
+      r.y = Math.max(0, Math.min(img.height - r.h, point.y - cropDrag.dy))
+    } else {
+      r.w = Math.max(8, Math.min(img.width - r.x, point.x - r.x))
+      r.h = Math.max(8, Math.min(img.height - r.y, point.y - r.y))
+    }
+    draw()
+    return
+  }
   if (!dragging.value) return
   const rect = canvasEl.value.getBoundingClientRect()
   offX = downPt.offX + (e.clientX - rect.left - downPt.x)
@@ -137,11 +238,12 @@ function onMove(e) {
 }
 
 function onUp() {
+  cropDrag = null
   dragging.value = false
 }
 
-/** 点击白色区域：以点击点为种子的容差洪泛 → 透明（继续抠白） */
-function deWhiteAt(px, py) {
+/** 点击颜色区域：以点击点颜色为种子，容差洪泛 → 透明 */
+function eraseColorAt(px, py) {
   // 把画布坐标换算回原图像素
   const ix = Math.floor((px - offX) / (img._drawW / img.width))
   const iy = Math.floor((py - offY) / (img._drawH / img.height))
@@ -157,16 +259,15 @@ function deWhiteAt(px, py) {
   const at = (x, y) => (y * img.width + x) * 4
   const seed = at(ix, iy)
   const target = [d[seed], d[seed + 1], d[seed + 2]]
-  // 只处理近白种子（防误点深色区域大面积清除）
-  if (target[0] < 200 || target[1] < 200 || target[2] < 200) {
-    savedTip.value = '点击的位置不是白色'
+  if (d[seed + 3] < 8) {
+    savedTip.value = '点击的位置已经是透明区域'
     setTimeout(() => { savedTip.value = '' }, 1500)
     return
   }
-  const nearWhite = (o) =>
-    Math.abs(d[o] - target[0]) <= WHITE_TOLERANCE &&
-    Math.abs(d[o + 1] - target[1]) <= WHITE_TOLERANCE &&
-    Math.abs(d[o + 2] - target[2]) <= WHITE_TOLERANCE
+  const nearSeed = (o) =>
+    Math.abs(d[o] - target[0]) <= ERASE_TOLERANCE &&
+    Math.abs(d[o + 1] - target[1]) <= ERASE_TOLERANCE &&
+    Math.abs(d[o + 2] - target[2]) <= ERASE_TOLERANCE
 
   const seen = new Uint8Array(img.width * img.height)
   const stack = [ix, iy]
@@ -181,7 +282,7 @@ function deWhiteAt(px, py) {
       const k = ny * img.width + nx
       if (seen[k]) continue
       const no = at(nx, ny)
-      if (nearWhite(no)) { seen[k] = 1; stack.push(nx, ny) }
+      if (d[no + 3] > 8 && nearSeed(no)) { seen[k] = 1; stack.push(nx, ny) }
     }
   }
   wctx.putImageData(data, 0, 0)
@@ -198,47 +299,39 @@ function deWhiteAt(px, py) {
   out.src = work.toDataURL('image/png')
 }
 
-/** 脚底贴底：裁掉四周透明边后，让脚底正好贴住图片底边（左右上留 4% 呼吸边） */
-function trimBottom() {
-  const work = document.createElement('canvas')
-  work.width = img.width
-  work.height = img.height
-  work.getContext('2d').drawImage(img, 0, 0)
-  const wctx = work.getContext('2d', { willReadFrequently: true })
-  const { width, height } = work
-  const d = wctx.getImageData(0, 0, width, height).data
-  let minY = height, maxY = -1, minX = width, maxX = -1
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (d[(y * width + x) * 4 + 3] > 8) {
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-      }
-    }
+/** 初始化截取框：直接基于原图尺寸居中，显示层只做等比换算 */
+function resetCrop() {
+  if (!img) return
+  const w = img.width * props.cropScale
+  const h = img.height * props.cropScale
+  cropRect.value = {
+    x: (img.width - w) / 2,
+    y: (img.height - h) / 2,
+    w, h,
   }
-  if (maxY < 0) return
-  const pad = Math.round(Math.max(maxX - minX, maxY - minY) * 0.04)
-  const cropW = maxX - minX + 1
-  const cropH = maxY - minY + 1
-  const out = document.createElement('canvas')
-  out.width = cropW + pad * 2
-  out.height = cropH + pad // 底部不留边：脚底贴底
-  const octx = out.getContext('2d')
-  octx.drawImage(work, minX, minY, cropW, cropH, pad, 0, cropW, cropH)
-  const outImg = new Image()
-  outImg.onload = () => {
-    outImg._drawW = out.width
-    outImg._drawH = out.height
-    img = outImg
-    const canvas = canvasEl.value
-    offX = (canvas.width - out.width) / 2
-    offY = canvas.height - out.height - 4
-    dirty.value = true
-    draw()
+}
+
+async function confirmCrop() {
+  const r = cropRect.value
+  if (!r || !img || cropping.value) return
+  const nx = Math.max(0, Math.round(r.x))
+  const ny = Math.max(0, Math.round(r.y))
+  const nw = Math.max(8, Math.min(Math.round(r.w), img.width - nx))
+  const nh = Math.max(8, Math.min(Math.round(r.h), img.height - ny))
+  cropping.value = true
+  try {
+    // 抠白后先保存底图，避免裁剪仍使用服务器上的旧图
+    if (dirty.value) await save()
+    await api.cropTownAsset(props.assetId, { x: nx, y: ny, w: nw, h: nh })
+    // 用新图刷新本地（缓存穿透）
+    await loadImage(`${props.src.split('?')[0]}?v=${Date.now()}`)
+    resetCrop()
+    emit('cropped')
+  } catch (err) {
+    console.warn('[img-editor] crop failed:', err?.message)
+  } finally {
+    cropping.value = false
   }
-  outImg.src = out.toDataURL('image/png')
 }
 
 async function save() {
@@ -261,15 +354,13 @@ async function save() {
 
 /** 合成导出：按原图分辨率导出当前编辑结果（drawW/drawH 等比还原） */
 function compositeFull() {
+  // 编辑只是加透明区域，必须保留原图分辨率；否则先抠白再裁剪时，原图坐标会落到缩小后的另一块区域。
   const out = document.createElement('canvas')
-  out.width = Math.round(img._drawW / (img._drawH / img.height)) || img.width
+  out.width = img.width
   out.height = img.height
-  const scale = img._drawW / img.width || 1
-  out.width = Math.round(img.width * scale)
-  out.height = Math.round(img.height * scale)
   const c = out.getContext('2d')
   c.imageSmoothingEnabled = false
-  c.drawImage(img, 0, 0, out.width, out.height)
+  c.drawImage(img, 0, 0, img.width, img.height)
   return out
 }
 
@@ -293,6 +384,7 @@ onBeforeUnmount(() => {
   dragging.value = false
   resizeObs?.disconnect()
 })
+
 </script>
 
 <style scoped>

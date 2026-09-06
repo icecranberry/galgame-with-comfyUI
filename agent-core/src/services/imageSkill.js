@@ -96,14 +96,18 @@ function buildWorkflow(promptText, overrides = {}) {
   // 全局 LoRA 前置 + 角色 LoRA，按 path 去重（全局优先），关闭的 LoRA 跳过
   // scenes 限制：空数组或无 scenes 字段=所有场景，overrides.scene 为空时也加载全部
   const currentScene = overrides.scene;
-  const globalLoras = (config.comfyui.globalLora || []).filter(l => {
-    if (!l.path || typeof l.path !== 'string') return false;
-    if (l.enabled === false) return false;
-    if (!currentScene) return true;
-    if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
-    return l.scenes.includes(currentScene);
-  });
-  const providedLoras = (overrides.loras || []).filter(l => l.path && typeof l.path === 'string');
+  const globalLoras = (config.comfyui.globalLora || [])
+    .map(l => ({ ...l, path: normalizeLoraValue(l.path) }))
+    .filter(l => {
+      if (!l.path || typeof l.path !== 'string') return false;
+      if (l.enabled === false) return false;
+      if (!currentScene) return true;
+      if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
+      return l.scenes.includes(currentScene);
+    });
+  const providedLoras = (overrides.loras || [])
+    .map(l => ({ ...l, path: normalizeLoraValue(l.path) }))
+    .filter(l => l.path && typeof l.path === 'string');
   const seen = new Set();
   const loras = [...globalLoras, ...providedLoras].filter(l => {
     if (seen.has(l.path)) return false;
@@ -482,4 +486,32 @@ export async function generateImageRaw(rawPrompt, opts = {}) {
   }
   lastHighTime = Date.now();
   return _execute(rawPrompt, opts);
+}
+function getComfyLorasRoot() {
+  try {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..');
+    const launcherConfigPath = path.resolve(projectRoot, '..', 'launcher_config.json');
+    const launcherConfig = JSON.parse(fs.readFileSync(launcherConfigPath, 'utf8'));
+    if (!launcherConfig.comfyui_exe) return null;
+    const rootDir = path.dirname(launcherConfig.comfyui_exe);
+    const lorasRoot = path.join(rootDir, 'ComfyUI', 'models', 'loras');
+    return fs.existsSync(lorasRoot) ? lorasRoot : null;
+  } catch {
+    return null;
+  }
+}
+
+// 兼容历史数据：ComfyUI 只接受模型根目录相对名，不接受本机绝对路径。
+function normalizeLoraValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw || !path.isAbsolute(raw)) return raw;
+
+  const lorasRoot = getComfyLorasRoot();
+  if (lorasRoot) {
+    const rel = path.relative(lorasRoot, raw);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) return rel;
+  }
+
+  const marker = /[\\/]models[\\/]loras[\\/]/i.exec(raw);
+  return marker ? raw.slice(marker.index + marker[0].length) : raw;
 }

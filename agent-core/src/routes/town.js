@@ -21,17 +21,19 @@ import {
   generateCharacterSprites, getTownSettings, updateTownSettings, resetWorld,
 } from '../services/town/townService.js';
 import {
-  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, getAssetById,
+  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, getAssetById, cropAssetImage, refineAssetWithHires,
 } from '../services/town/townAssetService.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
+  generateAssetPrompts,
   generateLayout, rerollLayout, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
   regenerateNpcRoster,
 } from '../services/town/townInitService.js';
 import {
   listNpcs, getNpc, createNpc, updateNpc, deleteNpc,
   generateNpcSprites, generateNpcPortrait, generateCharacterPortrait,
+  regenerateNpcPersonaCard,
   rerollNpc, getNpcChatHistory, chatWithNpc, inviteNpcAsCharacter,
   getPlayerKit, regeneratePlayerKit,
 } from '../services/town/townNpcService.js';
@@ -113,6 +115,26 @@ router.post('/assets/:id/image', async (req, res) => {
   }
 });
 
+// 按截取框裁剪素材并覆盖（放大查看后划定最终成图范围）
+router.post('/assets/:id/crop', async (req, res) => {
+  try {
+    const asset = await cropAssetImage(parseInt(req.params.id, 10), req.body || {});
+    res.json({ asset });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || '裁剪失败' });
+  }
+});
+
+// 小镇立绘 HiresFix（按全局 HiresFix 设置细化并覆盖原图）
+router.post('/assets/:id/hires', async (req, res) => {
+  try {
+    const asset = await refineAssetWithHires(parseInt(req.params.id, 10));
+    res.json({ asset });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || 'HiresFix 细化失败' });
+  }
+});
+
 router.post('/assets/batch', async (req, res) => {
   try {
     const { jobs } = req.body || {};
@@ -162,6 +184,15 @@ router.put('/init/blueprint', (req, res) => {
   const result = updateBlueprint(req.body);
   if (!result.ok) return res.status(400).json(result);
   res.json(getInitState());
+});
+
+// 清单确认后：根据名称/类别生成每项素材 prompt（不直接生图）
+router.post('/init/asset-prompts', async (req, res) => {
+  try {
+    res.json(await generateAssetPrompts(req.body || {}));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '素材提示词生成失败' });
+  }
 });
 
 router.post('/init/samples', async (req, res) => {
@@ -246,10 +277,10 @@ router.get('/npcs/:id', (req, res) => {
 });
 
 router.post('/npcs', (req, res) => {
-  const { displayName, persona, appearanceDesc, job, traits } = req.body || {};
+  const { displayName, persona, job, traits } = req.body || {};
   if (!displayName) return res.status(400).json({ error: 'displayName 必填' });
   const mapId = getMapPayload()?.id ?? null;
-  const npc = createNpc({ mapId, displayName, persona, appearanceDesc, job, traits });
+  const npc = createNpc({ mapId, displayName, persona, job, traits });
   res.json({ npc });
 });
 
@@ -283,6 +314,14 @@ router.post('/npcs/:id/portrait', async (req, res) => {
 });
 
 // 邀请居民入邻舍（NPC → 聊天侧角色）
+router.post('/npcs/:id/persona-card', async (req, res) => {
+  try {
+    res.json({ npc: await regenerateNpcPersonaCard(parseInt(req.params.id, 10), req.body || {}) });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '人格卡生成失败' });
+  }
+});
+
 router.post('/npcs/:id/invite', async (req, res) => {
   try {
     res.json(await inviteNpcAsCharacter(parseInt(req.params.id, 10)));

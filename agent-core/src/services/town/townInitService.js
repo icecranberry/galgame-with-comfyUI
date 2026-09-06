@@ -11,9 +11,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb } from '../../db/index.js';
+import { getDb, getSystemRules } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
+import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createAsset, listAssets } from './townAssetService.js';
 import { saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc } from './townNpcService.js';
@@ -139,6 +140,25 @@ function getWorldSetting(id) {
 
 export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, mapRows = 50 } = {}) {
   return enqueueStep(async () => {
+    // 初始化 = 全部数据抛弃：旧地图/地点/居民/相遇历史/运行态/素材索引全清（磁盘图片文件保留不删）
+    const db = getDb();
+    db.exec('UPDATE town_npcs SET home_location_id = NULL');
+    db.exec('DELETE FROM town_npc_chat_messages');
+    db.exec('DELETE FROM town_chat_messages');
+    db.exec('DELETE FROM town_encounters');
+    db.exec('DELETE FROM town_characters');
+    db.exec('DELETE FROM town_npcs');
+    db.exec('DELETE FROM town_locations');
+    db.exec('DELETE FROM town_agent_state');
+    db.exec('DELETE FROM town_maps');
+    db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL WHERE id = 'me'");
+    db.exec('DELETE FROM town_assets');
+    // 内存世界同步清空（若调度器在跑）
+    try {
+      const { resetWorldState } = await import('./townService.js');
+      resetWorldState();
+    } catch { /* 调度器未启动时忽略 */ }
+
     job = defaultJob();
     job.createdAt = new Date().toISOString();
     job.config = {
@@ -154,11 +174,13 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, m
       const worldName = world?.name || '（未指定）';
       job.config.worldSettingId = world?.id ?? null;
 
-      const bpPrompt = buildBlueprintPrompt(worldName, worldContent, job.config);
-      const content = await chatSync([
-        { role: 'system', content: bpPrompt },
-        { role: 'user', content: '请输出这个小镇的初始化蓝图 JSON。' },
-      ], {
+      const bpMsgs = [
+        ...townPromptSystemMessages(world),
+        { role: 'system', content: buildBlueprintOutputStructure() },
+        { role: 'system', content: buildBlueprintTaskRequirements(worldName, job.config) },
+        { role: 'user', content: '请执行：输出这个小镇的初始化蓝图 JSON。' },
+      ];
+      const content = await chatSync(bpMsgs, {
         max_tokens: 2500,
         temperature: 0.85,
         response_format: { type: 'json_object' },
@@ -167,6 +189,7 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, m
       const parsed = safeJsonParse(content);
       if (!parsed) throw new Error('蓝图 JSON 解析失败');
       job.blueprint = normalizeBlueprint(parsed, job.config);
+      job.blueprint.styleTags = '';
       setStatus('samples_pending', '蓝图已生成，请确认素材清单并出风格小样');
     } catch (err) {
       console.error('[townInit] blueprint failed:', err?.message);
@@ -177,46 +200,50 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, m
   });
 }
 
-function buildBlueprintPrompt(worldName, worldContent, cfg) {
+function buildBlueprintOutputStructure() {
   return [
-    '你是小镇规划师，为一个像素风 AI 小镇设计初始化蓝图：地砖/道路素材清单、建筑与道具清单、居民名册。',
-    '',
-    `【世界观】${worldName}`,
-    worldContent || '（无具体世界观，设计一个温暖治愈的通用小镇）',
-    '',
+    '【输出结构】',
     '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
     '{',
-    '  "styleTags": "warm pastel fantasy village, soft colors, cozy pixel art",',
     '  "groundAssets": [',
-    '    { "key": "grass_01", "name": "青草地", "desc": "short green grass with tiny flowers, seamless tileable top-down texture", "variants": 2 },',
-    '    { "key": "plaza_tile", "name": "广场石砖", "desc": "warm beige plaza stone tiles, seamless tileable top-down texture", "variants": 1 }',
+    '    { "key": "grass_01", "name": "青草地", "variants": 2 },',
+    '    { "key": "plaza_tile", "name": "广场石砖", "variants": 1 }',
     '  ],',
     '  "roadAssets": [',
-    '    { "key": "road_01", "name": "石板路", "desc": "cobblestone footpath, seamless tileable top-down texture", "variants": 1 }',
+    '    { "key": "road_01", "name": "石板路", "variants": 1 }',
     '  ],',
     '  "buildings": [',
-    '    { "key": "residential", "name": "普通居民楼", "desc": "simple cozy two-story house with warm windows", "reusable": true, "maxInstances": 6, "footprint": { "w": 4, "h": 3 }, "special": false },',
-    '    { "key": "cafe", "name": "兽人咖啡厅", "desc": "cozy cafe run by an orc barista, wooden signboard", "reusable": false, "maxInstances": 1, "footprint": { "w": 5, "h": 4 }, "special": true }',
+    '    { "key": "residential", "name": "普通居民楼", "reusable": true, "maxInstances": 6, "footprint": { "w": 4, "h": 3 }, "special": false },',
+    '    { "key": "cafe", "name": "兽人咖啡厅", "reusable": false, "maxInstances": 1, "footprint": { "w": 5, "h": 4 }, "special": true }',
     '  ],',
     '  "props": [',
-    '    { "key": "tree_01", "name": "橡树", "desc": "round oak tree, top-down front view", "blocking": true },',
-    '    { "key": "bench_01", "name": "长椅", "desc": "wooden park bench, front view", "blocking": false }',
+    '    { "key": "tree_01", "name": "橡树", "blocking": true },',
+    '    { "key": "bench_01", "name": "长椅", "blocking": false }',
     '  ],',
     '  "npcs": [',
-    '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "appearanceDesc": "short stout green orc baker wearing a white apron and a headband, chibi pixel sprite", "job": "面包师" }',
+    '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "job": "面包师" },',
     '  ]',
     '}',
-    '字段约束：',
-    '- styleTags：英文短语，描述整套素材统一的画风色调，所有素材生成都会拼进 prompt',
-    '- groundAssets：3~5 种地砖（草地/广场/水边/花田等），desc 用英文写无缝平铺纹理；variants 是同款变体数 1~3（打散重复感）',
-    '- roadAssets：1~2 种道路',
-    '- buildings：5~9 栋。一半是通用建筑（普通居民楼/公厕/公交站等，reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（2~3，等距视角下 3×3 已很大）；key 全部小写下划线且不重复',
-    '- props：4~8 种（树/长椅/路灯/花丛/水井等），blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
-    `- npcs：恰好 ${cfg.npcCount} 位居民。persona 一句话人设+性格关键词（中文 30~60 字）；appearanceDesc 英文外观描述（chibi 像素小人用）；job 中文职业`,
-    '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合世界观',
   ].join('\n');
 }
 
+function buildBlueprintTaskRequirements(worldName, cfg) {
+  return [
+    '【任务要求】',
+    '你是小镇规划师，为一个像素风 AI 小镇设计初始化清单：地砖/道路素材清单、建筑与道具清单、居民名册。',
+    '',
+    `【世界观】${worldName}`,
+    '本步只确认名称和类别，禁止输出任何外观描述、styleTags 或 prompt。',
+    '',
+    '字段约束：',
+    '- groundAssets：3~5 种地砖；variants 是同款变体数 1~3（打散重复感）',
+    '- roadAssets：1~2 种道路',
+    '- buildings：5~9 栋。一半是通用建筑（reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（2~3）；key 全部小写下划线且不重复',
+    '- props：4~8 种；blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
+    `- npcs：恰好 ${cfg.npcCount} 位居民。persona 一句话人设+性格关键词（中文 30~60 字，完整人格卡会在建档时生成）；job 中文职业`,
+    '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合世界观',
+  ].join('\n');
+}
 function normalizeBlueprint(parsed, cfg) {
   const bp = { styleTags: '', groundAssets: [], roadAssets: [], buildings: [], props: [], npcs: [] };
   bp.styleTags = String(parsed.styleTags || '').slice(0, 200);
@@ -236,7 +263,7 @@ function normalizeBlueprint(parsed, cfg) {
     bp.groundAssets.push({
       key: uniqKey(g.key || g.name),
       name: String(g.name).slice(0, 20),
-      desc: String(g.desc || g.name).slice(0, 200),
+      desc: String(g.desc || '').slice(0, 800),
       variants: Math.max(1, Math.min(3, parseInt(g.variants, 10) || 1)),
     });
   }
@@ -245,7 +272,7 @@ function normalizeBlueprint(parsed, cfg) {
     bp.roadAssets.push({
       key: uniqKey(r.key || r.name),
       name: String(r.name).slice(0, 20),
-      desc: String(r.desc || r.name).slice(0, 200),
+      desc: String(r.desc || '').slice(0, 800),
       variants: Math.max(1, Math.min(3, parseInt(r.variants, 10) || 1)),
     });
   }
@@ -255,7 +282,7 @@ function normalizeBlueprint(parsed, cfg) {
     bp.buildings.push({
       key: uniqKey(b.key || b.name),
       name: String(b.name).slice(0, 20),
-      desc: String(b.desc || b.name).slice(0, 200),
+      desc: String(b.desc || '').slice(0, 1000),
       reusable: !!b.reusable,
       maxInstances: Math.max(1, Math.min(8, parseInt(b.maxInstances, 10) || 1)),
       footprint: { w: Math.max(2, Math.min(3, parseInt(fp.w, 10) || 3)), h: Math.max(2, Math.min(3, parseInt(fp.h, 10) || 2)) },
@@ -267,23 +294,27 @@ function normalizeBlueprint(parsed, cfg) {
     bp.props.push({
       key: uniqKey(p.key || p.name),
       name: String(p.name).slice(0, 20),
-      desc: String(p.desc || p.name).slice(0, 200),
+      desc: String(p.desc || '').slice(0, 800),
       blocking: p.blocking !== false,
     });
   }
   const npcList = arr(parsed.npcs).slice(0, cfg.npcCount);
+  const seenNames = new Set();
   for (const n of npcList) {
     if (!n?.displayName) continue;
+    let name = String(n.displayName).slice(0, 20);
+    let i = 2;
+    while (seenNames.has(name)) name = `${String(n.displayName).slice(0, 17)}${i++}`; // 名单内重名加序号
+    seenNames.add(name);
     bp.npcs.push({
-      displayName: String(n.displayName).slice(0, 20),
-      persona: String(n.persona || '').slice(0, 120),
-      appearanceDesc: String(n.appearanceDesc || n.displayName).slice(0, 200),
+      displayName: name,
+      persona: String(n.persona || '').slice(0, 4000),
       job: String(n.job || '').slice(0, 20),
     });
   }
-  if (bp.groundAssets.length === 0) bp.groundAssets.push({ key: 'grass_01', name: '草地', desc: 'plain green grass seamless tileable top-down texture', variants: 2 });
-  if (bp.roadAssets.length === 0) bp.roadAssets.push({ key: 'road_01', name: '土路', desc: 'dirt footpath seamless tileable top-down texture', variants: 1 });
-  if (bp.buildings.length === 0) bp.buildings.push({ key: 'house', name: '小屋', desc: 'cozy small house', reusable: true, maxInstances: 4, footprint: { w: 4, h: 3 }, special: false });
+  if (bp.groundAssets.length === 0) bp.groundAssets.push({ key: 'grass_01', name: '草地', desc: '', variants: 2 });
+  if (bp.roadAssets.length === 0) bp.roadAssets.push({ key: 'road_01', name: '土路', desc: '', variants: 1 });
+  if (bp.buildings.length === 0) bp.buildings.push({ key: 'house', name: '小屋', desc: '', reusable: true, maxInstances: 4, footprint: { w: 4, h: 3 }, special: false });
   return bp;
 }
 
@@ -303,6 +334,97 @@ export function updateBlueprint(blueprint) {
   if (job.status === 'samples_pending' || job.status === 'failed') job.status = 'samples_pending';
   persistJob();
   return { ok: true };
+}
+
+/** 小镇 LLM 统一前两层：system0 = 破甲词 + 世界观，system1 = 世界观强化。 */
+function townPromptSystemMessages(world) {
+  const worldContent = String(world?.content || '').trim();
+  const worldBlock = worldContent ? `<world_setting>\n${worldContent}\n</world_setting>` : '';
+  const msgs = [{
+    role: 'system',
+    content: [getSystemRules({ roleplay: false }), worldBlock].filter(Boolean).join('\n\n'),
+  }];
+  if (worldBlock) {
+    msgs.push({ role: 'system', content: getWorldIntegrationRule('town_asset') });
+  }
+  return msgs;
+}
+/** 清单确认后，按当前步骤的名称清单批量生成英文生图提示词 */
+export function generateAssetPrompts({ step = 'tiles', styleTags, keys = [] } = {}) {
+  return enqueueStep(async () => {
+    if (!job?.blueprint) throw new Error('没有进行中的初始化任务');
+    const sections = step === 'tiles'
+      ? [['groundAssets', 'ground'], ['roadAssets', 'road']]
+      : [['buildings', 'building'], ['props', 'prop']];
+    const wantedKeys = new Set(Array.isArray(keys) ? keys : []);
+    const targets = [];
+    for (const [section, kind] of sections) {
+      for (const item of job.blueprint[section] || []) {
+        if (wantedKeys.size > 0 && !wantedKeys.has(item.key)) continue;
+        targets.push({ section, kind, key: item.key, item });
+      }
+    }
+    if (targets.length === 0) return { prompts: [], blueprint: job.blueprint };
+
+    if (styleTags !== undefined) job.blueprint.styleTags = String(styleTags || '').slice(0, 200);
+    const world = getWorldSetting(job.config.worldSettingId);
+    const inventory = targets.map(({ kind, key, item }) => ({ kind, key, name: item.name, footprint: item.footprint }));
+
+    setStatus(job.status, '正在根据清单生成素材提示词…');
+    const msgs = townPromptSystemMessages(world);
+    msgs.push({ role: 'system', content: [
+      '【输出结构】',
+      '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
+      '{',
+      '  "prompts": {',
+      '    "grass_01": "isometric ground game tile, one flat diamond-shaped block, the entire top face fully covered with short green grass, seamless tileable material, clean pixel edges, no buildings, no scene",',
+      '    "road_01": "isometric road game tile, one flat diamond-shaped block, the entire top face fully covered with warm cobblestones, seamless tileable material, clean pixel edges, no buildings, no scene",',
+      '    "cafe": "isometric building game sprite on pure white background, cozy two-story cafe with wooden walls and warm windows, 45 degree view showing two walls and the roof, complete building centered, walls extending past the bottom edge, no ground and no base",',
+      '    "tree_01": "single pixel game prop sprite on pure white background, round oak tree in slight three-quarter view, complete object centered, no ground platform and no scene"',
+      '}'
+    ].join('\n') });
+    msgs.push({ role: 'system', content: [
+      '【任务要求】',
+      '你是像素游戏素材提示词设计师。清单已确认，请根据清单中的名称逐项生成最终英文生图提示词。',
+      '',
+      '【素材清单】',
+      JSON.stringify(inventory, null, 1),
+      '',
+      '字段约束：',
+      '- prompts 的 key 必须与素材清单完全一致，一项不多、一项不少；value 是一段可直接用于文生图的英文 prompt',
+      '- ground/road：描述完整覆盖顶面的单一材质，保证 isometric game tile、seamless tileable material、no buildings/no scene',
+      '- building：描述建筑类型、墙体/屋顶/门窗/招牌/配色与世界观气质，保证 pure white background、isometric 45 degree view、no ground/no base；特殊建筑更有辨识度',
+      '- prop：描述单个道具的材质/形状/颜色与世界观气质，保证 pure white background、single sprite、no ground platform/no scene',
+      '- 全英文，不要双引号、换行、列表、标题、中文或代码围栏；不要输出 negative prompt',
+    ].join('\n') });
+    const extraDirection = String(job.blueprint.styleTags || '').trim();
+    msgs.push({
+      role: 'user',
+      content: [
+        extraDirection ? `【用户额外指定】\n${extraDirection}` : '',
+        `请执行：为清单中的 ${targets.length} 项素材输出 prompts JSON。没有额外指定时，保持 coherent cozy game-asset look。`
+      ].filter(Boolean).join('\n\n')
+    });
+    const content = await chatSync(msgs, {
+      max_tokens: 6000,
+      temperature: 0.75,
+      response_format: { type: 'json_object' },
+      label: '小镇素材提示词',
+    });
+    const parsed = safeJsonParse(content);
+    const generated = parsed?.prompts || null;
+    if (!generated || typeof generated !== 'object') throw new Error('素材提示词 JSON 解析失败');
+
+    const prompts = [];
+    for (const target of targets) {
+      const prompt = String(generated[target.key] || '').trim();
+      if (!prompt) throw new Error(`素材「${target.item.name}」缺少提示词`);
+      target.item.desc = prompt.slice(0, 1200);
+      prompts.push({ section: target.section, key: target.key, kind: target.kind, prompt: target.item.desc });
+    }
+    persistJob();
+    return { prompts, blueprint: job.blueprint };
+  });
 }
 
 // ── Step 3：风格小样 ──
@@ -458,10 +580,21 @@ export function generateLayout() {
       blocking: a.kind === 'prop' ? !!a.meta?.blocking : undefined,
     }));
 
-    const content = await chatSync([
-      { role: 'system', content: buildLayoutPrompt(cols, rows, bp, inventory) },
-      { role: 'user', content: `请输出 ${cols}×${rows} 小镇的布局 JSON。` },
-    ], {
+    const world = getWorldSetting(job.config.worldSettingId);
+    const extraDirection = String(bp.styleTags || '').trim();
+    const layoutMsgs = [
+      ...townPromptSystemMessages(world),
+      { role: 'system', content: buildLayoutOutputStructure(cols, rows) },
+      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory) },
+      {
+        role: 'user',
+        content: [
+          extraDirection ? `【用户额外指定】\n${extraDirection}` : '',
+          `请执行：输出 ${cols}×${rows} 小镇的布局 JSON。`,
+        ].filter(Boolean).join('\n\n'),
+      },
+    ];
+    const content = await chatSync(layoutMsgs, {
       max_tokens: 6000,
       temperature: 0.8,
       response_format: { type: 'json_object' },
@@ -485,14 +618,9 @@ export function generateLayout() {
   });
 }
 
-function buildLayoutPrompt(cols, rows, bp, inventory) {
+function buildLayoutOutputStructure(cols, rows) {
   return [
-    `你是像素小镇的地图设计师。请规划一张 ${cols}×${rows} 的小镇布局（格子坐标，x 向右 y 向下，原点左上）。`,
-    `小镇风格：${bp.styleTags || '温暖的小镇'}`,
-    '',
-    '可用素材（key 必须从这里面选）：',
-    JSON.stringify(inventory, null, 1),
-    '',
+    '【输出结构】',
     '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
     '{',
     '  "groundRects": [',
@@ -516,16 +644,26 @@ function buildLayoutPrompt(cols, rows, bp, inventory) {
     '    { "npcRef": "咕噜", "locationKey": "cafe" }',
     '  ]',
     '}',
+  ].join('\n');
+}
+
+function buildLayoutTaskRequirements(bp, inventory) {
+  return [
+    '【任务要求】',
+    '你是像素小镇的地图设计师。请规划符合世界观的小镇布局（格子坐标，x 向右 y 向下，原点左上）。',
+    '',
+    '【可用素材】',
+    JSON.stringify(inventory, null, 1),
+    '',
     '布局规则（务必遵守）：',
-    `- groundRects：先用草地/泥土这类基础地砖铺满整图（x=0,y=0,w=${cols},h=${rows}），再叠加特色区域；广场/花田等特色区域合计只占全图 10%~20%（单块不超过 ${Math.floor(cols * 0.35)}×${Math.floor(rows * 0.35)}），不要让广场砖盖满全图`,
+    '- groundRects：先用草地/泥土这类基础地砖铺满整图（x=0,y=0,w=地图宽度,h=地图高度），再叠加特色区域；广场/花田等特色区域合计只占全图 10%~20%，不要让广场砖盖满全图',
     '- roadPaths：点列之间按先横后纵的 L 形铺路；主路要纵横贯通（至少一横一纵），路网要连接所有建筑门口；道路从地图边缘通到中心广场',
-    `- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）；道具（树/长椅）散布 10~25 个填充建筑之间的空地，不要放在路上`,
+    '- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）；道具（树/长椅）散布 10~25 个填充建筑之间的空地，不要放在路上',
     '- locations：每栋 special 建筑都要绑定一个地点（objectRef = "key:instance"）；通用居民楼不用每个都绑；再挑 1~3 个开阔处设户外地点（广场/公园，给 x/y/radius）；aliases 是日程文本常用的同义词',
     `- npcSpawns：恰好 ${bp.npcs.length} 位居民，npcRef 用居民 displayName 原文，locationKey 用上面定义的地点 key`,
     '- 建筑之间留出步行空间，不要把地图塞满',
   ].join('\n');
 }
-
 /** 紧凑布局 JSON → 图层数据 + POI 草稿（本地展开，含连通校验补路） */
 export function expandLayout(parsed, readyAssets, bp, cols, rows) {
   const warnings = [];
@@ -741,14 +879,16 @@ export function commitWizardNpcs() {
     const db = getDb();
     job.npcIds = job.npcIds || [];
 
-    // 蓝图外的旧向导居民清掉
+    // 蓝图外的居民全部清掉（含名单换代后的孤儿、重名多建的多余行）
     const wanted = new Set(job.blueprint.npcs.map(n => n.displayName));
-    for (const id of [...job.npcIds]) {
-      const row = db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(id);
-      if (!row || !wanted.has(row.display_name)) {
-        db.prepare('DELETE FROM town_npcs WHERE id = ?').run(id);
-        job.npcIds = job.npcIds.filter(x => x !== id);
+    const seen = new Set();
+    for (const row of db.prepare('SELECT id, display_name FROM town_npcs').all()) {
+      if (!wanted.has(row.display_name) || seen.has(row.display_name)) {
+        db.prepare('DELETE FROM town_npcs WHERE id = ?').run(row.id);
+        job.npcIds = job.npcIds.filter(x => x !== row.id);
+        continue;
       }
+      seen.add(row.display_name);
     }
 
     // 可用地标 key：老地图的地点 + 蓝图建筑 key + home
@@ -762,23 +902,41 @@ export function commitWizardNpcs() {
         return row?.display_name === n.displayName;
       });
       if (existingId) {
-        updateNpc(existingId, { persona: n.persona, appearanceDesc: n.appearanceDesc, job: n.job });
+        const currentNpc = getNpc(existingId);
+        let persona = n.persona;
+        // 旧版本会把完整人格卡截到 120 字；若数据库里还保留更完整版本，优先找回。
+        if (persona.length === 120 && (currentNpc.persona || '').length > 120) {
+          persona = currentNpc.persona;
+        }
+        // 两边都已被旧逻辑截断时，补生成一次完整卡。
+        if (persona.length === 120 && persona.startsWith('你是')) {
+          try {
+            const { generateNpcPersonaCard } = await import('./townNpcService.js');
+            const { card } = await generateNpcPersonaCard({
+              displayName: n.displayName,
+              job: n.job,
+              worldHint: job.blueprint.styleTags,
+            });
+            persona = card;
+          } catch (err) {
+            console.warn(`[townInit] repair persona card for ${n.displayName} failed:`, err?.message);
+          }
+        }
+        updateNpc(existingId, { persona, job: n.job });
+        n.persona = persona;
         continue;
       }
       // 酒馆招募式：先生成结构化人格卡（跳过网络搜索，低温稳定特征）
       setStatus(job.status, `正在为「${n.displayName}」撰写人格卡…`);
       let persona = n.persona;
-      let appearanceDesc = n.appearanceDesc;
       try {
         const { generateNpcPersonaCard } = await import('./townNpcService.js');
-        const { card, appearance } = await generateNpcPersonaCard({
+        const { card } = await generateNpcPersonaCard({
           displayName: n.displayName,
           job: n.job,
-          appearanceDesc: n.appearanceDesc,
           worldHint: job.blueprint.styleTags,
         });
         persona = card;
-        if (appearance) appearanceDesc = appearance;
       } catch (err) {
         console.warn(`[townInit] persona card for ${n.displayName} failed, keep simple persona:`, err?.message);
       }
@@ -786,14 +944,12 @@ export function commitWizardNpcs() {
         mapId: null,
         displayName: n.displayName,
         persona,
-        appearanceDesc,
         job: n.job,
         traits: {},
         routine: [],
       });
       job.npcIds.push(npc.id);
       n.persona = persona;         // 同步回蓝图（前端卡展示完整人格卡）
-      n.appearanceDesc = appearanceDesc;
       setStatus(job.status, `已建档居民「${n.displayName}」，正在生成作息…`);
       try {
         const routine = await generateRoutine(npc, allKeys);
@@ -816,19 +972,41 @@ export function regenerateNpcRoster(count) {
     setStatus(job.status, `正在重新规划 ${n} 位居民…`);
 
     const world = getWorldSetting(job.config.worldSettingId);
-    const content = await chatSync([
-      { role: 'system', content: [
-        '你是小镇的人事导演，为像素小镇重新规划一份居民名册。',
-        '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
-        '{',
-        '  "npcs": [',
-        '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "appearanceDesc": "short stout green orc baker wearing a white apron (英文外观，chibi像素小人/立绘用)", "job": "面包师" }',
-        '  ]',
-        '}',
-        `字段约束：恰好 ${n} 位；displayName 中文 2~6 字不重复；职业要和小镇特色建筑/业态呼应、互相错开；persona 符合世界观；appearanceDesc 英文、含体型/肤色/发型/服装锚点。`,
-      ].join('\n') },
-      { role: 'user', content: `当前画风基调：${job.blueprint.styleTags || '温暖像素小镇'}。请输出 ${n} 位居民的名单 JSON。` },
-    ], {
+    const rosterMsgs = [
+      ...townPromptSystemMessages(world),
+      {
+        role: 'system',
+        content: [
+          '【输出结构】',
+          '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
+          '{',
+          '  "npcs": [',
+          '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "job": "面包师" }',
+          '  ]',
+          '}',
+        ].join('\n'),
+      },
+      {
+        role: 'system',
+        content: [
+          '【任务要求】',
+          '你是小镇的人事导演，为像素小镇重新规划一份居民名册。',
+          '',
+          '字段约束：',
+          `- 恰好 ${n} 位；displayName 中文 2~6 字不重复`,
+          '- 职业要和小镇特色建筑/业态呼应、互相错开',
+          '- persona 符合世界观',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          job.blueprint.styleTags ? `【用户额外指定】\n${job.blueprint.styleTags}` : '',
+          `请执行：输出 ${n} 位居民的名单 JSON。`,
+        ].filter(Boolean).join('\n\n'),
+      },
+    ];
+    const content = await chatSync(rosterMsgs, {
       max_tokens: 2500,
       temperature: 0.9,
       response_format: { type: 'json_object' },
@@ -838,15 +1016,21 @@ export function regenerateNpcRoster(count) {
     const roster = Array.isArray(parsed?.npcs) ? parsed.npcs : null;
     if (!roster || roster.length === 0) throw new Error('居民名册 JSON 解析失败');
 
+    const seenNames = new Set();
     job.blueprint.npcs = roster
       .filter(x => x?.displayName)
       .slice(0, n)
-      .map(x => ({
-        displayName: String(x.displayName).slice(0, 20),
-        persona: String(x.persona || '').slice(0, 120),
-        appearanceDesc: String(x.appearanceDesc || x.displayName).slice(0, 200),
-        job: String(x.job || '').slice(0, 20),
-      }));
+      .map(x => {
+        let name = String(x.displayName).slice(0, 20);
+        let i = 2;
+        while (seenNames.has(name)) name = `${String(x.displayName).slice(0, 17)}${i++}`;
+        seenNames.add(name);
+        return {
+          displayName: name,
+          persona: String(x.persona || '').slice(0, 120),
+          job: String(x.job || '').slice(0, 20),
+        };
+      });
     // 名单变了：已建档的旧居民作废（confirm 时会清理）
     job.npcIds = [];
     setStatus(job.status, `居民名单已更新（${job.blueprint.npcs.length} 位）`);
@@ -869,7 +1053,6 @@ export function confirmInit() {
       tileSize: draft.tileSize || 32, layers: draft.layers,
       worldSettingId: job.config.worldSettingId,
     });
-    db.exec("UPDATE town_characters SET home_location_id = NULL");
     db.exec('UPDATE town_npcs SET home_location_id = NULL');
     db.exec('DELETE FROM town_locations');
     db.exec('DELETE FROM town_agent_state');
@@ -909,7 +1092,6 @@ export function confirmInit() {
           mapId: saved.mapId,
           displayName: n.displayName,
           persona: n.persona,
-          appearanceDesc: n.appearanceDesc,
           job: n.job,
           traits: {},
           routine: [],

@@ -1421,12 +1421,24 @@ export function updateTownSettings(patch = {}) {
   return { ok: true, applied };
 }
 
-/** 重新初始化世界：清地图/POI/居民（相遇历史保留），走向导 */
+/** 仅清内存世界状态（DB 由调用方负责）——向导重新初始化时用 */
+export function resetWorldState() {
+  state.map = null;
+  state.locations = [];
+  state.agents.clear();
+  state.meta.clear();
+  state.occupied.clear();
+  state.encounters.clear();
+}
+
+/** 重新初始化世界：清地图/POI/居民/相遇历史，走向导 */
 export function resetWorld() {
   const db = getDb();
-  db.exec("UPDATE town_characters SET home_location_id = NULL");
   db.exec('UPDATE town_npcs SET home_location_id = NULL');
   db.exec('DELETE FROM town_npc_chat_messages');
+  db.exec('DELETE FROM town_chat_messages');
+  db.exec('DELETE FROM town_encounters');
+  db.exec('DELETE FROM town_characters');
   db.exec('DELETE FROM town_npcs');
   db.exec('DELETE FROM town_locations');
   db.exec('DELETE FROM town_agent_state');

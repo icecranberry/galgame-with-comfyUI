@@ -3,6 +3,18 @@
     <div class="pp-title">🪄 提示词与 LoRA</div>
     <div class="pp-hint">{{ stepHint }}</div>
 
+    <!-- 画师串交给生图器的画师节点，位于画面描述链路最前 -->
+    <div class="pp-field">
+      <div class="pp-label">画师串</div>
+      <linshe-input
+        :model-value="artistValue"
+        size="sm"
+        placeholder="@ebora"
+        @update:model-value="v => emit('update:modelValue', { ...modelValue, artist: v })"
+      />
+      <div class="pp-preview">最终按：<code>{{ artistValue || '（无）' }}, …后续提示词</code></div>
+    </div>
+
     <!-- 硬逻辑前缀：会直接拼在最终 prompt 最前面，可改可清空（清空=用默认） -->
     <div class="pp-field">
       <div class="pp-label">
@@ -26,6 +38,15 @@
       <div class="pp-label">
         LoRA（{{ modelValue.loras.length }}）
         <span class="pp-default-tag" v-if="modelValue.loras.length === 0">未启用</span>
+      </div>
+      <div v-if="showPortraitLora" class="pp-portrait-lora">
+        <linshe-switch
+          :model-value="!!modelValue.portraitLoras"
+          size="sm"
+          aria-label="立绘应用LoRA"
+          @update:model-value="v => emit('update:modelValue', { ...modelValue, portraitLoras: !!v })"
+        />
+        <span>立绘应用LoRA</span>
       </div>
       <TransitionGroup name="pp-pop" tag="div" class="pp-lora-list">
         <div v-for="(lora, idx) in modelValue.loras" :key="idx" class="pp-lora-item">
@@ -73,6 +94,7 @@ import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
+import LinsheSwitch from '../ui/LinsheSwitch.vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true }, // { prefix, loras: [{path, weight, triggerWord}] }
@@ -82,18 +104,19 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const DEFAULTS = {
-  tiles: '',
+  tiles: 'pixel art, game sprite',
   buildings: 'pixel art, game sprite',
   npcs: 'pixel art, mini human sized, full body, game sprite',
   player: 'pixel art, mini human sized, full body, game sprite',
-  layout: '',
-  player: '',
 }
 
+const DEFAULT_ARTIST = '@ebora'
+const artistValue = computed(() => props.modelValue.artist ?? DEFAULT_ARTIST)
+const showPortraitLora = computed(() => ['npcs', 'player'].includes(props.step))
 const defaultPrefix = computed(() => DEFAULTS[props.step] ?? '')
 
 const STEP_HINTS = {
-  tiles: '地砖/道路不加画师串，避免平铺纹理被带偏',
+  tiles: '地皮会默认加上 pixel art, game sprite',
   buildings: '建筑会硬逻辑加上 pixel art, game sprite',
   npcs: '像素小人会硬逻辑加上 mini human sized, full body',
   player: '同像素小人；立绘默认不加前缀',
@@ -105,7 +128,7 @@ const loraOptions = ref([])
 function addLora() {
   emit('update:modelValue', {
     ...props.modelValue,
-    loras: [...props.modelValue.loras, { path: '', weight: 0.8, triggerWord: '' }],
+    loras: [...props.modelValue.loras, { path: '', weight: 1, triggerWord: '' }],
   })
 }
 
@@ -122,9 +145,11 @@ function updateLora(idx, patch) {
 onMounted(async () => {
   try {
     const lf = await api.fetchLorasFiles()
+    // ComfyUI 的 lora_name 需要模型根目录相对标识，详情卡保存的是 file.name 而非本机绝对路径。
     loraOptions.value = (lf.files || []).map(f => {
-      const path = typeof f === 'string' ? f : (f.path || f.name || '')
-      return { label: path.split(/[\\/]/).pop() || path, value: path }
+      const name = typeof f === 'string' ? f : (f.name || f.path || '')
+      const source = typeof f === 'object' && f?.source ? `[${f.source}] ` : ''
+      return { label: `${source}${name}`, value: name }
     }).filter(o => o.value)
   } catch { /* LoRA 列表拉不到就不启用 */ }
 })
@@ -173,6 +198,14 @@ onMounted(async () => {
   border-radius: 4px;
   padding: 1px 4px;
   word-break: break-all;
+}
+
+.pp-portrait-lora {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-primary);
 }
 
 .pp-lora-list { display: flex; flex-direction: column; gap: 8px; }

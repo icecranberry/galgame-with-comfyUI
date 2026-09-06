@@ -1,6 +1,6 @@
 <template>
   <div class="npc-chat" :class="{ 'with-portrait': !!portraitUrl }">
-    <!-- 立绘跳出：聊天时在旁展示（已抠白的透明 PNG，贴底悬浮） -->
+    <!-- 立绘跳出：聊天时在旁展示（已抠除背景的透明 PNG，悬浮展示） -->
     <div v-if="portraitUrl" class="nc-portrait" aria-hidden="true">
       <img :src="portraitUrl" alt="">
       <linshe-button variant="icon" size="sm" class="nc-portrait-zoom" aria-label="放大立绘" @click="zoomed = true">⤢</linshe-button>

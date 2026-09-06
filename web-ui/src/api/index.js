@@ -1953,9 +1953,19 @@ export function fetchTownAsset(id) {
   return jsonRequest(`${BASE}/town/assets/${id}`)
 }
 
-// 保存前端编辑后的素材图（点击抠白 / 裁底，dataUrl PNG）
+// 保存前端编辑后的素材图（点击抠除颜色 / 裁剪，dataUrl PNG）
 export function saveTownAssetImage(id, dataUrl) {
   return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
+}
+
+// 按截取框裁剪素材并覆盖（放大查看后划定最终成图范围）
+export function cropTownAsset(id, rect) {
+  return jsonRequest(`${BASE}/town/assets/${id}/crop`, townJson('POST', rect))
+}
+
+// 小镇立绘 HiresFix 细化（按全局 HiresFix 设置覆盖原图）
+export function refineTownAssetHires(id) {
+  return jsonRequest(`${BASE}/town/assets/${id}/hires`, townJson('POST', {}))
 }
 
 // 地图（编辑器保存 / 渲染载荷）
@@ -1978,6 +1988,10 @@ export function startTownInit(payload) {
 
 export function updateTownBlueprint(blueprint) {
   return jsonRequest(`${BASE}/town/init/blueprint`, townJson('PUT', blueprint))
+}
+
+export function generateTownAssetPrompts(payload) {
+  return jsonRequest(`${BASE}/town/init/asset-prompts`, townJson('POST', payload))
 }
 
 export function generateTownSamples() {
@@ -2045,6 +2059,10 @@ export function generateTownNpcSprites(id, overrides = {}) {
 
 export function generateTownNpcPortrait(id, overrides = {}) {
   return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', overrides))
+}
+
+export function regenerateTownNpcPersonaCard(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/persona-card`, townJson('POST', overrides))
 }
 
 export function inviteTownNpc(id) {

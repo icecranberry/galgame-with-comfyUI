@@ -14,6 +14,7 @@ import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
 import { postProcessAsset, detectTileAnchorY, flattenIsoTile } from './assetPostProcess.js';
+import { refineImage } from '../imageRefine.js';
 import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
 
@@ -105,8 +106,8 @@ export const DEFAULT_PROMPT_PREFIX = {
   npc: 'pixel art, game sprite, mini human sized, full body',
   player: 'pixel art, game sprite, mini human sized, full body',
   portrait: '',
-  ground: '',
-  road: '',
+  ground: 'pixel art, game sprite',
+  road: 'pixel art, game sprite',
 };
 
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
@@ -202,7 +203,7 @@ async function generateIntoRow(row) {
     const result = await generateImageRaw(prompt, {
       scene: 'town',
       disableRAG: true,
-      artist: spec.artist !== undefined ? spec.artist : config.comfyui.artist,
+      artist: meta.artist !== undefined ? meta.artist : (spec.artist !== undefined ? spec.artist : config.comfyui.artist),
       width: size.width,
       height: size.height,
       loras: Array.isArray(meta.loras) && meta.loras.length ? meta.loras : undefined,
@@ -304,6 +305,70 @@ export async function saveEditedAssetImage(id, dataUrl) {
   return fresh;
 }
 
+/**
+ * 按截取框裁剪素材并覆盖（前端放大查看后划定最终成图范围）
+ * @param {number} id - 素材 id
+ * @param {{x:number,y:number,w:number,h:number}} rect - 存储图像素坐标的截取框
+ */
+export async function cropAssetImage(id, rect) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  const { x, y, w, h } = rect || {};
+  if (![x, y, w, h].every(v => Number.isInteger(v) && v >= 0) || w < 8 || h < 8) {
+    throw new Error('截取框无效');
+  }
+  const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
+  if (!fs.existsSync(filePath)) throw new Error('素材文件不存在');
+  const meta = await sharp(filePath).metadata();
+  if (x + w > meta.width || y + h > meta.height) throw new Error('截取框超出图片范围');
+  const out = await sharp(filePath)
+    .extract({ left: x, top: y, width: w, height: h })
+    .png()
+    .toBuffer();
+  fs.writeFileSync(filePath, out);
+
+  const m = JSON.parse(row.meta_json || '{}');
+  m.updatedAt = Date.now();
+  m.croppedAt = m.updatedAt;
+  m.pixelSize = { w, h };
+  if (row.kind === 'ground' || row.kind === 'road') m.groundAnchorY = 0.5; // 裁切后菱形占满画幅
+  db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ? WHERE id = ?')
+    .run(`/town-assets/${path.basename(filePath)}`, JSON.stringify(m), id);
+  const fresh = getAssetById(id);
+  broadcastTownAssetsUpdated({ asset: fresh });
+  return fresh;
+}
+
+/** 小镇立绘 HiresFix：沿用素材 source_prompt/meta，并按全局 HiresFix 设置细化后覆盖 */
+export async function refineAssetWithHires(id) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  if (row.kind !== 'portrait') throw new Error('仅支持细化立绘素材');
+  if (!row.source_prompt?.trim()) throw new Error('素材缺少生成提示词');
+  const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
+  if (!fs.existsSync(filePath)) throw new Error('素材文件不存在');
+
+  const meta = JSON.parse(row.meta_json || '{}');
+  await refineImage({
+    filePath,
+    promptText: row.source_prompt,
+    artist: meta.artist !== undefined ? meta.artist : config.comfyui.artist,
+    loras: Array.isArray(meta.loras) ? meta.loras : [],
+    scene: 'town',
+  });
+
+  const sharpMeta = await sharp(filePath).metadata();
+  meta.updatedAt = Date.now();
+  meta.hiresAt = meta.updatedAt;
+  meta.pixelSize = { w: sharpMeta.width, h: sharpMeta.height };
+  db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
+  const fresh = getAssetById(id);
+  broadcastTownAssetsUpdated({ asset: fresh });
+  return fresh;
+}
+
 // ── 对外 API ──
 
 export function getAssetById(id) {
@@ -359,6 +424,7 @@ export function regenerateAsset(id, overrides = {}) {
   if (overrides.styleTags !== undefined) meta.styleTags = overrides.styleTags;
   if (overrides.prompt !== undefined && String(overrides.prompt).trim()) meta.promptOverride = String(overrides.prompt).trim();
   if (Array.isArray(overrides.loras)) meta.loras = overrides.loras;
+  if (overrides.artist !== undefined) meta.artist = overrides.artist;
   if (overrides.promptPrefix !== undefined) meta.promptPrefix = overrides.promptPrefix;
   db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
   return enqueueAssetJob(() => generateIntoRow(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));

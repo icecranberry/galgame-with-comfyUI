@@ -174,6 +174,10 @@ export const useTownStore = defineStore('town', () => {
     return data
   }
 
+  function clearDraftPreview() {
+    draftPreview.value = null
+  }
+
   async function movePlayer(x, y) {
     return api.moveTownPlayer(x, y)
   }
@@ -232,7 +236,7 @@ export const useTownStore = defineStore('town', () => {
     snapshot, serverOffset, connected, loaded,
     map, locations, agents, player, weather, encountersActive, initialized,
     mapData, mapLoading, assets, initState, draftPreview, renderMap,
-    fetchState, fetchMap, fetchAssets, fetchInitState, refreshDraftPreview,
+    fetchState, fetchMap, fetchAssets, fetchInitState, refreshDraftPreview, clearDraftPreview,
     movePlayer, movePlayerDir, startTownStream, stopTownStream,
   }
 })

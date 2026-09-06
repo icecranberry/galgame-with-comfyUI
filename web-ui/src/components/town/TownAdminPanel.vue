@@ -121,7 +121,6 @@
             <div class="ap-section">
               <div class="ap-section-title">人设</div>
               <p class="ap-persona">{{ detailNpc.persona || '（还没有人设）' }}</p>
-              <p class="ap-appearance" v-if="detailNpc.appearanceDesc">{{ detailNpc.appearanceDesc }}</p>
             </div>
 
             <div class="ap-section">
@@ -153,13 +152,13 @@
           <div class="ap-detail">
             <div class="ap-detail-name">我（玩家）的形象</div>
             <div class="ap-section">
-              <div class="ap-section-title">立绘（900×1600，白底抠白）</div>
+              <div class="ap-section-title">立绘（900×1600，可抠除底色）</div>
               <TownImageEditor
                 v-if="playerKit.portrait?.status === 'ready'"
                 :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)"
                 :asset-id="playerKit.portrait.id"
                 :fit-height="300"
-                hint="点击白色继续抠白 · 拖动检查"
+                hint="点击底色或多余白色 · 可拖动检查"
               />
               <div v-else class="ap-empty is-small">还没有立绘，点下方生成。</div>
             </div>
@@ -168,7 +167,7 @@
               <div class="ap-sprite-row">
                 <template v-if="playerKit.sprites?.down?.status === 'ready'">
                   <div class="ap-player-sprite">
-                    <TownImageEditor :src="playerKit.sprites.down.image_path + '?v=' + (playerKit.sprites.down.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.down.id" :fit-height="170" hint="正面：脚底贴底" />
+                    <TownImageEditor :src="playerKit.sprites.down.image_path + '?v=' + (playerKit.sprites.down.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.down.id" :fit-height="170" hint="正面：可拖动检查位置" />
                   </div>
                   <div class="ap-player-sprite" v-if="playerKit.sprites?.up?.status === 'ready'">
                     <TownImageEditor :src="playerKit.sprites.up.image_path + '?v=' + (playerKit.sprites.up.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.up.id" :fit-height="170" hint="背面" />
@@ -271,7 +270,7 @@
 
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
-            <p class="ap-danger-desc">重新初始化会清除当前地图、地点与所有居民（相遇历史保留）。</p>
+            <p class="ap-danger-desc">重新初始化会清除当前地图、地点、所有居民与相遇历史。</p>
             <linshe-button variant="danger" size="sm" :loading="resetting" @click="resetting = true">
               重新初始化世界
             </linshe-button>

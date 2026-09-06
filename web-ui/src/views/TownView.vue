@@ -843,6 +843,7 @@ async function saveEditor() {
 
 function onTownApplied() {
   showWizard.value = false
+  town.clearDraftPreview()
   town.fetchState().catch(() => {})
 }
 
