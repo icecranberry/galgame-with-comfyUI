@@ -47,6 +47,7 @@ import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
 import { playNotificationSound } from './utils/sound.js'
 import { useMailboxStore } from './stores/mailbox.js'
+import { onEvent as onStreamEvent } from './stores/unifiedStream.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -163,17 +164,14 @@ onMounted(async () => {
   })
 
   // 订阅日程延迟回复 SSE 事件
-  try {
-    const { onEvent } = await import('./stores/unifiedStream.js')
-    onEvent('delayed_reply', (data) => {
-      chat.handleDelayedReply(data)
-      // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
-      if (data.character_id !== chat.activeCharId) {
-        playNotificationSound()
-        proactive.addProactive(data)
-      }
-    })
-  } catch { /* unifiedStream may not be ready */ }
+  onStreamEvent('delayed_reply', (data) => {
+    chat.handleDelayedReply(data)
+    // 非当前活跃角色 → 播放提示音 + 红点（延迟回复也应有通知）
+    if (data.character_id !== chat.activeCharId) {
+      playNotificationSound()
+      proactive.addProactive(data)
+    }
+  })
 
   // 信箱新回信 → 播放提示音
   watch(() => mailbox.unreadCount, (newVal, oldVal) => {
@@ -216,81 +214,9 @@ onUnmounted(() => {
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-:root {
-  --bg-primary: #f0ece8;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #ebebeb;
-  --bg-hover: #e0e0e0;
-  --border: #e0dcd6;
-  --text-primary: #333333;
-  --text-secondary: #8c8074;
-  --text-bright: #111111;
-  --accent: #e07b6c;
-  --accent-hover: #cc6a5c;
-  --accent-light: #f0a89a;
-  --success: #52c41a;
-  --warning: #faad14;
-  --danger: #e25c5c;
-
-  /* Glassmorphism tokens */
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-bg-strong: rgba(255, 255, 255, 0.38);
-  --glass-border: rgba(255, 255, 255, 0.28);
-  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
-  --glass-blur: blur(18px);
-}
-
-html, body, #app {
-  height: 100%;
-  min-height: 100vh; min-height: 100dvh;
-  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  color: var(--text-primary);
-  overflow: hidden;
-}
-html, body { background: var(--bg-primary); }
-#app { background: transparent; display: flex; flex-direction: column; }
-
 .app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
 .page-host { position: relative; flex: 1; min-width: 0; }
-/* Route transition: 0.25s fade between pages */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 0.25s ease;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-}
 #app { position: relative; z-index: 1; }
-
-/* 按钮统一使用 LinsheButton 组件（web-ui/src/components/ui/LinsheButton.vue），
-   不再提供全局 button 标签样式，避免样式污染。 */
-
-/* 文本输入框统一使用 LinsheInput 组件（web-ui/src/components/ui/LinsheInput.vue）。
-   以下全局样式仅作为 select 等未组件化控件及特殊输入界面的兜底，观感与 LinsheInput 保持一致。 */
-input, textarea, select {
-  background: #fffdfb; border: 1.5px solid #e3dcd2;
-  border-radius: 10px; color: var(--text-bright); padding: 8px 12px;
-  font-size: 13px; outline: none; caret-color: var(--accent);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-}
-input:focus, textarea:focus, select:focus {
-  border-color: var(--accent); background: #fff;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
-}
-textarea { resize: vertical; font-family: inherit; }
-
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d0d0d0; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
 
 /* ── 移动端 Sidebar 遮罩 ── */
 .mobile-scrim {
@@ -352,7 +278,7 @@ textarea { resize: vertical; font-family: inherit; }
   pointer-events: none;
 }
 .mobile-toast b {
-  color: #F0A89A;
+  color: var(--accent-light);
   font-weight: 600;
 }
 .toast-icon { font-size: 18px; flex-shrink: 0; }
@@ -373,9 +299,4 @@ textarea { resize: vertical; font-family: inherit; }
   opacity: 0;
   transform: translateX(-50%) translateY(12px);
 }
-
-.modal-fade-enter-active { transition: opacity 0.3s ease; }
-.modal-fade-leave-active { transition: opacity 0.2s ease; }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-
 </style>

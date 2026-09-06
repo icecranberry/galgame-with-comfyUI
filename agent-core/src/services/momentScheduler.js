@@ -8,7 +8,13 @@
  */
 
 import { getDb } from '../db/index.js';
-import { generateMomentPost } from '../routes/moments.js';
+
+// 生成函数由路由层装配时注入（setMomentPostGenerator），
+// 避免服务层静态反向依赖路由模块（service → route）。
+let momentPostGenerator = null;
+export function setMomentPostGenerator(fn) {
+  momentPostGenerator = fn;
+}
 
 const CHECK_INTERVAL = 10 * 60 * 1000; // 10 分钟
 
@@ -73,7 +79,11 @@ async function tick() {
     console.log(`[momentScheduler] Generating moment for ${candidate.display_name}...`);
 
     try {
-      await generateMomentPost(candidate);
+      if (!momentPostGenerator) {
+        console.warn('[momentScheduler] moment post generator not wired yet, skip this tick');
+        return;
+      }
+      await momentPostGenerator(candidate);
       console.log(`[momentScheduler] Done: ${candidate.display_name}`);
     } catch (err) {
       console.error(`[momentScheduler] Failed for ${candidate.display_name}:`, err.message);

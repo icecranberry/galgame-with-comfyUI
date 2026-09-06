@@ -289,34 +289,8 @@ async function save() {
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-.modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(1080px, 94vw); height: 90dvh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-}
-.modal-wide { width: min(1080px, 94vw); }
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; flex-shrink: 0;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-}
-.modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.modal-body { padding: 16px 22px; overflow-y: auto; flex: 1; scrollbar-width: none; -ms-overflow-style: none; }
-.modal-body::-webkit-scrollbar { display: none; }
-.modal-actions {
-  display: flex; align-items: center; gap: 10px;
-  flex-shrink: 0;
-  padding: 12px 22px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
+/* ═══ 弹窗骨架已迁移至全局 .modal-*（styles/components.css）═══ */
+.modal-body { padding: 16px 22px 22px; }
 
 .hires-hint { margin: 0 0 16px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
 .hires-main-body {
@@ -349,9 +323,9 @@ async function save() {
   text-align: center; white-space: nowrap;
   user-select: none;
 }
-.artist-mode-chip:hover { color: #E07B6C; }
+.artist-mode-chip:hover { color: var(--accent); }
 .artist-mode-chip.active {
-  background: #FFFEFC; color: #E07B6C; font-weight: 600;
+  background: #FFFEFC; color: var(--accent); font-weight: 600;
   box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
 .artist-mode-hint { margin-top: 7px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
@@ -402,11 +376,11 @@ async function save() {
   transition: background 180ms ease, color 180ms ease;
 }
 .lora-dropdown-item:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 .lora-dropdown-item.active {
-  background: rgba(224,123,108,0.06);
+  background: rgba(var(--accent-rgb),0.06);
   color: var(--accent);
   font-weight: 600;
 }
@@ -425,17 +399,13 @@ async function save() {
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 14px 0 8px; margin-bottom: 0; }
 .lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; user-select: none; }
-.lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
+.lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
 .lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
 .lora-civitai-link:hover { opacity: 1; text-decoration: underline; }
 
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-@keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+/* 弹窗动画已迁移至全局 animations.css */
 
 @media (max-width: 767px) {
   .modal-panel, .modal-wide { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }

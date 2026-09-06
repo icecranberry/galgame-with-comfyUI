@@ -1,0 +1,64 @@
+/* ═══════════════════════════════════════════════════════
+   base.css —— reset、元素默认、可访问性兜底
+   ═══════════════════════════════════════════════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body, #app {
+  height: 100%;
+  min-height: 100vh; min-height: 100dvh;
+  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  color: var(--text-primary);
+  overflow: hidden;
+}
+html, body { background: var(--bg-primary); transition: background-color 0.3s ease; }
+#app { background: transparent; display: flex; flex-direction: column; }
+
+::selection { background: rgba(var(--accent-rgb), 0.22); }
+
+/* ── 按钮基类 + 全局贴纸按压 ── */
+button {
+  cursor: pointer; border: none; border-radius: var(--radius-sm);
+  padding: 7px 14px; font-size: var(--fs-base); font-weight: 500;
+  transition:
+    transform 0.12s var(--ease-out),
+    box-shadow var(--dur-fast) ease,
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 赛璐璐手感：按下时贴纸微微下沉（自身定义了 :active transform 的组件不受影响） */
+button:active:not(:disabled):not(.no-press) { transform: translateY(1.5px) scale(0.985); }
+
+/* ── 表单元素 ── */
+input, textarea, select {
+  background: rgba(255, 255, 255, 0.9); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text-bright); padding: 8px 12px;
+  font-size: var(--fs-base); outline: none;
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+textarea { resize: vertical; font-family: inherit; }
+
+/* ── 滚动条 ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cfcbE4; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #b0aad0; }
+
+/* ── 键盘可达性 ── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* ── 动效减免：全局兜底（各组件无需单独处理）── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

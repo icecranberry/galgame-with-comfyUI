@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
+import { useMessageWindow } from '../composables/useMessageWindow.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -27,18 +28,16 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
+  const memoryRecalling = ref(false)  // Memory v3 阶段二：@memory 主动回想进行中（回想状态条）
   const guesses = ref(null)  // { a: string, b: string } | null — 回复候选词
   const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
   const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
-  // 客户端渲染窗口：messages 已全量加载，renderStart 控制从哪条开始显示
-  const INITIAL_COUNT = 50
-  const EXPAND_COUNT = 30
-  const renderStart = ref(0)
-  const visibleMessages = computed(() => messages.value.slice(renderStart.value))
-  const hasMoreOlder = computed(() => renderStart.value > 0)
+  // 客户端渲染窗口：messages 已全量加载，窗口策略统一由 useMessageWindow 提供
+  const { visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
+    useMessageWindow(messages)
 
   async function loadCharacters() {
     try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
@@ -50,7 +49,7 @@ export const useChatStore = defineStore('chat', () => {
       const raw = d.messages || [];
       const result = rawToMessages(raw);
       messages.value = result;
-      renderStart.value = Math.max(0, result.length - INITIAL_COUNT);
+      anchorToLatest();
       // 恢复好感度快照（切角色后 reatimeAffinity 被清空，从 DB 恢复）
       if (d.affinity && !realtimeAffinity.value) {
         realtimeAffinity.value = {
@@ -136,8 +135,7 @@ export const useChatStore = defineStore('chat', () => {
 
   // 向上展开渲染窗口（无需网络请求，数据已全量在内存中）
   function expandWindow() {
-    if (!hasMoreOlder.value) return
-    renderStart.value = Math.max(0, renderStart.value - EXPAND_COUNT)
+    expandOlder()
   }
 
   // 后台图片编辑任务确认覆盖后，刷新消息里的图片 URL（避免浏览器缓存旧图）
@@ -163,7 +161,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     activeCharId.value = charId
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
     guesses.value = null  // 切角色时清除候选词
     realtimeAffinity.value = null  // 切角色时清除实时好感度
     // 标记主动消息已读（DB 持久化），Sidebar 的 onCharClick 也会调，这里兜底
@@ -192,7 +190,7 @@ export const useChatStore = defineStore('chat', () => {
     showTypingDots.value = false
     await api.clearMessages(id)
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
   }
 
   // 撤回上一轮对话（用户最后一条消息 + 之后的所有 assistant 消息）
@@ -244,9 +242,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 调整渲染窗口
-    if (renderStart.value > messages.value.length - INITIAL_COUNT) {
-      renderStart.value = Math.max(0, messages.value.length - INITIAL_COUNT)
-    }
+    keepTailPinned()
   }
 
   // 在设置页面调用：AI 生成角色并直接入库
@@ -280,7 +276,7 @@ export const useChatStore = defineStore('chat', () => {
     showTypingDots.value = false
     await api.deleteCharacter(id)
     messages.value = []
-    renderStart.value = 0
+    resetToLatest()
     activeCharId.value = null
     await loadCharacters()
   }
@@ -302,7 +298,7 @@ export const useChatStore = defineStore('chat', () => {
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
     messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
 
-    streaming.value = true; streamingContent.value = ''; showTypingDots.value = true
+    streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
 
     // ── 安全超时：自适应时长，防止 streaming 永久锁死发送键 ──
     //     纯文本场景 30s，生图场景延长到 600s（匹配 ComfyUI 后端超时）
@@ -507,7 +503,7 @@ export const useChatStore = defineStore('chat', () => {
               bubbleIds.push(newId)
             }
             // ── context_update ──
-            if (lastEvent === 'context_update' && d.content) {
+            if (lastEvent === 'context_update' && d.content !== undefined && d.content !== null) {
               fullResponse = d.content
                if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
                clearPendingEmojiTimers()
@@ -531,6 +527,15 @@ export const useChatStore = defineStore('chat', () => {
                 messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
               }
               bubbleIds.length = parts.length
+            }
+            // ── @memory 主动回想：状态条 ──
+            if (lastEvent === 'memory_recall_start') {
+              // Memory v3 阶段二：角色发起主动回想，显示状态条并刷新安全超时
+              memoryRecalling.value = true
+              resetSafetyTimer(TEXT_SAFETY_MS)
+            }
+            if (lastEvent === 'memory_recall_end') {
+              memoryRecalling.value = false
             }
             // ── 深度思考 plan 事件（发生在正式回复之前）──
             if (lastEvent === 'plan_start') {
@@ -704,10 +709,12 @@ export const useChatStore = defineStore('chat', () => {
         }
         break
       } finally {
-        if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+        if (_bufTimer) { clearTimeout(_bufTimer) }
+        memoryRecalling.value = false
         reader.releaseLock()
         if (!isCurrentStream(sessionId)) {
           clearSafetyTimer()
+          // eslint-disable-next-line no-unsafe-finally -- 流已被新会话接管时静默退出是既定语义，不吞异常路径之外的逻辑
           return
         }
 
@@ -873,6 +880,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule, getSetting, setSetting, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
-import { searchCharacterInfo } from '../services/webSearch.js';
+import { searchCharacterInfo } from '../services/webSearch.js'; // 出站已白名单化（见 webSearch.js assertAllowedOutboundUrl / toSafeMoegirlScrapeUrl）
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache } from './images.js';
 import { deleteByConversation } from '../services/vectorClient.js';
@@ -30,33 +30,47 @@ const router = Router();
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
   const db = getDb();
-  const characters = db.prepare(`SELECT * FROM characters`).all();
+  const characters = db.prepare('SELECT * FROM characters').all();
+
+  // 聚合查询代替每角色 4 条子查询（N+1 → 固定 4 条，规模不随角色数增长）
+  const lastByConv = db.prepare(`
+    SELECT conversation_id, content, created_at FROM (
+      SELECT conversation_id, content, created_at,
+             ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY id DESC) AS rn
+      FROM messages
+      WHERE raw_id IS NOT NULL AND conversation_id LIKE 'char_%'
+    ) WHERE rn = 1
+  `).all();
+  const countsByConv = db.prepare(`
+    SELECT conversation_id, COUNT(*) AS c FROM raw_messages
+    WHERE conversation_id LIKE 'char_%' GROUP BY conversation_id
+  `).all();
+  const relCounts = db.prepare(`
+    SELECT id, COUNT(*) AS relationship_count FROM (
+      SELECT from_character_id AS id FROM character_relationships
+      UNION ALL
+      SELECT to_character_id AS id FROM character_relationships
+    ) GROUP BY id
+  `).all();
+  const userRels = db.prepare(
+    'SELECT character_id, affinity, is_oath FROM user_relationships'
+  ).all();
+
+  const lastMap = new Map(lastByConv.map(r => [r.conversation_id, r]));
+  const countMap = new Map(countsByConv.map(r => [r.conversation_id, r.c]));
+  const relMap = new Map(relCounts.map(r => [r.id, r.relationship_count]));
+  const userRelMap = new Map(userRels.map(r => [r.character_id, r]));
 
   const enriched = characters.map(c => {
     const convId = `char_${c.id}`;
-    const last = db.prepare(`
-      SELECT role, content, created_at FROM messages
-      WHERE conversation_id = ? AND raw_id IS NOT NULL
-      ORDER BY id DESC LIMIT 1
-    `).get(convId);
-
-    const count = db.prepare(`SELECT COUNT(*) as c FROM raw_messages WHERE conversation_id = ?`).get(convId);
-
-    const relCount = db.prepare(`
-      SELECT COUNT(*) as c FROM character_relationships
-      WHERE from_character_id = ? OR to_character_id = ?
-    `).pluck().get(c.id, c.id);
-
-    const userRel = db.prepare(
-      'SELECT affinity, is_oath FROM user_relationships WHERE character_id = ?'
-    ).get(c.id);
-
+    const last = lastMap.get(convId);
+    const userRel = userRelMap.get(c.id);
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
       last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
-      message_count: count?.c || 0,
-      relationship_count: relCount || 0,
+      message_count: countMap.get(convId) || 0,
+      relationship_count: relMap.get(c.id) || 0,
       affinity: userRel?.affinity ?? 50,
       is_oath: userRel?.is_oath ?? 0,
     };
@@ -181,7 +195,7 @@ router.put('/standing-mode', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
@@ -194,6 +208,7 @@ router.put('/:id', (req, res) => {
   }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
+  if (chat_bg_path !== undefined) { updates.push('chat_bg_path = ?'); params.push(chat_bg_path || null); }
 
   if (moments_disabled !== undefined) { updates.push('moments_disabled = ?'); params.push(moments_disabled ? 1 : 0); }
   if (proactive_disabled !== undefined) { updates.push('proactive_disabled = ?'); params.push(proactive_disabled ? 1 : 0); }
@@ -238,7 +253,12 @@ router.put('/:id', (req, res) => {
 // POST /api/characters/:id/avatar — 上传裁剪后的头像（base64 png）
 router.post('/:id/avatar', (req, res) => {
   const db = getDb();
-  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  // :id 会被拼进头像文件名，必须先归一化为正整数，防止 %2F 编码绕过造成目录穿越
+  const avatarCharId = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(avatarCharId) || avatarCharId <= 0) {
+    return res.status(400).json({ error: 'invalid character id' });
+  }
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(avatarCharId);
   if (!char) return res.status(404).json({ error: 'Character not found' });
 
   const { base64 } = req.body;
@@ -260,7 +280,7 @@ router.post('/:id/avatar', (req, res) => {
   const avatarsDir = path.join(projectRoot, 'data', 'avatars');
   fs.mkdirSync(avatarsDir, { recursive: true });
 
-  const filename = `avatar_${req.params.id}_${Date.now()}.png`;
+  const filename = `avatar_${avatarCharId}_${Date.now()}.png`;
   const filePath = path.join(avatarsDir, filename);
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
   fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
@@ -1123,6 +1143,129 @@ ${buildCharacterPersona(char, { variant: 'full' })}
   }
 });
 
+// POST /api/characters/:id/chat-bg — 上传聊天背景图（base64），空 base64 = 恢复默认
+router.post('/:id/chat-bg', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, chat_bg_path FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const { base64 } = req.body;
+  if (!base64) {
+    if (char.chat_bg_path) {
+      try { deleteImageFileByUrl(char.chat_bg_path); } catch {}
+    }
+    db.prepare('UPDATE characters SET chat_bg_path = NULL WHERE id = ?').run(req.params.id);
+    return res.json({ ok: true, chat_bg_path: null });
+  }
+
+  const filename = `chatbg_${req.params.id}_${Date.now()}.png`;
+  const url = saveBase64Image('chatbg', filename, base64);
+
+  if (char.chat_bg_path) {
+    try { deleteImageFileByUrl(char.chat_bg_path); } catch {}
+  }
+
+  db.prepare('UPDATE characters SET chat_bg_path = ? WHERE id = ?').run(url, req.params.id);
+  invalidateGalleryCache();
+  res.json({ ok: true, chat_bg_path: url });
+});
+
+// POST /api/characters/:id/generate-chat-bg — AI 生成聊天背景（依据角色设定与可选的场景提示，横版无人物）
+router.post('/:id/generate-chat-bg', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const userHint = String(req.body?.prompt || '').trim().slice(0, 300);
+  const imagePromptRule = getGlobalRule('image_prompt');
+  const imageRuleContent = imagePromptRule?.rule_content || '';
+
+  const systemPrompt = `你是专业的场景背景生成提示词助手。根据角色的人格设定${userHint ? '和用户的场景提示' : ''}，生成一张用作聊天界面背景的场景画面描述。
+
+${imageRuleContent ? `【画面描述要求】
+${imageRuleContent}
+` : ''}
+
+【聊天背景额外要求】
+- 画面中绝对不能出现任何人物、人影、角色、手部或面部（no humans, no characters, scenery only）
+- 横版构图（landscape orientation），主体内容集中在画面中部，上下留有呼吸感的留白
+- 色调柔和明亮，不要过暗或高对比，方便在其上叠加聊天气泡
+- 画面描述控制在 60 个英文单词以内
+- 直接输出英文画面描述，不要任何格式包装或额外文字`;
+
+  const userMsg = `请根据以下角色设定，生成一张 TA 的聊天界面背景场景描述${userHint ? `。用户希望的场景：${userHint}` : ''}（可从角色的生活环境、性格气质出发想象 TA 的房间或常去的地方）：
+
+---角色设定---
+${char.base_prompt}
+---`;
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[generate-chat-bg] Step 1/2: generating scene prompt for character "${char.display_name}"...`);
+
+    const llmResult = await chatSync([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ], { model, temperature: 0.7, max_tokens: 512, label: '生成聊天背景提示词' });
+
+    let promptText = llmResult.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (!promptText || promptText.length < 10) {
+      return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+    }
+    // 双保险：剥离可能残留的人物类标签
+    promptText = promptText.replace(/\b(1girl|2girls|solo|girl|boy|portrait|face focus|close-up( on face)?)\b\s*,?\s*/gi, '');
+    promptText = promptText.replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '');
+
+    console.log(`[generate-chat-bg] Prompt generated: "${promptText.slice(0, 80)}..."`);
+
+    // Step 2: ComfyUI 横版生图（SDXL 横版标准分辨率）
+    console.log('[generate-chat-bg] Step 2/2: generating image at 1216x704...');
+    const charLoras = _parseCharLoras(char.loras);
+    const bgArtist = charArtistOverride(char);
+    const result = await generateImageRaw(`${promptText}, no humans, scenery only`, {
+      promptScene: 'standalone',
+      ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
+      skipOptimization: true,
+      artist: bgArtist !== null ? bgArtist : config.comfyui.momentsArtist,
+      width: 1216,
+      height: 704,
+      loras: charLoras.length > 0 ? charLoras : undefined,
+      ...(char.custom_workflow ? { customWorkflow: char.custom_workflow } : {}),
+      onProgress: (p) => {
+        if (p.stage) console.log(`[generate-chat-bg] ComfyUI: ${p.stage}`);
+      },
+    });
+
+    if (result.success && result.images.length > 0) {
+      const savedPaths = [];
+      for (const img of result.images) {
+        const filename = `chatbg_gen_${req.params.id}_${Date.now()}_${img.filename || 'comfy.png'}`;
+        const url = saveBase64Image('chatbg', filename, img.base64);
+        savedPaths.push(url);
+        img.url = url;
+      }
+
+      db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
+        VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
+        .run(`char_${char.id}_chatbg`, promptText, result.promptRefined || promptText, JSON.stringify(savedPaths), getLastWorkflowMode());
+
+      invalidateGalleryCache();
+
+      res.json({
+        success: true,
+        images: result.images,
+        savedPaths,
+        promptText,
+      });
+    } else {
+      res.status(500).json({ error: result.error || '图像生成失败，请重试' });
+    }
+  } catch (err) {
+    console.error('[generate-chat-bg] error:', err.message);
+    res.status(500).json({ error: '生成失败: ' + err.message });
+  }
+});
+
+
 // ── 角色立绘（纯白背景全身立绘，1:2，人设卡 short_prompt + 外观注入） ──
 
 /**
@@ -1166,7 +1309,6 @@ router.post('/:id/generate-standing', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
-
   const requirement = typeof req.body?.requirement === 'string' ? req.body.requirement.trim().slice(0, 500) : '';
   const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
 

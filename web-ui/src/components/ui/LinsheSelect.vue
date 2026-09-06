@@ -308,14 +308,14 @@ defineExpose({ open: openPanel })
   box-sizing: border-box; width: 100%;
   font-family: inherit; line-height: 1.4;
   color: var(--text-bright);
-  background: #fffdfb;
-  border: 1.5px solid #e3dcd2;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border);
   border-radius: 10px;
   cursor: pointer; user-select: none;
   outline: none;
   text-align: left;
   position: relative;
-  box-shadow: inset 0 1px 2px rgba(96, 66, 46, 0.05);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease,
@@ -328,25 +328,25 @@ defineExpose({ open: openPanel })
 .ls-select--lg .ls-select-trigger { min-height: 42px; padding: 10px 32px 10px 14px; font-size: 14px; border-radius: 12px; }
 
 .ls-select-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ls-select-label.placeholder { color: #b8afa5; }
+.ls-select-label.placeholder { color: var(--text-secondary); }
 
 /* ── 悬停：边框加深一点（同 LinsheInput） ── */
-.ls-select-trigger:hover { border-color: #d5cabb; }
+.ls-select-trigger:hover { border-color: var(--border-strong); }
 
-/* ── 展开 / 聚焦：凹痕被珊瑚色照亮 ── */
+/* ── 展开 / 聚焦：凹痕被主题色照亮 ── */
 .ls-select-trigger:focus-visible,
 .ls-select-wrapper.is-open:not(.is-disabled) .ls-select-trigger {
-  background: #fff;
+  background: var(--bg-secondary);
   border-color: var(--accent);
   box-shadow:
-    0 0 0 3px rgba(224, 123, 108, 0.14),
+    0 0 0 3px rgba(var(--accent-rgb), 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .ls-select-chevron {
   position: absolute; right: 10px; top: 50%;
   transform: translateY(-50%);
-  color: #b8afa5;
+  color: var(--text-secondary);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s;
   pointer-events: none;
 }
@@ -356,21 +356,21 @@ defineExpose({ open: openPanel })
 
 /* ── 禁用：同 LinsheInput ── */
 .ls-select-wrapper.is-disabled .ls-select-trigger {
-  background: #f6f3ee;
-  border-color: #eae4da;
-  color: #b3aca4;
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-secondary);
   cursor: not-allowed;
   box-shadow: none;
 }
-.ls-select-wrapper.is-disabled .ls-select-trigger:hover { border-color: #eae4da; }
-.ls-select-wrapper.is-disabled .ls-select-label.placeholder { color: #c4bdb2; }
-.ls-select-wrapper.is-disabled .ls-select-chevron { color: #c4bdb2; }
+.ls-select-wrapper.is-disabled .ls-select-trigger:hover { border-color: var(--border); }
+.ls-select-wrapper.is-disabled .ls-select-label.placeholder { color: var(--text-secondary); }
+.ls-select-wrapper.is-disabled .ls-select-chevron { color: var(--text-secondary); }
 
 /* ── 选项面板：轻量浮层 ── */
 .ls-select-dropdown {
   position: fixed;
-  background: #fff;
-  border: 1px solid #e3dcd2;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.1), 0 2px 8px rgba(0,0,0,0.06);
   z-index: 11000;
@@ -394,8 +394,8 @@ defineExpose({ open: openPanel })
   transition: background 0.15s, color 0.15s;
 }
 .ls-select-option:hover,
-.ls-select-option.highlighted { background: rgba(224, 123, 108, 0.08); color: var(--accent); }
-.ls-select-option.active { background: rgba(224, 123, 108, 0.1); color: var(--accent-hover); font-weight: 600; }
+.ls-select-option.highlighted { background: rgba(var(--accent-rgb), 0.08); color: var(--accent); }
+.ls-select-option.active { background: rgba(var(--accent-rgb), 0.1); color: var(--accent-hover); font-weight: 600; }
 
 .ls-select-check { flex-shrink: 0; color: var(--accent); }
 

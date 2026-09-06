@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { readdir, stat } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
@@ -33,59 +32,10 @@ const FOLDER_LABEL = {
 // 最近一次测试画风成功结果（仅内存，不落盘），供测试细化选取“最近一张图”
 let lastStyleTest = null;
 
-// ── 相册缓存（避免每次请求都 readdir + stat 阻塞事件循环）──
-const galleryCache = {
-  data: null,       // { images: [...], total: number }
-  mtime: 0,         // 缓存创建时间
-  ttl: 30_000,      // 30 秒 TTL（生图不频繁，短缓存已足够）
-};
-
-/** 扫描单个目录，返回带 folder 标记的图片列表 */
-async function scanDirectory(dirPath, category, urlPrefix) {
-  try {
-    const files = await readdir(dirPath);
-    const imageFiles = files.filter(f => /\.(png|jpg|jpeg|webp|gif|avif)$/i.test(f));
-    if (imageFiles.length === 0) return [];
-
-    const BATCH_SIZE = 64;
-    const results = [];
-    for (let i = 0; i < imageFiles.length; i += BATCH_SIZE) {
-      const batch = imageFiles.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(async (name) => {
-          const s = await stat(join(dirPath, name));
-          return { name, size: s.size, mtime: s.mtimeMs, folder: category, url: `${urlPrefix}/${name}` };
-        })
-      );
-      results.push(...batchResults);
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
-
-/** 刷新相册缓存：扫描所有子目录 + 历史平铺目录，批量 stat */
-async function refreshGalleryCache() {
-  const dirs = getAllImageDirs();
-  const allResults = [];
-
-  for (const { category, dir, urlPrefix } of dirs) {
-    const results = await scanDirectory(dir, category, urlPrefix);
-    allResults.push(...results);
-  }
-
-  allResults.sort((a, b) => b.mtime - a.mtime);
-
-  galleryCache.data = { images: allResults, total: allResults.length };
-  galleryCache.mtime = Date.now();
-}
-
-/** 当新图片生成后调用，使缓存失效（由 imageSkill 在生图成功后调用） */
-export function invalidateGalleryCache() {
-  galleryCache.data = null;
-  galleryCache.mtime = 0;
-}
+// ── 相册缓存已下沉到 services/galleryCache.js（服务层/路由层统一从这里导入）──
+import { galleryCache, refreshGalleryCache, invalidateGalleryCache } from '../services/galleryCache.js';
+// 兼容再导出：characters.js 等历史调用方仍从本模块导入
+export { invalidateGalleryCache };
 
 // GET /api/images/gallery — 获取相册图片列表（按修改时间倒序，支持分页 + 文件夹筛选）
 router.get('/gallery', async (req, res) => {
@@ -805,7 +755,17 @@ router.delete('/delete', async (req, res) => {
     dirPath = getImageDir(LEGACY_CATEGORY);
   }
 
+  // 防目录穿越：文件名不允许路径分隔符与 .. 形态，且解析后必须仍在目录内
+  if (!filename || filename === '.' || filename === '..') {
+    return res.status(400).json({ error: 'invalid filename' });
+  }
+  if (path.basename(filename) !== filename) {
+    return res.status(400).json({ error: 'invalid filename' });
+  }
   const filePath = path.join(dirPath, filename);
+  if (!path.resolve(filePath).startsWith(path.resolve(dirPath) + path.sep)) {
+    return res.status(400).json({ error: 'invalid path' });
+  }
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'file not found' });
   }

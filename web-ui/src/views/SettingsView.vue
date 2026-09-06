@@ -6,6 +6,9 @@
     </div>
 
     <div class="settings-grid">
+      <!-- 外观：主题选择（已抽为独立组件，作为 SettingsView 功能域拆分的范本） -->
+      <ThemeSettingsCard />
+
       <!-- ComfyUI params: 对话配图 / 朋友圈配图 / 奇遇配图（Tab 切换） -->
       <div class="card comfy-params-card">
         <h3>画师串 & 分辨率</h3>
@@ -725,7 +728,8 @@
         <div
           role="button"
           tabindex="0"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
+          style="--entry-hue: var(--fun-teal)"
           aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
           @keydown.enter.prevent="router.push('/settings/memory')"
@@ -760,7 +764,8 @@
         <div
           role="button"
           tabindex="0"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
+          style="--entry-hue: var(--fun-violet)"
           aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
           @click="router.push('/settings/maibot')"
           @keydown.enter.prevent="router.push('/settings/maibot')"
@@ -879,7 +884,7 @@
                       class="disturb-char-avatar"
                       :style="ch.avatar_path
                         ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                        : { background: '#e07b6c' }"
+                        : { background: 'var(--accent)' }"
                     >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
                     <span class="disturb-char-name">{{ ch.display_name }}</span>
                   </label>
@@ -1005,6 +1010,7 @@ import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import ThemeSettingsCard from '../components/settings/ThemeSettingsCard.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
@@ -2246,20 +2252,21 @@ function resetTestPrompts() {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;
   color: var(--text-primary); text-align: left;
-  background: rgba(224, 123, 108, 0.07);
-  border: 1px solid rgba(224, 123, 108, 0.16);
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--entry-hue, var(--accent)) 18%, transparent);
   border-radius: 12px;
   cursor: pointer;
   user-select: none;
   touch-action: manipulation;
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease-out);
 }
 .memory-settings-entry:hover {
-  background: rgba(224, 123, 108, 0.12);
-  border-color: rgba(224, 123, 108, 0.38);
-  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.1);
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--entry-hue, var(--accent)) 40%, transparent);
+  box-shadow: var(--shadow-sm), var(--shadow-hard-sm);
+  transform: translateY(-2px);
 }
-.memory-settings-entry:active { background: rgba(224, 123, 108, 0.16); }
+.memory-settings-entry:active { background: rgba(var(--accent-rgb), 0.16); }
 .memory-settings-entry:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -2267,9 +2274,10 @@ function resetTestPrompts() {
 .memory-entry-icon {
   width: 40px; height: 40px; flex: 0 0 40px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent);
-  background: rgba(224, 123, 108, 0.12);
-  border-radius: 10px;
+  color: var(--entry-hue, var(--accent));
+  background: color-mix(in srgb, var(--entry-hue, var(--accent)) 13%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--entry-hue, var(--accent)) 20%, transparent);
+  border-radius: 12px;
 }
 .memory-entry-icon svg,
 .memory-entry-arrow svg {
@@ -2297,25 +2305,17 @@ function resetTestPrompts() {
 }
 .float-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 10px;
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C; margin-left: 4px;
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent); margin-left: 4px;
   white-space: nowrap;
 }
-.float-badge.active { background: rgba(224, 123, 108, 0.14); color: #E07B6C; }
+.float-badge.active { background: rgba(var(--accent-rgb), 0.14); color: var(--accent); }
 
-/* ── 毛玻璃卡片 ── */
+/* ── 卡片：视觉样式走全局 .card，这里只保留布局 ── */
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
   padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: box-shadow 0.2s ease;
   display: flex;
   flex-direction: column;
 }
-.card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
@@ -2352,8 +2352,8 @@ function resetTestPrompts() {
   color: #6F675F;
 }
 .comfy-tab.active {
-  background: rgba(224, 123, 108, 0.10);
-  color: #E07B6C;
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
   font-weight: 600;
 }
 .comfy-tab.active::after {
@@ -2361,7 +2361,7 @@ function resetTestPrompts() {
   position: absolute;
   left: 50%; bottom: 4px; width: 18px; height: 2px;
   border-radius: 2px; transform: translateX(-50%);
-  background: #E07B6C;
+  background: var(--accent);
 }
 
 .comfy-form-stage {
@@ -2468,8 +2468,8 @@ function resetTestPrompts() {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .fav-input-row:focus-within {
-  border-color: #E07B6C;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10);
 }
 .fav-input {
   flex: 1; min-width: 0; height: 38px; padding: 0; margin: 0;
@@ -2499,7 +2499,7 @@ function resetTestPrompts() {
 .fav-chip-x {
   font-size: 12px; line-height: 1; color: #A9A099;
 }
-.fav-chip-x:hover { color: #E07B6C; }
+.fav-chip-x:hover { color: var(--accent); }
 
 /* ── 收藏弹窗 ── */
 .fav-dialog-overlay {
@@ -2688,12 +2688,12 @@ function resetTestPrompts() {
   min-width: 70px;
 }
 .disturb-char-chip:hover {
-  border-color: #d5d0ca;
+  border-color: var(--border);
   background: #eeebe5;
 }
 .disturb-char-chip.selected {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .disturb-char-avatar {
   width: 42px; height: 42px; border-radius: 50%;
@@ -2968,7 +2968,7 @@ function resetTestPrompts() {
   width: calc((100% - 4px) / 3);
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.2);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.2);
   transform: translateX(100%);
   transition: transform 0.2s ease;
 }
@@ -3043,8 +3043,8 @@ function resetTestPrompts() {
 .profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
 .profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
 .profile-tag.active {
-  background: #e07b6c;
-  border-color: #e07b6c;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -3264,7 +3264,7 @@ function resetTestPrompts() {
 .wf-mode-option:hover { border-color: var(--accent); }
 .wf-mode-option.active {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .wf-mo-title {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
@@ -3297,8 +3297,8 @@ function resetTestPrompts() {
   margin-bottom: 10px; text-align: center;
 }
 .wf-mode-scenes {
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   border-radius: 8px; padding: 12px 16px;
 }
 .wf-scene-row-h {
@@ -3336,4 +3336,6 @@ function resetTestPrompts() {
 .modal-fade-enter-active { transition: opacity 0.3s ease; }
 .modal-fade-leave-active { transition: opacity 0.2s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+
+/* ── 外观/主题样式已随 ThemeSettingsCard 组件迁出 ── */
 </style>

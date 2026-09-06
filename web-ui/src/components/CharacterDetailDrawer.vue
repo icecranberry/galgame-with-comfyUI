@@ -7,7 +7,6 @@
           <div class="dr-header">
             <!-- Row 1: 头像 + 信息 + 关闭 -->
             <div class="dr-row1">
-              <div
               <div class="dr-avatar">
                 <img v-if="char?.avatar_path" :src="char.avatar_path" class="dr-avatar-img" alt="" />
                 <span v-else class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
@@ -76,7 +75,7 @@
               <div class="dr-scan-content">
                 <div class="dr-scan-icon">
                   <svg viewBox="0 0 80 80" class="dr-scan-ring">
-                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(var(--accent-rgb),0.12)" stroke-width="2.5"/>
                     <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                       stroke-width="2.5" stroke-linecap="round"
                       stroke-dasharray="214"
@@ -406,13 +405,13 @@ onUnmounted(() => {
   height: 2px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(224,123,108,0.3) 15%,
+    rgba(var(--accent-rgb),0.3) 15%,
     var(--accent) 50%,
-    rgba(224,123,108,0.3) 85%,
+    rgba(var(--accent-rgb),0.3) 85%,
     transparent 100%
   );
   animation: dr-scan-sweep 2.4s ease-in-out infinite;
-  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb),0.55), 0 0 10px rgba(var(--accent-rgb),0.25);
   z-index: 2;
   pointer-events: none;
 }
@@ -432,8 +431,8 @@ onUnmounted(() => {
   left: 20%; right: 20%;
   height: 60px;
   background: radial-gradient(ellipse at center,
-    rgba(224,123,108,0.12) 0%,
-    rgba(224,123,108,0.04) 40%,
+    rgba(var(--accent-rgb),0.12) 0%,
+    rgba(var(--accent-rgb),0.04) 40%,
     transparent 70%
   );
   animation: dr-glow-follow 2.4s ease-in-out infinite;

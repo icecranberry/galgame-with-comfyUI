@@ -114,7 +114,7 @@ defineExpose({ show })
   width: 48px; height: 48px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   flex-shrink: 0;
 }
 .confirm-icon.is-danger {

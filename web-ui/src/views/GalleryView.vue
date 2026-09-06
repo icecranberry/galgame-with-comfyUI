@@ -21,16 +21,8 @@
     <!-- 内容区 -->
     <Gallery ref="galleryRef" @loaded="onLoaded" />
 
-    <!-- 压缩弹窗 -->
-    <Transition name="modal-fade">
-      <div v-if="showModal" class="modal-overlay" @click.self="onOverlayClick">
-        <div class="modal-panel" @click.stop>
-          <div class="modal-header">
-            <span>图片压缩</span>
-            <linshe-button class="modal-close" variant="icon" @click="showModal = false">✕</linshe-button>
-          </div>
-
-          <div class="modal-body">
+    <!-- 压缩弹窗（统一 BaseModal 基座） -->
+    <BaseModal :visible="showModal" title="图片压缩" @close="showModal = false">
             <!-- 压缩类型 -->
             <div class="section">
               <div class="section-label">压缩类型</div>
@@ -123,19 +115,14 @@
                 <span v-if="task.errors > 0">，{{ task.errors }} 个错误</span>
               </div>
             </div>
-
-            <!-- 立刻压缩按钮 -->
-
-          </div>
-        </div>
-      </div>
-    </Transition>
+    </BaseModal>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import Gallery from '../components/Gallery.vue'
+import BaseModal from '../components/BaseModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
@@ -225,10 +212,7 @@ function onBackground() {
   showModal.value = false
 }
 
-function onOverlayClick() {
-  // 如果有进行中的任务，关闭弹窗 = 后台处理
-  showModal.value = false
-}
+// BaseModal 点击遮罩直接关闭；有进行中任务时关闭即等于后台处理
 
 // SSE 监听压缩进度
 onMounted(() => {
@@ -303,44 +287,15 @@ onUnmounted(() => {
   padding: 8px 22px;
 }
 
-/* ── 弹窗 ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+/* ── 弹窗：视觉样式走全局 modal 家族，这里只保留布局差异 ── */
 .modal-panel {
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
   width: 550px;
-  max-width: 90vw;
   max-height: 95vh;
   overflow-y: auto;
 }
 
 .modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 18px 20px 12px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-bright);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-.modal-close {
-  padding: 2px 6px;
 }
 
 .modal-body {
@@ -451,7 +406,7 @@ onUnmounted(() => {
   color: #4caf50;
   text-align: center;
 }
-.progress-done.is-error { color: #e07b6c; }
+.progress-done.is-error { color: var(--accent); }
 
 /* ── 立刻压缩按钮 ── */
 .btn-start-inline {

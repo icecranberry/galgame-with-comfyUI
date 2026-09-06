@@ -98,6 +98,49 @@
         </div>
       </section>
 
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>主动回想</h3><p>角色会在需要时主动检索自己的记忆（可能略微增加回复等待）。</p></div>
+          <label class="switch"><input v-model="form.activeSearch.enabled" type="checkbox" aria-label="主动回想"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.activeSearch.enabled">
+          <div class="collapse-body">
+            <label>回想最长等待时间（毫秒）<input v-model.number="form.activeSearch.timeoutMs" type="number" min="1000" max="30000"></label>
+            <p class="disabled-note">开启后，角色遇到“你应该记得”的话题时会自主发起一次记忆检索，结果只用于当轮回复。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>记忆整理（睡眠期）</h3><p>用户不聊天时，后台自动整理记忆：冲突消解、泛化归纳、强度衰减归档、画像建议。</p></div>
+          <label class="switch"><input v-model="form.consolidation.enabled" type="checkbox" aria-label="记忆整理"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.consolidation.enabled">
+          <div class="collapse-body">
+            <label>空闲判定（分钟，距最后一条消息）<input v-model.number="form.consolidation.idleDelayMinutes" type="number" min="5" max="720"></label>
+            <label>单轮整理模型调用上限<input v-model.number="form.consolidation.llmCallsPerRun" type="number" min="0" max="30"></label>
+            <div style="margin-top: 8px;">
+              <linshe-button variant="ghost" size="sm" :disabled="consolidating" @click="triggerConsolidation">{{ consolidating ? '整理中…' : '立即整理一次' }}</linshe-button>
+            </div>
+            <p class="disabled-note">整理永远避开聊天进行中；模型调用预算用尽时，剩余任务留到下轮继续。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
+      <section class="card" style="margin-top: 16px;">
+        <div class="section-title">
+          <div><h3>上下文预算</h3><p>限制随每轮消息注入的动态上下文总量，超出时按“历史减半 → 记忆裁剪 → 整块丢弃”逐级降级。</p></div>
+          <label class="switch"><input v-model="form.contextBudget.enabled" type="checkbox" aria-label="上下文预算"><span></span></label>
+        </div>
+        <CollapseTransition :show="form.contextBudget.enabled">
+          <div class="collapse-body">
+            <label>动态上下文 token 预算<input v-model.number="form.contextBudget.dynamicTokens" type="number" min="2000" max="100000"></label>
+            <p class="disabled-note">稳定人设部分不参与预算；降级过程会记录在服务端日志，不会静默截断。</p>
+          </div>
+        </CollapseTransition>
+      </section>
+
       <section class="card params">
         <h3>查找范围</h3>
         <div class="three-col">
@@ -186,6 +229,9 @@
                 <span v-if="item.embedding_error" class="index-error" :title="item.embedding_error"> · {{ item.embedding_error }}</span>
               </div>
             </div>
+            <linshe-button v-if="item.status === 'archived'" variant="ghost" size="sm" :disabled="restoringMemoryId === item.memory_id" @click="restoreMemory(item)">
+              {{ restoringMemoryId === item.memory_id ? '恢复中…' : '恢复' }}
+            </linshe-button>
             <linshe-button v-if="item.status !== 'deleted'" class="danger-link" variant="link" tone="danger" :disabled="deletingMemoryId === item.memory_id" @click="removeMemory(item)">
               {{ deletingMemoryId === item.memory_id ? '删除中…' : '删除' }}
             </linshe-button>
@@ -280,6 +326,7 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import {
   deleteMemoryFragment,
+  getConsolidationJobs,
   getMemoryConfig,
   getMemoryFragments,
   getMemoryIndexJobs,
@@ -287,7 +334,9 @@ import {
   listCharacters,
   listGroups,
   reindexMemories,
+  restoreMemoryFragment,
   retryFailedMemories,
+  runConsolidationNow,
   searchMemories,
   testMemoryEmbedding,
   testMemoryReranker,
@@ -318,6 +367,7 @@ const memoryTypeOptions = [
 ]
 const memoryStatusOptions = [
   { value: 'active', label: '正在使用' },
+  { value: 'archived', label: '已归档' },
   { value: 'superseded', label: '已有更新' },
   { value: 'deleted', label: '已删除' },
   { value: 'all', label: '全部状态' },
@@ -400,9 +450,14 @@ const recallTested = ref(false)
 
 const indexJobs = ref([])
 const jobsLoading = ref(false)
+const restoringMemoryId = ref(null)
+const consolidating = ref(false)
 
 const form = reactive({
   enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
+  activeSearch: { enabled: false, timeoutMs: 4000 },
+  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
+  contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', dimensions: null, headers: {}, timeoutMs: 8000, hasApiKey: false },
   reranker: { enabled: false, provider: 'custom', baseURL: '', apiKey: '', model: '', topN: 7, headers: {}, timeoutMs: 8000, hasApiKey: false },
 })
@@ -424,6 +479,9 @@ function providerPayload(provider, headersText) {
 function payload() {
   return {
     enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
+    activeSearch: { enabled: form.activeSearch.enabled, timeoutMs: form.activeSearch.timeoutMs },
+    consolidation: { enabled: form.consolidation.enabled, idleDelayMinutes: form.consolidation.idleDelayMinutes, llmCallsPerRun: form.consolidation.llmCallsPerRun },
+    contextBudget: { enabled: form.contextBudget.enabled, dynamicTokens: form.contextBudget.dynamicTokens },
     embedding: providerPayload(form.embedding, embeddingHeaders.value),
     reranker: providerPayload(form.reranker, rerankerHeaders.value),
   }
@@ -452,7 +510,7 @@ function memoryTypeLabel(type) {
   return ({ knowledge: '信息', skill: '技能', emotion: '情绪', event: '经历' })[type] || type || '未知'
 }
 function memoryStatusLabel(status) {
-  return ({ active: '正在使用', superseded: '已有更新', deleted: '已删除' })[status] || status || '未知'
+  return ({ active: '正在使用', archived: '已归档', superseded: '已有更新', deleted: '已删除' })[status] || status || '未知'
 }
 function embeddingStateLabel(state) {
   return ({ indexed: '已整理', pending: '等待整理', failed: '整理失败', stale: '需要重新整理', disabled: '等待智能整理' })[state] || state || '未知'
@@ -530,6 +588,31 @@ function changeMemoryPage(delta) {
   memoryPage.value = Math.min(memoryPageCount.value, Math.max(1, memoryPage.value + delta))
   loadMemories()
 }
+// 阶段四：archived 记忆恢复（恢复后 stale 触发重嵌入，重新可见于检索）
+async function restoreMemory(item) {
+  restoringMemoryId.value = item.memory_id
+  try {
+    await restoreMemoryFragment(item.memory_id)
+    notify('这条记忆已恢复，角色可以重新想起它')
+    await Promise.all([loadMemories(), refreshStats()])
+  } catch (error) { notify(`恢复失败：${error.message}`, 'error') }
+  finally { restoringMemoryId.value = null }
+}
+// 阶段三：手动触发一轮记忆整理（聊天进行中服务端会拒绝）
+async function triggerConsolidation() {
+  consolidating.value = true
+  try {
+    const result = await runConsolidationNow()
+    if (result.skipped) {
+      notify(result.skipped === 'chat-active' ? '正在聊天中，稍后再整理' : '本轮未满足整理条件')
+    } else {
+      const calls = result.llmCallsUsed ?? 0
+      notify(`整理完成，本轮调用 ${calls} 次记忆整理模型`)
+    }
+    await loadIndexJobs()
+  } catch (error) { notify(`整理失败：${error.message}`, 'error') }
+  finally { consolidating.value = false }
+}
 async function removeMemory(item) {
   const prompt = `删除后，这条内容不会再被角色想起。确定删除吗？\n\n${item.judgment || item.content}`
   const confirmed = confirmDialog
@@ -588,6 +671,9 @@ async function applyConfig() {
   Object.assign(form, config)
   form.embedding = { ...form.embedding, ...config.embedding }
   form.reranker = { ...form.reranker, ...config.reranker }
+  form.activeSearch = { ...form.activeSearch, ...(config.activeSearch || {}) }
+  form.consolidation = { ...form.consolidation, ...(config.consolidation || {}) }
+  form.contextBudget = { ...form.contextBudget, ...(config.contextBudget || {}) }
   embeddingHeaders.value = JSON.stringify(config.embedding.headers || {}, null, 2)
   rerankerHeaders.value = JSON.stringify(config.reranker.headers || {}, null, 2)
   Object.assign(stats, stat)
@@ -648,7 +734,7 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs(
 .page-header .back { font-size: 26px; }
 .mode-badge { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .mode-badge.text { background: rgba(85, 130, 180, .14); color: #4677a8; }
-.mode-badge.hybrid { background: rgba(224, 123, 108, .16); color: var(--accent); }
+.mode-badge.hybrid { background: rgba(var(--accent-rgb), .16); color: var(--accent); }
 .card, .state-card { background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: 16px; padding: 22px; box-shadow: var(--glass-shadow); }
 .card h3 { margin: 0 0 6px; font-size: 15px; }
 .advanced-settings { position: relative; z-index: 40; margin-bottom: 16px; border: 1px solid var(--glass-border); border-radius: 16px; background: var(--glass-bg); box-shadow: var(--glass-shadow); }
@@ -679,7 +765,7 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .params, .warning { margin-top: 16px; }
 .disabled-note { padding: 16px; background: rgba(85, 130, 180, .08); border-radius: 10px; }
 .collapse-body { padding-top: 4px; }
-.warning { border-color: rgba(224, 123, 108, .35); }
+.warning { border-color: rgba(var(--accent-rgb), .35); }
 .memory-manager { position: relative; z-index: 30; margin-top: 16px; }
 .manager-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .memory-filters { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, .75fr) minmax(130px, .75fr) auto; gap: 12px; align-items: end; }
@@ -701,7 +787,7 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .memory-judgment { margin-top: 9px; font-size: 14px; font-weight: 650; line-height: 1.55; overflow-wrap: anywhere; }
 .memory-reasoning { margin-top: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 .memory-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 11px; }
+.memory-tags span { padding: 3px 7px; border-radius: 6px; background: rgba(var(--accent-rgb), .09); color: var(--accent); font-size: 11px; }
 .memory-index-state { margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
 .index-error { color: #c34f4f; display: inline-block; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .danger-link { flex-shrink: 0; padding: 6px 8px; }
@@ -730,7 +816,7 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .job-details[open] .job-detail-action::after { content: '收起'; }
 .job-reasoning { margin-top: 4px; padding: 8px 10px; border-radius: 7px; background: rgba(85, 130, 180, .07); color: var(--text-secondary); line-height: 1.6; }
 .job-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(224, 123, 108, .09); color: var(--accent); font-size: 10px; }
+.job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(var(--accent-rgb), .09); color: var(--accent); font-size: 10px; }
 .job-unavailable { color: var(--text-secondary); font-size: 11px; }
 .job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.processing { color: #367aa3; }.job-status.failed { color: #c34f4f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }

@@ -4,6 +4,9 @@
     </div>
 
     <template v-else>
+      <!-- 角色自定义聊天背景（未设置时透出全局柔光背景） -->
+      <div v-if="chatBgUrl" class="chat-bg" :style="{ backgroundImage: `url(${chatBgUrl})` }"></div>
+      <div v-if="chatBgUrl" class="chat-bg-veil"></div>
       <div class="chat-header">
         <linshe-button v-if="isMobile" variant="icon" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -113,6 +116,17 @@
           </template>
         </div>
       </div>
+
+      <!-- @memory 回想状态条（Memory v3 阶段二）：角色主动检索记忆期间轻量提示，完成后收起 -->
+      <Transition name="guesses-fade">
+        <div v-if="chat.memoryRecalling" class="recall-status" role="status">
+          <svg class="recall-status-spinner cel-spin" viewBox="0 0 20 20" width="14" height="14" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8" stroke="var(--accent)" stroke-opacity="0.25" stroke-width="2.5" />
+            <path d="M18 10a8 8 0 0 0-8-8" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" />
+          </svg>
+          <span>回想着过去的记忆…</span>
+        </div>
+      </Transition>
 
       <!-- 回复候选词：v-if 控制 DOM 存在 + 仅 opacity 动画，避免移动端与滚动竞争 compositor -->
       <Transition name="guesses-fade">
@@ -228,6 +242,12 @@
               <div v-if="chat.activeChar?.avatar_path" role="button" tabindex="0" class="sp-btn-small sp-btn-subtle" @click="removeAvatar" @keydown.enter.prevent="removeAvatar" @keydown.space.prevent="removeAvatar">移除</div>
             </div>
           </div>
+        </div>
+
+        <!-- 聊天背景设置 -->
+        <div class="sp-section">
+          <label class="sp-label">聊天背景</label>
+          <ChatBgPanel :character="chat.activeChar" @updated="onChatBgUpdated" />
         </div>
 
         <div class="sp-divider"></div>
@@ -501,6 +521,20 @@
               </div>
             </div>
           </div>  <!-- impression-content -->
+
+          <!-- 阶段三 T4：记忆升华产生的画像建议（半自动，人工确认后生效） -->
+          <div v-if="impressionSuggestions.length" class="impression-suggestions">
+            <div class="impression-suggestions-title">记忆整理的新发现</div>
+            <p class="impression-suggestions-hint">从重要记忆中归纳的特征，确认后才会加入印象</p>
+            <div v-for="s in impressionSuggestions" :key="s.id" class="impression-suggestion-item">
+              <span class="impression-suggestion-field" :style="{ color: typeColor[s.field] || 'var(--text-secondary)' }">{{ typeLabel[s.field] || s.field }}</span>
+              <span class="impression-suggestion-text">{{ s.suggestion }}</span>
+              <div class="impression-suggestion-actions">
+                <button class="impression-btn impression-btn-save" :disabled="handlingSuggestionId === s.id" @click="acceptSuggestion(s)">{{ handlingSuggestionId === s.id ? '…' : '采纳' }}</button>
+                <button class="impression-btn impression-btn-cancel" :disabled="handlingSuggestionId === s.id" @click="dismissSuggestion(s)">忽略</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -535,7 +569,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
@@ -544,7 +578,9 @@ import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
 import GearIcon from '../components/GearIcon.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
-import RelationshipGraph from '../components/RelationshipGraph.vue'
+import ChatBgPanel from '../components/ChatBgPanel.vue'
+// 关系图依赖 @vue-flow（重），仅在打开弹窗时加载
+const RelationshipGraph = defineAsyncComponent(() => import('../components/RelationshipGraph.vue'))
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
@@ -552,7 +588,7 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'
-import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait } from '../api/index.js'
+import { getCharacterPortrait, addPortrait, updatePortrait, deletePortrait, getPortraitSuggestions, confirmPortraitSuggestion, rejectPortraitSuggestion } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useEventsStore } from '../stores/events.js'
 import { useScheduleStore } from '../stores/schedule.js'
@@ -867,6 +903,8 @@ const impressionLoading = ref(false)
 const impressionError = ref('')
 const impressionGrouped = ref({ personality: [], preference: [] })
 const impressionVad = ref(null)      // { instant, mood, dominantEmotion }
+const impressionSuggestions = ref([]) // 阶段三 T4：待确认画像建议
+const handlingSuggestionId = ref(null)
 const impressionAffinity = ref(50)
 const impressionLastDelta = ref(null)
 const impressionLastReason = ref('')
@@ -1067,17 +1105,47 @@ async function openImpression() {
   impressionVad.value = null
   impressionAffinity.value = 50
   try {
-    const data = await getCharacterPortrait(chat.activeChar.id)
+    const [data, suggestionData] = await Promise.all([
+      getCharacterPortrait(chat.activeChar.id),
+      getPortraitSuggestions(chat.activeChar.id).catch(() => ({ suggestions: [] })),
+    ])
     impressionGrouped.value = data.grouped || { personality: [], preference: [] }
     impressionVad.value = data.vad || null
     impressionAffinity.value = data.affinity ?? 50
     impressionLastDelta.value = data.lastAffinityDelta ?? null
     impressionLastReason.value = data.lastReason || ''
+    impressionSuggestions.value = suggestionData.suggestions || []
   } catch (err) {
     impressionError.value = err.message
   } finally {
     impressionLoading.value = false
   }
+}
+
+// ── 印象建议（阶段三 T4）：采纳 → 写入画像；忽略 → 仅关闭 ──
+async function acceptSuggestion(suggestion) {
+  handlingSuggestionId.value = suggestion.id
+  try {
+    await confirmPortraitSuggestion(suggestion.id)
+    impressionSuggestions.value = impressionSuggestions.value.filter(item => item.id !== suggestion.id)
+    impressionGrouped.value = {
+      ...impressionGrouped.value,
+      [suggestion.field]: [
+        ...(impressionGrouped.value[suggestion.field] || []),
+        { id: `local_${suggestion.id}`, trait_type: suggestion.field, content: suggestion.suggestion, confidence: 1.0, created_at: new Date().toISOString() },
+      ],
+    }
+  } catch (err) { impressionError.value = err.message }
+  finally { handlingSuggestionId.value = null }
+}
+
+async function dismissSuggestion(suggestion) {
+  handlingSuggestionId.value = suggestion.id
+  try {
+    await rejectPortraitSuggestion(suggestion.id)
+    impressionSuggestions.value = impressionSuggestions.value.filter(item => item.id !== suggestion.id)
+  } catch (err) { impressionError.value = err.message }
+  finally { handlingSuggestionId.value = null }
 }
 
 // ── 印象编辑/删除 ──
@@ -1196,18 +1264,18 @@ function confidenceLevel(confidence, index = 0) {
 const avatarPreviewStyle = computed(() => {
   const p = chat.activeChar?.avatar_path
   if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 
 const agentAvatarStyle = computed(() => {
 const p = chat.activeChar?.avatar_path
 if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-return { background: '#e07b6c' }
+return { background: 'var(--accent)' }
 })
 
 const userAvatarStyle = computed(() => {
 if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-return { background: '#e07b6c' }
+return { background: 'var(--accent)' }
 })
 
 function openSettings() { showSettings.value = true }
@@ -1280,6 +1348,19 @@ showSettings.value = false
 const ok = await confirmFn({ title:'移除头像', message:'确定要移除当前角色的头像吗？', okText:'移除' })
 if (!ok) return
 await chat.uploadAvatar(null)
+}
+
+// ══════════════════════════════════════════════════
+// 角色聊天背景
+// ══════════════════════════════════════════════════
+
+const chatBgUrl = computed(() => chat.activeChar?.chat_bg_path || '')
+
+function onChatBgUpdated(path) {
+  if (chat.activeChar) chat.activeChar.chat_bg_path = path
+  // 同步角色列表中的同名角色，避免切换会话时闪回旧背景
+  const inList = chat.characters.find(c => c.id === chat.activeCharId)
+  if (inList) inList.chat_bg_path = path
 }
 
 // ══════════════════════════════════════════════════
@@ -1665,7 +1746,22 @@ function renderContent(text) {
 </script>
 
 <style scoped>
-.chat-view { flex:1; display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; background:transparent; }
+.chat-view { flex:1; display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; background:transparent; position:relative; }
+
+/* ── 角色自定义聊天背景层（位于内容之下，随 activeChar.chat_bg_path 切换）── */
+.chat-bg {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+  pointer-events: none;
+}
+/* 可读性遮罩：以主题底色半透明罩住图片，保证气泡外文字可读 */
+.chat-bg-veil {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--bg-primary) 52%, transparent);
+  pointer-events: none;
+}
+/* 内容层抬到背景层之上（同为定位元素后按 DOM 顺序绘制） */
+.chat-header, .message-list, .guesses-row, .input-area { position: relative; }
 .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
 .empty-icon { font-size:56px; }
 .empty-state h2 { font-size:18px; color:var(--text-secondary); font-weight:400; }
@@ -1737,8 +1833,19 @@ function renderContent(text) {
   max-width:75%; padding:10px 14px; border-radius:8px;
   font-size:14px; line-height:1.6; word-break:break-word;
 }
-.message.user .msg-bubble { background:#a25740; color:#e8e8e8; }
-.message.assistant .msg-bubble { background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); }
+/* 赛璐璐漫画格气泡：尖角朝向说话方 + 描边 + 微硬阴影 */
+.message.user .msg-bubble {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color:#fff; border:none;
+  border-radius: 14px 4px 14px 14px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.16), var(--shadow-glow);
+}
+.message.assistant .msg-bubble {
+  background:var(--bg-secondary); color:var(--text-primary);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: var(--shadow-hard-sm);
+}
 
 /* 打字指示器：6 个圆点依次变色的 wave 动画 */
 .typing-dots { overflow: visible; flex-shrink: 0; }
@@ -1786,12 +1893,12 @@ function renderContent(text) {
   opacity: 0.5;
 }
 .force-img-icon { font-size: 18px; line-height: 1; transition: transform 0.25s ease; }
-.force-img-toggle:hover { opacity: 0.8; border-color: rgba(224, 123, 108, 0.3); }
+.force-img-toggle:hover { opacity: 0.8; border-color: rgba(var(--accent-rgb), 0.3); }
 .force-img-toggle.active {
   opacity: 1;
-  background: linear-gradient(135deg, rgba(224, 123, 108, 0.15) 0%, rgba(208, 110, 94, 0.15) 100%);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(208, 110, 94, 0.15) 100%);
   border-color: var(--accent-light);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.12), 0 0 16px rgba(224, 123, 108, 0.08);
+  box-shadow: var(--focus-ring), 0 0 16px rgba(var(--accent-rgb), 0.08);
 }
 .force-img-toggle.active .force-img-icon { transform: scale(1.1); }
 .force-img-toggle.off {
@@ -1820,6 +1927,21 @@ function renderContent(text) {
 .force-img-tip.is-mobile {
   left: calc(50% + 20px);
 }
+
+/* ── @memory 回想状态条（Memory v3 阶段二）：毛玻璃小胶囊，贴候选词行上方 ── */
+.recall-status {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 24px 6px;
+  padding: 6px 12px;
+  width: fit-content;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  border: 1.5px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(8px);
+}
+.recall-status-spinner { flex-shrink: 0; }
 
 /* ── 回复候选词（AI 猜想用户回复）── */
 .guesses-row {
@@ -1857,9 +1979,9 @@ function renderContent(text) {
 }
 .guess-pill:hover {
   border-color: var(--accent-light);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   transform: translateY(-1px);
-  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.12);
+  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.12);
 }
 .guess-pill:active {
   transform: scale(0.96);
@@ -1884,14 +2006,14 @@ function renderContent(text) {
   transition: border-color 0.2s ease, box-shadow 0.3s ease, background 0.2s ease;
 }
 .chat-input::placeholder { color: var(--text-secondary); opacity: 0.5; }
-.chat-input:hover { border-color: rgba(224, 123, 108, 0.35); }
+.chat-input:hover { border-color: rgba(var(--accent-rgb), 0.35); }
 .chat-input:focus {
   background: rgba(255, 255, 255, 0.9);
   border-color: var(--accent-light);
   box-shadow:
-    0 0 0 4px rgba(224, 123, 108, 0.10),
-    0 0 24px rgba(224, 123, 108, 0.08),
-    inset 0 0 10px rgba(224, 123, 108, 0.04);
+    0 0 0 4px rgba(var(--accent-rgb), 0.10),
+    0 0 24px rgba(var(--accent-rgb), 0.08),
+    inset 0 0 10px rgba(var(--accent-rgb), 0.04);
 }
 
 /* ── 送礼按钮：圆形 + 振动 + 花样式 ── */
@@ -1899,7 +2021,7 @@ function renderContent(text) {
   width: 42px; height: 42px; flex-shrink: 0;
   border-radius: 50%;
   font-size: 0;
-  background: linear-gradient(135deg, #f9c270 0%, #e07b6c 100%);
+  background: linear-gradient(135deg, #f9c270 0%, var(--accent) 100%);
   color: #fff;
   border: none; padding: 0;
   cursor: pointer;
@@ -1936,13 +2058,13 @@ function renderContent(text) {
   width: 42px; height: 42px; flex-shrink: 0;
   border-radius: 50%;
   font-size: 0;
-  background: linear-gradient(135deg, var(--accent) 0%, #d06e5e 100%);
+  background: var(--grad-brand);
   color: #fff;
   border: none; padding: 0;
   opacity: 1; cursor: pointer;
   box-shadow:
-    0 2px 8px rgba(224, 123, 108, 0.22),
-    0 0 0 0 rgba(224, 123, 108, 0);
+    0 2px 8px rgba(var(--accent-rgb), 0.22),
+    0 0 0 0 rgba(var(--accent-rgb), 0);
   transition:
     opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
     box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1),
@@ -1963,14 +2085,14 @@ function renderContent(text) {
   content: '';
   position: absolute; inset: -4px;
   border-radius: 50%;
-  border: 2px solid rgba(224, 123, 108, 0.25);
+  border: 2px solid rgba(var(--accent-rgb), 0.25);
   opacity: 0;
   transition: opacity 0.3s ease, inset 0.3s ease;
 }
 .send-btn:not(.is-disabled):hover {
   box-shadow:
-    0 4px 18px rgba(224, 123, 108, 0.35),
-    0 0 32px rgba(224, 123, 108, 0.10);
+    0 4px 18px rgba(var(--accent-rgb), 0.35),
+    0 0 32px rgba(var(--accent-rgb), 0.10);
   transform: scale(1.06);
 }
 .send-btn:not(.is-disabled):hover .send-icon { transform: translateX(1.5px); }
@@ -1980,7 +2102,7 @@ function renderContent(text) {
 }
 .send-btn:not(.is-disabled):active {
   transform: scale(0.94);
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.2);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.2);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 /* 禁用态 — 渐变保留仅降透明度 + 收光，靠 transition 实现 0.35s 缓入缓出 */
@@ -2086,9 +2208,9 @@ function renderContent(text) {
 .editor-close { width:32px; height:32px; font-size:20px; }
 .editor-field { padding:12px 20px 0; display:flex; flex-direction:column; gap:6px; }
 .editor-field label { font-size:13px; color:var(--text-secondary); }
-.editor-input { padding:8px 12px; font-size:14px; background:rgba(255,255,255,0.9); border:1px solid #d5d0ca; border-radius:8px; color:var(--text-bright); outline:none; transition: border-color 0.15s; }
+.editor-input { padding:8px 12px; font-size:14px; background:rgba(255,255,255,0.9); border:1px solid var(--border); border-radius:8px; color:var(--text-bright); outline:none; transition: border-color 0.15s; }
 .editor-input:focus { border-color:var(--accent); }
-.editor-textarea { padding:10px 12px; font-size:13px; line-height:1.6; background:rgba(255,255,255,0.9); border:1px solid #d5d0ca; border-radius:8px; color:var(--text-bright); outline:none; resize:vertical; font-family:inherit; }
+.editor-textarea { padding:10px 12px; font-size:13px; line-height:1.6; background:rgba(255,255,255,0.9); border:1px solid var(--border); border-radius:8px; color:var(--text-bright); outline:none; resize:vertical; font-family:inherit; }
 .editor-textarea:focus { border-color:var(--accent); }
 .editor-field-grow { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
 .editor-field-grow .editor-textarea { flex:1; min-height:120px; resize:none; overflow-y:auto; }
@@ -2102,34 +2224,11 @@ function renderContent(text) {
 .sp-btn-subtle { color:var(--text-secondary); border-color:transparent; background:transparent; }
 .sp-btn-subtle:hover { color:var(--danger); border-color:transparent; }
 
-/* ── 弹窗共用（酒馆同款详情编辑弹窗） ── */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-
-.modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden; backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
+/* ── 弹窗骨架已迁移至全局 .modal-*（styles/components.css）── */
 .modal-wide { width: min(760px, 97vw); }
-
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
 
 .modal-body {
   padding: 0px 22px 22px;
-  overflow-y: auto; flex: 1;
 }
 
 .modal-body-detail {
@@ -2182,8 +2281,8 @@ function renderContent(text) {
   margin-bottom: 16px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
 }
 .detail-rel-header {
   display: flex;
@@ -2199,6 +2298,7 @@ function renderContent(text) {
   align-items: center;
   gap: 6px;
 }
+/* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-list {
   display: flex;
   flex-direction: column;
@@ -2222,7 +2322,7 @@ function renderContent(text) {
   font-weight: 500;
   padding: 1px 8px;
   border-radius: 4px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 .detail-rel-more {
   font-size: 12px;
@@ -2253,7 +2353,7 @@ function renderContent(text) {
 }
 .rel-empty-spinner {
   width: 14px; height: 14px;
-  border: 2px solid rgba(224, 123, 108, 0.2);
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: rel-spin 0.6s linear infinite;
@@ -2327,15 +2427,7 @@ function renderContent(text) {
 .detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
 
 /* ── 弹窗动画 ── */
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-
-@keyframes modal-pop {
-  0% { transform: scale(0.92); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
+/* 弹窗动画已迁移至全局 animations.css */
 
 /* ── 移动端空间优化 ── */
 @media (max-width: 767px) {
@@ -2402,7 +2494,7 @@ function renderContent(text) {
     gap: 5px;
     padding: 7px 12px;
     border-radius: 8px;
-    background: rgba(224, 123, 108, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
     color: var(--accent);
     font-size: 12px;
     font-weight: 600;
@@ -2414,7 +2506,7 @@ function renderContent(text) {
     user-select: none;
   }
   .toolbar-item:active {
-    background: rgba(224, 123, 108, 0.16);
+    background: rgba(var(--accent-rgb), 0.16);
   }
   .toolbar-item-toggle {
     cursor: default;
@@ -2461,7 +2553,7 @@ function renderContent(text) {
 .impression-loading-spinner {
   width: 28px; height: 28px;
   border: 3px solid rgba(0,0,0,0.08);
-  border-top-color: var(--accent, #e07b6c);
+  border-top-color: var(--accent, var(--accent));
   border-radius: 50%;
   animation: impression-spin 0.7s linear infinite;
 }
@@ -2552,6 +2644,47 @@ function renderContent(text) {
 }
 .impression-add-link:hover {
   background: rgba(0,0,0,0.04);
+}
+
+/* 阶段三 T4：画像升华建议区（毛玻璃小节，复用 tokens 变量） */
+.impression-suggestions {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--glass-bg, rgba(255,255,255,0.5));
+  border: 1px solid var(--glass-border, rgba(0,0,0,0.06));
+  border-radius: var(--radius-lg, 12px);
+}
+.impression-suggestions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+.impression-suggestions-hint {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+}
+.impression-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--glass-border, rgba(0,0,0,0.06));
+}
+.impression-suggestion-field {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.impression-suggestion-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary, #333);
+}
+.impression-suggestion-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* 卡片列表 */
@@ -2671,7 +2804,7 @@ function renderContent(text) {
   padding: 8px 10px;
   font-size: 13px;
   line-height: 1.5;
-  border: 1.5px solid #d5d0ca;
+  border: 1.5px solid var(--border);
   border-radius: 8px;
   background: white;
   color: var(--text-bright);
@@ -2682,7 +2815,7 @@ function renderContent(text) {
   box-sizing: border-box;
 }
 .impression-edit-textarea:focus {
-  box-shadow: 0 0 0 3px rgba(224,123,108,0.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.12);
 }
 .impression-edit-actions {
   display: flex;
@@ -2800,7 +2933,7 @@ function renderContent(text) {
 .vad-bar-fill {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  background: linear-gradient(90deg, #6366f1, #a78bfa, #e07b6c);
+  background: linear-gradient(90deg, #6366f1, #a78bfa, var(--accent));
   border-radius: 3px;
   transition: width 0.4s ease;
 }
@@ -2868,8 +3001,8 @@ function renderContent(text) {
 }
 .affinity-tag {
   font-size: 11px;
-  color: #e07b6c;
-  background: rgba(224,123,108,0.08);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb),0.08);
   padding: 1px 8px;
   border-radius: 10px;
   margin-left: auto;

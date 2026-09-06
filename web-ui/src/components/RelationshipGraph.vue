@@ -243,13 +243,13 @@ async function buildGraph() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: rel.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
         labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
     })
 
@@ -405,13 +405,13 @@ async function confirmInput() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: created.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
         labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
       addEdges([newEdge])
       existingRels.value.push(created)
@@ -475,7 +475,7 @@ async function deleteEdge() {
 .rel-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 18px 24px;
-  border-bottom: 1px solid rgba(224,123,108,0.1);
+  border-bottom: 1px solid rgba(var(--accent-rgb),0.1);
   flex-shrink: 0;
   background: rgba(248,245,241,0.55);
 }
@@ -491,7 +491,7 @@ async function deleteEdge() {
 /* ── Hint ── */
 .rel-hint {
   padding: 12px 24px;
-  border-top: 1px solid rgba(224,123,108,0.1);
+  border-top: 1px solid rgba(var(--accent-rgb),0.1);
   font-size: 12px; color: #9a8a7a;
   flex-shrink: 0;
   text-align: center;

@@ -75,8 +75,8 @@ function onToggleEdit() {
   background: rgba(255,255,255,0.6);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.item-card:hover { border-color: rgba(224,123,108,0.35); box-shadow: 0 3px 16px rgba(224,123,108,0.06); }
-.item-card.editing { border-color: var(--accent, #e07b6c); box-shadow: 0 0 0 2px rgba(224,123,108,0.15); }
+.item-card:hover { border-color: rgba(var(--accent-rgb),0.35); box-shadow: 0 3px 16px rgba(var(--accent-rgb),0.06); }
+.item-card.editing { border-color: var(--accent, var(--accent)); box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.15); }
 .card-main { min-width: 0; }
 .card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card-name { font-size: 14px; font-weight: 700; color: var(--text-bright, #2b2b2b); }
@@ -88,7 +88,7 @@ function onToggleEdit() {
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag {
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: rgba(224,123,108,0.1); color: #c06a5a;
+  background: rgba(var(--accent-rgb),0.1); color: var(--accent-hover);
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
 .edit-form { display: flex; flex-direction: column; gap: 8px; }

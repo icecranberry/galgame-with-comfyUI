@@ -89,7 +89,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 </script>
 

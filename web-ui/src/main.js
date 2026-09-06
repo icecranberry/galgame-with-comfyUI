@@ -1,21 +1,31 @@
-// HarmonyOS Sans — 全局字体
-import './assets/fonts/fonts.css'
+// 全局样式体系：token → 基础 → 组件类 → 动效
+// （HarmonyOS Sans 已子集化，经 index.html 的 /fonts/fonts-split.css 加载，不再打包全量字体）
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/components.css'
+import './styles/animations.css'
+import { initTheme } from './theme.js'
+
+// 挂载前同步应用本地主题，避免首帧闪烁
+initTheme()
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
-import MemorySettingsView from './views/MemorySettingsView.vue'
-import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
-import SettingsView from './views/SettingsView.vue'
-import MomentsView from './views/MomentsView.vue'
-import GalleryView from './views/GalleryView.vue'
-import TavernView from './views/TavernView.vue'
-import EventsView from './views/EventsView.vue'
-import ScheduleView from './views/ScheduleView.vue'
-import MailboxView from './views/MailboxView.vue'
-import GroupChatView from './views/GroupChatView.vue'
+
+// 路由级代码分割：首屏只加载聊天页，其余视图按需拉取
+const MomentsView = () => import('./views/MomentsView.vue')
+const EventsView = () => import('./views/EventsView.vue')
+const ScheduleView = () => import('./views/ScheduleView.vue')
+const GalleryView = () => import('./views/GalleryView.vue')
+const TavernView = () => import('./views/TavernView.vue')
+const MailboxView = () => import('./views/MailboxView.vue')
+const SettingsView = () => import('./views/SettingsView.vue')
+const MemorySettingsView = () => import('./views/MemorySettingsView.vue')
+const MaibotBridgeView = () => import('./views/MaibotBridgeView.vue')
+const GroupChatView = () => import('./views/GroupChatView.vue')
 
 const routes = [
   { path: '/', redirect: '/chat' },

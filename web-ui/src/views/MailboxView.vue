@@ -600,7 +600,7 @@ onUnmounted(() => {
 .unread-dot {
   position: absolute; top: 10px; right: 10px;
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--danger, #e07b6c);
+  background: var(--danger, var(--accent));
 }
 
 .card-env-col { flex-shrink: 0; padding-top: 1px; }
@@ -614,7 +614,7 @@ onUnmounted(() => {
 }
 .card-mini-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 10px; font-weight: 700;
 }
 
@@ -659,7 +659,7 @@ onUnmounted(() => {
 }
 .detail-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0;
 }
 .detail-header-info { flex: 1; min-width: 0; }
@@ -789,7 +789,7 @@ onUnmounted(() => {
 }
 .picker-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #d4a08c, #c48a78);
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-2-light));
   color: #fff; font-size: 20px; font-weight: 700;
 }
 .picker-name { font-size: 12px; color: #3a2a1a; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

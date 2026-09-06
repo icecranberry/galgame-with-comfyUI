@@ -134,17 +134,17 @@ const endJelly = (event) => {
 }
 .ls-btn--primary:hover:not(:disabled) { filter: brightness(1.05) saturate(1.05); }
 
-/* ── 次要操作：白糖糖（珊瑚描边 + 浅珊瑚厚底） ── */
+/* ── 次要操作：白糖糖（主题色描边 + 浅主题色厚底） ── */
 .ls-btn--secondary {
-  background: #fff;
-  color: #a85545;
-  border: 1.5px solid rgba(224, 123, 108, 0.4);
-  box-shadow: 0 var(--depth) 0 #f0ddd3, inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: var(--bg-secondary);
+  color: var(--accent);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 var(--depth) 0 rgba(var(--accent-rgb), 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .ls-btn--secondary:hover:not(:disabled) {
-  background: #fff5ef;
-  border-color: rgba(224, 123, 108, 0.7);
-  color: #8f4a38;
+  background: var(--accent-light);
+  border-color: rgba(var(--accent-rgb), 0.7);
+  color: var(--accent-hover);
 }
 
 /* ── 危险操作：红辣椒糖 ── */
@@ -155,16 +155,16 @@ const endJelly = (event) => {
 }
 .ls-btn--danger:hover:not(:disabled) { filter: brightness(1.05); }
 
-/* ── 幽灵：暖白糖纸（无珊瑚色，弱存在感） ── */
+/* ── 幽灵：亮面糖纸（无主题色，弱存在感） ── */
 .ls-btn--ghost {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
-  border: 1.5px solid #e3dcd2;
-  box-shadow: 0 var(--depth) 0 rgba(222, 211, 198, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 1.5px solid var(--border);
+  box-shadow: 0 var(--depth) 0 var(--border), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .ls-btn--ghost:hover:not(:disabled) {
-  background: #fff;
-  border-color: #d5cabb;
+  background: var(--bg-secondary);
+  border-color: var(--border-strong);
   color: var(--text-bright);
 }
 .ls-btn--ghost:active:not(:disabled) { transform: translateY(1px); }
@@ -189,11 +189,11 @@ const endJelly = (event) => {
 .ls-btn--chip.ls-btn--lg { min-height: 34px; padding: 6px 16px; }
 .ls-btn--chip:hover:not(:disabled) { border-color: var(--accent-light); color: var(--text-bright); }
 .ls-btn--chip.ls-btn--active {
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   border-color: var(--accent-light);
   color: var(--accent-hover);
   font-weight: 600;
-  box-shadow: 0 2px 0 rgba(204, 106, 92, 0.28);
+  box-shadow: 0 2px 0 rgba(var(--accent-rgb), 0.28);
 }
 
 /* ── 链接 ── */
@@ -248,7 +248,7 @@ const endJelly = (event) => {
 @keyframes ls-spin { to { transform: rotate(360deg); } }
 
 /* ── 键盘焦点 ── */
-.ls-btn:focus-visible { outline: 3px solid rgba(224, 123, 108, 0.3); outline-offset: 2px; }
+.ls-btn:focus-visible { outline: 3px solid rgba(var(--accent-rgb), 0.3); outline-offset: 2px; }
 .ls-btn:focus:not(:focus-visible) { outline: none; }
 
 /* ── 减弱动效 ── */

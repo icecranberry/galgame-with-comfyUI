@@ -166,7 +166,7 @@ async function onDiscard(task) {
   padding: 12px 14px;
 }
 
-.iet-card.is-error { border-color: rgba(224, 123, 108, 0.5); }
+.iet-card.is-error { border-color: rgba(var(--accent-rgb), 0.5); }
 
 .iet-card-body { display: flex; align-items: center; gap: 10px; }
 
@@ -187,13 +187,13 @@ async function onDiscard(task) {
   color: #6f675f;
 }
 
-.iet-card.is-error .iet-state-icon { background: rgba(224, 123, 108, 0.16); color: #e07b6c; }
+.iet-card.is-error .iet-state-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
 
 .iet-card-text { min-width: 0; flex: 1; }
 
 .iet-card-title { font-size: 13px; font-weight: 700; color: #3d332c; margin-bottom: 6px; }
 
-.iet-error-text { font-size: 12px; color: #e07b6c; line-height: 1.45; word-break: break-word; }
+.iet-error-text { font-size: 12px; color: var(--accent); line-height: 1.45; word-break: break-word; }
 
 .iet-progress {
   height: 5px; border-radius: 999px; background: rgba(120, 90, 70, 0.12);
@@ -229,8 +229,8 @@ async function onDiscard(task) {
 .iet-modal-card {
   width: min(1080px, 94vw);
   background: #F7F4EF;
-  border: 1px solid rgba(224, 123, 108, 0.16);
-  border-color: color-mix(in srgb, #E07B6C 24%, transparent);
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   border-radius: 18px;
   box-shadow: 0 12px 35px rgba(50, 40, 35, 0.12);
   max-height: 90dvh;

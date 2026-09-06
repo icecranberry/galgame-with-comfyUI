@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import { rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
 import { deleteImageFileByUrl } from './imagePaths.js';
+import { invalidateGalleryCache } from './galleryCache.js';
 
 function parseImageUrls(value) {
   if (!value) return [];
@@ -133,9 +134,7 @@ export async function undoLastGroupRound(groupId) {
   }
 
   if (imageUrls.length > 0) {
-    import('../routes/images.js')
-      .then(({ invalidateGalleryCache }) => invalidateGalleryCache())
-      .catch(() => {});
+    try { invalidateGalleryCache(); } catch { /* 缓存失效失败不影响主流程 */ }
   }
 
   return {

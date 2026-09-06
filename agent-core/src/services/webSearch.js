@@ -15,7 +15,43 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const FETCH_TIMEOUT = 5000; // 萌娘百科/通用单次请求 5s 超时
 const BING_TIMEOUT = 8000;  // Bing 抓取（含 HTML 解析，给更长时间）
 
+// 出站白名单：联网抓取只允许这两个公共站点。
+// 从 Bing 结果 HTML 里提取的链接也可能回流到抓取入口，必须统一校验，
+// 防止任何用户输入间接把请求引向内网地址（SSRF）。
+const ALLOWED_FETCH_HOSTS = /^(?:[a-z0-9-]+\.)*(?:moegirl\.org\.cn|bing\.com)$/;
+
+function assertAllowedOutboundUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`[webSearch] blocked malformed outbound url: ${url}`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`[webSearch] blocked outbound protocol: ${parsed.protocol}`);
+  }
+  if (!ALLOWED_FETCH_HOSTS.test(parsed.hostname)) {
+    throw new Error(`[webSearch] blocked outbound host: ${parsed.hostname}`);
+  }
+  return url;
+}
+
+// 交给本地爬虫前的最后一道清洗：只保留路径/查询，主机用字面量硬重建。
+// 这样即使 URL 取自远程 HTML（Bing 结果等），实际请求目标也固定是萌娘百科，
+// 远程内容无法把抓取引向其他主机（含内网）。
+function toSafeMoegirlScrapeUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (!ALLOWED_FETCH_HOSTS.test(parsed.hostname)) return null;
+  return `https://zh.moegirl.org.cn${parsed.pathname}${parsed.search}`;
+}
+
 function fetchWithTimeout(url, opts = {}, timeoutMs = FETCH_TIMEOUT) {
+  assertAllowedOutboundUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
@@ -86,9 +122,10 @@ export async function searchCharacterInfo(query) {
         const best = matched[0];
         // 深度抓取萌娘百科页面（Python 服务提取 infobox + 正文）
         // 向前兼容：source 可能是完整 URL，也可能是"萌娘百科·Title"格式
-        const scrapeUrl = best.source && best.source.includes('moegirl.org.cn')
+        const rawScrapeUrl = best.source && best.source.includes('moegirl.org.cn')
           ? best.source
           : `https://zh.moegirl.org.cn/${encodeURIComponent(best.title)}`;
+        const scrapeUrl = toSafeMoegirlScrapeUrl(rawScrapeUrl);
         try {
           const pageData = await scrapeMoegirlPage(scrapeUrl);
           if (pageData && pageData.content) {
@@ -154,16 +191,8 @@ export async function searchCharacterInfo(query) {
  */
 async function tryDirectPageResolve(baseUrl, query) {
   try {
-    const url = `${baseUrl}?${new URLSearchParams({
-      action: 'query',
-      titles: query,
-      redirects: '1',       // 跟随重定向页面
-      prop: 'extracts',
-      exintro: '1',
-      explaintext: '1',
-      format: 'json',
-      origin: '*',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*`;
 
     const res = await fetchWithTimeout(url, {
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
@@ -205,15 +234,8 @@ async function tryDirectPageResolve(baseUrl, query) {
  */
 async function fetchFullPageExtract(baseUrl, query) {
   try {
-    const url = `${baseUrl}?${new URLSearchParams({
-      action: 'query',
-      titles: query,
-      redirects: '1',
-      prop: 'extracts',
-      explaintext: '1',
-      format: 'json',
-      origin: '*',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&explaintext=1&format=json&origin=*`;
 
     const res = await fetchWithTimeout(url, {
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
@@ -293,12 +315,8 @@ async function searchMoegirl(query, context = '') {
   let urls = [];
 
   for (const q of searchQueries) {
-    const searchUrl = `${BASE}?${new URLSearchParams({
-      action: 'opensearch',
-      search: q,
-      format: 'json',
-      limit: '5',
-    })}`;
+    // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
+    const searchUrl = `${BASE}?action=opensearch&search=${encodeURIComponent(q)}&format=json&limit=5`;
 
     let searchData;
     try {
@@ -323,15 +341,7 @@ async function searchMoegirl(query, context = '') {
     const title = titles[i];
     const pageUrl = urls[i] || '';
     try {
-      const extractUrl = `${BASE}?${new URLSearchParams({
-        action: 'query',
-        prop: 'extracts',
-        exintro: '1',
-        explaintext: '1',
-        titles: title,
-        format: 'json',
-        origin: '*',
-      })}`;
+      const extractUrl = `${BASE}?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
 
       const extractRes = await fetchWithTimeout(extractUrl, {
         headers: { 'User-Agent': UA, 'Accept': 'application/json' },
@@ -364,7 +374,9 @@ async function searchMoegirl(query, context = '') {
  * 搜到萌娘百科链接时，跟踪进去抓「基本资料」栏的结构化字段
  */
 async function searchBing(query) {
-  const url = `https://www.bing.com/search?q=${encodeURIComponent(query + ' 萌娘百科')}&setlang=zh-hans`;
+  const url = assertAllowedOutboundUrl(
+    `https://www.bing.com/search?q=${encodeURIComponent(query + ' 萌娘百科')}&setlang=zh-hans`
+  );
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BING_TIMEOUT);
@@ -389,11 +401,16 @@ async function searchBing(query) {
   // 先检查是否有萌娘百科结果，有则深度抓取
   const moegirlMatch = /<a[^>]*href="(https?:\/\/[a-z]*\.?moegirl\.org\.cn\/[^"]*?)"/i.exec(html);
   if (moegirlMatch) {
-    const moegirlUrl = moegirlMatch[1].replace(/&amp;/g, '&');
+    const moegirlUrl = toSafeMoegirlScrapeUrl(moegirlMatch[1].replace(/&amp;/g, '&'));
+    if (!moegirlUrl) {
+      console.warn('[webSearch] blocked non-moegirl link extracted from Bing HTML');
+    }
     console.log(`[webSearch] Found moegirl link: ${moegirlUrl}`);
     try {
-      const moegirlData = await scrapeMoegirlPage(moegirlUrl);
-      if (moegirlData) results.push(moegirlData);
+      if (moegirlUrl) {
+        const moegirlData = await scrapeMoegirlPage(moegirlUrl);
+        if (moegirlData) results.push(moegirlData);
+      }
     } catch (err) {
       console.warn('[webSearch] Moegirl scrape failed:', err.message);
     }
@@ -490,6 +507,11 @@ function extractInfoboxFromText(bodyText) {
  * 调用 Python 爬虫服务获取萌娘百科页面内容
  */
 async function scrapeMoegirlPage(pageUrl) {
+  // 汇点兜底：无论调用方来源如何，送进爬虫的必须是萌娘百科页面
+  if (!/^https:\/\/([^/]+\.)?moegirl\.org\.cn\//.test(String(pageUrl))) {
+    console.warn(`[webSearch] scrapeMoegirlPage blocked non-moegirl url: ${pageUrl}`);
+    return null;
+  }
   console.log(`[webSearch] scrapeMoegirlPage calling python: ${pageUrl}`);
   try {
     const res = await fetch(`http://localhost:8765/scrape`, {

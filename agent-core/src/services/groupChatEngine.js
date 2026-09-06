@@ -37,6 +37,7 @@ import { splitText } from '../utils/sentenceSplitter.js';
 import { stripImagePromptLines } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
+import { invalidateGalleryCache } from './galleryCache.js';
 import { buildGroupEmojiNote, getCharacterEmojiMap, parseGroupEmojiText, getEmojiCategories, parseEmojiText } from './emojiService.js';
 
 export function groupConvId(groupId) { return `group_${groupId}`; }
@@ -551,9 +552,8 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
     db.prepare(`UPDATE messages SET images = ? WHERE id = ?`).run(JSON.stringify(urls), targetMsgId);
     db.prepare(`UPDATE image_tasks SET status='done', output_paths=?, workflow_template=?, finished_at=datetime('now') WHERE id=?`)
       .run(JSON.stringify(urls), result.wfMode, taskId);
-    // 相册缓存失效（动态 import 避免 service→route 静态循环依赖）
+    // 相册缓存失效（cache 已下沉到 services，直接静态导入）
     try {
-      const { invalidateGalleryCache } = await import('../routes/images.js');
       invalidateGalleryCache();
     } catch { /* gallery 缓存失效失败不影响主流程 */ }
     emit('generate_done', { group_id: group.id, taskId, msg_id: targetMsgId, images: urls, speaker_character_id: speaker.id });
@@ -684,9 +684,7 @@ export function truncateRoundAfter(groupId, afterMsgId) {
     }
   }
   if (doomedImageUrls.length > 0) {
-    import('../routes/images.js')
-      .then(({ invalidateGalleryCache }) => invalidateGalleryCache())
-      .catch(() => {});
+    try { invalidateGalleryCache(); } catch { /* 缓存失效失败不影响主流程 */ }
   }
 
   console.log(`[group] truncated ${doomed.length} undelivered segments after msg #${afterMsgId} for group ${groupId}`);

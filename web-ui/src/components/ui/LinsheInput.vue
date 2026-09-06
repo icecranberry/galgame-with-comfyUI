@@ -98,7 +98,7 @@ defineExpose({
 <style scoped>
 /* ── 软糖凹陷输入框 ──
    与 LinsheButton 的「软糖立体」互补：按钮是凸起的糖，
-   输入框是糖被按进糖纸后留下的凹痕（微下陷 + 聚焦时被珊瑚色照亮） */
+   输入框是糖被按进糖纸后留下的凹痕（微下陷 + 聚焦时被主题色照亮） */
 .ls-input {
   box-sizing: border-box;
   display: block;
@@ -108,19 +108,19 @@ defineExpose({
   font-size: 13px;
   line-height: 1.4;
   color: var(--text-bright);
-  background: #fffdfb;
-  border: 1.5px solid #e3dcd2;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border);
   border-radius: 10px;
   caret-color: var(--accent);
   outline: none;
-  box-shadow: inset 0 1px 2px rgba(96, 66, 46, 0.05);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease,
     background-color 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.ls-input::placeholder { color: #b8afa5; opacity: 1; }
+.ls-input::placeholder { color: var(--text-secondary); opacity: 1; }
 
 /* ── 尺寸（与 LinsheButton 对齐） ── */
 .ls-input--sm { min-height: 26px; padding: 3px 9px; font-size: 12px; border-radius: 8px; }
@@ -136,14 +136,14 @@ defineExpose({
 }
 
 /* ── 悬停：边框加深一点 ── */
-.ls-input:hover:not(:disabled):not(:focus) { border-color: #d5cabb; }
+.ls-input:hover:not(:disabled):not(:focus) { border-color: var(--border-strong); }
 
-/* ── 聚焦：凹痕被珊瑚色照亮 ── */
+/* ── 聚焦：凹痕被主题色照亮 ── */
 .ls-input:focus {
-  background: #fff;
+  background: var(--bg-secondary);
   border-color: var(--accent);
   box-shadow:
-    0 0 0 3px rgba(224, 123, 108, 0.14),
+    0 0 0 3px rgba(var(--accent-rgb), 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
@@ -153,17 +153,17 @@ defineExpose({
 
 /* ── 禁用 ── */
 .ls-input:disabled {
-  background: #f6f3ee;
-  border-color: #eae4da;
-  color: #b3aca4;
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-secondary);
   cursor: not-allowed;
   box-shadow: none;
 }
-.ls-input:disabled::placeholder { color: #c4bdb2; }
+.ls-input:disabled::placeholder { color: var(--text-secondary); }
 
-/* ── 浏览器自动填充时保持暖白底 ── */
+/* ── 浏览器自动填充时保持内容底色 ── */
 .ls-input:-webkit-autofill {
-  -webkit-box-shadow: 0 0 0 40px #fffdfb inset;
+  -webkit-box-shadow: 0 0 0 40px var(--bg-secondary) inset;
   -webkit-text-fill-color: var(--text-bright);
   transition: background-color 9999s ease-out;
 }

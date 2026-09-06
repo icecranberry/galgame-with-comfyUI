@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════
+   邻舍.EXE Design Tokens —— 唯一变量源
+   主题体系：默认 violet（晴紫），其余经 <html data-theme> 覆盖。
+   赛璐璐语言：--cel-*（描边/硬阴影/两段式渐变）、--accent-3/4 多点配色、
+   --fun-* 功能色（导航配色/icon-tile 轮换，不随主题）。
+   尺度：--radius-* / --shadow-* / --fs-* / --dur-* / --ease-* / --z-*。
+   切换逻辑见 stores/settings.js + theme.js。
+   ═══════════════════════════════════════════════════════ */
+:root {
+  /* ── 底色与文字 ── */
+  --bg-primary: #f4f2fd;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #edebfb;
+  --bg-hover: #e2dff7;
+  --border: #e0dcf5;
+  --border-strong: #c6bef4;      /* 漫画格描边（组件级 2px 描边用） */
+  --cel-outline: #37306b;        /* 赛璐璐深描边色 */
+  --text-primary: #322d4e;
+  --text-secondary: #7d7897;
+  --text-bright: #16131f;
+
+  /* ── 主色系（蓝紫主导 · 橙红点睛）── */
+  --accent: #6c5ce7;
+  --accent-hover: #5a4bd6;
+  --accent-light: #a99df2;
+  --accent-rgb: 108, 92, 231;
+  --accent-2: #ff6f52;
+  --accent-2-hover: #f25a3d;
+  --accent-2-light: #ffb09c;
+  --accent-2-rgb: 255, 111, 82;
+  --accent-3: #00c2a8;           /* 青绿 */
+  --accent-3-light: #7ce4d6;
+  --accent-4: #f65fa4;           /* 桃粉 */
+  --accent-4-light: #ff9cc8;
+
+  /* ── 赛璐璐渐变与硬阴影 ── */
+  --grad-brand: linear-gradient(135deg, #6c5ce7 0%, #a35df0 55%, #ff6f52 100%);
+  --grad-cel: linear-gradient(180deg, var(--accent) 0%, var(--accent) 52%, var(--accent-hover) 52%, var(--accent-hover) 100%);
+  --grad-soft: linear-gradient(120deg, #efeafc 0%, #ffe9e2 35%, #e9ecfb 65%, #efeafc 100%);
+  --btn-lip: color-mix(in srgb, var(--accent-hover) 72%, #000);  /* 贴纸按钮底部厚度 */
+  --shadow-hard: 0 3px 0 color-mix(in srgb, var(--cel-outline) 16%, transparent);
+  --shadow-hard-sm: 0 2px 0 color-mix(in srgb, var(--cel-outline) 13%, transparent);
+
+  /* ── 功能色组（导航配色 / icon-tile 轮换，不随主题）── */
+  --fun-purple: #7c6af5;
+  --fun-pink: #f65fa4;
+  --fun-orange: #ff8a4c;
+  --fun-teal: #17c3ab;
+  --fun-blue: #4a9df8;
+  --fun-gold: #ffb020;
+  --fun-violet: #a35df0;
+  --fun-neutral: #9a96b5;
+
+  /* ── 语义色（不随主题）── */
+  --success: #3fbf7f;
+  --warning: #faad14;
+  --danger: #ff4d5f;
+
+  /* ── Glassmorphism（不随主题）── */
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-bg-strong: rgba(255, 255, 255, 0.38);
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
+  --glass-blur: blur(18px);
+
+  /* ── 背景光斑（index.html 引用）── */
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(178, 168, 248, 0.70) 0%, rgba(178, 168, 248, 0.34) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(255, 186, 152, 0.66) 0%, rgba(255, 186, 152, 0.32) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(198, 190, 252, 0.60) 0%, rgba(198, 190, 252, 0.30) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(255, 202, 216, 0.52) 0%, rgba(255, 202, 216, 0.26) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(186, 196, 250, 0.55) 0%, rgba(186, 196, 250, 0.28) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(168, 208, 252, 0.52) 0%, rgba(168, 208, 252, 0.26) 30%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(222, 210, 254, 0.55) 0%, rgba(222, 210, 254, 0.26) 32%, transparent 60%);
+  --dot-color: rgba(108, 92, 231, 0.08);   /* 波点纹理 */
+
+  /* ── 尺度：圆角 ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* ── 尺度：柔阴影 ── */
+  --shadow-xs: 0 1px 3px rgba(40, 32, 70, 0.06);
+  --shadow-sm: 0 2px 8px rgba(40, 32, 70, 0.08);
+  --shadow-md: 0 6px 20px rgba(40, 32, 70, 0.10);
+  --shadow-lg: 0 12px 40px rgba(40, 32, 70, 0.14);
+  --shadow-glow: 0 4px 18px rgba(var(--accent-rgb), 0.28);
+  --focus-ring: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+
+  /* ── 尺度：字号 ── */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+
+  /* ── 尺度：动效 ── */
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 350ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-emph: cubic-bezier(0.17, 0.89, 0.32, 1.28);
+
+  /* ── 尺度：层级 ── */
+  --z-nav: 100;
+  --z-drawer: 1000;
+  --z-modal: 10000;
+  --z-popover: 11000;
+  --z-toast: 12000;
+  --z-float: 15000;
+}
+
+/* ══ 暖阳：亮橙红主导 · 蓝紫点睛 ══ */
+[data-theme="sunset"] {
+  --bg-primary: #fcf2ec;
+  --bg-tertiary: #f8e7dc;
+  --bg-hover: #f1d8c9;
+  --border: #f3ddcf;
+  --border-strong: #f0c2ab;
+  --cel-outline: #5c2b1e;
+  --text-primary: #43332b;
+  --text-secondary: #97837a;
+  --text-bright: #201511;
+  --accent: #ff6347;
+  --accent-hover: #f04e30;
+  --accent-light: #ffab94;
+  --accent-rgb: 255, 99, 71;
+  --accent-2: #6c5ce7;
+  --accent-2-hover: #5a4bd6;
+  --accent-2-light: #b3a9f5;
+  --accent-2-rgb: 108, 92, 231;
+  --accent-3: #ffb020;
+  --accent-3-light: #ffd67e;
+  --accent-4: #f0508a;
+  --accent-4-light: #ff96bd;
+  --grad-brand: linear-gradient(135deg, #ff8a5c 0%, #ff6347 55%, #f0508a 100%);
+  --grad-soft: linear-gradient(120deg, #fdeee6 0%, #fde7f0 35%, #eef0fb 65%, #fdeee6 100%);
+  --dot-color: rgba(255, 99, 71, 0.08);
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(255, 190, 150, 0.70) 0%, rgba(255, 190, 150, 0.35) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(255, 168, 148, 0.64) 0%, rgba(255, 168, 148, 0.32) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(255, 206, 162, 0.60) 0%, rgba(255, 206, 162, 0.30) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(255, 190, 196, 0.50) 0%, rgba(255, 190, 196, 0.24) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(250, 192, 156, 0.58) 0%, rgba(250, 192, 156, 0.28) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(200, 190, 250, 0.48) 0%, rgba(200, 190, 250, 0.24) 30%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(255, 216, 178, 0.54) 0%, rgba(255, 216, 178, 0.26) 32%, transparent 60%);
+}
+
+/* ══ 海盐：电光蓝青 · 暖橙点睛 ══ */
+[data-theme="ocean"] {
+  --bg-primary: #edf4fc;
+  --bg-tertiary: #e2edf8;
+  --bg-hover: #d3e3f4;
+  --border: #d8e5f5;
+  --border-strong: #b4d0f0;
+  --cel-outline: #1f3c63;
+  --text-primary: #2b3a52;
+  --text-secondary: #7b89a0;
+  --text-bright: #122031;
+  --accent: #3f8ef7;
+  --accent-hover: #2a77de;
+  --accent-light: #9ec7f8;
+  --accent-rgb: 63, 142, 247;
+  --accent-2: #ffa23e;
+  --accent-2-hover: #f58d24;
+  --accent-2-light: #ffce8e;
+  --accent-2-rgb: 255, 162, 62;
+  --accent-3: #ff6b9d;
+  --accent-3-light: #ffa8c6;
+  --accent-4: #26c6b9;
+  --accent-4-light: #86e6de;
+  --grad-brand: linear-gradient(135deg, #3f8ef7 0%, #5f7bf0 55%, #8f6cf5 100%);
+  --grad-soft: linear-gradient(120deg, #e9f3fd 0%, #e9faf5 35%, #eef0fc 65%, #e9f3fd 100%);
+  --dot-color: rgba(63, 142, 247, 0.08);
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(158, 199, 250, 0.66) 0%, rgba(158, 199, 250, 0.33) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(255, 205, 158, 0.54) 0%, rgba(255, 205, 158, 0.27) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(168, 216, 250, 0.58) 0%, rgba(168, 216, 250, 0.29) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(196, 232, 250, 0.48) 0%, rgba(196, 232, 250, 0.24) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(182, 208, 250, 0.54) 0%, rgba(182, 208, 250, 0.27) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(198, 198, 250, 0.48) 0%, rgba(198, 198, 250, 0.24) 30%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(210, 230, 252, 0.54) 0%, rgba(210, 230, 252, 0.26) 32%, transparent 60%);
+}
+
+/* ══ 蜜桃：艳粉 · 莓果紫点睛 ══ */
+[data-theme="sakura"] {
+  --bg-primary: #fcf0f6;
+  --bg-tertiary: #f8e4ee;
+  --bg-hover: #f2d6e4;
+  --border: #f4dae7;
+  --border-strong: #f2bcd4;
+  --cel-outline: #5c2c46;
+  --text-primary: #48303f;
+  --text-secondary: #9b8290;
+  --text-bright: #23121a;
+  --accent: #f0569a;
+  --accent-hover: #dd3f86;
+  --accent-light: #faa8c9;
+  --accent-rgb: 240, 86, 154;
+  --accent-2: #8b6cf0;
+  --accent-2-hover: #7557e0;
+  --accent-2-light: #c0aef8;
+  --accent-2-rgb: 139, 108, 240;
+  --accent-3: #35b6e8;
+  --accent-3-light: #8ed9f5;
+  --accent-4: #ffb020;
+  --accent-4-light: #ffd67e;
+  --grad-brand: linear-gradient(135deg, #f0569a 0%, #d66fd0 55%, #8b6cf0 100%);
+  --grad-soft: linear-gradient(120deg, #fde9f2 0%, #f3e8fc 35%, #e9f0fc 65%, #fde9f2 100%);
+  --dot-color: rgba(240, 86, 154, 0.08);
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(252, 186, 214, 0.64) 0%, rgba(252, 186, 214, 0.32) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(255, 198, 186, 0.58) 0%, rgba(255, 198, 186, 0.29) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(236, 192, 250, 0.54) 0%, rgba(236, 192, 250, 0.27) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(255, 208, 226, 0.48) 0%, rgba(255, 208, 226, 0.24) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(250, 198, 222, 0.54) 0%, rgba(250, 198, 222, 0.27) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(210, 194, 252, 0.48) 0%, rgba(210, 194, 252, 0.24) 30%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(255, 220, 234, 0.54) 0%, rgba(255, 220, 234, 0.26) 32%, transparent 60%);
+}

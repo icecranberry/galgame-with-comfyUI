@@ -180,7 +180,7 @@
         </div>
         <div
           class="char-card-avatar"
-          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: '#e07b6c' }"
+          :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
         >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-card-name">{{ c.display_name }}</div>
         <div class="char-card-foot">
@@ -576,14 +576,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, inject, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, inject, nextTick, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
-import RelationshipGraph from '../components/RelationshipGraph.vue'
-import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
+// 关系图依赖 @vue-flow（重），仅在打开时加载
+const RelationshipGraph = defineAsyncComponent(() => import('../components/RelationshipGraph.vue'))
+const UserRelationshipGraph = defineAsyncComponent(() => import('../components/UserRelationshipGraph.vue'))
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
@@ -637,7 +638,7 @@ const personaInput = ref(null)
 
 const userAvatarStyle = computed(() => {
   if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 
 async function onUserAvatarSave(base64) {
@@ -981,7 +982,7 @@ function toWorldHighlightHtml(text) {
       if (/^\s*【[^】]*】\s*$/.test(safe)) {
         return `<span class="world-sec-title">${safe}</span>`
       }
-      if (/^\s*[-•·*]\s+/.test(safe) || /^\s*\d+[\.、．]/.test(safe)) {
+      if (/^\s*[-•·*]\s+/.test(safe) || /^\s*\d+[.、．]/.test(safe)) {
         return `<span class="world-sec-item">${safe}</span>`
       }
       return safe.replace(/^(\s*)(【[^】]*】)/, (m, indent, tag) => `${indent}<span class="world-sec-tag">${tag}</span>`)
@@ -1338,15 +1339,9 @@ onMounted(async () => {
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
 .is-clickable { cursor: pointer; }
 
-/* ── 卡片共用 ── */
+/* ── 卡片共用：视觉样式走全局 .card，这里只保留布局 ── */
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
   padding: 20px 24px;
-  box-shadow: var(--glass-shadow);
 }
 
 /* ── 用户行 ── */
@@ -1486,14 +1481,14 @@ onMounted(async () => {
 }
 .relation-entry:hover {
   background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(224, 123, 108, 0.2);
-  box-shadow: 0 2px 16px rgba(224, 123, 108, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 2px 16px rgba(var(--accent-rgb), 0.08);
 }
 
 .relation-entry-icon {
   width: 44px; height: 44px;
   border-radius: 12px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   display: flex; align-items: center; justify-content: center;
   color: var(--accent);
   flex-shrink: 0;
@@ -1518,7 +1513,7 @@ onMounted(async () => {
 
 /* ── 世界观入口卡片 ── */
 .world-icon {
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   color: #c06a52;
 }
 
@@ -1558,7 +1553,7 @@ onMounted(async () => {
 }
 .world-tag-selected {
   background: linear-gradient(180deg, #fffdf8 0%, #fdfaf3 100%);
-  color: #a9573d;
+  color: var(--accent-hover);
   font-weight: 700;
   border-color: rgba(120, 90, 60, 0.16);
   border-bottom-color: #fdfaf3;
@@ -1590,8 +1585,8 @@ onMounted(async () => {
 }
 
 .world-tag-edit:hover {
-  background: rgba(224, 123, 108, 0.12);
-  color: #b8664d;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-hover);
 }
 
 .world-tag-del:hover {
@@ -1605,7 +1600,7 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--text-bright);
   background: #fffdf8;
-  border: 1px solid rgba(224, 123, 108, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 6px;
   outline: none;
   font-family: inherit;
@@ -1629,8 +1624,8 @@ onMounted(async () => {
 }
 .world-tag-add:hover {
   opacity: 1;
-  background: rgba(224, 123, 108, 0.1);
-  color: #b8664d;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent-hover);
 }
 
 /* ── 新建名称行 ── */
@@ -1640,8 +1635,8 @@ onMounted(async () => {
   align-items: center;
   margin-bottom: 12px;
   padding: 10px 12px;
-  background: rgba(224, 123, 108, 0.05);
-  border: 1px solid rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.05);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   border-radius: 12px;
   animation: world-new-pop 0.2s ease;
 }
@@ -1667,7 +1662,7 @@ onMounted(async () => {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 150px;
-  background: radial-gradient(120% 100% at 22% 0%, rgba(224, 123, 108, 0.11) 0%, rgba(224, 123, 108, 0.04) 55%, transparent 100%);
+  background: radial-gradient(120% 100% at 22% 0%, rgba(var(--accent-rgb), 0.11) 0%, rgba(var(--accent-rgb), 0.04) 55%, transparent 100%);
   pointer-events: none;
 }
 .world-modal-panel .world-modal-header {
@@ -1707,8 +1702,8 @@ onMounted(async () => {
   font-weight: 500;
   letter-spacing: 0.4px;
   color: #c06a52;
-  background: rgba(224, 123, 108, 0.08);
-  border: 1px solid rgba(224, 123, 108, 0.18);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
   max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1808,7 +1803,7 @@ onMounted(async () => {
   color: rgba(90, 70, 55, 0.35);
 }
 .world-editor .world-textarea::selection {
-  background: rgba(224, 123, 108, 0.2);
+  background: rgba(var(--accent-rgb), 0.2);
 }
 .world-editor .world-textarea:focus {
   outline: none;
@@ -1848,8 +1843,8 @@ onMounted(async () => {
 .polish-tip {
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(224, 123, 108, 0.05);
-  border: 1px dashed rgba(224, 123, 108, 0.28);
+  background: rgba(var(--accent-rgb), 0.05);
+  border: 1px dashed rgba(var(--accent-rgb), 0.28);
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.7;
@@ -1867,7 +1862,7 @@ onMounted(async () => {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  border: 3px solid rgba(224, 123, 108, 0.18);
+  border: 3px solid rgba(var(--accent-rgb), 0.18);
   border-top-color: var(--accent);
   animation: polish-spin 0.8s linear infinite;
 }
@@ -1931,7 +1926,7 @@ onMounted(async () => {
   font-weight: 800;
   letter-spacing: 1.5px;
   color: #8f4a33;
-  border-left: 3px solid rgba(224, 123, 108, 0.4);
+  border-left: 3px solid rgba(var(--accent-rgb), 0.4);
   padding: 1px 0 1px 9px;
 }
 .polish-preview :deep(.world-sec-title:first-child) {
@@ -1940,7 +1935,7 @@ onMounted(async () => {
 .polish-preview :deep(.world-sec-tag) {
   font-weight: 700;
   color: #a05740;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -2051,7 +2046,7 @@ onMounted(async () => {
   gap: 3px;
   padding: 2px 6px;
   border-radius: 6px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   font-size: 10px;
   font-weight: 600;
@@ -2078,26 +2073,26 @@ onMounted(async () => {
   transition: all 0.15s;
 }
 .char-card-edit:hover {
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
 }
 
 /* ── 招募卡片 ── */
 .recruit-card {
   border-style: dashed;
-  border-color: rgba(224, 123, 108, 0.35);
+  border-color: rgba(var(--accent-rgb), 0.35);
   justify-content: center;
   min-height: 160px;
 }
 .recruit-card:hover {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .recruit-plus {
   width: 48px; height: 48px;
   border-radius: 50%;
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 28px; font-weight: 300;
@@ -2115,7 +2110,7 @@ onMounted(async () => {
 }
 .emoji-manage-card:hover {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 .emoji-manage-icon {
   width: 34px; height: 34px;
@@ -2132,38 +2127,12 @@ onMounted(async () => {
   font-weight: 500;
 }
 
-/* ── 弹窗共用 ── */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-
-.modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
+/* ── 弹窗骨架已迁移至全局 .modal-*（styles/components.css）── */
 .modal-wide { width: min(1100px, 97vw); }
 
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
-
-.modal-close {
-  width: 30px; height: 30px;
-}
 
 .modal-body {
   padding: 0px 22px 22px;
-  overflow-y: auto; flex: 1;
 }
 
 .modal-body-detail {
@@ -2234,7 +2203,7 @@ onMounted(async () => {
   transition: background 0.2s, border-color 0.2s, opacity 0.2s;
 }
 .import-card-btn:hover {
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   border-color: var(--accent);
 }
 .import-card-btn.disabled {
@@ -2260,7 +2229,7 @@ onMounted(async () => {
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   animation: scan-sweep 2s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(224,123,108,0.6), 0 0 8px rgba(224,123,108,0.3);
+  box-shadow: 0 0 24px rgba(var(--accent-rgb),0.6), 0 0 8px rgba(var(--accent-rgb),0.3);
 }
 @keyframes scan-sweep {
   0%   { top: 10%; opacity: 0.2; }
@@ -2272,7 +2241,7 @@ onMounted(async () => {
 .scan-text {
   font-size: 14px; color: var(--accent); font-weight: 600;
   animation: scan-pulse 1.2s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(224,123,108,0.3);
+  text-shadow: 0 0 12px rgba(var(--accent-rgb),0.3);
 }
 @keyframes scan-pulse {
   0%, 100% { opacity: 0.4; transform: scale(0.97); }
@@ -2286,13 +2255,13 @@ onMounted(async () => {
 .preview-name-input {
   font-size: 20px; font-weight: 700; color: var(--text-bright);
   background: #f0ece8;
-  border: 1px dashed rgba(224, 123, 108, 0.25);
+  border: 1px dashed rgba(var(--accent-rgb), 0.25);
   border-radius: 8px; padding: 4px 10px;
   flex: 1; min-width: 0; outline: none; font-family: inherit;
   transition: border-color 0.2s, background 0.2s;
   cursor: text;
 }
-.preview-name-input:hover  { border-color: rgba(224, 123, 108, 0.45); background: rgba(224, 123, 108, 0.07); }
+.preview-name-input:hover  { border-color: rgba(var(--accent-rgb), 0.45); background: rgba(var(--accent-rgb), 0.07); }
 .preview-name-input:focus  { border-color: var(--accent); background: rgba(255,255,255,0.5); }
 
 /* ── 预览卡片 ── */
@@ -2349,8 +2318,8 @@ onMounted(async () => {
   margin-bottom: 16px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
 }
 .detail-rel-header {
   display: flex;
@@ -2366,47 +2335,7 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
 }
-.detail-rel-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.detail-rel-btn.subtle {
-  background: rgba(224, 123, 108, 0.06);
-  border: 1px solid rgba(224, 123, 108, 0.15);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 10px;
-}
-.detail-rel-btn.subtle:hover {
-  background: rgba(224, 123, 108, 0.14);
-  border-color: rgba(224, 123, 108, 0.3);
-  color: #d06a5a;
-}
-/* 空状态 CTA 按钮——更醒目 */
-.detail-rel-btn.cta {
-  padding: 10px 22px;
-  font-size: 14px;
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 12px rgba(224, 123, 108, 0.25);
-}
-.detail-rel-btn.cta:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 4px 18px rgba(224, 123, 108, 0.35);
-  transform: translateY(-1px);
-}
-
-/* 已有关系的条目列表 */
+/* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-list {
   display: flex;
   flex-direction: column;
@@ -2430,7 +2359,7 @@ onMounted(async () => {
   font-weight: 500;
   padding: 1px 8px;
   border-radius: 4px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 
 .detail-rel-more {
@@ -2464,7 +2393,7 @@ onMounted(async () => {
 }
 .rel-empty-spinner {
   width: 14px; height: 14px;
-  border: 2px solid rgba(224, 123, 108, 0.2);
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: rel-spin 0.6s linear infinite;
@@ -2513,7 +2442,7 @@ onMounted(async () => {
 }
 .float-card-btn:hover {
   border-color: var(--accent);
-  box-shadow: 0 4px 20px rgba(224, 123, 108, 0.12);
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.12);
 }
 .float-badge {
   font-size: 10px;
@@ -2523,7 +2452,7 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 .float-badge.active {
-  background: rgba(224, 123, 108, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   color: var(--accent);
 }
 
@@ -2558,16 +2487,7 @@ onMounted(async () => {
 }
 .detail-actions-right { margin-left: auto; display: flex; gap: 10px; }
 
-/* ── 弹窗动画 ── */
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-
-@keyframes modal-pop {
-  0% { transform: scale(0.92); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
+/* 弹窗动画已迁移至全局 animations.css */
 
 /* ── 移动端 ── */
 @media (max-width: 767px) {
@@ -2661,10 +2581,7 @@ onMounted(async () => {
     padding: 12px;
     margin-bottom: 14px;
   }
-  .detail-rel-btn {
-    padding: 5px 10px;
-    font-size: 11px;
-  }
+  /* .detail-rel-btn 移动端覆写已在全局 components.css */
   .detail-layout { flex-direction: column; }
 
   /* 移动端详情工具栏 */
@@ -2683,7 +2600,7 @@ onMounted(async () => {
     gap: 5px;
     padding: 7px 12px;
     border-radius: 8px;
-    background: rgba(224, 123, 108, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
     color: var(--accent);
     font-size: 12px;
     font-weight: 600;
@@ -2694,7 +2611,7 @@ onMounted(async () => {
     user-select: none;
   }
   .toolbar-item:active {
-    background: rgba(224, 123, 108, 0.16);
+    background: rgba(var(--accent-rgb), 0.16);
   }
   .toolbar-item-toggle {
     cursor: default;
@@ -2712,7 +2629,7 @@ onMounted(async () => {
     flex-shrink: 0;
   }
   .toolbar-badge.active {
-    background: rgba(224, 123, 108, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
     color: var(--accent);
   }
 

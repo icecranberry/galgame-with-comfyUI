@@ -3,6 +3,8 @@ import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex }
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { recallChatMemories, CHAT_RAG_TIMEOUT_MS } from '../services/memory/chatMemoryRecall.js';
+import { isMemoryV3Enabled, getActiveSearchConfig } from '../services/memory/memoryConfig.js';
+import { activeMemorySearch, parseRecallInstruction, formatMemoryRecallBlock } from '../services/memory/activeSearch.js';
 import { curateChatMemories } from '../services/memoryExtractor.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories, rollbackMemoriesFromRawId } from '../services/memory/memoryRepository.js';
@@ -23,7 +25,7 @@ import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
-import { invalidateGalleryCache } from './images.js';
+import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
@@ -32,7 +34,9 @@ import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt 
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
-import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
+import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
+import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
+import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 import {
   buildPlannerTaskBlock, buildPlannerTriggerLine, prependToLastUserMessage, appendToLastUserMessage,
   runPlanner, sanitizePlan, buildPlanExecuteBlock, detectLastReplyMedia,
@@ -41,6 +45,15 @@ import {
 const router = Router();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// 阶段四：dynamicBlocks 预算降级包装（降级过程有日志，无静默截断）
+function applyBudgetToBlocks(blocks, budgetTokens) {
+  const result = applyContextBudget({ blocks, budgetTokens });
+  if (result.degraded.length > 0) {
+    console.log(`[chat] context budget: ${result.tokensBefore} → ${result.tokensAfter} tokens（预算 ${budgetTokens}）；${result.degraded.join('；')}`);
+  }
+  return result.blocks;
+}
 
 // ── 打字节奏：按分句文字长度随机 300~900ms，模拟真人打字（短句快、长句慢、带随机抖动） ──
 const typingDelay = (text = '') => {
@@ -84,26 +97,30 @@ function toISODate(sqliteDT) {
 // DELETE /api/characters/:id/messages — 清空角色对话记录
 router.delete('/characters/:id/messages', (req, res, next) => {
   const db = getDb();
-  const conversationId = convId(req.params.id);
+  // 入口即校验：id 必须是正整数，conversationId 由校验后的数字构造（不直接拼接原始输入）
+  const charId = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(charId) || charId <= 0) {
+    return res.status(400).json({ error: 'invalid character id' });
+  }
+  const conversationId = `char_${charId}`;
 
   const doDelete = () => {
-    const charId = parseInt(req.params.id, 10);
     // 先统一清理聊天长期记忆及其版本、checkpoint、审计和独立向量索引
     clearConversationMemories(conversationId);
-    db.prepare(`DELETE FROM emotion_snapshots WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ?`).run(conversationId);
+    db.prepare('DELETE FROM emotion_snapshots WHERE conversation_id = ?').run(conversationId);
+    db.prepare('DELETE FROM rolling_summaries WHERE conversation_id = ?').run(conversationId);
 
-    db.prepare(`DELETE FROM user_portraits WHERE character_id = ?`).run(charId);
+    db.prepare('DELETE FROM user_portraits WHERE character_id = ?').run(charId);
     // 删除奇遇数据
-    db.prepare(`DELETE FROM character_events WHERE character_id = ?`).run(charId);
-    db.prepare(`DELETE FROM event_history WHERE character_id = ?`).run(charId);
+    db.prepare('DELETE FROM character_events WHERE character_id = ?').run(charId);
+    db.prepare('DELETE FROM event_history WHERE character_id = ?').run(charId);
     // 重置好感度到默认值
-    db.prepare(`UPDATE user_relationships SET affinity = 50 WHERE character_id = ?`).run(charId);
+    db.prepare('UPDATE user_relationships SET affinity = 50 WHERE character_id = ?').run(charId);
     // 重置主动聊天连胜计数
-    db.prepare(`UPDATE characters SET proactive_streak = 0 WHERE id = ?`).run(charId);
+    db.prepare('UPDATE characters SET proactive_streak = 0 WHERE id = ?').run(charId);
     // 主表
-    db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(conversationId);
-    db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ?`).run(conversationId);
+    db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conversationId);
+    db.prepare('DELETE FROM raw_messages WHERE conversation_id = ?').run(conversationId);
     // 清理 ChromaDB 中该 conversation 的向量
     deleteByConversation(conversationId).then(
       n => { if (n > 0) console.log(`[chat] chroma deleted ${n} vectors for ${conversationId}`); },
@@ -278,6 +295,11 @@ router.post('/characters/:id/chat', async (req, res) => {
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
+
+  // 登记活跃聊天流：整理 daemon 的空闲判定信号。
+  // 用 res 'close' 注销——无论哪条 early return / 异常路径都恰好触发一次，计数不泄漏。
+  chatStreamStarted();
+  res.on('close', () => chatStreamEnded());
 
   const db = getDb();
   const characterId = req.params.id;
@@ -656,6 +678,22 @@ ${coreRules}
     // ── 稳定块集合 ──
     const stableBlocks = [stageContent, charBaseContent, formatContextBlock].filter(Boolean);
 
+    // Memory v3 阶段二：@memory 主动回想协议（仅 1v1 聊天，群聊明确排除）。
+    // 放 stableBlocks 尾部：稳定前缀之外，开关关闭时不进 prompt（零影响，方案 §5.1）。
+    const activeSearchConfig = config.features.memory ? getActiveSearchConfig() : { enabled: false, timeoutMs: 4000 };
+    const recallGateEnabled = activeSearchConfig.enabled;
+    if (recallGateEnabled) {
+      stableBlocks.push(`<recall_tool>
+如果你需要回想过去的对话细节——对方提起一件“你应该记得”的事、时间较久远的事、
+或下方提供的记忆片段不足以回应时——你可以在回复的第一行输出检索指令：
+
+@memory 一句自然的查询（例如：@memory 她之前说过家里的事吗）
+
+输出指令后立即停止，系统会替你回想并把结果反馈给你，你再继续正常回复。
+每轮最多使用一次；只是闲聊或记忆片段已够用时不要使用。
+</recall_tool>`);
+    }
+
     // ── 摘要块 ──
     const summaries = getRecentSummaries(conversationId, 1);
     const summaryBlock = summaries.length > 0
@@ -805,15 +843,17 @@ ${coreRules}
       }
     }
 
-    // 11. RAG 三路召回记忆
+    // 11. RAG 四路召回记忆（FTS/ngram/向量/实体）
     if (config.features.memory) {
       try {
+        // 本角色所在的群聊会话一并纳入记忆检索范围（与阶段二 @memory 回想共享同一 scope）
         const groupConversationIds = db.prepare(`
           SELECT 'group_' || group_id AS conversation_id
           FROM group_members WHERE character_id = ? ORDER BY group_id
         `).pluck().all(characterId);
+        const memoryScope = [conversationId, ...groupConversationIds];
         const { results: memoryResults, timedOut: ragTimedOut } = await recallChatMemories(message, {
-          conversationIds: [conversationId, ...groupConversationIds],
+          conversationIds: memoryScope,
         });
         if (ragTimedOut) {
           console.warn(`[chat] memory search exceeded ${CHAT_RAG_TIMEOUT_MS}ms; continuing without RAG memories`);
@@ -826,7 +866,15 @@ ${coreRules}
             && !judgment.includes('未互动事件');
         });
         if (chatMemoryResults.length > 0) {
-          const memoryLines = chatMemoryResults.map((m, i) => `${i + 1}. [${m.memory_type}] ${m.judgment}`).join('\n');
+          // v3 注入单元（MMS）：语义转述（semantic_note）优先、judgment 兜底；首个视角标签进 [类型|视角] 前缀。
+          // v3 关闭时完全回退旧行为（纯 judgment）。
+          const useV3Injection = isMemoryV3Enabled();
+          const memoryLines = chatMemoryResults.map((m, i) => {
+            const perspectives = Array.isArray(m.perspectives) ? m.perspectives.filter(Boolean) : [];
+            const label = perspectives.length ? `${m.memory_type}|${perspectives[0]}` : m.memory_type;
+            const text = (useV3Injection && m.semantic_note) || m.judgment;
+            return `${i + 1}. [${label}] ${text}`;
+          }).join('\n');
           memorySnapshot.push(...chatMemoryResults.map(m => ({
             id: m.memory_id,
             memoryType: m.memory_type,
@@ -877,6 +925,12 @@ ${coreRules}
     }
     dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);
 
+    // 生图仍由原有路径 A/B/C/D/E 决策；固定格式规则已在稳定前缀中，不额外改变主回复行为。
+    // ── 阶段四：dynamicBlocks token 预算（默认关；降级顺序有日志，无静默截断）──
+    const budgetConfig = config.features.memory ? getContextBudgetConfig() : { enabled: false, dynamicTokens: 8000 };
+    const budgetedBlocks = budgetConfig.enabled
+      ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens)
+      : dynamicBlocks;
     // ── 通过 buildChatContext 组装基础请求 ──
     // 深度思考时 planner 与主回复共用这一完全相同的消息结构（稳定块+摘要+历史+含全部动态块的用户消息），
     // 任务块合并到 user 消息头部（末尾另附触发提醒），盘算结果追加到 user 消息末尾，不新增独立 user 消息
@@ -884,8 +938,8 @@ ${coreRules}
       stableBlocks,
       summaryBlock,
       history: checkpointHistory,
-      dynamicBlocks,
-        userPrefix: emojiNote,
+      dynamicBlocks: budgetedBlocks,
+      userPrefix: emojiNote,
     });
 
     // ── 深度思考 Planner：先以角色视角盘算回复的媒介组合（text/sticker/image），再据此自然回复 ──
@@ -958,41 +1012,61 @@ ${coreRules}
 
     // 6. 流式生成（温度 0.72）
     // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
-    const splitter = new SentenceSplitter();
-    const collectedSegments = [];
-    let fullContent = '';
-    let wasStopped = false;
+    const streamState = { splitter: new SentenceSplitter(), fullContent: '', collectedSegments: [], wasStopped: false };
+
+    // 客户端断开 SSE 时中止上游 LLM 请求，避免继续空烧 token
+    const upstreamAbort = new AbortController();
+    req.on('close', () => upstreamAbort.abort());
 
     const streamOpts = {
       temperature: 0.72,
       label: '主聊天流',
+      signal: upstreamAbort.signal,
     };
 
-    send('response_start', {});
-    for await (const chunk of chatStream(msgs, streamOpts)) {
-      const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
-      fullContent += cleanChunk;
-
-      const { segments, stopped } = splitter.feed(cleanChunk);
-
-      for (const segText of segments) {
-        const parsedSeg = parseEmojiText(segText, emojiMap);
-        send('token', {
-          content: parsedSeg.content,
-          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
-          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
-        });
-        collectedSegments.push(segText);
-        send('bubble_break', {});
-        await sleep(typingDelay(segText));
+    // ── 阶段二 @memory 主动回想：首行行闸门（方案 §5.2）──
+    // 首行匹配 @memory 且行完整 → abort 当前流 → activeMemorySearch → 二次 buildChatContext 续写。
+    // 检测为 O(1) 前缀判断；未触发时行为与现状一致。
+    let recallQuery = null;
+    let recallChecked = false;
+    const checkRecallGate = () => {
+      if (recallChecked || !recallGateEnabled) return;
+      if (!/[\n\r]/.test(streamState.fullContent)) return; // 行未完整，继续等
+      recallChecked = true;
+      const query = parseRecallInstruction(streamState.fullContent);
+      if (query) {
+        recallQuery = query;
+        upstreamAbort.abort(); // 中断当前流（此时仅生成了一行指令，无可展示内容）
       }
-      // stopped=true 后 feed() 不再产出 segment，但 fullContent 继续累积
-    }
+    };
 
-    // 释放缓冲剩余 + flush 分句队列
-    const { segments: lastSegs, stopped: streamStopped } = splitter.flushAll();
-    wasStopped = streamStopped;
-    if (lastSegs.length > 0) {
+    // 流式消费 + flush（一次调用 = 一段 LLM 流；@memory 触发时会被复用跑第二段）
+    async function consumeStream(streamMessages, signal) {
+      for await (const chunk of chatStream(streamMessages, { ...streamOpts, signal })) {
+        const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
+        streamState.fullContent += cleanChunk;
+
+        checkRecallGate();
+        if (recallQuery) return; // 首行即检索指令：放弃当前流，转回想流程
+
+        const { segments, stopped } = streamState.splitter.feed(cleanChunk);
+
+        for (const segText of segments) {
+          const parsedSeg = parseEmojiText(segText, emojiMap);
+          send('token', {
+            content: parsedSeg.content,
+            ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
+            ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
+          });
+          streamState.collectedSegments.push(segText);
+          send('bubble_break', {});
+          await sleep(typingDelay(segText));
+        }
+        // stopped=true 后 feed() 不再产出 segment，但 fullContent 继续累积
+      }
+
+      // 释放缓冲剩余 + flush 分句队列
+      const { segments: lastSegs, stopped: wasStopped } = streamState.splitter.flushAll();
       for (const segText of lastSegs) {
         const parsedSeg = parseEmojiText(segText, emojiMap);
         send('token', {
@@ -1000,16 +1074,96 @@ ${coreRules}
           ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
           ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
         });
-        collectedSegments.push(segText);
+        streamState.collectedSegments.push(segText);
         send('bubble_break', {});
+      }
+      streamState.wasStopped = streamState.wasStopped || wasStopped;
+    }
+
+    send('response_start', {});
+    try {
+      await consumeStream(msgs, upstreamAbort.signal);
+    } catch (err) {
+      // @memory 闸门主动 abort 属预期；其余错误维持原行为向上抛
+      if (!recallQuery) throw err;
+      console.log('[chat] first stream aborted for @memory recall');
+    }
+
+    // 流在单行 @memory 指令处结束（无换行）时补检一次
+    if (recallGateEnabled && !recallChecked) {
+      recallChecked = true;
+      recallQuery = parseRecallInstruction(streamState.fullContent);
+    }
+
+    // ── 阶段二：@memory 触发 → 检索 → 二次续写 ──
+    if (recallQuery) {
+      console.log(`[chat] @memory recall triggered: "${recallQuery}"`);
+      send('memory_recall_start', { query: recallQuery });
+      let recallResults = [];
+      let recallFailed = false;
+      try {
+        // 检索范围与被动召回一致：本会话 + 所在群聊
+        const recallGroupIds = db.prepare(`
+          SELECT 'group_' || group_id AS conversation_id
+          FROM group_members WHERE character_id = ? ORDER BY group_id
+        `).pluck().all(characterId);
+        const recall = await activeMemorySearch(recallQuery, {
+          conversationIds: [conversationId, ...recallGroupIds],
+          timeoutMs: activeSearchConfig.timeoutMs,
+        });
+        recallResults = recall.results || [];
+        recallFailed = Boolean(recall.timedOut);
+        if (recall.timedOut) {
+          console.warn(`[chat] @memory recall exceeded ${activeSearchConfig.timeoutMs}ms; continuing with empty recall`);
+        }
+      } catch (err) {
+        recallFailed = true;
+        console.warn('[chat] @memory recall failed:', err.message);
+      }
+      send('memory_recall_end', { hits: recallResults.length, failed: recallFailed });
+
+      // 二次组装：dynamicBlocks 追加 <memory_recall_result>（含现行/历史徽标与防呆收尾语）
+      dynamicBlocks.push(formatMemoryRecallBlock(recallQuery, recallResults, { failed: recallFailed }));
+      const { messages: recallMsgs } = buildChatContext({
+        stableBlocks,
+        summaryBlock,
+        history: checkpointHistory,
+        dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
+        userPrefix: emojiNote,
+      });
+
+      // 重置流状态：指令行不进气泡不落库；闸门前已发出的零散片段用 context_update 清空
+      if (streamState.collectedSegments.length > 0) {
+        send('context_update', { content: '' });
+        streamState.collectedSegments.length = 0;
+      }
+      streamState.fullContent = '';
+      streamState.splitter = new SentenceSplitter();
+      streamState.wasStopped = false;
+
+      const recallAbort = new AbortController();
+      req.on('close', () => recallAbort.abort());
+      try {
+        await consumeStream(recallMsgs, recallAbort.signal);
+      } catch (err) {
+        // 二次续写失败兜底：指令行已被吞、气泡已清空，不能让用户面对沉默。
+        // 无任何内容时补一条角色化短文本并走正常落库；已有部分内容则保留半截回复。
+        console.warn('[chat] @memory recall continuation failed:', err.message);
+        if (streamState.collectedSegments.length === 0) {
+          const fallbackText = '……抱歉，刚刚走了一下神。你想说的是？';
+          streamState.fullContent = fallbackText;
+          streamState.collectedSegments.push(fallbackText);
+          send('token', { content: fallbackText });
+          send('bubble_break', {});
+        }
       }
     }
 
     // 补救：LLM 偶尔把 {"prompt":"..."} 放在正文前面（而非末尾），
     // 闸门在流开头就检测到 {" → stopped=true，导致后续正文全部丢失。
     // 此时从 fullContent 中剥离 prompt JSON，把剩余正文重新过分句器。
-    if (wasStopped && collectedSegments.length === 0) {
-      const textOnly = stripTags(fullContent).trim();
+    if (streamState.wasStopped && streamState.collectedSegments.length === 0) {
+      const textOnly = stripTags(streamState.fullContent).trim();
       if (textOnly) {
         const lateSplitter = new SentenceSplitter();
         const { segments: lateSegs1 } = lateSplitter.feed(textOnly);
@@ -1024,61 +1178,68 @@ ${coreRules}
             ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
             ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
           });
-          collectedSegments.push(segText);
+          streamState.collectedSegments.push(segText);
           send('bubble_break', {});
         }
       }
     }
 
-    fullContent = stripBracketActions(fullContent);
+    let fullContent = stripBracketActions(streamState.fullContent);
     send('response_end', {});
 
     // 7. 后处理：gate 尝试阻止 {"prompt"... JSON 内容进入 collectedSegments，
     //    stripTags 兜底清洗；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-      const parsedSegments = collectedSegments
-        .map(s => {
-          const cleaned = stripTags(stripBracketActions(s)).trim();
-          return { raw: cleaned, ...parseEmojiText(cleaned, emojiMap) };
-        })
-        .filter(p => p.content || p.images.length > 0);
-      const displayContent = parsedSegments.map(p => p.content).filter(Boolean).join('\n\n');
+    const parsedSegments = streamState.collectedSegments
+      .map(s => {
+        const cleaned = stripTags(stripBracketActions(s)).trim();
+        return { raw: cleaned, ...parseEmojiText(cleaned, emojiMap) };
+      })
+      .filter(p => p.content || p.images.length > 0);
+    const displayContent = parsedSegments.map(p => p.content).filter(Boolean).join('\n\n');
 
-      // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
-      if (wasStopped || tags.prompt || hasNeedImageTag) {
-        send('context_update', { content: displayContent });
+    // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
+    if (streamState.wasStopped || tags.prompt || hasNeedImageTag) {
+      send('context_update', { content: displayContent });
+    }
+    // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
+    //     thinking 列存深度思考原文（{think, plan} JSON），仅历史回看用，不进入 LLM 上下文
+    const rawContent = fullContent
+      .replace(/<needImage>/gi, '')
+      .trim();
+    const thinkingPayload = (deepThink && (planThinkText || replyPlan))
+      ? JSON.stringify({ think: planThinkText, plan: replyPlan })
+      : null;
+    // prepare 提到循环外 + 事务包裹：语句只编译一次，段落数增长时仍常数开销
+    const insertRawStmt = db.prepare('INSERT INTO raw_messages (conversation_id, role, content, prompt, thinking) VALUES (?, ?, ?, ?, ?)');
+    const insertMsgStmt = db.prepare('INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, ?, ?, ?, ?)');
+    const saveSegments = db.transaction((segs, rawId) => {
+      const ids = [];
+      for (let i = 0; i < segs.length; i++) {
+        const p = segs[i];
+        const r = insertMsgStmt.run(conversationId, rawId, 'assistant', p.content, p.images.length > 0 ? JSON.stringify(p.images) : null, i);
+        ids.push({ id: r.lastInsertRowid, p });
       }
-      // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
-      //     thinking 列存深度思考原文（{think, plan} JSON），仅历史回看用，不进入 LLM 上下文
-      const rawContent = fullContent
-        .replace(/<needImage>/gi, '')
-        .trim();
-      const thinkingPayload = (deepThink && (planThinkText || replyPlan))
-        ? JSON.stringify({ think: planThinkText, plan: replyPlan })
-        : null;
-      const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt, thinking) VALUES (?, 'assistant', ?, ?, ?)`)
-        .run(conversationId, rawContent, tags.prompt || null, thinkingPayload);
-      const rawMsgId = rawResult.lastInsertRowid;
+      return ids;
+    });
 
-      const savedIds = [];
-      for (let i = 0; i < parsedSegments.length; i++) {
-        const p = parsedSegments[i];
-        const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, 'assistant', ?, ?, ?)`)
-          .run(conversationId, rawMsgId, p.content, p.images.length > 0 ? JSON.stringify(p.images) : null, i);
-        savedIds.push(r.lastInsertRowid);
-        send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
-      }
-      if (parsedSegments.length === 0) {
-        // 兜底：AI 没有返回有效文本
-        const rawEmpty = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`)
-          .run(conversationId, '...');
-        const r = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-          .run(conversationId, rawEmpty.lastInsertRowid, '...');
-        savedIds.push(r.lastInsertRowid);
-        send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
-      }
-      const lastInsertRowid = savedIds[savedIds.length - 1];
+    const rawResult = insertRawStmt.run(conversationId, 'assistant', rawContent, tags.prompt || null, thinkingPayload);
+    const rawMsgId = rawResult.lastInsertRowid;
+
+    const savedIds = [];
+    for (const { id, p } of saveSegments(parsedSegments, rawMsgId)) {
+      savedIds.push(id);
+      send('msg_saved', { id, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
+    }
+    if (parsedSegments.length === 0) {
+      // 兜底：AI 没有返回有效文本
+      const rawEmpty = insertRawStmt.run(conversationId, 'assistant', '...', null, null);
+      const r = insertMsgStmt.run(conversationId, rawEmpty.lastInsertRowid, 'assistant', '...', null, 0);
+      savedIds.push(r.lastInsertRowid);
+      send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
+    }
+    const lastInsertRowid = savedIds[savedIds.length - 1];
 
     // 8.8 回复猜想 ← 启动（不 await，与情绪评估并行发起 LLM 调用）
     //      每次用户消息到达时重置冷却 → 每轮对话最多触发一次 → 写入 20s 冷却

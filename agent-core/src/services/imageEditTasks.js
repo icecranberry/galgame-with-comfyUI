@@ -13,6 +13,7 @@ import path from 'path';
 import { randomBytes, randomUUID } from 'crypto';
 import { getPendingDir } from './imagePaths.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { invalidateGalleryCache } from './galleryCache.js';
 
 const tasks = new Map();
 
@@ -132,7 +133,6 @@ export async function applyEditTask(id, token) {
   tasks.delete(id);
 
   try {
-    const { invalidateGalleryCache } = await import('../routes/images.js');
     invalidateGalleryCache();
   } catch {}
 

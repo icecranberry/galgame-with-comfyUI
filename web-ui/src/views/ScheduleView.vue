@@ -33,7 +33,7 @@
             </div>
           </div>
 
-          <div class="card-grid" @scroll.passive="onScroll" ref="cardGridEl">
+          <div class="card-grid stagger" @scroll.passive="onScroll" ref="cardGridEl">
             <CharacterStatusCard
               v-for="c in filteredChars"
               :key="c.id"
@@ -45,10 +45,9 @@
           </div>
         </template>
 
-        <!-- 加载态 -->
-        <div v-else-if="store.loading" class="sched-placeholder">
-          <div class="loader"></div>
-          <p>加载角色日程中...</p>
+        <!-- 加载态：骨架卡片 -->
+        <div v-else-if="store.loading" class="sched-skeleton-grid">
+          <div v-for="i in 3" :key="i" class="skeleton sched-skeleton-card"></div>
         </div>
 
         <!-- 空态 -->
@@ -68,7 +67,7 @@
           <div class="sidebar-scan-content">
             <div class="sidebar-scan-icon">
               <svg viewBox="0 0 80 80" class="sidebar-scan-ring">
-                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(var(--accent-rgb),0.12)" stroke-width="2.5"/>
                 <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                   stroke-width="2.5" stroke-linecap="round"
                   stroke-dasharray="214"
@@ -1141,7 +1140,7 @@ function finishReset() {
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
+  background: var(--grad-soft);
   background-size: 200% 200%;
   color: var(--accent);
   font-size: 13px;
@@ -1153,8 +1152,8 @@ function finishReset() {
 }
 .btn-reset-icon { flex-shrink: 0; fill: currentColor; }
 .btn-reset:hover:not(.is-disabled) {
-  border: 2px solid rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
   animation: waterflow 1s ease-in-out infinite;
 }
@@ -1164,7 +1163,7 @@ function finishReset() {
 }
 .btn-reset.is-disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-reset.is-resetting {
-  border-color: rgba(224, 123, 108, 0.35);
+  border-color: rgba(var(--accent-rgb), 0.35);
   color: var(--accent);
 }
 .btn-reset .spinning { animation: spin 1.2s linear infinite; }
@@ -1185,6 +1184,12 @@ function finishReset() {
   align-items: center; justify-content: center; gap: 10px;
   color: var(--text-secondary);
 }
+.sched-skeleton-grid {
+  flex: 1; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px; align-content: start;
+}
+.sched-skeleton-card { height: 190px; border-radius: var(--radius-lg); }
 .sched-placeholder p { margin: 0; font-size: 0.95rem; }
 .ph-hint { font-size: 0.8rem; color: #bfbbb6; }
 
@@ -1203,13 +1208,13 @@ function finishReset() {
   top: 0; right: 0; bottom: 0;
   width: 260px;
   z-index: 10;
-  border-left: 1px solid rgba(224,123,108,0.18);
+  border-left: 1px solid rgba(var(--accent-rgb),0.18);
   background: rgba(255, 255, 255, 0.45);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: flex; flex-direction: column;
   overflow: hidden;
-  box-shadow: inset 0 0 60px rgba(224,123,108,0.04);
+  box-shadow: inset 0 0 60px rgba(var(--accent-rgb),0.04);
 }
 
 .sidebar-scan-overlay {
@@ -1227,13 +1232,13 @@ function finishReset() {
   height: 2px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(224,123,108,0.3) 15%,
+    rgba(var(--accent-rgb),0.3) 15%,
     var(--accent) 50%,
-    rgba(224,123,108,0.3) 85%,
+    rgba(var(--accent-rgb),0.3) 85%,
     transparent 100%
   );
   animation: sidebar-scan-sweep 2.6s ease-in-out infinite;
-  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb),0.55), 0 0 10px rgba(var(--accent-rgb),0.25);
   z-index: 2;
   pointer-events: none;
 }
@@ -1254,8 +1259,8 @@ function finishReset() {
   left: 20%; right: 20%;
   height: 60px;
   background: radial-gradient(ellipse at center,
-    rgba(224,123,108,0.12) 0%,
-    rgba(224,123,108,0.04) 40%,
+    rgba(var(--accent-rgb),0.12) 0%,
+    rgba(var(--accent-rgb),0.04) 40%,
     transparent 70%
   );
   animation: sidebar-glow-follow 2.6s ease-in-out infinite;
@@ -1626,7 +1631,7 @@ function finishReset() {
   .sched-sidebar {
     top: auto; left: 0; right: 0; bottom: 0;
     width: 100%; max-height: 130px;
-    border-left: none; border-top: 1px solid rgba(224,123,108,0.18);
+    border-left: none; border-top: 1px solid rgba(var(--accent-rgb),0.18);
   }
   .sidebar-scan-ring { width: 56px; height: 56px; }
   .sidebar-scan-icon { width: 56px; height: 56px; }

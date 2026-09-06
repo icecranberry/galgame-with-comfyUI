@@ -1,3 +1,15 @@
+/**
+ * Memory v3 配置中心（memory_settings 单键 JSON 持久化于 system_settings 表）
+ *
+ * 四组阶段开关（docs/memory-upgrade-plan.md §8），彼此独立、可单独回退：
+ *   v3             阶段一  多重表示/实体通道/语义注入
+ *   activeSearch   阶段二  @memory 主动回想（默认关，灰度）
+ *   consolidation  阶段三  整理 daemon（默认开，空闲触发）
+ *   contextBudget  阶段四  dynamicBlocks token 预算（默认关）
+ * 另含 embedding/reranker provider 配置（getEmbeddingProfile 生成 corpus 指纹）。
+ * 所有 getter 在 DB 未就绪时按默认值降级，绝不阻塞聊天主流程。
+ */
+
 import crypto from 'crypto';
 import { getDb } from '../../db/index.js';
 
@@ -7,6 +19,16 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   textCandidates: 24,
   vectorCandidates: 24,
   recordUnengagedEvents: true,
+  // v3：记忆多重表示 + 实体检索通道 + 语义注入（docs/memory-upgrade-plan.md 阶段一开关）
+  v3: { enabled: true },
+  // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
+  activeSearch: { enabled: false, timeoutMs: 4000 },
+  // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）。
+  // llmCallsPerRun 是"每轮整理"的调用预算（每 5 分钟一轮、每轮重置），并非每日总量；
+  // 旧配置键 dailyMaxLlmCalls 由 normalizeMemorySettings 兼容读取。
+  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
+  // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
+  contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
     enabled: false,
     provider: 'custom',
@@ -44,12 +66,37 @@ export function normalizeMemorySettings(input = {}, previous = null) {
   const base = previous || cloneDefaults();
   const embedding = objectOrEmpty(input.embedding);
   const reranker = objectOrEmpty(input.reranker);
+  const v3 = objectOrEmpty(input.v3);
+  const activeSearch = objectOrEmpty(input.activeSearch);
+  const consolidation = objectOrEmpty(input.consolidation);
+  const contextBudget = objectOrEmpty(input.contextBudget);
   const merged = {
     enabled: input.enabled === undefined ? base.enabled : Boolean(input.enabled),
     topK: clampInt(input.topK, base.topK, 1, 20),
     textCandidates: clampInt(input.textCandidates, base.textCandidates, 5, 100),
     vectorCandidates: clampInt(input.vectorCandidates, base.vectorCandidates, 5, 100),
     recordUnengagedEvents: input.recordUnengagedEvents === undefined ? base.recordUnengagedEvents : Boolean(input.recordUnengagedEvents),
+    v3: {
+      enabled: v3.enabled === undefined ? (base.v3?.enabled ?? true) : Boolean(v3.enabled),
+    },
+    activeSearch: {
+      enabled: activeSearch.enabled === undefined ? (base.activeSearch?.enabled ?? false) : Boolean(activeSearch.enabled),
+      timeoutMs: clampInt(activeSearch.timeoutMs, base.activeSearch?.timeoutMs ?? 4000, 1000, 30000),
+    },
+    consolidation: {
+      enabled: consolidation.enabled === undefined ? (base.consolidation?.enabled ?? true) : Boolean(consolidation.enabled),
+      idleDelayMinutes: clampInt(consolidation.idleDelayMinutes, base.consolidation?.idleDelayMinutes ?? 30, 5, 720),
+      // 旧键 dailyMaxLlmCalls 兼容读取（实际语义是每轮预算，改名以正名）
+      llmCallsPerRun: clampInt(
+        consolidation.llmCallsPerRun ?? consolidation.dailyMaxLlmCalls,
+        base.consolidation?.llmCallsPerRun ?? base.consolidation?.dailyMaxLlmCalls ?? 6,
+        0, 30,
+      ),
+    },
+    contextBudget: {
+      enabled: contextBudget.enabled === undefined ? (base.contextBudget?.enabled ?? false) : Boolean(contextBudget.enabled),
+      dynamicTokens: clampInt(contextBudget.dynamicTokens, base.contextBudget?.dynamicTokens ?? 8000, 2000, 100000),
+    },
     embedding: {
       ...base.embedding,
       ...embedding,
@@ -87,6 +134,53 @@ export function getMemorySettings({ includeSecrets = false } = {}) {
   const settings = normalizeMemorySettings(stored);
   if (includeSecrets) return settings;
   return maskSecrets(settings);
+}
+
+// 记忆 v3 总开关（多重表示/实体通道/语义注入）。DB 未就绪时按默认开启处理。
+export function isMemoryV3Enabled() {
+  try {
+    return getMemorySettings().v3.enabled !== false;
+  } catch {
+    return true;
+  }
+}
+
+// 阶段二 @memory 主动回想配置（enabled 默认关）。DB 未就绪时按默认关闭处理，零影响。
+export function getActiveSearchConfig() {
+  try {
+    const { enabled, timeoutMs } = getMemorySettings().activeSearch || {};
+    return { enabled: enabled === true, timeoutMs: clampInt(timeoutMs, 4000, 1000, 30000) };
+  } catch {
+    return { enabled: false, timeoutMs: 4000 };
+  }
+}
+
+export function isMemoryActiveSearchEnabled() {
+  return getActiveSearchConfig().enabled;
+}
+
+// 阶段三整理 daemon 配置。DB 未就绪时按默认开启处理（daemon 内部还有空闲判定双重保险）。
+export function getConsolidationConfig() {
+  try {
+    const { enabled, idleDelayMinutes, llmCallsPerRun } = getMemorySettings().consolidation || {};
+    return {
+      enabled: enabled !== false,
+      idleDelayMinutes: clampInt(idleDelayMinutes, 30, 5, 720),
+      llmCallsPerRun: clampInt(llmCallsPerRun, 6, 0, 30),
+    };
+  } catch {
+    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 };
+  }
+}
+
+// 阶段四 dynamicBlocks token 预算配置。DB 未就绪时按默认关闭处理，零影响。
+export function getContextBudgetConfig() {
+  try {
+    const { enabled, dynamicTokens } = getMemorySettings().contextBudget || {};
+    return { enabled: enabled === true, dynamicTokens: clampInt(dynamicTokens, 8000, 2000, 100000) };
+  } catch {
+    return { enabled: false, dynamicTokens: 8000 };
+  }
 }
 
 export function saveMemorySettings(input) {

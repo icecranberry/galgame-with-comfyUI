@@ -1,0 +1,272 @@
+/* ═══════════════════════════════════════════════════════
+   components.css —— 全局共享组件类（赛璐璐语言）
+   迁移约定：组件改用这些类时必须删除自己的 scoped 副本，
+   避免 scoped 属性选择器优先级更高导致双写。
+   ═══════════════════════════════════════════════════════ */
+
+/* ══ 按钮家族 ══ */
+/* 主按钮：游戏贴纸——饱和实底 + 底部厚度 + 顶部件高光，按下下沉 */
+.btn-primary {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 3px 0 var(--btn-lip);
+  position: relative;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 3px 0 var(--btn-lip), var(--shadow-glow);
+}
+button.btn-primary:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 var(--btn-lip); }
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-bright); }
+/* 次要按钮：浅 accent 底 + accent 字（原 52 处散装浅底按钮的收敛形态） */
+.btn-tonal {
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
+}
+.btn-tonal:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.16); }
+/* 危险按钮 */
+.btn-danger { background: var(--danger); color: #fff; box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 62%, #000); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 88%, #000); }
+button.btn-danger:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 color-mix(in srgb, var(--danger) 62%, #000); }
+.btn-danger.btn-ghost-danger {
+  background: rgba(var(--danger-rgb, 255, 77, 95), 0.08); color: var(--danger);
+  border: 1px solid rgba(var(--danger-rgb, 255, 77, 95), 0.22); box-shadow: none;
+}
+.btn-danger.btn-ghost-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+/* 小尺寸 */
+.btn-sm { padding: 5px 12px; font-size: var(--fs-sm); border-radius: var(--radius-sm); }
+.btn-sm.btn-primary { box-shadow: 0 2px 0 var(--btn-lip); }
+button.btn-sm.btn-primary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 0 0 var(--btn-lip); }
+
+/* ══ 角色详情关系区按钮（原 ChatView/TavernView/CharacterDetailModal 三份逐行重复的收编）══ */
+.detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.detail-rel-btn.subtle { background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
+.detail-rel-btn.subtle:hover { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.3); color: var(--accent-hover); }
+.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
+.detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35); transform: translateY(-1px); }
+@media (max-width: 767px) {
+  .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
+}
+
+/* ══ 卡片 / 表面（漫画格面板）══ */
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm), var(--shadow-hard-sm);
+}
+/* 纸张风/纯白表面的实底变体 */
+.card-solid {
+  background: var(--bg-secondary);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm), var(--shadow-hard-sm);
+}
+.card-interactive { transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) ease, border-color var(--dur-base) ease; }
+.card-interactive:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md), 0 5px 0 color-mix(in srgb, var(--cel-outline) 13%, transparent);
+  border-color: var(--border-strong);
+}
+
+/* ══ 弹窗家族（统一玻璃面板 + 浓描边 + 硬阴影）══ */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  z-index: var(--z-modal);
+}
+.modal-panel {
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg), 0 5px 0 color-mix(in srgb, var(--cel-outline) 14%, transparent);
+  width: min(560px, 94vw);
+  max-height: 90vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.modal-panel.modal-wide { width: min(880px, 96vw); }
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 2px solid var(--border);
+  flex-shrink: 0;
+}
+.modal-title, .modal-header h3 { font-size: var(--fs-lg); font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
+.modal-close {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  border: none; font-size: 16px; padding: 0; line-height: 1;
+}
+.modal-close:hover { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; min-height: 0; }
+.modal-footer, .modal-actions {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+}
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ══ Chip 贴纸标签 ══ */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.chip:hover { border-color: var(--accent-light); color: var(--accent); }
+.chip.active {
+  background: rgba(var(--accent-rgb), 0.10);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-hard-sm);
+}
+.chip-x {
+  margin-left: 2px; margin-right: -3px;
+  width: 15px; height: 15px; line-height: 13px;
+  border-radius: 50%; text-align: center;
+  font-size: 11px;
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
+  cursor: pointer;
+}
+.chip-x:hover { background: var(--accent); color: #fff; }
+
+/* ══ 头像 ══ */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+.avatar-fallback {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-light), var(--accent));
+  color: #fff; font-weight: 700; user-select: none;
+  flex-shrink: 0;
+}
+.avatar-fallback.sm { font-size: var(--fs-xs); }
+/* hover 摆动（加在头像容器上） */
+.avatar-wiggle { transition: transform var(--dur-base) var(--ease-out); }
+.avatar-wiggle:hover { animation: cel-wiggle 0.5s var(--ease-standard); }
+
+/* ══ 空状态 ══ */
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 42px 16px; text-align: center;
+  background: radial-gradient(circle at 50% 42%, rgba(var(--accent-rgb), 0.06) 0%, transparent 62%);
+  border-radius: var(--radius-lg);
+  position: relative;
+}
+.empty::before {
+  content: ''; position: absolute; inset: 0;
+  border-radius: inherit;
+  background-image: radial-gradient(var(--dot-color) 1.2px, transparent 1.4px);
+  background-size: 18px 18px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.empty-icon {
+  font-size: 42px; line-height: 1;
+  filter: saturate(1.15);
+  animation: empty-float 3.2s ease-in-out infinite;
+}
+.empty-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); }
+.empty-hint { font-size: var(--fs-sm); color: var(--text-secondary); }
+
+/* ══ 骨架屏 ══ */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 37%, var(--bg-tertiary) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-wave 1.4s ease infinite;
+  border-radius: var(--radius-md);
+}
+
+/* ══ Icon Tile：四色轮换圆角底座 ══ */
+.icon-tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; flex-shrink: 0;
+  border-radius: var(--radius-md);
+  font-size: 18px; line-height: 1;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.18);
+}
+.icon-tile.t-purple { background: rgba(124, 106, 245, 0.12); color: var(--fun-purple); border-color: rgba(124, 106, 245, 0.20); }
+.icon-tile.t-pink   { background: rgba(246, 95, 164, 0.11); color: var(--fun-pink);   border-color: rgba(246, 95, 164, 0.20); }
+.icon-tile.t-orange { background: rgba(255, 138, 76, 0.12); color: var(--fun-orange); border-color: rgba(255, 138, 76, 0.22); }
+.icon-tile.t-teal   { background: rgba(23, 195, 171, 0.11); color: var(--fun-teal);   border-color: rgba(23, 195, 171, 0.20); }
+.icon-tile.t-blue   { background: rgba(74, 157, 248, 0.11); color: var(--fun-blue);   border-color: rgba(74, 157, 248, 0.20); }
+.icon-tile.t-gold   { background: rgba(255, 176, 32, 0.13); color: var(--fun-gold);   border-color: rgba(255, 176, 32, 0.24); }
+.icon-tile.t-violet { background: rgba(163, 93, 240, 0.11); color: var(--fun-violet); border-color: rgba(163, 93, 240, 0.20); }
+
+/* ══ Shine sweep：hover 时一道斜光扫过 ══ */
+.sheen { position: relative; overflow: hidden; }
+.sheen::after {
+  content: ''; position: absolute; top: -10%; bottom: -10%; left: 0;
+  width: 34%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+  transform: translateX(-160%) skewX(-18deg);
+  pointer-events: none;
+}
+.sheen:hover::after { transform: translateX(420%) skewX(-18deg); transition: transform 0.65s var(--ease-out); }
+
+/* ══ Sparkle ✦ 装饰 ══ */
+.sparkle { position: relative; display: inline-block; }
+.sparkle::after {
+  content: '✦';
+  position: absolute; top: -7px; right: -13px;
+  font-size: 12px; color: var(--accent-2);
+  animation: sparkle-twinkle 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.sparkle.s-low::after { top: auto; bottom: -6px; right: auto; left: -14px; animation-delay: 1.3s; }
+
+/* ══ 全局开关（ChatView / SettingsView 共用）══ */
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: var(--bg-hover); border-radius: 24px; cursor: pointer; transition: 0.2s; }
+.slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s var(--ease-spring); }
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(20px); }
+
+/* ══ 列表错峰入场（配合 animations.css 的 stagger-in）══
+   fill 用 backwards：动画结束后释放元素，hover 位移 / FLIP move 不被钉住 */
+.stagger > * { animation: stagger-in 0.45s var(--ease-out) backwards; }
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 55ms; }
+.stagger > *:nth-child(3) { animation-delay: 110ms; }
+.stagger > *:nth-child(4) { animation-delay: 165ms; }
+.stagger > *:nth-child(5) { animation-delay: 220ms; }
+.stagger > *:nth-child(6) { animation-delay: 275ms; }
+.stagger > *:nth-child(7) { animation-delay: 330ms; }
+.stagger > *:nth-child(8) { animation-delay: 385ms; }
+.stagger > *:nth-child(n + 9) { animation-delay: 440ms; }
+
+/* ══ 页面标题：accent 渐变竖条（作用于各页 .page-header h2）══ */
+.page-header h2 { position: relative; padding-left: 14px; }
+.page-header h2::before {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 5px; height: 70%;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: var(--grad-brand);
+}

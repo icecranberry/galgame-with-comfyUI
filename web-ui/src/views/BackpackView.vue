@@ -282,7 +282,7 @@ function onBack() {
   flex: 1;
   display: flex; flex-direction: column;
   overflow: hidden;
-  background: #FCFAF7;
+  background: var(--bg-primary);
   position: relative;
 }
 
@@ -295,7 +295,7 @@ function onBack() {
   padding: 12px 8px 12px 4px;
   flex-shrink: 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  background: #FCFAF7;
+  background: var(--bg-primary);
   z-index: 10;
 }
 .topbar-btn {
@@ -307,7 +307,7 @@ function onBack() {
   position: absolute;
   left: 50%; top: 50%;
   transform: translate(-50%, -50%);
-  font-size: 17px; font-weight: 600; color: #2a1a10;
+  font-size: 17px; font-weight: 600; color: var(--text-bright);
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
@@ -316,7 +316,7 @@ function onBack() {
   margin-right: 4px;
   padding: 5px 10px;
   border-radius: 999px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
@@ -351,7 +351,7 @@ function onBack() {
   align-items: center;
   padding: 20px 16px 16px;
   border-radius: 16px;
-  background: rgba(255, 253, 250, 0.8);
+  background: var(--bg-secondary);
   box-shadow: 0 2px 14px rgba(122, 91, 63, 0.04);
 }
 .bp-chest-stage { width: min(220px, 62%); }
@@ -383,7 +383,7 @@ function onBack() {
   align-items: center;
   justify-content: center;
   border-radius: 11px;
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
 }
 .bp-heading-icon svg { width: 20px; height: 20px; }
@@ -409,7 +409,7 @@ function onBack() {
   gap: 12px;
 }
 .item-card {
-  background: #fffdf9;
+  background: var(--bg-secondary);
   border-radius: 14px;
   padding: 10px;
   display: flex;
@@ -424,7 +424,7 @@ function onBack() {
   position: relative;
   aspect-ratio: 1;
   border-radius: 10px;
-  background: #f5efe7;
+  background: var(--bg-tertiary);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -452,7 +452,7 @@ function onBack() {
   padding: 34px 0 26px;
   gap: 4px;
   border-radius: 16px;
-  background: rgba(255, 253, 250, 0.55);
+  background: rgba(var(--accent-rgb), 0.04);
 }
 .empty-title { margin: 8px 0 0; font-weight: 600; color: var(--text-primary); }
 .empty-hint { margin: 0; font-size: 12px; color: var(--text-secondary); }
@@ -466,7 +466,7 @@ function onBack() {
 .loading-spinner {
   width: 22px;
   height: 22px;
-  border: 2.5px solid #e7ddd2;
+  border: 2.5px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: bp-spin 0.8s linear infinite;
@@ -480,9 +480,9 @@ function onBack() {
   gap: 10px;
 }
 .effect-card {
-  --effect-surface: #fff9f4;
-  --effect-border: #f3e4da;
-  --effect-shadow: #efd8cd;
+  --effect-surface: var(--bg-secondary);
+  --effect-border: var(--border);
+  --effect-shadow: var(--border);
   position: relative;
   display: flex;
   align-items: center;
@@ -504,9 +504,9 @@ function onBack() {
 .effect-card.card-outfit,
 .effect-card.card-transform,
 .effect-card.card-hairstyle {
-  --effect-surface: #fff5ef;
-  --effect-border: #f1d9cc;
-  --effect-shadow: #edcfc1;
+  --effect-surface: rgba(var(--accent-rgb), 0.05);
+  --effect-border: rgba(var(--accent-rgb), 0.16);
+  --effect-shadow: rgba(var(--accent-rgb), 0.12);
 }
 .effect-card.card-buff {
   --effect-surface: #f8f4fd;
@@ -600,7 +600,7 @@ function onBack() {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
 }
 .effect-time.urgent { color: #cc6a5c; }
 .effect-time.urgent .effect-time-dot {

@@ -27,5 +27,14 @@ export default defineConfig({
   build: {
     outDir: '../agent-core/public',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // 框架运行时单独分包（长缓存友好）；重库（vue-flow/html2canvas/lightbox）
+        // 经 defineAsyncComponent/动态 import 自然形成独立 chunk
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+        },
+      },
+    },
   },
 })

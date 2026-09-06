@@ -38,7 +38,6 @@
             </div>
             <!-- 头像 -->
             <div class="detail-avatar-row">
-              <div
               <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
                 <img v-if="character?.avatar_path" :src="character.avatar_path" class="detail-avatar-img" alt="" />
                 <span v-else>{{ character?.display_name?.charAt(0) }}</span>
@@ -1203,35 +1202,10 @@ async function onStandingUploadChange(e) {
 </script>
 
 <style scoped>
-/* ═══ 弹窗共用 ═══ */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-
-.modal-panel {
-  position: relative; z-index: 1;
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden; backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-.modal-wide { width: min(900px, 97vw); }
-
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
-
+/* ═══ 弹窗骨架已迁移至全局 .modal-*（styles/components.css）═══
+   此处仅保留本组件的布局覆写 */
 .modal-body {
   padding: 0px 22px 22px;
-  overflow-y: auto; flex: 1;
 }
 
 .modal-body-detail {
@@ -1285,22 +1259,28 @@ async function onStandingUploadChange(e) {
 .detail-avatar.clickable:hover { opacity: 0.85; }
 
 /* ═══ 角色关系区块 ═══ */
-.detail-rel-section { margin-bottom: 18px; }
+.detail-rel-section {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
+}
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
 .detail-rel-title svg { color: var(--accent); }
-.detail-rel-btn { display: flex; align-items: center; gap: 5px; }
+/* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
 .detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
 .detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: var(--bg-primary); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }
-.rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(224, 123, 108, 0.1); }
+.rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(var(--accent-rgb), 0.1); }
 .detail-rel-more { font-size: 12px; color: var(--accent); font-weight: 500; cursor: pointer; text-align: center; padding: 4px 0; transition: opacity 0.15s; }
 .detail-rel-more:hover { opacity: 0.7; }
 .detail-rel-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 8px 8px; text-align: center; }
 .rel-empty-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; max-width: 360px; }
-.rel-empty-spinner { width: 14px; height: 14px; border: 2px solid rgba(224, 123, 108, 0.2); border-top-color: var(--accent); border-radius: 50%; animation: rel-spin 0.6s linear infinite; }
+.rel-empty-spinner { width: 14px; height: 14px; border: 2px solid rgba(var(--accent-rgb), 0.2); border-top-color: var(--accent); border-radius: 50%; animation: rel-spin 0.6s linear infinite; }
 @keyframes rel-spin { to { transform: rotate(360deg); } }
 
 /* ═══ 誓约状态（头像行内） ═══ */
@@ -1373,10 +1353,10 @@ async function onStandingUploadChange(e) {
   border-radius: 10px; cursor: pointer;
   transition: background 0.15s;
 }
-.float-row-action:hover { background: rgba(224, 123, 108, 0.08); }
+.float-row-action:hover { background: rgba(var(--accent-rgb), 0.08); }
 .float-row-action:hover .float-label { color: var(--accent); }
 .float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
-.float-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
+.float-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
 /* ═══ 悬浮立绘窗（左侧，与右侧 float 面板镜像） ═══ */
 .detail-standing {
@@ -1535,12 +1515,7 @@ async function onStandingUploadChange(e) {
   text-decoration: underline;
 }
 
-/* ═══ 弹窗动画 ═══ */
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-@keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+/* ═══ 弹窗动画已迁移至全局 animations.css（modal-fade + modal-pop）═══ */
 
 /* ═══ 通用 ═══ */
 .sp-btn-small { margin-right: 6px; }
@@ -1604,11 +1579,11 @@ async function onStandingUploadChange(e) {
   transition: background 0.15s, color 0.15s;
 }
 .lora-dropdown-item:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 .lora-dropdown-item.active {
-  background: rgba(224,123,108,0.06);
+  background: rgba(var(--accent-rgb),0.06);
   color: var(--accent);
   font-weight: 600;
 }
@@ -1621,6 +1596,8 @@ async function onStandingUploadChange(e) {
 .lora-card-enter-from, .lora-card-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 20px 0; margin-bottom: 8px; }
+.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
+.lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 /* ═══ 外观 / 形态设置 ═══ */
 .outfit-intro { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
@@ -1631,8 +1608,6 @@ async function onStandingUploadChange(e) {
 .outfit-deleted input, .outfit-deleted textarea { text-decoration: line-through; }
 .float-badge-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outfit-save-hint { font-size: 11px; color: var(--text-secondary); }
-.lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 5px 0; user-select: none; }
-.lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
 .lora-civitai-link, .lora-tutorial-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
@@ -1657,14 +1632,15 @@ async function onStandingUploadChange(e) {
   .modal-body-detail .preview-card { flex: none; }
   .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
   .modal-wide .fi { font-size: 16px; }
-  .detail-rel-section { margin-bottom: 14px; }
+  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+  /* .detail-rel-btn 移动端覆写已在全局 components.css */
 
   .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
-  .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(224, 123, 108, 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
-  .toolbar-item:active { background: rgba(224, 123, 108, 0.16); }
+  .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.16); }
   .toolbar-item-toggle { cursor: default; justify-content: space-between; background: rgba(0, 0, 0, 0.04); color: var(--text-secondary); font-weight: 500; }
   .toolbar-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); flex-shrink: 0; }
-  .toolbar-badge.active { background: rgba(224, 123, 108, 0.15); color: var(--accent); }
+  .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
   .form-group .fl { font-size: 12px; }
   .form-hint { font-size: 10px; }

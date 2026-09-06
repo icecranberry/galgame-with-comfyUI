@@ -558,6 +558,6 @@ async function saveCrop() {
   gap: 10px;
 }
 .gen-error-icon { font-size: 36px; }
-.gen-error-text { font-size: 13px; color: #e07b6c; text-align: center; }
+.gen-error-text { font-size: 13px; color: var(--accent); text-align: center; }
 .gen-retry-btn { margin-top: 8px; }
 </style>

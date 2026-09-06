@@ -93,17 +93,17 @@ function onChange(e) {
   cursor: pointer;
 }
 
-/* ── 轨道：关＝暖灰软糖 ── */
+/* ── 轨道：关＝中性软糖 ── */
 .ls-switch__track {
   position: absolute;
   inset: 0;
   pointer-events: none;
   border-radius: 999px;
-  background: #e6dfd4;
-  box-shadow: 0 var(--depth) 0 #d1c5b3, inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: var(--bg-tertiary);
+  box-shadow: 0 var(--depth) 0 var(--border), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   transition:
-    background-color 0.25s var(--ease),
-    box-shadow 0.25s var(--ease),
+    background-color 0.25s var(--ease-standard),
+    box-shadow 0.25s var(--ease-standard),
     filter 0.15s ease;
 }
 
@@ -116,26 +116,26 @@ function onChange(e) {
   width: var(--knob);
   height: var(--knob);
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(96, 66, 46, 0.3);
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   transform: translateY(-50%) translateX(0);
-  transition: transform 0.25s var(--ease);
+  transition: transform 0.25s var(--ease-standard);
 }
 
-/* ── 开＝珊瑚糖 ── */
+/* ── 开＝主题糖 ── */
 .ls-switch--on .ls-switch__track {
   background: var(--accent);
   box-shadow: 0 var(--depth) 0 var(--accent-hover), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .ls-switch--on .ls-switch__track::before { transform: translateY(-50%) translateX(var(--travel)); }
 
-/* ── 悬停：关＝灰糖加深一点；开＝珊瑚糖提亮（同 primary 按钮） ── */
-.ls-switch:not(.ls-switch--on):not(.ls-switch--disabled):hover .ls-switch__track { background: #ddd4c5; }
+/* ── 悬停：关＝灰糖加深一点；开＝主题糖提亮（同 primary 按钮） ── */
+.ls-switch:not(.ls-switch--on):not(.ls-switch--disabled):hover .ls-switch__track { background: var(--bg-hover); }
 .ls-switch--on:not(.ls-switch--disabled):hover .ls-switch__track { filter: brightness(1.05) saturate(1.05); }
 
 /* ── 键盘焦点：与 LinsheButton 同款光环 ── */
 .ls-switch__input:focus-visible + .ls-switch__track {
-  outline: 3px solid rgba(224, 123, 108, 0.3);
+  outline: 3px solid rgba(var(--accent-rgb), 0.3);
   outline-offset: 2px;
 }
 

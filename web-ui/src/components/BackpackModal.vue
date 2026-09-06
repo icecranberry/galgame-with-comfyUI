@@ -51,7 +51,7 @@
             <!-- ── Right: 道具网格 ── -->
             <div class="items-panel">
               <Transition name="effects-panel">
-                <section class="active-effects" aria-labelledby="active-effects-title">
+                <section v-if="store.activeEffects.length" class="active-effects" aria-labelledby="active-effects-title">
                   <div class="effects-heading">
                     <div class="effects-heading-main">
                       <span class="effects-heading-icon" aria-hidden="true">
@@ -380,7 +380,7 @@ function close() {
   align-items: center;
   justify-content: center;
   border-radius: 11px;
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
 }
 .effects-heading-icon svg { width: 20px; height: 20px; }
@@ -415,7 +415,7 @@ function close() {
   height: 20px;
   padding: 0 6px;
   border-radius: 999px;
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
@@ -429,9 +429,9 @@ function close() {
   gap: 10px;
 }
 .effect-card {
-  --effect-surface: #fff9f4;
-  --effect-border: #f3e4da;
-  --effect-shadow: #efd8cd;
+  --effect-surface: var(--bg-secondary);
+  --effect-border: var(--border);
+  --effect-shadow: var(--border);
   position: relative;
   display: flex;
   align-items: center;
@@ -453,9 +453,9 @@ function close() {
 .effect-card.card-outfit,
 .effect-card.card-transform,
 .effect-card.card-hairstyle {
-  --effect-surface: #fff5ef;
-  --effect-border: #f1d9cc;
-  --effect-shadow: #edcfc1;
+  --effect-surface: rgba(var(--accent-rgb), 0.05);
+  --effect-border: rgba(var(--accent-rgb), 0.16);
+  --effect-shadow: rgba(var(--accent-rgb), 0.12);
 }
 .effect-card.card-buff {
   --effect-surface: #f8f4fd;
@@ -557,7 +557,7 @@ function close() {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
 }
 .effect-time.urgent { color: #cc6a5c; }
 .effect-time.urgent .effect-time-dot {

@@ -1,6 +1,6 @@
 <template>
   <aside class="sidebar" :class="{ 'mobile-open': isMobile && mobileOpen }">
-    <div ref="charListEl" class="char-list">
+    <div ref="charListEl" class="char-list stagger">
       <!-- 群聊分区 -->
       <div class="group-section-header">
         <span>群聊</span>
@@ -21,10 +21,8 @@
               v-for="m in g.members.slice(0, 4)"
               :key="m.id"
               class="group-avatar-cell"
-            >
-              <img v-if="m.avatar_path" :src="m.avatar_path" class="group-avatar-img" alt="" />
-              <span v-else>{{ m.display_name.charAt(0) }}</span>
-            </div>
+              :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: 'var(--accent)' }"
+            >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
           </div>
         </div>
         <div class="char-info">
@@ -47,11 +45,9 @@
       >
         <div class="char-avatar-wrap">
           <div
-            class="char-avatar"
-          >
-            <img v-if="c.avatar_path" :src="c.avatar_path" class="char-avatar-img" alt="" />
-            <span v-else>{{ c.display_name.charAt(0) }}</span>
-          </div>
+            class="char-avatar avatar-wiggle"
+            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
+          >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         </div>
         <div class="char-info">
           <div class="char-name">{{ c.display_name }}</div>
@@ -192,7 +188,7 @@
             >
               <div
                 class="cg-member-avatar"
-                :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
+                :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: 'var(--accent)' }"
               >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
               <span>{{ c.display_name }}</span>
             </div>
@@ -249,7 +245,7 @@
                   >
                     <div
                       class="cg-member-avatar"
-                      :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: '#e07b6c' }"
+                      :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: 'var(--accent)' }"
                     >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
                     <span>{{ c.display_name }}</span>
                   </div>
@@ -479,8 +475,23 @@ function formatTime(iso) {
 }
 .char-item:hover { background: rgba(255, 255, 255, 0.22); }
 .char-item.active {
-  background: rgb(226 166 122 / 28%);
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04);
+  background: rgb(var(--accent-rgb) / 16%);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.04), inset 0 0 0 1.5px rgba(var(--accent-rgb), 0.22);
+}
+/* 选中项左侧 accent 指示条（scaleY 入场） */
+.char-item::before {
+  content: '';
+  position: absolute;
+  left: -8px; top: 50%;
+  width: 4px; height: 58%;
+  border-radius: 0 4px 4px 0;
+  background: var(--grad-brand);
+  transform: translateY(-50%) scaleY(0);
+  transition: transform var(--dur-base) var(--ease-spring);
+  pointer-events: none;
+}
+.char-item.active::before {
+  transform: translateY(-50%) scaleY(1);
 }
 
 .char-avatar-wrap {
@@ -596,7 +607,7 @@ function formatTime(iso) {
   user-select: none;
 }
 .group-create-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.group-create-btn:hover { background: rgb(224 123 108 / 24%); }
+.group-create-btn:hover { background: rgb(var(--accent-rgb) / 40%); color: var(--text-bright); }
 .group-create-btn:active { transform: scale(0.94); }
 
 .group-avatar-grid {
@@ -636,8 +647,8 @@ function formatTime(iso) {
   user-select: none;
 }
 .cg-member.picked {
-  border-color: rgb(226 166 122);
-  background: rgb(226 166 122 / 15%);
+  border-color: var(--accent-light);
+  background: rgb(var(--accent-rgb) / 15%);
 }
 .cg-member-avatar {
   width: 40px; height: 40px; border-radius: 50%;
@@ -668,9 +679,9 @@ function formatTime(iso) {
   flex-direction: column;
   overflow: hidden;
   border-radius: 18px;
-  border: 1px solid rgba(224, 123, 108, 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
   background: #fff;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2), 0 2px 8px rgba(224, 123, 108, 0.08);
+  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2), 0 2px 8px rgba(var(--accent-rgb), 0.08);
 }
 .cg-dialog-header {
   display: flex;
@@ -678,7 +689,7 @@ function formatTime(iso) {
   justify-content: space-between;
   gap: 24px;
   padding: 20px 28px;
-  border-bottom: 1px solid rgba(224, 123, 108, 0.12);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
   background: #fff;
 }
 .cg-dialog-title {
@@ -733,23 +744,23 @@ function formatTime(iso) {
   padding: 2px 4px 2px 0;
   grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   scrollbar-width: thin;
-  scrollbar-color: rgba(224, 123, 108, 0.35) transparent;
+  scrollbar-color: rgba(var(--accent-rgb), 0.35) transparent;
 }
 .cg-member-desktop {
   min-height: 88px;
   padding: 9px 6px 8px;
   background: #fff;
   border-width: 1px;
-  border-color: #eee9e7;
+  border-color: var(--border);
 }
 .cg-member-desktop:hover {
-  background: #fff8f6;
-  border-color: rgba(224, 123, 108, 0.38);
+  background: var(--bg-tertiary);
+  border-color: rgba(var(--accent-rgb), 0.38);
 }
 .cg-member-desktop.picked {
-  border-color: var(--accent, #e07b6c);
-  background: rgba(224, 123, 108, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(224, 123, 108, 0.14);
+  border-color: var(--accent, var(--accent));
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.14);
 }
 .cg-member-desktop span {
   max-width: 100%;
@@ -763,7 +774,7 @@ function formatTime(iso) {
   justify-content: space-between;
   gap: 16px;
   padding: 18px 28px 22px;
-  border-top: 1px solid rgba(224, 123, 108, 0.12);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.12);
   background: #fff;
 }
 .cg-hint {

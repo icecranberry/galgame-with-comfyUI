@@ -488,9 +488,9 @@ function addItem() {
 }
 .scan-line {
   position: absolute; left: 8%; right: 8%; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent, #e07b6c), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent, var(--accent)), transparent);
   animation: lib-scan-sweep 2s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(224, 123, 108, 0.6), 0 0 8px rgba(224, 123, 108, 0.3);
+  box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.6), 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 @keyframes lib-scan-sweep {
   0%   { top: 10%; opacity: 0.2; }
@@ -500,9 +500,9 @@ function addItem() {
   100% { top: 10%; opacity: 0.2; }
 }
 .scan-text {
-  font-size: 13px; color: var(--accent, #e07b6c); font-weight: 600;
+  font-size: 13px; color: var(--accent, var(--accent)); font-weight: 600;
   animation: lib-scan-pulse 1.2s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(224, 123, 108, 0.3);
+  text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
 }
 @keyframes lib-scan-pulse {
   0%, 100% { opacity: 0.4; transform: scale(0.97); }
@@ -512,14 +512,14 @@ function addItem() {
 /* 生成预览 */
 .preview-section {
   margin-top: 14px; padding: 12px;
-  border: 1px dashed rgba(224, 123, 108, 0.4);
-  border-radius: 12px; background: rgba(224, 123, 108, 0.03);
+  border: 1px dashed rgba(var(--accent-rgb), 0.4);
+  border-radius: 12px; background: rgba(var(--accent-rgb), 0.03);
 }
 .preview-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
 }
-.preview-title { font-size: 13px; font-weight: 600; color: #c06a5a; }
+.preview-title { font-size: 13px; font-weight: 600; color: var(--accent-hover); }
 .preview-actions { display: flex; gap: 8px; }
 
 /* 分组 */
@@ -535,14 +535,14 @@ function addItem() {
 .group-hint { font-size: 11px; color: var(--text-secondary, #888); }
 .add-card {
   min-height: 130px;
-  border: 1.5px dashed var(--accent, #e07b6c);
+  border: 1.5px dashed var(--accent, var(--accent));
   border-radius: 12px;
-  background: transparent; color: var(--accent, #e07b6c);
+  background: transparent; color: var(--accent, var(--accent));
   font-size: 13px; font-family: inherit; cursor: pointer; transition: all 0.15s;
   display: flex; align-items: center; justify-content: center;
   user-select: none;
 }
-.add-card:hover { background: rgba(224,123,108,0.06); }
+.add-card:hover { background: rgba(var(--accent-rgb),0.06); }
 
 /* 卡片网格 */
 .card-grid {
@@ -559,8 +559,8 @@ function addItem() {
   background: rgba(255,255,255,0.6);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.item-card:hover { border-color: rgba(224,123,108,0.35); box-shadow: 0 3px 16px rgba(224,123,108,0.06); }
-.item-card.editing { border-color: var(--accent, #e07b6c); box-shadow: 0 0 0 2px rgba(224,123,108,0.15); }
+.item-card:hover { border-color: rgba(var(--accent-rgb),0.35); box-shadow: 0 3px 16px rgba(var(--accent-rgb),0.06); }
+.item-card.editing { border-color: var(--accent, var(--accent)); box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.15); }
 .card-main { min-width: 0; }
 .card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card-name { font-size: 14px; font-weight: 700; color: var(--text-bright, #2b2b2b); }
@@ -572,7 +572,7 @@ function addItem() {
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag {
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: rgba(224,123,108,0.1); color: #c06a5a;
+  background: rgba(var(--accent-rgb),0.1); color: var(--accent-hover);
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
 

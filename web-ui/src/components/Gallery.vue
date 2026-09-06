@@ -1,15 +1,14 @@
 <template>
   <div class="gallery" ref="scrollContainer" @scroll="onScroll">
-    <!-- 加载状态 -->
-    <div v-if="loading" class="gallery-empty">
+    <!-- 加载状态：骨架网格 -->
+    <div v-if="loading" class="gallery-skeleton-grid">
+      <div v-for="i in 9" :key="i" class="skeleton gallery-skeleton-item"></div>
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="images.length === 0 && !hasMore" class="gallery-empty">
-      <div class="empty-icon">📭</div>
-      <p>{{ activeFolder ? '该分类暂无图片' : '相册暂无图片' }}</p>
-      <p class="empty-hint">生成图片后会自动出现在这里</p>
-    </div>
+    <EmptyState v-else-if="images.length === 0 && !hasMore" icon="📭"
+      :title="activeFolder ? '该分类暂无图片' : '相册暂无图片'"
+      hint="生成图片后会自动出现在这里" />
 
     <!-- 文件夹筛选按钮（常驻） -->
     <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
@@ -32,16 +31,21 @@
           <span class="group-label">{{ group.label }}</span>
           <span class="group-count">{{ group.images.length }} 张</span>
         </div>
-        <div class="gallery-grid">
+        <div class="gallery-grid stagger">
           <div
             v-for="img in group.images"
             :key="img.name"
-            class="gallery-item"
+            class="gallery-item sheen"
             @click="onPreview(img.flatIndex)"
           >
-            <div class="img-wrapper">
-              <img :src="bustUrlIfOverwritten(img.url)" class="gallery-img" alt="" loading="lazy" decoding="async" />
-            </div>
+            <!-- 用 img + loading=lazy 取代 background-image：浏览器可延迟加载视口外缩略图 -->
+            <img
+              class="img-wrapper"
+              :src="bustUrlIfOverwritten(img.url)"
+              loading="lazy"
+              decoding="async"
+              alt=""
+            >
           </div>
         </div>
       </div>
@@ -71,6 +75,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import EmptyState from './EmptyState.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 
@@ -267,17 +272,14 @@ defineExpose({ refresh })
 }
 
 /* ── 空状态 ── */
-.gallery-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-secondary);
-  gap: 8px;
+/* 空状态已迁移至 EmptyState 组件 */
+.gallery-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 4px;
 }
-.empty-icon { font-size: 48px; opacity: 0.6; }
-.empty-hint { font-size: 12px; opacity: 0.5; }
+.gallery-skeleton-item { height: 150px; border-radius: var(--radius-md); }
 
 /* ── 分组 ── */
 .gallery-group {
@@ -322,11 +324,13 @@ defineExpose({ refresh })
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 }
 
-.img-wrapper {
+.gallery-item .img-wrapper {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   overflow: hidden;
   background-color: rgba(0, 0, 0, 0.04);
+  object-fit: cover;
   transition: transform 0.3s ease, background-color 0.2s ease;
 }
 .gallery-img {

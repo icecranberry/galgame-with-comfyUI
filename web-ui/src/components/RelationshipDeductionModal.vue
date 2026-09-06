@@ -300,20 +300,7 @@ watch(() => props.visible, (val) => {
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-.modal-panel {
-  background: #f4f1eef5; border-radius: 18px;
-  width: min(880px, 96vw); max-height: 95vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden; backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
+/* ═══ 弹窗骨架已迁移至全局 .modal-*（styles/components.css）═══ */
 .ded-modal { width: min(780px, 96vw); }
 
 .ded-glass-panel {
@@ -322,18 +309,7 @@ watch(() => props.visible, (val) => {
   border-radius: 14px;
   padding: 16px;
 }
-.modal-body { overflow-y: auto; overflow-x: hidden; }
-
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border, #e5e0db);
-}
-.modal-header h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--text-primary, #3e3a37); }
-
-.modal-body {
-  flex: 1; overflow-y: auto; padding: 16px 22px 22px;
-}
+/* .modal-header / .modal-body 使用全局类（styles/components.css） */
 
 /* ── 加载态 ── */
 .ded-loading {
@@ -342,12 +318,12 @@ watch(() => props.visible, (val) => {
 }
 .ded-spinner {
   width: 36px; height: 36px; border: 3px solid var(--glass-border, #e5e0db);
-  border-top-color: var(--accent, #e07b6c); border-radius: 50%;
+  border-top-color: var(--accent, var(--accent)); border-radius: 50%;
   animation: ded-spin 0.7s linear infinite;
 }
 @keyframes ded-spin { to { transform: rotate(360deg); } }
 .ded-loading p {
-  font-size: 14px; color: var(--text-secondary, #8b817c); margin: 0;
+  font-size: 14px; color: var(--text-secondary, var(--text-secondary)); margin: 0;
 }
 
 /* ── 双列布局 ── */
@@ -375,11 +351,11 @@ watch(() => props.visible, (val) => {
   font-size: 14px; font-weight: 700; color: var(--text-primary, #3e3a37);
 }
 .ded-col-subtitle {
-  margin: 2px 0 0; font-size: 11px; font-weight: 400; color: var(--text-secondary, #8b817c);
+  margin: 2px 0 0; font-size: 11px; font-weight: 400; color: var(--text-secondary, var(--text-secondary));
   line-height: 1.4;
 }
 .ded-col-count {
-  font-size: 12px; font-weight: 500; color: var(--text-secondary, #8b817c);
+  font-size: 12px; font-weight: 500; color: var(--text-secondary, var(--text-secondary));
 }
 
 /* ── 列表 ── */
@@ -389,7 +365,7 @@ watch(() => props.visible, (val) => {
   padding-right: 4px;
 }
 .ded-empty {
-  text-align: center; color: var(--text-secondary, #8b817c);
+  text-align: center; color: var(--text-secondary, var(--text-secondary));
   font-size: 13px; padding: 30px 12px;
 }
 
@@ -400,8 +376,8 @@ watch(() => props.visible, (val) => {
   border-radius: 10px; padding: 8px 8px 8px 10px;
   transition: border-color 0.15s;
 }
-.ded-item:hover { border-color: var(--accent, #e07b6c); }
-.ded-item.confirmed { border-color: rgba(224, 123, 108, 0.35); background: rgba(224, 123, 108, 0.04); }
+.ded-item:hover { border-color: var(--accent, var(--accent)); }
+.ded-item.confirmed { border-color: rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.04); }
 
 .ded-item-body { flex: 1; min-width: 0; }
 .ded-item-names {
@@ -409,8 +385,8 @@ watch(() => props.visible, (val) => {
   font-size: 13px; font-weight: 600; color: var(--text-primary, #3e3a37);
   margin-bottom: 2px;
 }
-.ded-arrow { color: var(--text-secondary, #8b817c); font-size: 12px; }
-.ded-item-text { font-size: 12px; color: var(--text-secondary, #8b817c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ded-arrow { color: var(--text-secondary, var(--text-secondary)); font-size: 12px; }
+.ded-item-text { font-size: 12px; color: var(--text-secondary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .ded-item-edit {
   flex: 1; display: flex; gap: 6px; align-items: center;
@@ -431,11 +407,11 @@ watch(() => props.visible, (val) => {
   transition: all 0.15s;
   user-select: none;
 }
-.ded-act.push { width: auto; background: rgba(224, 123, 108, 0.1); color: var(--accent, #e07b6c); font-size: 16px; }
-.ded-act.push:hover { background: var(--accent, #e07b6c); color: #fff; }
+.ded-act.push { width: auto; background: rgba(var(--accent-rgb), 0.1); color: var(--accent, var(--accent)); font-size: 16px; }
+.ded-act.push:hover { background: var(--accent, var(--accent)); color: #fff; }
 .ded-act.remove { background: rgba(255, 77, 79, 0.08); color: var(--danger); }
 .ded-act.remove:hover { background: var(--danger); color: #fff; }
-.ded-act.edit { background: rgba(0, 0, 0, 0.05); color: var(--text-secondary, #8b817c); font-size: 13px; }
+.ded-act.edit { background: rgba(0, 0, 0, 0.05); color: var(--text-secondary, var(--text-secondary)); font-size: 13px; }
 .ded-act.edit:hover { background: rgba(0, 0, 0, 0.1); color: var(--text-primary, #3e3a37); }
 .ded-act.trash { background: rgba(255, 77, 79, 0.06); color: var(--danger); font-size: 13px; }
 .ded-act.trash:hover { background: var(--danger); color: #fff; }
@@ -451,16 +427,7 @@ watch(() => props.visible, (val) => {
 }
 .ded-btn { flex: 1; }
 
-/* ── Transition ── */
-.modal-fade-enter-active  { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active  { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-
-@keyframes modal-pop {
-  0%   { transform: scale(0.92); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
+/* 弹窗动画已迁移至全局 animations.css */
 
 .ded-collapse-enter-active, .ded-collapse-leave-active {
   transition: opacity 0.25s ease, transform 0.3s ease;

@@ -23,7 +23,8 @@ export const MOMENT_SHARE_STYLES = [
 const STYLE_IDS = new Set(MOMENT_SHARE_STYLES.map(s => s.id))
 
 // ── 邻舍基础色板 ──
-const C = {
+// 海报跟随 Cel Glow 4 主题：渲染时从 CSS 变量读取，读不到（SSR/测试环境）回退上游暖纸色。
+const FALLBACK_PALETTE = {
   paperTop: '#fbf8f4',
   paper: '#f3ece3',
   card: '#fffdfb',
@@ -33,6 +34,30 @@ const C = {
   cream: '#f6f1ea',
   scrimDark: '24, 17, 13',
 }
+
+// token 映射：纸面层次对应主题表面层次，强调色对应主题主色
+const PALETTE_TOKENS = {
+  paperTop: '--bg-secondary',
+  paper: '--bg-primary',
+  card: '--bg-secondary',
+  ink: '--text-bright',
+  muted: '--text-secondary',
+  coral: '--accent',
+  cream: '--bg-tertiary',
+}
+
+function buildPalette() {
+  if (typeof document === 'undefined') return { ...FALLBACK_PALETTE }
+  const css = getComputedStyle(document.documentElement)
+  const palette = { ...FALLBACK_PALETTE }
+  for (const [key, token] of Object.entries(PALETTE_TOKENS)) {
+    const v = css.getPropertyValue(token).trim()
+    if (v) palette[key] = v
+  }
+  return palette
+}
+
+let C = buildPalette()
 
 // ════════════════════════ 基础工具 ════════════════════════
 
@@ -571,7 +596,7 @@ function drawAmbient(ctx, W, H, { tintHex } = {}) {
     ctx.fillStyle = g
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
   }
-  glow(W * 0.94, H * 0.05, W * 0.62, 'rgba(224, 123, 108, ALPHA)', 0.07)
+  glow(W * 0.94, H * 0.05, W * 0.62, rgba(C.coral, 'ALPHA'), 0.07)
   glow(W * 0.04, H * 0.985, W * 0.55, 'rgba(168, 186, 202, ALPHA)', 0.08)
 }
 
@@ -809,7 +834,6 @@ function renderCollage(ctx, m, u, W, H) {
       const halfH = stackH * 0.74
       drawPolaroid({ x: stackX, y: cursor + 34 * u, w: halfW, h: halfH }, -0.035, m.images[0], false)
       drawPolaroid({ x: stackX + halfW + 26 * u, y: cursor + 8 * u, w: halfW, h: halfH }, 0.03, m.images[1], false)
-      cursor += halfH + 42 * u
     } else {
       const mainW = m.images.length === 1 ? stackW : stackW * 0.84
       const mainFrame = { x: stackX + (stackW - mainW) / 2, y: cursor + 14 * u, w: mainW, h: stackH }
@@ -825,11 +849,9 @@ function renderCollage(ctx, m, u, W, H) {
       ctx.fillStyle = rgba(C.coral, 0.38)
       ctx.fillRect(-74 * u, -22 * u, 148 * u, 44 * u)
       ctx.restore()
-      cursor = mainFrame.y + mainFrame.h + 48 * u
     }
     if (block) {
       drawTextBlock(ctx, block, contentX, textTop, C.ink)
-      cursor = textTop + block.blockH
     }
   } else if (block) {
     // 纯文字帖：卡片里排大字 + 引号点缀
@@ -837,7 +859,6 @@ function renderCollage(ctx, m, u, W, H) {
     ctx.fillStyle = rgba(C.coral, 0.15)
     ctx.fillText('”', cardX + cardW - 200 * u, headTop + 158 * u)
     drawTextBlock(ctx, block, contentX, cursor + 30 * u, C.ink)
-    cursor = cursor + 30 * u + block.blockH
   }
 
   // 手写感虚线分隔 + 水印
@@ -1549,6 +1570,7 @@ export function pickMomentStyle(post, { firstImageAspect = 1, rand = Math.random
 export async function renderMomentShareCard(post, options = {}) {
   const { styleId = 'auto', width = 1080, featureLayout = null } = options
   await ensureFonts()
+  C = buildPalette() // 每次渲染刷新主题色（用户可能已切换主题）
   const m = await buildModel(post)
   if (featureLayout) m.featureLayoutOverride = featureLayout
 

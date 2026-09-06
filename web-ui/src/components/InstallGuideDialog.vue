@@ -109,9 +109,9 @@ defineExpose({ show, close })
   width: min(680px, 100%);
   max-height: min(720px, calc(100dvh - 48px));
   background: #F7F4EF;
-  border: 1px solid color-mix(in srgb, #E07B6C 30%, transparent);
-  border: 1px solid rgba(224, 123, 108, 0.18);
-  border-color: color-mix(in srgb, #E07B6C 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 18px;
   box-shadow: 0 16px 44px rgba(50, 40, 35, 0.18);
   overflow: hidden;
@@ -122,7 +122,7 @@ defineExpose({ show, close })
   align-items: flex-start;
   gap: 12px;
   padding: 20px 22px 14px;
-  border-bottom: 1px solid rgba(224, 123, 108, 0.14);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.14);
 }
 
 .guide-mark {
@@ -132,8 +132,8 @@ defineExpose({ show, close })
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: rgba(224, 123, 108, 0.12);
-  color: #E07B6C;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
 }
 .guide-mark svg {
   width: 21px;
@@ -190,7 +190,7 @@ defineExpose({ show, close })
   margin: 4px 0 10px;
   font-size: 14px;
   font-weight: 600;
-  color: #E07B6C;
+  color: var(--accent);
 }
 .guide-section:not(:first-child) {
   margin-top: 20px;
@@ -217,7 +217,7 @@ defineExpose({ show, close })
   color: #6F655C;
 }
 .guide-step-body :deep(a) {
-  color: #E07B6C;
+  color: var(--accent);
   text-decoration: none;
 }
 .guide-step-body :deep(a:hover) {
@@ -234,14 +234,14 @@ defineExpose({ show, close })
   color: #6F655C;
 }
 .guide-after li::marker {
-  color: #E07B6C;
+  color: var(--accent);
 }
 
 .guide-foot {
   display: flex;
   justify-content: flex-end;
   padding: 12px 22px 18px;
-  border-top: 1px solid rgba(224, 123, 108, 0.14);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.14);
 }
 /* 皮肤交给 LinsheButton，仅保留尺寸 */
 .guide-ok {
