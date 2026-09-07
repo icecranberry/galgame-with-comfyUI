@@ -252,7 +252,8 @@ async function generateIntoRow(row) {
     fs.writeFileSync(filePath, outBuffer);
 
     const imagePath = `/town-assets/${path.basename(filePath)}`;
-    meta.pixelSize = { w: tw, h: th };
+    const outputMeta = await sharp(outBuffer).metadata();
+    meta.pixelSize = { w: outputMeta.width, h: outputMeta.height };
     meta.styleTags = meta.styleTags || '';
     meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
     // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5

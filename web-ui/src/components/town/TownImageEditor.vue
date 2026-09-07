@@ -1,17 +1,19 @@
 <template>
   <div class="img-editor">
-    <!-- 画布区：棋盘格透明底 + 可拖动图片 + 点击颜色抠除连通区域 -->
+    <!-- 画布区：canvas 内部保持原图像素；CSS 只负责适配浏览器高度 -->
     <div
       ref="frameEl"
       class="ie-frame"
-      :class="{ 'is-grabbing': dragging }"
+      :class="{ 'is-crop': cropMode }"
       @pointerdown.prevent="onDown"
       @pointermove="onMove"
       @pointerup="onUp"
       @pointercancel="onUp"
     >
-      <div class="ie-checker"></div>
-      <canvas ref="canvasEl" class="ie-canvas"></canvas>
+      <div class="ie-stage">
+        <div class="ie-checker"></div>
+        <canvas ref="canvasEl" class="ie-canvas"></canvas>
+      </div>
       <div v-if="!loaded" class="ie-loading">{{ loadingText || '加载中…' }}</div>
     </div>
 
@@ -45,11 +47,11 @@ const props = defineProps({
   assetId: { type: Number, required: true },
   hint: { type: String, default: '' },
   loadingText: { type: String, default: '' },
-  /** 编辑画布的显示高度 */
+  /** 兼容旧调用；显示高度现在由浏览器可视区决定 */
   fitHeight: { type: [Number, String], default: 360 },
   /** 截取框模式：放大查看，拖动/缩放截取框划定最终成图范围 */
   cropMode: { type: Boolean, default: false },
-  /** 截取框默认占画面比例 */
+  /** 截取框默认占原图比例 */
   cropScale: { type: Number, default: 0.72 },
 })
 const emit = defineEmits(['saved', 'cropped'])
@@ -57,77 +59,71 @@ const emit = defineEmits(['saved', 'cropped'])
 const frameEl = ref(null)
 const canvasEl = ref(null)
 const loaded = ref(false)
-const dragging = ref(false)
 const eraseMode = ref(false)
 const saving = ref(false)
 const dirty = ref(false)
 const savedTip = ref('')
 
-let img = null          // 当前编辑中的 ImageData 源（HTMLImageElement）
-let offX = 0            // 图片在 frame 内的偏移
-let offY = 0
-let downPt = null
+let img = null
 let ctx = null
 
 const ERASE_TOLERANCE = 42
-
-// ── 截取框（原图像素坐标，绘制时换算到画布）──
-const cropRect = ref(null) // { x, y, w, h }
+const cropRect = ref(null)
 const cropping = ref(false)
-let cropDrag = null        // { mode: 'move'|'resize', dx, dy }
+let cropDrag = null
 
+/** canvas 是原图坐标系；这里返回 CSS 缩放比例，用于保持框线/手柄视觉大小 */
 function displayScale() {
-  if (!img) return { x: 1, y: 1 }
+  const canvas = canvasEl.value
+  if (!img || !canvas?.width || !canvas.clientWidth) return { x: 1, y: 1 }
   return {
-    x: (img._drawW || img.width) / img.width,
-    y: (img._drawH || img.height) / img.height,
+    x: canvas.clientWidth / canvas.width,
+    y: canvas.clientHeight / canvas.height,
   }
 }
 
-function sourcePoint(px, py) {
-  const scale = displayScale()
-  return { x: (px - offX) / scale.x, y: (py - offY) / scale.y }
+/** 鼠标 CSS 坐标 → canvas/原图像素 */
+function canvasPoint(e) {
+  const canvas = canvasEl.value
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: (e.clientX - rect.left) * (canvas.width / rect.width),
+    y: (e.clientY - rect.top) * (canvas.height / rect.height),
+  }
 }
 
 function cropDisplayRect() {
-  const scale = displayScale()
-  const r = cropRect.value
-  return {
-    x: offX + r.x * scale.x,
-    y: offY + r.y * scale.y,
-    w: r.w * scale.x,
-    h: r.h * scale.y,
-  }
+  return { ...cropRect.value }
 }
 
 const cropHint = computed(() => {
-  if (eraseMode.value) return props.hint || '点击要去除的白色或底色 · 拖动调整图片位置'
+  if (eraseMode.value) return props.hint || '点击要去除的白色或底色'
   if (props.cropMode) return '拖动移动截取框 · 拖右下角手柄调大小 · 框内即最终成图范围'
   return props.hint || '开启抠去多余白色后，点击要移除的白色或底色'
 })
 
 function draw() {
   if (!ctx || !img) return
-  const frame = frameEl.value
-  ctx.clearRect(0, 0, frame.clientWidth, frame.clientHeight)
+  const canvas = canvasEl.value
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(img, offX, offY, img._drawW || img.width, img._drawH || img.height)
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
   if (props.cropMode && cropRect.value && !eraseMode.value) {
     const r = cropDisplayRect()
-    // 框外压暗
+    const unit = Math.max(1 / (displayScale().x || 1), 1)
+    const lineWidth = 2 * unit
+    const handleSize = 12 * unit
     ctx.fillStyle = 'rgba(20, 14, 10, 0.45)'
     ctx.beginPath()
-    ctx.rect(0, 0, frame.clientWidth, frame.clientHeight)
+    ctx.rect(0, 0, canvas.width, canvas.height)
     ctx.rect(r.x, r.y, r.w, r.h)
     ctx.fill('evenodd')
-    // 框边
     ctx.strokeStyle = '#e07b6c'
-    ctx.lineWidth = 2
+    ctx.lineWidth = lineWidth
     ctx.strokeRect(r.x, r.y, r.w, r.h)
-    // 三分线
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
-    ctx.lineWidth = 1
+    ctx.lineWidth = Math.max(1, lineWidth / 2)
     for (let i = 1; i <= 2; i++) {
       ctx.beginPath()
       ctx.moveTo(r.x + (r.w * i) / 3, r.y)
@@ -136,11 +132,11 @@ function draw() {
       ctx.lineTo(r.x + r.w, r.y + (r.h * i) / 3)
       ctx.stroke()
     }
-    // 右下角手柄
     ctx.fillStyle = '#e07b6c'
-    ctx.fillRect(r.x + r.w - 10, r.y + r.h - 10, 12, 12)
+    ctx.fillRect(r.x + r.w - handleSize, r.y + r.h - handleSize, handleSize, handleSize)
     ctx.strokeStyle = '#fff'
-    ctx.strokeRect(r.x + r.w - 10, r.y + r.h - 10, 12, 12)
+    ctx.lineWidth = Math.max(1, lineWidth / 2)
+    ctx.strokeRect(r.x + r.w - handleSize, r.y + r.h - handleSize, handleSize, handleSize)
   }
 }
 
@@ -163,90 +159,62 @@ async function loadImage(src) {
   draw()
 }
 
-let lastFrameW = 0
+/** 关键点：backing store 就是原图宽高；缩放只发生在 CSS 显示层 */
 function sizeCanvas() {
-  const frame = frameEl.value
   const canvas = canvasEl.value
-  if (!frame || !canvas || !img) return
-  const fit = Number(props.fitHeight) || 360
-  const w = Math.max(80, frame.clientWidth)
-  const h = Math.max(120, Math.min(fit + 40, fit + 40))
-  canvas.width = w
-  canvas.height = h
-  frame.style.height = `${h}px`
+  if (!canvas || !img) return
+  canvas.width = img.naturalWidth || img.width
+  canvas.height = img.naturalHeight || img.height
+  canvas.style.width = ''
+  canvas.style.height = ''
   ctx = canvas.getContext('2d', { willReadFrequently: true })
-  const scale = Math.min((canvas.width - 24) / img.width, (canvas.height - 12) / img.height, 1.5)
-  img._drawW = img.width * scale
-  img._drawH = img.height * scale
-  offX = (canvas.width - img._drawW) / 2
-  offY = canvas.height - img._drawH - 4
-  lastFrameW = w
 }
 
 function onDown(e) {
-  const rect = canvasEl.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
+  const point = canvasPoint(e)
   if (eraseMode.value) {
-    eraseColorAt(x, y)
+    eraseColorAt(point.x, point.y)
     return
   }
   if (props.cropMode && cropRect.value) {
     const dr = cropDisplayRect()
-    const point = sourcePoint(x, y)
-    // 右下角手柄 → 缩放
-    if (x >= dr.x + dr.w - 14 && x <= dr.x + dr.w + 4 && y >= dr.y + dr.h - 14 && y <= dr.y + dr.h + 4) {
+    const scale = displayScale()
+    const unit = Math.max(1 / (scale.x || 1), 1)
+    const hit = 12 / unit
+    if (point.x >= dr.x + dr.w - hit && point.x <= dr.x + dr.w + hit / 4 && point.y >= dr.y + dr.h - hit && point.y <= dr.y + dr.h + hit / 4) {
       cropDrag = { mode: 'resize' }
-      canvasEl.value.setPointerCapture?.(e.pointerId)
+      frameEl.value?.setPointerCapture?.(e.pointerId)
       return
     }
-    // 框内 → 移动
-    if (x >= dr.x && x <= dr.x + dr.w && y >= dr.y && y <= dr.y + dr.h) {
+    if (point.x >= dr.x && point.x <= dr.x + dr.w && point.y >= dr.y && point.y <= dr.y + dr.h) {
       cropDrag = { mode: 'move', dx: point.x - cropRect.value.x, dy: point.y - cropRect.value.y }
-      canvasEl.value.setPointerCapture?.(e.pointerId)
+      frameEl.value?.setPointerCapture?.(e.pointerId)
     }
-    return
-  }
-  // 命中图片范围内才开始拖动
-  if (x >= offX && x <= offX + img._drawW && y >= offY && y <= offY + img._drawH) {
-    dragging.value = true
-    downPt = { x, y, offX, offY }
-    canvasEl.value.setPointerCapture?.(e.pointerId)
   }
 }
 
 function onMove(e) {
-  if (!eraseMode.value && props.cropMode && cropDrag && cropRect.value) {
-    const rect = canvasEl.value.getBoundingClientRect()
-    const point = sourcePoint(e.clientX - rect.left, e.clientY - rect.top)
-    const r = cropRect.value
-    if (cropDrag.mode === 'move') {
-      r.x = Math.max(0, Math.min(img.width - r.w, point.x - cropDrag.dx))
-      r.y = Math.max(0, Math.min(img.height - r.h, point.y - cropDrag.dy))
-    } else {
-      r.w = Math.max(8, Math.min(img.width - r.x, point.x - r.x))
-      r.h = Math.max(8, Math.min(img.height - r.y, point.y - r.y))
-    }
-    draw()
-    return
+  if (!props.cropMode || !cropDrag || !cropRect.value) return
+  const point = canvasPoint(e)
+  const r = cropRect.value
+  if (cropDrag.mode === 'move') {
+    r.x = Math.max(0, Math.min(img.width - r.w, point.x - cropDrag.dx))
+    r.y = Math.max(0, Math.min(img.height - r.h, point.y - cropDrag.dy))
+  } else {
+    r.w = Math.max(8, Math.min(img.width - r.x, point.x - r.x))
+    r.h = Math.max(8, Math.min(img.height - r.y, point.y - r.y))
   }
-  if (!dragging.value) return
-  const rect = canvasEl.value.getBoundingClientRect()
-  offX = downPt.offX + (e.clientX - rect.left - downPt.x)
-  offY = downPt.offY + (e.clientY - rect.top - downPt.y)
   draw()
 }
 
 function onUp() {
   cropDrag = null
-  dragging.value = false
 }
 
 /** 点击颜色区域：以点击点颜色为种子，容差洪泛 → 透明 */
 function eraseColorAt(px, py) {
-  // 把画布坐标换算回原图像素
-  const ix = Math.floor((px - offX) / (img._drawW / img.width))
-  const iy = Math.floor((py - offY) / (img._drawH / img.height))
+  const ix = Math.floor(px)
+  const iy = Math.floor(py)
   if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) return
 
   const work = document.createElement('canvas')
@@ -287,11 +255,8 @@ function eraseColorAt(px, py) {
   }
   wctx.putImageData(data, 0, 0)
 
-  // 编辑结果作为新的绘制源（保持 drawW/drawH）
   const out = new Image()
   out.onload = () => {
-    out._drawW = img._drawW
-    out._drawH = img._drawH
     img = out
     dirty.value = true
     draw()
@@ -299,7 +264,7 @@ function eraseColorAt(px, py) {
   out.src = work.toDataURL('image/png')
 }
 
-/** 初始化截取框：直接基于原图尺寸居中，显示层只做等比换算 */
+/** 初始化截取框：始终基于原图尺寸居中 */
 function resetCrop() {
   if (!img) return
   const w = img.width * props.cropScale
@@ -320,11 +285,9 @@ async function confirmCrop() {
   const nh = Math.max(8, Math.min(Math.round(r.h), img.height - ny))
   cropping.value = true
   try {
-    // 抠白后先保存底图，避免裁剪仍使用服务器上的旧图
     if (dirty.value) await save()
     await api.cropTownAsset(props.assetId, { x: nx, y: ny, w: nw, h: nh })
-    // 用新图刷新本地（缓存穿透）
-    await loadImage(`${props.src.split('?')[0]}?v=${Date.now()}`)
+    await loadImage(freshSrc())
     resetCrop()
     emit('cropped')
   } catch (err) {
@@ -352,9 +315,8 @@ async function save() {
   }
 }
 
-/** 合成导出：按原图分辨率导出当前编辑结果（drawW/drawH 等比还原） */
+/** 合成导出：canvas backing 本身就是原图分辨率 */
 function compositeFull() {
-  // 编辑只是加透明区域，必须保留原图分辨率；否则先抠白再裁剪时，原图坐标会落到缩小后的另一块区域。
   const out = document.createElement('canvas')
   out.width = img.width
   out.height = img.height
@@ -364,27 +326,20 @@ function compositeFull() {
   return out
 }
 
-watch(() => props.src, (v) => { if (v) loadImage(v) })
+function freshSrc() {
+  if (props.src.startsWith('data:')) return props.src
+  return `${props.src.split('?')[0]}?v=${Date.now()}`
+}
 
-let resizeObs = null
+watch(() => props.src, (v) => { if (v) loadImage(v) })
 
 onMounted(() => {
   if (props.src) loadImage(props.src)
-  resizeObs = new ResizeObserver(() => {
-    const frame = frameEl.value
-    if (!frame || !img) return
-    if (Math.abs(frame.clientWidth - lastFrameW) < 2) return
-    sizeCanvas()
-    draw()
-  })
-  if (frameEl.value) resizeObs.observe(frameEl.value)
 })
 
 onBeforeUnmount(() => {
-  dragging.value = false
-  resizeObs?.disconnect()
+  cropDrag = null
 })
-
 </script>
 
 <style scoped>
@@ -392,15 +347,18 @@ onBeforeUnmount(() => {
 
 .ie-frame {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 72vh;
   border-radius: 12px;
   overflow: hidden;
   background: #efe9de;
   min-height: 160px;
   touch-action: none;
-  cursor: grab;
 }
 
-.ie-frame.is-grabbing { cursor: grabbing; }
+.ie-frame.is-crop { cursor: move; }
 
 .ie-checker {
   position: absolute;
@@ -414,10 +372,18 @@ onBeforeUnmount(() => {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
+.ie-stage {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
 .ie-canvas {
   position: relative;
-  width: 100%;
   display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 72vh;
 }
 
 .ie-loading {

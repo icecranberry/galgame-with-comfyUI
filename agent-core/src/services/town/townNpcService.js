@@ -256,6 +256,29 @@ export function getPlayerKit() {
 }
 
 /** 重新生成玩家套装（LLM 出 prompt；串行队列内逐张完成，await 返回即全部 ready） */
+export async function regeneratePlayerSprite(direction, overrides = {}) {
+  if (!SPRITE_DIRECTIONS.includes(direction)) throw new Error('无效的小人方向');
+  const key = `player_${direction}`;
+  const existing = getAssetsByKey([key])[0];
+  if (existing) deleteAsset(existing.id);
+  const prompt = await generateSpritePrompt({
+    appearanceInfo: playerAppearanceInfo(),
+    direction,
+  });
+  await createAsset({
+    kind: 'player', key, name: `玩家 ${direction}`, desc: 'the player character',
+    meta: {
+      direction,
+      styleTags: getWorldStyleTags(),
+      promptOverride: prompt,
+      promptPrefix: overrides.promptPrefix,
+      loras: overrides.loras,
+      artist: overrides.artist,
+    },
+  });
+  return { ok: true, kit: getPlayerKit() };
+}
+
 export async function regeneratePlayerKit(overrides = {}) {
   const info = playerAppearanceInfo();
   const styleTags = getWorldStyleTags();

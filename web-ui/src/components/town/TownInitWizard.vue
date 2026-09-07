@@ -380,7 +380,7 @@
               @saved="onEditorSaved"
               @cropped="onEditorCropped"
             />
-            <div v-if="editor.open && editor.portrait" class="wiz-editor-actions">
+            <div v-if="editor.open && (editor.portrait || editor.what)" class="wiz-editor-actions">
               <linshe-button
                 variant="secondary" size="sm"
                 :loading="editorHiresBusy"
@@ -391,6 +391,18 @@
                 variant="secondary" size="sm"
                 :loading="editorAssetBusy"
                 @click="regenEditorNpcAsset"
+              >{{ npcAssetLabel(editor.what) }}</linshe-button>
+              <linshe-button
+                v-if="editor.npc"
+                variant="secondary" size="sm"
+                :loading="editorAssetBusy"
+                @click="regenEditorAsset"
+              >{{ npcAssetLabel(editor.what) }}</linshe-button>
+              <linshe-button
+                v-else-if="editor.what"
+                variant="secondary" size="sm"
+                :loading="editorAssetBusy"
+                @click="regenEditorAsset"
               >{{ npcAssetLabel(editor.what) }}</linshe-button>
             </div>
           </div>
@@ -918,6 +930,34 @@ async function regenEditorNpcAsset() {
   }
 }
 async function refineEditorPortrait() {
+async function regenEditorPlayerSprite() {
+  const what = editor.what
+  if (!what || editor.portrait || editorAssetBusy.value) return
+  editorAssetBusy.value = true
+  try {
+    const data = await api.regenerateTownPlayerSprite(what, {
+      ...generationParams('player'),
+      styleTags: bpForm.styleTags || '',
+    })
+    applyPlayerKit(data.kit)
+    await town.fetchInitState()
+    await refreshAssets()
+    const asset = data.kit?.sprites?.[what]
+    if (editor.open && asset?.status === 'ready') {
+      editor.src = assetUrl(asset)
+      editor.assetId = asset.id
+    }
+  } catch (err) {
+    console.warn('[wizard] player sprite redraw failed:', err?.message)
+  } finally {
+    editorAssetBusy.value = false
+  }
+}
+
+async function regenEditorAsset() {
+  if (editor.npc) await regenEditorNpcAsset()
+  else await regenEditorPlayerSprite()
+}
   if (!editor.portrait || !editor.assetId || editorHiresBusy.value) return
   editorHiresBusy.value = true
   try {

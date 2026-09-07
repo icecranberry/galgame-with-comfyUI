@@ -82,3 +82,24 @@ test('postProcessAsset 抠白 + 像素化串联（建筑规格）', async () => 
   assert.equal(info.height, 64);
   assert.equal(data[3], 0); // 左上角已透明
 });
+test('postProcessAsset 平滑缩放保留抠白裁切后的内容比例', async () => {
+  const narrowSvg = `
+    <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+      <rect width="64" height="64" fill="#ffffff"/>
+      <rect x="22" y="4" width="20" height="56" fill="#cc2222"/>
+    </svg>`;
+  const src = await sharp(Buffer.from(narrowSvg)).png().toBuffer();
+  const cropped = await postProcessAsset(src, { removeBg: true, cropContent: true });
+  const croppedMeta = await sharp(cropped).metadata();
+  const out = await postProcessAsset(src, {
+    targetW: 300,
+    targetH: 400,
+    removeBg: true,
+    cropContent: true,
+    smoothResize: true,
+  });
+  const meta = await sharp(out).metadata();
+  assert.ok(Math.abs(meta.width / meta.height - croppedMeta.width / croppedMeta.height) < 0.02);
+  assert.notEqual(meta.width, 300);
+  assert.ok(meta.width < 300);
+});

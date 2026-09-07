@@ -2104,6 +2104,10 @@ export function regenerateTownPlayerKit(overrides = {}) {
   return jsonRequest(`${BASE}/town/player/kit`, townJson('POST', overrides))
 }
 
+export function regenerateTownPlayerSprite(direction, overrides = {}) {
+  return jsonRequest(`${BASE}/town/player/sprites/${direction}`, townJson('POST', overrides))
+}
+
 // 小镇设置 / 世界重置
 export function fetchTownSettings() {
   return jsonRequest(`${BASE}/town/settings`)

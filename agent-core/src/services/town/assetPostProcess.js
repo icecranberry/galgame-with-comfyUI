@@ -273,8 +273,8 @@ export async function postProcessAsset(buffer, { targetW, targetH, removeBg = fa
     buffer = await cropToContent(buffer);
   }
   if (smoothResize && targetW && targetH) {
-    // 平滑轻缩：保留插画画质（像素风的颗粒感应由生成 prompt 控制，不做破坏性压像素）
-    return sharp(buffer).resize(targetW, targetH, { fit: 'fill' }).png().toBuffer();
+    // 平滑轻缩：保留插画画质；cropContent 后必须按内容比例适配，不能强填目标画幅
+    return sharp(buffer).resize(targetW, targetH, { fit: 'inside' }).png().toBuffer();
   }
   if (targetW && targetH) {
     // 先抠白再像素化：避免降采样把背景白边混进前景边缘
