@@ -27,6 +27,8 @@
         <span v-if="!connected" class="town-chip is-warn">连接中…</span>
       </div>
       <div v-if="initialized" class="town-topbar-actions">
+        <linshe-select v-model="renderMode" size="sm" :options="renderOptions" aria-label="小镇画质" class="town-quality" />
+        <linshe-switch v-if="hdActive && renderMode !== 'low'" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
       </div>
@@ -35,6 +37,8 @@
     <div v-if="initialized && !editing" class="town-hint">
       点击空地走过去 · WASD 移动 · 点一点邻居打个招呼 · 滚轮缩放 · 双击跟随
     </div>
+
+    <div v-if="rendererNotice" class="town-render-notice" role="status">{{ rendererNotice }}</div>
 
     <!-- 未开镇入口 -->
     <div v-if="loaded && !initialized" class="town-empty">
@@ -182,12 +186,17 @@
     </Teleport>
 
     <!-- 就地聊天 / 管理面板 / 向导 -->
-    <TownNpcChat
-      v-if="chatNpcId != null"
-      :npc-id="chatNpcId"
-      :display-name="chatNpcName"
-      @close="chatNpcId = null"
-    />
+    <Transition name="npc-stage" :duration="300">
+      <div v-if="chatNpcId != null" class="npc-stage" @click.self="chatNpcId = null">
+        <TownNpcChat
+          :key="chatNpcId"
+          :npc-id="chatNpcId"
+          :player-name="player?.displayName || '我'"
+          :display-name="chatNpcName"
+          @close="chatNpcId = null"
+        />
+      </div>
+    </Transition>
     <TownAdminPanel v-if="showAdmin" @close="showAdmin = false" />
     <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
     <TownAssetPromptDialog
@@ -208,6 +217,12 @@ import { useTownStore } from '../stores/town.js'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
+import { createCanvasTownRenderer } from '../town/renderers/CanvasTownRenderer.js'
+import { HW, HH, cellTopWorld, cellCenterWorld, worldToCell, objectRect, buildBlockedCells } from '../town/renderers/projection.js'
+import { canvasGroundImage } from '../town/renderers/groundTexture.js'
+import { adaptAgent, assetUrl } from '../town/renderers/TownSceneAdapter.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
@@ -219,9 +234,6 @@ const chat = useChatStore()
 const router = useRouter()
 const { map: mapMeta, locations, agents, player, weather, loaded, connected, initialized, renderMap } = storeToRefs(town)
 
-// ── 等距投影参数：菱形 2:1（宽 64 × 高 32 世界像素） ──
-const HW = 32   // 菱形半宽
-const HH = 16   // 菱形半高
 // 地砖贴图里菱形中心的纵向位置（占贴图高度比例；生成图菱形居中 → 0.5）
 const GROUND_ANCHOR_Y = 0.5
 
@@ -236,12 +248,56 @@ let cssW = 0
 let cssH = 0
 let resizeObserver = null
 
+// Client-only preference; renderer switching never touches the world or SSE.
+function readPreference(key, fallback) {
+  try { return localStorage.getItem(key) || fallback } catch { return fallback }
+}
+const renderOptions = [{ label: 'HD2D', value: 'balanced' }, { label: 'HD2D · 低配', value: 'low' }, { label: '兼容画面', value: 'canvas' }]
+const savedMode = readPreference('town.renderer', 'balanced')
+const renderMode = ref(renderOptions.some(o => o.value === savedMode) ? savedMode : 'balanced')
+const tiltShift = ref(readPreference('town.tiltShift', 'true') !== 'false')
+const hdActive = ref(false)
+const rendererNotice = ref('')
+let hdRenderer = null, canvasRenderer = null, rendererEpoch = 0, disposed = false
+let activeScene = null, blockedCells = new Set()
+function persistPreference(key, value) { try { localStorage.setItem(key, String(value)) } catch { /* private browsing */ } }
+function fallbackRenderer(message) {
+  rendererEpoch++
+  hdActive.value = false
+  hdRenderer?.dispose(); hdRenderer = null
+  rendererNotice.value = message
+}
+async function selectRenderer() {
+  const epoch = ++rendererEpoch
+  if (disposed) return
+  rendererNotice.value = ''
+  if (renderMode.value === 'canvas') { fallbackRenderer(''); return }
+  let next = null
+  try {
+    if (hdRenderer) { hdRenderer.setQuality(renderMode.value, tiltShift.value); return }
+    const { Hd2dTownRenderer } = await import('../town/renderers/Hd2dTownRenderer.js')
+    if (disposed || epoch !== rendererEpoch) return
+    next = new Hd2dTownRenderer({ onFailure: fallbackRenderer })
+    next.mount(viewEl.value)
+    next.setQuality(renderMode.value, tiltShift.value)
+    next.resize(cssW, cssH, window.devicePixelRatio || 1)
+    next.setScene(activeScene)
+    next.setCamera(cam)
+    hdRenderer = next; hdActive.value = true
+  } catch (error) {
+    next?.dispose()
+    console.warn('[town] HD2D unavailable:', error)
+    if (!disposed && epoch === rendererEpoch) fallbackRenderer('当前设备无法启用 HD2D，已切换为兼容画面')
+  }
+}
+watch(renderMode, () => { persistPreference('town.renderer', renderMode.value); selectRenderer() })
+watch(tiltShift, value => { persistPreference('town.tiltShift', value); hdRenderer?.setQuality(renderMode.value, value) })
+
 // 摄像机（世界像素坐标）
 const cam = reactive({ x: 0, y: 0, zoom: 1 })
 let followPlayer = true
 
 // 静态图层烘焙
-let staticCanvas = null
 let staticDirty = true
 
 // 图片缓存
@@ -252,46 +308,23 @@ function getImg(url) {
   if (!entry) {
     const img = new Image()
     entry = { img, ok: false }
-    img.onload = () => { entry.ok = true }
-    img.onerror = () => { entry.ok = false }
+    img.onload = () => { entry.ok = true; staticDirty = true }
+    img.onerror = () => { entry.ok = false; entry.failed = true }
     img.src = url
     imgCache.set(url, entry)
   }
   return entry.ok ? entry.img : null
 }
 function assetById(assetId) {
-  return renderMap.value?.assets?.find(a => a.id === assetId) || null
+  return (editing.value && townAssets.value.find(a => a.id === assetId)) || renderMap.value?.assets?.find(a => a.id === assetId) || null
 }
 function assetImage(assetId) {
   const asset = assetById(assetId)
   return asset ? getImg(assetUrl(asset)) : null
 }
 
-// 素材 URL 带更新时间戳：重生成同路径文件后穿透浏览器/页内缓存
-function assetUrl(asset) {
-  return `${asset.imagePath}?v=${asset.meta?.updatedAt ?? 0}`
-}
-
 // ── 等距坐标换算 ──
 // 逻辑格 (cx, cy) 的菱形顶点：((cx-cy)*HW, (cx+cy)*HH)；中心再 +HH
-
-function cellTopWorld(cx, cy) {
-  return { x: (cx - cy) * HW, y: (cx + cy) * HH }
-}
-
-function cellCenterWorld(cx, cy) {
-  return { x: (cx - cy) * HW, y: (cx + cy + 1) * HH }
-}
-
-/** 世界坐标 → 逻辑格（菱形含边界取整） */
-function worldToCell(wx, wy) {
-  const a = wx / HW
-  const b = wy / HH
-  return {
-    x: Math.floor((a + b) / 2),
-    y: Math.floor((b - a) / 2),
-  }
-}
 
 function screenToWorld(cssX, cssY) {
   return {
@@ -301,6 +334,7 @@ function screenToWorld(cssX, cssY) {
 }
 
 function screenToCell(cssX, cssY) {
+  if (hdRenderer) return hdRenderer.pick({ x: cssX, y: cssY }, { groundOnly: true })?.cell || { x: -1, y: -1 }
   const w = screenToWorld(cssX, cssY)
   return worldToCell(w.x, w.y)
 }
@@ -440,31 +474,24 @@ const facing = reactive({}) // agentKey -> 'down'|'up'|'left'|'right'
 
 function agentFacing(a, pos) {
   if (pos.moving) {
-    // 像素小人只有正/背两面：向上走显示背面，其余显示正面
-    facing[a.agentKey] = pos.dy < 0 ? 'up' : 'down'
+    // 两方向素材按屏幕纵向速度选择：screen dy = 16 * (dx + dy)。
+    facing[a.agentKey] = pos.dx + pos.dy < 0 ? 'up' : 'down'
   }
   return facing[a.agentKey] || 'down'
 }
 
 function hitAgent(cssX, cssY) {
-  for (const a of agents.value) {
-    const pos = agentDisplayPos(a)
-    const c = cellCenterWorld(pos.x, pos.y)
-    const sx = (c.x - cam.x) * cam.zoom + cssW / 2
-    const sy = (c.y - cam.y) * cam.zoom + cssH / 2
-    const h = 64 * cam.zoom
-    const dx = cssX - sx
-    const dy = cssY - (sy - h * 0.42)
-    if (Math.abs(dx) < h * 0.38 && Math.abs(dy) < h * 0.55) return a
-  }
-  return null
+  if (hdRenderer) return hdRenderer.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
+  return canvasRenderer?.pick(screenToWorld(cssX, cssY), { agentsOnly: true })?.agent || null
 }
 
 // ── 点击/拖拽交互 ──
 
 let downInfo = null
+let suppressClick = false
 
 function onCanvasDown(e) {
+  suppressClick = false
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false }
   if (editing.value && e.button === 0) {
     const cell = screenToCell(e.offsetX, e.offsetY)
@@ -500,6 +527,7 @@ function onCanvasMove(e) {
 }
 
 function onCanvasUp() {
+  suppressClick = !!downInfo?.moved
   if (editing.value && paintDrag.value && downInfo?.moved) {
     fillRect(paintDrag.value.startCell, paintDrag.value.lastCell)
   }
@@ -516,7 +544,7 @@ function onCanvasLeave() {
 }
 
 function onCanvasClick(e) {
-  if (downInfo?.moved) return
+  if (suppressClick || downInfo?.moved) { suppressClick = false; return }
   if (!loaded.value) return
   if (editing.value) {
     handleEditClick(e)
@@ -534,7 +562,7 @@ function onCanvasClick(e) {
     return
   }
   const cell = screenToCell(e.offsetX, e.offsetY)
-  if (!inBounds(cell)) return
+  if (!inBounds(cell) || blockedCells.has(`${cell.x},${cell.y}`)) return
   town.movePlayer(cell.x, cell.y).catch(err => {
     console.warn('[town] move failed:', err?.message)
   })
@@ -573,7 +601,7 @@ const KEY_DIRS = {
 
 function onKeyDown(e) {
   if (editing.value || showAdmin.value || showWizard.value || chatNpcId.value != null) return
-  if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return
+  if (e.isComposing || document.activeElement?.closest('input, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"]')) return
   if (KEY_DIRS[e.code]) {
     e.preventDefault()
     keysDown.add(e.code)
@@ -592,7 +620,13 @@ function onKeyUp(e) {
   }
 }
 
+function clearMovementKeys() {
+  keysDown.clear()
+  if (moveTimer) { clearInterval(moveTimer); moveTimer = null }
+}
+
 function stepByKey() {
+  if (editing.value || showAdmin.value || showWizard.value || chatNpcId.value != null || document.hidden) { clearMovementKeys(); return }
   for (const code of keysDown) {
     const [dx, dy] = KEY_DIRS[code] || [0, 0]
     if (dx || dy) {
@@ -728,8 +762,7 @@ function paintBlock(cell, value) {
 
 /** 建筑/道具 footprint 的逻辑矩形 [x0..x1] × [y0..y1]（obj.x = x0 左上列，obj.y = y1 底行） */
 function objRect(obj) {
-  const fp = assetById(obj.assetId)?.meta?.footprint || { w: 1, h: 1 }
-  return { x0: obj.x, y0: obj.y - fp.h + 1, x1: obj.x + fp.w - 1, y1: obj.y, fp }
+  return objectRect(obj, assetById(obj.assetId)?.meta)
 }
 
 function objectContainsCell(obj, cell) {
@@ -856,282 +889,10 @@ function groundTileDrawSize(img) {
   return { w, h }
 }
 
-function bakeStatic() {
-  const m = renderMap.value
-  if (!m) { staticCanvas = null; return }
-  const offX = m.rows * HW                       // 最西格的左顶点 x = -rows*HW → 平移到 0
-  const offY = 32                                // 顶部余量（贴图上沿超出菱形顶点）
-  const W = (m.cols + m.rows) * HW
-  const H = (m.cols + m.rows) * HH + 64
-  staticCanvas = staticCanvas || document.createElement('canvas')
-  staticCanvas.width = W
-  staticCanvas.height = H
-  const c = staticCanvas.getContext('2d')
-  c.imageSmoothingEnabled = false
-  c.clearRect(0, 0, W, H)
-
-  const groundImgs = new Map() // assetId -> { img, anchorY }
-  let imgPending = false // 贴图尚未加载完 → 保持 dirty，下一帧重烘焙
-  // 按 (cx+cy) 从后往前涂：前排地砖的侧沿会盖住后排的
-  for (let s = 0; s <= m.cols + m.rows - 2; s++) {
-    for (let cx = Math.max(0, s - m.rows + 1); cx <= Math.min(m.cols - 1, s); cx++) {
-      const cy = s - cx
-      const top = cellTopWorld(cx, cy)
-      const px = top.x + offX
-      const py = top.y + offY
-      const groundId = m.layers?.ground?.[cy]?.[cx]
-      const roadId = m.layers?.road?.[cy]?.[cx]
-      for (const id of [groundId, roadId]) {
-        if (!id) continue
-        let entry = groundImgs.get(id)
-        if (entry === undefined) {
-          const asset = assetById(id)
-          const img = asset ? getImg(assetUrl(asset)) : null
-          if (!img) imgPending = true
-          entry = img ? { img, anchorY: asset?.meta?.groundAnchorY ?? GROUND_ANCHOR_Y } : null
-          groundImgs.set(id, entry)
-        }
-        if (!entry) continue
-        const { w, h } = groundTileDrawSize(entry.img)
-        c.drawImage(entry.img, px - HW, py + HH - h * entry.anchorY, w, h)
-      }
-    }
-  }
-  staticCanvas._offX = offX
-  staticCanvas._offY = offY
-  staticDirty = imgPending // 贴图加载齐之前每帧重试烘焙
-}
-
-function wrapText(text, maxChars) {
-  const lines = []
-  let cur = ''
-  for (const ch of String(text)) {
-    cur += ch
-    if (cur.length >= maxChars) { lines.push(cur); cur = '' }
-  }
-  if (cur) lines.push(cur)
-  return lines.slice(0, 3)
-}
-
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath()
-  c.moveTo(x + r, y)
-  c.arcTo(x + w, y, x + w, y + h, r)
-  c.arcTo(x + w, y + h, x, y + h, r)
-  c.arcTo(x, y + h, x, y, r)
-  c.arcTo(x, y, x + w, y, r)
-  c.closePath()
-}
-
 function diamondPath(c, cx, cy, hw, hh) {
-  c.beginPath()
-  c.moveTo(cx, cy - hh)
-  c.lineTo(cx + hw, cy)
-  c.lineTo(cx, cy + hh)
-  c.lineTo(cx - hw, cy)
-  c.closePath()
+  c.beginPath(); c.moveTo(cx, cy - hh); c.lineTo(cx + hw, cy)
+  c.lineTo(cx, cy + hh); c.lineTo(cx - hw, cy); c.closePath()
 }
-
-function drawBubble(c, text, until, px, py) {
-  const remain = until - Date.now()
-  if (remain <= 0) return
-  const alpha = Math.min(1, remain / 1500)
-  const lines = wrapText(text, 12)
-  const bw = Math.min(190, Math.max(...lines.map(l => l.length)) * 11 + 18)
-  const bh = lines.length * 16 + 12
-  const bx = px - bw / 2
-  const by = py - bh
-  c.save()
-  c.globalAlpha = alpha
-  roundRect(c, bx, by, bw, bh, 9)
-  c.fillStyle = 'rgba(255,254,250,0.96)'
-  c.fill()
-  c.strokeStyle = '#e8ddd0'
-  c.lineWidth = 1
-  c.stroke()
-  c.beginPath()
-  c.moveTo(px - 5, by + bh - 1)
-  c.lineTo(px + 5, by + bh - 1)
-  c.lineTo(px, by + bh + 6)
-  c.closePath()
-  c.fill()
-  c.fillStyle = '#4a3a2c'
-  c.font = '11px "HarmonyOS Sans SC", sans-serif'
-  c.textAlign = 'center'
-  c.textBaseline = 'middle'
-  lines.forEach((line, i) => c.fillText(line, px, by + 12 + i * 16))
-  c.restore()
-}
-
-function drawNameTag(c, px, py, name) {
-  c.save()
-  c.font = '10px "HarmonyOS Sans SC", sans-serif'
-  c.textAlign = 'center'
-  c.textBaseline = 'middle'
-  const w = c.measureText(name).width + 10
-  roundRect(c, px - w / 2, py - 7, w, 15, 7)
-  c.fillStyle = 'rgba(255,253,248,0.9)'
-  c.fill()
-  c.fillStyle = '#7a6a58'
-  c.fillText(name, px, py + 0.5)
-  c.restore()
-}
-
-/** 建筑等距绘制：贴图底边对齐 footprint 菱形的南顶点 */
-function drawObject(c, obj, occluded) {
-  const asset = assetById(obj.assetId)
-  const img = asset ? getImg(assetUrl(asset)) : null
-  const r = objRect(obj)
-  const fp = r.fp
-  const north = cellTopWorld(r.x0, r.y0)
-  const southY = (r.x1 + r.y1 + 2) * HH
-  const westX = (r.x0 - r.y1 - 1) * HW
-  const eastX = (r.x1 - r.y0 + 1) * HW
-  const centerX = (north.x + ((r.x1 - r.y1) * HW)) / 2
-  const imgW = eastX - westX
-  if (img) {
-    const imgH = imgW * (img.naturalHeight / Math.max(1, img.naturalWidth))
-    c.save()
-    c.globalAlpha = occluded ? 0.62 : 1
-    if (obj.flip) {
-      c.translate(centerX, 0)
-      c.scale(-1, 1)
-      c.drawImage(img, -imgW / 2, southY - imgH, imgW, imgH)
-    } else {
-      c.drawImage(img, centerX - imgW / 2, southY - imgH, imgW, imgH)
-    }
-    c.restore()
-  } else {
-    // 无贴图占位：footprint 菱形色块
-    c.save()
-    c.globalAlpha = occluded ? 0.4 : 0.55
-    c.fillStyle = '#b4a08c'
-    diamondPath(c, centerX, north.y + (southY - north.y) / 2, imgW / 2, (southY - north.y) / 2)
-    c.fill()
-    c.restore()
-  }
-}
-
-function drawAgent(c, a, pos, nowMs) {
-  const center = cellCenterWorld(pos.x, pos.y)
-  const px = center.x
-  const feetY = center.y + HH
-  const dir = agentFacing(a, pos)
-  const spriteUrl = a.sprites?.[dir]
-  const isPlayer = a.agentKey === 'me'
-  const sleeping = a.sleeping
-  const bob = pos.moving ? Math.abs(Math.sin(nowMs / 110)) * 2.2 : Math.sin(nowMs / 900 + (a.npcId || 0)) * 1.1
-
-  // 落影（贴地小椭圆）
-  c.save()
-  c.globalAlpha = 0.22
-  c.fillStyle = '#3c2f22'
-  c.beginPath()
-  c.ellipse(px, feetY - 2, HW * 0.32, HH * 0.42, 0, 0, Math.PI * 2)
-  c.fill()
-  c.restore()
-
-  if (a.agentKey === hoverAgentKey.value || a.agentKey === selectedAgentKey.value) {
-    c.save()
-    c.strokeStyle = 'rgba(224,123,108,0.55)'
-    c.lineWidth = 2
-    diamondPath(c, px, center.y, HW * 0.62, HH * 0.72)
-    c.stroke()
-    c.restore()
-  }
-
-  const sprite = getImg(spriteUrl)
-  const alpha = sleeping ? 0.85 : 1
-  let drew = false
-  if (sprite) {
-    const h = 64
-    const w = h * (sprite.naturalWidth && sprite.naturalHeight ? sprite.naturalWidth / sprite.naturalHeight : 0.66)
-    c.save()
-    c.globalAlpha = alpha
-    // 小人是插画素材：单独开平滑缩放（世界层全局是 nearest，贴图锐利）
-    c.imageSmoothingEnabled = true
-    c.imageSmoothingQuality = 'high'
-    c.translate(px, feetY - (sleeping ? 0 : bob))
-    try { c.drawImage(sprite, -w / 2, -h, w, h); drew = true } catch { /* ignore */ }
-    c.restore()
-  }
-  if (!drew) {
-    const standing = a.standingUrl ? getImg(a.standingUrl) : null
-    const avatar = a.avatarPath ? getImg(a.avatarPath) : null
-    if (standing) {
-      const h = 68
-      const w = h * (standing.naturalWidth / Math.max(1, standing.naturalHeight) || 0.7)
-      c.save()
-      c.globalAlpha = alpha
-      c.imageSmoothingEnabled = true
-      c.imageSmoothingQuality = 'high'
-      c.drawImage(standing, px - w / 2, feetY - h, w, h)
-      c.restore()
-      drew = true
-    } else {
-      const r = HW * 0.5
-      const cy = feetY - r - bob
-      c.save()
-      c.globalAlpha = alpha
-      c.beginPath()
-      c.arc(px, cy, r, 0, Math.PI * 2)
-      c.fillStyle = isPlayer ? '#e07b6c' : '#f6efe4'
-      c.fill()
-      c.lineWidth = 2
-      c.strokeStyle = 'rgba(255,255,255,0.95)'
-      c.stroke()
-      if (avatar) {
-        c.beginPath()
-        c.arc(px, cy, r - 2, 0, Math.PI * 2)
-        c.clip()
-        try { c.drawImage(avatar, px - r, cy - r, r * 2, r * 2) } catch { /* ignore */ }
-      } else {
-        c.fillStyle = '#ffffff'
-        c.font = `700 ${Math.round(HH * 1.1)}px "HarmonyOS Sans SC", sans-serif`
-        c.textAlign = 'center'
-        c.textBaseline = 'middle'
-        c.fillText((a.displayName || '?').charAt(0), px, cy + 1)
-      }
-      c.restore()
-      drew = true
-    }
-  }
-
-  drawNameTag(c, px, feetY + HH * 0.6, a.displayName || '我')
-
-  if (sleeping) {
-    c.save()
-    c.font = '16px "HarmonyOS Sans SC", sans-serif'
-    c.textAlign = 'center'
-    c.globalAlpha = 0.5 + 0.5 * Math.sin(nowMs / 500)
-    c.fillText('💤', px + HW * 0.55, feetY - 52)
-    c.restore()
-  } else if (a.encounterId) {
-    c.save()
-    c.font = '15px "HarmonyOS Sans SC", sans-serif'
-    c.textAlign = 'center'
-    c.fillText('💬', px + HW * 0.55, feetY - 50)
-    c.restore()
-  }
-
-  if (a.bubble?.text) drawBubble(c, a.bubble.text, a.bubble.until, px, feetY - 62)
-}
-
-/** 居民是否被建筑挡住（站在建筑屏幕投影后方） */
-function objectOccludes(obj, agentPositions) {
-  const r = objRect(obj)
-  const north = cellTopWorld(r.x0, r.y0)
-  const southY = (r.x1 + r.y1 + 2) * HH
-  const westX = (r.x0 - r.y1 - 1) * HW
-  const eastX = (r.x1 - r.y0 + 1) * HW
-  for (const pos of agentPositions) {
-    const center = cellCenterWorld(pos.x, pos.y)
-    const feetY = center.y + HH
-    if (feetY < southY && feetY > north.y && center.x > westX && center.x < eastX) return true
-  }
-  return false
-}
-
 function drawEditorOverlays(c) {
   const m = renderMap.value
   const layers = editing.value ? editLayers.value : m?.layers
@@ -1172,7 +933,7 @@ function drawEditorOverlays(c) {
       const southY = (cell.x + y1 + 2) * HH
       const westX = (x0 - y1 - 1) * HW
       const eastX = (cell.x - y0 + 1) * HW
-      const centerX = (north.x + ((cell.x - y0) * HW)) / 2
+      const centerX = (north.x + ((cell.x - y1) * HW)) / 2
       const img = getImg(assetUrl(asset))
       c.save()
       if (img) {
@@ -1187,13 +948,13 @@ function drawEditorOverlays(c) {
       c.fill()
       c.restore()
     } else {
-      const img = getImg(assetUrl(asset))
+      const img = canvasGroundImage(getImg(assetUrl(asset)), asset)
       const t = cellTopWorld(cell.x, cell.y)
       c.save()
       c.globalAlpha = 0.5
       if (img) {
         const { w, h } = groundTileDrawSize(img)
-        c.drawImage(img, t.x - HW, t.y + HH - h * (asset.meta?.groundAnchorY ?? GROUND_ANCHOR_Y), w, h)
+        c.drawImage(img, t.x - HW, t.y + HH - h * (asset.meta?.projection === 'topdown_square' ? 0.5 : asset.meta?.groundAnchorY ?? GROUND_ANCHOR_Y), w, h)
       }
       c.globalAlpha = 0.4
       c.fillStyle = editTool.value === 'road' ? '#e8c86a' : '#8ab6d6'
@@ -1250,7 +1011,7 @@ function drawWeatherOverlay(c, nowMs) {
   if (hour >= 20 || hour < 5) tint = 'rgba(30, 38, 72, 0.32)'
   else if (hour >= 17) tint = 'rgba(244, 160, 92, 0.14)'
   else if (hour < 8) tint = 'rgba(255, 205, 130, 0.10)'
-  if (tint) {
+  if (tint && !hdActive.value) {
     c.fillStyle = tint
     c.fillRect(0, 0, cssW, cssH)
   }
@@ -1282,70 +1043,55 @@ function drawWeatherOverlay(c, nowMs) {
 
 function draw(nowMs) {
   rafId = 0
-  if (!ctx) return
+  if (!ctx || disposed) return
   const dpr = window.devicePixelRatio || 1
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
-  ctx.fillStyle = '#dfe5d0'
-  ctx.fillRect(0, 0, cssW, cssH)
-
   const m = renderMap.value
-  if (m && staticDirty) bakeStatic()
-
-  // 跟随玩家
+  if (staticDirty) {
+    activeScene = m ? { ...m, layers: editing.value ? editLayers.value : m.layers } : null
+    // Library assets include newly generated materials not yet referenced by the saved map.
+    if (activeScene && editing.value) activeScene.assets = [...new Map([...(m.assets || []), ...townAssets.value].map(a => [a.id, a])).values()]
+    canvasRenderer.setScene(activeScene)
+    hdRenderer?.setScene(activeScene)
+    blockedCells = buildBlockedCells(activeScene)
+    staticDirty = false
+  }
   if (player.value && followPlayer && !editing.value) {
     const pos = agentDisplayPos(player.value)
     const center = cellCenterWorld(pos.x, pos.y)
     cam.x += (center.x - cam.x) * 0.08
     cam.y += (center.y - cam.y) * 0.08
   }
-
-  if (m && staticCanvas) {
+  const frames = editing.value ? [] : [...agents.value, ...(player.value ? [player.value] : [])].map(a => {
+    const pos = agentDisplayPos(a)
+    return adaptAgent(a, pos, agentFacing(a, pos), nowMs)
+  })
+  if (hdRenderer) {
+    try {
+      hdRenderer.setCamera(cam)
+      hdRenderer.updateAgents(frames)
+      hdRenderer.render(weather.value, frames.filter(f => ['me', hoverAgentKey.value, selectedAgentKey.value].includes(f.agent.agentKey)).map(f => f.ground))
+    } catch (error) {
+      console.warn('[town] render failed:', error)
+      fallbackRenderer('画面渲染中断，已切换为兼容画面')
+    }
+  }
+  if (!hdActive.value) {
+    ctx.fillStyle = '#dfe5d0'; ctx.fillRect(0, 0, cssW, cssH)
+  }
+  if (m) {
     ctx.save()
-    ctx.translate(cssW / 2, cssH / 2)
-    ctx.scale(cam.zoom, cam.zoom)
-    ctx.translate(-cam.x, -cam.y)
+    ctx.translate(cssW / 2, cssH / 2); ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y)
     ctx.imageSmoothingEnabled = false
-
-    ctx.drawImage(staticCanvas, -staticCanvas._offX, -staticCanvas._offY)
-
-    // 对象 + 居民合并深度排序（等距深度 = 世界 y）
-    const layers = editing.value ? editLayers.value : m.layers
-    const agentPositions = editing.value ? [] : [
-      ...agents.value.map(a => agentDisplayPos(a)),
-      ...(player.value ? [agentDisplayPos(player.value)] : []),
-    ]
-    const drawables = []
-    for (const obj of layers?.objects || []) {
-      drawables.push({ kind: 'object', y: (objRect(obj).x1 + objRect(obj).y1 + 2) * HH, obj })
-    }
-    if (!editing.value) {
-      for (const a of agents.value) {
-        const pos = agentDisplayPos(a)
-        drawables.push({ kind: 'agent', y: (pos.x + pos.y + 2) * HH, a, pos })
-      }
-      if (player.value) {
-        const pos = agentDisplayPos(player.value)
-        drawables.push({ kind: 'agent', y: (pos.x + pos.y + 2) * HH, a: player.value, pos })
-      }
-    }
-    drawables.sort((p, q) => p.y - q.y)
-    for (const d of drawables) {
-      if (d.kind === 'object') drawObject(ctx, d.obj, !editing.value && objectOccludes(d.obj, agentPositions))
-      else drawAgent(ctx, d.a, d.pos, nowMs)
-    }
-
+    canvasRenderer.draw(ctx, frames, nowMs, { labelsOnly: hdActive.value, hover: hoverAgentKey.value, selected: selectedAgentKey.value })
     if (editing.value) drawEditorOverlays(ctx)
     ctx.restore()
-  } else if (!m) {
-    ctx.fillStyle = '#8c8074'
-    ctx.font = '13px "HarmonyOS Sans SC", sans-serif'
-    ctx.textAlign = 'center'
+  } else {
+    ctx.fillStyle = '#8c8074'; ctx.font = '13px "HarmonyOS Sans SC", sans-serif'; ctx.textAlign = 'center'
     ctx.fillText(loaded.value ? '这片土地还在等待它的故事…' : '正在唤醒这个世界…', cssW / 2, cssH / 2)
   }
-
   drawWeatherOverlay(ctx, nowMs)
-
   if (!document.hidden) rafId = requestAnimationFrame(draw)
 }
 
@@ -1361,6 +1107,7 @@ function relayout() {
   canvasEl.value.height = Math.round(cssH * dpr)
   canvasEl.value.style.width = `${cssW}px`
   canvasEl.value.style.height = `${cssH}px`
+  hdRenderer?.resize(cssW, cssH, dpr)
 }
 
 function centerCamera() {
@@ -1369,11 +1116,13 @@ function centerCamera() {
   const center = cellCenterWorld(m.cols / 2, m.rows / 2)
   cam.x = center.x
   cam.y = center.y
-  cam.zoom = Math.min(2.5, Math.max(0.5, Math.min(cssW / ((m.cols + m.rows) * HW), cssH / ((m.cols + m.rows) * HH))))
+  cam.zoom = player.value ? (cssW < 600 ? 1.15 : 1.5) : Math.min(1.5, Math.max(0.5, Math.min(cssW / ((m.cols + m.rows) * HW), cssH / ((m.cols + m.rows) * HH))))
+  if (player.value) { const p = cellCenterWorld(player.value.x, player.value.y); cam.x = p.x; cam.y = p.y }
   followPlayer = true
 }
 
 function onVisibility() {
+  if (document.hidden) clearMovementKeys()
   if (!document.hidden && rafId === 0) rafId = requestAnimationFrame(draw)
 }
 
@@ -1389,16 +1138,19 @@ watch(renderMap, (m, old) => {
   if (m && (!old || old.version !== m.version || old.name !== m.name)) {
     if (!editing.value) centerCamera()
   }
-})
+}, { deep: true })
 
 watch(editing, (v) => {
   if (!v) staticDirty = true
 })
 
 watch(editLayers, () => { staticDirty = true }, { deep: true })
+watch(townAssets, () => { staticDirty = true }, { deep: true })
 
 onMounted(async () => {
   ctx = canvasEl.value.getContext('2d')
+  canvasRenderer = createCanvasTownRenderer({ getImg, agentFacing, isImagePending: url => { const entry = imgCache.get(url); return !!entry && !entry.ok && !entry.failed } })
+  selectRenderer()
   town.startTownStream()
   relayout()
   resizeObserver = new ResizeObserver(() => relayout())
@@ -1406,6 +1158,7 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', clearMovementKeys)
   rafId = requestAnimationFrame(draw)
 
   try {
@@ -1417,12 +1170,18 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true; rendererEpoch++
+  hdRenderer?.dispose(); hdRenderer = null
+  canvasRenderer?.dispose()
+  for (const entry of imgCache.values()) { entry.img.onload = null; entry.img.onerror = null }
+  imgCache.clear()
   if (rafId) cancelAnimationFrame(rafId)
   rafId = 0
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', clearMovementKeys)
   if (moveTimer) { clearInterval(moveTimer); moveTimer = null }
   town.stopTownStream()
 })
@@ -1439,14 +1198,37 @@ async function goChat(characterId) {
 </script>
 
 <style scoped>
+.npc-stage { position: absolute; inset: 0; z-index: 60; overflow: clip; }
+.npc-stage-enter-active, .npc-stage-leave-active { transition: opacity .3s ease; }
+.npc-stage-enter-active :deep(.nc-portrait),
+.npc-stage-leave-active :deep(.nc-portrait),
+.npc-stage-enter-active :deep(.nc-main),
+.npc-stage-leave-active :deep(.nc-main) {
+  transition: transform .3s cubic-bezier(.22,.61,.36,1);
+  will-change: transform;
+}
+.npc-stage-enter-from, .npc-stage-leave-to { opacity: 0; }
+.npc-stage-enter-from :deep(.nc-portrait-left), .npc-stage-leave-to :deep(.nc-portrait-left) { transform: translateX(-64px); }
+.npc-stage-enter-from :deep(.nc-portrait-right), .npc-stage-leave-to :deep(.nc-portrait-right) { transform: translateX(64px); }
+.npc-stage-enter-from :deep(.nc-main), .npc-stage-leave-to :deep(.nc-main) { transform: translateY(40px); }
+@media (prefers-reduced-motion: reduce) {
+  .npc-stage-enter-active, .npc-stage-leave-active { transition-duration: .001ms; }
+  .npc-stage-enter-active :deep(.nc-portrait), .npc-stage-leave-active :deep(.nc-portrait),
+  .npc-stage-enter-active :deep(.nc-main), .npc-stage-leave-active :deep(.nc-main) { transition: none; transform: none; }
+}
+
 .town-view {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  overflow: clip;
   background: #dfe5d0;
 }
 
+.town-quality { width: 132px; }
+.town-render-notice { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: #fffaf2; color: #796957; font-size: 12px; }
 .town-canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -1492,7 +1274,13 @@ async function goChat(characterId) {
 
 .town-chip.is-warn { color: var(--accent-hover); }
 
-.town-topbar-actions { display: flex; gap: 6px; }
+.town-topbar-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
+@media (max-width: 700px) {
+  .town-topbar { flex-wrap: wrap; width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
+  .town-chips { flex: 1; }
+  .town-topbar-actions { width: 100%; flex-wrap: wrap; }
+  .town-hint { max-width: calc(100% - 28px); white-space: normal; text-align: center; }
+}
 
 /* ── 底部提示 ── */
 .town-hint {

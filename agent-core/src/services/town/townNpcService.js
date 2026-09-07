@@ -12,7 +12,7 @@ import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
-import { createAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS } from './townAssetService.js';
+import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS } from './townAssetService.js';
 import { generateSpritePrompt, generatePortraitPrompt } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection } from '../characterPersona.js';
 import { getMapRow } from './townMapService.js';
@@ -292,9 +292,22 @@ export async function regeneratePlayerKit(overrides = {}) {
       meta: { direction: dir, styleTags, promptOverride: prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
     });
   }
+  return regeneratePlayerPortrait(overrides);
+}
+
+/** Regenerate only the player's portrait, leaving both sprites untouched. */
+export async function regeneratePlayerPortrait(overrides = {}) {
+  const info = playerAppearanceInfo();
+  const styleTags = getWorldStyleTags();
   const existingPortrait = getAssetsByKey(['player_portrait'])[0];
-  if (existingPortrait) deleteAsset(existingPortrait.id);
   const portraitPrompt = await generatePortraitPrompt({ appearanceInfo: info });
+  if (existingPortrait) {
+    const portrait = await regenerateAsset(existingPortrait.id, {
+      styleTags, prompt: portraitPrompt, promptPrefix: overrides.promptPrefix,
+      loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist,
+    });
+    return { ok: true, kit: getPlayerKit(), portrait };
+  }
   const portrait = await createAsset({
     kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character',
     meta: { styleTags, promptOverride: portraitPrompt, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },

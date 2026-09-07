@@ -1,55 +1,53 @@
 <template>
-  <div class="npc-chat" :class="{ 'with-portrait': !!portraitUrl }">
-    <!-- 立绘跳出：聊天时在旁展示（已抠除背景的透明 PNG，悬浮展示） -->
-    <div v-if="portraitUrl" class="nc-portrait" aria-hidden="true">
-      <img :src="portraitUrl" alt="">
-      <linshe-button variant="icon" size="sm" class="nc-portrait-zoom" aria-label="放大立绘" @click="zoomed = true">⤢</linshe-button>
-    </div>
-
+  <section class="npc-chat" role="dialog" :aria-label="`与${displayName}对话`" @keydown.esc.stop="$emit('close')">
+    <figure class="nc-portrait nc-portrait-left">
+      <img v-if="portraitUrl" :src="portraitUrl" :alt="`${displayName}立绘`">
+      <div v-else class="nc-portrait-empty">{{ displayName?.charAt(0) || '邻' }}</div>
+      <figcaption>{{ displayName }}</figcaption>
+      <linshe-button v-if="portraitUrl" variant="icon" size="sm" class="nc-portrait-zoom" aria-label="放大邻居立绘" @click="zoomed = portraitUrl">⤢</linshe-button>
+    </figure>
     <div class="nc-main">
-      <div class="nc-head">
-        <div class="nc-name">💬 {{ displayName }}</div>
-        <linshe-button variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
-      </div>
-
-      <div ref="listEl" class="nc-list">
+      <svg class="nc-dialog-shape" viewBox="0 0 600 420" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M22 15 L216 8 L406 17 L574 11 L589 44 L582 174 L594 360 L574 401 L351 411 L173 400 L23 408 L9 375 L18 209 L8 53 Z" fill="#fffaf1" stroke="#8d7968" stroke-width="2" vector-effect="non-scaling-stroke" />
+        <path d="M29 24 L216 18 L405 26 L567 21 M29 392 L173 385 L350 395 L566 387" fill="none" stroke="#e0c9aa" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+      </svg>
+      <header class="nc-head">
+        <div><span class="nc-kicker">小镇 · 相谈</span><div class="nc-name">{{ displayName }}</div></div>
+        <linshe-button variant="icon" size="sm" aria-label="关闭对话" @click="$emit('close')">✕</linshe-button>
+      </header>
+      <div ref="listEl" class="nc-list" role="log" aria-live="polite" aria-label="对话记录">
         <div v-if="loading" class="nc-state">翻着记忆…</div>
         <template v-else>
           <div v-if="messages.length === 0" class="nc-state">这是你们在镇上的第一次交谈</div>
-          <div
-            v-for="(m, i) in messages" :key="i"
-            class="nc-msg" :class="{ 'is-mine': m.role === 'user' }"
-          >{{ m.content }}</div>
+          <div v-for="(m, i) in messages" :key="i" class="nc-msg" :class="{ 'is-mine': m.role === 'user' }">
+            <span class="nc-speaker">{{ m.role === 'user' ? playerName : displayName }}</span>
+            <p>{{ m.content }}</p>
+          </div>
         </template>
-        <div v-if="sending" class="nc-msg is-npc is-typing">（正在回应…）</div>
+        <div v-if="sending" class="nc-msg is-typing">（正在回应…）</div>
       </div>
-
       <div class="nc-input-row">
-        <linshe-input
-          ref="inputEl"
-          v-model="draft"
-          size="sm"
-          :disabled="sending"
-          placeholder="说点什么…"
-          maxlength="200"
-          @keyup.enter="send"
-        />
-        <linshe-button variant="primary" size="sm" :loading="sending" @click="send">发送</linshe-button>
+        <linshe-input ref="inputEl" v-model="draft" size="sm" :disabled="sending || loading" placeholder="说点什么…" maxlength="200" aria-label="对话内容" @keyup.enter="!$event.isComposing && send()" />
+        <linshe-button variant="primary" size="sm" :loading="sending" :disabled="loading || !draft.trim()" @click="send">发送</linshe-button>
       </div>
     </div>
-
-    <!-- 立绘放大 -->
+    <figure class="nc-portrait nc-portrait-right">
+      <img v-if="playerPortraitUrl" :src="playerPortraitUrl" :alt="`${playerName}立绘`">
+      <div v-else class="nc-portrait-empty">我</div>
+      <figcaption>{{ playerName }}</figcaption>
+      <linshe-button v-if="playerPortraitUrl" variant="icon" size="sm" class="nc-portrait-zoom" aria-label="放大我的立绘" @click="zoomed = playerPortraitUrl">⤢</linshe-button>
+    </figure>
     <Teleport to="body">
       <Transition name="town-modal">
-        <div v-if="zoomed" class="nc-zoom-mask" @click.self="zoomed = false">
+        <div v-if="zoomed" class="nc-zoom-mask" @click.self="zoomed = null">
           <div class="nc-zoom" role="dialog" aria-label="立绘">
-            <img :src="portraitUrl" alt="立绘大图">
-            <linshe-button variant="icon" size="sm" class="nc-zoom-close" aria-label="关闭" @click="zoomed = false">✕</linshe-button>
+            <img :src="zoomed" alt="立绘大图">
+            <linshe-button variant="icon" size="sm" class="nc-zoom-close" aria-label="关闭立绘" @click="zoomed = null">✕</linshe-button>
           </div>
         </div>
       </Transition>
     </Teleport>
-  </div>
+  </section>
 </template>
 
 <script setup>
@@ -61,6 +59,7 @@ import LinsheInput from '../ui/LinsheInput.vue'
 const props = defineProps({
   npcId: { type: Number, required: true },
   displayName: { type: String, default: '' },
+  playerName: { type: String, default: '我' },
 })
 defineEmits(['close'])
 
@@ -71,7 +70,8 @@ const draft = ref('')
 const listEl = ref(null)
 const inputEl = ref(null)
 const portraitUrl = ref(null)
-const zoomed = ref(false)
+const playerPortraitUrl = ref(null)
+const zoomed = ref(null)
 
 function scrollBottom() {
   nextTick(() => {
@@ -82,11 +82,14 @@ function scrollBottom() {
 async function load() {
   loading.value = true
   try {
-    const [msgData, npcData] = await Promise.all([
+    const [msgData, npcData, kit] = await Promise.all([
       api.fetchTownNpcMessages(props.npcId),
       api.fetchTownNpc(props.npcId).catch(() => null),
+      api.fetchTownPlayerKit().catch(() => null),
     ])
     messages.value = msgData.messages || []
+    const mine = kit?.portrait
+    if (mine?.status === 'ready' && mine.image_path) playerPortraitUrl.value = `${mine.image_path}?v=${mine.meta?.updatedAt ?? 0}`
     const p = npcData?.npc?.portrait
     if (p?.status === 'ready' && p.image_path) {
       portraitUrl.value = `${p.image_path}?v=${p.meta?.updatedAt ?? 0}`
@@ -96,12 +99,13 @@ async function load() {
   } finally {
     loading.value = false
     scrollBottom()
+    nextTick(() => inputEl.value?.focus?.({ preventScroll: true }))
   }
 }
 
 async function send() {
   const text = draft.value.trim()
-  if (!text || sending.value) return
+  if (!text || sending.value || loading.value) return
   sending.value = true
   messages.value.push({ role: 'user', content: text })
   draft.value = ''
@@ -120,154 +124,42 @@ async function send() {
 
 onMounted(() => {
   load()
-  inputEl.value?.focus?.()
+  inputEl.value?.focus?.({ preventScroll: true })
 })
 </script>
 
 <style scoped>
-.npc-chat {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 320px;
-  max-width: calc(100vw - 28px);
-  height: 400px;
-  max-height: calc(100vh - 120px);
-  display: flex;
-  flex-direction: column;
-  background: #f4f1eeed;
-  border-radius: 16px;
-  box-shadow: 0 16px 48px rgba(54, 42, 38, 0.2);
-  overflow: visible;
-  z-index: 60;
-}
-
-/* 有立绘时聊天面板让出左侧位置，立绘悬浮在旁 */
-.npc-chat.with-portrait {
-  width: 300px;
-}
-
-.nc-portrait {
-  position: absolute;
-  right: calc(100% - 40px);
-  bottom: 0;
-  width: 300px;
-  height: 560px;
-  pointer-events: none;
-}
-
-.nc-portrait img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: bottom;
-  filter: drop-shadow(0 10px 24px rgba(54, 42, 38, 0.28));
-}
-
-.nc-portrait-zoom {
-  position: absolute;
-  left: 6px;
-  top: 6px;
-  pointer-events: auto;
-}
-
-.nc-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: #f4f1eeed;
-  border-radius: 16px;
-  overflow: hidden;
-  min-height: 0;
-}
-
-.nc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px 8px;
-}
-
-.nc-name { font-size: 14px; font-weight: 700; color: var(--text-bright); }
-
-.nc-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 12px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.nc-state {
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 18px 0;
-}
-
-.nc-msg {
-  max-width: 82%;
-  font-size: 13px;
-  line-height: 1.6;
-  padding: 8px 12px;
-  border-radius: 14px;
-  background: #fffdf8;
-  border: 1px solid rgba(232, 221, 208, 0.9);
-  color: var(--text-primary);
-  align-self: flex-start;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.nc-msg.is-mine {
-  align-self: flex-end;
-  background: rgba(224, 123, 108, 0.14);
-  border-color: transparent;
-  color: var(--text-bright);
-}
-
-.nc-msg.is-typing { color: var(--text-secondary); font-style: italic; }
-
-.nc-input-row {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px 12px;
-}
-
-.nc-input-row > :first-child { flex: 1; }
-
-.nc-zoom-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1100;
-}
-
-.nc-zoom {
-  position: relative;
-  height: min(86vh, 900px);
-  aspect-ratio: 9 / 16;
-  max-width: calc(100vw - 40px);
-  background: #efe9de;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
-  overflow: hidden;
-}
-
-.nc-zoom img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: bottom;
-}
-
-.nc-zoom-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+.npc-chat { position: absolute; inset: auto 0 0; height: min(680px, calc(100% - 108px)); z-index: 60; display: grid; grid-template-rows: minmax(0, 1fr); box-sizing: border-box; grid-template-columns: minmax(0, 1fr) minmax(330px, 540px) minmax(0, 1fr); align-items: end; gap: 8px; padding: 0 18px 24px; pointer-events: none; }
+.nc-portrait { pointer-events: auto; position: relative; margin: 0; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.nc-portrait img { width: 100%; height: calc(100% - 30px); object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
+.nc-portrait figcaption { margin-top: 8px; color: #fffaf1; text-shadow: 0 1px 4px #302822; font-size: 14px; }
+.nc-portrait-empty { width: 110px; height: 150px; display: grid; place-items: center; color: #8d7968; background: #fffaf1d9; border-radius: 60% 45% 14px 14px; font-size: 36px; }
+.nc-portrait-zoom { position: absolute; bottom: 38px; right: 8px; pointer-events: auto; }
+.nc-main { box-sizing: border-box; position: relative; isolation: isolate; height: min(420px, 100%); display: flex; flex-direction: column; min-height: 0; padding: 27px 30px 30px; pointer-events: auto; }
+.nc-dialog-shape { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; filter: drop-shadow(0 8px 18px #362a3826); pointer-events: none; }
+.nc-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 14px; }
+.nc-kicker { color: #a1846e; font-size: 10px; letter-spacing: .15em; }
+.nc-name { color: #59483d; font-size: 20px; font-weight: 700; margin-top: 4px; }
+.nc-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 16px; padding: 4px 4px 14px; }
+.nc-state { margin: auto; font-size: 13px; color: #947f6d; text-align: center; }
+.nc-msg { max-width: 92%; align-self: flex-start; color: #574a40; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.nc-speaker { font-size: 11px; color: #a08062; }
+.nc-msg p { margin: 2px 0 0; white-space: pre-wrap; }
+.nc-msg.is-mine { align-self: flex-end; text-align: right; }
+.nc-msg.is-mine .nc-speaker { color: #ca7567; }
+.nc-msg.is-typing { font-style: italic; color: #947f6d; }
+.nc-input-row { display: flex; gap: 8px; padding-top: 10px; }
+.nc-input-row > :first-child { flex: 1; min-width: 0; }
+.nc-zoom-mask { position: fixed; inset: 0; background: #0007; display: grid; place-items: center; z-index: 1100; pointer-events: auto; }
+.nc-zoom { position: relative; height: min(86vh, 900px); max-width: calc(100vw - 40px); }
+.nc-zoom img { width: 100%; height: 100%; object-fit: contain; }
+.nc-zoom-close { position: absolute; right: 10px; top: 10px; }
+@media (max-width: 700px) {
+  .npc-chat { height: calc(100% - 112px); grid-template-columns: 1fr 1fr; grid-template-rows: minmax(80px, 1fr) minmax(220px, 48%); gap: 0; padding: 0 6px 10px; }
+  .nc-main { grid-column: 1 / -1; grid-row: 2; width: 100%; height: 100%; padding: 23px 25px; }
+  .nc-portrait { grid-row: 1; height: 100%; padding: 0 8px; }
+  .nc-portrait-left { grid-column: 1; } .nc-portrait-right { grid-column: 2; }
+  .nc-head { padding-bottom: 6px; } .nc-name { font-size: 17px; }
+  .nc-portrait-empty { height: 85px; width: 70px; font-size: 24px; }
 }
 </style>

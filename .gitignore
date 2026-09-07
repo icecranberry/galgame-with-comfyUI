@@ -41,3 +41,6 @@ android-shell/app/src/main/res/drawable-nodpi/ic_launcher_image.*
 MaiBot/
 MaiBot-Container/
 HyperFrames/
+
+# Isolated M1 UI build (screenshots and verification report remain reviewable)
+output/hd2d-m1/ui-build/

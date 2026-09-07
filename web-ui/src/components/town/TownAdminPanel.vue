@@ -151,33 +151,39 @@
         <div v-if="detail && detail.type === 'player'" class="ap-body">
           <div class="ap-detail">
             <div class="ap-detail-name">我（玩家）的形象</div>
+            <p v-if="playerError" class="ap-player-error" role="alert">{{ playerError }}</p>
             <div class="ap-section">
               <div class="ap-section-title">立绘（900×1600，可抠除底色）</div>
               <TownImageEditor
                 v-if="playerKit.portrait?.status === 'ready'"
                 :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)"
                 :asset-id="playerKit.portrait.id"
+                @saved="loadPlayerKit"
                 :fit-height="300"
                 hint="点击底色或多余白色 · 可拖动检查"
               />
               <div v-else class="ap-empty is-small">还没有立绘，点下方生成。</div>
+              <div class="ap-actions">
+                <linshe-button size="sm" :loading="playerOperation === 'portrait'" :disabled="playerKitBusy" @click="regenPlayerKit('portrait')">{{ playerKit.portrait ? '重新生成我的立绘' : '生成我的立绘' }}</linshe-button>
+                <linshe-button v-if="playerKit.portrait?.id" variant="ghost" size="sm" :disabled="playerKitBusy" @click="openPromptEdit(playerKit.portrait)">编辑立绘提示词</linshe-button>
+              </div>
             </div>
             <div class="ap-section">
               <div class="ap-section-title">像素小人（正面 / 背面）</div>
               <div class="ap-sprite-row">
-                <template v-if="playerKit.sprites?.down?.status === 'ready'">
-                  <div class="ap-player-sprite">
-                    <TownImageEditor :src="playerKit.sprites.down.image_path + '?v=' + (playerKit.sprites.down.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.down.id" :fit-height="170" hint="正面：可拖动检查位置" />
+                <div v-for="direction in ['down', 'up']" :key="direction" class="ap-player-sprite">
+                  <div class="ap-section-title">{{ direction === 'down' ? '正面' : '背面' }}</div>
+                  <TownImageEditor v-if="playerKit.sprites?.[direction]?.status === 'ready'" :src="playerKit.sprites[direction].image_path + '?v=' + (playerKit.sprites[direction].meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites[direction].id" :fit-height="170" @saved="loadPlayerKit" />
+                  <div v-else class="ap-empty is-small">还没有{{ direction === 'down' ? '正面' : '背面' }}小人</div>
+                  <div class="ap-actions is-column">
+                    <linshe-button size="sm" :loading="playerOperation === direction" :disabled="playerKitBusy" @click="regenPlayerKit(direction)">重生成{{ direction === 'down' ? '正面' : '背面' }}小人</linshe-button>
+                    <linshe-button v-if="playerKit.sprites?.[direction]?.id" variant="ghost" size="sm" :disabled="playerKitBusy" @click="openPromptEdit(playerKit.sprites[direction])">编辑提示词</linshe-button>
                   </div>
-                  <div class="ap-player-sprite" v-if="playerKit.sprites?.up?.status === 'ready'">
-                    <TownImageEditor :src="playerKit.sprites.up.image_path + '?v=' + (playerKit.sprites.up.meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites.up.id" :fit-height="170" hint="背面" />
-                  </div>
-                </template>
-                <div v-else class="ap-empty is-small">还没有像素小人。</div>
+                </div>
               </div>
             </div>
             <div class="ap-actions is-column">
-              <linshe-button variant="primary" size="sm" :loading="playerKitBusy" @click="regenPlayerKit">
+              <linshe-button variant="primary" size="sm" :loading="playerOperation === 'kit'" :disabled="playerKitBusy" @click="regenPlayerKit('kit')">
                 重新生成整套形象（按我的用户配置）
               </linshe-button>
             </div>
@@ -320,7 +326,9 @@ const batchChars = ref(false)
 const resetting = ref(false)
 const newNpc = reactive({ name: '', job: '', persona: '' })
 const playerKit = reactive({ sprites: {}, portrait: null })
-const playerKitBusy = ref(false)
+const playerOperation = ref(null)
+const playerKitBusy = computed(() => playerOperation.value !== null)
+const playerError = ref('')
 const promptEdit = reactive({ open: false, id: null, title: '' })
 
 function openPromptEdit(asset) {
@@ -346,16 +354,19 @@ async function loadPlayerKit() {
   }
 }
 
-async function regenPlayerKit() {
-  playerKitBusy.value = true
+async function regenPlayerKit(part = 'kit') {
+  if (playerKitBusy.value) return
+  playerError.value = ''
+  playerOperation.value = part
   try {
-    const data = await api.regenerateTownPlayerKit()
+    const data = await (part === 'portrait' ? api.regenerateTownPlayerPortrait() : part === 'kit' ? api.regenerateTownPlayerKit() : api.regenerateTownPlayerSprite(part))
     playerKit.sprites = data.kit?.sprites || {}
     playerKit.portrait = data.kit?.portrait || null
   } catch (err) {
+    playerError.value = err?.message || '生成失败，请重试'
     console.warn('[town-admin] player kit regen failed:', err?.message)
   } finally {
-    playerKitBusy.value = false
+    playerOperation.value = null
   }
 }
 
@@ -381,7 +392,7 @@ const detailChar = computed(() => {
   return chars.value.find(c => c.id === detail.value.id) || null
 })
 
-const detailName = computed(() => detailNpc.value?.displayName || detailChar.value?.displayName || '详情')
+const detailName = computed(() => detail.value?.type === 'player' ? '我的形象管理' : detailNpc.value?.displayName || detailChar.value?.displayName || '详情')
 
 function spriteCount(npc) {
   return ['down', 'up'].filter(d => npc.sprites?.[d]?.status === 'ready').length
@@ -766,9 +777,12 @@ onMounted(() => {
 .ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
 .ap-sprite-row > :last-child { margin-left: auto; }
 
-.ap-player-sprite { width: 130px; }
+.ap-player-sprite { flex: 1; min-width: 0; width: 130px; }
 
+.ap-player-error { color: #b85343; font-size: 12px; }
 .ap-persona, .ap-appearance {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 12px;
   color: var(--text-primary);
   line-height: 1.7;

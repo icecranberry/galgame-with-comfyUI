@@ -1,0 +1,160 @@
+{
+  "render": {
+    "glError": 0,
+    "geometries": 15,
+    "textures": 14,
+    "pick": "agent",
+    "agent": "npc:34",
+    "loaded": 4
+  },
+  "agentMotion": {
+    "rise": 0.056134139938781136,
+    "contactDelta": 0,
+    "samples": 4,
+    "alphaToCoverage": true,
+    "mipmaps": true
+  },
+  "shadowContrast": {
+    "changedPixels": 22827,
+    "maxDelta": 105.66666666666667
+  },
+  "chunk": true,
+  "low": {
+    "p50": 16.699999999999818,
+    "p95": 16.800000000000182,
+    "shadows": true
+  },
+  "largeMap": {
+    "p50": 16.699999999999818,
+    "p95": 16.800000000000182,
+    "chunks": 16,
+    "agents": 26,
+    "geometries": 188,
+    "textures": 14,
+    "glError": 0
+  },
+  "disposed": {
+    "geometries": 0,
+    "textures": 0
+  },
+  "street": {
+    "proxies": 8,
+    "duplicateShadows": false,
+    "depthTexture": true,
+    "glError": 0
+  },
+  "propFeet": [
+    {
+      "id": "flower:a",
+      "v": 0.966796875,
+      "footHeight": 0,
+      "shadowFootError": 4.223935481327983e-7,
+      "alignmentError": 1.4210854715202004e-13,
+      "castShadow": true
+    },
+    {
+      "id": "flower:b",
+      "v": 0.966796875,
+      "footHeight": 0,
+      "shadowFootError": 4.223935481327983e-7,
+      "alignmentError": 1.1368683772161603e-13,
+      "castShadow": true
+    },
+    {
+      "id": "lamp:13:13",
+      "v": 0.96484375,
+      "footHeight": 0,
+      "shadowFootError": 1.5359765386647212e-8,
+      "alignmentError": 2.2737367544323206e-13,
+      "castShadow": true
+    },
+    {
+      "id": "bench",
+      "v": 0.95703125,
+      "footHeight": 0,
+      "shadowFootError": 4.3316012185062867e-7,
+      "alignmentError": 6.261657858885883e-14,
+      "castShadow": true
+    }
+  ],
+  "occlusion": {
+    "front": {
+      "building": 100,
+      "character": 101,
+      "fade": 1
+    },
+    "orders": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "depthTest": false,
+    "behind": {
+      "building": 101,
+      "character": 100,
+      "fade": 0.32
+    }
+  },
+  "behindPick": "me",
+  "playerManagement": [
+    "/api/town/player/portrait",
+    "/api/town/player/sprites/down",
+    "/api/town/player/sprites/up"
+  ],
+  "dialogMotion": {
+    "fadeDuration": "0.3s",
+    "portraits": [
+      "0.3s",
+      "0.3s"
+    ],
+    "panelDuration": "0.3s"
+  },
+  "savedMap": {
+    "objects": [
+      {
+        "id": "a",
+        "assetId": 3,
+        "x": 4,
+        "y": 6
+      },
+      {
+        "id": "b",
+        "assetId": 3,
+        "x": 10,
+        "y": 6
+      },
+      {
+        "assetId": 3,
+        "x": 10,
+        "y": 10,
+        "flip": false
+      }
+    ],
+    "locations": []
+  },
+  "page": {
+    "starts": 1,
+    "stops": 0,
+    "moves": [
+      {
+        "x": 10,
+        "y": 9
+      }
+    ]
+  },
+  "lifecycle": {
+    "starts": 21,
+    "stops": 20,
+    "canvases": 2
+  },
+  "errors": []
+}

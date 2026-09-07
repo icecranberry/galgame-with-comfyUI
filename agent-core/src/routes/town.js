@@ -35,7 +35,7 @@ import {
   generateNpcSprites, generateNpcPortrait, generateCharacterPortrait,
   regenerateNpcPersonaCard,
   rerollNpc, getNpcChatHistory, chatWithNpc, inviteNpcAsCharacter,
-  getPlayerKit, regeneratePlayerKit, regeneratePlayerSprite,
+  getPlayerKit, regeneratePlayerKit, regeneratePlayerSprite, regeneratePlayerPortrait,
 } from '../services/town/townNpcService.js';
 
 const router = Router();
@@ -412,6 +412,14 @@ router.post('/player/kit', async (req, res) => {
     res.json(await regeneratePlayerKit());
   } catch (err) {
     res.status(500).json({ error: err?.message || '生成失败' });
+  }
+});
+
+router.post('/player/portrait', async (req, res) => {
+  try {
+    res.json(await regeneratePlayerPortrait(req.body || {}));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '重绘立绘失败' });
   }
 });
 

@@ -2125,3 +2125,8 @@ export function resetTownWorld() {
 export function moveTownPlayerDir(dx, dy) {
   return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy }))
 }
+
+
+export function regenerateTownPlayerPortrait(overrides = {}) {
+  return jsonRequest(`${BASE}/town/player/portrait`, townJson('POST', overrides))
+}

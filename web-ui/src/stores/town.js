@@ -50,8 +50,10 @@ export const useTownStore = defineStore('town', () => {
     // 服务器时钟 → 本地时钟
     const startedAtLocal = (d.startedAt ?? Date.now()) - serverOffset.value
     if (d.charId === 'me') {
+      if (d.revision != null && d.revision <= (snap.player?.moveRevision || 0)) return
       snap.player = {
         ...snap.player,
+        moveRevision: d.revision ?? snap.player?.moveRevision ?? 0,
         x: d.from?.x ?? snap.player?.x,
         y: d.from?.y ?? snap.player?.y,
         path: d.path || [],

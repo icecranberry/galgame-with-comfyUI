@@ -11,6 +11,7 @@
  * 进程重启后由「作息/日程 + 当前时刻」重建（town_agent_state 仅是恢复快照）。
  * 居民身份：agentKey = 'npc:{id}'（轻量居民）| 'char:{id}'（入住角色）；玩家恒为 'me'。
  */
+import { playerRouteStart, applyPlayerRoute } from './playerMovement.js';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
@@ -391,7 +392,7 @@ function advancePlayer(now) {
     persistPlayer();
   } else {
     const idx = Math.max(0, Math.floor(cells));
-    const step = p.path[Math.min(idx, p.path.length - 1)];
+    const step = idx ? p.path[idx - 1] : (p.moveFrom || p);
     p.x = step.x; p.y = step.y;
   }
 }
@@ -1137,9 +1138,12 @@ export function getTownState() {
     encountersActive: [...state.encounters.values()].map(e => ({ id: e.id, a: e.a, b: e.b, locationId: e.locationId })),
     player: state.player
       ? {
+        agentKey: 'me', kind: 'player',
         displayName: state.player.displayName,
+        moveRevision: state.player.moveRevision || 0,
         sprites: state.player.sprites,
-        x: state.player.x, y: state.player.y,
+        x: state.player.path?.length ? state.player.moveFrom?.x ?? state.player.x : state.player.x,
+        y: state.player.path?.length ? state.player.moveFrom?.y ?? state.player.y : state.player.y,
         path: state.player.path || [],
         speed: state.player.speed,
         startedAt: state.player.path ? state.player.moveStartedAt : now,
@@ -1158,15 +1162,12 @@ export function movePlayerTo(x, y) {
   }
   const now = Date.now();
   advancePlayer(now);
-  const from = { x: state.player.x, y: state.player.y };
-  const path = (from.x === x && from.y === y) ? [] : findPath(state.map.walkGrid, from, { x, y });
-  if (path === null) return { ok: false, error: '目标位置不可到达' };
-
-  state.player.x = from.x;
-  state.player.y = from.y;
-  state.player.path = path;
-  state.player.moveStartedAt = now;
-  broadcastTownMove({ charId: 'me', from, path, speed: state.player.speed, startedAt: now });
+  const start = playerRouteStart(state.player, now);
+  const tail = (start.cell.x === x && start.cell.y === y) ? [] : findPath(state.map.walkGrid, start.cell, { x, y });
+  if (tail === null) return { ok: false, error: '目标位置不可到达' };
+  applyPlayerRoute(state.player, start, tail);
+  const path = state.player.path;
+  broadcastTownMove({ charId: 'me', revision: state.player.moveRevision, from: start.from, path, speed: state.player.speed, startedAt: start.startedAt });
   return { ok: true, pathLength: path.length };
 }
 
@@ -1176,11 +1177,11 @@ export function movePlayerDir(dx, dy) {
   if (![0, 1, -1].includes(dx) || ![0, 1, -1].includes(dy)) return { ok: false, error: 'invalid direction' };
   const now = Date.now();
   advancePlayer(now);
-  const target = { x: state.player.x + dx, y: state.player.y + dy };
+  const start = playerRouteStart(state.player, now);
+  const target = { x: start.cell.x + dx, y: start.cell.y + dy };
   if (!isWalkable(state.map.walkGrid, target.x, target.y)) return { ok: false, error: 'blocked' };
-  state.player.path = [target];
-  state.player.moveStartedAt = now;
-  broadcastTownMove({ charId: 'me', from: { x: state.player.x, y: state.player.y }, path: [target], speed: state.player.speed, startedAt: now });
+  applyPlayerRoute(state.player, start, dx || dy ? [target] : []);
+  broadcastTownMove({ charId: 'me', revision: state.player.moveRevision, from: start.from, path: state.player.path, speed: state.player.speed, startedAt: start.startedAt });
   return { ok: true };
 }
 

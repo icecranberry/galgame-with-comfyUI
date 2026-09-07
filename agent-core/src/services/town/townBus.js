@@ -13,8 +13,8 @@
  */
 import { broadcast } from '../unifiedStreamBus.js';
 
-export function broadcastTownMove({ charId, from, path, speed, startedAt }) {
-  broadcast('town_move', { charId, from, path, speed, startedAt });
+export function broadcastTownMove({ charId, from, path, speed, startedAt, revision }) {
+  broadcast('town_move', { charId, from, path, speed, startedAt, ...(revision != null ? { revision } : {}) });
 }
 
 export function broadcastTownBubble({ charId, encounterId = null, text, ttl }) {
