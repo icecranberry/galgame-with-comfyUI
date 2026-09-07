@@ -22,12 +22,14 @@ import {
 } from '../services/town/townService.js';
 import {
   listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, getAssetById, cropAssetImage, refineAssetWithHires,
+  updateAssetGenerationConfig,
 } from '../services/town/townAssetService.js';
+import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
-  generateLayout, rerollLayout, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
+  generateLayout, rerollLayout, relayoutWorld, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
   regenerateNpcRoster,
 } from '../services/town/townInitService.js';
 import {
@@ -101,6 +103,28 @@ router.post('/assets/:id/regenerate', async (req, res) => {
   }
 });
 
+router.patch('/assets/:id/generation', (req, res) => {
+  try {
+    res.json({ asset: updateAssetGenerationConfig(parseInt(req.params.id, 10), req.body || {}) });
+  } catch (err) {
+    res.status(err?.message?.includes('not found') ? 404 : 400).json({ error: err?.message || '保存生成配置失败' });
+  }
+});
+router.post('/assets/:id/regenerate-prompt', async (req, res) => {
+  try {
+    const asset = getAssetById(parseInt(req.params.id, 10));
+    if (!asset) return res.status(404).json({ error: '素材不存在' });
+    const prompt = await regenerateAssetPrompt({
+      currentPrompt: asset.source_prompt,
+      requirement: req.body?.requirement,
+      kind: asset.kind,
+      name: asset.name,
+    });
+    res.json({ prompt });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '提示词改写失败' });
+  }
+});
 router.delete('/assets/:id', (req, res) => {
   res.json(deleteAsset(parseInt(req.params.id, 10)));
 });
@@ -394,6 +418,18 @@ router.get('/settings', (req, res) => {
 
 router.put('/settings', (req, res) => {
   res.json(updateTownSettings(req.body || {}));
+});
+
+// 管理面板：复用素材与居民重新生成布局
+router.post('/map/relayout', async (req, res) => {
+  try {
+    const result = await relayoutWorld();
+    if (!result?.ok) return res.status(400).json({ error: result?.error || '重新布局失败' });
+    reloadTown();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '重新布局失败' });
+  }
 });
 
 router.delete('/world', (req, res) => {

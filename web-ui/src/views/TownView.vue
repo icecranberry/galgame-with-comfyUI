@@ -1,5 +1,15 @@
 <template>
+  <div class="town-shell">
   <div class="town-view" ref="viewEl">
+    <Transition name="town-modal">
+      <div v-if="!resourcesReady && !loadError" class="town-boot-mask" role="status" aria-live="polite" aria-busy="true">
+        <div class="town-boot-stage">
+          <span class="town-boot-loader" aria-hidden="true"></span>
+          <p class="town-boot-title">世界加载中</p>
+          <p class="town-boot-desc">正在准备地图、居民和素材…</p>
+        </div>
+      </div>
+    </Transition>
     <canvas
       ref="canvasEl"
       class="town-canvas"
@@ -55,7 +65,8 @@
     </div>
 
     <!-- 编辑工具条 -->
-    <template v-if="editing">
+    <Transition name="town-editor">
+      <div v-if="editing" class="town-editor-ui">
       <div class="town-toolbar">
         <div
           v-for="tool in TOOLS" :key="tool.id"
@@ -77,23 +88,18 @@
           >{{ tab.label }}</linshe-button>
         </div>
         <div class="tl-grid">
-          <div
+          <TownAssetThumb
             v-for="asset in libAssets" :key="asset.id"
-            class="tl-item" :class="{ 'is-selected': selectedAssetId === asset.id, 'is-pending': asset.status !== 'ready' }"
-            role="button" tabindex="0"
-            :title="`${asset.name}（${asset.status === 'ready' ? '点击选用' : asset.status === 'pending' ? '生成中…' : '生成失败'}）`"
+            class="tl-item"
+            :asset="asset"
+            :selected="selectedAssetId === asset.id"
+            :show-name="true"
+            :deletable="true"
+            click-title="点击选用"
             @click="selectAsset(asset)"
-            @keydown.enter="selectAsset(asset)"
-          >
-            <img v-if="asset.status === 'ready'" :src="asset.image_path + `?v=` + (asset.meta?.updatedAt ?? 0)" alt="">
-            <span v-else class="tl-item-state">{{ asset.status === 'pending' ? '⏳' : '⚠️' }}</span>
-            <span class="tl-item-name">{{ asset.name }}</span>
-            <span v-if="asset.status === 'ready'" class="tl-item-ops">
-              <span class="tl-op" role="button" title="编辑提示词并重生成" @click.stop="openPromptEdit(asset)">✎</span>
-              <span class="tl-op" role="button" title="重新生成" @click.stop="regenAsset(asset)">↻</span>
-              <span class="tl-op is-danger" role="button" title="删除" @click.stop="removeAsset(asset)">✕</span>
-            </span>
-          </div>
+            @edit="openAssetManager(asset)"
+            @delete="requestDeleteAsset(asset)"
+          />
           <div class="tl-generate">
             <linshe-input v-model="genDesc" size="sm" placeholder="描述一个新素材…" @keyup.enter="generateAsset" />
             <linshe-button variant="secondary" size="sm" :loading="generating" @click="generateAsset">AI 生成</linshe-button>
@@ -101,25 +107,32 @@
         </div>
       </div>
 
-      <div class="town-edit-actions">
-        <linshe-button variant="primary" size="sm" :loading="savingMap" @click="saveEditor">保存地图</linshe-button>
-        <linshe-button variant="ghost" size="sm" @click="cancelEdit">放弃</linshe-button>
-      </div>
-
-      <!-- POI 绑定小窗 -->
-      <div v-if="poiEdit" class="town-poi-form">
-        <div class="poi-title">{{ poiEdit.objectId ? '绑定地点' : '新地点' }}</div>
-        <linshe-input v-model="poiEdit.name" size="sm" placeholder="地点名称" />
-        <linshe-input v-model="poiEdit.ambient" size="sm" placeholder="环境氛围（如：咖啡香四溢）" />
-        <linshe-input v-model="poiEdit.aliasText" size="sm" placeholder="别名（逗号分隔，日程匹配用）" />
-        <div class="row">
-          <linshe-button variant="ghost" size="sm" @click="poiEdit = null">取消</linshe-button>
-          <linshe-button variant="primary" size="sm" @click="savePoiEdit">保存地点</linshe-button>
+      <div class="town-edit-actions" role="toolbar" aria-label="地图编辑操作">
+        <div class="town-edit-card">
+          <span class="town-edit-state" aria-hidden="true">地图编辑中</span>
+          <linshe-button variant="primary" size="md" :loading="savingMap" @click="saveEditor">保存地图</linshe-button>
+          <linshe-button variant="secondary" size="md" @click="cancelEdit">放弃</linshe-button>
         </div>
       </div>
 
-      <div class="town-hint is-edit">{{ currentToolHint }}</div>
-    </template>
+      <!-- POI 绑定小窗 -->
+      <Transition name="town-pop">
+        <div v-if="poiEdit" class="town-poi-form">
+          <div class="poi-title">{{ poiEdit.objectId ? '绑定地点' : '新地点' }}</div>
+          <linshe-input v-model="poiEdit.name" size="sm" placeholder="地点名称" />
+          <linshe-input v-model="poiEdit.ambient" size="sm" placeholder="环境氛围（如：咖啡香四溢）" />
+          <linshe-input v-model="poiEdit.aliasText" size="sm" placeholder="别名（逗号分隔，日程匹配用）" />
+          <div class="row">
+            <linshe-button variant="ghost" size="sm" @click="poiEdit = null">取消</linshe-button>
+            <linshe-button variant="primary" size="sm" @click="savePoiEdit">保存地点</linshe-button>
+          </div>
+        </div>
+      </Transition>
+
+        <div class="town-hint is-edit">{{ currentToolHint }}</div>
+      </div>
+    </Transition>
+
 
     <!-- 角色资料卡（入住角色；有立绘时立绘跳出展示） -->
     <Teleport to="body">
@@ -197,15 +210,32 @@
         />
       </div>
     </Transition>
-    <TownAdminPanel v-if="showAdmin" @close="showAdmin = false" />
+    <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
     <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
-    <TownAssetPromptDialog
-      :visible="promptEdit.open"
-      :asset-id="promptEdit.id"
-      :title="promptEdit.title"
-      @close="promptEdit.open = false"
-      @regenerated="onPromptRegenerated"
-    />
+
+    <Teleport to="body">
+      <Transition name="town-modal">
+        <div v-if="pendingDeleteAsset" class="town-card-mask" @click.self="cancelDeleteAsset">
+          <div class="town-card town-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认删除素材">
+            <div class="town-confirm-title">删除素材</div>
+            <p class="town-confirm-text">确定删除「{{ pendingDeleteAsset.name || '未命名素材' }}」？删除后无法恢复。</p>
+            <p v-if="deleteError" class="town-confirm-error">{{ deleteError }}</p>
+            <div class="town-confirm-actions">
+              <linshe-button variant="ghost" size="sm" :disabled="deleting" @click="cancelDeleteAsset">取消</linshe-button>
+              <linshe-button variant="danger" size="sm" :loading="deleting" @click="confirmDeleteAsset">确认删除</linshe-button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+    <TownAssetManager
+      :open="assetManager.open"
+      :asset="assetManager.asset"
+      title="素材管理"
+      :regenerate="regenerateManagedAsset"
+      @close="assetManager.open = false"
+      @updated="onManagedAssetUpdated"
+    />  </div>
   </div>
 </template>
 
@@ -224,10 +254,11 @@ import { HW, HH, cellTopWorld, cellCenterWorld, worldToCell, objectRect, buildBl
 import { canvasGroundImage } from '../town/renderers/groundTexture.js'
 import { adaptAgent, assetUrl } from '../town/renderers/TownSceneAdapter.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import TownAssetThumb from '../components/town/TownAssetThumb.vue'
+import TownAssetManager from '../components/town/TownAssetManager.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
-import TownAssetPromptDialog from '../components/town/TownAssetPromptDialog.vue'
 
 const town = useTownStore()
 const chat = useChatStore()
@@ -241,6 +272,7 @@ const GROUND_ANCHOR_Y = 0.5
 const viewEl = ref(null)
 const canvasEl = ref(null)
 const loadError = ref('')
+const resourcesReady = ref(false)
 
 let ctx = null
 let rafId = 0
@@ -308,12 +340,20 @@ function getImg(url) {
   if (!entry) {
     const img = new Image()
     entry = { img, ok: false }
-    img.onload = () => { entry.ok = true; staticDirty = true }
-    img.onerror = () => { entry.ok = false; entry.failed = true }
+    entry.ready = new Promise(resolve => {
+      img.onload = () => { entry.ok = true; staticDirty = true; resolve(true) }
+      img.onerror = () => { entry.ok = false; entry.failed = true; resolve(false) }
+    })
     img.src = url
     imgCache.set(url, entry)
   }
   return entry.ok ? entry.img : null
+}
+
+function preloadImage(url) {
+  if (!url) return Promise.resolve()
+  getImg(url)
+  return imgCache.get(url)?.ready || Promise.resolve()
 }
 function assetById(assetId) {
   return (editing.value && townAssets.value.find(a => a.id === assetId)) || renderMap.value?.assets?.find(a => a.id === assetId) || null
@@ -367,7 +407,10 @@ const genDesc = ref('')
 const generating = ref(false)
 const savingMap = ref(false)
 const townAssets = ref([])
-const promptEdit = reactive({ open: false, id: null, title: '' })
+const assetManager = reactive({ open: false, asset: null })
+const pendingDeleteAsset = ref(null)
+const deleting = ref(false)
+const deleteError = ref('')
 
 const editLayers = ref(null)
 const editLocations = ref([])
@@ -693,19 +736,49 @@ async function regenAsset(asset) {
   }
 }
 
-function openPromptEdit(asset) {
-  promptEdit.id = asset.id
-  promptEdit.title = `「${asset.name}」编辑提示词并重生成`
-  promptEdit.open = true
+function openAssetManager(asset) {
+  if (asset?.status !== 'ready') return
+  assetManager.asset = asset
+  assetManager.open = true
 }
 
-function onPromptRegenerated() {
+function regenerateManagedAsset(asset) {
+  return api.regenerateTownAsset(asset.id, {}).then(data => data.asset)
+}
+
+function onManagedAssetUpdated() {
   fetchAssetsList()
   town.fetchMap().catch(() => {})
 }
 
-function removeAsset(asset) {
-  api.deleteTownAsset(asset.id).then(fetchAssetsList).catch(err => console.warn('[town] delete failed:', err?.message))
+function requestDeleteAsset(asset) {
+  if (!asset?.id || deleting.value) return
+  pendingDeleteAsset.value = asset
+  deleteError.value = ''
+}
+
+function cancelDeleteAsset() {
+  if (deleting.value) return
+  pendingDeleteAsset.value = null
+  deleteError.value = ''
+}
+
+async function confirmDeleteAsset() {
+  const asset = pendingDeleteAsset.value
+  if (!asset?.id || deleting.value) return
+  deleting.value = true
+  deleteError.value = ''
+  try {
+    await api.deleteTownAsset(asset.id)
+    if (selectedAssetId.value === asset.id) selectedAssetId.value = null
+    pendingDeleteAsset.value = null
+    await fetchAssetsList()
+  } catch (err) {
+    deleteError.value = err?.message || '删除失败，请重试'
+    console.warn('[town] delete failed:', err?.message)
+  } finally {
+    deleting.value = false
+  }
 }
 
 async function generateAsset() {
@@ -1099,9 +1172,9 @@ function draw(nowMs) {
 
 function relayout() {
   if (!viewEl.value || !canvasEl.value) return
-  const rect = viewEl.value.getBoundingClientRect()
-  cssW = Math.max(200, rect.width)
-  cssH = Math.max(200, rect.height)
+  // Layout dimensions stay in game coordinates even when the phone rotates the view.
+  cssW = Math.max(200, viewEl.value.clientWidth)
+  cssH = Math.max(200, viewEl.value.clientHeight)
   const dpr = window.devicePixelRatio || 1
   canvasEl.value.width = Math.round(cssW * dpr)
   canvasEl.value.height = Math.round(cssH * dpr)
@@ -1121,6 +1194,78 @@ function centerCamera() {
   followPlayer = true
 }
 
+function waitForRenderMap(timeout = 6000) {
+  if (renderMap.value) return Promise.resolve(true)
+  return new Promise(resolve => {
+    const startedAt = Date.now()
+    const check = () => {
+      if (renderMap.value) return resolve(true)
+      if (Date.now() - startedAt >= timeout) return resolve(false)
+      setTimeout(check, 50)
+    }
+    check()
+  })
+}
+
+function nextFrames(count = 2) {
+  return new Promise(resolve => {
+    let remaining = count
+    const tick = () => {
+      if (--remaining <= 0) resolve()
+      else requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
+
+function minimumBootDelay() {
+  return new Promise(resolve => setTimeout(resolve, 300))
+}
+
+function collectWorldResourceUrls() {
+  const m = renderMap.value
+  if (!m) return []
+  const urls = []
+  const usedAssets = new Set()
+  const layers = m.layers || {}
+  for (const layer of [layers.ground, layers.road]) {
+    for (const row of layer || []) { for (const id of row || []) if (id) usedAssets.add(id) }
+  }
+  for (const obj of layers.objects || []) if (obj?.assetId) usedAssets.add(obj.assetId)
+  const assetsById = new Map((m.assets || []).map(asset => [asset.id, asset]))
+  for (const id of usedAssets) {
+    const asset = assetsById.get(id)
+    if (asset?.status === 'ready') urls.push(assetUrl(asset))
+  }
+  for (const agent of [...agents.value, ...(player.value ? [player.value] : [])]) {
+    for (const spriteUrl of Object.values(agent.sprites || {})) urls.push(spriteUrl)
+    urls.push(agent.standingUrl, agent.avatarPath)
+  }
+  return [...new Set(urls.filter(Boolean))]
+}
+
+async function preloadWorldResources() {
+  await Promise.allSettled(collectWorldResourceUrls().map(preloadImage))
+}
+
+async function prepareWorldResources() {
+  resourcesReady.value = false
+  try {
+    await selectRenderer()
+    const snapshot = await town.fetchState()
+    if (snapshot?.initialized) {
+      await waitForRenderMap()
+      await preloadWorldResources()
+    }
+    centerCamera()
+    await Promise.all([nextFrames(2), minimumBootDelay()])
+  } catch (err) {
+    loadError.value = '世界暂时联系不上：' + (err?.message || '未知错误')
+  } finally {
+    resourcesReady.value = true
+  }
+}
+
 function onVisibility() {
   if (document.hidden) clearMovementKeys()
   if (!document.hidden && rafId === 0) rafId = requestAnimationFrame(draw)
@@ -1128,9 +1273,7 @@ function onVisibility() {
 
 function retryLoad() {
   loadError.value = ''
-  town.fetchState().catch(err => {
-    loadError.value = '世界暂时联系不上：' + (err?.message || '未知错误')
-  })
+  return prepareWorldResources()
 }
 
 watch(renderMap, (m, old) => {
@@ -1150,7 +1293,6 @@ watch(townAssets, () => { staticDirty = true }, { deep: true })
 onMounted(async () => {
   ctx = canvasEl.value.getContext('2d')
   canvasRenderer = createCanvasTownRenderer({ getImg, agentFacing, isImagePending: url => { const entry = imgCache.get(url); return !!entry && !entry.ok && !entry.failed } })
-  selectRenderer()
   town.startTownStream()
   relayout()
   resizeObserver = new ResizeObserver(() => relayout())
@@ -1160,13 +1302,7 @@ onMounted(async () => {
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', clearMovementKeys)
   rafId = requestAnimationFrame(draw)
-
-  try {
-    await town.fetchState()
-    centerCamera()
-  } catch (err) {
-    loadError.value = '世界暂时联系不上：' + (err?.message || '未知错误')
-  }
+  await prepareWorldResources()
 })
 
 onBeforeUnmount(() => {
@@ -1217,13 +1353,26 @@ async function goChat(characterId) {
   .npc-stage-enter-active :deep(.nc-main), .npc-stage-leave-active :deep(.nc-main) { transition: none; transform: none; }
 }
 
+.town-shell { position: absolute; inset: 0; overflow: clip; container-type: size; }
 .town-view {
+  container: town-world / inline-size;
   position: absolute;
   inset: 0;
   overflow: clip;
   background: #dfe5d0;
 }
 
+@media (pointer: coarse) and (max-width: 900px) and (orientation: portrait) {
+  .town-view {
+    inset: auto;
+    top: 0;
+    left: 100%;
+    width: 100cqh;
+    height: 100cqw;
+    transform-origin: 0 0;
+    transform: rotate(90deg);
+  }
+}
 .town-quality { width: 132px; }
 .town-render-notice { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: #fffaf2; color: #796957; font-size: 12px; }
 .town-canvas {
@@ -1238,6 +1387,66 @@ async function goChat(characterId) {
 .town-canvas.is-hoverable { cursor: pointer; }
 .town-canvas.is-editing { cursor: cell; }
 .town-canvas.is-panning { cursor: grabbing; }
+
+/* ── 进入世界时的资源就绪遮罩 ── */
+.town-boot-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1050;
+  display: grid;
+  place-items: center;
+  background: #f7f4ef;
+}
+
+.town-boot-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(260px, calc(100% - 48px));
+  text-align: center;
+}
+
+.town-boot-loader {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border: 2px solid rgba(224, 123, 108, 0.16);
+  border-radius: 50%;
+  animation: town-boot-spin 1.1s linear infinite;
+}
+
+.town-boot-loader::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  transform: translateX(-50%);
+}
+
+.town-boot-title {
+  margin: 22px 0 0;
+  color: var(--text-bright);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.town-boot-desc {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+@keyframes town-boot-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .town-boot-loader { animation-duration: 2.5s; }
+}
 
 /* ── 顶栏浮层 ── */
 .town-topbar {
@@ -1275,7 +1484,7 @@ async function goChat(characterId) {
 .town-chip.is-warn { color: var(--accent-hover); }
 
 .town-topbar-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
-@media (max-width: 700px) {
+@container town-world (max-width: 700px) {
   .town-topbar { flex-wrap: wrap; width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
   .town-chips { flex: 1; }
   .town-topbar-actions { width: 100%; flex-wrap: wrap; }
@@ -1298,6 +1507,7 @@ async function goChat(characterId) {
 }
 
 .town-hint.is-edit { bottom: 14px; }
+.town-hint.is-edit { bottom: 76px; }
 
 /* ── 未开镇 ── */
 .town-empty {
@@ -1363,7 +1573,7 @@ async function goChat(characterId) {
   position: absolute;
   left: 14px;
   top: 64px;
-  bottom: 64px;
+  bottom: 84px;
   width: 264px;
   display: flex;
   flex-direction: column;
@@ -1398,10 +1608,6 @@ async function goChat(characterId) {
   border: 1.5px solid transparent;
   cursor: pointer;
   overflow: hidden;
-  aspect-ratio: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .tl-item:hover { border-color: rgba(224, 123, 108, 0.35); }
@@ -1466,13 +1672,60 @@ async function goChat(characterId) {
 
 .tl-generate > :first-child { flex: 1; }
 
+.asset-viewer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.asset-viewer-panel {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(88vh, 780px);
+  overflow-y: auto;
+  background: #f4f1eeed;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
+  padding: 14px;
+}
+
+.asset-viewer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.asset-viewer-title { font-size: 14px; font-weight: 700; color: var(--text-bright); }
+.asset-viewer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
 /* ── 编辑动作 ── */
+.town-editor-ui { position: absolute; inset: 0; pointer-events: none; }
+.town-editor-ui > * { pointer-events: auto; }
 .town-edit-actions {
   position: absolute;
-  top: 64px;
-  right: 66px;
+  left: 50%;
+  bottom: 14px;
+  z-index: 40;
+  transform: translateX(-50%);
   display: flex;
   gap: 8px;
+}
+
+.town-edit-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(252, 250, 247, 0.96);
+  border: 1px solid rgba(232, 221, 208, 0.85);
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(54, 42, 38, 0.14);
+}
+
+.town-edit-state {
+  margin-right: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-hover);
+  white-space: nowrap;
 }
 
 /* ── POI 编辑小窗 ── */
@@ -1517,6 +1770,12 @@ async function goChat(characterId) {
   justify-content: center;
   z-index: 1000;
 }
+
+.town-delete-confirm { max-width: 320px; }
+.town-confirm-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
+.town-confirm-text { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.town-confirm-error { margin: 8px 0 0; font-size: 12px; color: #b85343; }
+.town-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 .town-card {
   width: 300px;
@@ -1635,10 +1894,56 @@ async function goChat(characterId) {
 .town-modal-enter-from .town-card,
 .town-modal-leave-to .town-card { transform: scale(0.96); }
 
+.town-editor-enter-active,
+.town-editor-leave-active { transition: opacity 0.28s ease; }
+
+.town-editor-enter-active .town-toolbar,
+.town-editor-leave-active .town-toolbar,
+.town-editor-enter-active .town-library,
+.town-editor-leave-active .town-library,
+.town-editor-enter-active .town-edit-actions,
+.town-editor-leave-active .town-edit-actions,
+.town-editor-enter-active .town-hint.is-edit,
+.town-editor-leave-active .town-hint.is-edit { transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1); }
+
+.town-editor-enter-from,
+.town-editor-leave-to { opacity: 0; }
+
+.town-editor-enter-from .town-toolbar,
+.town-editor-leave-to .town-toolbar { transform: translateX(16px); }
+
+.town-editor-enter-from .town-library,
+.town-editor-leave-to .town-library { transform: translateX(-16px); }
+
+.town-editor-enter-from .town-edit-actions,
+.town-editor-leave-to .town-edit-actions { transform: translate(-50%, 16px); }
+
+.town-pop-enter-active,
+.town-pop-leave-active { transition: opacity 0.24s ease, transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1); }
+
+.town-pop-enter-from,
+.town-pop-leave-to { opacity: 0; transform: translateY(8px); }
+
 @media (max-width: 767px) {
   .town-topbar { top: 8px; padding: 6px 12px; gap: 8px; }
   .town-title { font-size: 14px; }
   .town-hint { bottom: 10px; }
   .town-library { width: 220px; }
+  .town-edit-card { max-width: calc(100vw - 24px); gap: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .town-editor-enter-active,
+  .town-editor-leave-active,
+  .town-editor-enter-active .town-toolbar,
+  .town-editor-leave-active .town-toolbar,
+  .town-editor-enter-active .town-library,
+  .town-editor-leave-active .town-library,
+  .town-editor-enter-active .town-edit-actions,
+  .town-editor-leave-active .town-edit-actions,
+  .town-editor-enter-active .town-hint.is-edit,
+  .town-editor-leave-active .town-hint.is-edit,
+  .town-pop-enter-active,
+  .town-pop-leave-active { transition-duration: 0.001ms; }
 }
 </style>

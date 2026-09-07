@@ -220,18 +220,25 @@ export class Hd2dTownRenderer {
       }
     }
     if (!map && isAgent) {
-      const name = dto.agent.displayName || '我'
-      if (mesh.userData.placeholder?.name !== name) {
-        mesh.userData.placeholder?.texture.dispose()
-        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64
-        const ctx = canvas.getContext('2d')
-        ctx.fillStyle = '#e07b6c'; ctx.beginPath(); ctx.arc(32,32,30,0,Math.PI*2); ctx.fill()
-        ctx.strokeStyle = '#fffaf2'; ctx.lineWidth = 3; ctx.stroke()
-        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(name.charAt(0),32,33)
-        const texture = new T.CanvasTexture(canvas); texture.colorSpace = T.SRGBColorSpace
-        mesh.userData.placeholder = { name, texture, ready: true }
+      // Keep the previous facing visible while the newly selected sprite is loading.
+      // dto.urls only contains the current facing, so the old map is not among candidates.
+      if (mesh?.userData.entry?.ready) {
+        entry = mesh.userData.entry
+        map = entry.texture
+      } else {
+        const name = dto.agent.displayName || '我'
+        if (mesh.userData.placeholder?.name !== name) {
+          mesh.userData.placeholder?.texture.dispose()
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64
+          const ctx = canvas.getContext('2d')
+          ctx.fillStyle = '#e07b6c'; ctx.beginPath(); ctx.arc(32,32,30,0,Math.PI*2); ctx.fill()
+          ctx.strokeStyle = '#fffaf2'; ctx.lineWidth = 3; ctx.stroke()
+          ctx.fillStyle = '#ffffff'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(name.charAt(0),32,33)
+          const texture = new T.CanvasTexture(canvas); texture.colorSpace = T.SRGBColorSpace
+          mesh.userData.placeholder = { name, texture, ready: true }
+        }
+        entry = mesh.userData.placeholder; map = entry.texture
       }
-      entry = mesh.userData.placeholder; map = entry.texture
     }
     if (mesh.material.map !== map) {
       mesh.material.map = map; mesh.material.needsUpdate = true
@@ -315,7 +322,12 @@ export class Hd2dTownRenderer {
   }
   updateAgents(frames) {
     const live = new Set()
-    for (const dto of frames) { live.add(dto.agent.agentKey); this.updateCard(this.agents, dto.agent.agentKey, dto, true) }
+    for (const dto of frames) {
+      live.add(dto.agent.agentKey)
+      // Turn changes the current sprite URL; warm both directions so the first back-view load cannot flash the placeholder.
+      for (const url of Object.values(dto.agent.sprites || {})) this.texture(url, 'linear')
+      this.updateCard(this.agents, dto.agent.agentKey, dto, true)
+    }
     for (const [key, mesh] of this.agents) if (!live.has(key)) { freeMesh(mesh); this.agents.delete(key) }
   }
   project(point) {

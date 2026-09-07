@@ -821,6 +821,7 @@ function initSchema(db) {
 
   // 系统设置迁移: 清理历史遗留键（idempotent，需在种子注入前执行）
   migrateSystemSettings(db);
+  migrateTownGenerationSettings(db);
 
   // 迁移: 绘图知识词库保留可直接注入的结构化 tag。
   migrateImagePromptKnowledgeSchema(db);
@@ -2007,7 +2008,38 @@ const SETTING_TO_CONFIG = {
   comfy_hires_max_size:           { obj: 'comfyui',  key: 'hiresMaxSize',     type: 'int' },
   comfy_hires_artist_mode:        { obj: 'comfyui',  key: 'hiresArtistMode',  type: 'string' },
   comfy_hires_artist:             { obj: 'comfyui',  key: 'hiresArtist',      type: 'string' },
+  town_generation_settings:       { obj: 'town',     key: 'generation',       type: 'json'  },
 };
+
+// 迁移: 世界生成配置改为 system_settings 存储；首次启动写入与前端一致的默认值。
+function migrateTownGenerationSettings(db) {
+  try {
+    const existing = db.prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'town_generation_settings'").get();
+    if (existing) return;
+
+    // Upgrade compatibility: carry over a style preference that is still in the wizard state file.
+    let styleTags = '';
+    try {
+      const statePath = path.resolve(__dirname, '..', '..', 'data', 'town', 'init-state.json');
+      if (fs.existsSync(statePath)) {
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        styleTags = String(state?.blueprint?.styleTags || '').slice(0, 200);
+      }
+    } catch { /* init state is optional */ }
+    db.prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_generation_settings', ?)").run(JSON.stringify({
+      styleTags,
+      steps: {
+        tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
+        player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
+      },
+    }));
+    console.log('[db] system_settings: seeded town_generation_settings');
+  } catch (err) {
+    console.log('[db] migrateTownGenerationSettings error:', err.message);
+  }
+}
 
 function castValue(raw, type) {
   if (raw == null) return undefined;

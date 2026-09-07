@@ -155,14 +155,29 @@ export const useTownStore = defineStore('town', () => {
   }
 
   function _applyAssetUpdate(d) {
-    if (d.deleted != null) {
-      assets.value = assets.value.filter(a => a.id !== d.deleted)
+    const deleted = d.deleted != null ? assets.value.find(a => a.id === d.deleted) : null
+    assets.value = assets.value.filter(a => a.id !== d.deleted)
+
+    if (!d.asset) {
+      // 精灵重绘采用“删旧建新”的旧路径时，先退回占位图，避免继续请求已删除文件。
+      if (deleted?.kind === 'player' || deleted?.kind === 'npc') _scheduleAgentSpriteRefresh()
       return
     }
-    if (!d.asset) return
-    const idx = assets.value.findIndex(a => a.id === d.asset.id)
-    if (idx >= 0) assets.value.splice(idx, 1, d.asset)
-    else assets.value.push(d.asset)
+
+    // 重绘可能换 asset id（delete + create），素材需同时按 id 和业务 key 收敛。
+    assets.value = assets.value.filter(a => a.id !== d.asset.id && !(a.kind === d.asset.kind && a.key === d.asset.key))
+    assets.value.push(d.asset)
+
+    if (d.asset.kind === 'player' || d.asset.kind === 'npc') _scheduleAgentSpriteRefresh()
+  }
+
+  let _agentSpriteRefreshTimer = null
+  function _scheduleAgentSpriteRefresh() {
+    if (_agentSpriteRefreshTimer) return
+    _agentSpriteRefreshTimer = setTimeout(() => {
+      _agentSpriteRefreshTimer = null
+      fetchState().catch(() => {})
+    }, 120)
   }
 
   async function fetchInitState() {
@@ -213,11 +228,15 @@ export const useTownStore = defineStore('town', () => {
       onEvent('town_assets_updated', (d) => {
         _applyAssetUpdate(d)
         // 素材更新影响地图渲染贴图
-        if (mapData.value && d.asset && mapData.value.assets?.some(a => a.id === d.asset.id)) {
-          const idx = mapData.value.assets.findIndex(a => a.id === d.asset.id)
-          if (idx >= 0) mapData.value.assets.splice(idx, 1, {
-            ...mapData.value.assets[idx], imagePath: d.asset.image_path, meta: d.asset.meta, status: d.asset.status,
-          })
+        if (mapData.value?.assets) {
+          mapData.value.assets = mapData.value.assets.filter(a => a.id !== d.deleted)
+          if (d.asset) {
+            mapData.value.assets = mapData.value.assets.filter(a => a.id !== d.asset.id && !(a.kind === d.asset.kind && a.key === d.asset.key))
+            mapData.value.assets.push({
+              id: d.asset.id, kind: d.asset.kind, key: d.asset.key, name: d.asset.name,
+              imagePath: d.asset.image_path, meta: d.asset.meta, status: d.asset.status,
+            })
+          }
         }
       }),
       onEvent('town_init_progress', (d) => {
@@ -231,6 +250,10 @@ export const useTownStore = defineStore('town', () => {
     _refs = Math.max(0, _refs - 1)
     if (_refs > 0) return
     while (_unsubs.length) _unsubs.pop()()
+    if (_agentSpriteRefreshTimer) {
+      clearTimeout(_agentSpriteRefreshTimer)
+      _agentSpriteRefreshTimer = null
+    }
     connected.value = false
   }
 

@@ -16,7 +16,7 @@
     </div>
 
     <!-- 硬逻辑前缀：会直接拼在最终 prompt 最前面，可改可清空（清空=用默认） -->
-    <div class="pp-field">
+    <div v-if="!hidePrefix" class="pp-field">
       <div class="pp-label">
         直接添加的提示词
         <span v-if="!modelValue.prefix" class="pp-default-tag">默认</span>
@@ -100,6 +100,8 @@ const props = defineProps({
   modelValue: { type: Object, required: true }, // { prefix, loras: [{path, weight, triggerWord}] }
   step: { type: String, required: true },
   styleTags: { type: String, default: '' },
+  /** 立绘本身不拼类型前缀；组件保持向导默认行为，由调用方隐藏 */
+  hidePrefix: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 

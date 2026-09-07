@@ -118,24 +118,12 @@
                       :class="{ 'is-ready': assetOf(item)?.status === 'ready', 'is-busy': item.busy }"
                       :style="{ animationDelay: (i * 60) + 'ms' }"
                     >
-                      <div
+                      <TownAssetThumb
                         class="wiz-asset-thumb"
-                        :class="{ 'is-clickable': group.kind === 'building' && assetOf(item)?.status === 'ready' }"
-                        :title="group.kind === 'building' ? '点击放大查看并划定截取框' : ''"
-                        role="button" tabindex="0"
-                        @click="group.kind === 'building' && openAssetCrop(assetOf(item))"
-                        @keydown.enter="group.kind === 'building' && openAssetCrop(assetOf(item))"
-                      >
-                        <img
-                          v-if="assetOf(item)?.status === 'ready'"
-                          :src="assetUrl(assetOf(item))"
-                          class="wiz-asset-img"
-                          alt=""
-                        >
-                        <span v-else-if="item.busy" class="wiz-asset-state is-spin">⏳</span>
-                        <span v-else-if="assetOf(item)?.status === 'failed'" class="wiz-asset-state">⚠️</span>
-                        <span v-else class="wiz-asset-state">·</span>
-                      </div>
+                        :asset="assetOf(item)"
+                        :show-name="false"
+                        @edit="openAssetManager(assetOf(item), `「${item.name}」图片管理`)"
+                      />
                       <div class="wiz-asset-info">
                         <div class="wiz-asset-name">
                           {{ item.name }}
@@ -211,9 +199,13 @@
                   :style="{ animationDelay: (i * 50) + 'ms' }"
                 >
                   <div class="wiz-npc-portrait">
-                    <img v-if="npcAssetOf(n, 'portrait')" :src="npcAssetOf(n, 'portrait')" alt="">
-                    <span v-else-if="n.genBusy" class="wiz-asset-state is-spin">⏳</span>
-                    <span v-else class="wiz-asset-state">🧍</span>
+                    <TownAssetThumb
+                      class="wiz-portrait-thumb"
+                      :asset="npcAsset(n, 'portrait')"
+                      :show-name="false"
+                      @edit="openNpcManager(n, 'portrait')"
+                    />
+                    <span v-if="!npcAssetOf(n, 'portrait')" class="wiz-asset-state is-spin">⏳</span>
                   </div>
                   <div class="wiz-npc-form">
                     <div class="wiz-npc-line">
@@ -226,23 +218,20 @@
                     </div>
 
                     <div class="wiz-npc-sprites">
-                      <div
+                      <TownAssetThumb
                         v-for="dir in ['down', 'up']" :key="dir"
-                        class="wiz-npc-sprite" role="button" tabindex="0"
-                        :title="`放大查看${dir === 'down' ? '正面' : '背面'}小人并划定截取框`"
-                        @click="openNpcCrop(n, dir)"
-                      >
-                        <img v-if="npcAssetOf(n, dir)" :src="npcAssetOf(n, dir)" alt="">
-                        <span v-else>·</span>
-                      </div>
-                      <div
+                        class="wiz-npc-sprite"
+                        :asset="npcAsset(n, dir)"
+                        :show-name="false"
+                        @edit="openNpcManager(n, dir)"
+                      />
+                      <TownAssetThumb
                         v-if="npcAssetOf(n, 'portrait')"
-                        class="wiz-npc-sprite is-portrait" role="button" tabindex="0"
-                        title="放大查看立绘并划定截取框"
-                        @click="openNpcCrop(n, 'portrait')"
-                      >
-                        <img :src="npcAssetOf(n, 'portrait')" alt="">
-                      </div>
+                        class="wiz-npc-sprite is-portrait"
+                        :asset="npcAsset(n, 'portrait')"
+                        :show-name="false"
+                        @edit="openNpcManager(n, 'portrait')"
+                      />
                     </div>
                   </div>
                   <div class="wiz-npc-footer">
@@ -309,24 +298,32 @@
               <p class="wiz-desc">开镇前最后一步：确认「我」的形象。生成后可开启抠去多余白色移除背景，也可拖动检查。</p>
               <div class="wiz-player-kit">
                 <div class="wiz-player-portrait">
-                  <TownImageEditor
-                    v-if="playerKit.portrait"
-                    :src="playerKit.portrait"
-                    :asset-id="playerKit.portraitId"
-                    fit-height="320"
-                    hint="立绘：点击底色或多余白色"
+                  <TownAssetThumb
+                    v-if="playerKit.portraitAsset"
+                    class="wiz-player-image is-portrait"
+                    :asset="playerKit.portraitAsset"
+                    :show-name="false"
+                    @edit="openPlayerManager('portrait')"
                   />
                   <div v-else class="wiz-player-empty">
                     <linshe-button variant="secondary" :loading="playerBusy" @click="genPlayerKit">生成「我」的立绘（900×1600）</linshe-button>
                   </div>
                 </div>
                 <div class="wiz-player-sprites">
-                  <div v-if="playerKit.down" class="wiz-player-sprite">
-                    <TownImageEditor :src="playerKit.down" :asset-id="playerKit.downId" fit-height="180" hint="正面小人：可拖动检查位置" />
-                  </div>
-                  <div v-if="playerKit.up" class="wiz-player-sprite">
-                    <TownImageEditor :src="playerKit.up" :asset-id="playerKit.upId" fit-height="180" hint="背面小人" />
-                  </div>
+                  <TownAssetThumb
+                    v-if="playerKit.spriteAssets.down"
+                    class="wiz-player-image"
+                    :asset="playerKit.spriteAssets.down"
+                    :show-name="false"
+                    @edit="openPlayerManager('down')"
+                  />
+                  <TownAssetThumb
+                    v-if="playerKit.spriteAssets.up"
+                    class="wiz-player-image"
+                    :asset="playerKit.spriteAssets.up"
+                    :show-name="false"
+                    @edit="openPlayerManager('up')"
+                  />
                   <linshe-button v-if="!playerKit.down" variant="secondary" :loading="playerBusy" @click="genPlayerKit">
                     生成「我」的像素小人（正/背）
                   </linshe-button>
@@ -361,55 +358,15 @@
       </div>
     </div>
 
-    <!-- 图片编辑弹窗 -->
-    <Teleport to="body">
-      <Transition name="wiz-fade">
-        <div v-if="editor.open" class="wiz-editor-mask" @click.self="editor.open = false">
-          <div class="wiz-editor-panel" role="dialog" :aria-label="editor.title">
-            <div class="wiz-editor-head">
-              <span class="wiz-editor-title">{{ editor.title }}</span>
-              <linshe-button variant="icon" size="sm" aria-label="关闭" @click="editor.open = false">✕</linshe-button>
-            </div>
-            <TownImageEditor
-              v-if="editor.open"
-              :src="editor.src"
-              :asset-id="editor.assetId"
-              :crop-mode="editor.cropMode"
-              :fit-height="editor.cropMode ? (editor.portrait ? 420 : 340) : (editor.portrait ? 380 : 200)"
-              :hint="editor.portrait ? '立绘：点击底色或多余白色' : '小人：点击底色或多余白色'"
-              @saved="onEditorSaved"
-              @cropped="onEditorCropped"
-            />
-            <div v-if="editor.open && (editor.portrait || editor.what)" class="wiz-editor-actions">
-              <linshe-button
-                variant="secondary" size="sm"
-                :loading="editorHiresBusy"
-                @click="refineEditorPortrait"
-              >HiresFix 细化</linshe-button>
-              <linshe-button
-                v-if="editor.npc"
-                variant="secondary" size="sm"
-                :loading="editorAssetBusy"
-                @click="regenEditorNpcAsset"
-              >{{ npcAssetLabel(editor.what) }}</linshe-button>
-              <linshe-button
-                v-if="editor.npc"
-                variant="secondary" size="sm"
-                :loading="editorAssetBusy"
-                @click="regenEditorAsset"
-              >{{ npcAssetLabel(editor.what) }}</linshe-button>
-              <linshe-button
-                v-else-if="editor.what"
-                variant="secondary" size="sm"
-                :loading="editorAssetBusy"
-                @click="regenEditorAsset"
-              >{{ npcAssetLabel(editor.what) }}</linshe-button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-  </Teleport>
+    <!-- 图片管理弹窗 -->
+    <TownAssetManager
+      :open="manager.open"
+      :asset="manager.asset"
+      :title="manager.title"
+      :regenerate="regenerateManagedAsset"
+      @close="manager.open = false"
+      @updated="onManagerUpdated"
+    />  </Teleport>
 </template>
 
 <script setup>
@@ -419,7 +376,8 @@ import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
-import TownImageEditor from './TownImageEditor.vue'
+import TownAssetThumb from './TownAssetThumb.vue'
+import TownAssetManager from './TownAssetManager.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
 
 const emit = defineEmits(['close', 'applied'])
@@ -436,8 +394,8 @@ const rosterBusy = ref(false)
 const commitBusy = ref(false)
 const assetsBusy = ref(false)
 const playerBusy = ref(false)
-const playerKit = reactive({ portrait: null, portraitId: null, down: null, downId: null, up: null, upId: null })
-const editor = reactive({ open: false, src: '', assetId: null, title: '', portrait: false, npc: null, what: null, cropMode: false })
+const playerKit = reactive({ portrait: null, portraitId: null, down: null, downId: null, up: null, upId: null, portraitAsset: null, spriteAssets: {} })
+const manager = reactive({ open: false, asset: null, title: '', context: null })
 const editorAssetBusy = ref(false)
 const editorHiresBusy = ref(false)
 // 每步生成的提示词硬逻辑前缀 + LoRA（空 prefix = 用后端默认）
@@ -451,6 +409,11 @@ const loraFiles = ref([])
 const assets = ref([])
 const layoutBusy = ref(false)
 const promptBusy = ref(false)
+const generationLoaded = ref(false)
+let generationStyleTags = null
+let generationSaveTimer = null
+let generationSaving = false
+let generationSavePending = false
 
 const STEP_LIST = [
   { id: 'config', label: '配置' },
@@ -542,16 +505,16 @@ function upsertAsset(asset) {
   else assets.value.push(asset)
 }
 
-function npcAssetOf(n, what) {
-  // 全部从建档 NPC DTO 取（initState.wizardNpcs），key 按 displayName 对齐蓝图卡
+function npcAsset(n, what) {
   const dto = initState.value?.wizardNpcs?.find(w => w.displayName === n.displayName)
   if (!dto) return null
-  if (what === 'portrait') {
-    const a = dto.portrait
-    return a?.status === 'ready' ? `${a.image_path}?v=${a.meta?.updatedAt ?? 0}` : null
-  }
-  const a = dto.sprites?.[what]
-  return a?.status === 'ready' ? `${a.image_path}?v=${a.meta?.updatedAt ?? 0}` : null
+  const asset = what === 'portrait' ? dto.portrait : dto.sprites?.[what]
+  return asset?.status === 'ready' ? asset : null
+}
+
+function npcAssetOf(n, what) {
+  const asset = npcAsset(n, what)
+  return asset ? assetUrl(asset) : null
 }
 
 // ── 步骤控制 ──
@@ -585,7 +548,7 @@ function syncBpForm(force = false) {
   const json = JSON.stringify(bp)
   if (!force && json === lastBpJson) return // 轮询拿到相同内容时不动表单（保住编辑中状态与 uid）
   lastBpJson = json
-  bpForm.styleTags = bp.styleTags || ''
+  bpForm.styleTags = generationStyleTags ?? (bp.styleTags || '')
   const sections = [
     ['groundAssets', bp.groundAssets], ['roadAssets', bp.roadAssets],
     ['buildings', bp.buildings], ['props', bp.props], ['npcs', bp.npcs],
@@ -614,6 +577,76 @@ async function refreshAssets() {
     assets.value = data.assets || []
   } catch (err) {
     console.warn('[wizard] assets fetch failed:', err?.message)
+  }
+}
+
+function buildGenerationSettingsPayload() {
+  const payload = { styleTags: bpForm.styleTags || '', steps: {} }
+  for (const step of ['tiles', 'buildings', 'npcs', 'player']) {
+    const params = stepParams[step] || {}
+    payload.steps[step] = {
+      prefix: params.prefix ?? '',
+      artist: params.artist ?? '@ebora',
+      loras: selectedLoras(step),
+      portraitLoras: !!params.portraitLoras,
+    }
+  }
+  return payload
+}
+
+function applyGenerationSettings(raw) {
+  if (!raw || typeof raw !== 'object') return
+  generationStyleTags = typeof raw.styleTags === 'string' ? raw.styleTags : null
+  if (generationStyleTags !== null) bpForm.styleTags = generationStyleTags
+
+  const savedSteps = raw.steps && typeof raw.steps === 'object' ? raw.steps : {}
+  for (const step of ['tiles', 'buildings', 'npcs', 'player']) {
+    const saved = savedSteps[step] && typeof savedSteps[step] === 'object' ? savedSteps[step] : {}
+    const params = stepParams[step]
+    if (saved.prefix !== undefined || saved.promptPrefix !== undefined) params.prefix = saved.prefix ?? saved.promptPrefix
+    if (typeof saved.artist === 'string') params.artist = saved.artist
+    if (Array.isArray(saved.loras)) {
+      params.loras = saved.loras
+        .filter(l => l && typeof l.path === 'string' && l.path.trim())
+        .map(l => ({ ...l, weight: Number(l.weight ?? 1) }))
+    }
+    params.portraitLoras = saved.portraitLoras === true
+  }
+}
+
+async function loadGenerationSettings() {
+  try {
+    const settings = await api.fetchTownSettings()
+    applyGenerationSettings(settings?.generation)
+    generationLoaded.value = true
+  } catch (err) {
+    console.warn('[wizard] generation settings load failed:', err?.message)
+  }
+}
+
+function scheduleGenerationSettingsSave() {
+  if (!generationLoaded.value) return
+  if (generationSaveTimer) clearTimeout(generationSaveTimer)
+  generationSaveTimer = setTimeout(saveGenerationSettings, 400)
+}
+
+async function saveGenerationSettings() {
+  if (!generationLoaded.value) return
+  if (generationSaving) {
+    generationSavePending = true
+    return
+  }
+  generationSaving = true
+  try {
+    await api.updateTownSettings({ generation: buildGenerationSettingsPayload() })
+  } catch (err) {
+    console.warn('[wizard] generation settings save failed:', err?.message)
+  } finally {
+    generationSaving = false
+    if (generationSavePending) {
+      generationSavePending = false
+      saveGenerationSettings()
+    }
   }
 }
 
@@ -901,116 +934,81 @@ function personaRows(value = '') {
 }
 
 function npcAssetLabel(what) {
+  if (what === 'asset') return '重绘此图'
   if (what === 'portrait') return '重绘立绘'
   if (what === 'down') return '重绘正面'
   if (what === 'up') return '重绘背面'
   return '重绘此图'
 }
 
-async function regenEditorNpcAsset() {
-  const npc = editor.npc
-  const what = editor.what
-  if (!npc || !what || editorAssetBusy.value) return
-  editorAssetBusy.value = true
-  try {
+async function regenerateManagedAsset(asset) {
+  const context = manager.context || { type: 'asset' }
+  if (context.type === 'npc') {
     await saveBlueprint()
     await api.commitTownWizardNpcs()
-    const npcId = (initState.value?.npcIds || [])[bpForm.npcs.indexOf(npc)]
+    const npcId = (initState.value?.npcIds || [])[bpForm.npcs.indexOf(context.npc)]
     if (!npcId) throw new Error('人格卡未建档')
-    const baseParams = { ...generationParams('npcs', { portrait: what === 'portrait' }), styleTags: bpForm.styleTags || '', force: true }
-    if (what === 'portrait') await api.generateTownNpcPortrait(npcId, baseParams)
-    else await api.generateTownNpcSprites(npcId, { ...baseParams, loras: generationParams('npcs').loras, direction: what })
+    const baseParams = { ...generationParams('npcs', { portrait: context.what === 'portrait' }), styleTags: bpForm.styleTags || '', force: true }
+    if (context.what === 'portrait') {
+      const data = await api.generateTownNpcPortrait(npcId, baseParams)
+      await town.fetchInitState()
+      await refreshAssets()
+      return data.asset
+    }
+    await api.generateTownNpcSprites(npcId, { ...baseParams, loras: generationParams('npcs').loras, direction: context.what })
     await town.fetchInitState()
     await refreshAssets()
-    if (editor.open) openNpcCrop(npc, what)
-  } catch (err) {
-    console.warn('[wizard] npc asset redraw failed:', err?.message)
-  } finally {
-    editorAssetBusy.value = false
+    return npcAsset(context.npc, context.what)
   }
-}
-async function refineEditorPortrait() {
-async function regenEditorPlayerSprite() {
-  const what = editor.what
-  if (!what || editor.portrait || editorAssetBusy.value) return
-  editorAssetBusy.value = true
-  try {
-    const data = await api.regenerateTownPlayerSprite(what, {
-      ...generationParams('player'),
-      styleTags: bpForm.styleTags || '',
-    })
+  if (context.type === 'player') {
+    let data
+    if (context.what === 'portrait') {
+      data = await api.regenerateTownPlayerPortrait({
+        ...generationParams('player', { portrait: true }),
+        portraitLoras: !!stepParams.player.portraitLoras,
+        styleTags: bpForm.styleTags || '',
+      })
+    } else {
+      data = await api.regenerateTownPlayerSprite(context.what, {
+        ...generationParams('player'),
+        styleTags: bpForm.styleTags || '',
+      })
+    }
     applyPlayerKit(data.kit)
     await town.fetchInitState()
     await refreshAssets()
-    const asset = data.kit?.sprites?.[what]
-    if (editor.open && asset?.status === 'ready') {
-      editor.src = assetUrl(asset)
-      editor.assetId = asset.id
-    }
-  } catch (err) {
-    console.warn('[wizard] player sprite redraw failed:', err?.message)
-  } finally {
-    editorAssetBusy.value = false
+    return context.what === 'portrait' ? data.kit?.portrait : data.kit?.sprites?.[context.what]
   }
+  const data = await api.regenerateTownAsset(asset.id, {})
+  upsertAsset(data.asset)
+  await refreshAssets()
+  return data.asset
 }
 
-async function regenEditorAsset() {
-  if (editor.npc) await regenEditorNpcAsset()
-  else await regenEditorPlayerSprite()
-}
-  if (!editor.portrait || !editor.assetId || editorHiresBusy.value) return
-  editorHiresBusy.value = true
-  try {
-    const data = await api.refineTownAssetHires(editor.assetId)
-    if (editor.open && data.asset) {
-      editor.src = assetUrl(data.asset)
-    }
-    await town.fetchInitState()
-    await refreshAssets()
-  } catch (err) {
-    console.warn('[wizard] portrait hires failed:', err?.message)
-  } finally {
-    editorHiresBusy.value = false
-  }
+function openAssetManager(asset, title = '', context = null) {
+  if (!asset || asset.status !== 'ready') return
+  manager.asset = asset
+  manager.title = title || `「${asset.name}」图片管理`
+  manager.context = context
+  manager.open = true
 }
 
-/** 放大查看 + 截取框（立绘/小人/建筑通用） */
-function openNpcCrop(n, what) {
-  const src = npcAssetOf(n, what === 'portrait' ? 'portrait' : what)
-  if (!src) return
-  const dto = initState.value?.wizardNpcs?.find(w => w.displayName === n.displayName)
-  const assetId = what === 'portrait' ? dto?.portrait?.id : dto?.sprites?.[what]?.id
-  if (!assetId) return
-  editor.open = true
-  editor.src = src
-  editor.assetId = assetId
-  editor.title = `${n.displayName} · ${what === 'portrait' ? '立绘' : what === 'down' ? '正面小人' : '背面小人'} · 划定截取框`
-  editor.portrait = what === 'portrait'
-  editor.cropMode = true
-  editor.npc = n
-  editor.what = what
+function openNpcManager(n, what) {
+  const asset = npcAsset(n, what)
+  if (!asset) return
+  const label = what === 'portrait' ? '立绘' : what === 'down' ? '正面小人' : '背面小人'
+  openAssetManager(asset, `${n.displayName} · ${label} · 图片管理`, { type: 'npc', npc: n, what })
 }
 
-/** 建筑素材放大截取 */
-function openAssetCrop(asset) {
-  if (!asset?.id) return
-  editor.open = true
-  editor.src = assetUrl(asset)
-  editor.assetId = asset.id
-  editor.title = `「${asset.name}」· 放大查看并划定截取框`
-  editor.portrait = false
-  editor.cropMode = true
-  editor.npc = null
-  editor.what = null
+function openPlayerManager(what) {
+  const asset = what === 'portrait' ? playerKit.portraitAsset : playerKit.spriteAssets?.[what]
+  if (!asset) return
+  const label = what === 'portrait' ? '立绘' : what === 'down' ? '正面小人' : '背面小人'
+  openAssetManager(asset, `我 · ${label} · 图片管理`, { type: 'player', what })
 }
 
-function onEditorSaved() {
-  refreshAssets()
-  town.fetchInitState().catch(() => {})
-}
-
-function onEditorCropped() {
-  refreshAssets()
+function onManagerUpdated(asset) {
+  if (asset?.status === 'ready') upsertAsset(asset)
   town.fetchInitState().catch(() => {})
 }
 
@@ -1069,6 +1067,11 @@ function applyPlayerKit(kit) {
   playerKit.upId = kit.sprites?.up?.id ?? null
   playerKit.portrait = kit.portrait?.status === 'ready' ? assetUrl(kit.portrait) : null
   playerKit.portraitId = kit.portrait?.id ?? null
+  playerKit.spriteAssets = {
+    down: kit.sprites?.down?.status === 'ready' ? kit.sprites.down : null,
+    up: kit.sprites?.up?.status === 'ready' ? kit.sprites.up : null,
+  }
+  playerKit.portraitAsset = kit.portrait?.status === 'ready' ? kit.portrait : null
 }
 
 function confirmInit() {
@@ -1110,18 +1113,8 @@ function stopPolling() {
 
 // 蓝图到位后同步表单
 watch(() => initState.value?.blueprint, (bp) => { if (bp) syncBpForm() })
-watch(localStep, (v, prev) => {
-  const targetParams = stepParams[v]
-  if (targetParams) {
-    // 清单步会隔开地皮/建筑两个素材步，这里从最近一个可用的素材步接力参数。
-    const currentIndex = STEP_LIST.findIndex(s => s.id === v)
-    const sourceId = STEP_LIST.slice(0, currentIndex).reverse().map(s => s.id).find(id => stepParams[id]) || prev
-    const prevParams = sourceId ? stepParams[sourceId] : null
-    if (prevParams) {
-      targetParams.loras = selectedLoras(sourceId)
-      if (prevParams.artist !== undefined) targetParams.artist = prevParams.artist
-    }
-  }
+watch([bpForm.styleTags, stepParams], scheduleGenerationSettingsSave, { deep: true })
+watch(localStep, (v) => {
   // 地皮清单/建筑清单与各自生成步骤独立，切换时不会重建提示词
   if (v === 'player' && !playerKit.portrait && !playerKit.down && !playerBusy.value) genPlayerKit()
   if (v === 'town' && initState.value?.status !== 'confirm' && !layoutBusy.value) genLayout()
@@ -1134,6 +1127,7 @@ watch(() => initState.value?.status, (s) => {
 })
 
 onMounted(async () => {
+  await loadGenerationSettings()
   try {
     const worlds = await api.getWorldSettings()
     const list = (worlds.list || worlds.worlds || worlds || [])
@@ -1171,7 +1165,14 @@ onMounted(async () => {
   loadPlayerKitIfAny()
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  if (generationSaveTimer) {
+    clearTimeout(generationSaveTimer)
+    generationSaveTimer = null
+    saveGenerationSettings()
+  }
+})
 </script>
 
 <style scoped>
@@ -1537,6 +1538,10 @@ onBeforeUnmount(stopPolling)
   flex-shrink: 0;
 }
 
+.wiz-portrait-thumb {
+  width: 100%;
+  height: 100%;
+}
 .wiz-npc-portrait img {
   width: 100%;
   height: 100%;
@@ -1580,6 +1585,11 @@ onBeforeUnmount(stopPolling)
 }
 
 .wiz-player-portrait { min-height: 200px; }
+.wiz-player-image { width: 100%; height: 140px; border-radius: 12px; background: #fbf8f3; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; cursor: pointer; border: 1.5px solid transparent; transition: border-color .15s ease; }
+.wiz-player-image.is-portrait { height: 240px; }
+.wiz-player-image:hover { border-color: var(--accent); }
+.wiz-player-image img { width: 100%; height: 100%; object-fit: contain; object-position: bottom; image-rendering: pixelated; }
+.wiz-player-image.is-portrait img { image-rendering: auto; }
 .wiz-player-empty {
   height: 100%;
   min-height: 200px;

@@ -17,6 +17,7 @@ import { postProcessAsset, detectTileAnchorY, flattenIsoTile } from './assetPost
 import { refineImage } from '../imageRefine.js';
 import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
+import { getTownGenerationSettings, generationStepForAsset, isPortraitAsset, normalizeTownGenerationLoras } from './townGenerationConfig.js';
 
 /** 建筑 LLM 出 prompt（酒馆立绘同款结构）；失败回退静态串 */
 async function buildBuildingPromptViaLlm(p) {
@@ -110,6 +111,17 @@ export const DEFAULT_PROMPT_PREFIX = {
   road: 'pixel art, game sprite',
 };
 
+function generationDefaultsForAsset(row) {
+  const settings = getTownGenerationSettings();
+  const step = settings.steps[generationStepForAsset(row)] || {};
+  const portrait = isPortraitAsset(row);
+  return {
+    artist: typeof step.artist === 'string' ? step.artist : '',
+    loras: portrait && !step.portraitLoras ? [] : (Array.isArray(step.loras) ? step.loras : []),
+    prefix: portrait ? '' : (typeof step.prefix === 'string' ? step.prefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '')),
+    portraitLoras: step.portraitLoras === true,
+  };
+}
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
 const TILE_STYLE_STRIP = /\b(village|town|city|street|hamlet|townsquare|buildings?)\b/gi;
 
@@ -194,8 +206,9 @@ async function generateIntoRow(row) {
     });
   }
 
-  // 硬逻辑前缀（默认按 kind，用户可在向导/编辑器覆盖）：pixel art, game sprite 等
-  const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '');
+  // 固定前缀和画师/LoRA 优先使用素材级覆盖；未覆盖时回落到 system_settings 里的类型配置。
+  const generationDefaults = generationDefaultsForAsset(row);
+  const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : generationDefaults.prefix;
   if (prefix) prompt = `${prefix}, ${prompt}`;
   db.prepare(`UPDATE town_assets SET status = 'pending', source_prompt = ? WHERE id = ?`).run(prompt, row.id);
 
@@ -203,10 +216,10 @@ async function generateIntoRow(row) {
     const result = await generateImageRaw(prompt, {
       scene: 'town',
       disableRAG: true,
-      artist: meta.artist !== undefined ? meta.artist : (spec.artist !== undefined ? spec.artist : config.comfyui.artist),
+      artist: meta.artist !== undefined ? meta.artist : generationDefaults.artist,
       width: size.width,
       height: size.height,
-      loras: Array.isArray(meta.loras) && meta.loras.length ? meta.loras : undefined,
+      loras: Array.isArray(meta.loras) && meta.loras.length ? meta.loras : (generationDefaults.loras.length ? generationDefaults.loras : undefined),
     });
     if (!result?.success || !result.images?.length) {
       throw new Error(result?.error || 'ComfyUI 未返回图片');
@@ -341,12 +354,11 @@ export async function cropAssetImage(id, rect) {
   return fresh;
 }
 
-/** 小镇立绘 HiresFix：沿用素材 source_prompt/meta，并按全局 HiresFix 设置细化后覆盖 */
+/** 小镇素材 HiresFix：沿用素材 source_prompt/meta，并按全局 HiresFix 设置细化后覆盖 */
 export async function refineAssetWithHires(id) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
   if (!row) throw new Error(`asset #${id} not found`);
-  if (row.kind !== 'portrait') throw new Error('仅支持细化立绘素材');
   if (!row.source_prompt?.trim()) throw new Error('素材缺少生成提示词');
   const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
   if (!fs.existsSync(filePath)) throw new Error('素材文件不存在');
@@ -431,6 +443,28 @@ export function regenerateAsset(id, overrides = {}) {
   return enqueueAssetJob(() => generateIntoRow(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));
 }
 
+/** 只保存素材的生成配置（画师串/LoRA/固定前缀），不触发生图 */
+export function updateAssetGenerationConfig(id, overrides = {}) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  const meta = JSON.parse(row.meta_json || '{}');
+  if (overrides.artist !== undefined) {
+    if (overrides.artist === null) delete meta.artist;
+    else meta.artist = String(overrides.artist);
+  }
+  if (overrides.loras !== undefined) {
+    if (overrides.loras === null) delete meta.loras;
+    else meta.loras = normalizeTownGenerationLoras(overrides.loras);
+  }
+  if (overrides.promptPrefix !== undefined) {
+    if (overrides.promptPrefix === null) delete meta.promptPrefix;
+    else meta.promptPrefix = String(overrides.promptPrefix);
+  }
+  meta.updatedAt = Date.now();
+  db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
+  return rowToAsset(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id));
+}
 /** 删除素材（含磁盘文件）；引用它的地图对象由调用方负责清理 */
 export function deleteAsset(id) {
   const db = getDb();
@@ -467,3 +501,5 @@ export async function generateAssetsBatch(jobs, onProgress) {
   }
   return results;
 }
+
+/** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */

@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div class="admin-mask" @click.self="$emit('close')">
+    <Transition name="admin-slide">
+    <div v-if="open" class="admin-mask" @click.self="$emit('close')">
       <div class="admin-panel" role="dialog" aria-label="小镇管理">
         <div class="ap-head">
           <linshe-button v-if="detail" variant="ghost" size="sm" @click="detail = null">← 返回</linshe-button>
@@ -78,15 +79,18 @@
           <div v-if="detailNpc" class="ap-detail">
             <div class="ap-detail-media">
               <div class="ap-portrait-box">
-                <img v-if="detailNpc.portrait?.status === 'ready'" :src="detailNpc.portrait.image_path + '?v=' + (detailNpc.portrait.meta?.updatedAt ?? 0)" alt="立绘">
+                <TownAssetThumb
+                  v-if="detailNpc.portrait?.status === 'ready'"
+                  class="ap-portrait-thumb"
+                  :asset="detailNpc.portrait"
+                  :show-name="false"
+                  @edit="openAssetManager(detailNpc.portrait, `${detailNpc.displayName} 立绘`)"
+                />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <div class="ap-btn-row">
+              <div v-if="!detailNpc.portrait?.id" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
-                  {{ detailNpc.portrait?.status === 'ready' ? '重生成立绘' : '生成 900×1600 立绘' }}
-                </linshe-button>
-                <linshe-button v-if="detailNpc.portrait?.id" variant="ghost" size="sm" @click="openPromptEdit(detailNpc.portrait)">
-                  ✎ 提示词
+                  生成 900×1600 立绘
                 </linshe-button>
               </div>
             </div>
@@ -104,17 +108,23 @@
             </div>
 
             <div class="ap-section">
-              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可编辑提示词</div>
+              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可管理图片</div>
               <div class="ap-sprite-row">
                 <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
-                  <div class="ap-sprite" role="button" tabindex="0" title="点击编辑提示词并重生成" @click="detailNpc.sprites?.[dir]?.id && openPromptEdit(detailNpc.sprites[dir])">
-                    <img v-if="detailNpc.sprites?.[dir]?.status === 'ready'" :src="detailNpc.sprites[dir].image_path" :alt="dir">
-                    <span v-else class="ap-sprite-missing">·</span>
-                  </div>
+                  <TownAssetThumb
+                    v-if="detailNpc.sprites?.[dir]?.status === 'ready'"
+                    class="ap-sprite"
+                    :asset="detailNpc.sprites[dir]"
+                    :show-name="false"
+                    @edit="openAssetManager(detailNpc.sprites[dir], `${detailNpc.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
+                  />
+                  <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
                 </div>
-                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
-                  生成 / 重生成（600×800）
-                </linshe-button>
+                <div v-if="!detailNpc.sprites?.down?.id || !detailNpc.sprites?.up?.id" class="ap-btn-row">
+                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
+                    生成缺失小人
+                  </linshe-button>
+                </div>
               </div>
             </div>
 
@@ -154,18 +164,16 @@
             <p v-if="playerError" class="ap-player-error" role="alert">{{ playerError }}</p>
             <div class="ap-section">
               <div class="ap-section-title">立绘（900×1600，可抠除底色）</div>
-              <TownImageEditor
+              <TownAssetThumb
                 v-if="playerKit.portrait?.status === 'ready'"
-                :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)"
-                :asset-id="playerKit.portrait.id"
-                @saved="loadPlayerKit"
-                :fit-height="300"
-                hint="点击底色或多余白色 · 可拖动检查"
+                class="ap-portrait-thumb"
+                :asset="playerKit.portrait"
+                :show-name="false"
+                @edit="openAssetManager(playerKit.portrait, '我 · 立绘 · 图片管理')"
               />
               <div v-else class="ap-empty is-small">还没有立绘，点下方生成。</div>
-              <div class="ap-actions">
-                <linshe-button size="sm" :loading="playerOperation === 'portrait'" :disabled="playerKitBusy" @click="regenPlayerKit('portrait')">{{ playerKit.portrait ? '重新生成我的立绘' : '生成我的立绘' }}</linshe-button>
-                <linshe-button v-if="playerKit.portrait?.id" variant="ghost" size="sm" :disabled="playerKitBusy" @click="openPromptEdit(playerKit.portrait)">编辑立绘提示词</linshe-button>
+              <div v-if="!playerKit.portrait?.id" class="ap-actions">
+                <linshe-button size="sm" :loading="playerOperation === 'portrait'" :disabled="playerKitBusy" @click="regenPlayerKit('portrait')">生成我的立绘</linshe-button>
               </div>
             </div>
             <div class="ap-section">
@@ -173,18 +181,23 @@
               <div class="ap-sprite-row">
                 <div v-for="direction in ['down', 'up']" :key="direction" class="ap-player-sprite">
                   <div class="ap-section-title">{{ direction === 'down' ? '正面' : '背面' }}</div>
-                  <TownImageEditor v-if="playerKit.sprites?.[direction]?.status === 'ready'" :src="playerKit.sprites[direction].image_path + '?v=' + (playerKit.sprites[direction].meta?.updatedAt ?? 0)" :asset-id="playerKit.sprites[direction].id" :fit-height="170" @saved="loadPlayerKit" />
+                  <TownAssetThumb
+                    v-if="playerKit.sprites?.[direction]?.status === 'ready'"
+                    class="ap-sprite"
+                    :asset="playerKit.sprites[direction]"
+                    :show-name="false"
+                    @edit="openAssetManager(playerKit.sprites[direction], `我 · ${direction === 'down' ? '正面' : '背面'}小人 · 图片管理`)"
+                  />
                   <div v-else class="ap-empty is-small">还没有{{ direction === 'down' ? '正面' : '背面' }}小人</div>
-                  <div class="ap-actions is-column">
-                    <linshe-button size="sm" :loading="playerOperation === direction" :disabled="playerKitBusy" @click="regenPlayerKit(direction)">重生成{{ direction === 'down' ? '正面' : '背面' }}小人</linshe-button>
-                    <linshe-button v-if="playerKit.sprites?.[direction]?.id" variant="ghost" size="sm" :disabled="playerKitBusy" @click="openPromptEdit(playerKit.sprites[direction])">编辑提示词</linshe-button>
+                  <div v-if="!playerKit.sprites?.[direction]?.id" class="ap-actions is-column">
+                    <linshe-button size="sm" :loading="playerOperation === direction" :disabled="playerKitBusy" @click="regenPlayerKit(direction)">生成{{ direction === 'down' ? '正面' : '背面' }}小人</linshe-button>
                   </div>
                 </div>
               </div>
             </div>
             <div class="ap-actions is-column">
-              <linshe-button variant="primary" size="sm" :loading="playerOperation === 'kit'" :disabled="playerKitBusy" @click="regenPlayerKit('kit')">
-                重新生成整套形象（按我的用户配置）
+              <linshe-button v-if="!playerKit.portrait?.id || !playerKit.sprites?.down?.id || !playerKit.sprites?.up?.id" variant="primary" size="sm" :loading="playerOperation === 'kit'" :disabled="playerKitBusy" @click="regenPlayerKit('kit')">
+                生成缺失形象（按我的用户配置）
               </linshe-button>
             </div>
           </div>
@@ -221,15 +234,18 @@
           <div v-if="detailChar" class="ap-detail">
             <div class="ap-detail-media">
               <div class="ap-portrait-box">
-                <img v-if="detailChar.portraitUrl || detailChar.standingUrl" :src="detailChar.portraitUrl || detailChar.standingUrl" alt="立绘">
+                <TownAssetThumb
+                  v-if="charPortraitAsset(detailChar)"
+                  class="ap-portrait-thumb"
+                  :asset="charPortraitAsset(detailChar)"
+                  :show-name="false"
+                  @edit="openAssetManager(charPortraitAsset(detailChar), `${detailChar.displayName} 立绘`)"
+                />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <div class="ap-btn-row">
+              <div v-if="!detailChar.portraitId" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
-                  {{ detailChar.standingUrl ? '复用已有立绘 ✓' : (detailChar.portraitUrl ? '重生成 900×1600 立绘' : '生成 900×1600 立绘') }}
-                </linshe-button>
-                <linshe-button v-if="detailChar.portraitId" variant="ghost" size="sm" @click="openPromptEdit({ id: detailChar.portraitId, name: detailChar.displayName })">
-                  ✎ 提示词
+                  生成 900×1600 立绘
                 </linshe-button>
               </div>
             </div>
@@ -246,17 +262,23 @@
             </div>
 
             <div class="ap-section">
-              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可编辑提示词</div>
+              <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可管理图片</div>
               <div class="ap-sprite-row">
                 <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
-                  <div class="ap-sprite" role="button" tabindex="0" title="点击编辑提示词并重生成" @click="detailChar.spriteIds?.[dir] && openPromptEdit({ id: detailChar.spriteIds[dir], name: detailChar.displayName })">
-                    <img v-if="detailChar.sprites?.[dir]" :src="detailChar.sprites[dir]" :alt="dir">
-                    <span v-else class="ap-sprite-missing">·</span>
-                  </div>
+                  <TownAssetThumb
+                    v-if="charSpriteAsset(detailChar, dir)"
+                    class="ap-sprite"
+                    :asset="charSpriteAsset(detailChar, dir)"
+                    :show-name="false"
+                    @edit="openAssetManager(charSpriteAsset(detailChar, dir), `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
+                  />
+                  <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
                 </div>
-                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
-                  生成 / 重生成（600×800）
-                </linshe-button>
+                <div v-if="!charSpriteAsset(detailChar, 'down') || !charSpriteAsset(detailChar, 'up')" class="ap-btn-row">
+                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
+                    生成缺失小人
+                  </linshe-button>
+                </div>
               </div>
             </div>
 
@@ -274,6 +296,21 @@
           </div>
           <linshe-button variant="primary" size="sm" :loading="savingSettings" @click="saveSettings">保存设置</linshe-button>
 
+          <div class="ap-layout-zone">
+            <div class="ap-section-title">重新布局</div>
+            <p class="ap-layout-desc">AI 会用当前素材重建地图、道路和地点；居民与入住角色会保留，手动地图修改会被覆盖。道具密度始终高于建筑密度。</p>
+            <div v-if="relayoutError" class="ap-layout-error" role="alert">{{ relayoutError }}</div>
+            <div v-else-if="relayoutDone" class="ap-layout-done">布局已重建，地图正在刷新。</div>
+            <div v-if="!layoutConfirm" class="ap-actions">
+              <linshe-button variant="secondary" size="sm" @click="layoutConfirm = true">重新布局</linshe-button>
+            </div>
+            <div v-else class="ap-confirm">
+              <span>确定重建当前地图布局吗？</span>
+              <linshe-button variant="primary" size="sm" :loading="relayoutBusy" @click="doRelayout">开始重建</linshe-button>
+              <linshe-button variant="ghost" size="sm" :disabled="relayoutBusy" @click="layoutConfirm = false">取消</linshe-button>
+            </div>
+          </div>
+
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
             <p class="ap-danger-desc">重新初始化会清除当前地图、地点、所有居民与相遇历史。</p>
@@ -289,14 +326,15 @@
         </div>
       </div>
 
-      <TownAssetPromptDialog
-        :visible="promptEdit.open"
-        :asset-id="promptEdit.id"
-        :title="promptEdit.title"
-        @close="promptEdit.open = false"
-        @regenerated="onPromptRegenerated"
+      <TownAssetManager
+        :open="manager.open"
+        :asset="manager.asset"
+        :title="manager.title"
+        @close="manager.open = false"
+        @updated="onPromptRegenerated"
       />
     </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -307,10 +345,12 @@ import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSwitch from '../ui/LinsheSwitch.vue'
-import TownImageEditor from './TownImageEditor.vue'
-import TownAssetPromptDialog from './TownAssetPromptDialog.vue'
+import TownAssetThumb from './TownAssetThumb.vue'
+import TownAssetManager from './TownAssetManager.vue'
 
 defineEmits(['close'])
+
+defineProps({ open: Boolean })
 
 const town = useTownStore()
 const tab = ref('npcs')
@@ -324,19 +364,37 @@ const adding = ref(false)
 const batchSprites = ref(false)
 const batchChars = ref(false)
 const resetting = ref(false)
+const layoutConfirm = ref(false)
+const relayoutBusy = ref(false)
+const relayoutError = ref('')
+const relayoutDone = ref(false)
 const newNpc = reactive({ name: '', job: '', persona: '' })
 const playerKit = reactive({ sprites: {}, portrait: null })
 const playerOperation = ref(null)
 const playerKitBusy = computed(() => playerOperation.value !== null)
 const playerError = ref('')
-const promptEdit = reactive({ open: false, id: null, title: '' })
+const manager = reactive({ open: false, asset: null, title: '' })
 
-function openPromptEdit(asset) {
+function openAssetManager(asset, title = '') {
   if (!asset?.id) return
-  promptEdit.id = asset.id
-  promptEdit.title = asset.name ? `「${asset.name}」编辑提示词并重生成` : '编辑提示词并重生成'
-  promptEdit.open = true
+  manager.asset = asset
+  manager.title = title || `${asset.name || '图片'} · 图片管理`
+  manager.open = true
 }
+
+function charPortraitAsset(char) {
+  const path = char?.portraitUrl || char?.standingUrl
+  if (!char?.portraitId || !path) return null
+  return { id: char.portraitId, name: `${char.displayName} 立绘`, status: 'ready', image_path: path, meta: {} }
+}
+
+function charSpriteAsset(char, direction) {
+  const path = char?.sprites?.[direction]
+  const id = char?.spriteIds?.[direction]
+  if (!id || !path) return null
+  return { id, name: `${char.displayName} ${direction === 'down' ? '正面' : '背面'}小人`, status: 'ready', image_path: path, meta: {} }
+}
+
 
 function onPromptRegenerated() {
   loadNpcs()
@@ -380,6 +438,8 @@ const SETTING_FIELDS = [
   { key: 'encounterRelatedProb', label: '熟人相遇概率', min: 0, max: 1, step: 0.01 },
   { key: 'encounterStrangerProb', label: '陌生人相遇概率', min: 0, max: 1, step: 0.01 },
   { key: 'statusBubbleIntervalMin', label: '状态气泡间隔（分）', min: 5, max: 240, step: 5 },
+  { key: 'buildingDensity', label: '建筑密度（个/千格）', min: 0.5, max: 20, step: 0.1 },
+  { key: 'propDensity', label: '道具密度（个/千格）', min: 0.5, max: 40, step: 0.1 },
 ]
 
 const detailNpc = computed(() => {
@@ -573,11 +633,32 @@ async function generateAllMissingCharSprites() {
 async function saveSettings() {
   savingSettings.value = true
   try {
-    await api.updateTownSettings(settings.value)
+    const result = await api.updateTownSettings(settings.value)
+    if (result?.applied) settings.value = { ...settings.value, ...result.applied }
   } catch (err) {
     console.warn('[town-admin] save settings failed:', err?.message)
   } finally {
     savingSettings.value = false
+  }
+}
+
+async function doRelayout() {
+  if (relayoutBusy.value) return
+  relayoutBusy.value = true
+  relayoutError.value = ''
+  relayoutDone.value = false
+  try {
+    await api.updateTownSettings(settings.value)
+    await api.relayoutTownMap()
+    await loadSettings()
+    town.fetchState().catch(() => {})
+    town.fetchMap().catch(() => {})
+    relayoutDone.value = true
+    layoutConfirm.value = false
+  } catch (err) {
+    relayoutError.value = err?.message || '重新布局失败，请重试'
+  } finally {
+    relayoutBusy.value = false
   }
 }
 
@@ -609,6 +690,25 @@ onMounted(() => {
   z-index: 900;
   display: flex;
   justify-content: flex-end;
+}
+
+.admin-slide-enter-active,
+.admin-slide-leave-active { transition: opacity 0.3s ease; }
+
+.admin-slide-enter-active .admin-panel,
+.admin-slide-leave-active .admin-panel { transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.24s ease; }
+
+.admin-slide-enter-from,
+.admin-slide-leave-to { opacity: 0; }
+
+.admin-slide-enter-from .admin-panel,
+.admin-slide-leave-to .admin-panel { transform: translateX(48px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-slide-enter-active,
+  .admin-slide-leave-active,
+  .admin-slide-enter-active .admin-panel,
+  .admin-slide-leave-active .admin-panel { transition-duration: 0.001ms; }
 }
 
 .admin-panel {
@@ -739,6 +839,10 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.ap-portrait-thumb {
+  width: 100%;
+  height: 100%;
+}
 .ap-portrait-box img {
   width: 100%;
   height: 100%;
@@ -834,6 +938,26 @@ onMounted(() => {
 .ap-setting { display: flex; align-items: center; gap: 12px; }
 .ap-setting-label { flex: 1; font-size: 12px; color: var(--text-primary); }
 .ap-setting > :last-child { width: 90px; }
+
+.ap-layout-zone {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(224, 123, 108, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ap-layout-desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.ap-layout-error { font-size: 12px; color: #b85343; }
+.ap-layout-done { font-size: 12px; color: #4f7a4a; }
 
 .ap-danger-zone {
   margin-top: 16px;

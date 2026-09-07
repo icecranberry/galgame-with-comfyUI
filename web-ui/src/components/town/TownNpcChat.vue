@@ -154,7 +154,7 @@ onMounted(() => {
 .nc-zoom { position: relative; height: min(86vh, 900px); max-width: calc(100vw - 40px); }
 .nc-zoom img { width: 100%; height: 100%; object-fit: contain; }
 .nc-zoom-close { position: absolute; right: 10px; top: 10px; }
-@media (max-width: 700px) {
+@container town-world (max-width: 700px) {
   .npc-chat { height: calc(100% - 112px); grid-template-columns: 1fr 1fr; grid-template-rows: minmax(80px, 1fr) minmax(220px, 48%); gap: 0; padding: 0 6px 10px; }
   .nc-main { grid-column: 1 / -1; grid-row: 2; width: 100%; height: 100%; padding: 23px 25px; }
   .nc-portrait { grid-row: 1; height: 100%; padding: 0 8px; }

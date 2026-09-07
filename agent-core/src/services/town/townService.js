@@ -20,9 +20,10 @@ import { buildCharacterPersona } from '../characterPersona.js';
 import { applyMemoryActions } from '../memory/memoryRepository.js';
 import { getWeatherContext } from '../weatherService.js';
 import { getMapRow, buildWalkGridFromLayers } from './townMapService.js';
+import { getTownGenerationSettings, updateTownGenerationSettings } from './townGenerationConfig.js';
 import { buildLocationMatcher } from './townLocationMatch.js';
 import { findPath, isWalkable, pickStandingCell } from './townPathfinding.js';
-import { listAssets, createAsset, getAssetsByKey, deleteAsset } from './townAssetService.js';
+import { listAssets, createAsset, regenerateAsset, getAssetsByKey, deleteAsset } from './townAssetService.js';
 import { generateSpritePrompt } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection } from '../characterPersona.js';
 import {
@@ -1356,14 +1357,17 @@ export async function generateCharacterSprites(characterId) {
     const key = `char_${characterId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
     if (existing?.status === 'ready') continue;
-    if (existing) deleteAsset(existing.id);
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
-      await createAsset({
-        kind: 'npc', key, name: `${row.display_name || row.name} ${dir}`,
-        desc: appearance || row.display_name,
-        meta: { direction: dir, characterId, promptOverride: prompt },
-      });
+      if (existing) {
+        await regenerateAsset(existing.id, { prompt });
+      } else {
+        await createAsset({
+          kind: 'npc', key, name: `${row.display_name || row.name} ${dir}`,
+          desc: appearance || row.display_name,
+          meta: { direction: dir, characterId, promptOverride: prompt },
+        });
+      }
     } catch (err) {
       console.warn(`[town] char #${characterId} sprite ${dir} failed:`, err?.message);
     }
@@ -1385,14 +1389,20 @@ const TOWN_SETTING_FIELDS = {
   encounterRelatedProb: { min: 0, max: 1, type: 'float' },
   encounterStrangerProb: { min: 0, max: 1, type: 'float' },
   statusBubbleIntervalMin: { min: 5, max: 240, type: 'int' },
+  buildingDensity: { min: 0.5, max: 20, type: 'float' },
+  propDensity: { min: 0.5, max: 40, type: 'float' },
 };
 
 export function getTownSettings() {
-  return { ...config.town };
+  return { ...config.town, generation: getTownGenerationSettings() };
 }
 
 export function updateTownSettings(patch = {}) {
+  const db = getDb();
   const applied = {};
+  if (patch.generation !== undefined) {
+    updateTownGenerationSettings(patch.generation);
+  }
   for (const [key, spec] of Object.entries(TOWN_SETTING_FIELDS)) {
     if (patch[key] === undefined) continue;
     let v = spec.type === 'int' ? parseInt(patch[key], 10) : parseFloat(patch[key]);
@@ -1401,12 +1411,18 @@ export function updateTownSettings(patch = {}) {
     config.town[key] = v;
     applied[key] = v;
   }
+  // 保证道具密度始终高于建筑密度，而不是只在 prompt 里口头提醒。
+  if (applied.buildingDensity !== undefined || applied.propDensity !== undefined) {
+    config.town.propDensity = Math.min(TOWN_SETTING_FIELDS.propDensity.max, Math.max(config.town.propDensity, config.town.buildingDensity + 0.1));
+    applied.buildingDensity = config.town.buildingDensity;
+    applied.propDensity = config.town.propDensity;
+  }
   if (Object.keys(applied).length > 0) {
     // 存当前生效的全部字段，保证下次启动完整恢复
     const snapshot = {};
     for (const key of Object.keys(TOWN_SETTING_FIELDS)) snapshot[key] = config.town[key];
     try {
-      getDb().prepare(`
+      db.prepare(`
         INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_settings', ?)
         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
       `).run(JSON.stringify(snapshot));

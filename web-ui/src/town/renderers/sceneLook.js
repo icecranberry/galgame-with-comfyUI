@@ -45,9 +45,12 @@ export function townMaterial(kind, options = {}) {
         // Fixed-view relief normals approximate the two facades and roof of legacy
         // isometric artwork; the actual shadow caster remains the footprint prism.
         shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-          vec3 facade = vTownUv.x < .53 ? vec3(0.,0.,1.) : vec3(1.,0.,0.);
+          // Legacy artwork has no authored normal map: a hard UV split cuts
+          // arbitrary roofs in half. Blend only the lighting normal, not pixels.
+          float facadeBlend = smoothstep(.35,.71,vTownUv.x);
+          vec3 facade = normalize(mix(vec3(0.,0.,1.),vec3(1.,0.,0.),facadeBlend));
           vec3 roof = normalize(vec3(.25,.92,.30));
-          vec3 reliefNormal = normalize(mix(facade,roof,smoothstep(.57,.77,vTownUv.y)));
+          vec3 reliefNormal = normalize(mix(facade,roof,smoothstep(.45,.82,vTownUv.y)));
           normal = normalize((viewMatrix * vec4(reliefNormal,0.)).xyz);`)
       }
       if (kind === 'lamp') {
@@ -57,7 +60,7 @@ export function townMaterial(kind, options = {}) {
       }
     }
   }
-  material.customProgramCacheKey = () => `town-cinematic-v3-${kind}`
+  material.customProgramCacheKey = () => `town-cinematic-v4-${kind}`
   return material
 }
 

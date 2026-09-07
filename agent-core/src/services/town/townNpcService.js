@@ -163,17 +163,24 @@ export async function generateNpcSprites(npcId, overrides = {}) {
     const key = `npc_${npcId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
     if (existing?.status === 'ready' && !overrides.force) continue;
-    if (existing) deleteAsset(existing.id);
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
-      await createAsset({
-        kind: 'npc', key, name: `${npcRow.display_name} ${dir}`,
-        desc: npcAppearanceSection(npcRow) || npcRow.display_name,
-        meta: {
-          direction: dir, styleTags, npcId, promptOverride: prompt,
+      // 保留既有素材 ID，避免前端/地图仍引用旧 image_path 时出现 404。
+      if (existing) {
+        await regenerateAsset(existing.id, {
+          styleTags, prompt,
           promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
-        },
-      });
+        });
+      } else {
+        await createAsset({
+          kind: 'npc', key, name: `${npcRow.display_name} ${dir}`,
+          desc: npcAppearanceSection(npcRow) || npcRow.display_name,
+          meta: {
+            direction: dir, styleTags, npcId, promptOverride: prompt,
+            promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+          },
+        });
+      }
     } catch (err) {
       console.warn(`[townNpcs] sprite ${dir} failed:`, err?.message);
     }
@@ -190,14 +197,17 @@ export async function generateNpcPortrait(npcId, overrides = {}) {
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
   const key = `npc_${npcId}_portrait`;
   const existing = getAssetsByKey([key])[0];
-  if (existing) deleteAsset(existing.id);
   const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
   const prompt = await generatePortraitPrompt({ appearanceInfo: npcAppearanceInfo(npcRow, styleTags) });
-  const asset = await createAsset({
-    kind: 'portrait', key, name: `${npcRow.display_name} 立绘`,
-    desc: npcAppearanceSection(npcRow) || npcRow.display_name,
-    meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
-  });
+  const asset = existing
+    ? await regenerateAsset(existing.id, {
+      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+    })
+    : await createAsset({
+      kind: 'portrait', key, name: `${npcRow.display_name} 立绘`,
+      desc: npcAppearanceSection(npcRow) || npcRow.display_name,
+      meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
+    });
   return { ok: true, asset };
 }
 
@@ -260,22 +270,29 @@ export async function regeneratePlayerSprite(direction, overrides = {}) {
   if (!SPRITE_DIRECTIONS.includes(direction)) throw new Error('无效的小人方向');
   const key = `player_${direction}`;
   const existing = getAssetsByKey([key])[0];
-  if (existing) deleteAsset(existing.id);
   const prompt = await generateSpritePrompt({
     appearanceInfo: playerAppearanceInfo(),
     direction,
   });
-  await createAsset({
-    kind: 'player', key, name: `玩家 ${direction}`, desc: 'the player character',
-    meta: {
-      direction,
-      styleTags: getWorldStyleTags(),
-      promptOverride: prompt,
-      promptPrefix: overrides.promptPrefix,
-      loras: overrides.loras,
-      artist: overrides.artist,
-    },
-  });
+  const styleTags = getWorldStyleTags();
+  if (existing) {
+    // 保留素材 ID；旧图会一直显示到新图生成成功。
+    await regenerateAsset(existing.id, {
+      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+    });
+  } else {
+    await createAsset({
+      kind: 'player', key, name: `玩家 ${direction}`, desc: 'the player character',
+      meta: {
+        direction,
+        styleTags,
+        promptOverride: prompt,
+        promptPrefix: overrides.promptPrefix,
+        loras: overrides.loras,
+        artist: overrides.artist,
+      },
+    });
+  }
   return { ok: true, kit: getPlayerKit() };
 }
 
@@ -285,12 +302,17 @@ export async function regeneratePlayerKit(overrides = {}) {
   for (const dir of SPRITE_DIRECTIONS) {
     const key = `player_${dir}`;
     const existing = getAssetsByKey([key])[0];
-    if (existing) deleteAsset(existing.id);
     const prompt = await generateSpritePrompt({ appearanceInfo: info, direction: dir });
-    await createAsset({
-      kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character',
-      meta: { direction: dir, styleTags, promptOverride: prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
-    });
+    if (existing) {
+      await regenerateAsset(existing.id, {
+        styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+      });
+    } else {
+      await createAsset({
+        kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character',
+        meta: { direction: dir, styleTags, promptOverride: prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
+      });
+    }
   }
   return regeneratePlayerPortrait(overrides);
 }

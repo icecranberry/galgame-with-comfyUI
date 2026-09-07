@@ -16,7 +16,7 @@ import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createAsset, listAssets } from './townAssetService.js';
-import { saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
+import { getMapRow, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
 
@@ -585,7 +585,7 @@ export function generateLayout() {
     const layoutMsgs = [
       ...townPromptSystemMessages(world),
       { role: 'system', content: buildLayoutOutputStructure(cols, rows) },
-      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory) },
+      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory, cols, rows) },
       {
         role: 'user',
         content: [
@@ -595,7 +595,7 @@ export function generateLayout() {
       },
     ];
     const content = await chatSync(layoutMsgs, {
-      max_tokens: 6000,
+      max_tokens: 8196,
       temperature: 0.8,
       response_format: { type: 'json_object' },
       label: '小镇布图',
@@ -647,7 +647,10 @@ function buildLayoutOutputStructure(cols, rows) {
   ].join('\n');
 }
 
-function buildLayoutTaskRequirements(bp, inventory) {
+function buildLayoutTaskRequirements(bp, inventory, cols = 50, rows = 50) {
+  const cellCount = cols * rows;
+  const buildingTarget = Math.max(1, Math.round(cellCount * config.town.buildingDensity / 1000));
+  const propTarget = Math.max(buildingTarget + 1, Math.round(cellCount * config.town.propDensity / 1000));
   return [
     '【任务要求】',
     '你是像素小镇的地图设计师。请规划符合世界观的小镇布局（格子坐标，x 向右 y 向下，原点左上）。',
@@ -655,10 +658,11 @@ function buildLayoutTaskRequirements(bp, inventory) {
     '【可用素材】',
     JSON.stringify(inventory, null, 1),
     '',
+    `【密度目标】建筑约 ${buildingTarget} 个实例（可上下浮动 20%）；道具约 ${propTarget} 个实例（必须多于建筑，可上下浮动 20%）。`,
     '布局规则（务必遵守）：',
     '- groundRects：先用草地/泥土这类基础地砖铺满整图（x=0,y=0,w=地图宽度,h=地图高度），再叠加特色区域；广场/花田等特色区域合计只占全图 10%~20%，不要让广场砖盖满全图',
     '- roadPaths：点列之间按先横后纵的 L 形铺路；主路要纵横贯通（至少一横一纵），路网要连接所有建筑门口；道路从地图边缘通到中心广场',
-    '- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）；道具（树/长椅）散布 10~25 个填充建筑之间的空地，不要放在路上',
+    '- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）。道具（树/长椅）按密度目标散布在建筑之间，不要放在路上',
     '- locations：每栋 special 建筑都要绑定一个地点（objectRef = "key:instance"）；通用居民楼不用每个都绑；再挑 1~3 个开阔处设户外地点（广场/公园，给 x/y/radius）；aliases 是日程文本常用的同义词',
     `- npcSpawns：恰好 ${bp.npcs.length} 位居民，npcRef 用居民 displayName 原文，locationKey 用上面定义的地点 key`,
     '- 建筑之间留出步行空间，不要把地图塞满',
@@ -1165,4 +1169,61 @@ export function cancelInit() {
 /** 重掷布局（复用已生成素材，不重生图） */
 export function rerollLayout() {
   return generateLayout();
+}
+
+/** 管理面板重新布局：复用现有素材与居民，仅重建地图/道路/POI */
+export function relayoutWorld() {
+  return enqueueStep(async () => {
+    const mapRow = getMapRow();
+    if (!mapRow) return { ok: false, error: '小镇尚未初始化' };
+    const cols = mapRow.grid_cols;
+    const rows = mapRow.grid_rows;
+    const ready = listAssets({}).filter(a => a.status === 'ready' && ['ground', 'road', 'building', 'prop'].includes(a.kind));
+    if (ready.length < 4) return { ok: false, error: '可用素材不足，无法重新布局' };
+
+    const world = getWorldSetting(mapRow.world_setting_id);
+    const db = getDb();
+    const npcRows = db.prepare('SELECT display_name FROM town_npcs ORDER BY id').all();
+    const inventory = ready.map(a => ({
+      kind: a.kind, key: a.key, name: a.name,
+      footprint: a.meta?.footprint || undefined,
+      reusable: a.meta?.reusable || undefined,
+      maxInstances: a.meta?.maxInstances || undefined,
+      blocking: a.kind === 'prop' ? !!a.meta?.blocking : undefined,
+    }));
+    const bp = {
+      styleTags: job?.blueprint?.styleTags || config.town.generation?.styleTags || '',
+      npcs: npcRows.map(r => ({ displayName: r.display_name })),
+    };
+
+    const layoutMsgs = [
+      ...townPromptSystemMessages(world),
+      { role: 'system', content: buildLayoutOutputStructure(cols, rows) },
+      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory, cols, rows) },
+      {
+        role: 'user',
+        content: [`请执行：为现有小镇重新输出 ${cols}×${rows} 布局 JSON。保留世界观气质，但重新规划建筑、道路和 POI。`].join('\n'),
+      },
+    ];
+    const content = await chatSync(layoutMsgs, {
+      max_tokens: 8196,
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+      label: '小镇重新布图',
+    });
+    const parsed = safeJsonParse(content);
+    if (!parsed) throw new Error('重新布局 JSON 解析失败');
+
+    const draft = expandLayout(parsed, ready, bp, cols, rows);
+    const saved = saveMap({
+      name: mapRow.name || '小镇',
+      cols, rows,
+      tileSize: mapRow.tile_size || 32,
+      layers: draft.layers,
+      worldSettingId: mapRow.world_setting_id || null,
+      locations: draft.locations,
+    });
+
+    return { ok: true, mapId: saved.mapId, version: saved.version, warnings: draft.warnings || [] };
+  });
 }

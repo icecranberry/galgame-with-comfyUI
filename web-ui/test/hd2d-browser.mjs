@@ -200,6 +200,31 @@ try {
 
   await page.evaluate(() => probe.renderer.dispose())
 
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+  const phonePage = await phone.newPage()
+  phonePage.on('pageerror', e => errors.push(e.message))
+  await phonePage.route('**/api/**', route => new URL(route.request().url()).pathname.startsWith('/api/') ? route.fulfill({ contentType: 'application/json', body: '{}' }) : route.continue())
+  await phonePage.goto('http://127.0.0.1:5189/test/hd2d-fixture.html?page=1')
+  await phonePage.waitForFunction(() => document.querySelectorAll('canvas').length === 2 && document.querySelector('.town-view').clientWidth > document.querySelector('.town-view').clientHeight).catch(async error => { console.log(await phonePage.evaluate(() => ({ width: innerWidth, coarse: matchMedia('(pointer: coarse)').matches, nodes: [...document.querySelectorAll('.town-shell,.town-view,canvas')].map(e => ({ cls: e.className, w: e.clientWidth, h: e.clientHeight, css: getComputedStyle(e).transform })) }))); throw error })
+  results.phoneLandscape = await phonePage.locator('.town-view').evaluate(el => ({ width: el.clientWidth, height: el.clientHeight, transform: getComputedStyle(el).transform, canvasWidth: el.querySelector('.town-canvas').clientWidth }))
+  assert.equal(results.phoneLandscape.width, 844)
+  assert.equal(results.phoneLandscape.height, 390)
+  assert.equal(results.phoneLandscape.canvasWidth, 844)
+  await phonePage.waitForTimeout(500)
+  await phonePage.screenshot({ path: path.join(output, 'phone-portrait-landscape-world.png') })
+  const npcTap = await phonePage.locator('.town-view').evaluate(el => {
+    const r = el.getBoundingClientRect()
+    return { x: r.right - (el.clientHeight / 2 - 24 - 54), y: r.top + el.clientWidth / 2 - 48 }
+  })
+  await phonePage.touchscreen.tap(npcTap.x, npcTap.y)
+  await phonePage.getByRole('dialog', { name: '与邻居对话', exact: true }).waitFor()
+  assert.equal(await phonePage.locator('.npc-chat').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 3)
+  await phonePage.setViewportSize({ width: 844, height: 390 })
+  await phonePage.waitForFunction(() => getComputedStyle(document.querySelector('.town-view')).transform === 'none')
+  assert.equal(await phonePage.locator('.town-view').evaluate(el => el.clientWidth), 844)
+  await phonePage.screenshot({ path: path.join(output, 'phone-native-landscape.png') })
+  await phone.close()
+
   await page.route('**/api/**', async route => {
     const pathname = new URL(route.request().url()).pathname
     if (!pathname.startsWith('/api/')) return route.continue()

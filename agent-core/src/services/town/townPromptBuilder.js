@@ -188,3 +188,49 @@ export async function generateBuildingPrompt({ name, desc, footprint, special = 
   if (!text || text.length < 10) throw new Error('LLM 生成的建筑提示词不完整');
   return text;
 }
+
+// ── 已有素材：根据用户要求改写当前提示词 ──
+/**
+ * 按用户自然语言要求改写已有素材提示词。
+ * @param {object} p - { currentPrompt, requirement, kind, name }
+ */
+export async function regenerateAssetPrompt({ currentPrompt, requirement = '', kind = 'asset', name = '' }) {
+  const source = String(currentPrompt || '').trim();
+  if (!source) throw new Error('当前素材缺少提示词');
+  const request = String(requirement || '').trim();
+  const msgs = [
+    ...system0And1(),
+    {
+      role: 'system',
+      content: `【输出结构】
+Rewrite the existing game-asset image prompt as one natural English paragraph.
+
+Hard Rules:
+- Preserve the original asset type, required composition, and technical constraints (for example white background, isometric view, sprite framing, or front/back view).
+- Preserve the style unless the user explicitly asks to change it.
+- Apply every explicit user request. If a request conflicts with the asset type, favor the asset type and make a conservative compromise.
+- ALL text in English. No Chinese characters anywhere.
+- Output only the rewritten prompt, without headings, explanations, analysis, lists, or code fences.
+- Do not use unescaped double quotation marks ("). Use single quotes (') instead.
+- MAX 700 characters total.`
+    },
+    {
+      role: 'system',
+      content: [`【当前素材】`, name ? `名称：${name}` : '', `类型：${kind}`, `当前提示词：${source}`].filter(Boolean).join('\n')
+    },
+    {
+      role: 'user',
+      content: request
+        ? `【用户修改要求】\n${request}\n\n请执行：改写当前提示词，并以英文 prompt 输出。`
+        : '请执行：在保持素材主体与技术要求的前提下优化当前提示词，并以英文 prompt 输出。'
+    },
+  ];
+  const out = await chatSync(msgs, {
+    temperature: 0.55,
+    max_tokens: 700,
+    label: '小镇素材提示词改写',
+  });
+  const text = stripFence(out);
+  if (!text || text.length < 10) throw new Error('LLM 改写的提示词不完整');
+  return text;
+}

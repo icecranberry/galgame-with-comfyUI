@@ -1953,6 +1953,14 @@ export function fetchTownAsset(id) {
   return jsonRequest(`${BASE}/town/assets/${id}`)
 }
 
+export function regenerateTownAssetPrompt(id, requirement) {
+  return jsonRequest(`${BASE}/town/assets/${id}/regenerate-prompt`, townJson('POST', { requirement }))
+}
+
+// 保存单张素材的画师串 / LoRA / 固定前缀
+export function updateTownAssetGeneration(id, payload) {
+  return jsonRequest(`${BASE}/town/assets/${id}/generation`, townJson('PATCH', payload))
+}
 // 保存前端编辑后的素材图（点击抠除颜色 / 裁剪，dataUrl PNG）
 export function saveTownAssetImage(id, dataUrl) {
   return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
@@ -2115,6 +2123,10 @@ export function fetchTownSettings() {
 
 export function updateTownSettings(patch) {
   return jsonRequest(`${BASE}/town/settings`, townJson('PUT', patch))
+}
+
+export function relayoutTownMap() {
+  return jsonRequest(`${BASE}/town/map/relayout`, townJson('POST', {}))
 }
 
 export function resetTownWorld() {

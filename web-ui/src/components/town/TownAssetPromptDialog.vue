@@ -28,6 +28,25 @@
           </div>
 
           <div class="tpd-error" v-if="error">{{ error }}</div>
+          <div class="tpd-field">
+            <div class="tpd-label">按要求重写提示词</div>
+            <linshe-input
+              v-model="requirement"
+              type="textarea"
+              :rows="3"
+              size="sm"
+              placeholder="例如：把屋檐改成青色，加一串小灯笼"
+            />
+            <div class="tpd-rewrite">
+              <linshe-button
+                variant="secondary"
+                size="sm"
+                :loading="rewriting"
+                @click="rewritePrompt"
+              >按上面要求改写提示词</linshe-button>
+              <span class="tpd-hint">结果填入新提示词，可继续修改后再重生成图片</span>
+            </div>
+          </div>
 
           <div class="tpd-actions">
             <linshe-button variant="ghost" size="sm" @click="close">取消</linshe-button>
@@ -56,13 +75,16 @@ const emit = defineEmits(['close', 'regenerated'])
 
 const currentPrompt = ref('')
 const draft = ref('')
+const requirement = ref('')
 const busy = ref(false)
+const rewriting = ref(false)
 const error = ref('')
 
 watch(() => props.visible, async (v) => {
   if (!v || !props.assetId) return
   currentPrompt.value = ''
   draft.value = ''
+  requirement.value = ''
   error.value = ''
   try {
     const data = await api.fetchTownAsset(props.assetId)
@@ -75,6 +97,19 @@ function close() {
   emit('close')
 }
 
+async function rewritePrompt() {
+  if (!props.assetId || rewriting.value) return
+  rewriting.value = true
+  error.value = ''
+  try {
+    const prompt = await api.regenerateTownAssetPrompt(props.assetId, requirement.value.trim())
+    draft.value = prompt.prompt || ''
+  } catch (err) {
+    error.value = err?.message || '提示词改写失败'
+  } finally {
+    rewriting.value = false
+  }
+}
 async function regen() {
   if (busy.value) return
   busy.value = true
@@ -143,6 +178,13 @@ async function regen() {
 }
 
 .tpd-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.tpd-rewrite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
 
 .tpd-fade-enter-active, .tpd-fade-leave-active { transition: opacity 0.2s ease; }
 .tpd-fade-enter-from, .tpd-fade-leave-to { opacity: 0; }

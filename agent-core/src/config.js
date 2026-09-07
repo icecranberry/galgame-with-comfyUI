@@ -108,6 +108,20 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     encounterRelatedProb: 0.28,  // 有关系角色同地点相遇概率（每 tick）
     encounterStrangerProb: 0.05, // 陌生人相遇概率（用于发展新关系）
     statusBubbleIntervalMin: 45, // 批量状态气泡间隔（分钟）
+    // 布图密度：每 1000 格的目标对象数。原建筑均值约 2.8，默认提升 50% 后为 4.2；
+    // 道具必须始终高于建筑，由 updateTownSettings 统一夹紧。
+    buildingDensity: 4.2,
+    propDensity: 8,
+    // 世界生成配置：自定义生成偏好与各步骤画师串/前置提示词/LoRA；DB system_settings 持久化
+    generation: {
+      styleTags: '',
+      steps: {
+        tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
+        player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
+      },
+    },
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',

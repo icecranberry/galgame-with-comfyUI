@@ -43,4 +43,4 @@ MaiBot-Container/
 HyperFrames/
 
 # Isolated M1 UI build (screenshots and verification report remain reviewable)
-output/hd2d-m1/ui-build/
+output/
