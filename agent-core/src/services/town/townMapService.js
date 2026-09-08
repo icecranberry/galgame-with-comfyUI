@@ -112,10 +112,23 @@ export function getMapPayload() {
 
 /**
  * 保存地图（编辑器确认 / 向导开镇共用）：单地图 upsert，version+1 并广播
- * layers 内未带 id 的对象自动补 id；带 locations 时全量重建 POI。
+ * layers 内未带 id 的对象自动补 id。
+ * locations 缺省/null 保留 POI；数组为当前地图完整集合，[] 清空。
+ * key 是不可变身份：同 key 原位更新并保留 id；传入 id 时必须与该 key 匹配。
+ * 地图、POI 与删除地点的住宅引用在同一事务提交，成功后才广播。
  */
 export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingId = null, locations = null }) {
   const db = getDb();
+  if (locations !== null && !Array.isArray(locations)) throw new Error('locations 必须为数组或 null');
+  const keys = new Set();
+  for (const loc of locations || []) {
+    if (!loc || typeof loc.key !== 'string' || !loc.key.trim()
+      || typeof loc.name !== 'string' || !loc.name.trim()) {
+      throw new Error('地点 key/name 必填');
+    }
+    if (keys.has(loc.key)) throw new Error(`地点 key 重复: ${loc.key}`);
+    keys.add(loc.key);
+  }
   if (!layers || !Array.isArray(layers.ground)) throw new Error('layers.ground 矩阵缺失');
   if (!Array.isArray(layers.road)) layers.road = Array.from({ length: rows }, () => Array(cols).fill(null));
   if (!Array.isArray(layers.objects)) layers.objects = [];
@@ -127,65 +140,61 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
   for (const o of layers.objects) if (Number.isInteger(o.id)) nextId = Math.max(nextId, o.id + 1);
   for (const o of layers.objects) if (!Number.isInteger(o.id)) o.id = nextId++;
 
-  const existing = db.prepare('SELECT id, version FROM town_maps ORDER BY id LIMIT 1').get();
-  const layersJson = JSON.stringify(layers);
-  let mapId;
-  let version;
-  if (existing) {
-    // v1 地图升级：保留行 id；无 layers 的旧行 version 视为 0
-    version = (existing.version || 0) + 1;
-    db.prepare(`
-      UPDATE town_maps SET name = ?, grid_cols = ?, grid_rows = ?, layers_json = ?, tile_size = ?,
-        world_setting_id = COALESCE(?, world_setting_id), version = ?
-      WHERE id = ?
-    `).run(name, cols, rows, layersJson, tileSize, worldSettingId, version, existing.id);
-    mapId = existing.id;
-  } else {
-    version = 1;
-    const r = db.prepare(`
-      INSERT INTO town_maps (name, grid_cols, grid_rows, layers_json, tile_size, world_setting_id, version)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
-    `).run(name, cols, rows, layersJson, tileSize, worldSettingId);
-    mapId = Number(r.lastInsertRowid);
-  }
-
-  if (Array.isArray(locations)) {
-    // POI 全量重建会让 home_location_id 失效 → 先记旧 id→key 映射，重建后按 key 回填
-    const oldKeyById = new Map(
-      db.prepare('SELECT id, key FROM town_locations').all().map(r => [r.id, r.key])
-    );
-    const oldNpcHomes = db.prepare('SELECT id, home_location_id AS h FROM town_npcs WHERE home_location_id IS NOT NULL').all()
-      .map(r => [r.id, r.h]);
-    const oldCharHomes = db.prepare('SELECT character_id AS id, home_location_id AS h FROM town_characters WHERE home_location_id IS NOT NULL').all()
-      .map(r => [r.id, r.h]);
-    // town_characters.home_location_id 带 FK（无级联），先断开引用再删
-    db.exec('UPDATE town_characters SET home_location_id = NULL');
-    db.exec('UPDATE town_npcs SET home_location_id = NULL');
-    const insLoc = db.prepare(`
-      INSERT INTO town_locations (map_id, key, name, aliases_json, kind, grid_x, grid_y, radius, ambient, object_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    db.exec('DELETE FROM town_locations');
-    const idByKey = new Map();
-    for (const loc of locations) {
-      if (!loc?.key || !loc?.name) continue;
-      const r = insLoc.run(
-        mapId, loc.key, loc.name, JSON.stringify(loc.aliases || []), loc.kind || 'place',
-        loc.x || 0, loc.y || 0, loc.radius || 2, loc.ambient || '', loc.objectId ?? null,
-      );
-      idByKey.set(loc.key, Number(r.lastInsertRowid));
+  const result = db.transaction(() => {
+    const existing = db.prepare('SELECT id, version FROM town_maps ORDER BY id LIMIT 1').get();
+    const layersJson = JSON.stringify(layers);
+    let mapId;
+    let version;
+    if (existing) {
+      // v1 地图升级：保留行 id；无 layers 的旧行 version 视为 0
+      version = (existing.version || 0) + 1;
+      db.prepare(`
+        UPDATE town_maps SET name = ?, grid_cols = ?, grid_rows = ?, layers_json = ?, tile_size = ?,
+          world_setting_id = COALESCE(?, world_setting_id), version = ?
+        WHERE id = ?
+      `).run(name, cols, rows, layersJson, tileSize, worldSettingId, version, existing.id);
+      mapId = existing.id;
+    } else {
+      version = 1;
+      const r = db.prepare(`
+        INSERT INTO town_maps (name, grid_cols, grid_rows, layers_json, tile_size, world_setting_id, version)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+      `).run(name, cols, rows, layersJson, tileSize, worldSettingId);
+      mapId = Number(r.lastInsertRowid);
     }
-    const remapHomes = (oldHomes, table, idCol) => {
-      const upd = db.prepare(`UPDATE ${table} SET home_location_id = ? WHERE ${idCol} = ?`);
-      for (const [id, oldHome] of oldHomes) {
-        const key = oldKeyById.get(oldHome);
-        upd.run(key ? (idByKey.get(key) ?? null) : null, id);
-      }
-    };
-    try { remapHomes(oldNpcHomes, 'town_npcs', 'id'); } catch { /* 可容忍 */ }
-    try { remapHomes(oldCharHomes, 'town_characters', 'character_id'); } catch { /* 可容忍 */ }
-  }
 
-  broadcastTownMapUpdated({ mapId, version });
-  return { ok: true, mapId, version, layers };
+    if (Array.isArray(locations)) {
+      const oldLocations = db.prepare('SELECT id, key FROM town_locations WHERE map_id = ?').all(mapId);
+      const oldByKey = new Map(oldLocations.map(loc => [loc.key, loc]));
+      const insLoc = db.prepare(`
+        INSERT INTO town_locations (map_id, key, name, aliases_json, kind, grid_x, grid_y, radius, ambient, object_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const updLoc = db.prepare(`
+        UPDATE town_locations SET name = ?, aliases_json = ?, kind = ?, grid_x = ?, grid_y = ?,
+          radius = ?, ambient = ?, object_id = ? WHERE id = ? AND map_id = ?
+      `);
+      for (const loc of locations) {
+        const old = oldByKey.get(loc.key);
+        if (loc.id != null && (!Number.isInteger(loc.id) || loc.id !== old?.id)) {
+          throw new Error(`地点 id/key 不匹配: ${loc.key}`);
+        }
+        const values = [loc.name, JSON.stringify(loc.aliases || []), loc.kind || 'place',
+          loc.x ?? 0, loc.y ?? 0, loc.radius ?? 2, loc.ambient || '', loc.objectId ?? null];
+        if (old) updLoc.run(...values, old.id, mapId);
+        else insLoc.run(mapId, loc.key, ...values);
+      }
+      for (const old of oldLocations) {
+        if (keys.has(old.key)) continue;
+        db.prepare('UPDATE town_characters SET home_location_id = NULL WHERE home_location_id = ?').run(old.id);
+        db.prepare('UPDATE town_npcs SET home_location_id = NULL WHERE home_location_id = ?').run(old.id);
+        db.prepare('UPDATE town_agent_state SET current_location_id = NULL WHERE current_location_id = ?').run(old.id);
+        // 其他业务 FK 若仍引用该地点，删除失败并整体回滚，不能静默破坏引用。
+        db.prepare('DELETE FROM town_locations WHERE id = ? AND map_id = ?').run(old.id, mapId);
+      }
+    }
+    return { ok: true, mapId, version, layers };
+  })();
+  broadcastTownMapUpdated({ mapId: result.mapId, version: result.version });
+  return result;
 }

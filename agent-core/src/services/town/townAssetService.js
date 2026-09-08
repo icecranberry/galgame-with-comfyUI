@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
@@ -154,17 +155,125 @@ export function buildAssetPrompt({ kind, desc, styleTags = '', direction = null,
   return parts.join(', ');
 }
 
-// ── 串行队列：小镇生图永远一次只有一张 ──
+// ── 串行队列：同一 world/epoch 内一次一张，旧世界在途结果隔离 ──
 
-let assetChain = Promise.resolve();
+let assetQueue = { key: null, chain: Promise.resolve() };
 
-function enqueueAssetJob(fn) {
-  const run = assetChain.then(fn).catch(err => {
+function enqueueAssetJob(guard, fn) {
+  assertAssetCurrent(guard);
+  const key = JSON.stringify([guard.worldId, guard.epoch]);
+  // 新世界不等待旧世界仍在网络请求中的任务；旧队列醒来后只会被 fence 拒绝。
+  if (assetQueue.key !== key) assetQueue = { key, chain: Promise.resolve() };
+  const queue = assetQueue;
+  const run = queue.chain.then(() => { assertAssetCurrent(guard); return fn(); }).catch(err => {
+    // A new, image-less row superseded by an outfit change must not remain pending forever.
+    // This is only bookkeeping for our own current-world token; existing ready pixels survive.
+    if (guard.appearanceGuard && err?.code === 'TOWN_ASSET_STALE') {
+      const db = getDb();
+      const changed = db.transaction(() => {
+        const world = captureTownAssetWorld();
+        if (world.worldId !== guard.worldId || world.epoch !== guard.epoch) return false;
+        const current = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(guard.id);
+        if (!current || JSON.parse(current.meta_json || '{}')._assetOperation !== guard.token) return false;
+        const previous = guard.previousAsset;
+        if (previous?.image_path && previous.status === 'ready') {
+          const restored = { ...JSON.parse(previous.meta_json || '{}'), _assetOperation: guard.token };
+          const latest = JSON.parse(current.meta_json || '{}');
+          preserveSavedGenerationConfig(restored, latest);
+          db.prepare("UPDATE town_assets SET meta_json = ?, source_prompt = ?, status = 'ready' WHERE id = ?")
+            .run(JSON.stringify(restored), previous.source_prompt, guard.id);
+          return false;
+        }
+        if (current.image_path || current.status !== 'pending') return false;
+        db.prepare("UPDATE town_assets SET status = 'failed' WHERE id = ?").run(guard.id);
+        return true;
+      }).immediate();
+      if (changed) broadcastTownAssetsUpdated({ asset: getAssetById(guard.id) });
+    }
     console.warn('[townAssets] job failed:', err?.message || err);
     throw err;
   });
-  assetChain = run.catch(() => {});
+  queue.chain = run.catch(() => {});
   return run;
+}
+
+/** Call before an outer prompt-generation await, then pass expectedWorld to createAsset. */
+export function captureTownAssetWorld() {
+  const world = getDb().prepare('SELECT world_id, epoch FROM town_world_state WHERE singleton = 1').get();
+  if (!world) throw new Error('Town world schema has not been initialized');
+  return { worldId: world.world_id, epoch: world.epoch };
+}
+
+function staleAsset() {
+  return Object.assign(new Error('素材所属世界或生成任务已变化，已丢弃旧结果'), { code: 'TOWN_ASSET_STALE' });
+}
+
+function assertWorldCurrent(expected) {
+  const current = captureTownAssetWorld();
+  if (current.worldId !== expected.worldId || current.epoch !== expected.epoch) throw staleAsset();
+}
+
+function claimAsset(row, expectedWorld = captureTownAssetWorld(), appearanceGuard = null) {
+  const db = getDb();
+  return db.transaction(() => {
+    assertWorldCurrent(expectedWorld);
+    if (appearanceGuard) {
+      if (typeof appearanceGuard.assertCurrent !== 'function' || !appearanceGuard.source?.signature) throw staleAsset();
+      appearanceGuard.assertCurrent();
+    }
+    const token = randomUUID();
+    const meta = JSON.parse(row.meta_json || '{}');
+    meta._assetOperation = token;
+    row.meta_json = JSON.stringify(meta);
+    db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(row.meta_json, row.id);
+    return { ...expectedWorld, id: row.id, token, appearanceGuard };
+  }).immediate();
+}
+
+function assertAssetCurrent(guard) {
+  assertWorldCurrent(guard);
+  const row = getDb().prepare('SELECT * FROM town_assets WHERE id = ?').get(guard.id);
+  if (!row || JSON.parse(row.meta_json || '{}')._assetOperation !== guard.token) throw staleAsset();
+  guard.appearanceGuard?.assertCurrent();
+  return row;
+}
+
+// All awaited work must finish before this synchronous commit. Use a unique path so
+// rejected/rolled-back work cannot overwrite a file still referenced by another row.
+function preserveSavedGenerationConfig(meta, latest) {
+  // Explicit saves win even for same-value writes or resetting a field to defaults.
+  for (const field of ['artist', 'loras', 'promptPrefix']) {
+    if (latest._generationConfigEdits?.[field] === meta._generationConfigEdits?.[field]) continue;
+    if (Object.hasOwn(latest, field)) meta[field] = latest[field];
+    else delete meta[field];
+    meta.updatedAt = latest.updatedAt;
+  }
+  if (latest._generationConfigEdits) meta._generationConfigEdits = latest._generationConfigEdits;
+}
+
+function commitAssetImage(guard, row, buffer, meta, status = row.status, sourcePrompt = null) {
+  const db = getDb();
+  const filePath = assetFilePath(row.id, `${row.key || 'asset'}_${guard.token}`);
+  const imagePath = `/town-assets/${path.basename(filePath)}`;
+  try {
+    db.transaction(() => {
+      const latest = assertAssetCurrent(guard);
+      preserveSavedGenerationConfig(meta, JSON.parse(latest.meta_json || '{}'));
+      fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
+      fs.writeFileSync(filePath, buffer);
+      db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ?, status = ?, source_prompt = COALESCE(?,source_prompt) WHERE id = ?')
+        .run(imagePath, JSON.stringify(meta), status, sourcePrompt, row.id);
+    }).immediate();
+  } catch (err) {
+    try { fs.unlinkSync(filePath); } catch { /* only our unique unpublished file */ }
+    throw err;
+  }
+  if (row.image_path && path.basename(row.image_path) !== path.basename(filePath)) {
+    try { fs.unlinkSync(path.join(TOWN_ASSETS_DIR, path.basename(row.image_path))); } catch { /* optional old file */ }
+  }
+  const fresh = getAssetById(row.id);
+  broadcastTownAssetsUpdated({ asset: fresh });
+  return fresh;
 }
 
 // ── 存储 ──
@@ -182,7 +291,8 @@ function rowToAsset(row) {
 }
 
 /** 生成一张素材并落盘落库（串行队列内执行） */
-async function generateIntoRow(row) {
+async function generateIntoRow(row, guard) {
+  assertAssetCurrent(guard);
   const db = getDb();
   const meta = JSON.parse(row.meta_json || '{}');
   const spec = ASSET_SPECS[row.kind];
@@ -196,6 +306,7 @@ async function generateIntoRow(row) {
     prompt = meta.promptOverride;
   } else if (row.kind === 'building' && meta.useLlmPrompt !== false) {
     prompt = await buildBuildingPromptViaLlm({ name: row.name, desc: meta.desc, footprint: meta.footprint, special: !!meta.special, styleTags: meta.styleTags || '' });
+    assertAssetCurrent(guard);
   } else {
     prompt = buildAssetPrompt({
       kind: row.kind,
@@ -210,7 +321,12 @@ async function generateIntoRow(row) {
   const generationDefaults = generationDefaultsForAsset(row);
   const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : generationDefaults.prefix;
   if (prefix) prompt = `${prefix}, ${prompt}`;
-  db.prepare(`UPDATE town_assets SET status = 'pending', source_prompt = ? WHERE id = ?`).run(prompt, row.id);
+  db.transaction(() => {
+    assertAssetCurrent(guard);
+    if (!(row.status === 'ready' && row.image_path)) {
+      db.prepare(`UPDATE town_assets SET status = 'pending', source_prompt = ? WHERE id = ?`).run(prompt, row.id);
+    }
+  }).immediate();
 
   try {
     const result = await generateImageRaw(prompt, {
@@ -221,6 +337,7 @@ async function generateIntoRow(row) {
       height: size.height,
       loras: Array.isArray(meta.loras) && meta.loras.length ? meta.loras : (generationDefaults.loras.length ? generationDefaults.loras : undefined),
     });
+    assertAssetCurrent(guard);
     if (!result?.success || !result.images?.length) {
       throw new Error(result?.error || 'ComfyUI 未返回图片');
     }
@@ -230,7 +347,10 @@ async function generateIntoRow(row) {
     // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
     const isTile = row.kind === 'ground' || row.kind === 'road';
     let work = buffer;
-    if (isTile) work = await flattenIsoTile(work);
+    if (isTile) {
+      work = await flattenIsoTile(work);
+      assertAssetCurrent(guard);
+    }
     let tw;
     let th;
     let smoothResize = false;
@@ -253,36 +373,28 @@ async function generateIntoRow(row) {
     const outBuffer = await postProcessAsset(work, {
       targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent, smoothResize,
     });
-
-    const filePath = assetFilePath(row.id, row.key);
-    fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
-    // 旧文件（重生成可能换 key）先清理
-    for (const f of fs.readdirSync(TOWN_ASSETS_DIR)) {
-      if (f.startsWith(`asset_${row.id}_`) && f !== path.basename(filePath)) {
-        try { fs.unlinkSync(path.join(TOWN_ASSETS_DIR, f)); } catch { /* 可容忍 */ }
-      }
-    }
-    fs.writeFileSync(filePath, outBuffer);
-
-    const imagePath = `/town-assets/${path.basename(filePath)}`;
+    assertAssetCurrent(guard);
     const outputMeta = await sharp(outBuffer).metadata();
+    assertAssetCurrent(guard);
     meta.pixelSize = { w: outputMeta.width, h: outputMeta.height };
     meta.styleTags = meta.styleTags || '';
     meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
     // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5
     if (isTile) {
       meta.groundAnchorY = (await detectTileAnchorY(outBuffer)) ?? 0.5;
+      assertAssetCurrent(guard);
     }
-    db.prepare(`
-      UPDATE town_assets SET image_path = ?, meta_json = ?, status = 'ready' WHERE id = ?
-    `).run(imagePath, JSON.stringify(meta), row.id);
-
-    const fresh = getAssetById(row.id);
-    broadcastTownAssetsUpdated({ asset: fresh });
-    console.log(`[townAssets] ready #${row.id} ${row.kind}/${row.key} → ${imagePath}`);
+    // Provenance describes these new pixels, never the prompt merely saved for a future job.
+    if (guard.appearanceGuard) meta.appearanceSource = guard.appearanceGuard.source;
+    else delete meta.appearanceSource;
+    const fresh = commitAssetImage(guard, row, outBuffer, meta, 'ready', prompt);
+    console.log(`[townAssets] ready #${row.id} ${row.kind}/${row.key} → ${fresh.image_path}`);
     return fresh;
   } catch (err) {
-    db.prepare(`UPDATE town_assets SET status = 'failed' WHERE id = ?`).run(row.id);
+    db.transaction(() => {
+      assertAssetCurrent(guard); // stale failure must not mark a replacement asset failed
+      if (!(row.status === 'ready' && row.image_path)) db.prepare(`UPDATE town_assets SET status = 'failed' WHERE id = ?`).run(row.id);
+    }).immediate();
     broadcastTownAssetsUpdated({ asset: getAssetById(row.id) });
     throw err;
   }
@@ -290,7 +402,7 @@ async function generateIntoRow(row) {
 
 /**
  * 保存前端编辑后的素材图片（点击抠白 / 裁底等编辑产物，dataUrl PNG）
- * 覆盖原文件并 bump meta.updatedAt 供前端缓存穿透
+ * 发布新文件路径并 bump meta.updatedAt 供前端缓存穿透
  */
 export async function saveEditedAssetImage(id, dataUrl) {
   const db = getDb();
@@ -300,23 +412,18 @@ export async function saveEditedAssetImage(id, dataUrl) {
     throw new Error('invalid image dataUrl');
   }
   const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  const guard = claimAsset(row);
   // 尺寸守卫：编辑产物不超过 2048px
   const meta = await sharp(buffer).metadata();
+  assertAssetCurrent(guard);
   if (!meta.width || !meta.height || meta.width > 2048 || meta.height > 2048) {
     throw new Error('图片尺寸异常');
   }
-  const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
-  fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
-  fs.writeFileSync(filePath, buffer);
-
   const m = JSON.parse(row.meta_json || '{}');
   m.updatedAt = Date.now();
   m.editedAt = m.updatedAt;
-  db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ?, status = ? WHERE id = ?')
-    .run(`/town-assets/${path.basename(filePath)}`, JSON.stringify(m), 'ready', id);
-  const fresh = getAssetById(id);
-  broadcastTownAssetsUpdated({ asset: fresh });
-  return fresh;
+  delete m.appearanceSource; // arbitrary uploaded pixels have no trusted generation source
+  return commitAssetImage(guard, row, buffer, m, 'ready');
 }
 
 /**
@@ -334,24 +441,22 @@ export async function cropAssetImage(id, rect) {
   }
   const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
   if (!fs.existsSync(filePath)) throw new Error('素材文件不存在');
+  const guard = claimAsset(row);
   const meta = await sharp(filePath).metadata();
+  assertAssetCurrent(guard);
   if (x + w > meta.width || y + h > meta.height) throw new Error('截取框超出图片范围');
   const out = await sharp(filePath)
     .extract({ left: x, top: y, width: w, height: h })
     .png()
     .toBuffer();
-  fs.writeFileSync(filePath, out);
+  assertAssetCurrent(guard);
 
   const m = JSON.parse(row.meta_json || '{}');
   m.updatedAt = Date.now();
   m.croppedAt = m.updatedAt;
   m.pixelSize = { w, h };
   if (row.kind === 'ground' || row.kind === 'road') m.groundAnchorY = 0.5; // 裁切后菱形占满画幅
-  db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ? WHERE id = ?')
-    .run(`/town-assets/${path.basename(filePath)}`, JSON.stringify(m), id);
-  const fresh = getAssetById(id);
-  broadcastTownAssetsUpdated({ asset: fresh });
-  return fresh;
+  return commitAssetImage(guard, row, out, m);
 }
 
 /** 小镇素材 HiresFix：沿用素材 source_prompt/meta，并按全局 HiresFix 设置细化后覆盖 */
@@ -363,23 +468,31 @@ export async function refineAssetWithHires(id) {
   const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path || assetFilePath(id, row.key)));
   if (!fs.existsSync(filePath)) throw new Error('素材文件不存在');
 
+  const guard = claimAsset(row);
   const meta = JSON.parse(row.meta_json || '{}');
-  await refineImage({
-    filePath,
-    promptText: row.source_prompt,
-    artist: meta.artist !== undefined ? meta.artist : config.comfyui.artist,
-    loras: Array.isArray(meta.loras) ? meta.loras : [],
-    scene: 'town',
-  });
-
-  const sharpMeta = await sharp(filePath).metadata();
-  meta.updatedAt = Date.now();
-  meta.hiresAt = meta.updatedAt;
-  meta.pixelSize = { w: sharpMeta.width, h: sharpMeta.height };
-  db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
-  const fresh = getAssetById(id);
-  broadcastTownAssetsUpdated({ asset: fresh });
-  return fresh;
+  fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
+  const stagePath = path.join(TOWN_ASSETS_DIR, `.hires-${guard.token}.png`);
+  try {
+    await refineImage({
+      filePath,
+      outPath: stagePath,
+      promptText: row.source_prompt,
+      artist: meta.artist !== undefined ? meta.artist : config.comfyui.artist,
+      loras: Array.isArray(meta.loras) ? meta.loras : [],
+      scene: 'town',
+    });
+    assertAssetCurrent(guard);
+    const sharpMeta = await sharp(stagePath).metadata();
+    assertAssetCurrent(guard);
+    meta.updatedAt = Date.now();
+    meta.hiresAt = meta.updatedAt;
+    meta.pixelSize = { w: sharpMeta.width, h: sharpMeta.height };
+    return commitAssetImage(guard, row, fs.readFileSync(stagePath), meta);
+  } finally {
+    for (const staged of [stagePath, `${stagePath}.refining`]) {
+      try { fs.unlinkSync(staged); } catch { /* only this operation's staging files */ }
+    }
+  }
 }
 
 // ── 对外 API ──
@@ -411,27 +524,33 @@ export function getAssetsByKey(keys) {
 
 /**
  * 创建并生成一张素材（入串行队列）
- * @param {object} p - { kind, key, name, desc, meta, worldSettingId }
+ * @param {object} p - { kind, key, name, desc, meta, worldSettingId, expectedWorld? }
  * @returns {Promise<object>} 完成后的素材行（ready/failed）
  */
-export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId = null }) {
+export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId = null, expectedWorld = captureTownAssetWorld(), appearanceGuard = null }) {
   if (!ASSET_SPECS[kind]) throw new Error(`unknown asset kind: ${kind}`);
   const db = getDb();
   const metaJson = { desc: desc || '', ...meta };
-  const result = db.prepare(`
-    INSERT INTO town_assets (kind, key, name, image_path, meta_json, world_setting_id, status)
-    VALUES (?, ?, ?, '', ?, ?, 'pending')
-  `).run(kind, key || null, name, JSON.stringify(metaJson), worldSettingId);
-  const id = Number(result.lastInsertRowid);
-  broadcastTownAssetsUpdated({ asset: getAssetById(id) });
-  return enqueueAssetJob(() => generateIntoRow(getDb().prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));
+  delete metaJson.appearanceSource; // client metadata is not generation evidence
+  const { row, guard } = db.transaction(() => {
+    assertWorldCurrent(expectedWorld);
+    const result = db.prepare(`
+      INSERT INTO town_assets (kind, key, name, image_path, meta_json, world_setting_id, status)
+      VALUES (?, ?, ?, '', ?, ?, 'pending')
+    `).run(kind, key || null, name, JSON.stringify(metaJson), worldSettingId);
+    const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(Number(result.lastInsertRowid));
+    return { row, guard: claimAsset(row, expectedWorld, appearanceGuard) };
+  }).immediate();
+  broadcastTownAssetsUpdated({ asset: getAssetById(row.id) });
+  return enqueueAssetJob(guard, () => generateIntoRow(row, guard));
 }
 
-/** 重生成一张素材（沿用原 meta；可传 desc/styleTags/prompt/loras/promptPrefix 覆盖并保存） */
+/** 重生成一张素材（沿用原 meta；可传 desc/styleTags/prompt/loras/promptPrefix 与 expectedWorld） */
 export function regenerateAsset(id, overrides = {}) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
   if (!row) throw new Error(`asset #${id} not found`);
+  const previousAsset = { ...row }; // image provenance/config before this request changes metadata
   const meta = JSON.parse(row.meta_json || '{}');
   if (overrides.desc !== undefined) meta.desc = overrides.desc;
   if (overrides.styleTags !== undefined) meta.styleTags = overrides.styleTags;
@@ -439,8 +558,10 @@ export function regenerateAsset(id, overrides = {}) {
   if (Array.isArray(overrides.loras)) meta.loras = overrides.loras;
   if (overrides.artist !== undefined) meta.artist = overrides.artist;
   if (overrides.promptPrefix !== undefined) meta.promptPrefix = overrides.promptPrefix;
-  db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
-  return enqueueAssetJob(() => generateIntoRow(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id)));
+  row.meta_json = JSON.stringify(meta);
+  const guard = claimAsset(row, overrides.expectedWorld, overrides.appearanceGuard);
+  guard.previousAsset = previousAsset;
+  return enqueueAssetJob(guard, () => generateIntoRow(row, guard));
 }
 
 /** 只保存素材的生成配置（画师串/LoRA/固定前缀），不触发生图 */
@@ -460,6 +581,11 @@ export function updateAssetGenerationConfig(id, overrides = {}) {
   if (overrides.promptPrefix !== undefined) {
     if (overrides.promptPrefix === null) delete meta.promptPrefix;
     else meta.promptPrefix = String(overrides.promptPrefix);
+  }
+  for (const field of ['artist', 'loras', 'promptPrefix']) {
+    if (overrides[field] !== undefined) {
+      meta._generationConfigEdits = { ...meta._generationConfigEdits, [field]: randomUUID() };
+    }
   }
   meta.updatedAt = Date.now();
   db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
@@ -484,15 +610,18 @@ export function deleteAsset(id) {
  * @param {Array<object>} jobs - createAsset 参数数组
  * @param {function} [onProgress] - ({ done, total, asset, error }) => void
  */
-export async function generateAssetsBatch(jobs, onProgress) {
+export async function generateAssetsBatch(jobs, onProgress, { expectedWorld = captureTownAssetWorld() } = {}) {
   const total = jobs.length;
   let done = 0;
   const results = [];
   for (const job of jobs) {
+    assertWorldCurrent(expectedWorld);
     try {
-      const asset = await createAsset(job);
+      const asset = await createAsset({ ...job, expectedWorld });
+      assertWorldCurrent(expectedWorld);
       results.push({ ok: true, asset });
     } catch (err) {
+      assertWorldCurrent(expectedWorld); // stop old batch; never enqueue remaining jobs in new epoch
       console.warn('[townAssets] batch item failed:', err?.message);
       results.push({ ok: false, error: err?.message || '生成失败', job });
     }

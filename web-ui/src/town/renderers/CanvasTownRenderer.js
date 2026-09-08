@@ -325,7 +325,7 @@ return {
     }
     return null
   },
-  draw(c, frames, nowMs, { labelsOnly = false, hover = null, selected = null, groundScale: ground = 1, heightScale: height = 1 } = {}) {
+  draw(c, frames, nowMs, { labelsOnly = false, hover = null, selected = null, groundScale: ground = 1, heightScale: height = 1, interactionActorKeys } = {}) {
     hoverKey = hover; selectedKey = selected; groundScale = ground; heightScale = height
     if (!labelsOnly && scene) {
       if (staticDirty) bakeStatic()
@@ -339,7 +339,7 @@ return {
     drawables.sort((a, b) => a.y - b.y)
     lastDrawables = drawables
     for (const d of drawables) {
-      if (d.obj) drawObject(c, d.obj, objectOccludes(d.obj, frames.map(f => f.pos)))
+      if (d.obj) drawObject(c, d.obj, assetById(d.obj.assetId)?.kind === 'building' && objectOccludes(d.obj, frames.map(f => f.pos)))
       else drawAgent(c, d.agent, d.pos, nowMs, labelsOnly)
     }
   },

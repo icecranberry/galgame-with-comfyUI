@@ -1,0 +1,32 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Character dialogue fixture</title><div id="app"></div><script type="module">
+import '/src/App.vue?vue&type=style&index=0&lang.css'
+import { createApp, h, ref } from 'vue'
+import { createPinia } from 'pinia'
+import TownCharacterChat from '../src/components/town/TownCharacterChat.vue'
+import TownView from '../src/views/TownView.vue'
+import { useChatStore } from '../src/stores/chat.js'
+import { useTownStore } from '../src/stores/town.js'
+import { onEvent, startUnifiedStream, stopUnifiedStream } from '../src/stores/unifiedStream.js'
+const pinia = createPinia(), chat = useChatStore(pinia), id = ref(41), open = ref(true), busy = ref(false)
+const probe = window.probe = { chat, id, open, busy, moves: [] }
+// Same App-level dispatch contract; components must never subscribe a second time.
+onEvent('delayed_reply', data => chat.handleDelayedReply(data))
+onEvent('proactive_message', data => chat.handleProactiveMessage(data))
+startUnifiedStream()
+probe.stop = stopUnifiedStream
+if (new URLSearchParams(location.search).has('town')) {
+  const town = useTownStore(pinia)
+  const map = { version: 1, cols: 8, rows: 8, name: 'fixture', assets: [], locations: [], layers: { ground: Array.from({ length: 8 }, () => Array(8).fill(null)), road: [], objects: [], blockOverride: [] } }
+  const agents = [{ agentKey: 'char:41', actorId: 'actor:41', characterId: 41, npcId: 9, kind: 'char', displayName: '小满', x: 3, y: 3 }, { agentKey: 'npc:10', actorId: 'actor:42', characterId: 42, npcId: 10, kind: 'npc', displayName: '阿青', x: 4, y: 3 }]
+  const state = { worldId: 'fixture', worldEpoch: 1, map, initialized: true, agents, player: { agentKey: 'me', x: 2, y: 3 }, weather: {}, locations: [], encountersActive: [] }
+  town.snapshot = state; town.mapData = map; town.loaded = true; town.connected = true
+  town.startTownStream = () => {}; town.stopTownStream = () => {}
+  town.fetchState = async () => state; town.fetchMap = async () => map
+  town.movePlayer = async (x,y) => { probe.moves.push({x,y}) }
+  town.movePlayerDir = async (dx,dy) => { probe.moves.push({dx,dy}) }
+  probe.vm = createApp(TownView).use(pinia).mount('#app')
+  probe.view = probe.vm.$.setupState
+} else {
+  createApp({ setup: () => () => h('main', open.value ? [h(TownCharacterChat, { characterId: id.value, serviceBusy: busy.value, townContext: { worldId: 'fixture', worldEpoch: 1, actorId: `actor:${id.value}` }, displayName: '邻居', playerName: '旅人', onClose: () => { open.value = false } })] : []) }).use(pinia).mount('#app')
+}
+</script><style>body{margin:0}main{position:absolute;inset:0;container:town-world / inline-size;background:#dfe5d0;font-family:system-ui}</style></html>

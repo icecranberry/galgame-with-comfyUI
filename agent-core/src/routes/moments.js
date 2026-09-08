@@ -6,6 +6,8 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
+import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
@@ -592,6 +594,15 @@ ${rules}`;
 
   let text = '', imagePrompt = '', imageUrls = [];
   try {
+  // Read at model dispatch, never cache records across queued generations.
+  // Dream/fantasy and free expression retain their original narrative freedom.
+  if (config.features.town === true && !isFreeMode && !isSpecialMode) {
+    try {
+      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
+        registry: createTownActorRegistry(db), timeZone: config.town.timeZone })(character.id);
+      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: lifeContext });
+    } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
+  }
   const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 2048, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content

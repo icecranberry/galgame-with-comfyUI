@@ -21,6 +21,8 @@ import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { saveBase64Image } from './imagePaths.js';
 import { config } from '../config.js';
+import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
+import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
 import { applyMemoryActions, softDeleteMemory } from './memory/memoryRepository.js';
 import { getMemorySettings } from './memory/memoryConfig.js';
@@ -505,6 +507,18 @@ ${directorPrompt}`
 
   let eventData;
   let rawResult = '';
+  // Background for this existing initial generation only; never an event trigger or settlement input.
+  if (config.features.town === true) {
+    try {
+      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
+        registry: createTownActorRegistry(db), timeZone: config.town?.timeZone })(character.id);
+      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content:
+        '【角色此前生活记录·仅背景】以下记录只属于本次主角色，不是本次奇遇已发生的情节，不要求引用或复演。不得替换用户指定方向、当前日程起点或原事件选择；不得将已结算经历改写为本次新增经历、奖励或解锁依据，不得据此新增约定。预约不代表已赴约或已见面，也不证明其他角色知情或共同参与。\n'
+        + lifeContext });
+    } catch (err) {
+      console.warn('[eventGen] town life read failed:', err.message);
+    }
+  }
   try {
     rawResult = await chatSync(msgs, { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '奇遇生成' });
     const jsonStr = extractFirstJson(rawResult);

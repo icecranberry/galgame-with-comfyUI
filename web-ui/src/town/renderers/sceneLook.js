@@ -1,4 +1,5 @@
 import * as T from 'three'
+import { withTownOcclusionFade } from './interactionOcclusion.js'
 
 // Shared look: directional daylight is much stronger than the cool ambient fill.
 export function daylightLook(hour = 12, rainy = false) {
@@ -17,11 +18,7 @@ export function daylightLook(hour = 12, rainy = false) {
 
 export function townMaterial(kind, options = {}) {
   const material = new T.MeshLambertMaterial(options)
-  material.userData.townFade = { value: 1 }
   material.onBeforeCompile = shader => {
-    shader.uniforms.townFade = material.userData.townFade
-    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float townFade;')
-      .replace('#include <alphatest_fragment>', '#include <alphatest_fragment>\ndiffuseColor.a *= townFade;')
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTownWorld; varying vec2 vTownUv;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec4 townPosition = vec4(transformed, 1.);
@@ -61,7 +58,7 @@ export function townMaterial(kind, options = {}) {
     }
   }
   material.customProgramCacheKey = () => `town-cinematic-v4-${kind}`
-  return material
+  return withTownOcclusionFade(material)
 }
 
 // Occlusion under an existing object, on the ground only. It does not block walking.

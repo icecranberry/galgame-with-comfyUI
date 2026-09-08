@@ -37,8 +37,8 @@
         <span v-if="!connected" class="town-chip is-warn">连接中…</span>
       </div>
       <div v-if="initialized" class="town-topbar-actions">
-        <linshe-select v-model="renderMode" size="sm" :options="renderOptions" aria-label="小镇画质" class="town-quality" />
-        <linshe-switch v-if="hdActive && renderMode !== 'low'" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
+        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showLifePanel" @click="openLifePanel">生活</linshe-button>
+        <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
       </div>
@@ -48,7 +48,11 @@
       点击空地走过去 · WASD 移动 · 点一点邻居打个招呼 · 滚轮缩放 · 双击跟随
     </div>
 
-    <div v-if="rendererNotice" class="town-render-notice" role="status">{{ rendererNotice }}</div>
+    <div v-if="rendererNotice" class="town-render-notice" role="status">
+      <span>{{ rendererNotice }}</span>
+      <linshe-button v-if="!hdActive" variant="ghost" size="sm"
+        :loading="rendererPending" :disabled="rendererPending" @click="!rendererPending && selectRenderer()">重试 HD2D</linshe-button>
+    </div>
 
     <!-- 未开镇入口 -->
     <div v-if="loaded && !initialized" class="town-empty">
@@ -161,7 +165,8 @@
               <div class="tc-head-info">
                 <div class="tc-name">{{ selectedChar.displayName }}</div>
                 <div class="tc-status-line">
-                  <template v-if="selectedChar.sleeping">😴 睡得正香</template>
+                  <template v-if="selectedChar.busyReason === 'SERVICE_BUSY'">正在提供工坊服务，请稍后再交谈</template>
+                  <template v-else-if="selectedChar.sleeping">😴 睡得正香</template>
                   <template v-else-if="encounterPartnerName">💬 正在和 {{ encounterPartnerName }} 聊天</template>
                   <template v-else>📍 {{ selectedChar.locationName || '小镇某处' }} · {{ selectedChar.activityText || '自由活动' }}</template>
                 </div>
@@ -178,7 +183,8 @@
             </div>
 
             <div class="tc-actions">
-              <linshe-button variant="primary" size="sm" @click="goChat(selectedChar.characterId)">去聊天</linshe-button>
+              <linshe-button variant="primary" size="sm" :disabled="selectedChar.busyReason === 'SERVICE_BUSY'" @click="goChat(selectedChar.characterId)">就地交谈</linshe-button>
+              <linshe-button variant="secondary" size="sm" @click="openActivityPanel(selectedChar)">居民近况</linshe-button>
               <linshe-button variant="ghost" size="sm" @click="selectedAgentKey = null">先不了</linshe-button>
             </div>
           </div>
@@ -200,16 +206,26 @@
 
     <!-- 就地聊天 / 管理面板 / 向导 -->
     <Transition name="npc-stage" :duration="300">
-      <div v-if="chatNpcId != null" class="npc-stage" @click.self="chatNpcId = null">
-        <TownNpcChat
+      <div v-if="dialogueOpen" class="npc-stage" @click.self="closeDialogue">
+        <TownCharacterChat v-if="chatCharacterId != null" :key="`char:${chatCharacterId}`"
+          :character-id="chatCharacterId" :town-context="dialogueContext" :service-busy="dialogueServiceBusy" @context-invalid="refreshDialogueWorld" :display-name="chatResident?.displayName"
+          :standing-url="chatResident?.standingUrl" :avatar-url="chatResident?.avatarPath"
+          :player-name="player?.displayName || '我'" @close="closeDialogue" />
+        <TownNpcChat v-else-if="chatNpcId != null"
           :key="chatNpcId"
-          :npc-id="chatNpcId"
+          :npc-id="chatNpcId" :world-id="dialogueContext?.worldId" :world-epoch="dialogueContext?.worldEpoch" :service-busy="dialogueServiceBusy"
           :player-name="player?.displayName || '我'"
           :display-name="chatNpcName"
-          @close="chatNpcId = null"
+          show-activity @activity="openDialogueActivity"
+          @close="closeDialogue"
+          @character-chat="openLinkedCharacterChat" @context-invalid="refreshDialogueWorld"
         />
       </div>
     </Transition>
+    <p v-if="dialogueOpening || dialogueError || lifeMoveError" class="town-dialogue-notice" role="status">{{ lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
+    <TownLifePanel :open="showLifePanel" @close="closeLifePanel" @move-to="moveToLifeLocation" @appointments="openAppointments" />
+    <TownAppointmentPanel :open="showAppointments" :residents="agents" :locations="locations" @close="showAppointments = false" />
+    <TownActivityPanel :open="!!activityActor" :actor="activityActor" @close="activityActorId = null" />
     <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
     <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
 
@@ -241,13 +257,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, reactive } from 'vue'
-import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTownStore } from '../stores/town.js'
-import { useChatStore } from '../stores/chat.js'
+import { formatTownTemperature } from '../utils/townWeather.js'
 import * as api from '../api/index.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
-import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import { createCanvasTownRenderer } from '../town/renderers/CanvasTownRenderer.js'
 import { HW, HH, cellTopWorld, cellCenterWorld, worldToCell, objectRect, buildBlockedCells } from '../town/renderers/projection.js'
@@ -257,12 +271,15 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import TownAssetThumb from '../components/town/TownAssetThumb.vue'
 import TownAssetManager from '../components/town/TownAssetManager.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
+import TownCharacterChat from '../components/town/TownCharacterChat.vue'
+import TownLifePanel from '../components/town/TownLifePanel.vue'
+import TownActivityPanel from '../components/town/TownActivityPanel.vue'
+import TownAppointmentPanel from '../components/town/TownAppointmentPanel.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
 
+const props = defineProps({ initialPanel: { type: String, default: '' } })
 const town = useTownStore()
-const chat = useChatStore()
-const router = useRouter()
 const { map: mapMeta, locations, agents, player, weather, loaded, connected, initialized, renderMap } = storeToRefs(town)
 
 // 地砖贴图里菱形中心的纵向位置（占贴图高度比例；生成图菱形居中 → 0.5）
@@ -284,13 +301,13 @@ let resizeObserver = null
 function readPreference(key, fallback) {
   try { return localStorage.getItem(key) || fallback } catch { return fallback }
 }
-const renderOptions = [{ label: 'HD2D', value: 'balanced' }, { label: 'HD2D · 低配', value: 'low' }, { label: '兼容画面', value: 'canvas' }]
-const savedMode = readPreference('town.renderer', 'balanced')
-const renderMode = ref(renderOptions.some(o => o.value === savedMode) ? savedMode : 'balanced')
 const tiltShift = ref(readPreference('town.tiltShift', 'true') !== 'false')
 const hdActive = ref(false)
 const rendererNotice = ref('')
+const rendererPending = ref(false)
+let rendererRequest = 0
 let hdRenderer = null, canvasRenderer = null, rendererEpoch = 0, disposed = false
+const bootWaits = new Set()
 let activeScene = null, blockedCells = new Set()
 function persistPreference(key, value) { try { localStorage.setItem(key, String(value)) } catch { /* private browsing */ } }
 function fallbackRenderer(message) {
@@ -302,28 +319,29 @@ function fallbackRenderer(message) {
 async function selectRenderer() {
   const epoch = ++rendererEpoch
   if (disposed) return
-  rendererNotice.value = ''
-  if (renderMode.value === 'canvas') { fallbackRenderer(''); return }
+  const request = ++rendererRequest
+  rendererPending.value = true
   let next = null
   try {
-    if (hdRenderer) { hdRenderer.setQuality(renderMode.value, tiltShift.value); return }
+    if (hdRenderer) { hdRenderer.setQuality('balanced', tiltShift.value); return }
     const { Hd2dTownRenderer } = await import('../town/renderers/Hd2dTownRenderer.js')
     if (disposed || epoch !== rendererEpoch) return
     next = new Hd2dTownRenderer({ onFailure: fallbackRenderer })
     next.mount(viewEl.value)
-    next.setQuality(renderMode.value, tiltShift.value)
+    next.setQuality('balanced', tiltShift.value)
     next.resize(cssW, cssH, window.devicePixelRatio || 1)
     next.setScene(activeScene)
     next.setCamera(cam)
-    hdRenderer = next; hdActive.value = true
+    hdRenderer = next; hdActive.value = true; rendererNotice.value = ''
   } catch (error) {
     next?.dispose()
     console.warn('[town] HD2D unavailable:', error)
-    if (!disposed && epoch === rendererEpoch) fallbackRenderer('当前设备无法启用 HD2D，已切换为兼容画面')
+    if (!disposed && epoch === rendererEpoch) fallbackRenderer('当前设备无法启用 HD2D，世界渲染不可用')
+  } finally {
+    if (!disposed && request === rendererRequest) rendererPending.value = false
   }
 }
-watch(renderMode, () => { persistPreference('town.renderer', renderMode.value); selectRenderer() })
-watch(tiltShift, value => { persistPreference('town.tiltShift', value); hdRenderer?.setQuality(renderMode.value, value) })
+watch(tiltShift, value => { persistPreference('town.tiltShift', value); hdRenderer?.setQuality('balanced', value) })
 
 // 摄像机（世界像素坐标）
 const cam = reactive({ x: 0, y: 0, zoom: 1 })
@@ -335,12 +353,13 @@ let staticDirty = true
 // 图片缓存
 const imgCache = new Map()
 function getImg(url) {
-  if (!url) return null
+  if (!url || disposed) return null
   let entry = imgCache.get(url)
   if (!entry) {
     const img = new Image()
     entry = { img, ok: false }
     entry.ready = new Promise(resolve => {
+      entry.cancel = () => resolve(false)
       img.onload = () => { entry.ok = true; staticDirty = true; resolve(true) }
       img.onerror = () => { entry.ok = false; entry.failed = true; resolve(false) }
     })
@@ -389,6 +408,30 @@ const hoverAgentKey = ref(null)
 const selectedAgentKey = ref(null)
 const chatNpcId = ref(null)
 const chatNpcName = ref('')
+const chatCharacterId = ref(null)
+const chatResident = ref(null)
+const dialogueContext = ref(null)
+const dialogueOpening = ref(false)
+const dialogueError = ref('')
+const showLifePanel = ref(false)
+const showAppointments = ref(false)
+const activityActorId = ref(null)
+const activityActor = computed(() => {
+  const actor = agents.value.find(agent => agent.actorId === activityActorId.value)
+  return actor ? { ...actor, worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch } : null
+})
+const lifeMoving = ref(false)
+const lifeMoveError = ref('')
+let dialogueRequest = 0
+let lifeMoveRequest = 0
+const dialogueOpen = computed(() => chatNpcId.value != null || chatCharacterId.value != null)
+const dialogueServiceBusy = computed(() => {
+  const resident = agents.value.find(agent => dialogueContext.value?.actorId
+    ? agent.actorId === dialogueContext.value.actorId
+    : chatCharacterId.value != null ? agent.characterId === chatCharacterId.value : agent.npcId === chatNpcId.value)
+  return resident?.busyReason === 'SERVICE_BUSY'
+})
+const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showLifePanel.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
 const portraitPopupUrl = ref(null)
 const showAdmin = ref(false)
 const showWizard = ref(false)
@@ -397,6 +440,25 @@ const dragging = ref(false)
 // 键盘移动（等距屏幕方向 → 逻辑格对角）
 const keysDown = new Set()
 let moveTimer = null
+
+watch(dialogueInputBlocked, blocked => {
+  if (!blocked) return
+  clearMovementKeys()
+  onCanvasLeave()
+}, { flush: 'sync' })
+watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
+  activityActorId.value = null; showAppointments.value = false; showLifePanel.value = false
+  ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
+})
+watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch,
+  chatCharacterId.value == null || agents.value.some(agent => agent.actorId === dialogueContext.value?.actorId && agent.characterId === chatCharacterId.value)], () => {
+  if (!dialogueOpen.value || !dialogueContext.value) return
+  if (town.snapshot?.worldId !== dialogueContext.value.worldId || town.snapshot?.worldEpoch !== dialogueContext.value.worldEpoch
+      || (chatCharacterId.value != null && !agents.value.some(agent => agent.actorId === dialogueContext.value.actorId && agent.characterId === chatCharacterId.value))) {
+    closeDialogue()
+    dialogueError.value = '小镇或人物已变化，请重新选择邻居。'
+  }
+})
 
 // ── 编辑器状态 ──
 const editing = ref(false)
@@ -469,7 +531,7 @@ const encounterPartnerName = computed(() => {
 const weatherText = computed(() => {
   const w = weather.value
   if (!w) return ''
-  return [w.text, w.temperature != null ? `${w.temperature}°C` : ''].filter(Boolean).join(' ')
+  return [w.text, formatTownTemperature(w.temperature)].filter(Boolean).join(' ')
 })
 
 const weatherIcon = computed(() => {
@@ -524,8 +586,7 @@ function agentFacing(a, pos) {
 }
 
 function hitAgent(cssX, cssY) {
-  if (hdRenderer) return hdRenderer.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
-  return canvasRenderer?.pick(screenToWorld(cssX, cssY), { agentsOnly: true })?.agent || null
+  return hdRenderer?.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
 }
 
 // ── 点击/拖拽交互 ──
@@ -534,6 +595,7 @@ let downInfo = null
 let suppressClick = false
 
 function onCanvasDown(e) {
+  if (dialogueInputBlocked.value) return
   suppressClick = false
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false }
   if (editing.value && e.button === 0) {
@@ -546,6 +608,7 @@ function onCanvasDown(e) {
 }
 
 function onCanvasMove(e) {
+  if (dialogueInputBlocked.value) return
   if (editing.value) {
     ghostCell.value = screenToCell(e.offsetX, e.offsetY)
     if (paintDrag.value) {
@@ -587,6 +650,7 @@ function onCanvasLeave() {
 }
 
 function onCanvasClick(e) {
+  if (dialogueInputBlocked.value) return
   if (suppressClick || downInfo?.moved) { suppressClick = false; return }
   if (!loaded.value) return
   if (editing.value) {
@@ -596,9 +660,10 @@ function onCanvasClick(e) {
   if (!initialized.value) return
   const hit = hitAgent(e.offsetX, e.offsetY)
   if (hit) {
-    if (hit.kind === 'npc') {
-      chatNpcName.value = hit.displayName
-      chatNpcId.value = hit.npcId
+    if (hit.characterId && hit.kind === 'npc') {
+      goChat(hit.characterId)
+    } else if (hit.kind === 'npc') {
+      openDialogue(hit)
     } else {
       selectedAgentKey.value = hit.agentKey
     }
@@ -612,6 +677,7 @@ function onCanvasClick(e) {
 }
 
 function onCanvasRightClick(e) {
+  if (dialogueInputBlocked.value) return
   if (editing.value && editTool.value === 'block') {
     const cell = screenToCell(e.offsetX, e.offsetY)
     paintBlock(cell, 0) // 右键 = 手动清障（恢复可走）
@@ -619,10 +685,12 @@ function onCanvasRightClick(e) {
 }
 
 function onDblClick() {
+  if (dialogueInputBlocked.value) return
   if (!editing.value) followPlayer = true
 }
 
 function onWheel(e) {
+  if (dialogueInputBlocked.value) return
   const factor = e.deltaY < 0 ? 1.12 : 0.89
   const newZoom = Math.min(2.5, Math.max(0.5, cam.zoom * factor))
   const before = screenToWorld(e.offsetX, e.offsetY)
@@ -643,7 +711,7 @@ const KEY_DIRS = {
 }
 
 function onKeyDown(e) {
-  if (editing.value || showAdmin.value || showWizard.value || chatNpcId.value != null) return
+  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
   if (e.isComposing || document.activeElement?.closest('input, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"]')) return
   if (KEY_DIRS[e.code]) {
     e.preventDefault()
@@ -669,7 +737,7 @@ function clearMovementKeys() {
 }
 
 function stepByKey() {
-  if (editing.value || showAdmin.value || showWizard.value || chatNpcId.value != null || document.hidden) { clearMovementKeys(); return }
+  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value || document.hidden) { clearMovementKeys(); return }
   for (const code of keysDown) {
     const [dx, dy] = KEY_DIRS[code] || [0, 0]
     if (dx || dy) {
@@ -1140,29 +1208,31 @@ function draw(nowMs) {
     const pos = agentDisplayPos(a)
     return adaptAgent(a, pos, agentFacing(a, pos), nowMs)
   })
+  const interactionActorKeys = ['me', hoverAgentKey.value, selectedAgentKey.value,
+    chatResident.value?.actorId, activityActorId.value].filter(Boolean)
   if (hdRenderer) {
     try {
       hdRenderer.setCamera(cam)
       hdRenderer.updateAgents(frames)
-      hdRenderer.render(weather.value, frames.filter(f => ['me', hoverAgentKey.value, selectedAgentKey.value].includes(f.agent.agentKey)).map(f => f.ground))
+      hdRenderer.render(weather.value, frames.filter(f => interactionActorKeys.includes(f.agent.agentKey)
+        || interactionActorKeys.includes(f.agent.actorId)).map(f => f.ground), { interactionActorKeys })
     } catch (error) {
       console.warn('[town] render failed:', error)
-      fallbackRenderer('画面渲染中断，已切换为兼容画面')
+      fallbackRenderer('画面渲染中断，HD2D 已停止')
     }
   }
-  if (!hdActive.value) {
-    ctx.fillStyle = '#dfe5d0'; ctx.fillRect(0, 0, cssW, cssH)
-  }
-  if (m) {
+  if (m && hdActive.value) {
     ctx.save()
     ctx.translate(cssW / 2, cssH / 2); ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y)
     ctx.imageSmoothingEnabled = false
-    canvasRenderer.draw(ctx, frames, nowMs, { labelsOnly: hdActive.value, hover: hoverAgentKey.value, selected: selectedAgentKey.value })
+    canvasRenderer.draw(ctx, frames, nowMs, { labelsOnly: true, hover: hoverAgentKey.value,
+      selected: selectedAgentKey.value })
     if (editing.value) drawEditorOverlays(ctx)
     ctx.restore()
   } else {
+    ctx.fillStyle = '#dfe5d0'; ctx.fillRect(0, 0, cssW, cssH)
     ctx.fillStyle = '#8c8074'; ctx.font = '13px "HarmonyOS Sans SC", sans-serif'; ctx.textAlign = 'center'
-    ctx.fillText(loaded.value ? '这片土地还在等待它的故事…' : '正在唤醒这个世界…', cssW / 2, cssH / 2)
+    ctx.fillText(hdActive.value ? (loaded.value ? '这片土地还在等待它的故事…' : '正在唤醒这个世界…') : 'HD2D 渲染不可用，请点击重试', cssW / 2, cssH / 2)
   }
   drawWeatherOverlay(ctx, nowMs)
   if (!document.hidden) rafId = requestAnimationFrame(draw)
@@ -1195,31 +1265,45 @@ function centerCamera() {
 }
 
 function waitForRenderMap(timeout = 6000) {
+  if (disposed) return Promise.resolve(false)
   if (renderMap.value) return Promise.resolve(true)
   return new Promise(resolve => {
     const startedAt = Date.now()
+    let timer
+    const finish = value => { clearTimeout(timer); bootWaits.delete(cancel); resolve(value) }
+    const cancel = () => finish(false)
+    bootWaits.add(cancel)
     const check = () => {
-      if (renderMap.value) return resolve(true)
-      if (Date.now() - startedAt >= timeout) return resolve(false)
-      setTimeout(check, 50)
+      if (disposed) return finish(false)
+      if (renderMap.value) return finish(true)
+      if (Date.now() - startedAt >= timeout) return finish(false)
+      timer = setTimeout(check, 50)
     }
     check()
   })
 }
 
 function nextFrames(count = 2) {
+  if (disposed) return Promise.resolve()
   return new Promise(resolve => {
-    let remaining = count
+    let remaining = count, frame
+    const finish = () => { cancelAnimationFrame(frame); bootWaits.delete(finish); resolve() }
+    bootWaits.add(finish)
     const tick = () => {
-      if (--remaining <= 0) resolve()
-      else requestAnimationFrame(tick)
+      if (disposed || --remaining <= 0) finish()
+      else frame = requestAnimationFrame(tick)
     }
-    requestAnimationFrame(tick)
+    frame = requestAnimationFrame(tick)
   })
 }
 
 function minimumBootDelay() {
-  return new Promise(resolve => setTimeout(resolve, 300))
+  if (disposed) return Promise.resolve()
+  return new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); bootWaits.delete(finish); resolve() }
+    const timer = setTimeout(finish, 300)
+    bootWaits.add(finish)
+  })
 }
 
 function collectWorldResourceUrls() {
@@ -1249,20 +1333,25 @@ async function preloadWorldResources() {
 }
 
 async function prepareWorldResources() {
+  if (disposed) return
   resourcesReady.value = false
   try {
     await selectRenderer()
+    if (disposed) return
     const snapshot = await town.fetchState()
+    if (disposed) return
     if (snapshot?.initialized) {
       await waitForRenderMap()
+      if (disposed) return
       await preloadWorldResources()
+      if (disposed) return
     }
     centerCamera()
     await Promise.all([nextFrames(2), minimumBootDelay()])
   } catch (err) {
-    loadError.value = '世界暂时联系不上：' + (err?.message || '未知错误')
+    if (!disposed) loadError.value = '世界暂时联系不上：' + (err?.message || '未知错误')
   } finally {
-    resourcesReady.value = true
+    if (!disposed) resourcesReady.value = true
   }
 }
 
@@ -1287,6 +1376,11 @@ watch(editing, (v) => {
   if (!v) staticDirty = true
 })
 
+// A mailbox task link opens the current snapshot for review; it never accepts or moves.
+watch(() => [resourcesReady.value, props.initialPanel], ([ready, panel]) => {
+  if (ready && initialized.value && panel === 'life' && !disposed) openLifePanel()
+})
+
 watch(editLayers, () => { staticDirty = true }, { deep: true })
 watch(townAssets, () => { staticDirty = true }, { deep: true })
 
@@ -1307,9 +1401,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true; rendererEpoch++
+  for (const cancel of [...bootWaits]) cancel()
   hdRenderer?.dispose(); hdRenderer = null
   canvasRenderer?.dispose()
-  for (const entry of imgCache.values()) { entry.img.onload = null; entry.img.onerror = null }
+  for (const entry of imgCache.values()) { entry.img.onload = null; entry.img.onerror = null; entry.cancel?.() }
   imgCache.clear()
   if (rafId) cancelAnimationFrame(rafId)
   rafId = 0
@@ -1319,38 +1414,135 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', clearMovementKeys)
   if (moveTimer) { clearInterval(moveTimer); moveTimer = null }
+  dialogueRequest++
   town.stopTownStream()
 })
 
-async function goChat(characterId) {
-  selectedAgentKey.value = null
+async function openDialogue(resident) {
+  if (showLifePanel.value || lifeMoving.value) return
+  if (rejectBusyDialogue(resident)) return
+  const request = ++dialogueRequest
+  dialogueOpening.value = true
+  dialogueError.value = ''
   try {
-    await chat.selectChar(characterId)
-    router.push('/chat/' + characterId)
+    // The server keeps the remaining current edge and cancels subsequent waypoints.
+    const result = await api.moveTownPlayerDir(0, 0)
+    if (request !== dialogueRequest) return
+    if (result?.ok !== true) throw new Error('Unable to stop')
+    if (rejectBusyDialogue(resident)) return
+    selectedAgentKey.value = null
+    dialogueContext.value = { worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch, actorId: resident.actorId }
+    chatResident.value = resident
+    chatCharacterId.value = resident.characterId || null
+    chatNpcId.value = resident.characterId ? null : resident.npcId
+    chatNpcName.value = resident.displayName || '邻居'
+  } catch {
+    if (request === dialogueRequest) dialogueError.value = '暂时没能停下脚步，请再点一次邻居。'
+  } finally {
+    if (request === dialogueRequest) dialogueOpening.value = false
+  }
+}
+function rejectBusyDialogue(resident) {
+  const current = agents.value.find(agent => resident.actorId ? agent.actorId === resident.actorId
+    : resident.characterId ? agent.characterId === resident.characterId : agent.npcId === resident.npcId) || resident
+  if (current.busyReason !== 'SERVICE_BUSY') return false
+  dialogueError.value = `${current.displayName || '这位居民'}正在提供工坊服务，请稍后再交谈。`
+  return true
+}
+function goChat(characterId) {
+  const resident = agents.value.find(agent => agent.characterId === characterId) || { characterId }
+  return openDialogue(resident)
+}
+function closeDialogue() {
+  dialogueError.value = ''
+  dialogueRequest++
+  dialogueOpening.value = false
+  chatNpcId.value = null
+  chatCharacterId.value = null
+  chatResident.value = null
+  dialogueContext.value = null
+}
+async function refreshDialogueWorld(err) {
+  if (err.code !== 'TOWN_CHAT_TOO_FAR') await town.fetchState().catch(() => {})
+}
+async function openLinkedCharacterChat(characterId) {
+  // Invitation may have changed identity after the clicked snapshot; resolve the latest actor mapping.
+  const request = dialogueRequest
+  try { await town.fetchState() }
+  catch { dialogueError.value = '人物信息暂时未能更新，请关闭后再试。'; return }
+  if (request !== dialogueRequest) return
+  return goChat(characterId)
+}
+
+function openLifePanel() {
+  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  selectedAgentKey.value = null
+  portraitPopupUrl.value = null
+  dialogueError.value = ''
+  lifeMoveError.value = ''
+  showLifePanel.value = true
+}
+function openActivityPanel(actor) {
+  if (!actor?.actorId || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  activityActorId.value = actor.actorId
+  selectedAgentKey.value = null
+  portraitPopupUrl.value = null
+}
+function openDialogueActivity() {
+  const actor = chatResident.value
+  closeDialogue()
+  openActivityPanel(actor)
+}
+function closeLifePanel() {
+  showLifePanel.value = false
+}
+function openAppointments() {
+  if (!showLifePanel.value || lifeMoving.value) return
+  closeLifePanel()
+  showAppointments.value = true
+}
+async function moveToLifeLocation(locationKey) {
+  if (!showLifePanel.value || lifeMoving.value) return
+  const request = ++lifeMoveRequest
+  const current = () => !disposed && request === lifeMoveRequest
+  // Keep the shared input lock until the movement command is acknowledged.
+  lifeMoving.value = true
+  closeLifePanel()
+  lifeMoveError.value = ''
+  const location = locations.value.find(location => location.key === locationKey)
+  try {
+    if (!location || !Number.isInteger(location.x) || !Number.isInteger(location.y)) {
+      throw new Error('这个地点暂时不可前往，请刷新小镇后再试。')
+    }
+    const result = await town.movePlayer(location.x, location.y)
+    if (result?.ok === false) throw new Error('暂时无法前往这个地点，请稍后再试。')
   } catch (err) {
-    router.push('/chat/' + characterId)
+    if (current()) lifeMoveError.value = err.message || '暂时无法前往这个地点，请稍后再试。'
+  } finally {
+    if (current()) lifeMoving.value = false
   }
 }
 </script>
 
 <style scoped>
+.town-dialogue-notice { position: absolute; left: 50%; top: 80px; transform: translateX(-50%); z-index: 65; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 14px; color: #574a40; background: #f4f1eeed; font-size: 13px; }
 .npc-stage { position: absolute; inset: 0; z-index: 60; overflow: clip; }
 .npc-stage-enter-active, .npc-stage-leave-active { transition: opacity .3s ease; }
-.npc-stage-enter-active :deep(.nc-portrait),
-.npc-stage-leave-active :deep(.nc-portrait),
-.npc-stage-enter-active :deep(.nc-main),
-.npc-stage-leave-active :deep(.nc-main) {
+.npc-stage-enter-active :deep(.td-portraits figure),
+.npc-stage-leave-active :deep(.td-portraits figure),
+.npc-stage-enter-active :deep(.td-panel),
+.npc-stage-leave-active :deep(.td-panel) {
   transition: transform .3s cubic-bezier(.22,.61,.36,1);
   will-change: transform;
 }
 .npc-stage-enter-from, .npc-stage-leave-to { opacity: 0; }
-.npc-stage-enter-from :deep(.nc-portrait-left), .npc-stage-leave-to :deep(.nc-portrait-left) { transform: translateX(-64px); }
-.npc-stage-enter-from :deep(.nc-portrait-right), .npc-stage-leave-to :deep(.nc-portrait-right) { transform: translateX(64px); }
-.npc-stage-enter-from :deep(.nc-main), .npc-stage-leave-to :deep(.nc-main) { transform: translateY(40px); }
+.npc-stage-enter-from :deep(.td-portraits figure:first-child), .npc-stage-leave-to :deep(.td-portraits figure:first-child) { transform: translateX(-64px); }
+.npc-stage-enter-from :deep(.td-portraits figure:last-child), .npc-stage-leave-to :deep(.td-portraits figure:last-child) { transform: translateX(64px); }
+.npc-stage-enter-from :deep(.td-panel), .npc-stage-leave-to :deep(.td-panel) { transform: translateY(40px); }
 @media (prefers-reduced-motion: reduce) {
   .npc-stage-enter-active, .npc-stage-leave-active { transition-duration: .001ms; }
-  .npc-stage-enter-active :deep(.nc-portrait), .npc-stage-leave-active :deep(.nc-portrait),
-  .npc-stage-enter-active :deep(.nc-main), .npc-stage-leave-active :deep(.nc-main) { transition: none; transform: none; }
+  .npc-stage-enter-active :deep(.td-portraits figure), .npc-stage-leave-active :deep(.td-portraits figure),
+  .npc-stage-enter-active :deep(.td-panel), .npc-stage-leave-active :deep(.td-panel) { transition: none; transform: none; }
 }
 
 .town-shell { position: absolute; inset: 0; overflow: clip; container-type: size; }
@@ -1373,8 +1565,8 @@ async function goChat(characterId) {
     transform: rotate(90deg);
   }
 }
-.town-quality { width: 132px; }
-.town-render-notice { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: #fffaf2; color: #796957; font-size: 12px; }
+
+.town-render-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: #fffaf2; color: #796957; font-size: 12px; }
 .town-canvas {
   position: absolute;
   inset: 0;

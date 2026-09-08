@@ -12,28 +12,48 @@
  * 居民身份：agentKey = 'npc:{id}'（轻量居民）| 'char:{id}'（入住角色）；玩家恒为 'me'。
  */
 import { playerRouteStart, applyPlayerRoute } from './playerMovement.js';
+import { advanceAgentPosition } from './agentMovement.js';
+import { createTownActorRegistry } from './townActorRegistry.js';
+import { createTownActionRunner } from './townActionRunner.js';
+import { findRoutineSlot } from './routineSchedule.js';
+import { createTownClock } from './townClock.js';
+import { createTownSimulation } from './townSimulation.js';
+import { createEconomyService } from './economyService.js';
+import { createTownOrderService } from './townOrderService.js';
+import { maintainTownOrders, getTownBusinessRuntime, isTownActorServing, abortTownServiceGenerations,
+  getTownAppointmentRuntime } from './townEconomyRuntime.js';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { getCurrentActivity, isSleeping } from '../scheduleManager.js';
-import { buildCharacterPersona } from '../characterPersona.js';
 import { applyMemoryActions } from '../memory/memoryRepository.js';
-import { getWeatherContext } from '../weatherService.js';
+import { getTimeLight, getSeason } from '../timeLight.js';
+import { createTownWeatherFacts } from './townWeatherFacts.js';
+import { getWeatherSourceKey } from '../weatherSource.js';
+import { createTownWeatherShelter, isIdleScheduleActivity } from './townWeatherShelter.js';
 import { getMapRow, buildWalkGridFromLayers } from './townMapService.js';
-import { getTownGenerationSettings, updateTownGenerationSettings } from './townGenerationConfig.js';
+import { getTownGenerationSettings, mergeTownGenerationSettings } from './townGenerationConfig.js';
 import { buildLocationMatcher } from './townLocationMatch.js';
 import { findPath, isWalkable, pickStandingCell } from './townPathfinding.js';
-import { listAssets, createAsset, regenerateAsset, getAssetsByKey, deleteAsset } from './townAssetService.js';
+import { listAssets, createAsset, regenerateAsset, getAssetsByKey, deleteAsset, captureTownAssetWorld } from './townAssetService.js';
 import { generateSpritePrompt } from './townPromptBuilder.js';
-import { buildCharacterAppearanceSection } from '../characterPersona.js';
+import { buildCharacterAppearanceSection, buildCharacterPersona } from '../characterPersona.js';
+import { createTownAppearanceSignature, townAssetAppearanceStatus } from './townAppearanceSignature.js';
 import {
   broadcastTownMove, broadcastTownBubble,
   broadcastTownEncounterStart, broadcastTownEncounterEnd, broadcastTownPing,
+  broadcastTownStateUpdated, setTownBusScope,
 } from './townBus.js';
 
 const state = {
+  generation: 0,        // 内存装载代次；异步表达不能回写已卸载的场景
+  world: null,
+  actors: new Map(),
+  simulation: null,
+  simulationActorIds: new Set(),
   running: false,
   timer: null,
+  startupTimer: null,
   map: null,             // { id, name, cols, rows, tileSize, version, layers, walkGrid, assetsById }
   locations: [],         // [{ id, key, name, aliases, kind, x, y, radius, ambient }]
   matcher: null,
@@ -109,11 +129,44 @@ function safeParseObject(json) {
   } catch { return {}; }
 }
 
-function isRaining() {
+let weatherWarningAt = null;
+let localTimeClock = null;
+let localTimeZone = null;
+function townLocalTime(now) {
+  const timeZone = config.town.timeZone || 'Asia/Shanghai';
+  if (!localTimeClock || localTimeZone !== timeZone) {
+    localTimeClock = createTownClock({ timeZone });
+    localTimeZone = timeZone;
+  }
+  return localTimeClock.at(now);
+}
+function readTownWeather(now = Date.now()) {
+  const local = townLocalTime(now);
+  const hour = Math.floor(local.minuteOfDay / 60);
+  // Reuse the pure display vocabulary with town wall-clock fields, not a shifted instant.
+  const { timeDesc } = getTimeLight({ getHours: () => hour, getMinutes: () => local.minuteOfDay % 60 });
+  const db = getDb();
+  let facts;
   try {
-    const w = getWeatherContext()?.weather?.weather || '';
-    return /雨/.test(w);
-  } catch { return false; }
+    facts = createTownWeatherFacts({ db, clock: { now: () => now },
+      enabled: config.features.weather === true,
+      expectedSourceKey: getWeatherSourceKey(config.weather.city) }).readCurrent();
+  } catch (err) {
+    // Optional forecast failure must not abort the town snapshot or simulation tick.
+    // Keep schema diagnostics server-side, at most once per minute (also handle clock rollback).
+    if (weatherWarningAt === null || now < weatherWarningAt || now - weatherWarningAt >= 60000) {
+      weatherWarningAt = now;
+      console.warn('[town] weather read failed; forecast unavailable:', err);
+    }
+    facts = { source: 'forecast', status: 'unknown', precipitation: null, text: '', temperature: null,
+      forecastAt: null, fetchedAt: null, validUntil: null, reason: 'READ_FAILED' };
+  }
+  return { timeDesc, hour, season: getSeason(Number(local.date.slice(5, 7))), ...facts };
+}
+
+function isRaining() {
+  const weather = readTownWeather();
+  return weather.status === 'known' && weather.precipitation === 'rain';
 }
 
 // ── 启动 / 状态装载 ──
@@ -128,7 +181,10 @@ export function startTownScheduler() {
   loadState();
 
   // 首拍延后几秒：等 app.js 里日程管理器完成初始化
-  setTimeout(() => { if (state.running) tick(); }, 5000);
+  state.startupTimer = setTimeout(() => {
+    state.startupTimer = null;
+    if (state.running) tick();
+  }, 5000);
   state.timer = setInterval(tick, config.town.tickSeconds * 1000);
   console.log(`[town] scheduler started (tick=${config.town.tickSeconds}s, agents=${state.agents.size}${state.map ? '' : ', 等待世界初始化'})`);
 }
@@ -136,13 +192,18 @@ export function startTownScheduler() {
 export function stopTownScheduler() {
   state.running = false;
   if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  if (state.startupTimer) { clearTimeout(state.startupTimer); state.startupTimer = null; }
+  invalidateSceneCallbacks();
   persistAllAgents();
+  if (state.player) persistPlayer();
 }
 
 /** 地图保存/开镇后重载世界（不重启 tick 定时器） */
 export function reloadTown() {
   if (!state.running) return;
   try {
+    persistAllAgents();
+    if (state.player) persistPlayer();
     loadState();
     console.log(`[town] world reloaded (agents=${state.agents.size})`);
   } catch (err) {
@@ -151,7 +212,10 @@ export function reloadTown() {
 }
 
 function loadState() {
+  invalidateSceneCallbacks();
   const db = getDb();
+  state.world = createTownActorRegistry(db).getWorldState();
+  setTownBusScope(state.world);
   const mapRow = getMapRow();
   const assets = listAssets({});
   const assetsById = new Map(assets.map(a => [a.id, a]));
@@ -186,46 +250,8 @@ function loadState() {
     : [];
   state.matcher = buildLocationMatcher(state.locations);
 
-  // 居民元数据 + agent 重建
-  const saved = new Map(
-    db.prepare('SELECT * FROM town_agent_state').all().map(r => [r.agent_key, r])
-  );
-
-  // 1) 轻量 NPC（作息驱动）
-  const npcRows = db.prepare('SELECT * FROM town_npcs WHERE town_enabled = 1').all();
-  for (const row of npcRows) {
-    const agentKey = `npc:${row.id}`;
-    const meta = {
-      agentKey, kind: 'npc', refId: row.id,
-      displayName: row.display_name,
-      personaPrompt: [row.job ? `职业：${row.job}` : '', row.persona].filter(Boolean).join('\n'),
-      avatarPath: null,
-      sprites: spriteUrlsByKey(`npc_${row.id}_`, assets),
-    };
-    state.meta.set(agentKey, meta);
-    restoreAgent(agentKey, meta, saved.get(agentKey), homeLocationOfNpc(row));
-  }
-
-  // 2) 入住角色（日程投影驱动）
-  for (const row of db.prepare(`
-    SELECT c.id, c.name, c.display_name, c.avatar_path, c.standing_url, c.base_prompt, c.short_prompt
-    FROM town_characters tc JOIN characters c ON c.id = tc.character_id
-    WHERE tc.town_enabled = 1
-  `).all()) {
-    const agentKey = `char:${row.id}`;
-    const meta = {
-      agentKey, kind: 'char', refId: row.id,
-      displayName: row.display_name || row.name,
-      personaPrompt: '',
-      avatarPath: row.avatar_path || null,
-      standingUrl: row.standing_url || null,
-      basePrompt: row.base_prompt || '',
-      shortPrompt: row.short_prompt || '',
-      sprites: spriteUrlsByKey(`char_${row.id}_`, assets),
-    };
-    state.meta.set(agentKey, meta);
-    restoreAgent(agentKey, meta, saved.get(agentKey), getHomeLocation(row.id));
-  }
+  // actor registry 决定唯一实体；邀请后沿用原 NPC 的身份与位置。
+  synchronizeMembership();
 
   // 关系（角色无向对，相遇概率修正用）
   state.relationships.clear();
@@ -243,7 +269,7 @@ function loadState() {
     SELECT char_a, char_b, ended_at, created_at FROM town_encounters
     WHERE status IN ('done','cancelled') AND COALESCE(ended_at, created_at) >= ?
   `).all(new Date(cooldownCutoff).toISOString().slice(0, 19).replace('T', ' '))) {
-    const endTs = toEpochSeconds(row.ended_at || row.created_at) * 1000;
+    const endTs = toEpochSeconds(row.ended_at || row.created_at);
     state.pairCooldown.set(pairKey(decodeAgentId(row.char_a), decodeAgentId(row.char_b)), endTs + config.town.encounterCooldownHours * 3600_000);
   }
 
@@ -251,7 +277,7 @@ function loadState() {
   db.prepare(`INSERT INTO town_players (id, display_name) VALUES ('me', ?) ON CONFLICT(id) DO NOTHING`)
     .run(config.user.nickname || '我');
   const pRow = db.prepare(`SELECT * FROM town_players WHERE id = 'me'`).get();
-  const playerSaved = saved.get('me');
+  const playerSaved = db.prepare("SELECT * FROM town_agent_state WHERE agent_key = 'me'").get() || pRow;
   const center = state.map
     ? { x: Math.floor(state.map.cols / 2), y: Math.floor(state.map.rows / 2) }
     : { x: 0, y: 0 };
@@ -286,6 +312,173 @@ function loadState() {
   }
 
   refreshMoods();
+  initializeSimulation();
+}
+
+function initializeSimulation() {
+  const db = getDb();
+  // Include persisted owners so an appointment that ended while offline cannot
+  // leave an excluded actor's old movement/station lease behind after reload.
+  const hasSimulationState = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='town_simulation_state'").get();
+  state.simulationActorIds = new Set(hasSimulationState && state.world
+    ? db.prepare('SELECT actor_id FROM town_simulation_state WHERE world_id=? AND world_epoch=?')
+      .all(state.world.worldId,state.world.epoch).map(row => row.actor_id) : []);
+  state.simulation = createTownSimulation({ db,
+    registry: createTownActorRegistry(db),
+    clock: createTownClock({ timeZone: config.town.timeZone || 'Asia/Shanghai' }),
+    mode: config.town.simulation === 'rules' || config.town.economyEnabled ? 'rules' : 'legacy',
+    leaseMs: Math.max(180000, config.town.tickSeconds * 3000),
+    readActorFacts: readSimulationFacts,
+    moveToTarget: ({ actor, action, target, nowUtcMs }) => {
+      const agent = state.agents.get(actor?.agentKey);
+      const loc = state.locations.find(l => l.key === target);
+      if (!agent || !loc || action.worldEpoch !== state.world?.epoch) return { status: 'unreachable' };
+      if (agent.simulationMoveId === action.id && (agent.path || agent.targetLocId === loc.id)) return { status: 'moving' };
+      const success = assignTarget(agent, loc, nowUtcMs, { strictRadius: true });
+      if (success) agent.simulationMoveId = action.id;
+      return { status: success ? 'moving' : 'unreachable' };
+    },
+    stopMoving: ({ actor, action }) => {
+      const agent = state.agents.get(actor?.agentKey);
+      if (!agent || !action || action.worldEpoch !== state.world?.epoch || agent.simulationMoveId !== action.id) return;
+      agent.path = null;
+      agent.simulationMoveId = null;
+      if (agent.slotKey && state.occupied.get(agent.slotKey) === agent.agentKey) state.occupied.delete(agent.slotKey);
+      agent.slotKey = `${agent.x},${agent.y}`;
+      if (agent.presence !== 'off_town') state.occupied.set(agent.slotKey, agent.agentKey);
+      broadcastTownMove({ charId: agent.agentKey, from: { x: agent.x, y: agent.y }, path: [], speed: agent.speed, startedAt: Date.now() });
+    },
+  });
+}
+
+function economicActorIds() {
+  if (!config.town.economyEnabled || !state.world) return [];
+  const row = getDb().prepare('SELECT config FROM town_business_slices WHERE world_id = ? AND world_epoch = ?')
+    .get(state.world.worldId, state.world.epoch);
+  return row ? Object.values(JSON.parse(row.config).npcActorIds) : [];
+}
+
+function activeAppointment(actorId, now, runtime = getTownAppointmentRuntime()) {
+  if (!state.world || !actorId) return null;
+  const scope = { worldId: state.world.worldId, worldEpoch: state.world.epoch };
+  return runtime.appointments.getActiveForActor({ scope, actorId, at: now })
+    .find(appointment => appointment.providerActorId === actorId
+      && appointment.startAt <= now && now < appointment.endAt) ?? null;
+}
+
+function reconcileSimulationScope(now) {
+  const selected = new Set(economicActorIds());
+  if (config.town.simulation === 'rules') {
+    for (const agent of state.agents.values()) if (agent.actorId) selected.add(agent.actorId);
+  } else if (state.world) {
+    const runtime = getTownAppointmentRuntime();
+    for (const agent of state.agents.values()) {
+      if (agent.actorId && activeAppointment(agent.actorId,now,runtime)) selected.add(agent.actorId);
+    }
+  }
+  state.simulation?.setMode(config.town.simulation === 'rules' || selected.size ? 'rules' : 'legacy');
+  for (const actorId of state.simulationActorIds) {
+    if (!selected.has(actorId)) state.simulation?.cancelActor(actorId,'SIMULATION_SCOPE_ENDED');
+  }
+  state.simulationActorIds = selected;
+  return selected;
+}
+
+function tickTownSimulation(now = Date.now(), selected = reconcileSimulationScope(now)) {
+  if (config.town.simulation === 'rules') state.simulation?.tick();
+  else state.simulation?.tick({ actorIds: [...selected] });
+}
+
+function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
+  const agent = state.agents.get(actor.agentKey);
+  if (agent && isTownActorServing(actor.actorId)) {
+    advanceAgent(agent, nowUtcMs);
+    agent.activityText = '正在工坊提供服务';
+    agent.sleeping = false;
+    agent.presence = 'town';
+    return { actorId: actor.actorId, worldEpoch, intent: 'wait', scheduleKey: 'service:busy', target: null,
+      targetExists: true, arrived: false, locationKey: null, allowsAction: false,
+      durationMs: 15 * 60000, minDurationMs: 60000 };
+  }
+  let intent = 'wait', loc = null, target = null, scheduleKey = 'idle', sleeping = false, hasOriginalTask = false;
+  if (agent) {
+    advanceAgent(agent, nowUtcMs);
+    if (agent.kind === 'npc') {
+      const slot = getRoutineSlot(agent, nowUtcMs);
+      hasOriginalTask = !!slot;
+      const home = getDb().prepare('SELECT home_location_id FROM town_npcs WHERE id = ?').get(agent.refId)?.home_location_id;
+      loc = slot?.locationKey === 'home' ? state.locations.find(l => l.id === home) : locationFromKey(slot?.locationKey);
+      target = loc?.key || (slot?.locationKey !== 'home' ? slot?.locationKey : null) || null;
+      scheduleKey = slot ? JSON.stringify([slot.start, slot.end, slot.locationKey, slot.actionType || null]) : 'idle';
+      // 职业地点/动作标签是结构化配置；不从 activityText 猜测已工作。
+      intent = slot?.actionType === 'work_shift' || (target && agent.traits?.workLocationKey === target) ? 'work'
+        : slot?.actionType === 'rest' || slot?.sleeping === true ? 'rest' : 'wait';
+      sleeping = intent === 'rest';
+      agent.activityText = slot?.activity || '在镇上休息';
+    } else {
+      const date = new Date(nowUtcMs);
+      const sleep = isSleeping(agent.refId, date);
+      const activity = getCurrentActivity(agent.refId, date);
+      sleeping = !!sleep.sleeping || activity?.replyDelay === -1;
+      loc = sleeping ? getHomeLocation(agent.refId) : state.matcher(activity?.location);
+      const scheduled = !!activity?.startTime;
+      hasOriginalTask = sleeping || !isIdleScheduleActivity(activity);
+      intent = sleeping ? 'rest' : scheduled && !loc ? 'off_town'
+        : activity?.tags?.includes('work') && loc ? 'work' : 'wait';
+      target = loc?.key || null;
+      scheduleKey = scheduled ? JSON.stringify([activity.startTime, activity.endTime, activity.location, sleeping]) : `idle:${sleeping}`;
+      agent.activityText = sleeping ? '睡得正香' : activity?.activity || '自由时间';
+    }
+    agent.sleeping = sleeping;
+    agent.presence = intent === 'off_town' ? 'off_town' : 'town';
+    if (intent === 'off_town' && agent.slotKey && state.occupied.get(agent.slotKey) === agent.agentKey) state.occupied.delete(agent.slotKey);
+  }
+  const arrived = !!(agent && loc && !agent.path && chebyshev(agent, loc) <= (loc.radius ?? 2));
+  const facts = { actorId: actor.actorId, worldEpoch, intent, scheduleKey, target,
+    targetExists: target === null || !!loc, arrived, locationKey: arrived ? target : null,
+    allowsAction: !!agent && actor.participating && agent.encounterId === null && intent !== 'off_town' && !isTownActorServing(actor.actorId),
+    durationMs: 15 * 60000, minDurationMs: 60000 };
+  // A follow-up appointment is a temporary idle target, never a base schedule
+  // mutation or a work_shift. getActiveForActor also rechecks persisted schedules.
+  if (agent && facts.allowsAction && !['work','rest','off_town'].includes(intent)) {
+    const appointment = activeAppointment(actor.actorId,nowUtcMs);
+    if (appointment) {
+      const place = state.locations.find(location => location.key === appointment.locationKey);
+      const atAppointment = !!place && !agent.path && chebyshev(agent,place) <= (place.radius ?? 2);
+      agent.activityText = atAppointment ? '在工坊等候预约见面' : '正在前往预约地点';
+      return { ...facts, intent: 'wait', target: appointment.locationKey,
+        scheduleKey: `appointment:${appointment.appointmentId}`, targetExists: !!place,
+        arrived: atAppointment, locationKey: atAppointment ? appointment.locationKey : null,
+        durationMs: Math.max(1,Math.min(30 * 60000,appointment.endAt-nowUtcMs)), minDurationMs: 0 };
+    }
+  }
+  const enriched = config.town.economyEnabled ? getTownBusinessRuntime().work.enrichFacts(actor,
+    { worldId: state.world.worldId, worldEpoch, nowUtcMs }, facts) : facts;
+  if (agent && enriched.intent === 'work' && enriched.scheduleKey.startsWith('business:')) {
+    agent.activityText = enriched.arrived ? '正在岗位上营业' : '正在前往岗位';
+  }
+  if (config.town.simulation !== 'rules' || !agent || hasOriginalTask
+      || !enriched.allowsAction || enriched.intent !== 'wait' || enriched.target !== null
+      || enriched.scheduleKey !== facts.scheduleKey) return enriched;
+  // Keep legacy's default rest window out of new weather behavior; do not change
+  // rules sleep semantics or an explicit night-owl preference here.
+  const localMinute = townLocalTime(nowUtcMs).minuteOfDay;
+  if (agent.kind === 'npc' && !agent.traits?.nightOwl && (localMinute >= 23 * 60 || localMinute < 6 * 60)) return enriched;
+  const db = getDb();
+  const binding = agent.kind === 'npc'
+    ? db.prepare('SELECT home_location_id FROM town_npcs WHERE id=?').get(agent.refId)
+    : db.prepare('SELECT home_location_id FROM town_characters WHERE character_id=? AND town_enabled=1').get(agent.refId);
+  const homeRow = binding?.home_location_id ? db.prepare("SELECT id,key FROM town_locations WHERE id=? AND map_id=? AND kind='home'")
+    .get(binding.home_location_id, state.map?.id) : null;
+  const home = state.locations.find(place => place.id === homeRow?.id && place.key === homeRow.key && place.kind === 'home');
+  if (!home) return enriched;
+  const shelter = createTownWeatherShelter({ db }).enrich({ actor,
+    scope: { worldId: state.world.worldId, worldEpoch }, facts: enriched, weather: readTownWeather(nowUtcMs),
+    sourceKey: getWeatherSourceKey(config.weather.city), home, hasOriginalTask, actionId: action?.id });
+  if (shelter === enriched) return enriched;
+  const atHome = !agent.path && chebyshev(agent, home) <= (home.radius ?? 2);
+  agent.activityText = atHome ? '在自己家中避雨' : '正在回家避雨';
+  return { ...shelter, arrived: atHome, locationKey: atHome ? home.key : null };
 }
 
 /** 素材库 → 正/背精灵 URL（齐备才有值） */
@@ -324,6 +517,7 @@ function restoreAgent(agentKey, meta, savedRow, anchorLoc) {
   if (!state.map) return; // 无地图（向导模式）：只登记 meta，不落 agent
   const agent = {
     agentKey,
+    actorId: meta.actorId,
     x: null, y: null,
     path: null, speed: config.town.npcSpeed, moveStartedAt: 0,
     targetLocId: null, slotKey: null,
@@ -366,20 +560,7 @@ function restoreAgent(agentKey, meta, savedRow, anchorLoc) {
 // ── L0 确定性移动 ──
 
 function advanceAgent(agent, now) {
-  if (!agent.path || agent.path.length === 0) {
-    if (agent.path) agent.path = null;
-    return;
-  }
-  const cells = ((now - agent.moveStartedAt) / 1000) * agent.speed;
-  if (cells >= agent.path.length) {
-    const last = agent.path[agent.path.length - 1];
-    agent.x = last.x; agent.y = last.y;
-    agent.path = null;
-  } else {
-    const idx = Math.max(0, Math.floor(cells));
-    const step = agent.path[Math.min(idx, agent.path.length - 1)];
-    agent.x = step.x; agent.y = step.y;
-  }
+  advanceAgentPosition(agent, now);
 }
 
 function advancePlayer(now) {
@@ -398,73 +579,40 @@ function advancePlayer(now) {
   }
 }
 
-function assignTarget(agent, loc, now) {
-  if (!state.map) return;
-  if (agent.slotKey) {
-    const cur = state.occupied.get(agent.slotKey);
-    if (cur === agent.agentKey) state.occupied.delete(agent.slotKey);
-    agent.slotKey = null;
+function assignTarget(agent, loc, now, { strictRadius = false } = {}) {
+  if (!state.map || now < (agent.pathRetryAt || 0)) return false;
+  const oldSlot = agent.slotKey;
+  if (oldSlot && state.occupied.get(oldSlot) === agent.agentKey) state.occupied.delete(oldSlot);
+  const cell = pickStandingCell(state.map.walkGrid, state.occupied, { x: loc.x, y: loc.y }, loc.radius);
+  const start = agent.x == null || agent.y == null
+    ? (cell && { from: cell, cell, prefix: [], startedAt: now }) : playerRouteStart(agent, now);
+  const tail = cell && start
+    ? (start.cell.x === cell.x && start.cell.y === cell.y ? [] : findPath(state.map.walkGrid, start.cell, cell)) : null;
+  if (!cell || tail === null || (strictRadius && chebyshev(cell, loc) > (loc.radius ?? 2))) {
+    if (oldSlot) state.occupied.set(oldSlot, agent.agentKey);
+    agent.pathRetryAt = now + 30000;
+    agent.pathFailureReason = cell ? 'PATH_NOT_FOUND' : 'NO_STANDING_CELL';
+    return false;
   }
-
-  const cell = pickStandingCell(state.map.walkGrid, state.occupied, { x: loc.x, y: loc.y }, loc.radius)
-    || { x: loc.x, y: loc.y };
-  state.occupied.set(`${cell.x},${cell.y}`, agent.agentKey);
   agent.slotKey = `${cell.x},${cell.y}`;
+  state.occupied.set(agent.slotKey, agent.agentKey);
   agent.targetLocId = loc.id;
-
-  const from = { x: agent.x, y: agent.y };
-  let path = null;
-  if (agent.x === null || agent.y === null) {
-    agent.x = cell.x; agent.y = cell.y;
-    agent.path = null;
-  } else if (from.x === cell.x && from.y === cell.y) {
-    agent.path = null;
-  } else {
-    path = findPath(state.map.walkGrid, from, cell);
-    if (path === null) {
-      // 不可达（不该发生）→ 服务端权威瞬移兜底
-      agent.x = cell.x; agent.y = cell.y;
-      agent.path = null;
-      path = null;
-    } else if (path.length === 0) {
-      agent.path = null;
-    } else {
-      agent.path = path;
-      agent.moveStartedAt = now;
-    }
-  }
+  agent.pathFailureReason = null;
+  agent.pathRetryAt = 0;
+  applyPlayerRoute(agent, start, tail);
+  if (!agent.path.length) agent.path = null;
   agent.dirty = true;
-
-  broadcastTownMove({
-    charId: agent.agentKey,
-    from,
-    path: path || [],
-    speed: agent.speed,
-    startedAt: now,
-  });
+  broadcastTownMove({ charId: agent.agentKey, from: start.from,
+    path: agent.path || [], speed: agent.speed, startedAt: start.startedAt });
+  return true;
 }
 
 // ── 居民驱动：NPC 作息 / 入住角色日程投影 ──
 
-function routineMinutes(hhmm) {
-  const [h, m] = String(hhmm || '').split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-}
-
-/** 当前作息段（nightOwl 作息整体后移 1.5 小时） */
 function getRoutineSlot(agent, now) {
-  if (!agent.routine || agent.routine.length === 0) return null;
-  const d = new Date(now);
-  const offset = agent.traits?.nightOwl ? 90 : 0;
-  let minutes = d.getHours() * 60 + d.getMinutes() - offset;
-  if (minutes < 0) minutes += 24 * 60;
-  for (const slot of agent.routine) {
-    const s = routineMinutes(slot.start);
-    const e = routineMinutes(slot.end) || 24 * 60;
-    const adjE = e <= s ? 24 * 60 : e;
-    if (minutes >= s && minutes < adjE) return slot;
-  }
-  return null;
+  return findRoutineSlot(agent.routine, now, {
+    timeZone: config.town.timeZone || 'Asia/Shanghai', offsetMinutes: agent.traits?.nightOwl ? 90 : 0,
+  });
 }
 
 function locationFromKey(key) {
@@ -475,7 +623,7 @@ function locationFromKey(key) {
 
 function refreshNpcAgent(agent, now) {
   const slot = getRoutineSlot(agent, now);
-  const hour = new Date(now).getHours();
+  const hour = Math.floor(townLocalTime(now).minuteOfDay / 60);
   const isNight = hour >= 23 || hour < 6;
 
   if (!slot && isNight && !agent.traits?.nightOwl) {
@@ -541,9 +689,9 @@ function refreshCharAgent(agent, now) {
   let sleeping = false;
   let act = null;
   try {
-    const sleepState = isSleeping(agent.refId, now);
+    const sleepState = isSleeping(agent.refId, new Date(now));
     sleeping = !!sleepState.sleeping;
-    act = getCurrentActivity(agent.refId, now);
+    act = getCurrentActivity(agent.refId, new Date(now));
     if (act && act.replyDelay === -1) sleeping = true;
   } catch { /* 日程系统异常时按自由活动处理 */ }
 
@@ -582,7 +730,7 @@ const GREETINGS = [
 function playerNearbyReactions(now) {
   if (!state.player || !state.map) return;
   for (const agent of state.agents.values()) {
-    if (agent.kind !== 'npc' || agent.sleeping || agent.encounterId !== null) continue;
+    if (agent.kind !== 'npc' || agent.sleeping || agent.presence === 'off_town' || agent.encounterId !== null) continue;
     if (agent.x === null || agent.path !== null) continue;
     if (chebyshev(agent, state.player) > 1) continue;
     const key = pairKey(agent.agentKey, 'me');
@@ -609,7 +757,8 @@ function scanEncounters(now) {
   // 按 POI 分组（仅统计已到站、睡醒、空手的居民）
   const groups = new Map();
   for (const agent of state.agents.values()) {
-    if (agent.encounterId !== null || agent.sleeping) continue;
+    if (agent.encounterId !== null || agent.sleeping || agent.presence === 'off_town') continue;
+    if (isTownActorServing(agent.actorId) || currentActorAction(agent.actorId)?.type === 'work_shift') continue;
     if (agent.path !== null || agent.targetLocId === null) continue;
     if (agent.x === null || agent.y === null) continue;
     if (!groups.has(agent.targetLocId)) groups.set(agent.targetLocId, []);
@@ -655,6 +804,7 @@ function startEncounter(a, b, loc, now) {
   ).run(state.map.id, encodeAgentId(a.agentKey), encodeAgentId(b.agentKey), loc.id, 'chatting');
 
   const enc = {
+    generation: state.generation,
     id: Number(result.lastInsertRowid),
     a: a.agentKey, b: b.agentKey,
     locationId: loc.id, location: loc,
@@ -713,7 +863,11 @@ function expireEncounters(now) {
 
 /** 串行队列：小镇 LLM 永远一次只有一单，独立于聊天/后台任务池 */
 function enqueueLlm(fn) {
-  state.llmChain = state.llmChain.then(fn).catch(err => {
+  const generation = state.generation;
+  state.llmChain = state.llmChain.then(() => {
+    if (generation !== state.generation) return;
+    return fn();
+  }).catch(err => {
     console.warn('[town] llm task failed:', err?.message || err);
   });
   return state.llmChain;
@@ -723,15 +877,12 @@ function personaLine(agentKey) {
   const meta = state.meta.get(agentKey);
   if (!meta) return '';
   if (meta.kind === 'npc') return `${meta.displayName}：${meta.personaPrompt || '（神秘居民，性格开朗）'}`;
-  try {
-    return buildCharacterPersona(meta, { variant: 'full', person: meta.displayName, outfits: 'auto' });
-  } catch {
-    return `${meta.displayName}：${meta.shortPrompt || meta.basePrompt || ''}`;
-  }
+  // 相遇文字聊天沿用角色人格；生图外观组装仅用于下面的素材生成入口。
+  return `${meta.displayName}：${meta.basePrompt || meta.shortPrompt || ''}`;
 }
 
 async function runEncounterDialogue(enc) {
-  if (!state.encounters.has(enc.id)) return;
+  if (enc.generation !== state.generation || state.encounters.get(enc.id) !== enc) return;
   if (!config.features.townLLM) {
     enc.endAt = Date.now() + 45_000;
     return;
@@ -799,6 +950,7 @@ async function runEncounterDialogue(enc) {
       response_format: { type: 'json_object' },
       label: '小镇相遇对话',
     });
+    if (enc.generation !== state.generation || state.encounters.get(enc.id) !== enc) return;
     const parsed = safeJsonParse(content);
     const dialogue = Array.isArray(parsed?.dialogue) ? parsed.dialogue : null;
     if (!dialogue || dialogue.length === 0) throw new Error('empty dialogue');
@@ -811,7 +963,7 @@ async function runEncounterDialogue(enc) {
       if (!text) return;
       const at = now + i * 3800 + 1800;
       const timer = setTimeout(() => {
-        if (!state.encounters.has(enc.id)) return;
+        if (enc.generation !== state.generation || state.encounters.get(enc.id) !== enc) return;
         enc.messages.push({ speakerAgentKey: speaker, content: text, at });
         try {
           getDb().prepare('INSERT INTO town_chat_messages (encounter_id, speaker_char_id, content) VALUES (?, ?, ?)')
@@ -832,6 +984,7 @@ async function runEncounterDialogue(enc) {
 }
 
 async function runEncounterSummary(enc) {
+  if (enc.generation !== state.generation) return;
   if (!config.features.townLLM || enc.messages.length === 0) return;
   const metaA = state.meta.get(enc.a);
   const metaB = state.meta.get(enc.b);
@@ -861,6 +1014,7 @@ async function runEncounterSummary(enc) {
       response_format: { type: 'json_object' },
       label: '小镇相遇摘要',
     });
+    if (enc.generation !== state.generation) return;
     const parsed = safeJsonParse(content);
     const summary = String(parsed?.summary || '').trim().slice(0, 120);
     const tags = (Array.isArray(parsed?.tags) ? parsed.tags : [])
@@ -896,6 +1050,7 @@ async function runEncounterSummary(enc) {
 }
 
 function maybeStatusBubbles(now) {
+  const generation = state.generation;
   const intervalMs = config.town.statusBubbleIntervalMin * 60_000;
   if (now - state.lastBubbleBatchAt < intervalMs) return;
   state.lastBubbleBatchAt = now;
@@ -904,7 +1059,7 @@ function maybeStatusBubbles(now) {
 
   const candidates = [];
   for (const agent of state.agents.values()) {
-    if (agent.sleeping || agent.encounterId !== null) continue;
+    if (agent.sleeping || agent.presence === 'off_town' || agent.encounterId !== null) continue;
     const meta = state.meta.get(agent.agentKey);
     if (!meta) continue;
     candidates.push({
@@ -947,14 +1102,15 @@ function maybeStatusBubbles(now) {
       label: '小镇状态气泡',
     });
 
+    if (generation !== state.generation) return;
+
     const parsed = safeJsonParse(content);
     if (!Array.isArray(parsed?.bubbles)) return;
     for (const item of parsed.bubbles) {
       const agent = state.agents.get(String(item?.id));
       const text = String(item?.text ?? '').trim().slice(0, 30);
       if (!agent || !text || agent.sleeping || agent.encounterId !== null) continue;
-      agent.activityText = text;
-      agent.dirty = true;
+      agent.flavorText = text;
       agent.bubble = { text, until: Date.now() + 14_000 };
       broadcastTownBubble({ charId: agent.agentKey, text, ttl: 14 });
     }
@@ -962,13 +1118,8 @@ function maybeStatusBubbles(now) {
 }
 
 function getWeatherNote() {
-  try {
-    const ctx = getWeatherContext();
-    if (!ctx) return '';
-    const w = ctx.weather;
-    return [ctx.timeDesc, w?.weather, w?.temperature != null ? `${w.temperature}°C` : '']
-      .filter(Boolean).join('，');
-  } catch { return ''; }
+  const weather = readTownWeather();
+  return [weather.timeDesc, weather.text, weather.temperature].filter(Boolean).join('，');
 }
 
 function describeRelationship(charA, charB, metaA, metaB) {
@@ -1059,11 +1210,18 @@ function tick() {
       return; // 尚未开镇：心跳保连接，等向导初始化
     }
     if (now - state.lastMoodRefreshAt > 5 * 60_000) refreshMoods();
+    synchronizeMembership();
+    const simulatedActors = reconcileSimulationScope(now);
     for (const agent of state.agents.values()) {
       advanceAgent(agent, now);
-      if (agent.kind === 'npc') refreshNpcAgent(agent, now);
-      else refreshCharAgent(agent, now);
+      if (config.town.simulation !== 'rules' && !simulatedActors.has(agent.actorId) && !isTownActorServing(agent.actorId)) {
+        if (agent.kind === 'npc') refreshNpcAgent(agent, now);
+        else refreshCharAgent(agent, now);
+      }
     }
+    tickTownSimulation(now,simulatedActors);
+    maintainTownOrders();
+    if (config.town.simulation === 'rules') broadcastTownStateUpdated({ reason: 'simulation_tick' });
     advancePlayer(now);
     playerNearbyReactions(now);
     scanEncounters(now);
@@ -1082,30 +1240,37 @@ function tick() {
 
 export function getTownState() {
   const now = Date.now();
+  if (state.map) synchronizeMembership();
   for (const agent of state.agents.values()) advanceAgent(agent, now);
   advancePlayer(now);
+  if (state.running && config.features.town) tickTownSimulation(now);
 
   const locName = (id) => state.locations.find(l => l.id === id)?.name || null;
 
-  const agents = [...state.agents.values()].map(agent => {
+  const agents = [...state.agents.values()].filter(agent => agent.presence !== 'off_town').map(agent => {
     const meta = state.meta.get(agent.agentKey);
     const mood = agent.kind === 'char' ? state.moods.get(agent.refId) : null;
     return {
       agentKey: agent.agentKey,
+      actorId: meta?.actorId || null,
       kind: agent.kind,
-      characterId: agent.kind === 'char' ? agent.refId : null,
-      npcId: agent.kind === 'npc' ? agent.refId : null,
+      characterId: meta?.characterId || null,
+      npcId: meta?.npcId || null,
       displayName: meta?.displayName || agent.agentKey,
       avatarPath: meta?.avatarPath || null,
       standingUrl: meta?.standingUrl || null,
       sprites: meta?.sprites || null,
-      x: agent.x, y: agent.y,
+      x: agent.path?.length ? agent.moveFrom?.x ?? agent.x : agent.x,
+      y: agent.path?.length ? agent.moveFrom?.y ?? agent.y : agent.y,
       path: agent.path || [],
       speed: agent.speed,
       startedAt: agent.path ? agent.moveStartedAt : now,
       locationId: agent.targetLocId,
       locationName: locName(agent.targetLocId),
       activityText: agent.activityText || '',
+      flavorText: agent.flavorText || '',
+      action: currentActorAction(meta?.actorId),
+      busyReason: isTownActorServing(meta?.actorId) ? 'SERVICE_BUSY' : agent.pathFailureReason || null,
       sleeping: agent.sleeping,
       encounterId: agent.encounterId,
       mood: mood ? { valence: mood.valence, arousal: mood.arousal, dominantEmotion: mood.dominantEmotion } : null,
@@ -1113,19 +1278,13 @@ export function getTownState() {
     };
   });
 
-  const weather = (() => {
-    try {
-      const ctx = getWeatherContext();
-      if (!ctx) return null;
-      return {
-        timeDesc: ctx.timeDesc, hour: ctx.hour, season: ctx.season,
-        text: ctx.weather?.weather || '', temperature: ctx.weather?.temperature ?? null,
-      };
-    } catch { return null; }
-  })();
+  const weather = readTownWeather(now);
 
   return {
     enabled: config.features.town,
+    worldId: state.world?.worldId || null,
+    worldEpoch: state.world?.epoch || null,
+    stateVersion: state.generation,
     initialized: !!state.map,
     serverTime: now,
     tickSeconds: config.town.tickSeconds,
@@ -1136,10 +1295,13 @@ export function getTownState() {
       id: l.id, key: l.key, name: l.name, kind: l.kind, x: l.x, y: l.y, radius: l.radius, ambient: l.ambient,
     })),
     agents,
+    awayAgents: [...state.agents.values()].filter(a => a.presence === 'off_town')
+      .map(a => ({ actorId: a.actorId, agentKey: a.agentKey, activityText: a.activityText })),
     encountersActive: [...state.encounters.values()].map(e => ({ id: e.id, a: e.a, b: e.b, locationId: e.locationId })),
     player: state.player
       ? {
         agentKey: 'me', kind: 'player',
+        actorId: state.actors.get('me')?.actorId || null,
         displayName: state.player.displayName,
         moveRevision: state.player.moveRevision || 0,
         sprites: state.player.sprites,
@@ -1152,6 +1314,29 @@ export function getTownState() {
       : null,
     weather,
   };
+}
+
+function currentActorAction(actorId) {
+  if (!actorId || !state.world) return null;
+  return getDb().prepare(`SELECT id, type, status AS phase, version, target, due_at AS dueAt,
+    failure_reason AS failureReason FROM town_actions WHERE world_id = ? AND world_epoch = ?
+    AND actor_id = ? AND status IN ('validated', 'reserved', 'running') ORDER BY updated_at DESC LIMIT 1`)
+    .get(state.world.worldId, state.world.epoch, actorId) || null;
+}
+
+/** Server-only position evidence for orders/services; no renderer coordinates. */
+export function getTownActorPosition(actorId) {
+  if (!state.running || !config.features.town || !state.map || !state.world) return null;
+  const actor = createTownActorRegistry(getDb()).getActor(actorId, state.world.worldId);
+  if (!actor || actor.actorId !== actorId || !actor.participating || actor.archived) return null;
+  const agent = actor.playerId === 'me' ? state.player : state.agents.get(actor.agentKey);
+  if (!agent || agent.presence === 'off_town') return null;
+  if (actor.playerId === 'me') advancePlayer(Date.now());
+  else advanceAgent(agent, Date.now());
+  return { worldId: state.world.worldId, worldEpoch: state.world.epoch, actorId,
+    x: agent.x, y: agent.y, moving: !!agent.path?.length, sleeping: !!agent.sleeping,
+    encounterId: agent.encounterId ?? null,
+    locationKeys: agent.path?.length ? [] : state.locations.filter(l => chebyshev(agent, l) <= (l.radius ?? 2)).map(l => l.key) };
 }
 
 export function movePlayerTo(x, y) {
@@ -1211,11 +1396,11 @@ export function setTownCharacterEnabled(characterId, { townEnabled } = {}) {
   if (row) {
     const enabled = townEnabled === undefined ? row.town_enabled : (townEnabled ? 1 : 0);
     db.prepare('UPDATE town_characters SET town_enabled = ? WHERE character_id = ?').run(enabled, characterId);
-  } else if (townEnabled) {
-    db.prepare('INSERT INTO town_characters (character_id, town_enabled) VALUES (?, 1) ON CONFLICT(character_id) DO UPDATE SET town_enabled = 1')
-      .run(characterId);
+  } else if (townEnabled !== undefined) {
+    db.prepare('INSERT INTO town_characters (character_id, town_enabled) VALUES (?, ?) ON CONFLICT(character_id) DO UPDATE SET town_enabled = excluded.town_enabled')
+      .run(characterId, townEnabled ? 1 : 0);
   }
-  applyMembershipChange(`char:${characterId}`, townEnabled === undefined ? !!row?.town_enabled : !!townEnabled);
+  synchronizeMembership();
   return { ok: true };
 }
 
@@ -1225,19 +1410,38 @@ export function setNpcEnabled(npcId, enabled) {
   const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!row) return { ok: false, error: 'NPC 不存在' };
   db.prepare('UPDATE town_npcs SET town_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, npcId);
-  applyMembershipChange(`npc:${npcId}`, !!enabled);
+  synchronizeMembership();
   return { ok: true };
+}
+
+function synchronizeMembership() {
+  const registry = createTownActorRegistry(getDb());
+  const actors = registry.synchronize();
+  state.actors = new Map(actors.filter(a => a.agentKey).map(a => [a.agentKey, a]));
+  const desired = new Set(actors.filter(a => a.participating && a.agentKey && a.agentKey !== 'me').map(a => a.agentKey));
+  const membershipChanged = desired.size !== state.meta.size || [...desired].some(key => !state.meta.has(key));
+  for (const key of state.agents.keys()) if (!desired.has(key)) {
+    const agent = state.agents.get(key);
+    if (agent?.actorId) state.simulation?.cancelActor(agent.actorId, 'MEMBERSHIP_CHANGED');
+    applyMembershipChange(key, false);
+  }
+  for (const key of state.meta.keys()) if (!desired.has(key)) state.meta.delete(key);
+  for (const key of desired) applyMembershipChange(key, true);
+  if (membershipChanged) broadcastTownStateUpdated({ reason: 'membership_changed' });
 }
 
 /** 启停后同步内存 agent（reload 太重，增量处理） */
 function applyMembershipChange(agentKey, enabled) {
   if (enabled && !state.agents.has(agentKey)) {
     const db = getDb();
-    const saved = db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ?').get(agentKey);
+    const actor = state.actors.get(agentKey);
+    const saved = db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ?').get(agentKey)
+      || (actor?.npcExists ? db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ?').get(`npc:${actor.npcId}`) : null);
     if (agentKey.startsWith('npc:')) {
       const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(Number(agentKey.slice(4)));
       if (!row) return;
       const meta = {
+        actorId: actor?.actorId, npcId: row.id, characterId: actor?.characterExists ? actor.characterId : null,
         agentKey, kind: 'npc', refId: row.id,
         displayName: row.display_name,
         personaPrompt: [row.job ? `职业：${row.job}` : '', row.persona].filter(Boolean).join('\n'),
@@ -1251,6 +1455,7 @@ function applyMembershipChange(agentKey, enabled) {
       const metaRow = db.prepare('SELECT id, name, display_name, avatar_path, standing_url, base_prompt, short_prompt FROM characters WHERE id = ?').get(charId);
       if (!metaRow) return;
       const meta = {
+        actorId: actor?.actorId, characterId: metaRow.id, npcId: actor?.npcExists ? actor.npcId : null,
         agentKey, kind: 'char', refId: metaRow.id,
         displayName: metaRow.display_name || metaRow.name,
         personaPrompt: '',
@@ -1258,10 +1463,14 @@ function applyMembershipChange(agentKey, enabled) {
         standingUrl: metaRow.standing_url || null,
         basePrompt: metaRow.base_prompt || '',
         shortPrompt: metaRow.short_prompt || '',
-        sprites: spriteUrlsByKey(`char_${metaRow.id}_`),
+        sprites: spriteUrlsByKey(`char_${metaRow.id}_`)
+          || (actor?.npcExists ? spriteUrlsByKey(`npc_${actor.npcId}_`) : null),
       };
       state.meta.set(agentKey, meta);
-      restoreAgent(agentKey, meta, saved, getHomeLocation(charId));
+      const linkedNpc = actor?.npcExists ? db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(actor.npcId) : null;
+      const hasCharacterHome = db.prepare(`SELECT 1 FROM town_characters tc JOIN town_locations tl
+        ON tl.id = tc.home_location_id WHERE tc.character_id = ?`).get(charId);
+      restoreAgent(agentKey, meta, saved, hasCharacterHome || !linkedNpc ? getHomeLocation(charId) : homeLocationOfNpc(linkedNpc));
     }
     const agent = state.agents.get(agentKey);
     if (agent) {
@@ -1292,16 +1501,27 @@ export function listTownCharacters() {
   const assets = listAssets({});
   const byKey = new Map(assets.map(a => [a.key, a]));
   return rows.map(r => {
+    const appearanceStatus = { sprites: {}, portrait: 'unknown', standing: 'unknown' };
+    const snapshots = new Map();
+    const statusFor = (asset, mode) => {
+      if (!asset?.meta?.appearanceSource) return 'unknown';
+      if (!snapshots.has(mode)) snapshots.set(mode, createTownAppearanceSignature({ db,
+        buildAppearanceSection: buildCharacterAppearanceSection, buildPersona: buildCharacterPersona })
+        .capture({ sourceKind: 'character', sourceId: r.id, mode }));
+      return townAssetAppearanceStatus(asset, snapshots.get(mode));
+    };
     const sprites = {};
     const spriteIds = {};
     let ready = 0;
     for (const dir of ['down', 'up']) {
       const a = byKey.get(`char_${r.id}_${dir}`);
+      appearanceStatus.sprites[dir] = statusFor(a, 'sprite');
       sprites[dir] = a?.status === 'ready' ? a.image_path : null;
       spriteIds[dir] = a?.id ?? null;
       if (sprites[dir]) ready++;
     }
     const portrait = byKey.get(`char_${r.id}_portrait`);
+    appearanceStatus.portrait = statusFor(portrait, 'portrait');
     const agentKey = `char:${r.id}`;
     const agent = state.agents.get(agentKey);
     return {
@@ -1316,6 +1536,7 @@ export function listTownCharacters() {
       sprites,
       spriteIds,
       portraitId: portrait?.id ?? null,
+      appearanceStatus,
       locationName: agent ? state.locations.find(l => l.id === agent.targetLocId)?.name || null : null,
       activityText: agent?.activityText || '',
     };
@@ -1332,47 +1553,57 @@ export function forceTick() {
 // ── 管理面板：角色精灵 / 小镇设置 / 重置世界 ──
 
 /** 生成一个入住角色的正/背像素小人（600×800 → 36×48；外观走 characterPersona 统一入口 + 酒馆式 LLM 出 prompt） */
-export async function generateCharacterSprites(characterId) {
+export async function generateCharacterSprites(characterId, { expectedWorld = captureTownAssetWorld(), refreshAppearance = false } = {}) {
   const db = getDb();
+  const generation = state.generation;
   const row = db.prepare(`
     SELECT id, name, display_name, base_prompt, short_prompt FROM characters WHERE id = ?
   `).get(characterId);
   if (!row) throw new Error('角色不存在');
+  const appearanceGuard = createTownAppearanceSignature({ db,
+    buildAppearanceSection: buildCharacterAppearanceSection, buildPersona: buildCharacterPersona })
+    .capture({ sourceKind: 'character', sourceId: characterId, mode: 'sprite' });
+  const assertCurrent = () => {
+    const world = captureTownAssetWorld();
+    const current = db.prepare('SELECT id, name, display_name, base_prompt, short_prompt FROM characters WHERE id = ?').get(characterId);
+    if (world.worldId !== expectedWorld.worldId || world.epoch !== expectedWorld.epoch
+      || generation !== state.generation || !current
+      || ['name', 'display_name', 'base_prompt', 'short_prompt'].some(key => current[key] !== row[key])) {
+      throw Object.assign(new Error('世界或角色已变化，已取消旧精灵任务'), { code: 'TOWN_ASSET_STALE' });
+    }
+    appearanceGuard.assertCurrent();
+  };
+  assertCurrent();
 
-  let appearance = '';
-  try {
-    appearance = buildCharacterAppearanceSection(row, { outfits: 'auto' })
-      .replace(/^##\s*你的外观\s*$/m, '')
-      .replace(/^[-*]\s*/gm, '')
-      .trim();
-  } catch {
-    appearance = row.short_prompt || row.base_prompt || row.display_name;
-  }
-  const appearanceInfo = [
-    `【名字】${row.display_name || row.name}`,
-    `【外观描述（必以此为准）】${appearance || row.display_name}`,
-  ].join('\n');
+  const appearance = appearanceGuard.description;
+  const appearanceInfo = appearanceGuard.appearanceInfo;
 
   for (const dir of ['down', 'up']) {
+    assertCurrent();
     const key = `char_${characterId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
-    if (existing?.status === 'ready') continue;
+    if (existing?.status === 'ready' && (refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) === 'current')) continue;
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
+      assertCurrent();
       if (existing) {
-        await regenerateAsset(existing.id, { prompt });
+        await regenerateAsset(existing.id, { prompt, expectedWorld, appearanceGuard });
       } else {
         await createAsset({
-          kind: 'npc', key, name: `${row.display_name || row.name} ${dir}`,
+          kind: 'npc', key, name: `${row.display_name || row.name} ${dir}`, expectedWorld, appearanceGuard,
           desc: appearance || row.display_name,
           meta: { direction: dir, characterId, promptOverride: prompt },
         });
       }
+      assertCurrent();
     } catch (err) {
+      assertCurrent();
+      if (err.code === 'TOWN_ASSET_STALE') throw err;
       console.warn(`[town] char #${characterId} sprite ${dir} failed:`, err?.message);
     }
   }
   // 入住状态下刷新内存里的精灵引用
+  assertCurrent();
   const agentKey = `char:${characterId}`;
   const meta = state.meta.get(agentKey);
   if (meta) meta.sprites = spriteUrlsByKey(`char_${characterId}_`);
@@ -1380,6 +1611,10 @@ export async function generateCharacterSprites(characterId) {
 }
 
 const TOWN_SETTING_FIELDS = {
+  economyEnabled: { type: 'boolean' },
+  liquidityEnabled: { type: 'boolean' },
+  simulation: { type: 'enum', values: ['legacy', 'rules'] },
+  timeZone: { type: 'timezone' },
   tickSeconds: { min: 20, max: 300, type: 'int' },
   npcSpeed: { min: 0.1, max: 4, type: 'float' },
   playerSpeed: { min: 0.2, max: 6, type: 'float' },
@@ -1399,49 +1634,100 @@ export function getTownSettings() {
 
 export function updateTownSettings(patch = {}) {
   const db = getDb();
+  const next = { ...config.town };
   const applied = {};
   if (patch.generation !== undefined) {
-    updateTownGenerationSettings(patch.generation);
+    next.generation = mergeTownGenerationSettings(next.generation, patch.generation);
   }
   for (const [key, spec] of Object.entries(TOWN_SETTING_FIELDS)) {
     if (patch[key] === undefined) continue;
+    if (spec.type === 'boolean') {
+      if (typeof patch[key] === 'boolean') next[key] = applied[key] = patch[key];
+      continue;
+    }
+    if (spec.type === 'enum') {
+      if (spec.values.includes(patch[key])) next[key] = applied[key] = patch[key];
+      continue;
+    }
+    if (spec.type === 'timezone') {
+      try {
+        if (typeof patch[key] !== 'string') continue;
+        new Intl.DateTimeFormat('en', { timeZone: patch[key] }).format();
+        next[key] = applied[key] = patch[key];
+      } catch { /* Invalid timezone cannot poison the running clock. */ }
+      continue;
+    }
     let v = spec.type === 'int' ? parseInt(patch[key], 10) : parseFloat(patch[key]);
     if (Number.isNaN(v)) continue;
     v = Math.max(spec.min, Math.min(spec.max, v));
-    config.town[key] = v;
+    next[key] = v;
     applied[key] = v;
   }
   // 保证道具密度始终高于建筑密度，而不是只在 prompt 里口头提醒。
   if (applied.buildingDensity !== undefined || applied.propDensity !== undefined) {
-    config.town.propDensity = Math.min(TOWN_SETTING_FIELDS.propDensity.max, Math.max(config.town.propDensity, config.town.buildingDensity + 0.1));
-    applied.buildingDensity = config.town.buildingDensity;
-    applied.propDensity = config.town.propDensity;
+    next.propDensity = Math.min(TOWN_SETTING_FIELDS.propDensity.max, Math.max(next.propDensity, next.buildingDensity + 0.1));
+    applied.buildingDensity = next.buildingDensity;
+    applied.propDensity = next.propDensity;
   }
-  if (Object.keys(applied).length > 0) {
-    // 存当前生效的全部字段，保证下次启动完整恢复
+  // Validate and persist under the same writer lock. In-memory settings/timers
+  // change only after commit, including when generation settings share the patch.
+  db.transaction(() => {
+    if (patch.liquidityEnabled === true && config.town.liquidityEnabled !== true) {
+      const context = getTownBusinessRuntime();
+      const activation = context.liquidity.checkActivation(context.scope);
+      if (!activation.allowed) throw Object.assign(new Error('公共基金至少需要 60 邻币可用准备金，暂不能开启保障'),
+        { code: activation.reason, status: 409 });
+    }
+    if (patch.generation !== undefined) db.prepare(`
+      INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_generation_settings', ?)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
+    `).run(JSON.stringify(next.generation));
+    if (!Object.keys(applied).length) return;
     const snapshot = {};
-    for (const key of Object.keys(TOWN_SETTING_FIELDS)) snapshot[key] = config.town[key];
-    try {
-      db.prepare(`
+    for (const key of Object.keys(TOWN_SETTING_FIELDS)) snapshot[key] = next[key];
+    db.prepare(`
         INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_settings', ?)
         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
       `).run(JSON.stringify(snapshot));
-    } catch (err) {
-      console.warn('[town] persist settings failed:', err?.message);
-    }
+  }).immediate();
+  Object.assign(config.town, next);
+  if (Object.keys(applied).length > 0) {
     // tick 间隔变更即时生效
     if (applied.tickSeconds && state.timer) {
       clearInterval(state.timer);
       state.timer = setInterval(tick, config.town.tickSeconds * 1000);
+    }
+    if (applied.simulation || applied.timeZone || applied.tickSeconds || Object.hasOwn(applied, 'economyEnabled')) {
+      if (applied.simulation === 'legacy' || (applied.economyEnabled === false && config.town.simulation !== 'rules')) {
+        state.simulation?.setMode('legacy');
+        state.simulation?.tick();
+        for (const agent of state.agents.values()) agent.presence = 'town';
+      }
+      initializeSimulation();
+      broadcastTownStateUpdated({ reason: 'settings_changed' });
     }
   }
   return { ok: true, applied };
 }
 
 /** 仅清内存世界状态（DB 由调用方负责）——向导重新初始化时用 */
+function invalidateSceneCallbacks() {
+  state.generation++;
+  for (const enc of state.encounters.values()) {
+    for (const timer of enc.timeouts || []) clearTimeout(timer);
+  }
+}
+
 export function resetWorldState() {
+  invalidateSceneCallbacks();
   state.map = null;
   state.locations = [];
+  state.matcher = null;
+  state.player = null;
+  state.simulation = null;
+  state.simulationActorIds.clear();
+  state.actors.clear();
+  state.pairCooldown.clear();
   state.agents.clear();
   state.meta.clear();
   state.occupied.clear();
@@ -1451,21 +1737,52 @@ export function resetWorldState() {
 /** 重新初始化世界：清地图/POI/居民/相遇历史，走向导 */
 export function resetWorld() {
   const db = getDb();
-  db.exec('UPDATE town_npcs SET home_location_id = NULL');
-  db.exec('DELETE FROM town_npc_chat_messages');
-  db.exec('DELETE FROM town_chat_messages');
-  db.exec('DELETE FROM town_encounters');
-  db.exec('DELETE FROM town_characters');
-  db.exec('DELETE FROM town_npcs');
-  db.exec('DELETE FROM town_locations');
-  db.exec('DELETE FROM town_agent_state');
-  db.exec('DELETE FROM town_maps');
-  db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL WHERE id = 'me'");
-  state.map = null;
-  state.locations = [];
-  state.agents.clear();
-  state.meta.clear();
-  state.occupied.clear();
-  state.encounters.clear();
-  return { ok: true };
+  const registry = createTownActorRegistry(db);
+  const world = registry.getWorldState();
+  const nextWorld = db.transaction(() => {
+    db.prepare(`UPDATE town_dialogue_requests SET status = 'failed', error = 'WORLD_RESET', updated_at = ?
+      WHERE world_id = ? AND world_epoch = ? AND status = 'processing'`).run(Date.now(), world.worldId, world.epoch);
+    // 旧 epoch 仍有效时原子取消在途动作、释放资源，然后再跨 epoch。
+    createTownActionRunner({ db, clock: { now: Date.now },
+      getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor, readFacts: () => ({})
+    }).cancelActive({ worldId: world.worldId, worldEpoch: world.epoch,
+      reasonCode: 'WORLD_RESET', idempotencyKey: `reset:${world.epoch}` });
+    const economy = createEconomyService({ db, clock: { now: Date.now }, getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor });
+    const runtime = getTownBusinessRuntime();
+    runtime.services.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
+    getTownAppointmentRuntime().appointments.cancelForRebuild({ scope: { worldId: world.worldId, worldEpoch: world.epoch } });
+    runtime.production.cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch,
+      idempotencyKey: `reset-production:${world.epoch}`, sourceKey: `reset-production:${world.epoch}` });
+    runtime.itemTemplates.releaseLocks({ worldId: world.worldId, worldEpoch: world.epoch,
+      idempotencyKey: `reset-items:${world.epoch}`, sourceKey: `reset-items:${world.epoch}`, reasonCode: 'WORLD_RESET' });
+    createTownOrderService({ db, clock: { now: Date.now }, registry, economy,
+      position: { getLocation: () => null, hasArrived: () => false } })
+      .cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch,
+        idempotencyKey: `reset-orders:${world.epoch}`, sourceKey: `reset-orders:${world.epoch}` });
+    economy.releaseActive({ worldId: world.worldId, worldEpoch: world.epoch,
+        idempotencyKey: `reset-reserves:${world.epoch}`, sourceKey: `reset-reserves:${world.epoch}`, reasonCode: 'WORLD_RESET' });
+    db.prepare(`UPDATE town_event_deliveries SET status = 'dead', lease_token = NULL,
+      lease_until = NULL, last_error = 'WORLD_RESET' WHERE status IN ('pending', 'processing')
+      AND event_id IN (SELECT event_id FROM town_domain_events WHERE world_id = ? AND world_epoch = ?)`)
+      .run(world.worldId, world.epoch);
+    registry.advanceEpoch({ expectedEpoch: world.epoch });
+    db.exec('UPDATE town_npcs SET home_location_id = NULL');
+    db.exec('DELETE FROM town_npc_chat_messages');
+    db.exec('DELETE FROM town_chat_messages');
+    db.exec('DELETE FROM town_encounters');
+    db.exec('DELETE FROM town_characters');
+    db.exec('DELETE FROM town_npcs');
+    db.exec('DELETE FROM town_locations');
+    db.exec('DELETE FROM town_agent_state');
+    db.exec('DELETE FROM town_maps');
+    db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL WHERE id = 'me'");
+    registry.synchronize();
+    return registry.getWorldState();
+  })();
+  abortTownServiceGenerations(world.worldId, world.epoch);
+  resetWorldState();
+  state.world = nextWorld;
+  setTownBusScope(nextWorld);
+  broadcastTownStateUpdated({ reason: 'world_reset' });
+  return { ok: true, worldId: nextWorld.worldId, worldEpoch: nextWorld.epoch };
 }

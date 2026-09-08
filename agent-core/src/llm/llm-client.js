@@ -139,6 +139,7 @@ function mergeConsecutiveRoles(messages) {
 
 /** 免费鸡蛋同步请求：依次尝试本轮尚未失败过的免费模型，每个模型只请求一次 */
 async function _chatSyncFreeEgg(messages, opts) {
+  throwIfSyncAborted(opts.signal);
   const candidates = freeEggCandidates();
   if (candidates.length === 0) {
     const err = new Error('free egg: all models already failed in this session');
@@ -147,6 +148,7 @@ async function _chatSyncFreeEgg(messages, opts) {
   }
   let lastError = null;
   for (const model of candidates) {
+    throwIfSyncAborted(opts.signal);
     if (!config.llm.freeEgg) {
       lastError = lastError || new Error('free egg disabled');
       lastError.__freeEggFailover = true;
@@ -155,6 +157,8 @@ async function _chatSyncFreeEgg(messages, opts) {
     try {
       return await _chatSyncInner(messages, { ...opts, model, retries: 0 });
     } catch (err) {
+      throwIfSyncAborted(opts.signal, err);
+      if (opts.freeEggFailover === false) throw err;
       lastError = err;
       if (recordFreeEggFailure(model, err)) {
         err.__freeEggFailover = true;
@@ -162,6 +166,7 @@ async function _chatSyncFreeEgg(messages, opts) {
       }
     }
   }
+  throwIfSyncAborted(opts.signal);
   if (config.llm.freeEgg) {
     updateFreeEggEnabled(false);
     resetClient();
@@ -177,18 +182,74 @@ async function _chatSyncFreeEgg(messages, opts) {
  * 立即用恢复后的自有配置把本次请求重发一遍（model/thinking 等默认值重新求值）
  * @param {number} opts.retries - 最大重试次数（默认 2，共 3 次尝试）
  * @param {number} opts.retryDelay - 初始重试延迟 ms（默认 1000，指数退避 ×2）
+ * @param {AbortSignal} opts.signal - 覆盖排队、退避、请求与免费模型切换；取消后不再重发
+ * @param {number} opts.timeout - SDK 单次请求超时 ms（不含排队）；缺省沿用 SDK 默认
+ * @param {number} opts.maxRetries - SDK 内部重试次数；与外层 retries 独立，缺省不变
+ * @param {boolean} opts.freeEggFailover - false 禁止免费模型轮换/回退自有端点，缺省保持旧行为
+ * 单次请求用 { signal, timeout: 10000, retries: 0, maxRetries: 0, freeEggFailover: false }。
  */
 export async function chatSync(messages, opts = {}) {
+  throwIfSyncAborted(opts.signal);
+  if (opts.timeout !== undefined && (!Number.isSafeInteger(opts.timeout) || opts.timeout < 1 || opts.timeout > 2147483647)) {
+    throw new TypeError('chatSync timeout must be a positive integer in milliseconds');
+  }
+  if (opts.maxRetries !== undefined && (!Number.isSafeInteger(opts.maxRetries) || opts.maxRetries < 0)) {
+    throw new TypeError('chatSync maxRetries must be a nonnegative integer');
+  }
   try {
     if (config.llm.freeEgg) return await _chatSyncFreeEgg(messages, opts);
     return await _chatSyncInner(messages, opts);
   } catch (err) {
-    if (err && err.__freeEggFailover) {
+    throwIfSyncAborted(opts.signal, err);
+    if (err && err.__freeEggFailover && opts.freeEggFailover !== false) {
       console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'sync'})`);
       return await _chatSyncInner(messages, opts);
     }
     throw err;
   }
+}
+
+// Sync-path helpers only; streaming and the shared semaphore API retain their existing contract.
+function throwIfSyncAborted(signal, error) {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+  if (error?.name === 'AbortError' || error?.name === 'APIUserAbortError') throw error;
+}
+
+function awaitSyncSignal(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    // Attach both handlers even for pre-abort, so a late semaphore resolution/rejection is observed.
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) { signal.removeEventListener('abort', abort); abort(); }
+  });
+}
+
+async function acquireSyncSlot(signal) {
+  throwIfSyncAborted(signal);
+  let acquired = false, abandoned = false;
+  const pending = acquireSlot().then(() => {
+    // The existing semaphore cannot remove queued waiters. Return a cancelled waiter's slot immediately.
+    if (abandoned) releaseSlot();
+    else acquired = true;
+  });
+  try {
+    await awaitSyncSignal(pending, signal);
+    throwIfSyncAborted(signal);
+  } catch (error) {
+    abandoned = true;
+    if (acquired) releaseSlot();
+    throw error;
+  }
+}
+
+async function syncRetryDelay(ms, signal) {
+  throwIfSyncAborted(signal);
+  let timer;
+  try { await awaitSyncSignal(new Promise(resolve => { timer = setTimeout(resolve, ms); }), signal); }
+  finally { clearTimeout(timer); }
+  throwIfSyncAborted(signal);
 }
 
 /**
@@ -240,10 +301,17 @@ export async function testLlmConnection({ baseURL, apiKey, model, headers = {}, 
   };
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries } = {}) {
+  throwIfSyncAborted(signal);
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
-  if (_limitEnabled()) await acquireSlot();
+  const limited = _limitEnabled();
+  if (limited) await acquireSyncSlot(signal);
   try {
+  throwIfSyncAborted(signal);
+  const requestOptions = {};
+  if (signal !== undefined) requestOptions.signal = signal;
+  if (timeout !== undefined) requestOptions.timeout = timeout;
+  if (maxRetries !== undefined) requestOptions.maxRetries = maxRetries;
   const params = {
     model,
     messages,
@@ -288,10 +356,12 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       if (attempt > 0) {
         const delay = retryDelay * Math.pow(2, attempt - 1);
         console.warn(`[${providerLabel()}] ▸ 第 ${attempt}/${retries} 次重试 (${delay}ms 后退避)...`);
-        await sleep(delay);
+        await syncRetryDelay(delay, signal);
       }
 
-      const res = await getClient().chat.completions.create(params);
+      throwIfSyncAborted(signal);
+      const res = await getClient().chat.completions.create(params, requestOptions);
+      throwIfSyncAborted(signal);
       const content = res.choices[0].message.content;
 
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
@@ -305,6 +375,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
 
       return content;
     } catch (err) {
+      throwIfSyncAborted(signal, err);
       lastError = err;
       const status = err?.status || err?.response?.status;
       const code = err?.code || err?.error?.code || '';
@@ -328,7 +399,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   }
   throw lastError;
   } finally {
-    if (_limitEnabled()) releaseSlot();
+    if (limited) releaseSlot();
   }
 }
 

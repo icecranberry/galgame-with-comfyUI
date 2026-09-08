@@ -1,5 +1,6 @@
 import { agentBob } from './agentMotion.js'
 import { objectAnchor, isoToGround, cellCenterWorld } from './projection.js'
+import { adaptBuildingVolume } from './buildingVolumeProfile.js'
 
 const positive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback
 export function renderMeta(asset = {}, instance = {}) {
@@ -20,7 +21,10 @@ export const assetUrl = asset => {
 }
 export function adaptObject(obj, asset) {
   const anchor = objectAnchor(obj, asset?.meta)
-  return { ...obj, ...anchor, grid: { x: obj.x, y: obj.y }, ground: isoToGround(anchor.x, anchor.y), asset, render: renderMeta(asset, obj), url: assetUrl(asset) }
+  const dto = { ...obj, ...anchor, grid: { x: obj.x, y: obj.y }, ground: isoToGround(anchor.x, anchor.y), asset, render: renderMeta(asset, obj), url: assetUrl(asset) }
+  const volume = adaptBuildingVolume(asset, obj)
+  if (volume) { dto.volume = volume; dto.render.projection = 'modular_volume' }
+  return dto
 }
 export function adaptAgent(agent, pos, direction, nowMs = 0) {
   const anchor = cellCenterWorld(pos.x, pos.y)

@@ -1,5 +1,6 @@
 import { Vector3 } from 'three'
 import { imageAlphaHit } from './imageAlpha.js'
+import { visibleBodySamples } from './interactionOcclusion.js'
 
 export const cardDepth = mesh => mesh.userData.dto.ground.x + mesh.userData.dto.ground.z
 export function sortCards(cards) {
@@ -13,10 +14,9 @@ export function cardOccludesAgent(building, agent, camera) {
   building.updateMatrixWorld(true); agent.updateMatrixWorld(true)
   // Probe the character's body against actual building alpha, not its padded box.
   // Cards share the fixed view-facing horizontal axis and a vertical up axis.
-  const point = new Vector3(), near = new Vector3(-.5, -.5, 0).applyMatrix4(building.matrixWorld).project(camera)
+  const near = new Vector3(-.5, -.5, 0).applyMatrix4(building.matrixWorld).project(camera)
   const far = new Vector3(.5, .5, 0).applyMatrix4(building.matrixWorld).project(camera)
-  for (const x of [-.25, 0, .25]) for (const y of [-.35, 0, .35]) {
-    point.set(x, y, 0).applyMatrix4(agent.matrixWorld).project(camera)
+  for (const { projected: point } of visibleBodySamples(agent, camera)) {
     const u = (point.x - near.x) / (far.x - near.x)
     const v = 1 - (point.y - near.y) / (far.y - near.y)
     if (imageAlphaHit(building.material.map.image, u, v, building.material.alphaTest)) return true

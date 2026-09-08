@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { notifyWeatherSourceChange } from './services/weatherSource.js';
 import { setSetting, getSetting } from './db/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -99,6 +100,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     townLLM: process.env.FEATURE_TOWN_LLM !== 'false', // 默认开：小镇 LLM 事件（相遇对话/状态气泡）；关闭则退化为纯移动模拟
   },
   town: {
+    simulation: process.env.TOWN_SIMULATION === 'rules' ? 'rules' : 'legacy',
+    economyEnabled: false,
+    liquidityEnabled: false,
+    timeZone: process.env.TOWN_TIME_ZONE || 'Asia/Shanghai',
     tickSeconds: Math.max(20, Math.min(300, parseInt(process.env.TOWN_TICK_SECONDS, 10) || 60)), // 模拟步长（真实秒）
     npcSpeed: 0.5,        // NPC 移动速度（格/秒），服务端推进与前端插值共用
     playerSpeed: 1.1,     // 玩家 token 移动速度（格/秒）
@@ -562,6 +567,7 @@ export function getWorkflowConfig() {
 }
 
 export function updateWeatherConfig(city) {
+  notifyWeatherSourceChange(config.weather.city, city);
   config.weather.city = city;
   persistSettingSync('weather_city', city);
   console.log(`[config] weather city = ${city || '(auto)'}`);

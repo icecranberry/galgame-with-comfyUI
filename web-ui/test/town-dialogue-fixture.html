@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Town dialogue fixture</title><div id="app"></div><script type="module">
+import { createApp, ref, h } from 'vue'
+import TownNpcChat from '../src/components/town/TownNpcChat.vue'
+const id = ref(1), open = ref(true), busy = ref(false)
+window.fixture = { id, open, busy, linked: null, keys: 0, activityOpened: 0 }
+window.addEventListener('keydown', () => fixture.keys++)
+createApp({ setup: () => () => h('main', open.value ? [h(TownNpcChat, { npcId: id.value, showActivity: true, onActivity: () => { fixture.activityOpened++ }, serviceBusy: busy.value, worldId: 'fixture', worldEpoch: 1, displayName: '小满', playerName: '旅人', onClose: () => { open.value = false }, onCharacterChat: value => { fixture.linked = value } })] : []) }).mount('#app')
+</script><style>body{margin:0}main{position:absolute;inset:0;container:town-world / inline-size;background:#dfe5d0;font-family:system-ui}</style></html>

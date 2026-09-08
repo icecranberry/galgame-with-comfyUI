@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>居民近况验证</title><div id="app"></div><script type="module">
+import { createApp, ref, h } from 'vue'
+import TownActivityPanel from '../src/components/town/TownActivityPanel.vue'
+import LinsheButton from '../src/components/ui/LinsheButton.vue'
+const open = ref(false), actor = ref({ actorId: 'a', displayName: '阿禾', action: { type: 'work_shift', phase: 'running' } })
+window.fixture = { open, actor, keys: 0 }
+window.addEventListener('keydown', () => fixture.keys++)
+createApp({ setup: () => () => h('main', [h(LinsheButton, { onClick: () => open.value = true }, () => '查看居民近况'), h(TownActivityPanel, { open: open.value, actor: actor.value, onClose: () => open.value = false })]) }).mount('#app')
+</script><style>:root{--accent:#e07b6c;--accent-hover:#cc6a5c;--accent-light:#f0a89a;--danger:#e25c5c;--text-secondary:#8c8074;--text-bright:#111;--border:#e0dcd6}body{margin:0;font-family:system-ui,sans-serif;background:#e8e4dc;color:#74665a}main{padding:24px}</style></html>

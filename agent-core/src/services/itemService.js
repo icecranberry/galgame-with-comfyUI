@@ -4,7 +4,7 @@
  * 获取渠道：每日宝箱（16 小时冷却，开箱记录并入 gift_history（gift_type='chest'），
  * 按最近一次道具图片生成完成时间惰性计算；生成期间由 generating 道具占用冷却。
  * 冷却记录在图片生成完成（成功或兜底标记 ready）后才写入；进程中断未完成的 generating
- * 道具会在下次启动时清理，不计入冷却。
+ * 宝箱道具会在下次启动时清理，不计入冷却；商城/服务道具由各自流程恢复。
  * 道具池「效果固定 + LLM 调味」：效果类型与落地逻辑在 ITEM_EFFECTS 中固定，
  * 开箱时由 LLM 生成道具名/描述/512×512 图标 tag 串（以及服饰类的外观描述变体）。
  *
@@ -28,6 +28,7 @@ import { getWorldIntegrationRule } from '../builtinRules.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
+import { PLAYER_ITEM_SQL, CHEST_ITEM_SQL, hasGeneratingChest, completeChestItem, completeStaleChestItems } from './itemLifecycle.js';
 import { broadcast } from './unifiedStreamBus.js';
 import {
   loadEmotionState, saveEmotionSnapshot, loadAffinity, saveAffinity,
@@ -168,7 +169,7 @@ export function getChestState() {
   }
   const generating = Boolean(
     chestOpening ||
-    db.prepare(`SELECT id FROM backpack_items WHERE status = 'generating' LIMIT 1`).get()
+    hasGeneratingChest(db)
   );
   return {
     canOpen: remainingSeconds <= 0 && !generating,
@@ -176,22 +177,6 @@ export function getChestState() {
     cooldownHours: CHEST_COOLDOWN_SECONDS / 3600,
     generating,
   };
-}
-
-/** 当前开箱的图片已完成时补记冷却；已被 tick 兜底记录过的行不再重复写入 */
-function recordChestOpen(itemId) {
-  const db = getDb();
-  try {
-    const item = db.prepare('SELECT acquired_at FROM backpack_items WHERE id = ?').get(itemId);
-    if (!item) return false;
-    const last = db.prepare(`SELECT created_at FROM gift_history WHERE gift_type = 'chest' ORDER BY id DESC LIMIT 1`).get();
-    if (last && String(item.acquired_at) <= String(last.created_at)) return false;
-    db.prepare(`INSERT INTO gift_history (gift_type) VALUES ('chest')`).run();
-    return true;
-  } catch (err) {
-    console.error('[items] 记录宝箱冷却失败:', err.message);
-    return false;
-  }
 }
 
 /** 池内均匀抽一个效果 key */
@@ -369,15 +354,18 @@ export async function openChest() {
     }
 
     const result = db.prepare(
-      `INSERT INTO backpack_items (effect_key, name, description, status, payload_json)
-       VALUES (?, ?, ?, 'generating', ?)`
+      `INSERT INTO backpack_items (effect_key, name, description, status, payload_json, owner_key, source_type)
+       VALUES (?, ?, ?, 'generating', ?, 'me', 'chest')`
     ).run(effectKey, name, description, JSON.stringify(payload));
 
-    const item = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(result.lastInsertRowid);
+    const item = db.prepare(`SELECT * FROM backpack_items WHERE id = ? AND ${PLAYER_ITEM_SQL}`).get(result.lastInsertRowid);
     const imagePrompt = (typeof flavor.image_prompt === 'string' && flavor.image_prompt.trim())
       ? flavor.image_prompt.trim()
       : `game item icon, ${effect.theme || effect.name}, floating, glowing softly, no humans, simple background, best quality`;
-    generateItemImageAsync(item.id, imagePrompt);
+    generateItemImageAsync(item.id, imagePrompt).catch(err => {
+      // DB failures leave generating intact for the scheduler; avoid an unhandled rejection.
+      console.error('[items] 道具图片完成提交失败:', err.message);
+    });
 
     return { ok: true, item: serializeItem(item) };
   } finally {
@@ -388,6 +376,9 @@ export async function openChest() {
 /** 异步生成道具图标（512×512，失败时置 ready 无图，前端走兜底图标） */
 async function generateItemImageAsync(itemId, imagePrompt) {
   const db = getDb();
+  const snapshot = db.prepare(`SELECT version FROM backpack_items WHERE id = ? AND ${CHEST_ITEM_SQL}
+    AND status = 'generating' AND locked_by IS NULL`).get(itemId);
+  if (!snapshot) return;
   try {
     const result = await generateImageRaw(imagePrompt, {
       scene: 'chat',
@@ -401,21 +392,28 @@ async function generateItemImageAsync(itemId, imagePrompt) {
       throw new Error(result.error || 'ComfyUI 未返回图片');
     }
     const url = saveBase64Image('items', `item_${itemId}_${Date.now()}.png`, result.images[0].base64);
-    const updated = db.prepare(`UPDATE backpack_items SET image_url = ?, status = 'ready' WHERE id = ? AND status = 'generating'`)
-      .run(url, itemId);
-    if (updated.changes > 0) recordChestOpen(itemId);
-    broadcast('item_ready', { itemId, imageUrl: url });
+    if (completeChestItem(db, itemId, url, snapshot.version)) {
+      broadcast('item_ready', { itemId, imageUrl: url });
+    } else {
+      if (!db.prepare('SELECT 1 FROM backpack_items WHERE image_url = ? LIMIT 1').get(url)) deleteImageFileByUrl(url);
+    }
   } catch (err) {
     console.error('[items] 道具图标生成失败:', err.message);
-    const updated = db.prepare(`UPDATE backpack_items SET status = 'ready' WHERE id = ? AND status = 'generating'`).run(itemId);
-    if (updated.changes > 0) recordChestOpen(itemId);
-    broadcast('item_ready', { itemId, imageUrl: null });
+    if (completeChestItem(db, itemId, null, snapshot.version)) broadcast('item_ready', { itemId, imageUrl: null });
   }
 }
 
 function serializeItem(row) {
   return {
     id: row.id,
+    owner_key: row.owner_key,
+    source_type: row.source_type,
+    source_id: row.source_id,
+    template_id: row.template_id,
+    template_version: row.template_version,
+    version: row.version,
+    locked_by: row.locked_by,
+    retired_at: row.retired_at,
     effect_key: row.effect_key,
     effect_name: ITEM_EFFECTS[row.effect_key]?.name || row.effect_key,
     kind: ITEM_EFFECTS[row.effect_key]?.kind || 'unknown',
@@ -432,24 +430,34 @@ function serializeItem(row) {
 export function listBackpack() {
   const db = getDb();
   const items = db.prepare(
-    'SELECT * FROM backpack_items WHERE status != \'used\' AND collected_at IS NOT NULL ORDER BY id DESC'
+    `SELECT * FROM backpack_items WHERE ${PLAYER_ITEM_SQL} AND status IN ('ready', 'generating') AND collected_at IS NOT NULL ORDER BY id DESC`
   ).all().map(serializeItem);
   const pendingItems = db.prepare(
-    'SELECT * FROM backpack_items WHERE status != \'used\' AND collected_at IS NULL ORDER BY id DESC'
+    `SELECT * FROM backpack_items WHERE ${PLAYER_ITEM_SQL} AND status IN ('ready', 'generating') AND collected_at IS NULL ORDER BY id DESC`
   ).all().map(serializeItem);
   return { items, pendingItems, chest: getChestState() };
 }
 
 /** 收下道具：从「待收下」进入背包列表（幂等，重复收下直接返回现状） */
-export function collectItem(itemId) {
+export function collectItem(itemId, options = {}) {
   const db = getDb();
-  const item = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(itemId);
+  return db.transaction(() => collectItemInTransaction(itemId, options)).immediate();
+}
+
+function collectItemInTransaction(itemId, options) {
+  const db = getDb();
+  const item = db.prepare(`SELECT * FROM backpack_items WHERE id = ? AND ${PLAYER_ITEM_SQL}`).get(itemId);
   if (!item) return { ok: false, error: '道具不存在' };
+  if (item.locked_by !== null) return { ok: false, error: '道具正被交易或任务占用', code: 'ITEM_LOCKED' };
+  if (options.expectedVersion !== undefined && options.expectedVersion !== item.version) return { ok: false, error: '道具状态已变化，请刷新后重试', code: 'VERSION_CONFLICT' };
   if (item.status === 'used') return { ok: false, error: '道具已经使用过了' };
+  if (item.status !== 'ready') return { ok: false, error: '道具尚未就绪' };
   if (!item.collected_at) {
-    db.prepare(`UPDATE backpack_items SET collected_at = datetime('now') WHERE id = ?`).run(itemId);
+    const changed = db.prepare(`UPDATE backpack_items SET collected_at = datetime('now'), version = version + 1
+      WHERE id = ? AND ${PLAYER_ITEM_SQL} AND status = 'ready' AND collected_at IS NULL AND locked_by IS NULL AND version = ?`).run(itemId, item.version);
+    if (changed.changes !== 1) throw new Error('道具状态已变化，收下已回滚');
   }
-  const fresh = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(itemId);
+  const fresh = db.prepare(`SELECT * FROM backpack_items WHERE id = ? AND ${PLAYER_ITEM_SQL}`).get(itemId);
   return { ok: true, item: serializeItem(fresh) };
 }
 
@@ -462,7 +470,7 @@ export function listActiveEffects() {
      FROM item_effects e
      JOIN characters c ON c.id = e.character_id
      JOIN backpack_items i ON i.id = e.item_id
-     WHERE e.expires_at IS NULL OR e.expires_at > datetime('now')
+     WHERE i.owner_key = 'me' AND i.status = 'used' AND (e.expires_at IS NULL OR e.expires_at > datetime('now'))
      ORDER BY e.expires_at ASC`
   ).all().map(row => ({
     ...row,
@@ -479,7 +487,7 @@ export function listActiveEffects() {
  */
 export function removeActiveEffect(effectId) {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM item_effects WHERE id = ?').get(effectId);
+  const row = db.prepare(`SELECT e.* FROM item_effects e JOIN backpack_items i ON i.id = e.item_id WHERE e.id = ? AND i.owner_key = 'me' AND i.status = 'used'`).get(effectId);
   if (!row) return { ok: false, error: '生效效果不存在' };
 
   const effect = ITEM_EFFECTS[row.effect_key];
@@ -550,11 +558,19 @@ function insertEffect({ itemId, characterId, effectKey, payload = null, expiresA
  * 使用道具：按效果类型落地真实逻辑，并把道具标记为已使用。
  * @returns {{ok: true, summary: string, effect?: object}|{ok: false, error: string}}
  */
-export function useItem(itemId, characterId) {
+export function useItem(itemId, characterId, options = {}) {
   const db = getDb();
-  const item = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(itemId);
+  return db.transaction(() => useItemInTransaction(itemId, characterId, options)).immediate();
+}
+
+function useItemInTransaction(itemId, characterId, options) {
+  const db = getDb();
+  const item = db.prepare(`SELECT * FROM backpack_items WHERE id = ? AND ${PLAYER_ITEM_SQL}`).get(itemId);
   if (!item) return { ok: false, error: '道具不存在' };
+  if (item.locked_by !== null) return { ok: false, error: '道具正被交易或任务占用', code: 'ITEM_LOCKED' };
+  if (options.expectedVersion !== undefined && options.expectedVersion !== item.version) return { ok: false, error: '道具状态已变化，请刷新后重试', code: 'VERSION_CONFLICT' };
   if (item.status === 'used') return { ok: false, error: '道具已经使用过了' };
+  if (item.status !== 'ready') return { ok: false, error: '道具尚未就绪' };
   if (!item.collected_at) return { ok: false, error: '道具还未收下' };
   const effect = ITEM_EFFECTS[item.effect_key];
   if (!effect) return { ok: false, error: '未知的道具效果类型' };
@@ -599,7 +615,7 @@ export function useItem(itemId, characterId) {
       mood: { valence: 0.75, arousal: 0.6, dominance: 0.6 },
       instant: { valence: 0.8, arousal: 0.65, dominance: 0.6 },
     };
-    saveEmotionSnapshot(convId, latest?.after_msg_id ?? 0, state, 'joy', loadAffinity(characterId), null, `心情修复贴（${item.name}）`);
+    saveEmotionSnapshot(convId, latest?.after_msg_id ?? null, state, 'joy', loadAffinity(characterId), null, `心情修复贴（${item.name}）`);
     summary = `${char.display_name} 的心情被修复为开心`;
   } else if (effect.kind === 'favor') {
     const next = saveAffinity(characterId, loadAffinity(characterId) + FAVOR_DELTA, false);
@@ -608,7 +624,9 @@ export function useItem(itemId, characterId) {
     return { ok: false, error: '该道具类型尚未实现' };
   }
 
-  db.prepare(`UPDATE backpack_items SET status = 'used', used_at = datetime('now') WHERE id = ?`).run(itemId);
+  const consumed = db.prepare(`UPDATE backpack_items SET status = 'used', used_at = datetime('now'), version = version + 1
+    WHERE id = ? AND ${PLAYER_ITEM_SQL} AND status = 'ready' AND collected_at IS NOT NULL AND locked_by IS NULL AND version = ?`).run(itemId, item.version);
+  if (consumed.changes !== 1) throw new Error('道具状态已变化，使用已回滚');
   const activeEffect = effectId == null ? null : {
     id: effectId,
     character_id: characterId,
@@ -624,13 +642,22 @@ export function useItem(itemId, characterId) {
   return { ok: true, summary, effect: { kind: effect.kind, effect_key: item.effect_key }, activeEffect };
 }
 
-export function discardItem(itemId) {
+export function discardItem(itemId, options = {}) {
   const db = getDb();
-  const item = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(itemId);
-  if (!item) return { ok: false, error: '道具不存在' };
-  db.prepare('DELETE FROM item_effects WHERE item_id = ?').run(itemId);
-  db.prepare('DELETE FROM backpack_items WHERE id = ?').run(itemId);
-  if (item.image_url) deleteImageFileByUrl(item.image_url);
+  const result = db.transaction(() => {
+    const item = db.prepare(`SELECT * FROM backpack_items WHERE id = ? AND ${PLAYER_ITEM_SQL}`).get(itemId);
+    if (!item) return { ok: false, error: '道具不存在' };
+    if (item.locked_by !== null) return { ok: false, error: '道具正被交易或任务占用', code: 'ITEM_LOCKED' };
+    if (options.expectedVersion !== undefined && options.expectedVersion !== item.version) return { ok: false, error: '道具状态已变化，请刷新后重试', code: 'VERSION_CONFLICT' };
+    if (item.status !== 'ready') return { ok: false, error: '只能丢弃已就绪的未使用道具' };
+    const retired = db.prepare(`UPDATE backpack_items SET retired_at = datetime('now'), version = version + 1
+      WHERE id = ? AND ${PLAYER_ITEM_SQL} AND status = 'ready' AND locked_by IS NULL AND version = ?
+      AND NOT EXISTS (SELECT 1 FROM item_effects WHERE item_id = backpack_items.id)`).run(itemId, item.version);
+    if (!retired.changes) return { ok: false, error: '道具状态已变化或仍有关联效果' };
+    return { ok: true };
+  }).immediate();
+  if (!result.ok) return result;
+  // Keep the original instance/image for receipts and other shared references.
   return { ok: true };
 }
 
@@ -669,7 +696,8 @@ export function restoreExpiredTransforms() {
   const db = getDb();
   const expired = db.prepare(
     `SELECT id, character_id, payload_json FROM item_effects
-     WHERE effect_key = 'transform' AND expires_at IS NOT NULL AND expires_at <= datetime('now')`
+     WHERE effect_key = 'transform' AND expires_at IS NOT NULL AND expires_at <= datetime('now')
+       AND item_id IN (SELECT id FROM backpack_items WHERE owner_key = 'me' AND status = 'used')`
   ).all();
   let restored = 0;
   for (const row of expired) {
@@ -699,20 +727,11 @@ export function tickCleanup() {
   const db = getDb();
   const restoredTransforms = restoreExpiredTransforms();
   const removedEffects = db.prepare(
-    `DELETE FROM item_effects WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')`
+    `DELETE FROM item_effects WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')
+       AND item_id IN (SELECT id FROM backpack_items WHERE owner_key = 'me' AND status = 'used')`
   ).run().changes;
   const removedOutfits = deleteExpiredItemLimitedOutfits();
-  const staleRows = db.prepare(
-    `SELECT id FROM backpack_items WHERE status = 'generating' AND acquired_at <= datetime('now', '-${IMAGE_STALE_MINUTES} minutes')`
-  ).all();
-  let staleImages = 0;
-  for (const row of staleRows) {
-    const updated = db.prepare(`UPDATE backpack_items SET status = 'ready' WHERE id = ? AND status = 'generating'`).run(row.id);
-    if (updated.changes > 0) {
-      recordChestOpen(row.id);
-      staleImages++;
-    }
-  }
+  const staleImages = completeStaleChestItems(db, IMAGE_STALE_MINUTES);
   if (restoredTransforms || removedEffects || removedOutfits || staleImages) {
     console.log(`[items] cleanup: transforms restored=${restoredTransforms}, effects expired=${removedEffects}, outfits expired=${removedOutfits}, stale images=${staleImages}`);
   }

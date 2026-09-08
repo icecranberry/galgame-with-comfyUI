@@ -51,8 +51,8 @@ export function getTownGenerationSettings() {
   return normalizeTownGenerationSettings(config.town.generation);
 }
 
-export function updateTownGenerationSettings(patch = {}) {
-  const current = getTownGenerationSettings();
+export function mergeTownGenerationSettings(currentValue, patch = {}) {
+  const current = normalizeTownGenerationSettings(currentValue);
   const raw = patch && typeof patch === 'object' ? patch : {};
   const rawSteps = raw.steps && typeof raw.steps === 'object' ? raw.steps : {};
   const mergedSteps = {};
@@ -62,20 +62,21 @@ export function updateTownGenerationSettings(patch = {}) {
       ...(rawSteps[step] && typeof rawSteps[step] === 'object' ? rawSteps[step] : {}),
     };
   }
-  config.town.generation = normalizeTownGenerationSettings({
+  return normalizeTownGenerationSettings({
     ...current,
     ...raw,
     steps: mergedSteps,
   });
 
-  try {
-    getDb().prepare(`
+}
+
+export function updateTownGenerationSettings(patch = {}) {
+  const next = mergeTownGenerationSettings(config.town.generation, patch);
+  getDb().prepare(`
       INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_generation_settings', ?)
       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
-    `).run(JSON.stringify(config.town.generation));
-  } catch (err) {
-    console.warn('[townGeneration] persist settings failed:', err?.message);
-  }
+    `).run(JSON.stringify(next));
+  config.town.generation = next;
   return getTownGenerationSettings();
 }
 

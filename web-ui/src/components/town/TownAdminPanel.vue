@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="admin-slide">
-    <div v-if="open" class="admin-mask" @click.self="$emit('close')">
+    <div v-if="open" v-show="!deliveriesOpen" class="admin-mask" @click.self="$emit('close')">
       <div class="admin-panel" role="dialog" aria-label="小镇管理">
         <div class="ap-head">
           <linshe-button v-if="detail" variant="ghost" size="sm" @click="detail = null">← 返回</linshe-button>
@@ -57,6 +57,7 @@
                 <template v-if="npc.characterId"> · 已入邻舍</template>
                 <template v-else> · 未邀请</template>
               </div>
+              <p v-if="npc.portrait?.status === 'ready' || npc.sprites?.down?.status === 'ready'" class="ap-asset-appearance">{{ appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
           </div>
@@ -88,6 +89,7 @@
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
+              <p v-if="detailNpc.portrait?.status === 'ready'" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailNpc.portrait.appearanceStatus) }}</p>
               <div v-if="!detailNpc.portrait?.id" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
                   生成 900×1600 立绘
@@ -109,7 +111,7 @@
 
             <div class="ap-section">
               <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可管理图片</div>
-              <div class="ap-sprite-row">
+              <div class="ap-sprite-row ap-appearance-row">
                 <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
                   <TownAssetThumb
                     v-if="detailNpc.sprites?.[dir]?.status === 'ready'"
@@ -119,12 +121,21 @@
                     @edit="openAssetManager(detailNpc.sprites[dir], `${detailNpc.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
                   />
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
+                  <p v-if="detailNpc.sprites?.[dir]?.status === 'ready'" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailNpc.sprites[dir].appearanceStatus) }}</p>
                 </div>
                 <div v-if="!detailNpc.sprites?.down?.id || !detailNpc.sprites?.up?.id" class="ap-btn-row">
                   <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
                     生成缺失小人
                   </linshe-button>
                 </div>
+              </div>
+              <div v-if="npcSpritesStale(detailNpc)" class="ap-actions is-column">
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc, true)">按当前外观更新小人</linshe-button>
+                <p class="ap-asset-appearance">会重绘未记录版本或外观过时的小人</p>
+              </div>
+              <div v-if="spriteErrors[`npc:${detailNpc.id}`]" class="ap-actions is-column">
+                <p class="ap-sprite-error" role="alert">{{ spriteErrors[`npc:${detailNpc.id}`] }}</p>
+                <linshe-button variant="link" size="sm" @click="loadNpcs">重新读取素材状态</linshe-button>
               </div>
             </div>
 
@@ -224,6 +235,7 @@
             <div class="ap-npc-info">
               <div class="ap-npc-name">{{ c.displayName }}</div>
               <div class="ap-npc-meta">精灵 {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
+              <p v-if="c.portraitUrl || c.standingUrl || c.sprites?.down" class="ap-asset-appearance">{{ appearanceText(c.portraitUrl ? c.appearanceStatus?.portrait : c.standingUrl ? 'unknown' : c.appearanceStatus?.sprites?.down) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
           </div>
@@ -243,6 +255,7 @@
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
+              <p v-if="charPortraitAsset(detailChar)" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.portraitUrl ? detailChar.appearanceStatus?.portrait : 'unknown') }}</p>
               <div v-if="!detailChar.portraitId" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
                   生成 900×1600 立绘
@@ -263,7 +276,7 @@
 
             <div class="ap-section">
               <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可管理图片</div>
-              <div class="ap-sprite-row">
+              <div class="ap-sprite-row ap-appearance-row">
                 <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
                   <TownAssetThumb
                     v-if="charSpriteAsset(detailChar, dir)"
@@ -273,12 +286,21 @@
                     @edit="openAssetManager(charSpriteAsset(detailChar, dir), `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
                   />
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
+                  <p v-if="charSpriteAsset(detailChar, dir)" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
                 </div>
                 <div v-if="!charSpriteAsset(detailChar, 'down') || !charSpriteAsset(detailChar, 'up')" class="ap-btn-row">
                   <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
                     生成缺失小人
                   </linshe-button>
                 </div>
+              </div>
+              <div v-if="charSpritesStale(detailChar)" class="ap-actions is-column">
+                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar, true)">按当前外观更新小人</linshe-button>
+                <p class="ap-asset-appearance">会重绘未记录版本或外观过时的小人</p>
+              </div>
+              <div v-if="spriteErrors[`char:${detailChar.id}`]" class="ap-actions is-column">
+                <p class="ap-sprite-error" role="alert">{{ spriteErrors[`char:${detailChar.id}`] }}</p>
+                <linshe-button variant="link" size="sm" @click="loadChars">重新读取素材状态</linshe-button>
               </div>
             </div>
 
@@ -289,12 +311,38 @@
         </div>
 
         <!-- ── 小镇设置 ── -->
-        <div v-if="!detail && tab === 'settings'" class="ap-body">
+        <div v-if="!detail && tab === 'settings'" class="ap-body ap-settings">
+          <div class="ap-setting">
+            <span class="ap-setting-label">居民生活方式</span>
+            <linshe-select v-model="settings.simulation" size="sm" :disabled="settingsLocked"
+              :options="[{ label: '兼容作息', value: 'legacy' }, { label: '本地行为 · 可恢复', value: 'rules' }]" />
+          </div>
+          <p class="ap-layout-desc">本地行为会记录行动原因，并在到达地点后开始工作或休息。开启配送时，岗位居民仍会记录可恢复的工作进度。</p>
+          <div class="ap-setting">
+            <span class="ap-setting-label">配送与工坊接单</span>
+            <linshe-switch v-model="settings.economyEnabled" size="sm" :disabled="settingsLocked" aria-label="配送与工坊接单" />
+          </div>
+          <p class="ap-layout-desc">在生活面板配置居民与路线。关闭后暂停新委托和服务，已经接下的仍可完成或取消。</p>
+          <div class="ap-setting">
+            <span class="ap-setting-label">公共基金有限保障</span>
+            <linshe-switch v-model="settings.liquidityEnabled" size="sm" :disabled="settingsLocked" aria-label="公共基金有限保障" />
+          </div>
+          <p class="ap-layout-desc">默认关闭。仅在发布有原料的配送委托时按需向公共基金发行补助。重建不重置额度，不补充原料；不会直接给玩家发钱。</p>
+          <div v-if="liquidity" aria-label="公共基金保障状态">
+            <p class="ap-layout-desc">{{ liquidity.availableFund == null ? '基金尚未配置' : `基金可用 ${liquidity.availableFund} 邻币` }}。{{ liquidity.activationAllowed ? '已满足开启准备金条件，保存时会再次核验。' : '尚未满足开启条件，保存时由服务器核验。' }}</p>
+            <p v-if="liquidity.limits" class="ap-layout-desc">开启至少需要 {{ liquidity.limits.reserve }} 邻币可用准备金；每24小时最多 {{ liquidity.limits.rolling24h }}，滚动7天最多 {{ liquidity.limits.rolling7d }}，本镇累计最多 {{ liquidity.limits.grossWorld }}，流通总量上限 {{ liquidity.limits.circulation }}。</p>
+            <p class="ap-layout-desc">累计补助 {{ liquidity.grossIssued }}，剩余额度 {{ liquidity.remainingWorldBudget }}；过去24小时发行 {{ liquidity.issued24h }}，过去7天发行 {{ liquidity.issued7d }}。</p>
+          </div>
+          <p v-if="liquidityError" class="ap-layout-desc" role="status">{{ liquidityError }}</p>
+          <linshe-button variant="link" size="sm" :disabled="loadingSettings || savingSettings" @click="loadSettings">重新读取设置与基金状态</linshe-button>
           <div v-for="f in SETTING_FIELDS" :key="f.key" class="ap-setting">
             <span class="ap-setting-label">{{ f.label }}</span>
-            <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :min="f.min" :max="f.max" :step="f.step" />
+            <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :disabled="settingsLocked" :min="f.min" :max="f.max" :step="f.step" />
           </div>
-          <linshe-button variant="primary" size="sm" :loading="savingSettings" @click="saveSettings">保存设置</linshe-button>
+          <linshe-button variant="primary" size="sm" :disabled="settingsLocked" :loading="savingSettings" @click="saveSettings">保存设置</linshe-button>
+          <p v-if="settingsError" class="ap-player-error" role="alert">{{ settingsError }}</p>
+          <p v-else-if="settingsSaved" class="ap-layout-desc" role="status">设置已保存。</p>
+          <linshe-button ref="deliveriesTrigger" variant="link" size="sm" @click="deliveriesOpen = true">查看记录投递状态</linshe-button>
 
           <div class="ap-layout-zone">
             <div class="ap-section-title">重新布局</div>
@@ -313,7 +361,7 @@
 
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
-            <p class="ap-danger-desc">重新初始化会清除当前地图、地点、所有居民与相遇历史。</p>
+            <p class="ap-danger-desc">重新初始化会清除当前地图、地点、居民与相遇记录，清理未完成委托并退回服务托管款。已有角色、邻币、背包道具和交易履历会保留。</p>
             <linshe-button variant="danger" size="sm" :loading="resetting" @click="resetting = true">
               重新初始化世界
             </linshe-button>
@@ -335,31 +383,48 @@
       />
     </div>
     </Transition>
+    <TownDeliveryDiagnostics :open="open && deliveriesOpen" @close="closeDeliveries" />
   </Teleport>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSwitch from '../ui/LinsheSwitch.vue'
+import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
+import TownDeliveryDiagnostics from './TownDeliveryDiagnostics.vue'
 
 defineEmits(['close'])
 
-defineProps({ open: Boolean })
+const props = defineProps({ open: Boolean })
+const deliveriesOpen = ref(false), deliveriesTrigger = ref(null)
+async function closeDeliveries() { deliveriesOpen.value = false; await nextTick(); deliveriesTrigger.value?.$el?.focus() }
 
 const town = useTownStore()
 const tab = ref('npcs')
 const npcs = ref([])
 const chars = ref([])
-const settings = ref({})
+const settings = ref({ liquidityEnabled: false })
+const liquidity = ref(null), liquidityError = ref(''), loadingSettings = ref(false), settingsReady = ref(false)
+let settingsScope = 0
+let assetScope = 0, alive = true
+const assetReads = { npcs: 0, chars: 0, player: 0 }
+function beginAssetRead(kind) {
+  if (!alive || !props.open) return null
+  const scope = assetScope, sequence = ++assetReads[kind]
+  return () => alive && props.open && scope === assetScope && sequence === assetReads[kind]
+}
 const detail = ref(null) // { type: 'npc' | 'char', id }
 const busyFlags = reactive({})
 const savingSettings = ref(false)
+const settingsLocked = computed(() => loadingSettings.value || savingSettings.value || !settingsReady.value)
+const settingsError = ref('')
+const settingsSaved = ref(false)
 const adding = ref(false)
 const batchSprites = ref(false)
 const batchChars = ref(false)
@@ -403,8 +468,11 @@ function onPromptRegenerated() {
 }
 
 async function loadPlayerKit() {
+  const current = beginAssetRead('player')
+  if (!current) return
   try {
     const kit = await api.fetchTownPlayerKit()
+    if (!current()) return
     playerKit.sprites = kit.sprites || {}
     playerKit.portrait = kit.portrait || null
   } catch (err) {
@@ -459,8 +527,11 @@ function spriteCount(npc) {
 }
 
 async function loadNpcs() {
+  const current = beginAssetRead('npcs')
+  if (!current) return
   try {
     const data = await api.fetchTownNpcs()
+    if (!current()) return
     npcs.value = data.npcs || []
   } catch (err) {
     console.warn('[town-admin] npcs load failed:', err?.message)
@@ -468,8 +539,11 @@ async function loadNpcs() {
 }
 
 async function loadChars() {
+  const current = beginAssetRead('chars')
+  if (!current) return
   try {
     const data = await api.fetchTownCharacters()
+    if (!current()) return
     chars.value = data.characters || []
   } catch (err) {
     console.warn('[town-admin] chars load failed:', err?.message)
@@ -477,11 +551,16 @@ async function loadChars() {
 }
 
 async function loadSettings() {
-  try {
-    settings.value = await api.fetchTownSettings()
-  } catch (err) {
-    console.warn('[town-admin] settings load failed:', err?.message)
-  }
+  if (savingSettings.value) return
+  const token = ++settingsScope
+  loadingSettings.value = true; settingsReady.value = false; settingsError.value = ''; settingsSaved.value = false
+  const [config, economy] = await Promise.allSettled([api.fetchTownSettings(), api.getTownLiquidity()])
+  if (token !== settingsScope) return
+  if (config.status === 'fulfilled') { settings.value = { liquidityEnabled: false, ...config.value }; settingsReady.value = true }
+  else settingsError.value = '设置读取失败，请重新读取后再保存。'
+  liquidity.value = economy.status === 'fulfilled' ? economy.value.liquidity ?? null : null
+  liquidityError.value = economy.status === 'rejected' ? '基金状态暂时无法读取，请重新读取。' : ''
+  loadingSettings.value = false
 }
 
 async function toggleNpc(npc, enabled) {
@@ -502,12 +581,20 @@ async function toggleChar(c, enabled) {
   }
 }
 
-async function regenSprites(npc) {
+async function regenSprites(npc, refreshAppearance = false) {
+  const scope = assetScope
+  const current = () => alive && props.open && scope === assetScope
+  spriteErrors[`npc:${npc.id}`] = ''
   busyFlags[`sprites${npc.id}`] = true
   try {
-    await api.generateTownNpcSprites(npc.id)
+    await api.generateTownNpcSprites(npc.id, refreshAppearance ? { refreshAppearance: true } : {})
+    // A reopened panel may have read before this generation committed. Read the
+    // current list again, but never apply the old request's response as a snapshot.
+    if (!alive || !props.open) return
     await loadNpcs()
   } catch (err) {
+    if (!current()) return
+    spriteErrors[`npc:${npc.id}`] = '小人未更新成功，请重新读取素材状态后再试'
     console.warn('[town-admin] sprites failed:', err?.message)
   } finally {
     busyFlags[`sprites${npc.id}`] = false
@@ -606,12 +693,18 @@ async function generateAllMissingNpcSprites() {
   }
 }
 
-async function regenCharSprites(c) {
+async function regenCharSprites(c, refreshAppearance = false) {
+  const scope = assetScope
+  const current = () => alive && props.open && scope === assetScope
+  spriteErrors[`char:${c.id}`] = ''
   busyFlags[`charsprites${c.id}`] = true
   try {
-    await api.generateTownCharacterSprites(c.id)
+    await api.generateTownCharacterSprites(c.id, refreshAppearance ? { refreshAppearance: true } : {})
+    if (!alive || !props.open) return
     await loadChars()
   } catch (err) {
+    if (!current()) return
+    spriteErrors[`char:${c.id}`] = '小人未更新成功，请重新读取素材状态后再试'
     console.warn('[town-admin] char sprites failed:', err?.message)
   } finally {
     busyFlags[`charsprites${c.id}`] = false
@@ -631,15 +724,35 @@ async function generateAllMissingCharSprites() {
 }
 
 async function saveSettings() {
+  if (settingsLocked.value) return
+  const token = settingsScope
   savingSettings.value = true
+  settingsError.value = ''
+  settingsSaved.value = false
   try {
-    const result = await api.updateTownSettings(settings.value)
+    const result = await api.updateTownSettings({ ...settings.value })
+    if (token !== settingsScope) return
     if (result?.applied) settings.value = { ...settings.value, ...result.applied }
+    settingsSaved.value = true
   } catch (err) {
+    if (token !== settingsScope) return
+    settingsError.value = err.message || '设置未能保存，请重试。'
     console.warn('[town-admin] save settings failed:', err?.message)
   } finally {
-    savingSettings.value = false
+    if (token === settingsScope) savingSettings.value = false
   }
+}
+
+function appearanceText(status) {
+  return status === 'needs_update' ? '外观已变化，图片待更新'
+    : status === 'current' ? '与当前外观一致' : '未记录外观版本'
+}
+const spriteErrors = reactive({})
+function npcSpritesStale(npc) {
+  return ['down', 'up'].some(dir => npc.sprites?.[dir]?.status === 'ready' && npc.sprites[dir].appearanceStatus !== 'current')
+}
+function charSpritesStale(char) {
+  return ['down', 'up'].some(dir => charSpriteAsset(char, dir) && char.appearanceStatus?.sprites?.[dir] !== 'current')
 }
 
 async function doRelayout() {
@@ -674,11 +787,28 @@ async function doReset() {
   }
 }
 
-onMounted(() => {
-  loadNpcs()
-  loadChars()
-  loadSettings()
-  loadPlayerKit()
+watch(() => [props.open, town.snapshot?.worldId, town.snapshot?.worldEpoch], ([open, worldId, epoch], previous) => {
+  ++assetScope
+  if (previous && (worldId !== previous[1] || epoch !== previous[2])) {
+    npcs.value = []; chars.value = []
+    playerKit.sprites = {}; playerKit.portrait = null
+    detail.value = null; manager.open = false
+  }
+  for (const key of Object.keys(spriteErrors)) delete spriteErrors[key]
+  if (!open) deliveriesOpen.value = false
+  ++settingsScope; savingSettings.value = false; loadingSettings.value = false; settingsReady.value = false
+  settingsError.value = ''; settingsSaved.value = false
+  if (open) {
+    loadSettings()
+    loadNpcs()
+    loadChars()
+    loadPlayerKit()
+  }
+}, { immediate: true })
+onBeforeUnmount(() => {
+  alive = false
+  ++assetScope
+  ++settingsScope
 })
 </script>
 
@@ -741,6 +871,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 10px;
 }
+.ap-settings > * { flex-shrink: 0; }
 
 .ap-actions { display: flex; gap: 8px; }
 .ap-actions.is-column { flex-direction: column; }
@@ -825,6 +956,10 @@ onMounted(() => {
 .ap-btn-row { display: flex; gap: 6px; }
 .ap-btn-row > :first-child { flex: 1; }
 
+.ap-asset-appearance { font-size: 11px; line-height: 1.5; color: #8a7a6a; margin: 6px 0 0; overflow-wrap: anywhere; }
+.ap-sprite-error { color: #a44338; font-size: 12px; line-height: 1.6; margin: 0; }
+.ap-appearance-row { flex-wrap: wrap; align-items: flex-start; }
+.ap-sprite-wrap .ap-asset-appearance { max-width: 110px; }
 .ap-sprite-wrap { cursor: pointer; }
 .ap-sprite-wrap:hover .ap-sprite { box-shadow: 0 0 0 2px rgba(224, 123, 108, 0.4); }
 

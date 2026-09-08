@@ -1,0 +1,29 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>M7 interaction occlusion fixture</title>
+<style>html,body,#scene{margin:0;width:100%;height:100%;overflow:hidden;background:#dfe5d0;font-family:system-ui}aside{position:absolute;left:16px;top:16px;padding:12px 16px;border-radius:12px;background:#f4f1eeed;color:#594d43;pointer-events:none;font-size:13px}strong{display:block;font-size:18px;margin-bottom:4px}</style>
+<div id="scene"></div><aside><strong>M7 · 交互对象遮挡 fixture</strong>合成密集场景 · 建筑阴影与拾取轮廓保留</aside>
+<script type="module">
+import {createStressScene} from '/test/fixtures/townStressScene.js'
+import {adaptAgent} from '/src/town/renderers/TownSceneAdapter.js'
+import * as T from 'three'
+const query=new URLSearchParams(location.search),baseline=query.has('baseline')
+const modulePath=`/src/town/renderers/Hd2dTownRenderer${baseline?'.focus-baseline':''}.js`
+const {Hd2dTownRenderer}=await import(/* @vite-ignore */ modulePath)
+const {map,agents}=createStressScene(50)
+const renderer=new Hd2dTownRenderer();renderer.mount(document.querySelector('#scene'));renderer.resize(innerWidth,innerHeight,1);renderer.setQuality('balanced',false);renderer.setScene(map);renderer.setCamera({x:0,y:760,zoom:.5})
+const probe=window.probe={renderer,map,agents,keys:undefined,points:[],T,
+  draw(){renderer.updateAgents(probe.agents.map(a=>adaptAgent(a,{x:a.x,y:a.y,moving:false},'down',0)));renderer.render({hour:12,text:'晴'},probe.points,{interactionActorKeys:probe.keys})},
+  fades(){return [...renderer.objects].filter(([,m])=>m.userData.occluding).map(([id])=>id)},
+  isolated(volume=false){probe.agents=[];probe.keys=undefined;probe.points=[];probe.map.layers.objects=[{id:'a',assetId:volume?5:3,x:4,y:7},{id:'b',assetId:volume?6:3,x:10,y:7}];renderer.setScene(probe.map);renderer.setCamera({x:64,y:210,zoom:1.4});probe.draw()},
+  resident(key,x,y,actorId){return {agentKey:key,actorId,displayName:key,x,y,sprites:{down:'/stress-assets/person.svg'}}},
+  depthPixels(){
+    const target=new T.WebGLRenderTarget(innerWidth,innerHeight,{depthBuffer:false})
+    const m=new T.ShaderMaterial({uniforms:{depth:{value:renderer.tiltPass.composite.uniforms.sceneDepth.value}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:'#include <packing>\nuniform sampler2D depth;varying vec2 vUv;void main(){gl_FragColor=packDepthToRGBA(texture2D(depth,vUv).r);}',depthTest:false,depthWrite:false})
+    const g=new T.PlaneGeometry(2,2),s=new T.Scene();s.add(new T.Mesh(g,m));const pixels=new Uint8Array(innerWidth*innerHeight*4)
+    renderer.renderer.setRenderTarget(target);renderer.renderer.render(s,new T.Camera());renderer.renderer.readRenderTargetPixels(target,0,0,innerWidth,innerHeight,pixels);renderer.renderer.setRenderTarget(null)
+    target.dispose();g.dispose();m.dispose();return pixels
+  },
+}
+probe.draw()
+await new Promise(resolve=>{const check=()=>{probe.draw();if([...renderer.textures.values()].every(e=>e.ready||e.failed))resolve();else requestAnimationFrame(check)};check()})
+probe.ready=true
+</script></html>

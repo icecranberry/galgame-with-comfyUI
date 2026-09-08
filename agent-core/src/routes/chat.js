@@ -33,6 +33,10 @@ import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/t
 import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory } from '../services/contextAssembler.js';
+import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../services/characterChatTownContext.js';
+import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
+import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
+import { getTownState } from '../services/town/townService.js';
 import {
   buildPlannerTaskBlock, buildPlannerTriggerLine, prependToLastUserMessage, appendToLastUserMessage,
   runPlanner, sanitizePlan, buildPlanExecuteBlock, detectLastReplyMedia,
@@ -269,7 +273,7 @@ router.get('/messages/:id', (req, res) => {
 });
 
 // POST /api/characters/:id/chat — 流式对话
-router.post('/characters/:id/chat', async (req, res) => {
+router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTownState }), async (req, res) => {
   const { message, client_msg_id, force_image_gen, image_mode, deep_think } = req.body;
   const deepThink = deep_think === true || deep_think === 'true';
   const imageMode = ['off', 'smart', 'force'].includes(image_mode) ? image_mode : (force_image_gen ? 'force' : 'smart');
@@ -879,6 +883,15 @@ ${coreRules}
       }
     }
     dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);
+    dynamicBlocks.push(buildCharacterTownSceneBlock(req.townAdmission));
+    if (config.features.town) {
+      try {
+        dynamicBlocks.push(createCharacterTownLifeContext({ db, clock: { now: Date.now }, timeZone: config.town.timeZone,
+          registry: createTownActorRegistry(db) })(character.id));
+      } catch (error) {
+        console.warn('[chat] town life records unavailable:', error.message);
+      }
+    }
 
     // ── 通过 buildChatContext 组装基础请求 ──
     // 深度思考时 planner 与主回复共用这一完全相同的消息结构（稳定块+摘要+历史+含全部动态块的用户消息），

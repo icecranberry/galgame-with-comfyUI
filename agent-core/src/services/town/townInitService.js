@@ -15,7 +15,7 @@ import { getDb, getSystemRules } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
-import { createAsset, listAssets } from './townAssetService.js';
+import { createAsset, listAssets, captureTownAssetWorld } from './townAssetService.js';
 import { getMapRow, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
@@ -110,6 +110,21 @@ function enqueueStep(fn) {
   return run;
 }
 
+// Capture before enqueue/await: cancellation replaces job without necessarily advancing epoch.
+function captureInitGenerationGuard() {
+  const expectedJob = job;
+  const expectedBlueprint = job?.blueprint;
+  const expectedWorld = captureTownAssetWorld();
+  const assertCurrent = () => {
+    const world = captureTownAssetWorld();
+    if (job !== expectedJob || job?.blueprint !== expectedBlueprint
+      || world.worldId !== expectedWorld.worldId || world.epoch !== expectedWorld.epoch) {
+      throw Object.assign(new Error('初始化任务或世界已变化，已丢弃旧生成结果'), { code: 'TOWN_ASSET_STALE' });
+    }
+  };
+  return { expectedWorld, assertCurrent };
+}
+
 // ── 工具 ──
 
 function stripJsonFence(content) {
@@ -142,22 +157,9 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, m
   return enqueueStep(async () => {
     // 初始化 = 全部数据抛弃：旧地图/地点/居民/相遇历史/运行态/素材索引全清（磁盘图片文件保留不删）
     const db = getDb();
-    db.exec('UPDATE town_npcs SET home_location_id = NULL');
-    db.exec('DELETE FROM town_npc_chat_messages');
-    db.exec('DELETE FROM town_chat_messages');
-    db.exec('DELETE FROM town_encounters');
-    db.exec('DELETE FROM town_characters');
-    db.exec('DELETE FROM town_npcs');
-    db.exec('DELETE FROM town_locations');
-    db.exec('DELETE FROM town_agent_state');
-    db.exec('DELETE FROM town_maps');
-    db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL WHERE id = 'me'");
+    const { resetWorld } = await import('./townService.js');
+    resetWorld();
     db.exec('DELETE FROM town_assets');
-    // 内存世界同步清空（若调度器在跑）
-    try {
-      const { resetWorldState } = await import('./townService.js');
-      resetWorldState();
-    } catch { /* 调度器未启动时忽略 */ }
 
     job = defaultJob();
     job.createdAt = new Date().toISOString();
@@ -351,7 +353,9 @@ function townPromptSystemMessages(world) {
 }
 /** 清单确认后，按当前步骤的名称清单批量生成英文生图提示词 */
 export function generateAssetPrompts({ step = 'tiles', styleTags, keys = [] } = {}) {
+  const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
+    guard.assertCurrent();
     if (!job?.blueprint) throw new Error('没有进行中的初始化任务');
     const sections = step === 'tiles'
       ? [['groundAssets', 'ground'], ['roadAssets', 'road']]
@@ -411,6 +415,7 @@ export function generateAssetPrompts({ step = 'tiles', styleTags, keys = [] } = 
       response_format: { type: 'json_object' },
       label: '小镇素材提示词',
     });
+    guard.assertCurrent();
     const parsed = safeJsonParse(content);
     const generated = parsed?.prompts || null;
     if (!generated || typeof generated !== 'object') throw new Error('素材提示词 JSON 解析失败');
@@ -431,7 +436,9 @@ export function generateAssetPrompts({ step = 'tiles', styleTags, keys = [] } = 
 
 /** 出 3 张小样（草地 + 道路 + 一栋建筑）；已出过则只补缺 */
 export function generateSamples() {
+  const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
+    guard.assertCurrent();
     if (!job?.blueprint) return { ok: false, error: '没有进行中的初始化任务' };
     setStatus('samples_pending', '正在生成风格小样…');
     job.progress = { stage: 'samples', done: 0, total: 3, current: '' };
@@ -451,6 +458,7 @@ export function generateSamples() {
     job.sampleAssetIds = [];
     let done = 0;
     for (const spec of sampleSpecs) {
+      guard.assertCurrent();
       if (!spec.bpItem) { done++; continue; }
       const existingAsset = existing.find(a => a.key === spec.bpItem.key && a.status === 'ready');
       if (existingAsset) {
@@ -458,6 +466,7 @@ export function generateSamples() {
       } else {
         try {
           const asset = await createAsset({
+            expectedWorld: guard.expectedWorld,
             kind: spec.kind,
             key: spec.bpItem.key,
             name: spec.bpItem.name,
@@ -469,8 +478,11 @@ export function generateSamples() {
             },
             worldSettingId: worldId,
           });
+          guard.assertCurrent();
           job.sampleAssetIds.push(asset.id);
         } catch (err) {
+          guard.assertCurrent();
+          if (err.code === 'TOWN_ASSET_STALE') throw err;
           throw new Error(`小样「${spec.bpItem.name}」生成失败：${err?.message || err}`);
         }
       }
@@ -519,7 +531,9 @@ function expandBatchJobs() {
 
 /** 批量生成全部素材（可断点续跑：status=ready 的直接跳过） */
 export function startBatch() {
+  const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
+    guard.assertCurrent();
     if (!job?.blueprint) return { ok: false, error: '没有进行中的初始化任务' };
     setStatus('batch_pending', '开始批量生成素材…');
 
@@ -532,11 +546,15 @@ export function startBatch() {
 
     let done = 0;
     for (const j of pending) {
+      guard.assertCurrent();
       job.progress.current = j.name;
       broadcastTownInitProgress({ status: 'batching', stage: 'batch', done, total: pending.length, current: j.name });
       try {
-        await createAsset(j);
+        await createAsset({ ...j, expectedWorld: guard.expectedWorld });
+        guard.assertCurrent();
       } catch (err) {
+        guard.assertCurrent();
+        if (err.code === 'TOWN_ASSET_STALE') throw err;
         job.warnings.push(`素材「${j.name}」生成失败：${err?.message || err}（可稍后在素材库重试）`);
       }
       done++;
@@ -557,7 +575,9 @@ export function startBatch() {
 // ── Step 5：LLM 布图 + 本地展开 ──
 
 export function generateLayout() {
+  const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
+    guard.assertCurrent();
     if (!job?.blueprint) return { ok: false, error: '没有进行中的初始化任务' };
     setStatus('layout_pending', '正在生成小镇布局…');
 
@@ -600,6 +620,7 @@ export function generateLayout() {
       response_format: { type: 'json_object' },
       label: '小镇布图',
     });
+    guard.assertCurrent();
     const parsed = safeJsonParse(content);
     if (!parsed) {
       setStatus('failed', '布局 JSON 解析失败，请重试生成布局');
@@ -1051,26 +1072,20 @@ export function confirmInit() {
     const bp = job.blueprint;
     const db = getDb();
 
-    // 1. 写地图（version+1 / 新建），清掉旧 POI（先断开 town_characters 的 FK 引用）
+    // 1. 地图与 POI 统一保存：同 key 保留 id/家地址，移除的地点由 saveMap 解除引用。
     const saved = saveMap({
       name: draft.name, cols: draft.cols, rows: draft.rows,
       tileSize: draft.tileSize || 32, layers: draft.layers,
       worldSettingId: job.config.worldSettingId,
+      locations: draft.locations ?? [],
     });
-    db.exec('UPDATE town_npcs SET home_location_id = NULL');
-    db.exec('DELETE FROM town_locations');
     db.exec('DELETE FROM town_agent_state');
 
-    // 2. POI 落库
-    const insLoc = db.prepare(`
-      INSERT INTO town_locations (map_id, key, name, aliases_json, kind, grid_x, grid_y, radius, ambient, object_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const locationIdByKey = new Map();
-    for (const loc of draft.locations || []) {
-      const r = insLoc.run(saved.mapId, loc.key, loc.name, JSON.stringify(loc.aliases || []), loc.kind, loc.x, loc.y, loc.radius || 2, loc.ambient || '', loc.objectId ?? null);
-      locationIdByKey.set(loc.key, Number(r.lastInsertRowid));
-    }
+    // 2. 从已提交的地点读取真实 id，供蓝图出生点/作息分配使用。
+    const locationIdByKey = new Map(
+      db.prepare('SELECT key, id FROM town_locations WHERE map_id = ?').all(saved.mapId)
+        .map(loc => [loc.key, loc.id])
+    );
 
     // 3. 居民落库：向导内已建档的直接挂到新地图；否则按蓝图新建（LLM 逐个生成作息）
     const spawnByKey = new Map((draft.npcSpawns || []).map(s => [s.npcRef, s.locationKey]));
@@ -1139,24 +1154,33 @@ export function confirmInit() {
 
 /** 玩家正/背像素精灵（LLM 出 prompt，后台生成） */
 function spawnPlayerSprites(appearance, styleTags) {
+  const guard = captureInitGenerationGuard();
   (async () => {
     const { playerAppearanceInfo } = await import('./townNpcService.js');
+    guard.assertCurrent();
     const { generateSpritePrompt } = await import('./townPromptBuilder.js');
+    guard.assertCurrent();
     for (const dir of ['down', 'up']) {
+      guard.assertCurrent();
       try {
         const existing = listAssets({}).find(a => a.key === `player_${dir}` && a.status === 'ready');
         if (existing) continue;
         const prompt = await generateSpritePrompt({ appearanceInfo: playerAppearanceInfo(), direction: dir });
+        guard.assertCurrent();
         await createAsset({
+          expectedWorld: guard.expectedWorld,
           kind: 'player', key: `player_${dir}`, name: `玩家 ${dir}`,
           desc: appearance || 'a friendly villager',
           meta: { direction: dir, styleTags: styleTags || '', promptOverride: prompt },
         });
+        guard.assertCurrent();
       } catch (err) {
+        guard.assertCurrent();
+        if (err.code === 'TOWN_ASSET_STALE') throw err;
         console.warn(`[townInit] player sprite ${dir} failed:`, err?.message);
       }
     }
-  })();
+  })().catch(err => console.warn('[townInit] player sprites stopped:', err?.message));
 }
 
 /** 取消/重置向导 */
@@ -1173,7 +1197,9 @@ export function rerollLayout() {
 
 /** 管理面板重新布局：复用现有素材与居民，仅重建地图/道路/POI */
 export function relayoutWorld() {
+  const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
+    guard.assertCurrent();
     const mapRow = getMapRow();
     if (!mapRow) return { ok: false, error: '小镇尚未初始化' };
     const cols = mapRow.grid_cols;
@@ -1211,6 +1237,7 @@ export function relayoutWorld() {
       response_format: { type: 'json_object' },
       label: '小镇重新布图',
     });
+    guard.assertCurrent();
     const parsed = safeJsonParse(content);
     if (!parsed) throw new Error('重新布局 JSON 解析失败');
 

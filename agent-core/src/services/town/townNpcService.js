@@ -12,11 +12,16 @@ import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
-import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS } from './townAssetService.js';
+import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS, captureTownAssetWorld } from './townAssetService.js';
 import { generateSpritePrompt, generatePortraitPrompt } from './townPromptBuilder.js';
-import { buildCharacterAppearanceSection } from '../characterPersona.js';
+import { buildCharacterAppearanceSection, buildCharacterPersona } from '../characterPersona.js';
+import { createTownAppearanceSignature, townAssetAppearanceStatus } from './townAppearanceSignature.js';
 import { getMapRow } from './townMapService.js';
 import { broadcastTownBubble } from './townBus.js';
+import { createTownActorRegistry } from './townActorRegistry.js';
+import { findRoutineSlot } from './routineSchedule.js';
+import { randomUUID } from 'node:crypto';
+import { beginTownDialogueRequest, finishTownDialogueRequest, failTownDialogueRequest } from './townDialogueRequests.js';
 
 // ── 查询 ──
 
@@ -37,11 +42,18 @@ function npcToDto(row) {
   try { routine = JSON.parse(row.routine_json || '[]'); } catch { /* 忽略坏数据 */ }
   try { traits = JSON.parse(row.traits_json || '{}'); } catch { /* 忽略坏数据 */ }
   const sprites = {};
+  const snapshots = new Map();
+  const withAppearance = (asset, mode) => {
+    if (!asset) return null;
+    if (!asset.meta?.appearanceSource) return { ...asset, appearanceStatus: 'unknown' };
+    if (!snapshots.has(mode)) snapshots.set(mode, captureNpcAppearance(row.id, mode));
+    return { ...asset, appearanceStatus: townAssetAppearanceStatus(asset, snapshots.get(mode)) };
+  };
   for (const dir of SPRITE_DIRECTIONS) {
-    sprites[dir] = getAssetsByKey([`npc_${row.id}_${dir}`])[0] || null;
+    sprites[dir] = withAppearance(getAssetsByKey([`npc_${row.id}_${dir}`])[0], 'sprite');
   }
   const spriteReady = SPRITE_DIRECTIONS.every(d => sprites[d]?.status === 'ready');
-  const portrait = getAssetsByKey([`npc_${row.id}_portrait`])[0] || null;
+  const portrait = withAppearance(getAssetsByKey([`npc_${row.id}_portrait`])[0], 'portrait');
   return {
     id: row.id,
     mapId: row.map_id,
@@ -54,7 +66,8 @@ function npcToDto(row) {
     spriteReady,
     sprites,
     portrait,
-    characterId: row.character_id || null, // 已邀请入邻舍时的角色 id
+    characterId: row.character_id && getDb().prepare('SELECT 1 FROM characters WHERE id = ?').get(row.character_id)
+      ? row.character_id : null, // 删除关联角色后恢复为轻量 NPC，历史映射由 actor 保留
     townEnabled: !!row.town_enabled,
   };
 }
@@ -97,8 +110,12 @@ export function updateNpc(id, { displayName, persona, job, routine, traits, home
 }
 
 export function deleteNpc(id) {
-  const r = getDb().prepare('DELETE FROM town_npcs WHERE id = ?').run(id);
-  return { ok: r.changes > 0 };
+  const db = getDb();
+  return db.transaction(() => {
+    const r = db.prepare('DELETE FROM town_npcs WHERE id = ?').run(id);
+    createTownActorRegistry(db).synchronize();
+    return { ok: r.changes > 0 };
+  })();
 }
 
 // ── 精灵 / 立绘生成 ──
@@ -147,11 +164,32 @@ export function playerAppearanceInfo() {
 }
 
 /** 生成 NPC 像素小人；direction 存在时只重绘指定方向（600×800 → 36×48） */
+function imageGenerationGuard(expectedWorld = captureTownAssetWorld(), entity = null) {
+  const assertCurrent = () => {
+    const world = captureTownAssetWorld();
+    const current = entity && getDb().prepare(`SELECT * FROM ${entity.table} WHERE id = ?`).get(entity.row.id);
+    if (world.worldId !== expectedWorld.worldId || world.epoch !== expectedWorld.epoch
+      || (entity && (!current || entity.fields.some(key => current[key] !== entity.row[key])))) {
+      throw Object.assign(new Error('世界或角色已变化，已取消旧素材任务'), { code: 'TOWN_ASSET_STALE' });
+    }
+  };
+  assertCurrent();
+  return { expectedWorld, assertCurrent };
+}
+
+function captureNpcAppearance(npcId, mode, styleTags = '') {
+  return createTownAppearanceSignature({ db: getDb(), buildAppearanceSection: buildCharacterAppearanceSection,
+    buildPersona: buildCharacterPersona }).capture({ sourceKind: 'npc', sourceId: npcId, mode, styleTags });
+}
+
 export async function generateNpcSprites(npcId, overrides = {}) {
   const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
+  const guard = imageGenerationGuard(overrides.expectedWorld, { table: 'town_npcs', row: npcRow,
+    fields: ['created_at', 'character_id', 'persona', 'display_name'] });
   const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
-  const appearanceInfo = npcAppearanceInfo(npcRow, styleTags);
+  const appearanceGuard = captureNpcAppearance(npcId, 'sprite', styleTags);
+  const appearanceInfo = appearanceGuard.appearanceInfo;
   const directions = overrides.direction
     ? [String(overrides.direction)]
     : [...SPRITE_DIRECTIONS];
@@ -160,32 +198,43 @@ export async function generateNpcSprites(npcId, overrides = {}) {
   }
 
   for (const dir of directions) {
+    guard.assertCurrent();
+    appearanceGuard.assertCurrent();
     const key = `npc_${npcId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
-    if (existing?.status === 'ready' && !overrides.force) continue;
+    if (existing?.status === 'ready' && !overrides.force
+      && (overrides.refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) === 'current')) continue;
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
+      guard.assertCurrent();
+      appearanceGuard.assertCurrent();
       // 保留既有素材 ID，避免前端/地图仍引用旧 image_path 时出现 404。
       if (existing) {
         await regenerateAsset(existing.id, {
-          styleTags, prompt,
+          styleTags, prompt, expectedWorld: guard.expectedWorld, appearanceGuard,
           promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
         });
       } else {
         await createAsset({
-          kind: 'npc', key, name: `${npcRow.display_name} ${dir}`,
-          desc: npcAppearanceSection(npcRow) || npcRow.display_name,
+          kind: 'npc', key, name: `${npcRow.display_name} ${dir}`, expectedWorld: guard.expectedWorld, appearanceGuard,
+          desc: appearanceGuard.description,
           meta: {
             direction: dir, styleTags, npcId, promptOverride: prompt,
             promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
           },
         });
       }
+      guard.assertCurrent();
+      appearanceGuard.assertCurrent();
     } catch (err) {
+      guard.assertCurrent();
+      appearanceGuard.assertCurrent();
+      if (err.code === 'TOWN_ASSET_STALE') throw err;
       console.warn(`[townNpcs] sprite ${dir} failed:`, err?.message);
     }
   }
 
+  guard.assertCurrent();
   const allReady = SPRITE_DIRECTIONS.every(d => getAssetsByKey([`npc_${npcId}_${d}`])[0]?.status === 'ready');
   getDb().prepare('UPDATE town_npcs SET sprite_ready = ? WHERE id = ?').run(allReady ? 1 : 0, npcId);
   return { ok: true, spriteReady: allReady };
@@ -195,19 +244,25 @@ export async function generateNpcSprites(npcId, overrides = {}) {
 export async function generateNpcPortrait(npcId, overrides = {}) {
   const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!npcRow) throw new Error(`npc #${npcId} not found`);
+  const guard = imageGenerationGuard(overrides.expectedWorld, { table: 'town_npcs', row: npcRow,
+    fields: ['created_at', 'character_id', 'persona', 'display_name'] });
   const key = `npc_${npcId}_portrait`;
   const existing = getAssetsByKey([key])[0];
   const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
-  const prompt = await generatePortraitPrompt({ appearanceInfo: npcAppearanceInfo(npcRow, styleTags) });
+  const appearanceGuard = captureNpcAppearance(npcId, 'portrait', styleTags);
+  const prompt = await generatePortraitPrompt({ appearanceInfo: appearanceGuard.appearanceInfo });
+  guard.assertCurrent();
+  appearanceGuard.assertCurrent();
   const asset = existing
     ? await regenerateAsset(existing.id, {
-      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist, expectedWorld: guard.expectedWorld, appearanceGuard,
     })
     : await createAsset({
-      kind: 'portrait', key, name: `${npcRow.display_name} 立绘`,
-      desc: npcAppearanceSection(npcRow) || npcRow.display_name,
+      kind: 'portrait', key, name: `${npcRow.display_name} 立绘`, expectedWorld: guard.expectedWorld, appearanceGuard,
+      desc: appearanceGuard.description,
       meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
     });
+  guard.assertCurrent();
   return { ok: true, asset };
 }
 
@@ -227,28 +282,30 @@ export async function regenerateNpcPersonaCard(npcId, overrides = {}) {
 }
 
 /** 角色立绘：复用 characters.standing_url；没有才走 LLM 生成（存素材库 char_{id}_portrait） */
-export async function generateCharacterPortrait(characterId) {
+export async function generateCharacterPortrait(characterId, { expectedWorld } = {}) {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
   if (!char) throw new Error('角色不存在');
+  const guard = imageGenerationGuard(expectedWorld, { table: 'characters', row: char,
+    fields: ['created_at', 'base_prompt', 'short_prompt', 'standing_url', 'display_name', 'name'] });
   if (char.standing_url) {
     return { ok: true, reused: true, asset: null, url: char.standing_url };
   }
-  const { buildCharacterPersona } = await import('../characterPersona.js');
-  const appearanceInfo = [
-    `【名字】${char.display_name || char.name}`,
-    `【角色卡】\n${buildCharacterPersona(char, { variant: 'short', person: char.display_name || char.name })}`,
-    `【画风基调】${getWorldStyleTags() || 'cozy pixel town'}`,
-  ].filter(Boolean).join('\n');
+  guard.assertCurrent();
+  const appearanceGuard = createTownAppearanceSignature({ db, buildAppearanceSection: buildCharacterAppearanceSection,
+    buildPersona: buildCharacterPersona }).capture({ sourceKind: 'character', sourceId: characterId, mode: 'portrait', styleTags: getWorldStyleTags() });
+  const appearanceInfo = appearanceGuard.appearanceInfo;
   const prompt = await generatePortraitPrompt({ appearanceInfo });
+  guard.assertCurrent();
+  appearanceGuard.assertCurrent();
   const key = `char_${characterId}_portrait`;
   const existing = getAssetsByKey([key])[0];
-  if (existing) deleteAsset(existing.id);
-  const asset = await createAsset({
-    kind: 'portrait', key, name: `${char.display_name || char.name} 立绘`,
+  const asset = existing ? await regenerateAsset(existing.id, { prompt, expectedWorld: guard.expectedWorld, appearanceGuard }) : await createAsset({
+    kind: 'portrait', key, name: `${char.display_name || char.name} 立绘`, expectedWorld: guard.expectedWorld, appearanceGuard,
     desc: char.short_prompt || char.base_prompt || char.name,
     meta: { characterId, promptOverride: prompt },
   });
+  guard.assertCurrent();
   return { ok: true, reused: false, asset, url: asset.image_path };
 }
 
@@ -267,6 +324,7 @@ export function getPlayerKit() {
 
 /** 重新生成玩家套装（LLM 出 prompt；串行队列内逐张完成，await 返回即全部 ready） */
 export async function regeneratePlayerSprite(direction, overrides = {}) {
+  const guard = imageGenerationGuard(overrides.expectedWorld);
   if (!SPRITE_DIRECTIONS.includes(direction)) throw new Error('无效的小人方向');
   const key = `player_${direction}`;
   const existing = getAssetsByKey([key])[0];
@@ -274,15 +332,16 @@ export async function regeneratePlayerSprite(direction, overrides = {}) {
     appearanceInfo: playerAppearanceInfo(),
     direction,
   });
+  guard.assertCurrent();
   const styleTags = getWorldStyleTags();
   if (existing) {
     // 保留素材 ID；旧图会一直显示到新图生成成功。
     await regenerateAsset(existing.id, {
-      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist, expectedWorld: guard.expectedWorld,
     });
   } else {
     await createAsset({
-      kind: 'player', key, name: `玩家 ${direction}`, desc: 'the player character',
+      kind: 'player', key, name: `玩家 ${direction}`, desc: 'the player character', expectedWorld: guard.expectedWorld,
       meta: {
         direction,
         styleTags,
@@ -293,47 +352,56 @@ export async function regeneratePlayerSprite(direction, overrides = {}) {
       },
     });
   }
+  guard.assertCurrent();
   return { ok: true, kit: getPlayerKit() };
 }
 
 export async function regeneratePlayerKit(overrides = {}) {
+  const guard = imageGenerationGuard(overrides.expectedWorld);
   const info = playerAppearanceInfo();
   const styleTags = getWorldStyleTags();
   for (const dir of SPRITE_DIRECTIONS) {
+    guard.assertCurrent();
     const key = `player_${dir}`;
     const existing = getAssetsByKey([key])[0];
     const prompt = await generateSpritePrompt({ appearanceInfo: info, direction: dir });
+    guard.assertCurrent();
     if (existing) {
       await regenerateAsset(existing.id, {
-        styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist,
+        styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist, expectedWorld: guard.expectedWorld,
       });
     } else {
       await createAsset({
-        kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character',
+        kind: 'player', key, name: `玩家 ${dir}`, desc: 'the player character', expectedWorld: guard.expectedWorld,
         meta: { direction: dir, styleTags, promptOverride: prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
       });
     }
+    guard.assertCurrent();
   }
-  return regeneratePlayerPortrait(overrides);
+  return regeneratePlayerPortrait({ ...overrides, expectedWorld: guard.expectedWorld });
 }
 
 /** Regenerate only the player's portrait, leaving both sprites untouched. */
 export async function regeneratePlayerPortrait(overrides = {}) {
+  const guard = imageGenerationGuard(overrides.expectedWorld);
   const info = playerAppearanceInfo();
   const styleTags = getWorldStyleTags();
   const existingPortrait = getAssetsByKey(['player_portrait'])[0];
   const portraitPrompt = await generatePortraitPrompt({ appearanceInfo: info });
+  guard.assertCurrent();
   if (existingPortrait) {
     const portrait = await regenerateAsset(existingPortrait.id, {
       styleTags, prompt: portraitPrompt, promptPrefix: overrides.promptPrefix,
-      loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist,
+      loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist, expectedWorld: guard.expectedWorld,
     });
+    guard.assertCurrent();
     return { ok: true, kit: getPlayerKit(), portrait };
   }
   const portrait = await createAsset({
-    kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character',
+    kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character', expectedWorld: guard.expectedWorld,
     meta: { styleTags, promptOverride: portraitPrompt, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
   });
+  guard.assertCurrent();
   return { ok: true, kit: getPlayerKit(), portrait };
 }
 
@@ -415,36 +483,45 @@ D. 生活感 —— 这是小镇的日常居民，写ta的工作日常、邻里�
 /** 把小镇居民邀请为邻舍角色：characters 建档（人设/外观沿用 NPC 卡），NPC 记住对应关系 */
 export async function inviteNpcAsCharacter(npcId) {
   const db = getDb();
-  const npc = getNpc(npcId);
-  if (!npc) throw new Error('NPC 不存在');
-  if (npc.characterId) {
-    const exists = db.prepare('SELECT id, name FROM characters WHERE id = ?').get(npc.characterId);
-    if (exists) return { ok: true, characterId: exists.id, name: exists.name, already: true };
-  }
+  const registry = createTownActorRegistry(db);
+  const result = db.transaction(() => {
+    const npc = getNpc(npcId);
+    if (!npc) throw new Error('NPC 不存在');
+    if (npc.characterId) {
+      const exists = db.prepare('SELECT id, name FROM characters WHERE id = ?').get(npc.characterId);
+      if (exists) {
+        const actor = registry.linkNpcCharacter(npcId, exists.id);
+        return { ok: true, characterId: exists.id, actorId: actor.actorId, name: exists.name, already: true };
+      }
+    }
 
-  // 角色名唯一约束：重名时加后缀
-  let name = npc.displayName;
-  if (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) {
-    name = `${name}_镇`;
-    let i = 2;
-    while (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) name = `${npc.displayName}_镇${i++}`;
-  }
+    // 角色名唯一约束：重名时加后缀
+    let name = npc.displayName;
+    if (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) {
+      name = `${name}_镇`;
+      let i = 2;
+      while (db.prepare('SELECT id FROM characters WHERE name = ?').get(name)) name = `${npc.displayName}_镇${i++}`;
+    }
 
-  const basePrompt = npc.persona || [
-    `你是邻舍小镇的居民「${npc.displayName}」。`,
-    npc.job ? `职业：${npc.job}。` : '',
-    '你日常在小镇里按作息生活（工作/闲逛/回家），与邻里熟络。与用户聊天时保持角色口吻，聊小镇的日常、眼下的生活。',
-  ].filter(Boolean).join('\n');
+    const basePrompt = npc.persona || [
+      `你是邻舍小镇的居民「${npc.displayName}」。`,
+      npc.job ? `职业：${npc.job}。` : '',
+      '你日常在小镇里按作息生活（工作/闲逛/回家），与邻里熟络。与用户聊天时保持角色口吻，聊小镇的日常、眼下的生活。',
+    ].filter(Boolean).join('\n');
 
-  const r = db.prepare(`
-    INSERT INTO characters (name, display_name, base_prompt, short_prompt)
-    VALUES (?, ?, ?, ?)
-  `).run(name, npc.displayName, basePrompt, npc.persona || npc.displayName);
-  const characterId = Number(r.lastInsertRowid);
+    const r = db.prepare(`
+      INSERT INTO characters (name, display_name, base_prompt, short_prompt)
+      VALUES (?, ?, ?, ?)
+    `).run(name, npc.displayName, basePrompt, npc.persona || npc.displayName);
+    const characterId = Number(r.lastInsertRowid);
 
-  db.prepare('UPDATE town_npcs SET character_id = ? WHERE id = ?').run(characterId, npcId);
-  console.log(`[townNpcs] npc #${npcId} (${npc.displayName}) invited as character #${characterId}`);
-  return { ok: true, characterId, name, already: false };
+    const actor = registry.linkNpcCharacter(npcId, characterId);
+    console.log(`[townNpcs] npc #${npcId} (${npc.displayName}) invited as character #${characterId}`);
+    return { ok: true, characterId, actorId: actor.actorId, name, already: false };
+  })();
+  const { reloadTown } = await import('./townService.js');
+  reloadTown();
+  return result;
 }
 
 // ── 作息生成（LLM 一次性） ──
@@ -620,63 +697,94 @@ export function getNpcChatHistory(npcId, limit = 20) {
 
 /** 求当前作息描述（供现场语境） */
 export function currentRoutineLine(npc, now = new Date()) {
-  const minutes = now.getHours() * 60 + now.getMinutes();
-  const toMin = (t) => {
-    const [h, m] = String(t).split(':').map(Number);
-    return (h || 0) * 60 + (m || 0);
-  };
-  for (const slot of npc.routine || []) {
-    const s = toMin(slot.start);
-    const e = toMin(slot.end) || 24 * 60; // "24:00"
-    if (minutes >= s && minutes < e) return `正在【${slot.activity}】`;
-  }
-  return '正在闲逛';
+  const slot = findRoutineSlot(npc.routine, now.getTime(), {
+    timeZone: config.town.timeZone || 'Asia/Shanghai', offsetMinutes: npc.traits?.nightOwl ? 90 : 0,
+  });
+  return slot ? `正在【${slot.activity}】` : '正在闲逛';
 }
 
 /**
  * 玩家点击 NPC 就地聊天：单轮 LLM，历史注入，落库并广播气泡
  * @returns {Promise<{reply: string}>}
  */
-export async function chatWithNpc(npcId, message) {
+export async function chatWithNpc(npcId, message, opts = {}) {
   const npc = getNpc(npcId);
   if (!npc) throw new Error('NPC 不存在');
   const db = getDb();
+  const registry = createTownActorRegistry(db);
+  const world = registry.getWorldState();
+  if ((opts.worldId != null && opts.worldId !== world.worldId)
+      || (opts.worldEpoch != null && opts.worldEpoch !== world.epoch)) {
+    throw Object.assign(new Error('小镇已变化，请刷新后重新交谈'), { status: 409, code: 'STALE_WORLD' });
+  }
+  if (npc.characterId && db.prepare('SELECT id FROM characters WHERE id = ?').get(npc.characterId)) {
+    throw Object.assign(new Error('这位居民已入邻舍，请使用角色对话'), { status: 409, characterId: npc.characterId });
+  }
+  const scope = { worldId: world.worldId, epoch: world.epoch, npcId };
+  const content = String(message).trim().slice(0, 500);
+  if (!content) throw Object.assign(new Error('消息不能为空'), { status: 400 });
+  const request = beginTownDialogueRequest(db, { ...scope, clientMessageId: opts.clientMessageId || randomUUID(),
+    payload: { message: content } });
+  if (!request.started) {
+    if (request.status === 'completed') return request.reply;
+    throw Object.assign(new Error(request.status === 'processing' ? '居民正在回应，请稍后重试这条消息' : '这条消息未完成，请查看历史后重新发送'),
+      { status: 409, code: request.status === 'processing' ? 'DIALOGUE_PROCESSING' : 'DIALOGUE_FAILED', requestId: request.requestId });
+  }
+  const useModel = config.features.townLLM;
+  try {
+    const actor = registry.resolveAgentKey(`npc:${npcId}`);
+    if (actor && db.prepare(`SELECT 1 FROM town_service_sessions WHERE provider_actor_id = ?
+      AND escrow_account_id IS NOT NULL AND status IN ('active', 'resolving', 'settling')`).get(actor.actorId)) {
+      throw Object.assign(new Error('居民正在提供服务，请稍后再聊'), { status: 409, code: 'NPC_BUSY' });
+    }
 
-  const history = getNpcChatHistory(npcId, 12);
-  const now = new Date();
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const scene = currentRoutineLine(npc, now);
+    const history = getNpcChatHistory(npcId, 12);
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const scene = currentRoutineLine(npc, now);
 
-  const reply = await chatSync([
-    {
-      role: 'system',
-      content: [
-        `你是小镇居民「${npc.displayName}」，正在镇上和来访的玩家（${config.user.nickname}）面对面聊天。`,
-        npc.persona ? `你的人设：${npc.persona}` : '',
-        npc.job ? `你的职业：${npc.job}` : '',
-        `现在是 ${timeStr}，你${scene}。`,
-        '要求：用中文回复，1~2 句话（不超过 60 字），口语化、符合人设，可以聊眼前的生活；小动作用（括号）内嵌。不要输出旁白、不要自称 AI、不要列选项。',
-        '以下是你们之前在镇上的对话（可能为空）：',
-        history.length
-          ? history.map(h => `${h.role === 'user' ? '玩家' : npc.displayName}：${h.content}`).join('\n')
-          : '（第一次交谈）',
-      ].filter(Boolean).join('\n'),
-    },
-    { role: 'user', content: String(message).slice(0, 500) },
-  ], {
-    max_tokens: 300,
-    temperature: 0.9,
-    label: '小镇就地聊天',
-  });
+    const reply = useModel ? await chatSync([
+      {
+        role: 'system',
+        content: [
+          `你是小镇居民「${npc.displayName}」，正在镇上和来访的玩家（${config.user.nickname}）面对面聊天。`,
+          npc.persona ? `你的人设：${npc.persona}` : '',
+          npc.job ? `你的职业：${npc.job}` : '',
+          `现在是 ${timeStr}，你${scene}。`,
+          '要求：用中文回复，1~2 句话（不超过 60 字），口语化、符合人设，可以聊眼前的生活；小动作用（括号）内嵌。不要输出旁白、不要自称 AI、不要列选项。',
+          '以下是你们之前在镇上的对话（可能为空）：',
+          history.length
+            ? history.map(h => `${h.role === 'user' ? '玩家' : npc.displayName}：${h.content}`).join('\n')
+            : '（第一次交谈）',
+        ].filter(Boolean).join('\n'),
+      },
+      { role: 'user', content },
+    ], {
+      max_tokens: 300,
+      temperature: 0.9,
+      label: '小镇就地聊天',
+    }) : `（点点头）你好呀，${config.user.nickname || '邻居'}。我${scene}，见到你很高兴。`;
 
-  const text = String(reply || '').trim().slice(0, 200);
-  if (!text) throw new Error('NPC 没有回应');
+    const text = String(reply || '').trim().slice(0, 200);
+    if (!text) throw new Error('NPC 没有回应');
+    const result = { reply: text, source: useModel ? 'model' : 'template', requestId: request.requestId };
 
-  const ins = db.prepare('INSERT INTO town_npc_chat_messages (npc_id, role, content) VALUES (?, ?, ?)');
-  ins.run(npcId, 'user', String(message).slice(0, 500));
-  ins.run(npcId, 'npc', text);
+    db.transaction(() => {
+      registry.assertEpoch(world.epoch);
+      const current = db.prepare('SELECT character_id FROM town_npcs WHERE id = ?').get(npcId);
+      if (!current || (current.character_id || null) !== (npc.characterId || null)) throw new Error('居民身份已变化，请重新开始对话');
+      const ins = db.prepare('INSERT INTO town_npc_chat_messages (npc_id, role, content) VALUES (?, ?, ?)');
+      ins.run(npcId, 'user', content);
+      ins.run(npcId, 'npc', text);
+      finishTownDialogueRequest(db, { ...scope, requestId: request.requestId, reply: result });
+    })();
 
-  // 顺带冒个泡，让旁观端也能看到
-  broadcastTownBubble({ charId: `npc:${npcId}`, text, ttl: 10 });
-  return { reply: text };
+    // 顺带冒个泡，让旁观端也能看到
+    broadcastTownBubble({ charId: `npc:${npcId}`, text, ttl: 10 });
+    return result;
+  } catch (err) {
+    try { failTownDialogueRequest(db, { ...scope, requestId: request.requestId, error: String(err.code || err.message || 'GENERATION_FAILED') }); }
+    catch { /* Reset/startup may already have fenced or terminated this request. */ }
+    throw err;
+  }
 }

@@ -372,7 +372,7 @@ export async function deleteUserRelationship(id) {
   return res.json()
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false) {
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -393,10 +393,16 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
+          if (townContext !== undefined && [400, 409].includes(res.status)) {
+            const detail = await res.json().catch(() => ({}))
+            const error = Object.assign(new Error(detail.error || '小镇对话暂时不可用，请重新选择邻居'), { status: res.status, code: detail.code || 'TOWN_CHAT_REJECTED' })
+            outerController.error(error)
+            return // Admission errors must never retry or fall back to an ordinary request.
+          }
           // 非 2xx：也按重试处理（代理 502/504 等）
           retries++
           if (retries > MAX_RETRIES) {
@@ -763,7 +769,7 @@ export async function syncActiveLlmProfile() {
 async function jsonRequest(url, options) {
   const res = await fetch(url, options)
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status, code: data.code, requestId: data.requestId, characterId: data.characterId })
   return data
 }
 
@@ -1904,11 +1910,11 @@ export function fetchTownState() {
 }
 
 // 玩家 token 移动（服务端寻路 + town_move 广播）
-export function moveTownPlayer(x, y) {
+export function moveTownPlayer(x, y, { worldId, worldEpoch } = {}) {
   return jsonRequest(`${BASE}/town/player/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ x, y }),
+    body: JSON.stringify({ x, y, worldId, worldEpoch }),
   })
 }
 
@@ -2062,7 +2068,9 @@ export function deleteTownNpc(id) {
 }
 
 export function generateTownNpcSprites(id, overrides = {}) {
-  return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', overrides))
+  const body = { ...overrides }
+  if (typeof body.refreshAppearance !== 'boolean') delete body.refreshAppearance
+  return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', body))
 }
 
 export function generateTownNpcPortrait(id, overrides = {}) {
@@ -2089,8 +2097,8 @@ export function fetchTownNpcMessages(id) {
   return jsonRequest(`${BASE}/town/npcs/${id}/messages`)
 }
 
-export function chatWithTownNpc(id, message) {
-  return jsonRequest(`${BASE}/town/npcs/${id}/chat`, townJson('POST', { message }))
+export function chatWithTownNpc(id, message, { clientMessageId, worldId, worldEpoch } = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/chat`, townJson('POST', { message, clientMessageId, worldId, worldEpoch }))
 }
 
 // 入住角色开关
@@ -2099,8 +2107,9 @@ export function setTownCharacterEnabled(characterId, townEnabled) {
 }
 
 // 角色四方向精灵生成（管理面板）
-export function generateTownCharacterSprites(characterId) {
-  return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST', {}))
+export function generateTownCharacterSprites(characterId, options = {}) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST',
+    typeof options.refreshAppearance === 'boolean' ? { refreshAppearance: options.refreshAppearance } : {}))
 }
 
 // 玩家形象套装（立绘 + 正/背小人）
@@ -2134,11 +2143,21 @@ export function resetTownWorld() {
 }
 
 // 玩家方向键单步移动（本地节流上报）
-export function moveTownPlayerDir(dx, dy) {
-  return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy }))
+export function moveTownPlayerDir(dx, dy, { worldId, worldEpoch } = {}) {
+  return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy, worldId, worldEpoch }))
 }
 
 
 export function regenerateTownPlayerPortrait(overrides = {}) {
   return jsonRequest(`${BASE}/town/player/portrait`, townJson('POST', overrides))
 }
+
+export { getTownEconomy, getTownLiquidity, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand,
+  getPendingTownLifeCommand, savePendingTownLifeCommand } from './townLife.js'
+export { getTownActorActivities } from './townActivity.js'
+export { getTownMailboxTasks } from './townMailboxTasks.js'
+export { getTownAppointments, parseTownAppointmentBeijingTime, createTownAppointmentCommand,
+  executeTownAppointmentCommand, loadPendingTownAppointment, savePendingTownAppointment } from './townAppointments.js'
+export { getTownDeliveries, createTownDeliveryRetry, executeTownDeliveryRetry,
+  savePendingTownDeliveryRetry, loadPendingTownDeliveryRetry } from './townDeliveries.js'
+export { getTownScheduleOverlays, formatTownScheduleTime } from './townSchedule.js'

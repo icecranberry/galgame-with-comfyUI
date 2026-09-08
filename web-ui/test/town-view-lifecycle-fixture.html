@@ -1,0 +1,27 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Real TownView lifecycle fixture</title>
+<style>html,body,#app{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui;color:#74665a;background:#f4f1ee;--accent:#c66c5c;--text-primary:#74665a;--text-secondary:#8c8074;--bg-primary:#f4f1ee;--bg-secondary:#fffaf5}#app{position:relative}</style><div id="app"></div>
+<script type="module">
+import {createApp,nextTick} from 'vue'
+import {createPinia} from 'pinia'
+import TownView from '/src/views/TownView.vue'
+import {useTownStore} from '/src/stores/town.js'
+import {startUnifiedStream,stopUnifiedStream,__lifecycleSubscriptions} from '/src/stores/unifiedStream.js'
+import {Hd2dTownRenderer} from '/src/town/renderers/Hd2dTownRenderer.js'
+
+// Observation wrappers always call the original implementation. They neither
+// clear component resources nor replace store subscriptions/API implementations.
+const renderers=[],releases=[]
+const mount=Hd2dTownRenderer.prototype.mount,dispose=Hd2dTownRenderer.prototype.dispose
+Hd2dTownRenderer.prototype.mount=function(...args){renderers.push({epoch:window.__life.epoch,ref:new WeakRef(this)});return mount.apply(this,args)}
+Hd2dTownRenderer.prototype.dispose=function(...args){const result=dispose.apply(this,args);releases.push({epoch:window.__life.epoch,memory:{...this.renderer.info.memory},objects:this.objects.size,agents:this.agents.size,textures:this.textures.size,attached:this.renderer.domElement.isConnected,disposed:this.disposed});return result}
+const pinia=createPinia(),town=useTownStore(pinia),actions={start:0,stop:0};let app=null
+town.$onAction(({name})=>{if(name==='startTownStream')actions.start++;if(name==='stopTownStream')actions.stop++})
+const fixture=window.fixture={town,actions,releases,
+  startHost(){startUnifiedStream()},stopHost(){stopUnifiedStream()},
+  async mount(mode,epoch){if(app)throw new Error('Previous app still mounted');window.__life.epoch=epoch;window.__life.phase='mounted';localStorage.setItem('town.renderer',mode);localStorage.setItem('town.tiltShift','false');app=createApp(TownView).use(pinia);app.mount('#app');await nextTick()},
+  async unmount(){if(!app)throw new Error('No app mounted');app.unmount();app=null;window.__life.phase='unmounted';await nextTick()},
+  snapshot(){return {subscriptions:__lifecycleSubscriptions(),actions:{...actions},instrumentation:window.__life.snapshot(),renderers:renderers.map(({epoch,ref})=>{const r=ref.deref();return {epoch,alive:!!r,disposed:r?.disposed,memory:r?{...r.renderer.info.memory}:null,attached:r?.renderer.domElement.isConnected}}),releases:[...releases],canvases:document.querySelectorAll('canvas').length,connected:town.connected}},
+  ready(){return town.loaded&&!document.querySelector('.town-boot-mask')},
+}
+window.__life.phase='host'
+</script></html>

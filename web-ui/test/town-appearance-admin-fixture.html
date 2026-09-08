@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>公共基金设置验证</title><div id="app"></div><script type="module">
+import { createApp, ref, h } from 'vue'
+import { createPinia } from 'pinia'
+import TownAdminPanel from '../src/components/town/TownAdminPanel.vue'
+import LinsheButton from '../src/components/ui/LinsheButton.vue'
+const open = ref(false)
+createApp({ setup: () => () => h('main', [h(LinsheButton, { onClick: () => open.value = true }, () => '打开管理'), h(TownAdminPanel, { open: open.value, onClose: () => open.value = false })]) }).use(createPinia()).mount('#app')
+</script><style>:root{--accent:#e07b6c;--accent-hover:#cc6a5c;--accent-light:#f0a89a;--danger:#e25c5c;--text-primary:#74665a;--text-secondary:#8c8074;--text-bright:#463b33;--border:#e0dcd6}body{margin:0;font-family:system-ui,sans-serif;background:#e8e4dc;color:#74665a}main{padding:24px}</style></html>

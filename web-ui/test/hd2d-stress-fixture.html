@@ -1,0 +1,67 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>M7 isolated town stress and fallback</title>
+<style>html,body,#scene{margin:0;width:100%;height:100%;overflow:hidden;background:#dfe5d0;font-family:system-ui}canvas{position:absolute;inset:0}aside{position:absolute;left:16px;top:16px;padding:10px 14px;border-radius:12px;background:#f4f1eeed;color:#594d43;pointer-events:none;font-size:13px}strong{display:block;margin-bottom:4px;font-size:18px}</style>
+<div id="scene"><canvas id="overlay"></canvas></div><aside><strong>M7 · 全镇隔离压力 fixture</strong><span id="status"></span></aside>
+<script type="module">
+import {Hd2dTownRenderer} from '/src/town/renderers/Hd2dTownRenderer.js'
+import {createCanvasTownRenderer} from '/src/town/renderers/CanvasTownRenderer.js'
+import {adaptAgent,assetUrl} from '/src/town/renderers/TownSceneAdapter.js'
+import {cellCenterWorld,worldToCell,buildBlockedCells} from '/src/town/renderers/projection.js'
+import {createStressScene} from '/test/fixtures/townStressScene.js'
+const container=document.querySelector('#scene'),canvas=document.querySelector('#overlay'),ctx=canvas.getContext('2d')
+canvas.width=innerWidth;canvas.height=innerHeight
+const images=new Map(),load=url=>{
+  if(!url)return null
+  if(!images.has(url)){const image=new Image();const entry={image,ready:false,pending:true};images.set(url,entry);image.onload=()=>{entry.ready=true;entry.pending=false};image.onerror=()=>{entry.pending=false};image.src=url}
+  return images.get(url).ready?images.get(url).image:null
+}
+const probe=window.probe={...createStressScene(),hd:null,mode:'canvas',weather:{hour:12,text:'晴'},camera:{x:0,y:760,zoom:.5},raf:0,draws:0,paused:false,disposed:false,failures:[],releases:[],picks:[],edits:[],samples:[],longTasks:[],simulateUnavailable:false,moving:true}
+const c2d=createCanvasTownRenderer({getImg:load,agentFacing:()=> 'down',isImagePending:url=>!!images.get(url)?.pending})
+for(const a of probe.map.assets)load(assetUrl(a));load('/stress-assets/person.svg')
+c2d.setScene(probe.map)
+let observer
+try{observer=new PerformanceObserver(list=>probe.longTasks.push(...list.getEntries().map(e=>({start:e.startTime,duration:e.duration}))));observer.observe({type:'longtask',buffered:true})}catch{}
+function release(){if(probe.hd){const old=probe.hd;old.dispose();probe.releases.push({memory:{...old.renderer.info.memory},objects:old.objects.size,textures:old.textures.size,disposed:old.disposed});probe.hd=null}}
+function fallback(message){release();probe.mode='canvas';if(message)probe.failures.push(message)}
+probe.setMode=mode=>{
+  if(mode==='canvas'){fallback();return}
+  try{
+    if(!probe.hd){if(probe.simulateUnavailable)throw new Error('fixture WebGL2 unavailable');probe.hd=new Hd2dTownRenderer({onFailure:fallback});probe.hd.mount(container);probe.hd.setScene(probe.map);probe.hd.renderer.info.autoReset=false}
+    probe.mode=mode;probe.hd.setQuality(mode==='low'?'low':'balanced',mode==='tilt');probe.hd.resize(innerWidth,innerHeight,1.5)
+  }catch(error){fallback(error.message)}
+}
+probe.setCount=count=>{probe.agents=createStressScene(count).agents}
+probe.refreshScene=()=>{c2d.setScene(probe.map);probe.hd?.setScene(probe.map)}
+probe.ready=()=>[...images.values()].every(e=>!e.pending)&&(!probe.hd||[...probe.hd.textures.values()].every(e=>e.ready||e.failed))
+probe.draw=now=>{
+  const start=performance.now();probe.draws++
+  const step=probe.moving?Math.sin(now/1100)*.24:0
+  const frames=probe.agents.map(a=>adaptAgent(a,{x:a.x+step,y:a.y,moving:probe.moving},'down',now))
+  const camera={...probe.camera,x:probe.camera.x+(probe.moving?Math.sin(now/1800)*12:0)}
+  probe.activeCamera=camera
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,innerWidth,innerHeight)
+  let update=0,render=0,composite=0
+  if(probe.hd){
+    const r=probe.hd;r.renderer.info.reset();let t=performance.now();r.setCamera(camera);r.updateAgents(frames);update=performance.now()-t
+    const original=r.composer.render;r.composer.render=function(...args){const begin=performance.now();original.apply(this,args);composite=performance.now()-begin}
+    t=performance.now();r.render(probe.weather,frames.slice(0,1).map(f=>f.ground));render=performance.now()-t;r.composer.render=original
+  }else{ctx.fillStyle='#dfe5d0';ctx.fillRect(0,0,innerWidth,innerHeight)}
+  ctx.save();ctx.translate(innerWidth/2,innerHeight/2);ctx.scale(camera.zoom,camera.zoom);ctx.translate(-camera.x,-camera.y)
+  c2d.draw(ctx,frames,now,{labelsOnly:!!probe.hd});ctx.restore()
+  probe.lastCpu={total:performance.now()-start,update,render,composite}
+  document.querySelector('#status').textContent=`50×50 · 80 对象 · ${probe.agents.length} 居民 · ${probe.mode} · 合成素材，非 Android 结论`
+}
+function frame(now){probe.raf=0;if(probe.disposed||probe.paused||document.hidden)return;probe.draw(now);probe.raf=requestAnimationFrame(frame)}
+probe.resume=()=>{probe.paused=false;if(!probe.raf&&!probe.disposed&&!document.hidden)probe.raf=requestAnimationFrame(frame)}
+probe.pause=()=>{probe.paused=true;cancelAnimationFrame(probe.raf);probe.raf=0}
+function visibility(){if(document.hidden){cancelAnimationFrame(probe.raf);probe.raf=0}else if(!probe.paused)probe.resume()}
+document.addEventListener('visibilitychange',visibility)
+probe.groundPoint=(x,y)=>{const center=cellCenterWorld(x,y),c=probe.activeCamera||probe.camera;return {x:(center.x-c.x)*c.zoom+innerWidth/2,y:(center.y-c.y)*c.zoom+innerHeight/2}}
+const toWorld=p=>{const c=probe.activeCamera||probe.camera;return {x:(p.x-innerWidth/2)/c.zoom+c.x,y:(p.y-innerHeight/2)/c.zoom+c.y}}
+function click(event){const p={x:event.clientX,y:event.clientY},world=toWorld(p);const cell=probe.hd?probe.hd.pick(p,{groundOnly:true})?.cell:worldToCell(world.x,world.y)
+  const hit=probe.hd?probe.hd.pick(p,{agentsOnly:!!probe.agentOnly}):c2d.pick(world,{agentsOnly:!!probe.agentOnly});probe.picks.push({cell,kind:hit?.kind,id:hit?.object?.id,agent:hit?.agent?.agentKey})
+  if(probe.editing&&cell&&cell.x>=0&&cell.y>=0&&cell.x<50&&cell.y<50){const {x,y}=cell;(probe.map.layers.blockOverride[y]||=[])[x]=probe.editValue;probe.edits.push({x,y,value:probe.editValue,blocked:buildBlockedCells(probe.map).has(`${x},${y}`)})}
+}
+container.addEventListener('click',click)
+probe.dispose=()=>{probe.pause();probe.disposed=true;release();c2d.dispose();observer?.disconnect();document.removeEventListener('visibilitychange',visibility);container.removeEventListener('click',click);images.clear();canvas.remove()}
+probe.setMode('standard');probe.resume()
+</script></html>

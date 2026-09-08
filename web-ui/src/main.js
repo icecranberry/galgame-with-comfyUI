@@ -25,7 +25,7 @@ const routes = [
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
-  { path: '/town', component: TownView },
+  { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },

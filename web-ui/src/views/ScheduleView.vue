@@ -111,6 +111,10 @@
       :open="drawerOpen"
       :char="detailChar"
       :activities="detailActs"
+      :town-overlays="store.townOverlays"
+      :overlays-loading="store.townOverlaysLoading"
+      :overlays-error="store.townOverlaysError"
+      @refresh-overlays="store.refreshTownOverlays()"
       :loading="detailLoading"
       :peek-busy="peekBusy"
       :regenerating="detailRegenerating"
@@ -444,6 +448,9 @@ const detailChar = computed(() => {
 const detailActs = ref<any[]>([])
 const detailLoading = ref(false)
 const detailRegenerating = ref(false)
+watch(() => [drawerOpen.value, selectedCharId.value], ([open, id]) => {
+  store.selectTownOverlayCharacter(open ? id : null)
+})
 
 // ── 快照 ──
 const peekOpen = ref(false)
@@ -673,10 +680,15 @@ const peekFilmStyle = computed(() => {
 })
 
 // ── 生命周期 ──
+let disposed = false
+const peekUnsubscribers: Array<() => void> = []
 let _overviewRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 function refreshOverviewWhenVisible() {
-  if (document.visibilityState === 'visible') store.fetchOverview(true)
+  if (document.visibilityState !== 'visible') return
+  store.fetchOverview(true)
+  // Reuse the existing 60s/visibility/focus cadence; never fan out to other characters.
+  if (drawerOpen.value && !store.townOverlaysLoading) store.refreshTownOverlays()
 }
 
 onMounted(async () => {
@@ -689,6 +701,7 @@ onMounted(async () => {
   // 页面刷新恢复：查询后端是否有正在进行的重置任务
   try {
     const status = await api.getResetStatus()
+    if (disposed) return
     if (status.active) {
       store.startResetTask(status.total)
       // 用后端返回的当前进度更新
@@ -702,23 +715,28 @@ onMounted(async () => {
     }
   } catch { /* 查询失败不阻塞 */ }
 
+  if (disposed) return
   try {
-    onEvent('schedule_peek_ready', (d: any) => {
+    peekUnsubscribers.push(onEvent('schedule_peek_ready', (d: any) => {
       if (d.prompt) peekPrompt.value = d.prompt
       if (d.images?.length) { peekImage.value = d.images[0]; peekError.value = null }
       else if (d.error) { peekError.value = d.error }
       peekLoading.value = false; peekBusy.value = false
       simulatedPct.value = 100
       stopFakeProgress()
-    })
-    onEvent('schedule_peek_progress', (d: any) => {
+    }))
+    peekUnsubscribers.push(onEvent('schedule_peek_progress', (d: any) => {
       if (d.progress != null) {
         realPct.value = d.progress
       }
-    })
+    }))
   } catch { /* */ }
 })
 onUnmounted(() => {
+  disposed = true
+  for (const unsubscribe of peekUnsubscribers.splice(0)) unsubscribe()
+  ++detailRequestSequence
+  store.selectTownOverlayCharacter(null)
   if (_overviewRefreshTimer) { clearInterval(_overviewRefreshTimer); _overviewRefreshTimer = null }
   document.removeEventListener('visibilitychange', refreshOverviewWhenVisible)
   window.removeEventListener('focus', refreshOverviewWhenVisible)
@@ -730,16 +748,19 @@ onUnmounted(() => {
 // ── 方法 ──
 function onFilter(key: string) { activeFilter.value = key }
 
+let detailRequestSequence = 0
 async function onSelectChar(id: number) {
+  const sequence = ++detailRequestSequence
+  const current = () => sequence === detailRequestSequence && selectedCharId.value === id && drawerOpen.value
   selectedCharId.value = id
   drawerOpen.value = true
   detailLoading.value = true
   detailActs.value = []
   try {
     const d = await store.fetchCharacterSchedule(id)
-    detailActs.value = d.activities || []
-  } catch { detailActs.value = [] }
-  finally { detailLoading.value = false }
+    if (current()) detailActs.value = d.activities || []
+  } catch { if (current()) detailActs.value = [] }
+  finally { if (current()) detailLoading.value = false }
 }
 
 function onPeek() {

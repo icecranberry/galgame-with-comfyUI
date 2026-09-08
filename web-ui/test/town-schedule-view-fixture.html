@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ScheduleView真实集成验证</title><div id="app"></div><script type="module">
+import { createApp, h, ref, nextTick } from 'vue'
+import { createPinia } from 'pinia'
+import { createRouter, createMemoryHistory } from 'vue-router'
+import ScheduleView from '../src/views/ScheduleView.vue'
+import { useScheduleStore } from '../src/stores/schedule.js'
+import { __fixtureDispatch, __fixtureHandlerCount } from '../src/stores/unifiedStream.js'
+const app = createApp({ setup() { const visible = ref(true); window.fixture = { mount: async value => { visible.value = value; await nextTick() }, handlerCount: __fixtureHandlerCount, store: useScheduleStore(), world: value => __fixtureDispatch('town_state_updated', value), event: (type, value) => __fixtureDispatch(type, value) }; return () => visible.value ? h(ScheduleView) : null } })
+const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: ScheduleView }] })
+app.use(createPinia()); app.use(router)
+app.provide('isMobile', false); app.provide('toggleMobileSidebar', () => {}); app.provide('toast', () => {}); app.provide('confirm', async () => false)
+app.mount('#app')
+</script><style>:root{--accent:#e07b6c;--accent-hover:#cc6a5c;--accent-light:#f0a89a;--text-primary:#74665a;--text-secondary:#8c8074;--text-bright:#463b33;--border:#e0dcd6;--bg-primary:#f4f1ee;--bg-secondary:#fffaf4}body{margin:0;font-family:system-ui,sans-serif;background:#e8e4dc;color:#74665a}#app{height:100vh}</style></html>

@@ -1,0 +1,67 @@
+<!doctype html><html><meta charset="utf-8"><title>Plane single-pass isolated fixture</title>
+<style>html,body,#scene{margin:0;width:100%;height:100%;overflow:hidden;background:#dfe5d0}</style><div id="scene"></div>
+<script type="module">
+import * as T from 'three'
+import {Hd2dTownRenderer} from '/src/town/renderers/Hd2dTownRenderer.js'
+import {adaptAgent} from '/src/town/renderers/TownSceneAdapter.js'
+import {createStressScene} from '/test/fixtures/townStressScene.js'
+const r=new Hd2dTownRenderer();r.mount(document.querySelector('#scene'));r.resize(innerWidth,innerHeight,1.5);r.setQuality('balanced',false);r.renderer.info.autoReset=false
+const p=window.probe={r,T,keys:[],hour:12,moving:false,single:false,category:'all',raf:0,lastCpu:null,draws:0}
+p.materials=()=>{
+  const cards=[...r.objects.values()].filter(m=>!m.userData.volume).map(m=>m.material)
+  const agents=[...r.agents.values()].map(m=>m.material)
+  const shadows=[...r.objects.values()].flatMap(m=>m.userData.projectedShadow?[m.userData.projectedShadow.material]:[])
+  return {cards,agents,shadows}
+}
+p.setPass=(value,category='all')=>{p.single=value;p.category=category;for(const [key,materials]of Object.entries(p.materials()))for(const [index,material]of materials.entries())material.forceSinglePass=value&&(category==='all'||category===key||category===`${key}:${index}`)}
+p.scene=(kind='dense',hour=12)=>{
+  const world=createStressScene(60);p.map=world.map;p.agents=world.agents;p.hour=hour;p.keys=[]
+  p.camera={x:0,y:760,zoom:.5}
+  if(kind!=='dense'){
+    p.map.layers.objects=[{id:'a',assetId:kind==='volume'?5:3,x:4,y:7,flip:kind==='flipped'},
+      {id:'prop',assetId:4,x:7,y:8,flip:kind==='flipped'},{id:'volume',assetId:6,x:10,y:7}]
+    p.agents=[{agentKey:'me',x:4,y:kind==='volume'?4:5,sprites:{down:'/stress-assets/person.svg'}},
+      {agentKey:'front',x:6,y:8,sprites:{down:'/stress-assets/person.svg'}}]
+    p.keys=['me'];p.camera={x:64,y:210,zoom:1.4}
+    if(kind==='flipped')p.map.assets.find(a=>a.id===4).imagePath='/stress-assets/fractional.svg'
+  }
+  r.setScene(p.map);r.setCamera(p.camera);p.draw(1000)
+}
+p.draw=now=>{
+  const start=performance.now();p.draws++;r.renderer.info.reset()
+  const step=p.moving?Math.sin(now/1100)*.24:0
+  const frames=p.agents.map(a=>adaptAgent(a,{x:a.x+step,y:a.y,moving:p.moving},'down',p.moving?now:1000))
+  r.setCamera({...p.camera,x:p.camera.x+(p.moving?Math.sin(now/1800)*12:0)})
+  let t=performance.now();r.updateAgents(frames);const update=performance.now()-t
+  p.setPass(p.single,p.category)
+  let composite=0;const original=r.composer.render
+  r.composer.render=function(...args){const begin=performance.now();original.apply(this,args);composite=performance.now()-begin}
+  t=performance.now();r.render({hour:p.hour,text:'晴'},[],{interactionActorKeys:p.keys});const render=performance.now()-t
+  r.composer.render=original;p.lastCpu={total:performance.now()-start,update,render,composite}
+}
+p.ready=()=>[...r.textures.values()].every(e=>e.ready||e.failed)
+p.run=()=>{p.moving=true;const frame=now=>{p.raf=0;p.draw(now);p.raf=requestAnimationFrame(frame)};if(!p.raf)p.raf=requestAnimationFrame(frame)}
+p.pause=()=>{cancelAnimationFrame(p.raf);p.raf=0;p.moving=false}
+p.depth=()=>{
+  const {width,height}=r.tiltPass.composite.uniforms.sceneDepth.value.image
+  const target=new T.WebGLRenderTarget(width,height,{depthBuffer:false})
+  const material=new T.ShaderMaterial({uniforms:{depth:{value:r.tiltPass.composite.uniforms.sceneDepth.value}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:'#include <packing>\nuniform sampler2D depth;varying vec2 vUv;void main(){gl_FragColor=packDepthToRGBA(texture2D(depth,vUv).r);}',depthTest:false,depthWrite:false})
+  const geometry=new T.PlaneGeometry(2,2),scene=new T.Scene();scene.add(new T.Mesh(geometry,material));const pixels=new Uint8Array(width*height*4)
+  r.renderer.setRenderTarget(target);r.renderer.render(scene,new T.Camera());r.renderer.readRenderTargetPixels(target,0,0,width,height,pixels);r.renderer.setRenderTarget(null)
+  target.dispose();geometry.dispose();material.dispose();return pixels
+}
+p.capture=()=>{
+  p.draw(1000);const calls=r.renderer.info.render.calls,gl=r.renderer.getContext(),width=gl.drawingBufferWidth,height=gl.drawingBufferHeight,color=new Uint8Array(width*height*4)
+  gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,color)
+  const shadow=r.sun.shadow.map,shadowPixels=new Uint8Array(shadow.width*shadow.height*4)
+  r.renderer.readRenderTargetPixels(shadow,0,0,shadow.width,shadow.height,shadowPixels)
+  const depth=p.depth(),picks=[]
+  for(let y=40;y<innerHeight;y+=31)for(let x=40;x<innerWidth;x+=31){const h=r.pick({x,y});picks.push(`${h?.kind}:${h?.object?.id||h?.agent?.agentKey||JSON.stringify(h?.cell)}`)}
+  let casters=0;r.scene.traverse(m=>{if(m.castShadow)casters++})
+  return {width,height,color,depth,shadowPixels,picks,casters,calls,fades:[...r.objects].filter(([,m])=>m.userData.occluding).map(([id])=>id),gl:gl.getError()}
+}
+p.rawColor=()=>{p.draw(1000);const gl=r.renderer.getContext(),pixels=new Uint8Array(innerWidth*innerHeight*4);gl.readPixels(0,0,innerWidth,innerHeight,gl.RGBA,gl.UNSIGNED_BYTE,pixels);return pixels}
+p.scene()
+await new Promise(resolve=>{const check=()=>{p.draw(1000);if(p.ready())resolve();else requestAnimationFrame(check)};check()})
+p.loaded=true
+</script></html>

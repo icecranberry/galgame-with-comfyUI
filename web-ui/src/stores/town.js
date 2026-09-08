@@ -44,9 +44,23 @@ export const useTownStore = defineStore('town', () => {
     return snapshot.value?.agents.find(a => a.agentKey === agentKey) || null
   }
 
+  // Local observation order protects SSE movement received during an HTTP read.
+  // This is not a server revision and cannot detect independently reordered SSE.
+  let _moveGeneration = 0
+  const _agentMoveGenerations = new Map()
+
+  function _acceptWorldEvent(d) {
+    if (d?.worldEpoch == null || snapshot.value?.worldEpoch == null) return true
+    if (d.worldId !== snapshot.value.worldId || d.worldEpoch !== snapshot.value.worldEpoch) {
+      if (d.worldId !== snapshot.value.worldId || d.worldEpoch > snapshot.value.worldEpoch) _scheduleAgentSpriteRefresh()
+      return false
+    }
+    return true
+  }
+
   function _applyMove(d) {
     const snap = snapshot.value
-    if (!snap || !d) return
+    if (!snap || !d || !_acceptWorldEvent(d)) return
     // 服务器时钟 → 本地时钟
     const startedAtLocal = (d.startedAt ?? Date.now()) - serverOffset.value
     if (d.charId === 'me') {
@@ -64,6 +78,7 @@ export const useTownStore = defineStore('town', () => {
     }
     const agent = _findAgent(d.charId)
     if (!agent) return
+    _agentMoveGenerations.set(d.charId, ++_moveGeneration)
     agent.x = d.from?.x ?? agent.x
     agent.y = d.from?.y ?? agent.y
     agent.path = d.path || []
@@ -74,7 +89,7 @@ export const useTownStore = defineStore('town', () => {
 
   function _applyBubble(d) {
     const snap = snapshot.value
-    if (!snap || !d) return
+    if (!snap || !d || !_acceptWorldEvent(d)) return
     const agent = _findAgent(d.charId)
     if (!agent) return
     if (!d.text) { agent.bubble = null; return }
@@ -87,7 +102,7 @@ export const useTownStore = defineStore('town', () => {
 
   function _applyEncounterStart(d) {
     const snap = snapshot.value
-    if (!snap || !d) return
+    if (!snap || !d || !_acceptWorldEvent(d)) return
     for (const a of snap.agents) {
       if (a.agentKey === d.a || a.agentKey === d.b) a.encounterId = d.id
     }
@@ -98,15 +113,35 @@ export const useTownStore = defineStore('town', () => {
 
   function _applyEncounterEnd(d) {
     const snap = snapshot.value
-    if (!snap || !d) return
+    if (!snap || !d || !_acceptWorldEvent(d)) return
+    if (d.removed) snap.agents = snap.agents.filter(a => a.agentKey !== d.removed)
     for (const a of snap.agents) {
       if (a.encounterId === d.id) a.encounterId = null
     }
     snap.encountersActive = snap.encountersActive.filter(e => e.id !== d.id)
   }
 
+  let _stateRequest = 0
+  let _lastStateRefreshAt = -Infinity
   async function fetchState() {
+    _lastStateRefreshAt = Date.now()
+    const request = ++_stateRequest
+    const moveBoundary = _moveGeneration
     const data = await api.fetchTownState()
+    if (request !== _stateRequest) return snapshot.value
+    const sameWorld = snapshot.value?.worldId === data.worldId && snapshot.value?.worldEpoch === data.worldEpoch
+    if (!sameWorld) {
+      ++_mapRequest
+      ++_assetRequest
+      ++_initRequest
+      ++_previewRequest
+      _agentMoveGenerations.clear()
+      mapLoading.value = false
+      mapData.value = null
+      assets.value = []
+      draftPreview.value = null
+      initState.value = null
+    }
     serverOffset.value = (data.serverTime ?? Date.now()) - Date.now()
     // 快照里的 startedAt 是服务器时钟，换算成本地时钟供插值
     const nowLocal = Date.now()
@@ -114,29 +149,44 @@ export const useTownStore = defineStore('town', () => {
       if (a.path && a.path.length > 0) a.moveStartedAt = (a.startedAt ?? nowLocal) - serverOffset.value
       else a.moveStartedAt = nowLocal
       if (a.bubble) a.bubble.until = a.bubble.until - serverOffset.value
+      if (sameWorld && (_agentMoveGenerations.get(a.agentKey) || 0) > moveBoundary) {
+        const current = _findAgent(a.agentKey)
+        if (current && (!a.actorId || !current.actorId || a.actorId === current.actorId)) {
+          // Keep fresh snapshot metadata, but retain the move received after
+          // this request started, including an explicit empty-path stop.
+          for (const key of ['x', 'y', 'path', 'speed', 'moveStartedAt', 'sleeping']) a[key] = current[key]
+        }
+      }
     }
     if (data.player) {
       data.player.moveStartedAt = data.player.path && data.player.path.length > 0
         ? (data.player.startedAt ?? nowLocal) - serverOffset.value
         : nowLocal
+      if (sameWorld && (snapshot.value?.player?.moveRevision || 0) > (data.player.moveRevision || 0)) {
+        data.player = snapshot.value.player
+      }
     }
     snapshot.value = data
     loaded.value = true
     connected.value = true
     // 地图版本变化才重拉瓦片载荷
     const version = data.map?.version ?? null
-    if (!mapData.value || mapData.value.version !== version) {
+    if (!data.map) mapData.value = null
+    else if (!mapData.value || mapData.value.id !== data.map.id || mapData.value.version !== version) {
       fetchMap(version).catch(() => {})
     }
     return data
   }
 
   /** 拉取瓦片地图载荷（layers + assets） */
+  let _mapRequest = 0, _assetRequest = 0
+  const worldKey = () => JSON.stringify([snapshot.value?.worldId, snapshot.value?.worldEpoch])
   async function fetchMap(expectVersion = undefined) {
-    if (mapLoading.value) return mapData.value
+    const request = ++_mapRequest, scope = worldKey()
     mapLoading.value = true
     try {
       const data = await api.fetchTownMap()
+      if (request !== _mapRequest || scope !== worldKey()) return mapData.value
       if (expectVersion !== undefined && data && data.version !== expectVersion) {
         // 拉到的版本和快照不一致：仍接受最新数据，下次快照对齐
         console.warn('[town] map version drift:', data.version, 'vs', expectVersion)
@@ -144,12 +194,14 @@ export const useTownStore = defineStore('town', () => {
       mapData.value = data
       return data
     } finally {
-      mapLoading.value = false
+      if (request === _mapRequest) mapLoading.value = false
     }
   }
 
   async function fetchAssets(kind = null) {
+    const request = ++_assetRequest, scope = worldKey()
     const data = await api.fetchTownAssets(kind)
+    if (request !== _assetRequest || scope !== worldKey()) return assets.value
     assets.value = data.assets || []
     return assets.value
   }
@@ -176,31 +228,47 @@ export const useTownStore = defineStore('town', () => {
     if (_agentSpriteRefreshTimer) return
     _agentSpriteRefreshTimer = setTimeout(() => {
       _agentSpriteRefreshTimer = null
-      fetchState().catch(() => {})
+      if (_refs > 0) fetchState().catch(() => {})
     }, 120)
   }
 
+  let _initRequest = 0, _previewRequest = 0
   async function fetchInitState() {
-    initState.value = await api.fetchTownInitState()
+    const request = ++_initRequest, scope = worldKey()
+    const data = await api.fetchTownInitState()
+    if (request !== _initRequest || scope !== worldKey()) return initState.value
+    initState.value = data
     return initState.value
   }
 
   async function refreshDraftPreview() {
+    const request = ++_previewRequest, scope = worldKey()
     const data = await api.fetchTownInitPreview()
+    if (request !== _previewRequest || scope !== worldKey()) return draftPreview.value
     draftPreview.value = data
     return data
   }
 
   function clearDraftPreview() {
+    ++_previewRequest
+    ++_initRequest
     draftPreview.value = null
   }
 
   async function movePlayer(x, y) {
-    return api.moveTownPlayer(x, y)
+    const { worldId, worldEpoch } = snapshot.value || {}
+    if (typeof worldId !== 'string' || !worldId.trim() || !Number.isSafeInteger(worldEpoch) || worldEpoch < 1) {
+      throw Object.assign(new Error('请等待小镇加载后再移动'), { code: 'INVALID_WORLD_SCOPE' })
+    }
+    return api.moveTownPlayer(x, y, { worldId, worldEpoch })
   }
 
   async function movePlayerDir(dx, dy) {
-    return api.moveTownPlayerDir(dx, dy)
+    const { worldId, worldEpoch } = snapshot.value || {}
+    if (typeof worldId !== 'string' || !worldId.trim() || !Number.isSafeInteger(worldEpoch) || worldEpoch < 1) {
+      throw Object.assign(new Error('请等待小镇加载后再移动'), { code: 'INVALID_WORLD_SCOPE' })
+    }
+    return api.moveTownPlayerDir(dx, dy, { worldId, worldEpoch })
   }
 
   // ── SSE 订阅（引用计数，TownView 挂载期间保持连接） ──
@@ -216,16 +284,27 @@ export const useTownStore = defineStore('town', () => {
         connected.value = true
         fetchState().catch(() => {})
       }),
-      onEvent('town_ping', () => { connected.value = true }),
+      onEvent('town_ping', (data) => {
+        if (_refs <= 0 || typeof data?.serverTime !== 'number' || !Number.isFinite(data.serverTime)) return
+        const now = Date.now(), elapsed = now - _lastStateRefreshAt
+        connected.value = true
+        serverOffset.value = data.serverTime - now
+        // Legacy ticks only ping. Reuse the shared debounce, bounded to one
+        // ping-triggered read per minute; ordinary state notifications bypass it.
+        if (elapsed < 0 || elapsed >= 60_000) _scheduleAgentSpriteRefresh()
+      }),
+      onEvent('town_state_updated', () => _scheduleAgentSpriteRefresh()),
       onEvent('town_move', _applyMove),
       onEvent('town_bubble', _applyBubble),
       onEvent('town_encounter_start', _applyEncounterStart),
       onEvent('town_encounter_end', _applyEncounterEnd),
-      onEvent('town_map_updated', () => {
+      onEvent('town_map_updated', (d) => {
+        if (!_acceptWorldEvent(d)) return
         fetchState().catch(() => {})
         fetchMap().catch(() => {})
       }),
       onEvent('town_assets_updated', (d) => {
+        if (!_acceptWorldEvent(d)) return
         _applyAssetUpdate(d)
         // 素材更新影响地图渲染贴图
         if (mapData.value?.assets) {
@@ -249,6 +328,13 @@ export const useTownStore = defineStore('town', () => {
   function stopTownStream() {
     _refs = Math.max(0, _refs - 1)
     if (_refs > 0) return
+    ++_stateRequest
+    ++_mapRequest
+    ++_assetRequest
+    ++_initRequest
+    ++_previewRequest
+    _agentMoveGenerations.clear()
+    mapLoading.value = false
     while (_unsubs.length) _unsubs.pop()()
     if (_agentSpriteRefreshTimer) {
       clearTimeout(_agentSpriteRefreshTimer)

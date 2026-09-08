@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Town view integration fixture</title><div id="app"></div>
+<script type="module">
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import TownView from '../src/views/TownView.vue'
+import { useTownStore } from '../src/stores/town.js'
+localStorage.setItem('town.renderer', 'canvas')
+const pinia = createPinia(), app = createApp(TownView).use(pinia)
+app.mount('#app')
+window.fixture = { town: useTownStore(pinia), unmount: () => app.unmount() }
+</script>
+<style>html,body,#app{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui;color:#74665a;background:#f4f1ee;--accent:#c66c5c;--text-primary:#74665a;--text-secondary:#8c8074;--bg-primary:#f4f1ee;--bg-secondary:#fffaf5}#app{position:relative}</style></html>

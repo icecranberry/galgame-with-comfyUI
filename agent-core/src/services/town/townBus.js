@@ -12,21 +12,24 @@
  *   town_assets_updated  {asset|deleted}                          → 素材生成完成/失败/删除
  */
 import { broadcast } from '../unifiedStreamBus.js';
+let worldScope = {};
+export function setTownBusScope({ worldId, epoch }) { worldScope = { worldId, worldEpoch: epoch }; }
+export function broadcastTownStateUpdated(payload) { broadcast('town_state_updated', { ...worldScope, ...payload }); }
 
 export function broadcastTownMove({ charId, from, path, speed, startedAt, revision }) {
-  broadcast('town_move', { charId, from, path, speed, startedAt, ...(revision != null ? { revision } : {}) });
+  broadcast('town_move', { ...worldScope, charId, from, path, speed, startedAt, ...(revision != null ? { revision } : {}) });
 }
 
 export function broadcastTownBubble({ charId, encounterId = null, text, ttl }) {
-  broadcast('town_bubble', { charId, encounterId, text, ttl });
+  broadcast('town_bubble', { ...worldScope, charId, encounterId, text, ttl });
 }
 
 export function broadcastTownEncounterStart(payload) {
-  broadcast('town_encounter_start', payload);
+  broadcast('town_encounter_start', { ...worldScope, ...payload });
 }
 
 export function broadcastTownEncounterEnd(payload) {
-  broadcast('town_encounter_end', payload);
+  broadcast('town_encounter_end', { ...worldScope, ...payload });
 }
 
 export function broadcastTownPing() {
@@ -38,9 +41,9 @@ export function broadcastTownInitProgress(payload) {
 }
 
 export function broadcastTownMapUpdated(payload) {
-  broadcast('town_map_updated', payload);
+  broadcast('town_map_updated', { ...worldScope, ...payload });
 }
 
 export function broadcastTownAssetsUpdated(payload) {
-  broadcast('town_assets_updated', payload);
+  broadcast('town_assets_updated', { ...worldScope, ...payload });
 }

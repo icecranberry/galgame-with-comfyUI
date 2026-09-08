@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workshop fixture</title><div id="app"></div><script type="module">
+import { createApp, h, ref } from 'vue'
+import TownWorkshopService from '../src/components/town/TownWorkshopService.vue'
+import LinsheButton from '../src/components/ui/LinsheButton.vue'
+const open = ref(true), epoch = ref(1), sessionId = ref(null)
+window.fixture = { open, epoch, sessionId, keys: 0 }
+window.addEventListener('keydown', () => fixture.keys++)
+createApp({ setup: () => () => h('main', [
+  h(LinsheButton, { onClick: () => { open.value = true } }, () => '打开工坊'),
+  open.value ? h(TownWorkshopService, { worldId: 'fixture', worldEpoch: epoch.value, sessionId: sessionId.value, providerName: '木木', onClose: () => { open.value = false } }) : null,
+]) }).mount('#app')
+</script><style>:root{--accent:#e07b6c;--accent-hover:#cc6a5c;--accent-light:#f0a89a;--danger:#e25c5c;--text-secondary:#8c8074;--text-bright:#111;--border:#e0dcd6}body{margin:0;background:#e8e4dc;font-family:system-ui}main{padding:24px}</style></html>

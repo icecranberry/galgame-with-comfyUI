@@ -1,0 +1,6 @@
+<!doctype html><html><meta charset="utf-8"><script type="module">
+import {createPinia} from 'pinia'
+import {useTownStore} from '../src/stores/town.js'
+import {__fixtureDispatch} from '../src/stores/unifiedStream.js'
+window.fixture={town:useTownStore(createPinia()),event:__fixtureDispatch}
+</script></html>

@@ -15,6 +15,7 @@
  *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}
  */
 import { Router } from 'express';
+import { getDb } from '../db/index.js';
 import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
   setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
@@ -26,6 +27,11 @@ import {
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
+import { getTownWallet, getTownActorActivities, getTownEconomyState, setupTownEconomy, executeTownOrder, maintainTownOrders, executeTownService, getTownService } from '../services/town/townEconomyRuntime.js';
+import { getTownAppointments, executeTownAppointment } from '../services/town/townEconomyRuntime.js';
+import { getTownDeliveryDiagnostics, retryTownDelivery } from '../services/town/townEconomyRuntime.js';
+import { getTownLiquidityStatus } from '../services/town/townEconomyRuntime.js';
+import { getTownMailboxTaskCards } from '../services/town/townEconomyRuntime.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
@@ -48,7 +54,23 @@ router.get('/state', (req, res) => {
   res.json(getTownState());
 });
 
+function checkMovementScope(body, res) {
+  if (!Object.hasOwn(body, 'worldId') && !Object.hasOwn(body, 'worldEpoch')) return true;
+  if (typeof body.worldId !== 'string' || !body.worldId.trim()
+    || !Number.isSafeInteger(body.worldEpoch) || body.worldEpoch < 1) {
+    res.status(400).json({ code: 'INVALID_WORLD_SCOPE', error: '小镇范围参数无效' });
+    return false;
+  }
+  const world = getDb().prepare('SELECT world_id, epoch FROM town_world_state WHERE singleton = 1').get();
+  if (!world || world.world_id !== body.worldId || world.epoch !== body.worldEpoch) {
+    res.status(409).json({ code: 'STALE_WORLD', error: '小镇已变化，请刷新后再移动' });
+    return false;
+  }
+  return true;
+}
+
 router.post('/player/move', (req, res) => {
+  if (!checkMovementScope(req.body || {}, res)) return;
   const { x, y } = req.body || {};
   const result = movePlayerTo(x, y);
   if (!result.ok) return res.status(400).json({ error: result.error });
@@ -56,6 +78,7 @@ router.post('/player/move', (req, res) => {
 });
 
 router.post('/player/dir', (req, res) => {
+  if (!checkMovementScope(req.body || {}, res)) return;
   const { dx, dy } = req.body || {};
   const result = movePlayerDir(parseInt(dx, 10) || 0, parseInt(dy, 10) || 0);
   if (!result.ok) return res.status(400).json({ error: result.error });
@@ -109,6 +132,142 @@ router.patch('/assets/:id/generation', (req, res) => {
   } catch (err) {
     res.status(err?.message?.includes('not found') ? 404 : 400).json({ error: err?.message || '保存生成配置失败' });
   }
+});
+
+router.get('/wallet', (req, res) => {
+  try { res.json(getTownWallet()); }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+const townCommandMessages = {
+  LIQUIDITY_ACTIVATION_RESERVE_REQUIRED: '公共基金至少需要 60 邻币可用准备金，暂不能开启保障',
+  LIQUIDITY_RESERVE_REQUIRED: '公共基金准备金不足，暂不能发布新的委托',
+  LIQUIDITY_CLOCK_ROLLBACK: '系统时间回拨，基金保障暂时暂停',
+  LIQUIDITY_COOLDOWN: '公共基金补助尚在冷却，请稍后再来',
+  LIQUIDITY_CAP: '公共基金补助已达到本期或本镇额度上限',
+  LIQUIDITY_CIRCULATION_CAP: '小镇流通邻币已达到保障政策上限',
+  SCHEDULE_UNAVAILABLE: '这段时间与原日程冲突，请选择其他时间',
+  APPOINTMENT_CONFLICT: '这段时间已有预约，请选择其他时间',
+  INVALID_APPOINTMENT_TIME: '请选择有效期内的未来时间，并预留完整的三十分钟',
+  PROVIDER_NOT_LINKED: '这位居民尚未成为入住角色，暂时不能预约回访',
+  CANDIDATE_NOT_FOUND: '回访邀请不存在，请重新读取',
+  CANDIDATE_EXPIRED: '这份回访邀请已过期',
+  CANDIDATE_CLOSED: '这份回访邀请已处理，请重新读取',
+  APPOINTMENT_NOT_FOUND: '预约不存在，请重新读取',
+  APPOINTMENT_CLOSED: '这次预约已结束，请重新读取',
+  APPOINTMENT_NOT_OWNED: '这次预约不属于当前玩家',
+  SERVICE_NOT_OPEN: '工坊目前未营业，请稍后再来',
+  SERVICE_LOCKED: '工坊完成一次真实备料后，才能提供这项服务',
+  INVALID_SERVICE_KEY: '请选择当前提供的工坊服务',
+  INVALID_SERVICE_DEFINITION: '这份服务记录暂时无法确认，请重新读取工坊状态',
+  SERVICE_ACTOR_BUSY: '居民正在忙于其他事情，请稍后再来',
+  SESSION_NOT_OWNED: '这次服务不属于当前玩家，请重新读取',
+  SESSION_NOT_FOUND: '服务记录不存在，请重新读取',
+  SESSION_STATE_CONFLICT: '服务状态已变化，请重新读取',
+  INVALID_SERVICE_INTENT: '当前阶段已变化，请重新选择',
+  INVALID_SERVICE_INPUT: '服务输入无效，请检查后重试',
+  SESSION_BUSY: '服务正在处理中，请稍后重新读取',
+  SESSION_CLOSED: '这次服务已结束，请查看结算记录',
+  OFFER_EXPIRED: '这份报价已过期，请重新查看',
+  NOT_ARRIVED: '请走到委托要求的地点，停下后再试',
+  INSUFFICIENT_FUNDS: '可用邻币不足，暂时无法完成这项操作',
+  INSUFFICIENT_STOCK: '原料暂时不足，请稍后再来',
+  ORDER_EXPIRED: '这份委托已到期，请刷新查看',
+  VERSION_CONFLICT: '状态已变化，请刷新后重试',
+  IDEMPOTENCY_CONFLICT: '这次请求内容已变化，请刷新后重试',
+  SOURCE_CONFLICT: '这项操作已有记录，请刷新查看',
+  SLICE_NOT_CONFIGURED: '请先选择委托的居民和地点',
+  SLICE_CONFLICT: '当前小镇已配置委托地点，重建后才能重新选择',
+  ACTOR_UNAVAILABLE: '居民目前不在镇上，请重新选择',
+  LOCATION_UNAVAILABLE: '地点已变化，请刷新后重试',
+  INVALID_SLICE: '请选择三位不同的居民和三个不同的地点',
+};
+function sendTownCommandError(res, err) {
+  const message = townCommandMessages[err.code] || err.message || '操作未完成';
+  res.status(err.status || (err.code ? 409 : 500)).json({ error: message, code: err.code });
+}
+
+router.get('/economy', (req, res) => {
+  try { maintainTownOrders(); res.json(getTownEconomyState()); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/liquidity', (req, res) => {
+  try { res.json(getTownLiquidityStatus()); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/mailbox-tasks', (req, res) => {
+  let cursor = null;
+  if (req.query.cursor != null) {
+    try { cursor = JSON.parse(req.query.cursor); }
+    catch { return res.status(400).json({ error: '分页位置无效，请重新读取委托。', code: 'INVALID_PAGE' }); }
+  }
+  try { res.json(getTownMailboxTaskCards({ cursor, limit: req.query.limit == null ? 10 : Number(req.query.limit) })); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/appointments', (req, res) => {
+  try { res.json(getTownAppointments()); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/deliveries', (req, res) => {
+  try {
+    const cursor = req.query.cursorSeq == null && req.query.cursorConsumer == null ? null
+      : { seq: Number(req.query.cursorSeq), consumerKey: req.query.cursorConsumer };
+    res.json(getTownDeliveryDiagnostics({ cursor, limit: req.query.limit == null ? 20 : Number(req.query.limit) }));
+  } catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/deliveries/retry', (req, res) => {
+  try { res.json(retryTownDelivery(req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/appointments/candidates/:id/accept', (req, res) => {
+  try { res.json(executeTownAppointment('accept', req.params.id, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/appointments/:id/cancel', (req, res) => {
+  try { res.json(executeTownAppointment('cancel', req.params.id, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/economy/setup', (req, res) => {
+  try { res.json(setupTownEconomy(req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/orders', (req, res) => {
+  try { maintainTownOrders(); res.json({ orders: getTownEconomyState().orders }); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/orders/publish', (req, res) => {
+  try { res.json(executeTownOrder('publish', null, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+for (const command of ['accept', 'pickup', 'complete', 'cancel']) {
+  router.post(`/orders/:id/${command}`, (req, res) => {
+    try { res.json(executeTownOrder(command, req.params.id, req.body || {})); }
+    catch (err) { sendTownCommandError(res, err); }
+  });
+}
+
+router.post('/services/offer', async (req, res) => {
+  try { res.json(await executeTownService('offer', null, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/services/:id', (req, res) => {
+  try { res.json(getTownService(req.params.id)); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+for (const command of ['accept', 'turn', 'cancel']) {
+  router.post(`/services/:id/${command}`, async (req, res) => {
+    try { res.json(await executeTownService(command, req.params.id, req.body || {})); }
+    catch (err) { sendTownCommandError(res, err); }
+  });
+}
+
+router.get('/actors/:id/activities', (req, res) => {
+  try {
+    res.json(getTownActorActivities(req.params.id, {
+      cursor: req.query.cursor === undefined ? 0 : Number(req.query.cursor),
+      limit: req.query.limit === undefined ? 20 : Number(req.query.limit),
+    }));
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 router.post('/assets/:id/regenerate-prompt', async (req, res) => {
   try {
@@ -178,11 +337,11 @@ router.get('/map', (req, res) => {
 
 router.put('/map', (req, res) => {
   try {
-    const { name, cols, rows, tileSize, layers } = req.body || {};
+    const { name, cols, rows, tileSize, layers, locations } = req.body || {};
     if (!layers || !Number.isInteger(cols) || !Number.isInteger(rows)) {
       return res.status(400).json({ error: 'layers/cols/rows 必填' });
     }
-    const result = saveMap({ name, cols, rows, tileSize, layers });
+    const result = saveMap({ name, cols, rows, tileSize, layers, locations });
     reloadTown();
     res.json(result);
   } catch (err) {
@@ -323,8 +482,9 @@ router.delete('/npcs/:id', (req, res) => {
 
 router.post('/npcs/:id/sprites', async (req, res) => {
   try {
-    res.json(await generateNpcSprites(parseInt(req.params.id, 10), req.body || {}));
+    res.json(await generateNpcSprites(parseInt(req.params.id, 10), { ...(req.body || {}), refreshAppearance: req.body?.refreshAppearance === true }));
   } catch (err) {
+    if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
     res.status(500).json({ error: err?.message || '精灵生成失败' });
   }
 });
@@ -377,11 +537,15 @@ router.get('/npcs/:id/messages', (req, res) => {
 
 router.post('/npcs/:id/chat', async (req, res) => {
   try {
-    const { message } = req.body || {};
-    if (!message || !String(message).trim()) return res.status(400).json({ error: '说点什么吧' });
-    res.json(await chatWithNpc(parseInt(req.params.id, 10), String(message).trim()));
+    const { message, clientMessageId, worldId, worldEpoch } = req.body || {};
+    if (typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: '说点什么吧' });
+    if (clientMessageId != null && (typeof clientMessageId !== 'string' || !clientMessageId.trim() || clientMessageId.length > 128)) {
+      return res.status(400).json({ error: '消息标识无效' });
+    }
+    res.json(await chatWithNpc(parseInt(req.params.id, 10), message.trim(), { clientMessageId, worldId, worldEpoch }));
   } catch (err) {
-    res.status(500).json({ error: err?.message || '对方暂时没有回应' });
+    const conflict = ['STALE_WORLD', 'NPC_BUSY', 'DIALOGUE_PAYLOAD_CONFLICT'].includes(err.code);
+    res.status(err.status || (conflict ? 409 : 500)).json({ error: err?.message || '对方暂时没有回应', code: err.code, requestId: err.requestId, characterId: err.characterId });
   }
 });
 
@@ -404,8 +568,9 @@ router.post('/characters/:id/sprites', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-    res.json(await generateCharacterSprites(id));
+    res.json(await generateCharacterSprites(id, { refreshAppearance: req.body?.refreshAppearance === true }));
   } catch (err) {
+    if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
     res.status(500).json({ error: err?.message || '精灵生成失败' });
   }
 });
@@ -417,7 +582,13 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  res.json(updateTownSettings(req.body || {}));
+  try { res.json(updateTownSettings(req.body || {})); }
+  catch (err) {
+    if (String(err.code || '').startsWith('SQLITE_')) {
+      return res.status(500).json({ error: '设置未能保存，请稍后重试。当前设置保持不变。', code: 'SETTINGS_SAVE_FAILED' });
+    }
+    sendTownCommandError(res, err);
+  }
 });
 
 // 管理面板：复用素材与居民重新生成布局

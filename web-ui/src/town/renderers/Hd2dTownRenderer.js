@@ -10,6 +10,8 @@ import { imageFootV } from './imageAlpha.js'
 import { roadEdges } from './terrainEdges.js'
 import { daylightLook, townMaterial, makeContactShadow, buildingShadowGeometry } from './sceneLook.js'
 import { deriveGroundImage, GROUND_DERIVATIVE_VERSION } from './groundTexture.js'
+import { createBuildingVolume, setBuildingVolumeNight } from './buildingVolumeGeometry.js'
+import { setBuildingOcclusion, volumeOccludesAgent } from './interactionOcclusion.js'
 
 export function configureCamera(camera, state, width, height) {
   const target = isoToGround(state.x, state.y)
@@ -23,6 +25,7 @@ export function configureCamera(camera, state, width, height) {
 }
 
 function freeMesh(mesh) {
+  for (const child of [...mesh.children]) freeMesh(child)
   if (mesh.userData.projectedShadow) freeMesh(mesh.userData.projectedShadow)
   if (mesh.userData.contact) freeMesh(mesh.userData.contact)
   if (mesh.userData.shadowProxy) freeMesh(mesh.userData.shadowProxy)
@@ -64,7 +67,7 @@ export class Hd2dTownRenderer {
     this.tiltPass = new TiltShiftPass()
     this.composer.addPass(this.tiltPass)
     this.composer.addPass(new OutputPass())
-    this.contextLost = event => { event.preventDefault(); this.onFailure?.('显卡连接中断，已切换为兼容画面') }
+    this.contextLost = event => { event.preventDefault(); this.onFailure?.('显卡连接中断，HD2D 已停止') }
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLost)
   }
   mount(container) {
@@ -159,7 +162,8 @@ export class Hd2dTownRenderer {
     for (const [index, obj] of (m?.layers?.objects || []).entries()) {
       const key = obj.id ?? index; objectKeys.add(key)
       const dto = adaptObject(obj, assets.get(obj.assetId))
-      this.updateCard(this.objects, key, dto, false)
+      if (dto.volume) this.updateVolume(key, dto)
+      else this.updateCard(this.objects, key, dto, false)
     }
     for (const [key, mesh] of this.objects) if (!objectKeys.has(key)) { freeMesh(mesh); this.objects.delete(key) }
     const edges = roadEdges(m)
@@ -195,6 +199,20 @@ export class Hd2dTownRenderer {
     mesh.instanceMatrix.needsUpdate = true; mesh.receiveShadow = true
     mesh.userData.signature = signature; this.scene.add(mesh); this.surroundings = mesh
   }
+  updateVolume(key, dto) {
+    const entries = Object.fromEntries(Object.entries(dto.volume.textures).map(([face, url]) => [face, this.texture(url, dto.render.textureFilter)]))
+    const signature = JSON.stringify([dto.volume, dto.render.alphaCutoff, dto.render.textureFilter, Object.values(entries).map(e => !!e?.ready)])
+    let group = this.objects.get(key)
+    if (group?.userData.signature !== signature || !group.userData.volume) {
+      if (group) freeMesh(group)
+      group = createBuildingVolume(dto.volume, entries, dto.render.alphaCutoff)
+      group.userData.signature = signature
+      this.objects.set(key, group); this.scene.add(group)
+    }
+    group.userData.dto = dto
+    group.traverse(child => { if (child.isMesh) { child.userData.dto = dto; child.userData.volumePart = true } })
+    return group
+  }
   updateCard(collection, key, dto, isAgent) {
     const meta = isAgent ? { alphaCutoff: 0.3, textureFilter: 'linear', anchor: { u: 0.5, v: 1 } } : dto.render
     const materialKind = isAgent ? 'agent' : dto.asset?.kind === 'building' ? 'building' : /lamp|灯/.test(`${dto.asset?.key || ''} ${dto.asset?.name || ''}`) ? 'lamp' : 'prop'
@@ -204,7 +222,7 @@ export class Hd2dTownRenderer {
     let mesh = collection.get(key)
     if (mesh && mesh.userData.materialKind !== materialKind) { freeMesh(mesh); collection.delete(key); mesh = null }
     if (!mesh) {
-      mesh = new T.Mesh(new T.PlaneGeometry(1, 1), townMaterial(materialKind, { side: T.DoubleSide, alphaTest: meta.alphaCutoff, transparent: true, depthTest: false, depthWrite: true }))
+      mesh = new T.Mesh(new T.PlaneGeometry(1, 1), townMaterial(materialKind, { side: T.DoubleSide, forceSinglePass: true, alphaTest: meta.alphaCutoff, transparent: true, depthTest: false, depthWrite: true }))
       mesh.customDepthMaterial = new T.MeshDepthMaterial({ depthPacking: T.RGBADepthPacking, side: T.DoubleSide, alphaTest: meta.alphaCutoff })
       mesh.rotation.y = Math.PI / 4
       mesh.castShadow = true; mesh.receiveShadow = true
@@ -270,7 +288,7 @@ export class Hd2dTownRenderer {
     const fp = dto.asset?.meta?.footprint
     if (!isAgent && materialKind !== 'building' && meta.shadowMode !== 'volume') {
       if (!projectedShadow) {
-        projectedShadow = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ color: '#26352b', transparent: true, opacity: .52, depthWrite: false, side: T.DoubleSide, alphaTest: .05, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
+        projectedShadow = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ color: '#26352b', transparent: true, opacity: .52, depthWrite: false, side: T.DoubleSide, forceSinglePass: true, alphaTest: .05, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
         // Sample only source alpha: painted greens/flowers must not tint the shadow.
         projectedShadow.material.onBeforeCompile = shader => {
           shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = vec3(.028,.045,.033);')
@@ -338,10 +356,15 @@ export class Hd2dTownRenderer {
     this.scene.updateMatrixWorld(true)
     this.ray.setFromCamera(new T.Vector2(point.x / this.width * 2 - 1, 1 - point.y / this.height * 2), this.camera)
     if (!groundOnly) {
-      const hits = this.ray.intersectObjects([...this.agents.values(), ...(agentsOnly ? [] : this.objects.values())], false)
+      const hits = this.ray.intersectObjects([...this.agents.values(), ...(agentsOnly ? [] : this.objects.values())], true)
       hits.sort((a, b) => b.object.renderOrder - a.object.renderOrder || a.distance - b.distance)
-      for (const hit of hits) {
-        if (!this.alphaHit(hit)) continue
+      const card = hits.find(hit => !hit.object.userData.volumePart && !hit.object.userData.pickIgnore && this.alphaHit(hit))
+      // Legacy cards retain painter-order picking. Real surfaces depth-test
+      // against that visible card, so a foreground resident wins over a wall.
+      const volume = hits.filter(hit => hit.object.userData.volumePart && !hit.object.userData.pickIgnore)
+        .sort((a, b) => a.distance - b.distance).find(hit => this.alphaHit(hit))
+      const hit = volume && (!card || volume.distance < card.distance) ? volume : card
+      if (hit) {
         return hit.object.userData.isAgent ? { kind: 'agent', agent: hit.object.userData.dto.agent } : { kind: 'object', object: hit.object.userData.dto }
       }
     }
@@ -365,21 +388,34 @@ export class Hd2dTownRenderer {
     const y = Math.max(0, Math.min(height - 1, Math.floor((1 - hit.uv.y) * height)))
     return data[(y * width + x) * 4 + 3] / 255 >= hit.object.material.alphaTest
   }
-  render(weather, focusPoints = []) {
+  render(weather, focusPoints = [], { interactionActorKeys } = {}) {
     if (this.disposed) return
     this.frame = (this.frame || 0) + 1
     if (this.sceneDirty) this.syncScene()
     // Painter order follows ground anchors, never head height or walking bob.
     const cards = sortCards([...this.objects.values(), ...this.agents.values()])
-    cards.forEach((mesh, index) => { mesh.renderOrder = 100 + index })
+    cards.forEach((mesh, index) => {
+      mesh.renderOrder = 100 + index
+      if (mesh.userData.volume) mesh.traverse(child => { child.renderOrder = mesh.renderOrder })
+      else {
+        // Disabled depth testing also disables depth writes in WebGL. ALWAYS
+        // preserves painter order while recording actual alpha/coverage depth
+        // for both DOF and volume surfaces, including card-only scenes.
+        mesh.material.depthTest = true
+        mesh.material.depthFunc = T.AlwaysDepth
+      }
+    })
+    const subjects = [...this.agents.values()]
     for (const building of this.objects.values()) {
-      const hidden = building.userData.materialKind === 'building' && [...this.agents.values()].some(agent => cardOccludesAgent(building, agent, this.camera))
-      building.material.userData.townFade.value = hidden ? .32 : 1
-      building.userData.occluding = hidden
+      const hidden = subjects.some(agent => building.userData.volume
+        ? volumeOccludesAgent(building, agent, this.camera, hit => this.alphaHit(hit))
+        : building.userData.materialKind === 'building' && cardOccludesAgent(building, agent, this.camera))
+      setBuildingOcclusion(building, hidden)
     }
     const hour = weather?.hour ?? new Date().getHours()
     const rain = /雨|阴|雪/.test(weather?.text || '')
     const look = daylightLook(hour, rain)
+    for (const building of this.objects.values()) if (building.userData.volume) setBuildingVolumeNight(building, look.night)
     const target = this.cameraState ? isoToGround(this.cameraState.x, this.cameraState.y) : { x: 8, z: 8 }
     // Shadow texels follow the visible streets instead of spreading over the entire map.
     const tx = Math.round(target.x * 4) / 4, tz = Math.round(target.z * 4) / 4
@@ -417,7 +453,10 @@ export class Hd2dTownRenderer {
     this.composer.render()
     // Evict textures no longer referenced by any mesh (including regenerated URLs).
     if (this.frame % 120 === 0) {
-      const used = new Set([...(this.surroundings ? [this.surroundings] : []), ...this.chunks.values(), ...this.objects.values(), ...this.agents.values()].map(m => m.material.map))
+      const used = new Set()
+      for (const root of [...(this.surroundings ? [this.surroundings] : []), ...this.chunks.values(), ...this.objects.values(), ...this.agents.values()]) {
+        root.traverse(mesh => { if (mesh.material?.map) used.add(mesh.material.map) })
+      }
       for (const [key, entry] of this.textures) if ((entry.ready || entry.failed) && !used.has(entry.texture) && this.frame - entry.used > 120) {
         entry.texture.dispose(); this.textures.delete(key)
       }

@@ -1,0 +1,22 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mailbox town integration fixture</title><div id="app"></div>
+<script type="module">
+import { createApp, h, computed } from 'vue'
+import { createPinia } from 'pinia'
+import { createRouter, createMemoryHistory, RouterView } from 'vue-router'
+import MailboxView from '../src/views/MailboxView.vue'
+import TownView from '../src/views/TownView.vue'
+import { useTownStore } from '../src/stores/town.js'
+localStorage.setItem('town.renderer', 'canvas')
+const router = createRouter({ history: createMemoryHistory(), routes: [
+  { path: '/mailbox', component: MailboxView },
+  { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
+  { path: '/empty', component: { render: () => h('div', '已离开信箱') } },
+] })
+const pinia = createPinia()
+await router.push('/mailbox')
+const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router)
+app.provide('isMobile', computed(() => innerWidth <= 600))
+app.mount('#app')
+window.fixture = { router, town: useTownStore(pinia), unmount: () => app.unmount() }
+</script>
+<style>html,body,#app{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui;color:#74665a;background:#f4f1ee;--accent:#c66c5c;--accent-hover:#b85f50;--text-primary:#74665a;--text-secondary:#8c8074;--bg-primary:#f4f1ee;--bg-secondary:#fffaf5;--border:#e0dcd6}#app{position:relative}*{box-sizing:border-box}</style></html>

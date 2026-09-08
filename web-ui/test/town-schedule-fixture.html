@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>日程回访验证</title><div id="app"></div><script type="module">
+import { createApp, ref, h, watch } from 'vue'
+import { createPinia } from 'pinia'
+import { useScheduleStore } from '../src/stores/schedule.js'
+import { __fixtureDispatch } from '../src/stores/unifiedStream.js'
+import CharacterDetailDrawer from '../src/components/CharacterDetailDrawer.vue'
+const app = createApp({ setup() {
+  const store = useScheduleStore(), open = ref(true), id = ref(1), activities = ref([]), loading = ref(false), baseError = ref('')
+  let selection = 0
+  watch([open, id], async () => {
+    store.selectTownOverlayCharacter(open.value ? id.value : null)
+    const token = ++selection
+    if (!open.value) return
+    activities.value = []; loading.value = true; baseError.value = ''
+    try { const data = await store.fetchCharacterSchedule(id.value); if (token === selection) activities.value = data.activities || [] }
+    catch (e) { if (token === selection) baseError.value = e.message }
+    finally { if (token === selection) loading.value = false }
+  }, { immediate: true })
+  window.fixture = { open, id, store, world: scope => __fixtureDispatch('town_state_updated', scope), peek: null }
+  return () => h('main', [h('p', { 'data-base-error': true }, baseError.value), h(CharacterDetailDrawer, {
+    open: open.value, char: { id: id.value, display_name: `居民${id.value}` }, activities: activities.value, loading: loading.value, peekBusy: false,
+    townOverlays: store.townOverlays, overlaysLoading: store.townOverlaysLoading, overlaysError: store.townOverlaysError,
+    onRefreshOverlays: () => store.refreshTownOverlays(), onClose: () => open.value = false, onPeek: () => fixture.peek = activities.value.find(a => a.isCurrent), onPeekAt: act => fixture.peek = act,
+  })])
+} }); app.use(createPinia()); app.mount('#app')
+</script><style>:root{--accent:#e07b6c;--accent-hover:#cc6a5c;--accent-light:#f0a89a;--text-primary:#74665a;--text-secondary:#8c8074;--text-bright:#463b33;--border:#e0dcd6}body{margin:0;font-family:system-ui,sans-serif;background:#e8e4dc;color:#74665a}</style></html>

@@ -7,6 +7,23 @@ import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
 import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
 import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { migrateTownSchema } from './townSchema.js';
+import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
+import { migrateTownActionSchema } from './townActionSchema.js';
+import { ensureTownDialogueSchema } from './townDialogueSchema.js';
+import { migrateTownEconomySchema } from './townEconomySchema.js';
+import { migrateTownBusinessSchema } from './townBusinessSchema.js';
+import { migrateTownServiceSessionSchema } from './townServiceSessionSchema.js';
+import { migrateTownExperienceSchema } from './townExperienceSchema.js';
+import { migrateTownProductionSchema } from './townProductionSchema.js';
+import { migrateTownAppointmentSchema } from './townAppointmentSchema.js';
+import { migrateTownLiquidityPolicySchema } from './townLiquidityPolicySchema.js';
+import { migrateTownDeliveryDiagnosticsSchema } from '../services/town/townDeliveryDiagnostics.js';
+import { cleanupTownDialogueRequests } from '../services/town/townDialogueRequests.js';
+import { migrateTownItemSchema } from './townItemSchema.js';
+import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
+import { cleanupInterruptedChestItems } from '../services/itemLifecycle.js';
+import { migrateWeatherHourlySchema } from './weatherHourlySchema.js';
 
 let db;
 
@@ -20,8 +37,14 @@ export function getDb() {
     db = new Database(config.dbPath);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
-    initSchema(db);
-    cleanupOrphanedInFlight(db);
+    try {
+      initSchema(db);
+      cleanupOrphanedInFlight(db);
+    } catch (error) {
+      db.close();
+      db = undefined;
+      throw error;
+    }
   }
   return db;
 }
@@ -29,6 +52,7 @@ export function getDb() {
 // ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
 // moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
 function cleanupOrphanedInFlight(database) {
+  cleanupTownDialogueRequests(database);
   const tasks = [
     // 表名, 中断状态, 回收为（interrupted 后可重新生成的状态）
     ['character_emojis', `status = 'generating'`, `status = 'failed', error_message = '服务重启导致生成中断，请重新生成'`],
@@ -49,11 +73,8 @@ function cleanupOrphanedInFlight(database) {
 
   // 宝箱道具：中断的 generating 未完成图片，也不应占用冷却；直接清掉，允许下次重新开箱
   try {
-    const interruptedItems = database.prepare(
-      `SELECT COUNT(*) AS c FROM backpack_items WHERE status = 'generating'`
-    ).get().c;
+    const interruptedItems = cleanupInterruptedChestItems(database);
     if (interruptedItems > 0) {
-      database.prepare(`DELETE FROM backpack_items WHERE status = 'generating'`).run();
       console.log(`[db] 启动清理: backpack_items ${interruptedItems} 条中断生成任务已清理`);
     }
   } catch (err) {
@@ -786,6 +807,9 @@ function initSchema(db) {
     console.log('[db] idx_one_active_event skipped:', err.message);
   }
 
+  // 保留完整预报时间；历史天气缓存不推断日期或回填。
+  migrateWeatherHourlySchema(db);
+
   // 迁移: characters 表新增 next_moment_at 列
   migrateMomentsSchema(db);
 
@@ -802,6 +826,8 @@ function initSchema(db) {
   migrateEmotionSnapshotsUnique(db);
 
   // 迁移: 好感度回归系统 — user_relationships 加 last_interaction_at + gift_history 表
+  migrateTownItemSchema(db);
+  migrateTownItemTemplateSchema(db);
   migrateAffinityRegressionSchema(db);
 
   // 迁移: artist_favorites.artist 加 UNIQUE 约束（防止重复收藏）
@@ -876,6 +902,17 @@ function initSchema(db) {
 
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
+  migrateTownSchema(db);
+  migrateTownActionSchema(db);
+  ensureTownDialogueSchema(db);
+  migrateTownEconomySchema(db);
+  migrateTownBusinessSchema(db);
+  migrateTownServiceSessionSchema(db);
+  migrateTownExperienceSchema(db);
+  migrateTownProductionSchema(db);
+  migrateTownAppointmentSchema(db);
+  migrateTownLiquidityPolicySchema(db);
+  migrateTownDeliveryDiagnosticsSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
@@ -895,6 +932,8 @@ function initSchema(db) {
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
+  // 新存档 seed 会创建默认角色；首启就完成 actor 回填，避免第二次启动才补身份。
+  createTownActorRegistry(db).synchronize();
   // 种子: 表情类别（仅首次运行插入默认 15 类）
   seedEmojiCategories(db);
   migrateEmojiCategoriesV2(db);
@@ -1573,7 +1612,8 @@ function migrateAffinityRegressionSchema(db) {
         db.exec(`DROP TABLE gift_history`);
         db.exec(`ALTER TABLE gift_history_new RENAME TO gift_history`);
         // backpack_items 只由开箱写入，用最近一次开箱时间回填冷却（无开箱记录则不回填）
-        const lastItem = db.prepare(`SELECT MAX(acquired_at) AS acquired_at FROM backpack_items`).get();
+        const lastItem = db.prepare(`SELECT MAX(acquired_at) AS acquired_at FROM backpack_items
+          WHERE owner_key = 'me' AND source_type IN ('legacy_chest', 'chest')`).get();
         if (lastItem?.acquired_at) {
           db.prepare(`INSERT INTO gift_history (gift_type, created_at) VALUES ('chest', ?)`).run(lastItem.acquired_at);
         }

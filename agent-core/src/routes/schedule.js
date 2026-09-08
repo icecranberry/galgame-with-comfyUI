@@ -35,8 +35,37 @@ import { getTimeLightInline } from '../services/timeLight.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { processWakeUp } from '../services/wakeService.js';
 import { getLocalDateKey } from '../utils/localDate.js';
+import { createCharacterTownAppointments } from '../services/characterTownAppointments.js';
+import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 
 const router = Router();
+
+// Read-only commitments, separate from the existing daily-snapshot GET.
+router.get('/:characterId/overlays', (req, res) => {
+  const rawId = req.params.characterId;
+  const characterId = Number(rawId);
+  const rawLimit = req.query.limit;
+  const limit = rawLimit === undefined ? 20 : Number(rawLimit);
+  if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(characterId)
+      || (rawLimit !== undefined && (typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit)))
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    return res.status(400).json({ error: '角色或记录数量无效，请重新选择。', code: 'INVALID_OVERLAY_QUERY' });
+  }
+  try {
+    const db = getDb();
+    const registry = createTownActorRegistry(db);
+    const timeZone = config.town.timeZone || 'Asia/Shanghai';
+    if (config.features.town !== true) {
+      const world = registry.getWorldState();
+      return res.json({ worldId: world.worldId, worldEpoch: world.epoch, characterId, timeZone, appointments: [] });
+    }
+    const read = createCharacterTownAppointments({ db, registry, clock: { now: Date.now }, timeZone });
+    return res.json(read(characterId, { limit }));
+  } catch (err) {
+    console.error('[schedule] GET /:id/overlays error:', err.message);
+    return res.status(500).json({ error: '回访安排暂时无法读取，请稍后再试。', code: 'OVERLAY_READ_FAILED' });
+  }
+});
 
 // ── GET /api/schedule — 所有角色概览 ──
 
