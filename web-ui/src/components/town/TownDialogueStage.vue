@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 .td-portraits figure { pointer-events: auto; position: relative; align-self: stretch; margin: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
 .td-portraits figure:first-child { grid-column: 1; }
 .td-portraits figure:last-child { grid-column: 3; }
-.td-portraits img { min-height: 0; height: calc(100% - 30px); width: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
+.td-portraits img { min-height: 0; height: 75vh; width: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
 .td-portraits figcaption { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: #fffaf1; text-shadow: 0 1px 4px #302822; font-size: 14px; }
 .td-placeholder { background: #f4f1eeed; color: #947f6d; border-radius: 48px 48px 12px 12px; padding: 24px; font-size: 32px; }
 .td-panel { pointer-events: auto; position: relative; isolation: isolate; grid-column: 2; grid-row: 1; align-self: end; width: 100%; max-width: 540px; height: min(420px, 100%); min-height: 0; display: flex; flex-direction: column; box-sizing: border-box; padding: 27px 30px 30px; }

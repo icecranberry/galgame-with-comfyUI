@@ -13,11 +13,21 @@
 import { getDb } from '../../db/index.js';
 import { broadcastTownMapUpdated } from './townBus.js';
 
-/** 对象占用的阻挡格：建筑 = footprint 全格 - 门前格（朝向镜头的底角格）；blocking 道具 = 锚点 1 格 */
-export function getObjectBlockingCells(obj, assetMeta) {
+/** 对象占用的阻挡格：建筑 = footprint 全格 - 门前格；道具 = blocking 锚点，或有 footprintKind 时按全 footprint */
+export function getObjectBlockingCells(obj, assetMeta, assetKind = assetMeta?.kind) {
   const cells = [];
   const fp = assetMeta?.footprint;
   if (fp && fp.w > 0 && fp.h > 0) {
+    if (assetMeta.footprintKind === 'prop') {
+      if (assetMeta.blocking) {
+        for (let dy = 0; dy < fp.h; dy++) {
+          for (let dx = 0; dx < fp.w; dx++) {
+            cells.push({ x: obj.x + dx, y: obj.y - fp.h + 1 + dy });
+          }
+        }
+      }
+      return cells;
+    }
     const door = assetMeta?.doorOffset || { dx: fp.w - 1, dy: fp.h - 1 };
     for (let dy = 0; dy < fp.h; dy++) {
       for (let dx = 0; dx < fp.w; dx++) {
@@ -43,8 +53,8 @@ export function buildWalkGridFromLayers(cols, rows, layers, assetsById) {
     }
   }
   for (const obj of layers?.objects || []) {
-    const meta = assetsById.get(obj.assetId)?.meta;
-    for (const c of getObjectBlockingCells(obj, meta)) {
+    const asset = assetsById.get(obj.assetId);
+    for (const c of getObjectBlockingCells(obj, asset?.meta, asset?.kind)) {
       if (c.x >= 0 && c.x < cols && c.y >= 0 && c.y < rows) grid[c.y][c.x] = 0;
     }
   }

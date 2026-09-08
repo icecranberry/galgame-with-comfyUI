@@ -186,18 +186,21 @@ export class Hd2dTownRenderer {
     const id = [...counts].sort((a,b) => b[1]-a[1])[0]?.[0], asset = assets.get(id)
     const entry = this.texture(assetUrl(asset), 'nearest', asset)
     const texture = entry?.ready ? entry.texture : null
-    const signature = JSON.stringify([this.map.cols, this.map.rows, assetUrl(asset), !!texture])
+    if (this.mapBorder) { freeMesh(this.mapBorder); this.mapBorder = null }
+    const signature = JSON.stringify(['surroundings:10', this.map.cols, this.map.rows, assetUrl(asset), !!texture])
     if (this.surroundings?.userData.signature === signature) return
     if (this.surroundings) freeMesh(this.surroundings)
-    const margin = 20, cells = []
+    const margin = 10, cells = []
     for (let y = -margin; y < this.map.rows + margin; y++) for (let x = -margin; x < this.map.cols + margin; x++) {
       if (x < 0 || y < 0 || x >= this.map.cols || y >= this.map.rows) cells.push([x,y])
     }
-    const mesh = new T.InstancedMesh(this.groundGeometry(asset, texture), townMaterial('ground', { map: texture, color: '#e1edc6' }), cells.length)
-    const matrix = new T.Matrix4()
-    cells.forEach(([x,y], i) => mesh.setMatrixAt(i, matrix.makeTranslation(x, 0, y)))
-    mesh.instanceMatrix.needsUpdate = true; mesh.receiveShadow = true
-    mesh.userData.signature = signature; this.scene.add(mesh); this.surroundings = mesh
+    if (cells.length) {
+      const mesh = new T.InstancedMesh(this.groundGeometry(asset, texture), townMaterial('ground', { map: texture, color: '#e1edc6' }), cells.length)
+      const matrix = new T.Matrix4()
+      cells.forEach(([x,y], i) => mesh.setMatrixAt(i, matrix.makeTranslation(x, 0, y)))
+      mesh.instanceMatrix.needsUpdate = true; mesh.receiveShadow = true
+      mesh.userData.signature = signature; this.scene.add(mesh); this.surroundings = mesh
+    }
   }
   updateVolume(key, dto) {
     const entries = Object.fromEntries(Object.entries(dto.volume.textures).map(([face, url]) => [face, this.texture(url, dto.render.textureFilter)]))

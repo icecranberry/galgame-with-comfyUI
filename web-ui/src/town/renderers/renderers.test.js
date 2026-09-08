@@ -78,6 +78,18 @@ test('footprint bottom-row anchor, door and explicit clearing retain server conv
   cells = buildBlockedCells(map)
   assert(!cells.has('4,6')); assert(cells.has('6,7'))
 })
+
+test('footprinted props block all cells only when marked blocking', () => {
+  const makeMap = blocking => ({
+    cols: 6, rows: 6,
+    assets: [{ id: 1, kind: 'prop', meta: { footprint: { w: 2, h: 2 }, footprintKind: 'prop', blocking } }],
+    layers: { objects: [{ assetId: 1, x: 2, y: 3 }], blockOverride: [] },
+  })
+  const blockingCells = buildBlockedCells(makeMap(true))
+  assert.equal(blockingCells.size, 4)
+  for (const cell of ['2,2', '3,2', '2,3', '3,3']) assert(blockingCells.has(cell))
+  assert.equal(buildBlockedCells(makeMap(false)).size, 0)
+})
 test('legacy diamond UVs use cropped height, authored calibration and topdown bypass', () => {
   const uv = groundUvs({}, 64, 32)
   assert.equal(uv[0][0], 0.5); assert.equal(uv[1][1], 0.5)

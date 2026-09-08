@@ -78,6 +78,15 @@
                   <linshe-input v-model="item.name" size="sm" class="wiz-list-name" placeholder="名称" />
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="!item.special" @click="item.special = false; item.reusable = true">通用</linshe-button>
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="item.special" @click="item.special = true; item.reusable = false">特殊</linshe-button>
+                  <linshe-select
+                    v-if="group.kind === 'prop'"
+                    class="wiz-list-size"
+                    :model-value="footprintKey(item.footprint)"
+                    :options="PROP_SIZE_OPTIONS"
+                    size="sm"
+                    aria-label="道具占格尺寸"
+                    @update:model-value="value => setPropFootprint(item, value)"
+                  />
                   <linshe-button variant="icon" size="sm" aria-label="删除" @click="removeAssetItem(group.kind, item)">✕</linshe-button>
                 </div>
               </div>
@@ -458,6 +467,21 @@ const listGroups = computed(() => {
 
 const listGenerationStep = computed(() => localStep.value === 'groundList' ? 'tiles' : 'buildings')
 
+const PROP_SIZE_OPTIONS = [
+  { label: '1×1', value: '1x1' },
+  { label: '2×1', value: '2x1' },
+  { label: '1×2', value: '1x2' },
+  { label: '2×2', value: '2x2' },
+  { label: '3×3', value: '3x3' },
+]
+function footprintKey(footprint) {
+  return `${footprint?.w || 1}x${footprint?.h || 1}`
+}
+function setPropFootprint(item, value) {
+  const [w, h] = String(value || '1x1').split('x').map(v => Math.max(1, Math.min(3, parseInt(v, 10) || 1)))
+  item.footprint = { w, h }
+}
+
 /** 当前生成步骤的分组（地皮：地砖+道路；建筑：建筑+道具） */
 const stepGroups = computed(() => {
   if (localStep.value === 'tiles') {
@@ -745,11 +769,12 @@ async function genAssetItem(item, force = false) {
             promptPrefix: activeParams.promptPrefix,
             loras,
             artist: activeParams.artist,
-            footprint: kind === 'building' ? item.footprint : undefined,
+            footprint: kind === 'building' || kind === 'prop' ? item.footprint || { w: 1, h: 1 } : undefined,
             special: kind === 'building' ? !!item.special : undefined,
             reusable: kind === 'building' ? !!item.reusable : undefined,
             maxInstances: kind === 'building' ? item.maxInstances : undefined,
             blocking: kind === 'prop' ? item.blocking : undefined,
+            footprintKind: kind === 'prop' && item.footprint ? 'prop' : undefined,
           },
         })
         upsertAsset(created.asset)
@@ -819,7 +844,7 @@ function addAssetItem(kind) {
   if (kind === 'ground') bpForm.groundAssets.push({ key: nextKey('ground'), name: '新地砖', desc: '', variants: 1 })
   else if (kind === 'road') bpForm.roadAssets.push({ key: nextKey('road'), name: '新道路', desc: '', variants: 1 })
   else if (kind === 'building') bpForm.buildings.push({ key: nextKey('building'), name: '新建筑', desc: '', reusable: true, maxInstances: 2, footprint: { w: 3, h: 2 }, special: false })
-  else if (kind === 'prop') bpForm.props.push({ key: nextKey('prop'), name: '新道具', desc: '', blocking: true })
+  else if (kind === 'prop') bpForm.props.push({ key: nextKey('prop'), name: '新道具', desc: '', footprint: { w: 1, h: 1 }, blocking: true })
 }
 
 function removeAssetItem(kind, item) {
@@ -1380,6 +1405,7 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 .wiz-list-name { flex: 1; min-width: 140px; }
+.wiz-list-size { width: 84px; flex: 0 0 auto; }
 .wiz-list-desc { flex: 1; min-width: 0; }
 .wiz-list-back { margin-bottom: 8px; }
 .wiz-asset-ops-column {

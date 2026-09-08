@@ -22,6 +22,7 @@
             :model-value="generationParams"
             :step="generationStep"
             :hide-prefix="isPortrait"
+            :show-portrait-lora="isPortrait"
             @update:model-value="value => emit('update:generationParams', value)"
           />
           <div v-if="configStatus" class="ie-config-status">{{ configStatus }}</div>

@@ -70,6 +70,7 @@ export const ASSET_SPECS = {
     removeBg: true,
     cropContent: true,
     pixel: { w: 64, h: 64 },
+    pixelWidth: (fp) => (fp.w + fp.h) * 32,
   },
   // 像素小人：600×800 制作 → 抠白裁切 → 轻缩存储（保留生成图的画质，像素风由 prompt 控制）
   npc: {
@@ -132,7 +133,7 @@ function styleTagsFor(kind, styleTags) {
 }
 
 /** 组装素材 prompt（2.2）；ground/road 用 promptTemplate 把 desc 插进材质覆盖句 */
-export function buildAssetPrompt({ kind, desc, styleTags = '', direction = null, special = false }) {
+export function buildAssetPrompt({ kind, desc, styleTags = '', direction = null, special = false, footprint = null }) {
   const spec = ASSET_SPECS[kind];
   if (!spec) throw new Error(`unknown asset kind: ${kind}`);
   const material = [desc, styleTagsFor(kind, styleTags)].filter(Boolean).join(', ');
@@ -144,12 +145,16 @@ export function buildAssetPrompt({ kind, desc, styleTags = '', direction = null,
       special ? 'landmark building, distinctive and detailed' : null,
     ].filter(Boolean).join(', ');
   }
+  const propFootprint = kind === 'prop' && footprint?.w > 0 && footprint?.h > 0
+    ? `The sprite base matches an isometric footprint of ${footprint.w}x${footprint.h} tiles`
+    : null;
   const parts = [
     PIXEL_BASE,
     styleTagsFor(kind, styleTags),
     spec.prompt,
     direction && DIRECTION_PROMPT[direction],
     special ? 'landmark building, distinctive and detailed' : null,
+    propFootprint,
     desc,
   ].filter(Boolean);
   return parts.join(', ');
@@ -314,6 +319,7 @@ async function generateIntoRow(row, guard) {
       styleTags: meta.styleTags || '',
       direction: meta.direction || null,
       special: !!meta.special,
+      footprint: meta.footprint || null,
     });
   }
 
@@ -357,7 +363,7 @@ async function generateIntoRow(row, guard) {
     if (isTile) {
       tw = 64; th = 32;
     } else if (spec.pixelWidth && meta.footprint?.w) {
-      // 建筑按等距占格宽 (w+h)*32，渲染 1:1 不模糊
+      // 建筑/大件道具按等距占格宽 (w+h)*32，渲染 1:1 不模糊
       tw = spec.pixelWidth(meta.footprint);
       th = Math.max(1, Math.round(tw * size.height / size.width));
     } else if (spec.maxSide) {

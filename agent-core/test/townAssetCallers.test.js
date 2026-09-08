@@ -220,6 +220,7 @@ function wizardFixture(t) {
     getWorldSetting: () => null, townPromptSystemMessages: () => [],
     buildLayoutOutputStructure: () => '', buildLayoutTaskRequirements: () => '',
     expandLayout: () => ({ warnings: [] }),
+    generateLocalLayout: () => ({ warnings: [] }),
     safeJsonParse: text => JSON.parse(text),
     chatSync: async () => { await f.dependencies.generateSpritePrompt(); return '{"prompts":{"grass":"new","road":"new"}}'; },
   };
@@ -258,8 +259,8 @@ test('wizard queued task captures job before enqueue and refuses cancelled repla
   assert.equal(f.calls.persisted, 0);
 });
 
-test('wizard prompt/layout results never overwrite cancelled draft or persist progress', async t => {
-  for (const method of ['generateAssetPrompts', 'generateLayout']) await t.test(method, async t => {
+test('wizard prompt results never overwrite cancelled draft or persist progress', async t => {
+  for (const method of ['generateAssetPrompts']) await t.test(method, async t => {
     const f = wizardFixture(t);
     for (let i = 0; i < 4; i++) f.assets.set(`asset-${i}`, { id: i, kind: 'ground', status: 'ready' });
     const pause = f.pauseAt('prompt');

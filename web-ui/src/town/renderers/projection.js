@@ -22,12 +22,19 @@ export function buildBlockedCells(map) {
   const blocked = new Set()
   const assets = new Map((map?.assets || []).map(a => [a.id, a]))
   for (const obj of map?.layers?.objects || []) {
-    const meta = assets.get(obj.assetId)?.meta || {}
+    const asset = assets.get(obj.assetId)
+    const meta = asset?.meta || {}
     const fp = meta.footprint
     if (fp?.w > 0 && fp?.h > 0) {
-      const door = meta.doorOffset || { dx: fp.w - 1, dy: fp.h - 1 }
-      for (let y = 0; y < fp.h; y++) for (let x = 0; x < fp.w; x++) {
-        if (x !== door.dx || y !== door.dy) blocked.add(`${obj.x + x},${obj.y - fp.h + 1 + y}`)
+      if (meta.footprintKind === 'prop') {
+        if (meta.blocking) for (let y = 0; y < fp.h; y++) for (let x = 0; x < fp.w; x++) {
+          blocked.add(`${obj.x + x},${obj.y - fp.h + 1 + y}`)
+        }
+      } else {
+        const door = meta.doorOffset || { dx: fp.w - 1, dy: fp.h - 1 }
+        for (let y = 0; y < fp.h; y++) for (let x = 0; x < fp.w; x++) {
+          if (x !== door.dx || y !== door.dy) blocked.add(`${obj.x + x},${obj.y - fp.h + 1 + y}`)
+        }
       }
     } else if (meta.blocking) blocked.add(`${obj.x},${obj.y}`)
   }

@@ -251,12 +251,13 @@
                   class="ap-portrait-thumb"
                   :asset="charPortraitAsset(detailChar)"
                   :show-name="false"
+                  :editable="!!charPortraitAsset(detailChar)?.id"
                   @edit="openAssetManager(charPortraitAsset(detailChar), `${detailChar.displayName} 立绘`)"
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
               <p v-if="charPortraitAsset(detailChar)" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.portraitUrl ? detailChar.appearanceStatus?.portrait : 'unknown') }}</p>
-              <div v-if="!detailChar.portraitId" class="ap-btn-row">
+              <div v-if="!charPortraitAsset(detailChar)" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
                   生成 900×1600 立绘
                 </linshe-button>
@@ -344,9 +345,30 @@
           <p v-else-if="settingsSaved" class="ap-layout-desc" role="status">设置已保存。</p>
           <linshe-button ref="deliveriesTrigger" variant="link" size="sm" @click="deliveriesOpen = true">查看记录投递状态</linshe-button>
 
-          <div class="ap-layout-zone">
-            <div class="ap-section-title">重新布局</div>
-            <p class="ap-layout-desc">AI 会用当前素材重建地图、道路和地点；居民与入住角色会保留，手动地图修改会被覆盖。道具密度始终高于建筑密度。</p>
+            <div class="ap-layout-zone">
+              <div class="ap-section-title">重新布局</div>
+            <p class="ap-layout-desc">会用当前素材重建地图、道路和地点；居民与入住角色会保留，手动地图修改会被覆盖。</p>
+            <div class="ap-density-field">
+              <span class="ap-density-label">地图大小</span>
+              <div class="ap-density-slider-row">
+                <input v-model.number="layoutMapSize" class="ap-density-slider" type="range" min="30" max="80" step="1" :disabled="settingsLocked" aria-label="地图大小" :style="{ '--fill': ((layoutMapSize - 30) / 50 * 100) + '%' }">
+                <span class="ap-density-value">{{ mapSizeSummary }}</span>
+              </div>
+            </div>
+            <p class="ap-layout-desc">重新布局会按这个尺寸重建正方形地图。</p>
+            <div class="ap-setting">
+              <span class="ap-setting-label">AI 优化</span>
+              <linshe-switch v-model="settings.aiLayoutOptimize" size="sm" :disabled="settingsLocked" on-text="开启" off-text="关闭" aria-label="AI优化布局" />
+            </div>
+            <p class="ap-layout-desc">开启后，重新布局会由 LLM 润色地点命名、氛围并推荐少量装饰地皮；AI 失败会自动回退原布局。</p>
+            <div class="ap-density-field">
+              <span class="ap-density-label">布局密度</span>
+              <div class="ap-density-slider-row">
+                <input v-model.number="layoutDensity" class="ap-density-slider" type="range" min="1" max="40" step="0.5" :disabled="settingsLocked" aria-label="布局密度" :style="{ '--fill': ((layoutDensity - 1) / 39 * 100) + '%' }">
+                <span class="ap-density-value">{{ densitySummary }}</span>
+              </div>
+            </div>
+            <p class="ap-layout-desc">建筑按地图地皮面积折算；大件道具会按占格尺寸摊进布局密度。</p>
             <div v-if="relayoutError" class="ap-layout-error" role="alert">{{ relayoutError }}</div>
             <div v-else-if="relayoutDone" class="ap-layout-done">布局已重建，地图正在刷新。</div>
             <div v-if="!layoutConfirm" class="ap-actions">
@@ -433,6 +455,26 @@ const layoutConfirm = ref(false)
 const relayoutBusy = ref(false)
 const relayoutError = ref('')
 const relayoutDone = ref(false)
+const layoutDensity = computed({
+  get: () => Math.min(40, Math.max(1, Number(settings.value.propDensity) || 8)),
+  set(value) {
+    const propDensity = Math.min(40, Math.max(1, Number(value) || 8))
+    const buildingDensity = Math.max(0.5, Math.round(propDensity / 2 * 10) / 10)
+    settings.value = { ...settings.value, buildingDensity, propDensity }
+  },
+})
+const densitySummary = computed(() => {
+  const building = Math.max(0.5, Math.min(20, Number(settings.value.buildingDensity) || 4.2))
+  return `${building.toFixed(1)} 建筑 / ${Number(layoutDensity.value).toFixed(1)} 道具`
+})
+const layoutMapSize = computed({
+  get: () => Math.max(30, Math.min(80, Number(settings.value.mapSize) || 50)),
+  set(value) {
+    const mapSize = Math.max(30, Math.min(80, Number(value) || 50))
+    settings.value = { ...settings.value, mapSize }
+  },
+})
+const mapSizeSummary = computed(() => `${layoutMapSize.value}×${layoutMapSize.value}`)
 const newNpc = reactive({ name: '', job: '', persona: '' })
 const playerKit = reactive({ sprites: {}, portrait: null })
 const playerOperation = ref(null)
@@ -449,8 +491,9 @@ function openAssetManager(asset, title = '') {
 
 function charPortraitAsset(char) {
   const path = char?.portraitUrl || char?.standingUrl
-  if (!char?.portraitId || !path) return null
-  return { id: char.portraitId, name: `${char.displayName} 立绘`, status: 'ready', image_path: path, meta: {} }
+  if (!path) return null
+  // 传统 standingUrl 也是可展示立绘；没有 town portrait 素材时先允许查看，但不允许打开图片管理。
+  return { id: char?.portraitId ?? null, name: `${char.displayName} 立绘`, status: 'ready', image_path: path, meta: {} }
 }
 
 function charSpriteAsset(char, direction) {
@@ -506,8 +549,6 @@ const SETTING_FIELDS = [
   { key: 'encounterRelatedProb', label: '熟人相遇概率', min: 0, max: 1, step: 0.01 },
   { key: 'encounterStrangerProb', label: '陌生人相遇概率', min: 0, max: 1, step: 0.01 },
   { key: 'statusBubbleIntervalMin', label: '状态气泡间隔（分）', min: 5, max: 240, step: 5 },
-  { key: 'buildingDensity', label: '建筑密度（个/千格）', min: 0.5, max: 20, step: 0.1 },
-  { key: 'propDensity', label: '道具密度（个/千格）', min: 0.5, max: 40, step: 0.1 },
 ]
 
 const detailNpc = computed(() => {
@@ -1073,6 +1114,45 @@ onBeforeUnmount(() => {
 .ap-setting { display: flex; align-items: center; gap: 12px; }
 .ap-setting-label { flex: 1; font-size: 12px; color: var(--text-primary); }
 .ap-setting > :last-child { width: 90px; }
+
+.ap-density-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ap-density-label { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.ap-density-slider-row { display: flex; align-items: center; gap: 12px; }
+.ap-density-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 18%), rgba(240, 236, 232, 0.95) var(--fill, 18%));
+  outline: none;
+  cursor: pointer;
+}
+.ap-density-slider:disabled { cursor: not-allowed; opacity: .55; }
+.ap-density-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  box-shadow: 0 2px 8px rgba(54, 42, 38, 0.25);
+  cursor: grab;
+  transition: transform .15s ease;
+}
+.ap-density-slider::-webkit-slider-thumb:hover { transform: scale(1.12); }
+.ap-density-slider:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+.ap-density-value {
+  min-width: 116px;
+  font-size: 11px;
+  color: var(--accent-hover);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 .ap-layout-zone {
   margin-top: 16px;

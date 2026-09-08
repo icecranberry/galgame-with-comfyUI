@@ -293,15 +293,24 @@ export const useTownStore = defineStore('town', () => {
         // ping-triggered read per minute; ordinary state notifications bypass it.
         if (elapsed < 0 || elapsed >= 60_000) _scheduleAgentSpriteRefresh()
       }),
-      onEvent('town_state_updated', () => _scheduleAgentSpriteRefresh()),
+      onEvent('town_state_updated', (d) => {
+        if (d?.reason === 'world_reset') {
+          ++_stateRequest; ++_mapRequest; ++_assetRequest; ++_initRequest; ++_previewRequest
+          _agentMoveGenerations.clear()
+          snapshot.value = null; mapData.value = null; assets.value = []; draftPreview.value = null
+          initState.value = null; mapLoading.value = false
+        }
+        _scheduleAgentSpriteRefresh()
+      }),
       onEvent('town_move', _applyMove),
       onEvent('town_bubble', _applyBubble),
       onEvent('town_encounter_start', _applyEncounterStart),
       onEvent('town_encounter_end', _applyEncounterEnd),
       onEvent('town_map_updated', (d) => {
         if (!_acceptWorldEvent(d)) return
+        mapData.value = null
         fetchState().catch(() => {})
-        fetchMap().catch(() => {})
+        fetchMap(d?.version).catch(() => {})
       }),
       onEvent('town_assets_updated', (d) => {
         if (!_acceptWorldEvent(d)) return

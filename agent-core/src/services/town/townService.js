@@ -1626,6 +1626,8 @@ const TOWN_SETTING_FIELDS = {
   statusBubbleIntervalMin: { min: 5, max: 240, type: 'int' },
   buildingDensity: { min: 0.5, max: 20, type: 'float' },
   propDensity: { min: 0.5, max: 40, type: 'float' },
+  mapSize: { min: 30, max: 80, type: 'int' },
+  aiLayoutOptimize: { type: 'boolean' },
 };
 
 export function getTownSettings() {

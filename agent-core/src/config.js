@@ -117,6 +117,8 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     // 道具必须始终高于建筑，由 updateTownSettings 统一夹紧。
     buildingDensity: 4.2,
     propDensity: 8,
+    mapSize: 50,
+    aiLayoutOptimize: false,
     // 世界生成配置：自定义生成偏好与各步骤画师串/前置提示词/LoRA；DB system_settings 持久化
     generation: {
       styleTags: '',

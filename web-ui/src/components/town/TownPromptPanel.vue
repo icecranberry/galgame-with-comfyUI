@@ -36,8 +36,8 @@
     <!-- LoRA：参考角色详情页的添加方式 -->
     <div class="pp-field">
       <div class="pp-label">
-        LoRA（{{ modelValue.loras.length }}）
-        <span class="pp-default-tag" v-if="modelValue.loras.length === 0">未启用</span>
+        LoRA（{{ displayLoras.length }}）
+        <span class="pp-default-tag" v-if="displayLoras.length === 0">未启用</span>
       </div>
       <div v-if="showPortraitLora" class="pp-portrait-lora">
         <linshe-switch
@@ -49,7 +49,7 @@
         <span>立绘应用LoRA</span>
       </div>
       <TransitionGroup name="pp-pop" tag="div" class="pp-lora-list">
-        <div v-for="(lora, idx) in modelValue.loras" :key="idx" class="pp-lora-item">
+        <div v-for="(lora, idx) in displayLoras" :key="idx" class="pp-lora-item">
           <div class="pp-lora-row">
             <linshe-select
               :model-value="lora.path"
@@ -102,6 +102,8 @@ const props = defineProps({
   styleTags: { type: String, default: '' },
   /** 立绘本身不拼类型前缀；组件保持向导默认行为，由调用方隐藏 */
   hidePrefix: { type: Boolean, default: false },
+  /** 只有大立绘需要显式开关；普通素材始终应用 LoRA */
+  showPortraitLora: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -114,7 +116,7 @@ const DEFAULTS = {
 
 const DEFAULT_ARTIST = '@ebora'
 const artistValue = computed(() => props.modelValue.artist ?? DEFAULT_ARTIST)
-const showPortraitLora = computed(() => ['npcs', 'player'].includes(props.step))
+const showPortraitLora = computed(() => props.showPortraitLora && ['npcs', 'player'].includes(props.step))
 const defaultPrefix = computed(() => DEFAULTS[props.step] ?? '')
 
 const STEP_HINTS = {
@@ -126,22 +128,44 @@ const STEP_HINTS = {
 const stepHint = computed(() => STEP_HINTS[props.step] ?? '')
 
 const loraOptions = ref([])
+const pendingLoras = ref([])
+const displayLoras = computed(() => [...props.modelValue.loras, ...pendingLoras.value])
 
 function addLora() {
-  emit('update:modelValue', {
-    ...props.modelValue,
-    loras: [...props.modelValue.loras, { path: '', weight: 1, triggerWord: '' }],
-  })
+  pendingLoras.value.push({ path: '', weight: 1, triggerWord: '' })
 }
 
 function removeLora(idx) {
+  if (idx >= props.modelValue.loras.length) {
+    pendingLoras.value.splice(idx - props.modelValue.loras.length, 1)
+    return
+  }
+
   const loras = props.modelValue.loras.filter((_, i) => i !== idx)
   emit('update:modelValue', { ...props.modelValue, loras })
 }
 
 function updateLora(idx, patch) {
-  const loras = props.modelValue.loras.map((l, i) => i === idx ? { ...l, ...patch } : l)
-  emit('update:modelValue', { ...props.modelValue, loras })
+  const savedCount = props.modelValue.loras.length
+  if (idx < savedCount) {
+    const loras = props.modelValue.loras.map((l, i) => i === idx ? { ...l, ...patch } : l)
+    emit('update:modelValue', { ...props.modelValue, loras })
+    return
+  }
+
+  // 空占位行只留在本地；选中文件后才进入正式配置，避免点击添加就触发保存。
+  const pendingIdx = idx - savedCount
+  const nextRow = { ...pendingLoras.value[pendingIdx], ...patch }
+  if (nextRow.path) {
+    pendingLoras.value.splice(pendingIdx, 1)
+    emit('update:modelValue', {
+      ...props.modelValue,
+      loras: [...props.modelValue.loras, nextRow],
+    })
+    return
+  }
+
+  pendingLoras.value.splice(pendingIdx, 1, nextRow)
 }
 
 onMounted(async () => {

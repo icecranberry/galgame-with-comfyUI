@@ -1,10 +1,10 @@
 /**
  * 世界初始化向导（v2 核心流程）
  *
- * 七步：配置 → LLM 蓝图 → 风格小样 → 批量生图 → LLM 布图 → 用户确认 → 落库开镇
+ * 七步：配置 → LLM 蓝图 → 风格小样 → 批量生图 → 本地布图 → 用户确认 → 落库开镇
  *
  * - job 状态存 data/town/init-state.json，断点续跑（批量可重复触发，已 ready 的素材跳过）
- * - 布图 = 紧凑区域 JSON（不输出逐格矩阵），本地展开 + 洪泛连通校验 + 自动补路
+ * - 布图 = 程序化街区路网 + 贴路建筑 + 地皮预算道具；格子结果不交给 LLM 摆放
  * - 全部 LLM 调用按 AGENTS.md 规范带完整 JSON 示例；素材生成走 townAssetService 串行队列
  * - 每次状态变更广播 SSE town_init_progress
  */
@@ -19,6 +19,8 @@ import { createAsset, listAssets, captureTownAssetWorld } from './townAssetServi
 import { getMapRow, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
+import { generateLocalLayout } from './townLayoutGenerator.js';
+import { refineTownDraftWithLLM } from './townLayoutAI.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_PATH = path.resolve(__dirname, '..', '..', '..', 'data', 'town', 'init-state.json');
@@ -153,7 +155,7 @@ function getWorldSetting(id) {
 
 // ── Step 1+2：配置 + LLM 蓝图 ──
 
-export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, mapRows = 50 } = {}) {
+export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRows } = {}) {
   return enqueueStep(async () => {
     // 初始化 = 全部数据抛弃：旧地图/地点/居民/相遇历史/运行态/素材索引全清（磁盘图片文件保留不删）
     const db = getDb();
@@ -166,8 +168,8 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols = 50, m
     job.config = {
       worldSettingId: worldSettingId ?? null,
       npcCount: Math.max(3, Math.min(16, parseInt(npcCount, 10) || 8)),
-      mapCols: Math.max(30, Math.min(80, parseInt(mapCols, 10) || 50)),
-      mapRows: Math.max(30, Math.min(80, parseInt(mapRows, 10) || 50)),
+      mapCols: Math.max(30, Math.min(80, parseInt(mapCols, 10) || config.town.mapSize || 50)),
+      mapRows: Math.max(30, Math.min(80, parseInt(mapRows, 10) || config.town.mapSize || 50)),
     };
     setStatus('blueprint', '正在读取世界观并生成初始化蓝图…');
     try {
@@ -219,8 +221,8 @@ function buildBlueprintOutputStructure() {
     '    { "key": "cafe", "name": "兽人咖啡厅", "reusable": false, "maxInstances": 1, "footprint": { "w": 5, "h": 4 }, "special": true }',
     '  ],',
     '  "props": [',
-    '    { "key": "tree_01", "name": "橡树", "blocking": true },',
-    '    { "key": "bench_01", "name": "长椅", "blocking": false }',
+    '    { "key": "tree_01", "name": "橡树", "footprint": { "w": 2, "h": 2 }, "blocking": true },',
+    '    { "key": "bench_01", "name": "长椅", "footprint": { "w": 1, "h": 1 }, "blocking": false }',
     '  ],',
     '  "npcs": [',
     '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "job": "面包师" },',
@@ -241,7 +243,7 @@ function buildBlueprintTaskRequirements(worldName, cfg) {
     '- groundAssets：3~5 种地砖；variants 是同款变体数 1~3（打散重复感）',
     '- roadAssets：1~2 种道路',
     '- buildings：5~9 栋。一半是通用建筑（reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（2~3）；key 全部小写下划线且不重复',
-    '- props：4~8 种；blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
+    '- props：4~8 种；footprint.w/h 是占格数（1~3，橡树一般 2×2，长椅/花丛一般 1×1）；blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
     `- npcs：恰好 ${cfg.npcCount} 位居民。persona 一句话人设+性格关键词（中文 30~60 字，完整人格卡会在建档时生成）；job 中文职业`,
     '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合世界观',
   ].join('\n');
@@ -293,10 +295,12 @@ function normalizeBlueprint(parsed, cfg) {
   }
   for (const p of arr(parsed.props)) {
     if (!p?.name) continue;
+    const fp = p.footprint || {};
     bp.props.push({
       key: uniqKey(p.key || p.name),
       name: String(p.name).slice(0, 20),
       desc: String(p.desc || '').slice(0, 800),
+      footprint: { w: Math.max(1, Math.min(3, parseInt(fp.w, 10) || 1)), h: Math.max(1, Math.min(3, parseInt(fp.h, 10) || 1)) },
       blocking: p.blocking !== false,
     });
   }
@@ -398,7 +402,7 @@ export function generateAssetPrompts({ step = 'tiles', styleTags, keys = [] } = 
       '- prompts 的 key 必须与素材清单完全一致，一项不多、一项不少；value 是一段可直接用于文生图的英文 prompt',
       '- ground/road：描述完整覆盖顶面的单一材质，保证 isometric game tile、seamless tileable material、no buildings/no scene',
       '- building：描述建筑类型、墙体/屋顶/门窗/招牌/配色与世界观气质，保证 pure white background、isometric 45 degree view、no ground/no base；特殊建筑更有辨识度',
-      '- prop：描述单个道具的材质/形状/颜色与世界观气质，保证 pure white background、single sprite、no ground platform/no scene',
+      '- prop：描述单个道具的材质/形状/颜色与世界观气质，保证 pure white background、single sprite、no ground platform/no scene；若清单提供 footprint 且大于 1×1，用英文明确 sprite 底面比例符合该等距占格尺寸',
       '- 全英文，不要双引号、换行、列表、标题、中文或代码围栏；不要输出 negative prompt',
     ].join('\n') });
     const extraDirection = String(job.blueprint.styleTags || '').trim();
@@ -572,7 +576,7 @@ export function startBatch() {
   });
 }
 
-// ── Step 5：LLM 布图 + 本地展开 ──
+// ── Step 5：本地程序化布图 ──
 
 export function generateLayout() {
   const guard = captureInitGenerationGuard();
@@ -587,48 +591,25 @@ export function generateLayout() {
       throw new Error('素材不足');
     }
 
-    const cols = job.config.mapCols;
-    const rows = job.config.mapRows;
     const bp = job.blueprint;
-
-    // 供 LLM 的素材清单（类型 + 名 + 占格尺寸 + 复用上限）
-    const inventory = ready.map(a => ({
-      kind: a.kind, key: a.key, name: a.name,
-      footprint: a.meta?.footprint || undefined,
-      reusable: a.meta?.reusable || undefined,
-      maxInstances: a.meta?.maxInstances || undefined,
-      blocking: a.kind === 'prop' ? !!a.meta?.blocking : undefined,
-    }));
-
-    const world = getWorldSetting(job.config.worldSettingId);
-    const extraDirection = String(bp.styleTags || '').trim();
-    const layoutMsgs = [
-      ...townPromptSystemMessages(world),
-      { role: 'system', content: buildLayoutOutputStructure(cols, rows) },
-      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory, cols, rows) },
-      {
-        role: 'user',
-        content: [
-          extraDirection ? `【用户额外指定】\n${extraDirection}` : '',
-          `请执行：输出 ${cols}×${rows} 小镇的布局 JSON。`,
-        ].filter(Boolean).join('\n\n'),
-      },
-    ];
-    const content = await chatSync(layoutMsgs, {
-      max_tokens: 8196,
-      temperature: 0.8,
-      response_format: { type: 'json_object' },
-      label: '小镇布图',
-    });
     guard.assertCurrent();
-    const parsed = safeJsonParse(content);
-    if (!parsed) {
-      setStatus('failed', '布局 JSON 解析失败，请重试生成布局');
-      throw new Error('布局 JSON 解析失败');
-    }
-
     try {
-      job.draftMap = expandLayout(parsed, ready, bp, cols, rows);
+      job.draftMap = generateLocalLayout({
+        readyAssets: ready,
+        blueprint: bp,
+        cols: job.config.mapCols,
+        rows: job.config.mapRows,
+        buildingDensity: config.town.buildingDensity,
+        propDensity: config.town.propDensity,
+        seed: Date.now(),
+      });
+      if (config.town.aiLayoutOptimize) {
+        try {
+          await refineTownDraftWithLLM({ draft: job.draftMap, readyAssets: ready, blueprint: bp, cols: job.config.mapCols, rows: job.config.mapRows });
+        } catch (err) {
+          console.warn('[town] AI layout optimize skipped:', err?.message || err);
+        }
+      }
     } catch (err) {
       setStatus('failed', `布局展开失败：${err?.message || err}`);
       throw err;
@@ -672,6 +653,14 @@ function buildLayoutTaskRequirements(bp, inventory, cols = 50, rows = 50) {
   const cellCount = cols * rows;
   const buildingTarget = Math.max(1, Math.round(cellCount * config.town.buildingDensity / 1000));
   const propTarget = Math.max(buildingTarget + 1, Math.round(cellCount * config.town.propDensity / 1000));
+  const averageFootprint = (kind) => {
+    const items = inventory.filter(a => a.kind === kind);
+    if (!items.length) return 1;
+    const total = items.reduce((sum, a) => sum + Math.max(1, (a.footprint?.w || 1) * (a.footprint?.h || 1)), 0);
+    return total / items.length;
+  };
+  const buildingArea = Math.round(buildingTarget * averageFootprint('building'));
+  const propArea = Math.round(propTarget * averageFootprint('prop'));
   return [
     '【任务要求】',
     '你是像素小镇的地图设计师。请规划符合世界观的小镇布局（格子坐标，x 向右 y 向下，原点左上）。',
@@ -679,11 +668,11 @@ function buildLayoutTaskRequirements(bp, inventory, cols = 50, rows = 50) {
     '【可用素材】',
     JSON.stringify(inventory, null, 1),
     '',
-    `【密度目标】建筑约 ${buildingTarget} 个实例（可上下浮动 20%）；道具约 ${propTarget} 个实例（必须多于建筑，可上下浮动 20%）。`,
+    `【密度目标】地图地皮面积 = ${cols}×${rows} = ${cellCount} 格。建筑约 ${buildingTarget} 个实例，按平均 footprint 折算约 ${buildingArea} 格地皮（可上下浮动 20%）；道具约 ${propTarget} 个实例，按平均 footprint 折算约 ${propArea} 格地皮（必须多于建筑，可上下浮动 20%）。大 footprint 的道具数量不要机械按小块道具类推，必须同时满足这里的数量和地皮预算。`,
     '布局规则（务必遵守）：',
     '- groundRects：先用草地/泥土这类基础地砖铺满整图（x=0,y=0,w=地图宽度,h=地图高度），再叠加特色区域；广场/花田等特色区域合计只占全图 10%~20%，不要让广场砖盖满全图',
     '- roadPaths：点列之间按先横后纵的 L 形铺路；主路要纵横贯通（至少一横一纵），路网要连接所有建筑门口；道路从地图边缘通到中心广场',
-    '- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）。道具（树/长椅）按密度目标散布在建筑之间，不要放在路上',
+    '- placedObjects：建筑 x = 建筑占格矩形的左上角列，y = 底行（占 footprint.h 格向上）；必须完全在图内且互不重叠；建筑要分布在地图各处（不要全挤在边缘），每栋建筑门口紧邻道路；reusable 建筑最多放 maxInstances 个（instance 从 1 编号），special 建筑只放 1 个（instance=1）。道具（树/长椅）按密度目标和各自 footprint 散布在建筑之间，不要放在路上',
     '- locations：每栋 special 建筑都要绑定一个地点（objectRef = "key:instance"）；通用居民楼不用每个都绑；再挑 1~3 个开阔处设户外地点（广场/公园，给 x/y/radius）；aliases 是日程文本常用的同义词',
     `- npcSpawns：恰好 ${bp.npcs.length} 位居民，npcRef 用居民 displayName 原文，locationKey 用上面定义的地点 key`,
     '- 建筑之间留出步行空间，不要把地图塞满',
@@ -778,7 +767,7 @@ export function expandLayout(parsed, readyAssets, bp, cols, rows) {
   const blockingCells = new Set();
   for (const obj of objects) {
     const meta = assetsById.get(obj.assetId)?.meta;
-    for (const c of getObjectBlockingCells(obj, meta)) blockingCells.add(`${c.x},${c.y}`);
+    for (const c of getObjectBlockingCells(obj, meta, assetsById.get(obj.assetId)?.kind)) blockingCells.add(`${c.x},${c.y}`);
   }
   const start = { x: Math.floor(cols / 2), y: Math.floor(rows / 2) };
   if (blockingCells.has(`${start.x},${start.y}`)) {
@@ -1202,46 +1191,35 @@ export function relayoutWorld() {
     guard.assertCurrent();
     const mapRow = getMapRow();
     if (!mapRow) return { ok: false, error: '小镇尚未初始化' };
-    const cols = mapRow.grid_cols;
-    const rows = mapRow.grid_rows;
+    const desiredSize = Math.max(30, Math.min(80, parseInt(config.town.mapSize, 10) || mapRow.grid_cols || 50));
+    const cols = desiredSize;
+    const rows = desiredSize;
     const ready = listAssets({}).filter(a => a.status === 'ready' && ['ground', 'road', 'building', 'prop'].includes(a.kind));
     if (ready.length < 4) return { ok: false, error: '可用素材不足，无法重新布局' };
 
-    const world = getWorldSetting(mapRow.world_setting_id);
     const db = getDb();
     const npcRows = db.prepare('SELECT display_name FROM town_npcs ORDER BY id').all();
-    const inventory = ready.map(a => ({
-      kind: a.kind, key: a.key, name: a.name,
-      footprint: a.meta?.footprint || undefined,
-      reusable: a.meta?.reusable || undefined,
-      maxInstances: a.meta?.maxInstances || undefined,
-      blocking: a.kind === 'prop' ? !!a.meta?.blocking : undefined,
-    }));
     const bp = {
       styleTags: job?.blueprint?.styleTags || config.town.generation?.styleTags || '',
       npcs: npcRows.map(r => ({ displayName: r.display_name })),
     };
-
-    const layoutMsgs = [
-      ...townPromptSystemMessages(world),
-      { role: 'system', content: buildLayoutOutputStructure(cols, rows) },
-      { role: 'system', content: buildLayoutTaskRequirements(bp, inventory, cols, rows) },
-      {
-        role: 'user',
-        content: [`请执行：为现有小镇重新输出 ${cols}×${rows} 布局 JSON。保留世界观气质，但重新规划建筑、道路和 POI。`].join('\n'),
-      },
-    ];
-    const content = await chatSync(layoutMsgs, {
-      max_tokens: 8196,
-      temperature: 0.8,
-      response_format: { type: 'json_object' },
-      label: '小镇重新布图',
-    });
     guard.assertCurrent();
-    const parsed = safeJsonParse(content);
-    if (!parsed) throw new Error('重新布局 JSON 解析失败');
-
-    const draft = expandLayout(parsed, ready, bp, cols, rows);
+    const draft = generateLocalLayout({
+      readyAssets: ready,
+      blueprint: bp,
+      cols,
+      rows,
+      buildingDensity: config.town.buildingDensity,
+      propDensity: config.town.propDensity,
+      seed: Date.now(),
+    });
+    if (config.town.aiLayoutOptimize) {
+      try {
+        await refineTownDraftWithLLM({ draft, readyAssets: ready, blueprint: bp, cols, rows });
+      } catch (err) {
+        console.warn('[town] AI layout optimize skipped:', err?.message || err);
+      }
+    }
     const saved = saveMap({
       name: mapRow.name || '小镇',
       cols, rows,
