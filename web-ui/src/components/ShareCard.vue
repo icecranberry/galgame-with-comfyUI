@@ -17,7 +17,7 @@
               <span class="share-skeleton-hint">正在生成分享图…</span>
             </div>
             <template v-else-if="previewUrl">
-              <!-- 海报预览（1080×1920 竖版）：此时只是草稿，照片可在下方编辑层里调整 -->
+              <!-- 海报预览（默认 1080×1920 竖版，刊风 / 沉浸收窄照片框时会变矮）：此时只是草稿，照片可在编辑层里调整 -->
               <img
                 ref="posterRef"
                 :src="previewUrl"
@@ -44,12 +44,6 @@
               ></canvas>
               <div v-if="heroReady" class="share-hero-hint" :class="{ 'is-hidden': hintHidden }">
                 <span class="share-hero-hint-text">拖动照片调整位置 · 滚轮 / 双指缩放</span>
-                <linshe-button
-                  variant="ghost"
-                  size="sm"
-                  :disabled="!heroAdjusted"
-                  @click="resetHeroAdjust"
-                >复原</linshe-button>
               </div>
             </template>
           </div>
@@ -177,8 +171,8 @@ function revokePreview() {
 // ── 主图编辑：海报中间那张照片的位置 / 比例 ──
 // 变换以「框占比」表达：scale 相对 cover 基准（1 = 恰好铺满照片框），offset 为相对框
 // 宽高的中心偏移占比。编辑层画布与最终出图共用渲染器的 drawHeroAdjusted 路径，所见即
-// 所得；初始值由 computeHeroInitialAdjust 复刻智能裁剪的默认效果，不动照片时出图与
-// 旧的直接渲染逐像素一致。
+// 所得；初始值由 computeHeroInitialAdjust 复刻智能裁剪的默认效果。刊风 / 沉浸撑不满
+// 框高时渲染器会把框高收到照片高度并裁短画布，编辑层按 hero.clipFh 对位、纵向顶部对齐。
 const previewRef = ref(null)
 const posterRef = ref(null)
 const heroInfo = ref(null)
@@ -189,8 +183,9 @@ const heroLimits = reactive({ min: 1, max: 4 })
 const heroAdjustDirty = ref(false)
 const heroGestureActive = ref(false)
 const heroViewScale = ref(0) // 显示像素 / 画布基准像素
-// 操作提示：显示 2 秒后渐出，首次编辑手势立即渐出，切换版式时重新出现
+// 操作提示：打开分享窗口后首次出图时出现一次，显示 2 秒后渐出，首次编辑手势立即渐出
 const hintHidden = ref(false)
+let hintShown = false
 const heroPointers = new Map()
 let heroGesture = null
 let hintTimer = 0
@@ -239,6 +234,11 @@ function clampHeroAdjust() {
   const limY = Math.abs(m.dh - m.fh) / 2 / m.fh
   heroAdjust.offsetX = clampValue(heroAdjust.offsetX, -limX, limX)
   heroAdjust.offsetY = clampValue(heroAdjust.offsetY, -limY, limY)
+  // 刊风 / 沉浸收窄框高后照片纵向顶部对齐（实际偏移由渲染器统一算），编辑态归零避免回弹跳变
+  const clipFh = hero.clipFh
+  if (clipFh && clipFh < hero.fh - 0.5) {
+    heroAdjust.offsetY = 0
+  }
 }
 
 /** 客户端坐标 → 照片框局部坐标（逆旋转；普通版式 rotate=0 时即画布坐标） */
@@ -485,7 +485,10 @@ async function renderPoster(styleId, { bake = false } = {}) {
     }
     await nextTick()
     scheduleSyncHero()
-    if (!bake) showHeroHint()
+    if (!bake && !hintShown) {
+      hintShown = true
+      showHeroHint()
+    }
   } catch (err) {
     console.error('[ShareCard] render poster failed:', err)
     if (seq === renderSeq) toastFn?.('分享图生成失败', 'error')
@@ -597,6 +600,7 @@ watch(() => props.visible, v => {
   if (v) {
     focusPanel()
     activeStyle.value = 'auto'
+    hintShown = false
     renderPoster('auto')
   } else {
     copying.value = false
@@ -611,6 +615,7 @@ watch(() => props.visible, v => {
     bakeTimer = 0
     clearTimeout(hintTimer)
     hintHidden.value = false
+    hintShown = false
     heroInfo.value = null
     heroAdjustDirty.value = false
     heroPointers.clear()
@@ -671,7 +676,7 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 
-/* 海报本身是 1080×1920，这里只做展示缩放，导出始终是原尺寸 */
+/* 海报默认 1080×1920（刊风 / 沉浸收窄照片框时高度会更短），这里只做展示缩放，导出始终是原尺寸 */
 .share-poster {
   max-width: 100%;
   max-height: 100%;
@@ -704,8 +709,7 @@ onBeforeUnmount(() => {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px 4px 14px;
+  padding: 4px 14px;
   background: rgba(255, 253, 251, 0.92);
   border: 1px solid rgba(224, 216, 207, 0.55);
   border-radius: 999px;
@@ -718,10 +722,6 @@ onBeforeUnmount(() => {
 .share-hero-hint.is-hidden {
   opacity: 0;
   visibility: hidden;
-}
-
-.share-hero-hint > * {
-  pointer-events: auto;
 }
 
 .share-hero-hint-text {
@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
 
   .share-hero-hint {
     bottom: 10px;
-    padding: 3px 5px 3px 12px;
+    padding: 3px 12px;
   }
 
   .share-hero-hint-text {

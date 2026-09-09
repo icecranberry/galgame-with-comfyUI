@@ -241,23 +241,37 @@ export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limi
   return result;
 }
 
-// T4：importance≥4 的 knowledge 按会话聚合（每会话一次 LLM 调用生成画像建议）
-export function findPortraitSuggestionConversations(db, { minImportance = 4, limit = 2 } = {}) {
+// T4 待确认建议积压上限：达到上限的会话先跳过（与 routes/portraits.js 列表页 20 条对齐）
+export const PORTRAIT_PENDING_LIMIT = 20;
+
+// T4：importance≥4 的 knowledge 按会话聚合（每会话一次 LLM 调用生成画像建议）。
+// 待确认建议积压达到上限的会话先跳过——同一批记忆反复"升华"只会产出换词重述的近似建议，
+// 等人工确认/忽略掉一批后它自然重新进入候选（也让后面的会话有机会轮转）。
+export function findPortraitSuggestionConversations(db, { minImportance = 4, limit = 2, maxPending = PORTRAIT_PENDING_LIMIT } = {}) {
   const rows = db.prepare(`
     SELECT conversation_id, COUNT(*) AS cnt FROM memory_fragments
     WHERE status = 'active' AND memory_type = 'knowledge' AND importance >= ?
       AND substr(conversation_id, 1, 5) = 'char_'
-    GROUP BY conversation_id ORDER BY cnt DESC LIMIT ?
-  `).all(minImportance, limit);
-  return rows.map(row => ({
-    conversationId: row.conversation_id,
-    characterId: Number(String(row.conversation_id).match(/^char_(\d+)$/)?.[1]) || null,
-    memories: db.prepare(`
+    GROUP BY conversation_id ORDER BY cnt DESC LIMIT 50
+  `).all(minImportance);
+  const countPending = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM portrait_suggestions WHERE character_id = ? AND status = 'pending'
+  `);
+  const result = [];
+  for (const row of rows) {
+    const characterId = Number(String(row.conversation_id).match(/^char_(\d+)$/)?.[1]) || null;
+    if (!characterId) continue;
+    if (maxPending > 0 && countPending.get(characterId).cnt >= maxPending) continue;
+    const memories = db.prepare(`
       SELECT memory_id, judgment, semantic_note, importance FROM memory_fragments
       WHERE status = 'active' AND memory_type = 'knowledge' AND importance >= ? AND conversation_id = ?
       ORDER BY importance DESC, COALESCE(updated_at, created_at) DESC LIMIT 12
-    `).all(minImportance, row.conversation_id),
-  })).filter(item => item.characterId && item.memories.length > 0);
+    `).all(minImportance, row.conversation_id);
+    if (memories.length === 0) continue;
+    result.push({ conversationId: row.conversation_id, characterId, memories });
+    if (result.length >= limit) break;
+  }
+  return result;
 }
 
 // T5：v3 检索字段（keywords/perspectives/semantic_note）全缺失的 active 旧记忆，最旧优先
@@ -287,6 +301,11 @@ function parseJsonObject(raw) {
   const end = text.lastIndexOf('}');
   if (start >= 0 && end > start) text = text.slice(start, end + 1);
   return JSON.parse(text);
+}
+
+// 建议文本归一化（去空白/标点/符号）：挡住"多一个'的'/换标点"这类纯格式差异的重复建议
+export function normalizeSuggestionText(text) {
+  return String(text || '').replace(/[\s\p{P}\p{S}]/gu, '');
 }
 
 const LLM_OPTS = { temperature: 0.2, max_tokens: 1500, response_format: { type: 'json_object' }, label: '记忆整理' };
@@ -459,7 +478,10 @@ export async function runPortraitSuggestionTask({ conversations, llmBudgetRemain
   for (const conversation of conversations || []) {
     if (llmCalls >= llmBudgetRemaining) return { llmCalls, suggestions, done: false };
     const existingPortraits = db.prepare(`SELECT trait_type, content FROM user_portraits WHERE character_id = ?`).all(conversation.characterId);
-    const pending = db.prepare(`SELECT suggestion FROM portrait_suggestions WHERE character_id = ? AND status = 'pending'`).all(conversation.characterId);
+    const pending = db.prepare(`
+      SELECT suggestion FROM portrait_suggestions WHERE character_id = ? AND status = 'pending'
+      ORDER BY id DESC LIMIT ?
+    `).all(conversation.characterId, PORTRAIT_PENDING_LIMIT);
     const listing = conversation.memories.map(m => `- ${m.judgment}${m.semantic_note ? `（转述：${m.semantic_note}）` : ''} [重要度${m.importance}]`).join('\n');
     const portraitLines = existingPortraits.map(p => `- [${p.trait_type}] ${p.content}`).join('\n') || '（暂无画像）';
     const pendingLines = pending.map(p => `- ${p.suggestion}`).join('\n') || '（无待确认建议）';
@@ -484,18 +506,22 @@ ${pendingLines}
       console.warn('[memory-consolidation] T4 LLM failed:', error.message);
       continue;
     }
+    const accepted = [];
     for (const item of items.slice(0, 3)) {
       const field = item.field === 'preference' ? 'preference' : 'personality';
       const suggestion = String(item.suggestion || '').trim().slice(0, 200);
       if (!suggestion) continue;
-      if (pending.some(p => p.suggestion === suggestion)) continue;
-      if (existingPortraits.some(p => p.content === suggestion)) continue;
+      const normalized = normalizeSuggestionText(suggestion);
+      if (!normalized || accepted.includes(normalized)) continue;
+      if (pending.some(p => normalizeSuggestionText(p.suggestion) === normalized)) continue;
+      if (existingPortraits.some(p => normalizeSuggestionText(p.content) === normalized)) continue;
       const sourceIds = (Array.isArray(item.sourceMemoryIds) ? item.sourceMemoryIds : []).map(String).filter(id => conversation.memories.some(m => m.memory_id === id));
       db.prepare(`
         INSERT INTO portrait_suggestions(character_id, field, current_value, suggestion, source_memory_ids, status)
         VALUES (?, ?, NULL, ?, ?, 'pending')
       `).run(conversation.characterId, field, suggestion, JSON.stringify(sourceIds));
       suggestions++;
+      accepted.push(normalized);
     }
   }
   return { llmCalls, suggestions, done: true };
@@ -576,7 +602,7 @@ export function runTombstoneTask({ db, enqueueDelete, enqueueTripleDelete } = {}
 }
 
 // v3 开关关闭时，依赖 v3 字段的任务（T2/T4/T5）整体跳过；T1/T3/T6 只依赖基础字段照常运行
-export function taskEnabledByV3(jobType) {
+export function taskEnabledByV3(jobType, v3Enabled = isMemoryV3Enabled()) {
   if (!['generalize', 'portrait_suggest', 'backfill'].includes(jobType)) return true;
-  return isMemoryV3Enabled();
+  return v3Enabled;
 }

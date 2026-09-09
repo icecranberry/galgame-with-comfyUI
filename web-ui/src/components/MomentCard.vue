@@ -490,7 +490,6 @@ function formatTime(iso) {
 }
 .action-btn:hover { background: rgba(255, 255, 255, 0.28); color: var(--text-bright); }
 .action-btn.active { color: var(--accent); }
-.like-btn.active { color: var(--accent-2); }
 .action-btn.share-btn { margin-left: auto; }
 
 .comments-section {

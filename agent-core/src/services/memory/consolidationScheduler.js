@@ -20,7 +20,7 @@
 import { getDb } from '../../db/index.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { config } from '../../config.js';
-import { getConsolidationConfig } from './memoryConfig.js';
+import { getConsolidationConfig, isPortraitSuggestionEnabled, isMemoryV3Enabled } from './memoryConfig.js';
 import { hasActiveChatStream } from '../chatActivity.js';
 import {
   LLM_JOB_TYPES,
@@ -118,19 +118,30 @@ function lastCompletedAt(db, jobType) {
   `).get(jobType)?.at || null;
 }
 
-function completedBefore(db, jobType, withinMs) {
+function completedBefore(db, jobType, withinMs, now = Date.now()) {
   const at = lastCompletedAt(db, jobType);
   if (!at) return true;
   const parsed = new Date(String(at).replace('T', ' ') + 'Z');
   if (Number.isNaN(parsed.getTime())) return true;
-  return Date.now() - parsed.getTime() >= withinMs;
+  return now - parsed.getTime() >= withinMs;
+}
+
+// LLM 任务冷却表：缺省不冷却（如 backfill 要持续消化存量，靠每批 10 条自然限速）
+const LLM_JOB_COOLDOWN_MS = { portrait_suggest: 24 * 3600 * 1000 };
+
+// 供调度器与单测复用的冷却判定（纯查询，不触发全局 DB）
+export function isLlmJobCoolingDown(db, jobType, now = Date.now()) {
+  const cooldown = LLM_JOB_COOLDOWN_MS[jobType];
+  if (!cooldown) return false;
+  return !completedBefore(db, jobType, cooldown, now);
 }
 
 /**
  * 候选发现 + 入队。SQL 任务按时间节流（decay 6h / tombstone 24h），
- * LLM 任务只在"确实有活干"时入队，避免空转。
+ * LLM 任务只在"确实有活干"时入队；T4 再按天冷却——它的候选查询对同一批记忆恒为真，
+ * 不冷却就会每轮扫描都重跑同一个角色。
  */
-function discoverAndEnqueueJobs(db, llmBudget) {
+export function discoverAndEnqueueJobs(db, llmBudget, { portraitSuggest = isPortraitSuggestionEnabled(), v3Enabled = isMemoryV3Enabled() } = {}) {
   if (!hasOpenJob(db, 'decay') && completedBefore(db, 'decay', 6 * 3600 * 1000)) {
     enqueueJob(db, 'decay');
   }
@@ -145,8 +156,10 @@ function discoverAndEnqueueJobs(db, llmBudget) {
     backfill: () => hasBackfillCandidates(db),
   };
   for (const [jobType, hasWork] of Object.entries(candidates)) {
-    if (!taskEnabledByV3(jobType)) continue;
+    if (!taskEnabledByV3(jobType, v3Enabled)) continue;
+    if (jobType === 'portrait_suggest' && !portraitSuggest) continue;
     if (hasOpenJob(db, jobType)) continue;
+    if (isLlmJobCoolingDown(db, jobType)) continue;
     if (hasWork()) enqueueJob(db, jobType);
   }
 }
@@ -173,7 +186,7 @@ function finishJob(db, jobId, status, error = null) {
 
 // ── 任务执行分发 ──
 
-async function executeJob(job, { llmBudgetRemaining, db }) {
+async function executeJob(job, { llmBudgetRemaining, db, portraitSuggest = false }) {
   const deps = {
     db,
     chatSync,
@@ -194,6 +207,7 @@ async function executeJob(job, { llmBudgetRemaining, db }) {
       return runGeneralizationTask({ groups, llmBudgetRemaining, deps });
     }
     case 'portrait_suggest': {
+      if (!portraitSuggest) return { llmCalls: 0, suggestions: 0, done: true, skipped: 'disabled' };
       const conversations = findPortraitSuggestionConversations(db);
       return runPortraitSuggestionTask({ conversations, llmBudgetRemaining, deps });
     }
@@ -224,7 +238,7 @@ export async function runConsolidationOnce({ force = false } = {}) {
   const summary = {};
   try {
     recoverInterruptedJobs(db);
-    discoverAndEnqueueJobs(db, cfg.llmCallsPerRun);
+    discoverAndEnqueueJobs(db, cfg.llmCallsPerRun, { portraitSuggest: cfg.portraitSuggest });
     let llmCallsUsed = 0;
     while (true) {
       const job = claimNextJob(db);
@@ -237,7 +251,7 @@ export async function runConsolidationOnce({ force = false } = {}) {
         break;
       }
       try {
-        const result = await executeJob(job, { llmBudgetRemaining: budgetRemaining, db });
+        const result = await executeJob(job, { llmBudgetRemaining: budgetRemaining, db, portraitSuggest: cfg.portraitSuggest });
         llmCallsUsed += result.llmCalls || 0;
         // LLM 任务因预算中途让位 → 补一个后续任务（下轮接着跑剩余候选）
         if (isLlmJob && result.done === false && cfg.llmCallsPerRun - llmCallsUsed <= 0) {

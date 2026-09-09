@@ -826,19 +826,6 @@ export function deletePortrait(id) {
   return request(`/portraits/${id}`, { method: 'DELETE' })
 }
 
-// ── 阶段三 T4：画像升华建议（daemon 产出，人工确认）──
-export async function getPortraitSuggestions(characterId) {
-  return request(`/portraits/${characterId}/suggestions`)
-}
-
-export function confirmPortraitSuggestion(id) {
-  return request(`/portraits/suggestions/${id}/confirm`, { method: 'POST' })
-}
-
-export function rejectPortraitSuggestion(id) {
-  return request(`/portraits/suggestions/${id}/reject`, { method: 'POST' })
-}
-
 // ── ComfyUI health ──
 export async function comfyuiHealth() {
   try {

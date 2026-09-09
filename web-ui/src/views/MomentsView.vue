@@ -73,7 +73,7 @@
       </div>
 
       <!-- 帖子列表（stagger：首屏卡片错峰浮现） -->
-      <TransitionGroup name="post-enter" tag="div" class="moments-list stagger">
+      <TransitionGroup name="post-enter" tag="div" class="moments-list stagger" type="transition">
         <MomentCard
           v-for="post in moments.visiblePosts"
           :key="post.id"

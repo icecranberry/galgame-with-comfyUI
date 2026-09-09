@@ -26,7 +26,9 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）。
   // llmCallsPerRun 是"每轮整理"的调用预算（每 5 分钟一轮、每轮重置），并非每日总量；
   // 旧配置键 dailyMaxLlmCalls 由 normalizeMemorySettings 兼容读取。
-  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
+  // T4 画像升华（portrait_suggest）默认关：旧实现会对同一批记忆反复重跑、产出换词重述的
+  // 近似建议；保留开关与实现，等改成「新记忆触发 + 向量去重 + 拒绝反馈」后再放量。
+  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6, portraitSuggest: false },
   // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
@@ -92,6 +94,9 @@ export function normalizeMemorySettings(input = {}, previous = null) {
         base.consolidation?.llmCallsPerRun ?? base.consolidation?.dailyMaxLlmCalls ?? 6,
         0, 30,
       ),
+      portraitSuggest: consolidation.portraitSuggest === undefined
+        ? (base.consolidation?.portraitSuggest ?? false)
+        : Boolean(consolidation.portraitSuggest),
     },
     contextBudget: {
       enabled: contextBudget.enabled === undefined ? (base.contextBudget?.enabled ?? false) : Boolean(contextBudget.enabled),
@@ -162,15 +167,21 @@ export function isMemoryActiveSearchEnabled() {
 // 阶段三整理 daemon 配置。DB 未就绪时按默认开启处理（daemon 内部还有空闲判定双重保险）。
 export function getConsolidationConfig() {
   try {
-    const { enabled, idleDelayMinutes, llmCallsPerRun } = getMemorySettings().consolidation || {};
+    const { enabled, idleDelayMinutes, llmCallsPerRun, portraitSuggest } = getMemorySettings().consolidation || {};
     return {
       enabled: enabled !== false,
       idleDelayMinutes: clampInt(idleDelayMinutes, 30, 5, 720),
       llmCallsPerRun: clampInt(llmCallsPerRun, 6, 0, 30),
+      portraitSuggest: portraitSuggest === true,
     };
   } catch {
-    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 };
+    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6, portraitSuggest: false };
   }
+}
+
+// T4 画像升华开关（默认关）。DB 未就绪时按关闭处理。
+export function isPortraitSuggestionEnabled() {
+  return getConsolidationConfig().portraitSuggest === true;
 }
 
 // 阶段四 dynamicBlocks token 预算配置。DB 未就绪时按默认关闭处理，零影响。

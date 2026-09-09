@@ -427,6 +427,88 @@ test('runPortraitSuggestionTask：建议入 pending 队列且与已有画像去�
   db.close();
 });
 
+test('findPortraitSuggestionConversations：pending 积压达上限的会话先跳过', () => {
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_sat', judgment: '用户对花生过敏', importance: 5, conversationId: 'char_7' });
+  insertFragment(db, { memoryId: 'mem_free', judgment: '用户喜欢夜跑', importance: 4, conversationId: 'char_8' });
+  const insert = db.prepare(`INSERT INTO portrait_suggestions(character_id, field, suggestion, source_memory_ids, status) VALUES (?, 'personality', ?, '[]', 'pending')`);
+  for (let i = 0; i < 3; i++) insert.run(7, `积压建议${i}`);
+  // 上限 3：char_7 已满 → 本轮只轮到 char_8
+  assert.deepEqual(findPortraitSuggestionConversations(db, { maxPending: 3 }).map(c => c.characterId), [8]);
+  // 人工处理掉积压后 char_7 重新进入候选
+  db.prepare(`UPDATE portrait_suggestions SET status = 'rejected' WHERE character_id = 7`).run();
+  assert.deepEqual(findPortraitSuggestionConversations(db, { maxPending: 3 }).map(c => c.characterId).sort(), [7, 8]);
+  db.close();
+});
+
+test('runPortraitSuggestionTask：归一化去重挡住纯标点差异的重复建议', async () => {
+  const db = createDb();
+  db.prepare(`INSERT INTO portrait_suggestions(character_id, field, suggestion, source_memory_ids, status) VALUES (7, 'personality', '用户很细心。', '[]', 'pending')`).run();
+  const conversations = [{ characterId: 7, conversationId: 'char_7', memories: [{ memory_id: 'mem_c1', judgment: '用户记得所有纪念日', semantic_note: null, importance: 5 }] }];
+  const result = await runPortraitSuggestionTask({
+    conversations,
+    llmBudgetRemaining: 1,
+    deps: {
+      db,
+      chatSync: async () => JSON.stringify({
+        suggestions: [
+          { field: 'personality', suggestion: '用户很细心' },        // 与 pending 仅标点差异 → 跳过
+          { field: 'preference', suggestion: '用户偏好深夜聊天' },
+          { field: 'preference', suggestion: '用户偏好深夜聊天！' }, // 同批内仅标点差异 → 跳过
+        ],
+      }),
+    },
+  });
+  assert.equal(result.suggestions, 1);
+  assert.deepEqual(
+    db.prepare(`SELECT suggestion FROM portrait_suggestions WHERE character_id = 7 AND status = 'pending' ORDER BY id`).all().map(r => r.suggestion),
+    ['用户很细心。', '用户偏好深夜聊天'],
+  );
+  db.close();
+});
+
+test('runPortraitSuggestionTask：待确认建议最多 20 条进 prompt', async () => {
+  const db = createDb();
+  const insert = db.prepare(`INSERT INTO portrait_suggestions(character_id, field, suggestion, source_memory_ids, status) VALUES (7, 'personality', ?, '[]', 'pending')`);
+  for (let i = 1; i <= 25; i++) insert.run(`建议-${String(i).padStart(2, '0')}`);
+  let prompt = '';
+  await runPortraitSuggestionTask({
+    conversations: [{ characterId: 7, conversationId: 'char_7', memories: [{ memory_id: 'mem_c1', judgment: '用户记得所有纪念日', semantic_note: null, importance: 5 }] }],
+    llmBudgetRemaining: 1,
+    deps: { db, chatSync: async messages => { prompt = messages[0].content; return '{"suggestions":[]}'; } },
+  });
+  assert.match(prompt, /建议-25/);
+  assert.doesNotMatch(prompt, /建议-05/);
+  db.close();
+});
+
+test('isLlmJobCoolingDown：portrait_suggest 完成后 24h 内不再入队', async () => {
+  const { isLlmJobCoolingDown } = await import('../src/services/memory/consolidationScheduler.js');
+  const db = createDb();
+  const now = Date.now();
+  const stamp = ms => new Date(now - ms).toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare(`INSERT INTO memory_consolidation_jobs(job_type, status, updated_at) VALUES ('portrait_suggest', 'completed', ?)`).run(stamp(60 * 1000));
+  assert.equal(isLlmJobCoolingDown(db, 'portrait_suggest', now), true);
+  db.prepare(`UPDATE memory_consolidation_jobs SET updated_at = ? WHERE job_type = 'portrait_suggest'`).run(stamp(25 * 3600 * 1000));
+  assert.equal(isLlmJobCoolingDown(db, 'portrait_suggest', now), false);
+  // backfill 无冷却：存量要靠每轮持续消化
+  db.prepare(`INSERT INTO memory_consolidation_jobs(job_type, status, updated_at) VALUES ('backfill', 'completed', ?)`).run(stamp(60 * 1000));
+  assert.equal(isLlmJobCoolingDown(db, 'backfill', now), false);
+  db.close();
+});
+
+test('discoverAndEnqueueJobs：portraitSuggest 关闭时不入队 T4', async () => {
+  const { discoverAndEnqueueJobs } = await import('../src/services/memory/consolidationScheduler.js');
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_core', judgment: '用户对花生过敏', importance: 5, conversationId: 'char_7' });
+  const countT4 = () => db.prepare(`SELECT COUNT(*) c FROM memory_consolidation_jobs WHERE job_type = 'portrait_suggest'`).get().c;
+  discoverAndEnqueueJobs(db, 6, { portraitSuggest: false, v3Enabled: true });
+  assert.equal(countT4(), 0, '默认关闭时不应入队 T4');
+  discoverAndEnqueueJobs(db, 6, { portraitSuggest: true, v3Enabled: true });
+  assert.equal(countT4(), 1, '显式打开后才入队');
+  db.close();
+});
+
 test('runBackfillTask：补齐 v3 字段并置 stale 触发重嵌入', async () => {
   const db = createDb();
   insertFragment(db, { memoryId: 'mem_legacy', judgment: '用户不吃香菜', keywords: null });
