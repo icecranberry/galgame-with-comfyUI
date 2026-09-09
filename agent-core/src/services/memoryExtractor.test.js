@@ -10,7 +10,8 @@ function createRawDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id TEXT NOT NULL,
       role TEXT NOT NULL,
-      content TEXT NOT NULL
+      content TEXT NOT NULL,
+      created_at DATETIME
     )
   `);
   const insert = db.prepare(`

@@ -33,7 +33,7 @@
             </div>
           </div>
 
-          <div class="card-grid" @scroll.passive="onScroll" ref="cardGridEl">
+          <div class="card-grid stagger" @scroll.passive="onScroll" ref="cardGridEl">
             <CharacterStatusCard
               v-for="c in filteredChars"
               :key="c.id"
@@ -45,10 +45,9 @@
           </div>
         </template>
 
-        <!-- 加载态 -->
-        <div v-else-if="store.loading" class="sched-placeholder">
-          <div class="loader"></div>
-          <p>加载角色日程中...</p>
+        <!-- 加载态：骨架卡片 -->
+        <div v-else-if="store.loading" class="sched-skeleton-grid">
+          <div v-for="i in 3" :key="i" class="skeleton sched-skeleton-card"></div>
         </div>
 
         <!-- 空态 -->
@@ -68,7 +67,7 @@
           <div class="sidebar-scan-content">
             <div class="sidebar-scan-icon">
               <svg viewBox="0 0 80 80" class="sidebar-scan-ring">
-                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(var(--accent-rgb),0.12)" stroke-width="2.5"/>
                 <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                   stroke-width="2.5" stroke-linecap="round"
                   stroke-dasharray="214"
@@ -137,7 +136,7 @@
                 <div class="pk-wait">
                   <div class="pk-ring-container">
                     <svg viewBox="0 0 80 80" class="pk-ring">
-                      <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(0,0,0,0.06)" stroke-width="3" />
+                      <circle cx="40" cy="40" r="34" fill="none" stroke="var(--pk-ring-track)" stroke-width="3" />
                       <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                         stroke-width="3" stroke-linecap="round"
                         :stroke-dasharray="2 * Math.PI * 34"
@@ -1116,7 +1115,7 @@ function finishReset() {
   padding: 14px 24px;
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--glass-bg);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1141,7 +1140,7 @@ function finishReset() {
   padding: 8px 22px;
   border-radius: 14px;
   border: 2px solid transparent;
-  background: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
+  background: var(--grad-soft);
   background-size: 200% 200%;
   color: var(--accent);
   font-size: 13px;
@@ -1153,8 +1152,8 @@ function finishReset() {
 }
 .btn-reset-icon { flex-shrink: 0; fill: currentColor; }
 .btn-reset:hover:not(.is-disabled) {
-  border: 2px solid rgba(224, 123, 108, 0.55);
-  box-shadow: 0 3px 20px rgba(224, 123, 108, 0.10);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 3px 20px rgba(var(--accent-rgb), 0.10);
   color: #a85545;
   animation: waterflow 1s ease-in-out infinite;
 }
@@ -1164,7 +1163,7 @@ function finishReset() {
 }
 .btn-reset.is-disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-reset.is-resetting {
-  border-color: rgba(224, 123, 108, 0.35);
+  border-color: rgba(var(--accent-rgb), 0.35);
   color: var(--accent);
 }
 .btn-reset .spinning { animation: spin 1.2s linear infinite; }
@@ -1185,8 +1184,14 @@ function finishReset() {
   align-items: center; justify-content: center; gap: 10px;
   color: var(--text-secondary);
 }
+.sched-skeleton-grid {
+  flex: 1; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px; align-content: start;
+}
+.sched-skeleton-card { height: 190px; border-radius: var(--radius-lg); }
 .sched-placeholder p { margin: 0; font-size: 0.95rem; }
-.ph-hint { font-size: 0.8rem; color: #bfbbb6; }
+.ph-hint { font-size: 0.8rem; color: var(--text-secondary); }
 
 .loader { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1203,13 +1208,13 @@ function finishReset() {
   top: 0; right: 0; bottom: 0;
   width: 260px;
   z-index: 10;
-  border-left: 1px solid rgba(224,123,108,0.18);
-  background: rgba(255, 255, 255, 0.45);
+  border-left: 1px solid rgba(var(--accent-rgb),0.18);
+  background: var(--glass-bg-strong);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: flex; flex-direction: column;
   overflow: hidden;
-  box-shadow: inset 0 0 60px rgba(224,123,108,0.04);
+  box-shadow: inset 0 0 60px rgba(var(--accent-rgb),0.04);
 }
 
 .sidebar-scan-overlay {
@@ -1227,13 +1232,13 @@ function finishReset() {
   height: 2px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(224,123,108,0.3) 15%,
+    rgba(var(--accent-rgb),0.3) 15%,
     var(--accent) 50%,
-    rgba(224,123,108,0.3) 85%,
+    rgba(var(--accent-rgb),0.3) 85%,
     transparent 100%
   );
   animation: sidebar-scan-sweep 2.6s ease-in-out infinite;
-  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb),0.55), 0 0 10px rgba(var(--accent-rgb),0.25);
   z-index: 2;
   pointer-events: none;
 }
@@ -1254,8 +1259,8 @@ function finishReset() {
   left: 20%; right: 20%;
   height: 60px;
   background: radial-gradient(ellipse at center,
-    rgba(224,123,108,0.12) 0%,
-    rgba(224,123,108,0.04) 40%,
+    rgba(var(--accent-rgb),0.12) 0%,
+    rgba(var(--accent-rgb),0.04) 40%,
     transparent 70%
   );
   animation: sidebar-glow-follow 2.6s ease-in-out infinite;
@@ -1330,14 +1335,14 @@ function finishReset() {
 
 /* ── 副标题/进度详情 ── */
 .sidebar-scan-sub {
-  font-size: 0.73rem; color: #bfbbb6;
+  font-size: 0.73rem; color: var(--text-secondary);
   line-height: 1.5;
   margin-top: 2px;
 }
 .sidebar-scan-sub b { color: var(--text-secondary); font-weight: 600; }
 .sidebar-scan-count {
   display: block; font-size: 0.7rem;
-  color: #c5bfb8; margin-top: 2px;
+  color: var(--text-secondary); margin-top: 2px;
 }
 
 /* ── Peek Modal ── */
@@ -1377,13 +1382,13 @@ function finishReset() {
 .pk-bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 14px;
-  background: #fafaf9; flex-shrink: 0;
+  background: var(--bg-secondary); flex-shrink: 0;
   position: relative;
 }
 .pk-char { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; background: #e07b6c; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .pk-char-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
-.pk-char-avatar-text { color: #fff; font-size: 13px; font-weight: 600; line-height: 1; user-select: none; }
+.pk-char-avatar-text { color: var(--on-accent); font-size: 13px; font-weight: 600; line-height: 1; user-select: none; }
 .pk-char b { display: block; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pk-char span { font-size: 0.72rem; color: var(--text-secondary); }
 .pk-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -1474,7 +1479,7 @@ function finishReset() {
   transform: translateY(14px);
   opacity: 0;
 }
-.pk-wait span { font-size: 0.73rem; color: #bfbbb6; }
+.pk-wait span { font-size: 0.73rem; color: var(--pk-hint); }
 .loader-ring { width: 36px; height: 36px; margin: 0 auto; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 /* 环形进度条（参照 ImageGenBubble） */
 .pk-ring-container { position: relative; width: 80px; height: 80px; margin: 0 auto 8px; }
@@ -1507,7 +1512,7 @@ function finishReset() {
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 .reset-dialog {
-  background: #fff; border: 1px solid var(--border);
+  background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: 16px; width: 100%; max-width: 440px;
   overflow: hidden;
   box-shadow: 0 8px 40px rgba(0,0,0,0.1);
@@ -1564,8 +1569,8 @@ function finishReset() {
   background: var(--accent);
   transition: width 0.3s ease;
 }
-.reset-progress-fill.done { background: #52c41a; }
-.reset-progress-fill.cancelled { background: #faad14; }
+.reset-progress-fill.done { background: var(--success); }
+.reset-progress-fill.cancelled { background: var(--warning); }
 .reset-progress-text {
   font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
   min-width: 60px; text-align: right;
@@ -1578,8 +1583,8 @@ function finishReset() {
   font-size: 0.85rem; color: var(--text-secondary);
 }
 .reset-current-task b { color: var(--text-bright); }
-.reset-current-task.done { color: #52c41a; }
-.reset-current-task.cancelled { color: #faad14; }
+.reset-current-task.done { color: var(--success); }
+.reset-current-task.cancelled { color: var(--warning); }
 .loader-ring-sm {
   width: 18px; height: 18px;
   border: 2px solid var(--border); border-top-color: var(--accent);
@@ -1589,7 +1594,7 @@ function finishReset() {
 /* 错误列表 */
 .reset-errors {
   margin: 0 20px 6px; padding: 10px 12px;
-  background: rgba(255,77,79,0.05); border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 5%, transparent); border-radius: 10px;
   max-height: 120px; overflow-y: auto;
 }
 .reset-error-item {
@@ -1626,7 +1631,7 @@ function finishReset() {
   .sched-sidebar {
     top: auto; left: 0; right: 0; bottom: 0;
     width: 100%; max-height: 130px;
-    border-left: none; border-top: 1px solid rgba(224,123,108,0.18);
+    border-left: none; border-top: 1px solid rgba(var(--accent-rgb),0.18);
   }
   .sidebar-scan-ring { width: 56px; height: 56px; }
   .sidebar-scan-icon { width: 56px; height: 56px; }

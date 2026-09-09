@@ -21,16 +21,8 @@
     <!-- 内容区 -->
     <Gallery ref="galleryRef" @loaded="onLoaded" />
 
-    <!-- 压缩弹窗 -->
-    <Transition name="modal-fade">
-      <div v-if="showModal" class="modal-overlay" @click.self="onOverlayClick">
-        <div class="modal-panel" @click.stop>
-          <div class="modal-header">
-            <span>图片压缩</span>
-            <linshe-button class="modal-close" variant="icon" @click="showModal = false">✕</linshe-button>
-          </div>
-
-          <div class="modal-body">
+    <!-- 压缩弹窗（统一 LinsheModal 基座） -->
+    <linshe-modal :visible="showModal" title="图片压缩" @close="showModal = false">
             <!-- 压缩类型 -->
             <div class="section">
               <div class="section-label">压缩类型</div>
@@ -123,19 +115,14 @@
                 <span v-if="task.errors > 0">，{{ task.errors }} 个错误</span>
               </div>
             </div>
-
-            <!-- 立刻压缩按钮 -->
-
-          </div>
-        </div>
-      </div>
-    </Transition>
+    </linshe-modal>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import Gallery from '../components/Gallery.vue'
+import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
@@ -225,10 +212,7 @@ function onBackground() {
   showModal.value = false
 }
 
-function onOverlayClick() {
-  // 如果有进行中的任务，关闭弹窗 = 后台处理
-  showModal.value = false
-}
+// LinsheModal 点击遮罩直接关闭；有进行中任务时关闭即等于后台处理
 
 // SSE 监听压缩进度
 onMounted(() => {
@@ -272,10 +256,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -303,44 +287,15 @@ onUnmounted(() => {
   padding: 8px 22px;
 }
 
-/* ── 弹窗 ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+/* ── 弹窗：视觉样式走全局 modal 家族，这里只保留布局差异 ── */
 .modal-panel {
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
   width: 550px;
-  max-width: 90vw;
   max-height: 95vh;
   overflow-y: auto;
 }
 
 .modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 18px 20px 12px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-bright);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-.modal-close {
-  padding: 2px 6px;
 }
 
 .modal-body {
@@ -364,7 +319,7 @@ onUnmounted(() => {
   gap: 0;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-strong);
 }
 .toggle-btn {
   flex: 1;
@@ -381,7 +336,7 @@ onUnmounted(() => {
   width: 90%;
   margin: 8px auto 8px;
   height: 1px;
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--border);
 }
 
 /* ── 统计 ── */
@@ -389,7 +344,7 @@ onUnmounted(() => {
   flex-direction: row;
   gap: 16px;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--bg-tertiary);
   border-radius: 10px;
 }
 .stat-item {
@@ -403,7 +358,7 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--text-bright);
 }
-.stat-num.highlight { color: #4caf50; }
+.stat-num.highlight { color: var(--success); }
 .stat-label {
   font-size: 11px;
   color: var(--text-secondary);
@@ -423,7 +378,7 @@ onUnmounted(() => {
 
 .progress-bar {
   height: 6px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-hover);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -448,10 +403,10 @@ onUnmounted(() => {
 
 .progress-done {
   font-size: 13px;
-  color: #4caf50;
+  color: var(--success);
   text-align: center;
 }
-.progress-done.is-error { color: #e07b6c; }
+.progress-done.is-error { color: var(--accent); }
 
 /* ── 立刻压缩按钮 ── */
 .btn-start-inline {

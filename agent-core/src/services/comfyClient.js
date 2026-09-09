@@ -86,6 +86,8 @@ function startObjectInfoPolling() {
 
   poll(); // 立即尝试一次
   pollingTimer = setInterval(poll, 30_000);
+  // 后台探测不应阻止进程退出（否则测试进程会被该定时器吊住）
+  pollingTimer.unref();
 }
 
 // 模块加载时启动轮询

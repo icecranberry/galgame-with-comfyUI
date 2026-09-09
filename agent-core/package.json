@@ -7,10 +7,11 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon --watch src --watch app.js -e js,json app.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test \"test/*.test.js\" \"src/services/*.test.js\""
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

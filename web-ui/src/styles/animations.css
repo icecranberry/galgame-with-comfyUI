@@ -1,0 +1,117 @@
+/* ═══════════════════════════════════════════════════════
+   animations.css —— 全局 keyframes 库与 Vue Transition 类
+   组件内的重复副本（modal-pop/spin/waterflow 等）应删除并改用此处。
+   ═══════════════════════════════════════════════════════ */
+
+/* ── 页面切换：fade + 上浮 + 微缩放 ── */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.28s var(--ease-out), transform 0.28s var(--ease-out);
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+}
+.page-enter-from { opacity: 0; transform: translateY(10px) scale(0.995); }
+.page-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ── 弹窗：遮罩淡入 + 面板 Q 弹 ── */
+.modal-fade-enter-active { transition: opacity 0.25s ease; }
+.modal-fade-leave-active { transition: opacity 0.18s ease; }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-panel,
+.modal-fade-enter-active .modal-card,
+.modal-fade-enter-active .confirm-card,
+.modal-fade-enter-active .dialog {
+  animation: modal-pop 0.34s var(--ease-spring);
+}
+
+/* ── 抽屉 ── */
+.drawer-enter-active, .drawer-leave-active { transition: opacity var(--dur-base) ease; }
+.drawer-enter-active .drawer-panel, .drawer-leave-active .drawer-panel { transition: transform var(--dur-slow) var(--ease-out); }
+.drawer-enter-from, .drawer-leave-to { opacity: 0; }
+.drawer-enter-from .drawer-panel, .drawer-leave-to .drawer-panel { transform: translateX(48px); }
+
+/* ═══════════ keyframes 库 ═══════════ */
+
+/* 弹窗弹入（收敛 6 处本地 modal-pop） */
+@keyframes modal-pop {
+  0% { opacity: 0; transform: scale(0.92) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 列表错峰入场（.stagger 引用） */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 通用旋转 loader（收敛 8+ 处本地 spin） */
+@keyframes cel-spin { to { transform: rotate(360deg); } }
+.cel-spin { animation: cel-spin 0.7s linear infinite; }
+
+/* 渐变按钮 pending 流动（收敛 5 处 waterflow） */
+@keyframes cel-waterflow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+.cel-waterflow {
+  background: linear-gradient(90deg, var(--accent) 25%, var(--accent-hover) 50%, var(--accent) 75%);
+  background-size: 200% 100%;
+  animation: cel-waterflow 1.2s linear infinite;
+  pointer-events: none;
+}
+
+/* 骨架屏波（.skeleton 引用） */
+@keyframes skeleton-wave { 0% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+/* 徽标 Q 弹出现（收敛 jelly-pop×2） */
+@keyframes cel-jelly {
+  0% { transform: scale(0); }
+  55% { transform: scale(1.25); }
+  78% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.cel-jelly { animation: cel-jelly 0.45s var(--ease-spring) both; }
+
+/* 点赞爆心：爱心 pop + 粒子环 */
+@keyframes heart-pop {
+  0% { transform: scale(0.6); }
+  45% { transform: scale(1.35) rotate(-8deg); }
+  70% { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+@keyframes ring-out {
+  from { transform: scale(0.45); opacity: 0.9; }
+  to { transform: scale(1.9); opacity: 0; }
+}
+.like-burst { position: relative; }
+.like-burst svg { animation: heart-pop 0.45s var(--ease-spring); }
+.like-burst::after {
+  content: ''; position: absolute; inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-2);
+  animation: ring-out 0.55s var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+/* 头像摆动（.avatar-wiggle 引用） */
+@keyframes cel-wiggle {
+  0%, 100% { transform: rotate(0); }
+  22% { transform: rotate(-4deg); }
+  48% { transform: rotate(3.4deg); }
+  72% { transform: rotate(-1.8deg); }
+}
+
+/* Sparkle 微闪（.sparkle 引用） */
+@keyframes sparkle-twinkle {
+  0%, 100% { opacity: 0.35; transform: scale(0.82) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1.12) rotate(18deg); }
+}
+
+/* 空状态图标悬浮 */
+@keyframes empty-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* 打字等待点阵（收敛 dot 系） */
+@keyframes cel-dot {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.45; }
+  35% { transform: translateY(-4px); opacity: 1; }
+}

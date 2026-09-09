@@ -56,7 +56,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 </script>
 
@@ -77,7 +77,7 @@ const avatarStyle = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-accent);
   font-size: 44px;
   font-weight: 700;
   border: 4px solid rgba(255, 255, 255, 0.8);
@@ -89,7 +89,7 @@ const avatarStyle = computed(() => {
 .un-name {
   font-size: 16px;
   font-weight: 700;
-  color: #222;
+  color: var(--text-bright);
   text-align: center;
   max-width: 140px;
   overflow: hidden;

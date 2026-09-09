@@ -1,0 +1,263 @@
+/* ═══════════════════════════════════════════════════════
+   邻舍.EXE Design Tokens —— 唯一变量源
+   主题体系：默认 warm（暖色，沿用 v3.2 珊瑚暖纸原色），其余经 <html data-theme> 覆盖。
+   暗夜主题通过 [data-theme="dark"] 覆盖同一组 token。
+   赛璐璐语言：--cel-*（描边/硬阴影/两段式渐变）、--accent-3/4 多点配色、
+   --fun-* 功能色（导航配色/icon-tile 轮换，不随主题）。
+   尺度：--radius-* / --shadow-* / --fs-* / --dur-* / --ease-* / --z-*。
+   切换逻辑见 stores/settings.js + theme.js。
+   ═══════════════════════════════════════════════════════ */
+:root,
+[data-theme="warm"] {
+  color-scheme: light;
+
+  /* ── 底色与文字（对应 v3.2 原始暖纸配色）── */
+  --bg-primary: #f0ece8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ebebeb;
+  --bg-hover: #e0e0e0;
+  --bg-sunken: #f5f1ec;          /* 凹陷槽底色（分段控件/页签轨道，暖色沿用旧暖纸） */
+  --border: #e0dcd6;
+  --border-strong: #d0c3b8;      /* 漫画格描边（组件级 2px 描边用） */
+  --cel-outline: #4a3d36;        /* 赛璐璐深描边色 */
+  --text-primary: #333333;
+  --text-secondary: #8c8074;
+  --text-bright: #111111;
+  --on-accent: #ffffff;
+
+  /* ── 主色系（珊瑚暖色 · 橙粉点睛）── */
+  --accent: #e07b6c;
+  --accent-hover: #cc6a5c;
+  --accent-light: #f0a89a;
+  --accent-rgb: 224, 123, 108;
+  --accent-2: #ff8a4c;
+  --accent-2-hover: #f27632;
+  --accent-2-light: #ffc29a;
+  --accent-2-rgb: 255, 138, 76;
+  --accent-3: #17c3ab;           /* 青绿 */
+  --accent-3-light: #7ce4d6;
+  --accent-4: #f65fa4;           /* 桃粉 */
+  --accent-4-light: #ff9cc8;
+
+  /* ── 赛璐璐渐变与硬阴影 ── */
+  --grad-brand: linear-gradient(135deg, #e07b6c 0%, #f0a89a 48%, #ff8a4c 100%);
+  --grad-cel: linear-gradient(180deg, var(--accent) 0%, var(--accent) 52%, var(--accent-hover) 52%, var(--accent-hover) 100%);
+  --grad-soft: linear-gradient(120deg, #f8edea 0%, #f2eaf4 35%, #eaf0f8 65%, #f8edea 100%);
+  --grad-card-ending: linear-gradient(170deg, #fdfaf7 0%, #f7f1ec 55%, #fbf6f1 100%);
+  --btn-lip: color-mix(in srgb, var(--accent-hover) 72%, #000);  /* 贴纸按钮底部厚度 */
+  --shadow-hard: 0 3px 0 color-mix(in srgb, var(--cel-outline) 16%, transparent);
+  --shadow-hard-sm: 0 2px 0 color-mix(in srgb, var(--cel-outline) 13%, transparent);
+
+  /* ── 功能色组（导航配色 / icon-tile 轮换，不随主题）── */
+  --fun-purple: #7c6af5;
+  --fun-pink: #f65fa4;
+  --fun-orange: #ff8a4c;
+  --fun-teal: #17c3ab;
+  --fun-blue: #4a9df8;
+  --fun-gold: #ffb020;
+  --fun-violet: #a35df0;
+  --fun-neutral: #9a96b5;
+
+  /* ── 语义色（不随主题）── */
+  --success: #52c41a;
+  --warning: #faad14;
+  --danger: #e25c5c;
+
+  /* ── Glassmorphism（暖色下沿用原浅色玻璃）── */
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-bg-strong: rgba(255, 255, 255, 0.38);
+  --glass-bg-veil: rgba(255, 255, 255, 0.28);   /* 扫描/加载遮罩，比 glass-bg 更透 */
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
+  --glass-blur: blur(18px);
+  --tint-subtle: rgba(0, 0, 0, 0.05);           /* 极淡 hover / 分隔线 */
+  --tint-faint: rgba(0, 0, 0, 0.015);           /* 空态底纹等极浅填充 */
+  --text-warm-body: #54483b;                    /* 奇遇正文暖褐色（v3.2 原值） */
+
+  /* ── 背景光斑（index.html 引用）── */
+  /* 暖色沿用 v3.2 原暖纸光斑（与旧版逐值一致），暗夜另有一套（见下） */
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(238, 200, 170, 0.70) 0%, rgba(230, 190, 160, 0.35) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(240, 195, 170, 0.65) 0%, rgba(225, 180, 155, 0.30) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(235, 210, 185, 0.60) 0%, rgba(220, 195, 170, 0.28) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(240, 200, 190, 0.55) 0%, rgba(225, 185, 175, 0.25) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(228, 195, 170, 0.58) 0%, rgba(215, 180, 158, 0.26) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(218, 195, 205, 0.50) 0%, rgba(205, 182, 190, 0.22) 32%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(225, 208, 195, 0.52) 0%, rgba(210, 195, 182, 0.22) 32%, transparent 60%);
+  --dot-color: rgba(224, 123, 108, 0.08);   /* 波点纹理 */
+
+  /* ── 列表选中态（侧边栏角色/群聊项）── */
+  --list-item-active-bg: rgb(226 166 122 / 28%);
+
+  /* ── Peek 弹窗（奇遇/日程预览）加载态：暖色沿用 v3.2 原值 ── */
+  --pk-ring-track: rgba(0, 0, 0, 0.06);
+  --pk-hint: #bfbbb6;
+
+  /* ── 关系图（RelationshipGraph / UserRelationshipGraph）画布底：暖色沿用 v3.2 近白 ── */
+  --rel-canvas-bg: #fafaf9;
+
+  /* ── 弹窗（LinsheModal / modal 家族）：暖色沿用 v3.2 人物详情卡口径
+        —— 暖纸外壳 + 白色内衬，软阴影无描边 ── */
+  --modal-bg: rgba(244, 241, 238, 0.93);
+  --modal-border: none;
+  --modal-radius: 18px;
+  /* full 尺寸面板宽度：主题无关，页面可用 panel-class 覆盖该 token */
+  --modal-full-width: 94vw;
+  --modal-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+  --modal-backdrop: blur(6px);
+  --modal-lining-bg: var(--glass-bg);
+  --modal-lining-border: 1px solid var(--glass-border);
+  --modal-lining-radius: 14px;
+  --modal-lining-margin: 16px 22px 22px;
+  --modal-lining-pad: 18px;
+  --modal-footer-pad: 10px 22px 18px;
+  --modal-footer-border: 1px solid var(--glass-border);
+  --modal-divider: 1px solid var(--border);
+
+  /* ── 浮层与玻璃 hover：暖色沿用 v3.2 近白/更实口径 ── */
+  --popover-bg: rgba(255, 255, 255, 0.95);
+  --glass-bg-hover: rgba(255, 255, 255, 0.8);
+
+  /* ── 详情卡左右悬浮侧栏（角色立绘 / 更多设置）：暖色沿用 v3.2 暖纸底 ── */
+  --side-panel-bg: #f4f1eeed;
+  --side-panel-border: 1px solid rgba(0, 0, 0, 0.05);
+  --side-panel-shadow: 0 6px 28px rgba(0, 0, 0, 0.08);
+
+  /* ── 尺度：圆角 ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* ── 尺度：柔阴影 ── */
+  --shadow-xs: 0 1px 3px rgba(70, 52, 44, 0.06);
+  --shadow-sm: 0 2px 8px rgba(70, 52, 44, 0.08);
+  --shadow-md: 0 6px 20px rgba(70, 52, 44, 0.10);
+  --shadow-lg: 0 12px 40px rgba(70, 52, 44, 0.14);
+  --shadow-glow: 0 4px 18px rgba(var(--accent-rgb), 0.28);
+  --focus-ring: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+
+  /* ── 尺度：字号 ── */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+
+  /* ── 尺度：动效 ── */
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 350ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-emph: cubic-bezier(0.17, 0.89, 0.32, 1.28);
+
+  /* ── 尺度：层级 ── */
+  --z-nav: 100;
+  --z-drawer: 1000;
+  --z-modal: 10000;
+  --z-popover: 11000;
+  --z-toast: 12000;
+  --z-float: 15000;
+}
+
+/* ══ 暗夜：深色玻璃 · 珊瑚夜灯 ══ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-primary: #16131a;
+  --bg-secondary: #221e28;
+  --bg-tertiary: #2b2633;
+  --bg-hover: #383142;
+  --bg-sunken: #2b2633;          /* 凹陷槽底色：暗夜沿用原分段轨道 */
+  --border: #3b3544;
+  --border-strong: #575060;
+  --cel-outline: #0a090c;
+  --text-primary: #e7e2de;
+  --text-secondary: #a39ba9;
+  --text-bright: #fbf8f5;
+  --on-accent: #ffffff;
+
+  --accent: #ff7a64;
+  --accent-hover: #f0644e;
+  --accent-light: #ffa58f;
+  --accent-rgb: 255, 122, 100;
+  --accent-2: #ffb35c;
+  --accent-2-hover: #f09c3e;
+  --accent-2-light: #ffd69a;
+  --accent-2-rgb: 255, 179, 92;
+  --accent-3: #57d6c2;
+  --accent-3-light: #86e6de;
+  --accent-4: #ff7bab;
+  --accent-4-light: #ffa8c6;
+
+  --grad-brand: linear-gradient(135deg, #ff7a64 0%, #ff9a5c 52%, #c46bf5 100%);
+  --grad-cel: linear-gradient(180deg, var(--accent) 0%, var(--accent) 52%, var(--accent-hover) 52%, var(--accent-hover) 100%);
+  --grad-soft: linear-gradient(120deg, #251f2b 0%, #2a2026 35%, #1f2430 65%, #251f2b 100%);
+  --grad-card-ending: var(--grad-soft);
+  --btn-lip: color-mix(in srgb, var(--accent-hover) 72%, #000);
+  --shadow-hard: 0 3px 0 rgba(0, 0, 0, 0.42);
+  --shadow-hard-sm: 0 2px 0 rgba(0, 0, 0, 0.34);
+
+  --glass-bg: rgba(34, 30, 40, 0.72);
+  --glass-bg-strong: rgba(43, 38, 50, 0.62);
+  --glass-bg-veil: var(--glass-bg);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --tint-subtle: rgba(255, 255, 255, 0.06);
+  --tint-faint: rgba(255, 255, 255, 0.03);
+  --text-warm-body: var(--text-primary);
+  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.28);
+
+  --geo-1-bg: radial-gradient(ellipse at 50% 40%, rgba(99, 58, 135, 0.34) 0%, rgba(99, 58, 135, 0.16) 30%, transparent 55%);
+  --geo-2-bg: radial-gradient(ellipse at 40% 50%, rgba(176, 67, 54, 0.30) 0%, rgba(176, 67, 54, 0.15) 30%, transparent 55%);
+  --geo-3-bg: radial-gradient(ellipse at 60% 45%, rgba(68, 48, 90, 0.30) 0%, rgba(68, 48, 90, 0.15) 30%, transparent 55%);
+  --geo-4-bg: radial-gradient(ellipse at 50% 50%, rgba(122, 48, 88, 0.24) 0%, rgba(122, 48, 88, 0.12) 30%, transparent 55%);
+  --geo-5-bg: radial-gradient(ellipse at 50% 40%, rgba(74, 52, 96, 0.28) 0%, rgba(74, 52, 96, 0.14) 30%, transparent 55%);
+  --geo-6-bg: radial-gradient(ellipse at 45% 50%, rgba(48, 72, 112, 0.26) 0%, rgba(48, 72, 112, 0.13) 30%, transparent 58%);
+  --geo-7-bg: radial-gradient(ellipse at 50% 55%, rgba(116, 68, 122, 0.26) 0%, rgba(116, 68, 122, 0.13) 32%, transparent 60%);
+  --dot-color: rgba(255, 122, 100, 0.10);
+
+  /* 列表选中态：暗夜用主题糖低透明度，不沿用暖纸的琥珀底 */
+  --list-item-active-bg: color-mix(in srgb, var(--accent) 24%, transparent);
+
+  /* Peek 弹窗加载态：暗夜跟随主题语义色 */
+  --pk-ring-track: var(--border);
+  --pk-hint: var(--text-secondary);
+
+  /* 关系图画布底：暗夜沿用页面底色，避免暖色近白在深色下发光 */
+  --rel-canvas-bg: var(--bg-primary);
+
+  /* 弹窗：暗夜保持 Cel Glow 深色玻璃 + 浓描边，无白色内衬 */
+  --modal-bg: var(--bg-secondary);
+  --modal-border: 2px solid var(--border-strong);
+  --modal-radius: var(--radius-xl);
+  --modal-shadow: var(--shadow-lg), 0 5px 0 color-mix(in srgb, var(--cel-outline) 14%, transparent);
+  --modal-backdrop: none;
+  --modal-lining-bg: transparent;
+  --modal-lining-border: none;
+  --modal-lining-radius: 0px;
+  --modal-lining-margin: 0px;
+  --modal-lining-pad: 20px;
+  --modal-footer-pad: 14px 20px;
+  --modal-footer-border: 2px solid var(--border);
+  --modal-divider: 2px solid var(--border);
+
+  /* 浮层与玻璃 hover：暗夜沿用深色玻璃语义 */
+  --popover-bg: var(--glass-bg-strong);
+  --glass-bg-hover: var(--glass-bg-strong);
+
+  /* 详情卡左右悬浮侧栏：暗夜保持玻璃面板 */
+  --side-panel-bg: var(--glass-bg-strong);
+  --side-panel-border: 1px solid var(--glass-border);
+  --side-panel-shadow: var(--shadow-md);
+
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.32);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.46);
+  --shadow-glow: 0 4px 18px rgba(var(--accent-rgb), 0.30);
+  --focus-ring: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
+}

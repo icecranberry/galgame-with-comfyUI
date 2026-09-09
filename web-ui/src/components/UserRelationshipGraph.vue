@@ -237,13 +237,13 @@ async function buildGraph() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: rel.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
-        labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
+        labelBgStyle: { fill: 'var(--bg-secondary)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
     })
 
@@ -382,13 +382,13 @@ async function confirmInput() {
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
         label: created.relationship_text,
-        style: { stroke: 'var(--accent, #e07b6c)', strokeWidth: 3 },
+        style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3 },
         labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
-        labelBgStyle: { fill: 'rgba(255,255,255,0.92)', fillOpacity: 0.92 },
+        labelBgStyle: { fill: 'var(--bg-secondary)', fillOpacity: 0.92 },
         labelBgPadding: [8, 4],
         labelBgBorderRadius: 6,
         animated: false,
-        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, #e07b6c)' },
+        markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
       }
       addEdges([newEdge])
       existingRels.value.push(created)
@@ -439,12 +439,12 @@ async function deleteEdge() {
   z-index: 11000;
 }
 .rel-panel {
-  background: #f4f1ee;
+  background: var(--bg-secondary);
   border-radius: 18px;
   width: min(96vw, 1152px);
   height: min(90vh, 840px);
   display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
@@ -452,11 +452,11 @@ async function deleteEdge() {
 .rel-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 18px 24px;
-  border-bottom: 1px solid rgba(224,123,108,0.1);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  background: rgba(248,245,241,0.55);
+  background: var(--glass-bg);
 }
-.rel-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: #3a2a1a; }
+.rel-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: var(--text-bright); }
 
 .rel-header-actions {
   display: flex; align-items: center; gap: 8px;
@@ -466,17 +466,17 @@ async function deleteEdge() {
 .rel-canvas-wrap {
   flex: 1;
   min-height: 0;
-  background: #fafaf9;
+  background: var(--rel-canvas-bg);
 }
 
 /* ── Hint ── */
 .rel-hint {
   padding: 12px 24px;
-  border-top: 1px solid rgba(224,123,108,0.1);
-  font-size: 12px; color: #9a8a7a;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-secondary);
   flex-shrink: 0;
   text-align: center;
-  background: rgba(255,252,250,0.4);
+  background: var(--glass-bg);
 }
 
 /* ── Input dialog ── */
@@ -487,21 +487,21 @@ async function deleteEdge() {
   z-index: 12000;
 }
 .rel-dialog {
-  background: #fff;
+  background: var(--bg-secondary);
   border-radius: 14px;
   width: min(90vw, 420px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 .rel-dialog-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-  font-weight: 600; font-size: 15px; color: #333;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600; font-size: 15px; color: var(--text-bright);
 }
 .rel-dialog-body { padding: 16px 18px 18px; }
 .rel-dialog-desc {
-  font-size: 13px; color: #888; margin: 0 0 10px;
+  font-size: 13px; color: var(--text-secondary); margin: 0 0 10px;
 }
 .rel-input {
   width: 100%; padding: 10px 12px;

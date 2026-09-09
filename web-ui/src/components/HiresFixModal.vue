@@ -1,13 +1,6 @@
 <template>
-  <Transition name="modal-fade">
-    <div v-if="modelValue" class="modal-overlay" @click.self="close">
-      <div class="modal-panel modal-wide">
-        <div class="modal-header">
-          <h3>HiresFix 细化设置</h3>
-          <linshe-button variant="icon" @click="close">✕</linshe-button>
-        </div>
-        <div class="modal-body">
-          <div class="hires-main-body">
+  <linshe-modal :model-value="modelValue" title="HiresFix 细化设置" wide @update:model-value="close">
+    <div class="hires-main-body">
 
           <div class="hires-section hires-params-section">
             <div class="hires-section-title">HiresFix 参数</div>
@@ -33,11 +26,12 @@
 
           <div class="hires-section hires-artist-section">
             <div class="hires-section-title">画师串</div>
-            <div class="artist-segmented">
-              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'inherit' }]" @click="artistMode = 'inherit'" @keydown.enter.prevent="artistMode = 'inherit'" @keydown.space.prevent="artistMode = 'inherit'">沿用原图</div>
-              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'empty' }]" @click="artistMode = 'empty'" @keydown.enter.prevent="artistMode = 'empty'" @keydown.space.prevent="artistMode = 'empty'">留空</div>
-              <div role="button" tabindex="0" :class="['artist-mode-chip', { active: artistMode === 'specified' }]" @click="artistMode = 'specified'" @keydown.enter.prevent="artistMode = 'specified'" @keydown.space.prevent="artistMode = 'specified'">指定</div>
-            </div>
+            <linshe-tabs
+              v-model="artistMode"
+              :options="artistModeOptions"
+              size="sm"
+              class="artist-segmented"
+            />
             <div class="artist-mode-hint">{{ artistModeHint }}</div>
             <Transition name="artist-block">
             <div v-if="artistMode === 'specified'" class="artist-specified-block">
@@ -119,26 +113,25 @@
             </div>
             </div>
             </div>
-          </div>
-          </div>
-
-        <div class="modal-actions">
-          <span class="lora-civitai-label">LoRA 获取：</span>
-          <a href="https://civitai.com/models/2619830/turbo-for-anima-less-steps" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Turbo-ANIMA（步数：12，CFG：1）</a>
-          <div style="flex:1"></div>
-          <linshe-button variant="primary" @click="save" :disabled="loraLoading">
-            {{ loraLoading ? '保存中…' : '保存' }}
-          </linshe-button>
-        </div>
-      </div>
     </div>
-  </Transition>
+
+    <template #footer>
+      <span class="lora-civitai-label">LoRA 获取：</span>
+      <a href="https://civitai.com/models/2619830/turbo-for-anima-less-steps" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Turbo-ANIMA（步数：12，CFG：1）</a>
+      <div style="flex:1"></div>
+      <linshe-button variant="primary" @click="save" :disabled="loraLoading">
+        {{ loraLoading ? '保存中…' : '保存' }}
+      </linshe-button>
+    </template>
+  </linshe-modal>
 </template>
 
 <script setup>
 import { ref, computed, watch, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheModal from './ui/LinsheModal.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
 
@@ -163,6 +156,11 @@ const cfg = ref(5)
 const denoise = ref(0.35)
 const maxSize = ref(2000)
 const artistMode = ref('empty')
+const artistModeOptions = [
+  { value: 'inherit', label: '沿用原图' },
+  { value: 'empty', label: '留空' },
+  { value: 'specified', label: '指定' },
+]
 const artist = ref('')
 const artistModeHint = computed(() => {
   if (artistMode.value === 'empty') return 'HiresFix 时不使用画师串'
@@ -289,48 +287,15 @@ async function save() {
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-.modal-panel {
-  background: #f4f1eeed; border-radius: 18px;
-  width: min(1080px, 94vw); height: 90dvh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-}
-.modal-wide { width: min(1080px, 94vw); }
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; flex-shrink: 0;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
-}
-.modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.modal-body { padding: 16px 22px; overflow-y: auto; flex: 1; scrollbar-width: none; -ms-overflow-style: none; }
-.modal-body::-webkit-scrollbar { display: none; }
-.modal-actions {
-  display: flex; align-items: center; gap: 10px;
-  flex-shrink: 0;
-  padding: 12px 22px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
+/* ═══ 弹窗骨架交给 LinsheModal，本组件只保留内容样式 ═══ */
 
 .hires-hint { margin: 0 0 16px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
-.hires-main-body {
-  background: #FFFEFC;
-  border: 1px solid rgba(125, 105, 85, 0.10);
-  border-radius: 14px;
-  padding: 16px;
-}
 .hires-section { margin-bottom: 16px; }
 .hires-section:last-child { margin-bottom: 0; }
-.hires-section-title { font-size: 12px; font-weight: 700; color: #6F675F; margin-bottom: 8px; }
+.hires-section-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; }
 .hires-params-section {
-  background: rgba(245, 241, 236, 0.70);
-  border: 1px solid rgba(125, 105, 85, 0.08);
+  background: var(--bg-sunken);
+  border: 1px solid var(--tint-subtle);
   border-radius: 10px;
   padding: 12px 14px 14px;
 }
@@ -338,22 +303,6 @@ async function save() {
 .hires-params .form-group { margin-bottom: 0; }
 .hires-params .fi { margin-bottom: 0; }
 .hires-artist-section { padding: 0 2px; }
-.artist-segmented {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
-  padding: 3px; background: #F5F1EC; border-radius: 10px;
-}
-.artist-mode-chip {
-  padding: 8px 6px; border: none; border-radius: 7px;
-  background: transparent; color: #6F675F; font-size: 12px; font-weight: 500;
-  cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  text-align: center; white-space: nowrap;
-  user-select: none;
-}
-.artist-mode-chip:hover { color: #E07B6C; }
-.artist-mode-chip.active {
-  background: #FFFEFC; color: #E07B6C; font-weight: 600;
-  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
-}
 .artist-mode-hint { margin-top: 7px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 .artist-specified-block { margin-top: 10px; overflow: hidden; }
 .artist-input { margin: 0; }
@@ -368,7 +317,7 @@ async function save() {
 }
 .artist-input-hint { margin: 6px 0 0; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 
-.lora-body-card { background: rgba(245, 241, 236, 0.72); border: 1px solid rgba(125, 105, 85, 0.08); border-radius: 10px; padding: 12px; }
+.lora-body-card { background: var(--bg-sunken); border: 1px solid var(--tint-subtle); border-radius: 10px; padding: 12px; }
 .lora-list { display: flex; flex-direction: column; gap: 8px; }
 .lora-item-card { position: relative; background: var(--bg-primary); border: 1px solid var(--glass-border); border-radius: 12px; padding: 9px 10px 9px 12px; }
 .lora-disabled { opacity: 0.45; }
@@ -383,8 +332,8 @@ async function save() {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px);
   max-height: 220px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #e2d6c7;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 8px;
   z-index: 10001;
   list-style: none;
@@ -402,11 +351,11 @@ async function save() {
   transition: background 180ms ease, color 180ms ease;
 }
 .lora-dropdown-item:hover {
-  background: rgba(224,123,108,0.08);
+  background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
 }
 .lora-dropdown-item.active {
-  background: rgba(224,123,108,0.06);
+  background: rgba(var(--accent-rgb),0.06);
   color: var(--accent);
   font-weight: 600;
 }
@@ -425,23 +374,15 @@ async function save() {
 .lora-card-enter-to, .lora-card-leave-from { opacity: 1; max-height: 120px; }
 .lora-empty-hint { text-align: center; font-size: 13px; color: var(--text-secondary); padding: 14px 0 8px; margin-bottom: 0; }
 .lora-add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px 0; border: 1.5px dashed var(--glass-border); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; margin: 4px 0 0; user-select: none; }
-.lora-add-btn:hover { border-color: var(--accent); background: rgba(224, 123, 108, 0.05); }
+.lora-add-btn:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 .lora-civitai-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; margin: 0 2px; }
 .lora-civitai-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s; }
 .lora-civitai-link:hover { opacity: 1; text-decoration: underline; }
 
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-@keyframes modal-pop { 0% { transform: scale(0.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+/* 弹窗动画已迁移至全局 animations.css */
 
 @media (max-width: 767px) {
-  .modal-panel, .modal-wide { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
-  .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .modal-body { padding: 14px 16px; }
-  .modal-actions { padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   .modal-wide .fi { font-size: 16px; }
   .hires-params { grid-template-columns: 1fr; }
 }

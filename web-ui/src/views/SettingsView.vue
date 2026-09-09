@@ -11,23 +11,23 @@
         <h3>画师串 & 分辨率</h3>
         <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
-        <div class="comfy-tabs">
-          <div v-for="t in comfyTabs" :key="t.mode"
-            role="button"
-            tabindex="0"
-            :class="['comfy-tab', { active: comfyTab === t.mode }]"
-            @click="switchComfyTab(t.mode)"
-            @keydown.enter.prevent="switchComfyTab(t.mode)"
-            @keydown.space.prevent="switchComfyTab(t.mode)"
-          >{{ t.label }}</div>
-        </div>
+        <linshe-tabs
+          :model-value="comfyTab"
+          :options="comfyTabs"
+          class="comfy-tabs"
+          @update:model-value="switchComfyTab"
+        />
 
         <div class="comfy-form-stage">
           <Transition :name="'tab-slide-' + tabSlideDir" mode="out-in">
             <div :key="comfyTab" class="comfy-form-inner">
               <div class="fav-input-row">
-                <input v-model="form[activeFields.artist]" class="fi fav-input" @input="markDirty" placeholder="画师串"/>
-                <div
+                <linshe-input
+                  v-model="form[activeFields.artist]"
+                  class="fi fav-input"
+                  placeholder="画师串"
+                  @input="markDirty"
+                />                <div
                   role="button"
                   tabindex="0"
                   class="fav-star-btn"
@@ -112,24 +112,16 @@
 
         <div class="free-scene-row">
           <div class="free-scene-input-wrap">
-            <textarea
+            <linshe-auto-textarea
               ref="sceneDescRef"
               v-model="freeSceneDesc"
               class="free-scene-textarea"
+              collapsible
               placeholder="（置空使用默认）自由描述任意画面"
               @focus="onSceneDescFocus"
-              @input="resizeSceneDesc"
-              @keydown.enter.exact="submitOnEnter($event, runFreeSceneTest)"
               @blur="onSceneDescBlur"
-            ></textarea>
-            <!-- 收起态的单行省略展示（textarea 不支持 ellipsis，用覆盖层实现），点击展开编辑 -->
-            <div
-              v-if="freeSceneDesc && !sceneDescFocused"
-              class="free-scene-ellipsis"
-              title="点击展开编辑"
-              @mousedown.prevent="focusSceneDesc"
-            >{{ freeSceneDesc }}</div>
-          </div>
+              @enter="submitOnEnter($event, runFreeSceneTest)"
+            />          </div>
           <!-- 有输入内容时才出现，渐入渐出 -->
           <Transition name="gen-btn-fade">
             <linshe-button
@@ -150,18 +142,16 @@
           title="点击编辑提示词"
           @click="startPromptEdit"
         >{{ generatedPrompt }}</div>
-        <textarea
+        <linshe-auto-textarea
           v-else-if="generatedPrompt"
           ref="promptEditRef"
           v-model="generatedPrompt"
           class="generated-prompt-box generated-prompt-editor"
-          rows="3"
-          @input="resizePromptEditor"
-          @keydown.enter.exact="submitOnEnter($event, runGeneratedPromptTest)"
-          @keydown.esc="promptEditing = false"
+          placeholder=""
           @blur="promptEditing = false"
-        ></textarea>
-
+          @enter="submitOnEnter($event, runGeneratedPromptTest)"
+          @escape="promptEditing = false"
+        />
         <div v-if="styleError" class="style-error">{{ styleError }}</div>
 
         <div v-if="styleTesting" class="style-loading">
@@ -199,35 +189,13 @@
           >
             {{ styleTesting ? '生成中...' : '🎨 生成画面' }}
           </linshe-button>
-          <div class="test-mode-segmented">
-            <div
-              role="button"
-              tabindex="0"
-              :class="['test-mode-btn', { active: testMode === 'chat', 'is-disabled': styleTesting }]"
-              :aria-disabled="styleTesting"
-              @click="!styleTesting && (testMode = 'chat')"
-              @keydown.enter.prevent="!styleTesting && (testMode = 'chat')"
-              @keydown.space.prevent="!styleTesting && (testMode = 'chat')"
-            >对话参数</div>
-            <div
-              role="button"
-              tabindex="0"
-              :class="['test-mode-btn', { active: testMode === 'moments', 'is-disabled': styleTesting }]"
-              :aria-disabled="styleTesting"
-              @click="!styleTesting && (testMode = 'moments')"
-              @keydown.enter.prevent="!styleTesting && (testMode = 'moments')"
-              @keydown.space.prevent="!styleTesting && (testMode = 'moments')"
-            >朋友圈参数</div>
-            <div
-              role="button"
-              tabindex="0"
-              :class="['test-mode-btn', { active: testMode === 'event', 'is-disabled': styleTesting }]"
-              :aria-disabled="styleTesting"
-              @click="!styleTesting && (testMode = 'event')"
-              @keydown.enter.prevent="!styleTesting && (testMode = 'event')"
-              @keydown.space.prevent="!styleTesting && (testMode = 'event')"
-            >奇遇参数</div>
-          </div>
+          <linshe-tabs
+            v-model="testMode"
+            :options="testModes"
+            :disabled="styleTesting"
+            size="sm"
+            class="test-mode-segmented"
+          />
           <linshe-button
             class="style-test-btn hires-test-btn"
             variant="primary"
@@ -266,35 +234,24 @@
       </div>
 
       <!-- 测试提示词编辑弹窗 -->
-      <Teleport to="body">
-        <div v-if="showPromptEditor" class="prompt-editor-overlay" @click.self="showPromptEditor = false">
-          <div class="prompt-editor-modal">
-            <div class="prompt-editor-header">
-              <h3>编辑测试提示词</h3>
-              <linshe-button class="prompt-editor-close" variant="icon" @click="showPromptEditor = false">✕</linshe-button>
-            </div>
-            <div class="prompt-editor-body">
-              <div class="prompt-editor-field">
-                <label class="fl">对话配图提示词</label>
-                <linshe-input v-model="testPrompts.chat" class="fi prompt-textarea" type="textarea" rows="5" />
-              </div>
-              <div class="prompt-editor-field">
-                <label class="fl">朋友圈配图提示词</label>
-                <linshe-input v-model="testPrompts.moments" class="fi prompt-textarea" type="textarea" rows="5" />
-              </div>
-              <div class="prompt-editor-field">
-                <label class="fl">奇遇配图提示词</label>
-                <linshe-input v-model="testPrompts.event" class="fi prompt-textarea" type="textarea" rows="5" />
-              </div>
-            </div>
-            <div class="prompt-editor-actions">
-              <linshe-button variant="secondary" @click="resetTestPrompts">恢复默认</linshe-button>
-              <linshe-button variant="primary" @click="saveTestPrompts">保存</linshe-button>
-            </div>
-          </div>
+      <linshe-modal v-model="showPromptEditor" title="编辑测试提示词" wide>
+        <div class="prompt-editor-field">
+          <label class="fl">对话配图提示词</label>
+          <linshe-input v-model="testPrompts.chat" class="fi prompt-textarea" type="textarea" rows="5" />
         </div>
-      </Teleport>
-
+        <div class="prompt-editor-field">
+          <label class="fl">朋友圈配图提示词</label>
+          <linshe-input v-model="testPrompts.moments" class="fi prompt-textarea" type="textarea" rows="5" />
+        </div>
+        <div class="prompt-editor-field">
+          <label class="fl">奇遇配图提示词</label>
+          <linshe-input v-model="testPrompts.event" class="fi prompt-textarea" type="textarea" rows="5" />
+        </div>
+        <template #footer>
+          <linshe-button variant="secondary" @click="resetTestPrompts">恢复默认</linshe-button>
+          <linshe-button variant="primary" @click="saveTestPrompts">保存</linshe-button>
+        </template>
+      </linshe-modal>
       <!-- LLM API 设置 -->
       <div class="card">
         <div class="llm-card-header">
@@ -358,28 +315,20 @@
         </div>
 
         <!-- 新增 Profile 弹窗 -->
-        <Teleport to="body">
-          <Transition name="add-profile-fade">
-            <div v-if="showAddProfile" class="add-profile-overlay" @click.self="showAddProfile = false">
-              <div class="add-profile-dialog">
-                <h4>新增配置</h4>
-                <p class="fd">将当前 LLM 配置（地址、模型、自定义开关等）保存为一个新的配置快照（不含 API Key）</p>
-                <linshe-input
-                  v-model="newProfileName"
-                  class="fi"
-                  placeholder="输入配置名称，如：我的OpenAI、本地LLM"
-                  @keyup.enter="addProfile"
-                  ref="newProfileInput"
-                />
-                <div class="add-profile-actions">
-                  <linshe-button variant="secondary" @click="showAddProfile = false">取消</linshe-button>
-                  <linshe-button variant="primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</linshe-button>
-                </div>
-              </div>
-            </div>
-          </Transition>
-        </Teleport>
-
+        <linshe-modal v-model="showAddProfile" title="新增配置">
+          <p class="fd">将当前 LLM 配置（地址、模型、自定义开关等）保存为一个新的配置快照（不含 API Key）</p>
+          <linshe-input
+            v-model="newProfileName"
+            class="fi"
+            placeholder="输入配置名称，如：我的OpenAI、本地LLM"
+            @keyup.enter="addProfile"
+            ref="newProfileInput"
+          />
+          <template #footer>
+            <linshe-button variant="secondary" @click="showAddProfile = false">取消</linshe-button>
+            <linshe-button variant="primary" :disabled="!newProfileName.trim()" @click="addProfile">确定</linshe-button>
+          </template>
+        </linshe-modal>
         <!-- API Key -->
         <label class="fl llm-label">API Key</label>
         <div class="apikey-row">
@@ -562,38 +511,42 @@
       </div>
 
       <!-- 推荐中转站弹窗 -->
-      <Teleport to="body">
-        <Transition name="relay-modal-fade">
-          <div v-if="showRelayModal" class="relay-modal-overlay" @click.self="showRelayModal = false">
-            <div class="relay-modal" role="dialog" aria-modal="true" aria-label="推荐中转站">
-              <div class="relay-modal-header">
-                <h3>推荐中转站</h3>
-                <linshe-button class="relay-modal-close" variant="icon" aria-label="关闭" @click="showRelayModal = false">✕</linshe-button>
-              </div>
-              <div class="relay-modal-body">
-                <p class="relay-modal-tip">以下为第三方 LLM 中转站，API Key 请在其官网获取</p>
-                <div v-for="station in relayStations" :key="station.name" class="relay-station">
-                  <div class="relay-station-head">
-                    <span class="relay-station-name">{{ station.name }}</span>
-                    <linshe-button class="relay-quick-btn" variant="secondary" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
-                      <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-                      <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
-                    </linshe-button>
-                  </div>
-                  <p class="relay-station-desc">{{ station.desc }}</p>
-                  <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
-                </div>
-                <p class="relay-sponsor-note">可以注意到以上中转均未支付赞助费，看到请及时支付 <strong>**广告位招租**</strong></p>
-              </div>
-            </div>
+      <linshe-modal v-model="showRelayModal" title="推荐中转站" wide>
+        <p class="relay-modal-tip">以下为第三方 LLM 中转站，API Key 请在其官网获取</p>
+        <div v-for="station in relayStations" :key="station.name" class="relay-station">
+          <div class="relay-station-head">
+            <span class="relay-station-name">{{ station.name }}</span>
+            <linshe-button class="relay-quick-btn" variant="secondary" :disabled="relayConfigBusy" @click="applyRelayConfig(station)">
+              <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+              <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
+            </linshe-button>
           </div>
-        </Transition>
-      </Teleport>
-
+          <p class="relay-station-desc">{{ station.desc }}</p>
+          <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
+        </div>
+        <p class="relay-sponsor-note">可以注意到以上中转均未支付赞助费，看到请及时支付 <strong>**广告位招租**</strong></p>
+      </linshe-modal>
 
       <!-- 功能开关 -->
       <div class="card">
         <h3>功能开关</h3>
+
+        <div class="toggle-row theme-mode-row">
+          <div>
+            <div class="tl">界面主题</div>
+            <div class="td">暖色、暗夜，或按时间自动切换</div>
+          </div>
+          <div class="theme-mode-options" role="group" aria-label="界面主题">
+            <linshe-button
+              v-for="t in themeModes"
+              :key="t.id"
+              size="sm"
+              variant="chip"
+              :active="settingsStore.themeMode === t.id"
+              @click="settingsStore.setThemeMode(t.id)"
+            >{{ t.name }}</linshe-button>
+          </div>
+        </div>
 
         <div class="toggle-row">
           <div>
@@ -725,7 +678,7 @@
         <div
           role="button"
           tabindex="0"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
           aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
           @click="router.push('/settings/memory')"
           @keydown.enter.prevent="router.push('/settings/memory')"
@@ -760,7 +713,7 @@
         <div
           role="button"
           tabindex="0"
-          class="memory-settings-entry"
+          class="memory-settings-entry sheen"
           aria-label="管理 MaiBot 桥接：连接设置、插件配置、人格信息与记忆整理"
           @click="router.push('/settings/maibot')"
           @keydown.enter.prevent="router.push('/settings/maibot')"
@@ -786,212 +739,146 @@
     </div>
 
     <!-- 收藏画师串弹窗 -->
-    <Teleport to="body">
-      <Transition name="fav-dialog-fade">
-        <div v-if="favDialog.show" class="fav-dialog-overlay">
-          <div class="fav-dialog">
-            <div class="fav-dialog-header">
-              <span>收藏画师串</span>
-              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelAddFavorite">✕</linshe-button>
-            </div>
-            <div class="fav-dialog-body">
-              <p class="fav-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
-              <linshe-input
-                ref="favDialogInput"
-                v-model="favDialog.label"
-                placeholder="输入收藏名称"
-                maxlength="30"
-                @keyup.enter="confirmAddFavorite"
-              />
-              <div class="fav-dialog-actions">
-                <linshe-button variant="secondary" @click="cancelAddFavorite">取消</linshe-button>
-                <linshe-button variant="primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</linshe-button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <linshe-modal v-model="favDialog.show" title="收藏画师串">
+      <p class="form-dialog-desc">为当前画师串起个名字，方便以后快速识别：</p>
+      <linshe-input
+        ref="favDialogInput"
+        v-model="favDialog.label"
+        placeholder="输入收藏名称"
+        maxlength="30"
+        @keyup.enter="confirmAddFavorite"
+      />
+      <template #footer>
+        <linshe-button variant="secondary" @click="cancelAddFavorite">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="!favDialog.label.trim()" @click="confirmAddFavorite">确认收藏</linshe-button>
+      </template>
+    </linshe-modal>
 
     <!-- 质量提示词弹窗 -->
-    <Teleport to="body">
-      <Transition name="fav-dialog-fade">
-        <div v-if="qualityDialog.show" class="fav-dialog-overlay">
-          <div class="fav-dialog">
-            <div class="fav-dialog-header">
-              <span>质量提示词</span>
-              <linshe-button class="fav-dialog-close" variant="icon" @click="qualityDialog.show = false">✕</linshe-button>
-            </div>
-            <div class="fav-dialog-body">
-              <p class="fav-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
-              <linshe-input
-                v-model="qualityDialog.text"
-                type="textarea"
-                rows="4"
-                maxlength="500"
-                placeholder="masterpiece, best quality..."
-              />
-              <div class="fav-dialog-actions">
-                <linshe-button variant="secondary" @click="qualityDialog.show = false">取消</linshe-button>
-                <linshe-button variant="primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</linshe-button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <linshe-modal v-model="qualityDialog.show" title="质量提示词">
+      <p class="form-dialog-desc">填写英文质量提示词覆盖工作流默认值，留空则使用系统默认</p>
+      <linshe-input
+        v-model="qualityDialog.text"
+        type="textarea"
+        rows="4"
+        maxlength="500"
+        placeholder="masterpiece, best quality..."
+      />
+      <template #footer>
+        <linshe-button variant="secondary" @click="qualityDialog.show = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="qualitySaving" @click="saveQualityPrompt">{{ qualitySaving ? '保存中…' : '保存' }}</linshe-button>
+      </template>
+    </linshe-modal>
 
     <!-- 防打扰模式设置弹窗 -->
-    <Teleport to="body">
-      <Transition name="disturb-dialog-fade">
-        <div v-if="disturbDialog.show" class="disturb-dialog-overlay" @click.self="cancelDisturbDialog">
-          <div class="disturb-dialog">
-            <div class="disturb-dialog-header">
-              <span>防打扰设置</span>
-              <linshe-button class="fav-dialog-close" variant="icon" @click="cancelDisturbDialog">✕</linshe-button>
-            </div>
-            <div class="disturb-dialog-body">
-              <!-- 时间段设置 -->
-              <div class="disturb-dialog-section">
-                <span class="disturb-dialog-label">⏰ 静默时段</span>
-                <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
-                <div class="disturb-time-row">
-                  <linshe-input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
-                  <span class="disturb-time-sep">—</span>
-                  <linshe-input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
-                </div>
-              </div>
-
-              <!-- 角色选择 -->
-              <div class="disturb-dialog-section disturb-char-scroll">
-                <span class="disturb-dialog-label">👤 适用角色</span>
-                <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
-                <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
-                <div v-else class="disturb-char-grid">
-                  <label
-                    v-for="ch in allCharacters"
-                    :key="ch.id"
-                    class="disturb-char-chip"
-                    :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
-                    @click="toggleDisturbDialogChar(ch.id)"
-                  >
-                    <div
-                      class="disturb-char-avatar"
-                      :style="ch.avatar_path
-                        ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                        : { background: '#e07b6c' }"
-                    >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
-                    <span class="disturb-char-name">{{ ch.display_name }}</span>
-                  </label>
-                </div>
-              </div>
-
-              <!-- 额外选项 -->
-              <div class="disturb-dialog-section disturb-dialog-toggles">
-                <label class="disturb-option-row">
-                  <span class="disturb-option-label">隐藏世界观</span>
-                  <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
-                  <linshe-switch v-model="disturbDialog.hideWorld" aria-label="隐藏世界观" />
-                </label>
-                <label class="disturb-option-row">
-                  <span class="disturb-option-label">跳过周末</span>
-                  <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
-                  <linshe-switch v-model="disturbDialog.skipWeekends" aria-label="跳过周末" />
-                </label>
-              </div>
-
-              <div class="disturb-dialog-actions">
-                <linshe-button variant="secondary" @click="cancelDisturbDialog">取消</linshe-button>
-                <linshe-button variant="primary" @click="confirmDisturbDialog">保存设置</linshe-button>
-              </div>
-            </div>
-          </div>
+    <linshe-modal v-model="disturbDialog.show" title="防打扰设置" wide>
+      <div class="disturb-dialog-section">
+        <span class="disturb-dialog-label">⏰ 静默时段</span>
+        <p class="disturb-dialog-hint">在此时段内自动禁用所选角色的朋友圈、主动聊天和奇遇。支持跨午夜（如 22:00 ~ 08:00）。</p>
+        <div class="disturb-time-row">
+          <linshe-input type="time" v-model="disturbDialog.startTime" class="disturb-time-input" />
+          <span class="disturb-time-sep">—</span>
+          <linshe-input type="time" v-model="disturbDialog.endTime" class="disturb-time-input" />
         </div>
-      </Transition>
-    </Teleport>
+      </div>
+      <div class="disturb-dialog-section">
+        <span class="disturb-dialog-label">👤 适用角色</span>
+        <p class="disturb-dialog-hint">勾选需要在静默时段内暂停互动通知的角色</p>
+        <div v-if="allCharacters.length === 0" class="disturb-no-chars">暂无角色，请先创建角色</div>
+        <div v-else class="disturb-char-grid">
+          <label
+            v-for="ch in allCharacters"
+            :key="ch.id"
+            class="disturb-char-chip"
+            :class="{ selected: disturbDialog.characterIds.includes(ch.id) }"
+            @click="toggleDisturbDialogChar(ch.id)"
+          >
+            <div
+              class="disturb-char-avatar"
+              :style="ch.avatar_path
+                ? { backgroundImage: `url(${ch.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                : { background: 'var(--accent)' }"
+            >{{ ch.avatar_path ? '' : ch.display_name.charAt(0) }}</div>
+            <span class="disturb-char-name">{{ ch.display_name }}</span>
+          </label>
+        </div>
+      </div>
+      <div class="disturb-dialog-section disturb-dialog-toggles">
+        <label class="disturb-option-row">
+          <span class="disturb-option-label">隐藏世界观</span>
+          <span class="disturb-option-hint">时段内暂时不向角色注入世界背景设定</span>
+          <linshe-switch v-model="disturbDialog.hideWorld" aria-label="隐藏世界观" />
+        </label>
+        <label class="disturb-option-row">
+          <span class="disturb-option-label">跳过周末</span>
+          <span class="disturb-option-hint">周六周日不执行防打扰，恢复全部互动</span>
+          <linshe-switch v-model="disturbDialog.skipWeekends" aria-label="跳过周末" />
+        </label>
+      </div>
+      <template #footer>
+        <linshe-button variant="secondary" @click="cancelDisturbDialog">取消</linshe-button>
+        <linshe-button variant="primary" @click="confirmDisturbDialog">保存设置</linshe-button>
+      </template>
+    </linshe-modal>
 
     <!-- 天气城市设置弹窗 -->
-    <Teleport to="body">
-      <Transition name="disturb-dialog-fade">
-        <div v-if="weatherCityDialog.show" class="disturb-dialog-overlay" @click.self="weatherCityDialog.show = false">
-          <div class="disturb-dialog" style="max-width:360px;">
-            <div class="disturb-dialog-header">
-              <span>天气城市设置</span>
-              <linshe-button class="fav-dialog-close" variant="icon" @click="weatherCityDialog.show = false">✕</linshe-button>
-            </div>
-            <div class="disturb-dialog-body" style="padding: 0 24px 16px;">
-              <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
-              <linshe-input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
-              <div class="disturb-dialog-footer" style="display: flex; margin-top: 16px; justify-content: flex-end;">
-                <linshe-button variant="primary" @click="confirmWeatherCity">保存</linshe-button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
+    <linshe-modal v-model="weatherCityDialog.show" title="天气城市设置">
+      <p class="disturb-dialog-hint">输入城市名（中文），留空则自动根据 IP 定位</p>
+      <linshe-input type="text" v-model="weatherCityDialog.city" class="fi" placeholder="如：北京、上海、杭州" @keyup.enter="confirmWeatherCity" />
+      <template #footer>
+        <linshe-button variant="primary" @click="confirmWeatherCity">保存</linshe-button>
+      </template>
+    </linshe-modal>
     <!-- 工作流模式弹窗 -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div v-if="showWfModeDialog" class="wf-mode-overlay" @click.self="showWfModeDialog = false">
-          <div class="wf-mode-modal">
-            <h3>工作流模式</h3>
-            <div class="wf-mode-options">
-              <div v-for="m in workflowModeOptions" :key="m.value"
-                role="button"
-                tabindex="0"
-                :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
-                @click="wfModeDraft = m.value"
-                @keydown.enter.prevent="wfModeDraft = m.value"
-                @keydown.space.prevent="wfModeDraft = m.value">
-                <span class="wf-mo-title">{{ m.label }}</span>
-                <span class="wf-mo-desc" v-html="m.desc"></span>
-              </div>
-            </div>
-
-            <div class="wf-mode-downloads">
-              <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
-              <div class="wf-dl-item">
-                <span class="wf-dl-label">Anima-turbo：</span>
-                <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>
-                <span class="wf-dl-sep">|</span>
-                <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
-              </div>
-              <div class="wf-dl-item">
-                <span class="wf-dl-label">Anima-base：</span>
-                <a href="https://civitai.com/api/download/models/2945208?fileId=2824391" target="_blank" rel="noopener">Civitai 下载</a>
-                <span class="wf-dl-sep">|</span>
-                <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
-              </div>
-            </div>
-
-            <Transition name="expand">
-              <div v-if="wfModeDraft === 'hybrid'" class="wf-mode-scenes">
-                <p class="wf-mode-hint">hybrid 模式下可为不同场景分配不同工作流，默认生图用 turbo</p>
-                <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
-                  <span class="wf-scene-name">{{ s.label }}</span>
-                  <div class="wf-scene-toggle">
-                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
-                      :active="wfSceneDraft[s.key] === 'turbo'"
-                      @click="wfSceneDraft[s.key] = 'turbo'">turbo</linshe-button>
-                    <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
-                      :active="wfSceneDraft[s.key] === 'base'"
-                      @click="wfSceneDraft[s.key] = 'base'">base</linshe-button>
-                  </div>
-                </div>
-              </div>
-            </Transition>
-
-            <div class="wf-mode-actions">
-              <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
-              <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
+    <linshe-modal v-model="showWfModeDialog" title="工作流模式" wide>
+      <div class="wf-mode-options">
+        <div v-for="m in workflowModeOptions" :key="m.value"
+          role="button"
+          tabindex="0"
+          :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
+          @click="wfModeDraft = m.value"
+          @keydown.enter.prevent="wfModeDraft = m.value"
+          @keydown.space.prevent="wfModeDraft = m.value">
+          <span class="wf-mo-title">{{ m.label }}</span>
+          <span class="wf-mo-desc" v-html="m.desc"></span>
+        </div>
+      </div>
+      <div class="wf-mode-downloads">
+        <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
+        <div class="wf-dl-item">
+          <span class="wf-dl-label">Anima-turbo：</span>
+          <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>
+          <span class="wf-dl-sep">|</span>
+          <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+        </div>
+        <div class="wf-dl-item">
+          <span class="wf-dl-label">Anima-base：</span>
+          <a href="https://civitai.com/api/download/models/2945208?fileId=2824391" target="_blank" rel="noopener">Civitai 下载</a>
+          <span class="wf-dl-sep">|</span>
+          <a href="https://pan.quark.cn/s/8ee40c22ccc6?pwd=SWwE" target="_blank" rel="noopener">网盘下载</a>
+        </div>
+      </div>
+      <Transition name="expand">
+        <div v-if="wfModeDraft === 'hybrid'" class="wf-mode-scenes">
+          <p class="wf-mode-hint">hybrid 模式下可为不同场景分配不同工作流，默认生图用 turbo</p>
+          <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
+            <span class="wf-scene-name">{{ s.label }}</span>
+            <div class="wf-scene-toggle">
+              <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                :active="wfSceneDraft[s.key] === 'turbo'"
+                @click="wfSceneDraft[s.key] = 'turbo'">turbo</linshe-button>
+              <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                :active="wfSceneDraft[s.key] === 'base'"
+                @click="wfSceneDraft[s.key] = 'base'">base</linshe-button>
             </div>
           </div>
         </div>
       </Transition>
-    </Teleport>
-  </div>
+      <template #footer>
+        <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
+      </template>
+    </linshe-modal>  </div>
 </template>
 
 <script setup>
@@ -1000,17 +887,22 @@ import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import LinsheModal from '../components/ui/LinsheModal.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import LinsheTabs from '../components/ui/LinsheTabs.vue'
+import LinsheAutoTextarea from '../components/ui/LinsheAutoTextarea.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import GlobalLoraModal from '../components/GlobalLoraModal.vue'
 import HiresFixModal from '../components/HiresFixModal.vue'
+import { THEME_MODES } from '../theme.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const settingsStore = useSettingsStore()
+const themeModes = THEME_MODES
 const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -1053,9 +945,9 @@ const qualityDialog = reactive({ show: false, text: '' })
 const qualitySaving = ref(false)
 const comfyTab = ref('chat')
 const comfyTabs = [
-  { mode: 'chat', label: '对话配图' },
-  { mode: 'moments', label: '朋友圈&信件配图' },
-  { mode: 'event', label: '奇遇&日程配图' },
+  { value: 'chat', label: '对话配图' },
+  { value: 'moments', label: '朋友圈&信件配图' },
+  { value: 'event', label: '奇遇&日程配图' },
 ]
 const activeFields = computed(() => {
   if (comfyTab.value === 'moments') return { artist: 'momentsArtist', width: 'momentsWidth', height: 'momentsHeight' }
@@ -1953,7 +1845,12 @@ async function checkHealth() { health.value = await comfyuiHealth() }
 
 
 // ── 测试画风 ──
-const testMode = ref('chat')  // 'chat' | 'moments'
+const testMode = ref('chat')
+const testModes = [
+  { value: 'chat', label: '对话参数' },
+  { value: 'moments', label: '朋友圈参数' },
+  { value: 'event', label: '奇遇参数' },
+]
 const styleTesting = ref(false)
 const styleError = ref('')
 const styleImages = ref([])
@@ -1964,62 +1861,33 @@ const generatedPrompt = ref('')  // RAG 召回合并后的最终 prompt 展示
 const promptEditing = ref(false)  // prompt 展示框的点击编辑态
 const promptEditRef = ref(null)
 
-// textarea 自动增高，避免内容溢出时出现滚动条
-function resizeTextareaElement(el) {
-  if (!el) return
-  const style = getComputedStyle(el)
-  const borderHeight = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
-  el.style.height = 'auto'
-  el.style.height = `${Math.max(el.scrollHeight, el.clientHeight) + borderHeight}px`
-}
-
 function submitOnEnter(event, action) {
   if (event.isComposing || event.keyCode === 229) return
   event.preventDefault()
   action()
 }
 
-function resizeSceneDesc() {
-  resizeTextareaElement(sceneDescRef.value)
-}
-
-function resizePromptEditor() {
-  resizeTextareaElement(promptEditRef.value)
-}
-
-// 点击 prompt 框进入编辑：textarea 按完整内容增高，光标定位到末尾
+// 点击 prompt 框进入编辑：光标定位到末尾
 async function startPromptEdit() {
   promptEditing.value = true
   await nextTick()
-  resizePromptEditor()
-  const el = promptEditRef.value
-  if (el) {
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
-  }
+  promptEditRef.value?.focusToEnd()
 }
-
 // 画面描述框：收起态单行省略展示 ↔ 聚焦展开编辑
 const sceneDescFocused = ref(false)
 const sceneDescRef = ref(null)
 
 // 点击收起态的省略展示 → 展开编辑，光标到末尾
 function focusSceneDesc() {
-  const el = sceneDescRef.value
-  if (!el) return
-  el.focus()
-  el.setSelectionRange(el.value.length, el.value.length)
+  sceneDescRef.value?.focusToEnd()
 }
-
 function onSceneDescFocus() {
   sceneDescFocused.value = true
-  nextTick(resizeSceneDesc)
 }
 
-// 失焦收起：清掉手动拖高的内联高度，回到单行
-function onSceneDescBlur(e) {
+// 失焦后组件自动回到单行
+function onSceneDescBlur() {
   sceneDescFocused.value = false
-  e.target.style.height = ''
 }
 
 const hireTesting = ref(false)
@@ -2233,6 +2101,7 @@ function resetTestPrompts() {
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .memory-settings-card { gap: 0; }
+.maibot-settings-card .memory-settings-entry { margin-top: 14px; }
 .memory-settings-header h3 { margin-bottom: 4px; }
 .memory-settings-header p {
   max-width: 560px;
@@ -2246,20 +2115,21 @@ function resetTestPrompts() {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;
   color: var(--text-primary); text-align: left;
-  background: rgba(224, 123, 108, 0.07);
-  border: 1px solid rgba(224, 123, 108, 0.16);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 12px;
   cursor: pointer;
   user-select: none;
   touch-action: manipulation;
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease-out);
 }
 .memory-settings-entry:hover {
-  background: rgba(224, 123, 108, 0.12);
-  border-color: rgba(224, 123, 108, 0.38);
-  box-shadow: 0 4px 14px rgba(224, 123, 108, 0.1);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: var(--shadow-sm), var(--shadow-hard-sm);
+  transform: translateY(-2px);
 }
-.memory-settings-entry:active { background: rgba(224, 123, 108, 0.16); }
+.memory-settings-entry:active { background: rgba(var(--accent-rgb), 0.16); }
 .memory-settings-entry:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -2268,8 +2138,9 @@ function resetTestPrompts() {
   width: 40px; height: 40px; flex: 0 0 40px;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent);
-  background: rgba(224, 123, 108, 0.12);
-  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  border-radius: 12px;
 }
 .memory-entry-icon svg,
 .memory-entry-arrow svg {
@@ -2297,72 +2168,30 @@ function resetTestPrompts() {
 }
 .float-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 10px;
-  background: rgba(224, 123, 108, 0.10); color: #E07B6C; margin-left: 4px;
+  background: rgba(var(--accent-rgb), 0.10); color: var(--accent); margin-left: 4px;
   white-space: nowrap;
 }
-.float-badge.active { background: rgba(224, 123, 108, 0.14); color: #E07B6C; }
+.float-badge.active { background: rgba(var(--accent-rgb), 0.14); color: var(--accent); }
 
-/* ── 毛玻璃卡片 ── */
+/* ── 卡片：视觉样式走全局 .card，这里只保留布局 ── */
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
   padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: box-shadow 0.2s ease;
   display: flex;
   flex-direction: column;
 }
-.card:hover { box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06); }
 .card-full { grid-column: 1 / -1; margin-top: 16px; }
 .card h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; font-weight: 600; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 2px; }
 .fd { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .fi { margin-bottom: 14px; }
+.prompt-editor-field { margin-bottom: 16px; }
+.prompt-textarea { min-height: 100px; margin-bottom: 0; }
 /* ── 画师串参数卡：轻量 Tab + 紧凑表单节奏 ── */
 .comfy-params-card { padding: 22px; }
 .comfy-params-card h3 { margin-bottom: 18px; }
 .comfy-params-card .fd { margin-bottom: 14px; line-height: 1.55; }
 .comfy-params-card .fr { margin-bottom: 18px; }
 .comfy-params-card .fpresets { margin: 0 0 24px; }
-
-.comfy-tabs {
-  display: flex; gap: 4px; margin-bottom: 20px;
-  border-radius: 12px;
-  background: #F5F1EC;
-  padding: 3px;
-}
-.comfy-tab {
-  flex: 1; min-width: 0;
-  padding: 10px 6px 9px; font-size: 13px; font-weight: 500;
-  text-align: center; cursor: pointer;
-  border-radius: 9px;
-  background: transparent; color: #8B8074;
-  border: none;
-  font-family: inherit;
-  position: relative;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: background-color 0.2s ease, color 0.2s ease;
-  user-select: none;
-}
-.comfy-tab:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.55);
-  color: #6F675F;
-}
-.comfy-tab.active {
-  background: rgba(224, 123, 108, 0.10);
-  color: #E07B6C;
-  font-weight: 600;
-}
-.comfy-tab.active::after {
-  content: '';
-  position: absolute;
-  left: 50%; bottom: 4px; width: 18px; height: 2px;
-  border-radius: 2px; transform: translateX(-50%);
-  background: #E07B6C;
-}
 
 .comfy-form-stage {
   overflow: hidden;
@@ -2398,13 +2227,13 @@ function resetTestPrompts() {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
 }
 .resolution-hint {
-  font-size: 12px; color: #9A9189;
+  font-size: 12px; color: var(--text-secondary);
 }
 /* ── 全局细化 / HiresFix 独立层级 ── */
 .hiresfix-section {
   margin: 8px 0 0; padding: 16px 0;
-  border-top: 1px solid #EDE5DC;
-  border-bottom: 1px solid #EDE5DC;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .hiresfix-header {
   display: flex; align-items: baseline;
@@ -2414,35 +2243,35 @@ function resetTestPrompts() {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
 }
 .hiresfix-tag {
-  font-size: 12px; font-weight: 500; color: #8B8074;
-  background: #F5F1EC; border-radius: 8px; padding: 3px 9px;
+  font-size: 12px; font-weight: 500; color: var(--text-secondary);
+  background: var(--bg-tertiary); border-radius: 8px; padding: 3px 9px;
 }
 .hiresfix-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .hiresfix-copy { flex: 1; min-width: 200px; }
 .hiresfix-desc {
-  font-size: 12px; color: #9A9189; margin-top: 2px;
+  font-size: 12px; color: var(--text-secondary); margin-top: 2px;
 }
-.hiresfix-summary { font-size: 12px; color: #6F675F; }
+.hiresfix-summary { font-size: 12px; color: var(--text-secondary); }
 .hiresfix-link, .quality-link {
   font-size: 13px;
 }
 /* ── 质量提示词 ── */
 .quality-section {
   margin: 0 0 20px; padding: 16px 0;
-  border-bottom: 1px solid #EDE5DC;
+  border-bottom: 1px solid var(--border);
 }
 .quality-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .quality-copy { flex: 1; min-width: 180px; }
 .quality-subtitle { font-size: 13px; font-weight: 700; color: var(--text-bright); }
-.quality-desc { font-size: 12px; color: #9A9189; margin-top: 2px; }
+.quality-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 .quality-summary {
-  font-size: 12px; color: #6F675F;
+  font-size: 12px; color: var(--text-secondary);
   max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.quality-summary.is-default { color: #9A9189; }
-.pl { font-size: 12px; color: #9A9189; margin-right: 2px; }
+.quality-summary.is-default { color: var(--text-secondary); }
+.pl { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
 .pbtn {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
   font-size: 12px;
@@ -2464,12 +2293,12 @@ function resetTestPrompts() {
 .fav-input-row {
   display: flex; align-items: center; gap: 2px;
   padding: 0 4px 0 12px; margin-bottom: 8px;
-  background: #FFFEFC; border: 1px solid #E5D8CE; border-radius: 12px;
+  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .fav-input-row:focus-within {
-  border-color: #E07B6C;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.10);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10);
 }
 .fav-input {
   flex: 1; min-width: 0; height: 38px; padding: 0; margin: 0;
@@ -2479,7 +2308,7 @@ function resetTestPrompts() {
 .fav-star-btn {
   width: 34px; height: 34px; flex-shrink: 0; padding: 0;
   display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: #A9A099;
+  border: none; background: transparent; color: var(--text-secondary);
   font-size: 16px; line-height: 1; cursor: pointer;
   transition: color 0.15s ease;
   user-select: none;
@@ -2487,7 +2316,7 @@ function resetTestPrompts() {
 .fav-star-btn:hover:not(.is-disabled) { color: #E2A83E; }
 .fav-star-btn.is-disabled { opacity: 0.35; cursor: not-allowed; }
 .fav-section-title {
-  font-size: 12px; color: #9A9189; margin-bottom: 6px;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;
 }
 .fav-chips {
   display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px;
@@ -2497,52 +2326,9 @@ function resetTestPrompts() {
   height: 28px; padding: 0 10px; font-size: 14px;
 }
 .fav-chip-x {
-  font-size: 12px; line-height: 1; color: #A9A099;
+  font-size: 12px; line-height: 1; color: var(--text-secondary);
 }
-.fav-chip-x:hover { color: #E07B6C; }
-
-/* ── 收藏弹窗 ── */
-.fav-dialog-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-.fav-dialog {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
-  width: 400px; max-width: 90vw;
-  overflow: hidden;
-}
-.fav-dialog-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px 0;
-  font-size: 15px; font-weight: 600; color: var(--text-bright);
-}
-.fav-dialog-close {
-  width: 28px; height: 28px;
-  font-size: 14px;
-  display: flex; align-items: center; justify-content: center;
-}
-.fav-dialog-body { padding: 12px 20px 20px; }
-.fav-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
-.fav-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-
-/* ── 弹窗过渡动画 ── */
-.fav-dialog-fade-enter-active { transition: opacity 0.2s ease; }
-.fav-dialog-fade-leave-active { transition: opacity 0.15s ease; }
-.fav-dialog-fade-enter-active .fav-dialog { animation: fav-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-.fav-dialog-fade-leave-active .fav-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
-.fav-dialog-fade-enter-from,
-.fav-dialog-fade-leave-to { opacity: 0; }
-.fav-dialog-fade-leave-to .fav-dialog { transform: scale(0.95); opacity: 0; }
-
-@keyframes fav-pop {
-  from { transform: scale(0.9); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
+.fav-chip-x:hover { color: var(--accent); }
 
 .sa { display: flex; align-items: center; gap: 12px; margin-top: auto; }
 .sa-spacer { flex: 1; }
@@ -2610,45 +2396,8 @@ function resetTestPrompts() {
   transform: rotate(60deg);
 }
 
-/* ── 防打扰弹窗 ── */
-.disturb-dialog-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-.disturb-dialog {
-  background: #fff;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
-  width: 640px; max-width: calc(100vw - 48px); max-height: 85vh;
-  display: flex; flex-direction: column;
-}
-/* PC 端圆角弹窗 */
-@media (min-width: 768px) {
-  .disturb-dialog { border-radius: 16px; }
-}
-/* 手机端全屏 */
-@media (max-width: 767px) {
-  .disturb-dialog {
-    width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh;
-    border-radius: 0;
-  }
-  .disturb-dialog-overlay { backdrop-filter: none; background: rgba(0, 0, 0, 0.5); }
-  .disturb-dialog-header { padding-top: 20px; }
-  .disturb-dialog-body { padding-bottom: 32px; }
-}
-.disturb-dialog-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 22px 0;
-  font-size: 16px; font-weight: 600; color: var(--text-bright);
-  flex-shrink: 0;
-}
-.disturb-dialog-body {
-  padding: 14px 22px 20px;
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-}
+/* ── 防打扰内容（窗体由 LinsheModal 提供） ── */
+.form-dialog-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .disturb-dialog-section { margin-bottom: 18px; flex-shrink: 0; }
 .disturb-dialog-section.disturb-char-scroll {
   flex: 1; min-height: 0;
@@ -2681,19 +2430,19 @@ function resetTestPrompts() {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 10px 12px; border-radius: 12px;
   border: 2px solid transparent;
-  background: #f5f3ef;
+  background: var(--bg-tertiary);
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
   min-width: 70px;
 }
 .disturb-char-chip:hover {
-  border-color: #d5d0ca;
-  background: #eeebe5;
+  border-color: var(--border);
+  background: var(--bg-hover);
 }
 .disturb-char-chip.selected {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .disturb-char-avatar {
   width: 42px; height: 42px; border-radius: 50%;
@@ -2715,7 +2464,7 @@ function resetTestPrompts() {
   color: var(--accent); font-weight: 500;
 }
 .disturb-dialog-toggles {
-  padding-top: 10px; border-top: 1px solid #eee;
+  padding-top: 10px; border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 .disturb-option-row {
@@ -2730,26 +2479,6 @@ function resetTestPrompts() {
 .disturb-option-hint {
   flex: 1; min-width: 140px; font-size: 12px; color: var(--text-secondary);
 }
-.disturb-dialog-actions {
-  display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 12px;
-  border-top: 1px solid #eee;
-  flex-shrink: 0;
-}
-
-/* ── 弹窗过渡动画 ── */
-.disturb-dialog-fade-enter-active { transition: opacity 0.2s ease; }
-.disturb-dialog-fade-leave-active { transition: opacity 0.15s ease; }
-.disturb-dialog-fade-enter-active .disturb-dialog { animation: disturb-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-.disturb-dialog-fade-leave-active .disturb-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
-.disturb-dialog-fade-enter-from,
-.disturb-dialog-fade-leave-to { opacity: 0; }
-.disturb-dialog-fade-leave-to .disturb-dialog { transform: scale(0.95); opacity: 0; }
-
-@keyframes disturb-pop {
-  from { transform: scale(0.9); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
-
 .sr { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
 .sd { width: 9px; height: 9px; border-radius: 50%; }
 .sd.on { background: var(--success); }
@@ -2802,37 +2531,10 @@ function resetTestPrompts() {
 }
 .relay-intro-btn:hover { color: var(--accent-hover); }
 .relay-intro-footer { margin-left: auto; }
-.relay-modal-overlay {
-  position: fixed; inset: 0; z-index: 2100;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  padding: 20px;
-}
-.relay-modal {
-  width: min(540px, 100%);
-  max-height: min(660px, 90vh);
-  overflow: auto;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 10px 44px rgba(0, 0, 0, 0.18);
-}
-.relay-modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 20px 0;
-}
-.relay-modal-header h3 { margin: 0; font-size: 16px; color: var(--text-bright); }
-.relay-modal-close {
-  width: 28px; height: 28px;
-  font-size: 14px;
-  display: flex; align-items: center; justify-content: center;
-}
-.relay-modal-body { padding: 10px 20px 18px; }
 .relay-modal-tip { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
 .relay-station {
-  border: 1px solid #eee3d9; border-radius: 12px; padding: 14px; margin-bottom: 12px;
-  background: #fffcf9;
+  border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px;
+  background: var(--bg-secondary);
 }
 .relay-station-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px;
@@ -2857,16 +2559,7 @@ function resetTestPrompts() {
   color: var(--text-muted, #b3aca4); opacity: 0.55;
 }
 .relay-sponsor-note strong { font-weight: 600; color: var(--text-muted, #b3aca4); }
-.relay-modal-fade-enter-active { transition: opacity 0.2s ease; }
-.relay-modal-fade-leave-active { transition: opacity 0.15s ease; }
-.relay-modal-fade-enter-active .relay-modal { animation: relay-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-.relay-modal-fade-leave-active .relay-modal { transition: transform 0.15s ease, opacity 0.15s ease; }
-.relay-modal-fade-enter-from,
-.relay-modal-fade-leave-to { opacity: 0; }
-.relay-modal-fade-leave-to .relay-modal { transform: scale(0.95); opacity: 0; }
-@keyframes relay-pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (max-width: 640px) {
-  .relay-modal-overlay { padding: 12px; }
   .relay-station-head { align-items: flex-start; }
 }
 
@@ -2968,7 +2661,7 @@ function resetTestPrompts() {
   width: calc((100% - 4px) / 3);
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.2);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.2);
   transform: translateX(100%);
   transition: transform 0.2s ease;
 }
@@ -3043,8 +2736,8 @@ function resetTestPrompts() {
 .profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
 .profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
 .profile-tag.active {
-  background: #e07b6c;
-  border-color: #e07b6c;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -3060,64 +2753,10 @@ function resetTestPrompts() {
 .profile-add { border-radius: 20px; border-style: dashed; color: var(--text-muted); }
 .profile-add:hover { border-color: var(--accent); color: var(--accent); }
 
-.add-profile-overlay {
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center;
-}
-.add-profile-dialog {
-  background: #ffffffe3;
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 24px;
-  min-width: 360px;
-  max-width: 440px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-}
-.add-profile-dialog h4 { margin: 0 0 8px; font-size: 16px; color: var(--text-bright); }
-.add-profile-dialog .fd { margin-bottom: 16px; }
-.add-profile-dialog .fi { width: 100%; margin-bottom: 16px; }
-.add-profile-actions { display: flex; gap: 10px; justify-content: flex-end; }
-
-.add-profile-fade-enter-active { transition: opacity 0.2s ease; }
-.add-profile-fade-leave-active { transition: opacity 0.15s ease; }
-.add-profile-fade-enter-active .add-profile-dialog { animation: profile-pop 0.25s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-.add-profile-fade-leave-active .add-profile-dialog { transition: transform 0.15s ease, opacity 0.15s ease; }
-.add-profile-fade-enter-from,
-.add-profile-fade-leave-to { opacity: 0; }
-.add-profile-fade-leave-to .add-profile-dialog { transform: scale(0.95); opacity: 0; }
-
-@keyframes profile-pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
 /* ── 测试画风 ── */
 .style-test-row { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; flex-wrap: wrap; }
 .free-scene-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
 .free-scene-input-wrap { position: relative; flex: 1; min-width: 0; }
-/* 折叠/展开输入框：独立设计（单行收起 + 省略覆盖层），皮肤与 LinsheInput 对齐 */
-.free-scene-textarea {
-  width: 100%; display: block; padding: 9px 12px; font-size: 13px; line-height: 1.5;
-  font-family: inherit; border-radius: 10px; background: #fffdfb;
-  border: 1.5px solid #e3dcd2; color: var(--text-bright); outline: none;
-  caret-color: var(--accent);
-  resize: none; overflow: hidden;
-  height: 38px;  /* 默认单行，聚焦展开 */
-  transition: height 0.18s ease, border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-}
-.free-scene-textarea:focus {
-  height: auto; min-height: 58px; resize: none; overflow: hidden;
-  border-color: var(--accent); background: #fff;
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.14);
-}
-.free-scene-ellipsis {
-  position: absolute; inset: 0;
-  display: flex; align-items: center;
-  padding: 0 12px; font-size: 13px;
-  border-radius: 10px; background: #fffdfb;
-  border: 1.5px solid #e3dcd2; color: var(--text-bright);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: text; transition: border-color 0.15s;
-}
-.free-scene-ellipsis:hover { border-color: var(--accent); }
 .free-scene-btn { margin: 0; flex-shrink: 0; }
 /* 生成提示词按钮：随输入内容渐入渐出 */
 .gen-btn-fade-enter-active, .gen-btn-fade-leave-active { transition: opacity 0.25s ease; }
@@ -3136,24 +2775,6 @@ function resetTestPrompts() {
 }
 .generated-prompt-editor:focus { border-color: var(--accent); }
 .style-test-btn { margin: 0; }
-.test-mode-segmented {
-  display: inline-flex; gap: 3px;
-  padding: 3px; background: #F5F1EC; border-radius: 10px;
-}
-.test-mode-btn {
-  flex: 1;
-  padding: 6px 14px; font-size: 12px; font-weight: 500;
-  border-radius: 7px; border: none;
-  background: transparent; color: #6F675F;
-  cursor: pointer; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  font-family: inherit; text-align: center; white-space: nowrap; user-select: none;
-}
-.test-mode-btn:hover { color: #E07B6C; }
-.test-mode-btn.active {
-  background: #FFFEFC; color: #E07B6C; font-weight: 600;
-  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
-}
-.test-mode-btn.is-disabled { opacity: 0.5; pointer-events: none; }
 .test-prompt-btn {
   margin-left: auto; padding: 0; font-size: 12px;
 }
@@ -3168,26 +2789,6 @@ function resetTestPrompts() {
 .style-preview-img { max-width: 480px; max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
 .style-preview-img:hover { transform: scale(1.03); }
 
-/* ── 测试提示词弹窗 ── */
-.prompt-editor-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex;
-  align-items: center; justify-content: center; z-index: 10000;
-}
-.prompt-editor-modal {
-  background: var(--bg-primary); border-radius: 16px; padding: 24px;
-  width: min(640px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-.prompt-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.prompt-editor-header h3 { font-size: 16px; font-weight: 600; color: var(--text-bright); }
-.prompt-editor-close {
-  width: 28px; height: 28px;
-  font-size: 14px; display: flex; align-items: center; justify-content: center;
-}
-.prompt-editor-body { flex: 1; overflow-y: auto; }
-.prompt-editor-field { margin-bottom: 16px; }
-.prompt-textarea { min-height: 100px; resize: vertical; font-family: inherit; margin-bottom: 0; }
-.prompt-editor-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; }
 
 /* ── 移动端：卡片单列 + 间距收缩 ── */
 @media (max-width: 767px) {
@@ -3208,7 +2809,6 @@ function resetTestPrompts() {
   /* 图片实验室操作区：生成画面/细化按钮占满一行，三个参数切换共占一行 */
   .style-test-row .style-test-btn { width: 100%; }
   .style-test-row .test-mode-segmented { flex: 1 1 0; }
-  .style-test-row .test-mode-btn { padding-left: 6px; padding-right: 6px; }
   .test-prompt-btn { margin-left: 0; }
   /* 画师串操作按钮行：允许换行，避免挤压 */
   .sa { flex-wrap: wrap; gap: 8px; }
@@ -3228,30 +2828,12 @@ function resetTestPrompts() {
 }
 
 /* ── 工作流模式弹窗 ── */
-.wf-mode-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10001;
-}
-.wf-mode-modal {
-  background: var(--bg-secondary);
-  border-radius: 16px; padding: 28px 32px;
-  max-width: 600px; width: 90%;
-  max-height: 85vh; overflow-y: auto;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
-  transition: max-height 0.35s ease, max-width 0.35s ease;
-}
-.wf-mode-modal h3 {
-  font-size: 18px; margin-bottom: 16px; color: var(--text-bright);
-  text-align: center;
-}
 .wf-mode-options {
   display: flex; gap: 12px; margin-bottom: 16px;
 }
 .wf-mode-option {
   flex: 1;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-secondary);
   border: 2px solid var(--border);
   border-radius: 12px;
   padding: 14px 12px;
@@ -3264,7 +2846,7 @@ function resetTestPrompts() {
 .wf-mode-option:hover { border-color: var(--accent); }
 .wf-mode-option.active {
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .wf-mo-title {
   font-size: 14px; font-weight: 600; color: var(--text-bright);
@@ -3276,7 +2858,7 @@ function resetTestPrompts() {
   color: var(--accent); font-weight: 700;
 }
 .wf-mode-downloads {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 8px; padding: 10px 14px; margin-bottom: 4px;
 }
@@ -3297,15 +2879,15 @@ function resetTestPrompts() {
   margin-bottom: 10px; text-align: center;
 }
 .wf-mode-scenes {
-  background: rgba(224, 123, 108, 0.04);
-  border: 1px solid rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   border-radius: 8px; padding: 12px 16px;
 }
 .wf-scene-row-h {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 0;
 }
-.wf-scene-row-h + .wf-scene-row-h { border-top: 1px solid rgba(0,0,0,0.06); }
+.wf-scene-row-h + .wf-scene-row-h { border-top: 1px solid var(--border); }
 .wf-scene-name {
   font-size: 13px; color: var(--text-primary);
 }
@@ -3330,10 +2912,12 @@ function resetTestPrompts() {
   max-height: 300px;
   opacity: 1;
 }
-.wf-mode-actions {
-  margin-top: 20px; display: flex; justify-content: center; gap: 10px;
+
+/* ── 界面主题（功能开关内）── */
+.theme-mode-row { align-items: flex-start; }
+.theme-mode-options { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; padding-top: 2px; }
+@media (max-width: 767px) {
+  .theme-mode-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .theme-mode-options { justify-content: flex-start; }
 }
-.modal-fade-enter-active { transition: opacity 0.3s ease; }
-.modal-fade-leave-active { transition: opacity 0.2s ease; }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 </style>

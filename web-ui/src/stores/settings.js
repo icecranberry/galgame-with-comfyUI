@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api/index.js'
+import { getSavedTheme, getSavedThemeMode, applyTheme, applyThemeMode, resolveThemeByTime } from '../theme.js'
 
 export const useSettingsStore = defineStore('settings', () => {
   const comfyWidth = ref(1600)
@@ -12,6 +13,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const realtimeAffinityDisplay = ref(false)
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
+  const theme = ref(getSavedTheme()) // main.js 已在挂载前应用过，这里只是同步状态
+  const themeMode = ref(getSavedThemeMode()) // 'warm' | 'dark' | 'auto'
   let loaded = false
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
@@ -92,5 +95,20 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateWeatherCity(city)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, hasApiKey, weatherCity, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity }
+  // 切换主题模式：暖色 / 暗夜 / 按时间，立即应用到 <html data-theme>，持久化在 localStorage
+  function setThemeMode(mode) {
+    if (!['warm', 'dark', 'auto'].includes(mode)) return
+    themeMode.value = mode
+    theme.value = mode === 'auto' ? resolveThemeByTime() : mode
+    applyThemeMode(mode)
+  }
+
+  // 按时间模式下的定时/聚焦刷新
+  function refreshTheme() {
+    if (themeMode.value !== 'auto') return
+    theme.value = resolveThemeByTime()
+    applyTheme(theme.value)
+  }
+
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
 })

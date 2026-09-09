@@ -50,6 +50,15 @@ web-ui 中所有拨动开关（toggle switch）统一使用组件 `web-ui/src/co
 3. 尺寸用 `size="sm|md|lg"`（默认 md），与 LinsheButton / LinsheInput 尺寸档位对齐
 4. 调整开关风格只改 `LinsheSwitch.vue`，不要在各页面里覆盖组件皮肤
 
+## 弹窗（LinsheModal）
+
+web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.vue`（原 `BaseModal.vue` 已改名收编），禁止手写遮罩 / 面板皮肤。
+
+1. 引入：`import LinsheModal from '.../components/ui/LinsheModal.vue'`，模板中写 `<linshe-modal>`；`v-model` 控制显隐（旧代码仍可传 `:visible`），`title` 为标题
+2. 尺寸用 `wide`（加宽）/ `full`（大型管理面板）；内容用默认插槽，底部操作区用 `#footer`，头部右侧附加内容（如计数）用 `#header-extra`；需要局部布局差异用 `panel-class` / `body-class`
+3. 暖色主题沿用人物详情卡 pr 前口径（对齐 LoRA 设置窗）：暖纸外壳 + 白色内衬，标题栏与 `#footer` 留在外壳上、白色内衬只包正文（`--modal-*` token，见 `styles/tokens.css`）；暗夜保持 Cel Glow 深色玻璃；Esc / 点遮罩关闭
+4. 调整弹窗风格只改 `LinsheModal.vue` 与 `tokens.css` 的 `--modal-*`，不要在各页面里覆盖组件皮肤
+
 ## LLM 输出
 
 编写或修改 LLM 生成相关的 prompt 时：

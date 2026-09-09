@@ -2,10 +2,11 @@
   <div class="moment-card">
     <!-- 头部：角色信息 -->
     <div class="moment-header">
-      <div class="moment-avatar" @click="goToChat">
-        <img v-if="post.avatar_path" :src="post.avatar_path" class="moment-avatar-img" alt="" />
-        <span v-else>{{ post.display_name?.charAt(0) }}</span>
-      </div>
+      <div
+        class="moment-avatar avatar-wiggle"
+        :style="avatarStyle"
+        @click="goToChat"
+      ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
       <div class="moment-header-info">
         <span class="moment-name">{{ post.display_name }}</span>
         <span class="moment-time">{{ formatTime(post.created_at) }}</span>
@@ -44,7 +45,7 @@
 
     <!-- 底部操作栏 -->
     <div class="moment-actions">
-      <div class="action-btn" :class="{ active: post.liked }" role="button" tabindex="0" @click="onLike" @keydown.enter.prevent="onLike" @keydown.space.prevent="onLike">
+      <div class="action-btn like-btn" :class="{ active: post.liked, 'like-burst': likeBursting }" role="button" tabindex="0" @click="onLike" @keydown.enter.prevent="onLike" @keydown.space.prevent="onLike">
         <svg viewBox="0 0 24 24" width="18" height="18" :fill="post.liked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
         </svg>
@@ -209,6 +210,11 @@ const alwaysVisible = computed(() => comments.value.slice(0, MAX_VISIBLE))
 const hiddenComments = computed(() => comments.value.slice(MAX_VISIBLE))
 const hiddenCount = computed(() => Math.max(0, comments.value.length - MAX_VISIBLE))
 
+const avatarStyle = computed(() => {
+  const p = props.post
+  if (p.avatar_path) return { backgroundImage: `url(${p.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  return { background: 'var(--accent)' }
+})
 
 const visibleImages = computed(() => {
   return (props.post.images || []).filter((_, i) => !imgErrors.has(i))
@@ -308,8 +314,19 @@ async function onDelete() {
   await moments.deletePost(props.post.id)
 }
 
+const likeBursting = ref(false)
+let burstTimer = null
 async function onLike() {
   await moments.toggleLike(props.post.id)
+  // 点赞成功：爱心爆心动画（粒子环扩散），600ms 后复位
+  if (props.post.liked) {
+    likeBursting.value = false
+    requestAnimationFrame(() => {
+      likeBursting.value = true
+      clearTimeout(burstTimer)
+      burstTimer = setTimeout(() => { likeBursting.value = false }, 650)
+    })
+  }
 }
 
 function formatTime(iso) {
@@ -368,16 +385,9 @@ function formatTime(iso) {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.moment-avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-  display: block;
-}
 .moment-avatar:hover {
   transform: scale(1.08);
-  box-shadow: 0 0 0 3px rgba(224, 123, 108, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 .moment-header-info {
   display: flex; flex-direction: column; gap: 2px;
@@ -480,6 +490,7 @@ function formatTime(iso) {
 }
 .action-btn:hover { background: rgba(255, 255, 255, 0.28); color: var(--text-bright); }
 .action-btn.active { color: var(--accent); }
+.like-btn.active { color: var(--accent-2); }
 .action-btn.share-btn { margin-left: auto; }
 
 .comments-section {
@@ -497,8 +508,8 @@ function formatTime(iso) {
   color: var(--text-primary);
 }
 .comment-item.is-character {
-  background: rgba(224, 123, 108, 0.06);
-  border: 1px solid rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
 }
 .comment-char-name {
   font-size: 12px; font-weight: 600;
@@ -536,7 +547,7 @@ function formatTime(iso) {
   transition: all 0.15s;
   text-align: center; user-select: none;
 }
-.comment-expand-btn:hover { color: var(--accent); background: rgba(224, 123, 108, 0.05); }
+.comment-expand-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.05); }
 
 .comment-input-row {
   display: flex; gap: 8px; align-items: center;

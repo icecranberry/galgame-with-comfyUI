@@ -89,7 +89,7 @@ const avatarStyle = computed(() => {
       backgroundPosition: 'center',
     }
   }
-  return { background: '#e07b6c' }
+  return { background: 'var(--accent)' }
 })
 </script>
 
@@ -110,7 +110,7 @@ const avatarStyle = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-accent);
   font-size: 28px;
   font-weight: 700;
   border: 3px solid rgba(255,255,255,0.8);
@@ -130,7 +130,7 @@ const avatarStyle = computed(() => {
 .cn-name {
   font-size: 12px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
   text-align: center;
   max-width: 100px;
   overflow: hidden;
@@ -143,7 +143,7 @@ const avatarStyle = computed(() => {
 .is-center .cn-name {
   font-size: 16px;
   font-weight: 700;
-  color: #222;
+  color: var(--text-bright);
   max-width: 140px;
 }
 

@@ -1,15 +1,6 @@
 <template>
   <div class="gallery" ref="scrollContainer" @scroll="onScroll">
-    <!-- 加载状态 -->
-    <div v-if="loading" class="gallery-empty">
-    </div>
-
     <!-- 空状态 -->
-    <div v-else-if="images.length === 0 && !hasMore" class="gallery-empty">
-      <div class="empty-icon">📭</div>
-      <p>{{ activeFolder ? '该分类暂无图片' : '相册暂无图片' }}</p>
-      <p class="empty-hint">生成图片后会自动出现在这里</p>
-    </div>
 
     <!-- 文件夹筛选按钮（常驻） -->
     <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
@@ -32,16 +23,21 @@
           <span class="group-label">{{ group.label }}</span>
           <span class="group-count">{{ group.images.length }} 张</span>
         </div>
-        <div class="gallery-grid">
+        <div class="gallery-grid stagger">
           <div
             v-for="img in group.images"
             :key="img.name"
-            class="gallery-item"
+            class="gallery-item sheen"
             @click="onPreview(img.flatIndex)"
           >
-            <div class="img-wrapper">
-              <img :src="bustUrlIfOverwritten(img.url)" class="gallery-img" alt="" loading="lazy" decoding="async" />
-            </div>
+            <!-- 用 img + loading=lazy 取代 background-image：浏览器可延迟加载视口外缩略图 -->
+            <img
+              class="img-wrapper"
+              :src="bustUrlIfOverwritten(img.url)"
+              loading="lazy"
+              decoding="async"
+              alt=""
+            >
           </div>
         </div>
       </div>
@@ -253,7 +249,7 @@ defineExpose({ refresh })
   flex-wrap: wrap;
   gap: 8px;
   padding: 4px 0 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
 
@@ -267,17 +263,7 @@ defineExpose({ refresh })
 }
 
 /* ── 空状态 ── */
-.gallery-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-secondary);
-  gap: 8px;
-}
-.empty-icon { font-size: 48px; opacity: 0.6; }
-.empty-hint { font-size: 12px; opacity: 0.5; }
+/* 空状态已迁移至 EmptyState 组件 */
 
 /* ── 分组 ── */
 .gallery-group {
@@ -310,23 +296,25 @@ defineExpose({ refresh })
 .gallery-item {
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--glass-bg-strong);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--glass-border);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .gallery-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
-.img-wrapper {
+.gallery-item .img-wrapper {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   overflow: hidden;
-  background-color: rgba(0, 0, 0, 0.04);
+  background-color: var(--bg-tertiary);
+  object-fit: cover;
   transition: transform 0.3s ease, background-color 0.2s ease;
 }
 .gallery-img {

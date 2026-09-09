@@ -91,7 +91,7 @@ async function send() {
 }
 .write-avatar-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #e07b6c, #d4695a);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: #fff; font-size: 18px; font-weight: 700;
 }
 .write-context-text { flex: 1; }

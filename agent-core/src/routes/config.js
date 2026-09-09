@@ -267,7 +267,13 @@ router.put('/llm/free-egg', (req, res) => {
 });
 
 // GET /api/config/llm/key — 获取当前 LLM API Key（前端复制用）
-router.get('/llm/key', (_req, res) => {
+// 明文 Key 属敏感信息，仅限本机回环调用（手机端仍可从 /api/config 看到脱敏预览）
+router.get('/llm/key', (req, res) => {
+  const addr = req.socket?.remoteAddress || '';
+  const isLoopback = addr === '::1' || addr === '127.0.0.1' || addr === '::ffff:127.0.0.1';
+  if (!isLoopback) {
+    return res.status(403).json({ ok: false, error: 'API Key 明文仅允许本机获取' });
+  }
   const apiKey = getLlmApiKey();
   if (!apiKey) {
     return res.status(404).json({ ok: false, error: '未设置 API Key' });

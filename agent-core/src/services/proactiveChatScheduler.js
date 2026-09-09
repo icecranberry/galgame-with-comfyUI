@@ -12,7 +12,7 @@
  *   - 每次只处理一个角色（排队）
  */
 
-import { invalidateGalleryCache } from '../routes/images.js';
+import { invalidateGalleryCache } from './galleryCache.js';
 import { getDb, getSystemRulesWithWorld, getGlobalRule, getWorldSetting } from '../db/index.js';
 import { appendOathRing } from './oathUtils.js';
 import { buildCharacterAppearanceSection } from './characterPersona.js';

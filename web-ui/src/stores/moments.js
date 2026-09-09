@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
+// unifiedStream 不依赖 moments store，无循环依赖；统一静态导入（消除构建警告）
+import { onEvent as onStreamEvent } from './unifiedStream.js'
 
 const PAGE_SIZE = 20
 
@@ -185,14 +187,12 @@ export const useMomentsStore = defineStore('moments', () => {
     // 从 DB 加载初始未读计数
     await refreshUnreadCount()
 
-    // 动态导入避免循环依赖（unifiedStream 不依赖 moments store）
-    const { onEvent } = await import('./unifiedStream.js')
-    _unsubNewPost = onEvent('new_post', (_post) => {
+    _unsubNewPost = onStreamEvent('new_post', (_post) => {
       newPostCount.value++
     })
 
     // 监听关系网互动产生的新评论，实时追加到帖子评论区
-    _unsubNewComment = onEvent('new_comment', (data) => {
+    _unsubNewComment = onStreamEvent('new_comment', (data) => {
       if (!data?.post_id || !data?.comment) return
       const post = posts.value.find(p => p.id === data.post_id)
       if (post) {

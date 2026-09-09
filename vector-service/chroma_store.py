@@ -13,6 +13,7 @@ _collections = {}
 DEFAULT_CORPUS = "memory_fragments"
 IMAGE_PROMPT_CORPUS = "image_prompt_knowledge"
 CHAT_MEMORY_PREFIX = "memory_v2_"
+MEMORY_TRIPLES_CORPUS = "memory_triples_v1"
 
 
 def _collection_name(corpus: str) -> str:
@@ -20,6 +21,9 @@ def _collection_name(corpus: str) -> str:
         return CHROMA_COLLECTION
     if corpus == IMAGE_PROMPT_CORPUS:
         return f"{CHROMA_COLLECTION}_image_prompt_knowledge"
+    if corpus == MEMORY_TRIPLES_CORPUS:
+        # Memory v3 阶段二：三元组联想扩展专用语料（docs/memory-upgrade-plan.md §5.3）
+        return f"{CHROMA_COLLECTION}_memory_triples"
     if corpus.startswith(CHAT_MEMORY_PREFIX) and corpus[len(CHAT_MEMORY_PREFIX):].isalnum():
         return f"{CHROMA_COLLECTION}_{corpus}"
     raise ValueError(f"unsupported corpus: {corpus}")

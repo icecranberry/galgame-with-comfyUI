@@ -2,7 +2,7 @@
 
 [中文](./README.md)
 
-A **local AI companion app** inspired by Galgame. Chat with characters that have customizable personalities; AI automatically triggers **ComfyUI** image generation from context, with 3D emotion simulation, long-term memory retrieval, and a Moments feed.
+A **local AI companion app** inspired by Galgame. Chat with characters that have customizable personalities; AI automatically triggers **ComfyUI** image generation from context, with 3D emotion simulation, an evolving long-term memory system, a Moments feed, and switchable UI themes.
 
 Welcome to leave better suggestions under the videos:
 - [我好像让纸片人「活」过来了【邻舍.EXE-1.0】- bilibili 详细演示以及安装视频](https://www.bilibili.com/video/BV1uH7q6vEQ9/)
@@ -80,6 +80,14 @@ The system does not stuff unlimited chat history into the model. Instead, memory
 
 When the user mentions a related topic again, the system recalls memories through keyword and vector semantic search. Even if the user phrases it differently, the character still has a chance to connect it to past experiences.
 
+In v3.4.0 the memory system was upgraded to the **Memory v3 architecture**, adding five capabilities on top of the three layers:
+
+- **Multiple representations & indexes**: the same experience is encoded as factual statements, emotional impressions, and more, organized with entity and triple indexes and recalled through a four-way hybrid of keyword, vector, and entity retrieval — even rephrased mentions can be remembered.
+- **Dual timestamps**: every memory records both "when it happened" and "when it was noted", so a character can tell "something we chatted about last week" apart from "a promise made long ago".
+- **@memory active recall**: characters are no longer limited to passively receiving injected memories — when a topic touches the past, they can proactively search their memory and bring it into the conversation.
+- **Sleep-time consolidation**: during idle periods a background daemon deduplicates, merges, and archives memories, under an LLM call budget to avoid unbounded cost.
+- **Context budget**: dynamic context blocks (memories, schedules, weather, ...) are degraded by priority when the budget tightens, and every downgrade is logged — nothing is silently truncated.
+
 *The memory management page lets users query, test, and delete long-term memories, and view recent memory organization records.*
 
 ### 3. AI Emotion System
@@ -126,6 +134,21 @@ These features share the same personas, relationships, memories, and time states
 |------|------|
 | [![Schedule page](https://github.com/user-attachments/assets/56ed71d3-ae25-4ac6-86c1-c0f04ebf3add)](https://github.com/user-attachments/assets/56ed71d3-ae25-4ac6-86c1-c0f04ebf3add) | [![Adventure page](https://github.com/user-attachments/assets/c2b80641-54c7-4c08-8d1a-661f14d8da9e)](https://github.com/user-attachments/assets/c2b80641-54c7-4c08-8d1a-661f14d8da9e) |
 
+## 🎨 Personalized Themes & UI
+
+The UI is built on the custom **Cel Glow design system** — cel-shaded anime texture × soft glass atmosphere: sticker-like buttons that sink when pressed, candy-dimpled inputs and selects, hard shadows and dot textures, with subtle entrance and feedback animations.
+
+**4 complete themes** ship out of the box and can be switched in Settings. Switching is not just an accent color — every page follows the theme, from chat and Moments to the backpack, emoji manager, and Moments share posters:
+
+| Theme | Vibe |
+|------|------|
+| 🌌 Violet | Default; blue-purple led with orange-red accents |
+| 🌅 Sunset | Warm orange-tomato tones |
+| 🌊 Ocean | Fresh blue-green |
+| 🌸 Sakura | Soft pink and cream |
+
+The theme preference is persisted per device; the mailbox and Toast pages keep their signature "warm paper" texture as accents, and semantic colors such as the gold gift color stay theme-independent for recognizability.
+
 ## 🏆 Core Advantages
 
 ### Character Continuity
@@ -156,7 +179,7 @@ The backend calls LLMs through OpenAI-compatible protocols, and image generation
 
 ### More Than a Concept Prototype
 
-The project already has complete modules including character management, private chat, group chat, memory, emotion, relationships, Moments, gallery, schedules, adventures, mailbox, notifications, a desktop launcher, and an Android shell. It can be used and iterated as a real application.
+The project already has complete modules including character management, private chat, group chat, multi-set emoji packs, a backpack with items and daily chests, character standing portraits, memory, emotion, relationships, Moments, gallery, schedules, adventures, mailbox, notifications, themeable UI, a desktop launcher, and an Android shell. It can be used and iterated as a real application.
 
 [![Mobile view](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201)](https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201)
 
@@ -171,6 +194,7 @@ The project already has complete modules including character management, private
 | Time concept | Usually none | Current time, weather, schedule, sleep, and reply delays |
 | Proactivity | Waits for user questions | Proactive chat, posts, letters, and triggered events |
 | Multiple characters | Separate sessions | Characters build relationships and join group chats |
+| UI themes | Usually a fixed style | 4 complete themes, one-click switching across the whole UI |
 | Control | Depends on platform options | Configurable LLM, ComfyUI, LoRA, rules, and worldviews |
 
 ## 🏗️ Technical Architecture
@@ -210,7 +234,7 @@ Node.js + Express (Core :3099)
 
 ### Option 1: Use the Release Package (Recommended)
 
-Download `邻舍.EXE-vX.Y.Z.zip` from [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) and extract it anywhere. The archive bundles portable Node.js / Python / Git runtimes, preinstalled dependencies, the embedding model, frontend build output, and the **`邻舍.EXE.exe`** launcher. The Android APK is also included with each release (optional).
+Download `邻舍.EXE-vX.Y.Z.zip` from [Releases](https://github.com/moye-galaxy/galgame-with-comfyUI/releases) and extract it anywhere. The archive bundles portable Node.js / Python / Git runtimes, preinstalled dependencies, the embedding model, frontend build output, and the **`邻舍.EXE.exe`** launcher. The Android APK is also included with each release (optional).
 
 Before using it, make sure:
 
@@ -229,7 +253,7 @@ Prerequisites: **Node.js ≥ 18**, **Python ≥ 3.10 (with venv)**, **Git**, Com
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/icecranberry/galgame-with-comfyUI.git
+git clone https://github.com/moye-galaxy/galgame-with-comfyUI.git
 cd galgame-with-comfyUI
 
 # 2. Install dependencies

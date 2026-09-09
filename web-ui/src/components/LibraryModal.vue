@@ -1,17 +1,14 @@
 <template>
-  <Transition name="modal-fade">
-    <div v-if="modelValue" class="lib-overlay" @click.self="close">
-      <div class="lib-panel">
-        <!-- 头部 -->
-        <div class="lib-header">
-          <h3 class="lib-title">{{ title }}</h3>
-          <div class="lib-header-right">
-            <span class="lib-count">{{ items.length }} 条</span>
-            <linshe-button variant="icon" @click="close">✕</linshe-button>
-          </div>
-        </div>
-
-        <div class="lib-body">
+    <linshe-modal
+      :model-value="modelValue"
+      :title="title"
+      full
+      @update:model-value="$emit('update:modelValue', $event)"
+    >
+      <template #header-extra>
+        <span class="lib-count">{{ items.length }} 条</span>
+      </template>
+      <div class="lib-body">
           <!-- 生成器 -->
           <div class="gen-section">
             <div class="gen-row">
@@ -147,10 +144,8 @@
               </TransitionGroup>
             </CollapseTransition>
           </div>
-        </div>
       </div>
-    </div>
-  </Transition>
+    </linshe-modal>
 </template>
 
 <script setup>
@@ -159,8 +154,9 @@ import * as api from '../api/index.js'
 import LibraryItemCard from './LibraryItemCard.vue'
 import CollapseTransition from './CollapseTransition.vue'
 import CardHeightTransition from './CardHeightTransition.vue'
-import LinsheButton from './ui/LinsheButton.vue'
+import LinsheModal from './ui/LinsheModal.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -215,9 +211,6 @@ watch(() => props.modelValue, async (v) => {
   }
 })
 
-function close() {
-  emit('update:modelValue', false)
-}
 
 // ── 生成器 ──
 
@@ -433,37 +426,9 @@ function addItem() {
 </script>
 
 <style scoped>
-.lib-overlay {
-  position: fixed; inset: 0; z-index: 300;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: flex; align-items: center; justify-content: center;
-  padding: 3vh 3vw;
-}
-.lib-panel {
-  width: 94vw; height: 92vh;
-  display: flex; flex-direction: column;
-  background: rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 18px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-}
-.lib-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--glass-border, rgba(0,0,0,0.08));
-  flex-shrink: 0;
-}
-.lib-title { font-size: 17px; font-weight: 700; color: var(--text-bright, #2b2b2b); margin: 0; }
-.lib-header-right { display: flex; align-items: center; gap: 12px; }
-.lib-count { font-size: 12px; color: var(--text-secondary, #888); }
 
 .lib-body {
-  flex: 1; overflow-y: auto;
-  padding: 16px 24px 32px;
+  padding: 0 4px 12px;
 }
 
 /* 生成器 */
@@ -479,7 +444,7 @@ function addItem() {
 /* ── 生成中扫描线（酒馆同款）── */
 .scan-overlay {
   position: absolute; inset: 0;
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--glass-bg-veil);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   border-radius: 12px;
@@ -488,9 +453,9 @@ function addItem() {
 }
 .scan-line {
   position: absolute; left: 8%; right: 8%; height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent, #e07b6c), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent, var(--accent)), transparent);
   animation: lib-scan-sweep 2s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(224, 123, 108, 0.6), 0 0 8px rgba(224, 123, 108, 0.3);
+  box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.6), 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 @keyframes lib-scan-sweep {
   0%   { top: 10%; opacity: 0.2; }
@@ -500,9 +465,9 @@ function addItem() {
   100% { top: 10%; opacity: 0.2; }
 }
 .scan-text {
-  font-size: 13px; color: var(--accent, #e07b6c); font-weight: 600;
+  font-size: 13px; color: var(--accent, var(--accent)); font-weight: 600;
   animation: lib-scan-pulse 1.2s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(224, 123, 108, 0.3);
+  text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
 }
 @keyframes lib-scan-pulse {
   0%, 100% { opacity: 0.4; transform: scale(0.97); }
@@ -512,14 +477,14 @@ function addItem() {
 /* 生成预览 */
 .preview-section {
   margin-top: 14px; padding: 12px;
-  border: 1px dashed rgba(224, 123, 108, 0.4);
-  border-radius: 12px; background: rgba(224, 123, 108, 0.03);
+  border: 1px dashed rgba(var(--accent-rgb), 0.4);
+  border-radius: 12px; background: rgba(var(--accent-rgb), 0.03);
 }
 .preview-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
 }
-.preview-title { font-size: 13px; font-weight: 600; color: #c06a5a; }
+.preview-title { font-size: 13px; font-weight: 600; color: var(--accent-hover); }
 .preview-actions { display: flex; gap: 8px; }
 
 /* 分组 */
@@ -527,7 +492,7 @@ function addItem() {
 .group-header {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 4px; cursor: pointer; user-select: none;
-  border-top: 1px solid rgba(0,0,0,0.05);
+  border-top: 1px solid var(--tint-subtle);
 }
 .group-header svg { transition: transform 0.25s; color: var(--text-secondary, #888); flex-shrink: 0; }
 .group-header svg.rotated { transform: rotate(90deg); }
@@ -535,14 +500,14 @@ function addItem() {
 .group-hint { font-size: 11px; color: var(--text-secondary, #888); }
 .add-card {
   min-height: 130px;
-  border: 1.5px dashed var(--accent, #e07b6c);
+  border: 1.5px dashed var(--accent, var(--accent));
   border-radius: 12px;
-  background: transparent; color: var(--accent, #e07b6c);
+  background: transparent; color: var(--accent, var(--accent));
   font-size: 13px; font-family: inherit; cursor: pointer; transition: all 0.15s;
   display: flex; align-items: center; justify-content: center;
   user-select: none;
 }
-.add-card:hover { background: rgba(224,123,108,0.06); }
+.add-card:hover { background: rgba(var(--accent-rgb),0.06); }
 
 /* 卡片网格 */
 .card-grid {
@@ -554,13 +519,13 @@ function addItem() {
 }
 .item-card {
   display: flex; flex-direction: column; justify-content: space-between;
-  border: 1px solid var(--glass-border, rgba(0,0,0,0.1));
+  border: 1px solid var(--glass-border);
   border-radius: 12px; padding: 12px;
-  background: rgba(255,255,255,0.6);
+  background: var(--glass-bg);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.item-card:hover { border-color: rgba(224,123,108,0.35); box-shadow: 0 3px 16px rgba(224,123,108,0.06); }
-.item-card.editing { border-color: var(--accent, #e07b6c); box-shadow: 0 0 0 2px rgba(224,123,108,0.15); }
+.item-card:hover { border-color: rgba(var(--accent-rgb),0.35); box-shadow: 0 3px 16px rgba(var(--accent-rgb),0.06); }
+.item-card.editing { border-color: var(--accent, var(--accent)); box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.15); }
 .card-main { min-width: 0; }
 .card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card-name { font-size: 14px; font-weight: 700; color: var(--text-bright, #2b2b2b); }
@@ -572,7 +537,7 @@ function addItem() {
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag {
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: rgba(224,123,108,0.1); color: #c06a5a;
+  background: rgba(var(--accent-rgb),0.1); color: var(--accent-hover);
 }
 .card-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
 
@@ -588,7 +553,7 @@ function addItem() {
 .empty-hint {
   grid-column: 1 / -1;
   font-size: 12px; color: var(--text-secondary, #888);
-  padding: 18px; text-align: center; background: rgba(0,0,0,0.015);
+  padding: 18px; text-align: center; background: var(--tint-faint);
   border-radius: 10px;
 }
 

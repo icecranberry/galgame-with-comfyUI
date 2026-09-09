@@ -1,21 +1,5 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="show" class="modal-overlay">
-        <div class="modal-panel modal-wide emoji-manager-modal">
-          <div class="modal-header">
-            <h3>表情包管理</h3>
-            <span
-              class="modal-close"
-              role="button"
-              tabindex="0"
-              aria-label="关闭"
-              title="关闭"
-              @click="close"
-              @keydown.enter.prevent="close"
-              @keydown.space.prevent="close"
-            >✕</span>
-          </div>
+  <linshe-modal v-model="show" title="表情包管理" full panel-class="emoji-manager-modal" body-class="emoji-manager-body" @close="close">
 
           <div class="emoji-body">
             <!-- 生成 prompt 时的全局扫描遮罩 -->
@@ -312,30 +296,12 @@
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </Transition>
+  </linshe-modal>
 
     <!-- 高级设置弹窗 -->
-    <Transition name="modal-fade">
-      <div v-if="showAdvancedSettings" class="modal-overlay advanced-overlay">
-        <div class="modal-panel advanced-panel">
-          <div class="modal-header">
-            <h3>高级设置</h3>
-            <span
-              class="modal-close"
-              role="button"
-              tabindex="0"
-              aria-label="关闭"
-              title="关闭"
-              @click="showAdvancedSettings = false"
-              @keydown.enter.prevent="showAdvancedSettings = false"
-              @keydown.space.prevent="showAdvancedSettings = false"
-            >✕</span>
-          </div>
-
-          <div class="advanced-body">
-            <div class="advanced-content">
+    <linshe-modal v-model="showAdvancedSettings" title="高级设置">
+      <div class="advanced-body">
+        <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">画师串</div>
               <linshe-input v-model="artist" class="advanced-artist-input" type="text" placeholder="@ebora" />
@@ -372,11 +338,7 @@
 
             <div class="advanced-section">
               <div class="advanced-label">表情包风格</div>
-              <div class="emoji-style-segmented">
-                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'half_body' }]" @click="styleMode = 'half_body'" @keydown.enter.prevent="styleMode = 'half_body'" @keydown.space.prevent="styleMode = 'half_body'">半身LINE</div>
-                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'half_body_chibi' }]" @click="styleMode = 'half_body_chibi'" @keydown.enter.prevent="styleMode = 'half_body_chibi'" @keydown.space.prevent="styleMode = 'half_body_chibi'">半身Q版</div>
-                <div role="button" tabindex="0" :class="['emoji-style-chip', { active: styleMode === 'chibi_head' }]" @click="styleMode = 'chibi_head'" @keydown.enter.prevent="styleMode = 'chibi_head'" @keydown.space.prevent="styleMode = 'chibi_head'">猪鼻大头</div>
-              </div>
+              <linshe-tabs v-model="styleMode" :options="styleModeOptions" size="sm" />
               <div class="advanced-hint">{{ styleModeHint }}</div>
             </div>
 
@@ -395,33 +357,15 @@
             </div>
           </div>
 
-          <div class="advanced-footer">
-            <linshe-button variant="secondary" @click="showAdvancedSettings = false">取消</linshe-button>
-            <linshe-button variant="primary" :disabled="categorySaving" @click="saveAdvancedSettings">保存</linshe-button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+      <template #footer>
+        <linshe-button variant="secondary" @click="showAdvancedSettings = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="categorySaving" @click="saveAdvancedSettings">保存</linshe-button>
+      </template>
+    </linshe-modal>
     <!-- 全部生成弹窗 -->
-    <Transition name="modal-fade">
-      <div v-if="showBatchDialog" class="modal-overlay advanced-overlay">
-        <div class="modal-panel batch-panel">
-          <div class="modal-header">
-            <h3>全部生成</h3>
-            <span
-              class="modal-close"
-              role="button"
-              tabindex="0"
-              aria-label="关闭"
-              title="关闭"
-              @click="showBatchDialog = false"
-              @keydown.enter.prevent="showBatchDialog = false"
-              @keydown.space.prevent="showBatchDialog = false"
-            >✕</span>
-          </div>
-
-          <div class="advanced-body">
-            <div class="advanced-content">
+    <linshe-modal v-model="showBatchDialog" title="全部生成">
+      <div class="advanced-body">
+        <div class="advanced-content">
             <div class="advanced-section">
               <div class="advanced-label">自定义整体风格</div>
               <linshe-input
@@ -436,22 +380,21 @@
             </div>
           </div>
 
-          <div class="advanced-footer">
-            <linshe-button variant="secondary" @click="showBatchDialog = false">取消</linshe-button>
-            <linshe-button variant="primary" @click="startBatchGenerate">开始生成</linshe-button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+      <template #footer>
+        <linshe-button variant="secondary" @click="showBatchDialog = false">取消</linshe-button>
+        <linshe-button variant="primary" @click="startBatchGenerate">开始生成</linshe-button>
+      </template>
+    </linshe-modal>
     <input ref="uploadInputRef" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden @change="onUploadFileChange" />
-  </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue'
 import * as api from '../api/index.js'
+import LinsheModal from './ui/LinsheModal.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
 
 const props = defineProps({
   characters: { type: Array, default: () => [] },
@@ -493,6 +436,7 @@ const resolutionSize = ref(512)
 /** 表情包风格三种：徽章点击按此顺序循环切换 */
 const STYLE_MODE_ORDER = ['half_body', 'half_body_chibi', 'chibi_head']
 const STYLE_MODE_LABELS = { half_body: '半身LINE', half_body_chibi: '半身Q版', chibi_head: '猪鼻大头' }
+const styleModeOptions = STYLE_MODE_ORDER.map(value => ({ value, label: STYLE_MODE_LABELS[value] }))
 const styleModeHint = computed(() => {
   switch (styleMode.value) {
     case 'half_body_chibi':
@@ -1148,81 +1092,29 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000;
-}
-.modal-panel {
-  background: #f4f1eeed;
-  border-radius: 18px;
-  width: min(880px, 96vw); max-height: 90vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-}
-.modal-wide { width: min(1100px, 97vw); }
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
-  flex-shrink: 0;
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: var(--text-bright); }
-.modal-close {
-  width: 30px; height: 30px; border-radius: 50%;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  border: none; background: var(--glass-bg-strong);
-  color: var(--text-secondary); font-size: 15px;
-  font-family: inherit; line-height: 1;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  user-select: none;
-  transition: all 0.15s;
-}
-.modal-close:hover { background: var(--bg-hover); color: var(--text-bright); }
-.modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .modal-panel { animation: emoji-modal-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
-@keyframes emoji-modal-pop {
-  0% { transform: scale(0.92); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.emoji-manager-modal {
-  width: min(1287px, 94vw);
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
 .emoji-body {
   flex: 1;
+  min-height: 0;
   position: relative;
   display: flex;
   gap: 16px;
-  padding: 16px 20px 20px;
+  padding: 0;
   overflow: hidden;
-  background: var(--glass-bg);
-  border-radius: 14px;
-  margin: 0 20px 20px;
 }
 
 /* ── 生成 prompt 时全局扫描遮罩（招募同款）── */
 .emoji-gen-overlay {
   position: absolute; inset: 0; z-index: 20;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--glass-bg);
   border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
 }
 .emoji-gen-line {
   position: absolute; left: 12%; right: 12%; height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(224,123,108,0.3), var(--accent), rgba(224,123,108,0.3), transparent);
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.3), var(--accent), rgba(var(--accent-rgb), 0.3), transparent);
   animation: emoji-gen-sweep 2.2s ease-in-out infinite;
-  box-shadow: 0 0 26px rgba(224,123,108,0.55), 0 0 8px rgba(224,123,108,0.25);
+  box-shadow: 0 0 26px rgba(var(--accent-rgb), 0.55), 0 0 8px rgba(var(--accent-rgb), 0.25);
   z-index: 2; pointer-events: none;
 }
 @keyframes emoji-gen-sweep {
@@ -1234,7 +1126,7 @@ onBeforeUnmount(() => {
 }
 .emoji-gen-glow {
   position: absolute; left: 20%; right: 20%; height: 70px;
-  background: radial-gradient(ellipse at center, rgba(224,123,108,0.13) 0%, rgba(224,123,108,0.04) 40%, transparent 70%);
+  background: radial-gradient(ellipse at center, rgba(var(--accent-rgb), 0.13) 0%, rgba(var(--accent-rgb), 0.04) 40%, transparent 70%);
   animation: emoji-gen-glow-follow 2.2s ease-in-out infinite;
   z-index: 1; pointer-events: none; filter: blur(8px);
 }
@@ -1302,15 +1194,15 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 2px 6px 4px 0;
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  scrollbar-color: var(--bg-hover) transparent;
 }
 .emoji-char-list::-webkit-scrollbar { width: 4px; height: 4px; }
 .emoji-char-list::-webkit-scrollbar-track { background: transparent; }
 .emoji-char-list::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.14);
+  background: var(--bg-hover);
   border-radius: 4px;
 }
-.emoji-char-list::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.26); }
+.emoji-char-list::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 .emoji-char-item {
   display: flex;
   align-items: center;
@@ -1321,15 +1213,15 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: all 0.15s;
 }
-.emoji-char-item:hover { background: rgba(0, 0, 0, 0.04); }
+.emoji-char-item:hover { background: var(--bg-hover); }
 .emoji-char-item.active {
-  background: rgba(224, 123, 108, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border-color: var(--accent);
 }
 .emoji-char-avatar {
   width: 40px; height: 40px; border-radius: 50%;
-  background: #e07b6c;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; font-weight: 600;
   flex-shrink: 0;
@@ -1366,7 +1258,7 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
 }
 .emoji-char-count.full .emoji-count-num { color: var(--accent); }
-.emoji-char-count.full .emoji-count-total { color: rgba(224, 123, 108, 0.72); }
+.emoji-char-count.full .emoji-count-total { color: rgba(var(--accent-rgb), 0.72); }
 .emoji-full-icon {
   margin-left: 25px;
   display: inline-flex;
@@ -1387,7 +1279,7 @@ onBeforeUnmount(() => {
   margin-right: 3px;
   padding: 2px 7px 2px 5px;
   border-radius: 999px;
-  background: rgba(224, 123, 108, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
@@ -1396,13 +1288,13 @@ onBeforeUnmount(() => {
   animation: emoji-gen-badge-pulse 1.5s ease-in-out infinite;
 }
 @keyframes emoji-gen-badge-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(224, 123, 108, 0.12), 0 0 0 0 rgba(224, 123, 108, 0); }
-  50% { box-shadow: 0 0 0 1px rgba(224, 123, 108, 0.34), 0 0 12px rgba(224, 123, 108, 0.28); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.12), 0 0 0 0 rgba(var(--accent-rgb), 0); }
+  50% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.34), 0 0 12px rgba(var(--accent-rgb), 0.28); }
 }
 .emoji-char-progress {
   height: 3px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-tertiary);
   overflow: hidden;
   margin-top: 2px;
 }
@@ -1410,7 +1302,7 @@ onBeforeUnmount(() => {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: rgba(224, 123, 108, 0.42);
+  background: rgba(var(--accent-rgb), 0.42);
   transition: width 0.25s ease;
 }
 .emoji-char-progress.full i { background: var(--accent); }
@@ -1430,7 +1322,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding: 7px 10px;
   border-radius: 10px;
-  border: 1px dashed rgba(224, 123, 108, 0.35);
+  border: 1px dashed rgba(var(--accent-rgb), 0.35);
   background: transparent;
   color: var(--accent);
   font-size: 12px;
@@ -1446,13 +1338,13 @@ onBeforeUnmount(() => {
 .emoji-batch-btn:hover:not(.is-disabled) {
   border-style: solid;
   border-color: var(--accent);
-  background: rgba(224, 123, 108, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .emoji-batch-btn.paused {
   border-style: solid;
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .emoji-batch-btn.paused:hover:not(.is-disabled) { background: var(--accent-hover); }
 .emoji-batch-btn.is-disabled {
@@ -1473,8 +1365,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  border: 1px solid rgba(224, 123, 108, 0.35);
-  background: rgba(224, 123, 108, 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.08);
   color: var(--accent);
   cursor: pointer;
   transition: all 0.15s;
@@ -1483,8 +1375,8 @@ onBeforeUnmount(() => {
 .emoji-pause-btn:hover {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(224, 123, 108, 0.25);
+  color: var(--on-accent);
+  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.25);
 }
 
 .emoji-right {
@@ -1504,10 +1396,10 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-  background: #fff;
+  background: var(--bg-secondary);
   padding: 10px 14px;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-xs);
 }
 .emoji-gear {
   width: 30px; height: 30px;
@@ -1543,12 +1435,12 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   user-select: none;
 }
-.emoji-mode-badge.half_body { background: #FBEAE6; color: #D96A59; }
-.emoji-mode-badge.half_body_chibi { background: #FBF2DD; color: #B8873B; }
-.emoji-mode-badge.chibi_head { background: #E8F1EA; color: #5B8C6E; }
+.emoji-mode-badge.half_body { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.emoji-mode-badge.half_body_chibi { background: color-mix(in srgb, var(--fun-gold) 14%, transparent); color: color-mix(in srgb, var(--fun-gold) 82%, var(--text-bright)); }
+.emoji-mode-badge.chibi_head { background: color-mix(in srgb, var(--fun-teal) 14%, transparent); color: color-mix(in srgb, var(--fun-teal) 78%, var(--text-bright)); }
 .emoji-mode-badge:hover:not(.is-disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(125, 105, 85, 0.12);
+  box-shadow: var(--shadow-xs);
 }
 .emoji-mode-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emoji-style-input {
@@ -1560,13 +1452,13 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: rgba(224, 123, 108, 0.08);
-  border: 1px solid rgba(224, 123, 108, 0.16);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
   color: var(--accent); font-size: 13px; font-weight: 600;
 }
 .emoji-progress-strip.paused {
-  background: rgba(224, 123, 108, 0.05);
-  border-color: rgba(224, 123, 108, 0.14);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(var(--accent-rgb), 0.14);
   color: var(--text-secondary);
 }
 .emoji-paused-mark {
@@ -1585,7 +1477,7 @@ onBeforeUnmount(() => {
   bottom: 3px;
   width: 2px;
   border-radius: 1px;
-  background: #fff;
+  background: var(--on-accent);
 }
 .emoji-paused-mark::before { left: 4px; }
 .emoji-paused-mark::after { right: 4px; }
@@ -1593,7 +1485,7 @@ onBeforeUnmount(() => {
   display: inline-block; flex-shrink: 0;
   width: 14px; height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(224, 123, 108, 0.22);
+  border: 2px solid rgba(var(--accent-rgb), 0.22);
   border-top-color: var(--accent);
   animation: emoji-spin 0.8s linear infinite;
 }
@@ -1602,7 +1494,7 @@ onBeforeUnmount(() => {
 }
 .emoji-gen-badge .emoji-count-spinner {
   width: 12px; height: 12px; border-width: 2px;
-  box-shadow: 0 0 8px rgba(224, 123, 108, 0.4);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
 }
 .emoji-scan-overlay .emoji-spinner {
   width: 22px; height: 22px; border-width: 2.5px;
@@ -1652,7 +1544,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 10px;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--glass-bg-strong);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1662,10 +1554,10 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
-.emoji-card.failed { border-color: #e06b6b; }
+.emoji-card.failed { border-color: var(--danger); }
 .emoji-card.empty {
   border-style: dashed;
-  border-color: rgba(224, 123, 108, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
   cursor: pointer;
 }
 .emoji-card.empty:hover {
@@ -1682,10 +1574,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(224, 123, 108, 0.38);
+  border: 1px solid rgba(var(--accent-rgb), 0.38);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.92);
-  color: #e07b6c;
+  background: var(--bg-secondary);
+  color: var(--accent);
   cursor: pointer;
   opacity: 0;
   transform: translateY(-3px);
@@ -1697,9 +1589,9 @@ onBeforeUnmount(() => {
   transform: translateY(0);
 }
 .emoji-card-delete:hover:not(.is-disabled) {
-  background: #e07b6c;
-  border-color: #e07b6c;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .emoji-card-delete.is-disabled {
   opacity: 0.45;
@@ -1712,12 +1604,12 @@ onBeforeUnmount(() => {
 .emoji-empty-slot {
   width: 100%; aspect-ratio: 1;
   border-radius: 8px;
-  background: rgba(224, 123, 108, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   transition: background 0.15s;
 }
-.emoji-empty-slot:hover { background: rgba(224, 123, 108, 0.1); }
+.emoji-empty-slot:hover { background: rgba(var(--accent-rgb), 0.1); }
 .emoji-empty-plus {
   font-size: 34px; line-height: 1;
   color: var(--accent-light);
@@ -1736,7 +1628,7 @@ onBeforeUnmount(() => {
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
-  background: #f4f4f4;
+  background: var(--bg-tertiary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1760,12 +1652,12 @@ onBeforeUnmount(() => {
 }
 .emoji-error {
   font-size: 11px;
-  color: #c0392b;
+  color: var(--danger);
 }
 .emoji-scan-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.68);
+  background: var(--glass-bg);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -1775,28 +1667,17 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.advanced-overlay {
-  z-index: 10001;
-}
-.advanced-panel {
-  width: min(560px, 94vw);
-}
-.batch-panel {
-  width: min(460px, 94vw);
-}
 .advanced-body {
-  padding: 0px 24px;
-  overflow-y: auto;
-  flex: 1;
+  min-height: 0;
 }
 .advanced-section {
   margin-bottom: 0;
 }
 .advanced-content {
-  background: #FFFFFF;
+  background: var(--bg-secondary);
   border-radius: 14px;
   padding: 18px;
-  box-shadow: 0 4px 18px rgba(72, 55, 44, 0.05);
+  box-shadow: var(--shadow-xs);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1835,14 +1716,12 @@ onBeforeUnmount(() => {
 .advanced-res-slider::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
-  background: #F7F2EC;
-  box-shadow: inset 0 1px 2px rgba(125, 105, 85, 0.12);
+  background: var(--bg-tertiary);
 }
 .advanced-res-slider::-moz-range-track {
   height: 4px;
   border-radius: 2px;
-  background: #F7F2EC;
-  box-shadow: inset 0 1px 2px rgba(125, 105, 85, 0.12);
+  background: var(--bg-tertiary);
 }
 .advanced-res-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -1851,7 +1730,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--accent);
   margin-top: -6px;
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.35);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.35);
   cursor: pointer;
 }
 .advanced-res-slider::-moz-range-thumb {
@@ -1860,7 +1739,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--accent);
   border: none;
-  box-shadow: 0 1px 4px rgba(224, 123, 108, 0.35);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.35);
   cursor: pointer;
 }
 .advanced-res-slider:focus-visible {
@@ -1875,36 +1754,6 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--text-bright);
   font-variant-numeric: tabular-nums;
-}
-.emoji-style-segmented {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  padding: 3px;
-  background: #F7F2EC;
-  border-radius: 10px;
-}
-.emoji-style-chip {
-  padding: 8px 6px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: #6F675F;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  text-align: center;
-  white-space: nowrap;
-  user-select: none;
-}
-.emoji-style-chip:hover { color: #E07B6C; }
-.emoji-style-chip.active {
-  background: #FFFEFC;
-  color: #E07B6C;
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(125, 105, 85, 0.12);
 }
 .advanced-hint {
   font-size: 12px;
@@ -1997,34 +1846,19 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 767px) {
-  .advanced-body { padding: 16px; }
+  .advanced-body { padding: 0; }
   .advanced-content { padding: 16px; border-radius: 12px; }
   .advanced-cat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .advanced-footer { padding: 14px 16px; }
   .emoji-body { flex-direction: column; }
   .emoji-left { width: 100%; border-right: none; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; }
   .emoji-char-list { flex-direction: row; overflow-x: auto; }
   .emoji-char-item { flex-shrink: 0; width: 100%; box-sizing: border-box; }
   .emoji-char-meta { flex: 1; width: 100%; }
 
-  .modal-overlay { align-items: flex-start; }
-  .emoji-manager-modal {
-    width: 100%;
-    height: 100vh;
-    height: 100dvh;
-    max-height: none;
-    background: #f4f1ee;
-    border-radius: 0;
-  }
-  .modal-header {
-    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
-  }
-  .modal-header h3 { font-size: 16px; }
   .emoji-body {
     gap: 8px;
     margin: 0;
-    padding: 6px 12px calc(10px + env(safe-area-inset-bottom, 0px));
-    border-radius: 0;
+    padding: 0;
   }
   .emoji-left {
     width: 100%;
@@ -2042,7 +1876,7 @@ onBeforeUnmount(() => {
     padding: 6px;
     border: 1px solid var(--glass-border);
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.72);
+    background: var(--glass-bg);
     color: var(--text-bright);
     font-family: inherit;
     text-align: left;
@@ -2065,7 +1899,7 @@ onBeforeUnmount(() => {
     inset: 0;
     padding: 0;
     border: 0;
-    background: rgba(43, 31, 24, 0.24);
+    background: rgba(0, 0, 0, 0.24);
     cursor: default;
   }
   .emoji-char-dropdown {
@@ -2077,9 +1911,9 @@ onBeforeUnmount(() => {
     max-height: min(72dvh, 540px);
     overflow: hidden;
     border-radius: 14px;
-    background: #fff;
+    background: var(--bg-secondary);
     border: 1px solid var(--glass-border);
-    box-shadow: 0 10px 32px rgba(72, 55, 44, 0.18);
+    box-shadow: var(--shadow-lg);
   }
   .emoji-dropdown-head { padding: 10px 12px 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
   .emoji-char-list {
@@ -2098,7 +1932,7 @@ onBeforeUnmount(() => {
     gap: 6px;
     padding: 6px;
     border-radius: 10px;
-    box-shadow: 0 1px 5px rgba(72, 55, 44, 0.06);
+    box-shadow: var(--shadow-xs);
   }
   .emoji-gear { width: 32px; height: 32px; }
   .emoji-mode-badge { padding: 8px 8px; font-size: 11px; }
@@ -2143,5 +1977,17 @@ onBeforeUnmount(() => {
     .emoji-picker-fade-enter-active .emoji-char-dropdown,
     .emoji-picker-fade-leave-active .emoji-char-dropdown { transition: none; }
   }
+}
+</style>
+
+<style>
+/* 主面板交给 LinsheModal，本组件只约束专用 body 的布局。 */
+/* 面板宽度：恢复收编 LinsheModal（720c9cd）前的历史口径（1287px 上限） */
+.modal-panel.modal-full.emoji-manager-modal { --modal-full-width: min(1287px, 94vw); }
+.modal-body.emoji-manager-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
 }
 </style>

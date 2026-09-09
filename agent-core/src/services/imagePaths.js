@@ -13,6 +13,7 @@ export const IMAGE_CATEGORIES = {
   avatargen: { dir: 'avatargen', label: '头像' },
   peek:      { dir: 'peek',      label: '日程' },
   mailbox:   { dir: 'mailbox',   label: '信箱' },
+  chatbg:    { dir: 'chatbg',    label: '聊天背景' },
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },
   standing:  { dir: 'standing',  label: '立绘' },
@@ -69,10 +70,17 @@ export function deleteImageFileByUrl(url) {
   const category = extractCategoryFromUrl(cleanUrl);
   if (!category) return false;
 
-  const filename = cleanUrl.split('/').pop();
-  if (!filename || path.basename(filename) !== filename) return false;
+  // 文件名白名单提取：仅接受字母/数字/点/横线/下划线/空格的纯文件名，
+  // 从源头杜绝任何路径穿越形态（`..`、路径分隔符都会匹配失败直接返回 false）
+  const m = /^([\w.\- ]+)$/.exec(cleanUrl.split('/').pop() || '');
+  if (!m) return false;
+  const filename = m[1];
 
-  const filePath = path.join(getImageDir(category), filename);
+  const dir = getImageDir(category);
+  const filePath = path.join(dir, filename);
+  // 双保险：解析后的真实路径必须仍位于目录内
+  if (path.resolve(filePath) !== path.resolve(dir, filename)) return false;
+  if (!path.resolve(filePath).startsWith(path.resolve(dir) + path.sep)) return false;
   let removed = false;
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);

@@ -873,3 +873,7 @@ function _parseCharLoras(raw) {
 
 export default router;
 export { generateMomentPost };
+
+// 装配：把生成函数注入调度器（解除 momentScheduler → routes 的反向依赖）
+import { setMomentPostGenerator } from '../services/momentScheduler.js';
+setMomentPostGenerator(generateMomentPost);

@@ -7,7 +7,6 @@
           <div class="dr-header">
             <!-- Row 1: 头像 + 信息 + 关闭 -->
             <div class="dr-row1">
-              <div
               <div class="dr-avatar">
                 <img v-if="char?.avatar_path" :src="char.avatar_path" class="dr-avatar-img" alt="" />
                 <span v-else class="dr-avatar-text">{{ char?.display_name?.charAt(0) || '' }}</span>
@@ -76,7 +75,7 @@
               <div class="dr-scan-content">
                 <div class="dr-scan-icon">
                   <svg viewBox="0 0 80 80" class="dr-scan-ring">
-                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(224,123,108,0.12)" stroke-width="2.5"/>
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(var(--accent-rgb),0.12)" stroke-width="2.5"/>
                     <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
                       stroke-width="2.5" stroke-linecap="round"
                       stroke-dasharray="214"
@@ -301,7 +300,7 @@ onUnmounted(() => {
 }
 .drawer-panel {
   width: 420px; max-width: 92vw; height: 100vh; height: 100dvh;
-  background: #fff; border-left: 1px solid var(--border);
+  background: var(--bg-secondary); border-left: 1px solid var(--border);
   display: flex; flex-direction: column;
   box-shadow: -4px 0 30px rgba(0,0,0,0.08);
 }
@@ -321,7 +320,7 @@ onUnmounted(() => {
 
 .dr-avatar {
   width: 52px; height: 52px; border-radius: 50%;
-  background: #e07b6c;
+  background: var(--accent);
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   display: flex; align-items: center; justify-content: center;
@@ -334,7 +333,7 @@ onUnmounted(() => {
   display: block;
 }
 .dr-avatar-text {
-  color: #fff; font-size: 22px; font-weight: 600;
+  color: var(--on-accent); font-size: 22px; font-weight: 600;
   line-height: 1; user-select: none;
 }
 
@@ -351,7 +350,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .dr-no-data {
-  color: #bfbbb6; font-style: italic;
+  color: var(--text-secondary); font-style: italic;
 }
 
 .dr-now-line {
@@ -393,7 +392,7 @@ onUnmounted(() => {
   position: absolute; inset: 0; z-index: 10;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--glass-bg-strong);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   overflow: hidden;
@@ -406,13 +405,13 @@ onUnmounted(() => {
   height: 2px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(224,123,108,0.3) 15%,
+    rgba(var(--accent-rgb),0.3) 15%,
     var(--accent) 50%,
-    rgba(224,123,108,0.3) 85%,
+    rgba(var(--accent-rgb),0.3) 85%,
     transparent 100%
   );
   animation: dr-scan-sweep 2.4s ease-in-out infinite;
-  box-shadow: 0 0 28px rgba(224,123,108,0.55), 0 0 10px rgba(224,123,108,0.25);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb),0.55), 0 0 10px rgba(var(--accent-rgb),0.25);
   z-index: 2;
   pointer-events: none;
 }
@@ -432,8 +431,8 @@ onUnmounted(() => {
   left: 20%; right: 20%;
   height: 60px;
   background: radial-gradient(ellipse at center,
-    rgba(224,123,108,0.12) 0%,
-    rgba(224,123,108,0.04) 40%,
+    rgba(var(--accent-rgb),0.12) 0%,
+    rgba(var(--accent-rgb),0.04) 40%,
     transparent 70%
   );
   animation: dr-glow-follow 2.4s ease-in-out infinite;
@@ -533,9 +532,9 @@ onUnmounted(() => {
 }
 
 .tl-node { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
-.tl-d { width: 9px; height: 9px; border-radius: 50%; background: #d9d9d9; flex-shrink: 0; }
+.tl-d { width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); flex-shrink: 0; }
 .tl-curr .tl-d { background: #52c41a; box-shadow: 0 0 0 4px rgba(82,196,26,0.12); }
-.tl-sleep .tl-d { background: #bfbfbf; }
+.tl-sleep .tl-d { background: var(--border); }
 .tl-l { width: 1.5px; flex: 1; min-height: 22px; background: var(--border); margin-top: 3px; }
 .tl-item:last-child .tl-l { display: none; }
 

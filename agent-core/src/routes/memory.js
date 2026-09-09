@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { hybridSearch } from '../services/memorySearch.js';
-import { listActiveMemories, softDeleteMemory, memoryStats, reindexAllMemories, retryFailedIndexJobs } from '../services/memory/memoryRepository.js';
+import { listActiveMemories, softDeleteMemory, memoryStats, reindexAllMemories, retryFailedIndexJobs, restoreArchivedMemory } from '../services/memory/memoryRepository.js';
+import { runConsolidationOnce } from '../services/memory/consolidationScheduler.js';
 
 const router = Router();
 
@@ -38,6 +39,26 @@ router.delete('/fragments/:id', (req, res) => {
   const deleted = softDeleteMemory(req.params.id);
   if (!deleted) return res.status(404).json({ error: 'memory not found' });
   res.json({ ok: true });
+});
+
+// 阶段四：archived 记忆恢复（status='active' + stale 触发重嵌入，恢复后重新可见于被动/主动检索）
+router.post('/fragments/:id/restore', (req, res) => {
+  const restored = restoreArchivedMemory(req.params.id);
+  if (!restored) return res.status(404).json({ error: 'archived memory not found' });
+  res.json({ ok: true });
+});
+
+// 阶段三：整理 daemon 任务队列记录（kill 后续跑/失败原因可查）
+router.get('/consolidation/jobs', (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
+  const jobs = getDb().prepare(`SELECT * FROM memory_consolidation_jobs ORDER BY id DESC LIMIT ?`).all(limit);
+  res.json({ jobs });
+});
+
+// 阶段三：手动触发一轮整理（仍受空闲保护：聊天进行中拒绝）
+router.post('/consolidation/run', async (_req, res) => {
+  try { res.json(await runConsolidationOnce({ force: true })); }
+  catch (error) { res.status(500).json({ ok: false, error: error.message }); }
 });
 
 router.get('/stats', (_req, res) => {

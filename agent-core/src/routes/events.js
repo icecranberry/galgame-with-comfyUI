@@ -37,7 +37,9 @@ router.get('/stream', (req, res) => {
     'X-Accel-Buffering': 'no',
   });
 
-  res.write('event: connected\ndata: {}\n\n');
+  // 固定的握手帧（无任何请求输入参与），经异步队列写出
+  const connectedFrame = Buffer.from('event: connected\ndata: {}\n\n');
+  res.write(connectedFrame);
   addSSEClient(res);
 
   const heartbeat = setInterval(() => {

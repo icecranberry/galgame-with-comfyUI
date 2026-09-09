@@ -169,9 +169,9 @@ defineExpose({ show })
   max-width: 380px;
   padding: 15px 14px 15px 18px;
   background: #F7F4EF;
-  border: 1px solid rgba(224, 123, 108, 0.18);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
   /* 边框染上低透明度状态色,与图标、生命周期线呼应;color-mix 不支持时退回上面的暖色边 */
-  border-color: color-mix(in srgb, var(--lt-status, #E07B6C) 30%, transparent);
+  border-color: color-mix(in srgb, var(--lt-status, var(--accent)) 30%, transparent);
   border-radius: 18px;
   box-shadow: 0 12px 35px rgba(50, 40, 35, 0.12);
   overflow: hidden;
@@ -182,7 +182,7 @@ defineExpose({ show })
 }
 .live-toast:hover {
   box-shadow: 0 14px 38px rgba(50, 40, 35, 0.15);
-  border-color: color-mix(in srgb, var(--lt-status, #E07B6C) 50%, transparent);
+  border-color: color-mix(in srgb, var(--lt-status, var(--accent)) 50%, transparent);
 }
 
 /* 状态色只落在标记与生命周期线上,不染整张卡;四态色相彼此拉开 */
@@ -195,7 +195,7 @@ defineExpose({ show })
   width: 21px;
   height: 21px;
   flex-shrink: 0;
-  color: var(--lt-status, #E07B6C);
+  color: var(--lt-status, var(--accent));
 }
 
 .live-toast-body {
@@ -253,7 +253,7 @@ defineExpose({ show })
   right: 0;
   bottom: 0;
   height: 2px;
-  background: var(--lt-status, #E07B6C);
+  background: var(--lt-status, var(--accent));
   transform-origin: right center;
   animation: lt-life var(--lt-life, 3000ms) linear forwards;
 }

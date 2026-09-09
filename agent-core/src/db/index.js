@@ -2,11 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import { initSettingsHandle, loadSystemSettings } from './settings.js';
+import { initWorldRepository } from './worldRepository.js';
 import { seedAll } from './seedData.js';
 import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
 import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
-import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let db;
 
@@ -707,6 +708,9 @@ function initSchema(db) {
   // 迁移: PAI 风格聊天记忆单元、全文索引、提取 checkpoint 与索引任务
   migrateChatMemoryV2Schema(db);
 
+  // 迁移: 记忆 v3 —— 多重表示 + 双时态演化 + 实体/三元组索引层（见 docs/memory-upgrade-plan.md）
+  migrateChatMemoryV3Schema(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -730,6 +734,9 @@ function initSchema(db) {
 
   // 迁移: 手写字体 — characters 表新增 handwriting_font 列
   migrateHandwritingFont(db);
+
+  // 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
+  migrateChatBgSchema(db);
 
   // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
   migrateEventEmphasisSchema(db);
@@ -782,8 +789,10 @@ function initSchema(db) {
   // 图片提示词知识使用独立版本化种子；版本升级时只覆盖内置同 ID 条目，保留用户自建条目。
   seedImagePromptKnowledge(db);
 
-  // 系统设置: 从 DB 加载覆盖 config 内存（DB 优先于代码默认值）
+  // 系统设置: 注入句柄并从 DB 加载覆盖 config 内存（DB 优先于代码默认值）
+  initSettingsHandle(db);
   loadSystemSettings(db);
+  initWorldRepository(db);
 
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
@@ -1607,201 +1616,27 @@ export function repairFtsIndex() {
   console.log('[db] repairFtsIndex: done');
 }
 
-/**
- * 获取所有激活的全局规则内容（拼接为一个字符串）
- */
-// image_intent / image_prompt 是元规则（非 LLM system prompt 内容），不拼入
-// world_setting 单独追加到末尾，不在批量拼接中
-// BUILTIN_RULE_KEYS 从 builtinRules.js 导入，统一管理所有硬编码规则
+// ── 世界观 / 全局规则仓储已下沉到 db/worldRepository.js（缩小本模块体积）──
+// 函数由 worldRepository 提供，此处兼容再导出；db 句柄在 getDb() 打开时注入。
+export {
+  getActiveGlobalRules,
+  getWorldSetting,
+  getSystemRulesWithWorld,
+  getGlobalRule,
+  getSystemRules,
+  listWorldSettings,
+  getActiveWorldSetting,
+  getWorldSettingById,
+  createWorldSetting,
+  updateWorldSetting,
+  deleteWorldSetting,
+  activateWorldSetting,
+} from './worldRepository.js';
 
-export function getActiveGlobalRules() {
-  const database = getDb();
-  const excludeKeys = [...BUILTIN_RULE_KEYS, 'world_setting'];
-  const rules = database.prepare(
-    `SELECT rule_content FROM global_rules WHERE is_active = 1 AND rule_key NOT IN (${excludeKeys.map(() => '?').join(',')})`
-  ).all(...excludeKeys);
-  return rules.map(r => r.rule_content).join('\n\n');
-}
-
-/** 判断当前时间是否在指定时间段内（24 小时制，支持跨午夜） */
-function isInDisturbTimeRange(now, startTime, endTime) {
-  const toMinutes = (hhmm) => {
-    const parts = String(hhmm).split(':');
-    return parseInt(parts[0], 10) * 60 + (parseInt(parts[1], 10) || 0);
-  };
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const startMin = toMinutes(startTime);
-  const endMin = toMinutes(endTime);
-  if (startMin <= endMin) {
-    return nowMin >= startMin && nowMin < endMin;
-  } else {
-    return nowMin >= startMin || nowMin < endMin;
-  }
-}
-
-/** 获取世界观（独立消息注入，不拼入全局规则）
- *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值
- *  优先从 world_settings 表读取激活项，兼容旧 global_rules.world_setting */
-export function getWorldSetting() {
-  // 防打扰隐藏世界观：不改 DB，仅在 prompt 构建时返回 null
-  if (config.features.disturbMode && config.disturb.hideWorld) {
-    const now = new Date();
-    if (isInDisturbTimeRange(now, config.disturb.startTime, config.disturb.endTime)) {
-      if (!config.disturb.skipWeekends || (now.getDay() !== 0 && now.getDay() !== 6)) {
-        return null;
-      }
-    }
-  }
-
-  // 只要存在激活项就以它为准：内容为空视为用户主动选择"无世界观"，不再回退旧表
-  const active = getActiveWorldSetting();
-  if (active) {
-    return active.content?.trim() ? `<world_setting>\n${active.content}\n</world_setting>` : null;
-  }
-
-  // 兼容旧表（仅 world_settings 表无激活项时）
-  const world = getGlobalRule('world_setting');
-  if (world?.rule_content && world.is_active) {
-    return world.rule_content;
-  }
-  return null;
-}
-
-/** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用 */
-export function getSystemRulesWithWorld(opts = {}) {
-  const rules = getSystemRules(opts);
-  const world = getWorldSetting();
-  return [rules, world].filter(Boolean).join('\n\n');
-}
-
-/** 获取单条全局规则（用于元规则如 judge_prompt）。内置规则直接返回硬编码常量。 */
-export function getGlobalRule(key) {
-  if (BUILTIN_RULE_KEYS.has(key)) {
-    return key === 'image_prompt' ? IMAGE_PROMPT_RULE : null;
-  }
-  const database = getDb();
-  return database.prepare(`SELECT * FROM global_rules WHERE rule_key = ?`).get(key);
-}
-
-/**
- * 获取系统规则（破限词：system_context + core_rules），统一各场景的 jailbreak。
- *
- * @param {object} [options]
- * @param {boolean} [options.roleplay=true] - 是否包含 `<roleplay>` 内的角色扮演激活指令。
- *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
- */
-export function getSystemRules({ roleplay = true } = {}) {
-  const content = SYSTEM_RULES_CONTENT;
-
-  // 基础内容
-  let base = '';
-  const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
-  if (!rpMatch) {
-    base = content;  // 无标签（旧数据），向下兼容
-  } else {
-    const before = content.slice(0, rpMatch.index).trim();
-    // 基础上下文始终保留，roleplay 指令按需包含
-    base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
-  }
-
-  return base;
-}
-
-// ── 系统设置（替代 .env 中的画师串/分辨率/功能开关） ──
-
-/** 按 key 读取系统设置 */
-export function getSetting(key) {
-  const database = getDb();
-  return database.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = ?`).pluck().get(key) ?? null;
-}
-
-// 有意不纳入 SETTING_TO_CONFIG 的 DB-only 键（用于存储时间戳等运行时状态，不走 config 加载路径）
-const DB_ONLY_KEYS = new Set([
-  'last_moments_seen_at',
-  'last_events_seen_at',
-  'llm_profiles',
-  'active_llm_profile_id',
-  'memory_settings',
-  'workflow_mode_auto_detected',
-  'maibot_webui_url',
-  'maibot_webui_token',
-  'emoji_fixed_tags',
-  'emoji_style_mode',
-  'standing_prompt_mode',
-]);
-
-/** 写入单条系统设置 */
-export function setSetting(key, value) {
-  const database = getDb();
-  database.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
-    .run(key, String(value));
-  // 写入时校验：如果 key 不在映射表、也不在 disturb 前缀、也不在 DB-only 白名单，说明重启后会丢失
-  if (!(key in SETTING_TO_CONFIG) && !key.startsWith('disturb_') && !DB_ONLY_KEYS.has(key)) {
-    console.warn(`[config] setSetting("${key}"): key is not registered in SETTING_TO_CONFIG — value will NOT survive restart. Add it to the mapping in db/index.js.`);
-  }
-}
-
-// 需要从 DB 迁移到 config 的字段映射
-const SETTING_TO_CONFIG = {
-  comfy_artist:            { obj: 'comfyui',   key: 'artist',          type: 'string'  },
-  comfy_width:             { obj: 'comfyui',   key: 'width',           type: 'int'     },
-  comfy_height:            { obj: 'comfyui',   key: 'height',          type: 'int'     },
-  comfy_moments_artist:    { obj: 'comfyui',   key: 'momentsArtist',   type: 'string'  },
-  comfy_moments_width:     { obj: 'comfyui',   key: 'momentsWidth',    type: 'int'     },
-  comfy_moments_height:    { obj: 'comfyui',   key: 'momentsHeight',   type: 'int'     },
-  comfy_event_artist:      { obj: 'comfyui',   key: 'eventArtist',     type: 'string'  },
-  comfy_event_width:       { obj: 'comfyui',   key: 'eventWidth',      type: 'int'     },
-  comfy_event_height:      { obj: 'comfyui',   key: 'eventHeight',     type: 'int'     },
-  comfy_quality_prompt:    { obj: 'comfyui',   key: 'qualityPrompt',   type: 'string'  },
-  feature_emotion:               { obj: 'features', key: 'emotion',          type: 'bool' },
-  feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
-  feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
-  feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
-  feature_imageGenMode:                { obj: 'features', key: 'imageGenMode',             type: 'string' },
-  feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
-  feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
-  feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
-  feature_events:                    { obj: 'features', key: 'events',               type: 'bool' },
-  feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
-  feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
-  feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
-  feature_serializeBackgroundLLM:     { obj: 'features', key: 'serializeBackgroundLLM',    type: 'bool' },
-  feature_backgroundLLMMaxConcurrency: { obj: 'features', key: 'backgroundLLMMaxConcurrency', type: 'int' },
-  feature_mergeMessages:             { obj: 'features', key: 'mergeMessages',             type: 'bool' },
-  feature_weather:                   { obj: 'features', key: 'weather',                type: 'bool' },
-  feature_groupChat:                 { obj: 'features', key: 'groupChat',              type: 'bool' },
-  feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
-  feature_deepThinkMode:             { obj: 'features', key: 'deepThinkMode',          type: 'bool' },
-  group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
-  group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
-  weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },
-  compression_enabled:              { obj: 'compression', key: 'enabled',          type: 'bool' },
-  compression_type:                 { obj: 'compression', key: 'type',             type: 'string' },
-  user_nickname:                   { obj: 'user',     key: 'nickname',          type: 'string' },
-  user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
-  user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
-  user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
-  workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
-  comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
-  comfy_hires_lora:               { obj: 'comfyui',  key: 'hiresLora',        type: 'json' },
-  comfy_hires_steps:              { obj: 'comfyui',  key: 'hiresSteps',       type: 'int' },  
-  comfy_hires_cfg:                { obj: 'comfyui',  key: 'hiresCfg',         type: 'float' },
-  comfy_hires_denoise:            { obj: 'comfyui',  key: 'hiresDenoise',     type: 'float' },
-  comfy_hires_max_size:           { obj: 'comfyui',  key: 'hiresMaxSize',     type: 'int' },
-  comfy_hires_artist_mode:        { obj: 'comfyui',  key: 'hiresArtistMode',  type: 'string' },
-  comfy_hires_artist:             { obj: 'comfyui',  key: 'hiresArtist',      type: 'string' },
-};
-
-function castValue(raw, type) {
-  if (raw == null) return undefined;
-  switch (type) {
-    case 'int':  { const v = parseInt(raw, 10); return Number.isNaN(v) ? undefined : v; }
-    case 'float': { const v = parseFloat(raw); return Number.isNaN(v) ? undefined : v; }
-    case 'bool': return raw === 'true' || raw === '1';
-    case 'json': { try { const v = JSON.parse(raw); return v; } catch { return undefined; } }
-    default:     return raw;
-  }
-}
+// ── 系统设置已下沉到 db/settings.js（打破 config↔db 循环依赖）──
+// getSetting/setSetting/SETTING_TO_CONFIG/loadSystemSettings 均由 settings.js 提供，
+// 此处仅做兼容再导出，既有 import 路径不受影响。
+export { getSetting, setSetting, SETTING_TO_CONFIG } from './settings.js';
 
 /**
  * 迁移: characters 表新增 lora 列（仅保留 custom_workflow 和 loras）
@@ -1934,6 +1769,21 @@ function migrateHandwritingFont(db) {
   }
 }
 
+/**
+ * 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
+ */
+function migrateChatBgSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'chat_bg_path')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN chat_bg_path TEXT`);
+      console.log('[db] Added characters.chat_bg_path column');
+    }
+  } catch (err) {
+    console.log('[db] migrateChatBgSchema error:', err.message);
+  }
+}
+
 
 function migrateOathSchema(db) {
   try {
@@ -2050,69 +1900,7 @@ function migrateEventCrossRef(db) {
   }
 }
 
-// ── 世界观收藏 CRUD ──
-
-export function listWorldSettings() {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings ORDER BY sort_order, id`).all();
-}
-
-export function getActiveWorldSetting() {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings WHERE is_active = 1`).get() || null;
-}
-
-export function getWorldSettingById(id) {
-  const database = getDb();
-  return database.prepare(`SELECT * FROM world_settings WHERE id = ?`).get(id);
-}
-
-export function createWorldSetting({ name, content }) {
-  const database = getDb();
-  const maxOrder = database.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_settings`).get().m;
-  const result = database.prepare(
-    `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 0, ?)`
-  ).run(name, content, maxOrder + 1);
-  return getWorldSettingById(result.lastInsertRowid);
-}
-
-export function updateWorldSetting(id, { name, content }) {
-  const database = getDb();
-  const sets = [];
-  const params = [];
-  if (name !== undefined) { sets.push('name = ?'); params.push(name); }
-  if (content !== undefined) { sets.push('content = ?'); params.push(content); }
-  if (sets.length === 0) return null;
-  sets.push("updated_at = datetime('now')");
-  params.push(id);
-  database.prepare(`UPDATE world_settings SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-  return getWorldSettingById(id);
-}
-
-export function deleteWorldSetting(id) {
-  const database = getDb();
-  const count = database.prepare(`SELECT COUNT(*) AS c FROM world_settings`).get().c;
-  if (count <= 1) return { ok: false, error: '不可删除最后一套世界观' };
-  const target = getWorldSettingById(id);
-  if (!target) return { ok: false, error: '世界观不存在' };
-  database.prepare(`DELETE FROM world_settings WHERE id = ?`).run(id);
-  if (target.is_active) {
-    const first = database.prepare(`SELECT id FROM world_settings LIMIT 1`).get();
-    if (first) {
-      database.prepare(`UPDATE world_settings SET is_active = 1 WHERE id = ?`).run(first.id);
-    }
-  }
-  return { ok: true };
-}
-
-export function activateWorldSetting(id) {
-  const database = getDb();
-  const target = getWorldSettingById(id);
-  if (!target) return null;
-  database.prepare(`UPDATE world_settings SET is_active = 0`).run();
-  database.prepare(`UPDATE world_settings SET is_active = 1, updated_at = datetime('now') WHERE id = ?`).run(id);
-  return getWorldSettingById(id);
-}
+// ── 世界观收藏 CRUD 已下沉到 db/worldRepository.js ──
 
 // 迁移: PAI 风格聊天记忆 v2。保留旧字段供现有管理界面兼容，新增字段作为权威语义。
 function migrateChatMemoryV2Schema(db) {
@@ -2237,6 +2025,150 @@ function migrateChatMemoryV2Schema(db) {
   }
 }
 
+// 迁移: 记忆 v3 —— MMS 多重表示（keywords/perspectives/episodic_note 为检索单元，semantic_note
+// 为注入单元）、双时态演化列（valid_from/valid_to，替换改为"置失效+保留历史"）、实体与三元组
+// 索引层（平行表，不上图数据库）。设计依据 docs/memory-upgrade-plan.md。
+// 导出供迁移回归测试使用（test/memoryV3Migration.test.js）。
+export function migrateChatMemoryV3Schema(db) {
+  try {
+    const columns = new Set(db.prepare(`PRAGMA table_info(memory_fragments)`).all().map(c => c.name));
+    const additions = [
+      // 检索单元字段（进 FTS / 向量 / LIKE 通道）
+      ['keywords', "TEXT NOT NULL DEFAULT '[]'"],
+      ['perspectives', "TEXT NOT NULL DEFAULT '[]'"],
+      ['episodic_note', "TEXT NOT NULL DEFAULT ''"],
+      // 注入单元字段（只进 <rag_memories>，刻意不进任何检索通道）
+      ['semantic_note', "TEXT NOT NULL DEFAULT ''"],
+      // 双时态演化
+      ['event_time', 'DATETIME'],
+      ['valid_from', 'DATETIME'],
+      ['valid_to', 'DATETIME'],
+      // 强度模型（遗忘曲线，阶段三整理 daemon 消费）
+      ['importance', 'INTEGER NOT NULL DEFAULT 3'],
+      ['strength', 'REAL NOT NULL DEFAULT 1.0'],
+      ['last_reinforced_at', 'DATETIME'],
+      ['retrieval_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) db.prepare(`ALTER TABLE memory_fragments ADD COLUMN ${name} ${definition}`).run();
+    }
+
+    const relationColumns = new Set(db.prepare(`PRAGMA table_info(memory_relations)`).all().map(c => c.name));
+    if (!relationColumns.has('relation_meta')) {
+      db.prepare(`ALTER TABLE memory_relations ADD COLUMN relation_meta TEXT`).run();
+    }
+
+    const ddlStatements = [
+      // 存量记忆回填 valid_from（双时态起点）
+      `UPDATE memory_fragments SET valid_from = COALESCE(valid_from, updated_at, created_at, CURRENT_TIMESTAMP) WHERE valid_from IS NULL`,
+
+      // 实体索引层（Mem0 平行实体集合思路：不上图数据库，检索时 boost）
+      `CREATE TABLE IF NOT EXISTS memory_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        aliases TEXT NOT NULL DEFAULT '[]',
+        mention_count INTEGER NOT NULL DEFAULT 0,
+        embedding_state TEXT NOT NULL DEFAULT 'disabled',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_entities_name ON memory_entities(name)`,
+
+      `CREATE TABLE IF NOT EXISTS memory_entity_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        role TEXT NOT NULL DEFAULT 'mention',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(memory_id, entity_id, role)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_entity_links_entity ON memory_entity_links(entity_id, memory_id)`,
+
+      // 三元组索引层（阶段二主动回想 query-to-triple 匹配用）
+      `CREATE TABLE IF NOT EXISTS memory_triples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id TEXT NOT NULL,
+        subject_entity_id INTEGER,
+        subject_text TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object_entity_id INTEGER,
+        object_text TEXT NOT NULL,
+        event_time DATETIME,
+        valid_from DATETIME,
+        valid_to DATETIME,
+        embedding_state TEXT NOT NULL DEFAULT 'disabled',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_triples_memory ON memory_triples(memory_id)`,
+
+      // 整理任务队列（阶段三 daemon 用；先建表占位，调度器后续接入）
+      `CREATE TABLE IF NOT EXISTS memory_consolidation_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_type TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // 画像升华建议（阶段三 T4 半自动通道）
+      `CREATE TABLE IF NOT EXISTS portrait_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER,
+        field TEXT NOT NULL,
+        current_value TEXT,
+        suggestion TEXT NOT NULL,
+        source_memory_ids TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+    ];
+    for (const sql of ddlStatements) db.prepare(sql).run();
+
+    upgradeMemoryFtsToV3(db);
+  } catch (err) {
+    console.error('[db] migrateChatMemoryV3Schema error:', err.message);
+    throw err;
+  }
+}
+
+// FTS 扩列 3 → 6 列：外部内容表无法 ALTER，需删表重建 + 全量 rebuild。
+// semantic_note 刻意不进 FTS（高层语义提炼与提问语言形态脱节，混入降低召回，见方案 §2）。
+function upgradeMemoryFtsToV3(db) {
+  const ftsSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fragments_fts'`).get();
+  if (!ftsSql || /keywords/i.test(ftsSql.sql || '')) return;
+  const ddlStatements = [
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_ai`,
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_ad`,
+    `DROP TRIGGER IF EXISTS memory_fragments_fts_au`,
+    `DROP TABLE IF EXISTS memory_fragments_fts`,
+    `CREATE VIRTUAL TABLE memory_fragments_fts USING fts5(
+      judgment, reasoning, tags, keywords, perspectives, episodic_note,
+      content='memory_fragments', content_rowid='id'
+    )`,
+    `CREATE TRIGGER memory_fragments_fts_ai AFTER INSERT ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES (new.id, new.judgment, new.reasoning, new.tags, new.keywords, new.perspectives, new.episodic_note);
+    END`,
+    `CREATE TRIGGER memory_fragments_fts_ad AFTER DELETE ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags, old.keywords, old.perspectives, old.episodic_note);
+    END`,
+    `CREATE TRIGGER memory_fragments_fts_au AFTER UPDATE OF judgment, reasoning, tags, keywords, perspectives, episodic_note ON memory_fragments BEGIN
+      INSERT INTO memory_fragments_fts(memory_fragments_fts, rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES ('delete', old.id, old.judgment, old.reasoning, old.tags, old.keywords, old.perspectives, old.episodic_note);
+      INSERT INTO memory_fragments_fts(rowid, judgment, reasoning, tags, keywords, perspectives, episodic_note)
+      VALUES (new.id, new.judgment, new.reasoning, new.tags, new.keywords, new.perspectives, new.episodic_note);
+    END`,
+    `INSERT INTO memory_fragments_fts(memory_fragments_fts) VALUES ('rebuild')`,
+  ];
+  for (const sql of ddlStatements) db.prepare(sql).run();
+  console.log('[db] memory_fragments_fts upgraded to v3 (6-column) and rebuilt');
+}
+
 // 清理历史遗留的 system_settings 键（idempotent）
 function migrateSystemSettings(db) {
   // 合并 feature_memoryExtract → feature_memory（v2 迁移）
@@ -2267,54 +2199,5 @@ function migrateSystemSettings(db) {
   }
 }
 
-// 从 DB 读取 system_settings 覆盖 config 内存（DB 优先于代码默认值）
-function loadSystemSettings(db) {
-  const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
-  let applied = 0;
-  for (const row of rows) {
-    const mapping = SETTING_TO_CONFIG[row.setting_key];
-    if (mapping) {
-      let value = castValue(row.setting_value, mapping.type);
-      if (value !== undefined) {
-        // 群聊记忆轮数历史遗留值收敛到 2~6
-        if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(6, value));
-        config[mapping.obj][mapping.key] = value;
-        applied++;
-      }
-      continue;
-    }
-    // 额外处理 disturb 配置（不在 SETTING_TO_CONFIG 映射中）
-    if (row.setting_key === 'disturb_start_time') {
-      config.disturb.startTime = row.setting_value;
-      applied++;
-    } else if (row.setting_key === 'disturb_end_time') {
-      config.disturb.endTime = row.setting_value;
-      applied++;
-    } else if (row.setting_key === 'disturb_character_ids') {
-      try {
-        config.disturb.characterIds = JSON.parse(row.setting_value);
-      } catch {
-        config.disturb.characterIds = [];
-      }
-      applied++;
-    } else if (row.setting_key === 'disturb_hide_world') {
-      config.disturb.hideWorld = row.setting_value === 'true' || row.setting_value === '1';
-      applied++;
-    } else if (row.setting_key === 'disturb_skip_weekends') {
-      config.disturb.skipWeekends = row.setting_value === 'true' || row.setting_value === '1';
-      applied++;
-    }
-    // workflow_scene JSON 配置
-    if (row.setting_key === 'workflow_scene') {
-      try {
-        config.workflow.scene = { ...config.workflow.scene, ...JSON.parse(row.setting_value) };
-      } catch {
-        /* keep defaults */
-      }
-      applied++;
-    }
-  }
-  if (applied > 0) {
-    console.log(`[db] system_settings: ${applied} keys applied to config`);
-  }
-}
+// loadSystemSettings 已移至 db/settings.js（config 作为参数传入，避免反向依赖 config 之外的耦合）
+
