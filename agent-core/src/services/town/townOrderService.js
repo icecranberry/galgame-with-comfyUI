@@ -1,13 +1,71 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson, townError } from './townEventService.js';
-import { createTownBusinessContext, DELIVERY_SLICE } from './townBusinessService.js';
+import { createTownBusinessContext, BUSINESS_KEYS, DELIVERY_SLICE } from './townBusinessService.js';
 
 const terminal = new Set(['completed', 'cancelled', 'expired']);
-const dto = row => row && ({ orderId: row.order_id, worldId: row.world_id, worldEpoch: row.world_epoch,
-  status: row.status, version: row.version, actorId: row.actor_id, expiresAt: row.expires_at,
-  createdAt: row.created_at, moneyReservationId: row.money_reservation_id,
-  materialReservationId: row.material_reservation_id, cargoStockId: row.cargo_stock_id,
-  cargoReservationId: row.cargo_reservation_id, config: JSON.parse(row.config) });
+const dto = row => {
+  if (!row) return null;
+  const config = JSON.parse(row.config);
+  return { orderId: row.order_id, worldId: row.world_id, worldEpoch: row.world_epoch,
+    status: row.status, version: row.version, actorId: row.actor_id, expiresAt: row.expires_at,
+    createdAt: row.created_at, moneyReservationId: row.money_reservation_id,
+    materialReservationId: row.material_reservation_id, cargoStockId: row.cargo_stock_id,
+    cargoReservationId: row.cargo_reservation_id, config,
+    businessKey: config.orderKind ?? 'workshop' };
+};
+
+/** Trusted server-side business profile. Every amount/stock/account comes from
+ * the frozen slice, never from HTTP. Legacy orders default to the workshop line.
+ */
+export function selectTownBusiness(config, businessKey = 'workshop') {
+  const functional = (config.functionalBuildings || []).find(building => building.businessKey === businessKey);
+  if (!BUSINESS_KEYS.includes(businessKey) && !functional) throw townError('INVALID_BUSINESS_KEY');
+  if (functional) {
+    return {
+      businessKey,
+      actorIds: { ...config.npcActorIds, [businessKey]: functional.actorId },
+      locationKeys: { ...config.locationKeys, [businessKey]: functional.locationKey },
+      accountId: functional.accountId,
+      sourceStockId: functional.supplierStockId,
+      destinationStockId: functional.stockId,
+      sourceLocationKey: config.locationKeys.supplier,
+      destinationLocationKey: functional.locationKey,
+      reward: functional.reward,
+      materialQuantity: functional.materialQuantity,
+      resourceKey: functional.resourceKey,
+    };
+  }
+  if (businessKey === 'cafe') {
+    if (!config.cafe || !config.accounts?.cafe) throw townError('CAFE_NOT_CONFIGURED');
+    const cafe = config.cafe;
+    return {
+      businessKey,
+      actorIds: { ...config.npcActorIds, cafe: cafe.actorId },
+      locationKeys: { ...config.locationKeys, cafe: cafe.locationKey },
+      accountId: config.accounts.cafe,
+      sourceStockId: cafe.supplierStockId,
+      destinationStockId: cafe.stockId,
+      sourceLocationKey: config.locationKeys.supplier,
+      destinationLocationKey: cafe.locationKey,
+      reward: cafe.reward,
+      materialQuantity: cafe.materialQuantity,
+      resourceKey: cafe.resourceKey,
+    };
+  }
+  return {
+    businessKey,
+    actorIds: config.npcActorIds,
+    locationKeys: config.locationKeys,
+    accountId: config.accounts.fund,
+    sourceStockId: config.stocks.supplier,
+    destinationStockId: config.stocks.workshop,
+    sourceLocationKey: config.locationKeys.supplier,
+    destinationLocationKey: config.locationKeys.workshop,
+    reward: config.reward,
+    materialQuantity: config.materialQuantity,
+    resourceKey: config.resourceKey,
+  };
+}
 
 /** Server commands. HTTP authenticates actorId; price, material and expiry are
  * fixed here. position adapters must use server movement state, not request XY.
@@ -34,14 +92,15 @@ export function createTownOrderService(dependencies) {
     if (value.actorId !== input.actorId) throw townError('ORDER_NOT_OWNED');
   }
   function record(input, value, phase) {
+    const business = selectTownBusiness(value.config, value.businessKey);
     const eventId = `delivery:${value.orderId}:${value.version}`;
     const occurredAt = c.now();
     const event = c.events.append({ eventId, worldId: input.worldId, worldEpoch: input.worldEpoch,
       type: 'town.delivery.changed', occurredAt,
-      actorIds: [value.actorId,...Object.values(value.config.npcActorIds)].filter(Boolean),
-      locationKey: value.status === 'completed' ? value.config.locationKeys.workshop : null,
+      actorIds: [value.actorId, ...Object.values(business.actorIds)].filter(Boolean),
+      locationKey: value.status === 'completed' ? business.destinationLocationKey : null,
       source: { system: 'town.delivery', entityId: value.orderId },
-      payload: { orderId: value.orderId, status: value.status, version: value.version, reward: value.config.reward } }, dependencies.consumers || []);
+      payload: { orderId: value.orderId, status: value.status, version: value.version, reward: business.reward } }, dependencies.consumers || []);
     db.prepare(`INSERT INTO town_business_log(world_id,world_epoch,order_id,actor_id,event_id,phase,occurred_at,result)
       VALUES(?,?,?,?,?,?,?,?)`).run(input.worldId,input.worldEpoch,value.orderId,value.actorId,eventId,phase,occurredAt,canonicalJson(value));
     return { order: value, eventId: event.eventId };
@@ -61,18 +120,20 @@ export function createTownOrderService(dependencies) {
   function publish(input) {
     return c.execute('publish',input,() => {
       const config = c.slice(input);
-      for (const actorId of Object.values(config.npcActorIds)) c.actor(input,actorId,{ npc: true });
-      for (const key of Object.values(config.locationKeys)) c.location(input,key);
+      const business = selectTownBusiness(config,input.businessKey ?? 'workshop');
+      for (const actorId of Object.values(business.actorIds)) c.actor(input,actorId,{ npc: true });
+      for (const key of Object.values(business.locationKeys)) c.location(input,key);
       const orderId = randomUUID();
       const createdAt = c.now(), expiresAt = createdAt + DELIVERY_SLICE.lifetimeMs;
       if (!Number.isSafeInteger(expiresAt)) throw townError('INVALID_CLOCK');
-      const money = economy.reserve({ ...c.command(input,'publish.money'), accountId: config.accounts.fund,
-        amount: config.reward, ownerRef: `order:${orderId}` }).reservation;
-      const material = economy.reserveStock({ ...c.command(input,'publish.material'), stockId: config.stocks.supplier,
-        amount: config.materialQuantity, ownerRef: `order:${orderId}` }).reservation;
+      const money = economy.reserve({ ...c.command(input,'publish.money'), accountId: business.accountId,
+        amount: business.reward, ownerRef: `order:${orderId}` }).reservation;
+      const material = economy.reserveStock({ ...c.command(input,'publish.material'), stockId: business.sourceStockId,
+        amount: business.materialQuantity, ownerRef: `order:${orderId}` }).reservation;
       db.prepare(`INSERT INTO town_delivery_orders(order_id,world_id,world_epoch,status,expires_at,created_at,
         money_reservation_id,material_reservation_id,config) VALUES(?,?,?,'open',?,?,?,?,?)`)
-        .run(orderId,input.worldId,input.worldEpoch,expiresAt,createdAt,money.reservationId,material.reservationId,canonicalJson(config));
+        .run(orderId,input.worldId,input.worldEpoch,expiresAt,createdAt,money.reservationId,material.reservationId,
+          canonicalJson(business.businessKey === 'cafe' ? { ...config, orderKind: 'cafe' } : config));
       return record(input,getOrder({ ...input,orderId }),'open');
     });
   }
@@ -88,16 +149,17 @@ export function createTownOrderService(dependencies) {
     return c.execute('pickup',input,() => {
       const value = order(input,['accepted']);
       owned(input,value);
-      c.arrived(input,value.config.locationKeys.supplier);
-      const material = reservation(input,value.materialReservationId,value.config.materialQuantity);
+      const business = selectTownBusiness(value.config,value.businessKey);
+      c.arrived(input,business.sourceLocationKey);
+      const material = reservation(input,value.materialReservationId,business.materialQuantity);
       const cargo = economy.ensureStock({ worldId: input.worldId, worldEpoch: input.worldEpoch,
-        ownerKey: `delivery:cargo:${value.orderId}:${value.actorId}`, resourceKey: value.config.resourceKey });
+        ownerKey: `delivery:cargo:${value.orderId}:${value.actorId}`, resourceKey: business.resourceKey });
       economy.captureStock({ ...c.command(input,'pickup.material'), reservationId: material.reservationId,
         expectedVersion: material.version, toStockId: cargo.stockId });
       // Order-bound custody: cargo is physically held by the courier but cannot
       // be sold/transferred by ordinary available-stock operations.
       const lock = economy.reserveStock({ ...c.command(input,'pickup.custody'), stockId: cargo.stockId,
-        ownerRef: `order:${value.orderId}`, amount: value.config.materialQuantity }).reservation;
+        ownerRef: `order:${value.orderId}`, amount: business.materialQuantity }).reservation;
       return transition(input,value,'picked_up',{ cargoStockId: cargo.stockId,cargoReservationId: lock.reservationId });
     });
   }
@@ -105,28 +167,30 @@ export function createTownOrderService(dependencies) {
     return c.execute('complete',input,() => {
       const value = order(input,['picked_up']);
       owned(input,value);
-      c.arrived(input,value.config.locationKeys.workshop);
-      const cargo = reservation(input,value.cargoReservationId,value.config.materialQuantity);
+      const business = selectTownBusiness(value.config,value.businessKey);
+      c.arrived(input,business.destinationLocationKey);
+      const cargo = reservation(input,value.cargoReservationId,business.materialQuantity);
       if (cargo.assetId !== value.cargoStockId || cargo.ownerRef !== `order:${value.orderId}`) throw townError('CARGO_NOT_OWNED');
       const stock = economy.getStock({ worldId: input.worldId,worldEpoch: input.worldEpoch,stockId: value.cargoStockId });
-      if (stock.ownerKey !== `delivery:cargo:${value.orderId}:${value.actorId}` || stock.quantity < value.config.materialQuantity) throw townError('CARGO_NOT_OWNED');
-      const money = reservation(input,value.moneyReservationId,value.config.reward);
+      if (stock.ownerKey !== `delivery:cargo:${value.orderId}:${value.actorId}` || stock.quantity < business.materialQuantity) throw townError('CARGO_NOT_OWNED');
+      const money = reservation(input,value.moneyReservationId,business.reward);
       economy.captureStock({ ...c.command(input,'complete.material'),reservationId: cargo.reservationId,
-        expectedVersion: cargo.version,toStockId: value.config.stocks.workshop });
+        expectedVersion: cargo.version,toStockId: business.destinationStockId });
       economy.capture({ ...c.command(input,'complete.wage'),reservationId: money.reservationId,
         expectedVersion: money.version,toAccountId: value.config.accounts.player });
       return transition(input,value,'completed');
     });
   }
   function releaseOrder(input, value, status) {
-    const money = reservation(input,value.moneyReservationId,value.config.reward);
+    const business = selectTownBusiness(value.config,value.businessKey);
+    const money = reservation(input,value.moneyReservationId,business.reward);
     economy.release({ ...c.command(input,'cancel.money'),reservationId: money.reservationId,expectedVersion: money.version });
     if (value.status === 'picked_up') {
-      const cargo = reservation(input,value.cargoReservationId,value.config.materialQuantity);
+      const cargo = reservation(input,value.cargoReservationId,business.materialQuantity);
       economy.captureStock({ ...c.command(input,'cancel.return'),reservationId: cargo.reservationId,
-        expectedVersion: cargo.version,toStockId: value.config.stocks.supplier });
+        expectedVersion: cargo.version,toStockId: business.sourceStockId });
     } else {
-      const material = reservation(input,value.materialReservationId,value.config.materialQuantity);
+      const material = reservation(input,value.materialReservationId,business.materialQuantity);
       economy.releaseStock({ ...c.command(input,'cancel.material'),reservationId: material.reservationId,expectedVersion: material.version });
     }
     return transition(input,value,status);

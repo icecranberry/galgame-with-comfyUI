@@ -7,6 +7,7 @@ import { createTownOrderService } from './townOrderService.js';
 import { getTownActorPosition, updateTownSettings } from './townService.js';
 import { broadcastTownStateUpdated } from './townBus.js';
 import { createTownServiceSessionService } from './townServiceSessionService.js';
+import { createTownCafeService } from './townCafeService.js';
 import { createItemTemplateService } from './itemTemplateService.js';
 import { ITEM_EFFECTS } from '../itemService.js';
 import { createTownExperienceService, TOWN_EXPERIENCE_CONSUMER } from './townExperienceService.js';
@@ -25,6 +26,7 @@ import { createTownDeliveryDiagnostics } from './townDeliveryDiagnostics.js';
 import { createTownMailboxTasks } from './townMailboxTasks.js';
 
 const activeServiceGenerations = new Map();
+const CAFE_SERVICE_KEYS = new Set(['town.cafe.drink_coffee', 'town.cafe.work_shift']);
 export function abortTownServiceGenerations(worldId, worldEpoch) {
   for (const [controller, scope] of activeServiceGenerations) {
     if (scope.worldId === worldId && scope.worldEpoch === worldEpoch) controller.abort();
@@ -131,6 +133,7 @@ function maintainTownAppointments(context = getTownAppointmentRuntime()) {
     JOIN town_actors a ON a.actor_id = s.provider_actor_id
     JOIN characters c ON c.id = a.character_id
     WHERE e.world_id = ? AND e.world_epoch = ? AND e.type = 'town.service.settled'
+      AND json_extract(s.config_json, '$.template.key') = 'town.workshop'
       AND a.participating = 1 AND a.archived = 0 AND a.merged_into IS NULL
       AND json_extract(e.envelope, '$.occurredAt') > ? AND NOT EXISTS (SELECT 1 FROM town_appointment_candidates candidate
         WHERE candidate.world_id = e.world_id AND candidate.source_event_id = e.event_id)
@@ -247,7 +250,28 @@ export function getTownBusinessRuntime() {
       return { accountId: slice.accounts.workshop, stockId: slice.stocks.workshop,
         actorId: slice.npcActorIds.workshop, locationKey: slice.locationKeys.workshop };
     } });
-  return { ...context, position, business, work, itemTemplates, services,
+  const interruptCafeWork = ({ scope: serviceScope, providerActorId, sessionId }) => {
+    const slice = business.getSlice(serviceScope);
+    if (!slice.cafe) return;
+    const runner = createTownActionRunner({ db, clock: { now: Date.now },
+      getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor, readFacts: () => ({}) });
+    const actions = db.prepare(`SELECT id, version, type, target FROM town_actions WHERE world_id = ?
+      AND world_epoch = ? AND actor_id = ? AND status IN ('validated', 'reserved', 'running')`)
+      .all(serviceScope.worldId, serviceScope.worldEpoch, providerActorId);
+    for (const action of actions) {
+      if (!['work_shift', 'wait'].includes(action.type) || action.target !== slice.cafe.locationKey) continue;
+      runner.cancel({ ...serviceScope, actionId: action.id, expectedVersion: action.version,
+        idempotencyKey: `cafe:${sessionId}:interrupt:${action.id}`, reasonCode: 'CAFE_SERVICE_ACCEPTED' });
+    }
+  };
+  const getCafe = requestedScope => {
+    const slice = business.getSlice(requestedScope);
+    if (!slice.cafe) throw Object.assign(new Error('CAFE_NOT_CONFIGURED'), { code: 'CAFE_NOT_CONFIGURED' });
+    return { accountId: slice.accounts.cafe, stockId: slice.cafe.stockId,
+      actorId: slice.cafe.actorId, locationKey: slice.cafe.locationKey };
+  };
+  const cafe = createTownCafeService({ ...dependencies, getCafe, interruptWork: interruptCafeWork });
+  return { ...context, position, business, work, itemTemplates, services, cafe,
     liquidity: createTownLiquidityPolicy({ ...dependencies, enabled: config.town.liquidityEnabled === true }),
     production: createTownProductionService(dependencies), orders: createTownOrderService(dependencies) };
 }
@@ -264,7 +288,7 @@ function commandScope(context, input) {
 
 export function getTownEconomyState() {
   const context = getTownBusinessRuntime();
-  const { db, scope, registry, business, orders } = context;
+  const { db, scope, registry, business, orders, economy } = context;
   let slice = null;
   try { slice = business.getSlice(scope); } catch (err) { if (err.code !== 'SLICE_NOT_CONFIGURED') throw err; }
   const participants = registry.synchronize().filter(a => a.npcExists && a.participating && !a.archived)
@@ -278,7 +302,14 @@ export function getTownEconomyState() {
       open: !!config.town.economyEnabled && context.work.getBusinessStatus({ ...scope, role: 'workshop' })?.open === true,
       hours: '09:00–18:00（北京时间）',
       catalog: context.services.listCatalog(scope),
-      sessions: context.services.list({ ...scope, actorId: context.player.actorId }) } : null };
+      sessions: context.services.list({ ...scope, actorId: context.player.actorId }) } : null,
+    cafe: slice?.cafe ? { locationKey: slice.cafe.locationKey, providerActorId: slice.cafe.actorId,
+      open: !!config.town.economyEnabled && context.work.getBusinessStatus({ ...scope, role: 'cafe' })?.open === true,
+      hours: '09:00–18:00（北京时间）',
+      stock: economy.getStock({ ...scope, stockId: slice.cafe.stockId }),
+      supplierStock: economy.getStock({ ...scope, stockId: slice.cafe.supplierStockId }),
+      catalog: context.cafe.listCatalog(scope),
+      sessions: context.cafe.list({ ...scope, actorId: context.player.actorId }) } : null };
 }
 
 export function getTownLiquidityStatus() {
@@ -299,15 +330,27 @@ export async function executeTownService(command, sessionId, input) {
   // retain their frozen configuration and original request fingerprint.
   if (command === 'offer' && Object.hasOwn(input, 'serviceKey')) args.serviceKey = input.serviceKey;
   if (command === 'turn') Object.assign(args, { clientTurnId: scope.idempotencyKey, intentKey: input.intentKey, text: input.text ?? '' });
-  const result = await context.services[command](args);
+  const cafeSession = sessionId ? (() => {
+    try {
+      const row = context.db.prepare('SELECT config_json FROM town_service_sessions WHERE session_id=? AND world_id=? AND world_epoch=?')
+        .get(sessionId, scope.worldId, scope.worldEpoch);
+      return !!row && CAFE_SERVICE_KEYS.has(JSON.parse(row.config_json).template?.key);
+    } catch { return false; }
+  })() : CAFE_SERVICE_KEYS.has(input.serviceKey);
+  const service = cafeSession ? context.cafe : context.services;
+  const result = await service[command](args);
   broadcastTownStateUpdated({ reason: 'service_changed' });
   return result;
 }
 
 export function getTownService(sessionId) {
   const context = getTownBusinessRuntime();
-  context.services.recover(context.scope);
-  return context.services.get({ ...context.scope, actorId: context.player.actorId, sessionId });
+  context.cafe.recover(context.scope); context.services.recover(context.scope);
+  const row = context.db.prepare('SELECT config_json FROM town_service_sessions WHERE session_id=? AND world_id=? AND world_epoch=?')
+    .get(sessionId, context.scope.worldId, context.scope.worldEpoch);
+  if (!row) throw new Error('服务不存在');
+  const service = CAFE_SERVICE_KEYS.has(JSON.parse(row.config_json).template?.key) ? context.cafe : context.services;
+  return service.get({ ...context.scope, actorId: context.player.actorId, sessionId });
 }
 
 export function isTownActorServing(actorId) {
@@ -341,15 +384,22 @@ export function executeTownOrder(command, orderId, input) {
   if (!['publish', 'accept', 'pickup', 'complete', 'cancel'].includes(command)) throw new Error('未知委托操作');
   const result = context.db.transaction(() => {
   if (command === 'publish') {
-    // One available/unsettled commission at a time; clients cannot drain all budget by publishing many cards.
-    const active = context.orders.list(scope).find(o => ['open', 'accepted', 'picked_up'].includes(o.status));
+    const businessKey = input.businessKey ?? 'workshop';
+    const functionalOrder = businessKey !== 'workshop';
+    const requestKey = functionalOrder ? `${businessKey}:${scope.idempotencyKey}` : scope.idempotencyKey;
+    // One available/unsettled commission per business line; clients cannot drain all budget by publishing many cards.
+    const active = context.orders.list(scope).find(o => ['open', 'accepted', 'picked_up'].includes(o.status)
+      && (!functionalOrder || o.businessKey === businessKey));
     const legacyRequest = context.db.prepare('SELECT 1 FROM town_business_requests WHERE world_id = ? AND request_key = ?')
-      .get(scope.worldId, scope.idempotencyKey);
-    const policyRequest = context.db.prepare('SELECT 1 FROM town_liquidity_requests WHERE world_id = ? AND request_key = ?')
-      .get(scope.worldId, scope.idempotencyKey);
+      .get(scope.worldId, requestKey);
+    const policyRequest = !functionalOrder ? context.db.prepare('SELECT 1 FROM town_liquidity_requests WHERE world_id = ? AND request_key = ?')
+      .get(scope.worldId, scope.idempotencyKey) : null;
     if (active && !legacyRequest && !policyRequest) {
       throw Object.assign(new Error('已有一份委托，请先完成或取消'), { status: 409, code: 'ACTIVE_ORDER_EXISTS' });
     }
+    if (functionalOrder) return context.orders.publish({ ...scope, actorId: context.player.actorId,
+      businessKey, idempotencyKey: requestKey,
+      sourceKey: `${businessKey}-publish:${scope.worldEpoch}:${scope.idempotencyKey}` });
     if (!legacyRequest) return context.liquidity.publish({ ...scope, actorId: context.player.actorId });
   }
   return context.orders[command]({ ...scope, actorId: context.player.actorId,
@@ -364,7 +414,7 @@ export function executeTownOrder(command, orderId, input) {
 export function maintainTownOrders() {
   const context = getTownBusinessRuntime();
   const now = Date.now();
-  const recovered = context.services.recover(context.scope);
+  const recovered = [...context.services.recover(context.scope), ...context.cafe.recover(context.scope)];
   if (recovered.length) broadcastTownStateUpdated({ reason: 'service_recovered' });
   for (const order of context.orders.list(context.scope)) {
     if (['open', 'accepted', 'picked_up'].includes(order.status) && order.expiresAt <= now) {
@@ -374,10 +424,30 @@ export function maintainTownOrders() {
     }
   }
   maintainTownProductions(context);
+  maintainTownCafeRestock(context);
   maintainTownAppointments();
   createTownExperienceService({ db: context.db, clock: { now: Date.now }, registry: context.registry,
     writeMemory: applyMemoryActions, memoryEnabled: () => getMemorySettings().enabled,
     timeZone: config.town.timeZone || 'Asia/Shanghai' }).drain(context.scope);
+}
+
+function maintainTownCafeRestock(context) {
+  if (!config.town.economyEnabled) return;
+  let slice;
+  try { slice = context.business.getSlice(context.scope); }
+  catch (error) { if (error.code === 'SLICE_NOT_CONFIGURED') return; throw error; }
+  if (!slice.cafe) return;
+  const orders = context.orders.list(context.scope);
+  const active = orders.some(order => order.businessKey === 'cafe' && ['open', 'accepted', 'picked_up'].includes(order.status));
+  const stock = context.economy.getStock({ ...context.scope, stockId: slice.cafe.stockId });
+  const supplier = context.economy.getStock({ ...context.scope, stockId: slice.cafe.supplierStockId });
+  const cafeAccount = context.economy.getAccount({ ...context.scope, accountId: slice.accounts.cafe });
+  if (active || stock.available > 2 || supplier.available < 1 || cafeAccount.available < slice.cafe.reward) return;
+  const count = orders.filter(order => order.businessKey === 'cafe').length + 1;
+  const key = `cafe-restock:${context.scope.worldId}:${context.scope.worldEpoch}:${count}`;
+  context.db.transaction(() => context.orders.publish({ ...context.scope, actorId: context.player.actorId,
+    businessKey: 'cafe', idempotencyKey: key, sourceKey: key }))();
+  broadcastTownStateUpdated({ reason: 'cafe_restock' });
 }
 
 function maintainTownProductions(context) {

@@ -18,7 +18,7 @@ const { buildCharacterPersona, buildCharacterAppearanceSection } = await import(
 const { createTownAppearanceSignature, townAssetAppearanceStatus } = await import('../src/services/town/townAppearanceSignature.js');
 
 test('B chain: delivery → mood service → real dual work production → bob card → manual use → central appearance stale', async t => {
-  let now = Date.parse('2026-09-08T10:00:00+08:00');
+  let now = Math.floor((Date.now() - 23 * 3600000) / 1000) * 1000;
   t.mock.method(Date, 'now', () => now);
   const db = getDb(); assert.equal(config.dbPath, ':memory:');
   config.features.town = true; config.features.townLLM = false;

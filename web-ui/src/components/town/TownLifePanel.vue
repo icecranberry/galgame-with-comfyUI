@@ -89,7 +89,20 @@
                 <p class="tl-muted">和已入住的工坊邻居约一次免费回访，时间由你确认。</p>
                 <linshe-button variant="secondary" size="sm" :disabled="loading || sending" @click="$emit('appointments')">查看回访邀请与预约</linshe-button>
               </section>
-              <section aria-labelledby="tl-orders-title">
+              <section v-if="economy.cafe" aria-labelledby="tl-cafe-title">
+                <div class="tl-section-heading"><h3 id="tl-cafe-title">咖啡馆 · 打工</h3><span class="tl-reward">{{ economy.cafe.catalog?.find(item => item.serviceKey === 'town.cafe.work_shift')?.wage ?? 24 }} 邻币/班</span></div>
+                <p class="tl-muted">不需要接配送单；到店当班，完成固定小任务后由咖啡馆付工资。</p>
+                <p v-if="economy.cafe.stock" class="tl-muted">咖啡豆 {{ economy.cafe.stock.available }} 份 · 可接 {{ economy.cafe.open ? '营业中' : '暂未营业' }}</p>
+                <div class="tl-actions">
+                  <linshe-button size="sm" :disabled="locked || !economy.enabled" @click="openCafe()">去咖啡馆打工</linshe-button>
+                  <linshe-button variant="link" size="sm" :disabled="!economy.cafe.locationKey" @click="go(economy.cafe.locationKey)">前往咖啡馆</linshe-button>
+                </div>
+                <div v-for="item in economy.cafe.sessions || []" :key="item.sessionId" class="tl-session">
+                  <span>{{ serviceStatuses[item.status] || '状态待确认' }}</span>
+                  <linshe-button variant="link" size="sm" :disabled="locked" @click="openCafe(item.sessionId)">{{ ['completed','cancelled','failed','expired'].includes(item.status) ? '查看结算' : '继续这班打工' }}</linshe-button>
+                </div>
+              </section>
+              <section v-if="!economy.cafe" aria-labelledby="tl-orders-title">
                 <div class="tl-section-heading"><h3 id="tl-orders-title">配送委托</h3>
                   <linshe-button :variant="activeOrders.length ? 'ghost' : 'primary'" size="sm" :disabled="locked || !economy.enabled" @click="submit('publish')">发布配送委托</linshe-button>
                 </div>
@@ -119,6 +132,8 @@
   </Teleport>
   <town-workshop-service v-if="open && workshopOpen && economy" :world-id="economy.worldId" :world-epoch="economy.worldEpoch"
     :session-id="workshopSessionId" :provider-name="workshopProvider" @close="closeWorkshop" />
+  <town-cafe-work-panel v-if="open && cafeOpen && economy" :world-id="economy.worldId" :world-epoch="economy.worldEpoch"
+    :session-id="cafeSessionId" :provider-name="cafeProvider" @close="closeCafe" />
 </template>
 
 <script setup>
@@ -126,18 +141,20 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownWorkshopService from './TownWorkshopService.vue'
+import TownCafeWorkPanel from './TownCafeWorkPanel.vue'
 import { getTownEconomy, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand } from '../../api/index.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close', 'move-to', 'appointments'])
 const panel = ref(null), economy = ref(null), loading = ref(false), sending = ref(false), fresh = ref(false)
 const error = ref(''), notice = ref(''), pending = ref(getPendingTownLifeCommand()), rejected = ref(false), cancelId = ref(null)
-const workshopOpen = ref(false), workshopSessionId = ref(null)
+const workshopOpen = ref(false), workshopSessionId = ref(null), cafeOpen = ref(false), cafeSessionId = ref(null)
 const serviceStatuses = { offered: '等待接受报价', active: '服务进行中', resolving: '正在处理', settling: '正在结算', completed: '已完成', cancelled: '已取消', failed: '服务未完成', expired: '已结束' }
 const workshopProvider = computed(() => economy.value?.participants?.find(p => p.actorId === economy.value?.service?.providerActorId)?.displayName || '邻居')
-const chosenActors = reactive({ commissioner: '', supplier: '', workshop: '' })
-const chosenLocations = reactive({ board: '', supplier: '', workshop: '' })
-const setupRoles = [
+const cafeProvider = computed(() => economy.value?.participants?.find(p => p.actorId === economy.value?.cafe?.providerActorId)?.displayName || '咖啡师')
+const chosenActors = reactive({ commissioner: '', supplier: '', workshop: '', cafe: '' })
+const chosenLocations = reactive({ board: '', supplier: '', workshop: '', cafe: '' })
+const baseSetupRoles = [
   { actor: 'commissioner', place: 'board', title: '发布委托', personLabel: '委托居民', placeLabel: '公告站地点' },
   { actor: 'supplier', place: 'supplier', title: '准备材料', personLabel: '供货居民', placeLabel: '领取材料地点' },
   { actor: 'workshop', place: 'workshop', title: '接收配送', personLabel: '工坊居民', placeLabel: '工坊地点' },
@@ -153,6 +170,9 @@ const steps = {
 const nextStep = order => steps[order.status]
 const participantOptions = computed(() => (economy.value?.participants || []).map(p => ({ label: p.displayName, value: p.actorId })))
 const locationOptions = computed(() => (economy.value?.locations || []).map(p => ({ label: p.name, value: p.key })))
+const hasCafeSetup = computed(() => participantOptions.value.length >= 4 && locationOptions.value.some(option => option.value === 'cafe'))
+const setupRoles = computed(() => hasCafeSetup.value ? [...baseSetupRoles,
+  { actor: 'cafe', place: 'cafe', title: '咖啡馆', personLabel: '咖啡馆经营者', placeLabel: '咖啡馆地点' }] : baseSetupRoles)
 const orders = computed(() => economy.value?.orders || [])
 const productionTotals = computed(() => (economy.value?.production?.batches || []).reduce((totals, batch) => {
   if (batch.status === 'reserved' || batch.status === 'completed') {
@@ -164,10 +184,11 @@ const productionTotals = computed(() => (economy.value?.production?.batches || [
 const activeOrders = computed(() => orders.value.filter(order => nextStep(order)))
 const locked = computed(() => loading.value || sending.value || !!pending.value || !fresh.value)
 const canSetup = computed(() => {
-  const actors = Object.values(chosenActors), locations = Object.values(chosenLocations)
-  return new Set(actors).size === 3 && new Set(locations).size === 3
-    && actors.every(id => participantOptions.value.some(o => o.value === id))
-    && locations.every(key => locationOptions.value.some(o => o.value === key))
+  const roles = setupRoles.value
+  const actorIds = roles.map(role => chosenActors[role.actor]), locationKeys = roles.map(role => chosenLocations[role.place])
+  return new Set(actorIds).size === roles.length && new Set(locationKeys).size === roles.length
+    && actorIds.every(id => participantOptions.value.some(o => o.value === id))
+    && locationKeys.every(key => locationOptions.value.some(o => o.value === key))
 })
 const locationName = key => economy.value?.locations?.find(l => l.key === key)?.name || '地点待确认'
 const money = value => Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—'
@@ -237,6 +258,14 @@ function openWorkshop(sessionId = null) {
 }
 async function closeWorkshop() {
   workshopOpen.value = false; refresh(); await nextTick(); panel.value?.focus({ preventScroll: true })
+}
+function openCafe(sessionId = null) {
+  if (!sessionId && !economy.value?.enabled) return
+  cafeSessionId.value = sessionId || economy.value?.cafe?.sessions?.find(s => ['offered', 'active', 'resolving', 'settling'].includes(s.status))?.sessionId || null
+  cafeOpen.value = true
+}
+async function closeCafe() {
+  cafeOpen.value = false; refresh(); await nextTick(); panel.value?.focus({ preventScroll: true })
 }
 function onKeydown(event) {
   if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); close(); return }

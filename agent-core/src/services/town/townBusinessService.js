@@ -3,6 +3,9 @@ import { canonicalJson, createTownEventService, requireText, townError } from '.
 
 export const DELIVERY_SLICE = Object.freeze({ reward: 30, materialQuantity: 1, resourceKey: 'delivery:raw_material',
   publicBudget: 2000, initialMaterials: 20, lifetimeMs: 30 * 60 * 1000 });
+export const CAFE_SLICE = Object.freeze({ businessKey: 'cafe', reward: 30, materialQuantity: 1,
+  resourceKey: 'cafe:coffee_bean', budget: 600, initialSupplierMaterials: 20, initialMaterials: 8 });
+export const BUSINESS_KEYS = Object.freeze(['workshop', 'cafe']);
 const hash = value => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
 /** Shared synchronous command boundary; exported for the order service only.
@@ -90,21 +93,63 @@ export function createTownBusinessContext({ db, clock, registry, economy, positi
 export function createTownBusinessService(dependencies) {
   const context = createTownBusinessContext(dependencies);
   const { db, economy, registry } = context;
+  function addCafe(input, previous) {
+    const world = { worldId: input.worldId, worldEpoch: input.worldEpoch };
+    const cafeActorId = input.npcActorIds.cafe, cafeLocationKey = input.locationKeys.cafe;
+    context.actor(input,cafeActorId,{ npc: true }); context.location(input,cafeLocationKey);
+    const accountId = economy.ensureAccount({ ...world, ownerKey: 'delivery:business:cafe', accountType: 'business' }).accountId;
+    const key = `seed:${input.worldId}:delivery:cafe:1`;
+    economy.seed({ ...world, accountId, amount: CAFE_SLICE.budget, seedVersion: 1,
+      idempotencyKey: key, sourceKey: key, reasonCode: 'cafe.initial_budget' });
+    const supplierStockId = economy.ensureStock({ ...world, ownerKey: 'delivery:business:supplier',
+      resourceKey: CAFE_SLICE.resourceKey }).stockId;
+    const stockId = economy.ensureStock({ ...world, ownerKey: 'delivery:business:cafe',
+      resourceKey: CAFE_SLICE.resourceKey }).stockId;
+    economy.seedStock({ ...world, stockId: supplierStockId, amount: CAFE_SLICE.initialSupplierMaterials, seedVersion: 1,
+      idempotencyKey: `seed:${input.worldId}:delivery:cafe:supplier-materials:1`,
+      sourceKey: `seed:${input.worldId}:delivery:cafe:supplier-materials:1`, reasonCode: 'cafe.initial_supplier_materials' });
+    economy.seedStock({ ...world, stockId, amount: CAFE_SLICE.initialMaterials, seedVersion: 1,
+      idempotencyKey: `seed:${input.worldId}:delivery:cafe:materials:1`,
+      sourceKey: `seed:${input.worldId}:delivery:cafe:materials:1`, reasonCode: 'cafe.initial_materials' });
+    const profile = { businessKey: 'cafe', kind: 'cafe', actorId: cafeActorId, locationKey: cafeLocationKey,
+      accountId, supplierStockId, stockId, serviceKeys: ['town.cafe.work_shift', 'town.cafe.drink_coffee'], ...CAFE_SLICE };
+    return { ...previous, accounts: { ...previous.accounts, cafe: accountId },
+      stocks: { ...previous.stocks, cafeSupplier: supplierStockId, cafe: stockId },
+      cafe: profile, functionalBuildings: [...(previous.functionalBuildings || [])
+        .filter(building => building.businessKey !== 'cafe'), profile] };
+  }
   function setup(input) {
     return context.execute('setup', input, () => {
-      const roles = ['commissioner', 'supplier', 'workshop'];
-      const places = ['board', 'supplier', 'workshop'];
       if (!input.npcActorIds || !input.locationKeys) throw townError('INVALID_SLICE');
+      const hasCafe = Object.hasOwn(input.npcActorIds, 'cafe') || Object.hasOwn(input.locationKeys, 'cafe');
+      if (hasCafe && (!input.npcActorIds.cafe || !input.locationKeys.cafe)) throw townError('INVALID_SLICE');
+      const baseRoles = ['commissioner','supplier','workshop'];
+      const basePlaces = ['board','supplier','workshop'];
+      const roles = hasCafe ? [...baseRoles, 'cafe'] : baseRoles;
+      const places = hasCafe ? [...basePlaces, 'cafe'] : basePlaces;
       roles.forEach(role => context.actor(input,input.npcActorIds[role],{ npc: true }));
       places.forEach(place => context.location(input,input.locationKeys[place]));
-      if (new Set(roles.map(role => input.npcActorIds[role])).size !== 3
-          || new Set(places.map(place => input.locationKeys[place])).size !== 3) throw townError('INVALID_SLICE');
-      const selected = { npcActorIds: Object.fromEntries(roles.map(role => [role,input.npcActorIds[role]])),
-        locationKeys: Object.fromEntries(places.map(place => [place,input.locationKeys[place]])) };
+      if (new Set(roles.map(role => input.npcActorIds[role])).size !== roles.length
+          || new Set(places.map(place => input.locationKeys[place])).size !== places.length) throw townError('INVALID_SLICE');
+      const baseSelected = { npcActorIds: Object.fromEntries(baseRoles.map(role => [role,input.npcActorIds[role]])),
+        locationKeys: Object.fromEntries(basePlaces.map(place => [place,input.locationKeys[place]])) };
       const previous = db.prepare('SELECT config FROM town_business_slices WHERE world_id=? AND world_epoch=?').get(input.worldId,input.worldEpoch);
       if (previous) {
         const value = JSON.parse(previous.config);
-        if (canonicalJson(selected) !== canonicalJson({ npcActorIds: value.npcActorIds, locationKeys: value.locationKeys })) throw townError('SLICE_CONFLICT');
+        const requestedBase = { npcActorIds: Object.fromEntries(baseRoles.map(role => [role,input.npcActorIds[role]])),
+          locationKeys: Object.fromEntries(basePlaces.map(place => [place,input.locationKeys[place]])) };
+        if (canonicalJson(requestedBase) !== canonicalJson({ npcActorIds: value.npcActorIds, locationKeys: value.locationKeys })) {
+          throw townError('SLICE_CONFLICT');
+        }
+        if (value.cafe) {
+          const currentCafe = { cafeActorId: value.cafe.actorId, cafeLocationKey: value.cafe.locationKey };
+          const requestedCafe = hasCafe
+            ? { cafeActorId: input.npcActorIds.cafe, cafeLocationKey: input.locationKeys.cafe }
+            : null;
+          if (requestedCafe && canonicalJson(currentCafe) !== canonicalJson(requestedCafe)) throw townError('SLICE_CONFLICT');
+          return value;
+        }
+        if (hasCafe) return addCafe(input,value);
         return value;
       }
       const world = { worldId: input.worldId, worldEpoch: input.worldEpoch };
@@ -113,7 +158,7 @@ export function createTownBusinessService(dependencies) {
       const accounts = {};
       accounts.player = economy.ensureAccount({ ...world, ownerKey: `actor:${player.actorId}`, actorId: player.actorId, accountType: 'actor' }).accountId;
       accounts.fund = economy.ensureAccount({ ...world, ownerKey: 'delivery:public-fund', accountType: 'fund' }).accountId;
-      for (const role of roles) accounts[role] = economy.ensureAccount({ ...world, ownerKey: `delivery:business:${role}`, accountType: 'business' }).accountId;
+      for (const role of baseRoles) accounts[role] = economy.ensureAccount({ ...world, ownerKey: `delivery:business:${role}`, accountType: 'business' }).accountId;
       const grants = { player: 0, fund: DELIVERY_SLICE.publicBudget, commissioner: 400, supplier: 600, workshop: 400 };
       for (const [role, amount] of Object.entries(grants)) {
         // Source and request key deliberately exclude epoch and setup sourceKey.
@@ -127,10 +172,13 @@ export function createTownBusinessService(dependencies) {
       const key = `seed:${input.worldId}:delivery:materials:1`;
       economy.seedStock({ ...world, stockId: stocks.supplier, amount: DELIVERY_SLICE.initialMaterials, seedVersion: 1,
         idempotencyKey: key, sourceKey: key, reasonCode: 'delivery.initial_materials' });
-      const result = { ...selected, accounts, stocks, playerActorId: player.actorId, ...DELIVERY_SLICE };
-      db.prepare('INSERT INTO town_business_slices VALUES(?,?,?)').run(input.worldId,input.worldEpoch,canonicalJson(result));
-      return result;
+      const result = { ...baseSelected, accounts, stocks, playerActorId: player.actorId, ...DELIVERY_SLICE };
+      const finalResult = hasCafe ? addCafe(input,result) : result;
+      db.prepare('INSERT INTO town_business_slices VALUES(?,?,?)').run(input.worldId,input.worldEpoch,canonicalJson(finalResult));
+      return finalResult;
     });
   }
-  return { setup, getSlice: context.slice };
+  return { setup, getSlice: context.slice,
+    getFunctionalBuildings: input => { const slice = context.slice(input);
+      return slice.functionalBuildings || (slice.cafe ? [slice.cafe] : []); } };
 }

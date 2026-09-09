@@ -34,6 +34,28 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
       if (!row) return null;
       const receipt = JSON.parse(row.receipt_json);
       const config = JSON.parse(row.config_json);
+      if (config.template?.key === 'town.cafe.work_shift') {
+        if (receipt.status !== 'completed' || !Array.isArray(receipt.itemIds) || receipt.itemIds.length !== 0
+          || receipt.eventId !== event.eventId || event.eventId !== `service:${row.session_id}:settled`
+          || receipt.sessionId !== row.session_id || receipt.settlementId !== event.payload.settlementId
+          || receipt.settlementId !== row.session_id || receipt.outcomeKey !== 'cafe_shift_done'
+          || receipt.outcomeKey !== event.payload.outcomeKey || receipt.paid !== 0 || receipt.payout !== 24 || receipt.refund !== 0
+          || receipt.settledAt !== event.occurredAt || event.source?.system !== 'town.service' || event.source.entityId !== row.session_id
+          || config.template.version !== 1 || !row.consumed || !row.crafted) throw townError('EXPERIENCE_SOURCE_INVALID');
+        return { actorIds: [row.actor_id, row.provider_actor_id],
+          summary: '玩家在镇咖啡馆完成了一班临时代班，工资已经结算。', locationKey: config.locationKey };
+      }
+      if (config.template?.key === 'town.cafe.drink_coffee') {
+        if (receipt.status !== 'completed' || !Array.isArray(receipt.itemIds) || receipt.itemIds.length !== 0
+          || receipt.eventId !== event.eventId || event.eventId !== `service:${row.session_id}:settled`
+          || receipt.sessionId !== row.session_id || receipt.settlementId !== event.payload.settlementId
+          || receipt.settlementId !== row.session_id || receipt.outcomeKey !== 'coffee_served'
+          || receipt.outcomeKey !== event.payload.outcomeKey || receipt.paid !== 18 || receipt.payout !== 18 || receipt.refund !== 0
+          || receipt.settledAt !== event.occurredAt || event.source?.system !== 'town.service' || event.source.entityId !== row.session_id
+          || config.template.version !== 1 || !row.consumed || !row.crafted) throw townError('EXPERIENCE_SOURCE_INVALID');
+        return { actorIds: [row.actor_id, row.provider_actor_id],
+          summary: '玩家在镇咖啡馆喝到了一杯手冲咖啡，服务已经正式结算。', locationKey: config.locationKey };
+      }
       let definition;
       try { definition = resolveTownServiceDefinition(config); }
       catch { throw townError('EXPERIENCE_SOURCE_INVALID'); }

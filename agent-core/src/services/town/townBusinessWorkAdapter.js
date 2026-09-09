@@ -2,7 +2,7 @@ import { assertUtcMs, createTownClock, isInTimeWindow } from './townClock.js';
 import { requireText, townError } from './townEventService.js';
 
 export const BUSINESS_WORK_HOURS = Object.freeze({ timeZone: 'Asia/Shanghai', startMinute: 540, endMinute: 1080 });
-const places = Object.freeze({ commissioner: 'board', supplier: 'supplier', workshop: 'workshop' });
+const places = Object.freeze({ commissioner: 'board', supplier: 'supplier', workshop: 'workshop', cafe: 'cafe' });
 const sync = value => {
   if (value?.then) throw townError('ASYNC_ADAPTER_FORBIDDEN');
   return value;
@@ -37,9 +37,10 @@ export function createTownBusinessWorkAdapter({ clock, registry, getSlice, getAc
     catch (error) { if (error.code === 'SLICE_NOT_CONFIGURED') return null; throw error; }
   }
   function inspect(actorId, ctx, config) {
-    const role = Object.keys(places).find(key => config?.npcActorIds?.[key] === actorId);
+    const dynamic = (config?.functionalBuildings || []).find(building => building.actorId === actorId);
+    const role = dynamic?.businessKey || Object.keys(places).find(key => key === 'cafe' ? config?.cafe?.actorId === actorId : config?.npcActorIds?.[key] === actorId);
     if (!role) return null;
-    const locationKey = config.locationKeys?.[places[role]];
+    const locationKey = dynamic ? dynamic.locationKey : role === 'cafe' ? config?.cafe?.locationKey : config.locationKeys?.[places[role]];
     requireText(locationKey);
     const actor = sync(registry.getActor(actorId, ctx.worldId));
     const available = !!actor && actor.actorId === actorId && actor.participating === true
@@ -72,9 +73,10 @@ export function createTownBusinessWorkAdapter({ clock, registry, getSlice, getAc
     return inspect(actorId,ctx,slice(ctx));
   }
   function getBusinessStatus(input) {
-    if (!Object.hasOwn(places,input.role)) throw townError('INVALID_BUSINESS_ROLE');
     const ctx = context(input), config = slice(ctx);
-    const actorId = config?.npcActorIds?.[input.role];
+    if (!Object.hasOwn(places,input.role) && !config?.functionalBuildings?.some(building => building.businessKey === input.role)) throw townError('INVALID_BUSINESS_ROLE');
+    const actorId = config?.functionalBuildings?.find(building => building.businessKey === input.role)?.actorId
+      ?? (input.role === 'cafe' ? config?.cafe?.actorId : config?.npcActorIds?.[input.role]);
     return actorId ? inspect(actorId,ctx,config) : null;
   }
   /** Spread into readActorFacts AFTER base schedule and movement have been read.

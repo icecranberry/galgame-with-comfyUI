@@ -1752,6 +1752,7 @@ export function resetWorld() {
     const economy = createEconomyService({ db, clock: { now: Date.now }, getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor });
     const runtime = getTownBusinessRuntime();
     runtime.services.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
+    runtime.cafe.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     getTownAppointmentRuntime().appointments.cancelForRebuild({ scope: { worldId: world.worldId, worldEpoch: world.epoch } });
     runtime.production.cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch,
       idempotencyKey: `reset-production:${world.epoch}`, sourceKey: `reset-production:${world.epoch}` });

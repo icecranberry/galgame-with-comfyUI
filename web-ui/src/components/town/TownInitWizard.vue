@@ -9,6 +9,9 @@
         </div>
 
         <!-- 白色内衬卡（对齐角色详情弹窗的 lora-body-card 风格） -->
+        <div v-if="showInitAlphaBanner" class="wiz-alpha-banner" role="note">
+          目前小镇功能极其不完善，就是看看美术素材图一乐，没任何功能，主包正在努力女娲补天
+        </div>
         <div class="wiz-inner">
         <!-- 步骤条 -->
         <div class="wiz-steps-row">
@@ -559,6 +562,9 @@ const workingText = computed(() => {
   if (s === 'blueprint') return '正在解读世界观，规划素材与居民…'
   return 'AI 正在思考…'
 })
+
+// 生成素材阶段才展示的临时说明：地图（含布局预览）出现后不再出现
+const showInitAlphaBanner = computed(() => !town.initialized && !town.renderMap && localStep.value !== 'done')
 
 function canJump(id) {
   // 已走过的步骤可回跳
@@ -1262,6 +1268,18 @@ onBeforeUnmount(() => {
 
 .wiz-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
 .wiz-step-hint { flex: 1; font-size: 11px; color: var(--text-secondary); }
+
+.wiz-alpha-banner {
+  margin: 2px 12px 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: #fff7ef;
+  border: 1px solid rgba(224, 123, 108, 0.22);
+  color: #96705b;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
 
 .wiz-inner {
   flex: 1;

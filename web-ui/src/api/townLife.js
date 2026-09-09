@@ -25,32 +25,33 @@ export const getTownLiquidity = () => request('/liquidity')
 export const getTownServiceSession = sessionId => request(`/services/${encodeURIComponent(sessionId)}`)
 
 /** Snapshot a command once. Retry this object verbatim; never add player IDs or coordinates. */
-export function createTownLifeCommand(kind, { worldId, worldEpoch, orderId, expectedVersion, npcActorIds, locationKeys, sessionId, serviceKey, intentKey, text = '' } = {}) {
+export function createTownLifeCommand(kind, { worldId, worldEpoch, orderId, expectedVersion, npcActorIds, locationKeys, sessionId, serviceKey, intentKey, text = '', businessKey } = {}) {
   if (!['setup', 'publish', 'accept', 'pickup', 'complete', 'cancel', 'service_offer', 'service_accept', 'service_cancel', 'service_turn'].includes(kind)) throw new Error('未知操作')
   if (!worldId || !Number.isSafeInteger(worldEpoch)) throw new Error('请先重新读取小镇状态')
   const body = { worldEpoch, idempotencyKey: crypto.randomUUID() }
   let path
   if (kind.startsWith('service_')) {
     if (kind === 'service_offer') {
-      if (serviceKey !== undefined && !['town.workshop', 'town.workshop.bob_cut'].includes(serviceKey)) throw new Error('未知工坊服务')
+      if (serviceKey !== undefined && !['town.workshop', 'town.workshop.bob_cut', 'town.cafe.drink_coffee', 'town.cafe.work_shift'].includes(serviceKey)) throw new Error('未知小镇服务')
       path = '/services/offer'
       // Preserve the legacy request body and its server fingerprint, including explicit default selection.
-      if (serviceKey === 'town.workshop.bob_cut') body.serviceKey = serviceKey
+      if (['town.workshop.bob_cut', 'town.cafe.drink_coffee', 'town.cafe.work_shift'].includes(serviceKey)) body.serviceKey = serviceKey
     }
     else {
       if (!sessionId || !Number.isSafeInteger(expectedVersion)) throw new Error('请先重新读取工坊服务状态')
       body.expectedVersion = expectedVersion
       path = `/services/${encodeURIComponent(sessionId)}/${kind.slice(8)}`
       if (kind === 'service_turn') {
-        if (!['choose_theme', 'confirm_materials', 'craft', 'deliver', 'clarify'].includes(intentKey) || typeof text !== 'string' || [...text].length > 500) throw new Error('无效服务选项或说明过长')
+        if (!['choose_theme', 'confirm_materials', 'craft', 'deliver', 'clarify', 'choose_drink', 'serve'].includes(intentKey) || typeof text !== 'string' || [...text].length > 500) throw new Error('无效服务选项或说明过长')
         body.intentKey = intentKey; body.text = text
       }
     }
   } else if (kind === 'setup') {
     body.npcActorIds = { commissioner: npcActorIds.commissioner, supplier: npcActorIds.supplier, workshop: npcActorIds.workshop }
     body.locationKeys = { board: locationKeys.board, supplier: locationKeys.supplier, workshop: locationKeys.workshop }
+    if (npcActorIds?.cafe && locationKeys?.cafe) { body.npcActorIds.cafe = npcActorIds.cafe; body.locationKeys.cafe = locationKeys.cafe }
     path = '/economy/setup'
-  } else if (kind === 'publish') path = '/orders/publish'
+  } else if (kind === 'publish') { if (businessKey === 'cafe') body.businessKey = 'cafe'; path = '/orders/publish' }
   else {
     if (!orderId || !Number.isSafeInteger(expectedVersion)) throw new Error('请先重新读取委托状态')
     body.expectedVersion = expectedVersion

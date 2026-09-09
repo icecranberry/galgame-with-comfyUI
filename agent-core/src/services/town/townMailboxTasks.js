@@ -63,7 +63,8 @@ export function createTownMailboxTasks({db,clock,registry,enabled=true}) {
         [row.actor_id,...roles.map(role=>config.npcActorIds[role])].filter(Boolean).sort())) return null;
     const expected={orderId:row.order_id,worldId:row.world_id,worldEpoch:row.world_epoch,status:row.status,version:row.version,
       actorId:row.actor_id,expiresAt:row.expires_at,createdAt:row.created_at,moneyReservationId:row.money_reservation_id,
-      materialReservationId:row.material_reservation_id,cargoStockId:row.cargo_stock_id,cargoReservationId:row.cargo_reservation_id,config};
+      materialReservationId:row.material_reservation_id,cargoStockId:row.cargo_stock_id,cargoReservationId:row.cargo_reservation_id,config,
+      businessKey:config.orderKind ?? 'workshop'};
     if (!equal(logged,expected)) return null;
     const account=id=>db.prepare('SELECT * FROM economy_accounts WHERE account_id=? AND world_id=?').get(id,scope.worldId);
     const fund=account(config.accounts.fund),payee=account(config.accounts.player);

@@ -75,3 +75,19 @@ test('fixed bob offer retains its key on retry while legacy offers keep their or
   assert.throws(() => createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.workshop.bob_cut@1' }))
   savePendingTownLifeCommand(null, 'workshop')
 })
+
+test('cafe publish and drink service commands carry their explicit business and service keys', () => {
+  const scope = { worldId: 'w', worldEpoch: 2 }
+  const publish = createTownLifeCommand('publish', { ...scope, businessKey: 'cafe' })
+  assert.equal(publish.body.businessKey, 'cafe')
+  const offer = createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.cafe.drink_coffee' })
+  assert.equal(offer.body.serviceKey, 'town.cafe.drink_coffee')
+  const workOffer = createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.cafe.work_shift' })
+  assert.equal(workOffer.body.serviceKey, 'town.cafe.work_shift')
+  const turn = createTownLifeCommand('service_turn', { ...scope, sessionId: 'cafe', expectedVersion: 1, intentKey: 'serve' })
+  assert.equal(turn.body.intentKey, 'serve')
+  const setup = createTownLifeCommand('setup', { ...scope, npcActorIds: { commissioner: 'a', supplier: 'b', workshop: 'c', cafe: 'd' },
+    locationKeys: { board: 'board', supplier: 'supplier', workshop: 'workshop', cafe: 'cafe' } })
+  assert.equal(setup.body.npcActorIds.cafe, 'd'); assert.equal(setup.body.locationKeys.cafe, 'cafe')
+  assert.throws(() => createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.cafe.drink_coffee@1' }))
+})
