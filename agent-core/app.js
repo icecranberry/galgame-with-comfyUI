@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
@@ -49,6 +50,11 @@ import { startConsolidationScheduler, stopConsolidationScheduler } from './src/s
 
 const app = express();
 
+// 静态资源锚定 agent-core/，不随启动 cwd 漂移（从别处启动时曾静默落到空目录）
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const DATA_DIR = path.join(__dirname, 'data');
+
 // 中间件
 app.use(cors());
 app.use(compression()); // 聊天历史等大 JSON 响应启用 gzip
@@ -56,7 +62,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // 静态文件（Vue 前端，构建后）
 // 带内容哈希的资源（/assets/*，含字体）可长缓存；index.html 保持可即时更新
-app.use(express.static('public', {
+app.use(express.static(PUBLIC_DIR, {
   setHeaders(res, filePath) {
     if (filePath.includes(`${path.sep}assets${path.sep}`)) {
       res.setHeader('Cache-Control', 'public, max-age=2592000'); // 30d
@@ -65,12 +71,12 @@ app.use(express.static('public', {
 }));
 
 // 图片编辑任务暂存预览（重新生成 / HiresFix 细化确认前）
-app.use('/images/.pending', express.static('data/images/.pending', { dotfiles: 'allow', index: false, maxAge: '5m' }));
+app.use('/images/.pending', express.static(path.join(DATA_DIR, 'images', '.pending'), { dotfiles: 'allow', index: false, maxAge: '5m' }));
 
 // 图片存储目录（AVIF 自适应：请求 .png 时若同名 .avif 存在则返回 AVIF）
-app.use('/images', imageAvifFallback('data/images'));
-app.use('/images', express.static('data/images', { maxAge: '7d' }));
-app.use('/avatars', express.static('data/avatars', { maxAge: '30d' }));
+app.use('/images', imageAvifFallback(path.join(DATA_DIR, 'images')));
+app.use('/images', express.static(path.join(DATA_DIR, 'images'), { maxAge: '7d' }));
+app.use('/avatars', express.static(path.join(DATA_DIR, 'avatars'), { maxAge: '30d' }));
 
 // API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages

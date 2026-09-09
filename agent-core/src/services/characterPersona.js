@@ -20,6 +20,17 @@ import { getActiveOutfits } from './outfitService.js';
 
 const APPEARANCE_HEADING_RE = /##\s*你的外观/;
 
+// 「你」→ 第三人称名时跳过非人称代词的复合词：
+//   迷｜你（迷你）、你｜们（你们）、你｜我（你我/你追我赶）、你｜好（你好）、你｜死（你死我活）。
+// 历史问题：全量 replace(/你/g) 会把「迷你裙」写成「迷<角色名>裙」、「你们」写成「<角色名>们」。
+const SECOND_PERSON_RE = /(?<!迷)你(?!们|我|好|死)/g;
+
+/** 把第二人称「你」替换为角色名；person 为空时原样返回。 */
+function toThirdPerson(text, person) {
+  if (!person) return text;
+  return String(text).replace(SECOND_PERSON_RE, () => person);
+}
+
 /**
  * 提取「## 你的外观」段（含标题，截到字符串末尾）。
  * 角色卡标准结构中外观是最后一段（见 routes/characters.js buildPersonaSystemPrompt），
@@ -155,7 +166,7 @@ export function buildCharacterPersona(character, opts = {}) {
     } else {
       result = base;
     }
-    return person ? result.replace(/你/g, person) : result;
+    return toThirdPerson(result, person);
   }
 
   // short variant
@@ -168,7 +179,7 @@ export function buildCharacterPersona(character, opts = {}) {
     return basePrompt.trim();
   }
   let appearancePart = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(outfits)).trim();
-  if (person) appearancePart = appearancePart.replace(/你/g, person);
+  appearancePart = toThirdPerson(appearancePart, person);
   return [short, appearancePart].filter(Boolean).join(joiner);
 }
 
@@ -202,7 +213,7 @@ export function buildImageCrossRefInfo(char, opts = {}) {
   const appearance = extractAppearanceSection(base);
   const injected = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(resolveOutfits(char, opts.outfits)));
   if (injected) {
-    parts.push(person ? injected.replace(/你/g, person) : injected);
+    parts.push(toThirdPerson(injected, person));
   }
   return parts.join('\n');
 }

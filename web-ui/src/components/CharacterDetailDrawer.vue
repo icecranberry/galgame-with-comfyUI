@@ -528,14 +528,14 @@ onUnmounted(() => {
 /* ── Timeline ── */
 .tl-item {
   display: grid; grid-template-columns: 18px 50px 1fr;
-  gap: 8px; align-items: start; padding: 4px 0;
+  gap: 8px; align-items: stretch; padding: 4px 0;
 }
 
 .tl-node { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
 .tl-d { width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); flex-shrink: 0; }
 .tl-curr .tl-d { background: #52c41a; box-shadow: 0 0 0 4px rgba(82,196,26,0.12); }
-.tl-sleep .tl-d { background: var(--border); }
-.tl-l { width: 1.5px; flex: 1; min-height: 22px; background: var(--border); margin-top: 3px; }
+.tl-sleep:not(.tl-curr) .tl-d { background: var(--border); }
+.tl-l { width: 1.5px; flex: 1; min-height: 22px; background: var(--border); margin-top: 3px; margin-bottom: -14px; }
 .tl-item:last-child .tl-l { display: none; }
 
 .tl-t {
