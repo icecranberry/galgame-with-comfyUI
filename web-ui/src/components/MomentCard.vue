@@ -72,55 +72,23 @@
     <div v-if="comments.length > 0" class="comments-section">
       <!-- 始终可见：最早 2 条 -->
       <div class="comments-list">
-        <div
+        <moment-comment-item
           v-for="c in alwaysVisible"
           :key="c.id"
-          class="comment-item"
-          :class="{ 'is-character': c.author_type === 'character' && c.author_id === post.character_id }"
-        >
-          <template v-if="c.author_type === 'character'">
-            <span class="comment-char-name">{{ c.char_display_name || post.display_name }}</span>
-            <template v-if="c.auto_trigger && !c.reply_to_name">
-              <!-- AI 互动首轮评论：无需"回复"前缀 -->
-            </template>
-            <template v-else>
-              <span class="comment-reply-to"> 回复 </span>
-              <span class="comment-user-name">{{ c.reply_to_name || userNickname || '我' }}</span>
-            </template>
-          </template>
-          <template v-else>
-            <span class="comment-user-name">{{ userNickname || '我' }}</span>
-          </template>
-          <span>：</span>
-          <span class="comment-content">{{ c.content }}</span>
-        </div>
+          :comment="c"
+          :post="post"
+        />
       </div>
 
       <!-- 超出部分：max-height 动画展开 -->
       <div class="expand-wrapper" :class="{ open: expanded }">
         <div v-if="hiddenCount > 0" class="comments-list">
-          <div
+          <moment-comment-item
             v-for="c in hiddenComments"
             :key="c.id"
-            class="comment-item"
-            :class="{ 'is-character': c.author_type === 'character' && c.author_id === post.character_id }"
-          >
-            <template v-if="c.author_type === 'character'">
-              <span class="comment-char-name">{{ c.char_display_name || post.display_name }}</span>
-              <template v-if="c.auto_trigger && !c.reply_to_name">
-                <!-- AI 互动首轮评论：无需"回复"前缀 -->
-              </template>
-              <template v-else>
-                <span class="comment-reply-to"> 回复 </span>
-                <span class="comment-user-name">{{ c.reply_to_name || userNickname || '我' }}</span>
-              </template>
-            </template>
-            <template v-else>
-              <span class="comment-user-name">{{ userNickname || '我' }}</span>
-            </template>
-            <span>：</span>
-            <span class="comment-content">{{ c.content }}</span>
-          </div>
+            :comment="c"
+            :post="post"
+          />
         </div>
       </div>
 
@@ -167,9 +135,9 @@
 import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
-import { userNickname } from '../userConfig.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import MomentCommentItem from './MomentCommentItem.vue'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -499,29 +467,7 @@ function formatTime(iso) {
   display: flex; flex-direction: column; gap: 8px;
   margin-bottom: 12px;
 }
-.comment-item {
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.45);
-  font-size: 13px; line-height: 1.6;
-  color: var(--text-primary);
-}
-.comment-item.is-character {
-  background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid rgba(var(--accent-rgb), 0.12);
-}
-.comment-char-name {
-  font-size: 12px; font-weight: 600;
-  color: var(--accent);
-}
-.comment-user-name {
-  font-size: 12px; font-weight: 600;
-  color: var(--text-bright);
-}
-.comment-reply-to {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
+/* 单条评论（含评论人头像）皮肤在 MomentCommentItem.vue */
 
 /* 评论展开动画：max-height 过渡 */
 .expand-wrapper {

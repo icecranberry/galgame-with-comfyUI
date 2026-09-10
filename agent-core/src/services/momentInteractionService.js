@@ -3,7 +3,7 @@
  *
  * 帖子发布后，关系网中的角色有概率来评论区互动：
  *   1. Sigmoid 概率判断 → 层叠选朋友（第1个必选，之后每个 50%）
- *   2. 朋友首轮评论（含双方人格 + 世界观 + 帖子原文）
+ *   2. 朋友首轮评论（含双方人格 + <world_setting> + 帖子原文）
  *   3. 发帖人必定回复
  *   4. 30% 连锁继续，最多 3 轮（全帖累计）
  *
@@ -125,7 +125,7 @@ ${post.content}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来评论朋友圈，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
+    ? '请遵循当前<world_setting>来评论朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '去评论区留个言吧：' });
 
@@ -180,7 +180,7 @@ ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来回复朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
+    ? '请遵循当前<world_setting>来回复朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + `回复${friendName}的最后一条评论：` });
 
@@ -237,7 +237,7 @@ ${threadText}
   msgs.push({ role: 'system', content: contextTask });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前世界观来继续朋友圈评论，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
+    ? '请遵循当前<world_setting>来继续朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '继续聊天：' });
 
@@ -369,6 +369,8 @@ async function runInteractionThread(post, posterChar, friend) {
       char_display_name: friendName,
       char_avatar_path: friendAvatar,
       reply_to_name: null,  // 首轮评论，不回复任何人
+      reply_to_avatar_path: null,
+      reply_to_author_type: null,
       auto_trigger: 1,
       thread_root_id: threadRootId,
       created_at: new Date().toISOString(),
@@ -397,6 +399,8 @@ async function runInteractionThread(post, posterChar, friend) {
       char_display_name: posterName,
       char_avatar_path: posterChar.avatar_path,
       reply_to_name: friendName,  // 发帖人回复朋友
+      reply_to_avatar_path: friendAvatar,
+      reply_to_author_type: 'character',
       auto_trigger: 1,
       thread_root_id: threadRootId,
       created_at: new Date().toISOString(),
@@ -458,6 +462,8 @@ async function runInteractionThread(post, posterChar, friend) {
         char_display_name: friendName,
         char_avatar_path: friendAvatar,
         reply_to_name: posterName,  // 朋友续评，回复发帖人
+        reply_to_avatar_path: posterAvatar,
+        reply_to_author_type: 'character',
         auto_trigger: 1,
         thread_root_id: threadRootId,
         created_at: new Date().toISOString(),
@@ -495,6 +501,8 @@ async function runInteractionThread(post, posterChar, friend) {
         char_display_name: posterName,
         char_avatar_path: posterAvatar,
         reply_to_name: friendName,  // 发帖人回复朋友续评
+        reply_to_avatar_path: friendAvatar,
+        reply_to_author_type: 'character',
         auto_trigger: 1,
         thread_root_id: threadRootId,
         created_at: new Date().toISOString(),

@@ -4,13 +4,17 @@
  *   $ npm run dev   (在项目根目录)
  *
  * 启动流程:
- *   1. 清理端口占用 (3099, 8765, 5173)
- *   2. 检查 Node.js / Python 环境
- *   3. vector-service  (:8765) — Python uvicorn
- *   4. agent-core       (:3099) — Express (node --watch)
- *   5. web-ui           (:5173) — Vite HMR
+ *   0. 清理残留进程（全部本项目 node/python：老服务 + 不占端口的幽灵 + 遗留的 nodemon 监督进程）
+ *   1. 检查 Node.js / Python 环境
+ *   2. vector-service  (:8765) — Python uvicorn
+ *   3. agent-core       (:3099) — Express (nodemon)
+ *   4. web-ui           (:5173) — Vite HMR
  *
  * Ctrl+C 一键停止全部子进程。
+ *
+ * 注意：残留进程清理走 scripts/lib/projectProcesses.mjs。不要退回「只清端口」的写法——
+ * 不占端口的幽灵 agent-core 会继续跑 scheduler（朋友圈重复发帖），遗留在外的 nodemon
+ * 监督进程还会在新会话里再拉起一份实例，形成同相位的双调度器。
  */
 
 import { spawn, execSync } from "node:child_process";
@@ -18,6 +22,7 @@ import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { cleanupProjectProcesses, label } from "./lib/projectProcesses.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -35,83 +40,6 @@ const C = {
 
 function tag(name) {
   return `${C.dim}[${C.cyan}${name}${C.dim}]${C.reset}`;
-}
-
-// ── 端口清理（带进程身份验证，防止误杀其他应用）──
-const PROJECT_KEYWORDS = [
-  "generate-image-agent", "agent-core", "vector-service", "web-ui",
-  "app.js", "server:app", "vite", "uvicorn",
-];
-
-function getProcessName(pid) {
-  try {
-    return execSync(
-      `powershell -NoProfile -Command "(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName"`,
-      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-    ).trim();
-  } catch { return ""; }
-}
-
-function isProjectProcess(pid) {
-  // 第一层：只检查 node.exe / python.exe —— 其他进程（如京东金融等原生应用）直接放行
-  const name = getProcessName(pid).toLowerCase();
-  if (!name || (name !== "node.exe" && name !== "python.exe")) {
-    return false;
-  }
-
-  // 第二层：检查命令行是否包含项目路径/关键字
-  try {
-    const cmdLine = execSync(
-      `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`,
-      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-    ).trim();
-
-    const lower = cmdLine.toLowerCase();
-    return PROJECT_KEYWORDS.some((kw) => lower.includes(kw));
-  } catch {
-    // 无法获取命令行 → 保守处理，不杀
-    return false;
-  }
-}
-
-function killPort(port) {
-  try {
-    if (process.platform === "win32") {
-      const out = execSync(
-        `netstat -ano | findstr ":${port} " | findstr "LISTENING"`,
-        { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-      ).trim();
-      if (!out) return false;
-
-      const seen = new Set();
-      for (const line of out.split("\n")) {
-        const parts = line.trim().split(/\s+/);
-        const pid = parts[parts.length - 1];
-        if (pid && /^\d+$/.test(pid)) seen.add(pid);
-      }
-
-      let killedCount = 0;
-      for (const pid of seen) {
-        if (isProjectProcess(pid)) {
-          execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, stdio: "ignore" });
-          killedCount++;
-          console.log(`        ${C.dim}Killed old project process (PID ${pid}) on port ${port}${C.reset}`);
-        } else {
-          const procName = getProcessName(pid) || `PID ${pid}`;
-          console.log(
-            `\n        ${C.yellow}[WARN] Port ${port} occupied by "${procName}" (PID ${pid}) — not killing${C.reset}`
-          );
-          console.log(
-            `        ${C.yellow}       This is NOT a project process. Check your running applications.${C.reset}`
-          );
-        }
-      }
-      return killedCount > 0;
-    } else {
-      execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { stdio: "ignore" });
-      return true;
-    }
-  } catch { return false; }
 }
 
 // ── 嵌入模型检测 & 自动下载 ──
@@ -243,12 +171,18 @@ async function main() {
   console.log(`  ${C.dim}${"=".repeat(40)}${C.reset}`);
   console.log();
 
-  // [0/4] 端口清理
-  process.stdout.write(`  [0/4] Cleaning up ports...`);
-  killPort(3099);
-  killPort(8765);
-  killPort(5173);
-  console.log(` ${C.green}Done${C.reset}`);
+  // [0/4] 清理残留进程
+  // 不只清端口占用者：不占端口的「幽灵」agent-core 与遗留在外的 nodemon 监督进程
+  // 同样要清掉 —— 它们会继续跑 scheduler（朋友圈重复发帖），并在下次保存源码时
+  // 再拉起一份新实例，与新会话形成同相位的双调度器。
+  process.stdout.write(`  [0/4] Cleaning up leftover processes...\n`);
+  const cleanup = cleanupProjectProcesses({ excludePatterns: ["dev.mjs"], prefix: "        " });
+  if (cleanup.leftover && cleanup.leftover.length > 0) {
+    console.log(`        ${C.yellow}[WARN] ${cleanup.leftover.length} project process(es) survived cleanup:${C.reset}`);
+    for (const p of cleanup.leftover) console.log(`        ${C.yellow}       ${label(p.ProcessId, p.CommandLine)}${C.reset}`);
+    console.log(`        ${C.yellow}       Run \`npm run stop\` then retry — otherwise moments may duplicate.${C.reset}`);
+  }
+  console.log(`        ${C.green}Done${C.reset}`);
 
   // [1/4] 环境检查
   console.log(`  [1/4] Checking environment...`);

@@ -1,88 +1,62 @@
-import { execSync } from 'child_process';
-import os from 'os';
+/**
+ * stop.mjs — 一键停止全部开发服务
+ *
+ *   $ npm run stop              在项目根目录
+ *   $ npm run stop -- --dry     只列出目标进程与清理顺序，不执行任何杀进程操作
+ *
+ * 流程:
+ *   1. 先请求 agent-core 优雅退出 (/api/shutdown)，避免硬杀导致 SQLite WAL 未落盘
+ *   2. 全量清扫本项目进程（进程名 + 命令行关键字，先杀监督进程再杀服务进程）
+ *      —— 关键：不只看端口。不占端口的「幽灵」node app.js 与遗留在外的 nodemon
+ *         监督进程都要清掉，否则它们会继续跑后台调度器（朋友圈重复发帖的根源），
+ *         并在下次保存源码时再拉起一份新实例。
+ *   3. 端口兜底（只杀 node / python，其他应用放行）
+ *   4. 复查并报告残留
+ *
+ * 识别与清理逻辑见 scripts/lib/projectProcesses.mjs（与 dev.mjs / restart-core.mjs 共用）。
+ */
 
-const PORTS = [3099, 5173, 8765];
-const isWindows = os.platform() === 'win32';
+import { cleanupProjectProcesses, label } from './lib/projectProcesses.mjs';
 
-let stopped = 0;
+const DRY = process.argv.includes('--dry') || process.argv.includes('--dry-run');
+// 绝不自杀：stop.mjs 自身进程、`npm run stop` 包装进程
+const SELF_PATTERNS = ['stop.mjs', 'run stop'];
 
-// ── 第一步：找到 npm run dev / dev.mjs 父进程，整棵树杀 ──
-console.log('查找 dev 父进程…');
-try {
-  if (isWindows) {
-    // wmic 查命令行包含 "npm" 和 "dev" 的 node 进程
-    const wmicOut = execSync(
-      `wmic process where "name='node.exe' and commandline like '%npm%run dev%'" get ProcessId`,
-      { encoding: 'utf8' }
-    );
-    const pids = wmicOut
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => /^\d+$/.test(l));
-
-    for (const pid of pids) {
-      try {
-        execSync(`taskkill /PID ${pid} /T /F`, { encoding: 'utf8', stdio: 'pipe' });
-        console.log(`  已树杀 npm run dev (PID ${pid})`);
-        stopped++;
-      } catch (e) {
-        console.log(`  跳过 PID ${pid}: ${e.stderr || e.message}`);
-      }
-    }
-  } else {
-    // Unix: pgrep 找 npm run dev
-    try {
-      const pgrepOut = execSync('pgrep -f "npm run dev"', { encoding: 'utf8' });
-      const pids = pgrepOut.trim().split('\n').filter(Boolean);
-      for (const pid of pids) {
-        execSync(`kill -9 ${pid}`, { stdio: 'pipe' });
-        console.log(`  已杀掉 npm run dev (PID ${pid})`);
-        stopped++;
-      }
-    } catch {
-      // pgrep 没找到任何进程也会 exit 1
-    }
-  }
-} catch (e) {
-  // wmic 没匹配到任何进程时也会抛异常
-}
-if (stopped === 0) console.log('  未找到运行中的 npm run dev');
-
-// ── 第二步：兜底，按端口清理残留 ──
-for (const port of PORTS) {
-  try {
-    if (isWindows) {
-      const netstatOut = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
-      const lines = netstatOut.trim().split('\n').filter(l => l.includes('LISTENING'));
-      if (lines.length === 0) {
-        console.log(`端口 ${port} — 未占用，跳过`);
-        continue;
-      }
-      const pid = lines[0].trim().split(/\s+/).pop();
-      execSync(`taskkill /PID ${pid} /F`, { encoding: 'utf8', stdio: 'pipe' });
-      console.log(`端口 ${port} — 已杀掉 PID ${pid}`);
-      stopped++;
-    } else {
-      try {
-        const lsofOut = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf8' });
-        const pids = lsofOut.trim().split('\n').filter(Boolean);
-        for (const pid of pids) {
-          execSync(`kill -9 ${pid}`, { stdio: 'pipe' });
-        }
-        console.log(`端口 ${port} — 已杀掉 PID ${pids.join(', ')}`);
-        stopped++;
-      } catch {
-        console.log(`端口 ${port} — 未占用，跳过`);
-      }
-    }
-  } catch (e) {
-    // netstat/findstr 没匹配到任何结果时会 exit 1，这是正常的
-    console.log(`端口 ${port} — 未占用，跳过`);
-  }
-}
-
-if (stopped === 0) {
-  console.log('\n所有服务均未运行，无需清理。');
+// ── 1. 优雅退出（尽力而为：只有占着 3099 的那个进程能收到）──
+if (DRY) {
+  console.log('(dry-run：跳过优雅退出请求)');
 } else {
-  console.log(`\n已停止 ${stopped} 个进程。可运行 npm run dev 重新启动。`);
+  console.log('请求 agent-core 优雅退出…');
+  try {
+    const resp = await fetch('http://localhost:3099/api/shutdown', {
+      method: 'POST',
+      signal: AbortSignal.timeout(3000),
+    });
+    console.log(resp.ok ? '  已请求，等待 WAL 落盘…' : `  返回 ${resp.status}，继续`);
+    await new Promise((r) => setTimeout(r, 4000));
+  } catch {
+    console.log('  无法连接（可能未运行），继续');
+  }
+}
+
+// ── 2 + 3. 全量清扫 + 端口兜底 ──
+console.log('\n扫描本项目进程…');
+const res = cleanupProjectProcesses({ excludePatterns: SELF_PATTERNS, dryRun: DRY });
+
+// ── 4. 复查 ──
+if (DRY) {
+  console.log('\n(dry-run 结束，未杀任何进程)');
+} else {
+  await new Promise((r) => setTimeout(r, 500));
+  if (!res.tableReadable || res.leftover === null) {
+    console.log(`\n本次停止 ${res.killed} 个进程（进程表不可读，未复查）。`);
+  } else if (res.leftover.length === 0) {
+    console.log(res.killed > 0
+      ? `\n已清理完毕，本次停止 ${res.killed} 个进程。可运行 npm run dev 重新启动。`
+      : '\n所有服务均未运行，无需清理。');
+  } else {
+    console.log(`\n[警告] 本次停止 ${res.killed} 个，仍有 ${res.leftover.length} 个本项目进程存活：`);
+    for (const p of res.leftover) console.log(`    ${label(p.ProcessId, p.CommandLine)}`);
+    console.log('  它们会继续跑后台调度器（朋友圈可能出现重复发帖），可再执行一次 npm run stop。');
+  }
 }

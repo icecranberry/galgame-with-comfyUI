@@ -33,7 +33,7 @@ import { getWorldIntegrationRule } from '../builtinRules.js';
 // ── 生活片段类型库（事件类型存于 event_types 表，见 db/index.js 的 seedEventLibraries）──
 // 每个类型描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
 // 系统默认条目在启动时种入；用户可在「事件库管理」弹窗中编辑/删除/生成自定义条目。
-// LLM 结合角色人格+世界观+当前时间，在这个状态中截取属于该角色的具体的一分钟。
+// LLM 结合角色人格+<world_setting>+当前时间，在这个状态中截取属于该角色的具体的一分钟。
 // 事件结束=镜头切走，角色的人生不会有任何变化
 
 /**
@@ -367,8 +367,8 @@ export async function generateEvent(character, options = {}) {
 
   const worldPenetrationLine = worldSetting
     ? (eventType.key === 'custom'
-        ? '- **严格遵循世界观**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。用户指定的事件方向是本次事件的核心，必须直接发生；世界观重塑的是它的呈现方式，而不是替换它。\n'
-        : '- **严格遵循世界观**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n')
+        ? '- **严格遵循<world_setting>**：这个事件发生在上述<world_setting>中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在<world_setting>规则下展开。用户指定的事件方向是本次事件的核心，必须直接发生；<world_setting>重塑的是它的呈现方式，而不是替换它。\n'
+        : '- **严格遵循<world_setting>**：这个事件发生在上述<world_setting>中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在<world_setting>规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被<world_setting>重新塑造。\n')
     : '';
 
   // [1] 角色人格（"你"已替换为角色名，去角色扮演化）
@@ -403,7 +403,7 @@ ${multiPerson.otherPersona}`;
 - 行动需要符合当前天气和时间，但禁止直接提及天气时间",
   "prompt": "${imagePromptInstruction}${weatherHint}${multiPersonImageNote}",
   "choiceA": "选项A（具体行动，8-15字。符合${displayName}的性格和当下处境）",
-  "choiceB": "选项B（与A形成真正的行动对比——不符合${displayName}的个性，会将事件往意料之外但符合世界观的情况发展。8-15字）"
+  "choiceB": "选项B（与A形成真正的行动对比——不符合${displayName}的个性，会将事件往意料之外但符合<world_setting>的情况发展。8-15字）"
 }
 
 选项设计原则：
@@ -426,7 +426,7 @@ ${multiPerson.otherPersona}`;
     : `事件方向：**${eventType.name}**——${eventType.desc}`;
 
   const customKeyUnderstanding = eventType.key === 'custom'
-    ? `**关键理解**：**「${eventType.desc}」是本次事件的核心，不是可选的出发点**——开场必须让${displayName}直接身处这件事之中，让它在正文里具体地发生（场景、动作、对话都围绕它展开）。世界观、日程、人设决定这件事在${displayName}身上如何发生，但不能把用户点名的事替换成别的活动。`
+    ? `**关键理解**：**「${eventType.desc}」是本次事件的核心，不是可选的出发点**——开场必须让${displayName}直接身处这件事之中，让它在正文里具体地发生（场景、动作、对话都围绕它展开）。<world_setting>、日程、人设决定这件事在${displayName}身上如何发生，但不能把用户点名的事替换成别的活动。`
     : `**关键理解**：上面的事件方向只是一个出发点——不是剧本，里面没有具体场景。把方向翻译成${displayName}今天此刻实际遇到的、不可复制到别人身上的生活切片。`;
 
   const directorPrompt = `${customDirectionHeader}${funFromNote}
@@ -459,7 +459,7 @@ ${customKeyUnderstanding}
 - 叙述始终贴着角色此刻的感知。读者看到什么、听到什么、注意到什么，都应与角色保持一致，不跳出角色视角解释世界。
 
 【角色定制锁——事件触发器根植于角色独有信息】
-- 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或世界观中独有的属性——至少命中一项
+- 事件的触发点应与${displayName}的独有信息直接相关——习惯、身份、能力、关系网、正在隐瞒的事、雷点、近期状态的改变、或<world_setting>中独有的属性——至少命中一项
 
 【正文——写现场，不写剧情总结】
 正文始终停留在现场，而不是剧情总结。
@@ -488,16 +488,16 @@ ${worldPenetrationLine}
 
 - 开场必须直接落在方向这件事本身上：${displayName}此刻正在做、或正要开始这件事，正文让这件事具体发生（场景、动作、对话全部围绕它展开）。
 - 方向里的每个要素都要真实呈现：不能只擦边、暗示、用比喻带过，更不能把用户点名的事替换成别的活动。
-- 世界观和日程决定"这件事在${displayName}身上如何发生"，但不能淡化或替换"发生的这件事本身"。
-- 若方向与世界观有冲突：保留方向的核心行为，只把它的表现方式融入世界观。` });
+- <world_setting>和日程决定"这件事在${displayName}身上如何发生"，但不能淡化或替换"发生的这件事本身"。
+- 若方向与<world_setting>有冲突：保留方向的核心行为，只把它的表现方式融入<world_setting>。` });
   }
 
-  // [user] Event-specific creation task — changes per event（有世界观时开头注入遵循规则）
+  // [user] Event-specific creation task — changes per event（有<world_setting>时开头注入遵循规则）
   const customPreamble = eventType.key === 'custom'
-    ? '\n用户手动指定的事件方向必须直接发生——世界观负责塑造它的表现方式，不负责替换它。'
+    ? '\n用户手动指定的事件方向必须直接发生——<world_setting>负责塑造它的表现方式，不负责替换它。'
     : '';
   const eventUserContent = worldSetting
-    ? `请遵循当前世界观来生成奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。${customPreamble}
+    ? `请遵循当前<world_setting>来生成奇遇，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。${customPreamble}
 
 ${directorPrompt}`
     : directorPrompt;
@@ -722,7 +722,7 @@ export async function generateNextBranch(character, event, choice) {
     : '';
 
   const worldPenetrationLine2 = worldSetting2
-    ? '- **严格遵循世界观**：这个事件发生在上述世界观中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在世界观规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被世界观重新塑造。\n'
+    ? '- **严格遵循<world_setting>**：这个事件发生在上述<world_setting>中，不是发生在真空或现实世界中。所有感官细节（街头景象、路人行为、空气气味、社交礼仪）和角色反应（身体本能、社交判断、情感触发点）必须忠实地在<world_setting>规则下展开。事件方向只是一个叙事钩子——它的具体呈现方式必须被<world_setting>重新塑造。\n'
     : '';
 
   let personaMsg2 = `以下是角色「${displayName2}」的人格设定，供你参考角色的外貌、性格和行为模式：
@@ -788,7 +788,7 @@ ${multiPerson2.otherPersona}`;
 - 行动需要符合当前天气和时间，但禁止直接提及天气时间。",
   "prompt": "${branchImagePromptInstruction}${weatherHint}${multiPersonImageNote2}",
   "choiceA": "新选项A（具体行动。必须符合${displayName2}的个性——是ta此刻真的会做出来的事。8-15字）",
-  "choiceB": "新选项B（与A形成真正的行动对比——不符合${displayName2}的个性，会将事件往意料之外但符合世界观的情况发展。8-15字）"
+  "choiceB": "新选项B（与A形成真正的行动对比——不符合${displayName2}的个性，会将事件往意料之外但符合<world_setting>的情况发展。8-15字）"
 }`;
 
   // 只有多人模式才注入关系信息（和初始事件生成一致）
@@ -838,9 +838,9 @@ ${worldPenetrationLine2}
   // [4] Character persona — stable per character
   msgs.push({ role: 'system', content: personaMsg2 });
 
-  // [user] Branch task（有世界观时开头注入遵循规则）
+  // [user] Branch task（有<world_setting>时开头注入遵循规则）
   const branchUserContent = worldSetting2
-    ? `请遵循当前世界观来推进奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。
+    ? `请遵循当前<world_setting>来推进奇遇，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。
 
 ${directorPrompt2}${prevSceneBlock}`
     : directorPrompt2 + prevSceneBlock;
@@ -1030,7 +1030,7 @@ export async function concludeEvent(character, event, outcome) {
     : `角色经历了：${event.description}（未与用户互动）`;
 
   const worldConsistencyLine = worldSetting3
-    ? '- **世界观一致性**：结局和记忆摘要必须反映世界观的基本规则。角色做出的选择及其后果、环境的反应、事件的收束方式，都必须在世界观框架内自然发生。\n'
+    ? '- **<world_setting>一致性**：结局和记忆摘要必须反映<world_setting>的基本规则。角色做出的选择及其后果、环境的反应、事件的收束方式，都必须在<world_setting>框架内自然发生。\n'
     : '';
 
   // 人格走统一入口把「你」替换为角色名；直接塞原始 base_prompt（第二人称）会把结局叙事带成第一人称
@@ -1073,7 +1073,7 @@ ${worldConsistencyLine}- 【叙事视角·最高优先级】全程第三人称�
 {"conclusion":"结局叙述（全程第三人称，主语用${displayName3}或她/他，叙事部分禁止出现「我」，仅台词引号内可例外）","summary":"记忆摘要（第三人称）"}`;
 
   const conclusionUserContent = worldSetting3
-    ? `请遵循当前世界观来收束奇遇，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。
+    ? `请遵循当前<world_setting>来收束奇遇，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。
 
 ${taskPrompt}`
     : taskPrompt;

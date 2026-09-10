@@ -4,14 +4,15 @@
  *   $ npm run restart-core   (在项目根目录)
  *
  * 流程:
- *   1. 端口清理 (3099, 含进程身份验证)
- *   2. 优雅退出（先调 /api/shutdown 防 SQLite WAL 损坏）
- *   3. 重新拉起 agent-core (node --watch)
+ *   1. 清理 agent-core 残留进程（优雅退出 + 全量清扫 agent-core 相关进程，不碰 vite / vector-service）
+ *   2. 重新拉起 agent-core (node --watch)
+ *   3. 等待服务就绪
  */
 
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupProjectProcesses, AGENT_CORE_KEYWORDS } from "./lib/projectProcesses.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -28,73 +29,6 @@ const C = {
 
 function tag(name) {
   return `${C.dim}[${C.cyan}${name}${C.dim}]${C.reset}`;
-}
-
-// ── 端口清理（含进程身份验证，抄自 dev.mjs）──
-const PROJECT_KEYWORDS = [
-  "generate-image-agent", "agent-core", "vector-service", "web-ui",
-  "app.js", "server:app", "vite", "uvicorn",
-];
-
-function getProcessName(pid) {
-  try {
-    return execSync(
-      `powershell -NoProfile -Command "(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName"`,
-      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-    ).trim();
-  } catch { return ""; }
-}
-
-function isProjectProcess(pid) {
-  const name = getProcessName(pid).toLowerCase();
-  if (!name || (name !== "node.exe" && name !== "python.exe")) return false;
-
-  try {
-    const cmdLine = execSync(
-      `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine"`,
-      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-    ).trim();
-    return PROJECT_KEYWORDS.some((kw) => cmdLine.toLowerCase().includes(kw));
-  } catch {
-    return false;
-  }
-}
-
-function killPort(port) {
-  if (process.platform !== "win32") {
-    try {
-      execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { stdio: "ignore" });
-      return true;
-    } catch { return false; }
-  }
-
-  try {
-    const out = execSync(
-      `netstat -ano | findstr ":${port} " | findstr "LISTENING"`,
-      { encoding: "utf8", windowsHide: true, stdio: ["pipe","pipe","pipe"] }
-    ).trim();
-    if (!out) return false;
-
-    const seen = new Set();
-    for (const line of out.split("\n")) {
-      const parts = line.trim().split(/\s+/);
-      const pid = parts[parts.length - 1];
-      if (pid && /^\d+$/.test(pid)) seen.add(pid);
-    }
-
-    let killed = 0;
-    for (const pid of seen) {
-      if (isProjectProcess(pid)) {
-        execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, stdio: "ignore" });
-        killed++;
-        console.log(`        已杀掉旧进程 (PID ${pid})`);
-      } else {
-        const procName = getProcessName(pid) || `PID ${pid}`;
-        console.log(`        端口 ${port} 被 "${procName}" (PID ${pid}) 占用 — 跳过`);
-      }
-    }
-    return killed > 0;
-  } catch { return false; }
 }
 
 // ── HTTP 健康检查 ──
@@ -117,23 +51,31 @@ async function main() {
   console.log(`  ${C.bold}Restart agent-core${C.reset}`);
   console.log(`  ${C.dim}${"=".repeat(40)}${C.reset}`);
 
-  // 1. 杀掉旧进程
-  console.log(`\n  [1/3] 清理端口 3099...`);
-  const wasRunning = killPort(3099);
-  if (!wasRunning) console.log(`        端口 3099 未占用`);
+  // 1. 清理 agent-core 残留（只动 agent-core，绝不碰 vite / vector-service）
+  //    只清端口是不够的：不占端口的「幽灵」node app.js 与遗留在外的 nodemon
+  //    监督进程都要清掉，否则监督进程会立刻把服务再拉起来、幽灵会继续跑调度器。
+  console.log(`\n  [1/3] 清理 agent-core 残留进程...`);
 
-  // 2. 尝试优雅退出（如果还没完全挂）
+  // 先尝试优雅退出（占着 3099 的那个进程），避免硬杀导致 SQLite WAL 未落盘
   try {
     await fetch("http://localhost:3099/api/shutdown", {
       method: "POST",
       signal: AbortSignal.timeout(2000),
     });
   } catch { /* 已经挂了，无视 */ }
+  await new Promise(r => setTimeout(r, 1500));
+
+  cleanupProjectProcesses({
+    keywords: AGENT_CORE_KEYWORDS,
+    ports: [3099],
+    excludePatterns: ["restart-core.mjs"],
+    prefix: "        ",
+  });
 
   // 等端口彻底释放
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 1000));
 
-  // 3. 拉起 agent-core
+  // 2. 拉起 agent-core
   console.log(`\n  [2/3] 启动 agent-core (:3099)...`);
   const cwd = resolve(ROOT, "agent-core");
   const child = spawn("node", ["--watch", "app.js"], {
@@ -152,7 +94,7 @@ async function main() {
     process.exit(code || 0);
   });
 
-  // 4. 等待就绪
+  // 3. 等待就绪
   console.log(`\n  [3/3] 等待服务就绪...`);
   const ok = await waitFor("http://localhost:3099/api/health", child);
   if (ok) {

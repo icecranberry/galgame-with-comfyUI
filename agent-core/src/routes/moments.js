@@ -150,17 +150,23 @@ router.get('/:id', (req, res) => {
     SELECT mc.*,
       CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE NULL END AS char_display_name,
       CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path,
-      CASE WHEN mc.auto_trigger = 1 THEN
-        (SELECT CASE WHEN prev.author_type = 'character' THEN pc.display_name ELSE '用户' END
-         FROM moment_comments prev
-         LEFT JOIN characters pc ON pc.id = prev.author_id
-         WHERE prev.post_id = mc.post_id
-           AND prev.thread_root_id = mc.thread_root_id
-           AND prev.id < mc.id
-         ORDER BY prev.id DESC LIMIT 1)
-      ELSE NULL END AS reply_to_name
+      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL
+        THEN CASE WHEN prev.author_type = 'character' THEN pc.display_name ELSE '用户' END
+        ELSE NULL END AS reply_to_name,
+      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL AND prev.author_type = 'character'
+        THEN pc.avatar_path ELSE NULL END AS reply_to_avatar_path,
+      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL
+        THEN prev.author_type ELSE NULL END AS reply_to_author_type
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
+    LEFT JOIN moment_comments prev ON prev.id = (
+      SELECT p2.id FROM moment_comments p2
+      WHERE p2.post_id = mc.post_id
+        AND p2.thread_root_id = mc.thread_root_id
+        AND p2.id < mc.id
+      ORDER BY p2.id DESC LIMIT 1
+    )
+    LEFT JOIN characters pc ON pc.id = prev.author_id
     WHERE mc.post_id = ?
     ORDER BY mc.created_at ASC
   `).all(req.params.id);
@@ -268,7 +274,8 @@ router.post('/:id/comments', async (req, res) => {
         content: reply,
         char_display_name: post.display_name,
         char_avatar_path: post.avatar_path,
-        
+        reply_to_author_type: 'user',   // 角色回复的是用户评论 → 前端用本地用户头像
+        reply_to_avatar_path: null,
         created_at: new Date().toISOString(),
       };
     }

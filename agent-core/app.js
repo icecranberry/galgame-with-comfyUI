@@ -1,7 +1,6 @@
 import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better-sqlite3 加载崩溃
 import express from 'express';
 import cors from 'cors';
-import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
@@ -57,7 +56,19 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 // 中间件
 app.use(cors());
-app.use(compression()); // 聊天历史等大 JSON 响应启用 gzip
+// 刻意不使用 compression 中间件（v3.4.0 加过，已整体移除）。两条理由，改回来之前先读：
+//   1) 正确性：它的默认 filter 认为 text/event-stream 可压缩（compressible 返回 true），
+//      会把 SSE 接进 zlib/brotli 变换流，事件被缓冲在压缩缓冲里下不去。
+//      gzip/deflate 是「响应头能发、body 0 字节」，br 更狠「连响应头都发不出去」；
+//      浏览器必带 Accept-Encoding，服务端必选中一种编码 ⇒ 实时推送 100% 静默失效
+//      （瞄一眼图片、流式回复、主动消息、群聊/朋友圈事件全挂，且不报错）。
+//   2) 收益：本项目以本机/局域网为主，瓶颈已从带宽转到 CPU。实测 gzip level 6 压
+//      11.67MB JSON 需 263ms、只压到 4.02MB，平衡点 ≈29 MB/s(233Mbps)；
+//      而 WiFi5/6 有效吞吐 50~150 MB/s 远高于它 ⇒ 压了反而更慢（12MB 接口 117ms → 303ms）。
+// 若将来确需压缩（如公网/蜂窝访问），必须显式排除 text/event-stream，并建议降档
+// （另需 import zlib from 'node:zlib'）：
+//   compression({ level: 1, brotli: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 1 } } })
+//   （gzip 263→134ms、brotli 194→58ms，平衡点抬到 ≈134 MB/s）
 app.use(express.json({ limit: '10mb' }));
 
 // 静态文件（Vue 前端，构建后）

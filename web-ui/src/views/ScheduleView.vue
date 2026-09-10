@@ -45,13 +45,8 @@
           </div>
         </template>
 
-        <!-- 加载态：骨架卡片 -->
-        <div v-else-if="store.loading" class="sched-skeleton-grid">
-          <div v-for="i in 3" :key="i" class="skeleton sched-skeleton-card"></div>
-        </div>
-
-        <!-- 空态 -->
-        <div v-else class="sched-placeholder">
+        <!-- 空态（加载中不渲染，避免误报「还没有日程」） -->
+        <div v-else-if="!store.loading" class="sched-placeholder">
           <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <p>今天还没有角色日程</p>
           <span class="ph-hint">生成日程后，这里会显示每位角色的今日动向。</span>
@@ -88,16 +83,8 @@
                 正在为 <b>{{ store.resetTask.currentName || '...' }}</b> 编排日程
                 <span class="sidebar-scan-count">({{ store.resetTask.current }}/{{ store.resetTask.total }})</span>
               </template>
-              <template v-else-if="sidebarScanContext === 'single'">
-                正在为 <b>{{ detailChar?.display_name || '...' }}</b> 重新编排日程
-              </template>
               <template v-else>
-                <template v-if="store.characters.length > 0">
-                  正在检索 {{ store.characters.length }} 个角色的今日行程...
-                </template>
-                <template v-else>
-                  正在等待日程数据抵达...
-                </template>
+                正在为 <b>{{ detailChar?.display_name || '...' }}</b> 重新编排日程
               </template>
             </div>
           </div>
@@ -495,15 +482,13 @@ const resetProgressPct = computed(() => {
   return Math.round((rt.current / rt.total) * 100)
 })
 
-// ── 侧边栏：扫描态控制（全部重置时不弹扫描面板，仅单角色再生/初始加载时显示）──
-const sidebarScanActive = computed(() =>
-  store.loading || detailRegenerating.value
+// ── 侧边栏：扫描态控制（仅真正的生成/再生时显示）──
+// 首次进入页面的数据加载不再弹这块「日程生成中」面板：那只是一次读取，不是生成。
+// 全部重置有自己的进度弹窗，同样不弹这里。
+const sidebarScanActive = computed(() => detailRegenerating.value)
+const sidebarScanContext = computed(() =>
+  store.resetTask?.phase === 'running' ? 'reset' : 'single'
 )
-const sidebarScanContext = computed(() => {
-  if (store.resetTask?.phase === 'running') return 'reset'
-  if (detailRegenerating.value) return 'single'
-  return 'load'
-})
 
 // 脉冲进度（加载/单角色再生用 interval 驱动）
 const _pulseProgress = ref(0)
@@ -1184,12 +1169,6 @@ function finishReset() {
   align-items: center; justify-content: center; gap: 10px;
   color: var(--text-secondary);
 }
-.sched-skeleton-grid {
-  flex: 1; display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px; align-content: start;
-}
-.sched-skeleton-card { height: 190px; border-radius: var(--radius-lg); }
 .sched-placeholder p { margin: 0; font-size: 0.95rem; }
 .ph-hint { font-size: 0.8rem; color: var(--text-secondary); }
 

@@ -60,13 +60,13 @@ export async function generateSchedule(character, direction) {
   // ── 角色人格（裁剪到外观之前）──
   const personaMsg = `${persona}
 
-以上人格只用于辨认角色的性格、说话习惯与气质。世界观是最高优先级：人格中的身份、职业、组织、地点与经历属于角色原设，一律作废，不得沿用进日程；日程中的职业、地点、活动与作息必须由当前世界观重新定义。`;
+以上人格只用于辨认角色的性格、说话习惯与气质。<world_setting>是最高优先级：人格中的身份、职业、组织、地点与经历属于角色原设，一律作废，不得沿用进日程；日程中的职业、地点、活动与作息必须由当前<world_setting>重新定义，日程编排必须和<world_setting>有强相关。`;
 
   // ── 日程生成指令 ──
-  const scheduleInst = `你是一个日程编排助手。在世界观的影响下生成职业，基于角色的职业和人格，生成该角色典型一天的完整日程。
+  const scheduleInst = `你是一个日程编排助手。在<world_setting>的影响下生成职业，基于角色的职业和人格，生成该角色典型一天的完整日程。
 
 ## 职业驱动原则
-角色的职业是日程的核心骨架。所有主要活动必须围绕职业展开。职业决定了角色一天中大部分时间的去向和活动类型。
+角色的职业是日程的核心骨架。所有主要活动必须围绕职业展开。职业决定了角色一天中大部分时间的去向和活动类型，<world_setting>决定了在这种情况下职业的表现形式。
 - 学生→上课、自习、社团、考试
 - 上班族→通勤、会议、午休、加班
 - 偶像→排练、录音、演出、粉丝互动
@@ -92,7 +92,7 @@ export async function generateSchedule(character, direction) {
 **关键原则**：
 1. 角色的人格和职业直接决定睡眠类型——性格懒散的 NEET 不可能是早睡早起型，深夜主播不可能是社畜型
 2. 如果角色是自由职业、创作者、ACG 宅、夜生活相关职业，80% 以上的概率是夜猫子型
-3. 睡眠时间要贴合角色的"人设气質"——比如病娇角色可能作息极度不规律，军武角色可能作息严格
+3. 睡眠时间要贴合角色的"角色设定气質"——比如病娇角色可能作息极度不规律，军武角色可能作息严格
 
 ## replyDelay 规则（非常重要）
 - 正常活动都是 replyDelay=0（即时回复）
@@ -126,7 +126,7 @@ export async function generateSchedule(character, direction) {
 
 ${direction}**
 
-**注意：以上是用户指定的日程"方向"或"主题"，这就是严格的指令。所有日程编排以用户的意愿为准，可以想象理由，适当破坏角色原有的人设，自然地融入这个方向的元素。**` : null;
+**注意：以上是用户指定的日程"方向"或"主题"，这就是严格的指令。所有日程编排以用户的意愿为准，可以想象理由，适当破坏角色原有的角色设定，自然地融入这个方向的元素。**` : null;
 
   // ── 组装多层 system（前三层为跨角色共享前缀，提高 LLM 缓存命中率）──
   const msgs = [];
@@ -140,7 +140,7 @@ ${direction}**
   msgs.push({ role: 'system', content: personaMsg });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
-    ? `请遵循<world_setting>来安排日程，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。
+    ? `请遵循<world_setting>来安排日程，角色设定如果和<world_setting>有冲突，则以<world_setting>最高优先级，角色设定会因为<world_setting>改变,日程内容必须体现<world_setting>的设定。
 
 请为 ${character.display_name} 生成完整的今日日程安排。`
     : `请为 ${character.display_name} 生成完整的今日日程安排。`;

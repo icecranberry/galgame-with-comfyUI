@@ -112,7 +112,7 @@ import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useMomentsStore } from '../stores/moments.js'
 import { useChatStore } from '../stores/chat.js'
 import { useRoute } from 'vue-router'
-import { loadUserConfig } from '../userConfig.js'
+import { loadUserConfig, loadUserAvatar } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
 import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
@@ -165,6 +165,7 @@ onMounted(async () => {
   if (characterId) moments.setFilter(characterId)
   await chat.loadCharacters()
   await loadUserConfig()
+  await loadUserAvatar()   // 评论区用户头像
   await moments.loadPosts()
   // 显式标记已读：兜底防止 loadPosts 因 loading guard 跳过内部 markSeen
   moments.markSeen()

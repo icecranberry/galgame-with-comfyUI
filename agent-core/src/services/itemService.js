@@ -316,7 +316,7 @@ async function generateItemFlavor(effect) {
 function effectKindSummary(effect) {
   switch (effect.kind) {
     case 'outfit': return '让一位角色换上这套服装，持续一天';
-    case 'world_outfit': return '根据当前世界观原创一套这个世界观中合理存在的服装，让一位角色换上，持续一天';
+    case 'world_outfit': return '根据当前<world_setting>原创一套这个<world_setting>中合理存在的服装，让一位角色换上，持续一天';
     case 'hairstyle': return '让一位角色换上这个发型，持续一天';
     case 'transform': return '让一位角色变身成一种非人形态，持续一天';
     case 'buff': return '让一位角色在接下来六小时的对话中带有特定状态';
