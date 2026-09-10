@@ -108,6 +108,7 @@
   --modal-lining-border: 1px solid var(--glass-border);
   --modal-lining-radius: 14px;
   --modal-lining-margin: 16px 22px 22px;
+  --modal-lining-margin-mobile: 0px 12px 12px;   /* 手机端：缩窄留白（顶部交给头部自身内边距） */
   --modal-lining-pad: 18px;
   --modal-footer-pad: 10px 22px 18px;
   --modal-footer-border: 1px solid var(--glass-border);
@@ -240,6 +241,7 @@
   --modal-lining-border: none;
   --modal-lining-radius: 0px;
   --modal-lining-margin: 0px;
+  --modal-lining-margin-mobile: 0px;
   --modal-lining-pad: 20px;
   --modal-footer-pad: 14px 20px;
   --modal-footer-border: 2px solid var(--border);

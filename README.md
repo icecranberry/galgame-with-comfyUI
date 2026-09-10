@@ -7,7 +7,7 @@
 欢迎在视频底下提出更好的建设性建议：
 [我好像让纸片人「活」过来了【邻舍 1.0】详细演示以及安装视频](https://www.bilibili.com/video/BV1uH7q6vEQ9/)
 [😈既然是在本地AI生成，那凑成什么CP可就随我说了算了【邻舍 2.0】](https://www.bilibili.com/video/BV1wsNu61EX6/)
-邻舍3.0视频制作中...
+[猛肝三个月，用AI让游戏角色「活」起来，邻舍3.0安卓端、群聊正式上线！](https://www.bilibili.com/video/BV1y3h36pEXU/)
 
 ---
 
@@ -233,7 +233,7 @@ Node.js + Express (主控 :3099)
 
 ### 方式一：直接使用 Release 包（推荐）
 
-在 [Releases](https://github.com/moye-galaxy/galgame-with-comfyUI/releases) 下载 `邻舍.EXE-vX.Y.Z.zip`，解压后即可使用。压缩包内置便携 Node.js / Python / Git 运行时、预装依赖、向量模型、前端构建产物和 **`邻舍.EXE.exe`** 启动器，Android APK 也会随版本附带（可选安装）。
+在 [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) 下载 `邻舍.EXE-vX.Y.Z.zip`，解压后即可使用。压缩包内置便携 Node.js / Python / Git 运行时、预装依赖、向量模型、前端构建产物和 **`邻舍.EXE.exe`** 启动器，Android APK 也会随版本附带（可选安装）。
 
 使用前只需确保：
 
@@ -252,7 +252,7 @@ Node.js + Express (主控 :3099)
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/moye-galaxy/galgame-with-comfyUI.git
+git clone https://github.com/icecranberry/galgame-with-comfyUI.git
 cd galgame-with-comfyUI
 
 # 2. 安装依赖

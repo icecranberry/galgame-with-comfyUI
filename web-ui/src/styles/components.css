@@ -123,17 +123,10 @@ button.btn-sm.btn-primary:active:not(:disabled) { transform: translateY(2px); bo
   flex-shrink: 0;
 }
 
-@media (max-width: 767px) {
-  .modal-panel.modal-full {
-    width: 100vw;
-    height: 100dvh;
-    max-height: 100dvh;
-    border-left: none;
-    border-right: none;
-    border-radius: 0;
-  }
-  .modal-panel.modal-full .modal-header { padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
-}
+/* 移动端（<768px）尺寸与留白不在这里覆盖：
+   LinsheModal 的 scoped 样式统一处理遮罩留白 + 安全区 + 面板贴边问题，
+   见 components/ui/LinsheModal.vue 的移动端段落（历史上此处用 100vw/100dvh +
+   border-radius: 0 做「全屏面板」，会让面板被遮罩内边距推向一侧并丢掉圆角）。 */
 
 /* ══ Chip 贴纸标签 ══ */
 .chip {

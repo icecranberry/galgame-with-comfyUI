@@ -234,7 +234,7 @@ Node.js + Express (Core :3099)
 
 ### Option 1: Use the Release Package (Recommended)
 
-Download `邻舍.EXE-vX.Y.Z.zip` from [Releases](https://github.com/moye-galaxy/galgame-with-comfyUI/releases) and extract it anywhere. The archive bundles portable Node.js / Python / Git runtimes, preinstalled dependencies, the embedding model, frontend build output, and the **`邻舍.EXE.exe`** launcher. The Android APK is also included with each release (optional).
+Download `邻舍.EXE-vX.Y.Z.zip` from [Releases](https://github.com/icecranberry/galgame-with-comfyUI/releases) and extract it anywhere. The archive bundles portable Node.js / Python / Git runtimes, preinstalled dependencies, the embedding model, frontend build output, and the **`邻舍.EXE.exe`** launcher. The Android APK is also included with each release (optional).
 
 Before using it, make sure:
 
@@ -253,7 +253,7 @@ Prerequisites: **Node.js ≥ 18**, **Python ≥ 3.10 (with venv)**, **Git**, Com
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/moye-galaxy/galgame-with-comfyUI.git
+git clone https://github.com/icecranberry/galgame-with-comfyUI.git
 cd galgame-with-comfyUI
 
 # 2. Install dependencies

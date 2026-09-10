@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="isOpen" class="modal-overlay" @click.self="close">
+      <div v-if="isOpen" class="modal-overlay linshe-modal-overlay" @click.self="close">
         <div class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full }, panelClass]" @click.stop>
           <div class="modal-header">
             <h3 class="modal-title">{{ title }}</h3>
@@ -99,15 +99,29 @@ watch(isOpen, (v) => {
   background: rgba(var(--accent-rgb), 0.45);
 }
 
-/* 移动端全屏面板：内衬贴边、去圆角与描边（面板本身已满屏） */
+/* 移动端：保留 PC 的「圆角浮层」观感 —— 面板圆角、描边、白色内衬一律不动，
+   只把遮罩留白从 20px 收紧到 8px，并把刘海 / 挖孔 / 手势条的安全区让给遮罩
+   （面板靠遮罩内边距避开异形屏，因此头部不再需要单独加 safe-area 上内边距）。
+   历史写法是 full 面板 100vw/100dvh + border-radius: 0，会让面板被遮罩内边距
+   推向一侧、贴边裁切并丢掉圆角，与 PC 观感完全不一致，已废弃。 */
 @media (max-width: 767px) {
-  .linshe-modal-lining {
-    margin: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  .linshe-modal-overlay {
+    /* 只收内边距，不动 inset:0（写死 100dvh 会让遮罩底部在手机浏览器里露一条缝） */
+    padding: calc(8px + env(safe-area-inset-top, 0px))
+             calc(8px + env(safe-area-inset-right, 0px))
+             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(8px + env(safe-area-inset-left, 0px));
   }
-  .linshe-modal.modal-full .linshe-modal-lining {
-    margin: 0;
-    border-radius: 0;
-    border: none;
+  /* 三档尺寸在窄屏统一铺满可用宽度（.modal-wide/.modal-full 的 PC 宽度对手机没意义），
+     高度仍受遮罩内容区约束，避免顶进安全区 */
+  .linshe-modal.modal-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: 100%;
   }
+  /* full 面板撑满可用高度，但保持留边与圆角 */
+  .linshe-modal.modal-full { height: 100%; }
+  /* 内衬留白收紧；底部安全区已由遮罩内边距让出，不再叠加 */
+  .linshe-modal-lining { margin: var(--modal-lining-margin-mobile); }
 }
 </style>

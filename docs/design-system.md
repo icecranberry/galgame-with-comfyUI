@@ -28,6 +28,7 @@
 - **按钮**：`.btn-primary`（贴纸：实底+底厚+顶部高光，按下沉底）/ `.btn-ghost` / `.btn-tonal` / `.btn-danger` / `.btn-sm`；全局 `button:active` 按压下沉（`.no-press` 可豁免）
 - **表面**：`.card`（毛玻璃+2px 描边+微硬阴影）/ `.card-solid` / `.card-interactive`（hover 上浮）
 - **弹窗**：新弹窗一律用 `LinsheModal`，配合 `modal-fade` 获得统一 pop 入场；暖色沿用 v3.2 人物详情卡口径（暖纸外壳 + 白色内衬，`--modal-*` token），暗夜保持 Cel Glow 深色玻璃；底层仍是 `.modal-overlay / -panel(±.modal-wide/.modal-full) / -header / -title / -close / -body / -footer` 家族类。
+- **弹窗（手机端 <768px）**：不换皮肤，只收留白 —— 遮罩内边距 20px → `8px + env(safe-area-inset-*)`（面板靠它避开刘海 / 挖孔 / 手势条），面板宽度铺满可用宽度、三档尺寸统一，`full` 撑满可用高度；**圆角、描边、白色内衬全部保留**，内衬留白走 `--modal-lining-margin-mobile`。移动端几何只写在 `LinsheModal.vue` 的移动端段落里，不要再用 `100vw/100dvh + border-radius:0` 做「全屏面板」（会被遮罩内边距推向一侧、贴边裁切并丢圆角，与 PC 观感不一致）。
 - **其他**：`.chip(.active/.chip-x)`、`.avatar(-fallback)`、`.empty`（波点+悬浮图标）、`.skeleton`、`.icon-tile(.t-purple/pink/orange/teal/blue/gold/violet)`、`.sheen`（hover 斜光扫过）、`.sparkle(.s-low)`、`.stagger`（列表错峰入场，fill=backwards 不阻塞 hover/FLIP）
 
 ## 主题体系

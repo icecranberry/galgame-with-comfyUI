@@ -11,7 +11,7 @@
               </linshe-button>
             </div>
             <div class="iet-modal-preview">
-              <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" />
+              <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" fit-mode="container" />
             </div>
             <div class="iet-modal-actions">
               <linshe-button variant="secondary" class="iet-btn" :disabled="busy" @click="onRerun(modalTask)">
@@ -289,9 +289,45 @@ async function onDiscard(task) {
 }
 
 @media (max-width: 767px) {
-  .iet-cards { right: 12px; bottom: 12px; left: 12px; max-width: none; }
-  .iet-modal-card { max-height: 90dvh; overflow: auto; }
-  .iet-modal-actions { flex-wrap: wrap; }
-  .iet-modal-actions .iet-btn { flex: 1 1 40%; }
+  .iet-cards {
+    right: 12px;
+    left: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+
+  /* 整屏对比：把高度交给「预览区 flex:1 + 图片按容器收敛」，
+     避免固定 90dvh 里图片与按钮互相挤、把按钮顶出屏幕 */
+  .iet-modal {
+    padding: 0;
+    place-items: stretch;
+  }
+  .iet-modal-card {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: none;
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .iet-modal-head {
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 8px;
+  }
+  /* 24px 的圆钮在手机上太难点，放大到 38px 热区（皮肤仍由 LinsheButton 决定） */
+  .iet-modal-head .iet-icon-btn { width: 38px; height: 38px; flex: none; }
+  .iet-modal-head .iet-icon-btn svg { width: 13px; height: 13px; }
+  .iet-modal-preview {
+    padding: 0 12px;
+    overflow: hidden;
+  }
+  .iet-modal-preview :deep(.ba-slider) { border-radius: 12px; }
+  .iet-modal-actions {
+    flex-wrap: wrap;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .iet-modal-actions .iet-btn {
+    flex: 1 1 calc(50% - 5px);
+    min-height: 44px;
+  }
 }
 </style>
