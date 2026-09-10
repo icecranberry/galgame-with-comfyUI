@@ -48,7 +48,7 @@ project-root/
 ├─ agent-core/              # 主控后端 (Express, :3099)
 │  ├─ app.js                # 入口：中间件、路由挂载、WAL 定期 checkpoint、优雅退出
 │  ├─ data/                 # 运行时数据（DB、图片、头像，gitignore）
-│  ├─ public/               # web-ui build 产物（gitignore）
+│  ├─ public/               # web-ui build 产物（已入库跟踪：启动器 release 直接分发，改前端后需 npm run build 并一并提交）
 │  └─ src/
 │     ├─ config.js          # 配置中心（dotenv + DB 持久化 + .env 写回，三通道同步）
 │     ├─ db/index.js        # SQLite 表/FTS5/触发器/索引/种子/迁移/repairFtsIndex
@@ -137,9 +137,9 @@ project-root/
 |---|---|
 | `memoryConfig.js` | memory_settings 读写/归一化（v3 / activeSearch / consolidation / contextBudget 四组开关） |
 | `memoryRepository.js` | 碎片落库 + 向量索引任务队列（memory_index_jobs + worker，含 triple_upsert/triple_delete 与 trip_ 前缀隔离） |
-| `memoryProviders.js` | 嵌入/重排序 provider（自定义 API → 内置 → 本地 ONNX 降级链） |
-| `memoryConsolidation.js` | 阶段三六任务实现（T1~T6，全部依赖可注入） |
-| `consolidationScheduler.js` | 阶段三 daemon 调度（空闲触发/LLM 预算/任务队列 kill 续跑） |
+| `memoryProviders.js` | 嵌入/重排序 provider（自定义 API → 内置 → 本地 ONNX 降级链；`useBuiltin=false` 可彻底关掉随包内置的第三方服务，失败计数内存缓存） |
+| `memoryConsolidation.js` | 阶段三六任务实现（T1~T6，全部依赖可注入）+ 候选消费记账（`memory_consolidation_marks`，防重复送 LLM） |
+| `consolidationScheduler.js` | 阶段三 daemon 调度（空闲/最小间隔/日预算/空扫退避四道闸门 + 任务轮转领取） |
 | `activeSearch.js` | 阶段二 @memory 主动回想检索（时态检测 + 三元组联想 + 实体 1 跳 + RRF） |
 | `chatMemoryRecall.js` | 聊天流被动召回入口 |
 
@@ -151,7 +151,7 @@ project-root/
 
 **主动回想（阶段二，`activeSearch.enabled` 默认关，灰度）**：1v1 stableBlocks 注入 `<recall_tool>`；模型回复首行输出 `@memory <查询>` → chat.js 流式行闸门 abort → activeMemorySearch（含时态检测：命中"以前/曾经/第一次…"放宽历史过滤并带过时徽标）→ dynamicBlocks 追加 `<memory_recall_result>` → 二次 buildChatContext 续写；指令行不进气泡不落库。群聊不接入。
 
-**整理 daemon（阶段三，`consolidation.enabled` 默认开）**：每 5 分钟扫描，空闲判定（无活跃聊天流 + 距最后一条消息 ≥ idleDelayMinutes）或 >22h 兑底，聊天进行中永不触发；单轮 LLM 调用 ≤ llmCallsPerRun（旧键 dailyMaxLlmCalls 兼容读取，实际语义为每轮预算）；任务表 memory_consolidation_jobs（启动时 processing→pending 续跑，attempts≥3 落 failed）。六任务：T1 冲突消解（矛盾→update 双时态失效，重复→merge，决议直接携带 keywords/semanticNote 完整入库）；T2 泛化升华（同实体同主体 event/emotion ≥3 条跨 14 天 → 归纳 knowledge，原记忆保留 importance-1，血缘 relation_meta=generalize；组内已有存活泛化后代则跳过防反复升华）；T3 强度衰减（纯 SQL，strength=(importance/5)×exp(-Δd/halfLife)×(1+0.1·ln(1+召回数))，<0.15 → archived + 向量墓碑，halfLife：event 14/emotion 60/knowledge·skill 180 天，锚点=召回>事件>创建时间，刻意排除 updated_at）；T4 画像建议（importance≥4 knowledge → portrait_suggestions 待确认，ChatView 印象弹窗采纳/忽略）；T5 v3 字段回填（缺 keywords/perspectives/semantic_note 的旧记忆每批 10 条补齐 → stale 重嵌入）；T6 向量墓碑扫描（幂等补发漏删的向量 delete）。
+**整理 daemon（阶段三，`consolidation.enabled` 默认开）**：每 5 分钟扫描，四道闸门逐级收紧——① 空闲判定（无活跃前台聊天流 + 距最后一条消息 ≥ idleDelayMinutes；1v1 聊天与群聊/冷场续聊都在 `chatActivity` 登记）；② 两次"真正干过活"的整理间隔 ≥ minIntervalMinutes（空闲判定在用户离开后会恒为真，没有这道闸门就等于每 5 分钟一满轮）；③ >22h 兜底（锚在上次实干时间，空转轮不再刷新它）；④ 上一轮空手而归则退避 30 分钟（避免空转轮反复做候选发现全表扫描）。LLM 预算双层且持久化：单轮 ≤ llmCallsPerRun、每日 ≤ dailyLlmCalls（按上海日期归零，写 `state.daily`；旧键 `dailyMaxLlmCalls` 语义即"每日总量"，由 `normalizeMemorySettings` 归位到 `dailyLlmCalls`；老库启动时由 `migrateMemoryConsolidationSettings` 幂等把整个 consolidation 配置块显式写回 `memory_settings`，只补缺失键、不覆盖用户值）。任务表 memory_consolidation_jobs（启动时 processing→pending 续跑，attempts≥3 落 failed；同优先级按"该类型上次完成时间"轮转领取，避免 T1/T2 吃满预算把 T4/T5 饿死）。**候选消费记账**：`memory_consolidation_marks(job_type, mark_key, marked_at)` 记录"这批候选已经问过模型"——模型判定"无关/归纳不出结论/补不出字段"时同样记账（LLM 调用失败则不记账，下轮重试），TTL 到期后可重新整理（conflict 7 / generalize 30 / portrait_suggest 14 / backfill 30 天）；没有这道记账，daemon 会在空闲期每 5 分钟把同一批候选重复送进 LLM。六任务：T1 冲突消解（矛盾→update 双时态失效，重复→merge，决议直接携带 keywords/semanticNote 完整入库）；T2 泛化升华（同实体同主体 event/emotion ≥3 条跨 14 天 → 归纳 knowledge，原记忆保留 importance-1，血缘 relation_meta=generalize；组内已有存活泛化后代则跳过防反复升华）；T3 强度衰减（纯 SQL，strength=(importance/5)×exp(-Δd/halfLife)×(1+0.1·ln(1+召回数))，<0.15 → archived + 向量墓碑，halfLife：event 14/emotion 60/knowledge·skill 180 天，锚点=召回>事件>创建时间，刻意排除 updated_at；只在强度真的变化时写库，顺带清理辅助表保留期：审计 90 天 / 已终结任务 7 天 / 过期记账 180 天）；T4 画像建议（importance≥4 knowledge → portrait_suggestions 待确认，ChatView 印象弹窗采纳/忽略）；T5 v3 字段回填（缺 keywords/perspectives/semantic_note 的旧记忆每批 10 条补齐，仅当字段真的变化时才置 stale 触发重嵌入，模型留空不写库也不回环）；T6 向量墓碑扫描（幂等补发漏删的向量 delete）。
 
 **上下文预算（阶段四，`contextBudget.enabled` 默认关）**：`contextAssembler.applyContextBudget` 只作用于 dynamicBlocks（stableBlocks 不预算），降级顺序：活跃历史轮数减半 → rag 条目裁到 3 条 → 按优先级从尾部整块丢弃（rag 类永不丢），全程 degraded 日志无静默截断。
 
@@ -162,7 +162,7 @@ project-root/
 角色视角下的用户特征提取，每个角色独立维护其"眼中"的用户画像。
 
 - **异步提取** (`portraitExtractor.js`): 每 10 条用户消息触发一次，LLM 从对话中提取两大维度（personality/preference），写入 `user_portraits` 表（`UNIQUE(character_id, trait_type, content)` 防重复）。appearance 维度已移除——用户外观由 `config.user.appearance` 自述，启动时会幂等清理历史 appearance 行。
-- **向量相似度去重**: 新 trait 与已有 portrait 批量嵌入 → 余弦相似度 > 0.85 判定为语义重复，跳过写入。向量服务不可用时静默回退到 UNIQUE 约束。
+- **向量相似度去重**: 一次提取只做一次批量嵌入（全部待写入特征 + 相关维度的全部已有画像），余弦相似度 > 0.85 判定为语义重复则跳过写入；字面完全相同的直接丢弃，不浪费嵌入。此前是"每条新特征都重新嵌入全部已有画像"，随画像增长产生 O(N) 次重复调用。向量服务不可用时静默回退到 UNIQUE 约束。
 - **手动管理**: 前端 TavernView 中可查看/添加/编辑/删除画像，支持一键清空某角色的全部画像。
 
 ### 角色关系图 (Character Relationships)

@@ -24,9 +24,11 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
   activeSearch: { enabled: false, timeoutMs: 4000 },
   // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）。
-  // llmCallsPerRun 是"每轮整理"的调用预算（每 5 分钟一轮、每轮重置），并非每日总量；
-  // 旧配置键 dailyMaxLlmCalls 由 normalizeMemorySettings 兼容读取。
-  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 },
+  //   minIntervalMinutes 两次"真正干过活"的整理之间的最小间隔（防用户离开后每 5 分钟一整轮）
+  //   llmCallsPerRun    单轮整理的 LLM 调用上限
+  //   dailyLlmCalls     每日 LLM 调用总量（跨轮累计、按上海日期归零）
+  // 旧配置键 dailyMaxLlmCalls 的语义本就是"每日总量"，统一归位到 dailyLlmCalls。
+  consolidation: { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60 },
   // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
@@ -38,6 +40,8 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
     dimensions: null,
     headers: {},
     timeoutMs: 8000,
+    // 未配置自定义 provider 时是否允许回落到随包内置的第三方嵌入服务（走项目内置凭据）
+    useBuiltin: true,
   },
   reranker: {
     enabled: false,
@@ -48,6 +52,8 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
     topN: 7,
     headers: {},
     timeoutMs: 8000,
+    // 未配置自定义 provider 时是否允许回落到随包内置的第三方重排服务（每轮检索一次远端调用）
+    useBuiltin: true,
   },
 });
 
@@ -86,11 +92,18 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     consolidation: {
       enabled: consolidation.enabled === undefined ? (base.consolidation?.enabled ?? true) : Boolean(consolidation.enabled),
       idleDelayMinutes: clampInt(consolidation.idleDelayMinutes, base.consolidation?.idleDelayMinutes ?? 30, 5, 720),
-      // 旧键 dailyMaxLlmCalls 兼容读取（实际语义是每轮预算，改名以正名）
-      llmCallsPerRun: clampInt(
-        consolidation.llmCallsPerRun ?? consolidation.dailyMaxLlmCalls,
-        base.consolidation?.llmCallsPerRun ?? base.consolidation?.dailyMaxLlmCalls ?? 6,
-        0, 30,
+      minIntervalMinutes: clampInt(
+        consolidation.minIntervalMinutes,
+        base.consolidation?.minIntervalMinutes ?? 60,
+        0, 1440,
+      ),
+      llmCallsPerRun: clampInt(consolidation.llmCallsPerRun, base.consolidation?.llmCallsPerRun ?? 3, 0, 30),
+      // 旧键 dailyMaxLlmCalls → dailyLlmCalls：旧键语义就是"每日总量"，
+      // 此前被误接到"每轮预算"导致默认值被放大 288 倍（每 5 分钟一轮 × 6 次）
+      dailyLlmCalls: clampInt(
+        consolidation.dailyLlmCalls ?? consolidation.dailyMaxLlmCalls,
+        base.consolidation?.dailyLlmCalls ?? base.consolidation?.dailyMaxLlmCalls ?? 60,
+        0, 2000,
       ),
     },
     contextBudget: {
@@ -101,6 +114,7 @@ export function normalizeMemorySettings(input = {}, previous = null) {
       ...base.embedding,
       ...embedding,
       enabled: embedding.enabled === undefined ? base.embedding.enabled : Boolean(embedding.enabled),
+      useBuiltin: embedding.useBuiltin === undefined ? (base.embedding.useBuiltin ?? true) : Boolean(embedding.useBuiltin),
       headers: objectOrEmpty(embedding.headers ?? base.embedding.headers),
       dimensions: embedding.dimensions === undefined
         ? base.embedding.dimensions
@@ -111,6 +125,7 @@ export function normalizeMemorySettings(input = {}, previous = null) {
       ...base.reranker,
       ...reranker,
       enabled: reranker.enabled === undefined ? base.reranker.enabled : Boolean(reranker.enabled),
+      useBuiltin: reranker.useBuiltin === undefined ? (base.reranker.useBuiltin ?? true) : Boolean(reranker.useBuiltin),
       headers: objectOrEmpty(reranker.headers ?? base.reranker.headers),
       topN: clampInt(reranker.topN, base.reranker.topN, 1, 50),
       timeoutMs: clampInt(reranker.timeoutMs, base.reranker.timeoutMs, 1000, 60000),
@@ -162,14 +177,16 @@ export function isMemoryActiveSearchEnabled() {
 // 阶段三整理 daemon 配置。DB 未就绪时按默认开启处理（daemon 内部还有空闲判定双重保险）。
 export function getConsolidationConfig() {
   try {
-    const { enabled, idleDelayMinutes, llmCallsPerRun } = getMemorySettings().consolidation || {};
+    const { enabled, idleDelayMinutes, minIntervalMinutes, llmCallsPerRun, dailyLlmCalls } = getMemorySettings().consolidation || {};
     return {
       enabled: enabled !== false,
       idleDelayMinutes: clampInt(idleDelayMinutes, 30, 5, 720),
-      llmCallsPerRun: clampInt(llmCallsPerRun, 6, 0, 30),
+      minIntervalMinutes: clampInt(minIntervalMinutes, 60, 0, 1440),
+      llmCallsPerRun: clampInt(llmCallsPerRun, 3, 0, 30),
+      dailyLlmCalls: clampInt(dailyLlmCalls, 60, 0, 2000),
     };
   } catch {
-    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6 };
+    return { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60 };
   }
 }
 
@@ -215,9 +232,9 @@ export function getEmbeddingProfile(settings = getMemorySettings({ includeSecret
   return { fingerprint, corpus: `memory_v2_${fingerprint}` };
 }
 
-export function getMemoryMode(settings = getMemorySettings({ includeSecrets: true })) {
-  return 'hybrid';
-}
+// 检索模式对外统一报告为 hybrid：文本通道永远可用，向量/实体通道按配置与可用性自行降级
+// （此前是一个恒返回 'hybrid' 的导出函数，收口为常量，避免"看起来可切换"的误导）
+export const MEMORY_MODE = 'hybrid';
 
 function maskSecrets(settings) {
   const copy = JSON.parse(JSON.stringify(settings));
@@ -227,7 +244,7 @@ function maskSecrets(settings) {
     copy[key].apiKeyPreview = secret ? `${secret.slice(0, 3)}***${secret.slice(-2)}` : '';
     copy[key].apiKey = '';
   }
-  copy.mode = getMemoryMode(settings);
+  copy.mode = MEMORY_MODE;
   copy.profile = getEmbeddingProfile(settings)?.fingerprint || null;
   return copy;
 }

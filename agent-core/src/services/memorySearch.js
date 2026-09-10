@@ -303,13 +303,21 @@ function queryTokens(query) {
   return [...tokens].slice(0, 24);
 }
 
+// 审计里保存的查询文本长度。curation 检索的"查询"是整段 40 条消息的 transcript，
+// 原样落库既让 memory_retrieval_audits 迅速膨胀，也把大段对话原文写进审计表。
+export const AUDIT_QUERY_MAX_LENGTH = 200;
+
+export function auditQueryText(query) {
+  return String(query ?? '').slice(0, AUDIT_QUERY_MAX_LENGTH);
+}
+
 function writeAudit({ conversationIds, query, mode, textCount, vectorCount, entityCount = 0, memoryIds, fallbackReason }) {
   try {
     const conversationScope = conversationIds.length <= 1 ? (conversationIds[0] || null) : JSON.stringify(conversationIds);
     getDb().prepare(`
       INSERT INTO memory_retrieval_audits(conversation_id, query, mode, candidate_sources, memory_ids, fallback_reason)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(conversationScope, String(query).slice(0, 1000), mode, JSON.stringify({ text: textCount, vector: vectorCount, entity: entityCount }), JSON.stringify(memoryIds), fallbackReason);
+    `).run(conversationScope, auditQueryText(query), mode, JSON.stringify({ text: textCount, vector: vectorCount, entity: entityCount }), JSON.stringify(memoryIds), fallbackReason);
   } catch (error) {
     console.error('[memorySearch] audit failed:', error.message);
   }

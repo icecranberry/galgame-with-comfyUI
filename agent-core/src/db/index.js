@@ -711,6 +711,12 @@ function initSchema(db) {
   // 迁移: 记忆 v3 —— 多重表示 + 双时态演化 + 实体/三元组索引层（见 docs/memory-upgrade-plan.md）
   migrateChatMemoryV3Schema(db);
 
+  // 迁移: 记忆整理记账表（防同一批候选被反复送进 LLM）+ 整理/审计表维护索引
+  migrateMemoryConsolidationMarks(db);
+
+  // 迁移: 把整理 daemon 的显式配置写进既有 memory_settings 行（缺失才补，不覆盖用户值）
+  migrateMemoryConsolidationSettings(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -2132,6 +2138,83 @@ export function migrateChatMemoryV3Schema(db) {
   } catch (err) {
     console.error('[db] migrateChatMemoryV3Schema error:', err.message);
     throw err;
+  }
+}
+
+// 迁移: 记忆整理"已处理"记账表 + 维护索引。
+//
+// 背景：T1/T2/T4/T5 的候选发现只按时间窗/状态筛选，模型判定"无关 / 归纳不出结论 / 补不出字段"
+// 时不产生任何内容写入，候选就不会消失——daemon 每轮扫描（默认 5 分钟、空闲时全程为真）
+// 会把同一批候选重复送进 LLM。本表按 (job_type, mark_key) 记账并带 TTL
+// （TTL 常量见 services/memory/memoryConsolidation.js），过期行由 T3 维护清理删除。
+//
+// 键约定：conflict=memory_id、generalize=会话|实体|主体、portrait_suggest=会话、backfill=memory_id。
+// 导出供迁移回归测试使用（test/memoryConsolidationMarks.test.js）。
+export function migrateMemoryConsolidationMarks(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_consolidation_marks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_type TEXT NOT NULL,
+        mark_key TEXT NOT NULL,
+        marked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(job_type, mark_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_consolidation_jobs_type
+        ON memory_consolidation_jobs(job_type, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_memory_retrieval_audits_created
+        ON memory_retrieval_audits(created_at);
+    `);
+  } catch (err) {
+    console.error('[db] migrateMemoryConsolidationMarks error:', err.message);
+    throw err;
+  }
+}
+
+// 迁移: 把整理 daemon 的显式配置写进既有 memory_settings 行。
+//
+// 背景：memory_settings 只在首次运行时 INSERT OR IGNORE，老库里根本没有 consolidation 块，
+// 一直靠 normalizeMemorySettings 的默认值兜底——库里看不出实际生效的节奏，旧键
+// dailyMaxLlmCalls（语义本就是"每日总量"）也一直残留。这里做一次幂等的显式化：
+//   - 只动 consolidation 一个键，其余配置逐字保留；
+//   - dailyMaxLlmCalls → dailyLlmCalls（语义归位，避免被读成"每轮预算"）；
+//   - 已有值不覆盖（用户手改过就以用户为准），只补缺失键。
+// 全新库由 migrateChatMemoryV2Schema 的种子行覆盖，本函数直接跳过。
+// 注意：这里的数值不在这里做钳制，读取侧 memoryConfig.normalizeMemorySettings 统一钳制。
+// 导出供迁移回归测试使用（test/consolidation.test.js）。
+export function migrateMemoryConsolidationSettings(db) {
+  try {
+    const row = db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'memory_settings'`).get();
+    if (!row) return { skipped: 'no-settings' };
+
+    let stored = {};
+    try { stored = JSON.parse(row.setting_value) || {}; } catch { stored = {}; }
+    const current = stored.consolidation && typeof stored.consolidation === 'object' && !Array.isArray(stored.consolidation)
+      ? stored.consolidation
+      : {};
+
+    const fields = ['enabled', 'idleDelayMinutes', 'minIntervalMinutes', 'llmCallsPerRun', 'dailyLlmCalls'];
+    const missing = fields.some(field => current[field] === undefined);
+    const hasLegacyKey = current.dailyMaxLlmCalls !== undefined;
+    if (!missing && !hasLegacyKey) return { skipped: 'up-to-date' };
+
+    const next = {
+      enabled: current.enabled === undefined ? true : Boolean(current.enabled),
+      idleDelayMinutes: current.idleDelayMinutes === undefined ? 30 : current.idleDelayMinutes,
+      minIntervalMinutes: current.minIntervalMinutes === undefined ? 60 : current.minIntervalMinutes,
+      llmCallsPerRun: current.llmCallsPerRun === undefined ? 3 : current.llmCallsPerRun,
+      dailyLlmCalls: current.dailyLlmCalls ?? current.dailyMaxLlmCalls ?? 60,
+    };
+    stored.consolidation = next;
+    db.prepare(`
+      UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = 'memory_settings'
+    `).run(JSON.stringify(stored));
+    console.log(`[db] migrateMemoryConsolidationSettings: consolidation 已显式化 ${JSON.stringify(next)}`);
+    return { updated: true, consolidation: next };
+  } catch (err) {
+    // 配置显式化失败不应阻止启动：读取侧仍有默认值兜底
+    console.warn('[db] migrateMemoryConsolidationSettings skipped:', err.message);
+    return { error: err.message };
   }
 }
 

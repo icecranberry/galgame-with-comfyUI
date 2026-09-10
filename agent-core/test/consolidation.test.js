@@ -8,8 +8,10 @@ import {
   findBackfillCandidates,
   runConflictResolutionTask, runGeneralizationTask, runPortraitSuggestionTask, runBackfillTask,
   runDecayTask, runTombstoneTask,
+  markConsolidated, listActiveMarks, RECONSOLIDATE_AFTER_DAYS, pruneConsolidationArtifacts,
 } from '../src/services/memory/memoryConsolidation.js';
 import { insertGeneralizedMemory } from '../src/services/memory/memoryRepository.js';
+import { migrateMemoryConsolidationMarks, migrateMemoryConsolidationSettings } from '../src/db/index.js';
 
 // ── 测试库：阶段三涉及的最小表集合 ──
 
@@ -114,6 +116,18 @@ function createDb() {
       attempts INTEGER NOT NULL DEFAULT 0,
       error TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE memory_consolidation_marks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_type TEXT NOT NULL,
+      mark_key TEXT NOT NULL,
+      marked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(job_type, mark_key)
+    );
+    CREATE TABLE system_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE portrait_suggestions (
@@ -489,5 +503,198 @@ test('findConflictClusters：已消费的旧记忆不中断簇发现（continue 
   assert.equal(clusters.length, 2);
   const clusterIds = clusters.map(cluster => cluster.memories.map(m => m.memory_id).sort().join(',')).sort();
   assert.deepEqual(clusterIds, ['mem_c1,mem_o1', 'mem_c2,mem_o2']);
+  db.close();
+});
+
+// ── 整理记账：同一批候选不得被反复送进 LLM（历史缺陷：每 5 分钟重问一次，永不停止）──
+
+function insertConflictPair(db) {
+  insertFragment(db, { memoryId: 'mem_new', judgment: '她今天点了香菜牛肉', createdAt: daysAgo(0) });
+  insertFragment(db, { memoryId: 'mem_old', judgment: '她讨厌香菜', createdAt: daysAgo(3) });
+  linkEntity(db, 'mem_new', '香菜');
+  linkEntity(db, 'mem_old', '香菜');
+}
+
+test('T1 记账：模型判定"无关"后同一簇不再重复入选（连续 5 轮扫描只花 1 次 LLM）', async () => {
+  const db = createDb();
+  insertConflictPair(db);
+  let llmCalls = 0;
+  const deps = {
+    db,
+    chatSync: async () => { llmCalls++; return JSON.stringify({ resolutions: [] }); },
+    applyMemoryActions: () => ({}),
+  };
+
+  // 第一轮：发现簇 → 1 次 LLM → 模型说"无关"（无任何内容写入）→ 记账
+  const first = await runConflictResolutionTask({ clusters: findConflictClusters(db), llmBudgetRemaining: 6, deps });
+  assert.equal(first.llmCalls, 1);
+  assert.equal(first.applied, 0);
+  assert.deepEqual(listActiveMarks(db, 'conflict').sort(), ['mem_new', 'mem_old']);
+
+  // 后续 4 轮扫描（daemon 每 5 分钟一轮）：候选为空 → 0 次 LLM
+  for (let round = 0; round < 4; round++) {
+    const next = await runConflictResolutionTask({ clusters: findConflictClusters(db), llmBudgetRemaining: 6, deps });
+    assert.equal(next.llmCalls, 0, `第 ${round + 2} 轮不应再调 LLM`);
+  }
+  assert.equal(llmCalls, 1, '修复前这里是 5 次');
+  db.close();
+});
+
+test('T1 记账带 TTL：到期后同一条记忆可以重新整理', () => {
+  const db = createDb();
+  insertConflictPair(db);
+  markConsolidated(db, 'conflict', ['mem_new', 'mem_old']);
+  assert.equal(findConflictClusters(db).length, 0);
+  // 记账时间推到 TTL 之前 → 重新成为候选
+  const expired = new Date(Date.now() - (RECONSOLIDATE_AFTER_DAYS.conflict + 1) * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare(`UPDATE memory_consolidation_marks SET marked_at = ?`).run(expired);
+  assert.equal(findConflictClusters(db).length, 1);
+  assert.equal(listActiveMarks(db, 'conflict').length, 0);
+  db.close();
+});
+
+test('LLM 调用失败不记账：下一轮仍会重试（不把失败当"已处理"）', async () => {
+  const db = createDb();
+  insertConflictPair(db);
+  const deps = {
+    db,
+    chatSync: async () => { throw new Error('boom'); },
+    applyMemoryActions: () => ({}),
+  };
+  const result = await runConflictResolutionTask({ clusters: findConflictClusters(db), llmBudgetRemaining: 6, deps });
+  assert.equal(result.llmCalls, 1);
+  assert.equal(listActiveMarks(db, 'conflict').length, 0);
+  assert.equal(findConflictClusters(db).length, 1);
+  db.close();
+});
+
+test('T2 记账：模型输出 generalization:null 后该组不再重复入选', async () => {
+  const db = createDb();
+  for (const [id, days] of [['mem_ev0', 30], ['mem_ev1', 18], ['mem_ev2', 5]]) {
+    insertFragment(db, { memoryId: id, type: 'event', judgment: `情景记录${id}`, eventTime: daysAgo(days), conversationId: 'char_1' });
+    linkEntity(db, id, '感冒');
+  }
+  let llmCalls = 0;
+  const deps = {
+    db,
+    chatSync: async () => { llmCalls++; return JSON.stringify({ generalization: null }); },
+    insertGeneralizedMemory: () => 'x',
+  };
+  const first = await runGeneralizationTask({ groups: findGeneralizationGroups(db), llmBudgetRemaining: 6, deps });
+  assert.equal(first.llmCalls, 1);
+  assert.equal(first.applied, 0);
+  assert.equal(first.skipped, 1);
+  // 修复前这里仍是 1（组永不消失，每轮重问）
+  assert.equal(findGeneralizationGroups(db).length, 0);
+  const second = await runGeneralizationTask({ groups: findGeneralizationGroups(db), llmBudgetRemaining: 6, deps });
+  assert.equal(second.llmCalls, 0);
+  assert.equal(llmCalls, 1);
+  db.close();
+});
+
+test('T4 记账：模型提不出新建议时同一会话不再每轮重问', async () => {
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_core', type: 'knowledge', importance: 5, conversationId: 'char_7' });
+  let llmCalls = 0;
+  const deps = { db, chatSync: async () => { llmCalls++; return JSON.stringify({ suggestions: [] }); } };
+  const first = await runPortraitSuggestionTask({ conversations: findPortraitSuggestionConversations(db), llmBudgetRemaining: 6, deps });
+  assert.equal(first.llmCalls, 1);
+  assert.equal(findPortraitSuggestionConversations(db).length, 0);
+  const second = await runPortraitSuggestionTask({ conversations: findPortraitSuggestionConversations(db), llmBudgetRemaining: 6, deps });
+  assert.equal(second.llmCalls, 0);
+  assert.equal(llmCalls, 1);
+  db.close();
+});
+
+test('T5 记账 + 条件写入：模型留空时不写库、不刷 updated_at、不置 stale，且不再回环', async () => {
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_legacy', judgment: '用户养了一只猫', keywords: null, createdAt: daysAgo(30) });
+  const before = db.prepare(`SELECT updated_at, embedding_state FROM memory_fragments WHERE memory_id = 'mem_legacy'`).get();
+  const deps = {
+    db,
+    chatSync: async () => JSON.stringify({
+      items: [{ memoryId: 'mem_legacy', keywords: [], perspectives: [], semanticNote: '', episodicNote: '', importance: 3 }],
+    }),
+  };
+  const result = await runBackfillTask({ candidates: findBackfillCandidates(db), llmBudgetRemaining: 6, deps });
+  assert.equal(result.llmCalls, 1);
+  assert.equal(result.updated, 0);
+  assert.equal(result.skipped, 1);
+  const after = db.prepare(`SELECT updated_at, embedding_state FROM memory_fragments WHERE memory_id = 'mem_legacy'`).get();
+  assert.equal(after.updated_at, before.updated_at, '无变化不应刷新 updated_at（会污染检索排序）');
+  assert.equal(after.embedding_state, before.embedding_state, '无变化不应置 stale（会重复付费重嵌入同一文本）');
+  assert.equal(findBackfillCandidates(db).length, 0, '已问过模型的不再回环');
+  db.close();
+});
+
+// ── 维护清理 ──
+
+test('migrateMemoryConsolidationMarks：建表幂等并补齐维护索引', () => {
+  const db = createDb();
+  migrateMemoryConsolidationMarks(db);
+  migrateMemoryConsolidationMarks(db); // 幂等
+  const table = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_consolidation_marks'`).get();
+  assert.ok(table, '记账表应存在');
+  const indexes = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_memory_%'`).all().map(row => row.name);
+  assert.ok(indexes.includes('idx_memory_consolidation_jobs_type'));
+  assert.ok(indexes.includes('idx_memory_retrieval_audits_created'));
+  db.close();
+});
+
+test('pruneConsolidationArtifacts：按保留期清理审计/已终结任务/过期记账，不碰 pending', () => {  const db = createDb();
+  db.prepare(`INSERT INTO memory_retrieval_audits(query, mode, created_at) VALUES ('old', 'passive', ?)`).run(daysAgo(120));
+  db.prepare(`INSERT INTO memory_retrieval_audits(query, mode, created_at) VALUES ('new', 'passive', ?)`).run(daysAgo(1));
+  db.prepare(`INSERT INTO memory_consolidation_jobs(job_type, status, updated_at) VALUES ('decay', 'completed', ?)`).run(daysAgo(30));
+  db.prepare(`INSERT INTO memory_consolidation_jobs(job_type, status, updated_at) VALUES ('decay', 'pending', ?)`).run(daysAgo(30));
+  markConsolidated(db, 'backfill', ['mem_gone']);
+  db.prepare(`UPDATE memory_consolidation_marks SET marked_at = ?`).run(daysAgo(400));
+
+  const pruned = pruneConsolidationArtifacts(db, {});
+  assert.equal(pruned.audits, 1);
+  assert.equal(pruned.jobs, 1);
+  assert.equal(pruned.marks, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS c FROM memory_consolidation_jobs`).get().c, 1, 'pending 任务永不清理');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS c FROM memory_retrieval_audits`).get().c, 1);
+  db.close();
+});
+
+test('decayAndArchiveMemories：强度未变化时不重复写库', () => {
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_stable', importance: 5, lastReinforcedAt: daysAgo(1), createdAt: daysAgo(1) });
+  const first = decayAndArchiveMemories(db, {});
+  const second = decayAndArchiveMemories(db, {});
+  assert.equal(first.scanned, 1);
+  assert.equal(first.strengthened, 1, '首次写入强度');
+  assert.equal(second.strengthened, 0, '同一天重跑不应再写（避免全表无谓写放大）');
+  db.close();
+});
+
+// ── 配置显式化迁移 ──
+
+test('migrateMemoryConsolidationSettings：补全 consolidation 且其余配置逐字保留', () => {
+  const db = createDb();
+  assert.equal(migrateMemoryConsolidationSettings(db).skipped, 'no-settings', '全新库由种子行覆盖');
+  db.prepare(`INSERT INTO system_settings(setting_key, setting_value) VALUES ('memory_settings', ?)`)
+    .run(JSON.stringify({ enabled: true, topK: 7, embedding: { enabled: false } }));
+
+  const first = migrateMemoryConsolidationSettings(db);
+  assert.equal(first.updated, true);
+  assert.deepEqual(first.consolidation, { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60 });
+  const stored = JSON.parse(db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'memory_settings'`).get().setting_value);
+  assert.equal(stored.topK, 7, '其余配置不得被动到');
+  assert.equal(stored.embedding.enabled, false);
+  assert.equal(migrateMemoryConsolidationSettings(db).skipped, 'up-to-date', '幂等');
+  db.close();
+});
+
+test('migrateMemoryConsolidationSettings：旧键 dailyMaxLlmCalls 归位且不覆盖用户已存值', () => {
+  const db = createDb();
+  db.prepare(`INSERT INTO system_settings(setting_key, setting_value) VALUES ('memory_settings', ?)`)
+    .run(JSON.stringify({ consolidation: { enabled: false, idleDelayMinutes: 120, dailyMaxLlmCalls: 9 } }));
+
+  const result = migrateMemoryConsolidationSettings(db);
+  assert.equal(result.updated, true);
+  assert.deepEqual(result.consolidation, { enabled: false, idleDelayMinutes: 120, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 9 });
+  assert.equal(result.consolidation.dailyMaxLlmCalls, undefined, '旧键被归位而非保留');
   db.close();
 });

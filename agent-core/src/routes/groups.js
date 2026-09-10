@@ -20,6 +20,7 @@ import { undoLastGroupRound } from '../services/groupRoundUndo.js';
 import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { beginTurn } from '../services/llmTelemetry.js';
+import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 
 const router = Router();
 
@@ -256,6 +257,8 @@ router.post('/:id/nudge', async (req, res) => {
   if (isGroupRoundRunning(groupId)) return res.json({ ok: false, busy: true });
 
   beginTurn(groupConvId(groupId));
+  // 冷场续聊同样是一轮真实群聊生成：登记为活跃流，整理 daemon 让路
+  chatStreamStarted();
   try {
     const { messages, busy } = await runGroupRound(groupId, {
       trigger: 'lull',
@@ -271,6 +274,8 @@ router.post('/:id/nudge', async (req, res) => {
   } catch (err) {
     console.error(`[groups] nudge error for group ${groupId}:`, err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    chatStreamEnded();
   }
 });
 
@@ -300,6 +305,9 @@ router.post('/:id/chat', async (req, res) => {
   });
   req.socket.setTimeout(0);
   res.setTimeout(0);
+  // 登记为"活跃前台聊天流"：记忆整理 daemon 据此让路（1v1 聊天在 chat.js 同样登记）
+  chatStreamStarted();
+  res.on('close', () => chatStreamEnded());
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
   try {
