@@ -28,6 +28,7 @@ import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
+import townRoutes from './src/routes/town.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -43,6 +44,8 @@ import { startGroupIdleScheduler } from './src/services/groupIdleScheduler.js';
 import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge.js';
 import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
+import { startTownScheduler, stopTownScheduler } from './src/services/town/townService.js';
+import { restoreInitJob } from './src/services/town/townInitService.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
 import { startConsolidationScheduler, stopConsolidationScheduler } from './src/services/memory/consolidationScheduler.js';
@@ -72,6 +75,9 @@ app.use('/images', imageAvifFallback('data/images'));
 app.use('/images', express.static('data/images', { maxAge: '7d' }));
 app.use('/avatars', express.static('data/avatars', { maxAge: '30d' }));
 
+// 小镇像素素材（独立于 data/images，不进图库/压缩扫描；不带强缓存，素材重生成后刷新即生效）
+app.use('/town-assets', express.static('data/town/assets'));
+
 // API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
@@ -92,6 +98,7 @@ app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
 app.use('/api/groups', wrapRouterAsync(groupsRoutes));
 app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
 app.use('/api/items', wrapRouterAsync(itemsRoutes));
+app.use('/api/town', wrapRouterAsync(townRoutes));         // AI 小镇（上游 ai-town 线）
 
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 // 健康检查
@@ -168,6 +175,10 @@ startConsolidationScheduler();
 // 启动道具系统调度器（每 10 分钟清理到期效果、恢复变身、标记卡死的生成中道具）
 startItemScheduler();
 
+// 启动小镇调度器（世界页：瓦片地图 + 轻量居民生态，由 config.features.town 控制）
+restoreInitJob();  // 恢复未完成的初始化向导（断点续跑）
+startTownScheduler();
+
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
   console.log(`[agent-core] http://localhost:${config.port}`);
@@ -226,6 +237,7 @@ const shutdown = () => {
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
   stopConsolidationScheduler();
+  stopTownScheduler();
 
   // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
   try {

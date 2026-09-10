@@ -22,6 +22,11 @@ export default defineConfig({
         target: 'http://localhost:3099',
         changeOrigin: true,
       },
+      // 小镇像素素材（data/town/assets，由 agent-core 静态服务）
+      '/town-assets': {
+        target: 'http://localhost:3099',
+        changeOrigin: true,
+      },
     },
   },
   build: {

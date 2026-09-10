@@ -14,10 +14,10 @@ import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import App from './App.vue'
 import ChatView from './views/ChatView.vue'
-
 // 路由级代码分割：首屏只加载聊天页，其余视图按需拉取
 const MomentsView = () => import('./views/MomentsView.vue')
 const EventsView = () => import('./views/EventsView.vue')
+const TownView = () => import('./views/TownView.vue')
 const ScheduleView = () => import('./views/ScheduleView.vue')
 const GalleryView = () => import('./views/GalleryView.vue')
 const TavernView = () => import('./views/TavernView.vue')
@@ -34,6 +34,7 @@ const routes = [
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
+  { path: '/town', component: TownView },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },

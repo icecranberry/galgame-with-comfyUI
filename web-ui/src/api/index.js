@@ -1325,3 +1325,233 @@ export function discardItem(itemId) {
 export function removeActiveEffect(effectId) {
   return request(`/items/effects/${effectId}`, { method: 'DELETE' })
 }
+
+// ── AI 小镇（世界页）──
+
+// 全量快照：地图/POI/agents/玩家/天气/活跃相遇
+export function fetchTownState() {
+  return jsonRequest(`${BASE}/town/state`)
+}
+
+// 玩家 token 移动（服务端寻路 + town_move 广播）
+export function moveTownPlayer(x, y) {
+  return jsonRequest(`${BASE}/town/player/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ x, y }),
+  })
+}
+
+// 相遇对话记录
+export function fetchTownEncounterMessages(encounterId) {
+  return jsonRequest(`${BASE}/town/encounters/${encounterId}/messages`)
+}
+
+// 小镇角色名单（在场状态）
+export function fetchTownCharacters() {
+  return jsonRequest(`${BASE}/town/characters`)
+}
+
+// ── AI 小镇 v2：素材库 / 瓦片地图 / 初始化向导 / 轻量居民 ──
+
+function townJson(method, body) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  }
+}
+
+// 素材库
+export function fetchTownAssets(kind = null) {
+  return jsonRequest(`${BASE}/town/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`)
+}
+
+export function createTownAsset(payload) {
+  return jsonRequest(`${BASE}/town/assets`, townJson('POST', payload))
+}
+
+export function regenerateTownAsset(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/assets/${id}/regenerate`, townJson('POST', overrides))
+}
+
+export function deleteTownAsset(id) {
+  return jsonRequest(`${BASE}/town/assets/${id}`, { method: 'DELETE' })
+}
+
+export function fetchTownAsset(id) {
+  return jsonRequest(`${BASE}/town/assets/${id}`)
+}
+
+// 保存前端编辑后的素材图（点击抠除颜色 / 裁剪，dataUrl PNG）
+export function saveTownAssetImage(id, dataUrl) {
+  return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
+}
+
+// 按截取框裁剪素材并覆盖（放大查看后划定最终成图范围）
+export function cropTownAsset(id, rect) {
+  return jsonRequest(`${BASE}/town/assets/${id}/crop`, townJson('POST', rect))
+}
+
+// 小镇立绘 HiresFix 细化（按全局 HiresFix 设置覆盖原图）
+export function refineTownAssetHires(id) {
+  return jsonRequest(`${BASE}/town/assets/${id}/hires`, townJson('POST', {}))
+}
+
+// 地图（编辑器保存 / 渲染载荷）
+export function fetchTownMap() {
+  return jsonRequest(`${BASE}/town/map`)
+}
+
+export function saveTownMap(payload) {
+  return jsonRequest(`${BASE}/town/map`, townJson('PUT', payload))
+}
+
+// 初始化向导
+export function fetchTownInitState() {
+  return jsonRequest(`${BASE}/town/init`)
+}
+
+export function startTownInit(payload) {
+  return jsonRequest(`${BASE}/town/init/start`, townJson('POST', payload))
+}
+
+export function updateTownBlueprint(blueprint) {
+  return jsonRequest(`${BASE}/town/init/blueprint`, townJson('PUT', blueprint))
+}
+
+export function generateTownAssetPrompts(payload) {
+  return jsonRequest(`${BASE}/town/init/asset-prompts`, townJson('POST', payload))
+}
+
+export function generateTownSamples() {
+  return jsonRequest(`${BASE}/town/init/samples`, townJson('POST', {}))
+}
+
+export function startTownBatch() {
+  return jsonRequest(`${BASE}/town/init/batch`, townJson('POST', {}))
+}
+
+export function fetchTownInitPreview() {
+  return jsonRequest(`${BASE}/town/init/preview`)
+}
+
+export function generateTownLayout() {
+  return jsonRequest(`${BASE}/town/init/layout`, townJson('POST', {}))
+}
+
+export function rerollTownLayout() {
+  return jsonRequest(`${BASE}/town/init/reroll`, townJson('POST', {}))
+}
+
+// 向导居民步：按蓝图提前建档居民（稳定人格卡）
+export function commitTownWizardNpcs() {
+  return jsonRequest(`${BASE}/town/init/npcs`, townJson('POST', {}))
+}
+
+// 向导居民步：按数量重新生成名单（拉条）
+export function regenerateTownNpcRoster(count) {
+  return jsonRequest(`${BASE}/town/init/npc-roster`, townJson('POST', { count }))
+}
+
+export function confirmTownInit() {
+  return jsonRequest(`${BASE}/town/init/confirm`, townJson('POST', {}))
+}
+
+export function cancelTownInit() {
+  return jsonRequest(`${BASE}/town/init`, { method: 'DELETE' })
+}
+
+// 轻量居民（NPC）
+export function fetchTownNpcs() {
+  return jsonRequest(`${BASE}/town/npcs`)
+}
+
+export function fetchTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}`)
+}
+
+export function createTownNpc(payload) {
+  return jsonRequest(`${BASE}/town/npcs`, townJson('POST', payload))
+}
+
+export function updateTownNpc(id, payload) {
+  return jsonRequest(`${BASE}/town/npcs/${id}`, townJson('PUT', payload))
+}
+
+export function deleteTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}`, { method: 'DELETE' })
+}
+
+export function generateTownNpcSprites(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/sprites`, townJson('POST', overrides))
+}
+
+export function generateTownNpcPortrait(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', overrides))
+}
+
+export function regenerateTownNpcPersonaCard(id, overrides = {}) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/persona-card`, townJson('POST', overrides))
+}
+
+export function inviteTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/invite`, townJson('POST', {}))
+}
+
+export function generateTownCharacterPortrait(characterId) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/portrait`, townJson('POST', {}))
+}
+
+export function rerollTownNpc(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/reroll`, townJson('POST', {}))
+}
+
+export function fetchTownNpcMessages(id) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/messages`)
+}
+
+export function chatWithTownNpc(id, message) {
+  return jsonRequest(`${BASE}/town/npcs/${id}/chat`, townJson('POST', { message }))
+}
+
+// 入住角色开关
+export function setTownCharacterEnabled(characterId, townEnabled) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}`, townJson('PUT', { townEnabled }))
+}
+
+// 角色四方向精灵生成（管理面板）
+export function generateTownCharacterSprites(characterId) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST', {}))
+}
+
+// 玩家形象套装（立绘 + 正/背小人）
+export function fetchTownPlayerKit() {
+  return jsonRequest(`${BASE}/town/player/kit`)
+}
+
+export function regenerateTownPlayerKit(overrides = {}) {
+  return jsonRequest(`${BASE}/town/player/kit`, townJson('POST', overrides))
+}
+
+export function regenerateTownPlayerSprite(direction, overrides = {}) {
+  return jsonRequest(`${BASE}/town/player/sprites/${direction}`, townJson('POST', overrides))
+}
+
+// 小镇设置 / 世界重置
+export function fetchTownSettings() {
+  return jsonRequest(`${BASE}/town/settings`)
+}
+
+export function updateTownSettings(patch) {
+  return jsonRequest(`${BASE}/town/settings`, townJson('PUT', patch))
+}
+
+export function resetTownWorld() {
+  return jsonRequest(`${BASE}/town/world`, { method: 'DELETE' })
+}
+
+// 玩家方向键单步移动（本地节流上报）
+export function moveTownPlayerDir(dx, dy) {
+  return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy }))
+}

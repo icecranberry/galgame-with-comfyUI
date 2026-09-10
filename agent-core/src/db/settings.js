@@ -36,6 +36,10 @@ const DB_ONLY_KEYS = new Set([
   'emoji_fixed_tags',
   'emoji_style_mode',
   'standing_prompt_mode',
+  // 由 loadSystemSettings 的 JSON 特例分支装载（不在 SETTING_TO_CONFIG 表内）：
+  // 登记在此以免 setSetting 误报"重启后会丢失"
+  'workflow_scene',
+  'town_settings',
 ]);
 
 /** 写入单条系统设置 */
@@ -64,6 +68,7 @@ export const SETTING_TO_CONFIG = {
   feature_memory:                { obj: 'features', key: 'memory',           type: 'bool' },
   feature_replyGuesses:          { obj: 'features', key: 'replyGuesses',     type: 'bool' },
   feature_forceImageGen:               { obj: 'features', key: 'forceImageGen',            type: 'bool' },
+  feature_imageGenMode:                { obj: 'features', key: 'imageGenMode',            type: 'string' },
   feature_realtimeAffinityDisplay: { obj: 'features', key: 'realtimeAffinityDisplay', type: 'bool' },
   feature_proactiveChat:             { obj: 'features', key: 'proactiveChat',          type: 'bool' },
   feature_proactiveChatFreq:         { obj: 'features', key: 'proactiveChatFreq',     type: 'float' },
@@ -150,6 +155,18 @@ export function loadSystemSettings(db) {
     if (row.setting_key === 'workflow_scene') {
       try {
         config.workflow.scene = { ...config.workflow.scene, ...JSON.parse(row.setting_value) };
+      } catch {
+        /* keep defaults */
+      }
+      applied++;
+    }
+    // 小镇参数 JSON 配置（来自上游 ai-town 线的 v2 管理面板；合版时并入）
+    if (row.setting_key === 'town_settings') {
+      try {
+        const patch = JSON.parse(row.setting_value);
+        for (const [k, v] of Object.entries(patch)) {
+          if (k in config.town && v !== null && v !== undefined) config.town[k] = v;
+        }
       } catch {
         /* keep defaults */
       }

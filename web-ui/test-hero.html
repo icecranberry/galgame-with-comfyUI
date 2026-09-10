@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>hero overlay math test</title>
+  <style>
+    body { font: 12px/1.7 Consolas, monospace; margin: 16px; background: #f6f1ec; }
+    .ok { color: #1a7f37; }
+    .bad { color: #c0392b; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id="log">running…</div>
+  <script type="module">
+    // 带时间戳绕过 vite/浏览器缓存，确保每次 reload 都拿到最新渲染器
+    const {
+      renderMomentShareCard, computeHeroInitialAdjust, getHeroOverlayBounds, paintHeroOverlay,
+    } = await import('/src/utils/momentShareRenderer.js?t=' + Date.now())
+
+    const logEl = document.getElementById('log')
+    const lines = []
+    const log = (s) => { lines.push(s); logEl.innerHTML = lines.map(l => `<div class="${l.startsWith('✗') ? 'bad' : l.startsWith('✓') ? 'ok' : ''}">${l}</div>`).join('') }
+
+    function makeImage(w, h, seed) {
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+      const g = cv.getContext('2d')
+      const grad = g.createLinearGradient(0, 0, w, h)
+      grad.addColorStop(0, `hsl(${seed * 47 % 360}, 60%, 55%)`)
+      grad.addColorStop(1, `hsl(${(seed * 47 + 120) % 360}, 55%, 40%)`)
+      g.fillStyle = grad; g.fillRect(0, 0, w, h)
+      g.fillStyle = 'rgba(255,255,255,0.85)'
+      g.beginPath(); g.arc(w * 0.5, h * 0.28, Math.min(w, h) * 0.13, 0, Math.PI * 2); g.fill()
+      g.fillStyle = 'rgba(30,20,10,0.5)'
+      g.font = `${Math.round(Math.min(w, h) * 0.18)}px sans-serif`
+      g.textAlign = 'center'
+      g.fillText(`${w}x${h}`, w / 2, h * 0.75)
+      return cv.toDataURL('image/png')
+    }
+
+    const portrait = makeImage(600, 900, 1)
+    const wide = makeImage(1200, 480, 2)
+    const square = makeImage(520, 520, 3)
+    const avatar = makeImage(200, 200, 4)
+
+    const makePost = images => ({
+      id: 42,
+      display_name: '测试邻友',
+      content: '这是一条用于校验主图编辑覆盖层与最终出图逐像素一致的测试朋友圈文案，稍微长一点好触发正文自适应排版逻辑。',
+      created_at: '2026-09-05T12:30:00',
+      avatar_path: avatar,
+      images,
+    })
+
+    function compare(a, b) {
+      const A = a.getContext('2d').getImageData(0, 0, a.width, a.height).data
+      const B = b.getContext('2d').getImageData(0, 0, b.width, b.height).data
+      let sum = 0, n = 0, max = 0, total = a.width * a.height
+      for (let i = 0; i < A.length; i += 4) {
+        if (A[i + 3] <= 250) continue
+        const d = (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2])) / 3
+        sum += d
+        if (d > max) max = d
+        n++
+      }
+      return { mean: n ? sum / n : 0, max, cover: n / total }
+    }
+
+    function cropCanvas(src, b) {
+      const w = Math.round(b.w), h = Math.round(b.h)
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+      cv.getContext('2d').drawImage(src, b.x, b.y, b.w, b.h, 0, 0, w, h)
+      return cv
+    }
+
+    function paint(hero, adjust) {
+      const b = getHeroOverlayBounds(hero)
+      const cv = document.createElement('canvas')
+      paintHeroOverlay(cv, hero, adjust, 1)
+      return { cv, b }
+    }
+
+    async function runCase(name, styleId, images, opts = {}, tol = 2.5) {
+      const post = makePost(images)
+      const baked = await renderMomentShareCard(post, { styleId, ...opts })
+      const { hero } = baked
+      if (!hero || !hero.img) { log(`✗ ${name}: no hero recorded`); return }
+      const init = computeHeroInitialAdjust(hero)
+      const { cv: ov1, b: b1 } = paint(hero, init)
+      const r1 = compare(ov1, cropCanvas(baked.canvas, b1))
+
+      const manual = {
+        scale: Math.min(init.maxScale, Math.max(init.minScale, init.scale * 1.9)),
+        offsetX: 0.14, offsetY: -0.11,
+      }
+      const final = await renderMomentShareCard(post, {
+        styleId: baked.styleId,
+        featureLayout: opts.featureLayout || baked.filmLayout || null,
+        imageAdjust: manual,
+      })
+      const { cv: ov2, b: b2 } = paint(final.hero, manual)
+      const r2 = compare(ov2, cropCanvas(final.canvas, b2))
+      const frameStable = Math.abs(b1.x - b2.x) < 1 && Math.abs(b1.y - b2.y) < 1 && Math.abs(b1.w - b2.w) < 1 && Math.abs(b1.h - b2.h) < 1
+      const ok = r1.mean < tol && r2.mean < tol && frameStable
+      log(`${ok ? '✓' : '✗'} ${name} | init mean=${r1.mean.toFixed(3)} max=${r1.max.toFixed(1)} | manual mean=${r2.mean.toFixed(3)} max=${r2.max.toFixed(1)} | cover=${r1.cover.toFixed(3)} frameStable=${frameStable} | initScale=${init.scale.toFixed(3)} initOffY=${init.offsetY.toFixed(4)}${baked.filmLayout ? ' film=' + baked.filmLayout : ''}`)
+    }
+
+    const P = [portrait], W1 = [wide], S = [square], PWS = [portrait, wide, square], PW = [portrait, wide]
+    // 装饰（竖排名/日期签/胶带/胶片饰面）现已由覆盖层补画，框内像素应与出图基本一致
+    await runCase('magazine  portrait(name over photo)', 'magazine', P)
+    await runCase('magazine  wide(blur+contain)', 'magazine', W1)
+    await runCase('immersive portrait(blur)', 'immersive', P)
+    await runCase('immersive wide(blur)', 'immersive', W1)
+    await runCase('editorial portrait(pill+avatar)', 'editorial', P)
+    await runCase('minimal   square(cover .5)', 'minimal', S)
+    await runCase('minimal   grid3(cell hero)', 'minimal', PWS)
+    await runCase('collage   3img(rotated+tape)', 'collage', PWS)
+    await runCase('collage   2img(rotated)', 'collage', PW)
+    await runCase('film A    portrait(vignette)', 'feature', P, { featureLayout: 'A' })
+    await runCase('film B    portrait(vignette)', 'feature', P, { featureLayout: 'B' })
+    await runCase('film C    portrait(vignette)', 'feature', P, { featureLayout: 'C' })
+
+    // 胶片差异空间分布（4×4 分块）
+    {
+      const post = makePost(P)
+      const baked = await renderMomentShareCard(post, { styleId: 'feature', featureLayout: 'A' })
+      const hero = baked.hero
+      const init = computeHeroInitialAdjust(hero)
+      const b = getHeroOverlayBounds(hero)
+      const ov = document.createElement('canvas')
+      paintHeroOverlay(ov, hero, init, 1)
+      const crop = cropCanvas(baked.canvas, b)
+      const A = ov.getContext('2d').getImageData(0, 0, ov.width, ov.height).data
+      const B = crop.getContext('2d').getImageData(0, 0, crop.width, crop.height).data
+      const grid = Array.from({ length: 16 }, () => ({ sum: 0, n: 0 }))
+      for (let y = 0; y < crop.height; y++) {
+        for (let x = 0; x < crop.width; x++) {
+          const i = (y * crop.width + x) * 4
+          if (A[i + 3] <= 250) continue
+          const d = (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2])) / 3
+          const cell = grid[Math.min(3, Math.floor(y / crop.height * 4)) * 4 + Math.min(3, Math.floor(x / crop.width * 4))]
+          cell.sum += d; cell.n++
+        }
+      }
+      log('film diff grid (mean): ' + grid.map(c => c.n ? c.sum / c.n : -1).map(v => v.toFixed(2)).join(' | '))
+      log('film decor type: ' + (typeof hero.decor) + ' | heroKeys: ' + Object.keys(hero).join(','))
+      // 有 decor vs 无 decor 的覆盖层对比
+      const ovWith = document.createElement('canvas')
+      paintHeroOverlay(ovWith, hero, init, 1)
+      const ovWithout = document.createElement('canvas')
+      paintHeroOverlay(ovWithout, { ...hero, decor: null }, init, 1)
+      const Aw = ovWith.getContext('2d').getImageData(0, 0, ovWith.width, ovWith.height).data
+      const Ao = ovWithout.getContext('2d').getImageData(0, 0, ovWithout.width, ovWithout.height).data
+      let dsum = 0, dn = 0
+      for (let i = 0; i < Aw.length; i += 4) {
+        if (Aw[i + 3] <= 250) continue
+        dsum += (Math.abs(Aw[i] - Ao[i]) + Math.abs(Aw[i + 1] - Ao[i + 1]) + Math.abs(Aw[i + 2] - Ao[i + 2])) / 3
+        dn++
+      }
+      log('decor effect on overlay (mean): ' + (dsum / dn).toFixed(3))
+    }
+    log('DONE')
+  </script>
+</body>
+</html>

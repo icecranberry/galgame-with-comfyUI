@@ -329,7 +329,7 @@ export function buildGroupContext(group, directiveBlocks = []) {
 
   const directive = directiveBlocks.filter(Boolean).join('\n');
   const worldRulePrefix = getWorldSetting()
-    ? '请遵循当前世界观来参与群聊，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
+    ? '请遵循<world_setting>来参与群聊，角色人设如果和<world_setting>有冲突，则以<world_setting>为最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   messages.push({ role: 'user', content: worldRulePrefix + `<round_directive>\n${directive}\n</round_directive>\n\n现在按输出协议续写群聊：` });
 

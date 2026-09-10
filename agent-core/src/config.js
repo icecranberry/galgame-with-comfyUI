@@ -96,6 +96,19 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     weather: process.env.FEATURE_WEATHER !== 'false', // 默认开：实时天气
     groupChat: process.env.FEATURE_GROUP_CHAT !== 'false', // 默认开：群聊系统
     groupIdleBudget: Math.max(0, parseInt(process.env.GROUP_IDLE_BUDGET ?? '0', 10) || 0), // 默认关闭；显式设为正数后启用每群每日后台闲聊预算
+    town: process.env.FEATURE_TOWN !== 'false', // 默认开：AI 小镇（世界页）
+    townLLM: process.env.FEATURE_TOWN_LLM !== 'false', // 默认开：小镇 LLM 事件（相遇对话/状态气泡）；关闭则退化为纯移动模拟
+  },
+  town: {
+    tickSeconds: Math.max(20, Math.min(300, parseInt(process.env.TOWN_TICK_SECONDS, 10) || 60)), // 模拟步长（真实秒）
+    npcSpeed: 0.5,        // NPC 移动速度（格/秒），服务端推进与前端插值共用
+    playerSpeed: 1.1,     // 玩家 token 移动速度（格/秒）
+    encounterCooldownHours: 3,   // 同一对角色相遇冷却
+    encounterMinStartGapMin: 8,  // 两场相遇之间的全局最小间隔（分钟），防止人口密集时 LLM 调用风暴
+    maxActiveEncounters: 2,      // 同时在场的相遇上限
+    encounterRelatedProb: 0.28,  // 有关系角色同地点相遇概率（每 tick）
+    encounterStrangerProb: 0.05, // 陌生人相遇概率（用于发展新关系）
+    statusBubbleIntervalMin: 45, // 批量状态气泡间隔（分钟）
   },
   disturb: {
     startTime: process.env.DISTURB_START_TIME || '22:00',
@@ -117,6 +130,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
       events: 'base',
       schedule: 'base',
       mailbox: 'base',
+      town: 'turbo',   // AI 小镇像素素材
     },
   },
   user: {
@@ -521,7 +535,7 @@ export function updateWorkflowScene(scene) {
     return { ok: false, error: 'scene must be an object' };
   }
   for (const [k, v] of Object.entries(scene)) {
-    if (['chat', 'group', 'moments', 'events', 'schedule', 'mailbox'].includes(k) && ['base', 'turbo'].includes(v)) {
+    if (['chat', 'group', 'moments', 'events', 'schedule', 'mailbox', 'town'].includes(k) && ['base', 'turbo'].includes(v)) {
       config.workflow.scene[k] = v;
     }
   }
