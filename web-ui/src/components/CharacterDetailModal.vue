@@ -3,39 +3,13 @@
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
       <div v-if="visible && !showLoraModal && !showOutfitModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
-        <div class="modal-panel modal-wide" style="height:95vh;max-height:95vh">
+        <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
-            <linshe-button variant="icon" class="modal-close" @click="$emit('close')">✕</linshe-button>
+            <linshe-button variant="icon" class="modal-close" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
           </div>
 
           <div class="modal-body modal-body-detail">
-            <!-- 移动端工具栏 -->
-            <div class="mobile-detail-toolbar" v-if="isMobile">
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不看ta的朋友圈</span>
-                <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不主动聊天</span>
-                <linshe-switch v-model="detail.proactiveDisabled" size="sm" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
-              </div>
-              <div class="toolbar-item toolbar-item-toggle">
-                <span>不发生奇遇</span>
-                <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
-              </div>
-              <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
-                <span>设置 Lora</span>
-                <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
-                <span v-else class="toolbar-badge">未配置</span>
-              </div>
-              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
-              <!-- <div class="toolbar-item toolbar-item-btn" @click="openOutfitModal">
-                <span>外观 / 形态</span>
-                <span v-if="activeOutfitName" class="toolbar-badge active">{{ activeOutfitName }}</span>
-                <span v-else class="toolbar-badge">未启用</span>
-              </div> -->
-            </div>
             <!-- 头像 -->
             <div class="detail-avatar-row">
               <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
@@ -129,19 +103,53 @@
               <label class="fl" style="margin-top:12px">人格提示词</label>
               <linshe-input v-model="detail.editPrompt" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
             </div>
+
+            <!-- 移动端「更多设置」：桌面端是右侧悬浮面板，手机端收进正文末尾，保持内容优先 -->
+            <div class="mobile-detail-toolbar" v-if="isMobile">
+              <div class="toolbar-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                </svg>
+                更多设置
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不看ta的朋友圈</span>
+                <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不主动聊天</span>
+                <linshe-switch v-model="detail.proactiveDisabled" size="sm" :disabled="detail.proactiveToggling" @change="toggleProactiveDisabled" aria-label="不主动聊天" />
+              </div>
+              <div class="toolbar-item toolbar-item-toggle">
+                <span>不发生奇遇</span>
+                <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
+                <span>设置 Lora</span>
+                <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
+                <span v-else class="toolbar-badge">未配置</span>
+              </div>
+              <!-- 外观 / 形态入口暂时隐藏：角色外观系统数据层与注入已就绪，待开放时取消注释即可 -->
+              <!-- <div class="toolbar-item toolbar-item-btn" @click="openOutfitModal">
+                <span>外观 / 形态</span>
+                <span v-if="activeOutfitName" class="toolbar-badge active">{{ activeOutfitName }}</span>
+                <span v-else class="toolbar-badge">未启用</span>
+              </div> -->
+            </div>
+
+            <!-- 角色立绘（手机端）：桌面端是左侧悬浮窗，手机端收在正文末尾 -->
+            <CharacterStandingPanel v-if="isMobile" inline :character="character" :ctl="standingPanel" />
           </div>
 
           <!-- 操作栏 sticky footer -->
           <div class="modal-footer">
             <div class="detail-actions">
               <linshe-button variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
-              <div class="detail-actions-right">
-                <div class="recruit-appearance-hint">
-                  外观描述补充tag查阅
-                  <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
-                </div>
-                <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
+              <div class="recruit-appearance-hint">
+                外观描述补充tag查阅
+                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
               </div>
+              <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
             </div>
           </div>
         </div>
@@ -183,90 +191,8 @@
           </div>
         </div>
 
-        <!-- 悬浮立绘窗（桌面端）：延迟弹出；标题栏开合功能区，点击立绘查看大图 -->
-        <div class="detail-standing" v-if="!isMobile">
-          <div class="standing-panel">
-            <div
-              class="standing-panel-header"
-              role="button"
-              tabindex="0"
-              :title="standingFuncOpen ? '收起立绘操作' : '展开立绘操作'"
-              @click="toggleStandingFunc"
-              @keydown.enter.prevent="toggleStandingFunc"
-              @keydown.space.prevent="toggleStandingFunc"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
-              </svg>
-              角色立绘
-              <svg class="standing-chevron" :class="{ open: standingFuncOpen }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </div>
-            <div
-              class="standing-stage"
-              role="button"
-              tabindex="0"
-              :title="standingFuncOpen && character?.standing_url ? '再点一次查看大图' : '点击展开立绘操作'"
-              @click="onStandingStageClick"
-              @keydown.enter.prevent="onStandingStageClick"
-              @keydown.space.prevent="onStandingStageClick"
-            >
-              <img v-if="character?.standing_url" :src="standingDisplayUrl" class="standing-img" alt="" />
-              <div v-else-if="!standingBusyForChar" class="standing-empty">
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-                </svg>
-                <p class="standing-empty-title">尚未生成立绘</p>
-                <p class="standing-empty-hint"></p>
-              </div>
-              <!-- 生成中：扫描线 + 轮播趣语（与角色招募同款） -->
-              <div v-if="standingBusyForChar" class="standing-loading">
-                <div class="standing-scan-line"></div>
-                <div class="standing-spinner"></div>
-                <span class="standing-loading-text">{{ standingReimageing ? '正在重绘立绘…' : '正在生成立绘…' }}</span>
-                <span class="standing-loading-tip">{{ standingTip }}</span>
-              </div>
-            </div>
-            <Transition name="standing-func">
-              <div v-if="standingFuncOpen" class="standing-func">
-                <div class="standing-func-input-row">
-                  <div
-                    class="standing-mode-badge"
-                    role="button"
-                    tabindex="0"
-                    :class="[standingMode, { 'is-disabled': standingBusy }]"
-                    :aria-disabled="standingBusy || undefined"
-                    title="切换立绘姿势风格（全局设置）"
-                    @click="toggleStandingMode"
-                    @keydown.enter.prevent="toggleStandingMode"
-                    @keydown.space.prevent="toggleStandingMode"
-                  >{{ standingMode === 'dynamic' ? '张力！' : '普通' }}</div>
-                  <linshe-input
-                    v-model="standingRequirement"
-                    size="sm"
-                    placeholder="额外立绘需求"
-                    @keyup.enter="generateStanding"
-                  />
-                </div>
-                <div class="standing-func-btns">
-                  <template v-if="standingHasPrompt">
-                    <linshe-button variant="secondary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">重新生成提示词</linshe-button>
-                    <linshe-button variant="primary" size="sm" :loading="standingReimageing" :disabled="standingBusy" @click="regenerateStanding">再次Roll图</linshe-button>
-                  </template>
-                  <template v-else>
-                    <linshe-button variant="primary" size="sm" :loading="standingGenerating" :disabled="standingBusy" @click="generateStanding">生成立绘</linshe-button>
-                  </template>
-                </div>
-                <div class="standing-manage-btns">
-                  <linshe-button variant="secondary" size="sm" :disabled="standingBusy || standingUploading" @click="openStandingUpload">上传立绘</linshe-button>
-                  <linshe-button v-if="character?.standing_url" variant="ghost" size="sm" :disabled="standingBusy" @click="removeStanding">删除立绘</linshe-button>
-                </div>
-              </div>
-            </Transition>
-            <input ref="standingUploadInput" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onStandingUploadChange" />
-          </div>
-        </div>
+        <!-- 角色立绘（桌面端）：主面板左侧的悬浮窗；手机端改为正文末尾的内联卡（见 modal-body-detail 末尾） -->
+        <CharacterStandingPanel v-if="!isMobile" :character="character" :ctl="standingPanel" />
 
         <!-- ── 立绘大图查看（重新生成 / HiresFix 放大 / 下载；不放删除，面板里有）── 放在 overlay 内以复用其 10000 层级，盖过主面板 ── -->
         <ImageLightbox
@@ -496,6 +422,7 @@ import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 
 const props = defineProps({
@@ -986,7 +913,8 @@ async function saveOutfits() {
 }
 
 // ═══════════════════════════════════════
-// 立绘面板（左侧悬浮窗）
+// 立绘面板：状态与请求逻辑都在本组件，展示层见 CharacterStandingPanel.vue
+// （桌面端是左侧悬浮窗、手机端是正文末尾的内联卡，两者共用下面的 standingPanel 接口）
 // ═══════════════════════════════════════
 
 const standingFuncOpen = ref(false)
@@ -1148,8 +1076,8 @@ async function removeStanding() {
   }
 }
 
-// 上传本地图片作为立绘：替换当前立绘（已生成立绘时也允许，AI 重绘会覆盖）
-const standingUploadInput = ref(null)
+// 上传本地图片作为立绘：替换当前立绘（已生成立绘时也允许，AI 重绘会覆盖）。
+// 文件由面板里的隐藏 input 选好再传进来 —— DOM 细节归面板，校验与请求留在弹窗里。
 const standingUploading = ref(false)
 
 function readFileAsDataURL(file) {
@@ -1161,14 +1089,7 @@ function readFileAsDataURL(file) {
   })
 }
 
-function openStandingUpload() {
-  if (standingBusy.value || standingUploading.value) return
-  standingUploadInput.value?.click()
-}
-
-async function onStandingUploadChange(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
+async function uploadStandingFile(file) {
   if (!file) return
   if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
     toastFn('请选择 PNG / JPG / WEBP 图片', 'error')
@@ -1199,6 +1120,30 @@ async function onStandingUploadChange(e) {
     standingUploading.value = false
   }
 }
+
+// 立绘面板接口：状态与方法都留在弹窗里（弹窗会因打开 LoRA / 外观设置整体重建，放面板里会丢），
+// 面板只负责渲染。reactive 里的 ref 会自动解包，面板侧可以当普通值读写。
+const standingPanel = reactive({
+  funcOpen: standingFuncOpen,
+  requirement: standingRequirement,
+  hasPrompt: standingHasPrompt,
+  generating: standingGenerating,
+  reimageing: standingReimageing,
+  busy: standingBusy,
+  busyForChar: standingBusyForChar,
+  uploading: standingUploading,
+  tip: standingTip,
+  displayUrl: standingDisplayUrl,
+  mode: standingMode,
+  toggleFunc: toggleStandingFunc,
+  onStageClick: onStandingStageClick,
+  toggleMode: toggleStandingMode,
+  generate: generateStanding,
+  regenerate: regenerateStanding,
+  remove: removeStanding,
+  uploadFile: uploadStandingFile,
+})
+
 </script>
 
 <style scoped>
@@ -1231,6 +1176,9 @@ async function onStandingUploadChange(e) {
 .modal-body-detail .prompt-textarea::-webkit-scrollbar-track { background: transparent; }
 .modal-body-detail .prompt-textarea::-webkit-scrollbar-thumb { background: var(--text-secondary); border-radius: 5px; }
 .modal-body-detail .prompt-textarea::-webkit-scrollbar-thumb:hover { background: var(--text-primary); }
+
+/* 面板高度：桌面端固定 95vh（原写作行内 style，移动端要按遮罩留白重算高度，故收进类里） */
+.detail-panel { height: 95vh; max-height: 95vh; }
 
 .modal-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;align-items: center;
@@ -1358,143 +1306,6 @@ async function onStandingUploadChange(e) {
 .float-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
 .float-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
-/* ═══ 悬浮立绘窗（左侧，与右侧 float 面板镜像） ═══ */
-.detail-standing {
-  position: absolute;
-  right: calc(50% + min(450px, 48.5vw) + 16px);
-  top: 2.5vh;
-  width: 300px;
-  z-index: 0;
-}
-.standing-panel {
-  display: flex; flex-direction: column;
-  padding: 12px;
-  border-radius: 18px;
-  background: var(--side-panel-bg);
-  border: var(--side-panel-border);
-  box-shadow: var(--side-panel-shadow);
-  /* 主面板 modal-pop(0.28s) 结束后再延迟 0.5s，与右侧 float-emerge 镜像向左弹出；
-     初始多藏 60px，避免面板 0.92 缩放阶段露出左缘 */
-  animation: standing-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.5s both;
-}
-@keyframes standing-emerge {
-  0%   { transform: translateX(calc(100% + 60px)); }
-  100% { transform: translateX(0); }
-}
-.standing-panel-header {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700; letter-spacing: 1px;
-  color: var(--text-secondary);
-  margin: 2px 2px 10px;
-  cursor: pointer; user-select: none;
-  border-radius: 8px; padding: 2px 4px;
-  transition: color 0.15s, background 0.15s;
-}
-.standing-panel-header:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
-.standing-chevron { margin-left: auto; transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.standing-chevron.open { transform: rotate(180deg); }
-.standing-stage {
-  position: relative;
-  aspect-ratio: 1 / 2;
-  max-height: calc(95vh - 250px);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--bg-secondary);
-  border: 1px solid var(--glass-border);
-  cursor: pointer;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-.standing-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.standing-img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.standing-empty {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; padding: 16px 14px; text-align: center;
-  color: var(--text-secondary);
-}
-.standing-empty svg { opacity: 0.3; color: var(--text-secondary); flex-shrink: 0; }
-.standing-empty-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0; }
-.standing-empty-hint { font-size: 11px; line-height: 1.6; color: var(--text-secondary); margin: 0; }
-/* 生成中遮罩：扫描线 + 轮播趣语（与角色招募同款） */
-.standing-loading {
-  position: absolute; inset: 0; z-index: 1;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; padding: 16px; text-align: center;
-  background: var(--glass-bg);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  overflow: hidden;
-}
-.standing-scan-line {
-  position: absolute; left: 10%; right: 10%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: standing-scan-sweep 2s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.6), 0 0 8px rgba(var(--accent-rgb), 0.3);
-}
-@keyframes standing-scan-sweep {
-  0%   { top: 10%; opacity: 0.2; }
-  25%  { top: 90%; opacity: 1; }
-  50%  { top: 90%; opacity: 0.2; }
-  75%  { top: 10%; opacity: 1; }
-  100% { top: 10%; opacity: 0.2; }
-}
-.standing-spinner {
-  width: 22px; height: 22px;
-  border: 2.5px solid rgba(var(--accent-rgb), 0.2);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: standing-spin 0.7s linear infinite;
-}
-@keyframes standing-spin { to { transform: rotate(360deg); } }
-.standing-loading-text {
-  font-size: 13px; font-weight: 700; color: var(--accent);
-  animation: standing-tip-pulse 1.2s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-.standing-loading-tip {
-  font-size: 11px; line-height: 1.6; color: var(--text-secondary);
-  animation: standing-tip-pulse 1.2s ease-in-out infinite;
-}
-@keyframes standing-tip-pulse {
-  0%, 100% { opacity: 0.4; transform: scale(0.97); }
-  50%      { opacity: 1;   transform: scale(1); }
-}
-.standing-func { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
-.standing-func-input-row { display: flex; align-items: center; gap: 8px; }
-.standing-func-input-row .ls-input { flex: 1; width: auto; min-width: 0; }
-/* 姿势风格切换徽标：与表情包管理 emoji-mode-badge 同款双色胶囊 */
-.standing-mode-badge {
-  flex-shrink: 0;
-  cursor: pointer;
-  border: none;
-  font-family: inherit;
-  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-  user-select: none;
-  text-align: center;
-  -webkit-tap-highlight-color: transparent;
-}
-.standing-mode-badge.normal { background: color-mix(in srgb, var(--fun-teal) 12%, transparent); color: var(--fun-teal); }
-.standing-mode-badge.dynamic { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
-.standing-mode-badge:hover:not(.is-disabled) { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
-.standing-mode-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.standing-mode-badge.is-disabled { opacity: 0.5; cursor: default; }
-.standing-func-btns { display: flex; align-items: center; gap: 8px; }
-.standing-func-btns > :first-child { flex: 1; }
-/* 上传 / 删除立绘并排各占一半 */
-.standing-manage-btns { display: flex; align-items: center; gap: 8px; }
-.standing-manage-btns > * { flex: 1; min-width: 0; }
-.standing-func-enter-active { transition: all 0.32s cubic-bezier(0.3, 1.35, 0.55, 1); overflow: hidden; }
-.standing-func-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
-.standing-func-enter-from, .standing-func-leave-to { opacity: 0; max-height: 0; transform: translateY(-8px); }
-.standing-func-enter-to, .standing-func-leave-from { opacity: 1; max-height: 150px; transform: translateY(0); }
 
 /* ═══ 操作栏 ═══ */
 .modal-footer {
@@ -1504,10 +1315,11 @@ async function onStandingUploadChange(e) {
   background: inherit;
 }
 /* 撑满 footer：全局 .modal-footer 是 justify-content:flex-end 的 flex 容器，
-   不撑满会把「删除角色」和「保存」挤到右下角；撑满后由 .detail-actions-right 的 margin-left:auto 分列两端 */
+   不撑满会把「删除角色」和「保存」挤到右下角；撑满后由 .recruit-appearance-hint 的
+   margin-left:auto 把「说明 + 保存」推到右端，与左侧「删除角色」分列两端 */
 .detail-actions { flex: 1; min-width: 0; display: flex; align-items: center; margin-top: 0; gap: 10px; }
-.detail-actions-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .recruit-appearance-hint {
+  margin-left: auto;
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -1616,32 +1428,65 @@ async function onStandingUploadChange(e) {
 .lora-civitai-link:hover, .lora-tutorial-link:hover { opacity: 1; text-decoration: underline; }
 .lora-tutorial-link { margin-left: 6px; }
 
-/* ═══ 移动端 ═══ */
+/* ═══ 移动端 ═══
+   几何与 LinsheModal 的移动端段落同口径：遮罩只收留白（8px + 安全区），面板保留
+   圆角 / 描边 / 白内衬的浮层观感 —— 不要再退回 100vw/100dvh + border-radius:0 的全屏面板。
+   正文改成「内容优先」的纵向流：头像 → 内容卡 → 更多设置，底部操作区固定。 */
 @media (max-width: 767px) {
-  .modal-panel, .modal-wide { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
-  .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .modal-overlay {
+    padding: calc(8px + env(safe-area-inset-top, 0px))
+             calc(8px + env(safe-area-inset-right, 0px))
+             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(8px + env(safe-area-inset-left, 0px));
+  }
+  .modal-panel, .modal-wide { width: 100%; max-width: 100%; max-height: 100%; }
+  .detail-panel { height: 100%; max-height: 100%; }
+
+  /* 安全区由上方的遮罩留白让出，头部 / 底部不再各自叠加 */
+  .modal-header { padding: 12px 16px; }
   .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
   .modal-close { flex-shrink: 0; }
-  .modal-body { padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
-  .detail-avatar-row { gap: 10px; margin-bottom: 12px; }
-  .detail-avatar { width: 52px; height: 52px; font-size: 22px; }
-  .detail-actions { flex-wrap: wrap; gap: 8px; }
-  .detail-actions-right { margin-left: 0; flex-wrap: wrap; gap: 8px; }
-  .modal-footer { padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
-  .prompt-textarea { min-height: 350px; font-size: 16px; }
-  .modal-wide .prompt-textarea { font-size: 16px; }
-  .modal-body-detail { overflow-y: auto; }
-  .modal-body-detail .preview-card { flex: none; }
-  .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
-  .modal-wide .fi { font-size: 16px; }
-  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
-  /* .detail-rel-btn 移动端覆写已在全局 components.css */
+  .modal-body { padding: 4px 14px 14px; }
+  .modal-footer { padding: 10px 14px 14px; }
 
-  .mobile-detail-toolbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 0 12px; }
-  .toolbar-item { display: flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 8px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; justify-content: center; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
-  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.16); }
-  .toolbar-item-toggle { cursor: default; justify-content: space-between; background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 500; }
-  .toolbar-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg-muted, #f0f0f0); color: var(--text-secondary); flex-shrink: 0; }
+  .modal-body-detail { overflow-y: auto; }
+  .modal-body-detail .preview-card { flex: none; padding: 14px; border-radius: 12px; }
+  .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
+  .modal-wide .fi, .modal-wide .prompt-textarea { font-size: 16px; }
+
+  /* 头像行：允许换行，誓约徽章不再把「更换头像 / 移除」挤出屏幕 */
+  .detail-avatar-row { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 0 2px; }
+  .detail-avatar { width: 56px; height: 56px; font-size: 24px; }
+
+  /* 角色关系：标题独占一行，入口按钮并排平分（原先是标题被两个按钮挤成两行） */
+  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+  .detail-rel-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 10px; }
+  .detail-rel-btns, .detail-rel-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .detail-rel-btn { width: 100%; justify-content: center; }
+
+  /* 角色名 / 英文名：窄屏改单列，别把两个输入框挤进半屏 */
+  .detail-name-row { flex-direction: column; gap: 10px; }
+
+  /* 底部操作区：说明独占一行，删除 / 保存分列两端 */
+  .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+  .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
+
+  /* 更多设置：与桌面端右侧悬浮面板同款卡片 */
+  .mobile-detail-toolbar {
+    display: flex; flex-direction: column;
+    margin-top: 14px; padding: 8px;
+    border-radius: 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+  }
+  .toolbar-title { display: flex; align-items: center; gap: 5px; margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-secondary); }
+  .toolbar-title svg { color: var(--accent); }
+  .toolbar-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 6px; border-radius: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .toolbar-item + .toolbar-item { border-top: 1px solid var(--border); }
+  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.08); }
+  .toolbar-item-toggle { cursor: default; }
+  .toolbar-item-btn { color: var(--accent); font-weight: 600; }
+  .toolbar-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); flex-shrink: 0; }
   .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
   .form-group .fl { font-size: 12px; }

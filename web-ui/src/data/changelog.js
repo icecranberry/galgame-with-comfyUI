@@ -32,6 +32,15 @@ export const CHANGELOG_TITLE = '更新说明'
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
   {
+    version: 'v3.4.1',
+    date: '2026-09-11',
+    title: '把歪掉的地方扶正',
+    summary: '手机端开箱那一屏站歪了，扶一下。',
+    items: [
+      '手机端背包开箱时，揭晓出来的道具卡不再往右偏，图标、名字和说明文字都居中显示了',
+    ],
+  },
+  {
     version: 'v3.4.0',
     date: '2026-09-10',
     title: '世界（内测）功能上线，页面视觉UI升级',

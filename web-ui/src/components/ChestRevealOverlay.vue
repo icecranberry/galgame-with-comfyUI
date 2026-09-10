@@ -158,13 +158,16 @@ onUnmounted(stopTips)
   color: #f3e6c8;
   text-align: center;
 }
-/* 舞台：宝箱与揭示道具共用同一坐标系，道具悬浮其上不影响宝箱布局 */
+/* 舞台：宝箱与揭示道具共用同一坐标系，道具悬浮其上不影响宝箱布局。
+   舞台铺满整屏只作定位参照，宝箱自己收窄居中：这样窄屏下道具卡
+   （min(360px, 86vw)）比宝箱宽时仍按整屏居中，不会被挤偏。 */
 .fs-stage {
   position: relative;
-  width: min(430px, 64vw);
+  width: 100%;
 }
 .fs-chest-wrap {
-  width: 100%;
+  width: min(430px, 64vw);
+  margin: 0 auto;
   transform-origin: 50% 100%;
 }
 /* 蓄力期可戳：点击宝箱果冻式弹动一下，作为等待期的即时正反馈 */
