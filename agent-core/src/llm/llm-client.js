@@ -206,7 +206,7 @@ export async function testLlmConnection({ baseURL, apiKey, model, headers = {}, 
     throw new Error('API 地址格式无效');
   }
 
-  const effectiveModel = model || config.llm.model || 'deepseek-v4-flash';
+  const effectiveModel = model || config.llm.model || 'deepseek-flash';
   const effectiveApiKey = apiKey || config.llm.apiKey || '';
   const effectiveHeaders = headers && typeof headers === 'object' && !Array.isArray(headers) ? headers : {};
   const effectiveExtraBody = extraBody && typeof extraBody === 'object' && !Array.isArray(extraBody) ? extraBody : {};
@@ -241,7 +241,7 @@ export async function testLlmConnection({ baseURL, apiKey, model, headers = {}, 
   };
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-v4-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
   try {
@@ -404,7 +404,7 @@ export async function* chatStream(messages, opts = {}) {
 }
 
 async function* _chatStreamInner(messages, {
-  model = config.llm.model || 'deepseek-v4-flash',
+  model = config.llm.model || 'deepseek-flash',
   max_tokens = 4096,
   temperature = 0.7,
   thinking,

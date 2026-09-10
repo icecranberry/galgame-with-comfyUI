@@ -357,7 +357,7 @@
         <linshe-input v-if="isCustomBaseURL" v-model="llmBaseURL" class="fi" placeholder="https://your-api-endpoint/v1" @input="markLlmDirty" />
 
         <!-- 模型 -->
-        <label class="fl llm-label">模型（建议deepseek-v4-flash）</label>
+        <label class="fl llm-label">模型（建议点击自动获取选择deepseek-flash）</label>
         <div class="llm-model-row">
           <linshe-select
             ref="llmModelSelect"
@@ -366,7 +366,7 @@
             :options="llmModelOptions"
             searchable
             allow-free-input
-            placeholder="deepseek-v4-flash"
+            placeholder="deepseek-flash"
             aria-label="模型"
           />
           <linshe-button
@@ -736,6 +736,45 @@
         </div>
       </div>
 
+      <!-- 更新说明：重新查看历次更新内容（平时只在版本变化后自动弹一次） -->
+      <div class="card memory-settings-card">
+        <div class="memory-settings-header">
+          <div>
+            <h3>更新说明</h3>
+            <p>查看历次版本都改了什么，内容随版本一同发布</p>
+          </div>
+        </div>
+
+        <div
+          role="button"
+          tabindex="0"
+          class="memory-settings-entry sheen"
+          aria-label="打开更新说明"
+          @click="openChangelog"
+          @keydown.enter.prevent="openChangelog"
+          @keydown.space.prevent="openChangelog"
+        >
+          <span class="memory-entry-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M6 3h9l4 4v14H6zM15 3v4h4M9 12h7M9 16h5" />
+            </svg>
+          </span>
+          <span class="memory-entry-copy">
+            <span class="memory-entry-title">
+              {{ changelogLatest ? `最新 ${changelogLatest.version}` : '更新说明' }}
+            </span>
+            <span class="memory-entry-desc">
+              {{ changelogTotal ? `共 ${changelogTotal} 个版本 · 点击查看全文` : '暂无更新条目' }}
+            </span>
+          </span>
+          <span class="memory-entry-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </div>
+      </div>
+
     </div>
 
     <!-- 收藏画师串弹窗 -->
@@ -900,6 +939,7 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
+import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
 const settingsStore = useSettingsStore()
 const themeModes = THEME_MODES
@@ -908,6 +948,15 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
 const confirmFn = inject('confirm')
+const showChangelogFn = inject('showChangelog', null)
+
+// ── 更新说明入口：显示最新版本号与条目数，点击重新打开弹窗 ──
+const changelogLatest = computed(() => CHANGELOG_ENTRIES[0] || null)
+const changelogTotal = computed(() => CHANGELOG_ENTRIES.length)
+function openChangelog() {
+  if (showChangelogFn) showChangelogFn()
+  else toastFn?.('更新说明弹窗未就绪，请刷新页面重试', 'info')
+}
 
 // ── 移动端滚动方向感知：下滑隐藏标题，上滑显示 ──
 const scrollEl = ref(null)
@@ -1103,14 +1152,12 @@ const thinkingModeOptions = [
   { value: 'omit', label: '不传' },
 ]
 const isCustomBaseURL = ref(false)
-const presetURLs = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1']
-const llmBaseURLOptions = computed(() => [
+// 目前只内置 DeepSeek 一个官方地址，其余服务统一走「自定义…」手填
+const presetURLs = ['https://api.deepseek.com']
+const llmBaseURLOptions = [
   { value: 'https://api.deepseek.com', label: 'DeepSeek' },
-  { value: 'https://dashscope.aliyuncs.com/compatible-mode/v1', label: '通义千问 (DashScope)' },
-  { value: 'https://api.moonshot.cn/v1', label: 'Moonshot (Kimi)' },
-  { value: 'https://api.openai.com/v1', label: 'OpenAI' },
   { value: '', label: '自定义…' },
-])
+]
 const llmBaseURLSelectVal = computed({
   get: () => isCustomBaseURL.value ? '' : llmBaseURL.value,
   set: (val) => {
@@ -1183,7 +1230,7 @@ async function applyRelayConfig(station) {
   try {
     isCustomBaseURL.value = true
     llmBaseURL.value = station.url
-    llmModel.value = 'deepseek-v4-flash'
+    llmModel.value = 'deepseek-flash'
     llmThinkingMode.value = 'disabled'
     llmHeadersEnabled.value = false
     llmHeadersText.value = '{}'
@@ -1193,7 +1240,7 @@ async function applyRelayConfig(station) {
     const result = await addLlmProfile(name, {
       apiKey: '',
       baseURL: station.url,
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       thinkingMode: 'disabled',
       headers: {},
       extraBody: {},

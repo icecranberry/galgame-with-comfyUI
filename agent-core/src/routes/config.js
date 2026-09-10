@@ -21,6 +21,10 @@ import { reindexAllMemories } from '../services/memory/memoryRepository.js';
 
 const router = Router();
 
+// 内置官方地址（仅 DeepSeek，其余走自定义中转站）。
+// 命中这些地址时视为官方直连：用于自动关闭「后台 LLM 任务队列」等仅自定义场景可用的开关。
+const PRESET_LLM_URLS = ['https://api.deepseek.com'];
+
 // GET/PUT /api/config/memory — 聊天记忆模型配置（Key 仅保存，不回显）
 router.get('/memory', (_req, res) => {
   res.json({ ...getMemorySettings(), enabled: config.features.memory });
@@ -242,9 +246,8 @@ router.put('/llm', (req, res) => {
   }
   resetClient();
 
-  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1'];
   const effectiveUrl = baseURL || config.llm.baseURL;
-  if (effectiveUrl && presets.includes(effectiveUrl) && config.features.serializeBackgroundLLM) {
+  if (effectiveUrl && PRESET_LLM_URLS.includes(effectiveUrl) && config.features.serializeBackgroundLLM) {
     updateFeatureFlag('serializeBackgroundLLM', false);
     console.log('[config] serializeBackgroundLLM auto-disabled (preset LLM selected)');
   }
@@ -393,8 +396,7 @@ router.post('/llm/profiles/:id/activate', (req, res) => {
   resetClient();
 
   // preset 检测：与 PUT /api/config/llm 一致
-  const presets = ['https://api.deepseek.com', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1', 'https://api.openai.com/v1'];
-  if (presets.includes(config.llm.baseURL) && config.features.serializeBackgroundLLM) {
+  if (PRESET_LLM_URLS.includes(config.llm.baseURL) && config.features.serializeBackgroundLLM) {
     updateFeatureFlag('serializeBackgroundLLM', false);
   }
 

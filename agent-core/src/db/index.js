@@ -1696,7 +1696,7 @@ function migrateLlmProfiles(db) {
       name: '默认配置',
       apiKey: config.llm.apiKey || '',
       baseURL: config.llm.baseURL || 'https://api.deepseek.com',
-      model: config.llm.model || 'deepseek-v4-flash',
+      model: config.llm.model || 'deepseek-flash',
       headers: config.llm.headers || {},
       extraBody: config.llm.extraBody || {},
       serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,

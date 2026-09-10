@@ -59,6 +59,15 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 3. 暖色主题沿用人物详情卡 pr 前口径（对齐 LoRA 设置窗）：暖纸外壳 + 白色内衬，标题栏与 `#footer` 留在外壳上、白色内衬只包正文（`--modal-*` token，见 `styles/tokens.css`）；暗夜保持 Cel Glow 深色玻璃；Esc / 点遮罩关闭
 4. 调整弹窗风格只改 `LinsheModal.vue` 与 `tokens.css` 的 `--modal-*`，不要在各页面里覆盖组件皮肤
 
+## 更新说明（ChangelogDialog）
+
+面向用户的改动通过更新说明弹窗告知，内容与标志位机制如下，不要再另造一套：
+
+1. 内容全部写在 `web-ui/src/data/changelog.js` 的 `CHANGELOG_ENTRIES` 里，**最新的条目放最前面**；组件 `web-ui/src/components/ChangelogDialog.vue` 只负责渲染，不要在组件里写文案
+2. `changelog.js` 里的 `export const CHANGELOG_FLAG = '...'` 由 `scripts/tag.mjs` 自动维护（值 = 该文件除本行外内容的 sha256 前 12 位），**禁止手写**。想让用户重新看到弹窗，改文案即可
+3. 弹窗触发口径在 `App.vue`：拿 `CHANGELOG_FLAG` 和 `localStorage['linshe_changelog_seen']` 比，不一致才弹；关闭时回写。因此同一份更新说明只弹一次，首次启动必弹
+4. 该检查刻意写在**独立的 `onMounted`** 里，不依赖角色加载 / SSE 等启动流程，改动那段启动代码时请勿把两者合并
+
 ## LLM 输出
 
 编写或修改 LLM 生成相关的 prompt 时：

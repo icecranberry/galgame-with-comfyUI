@@ -27,6 +27,7 @@
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
   <InstallGuideDialog ref="guideDialog" />
+  <ChangelogDialog ref="changelogDialog" @close="onChangelogClose" />
   <ImageEditTaskFloater />
 
   <!-- 手机端访问提示 Toast -->
@@ -53,8 +54,10 @@ import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import Toast from './components/Toast.vue'
 import InstallGuideDialog from './components/InstallGuideDialog.vue'
+import ChangelogDialog from './components/ChangelogDialog.vue'
 import ImageEditTaskFloater from './components/ImageEditTaskFloater.vue'
 import { MAIBOT_AFTER_START_STEPS, MAIBOT_INSTALL_STEPS, MAIBOT_INTRO_TEXT } from './data/maibotTutorial.js'
+import { CHANGELOG_FLAG } from './data/changelog.js'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
@@ -64,6 +67,7 @@ const route = useRoute()
 const confirmDialog = ref(null)
 const toastEl = ref(null)
 const guideDialog = ref(null)
+const changelogDialog = ref(null)
 const themeAutoTimer = ref(null)
 
 // ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
@@ -112,6 +116,41 @@ provide('confirm', confirm)
 provide('toast', toast)
 provide('showGuide', showGuide)
 provide('showInstallGuide', showInstallGuide)
+
+// ══════════════════════════════════════════════════
+// 更新说明 — 「内容变了就弹一次」
+//
+// CHANGELOG_FLAG 由 `npm run tag` 从 src/data/changelog.js 的内容哈希生成，
+// 用户浏览器里存着上次看过的值。两者不一致 = 首次启动，或更新说明被改过 → 弹一次；
+// 关闭时把当前标志位写回去，于是同一个版本只会弹一次。
+// ══════════════════════════════════════════════════
+const CHANGELOG_SEEN_KEY = 'linshe_changelog_seen'
+
+function readChangelogSeen() {
+  try {
+    return localStorage.getItem(CHANGELOG_SEEN_KEY)
+  } catch {
+    return null // 隐私模式等场景下 localStorage 不可用：退化为每次启动都弹
+  }
+}
+
+function markChangelogSeen() {
+  try {
+    if (CHANGELOG_FLAG) localStorage.setItem(CHANGELOG_SEEN_KEY, CHANGELOG_FLAG)
+  } catch {}
+}
+
+/** 关闭即视为已读（Esc / 点遮罩 / 「我知道了」都走这里） */
+function onChangelogClose() {
+  markChangelogSeen()
+}
+
+/** 供设置页手动重新打开 */
+function showChangelog() {
+  changelogDialog.value?.open()
+}
+
+provide('showChangelog', showChangelog)
 
 // ══════════════════════════════════════════════════
 // 移动端响应式 — Sidebar 抽屉状态
@@ -205,6 +244,16 @@ onMounted(async () => {
     const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash
     window.history.replaceState(null, '', newUrl)
   }
+})
+
+// ── 更新说明弹窗：首次启动 / 更新说明内容有变化时弹一次 ──
+// 刻意独立成一个 onMounted：它不依赖角色加载、SSE 等任何启动流程，
+// 上面那段万一中途出错，更新说明也照样能弹出来。
+onMounted(() => {
+  if (!CHANGELOG_FLAG) return
+  if (readChangelogSeen() === CHANGELOG_FLAG) return
+  // 稍作延迟，避免和首屏 page 过渡动画抢注意力
+  window.setTimeout(() => changelogDialog.value?.open(), 400)
 })
 
 onUnmounted(() => {

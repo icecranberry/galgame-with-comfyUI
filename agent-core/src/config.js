@@ -12,7 +12,7 @@ dotenv.config({ path: envPath });
 // 每日免费鸡蛋：opencode zen 免费端点（无需 API Key，按 IP 限流）
 const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
 // 免费模型轮换顺序：deepseek → MiMo → Hy3；本轮失败过的模型只记内存，下次开启重新开始
-export const FREE_EGG_MODELS = ['deepseek-v4-flash-free', 'mimo-v2.5-free', 'hy3-free'];
+export const FREE_EGG_MODELS = ['deepseek-flash-free', 'mimo-v2.5-free', 'hy3-free'];
 const FREE_EGG_MODEL = FREE_EGG_MODELS[0];
 
 export const config = {
@@ -29,7 +29,7 @@ export const config = {
     freeEgg: false,
     _apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
     _baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-    _model: process.env.LLM_MODEL || 'deepseek-v4-flash',
+    _model: process.env.LLM_MODEL || 'deepseek-flash',
     _thinkingMode: ['enabled', 'disabled', 'omit'].includes(process.env.LLM_THINKING_MODE)
       ? process.env.LLM_THINKING_MODE
       : 'disabled',
@@ -587,7 +587,7 @@ export function addLlmProfile(name, overrides = {}) {
     name: name.trim(),
     apiKey: overrides.apiKey !== undefined ? overrides.apiKey : '',
     baseURL: overrides.baseURL !== undefined ? overrides.baseURL : (config.llm.baseURL || 'https://api.deepseek.com'),
-    model: overrides.model !== undefined ? overrides.model : (config.llm.model || 'deepseek-v4-flash'),
+    model: overrides.model !== undefined ? overrides.model : (config.llm.model || 'deepseek-flash'),
     thinkingMode: overrides.thinkingMode !== undefined ? overrides.thinkingMode : (config.llm.thinkingMode || 'disabled'),
     headers: overrides.headers !== undefined ? overrides.headers : (config.llm.headers || {}),
     extraBody: overrides.extraBody !== undefined ? overrides.extraBody : (config.llm.extraBody || {}),
