@@ -1,10 +1,13 @@
 /**
  * 用户画像提取器
  *
- * 每 10 条用户消息触发一次，从对话中提取用户的外貌、性格、偏好特征，
- * 以角色视角存入 user_portraits 表。
+ * 每 10 条用户消息触发一次，从对话中提取用户的性格与偏好特征，
+ * 以角色视角存入 user_portraits 表（appearance 维度已移除，用户外观由 config.user.appearance 自述）。
  *
  * 每个角色独立维护其"眼中"的用户画像，反映该角色对用户的独特认知。
+ *
+ * 去重口径：一次提取只做一次批量嵌入（全部待写入特征 + 相关维度的全部已有画像），
+ * 而不是每条新特征都重新嵌入一遍已有画像——后者是 O(N) 次重复远端调用，N 随画像增长。
  */
 
 import { getDb, getSystemRules } from '../db/index.js';
@@ -26,40 +29,55 @@ function cosineSimilarity(a, b) {
 }
 
 /**
- * 向量相似度去重：检查新 trait 是否与已有 portrait 语义重复
+ * 向量相似度去重（批量版）
+ *
+ * @param {number} characterId
+ * @param {{ type: string, content: string }[]} candidates 已通过格式校验的待写入特征
+ * @returns {Promise<{ type: string, content: string }[]>} 过滤掉语义重复后的特征
  */
-async function checkDuplicate(characterId, traitType, content) {
+async function filterDuplicates(characterId, candidates) {
+  if (candidates.length === 0) return [];
   const db = getDb();
+  const existingRows = db.prepare(`
+    SELECT trait_type, content FROM user_portraits WHERE character_id = ?
+  `).all(characterId);
+  const existingByType = new Map();
+  for (const row of existingRows) {
+    if (!existingByType.has(row.trait_type)) existingByType.set(row.trait_type, new Set());
+    existingByType.get(row.trait_type).add(row.content);
+  }
 
-  const existing = db.prepare(`
-    SELECT id, content FROM user_portraits
-    WHERE character_id = ? AND trait_type = ?
-  `).all(characterId, traitType);
+  // 字面完全相同的（UNIQUE 约束本来也会拒绝）直接丢弃，不浪费一次嵌入
+  const kept = candidates.filter(item => !existingByType.get(item.type)?.has(item.content));
+  if (kept.length === 0) return [];
 
-  if (existing.length === 0) return false;
+  const texts = kept.map(item => item.content);
+  const existingSlots = []; // [{ type, textIndex }]
+  for (const type of new Set(kept.map(item => item.type))) {
+    for (const content of existingByType.get(type) || []) {
+      existingSlots.push({ type, textIndex: texts.length });
+      texts.push(content);
+    }
+  }
+  if (existingSlots.length === 0) return kept;
 
-  // 批量嵌入：新内容 + 已有内容
-  const texts = [content, ...existing.map(e => e.content)];
   let embeddings;
   try {
     embeddings = await embedBatch(texts);
   } catch (err) {
     // 向量服务不可用 → 静默回退，仅靠 UNIQUE 约束
     console.warn('[portraitExtractor] vector service unavailable, skip similarity check:', err.message);
-    return false;
+    return kept;
   }
+  if (!Array.isArray(embeddings) || embeddings.length !== texts.length) return kept;
 
-  const newEmb = embeddings[0];
-  const existingEmbs = embeddings.slice(1);
-
-  for (let i = 0; i < existingEmbs.length; i++) {
-    const sim = cosineSimilarity(newEmb, existingEmbs[i]);
-    if (sim > SIMILARITY_THRESHOLD) {
-      return true;
+  return kept.filter((item, index) => {
+    for (const slot of existingSlots) {
+      if (slot.type !== item.type) continue;
+      if (cosineSimilarity(embeddings[index], embeddings[slot.textIndex]) > SIMILARITY_THRESHOLD) return false;
     }
-  }
-
-  return false;
+    return true;
+  });
 }
 
 const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
@@ -165,7 +183,14 @@ export async function maybeExtractPortrait(conversationId, characterId) {
     return 0;
   }
 
-  if (newTraits.length === 0) return 0;
+  const candidates = newTraits
+    .map(trait => ({
+      type: normalizeType(trait?.type),
+      content: typeof trait?.content === 'string' ? trait.content.trim() : '',
+    }))
+    .filter(item => item.type && item.content.length >= 3);
+
+  if (candidates.length === 0) return 0;
 
   // 获取 source_msg_id（最近的 assistant 消息 ID）
   const lastMsg = db.prepare(`
@@ -181,26 +206,18 @@ export async function maybeExtractPortrait(conversationId, characterId) {
     VALUES (?, ?, ?, ?, ?)
   `);
 
+  let unique = candidates;
+  try {
+    unique = await filterDuplicates(characterId, candidates);
+  } catch (err) {
+    // 去重异常 → 静默回退，继续走 UNIQUE 约束
+    console.warn('[portraitExtractor] dedupe failed, fall back to UNIQUE constraint:', err.message);
+  }
+
   let added = 0;
-  for (const trait of newTraits) {
-    const type = normalizeType(trait.type);
-    if (!type || !trait.content || typeof trait.content !== 'string') continue;
-    const content = trait.content.trim();
-    if (content.length < 3) continue;
-
-    // 向量相似度去重：检查是否与已有 portrait 语义重复
+  for (const trait of unique) {
     try {
-      const isDup = await checkDuplicate(characterId, type, content);
-      if (isDup) {
-        // 静默跳过，不做额外日志（避免刷屏）
-        continue;
-      }
-    } catch (err) {
-      // 向量检查异常 → 静默回退，继续走 UNIQUE 约束
-    }
-
-    try {
-      const result = insert.run(characterId, type, content, 0.5, sourceMsgId);
+      const result = insert.run(characterId, trait.type, trait.content, 0.5, sourceMsgId);
       if (result.changes > 0) added++;
     } catch (err) {
       // UNIQUE 冲突忽略
@@ -222,85 +239,4 @@ function normalizeType(type) {
   if (t === 'personality' || t === 'persona') return 'personality';
   if (t === 'preference' || t === 'pref') return 'preference';
   return null;
-}
-
-/**
- * 清理已有 portrait 中的语义重复条目
- *
- * 按 (character_id, trait_type) 分组，组内通过向量相似度聚类，
- * 每个相似集群只保留最新一条（id 最大），删除其余。
- *
- * @param {number} [characterId] - 可选，指定角色 ID；不传则清理所有角色
- * @returns {Promise<{checked: number, removed: number}>} 检查数和删除数
- */
-export async function deduplicatePortraits(characterId) {
-  const db = getDb();
-
-  const where = characterId != null
-    ? 'WHERE character_id = ?'
-    : '';
-  const params = characterId != null ? [characterId] : [];
-
-  const portraits = db.prepare(`
-    SELECT id, character_id, trait_type, content
-    FROM user_portraits
-    ${where}
-    ORDER BY character_id, trait_type, id DESC
-  `).all(...params);
-
-  if (portraits.length === 0) return { checked: 0, removed: 0 };
-
-  // 按 (character_id, trait_type) 分组
-  const groups = {};
-  for (const p of portraits) {
-    const key = `${p.character_id}|${p.trait_type}`;
-    groups[key] = groups[key] || [];
-    groups[key].push(p);
-  }
-
-  let removed = 0;
-
-  for (const [key, group] of Object.entries(groups)) {
-    if (group.length <= 1) continue;
-
-    // 批量嵌入组内所有 content
-    const contents = group.map(p => p.content);
-    let embeddings;
-    try {
-      embeddings = await embedBatch(contents);
-    } catch (err) {
-      console.warn(`[deduplicatePortraits] embed failed for ${key}:`, err.message);
-      continue;
-    }
-
-    // 贪心聚类：从最新（id 最大）的开始，标记所有与其相似度 > 阈值的条目
-    const toDelete = new Set();
-    const kept = new Set();
-
-    for (let i = 0; i < group.length; i++) {
-      if (toDelete.has(i)) continue;
-      kept.add(i);
-      for (let j = i + 1; j < group.length; j++) {
-        if (toDelete.has(j)) continue;
-        const sim = cosineSimilarity(embeddings[i], embeddings[j]);
-        if (sim > SIMILARITY_THRESHOLD) {
-          toDelete.add(j);
-        }
-      }
-    }
-
-    // 删除标记的条目
-    const deleteStmt = db.prepare('DELETE FROM user_portraits WHERE id = ?');
-    for (const idx of toDelete) {
-      const portrait = group[idx];
-      deleteStmt.run(portrait.id);
-      removed++;
-    }
-  }
-
-  if (removed > 0) {
-    console.log(`[deduplicatePortraits] removed ${removed} duplicate portraits across ${Object.keys(groups).length} groups`);
-  }
-
-  return { checked: portraits.length, removed };
 }

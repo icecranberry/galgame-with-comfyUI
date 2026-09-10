@@ -12,7 +12,7 @@ import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
 import { restartComfyClient } from '../services/comfyClient.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
-import { restartWeatherScheduler } from '../services/weatherService.js';
+import { restartWeatherScheduler, triggerUpdate } from '../services/weatherService.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 import { getMemorySettings, saveMemorySettings, normalizeMemorySettings } from '../services/memory/memoryConfig.js';
@@ -195,7 +195,9 @@ router.put('/features', (req, res) => {
   }
   if (key === 'weather' && value === true) {
     restartWeatherScheduler();
-    triggerWeatherUpdate();
+    // 打开天气后立刻拉一次，避免要等到下一个整点才有数据。
+    // （原代码调用的是不存在的 triggerWeatherUpdate() → 打开天气开关必抛 ReferenceError → 500）
+    triggerUpdate().catch(err => console.warn('[config] weather update failed:', err.message));
   }
   res.json({ ok: true, features: config.features });
 });

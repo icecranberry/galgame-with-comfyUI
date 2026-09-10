@@ -625,7 +625,7 @@
         <div class="toggle-row">
           <div>
             <div class="tl">深度思考<span class="beta-tag">测试版</span></div>
-            <div class="td">私聊回复前 AI 先在内心盘算用什么形式表达（文字/表情包/照片），思考过程默认折叠显示。</div>
+            <div class="td">私聊回复前角色先在内心盘算用什么形式表达（文字/表情包/照片），思考过程默认折叠显示。</div>
           </div>
           <linshe-switch :model-value="deepThinkMode" @change="onDeepThinkChange" />
         </div>

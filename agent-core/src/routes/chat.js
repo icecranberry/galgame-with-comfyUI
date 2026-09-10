@@ -530,10 +530,12 @@ router.post('/characters/:id/chat', async (req, res) => {
     const explicitImageIntent = detectImageIntent(message);
 
     // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
+    // 奇遇创建已超过一天的视为过期话题：私聊中不再提及（情绪联动与上下文注入一并失效）
     const activeEvent = db.prepare(`
       SELECT id, title, description, current_branch, choice_history, status, engaged, event_type_key, emphasis_delivered, referenced_character_ids
       FROM character_events
       WHERE character_id = ? AND status IN ('open','engaged')
+        AND created_at > datetime('now', '-1 day')
       ORDER BY id DESC LIMIT 1
     `).get(characterId);
 
@@ -736,10 +738,11 @@ ${coreRules}
       dynamicBlocks.push(`<mailbox_history>你与${chatUserName}的最近信箱往来：\n${letterLines.join('\n')}\n\n可以在对话中自然地提及近期的通信内容，让对话更有连续性。</mailbox_history>`);
     }
 
-    // 2. 最近奇遇总结
+    // 2. 最近奇遇总结（仅提及一天内结束的奇遇，更早的视为过期话题不再主动提）
     const engagedEvent = db.prepare(`
       SELECT title, summary, ended_at
       FROM event_history WHERE character_id = ? AND engaged = 1
+        AND ended_at > datetime('now', '-1 day')
       ORDER BY ended_at DESC LIMIT 1
     `).get(characterId);
     if (engagedEvent) {

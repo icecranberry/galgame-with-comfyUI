@@ -2,17 +2,28 @@
  * Memory v3 阶段三：整理 daemon 调度器（记忆的"睡眠期"）
  * docs/memory-upgrade-plan.md §6.1
  *
- * 触发模型：
- *   - 每 5 分钟扫描一次；
- *   - 空闲判定通过才执行：无活跃聊天流（chatActivity）且距最后一条消息 ≥ idleDelayMinutes（默认 30 分钟）；
- *   - 每日兜底：距上次成功运行 > 22 小时时，即便不够空闲也执行（但聊天进行中仍然让路）；
- *   - daemon 永不在聊天进行中触发 LLM 调用。
+ * 触发模型（四道闸门，逐级收紧）：
+ *   1. 每 5 分钟扫描一次，但只有"空闲"才继续：无活跃前台聊天流（chatActivity）
+ *      且距最后一条消息 ≥ idleDelayMinutes（默认 30 分钟）；
+ *   2. 两次"真正干过活"的整理之间至少间隔 minIntervalMinutes（默认 60 分钟）——
+ *      空闲判定在用户离开后会恒为真，没有这道闸门就等于"每 5 分钟一整轮"；
+ *   3. 每日兜底：距上次真正干过活 > 22 小时时，即便不够空闲也执行（聊天进行中仍然让路）；
+ *   4. 上一轮什么都没干成 → 退避 30 分钟，避免空转轮把候选发现查询每 5 分钟跑一遍。
+ *
+ * LLM 预算双层：
+ *   - 单轮上限 llmCallsPerRun（默认 3）；
+ *   - 每日总量 dailyLlmCalls（默认 60，跨轮累计、按上海日期归零、持久化在 state.daily）。
+ *   旧配置键 dailyMaxLlmCalls 的语义本就是"每日总量"，由 memoryConfig 归位到 dailyLlmCalls。
  *
  * 任务队列：memory_consolidation_jobs（job_type/payload/status/attempts）。
  *   - 扫描时按候选发现结果入队（同类型已有 pending/processing 则不重复入队）；
- *   - SQL 任务（decay/tombstone）优先领取，LLM 任务受单轮预算 llmCallsPerRun 约束；
+ *   - SQL 任务（decay/tombstone）优先领取；同优先级内按"该类型上次完成时间"轮转，
+ *     避免 T1/T2 长期吃满预算把 T4/T5 饿死；
  *   - 预算耗尽而任务未完成 → 留在 pending（或补一个后续任务），下次扫描自然续跑；
  *   - 启动时 processing → pending 恢复（kill 后续跑）；attempts ≥ 3 → failed 不再自动重试。
+ *
+ * 候选消费记账：见 memoryConsolidation.js 的 RECONSOLIDATE_AFTER_DAYS / markConsolidated——
+ * 模型判定"无关/无需泛化/补不出字段"时同样记账，否则同一批候选会被无限重复送进 LLM。
  *
  * 运行状态写入 system_settings('memory_consolidation_state')，管理接口可查。
  */
@@ -44,13 +55,11 @@ import {
 } from './memoryRepository.js';
 
 const SCAN_INTERVAL_MS = 5 * 60 * 1000;       // 扫描周期
-const DAILY_FALLBACK_HOURS = 22;              // 每日兜底线
+const DAILY_FALLBACK_HOURS = 22;              // 每日兜底线（锚在"上次真正干过活"）
 const STARTUP_DELAY_MS = 2 * 60 * 1000;       // 启动后首次扫描延迟
 const MAX_ATTEMPTS = 3;                       // 任务失败重试上限
+const EMPTY_SCAN_BACKOFF_MS = 30 * 60 * 1000; // 空转轮退避
 const STATE_KEY = 'memory_consolidation_state';
-
-// SQL 任务（零 LLM）永远先于 LLM 任务执行，保证预算紧张时免费任务不被饿死
-const FREE_JOB_TYPES = new Set(['decay', 'tombstone']);
 
 let timer = null;
 let executing = false;
@@ -74,6 +83,49 @@ function writeState(patch) {
     ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
   `).run(STATE_KEY, JSON.stringify(next));
   return next;
+}
+
+// 每日额度按上海日期归零（与 memoryProviders 的失败计数同口径）
+export function shanghaiDateKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+export function readDailyUsage(state, now = new Date()) {
+  const date = shanghaiDateKey(now);
+  const used = state.daily?.date === date ? Math.max(0, Number(state.daily.used) || 0) : 0;
+  return { date, used };
+}
+
+/**
+ * 运行闸门决策（纯函数，便于单测）。三道时间闸门都在这里：
+ *   1. not-idle        —— 不空闲且距上次实干 < 22h
+ *   2. min-interval    —— 距上次实干 < minIntervalMinutes（空闲判定在用户离开后恒为真，
+ *                         没有这道闸门就等于每 5 分钟一满轮）
+ *   3. scan-backoff    —— 上一轮空手而归且退避期未过（避免空转轮反复做候选发现全表扫描）
+ * 返回 { run: true } 或 { run: false, skipped }。force 由调用方绕过本函数。
+ */
+export function evaluateRunGates({ state = {}, cfg = {}, idle = false, now = Date.now() } = {}) {
+  const withinMs = (iso, windowMs) => {
+    if (!iso) return false;
+    const parsed = new Date(iso).getTime();
+    if (Number.isNaN(parsed)) return false;
+    return now - parsed < windowMs;
+  };
+  // 不空闲时：距上次实干 < 22h 就让路；≥ 22h 走每日兜底（state 里没有实干记录则视为需要兜底）
+  if (!idle && withinMs(state.lastWorkedAt, DAILY_FALLBACK_HOURS * 3600000)) {
+    return { run: false, skipped: 'not-idle' };
+  }
+  if (withinMs(state.lastWorkedAt, Math.max(0, Number(cfg.minIntervalMinutes) || 0) * 60000)) {
+    return { run: false, skipped: 'min-interval' };
+  }
+  if (withinMs(state.lastEmptyScanAt, EMPTY_SCAN_BACKOFF_MS)) {
+    return { run: false, skipped: 'scan-backoff' };
+  }
+  return { run: true };
 }
 
 // ── 空闲判定 ──
@@ -128,7 +180,7 @@ function completedBefore(db, jobType, withinMs) {
 
 /**
  * 候选发现 + 入队。SQL 任务按时间节流（decay 6h / tombstone 24h），
- * LLM 任务只在"确实有活干"时入队，避免空转。
+ * LLM 任务只在"确实有活干"时入队；候选是否重复由 memoryConsolidation 的记账表负责。
  */
 function discoverAndEnqueueJobs(db, llmBudget) {
   if (!hasOpenJob(db, 'decay') && completedBefore(db, 'decay', 6 * 3600 * 1000)) {
@@ -151,11 +203,22 @@ function discoverAndEnqueueJobs(db, llmBudget) {
   }
 }
 
+/**
+ * 领取下一个 pending 任务。
+ * 排序：SQL 任务永远优先；同为 LLM 任务时按"该类型上次完成时间"升序轮转——
+ * 原先只按 id 升序会让 conflict/generalize 稳定吃满预算，portrait_suggest/backfill 永远排不上。
+ */
 function claimNextJob(db) {
   return db.transaction(() => {
     const job = db.prepare(`
-      SELECT * FROM memory_consolidation_jobs WHERE status = 'pending'
-      ORDER BY CASE WHEN job_type IN ('decay', 'tombstone') THEN 0 ELSE 1 END, id ASC LIMIT 1
+      SELECT pj.* FROM memory_consolidation_jobs pj
+      WHERE pj.status = 'pending'
+      ORDER BY
+        CASE WHEN pj.job_type IN ('decay', 'tombstone') THEN 0 ELSE 1 END,
+        (SELECT COALESCE(MAX(hist.updated_at), '') FROM memory_consolidation_jobs hist
+          WHERE hist.job_type = pj.job_type AND hist.status = 'completed') ASC,
+        pj.id ASC
+      LIMIT 1
     `).get();
     if (!job) return null;
     const claimed = db.prepare(`
@@ -216,23 +279,29 @@ export async function runConsolidationOnce({ force = false } = {}) {
 
   const state = readState();
   const idle = isIdleForConsolidation(cfg.idleDelayMinutes);
-  const hoursSinceRun = state.lastFinishedAt ? (Date.now() - new Date(state.lastFinishedAt).getTime()) / 3600000 : Infinity;
-  if (!force && !idle && hoursSinceRun < DAILY_FALLBACK_HOURS) return { skipped: 'not-idle' };
+  if (!force) {
+    const gate = evaluateRunGates({ state, cfg, idle });
+    if (!gate.run) return { skipped: gate.skipped };
+  }
 
   if (executing) return { skipped: 'already-running' };
   executing = true;
   const summary = {};
+  let jobsExecuted = 0;
+  let llmCallsUsed = 0;
   try {
+    const daily = readDailyUsage(state);
+    const dailyRemaining = Math.max(0, cfg.dailyLlmCalls - daily.used);
+    const llmBudgetForRun = Math.min(cfg.llmCallsPerRun, dailyRemaining);
     recoverInterruptedJobs(db);
-    discoverAndEnqueueJobs(db, cfg.llmCallsPerRun);
-    let llmCallsUsed = 0;
+    discoverAndEnqueueJobs(db, llmBudgetForRun);
     while (true) {
       const job = claimNextJob(db);
       if (!job) break;
       const isLlmJob = LLM_JOB_TYPES.has(job.job_type);
-      const budgetRemaining = Math.max(0, cfg.llmCallsPerRun - llmCallsUsed);
+      const budgetRemaining = Math.max(0, llmBudgetForRun - llmCallsUsed);
       if (isLlmJob && budgetRemaining === 0) {
-        // 预算耗尽：任务退回 pending，下轮扫描续跑
+        // 预算耗尽：任务退回 pending，下轮扫描续跑（SQL 任务排序在前，不会被这里挡住）
         db.prepare(`UPDATE memory_consolidation_jobs SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(job.id);
         break;
       }
@@ -240,10 +309,11 @@ export async function runConsolidationOnce({ force = false } = {}) {
         const result = await executeJob(job, { llmBudgetRemaining: budgetRemaining, db });
         llmCallsUsed += result.llmCalls || 0;
         // LLM 任务因预算中途让位 → 补一个后续任务（下轮接着跑剩余候选）
-        if (isLlmJob && result.done === false && cfg.llmCallsPerRun - llmCallsUsed <= 0) {
+        if (isLlmJob && result.done === false && llmBudgetForRun - llmCallsUsed <= 0) {
           enqueueJob(db, job.job_type, { continuation: true });
         }
         finishJob(db, job.id, 'completed');
+        jobsExecuted++;
         summary[job.job_type] = result;
         console.log(`[consolidation] job ${job.job_type}#${job.id} completed:`, JSON.stringify(result).slice(0, 300));
       } catch (error) {
@@ -254,8 +324,28 @@ export async function runConsolidationOnce({ force = false } = {}) {
       }
     }
     if (llmCallsUsed > 0) notifyMemoryIndexWorker();
-    writeState({ lastFinishedAt: new Date().toISOString(), lastRunIdle: idle, llmCallsUsed, summary });
-    return { ok: true, idle, llmCallsUsed, summary };
+    const nowIso = new Date().toISOString();
+    const worked = jobsExecuted > 0;
+    writeState({
+      lastFinishedAt: nowIso,
+      ...(worked ? { lastWorkedAt: nowIso, lastEmptyScanAt: null } : { lastEmptyScanAt: nowIso }),
+      lastRunIdle: idle,
+      llmCallsUsed,
+      llmCallsPerRun: llmBudgetForRun,
+      dailyLlmCalls: cfg.dailyLlmCalls,
+      dailyMaxLlmCalls: undefined,
+      daily: { date: daily.date, used: daily.used + llmCallsUsed },
+      summary,
+    });
+    return {
+      ok: true,
+      idle,
+      jobsExecuted,
+      llmCallsUsed,
+      dailyLlmCallsUsed: daily.used + llmCallsUsed,
+      dailyLlmCalls: cfg.dailyLlmCalls,
+      summary,
+    };
   } finally {
     executing = false;
   }
@@ -275,7 +365,7 @@ export function startConsolidationScheduler() {
   setTimeout(() => {
     runConsolidationOnce().catch(error => console.warn('[consolidation] first scan failed:', error.message));
   }, STARTUP_DELAY_MS).unref();
-  console.log('[consolidation] scheduler started (scan every 5min, idle-gated)');
+  console.log('[consolidation] scheduler started (scan every 5min, idle+min-interval gated, daily LLM budget)');
 }
 
 export function stopConsolidationScheduler() {

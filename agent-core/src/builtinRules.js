@@ -270,11 +270,18 @@ const WORLD_INTEGRATION_TASK_RULES = Object.freeze({
 2. 每个关键细节都要能回指到世界观文本；世界观里"理所当然"的身体规则、社交规则、环境材料与生活方式，优先于现实世界的常识、通用审美和示例服装。
 3. 世界观是最高优先级：当示例服装、现实服装、原 IP 服装或通用时尚模板与世界观冲突时，一律以世界观为准，不得用通用模板替代世界设计。
 4. 不要把世界观当成一段可以忽略的"前置说明"。服装的轮廓、材质、用途和命名都必须从这个世界里自然生长出来。`,
+
+  town_asset: `${WORLD_INTEGRATION_PREAMBLE}以下小镇素材设计必须在<world_setting>的框架内展开：
+
+1. 地砖、道路、建筑、道具、居民与玩家素材都要反映世界观下的真实生活。材料、气候、技术、行业、社会习惯和视觉符号必须能回指到世界观，而不是套用现实小镇的通用模板。
+2. 世界观里"理所当然"的东西要变成可见的素材细节：常见建材、交通方式、公共标识、食物与器物、职业装备、环境气质都可以进入设计，但不能破坏素材本身的独立裁切要求。
+3. 世界观是最高优先级：当通用像素游戏素材、现实小镇常识或示例风格与世界观冲突时，一律以世界观为准。
+4. 不要把世界观当成一段可以忽略的"前置说明"。它必须穿透到每一张素材的形状、材质、配色、装饰和用途中。世界观不是背景，是地基。`,
 });
 
 /**
  * 构建世界观最高优先级注入。
- * @param {'interaction'|'moments'|'momentReply'|'relationships'|'photo'|'schedule'|'event'|'eventConclusion'|'world_outfit'} scope
+ * @param {'interaction'|'moments'|'momentReply'|'relationships'|'photo'|'schedule'|'event'|'eventConclusion'|'world_outfit'|'town_asset'} scope
  * @returns {string}
  */
 export function getWorldIntegrationRule(scope = 'interaction') {

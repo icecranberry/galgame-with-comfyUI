@@ -224,17 +224,20 @@ test('activeMemorySearch 超时返回空结果并标记 timedOut', async () => {
   assert.ok(elapsedMs < 2000, `resolved too late: ${elapsedMs}ms`);
 });
 
-test('normalizeMemorySettings 兼容旧键 dailyMaxLlmCalls → llmCallsPerRun', () => {
-  // 旧配置文件只有 dailyMaxLlmCalls：读入新键并保留值
+test('normalizeMemorySettings 把旧键 dailyMaxLlmCalls 归位到每日总量 dailyLlmCalls', () => {
+  // 旧键的语义本来就是"每日总量"，此前被误接到"每轮预算"（默认 6 × 每 5 分钟一轮 = 放大 288 倍）
   const legacy = normalizeMemorySettings({ consolidation: { dailyMaxLlmCalls: 9 } });
-  assert.equal(legacy.consolidation.llmCallsPerRun, 9);
+  assert.equal(legacy.consolidation.dailyLlmCalls, 9);
+  assert.equal(legacy.consolidation.llmCallsPerRun, 3);
   // 新旧键并存时新键优先；输出不再包含旧键（下次保存后彻底迁移）
-  const both = normalizeMemorySettings({ consolidation: { dailyMaxLlmCalls: 2, llmCallsPerRun: 4 } });
-  assert.equal(both.consolidation.llmCallsPerRun, 4);
+  const both = normalizeMemorySettings({ consolidation: { dailyMaxLlmCalls: 2, dailyLlmCalls: 20 } });
+  assert.equal(both.consolidation.dailyLlmCalls, 20);
   assert.equal(both.consolidation.dailyMaxLlmCalls, undefined);
-  // 无任何键时取默认 6
+  // 无任何键时取默认：单轮 3 次、每日 60 次、实干间隔 60 分钟
   const fresh = normalizeMemorySettings({});
-  assert.equal(fresh.consolidation.llmCallsPerRun, 6);
+  assert.equal(fresh.consolidation.llmCallsPerRun, 3);
+  assert.equal(fresh.consolidation.dailyLlmCalls, 60);
+  assert.equal(fresh.consolidation.minIntervalMinutes, 60);
 });
 
 test('activeMemorySearch 历史模式：已失效三元组与其 superseded 记忆参与联想并标历史徽标', async () => {

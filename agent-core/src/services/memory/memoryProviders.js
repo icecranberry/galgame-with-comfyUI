@@ -6,6 +6,8 @@ import { getMemorySettings } from './memoryConfig.js';
 const DAILY_FAILURE_LIMIT = 5;
 const SLOW_REQUEST_THRESHOLD_MS = 2500;
 const FAILURE_SETTING_KEY = 'memory_builtin_provider_failures';
+// 内置服务失败计数缓存（同进程同日期内只读一次 DB）
+let _failureStateCache = null;
 const LOCAL_PROFILE = Object.freeze({
   fingerprint: 'local_builtin',
   corpus: 'memory_fragments',
@@ -82,17 +84,25 @@ function todayInShanghai() {
 
 function readFailureState() {
   const date = todayInShanghai();
+  // 内存缓存：每次嵌入/重排都读一次 system_settings 是纯浪费（每轮对话至少 2 次额外 DB 往返），
+  // 同一日期内只在首次读取时落库，之后走缓存；写操作仍会同步更新缓存。
+  if (_failureStateCache && _failureStateCache.date === date) return { ..._failureStateCache };
   try {
     const row = getDb().prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(FAILURE_SETTING_KEY);
     const parsed = row ? JSON.parse(row.setting_value) : null;
-    if (parsed?.date === date) return { date, embedding: Number(parsed.embedding) || 0, reranker: Number(parsed.reranker) || 0, embedding_index: Number(parsed.embedding_index) || 0 };
+    if (parsed?.date === date) {
+      _failureStateCache = { date, embedding: Number(parsed.embedding) || 0, reranker: Number(parsed.reranker) || 0, embedding_index: Number(parsed.embedding_index) || 0 };
+      return { ..._failureStateCache };
+    }
   } catch (error) {
     console.warn('[memory-provider] unable to read daily failure state:', error.message);
   }
-  return { date, embedding: 0, reranker: 0, embedding_index: 0 };
+  _failureStateCache = { date, embedding: 0, reranker: 0, embedding_index: 0 };
+  return { ..._failureStateCache };
 }
 
 function writeFailureState(state) {
+  _failureStateCache = { ...state };
   try {
     getDb().prepare(`
       INSERT INTO system_settings(setting_key, setting_value, updated_at)
@@ -157,8 +167,14 @@ async function requestEmbeddings(texts, provider, source) {
 
 export function getPreferredMemoryEmbeddingProfile(settings = getMemorySettings({ includeSecrets: true }), kind = 'embedding') {
   if (isCompleteUserProvider(settings.embedding)) return profileFor(settings.embedding, 'user');
-  if (builtinAvailable(kind)) return profileFor(builtinProvider('embedding'), 'builtin');
+  if (builtinAllowed(settings.embedding, kind)) return profileFor(builtinProvider('embedding'), 'builtin');
   return LOCAL_PROFILE;
+}
+
+// 内置服务开关：settings.useBuiltin === false 时完全不碰随包内置的第三方服务（改走本地模型）
+function builtinAllowed(provider, kind) {
+  if (provider?.useBuiltin === false) return false;
+  return builtinAvailable(kind);
 }
 
 export function getBuiltinMemoryProviderStatus() {
@@ -177,7 +193,7 @@ export async function embedMemoryTexts(texts, settings = getMemorySettings({ inc
     }
   }
 
-  if (builtinAvailable(failureKind)) {
+  if (builtinAllowed(userProvider, failureKind)) {
     try {
       const result = await requestEmbeddings(texts, { ...builtinProvider('embedding'), timeoutMs: timeoutMs || 8000 }, 'builtin');
       if (slowThresholdMs && result.elapsedMs > slowThresholdMs) {
@@ -241,7 +257,7 @@ export async function rerankMemories(query, candidates, settings = getMemorySett
     }
   }
 
-  if (builtinAvailable('reranker')) {
+  if (builtinAllowed(userProvider, 'reranker')) {
     try {
       const result = await requestRerank(query, candidates, builtinProvider('reranker'), 'builtin');
       if (result[0]?.rerank_elapsed_ms > SLOW_REQUEST_THRESHOLD_MS) {

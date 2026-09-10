@@ -22,6 +22,9 @@ export const MOMENT_SHARE_STYLES = [
 
 const STYLE_IDS = new Set(MOMENT_SHARE_STYLES.map(s => s.id))
 
+// 主图（照片）手动缩放上限：相对「恰好铺满框」的 cover 基准
+export const MOMENT_HERO_MAX_SCALE = 4
+
 // ── 邻舍基础色板 ──
 // 海报跟随 Cel Glow 4 主题：渲染时从 CSS 变量读取，读不到（SSR/测试环境）回退上游暖纸色。
 const FALLBACK_PALETTE = {
@@ -288,36 +291,78 @@ function drawCover(ctx, img, f, focusY = 0.5) {
   ctx.drawImage(img, sx, sy, sw, sh, f.x, f.y, f.w, f.h)
 }
 
+/** drawImageSmart 的裁剪决策：'cover'（focusY 锚点）或 'blur'（模糊延展 + 完整 contain） */
+function smartPlan(img, f) {
+  const imgAspect = img.naturalWidth / img.naturalHeight
+  const frameAspect = f.w / f.h
+  if (imgAspect >= frameAspect) {
+    // 图比框「宽」→ cover 裁左右；裁太多（横图塞进竖框）退化为模糊延展
+    const hExcess = 1 - frameAspect / imgAspect
+    if (hExcess > 0.5) return { mode: 'blur' }
+    return { mode: 'cover', focusY: 0.5 }
+  }
+  const excess = 1 - imgAspect / frameAspect // cover 时被裁掉的竖向占比
+  if (excess <= 0.24) return { mode: 'cover', focusY: 0.2 } // 顶部偏置：主要裁底部
+  return { mode: 'blur' }
+}
+
 /**
  * 智能填充：横向裁剪不伤人脸，直接 cover；
  * 任一方向会裁掉太多时改用「模糊延展底 + 完整 contain」，避免裁掉头部/关键内容。
  */
 function drawImageSmart(ctx, img, f, tintHex) {
   if (!img) { drawPlaceholder(ctx, f, tintHex); return }
-  const imgAspect = img.naturalWidth / img.naturalHeight
-  const frameAspect = f.w / f.h
-  if (imgAspect >= frameAspect) {
-    // 图比框「宽」→ cover 裁左右；裁太多（横图塞进竖框）退化为模糊延展
-    const hExcess = 1 - frameAspect / imgAspect
-    if (hExcess > 0.5) {
-      drawBlurredFill(ctx, img, f, tintHex)
-      const scale = Math.min(f.w / img.naturalWidth, f.h / img.naturalHeight)
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale
-      ctx.drawImage(img, f.x + (f.w - dw) / 2, f.y + (f.h - dh) / 2, dw, dh)
-    } else {
-      drawCover(ctx, img, f, 0.5)
-    }
+  const plan = smartPlan(img, f)
+  if (plan.mode === 'blur') {
+    drawBlurredFill(ctx, img, f, tintHex)
+    const scale = Math.min(f.w / img.naturalWidth, f.h / img.naturalHeight)
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale
+    ctx.drawImage(img, f.x + (f.w - dw) / 2, f.y + (f.h - dh) / 2, dw, dh)
   } else {
-    const excess = 1 - imgAspect / frameAspect // cover 时被裁掉的竖向占比
-    if (excess <= 0.24) {
-      drawCover(ctx, img, f, 0.2) // 顶部偏置：主要裁底部
-    } else {
-      drawBlurredFill(ctx, img, f, tintHex)
-      const scale = Math.min(f.w / img.naturalWidth, f.h / img.naturalHeight)
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale
-      ctx.drawImage(img, f.x + (f.w - dw) / 2, f.y + (f.h - dh) / 2, dw, dh)
-    }
+    drawCover(ctx, img, f, plan.focusY)
   }
+}
+
+/**
+ * 手动变换绘制主图：scale 相对 cover 基准（<1 时图片缩小、空隙由模糊延展垫底），
+ * offsetX / offsetY 为相对框宽高的中心偏移占比。与编辑器覆盖层共用，保证所见即所得。
+ */
+function drawHeroAdjusted(ctx, img, f, adj, tintHex) {
+  const iw = img.naturalWidth, ih = img.naturalHeight
+  const base = Math.max(f.w / iw, f.h / ih)
+  const minScale = Math.min(f.w / iw, f.h / ih) / base
+  const scale = Math.min(MOMENT_HERO_MAX_SCALE, Math.max(minScale, Number(adj?.scale) || 1))
+  const s = base * scale
+  const dw = iw * s, dh = ih * s
+  const cx = f.x + f.w / 2 + (Number(adj?.offsetX) || 0) * f.w
+  const cy = f.y + f.h / 2 + (Number(adj?.offsetY) || 0) * f.h
+  if (dw < f.w - 0.5 || dh < f.h - 0.5) drawBlurredFill(ctx, img, f, tintHex)
+  ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh)
+}
+
+/**
+ * 主图（images[0]）统一绘制入口：默认走 drawImageSmart，传入 adjust（用户手动变换）时
+ * 走 drawHeroAdjusted；同时把照片框几何记录到 m.hero，供编辑器覆盖层对位。
+ * radius 支持数组；rotate / pivot 描述拍立得这类局部旋转坐标系（pivot 为画布坐标）。
+ */
+function drawHeroImage(ctx, m, f, { tintHex = null, radius = 0, rotate = 0, pivotX = 0, pivotY = 0 } = {}) {
+  const it = m.images[0]
+  if (!it) return
+  m.hero = { fx: f.x, fy: f.y, fw: f.w, fh: f.h, radius, rotate, pivotX, pivotY, img: it.img, tintHex, decor: null }
+  if (!it.img) { drawImageSmart(ctx, null, f, tintHex); return }
+  if (m.adjust) drawHeroAdjusted(ctx, it.img, f, m.adjust, tintHex)
+  else drawImageSmart(ctx, it.img, f, tintHex)
+}
+
+/**
+ * 登记「压在主图上的装饰」（竖排名 / 日期签 / 和纸胶带 / 胶片饰面等，画布基准坐标）：
+ * 正常出图照旧直接画；编辑覆盖层画完照片后会把它补画进照片框裁剪内，
+ * 使压在照片上的文字 / 印记不被编辑层盖住（框外部分仍由海报底层透出）。
+ */
+function addHeroDecor(m, draw) {
+  if (!m.hero) return
+  const prev = m.hero.decor
+  m.hero.decor = prev ? c => { prev(c); draw(c) } : draw
 }
 
 let _ctxFilterSupported = null
@@ -564,7 +609,8 @@ function drawImageGrid(ctx, m, u, { x, y, w, h, gap, radius, tintHex }) {
     ctx.save()
     roundRectPath(ctx, f.x, f.y, f.w, f.h, radius)
     ctx.clip()
-    drawImageSmart(ctx, it.img, f, tintHex)
+    if (i === 0) drawHeroImage(ctx, m, f, { tintHex, radius })
+    else drawImageSmart(ctx, it.img, f, tintHex)
     ctx.restore()
   })
   // 超过 4 张：在第 4 格角落轻量标注剩余数量
@@ -626,13 +672,15 @@ function renderMagazine(ctx, m, u, W, H) {
     ctx.save()
     roundRectPath(ctx, 0, py, plateW, imgH, [0, 16 * u, 16 * u, 0])
     ctx.clip()
-    drawImageSmart(ctx, m.images[0].img, { x: 0, y: py, w: plateW, h: imgH }, null)
+    drawHeroImage(ctx, m, { x: 0, y: py, w: plateW, h: imgH }, { radius: [0, 16 * u, 16 * u, 0] })
     ctx.restore()
 
-    // 竖排角色名压在图版右缘(约 40% 字宽叠进图内),无描边光晕
+    // 竖排角色名压在图版右缘(约 40% 字宽叠进图内),无描边光晕;编辑预览时由覆盖层补画
     const chars = Math.max(1, m.name.length)
     const vSize = Math.min(165 * u, Math.floor((imgH + 140 * u) / chars))
-    drawStackedVertical(ctx, m.name, plateW + vSize * 0.1, py + 36 * u, vSize, P.ink)
+    const drawVerticalName = c => drawStackedVertical(c, m.name, plateW + vSize * 0.1, py + 36 * u, vSize, P.ink)
+    drawVerticalName(ctx)
+    addHeroDecor(m, drawVerticalName)
 
     if (block) drawTextBlock(ctx, block, 84 * u, py + imgH + 80 * u, P.ink)
   } else if (m.content) {
@@ -685,7 +733,7 @@ function renderImmersive(ctx, m, u, W, H) {
     ctx.save()
     roundRectPath(ctx, 0, py, W, imgH, [0, 0, 20 * u, 20 * u])
     ctx.clip()
-    drawImageSmart(ctx, m.images[0].img, { x: 0, y: py, w: W, h: imgH }, null)
+    drawHeroImage(ctx, m, { x: 0, y: py, w: W, h: imgH }, { radius: [0, 0, 20 * u, 20 * u] })
     ctx.restore()
 
     if (block) drawTextBlock(ctx, block, 140 * u, py + imgH + 88 * u, P.ink)
@@ -813,6 +861,12 @@ function renderCollage(ctx, m, u, W, H) {
         if (behind) {
           ctx.fillStyle = mixHex(m.dominant || C.cream, '#ffffff', 0.35)
           ctx.fillRect(imgF.x, imgF.y, imgF.w, imgF.h)
+        } else if (imgItem === m.images[0]) {
+          // 主照片走编辑器入口：拍立得有倾角，记录局部旋转坐标（pivot 为卡片中心）供覆盖层对位
+          drawHeroImage(ctx, m, imgF, {
+            tintHex: m.dominant, radius: 6 * u, rotate: rot,
+            pivotX: frame.x + frame.w / 2, pivotY: frame.y + frame.h / 2,
+          })
         } else {
           drawImageSmart(ctx, imgItem.img, imgF, m.dominant)
         }
@@ -842,13 +896,17 @@ function renderCollage(ctx, m, u, W, H) {
         drawPolaroid({ ...mainFrame, x: mainFrame.x + 30 * u, y: mainFrame.y - 10 * u }, 0.055, m.images[2], true)
       }
       drawPolaroid(mainFrame, -0.02, m.images[0], false)
-      // 和纸胶带压在主照片顶边
-      ctx.save()
-      ctx.translate(mainFrame.x + mainFrame.w / 2, mainFrame.y - 4 * u)
-      ctx.rotate(-0.05)
-      ctx.fillStyle = rgba(C.coral, 0.38)
-      ctx.fillRect(-74 * u, -22 * u, 148 * u, 44 * u)
-      ctx.restore()
+      // 和纸胶带压在主照片顶边;编辑预览时由覆盖层补画
+      const drawTape = c => {
+        c.save()
+        c.translate(mainFrame.x + mainFrame.w / 2, mainFrame.y - 4 * u)
+        c.rotate(-0.05)
+        c.fillStyle = rgba(C.coral, 0.38)
+        c.fillRect(-74 * u, -22 * u, 148 * u, 44 * u)
+        c.restore()
+      }
+      drawTape(ctx)
+      addHeroDecor(m, drawTape)
     }
     if (block) {
       drawTextBlock(ctx, block, contentX, textTop, C.ink)
@@ -906,28 +964,35 @@ function renderEditorial(ctx, m, u, W, H) {
     ctx.save()
     roundRectPath(ctx, 0, imgTop, W, imgH, [0, 0, 26 * u, 26 * u])
     ctx.clip()
-    drawImageSmart(ctx, m.images[0].img, imgFrame, tint)
+    drawHeroImage(ctx, m, imgFrame, { tintHex: tint, radius: [0, 0, 26 * u, 26 * u] })
     // 底缘轻压暗，衬浮层元素
-    const footShade = ctx.createLinearGradient(0, imgTop + imgH - 170 * u, 0, imgTop + imgH)
-    footShade.addColorStop(0, 'rgba(20, 14, 10, 0)')
-    footShade.addColorStop(1, 'rgba(20, 14, 10, 0.2)')
-    ctx.fillStyle = footShade
-    ctx.fillRect(0, imgTop + imgH - 170 * u, W, 170 * u)
+    const drawFootShade = c => {
+      const footShade = c.createLinearGradient(0, imgTop + imgH - 170 * u, 0, imgTop + imgH)
+      footShade.addColorStop(0, 'rgba(20, 14, 10, 0)')
+      footShade.addColorStop(1, 'rgba(20, 14, 10, 0.2)')
+      c.fillStyle = footShade
+      c.fillRect(0, imgTop + imgH - 170 * u, W, 170 * u)
+    }
+    drawFootShade(ctx)
+    addHeroDecor(m, drawFootShade)
     ctx.restore()
 
     // 骑缝日期签：珊瑚胶囊从左缘探出，压在图片下边缘上
     const edgeY = imgTop + imgH
-    setFont(ctx, 700, 26 * u)
-    const tw = ctx.measureText(m.time).width
-    const pillH = 62 * u
-    ctx.fillStyle = C.coral
-    roundRectPath(ctx, 0, edgeY - pillH / 2, tw + 64 * u, pillH, [0, pillH / 2, pillH / 2, 0])
-    ctx.fill()
-    ctx.fillStyle = C.card
-    ctx.fillText(m.time, 32 * u, edgeY + 9 * u)
-
-    // 头像印记：白环圆片骑在图片下边缘右侧
-    drawAvatar(ctx, m.avatarImg, W - padX - 62 * u, edgeY, 62 * u, m.name, '#fffdfb')
+    const drawEdgeFloats = c => {
+      setFont(c, 700, 26 * u)
+      const tw = c.measureText(m.time).width
+      const pillH = 62 * u
+      c.fillStyle = C.coral
+      roundRectPath(c, 0, edgeY - pillH / 2, tw + 64 * u, pillH, [0, pillH / 2, pillH / 2, 0])
+      c.fill()
+      c.fillStyle = C.card
+      c.fillText(m.time, 32 * u, edgeY + 9 * u)
+      // 头像印记：白环圆片骑在图片下边缘右侧
+      drawAvatar(c, m.avatarImg, W - padX - 62 * u, edgeY, 62 * u, m.name, '#fffdfb')
+    }
+    drawEdgeFloats(ctx)
+    addHeroDecor(m, drawEdgeFloats)
 
     // 正文：左肩珊瑚引言竖线
     if (block) {
@@ -1289,14 +1354,46 @@ function drawSprocketRail(ctx, P, u, cx, H) {
   }
 }
 
+/** 按帖子 id 播种的伪随机：胶片颗粒在覆盖层预览与最终出图间保持一致，重绘不闪动 */
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** 胶片帧压图饰面：暗角 + 颗粒/灰尘；编辑覆盖层会原样补画进照片区 */
+function drawFilmPhotoFinish(ctx, m, f, u, P) {
+  const cx = f.x + f.w / 2, cy = f.y + f.h / 2
+  const vg = ctx.createRadialGradient(cx, cy, Math.min(f.w, f.h) * 0.44, cx, cy, Math.max(f.w, f.h) * 0.74)
+  vg.addColorStop(0, 'rgba(8, 6, 4, 0)')
+  vg.addColorStop(1, 'rgba(8, 6, 4, 0.15)')
+  ctx.fillStyle = vg
+  ctx.fillRect(f.x, f.y, f.w, f.h)
+  const rand = mulberry32((Number(m.post && m.post.id) || 1) * 7919 + 13)
+  ctx.globalAlpha = 0.045
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = i % 2 ? '#ffffff' : '#0a0806'
+    ctx.fillRect(f.x + rand() * f.w, f.y + rand() * f.h, 2 * u, 2 * u)
+  }
+  ctx.globalAlpha = 0.16
+  ctx.fillStyle = '#fff6ea'
+  for (let i = 0; i < 6; i++) {
+    ctx.fillRect(f.x + rand() * f.w, f.y + rand() * f.h, 1.6 * u, 1.6 * u + rand() * 3 * u)
+  }
+  ctx.globalAlpha = 1
+}
+
 /** 胶片帧照片：原图 + 极轻暗角/颗粒/灰尘,帧线勾边 */
-function drawFilmFramePhoto(ctx, img, f, u, P) {
+function drawFilmFramePhoto(ctx, m, f, u, P) {
   ctx.save()
   ctx.beginPath()
   ctx.rect(f.x, f.y, f.w, f.h)
   ctx.clip()
-  if (img) {
-    drawImageSmart(ctx, img, f, null)
+  if (m.images[0]?.img) {
+    drawHeroImage(ctx, m, f, { radius: 0 })
   } else {
     // 无图时画一帧「空曝光」
     const g = ctx.createLinearGradient(f.x, f.y, f.x + f.w, f.y + f.h)
@@ -1305,23 +1402,14 @@ function drawFilmFramePhoto(ctx, img, f, u, P) {
     ctx.fillStyle = g
     ctx.fillRect(f.x, f.y, f.w, f.h)
   }
-  const cx = f.x + f.w / 2, cy = f.y + f.h / 2
-  const vg = ctx.createRadialGradient(cx, cy, Math.min(f.w, f.h) * 0.44, cx, cy, Math.max(f.w, f.h) * 0.74)
-  vg.addColorStop(0, 'rgba(8, 6, 4, 0)')
-  vg.addColorStop(1, 'rgba(8, 6, 4, 0.15)')
-  ctx.fillStyle = vg
-  ctx.fillRect(f.x, f.y, f.w, f.h)
-  ctx.globalAlpha = 0.045
-  for (let i = 0; i < 260; i++) {
-    ctx.fillStyle = i % 2 ? '#ffffff' : '#0a0806'
-    ctx.fillRect(f.x + Math.random() * f.w, f.y + Math.random() * f.h, 2 * u, 2 * u)
-  }
-  ctx.globalAlpha = 0.16
-  ctx.fillStyle = '#fff6ea'
-  for (let i = 0; i < 6; i++) {
-    ctx.fillRect(f.x + Math.random() * f.w, f.y + Math.random() * f.h, 1.6 * u, 1.6 * u + Math.random() * 3 * u)
-  }
-  ctx.globalAlpha = 1
+  drawFilmPhotoFinish(ctx, m, f, u, P)
+  // 覆盖层补画饰面 + 帧线（框裁剪内为内半段，框外由海报底层透出）
+  addHeroDecor(m, c => {
+    drawFilmPhotoFinish(c, m, f, u, P)
+    c.strokeStyle = P.printSub
+    c.lineWidth = 2 * u
+    c.strokeRect(f.x - 8 * u, f.y - 8 * u, f.w + 16 * u, f.h + 16 * u)
+  })
   ctx.restore()
   ctx.strokeStyle = P.printSub
   ctx.lineWidth = 2 * u
@@ -1355,7 +1443,7 @@ function filmLayoutA(ctx, m, P, u, W, H) {
   const { block, imgH } = coverBlockAndImageH(ctx, m, u, H, {
     top, footerZoneY, captionGap: 88 * u, maxWidth: fw, minImg: 0.5, maxImg: 0.62,
   })
-  drawFilmFramePhoto(ctx, m.images[0]?.img, { x: fx, y: top, w: fw, h: imgH }, u, P)
+  drawFilmFramePhoto(ctx, m, { x: fx, y: top, w: fw, h: imgH }, u, P)
 
   const stamp = filmStamp(m.post)
   const infoY = top + imgH + 66 * u
@@ -1398,7 +1486,7 @@ function filmLayoutB(ctx, m, P, u, W, H) {
   const { block, imgH } = coverBlockAndImageH(ctx, m, u, H, {
     top, footerZoneY, captionGap: 56 * u + stripH + 48 * u + 44 * u, maxWidth: fw, minImg: 0.48, maxImg: 0.56,
   })
-  drawFilmFramePhoto(ctx, m.images[0]?.img, { x: fx, y: top, w: fw, h: imgH }, u, P)
+  drawFilmFramePhoto(ctx, m, { x: fx, y: top, w: fw, h: imgH }, u, P)
 
   // 连续胶片暗示:三个空白帧位,中间是当前 FRAME,只有编号没有内容
   const stamp = filmStamp(m.post)
@@ -1462,7 +1550,7 @@ function filmLayoutC(ctx, m, P, u, W, H) {
     top, footerZoneY, captionGap: 210 * u, maxWidth: fw, minImg: 0.5, maxImg: 0.62,
     sizes: [36, 33, 30, 28, 26],
   })
-  drawFilmFramePhoto(ctx, m.images[0]?.img, { x: fx, y: top, w: fw, h: imgH }, u, P)
+  drawFilmFramePhoto(ctx, m, { x: fx, y: top, w: fw, h: imgH }, u, P)
 
   const stamp = filmStamp(m.post)
   const dateY = top + imgH + 72 * u
@@ -1510,6 +1598,7 @@ function renderFilmDiary(ctx, m, u, W, H) {
   ctx.fillRect(0, 0, W, H)
 
   const layout = pickFilmLayout(m, m.featureLayoutOverride || null)
+  m.filmLayout = layout
   if (layout === 'B') filmLayoutB(ctx, m, P, u, W, H)
   else if (layout === 'C') filmLayoutC(ctx, m, P, u, W, H)
   else filmLayoutA(ctx, m, P, u, W, H)
@@ -1565,14 +1654,22 @@ export function pickMomentStyle(post, { firstImageAspect = 1, rand = Math.random
  * @param {Object} [options]
  * @param {string} [options.styleId] 版式 id（见 MOMENT_SHARE_STYLES）；'auto' 或缺省 = 智能选择
  * @param {number} [options.width]  画布宽，默认 1080（高 = width * 16 / 9，即 1080×1920；传 1440 得 1440×2560）
- * @returns {Promise<{ canvas: HTMLCanvasElement, styleId: string }>}
+ * @param {{ scale: number, offsetX: number, offsetY: number }} [options.imageAdjust]
+ *        主图手动变换（scale 相对 cover 基准、offset 为框占比偏移），来自分享弹窗的编辑层；
+ *        缺省时主图走原 drawImageSmart 智能裁剪，两者在初始变换下逐像素一致
+ * @returns {Promise<{ canvas: HTMLCanvasElement, styleId: string, hero: Object|null, filmLayout: string|null }>}
+ *          hero 为主图框几何（fx/fy/fw/fh/radius/rotate/pivotX/pivotY/img/tintHex），供编辑覆盖层使用；
+ *          filmLayout 为胶片版式实际抽中的布局（A/B/C），编辑器重烘焙时需回传以锁定布局
  */
 export async function renderMomentShareCard(post, options = {}) {
-  const { styleId = 'auto', width = 1080, featureLayout = null } = options
+  const { styleId = 'auto', width = 1080, featureLayout = null, imageAdjust = null } = options
   await ensureFonts()
   C = buildPalette() // 每次渲染刷新主题色（用户可能已切换主题）
   const m = await buildModel(post)
   if (featureLayout) m.featureLayoutOverride = featureLayout
+  m.adjust = imageAdjust
+  m.hero = null
+  m.filmLayout = null
 
   const resolved = STYLE_IDS.has(styleId)
     ? styleId
@@ -1588,5 +1685,83 @@ export async function renderMomentShareCard(post, options = {}) {
   ctx.textAlign = 'left'
 
   RENDERERS[resolved](ctx, m, u, W, H)
-  return { canvas, styleId: resolved }
+  return { canvas, styleId: resolved, hero: m.hero, filmLayout: m.filmLayout }
+}
+
+// ════════════════════════ 主图编辑器（分享弹窗覆盖层）════════════════════════
+
+/**
+ * 主图编辑器的初始变换：复刻 drawImageSmart 对该照片框的默认裁剪，
+ * 保证覆盖层起点与直接渲染的成品一致；minScale 允许缩到完整显示（空隙由模糊延展垫底）。
+ */
+export function computeHeroInitialAdjust(hero) {
+  if (!hero || !hero.img) {
+    return { scale: 1, offsetX: 0, offsetY: 0, minScale: 1, maxScale: MOMENT_HERO_MAX_SCALE }
+  }
+  const f = { x: hero.fx, y: hero.fy, w: hero.fw, h: hero.fh }
+  const iw = hero.img.naturalWidth, ih = hero.img.naturalHeight
+  const base = Math.max(f.w / iw, f.h / ih)
+  const containRatio = Math.min(f.w / iw, f.h / ih) / base
+  const plan = smartPlan(hero.img, f)
+  let scale = 1, offsetX = 0, offsetY = 0
+  if (plan.mode === 'blur') {
+    scale = containRatio // 智能裁剪的「模糊延展 + 完整 contain」分支
+  } else if (plan.focusY !== 0.5) {
+    // cover 竖向锚点从中心平移到 focusY（0.2 = 顶部偏置保头部）
+    offsetY = (0.5 - plan.focusY) * (ih * base - f.h) / f.h
+  }
+  return { scale, offsetX, offsetY, minScale: containRatio, maxScale: MOMENT_HERO_MAX_SCALE }
+}
+
+/** 覆盖层画布需要覆盖的区域（画布基准坐标，含旋转外接框与少量余量） */
+export function getHeroOverlayBounds(hero) {
+  if (!hero) return { x: 0, y: 0, w: 0, h: 0 }
+  const cos = Math.cos(hero.rotate), sin = Math.sin(hero.rotate)
+  const pts = [
+    [hero.fx, hero.fy], [hero.fx + hero.fw, hero.fy],
+    [hero.fx + hero.fw, hero.fy + hero.fh], [hero.fx, hero.fy + hero.fh],
+  ]
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const [x, y] of pts) {
+    const px = hero.pivotX + x * cos - y * sin
+    const py = hero.pivotY + x * sin + y * cos
+    minX = Math.min(minX, px); minY = Math.min(minY, py)
+    maxX = Math.max(maxX, px); maxY = Math.max(maxY, py)
+  }
+  const pad = 2
+  return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 }
+}
+
+/**
+ * 把主图按当前变换绘制进编辑器覆盖层画布（与最终出图共用 drawHeroAdjusted，所见即所得）。
+ * @param {HTMLCanvasElement} canvas 覆盖层画布，尺寸由本函数按 scale 设置
+ * @param {Object} hero    renderMomentShareCard 返回的 hero 几何
+ * @param {Object} adjust  当前手动变换 { scale, offsetX, offsetY }
+ * @param {number} scale   画布基准坐标 → 设备像素（显示比例 × devicePixelRatio）
+ */
+export function paintHeroOverlay(canvas, hero, adjust, scale) {
+  if (!canvas || !hero || !hero.img || !(scale > 0)) return
+  const b = getHeroOverlayBounds(hero)
+  canvas.width = Math.max(1, Math.round(b.w * scale))
+  canvas.height = Math.max(1, Math.round(b.h * scale))
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(scale, 0, 0, scale, -b.x * scale, -b.y * scale)
+  ctx.clearRect(b.x, b.y, b.w, b.h)
+  ctx.save()
+  ctx.translate(hero.pivotX, hero.pivotY)
+  if (hero.rotate) ctx.rotate(hero.rotate)
+  roundRectPath(ctx, hero.fx, hero.fy, hero.fw, hero.fh, hero.radius)
+  ctx.clip()
+  drawHeroAdjusted(ctx, hero.img, { x: hero.fx, y: hero.fy, w: hero.fw, h: hero.fh }, adjust, hero.tintHex)
+  if (hero.decor) {
+    // 回到画布坐标补画压图装饰（裁剪仍是照片框）：照片移动时它们保持不动，与最终出图一致
+    ctx.setTransform(scale, 0, 0, scale, -b.x * scale, -b.y * scale)
+    resetDecoration(ctx)
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'alphabetic'
+    try { ctx.letterSpacing = '0px' } catch { /* 旧浏览器忽略 */ }
+    hero.decor(ctx)
+    resetDecoration(ctx)
+  }
+  ctx.restore()
 }

@@ -581,6 +581,124 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- ── AI 小镇（世界页 v2）：瓦片地图 / 素材库 / 轻量 NPC / POI / 相遇对话 ──
+    CREATE TABLE IF NOT EXISTS town_maps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      image_path TEXT,                   -- v1 遗留：整图插画（v2 弃用，保留列兼容旧库）
+      grid_cols INTEGER NOT NULL,
+      grid_rows INTEGER NOT NULL,
+      walk_grid TEXT NOT NULL DEFAULT '[]',  -- v1 遗留：已废弃，可走性由 layers_json 运行时计算
+      layers_json TEXT,                  -- v2：{ground,road,objects,blockOverride} 图层数据
+      tile_size INTEGER DEFAULT 32,      -- 世界像素/格（1x 缩放下）
+      world_setting_id INTEGER,          -- 初始化用的世界观
+      version INTEGER DEFAULT 1,         -- 编辑保存版本号（SSE 通知其他端重载）
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 像素素材库（ComfyUI 生成 → 抠白/像素化 → data/town/assets/）
+    CREATE TABLE IF NOT EXISTS town_assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,          -- ground | road | building | prop | npc | player
+      key TEXT,                    -- grass_01 / residential / npc_3_down / char_12_right / player_down
+      name TEXT NOT NULL,          -- 显示名（青草地 / 普通居民楼）
+      image_path TEXT NOT NULL,    -- /town-assets/xxx.png
+      meta_json TEXT DEFAULT '{}', -- footprint{w,h}/blocking/doorOffset/cellW,cellH/direction/reusable/maxInstances/styleTags/pixelSize
+      source_prompt TEXT DEFAULT '',
+      world_setting_id INTEGER,
+      status TEXT DEFAULT 'pending',  -- pending | ready | failed
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_town_assets_kind ON town_assets(kind, status);
+
+    CREATE TABLE IF NOT EXISTS town_locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,
+      key TEXT NOT NULL UNIQUE,          -- 'cafe'
+      name TEXT NOT NULL,                -- '兽人咖啡厅'
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      kind TEXT NOT NULL DEFAULT 'place' CHECK(kind IN ('home','place','outdoor')),
+      grid_x INTEGER NOT NULL,
+      grid_y INTEGER NOT NULL,
+      radius INTEGER NOT NULL DEFAULT 2, -- 锚点周围可站立半径
+      ambient TEXT DEFAULT '',           -- 环境氛围描述（注入对话 prompt）
+      object_id INTEGER,                 -- v2：绑定的地图对象 id（建筑 POI）
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 轻量小镇居民（世界观生成，不进 characters 表）
+    CREATE TABLE IF NOT EXISTS town_npcs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      map_id INTEGER NOT NULL,
+      display_name TEXT NOT NULL,
+      persona TEXT DEFAULT '',           -- 轻量人设卡（一段话 + 性格关键词）
+      appearance_desc TEXT DEFAULT '',   -- 精灵生成用外观描述
+      job TEXT DEFAULT '', home_location_id INTEGER,
+      routine_json TEXT DEFAULT '[]',    -- [{start:"08:00",end:"12:00",activity,locationKey}]
+      traits_json TEXT DEFAULT '{}',     -- {social, outdoor, nightOwl, 作息偏移}
+      sprite_ready INTEGER DEFAULT 0,    -- 4 方向素材齐备标记
+      town_enabled INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 玩家与 NPC 就地对话历史（注入后续对话）
+    CREATE TABLE IF NOT EXISTS town_npc_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      npc_id INTEGER NOT NULL REFERENCES town_npcs(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,                -- user | npc
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_town_npc_chat ON town_npc_chat_messages(npc_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS town_characters (
+      character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+      home_location_id INTEGER REFERENCES town_locations(id),
+      town_enabled INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 运行时状态快照（v2：agent_key = 'npc:3' / 'char:12' / 'me'，进程重启后由作息/日程重建）
+    CREATE TABLE IF NOT EXISTS town_agent_state (
+      agent_key TEXT PRIMARY KEY,
+      grid_x INTEGER,
+      grid_y INTEGER,
+      path_json TEXT DEFAULT '[]',
+      current_location_id INTEGER,
+      activity_text TEXT DEFAULT '',
+      updated_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS town_encounters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      map_id INTEGER NOT NULL,
+      char_a INTEGER NOT NULL,
+      char_b INTEGER NOT NULL,
+      location_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'chatting' CHECK(status IN ('chatting','done','cancelled')),
+      summary TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ended_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS town_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      encounter_id INTEGER NOT NULL REFERENCES town_encounters(id) ON DELETE CASCADE,
+      speaker_char_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS town_players (
+      id TEXT PRIMARY KEY,               -- 'me'（单用户）
+      display_name TEXT NOT NULL,
+      grid_x INTEGER,
+      grid_y INTEGER,
+      sprite_asset_id INTEGER,           -- v2：玩家精灵素材（player_down 等 4 方向共用一套 meta）
+      appearance_desc TEXT DEFAULT '',   -- v2：精灵生成用外观描述（用户配置外观）
+      updated_at DATETIME
+    );
   `);
 
   // 只补齐历史 NULL；保留用户显式关闭后台闲聊的 idle_enabled=0。
@@ -650,6 +768,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
     CREATE INDEX IF NOT EXISTS idx_group_members_char ON group_members(character_id);
     CREATE INDEX IF NOT EXISTS idx_group_chats_idle ON group_chats(next_idle_at, idle_enabled);
+    CREATE INDEX IF NOT EXISTS idx_town_locations_map ON town_locations(map_id);
+    CREATE INDEX IF NOT EXISTS idx_town_encounters_status ON town_encounters(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_town_chat_enc ON town_chat_messages(encounter_id, created_at);
   `);
 
   // Partial unique index for raw_messages client_msg_id (SQLite 3.8+)
@@ -711,6 +832,12 @@ function initSchema(db) {
   // 迁移: 记忆 v3 —— 多重表示 + 双时态演化 + 实体/三元组索引层（见 docs/memory-upgrade-plan.md）
   migrateChatMemoryV3Schema(db);
 
+  // 迁移: 记忆整理记账表（防同一批候选被反复送进 LLM）+ 整理/审计表维护索引
+  migrateMemoryConsolidationMarks(db);
+
+  // 迁移: 把整理 daemon 的显式配置写进既有 memory_settings 行（缺失才补，不覆盖用户值）
+  migrateMemoryConsolidationSettings(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -758,6 +885,9 @@ function initSchema(db) {
 
   // 迁移: 角色立绘 — characters 表新增 standing_url 列
   migrateStandingSchema(db);
+
+  // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
+  migrateTownV2Schema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
@@ -1315,6 +1445,99 @@ function migrateStandingSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: AI 小镇 v2（瓦片地图 + 素材库 + 轻量 NPC）
+ * - town_maps 加 layers_json / tile_size / world_setting_id / version
+ * - town_locations 加 object_id
+ * - town_players 加 sprite_asset_id / appearance_desc
+ * 新表（town_assets / town_npcs / town_npc_chat_messages）由 CREATE TABLE IF NOT EXISTS 建出
+ */
+function migrateTownV2Schema(db) {
+  try {
+    const mapCols = db.prepare(`PRAGMA table_info(town_maps)`).all();
+    if (mapCols.length > 0 && !mapCols.find(c => c.name === 'layers_json')) {
+      db.exec(`ALTER TABLE town_maps ADD COLUMN layers_json TEXT`);
+      db.exec(`ALTER TABLE town_maps ADD COLUMN tile_size INTEGER DEFAULT 32`);
+      db.exec(`ALTER TABLE town_maps ADD COLUMN world_setting_id INTEGER`);
+      db.exec(`ALTER TABLE town_maps ADD COLUMN version INTEGER DEFAULT 1`);
+      console.log('[db] Added town_maps v2 columns (layers_json/tile_size/world_setting_id/version)');
+    }
+    // v1→v2 行为切换（once 标记）：v1 默认全员进镇；v2 角色默认不进镇（管理面板里手动入住）
+    const marker = db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'town_v2_optin_reset'`).get();
+    if (!marker && db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='town_characters'`).get()) {
+      try {
+        db.exec(`UPDATE town_characters SET town_enabled = 0`);
+        db.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_v2_optin_reset', '1')`).run();
+        console.log('[db] town_characters reset to opt-in (v2 behavior, one-time)');
+      } catch { /* 表可能不存在 */ }
+    }
+    const locCols = db.prepare(`PRAGMA table_info(town_locations)`).all();
+    if (locCols.length > 0 && !locCols.find(c => c.name === 'object_id')) {
+      db.exec(`ALTER TABLE town_locations ADD COLUMN object_id INTEGER`);
+      console.log('[db] Added town_locations.object_id column');
+    }
+    // 邀请入邻舍：NPC 对应的 characters.id（未邀请为 NULL）
+    const npcCols = db.prepare(`PRAGMA table_info(town_npcs)`).all();
+    if (npcCols.length > 0 && !npcCols.find(c => c.name === 'character_id')) {
+      db.exec(`ALTER TABLE town_npcs ADD COLUMN character_id INTEGER`);
+      console.log('[db] Added town_npcs.character_id column');
+    }
+    // 向导提前建档：map_id 需可空（建档时地图尚未生成）
+    const mapIdCol = npcCols.find(c => c.name === 'map_id');
+    if (mapIdCol && mapIdCol.notnull) {
+      const chatExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='town_npc_chat_messages'`).get();
+      if (chatExists) db.exec('DELETE FROM town_npc_chat_messages');
+      db.exec(`
+        CREATE TABLE town_npcs_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          map_id INTEGER,
+          display_name TEXT NOT NULL,
+          persona TEXT DEFAULT '',
+          appearance_desc TEXT DEFAULT '',
+          job TEXT DEFAULT '', home_location_id INTEGER,
+          routine_json TEXT DEFAULT '[]',
+          traits_json TEXT DEFAULT '{}',
+          sprite_ready INTEGER DEFAULT 0,
+          town_enabled INTEGER DEFAULT 1,
+          character_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO town_npcs_new (id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at)
+          SELECT id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at FROM town_npcs;
+        DROP TABLE town_npcs;
+        ALTER TABLE town_npcs_new RENAME TO town_npcs;
+      `);
+      console.log('[db] town_npcs.map_id made nullable (wizard early-create)');
+    }
+    const playerCols = db.prepare(`PRAGMA table_info(town_players)`).all();
+    if (playerCols.length > 0 && !playerCols.find(c => c.name === 'sprite_asset_id')) {
+      db.exec(`ALTER TABLE town_players ADD COLUMN sprite_asset_id INTEGER`);
+      db.exec(`ALTER TABLE town_players ADD COLUMN appearance_desc TEXT DEFAULT ''`);
+      console.log('[db] Added town_players v2 columns (sprite_asset_id/appearance_desc)');
+    }
+    // town_agent_state：v1 主键是 character_id（带 characters 外键），NPC 无法落库 → 整表重建
+    // （v1 快照绑定已作废的种子地图，无保留价值）
+    const agentCols = db.prepare(`PRAGMA table_info(town_agent_state)`).all();
+    if (agentCols.length > 0 && agentCols.find(c => c.name === 'character_id')) {
+      db.exec(`DROP TABLE town_agent_state`);
+      db.exec(`
+        CREATE TABLE town_agent_state (
+          agent_key TEXT PRIMARY KEY,
+          grid_x INTEGER,
+          grid_y INTEGER,
+          path_json TEXT DEFAULT '[]',
+          current_location_id INTEGER,
+          activity_text TEXT DEFAULT '',
+          updated_at DATETIME
+        )
+      `);
+      console.log('[db] town_agent_state rebuilt with agent_key primary key (v2)');
+    }
+  } catch (err) {
+    console.log('[db] migrateTownV2Schema error:', err.message);
   }
 }
 
@@ -2135,6 +2358,83 @@ export function migrateChatMemoryV3Schema(db) {
   }
 }
 
+// 迁移: 记忆整理"已处理"记账表 + 维护索引。
+//
+// 背景：T1/T2/T4/T5 的候选发现只按时间窗/状态筛选，模型判定"无关 / 归纳不出结论 / 补不出字段"
+// 时不产生任何内容写入，候选就不会消失——daemon 每轮扫描（默认 5 分钟、空闲时全程为真）
+// 会把同一批候选重复送进 LLM。本表按 (job_type, mark_key) 记账并带 TTL
+// （TTL 常量见 services/memory/memoryConsolidation.js），过期行由 T3 维护清理删除。
+//
+// 键约定：conflict=memory_id、generalize=会话|实体|主体、portrait_suggest=会话、backfill=memory_id。
+// 导出供迁移回归测试使用（test/memoryConsolidationMarks.test.js）。
+export function migrateMemoryConsolidationMarks(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_consolidation_marks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_type TEXT NOT NULL,
+        mark_key TEXT NOT NULL,
+        marked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(job_type, mark_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_consolidation_jobs_type
+        ON memory_consolidation_jobs(job_type, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_memory_retrieval_audits_created
+        ON memory_retrieval_audits(created_at);
+    `);
+  } catch (err) {
+    console.error('[db] migrateMemoryConsolidationMarks error:', err.message);
+    throw err;
+  }
+}
+
+// 迁移: 把整理 daemon 的显式配置写进既有 memory_settings 行。
+//
+// 背景：memory_settings 只在首次运行时 INSERT OR IGNORE，老库里根本没有 consolidation 块，
+// 一直靠 normalizeMemorySettings 的默认值兜底——库里看不出实际生效的节奏，旧键
+// dailyMaxLlmCalls（语义本就是"每日总量"）也一直残留。这里做一次幂等的显式化：
+//   - 只动 consolidation 一个键，其余配置逐字保留；
+//   - dailyMaxLlmCalls → dailyLlmCalls（语义归位，避免被读成"每轮预算"）；
+//   - 已有值不覆盖（用户手改过就以用户为准），只补缺失键。
+// 全新库由 migrateChatMemoryV2Schema 的种子行覆盖，本函数直接跳过。
+// 注意：这里的数值不在这里做钳制，读取侧 memoryConfig.normalizeMemorySettings 统一钳制。
+// 导出供迁移回归测试使用（test/consolidation.test.js）。
+export function migrateMemoryConsolidationSettings(db) {
+  try {
+    const row = db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'memory_settings'`).get();
+    if (!row) return { skipped: 'no-settings' };
+
+    let stored = {};
+    try { stored = JSON.parse(row.setting_value) || {}; } catch { stored = {}; }
+    const current = stored.consolidation && typeof stored.consolidation === 'object' && !Array.isArray(stored.consolidation)
+      ? stored.consolidation
+      : {};
+
+    const fields = ['enabled', 'idleDelayMinutes', 'minIntervalMinutes', 'llmCallsPerRun', 'dailyLlmCalls'];
+    const missing = fields.some(field => current[field] === undefined);
+    const hasLegacyKey = current.dailyMaxLlmCalls !== undefined;
+    if (!missing && !hasLegacyKey) return { skipped: 'up-to-date' };
+
+    const next = {
+      enabled: current.enabled === undefined ? true : Boolean(current.enabled),
+      idleDelayMinutes: current.idleDelayMinutes === undefined ? 30 : current.idleDelayMinutes,
+      minIntervalMinutes: current.minIntervalMinutes === undefined ? 60 : current.minIntervalMinutes,
+      llmCallsPerRun: current.llmCallsPerRun === undefined ? 3 : current.llmCallsPerRun,
+      dailyLlmCalls: current.dailyLlmCalls ?? current.dailyMaxLlmCalls ?? 60,
+    };
+    stored.consolidation = next;
+    db.prepare(`
+      UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = 'memory_settings'
+    `).run(JSON.stringify(stored));
+    console.log(`[db] migrateMemoryConsolidationSettings: consolidation 已显式化 ${JSON.stringify(next)}`);
+    return { updated: true, consolidation: next };
+  } catch (err) {
+    // 配置显式化失败不应阻止启动：读取侧仍有默认值兜底
+    console.warn('[db] migrateMemoryConsolidationSettings skipped:', err.message);
+    return { error: err.message };
+  }
+}
+
 // FTS 扩列 3 → 6 列：外部内容表无法 ALTER，需删表重建 + 全量 rebuild。
 // semantic_note 刻意不进 FTS（高层语义提炼与提问语言形态脱节，混入降低召回，见方案 §2）。
 function upgradeMemoryFtsToV3(db) {
@@ -2200,4 +2500,4 @@ function migrateSystemSettings(db) {
 }
 
 // loadSystemSettings 已移至 db/settings.js（config 作为参数传入，避免反向依赖 config 之外的耦合）
-
+// 上游 ai-town 线给该函数加的 town_settings 装载逻辑已同步移植到 db/settings.js（合版时并入）

@@ -369,8 +369,9 @@ memoryLines.push(`${i + 1}. [${label}] ${text}`);
 
 新文件 `services/memory/consolidationScheduler.js`，模式对齐 `proactiveChatScheduler.js`：
 
-- **触发**：空闲判定（无活跃 SSE 流 且 距最后一条消息 ≥ `idleDelayMinutes`，默认 30 分钟）或每日一次兜底；可选产品化——结合角色 `schedule_templates` 作息，在角色"睡觉"时段执行（"她睡着后在整理今天的记忆"）。
-- **预算**：单次运行 LLM 调用 ≤ `dailyMaxLlmCalls`（默认 6）、总 token 上限；全部走 `chatSync` + `llmConcurrency` 正常排队，label 统一 `记忆整理`。
+- **触发**：空闲判定（无活跃前台聊天流 且 距最后一条消息 ≥ `idleDelayMinutes`，默认 30 分钟）或每日一次兜底；可选产品化——结合角色 `schedule_templates` 作息，在角色"睡觉"时段执行（"她睡着后在整理今天的记忆"）。
+  > ⚠️ 实施修订（2026-09-10）：仅靠空闲判定等于"用户离开后每 5 分钟一满轮"，且候选不做消费记账会被无限重问。实际实现另加 `minIntervalMinutes`（两次实干最小间隔）、`dailyLlmCalls`（每日总量）、空转退避与 `memory_consolidation_marks` 记账，详见 [memory-upgrade-progress.md](memory-upgrade-progress.md) 的"记忆系统空转 / token 审查修复"一节。
+- **预算**：单次运行 LLM 调用 ≤ `llmCallsPerRun`（默认 3）、每日总量 ≤ `dailyLlmCalls`（默认 60）、总 token 上限；全部走 `chatSync` + `llmConcurrency` 正常排队，label 统一 `记忆整理`。
 - **任务表**：`memory_consolidation_jobs`，启动时 `processing→pending` 恢复（模式同 index worker L432），`attempts` ≥3 进 failed 不再自动重试。
 - **feature flag**：`memory_settings.consolidation.enabled`。
 
@@ -451,7 +452,7 @@ archived 不进任何检索通道，管理界面可查可恢复（恢复即 stat
 v3:            { enabled: true },                       // 阶段一：新表示与实体信号
 activeSearch:  { enabled: false, timeoutMs: 4000 },     // 阶段二：@memory 主动回想
 consolidation: { enabled: true, idleDelayMinutes: 30,   // 阶段三：整理 daemon
-                 dailyMaxLlmCalls: 6 },
+                 minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60 },
 contextBudget: { enabled: false, dynamicTokens: 8000 }, // 阶段四：上下文预算
 ```
 
