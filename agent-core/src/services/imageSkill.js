@@ -133,7 +133,7 @@ function buildWorkflow(promptText, overrides = {}) {
   const workflow = JSON.parse(fs.readFileSync(wfPath, 'utf8'));
   let wf = apiToGui(workflow);
   if (!Array.isArray(wf.nodes)) {
-    throw new Error(`Workflow "${wfName}" is invalid: missing "nodes" array and could not be parsed as an API-format workflow. Please use ComfyUI's regular "Save" (not "Export (API)") to export the workflow.`);
+    throw new Error(`Workflow "${path.basename(wfPath)}" is invalid: missing "nodes" array and could not be parsed as an API-format workflow. Please use ComfyUI's regular "Save" (not "Export (API)") to export the workflow.`);
   }
   wf = JSON.parse(JSON.stringify(wf));
 
