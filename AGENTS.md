@@ -67,6 +67,7 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 2. `changelog.js` 里的 `export const CHANGELOG_FLAG = '...'` 由 `scripts/tag.mjs` 自动维护（值 = 该文件除本行外内容的 sha256 前 12 位），**禁止手写**。想让用户重新看到弹窗，改文案即可
 3. 弹窗触发口径在 `App.vue`：拿 `CHANGELOG_FLAG` 和 `localStorage['linshe_changelog_seen']` 比，不一致才弹；关闭时回写。因此同一份更新说明只弹一次，首次启动必弹
 4. 该检查刻意写在**独立的 `onMounted`** 里，不依赖角色加载 / SSE 等启动流程，改动那段启动代码时请勿把两者合并
+5. 页脚的交流群 / 仓库地址 / 哔哩哔哩主页 / 特别鸣谢名单属于**长期信息**，写在 `web-ui/src/data/community.js`，不要放进 `changelog.js` —— 后者的内容一变就会给所有用户重弹一次更新说明
 
 ## LLM 输出
 
