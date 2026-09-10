@@ -139,10 +139,15 @@ const toastFn = inject('toast', null)
 
 const props = defineProps({
   post: { type: Object, required: true },
+  // 分享用图：朋友圈里摊在最前面的那张（不传则沿用 post.images）
+  image: { type: String, default: '' },
   visible: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close'])
+
+// 分享图永远只出一张：把 post 收成单图，多图版式（拼贴 / 拍立得叠放）自然退回单图
+const shareSource = computed(() => (props.image ? { ...props.post, images: [props.image] } : props.post))
 
 const styles = MOMENT_SHARE_STYLES
 const panelRef = ref(null)
@@ -449,7 +454,7 @@ async function renderPoster(styleId, { bake = false } = {}) {
     rendering.value = true
   }
   try {
-    const { canvas, styleId: resolved, hero, filmLayout } = await renderMomentShareCard(props.post, {
+    const { canvas, styleId: resolved, hero, filmLayout } = await renderMomentShareCard(shareSource.value, {
       styleId: bake
         ? (resolvedStyleId.value || undefined)
         : (styleId === 'auto' ? undefined : styleId),

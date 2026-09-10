@@ -312,9 +312,28 @@ router.post('/:id/like', (req, res) => {
 
 // ──────────────── 内部函数 ────────────────
 
+// 配图张数分布：70% 一张 / 20% 两张 / 10% 三张
+// 多于一张时 LLM 一并给出对应数量的 prompt，之后串行出图
+const MOMENT_IMAGE_COUNT_DIST = [
+  { count: 1, weight: 0.70 },
+  { count: 2, weight: 0.20 },
+  { count: 3, weight: 0.10 },
+];
+const MOMENT_IMAGE_FIELDS = ['imagePrompt', 'imagePrompt2', 'imagePrompt3'];
+const CHINESE_NUM = ['', '一', '两', '三'];
+
+function pickMomentImageCount() {
+  let roll = Math.random() * MOMENT_IMAGE_COUNT_DIST.reduce((sum, i) => sum + i.weight, 0);
+  for (const item of MOMENT_IMAGE_COUNT_DIST) {
+    roll -= item.weight;
+    if (roll <= 0) return item.count;
+  }
+  return 1;
+}
+
 /**
  * 生成一条朋友圈帖子（文案 + 配图）
- * 单次 LLM 调用输出 { text, imagePrompt }，确保图文一致
+ * 单次 LLM 调用输出 { text, imagePrompt[, imagePrompt2[, imagePrompt3]] }，确保图文一致
  */
 async function generateMomentPost(character, opts = {}) {
   const db = getDb();
@@ -416,6 +435,11 @@ const MOMENT_FORMS = [
     const picked = weightedPick(MOMENT_FORMS, formWeights);
     pickedForm = { name: picked.name, desc: picked.desc, len: picked.len };
   }
+
+  // 1.6 配图掷骰：70% 一张 / 20% 两张 / 10% 三张，prompt 由下面的 LLM 调用一并给出
+  const imageCount = pickMomentImageCount();
+  const imageFieldNames = MOMENT_IMAGE_FIELDS.slice(0, imageCount);
+  if (imageCount > 1) console.log(`[moments] ${character.display_name} posts ${imageCount} images this time`);
 
   // 2. 创建 pending 记录
   const postResult = db.prepare(
@@ -532,14 +556,25 @@ const MOMENT_FORMS = [
     : '';
 
   const postingTask = (() => {
+    // 本次发几张图就要几个画面描述字段：第 1 张是 imagePrompt，之后依次 imagePrompt2 / imagePrompt3
+    const imageFieldJson = imageFieldNames.map((name, i) => (i === 0
+      ? `"imagePrompt":"第一张照片的英文画面描述：${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"`
+      : `"${name}":"第${i + 1}张照片的英文画面描述：同一次经历里的另一张照片，内容要求与 imagePrompt 完全一致（英文、完整独立、贴合正文）"`
+    )).join(',');
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（自然口语化）","imagePrompt":"${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"}`;
+{"text":"朋友圈文案（自然口语化）",${imageFieldJson}}`;
+
+    const multiImageRule = imageCount > 1
+      ? `- **本次要发${CHINESE_NUM[imageCount]}张照片**：${imageFieldNames.join('、')} 是同一次经历里的${CHINESE_NUM[imageCount]}张不同照片——比如一张近景一张远景、一张拍自己一张拍身旁的风景或同伴、一张抓拍一张合影。每张都要能对应上 text 写的事，画面彼此不要重复，合起来才是一条完整的朋友圈。
+- 每张照片的描述要求都与 imagePrompt 完全一致：英文、独立完整（场景、人物、动作、光线、构图都要写全），禁止写"同上""同 imagePrompt""参考第一张"这类省略。`
+      : '';
 
     const rules = `规则：
 - 只输出 JSON，不要解释
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 - **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
+${multiImageRule}
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
 ${imperfectionNote}
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
@@ -574,9 +609,10 @@ ${rules}`;
       ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
       : `\n**本次发朋友圈你是正在做或者想到：【${pickedTopic.desc}】**`;
 
+  const userJsonHint = `{"text":"...",${imageFieldNames.map(n => `"${n}":"..."`).join(',')}}`;
   const userMsg = multiPersons.length > 0
-    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
-    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`;
+    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 ${userJsonHint} JSON。`
+    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 ${userJsonHint} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 任务 → msgs[2] 角色 → msgs[3] 交互(多人) → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -598,19 +634,24 @@ ${rules}`;
   msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
 
   let text = '', imagePrompt = '', imageUrls = [];
+  let imagePrompts = [];
   try {
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 2048, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
+  // 每多一张配图就多一段画面描述，max_tokens 相应放宽（一张 2048 / 两张 3072 / 三张 4096）
+  const maxTokens = 2048 + (imageCount - 1) * 1024;
+  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content
   const parsed = parseMomentResponse(result);
   text = parsed.text;
-  imagePrompt = parsed.imagePrompt;
+  imagePrompts = [parsed.imagePrompt, parsed.imagePrompt2, parsed.imagePrompt3].slice(0, imageCount).filter(Boolean);
+  imagePrompt = imagePrompts[0] || '';
 
   if (!text) {
     text = '今天天气真好～';
   }
   if (!imagePrompt) {
     imagePrompt = DEFAULT_MOMENT_IMAGE_PROMPT;
+    imagePrompts = [imagePrompt];
   }
 
   console.log(`[moments] Generated post for ${character.display_name}: "${text.slice(0, 40)}..."`);
@@ -638,37 +679,50 @@ ${rules}`;
       console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
     }
 
-    const originalImagePrompt = imagePrompt;
     const charArtist = charArtistOverrideWithFallback(character, otherChars);
-    const genResult = await generateImageRaw(imagePrompt, {
-      ragQuery: text,
-      artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
-      width: config.comfyui.momentsWidth,
-      height: config.comfyui.momentsHeight,
-      scene: 'moments',
-      priority: opts.manual ? 'high' : 'low',
-      ...loraOpts,
-    });
+    const usedPrompts = [];
+    // 多图模式串行出图：单张失败只丢那一张，不影响其他张和发帖
+    for (let i = 0; i < imagePrompts.length; i++) {
+      try {
+        const genResult = await generateImageRaw(imagePrompts[i], {
+          ragQuery: text,
+          artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
+          width: config.comfyui.momentsWidth,
+          height: config.comfyui.momentsHeight,
+          scene: 'moments',
+          priority: opts.manual ? 'high' : 'low',
+          ...loraOpts,
+        });
 
-    if (genResult.success && genResult.images.length > 0) {
-      imagePrompt = genResult.promptRefined || imagePrompt;
-      for (const img of genResult.images) {
-        const ts = Date.now();
-        const filename = `moment_${ts}_${img.filename || 'comfy.png'}`;
-        const url = saveBase64Image('moments', filename, img.base64);
-        imageUrls.push(url);
+        if (!genResult.success || genResult.images.length === 0) continue;
+
+        const usedPrompt = genResult.promptRefined || imagePrompts[i];
+        usedPrompts.push(usedPrompt);
+
+        const batchUrls = [];
+        for (const img of genResult.images) {
+          const ts = Date.now();
+          const filename = `moment_${ts}_${i + 1}_${img.filename || 'comfy.png'}`;
+          const url = saveBase64Image('moments', filename, img.base64);
+          batchUrls.push(url);
+          imageUrls.push(url);
+        }
+        recordCompletedImageTask({
+          conversationId: `char_${character.id}_moments`,
+          promptOriginal: imagePrompts[i],
+          promptRefined: usedPrompt,
+          outputPaths: batchUrls,
+          style: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
+          resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
+          workflowTemplate: genResult.wfMode,
+          db,
+        });
+      } catch (err) {
+        console.error(`[moments] Image ${i + 1}/${imagePrompts.length} failed for post ${postId}:`, err.message);
       }
-      recordCompletedImageTask({
-        conversationId: `char_${character.id}_moments`,
-        promptOriginal: originalImagePrompt,
-        promptRefined: imagePrompt,
-        outputPaths: imageUrls,
-        style: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
-        resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
-        workflowTemplate: genResult.wfMode,
-        db,
-      });
     }
+    // 落库用实际生效的 prompt；多图用分隔线拼起来，供图片反查 / 重绘参考
+    if (usedPrompts.length > 0) imagePrompt = usedPrompts.join('\n---\n');
   } catch (err) {
     console.error(`[moments] Image generation failed for post ${postId}:`, err.message);
     // 生图失败不阻塞发帖——无图但有文案

@@ -29,18 +29,73 @@
     <!-- 正文 -->
     <div class="moment-content">{{ post.content }}</div>
 
-    <!-- 配图 -->
-    <div v-if="post.images?.length > 0 && visibleImages.length > 0" class="moment-images" :class="{ 'single': visibleImages.length === 1 }">
+    <!-- 配图：单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
+    <div v-if="visibleImages.length === 1" class="moment-images">
       <img
-        v-for="(img, i) in visibleImages"
-        :key="i"
-        :src="img"
+        :src="visibleImages[0].url"
         class="moment-img"
-        @click="onPreviewImg(i)"
-        @error="onImgError(i)"
+        @click="onPreviewImg(0)"
+        @error="onImgError(visibleImages[0].idx)"
         loading="lazy"
         alt="朋友圈配图"
       />
+    </div>
+    <div
+      v-else-if="visibleImages.length > 1"
+      class="moment-deck"
+      :style="{ '--deck-ar': deckAspect }"
+      role="group"
+      tabindex="0"
+      aria-label="朋友圈配图，可左右翻看"
+      @keydown.left.prevent="flipDeck(-1)"
+      @keydown.right.prevent="flipDeck(1)"
+      @wheel="onDeckWheel"
+      @touchstart.passive="onDeckTouchStart"
+      @touchend="onDeckTouchEnd"
+    >
+      <div
+        v-for="(item, i) in visibleImages"
+        :key="item.idx"
+        class="deck-card"
+        :class="deckCardClass(i)"
+        :style="deckCardStyle(i)"
+        role="button"
+        :tabindex="i === deckIndex ? 0 : -1"
+        :aria-label="i === deckIndex ? `查看第 ${i + 1} 张配图` : `翻到第 ${i + 1} 张配图`"
+        @click="onDeckCardClick(i)"
+        @keydown.enter.prevent="onDeckCardClick(i)"
+        @keydown.space.prevent="onDeckCardClick(i)"
+      >
+        <img
+          :src="item.url"
+          class="deck-img"
+          :alt="`朋友圈配图 ${i + 1}`"
+          @load="onDeckImgLoad"
+          @error="onImgError(item.idx)"
+          loading="lazy"
+        />
+      </div>
+
+      <linshe-button
+        variant="icon"
+        size="md"
+        class="deck-nav deck-nav--prev"
+        aria-label="上一张"
+        @click.stop="flipDeck(-1)"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+      </linshe-button>
+      <linshe-button
+        variant="icon"
+        size="md"
+        class="deck-nav deck-nav--next"
+        aria-label="下一张"
+        @click.stop="flipDeck(1)"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+      </linshe-button>
+
+      <div class="deck-counter">{{ deckIndex + 1 }} / {{ visibleImages.length }}</div>
     </div>
 
     <!-- 底部操作栏 -->
@@ -57,7 +112,7 @@
         </svg>
         <span v-if="(post.comment_count || 0) > 0">{{ post.comment_count }}</span>
       </div>
-      <div class="action-btn share-btn" role="button" tabindex="0" @click="$emit('share', post)" @keydown.enter.prevent="$emit('share', post)" @keydown.space.prevent="$emit('share', post)">
+      <div class="action-btn share-btn" role="button" tabindex="0" @click="onShare" @keydown.enter.prevent="onShare" @keydown.space.prevent="onShare">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="18" cy="5" r="3" />
           <circle cx="6" cy="12" r="3" />
@@ -184,16 +239,167 @@ const avatarStyle = computed(() => {
   return { background: 'var(--accent)' }
 })
 
+// 带原始下标的可见配图：加载失败按下标剔除，多图翻看与灯箱都基于这个顺序
 const visibleImages = computed(() => {
-  return (props.post.images || []).filter((_, i) => !imgErrors.has(i))
+  return (props.post.images || [])
+    .map((url, idx) => ({ url, idx }))
+    .filter(({ idx }) => !imgErrors.has(idx))
 })
 
-function onImgError(i) {
-  imgErrors.add(i)
+function onImgError(idx) {
+  imgErrors.add(idx)
 }
 
 function onPreviewImg(i) {
-  emit('preview', { images: visibleImages.value, index: i })
+  emit('preview', { images: visibleImages.value.map(e => e.url), index: i })
+}
+
+// ── 多图：一摞摊开的相片（滚轮 / 手指滑动 / 点左右翻看）──
+const deckIndex = ref(0)
+// 舞台高度按相片原始宽高比来（首张加载完就量），默认 4:3
+const deckAspect = ref('4 / 3')
+// 翻页动画：记下这一拍在飞的那张 —— next 是顶张甩出去，prev 是最底下那张被抽上来
+const deckFly = ref(null)
+// 飞出去的那张只在“甩出去”的半程压在整摞上面，回落时要把层级交回去
+const deckFlyFront = ref(false)
+let deckFlyTimer = null
+let deckFlyFrontTimer = null
+let deckWheelLock = 0
+let deckTouchStart = null
+
+// 扇形层叠参数：每深一层多转一点、往右上错开一点。
+// 旋转原点是底边中点，所以后一张的右上角会翘到顶张上面、左下角从底下露出来一点
+const DECK_LAYERS = [
+  { x: 0, y: 0, r: 0 },
+  { x: 4, y: -7, r: -3.8 },
+  { x: 7, y: -11, r: -5.6 },
+  { x: 9, y: -14, r: -7 },
+]
+
+// 图片数量变化（加载失败被剔除 / 帖子换图）后把翻页位置收回范围内
+watch(() => visibleImages.value.length, (n) => {
+  if (deckIndex.value >= n) deckIndex.value = 0
+})
+
+// 换了一批图就重新量宽高比
+watch(() => (props.post.images || []).join('|'), () => { deckAspect.value = '4 / 3' })
+
+function onDeckImgLoad(e) {
+  const img = e?.target
+  if (!img?.naturalWidth || !img?.naturalHeight) return
+  if (deckAspect.value !== '4 / 3') return
+  deckAspect.value = `${img.naturalWidth} / ${img.naturalHeight}`
+}
+
+function markDeckFly(idx, dir) {
+  deckFly.value = { idx, dir }
+  clearTimeout(deckFlyFrontTimer)
+  if (dir > 0) {
+    deckFlyFront.value = true
+    // 480ms 的甩出动画在 40%（192ms）到最远点，之后开始回落，就在这时候钻回后面
+    deckFlyFrontTimer = setTimeout(() => { deckFlyFront.value = false }, 200)
+  } else {
+    // prev 是下层那张抽到最上面，本来就是顶张，不用额外抬层级
+    deckFlyFront.value = false
+  }
+  clearTimeout(deckFlyTimer)
+  deckFlyTimer = setTimeout(() => { deckFly.value = null }, 520)
+}
+
+function flipDeck(step) {
+  const n = visibleImages.value.length
+  if (n < 2) return
+  const dir = step > 0 ? 1 : -1
+  // 下一张 = 顶张飞出去落回最下面；上一张 = 最下面那张从后面被抽到最上面
+  const flyingIdx = dir > 0 ? deckIndex.value : (deckIndex.value - 1 + n) % n
+  deckIndex.value = (deckIndex.value + step + n) % n
+  markDeckFly(flyingIdx, dir)
+}
+
+// 堆叠深度：0 = 最上面一张，数字越大越靠后
+function deckDepth(i) {
+  const n = visibleImages.value.length
+  return (i - deckIndex.value + n) % n
+}
+
+function deckCardStyle(i) {
+  const depth = deckDepth(i)
+  const layer = DECK_LAYERS[Math.min(depth, DECK_LAYERS.length - 1)]
+  const fly = deckFly.value
+  const flying = !!fly && fly.idx === i
+  const style = {
+    '--deck-x': `${layer.x}px`,
+    '--deck-y': `${layer.y}px`,
+    '--deck-r': `${layer.r}deg`,
+    // 相片本体自己按原始比例缩放到舞台内，这里只负责摆它所在的那一层
+    transform: `translate(${layer.x}px, ${layer.y}px) rotate(${layer.r}deg)`,
+    // 甩出去的那张在半程内压到整摞上面，回落时自动交回层级
+    zIndex: flying && deckFlyFront.value ? 30 : 10 - depth,
+    opacity: depth > DECK_LAYERS.length ? 0 : 1,
+  }
+  if (flying && fly.dir < 0) {
+    // 从它原来那一层（最底下可见层）的位置抽上来
+    const from = DECK_LAYERS[Math.min(visibleImages.value.length - 1, DECK_LAYERS.length - 1)]
+    style['--fly-x'] = `${from.x}px`
+    style['--fly-y'] = `${from.y}px`
+    style['--fly-r'] = `${from.r}deg`
+  }
+  return style
+}
+
+function deckCardClass(i) {
+  const fly = deckFly.value
+  const flying = !!fly && fly.idx === i
+  return {
+    'is-top': i === deckIndex.value,
+    'is-flying': flying,
+    'fly-next': flying && fly.dir > 0,
+    'fly-prev': flying && fly.dir < 0,
+  }
+}
+
+// 摊在最上面的那张（翻页后跟着变）：分享按这张出图，且只出一张
+const frontImageUrl = computed(() => visibleImages.value[deckIndex.value]?.url || '')
+
+function onShare() {
+  emit('share', props.post, frontImageUrl.value)
+}
+
+function onDeckCardClick(i) {
+  if (i === deckIndex.value) onPreviewImg(i)
+  else {
+    deckIndex.value = i
+    markDeckFly(i, -1)
+  }
+}
+
+function onDeckWheel(e) {
+  if (visibleImages.value.length < 2) return
+  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+  if (!delta) return
+  // 悬停在卡片上时滚轮只翻图，不进页面滚动；加冷却避免一次滑动连翻
+  e.preventDefault()
+  const now = Date.now()
+  if (now - deckWheelLock < 300) return
+  deckWheelLock = now
+  flipDeck(delta > 0 ? 1 : -1)
+}
+
+function onDeckTouchStart(e) {
+  const t = e.changedTouches?.[0]
+  deckTouchStart = t ? { x: t.clientX, y: t.clientY } : null
+}
+
+function onDeckTouchEnd(e) {
+  const start = deckTouchStart
+  deckTouchStart = null
+  const t = e.changedTouches?.[0]
+  if (!start || !t) return
+  const dx = t.clientX - start.x
+  const dy = t.clientY - start.y
+  // 横向滑动且够长才翻，纵向留给页面滚动
+  if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return
+  flipDeck(dx < 0 ? 1 : -1)
 }
 
 // 首次加载评论（store.loadComments 直接设置 post._comments，computed 自动同步）
@@ -417,16 +623,11 @@ function formatTime(iso) {
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* 单图 */
 .moment-images {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
   margin-bottom: 14px;
   border-radius: 12px;
   overflow: hidden;
-}
-.moment-images.single {
-  grid-template-columns: 1fr;
 }
 .moment-img {
   width: 100%;
@@ -438,6 +639,87 @@ function formatTime(iso) {
   transition: transform 0.2s ease;
 }
 .moment-img:hover { transform: scale(1.02); }
+
+/* 多图：一摞摊开的相片 —— 后一张从右上角翘出来一点、左下角从底下露一点，
+   滚轮 / 手指滑动 / 点左右箭头翻看；翻页时顶张甩出去、再落回最下面。
+   舞台吃满原来单图的位置（宽度撑满，高度按相片比例、上限 520px） */
+.moment-deck {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--deck-ar, 4 / 3);
+  max-height: 520px;
+  margin-top: 15px;
+  margin-bottom: 16px;
+  touch-action: pan-y;
+}
+/* 舞台只负责定位和翻页动画：底面透明、不拦指针（露在外面的那张也能点到），
+   圆角 / 阴影都挂在相片本体上，所以相片多大、看起来的卡片就多大 */
+.deck-card {
+  position: absolute;
+  inset: 22px 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  transition: transform var(--dur-base) var(--ease-spring), opacity var(--dur-base) var(--ease-standard);
+  will-change: transform;
+}
+/* 相片：按原始比例缩放到舞台内（完整不裁切），尺寸由 max-width/height 决定 */
+.deck-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  box-shadow: var(--shadow-sm);
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  transition: box-shadow var(--dur-base) var(--ease-standard);
+}
+.deck-card.is-top .deck-img { box-shadow: var(--shadow-md); }
+/* 翻页中飞的那张影子拉深一点（层级由 deckCardStyle 顶到 30） */
+.deck-card.is-flying .deck-img { box-shadow: var(--shadow-lg); }
+
+/* 下一张：顶张往右上甩出去，再落回最底下那一层 */
+.deck-card.fly-next { animation: deck-throw-out 480ms var(--ease-out) both; }
+@keyframes deck-throw-out {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  40% { transform: translate(26px, -6px) rotate(6deg) scale(0.94); }
+  100% { transform: translate(var(--deck-x), var(--deck-y)) rotate(var(--deck-r)) scale(1); }
+}
+/* 上一张：最底下那张从后面被抽上来，落定时带一点回弹 */
+.deck-card.fly-prev { animation: deck-pull-in 480ms var(--ease-spring) both; }
+@keyframes deck-pull-in {
+  0% { transform: translate(var(--fly-x), var(--fly-y)) rotate(var(--fly-r)) scale(0.97); }
+  100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+}
+/* 只补定位，皮肤仍归 LinsheButton；md 圆形图标钮 30px，故上移 15px 居中 */
+.moment-deck .deck-nav {
+  position: absolute;
+  top: calc(50% - 15px);
+  z-index: 40;
+}
+.moment-deck .deck-nav--prev { left: 8px; }
+.moment-deck .deck-nav--next { right: 8px; }
+.deck-counter {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 40;
+  padding: 2px 10px;
+  border-radius: 999px;
+  /* 压在照片上的小标签，沿用灯箱遮罩的黑底白字口径，任何画面上都看得清 */
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
 
 .moment-actions {
   display: flex; gap: 4px;

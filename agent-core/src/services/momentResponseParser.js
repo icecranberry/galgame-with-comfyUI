@@ -1,8 +1,14 @@
-// Parses the { text, imagePrompt } object returned by the moments LLM call.
+// Parses the { text, imagePrompt, imagePrompt2, imagePrompt3 } object returned by
+// the moments LLM call. imagePrompt2 / imagePrompt3 只在本次要发多张配图时才出现
+// （配图张数分布：70% 一张 / 20% 两张 / 10% 三张）。
 // The parser is intentionally strict about not leaking raw JSON syntax into
 // the stored post content when the model response is truncated or malformed.
 
 export const DEFAULT_MOMENT_IMAGE_PROMPT = 'scenic view, beautiful lighting, detailed';
+
+function emptyMoment(text = '') {
+  return { text, imagePrompt: '', imagePrompt2: '', imagePrompt3: '' };
+}
 
 function stripCodeFence(raw) {
   return raw.trim()
@@ -59,15 +65,23 @@ function tryParseJson(text) {
     return {
       text: textValue,
       imagePrompt: typeof parsed?.imagePrompt === 'string' ? parsed.imagePrompt.trim() : '',
+      imagePrompt2: typeof parsed?.imagePrompt2 === 'string' ? parsed.imagePrompt2.trim() : '',
+      imagePrompt3: typeof parsed?.imagePrompt3 === 'string' ? parsed.imagePrompt3.trim() : '',
     };
   } catch {
     return null;
   }
 }
 
+// 截断发生在字符串内部时，用来判断某个字段是否已经写完（引号闭合）。
+// 只保留写完的 prompt，避免把半截画面描述送去生图。
+function hasClosedStringField(text, name) {
+  return new RegExp(`"${name}"\\s*:\\s*"(?:[^"\\\\]|\\\\.)*"`).test(text);
+}
+
 export function parseMomentResponse(raw) {
   const cleaned = stripCodeFence(typeof raw === 'string' ? raw : '');
-  if (!cleaned) return { text: '', imagePrompt: '' };
+  if (!cleaned) return emptyMoment();
 
   const start = cleaned.indexOf('{');
   const jsonish = start === -1 ? cleaned : cleaned.slice(start);
@@ -85,7 +99,14 @@ export function parseMomentResponse(raw) {
   for (const suffix of suffixes) {
     const parsed = tryParseJson(jsonish + suffix);
     if (parsed) {
-      if (truncatedInsideString) return { text: parsed.text, imagePrompt: '' };
+      if (truncatedInsideString) {
+        return {
+          text: parsed.text,
+          imagePrompt: hasClosedStringField(jsonish, 'imagePrompt') ? parsed.imagePrompt : '',
+          imagePrompt2: hasClosedStringField(jsonish, 'imagePrompt2') ? parsed.imagePrompt2 : '',
+          imagePrompt3: hasClosedStringField(jsonish, 'imagePrompt3') ? parsed.imagePrompt3 : '',
+        };
+      }
       return parsed;
     }
   }
@@ -93,11 +114,11 @@ export function parseMomentResponse(raw) {
   // Last-chance salvage: keep only the text field, never raw JSON in content.
   const textMatch = jsonish.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/is);
   if (textMatch?.[1]) {
-    return { text: unescapeJsonString(textMatch[1]), imagePrompt: '' };
+    return emptyMoment(unescapeJsonString(textMatch[1]));
   }
 
-  if (jsonish.startsWith('{')) return { text: '', imagePrompt: '' };
-  return { text: cleaned.slice(0, 200), imagePrompt: '' };
+  if (jsonish.startsWith('{')) return emptyMoment();
+  return emptyMoment(cleaned.slice(0, 200));
 }
 
 /**

@@ -92,15 +92,17 @@
 
     <!-- 图片预览 -->
     <ImageLightbox
-      :visible="!!previewImage"
-      :imgs="previewImage"
-      @hide="previewImage = null"
+      :visible="!!previewImg"
+      :imgs="previewImg?.imgs || []"
+      :index="previewImg?.index || 0"
+      @hide="previewImg = null"
     />
 
     <!-- 分享卡片 -->
     <ShareCard
       v-if="sharePost"
       :post="sharePost"
+      :image="shareImage"
       :visible="true"
       @close="onShareClose"
     />
@@ -129,8 +131,11 @@ const showPicker = ref(false)
 const pickerRef = ref(null)
 const genPending = ref(false)
 const libraryOpen = ref(false)
-const previewImage = ref(null)
+// 灯箱状态：多图帖子可带整组图 + 起始下标，双图朋友圈能在灯箱里继续左右翻
+const previewImg = ref(null)
 const sharePost = ref(null)
+// 分享用图：以朋友圈里摊在最前面的那张为准（分享图只出一张）
+const shareImage = ref('')
 const scrollContainer = ref(null)
 const filterScrollRef = ref(null)
 
@@ -147,15 +152,17 @@ function onFilterWheel(e) {
 const characters = computed(() => [...chat.characters].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 function onPreview({ images, index }) {
-  previewImage.value = images[index]
+  previewImg.value = { imgs: images, index }
 }
 
-function onShare(post) {
+function onShare(post, imageUrl) {
   sharePost.value = post
+  shareImage.value = imageUrl || ''
 }
 
 function onShareClose() {
   sharePost.value = null
+  shareImage.value = ''
 }
 
 onMounted(async () => {
