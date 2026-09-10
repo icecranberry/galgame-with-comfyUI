@@ -30,7 +30,7 @@ const server=await createServer({root,configFile:false,cacheDir:path.join(out,'.
     requests.push({path:url.pathname,method:req.method,at:Date.now()})
     if(url.pathname==='/api/stream'){connections++;sockets.add(res);res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'});res.write('event: connected\ndata: {}\n\n');res.on('close',()=>{sockets.delete(res);closed++});return}
     const endpoint=url.pathname.replace('/api/town/','')
-    const payloads={state:state(),map,assets:{assets},npcs:{npcs:[]},characters:{characters:[]},settings:{enabled:true},'player/kit':{}}
+    const payloads={state:state(),map,assets:{assets},npcs:{npcs:[]},characters:{characters:[]},settings:{enabled:true},'player/kit':{},economy:{...scope,enabled:true,configured:false,wallet:{balance:0,reserved:0,available:0},orders:[],locations:[],participants:[],slice:null,service:null,venues:[]}}
     if(req.method==='POST'&&endpoint==='player/dir'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true}));return}
     if(req.method!=='GET'||!(endpoint in payloads)){unknown.push({method:req.method,path:url.pathname});res.writeHead(404,{'Content-Type':'application/json'});res.end('{"error":"Unexpected fixture request"}');return}
     const respond=()=>{if(!res.destroyed){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(payloads[endpoint]))}}

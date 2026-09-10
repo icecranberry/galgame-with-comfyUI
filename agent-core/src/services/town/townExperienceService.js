@@ -1,6 +1,7 @@
 import { createTownEventService, townError } from './townEventService.js';
 import { createTownClock } from './townClock.js';
 import { resolveTownServiceDefinition } from './townServiceDefinitions.js';
+import { getVenueServiceSpec, venueRegularProfile, venueServiceTemplate } from './townVenuePlaybooks.js';
 
 export const TOWN_EXPERIENCE_CONSUMER = 'town.experience';
 
@@ -24,6 +25,26 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
       const config = JSON.parse(row.config);
       return { actorIds: [row.actor_id, config.npcActorIds.workshop],
         summary: '玩家将领取的原料送到了工坊，配送已经交付并完成结算。', locationKey: config.locationKeys.workshop };
+    }
+    if (event.type === 'town.venue.regular') {
+      const payload = event.payload || {};
+      const profile = venueRegularProfile(payload.businessKey);
+      const tier = profile?.tiers[payload.tier - 1];
+      if (!profile || !tier || payload.topic !== tier.topic) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const visit = db.prepare(`SELECT * FROM town_venue_regular_visits WHERE world_id=? AND world_epoch=? AND session_id=?`)
+        .get(event.worldId, event.worldEpoch, payload.sessionId);
+      const session = db.prepare(`SELECT * FROM town_service_sessions WHERE session_id=? AND world_id=?
+        AND world_epoch=? AND status='completed'`).get(payload.sessionId, event.worldId, event.worldEpoch);
+      if (!visit || !session || visit.business_key !== payload.businessKey
+          || event.source?.system !== 'town.venue' || event.source.entityId !== payload.sessionId
+          || event.locationKey !== JSON.parse(session.config_json).locationKey) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const regular = db.prepare(`SELECT * FROM town_venue_regulars WHERE world_id=? AND world_epoch=?
+        AND business_key=? AND player_actor_id=?`)
+        .get(event.worldId, event.worldEpoch, payload.businessKey, session.actor_id);
+      if (!regular || regular.tier < payload.tier || regular.visits < payload.visits) throw townError('EXPERIENCE_SOURCE_INVALID');
+      return { actorIds: [session.actor_id, session.provider_actor_id],
+        summary: `玩家常来${profile.displayName}，已经成了这里的熟客。${tier.topic}`,
+        locationKey: event.locationKey };
     }
     if (['town.service.completed', 'town.service.settled'].includes(event.type)) {
       if (event.payload?.status !== 'completed') return null;
@@ -55,6 +76,38 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
           || config.template.version !== 1 || !row.consumed || !row.crafted) throw townError('EXPERIENCE_SOURCE_INVALID');
         return { actorIds: [row.actor_id, row.provider_actor_id],
           summary: '玩家在镇咖啡馆喝到了一杯手冲咖啡，服务已经正式结算。', locationKey: config.locationKey };
+      }
+      // 通用功能建筑：咖啡馆之外的所有店铺共用同一份回执校验口径。
+      const venueSpec = getVenueServiceSpec(config.template?.key);
+      if (venueSpec) {
+        const template = venueServiceTemplate(venueSpec.service);
+        if (receipt.status !== 'completed' || receipt.eventId !== event.eventId
+            || event.eventId !== `service:${row.session_id}:settled` || receipt.sessionId !== row.session_id
+            || receipt.settlementId !== event.payload.settlementId || receipt.settlementId !== row.session_id
+            || receipt.outcomeKey !== event.payload.outcomeKey || receipt.outcomeKey !== template.outcomeKey
+            || receipt.settledAt !== event.occurredAt || event.source?.system !== 'town.service'
+            || event.source.entityId !== row.session_id || config.template.version !== 1
+            || !row.consumed || !row.crafted) throw townError('EXPERIENCE_SOURCE_INVALID');
+        const venuePays = venueSpec.playbook.payer === 'venue';
+        if (venuePays ? (receipt.paid !== 0 || receipt.payout !== template.wage || receipt.refund !== 0)
+          : (receipt.paid !== template.price || receipt.payout !== template.price || receipt.refund !== 0)) {
+          throw townError('EXPERIENCE_SOURCE_INVALID');
+        }
+        if (venueSpec.service.product) {
+          if (!Array.isArray(receipt.itemIds) || receipt.itemIds.length !== 1
+              || !Number.isSafeInteger(receipt.itemIds[0])) throw townError('EXPERIENCE_SOURCE_INVALID');
+          const granted = db.prepare(`SELECT id FROM backpack_items WHERE id=? AND world_id=? AND source_type='service'
+            AND source_id=? AND template_id=? AND template_version=? AND effect_key=?`)
+            .get(receipt.itemIds[0], event.worldId, `service:${row.session_id}:outcome:${receipt.outcomeKey}`,
+              venueSpec.service.product.templateId, venueSpec.service.product.templateVersion,
+              venueSpec.service.product.effectKey);
+          if (!granted) throw townError('EXPERIENCE_SOURCE_INVALID');
+        } else if (!Array.isArray(receipt.itemIds) || receipt.itemIds.length !== 0) {
+          throw townError('EXPERIENCE_SOURCE_INVALID');
+        }
+        return { actorIds: [row.actor_id, row.provider_actor_id],
+          summary: `玩家在${venueSpec.kind.displayName}完成了「${venueSpec.service.name}」，服务已经正式结算。`,
+          locationKey: config.locationKey };
       }
       let definition;
       try { definition = resolveTownServiceDefinition(config); }

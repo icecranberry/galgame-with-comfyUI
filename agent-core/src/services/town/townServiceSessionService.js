@@ -108,10 +108,15 @@ export function createTownServiceSessionService({ db, clock, registry, economy, 
     };
   }
   function get(input) { const value = row(input); owner(input,value); return dto(value); }
+  /** 工坊只列自己的会话；咖啡馆与功能建筑的会话由各自引擎负责。 */
+  const isWorkshopTemplate = template => {
+    try { getTownServiceDefinition(template?.key); return true; } catch { return false; }
+  };
   function list(input) {
     epoch(input); actor(input,input.actorId,true);
     return db.prepare('SELECT * FROM town_service_sessions WHERE world_id=? AND world_epoch=? AND actor_id=? ORDER BY created_at DESC LIMIT 100')
-      .all(input.worldId,input.worldEpoch,input.actorId).map(dto);
+      .all(input.worldId,input.worldEpoch,input.actorId)
+      .filter(value => isWorkshopTemplate(JSON.parse(value.config_json).template)).map(dto);
   }
   /** Runtime movement/encounter exclusion. Offers do not occupy either actor. */
   function getBusyActorIds(input) {

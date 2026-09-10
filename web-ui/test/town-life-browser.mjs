@@ -64,6 +64,7 @@ try {
   const button = name => page.getByRole('button', { name, exact: true })
   const ready = () => page.waitForFunction(() => !document.querySelector('.tl-content')?.getAttribute('aria-busy') || document.querySelector('.tl-content')?.getAttribute('aria-busy') === 'false')
   await page.goto(`${origin}/test/town-life-fixture.html`)
+  await button('打开钱袋面板').click()
   await button('开启配送生活').waitFor(); await ready()
   assert.equal(posts.length, 0); assert.ok(await button('开启配送生活').isDisabled())
   await page.keyboard.press('w'); assert.equal(await page.evaluate(() => fixture.keys), 0)
@@ -80,6 +81,10 @@ try {
   delay = 120
   await button('开启配送生活').click()
   await button('开启配送生活').dispatchEvent('click')
+  // 开张在钱袋面板，配送与备料在公告站面板：同屏只开一个窗口，等开张确认后再换面板。
+  await page.getByText('镇上的事，到地方办').waitFor()
+  await button('关闭钱袋').click()
+  await button('打开公告站面板').click()
   await button('发布配送委托').waitFor(); await ready()
   assert.equal(posts.length, 1)
   await button('发布配送委托').click(); await button('接取委托').waitFor(); await ready()
@@ -109,9 +114,9 @@ try {
   await button('交付材料').click(); await page.getByRole('alert').waitFor(); await ready()
   assert.equal(state.wallet.available, 30)
   const completionId = posts.at(-1).body.idempotencyKey
-  await button('关闭生活面板').click(); await button('打开生活面板').click(); await ready()
+  await button('关闭公告站').click(); await button('打开公告站面板').click(); await ready()
   await button('重试同一次操作').waitFor()
-  await page.reload(); await button('重试同一次操作').waitFor(); await ready()
+  await page.reload(); await button('打开公告站面板').click(); await button('重试同一次操作').waitFor(); await ready()
   loseAck = false
   await button('重试同一次操作').click(); await ready()
   assert.equal(posts.at(-1).body.idempotencyKey, completionId); assert.equal(state.wallet.available, 30)
@@ -144,27 +149,13 @@ try {
   await button('取消委托').click(); await button('确认取消').click(); await ready()
   assert.equal(state.orders[0].status, 'cancelled'); assert.equal(state.wallet.available, 30)
   await button('重新读取').focus(); await page.keyboard.press('Tab')
-  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), '关闭生活面板')
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), '关闭公告站')
   await page.keyboard.press('Escape'); assert.equal(await page.getByRole('dialog').count(), 0)
-  failedRead = true; await button('打开生活面板').click(); await page.getByRole('alert').waitFor(); await ready()
+  failedRead = true; await button('打开公告站面板').click(); await page.getByRole('alert').waitFor(); await ready()
   assert.ok(await button('发布配送委托').isDisabled())
   const before = posts.length; await button('重新读取').click(); await ready(); assert.equal(posts.length, before)
   failedRead = false
-  state.service = { locationKey: 'workshop', providerActorId: 'c', sessions: [{ sessionId: 's-life', worldId: 'fixture', worldEpoch: 1,
-    status: 'active', phaseKey: 'theme', version: 1, turnCount: 0, choices: ['choose_theme', 'clarify', 'cancel'], turns: [] }] }
-  await button('重新读取').click(); await ready()
-  assert.ok(await button('了解工坊服务').isDisabled())
-  assert.ok(await button('继续本次服务').isEnabled())
-  await button('继续本次服务').click(); await button('选好主题，继续').waitFor()
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === '选好主题，继续' && !b.disabled))
-  assert.equal(posts.length, before)
-  await button('返回生活面板').click(); await ready()
-  state.service.sessions = []
-  state.enabled = true; await button('重新读取').click(); await ready(); await button('了解工坊服务').click()
-  await button('查看本次报价（不收费）').waitFor()
-  assert.equal(posts.length, before)
-  await button('返回生活面板').click(); await ready()
-  assert.ok(await button('了解工坊服务').isVisible())
+  // 工坊/咖啡馆/店铺的玩法面板改由世界里点建筑或掌柜打开，那条链路见 town-view-browser.mjs。
   state.production = { batches: [{ productionId: 'internal-reserved', status: 'reserved', config: { recipe: { quantity: 1 } } },
     ...Array.from({ length: 3 }, (_, i) => ({ productionId: `internal-completed-${i}`, status: 'completed', config: { recipe: { quantity: 1 } } })),
     { status: 'cancelled' }, { status: 'expired' }], resource: { capacity: 200, remaining: 197, reserved: 1, available: 196 } }
@@ -177,13 +168,14 @@ try {
   assert.equal(await production.getByRole('button').count(), 0); assert.equal(posts.length, before)
   state.liquidity = { enabled: false, availableFund: 59, activationAllowed: false, grossIssued: 80, remainingWorldBudget: 720, issued24h: 12, issued7d: 70,
     limits: { reserve: 75, rolling24h: 40, rolling7d: 280, grossWorld: 800, circulation: 5000 } }
+  await button('关闭公告站').click(); await button('打开钱袋面板').click(); await ready()
   await button('重新读取').click(); await ready()
   const liquidity = page.getByRole('region', { name: '公共基金', exact: true })
   assert.match(await liquidity.innerText(), /可用 59/); assert.match(await liquidity.innerText(), /累计补助 80/)
   for (const value of ['75', '40', '280', '800', '5,000']) assert.ok((await liquidity.innerText()).includes(value))
   assert.equal(await liquidity.getByRole('button').count(), 0)
   state.liquidity.availableFund = null
-  await button('关闭生活面板').click(); await button('打开生活面板').click(); await ready()
+  await button('关闭钱袋').click(); await button('打开钱袋面板').click(); await ready()
   assert.match(await liquidity.innerText(), /基金尚未配置/)
   assert.doesNotMatch(await liquidity.innerText(), /可用 0/); assert.equal(posts.length, before)
   await checkLifeBoundary(browser, origin)

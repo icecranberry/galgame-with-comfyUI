@@ -60,7 +60,7 @@
                   <p v-else>已支付 {{ session.settlement.paid }} · 服务费用 {{ session.settlement.payout }} · 已退回 {{ session.settlement.refund }} 邻币</p>
                 </template>
               </section>
-              <div class="tcw-actions tcw-read"><linshe-button variant="ghost" size="sm" :disabled="loading || sending" @click="refresh">重新读取</linshe-button><linshe-button variant="link" size="sm" @click="$emit('close')">返回生活面板</linshe-button></div>
+              <div class="tcw-actions tcw-read"><linshe-button variant="ghost" size="sm" :disabled="loading || sending" @click="refresh">重新读取</linshe-button><linshe-button variant="link" size="sm" @click="$emit('chat')">先和{{ providerName }}聊两句</linshe-button><linshe-button variant="link" size="sm" @click="$emit('close')">回到小镇</linshe-button></div>
             </template>
             <p v-else>{{ message.content }}</p>
           </template>
@@ -77,7 +77,7 @@ import LinsheButton from '../ui/LinsheButton.vue'
 import { getTownEconomy, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand } from '../../api/index.js'
 const props = defineProps({ worldId: { type: String, required: true }, worldEpoch: { type: Number, required: true },
   sessionId: { type: String, default: null }, providerName: { type: String, default: '邻居' } })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'chat'])
 const session = ref(null), loading = ref(false), sending = ref(false), fresh = ref(false), error = ref('')
 const economyEnabled = ref(false), serviceOpen = ref(null), serviceHours = ref('')
 const catalog = ref(null), selectedServiceKey = ref('town.cafe.work_shift')
@@ -103,7 +103,7 @@ const choiceNames = { choose_drink: isWork.value ? '开始这班工作' : '选�
 function choiceLabel(choice) { return choiceNames[choice] || choice }
 const currentDialogue = computed(() => terminal.value ? `${statusNames[session.value.status]}。以下为本次结算结果。`
   : session.value?.turns?.at(-1)?.response?.dialogue || session.value?.dialogue || (isWork.value ? '今天店里忙，来搭把手吧。' : '先看看今天的咖啡吧。'))
-const statusText = computed(() => stale.value ? '小镇已更新，请返回生活面板。' : terminal.value ? '本次已结束，关闭不会重复结算。' : '关闭只收起面板，不会自动取消。')
+const statusText = computed(() => stale.value ? '小镇已更新，请回到小镇里重新进店。' : terminal.value ? '本次已结束，关闭不会重复结算。' : '关闭只收起面板，不会自动取消。')
 const messages = computed(() => [
   ...(session.value?.turns || []).flatMap((turn, index, turns) => [
     { id: `${turn.clientTurnId}:user`, role: 'user', content: turn.input?.text || choiceLabel(turn.input?.intentKey) || '继续' },

@@ -62,7 +62,7 @@
                 </template>
                 <p v-else>收据尚未读取完成，请重新读取确认退款与道具。</p>
               </section>
-              <div class="tws-actions tws-read"><linshe-button variant="ghost" size="sm" :disabled="loading || sending" @click="refresh">重新读取服务</linshe-button><linshe-button variant="link" size="sm" @click="$emit('close')">返回生活面板</linshe-button></div>
+              <div class="tws-actions tws-read"><linshe-button variant="ghost" size="sm" :disabled="loading || sending" @click="refresh">重新读取服务</linshe-button><linshe-button variant="link" size="sm" @click="$emit('chat')">先和{{ providerName }}聊两句</linshe-button><linshe-button variant="link" size="sm" @click="$emit('close')">回到小镇</linshe-button></div>
             </template>
             <p v-else>{{ message.content }}</p>
           </template>
@@ -79,7 +79,7 @@ import LinsheButton from '../ui/LinsheButton.vue'
 import { getTownEconomy, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand } from '../../api/index.js'
 const props = defineProps({ worldId: { type: String, required: true }, worldEpoch: { type: Number, required: true },
   sessionId: { type: String, default: null }, providerName: { type: String, default: '邻居' } })
-const emit = defineEmits(['close', 'changed'])
+const emit = defineEmits(['close', 'changed', 'chat'])
 const session = ref(null), loading = ref(false), sending = ref(false), fresh = ref(false), error = ref('')
 const economyEnabled = ref(false)
 const serviceOpen = ref(null), serviceHours = ref('')
@@ -109,7 +109,7 @@ const canClarify = computed(() => !locked.value && session.value?.status === 'ac
 const actionChoices = computed(() => (session.value?.choices || []).filter(choice => Object.hasOwn(choiceNames, choice)))
 const currentDialogue = computed(() => terminal.value ? `${statusNames[session.value.status]}。以下为本次服务的结算结果。`
   : session.value?.turns?.at(-1)?.response?.dialogue || session.value?.dialogue || `一起制作${serviceName.value}吧。先了解报价，确认接受后才会收费。`)
-const statusText = computed(() => stale.value ? '小镇已更新，请返回生活面板。' : terminal.value ? '本次服务已结束，关闭面板不会再收费。' : '关闭只收起面板，不会自动取消服务。')
+const statusText = computed(() => stale.value ? '小镇已更新，请回到小镇里重新进店。' : terminal.value ? '本次服务已结束，关闭面板不会再收费。' : '关闭只收起面板，不会自动取消服务。')
 const messages = computed(() => [
   ...(session.value?.turns || []).flatMap((turn, index, turns) => [
     { id: `${turn.clientTurnId}:user`, role: 'user', content: turn.input?.text || choiceLabel(turn.input?.intentKey) || '继续服务' },
@@ -140,7 +140,7 @@ async function refresh() {
     catalog.value = Array.isArray(overview.service?.catalog) ? overview.service.catalog : null
     serviceOpen.value = overview.service?.open ?? null; serviceHours.value = overview.service?.hours || ''
     if (overview.worldId !== scope.value.worldId || overview.worldEpoch !== scope.value.worldEpoch) {
-      clearPending(); stale.value = true; session.value = null; error.value = '小镇已更新，旧服务操作已停止。请返回生活面板。'; return
+      clearPending(); stale.value = true; session.value = null; error.value = '小镇已更新，旧服务操作已停止。请回到小镇里重新进店。'; return
     }
     pending.value = getPendingTownLifeCommand('workshop')
     if (!pending.value) rejected.value = false

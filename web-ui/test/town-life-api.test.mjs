@@ -91,3 +91,29 @@ test('cafe publish and drink service commands carry their explicit business and 
   assert.equal(setup.body.npcActorIds.cafe, 'd'); assert.equal(setup.body.locationKeys.cafe, 'cafe')
   assert.throws(() => createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.cafe.drink_coffee@1' }))
 })
+
+test('functional venue commands carry their service key, intents and setup selections', () => {
+  const scope = { worldId: 'w', worldEpoch: 3 }
+  for (const serviceKey of ['town.tavern.shift', 'town.tavern.help_swap', 'town.tavern.buy_meal',
+    'town.clothing.custom_order', 'town.clothing.shift']) {
+    assert.equal(createTownLifeCommand('service_offer', { ...scope, serviceKey }).body.serviceKey, serviceKey)
+  }
+  assert.throws(() => createTownLifeCommand('service_offer', { ...scope, serviceKey: 'town.tavern.shift@2' }))
+  const work = createTownLifeCommand('service_turn', { ...scope, sessionId: 'v', expectedVersion: 1, intentKey: 'work' })
+  assert.equal(work.body.intentKey, 'work')
+  const style = createTownLifeCommand('service_turn', { ...scope, sessionId: 'v', expectedVersion: 2, intentKey: 'choose_style' })
+  assert.equal(style.body.intentKey, 'choose_style')
+  const order = createTownLifeCommand('service_turn', { ...scope, sessionId: 'v', expectedVersion: 2, intentKey: 'confirm_order' })
+  assert.equal(order.body.intentKey, 'confirm_order')
+  const take = createTownLifeCommand('service_turn', { ...scope, sessionId: 'v', expectedVersion: 3, intentKey: 'take' })
+  assert.equal(take.body.intentKey, 'take')
+  assert.throws(() => createTownLifeCommand('service_turn', { ...scope, sessionId: 'v', expectedVersion: 2, intentKey: 'grant_item' }))
+  const setup = createTownLifeCommand('setup', { ...scope,
+    npcActorIds: { commissioner: 'a', supplier: 'b', workshop: 'c', cafe: 'd', tavern: 'e', clothing_shop: 'f', bookshop: 'g' },
+    locationKeys: { board: 'board', supplier: 'supplier', workshop: 'workshop', cafe: 'cafe',
+      tavern: 'tavern', clothing_shop: 'clothing_shop', bookshop: 'bookshop' } })
+  assert.equal(setup.body.npcActorIds.tavern, 'e'); assert.equal(setup.body.locationKeys.tavern, 'tavern')
+  assert.equal(setup.body.npcActorIds.clothing_shop, 'f'); assert.equal(setup.body.locationKeys.clothing_shop, 'clothing_shop')
+  // 新增建筑不再需要改前端白名单：额外角色键会随 setup 一起提交。
+  assert.equal(setup.body.npcActorIds.bookshop, 'g'); assert.equal(setup.body.locationKeys.bookshop, 'bookshop')
+})

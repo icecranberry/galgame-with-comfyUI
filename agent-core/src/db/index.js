@@ -15,6 +15,7 @@ import { migrateTownEconomySchema } from './townEconomySchema.js';
 import { migrateTownBusinessSchema } from './townBusinessSchema.js';
 import { migrateTownServiceSessionSchema } from './townServiceSessionSchema.js';
 import { migrateTownExperienceSchema } from './townExperienceSchema.js';
+import { migrateTownVenueRegularSchema } from './townVenueRegularSchema.js';
 import { migrateTownProductionSchema } from './townProductionSchema.js';
 import { migrateTownAppointmentSchema } from './townAppointmentSchema.js';
 import { migrateTownLiquidityPolicySchema } from './townLiquidityPolicySchema.js';
@@ -909,6 +910,7 @@ function initSchema(db) {
   migrateTownBusinessSchema(db);
   migrateTownServiceSessionSchema(db);
   migrateTownExperienceSchema(db);
+  migrateTownVenueRegularSchema(db);
   migrateTownProductionSchema(db);
   migrateTownAppointmentSchema(db);
   migrateTownLiquidityPolicySchema(db);

@@ -74,7 +74,7 @@ try {
   session.status = 'completed'; session.settlement = { paid: 30, payout: 30, refund: 0, itemIds: [42] }
   available = false; open = false; enabled = false
   await page.evaluate(() => { fixture.sessionId.value = 'bob-session' }); await ready()
-  await button('返回生活面板').click(); await button('打开工坊').click(); await page.getByLabel('服务结算收据').waitFor(); await ready()
+  await button('回到小镇').click(); await button('打开工坊').click(); await page.getByLabel('服务结算收据').waitFor(); await ready()
   assert.match(await page.locator('.town-dialogue-stage').innerText(), /手动使用后.*24 小时/)
   assert.match(await page.locator('.town-dialogue-stage').innerText(), /本次不新增免费回访/)
   assert.match(await page.locator('.town-dialogue-stage').innerText(), /冻结的发型卡服务说明/)
@@ -84,7 +84,7 @@ try {
   await capture('375-bob-receipt', page.getByLabel('服务结算收据'))
   await page.setViewportSize({ width: 740, height: 360 })
   await capture('740-bob-receipt', page.getByLabel('服务结算收据'))
-  await button('返回生活面板').scrollIntoViewIfNeeded(); assert.ok(await button('返回生活面板').isVisible())
+  await button('回到小镇').scrollIntoViewIfNeeded(); assert.ok(await button('回到小镇').isVisible())
   // An old DTO without new fields always remains the old mood outcome.
   delete session.serviceKey; delete session.serviceName; delete session.serviceDescription
   await button('重新读取服务').click(); await ready()

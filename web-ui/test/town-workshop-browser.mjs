@@ -89,7 +89,7 @@ try {
   assert.ok(await button('选好主题，继续').isEnabled())
   await page.evaluate(id => { fixture.sessionId.value = id }, session.sessionId); await ready()
   const beforeReopen = posts.length
-  await button('返回生活面板').click(); await button('打开工坊').click()
+  await button('回到小镇').click(); await button('打开工坊').click()
   await button('选好主题，继续').waitFor(); await ready()
   assert.equal(posts.length, beforeReopen); assert.equal(session.status, 'active')
   const input = page.getByRole('textbox', { name: '对话内容' })
@@ -114,7 +114,7 @@ try {
   await page.setViewportSize({ width: 1100, height: 820 })
   async function newService() {
     economyEnabled = true; serviceOpen = true
-    await button('返回生活面板').click(); await page.evaluate(() => { fixture.sessionId.value = null })
+    await button('回到小镇').click(); await page.evaluate(() => { fixture.sessionId.value = null })
     await button('打开工坊').click(); await ready()
     await button('查看本次报价（不收费）').click(); await button('接受服务并支付 30 邻币').waitFor(); await ready()
     await button('接受服务并支付 30 邻币').click(); await button('选好主题，继续').waitFor(); await ready()
@@ -138,7 +138,7 @@ try {
   session.status = 'failed'; session.settlement = { paid: 30, payout: 0, refund: 30, itemIds: [] }; update()
   await button('重新读取服务').click(); await ready()
   assert.match(await page.getByLabel('服务结算收据').innerText(), /已退回 30/)
-  await button('返回生活面板').click(); await button('打开工坊').click(); await ready()
+  await button('回到小镇').click(); await button('打开工坊').click(); await ready()
   economyEnabled = true; await button('重新读取服务').click(); await ready()
   loseAck = true
   await button('查看本次报价（不收费）').click(); await button('重试同一次服务操作').waitFor(); await ready()

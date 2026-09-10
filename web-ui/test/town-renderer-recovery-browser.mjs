@@ -20,7 +20,7 @@ try {
   const map={id:1,cols:12,rows:12,version:1,name:'恢复测试',assets:[],layers:{ground:[],road:[],objects:[],blockOverride:[]}}
   await page.route(`${origin}/api/**`,async route=>{
    const req=route.request(),url=new URL(req.url()).pathname;calls.push({url,method:req.method()})
-   const endpoint=url.replace('/api/town/',''),payloads={state:{worldId:'recovery',worldEpoch:1,enabled:true,initialized:true,serverTime:Date.now(),map,locations:[],agents:[],encountersActive:[],weather:{text:'晴',hour:12},player:null},map,assets:{assets:[]},npcs:{npcs:[]},characters:{characters:[]},settings:{enabled:true},'player/kit':{}}
+   const endpoint=url.replace('/api/town/',''),payloads={state:{worldId:'recovery',worldEpoch:1,enabled:true,initialized:true,serverTime:Date.now(),map,locations:[],agents:[],encountersActive:[],weather:{text:'晴',hour:12},player:null},map,assets:{assets:[]},npcs:{npcs:[]},characters:{characters:[]},settings:{enabled:true},'player/kit':{},economy:{worldId:'recovery',worldEpoch:1,enabled:true,configured:false,wallet:{balance:0,reserved:0,available:0},orders:[],locations:[],participants:[],slice:null,service:null,venues:[]}}
    assert.equal(req.method(),'GET');assert.ok(endpoint in payloads,url)
    await route.fulfill({json:payloads[endpoint]})
   })

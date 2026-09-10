@@ -133,7 +133,7 @@ export function createTownOrderService(dependencies) {
       db.prepare(`INSERT INTO town_delivery_orders(order_id,world_id,world_epoch,status,expires_at,created_at,
         money_reservation_id,material_reservation_id,config) VALUES(?,?,?,'open',?,?,?,?,?)`)
         .run(orderId,input.worldId,input.worldEpoch,expiresAt,createdAt,money.reservationId,material.reservationId,
-          canonicalJson(business.businessKey === 'cafe' ? { ...config, orderKind: 'cafe' } : config));
+          canonicalJson(business.businessKey === 'workshop' ? config : { ...config, orderKind: business.businessKey }));
       return record(input,getOrder({ ...input,orderId }),'open');
     });
   }

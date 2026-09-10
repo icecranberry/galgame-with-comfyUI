@@ -8,6 +8,9 @@ import { getTownActorPosition, updateTownSettings } from './townService.js';
 import { broadcastTownStateUpdated } from './townBus.js';
 import { createTownServiceSessionService } from './townServiceSessionService.js';
 import { createTownCafeService } from './townCafeService.js';
+import { createTownVenueService } from './townVenueService.js';
+import { createTownVenueRegularService } from './townVenueRegularService.js';
+import { isVenueServiceKey, venueKindDescriptors, venueProductTemplates } from './townVenuePlaybooks.js';
 import { createItemTemplateService } from './itemTemplateService.js';
 import { ITEM_EFFECTS } from '../itemService.js';
 import { createTownExperienceService, TOWN_EXPERIENCE_CONSUMER } from './townExperienceService.js';
@@ -270,8 +273,38 @@ export function getTownBusinessRuntime() {
     return { accountId: slice.accounts.cafe, stockId: slice.cafe.stockId,
       actorId: slice.cafe.actorId, locationKey: slice.cafe.locationKey };
   };
-  const cafe = createTownCafeService({ ...dependencies, getCafe, interruptWork: interruptCafeWork });
-  return { ...context, position, business, work, itemTemplates, services, cafe,
+  // 熟客累计只由已正式结算的玩家付费服务驱动；它写入失败不会回滚结算本身。
+  const regulars = createTownVenueRegularService({ db, clock: { now: Date.now }, registry,
+    consumers: [TOWN_EXPERIENCE_CONSUMER] });
+  const onConsumed = input => regulars.record(input);
+  const cafe = createTownCafeService({ ...dependencies, getCafe, interruptWork: interruptCafeWork, onConsumed });
+  /** 功能建筑档案统一读取入口：咖啡馆走冻结的 slice.cafe，其余走 functionalBuildings。 */
+  const getVenue = requestedScope => {
+    const slice = business.getSlice(requestedScope);
+    const businessKey = requestedScope.businessKey;
+    const profile = (slice.functionalBuildings || []).find(building => building.businessKey === businessKey)
+      || (businessKey === 'cafe' ? slice.cafe : null);
+    if (!profile) throw Object.assign(new Error('VENUE_NOT_CONFIGURED'), { code: 'VENUE_NOT_CONFIGURED' });
+    return { businessKey, accountId: profile.accountId ?? slice.accounts?.[businessKey], stockId: profile.stockId,
+      actorId: profile.actorId, locationKey: profile.locationKey, displayName: profile.displayName || '店铺',
+      resourceLabel: profile.resourceLabel || '材料', services: profile.serviceKeys || [] };
+  };
+  const interruptVenueWork = ({ scope: serviceScope, providerActorId, sessionId, locationKey }) => {
+    if (!locationKey) return;
+    const runner = createTownActionRunner({ db, clock: { now: Date.now },
+      getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor, readFacts: () => ({}) });
+    const actions = db.prepare(`SELECT id, version, type, target FROM town_actions WHERE world_id = ?
+      AND world_epoch = ? AND actor_id = ? AND status IN ('validated', 'reserved', 'running')`)
+      .all(serviceScope.worldId, serviceScope.worldEpoch, providerActorId);
+    for (const action of actions) {
+      if (!['work_shift', 'wait'].includes(action.type) || action.target !== locationKey) continue;
+      runner.cancel({ ...serviceScope, actionId: action.id, expectedVersion: action.version,
+        idempotencyKey: `venue:${sessionId}:interrupt:${action.id}`, reasonCode: 'VENUE_SERVICE_ACCEPTED' });
+    }
+  };
+  const venues = createTownVenueService({ ...dependencies, itemTemplates, getVenue,
+    interruptWork: interruptVenueWork, onConsumed });
+  return { ...context, position, business, work, itemTemplates, services, cafe, venues, regulars,
     liquidity: createTownLiquidityPolicy({ ...dependencies, enabled: config.town.liquidityEnabled === true }),
     production: createTownProductionService(dependencies), orders: createTownOrderService(dependencies) };
 }
@@ -296,6 +329,7 @@ export function getTownEconomyState() {
   const locations = db.prepare('SELECT key, name, grid_x AS x, grid_y AS y FROM town_locations ORDER BY id').all();
   return { ...scope, enabled: !!config.town.economyEnabled, configured: !!slice,
     slice, wallet: getTownWallet(), orders: orders.list(scope), participants, locations,
+    venueKinds: venueKindDescriptors(),
     production: slice ? { batches: context.production.list(scope), resource: context.production.getResourceNode(scope) } : null,
     liquidity: slice ? context.liquidity.getStatus(scope) : null,
     service: slice ? { locationKey: slice.locationKeys.workshop, providerActorId: slice.npcActorIds.workshop,
@@ -309,7 +343,22 @@ export function getTownEconomyState() {
       stock: economy.getStock({ ...scope, stockId: slice.cafe.stockId }),
       supplierStock: economy.getStock({ ...scope, stockId: slice.cafe.supplierStockId }),
       catalog: context.cafe.listCatalog(scope),
-      sessions: context.cafe.list({ ...scope, actorId: context.player.actorId }) } : null };
+      regular: context.regulars.get({ ...scope, businessKey: 'cafe', playerActorId: context.player.actorId }),
+      sessions: context.cafe.list({ ...scope, actorId: context.player.actorId }) } : null,
+    // 咖啡馆仍由冻结的 slice.cafe 与专用服务提供；从通用 venue 视图里排除，避免重复面板与跳到未注册的 serviceKey。
+    venues: slice ? (slice.functionalBuildings || []).filter(profile => profile.businessKey !== 'cafe').map(profile => {
+      const venueOpen = !!config.town.economyEnabled
+        && context.work.getBusinessStatus({ ...scope, role: profile.businessKey })?.open === true;
+      return { businessKey: profile.businessKey, kind: profile.kind, displayName: profile.displayName || '店铺',
+        resourceLabel: profile.resourceLabel || '材料', locationKey: profile.locationKey,
+        providerActorId: profile.actorId, open: venueOpen, hours: '09:00–18:00（北京时间）',
+        stock: economy.getStock({ ...scope, stockId: profile.stockId }),
+        supplierStock: economy.getStock({ ...scope, stockId: profile.supplierStockId }),
+        catalog: context.venues.listCatalog({ ...scope, businessKey: profile.businessKey }),
+        regular: context.regulars.get({ ...scope, businessKey: profile.businessKey, playerActorId: context.player.actorId }),
+        sessions: context.venues.list({ ...scope, actorId: context.player.actorId })
+          .filter(session => session.businessKey === profile.businessKey) };
+    }) : [] };
 }
 
 export function getTownLiquidityStatus() {
@@ -330,14 +379,15 @@ export async function executeTownService(command, sessionId, input) {
   // retain their frozen configuration and original request fingerprint.
   if (command === 'offer' && Object.hasOwn(input, 'serviceKey')) args.serviceKey = input.serviceKey;
   if (command === 'turn') Object.assign(args, { clientTurnId: scope.idempotencyKey, intentKey: input.intentKey, text: input.text ?? '' });
-  const cafeSession = sessionId ? (() => {
+  const serviceKey = sessionId ? (() => {
     try {
       const row = context.db.prepare('SELECT config_json FROM town_service_sessions WHERE session_id=? AND world_id=? AND world_epoch=?')
         .get(sessionId, scope.worldId, scope.worldEpoch);
-      return !!row && CAFE_SERVICE_KEYS.has(JSON.parse(row.config_json).template?.key);
-    } catch { return false; }
-  })() : CAFE_SERVICE_KEYS.has(input.serviceKey);
-  const service = cafeSession ? context.cafe : context.services;
+      return row ? JSON.parse(row.config_json).template?.key : null;
+    } catch { return null; }
+  })() : input.serviceKey;
+  const service = CAFE_SERVICE_KEYS.has(serviceKey) ? context.cafe
+    : isVenueServiceKey(serviceKey) ? context.venues : context.services;
   const result = await service[command](args);
   broadcastTownStateUpdated({ reason: 'service_changed' });
   return result;
@@ -345,11 +395,13 @@ export async function executeTownService(command, sessionId, input) {
 
 export function getTownService(sessionId) {
   const context = getTownBusinessRuntime();
-  context.cafe.recover(context.scope); context.services.recover(context.scope);
+  context.cafe.recover(context.scope); context.venues.recover(context.scope); context.services.recover(context.scope);
   const row = context.db.prepare('SELECT config_json FROM town_service_sessions WHERE session_id=? AND world_id=? AND world_epoch=?')
     .get(sessionId, context.scope.worldId, context.scope.worldEpoch);
   if (!row) throw new Error('服务不存在');
-  const service = CAFE_SERVICE_KEYS.has(JSON.parse(row.config_json).template?.key) ? context.cafe : context.services;
+  const templateKey = JSON.parse(row.config_json).template?.key;
+  const service = CAFE_SERVICE_KEYS.has(templateKey) ? context.cafe
+    : isVenueServiceKey(templateKey) ? context.venues : context.services;
   return service.get({ ...context.scope, actorId: context.player.actorId, sessionId });
 }
 
@@ -368,6 +420,11 @@ export function setupTownEconomy(input) {
       npcActorIds: input.npcActorIds, locationKeys: input.locationKeys });
     const resourceKey = `resource:${context.scope.worldId}:${context.scope.worldEpoch}`;
     context.production.initializeResourceNode({ ...context.scope, idempotencyKey: resourceKey, sourceKey: resourceKey });
+    // 功能建筑的本地产出模板只发布一次；模型不参与，缺货也不会卡住已有服务。
+    const products = venueProductTemplates();
+    if (products.length) context.itemTemplates.ensureVenueTemplates({ ...context.scope,
+      idempotencyKey: `venue-templates:${context.scope.worldEpoch}`, sourceKey: `venue-templates:${context.scope.worldEpoch}`,
+      reasonCode: 'VENUE_PRODUCT_TEMPLATE' }, products);
     return value;
   }).immediate();
   updateTownSettings({ economyEnabled: true });
@@ -414,7 +471,8 @@ export function executeTownOrder(command, orderId, input) {
 export function maintainTownOrders() {
   const context = getTownBusinessRuntime();
   const now = Date.now();
-  const recovered = [...context.services.recover(context.scope), ...context.cafe.recover(context.scope)];
+  const recovered = [...context.services.recover(context.scope), ...context.cafe.recover(context.scope),
+    ...context.venues.recover(context.scope)];
   if (recovered.length) broadcastTownStateUpdated({ reason: 'service_recovered' });
   for (const order of context.orders.list(context.scope)) {
     if (['open', 'accepted', 'picked_up'].includes(order.status) && order.expiresAt <= now) {
@@ -425,6 +483,7 @@ export function maintainTownOrders() {
   }
   maintainTownProductions(context);
   maintainTownCafeRestock(context);
+  maintainTownVenueRestock(context);
   maintainTownAppointments();
   createTownExperienceService({ db: context.db, clock: { now: Date.now }, registry: context.registry,
     writeMemory: applyMemoryActions, memoryEnabled: () => getMemorySettings().enabled,
@@ -450,8 +509,32 @@ function maintainTownCafeRestock(context) {
   broadcastTownStateUpdated({ reason: 'cafe_restock' });
 }
 
+/** 通用功能建筑补货：与咖啡馆同一套预算/库存/在途规则，只是 businessKey 与材料不同。 */
+function maintainTownVenueRestock(context) {
+  if (!config.town.economyEnabled) return;
+  let slice;
+  try { slice = context.business.getSlice(context.scope); }
+  catch (error) { if (error.code === 'SLICE_NOT_CONFIGURED') return; throw error; }
+  const buildings = (slice.functionalBuildings || []).filter(building => building.businessKey !== 'cafe');
+  if (!buildings.length) return;
+  const orders = context.orders.list(context.scope);
+  for (const building of buildings) {
+    const businessKey = building.businessKey;
+    if (orders.some(order => order.businessKey === businessKey
+        && ['open', 'accepted', 'picked_up'].includes(order.status))) continue;
+    const stock = context.economy.getStock({ ...context.scope, stockId: building.stockId });
+    const supplier = context.economy.getStock({ ...context.scope, stockId: building.supplierStockId });
+    const account = context.economy.getAccount({ ...context.scope, accountId: building.accountId });
+    if (stock.available > 2 || supplier.available < 1 || account.available < building.reward) continue;
+    const count = orders.filter(order => order.businessKey === businessKey).length + 1;
+    const key = `${businessKey}-restock:${context.scope.worldId}:${context.scope.worldEpoch}:${count}`;
+    context.db.transaction(() => context.orders.publish({ ...context.scope, actorId: context.player.actorId,
+      businessKey, idempotencyKey: key, sourceKey: key }))();
+    broadcastTownStateUpdated({ reason: `${businessKey}_restock` });
+  }
+}
 function maintainTownProductions(context) {
-  const { db, scope, production, work } = context;
+  const { db, scope, production, work, business } = context;
   let changed = false;
   for (const batch of production.list(scope)) {
     if (batch.status !== 'reserved') continue;
@@ -470,10 +553,13 @@ function maintainTownProductions(context) {
   }
   if (config.town.economyEnabled && work.getBusinessStatus({ ...scope, role: 'supplier' })?.open
       && work.getBusinessStatus({ ...scope, role: 'workshop' })?.open) {
+    // 生产只跟工坊付费服务挂钩；咖啡馆与功能建筑的会话由各自玩法结算，不能进入这条队列。
+    const workshopAccountId = business.getSlice(scope).accounts.workshop;
     const sessions = db.prepare(`SELECT s.session_id FROM town_service_sessions s WHERE s.world_id = ?
-      AND s.world_epoch = ? AND s.status = 'completed' AND NOT EXISTS (SELECT 1 FROM town_productions p
+      AND s.world_epoch = ? AND s.status = 'completed' AND json_extract(s.config_json, '$.accountId') = ?
+      AND NOT EXISTS (SELECT 1 FROM town_productions p
         WHERE p.world_id = s.world_id AND p.session_id = s.session_id AND p.status IN ('reserved', 'completed'))
-      ORDER BY s.created_at LIMIT 10`).all(scope.worldId, scope.worldEpoch);
+      ORDER BY s.created_at LIMIT 10`).all(scope.worldId, scope.worldEpoch, workshopAccountId);
     for (const session of sessions) {
       const attempt = db.prepare('SELECT count(*) n FROM town_productions WHERE session_id = ?').get(session.session_id).n;
       const key = `start:${session.session_id}:${attempt}`;

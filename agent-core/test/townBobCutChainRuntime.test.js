@@ -18,7 +18,11 @@ const { buildCharacterPersona, buildCharacterAppearanceSection } = await import(
 const { createTownAppearanceSignature, townAssetAppearanceStatus } = await import('../src/services/town/townAppearanceSignature.js');
 
 test('B chain: delivery → mood service → real dual work production → bob card → manual use → central appearance stale', async t => {
-  let now = Math.floor((Date.now() - 23 * 3600000) / 1000) * 1000;
+  // 营业时段是北京时间 09:00–18:00；把模拟时间对齐到最近一个已过去的 10:00（北京），
+  // 既落在营业时段内，又保证限时外观的 24 小时到期时间仍在真实时间之后（getActiveOutfits 用 datetime('now')）。
+  const beijing = new Date(Date.now() + 8 * 3600000);
+  const tenBeijing = Date.UTC(beijing.getUTCFullYear(), beijing.getUTCMonth(), beijing.getUTCDate(), 2, 0, 0);
+  let now = tenBeijing <= Date.now() ? tenBeijing : tenBeijing - 24 * 3600000;
   t.mock.method(Date, 'now', () => now);
   const db = getDb(); assert.equal(config.dbPath, ':memory:');
   config.features.town = true; config.features.townLLM = false;

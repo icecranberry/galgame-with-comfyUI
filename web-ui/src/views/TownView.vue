@@ -37,7 +37,7 @@
         <span v-if="!connected" class="town-chip is-warn">连接中…</span>
       </div>
       <div v-if="initialized" class="town-topbar-actions">
-        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showLifePanel" @click="openLifePanel">生活</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
@@ -45,7 +45,7 @@
     </div>
 
     <div v-if="initialized && !editing" class="town-hint">
-      点击空地走过去 · WASD 移动 · 点一点邻居打个招呼 · 滚轮缩放 · 双击跟随
+      点击空地走过去 · 点一下店门或掌柜就能进店办事 · 点一点邻居打个招呼 · WASD 移动 · 滚轮缩放
     </div>
 
     <div v-if="rendererNotice" class="town-render-notice" role="status">
@@ -223,7 +223,15 @@
       </div>
     </Transition>
     <p v-if="dialogueOpening || dialogueError || lifeMoveError" class="town-dialogue-notice" role="status">{{ lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
-    <TownLifePanel :open="showLifePanel" @close="closeLifePanel" @move-to="moveToLifeLocation" @appointments="openAppointments" />
+    <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
+    <TownBoardPanel :open="showBoardPanel" @close="closeBoardPanel" @move-to="moveToLifeLocation" @appointments="openAppointments" />
+    <town-workshop-service v-if="spotReady && worldSpot.type === 'workshop'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+      :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
+    <town-cafe-work-panel v-if="spotReady && worldSpot.type === 'cafe'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+      :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
+    <town-venue-service-panel v-if="spotReady && worldSpot.type === 'venue'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+      :business-key="worldSpot.businessKey" :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName"
+      @close="closeWorldSpot" @chat="openSpotDialogue" />
     <TownAppointmentPanel :open="showAppointments" :residents="agents" :locations="locations" @close="showAppointments = false" />
     <TownActivityPanel :open="!!activityActor" :actor="activityActor" @close="activityActorId = null" />
     <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
@@ -272,7 +280,11 @@ import TownAssetThumb from '../components/town/TownAssetThumb.vue'
 import TownAssetManager from '../components/town/TownAssetManager.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownCharacterChat from '../components/town/TownCharacterChat.vue'
-import TownLifePanel from '../components/town/TownLifePanel.vue'
+import TownWalletPanel from '../components/town/TownWalletPanel.vue'
+import TownBoardPanel from '../components/town/TownBoardPanel.vue'
+import TownWorkshopService from '../components/town/TownWorkshopService.vue'
+import TownCafeWorkPanel from '../components/town/TownCafeWorkPanel.vue'
+import TownVenueServicePanel from '../components/town/TownVenueServicePanel.vue'
 import TownActivityPanel from '../components/town/TownActivityPanel.vue'
 import TownAppointmentPanel from '../components/town/TownAppointmentPanel.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
@@ -405,6 +417,7 @@ function inBounds(c) {
 
 // ── 交互状态 ──
 const hoverAgentKey = ref(null)
+const hoverSpotKey = ref(null)
 const selectedAgentKey = ref(null)
 const chatNpcId = ref(null)
 const chatNpcName = ref('')
@@ -413,7 +426,12 @@ const chatResident = ref(null)
 const dialogueContext = ref(null)
 const dialogueOpening = ref(false)
 const dialogueError = ref('')
-const showLifePanel = ref(false)
+const showWalletPanel = ref(false)
+const showBoardPanel = ref(false)
+// 世界里点开的建筑玩法：{ type, businessKey, displayName, providerName, providerActorId, sessionId }
+const worldSpot = ref(null)
+const approaching = ref('')
+const townEconomy = ref(null)
 const showAppointments = ref(false)
 const activityActorId = ref(null)
 const activityActor = computed(() => {
@@ -431,7 +449,10 @@ const dialogueServiceBusy = computed(() => {
     : chatCharacterId.value != null ? agent.characterId === chatCharacterId.value : agent.npcId === chatNpcId.value)
   return resident?.busyReason === 'SERVICE_BUSY'
 })
-const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showLifePanel.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
+const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showWalletPanel.value
+  || showBoardPanel.value || !!worldSpot.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
+const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
+const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
 const portraitPopupUrl = ref(null)
 const showAdmin = ref(false)
 const showWizard = ref(false)
@@ -447,8 +468,10 @@ watch(dialogueInputBlocked, blocked => {
   onCanvasLeave()
 }, { flush: 'sync' })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
-  activityActorId.value = null; showAppointments.value = false; showLifePanel.value = false
+  activityActorId.value = null; showAppointments.value = false
+  showWalletPanel.value = false; showBoardPanel.value = false; worldSpot.value = null; approaching.value = ''
   ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
+  refreshTownEconomy()
 })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch,
   chatCharacterId.value == null || agents.value.some(agent => agent.actorId === dialogueContext.value?.actorId && agent.characterId === chatCharacterId.value)], () => {
@@ -496,7 +519,7 @@ const LIB_TABS = [
 ]
 
 const canvasClass = computed(() => ({
-  'is-hoverable': !!hoverAgentKey.value,
+  'is-hoverable': !!hoverAgentKey.value || !!hoverSpotKey.value,
   'is-editing': editing.value,
   'is-panning': dragging.value,
 }))
@@ -589,6 +612,149 @@ function hitAgent(cssX, cssY) {
   return hdRenderer?.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
 }
 
+// ── 世界里的店：走到门口点一下就能进店办事 ──
+// 店台账面只在服务端；前端只按 /api/town/economy 的投影把地点映成可点的热区，
+// 新增建筑只改后端注册表，这里不需要再认名字。
+let economyRead = 0
+async function refreshTownEconomy() {
+  const request = ++economyRead
+  try {
+    const data = await api.getTownEconomy()
+    if (disposed || request !== economyRead) return
+    if (!data || typeof data.configured !== 'boolean') throw new Error('小镇状态不完整')
+    townEconomy.value = data
+  } catch {
+    if (request === economyRead) townEconomy.value = null
+  }
+}
+function actorName(actorId, fallback) {
+  if (!actorId) return fallback
+  return (townEconomy.value?.participants || []).find(item => item.actorId === actorId)?.displayName || fallback
+}
+const venueSpots = computed(() => {
+  const economy = townEconomy.value
+  if (!economy?.configured) return []
+  const map = renderMap.value
+  // /api/town/map 的地点带 objectId，是画布所画的那一份；载荷还没到时退回快照地点，两处同源。
+  const places = map?.locations?.length ? map.locations : (locations.value || [])
+  const placeByKey = new Map(places.map(item => [item.key, item]))
+  const objectById = new Map((map?.layers?.objects || []).map(item => [item.id, item]))
+  const assetById = new Map((map?.assets || []).map(item => [item.id, item]))
+  const rows = []
+  const push = (type, businessKey, displayName, locationKey, providerActorId = null) => {
+    const location = placeByKey.get(locationKey)
+    if (!location || !Number.isInteger(location.x) || !Number.isInteger(location.y)) return
+    const object = location.objectId ? objectById.get(location.objectId) : null
+    const rect = object ? objectRect(object, assetById.get(object.assetId)?.meta || {}) : null
+    rows.push({ type, businessKey, displayName, location, rect, providerActorId,
+      providerName: actorName(providerActorId, type === 'workshop' ? '工坊邻居' : displayName) })
+  }
+  push('board', 'board', '公告站', economy.slice?.locationKeys?.board)
+  push('workshop', 'workshop', '工坊', economy.service?.locationKey, economy.service?.providerActorId)
+  push('cafe', 'cafe', '咖啡馆', economy.cafe?.locationKey, economy.cafe?.providerActorId)
+  for (const venue of economy.venues || []) push('venue', venue.businessKey, venue.displayName, venue.locationKey, venue.providerActorId)
+  return rows
+})
+/** 按格子找热区：建筑占地整块都算，没绑建筑的地点按锚点半径算。 */
+function spotAtCell(cell) {
+  if (!cell || cell.x < 0 || cell.y < 0) return null
+  let best = null
+  for (const spot of venueSpots.value) {
+    const { location, rect } = spot
+    if (rect && cell.x >= rect.x0 - 1 && cell.x <= rect.x1 + 1 && cell.y >= rect.y0 - 1 && cell.y <= rect.y1 + 1) return spot
+    const distance = Math.max(Math.abs(cell.x - location.x), Math.abs(cell.y - location.y))
+    if (distance <= (location.radius ?? 2) && (!best || distance < best.distance)) best = { spot, distance }
+  }
+  return best ? best.spot : null
+}
+function spotForActor(actorId) {
+  if (!actorId) return null
+  return venueSpots.value.find(spot => spot.providerActorId === actorId) || null
+}
+function hitWorldSpot(cssX, cssY) {
+  if (!venueSpots.value.length) return null
+  if (hdRenderer) {
+    const picked = hdRenderer.pick({ x: cssX, y: cssY })
+    // 点在建筑立面上时以真正命中那栋楼为准，避免被它身后的格子抢先。
+    if (picked?.kind === 'object') {
+      const objectId = picked.object?.id
+      return venueSpots.value.find(spot => spot.location.objectId && spot.location.objectId === objectId) || null
+    }
+  }
+  return spotAtCell(screenToCell(cssX, cssY))
+}
+/** 玩家是否已经站在地点范围内（与 townService.hasArrived 同一口径：不动且切比雪夫距离 ≤ 半径）。 */
+function playerAtLocation(location) {
+  const me = player.value
+  if (!me || !location) return false
+  const pos = agentDisplayPos(me)
+  if (pos.moving) return false
+  return Math.max(Math.abs(pos.x - location.x), Math.abs(pos.y - location.y)) <= (location.radius ?? 2)
+}
+function waitForSpot(location, current) {
+  return new Promise(resolve => {
+    const deadline = Date.now() + 20000
+    const tick = () => {
+      if (disposed || !current()) return resolve(false)
+      if (playerAtLocation(location)) return resolve(true)
+      if (Date.now() > deadline) return resolve(false)
+      window.setTimeout(tick, 120)
+    }
+    tick()
+  })
+}
+function inFlightSessionId(spot) {
+  const sessions = spot.type === 'cafe' ? townEconomy.value?.cafe?.sessions
+    : spot.type === 'workshop' ? townEconomy.value?.service?.sessions
+      : (townEconomy.value?.venues || []).find(item => item.businessKey === spot.businessKey)?.sessions
+  return (sessions || []).find(item => ['offered', 'active', 'resolving', 'settling'].includes(item.status))?.sessionId || null
+}
+function openSpotPanel(spot) {
+  worldSpot.value = { type: spot.type, businessKey: spot.businessKey, displayName: spot.displayName,
+    providerName: spot.providerName, providerActorId: spot.providerActorId, sessionId: inFlightSessionId(spot) }
+}
+function closeWorldSpot() {
+  worldSpot.value = null
+  refreshTownEconomy()
+}
+function openSpotDialogue() {
+  const spot = worldSpot.value
+  if (!spot) return
+  const resident = agents.value.find(agent => agent.actorId === spot.providerActorId) || null
+  closeWorldSpot()
+  if (resident) openDialogue(resident)
+  else dialogueError.value = `暂时找不到${spot.providerName}，请稍后再试。`
+}
+async function walkToSpot(spot) {
+  const request = ++lifeMoveRequest
+  const current = () => !disposed && request === lifeMoveRequest
+  approaching.value = spot.displayName
+  lifeMoveError.value = ''
+  try {
+    const result = await town.movePlayer(spot.location.x, spot.location.y)
+    if (result?.ok === false) throw new Error('这个门口暂时走不过去，请稍后再试。')
+    const arrived = await waitForSpot(spot.location, current)
+    if (!current()) return
+    // 到店才开店：服务端要求玩家真的站在地点范围内，面板里的报价与接受才有意义。
+    if (arrived) openSpotPanel(spot)
+    else lifeMoveError.value = `还没走到${spot.displayName}门口，再点一次就好。`
+  } catch (err) {
+    if (current()) lifeMoveError.value = err?.message || '这个门口暂时走不过去，请稍后再试。'
+  } finally {
+    if (current()) approaching.value = ''
+  }
+}
+/** 点建筑或点经营者都走同一条路：先到门口，再开这家店的玩法面板。 */
+function enterWorldSpot(spot) {
+  if (!spot || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  if (spot.type === 'board') { openBoardPanel(); return }
+  selectedAgentKey.value = null
+  portraitPopupUrl.value = null
+  lifeMoveError.value = ''
+  if (playerAtLocation(spot.location)) { openSpotPanel(spot); return }
+  walkToSpot(spot)
+}
+
 // ── 点击/拖拽交互 ──
 
 let downInfo = null
@@ -630,6 +796,7 @@ function onCanvasMove(e) {
     downInfo.y = e.offsetY
   }
   hoverAgentKey.value = editing.value ? null : (hitAgent(e.offsetX, e.offsetY)?.agentKey || null)
+  hoverSpotKey.value = editing.value || hoverAgentKey.value ? null : (spotAtCell(screenToCell(e.offsetX, e.offsetY))?.businessKey || null)
 }
 
 function onCanvasUp() {
@@ -647,6 +814,7 @@ function onCanvasLeave() {
   dragging.value = false
   downInfo = null
   hoverAgentKey.value = null
+  hoverSpotKey.value = null
 }
 
 function onCanvasClick(e) {
@@ -660,6 +828,9 @@ function onCanvasClick(e) {
   if (!initialized.value) return
   const hit = hitAgent(e.offsetX, e.offsetY)
   if (hit) {
+    // 掌柜本人也是这家店的入口：点他就进店办事，面板里还留着聊天入口。
+    const spot = hit.kind === 'npc' ? spotForActor(hit.actorId) : null
+    if (spot) { enterWorldSpot(spot); return }
     if (hit.characterId && hit.kind === 'npc') {
       goChat(hit.characterId)
     } else if (hit.kind === 'npc') {
@@ -669,6 +840,8 @@ function onCanvasClick(e) {
     }
     return
   }
+  const spot = hitWorldSpot(e.offsetX, e.offsetY)
+  if (spot) { enterWorldSpot(spot); return }
   const cell = screenToCell(e.offsetX, e.offsetY)
   if (!inBounds(cell) || blockedCells.has(`${cell.x},${cell.y}`)) return
   town.movePlayer(cell.x, cell.y).catch(err => {
@@ -1341,6 +1514,7 @@ async function prepareWorldResources() {
     const snapshot = await town.fetchState()
     if (disposed) return
     if (snapshot?.initialized) {
+      refreshTownEconomy()
       await waitForRenderMap()
       if (disposed) return
       await preloadWorldResources()
@@ -1378,7 +1552,7 @@ watch(editing, (v) => {
 
 // A mailbox task link opens the current snapshot for review; it never accepts or moves.
 watch(() => [resourcesReady.value, props.initialPanel], ([ready, panel]) => {
-  if (ready && initialized.value && panel === 'life' && !disposed) openLifePanel()
+  if (ready && initialized.value && panel === 'life' && !disposed) openWalletPanel()
 })
 
 watch(editLayers, () => { staticDirty = true }, { deep: true })
@@ -1419,7 +1593,7 @@ onBeforeUnmount(() => {
 })
 
 async function openDialogue(resident) {
-  if (showLifePanel.value || lifeMoving.value) return
+  if (showWalletPanel.value || showBoardPanel.value || worldSpot.value || lifeMoving.value) return
   if (rejectBusyDialogue(resident)) return
   const request = ++dialogueRequest
   dialogueOpening.value = true
@@ -1474,13 +1648,23 @@ async function openLinkedCharacterChat(characterId) {
   return goChat(characterId)
 }
 
-function openLifePanel() {
+function openWalletPanel() {
   if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
   selectedAgentKey.value = null
   portraitPopupUrl.value = null
   dialogueError.value = ''
   lifeMoveError.value = ''
-  showLifePanel.value = true
+  showWalletPanel.value = true
+  refreshTownEconomy()
+}
+function openBoardPanel() {
+  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  selectedAgentKey.value = null
+  portraitPopupUrl.value = null
+  dialogueError.value = ''
+  lifeMoveError.value = ''
+  showBoardPanel.value = true
+  refreshTownEconomy()
 }
 function openActivityPanel(actor) {
   if (!actor?.actorId || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
@@ -1493,21 +1677,25 @@ function openDialogueActivity() {
   closeDialogue()
   openActivityPanel(actor)
 }
-function closeLifePanel() {
-  showLifePanel.value = false
+function closeWalletPanel() {
+  showWalletPanel.value = false
+}
+function closeBoardPanel() {
+  showBoardPanel.value = false
+  refreshTownEconomy()
 }
 function openAppointments() {
-  if (!showLifePanel.value || lifeMoving.value) return
-  closeLifePanel()
+  if (!showBoardPanel.value || lifeMoving.value) return
+  closeBoardPanel()
   showAppointments.value = true
 }
 async function moveToLifeLocation(locationKey) {
-  if (!showLifePanel.value || lifeMoving.value) return
+  if (!showBoardPanel.value || lifeMoving.value) return
   const request = ++lifeMoveRequest
   const current = () => !disposed && request === lifeMoveRequest
   // Keep the shared input lock until the movement command is acknowledged.
   lifeMoving.value = true
-  closeLifePanel()
+  closeBoardPanel()
   lifeMoveError.value = ''
   const location = locations.value.find(location => location.key === locationKey)
   try {

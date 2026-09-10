@@ -80,7 +80,7 @@ try {
     await page.screenshot({path:path.join(output,`mailbox-${width}.png`)})
   }
   await page.getByRole('button',{name:'去小镇查看',exact:true}).click()
-  await page.getByRole('dialog',{name:'小镇生活',exact:true}).waitFor()
+  await page.getByRole('dialog',{name:'钱袋',exact:true}).waitFor()
   await page.waitForFunction(()=>document.querySelector('.tl-content')?.textContent.includes('73'))
   assert.equal(await page.evaluate(()=>fixture.router.currentRoute.value.fullPath),'/town?panel=life')
   assert.equal(await page.evaluate(()=>fixture.town.snapshot.worldEpoch),2)

@@ -1753,6 +1753,7 @@ export function resetWorld() {
     const runtime = getTownBusinessRuntime();
     runtime.services.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     runtime.cafe.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
+    runtime.venues.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     getTownAppointmentRuntime().appointments.cancelForRebuild({ scope: { worldId: world.worldId, worldEpoch: world.epoch } });
     runtime.production.cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch,
       idempotencyKey: `reset-production:${world.epoch}`, sourceKey: `reset-production:${world.epoch}` });

@@ -5,6 +5,7 @@ import { compileFunction } from 'node:vm';
 import { createServer } from 'node:http';
 import express, { Router } from 'express';
 import { listenLocalHttpServer, closeLocalHttpServer } from './fixtures/localHttpServer.js';
+import { isVenueServiceKey, venueKindDescriptors } from '../src/services/town/townVenuePlaybooks.js';
 
 // Production runtime/router source; only the underlying business context is fake.
 // This checks HTTP selection/DTO/error contracts, not payment or unlock correctness.
@@ -31,7 +32,7 @@ async function fixture(t) {
     services: { listCatalog: received => { assert.deepEqual(received, scope); return catalog; }, list: () => [],
       offer: perform('offer'), accept: perform('accept') } };
   const runtime = load('../src/services/town/townEconomyRuntime.js', {
-    fixtureContext: context, config: { town: { economyEnabled: true } }, broadcastTownStateUpdated: value => broadcasts.push(value),
+    fixtureContext: context, config: { town: { economyEnabled: true } }, broadcastTownStateUpdated: value => broadcasts.push(value), isVenueServiceKey, venueKindDescriptors,
   }, 'getTownBusinessRuntime = () => fixtureContext; getTownWallet = () => ({balance:30,available:30,reserved:0}); return {getTownEconomyState,executeTownService};');
   const router = load('../src/routes/town.js', { Router, ...runtime, maintainTownOrders: () => {} }, 'return router;');
   const app = express(); app.use(express.json()); app.use('/api/town', router);
@@ -67,7 +68,7 @@ test('locked and invalid selections have real HTTP errors without a success noti
     f.fail(code);
     const response = await f.request('/services/offer', { worldEpoch: 3, idempotencyKey: code, serviceKey: 'town.workshop.bob_cut' });
     assert.equal(response.status, 409); assert.equal(response.body.code, code);
-    assert.notEqual(response.body.error, code); assert.match(response.body.error, /工坊/);
+    assert.notEqual(response.body.error, code); assert.match(response.body.error, /店|服务/);
   }
   assert.equal(f.broadcasts.length, 0);
 });

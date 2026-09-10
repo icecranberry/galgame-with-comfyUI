@@ -4,6 +4,8 @@ import {canonicalJson,createTownEventService,requireText,townError} from './town
 const digest=value=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 const date=ms=>new Date(ms).toISOString().slice(0,19).replace('T',' ');
 const bobPayload=Object.freeze({outfit_name:'波波头发型',outfit_description:'利落波波头：齐下巴的内扣纯色短发、圆润发尾、空气刘海'});
+// 允许的道具模板效果白名单：新效果必须在此显式登记，模板只能落在这几种 kind 上。
+const EFFECT_KINDS=Object.freeze({mood_fix:'mood',energy:'buff',bob_cut:'hairstyle',tipsy:'buff',yukata:'outfit'});
 const templateDto=r=>r && ({worldId:r.world_id,templateId:r.template_id,version:r.version,effectKey:r.effect_key,
   name:r.name,description:r.description,payload:JSON.parse(r.payload_json),rarity:r.rarity,imageUrl:r.image_url,tradable:!!r.tradable});
 const itemDto=r=>r && ({id:r.id,worldId:r.world_id,ownerKey:r.owner_key,sourceType:r.source_type,sourceId:r.source_id,
@@ -43,12 +45,11 @@ export function createItemTemplateService({db,clock,getWorldEpoch,getActor,effec
     requireText(input.templateId);
     if(!Number.isSafeInteger(input.version) || input.version<1) throw townError('INVALID_TEMPLATE_VERSION');
     const effect=Object.hasOwn(effectRegistry,input.effectKey)?effectRegistry[input.effectKey]:null;
-    // Additional existing effects require a deliberate local payload validator;
+    // Additional existing effects require a deliberate local whitelist entry;
     // merely appearing in ITEM_EFFECTS does not authorize arbitrary template payloads.
-    const bob=input.effectKey==='bob_cut';
+    const bob=input.effectKey==='bob_cut', expectedKind=EFFECT_KINDS[input.effectKey];
     if(input.templateId==='town.bob_cut' && !bob) throw townError('UNSUPPORTED_TEMPLATE_EFFECT');
-    if(!effect || !(['mood_fix','energy','bob_cut'].includes(input.effectKey)) ||
-      (bob?effect.kind!=='hairstyle':input.effectKey==='mood_fix'?effect.kind!=='mood':effect.kind!=='buff')) throw townError('UNSUPPORTED_TEMPLATE_EFFECT');
+    if(!effect || !expectedKind || effect.kind!==expectedKind) throw townError('UNSUPPORTED_TEMPLATE_EFFECT');
     const payload=input.payload??{};
     if(bob && (input.templateId!=='town.bob_cut' || input.version!==1)) throw townError('UNSUPPORTED_TEMPLATE_EFFECT');
     if(canonicalJson(payload)!==canonicalJson(bob?bobPayload:{})) throw townError('INVALID_TEMPLATE_PAYLOAD');
@@ -79,6 +80,13 @@ export function createItemTemplateService({db,clock,getWorldEpoch,getActor,effec
       publishTemplate({...input,templateId:'town.energy_charm',version:1,effectKey:'energy',name:'元气挂饰',
         description:'一枚轻巧的元气挂饰。使用后让一位角色精神饱满，效果沿用原元气符咒。',tradable:true}),
     ]).immediate();
+  }
+  /** 功能建筑的本地产出模板（不调用模型）：只发布注册表声明过的商品。 */
+  function ensureVenueTemplates(input,products) {
+    if(!Array.isArray(products))throw townError('INVALID_TEMPLATE');
+    return db.transaction(()=>products.map(product=>publishTemplate({...input,templateId:product.templateId,
+      version:product.templateVersion,effectKey:product.effectKey,name:product.name,description:product.description,
+      tradable:true}))).immediate();
   }
   function ensureBobCutTemplate(input) {
     return publishTemplate({...input,templateId:'town.bob_cut',version:1,effectKey:'bob_cut',
@@ -224,7 +232,7 @@ export function createItemTemplateService({db,clock,getWorldEpoch,getActor,effec
       return {itemIds:rows.map(r=>r.id),items:rows.map(r=>itemDto(db.prepare('SELECT * FROM backpack_items WHERE id=?').get(r.id)))};
     });
   }
-  return {publishTemplate,getTemplate,ensureDefaultTemplates,ensureBobCutTemplate,grant,lock,unlock,retire,trade,releaseLocks,events,
+  return {publishTemplate,getTemplate,ensureDefaultTemplates,ensureBobCutTemplate,ensureVenueTemplates,grant,lock,unlock,retire,trade,releaseLocks,events,
     transfer:input=>execute('transfer',input,()=>transferItem(input)),
     getItem:input=>{epoch(input);return itemDto(db.prepare('SELECT * FROM backpack_items WHERE id=? AND world_id=?').get(input.itemId,input.worldId))??null;},
     flushNotifications:(receipt,broadcast)=>{

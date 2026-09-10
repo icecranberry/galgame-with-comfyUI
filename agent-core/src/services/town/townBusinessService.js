@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson, createTownEventService, requireText, townError } from './townEventService.js';
+import { VENUE_KINDS } from './townVenuePlaybooks.js';
+
 
 export const DELIVERY_SLICE = Object.freeze({ reward: 30, materialQuantity: 1, resourceKey: 'delivery:raw_material',
   publicBudget: 2000, initialMaterials: 20, lifetimeMs: 30 * 60 * 1000 });
@@ -90,9 +92,11 @@ export function createTownBusinessContext({ db, clock, registry, economy, positi
  * Each world has stable business accounts independent of current proprietor.
  * Rebuilding changes selected NPCs/locations, never repeats initial issuance.
  */
+
 export function createTownBusinessService(dependencies) {
   const context = createTownBusinessContext(dependencies);
   const { db, economy, registry } = context;
+  const venueKinds = Object.values(VENUE_KINDS);
   function addCafe(input, previous) {
     const world = { worldId: input.worldId, worldEpoch: input.worldEpoch };
     const cafeActorId = input.npcActorIds.cafe, cafeLocationKey = input.locationKeys.cafe;
@@ -118,15 +122,53 @@ export function createTownBusinessService(dependencies) {
       cafe: profile, functionalBuildings: [...(previous.functionalBuildings || [])
         .filter(building => building.businessKey !== 'cafe'), profile] };
   }
+  /** 通用功能建筑：账户、供货库存、店内存货与档案全部按 kind 声明生成。
+   * 与咖啡馆共用同一账本/库存/订单引擎，只是 businessKey、材料与服务不同。
+   */
+  function addVenue(input, previous, kind) {
+    const world = { worldId: input.worldId, worldEpoch: input.worldEpoch };
+    const businessKey = kind.businessKey;
+    const actorId = input.npcActorIds[businessKey], locationKey = input.locationKeys[businessKey];
+    context.actor(input, actorId, { npc: true }); context.location(input, locationKey);
+    const accountId = economy.ensureAccount({ ...world, ownerKey: `delivery:business:${businessKey}`,
+      accountType: 'business' }).accountId;
+    const seedKey = `seed:${input.worldId}:delivery:${businessKey}:1`;
+    economy.seed({ ...world, accountId, amount: kind.budget, seedVersion: 1,
+      idempotencyKey: seedKey, sourceKey: seedKey, reasonCode: `${businessKey}.initial_budget` });
+    const supplierStockId = economy.ensureStock({ ...world, ownerKey: 'delivery:business:supplier',
+      resourceKey: kind.resourceKey }).stockId;
+    const stockId = economy.ensureStock({ ...world, ownerKey: `delivery:business:${businessKey}`,
+      resourceKey: kind.resourceKey }).stockId;
+    const supplierSeed = `seed:${input.worldId}:delivery:${businessKey}:supplier-materials:1`;
+    economy.seedStock({ ...world, stockId: supplierStockId, amount: kind.initialSupplierMaterials, seedVersion: 1,
+      idempotencyKey: supplierSeed, sourceKey: supplierSeed, reasonCode: `${businessKey}.initial_supplier_materials` });
+    const stockSeed = `seed:${input.worldId}:delivery:${businessKey}:materials:1`;
+    economy.seedStock({ ...world, stockId, amount: kind.initialMaterials, seedVersion: 1,
+      idempotencyKey: stockSeed, sourceKey: stockSeed, reasonCode: `${businessKey}.initial_materials` });
+    const profile = { businessKey, kind: kind.kind, actorId, locationKey, accountId, supplierStockId, stockId,
+      serviceKeys: kind.services.map(service => service.serviceKey), reward: kind.reward,
+      materialQuantity: kind.materialQuantity, resourceKey: kind.resourceKey,
+      displayName: kind.displayName, resourceLabel: kind.resourceLabel };
+    return { ...previous, accounts: { ...previous.accounts, [businessKey]: accountId },
+      stocks: { ...previous.stocks, [`${businessKey}Supplier`]: supplierStockId, [businessKey]: stockId },
+      functionalBuildings: [...(previous.functionalBuildings || []).filter(building => building.businessKey !== businessKey), profile] };
+  }
+  const requestedVenues = input => venueKinds.filter(kind =>
+    Object.hasOwn(input.npcActorIds, kind.businessKey) || Object.hasOwn(input.locationKeys, kind.businessKey));
   function setup(input) {
     return context.execute('setup', input, () => {
       if (!input.npcActorIds || !input.locationKeys) throw townError('INVALID_SLICE');
       const hasCafe = Object.hasOwn(input.npcActorIds, 'cafe') || Object.hasOwn(input.locationKeys, 'cafe');
       if (hasCafe && (!input.npcActorIds.cafe || !input.locationKeys.cafe)) throw townError('INVALID_SLICE');
+      const venues = requestedVenues(input);
+      for (const kind of venues) {
+        if (!input.npcActorIds[kind.businessKey] || !input.locationKeys[kind.businessKey]) throw townError('INVALID_SLICE');
+      }
+      const venueRoles = venues.map(kind => kind.businessKey);
       const baseRoles = ['commissioner','supplier','workshop'];
       const basePlaces = ['board','supplier','workshop'];
-      const roles = hasCafe ? [...baseRoles, 'cafe'] : baseRoles;
-      const places = hasCafe ? [...basePlaces, 'cafe'] : basePlaces;
+      const roles = [...baseRoles, ...(hasCafe ? ['cafe'] : []), ...venueRoles];
+      const places = [...basePlaces, ...(hasCafe ? ['cafe'] : []), ...venueRoles];
       roles.forEach(role => context.actor(input,input.npcActorIds[role],{ npc: true }));
       places.forEach(place => context.location(input,input.locationKeys[place]));
       if (new Set(roles.map(role => input.npcActorIds[role])).size !== roles.length
@@ -141,16 +183,23 @@ export function createTownBusinessService(dependencies) {
         if (canonicalJson(requestedBase) !== canonicalJson({ npcActorIds: value.npcActorIds, locationKeys: value.locationKeys })) {
           throw townError('SLICE_CONFLICT');
         }
+        let next = value;
         if (value.cafe) {
           const currentCafe = { cafeActorId: value.cafe.actorId, cafeLocationKey: value.cafe.locationKey };
           const requestedCafe = hasCafe
             ? { cafeActorId: input.npcActorIds.cafe, cafeLocationKey: input.locationKeys.cafe }
             : null;
           if (requestedCafe && canonicalJson(currentCafe) !== canonicalJson(requestedCafe)) throw townError('SLICE_CONFLICT');
-          return value;
+        } else if (hasCafe) next = addCafe(input, next);
+        for (const kind of venues) {
+          const businessKey = kind.businessKey;
+          const current = (next.functionalBuildings || []).find(building => building.businessKey === businessKey);
+          if (!current) { next = addVenue(input, next, kind); continue; }
+          if (current.actorId !== input.npcActorIds[businessKey] || current.locationKey !== input.locationKeys[businessKey]) {
+            throw townError('SLICE_CONFLICT');
+          }
         }
-        if (hasCafe) return addCafe(input,value);
-        return value;
+        return next;
       }
       const world = { worldId: input.worldId, worldEpoch: input.worldEpoch };
       const player = registry.resolveAgentKey('me');
@@ -172,10 +221,11 @@ export function createTownBusinessService(dependencies) {
       const key = `seed:${input.worldId}:delivery:materials:1`;
       economy.seedStock({ ...world, stockId: stocks.supplier, amount: DELIVERY_SLICE.initialMaterials, seedVersion: 1,
         idempotencyKey: key, sourceKey: key, reasonCode: 'delivery.initial_materials' });
-      const result = { ...baseSelected, accounts, stocks, playerActorId: player.actorId, ...DELIVERY_SLICE };
-      const finalResult = hasCafe ? addCafe(input,result) : result;
-      db.prepare('INSERT INTO town_business_slices VALUES(?,?,?)').run(input.worldId,input.worldEpoch,canonicalJson(finalResult));
-      return finalResult;
+      let result = { ...baseSelected, accounts, stocks, playerActorId: player.actorId, ...DELIVERY_SLICE };
+      if (hasCafe) result = addCafe(input,result);
+      for (const kind of venues) result = addVenue(input, result, kind);
+      db.prepare('INSERT INTO town_business_slices VALUES(?,?,?)').run(input.worldId,input.worldEpoch,canonicalJson(result));
+      return result;
     });
   }
   return { setup, getSlice: context.slice,

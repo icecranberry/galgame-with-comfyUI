@@ -203,14 +203,19 @@ try {
   await page.locator('.town-dialogue-stage').waitFor({state:'detached'})
   // Life/Workshop remain usable while the provider is SERVICE_BUSY.
   await page.evaluate(()=>{probe.view.town.snapshot.agents[0].busyReason='SERVICE_BUSY';probe.view.town.snapshot.locations=[{key:'board',x:1,y:2}]})
-  await page.getByRole('button',{name:'生活',exact:true}).click()
-  await page.getByRole('dialog',{name:'小镇生活'}).waitFor()
-  await page.getByRole('button',{name:'了解工坊服务'}).click()
+  await page.getByRole('button',{name:'钱袋',exact:true}).click()
+  await page.getByRole('dialog',{name:'钱袋'}).waitFor()
+  await page.getByRole('button',{name:'关闭钱袋'}).click()
+  // 工坊玩法面板改由世界里点建筑或掌柜打开；掌柜忙碌时也照常进店。
+  await page.evaluate(() => { probe.view.openSpotPanel({ type:'workshop', businessKey:'workshop', displayName:'工坊', providerName:'小满', providerActorId:'actor:41' }) })
   await page.locator('.tws-overlay').waitFor()
   await page.locator('.tws-overlay').getByRole('button',{name:'关闭对话'}).click()
   await page.locator('.tws-overlay').waitFor({state:'detached'})
+  // 公告站面板自带「前往」：走过去时面板自己收起。
+  await page.evaluate(() => { probe.view.openBoardPanel() })
+  await page.getByRole('dialog',{name:'公告站'}).waitFor()
   await page.getByRole('button',{name:'前往',exact:true}).first().click()
-  await page.getByRole('dialog',{name:'小镇生活'}).waitFor({state:'detached'})
+  await page.getByRole('dialog',{name:'公告站'}).waitFor({state:'detached'})
   assert.deepEqual(await page.evaluate(()=>probe.moves.at(-1)),{x:1,y:2})
   assert.deepEqual(errors,[])
   console.log('PASS: original history/HTTP/SSE/images/affinity/retry key/delayed reply, close/reopen, selection races, shared stream, TownView stop+input+linked identity, offline only')
