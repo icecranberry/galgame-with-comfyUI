@@ -13,6 +13,16 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
   return result
 }
 
+// 兼容上游 ai-town 线的旧调用风格：调用方传入完整 URL 与已序列化的 body，
+// 与本文件的 request() 基元（自动前缀 /api、自动 JSON.stringify body）签名不同，故单独适配。
+// 作用：上游新增的小镇接口在合版时被自动并入，但它们引用的基元在本地 API 收口时已改名（jsonRequest → request）。
+async function jsonRequest(url, options) {
+  const res = await fetch(url, options)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || data.message || `请求失败 (${res.status})`)
+  return data
+}
+
 // 统一 SSE 解析循环：按行解析 event:/data: 帧，每帧回调 onEvent(event, data)。
 // data 帧回调 JSON 解析后的对象；仅 event 行时 data 为 undefined。
 // 读取错误向上抛（由调用方决定静默断开还是向下游报错），流自然结束则正常返回。

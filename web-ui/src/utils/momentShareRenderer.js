@@ -907,9 +907,6 @@ function renderCollage(ctx, m, u, W, H) {
       }
       drawTape(ctx)
       addHeroDecor(m, drawTape)
-      // 合版修复：这行在本地 v3.2.1 合并解冲突时被误删（上游侧一直有），
-      // 缺了它 drawTextBlock 会用 cursorStart 定位，文字压在主照片上
-      cursor = mainFrame.y + mainFrame.h + 48 * u
     }
     if (block) {
       drawTextBlock(ctx, block, contentX, textTop, C.ink)
