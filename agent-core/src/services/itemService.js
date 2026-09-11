@@ -76,6 +76,7 @@ export const ITEM_EFFECTS = {
   jk_uniform:    { kind: 'outfit', name: 'JK制服', theme: '日式JK制服：白衬衫、格纹百褶裙、领结或领带' },
   yukata:        { kind: 'outfit', name: '浴衣', theme: '夏日浴衣：印花图案、宽袖、腰封带结、木屐' },
   cheongsam:     { kind: 'outfit', name: '旗袍', theme: '修身旗袍：立领、盘扣、开衩、丝绸质感' },
+  cheongsam:     { kind: 'outfit', name: '魔法师', theme: '魔法师服装：深蓝色长袍、银色装饰、法杖' },
   gothic_lolita: { kind: 'outfit', name: '哥特萝莉服', theme: '哥特萝莉塔：黑色蕾丝、裙撑蓬裙、蝴蝶结、蕾丝手套' },
   bunny_girl:    { kind: 'outfit', name: '兔女郎服', theme: '明确表现为 bunny girl costume、satin leotard、bunny ear headband、bow tie、detachable cuffs 与 fluffy bunny tail accessory；这是服装道具，不是兔子、动物或吉祥物' },
   miko:          { kind: 'outfit', name: '巫女服', theme: '传统巫女服：白色襦袢、绯色袴、红色发带' },

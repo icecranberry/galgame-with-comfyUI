@@ -45,7 +45,7 @@ import { createTownAppearanceSignature, townAssetAppearanceStatus } from './town
 import {
   broadcastTownMove, broadcastTownBubble,
   broadcastTownEncounterStart, broadcastTownEncounterEnd, broadcastTownPing,
-  broadcastTownStateUpdated, setTownBusScope,
+  broadcastTownStateUpdated, setTownBusScope, onTownAssetsUpdated,
 } from './townBus.js';
 
 const state = {
@@ -1647,13 +1647,42 @@ export async function generateCharacterSprites(characterId, { expectedWorld = ca
 export function refreshCharacterAssets(characterId) {
   const meta = state.meta.get(`char:${characterId}`);
   if (!meta) return { ok: false };
-  const npcId = meta.npcId || null;
-  meta.sprites = spriteUrlsByKey(`char_${characterId}_`)
-    || (npcId ? spriteUrlsByKey(`npc_${npcId}_`) : null)
-    || meta.sprites || null;
-  meta.standingUrl = charPortraitUrl(characterId, { npcId, standingUrl: characterStandingUrl(characterId) });
+  refreshAgentVisuals();
   return { ok: true };
 }
+
+/** 作息落库后同步内存 agent 的作息表（开镇后台补作息用；未开跑/未入住则无事发生，下个 tick 按新作息行动） */
+export function refreshNpcRoutine(npcId) {
+  const agent = state.agents.get(`npc:${npcId}`);
+  if (!agent || agent.kind !== 'npc') return { ok: false };
+  const row = getDb().prepare('SELECT routine_json FROM town_npcs WHERE id = ?').get(npcId);
+  if (row) agent.routine = safeParseArray(row.routine_json);
+  return { ok: true };
+}
+
+/**
+ * 素材落盘/删除后重建内存 agent 的立绘 / 小人引用（npc / char / 玩家统一口径）。
+ * 素材每次提交都会写新文件并删除旧文件（townAssetService.commitAssetImage），
+ * 这里的引用不同步的话，getTownState 会一直吐出已删除文件的 URL，场景 404。
+ * 空查结果不回退旧值：旧值指向的文件可能已被删，宁可让渲染端走立绘/占位兜底。
+ */
+export function refreshAgentVisuals() {
+  if (!state.meta.size && !state.player) return;
+  const assets = listAssets({});
+  for (const meta of state.meta.values()) {
+    if (meta.kind === 'npc') {
+      meta.sprites = spriteUrlsByKey(`npc_${meta.refId}_`, assets);
+    } else if (meta.kind === 'char') {
+      meta.sprites = spriteUrlsByKey(`char_${meta.refId}_`, assets)
+        || (meta.npcId ? spriteUrlsByKey(`npc_${meta.npcId}_`, assets) : null);
+      meta.standingUrl = charPortraitUrl(meta.refId, { npcId: meta.npcId, standingUrl: characterStandingUrl(meta.refId) });
+    }
+  }
+  if (state.player) state.player.sprites = spriteUrlsByKey('player_', assets);
+}
+
+// 素材提交/删除统一走 townBus 广播：运行中的小镇就地重建内存引用，避免快照吐出已删除文件的 URL
+onTownAssetsUpdated(() => refreshAgentVisuals());
 
 /**
  * 角色素材补齐（与「新增居民自动入驻」同口径，各阶段独立容错）：

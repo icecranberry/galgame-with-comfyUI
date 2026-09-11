@@ -133,7 +133,9 @@ async function regen() {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  z-index: 1150;
+  /* 必须高于素材详情弹窗 .tam-mask(1160) 与生成配置浮层 .ie-info(1170)，
+     否则本弹窗会被素材详情盖在下面；低于保存提示 .ie-saved-tip(1200) */
+  z-index: 1180;
   display: flex;
   align-items: center;
   justify-content: center;

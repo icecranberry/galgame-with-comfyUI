@@ -112,6 +112,87 @@ export function injectOutfitsIntoAppearance(appearance, blocks) {
 }
 
 /**
+ * 从人格卡最前面截取「名字 + IP」身份语料，供修正外观时作为身份上下文传给视觉模型
+ * （见 routes/characters.js refine-appearance）：取首个空行前的段落，找到「来自」后取其之后
+ * 第一个句号，从头截到该句号（含），并去掉卡片口吻前缀「你是」。
+ * 例：你是Cyrene(Cyrene)。\n来自《崩坏：星穹铁道》。 → Cyrene(Cyrene)。\n来自《崩坏：星穹铁道》。
+ * 「来自」只在开头段落里找：正文里更靠后的「来自」会把语料拉出整段身份设定。
+ * 找不到「来自」或其后的句号（原创角色卡）时回退为 fallbackName。
+ * @param {string} basePrompt
+ * @param {string} [fallbackName] - 回退用语料（一般传 display_name）
+ * @returns {string} 空卡且无 fallbackName 时返回 ''
+ */
+export function extractAppearanceIdentityCorpus(basePrompt, fallbackName = '') {
+  const base = String(basePrompt || '');
+  const paraEnd = base.indexOf('\n\n');
+  const head = paraEnd >= 0 ? base.slice(0, paraEnd) : base.slice(0, 300);
+  const laiIdx = head.indexOf('来自');
+  if (laiIdx >= 0) {
+    const periodIdx = head.indexOf('。', laiIdx);
+    if (periodIdx >= 0) {
+      return base.slice(0, periodIdx + 1).replace(/^你是/, '').trim();
+    }
+  }
+  return String(fallbackName || '').trim();
+}
+
+/**
+ * 把整卡 base_prompt 按「## 你的外观」段切开，返回外观段之外的前后文。
+ * 供「外观正文可编辑」的场景（routes/characters.js refine-appearance）在前端重组：
+ * 重组公式恒为 before + '## 你的外观\n' + body + after，口径仍收口在本文件。
+ * @param {string} basePrompt
+ * @returns {{ before: string, after: string }}
+ */
+export function splitAppearanceSection(basePrompt) {
+  const base = String(basePrompt || '');
+  const m = base.match(APPEARANCE_HEADING_RE);
+  if (!m) return { before: `${base.trimEnd()}\n\n`, after: '' };
+  const next = base.indexOf('\n## ', m.index + 1);
+  return {
+    before: base.slice(0, m.index),
+    after: next >= 0 ? base.slice(next) : '',
+  };
+}
+
+/**
+ * 用新外观正文重组 base_prompt 的「## 你的外观」段（不落库，由调用方决定去留）：
+ * 已有该段 → 原位替换到下一个「## 」标题（外观段通常是最后一段，没有则替换到末尾）；
+ * 没有该段 → 在卡末补一段。
+ * @param {string} basePrompt
+ * @param {string} newAppearanceBody - 新外观正文（不含「## 你的外观」标题行）
+ * @returns {string}
+ */
+export function replaceAppearanceSection(basePrompt, newAppearanceBody) {
+  const base = String(basePrompt || '');
+  const section = `## 你的外观\n${String(newAppearanceBody || '').trim()}`;
+  const m = base.match(APPEARANCE_HEADING_RE);
+  if (!m) return `${base.trimEnd()}\n\n${section}`;
+  const next = base.indexOf('\n## ', m.index + 1);
+  const tail = next >= 0 ? base.slice(next) : '';
+  return base.slice(0, m.index) + section + tail;
+}
+
+/**
+ * 判断 base_prompt 的修改是否仅限「## 你的外观」段（含该段的增删）。
+ * 以标题为界比较前缀：标题之前的正文一致（仅容忍标题前收尾空白的增删）即视为纯外观修改；
+ * 两卡完全一致也返回 true（同样无需重生成）。
+ * short_prompt（emotionEngine 的裁剪与 LLM 浓缩，后者明确排除外观描写）与日程模板人格
+ * 都只取外观段之前的文本，纯外观修改无需触发它们重生成（routes/characters.js PUT /:id 用）。
+ * @param {string} oldBase
+ * @param {string} newBase
+ * @returns {boolean}
+ */
+export function isAppearanceOnlyPromptChange(oldBase, newBase) {
+  const oldStr = String(oldBase || '');
+  const newStr = String(newBase || '');
+  const oldM = oldStr.match(APPEARANCE_HEADING_RE);
+  const newM = newStr.match(APPEARANCE_HEADING_RE);
+  const oldPrefix = oldM ? oldStr.slice(0, oldM.index) : oldStr;
+  const newPrefix = newM ? newStr.slice(0, newM.index) : newStr;
+  return oldPrefix.trimEnd() === newPrefix.trimEnd();
+}
+
+/**
  * 组装角色完整外观段（含标题「## 你的外观」与生效外观注入）。
  * 供需要单独拿外观段的场景使用（如表情包 system3，自行决定是否保留标题行）。
  * @param {object} character - 至少含 base_prompt（注入查询需要 id）

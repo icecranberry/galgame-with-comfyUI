@@ -398,7 +398,7 @@
 
             <!-- 完成 -->
             <div v-else-if="localStep === 'done'" key="done">
-              <p class="wiz-desc">🎉 小镇已经开张！居民们正在按作息生活。</p>
+              <p class="wiz-desc">🎉 小镇已经开张！居民们正在陆续入住，作息正在后台生成。</p>
               <linshe-button variant="primary" class="wiz-go" @click="finish">进入小镇</linshe-button>
             </div>
           </Transition>
@@ -428,6 +428,11 @@ import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
+import {
+  TOWN_FOOTPRINT_OPTIONS as PROP_SIZE_OPTIONS,
+  townFootprintKey as footprintKey,
+  parseTownFootprint,
+} from '../../utils/townFootprint.js'
 
 const emit = defineEmits(['close', 'applied'])
 
@@ -547,19 +552,8 @@ const listUnchanged = computed(() => {
 /** 清单没动过且提示词已就绪 → 不必再跑一次 LLM，可以直接进生成步 */
 const listCanSkip = computed(() => listHasPrompts.value && listUnchanged.value)
 
-const PROP_SIZE_OPTIONS = [
-  { label: '1×1', value: '1x1' },
-  { label: '2×1', value: '2x1' },
-  { label: '1×2', value: '1x2' },
-  { label: '2×2', value: '2x2' },
-  { label: '3×3', value: '3x3' },
-]
-function footprintKey(footprint) {
-  return `${footprint?.w || 1}x${footprint?.h || 1}`
-}
 function setPropFootprint(item, value) {
-  const [w, h] = String(value || '1x1').split('x').map(v => Math.max(1, Math.min(3, parseInt(v, 10) || 1)))
-  item.footprint = { w, h }
+  item.footprint = parseTownFootprint(value)
 }
 
 /** 当前生成步骤的分组（地皮：地砖+道路；建筑：建筑+道具） */
@@ -956,6 +950,28 @@ async function goNextFromList() {
     stepError.value = `进入下一步失败：${err?.message || err}`
   } finally {
     promptBusy.value = false
+  }
+}
+
+/** 单项重出提示词：只让 LLM 重写这一项（按 key 过滤），结果直接覆盖 item.desc */
+async function regenAssetPrompt(item) {
+  if (item.promptBusy) return
+  item.promptBusy = true
+  stepError.value = ''
+  try {
+    await saveBlueprint()
+    const data = await api.generateTownAssetPrompts({
+      step: localStep.value,
+      styleTags: bpForm.styleTags,
+      keys: [item.key],
+    })
+    const prompt = (data.prompts || []).find(p => p.key === item.key)?.prompt
+    if (!prompt) throw new Error('未返回提示词')
+    item.desc = prompt
+  } catch (err) {
+    stepError.value = `「${item.name}」提示词生成失败：${err?.message || err}`
+  } finally {
+    item.promptBusy = false
   }
 }
 

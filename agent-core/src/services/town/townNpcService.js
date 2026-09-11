@@ -2,7 +2,7 @@
  * 轻量小镇居民（NPC）服务
  *
  * 定位：世界观生成的轻量居民——不进 characters 表、没有日程/记忆/关系全套大脑，
- * 只在镇上生活与就地对话。作息（routine_json）由 LLM 初始化时一次性生成，此后永久本地执行。
+ * 只在镇上生活与就地对话。作息（routine_json）由 LLM 一次性生成（开镇后后台补齐 / 新增居民入驻时），此后永久本地执行。
  *
  * 素材：正/背两张像素小人（npc_{id}_{down|up}，600×800→36×48）+ 一张正式立绘
  * （npc_{id}_portrait，900×1600 白底抠白）——全部走酒馆立绘同款 LLM 出 prompt 结构。
@@ -590,7 +590,7 @@ E. 尊重给定设定 —— 给了「一句话人设」时，职业背景、性
   const msgs = personaMsgs;
   const out = await chatSync(msgs, {
     temperature: 0.5, // 有明确设定（名字/职业/世界观）→ 低温稳定特征
-    max_tokens: 1600,
+    max_tokens: 3000,
     label: '小镇居民人格卡',
   });
 

@@ -107,7 +107,18 @@
           />
           <div class="tl-generate">
             <linshe-input v-model="genDesc" size="sm" placeholder="描述一个新素材…" @keyup.enter="generateAsset" />
-            <linshe-button variant="secondary" size="sm" :loading="generating" @click="generateAsset">AI 生成</linshe-button>
+            <div class="tl-gen-row">
+              <linshe-select
+                v-if="libKind === 'building' || libKind === 'prop'"
+                v-model="genFootprint"
+                :options="TOWN_FOOTPRINT_OPTIONS"
+                size="sm"
+                class="tl-gen-size"
+                title="新素材的占地大小（占格数）"
+                aria-label="占地大小"
+              />
+              <linshe-button variant="secondary" size="sm" class="tl-gen-go" :loading="generating" @click="generateAsset">生成{{ genKindLabel }}</linshe-button>
+            </div>
           </div>
         </div>
       </div>
@@ -211,6 +222,8 @@ import { HW, HH, cellTopWorld, cellCenterWorld, worldToCell, objectRect, buildBl
 import { canvasGroundImage } from '../town/renderers/groundTexture.js'
 import { adaptAgent, assetUrl } from '../town/renderers/TownSceneAdapter.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import { TOWN_FOOTPRINT_OPTIONS, parseTownFootprint } from '../utils/townFootprint.js'
 import TownAssetThumb from '../components/town/TownAssetThumb.vue'
 import TownAssetManager from '../components/town/TownAssetManager.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
@@ -423,6 +436,12 @@ const editTool = ref('ground')
 const libKind = ref('ground')
 const selectedAssetId = ref(null)
 const genDesc = ref('')
+// 建筑/道具新素材的占地档位；地砖/道路是固定 64×32 菱形贴图，不涉及占地
+const genFootprint = ref('1x1')
+watch(libKind, (kind) => {
+  if (kind === 'building') genFootprint.value = '2x2'
+  else if (kind === 'prop') genFootprint.value = '1x1'
+})
 const generating = ref(false)
 const savingMap = ref(false)
 const townAssets = ref([])
@@ -451,6 +470,7 @@ const LIB_TABS = [
   { id: 'building', label: '建筑' },
   { id: 'prop', label: '道具' },
 ]
+const genKindLabel = computed(() => LIB_TABS.find(t => t.id === libKind.value)?.label || '')
 
 const canvasClass = computed(() => ({
   'is-hoverable': !!hoverAgentKey.value || !!hoverSpotKey.value,
@@ -959,7 +979,14 @@ async function generateAsset() {
   if (!desc || generating.value) return
   generating.value = true
   try {
-    await api.createTownAsset({ kind: libKind.value, key: null, name: desc.slice(0, 12), desc, meta: { desc } })
+    const meta = { desc }
+    // 占地写进 meta：提示词比例、成品像素宽 (w+h)*64、地图放置占格都按它算；
+    // 道具标 footprintKind 与向导清单同口径（阻挡格按道具规则，不按建筑留门）
+    if (libKind.value === 'building' || libKind.value === 'prop') {
+      meta.footprint = parseTownFootprint(genFootprint.value)
+      if (libKind.value === 'prop') meta.footprintKind = 'prop'
+    }
+    await api.createTownAsset({ kind: libKind.value, key: null, name: desc.slice(0, 12), desc, meta })
     genDesc.value = ''
     setTimeout(fetchAssetsList, 800)
   } catch (err) {
@@ -1975,11 +2002,14 @@ async function moveToLifeLocation(locationKey) {
 .tl-generate {
   grid-column: 1 / -1;
   display: flex;
+  flex-direction: column;
   gap: 6px;
   margin-top: 6px;
 }
 
-.tl-generate > :first-child { flex: 1; }
+.tl-gen-row { display: flex; gap: 6px; }
+.tl-gen-size { width: 84px; flex: 0 0 auto; }
+.tl-gen-go { flex: 1; }
 
 .asset-viewer-mask {
   position: fixed;

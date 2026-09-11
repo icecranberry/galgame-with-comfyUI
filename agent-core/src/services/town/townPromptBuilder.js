@@ -67,7 +67,7 @@ export async function generatePortraitPrompt({ appearanceInfo, requirement = '' 
   ];
   const out = await chatSync(msgs, {
     temperature: 0.7,
-    max_tokens: 1024,
+    max_tokens: 2048,
     label: '小镇立绘提示词',
   });
   const text = stripFence(out);
@@ -114,7 +114,7 @@ export async function generateSpritePrompt({ appearanceInfo, direction = 'down' 
   ];
   const out = await chatSync(msgs, {
     temperature: 0.7,
-    max_tokens: 1000,
+    max_tokens: 2048,
     label: '小镇人物图片素材提示词',
   });
   const text = stripFence(out);
@@ -159,7 +159,7 @@ export async function generateNpcAssetPrompts({ appearanceInfo }) {
   ];
   const out = await chatSync(msgs, {
     temperature: 0.7,
-    max_tokens: 1600,
+    max_tokens: 3000,
     response_format: { type: 'json_object' },
     label: '小镇小人图提示词',
   });
@@ -243,7 +243,7 @@ export async function generateBuildingPrompt({ name, desc, footprint, special = 
   ];
   const out = await chatSync(msgs, {
     temperature: 0.7,
-    max_tokens: 700,
+    max_tokens: 2048,
     label: '小镇建筑提示词',
   });
   const text = stripFence(out);
@@ -289,7 +289,7 @@ Hard Rules:
   ];
   const out = await chatSync(msgs, {
     temperature: 0.55,
-    max_tokens: 700,
+    max_tokens: 2048,
     label: '小镇素材提示词改写',
   });
   const text = stripFence(out);

@@ -247,10 +247,10 @@ function loadImageFromFile(file) {
 // 行业标准做法：裁剪圆固定在画布中心不动，用户拖拽/缩放底图来调整选取区域
 // 图片始终以原分辨率渲染到 canvas（借助 ctx.drawImage 的目标缩放），保存时直接裁原图，无精度损失
 
-const CROP_CANVAS = 400
+const CROP_CANVAS = 520
 const CROP_CX = CROP_CANVAS / 2
 const CROP_CY = CROP_CANVAS / 2
-const CROP_R = 160
+const CROP_R = 208
 
 const cropVars = reactive({
   imgScale: 1,
@@ -310,7 +310,7 @@ function drawCrop() {
 
   const preview = previewCanvas.value
   if (preview) {
-    const ps = 80
+    const ps = 104
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const bufSize = Math.round(ps * dpr)
     preview.width = bufSize
@@ -446,7 +446,7 @@ async function saveCrop() {
   animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .avpicker-panel {
-  width:520px; max-height:80vh;
+  width:676px; max-width:calc(100vw - 24px); max-height:80vh;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
@@ -459,25 +459,25 @@ async function saveCrop() {
 @keyframes avFadeIn  { from { opacity:0; } to { opacity:1; } }
 @keyframes avScaleIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
 
-.avpicker-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
-.avpicker-header span { font-size:15px; font-weight:600; color:var(--text-bright); }
+.avpicker-header { padding:18px 23px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
+.avpicker-header span { font-size:19px; font-weight:600; color:var(--text-bright); }
 
 .avpicker-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.2); }
-.avtab { flex:1; padding:10px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:13px; font-weight:500; font-family:inherit; text-align:center; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; user-select:none; }
+.avtab { flex:1; padding:13px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:17px; font-weight:500; font-family:inherit; text-align:center; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; user-select:none; }
 .avtab:hover:not(.is-disabled) { color:var(--text-bright); }
 .avtab.is-disabled { opacity:0.35; cursor:not-allowed; }
 .avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
-.avtab-body { padding:16px; overflow-y:auto; max-height:380px; }
-.av-upload-zone { display:block; border:2px dashed rgba(255,255,255,0.25); border-radius:10px; cursor:pointer; transition:border-color 0.15s; }
+.avtab-body { padding:21px; overflow-y:auto; max-height:494px; }
+.av-upload-zone { display:block; border:2px dashed rgba(255,255,255,0.25); border-radius:13px; cursor:pointer; transition:border-color 0.15s; }
 .av-upload-zone:hover { border-color:var(--accent); }
-.av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:48px 16px; gap:10px; }
-.av-upload-icon { font-size:40px; }
-.av-upload-text { font-size:14px; color:var(--text-secondary); }
+.av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:62px 21px; gap:13px; }
+.av-upload-icon { font-size:52px; }
+.av-upload-text { font-size:18px; color:var(--text-secondary); }
 
-.av-gallery { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
-.av-loading, .av-empty { font-size:13px; color:var(--text-secondary); text-align:center; padding:40px 0; grid-column:1/-1; }
-.av-thumb { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; transition:border-color 0.15s; }
+.av-gallery { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+.av-loading, .av-empty { font-size:17px; color:var(--text-secondary); text-align:center; padding:52px 0; grid-column:1/-1; }
+.av-thumb { width:100%; aspect-ratio:1; object-fit:cover; border-radius:10px; cursor:pointer; border:2px solid transparent; transition:border-color 0.15s; }
 .av-thumb:hover { border-color:var(--accent); }
 .av-thumb-err { opacity:0.3; cursor:default; }
 
@@ -497,67 +497,67 @@ async function saveCrop() {
   overflow:hidden;
   animation: avScaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.crop-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
-.crop-header span { font-size:14px; font-weight:600; color:var(--text-bright); }
+.crop-header { padding:18px 23px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
+.crop-header span { font-size:18px; font-weight:600; color:var(--text-bright); }
 
-.crop-body { display:flex; gap:20px; padding:20px; align-items:flex-start; }
-.crop-canvas { display:block; border-radius:8px; cursor:grab; max-width:400px; }
+.crop-body { display:flex; gap:26px; padding:26px; align-items:flex-start; }
+.crop-canvas { display:block; border-radius:10px; cursor:grab; max-width:520px; }
 .crop-canvas:active { cursor:grabbing; }
-.crop-preview-container { display:flex; flex-direction:column; align-items:center; gap:8px; }
-.crop-preview-label { font-size:12px; color:var(--text-secondary); }
-.crop-preview { width:80px; height:80px; border-radius:50%; border:2px solid var(--border); }
-.crop-zoom-info { font-size:12px; color:var(--text-secondary); }
+.crop-preview-container { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.crop-preview-label { font-size:16px; color:var(--text-secondary); }
+.crop-preview { width:104px; height:104px; border-radius:50%; border:2px solid var(--border); }
+.crop-zoom-info { font-size:16px; color:var(--text-secondary); }
 
-.crop-actions { padding:14px 20px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.crop-actions { padding:18px 26px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
 
 /* ── 生成头像 Tab ── */
 .gen-idle {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 16px 32px;
-  gap: 10px;
+  padding: 31px 21px 42px;
+  gap: 13px;
 }
-.gen-icon { font-size: 44px; }
-.gen-label { font-size: 15px; font-weight: 600; color: var(--text-bright); }
-.gen-desc { font-size: 13px; color: var(--text-secondary); text-align: center; line-height: 1.5; }
-.gen-meta { font-size: 12px; color: var(--text-muted, #999); }
-.gen-start-btn { margin-top: 12px; }
+.gen-icon { font-size: 57px; }
+.gen-label { font-size: 19px; font-weight: 600; color: var(--text-bright); }
+.gen-desc { font-size: 17px; color: var(--text-secondary); text-align: center; line-height: 1.5; }
+.gen-meta { font-size: 16px; color: var(--text-muted, #999); }
+.gen-start-btn { margin-top: 16px; }
 
 /* 生成中动画 */
 .gen-running {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 32px 16px 40px;
-  gap: 16px;
+  padding: 42px 21px 52px;
+  gap: 21px;
 }
 .gen-spinner {
   position: relative;
-  width: 80px; height: 80px;
+  width: 104px; height: 104px;
   display: flex; align-items: center; justify-content: center;
 }
 .gen-spinner-ring {
   position: absolute; inset: 0;
-  border: 3px solid rgba(255,255,255,0.15);
+  border: 4px solid rgba(255,255,255,0.15);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: genSpin 1s linear infinite;
 }
 @keyframes genSpin { to { transform: rotate(360deg); } }
-.gen-spinner-icon { font-size: 28px; z-index: 1; }
-.gen-phase { font-size: 15px; font-weight: 600; color: var(--text-bright); }
-.gen-progress-hint { font-size: 12px; color: var(--text-secondary); }
+.gen-spinner-icon { font-size: 36px; z-index: 1; }
+.gen-phase { font-size: 19px; font-weight: 600; color: var(--text-bright); }
+.gen-progress-hint { font-size: 16px; color: var(--text-secondary); }
 
 /* 生成失败 */
 .gen-error {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 16px 32px;
-  gap: 10px;
+  padding: 31px 21px 42px;
+  gap: 13px;
 }
-.gen-error-icon { font-size: 36px; }
-.gen-error-text { font-size: 13px; color: var(--accent); text-align: center; }
-.gen-retry-btn { margin-top: 8px; }
+.gen-error-icon { font-size: 47px; }
+.gen-error-text { font-size: 17px; color: var(--accent); text-align: center; }
+.gen-retry-btn { margin-top: 10px; }
 </style>

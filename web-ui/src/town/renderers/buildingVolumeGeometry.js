@@ -89,10 +89,15 @@ export function createBuildingVolume(spec, entries = {}, alphaCutoff = .3) {
   return group
 }
 
-export function setBuildingVolumeNight(group, night) {
+const DAY_WINDOW = new T.Color('#8fa6a1')
+const NIGHT_WINDOW = new T.Color('#ffdd93')
+const NIGHT_WINDOW_EMISSIVE = new T.Color('#ffb954')
+
+// Windows warm up smoothly with the night glow factor instead of snapping on/off.
+export function setBuildingVolumeNight(group, glow = 0) {
   for (const lamp of group.userData.lamps) {
-    lamp.color.set(night ? '#ffdd93' : '#8fa6a1')
-    lamp.emissive.set(night ? '#ffb954' : '#000000')
-    lamp.emissiveIntensity = night ? 1.4 : 0
+    lamp.color.copy(DAY_WINDOW).lerp(NIGHT_WINDOW, glow)
+    lamp.emissive.setRGB(0, 0, 0).lerp(NIGHT_WINDOW_EMISSIVE, glow)
+    lamp.emissiveIntensity = 1.4 * glow
   }
 }

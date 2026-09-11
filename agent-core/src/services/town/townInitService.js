@@ -190,7 +190,7 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRow
         { role: 'user', content: '请执行：输出这个小镇的初始化蓝图 JSON。' },
       ];
       const content = await chatSync(bpMsgs, {
-        max_tokens: 2500,
+        max_tokens: 6000,
         temperature: 0.85,
         response_format: { type: 'json_object' },
         label: '小镇蓝图',
@@ -909,7 +909,7 @@ async function generateWizardPersonaCard({ displayName, job, brief, worldHint, f
 /**
  * 向导居民步：按蓝图提前建档 town_npcs（稳定人格卡，不入 characters 表）。
  * 幂等：按 displayName 对齐 job.npcIds；蓝图改动（增删改）会同步到已建档行。
- * 新建档居民顺手生成作息（LLM，失败降级为空作息自由闲逛）。
+ * 作息不在这里生成：此时真实地点还没落库，进镇后（confirmInit）按真实地点 key 后台补齐。
  */
 export function commitWizardNpcs() {
   return enqueueStep(async () => {
@@ -928,11 +928,6 @@ export function commitWizardNpcs() {
       }
       seen.add(row.display_name);
     }
-
-    // 可用地标 key：老地图的地点 + 蓝图建筑 key + home
-    const locKeys = db.prepare('SELECT key FROM town_locations').all().map(r => r.key);
-    const bpKeys = job.blueprint.buildings.map(b => b.key);
-    const allKeys = [...new Set([...locKeys, ...bpKeys, 'home'])];
 
     for (const n of job.blueprint.npcs) {
       const existingId = job.npcIds.find(nid => {
@@ -984,13 +979,6 @@ export function commitWizardNpcs() {
       job.npcIds.push(npc.id);
       n.persona = persona;         // 同步回蓝图（前端卡展示完整人格卡）
       n.brief = brief;
-      setStatus(job.status, `已建档居民「${n.displayName}」，正在生成作息…`);
-      try {
-        const routine = await generateRoutine(npc, allKeys);
-        db.prepare('UPDATE town_npcs SET routine_json = ? WHERE id = ?').run(JSON.stringify(routine), npc.id);
-      } catch (err) {
-        console.warn(`[townInit] wizard routine for ${n.displayName} failed:`, err?.message);
-      }
     }
     persistJob();
     return getInitState();
@@ -1041,7 +1029,7 @@ export function regenerateNpcRoster(count) {
       },
     ];
     const content = await chatSync(rosterMsgs, {
-      max_tokens: 2500,
+      max_tokens: 6000,
       temperature: 0.9,
       response_format: { type: 'json_object' },
       label: '小镇居民名册',
@@ -1098,12 +1086,12 @@ export function confirmInit() {
         .map(loc => [loc.key, loc.id])
     );
 
-    // 3. 居民落库：向导内已建档的直接挂到新地图；否则按蓝图新建（LLM 逐个生成作息）
+    // 3. 居民落库：向导内已建档的直接挂到新地图；否则按蓝图新建（作息统一在开镇后后台补齐）
     const spawnByKey = new Map((draft.npcSpawns || []).map(s => [s.npcRef, s.locationKey]));
     const locationKeys = [...locationIdByKey.keys()];
     const wizardIds = job.npcIds || [];
     if (wizardIds.length > 0) {
-      // 复用向导人格卡（作息/素材已生成），清掉名单外的旧居民
+      // 复用向导人格卡（素材已生成，作息随后台补齐），清掉名单外的旧居民
       const keep = wizardIds.join(',');
       db.exec(`DELETE FROM town_npc_chat_messages WHERE npc_id NOT IN (${keep})`);
       db.exec(`DELETE FROM town_npcs WHERE id NOT IN (${keep})`);
@@ -1130,12 +1118,6 @@ export function confirmInit() {
         if (spawnKey && locationIdByKey.has(spawnKey)) {
           db.prepare('UPDATE town_npcs SET home_location_id = ? WHERE id = ?').run(locationIdByKey.get(spawnKey), npc.id);
         }
-        try {
-          const routine = await generateRoutine(npc, [...locationKeys, 'home']);
-          db.prepare('UPDATE town_npcs SET routine_json = ? WHERE id = ?').run(JSON.stringify(routine), npc.id);
-        } catch (err) {
-          console.warn(`[townInit] routine for ${n.displayName} failed:`, err?.message);
-        }
       }
     }
 
@@ -1148,10 +1130,27 @@ export function confirmInit() {
     `).run(config.user.nickname || '我', appearance);
     spawnPlayerSprites(appearance, bp.styleTags);
 
-    // 5. NPC spirit后台补齐
-    const npcIds = db.prepare('SELECT id FROM town_npcs').all().map(r => r.id);
+    // 5. NPC 作息后台补齐：建档时不再提前生成作息，进镇后按已落库的真实地点 key 逐个 LLM 生成
+    //    （失败降级为空作息自由闲逛；已有作息的跳过，重复确认不覆盖）
+    const npcRows = db.prepare('SELECT id, routine_json FROM town_npcs').all();
+    const routineKeys = [...locationKeys, 'home'];
+    const { refreshNpcRoutine } = await import('./townService.js');
     (async () => {
-      for (const id of npcIds) {
+      for (const row of npcRows) {
+        if (safeJsonParse(row.routine_json || '[]')?.length) continue;
+        try {
+          const routine = await generateRoutine(getNpc(row.id), routineKeys);
+          db.prepare('UPDATE town_npcs SET routine_json = ? WHERE id = ?').run(JSON.stringify(routine), row.id);
+          refreshNpcRoutine(row.id); // 小镇可能已 reload 开跑，同步内存 agent 的作息
+        } catch (err) {
+          console.warn(`[townInit] background routine for npc #${row.id} failed:`, err?.message);
+        }
+      }
+    })().catch(err => console.warn('[townInit] routine pass stopped:', err?.message));
+
+    // 6. NPC spirit后台补齐
+    (async () => {
+      for (const { id } of npcRows) {
         try { await generateNpcSprites(id); } catch (err) { console.warn(`[townInit] npc #${id} sprites failed:`, err?.message); }
       }
     })();

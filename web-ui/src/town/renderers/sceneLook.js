@@ -1,16 +1,32 @@
 import * as T from 'three'
 import { withTownOcclusionFade } from './interactionOcclusion.js'
 
+const smooth = t => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t) }
+
+// Lamp/window glow factor: 0 in daylight, ramps through dusk (17-20) and dawn
+// (5-8), full at night. Gloomy overcast keeps a faint daytime glow.
+export function nightGlowFactor(hour = 12, rainy = false) {
+  if (hour >= 20 || hour < 5) return 1
+  if (hour >= 17) return smooth((hour - 17) / 3)
+  if (hour < 8) return 1 - smooth((hour - 5) / 3)
+  return rainy ? .3 : 0
+}
+
 // Shared look: directional daylight is much stronger than the cool ambient fill.
+// Night leans on a punchier blue moon against a much darker fill — the old flat
+// ambient washed the streets out, so shadows now go deep while moon-facing
+// facades stay readable.
 export function daylightLook(hour = 12, rainy = false) {
   const night = hour >= 20 || hour < 5
   const dusk = !night && (hour >= 17 || hour < 8)
   return {
-    night, sun: night ? 1.05 : rainy ? 2.0 : 3.8,
-    ambient: night ? 0.35 : rainy ? 1.05 : 0.9,
-    color: night ? '#b2cafa' : dusk ? '#ffba73' : '#fff5df',
-    sky: night ? '#51687e' : rainy ? '#b0c5ca' : '#c9e4ed',
-    fog: night ? '#263c48' : rainy ? '#b5c9c6' : '#c5ddd2',
+    night, glow: nightGlowFactor(hour, rainy),
+    sun: night ? 1.55 : rainy ? 2.0 : 3.8,
+    ambient: night ? .22 : rainy ? 1.05 : .9,
+    color: night ? '#9db9f0' : dusk ? '#ffba73' : '#fff5df',
+    sky: night ? '#41566e' : rainy ? '#b0c5ca' : '#c9e4ed',
+    fillGround: night ? '#3d4350' : '#9a967b',
+    fog: night ? '#1d2f3b' : rainy ? '#b5c9c6' : '#c5ddd2',
     // Side/back light throws readable diagonal shadows across the street.
     offset: new T.Vector3(-24 + Math.sin(hour / 24 * Math.PI * 2) * 5, dusk ? 15 : night ? 24 : 26, 12),
   }
@@ -18,6 +34,7 @@ export function daylightLook(hour = 12, rainy = false) {
 
 export function townMaterial(kind, options = {}) {
   const material = new T.MeshLambertMaterial(options)
+  if (kind === 'lamp') material.userData.townGlow = { value: 0 }
   material.onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTownWorld; varying vec2 vTownUv;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -51,14 +68,59 @@ export function townMaterial(kind, options = {}) {
           normal = normalize((viewMatrix * vec4(reliefNormal,0.)).xyz);`)
       }
       if (kind === 'lamp') {
-        shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-          float glass = smoothstep(.08,.32,dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))) * smoothstep(.65,.85,vTownUv.y);
-          totalEmissiveRadiance += vec3(2.3,1.05,.28) * glass;`)
+        shader.uniforms.townGlow = material.userData.townGlow
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nuniform float townGlow;')
+          .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+            float glass = smoothstep(.08,.32,dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))) * smoothstep(.65,.85,vTownUv.y);
+            totalEmissiveRadiance += vec3(2.6,1.18,.32) * glass * townGlow;`)
       }
     }
   }
-  material.customProgramCacheKey = () => `town-cinematic-v4-${kind}`
+  material.customProgramCacheKey = () => `town-cinematic-v5-${kind}`
   return withTownOcclusionFade(material)
+}
+
+// Shared soft radial falloff for fake light spill and halos (additive quads).
+let glowTexture = null
+export function townGlowTexture() {
+  if (!glowTexture) {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 128
+    const ctx = canvas.getContext('2d')
+    const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 64)
+    g.addColorStop(0, 'rgba(255,255,255,.85)')
+    g.addColorStop(.3, 'rgba(255,255,255,.4)')
+    g.addColorStop(.65, 'rgba(255,255,255,.12)')
+    g.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 128, 128)
+    glowTexture = new T.CanvasTexture(canvas)
+    glowTexture.colorSpace = T.SRGBColorSpace
+  }
+  return glowTexture
+}
+
+const glowMaterial = (color, depthTest) => new T.MeshBasicMaterial({
+  map: townGlowTexture(), color, transparent: true, opacity: 0,
+  blending: T.AdditiveBlending, depthWrite: false, depthTest, fog: false,
+})
+
+// Warm light spill on the ground under a lit source (lamps, building doorways).
+export function makeLightPool(size, color = '#ffb45e') {
+  const mesh = new T.Mesh(new T.PlaneGeometry(size, size), glowMaterial(color, true))
+  mesh.rotation.x = -Math.PI / 2
+  mesh.renderOrder = 90 // above the world volumes, below the 100+ painter cards
+  return mesh
+}
+
+// Glow billboard at the light source itself. The iso camera is fixed, so the
+// same π/4 card facing the sprites use faces it exactly.
+export function makeLightHalo(size, color = '#ffd9a0') {
+  const mesh = new T.Mesh(new T.PlaneGeometry(size, size), glowMaterial(color, true))
+  mesh.rotation.y = Math.PI / 4
+  mesh.renderOrder = 90
+  return mesh
 }
 
 // Occlusion under an existing object, on the ground only. It does not block walking.

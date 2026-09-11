@@ -16,13 +16,13 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
-import { saveBase64Image, deleteImageFileByUrl } from '../services/imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl, imageUrlExists } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
-import { buildCharacterPersona } from '../services/characterPersona.js';
+import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 
 const router = Router();
@@ -199,12 +199,21 @@ router.put('/:id', (req, res) => {
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
+  // 纯外观修改判定：short_prompt（裁剪/LLM 浓缩）与日程模板人格都只取「## 你的外观」
+  // 之前的文本，标题前正文与角色名都未变时，跳过重裁/重优化与日程重生成标记
+  let appearanceOnlyEdit = false;
   if (base_prompt !== undefined) {
     updates.push('base_prompt = ?'); params.push(base_prompt);
-    // 获取角色名用于人格裁剪：优先请求体中的 display_name，否则从 DB 查
-    const charForCrop = db.prepare('SELECT display_name, name FROM characters WHERE id = ?').get(req.params.id);
-    const cropName = display_name || charForCrop?.display_name || charForCrop?.name || 'assistant';
-    updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt, cropName));
+    const charForCrop = db.prepare('SELECT display_name, name, base_prompt FROM characters WHERE id = ?').get(req.params.id);
+    // 改名会替换 short_prompt 中的「你」，视作人格变更；前端保存时总是携带 name/display_name，需与库中旧值比对
+    const renamed = (name !== undefined && name !== charForCrop?.name)
+      || (display_name !== undefined && display_name !== charForCrop?.display_name);
+    appearanceOnlyEdit = !renamed && isAppearanceOnlyPromptChange(charForCrop?.base_prompt, base_prompt);
+    if (!appearanceOnlyEdit) {
+      // 获取角色名用于人格裁剪：优先请求体中的 display_name，否则从 DB 查
+      const cropName = display_name || charForCrop?.display_name || charForCrop?.name || 'assistant';
+      updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt, cropName));
+    }
   }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
@@ -220,8 +229,8 @@ router.put('/:id', (req, res) => {
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
-  // 如果更新了 base_prompt，标记日程模板需要重新生成
-  if (base_prompt !== undefined && config.features.schedule !== false) {
+  // 如果更新了 base_prompt（非纯外观修改，日程人格只取外观段之前），标记日程模板需要重新生成
+  if (base_prompt !== undefined && !appearanceOnlyEdit && config.features.schedule !== false) {
     const charId = parseInt(req.params.id, 10);
     // 将 version 设为 0，下次查看日程时触发重新生成
     db.prepare('UPDATE schedule_templates SET version = 0 WHERE character_id = ?').run(charId);
@@ -232,8 +241,8 @@ router.put('/:id', (req, res) => {
   res.json({ ok: true });
   refreshCharSearch();
 
-  // 若 base_prompt 变更，异步优化 short_prompt
-  if (base_prompt !== undefined) {
+  // 若 base_prompt 变更（非纯外观修改，LLM 浓缩明确排除外观描写），异步优化 short_prompt
+  if (base_prompt !== undefined && !appearanceOnlyEdit) {
     const charId = parseInt(req.params.id, 10);
     setImmediate(async () => {
       try {
@@ -298,6 +307,7 @@ router.post('/:id/avatar', (req, res) => {
 });
 
 // GET /api/characters/:id/recent-images — 该角色全部渠道的图片（按新到旧、URL 去重；供头像/立绘选取）
+// 磁盘上已不存在的 URL 一并过滤（重生成会替换删除旧文件，但 image_tasks 里的旧 URL 仍会返回，前端会 404）
 router.get('/:id/recent-images', (req, res) => {
   const db = getDb();
   const characterId = req.params.id;
@@ -306,7 +316,10 @@ router.get('/:id/recent-images', (req, res) => {
   const urls = [];
   const seen = new Set();
   const push = (u) => {
-    if (typeof u === 'string' && u.trim() && !seen.has(u)) { seen.add(u); urls.push(u); }
+    if (typeof u !== 'string' || !u.trim() || seen.has(u)) return;
+    seen.add(u);
+    if (!imageUrlExists(u)) return;
+    urls.push(u);
   };
 
   // 1. 生图任务登记：所有以 char_{id} 为前缀的渠道（私聊配图 / 送礼 / 主动聊天 / 立绘 /
@@ -1459,6 +1472,91 @@ router.delete('/:id/standing', (req, res) => {
     invalidateGalleryCache();
   }
   res.json({ ok: true });
+});
+
+// ── 修正外观（视觉 LLM 分析参考图 → 重写「## 你的外观」）──
+// 只做分析不改库：返回新外观段与重组后的整卡 base_prompt，由前端回填人格卡文本框走既有保存链路
+
+const REFINE_APPEARANCE_SYSTEM_PROMPT = `你是角色外观修正助手。用户会提供一张角色参考图和该角色的身份信息，请仔细观察图中角色的外观，输出一段用于 AI 生图的外观描述。
+
+【输出格式（严格遵守）】
+输出以「角色名 (作品名)」开头，紧接着以 has ... / wearing ... 续写外观描述，一整段连贯英文。示例：
+
+Cyrene (Honkai: Star Rail) has soft pastel pink hair in a fluffy shoulder-length bob with small white horn-like accessories, bright blue eyes, wearing a white off-shoulder corset-style bodice with intricate gold embroidery, a dark purple open-front coat with wide flowing sleeves featuring gold patterns and white floral accents, a large blue gem centerpiece at the chest connected with golden ornaments, a matching blue gem necklace, and a short white dress underneath.
+
+【示例字段要求】
+- 开头固定为「角色名 (作品名)」格式（半角括号，写法与示例一致）：角色名用英文名，作品名用作品的官方英文名，均从用户消息给定的身份信息转换而来，如 宵宫（Yoimiya），来自《原神》→ Yoimiya (Genshin Impact)
+- 角色名之后直接以 has ... / wearing ... 续写，不要主语代词（she/he/they），不要再出现中文、「来自」或书名号
+- 先写脸与发型（发型、发色、瞳色、五官特征、可选的体型），再写服装与饰品，全部以图中可见内容为准
+- 只描述静态外观：不要表情、动作、姿势、场景、背景、画质与镜头描述
+- 一段连贯英文，不要换行、不要中文、不要 markdown、列表、引号或任何解释，严格按示例格式输出`;
+
+// POST /api/characters/:id/refine-appearance — 分析参考图并重写外观段
+// Body: { image: <dataURL png/jpeg/webp> } → { appearance, base_prompt }
+router.post('/:id/refine-appearance', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const image = typeof req.body?.image === 'string' ? req.body.image : '';
+  const mimeMatch = image.match(/^data:image\/(png|jpeg|webp);base64,/i);
+  if (!mimeMatch) {
+    return res.status(400).json({ error: '请上传 PNG / JPG / WEBP 图片' });
+  }
+  // 前端已限 6MB；这里拦一道解码前超限的（base64 约为原大小 4/3，express.json 限 10mb）
+  if (image.length > 8 * 1024 * 1024) {
+    return res.status(400).json({ error: '图片过大，请压缩后再上传（不超过 6MB）' });
+  }
+
+  try {
+    // 语料只作为身份上下文传给模型（角色名/作品名的出处），由模型自行组织成「角色名 (作品名) has ...」的开头
+    const corpus = extractAppearanceIdentityCorpus(char.base_prompt, char.display_name);
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[refine-appearance] analyzing reference image for "${char.display_name}" (corpus: ${corpus.slice(0, 40)}...)`);
+
+    const llmResult = await chatSync([
+      // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
+      { role: 'system', content: getSystemRules({ roleplay: false }) },
+      { role: 'system', content: REFINE_APPEARANCE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: `角色「${char.display_name}」的参考图如下。角色的身份信息（用于生成开头的「角色名 (作品名)」）：${corpus}` },
+          { type: 'image_url', image_url: { url: image } },
+        ],
+      },
+    ], { model, temperature: 0.3, max_tokens: 1024, label: '修正外观' });
+
+    // 剥掉代码围栏与引号包装，压成单段
+    let appearance = llmResult.trim()
+      .replace(/^```(?:[a-z]+)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/^["'「『]+|["'」』]+$/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (appearance.length < 20) {
+      return res.status(502).json({ error: '邻舍没能从图片中读出足够的外观信息，请换一张更清晰的图片重试' });
+    }
+
+    const basePrompt = replaceAppearanceSection(char.base_prompt, appearance);
+    console.log(`[refine-appearance] appearance rewritten (${appearance.length} chars) for "${char.display_name}"`);
+
+    // 附上外观段前后文：结果框可编辑，前端按 before + '## 你的外观\n' + 编辑后正文 + after 自行重组
+    const { before, after } = splitAppearanceSection(char.base_prompt);
+    res.json({ ok: true, appearance, base_prompt: basePrompt, prompt_before: before, prompt_after: after });
+  } catch (err) {
+    console.error('[refine-appearance] error:', err.message);
+    const status = err?.status || err?.response?.status;
+    const rawMsg = String(err?.message || '');
+    // 中转站对「模型不支持图片输入」的报错措辞五花八门，常见就是 400/404 且 body 为空，
+    // 关键词匹配不到 → 按状态码兜底识别，命中即提示更换视觉模型（原始报错留在括号里便于排查）
+    if (status === 400 || status === 404 || /image|vision|multimodal|visual|image_url|content part/i.test(rawMsg)) {
+      return res.status(500).json({
+        error: `当前配置的 LLM API 不支持图片输入，请在设置中更换支持视觉（图片输入）的模型后重试（上游返回：${rawMsg || status}）`,
+      });
+    }
+    res.status(500).json({ error: '修正外观失败: ' + rawMsg });
+  }
 });
 
 function _parseCharLoras(raw) {

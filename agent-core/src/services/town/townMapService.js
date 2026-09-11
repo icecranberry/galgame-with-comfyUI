@@ -95,6 +95,52 @@ export function getLayersAssets(layers) {
   });
 }
 
+/**
+ * 清掉图层里指向已不存在素材的引用（原地修改 layers）：地面/路面格置空、移除悬空的建筑/道具对象。
+ * 被清空的地面格回填全图最常见的剩余地砖（与渲染器周边外扩取砖同一口径），避免地图留下黑洞。
+ * 返回统计 { groundCells, backfilled, roadCells, removedObjects, removedObjectIds }。
+ */
+function scrubMissingAssetReferences(layers, knownIds) {
+  const known = value => { const n = Number(value); return Number.isFinite(n) && knownIds.has(n); };
+  const clearedGround = [];
+  const scrubGrid = (name, collect) => {
+    const grid = layers?.[name];
+    if (!Array.isArray(grid)) return 0;
+    let cleared = 0;
+    for (let y = 0; y < grid.length; y++) {
+      const cells = grid[y];
+      if (!Array.isArray(cells)) continue;
+      for (let x = 0; x < cells.length; x++) {
+        if (cells[x] != null && !known(cells[x])) {
+          cells[x] = null;
+          cleared++;
+          if (collect) clearedGround.push([x, y]);
+        }
+      }
+    }
+    return cleared;
+  };
+  const groundCells = scrubGrid('ground', true);
+  const roadCells = scrubGrid('road', false);
+  let backfilled = 0;
+  if (groundCells > 0) {
+    const counts = new Map();
+    for (const cells of layers.ground) for (const id of cells || []) if (id != null) counts.set(id, (counts.get(id) || 0) + 1);
+    const dominant = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (dominant != null) {
+      for (const [x, y] of clearedGround) { layers.ground[y][x] = dominant; backfilled++; }
+    }
+  }
+  const objects = Array.isArray(layers?.objects) ? layers.objects : [];
+  const kept = objects.filter(o => o?.assetId != null && known(o.assetId));
+  const removedObjectIds = objects
+    .filter(o => !o || o.assetId == null || !known(o.assetId))
+    .map(o => o?.id)
+    .filter(id => Number.isInteger(id));
+  if (kept.length !== objects.length) layers.objects = kept;
+  return { groundCells, backfilled, roadCells, removedObjects: objects.length - kept.length, removedObjectIds };
+}
+
 /** 供前端渲染的完整地图载荷 */
 export function getMapPayload() {
   const row = getMapRow();
@@ -106,6 +152,9 @@ export function getMapPayload() {
       kind: l.kind, x: l.grid_x, y: l.grid_y, radius: l.radius, ambient: l.ambient || '',
       objectId: l.object_id ?? null,
     }));
+  const assets = getLayersAssets(row.layers);
+  // 渲染兜底：悬空引用会在地图上渲染成白块/黑洞，读载荷时就地清掉；持久化清理由 removeDeletedAssetReferences 在删素材时负责
+  scrubMissingAssetReferences(row.layers, new Set(assets.map(a => Number(a.id))));
   return {
     id: row.id,
     name: row.name,
@@ -115,7 +164,7 @@ export function getMapPayload() {
     version: row.version || 1,
     worldSettingId: row.world_setting_id || null,
     layers: row.layers,
-    assets: getLayersAssets(row.layers),
+    assets,
     locations,
   };
 }
@@ -207,4 +256,30 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
   })();
   broadcastTownMapUpdated({ mapId: result.mapId, version: result.version });
   return result;
+}
+
+/**
+ * 删除素材后调用（deleteAsset 专用）：把图层里指向已不存在素材的引用真正清出数据库——
+ * 悬空对象移除、绑定了悬空对象的 POI 解绑（object_id 置空，地点本身保留）、地面/路面引用格清空回填；
+ * 有改动才 version+1 并广播，让各端立即重取地图。顺带修复历史版本遗留的悬空引用
+ * （旧版本删素材不清图层，会在地图上留下白块/黑洞）。地图不存在或无悬空引用时返回 null。
+ */
+export function removeDeletedAssetReferences() {
+  const row = getMapRow();
+  if (!row) return null;
+  const db = getDb();
+  const knownIds = new Set(db.prepare('SELECT id FROM town_assets').all().map(r => r.id));
+  const stats = scrubMissingAssetReferences(row.layers, knownIds);
+  if (!stats.groundCells && !stats.roadCells && !stats.removedObjects) return null;
+  const result = db.transaction(() => {
+    const version = (row.version || 0) + 1;
+    db.prepare('UPDATE town_maps SET layers_json = ?, version = ? WHERE id = ?')
+      .run(JSON.stringify(row.layers), version, row.id);
+    for (const objectId of stats.removedObjectIds) {
+      db.prepare('UPDATE town_locations SET object_id = NULL WHERE map_id = ? AND object_id = ?').run(row.id, objectId);
+    }
+    return { mapId: row.id, version };
+  })();
+  broadcastTownMapUpdated({ mapId: result.mapId, version: result.version });
+  return { ...stats, version: result.version };
 }

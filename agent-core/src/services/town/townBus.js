@@ -44,6 +44,17 @@ export function broadcastTownMapUpdated(payload) {
   broadcast('town_map_updated', { ...worldScope, ...payload });
 }
 
+// 进程内订阅：素材提交/删除除了推给前端，还要让小镇运行时重建内存里的立绘/小人引用
+// （townService.refreshAgentVisuals）——素材每次提交都换新文件并删旧文件，内存引用不同步就会 404。
+const assetUpdateListeners = new Set();
+export function onTownAssetsUpdated(listener) {
+  assetUpdateListeners.add(listener);
+  return () => assetUpdateListeners.delete(listener);
+}
+
 export function broadcastTownAssetsUpdated(payload) {
   broadcast('town_assets_updated', { ...worldScope, ...payload });
+  for (const listener of assetUpdateListeners) {
+    try { listener(payload); } catch (err) { console.warn('[townBus] asset update listener failed:', err?.message || err); }
+  }
 }

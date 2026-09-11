@@ -8,7 +8,7 @@ import { adaptObject, assetUrl, groundUvs, renderMeta } from './TownSceneAdapter
 import { sortCards, cardOccludesAgent } from './cardLayers.js'
 import { imageFootV } from './imageAlpha.js'
 import { roadEdges } from './terrainEdges.js'
-import { daylightLook, townMaterial, makeContactShadow, buildingShadowGeometry } from './sceneLook.js'
+import { daylightLook, townMaterial, makeContactShadow, buildingShadowGeometry, makeLightPool, makeLightHalo } from './sceneLook.js'
 import { deriveGroundImage, GROUND_DERIVATIVE_VERSION } from './groundTexture.js'
 import { createBuildingVolume, setBuildingVolumeNight } from './buildingVolumeGeometry.js'
 import { setBuildingOcclusion, volumeOccludesAgent } from './interactionOcclusion.js'
@@ -29,6 +29,8 @@ function freeMesh(mesh) {
   if (mesh.userData.projectedShadow) freeMesh(mesh.userData.projectedShadow)
   if (mesh.userData.contact) freeMesh(mesh.userData.contact)
   if (mesh.userData.shadowProxy) freeMesh(mesh.userData.shadowProxy)
+  if (mesh.userData.lightPool) freeMesh(mesh.userData.lightPool)
+  if (mesh.userData.halo) freeMesh(mesh.userData.halo)
   mesh.userData.placeholder?.texture.dispose()
   mesh.geometry?.dispose()
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
@@ -214,6 +216,7 @@ export class Hd2dTownRenderer {
     }
     group.userData.dto = dto
     group.traverse(child => { if (child.isMesh) { child.userData.dto = dto; child.userData.volumePart = true } })
+    this.syncVolumeLights(group, dto)
     return group
   }
   updateCard(collection, key, dto, isAgent) {
@@ -338,8 +341,63 @@ export class Hd2dTownRenderer {
       if (shadowProxy) { freeMesh(shadowProxy); shadowProxy = null }
     }
     if ((isAgent || materialKind === 'building' || meta.shadowMode === 'volume') && projectedShadow) { freeMesh(projectedShadow); projectedShadow = null }
-    mesh.userData = { projectedShadow, dto, entry, isAgent, contact, shadowProxy, materialKind, placeholder: mesh.userData.placeholder, footV }
+    mesh.userData = { projectedShadow, dto, entry, isAgent, contact, shadowProxy, materialKind, placeholder: mesh.userData.placeholder, footV, lightPool: mesh.userData.lightPool, halo: mesh.userData.halo, lightPhase: mesh.userData.lightPhase }
+    this.syncCardLights(mesh, dto, materialKind, h, footV, groundShift)
     return mesh
+  }
+  // Night lighting rig: lamp props spill a flickering pool and head halo,
+  // buildings cast a steady pool out of their doorway. Holders own the meshes
+  // through userData so the normal freeMesh path reclaims them.
+  ensureLights(holder, { x, z, headY = null, poolSize = 0, haloSize = 0 }) {
+    if (poolSize > 0) {
+      let pool = holder.userData.lightPool
+      if (!pool || pool.userData.size !== poolSize) {
+        if (pool) freeMesh(pool)
+        pool = makeLightPool(poolSize)
+        pool.userData.size = poolSize
+        holder.userData.lightPool = pool
+        this.scene.add(pool)
+      }
+      pool.position.set(x, .075, z)
+    } else if (holder.userData.lightPool) { freeMesh(holder.userData.lightPool); holder.userData.lightPool = null }
+    if (haloSize > 0 && headY != null) {
+      let halo = holder.userData.halo
+      if (!halo || halo.userData.size !== haloSize) {
+        if (halo) freeMesh(halo)
+        halo = makeLightHalo(haloSize)
+        halo.userData.size = haloSize
+        holder.userData.halo = halo
+        this.scene.add(halo)
+      }
+      halo.position.set(x, headY, z)
+    } else if (holder.userData.halo) { freeMesh(holder.userData.halo); holder.userData.halo = null }
+    holder.userData.lightPhase ??= (holder.id * 2.39996323) % (Math.PI * 2)
+  }
+  syncCardLights(mesh, dto, materialKind, h, footV, groundShift) {
+    const x = dto.ground.x - groundShift, z = dto.ground.z - groundShift
+    if (materialKind === 'lamp') {
+      // Painted glass band sits at 65-85% of the card height.
+      this.ensureLights(mesh, { x, z, headY: h * (footV - .25), poolSize: 3.4, haloSize: Math.min(2.4, Math.max(.9, h * .95)) })
+    } else if (materialKind === 'building') {
+      const meta = dto.asset?.meta, fp = meta?.footprint
+      if (fp?.w > 0 && fp?.h > 0) {
+        // Push the pool out of the doorway, away from the footprint middle.
+        const door = meta.doorOffset || { dx: fp.w - 1, dy: fp.h - 1 }
+        const cx = dto.grid.x + door.dx + .5, cz = dto.grid.y - fp.h + 1 + door.dy + .5
+        let dx = cx - (dto.grid.x + fp.w / 2), dz = cz - (dto.grid.y - fp.h / 2 + 1)
+        const len = Math.hypot(dx, dz) || 1
+        this.ensureLights(mesh, { x: cx + dx / len * .8, z: cz + dz / len * .8, poolSize: Math.max(fp.w, fp.h) * 1.4 + 1.6 })
+      } else this.ensureLights(mesh, { x, z })
+    } else this.ensureLights(mesh, { x, z })
+  }
+  syncVolumeLights(group, dto) {
+    const spec = dto.volume
+    const out = spec.door.side === 'south' ? [0, 1] : spec.door.side === 'north' ? [0, -1] : spec.door.side === 'east' ? [1, 0] : [-1, 0]
+    this.ensureLights(group, {
+      x: spec.origin.x + spec.door.dx + .5 + out[0] * .85,
+      z: spec.origin.z + spec.door.dy + .5 + out[1] * .85,
+      poolSize: Math.max(spec.width, spec.depth) * 1.4 + 1.6,
+    })
   }
   updateAgents(frames) {
     const live = new Set()
@@ -418,7 +476,8 @@ export class Hd2dTownRenderer {
     const hour = weather?.hour ?? new Date().getHours()
     const rain = /雨|阴|雪/.test(weather?.text || '')
     const look = daylightLook(hour, rain)
-    for (const building of this.objects.values()) if (building.userData.volume) setBuildingVolumeNight(building, look.night)
+    const glow = look.glow
+    for (const building of this.objects.values()) if (building.userData.volume) setBuildingVolumeNight(building, glow)
     const target = this.cameraState ? isoToGround(this.cameraState.x, this.cameraState.y) : { x: 8, z: 8 }
     // Shadow texels follow the visible streets instead of spreading over the entire map.
     const tx = Math.round(target.x * 4) / 4, tz = Math.round(target.z * 4) / 4
@@ -426,6 +485,9 @@ export class Hd2dTownRenderer {
     this.sun.target.position.set(tx, 0, tz)
     this.sun.intensity = look.sun; this.sun.color.set(look.color)
     this.fill.intensity = look.ambient; this.fill.color.set(look.sky)
+    this.fill.groundColor.set(look.fillGround)
+    // A slightly cooler exposure deepens the night without clipping the day.
+    this.renderer.toneMappingExposure = 1.25 - .13 * glow
     // Project each prop's alpha silhouette directly onto the receiving ground.
     // This avoids shadow-map depth bias opening a gap at a small object's foot.
     for (const mesh of this.objects.values()) {
@@ -452,6 +514,23 @@ export class Hd2dTownRenderer {
     const depths = focusPoints.map(p => -new T.Vector3(p.x, p.y || 0, p.z).applyMatrix4(this.camera.matrixWorldInverse).z)
     this.tiltPass.setFocus(Math.min(focal, ...depths), Math.max(focal, ...depths), this.camera.near, this.camera.far)
     this.tiltPass.defocus = this.tilt && this.quality !== 'low'
+    // Animate the light rig: lamp pools/halos flicker gently, doorway pools stay
+    // steady; both follow the dusk→night glow and interaction occlusion fades.
+    const now = performance.now() / 1000
+    for (const holder of this.objects.values()) {
+      const ud = holder.userData
+      if (!ud.lightPool && !ud.halo) continue
+      const fade = ud.occluding ? .32 : 1
+      if (ud.materialKind === 'lamp') {
+        const phase = ud.lightPhase || 0
+        const flicker = 1 - .08 * (.5 + .5 * (.6 * Math.sin(now * 2.3 + phase) + .4 * Math.sin(now * 4.1 + phase * 1.7)))
+        if (ud.halo) ud.halo.material.opacity = .45 * glow * flicker * fade
+        if (ud.lightPool) ud.lightPool.material.opacity = .46 * glow * flicker * fade
+        if (holder.material.userData.townGlow) holder.material.userData.townGlow.value = glow * flicker
+      } else if (ud.lightPool) {
+        ud.lightPool.material.opacity = .3 * glow * fade
+      }
+    }
     // Color grade and HDR output remain active even with depth of field disabled.
     this.composer.render()
     // Evict textures no longer referenced by any mesh (including regenerated URLs).

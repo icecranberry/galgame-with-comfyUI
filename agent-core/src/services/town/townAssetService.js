@@ -18,6 +18,7 @@ import { postProcessAsset, detectTileAnchorY, flattenIsoTileWithRect, extractIso
 import { refineImage } from '../imageRefine.js';
 import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
+import { removeDeletedAssetReferences } from './townMapService.js';
 import { getTownGenerationSettings, generationStepForAsset, isPortraitAsset, normalizeTownGenerationLoras } from './townGenerationConfig.js';
 
 /** 建筑 LLM 出 prompt（酒馆立绘同款结构）；失败回退静态串 */
@@ -417,10 +418,16 @@ async function generateIntoRow(row, guard) {
   const spec = ASSET_SPECS[row.kind];
   const size = spec.size;
 
-  // prompt 来源优先级：meta.promptOverride（立绘/spirit/建筑 LLM 产物，或用户手改）→ 建筑 LLM → 静态组装
+  // prompt 来源优先级：meta.promptOverride（用户手改 / 立绘 LLM 产物）→ source_prompt（当前生效提示词，直接复用）
+  // → 建筑 LLM → 静态组装。「重新生成」= 用当前提示词换种子重出图，不重新生成提示词；
+  // source_prompt 是上次落库的最终完整 prompt（已含前缀 / 硬 tag），按 verbatim 原样送 ComfyUI。
   let prompt;
+  let promptVerbatim = meta.promptVerbatim === true;
   if (meta.promptOverride) {
     prompt = meta.promptOverride;
+  } else if (String(row.source_prompt || '').trim()) {
+    prompt = String(row.source_prompt).trim();
+    promptVerbatim = true;
   } else if (row.kind === 'building' && meta.useLlmPrompt !== false) {
     prompt = await buildBuildingPromptViaLlm({ name: row.name, desc: meta.desc, footprint: meta.footprint, special: !!meta.special, styleTags: meta.styleTags || '' });
     assertAssetCurrent(guard);
@@ -436,11 +443,11 @@ async function generateIntoRow(row, guard) {
   }
 
   // 固定前缀和画师/LoRA 优先使用素材级覆盖；未覆盖时回落到 system_settings 里的类型配置。
-  // promptVerbatim = true 表示当前 promptOverride 是用户在「图片提示词」弹窗里手写的完整提示词，
+  // promptVerbatim = true 表示 prompt 已是完整提示词（弹窗手写或 source_prompt 复用）：
   // 原样送 ComfyUI，不再补前缀 / 硬 tag（弹窗「改动后完全按新提示词出图」的兑现口径）。
   const generationDefaults = generationDefaultsForAsset(row);
   const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : generationDefaults.prefix;
-  prompt = composeAssetPrompt({ kind: row.kind, prefix, prompt, verbatim: meta.promptVerbatim === true });
+  prompt = composeAssetPrompt({ kind: row.kind, prefix, prompt, verbatim: promptVerbatim });
   db.transaction(() => {
     assertAssetCurrent(guard);
     if (!(row.status === 'ready' && row.image_path)) {
@@ -777,7 +784,7 @@ export function updateAssetGenerationConfig(id, overrides = {}) {
   db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify(meta), id);
   return rowToAsset(db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id));
 }
-/** 删除素材（含磁盘文件）；引用它的地图对象由调用方负责清理 */
+/** 删除素材（含磁盘文件）；引用它的地图图层由 removeDeletedAssetReferences 统一清理并广播地图更新 */
 export function deleteAsset(id) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
@@ -792,6 +799,10 @@ export function deleteAsset(id) {
     try { fs.unlinkSync(path.join(TOWN_ASSETS_DIR, path.basename(meta.sourceImage))); } catch { /* 原图已不存在 */ }
   }
   db.prepare('DELETE FROM town_assets WHERE id = ?').run(id);
+  const scrubbed = removeDeletedAssetReferences();
+  if (scrubbed) {
+    console.log(`[townAssets] deleted #${id}: map cleaned (objects -${scrubbed.removedObjects}, ground -${scrubbed.groundCells}, road -${scrubbed.roadCells})`);
+  }
   broadcastTownAssetsUpdated({ deleted: id });
   return { ok: true };
 }

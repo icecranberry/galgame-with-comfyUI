@@ -34,7 +34,7 @@
         <span class="nav-label">奇遇</span>
       </div>
 
-      <router-link to="/town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
+      <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -145,6 +145,7 @@ const activeNavKey = computed(() => {
   if (p.startsWith('/chat') || p.startsWith('/group')) return 'chat'
   if (p.startsWith('/moments')) return 'moments'
   if (p.startsWith('/events')) return 'events'
+  if (p.startsWith('/town')) return 'town'
   if (p.startsWith('/schedule')) return 'schedule'
   if (p.startsWith('/gallery')) return 'gallery'
   if (p.startsWith('/tavern')) return 'tavern'

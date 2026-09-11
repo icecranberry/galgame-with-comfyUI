@@ -309,6 +309,26 @@ export async function testLlmConnection({ baseURL, apiKey, model, headers = {}, 
   };
 }
 
+// 日志打印前压缩超大内容：ANIMA3 模板与视觉消息里的图片 base64（几 MB）都不进控制台
+function compressLogMessages(messages) {
+  return messages.map(m => {
+    if (Array.isArray(m.content)) {
+      return {
+        ...m,
+        content: m.content.map(part =>
+          part?.type === 'image_url'
+            ? { ...part, image_url: { url: `[image base64 omitted: ${String(part.image_url?.url || '').length} chars]` } }
+            : part
+        ),
+      };
+    }
+    if (m.content && m.content.includes('ANIMA3 提示词生成模板')) {
+      return { ...m, content: '# ANIMA3 提示词生成模板 v3.0（已省略，共 ' + m.content.length + ' 字符）' };
+    }
+    return m;
+  });
+}
+
 async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', max_tokens = 2048, temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries } = {}) {
   throwIfSyncAborted(signal);
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
@@ -345,12 +365,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   }
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
-  const logMsgs = messages.map(m => {
-    if (m.content && m.content.includes('ANIMA3 提示词生成模板')) {
-      return { ...m, content: '# ANIMA3 提示词生成模板 v3.0（已省略，共 ' + m.content.length + ' 字符）' };
-    }
-    return m;
-  });
+  const logMsgs = compressLogMessages(messages);
   // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
   const requestLog =
     `\n══════════ [${providerLabel()} → ${label}] ══════════\n` +
@@ -500,12 +515,7 @@ async function* _chatStreamInner(messages, {
   try {
     console.log(`\n══════════ [${providerLabel()} → ${label}] ══════════`);
     // 压缩 ANIMA3 等超长模板的日志输出
-    const logMsgs = messages.map(m => {
-      if (m.content && m.content.includes('ANIMA3 提示词生成模板')) {
-        return { ...m, content: '# ANIMA3 提示词生成模板 v3.0（已省略，共 ' + m.content.length + ' 字符）' };
-      }
-      return m;
-    });
+    const logMsgs = compressLogMessages(messages);
     console.log(JSON.stringify(logMsgs, null, 2));
     console.log('────────────────────────────────────────────────');
 

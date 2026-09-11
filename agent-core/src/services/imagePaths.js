@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '..', '..', 'data', 'images');
+const AVATARS_DIR = path.resolve(__dirname, '..', '..', 'data', 'avatars');
 
 export const IMAGE_CATEGORIES = {
   chat:      { dir: 'chat',      label: '聊天' },
@@ -54,6 +55,36 @@ export function extractCategoryFromUrl(url) {
   }
   if (url.match(/^\/images\/[^/]+$/)) return LEGACY_CATEGORY;
   return null;
+}
+
+/**
+ * 本地图片 URL 是否仍能被静态服务命中（存在性检查必须与 app.js 的静态挂载口径一致）：
+ * /images/**（含 .pending 子目录与历史根目录）、/avatars/** 映射到磁盘后检查文件；
+ * .png URL 命中同名 .avif（压缩后替换）也算存在；处理百分号编码（表情包中文文件名），
+ * 解码结果限制在目录内防编码逃逸；映射不了的形态（data:/外链等）一律视为存在。
+ */
+export function imageUrlExists(url) {
+  const cleanUrl = String(url || '').replace(/\?.*$/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(cleanUrl); } catch { decoded = cleanUrl; }
+
+  if (decoded.startsWith('/avatars/')) {
+    const filePath = path.resolve(AVATARS_DIR, '.' + decoded.slice('/avatars'.length));
+    return filePath.startsWith(AVATARS_DIR + path.sep) && fs.existsSync(filePath);
+  }
+
+  const imgMatch = decoded.match(/^\/images\/(.+)$/);
+  if (imgMatch) {
+    // 与 imageAvifFallback 相同的接受面：解码后必须仍落在数据目录内（防 %2e%2e 编码逃逸）
+    const filePath = path.resolve(DATA_DIR, imgMatch[1]);
+    if (!filePath.startsWith(DATA_DIR + path.sep)) return false;
+    if (fs.existsSync(filePath)) return true;
+    // PNG 已被 AVIF 压缩替换时，按 .png URL 请求会由回退中间件返回 .avif 内容
+    if (/\.png$/i.test(filePath)) return fs.existsSync(filePath.replace(/\.png$/i, '.avif'));
+    return false;
+  }
+
+  return true;
 }
 
 export function saveBase64Image(category, filename, dataUri) {

@@ -209,6 +209,7 @@ export const useTownStore = defineStore('town', () => {
   function _applyAssetUpdate(d) {
     const deleted = d.deleted != null ? assets.value.find(a => a.id === d.deleted) : null
     assets.value = assets.value.filter(a => a.id !== d.deleted)
+    if (d.deleted != null) _scrubDeletedAssetFromLayers(d.deleted)
 
     if (!d.asset) {
       // spirit重绘采用“删旧建新”的旧路径时，先退回占位图，避免继续请求已删除文件。
@@ -221,6 +222,33 @@ export const useTownStore = defineStore('town', () => {
     assets.value.push(d.asset)
 
     if (d.asset.kind === 'player' || d.asset.kind === 'npc') _scheduleAgentSpriteRefresh()
+  }
+
+  // 素材删除后同步清掉当前地图图层里的引用（悬空对象渲染成白块、悬空地砖渲染成黑洞）：
+  // 后端会持久化清理并广播地图更新，这里让本端在重取落地前就先干净。地面格回填最常见的剩余地砖。
+  function _scrubDeletedAssetFromLayers(assetId) {
+    const layers = mapData.value?.layers
+    if (!layers || assetId == null) return
+    const ground = layers.ground
+    if (Array.isArray(ground)) {
+      const cleared = []
+      for (let y = 0; y < ground.length; y++) {
+        const row = ground[y]
+        if (!Array.isArray(row)) continue
+        for (let x = 0; x < row.length; x++) {
+          if (row[x] === assetId) { row[x] = null; cleared.push([x, y]) }
+        }
+      }
+      if (cleared.length) {
+        const counts = new Map()
+        for (const row of ground) for (const id of row || []) if (id != null) counts.set(id, (counts.get(id) || 0) + 1)
+        const dominant = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
+        if (dominant != null) for (const [x, y] of cleared) ground[y][x] = dominant
+      }
+    }
+    const road = layers.road
+    if (Array.isArray(road)) for (const row of road) if (Array.isArray(row)) for (let x = 0; x < row.length; x++) if (row[x] === assetId) row[x] = null
+    if (Array.isArray(layers.objects)) layers.objects = layers.objects.filter(o => o?.assetId !== assetId)
   }
 
   let _agentSpriteRefreshTimer = null

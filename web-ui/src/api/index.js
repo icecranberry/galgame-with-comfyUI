@@ -210,6 +210,11 @@ export function uploadStanding(characterId, base64) {
   return request(`/characters/${characterId}/standing-upload`, { method: 'POST', body: { base64 } })
 }
 
+/** 修正外观：上传参考图（base64 data URL），邻舍分析后重写「## 你的外观」（不入库，由前端回填后保存） */
+export function refineAppearance(characterId, image) {
+  return request(`/characters/${characterId}/refine-appearance`, { method: 'POST', body: { image } })
+}
+
 /** 用已有英文 prompt 直接重出立绘（不重新请求提示词） */
 export function regenerateStandingImage(characterId, prompt) {
   return request(`/characters/${characterId}/generate-standing-image`, { method: 'POST', body: { prompt } })
