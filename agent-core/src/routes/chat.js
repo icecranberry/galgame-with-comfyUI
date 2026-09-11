@@ -1017,9 +1017,19 @@ ${coreRules}
     // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
     const streamState = { splitter: new SentenceSplitter(), fullContent: '', collectedSegments: [], wasStopped: false };
 
-    // 客户端断开 SSE 时中止上游 LLM 请求，避免继续空烧 token
+    // 客户端断开 SSE 时中止上游 LLM 请求，避免继续空烧 token。
+    // 必须监听 res 的 'close'，不能监听 req 的：Node ≥16 里 IncomingMessage 的 'close'
+    // 表示「请求体已读完」，实测请求到达后 ~42ms 就触发（此时 SSE 还没开始写），而本行在
+    // handler 深处才注册，事件早已错过 ⇒ 原来的 req.on('close') 永远不会触发，客户端超时
+    // 断开后上游仍会跑完整轮并照常计费。只有 ServerResponse 的 'close' 配合
+    // writableEnded=false 才代表「响应没写完，连接就断了」。
+    let clientGone = false;
     const upstreamAbort = new AbortController();
-    req.on('close', () => upstreamAbort.abort());
+    res.on('close', () => {
+      if (res.writableEnded) return; // 正常结束（我们自己 res.end()）不算断开
+      clientGone = true;
+      upstreamAbort.abort();
+    });
 
     const streamOpts = {
       temperature: 0.72,
@@ -1087,6 +1097,9 @@ ${coreRules}
     try {
       await consumeStream(msgs, upstreamAbort.signal);
     } catch (err) {
+      // 客户端已断开：立刻收摊。既不再跑 @memory 回想，也不落库——半截回复进了 raw_messages
+      // 会污染后续轮次的上下文，而这一轮用户已经放弃了。
+      if (clientGone) throw err;
       // @memory 闸门主动 abort 属预期；其余错误维持原行为向上抛
       if (!recallQuery) throw err;
       console.log('[chat] first stream aborted for @memory recall');
@@ -1144,11 +1157,16 @@ ${coreRules}
       streamState.splitter = new SentenceSplitter();
       streamState.wasStopped = false;
 
+      // 同上：二次续写这一段同样只能在“真正的断开”时中止（req 的 close 在请求体读完就触发）
       const recallAbort = new AbortController();
-      req.on('close', () => recallAbort.abort());
+      res.on('close', () => {
+        if (!res.writableEnded) recallAbort.abort();
+      });
       try {
         await consumeStream(recallMsgs, recallAbort.signal);
       } catch (err) {
+        // 客户端断开：不要补那条“走神”兜底文案，更不要落库（用户已经不在看了）
+        if (clientGone) throw err;
         // 二次续写失败兜底：指令行已被吞、气泡已清空，不能让用户面对沉默。
         // 无任何内容时补一条角色化短文本并走正常落库；已有部分内容则保留半截回复。
         console.warn('[chat] @memory recall continuation failed:', err.message);
