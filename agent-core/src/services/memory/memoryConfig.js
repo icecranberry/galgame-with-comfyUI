@@ -24,11 +24,13 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
   activeSearch: { enabled: false, timeoutMs: 4000 },
   // 阶段三：整理 daemon（记忆的"睡眠期"；docs/memory-upgrade-plan.md §6）。
-  // llmCallsPerRun 是"每轮整理"的调用预算（每 5 分钟一轮、每轮重置），并非每日总量；
-  // 旧配置键 dailyMaxLlmCalls 由 normalizeMemorySettings 兼容读取。
-  // T4 画像升华（portrait_suggest）默认关：旧实现会对同一批记忆反复重跑、产出换词重述的
-  // 近似建议；保留开关与实现，等改成「新记忆触发 + 向量去重 + 拒绝反馈」后再放量。
-  consolidation: { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6, portraitSuggest: false },
+  //   minIntervalMinutes 两次“真正干过活”的整理之间的最小间隔（防用户离开后每 5 分钟一整轮）
+  //   llmCallsPerRun    单轮整理的 LLM 调用上限
+  //   dailyLlmCalls     每日 LLM 调用总量（跨轮累计、按上海日期归零）
+  // 旧配置键 dailyMaxLlmCalls 的语义本就是“每日总量”，统一归位到 dailyLlmCalls。
+  // T4 画像升华（portrait_suggest）默认开启：候选消费记账（memory_consolidation_marks，14 天 TTL）
+  // 已从根上消除“同一批候选每轮重复送 LLM”，不再需要按天冷却或默认关闭；开关保留，可随时关。
+  consolidation: { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: true },
   // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
@@ -88,14 +90,21 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     consolidation: {
       enabled: consolidation.enabled === undefined ? (base.consolidation?.enabled ?? true) : Boolean(consolidation.enabled),
       idleDelayMinutes: clampInt(consolidation.idleDelayMinutes, base.consolidation?.idleDelayMinutes ?? 30, 5, 720),
-      // 旧键 dailyMaxLlmCalls 兼容读取（实际语义是每轮预算，改名以正名）
-      llmCallsPerRun: clampInt(
-        consolidation.llmCallsPerRun ?? consolidation.dailyMaxLlmCalls,
-        base.consolidation?.llmCallsPerRun ?? base.consolidation?.dailyMaxLlmCalls ?? 6,
-        0, 30,
+      minIntervalMinutes: clampInt(
+        consolidation.minIntervalMinutes,
+        base.consolidation?.minIntervalMinutes ?? 60,
+        0, 1440,
+      ),
+      llmCallsPerRun: clampInt(consolidation.llmCallsPerRun, base.consolidation?.llmCallsPerRun ?? 3, 0, 30),
+      // 旧键 dailyMaxLlmCalls → dailyLlmCalls：旧键语义就是"每日总量"，
+      // 此前被误接到"每轮预算"导致默认值被放大 288 倍（每 5 分钟一轮 × 6 次）
+      dailyLlmCalls: clampInt(
+        consolidation.dailyLlmCalls ?? consolidation.dailyMaxLlmCalls,
+        base.consolidation?.dailyLlmCalls ?? base.consolidation?.dailyMaxLlmCalls ?? 60,
+        0, 2000,
       ),
       portraitSuggest: consolidation.portraitSuggest === undefined
-        ? (base.consolidation?.portraitSuggest ?? false)
+        ? (base.consolidation?.portraitSuggest ?? true)
         : Boolean(consolidation.portraitSuggest),
     },
     contextBudget: {
@@ -167,21 +176,23 @@ export function isMemoryActiveSearchEnabled() {
 // 阶段三整理 daemon 配置。DB 未就绪时按默认开启处理（daemon 内部还有空闲判定双重保险）。
 export function getConsolidationConfig() {
   try {
-    const { enabled, idleDelayMinutes, llmCallsPerRun, portraitSuggest } = getMemorySettings().consolidation || {};
+    const { enabled, idleDelayMinutes, minIntervalMinutes, llmCallsPerRun, dailyLlmCalls, portraitSuggest } = getMemorySettings().consolidation || {};
     return {
       enabled: enabled !== false,
       idleDelayMinutes: clampInt(idleDelayMinutes, 30, 5, 720),
-      llmCallsPerRun: clampInt(llmCallsPerRun, 6, 0, 30),
-      portraitSuggest: portraitSuggest === true,
+      minIntervalMinutes: clampInt(minIntervalMinutes, 60, 0, 1440),
+      llmCallsPerRun: clampInt(llmCallsPerRun, 3, 0, 30),
+      dailyLlmCalls: clampInt(dailyLlmCalls, 60, 0, 2000),
+      portraitSuggest: portraitSuggest !== false,
     };
   } catch {
-    return { enabled: true, idleDelayMinutes: 30, llmCallsPerRun: 6, portraitSuggest: false };
+    return { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: true };
   }
 }
 
-// T4 画像升华开关（默认关）。DB 未就绪时按关闭处理。
+// T4 画像升华开关（默认开）。DB 未就绪时按开启处理。
 export function isPortraitSuggestionEnabled() {
-  return getConsolidationConfig().portraitSuggest === true;
+  return getConsolidationConfig().portraitSuggest !== false;
 }
 
 // 阶段四 dynamicBlocks token 预算配置。DB 未就绪时按默认关闭处理，零影响。
@@ -226,9 +237,9 @@ export function getEmbeddingProfile(settings = getMemorySettings({ includeSecret
   return { fingerprint, corpus: `memory_v2_${fingerprint}` };
 }
 
-export function getMemoryMode(settings = getMemorySettings({ includeSecrets: true })) {
-  return 'hybrid';
-}
+// 检索模式对外统一报告为 hybrid：文本通道永远可用，向量/实体通道按配置与可用性自行降级
+// （此前是一个恒返回 'hybrid' 的导出函数，收口为常量，避免"看起来可切换"的误导）
+export const MEMORY_MODE = 'hybrid';
 
 function maskSecrets(settings) {
   const copy = JSON.parse(JSON.stringify(settings));
@@ -238,7 +249,7 @@ function maskSecrets(settings) {
     copy[key].apiKeyPreview = secret ? `${secret.slice(0, 3)}***${secret.slice(-2)}` : '';
     copy[key].apiKey = '';
   }
-  copy.mode = getMemoryMode(settings);
+  copy.mode = MEMORY_MODE;
   copy.profile = getEmbeddingProfile(settings)?.fingerprint || null;
   return copy;
 }

@@ -5,7 +5,7 @@
 // 3. 实体 1 跳扩展：已命中记忆的共享实体反查关联记忆
 // 4. RRF 融合 → [{ injectionText, isHistorical, ... }]，注入 <memory_recall_result> 二次续写
 import { getDb } from '../../db/index.js';
-import { hybridSearch, rrfFusion, formatRow } from '../memorySearch.js';
+import { hybridSearch, rrfFusion, formatRow, auditQueryText } from '../memorySearch.js';
 import { vectorSearch } from '../vectorClient.js';
 import { embedMemoryText } from './memoryProviders.js';
 import { getMemorySettings, isMemoryV3Enabled } from './memoryConfig.js';
@@ -250,7 +250,7 @@ function writeActiveAudit({ conversationIds, query, primary, tripleResults, enti
       VALUES (?, ?, 'active', ?, ?, ?)
     `).run(
       conversationScope,
-      String(query).slice(0, 1000),
+      auditQueryText(query),
       JSON.stringify(counts),
       JSON.stringify(results.map(item => item.memory_id)),
       null,

@@ -24,6 +24,65 @@ export const ARCHIVE_THRESHOLD = 0.15;
 // LLM 任务类型集合（调度器据此做预算闸门）
 export const LLM_JOB_TYPES = new Set(['conflict', 'generalize', 'portrait_suggest', 'backfill']);
 
+// ── 整理记账（防止同一批候选被反复送进 LLM）──
+//
+// 候选发现只按时间窗/状态筛选，模型判定"无关 / 归纳不出结论 / 补不出字段"时不产生任何内容写入。
+// 若不做记账，同一批候选会在每轮扫描（默认 5 分钟，用户离开后空闲判定恒为真）里被无限重复送进 LLM。
+// 记账键按任务类型区分：
+//   conflict        → memory_id
+//   generalize      → conversation_id|entity_id|subject（组级：成员会随新记忆变化）
+//   portrait_suggest→ conversation_id
+//   backfill        → memory_id
+// TTL 到期后同一条记忆/组可以被重新整理（内容可能已变化）。
+export const RECONSOLIDATE_AFTER_DAYS = Object.freeze({
+  conflict: 7,
+  generalize: 30,
+  portrait_suggest: 14,
+  backfill: 30,
+});
+
+// 记账行保留期：远超所有 TTL，过期行由 T3 维护清理删除
+export const MARK_RETENTION_DAYS = 180;
+
+// 统一时间形态（与 memory_fragments.created_at 一致：UTC 'YYYY-MM-DD HH:MM:SS' 字符串可比）
+function sqliteTime(date = new Date()) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function markCutoff(jobType, now = new Date()) {
+  return sqliteTime(new Date(now.getTime() - (RECONSOLIDATE_AFTER_DAYS[jobType] ?? 30) * 86400000));
+}
+
+/** 泛化组的记账键（必须与 findGeneralizationGroups 里的 SQL 拼接表达式逐字一致）。 */
+export function generalizationMarkKey({ conversation_id: conversationId, entity_id: entityId, subject }) {
+  return `${conversationId ?? ''}|${entityId}|${subject ?? ''}`;
+}
+
+/**
+ * 记账：标记"这批候选已经问过模型了"（无论模型给出什么结论）。
+ * 只应在 LLM 成功返回后调用——调用抛错时不记账，下一轮自然重试。
+ */
+export function markConsolidated(db, jobType, keys, { now = new Date() } = {}) {
+  const list = [...new Set((keys || []).map(key => String(key ?? '')).filter(Boolean))];
+  if (!db || list.length === 0) return 0;
+  const at = sqliteTime(now);
+  const stmt = db.prepare(`
+    INSERT INTO memory_consolidation_marks(job_type, mark_key, marked_at) VALUES (?, ?, ?)
+    ON CONFLICT(job_type, mark_key) DO UPDATE SET marked_at = excluded.marked_at
+  `);
+  const tx = db.transaction(() => { for (const key of list) stmt.run(jobType, key, at); });
+  tx();
+  return list.length;
+}
+
+/** 尚未过期（仍在 TTL 内）的记账键，供测试与排查使用。 */
+export function listActiveMarks(db, jobType, { now = new Date() } = {}) {
+  if (!db) return [];
+  return db.prepare(`
+    SELECT mark_key FROM memory_consolidation_marks WHERE job_type = ? AND marked_at >= ?
+  `).all(jobType, markCutoff(jobType, now)).map(row => row.mark_key);
+}
+
 // SQLite 时间统一成可比较/可解析形态（存储里 'T' 与空格两种分隔符并存）
 export function normalizeSqliteTime(value) {
   if (!value) return null;
@@ -81,14 +140,27 @@ export function aggregateRetrievalAudits(db, { sinceDays = 90, now = new Date() 
 /**
  * 遍历全部 active 记忆重算 strength 并写回；低于阈值的 → archived + 向量墓碑。
  * 返回归档明细（可解释：每条含强度构成），供日志与状态汇报。
+ *
+ * 写入约束：只在强度真的变化时才 UPDATE（`strength IS NOT ?`），
+ * 否则每 6 小时一次的全表写会白白放大 WAL 写入量、与聊天写事务抢 SQLite 单写锁。
+ * 语句在循环外 prepare，事务内复用。
  */
 export function decayAndArchiveMemories(db, { now = new Date(), threshold = ARCHIVE_THRESHOLD, enqueueDelete, enqueueTripleDelete } = {}) {
   const rows = db.prepare(`
     SELECT memory_id, memory_type, importance, retrieval_count, embedding_state, chroma_id,
-           last_reinforced_at, event_time, updated_at, created_at
+           last_reinforced_at, event_time, updated_at, created_at, strength
     FROM memory_fragments WHERE status = 'active'
   `).all();
   const archived = [];
+  const updateStrength = db.prepare(`
+    UPDATE memory_fragments SET strength = ? WHERE memory_id = ? AND status = 'active' AND strength IS NOT ?
+  `);
+  const archiveStmt = db.prepare(`
+    UPDATE memory_fragments SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'active'
+  `);
+  const selectTriples = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ? AND valid_to IS NULL`);
+  const invalidateTriples = db.prepare(`UPDATE memory_triples SET valid_to = CURRENT_TIMESTAMP WHERE memory_id = ? AND valid_to IS NULL`);
+  let strengthened = 0;
   const tx = db.transaction(() => {
     for (const row of rows) {
       const halfLifeDays = HALF_LIFE_DAYS[row.memory_type] ?? 180;
@@ -100,21 +172,23 @@ export function decayAndArchiveMemories(db, { now = new Date(), threshold = ARCH
         halfLifeDays,
         retrievalCount: row.retrieval_count,
       });
-      db.prepare(`UPDATE memory_fragments SET strength = ? WHERE memory_id = ? AND status = 'active'`)
-        .run(Math.round(strength * 10000) / 10000, row.memory_id);
+      const rounded = Math.round(strength * 10000) / 10000;
+      if (rounded !== Number(row.strength)) {
+        updateStrength.run(rounded, row.memory_id, rounded);
+        strengthened++;
+      }
       if (strength >= threshold) continue;
-      db.prepare(`UPDATE memory_fragments SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE memory_id = ? AND status = 'active'`)
-        .run(row.memory_id);
+      archiveStmt.run(row.memory_id);
       // 归档即出检索通道：向量墓碑（v3 corpus）；三元组连带失效 + 墓碑
       if (row.embedding_state === 'indexed' || row.chroma_id) enqueueDelete?.(row.memory_id, row);
-      const tripleIds = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ? AND valid_to IS NULL`).all(row.memory_id);
+      const tripleIds = selectTriples.all(row.memory_id);
       if (tripleIds.length > 0) {
-        db.prepare(`UPDATE memory_triples SET valid_to = CURRENT_TIMESTAMP WHERE memory_id = ? AND valid_to IS NULL`).run(row.memory_id);
+        invalidateTriples.run(row.memory_id);
         for (const triple of tripleIds) enqueueTripleDelete?.(triple.id);
       }
       archived.push({
         memoryId: row.memory_id,
-        strength: Math.round(strength * 10000) / 10000,
+        strength: rounded,
         importance: row.importance,
         halfLifeDays,
         daysSinceAnchor: Math.round(daysSinceAnchor * 10) / 10,
@@ -124,7 +198,27 @@ export function decayAndArchiveMemories(db, { now = new Date(), threshold = ARCH
     }
   });
   tx();
-  return { scanned: rows.length, archived };
+  return { scanned: rows.length, strengthened, archived };
+}
+
+// ── 维护清理：为整理 daemon 产生的辅助数据设保留期（纯 SQL，随 T3 一起跑）──
+
+/**
+ * 审计/任务/记账三类辅助表的保留期清理。
+ * 只删已终结的整理任务行（pending/processing 永不删，避免删掉正在跑的任务）。
+ */
+export function pruneConsolidationArtifacts(db, {
+  now = new Date(),
+  auditRetentionDays = 90,
+  jobRetentionDays = 7,
+  markRetentionDays = MARK_RETENTION_DAYS,
+} = {}) {
+  const olderThan = days => sqliteTime(new Date(now.getTime() - days * 86400000));
+  return {
+    audits: db.prepare(`DELETE FROM memory_retrieval_audits WHERE created_at < ?`).run(olderThan(auditRetentionDays)).changes,
+    jobs: db.prepare(`DELETE FROM memory_consolidation_jobs WHERE status IN ('completed', 'failed') AND updated_at < ?`).run(olderThan(jobRetentionDays)).changes,
+    marks: db.prepare(`DELETE FROM memory_consolidation_marks WHERE marked_at < ?`).run(olderThan(markRetentionDays)).changes,
+  };
 }
 
 // ── T6：向量墓碑一致性扫描（幂等）──
@@ -163,15 +257,20 @@ export function scanVectorTombstones(db, { limit = 200, enqueueDelete, enqueueTr
 
 // ── T1~T5 候选发现（纯查询，供调度器决定是否入队 + runner 消费）──
 
-// T1：近 N 天新建且有实体的记忆 → 各自找共享实体的更早 active 记忆，组成冲突候选簇
+// T1：近 N 天新建且有实体的记忆 → 各自找共享实体的更早 active 记忆，组成冲突候选簇。
+// TTL 内已问过模型的记忆不再入选（否则模型说"无关"后同一簇每轮扫描都会重问）。
 export function findConflictClusters(db, { sinceDays = 7, limit = 4, now = new Date(), maxOldPerCluster = 4 } = {}) {
   const cutoff = new Date(now.getTime() - sinceDays * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   const recent = db.prepare(`
     SELECT mf.* FROM memory_fragments mf
     WHERE mf.status = 'active' AND mf.created_at >= ?
       AND EXISTS (SELECT 1 FROM memory_entity_links mel WHERE mel.memory_id = mf.memory_id)
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_consolidation_marks mcm
+        WHERE mcm.job_type = 'conflict' AND mcm.mark_key = mf.memory_id AND mcm.marked_at >= ?
+      )
     ORDER BY mf.created_at DESC LIMIT 40
-  `).all(cutoff);
+  `).all(cutoff, markCutoff('conflict', now));
   const clusters = [];
   const usedIds = new Set();
   for (const row of recent) {
@@ -211,7 +310,8 @@ function hasLivingGeneralization(db, memberIds) {
 }
 
 // T2：同会话同实体同 subject 的 event/emotion ≥3 条且跨度 > 14 天 → 泛化候选组
-export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limit = 2 } = {}) {
+// TTL 内已问过模型的组不再入选（模型明确"归纳不出结论"时同样记账，否则组永不消失）。
+export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limit = 2, now = new Date() } = {}) {
   const groups = db.prepare(`
     SELECT mf.conversation_id, mel.entity_id, me.name AS entity_name, mf.subject,
            COUNT(*) AS cnt,
@@ -221,10 +321,15 @@ export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limi
     JOIN memory_entity_links mel ON mel.memory_id = mf.memory_id
     JOIN memory_entities me ON me.id = mel.entity_id
     WHERE mf.status = 'active' AND mf.memory_type IN ('event', 'emotion')
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_consolidation_marks mcm
+        WHERE mcm.job_type = 'generalize' AND mcm.marked_at >= ?
+          AND mcm.mark_key = COALESCE(mf.conversation_id, '') || '|' || mel.entity_id || '|' || COALESCE(mf.subject, '')
+      )
     GROUP BY mf.conversation_id, mel.entity_id, mf.subject
     HAVING cnt >= ? AND (julianday(newest) - julianday(oldest)) >= ?
     ORDER BY cnt DESC, me.mention_count DESC LIMIT ?
-  `).all(minCount, spanDays, limit);
+  `).all(markCutoff('generalize', now), minCount, spanDays, limit);
   const result = [];
   for (const group of groups) {
     const members = db.prepare(`
@@ -245,15 +350,21 @@ export function findGeneralizationGroups(db, { minCount = 3, spanDays = 14, limi
 export const PORTRAIT_PENDING_LIMIT = 20;
 
 // T4：importance≥4 的 knowledge 按会话聚合（每会话一次 LLM 调用生成画像建议）。
-// 待确认建议积压达到上限的会话先跳过——同一批记忆反复"升华"只会产出换词重述的近似建议，
-// 等人工确认/忽略掉一批后它自然重新进入候选（也让后面的会话有机会轮转）。
-export function findPortraitSuggestionConversations(db, { minImportance = 4, limit = 2, maxPending = PORTRAIT_PENDING_LIMIT } = {}) {
+// 两道过滤：
+//   1) TTL 内已问过模型的会话不再入选（模型提不出新建议时同样记账，否则同一会话每轮都会被重问）；
+//   2) 待确认建议积压达到上限的会话先跳过——同一批记忆反复“升华”只会产出换词重述的近似建议，
+//      等人工确认/忽略掉一批后它自然重新进入候选（也让后面的会话有机会轮转）。
+export function findPortraitSuggestionConversations(db, { minImportance = 4, limit = 2, maxPending = PORTRAIT_PENDING_LIMIT, now = new Date() } = {}) {
   const rows = db.prepare(`
-    SELECT conversation_id, COUNT(*) AS cnt FROM memory_fragments
-    WHERE status = 'active' AND memory_type = 'knowledge' AND importance >= ?
-      AND substr(conversation_id, 1, 5) = 'char_'
-    GROUP BY conversation_id ORDER BY cnt DESC LIMIT 50
-  `).all(minImportance);
+    SELECT mf.conversation_id, COUNT(*) AS cnt FROM memory_fragments mf
+    WHERE mf.status = 'active' AND mf.memory_type = 'knowledge' AND mf.importance >= ?
+      AND substr(mf.conversation_id, 1, 5) = 'char_'
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_consolidation_marks mcm
+        WHERE mcm.job_type = 'portrait_suggest' AND mcm.mark_key = mf.conversation_id AND mcm.marked_at >= ?
+      )
+    GROUP BY mf.conversation_id ORDER BY cnt DESC LIMIT 50
+  `).all(minImportance, markCutoff('portrait_suggest', now));
   const countPending = db.prepare(`
     SELECT COUNT(*) AS cnt FROM portrait_suggestions WHERE character_id = ? AND status = 'pending'
   `);
@@ -274,17 +385,25 @@ export function findPortraitSuggestionConversations(db, { minImportance = 4, lim
   return result;
 }
 
-// T5：v3 检索字段（keywords/perspectives/semantic_note）全缺失的 active 旧记忆，最旧优先
-export function findBackfillCandidates(db, { limit = 10 } = {}) {
+// T5：v3 检索字段（keywords/perspectives/semantic_note）全缺失的 active 旧记忆，最旧优先。
+// TTL 内已补过的记忆不再入选（模型"宁可留空"时同样记账，否则同一批每轮都会被重补 + 重嵌入）。
+// 额外带出待比较字段，供 runner 判断"是否真的需要写库"。
+export function findBackfillCandidates(db, { limit = 10, now = new Date() } = {}) {
   return db.prepare(`
-    SELECT memory_id, memory_type, subject, judgment, reasoning, tags, created_at FROM memory_fragments
-    WHERE status = 'active' AND (
-      keywords IS NULL OR keywords IN ('', '[]')
-      OR perspectives IS NULL OR perspectives IN ('', '[]')
-      OR semantic_note IS NULL OR semantic_note = ''
+    SELECT mf.memory_id, mf.memory_type, mf.subject, mf.judgment, mf.reasoning, mf.tags, mf.created_at,
+           mf.keywords, mf.perspectives, mf.semantic_note, mf.episodic_note, mf.importance
+    FROM memory_fragments mf
+    WHERE mf.status = 'active' AND (
+      mf.keywords IS NULL OR mf.keywords IN ('', '[]')
+      OR mf.perspectives IS NULL OR mf.perspectives IN ('', '[]')
+      OR mf.semantic_note IS NULL OR mf.semantic_note = ''
     )
-    ORDER BY COALESCE(updated_at, created_at) ASC LIMIT ?
-  `).all(limit);
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_consolidation_marks mcm
+        WHERE mcm.job_type = 'backfill' AND mcm.mark_key = mf.memory_id AND mcm.marked_at >= ?
+      )
+    ORDER BY COALESCE(mf.updated_at, mf.created_at) ASC, mf.id ASC LIMIT ?
+  `).all(markCutoff('backfill', now), limit);
 }
 
 // T5 是否还有存量（调度器据此决定是否续队）
@@ -320,6 +439,7 @@ const LLM_OPTS = { temperature: 0.2, max_tokens: 1500, response_format: { type: 
  */
 export async function runConflictResolutionTask({ clusters, llmBudgetRemaining = 0, deps = {} } = {}) {
   const chatSync = deps.chatSync;
+  const db = deps.db;
   const applyActions = deps.applyMemoryActions || applyMemoryActions;
   let llmCalls = 0;
   let applied = 0;
@@ -347,9 +467,12 @@ ${listing}
       const raw = await chatSync([{ role: 'user', content: prompt }], LLM_OPTS);
       resolutions = parseJsonObject(raw).resolutions || [];
     } catch (error) {
+      // 调用失败不记账：下一轮自然重试（与"模型判定无关"区分开）
       console.warn('[memory-consolidation] T1 LLM failed:', error.message);
       continue;
     }
+    // 记账：本簇已被模型判定过（含"无关"结论）。不记账则同一簇每轮扫描都会重问，永不停止。
+    markConsolidated(db, 'conflict', cluster.memories.map(m => m.memory_id));
     for (const resolution of resolutions.slice(0, 3)) {
       try {
         if (resolution.type === 'conflict' && resolution.outdatedMemoryId && resolution.updatedFact) {
@@ -416,11 +539,13 @@ ${listing}
  */
 export async function runGeneralizationTask({ groups, llmBudgetRemaining = 0, deps = {} } = {}) {
   const chatSync = deps.chatSync;
+  const db = deps.db;
   const insertGeneralized = deps.insertGeneralizedMemory || insertGeneralizedMemory;
   let llmCalls = 0;
   let applied = 0;
+  let skipped = 0;
   for (const group of groups || []) {
-    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, done: false };
+    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, skipped, done: false };
     const listing = group.members.map((m, index) => {
       const when = m.event_time || m.created_at || '';
       return `${index + 1}. [${when.slice(0, 10)}] ${m.judgment}`;
@@ -443,7 +568,10 @@ ${listing}
       console.warn('[memory-consolidation] T2 LLM failed:', error.message);
       continue;
     }
-    if (!generalization?.judgment) continue;
+    // 记账：无论模型是否归纳出结论，本组都已被判定过。
+    // 若不记账，"归纳不出结论"（prompt 明确允许 {"generalization":null}）的组会每轮重问。
+    markConsolidated(db, 'generalize', [generalizationMarkKey(group)]);
+    if (!generalization?.judgment) { skipped++; continue; }
     try {
       const memoryId = insertGeneralized({
         conversationId: group.conversation_id,
@@ -465,7 +593,7 @@ ${listing}
       console.warn('[memory-consolidation] T2 insert failed:', error.message);
     }
   }
-  return { llmCalls, applied, done: true };
+  return { llmCalls, applied, skipped, done: true };
 }
 
 // ── T4：核心记忆升华 runner（半自动：只产出建议，人工确认后才入画像）──
@@ -506,6 +634,8 @@ ${pendingLines}
       console.warn('[memory-consolidation] T4 LLM failed:', error.message);
       continue;
     }
+    // 记账：本会话已被模型提炼过（含“提不出新建议”）。不记账则同一会话每轮都要重问一遍。
+    markConsolidated(db, 'portrait_suggest', [conversation.conversationId]);
     const accepted = [];
     for (const item of items.slice(0, 3)) {
       const field = item.field === 'preference' ? 'preference' : 'personality';
@@ -532,15 +662,21 @@ ${pendingLines}
 /**
  * 每批 ≤10 条一次 LLM 调用，补齐 keywords/perspectives/semantic_note/importance。
  * 补完置 embedding_state='stale'——index worker 的 stale 兜底会自动重嵌入，无需额外入队。
+ *
+ * 两条硬约束：
+ *   1. 只在字段真的变化时才写库（含 updated_at / stale）——否则模型留空时既刷新了排序用的
+ *      updated_at，又让 index worker 用完全相同的文本重复付费嵌入；
+ *   2. 无论模型是否补出字段都记账，否则这批候选每轮扫描都会被重补 + 重嵌入，永不前进。
  */
 export async function runBackfillTask({ candidates, llmBudgetRemaining = 0, deps = {} } = {}) {
   const chatSync = deps.chatSync;
   const db = deps.db;
   let llmCalls = 0;
   let updated = 0;
+  let skipped = 0;
   const batch = (candidates || []).slice(0, 10);
-  if (batch.length === 0) return { llmCalls: 0, updated: 0, done: true };
-  if (llmBudgetRemaining <= 0) return { llmCalls: 0, updated: 0, done: false };
+  if (batch.length === 0) return { llmCalls: 0, updated: 0, skipped: 0, done: true };
+  if (llmBudgetRemaining <= 0) return { llmCalls: 0, updated: 0, skipped: 0, done: false };
   const listing = batch.map(m => `- ${m.memory_id} [${m.memory_type}|主体:${m.subject}] 判断：${m.judgment}｜依据：${m.reasoning || '无'}｜tags：${m.tags || '[]'}`).join('\n');
   const prompt = `你是记忆表示补全器。下面这些旧记忆缺少 v3 检索字段，请逐条补全：
 
@@ -562,37 +698,63 @@ ${listing}
     items = parseJsonObject(raw).items || [];
   } catch (error) {
     console.warn('[memory-consolidation] T5 LLM failed:', error.message);
-    return { llmCalls, updated: 0, done: false };
+    return { llmCalls, updated: 0, skipped: 0, done: false };
   }
   const byId = new Map(batch.map(m => [m.memory_id, m]));
   for (const item of items) {
     const row = byId.get(item.memoryId);
     if (!row) continue;
-    const keywords = Array.isArray(item.keywords) ? item.keywords.map(String).map(k => k.trim()).filter(Boolean).slice(0, 8) : [];
-    const perspectives = Array.isArray(item.perspectives) ? item.perspectives.map(String).map(k => k.trim()).filter(Boolean).slice(0, 5) : [];
+    const keywords = stringList(item.keywords).slice(0, 8);
+    const perspectives = stringList(item.perspectives).slice(0, 5);
     const semanticNote = String(item.semanticNote || '').trim().slice(0, 400);
     const episodicNote = String(item.episodicNote || '').trim().slice(0, 400);
     const importance = Math.min(5, Math.max(1, Number(item.importance) || 3));
+
+    // 逐字段判定"是否真的需要写"，只写变化项
+    const changes = {};
+    if (keywords.length && JSON.stringify(keywords) !== JSON.stringify(stringList(row.keywords))) {
+      changes.keywords = JSON.stringify(keywords);
+    }
+    if (perspectives.length && JSON.stringify(perspectives) !== JSON.stringify(stringList(row.perspectives))) {
+      changes.perspectives = JSON.stringify(perspectives);
+    }
+    const currentSemantic = String(row.semantic_note || '').trim();
+    if (semanticNote && semanticNote !== currentSemantic) changes.semantic_note = semanticNote;
+    const currentEpisodic = String(row.episodic_note || '').trim();
+    if (episodicNote && episodicNote !== currentEpisodic) changes.episodic_note = episodicNote;
+    if (importance !== (Number(row.importance) || 3)) changes.importance = importance;
+
+    const columns = Object.keys(changes);
+    if (columns.length === 0) { skipped++; continue; }
     db.prepare(`
-      UPDATE memory_fragments SET
-        keywords = CASE WHEN ? != '[]' THEN ? ELSE keywords END,
-        perspectives = CASE WHEN ? != '[]' THEN ? ELSE perspectives END,
-        semantic_note = CASE WHEN ? != '' THEN ? ELSE semantic_note END,
-        episodic_note = CASE WHEN ? != '' THEN ? ELSE episodic_note END,
-        importance = ?, embedding_state = 'stale', updated_at = CURRENT_TIMESTAMP
+      UPDATE memory_fragments
+      SET ${columns.map(column => `${column} = ?`).join(', ')}, embedding_state = 'stale', updated_at = CURRENT_TIMESTAMP
       WHERE memory_id = ? AND status = 'active'
-    `).run(JSON.stringify(keywords), JSON.stringify(keywords), JSON.stringify(perspectives), JSON.stringify(perspectives),
-      semanticNote, semanticNote, episodicNote, episodicNote, importance, row.memory_id);
+    `).run(...columns.map(column => changes[column]), row.memory_id);
     updated++;
   }
-  return { llmCalls, updated, done: true };
+  // 记账：整批都已被模型看过（含模型留空的条数），下一轮换下一批，不再回环
+  markConsolidated(db, 'backfill', batch.map(row => row.memory_id));
+  return { llmCalls, updated, skipped, done: true };
 }
 
-// 便捷组合：T3 全流程（审计聚合 + 衰减归档），调度器直接调用
+function stringList(value) {
+  if (Array.isArray(value)) return value.map(String).map(text => text.trim()).filter(Boolean);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String).map(text => text.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 便捷组合：T3 全流程（审计聚合 + 衰减归档 + 辅助表保留期清理），调度器直接调用
 export function runDecayTask({ db, now = new Date(), enqueueDelete, enqueueTripleDelete } = {}) {
   const audited = aggregateRetrievalAudits(db, { now });
   const result = decayAndArchiveMemories(db, { now, enqueueDelete, enqueueTripleDelete });
-  return { audited, ...result, done: true, llmCalls: 0 };
+  const pruned = pruneConsolidationArtifacts(db, { now });
+  return { audited, ...result, pruned, done: true, llmCalls: 0 };
 }
 
 // 便捷组合：T6
