@@ -28,9 +28,10 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   //   llmCallsPerRun    单轮整理的 LLM 调用上限
   //   dailyLlmCalls     每日 LLM 调用总量（跨轮累计、按上海日期归零）
   // 旧配置键 dailyMaxLlmCalls 的语义本就是“每日总量”，统一归位到 dailyLlmCalls。
-  // T4 画像升华（portrait_suggest）默认开启：候选消费记账（memory_consolidation_marks，14 天 TTL）
-  // 已从根上消除“同一批候选每轮重复送 LLM”，不再需要按天冷却或默认关闭；开关保留，可随时关。
-  consolidation: { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: true },
+  // T4 画像升华（portrait_suggest）默认关闭：候选消费记账（memory_consolidation_marks，14 天 TTL）
+  // 已消除"同一批候选每轮重复送 LLM"，但为与上游「暂时关闭 T4」的默认行为保持一致，开关默认 false；
+  // 需要时把 consolidation 配置里的 portraitSuggest 置为 true 即可开启。
+  consolidation: { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: false },
   // 阶段四：dynamicBlocks token 预算（默认关；docs/memory-upgrade-plan.md §7）
   contextBudget: { enabled: false, dynamicTokens: 8000 },
   embedding: {
@@ -104,7 +105,7 @@ export function normalizeMemorySettings(input = {}, previous = null) {
         0, 2000,
       ),
       portraitSuggest: consolidation.portraitSuggest === undefined
-        ? (base.consolidation?.portraitSuggest ?? true)
+        ? (base.consolidation?.portraitSuggest ?? false)
         : Boolean(consolidation.portraitSuggest),
     },
     contextBudget: {
@@ -183,16 +184,16 @@ export function getConsolidationConfig() {
       minIntervalMinutes: clampInt(minIntervalMinutes, 60, 0, 1440),
       llmCallsPerRun: clampInt(llmCallsPerRun, 3, 0, 30),
       dailyLlmCalls: clampInt(dailyLlmCalls, 60, 0, 2000),
-      portraitSuggest: portraitSuggest !== false,
+      portraitSuggest: portraitSuggest === true,
     };
   } catch {
-    return { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: true };
+    return { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: false };
   }
 }
 
-// T4 画像升华开关（默认开）。DB 未就绪时按开启处理。
+// T4 画像升华开关（默认关）。DB 未就绪时按关闭处理。
 export function isPortraitSuggestionEnabled() {
-  return getConsolidationConfig().portraitSuggest !== false;
+  return getConsolidationConfig().portraitSuggest === true;
 }
 
 // 阶段四 dynamicBlocks token 预算配置。DB 未就绪时按默认关闭处理，零影响。

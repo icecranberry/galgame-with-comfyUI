@@ -2204,8 +2204,8 @@ export function migrateMemoryConsolidationSettings(db) {
       minIntervalMinutes: current.minIntervalMinutes === undefined ? 60 : current.minIntervalMinutes,
       llmCallsPerRun: current.llmCallsPerRun === undefined ? 3 : current.llmCallsPerRun,
       dailyLlmCalls: current.dailyLlmCalls ?? current.dailyMaxLlmCalls ?? 60,
-      // 用户显式关过 T4 就必须保留：白名单漏掉这个键会把「关」悄悄改回「开」
-      portraitSuggest: current.portraitSuggest === undefined ? true : Boolean(current.portraitSuggest),
+      // 用户显式开启过 T4 就必须保留：白名单漏掉这个键会把「开」悄悄改回「关」
+      portraitSuggest: current.portraitSuggest === undefined ? false : Boolean(current.portraitSuggest),
     };
     stored.consolidation = next;
     db.prepare(`
