@@ -99,13 +99,36 @@ function onKeydown(event) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
 function resize() {
+  const parent = root.value?.parentElement
+  if (!parent) return
+  const bounds = parent.getBoundingClientRect()
+  // 父层（.npc-stage / 门店面板的 stage-host）的真实布局尺寸。offsetWidth / offsetHeight
+  // 不受 CSS transform 影响，而 getBoundingClientRect 会：手机竖屏时 .town-view 被
+  // rotate(90deg) 撑成横屏，包围盒的宽高是互换的 —— 直接用包围盒高度当可用高度，
+  // 会把 390 算成 844，舞台被撑到屏幕外，两侧立绘就一个都看不见了。
+  const localWidth = parent.offsetWidth || bounds.width
+  const localHeight = parent.offsetHeight || bounds.height
+  const rotated = localWidth > localHeight + 1
+    && Math.abs(bounds.width - localHeight) < 1.5
+    && Math.abs(bounds.height - localWidth) < 1.5
   const viewport = window.visualViewport
-  if (!viewport || !root.value?.parentElement) return
-  const bounds = root.value.parentElement.getBoundingClientRect()
-  const top = Math.max(bounds.top, viewport.offsetTop)
-  const bottom = Math.min(bounds.bottom, viewport.offsetTop + viewport.height)
-  compact.value = bottom - top < 420
-  viewportStyle.value = { top: `${Math.max(0, top - bounds.top)}px`, height: `${Math.max(0, bottom - top)}px` }
+  const visibleTop = viewport ? Math.max(bounds.top, viewport.offsetTop) : bounds.top
+  const visibleBottom = viewport ? Math.min(bounds.bottom, viewport.offsetTop + viewport.height) : bounds.bottom
+  const visibleLeft = viewport ? Math.max(bounds.left, viewport.offsetLeft) : bounds.left
+  const visibleRight = viewport ? Math.min(bounds.right, viewport.offsetLeft + viewport.width) : bounds.right
+  // 旋转 90° 后舞台的纵向对应屏幕的横向，可用高度要按屏幕宽度算
+  const height = Math.max(0, rotated ? visibleRight - visibleLeft : visibleBottom - visibleTop)
+  const offset = Math.max(0, rotated ? bounds.right - visibleRight : visibleTop - bounds.top)
+  // 收起立绘（compact）只在两种情况：可用高度被屏幕键盘 / 浏览器 UI 挤掉，
+  // 或高度真的矮到放不下面板。手机横屏整屏本来就只有 ~380px 高，不能再按绝对高度一刀切，
+  // 否则舞台上永远只剩对话框、双方立绘一个都看不见。
+  compact.value = height < 260 || (height < 420 && height < localHeight - 120)
+  // 旋转后的横屏里，行内高度会顶掉 CSS 给顶栏留的那 108px（可用高度也不是本地纵向，
+  // 屏幕键盘挡的是本地横向，写进来只会把舞台撑出屏幕），所以没被挤掉时交回
+  // CSS 的 min(680px, calc(100% - 108px))；其余情况保持原有行为。
+  viewportStyle.value = (rotated && height >= localHeight - 1)
+    ? {}
+    : { top: `${offset}px`, height: `${height}px` }
 }
 let previousFocus, observer
 let zoomTrigger
@@ -146,7 +169,7 @@ onBeforeUnmount(() => {
 .td-portraits figure { pointer-events: auto; position: relative; align-self: stretch; margin: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
 .td-portraits figure:first-child { grid-column: 1; }
 .td-portraits figure:last-child { grid-column: 3; }
-.td-portraits img { min-height: 0; height: 75vh; width: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
+.td-portraits img { min-height: 0; height: 75vh; max-height: 100%; width: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
 .td-portraits figcaption { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: #fffaf1; text-shadow: 0 1px 4px #302822; font-size: 14px; }
 .td-placeholder { background: #f4f1eeed; color: #947f6d; border-radius: 48px 48px 12px 12px; padding: 24px; font-size: 32px; }
 .td-panel { pointer-events: auto; position: relative; isolation: isolate; grid-column: 2; grid-row: 1; align-self: end; width: 100%; max-width: 540px; height: min(420px, 100%); min-height: 0; display: flex; flex-direction: column; box-sizing: border-box; padding: 27px 30px 30px; }
@@ -173,8 +196,18 @@ article p { white-space: pre-wrap; line-height: 1.8; margin: 4px 0; font-size: 1
 .compact .td-panel { grid-column: 1 / -1; width: 100%; height: 100%; }
 .td-zoom { position: absolute; inset: 0; z-index: 2; background: rgba(0,0,0,.45); display: flex; justify-content: center; align-items: center; pointer-events: auto; }
 .td-zoom img { max-width: 85%; max-height: 90%; object-fit: contain; }
-@media (max-height: 500px) {
-  .td-portraits { display: none; }
-  .td-panel { grid-column: 1 / -1; width: 100%; height: 100%; }
+/* 手机横屏：整屏高度通常只有 ~380px。旧规则是 @media (max-height: 500px) 直接
+   .td-portraits { display: none }，而横屏手机高度必然小于 500px —— 等于手机上永远看不到双方立绘。
+   现在改成：有立绘的舞台只收紧留白、把中栏收窄，让两侧立绘站得住；
+   真正该收起立绘的场合（屏幕键盘弹出）交给 JS 的 compact 判断。 */
+@media (max-height: 560px) {
+  .town-dialogue-stage { grid-template-columns: minmax(0, 1fr) minmax(0, min(46%, 480px)) minmax(0, 1fr); padding: 0 12px 12px; }
+  .td-panel { padding: 22px 24px 24px; }
+}
+/* 舞台本身没有立绘（工坊 / 门店的对话只有占位字母）时，矮屏不必为两侧留位，面板独占整行居中 */
+@media (max-height: 560px) {
+  .town-dialogue-stage:not(:has(.td-portraits img)) { grid-template-columns: minmax(0, 1fr); }
+  .town-dialogue-stage:not(:has(.td-portraits img)) .td-portraits { display: none; }
+  .town-dialogue-stage:not(:has(.td-portraits img)) .td-panel { grid-column: 1; justify-self: center; width: 100%; height: 100%; }
 }
 </style>

@@ -873,12 +873,12 @@ async function onDissolve() {
 
 .btn-mobile-back {
   width: 44px; height: 44px; flex-shrink: 0;
+  background: transparent;
 }
 
 .btn-header-settings {
   width:32px; height:32px; border-radius:10px;
   border:1px solid var(--glass-border);
-  background: var(--bg-hover);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;

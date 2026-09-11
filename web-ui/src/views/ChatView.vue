@@ -1735,12 +1735,12 @@ function renderContent(text) {
 .btn-mobile-back {
   width: 44px; height: 44px; flex-shrink: 0;
   margin-right: 8px;
+  background: transparent;
 }
 
 .btn-header-settings {
   width:32px; height:32px; border-radius:10px;
   border:1px solid var(--glass-border);
-  background: var(--bg-hover);
   color:var(--text-secondary); font-size:16px; cursor:pointer;
   display:flex; align-items:center; justify-content:center;
   transition: all 0.2s ease;

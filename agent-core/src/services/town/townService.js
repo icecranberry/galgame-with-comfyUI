@@ -5,6 +5,9 @@
  *   L0 确定性模拟：NPC 作息 FSM / 入住角色日程投影 → A* 寻路 → 服务端权威推进（无 LLM）
  *   L1 规则触发：  相遇判定、玩家靠近问候（本地模板）、天气/时段修正（无 LLM）
  *   L2 LLM 事件：  相遇对话、批量状态短语（独立串行队列，永不挤占聊天）
+ *                  由 config.features.townAutoLLM 统一控制：关闭时这两个 tick 驱动的自动
+ *                  生成不再调用模型（相遇仍照常发生，只是静默）；玩家主动发起的 NPC 交谈
+ *                  与工坊服务不受影响，仍由 config.features.townLLM 决定。
  *   L3 记忆回写：  角色×角色相遇摘要 → memory_fragments；NPC 对话历史由 townNpcService 落库
  *
  * 状态原则：服务端权威 + 内存为准；坐标只在换目标/换活动时落库，
@@ -883,7 +886,7 @@ function personaLine(agentKey) {
 
 async function runEncounterDialogue(enc) {
   if (enc.generation !== state.generation || state.encounters.get(enc.id) !== enc) return;
-  if (!config.features.townLLM) {
+  if (!config.features.townLLM || !config.features.townAutoLLM) {
     enc.endAt = Date.now() + 45_000;
     return;
   }
@@ -985,7 +988,7 @@ async function runEncounterDialogue(enc) {
 
 async function runEncounterSummary(enc) {
   if (enc.generation !== state.generation) return;
-  if (!config.features.townLLM || enc.messages.length === 0) return;
+  if (!config.features.townLLM || !config.features.townAutoLLM || enc.messages.length === 0) return;
   const metaA = state.meta.get(enc.a);
   const metaB = state.meta.get(enc.b);
   if (!metaA || !metaB) return;
@@ -1055,7 +1058,7 @@ function maybeStatusBubbles(now) {
   if (now - state.lastBubbleBatchAt < intervalMs) return;
   state.lastBubbleBatchAt = now;
 
-  if (!config.features.townLLM) return;
+  if (!config.features.townLLM || !config.features.townAutoLLM) return;
 
   const candidates = [];
   for (const agent of state.agents.values()) {

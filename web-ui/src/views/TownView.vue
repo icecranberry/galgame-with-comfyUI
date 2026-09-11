@@ -16,10 +16,11 @@
       :class="canvasClass"
       @click="onCanvasClick"
       @contextmenu.prevent="onCanvasRightClick"
-      @mousedown="onCanvasDown"
-      @mousemove="onCanvasMove"
-      @mouseup="onCanvasUp"
-      @mouseleave="onCanvasLeave"
+      @pointerdown="onCanvasDown"
+      @pointermove="onCanvasMove"
+      @pointerup="onCanvasUp"
+      @pointercancel="onCanvasCancel"
+      @pointerleave="onCanvasLeave"
       @wheel.prevent="onWheel"
       @dblclick="onDblClick"
     ></canvas>
@@ -757,6 +758,13 @@ function enterWorldSpot(spot) {
 
 // ── 点击/拖拽交互 ──
 
+// 统一走 Pointer Events（鼠标 / 手指 / 触控笔一条路径）。之前只绑 mouse*，
+// 在触摸设备上只能拿到浏览器合成的兼容鼠标事件：手指一滑动，浏览器就把手势
+// 当成页面滚动接管，mousemove 直接断掉，于是地图拖不动。配合样式表里
+// .town-canvas 的 touch-action: none，拖拽才会稳定走我们自己的平移逻辑。
+// e.offsetX / e.offsetY 是元素本地坐标系下的偏移（已经扣掉 CSS transform），
+// 所以手机竖屏里那层 rotate(90deg) 不用再手动换算，命中测试和位移都直接可用。
+
 let downInfo = null
 let suppressClick = false
 
@@ -795,11 +803,13 @@ function onCanvasMove(e) {
     downInfo.x = e.offsetX
     downInfo.y = e.offsetY
   }
+  // 手指没有悬停态，拖动地图时不用一路做命中测试
+  if (e.pointerType === 'touch') return
   hoverAgentKey.value = editing.value ? null : (hitAgent(e.offsetX, e.offsetY)?.agentKey || null)
   hoverSpotKey.value = editing.value || hoverAgentKey.value ? null : (spotAtCell(screenToCell(e.offsetX, e.offsetY))?.businessKey || null)
 }
 
-function onCanvasUp() {
+function onCanvasUp(e) {
   suppressClick = !!downInfo?.moved
   if (editing.value && paintDrag.value && downInfo?.moved) {
     fillRect(paintDrag.value.startCell, paintDrag.value.lastCell)
@@ -807,6 +817,22 @@ function onCanvasUp() {
   paintDrag.value = null
   dragging.value = false
   downInfo = null
+  // 手指抬起后没有 mouseleave 那种收尾，高亮得自己清掉
+  if (e?.pointerType === 'touch') {
+    hoverAgentKey.value = null
+    hoverSpotKey.value = null
+  }
+}
+
+// pointercancel（手势被系统接管、来电等）：只收尾，不能算成“移动过”，
+// 否则 suppressClick 会留着把下一次正常点击吃掉。
+function onCanvasCancel() {
+  paintDrag.value = null
+  dragging.value = false
+  downInfo = null
+  suppressClick = false
+  hoverAgentKey.value = null
+  hoverSpotKey.value = null
 }
 
 function onCanvasLeave() {
@@ -1762,6 +1788,11 @@ async function moveToLifeLocation(locationKey) {
   width: 100%;
   height: 100%;
   cursor: crosshair;
+  /* 手指落在画布上时交给我们的 pointer 逻辑处理：不滚动页面、不做浏览器手势，
+     否则手势一被接管，pointermove 就断了，地图拖不动（点按仍然会派发 click）。 */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .town-canvas.is-hoverable { cursor: pointer; }

@@ -100,6 +100,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     groupIdleBudget: Math.max(0, parseInt(process.env.GROUP_IDLE_BUDGET ?? '0', 10) || 0), // 默认关闭；显式设为正数后启用每群每日后台闲聊预算
     town: process.env.FEATURE_TOWN !== 'false', // 默认开：AI 小镇（世界页）
     townLLM: process.env.FEATURE_TOWN_LLM !== 'false', // 默认开：小镇 LLM 事件（相遇对话/状态气泡）；关闭则退化为纯移动模拟
+    townAutoLLM: process.env.FEATURE_TOWN_AUTO_LLM !== 'false', // 默认开：小镇「自动/定时」LLM 事件（tick 驱动的相遇对话+摘要、批量状态气泡）；关闭只影响后台自动生成，玩家主动发起的 NPC/工坊对话仍走模型
   },
   town: {
     simulation: process.env.TOWN_SIMULATION === 'rules' ? 'rules' : 'legacy',
