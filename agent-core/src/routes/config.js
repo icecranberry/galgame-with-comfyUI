@@ -194,8 +194,8 @@ router.put('/features', (req, res) => {
     applyFromConfig(config);
   }
   if (key === 'weather' && value === true) {
+    // restartWeatherScheduler 内部会立即 tick() 一次，无需再手动触发拉取
     restartWeatherScheduler();
-    triggerWeatherUpdate();
   }
   res.json({ ok: true, features: config.features });
 });

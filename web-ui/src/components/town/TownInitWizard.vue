@@ -51,10 +51,9 @@
               </div>
               <div class="wiz-field">
                 <span class="wiz-label">地图规格</span>
-                <div class="wiz-inline">
-                  <linshe-input v-model.number="form.mapCols" size="md" type="number" min="30" max="80" />
-                  <span class="wiz-x">×</span>
-                  <linshe-input v-model.number="form.mapRows" size="md" type="number" min="30" max="80" />
+                <div class="wiz-slider-row">
+                  <input v-model.number="form.mapSize" class="wiz-slider" type="range" min="30" max="80" step="1" :style="{ '--fill': ((form.mapSize - 30) / 50 * 100) + '%' }">
+                  <span class="wiz-slider-num">{{ form.mapSize }} × {{ form.mapSize }}</span>
                 </div>
               </div>
               <div class="wiz-error" v-if="initState?.error && localStep === 'config'">{{ initState.error }}</div>
@@ -65,12 +64,16 @@
             <div v-else-if="localStep === 'groundList' || localStep === 'buildingList'" :key="localStep">
               <p class="wiz-desc">
                 {{ localStep === 'groundList'
-                  ? '先确认地皮清单（地砖与道路）。确认后才会生成地皮提示词；之后返回这里修改不会自动重建提示词。'
-                  : '先确认建筑清单（通用/特殊建筑与道具）。确认后才会生成建筑提示词；之后返回这里修改不会自动重建提示词。' }}
+                  ? '先确认地皮清单（地砖与道路）。确认后才会生成地皮提示词；清单没改动时可以直接「下一步」，改动过就要重新生成提示词。'
+                  : '先确认建筑清单（通用/特殊建筑与道具）。确认后才会生成建筑提示词；清单没改动时可以直接「下一步」，改动过就要重新生成提示词。' }}
               </p>
               <div class="wiz-global-style">
-                <span class="wiz-label">🎨 自定义生成偏好</span>
+                <div class="wiz-style-head">
+                  <span class="wiz-label">🎨 自定义生成偏好</span>
+                  <span class="wiz-style-tag" :class="{ 'is-now': styleTagsScope.when === 'now' }">{{ styleTagsScope.badge }}</span>
+                </div>
                 <linshe-input v-model="bpForm.styleTags" size="sm" placeholder="可留空；填写后会作为额外生成偏好" />
+                <p class="wiz-style-hint">{{ styleTagsScope.hint }}</p>
               </div>
               <div v-for="(group, gi) in listGroups" :key="'l' + gi" class="wiz-section">
                 <div class="wiz-section-title">
@@ -95,15 +98,20 @@
               </div>
               <div class="wiz-error" v-if="stepError">{{ stepError }}</div>
               <div class="wiz-actions">
-                <linshe-button variant="primary" :loading="promptBusy" @click="confirmAssetList">确认清单，生成提示词 →</linshe-button>
+                <template v-if="listCanSkip">
+                  <linshe-button variant="secondary" :loading="promptBusy" @click="confirmAssetList">重新生成提示词</linshe-button>
+                  <linshe-button variant="primary" :disabled="promptBusy" @click="goNextFromList">下一步 →</linshe-button>
+                </template>
+                <linshe-button v-else variant="primary" :loading="promptBusy" @click="confirmAssetList">确认清单，生成提示词 →</linshe-button>
               </div>
             </div>
             <!-- ── 3/4. 素材步（地皮 / 建筑+道具 共用模板） ── -->
             <div v-else-if="localStep === 'tiles' || localStep === 'buildings'" :key="localStep" class="wiz-split">
               <TownPromptPanel
-                v-model="stepParams[localStep]"
+                :model-value="stepParams[localStep]"
                 :step="localStep"
                 :style-tags="bpForm.styleTags"
+                @update:model-value="v => applyStepPanel(localStep, v)"
               />
               <div class="wiz-right">
                 <p class="wiz-desc">
@@ -114,8 +122,12 @@
 
                 <!-- 全局风格总输入框 -->
                 <div class="wiz-global-style">
-                  <span class="wiz-label">🎨 自定义生成偏好</span>
+                  <div class="wiz-style-head">
+                    <span class="wiz-label">🎨 自定义生成偏好</span>
+                    <span class="wiz-style-tag" :class="{ 'is-now': styleTagsScope.when === 'now' }">{{ styleTagsScope.badge }}</span>
+                  </div>
                   <linshe-input v-model="bpForm.styleTags" size="sm" placeholder="可留空；填写后会作为额外生成偏好" />
+                  <p class="wiz-style-hint">{{ styleTagsScope.hint }}</p>
                 </div>
 
                 <div v-for="(group, gi) in stepGroups" :key="gi" class="wiz-section">
@@ -178,16 +190,22 @@
             <!-- ── 4. 居民) ── -->
             <div v-else-if="localStep === 'npcs'" key="npcs" class="wiz-split is-npcs">
             <TownPromptPanel
-    v-model="stepParams[localStep]"
+    :model-value="stepParams[localStep]"
     :step="localStep"
     :style-tags="bpForm.styleTags"
+    show-portrait-lora
+    @update:model-value="v => applyStepPanel('npcs', v)"
   />
               <div class="wiz-right">
               <p class="wiz-desc">第三步：招募居民。按世界观生成稳定的人格卡，素材满意后确认。</p>
 
               <div class="wiz-global-style">
-                <span class="wiz-label">🎨 自定义生成偏好</span>
+                <div class="wiz-style-head">
+                  <span class="wiz-label">🎨 自定义生成偏好</span>
+                  <span class="wiz-style-tag" :class="{ 'is-now': styleTagsScope.when === 'now' }">{{ styleTagsScope.badge }}</span>
+                </div>
                 <linshe-input v-model="bpForm.styleTags" size="sm" placeholder="可留空；填写后会作为额外生成偏好" />
+                <p class="wiz-style-hint">{{ styleTagsScope.hint }}</p>
               </div>
 
               <div class="wiz-field">
@@ -213,11 +231,14 @@
                   <div class="wiz-npc-portrait">
                     <TownAssetThumb
                       class="wiz-portrait-thumb"
-                      :asset="npcAsset(n, 'portrait')"
+                      fill
+                      :asset="npcAssetView(n, 'portrait')"
                       :show-name="false"
                       @edit="openNpcManager(n, 'portrait')"
                     />
-                    <span v-if="!npcAssetOf(n, 'portrait')" class="wiz-asset-state is-spin">⏳</span>
+                    <span v-if="n.genBusy" class="wiz-asset-state" aria-label="正在生成素材">
+                      <span class="wiz-asset-state-icon">⏳</span>
+                    </span>
                   </div>
                   <div class="wiz-npc-form">
                     <div class="wiz-npc-line">
@@ -225,22 +246,33 @@
                       <linshe-input v-model="n.job" size="sm" class="is-job" placeholder="职业" />
                     </div>
                     <div class="wiz-persona-block">
+                      <span class="wiz-label">一句话人设</span>
+                      <linshe-input
+                        v-model="n.brief"
+                        size="sm"
+                        maxlength="300"
+                        placeholder="30~60 字，人格卡的设定种子（可空）"
+                      />
+                    </div>
+                    <div class="wiz-persona-block">
                       <span class="wiz-label">人格卡</span>
-                      <linshe-input v-model="n.persona" type="textarea" :rows="personaRows(n.persona)" size="sm" placeholder="完整人格卡" />
+                      <linshe-input v-model="n.persona" type="textarea" :rows="personaRows(n.persona)" size="sm" placeholder="按「一句话人设」生成，可手动修改" />
                     </div>
 
                     <div class="wiz-npc-sprites">
                       <TownAssetThumb
                         v-for="dir in ['down', 'up']" :key="dir"
                         class="wiz-npc-sprite"
-                        :asset="npcAsset(n, dir)"
+                        fill
+                        :asset="npcAssetView(n, dir)"
                         :show-name="false"
                         @edit="openNpcManager(n, dir)"
                       />
                       <TownAssetThumb
                         v-if="npcAssetOf(n, 'portrait')"
                         class="wiz-npc-sprite is-portrait"
-                        :asset="npcAsset(n, 'portrait')"
+                        fill
+                        :asset="npcAssetView(n, 'portrait')"
                         :show-name="false"
                         @edit="openNpcManager(n, 'portrait')"
                       />
@@ -265,14 +297,14 @@
 
               <div class="wiz-actions is-column">
                 <linshe-button variant="secondary" :loading="commitBusy" @click="commitNpcs">
-                  {{ bpForm.npcs.every(n => npcAssetOf(n, 'portrait')) ? '已建档 · 同步我的修改' : '1️⃣ 创建人格卡（写入居民表，不入角色表）' }}
+                  {{ bpForm.npcs.every(n => npcAssetOf(n, 'portrait')) ? '已建档 · 同步我的修改' : '1、为NPC创建人格卡' }}
                 </linshe-button>
                 <linshe-button
                   variant="primary"
                   :loading="assetsBusy"
                   :disabled="committedIds.length === 0"
                   @click="genAllNpcAssets"
-                >2️⃣ 一键生成全员素材（立绘 + 正/背小人）</linshe-button>
+                >2、一键生成全员素材（立绘 + 正/背小人）</linshe-button>
                 <linshe-button
                   variant="primary"
                   :disabled="!allNpcReady"
@@ -300,11 +332,13 @@
             </div>
 
             <!-- ── 6. 「我」的确认 + 开镇 ── -->
-            <div v-else-if="localStep === 'player'" key="player" class="wiz-split">
+            <div v-else-if="localStep === 'player'" key="player" class="wiz-split is-player">
             <TownPromptPanel
-    v-model="stepParams[localStep]"
+    :model-value="stepParams[localStep]"
     :step="localStep"
     :style-tags="bpForm.styleTags"
+    show-portrait-lora
+    @update:model-value="v => applyStepPanel('player', v)"
   />
               <div class="wiz-right">
               <p class="wiz-desc">开镇前最后一步：确认「我」的形象。生成后可开启抠去多余白色移除背景，也可拖动检查。</p>
@@ -313,6 +347,7 @@
                   <TownAssetThumb
                     v-if="playerKit.portraitAsset"
                     class="wiz-player-image is-portrait"
+                    fill
                     :asset="playerKit.portraitAsset"
                     :show-name="false"
                     @edit="openPlayerManager('portrait')"
@@ -325,6 +360,7 @@
                   <TownAssetThumb
                     v-if="playerKit.spriteAssets.down"
                     class="wiz-player-image"
+                    fill
                     :asset="playerKit.spriteAssets.down"
                     :show-name="false"
                     @edit="openPlayerManager('down')"
@@ -332,6 +368,7 @@
                   <TownAssetThumb
                     v-if="playerKit.spriteAssets.up"
                     class="wiz-player-image"
+                    fill
                     :asset="playerKit.spriteAssets.up"
                     :show-name="false"
                     @edit="openPlayerManager('up')"
@@ -398,9 +435,21 @@ const town = useTownStore()
 const busy = ref(false)
 const worldOptions = ref([{ label: '（跟随当前激活世界观）', value: null }])
 
-const form = reactive({ worldSettingId: null, npcCount: 8, mapCols: 50, mapRows: 50 })
-const bpForm = reactive({ styleTags: '', groundAssets: [], roadAssets: [], buildings: [], props: [], npcs: [] })
+const form = reactive({ worldSettingId: null, npcCount: 8, mapSize: 50 })
 const localStep = ref('config')
+
+// 自定义生成偏好默认值：各步骤的「🎨 自定义生成偏好」共用这一个值
+const DEFAULT_STYLE_TAGS = '超现实主义，充满想象力的幻想风格'
+// 各步骤的作用范围：清单步骤的偏好只喂给下一步，生成步骤当场生效
+const STYLE_TAGS_SCOPE = {
+  groundList: { when: 'next', badge: '下一步生效', hint: '点「确认清单，生成提示词」/「重新生成提示词」时才会用到：它决定下一步「地皮」的提示词与图片，后面的步骤也会继续沿用。' },
+  buildingList: { when: 'next', badge: '下一步生效', hint: '点「确认清单，生成提示词」/「重新生成提示词」时才会用到：它决定下一步「建筑与道具」的提示词与图片，后面的步骤也会继续沿用。' },
+  tiles: { when: 'now', badge: '本步生效', hint: '本步「重出提示词 / 生成」时立即生效；已经生成好的素材不会自动重建。' },
+  buildings: { when: 'now', badge: '本步生效', hint: '本步「重出提示词 / 重生成」时立即生效；已经生成好的素材不会自动重建。' },
+  npcs: { when: 'now', badge: '本步生效', hint: '本步重新生成立绘 / 像素小人、以及重掷人格卡时生效；已经生成好的素材不会自动重建。' },
+}
+const bpForm = reactive({ styleTags: DEFAULT_STYLE_TAGS, groundAssets: [], roadAssets: [], buildings: [], props: [], npcs: [] })
+const styleTagsScope = computed(() => STYLE_TAGS_SCOPE[localStep.value] || STYLE_TAGS_SCOPE.tiles)
 const npcSlider = ref(8)
 const rosterBusy = ref(false)
 const commitBusy = ref(false)
@@ -410,10 +459,12 @@ const playerKit = reactive({ portrait: null, portraitId: null, down: null, downI
 const manager = reactive({ open: false, asset: null, title: '', context: null })
 const editorAssetBusy = ref(false)
 const editorHiresBusy = ref(false)
-// 每步生成的提示词硬逻辑前缀 + LoRA（空 prefix = 用后端默认）
+// 每步生成的提示词硬逻辑前缀 + 画师串（空 prefix = 用后端默认）
+// LoRA 不按步分开：四个步骤共用 setSharedLoras 里的同一份列表，只有大立绘要单独开开关
+const GENERATION_STEPS = ['tiles', 'buildings', 'npcs', 'player']
 const stepParams = reactive({
-  tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
-  buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+  tiles: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
+  buildings: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
   npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
   player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
 })
@@ -469,6 +520,32 @@ const listGroups = computed(() => {
 })
 
 const listGenerationStep = computed(() => localStep.value === 'groundList' ? 'tiles' : 'buildings')
+
+/**
+ * 清单指纹：只含真正喂给「素材提示词」LLM 的字段（styleTags + key/name/footprint）。
+ * desc 是这个 LLM 的产物，放进指纹会让「刚生成完」立刻被判成有变化。
+ */
+function listSignature(step) {
+  const sections = step === 'tiles'
+    ? [bpForm.groundAssets, bpForm.roadAssets]
+    : [bpForm.buildings, bpForm.props]
+  return JSON.stringify({
+    styleTags: bpForm.styleTags,
+    items: sections.flat().map(item => [item.key, item.name, item.footprint?.w || 1, item.footprint?.h || 1]),
+  })
+}
+/** 各步最后一次生成提示词时的清单指纹：载入蓝图时按蓝图重置，生成成功后按当前清单重置 */
+const listBaselines = reactive({ tiles: '', buildings: '' })
+const listHasPrompts = computed(() => {
+  const items = listGroups.value.flatMap(group => group.items)
+  return items.length > 0 && items.every(item => String(item.desc || '').trim())
+})
+const listUnchanged = computed(() => {
+  const step = listGenerationStep.value
+  return !!listBaselines[step] && listBaselines[step] === listSignature(step)
+})
+/** 清单没动过且提示词已就绪 → 不必再跑一次 LLM，可以直接进生成步 */
+const listCanSkip = computed(() => listHasPrompts.value && listUnchanged.value)
 
 const PROP_SIZE_OPTIONS = [
   { label: '1×1', value: '1x1' },
@@ -532,10 +609,16 @@ function upsertAsset(asset) {
   else assets.value.push(asset)
 }
 
-function npcAsset(n, what) {
+// 展示用：返回原始素材（含 pending / failed），交给 TownAssetThumb 区分「缺省」与「失败」
+function npcAssetView(n, what) {
   const dto = initState.value?.wizardNpcs?.find(w => w.displayName === n.displayName)
   if (!dto) return null
-  const asset = what === 'portrait' ? dto.portrait : dto.sprites?.[what]
+  return (what === 'portrait' ? dto.portrait : dto.sprites?.[what]) || null
+}
+
+// 判定用：只有真的出图了才算就绪
+function npcAsset(n, what) {
+  const asset = npcAssetView(n, what)
   return asset?.status === 'ready' ? asset : null
 }
 
@@ -578,7 +661,7 @@ function syncBpForm(force = false) {
   const json = JSON.stringify(bp)
   if (!force && json === lastBpJson) return // 轮询拿到相同内容时不动表单（保住编辑中状态与 uid）
   lastBpJson = json
-  bpForm.styleTags = generationStyleTags ?? (bp.styleTags || '')
+  bpForm.styleTags = generationStyleTags || bp.styleTags || DEFAULT_STYLE_TAGS
   const sections = [
     ['groundAssets', bp.groundAssets], ['roadAssets', bp.roadAssets],
     ['buildings', bp.buildings], ['props', bp.props], ['npcs', bp.npcs],
@@ -597,6 +680,9 @@ function syncBpForm(force = false) {
     })
     attachUid(bpForm[key])
   }
+  // 蓝图 = 最后一次保存的清单，此刻与表单一致，正好当作「没变化」的基准
+  listBaselines.tiles = listSignature('tiles')
+  listBaselines.buildings = listSignature('buildings')
   if (localStep.value === 'config') localStep.value = 'groundList'
   refreshAssets()
 }
@@ -612,7 +698,7 @@ async function refreshAssets() {
 
 function buildGenerationSettingsPayload() {
   const payload = { styleTags: bpForm.styleTags || '', steps: {} }
-  for (const step of ['tiles', 'buildings', 'npcs', 'player']) {
+  for (const step of GENERATION_STEPS) {
     const params = stepParams[step] || {}
     payload.steps[step] = {
       prefix: params.prefix ?? '',
@@ -627,10 +713,10 @@ function buildGenerationSettingsPayload() {
 function applyGenerationSettings(raw) {
   if (!raw || typeof raw !== 'object') return
   generationStyleTags = typeof raw.styleTags === 'string' ? raw.styleTags : null
-  if (generationStyleTags !== null) bpForm.styleTags = generationStyleTags
+  if (generationStyleTags !== null) bpForm.styleTags = generationStyleTags || DEFAULT_STYLE_TAGS
 
   const savedSteps = raw.steps && typeof raw.steps === 'object' ? raw.steps : {}
-  for (const step of ['tiles', 'buildings', 'npcs', 'player']) {
+  for (const step of GENERATION_STEPS) {
     const saved = savedSteps[step] && typeof savedSteps[step] === 'object' ? savedSteps[step] : {}
     const params = stepParams[step]
     if (saved.prefix !== undefined || saved.promptPrefix !== undefined) params.prefix = saved.prefix ?? saved.promptPrefix
@@ -642,6 +728,8 @@ function applyGenerationSettings(raw) {
     }
     params.portraitLoras = saved.portraitLoras === true
   }
+  // LoRA 全镇共享：老配置各步不一致时取第一个非空列表
+  setSharedLoras(GENERATION_STEPS.map(step => stepParams[step].loras).find(list => list.length) || [])
 }
 
 async function loadGenerationSettings() {
@@ -701,8 +789,8 @@ function start() {
     await api.startTownInit({
       worldSettingId: form.worldSettingId,
       npcCount: form.npcCount,
-      mapCols: form.mapCols,
-      mapRows: form.mapRows,
+      mapCols: form.mapSize,
+      mapRows: form.mapSize,
     })
     await town.fetchInitState()
     syncBpForm()
@@ -724,12 +812,28 @@ function selectedLoras(step) {
   return (stepParams[step]?.loras || []).filter(l => l.path).map(l => ({ ...l, weight: Number(l.weight ?? 1) }))
 }
 
+/** LoRA 是全镇共享的：四个步骤指向同一份列表，任一步增删都会同步到其它步骤 */
+function setSharedLoras(list) {
+  const next = (Array.isArray(list) ? list : []).filter(l => l && typeof l.path === 'string' && l.path.trim())
+  for (const step of GENERATION_STEPS) stepParams[step].loras = next
+}
+
+/** 各步面板回传：prefix / 画师串 / 大立绘开关按步存，LoRA 写回共享列表 */
+function applyStepPanel(step, next) {
+  const params = stepParams[step]
+  params.prefix = next.prefix ?? ''
+  params.artist = next.artist ?? '@ebora'
+  if (step === 'npcs' || step === 'player') params.portraitLoras = next.portraitLoras === true
+  if (Array.isArray(next.loras)) setSharedLoras(next.loras)
+}
+
 function generationParams(step, { portrait = false } = {}) {
   const params = stepParams[step] || {}
   return {
     promptPrefix: params.prefix,
     artist: params.artist ?? '@ebora',
     loras: portrait && !params.portraitLoras ? [] : selectedLoras(step),
+    portraitLoras: !!params.portraitLoras,
   }
 }
 
@@ -796,10 +900,9 @@ async function genAssetItem(item, force = false) {
 
 async function generateAllStep() {
   await saveBlueprint()
+  // 全量重生成：已就绪的也按当前提示词 / LoRA / 画幅重跑；串行不抢 ComfyUI，单项失败不中断后续
   for (const item of stepItems.value) {
-    if (assetOf(item)?.status !== 'ready') {
-      await genAssetItem(item) // 串行：不抢 ComfyUI
-    }
+    await genAssetItem(item, true)
   }
 }
 
@@ -831,9 +934,26 @@ async function confirmAssetList() {
       else missing.push(item.name)
     }
     if (missing.length) throw new Error(`这些素材缺少提示词：${missing.join('、')}`)
+    listBaselines[generationStep] = listSignature(generationStep)
     localStep.value = generationStep
   } catch (err) {
     stepError.value = `提示词生成失败：${err?.message || err}`
+  } finally {
+    promptBusy.value = false
+  }
+}
+
+/** 清单没变化：提示词已经是这份清单的产物，保存后直接进生成步（不重跑 LLM） */
+async function goNextFromList() {
+  if (promptBusy.value) return
+  promptBusy.value = true
+  stepError.value = ''
+  try {
+    const generationStep = listGenerationStep.value
+    await saveBlueprint()
+    localStep.value = generationStep
+  } catch (err) {
+    stepError.value = `进入下一步失败：${err?.message || err}`
   } finally {
     promptBusy.value = false
   }
@@ -898,12 +1018,14 @@ async function regenNpcPersonaCard(n) {
   if (n.personaBusy) return
   n.personaBusy = true
   try {
+    // 已建档的居民：commit 不会重掷，需要显式再掷一次；首次建档则由 commit 按一句话人设直接生成
+    const committed = (initState.value?.wizardNpcs || []).some(w => w.displayName === n.displayName)
     await saveBlueprint()
     await api.commitTownWizardNpcs()
     await town.fetchInitState()
     const npcId = (initState.value?.npcIds || [])[bpForm.npcs.indexOf(n)]
     if (!npcId) throw new Error('居民未建档')
-    await api.regenerateTownNpcPersonaCard(npcId, { worldHint: bpForm.styleTags || '' })
+    if (committed) await api.regenerateTownNpcPersonaCard(npcId, { brief: n.brief || '', worldHint: bpForm.styleTags || '' })
     await town.fetchInitState()
   } catch (err) {
     console.warn('[wizard] npc persona regen failed:', err?.message)
@@ -919,10 +1041,8 @@ async function genNpcAssets(n) {
     await api.commitTownWizardNpcs()
     const npcId = (initState.value?.npcIds || [])[bpForm.npcs.indexOf(n)]
     if (!npcId) throw new Error('人格卡未建档')
-    const spriteParams = { ...generationParams('npcs'), styleTags: bpForm.styleTags || '', force: true }
-    const portraitParams = { ...generationParams('npcs', { portrait: true }), styleTags: bpForm.styleTags || '', force: true }
-    await api.generateTownNpcSprites(npcId, spriteParams)
-    await api.generateTownNpcPortrait(npcId, portraitParams)
+    // 一次请求出齐正面 / 背面 / 立绘三条提示词（后端一次 LLM 返回 JSON），再由后端分别出图
+    await api.generateTownNpcAssetSet(npcId, { ...generationParams('npcs'), styleTags: bpForm.styleTags || '', force: true })
     await town.fetchInitState()
     await refreshAssets()
   } catch (err) {
@@ -941,11 +1061,9 @@ async function genAllNpcAssets() {
     for (let i = 0; i < ids.length; i++) {
       const n = bpForm.npcs[i]
       if (n) n.genBusy = true
-      const spriteParams = { ...generationParams('npcs'), styleTags: bpForm.styleTags || '', force: true }
-      const portraitParams = { ...generationParams('npcs', { portrait: true }), styleTags: bpForm.styleTags || '', force: true }
       try {
-        await api.generateTownNpcSprites(ids[i], spriteParams)
-        await api.generateTownNpcPortrait(ids[i], portraitParams)
+        // 同样是「一次出齐全套」：每位居民只发一个请求、后端只调一次 LLM
+        await api.generateTownNpcAssetSet(ids[i], { ...generationParams('npcs'), styleTags: bpForm.styleTags || '', force: true })
       } catch (err) {
         console.warn('[wizard] npc assets failed:', err?.message)
       }
@@ -996,7 +1114,6 @@ async function regenerateManagedAsset(asset) {
     if (context.what === 'portrait') {
       data = await api.regenerateTownPlayerPortrait({
         ...generationParams('player', { portrait: true }),
-        portraitLoras: !!stepParams.player.portraitLoras,
         styleTags: bpForm.styleTags || '',
       })
     } else {
@@ -1079,8 +1196,8 @@ async function genPlayerKit() {
   playerBusy.value = true
   try {
     const data = await api.regenerateTownPlayerKit({
-      ...generationParams('player', { portrait: true }),
-      portraitLoras: !!stepParams.player.portraitLoras,
+      // 小人要拿完整 LoRA；只有大立绘由 portraitLoras 决定是否套用
+      ...generationParams('player'),
     })
     applyPlayerKit(data.kit)
   } catch (err) {
@@ -1229,7 +1346,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.wiz-panel:has(.wiz-split.is-npcs) {
+.wiz-panel:has(.wiz-split.is-npcs),
+.wiz-panel:has(.wiz-split.is-player) {
   width: min(1020px, calc(100vw - 32px));
 }
 
@@ -1347,6 +1465,8 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 只纵向滚动：窄窗口下内容自适应换行，不再出现横向滚动条 */
+  overflow-x: hidden;
   padding: 12px 14px 18px;
 }
 
@@ -1354,12 +1474,14 @@ onBeforeUnmount(() => {
 
 .wiz-split {
   display: flex;
+  flex-wrap: wrap; /* 窗口不够宽时把提示词面板与内容区上下堆叠，避免横向滚动条 */
   gap: 12px;
   align-items: flex-start;
 }
 
 .wiz-right {
-  flex: 1;
+  /* flex-basis 给足：一行放不下提示词面板（232px）时就换行占满整行 */
+  flex: 1 1 300px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1367,9 +1489,6 @@ onBeforeUnmount(() => {
 
 .wiz-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .wiz-label { font-size: 12px; color: var(--text-primary); }
-.wiz-inline { display: flex; align-items: center; gap: 8px; }
-.wiz-inline > * { flex: 1; }
-.wiz-x { color: var(--text-secondary); }
 
 /* 拉条 */
 .wiz-slider-row { display: flex; align-items: center; gap: 12px; }
@@ -1415,6 +1534,19 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   margin-bottom: 14px;
 }
+
+.wiz-style-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wiz-style-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(224, 123, 108, 0.14);
+  color: var(--accent-hover);
+  white-space: nowrap;
+}
+.wiz-style-tag.is-now { background: rgba(124, 176, 116, 0.16); color: #5c8a52; }
+.wiz-style-hint { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
 
 .wiz-list-row {
   display: flex;
@@ -1467,7 +1599,7 @@ onBeforeUnmount(() => {
   width: 56px;
   height: 56px;
   border-radius: 10px;
-  background: #f1ebe1;
+  background: #fbf8f3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1488,8 +1620,22 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: scale(1) rotate(0); }
 }
 
-.wiz-asset-state { font-size: 18px; color: #cfc4b4; }
-.wiz-asset-state.is-spin { animation: wiz-spin 1s linear infinite; display: inline-block; }
+/* 只有该居民真的在生成素材时才出现的小徽标，不铺满、不遮挡已有立绘 */
+.wiz-asset-state {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 2px 8px rgba(54, 42, 38, 0.14);
+}
+.wiz-asset-state .wiz-asset-state-icon { display: inline-block; font-size: 15px; line-height: 1; animation: wiz-spin 1.1s linear infinite; }
 @keyframes wiz-spin { to { transform: rotate(360deg); } }
 
 .wiz-asset-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -1570,11 +1716,12 @@ onBeforeUnmount(() => {
 }
 
 .wiz-npc-portrait {
-  width: 140px;
-  min-width: 140px;
-  height: 200px;
+  position: relative;
+  width: 170px;
+  min-width: 170px;
+  height: 280px;
   border-radius: 10px;
-  background: #efe9de;
+  background: #fbf8f3;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1603,47 +1750,47 @@ onBeforeUnmount(() => {
 
 .wiz-npc-sprites { display: flex; gap: 6px; align-items: flex-end; }
 
+/* 画框由 TownAssetThumb 自己描边（悬停珊瑚色也走组件），这里只留底色 */
 .wiz-npc-sprite {
   width: 40px;
   height: 52px;
   border-radius: 8px;
-  background: #f1ebe1;
+  background: #fbf8f3;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
-  border: 1.5px solid transparent;
-  transition: border-color 0.15s ease;
 }
-
-.wiz-npc-sprite:hover { border-color: var(--accent); }
 .wiz-npc-sprite img { width: 100%; height: 100%; object-fit: contain; object-position: bottom; image-rendering: pixelated; }
 .wiz-npc-sprite.is-portrait img { image-rendering: auto; }
 .wiz-npc-sprite span { color: #cfc4b4; font-size: 14px; padding-bottom: 6px; }
 
 .wiz-player-kit {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
   gap: 12px;
+  align-items: start;
 }
 
-.wiz-player-portrait { min-height: 200px; }
-.wiz-player-image { width: 100%; height: 140px; border-radius: 12px; background: #fbf8f3; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; cursor: pointer; border: 1.5px solid transparent; transition: border-color .15s ease; }
-.wiz-player-image.is-portrait { height: 240px; }
-.wiz-player-image:hover { border-color: var(--accent); }
+/* 立绘预览：拉高画框（900×1600 竖图在矮框里 contain 后只剩中间一小条） */
+.wiz-player-portrait { min-height: 420px; }
+.wiz-player-image { width: 100%; height: 140px; border-radius: 12px; background: #fbf8f3; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; cursor: pointer; }
+.wiz-player-image.is-portrait { height: 100%; min-height: 420px; }
 .wiz-player-image img { width: 100%; height: 100%; object-fit: contain; object-position: bottom; image-rendering: pixelated; }
 .wiz-player-image.is-portrait img { image-rendering: auto; }
 .wiz-player-empty {
   height: 100%;
-  min-height: 200px;
+  min-height: 420px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #fbf8f3;
   border-radius: 12px;
 }
-.wiz-player-sprites { display: flex; flex-direction: column; gap: 10px; }
+.wiz-player-sprites { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* 按钮是 nowrap，窄列里会溢出叠到相邻列：限宽并允许换行兜底 */
+.wiz-player-kit :deep(.ls-btn) { max-width: 100%; white-space: normal; word-break: break-word; }
 
 .wiz-working {
   display: flex;

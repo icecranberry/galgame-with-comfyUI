@@ -116,7 +116,8 @@ async function regen() {
   error.value = ''
   try {
     const prompt = draft.value.trim()
-    await api.regenerateTownAsset(props.assetId, prompt ? { prompt } : {})
+    // verbatim: true → 后端原样使用这段手写提示词出图，不再补固定前缀 / chibi、big head 等硬 tag
+    await api.regenerateTownAsset(props.assetId, prompt ? { prompt, verbatim: true } : {})
     emit('regenerated')
     close()
   } catch (err) {

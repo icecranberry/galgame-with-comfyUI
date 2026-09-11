@@ -150,6 +150,9 @@ function drawObject(c, obj, occluded) {
     const imgH = imgW * (img.naturalHeight / Math.max(1, img.naturalWidth))
     c.save()
     c.globalAlpha = occluded ? 0.62 : 1
+    // 建筑/道具是 2× 烘焙的插画素材：单独开平滑缩放，缩小采样不起锯齿（地砖层保持 nearest 像素风）
+    c.imageSmoothingEnabled = true
+    c.imageSmoothingQuality = 'high'
     if (obj.flip) {
       c.translate(centerX, 0)
       c.scale(-1, 1)

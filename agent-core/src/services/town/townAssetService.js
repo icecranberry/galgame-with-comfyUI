@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { generateImageRaw } from '../imageSkill.js';
-import { postProcessAsset, detectTileAnchorY, flattenIsoTile } from './assetPostProcess.js';
+import { postProcessAsset, detectTileAnchorY, flattenIsoTileWithRect, extractIsoDiamond } from './assetPostProcess.js';
 import { refineImage } from '../imageRefine.js';
 import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
@@ -40,7 +40,8 @@ const PIXEL_BASE = 'pixel art, clean pixel edges, limited color palette, no anti
  *  地砖/道路不带画师串（illustration 画师会把平铺纹理带偏成场景插画） */
 export const ASSET_SPECS = {
   ground: {
-    size: { width: 1536, height: 1536 },
+    // 成品是 64×32 的平铺贴图，生成端不需要 1536：800×800 出图更省时间/显存，缩到像素尺寸前细节仍够
+    size: { width: 800, height: 800 },
     // {desc} 会被插进「顶面完全被该材质覆盖」的句子里，避免模型画成花坛（顶面裸土、草只长边缘）
     promptTemplate: 'isometric ground tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
@@ -48,21 +49,20 @@ export const ASSET_SPECS = {
     artist: '',
   },
   road: {
-    size: { width: 1536, height: 1536 },
+    size: { width: 800, height: 800 }, // 与 ground 一致，见上
     promptTemplate: 'isometric road tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
     pixel: { w: 64, h: 32 },
     artist: '',
   },
   building: {
-    size: { width: 1536, height: 1536 },   // 特殊建筑 1536×2048
-    tallSize: { width: 1536, height: 2048 },
+    size: { width: 1200, height: 1200 },
     // 英文 prompt 由 LLM 按酒馆立绘同款四层结构生成（townPromptBuilder），此串仅兜底
     prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no ground tiles, no pavement, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
     removeBg: true,
     cropContent: true,
-    // 渲染按 (w+h)*HALF_W 画：像素宽做成同尺寸 → 1:1 绘制不模糊
-    pixelWidth: (fp) => (fp.w + fp.h) * 32,
+    // 按等距占格宽 (w+h)*32 画：烘焙成 2× 做超采样，zoom=1 时约 2 texel/px，放到 2.5 倍仍有富余
+    pixelWidth: (fp) => (fp.w + fp.h) * 64, // 2× 烘焙：贴图密度高于屏幕需求，缩小/放大都由 GPU 采样
   },
   prop: {
     size: { width: 512, height: 512 },
@@ -70,7 +70,7 @@ export const ASSET_SPECS = {
     removeBg: true,
     cropContent: true,
     pixel: { w: 64, h: 64 },
-    pixelWidth: (fp) => (fp.w + fp.h) * 32,
+    pixelWidth: (fp) => (fp.w + fp.h) * 64, // 2× 烘焙：贴图密度高于屏幕需求，缩小/放大都由 GPU 采样
   },
   // 像素小人：600×800 制作 → 抠白裁切 → 轻缩存储（保留生成图的画质，像素风由 prompt 控制）
   npc: {
@@ -104,26 +104,55 @@ const DIRECTION_PROMPT = {
 
 /** 各 kind 的默认硬逻辑前缀（用户可在向导/编辑器覆盖 meta.promptPrefix） */
 export const DEFAULT_PROMPT_PREFIX = {
-  building: 'pixel art, game sprite',
-  prop: 'pixel art, game sprite',
+  building: 'pixel art, game sprite, white background',
+  prop: 'pixel art, game sprite, white background',
   npc: 'pixel art, game sprite, mini human sized, full body',
   player: 'pixel art, game sprite, mini human sized, full body',
   portrait: '',
-  ground: 'pixel art, game sprite',
-  road: 'pixel art, game sprite',
+  ground: 'pixel art, game sprite, white background',
+  road: 'pixel art, game sprite, white background',
 };
 
-function generationDefaultsForAsset(row) {
-  const settings = getTownGenerationSettings();
-  const step = settings.steps[generationStepForAsset(row)] || {};
-  const portrait = isPortraitAsset(row);
-  return {
-    artist: typeof step.artist === 'string' ? step.artist : '',
-    loras: portrait && !step.portraitLoras ? [] : (Array.isArray(step.loras) ? step.loras : []),
-    prefix: portrait ? '' : (typeof step.prefix === 'string' ? step.prefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '')),
-    portraitLoras: step.portraitLoras === true,
-  };
-}
+/** 像素小人（npc/player 的正/背小人）固定追加的硬 tag：Q 版大头，保证各世界头身比一致 */
+export const SPRITE_HARD_TAGS = ['chibi', 'big head'];
+
+/** tag 是否已整词出现（大小写不敏感），避免与用户前缀 / LLM 正文重复 */
+function hasPromptTag(text, tag) {
+  const escaped = tag.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').split(/\s+/).join('\\s+');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
+}
+
+/**
+ * 组装最终 prompt：固定前缀 + 像素小人硬 tag 在最前，描述正文在后。
+ * 像素小人的 chibi / big head 是硬逻辑：只看前缀有没有手写过，缺的补齐，
+ * 保证最终 prompt 一定带这两个 tag（LLM 正文写没写不影响）。
+ * verbatim = true 表示 prompt 是用户在「图片提示词」弹窗里手写的完整提示词：
+ * 原样送 ComfyUI，不再补前缀 / 硬 tag——这是弹窗「改动后完全按新提示词出图」的兑现口径，
+ * 否则用户想删掉前缀里的 tag（如 chibi / big head）会被重新补回来，看起来像没生效。
+ * @param {object} p - { kind, prefix, prompt, verbatim }
+ */
+export function composeAssetPrompt({ kind, prefix = '', prompt = '', verbatim = false }) {
+  const body = String(prompt || '').trim();
+  if (verbatim && body.trim()) return body.trim();
+  const tags = kind === 'npc' || kind === 'player'
+    ? SPRITE_HARD_TAGS.filter(tag => !hasPromptTag(prefix, tag))
+    : [];
+  const head = [prefix, tags.join(', ')].filter(Boolean).join(', ');
+  if (!head) return body;
+  return body ? `${head}, ${body}` : head;
+}
+
+function generationDefaultsForAsset(row) {
+  const settings = getTownGenerationSettings();
+  const step = settings.steps[generationStepForAsset(row)] || {};
+  const portrait = isPortraitAsset(row);
+  return {
+    artist: typeof step.artist === 'string' ? step.artist : '',
+    loras: portrait && !step.portraitLoras ? [] : (Array.isArray(step.loras) ? step.loras : []),
+    prefix: portrait ? '' : (typeof step.prefix === 'string' ? step.prefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '')),
+    portraitLoras: step.portraitLoras === true,
+  };
+}
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
 const TILE_STYLE_STRIP = /\b(village|town|city|street|hamlet|townsquare|buildings?)\b/gi;
 
@@ -256,21 +285,28 @@ function preserveSavedGenerationConfig(meta, latest) {
   if (latest._generationConfigEdits) meta._generationConfigEdits = latest._generationConfigEdits;
 }
 
-function commitAssetImage(guard, row, buffer, meta, status = row.status, sourcePrompt = null) {
+function commitAssetImage(guard, row, buffer, meta, status = row.status, sourcePrompt = null, extraFiles = null) {
   const db = getDb();
   const filePath = assetFilePath(row.id, `${row.key || 'asset'}_${guard.token}`);
   const imagePath = `/town-assets/${path.basename(filePath)}`;
+  const writtenExtras = [];
   try {
     db.transaction(() => {
       const latest = assertAssetCurrent(guard);
       preserveSavedGenerationConfig(meta, JSON.parse(latest.meta_json || '{}'));
       fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
       fs.writeFileSync(filePath, buffer);
+      // 附属文件（地砖的裁剪前原图）与成品同批落盘：事务失败时一起删，不留孤儿文件
+      for (const extra of extraFiles || []) {
+        fs.writeFileSync(extra.path, extra.buffer);
+        writtenExtras.push(extra.path);
+      }
       db.prepare('UPDATE town_assets SET image_path = ?, meta_json = ?, status = ?, source_prompt = COALESCE(?,source_prompt) WHERE id = ?')
         .run(imagePath, JSON.stringify(meta), status, sourcePrompt, row.id);
     }).immediate();
   } catch (err) {
     try { fs.unlinkSync(filePath); } catch { /* only our unique unpublished file */ }
+    for (const extraPath of writtenExtras) { try { fs.unlinkSync(extraPath); } catch { /* optional extra */ } }
     throw err;
   }
   if (row.image_path && path.basename(row.image_path) !== path.basename(filePath)) {
@@ -283,9 +319,18 @@ function commitAssetImage(guard, row, buffer, meta, status = row.status, sourceP
 
 // ── 存储 ──
 
+/** 文件名安全片段：素材 key 可能带中文 / 空格 */
+function safeAssetKey(id, key) {
+  return String(key || `asset${id}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/** 地砖裁剪前原图（固定名，每次重新生成覆盖）：素材库的菱形裁剪要拿它当底图 */
+function tileSourceFilePath(id, key) {
+  return path.join(TOWN_ASSETS_DIR, `asset_${id}_${safeAssetKey(id, key)}_source.png`);
+}
+
 function assetFilePath(id, key) {
-  const safeKey = String(key || `asset${id}`).replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(TOWN_ASSETS_DIR, `asset_${id}_${safeKey}.png`);
+  return path.join(TOWN_ASSETS_DIR, `asset_${id}_${safeAssetKey(id, key)}.png`);
 }
 
 function rowToAsset(row) {
@@ -295,15 +340,82 @@ function rowToAsset(row) {
   return { ...row, meta };
 }
 
+/**
+ * 把「源图」处理成该素材可用的成品并落盘落库：地砖归一成 2:1 菱形贴图、抠白、裁到内容、按规格缩放。
+ * ComfyUI 生成与用户手动上传共用这条后处理管线，保证尺寸 / 画幅约定一致。
+ * @param {object} p - { row, guard, meta, spec, size, buffer, prompt }
+ */
+async function commitProcessedSource({ row, guard, meta, spec, size, buffer, prompt = null }) {
+  // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
+  const isTile = row.kind === 'ground' || row.kind === 'road';
+  let work = buffer;
+  let tileRect = null;
+  if (isTile) {
+    const flattened = await flattenIsoTileWithRect(work);
+    work = flattened.buffer;
+    tileRect = flattened.rect; // 自动检测到的菱形框：素材库拿它当初始裁剪框
+    assertAssetCurrent(guard);
+  }
+  let tw;
+  let th;
+  let smoothResize = false;
+  if (isTile) {
+    tw = 64; th = 32;
+  } else if (spec.pixelWidth && meta.footprint?.w) {
+    // 建筑/大件道具按等距占格宽 (w+h)*32 的 2× 烘焙：配 linear+mipmap，放大不结块
+    tw = spec.pixelWidth(meta.footprint);
+    th = Math.max(1, Math.round(tw * size.height / size.width));
+  } else if (spec.maxSide) {
+    // 插画小人：保留画质，仅轻缩存储（渲染时平滑缩放；像素风由生成 prompt 决定）
+    const ratio = Math.min(1, spec.maxSide / Math.max(size.width, size.height));
+    tw = Math.round(size.width * ratio);
+    th = Math.round(size.height * ratio);
+    smoothResize = true;
+  } else {
+    // portrait：不强制 fill 拉伸到规格画幅（生成端实际返回尺寸可能与规格不一致，
+    // fit:'fill' 会把原图硬拉变形+重采样发糊）。按原分辨率存储，仅超出规格时轻缩。
+    tw = size.width; th = size.height;
+    smoothResize = true;
+  }
+
+  const outBuffer = await postProcessAsset(work, {
+    targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent, smoothResize,
+  });
+  assertAssetCurrent(guard);
+  const outputMeta = await sharp(outBuffer).metadata();
+  assertAssetCurrent(guard);
+  meta.pixelSize = { w: outputMeta.width, h: outputMeta.height };
+  meta.styleTags = meta.styleTags || '';
+  meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
+  // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5
+  if (isTile) {
+    meta.groundAnchorY = (await detectTileAnchorY(outBuffer)) ?? 0.5;
+    assertAssetCurrent(guard);
+  }
+  // Provenance describes these new pixels, never the prompt merely saved for a future job.
+  if (guard.appearanceGuard) meta.appearanceSource = guard.appearanceGuard.source;
+  else delete meta.appearanceSource;
+  // 地砖：一并留下裁剪前的原图（素材库里可在这张图上手动画菱形重裁）
+  let tileSourceFile = null;
+  if (isTile) {
+    const sourcePath = tileSourceFilePath(row.id, row.key);
+    meta.sourceImage = `/town-assets/${path.basename(sourcePath)}`;
+    meta.sourceUpdatedAt = meta.updatedAt; // 原图是固定名：用生成时间做 URL 缓存穿透，重裁不换原图
+    if (tileRect) meta.sourceDiamond = tileRect;
+    else delete meta.sourceDiamond;
+    tileSourceFile = { path: sourcePath, buffer };
+  }
+  const fresh = commitAssetImage(guard, row, outBuffer, meta, 'ready', prompt, tileSourceFile ? [tileSourceFile] : null);
+  console.log(`[townAssets] ready #${row.id} ${row.kind}/${row.key} → ${fresh.image_path}`);
+  return fresh;
+}
 /** 生成一张素材并落盘落库（串行队列内执行） */
 async function generateIntoRow(row, guard) {
   assertAssetCurrent(guard);
   const db = getDb();
   const meta = JSON.parse(row.meta_json || '{}');
   const spec = ASSET_SPECS[row.kind];
-  const size = row.kind === 'building' && (meta.special || meta.tall)
-    ? spec.tallSize
-    : spec.size;
+  const size = spec.size;
 
   // prompt 来源优先级：meta.promptOverride（立绘/精灵/建筑 LLM 产物，或用户手改）→ 建筑 LLM → 静态组装
   let prompt;
@@ -324,9 +436,11 @@ async function generateIntoRow(row, guard) {
   }
 
   // 固定前缀和画师/LoRA 优先使用素材级覆盖；未覆盖时回落到 system_settings 里的类型配置。
+  // promptVerbatim = true 表示当前 promptOverride 是用户在「图片提示词」弹窗里手写的完整提示词，
+  // 原样送 ComfyUI，不再补前缀 / 硬 tag（弹窗「改动后完全按新提示词出图」的兑现口径）。
   const generationDefaults = generationDefaultsForAsset(row);
   const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : generationDefaults.prefix;
-  if (prefix) prompt = `${prefix}, ${prompt}`;
+  prompt = composeAssetPrompt({ kind: row.kind, prefix, prompt, verbatim: meta.promptVerbatim === true });
   db.transaction(() => {
     assertAssetCurrent(guard);
     if (!(row.status === 'ready' && row.image_path)) {
@@ -350,52 +464,8 @@ async function generateIntoRow(row, guard) {
     const base64 = result.images[0].base64;
     const buffer = Buffer.from(base64.slice(base64.indexOf(',') + 1), 'base64');
 
-    // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
-    const isTile = row.kind === 'ground' || row.kind === 'road';
-    let work = buffer;
-    if (isTile) {
-      work = await flattenIsoTile(work);
-      assertAssetCurrent(guard);
-    }
-    let tw;
-    let th;
-    let smoothResize = false;
-    if (isTile) {
-      tw = 64; th = 32;
-    } else if (spec.pixelWidth && meta.footprint?.w) {
-      // 建筑/大件道具按等距占格宽 (w+h)*32，渲染 1:1 不模糊
-      tw = spec.pixelWidth(meta.footprint);
-      th = Math.max(1, Math.round(tw * size.height / size.width));
-    } else if (spec.maxSide) {
-      // 插画小人：保留画质，仅轻缩存储（渲染时平滑缩放；像素风由生成 prompt 决定）
-      const ratio = Math.min(1, spec.maxSide / Math.max(size.width, size.height));
-      tw = Math.round(size.width * ratio);
-      th = Math.round(size.height * ratio);
-      smoothResize = true;
-    } else {
-      tw = size.width; th = size.height; // portrait 保持原分辨率
-    }
+    return commitProcessedSource({ row, guard, meta, spec, size, buffer, prompt });
 
-    const outBuffer = await postProcessAsset(work, {
-      targetW: tw, targetH: th, removeBg: spec.removeBg, cropContent: !!spec.cropContent, smoothResize,
-    });
-    assertAssetCurrent(guard);
-    const outputMeta = await sharp(outBuffer).metadata();
-    assertAssetCurrent(guard);
-    meta.pixelSize = { w: outputMeta.width, h: outputMeta.height };
-    meta.styleTags = meta.styleTags || '';
-    meta.updatedAt = Date.now(); // 前端 URL 缓存穿透标记
-    // 等距地砖：检测菱形中心锚点（渲染对齐用），失败回退 0.5
-    if (isTile) {
-      meta.groundAnchorY = (await detectTileAnchorY(outBuffer)) ?? 0.5;
-      assertAssetCurrent(guard);
-    }
-    // Provenance describes these new pixels, never the prompt merely saved for a future job.
-    if (guard.appearanceGuard) meta.appearanceSource = guard.appearanceGuard.source;
-    else delete meta.appearanceSource;
-    const fresh = commitAssetImage(guard, row, outBuffer, meta, 'ready', prompt);
-    console.log(`[townAssets] ready #${row.id} ${row.kind}/${row.key} → ${fresh.image_path}`);
-    return fresh;
   } catch (err) {
     db.transaction(() => {
       assertAssetCurrent(guard); // stale failure must not mark a replacement asset failed
@@ -432,6 +502,39 @@ export async function saveEditedAssetImage(id, dataUrl) {
   return commitAssetImage(guard, row, buffer, m, 'ready');
 }
 
+const UPLOAD_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
+
+/**
+ * 手动上传本地图片替换素材（base64 dataUrl）。
+ * 走与生成同一条后处理管线（见 commitProcessedSource）：地砖归一成菱形贴图、其余按素材规格抠白/裁切/缩放，
+ * 上传什么尺寸都能直接被小镇渲染，不需要用户自己裁成 64×32 之类的成品尺寸。
+ */
+export async function importAssetImage(id, dataUrl) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  if (typeof dataUrl !== 'string' || !UPLOAD_MIME_RE.test(dataUrl)) throw new Error('请上传 PNG / JPG / WEBP 图片');
+  // 前端已限 6MB；这里拦一道解码前超限的（base64 约为原大小 4/3）
+  if (dataUrl.length > 8 * 1024 * 1024) throw new Error('图片过大，请压缩后再上传（不超过 6MB）');
+  const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  if (!buffer.length) throw new Error('图片内容为空');
+  const spec = ASSET_SPECS[row.kind];
+  const guard = claimAsset(row);
+  let info;
+  try {
+    info = await sharp(buffer).metadata();
+  } catch {
+    throw new Error('无法识别这张图片，请换一张 PNG / JPG / WEBP');
+  }
+  assertAssetCurrent(guard);
+  if (!info.width || !info.height) throw new Error('图片尺寸异常');
+  if (Math.max(info.width, info.height) > 4096) throw new Error('图片边长请控制在 4096px 以内');
+  const meta = JSON.parse(row.meta_json || '{}');
+  meta.uploadedAt = Date.now();
+  const fresh = await commitProcessedSource({ row, guard, meta, spec, size: spec.size, buffer });
+  console.log(`[townAssets] uploaded #${row.id} ${row.kind}/${row.key} → ${fresh.image_path}`);
+  return fresh;
+}
 /**
  * 按截取框裁剪素材并覆盖（前端放大查看后划定最终成图范围）
  * @param {number} id - 素材 id
@@ -462,6 +565,39 @@ export async function cropAssetImage(id, rect) {
   m.croppedAt = m.updatedAt;
   m.pixelSize = { w, h };
   if (row.kind === 'ground' || row.kind === 'road') m.groundAnchorY = 0.5; // 裁切后菱形占满画幅
+  return commitAssetImage(guard, row, out, m);
+}
+
+/**
+ * 地砖专用裁剪：在「裁剪前原图」上按用户选定的 2:1 菱形重裁 → 像素化到 64×32 覆盖成品。
+ * 与生成时的自动归一化走同一条管线（extractIsoDiamond → pixelate），用户可微调菱形避开侧面 / 顶面装饰。
+ * @param {number} id - 素材 id
+ * @param {{x:number,y:number,w:number}} diamond - 原图像素坐标的菱形包围框（高 = 宽 / 2）
+ */
+export async function cropTileAssetImage(id, diamond) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
+  if (!row) throw new Error(`asset #${id} not found`);
+  if (row.kind !== 'ground' && row.kind !== 'road') throw new Error('只有地皮/道路支持菱形裁剪');
+  const m = JSON.parse(row.meta_json || '{}');
+  if (!m.sourceImage) throw new Error('这张地皮没有裁剪前原图，请先重新生成');
+  const sourcePath = path.join(TOWN_ASSETS_DIR, path.basename(m.sourceImage));
+  if (!fs.existsSync(sourcePath)) throw new Error('裁剪前原图已丢失，请先重新生成');
+
+  const guard = claimAsset(row);
+  const diamondBuffer = await extractIsoDiamond(fs.readFileSync(sourcePath), diamond);
+  assertAssetCurrent(guard);
+  const spec = ASSET_SPECS[row.kind] || {};
+  const out = await postProcessAsset(diamondBuffer, { targetW: spec.pixel?.w ?? 64, targetH: spec.pixel?.h ?? 32 });
+  assertAssetCurrent(guard);
+  const outMeta = await sharp(out).metadata();
+  assertAssetCurrent(guard);
+
+  m.updatedAt = Date.now();
+  m.croppedAt = m.updatedAt;
+  m.tileCrop = { x: Math.round(diamond.x), y: Math.round(diamond.y), w: Math.round(diamond.w) };
+  m.pixelSize = { w: outMeta.width, h: outMeta.height };
+  m.groundAnchorY = (await detectTileAnchorY(out)) ?? 0.5; // 裁切后菱形占满画幅
   return commitAssetImage(guard, row, out, m);
 }
 
@@ -560,7 +696,11 @@ export function regenerateAsset(id, overrides = {}) {
   const meta = JSON.parse(row.meta_json || '{}');
   if (overrides.desc !== undefined) meta.desc = overrides.desc;
   if (overrides.styleTags !== undefined) meta.styleTags = overrides.styleTags;
-  if (overrides.prompt !== undefined && String(overrides.prompt).trim()) meta.promptOverride = String(overrides.prompt).trim();
+  if (overrides.prompt !== undefined && String(overrides.prompt).trim()) {
+    meta.promptOverride = String(overrides.prompt).trim();
+    // 弹窗带 verbatim: true → 用户手写的完整提示词；其他调用方（NPC/建筑 LLM）不带 → 仍按常规补前缀/硬 tag
+    meta.promptVerbatim = overrides.verbatim === true;
+  }
   if (Array.isArray(overrides.loras)) meta.loras = overrides.loras;
   if (overrides.artist !== undefined) meta.artist = overrides.artist;
   if (overrides.promptPrefix !== undefined) meta.promptPrefix = overrides.promptPrefix;
@@ -606,6 +746,10 @@ export function deleteAsset(id) {
     const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path));
     try { fs.unlinkSync(filePath); } catch { /* 文件可能已不存在 */ }
   }
+  try {
+    const { sourceImage } = JSON.parse(row.meta_json || '{}'); // 地砖的裁剪前原图
+    if (sourceImage) fs.unlinkSync(path.join(TOWN_ASSETS_DIR, path.basename(sourceImage)));
+  } catch { /* meta 损坏或原图已不存在 */ }
   db.prepare('DELETE FROM town_assets WHERE id = ?').run(id);
   broadcastTownAssetsUpdated({ deleted: id });
   return { ok: true };

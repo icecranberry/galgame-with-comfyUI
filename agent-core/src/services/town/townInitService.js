@@ -17,7 +17,7 @@ import { chatSync } from '../../llm/llm-client.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createAsset, listAssets, captureTownAssetWorld } from './townAssetService.js';
 import { getMapRow, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
-import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc } from './townNpcService.js';
+import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc, isPersonaCard } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
 import { generateLocalLayout } from './townLayoutGenerator.js';
 import { refineTownDraftWithLLM } from './townLayoutAI.js';
@@ -69,6 +69,11 @@ export function restoreInitJob() {
     const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
     if (!raw || typeof raw !== 'object') return;
     job = { ...defaultJob(), ...raw };
+    // 旧 job 迁移：蓝图里塞在 persona 的一句话人设归位到 brief（口径同 updateBlueprint）
+    if (job.blueprint) {
+      try { job.blueprint = normalizeBlueprint(job.blueprint, job.config || defaultJob().config); }
+      catch (err) { console.warn('[townInit] blueprint normalize on restore failed:', err?.message); }
+    }
     if (job.status === 'blueprint') {
       // 蓝图 LLM 调用中断，无法续跑
       job.status = 'failed';
@@ -207,11 +212,12 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRow
 function buildBlueprintOutputStructure() {
   return [
     '【输出结构】',
-    '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
+    '必须严格按以下 JSON 格式（仅作为演示，实际内容跟随<world_setting>设定输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
     '{',
     '  "groundAssets": [',
     '    { "key": "grass_01", "name": "青草地", "variants": 2 },',
-    '    { "key": "plaza_tile", "name": "广场石砖", "variants": 1 }',
+    '    { "key": "plaza_tile", "name": "广场石砖", "variants": 1 },',
+    '    { "key": "pond_water", "name": "池塘水面", "variants": 1 }',
     '  ],',
     '  "roadAssets": [',
     '    { "key": "road_01", "name": "石板路", "variants": 1 }',
@@ -225,7 +231,7 @@ function buildBlueprintOutputStructure() {
     '    { "key": "bench_01", "name": "长椅", "footprint": { "w": 1, "h": 1 }, "blocking": false }',
     '  ],',
     '  "npcs": [',
-    '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "job": "面包师" },',
+    '    { "displayName": "咕噜", "brief": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "job": "面包师" },',
     '  ]',
     '}',
   ].join('\n');
@@ -234,18 +240,18 @@ function buildBlueprintOutputStructure() {
 function buildBlueprintTaskRequirements(worldName, cfg) {
   return [
     '【任务要求】',
-    '你是小镇规划师，为一个像素风 AI 小镇设计初始化清单：地砖/道路素材清单、建筑与道具清单、居民名册。',
+    '你是建筑师，为一片居住地设计初始化清单：地砖/道路素材清单、建筑与道具清单、居民名册。',
     '',
-    `【世界观】${worldName}`,
+    `输出的内容要和<world_setting>强相关，你就是在<world_setting>的设定之下规划居住地。世界观名称：${worldName}`,
     '本步只确认名称和类别，禁止输出任何外观描述、styleTags 或 prompt。',
     '',
     '字段约束：',
-    '- groundAssets：3~5 种地砖；variants 是同款变体数 1~3（打散重复感）',
+    '- groundAssets：3~6 种地皮；variants 是同款变体数 1~3（打散重复感）；地表类型要多样，按<world_setting>挑（草地/泥土/石板/沙地/雪地/水面……），有河流湖泊池塘设定的必须至少 1 种水面，不要只出草地和石砖',
     '- roadAssets：1~2 种道路',
     '- buildings：5~9 栋。一半是通用建筑（reusable=true 且 maxInstances 2~8），一半是世界观专属特色建筑（special=true，唯一）；footprint.w/h 是占格数（2~3）；key 全部小写下划线且不重复',
     '- props：4~8 种；footprint.w/h 是占格数（1~3，橡树一般 2×2，长椅/花丛一般 1×1）；blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
-    `- npcs：恰好 ${cfg.npcCount} 位居民。persona 一句话人设+性格关键词（中文 30~60 字，完整人格卡会在建档时生成）；job 中文职业`,
-    '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合世界观',
+    `- npcs：恰好 ${cfg.npcCount} 位居民。brief 一句话人设+性格关键词（中文 30~60 字，会作为完整人格卡的设定依据）；job 中文职业`,
+    '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合<world_setting>',
   ].join('\n');
 }
 function normalizeBlueprint(parsed, cfg) {
@@ -312,9 +318,12 @@ function normalizeBlueprint(parsed, cfg) {
     let i = 2;
     while (seenNames.has(name)) name = `${String(n.displayName).slice(0, 17)}${i++}`; // 名单内重名加序号
     seenNames.add(name);
+    // persona 只装完整人格卡；名单产出的一句话人设（含旧数据里塞在 persona 的非卡文本）统一归到 brief
+    const rawPersona = String(n.persona || '').slice(0, 4000);
     bp.npcs.push({
       displayName: name,
-      persona: String(n.persona || '').slice(0, 4000),
+      brief: String(n.brief || (isPersonaCard(rawPersona) ? '' : rawPersona)).slice(0, 300),
+      persona: isPersonaCard(rawPersona) ? rawPersona : '',
       job: String(n.job || '').slice(0, 20),
     });
   }
@@ -883,6 +892,21 @@ export function expandLayout(parsed, readyAssets, bp, cols, rows) {
 // ── Step 7：确认开镇 ──
 
 /**
+ * 生成完整人格卡；失败时回退到一句话人设，保证居民始终有 persona 可用。
+ * 沿用本文件既有的动态 import 写法，避免与素材/LLM 模块的加载顺序耦合。
+ */
+async function generateWizardPersonaCard({ displayName, job, brief, worldHint, fallback = '' }) {
+  try {
+    const { generateNpcPersonaCard } = await import('./townNpcService.js');
+    const { card } = await generateNpcPersonaCard({ displayName, job, brief, worldHint });
+    return card;
+  } catch (err) {
+    console.warn(`[townInit] persona card for ${displayName} failed, keep brief:`, err?.message);
+    return fallback;
+  }
+}
+
+/**
  * 向导居民步：按蓝图提前建档 town_npcs（稳定人格卡，不入 characters 表）。
  * 幂等：按 displayName 对齐 job.npcIds；蓝图改动（增删改）会同步到已建档行。
  * 新建档居民顺手生成作息（LLM，失败降级为空作息自由闲逛）。
@@ -917,53 +941,49 @@ export function commitWizardNpcs() {
       });
       if (existingId) {
         const currentNpc = getNpc(existingId);
-        let persona = n.persona;
+        const brief = String(n.brief || '').trim();
+        let persona = String(n.persona || '');
         // 旧版本会把完整人格卡截到 120 字；若数据库里还保留更完整版本，优先找回。
         if (persona.length === 120 && (currentNpc.persona || '').length > 120) {
           persona = currentNpc.persona;
         }
-        // 两边都已被旧逻辑截断时，补生成一次完整卡。
-        if (persona.length === 120 && persona.startsWith('你是')) {
-          try {
-            const { generateNpcPersonaCard } = await import('./townNpcService.js');
-            const { card } = await generateNpcPersonaCard({
-              displayName: n.displayName,
-              job: n.job,
-              worldHint: job.blueprint.styleTags,
-            });
-            persona = card;
-          } catch (err) {
-            console.warn(`[townInit] repair persona card for ${n.displayName} failed:`, err?.message);
-          }
+        // 蓝图里还没有完整卡（旧数据把一句话人设塞在 persona、或被截断）→ 按一句话人设补生成一次
+        if (!isPersonaCard(persona)) {
+          persona = await generateWizardPersonaCard({
+            displayName: n.displayName,
+            job: n.job,
+            brief,
+            worldHint: job.blueprint.styleTags,
+            fallback: brief || persona,
+          });
         }
-        updateNpc(existingId, { persona, job: n.job });
+        updateNpc(existingId, { persona, brief, job: n.job });
         n.persona = persona;
+        n.brief = brief;
         continue;
       }
       // 酒馆招募式：先生成结构化人格卡（跳过网络搜索，低温稳定特征）
       setStatus(job.status, `正在为「${n.displayName}」撰写人格卡…`);
-      let persona = n.persona;
-      try {
-        const { generateNpcPersonaCard } = await import('./townNpcService.js');
-        const { card } = await generateNpcPersonaCard({
-          displayName: n.displayName,
-          job: n.job,
-          worldHint: job.blueprint.styleTags,
-        });
-        persona = card;
-      } catch (err) {
-        console.warn(`[townInit] persona card for ${n.displayName} failed, keep simple persona:`, err?.message);
-      }
+      const brief = String(n.brief || '').trim();
+      const persona = await generateWizardPersonaCard({
+        displayName: n.displayName,
+        job: n.job,
+        brief,
+        worldHint: job.blueprint.styleTags,
+        fallback: brief || String(n.persona || ''),
+      });
       const npc = createNpc({
         mapId: null,
         displayName: n.displayName,
         persona,
+        brief,
         job: n.job,
         traits: {},
         routine: [],
       });
       job.npcIds.push(npc.id);
       n.persona = persona;         // 同步回蓝图（前端卡展示完整人格卡）
+      n.brief = brief;
       setStatus(job.status, `已建档居民「${n.displayName}」，正在生成作息…`);
       try {
         const routine = await generateRoutine(npc, allKeys);
@@ -995,7 +1015,7 @@ export function regenerateNpcRoster(count) {
           '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
           '{',
           '  "npcs": [',
-          '    { "displayName": "咕噜", "persona": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "job": "面包师" }',
+          '    { "displayName": "咕噜", "brief": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "job": "面包师" }',
           '  ]',
           '}',
         ].join('\n'),
@@ -1009,7 +1029,7 @@ export function regenerateNpcRoster(count) {
           '字段约束：',
           `- 恰好 ${n} 位；displayName 中文 2~6 字不重复`,
           '- 职业要和小镇特色建筑/业态呼应、互相错开',
-          '- persona 符合世界观',
+          '- brief 一句话人设+性格关键词（中文30~60字），符合世界观，会作为完整人格卡的设定依据',
         ].join('\n'),
       },
       {
@@ -1039,9 +1059,11 @@ export function regenerateNpcRoster(count) {
         let i = 2;
         while (seenNames.has(name)) name = `${String(x.displayName).slice(0, 17)}${i++}`;
         seenNames.add(name);
+        const rawBrief = String(x.brief || x.persona || '');
         return {
           displayName: name,
-          persona: String(x.persona || '').slice(0, 120),
+          brief: isPersonaCard(rawBrief) ? '' : rawBrief.slice(0, 300),
+          persona: '',           // 名单换了，人格卡要按新 brief 重新生成
           job: String(x.job || '').slice(0, 20),
         };
       });
@@ -1099,7 +1121,8 @@ export function confirmInit() {
         const npc = createNpc({
           mapId: saved.mapId,
           displayName: n.displayName,
-          persona: n.persona,
+          persona: n.persona || n.brief || '',
+          brief: n.brief || '',
           job: n.job,
           traits: {},
           routine: [],

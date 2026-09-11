@@ -138,14 +138,15 @@ export async function detectTileAnchorY(buffer) {
 }
 
 /**
- * 等距地砖归一化：从生成图里裁出顶面菱形，输出刚好铺满画幅的 2:1 菱形贴图。
- * 生成图的菱形位置/侧面厚度每次都不同，直接平铺会在接缝处露出毛刺；
- * 裁掉侧面后所有地砖都是标准菱形，可完美互锁（侧面立体感交给建筑/道具）。
- * 检测失败时原样返回（调用方按普通方图降级处理）。
+ * 检测等距地砖生成图里顶面菱形的包围框。
+ * 生成图的菱形位置/侧面厚度每次都不同，直接平铺会在接缝处露出毛刺，需按实际位置裁切。
+ * 裁切框由「最宽行」反推：菱形最宽行就是它的竖直中线，所以顶点 = 最宽行 − 菱形高/2。
+ * 不能用内容最高行：Anima 常在顶面上加草丛/水晶/道具，那会顶高最高行、把裁切框整体抬偏。
+ * 检测失败返回 null（调用方降级成普通方图；素材库改为让用户手动画菱形）。
  * @param {Buffer} buffer - 原始生成图
- * @returns {Promise<Buffer>} PNG，内容为 2:1 菱形顶面
+ * @returns {Promise<{x:number,y:number,w:number}|null>} 菱形包围框：宽 w、高 w/2
  */
-export async function flattenIsoTile(buffer) {
+export async function detectIsoDiamond(buffer) {
   try {
     const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
@@ -188,35 +189,86 @@ export async function flattenIsoTile(buffer) {
       }
     }
     const diamondW = bestRight - bestLeft + 1;
-    if (minY < 0 || bestRow < 0 || diamondW < width * 0.35 || bestRow <= minY) return buffer;
+    if (minY < 0 || bestRow < 0 || diamondW < width * 0.35 || bestRow <= minY) return null; // 内容太小，不可信
 
-    const diamondH = Math.round(diamondW / 2); // 2:1 菱形
-    if (minY + diamondH > height) return buffer;
+    const diamondH = Math.round(diamondW / 2); // 2:1 菱形：竖直对角线是水平对角线的一半
+    // 顶面顶点由「最宽行」反推：菱形最宽行位于竖直中线，向上推 diamondH/2 即顶面顶点，
+    // 向下推 diamondH/2 即底角（砖的侧面/土壤厚度正好全被切掉）。
+    const diamondTop = bestRow - Math.round(diamondH / 2);
+    if (diamondTop < 0 || diamondTop + diamondH > height) return null;
+    return { x: bestLeft, y: diamondTop, w: diamondW };
+  } catch {
+    return null;
+  }
+}
 
-    const cropped = await sharp(data, { raw: { width, height, channels: 4 } })
-      .extract({ left: bestLeft, top: minY, width: diamondW, height: diamondH })
-      .raw()
-      .toBuffer();
+/**
+ * 按包围框从原图裁出 2:1 菱形顶面（不缩放，菱形之外 alpha=0）。
+ * 生成时的自动归一化与素材库里用户手动调菱形走的是同一条管线，改这里两边同时生效。
+ * @param {Buffer} buffer - 原始生成图
+ * @param {{x:number,y:number,w:number}} rect - 菱形包围框：宽 w、高 w/2（原图像素坐标）
+ * @returns {Promise<Buffer>} PNG，w × w/2
+ */
+export async function extractIsoDiamond(buffer, rect) {
+  const x = Math.round(Number(rect?.x));
+  const y = Math.round(Number(rect?.y));
+  const w = Math.round(Number(rect?.w));
+  if (![x, y, w].every(Number.isFinite) || x < 0 || y < 0 || w < 8) throw new Error('菱形裁剪框无效');
+  const diamondH = Math.round(w / 2);
+  if (diamondH < 4) throw new Error('菱形裁剪框无效');
 
-    // 菱形 alpha 蒙版：2:1 菱形之外全透明（裁剪框四角是侧面/背景残留，互锁时会露出来）。
-    // 容差 +6%：边缘略外扩，避免相邻菱形之间出现发丝缝
-    const cx = diamondW / 2;
-    const cy = diamondH / 2;
-    const EPS = 1.06;
-    for (let y = 0; y < diamondH; y++) {
-      for (let x = 0; x < diamondW; x++) {
-        if (Math.abs(x + 0.5 - cx) / cx + Math.abs(y + 0.5 - cy) / cy > EPS) {
-          cropped[(y * diamondW + x) * 4 + 3] = 0;
-        }
+  const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  if (x + w > width || y + diamondH > height) throw new Error('菱形裁剪框超出图片范围');
+
+  const cropped = await sharp(data, { raw: { width, height, channels: 4 } })
+    .extract({ left: x, top: y, width: w, height: diamondH })
+    .raw()
+    .toBuffer();
+
+  // 菱形 alpha 蒙版：2:1 菱形之外全透明（裁剪框四角是侧面/背景残留，互锁时会露出来）。
+  // 容差 +6%：边缘略外扩，避免相邻菱形之间出现发丝缝
+  const cx = w / 2;
+  const cy = diamondH / 2;
+  const EPS = 1.06;
+  for (let py = 0; py < diamondH; py++) {
+    for (let px = 0; px < w; px++) {
+      if (Math.abs(px + 0.5 - cx) / cx + Math.abs(py + 0.5 - cy) / cy > EPS) {
+        cropped[(py * w + px) * 4 + 3] = 0;
       }
     }
-
-    return sharp(cropped, { raw: { width: diamondW, height: diamondH, channels: 4 } })
-      .png()
-      .toBuffer();
-  } catch {
-    return buffer;
   }
+
+  return sharp(cropped, { raw: { width: w, height: diamondH, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/**
+ * 生成端地砖归一化：裁出顶面菱形，输出刚好铺满画幅的 2:1 菱形贴图（接缝完美互锁）。
+ * 裁掉侧面后所有地砖都是标准菱形，立体感交给建筑/道具。
+ * 额外返回检测到的框，记进素材 meta 后素材库可拿它当初始菱形让用户微调。
+ * 检测失败时原样返回（调用方按普通方图降级处理）。
+ * @param {Buffer} buffer - 原始生成图
+ * @returns {Promise<{buffer:Buffer,rect:{x:number,y:number,w:number}|null}>}
+ */
+export async function flattenIsoTileWithRect(buffer) {
+  const rect = await detectIsoDiamond(buffer);
+  if (!rect) return { buffer, rect: null };
+  try {
+    return { buffer: await extractIsoDiamond(buffer, rect), rect };
+  } catch {
+    return { buffer, rect: null };
+  }
+}
+
+/**
+ * 只要图的老入口：等价于 flattenIsoTileWithRect(buffer).buffer
+ * @param {Buffer} buffer - 原始生成图
+ * @returns {Promise<Buffer>} PNG，内容为 2:1 菱形顶面
+ */
+export async function flattenIsoTile(buffer) {
+  return (await flattenIsoTileWithRect(buffer)).buffer;
 }
 
 /**
@@ -273,8 +325,9 @@ export async function postProcessAsset(buffer, { targetW, targetH, removeBg = fa
     buffer = await cropToContent(buffer);
   }
   if (smoothResize && targetW && targetH) {
-    // 平滑轻缩：保留插画画质；cropContent 后必须按内容比例适配，不能强填目标画幅
-    return sharp(buffer).resize(targetW, targetH, { fit: 'inside' }).png().toBuffer();
+    // 平滑轻缩：保留插画画质；cropContent 后必须按内容比例适配，不能强填目标画幅；
+    // withoutEnlargement：小图不放大（放大只会糊），原样保留分辨率
+    return sharp(buffer).resize(targetW, targetH, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
   }
   if (targetW && targetH) {
     // 先抠白再像素化：避免降采样把背景白边混进前景边缘

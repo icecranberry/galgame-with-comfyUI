@@ -17,7 +17,7 @@
         </div>
 
         <!-- ── 居民列表 ── -->
-        <div v-if="!detail && tab === 'npcs'" class="ap-body">
+        <div v-if="!detail && tab === 'npcs'" class="ap-body" :class="{ 'is-scanning': !!autoGen.npcId }">
           <div class="ap-row" role="button" tabindex="0" @click="detail = { type: 'player' }" @keydown.enter="detail = { type: 'player' }">
             <div class="ap-row-thumb is-portrait">
               <img v-if="playerKit.portrait?.status === 'ready'" :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)" alt="">
@@ -73,6 +73,11 @@
               加入小镇
             </linshe-button>
           </div>
+          <!-- 新增居民自动生成中：酒馆招募同款扫描遮罩 -->
+          <div v-if="autoGen.npcId" class="scan-overlay">
+            <div class="scan-line"></div>
+            <div class="scan-text">{{ autoGen.status }}</div>
+          </div>
         </div>
 
         <!-- ── NPC 详情页 ── -->
@@ -83,6 +88,7 @@
                 <TownAssetThumb
                   v-if="detailNpc.portrait?.status === 'ready'"
                   class="ap-portrait-thumb"
+                  fill
                   :asset="detailNpc.portrait"
                   :show-name="false"
                   @edit="openAssetManager(detailNpc.portrait, `${detailNpc.displayName} 立绘`)"
@@ -116,6 +122,7 @@
                   <TownAssetThumb
                     v-if="detailNpc.sprites?.[dir]?.status === 'ready'"
                     class="ap-sprite"
+                    fill
                     :asset="detailNpc.sprites[dir]"
                     :show-name="false"
                     @edit="openAssetManager(detailNpc.sprites[dir], `${detailNpc.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
@@ -178,6 +185,7 @@
               <TownAssetThumb
                 v-if="playerKit.portrait?.status === 'ready'"
                 class="ap-portrait-thumb"
+                fill
                 :asset="playerKit.portrait"
                 :show-name="false"
                 @edit="openAssetManager(playerKit.portrait, '我 · 立绘 · 图片管理')"
@@ -195,6 +203,7 @@
                   <TownAssetThumb
                     v-if="playerKit.sprites?.[direction]?.status === 'ready'"
                     class="ap-sprite"
+                    fill
                     :asset="playerKit.sprites[direction]"
                     :show-name="false"
                     @edit="openAssetManager(playerKit.sprites[direction], `我 · ${direction === 'down' ? '正面' : '背面'}小人 · 图片管理`)"
@@ -249,6 +258,7 @@
                 <TownAssetThumb
                   v-if="charPortraitAsset(detailChar)"
                   class="ap-portrait-thumb"
+                  fill
                   :asset="charPortraitAsset(detailChar)"
                   :show-name="false"
                   :editable="!!charPortraitAsset(detailChar)?.id"
@@ -282,6 +292,7 @@
                   <TownAssetThumb
                     v-if="charSpriteAsset(detailChar, dir)"
                     class="ap-sprite"
+                    fill
                     :asset="charSpriteAsset(detailChar, dir)"
                     :show-name="false"
                     @edit="openAssetManager(charSpriteAsset(detailChar, dir), `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
@@ -706,20 +717,71 @@ async function addNpc() {
   if (!newNpc.name.trim() || adding.value) return
   adding.value = true
   try {
-    await api.createTownNpc({
+    const data = await api.createTownNpc({
       displayName: newNpc.name.trim(),
       job: newNpc.job.trim(),
-      persona: newNpc.persona.trim(),
+      // 一句话人设作为 brief 种子；后端会自动生成完整人格卡与全套素材
+      brief: newNpc.persona.trim(),
     })
     newNpc.name = ''
     newNpc.job = ''
     newNpc.persona = ''
     await loadNpcs()
+    if (data?.npc?.id) startAutoGenWatch(data.npc.id)
   } catch (err) {
     console.warn('[town-admin] add npc failed:', err?.message)
   } finally {
     adding.value = false
   }
+}
+
+// ── 新增居民自动生成进度（人格卡 → 全套图片素材） ──
+const AUTO_GEN_TIMEOUT_MS = 10 * 60_000
+const autoGen = reactive({ npcId: null, timer: null, status: '', startedAt: 0 })
+
+function autoGenStage(npc) {
+  if (!npc) return null
+  if (!String(npc.persona || '').trim()) return '正在生成人格卡…'
+  const portraitReady = npc.portrait?.status === 'ready'
+  const spritesReady = npc.sprites?.down?.status === 'ready' && npc.sprites?.up?.status === 'ready'
+  if (!portraitReady || !spritesReady) return '人格卡已就绪，正在生成图片素材（小人 + 立绘）…'
+  return null // 全部完成
+}
+
+function stopAutoGenWatch(message = '') {
+  if (autoGen.timer) { clearInterval(autoGen.timer); autoGen.timer = null }
+  autoGen.npcId = null
+  autoGen.status = message
+}
+
+async function refreshAutoGenStatus() {
+  if (!autoGen.npcId) return
+  if (Date.now() - autoGen.startedAt > AUTO_GEN_TIMEOUT_MS) {
+    stopAutoGenWatch('自动生成超时，可稍后在居民详情页手动补齐素材')
+    await loadNpcs()
+    return
+  }
+  try {
+    const data = await api.fetchTownNpc(autoGen.npcId)
+    const stage = autoGenStage(data?.npc)
+    if (stage) {
+      autoGen.status = stage
+    } else {
+      stopAutoGenWatch('人格卡与全套素材已自动生成完成')
+      await loadNpcs()
+    }
+  } catch (err) {
+    console.warn('[town-admin] auto-gen status poll failed:', err?.message)
+  }
+}
+
+function startAutoGenWatch(npcId) {
+  stopAutoGenWatch()
+  autoGen.npcId = npcId
+  autoGen.startedAt = Date.now()
+  autoGen.status = '已加入小镇，正在自动生成人格卡…'
+  autoGen.timer = setInterval(refreshAutoGenStatus, 4000)
+  refreshAutoGenStatus()
 }
 
 async function generateAllMissingNpcSprites() {
@@ -834,9 +896,19 @@ watch(() => [props.open, town.snapshot?.worldId, town.snapshot?.worldEpoch], ([o
     npcs.value = []; chars.value = []
     playerKit.sprites = {}; playerKit.portrait = null
     detail.value = null; manager.open = false
+    stopAutoGenWatch() // 世界重置后旧居民已不存在，停止进度跟踪
   }
   for (const key of Object.keys(spriteErrors)) delete spriteErrors[key]
-  if (!open) deliveriesOpen.value = false
+  if (!open) {
+    deliveriesOpen.value = false
+    // 关面板只暂停轮询；后台生成继续，npcId 保留以便重开面板时恢复进度显示
+    if (autoGen.timer) { clearInterval(autoGen.timer); autoGen.timer = null }
+  } else if (autoGen.npcId && !autoGen.timer) {
+    // 重开面板：若上次的新居民还没生成完，恢复进度轮询
+    autoGen.startedAt = Date.now() - AUTO_GEN_TIMEOUT_MS / 2
+    autoGen.timer = setInterval(refreshAutoGenStatus, 4000)
+    refreshAutoGenStatus()
+  }
   ++settingsScope; savingSettings.value = false; loadingSettings.value = false; settingsReady.value = false
   settingsError.value = ''; settingsSaved.value = false
   if (open) {
@@ -850,6 +922,7 @@ onBeforeUnmount(() => {
   alive = false
   ++assetScope
   ++settingsScope
+  stopAutoGenWatch()
 })
 </script>
 
@@ -905,6 +978,7 @@ onBeforeUnmount(() => {
 .ap-tabs { display: flex; gap: 6px; padding: 6px 18px 10px; }
 
 .ap-body {
+  position: relative; /* 扫描遮罩定位基准 */
   flex: 1;
   overflow-y: auto;
   padding: 4px 18px 24px;
@@ -1008,7 +1082,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 300px;
   border-radius: 14px;
-  background: #efe9de;
+  background: #fbf8f3;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1046,7 +1120,7 @@ onBeforeUnmount(() => {
   width: 44px;
   height: 58px;
   border-radius: 8px;
-  background: #f1ebe1;
+  background: #fbf8f3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1109,6 +1183,50 @@ onBeforeUnmount(() => {
 .ap-add-grid { display: flex; gap: 8px; }
 .ap-add-grid > * { flex: 1; }
 .ap-add > :last-child { align-self: flex-end; }
+
+/* ── 新增居民自动生成：酒馆招募同款扫描遮罩 ── */
+.scan-overlay {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  overflow: hidden;
+}
+.scan-line {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: ap-scan-sweep 2s ease-in-out infinite;
+  box-shadow: 0 0 24px rgba(224, 123, 108, 0.6), 0 0 8px rgba(224, 123, 108, 0.3);
+}
+@keyframes ap-scan-sweep {
+  0%   { top: 10%; opacity: 0.2; }
+  25%  { top: 90%; opacity: 1; }
+  50%  { top: 90%; opacity: 0.2; }
+  75%  { top: 10%; opacity: 1; }
+  100% { top: 10%; opacity: 0.2; }
+}
+.scan-text {
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 600;
+  animation: ap-scan-pulse 1.2s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(224, 123, 108, 0.3);
+  padding: 0 16px;
+  text-align: center;
+}
+@keyframes ap-scan-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.97); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
 
 /* ── 设置 ── */
 .ap-setting { display: flex; align-items: center; gap: 12px; }

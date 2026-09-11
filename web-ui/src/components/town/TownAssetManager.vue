@@ -17,14 +17,53 @@
             </div>
           </div>
 
+          <input
+            ref="fileEl"
+            class="tam-file"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            @change="onFilePicked"
+          >
+
           <div class="tam-editor">
+            <!-- 地皮：单独一套菱形裁剪逻辑——在裁剪前原图上调菱形，而不是在已成型的 64×32 上裁 -->
+            <TownTileCropper
+              v-if="open && displayAsset?.id && useTileCropper"
+              :key="`tile-${displayAsset.id}`"
+              :asset-id="displayAsset.id"
+              :src="tileSourceUrl"
+              :preview-src="srcUrl"
+              :initial="tileCropInitial"
+              :generation-step="generationStep"
+              :generation-params="generationParams"
+              :is-portrait="portraitConfig"
+              :config-status="generationStatus"
+              @update:generation-params="queueGenerationConfigSave"
+              @cropped="refreshAsset"
+            >
+              <template #actions>
+                <linshe-button
+                  variant="secondary" size="sm"
+                  :loading="uploadBusy"
+                  :disabled="!displayAsset?.id"
+                  title="用本地图片替换这张地皮（会按地皮规格自动裁成菱形贴图）"
+                  @click="pickUpload"
+                >🖼 上传图片</linshe-button>
+                <linshe-button
+                  variant="secondary" size="sm"
+                  :loading="regenBusy"
+                  :disabled="!displayAsset?.id"
+                  @click="regenerateAsset"
+                >重新生成</linshe-button>
+              </template>
+            </TownTileCropper>
             <TownImageEditor
-              v-if="open && displayAsset?.id"
+              v-else-if="open && displayAsset?.id"
               :key="displayAsset.id"
               :src="srcUrl"
               :asset-id="displayAsset.id"
               crop-mode
-              :hint="hint"
+              :hint="editorHint"
               :generation-step="generationStep"
               :generation-params="generationParams"
               :is-portrait="portraitConfig"
@@ -32,29 +71,34 @@
               @update:generation-params="queueGenerationConfigSave"
               @saved="refreshAsset"
               @cropped="refreshAsset"
-            />
+            >
+              <template #actions>
+                <!-- HiresFix 只属于角色大立绘的详情：地皮 / 建筑 / 道具 / 像素小人不提供 -->
+                <linshe-button
+                  v-if="portraitConfig"
+                  variant="secondary" size="sm"
+                  :loading="hiresBusy"
+                  @click="refineAsset"
+                >HiresFix</linshe-button>
+                <linshe-button
+                  variant="secondary" size="sm"
+                  :loading="uploadBusy"
+                  :disabled="!displayAsset?.id"
+                  title="用本地图片替换这张素材（会按素材规格自动抠白 / 裁切 / 缩放）"
+                  @click="pickUpload"
+                >🖼 上传图片</linshe-button>
+                <linshe-button
+                  variant="secondary" size="sm"
+                  :loading="regenBusy"
+                  :disabled="!displayAsset?.id"
+                  @click="regenerateAsset"
+                >重新生成</linshe-button>
+              </template>
+            </TownImageEditor>
           </div>
 
-          <div class="tam-actions">
-            <div class="tam-actions-left">
-              <span v-if="error" class="tam-error">{{ error }}</span>
-            </div>
-            <div class="tam-actions-right">
-              <linshe-button
-                v-if="displayAsset?.id"
-                variant="secondary"
-                size="sm"
-                :loading="hiresBusy"
-                @click="refineAsset"
-              >HiresFix</linshe-button>
-              <linshe-button
-                variant="primary"
-                size="sm"
-                :loading="regenBusy"
-                :disabled="!displayAsset?.id"
-                @click="regenerateAsset"
-              >重新生成</linshe-button>
-            </div>
+          <div v-if="error" class="tam-actions">
+            <span class="tam-error">{{ error }}</span>
           </div>
         </div>
       </div>
@@ -74,6 +118,7 @@ import { computed, ref, watch } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownImageEditor from './TownImageEditor.vue'
+import TownTileCropper from './TownTileCropper.vue'
 import TownAssetPromptDialog from './TownAssetPromptDialog.vue'
 
 const ASSET_STEP_LABELS = { tiles: '地皮', buildings: '建筑/道具', npcs: '居民', player: '玩家' }
@@ -93,6 +138,8 @@ const localAsset = ref(null)
 const promptOpen = ref(false)
 const regenBusy = ref(false)
 const hiresBusy = ref(false)
+const uploadBusy = ref(false)
+const fileEl = ref(null)
 const error = ref('')
 const generationSettings = ref(null)
 const generationSaving = ref(false)
@@ -106,6 +153,18 @@ const displayAsset = computed(() => localAsset.value || props.asset)
 const srcUrl = computed(() => displayAsset.value?.image_path
   ? `${displayAsset.value.image_path}?v=${displayAsset.value.meta?.updatedAt ?? Date.now()}`
   : displayAsset.value?.src || '')
+
+/** 地皮 / 道路：成品是 64×32 菱形贴图，单独走菱形裁剪逻辑（其余素材仍是通用编辑器） */
+const isTileAsset = computed(() => ['ground', 'road'].includes(String(displayAsset.value?.kind || '')))
+const tileSourceUrl = computed(() => {
+  const meta = displayAsset.value?.meta
+  if (!meta?.sourceImage) return ''
+  return `${meta.sourceImage}?v=${meta.sourceUpdatedAt ?? meta.updatedAt ?? 0}`
+})
+const useTileCropper = computed(() => isTileAsset.value && !!tileSourceUrl.value)
+/** 初始菱形：用户上次调的 > 生成时自动检测的 */
+const tileCropInitial = computed(() => displayAsset.value?.meta?.tileCrop || displayAsset.value?.meta?.sourceDiamond || null)
+const editorHint = computed(() => (isTileAsset.value ? '这张地皮没有裁剪前原图，重新生成后才能用菱形微调' : props.hint))
 
 function generationStepForAsset(asset) {
   const kind = String(asset?.kind || '')
@@ -270,6 +329,52 @@ async function refineAsset() {
   }
 }
 
+// ── 主动上传本地图片替换这张素材 ──
+
+function pickUpload() {
+  if (uploadBusy.value) return
+  error.value = ''
+  fileEl.value?.click()
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function onFilePicked(event) {
+  const file = event?.target?.files?.[0]
+  if (event?.target) event.target.value = '' // 清空后同一个文件也能再次上传
+  if (!file) return
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    error.value = '请上传 PNG / JPG / WEBP 图片'
+    return
+  }
+  if (file.size > 6 * 1024 * 1024) {
+    error.value = '图片过大，请压缩后再上传（不超过 6MB）'
+    return
+  }
+  const asset = displayAsset.value
+  if (!asset?.id) return
+  error.value = ''
+  uploadBusy.value = true
+  try {
+    await flushGenerationConfigSave()
+    const dataUrl = await readAsDataUrl(file)
+    const data = await api.uploadTownAssetImage(asset.id, dataUrl)
+    localAsset.value = data.asset || null
+    if (data.asset) emit('updated', data.asset)
+  } catch (err) {
+    error.value = `上传失败：${err?.message || err}`
+  } finally {
+    uploadBusy.value = false
+  }
+}
+
 watch(() => props.open, async (open) => {
   if (open) {
     localAsset.value = null
@@ -320,14 +425,13 @@ watch(() => props.open, async (open) => {
   flex-direction: column;
 }
 
+.tam-file { display: none; }
+
 .tam-actions {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
   gap: 10px;
 }
-.tam-actions-left { min-width: 0; flex: 1; }
-.tam-actions-right { display: flex; align-items: center; gap: 8px; }
 .tam-error {
   font-size: 11px;
   color: #c0564a;

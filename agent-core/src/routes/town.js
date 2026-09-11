@@ -6,11 +6,11 @@
  *          POST /api/town/player/dir                — WASD 单步 {dx, dy}
  *          GET  /api/town/encounters/:id/messages   — 相遇对话记录
  *          POST /api/town/tick                      — 调试：手动触发一拍
- * 素材库   GET/POST /api/town/assets、POST :id/regenerate、DELETE :id、POST /batch
+ * 素材库   GET/POST /api/town/assets、POST :id/regenerate、POST :id/upload（手动上传图片替换）、DELETE :id、POST /batch
  * 地图     GET  /api/town/map                       — 渲染载荷（layers + assets）
  *          PUT  /api/town/map                       — 编辑器保存（version+1 广播）
  * 向导     GET/POST/PUT/DELETE /api/town/init*      — 七步初始化流程
- * 居民     GET/POST /api/town/npcs、PUT/DELETE :id、:id/sprites、:id/reroll、:id/chat、:id/messages
+ * 居民     GET/POST /api/town/npcs、PUT/DELETE :id、:id/sprites、:id/portrait、:id/asset-set（一次出齐全套）、:id/reroll、:id/chat、:id/messages
  * 角色     GET  /api/town/characters                — 素材状态 + 入住状态（管理面板）
  *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}
  */
@@ -22,7 +22,7 @@ import {
   generateCharacterSprites, getTownSettings, updateTownSettings, resetWorld,
 } from '../services/town/townService.js';
 import {
-  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, getAssetById, cropAssetImage, refineAssetWithHires,
+  listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, importAssetImage, getAssetById, cropAssetImage, cropTileAssetImage, refineAssetWithHires,
   updateAssetGenerationConfig,
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
@@ -39,9 +39,9 @@ import {
   regenerateNpcRoster,
 } from '../services/town/townInitService.js';
 import {
-  listNpcs, getNpc, createNpc, updateNpc, deleteNpc,
-  generateNpcSprites, generateNpcPortrait, generateCharacterPortrait,
-  regenerateNpcPersonaCard,
+  listNpcs, getNpc, updateNpc, deleteNpc,
+  generateNpcSprites, generateNpcPortrait, generateNpcAssetSet, generateCharacterPortrait,
+  regenerateNpcPersonaCard, createNpcWithOnboarding,
   rerollNpc, getNpcChatHistory, chatWithNpc, inviteNpcAsCharacter,
   getPlayerKit, regeneratePlayerKit, regeneratePlayerSprite, regeneratePlayerPortrait,
 } from '../services/town/townNpcService.js';
@@ -301,6 +301,15 @@ router.post('/assets/:id/image', async (req, res) => {
   }
 });
 
+// 手动上传本地图片替换素材（base64 dataUrl）：走生成同款后处理管线，直接变成可用成品
+router.post('/assets/:id/upload', async (req, res) => {
+  try {
+    const asset = await importAssetImage(parseInt(req.params.id, 10), req.body?.dataUrl);
+    res.json({ asset });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || '上传失败' });
+  }
+});
 // 按截取框裁剪素材并覆盖（放大查看后划定最终成图范围）
 router.post('/assets/:id/crop', async (req, res) => {
   try {
@@ -308,6 +317,16 @@ router.post('/assets/:id/crop', async (req, res) => {
     res.json({ asset });
   } catch (err) {
     res.status(400).json({ error: err?.message || '裁剪失败' });
+  }
+});
+
+// 地砖专用：按用户调整的菱形在「裁剪前原图」上重裁（x/y/w，高 = 宽 / 2），覆盖成品贴图
+router.post('/assets/:id/crop-tile', async (req, res) => {
+  try {
+    const asset = await cropTileAssetImage(parseInt(req.params.id, 10), req.body || {});
+    res.json({ asset });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || '地砖裁剪失败' });
   }
 });
 
@@ -463,10 +482,20 @@ router.get('/npcs/:id', (req, res) => {
 });
 
 router.post('/npcs', (req, res) => {
-  const { displayName, persona, job, traits } = req.body || {};
-  if (!displayName) return res.status(400).json({ error: 'displayName 必填' });
+  const { displayName, persona, brief, job, traits } = req.body || {};
+  if (!displayName || !String(displayName).trim()) return res.status(400).json({ error: 'displayName 必填' });
+  // 一句话人设统一归位到 brief（旧字段名叫 persona），由后台流水线据此生成完整人格卡
+  const npcBrief = String(brief ?? persona ?? '').trim().slice(0, 300);
   const mapId = getMapPayload()?.id ?? null;
-  const npc = createNpc({ mapId, displayName, persona, job, traits });
+  // 建档同步返回，人格卡 → 作息 → 全套图片素材在后台自动生成
+  const npc = createNpcWithOnboarding({
+    mapId,
+    displayName: String(displayName).trim(),
+    persona: '',
+    brief: npcBrief,
+    job: String(job || '').trim().slice(0, 20),
+    traits: traits && typeof traits === 'object' ? traits : {},
+  });
   res.json({ npc });
 });
 
@@ -497,6 +526,16 @@ router.post('/npcs/:id/portrait', async (req, res) => {
     res.json(await generateNpcPortrait(parseInt(req.params.id, 10), req.body || {}));
   } catch (err) {
     res.status(500).json({ error: err?.message || '立绘生成失败' });
+  }
+});
+
+// 一次出齐全套素材（正面 / 背面 / 大立绘）：一次 LLM 返回三条提示词后再分别出图
+router.post('/npcs/:id/asset-set', async (req, res) => {
+  try {
+    res.json(await generateNpcAssetSet(parseInt(req.params.id, 10), { ...(req.body || {}), refreshAppearance: req.body?.refreshAppearance === true }));
+  } catch (err) {
+    if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
+    res.status(500).json({ error: err?.message || '素材生成失败' });
   }
 });
 

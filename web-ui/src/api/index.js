@@ -1972,9 +1972,18 @@ export function saveTownAssetImage(id, dataUrl) {
   return jsonRequest(`${BASE}/town/assets/${id}/image`, townJson('POST', { dataUrl }))
 }
 
+// 手动上传本地图片替换素材（base64 dataUrl）：后端按素材规格走生成同款后处理
+export function uploadTownAssetImage(id, dataUrl) {
+  return jsonRequest(`${BASE}/town/assets/${id}/upload`, townJson('POST', { dataUrl }))
+}
 // 按截取框裁剪素材并覆盖（放大查看后划定最终成图范围）
 export function cropTownAsset(id, rect) {
   return jsonRequest(`${BASE}/town/assets/${id}/crop`, townJson('POST', rect))
+}
+
+// 地砖专用：按菱形框（x/y/w，高 = 宽 / 2）在裁剪前原图上重裁并覆盖成品
+export function cropTownTileAsset(id, diamond) {
+  return jsonRequest(`${BASE}/town/assets/${id}/crop-tile`, townJson('POST', diamond))
 }
 
 // 小镇立绘 HiresFix 细化（按全局 HiresFix 设置覆盖原图）
@@ -2075,6 +2084,13 @@ export function generateTownNpcSprites(id, overrides = {}) {
 
 export function generateTownNpcPortrait(id, overrides = {}) {
   return jsonRequest(`${BASE}/town/npcs/${id}/portrait`, townJson('POST', overrides))
+}
+
+/** 一次出齐全套素材（正面 / 背面 / 大立绘）：后端一次 LLM 返回三条提示词再分别出图 */
+export function generateTownNpcAssetSet(id, overrides = {}) {
+  const body = { ...overrides }
+  if (typeof body.refreshAppearance !== 'boolean') delete body.refreshAppearance
+  return jsonRequest(`${BASE}/town/npcs/${id}/asset-set`, townJson('POST', body))
 }
 
 export function regenerateTownNpcPersonaCard(id, overrides = {}) {

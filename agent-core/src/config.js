@@ -123,8 +123,8 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     generation: {
       styleTags: '',
       steps: {
-        tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
-        buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        tiles: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
+        buildings: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
         npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
         player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
       },

@@ -653,7 +653,8 @@ function initSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       map_id INTEGER NOT NULL,
       display_name TEXT NOT NULL,
-      persona TEXT DEFAULT '',           -- 轻量人设卡（一段话 + 性格关键词）
+      persona TEXT DEFAULT '',           -- 完整人格卡（建档时按 brief 生成）
+      brief TEXT DEFAULT '',             -- 一句话人设（名单生成/用户手填，人格卡生成种子）
       appearance_desc TEXT DEFAULT '',   -- 精灵生成用外观描述
       job TEXT DEFAULT '', home_location_id INTEGER,
       routine_json TEXT DEFAULT '[]',    -- [{start:"08:00",end:"12:00",activity,locationKey}]
@@ -1512,6 +1513,11 @@ function migrateTownV2Schema(db) {
       db.exec(`ALTER TABLE town_npcs ADD COLUMN character_id INTEGER`);
       console.log('[db] Added town_npcs.character_id column');
     }
+    // 向导「一句话人设」：人格卡生成种子，重掷人格卡时复用（旧库无此列）
+    if (npcCols.length > 0 && !npcCols.find(c => c.name === 'brief')) {
+      db.exec(`ALTER TABLE town_npcs ADD COLUMN brief TEXT DEFAULT ''`);
+      console.log('[db] Added town_npcs.brief column');
+    }
     // 向导提前建档：map_id 需可空（建档时地图尚未生成）
     const mapIdCol = npcCols.find(c => c.name === 'map_id');
     if (mapIdCol && mapIdCol.notnull) {
@@ -1523,6 +1529,7 @@ function migrateTownV2Schema(db) {
           map_id INTEGER,
           display_name TEXT NOT NULL,
           persona TEXT DEFAULT '',
+          brief TEXT DEFAULT '',
           appearance_desc TEXT DEFAULT '',
           job TEXT DEFAULT '', home_location_id INTEGER,
           routine_json TEXT DEFAULT '[]',
@@ -1532,8 +1539,8 @@ function migrateTownV2Schema(db) {
           character_id INTEGER,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO town_npcs_new (id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at)
-          SELECT id, map_id, display_name, persona, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at FROM town_npcs;
+        INSERT INTO town_npcs_new (id, map_id, display_name, persona, brief, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at)
+          SELECT id, map_id, display_name, persona, brief, appearance_desc, job, home_location_id, routine_json, traits_json, sprite_ready, town_enabled, character_id, created_at FROM town_npcs;
         DROP TABLE town_npcs;
         ALTER TABLE town_npcs_new RENAME TO town_npcs;
       `);
@@ -2071,8 +2078,8 @@ function migrateTownGenerationSettings(db) {
     db.prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('town_generation_settings', ?)").run(JSON.stringify({
       styleTags,
       steps: {
-        tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
-        buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [] },
+        tiles: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
+        buildings: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [] },
         npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
         player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
       },

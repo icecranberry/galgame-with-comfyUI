@@ -23,6 +23,13 @@ function configuredThinking() {
   return { type: config.llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
 }
 
+// 模型输出日志上限：小镇相关日志（label 以「小镇」开头）完全输出，不截断
+function outputLogLimit(label) {
+  const name = String(label || '');
+  if (name.startsWith('小镇')) return Infinity;
+  return name.startsWith('schedule-gen:') ? 300 : 2000;
+}
+
 // 复用单个 OpenAI 客户端实例，避免每次调用都创建新的 HTTP Agent
 // 频繁创建 client 会实例化底层 undici 连接池，在高并发场景下浪费 FD 和内存
 let _client = null;
@@ -367,8 +374,9 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}]`);
-      const outputLimit = label.startsWith('schedule-gen:') ? 300 : 2000;
-      console.log((content || '').slice(0, outputLimit));
+      const outputLimit = outputLogLimit(label);
+      const outputText = content || '';
+      console.log(outputLimit === Infinity ? outputText : outputText.slice(0, outputLimit));
       logUsage(label, res.usage);
       recordLlmCall(label, res.usage);
       console.log('═════════════════════════════════════════════\n');
@@ -536,8 +544,10 @@ async function* _chatStreamInner(messages, {
     }
 
     console.log(`[${providerLabel()} ← ${label} end]`);
-    console.log((total || '(empty)').slice(0, 2000));
-    if (total.length > 2000) console.log(`... (${total.length} chars total, truncated)`);
+    const outputText = total || '(empty)';
+    const outputLimit = outputLogLimit(label);
+    console.log(outputLimit === Infinity ? outputText : outputText.slice(0, outputLimit));
+    if (outputLimit !== Infinity && outputText.length > outputLimit) console.log(`... (${outputText.length} chars total, truncated)`);
     logUsage(label, usage);
     recordLlmCall(label, usage);
     console.log('═══════════════════════════════════════════════\n');

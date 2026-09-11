@@ -30,7 +30,7 @@
         :placeholder="defaultPrefix"
         @update:model-value="v => emit('update:modelValue', { ...modelValue, prefix: v })"
       />
-      <div class="pp-preview">最终会拼成：<code>{{ (modelValue.prefix || defaultPrefix) || '（无）' }}, …其余内容</code></div>
+      <div class="pp-preview">最终会拼成：<code>{{ effectivePrefix || '（无）' }}, …其余内容</code></div>
     </div>
 
     <!-- LoRA：参考角色详情页的添加方式 -->
@@ -39,14 +39,23 @@
         LoRA（{{ displayLoras.length }}）
         <span class="pp-default-tag" v-if="displayLoras.length === 0">未启用</span>
       </div>
+      <div class="pp-recommend">
+        <span class="pp-recommend-tag">推荐</span>
+        <a
+          class="pp-recommend-link"
+          href="https://civitai.red/models/2865791/pixel-artist-style-lora-for-anima-dungeon-squad-game-style-and-coarsefine-pixel-art-style?modelVersionId=3237547"
+          target="_blank"
+          rel="noopener noreferrer"
+        >像素风 LoRA<span class="pp-recommend-arrow" aria-hidden="true">↗</span></a>
+      </div>
       <div v-if="showPortraitLora" class="pp-portrait-lora">
         <linshe-switch
           :model-value="!!modelValue.portraitLoras"
           size="sm"
-          aria-label="立绘应用LoRA"
+          aria-label="NPC大立绘也应用LoRA"
           @update:model-value="v => emit('update:modelValue', { ...modelValue, portraitLoras: !!v })"
         />
-        <span>立绘应用LoRA</span>
+        <span>NPC大立绘也应用 LoRA</span>
       </div>
       <TransitionGroup name="pp-pop" tag="div" class="pp-lora-list">
         <div v-for="(lora, idx) in displayLoras" :key="idx" class="pp-lora-item">
@@ -108,8 +117,8 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const DEFAULTS = {
-  tiles: 'pixel art, game sprite',
-  buildings: 'pixel art, game sprite',
+  tiles: 'pixel art, game sprite, white background',
+  buildings: 'pixel art, game sprite, white background',
   npcs: 'pixel art, mini human sized, full body, game sprite',
   player: 'pixel art, mini human sized, full body, game sprite',
 }
@@ -119,11 +128,24 @@ const artistValue = computed(() => props.modelValue.artist ?? DEFAULT_ARTIST)
 const showPortraitLora = computed(() => props.showPortraitLora && ['npcs', 'player'].includes(props.step))
 const defaultPrefix = computed(() => DEFAULTS[props.step] ?? '')
 
+/** 像素小人的硬 tag：后端 composeAssetPrompt 会补齐，预览同步体现，避免 UI 与真实 prompt 不一致 */
+const SPRITE_HARD_TAGS = ['chibi', 'big head']
+function hasTag(text, tag) {
+  const pattern = tag.split(/\s+/).join('\\s+')
+  return new RegExp(`(^|[^a-z0-9])${pattern}([^a-z0-9]|$)`, 'i').test(text)
+}
+const effectivePrefix = computed(() => {
+  const base = props.modelValue.prefix || defaultPrefix.value || ''
+  if (!['npcs', 'player'].includes(props.step)) return base
+  const missing = SPRITE_HARD_TAGS.filter(tag => !hasTag(base, tag))
+  return [base, missing.join(', ')].filter(Boolean).join(', ')
+})
+
 const STEP_HINTS = {
-  tiles: '地皮会默认加上 pixel art, game sprite',
-  buildings: '建筑会硬逻辑加上 pixel art, game sprite',
-  npcs: '像素小人会硬逻辑加上 mini human sized, full body',
-  player: '同像素小人；立绘默认不加前缀',
+  tiles: '地皮会默认加上 pixel art, game sprite, white background',
+  buildings: '建筑会硬逻辑加上 pixel art, game sprite, white background',
+  npcs: '像素小人会硬逻辑加上 chibi, big head 与 mini human sized, full body；大立绘默认不套 LoRA，要单独打开开关',
+  player: '同像素小人（硬逻辑加 chibi, big head）；大立绘默认不加前缀、也不套 LoRA，要单独打开开关',
 }
 const stepHint = computed(() => STEP_HINTS[props.step] ?? '')
 
@@ -233,6 +255,30 @@ onMounted(async () => {
   font-size: 11px;
   color: var(--text-primary);
 }
+
+.pp-recommend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+}
+.pp-recommend-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  background: rgba(224, 123, 108, 0.14);
+  color: var(--accent-hover);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.pp-recommend-link {
+  font-size: 10px;
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+.pp-recommend-link:hover { opacity: 1; text-decoration: underline; }
+.pp-recommend-arrow { margin-left: 2px; font-size: 9px; opacity: 0.75; }
 
 .pp-lora-list { display: flex; flex-direction: column; gap: 8px; }
 

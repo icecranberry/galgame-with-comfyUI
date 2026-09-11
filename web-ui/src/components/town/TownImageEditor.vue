@@ -1,5 +1,5 @@
 <template>
-  <div class="img-editor" :class="{ 'is-large': cropMode }">
+  <div class="img-editor" :class="{ 'is-large': cropMode, 'is-portrait': isPortrait }">
     <!-- 画布区：canvas 内部保持原图像素；CSS 只负责适配浏览器高度 -->
     <div
       ref="frameEl"
@@ -42,6 +42,8 @@
         </linshe-button>
 
         <linshe-button variant="ghost" size="sm" :disabled="!canUndo" @click="undoErase">撤销上一步</linshe-button>
+        <!-- 外部注入的操作（重新生成 / 立绘 HiresFix）：与主按钮同排 -->
+        <slot name="actions" />
         <linshe-button v-if="cropActive && !eraseMode" variant="primary" size="sm" :loading="cropping" @click="confirmCrop">确认裁剪</linshe-button>
         <linshe-button v-else variant="primary" size="sm" :loading="saving" :disabled="!dirty" @click="save">保存编辑</linshe-button>
       </div>
@@ -491,6 +493,12 @@ onBeforeUnmount(() => {
 
 .img-editor.is-large .ie-frame { min-height: 50vh; }
 
+/* 立绘（900×1600 竖图）画框拉高：普通横版画幅里竖图 contain 后只占中间一小条，观感像被压缩 */
+.img-editor.is-portrait .ie-frame {
+  height: min(78vh, 900px);
+  max-height: 86vh;
+}
+
 .ie-frame {
   position: relative;
   display: flex;
@@ -535,9 +543,14 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* 预览把像素素材（建筑/道具/地皮/小人）放大到画布尺寸：这里必须用最近邻，
+     否则浏览器平滑插值会把本来就小的像素贴图糊成一团（ctx.imageSmoothingEnabled 管不到 CSS 缩放） */
+  image-rendering: pixelated;
   transform-origin: 0 0;
   will-change: transform;
 }
+/* 立绘是 900×1600 插画，不是像素画，保持平滑缩放 */
+.img-editor.is-portrait .ie-canvas { image-rendering: auto; }
 
 .ie-info {
   position: fixed;

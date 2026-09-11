@@ -6,8 +6,8 @@ export const TOWN_GENERATION_STEPS = ['tiles', 'buildings', 'npcs', 'player'];
 export const DEFAULT_TOWN_GENERATION_SETTINGS = {
   styleTags: '',
   steps: {
-    tiles: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [], portraitLoras: false },
-    buildings: { prefix: 'pixel art, game sprite', artist: '@ebora', loras: [], portraitLoras: false },
+    tiles: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [], portraitLoras: false },
+    buildings: { prefix: 'pixel art, game sprite, white background', artist: '@ebora', loras: [], portraitLoras: false },
     npcs: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
     player: { prefix: 'pixel art, game sprite, mini human sized, full body', artist: '@ebora', loras: [], portraitLoras: false },
   },
@@ -61,6 +61,13 @@ export function mergeTownGenerationSettings(currentValue, patch = {}) {
       ...current.steps[step],
       ...(rawSteps[step] && typeof rawSteps[step] === 'object' ? rawSteps[step] : {}),
     };
+  }
+  // LoRA 是全镇共享的：任一类型改了 LoRA 都同步到所有步骤，避免「这一步加了、那一步没加」
+  const sharedLoras = TOWN_GENERATION_STEPS
+    .map(step => rawSteps[step]?.loras)
+    .find(list => Array.isArray(list));
+  if (sharedLoras) {
+    for (const step of TOWN_GENERATION_STEPS) mergedSteps[step] = { ...mergedSteps[step], loras: sharedLoras };
   }
   return normalizeTownGenerationSettings({
     ...current,

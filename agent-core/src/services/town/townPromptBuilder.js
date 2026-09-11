@@ -123,6 +123,69 @@ export async function generateSpritePrompt({ appearanceInfo, direction = 'down' 
   return text;
 }
 
+// ── 一次出齐全套（正面 / 背面 / 大立绘） ──
+
+const NPC_SET_OUTPUT_STRUCTURE = `【输出结构】
+必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：
+
+{
+  "down": "chibi pixel character sprite, front view facing the viewer, short black hair, silver eyes, white apron over a brown dress, small satchel, slender build, standing straight with hands at her sides, pure white background, no shadow on the ground, clean thick pixel outlines, limited color palette, solo character centered filling the frame",
+  "up": "chibi pixel character sprite, seen from behind, back view, short black hair, silver eyes, white apron tied in a bow at the back over a brown dress, small satchel across the back, slender build, standing straight with arms relaxed, pure white background, no shadow on the ground, clean thick pixel outlines, limited color palette, solo character centered filling the frame",
+  "portrait": "full body anime style character illustration, short black hair, silver eyes, white apron over a brown dress with a small satchel, standing in a relaxed pose holding a tray, soft rim light, pure white background, solo, vertical 9:16 composition"
+}
+
+字段约束：
+- down / up：同一个角色的像素小人精灵。先写至少 6 个准确外观锚点（发型、发色、瞳色、标志性服装、配饰、体型特征），再写站姿；down 必须是正面（front view facing the viewer），up 必须是背面（seen from behind, back view）；两者都要写清 pure white background、no shadow on the ground、chibi big head、clean thick pixel outlines、limited color palette、solo character centered filling the frame。各自 400 字符以内。
+- portrait：大立绘插画。先写外观锚点与服装外形，再写姿势与镜头；必须写清 pure white background、solo、全身从头顶到脚完整入画、约 9:16 竖幅构图；可有光效或少量与职业相关的实物点缀。800 字符以内。
+- 三个字段都必须有值，且各自是独立完整的英文段落；不要写「同上」「与 down 相同」这类引用。
+- 三个字段里 ALL text in English：不得出现任何中文字符（用英文描述，例如 ponytail、white apron）。
+- 值里不要用未转义的双引号（"），需要引号时用单引号（'）。`;
+
+/**
+ * 一次 LLM 调用生成一位居民的全套素材提示词（正面 / 背面 / 大立绘），返回 JSON 对象。
+ * 单张路径仍保留：需要单独重绘某一张时走 generateSpritePrompt / generatePortraitPrompt。
+ * @param {object} p - { appearanceInfo }
+ * @returns {Promise<{down:string, up:string, portrait:string}>}
+ */
+export async function generateNpcAssetPrompts({ appearanceInfo }) {
+  const msgs = [
+    ...system0And1(),
+    { role: 'system', content: SPRITE_OUTPUT_STRUCTURE },
+    { role: 'system', content: SPRITE_TASK_REQUIREMENTS },
+    { role: 'system', content: STANDING_IMAGE_PROMPT_RULE.rule_content },
+    { role: 'system', content: PORTRAIT_TASK_REQUIREMENTS },
+    { role: 'system', content: NPC_SET_OUTPUT_STRUCTURE },
+    { role: 'system', content: `【角色外观信息】\n${appearanceInfo}` },
+    { role: 'user', content: '请执行：一次输出这位居民三张素材的英文 prompt（正面像素小人 down、背面像素小人 up、大立绘 portrait），并严格按要求返回 JSON。' },
+  ];
+  const out = await chatSync(msgs, {
+    temperature: 0.7,
+    max_tokens: 1600,
+    response_format: { type: 'json_object' },
+    label: '小镇精灵提示词',
+  });
+  return parseNpcAssetPrompts(out);
+}
+
+/** 解析「一次出齐」的三张提示词：容错代码围栏与前后杂字，缺字段或过短直接抛错 */
+export function parseNpcAssetPrompts(content) {
+  const raw = String(content || '').replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch { /* 再试截取花括号之间的内容 */ }
+  if (!parsed || typeof parsed !== 'object') {
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start < 0 || end <= start) throw new Error('LLM 返回的精灵提示词不是 JSON');
+    try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { throw new Error('LLM 返回的精灵提示词 JSON 解析失败'); }
+  }
+  const result = {};
+  for (const key of ['down', 'up', 'portrait']) {
+    const value = typeof parsed[key] === 'string' ? stripFence(parsed[key]) : '';
+    if (value.length < 10) throw new Error(`LLM 返回的 ${key} 提示词不完整`);
+    result[key] = value;
+  }
+  return result;
+}
 // ── 建筑（等距 45°、白底、无底座地砖） ──
 
 const BUILDING_OUTPUT_STRUCTURE = `【输出结构】

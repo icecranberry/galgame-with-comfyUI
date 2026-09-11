@@ -13,7 +13,7 @@ import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS, captureTownAssetWorld } from './townAssetService.js';
-import { generateSpritePrompt, generatePortraitPrompt } from './townPromptBuilder.js';
+import { generateSpritePrompt, generatePortraitPrompt, generateNpcAssetPrompts } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection, buildCharacterPersona } from '../characterPersona.js';
 import { createTownAppearanceSignature, townAssetAppearanceStatus } from './townAppearanceSignature.js';
 import { getMapRow } from './townMapService.js';
@@ -59,6 +59,7 @@ function npcToDto(row) {
     mapId: row.map_id,
     displayName: row.display_name,
     persona: row.persona || '',
+    brief: row.brief || '',
     job: row.job || '',
     homeLocationId: row.home_location_id,
     routine,
@@ -78,27 +79,28 @@ export function npcCount() {
 
 // ── CRUD ──
 
-export function createNpc({ mapId, displayName, persona = '', job = '', traits = {}, routine = [], homeLocationId = null, townEnabled = 1 }) {
+export function createNpc({ mapId, displayName, persona = '', brief = '', job = '', traits = {}, routine = [], homeLocationId = null, townEnabled = 1 }) {
   const db = getDb();
   const r = db.prepare(`
-    INSERT INTO town_npcs (map_id, display_name, persona, job, routine_json, traits_json, home_location_id, town_enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(mapId ?? null, displayName, persona, job, JSON.stringify(routine), JSON.stringify(traits), homeLocationId, townEnabled ? 1 : 0);
+    INSERT INTO town_npcs (map_id, display_name, persona, brief, job, routine_json, traits_json, home_location_id, town_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(mapId ?? null, displayName, persona, brief, job, JSON.stringify(routine), JSON.stringify(traits), homeLocationId, townEnabled ? 1 : 0);
   return getNpc(Number(r.lastInsertRowid));
 }
 
-export function updateNpc(id, { displayName, persona, job, routine, traits, homeLocationId, townEnabled } = {}) {
+export function updateNpc(id, { displayName, persona, brief, job, routine, traits, homeLocationId, townEnabled } = {}) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(id);
   if (!row) return null;
   db.prepare(`
     UPDATE town_npcs SET
-      display_name = ?, persona = ?, job = ?,
+      display_name = ?, persona = ?, brief = ?, job = ?,
       routine_json = ?, traits_json = ?, home_location_id = ?, town_enabled = ?
     WHERE id = ?
   `).run(
     displayName ?? row.display_name,
     persona ?? row.persona,
+    brief ?? row.brief,
     job ?? row.job,
     routine ? JSON.stringify(routine) : row.routine_json,
     traits ? JSON.stringify(traits) : row.traits_json,
@@ -196,6 +198,8 @@ export async function generateNpcSprites(npcId, overrides = {}) {
   if (directions.some(dir => !SPRITE_DIRECTIONS.includes(dir))) {
     throw new Error('invalid sprite direction');
   }
+  // 批量路径（generateNpcAssetSet）会把一次 LLM 出齐的提示词传进来；缺哪一张就退回单独调 LLM
+  const presetPrompts = overrides.prompts && typeof overrides.prompts === 'object' ? overrides.prompts : null;
 
   for (const dir of directions) {
     guard.assertCurrent();
@@ -205,7 +209,8 @@ export async function generateNpcSprites(npcId, overrides = {}) {
     if (existing?.status === 'ready' && !overrides.force
       && (overrides.refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) === 'current')) continue;
     try {
-      const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
+      const preset = typeof presetPrompts?.[dir] === 'string' ? presetPrompts[dir].trim() : '';
+      const prompt = preset || await generateSpritePrompt({ appearanceInfo, direction: dir });
       guard.assertCurrent();
       appearanceGuard.assertCurrent();
       // 保留既有素材 ID，避免前端/地图仍引用旧 image_path 时出现 404。
@@ -250,35 +255,121 @@ export async function generateNpcPortrait(npcId, overrides = {}) {
   const existing = getAssetsByKey([key])[0];
   const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
   const appearanceGuard = captureNpcAppearance(npcId, 'portrait', styleTags);
-  const prompt = await generatePortraitPrompt({ appearanceInfo: appearanceGuard.appearanceInfo });
+  const preset = typeof overrides.prompt === 'string' ? overrides.prompt.trim() : '';
+  const prompt = preset || await generatePortraitPrompt({ appearanceInfo: appearanceGuard.appearanceInfo });
   guard.assertCurrent();
   appearanceGuard.assertCurrent();
+  // 大立绘默认不套 LoRA：调用方要显式传 portraitLoras 才应用（与玩家立绘一致）
   const asset = existing
     ? await regenerateAsset(existing.id, {
-      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist, expectedWorld: guard.expectedWorld, appearanceGuard,
+      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist, expectedWorld: guard.expectedWorld, appearanceGuard,
     })
     : await createAsset({
       kind: 'portrait', key, name: `${npcRow.display_name} 立绘`, expectedWorld: guard.expectedWorld, appearanceGuard,
       desc: appearanceGuard.description,
-      meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.loras, artist: overrides.artist },
+      meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
     });
   guard.assertCurrent();
   return { ok: true, asset };
 }
 
-/** 只重生成一位居民的完整人格卡，不改名字与职业 */
+/**
+ * 一次性生成一位居民的全套素材：正面 / 背面像素小人 + 大立绘。
+ * 三张提示词由**一次 LLM 调用**（JSON）出齐，再分别出图；单独重绘某一张时仍走
+ * generateNpcSprites（可带 direction）/ generateNpcPortrait，各自单独调 LLM。
+ */
+export async function generateNpcAssetSet(npcId, overrides = {}) {
+  const npcRow = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  if (!npcRow) throw new Error(`npc #${npcId} not found`);
+  const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
+  // 正/背与立绘的外观签名 mode 不同，但 NPC 两种 mode 的 appearanceInfo 完全一致，取一次即可
+  const appearanceGuard = captureNpcAppearance(npcId, 'sprite', styleTags);
+  const prompts = await generateNpcAssetPrompts({ appearanceInfo: appearanceGuard.appearanceInfo });
+  appearanceGuard.assertCurrent();
+  const sprites = await generateNpcSprites(npcId, { ...overrides, styleTags, prompts });
+  const portrait = await generateNpcPortrait(npcId, { ...overrides, styleTags, prompt: prompts.portrait });
+  return { ok: true, spriteReady: sprites.spriteReady, asset: portrait.asset };
+}
+/** 只重生成一位居民的完整人格卡，不改名字与职业；一句话人设 brief 沿用库里的，可被 overrides.brief 覆盖并回写 */
 export async function regenerateNpcPersonaCard(npcId, overrides = {}) {
   const row = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
   if (!row) throw new Error('NPC 不存在');
+  const brief = overrides.brief !== undefined
+    ? String(overrides.brief || '').trim().slice(0, 300)
+    : String(row.brief || '');
   const { card } = await generateNpcPersonaCard({
     displayName: row.display_name,
     job: row.job || '',
+    brief,
     worldHint: overrides.worldHint !== undefined ? overrides.worldHint : getWorldStyleTags(),
   });
-  updateNpc(npcId, { persona: card });
+  updateNpc(npcId, { persona: card, brief });
   // 外观可能变化，让素材状态进入待重建，但保留旧图直到用户重绘。
   getDb().prepare('UPDATE town_npcs SET sprite_ready = 0 WHERE id = ?').run(npcId);
   return getNpc(npcId);
+}
+
+// ── 新增居民自动入驻（人格卡 → 作息 → 全套素材） ──
+
+/**
+ * 新增居民的自动入驻流水线（后台异步执行，沿用向导/素材生成同款流程）：
+ * 1) LLM 生成完整人格卡（失败回退一句话人设，保证 persona 始终可用）
+ * 2) LLM 生成作息表（失败降级为自由闲逛）
+ * 3) 一次 LLM 出齐全部图片 prompt（正/背小人 + 立绘）→ 逐张生图
+ * 各阶段独立容错，前一阶段失败不阻塞后续阶段。
+ */
+export async function runNpcOnboarding(npcId) {
+  const db = getDb();
+  let row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  if (!row) throw new Error(`npc #${npcId} not found`);
+  console.log(`[townNpcs] onboarding start for npc #${npcId} (${row.display_name})`);
+
+  // 1. 完整人格卡
+  try {
+    const { card } = await generateNpcPersonaCard({
+      displayName: row.display_name,
+      job: row.job || '',
+      brief: String(row.brief || ''),
+      worldHint: getWorldStyleTags(),
+    });
+    updateNpc(npcId, { persona: card });
+    row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+  } catch (err) {
+    console.warn(`[townNpcs] onboarding persona card failed for #${npcId}, fallback to brief:`, err?.message);
+    if (!String(row.persona || '').trim() && String(row.brief || '').trim()) {
+      updateNpc(npcId, { persona: String(row.brief).slice(0, 300) });
+      row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(npcId);
+    }
+  }
+
+  // 2. 作息表
+  try {
+    const locations = db.prepare('SELECT key FROM town_locations ORDER BY id').all().map(r => r.key);
+    const routine = await generateRoutine(getNpc(npcId), [...locations, 'home']);
+    db.prepare('UPDATE town_npcs SET routine_json = ? WHERE id = ?').run(JSON.stringify(routine), npcId);
+  } catch (err) {
+    console.warn(`[townNpcs] onboarding routine failed for #${npcId}:`, err?.message);
+  }
+
+  // 3. 全套素材：一次 LLM 出齐三张 prompt，再逐张生图（小人 down/up + 立绘）
+  try {
+    await generateNpcAssetSet(npcId);
+  } catch (err) {
+    console.warn(`[townNpcs] onboarding asset set failed for #${npcId}:`, err?.message);
+  }
+  console.log(`[townNpcs] onboarding done for npc #${npcId}`);
+}
+
+/**
+ * 新增居民并立即开始自动入驻：建档同步返回（前端即时看到新居民），
+ * 人格卡 → 作息 → 全套图片素材在后台生成（同开镇时精灵后台补齐的模式）。
+ */
+export function createNpcWithOnboarding(params = {}) {
+  const npc = createNpc(params);
+  runNpcOnboarding(npc.id).catch(err => {
+    console.error(`[townNpcs] onboarding crashed for npc #${npc.id}:`, err?.message);
+  });
+  return npc;
 }
 
 /** 角色立绘：复用 characters.standing_url；没有才走 LLM 生成（存素材库 char_{id}_portrait） */
@@ -407,13 +498,20 @@ export async function regeneratePlayerPortrait(overrides = {}) {
 
 // ── NPC 人格卡（对齐酒馆招募角色流程：四层 system + 结构化模板，跳过网络搜索） ──
 
+/** 完整人格卡判定口径：向导建档 / 重掷共用，避免各处自行写正则 */
+export function isPersonaCard(text) {
+  const card = String(text || '');
+  return card.startsWith('你是') && card.includes('## 你的外观');
+}
+
 /**
  * 为居民生成结构化人格卡（你就是她/他 第二人称模板，同 characters 人格生成器）。
  * 外观统一放在「## 你的外观」，生图时由 characterPersona 统一截取。
- * @param {object} p - { displayName, job, worldHint }
+ * @param {object} p - { displayName, job, worldHint, brief }
+ * @param {string} [p.brief] 一句话人设（名单生成或用户手填）：人格卡的设定种子，重掷时保持人设稳定
  * @returns {Promise<{card: string}>} card 为完整人格卡
  */
-export async function generateNpcPersonaCard({ displayName, job = '', worldHint = '' }) {
+export async function generateNpcPersonaCard({ displayName, job = '', worldHint = '', brief = '' }) {
   const world = getWorldSetting();
   const worldBlock = world || '';
   const personaMsgs = [
@@ -446,7 +544,7 @@ export async function generateNpcPersonaCard({ displayName, job = '', worldHint 
 - 只输出人格卡本身（从"你是"开始），不要标题、解释或列表符号以外的格式
 - 你的外观 两段必须具体（发色/瞳色/服装颜色），后续生成像素小人与立绘都以此为准` });
   personaMsgs.push({ role: 'system', content: `【任务要求】
-你是一个角色人格生成器。用户会给出小镇居民的名字与职业，你为他们生成一张完整的人格卡。
+你是一个角色人格生成器。用户会给出小镇居民的名字、职业与一句话人设，你为他们生成一张完整的人格卡。
 
 你的任务：根据<world_setting>世界观，把这个居民写成有血有肉的角色。
 
@@ -454,13 +552,15 @@ export async function generateNpcPersonaCard({ displayName, job = '', worldHint 
 A. 你就是她/他 —— 所有描述从"你"出发。全文不得出现"扮演""模仿"等旁观字眼。
 B. 过去化为直觉 —— 经历塑造性格，但对话中不主动提及过去。
 C. 自我认知而非外部评价 —— 写"我怎么看自己"。
-D. 生活感 —— 这是小镇的日常居民，写ta的工作日常、邻里关系、生活小习惯。` });
+D. 生活感 —— 这是小镇的日常居民，写ta的工作日常、邻里关系、生活小习惯。
+E. 尊重给定设定 —— 给了「一句话人设」时，职业背景、性格关键词与好恶必须与它一致，只能扩写细节，不得推翻或改设定。` });
   personaMsgs.push({
     role: 'user',
     content: [
       worldHint ? `【用户额外指定】\n${worldHint}` : '',
       `居民名字：${displayName}`,
       job ? `职业：${job}` : '',
+      brief ? `一句话人设（必须遵循，可扩写细节，不得改变核心设定）：\n${brief}` : '',
       '请执行：生成这位居民的人格卡。',
     ].filter(Boolean).join('\n\n'),
   });
@@ -472,9 +572,7 @@ D. 生活感 —— 这是小镇的日常居民，写ta的工作日常、邻里�
   });
 
   const card = String(out || '').replace(/^\s*```(?:[a-z]+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-  if (!card.startsWith('你是') || !card.includes('## 你的外观')) {
-    throw new Error('人格卡缺少完整结构或「## 你的外观」');
-  }
+  if (!isPersonaCard(card)) throw new Error('人格卡缺少完整结构或「## 你的外观」');
   return { card };
 }
 

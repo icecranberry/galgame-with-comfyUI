@@ -12,7 +12,11 @@ export function renderMeta(asset = {}, instance = {}) {
     worldHeight: positive(m.worldHeight, null),
     alphaCutoff: Number.isFinite(m.alphaCutoff) ? Math.max(0.01, Math.min(1, m.alphaCutoff)) : 0.3,
     shadowMode: ['none', 'alpha_card', 'volume'].includes(m.shadowMode) ? m.shadowMode : asset.kind === 'building' && m.footprint ? 'volume' : 'alpha_card',
-    textureFilter: m.textureFilter === 'linear' ? 'linear' : 'nearest',
+    // 建筑/道具是「生成图降采样」的插画贴图：默认 linear + mipmap，缩小不锯齿、放大不结块；
+    // 地砖/路面保持 nearest，维持像素风硬边（单张素材可用 meta.textureFilter 覆盖）。
+    textureFilter: m.textureFilter === 'linear' || m.textureFilter === 'nearest'
+      ? m.textureFilter
+      : (asset.kind === 'building' || asset.kind === 'prop' ? 'linear' : 'nearest'),
   }
 }
 export const assetUrl = asset => {
