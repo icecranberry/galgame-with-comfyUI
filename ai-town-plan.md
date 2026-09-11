@@ -1,15 +1,15 @@
 # AI 小镇（瓦片地图 × 生成式像素素材 × 世界观初始化 × 本地行为生态）方案 v2
 
-> 状态：v2 已实施并全流程跑通（M0~M5 完成，2026-09-06）。视觉定稿为 **45° 等距（2.5D）风格**（顺应 Anima 模型的生成天赋）：地面 = 归一化 2:1 菱形贴图互锁平铺，建筑/道具 = 等距视角无底座精灵，立在地面上；A* 寻路仍在逻辑方格上运行，仅渲染层做等距投影。
+> 状态：v2 已实施并全流程跑通（M0~M5 完成，2026-09-06）。视觉定稿为 **45° 等距（2.5D）风格**（顺应 Anima 模型的生成天赋）：地面 = 归一化 2:1 菱形贴图互锁平铺，建筑/道具 = 等距视角无底座spirit，立在地面上；A* 寻路仍在逻辑方格上运行，仅渲染层做等距投影。
 > **v2.1 角色素材定稿（2026-09-06）**：像素小人只做正/背两面（600×800 制作 → 36×48）；NPC/玩家新增 900×1600 白底正式立绘（生成即抠白，交互/资料卡跳出展示），入住角色复用 characters.standing_url；地砖/道路制作分辨率拉到 1536×1536；建筑像素密度 (w+h)×32（渲染 1:1 不模糊），prompt 用「贴纸式裁切」构图规避底层地砖；立绘/小人/建筑全部走酒馆立绘同款四层 system 结构（townPromptBuilder.js）由 LLM 出英文 prompt；管理面板新增 NPC/角色详情页（开关/生成操作移入），NPC 可一键「邀请入邻舍」成为聊天角色（town_npcs.character_id）。
 > 核心变更：地图 = ComfyUI 生成的像素瓦片；世界 = 按世界观一键初始化（素材 → 布图 → 确认）；NPC = 轻量小镇居民（本地行为生态，LLM 仅关键步骤）；整个世界全程可编辑。
-> 实测已验证：蓝图/作息/相遇对话/状态气泡/就地聊天 LLM 调用、ComfyUI 全套素材生成（地砖/道路/建筑/道具/精灵/立绘）、开镇后 NPC 按作息昼夜流动、点击寻路、编辑器、邀请入邻舍。
+> 实测已验证：蓝图/作息/相遇对话/状态气泡/就地聊天 LLM 调用、ComfyUI 全套素材生成（地砖/道路/建筑/道具/spirit/立绘）、开镇后 NPC 按作息昼夜流动、点击寻路、编辑器、邀请入邻舍。
 
 ---
 
 ## 0. 一句话结论
 
-邻舍已有的「大脑」（人设/日程/记忆/关系/情绪）不动；小镇要补的是「身体和舞台」：**ComfyUI 生成一整套像素瓦片与精灵素材 → 世界观驱动初始化出一张 50×50 瓦片小镇 → 轻量 NPC 以本地作息引擎在镇上生活 → 地图全程可编辑。** LLM 只出现在初始化、相遇对话、就地聊天等关键步骤，日常运转零 LLM 成本。
+邻舍已有的「大脑」（人设/日程/记忆/关系/情绪）不动；小镇要补的是「身体和舞台」：**ComfyUI 生成一整套像素瓦片与spirit素材 → 世界观驱动初始化出一张 50×50 瓦片小镇 → 轻量 NPC 以本地作息引擎在镇上生活 → 地图全程可编辑。** LLM 只出现在初始化、相遇对话、就地聊天等关键步骤，日常运转零 LLM 成本。
 
 ---
 
@@ -39,10 +39,10 @@
 | road 道路（直路/转角/人行道…） | 512×512 | seamless tileable, top-down | 直接像素化 | 64×64 |
 | building 建筑 | 768×768（特殊建筑 768×1024） | pure white background, front view, complete building | 抠白 → 像素化 | 按占格比例 |
 | prop 道具（树/长椅/路灯/花丛…） | 512×512 | white background, single object | 抠白 → 像素化 | 48×48 |
-| NPC 精灵 | 768×768 × 4 张 | white background, full body, chibi pixel sprite, facing down/up/left/right | 抠白 → 像素化 | 约 32×48 |
-| 玩家精灵 | 同 NPC | 同上 + 用户配置（nickname/gender/appearance/persona）外观描述 | 同上 | 同上 |
+| NPC spirit | 768×768 × 4 张 | white background, full body, chibi pixel sprite, facing down/up/left/right | 抠白 → 像素化 | 约 32×48 |
+| 玩家spirit | 同 NPC | 同上 + 用户配置（nickname/gender/appearance/persona）外观描述 | 同上 | 同上 |
 
-- 地砖是方形，生成完整素材直接用；建筑/道具/精灵是白底图，抠掉白色成透明 PNG 再用。
+- 地砖是方形，生成完整素材直接用；建筑/道具/spirit是白底图，抠掉白色成透明 PNG 再用。
 - 全部素材像素风格；像素化到低密度后由前端 nearest-neighbor 放大保持颗粒感。
 
 ### 2.2 Prompt 组装与风格统一
@@ -113,7 +113,7 @@ layers_json = {
 - ground + road 烘焙进离屏静态画布（地图/缩放变更时重烘焙），`imageSmoothingEnabled = false`
 - 对象与角色合并逐帧 y 排序（角色可走到建筑「后面」，被遮挡时建筑半透明）
 - 摄像机：滚轮缩放（0.5~2.5×）、拖拽平移、双击跟随玩家；点击拾取经逆变换换算格坐标
-- 精灵：按移动向量选前后左右贴图，单帧 + 滑步弹跳 + 左右镜像（v2 不做多帧动画，留作后续增强）
+- spirit：按移动向量选前后左右贴图，单帧 + 滑步弹跳 + 左右镜像（v2 不做多帧动画，留作后续增强）
 - 昼夜/天气 tint 与雨雪粒子保留
 
 ### 3.3 编辑模式（TownView 内开关，带确认）
@@ -131,10 +131,10 @@ layers_json = {
 1. **配置**：选世界观（world_settings 下拉）+ NPC 数量（默认 8，3~16）+ 地图规格（默认 50×50）
 2. **LLM 蓝图**（一次调用，JSON 按 AGENTS.md 规范带完整字段示例）：styleTags、素材清单、NPC 名册。清单在 UI 中可增删后开始
 3. **风格小样**：3 张（草地/道路/一栋建筑）确认风格，不合意调整重出
-4. **批量生图**：先全部基础方块，再建筑与道具，再 NPC 精灵；串行队列逐张 SSE `town_init_progress`；失败可重试，断点续跑（job 状态存 `data/town/init-state.json`）
+4. **批量生图**：先全部基础方块，再建筑与道具，再 NPC spirit；串行队列逐张 SSE `town_init_progress`；失败可重试，断点续跑（job 状态存 `data/town/init-state.json`）
 5. **LLM 布图**：输入 = 可用素材清单（类型 + 名 + 占格尺寸），输出 = **紧凑布局 JSON**（不输出 2500 格矩阵，保证可靠性）；本地展开为图层，A* 连通校验，不连通自动补路
 6. **用户确认**：真实素材实时渲染预览 → 确认开镇 / 重掷布局（复用已生成素材，不重生图）/ 进编辑器手改
-7. **落库开镇**：写 town_maps / town_locations、批量建轻量 NPC、生成玩家精灵、广播 `town_map_updated`
+7. **落库开镇**：写 town_maps / town_locations、批量建轻量 NPC、生成玩家spirit、广播 `town_map_updated`
 
 **素材复用原则**（用户明确要求）：小镇里至少一半格子是重复的地砖/道路/草/树；基础方块大量复用。建筑一半左右是**通用建筑**（普通居民楼/公厕/公交站这类，`reusable: true + maxInstances`，多实例复用），另一半是**特殊建筑**（市民广场/兽人咖啡厅/天使广场这类世界观专属，唯一）。先生成基础方块，再生成建筑，最后按方块类型和名字让 LLM 布置地图（JSON 返回），用户确认。
 
@@ -155,7 +155,7 @@ layers_json = {
     { "key": "tree_01", "name": "橡树", "desc": "round oak tree", "blocking": true }
   ],
   "npcs": [
-    { "displayName": "咕噜", "persona": "开朗的兽人面包师（一句话人设+性格关键词）", "appearanceDesc": "矮壮的绿皮兽人，白色围裙（英文，用于精灵生成）", "job": "面包师", "home": "residential", "traits": { "social": 0.8, "outdoor": 0.6, "nightOwl": false } }
+    { "displayName": "咕噜", "persona": "开朗的兽人面包师（一句话人设+性格关键词）", "appearanceDesc": "矮壮的绿皮兽人，白色围裙（英文，用于spirit生成）", "job": "面包师", "home": "residential", "traits": { "social": 0.8, "outdoor": 0.6, "nightOwl": false } }
   ]
 }
 ```
@@ -196,7 +196,7 @@ CREATE TABLE town_npcs (
   map_id INTEGER NOT NULL,
   display_name TEXT NOT NULL,
   persona TEXT DEFAULT '',           -- 轻量人设卡（一段话 + 性格关键词）
-  appearance_desc TEXT DEFAULT '',   -- 精灵生成用外观描述
+  appearance_desc TEXT DEFAULT '',   -- spirit生成用外观描述
   job TEXT DEFAULT '', home_location_id INTEGER,
   routine_json TEXT DEFAULT '[]',    -- [{start:"08:00",end:"12:00",activity,locationKey}]
   traits_json TEXT DEFAULT '{}',     -- {vad, social, outdoor, nightOwl, 作息偏移}
@@ -230,15 +230,15 @@ CREATE TABLE town_npc_chat_messages ( -- 玩家与 NPC 就地对话历史（注�
 
 ### 5.3 玩家
 
-- `town_players` 增 `sprite_asset_id / appearance_desc`；精灵按用户配置（nickname/gender/appearance/persona）+ 世界观风格生成四方向
+- `town_players` 增 `sprite_asset_id / appearance_desc`；spirit按用户配置（nickname/gender/appearance/persona）+ 世界观风格生成四方向
 - 移动：点击寻路（保留）+ WASD/方向键连续移动（本地节流上报，服务端校验）
 
 ---
 
 ## 6. 管理面板（小镇页右上入口）
 
-- **居民管理**：NPC 列表（四方向精灵预览、启停、重生成精灵、重掷人设/作息、删除、新增单个 NPC）
-- **角色素材**：现有 characters 的精灵生成状态列表 + **「一键生成所有缺失素材」**（批量队列，外观走 `buildCharacterAppearanceSection`，遵守 characterPersona 统一入口规范）+ 完成后可开「入住小镇」
+- **居民管理**：NPC 列表（四方向spirit预览、启停、重生成spirit、重掷人设/作息、删除、新增单个 NPC）
+- **角色素材**：现有 characters 的spirit生成状态列表 + **「一键生成所有缺失素材」**（批量队列，外观走 `buildCharacterAppearanceSection`，遵守 characterPersona 统一入口规范）+ 完成后可开「入住小镇」
 - **小镇设置**：config.town 各参数（tick 间隔/速度/相遇概率等）+ 「重新初始化世界」（带确认）
 
 ---
@@ -258,10 +258,10 @@ CREATE TABLE town_npc_chat_messages ( -- 玩家与 NPC 就地对话历史（注�
 |---|---|---|---|
 | M0 | git 存档 + 本文档定稿 | 文档定稿 | ✅ 已完成（v1 存档于 `004332a`） |
 | M1 素材管线 | 生成/抠白/像素化 + town_assets 表 + API/SSE + 素材库面板 | 能生成并预览合格的地砖与抠白建筑，后处理单测通过 | ✅ 已实现（`assetPostProcess.js` + 6 项单测通过；`townAssetService.js` 串行队列 + SSE `town_assets_updated`；编辑模式素材库面板含 AI 生成/重生成/删除） |
-| M2 瓦片地图 | 数据模型迁移 + 渲染器（烘焙/y 排序/摄像机/精灵）+ 编辑模式全套 | 手动铺图保存后多端一致，角色在建筑前后正确遮挡 | ✅ 已实现（`town_maps` v2 迁移 + `townMapService.js` 可走性运行时计算；TownView 纯 canvas 渲染器：静态烘焙、对象/居民合并 y 排序、遮挡半透明、滚轮缩放/拖拽/双击跟随、WASD；编辑模式六工具 + POI 绑定 + 保存 version+1 广播） |
-| M3 世界初始化 | 向导（蓝图 → 风格小样 → 批量生图 → 布图 → 确认 → 开镇）+ 玩家精灵 | 选世界观一键出镇，断点续跑可用，确认前可重掷布局 | ✅ 已实现（`townInitService.js` 七步状态机 + `data/town/init-state.json` 断点续跑 + 紧凑布图 JSON 本地展开/洪泛连通校验自动补路 + 确认前实时预览/重掷；玩家精灵后台生成） |
-| M4 NPC 生态 | 轻量 NPC 建档/作息引擎/FSM/就地聊天 + 管理面板（含一键补素材、角色入住） | NPC 全天按作息流动、相遇聊天、点击可对话且带现场语境 | ✅ 已实现（`town_npcs`/`town_npc_chat_messages` 表；作息 LLM 一次生成后永久本地执行 + traits 闲逛/夜猫偏移/雨天少外出；玩家靠近本地模板问候；相遇对话 NPC/角色通用（编码 id 存 town_encounters）；就地聊天带现场语境与历史注入；管理面板居民/角色素材/设置三页签 + 一键补精灵 + opt-in 入住） |
-| M5 打磨 | 昼夜天气联动瓦片渲染、遮挡半透明、设置项、测试接入 npm test、文档同步 | 小镇完整可用且像邻舍的一部分 | ✅ 大部分随实现落地（昼夜/雨雪 tint 与粒子保留、遮挡半透明、设置页签 + `town_settings` 持久化、后处理单测进 npm test；多帧精灵动画留作后续增强） |
+| M2 瓦片地图 | 数据模型迁移 + 渲染器（烘焙/y 排序/摄像机/spirit）+ 编辑模式全套 | 手动铺图保存后多端一致，角色在建筑前后正确遮挡 | ✅ 已实现（`town_maps` v2 迁移 + `townMapService.js` 可走性运行时计算；TownView 纯 canvas 渲染器：静态烘焙、对象/居民合并 y 排序、遮挡半透明、滚轮缩放/拖拽/双击跟随、WASD；编辑模式六工具 + POI 绑定 + 保存 version+1 广播） |
+| M3 世界初始化 | 向导（蓝图 → 风格小样 → 批量生图 → 布图 → 确认 → 开镇）+ 玩家spirit | 选世界观一键出镇，断点续跑可用，确认前可重掷布局 | ✅ 已实现（`townInitService.js` 七步状态机 + `data/town/init-state.json` 断点续跑 + 紧凑布图 JSON 本地展开/洪泛连通校验自动补路 + 确认前实时预览/重掷；玩家spirit后台生成） |
+| M4 NPC 生态 | 轻量 NPC 建档/作息引擎/FSM/就地聊天 + 管理面板（含一键补素材、角色入住） | NPC 全天按作息流动、相遇聊天、点击可对话且带现场语境 | ✅ 已实现（`town_npcs`/`town_npc_chat_messages` 表；作息 LLM 一次生成后永久本地执行 + traits 闲逛/夜猫偏移/雨天少外出；玩家靠近本地模板问候；相遇对话 NPC/角色通用（编码 id 存 town_encounters）；就地聊天带现场语境与历史注入；管理面板居民/角色素材/设置三页签 + 一键补spirit + opt-in 入住） |
+| M5 打磨 | 昼夜天气联动瓦片渲染、遮挡半透明、设置项、测试接入 npm test、文档同步 | 小镇完整可用且像邻舍的一部分 | ✅ 大部分随实现落地（昼夜/雨雪 tint 与粒子保留、遮挡半透明、设置页签 + `town_settings` 持久化、后处理单测进 npm test；多帧spirit动画留作后续增强） |
 
 > 端到端验证记录（2026-09-06）：后端 34/34 单测通过；合成地图 PUT /map → initialized → 点击寻路/建筑阻挡/门前可走/WASD 单步/tick 全部符合预期；浏览器实测空世界向导入口、向导第一步、管理面板（居民/角色素材）、编辑模式（素材库 + 工具条）渲染正常。全流程 ComfyUI 生图与 LLM 蓝图待真实环境跑通。
 

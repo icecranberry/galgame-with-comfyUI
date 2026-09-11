@@ -1,157 +1,3 @@
-- name: 人物
-  groups:
-    - name: 对象
-      color: rgba(255, 123, 2, .4)
-      tags:
-        size difference,giantess,extreme size difference: 女巨人
-        phimosis,foreskin: 包茎
-        onee-shota: 小孩开大车
-        futanari,testicles:1.2,penis,pussy: 扶她
-        huge testicles,futanari,massive erect penis,veiny penis,thick shaft: 粗牛子
-        huge penis:1.2,huge testicles:1.2: 大牛子
-
-    - name: 眼睛
-      color: rgba(255, 123, 2, .4)
-      tags:
-        ahegao: 阿嘿颜
-
-    - name: 嘴巴（纯嘴巴补充）
-      color: rgba(255, 123, 2, .4)
-      tags:
-        glutton: 馋嘴
-        pout: 嘟嘴
-        open mouth: 张嘴
-        wavy mouth: 波浪嘴
-        close mouth: 闭嘴
-        saliva: 唾液
-        drooling: 流口水
-        mouth drool: 嘴角画着口水滴形状的缺口
-        
-        # 特殊嘴巴形状/表情系（纯嘴巴相关）
-        cat mouth: 猫式小嘴（更泛用版）
-        '>:3': 坏坏小猫嘴
-        ':c': 难过小嘴
-        ':>' : 得意小嘴
-        ':o' : 微张小嘴
-        x mouth: X形闭嘴（拒绝/晕眩）
-        squiggly mouth: 波浪颤抖小嘴
-        
-        # 嘴巴内部可见细节
-        uvula: 小舌头（悬雍垂）
-        throat visible: 可见喉咙深处
-        tonsils: 扁桃体可见
-        
-        # 嘴巴痕迹/液体（纯嘴部）
-        saliva trail: 口水丝线
-        saliva string: 口水拉丝
-        drool on chin: 口水流到下巴
-        excessive drool: 超多口水
-        
-        # 极度冷门但存在的嘴巴tag
-        asymmetrical mouth: 不对称嘴巴
-        crooked mouth: 歪嘴
-        mouth droop: 嘴角下垂
-        full mouth: 嘴巴塞满东西（食物/液体）
-        cum in mouth,cum overflow,cumdrip,cum from mouth,cum in nose,cum from nose,excessive cum: 射满嘴巴
-
-    - name: 舌头
-      color: rgba(255, 123, 2, .4)
-      tags:
-        :q: 舌头放在上唇
-        :p: 舌头放在下唇
-        ;p: 眨眼舌头上伸
-        french kiss: 舌吻|法式湿吻
-        long tongue: 长舌头
-        oral invitation: 迎接射精而伸出舌头
-        tongue: 舌头
-        tongue out: 吐舌头
-        uvula: 小舌头|口盖垂|悬雍垂
-
-    - name: 胸部
-      color: rgba(255, 123, 2, .4)
-      tags:
-        one breast out: 一胸向外
-        erect nipples: 乳头直立
-        nipple slip: 乳头滑出
-        areola slip: 乳晕微露
-        inverted nipples: 内陷乳头
-        huge nipples: 大乳头
-        chest: 胸部
-        flat chest: 贫乳(A )
-        small breasts: 小胸部(B)
-        medium breasts: 中等胸部(C)
-        big breasts: 大胸部(D)
-        large saggy breasts : 大而下垂的胸部
-        huge breasts: 巨乳(E)
-        gigantic breasts: 超巨乳(F)
-        between breasts: 两胸之间
-        breasts apart: 胸部分开
-        hanging breasts: 下垂
-        bouncing breasts: 晃动
-        cleavage: 乳沟
-        areola: 乳晕
-        nipples: 乳头
-        huge nipples,thick nipples: 大乳头
-        puffy nipples,erect nipples: 乳头勃起
-        pectorals: 胸肌
-        large pectorals: 大胸肌
-        unbuttoned clothes: 半露前胸
-        underboob: 下胸部
-        skindentation: 皮肤凹痕
-
-        # 之前追加的部分（保持不变）
-        large breasts: 大胸部（常用）
-        perky breasts: 挺翘胸部（上翘型）
-        pointy breasts: 尖尖胸部（火箭型）
-        sagging breasts: 下垂胸部（自然下垂）
-        asymmetrical breasts: 不对称胸部（大小不一）
-        veiny breasts: 胸部青筋可见
-        mole on breast: 胸部痣
-        dark nipples: 深色乳头
-        pink nipples: 粉色乳头
-        puffy areola: 肿胀乳晕
-        large areola: 大乳晕
-        small areola: 小乳晕
-        covered nipples: 乳头被遮盖（但隐约可见）
-        nipple piercing: 乳头穿孔
-        long nipples: 长乳头
-        gaping nipples: 张开乳头（罕见）
-        sideboob: 侧乳（侧面可见）
-        backboob: 后乳（背后可见）
-        breasts out: 双胸完全露出
-        bursting breasts: 胸部快要爆出来（衣服紧绷）
-        cleavage cutout: 乳沟镂空设计
-        framed breasts: 胸部被衣服框住（突出感）
-        sweat on breasts: 胸部出汗
-        cum on breasts: 胸部沾精液（痕迹）
-        breast focus: 胸部特写焦点
-        floating breasts: 胸部漂浮感（无重力/夸张）
-        unaligned breasts: 胸部不对齐（自然晃动感）
-
-        # 新追加：更多形状/质感/特殊细分
-        torpedo breasts: 鱼雷型胸部（向前突出）
-        bell shaped breasts: 钟形胸部（下圆上窄）
-        round breasts: 圆润胸部
-        teardrop breasts: 水滴型胸部
-        full breasts: 饱满胸部
-        firm breasts: 紧实胸部
-        soft breasts: 柔软胸部（视觉暗示）
-        breast tanlines: 胸部晒痕
-        freckles on breasts: 胸部雀斑
-        mole under breast: 胸下痣
-        visible ribs: 胸部可见肋骨（极瘦）
-        collarbone visible: 锁骨突出（与胸部搭配常见）
-        areolae visible through clothes: 乳晕透衣可见
-        see through cleavage: 透视乳沟
-        underboob cutout: 下胸镂空设计
-        nippleless clothes: 无乳头衣服设计（但胸部可见）
-        bare shoulders: 露肩
-
-    - name: 腹部
-      color: rgba(255, 123, 2, .4)
-      tags:
-        big clitoris,clitoral foreskin,cute pussy,enlarged labia,developed inner labia,vagina: 夸张的小穴
-
 - name: 服饰
   groups:
     - name: 正装
@@ -684,26 +530,7 @@
         # --- [装饰与动作状态 - Accessories & States] ---
         waist bow: 腰部蝴蝶结
         unzipping: 拉下拉链
-        pulling down pants: 拉下裤子
         pants down: 裤子褪下 (通常至膝盖或足踝)
-        zipper pull: 拉链头 (强调细节)
-
-    - name: 与裤子互动
-      color: rgba(230, 84, 128, .4)
-      tags:
-        panties aside: 内裤拨到一边
-        pulling own clothes: 拉自己的衣服
-        unbuttoned: 解开裤子纽扣
-        pants pull: 拉下裤子
-        asymmetrical legwear: 不对称的裤子
-        leotard aside: 把连衣裤裆部剥到一边
-        open fly: 解开的裤子拉链
-        pants down: 褪下裤子
-        pants rolled up: 裤子卷起来
-        pants tucked in: 裤子塞进去
-        torn jeans: 破损的牛仔裤
-        torn pants: 破损的裤子
-        torn shorts: 破损的短裤
 
     - name: 内衣 
       color: rgba(230, 84, 128, .4)
@@ -1178,6 +1005,163 @@
         single earring: 只一边戴着耳环
         skull earrings: 骷髅耳环
         star earrings: 星形耳环
+
+- name: 人物
+  groups:
+
+    - name: 嘴巴（纯嘴巴补充）
+      color: rgba(255, 123, 2, .4)
+      tags:
+        glutton: 馋嘴
+        pout: 嘟嘴
+        open mouth: 张嘴
+        wavy mouth: 波浪嘴
+        close mouth: 闭嘴
+        saliva: 唾液
+        drooling: 流口水
+        mouth drool: 嘴角画着口水滴形状的缺口
+        
+        # 特殊嘴巴形状/表情系（纯嘴巴相关）
+        cat mouth: 猫式小嘴（更泛用版）
+        '>:3': 坏坏小猫嘴
+        ':c': 难过小嘴
+        ':>' : 得意小嘴
+        ':o' : 微张小嘴
+        x mouth: X形闭嘴（拒绝/晕眩）
+        squiggly mouth: 波浪颤抖小嘴
+        
+        # 嘴巴内部可见细节
+        uvula: 小舌头（悬雍垂）
+        throat visible: 可见喉咙深处
+        tonsils: 扁桃体可见
+        
+        # 嘴巴痕迹/液体（纯嘴部）
+        saliva trail: 口水丝线
+        saliva string: 口水拉丝
+        drool on chin: 口水流到下巴
+        excessive drool: 超多口水
+        
+        # 极度冷门但存在的嘴巴tag
+        asymmetrical mouth: 不对称嘴巴
+        crooked mouth: 歪嘴
+        mouth droop: 嘴角下垂
+        full mouth: 嘴巴塞满东西（食物/液体）
+        cum in mouth,cum overflow,cumdrip,cum from mouth,cum in nose,cum from nose,excessive cum: 射满嘴巴
+
+    - name: 舌头
+      color: rgba(255, 123, 2, .4)
+      tags:
+        :q: 舌头放在上唇
+        :p: 舌头放在下唇
+        ;p: 眨眼舌头上伸
+        french kiss: 舌吻|法式湿吻
+        long tongue: 长舌头
+        oral invitation: 迎接射精而伸出舌头
+        tongue: 舌头
+        tongue out: 吐舌头
+        uvula: 小舌头|口盖垂|悬雍垂
+
+    - name: 胸部
+      color: rgba(255, 123, 2, .4)
+      tags:
+        one breast out: 一胸向外
+        erect nipples: 乳头直立
+        nipple slip: 乳头滑出
+        areola slip: 乳晕微露
+        inverted nipples: 内陷乳头
+        huge nipples: 大乳头
+        chest: 胸部
+        flat chest: 贫乳(A )
+        small breasts: 小胸部(B)
+        medium breasts: 中等胸部(C)
+        big breasts: 大胸部(D)
+        large saggy breasts : 大而下垂的胸部
+        huge breasts: 巨乳(E)
+        gigantic breasts: 超巨乳(F)
+        between breasts: 两胸之间
+        breasts apart: 胸部分开
+        hanging breasts: 下垂
+        bouncing breasts: 晃动
+        cleavage: 乳沟
+        areola: 乳晕
+        nipples: 乳头
+        huge nipples,thick nipples: 大乳头
+        puffy nipples,erect nipples: 乳头勃起
+        pectorals: 胸肌
+        large pectorals: 大胸肌
+        unbuttoned clothes: 半露前胸
+        underboob: 下胸部
+        skindentation: 皮肤凹痕
+
+        # 之前追加的部分（保持不变）
+        large breasts: 大胸部（常用）
+        perky breasts: 挺翘胸部（上翘型）
+        pointy breasts: 尖尖胸部（火箭型）
+        sagging breasts: 下垂胸部（自然下垂）
+        asymmetrical breasts: 不对称胸部（大小不一）
+        veiny breasts: 胸部青筋可见
+        mole on breast: 胸部痣
+        dark nipples: 深色乳头
+        pink nipples: 粉色乳头
+        puffy areola: 肿胀乳晕
+        large areola: 大乳晕
+        small areola: 小乳晕
+        covered nipples: 乳头被遮盖（但隐约可见）
+        nipple piercing: 乳头穿孔
+        long nipples: 长乳头
+        gaping nipples: 张开乳头（罕见）
+        sideboob: 侧乳（侧面可见）
+        backboob: 后乳（背后可见）
+        breasts out: 双胸完全露出
+        bursting breasts: 胸部快要爆出来（衣服紧绷）
+        cleavage cutout: 乳沟镂空设计
+        framed breasts: 胸部被衣服框住（突出感）
+        sweat on breasts: 胸部出汗
+        cum on breasts: 胸部沾精液（痕迹）
+        breast focus: 胸部特写焦点
+        floating breasts: 胸部漂浮感（无重力/夸张）
+        unaligned breasts: 胸部不对齐（自然晃动感）
+
+        # 新追加：更多形状/质感/特殊细分
+        torpedo breasts: 鱼雷型胸部（向前突出）
+        bell shaped breasts: 钟形胸部（下圆上窄）
+        round breasts: 圆润胸部
+        teardrop breasts: 水滴型胸部
+        full breasts: 饱满胸部
+        firm breasts: 紧实胸部
+        soft breasts: 柔软胸部（视觉暗示）
+        breast tanlines: 胸部晒痕
+        freckles on breasts: 胸部雀斑
+        mole under breast: 胸下痣
+        visible ribs: 胸部可见肋骨（极瘦）
+        collarbone visible: 锁骨突出（与胸部搭配常见）
+        areolae visible through clothes: 乳晕透衣可见
+        see through cleavage: 透视乳沟
+        underboob cutout: 下胸镂空设计
+        nippleless clothes: 无乳头衣服设计（但胸部可见）
+        bare shoulders: 露肩
+      
+    - name: 对象
+      color: rgba(255, 123, 2, .4)
+      tags:
+        phimosis,foreskin: 包茎
+        penis: 鸡巴
+        pussy: 小穴
+        onee-shota: 小孩开大车
+        futanari,testicles:1.2,penis,pussy: 扶她
+        huge testicles,futanari,massive erect penis,veiny penis,thick shaft: 粗牛子
+        huge penis:1.2,huge testicles:1.2: 大牛子
+
+    - name: 眼睛
+      color: rgba(255, 123, 2, .4)
+      tags:
+        ahegao: 阿黑颜
+
+    - name: 腹部
+      color: rgba(255, 123, 2, .4)
+      tags:
+        big clitoris,clitoral foreskin,cute pussy,enlarged labia,developed inner labia,vagina: 夸张的小穴
+
 
 
 - name: 表情动作

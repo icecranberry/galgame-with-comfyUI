@@ -417,7 +417,7 @@ async function generateIntoRow(row, guard) {
   const spec = ASSET_SPECS[row.kind];
   const size = spec.size;
 
-  // prompt 来源优先级：meta.promptOverride（立绘/精灵/建筑 LLM 产物，或用户手改）→ 建筑 LLM → 静态组装
+  // prompt 来源优先级：meta.promptOverride（立绘/spirit/建筑 LLM 产物，或用户手改）→ 建筑 LLM → 静态组装
   let prompt;
   if (meta.promptOverride) {
     prompt = meta.promptOverride;
@@ -687,6 +687,46 @@ export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId =
   return enqueueAssetJob(guard, () => generateIntoRow(row, guard));
 }
 
+/**
+ * 把一张**已经存在**的图片登记为小镇素材：只落库不动图片、不触发生图。
+ * 用途：邀请入邻舍的角色复用关联居民已有的小镇立绘 / 小人，接进素材库后与 NPC 走同一套
+ * 「素材 → 管理面板 → 小镇渲染」口径，不重复生图。
+ * 注意：酒馆立绘（characters.standing_url）**不走这里** —— 它不是小镇素材，不进素材库、面板也不显示。
+ *
+ * 覆盖规则：已有 ready 素材且图片不同时**保留原图**，除非那条素材本身就是登记来的同一来源
+ * （meta.importedFrom === 它的 image_path）——这样用户在小镇里重绘 / 手工编辑过的立绘不会被酒馆立绘顶掉。
+ * 登记进来的图片文件不归素材库所有（见 deleteAsset）：删除素材只删记录，不删原文件。
+ */
+export function registerAssetFromUrl({ kind, key, name, url, desc = '', meta = {} }) {
+  if (!ASSET_SPECS[kind]) throw new Error(`unknown asset kind: ${kind}`);
+  const imagePath = typeof url === 'string' ? url.trim() : '';
+  if (!key || !imagePath) throw new Error('登记素材需要 key 与图片地址');
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM town_assets WHERE key = ?').get(key);
+  const prevMeta = rowToAsset(existing)?.meta || {};
+  if (existing?.status === 'ready' && existing.image_path && existing.image_path !== imagePath
+    && prevMeta.importedFrom !== existing.image_path) {
+    return rowToAsset(existing);
+  }
+  const metaJson = JSON.stringify({
+    ...prevMeta, ...meta, desc: desc || prevMeta.desc || '',
+    importedFrom: imagePath, updatedAt: Date.now(),
+  });
+  if (existing) {
+    db.prepare(`UPDATE town_assets SET name = ?, image_path = ?, meta_json = ?, status = 'ready' WHERE id = ?`)
+      .run(name || existing.name, imagePath, metaJson, existing.id);
+  } else {
+    db.prepare(`
+      INSERT INTO town_assets (kind, key, name, image_path, meta_json, world_setting_id, status)
+      VALUES (?, ?, ?, ?, ?, NULL, 'ready')
+    `).run(kind, key, name, imagePath, metaJson);
+  }
+  const asset = rowToAsset(db.prepare('SELECT * FROM town_assets WHERE key = ?').get(key));
+  console.log(`[townAssets] registered ${kind}/${key} → ${imagePath}`);
+  broadcastTownAssetsUpdated({ asset });
+  return asset;
+}
+
 /** 重生成一张素材（沿用原 meta；可传 desc/styleTags/prompt/loras/promptPrefix 与 expectedWorld） */
 export function regenerateAsset(id, overrides = {}) {
   const db = getDb();
@@ -742,14 +782,15 @@ export function deleteAsset(id) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
   if (!row) return { ok: false, error: '素材不存在' };
-  if (row.image_path) {
+  const meta = rowToAsset(row)?.meta || {};
+  // 登记进来的站外图片（酒馆立绘、关联居民素材）不属于素材库，删记录不删原文件
+  if (row.image_path && meta.importedFrom !== row.image_path) {
     const filePath = path.join(TOWN_ASSETS_DIR, path.basename(row.image_path));
     try { fs.unlinkSync(filePath); } catch { /* 文件可能已不存在 */ }
   }
-  try {
-    const { sourceImage } = JSON.parse(row.meta_json || '{}'); // 地砖的裁剪前原图
-    if (sourceImage) fs.unlinkSync(path.join(TOWN_ASSETS_DIR, path.basename(sourceImage)));
-  } catch { /* meta 损坏或原图已不存在 */ }
+  if (meta.sourceImage) { // 地砖的裁剪前原图
+    try { fs.unlinkSync(path.join(TOWN_ASSETS_DIR, path.basename(meta.sourceImage))); } catch { /* 原图已不存在 */ }
+  }
   db.prepare('DELETE FROM town_assets WHERE id = ?').run(id);
   broadcastTownAssetsUpdated({ deleted: id });
   return { ok: true };

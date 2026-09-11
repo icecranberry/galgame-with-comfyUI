@@ -658,7 +658,7 @@ function initSchema(db) {
       display_name TEXT NOT NULL,
       persona TEXT DEFAULT '',           -- 完整人格卡（建档时按 brief 生成）
       brief TEXT DEFAULT '',             -- 一句话人设（名单生成/用户手填，人格卡生成种子）
-      appearance_desc TEXT DEFAULT '',   -- 精灵生成用外观描述
+      appearance_desc TEXT DEFAULT '',   -- spirit生成用外观描述
       job TEXT DEFAULT '', home_location_id INTEGER,
       routine_json TEXT DEFAULT '[]',    -- [{start:"08:00",end:"12:00",activity,locationKey}]
       traits_json TEXT DEFAULT '{}',     -- {social, outdoor, nightOwl, 作息偏移}
@@ -720,8 +720,8 @@ function initSchema(db) {
       display_name TEXT NOT NULL,
       grid_x INTEGER,
       grid_y INTEGER,
-      sprite_asset_id INTEGER,           -- v2：玩家精灵素材（player_down 等 4 方向共用一套 meta）
-      appearance_desc TEXT DEFAULT '',   -- v2：精灵生成用外观描述（用户配置外观）
+      sprite_asset_id INTEGER,           -- v2：玩家spirit素材（player_down 等 4 方向共用一套 meta）
+      appearance_desc TEXT DEFAULT '',   -- v2：spirit生成用外观描述（用户配置外观）
       updated_at DATETIME
     );
   `);

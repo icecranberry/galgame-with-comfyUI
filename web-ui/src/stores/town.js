@@ -211,7 +211,7 @@ export const useTownStore = defineStore('town', () => {
     assets.value = assets.value.filter(a => a.id !== d.deleted)
 
     if (!d.asset) {
-      // 精灵重绘采用“删旧建新”的旧路径时，先退回占位图，避免继续请求已删除文件。
+      // spirit重绘采用“删旧建新”的旧路径时，先退回占位图，避免继续请求已删除文件。
       if (deleted?.kind === 'player' || deleted?.kind === 'npc') _scheduleAgentSpriteRefresh()
       return
     }

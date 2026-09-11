@@ -11,15 +11,18 @@
  *          PUT  /api/town/map                       — 编辑器保存（version+1 广播）
  * 向导     GET/POST/PUT/DELETE /api/town/init*      — 七步初始化流程
  * 居民     GET/POST /api/town/npcs、PUT/DELETE :id、:id/sprites、:id/portrait、:id/asset-set（一次出齐全套）、:id/reroll、:id/chat、:id/messages
- * 角色     GET  /api/town/characters                — 素材状态 + 入住状态（管理面板）
- *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}
+ * 角色     GET  /api/town/characters                — 素材状态 + 入住状态（管理面板；只含角色自己的小镇素材）
+ *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}（入住前先补齐素材，齐了才入住）
+ *          POST /api/town/characters/:id/portrait   — 立绘（复用关联居民立绘，缺失才生成；酒馆立绘不参与）
+ *          POST /api/town/characters/:id/sprites    — 正/背像素小人
+ *          POST /api/town/characters/:id/assets     — 一键补齐全套素材
  */
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
   setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
-  generateCharacterSprites, getTownSettings, updateTownSettings, resetWorld,
+  generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld,
 } from '../services/town/townService.js';
 import {
   listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, importAssetImage, getAssetById, cropAssetImage, cropTileAssetImage, refineAssetWithHires,
@@ -517,7 +520,7 @@ router.post('/npcs/:id/sprites', async (req, res) => {
     res.json(await generateNpcSprites(parseInt(req.params.id, 10), { ...(req.body || {}), refreshAppearance: req.body?.refreshAppearance === true }));
   } catch (err) {
     if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
-    res.status(500).json({ error: err?.message || '精灵生成失败' });
+    res.status(500).json({ error: err?.message || 'spirit生成失败' });
   }
 });
 
@@ -556,7 +559,7 @@ router.post('/npcs/:id/invite', async (req, res) => {
   }
 });
 
-// 角色立绘（复用 characters.standing_url，没有才 LLM 生成）
+// 角色立绘（复用关联居民的小镇立绘；没有才 LLM 生成。酒馆 standing_url 不参与）
 router.post('/characters/:id/portrait', async (req, res) => {
   try {
     res.json(await generateCharacterPortrait(parseInt(req.params.id, 10)));
@@ -597,13 +600,38 @@ router.get('/characters', (req, res) => {
   res.json({ characters: listTownCharacters() });
 });
 
-router.put('/characters/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-  const { townEnabled } = req.body || {};
-  res.json(setTownCharacterEnabled(id, {
-    townEnabled: townEnabled === undefined ? undefined : !!townEnabled,
-  }));
+router.put('/characters/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+    const { townEnabled } = req.body || {};
+    if (townEnabled === undefined) return res.json(setTownCharacterEnabled(id));
+    if (!townEnabled) return res.json(setTownCharacterEnabled(id, { townEnabled: false }));
+
+    // 入住前置：先把立绘 + 正/背小人补齐（优先复用关联居民的素材，缺失才生成），三张齐了才允许入住
+    const ensure = await ensureCharacterTownAssets(id);
+    if (!ensure.ready) {
+      const result = setTownCharacterEnabled(id, { townEnabled: false });
+      return res.json({ ...result, ok: false, townEnabled: false, ready: false, steps: ensure.steps,
+        error: '素材还没补齐，暂时不能入住。稍后重试，或去「角色素材」列表点「一键生成所有缺失素材」。' });
+    }
+    res.json({ ...setTownCharacterEnabled(id, { townEnabled: true }), ready: true, steps: ensure.steps });
+  } catch (err) {
+    if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
+    res.status(500).json({ error: err?.message || '入住失败' });
+  }
+});
+
+// 一键补齐角色的全套素材（立绘 + 正/背小人；已有 ready 素材的环节自动跳过）
+router.post('/characters/:id/assets', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+    res.json(await ensureCharacterTownAssets(id));
+  } catch (err) {
+    if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
+    res.status(500).json({ error: err?.message || '素材补齐失败' });
+  }
 });
 
 router.post('/characters/:id/sprites', async (req, res) => {
@@ -613,7 +641,7 @@ router.post('/characters/:id/sprites', async (req, res) => {
     res.json(await generateCharacterSprites(id, { refreshAppearance: req.body?.refreshAppearance === true }));
   } catch (err) {
     if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
-    res.status(500).json({ error: err?.message || '精灵生成失败' });
+    res.status(500).json({ error: err?.message || 'spirit生成失败' });
   }
 });
 

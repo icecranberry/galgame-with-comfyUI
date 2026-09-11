@@ -139,79 +139,13 @@
     </Transition>
 
 
-    <!-- 角色资料卡（入住角色；有立绘时立绘跳出展示） -->
-    <Teleport to="body">
-      <Transition name="town-modal">
-        <div v-if="selectedChar" class="town-card-mask" @click.self="selectedAgentKey = null">
-          <div class="town-card is-portrait" role="dialog" aria-label="邻居资料">
-            <div
-              v-if="selectedChar.standingUrl"
-              class="tc-standing"
-              role="button"
-              tabindex="0"
-              aria-label="查看立绘"
-              @click="portraitPopupUrl = selectedChar.standingUrl"
-              @keydown.enter="portraitPopupUrl = selectedChar.standingUrl"
-            >
-              <img :src="selectedChar.standingUrl" alt="立绘">
-              <span class="tc-standing-hint">立绘 · 点击放大</span>
-            </div>
-            <div class="tc-head">
-              <div
-                class="tc-avatar"
-                :style="selectedChar.avatarPath
-                  ? { backgroundImage: `url(${selectedChar.avatarPath})` }
-                  : { background: 'var(--accent)' }"
-              >{{ selectedChar.avatarPath ? '' : selectedChar.displayName.charAt(0) }}</div>
-              <div class="tc-head-info">
-                <div class="tc-name">{{ selectedChar.displayName }}</div>
-                <div class="tc-status-line">
-                  <template v-if="selectedChar.busyReason === 'SERVICE_BUSY'">正在提供工坊服务，请稍后再交谈</template>
-                  <template v-else-if="selectedChar.sleeping">😴 睡得正香</template>
-                  <template v-else-if="encounterPartnerName">💬 正在和 {{ encounterPartnerName }} 聊天</template>
-                  <template v-else>📍 {{ selectedChar.locationName || '小镇某处' }} · {{ selectedChar.activityText || '自由活动' }}</template>
-                </div>
-              </div>
-              <linshe-button variant="icon" size="sm" aria-label="关闭" @click="selectedAgentKey = null">✕</linshe-button>
-            </div>
-
-            <div class="tc-tags">
-              <span v-if="selectedChar.mood?.dominantEmotion" class="tc-tag">{{ selectedChar.mood.dominantEmotion }}</span>
-              <span v-if="selectedChar.locationName" class="tc-tag is-soft">{{ selectedChar.locationName }}</span>
-              <span v-if="selectedChar.mood" class="tc-tag is-soft">
-                心情 {{ moodLabel(selectedChar.mood.valence) }}
-              </span>
-            </div>
-
-            <div class="tc-actions">
-              <linshe-button variant="primary" size="sm" :disabled="selectedChar.busyReason === 'SERVICE_BUSY'" @click="goChat(selectedChar.characterId)">就地交谈</linshe-button>
-              <linshe-button variant="secondary" size="sm" @click="openActivityPanel(selectedChar)">居民近况</linshe-button>
-              <linshe-button variant="ghost" size="sm" @click="selectedAgentKey = null">先不了</linshe-button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
-    <!-- 立绘放大浮层 -->
-    <Teleport to="body">
-      <Transition name="town-modal">
-        <div v-if="portraitPopupUrl" class="town-card-mask" @click.self="portraitPopupUrl = null">
-          <div class="portrait-popup" role="dialog" aria-label="立绘">
-            <img :src="portraitPopupUrl" alt="立绘大图">
-            <linshe-button variant="icon" size="sm" aria-label="关闭" class="portrait-close" @click="portraitPopupUrl = null">✕</linshe-button>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
     <!-- 就地聊天 / 管理面板 / 向导 -->
     <Transition name="npc-stage" :duration="300">
       <div v-if="dialogueOpen" class="npc-stage" @click.self="closeDialogue">
         <TownCharacterChat v-if="chatCharacterId != null" :key="`char:${chatCharacterId}`"
           :character-id="chatCharacterId" :town-context="dialogueContext" :service-busy="dialogueServiceBusy" @context-invalid="refreshDialogueWorld" :display-name="chatResident?.displayName"
           :standing-url="chatResident?.standingUrl" :avatar-url="chatResident?.avatarPath"
-          :player-name="player?.displayName || '我'" @close="closeDialogue" />
+          :player-name="player?.displayName || '我'" show-activity @activity="openDialogueActivity" @close="closeDialogue" />
         <TownNpcChat v-else-if="chatNpcId != null"
           :key="chatNpcId"
           :npc-id="chatNpcId" :world-id="dialogueContext?.worldId" :world-epoch="dialogueContext?.worldEpoch" :service-busy="dialogueServiceBusy"
@@ -417,9 +351,9 @@ function inBounds(c) {
 }
 
 // ── 交互状态 ──
+// 地图上点谁都不再走「选中资料卡」：居民与入住角色统一直接开对话舞台。
 const hoverAgentKey = ref(null)
 const hoverSpotKey = ref(null)
-const selectedAgentKey = ref(null)
 const chatNpcId = ref(null)
 const chatNpcName = ref('')
 const chatCharacterId = ref(null)
@@ -454,7 +388,6 @@ const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpenin
   || showBoardPanel.value || !!worldSpot.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
 const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
 const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
-const portraitPopupUrl = ref(null)
 const showAdmin = ref(false)
 const showWizard = ref(false)
 const dragging = ref(false)
@@ -538,20 +471,6 @@ const currentToolHint = computed(() => {
   return t?.label || ''
 })
 
-const selectedChar = computed(() => {
-  const a = agents.value.find(x => x.agentKey === selectedAgentKey.value)
-  return a && a.kind === 'char' ? a : null
-})
-
-const encounterPartnerName = computed(() => {
-  const c = selectedChar.value
-  if (!c?.encounterId) return null
-  const enc = town.encountersActive.find(e => e.id === c.encounterId)
-  if (!enc) return null
-  const otherKey = enc.a === c.agentKey ? enc.b : enc.a
-  return agents.value.find(a => a.agentKey === otherKey)?.displayName || null
-})
-
 const weatherText = computed(() => {
   const w = weather.value
   if (!w) return ''
@@ -569,13 +488,6 @@ const weatherIcon = computed(() => {
   if (/晴/.test(t)) return '☀️'
   return '🌤️'
 })
-
-function moodLabel(valence) {
-  if (valence == null) return '平静'
-  if (valence > 0.3) return '不错'
-  if (valence < -0.3) return '有点低落'
-  return '平静'
-}
 
 // ── 实体拾取与插值 ──
 
@@ -749,8 +661,6 @@ async function walkToSpot(spot) {
 function enterWorldSpot(spot) {
   if (!spot || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
   if (spot.type === 'board') { openBoardPanel(); return }
-  selectedAgentKey.value = null
-  portraitPopupUrl.value = null
   lifeMoveError.value = ''
   if (playerAtLocation(spot.location)) { openSpotPanel(spot); return }
   walkToSpot(spot)
@@ -855,15 +765,11 @@ function onCanvasClick(e) {
   const hit = hitAgent(e.offsetX, e.offsetY)
   if (hit) {
     // 掌柜本人也是这家店的入口：点他就进店办事，面板里还留着聊天入口。
-    const spot = hit.kind === 'npc' ? spotForActor(hit.actorId) : null
+    const spot = spotForActor(hit.actorId)
     if (spot) { enterWorldSpot(spot); return }
-    if (hit.characterId && hit.kind === 'npc') {
-      goChat(hit.characterId)
-    } else if (hit.kind === 'npc') {
-      openDialogue(hit)
-    } else {
-      selectedAgentKey.value = hit.agentKey
-    }
+    // 入住角色与居民同口径：点一下直接开对话舞台（立绘 + 对话框），不再弹资料卡。
+    if (hit.characterId) { goChat(hit.characterId); return }
+    openDialogue(hit)
     return
   }
   const spot = hitWorldSpot(e.offsetX, e.offsetY)
@@ -1407,7 +1313,7 @@ function draw(nowMs) {
     const pos = agentDisplayPos(a)
     return adaptAgent(a, pos, agentFacing(a, pos), nowMs)
   })
-  const interactionActorKeys = ['me', hoverAgentKey.value, selectedAgentKey.value,
+  const interactionActorKeys = ['me', hoverAgentKey.value,
     chatResident.value?.actorId, activityActorId.value].filter(Boolean)
   if (hdRenderer) {
     try {
@@ -1424,8 +1330,7 @@ function draw(nowMs) {
     ctx.save()
     ctx.translate(cssW / 2, cssH / 2); ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y)
     ctx.imageSmoothingEnabled = false
-    canvasRenderer.draw(ctx, frames, nowMs, { labelsOnly: true, hover: hoverAgentKey.value,
-      selected: selectedAgentKey.value })
+    canvasRenderer.draw(ctx, frames, nowMs, { labelsOnly: true, hover: hoverAgentKey.value })
     if (editing.value) drawEditorOverlays(ctx)
     ctx.restore()
   } else {
@@ -1630,7 +1535,6 @@ async function openDialogue(resident) {
     if (request !== dialogueRequest) return
     if (result?.ok !== true) throw new Error('Unable to stop')
     if (rejectBusyDialogue(resident)) return
-    selectedAgentKey.value = null
     dialogueContext.value = { worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch, actorId: resident.actorId }
     chatResident.value = resident
     chatCharacterId.value = resident.characterId || null
@@ -1676,8 +1580,6 @@ async function openLinkedCharacterChat(characterId) {
 
 function openWalletPanel() {
   if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
-  selectedAgentKey.value = null
-  portraitPopupUrl.value = null
   dialogueError.value = ''
   lifeMoveError.value = ''
   showWalletPanel.value = true
@@ -1685,8 +1587,6 @@ function openWalletPanel() {
 }
 function openBoardPanel() {
   if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
-  selectedAgentKey.value = null
-  portraitPopupUrl.value = null
   dialogueError.value = ''
   lifeMoveError.value = ''
   showBoardPanel.value = true
@@ -1695,8 +1595,6 @@ function openBoardPanel() {
 function openActivityPanel(actor) {
   if (!actor?.actorId || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
   activityActorId.value = actor.actorId
-  selectedAgentKey.value = null
-  portraitPopupUrl.value = null
 }
 function openDialogueActivity() {
   const actor = chatResident.value
@@ -2171,7 +2069,7 @@ async function moveToLifeLocation(locationKey) {
 
 .town-loadstate p { font-size: 13px; color: var(--text-secondary); }
 
-/* ── 资料卡 ── */
+/* ── 遮罩与卡片（地图上的资料卡已弃用，这里只剩删除素材确认） ── */
 .town-card-mask {
   position: fixed;
   inset: 0;
@@ -2195,102 +2093,6 @@ async function moveToLifeLocation(locationKey) {
   border-radius: 18px;
   box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2);
   padding: 18px;
-}
-
-.tc-head { display: flex; align-items: center; gap: 12px; }
-
-.tc-avatar {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background-size: cover;
-  background-position: center;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.tc-head-info { flex: 1; min-width: 0; }
-.tc-name { font-size: 16px; font-weight: 700; color: var(--text-bright); }
-
-.tc-status-line {
-  margin-top: 3px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-
-.tc-tag {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: rgba(224, 123, 108, 0.12);
-  color: var(--accent-hover);
-}
-
-.tc-tag.is-soft { background: rgba(240, 236, 232, 0.9); color: var(--text-secondary); }
-.tc-actions { display: flex; gap: 10px; margin-top: 18px; }
-.tc-actions > * { flex: 1; }
-
-/* 立绘跳出 */
-.town-card.is-portrait { width: 360px; }
-.tc-standing {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 280px;
-  padding: 0;
-  margin-bottom: 12px;
-  border-radius: 12px;
-  background: #efe9de;
-  cursor: zoom-in;
-  overflow: hidden;
-  text-align: center;
-}
-.tc-standing img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: bottom;
-}
-.tc-standing-hint {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  font-size: 10px;
-  color: var(--text-secondary);
-  background: rgba(255, 253, 248, 0.9);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-.portrait-popup {
-  position: relative;
-  height: min(86vh, 900px);
-  aspect-ratio: 9 / 16;
-  max-width: calc(100vw - 40px);
-  background: #efe9de;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
-  overflow: hidden;
-}
-.portrait-popup img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: bottom;
-}
-.portrait-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
 }
 
 .town-modal-enter-active,

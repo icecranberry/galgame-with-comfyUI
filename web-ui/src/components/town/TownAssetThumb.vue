@@ -7,12 +7,13 @@
       'is-failed': state === 'failed',
       'is-empty': state === 'empty',
       'is-fill': fill,
+      'is-static': !interactive,
     }"
-    role="button"
-    tabindex="0"
+    :role="interactive ? 'button' : null"
+    :tabindex="interactive ? 0 : null"
     :title="stateTitle"
-    @click="emit('click', asset)"
-    @keydown.enter.prevent="emit('click', asset)"
+    @click="interactive && emit('click', asset)"
+    @keydown.enter.prevent="interactive && emit('click', asset)"
   >
     <div class="tat-media">
       <img v-if="state === 'ready'" :src="imageUrl" :alt="asset?.name || ''">
@@ -27,7 +28,7 @@
       </span>
 
       <linshe-button
-        v-if="state === 'ready' && editable"
+        v-if="state === 'ready' && editable && interactive"
         class="tat-edit"
         variant="icon"
         size="sm"
@@ -57,6 +58,8 @@ const props = defineProps({
   clickTitle: { type: String, default: '' },
   /** 宿主已给固定画框（立绘 / 小人位）时让画面铺满整框，避免按 1:1 留出一条底色带 */
   fill: { type: Boolean, default: false },
+  /** 只作展示（列表缩略图等，外层另有整行热区）时关掉按钮语义、hover 抬升与编辑铅笔 */
+  interactive: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['click', 'edit', 'delete'])
@@ -126,6 +129,14 @@ const stateTitle = computed(() => {
   height: 100%;
   min-height: 0;
   border-radius: inherit;
+}
+
+/* 只作展示时（列表缩略图）不抢外层整行热区：无指针、无 hover 抬升 */
+.town-asset-thumb.is-static { cursor: default; }
+.town-asset-thumb.is-static:hover .tat-media,
+.town-asset-thumb.is-static:focus-visible .tat-media {
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 .town-asset-thumb.is-pending { opacity: 0.62; }

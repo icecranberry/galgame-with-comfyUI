@@ -19,11 +19,13 @@
         <!-- ── 居民列表 ── -->
         <div v-if="!detail && tab === 'npcs'" class="ap-body" :class="{ 'is-scanning': !!autoGen.npcId }">
           <div class="ap-row" role="button" tabindex="0" @click="detail = { type: 'player' }" @keydown.enter="detail = { type: 'player' }">
-            <div class="ap-row-thumb is-portrait">
-              <img v-if="playerKit.portrait?.status === 'ready'" :src="playerKit.portrait.image_path + '?v=' + (playerKit.portrait.meta?.updatedAt ?? 0)" alt="">
-              <img v-else-if="playerKit.sprites?.down?.status === 'ready'" :src="playerKit.sprites.down.image_path" alt="">
-              <span v-else class="ap-thumb-missing">·</span>
-            </div>
+            <TownAssetThumb
+              class="ap-row-thumb is-portrait"
+              fill
+              :interactive="false"
+              :show-name="false"
+              :asset="listThumbAsset({ portrait: playerKit.portrait, sprites: playerKit.sprites })"
+            />
             <div class="ap-npc-info">
               <div class="ap-npc-name">我（玩家）</div>
               <div class="ap-npc-meta">确认我的立绘与像素小人形象</div>
@@ -32,7 +34,7 @@
           </div>
           <div class="ap-actions">
             <linshe-button variant="secondary" size="sm" :loading="batchSprites" @click="generateAllMissingNpcSprites">
-              一键补齐缺失精灵
+              一键补齐缺失spirit
             </linshe-button>
           </div>
           <div v-if="npcs.length === 0" class="ap-empty">镇上还没有居民，先完成世界初始化吧。</div>
@@ -42,18 +44,20 @@
             @click="detail = { type: 'npc', id: npc.id }"
             @keydown.enter="detail = { type: 'npc', id: npc.id }"
           >
-            <div class="ap-row-thumb is-portrait">
-              <img v-if="npc.portrait?.status === 'ready'" :src="npc.portrait.image_path + '?v=' + (npc.portrait.meta?.updatedAt ?? 0)" alt="">
-              <img v-else-if="npc.sprites?.down?.status === 'ready'" :src="npc.sprites.down.image_path" alt="">
-              <span v-else class="ap-thumb-missing">·</span>
-            </div>
+            <TownAssetThumb
+              class="ap-row-thumb is-portrait"
+              fill
+              :interactive="false"
+              :show-name="false"
+              :asset="listThumbAsset(npc)"
+            />
             <div class="ap-npc-info">
               <div class="ap-npc-name">
                 {{ npc.displayName }}
                 <span v-if="npc.job" class="ap-npc-job">{{ npc.job }}</span>
               </div>
               <div class="ap-npc-meta">
-                {{ npc.townEnabled ? (npc.sleepingHint || '在镇上活动') : '已暂停' }} · 精灵 {{ spriteCount(npc) }}/2
+                {{ npc.townEnabled ? (npc.sleepingHint || '在镇上活动') : '已暂停' }} · spirit {{ spriteCount(npc) }}/2
                 <template v-if="npc.characterId"> · 已入邻舍</template>
                 <template v-else> · 未邀请</template>
               </div>
@@ -226,7 +230,7 @@
         <!-- ── 角色列表 ── -->
         <div v-if="!detail && tab === 'chars'" class="ap-body">
           <div class="ap-actions">
-            <linshe-button variant="primary" size="sm" :loading="batchChars" @click="generateAllMissingCharSprites">
+            <linshe-button variant="primary" size="sm" :loading="batchChars" @click="generateAllMissingCharAssets">
               一键生成所有缺失素材
             </linshe-button>
           </div>
@@ -236,15 +240,17 @@
             @click="detail = { type: 'char', id: c.id }"
             @keydown.enter="detail = { type: 'char', id: c.id }"
           >
-            <div class="ap-row-thumb is-portrait">
-              <img v-if="c.portraitUrl || c.standingUrl" :src="c.portraitUrl || c.standingUrl" alt="">
-              <img v-else-if="c.sprites?.down" :src="c.sprites.down" alt="">
-              <span v-else class="ap-thumb-missing">·</span>
-            </div>
+            <TownAssetThumb
+              class="ap-row-thumb is-portrait"
+              fill
+              :interactive="false"
+              :show-name="false"
+              :asset="charThumbAsset(c)"
+            />
             <div class="ap-npc-info">
               <div class="ap-npc-name">{{ c.displayName }}</div>
-              <div class="ap-npc-meta">精灵 {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
-              <p v-if="c.portraitUrl || c.standingUrl || c.sprites?.down" class="ap-asset-appearance">{{ appearanceText(c.portraitUrl ? c.appearanceStatus?.portrait : c.standingUrl ? 'unknown' : c.appearanceStatus?.sprites?.down) }}</p>
+              <div class="ap-npc-meta">spirit {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
+              <p v-if="c.portrait?.status === 'ready' || c.spriteAssets?.down?.status === 'ready'" class="ap-asset-appearance">{{ appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
           </div>
@@ -256,22 +262,16 @@
             <div class="ap-detail-media">
               <div class="ap-portrait-box">
                 <TownAssetThumb
-                  v-if="charPortraitAsset(detailChar)"
+                  v-if="detailChar.portrait?.status === 'ready'"
                   class="ap-portrait-thumb"
                   fill
-                  :asset="charPortraitAsset(detailChar)"
+                  :asset="detailChar.portrait"
                   :show-name="false"
-                  :editable="!!charPortraitAsset(detailChar)?.id"
-                  @edit="openAssetManager(charPortraitAsset(detailChar), `${detailChar.displayName} 立绘`)"
+                  @edit="openAssetManager(detailChar.portrait, `${detailChar.displayName} 立绘`)"
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <p v-if="charPortraitAsset(detailChar)" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.portraitUrl ? detailChar.appearanceStatus?.portrait : 'unknown') }}</p>
-              <div v-if="!charPortraitAsset(detailChar)" class="ap-btn-row">
-                <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charportrait${detailChar.id}`]" @click="makeCharPortrait(detailChar)">
-                  生成 900×1600 立绘
-                </linshe-button>
-              </div>
+              <p v-if="detailChar.portrait?.status === 'ready'" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.appearanceStatus?.portrait) }}</p>
             </div>
 
             <div class="ap-detail-name">
@@ -280,32 +280,36 @@
                 class="ap-detail-switch"
                 v-model="detailChar.townEnabled"
                 size="sm"
+                :disabled="!!busyFlags[`chartoggle${detailChar.id}`]"
                 :aria-label="`${detailChar.displayName} 入住`"
                 @change="v => toggleChar(detailChar, v)"
               />
             </div>
+            <p v-if="busyFlags[`chartoggle${detailChar.id}`]" class="ap-asset-appearance">正在补齐立绘与正/背小人，补齐后才算入住…</p>
 
             <div class="ap-section">
               <div class="ap-section-title">像素小人（正面 / 背面）· 点小图可管理图片</div>
               <div class="ap-sprite-row ap-appearance-row">
                 <div v-for="dir in ['down', 'up']" :key="dir" class="ap-sprite-wrap">
                   <TownAssetThumb
-                    v-if="charSpriteAsset(detailChar, dir)"
+                    v-if="detailChar.spriteAssets?.[dir]?.status === 'ready'"
                     class="ap-sprite"
                     fill
-                    :asset="charSpriteAsset(detailChar, dir)"
+                    :asset="detailChar.spriteAssets[dir]"
                     :show-name="false"
-                    @edit="openAssetManager(charSpriteAsset(detailChar, dir), `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
+                    @edit="openAssetManager(detailChar.spriteAssets[dir], `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
                   />
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
-                  <p v-if="charSpriteAsset(detailChar, dir)" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
+                  <p v-if="detailChar.spriteAssets?.[dir]?.status === 'ready'" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
                 </div>
-                <div v-if="!charSpriteAsset(detailChar, 'down') || !charSpriteAsset(detailChar, 'up')" class="ap-btn-row">
-                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar)">
-                    生成缺失小人
+                <div v-if="charMissingAssets(detailChar)" class="ap-btn-row">
+                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charassets${detailChar.id}`]" @click="completeCharAssets(detailChar)">
+                    补全图片素材
                   </linshe-button>
                 </div>
               </div>
+              <p v-if="busyFlags[`charassets${detailChar.id}`]" class="ap-asset-appearance">正在补齐立绘与正/背小人，请稍候…</p>
+              <p v-if="charMissingAssets(detailChar)" class="ap-asset-appearance">这里只认角色自己的小镇立绘与小人，没做的就是空槽。点「补全图片素材」会把缺的立绘、正/背小人一次补齐（优先复用关联居民的素材，没有才生成）；也可在「角色素材」列表点「一键生成所有缺失素材」，或直接打开上方入住开关（会先补齐素材再入住）。</p>
               <div v-if="charSpritesStale(detailChar)" class="ap-actions is-column">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar, true)">按当前外观更新小人</linshe-button>
                 <p class="ap-asset-appearance">会重绘未记录版本或外观过时的小人</p>
@@ -314,10 +318,6 @@
                 <p class="ap-sprite-error" role="alert">{{ spriteErrors[`char:${detailChar.id}`] }}</p>
                 <linshe-button variant="link" size="sm" @click="loadChars">重新读取素材状态</linshe-button>
               </div>
-            </div>
-
-            <div class="ap-actions is-column">
-              <linshe-button variant="primary" size="sm" @click="$emit('close')">去小镇看看</linshe-button>
             </div>
           </div>
         </div>
@@ -500,18 +500,22 @@ function openAssetManager(asset, title = '') {
   manager.open = true
 }
 
-function charPortraitAsset(char) {
-  const path = char?.portraitUrl || char?.standingUrl
-  if (!path) return null
-  // 传统 standingUrl 也是可展示立绘；没有 town portrait 素材时先允许查看，但不允许打开图片管理。
-  return { id: char?.portraitId ?? null, name: `${char.displayName} 立绘`, status: 'ready', image_path: path, meta: {} }
+/** 列表缩略图用什么素材：立绘优先，其次正面小人；都没就绪时把最靠前的素材交给组件显示生成中 / 失败态 */
+function listThumbAsset(row) {
+  const candidates = [row?.portrait, row?.sprites?.down]
+  return candidates.find(a => a?.status === 'ready') || candidates.find(Boolean) || null
 }
 
-function charSpriteAsset(char, direction) {
-  const path = char?.sprites?.[direction]
-  const id = char?.spriteIds?.[direction]
-  if (!id || !path) return null
-  return { id, name: `${char.displayName} ${direction === 'down' ? '正面' : '背面'}小人`, status: 'ready', image_path: path, meta: {} }
+/**
+ * 角色列表缩略图：只看角色**自己的**小镇素材 —— 立绘优先，其次正面小人。
+ * 不借酒馆立绘、也不借关联居民的素材：没做过的角色就显示空槽。
+ */
+function charThumbAsset(c) {
+  return listThumbAsset({ portrait: c?.portrait, sprites: c?.spriteAssets })
+}
+
+function charMissingAssets(c) {
+  return c.spriteCount < 2 || !c.portrait
 }
 
 
@@ -624,12 +628,25 @@ async function toggleNpc(npc, enabled) {
   }
 }
 
+// 入住前置：后端会先把立绘 + 正/背小人补齐（优先复用关联居民的素材，缺失才生成），
+// 三张齐了才真的入住；没齐会回 ok:false，这时把开关拨回去并说明原因。
 async function toggleChar(c, enabled) {
+  const flag = `chartoggle${c.id}`
+  busyFlags[flag] = true
+  spriteErrors[`char:${c.id}`] = ''
   try {
-    await api.setTownCharacterEnabled(c.id, enabled)
+    const result = await api.setTownCharacterEnabled(c.id, enabled)
+    if (result && result.townEnabled !== undefined) c.townEnabled = !!result.townEnabled
+    if (enabled && result?.ok === false) {
+      spriteErrors[`char:${c.id}`] = result.error || '素材还没补齐，暂时不能入住。'
+    }
+    await loadChars()
   } catch (err) {
     c.townEnabled = !enabled
+    spriteErrors[`char:${c.id}`] = err?.message || '入住失败，请稍后重试。'
     console.warn('[town-admin] toggle char failed:', err?.message)
+  } finally {
+    busyFlags[flag] = false
   }
 }
 
@@ -662,19 +679,6 @@ async function makePortrait(npc) {
     console.warn('[town-admin] portrait failed:', err?.message)
   } finally {
     busyFlags[`portrait${npc.id}`] = false
-  }
-}
-
-async function makeCharPortrait(c) {
-  if (c.standingUrl) return // 已有立绘直接复用
-  busyFlags[`charportrait${c.id}`] = true
-  try {
-    await api.generateTownCharacterPortrait(c.id)
-    await loadChars()
-  } catch (err) {
-    console.warn('[town-admin] char portrait failed:', err?.message)
-  } finally {
-    busyFlags[`charportrait${c.id}`] = false
   }
 }
 
@@ -814,11 +818,39 @@ async function regenCharSprites(c, refreshAppearance = false) {
   }
 }
 
-async function generateAllMissingCharSprites() {
+/**
+ * 补全角色的图片素材：大立绘 + 正/背像素小人（后端 ensureCharacterTownAssets，
+ * 优先登记关联居民已有素材、缺失才生成；已有 ready 的环节自动跳过）。
+ */
+async function completeCharAssets(c) {
+  const scope = assetScope
+  const current = () => alive && props.open && scope === assetScope
+  spriteErrors[`char:${c.id}`] = ''
+  busyFlags[`charassets${c.id}`] = true
+  try {
+    const result = await api.ensureTownCharacterAssets(c.id)
+    if (!alive || !props.open) return
+    await loadChars()
+    if (result?.ok === false) {
+      spriteErrors[`char:${c.id}`] = result.error || '素材还没补齐，请稍后重试。'
+    } else if (result?.ready === false) {
+      spriteErrors[`char:${c.id}`] = '立绘或小人没生成成功，请重新读取素材状态后再试。'
+    }
+  } catch (err) {
+    if (!current()) return
+    spriteErrors[`char:${c.id}`] = err?.message || '素材补齐失败，请稍后重试。'
+    console.warn('[town-admin] char assets failed:', err?.message)
+  } finally {
+    busyFlags[`charassets${c.id}`] = false
+  }
+}
+
+/** 一键补齐所有缺素材的角色：立绘与小人一次到位（已有的环节后端自动跳过） */
+async function generateAllMissingCharAssets() {
   batchChars.value = true
   try {
-    for (const c of chars.value.filter(x => x.spriteCount < 2)) {
-      try { await api.generateTownCharacterSprites(c.id) } catch (err) { console.warn('[town-admin]', err?.message) }
+    for (const c of chars.value.filter(charMissingAssets)) {
+      try { await api.ensureTownCharacterAssets(c.id) } catch (err) { console.warn('[town-admin]', err?.message) }
       await loadChars()
     }
   } finally {
@@ -855,7 +887,7 @@ function npcSpritesStale(npc) {
   return ['down', 'up'].some(dir => npc.sprites?.[dir]?.status === 'ready' && npc.sprites[dir].appearanceStatus !== 'current')
 }
 function charSpritesStale(char) {
-  return ['down', 'up'].some(dir => charSpriteAsset(char, dir) && char.appearanceStatus?.sprites?.[dir] !== 'current')
+  return ['down', 'up'].some(dir => char.spriteAssets?.[dir]?.status === 'ready' && char.appearanceStatus?.sprites?.[dir] !== 'current')
 }
 
 async function doRelayout() {
@@ -1014,27 +1046,30 @@ onBeforeUnmount(() => {
 
 .ap-row:hover { border-color: rgba(224, 123, 108, 0.3); }
 
+/* 列表行缩略图：画框留在行内，里面的画面交给小镇图片组件（去掉它自带的描边 / 底色） */
 .ap-row-thumb {
   width: 44px;
   height: 56px;
   border-radius: 8px;
   background: #f1ebe1;
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
   overflow: hidden;
   flex-shrink: 0;
 }
 
-.ap-row-thumb img {
-  width: 100%;
-  height: 100%;
+.ap-row-thumb :deep(.tat-media) {
+  border: none;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.ap-row-thumb :deep(.tat-media img) {
   object-fit: contain;
-  object-position: bottom;
+  object-position: bottom center;
   image-rendering: pixelated;
 }
 
-.ap-row-thumb.is-portrait img { image-rendering: auto; }
+.ap-row-thumb.is-portrait :deep(.tat-media img) { image-rendering: auto; }
 
 .ap-thumb-missing { color: #cfc4b4; font-size: 14px; padding-bottom: 8px; }
 .ap-thumb-missing.is-big { font-size: 13px; }

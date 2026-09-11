@@ -34,11 +34,27 @@
       <div class="ie-hint">{{ cropHint }}</div>
       <div class="ie-buttons">
         <linshe-button variant="chip" size="sm" :active="eraseMode" @click="eraseMode = !eraseMode">
-          {{ eraseMode ? '🪄 抠白中' : '🪄 抠去多余白色' }}
+          <span class="ie-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+              <path d="M22 21H7" />
+              <path d="m5 11 9 9" />
+            </svg>
+          </span>
+          {{ eraseMode ? '抠白中' : '抠去多余白色' }}
         </linshe-button>
 
         <linshe-button v-if="cropMode" variant="chip" size="sm" :active="cropActive" @click="cropActive = !cropActive">
-          ✂️ 裁剪模式
+          <span class="ie-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="3" />
+              <path d="M8.12 8.12 12 12" />
+              <path d="M20 4 8.12 15.88" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="m14.8 14.8 5.2 5.2" />
+            </svg>
+          </span>
+          裁剪模式
         </linshe-button>
 
         <linshe-button variant="ghost" size="sm" :disabled="!canUndo" @click="undoErase">撤销上一步</linshe-button>
@@ -589,6 +605,10 @@ onBeforeUnmount(() => {
 .ie-hint { font-size: 10px; color: var(--text-secondary); }
 .ie-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .ie-buttons > :last-child { margin-left: auto; }
+
+/* chip 按钮的行内图标：跟字色走、不参与压缩 */
+.ie-icon { display: inline-flex; flex-shrink: 0; }
+.ie-icon svg { display: block; width: 13px; height: 13px; }
 
 .ie-saved-tip {
   position: fixed;

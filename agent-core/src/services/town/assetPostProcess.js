@@ -5,7 +5,7 @@
  *   box 式降采样到目标像素密度，输出小图；前端 nearest-neighbor 放大保持颗粒感。
  *
  * removeWhiteBackground(buffer, tolerance)
- *   白底图（建筑/道具/精灵）抠透明背景：
+ *   白底图（建筑/道具/spirit）抠透明背景：
  *   - 从四边泛洪的「连通」白区判定背景 —— 图内部的白色衣物/白色墙面靠连通性保护，不会误抠；
  *   - 亮度容差阈值（0~128），容忍生成图的暖白/浅灰底；
  *   - alpha 二值化（0/255 硬边），不产生半透明毛边，符合像素风。
@@ -312,9 +312,9 @@ export async function cropToContent(buffer, marginRatio = 0.04) {
  * @param {object} opts
  * @param {number} [opts.targetW] - 像素化目标宽（不传 targetW 时不做像素化）
  * @param {number} [opts.targetH] - 像素化目标高
- * @param {boolean} [opts.removeBg=false] - 是否抠白底（建筑/道具/精灵）
+ * @param {boolean} [opts.removeBg=false] - 是否抠白底（建筑/道具/spirit）
  * @param {number} [opts.tolerance=28] - 抠白容差
- * @param {boolean} [opts.cropContent=false] - 裁到内容包围盒（道具/精灵防「主体只占中间一小块」）
+ * @param {boolean} [opts.cropContent=false] - 裁到内容包围盒（道具/spirit防「主体只占中间一小块」）
  * @param {boolean} [opts.smoothResize=false] - 平滑缩放到 targetW/H（插画小人用，保留画质不做像素化）
  */
 export async function postProcessAsset(buffer, { targetW, targetH, removeBg = false, tolerance = 28, cropContent = false, smoothResize = false } = {}) {

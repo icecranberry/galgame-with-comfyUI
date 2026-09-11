@@ -12,7 +12,7 @@ import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
-import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS, captureTownAssetWorld } from './townAssetService.js';
+import { createAsset, regenerateAsset, getAssetsByKey, deleteAsset, SPRITE_DIRECTIONS, captureTownAssetWorld, registerAssetFromUrl } from './townAssetService.js';
 import { generateSpritePrompt, generatePortraitPrompt, generateNpcAssetPrompts } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection, buildCharacterPersona } from '../characterPersona.js';
 import { createTownAppearanceSignature, townAssetAppearanceStatus } from './townAppearanceSignature.js';
@@ -120,9 +120,9 @@ export function deleteNpc(id) {
   })();
 }
 
-// ── 精灵 / 立绘生成 ──
+// ── spirit / 立绘生成 ──
 
-/** 世界观 styleTags：优先取素材库中已存的（整套共享），保证精灵与小镇风格一致 */
+/** 世界观 styleTags：优先取素材库中已存的（整套共享），保证spirit与小镇风格一致 */
 export function getWorldStyleTags() {
   const row = getDb().prepare(`
     SELECT meta_json FROM town_assets WHERE status = 'ready' AND kind IN ('ground','road','building','prop') ORDER BY id LIMIT 1
@@ -362,7 +362,7 @@ export async function runNpcOnboarding(npcId) {
 
 /**
  * 新增居民并立即开始自动入驻：建档同步返回（前端即时看到新居民），
- * 人格卡 → 作息 → 全套图片素材在后台生成（同开镇时精灵后台补齐的模式）。
+ * 人格卡 → 作息 → 全套图片素材在后台生成（同开镇时spirit后台补齐的模式）。
  */
 export function createNpcWithOnboarding(params = {}) {
   const npc = createNpc(params);
@@ -372,15 +372,28 @@ export function createNpcWithOnboarding(params = {}) {
   return npc;
 }
 
-/** 角色立绘：复用 characters.standing_url；没有才走 LLM 生成（存素材库 char_{id}_portrait） */
-export async function generateCharacterPortrait(characterId, { expectedWorld } = {}) {
+/**
+ * 角色立绘（与 NPC 同口径：立绘就是一张小镇素材 `char_{id}_portrait`）
+ * - 有 `fallbackUrl`（关联居民已有的小镇立绘，邀请入邻舍的角色复用原居民形象）→ **登记**成素材，不重新生图
+ * - `characters.standing_url`（酒馆立绘）**不参与**：酒馆立绘不是小镇素材，不进小镇素材库，面板也不拿它充数
+ * - 都没有 → LLM 出 prompt 生成
+ */
+export async function generateCharacterPortrait(characterId, { expectedWorld, fallbackUrl = null } = {}) {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
   if (!char) throw new Error('角色不存在');
   const guard = imageGenerationGuard(expectedWorld, { table: 'characters', row: char,
-    fields: ['created_at', 'base_prompt', 'short_prompt', 'standing_url', 'display_name', 'name'] });
-  if (char.standing_url) {
-    return { ok: true, reused: true, asset: null, url: char.standing_url };
+    fields: ['created_at', 'base_prompt', 'short_prompt', 'display_name', 'name'] });
+  const key = `char_${characterId}_portrait`;
+  if (fallbackUrl) {
+    // 复用关联居民的小镇立绘：登记为角色自己的立绘素材，同一人形象保持一致
+    const asset = registerAssetFromUrl({
+      kind: 'portrait', key, name: `${char.display_name || char.name} 立绘`,
+      url: fallbackUrl, desc: char.short_prompt || char.base_prompt || char.name,
+      meta: { characterId, importSource: 'linked_npc' },
+    });
+    await refreshTownCharacterMeta(characterId);
+    return { ok: true, reused: true, asset, url: asset?.image_path || fallbackUrl };
   }
   guard.assertCurrent();
   const appearanceGuard = createTownAppearanceSignature({ db, buildAppearanceSection: buildCharacterAppearanceSection,
@@ -389,7 +402,6 @@ export async function generateCharacterPortrait(characterId, { expectedWorld } =
   const prompt = await generatePortraitPrompt({ appearanceInfo });
   guard.assertCurrent();
   appearanceGuard.assertCurrent();
-  const key = `char_${characterId}_portrait`;
   const existing = getAssetsByKey([key])[0];
   const asset = existing ? await regenerateAsset(existing.id, { prompt, expectedWorld: guard.expectedWorld, appearanceGuard }) : await createAsset({
     kind: 'portrait', key, name: `${char.display_name || char.name} 立绘`, expectedWorld: guard.expectedWorld, appearanceGuard,
@@ -397,7 +409,18 @@ export async function generateCharacterPortrait(characterId, { expectedWorld } =
     meta: { characterId, promptOverride: prompt },
   });
   guard.assertCurrent();
+  await refreshTownCharacterMeta(characterId);
   return { ok: true, reused: false, asset, url: asset.image_path };
+}
+
+/** 素材写完后刷新小镇内存里该入住角色的立绘 / spirit引用（小镇未启动时静默跳过） */
+async function refreshTownCharacterMeta(characterId) {
+  try {
+    const { refreshCharacterAssets } = await import('./townService.js');
+    refreshCharacterAssets(characterId);
+  } catch (err) {
+    console.warn(`[townNpcs] refresh char #${characterId} assets failed:`, err?.message);
+  }
 }
 
 // ── 玩家形象套装（立绘 + 正/背小人，「我」的确认窗口用） ──
@@ -617,8 +640,11 @@ export async function inviteNpcAsCharacter(npcId) {
     console.log(`[townNpcs] npc #${npcId} (${npc.displayName}) invited as character #${characterId}`);
     return { ok: true, characterId, actorId: actor.actorId, name, already: false };
   })();
-  const { reloadTown } = await import('./townService.js');
+  const { reloadTown, ensureCharacterTownAssets } = await import('./townService.js');
   reloadTown();
+  // 新角色接管原居民的镇内身份：后台把居民已有的立绘 / 小人登记成角色素材（不重复生图）
+  ensureCharacterTownAssets(result.characterId).catch(err =>
+    console.warn(`[townNpcs] ensure char #${result.characterId} assets failed:`, err?.message));
   return result;
 }
 

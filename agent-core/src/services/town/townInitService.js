@@ -1139,7 +1139,7 @@ export function confirmInit() {
       }
     }
 
-    // 4. 玩家档案 + 精灵（素材队列后台跑，不阻塞开镇）
+    // 4. 玩家档案 + spirit（素材队列后台跑，不阻塞开镇）
     const appearance = [config.user.nickname, config.user.gender, config.user.appearance]
       .filter(Boolean).join('，');
     db.prepare(`
@@ -1148,7 +1148,7 @@ export function confirmInit() {
     `).run(config.user.nickname || '我', appearance);
     spawnPlayerSprites(appearance, bp.styleTags);
 
-    // 5. NPC 精灵后台补齐
+    // 5. NPC spirit后台补齐
     const npcIds = db.prepare('SELECT id FROM town_npcs').all().map(r => r.id);
     (async () => {
       for (const id of npcIds) {
@@ -1164,7 +1164,7 @@ export function confirmInit() {
   });
 }
 
-/** 玩家正/背像素精灵（LLM 出 prompt，后台生成） */
+/** 玩家正/背像素spirit（LLM 出 prompt，后台生成） */
 function spawnPlayerSprites(appearance, styleTags) {
   const guard = captureInitGenerationGuard();
   (async () => {

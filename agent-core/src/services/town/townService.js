@@ -38,7 +38,7 @@ import { getMapRow, buildWalkGridFromLayers } from './townMapService.js';
 import { getTownGenerationSettings, mergeTownGenerationSettings } from './townGenerationConfig.js';
 import { buildLocationMatcher } from './townLocationMatch.js';
 import { findPath, isWalkable, pickStandingCell } from './townPathfinding.js';
-import { listAssets, createAsset, regenerateAsset, getAssetsByKey, deleteAsset, captureTownAssetWorld } from './townAssetService.js';
+import { listAssets, createAsset, regenerateAsset, getAssetsByKey, deleteAsset, captureTownAssetWorld, registerAssetFromUrl, SPRITE_DIRECTIONS } from './townAssetService.js';
 import { generateSpritePrompt } from './townPromptBuilder.js';
 import { buildCharacterAppearanceSection, buildCharacterPersona } from '../characterPersona.js';
 import { createTownAppearanceSignature, townAssetAppearanceStatus } from './townAppearanceSignature.js';
@@ -484,7 +484,7 @@ function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
   return { ...shelter, arrived: atHome, locationKey: atHome ? home.key : null };
 }
 
-/** 素材库 → 正/背精灵 URL（齐备才有值） */
+/** 素材库 → 正/背spirit URL（齐备才有值） */
 function spriteUrlsByKey(prefix, assets) {
   const dirs = ['down', 'up'];
   const byKey = new Map((assets || listAssets({})).map(a => [a.key, a]));
@@ -495,6 +495,25 @@ function spriteUrlsByKey(prefix, assets) {
     if (a?.status === 'ready' && a.image_path) { sprites[dir] = a.image_path; ready++; }
   }
   return ready === dirs.length ? sprites : (ready > 0 ? sprites : null);
+}
+
+function readyAssetUrl(asset) {
+  return asset?.status === 'ready' && asset.image_path ? asset.image_path : null;
+}
+
+/**
+ * 角色的立绘来源链（与 NPC 立绘同口径：立绘始终以小镇素材为准）：
+ * 小镇立绘 char_{id}_portrait → 关联居民的小镇立绘 npc_{npcId}_portrait → 酒馆立绘 characters.standing_url。
+ * 邀约 NPC 转成的角色一开始没有自己的立绘，走中间这层复用原居民的立绘，不重复生图。
+ */
+function charPortraitUrl(characterId, { npcId = null, standingUrl = null } = {}) {
+  return readyAssetUrl(getAssetsByKey([`char_${characterId}_portrait`])[0])
+    || (npcId ? readyAssetUrl(getAssetsByKey([`npc_${npcId}_portrait`])[0]) : null)
+    || standingUrl || null;
+}
+
+function characterStandingUrl(characterId) {
+  return getDb().prepare('SELECT standing_url FROM characters WHERE id = ?').get(characterId)?.standing_url || null;
 }
 
 function homeLocationOfNpc(row) {
@@ -1396,15 +1415,19 @@ export function getEncounterMessages(encounterId) {
 export function setTownCharacterEnabled(characterId, { townEnabled } = {}) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_characters WHERE character_id = ?').get(characterId);
+  let enabled;
   if (row) {
-    const enabled = townEnabled === undefined ? row.town_enabled : (townEnabled ? 1 : 0);
+    enabled = townEnabled === undefined ? row.town_enabled : (townEnabled ? 1 : 0);
     db.prepare('UPDATE town_characters SET town_enabled = ? WHERE character_id = ?').run(enabled, characterId);
   } else if (townEnabled !== undefined) {
+    enabled = townEnabled ? 1 : 0;
     db.prepare('INSERT INTO town_characters (character_id, town_enabled) VALUES (?, ?) ON CONFLICT(character_id) DO UPDATE SET town_enabled = excluded.town_enabled')
-      .run(characterId, townEnabled ? 1 : 0);
+      .run(characterId, enabled);
+  } else {
+    enabled = 0;
   }
   synchronizeMembership();
-  return { ok: true };
+  return { ok: true, townEnabled: !!enabled };
 }
 
 /** NPC 启停（管理面板） */
@@ -1457,17 +1480,19 @@ function applyMembershipChange(agentKey, enabled) {
       const charId = Number(agentKey.slice(5));
       const metaRow = db.prepare('SELECT id, name, display_name, avatar_path, standing_url, base_prompt, short_prompt FROM characters WHERE id = ?').get(charId);
       if (!metaRow) return;
+      const linkedNpcId = actor?.npcExists ? actor.npcId : null;
       const meta = {
-        actorId: actor?.actorId, characterId: metaRow.id, npcId: actor?.npcExists ? actor.npcId : null,
+        actorId: actor?.actorId, characterId: metaRow.id, npcId: linkedNpcId,
         agentKey, kind: 'char', refId: metaRow.id,
         displayName: metaRow.display_name || metaRow.name,
         personaPrompt: '',
         avatarPath: metaRow.avatar_path || null,
-        standingUrl: metaRow.standing_url || null,
+        // 立绘与 NPC 同口径：小镇立绘素材（缺失时回退酒馆立绘 / 关联居民的小镇立绘）
+        standingUrl: charPortraitUrl(metaRow.id, { npcId: linkedNpcId, standingUrl: metaRow.standing_url || null }),
         basePrompt: metaRow.base_prompt || '',
         shortPrompt: metaRow.short_prompt || '',
         sprites: spriteUrlsByKey(`char_${metaRow.id}_`)
-          || (actor?.npcExists ? spriteUrlsByKey(`npc_${actor.npcId}_`) : null),
+          || (linkedNpcId ? spriteUrlsByKey(`npc_${linkedNpcId}_`) : null),
       };
       state.meta.set(agentKey, meta);
       const linkedNpc = actor?.npcExists ? db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(actor.npcId) : null;
@@ -1491,7 +1516,11 @@ function applyMembershipChange(agentKey, enabled) {
   }
 }
 
-/** 角色名单（管理面板：素材状态 + 入住状态） */
+/**
+ * 角色名单（管理面板：素材状态 + 入住状态）
+ * 素材口径与 NPC 一致，且**只认角色自己名下的小镇素材**：立绘 = char_{id}_portrait，小人 = char_{id}_down/up。
+ * 没做过的素材如实返回 null（面板显示空槽），既不拿酒馆立绘充数，也不借用关联居民的素材。
+ */
 export function listTownCharacters() {
   const db = getDb();
   const rows = db.prepare(`
@@ -1515,29 +1544,32 @@ export function listTownCharacters() {
     };
     const sprites = {};
     const spriteIds = {};
+    const spriteAssets = {};
     let ready = 0;
     for (const dir of ['down', 'up']) {
-      const a = byKey.get(`char_${r.id}_${dir}`);
-      appearanceStatus.sprites[dir] = statusFor(a, 'sprite');
-      sprites[dir] = a?.status === 'ready' ? a.image_path : null;
-      spriteIds[dir] = a?.id ?? null;
+      const own = byKey.get(`char_${r.id}_${dir}`) || null;
+      spriteAssets[dir] = own;
+      appearanceStatus.sprites[dir] = own ? statusFor(own, 'sprite') : 'unknown';
+      sprites[dir] = own?.status === 'ready' ? own.image_path : null;
+      spriteIds[dir] = own?.id ?? null;
       if (sprites[dir]) ready++;
     }
-    const portrait = byKey.get(`char_${r.id}_portrait`);
-    appearanceStatus.portrait = statusFor(portrait, 'portrait');
+    const portrait = byKey.get(`char_${r.id}_portrait`) || null;
+    appearanceStatus.portrait = portrait ? statusFor(portrait, 'portrait') : 'unknown';
     const agentKey = `char:${r.id}`;
     const agent = state.agents.get(agentKey);
     return {
       id: r.id,
       displayName: r.display_name || r.name,
       avatarPath: r.avatar_path || null,
-      standingUrl: db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(r.id)?.standing_url || null,
-      portraitUrl: portrait?.status === 'ready' ? portrait.image_path : null,
+      // 立绘 / 小人都是角色自己的小镇素材，没做过就是 null（面板显示空槽）
+      portrait,
       townEnabled: !!r.town_enabled,
       spriteReady: ready === 2,
       spriteCount: ready,
       sprites,
       spriteIds,
+      spriteAssets,
       portraitId: portrait?.id ?? null,
       appearanceStatus,
       locationName: agent ? state.locations.find(l => l.id === agent.targetLocId)?.name || null : null,
@@ -1553,7 +1585,7 @@ export function forceTick() {
   return { ok: true };
 }
 
-// ── 管理面板：角色精灵 / 小镇设置 / 重置世界 ──
+// ── 管理面板：角色spirit / 小镇设置 / 重置世界 ──
 
 /** 生成一个入住角色的正/背像素小人（600×800 → 36×48；外观走 characterPersona 统一入口 + 酒馆式 LLM 出 prompt） */
 export async function generateCharacterSprites(characterId, { expectedWorld = captureTownAssetWorld(), refreshAppearance = false } = {}) {
@@ -1572,7 +1604,7 @@ export async function generateCharacterSprites(characterId, { expectedWorld = ca
     if (world.worldId !== expectedWorld.worldId || world.epoch !== expectedWorld.epoch
       || generation !== state.generation || !current
       || ['name', 'display_name', 'base_prompt', 'short_prompt'].some(key => current[key] !== row[key])) {
-      throw Object.assign(new Error('世界或角色已变化，已取消旧精灵任务'), { code: 'TOWN_ASSET_STALE' });
+      throw Object.assign(new Error('世界或角色已变化，已取消旧spirit任务'), { code: 'TOWN_ASSET_STALE' });
     }
     appearanceGuard.assertCurrent();
   };
@@ -1605,12 +1637,87 @@ export async function generateCharacterSprites(characterId, { expectedWorld = ca
       console.warn(`[town] char #${characterId} sprite ${dir} failed:`, err?.message);
     }
   }
-  // 入住状态下刷新内存里的精灵引用
+  // 入住状态下刷新内存里的spirit引用
   assertCurrent();
-  const agentKey = `char:${characterId}`;
-  const meta = state.meta.get(agentKey);
-  if (meta) meta.sprites = spriteUrlsByKey(`char_${characterId}_`);
+  refreshCharacterAssets(characterId);
   return { ok: true };
+}
+
+/** 角色素材变化后刷新内存 agent 的立绘 / spirit引用（位置与行为不动；未入住则无事发生） */
+export function refreshCharacterAssets(characterId) {
+  const meta = state.meta.get(`char:${characterId}`);
+  if (!meta) return { ok: false };
+  const npcId = meta.npcId || null;
+  meta.sprites = spriteUrlsByKey(`char_${characterId}_`)
+    || (npcId ? spriteUrlsByKey(`npc_${npcId}_`) : null)
+    || meta.sprites || null;
+  meta.standingUrl = charPortraitUrl(characterId, { npcId, standingUrl: characterStandingUrl(characterId) });
+  return { ok: true };
+}
+
+/**
+ * 角色素材补齐（与「新增居民自动入驻」同口径，各阶段独立容错）：
+ * 1) 立绘：优先**登记**关联居民已有的小镇立绘（邀请入邻舍的角色复用原居民形象）；没有才 LLM 生成
+ * 2) 正/背小人：优先登记关联居民的小镇小人（char_{id}_*）；没有才 LLM 生成
+ * 已有 ready 素材的环节直接跳过，重复调用安全。
+ * 返回的 `ready` 表示三张素材（立绘 + 正/背小人）是否齐备 —— 入住的前置条件。
+ */
+export async function ensureCharacterTownAssets(characterId) {
+  const db = getDb();
+  const char = db.prepare('SELECT id, name, display_name, standing_url FROM characters WHERE id = ?').get(characterId);
+  if (!char) return { ok: false, error: '角色不存在' };
+  const actor = createTownActorRegistry(db).resolveAgentKey(`char:${characterId}`);
+  const npcId = actor?.npcExists ? actor.npcId : null;
+  const label = char.display_name || char.name;
+  const steps = { portrait: 'skipped', sprites: 'skipped' };
+
+  try {
+    if (readyAssetUrl(getAssetsByKey([`char_${characterId}_portrait`])[0])) {
+      steps.portrait = 'ready';
+    } else {
+      const npcPortrait = npcId ? readyAssetUrl(getAssetsByKey([`npc_${npcId}_portrait`])[0]) : null;
+      const { generateCharacterPortrait } = await import('./townNpcService.js');
+      const result = await generateCharacterPortrait(characterId, { fallbackUrl: npcPortrait });
+      steps.portrait = result.reused ? 'imported' : 'generated';
+    }
+  } catch (err) {
+    steps.portrait = 'failed';
+    console.warn(`[town] char #${characterId} portrait failed:`, err?.message);
+  }
+
+  // 正/背都要有才算齐（spriteUrlsByKey 有一向就返回对象，不能拿它当「齐备」判据）
+  const ownSpriteUrl = (dir) => readyAssetUrl(getAssetsByKey([`char_${characterId}_${dir}`])[0]);
+  const npcSpriteUrl = (dir) => (npcId ? readyAssetUrl(getAssetsByKey([`npc_${npcId}_${dir}`])[0]) : null);
+  try {
+    if (SPRITE_DIRECTIONS.every(ownSpriteUrl)) {
+      steps.sprites = 'ready';
+    } else if (SPRITE_DIRECTIONS.every(npcSpriteUrl)) {
+      // 关联居民正/背都在才整套登记，避免只借来半套让角色半身可动
+      for (const dir of SPRITE_DIRECTIONS) {
+        if (ownSpriteUrl(dir)) continue;
+        registerAssetFromUrl({
+          kind: 'npc', key: `char_${characterId}_${dir}`, name: `${label} ${dir}`,
+          url: npcSpriteUrl(dir), desc: label,
+          meta: { direction: dir, characterId, importSource: 'linked_npc' },
+        });
+      }
+      steps.sprites = 'imported';
+    } else {
+      // generateCharacterSprites 会跳过已就绪的方向，只补缺的那一向
+      await generateCharacterSprites(characterId);
+      steps.sprites = 'generated';
+    }
+  } catch (err) {
+    steps.sprites = 'failed';
+    console.warn(`[town] char #${characterId} sprites failed:`, err?.message);
+  }
+
+  refreshCharacterAssets(characterId);
+  // 三张素材齐备才算补齐（入住前置条件；失败或还在生成的环节会如实报 false）
+  const ready = !!readyAssetUrl(getAssetsByKey([`char_${characterId}_portrait`])[0])
+    && SPRITE_DIRECTIONS.every(ownSpriteUrl);
+  console.log(`[town] char #${characterId} assets ensured:`, JSON.stringify({ ...steps, ready }));
+  return { ok: true, ready, steps };
 }
 
 const TOWN_SETTING_FIELDS = {

@@ -1,9 +1,11 @@
 <template>
+  <!-- 立绘与 NPC 同口径：小镇立绘素材（standingUrl）优先，缺失才回退酒馆立绘 / 头像 -->
   <TownDialogueStage :display-name="character?.display_name || displayName || '邻居'" :player-name="playerName"
-    :portrait-url="character?.standing_url || standingUrl || character?.avatar_path || avatarUrl"
+    :portrait-url="standingUrl || character?.standing_url || character?.avatar_path || avatarUrl"
     :player-portrait-url="playerPortraitUrl" :messages="messages" :loading="loading" :sending="sending"
     :blocked="blocked || !settingsReady" :error="error" :draft-restore="draftRestore" :status="status" :has-more-history="hasMoreOlder" :max-length="4000"
-    @send="sendWithSettings" @reload="load" @load-older="loadOlder" @close="$emit('close')">
+    :show-activity="showActivity"
+    @send="sendWithSettings" @reload="load" @load-older="loadOlder" @activity="$emit('activity')" @close="$emit('close')">
     <template #message="{ message }">
       <details v-if="message.type === 'thinking'" class="tcc-thinking">
         <summary>{{ message.summary || (message.status === 'done' ? '思考记录' : '正在思考…') }}</summary>
@@ -34,8 +36,8 @@ import { useTownCharacterChat } from '../../town/dialogue/useTownCharacterChat.j
 import * as api from '../../api/index.js'
 import TownDialogueStage from './TownDialogueStage.vue'
 const props = defineProps({ characterId: { type: Number, required: true }, displayName: String, standingUrl: String,
-  avatarUrl: String, townContext: Object, serviceBusy: Boolean, playerName: { type: String, default: '我' } })
-const emit = defineEmits(['close', 'context-invalid'])
+  avatarUrl: String, townContext: Object, serviceBusy: Boolean, showActivity: Boolean, playerName: { type: String, default: '我' } })
+const emit = defineEmits(['close', 'context-invalid', 'activity'])
 const settings = useSettingsStore()
 const { loading, error, blocked, sending, messages, character, status, draftRestore, load, send, hasMoreOlder, loadOlder } =
   useTownCharacterChat(toRef(props, 'characterId'), { settings, serviceBusy: toRef(props, 'serviceBusy'), townContext: toRef(props, 'townContext'), onContextInvalid: err => emit('context-invalid', err) })

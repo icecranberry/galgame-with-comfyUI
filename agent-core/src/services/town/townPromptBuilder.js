@@ -89,13 +89,12 @@ Hard Rules:
 - MAX 400 characters total.`;
 
 const SPRITE_TASK_REQUIREMENTS = `【任务要求】
-你是一个专业的像素游戏角色精灵设计师。请在<world_setting>的背景下，为下面的小镇居民设计一张像素小人精灵图。
+你是一个专业的像素游戏角色设计师。请在<world_setting>的背景下，为下面的小镇居民设计角色形象图。
 
-【精灵硬性要求（与生图规则冲突时，以本条为准）】
+【硬性要求（与生图规则冲突时，以本条为准）】
 - 纯白色背景（pure white background, no shadow on the ground）
-- 单个角色（solo），Q版二头身像素小人（chibi, big head small body），全身完整入画，头部到脚部都在画面内
+- 单个角色（solo），全身完整入画，头部到脚部都在画面内
 - 角色占画面绝大部分（character fills the frame），居中
-- 干净粗像素描边、有限色板（clean thick pixel outlines, limited color palette, crisp pixel edges）
 - 服装与外形严格按 system 提供的外观信息，不得自行改动标志性特征
 - 画面里只有角色本身：没有地面、没有阴影投影、没有道具台座、没有文字`;
 
@@ -111,15 +110,15 @@ export async function generateSpritePrompt({ appearanceInfo, direction = 'down' 
     ...system0And1(),
     { role: 'system', content: SPRITE_OUTPUT_STRUCTURE },
     { role: 'system', content: `${SPRITE_TASK_REQUIREMENTS}\n\n【角色外观信息】\n${appearanceInfo}` },
-    { role: 'user', content: `请执行：设计这位居民的像素小人精灵（${facing}），并以英文 prompt 输出。` },
+    { role: 'user', content: `请执行：设计这位居民的像素小人（${facing}），并以英文 prompt 输出。` },
   ];
   const out = await chatSync(msgs, {
     temperature: 0.7,
-    max_tokens: 500,
-    label: '小镇精灵提示词',
+    max_tokens: 1000,
+    label: '小镇人物图片素材提示词',
   });
   const text = stripFence(out);
-  if (!text || text.length < 10) throw new Error('LLM 生成的精灵提示词不完整');
+  if (!text || text.length < 10) throw new Error('LLM 生成的提示词不完整');
   return text;
 }
 
@@ -135,7 +134,7 @@ const NPC_SET_OUTPUT_STRUCTURE = `【输出结构】
 }
 
 字段约束：
-- down / up：同一个角色的像素小人精灵。先写至少 6 个准确外观锚点（发型、发色、瞳色、标志性服装、配饰、体型特征），再写站姿；down 必须是正面（front view facing the viewer），up 必须是背面（seen from behind, back view）；两者都要写清 pure white background、no shadow on the ground、chibi big head、clean thick pixel outlines、limited color palette、solo character centered filling the frame。各自 400 字符以内。
+- down / up：同一个角色的像素小人。先写至少 6 个准确外观锚点（发型、发色、瞳色、标志性服装、配饰、体型特征），再写站姿；down 必须是正面（front view facing the viewer），up 必须是背面（seen from behind, back view）；两者都要写清 pure white background、no shadow on the ground、chibi big head、clean thick pixel outlines、limited color palette、solo character centered filling the frame。各自 400 字符以内。
 - portrait：大立绘插画。先写外观锚点与服装外形，再写姿势与镜头；必须写清 pure white background、solo、全身从头顶到脚完整入画、约 9:16 竖幅构图；可有光效或少量与职业相关的实物点缀。800 字符以内。
 - 三个字段都必须有值，且各自是独立完整的英文段落；不要写「同上」「与 down 相同」这类引用。
 - 三个字段里 ALL text in English：不得出现任何中文字符（用英文描述，例如 ponytail、white apron）。
@@ -162,7 +161,7 @@ export async function generateNpcAssetPrompts({ appearanceInfo }) {
     temperature: 0.7,
     max_tokens: 1600,
     response_format: { type: 'json_object' },
-    label: '小镇精灵提示词',
+    label: '小镇小人图提示词',
   });
   return parseNpcAssetPrompts(out);
 }
@@ -175,8 +174,8 @@ export function parseNpcAssetPrompts(content) {
   if (!parsed || typeof parsed !== 'object') {
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
-    if (start < 0 || end <= start) throw new Error('LLM 返回的精灵提示词不是 JSON');
-    try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { throw new Error('LLM 返回的精灵提示词 JSON 解析失败'); }
+    if (start < 0 || end <= start) throw new Error('LLM 返回的提示词不是 JSON');
+    try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { throw new Error('LLM 返回的提示词 JSON 解析失败'); }
   }
   const result = {};
   for (const key of ['down', 'up', 'portrait']) {

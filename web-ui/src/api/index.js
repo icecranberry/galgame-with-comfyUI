@@ -1529,6 +1529,11 @@ export function generateTownCharacterPortrait(characterId) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/portrait`, townJson('POST', {}))
 }
 
+// 一键补齐入住角色的全套素材（立绘 + 正/背小人；已有素材的环节后端自动跳过）
+export function ensureTownCharacterAssets(characterId) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/assets`, townJson('POST', {}))
+}
+
 export function rerollTownNpc(id) {
   return jsonRequest(`${BASE}/town/npcs/${id}/reroll`, townJson('POST', {}))
 }
@@ -1546,7 +1551,7 @@ export function setTownCharacterEnabled(characterId, townEnabled) {
   return jsonRequest(`${BASE}/town/characters/${characterId}`, townJson('PUT', { townEnabled }))
 }
 
-// 角色四方向精灵生成（管理面板）
+// 角色四方向spirit生成（管理面板）
 export function generateTownCharacterSprites(characterId, options = {}) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST',
     typeof options.refreshAppearance === 'boolean' ? { refreshAppearance: options.refreshAppearance } : {}))
