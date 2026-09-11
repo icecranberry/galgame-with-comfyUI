@@ -17,6 +17,18 @@ DEFAULT_CONFIG = {
     "version_display": "",  # 持久化版本信息，启动即可显示
     "use_mirror": True,  # 使用国内镜像源加速 npm/pip 依赖下载
     "extra_lora_folders": "",  # 额外 LoRA 文件夹路径，多个用;分隔；留空则仅从 ComfyUI/models/loras 读取
+    # --- 增量补丁 ---
+    # 补丁源：存放 index.json 与 *.tar.gz 的静态目录（对象存储 / 自建站 / 本地或共享目录都行）。
+    # 留空则按 repo_url 自动推导为「同仓库的 patches 分支」——本地程序无法被推送，只能主动去拉，
+    # 而代码仓库本来就得能访问，所以默认复用它，零新增托管。
+    "patch_base_url": "",
+    # --- 问题反馈 ---
+    # 提交地址模板，支持 {slug} {issue_id} {title} {body} 占位符；默认是 GitHub issue 预填链接
+    #（客户端因此不需要内置任何 token）。
+    "feedback_issue_template": "https://github.com/{slug}/issues/new?title={title}&body={body}",
+    # 备用反馈渠道：主渠道直连不通时自动改开这个链接（QQ 群 / 问卷 / B站视频页）。
+    # 无论走哪条路，报告都会先复制到剪贴板，用户粘贴即可。
+    "feedback_channel_url": "",
     # --- MaiBot ---
     "maibot_autostart": False,  # 点击一键启动邻舍时同时启动 MaiBot
     "maibot_browser_maibot": True,  # MaiBot 就绪后自动打开后台 (8001)

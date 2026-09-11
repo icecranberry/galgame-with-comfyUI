@@ -5,6 +5,8 @@ from PySide6.QtWidgets import QPlainTextEdit, QMenu
 from PySide6.QtGui import QTextCursor, QColor, QFont, QAction
 from PySide6.QtCore import Qt, Signal
 
+from . import logbus
+
 
 class LogWidget(QPlainTextEdit):
     """只读日志区域。自动着色、自动滚动、行数上限。"""
@@ -52,7 +54,7 @@ class LogWidget(QPlainTextEdit):
                 border: 1px solid #E5D9D2;
                 border-radius: 6px;
                 padding: 8px;
-                selection-background: #F7D7D1;
+                selection-background-color: #F7D7D1;
                 selection-color: #2E2A27;
             }
         """)
@@ -68,6 +70,10 @@ class LogWidget(QPlainTextEdit):
         智能滚动：仅当插入前用户在底部时才滚到新的底部，
         如果在上面看历史消息则不打扰。
         """
+        # 任何日志区的内容都汇入全局缓冲，反馈页据此自动生成"简要日志"，
+        # 用户不需要自己去别的标签页复制。集中在这一处，新增日志区自动覆盖。
+        logbus.append(text)
+
         color_name = color or self._detect_color(text)
         qcolor = self.COLORS.get(color_name, self.COLORS["white"])
 

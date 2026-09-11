@@ -13,8 +13,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QVBoxLayout,
+    QFileDialog,
     QGraphicsOpacityEffect,
     QGraphicsDropShadowEffect,
+    QMessageBox,
     QSizeGrip,
     QApplication,
 )
@@ -33,6 +35,8 @@ from .maibot_page import MaiBotPage, MAIBOT_ADMIN_URL, SNOWLUMA_ADMIN_URL
 from .version_page import VersionPage
 from .settings_page import SettingsPage
 from .qa_page import QAPage
+from .feedback_page import FeedbackPage
+from .patch_manager import PatchManager, PatchError, derive_patch_base
 
 
 # 窗口尺寸
@@ -192,6 +196,7 @@ class MainWindow(QMainWindow):
     PAGE_VERSION = 3
     PAGE_SETTINGS = 4
     PAGE_QA = 5
+    PAGE_FEEDBACK = 6
 
     def __init__(self):
         super().__init__()
@@ -205,6 +210,7 @@ class MainWindow(QMainWindow):
         self._build = BuildManager(self._project_path)
         self._runner = ServiceRunner(self._project_path)
         self._maibot_runner = MaiBotRunner(self._project_path)
+        self._patch = PatchManager(self._project_path, "")
 
         self._is_built = False
         self._switching_version = False
@@ -351,6 +357,15 @@ class MainWindow(QMainWindow):
         self._qa_page = QAPage()
         self._stack.addWidget(self._qa_page)
 
+        self._feedback_page = FeedbackPage(self._project_path)
+        self._feedback_page.set_context_provider(self._feedback_context)
+        self._feedback_page.set_issue_template(self._config.get("feedback_issue_template") or "")
+        self._feedback_page.set_channel(self._config.get("feedback_channel_url") or "")
+        self._feedback_page.report_saved.connect(
+            lambda path: self._log_page.append_log(f"[反馈] 报告已保存：{path}")
+        )
+        self._stack.addWidget(self._feedback_page)
+
         self._stack.setCurrentIndex(self.PAGE_HOME)
 
         # 标题栏按钮浮在页面之上
@@ -394,7 +409,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()  # 把按钮推到底部
 
         self._nav_btns: list[QPushButton] = []
-        labels = ["首页", "日志", "MaiBot", "版本", "设置", "Q&A"]
+        labels = ["首页", "日志", "MaiBot", "版本", "设置", "Q&A", "反馈"]
 
         for i, label in enumerate(labels):
             btn = QPushButton(label, self._nav)
@@ -456,6 +471,22 @@ class MainWindow(QMainWindow):
         self._maibot_runner.status_changed.connect(self._on_maibot_status)
         self._maibot_runner.health_changed.connect(self._on_maibot_health)
 
+        # --- 增量补丁 ---
+        self._version_page.patch_check_clicked.connect(self._on_patch_check)
+        self._version_page.patch_apply_clicked.connect(self._on_patch_apply)
+        self._version_page.patch_rollback_clicked.connect(self._on_patch_rollback)
+        self._version_page.patch_source_saved.connect(self._on_patch_source_saved)
+        self._version_page.patch_import_clicked.connect(self._on_patch_import)
+
+        self._feedback_page.channel_saved.connect(self._on_feedback_channel_saved)
+
+        self._patch.manifest_ready.connect(self._on_patch_manifest)
+        self._patch.manifest_failed.connect(self._on_patch_failed)
+        self._patch.download_progress.connect(self._version_page.set_patch_progress)
+        self._patch.download_done.connect(self._on_patch_downloaded)
+        self._patch.failed.connect(self._on_patch_failed)
+        self._patch.status.connect(self._version_page.set_patch_status)
+
     # ==================================================================
     # 页面切换
     # ==================================================================
@@ -495,6 +526,11 @@ class MainWindow(QMainWindow):
             self._version_page.set_current_tag(self._cached_current_tag)
             self._version_page.set_tags(self._cached_tags)
             self._version_page.set_remote_status(self._cached_has_updates)
+            self._version_page.set_patch_source(self._patch_base())
+            self._refresh_patch_rollback()
+        elif index == self.PAGE_FEEDBACK:
+            # 进页面才重新采集：日志与环境信息要反映"现在"，不是启动时的快照
+            self._feedback_page.refresh_preview()
 
     def _on_slide_done(self):
         """动画结束，确保位置精确归位。"""
@@ -700,6 +736,169 @@ class MainWindow(QMainWindow):
                 self._version_page.append_log(f"[ERROR] checkout 失败: {message}")
                 self._version_page.set_building(False)
                 self._switching_version = False
+
+    # ==================================================================
+    # 增量补丁
+    # ==================================================================
+
+    def _on_patch_source_saved(self, url: str):
+        self._config.set("patch_base_url", url)
+        self._patch.set_base_url(self._patch_base())
+        self._version_page.set_patch_source(self._patch_base())
+        self._version_page.set_patch_status("补丁源已保存", ok=True)
+        self._version_page.append_log(
+            f"[补丁] 源地址：{self._patch_base() or '（为空，只能离线导入补丁包）'}"
+        )
+
+    def _patch_base(self) -> str:
+        """生效的补丁源：显式配置优先，否则按更新源推导（同仓库 patches 分支）。"""
+        configured = (self._config.get("patch_base_url") or "").strip()
+        return configured or derive_patch_base(self._config.get("repo_url") or "")
+
+    def _on_patch_check(self):
+        self._patch.set_project_path(self._project_path)
+        self._patch.set_base_url(self._patch_base())
+        self._version_page.set_patch_source(self._patch_base())
+        self._version_page.set_patch_busy(True)
+        self._patch.fetch_manifest()
+
+    def _on_patch_manifest(self, data: dict):
+        self._version_page.set_patch_busy(False)
+        patches = data.get("patches") or []
+        self._version_page.set_patches(patches, self._cached_current_tag or "")
+        self._version_page.set_patch_status(
+            f"共 {len(patches)} 个补丁，最新 {data.get('latest') or '?'}", ok=True
+        )
+        self._version_page.append_log(f"[补丁] 清单就绪：{len(patches)} 个")
+        self._refresh_patch_rollback()
+
+    def _on_patch_failed(self, message: str):
+        self._version_page.set_patch_busy(False)
+        if message != "已取消":
+            self._version_page.set_patch_status(message, ok=False)
+            self._version_page.append_log(f"[ERROR] [补丁] {message}")
+
+    def _refresh_patch_rollback(self):
+        """有备份才允许回滚；默认指向最近一次应用的补丁。"""
+        backups = self._patch.list_backups()
+        self._version_page.set_applied_patch(backups[0] if backups else "")
+
+    def _on_patch_apply(self, patch: dict):
+        current = (self._cached_current_tag or "").lstrip("v")
+        targets = [str(v).lstrip("v") for v in (patch.get("from") or [])]
+        if current and targets and current not in targets:
+            self._version_page.set_patch_status(
+                f"当前版本 {self._cached_current_tag} 不在该补丁适用范围内"
+                f"（适用 {'/'.join(targets)}）", ok=False,
+            )
+            return
+
+        if self._runner.is_any_running():
+            # Windows 下运行中的进程持有文件锁，覆盖文件前必须先停服务
+            self._version_page.append_log("正在停止服务（应用补丁需要独占文件访问）...")
+            self._runner.stop_all()
+            QTimer.singleShot(5000, lambda: self._patch.download_patch(patch))
+        else:
+            self._patch.download_patch(patch)
+
+    def _on_patch_downloaded(self, local_path: str, patch: dict):
+        self._apply_patch_file(local_path, patch)
+
+    def _on_patch_import(self):
+        """离线通道：直接挑一个补丁包应用，不需要任何托管。
+
+        适用于"你把 .tar.gz 发给用户"的场景（QQ/网盘/U 盘/共享目录都行），
+        也适用于补丁源是本地目录时手工取包。
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择补丁包", "", "增量补丁 (*.tar.gz);;所有文件 (*)"
+        )
+        if not path:
+            return
+        try:
+            meta = PatchManager.read_meta(path)
+        except PatchError as exc:
+            self._on_patch_failed(str(exc))
+            return
+
+        targets = "、".join(str(v) for v in (meta.get("from") or [])) or "任意版本"
+        reply = QMessageBox.question(
+            self, "应用本地补丁",
+            f"补丁：{meta.get('to')}\n适用版本：{targets}\n"
+            f"说明：{meta.get('notes') or '（无）'}\n\n"
+            "将覆盖项目里的变更文件（原文件先备份，可回滚），之后需要强制重新构建。",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        if self._runner.is_any_running():
+            self._version_page.append_log("正在停止服务（应用补丁需要独占文件访问）...")
+            self._runner.stop_all()
+            QTimer.singleShot(5000, lambda: self._apply_patch_file(path, meta))
+            return
+
+        self._apply_patch_file(path, meta)
+
+    def _apply_patch_file(self, local_path: str, patch: dict):
+        """落盘 + 记录回滚点。下载通道与导入通道共用。"""
+        try:
+            summary = self._patch.apply_patch(
+                local_path,
+                expected_from=[str(v) for v in (patch.get("from") or [])],
+                current_version=self._cached_current_tag or "",
+            )
+        except PatchError as exc:
+            self._on_patch_failed(str(exc))
+            return
+        self._version_page.set_patch_busy(False)
+        self._version_page.set_patch_status(summary, ok=True)
+        self._version_page.append_log(f"[补丁] {summary}")
+        self._log_page.append_log(f"[补丁] {summary}")
+        self._version_page.set_applied_patch(patch.get("id") or "")
+
+    def _on_patch_rollback(self, patch_id: str):
+        try:
+            message = self._patch.rollback(patch_id)
+        except PatchError as exc:
+            self._on_patch_failed(str(exc))
+            return
+        self._version_page.set_patch_status(message, ok=True)
+        self._version_page.append_log(f"[补丁] {message}")
+        self._log_page.append_log(f"[补丁] {message}")
+        self._refresh_patch_rollback()
+
+    # ==================================================================
+    # 问题反馈
+    # ==================================================================
+
+    def _on_feedback_channel_saved(self, url: str):
+        """保存备用反馈渠道。GitHub 直连不通时，「提交反馈」会自动改开这个链接。"""
+        self._config.set("feedback_channel_url", url)
+        self._feedback_page.set_channel(url)
+        self._log_page.append_log(f"[反馈] 备用渠道已保存：{url or '（清空）'}")
+
+    def _feedback_context(self) -> dict:
+        """反馈页取报告时回调：给"此刻"的版本与服务状态，而不是启动时的快照。"""
+        services: dict[str, str] = {}
+        try:
+            services["向量服务(:8765)"] = (
+                "运行中" if self._log_page.vector_indicator._running else "已停止"
+            )
+            services["主控后端(:3099)"] = (
+                "运行中" if self._log_page.agent_indicator._running else "已停止"
+            )
+        except Exception:  # noqa: BLE001 - 采集失败不该影响反馈本身
+            pass
+        return {
+            "launcher_version": self._config.get("version_display") or "",
+            "current_tag": self._cached_current_tag or self._config.get("current_tag") or "",
+            # get_tags 按 creatordate 倒序，首条即已知最新
+            "remote_tag": (self._cached_tags[0].get("name") if self._cached_tags else ""),
+            "project_path": self._project_path,
+            "repo_url": self._config.get("repo_url") or "",
+            "services": services,
+        }
 
     # ==================================================================
     # Build 信号
