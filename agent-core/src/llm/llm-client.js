@@ -348,8 +348,11 @@ async function* _chatStreamFreeEgg(messages, opts) {
       lastError.__freeEggFailover = true;
       throw lastError;
     }
+    // attemptYielded 必须声明在 try 之外：catch 块要读它。
+    // 原先写在 try 内，let 的块作用域使 catch 里的读取必然抛 ReferenceError，
+    // 于是"已输出内容就不再换模型"的守卫从未生效，真实错误也被替换成 "attemptYielded is not defined"。
+    let attemptYielded = false;
     try {
-      let attemptYielded = false;
       for await (const delta of _chatStreamInner(messages, { ...opts, model })) {
         attemptYielded = true;
         yield delta;
