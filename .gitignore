@@ -47,3 +47,10 @@ output/
 .mimosa/
 *.apk
 HyperFrames/
+
+# 启动器问题反馈的本地产物（feedback/<问题ID>.txt）
+feedback/
+
+# 增量补丁的下载缓存与回滚备份（由 PatchManager 维护，不入库）
+.patch-cache/
+.patch-backup/

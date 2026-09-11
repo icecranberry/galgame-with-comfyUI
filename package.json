@@ -12,6 +12,7 @@
     "install-apk": "node scripts/install-apk.mjs",
     "install-apk:n": "node scripts/install-apk.mjs -n",
     "build": "node scripts/build.mjs",
+    "build-patch": "node scripts/build-patch.mjs",
     "lasttag": "node scripts/lasttag.mjs",
     "restart-core": "node scripts/restart-core.mjs",
     "preview-launcher": "cd launcher && python main.py"

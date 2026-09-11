@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QListWidget,
     QListWidgetItem,
@@ -14,6 +15,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
 from .log_widget import LogWidget
+
+# 补丁条目挂在 QListWidgetItem 上的附加数据：补丁本体 / 是否适用于当前版本
+_ROLE_PATCH = Qt.ItemDataRole.UserRole
+_ROLE_APPLICABLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
 class SmoothListWidget(QListWidget):
@@ -67,17 +72,23 @@ class SmoothListWidget(QListWidget):
 
 class VersionPage(QWidget):
     """版本管理页面。"""
-
     # 信号
     check_update_clicked = Signal()
     switch_tag_clicked = Signal(str)  # tag
     force_rebuild_clicked = Signal()
     cancel_build_clicked = Signal()
+    # --- 增量补丁 ---
+    patch_source_saved = Signal(str)      # 补丁源地址
+    patch_check_clicked = Signal()
+    patch_apply_clicked = Signal(object)  # patch dict
+    patch_rollback_clicked = Signal(str)  # patch id
+    patch_import_clicked = Signal()       # 导入本地补丁包
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_tag: str | None = None
         self._building = False
+        self._applied_patch_id = ""
         self._setup_ui()
 
     def _setup_ui(self):
@@ -164,6 +175,83 @@ class VersionPage(QWidget):
         warn_label.setStyleSheet("color: #C88700; font-size: 12px;")
         layout.addWidget(warn_label)
 
+        # --- 增量补丁 ---
+        # 与「切换版本」互补：切版本要拉整包 + 全量构建，补丁只下发变更文件，
+        # 现场网络差时不用反复从 GitHub 下整包。
+        patch_header = QHBoxLayout()
+        patch_title = QLabel("增量补丁")
+        patch_title.setStyleSheet("color: #2E2A27; font-size: 12px; font-weight: 600;")
+        patch_header.addWidget(patch_title)
+
+        self.patch_status_label = QLabel("未检查")
+        self.patch_status_label.setStyleSheet("color: #756B65; font-size: 11px;")
+        patch_header.addWidget(self.patch_status_label)
+        patch_header.addStretch()
+        layout.addLayout(patch_header)
+
+        source_row = QHBoxLayout()
+        source_label = QLabel("补丁源")
+        source_label.setStyleSheet("color: #756B65; font-size: 11px;")
+        source_row.addWidget(source_label)
+
+        self.patch_source_edit = QLineEdit()
+        self.patch_source_edit.setPlaceholderText(
+            "静态目录：http(s) 网址，或本机/共享目录（如 D:\\patches、\\\\nas\\patches）"
+        )
+        self.patch_source_edit.setStyleSheet(_input_style())
+        source_row.addWidget(self.patch_source_edit, stretch=1)
+
+        self.patch_save_btn = QPushButton("保存源")
+        self.patch_save_btn.setStyleSheet(_small_btn_style())
+        self.patch_save_btn.clicked.connect(
+            lambda: self.patch_source_saved.emit(self.patch_source_edit.text().strip())
+        )
+        source_row.addWidget(self.patch_save_btn)
+        layout.addLayout(source_row)
+
+        self.patch_list = QListWidget()
+        self.patch_list.setMaximumHeight(76)
+        self.patch_list.setStyleSheet("""
+            QListWidget {
+                background: #FCFAF8; color: #2E2A27; border: 1px solid #E5D9D2;
+                border-radius: 6px; font-size: 12px;
+            }
+            QListWidget::item { border-bottom: 1px solid #F1ECE8; padding: 3px 6px; }
+            QListWidget::item:hover { background: #F1ECE8; }
+            QListWidget::item:selected { background: #F7D7D1; }
+        """)
+        self.patch_list.itemDoubleClicked.connect(lambda _item: self._on_patch_apply())
+        self.patch_list.currentItemChanged.connect(lambda *_: self._refresh_patch_buttons())
+        layout.addWidget(self.patch_list)
+
+        patch_btns = QHBoxLayout()
+
+        self.patch_check_btn = QPushButton("检查补丁")
+        self.patch_check_btn.setStyleSheet(_small_btn_style())
+        self.patch_check_btn.clicked.connect(self.patch_check_clicked.emit)
+        patch_btns.addWidget(self.patch_check_btn)
+
+        self.patch_apply_btn = QPushButton("应用选中补丁")
+        self.patch_apply_btn.setStyleSheet(_small_btn_style())
+        self.patch_apply_btn.setEnabled(False)
+        self.patch_apply_btn.clicked.connect(self._on_patch_apply)
+        patch_btns.addWidget(self.patch_apply_btn)
+
+        self.patch_rollback_btn = QPushButton("回滚已应用")
+        self.patch_rollback_btn.setStyleSheet(_small_btn_style())
+        self.patch_rollback_btn.setEnabled(False)
+        self.patch_rollback_btn.clicked.connect(self._on_patch_rollback)
+        patch_btns.addWidget(self.patch_rollback_btn)
+
+        # 离线通道：拿到一个 .tar.gz 就能应用，完全不依赖任何托管
+        self.patch_import_btn = QPushButton("导入补丁包…")
+        self.patch_import_btn.setStyleSheet(_small_btn_style())
+        self.patch_import_btn.clicked.connect(self.patch_import_clicked.emit)
+        patch_btns.addWidget(self.patch_import_btn)
+
+        patch_btns.addStretch()
+        layout.addLayout(patch_btns)
+
         # --- 操作日志 ---
         self.log_widget = LogWidget(self, max_lines=2000)
         self.log_widget.setMaximumHeight(120)
@@ -228,6 +316,101 @@ class VersionPage(QWidget):
 
     def append_log(self, text: str):
         self.log_widget.append_line(text)
+
+    # ------------------------------------------------------------------
+    # 增量补丁
+    # ------------------------------------------------------------------
+
+    def set_patch_source(self, url: str):
+        self.patch_source_edit.setText(url or "")
+
+    def patch_source(self) -> str:
+        return self.patch_source_edit.text().strip()
+
+    def set_patch_status(self, text: str, *, ok: bool | None = None):
+        self.patch_status_label.setText(text)
+        color = "#4A9B4A" if ok else ("#D9434A" if ok is False else "#756B65")
+        self.patch_status_label.setStyleSheet(f"color: {color}; font-size: 11px;")
+
+    def set_patches(self, patches: list, current_version: str = ""):
+        """填充补丁列表。``●`` = 适用于当前版本，``○`` = 需要先切到对应版本。"""
+        self.patch_list.clear()
+        current = (current_version or "").lstrip("v")
+        for patch in patches or []:
+            targets = [str(v) for v in (patch.get("from") or [])]
+            applicable = bool(current) and any(v.lstrip("v") == current for v in targets)
+            size_kb = (patch.get("size") or 0) / 1024
+            label = "可应用" if applicable else f"需先切到 {'/'.join(targets) or '?'}"
+            notes = f"　{patch['notes']}" if patch.get("notes") else ""
+            item = QListWidgetItem(
+                f"{'●' if applicable else '○'} {patch.get('to')}　{size_kb:.0f} KB　{label}{notes}"
+            )
+            item.setData(_ROLE_PATCH, patch)
+            item.setData(_ROLE_APPLICABLE, applicable)
+            self.patch_list.addItem(item)
+        if self.patch_list.count():
+            self.patch_list.setCurrentRow(0)
+        self._refresh_patch_buttons()
+
+    def set_patch_busy(self, busy: bool):
+        self.patch_check_btn.setEnabled(not busy)
+        self.patch_save_btn.setEnabled(not busy)
+        self.patch_import_btn.setEnabled(not busy)
+        self._refresh_patch_buttons()
+
+    def set_patch_progress(self, received: int, total: int):
+        if total > 0:
+            self.set_patch_status(
+                f"下载中 {received * 100 // total}%（{received // 1024}/{total // 1024} KB）"
+            )
+        else:
+            self.set_patch_status(f"下载中 {received // 1024} KB")
+
+    def set_applied_patch(self, patch_id: str | None):
+        """记录最近应用的补丁，决定「回滚」按钮是否可用。"""
+        self._applied_patch_id = patch_id or ""
+        self.patch_rollback_btn.setEnabled(bool(self._applied_patch_id))
+
+    def _selected_patch(self) -> dict | None:
+        item = self.patch_list.currentItem()
+        return item.data(_ROLE_PATCH) if item else None
+
+    def _refresh_patch_buttons(self):
+        """只有"选中 + 适用于当前版本 + 空闲"才允许点应用，避免误点导致失败。"""
+        item = self.patch_list.currentItem()
+        applicable = bool(item.data(_ROLE_APPLICABLE)) if item else False
+        self.patch_apply_btn.setEnabled(
+            item is not None and applicable and self.patch_check_btn.isEnabled()
+        )
+
+    def _on_patch_apply(self):
+        patch = self._selected_patch()
+        if not patch:
+            self.patch_apply_btn.setEnabled(False)
+            return
+        reply = QMessageBox.question(
+            self,
+            "应用补丁",
+            f"应用补丁 {patch.get('to')}？\n\n"
+            f"{patch.get('notes') or '（无说明）'}\n\n"
+            "变更文件会被覆盖，原文件先备份到 .patch-backup，随时可回滚；"
+            "应用后需要强制重新构建才会生效。",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.patch_apply_clicked.emit(patch)
+
+    def _on_patch_rollback(self):
+        if not self._applied_patch_id:
+            return
+        reply = QMessageBox.question(
+            self,
+            "回滚补丁",
+            f"回滚补丁 {self._applied_patch_id}？\n\n会还原被覆盖的文件，之后同样需要重新构建。",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.patch_rollback_clicked.emit(self._applied_patch_id)
 
     # ------------------------------------------------------------------
     # Slots
@@ -327,4 +510,26 @@ def _btn_style() -> str:
         }
         QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
         QPushButton:disabled { background: #F1ECE8; color: #C9C0BB; }
+    """
+
+
+def _small_btn_style() -> str:
+    return """
+        QPushButton {
+            background: #E5D9D2; color: #756B65; font-size: 11px;
+            padding: 4px 10px; border-radius: 5px; border: none;
+        }
+        QPushButton:hover { background: #DDD0C8; color: #2E2A27; }
+        QPushButton:disabled { background: #F1ECE8; color: #C9C0BB; }
+    """
+
+
+def _input_style() -> str:
+    return """
+        QLineEdit {
+            background: #FCFAF8; color: #2E2A27;
+            border: 1px solid #E5D9D2; border-radius: 5px;
+            padding: 4px 8px; font-size: 11px;
+        }
+        QLineEdit:focus { border-color: #E07B6C; }
     """
