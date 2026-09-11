@@ -13,6 +13,8 @@ import { formatScheduleContext } from './scheduleManager.js';
 import { getTimeLight } from './timeLight.js';
 import { config } from '../config.js';
 import { ensureFontForCharacter } from './handwritingFontService.js';
+import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
+import { createTownActorRegistry } from './town/townActorRegistry.js';
 
 const CHECK_INTERVAL = 60 * 1000;
 
@@ -363,6 +365,16 @@ ${userContent}
   msgs.push({ role: 'user', content: taskMsg });
 
   // ── 调用 LLM ──
+  // Read after memory retrieval awaits, immediately before the existing reply request.
+  if (config.features.town === true) {
+    try {
+      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
+        registry: createTownActorRegistry(db), timeZone: config.town.timeZone })(charId);
+      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: lifeContext });
+    } catch (error) {
+      console.warn('[mailboxScheduler] town life records unavailable:', error.message);
+    }
+  }
   try {
     const raw = await chatSync(msgs, { temperature: 0.7, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '信箱回信助手' });
     return parseReplyJSON(raw, userContent);

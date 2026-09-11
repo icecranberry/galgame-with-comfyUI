@@ -19,6 +19,7 @@
     <div class="panels-track" :style="{ transform: `translateX(${panelOffset})` }">
       <!-- ── Panel 0: 信件列表 ── -->
       <div ref="panelListRef" class="panel panel-list" @scroll="onPanelScroll">
+        <TownMailboxTasks @open-town="router.push({ path: '/town', query: { panel: 'life' } })" />
         <div v-if="store.loading && store.letters.length === 0" class="state-loading">
           <span class="spinner"></span>
           <p>加载中...</p>
@@ -223,6 +224,7 @@ import LetterViewer from '../components/LetterViewer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import TownMailboxTasks from '../components/town/TownMailboxTasks.vue'
 
 const router = useRouter()
 const chatStore = useChatStore()

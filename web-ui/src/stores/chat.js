@@ -12,6 +12,8 @@ function isEmojiImageUrl(url) {
 
 export const useChatStore = defineStore('chat', () => {
   let streamSeq = 0
+  let selectionSeq = 0
+  let historySeq = 0
   let activeStream = null  // { charId, id, abort } | null
 
   function cancelActiveStream() {
@@ -26,6 +28,7 @@ export const useChatStore = defineStore('chat', () => {
   const characters = ref([])
   const activeCharId = ref(null)
   const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
+  const queuedReplies = ref({}) // presentation only; authoritative delayed replies still use the original queue/SSE
   const streaming = ref(false)
   const streamingContent = ref('')
   const showTypingDots = ref(false)   // 打字动画：仅在发送后、首个 token 到达前显示一次
@@ -45,8 +48,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadMessages(charId) {
+    const request = ++historySeq
     try {
       const d = await api.getMessages(charId);
+      if (request !== historySeq || activeCharId.value !== charId) return false;
+      if (!Array.isArray(d.messages)) return false;
       const raw = d.messages || [];
       const result = rawToMessages(raw);
       messages.value = result;
@@ -59,7 +65,8 @@ export const useChatStore = defineStore('chat', () => {
           lastReason: d.affinity.reason || '',
         }
       }
-    } catch {}
+      return true;
+    } catch { return false }
   }
 
   // 将服务端原始消息转为前端统一格式
@@ -154,6 +161,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectChar(charId) {
+    const selection = ++selectionSeq
     if (activeStream) {
       cancelActiveStream()
       streaming.value = false
@@ -169,9 +177,12 @@ export const useChatStore = defineStore('chat', () => {
     try {
       useProactiveStore().markRead(charId)
     } catch { /* 非关键 */ }
+    if (selection !== selectionSeq) return false
     affinityKey.value = 0         // 重置动画 key，避免切角色触发 roll
-    await loadMessages(charId)
+    const loaded = await loadMessages(charId)
+    if (selection !== selectionSeq) return false
     await loadCharacters()
+    return loaded && selection === selectionSeq
   }
 
   async function updateActiveCharacter(data) {
@@ -283,7 +294,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content, imageMode = 'smart', deepThink = false) {
+  async function sendMessage(content, imageMode = 'smart', deepThink = false, { townContext } = {}) {
     if (streaming.value || !content.trim()) return
     const charId = activeCharId.value
     if (!charId) return
@@ -375,6 +386,7 @@ export const useChatStore = defineStore('chat', () => {
     let fullResponse = ''
     let thinkingMsg = null   // 深度思考块（本请求的，跨重试清理重建）
     let sawImageGen = false  // 本轮是否出现过生图任务（图即回复时禁止 "..." 兜底）
+    let admissionError = null
 
     for (let streamAttempt = 0; streamAttempt <= MAX_STREAM_RETRIES; streamAttempt++) {
       if (!isCurrentStream(sessionId)) break
@@ -448,7 +460,7 @@ export const useChatStore = defineStore('chat', () => {
         pendingTextTimers.clear()
       }
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink, townContext)
       abort = streamAbort
       const reader = stream.getReader()
 
@@ -597,6 +609,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── queued: 日程系统延迟回复 ──
             if (lastEvent === 'queued') {
+              queuedReplies.value[charId] = { currentActivity: d.currentActivity || '', estimatedReplyAt: d.estimatedReplyAt || null }
               // 清理临时气泡（后端已保存用户消息）
               for (const bid of bubbleIds) {
                 messages.value = messages.value.filter(x => x.id !== bid)
@@ -674,6 +687,13 @@ export const useChatStore = defineStore('chat', () => {
         break
       } catch (err) {
         if (!isCurrentStream(sessionId)) break
+        if (townContext !== undefined && [400, 409].includes(err.status)) {
+          admissionError = err
+          // The town guard rejects before any chat write. Remove only this rejected optimistic turn.
+          messages.value = messages.value.filter(m => m.clientMsgId !== clientMsgId && !bubbleIds.includes(m.id) && m !== thinkingMsg)
+          bubbleIds.length = 0
+          break
+        }
         if (safetyFired) { break }
         if (err.name === 'AbortError') { break }
 
@@ -720,7 +740,7 @@ export const useChatStore = defineStore('chat', () => {
 
         // 判断此次尝试是否将重试（气泡已在 retry 路径中被清理，避免 finally 再次清理/兜底）
         const isRetrying = !safetyFired && !thisAttemptHadBubble && !thisAttemptHadMsgSaved && streamAttempt < MAX_STREAM_RETRIES
-        if (!isRetrying) {
+        if (!isRetrying && !admissionError) {
           // 从后往前删 trailing 空泡
           for (let i = bubbleIds.length - 1; i >= 0; i--) {
             const m = messages.value.find(x => x.id === bubbleIds[i])
@@ -762,8 +782,9 @@ export const useChatStore = defineStore('chat', () => {
     if (isCurrentStream(sessionId)) {
       streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
       activeStream = null
-      await loadCharacters()
+      if (!admissionError) await loadCharacters()
     }
+    if (admissionError) throw admissionError
   }
 
   /**
@@ -849,6 +870,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleDelayedReply(data) {
     const charId = data.character_id
+    delete queuedReplies.value[charId]
 
     // 更新角色列表中的预览 + 排序
     const char = characters.value.find(c => c.id === charId)
@@ -880,6 +902,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { characters, activeCharId, messages, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+  return { characters, activeCharId, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

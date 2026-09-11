@@ -26,6 +26,7 @@ import SettingsView from './views/SettingsView.vue'
 import MemorySettingsView from './views/MemorySettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
+import TownView from './views/TownView.vue'
 
 const routes = [
   { path: '/', redirect: '/chat' },
@@ -34,6 +35,7 @@ const routes = [
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
+  { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/tavern', component: TavernView },

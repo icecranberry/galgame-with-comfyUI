@@ -47,3 +47,5 @@ output/
 .mimosa/
 *.apk
 HyperFrames/
+
+# Isolated M1 UI build (screenshots and verification report remain reviewable)

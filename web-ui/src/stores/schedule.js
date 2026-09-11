@@ -19,6 +19,40 @@ export const useScheduleStore = defineStore('schedule', () => {
   const peekGenerating = ref(false)    // 瞄一眼生图中
   const peekImage = ref(null)          // 快照 base64 结果
   const peekError = ref(null)
+  // Kept separate from currentSchedule/activities: appointments are not attendance.
+  const townOverlays = ref(null), townOverlaysLoading = ref(false), townOverlaysError = ref('')
+  let overlayCharacterId = null, overlaySequence = 0, overlayController = null, overlayWorld = null
+
+  function selectTownOverlayCharacter(characterId) {
+    overlayCharacterId = characterId == null ? null : Number(characterId)
+    overlaySequence++; overlayController?.abort()
+    townOverlays.value = null; townOverlaysError.value = ''; townOverlaysLoading.value = false
+    if (overlayCharacterId != null) refreshTownOverlays()
+  }
+
+  async function refreshTownOverlays(worldScope = null) {
+    if (worldScope?.worldId && Number.isSafeInteger(worldScope.worldEpoch)) {
+      if (overlayWorld?.worldId === worldScope.worldId && worldScope.worldEpoch < overlayWorld.worldEpoch) return
+      overlayWorld = { worldId: worldScope.worldId, worldEpoch: worldScope.worldEpoch }
+    }
+    if (overlayCharacterId == null) return
+    const sequence = ++overlaySequence, characterId = overlayCharacterId
+    overlayController?.abort(); overlayController = new AbortController()
+    townOverlays.value = null; townOverlaysError.value = ''; townOverlaysLoading.value = true
+    try {
+      const data = await api.getTownScheduleOverlays(characterId, { signal: overlayController.signal })
+      if (sequence !== overlaySequence || characterId !== overlayCharacterId) return
+      if (!data.worldId && !data.appointments.length) { townOverlays.value = data; return }
+      if (overlayWorld?.worldId === data.worldId && data.worldEpoch < overlayWorld.worldEpoch) {
+        townOverlaysError.value = '小镇已更新，请重新读取回访安排。'; return
+      }
+      overlayWorld = { worldId: data.worldId, worldEpoch: data.worldEpoch }
+      townOverlays.value = { ...data, appointments: data.appointments.filter(item => item.status === 'accepted') }
+    } catch (err) {
+      if (sequence === overlaySequence && err.name !== 'AbortError') townOverlaysError.value = '回访安排暂时无法读取，原日程不受影响。'
+    } finally { if (sequence === overlaySequence) townOverlaysLoading.value = false }
+  }
+  onEvent('town_state_updated', data => { refreshTownOverlays(data) })
 
   // ── 重置世界线状态（store 级，跨页面持久）──
   const resetTask = ref(null) // { phase, current, total, currentName, errors, processing, backgrounded }
@@ -71,6 +105,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   // 叫醒状态变更 → 刷新概览
   onEvent('schedule_state_change', () => {
     fetchOverview(true)
+    refreshTownOverlays()
   })
 
   onEvent('schedule_reset_progress', (data) => {
@@ -95,6 +130,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       resetTask.value.backgrounded = false
       // 静默刷新概览（不触发 loading，避免 card-grid 闪烁）
       fetchOverview(true)
+      refreshTownOverlays()
     } else if (data.phase === 'error') {
       resetTask.value.phase = 'cancelled'
       resetTask.value.processing = false
@@ -116,9 +152,11 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  let characterScheduleSequence = 0
   async function fetchCharacterSchedule(characterId) {
+    const sequence = ++characterScheduleSequence
     const data = await api.getCharacterSchedule(characterId)
-    currentSchedule.value = data
+    if (sequence === characterScheduleSequence) currentSchedule.value = data
     return data
   }
 
@@ -158,6 +196,7 @@ export const useScheduleStore = defineStore('schedule', () => {
           ? fetchCharacterSchedule(characterId)
           : Promise.resolve(),
       ])
+      if (overlayCharacterId === Number(characterId)) await refreshTownOverlays()
       return result
     } catch (err) {
       console.error('[schedule] regenerateSchedule failed:', err.message)
@@ -166,6 +205,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   return {
+    townOverlays, townOverlaysLoading, townOverlaysError, selectTownOverlayCharacter, refreshTownOverlays,
     characters, currentSchedule, loading,
     peekGenerating, peekImage, peekError,
     sleepingCharacters, delayedCharacters,

@@ -20,6 +20,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, uploadImage, apiToGui } from './comfyClient.js';
+import sharp from 'sharp';
 import { config } from '../config.js';
 import {
   HIRES_WORKFLOW, ACTIVE_WORKFLOW, PRO_WORKFLOW, autoRestoreMissing,
@@ -240,6 +241,20 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
  * @param {string} [opts.output]       - 'file' 写文件（默认）| 'buffer' 仅返回 base64
  * @returns {Promise<{success: boolean, wfPath: string, filename: string}>}
  */
+async function applySourceAlpha(refinedBuf, sourceBuf) {
+  const refinedMeta = await sharp(refinedBuf).metadata();
+  const alpha = await sharp(sourceBuf)
+    .ensureAlpha()
+    .extractChannel(3)
+    .resize(refinedMeta.width, refinedMeta.height, { fit: 'fill' })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return sharp(refinedBuf).removeAlpha()
+    .joinChannel(alpha.data, { raw: { width: alpha.info.width, height: alpha.info.height, channels: 1 } })
+    .png()
+    .toBuffer();
+}
+
 export async function refineImage({
   filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, onProgress,
   buffer, ext, output = 'file',
@@ -261,7 +276,13 @@ export async function refineImage({
   }
 
   const img = result.images[0];
-  const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+  const rawBase64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
+  let refinedBuf = Buffer.from(rawBase64, 'base64');
+  const sourceHasAlpha = (await sharp(sourceBuf).metadata()).hasAlpha;
+  if (sourceHasAlpha) refinedBuf = await applySourceAlpha(refinedBuf, sourceBuf);
+  const base64 = img.base64.startsWith('data:')
+    ? `[image omitted];base64,${refinedBuf.toString('base64')}`
+    : refinedBuf.toString('base64');
 
   if (output === 'buffer') {
     console.log('[imageRefine] Refined image returned in memory (not saved)');
@@ -269,7 +290,7 @@ export async function refineImage({
   }
   const target = outPath || filePath;
   const tmpPath = target + '.refining';
-  fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+  fs.writeFileSync(tmpPath, refinedBuf);
   fs.renameSync(tmpPath, target);
 
   console.log(`[imageRefine] Refined image saved (overwrote): ${target}`);

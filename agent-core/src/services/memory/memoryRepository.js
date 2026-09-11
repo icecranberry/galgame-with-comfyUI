@@ -111,7 +111,10 @@ export function validateMemoryAction(input = {}) {
   return { action, sourceMemoryIds, memory: normalizeMemory(input.memory) };
 }
 
-export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions, eventTime = null }) {
+export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions, eventTime = null, dedupeKey = null }) {
+  if (dedupeKey !== null && (typeof dedupeKey !== 'string' || !dedupeKey.length || dedupeKey.length > 256)) {
+    throw new Error('无效的记忆来源标识');
+  }
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
   const profile = getPreferredMemoryEmbeddingProfile();
@@ -122,7 +125,7 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
         ? db.prepare(`SELECT * FROM memory_fragments WHERE conversation_id = ? AND memory_id IN (${item.sourceMemoryIds.map(() => '?').join(',')}) AND status = 'active'`).all(conversationId, ...item.sourceMemoryIds)
         : [];
       if (sources.length !== item.sourceMemoryIds.length) throw new Error('引用的旧记忆不存在、已失效或不属于当前会话');
-      const contentHash = crypto.createHash('sha256').update(`${conversationId}\n${item.memory.memoryType}\n${item.memory.judgment}`).digest('hex');
+      const contentHash = crypto.createHash('sha256').update(`${conversationId}\n${item.memory.memoryType}\n${item.memory.judgment}${dedupeKey === null ? '' : `\nsource:${dedupeKey}`}`).digest('hex');
       const duplicate = db.prepare(`SELECT memory_id FROM memory_fragments WHERE conversation_id = ? AND content_hash = ? AND status = 'active'`).get(conversationId, contentHash);
       if (duplicate) continue;
       const memoryId = `mem_${randomUUID()}`;

@@ -1,4 +1,6 @@
 import { getDb } from '../db/index.js';
+import { replaceWeatherHourlyCache } from './weatherHourlyCache.js';
+import { captureWeatherSource, assertWeatherSourceCurrent, beginWeatherForecastRequest, assertWeatherForecastCurrent } from './weatherSource.js';
 import { config } from '../config.js';
 import { getTimeLight } from './timeLight.js';
 import * as jose from 'jose';
@@ -21,6 +23,9 @@ const _w  = _d('93c0d5d48585');
 const _z = 60 * 60 * 1000;
 
 let timer = null;
+let startupTimer = null;
+let schedulerRunning = false;
+let schedulerGeneration = 0;
 let processing = false;
 let resolvedCity = null;
 
@@ -91,24 +96,29 @@ function saveLocation(loc) {
   }
 }
 
+let resolvedCitySource = null, locationGeneration = 0;
 export async function resolveCity() {
-  if (resolvedCity) return resolvedCity;
-
-  if (config.weather.city) {
-    resolvedCity = { city: config.weather.city, source: 'env' };
-    saveLocation(resolvedCity);
+  const source = captureWeatherSource(), generation = ++locationGeneration;
+  const assertCurrent = () => {
+    assertWeatherSourceCurrent(source);
+    if (generation !== locationGeneration) throw Object.assign(new Error('天气定位请求已变化'), { code: 'WEATHER_SOURCE_STALE' });
+  };
+  if (resolvedCity && resolvedCitySource?.sourceKey === source.sourceKey && resolvedCitySource.revision === source.revision) {
+    assertCurrent();
     return resolvedCity;
   }
-
-  const ipResult = await resolveCityByIP();
-  if (ipResult) {
-    resolvedCity = ipResult;
-    saveLocation(resolvedCity);
-    return resolvedCity;
+  const city = typeof config.weather.city === 'string' ? config.weather.city.trim() : '';
+  let location;
+  if (city) location = { city, source: 'env' };
+  else {
+    const ipResult = await resolveCityByIP();
+    assertCurrent();
+    location = ipResult || { city: _w, source: 'default' };
   }
-
-  resolvedCity = { city: _w, source: 'default' };
-  saveLocation(resolvedCity);
+  assertCurrent();
+  saveLocation(location);
+  resolvedCity = location;
+  resolvedCitySource = source;
   return resolvedCity;
 }
 
@@ -147,7 +157,8 @@ async function fetchQWeather(url) {
   return data;
 }
 
-async function getLocationQuery(loc) {
+async function getLocationQuery(loc, request) {
+  assertWeatherForecastCurrent(request);
   if (loc.lat !== undefined && loc.lon !== undefined) {
     return `${loc.lon},${loc.lat}`;
   }
@@ -160,6 +171,7 @@ async function getLocationQuery(loc) {
   }
 
   const geoData = await fetchQWeather(`${_u}?location=${encodeURIComponent(loc.city)}`);
+  assertWeatherForecastCurrent(request);
   if (!geoData?.location?.[0]) {
     console.warn(`[weather] geo lookup failed for ${loc.city}`);
     return null;
@@ -171,36 +183,28 @@ async function getLocationQuery(loc) {
   return id;
 }
 
-async function fetchWeatherData(loc) {
-  const query = await getLocationQuery(loc);
+async function fetchWeatherData(loc, request) {
+  assertWeatherForecastCurrent(request);
+  const query = await getLocationQuery(loc, request);
+  assertWeatherForecastCurrent(request);
   if (!query) return;
 
   const data = await fetchQWeather(`${_v}?location=${query}`);
+  assertWeatherForecastCurrent(request);
   if (!data?.hourly?.length) {
     console.warn('[weather] no hourly data returned');
     return;
   }
 
-  const db = getDb();
-  db.prepare('DELETE FROM weather_hourly').run();
-
-  const insert = db.prepare(
-    'INSERT OR IGNORE INTO weather_hourly (weather_time, weather_text, temperature, wind_speed) VALUES (?, ?, ?, ?)'
-  );
-
-  const txn = db.transaction(() => {
-    for (const h of data.hourly) {
-      const t = h.fxTime.substring(11, 16);
-      const c = parseInt(h.temp, 10) || 0;
-      insert.run(t, h.text, tempLabel(c), beaufortLabel(parseFloat(h.windSpeed)));
-    }
-  });
-  txn();
+  replaceWeatherHourlyCache({ db: getDb(), hourly: data.hourly, fetchedAt: Date.now(), tempLabel, beaufortLabel,
+    sourceKey: request.sourceKey, assertCurrent: () => assertWeatherForecastCurrent(request) });
 
   console.log(`[weather] updated ${data.hourly.length} hours`);
 }
 
 function needsUpdate() {
+  const source = captureWeatherSource();
+  if (getDb().prepare('SELECT 1 FROM weather_hourly WHERE source_key IS NULL OR source_key != ? LIMIT 1').get(source.sourceKey)) return true;
   const row = getDb().prepare(
     'SELECT MAX(created_at) AS last_update FROM weather_hourly'
   ).get();
@@ -217,11 +221,12 @@ async function tick() {
   processing = true;
   try {
     if (!needsUpdate()) return;
-
+    const request = beginWeatherForecastRequest();
     const loc = await resolveCity();
+    assertWeatherForecastCurrent(request);
     if (!loc) return;
 
-    await fetchWeatherData(loc);
+    await fetchWeatherData(loc, request);
   } catch (err) {
     console.error('[weather] tick failed:', err.message);
   } finally {
@@ -230,21 +235,35 @@ async function tick() {
 }
 
 export function startWeatherScheduler() {
+  if (schedulerRunning) return;
   if (!config.features.weather) {
     console.log('[weather] disabled via feature flag');
     return;
   }
   console.log('[weather] starting scheduler (QWeather)');
+  schedulerRunning = true;
+  const generation = ++schedulerGeneration;
 
   resolveCity().catch(() => {});
-  setTimeout(() => {
+  startupTimer = setTimeout(() => {
+    if (!schedulerRunning || generation !== schedulerGeneration) return;
+    startupTimer = null;
     tick();
-    timer = setInterval(tick, _z);
+    timer = setInterval(() => {
+      if (!schedulerRunning || generation !== schedulerGeneration) return;
+      tick();
+    }, _z);
   }, 10_000);
 }
 
 export function stopWeatherScheduler() {
-  if (timer) {
+  schedulerRunning = false;
+  schedulerGeneration++;
+  if (startupTimer !== null) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+  }
+  if (timer !== null) {
     clearInterval(timer);
     timer = null;
   }
@@ -259,15 +278,20 @@ export function restartWeatherScheduler() {
 export async function triggerUpdate() {
   try {
     console.log('[weather] manual trigger');
+    const request = beginWeatherForecastRequest();
     const loc = await resolveCity();
+    assertWeatherForecastCurrent(request);
     if (!loc) return;
-    await fetchWeatherData(loc);
+    await fetchWeatherData(loc, request);
   } catch (err) {
     console.error('[weather] manual trigger failed:', err.message);
   }
 }
 
 export function getResolvedCity() {
+  if (!resolvedCitySource) return null;
+  const current = captureWeatherSource();
+  if (current.sourceKey !== resolvedCitySource.sourceKey || current.revision !== resolvedCitySource.revision) return null;
   return resolvedCity;
 }
 

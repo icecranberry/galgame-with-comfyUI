@@ -343,7 +343,7 @@ export async function prepareImagePrompt(prompt, {
   db = null,
   ragTimeoutMs = undefined,
 } = {}) {
-  const sceneAliases = { event: 'events', peek: 'schedule', gifts: 'gift', avatargen: 'avatar' };
+  const sceneAliases = { event: 'events', peek: 'schedule', gifts: 'gift', avatargen: 'avatar', town: 'town' };
   scene = sceneAliases[scene] || scene;
   const original = String(prompt || '').trim();
   if (!original) {

@@ -6,6 +6,8 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
+import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
@@ -636,6 +638,15 @@ ${rules}`;
   let text = '', imagePrompt = '', imageUrls = [];
   let imagePrompts = [];
   try {
+  // 小镇生活上下文（读模型分发时的最新记录，不跨排队缓存）
+  // Dream/fantasy and free expression retain their original narrative freedom.
+  if (config.features.town === true && !isFreeMode && !isSpecialMode) {
+    try {
+      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
+        registry: createTownActorRegistry(db), timeZone: config.town.timeZone })(character.id);
+      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: lifeContext });
+    } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
+  }
   // 每多一张配图就多一段画面描述，max_tokens 相应放宽（一张 2048 / 两张 3072 / 三张 4096）
   const maxTokens = 2048 + (imageCount - 1) * 1024;
   const result = await chatSync(msgs, { temperature: 0.7, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '发朋友圈助手' });

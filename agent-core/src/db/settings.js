@@ -96,6 +96,8 @@ export const SETTING_TO_CONFIG = {
   comfy_hires_max_size:           { obj: 'comfyui',  key: 'hiresMaxSize',     type: 'int' },
   comfy_hires_artist_mode:        { obj: 'comfyui',  key: 'hiresArtistMode',  type: 'string' },
   comfy_hires_artist:             { obj: 'comfyui',  key: 'hiresArtist',      type: 'string' },
+  feature_imageGenMode:            { obj: 'features', key: 'imageGenMode',     type: 'string' },
+  town_generation_settings:       { obj: 'town',     key: 'generation',       type: 'json'  },
 };
 
 function castValue(raw, type) {
@@ -150,6 +152,18 @@ export function loadSystemSettings(db) {
     if (row.setting_key === 'workflow_scene') {
       try {
         config.workflow.scene = { ...config.workflow.scene, ...JSON.parse(row.setting_value) };
+      } catch {
+        /* keep defaults */
+      }
+      applied++;
+    }
+    // 小镇参数 JSON 配置（v2 管理面板）
+    if (row.setting_key === 'town_settings') {
+      try {
+        const patch = JSON.parse(row.setting_value);
+        for (const [k, v] of Object.entries(patch)) {
+          if (k in config.town && v !== null && v !== undefined) config.town[k] = v;
+        }
       } catch {
         /* keep defaults */
       }
