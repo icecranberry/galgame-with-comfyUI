@@ -1,5 +1,5 @@
 <template>
-  <div class="img-editor" :class="{ 'is-large': cropMode, 'is-portrait': isPortrait }">
+  <div class="img-editor" :class="{ 'is-large': cropMode, 'is-portrait': isPortrait, 'is-checking': gapOpen }">
     <!-- 画布区：canvas 内部保持原图像素；CSS 只负责适配浏览器高度 -->
     <div
       ref="frameEl"
@@ -9,15 +9,15 @@
       @wheel.prevent="onWheel"
       @pointermove="onMove"
       @pointerup="onUp"
-      @pointercancel="onUp"
+      @pointercancel="onCancel"
     >
       <div class="ie-stage">
         <div class="ie-checker"></div>
         <canvas ref="canvasEl" class="ie-canvas" :style="canvasViewStyle"></canvas>
       </div>
-      <div v-if="!loaded" class="ie-loading">{{ loadingText || '加载中…' }}</div>
+      <div v-if="!loaded" class="ie-loading" role="status">{{ loadError || loadingText || '加载中…' }}</div>
       <Teleport to="body">
-        <aside class="ie-info" :style="infoStyle" aria-label="图片生成配置">
+        <aside v-show="!gapOpen" class="ie-info" :style="infoStyle" aria-label="图片生成配置">
           <TownPromptPanel
             :model-value="generationParams"
             :step="generationStep"
@@ -31,9 +31,41 @@
     </div>
 
     <div class="ie-toolbar">
+      <section v-if="gapOpen" class="ie-gaps" aria-label="自动抠白" :aria-busy="detecting">
+        <div class="ie-gap-heading">
+          <label :for="gapSliderId">抠白强度 <strong>{{ gapStrength }}</strong></label>
+          <span role="status">{{ gapStatus }}</span>
+          <linshe-button variant="icon" size="sm" aria-label="收起自动抠白" @click="closeGaps">✕</linshe-button>
+        </div>
+        <input
+          :id="gapSliderId" v-model.number="gapStrength" class="ie-gap-slider" type="range" min="0" max="100" step="1" aria-label="抠白强度"
+          :disabled="!loaded || saving || cropping" :aria-valuetext="`${gapStrength}，${gapStatus}`" :style="{ '--fill': gapStrength / 100 }"
+        >
+        <div class="ie-gap-scale"><span>0 · 不抠</span><span>低抠大块 · 高抠碎白</span><span>100 · 碎白</span></div>
+        <div class="ie-gap-footer">
+          <p class="ie-gap-help"><i class="ie-gap-swatch" aria-hidden="true"></i>{{ gapPreview ? '正在预览抠后效果，保存后生效。' : '粉色区域将被整块抠透明。' }}抠白按连通的白色块计算：强度低只动大块留白，调高强度才把更细碎的白色也整块抠掉。</p>
+          <linshe-button variant="ghost" size="sm" :disabled="editLocked || !gapPixelCount" @click="gapPreview = !gapPreview">{{ gapPreview ? '显示待抠标记' : '看抠后效果' }}</linshe-button>
+        </div>
+        <p v-if="gapError" class="ie-gap-error" role="alert">{{ gapError }}</p>
+      </section>
       <div class="ie-hint">{{ cropHint }}</div>
       <div class="ie-buttons">
-        <linshe-button variant="chip" size="sm" :active="eraseMode" @click="eraseMode = !eraseMode">
+        <linshe-button variant="chip" size="sm" :active="gapOpen" :loading="detecting" :disabled="!loaded || saving || cropping" @click="toggleGaps">
+          <span class="ie-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+              <path d="m14 7 3 3" />
+              <path d="M5 6v4" />
+              <path d="M19 14v4" />
+              <path d="M10 2v2" />
+              <path d="M7 8H3" />
+              <path d="M21 16h-4" />
+              <path d="M11 3H9" />
+            </svg>
+          </span>
+          自动抠白
+        </linshe-button>
+        <linshe-button variant="chip" size="sm" :active="eraseMode" :disabled="editLocked" @click="toggleErase">
           <span class="ie-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
@@ -41,10 +73,10 @@
               <path d="m5 11 9 9" />
             </svg>
           </span>
-          {{ eraseMode ? '抠白中' : '抠去多余白色' }}
+          {{ eraseMode ? '点选抠白中' : '手动抠白' }}
         </linshe-button>
 
-        <linshe-button v-if="cropMode" variant="chip" size="sm" :active="cropActive" @click="cropActive = !cropActive">
+        <linshe-button v-if="cropMode" variant="chip" size="sm" :active="cropActive" :disabled="editLocked" @click="toggleCrop">
           <span class="ie-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="6" cy="6" r="3" />
@@ -57,11 +89,11 @@
           裁剪模式
         </linshe-button>
 
-        <linshe-button variant="ghost" size="sm" :disabled="!canUndo" @click="undoErase">撤销上一步</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="(!canUndo && !(gapOpen && gapPixelCount)) || editLocked" @click="undoErase">{{ gapOpen && gapPixelCount ? '撤销抠白预览' : '撤销上一步' }}</linshe-button>
         <!-- 外部注入的操作（重新生成 / 立绘 HiresFix）：与主按钮同排 -->
         <slot name="actions" />
-        <linshe-button v-if="cropActive && !eraseMode" variant="primary" size="sm" :loading="cropping" @click="confirmCrop">确认裁剪</linshe-button>
-        <linshe-button v-else variant="primary" size="sm" :loading="saving" :disabled="!dirty" @click="save">保存编辑</linshe-button>
+        <linshe-button v-if="cropActive && !eraseMode" variant="primary" size="sm" :loading="cropping" :disabled="editLocked" @click="confirmCrop">确认裁剪</linshe-button>
+        <linshe-button v-else variant="primary" size="sm" :loading="saving" :disabled="(!dirty && !(gapOpen && gapPixelCount)) || editLocked" @click="save">{{ gapOpen && gapPixelCount ? '应用并保存' : '保存编辑' }}</linshe-button>
       </div>
     </div>
 
@@ -74,10 +106,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
+import { applyWhiteGapStrength, normalizeWhiteGapStrength, MAX_WHITE_GAP_PIXELS } from '../../town/whiteGapDetection.js'
 
 const props = defineProps({
   src: { type: String, required: true },
@@ -100,6 +133,7 @@ const emit = defineEmits(['saved', 'cropped', 'update:generationParams'])
 const frameEl = ref(null)
 const canvasEl = ref(null)
 const loaded = ref(false)
+const loadError = ref('')
 const eraseMode = ref(false)
 const cropActive = ref(false)
 const canUndo = ref(false)
@@ -120,6 +154,206 @@ const cropping = ref(false)
 let cropDrag = null
 let viewDrag = null
 let eraseHistory = []
+const gapOpen = ref(false)
+const detecting = ref(false)
+const gapError = ref('')
+const gapStrength = ref(35)
+const gapSliderId = useId()
+const gapSession = shallowRef(null)
+const gapPreview = ref(false)
+const gapPixelCount = computed(() => gapSession.value?.pixelCounts[normalizeWhiteGapStrength(gapStrength.value)] || 0)
+const gapRegionCount = computed(() => gapSession.value?.regionCounts[normalizeWhiteGapStrength(gapStrength.value)] || 0)
+const editLocked = computed(() => !loaded.value || saving.value || cropping.value || detecting.value)
+const gapStatus = computed(() => detecting.value ? '正在分析留白…' : !gapSession.value ? '等待分析' :
+  gapStrength.value === 0 ? '保留原图' : gapRegionCount.value ? `将抠去 ${gapRegionCount.value} 处` :
+    gapSession.value.pixelCounts[100] ? '暂无待抠区域，可调高强度' : '未发现可抠留白')
+let gapWorker = null
+let gapOverlay = null
+let gapPreviewMask = null
+let gapBoundary = null
+let gapPaintFrame = null
+let imageVersion = 0
+
+function cancelDetection() {
+  gapWorker?.terminate()
+  gapWorker = null
+  detecting.value = false
+}
+
+function clearGaps() {
+  cancelDetection()
+  if (gapPaintFrame !== null) cancelAnimationFrame(gapPaintFrame)
+  gapPaintFrame = null
+  gapSession.value = null
+  gapPreview.value = false
+  gapOverlay = null
+  gapPreviewMask = null
+  gapBoundary = null
+  gapError.value = ''
+}
+
+function closeGaps() {
+  cancelDetection()
+  gapOpen.value = false
+  gapPreview.value = false
+  nextTick(() => requestAnimationFrame(() => requestAnimationFrame(draw)))
+  draw()
+}
+
+function toggleGaps() {
+  if (gapOpen.value) { closeGaps(); return }
+  if (editLocked.value) return
+  gapOpen.value = true
+  eraseMode.value = false
+  cropActive.value = false
+  // 画框高度在 is-checking 下变化，等布局稳定后补一次重绘，避免合成层按旧尺寸采样
+  nextTick(() => requestAnimationFrame(() => requestAnimationFrame(draw)))
+  if (gapSession.value) nextTick(scheduleGapOverlay)
+  else scanGaps()
+}
+
+function toggleErase() {
+  closeGaps()
+  cropActive.value = false
+  eraseMode.value = !eraseMode.value
+}
+
+function toggleCrop() {
+  closeGaps()
+  eraseMode.value = false
+  cropActive.value = !cropActive.value
+}
+
+function scanGaps() {
+  if (editLocked.value || !img) return
+  clearGaps()
+  gapOpen.value = true
+  eraseMode.value = false
+  cropActive.value = false
+  resetView()
+  draw()
+  if (img.width * img.height > MAX_WHITE_GAP_PIXELS) {
+    gapError.value = '图片较大，请使用不超过 1600 万像素的图片查找留白；仍可手动抠白。'
+    return
+  }
+  detecting.value = true
+  const version = imageVersion
+  try {
+    // Read the working image, never the canvas containing preview highlights.
+    const source = compositeFull().getContext('2d', { willReadFrequently: true }).getImageData(0, 0, img.width, img.height)
+    const worker = new Worker(new URL('../../town/whiteGapDetection.worker.js', import.meta.url), { type: 'module' })
+    gapWorker = worker
+    const fail = message => {
+      if (gapWorker !== worker || version !== imageVersion) return
+      cancelDetection()
+      gapError.value = message
+    }
+    worker.onerror = () => fail('留白查找失败，请重试；仍可使用手动抠白。')
+    worker.onmessage = ({ data }) => {
+      if (gapWorker !== worker || version !== imageVersion) return
+      if (data.error) { fail(data.error); return }
+      cancelDetection()
+      gapSession.value = { ...data, width: source.width, height: source.height }
+      rebuildGapOverlay()
+    }
+    worker.postMessage({ pixels: source.data.buffer, width: source.width, height: source.height }, [source.data.buffer])
+  } catch (error) {
+    cancelDetection()
+    gapError.value = error.message || '留白查找失败，请重试'
+  }
+}
+
+function scheduleGapOverlay() {
+  if (gapPaintFrame !== null) return
+  gapPaintFrame = requestAnimationFrame(() => {
+    gapPaintFrame = null
+    rebuildGapOverlay()
+  })
+}
+
+function rebuildGapOverlay() {
+  const session = gapSession.value
+  if (!session) { gapOverlay = null; gapPreviewMask = null; gapBoundary = null; draw(); return }
+  const { width, height, thresholds } = session
+  const strength = normalizeWhiteGapStrength(gapStrength.value)
+  gapOverlay ||= document.createElement('canvas')
+  gapPreviewMask ||= document.createElement('canvas')
+  gapOverlay.width = gapPreviewMask.width = width
+  gapOverlay.height = gapPreviewMask.height = height
+  const overlay = gapOverlay.getContext('2d')
+  const mask = gapPreviewMask.getContext('2d')
+  const cutout = mask.createImageData(width, height)
+  const selected = i => thresholds[i] > 0 && thresholds[i] <= strength
+  // Regions go away whole, so the preview is binary too: solid pink over every selected region.
+  const boundary = new Path2D()
+  for (let i = 0; i < thresholds.length; i++) {
+    if (!selected(i)) continue
+    cutout.data[i * 4 + 3] = 255
+    const x = i % width, y = Math.floor(i / width)
+    // The contour is a display-only path. Its thick outline never enters the saved alpha mask.
+    if (x === 0 || !selected(i - 1)) { boundary.moveTo(x, y); boundary.lineTo(x, y + 1) }
+    if (x === width - 1 || !selected(i + 1)) { boundary.moveTo(x + 1, y); boundary.lineTo(x + 1, y + 1) }
+    if (y === 0 || !selected(i - width)) { boundary.moveTo(x, y); boundary.lineTo(x + 1, y) }
+    if (y === height - 1 || !selected(i + width)) { boundary.moveTo(x, y + 1); boundary.lineTo(x + 1, y + 1) }
+  }
+  gapBoundary = [{ path: boundary, opacity: 1 }]
+  mask.putImageData(cutout, 0, 0)
+  overlay.putImageData(cutout, 0, 0)
+  overlay.globalCompositeOperation = 'source-in'
+  const style = getComputedStyle(frameEl.value)
+  overlay.fillStyle = style.getPropertyValue('--fun-pink').trim()
+  overlay.fillRect(0, 0, width, height)
+  overlay.globalCompositeOperation = 'source-atop'
+  overlay.strokeStyle = style.getPropertyValue('--on-accent').trim()
+  const unit = 1 / Math.max(0.01, displayScale().x * view.scale)
+  const stride = Math.max(5, 10 * unit)
+  overlay.lineWidth = Math.max(1, 2 * unit)
+  overlay.beginPath()
+  for (let x = -height; x < width; x += stride) {
+    overlay.moveTo(x, 0); overlay.lineTo(x + height, height)
+  }
+  overlay.stroke()
+  overlay.globalCompositeOperation = 'source-over'
+  draw()
+}
+
+function drawGapMarkers() {
+  if (!gapBoundary || !gapPixelCount.value) return
+  const style = getComputedStyle(frameEl.value)
+  const pink = style.getPropertyValue('--fun-pink').trim()
+  const ink = style.getPropertyValue('--cel-outline').trim()
+  const paper = style.getPropertyValue('--on-accent').trim()
+  const unit = 1 / Math.max(0.01, displayScale().x * view.scale)
+  ctx.save()
+  ctx.globalAlpha = 0.85
+  ctx.drawImage(gapOverlay, 0, 0)
+  ctx.lineJoin = 'round'
+  for (const { path, opacity } of gapBoundary) {
+    ctx.globalAlpha = opacity
+    for (const [color, weight] of [[ink, 4], [pink, 2.5], [paper, 0.8]]) {
+      ctx.strokeStyle = color
+      ctx.lineWidth = weight * unit
+      ctx.stroke(path)
+    }
+  }
+  // Keep tiny openings visible even when viewing a whole portrait.
+  for (const region of gapSession.value.regions) {
+    if (region.firstStrength > gapStrength.value || Math.min(region.bounds.w, region.bounds.h) / unit >= 6) continue
+    const { x, y } = region.anchor
+    ctx.beginPath()
+    ctx.arc(x, y, 8 * unit, 0, Math.PI * 2)
+    ctx.strokeStyle = ink; ctx.lineWidth = 4 * unit; ctx.stroke()
+    ctx.strokeStyle = paper; ctx.lineWidth = 2.5 * unit; ctx.stroke()
+    ctx.strokeStyle = pink; ctx.lineWidth = 1.5 * unit; ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function rememberEdit() {
+  eraseHistory.push({ image: compositeFull(), dirty: dirty.value })
+  if (eraseHistory.length > 8) eraseHistory.shift()
+  canUndo.value = true
+}
 
 /** object-fit: contain 时，canvas 元素边框不等于实际内容区域；交互必须按内容区域换算 */
 function canvasContentRect(canvas) {
@@ -161,6 +395,7 @@ function cropDisplayRect() {
 }
 
 const cropHint = computed(() => {
+  if (gapOpen.value) return '调低强度即可恢复 · 拖动画布查看 · 滚轮缩放'
   if (eraseMode.value) return props.hint || '点击要去除的白色或底色'
   if (cropActive.value) return '拖动移动截取框 · 拖右下角手柄调大小 · 框内即最终成图范围'
   return '滚轮缩放 · 拖动画布查看'
@@ -189,6 +424,14 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.imageSmoothingEnabled = false
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+  if (gapOpen.value && gapOverlay) {
+    if (gapPreview.value) {
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.drawImage(gapPreviewMask, 0, 0)
+      ctx.globalCompositeOperation = 'source-over'
+    } else drawGapMarkers()
+  }
 
   if (cropActive.value && cropRect.value && !eraseMode.value) {
     const r = cropDisplayRect()
@@ -222,7 +465,14 @@ function draw() {
 }
 
 async function loadImage(src) {
+  const version = ++imageVersion
+  clearGaps()
+  gapOpen.value = false
+  gapStrength.value = 35
+  eraseMode.value = false
+  onCancel()
   loaded.value = false
+  loadError.value = ''
   dirty.value = false
   eraseHistory = []
   canUndo.value = false
@@ -230,14 +480,21 @@ async function loadImage(src) {
   resetView()
   const image = new Image()
   image.crossOrigin = 'anonymous'
-  await new Promise((resolve, reject) => {
-    image.onload = resolve
-    image.onerror = () => reject(new Error('图片加载失败'))
-    image.src = src
-  })
+  try {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve
+      image.onerror = () => reject(new Error('图片加载失败，请重新打开图片'))
+      image.src = src
+    })
+  } catch (error) {
+    if (version === imageVersion) loadError.value = error.message
+    return
+  }
+  if (version !== imageVersion) return
   img = image
   await nextTick()
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+  if (version !== imageVersion) return
   sizeCanvas()
   loaded.value = true
   if (props.cropMode) resetCrop()
@@ -250,25 +507,27 @@ function resetView() {
   view.y = 0
 }
 
+/** 滚轮缩放：以当前鼠标位置为锚点，指针下的图像点保持不动 */
 function onWheel(e) {
   if (!img || !canvasEl.value || !frameEl.value) return
   const canvas = canvasEl.value
-  const frameRect = frameEl.value.getBoundingClientRect()
-  const oldContent = canvasContentRect(canvas)
   const oldScale = view.scale
   const nextScale = Math.min(5, Math.max(1, oldScale * (e.deltaY > 0 ? 0.9 : 1.1)))
   if (nextScale === oldScale) return
-
+  // contain 后位图在元素内的居中偏移只跟布局有关；显示区域 = translate + 偏移 × scale
+  const layoutScale = Math.min(canvas.offsetWidth / img.width, canvas.offsetHeight / img.height)
+  const baseW = img.width * layoutScale
+  const baseH = img.height * layoutScale
+  const offsetLeft = (canvas.offsetWidth - baseW) / 2
+  const offsetTop = (canvas.offsetHeight - baseH) / 2
+  const frameRect = frameEl.value.getBoundingClientRect()
   const pointerX = e.clientX - frameRect.left
   const pointerY = e.clientY - frameRect.top
-  const oldLeft = oldContent.left - frameRect.left
-  const oldTop = oldContent.top - frameRect.top
-  const baseLeft = oldLeft - view.x
-  const baseTop = oldTop - view.y
-  const nextLeft = pointerX - (pointerX - oldLeft) * (nextScale / oldScale)
-  const nextTop = pointerY - (pointerY - oldTop) * (nextScale / oldScale)
-  view.x = nextLeft - baseLeft
-  view.y = nextTop - baseTop
+  const ratio = nextScale / oldScale
+  const left = view.x + offsetLeft * oldScale
+  const top = view.y + offsetTop * oldScale
+  view.x = pointerX - (pointerX - left) * ratio - offsetLeft * nextScale
+  view.y = pointerY - (pointerY - top) * ratio - offsetTop * nextScale
   view.scale = nextScale
 }
 
@@ -284,6 +543,7 @@ function sizeCanvas() {
 }
 
 function onDown(e) {
+  if (!loaded.value || !img || saving.value || cropping.value || detecting.value) return
   const point = canvasPoint(e)
   if (eraseMode.value) {
     eraseColorAt(point.x, point.y)
@@ -330,6 +590,10 @@ function onMove(e) {
 }
 
 function onUp() {
+  onCancel()
+}
+
+function onCancel() {
   cropDrag = null
   viewDrag = null
   panning.value = false
@@ -337,17 +601,10 @@ function onUp() {
 
 /** 点击颜色区域：以点击点颜色为种子，容差洪泛 → 透明 */
 function eraseColorAt(px, py) {
+  if (editLocked.value || !img) return
   const ix = Math.floor(px)
   const iy = Math.floor(py)
   if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) return
-
-  const snapshot = document.createElement('canvas')
-  snapshot.width = img.width
-  snapshot.height = img.height
-  snapshot.getContext('2d').drawImage(img, 0, 0)
-  eraseHistory.push(snapshot)
-  if (eraseHistory.length > 8) eraseHistory.shift()
-  canUndo.value = true
 
   const work = document.createElement('canvas')
   work.width = img.width
@@ -364,6 +621,7 @@ function eraseColorAt(px, py) {
     setTimeout(() => { savedTip.value = '' }, 1500)
     return
   }
+  rememberEdit()
   const nearSeed = (o) =>
     Math.abs(d[o] - target[0]) <= ERASE_TOLERANCE &&
     Math.abs(d[o + 1] - target[1]) <= ERASE_TOLERANCE &&
@@ -387,21 +645,28 @@ function eraseColorAt(px, py) {
   }
   wctx.putImageData(data, 0, 0)
 
-  const out = new Image()
-  out.onload = () => {
-    img = out
-    dirty.value = true
-    draw()
-  }
-  out.src = work.toDataURL('image/png')
+  img = work
+  imageVersion++
+  dirty.value = true
+  clearGaps()
+  draw()
 }
 
 function undoErase() {
-  if (!eraseHistory.length || !img) return
-  img = eraseHistory.pop()
-  dirty.value = eraseHistory.length > 0
+  if (gapOpen.value && gapPixelCount.value && !editLocked.value) {
+    gapStrength.value = 0
+    gapPreview.value = false
+    return
+  }
+  if (!eraseHistory.length || !img || editLocked.value) return
+  const previous = eraseHistory.pop()
+  img = previous.image
+  imageVersion++
+  dirty.value = previous.dirty
+  clearGaps()
+  gapOpen.value = false
   canUndo.value = eraseHistory.length > 0
-  draw()
+  rebuildGapOverlay()
 }
 
 /** 初始化截取框：始终基于原图尺寸居中 */
@@ -425,7 +690,7 @@ async function confirmCrop() {
   const nh = Math.max(8, Math.min(Math.round(r.h), img.height - ny))
   cropping.value = true
   try {
-    if (dirty.value) await save()
+    if (dirty.value && !(await save())) return
     await api.cropTownAsset(props.assetId, { x: nx, y: ny, w: nw, h: nh })
     await loadImage(freshSrc())
     resetCrop()
@@ -438,20 +703,36 @@ async function confirmCrop() {
 }
 
 async function save() {
-  if (!dirty.value || saving.value) return
+  const applyGaps = gapOpen.value && gapPixelCount.value > 0
+  if ((!dirty.value && !applyGaps) || saving.value || detecting.value || !loaded.value) return false
   saving.value = true
+  const version = imageVersion
   try {
-    const dataUrl = canvasEl.value ? compositeFull().toDataURL('image/png') : null
-    await api.saveTownAssetImage(props.assetId, dataUrl)
+    const output = compositeFull()
+    if (applyGaps) {
+      const context = output.getContext('2d', { willReadFrequently: true })
+      const data = context.getImageData(0, 0, output.width, output.height)
+      data.data.set(applyWhiteGapStrength(data.data, gapSession.value.thresholds, gapStrength.value))
+      context.putImageData(data, 0, 0)
+    }
+    await api.saveTownAssetImage(props.assetId, output.toDataURL('image/png'))
+    if (version !== imageVersion) return true
+    img = output
+    imageVersion++
     savedTip.value = '✓ 已保存'
     dirty.value = false
     eraseHistory = []
     canUndo.value = false
+    clearGaps()
+    gapOpen.value = false
+    draw()
     emit('saved')
     setTimeout(() => { savedTip.value = '' }, 1600)
+    return true
   } catch (err) {
     savedTip.value = '保存失败：' + (err?.message || '')
     setTimeout(() => { savedTip.value = '' }, 2200)
+    return false
   } finally {
     saving.value = false
   }
@@ -475,6 +756,9 @@ function freshSrc() {
 
 watch(() => props.src, (v) => { if (v) loadImage(v) })
 watch(eraseMode, () => draw())
+watch(gapPreview, () => draw())
+watch(gapStrength, () => { if (gapOpen.value) scheduleGapOverlay() })
+watch(() => view.scale, () => { if (gapOpen.value) scheduleGapOverlay() })
 watch(cropActive, (active) => {
   if (active) resetCrop()
   resetView()
@@ -486,16 +770,20 @@ watch(() => props.cropMode, (allowed) => {
 
 onMounted(() => {
   nextTick(() => updateInfoPosition())
-  const panel = frameEl.value?.closest?.('.tam-panel')
-  if (panel && typeof ResizeObserver !== 'undefined') {
-    infoResizeObserver = new ResizeObserver(() => updateInfoPosition())
-    infoResizeObserver.observe(panel)
+  if (frameEl.value && typeof ResizeObserver !== 'undefined') {
+    infoResizeObserver = new ResizeObserver(() => {
+      updateInfoPosition()
+      if (gapOpen.value) scheduleGapOverlay()
+    })
+    infoResizeObserver.observe(frameEl.value)
   }
   window.addEventListener('resize', updateInfoPosition)
   if (props.src) loadImage(props.src)
 })
 
 onBeforeUnmount(() => {
+  imageVersion++
+  clearGaps()
   cropDrag = null
   viewDrag = null
   infoResizeObserver?.disconnect()
@@ -523,7 +811,7 @@ onBeforeUnmount(() => {
   max-height: 72vh;
   border-radius: 12px;
   overflow: hidden;
-  background: #efe9de;
+  background: #e8e0cb;
   min-height: 160px;
   touch-action: none;
 }
@@ -537,10 +825,10 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(45deg, #e3dccc 25%, transparent 25%),
-    linear-gradient(-45deg, #e3dccc 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #e3dccc 75%),
-    linear-gradient(-45deg, transparent 75%, #e3dccc 75%);
+    linear-gradient(45deg, #d4c7a7 25%, transparent 25%),
+    linear-gradient(-45deg, #d4c7a7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d4c7a7 75%),
+    linear-gradient(-45deg, transparent 75%, #d4c7a7 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
@@ -563,7 +851,8 @@ onBeforeUnmount(() => {
      否则浏览器平滑插值会把本来就小的像素贴图糊成一团（ctx.imageSmoothingEnabled 管不到 CSS 缩放） */
   image-rendering: pixelated;
   transform-origin: 0 0;
-  will-change: transform;
+  /* 不要加 will-change: transform：常驻合成层在画框高度变化（开合自动抠白面板）后
+     会按旧倍率光栅化，立绘会被放大发糊，直到多次重绘才恢复 */
 }
 /* 立绘是 900×1600 插画，不是像素画，保持平滑缩放 */
 .img-editor.is-portrait .ie-canvas { image-rendering: auto; }
@@ -602,6 +891,85 @@ onBeforeUnmount(() => {
 }
 
 .ie-toolbar { display: flex; flex-direction: column; gap: 6px; }
+.ie-gaps { padding: 10px 0; border-block: 1px solid var(--border); color: var(--text-primary); font-size: 12px; }
+.ie-gap-heading { display: flex; align-items: center; gap: 8px; }
+.ie-gap-heading label { font-weight: 700; white-space: nowrap; }
+.ie-gap-heading strong { display: inline-block; min-width: 3ch; color: var(--accent-hover); font-variant-numeric: tabular-nums; }
+.ie-gap-heading > span { flex: 1; color: var(--text-secondary); text-align: right; }
+.ie-gap-slider {
+  --thumb-size: 24px;
+  --fill-position: calc(var(--thumb-size) / 2 + (100% - var(--thumb-size)) * var(--fill, .35));
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 6px 0 6px;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.ie-gap-slider:focus { box-shadow: none; }
+.ie-gap-slider:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.ie-gap-slider:disabled { cursor: not-allowed; opacity: .55; }
+.ie-gap-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill-position), var(--border) var(--fill-position));
+}
+.ie-gap-slider::-moz-range-track {
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill-position), var(--border) var(--fill-position));
+}
+.ie-gap-slider::-webkit-slider-thumb {
+  appearance: none;
+  box-sizing: border-box;
+  width: var(--thumb-size);
+  height: var(--thumb-size);
+  margin-top: -8px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 3px solid var(--accent);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+}
+.ie-gap-slider::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb-size);
+  height: var(--thumb-size);
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 3px solid var(--accent);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+}
+.ie-gap-slider:active::-webkit-slider-thumb { cursor: grabbing; }
+.ie-gap-slider:active::-moz-range-thumb { cursor: grabbing; }
+.ie-gap-scale { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 10px; }
+.ie-gap-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
+.ie-gap-help { flex: 1 1 220px; margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
+.ie-gap-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  border: 1px solid var(--cel-outline);
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, var(--fun-pink) 0 3px, var(--on-accent) 3px 4px);
+}
+.ie-gap-error { color: var(--danger); margin: 8px 0; }
+.img-editor.is-checking .ie-frame { min-height: 200px; height: min(55vh, 680px); max-height: 60vh; }
+@media (max-width: 600px) {
+  .img-editor.is-checking .ie-frame { min-height: 180px; height: 44vh; }
+  .ie-gap-heading { gap: 4px; }
+}
 .ie-hint { font-size: 10px; color: var(--text-secondary); }
 .ie-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .ie-buttons > :last-child { margin-left: auto; }
