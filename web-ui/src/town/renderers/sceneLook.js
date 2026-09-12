@@ -37,9 +37,9 @@ export function daylightLook(hour = 12, rainy = false) {
 
 export function townMaterial(kind, options = {}) {
   const material = new T.MeshLambertMaterial(options)
-  const paintedCard = kind === 'agent' || kind === 'building'
-  if (paintedCard) material.userData.townDaylight = { value: 1 }
-  if (kind === 'agent') {
+  const paintedCard = ['agent', 'building', 'prop', 'lamp'].includes(kind)
+  if (paintedCard) {
+    material.userData.townDaylight = { value: 1 }
     material.userData.townExposure = { value: 1.25 }
     material.userData.townSpriteWhite = { value: .95 }
   }
@@ -59,8 +59,8 @@ export function townMaterial(kind, options = {}) {
         float variation = .98 + .04*sin(vTownWorld.x*.63+sin(vTownWorld.z*.49)) + .025*sin(vTownWorld.z*1.8+vTownWorld.x*.31);
         diffuseColor.rgb = mix(vec3(townLuma), diffuseColor.rgb, .94) * variation;`)
     } else {
-      // Preserve the existing night shading. Buildings receive a neutral daylight
-      // fill; character daylight is calibrated to the authored display color below.
+      // Retain the existing night shading. All painted cards share the authored
+      // daylight color below; their source artwork already contains its shading.
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += diffuseColor.rgb * ${kind === 'building'
           ? 'mix(.22 + .07*smoothstep(.52,.86,vTownUv.y), .65, townDaylight)'
@@ -71,15 +71,13 @@ export function townMaterial(kind, options = {}) {
       if (paintedCard) {
         shader.uniforms.townDaylight = material.userData.townDaylight
         shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float townDaylight;')
-      }
-      if (kind === 'agent') {
         shader.uniforms.townExposure = material.userData.townExposure
         shader.uniforms.townSpriteWhite = material.userData.townSpriteWhite
         shader.fragmentShader = shader.fragmentShader
           .replace('#include <common>', `#include <common>\n${authoredSpriteColorShader}`)
           .replace('#include <color_fragment>', '#include <color_fragment>\nvec3 townAuthoredColor = diffuseColor.rgb;')
           .replace('#include <opaque_fragment>', `
-            outgoingLight = mix(outgoingLight, townSpriteRadiance(townAuthoredColor), townDaylight);
+            outgoingLight = mix(outgoingLight, townSpriteRadiance(townAuthoredColor)${kind === 'lamp' ? ' + townLampEmission' : ''}, townDaylight);
             #include <opaque_fragment>`)
       }
       if (kind === 'building') {
@@ -102,11 +100,13 @@ export function townMaterial(kind, options = {}) {
           .replace('#include <common>', '#include <common>\nuniform float townGlow;')
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
             float glass = smoothstep(.08,.32,dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))) * smoothstep(.65,.85,vTownUv.y);
-            totalEmissiveRadiance += vec3(2.6,1.18,.32) * glass * townGlow;`)
+            // Keep the lamp's actual emission, including faint overcast glow.
+            vec3 townLampEmission = vec3(2.6,1.18,.32) * glass * townGlow;
+            totalEmissiveRadiance += townLampEmission;`)
       }
     }
   }
-  material.customProgramCacheKey = () => `town-cinematic-v8-${kind}`
+  material.customProgramCacheKey = () => `town-cinematic-v9-${kind}`
   return withTownOcclusionFade(material)
 }
 
