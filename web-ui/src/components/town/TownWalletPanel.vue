@@ -18,7 +18,7 @@
         <span>我的邻币</span><strong>{{ money(economy.wallet?.available) }}<small>可用</small></strong>
         <p>余额 {{ money(economy.wallet?.balance) }} <span>·</span> 预留 {{ money(economy.wallet?.reserved) }}</p>
       </section>
-      <!-- <section v-if="economy.liquidity" aria-labelledby="tl-liquidity-title">
+      <section v-if="economy.liquidity" aria-labelledby="tl-liquidity-title">
         <h3 id="tl-liquidity-title">公共基金</h3>
         <p>{{ economy.liquidity.availableFund == null ? '基金尚未配置' : `可用 ${money(economy.liquidity.availableFund)} 邻币` }} · 有限保障{{ economy.liquidity.enabled ? '已开启' : '未开启' }}</p>
         <p class="tl-muted">本镇累计补助 {{ money(economy.liquidity.grossIssued) }}，剩余额度 {{ money(economy.liquidity.remainingWorldBudget) }}。过去 24 小时发行 {{ money(economy.liquidity.issued24h) }}，过去 7 天发行 {{ money(economy.liquidity.issued7d) }}。</p>
@@ -44,10 +44,11 @@
       </template>
       <section v-else aria-labelledby="tl-where-title">
         <h3 id="tl-where-title">镇上的事，到地方办</h3>
-        <p class="tl-muted">走到店门口点一下那栋房子，或者点一下掌柜本人，就能进店帮忙、点单、投宿或学一手。这里只管钱袋子。</p>
+        <p class="tl-muted">想攒邻币，路子都在镇上：到公告站接一份配送委托、去店里当一班工、随手接一份「奇遇」托付，完成后赏钱直接进钱包。</p>
+        <p class="tl-muted">走到店门口点一下那栋房子，或者点一下掌柜本人，就能进店帮忙、点单、投宿或学一手；跟邻居聊天时也可能被托付小事。这里只管钱袋子。</p>
         <p v-if="shopLine" class="tl-muted">镇上开着的：{{ shopLine }}。</p>
         <p class="tl-muted">配送委托、工坊备料和邻居回访都在公告站；一家店去过几次，店里会记得你。</p>
-      </section> -->
+      </section>
     </template>
   </town-paper-panel>
 </template>

@@ -21,6 +21,11 @@
               </p>
               <p v-if="stock" class="tvp-muted">{{ venueResourceLabel }} {{ stock.available }} 份</p>
               <p v-if="regularLine" class="tvp-muted">{{ regularLine }}</p>
+              <section v-if="venueQuests.length" class="tvp-policy" aria-label="本店奇遇">
+                <strong>本店奇遇</strong>
+                <p v-for="quest in venueQuests" :key="quest.questId">「{{ quest.title }}」{{ quest.intro }}（{{ questReward(quest) }}）</p>
+                <linshe-button variant="secondary" size="sm" @click="$emit('quests')">打开奇遇手账接下</linshe-button>
+              </section>
               <p v-if="!economyEnabled" class="tvp-muted">新的服务已暂停。已接受的服务仍可继续或取消。</p>
               <div v-if="!terminal" class="tvp-policy" aria-label="活动规则">
                 <strong>{{ policyTitle }}</strong>
@@ -84,12 +89,12 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import TownDialogueStage from './TownDialogueStage.vue'
 import LinsheButton from '../ui/LinsheButton.vue'
-import { getTownEconomy, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand } from '../../api/index.js'
+import { getTownEconomy, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand, fetchTownQuests } from '../../api/index.js'
 
 const props = defineProps({ worldId: { type: String, required: true }, worldEpoch: { type: Number, required: true },
   businessKey: { type: String, required: true }, sessionId: { type: String, default: null },
   providerName: { type: String, default: '店主' } })
-const emit = defineEmits(['close', 'chat'])
+const emit = defineEmits(['close', 'chat', 'quests'])
 
 const session = ref(null), loading = ref(false), sending = ref(false), fresh = ref(false), error = ref('')
 const economyEnabled = ref(false), serviceOpen = ref(null), serviceHours = ref('')
@@ -102,6 +107,15 @@ const terminal = computed(() => !!statusNames[session.value?.status])
 const locked = computed(() => loading.value || sending.value || !!pending.value || !fresh.value || stale.value)
 
 const venueName = computed(() => venue.value?.displayName || session.value?.businessKey || '店铺')
+const quests = ref(null)
+const venueQuests = computed(() => (quests.value?.offered || [])
+  .filter(quest => quest.trigger?.type === 'venue' && quest.trigger?.key === props.businessKey))
+function questReward(quest) {
+  const parts = []
+  if ((quest.rewards?.coins ?? 0) > 0) parts.push(`${quest.rewards.coins} 邻币`)
+  for (const item of quest.rewards?.items || []) parts.push(`${item.name || item.templateId}×${item.count ?? 1}`)
+  return parts.join(' + ') || '一份心意'
+}
 const venueResourceLabel = computed(() => venue.value?.resourceLabel || '材料')
 const stock = computed(() => venue.value?.stock || null)
 function regularRow(regular) {
@@ -195,9 +209,11 @@ async function refresh() {
   const current = () => alive && generation === lifecycle && sequence === reads
   if (!pending.value) error.value = ''
   try {
-    const overview = await getTownEconomy()
+    const [overview, questData] = await Promise.all([getTownEconomy(), fetchTownQuests().catch(() => null)])
     if (!current()) return
     economyEnabled.value = overview.enabled === true
+    if (questData && Number.isSafeInteger(questData.worldEpoch)
+        && questData.worldId === overview.worldId && questData.worldEpoch === overview.worldEpoch) quests.value = questData
     venue.value = (overview.venues || []).find(item => item.businessKey === props.businessKey) || null
     catalog.value = Array.isArray(venue.value?.catalog) ? venue.value.catalog : null
     serviceOpen.value = venue.value?.open ?? null; serviceHours.value = venue.value?.hours || ''

@@ -52,6 +52,16 @@
           </div>
         </article>
       </section>
+      <section v-if="questsEnabled" aria-labelledby="tl-quests-title">
+        <div class="tl-section-heading"><h3 id="tl-quests-title">镇上的奇遇</h3>
+          <linshe-button variant="link" size="sm" @click="$emit('quests')">打开奇遇手账</linshe-button></div>
+        <p v-if="!boardQuests.length" class="tl-muted">公告站暂时没有新托付。镇上的奇遇也会出现在手账里。</p>
+        <article v-for="quest in boardQuests" :key="quest.questId" class="tl-order">
+          <div class="tl-order-heading"><strong>{{ quest.title }}</strong><span class="tl-reward">{{ questReward(quest) }}</span></div>
+          <p class="tl-muted">{{ quest.intro }}</p>
+          <linshe-button variant="secondary" size="sm" @click="$emit('quests')">去手账接下</linshe-button>
+        </article>
+      </section>
       <section aria-labelledby="tl-appointments-title">
         <h3 id="tl-appointments-title">再来坐坐</h3>
         <p class="tl-muted">和已入住的工坊邻居约一次免费回访，时间由你确认。</p>
@@ -66,10 +76,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownPaperPanel from './TownPaperPanel.vue'
-import { getTownEconomy, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand } from '../../api/index.js'
+import { getTownEconomy, createTownLifeCommand, executeTownLifeCommand, getPendingTownLifeCommand, savePendingTownLifeCommand, fetchTownQuests } from '../../api/index.js'
 
 const props = defineProps({ open: Boolean })
-const emit = defineEmits(['close', 'move-to', 'appointments'])
+const emit = defineEmits(['close', 'move-to', 'appointments', 'quests'])
 const economy = ref(null), loading = ref(false), sending = ref(false), fresh = ref(false)
 const error = ref(''), notice = ref(''), cancelId = ref(null), rejected = ref(false)
 // 公告站的待确认操作单独存一条通道，避免与钱袋面板里的开张操作互相顶替。
@@ -85,6 +95,15 @@ const steps = {
 }
 const nextStep = order => steps[order.status]
 const orders = computed(() => economy.value?.orders || [])
+const quests = ref(null)
+const questsEnabled = computed(() => quests.value?.enabled === true)
+const boardQuests = computed(() => (quests.value?.offered || []).filter(quest => quest.trigger?.type === 'board'))
+function questReward(quest) {
+  const parts = []
+  if ((quest.rewards?.coins ?? 0) > 0) parts.push(`${quest.rewards.coins} 邻币`)
+  for (const item of quest.rewards?.items || []) parts.push(`${item.name || item.templateId}×${item.count ?? 1}`)
+  return parts.join(' + ') || '一份心意'
+}
 const activeOrders = computed(() => orders.value.filter(order => nextStep(order)))
 const productionTotals = computed(() => (economy.value?.production?.batches || []).reduce((totals, batch) => {
   if (batch.status === 'reserved' || batch.status === 'completed') {
@@ -113,10 +132,11 @@ async function refresh() {
   if (!pending.value) error.value = ''
   loading.value = true; fresh.value = false
   try {
-    const data = await getTownEconomy()
+    const [data, questData] = await Promise.all([getTownEconomy(), fetchTownQuests().catch(() => null)])
     if (!current()) return
     if (!data || typeof data.enabled !== 'boolean' || !Number.isSafeInteger(data.worldEpoch)) throw new Error('小镇状态不完整，请稍后重新读取。')
     economy.value = data
+    if (questData && Number.isSafeInteger(questData.worldEpoch) && questData.worldId === data.worldId) quests.value = questData
     fresh.value = true
     if (pending.value && (pending.value.worldId !== data.worldId || pending.value.body.worldEpoch !== data.worldEpoch)) {
       pending.value = null; savePendingTownLifeCommand(null, CHANNEL); rejected.value = false

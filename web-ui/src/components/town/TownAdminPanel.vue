@@ -336,6 +336,11 @@
           </div>
           <p class="ap-layout-desc">在生活面板配置居民与路线。关闭后暂停新委托和服务，已经接下的仍可完成或取消。</p>
           <div class="ap-setting">
+            <span class="ap-setting-label">奇遇任务</span>
+            <linshe-switch v-model="settings.questEnabled" size="sm" :disabled="settingsLocked" aria-label="奇遇任务" />
+          </div>
+          <p class="ap-layout-desc">默认开启（需先开「配送与工坊接单」）。居民和店铺会托付有明确完成点的小任务，赏钱由店铺或公共基金托管支付。</p>
+          <div class="ap-setting">
             <span class="ap-setting-label">公共基金有限保障</span>
             <linshe-switch v-model="settings.liquidityEnabled" size="sm" :disabled="settingsLocked" aria-label="公共基金有限保障" />
           </div>

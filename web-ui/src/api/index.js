@@ -1603,7 +1603,8 @@ export function regenerateTownPlayerPortrait(overrides = {}) {
 }
 
 export { getTownEconomy, getTownLiquidity, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand,
-  getPendingTownLifeCommand, savePendingTownLifeCommand } from './townLife.js'
+  getPendingTownLifeCommand, savePendingTownLifeCommand, fetchTownQuests,
+  fetchTownNpcFunctions, fetchTownNpcTrade, askTownNpcQuestOffer, askTownCharacterQuestOffer, receiveTownNpcGift, tradeWithTownNpc } from './townLife.js'
 export { getTownActorActivities } from './townActivity.js'
 export { getTownMailboxTasks } from './townMailboxTasks.js'
 export { getTownAppointments, parseTownAppointmentBeijingTime, createTownAppointmentCommand,

@@ -44,7 +44,11 @@
           @compositionstart="composing = true" @compositionend="composing = false" @keydown.enter="onEnter" />
         <linshe-button type="submit" variant="primary" size="sm" :loading="sending" :disabled="loading || blocked || !draft.trim()">发送</linshe-button>
       </form>
-      <linshe-button v-if="showActivity" variant="link" size="sm" @click="$emit('activity')">查看居民近况</linshe-button>
+      <div class="td-extra">
+        <linshe-button v-for="item in actions" :key="item.key" variant="link" size="sm"
+          :disabled="loading || sending || blocked" @click="$emit('action', item.key)">{{ item.label }}</linshe-button>
+        <linshe-button v-if="showActivity" variant="link" size="sm" @click="$emit('activity')">查看居民近况</linshe-button>
+      </div>
     </div>
   </section>
 </template>
@@ -59,9 +63,9 @@ const props = defineProps({
   messages: { type: Array, default: () => [] }, loading: Boolean, sending: Boolean, blocked: Boolean,
   error: { type: String, default: '' },
   status: { type: String, default: '' }, hasMoreHistory: Boolean, maxLength: { type: Number, default: 200 },
-  retryable: Boolean, draftRestore: Object, showActivity: Boolean,
+  retryable: Boolean, draftRestore: Object, showActivity: Boolean, actions: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['send', 'close', 'reload', 'load-older', 'retry', 'activity'])
+const emit = defineEmits(['send', 'close', 'reload', 'load-older', 'retry', 'activity', 'action'])
 const root = ref(null), input = ref(null), body = ref(null)
 const draft = ref(''), composing = ref(false), historyOpen = ref(false), failedImages = ref({})
 const viewportStyle = ref({}), compact = ref(false), zoomed = ref(null)
@@ -186,6 +190,7 @@ article p { white-space: pre-wrap; line-height: 1.8; margin: 4px 0; font-size: 1
 .td-input > :first-child { flex: 1; min-width: 0; }
 .td-status, .td-error { font-size: 12px; margin: 6px 0 0; }
 .td-error { color: #ad5147; }
+.td-extra { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 @container town-world (max-width: 700px) {
   .town-dialogue-stage { height: calc(100% - 112px); grid-template-columns: 1fr 1fr; grid-template-rows: minmax(80px, 1fr) minmax(220px, 48%); gap: 0; padding: 0 6px 10px; }
   .td-portraits { display: flex; justify-content: space-between; grid-column: 1 / -1; grid-row: 1; width: 100%; height: 100%; }

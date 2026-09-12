@@ -1752,6 +1752,7 @@ export async function ensureCharacterTownAssets(characterId) {
 const TOWN_SETTING_FIELDS = {
   economyEnabled: { type: 'boolean' },
   liquidityEnabled: { type: 'boolean' },
+  questEnabled: { type: 'boolean' },
   simulation: { type: 'enum', values: ['legacy', 'rules'] },
   timeZone: { type: 'timezone' },
   tickSeconds: { min: 20, max: 300, type: 'int' },
@@ -1893,6 +1894,7 @@ export function resetWorld() {
     runtime.services.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     runtime.cafe.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     runtime.venues.failForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
+    runtime.quests.cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch });
     getTownAppointmentRuntime().appointments.cancelForRebuild({ scope: { worldId: world.worldId, worldEpoch: world.epoch } });
     runtime.production.cancelForRebuild({ worldId: world.worldId, worldEpoch: world.epoch,
       idempotencyKey: `reset-production:${world.epoch}`, sourceKey: `reset-production:${world.epoch}` });

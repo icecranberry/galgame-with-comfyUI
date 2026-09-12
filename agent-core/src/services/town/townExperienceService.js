@@ -130,6 +130,38 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
           : '玩家在工坊完成了制作体验，收下了一枚心情修复贴，服务已经结算。',
         locationKey: config.locationKey };
     }
+    if (event.type === 'town.gift.given') {
+      const payload = event.payload || {};
+      const item = db.prepare(`SELECT id, template_id, name, source_id, owner_key FROM backpack_items
+        WHERE id = ? AND world_id = ? AND source_type = 'reward'`).get(payload.itemId, event.worldId);
+      if (!item || item.source_id !== payload.sourceId || item.owner_key !== 'me'
+        || item.template_id !== payload.templateId
+        || event.source?.system !== 'town.npc.functions' || event.source.entityId !== payload.sourceId) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const npcActor = sync(registry.getActor(payload.npcActorId, event.worldId, { followMerged: false }));
+      if (!npcActor || npcActor.actorId !== payload.npcActorId) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const npcName = npcActor.npcExists
+        ? db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(npcActor.npcId)?.display_name || '邻居' : '邻居';
+      return { actorIds: [...new Set([payload.npcActorId])],
+        summary: `${npcName}送了玩家一份「${item.name}」的小心意。`, locationKey: event.locationKey ?? null };
+    }
+    if (event.type === 'town.quest.changed') {
+      if (event.payload?.status !== 'completed') return null;
+      const row = db.prepare(`SELECT * FROM town_quests WHERE quest_id=? AND world_id=? AND world_epoch=? AND status='completed'`)
+        .get(event.payload.questId, event.worldId, event.worldEpoch);
+      if (!row || row.version !== event.payload.version || event.eventId !== `quest:${row.quest_id}:${row.version}`
+        || event.source?.system !== 'town.quest' || event.source.entityId !== row.quest_id) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const log = db.prepare(`SELECT occurred_at FROM town_quest_log WHERE event_id=? AND quest_id=?
+        AND world_id=? AND world_epoch=? AND phase='completed'`)
+        .get(event.eventId, row.quest_id, event.worldId, event.worldEpoch);
+      if (!log || log.occurred_at !== event.occurredAt) throw townError('EXPERIENCE_SOURCE_INVALID');
+      const config = JSON.parse(row.config);
+      const participantIds = [...new Set([row.actor_id, row.offering_actor_id].filter(Boolean))];
+      for (const actorId of participantIds) {
+        if (!event.actorIds.includes(actorId)) throw townError('EXPERIENCE_PARTICIPANT_INVALID');
+      }
+      return { actorIds: participantIds,
+        summary: `玩家完成了奇遇任务「${config.title}」。`, locationKey: row.location_key ?? null };
+    }
     return null;
   }
   function consume(event) {

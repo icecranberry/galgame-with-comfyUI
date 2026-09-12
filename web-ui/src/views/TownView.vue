@@ -39,6 +39,7 @@
       </div>
       <div v-if="initialized" class="town-topbar-actions">
         <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showQuestPanel" @click="openQuestPanel">奇遇</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
@@ -170,14 +171,15 @@
     </Transition>
     <p v-if="dialogueOpening || dialogueError || lifeMoveError" class="town-dialogue-notice" role="status">{{ lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
     <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
-    <TownBoardPanel :open="showBoardPanel" @close="closeBoardPanel" @move-to="moveToLifeLocation" @appointments="openAppointments" />
+    <TownBoardPanel :open="showBoardPanel" @close="closeBoardPanel" @move-to="moveToLifeLocation" @appointments="openAppointments" @quests="openQuestPanel" />
+    <TownQuestPanel :open="showQuestPanel" :locations="locations" @close="closeQuestPanel" @move-to="moveToLifeLocation" />
     <town-workshop-service v-if="spotReady && worldSpot.type === 'workshop'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
       :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
     <town-cafe-work-panel v-if="spotReady && worldSpot.type === 'cafe'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
       :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
     <town-venue-service-panel v-if="spotReady && worldSpot.type === 'venue'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
       :business-key="worldSpot.businessKey" :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName"
-      @close="closeWorldSpot" @chat="openSpotDialogue" />
+      @close="closeWorldSpot" @chat="openSpotDialogue" @quests="openQuestPanel" />
     <TownAppointmentPanel :open="showAppointments" :residents="agents" :locations="locations" @close="showAppointments = false" />
     <TownActivityPanel :open="!!activityActor" :actor="activityActor" @close="activityActorId = null" />
     <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
@@ -230,6 +232,7 @@ import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownCharacterChat from '../components/town/TownCharacterChat.vue'
 import TownWalletPanel from '../components/town/TownWalletPanel.vue'
 import TownBoardPanel from '../components/town/TownBoardPanel.vue'
+import TownQuestPanel from '../components/town/TownQuestPanel.vue'
 import TownWorkshopService from '../components/town/TownWorkshopService.vue'
 import TownCafeWorkPanel from '../components/town/TownCafeWorkPanel.vue'
 import TownVenueServicePanel from '../components/town/TownVenueServicePanel.vue'
@@ -376,6 +379,7 @@ const dialogueOpening = ref(false)
 const dialogueError = ref('')
 const showWalletPanel = ref(false)
 const showBoardPanel = ref(false)
+const showQuestPanel = ref(false)
 // 世界里点开的建筑玩法：{ type, businessKey, displayName, providerName, providerActorId, sessionId }
 const worldSpot = ref(null)
 const approaching = ref('')
@@ -398,7 +402,7 @@ const dialogueServiceBusy = computed(() => {
   return resident?.busyReason === 'SERVICE_BUSY'
 })
 const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showWalletPanel.value
-  || showBoardPanel.value || !!worldSpot.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
+  || showBoardPanel.value || showQuestPanel.value || !!worldSpot.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
 const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
 const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
 const showAdmin = ref(false)
@@ -416,7 +420,7 @@ watch(dialogueInputBlocked, blocked => {
 }, { flush: 'sync' })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
   activityActorId.value = null; showAppointments.value = false
-  showWalletPanel.value = false; showBoardPanel.value = false; worldSpot.value = null; approaching.value = ''
+  showWalletPanel.value = false; showBoardPanel.value = false; showQuestPanel.value = false; worldSpot.value = null; approaching.value = ''
   ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
   refreshTownEconomy()
 })
@@ -1617,6 +1621,19 @@ function openBoardPanel() {
   dialogueError.value = ''
   lifeMoveError.value = ''
   showBoardPanel.value = true
+  refreshTownEconomy()
+}
+function openQuestPanel() {
+  if (editing.value || showAdmin.value || showWizard.value || lifeMoving.value) return
+  dialogueError.value = ''
+  lifeMoveError.value = ''
+  showBoardPanel.value = false
+  showWalletPanel.value = false
+  worldSpot.value = null
+  showQuestPanel.value = true
+}
+function closeQuestPanel() {
+  showQuestPanel.value = false
   refreshTownEconomy()
 }
 function openActivityPanel(actor) {

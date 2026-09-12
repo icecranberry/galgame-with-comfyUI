@@ -28,14 +28,32 @@ async function request(path, body) {
 export const getTownEconomy = () => request('/economy')
 export const getTownLiquidity = () => request('/liquidity')
 export const getTownServiceSession = sessionId => request(`/services/${encodeURIComponent(sessionId)}`)
+export const fetchTownQuests = () => request('/quests')
+// NPC 功能点：目录只读；gift/trade 是带幂等键的服务端授权操作。
+export const fetchTownNpcFunctions = npcId => request(`/npcs/${encodeURIComponent(npcId)}/functions`)
+export const fetchTownNpcTrade = npcId => request(`/npcs/${encodeURIComponent(npcId)}/trade`)
+export const askTownNpcQuestOffer = (npcId, { worldEpoch } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/quest-offer`,
+  { idempotencyKey: crypto.randomUUID(), ...(Number.isSafeInteger(worldEpoch) ? { worldEpoch } : {}) })
+export const askTownCharacterQuestOffer = (characterId, { worldEpoch } = {}) => request(`/characters/${encodeURIComponent(characterId)}/quest-offer`,
+  { idempotencyKey: crypto.randomUUID(), ...(Number.isSafeInteger(worldEpoch) ? { worldEpoch } : {}) })
+export const receiveTownNpcGift = (npcId, { worldEpoch } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/gift`,
+  { idempotencyKey: crypto.randomUUID(), ...(Number.isSafeInteger(worldEpoch) ? { worldEpoch } : {}) })
+export const tradeWithTownNpc = (npcId, body) => request(`/npcs/${encodeURIComponent(npcId)}/trade`,
+  { idempotencyKey: crypto.randomUUID(), ...body })
 
 /** Snapshot a command once. Retry this object verbatim; never add player IDs or coordinates. */
-export function createTownLifeCommand(kind, { worldId, worldEpoch, orderId, expectedVersion, npcActorIds, locationKeys, sessionId, serviceKey, intentKey, text = '', businessKey } = {}) {
-  if (!['setup', 'publish', 'accept', 'pickup', 'complete', 'cancel', 'service_offer', 'service_accept', 'service_cancel', 'service_turn'].includes(kind)) throw new Error('未知操作')
+export function createTownLifeCommand(kind, { worldId, worldEpoch, orderId, expectedVersion, npcActorIds, locationKeys, sessionId, serviceKey, intentKey, text = '', businessKey, questId } = {}) {
+  if (!['setup', 'publish', 'accept', 'pickup', 'complete', 'cancel', 'service_offer', 'service_accept', 'service_cancel', 'service_turn',
+    'quest_accept', 'quest_abandon', 'quest_progress'].includes(kind)) throw new Error('未知操作')
   if (!worldId || !Number.isSafeInteger(worldEpoch)) throw new Error('请先重新读取小镇状态')
   const body = { worldEpoch, idempotencyKey: crypto.randomUUID() }
   let path
-  if (kind.startsWith('service_')) {
+  if (kind.startsWith('quest_')) {
+    if (!questId) throw new Error('请先重新读取奇遇状态')
+    body.questId = questId
+    path = `/quests/${encodeURIComponent(questId)}/${kind.slice(6)}`
+  }
+  else if (kind.startsWith('service_')) {
     if (kind === 'service_offer') {
       if (serviceKey !== undefined && !['town.workshop', 'town.workshop.bob_cut', ...VENUE_SERVICE_KEYS].includes(serviceKey)) throw new Error('未知小镇服务')
       path = '/services/offer'
@@ -79,7 +97,7 @@ export function getPendingTownLifeCommand(channel = 'life') {
   const key = channel === 'life' ? PENDING_KEY : `${PENDING_KEY}:${channel}`
   try {
     const saved = JSON.parse(sessionStorage.getItem(key) || 'null')
-    if (saved?.body?.idempotencyKey && saved?.worldId && /^\/(economy\/setup|orders\/publish|orders\/[^/]+\/(accept|pickup|complete|cancel)|services\/offer|services\/[^/]+\/(accept|cancel|turn))$/.test(saved.path)) memoryPending.set(channel, saved)
+    if (saved?.body?.idempotencyKey && saved?.worldId && /^\/(economy\/setup|orders\/publish|orders\/[^/]+\/(accept|pickup|complete|cancel)|services\/offer|services\/[^/]+\/(accept|cancel|turn)|quests\/[^/]+\/(accept|abandon|progress))$/.test(saved.path)) memoryPending.set(channel, saved)
   } catch { /* Storage may be unavailable; retain same-session memory. */ }
   return memoryPending.get(channel) || null
 }

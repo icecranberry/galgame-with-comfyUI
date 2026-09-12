@@ -19,6 +19,8 @@ import { createTownAppearanceSignature, townAssetAppearanceStatus } from './town
 import { getMapRow } from './townMapService.js';
 import { broadcastTownBubble } from './townBus.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
+import { ensureNpcFunctions, describeNpcFunctions } from './townNpcFunctions.js';
+import { questTemplateList } from './townQuestDefinitions.js';
 import { findRoutineSlot } from './routineSchedule.js';
 import { randomUUID } from 'node:crypto';
 import { beginTownDialogueRequest, finishTownDialogueRequest, failTownDialogueRequest } from './townDialogueRequests.js';
@@ -866,6 +868,29 @@ export async function chatWithNpc(npcId, message, opts = {}) {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const scene = currentRoutineLine(npc, now);
+    // 功能点事实：让 NPC 知道自己能托付/送东西/做买卖；给不给仍由服务端决定。
+    let functionLine = '';
+    try {
+      const row = db.prepare('SELECT id, display_name, job, functions_json FROM town_npcs WHERE id = ?').get(npcId);
+      if (row) {
+        functionLine = describeNpcFunctions(ensureNpcFunctions(db, row, {
+          npcQuestTemplateIds: questTemplateList().filter(template => template.trigger?.type === 'npc').map(template => template.id),
+        }));
+      }
+    } catch { /* 功能档案不可用不影响聊天 */ }
+    // 任务事实：玩家手头有进行中的奇遇时，让 NPC 知情，聊天才接得上。
+    let questLine = '';
+    try {
+      if (actor) {
+        const active = db.prepare(`SELECT title, current_step, config FROM town_quests WHERE world_id = ? AND world_epoch = ?
+          AND actor_id = ? AND status = 'active' LIMIT 1`).get(world.worldId, world.epoch, actor.actorId);
+        if (active) {
+          const questConfig = JSON.parse(active.config);
+          const step = questConfig.steps?.[active.current_step];
+          questLine = `来访者手头有一件没做完的事「${active.title}」${step ? `，当前这一步是：${step.label}` : ''}。如果TA提起，可以顺着聊，也可以打打气。`;
+        }
+      }
+    } catch { /* 任务事实不可用不影响聊天 */ }
 
     const reply = useModel ? await chatSync([
       {
@@ -874,6 +899,8 @@ export async function chatWithNpc(npcId, message, opts = {}) {
           `你是小镇居民「${npc.displayName}」，正在镇上和来访的玩家（${config.user.nickname}）面对面聊天。`,
           npc.persona ? `你的人设：${npc.persona}` : '',
           npc.job ? `你的职业：${npc.job}` : '',
+          functionLine ? `你在小镇里的生活设定：${functionLine}` : '',
+          questLine,
           `现在是 ${timeStr}，你${scene}。`,
           '要求：用中文回复，1~2 句话（不超过 60 字），口语化、符合人设，可以聊眼前的生活；小动作用（括号）内嵌。不要输出旁白、不要自称 AI、不要列选项。',
           '以下是你们之前在镇上的对话（可能为空）：',
@@ -892,6 +919,14 @@ export async function chatWithNpc(npcId, message, opts = {}) {
     const text = String(reply || '').trim().slice(0, 200);
     if (!text) throw new Error('NPC 没有回应');
     const result = { reply: text, source: useModel ? 'model' : 'template', requestId: request.requestId };
+
+    // 奇遇钩子：镇上恰有可接的托付时，把邀约随回复带给前端（并随请求存档，重放可见）。
+    // 安静失败：邀约只是聊天的小概率惊喜，任何不满足都不能影响聊天本身。
+    try {
+      const { maybeOfferTownQuestAfterNpcChat } = await import('./townEconomyRuntime.js');
+      const questOffer = maybeOfferTownQuestAfterNpcChat({ actorId: actor?.actorId ?? null, npcId });
+      if (questOffer) result.questOffer = questOffer;
+    } catch { /* 奇遇不可用不阻塞对话 */ }
 
     db.transaction(() => {
       registry.assertEpoch(world.epoch);

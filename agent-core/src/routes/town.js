@@ -30,11 +30,13 @@ import {
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
-import { getTownWallet, getTownActorActivities, getTownEconomyState, setupTownEconomy, executeTownOrder, maintainTownOrders, executeTownService, getTownService } from '../services/town/townEconomyRuntime.js';
+import { getTownWallet, getTownActorActivities, getTownEconomyState, setupTownEconomy, executeTownOrder, maintainTownOrders, executeTownService, getTownService,
+  getTownQuests, executeTownQuest } from '../services/town/townEconomyRuntime.js';
 import { getTownAppointments, executeTownAppointment } from '../services/town/townEconomyRuntime.js';
 import { getTownDeliveryDiagnostics, retryTownDelivery } from '../services/town/townEconomyRuntime.js';
 import { getTownLiquidityStatus } from '../services/town/townEconomyRuntime.js';
 import { getTownMailboxTaskCards } from '../services/town/townEconomyRuntime.js';
+import { offerTownQuestForNpc, offerTownQuestForCharacter, getTownNpcFunctions, receiveTownNpcGift, getTownNpcTrade, executeTownNpcTrade } from '../services/town/townEconomyRuntime.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
@@ -187,6 +189,29 @@ const townCommandMessages = {
   ACTOR_UNAVAILABLE: '居民目前不在镇上，请重新选择',
   LOCATION_UNAVAILABLE: '地点已变化，请刷新后重试',
   INVALID_SLICE: '请选择互不相同的居民和地点',
+  QUEST_NOT_FOUND: '这份奇遇不存在，请重新读取',
+  QUEST_NOT_OWNED: '这份奇遇不属于当前玩家，请重新读取',
+  QUEST_STATE_CONFLICT: '奇遇状态已变化，请重新读取',
+  QUEST_ACTIVE_LIMIT: '已经有进行中的奇遇了，先完成它再说',
+  QUEST_POOL_LIMIT: '镇上的奇遇已经够多了，稍后再来看',
+  NO_QUEST_AVAILABLE: '现在没有合适的奇遇，稍后再来问问',
+  INVALID_QUEST_TRIGGER: '这份奇遇的来路不对，请重新读取',
+  INVALID_QUEST_TEMPLATE: '这份奇遇的定义暂时无法确认，请重新读取',
+  QUEST_REWARD_MISSING: '赏钱托管记录丢失，任务暂时无法结算',
+  QUEST_REWARD_UNAVAILABLE: '赏钱托管出了问题，已停止结算，请稍后再试',
+  QUESTS_DISABLED: '奇遇任务暂未开启',
+  ECONOMY_DISABLED: '小镇经济暂未开启，先去设置里开张吧',
+  NPC_NOT_FOUND: '这位居民不存在，请重新读取',
+  NOT_A_GIFT_GIVER: '这位邻居没有随身带礼物的习惯',
+  GIFT_COOLDOWN: '这位邻居今天已经送过东西了，改天再来',
+  NOT_A_TRADER: '这位邻居不做买卖',
+  INVALID_TRADE_ITEM: '这里不做这件物品的生意',
+  INVALID_TRADE_DIRECTION: '交易方向无效，请重新读取',
+  ITEM_NOT_FOUND: '背包里找不到这件物品，请重新读取',
+  ITEM_NOT_TRADABLE: '这件物品不能交易',
+  ITEM_LOCKED: '这件物品正被占用，稍后再试',
+  ACCOUNT_OWNER_MISMATCH: '交易账户校验未通过，请重新读取后再试',
+  TEMPLATE_NOT_FOUND: '这件商品的模板还没准备好，请稍后再来',
 };
 function sendTownCommandError(res, err) {
   const message = townCommandMessages[err.code] || err.message || '操作未完成';
@@ -256,6 +281,19 @@ router.post('/services/offer', async (req, res) => {
   try { res.json(await executeTownService('offer', null, req.body || {})); }
   catch (err) { sendTownCommandError(res, err); }
 });
+
+// ── 奇遇任务 ──
+
+router.get('/quests', (req, res) => {
+  try { res.json(getTownQuests()); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+for (const command of ['accept', 'abandon', 'progress']) {
+  router.post(`/quests/:id/${command}`, (req, res) => {
+    try { res.json(executeTownQuest(command, req.params.id, req.body || {})); }
+    catch (err) { sendTownCommandError(res, err); }
+  });
+}
 router.get('/services/:id', (req, res) => {
   try { res.json(getTownService(req.params.id)); }
   catch (err) { sendTownCommandError(res, err); }
@@ -578,6 +616,36 @@ router.post('/npcs/:id/reroll', async (req, res) => {
 
 router.get('/npcs/:id/messages', (req, res) => {
   res.json({ messages: getNpcChatHistory(parseInt(req.params.id, 10)) });
+});
+
+// 问邻居有没有能帮上忙的事：同场才能问，服务端决定是否真的有奇遇可给
+router.post('/npcs/:id/quest-offer', (req, res) => {
+  try { res.json({ questOffer: offerTownQuestForNpc(parseInt(req.params.id, 10), req.body || {}) }); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+// 入住角色侧的同款入口：经 town_npcs.character_id 反查镇上档案
+router.post('/characters/:id/quest-offer', (req, res) => {
+  try { res.json({ questOffer: offerTownQuestForCharacter(parseInt(req.params.id, 10), req.body || {}) }); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+
+// ── NPC 功能点（给任务 / 送东西 / 做买卖） ──
+
+router.get('/npcs/:id/functions', (req, res) => {
+  try { res.json(getTownNpcFunctions(parseInt(req.params.id, 10))); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/npcs/:id/gift', (req, res) => {
+  try { res.json(receiveTownNpcGift(parseInt(req.params.id, 10), req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.get('/npcs/:id/trade', (req, res) => {
+  try { res.json(getTownNpcTrade(parseInt(req.params.id, 10))); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+router.post('/npcs/:id/trade', (req, res) => {
+  try { res.json(executeTownNpcTrade(parseInt(req.params.id, 10), req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
 });
 
 router.post('/npcs/:id/chat', async (req, res) => {

@@ -9,6 +9,10 @@ import { broadcastTownStateUpdated } from './townBus.js';
 import { createTownServiceSessionService } from './townServiceSessionService.js';
 import { createTownCafeService } from './townCafeService.js';
 import { createTownVenueService } from './townVenueService.js';
+import { createTownQuestService } from './townQuestService.js';
+import { createTownNpcFunctionService } from './townNpcFunctionService.js';
+import { ensureNpcFunctions } from './townNpcFunctions.js';
+import { questTemplateList } from './townQuestDefinitions.js';
 import { createTownVenueRegularService } from './townVenueRegularService.js';
 import { isVenueServiceKey, venueKindDescriptors, venueProductTemplates } from './townVenuePlaybooks.js';
 import { createItemTemplateService } from './itemTemplateService.js';
@@ -304,7 +308,69 @@ export function getTownBusinessRuntime() {
   };
   const venues = createTownVenueService({ ...dependencies, itemTemplates, getVenue,
     interruptWork: interruptVenueWork, onConsumed });
-  return { ...context, position, business, work, itemTemplates, services, cafe, venues, regulars,
+  // 奇遇任务：发布方（venue 账户/公共基金）与触发观察由运行时注入，引擎本身不认识 slice。
+  const npcQuestTemplateIdsFor = (db, npcId) => {
+    try {
+      const row = Number.isSafeInteger(npcId)
+        ? db.prepare('SELECT id, display_name, job, functions_json FROM town_npcs WHERE id = ?').get(npcId) : null;
+      return row ? ensureNpcFunctions(db, row, {
+        npcQuestTemplateIds: questTemplateList().filter(template => template.trigger?.type === 'npc').map(template => template.id),
+      }).quest_giver?.questTemplateIds ?? null : null;
+    } catch { return null; }
+  };
+  const questPayer = (requestedScope, payer) => {
+    const slice = business.getSlice(requestedScope);
+    if (payer?.type === 'fund') return { accountId: slice.accounts.fund };
+    if (payer?.type === 'venue') {
+      const profile = (slice.functionalBuildings || []).find(building => building.businessKey === payer.businessKey)
+        || (payer.businessKey === 'cafe' ? slice.cafe : null);
+      if (!profile) throw Object.assign(new Error('VENUE_NOT_CONFIGURED'), { code: 'VENUE_NOT_CONFIGURED' });
+      return { accountId: profile.accountId ?? slice.accounts?.[payer.businessKey] };
+    }
+    throw Object.assign(new Error('INVALID_QUEST_PAYER'), { code: 'INVALID_QUEST_PAYER' });
+  };
+  const observeQuestTriggers = requestedScope => {
+    const triggers = [];
+    let slice = null;
+    try { slice = business.getSlice(requestedScope); }
+    catch (error) { if (error.code !== 'SLICE_NOT_CONFIGURED') throw error; }
+    triggers.push({ type: 'board', locationKey: slice?.locationKeys?.board ?? null });
+    const playerSpot = getTownActorPosition(registry.resolveAgentKey('me').actorId);
+    if (slice && playerSpot && !playerSpot.moving && Array.isArray(playerSpot.locationKeys)) {
+      for (const profile of [slice.cafe, ...(slice.functionalBuildings || [])].filter(Boolean)) {
+        if (playerSpot.locationKeys.includes(profile.locationKey)) {
+          triggers.push({ type: 'venue', key: profile.businessKey, locationKey: profile.locationKey, actorId: profile.actorId });
+        }
+      }
+    }
+    if (playerSpot && !playerSpot.moving && Array.isArray(playerSpot.locationKeys) && playerSpot.locationKeys.length) {
+      for (const actor of registry.synchronize()) {
+        if ((!actor.npcExists && !actor.characterExists) || !actor.participating || actor.archived || actor.mergedInto) continue;
+        if (!actor.npcExists) continue; // 功能档案目前挂在 town_npcs 上，纯入住角色经其关联居民参与
+        const spot = getTownActorPosition(actor.actorId);
+        if (!spot || spot.moving || !Array.isArray(spot.locationKeys)) continue;
+        if (spot.locationKeys.some(key => playerSpot.locationKeys.includes(key))) {
+          triggers.push({ type: 'npc', key: null, locationKey: playerSpot.locationKeys[0], actorId: actor.actorId,
+            questTemplateIds: npcQuestTemplateIdsFor(db, actor.npcId) });
+          break;
+        }
+      }
+    }
+    return triggers;
+  };
+  const quests = createTownQuestService({ ...dependencies, observeTriggers: observeQuestTriggers, resolvePayer: questPayer,
+    resolveRegularTier: (input, trigger) => regulars.get({ ...input, businessKey: trigger.key,
+      playerActorId: registry.resolveAgentKey('me').actorId })?.tier ?? 0,
+    enabled: () => config.town.questEnabled === true && config.town.economyEnabled === true });
+  // NPC 功能点（给任务/送东西/做买卖）：同场判定由运行时注入。
+  const npcFunctions = createTownNpcFunctionService({ ...dependencies,
+    sameSpot: (input, npcActorId) => {
+      const playerSpot = getTownActorPosition(registry.resolveAgentKey('me').actorId);
+      const npcSpot = getTownActorPosition(npcActorId);
+      return !!playerSpot && !playerSpot.moving && !!npcSpot && !npcSpot.moving
+        && (npcSpot.locationKeys || []).some(key => (playerSpot.locationKeys || []).includes(key));
+    } });
+  return { ...context, position, business, work, itemTemplates, services, cafe, venues, quests, npcFunctions, regulars,
     liquidity: createTownLiquidityPolicy({ ...dependencies, enabled: config.town.liquidityEnabled === true }),
     production: createTownProductionService(dependencies), orders: createTownOrderService(dependencies) };
 }
@@ -484,10 +550,140 @@ export function maintainTownOrders() {
   maintainTownProductions(context);
   maintainTownCafeRestock(context);
   maintainTownVenueRestock(context);
+  maintainTownQuests(context);
   maintainTownAppointments();
   createTownExperienceService({ db: context.db, clock: { now: Date.now }, registry: context.registry,
     writeMemory: applyMemoryActions, memoryEnabled: () => getMemorySettings().enabled,
     timeZone: config.town.timeZone || 'Asia/Shanghai' }).drain(context.scope);
+}
+
+function questEnabled() { return config.town.questEnabled === true && config.town.economyEnabled === true; }
+
+/** NPC 功能档案查询：无声明时按规则现场分配并落库。 */
+export function getTownNpcFunctions(npcId) {
+  const context = getTownBusinessRuntime();
+  return context.npcFunctions.functionsOf(npcId, { ...context.scope, actorId: context.player.actorId });
+}
+
+export function receiveTownNpcGift(npcId, input) {
+  const context = getTownBusinessRuntime();
+  if (!config.town.economyEnabled) throw Object.assign(new Error('小镇经济暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  const scope = commandScope(context, input);
+  const result = context.npcFunctions.receiveGift(npcId, scope);
+  broadcastTownStateUpdated({ reason: 'npc_gift' });
+  return result;
+}
+
+export function getTownNpcTrade(npcId) {
+  const context = getTownBusinessRuntime();
+  return context.npcFunctions.tradeCatalog(npcId, { ...context.scope, actorId: context.player.actorId });
+}
+
+export function executeTownNpcTrade(npcId, input) {
+  const context = getTownBusinessRuntime();
+  if (!config.town.economyEnabled) throw Object.assign(new Error('小镇经济暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  const scope = commandScope(context, input);
+  const result = context.npcFunctions.executeTrade(npcId, { ...scope, direction: input.direction,
+    templateId: input.templateId, itemId: input.itemId, expectedVersion: input.expectedVersion, reasonCode: 'NPC_TRADE' });
+  broadcastTownStateUpdated({ reason: 'npc_trade' });
+  return result;
+}
+
+/** 奇遇维护：过期清理/自动推进/奇遇上架。关闭开关也不能把在途任务的托管悬空。 */
+function maintainTownQuests(context) {
+  if (!context.quests) return;
+  if (!(config.town.questEnabled === true && config.town.economyEnabled === true)) return;
+  try {
+    const result = context.quests.maintain({ ...context.scope, actorId: context.player.actorId });
+    if (result.changed.length || result.offered.length) broadcastTownStateUpdated({ reason: 'quest_changed' });
+  } catch (error) {
+    if (!['SLICE_NOT_CONFIGURED', 'VENUE_NOT_CONFIGURED', 'CAFE_NOT_CONFIGURED'].includes(error.code)) throw error;
+  }
+}
+
+export function getTownQuests() {
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) return { ...context.scope, enabled: false, offered: [], active: [], closed: [] };
+  maintainTownQuests(context);
+  return { ...context.scope, enabled: true, ...context.quests.list({ ...context.scope, actorId: context.player.actorId }) };
+}
+
+export function executeTownQuest(command, questId, input) {
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) throw Object.assign(new Error('奇遇任务暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  if (!['accept', 'abandon', 'progress'].includes(command)) throw new Error('未知任务操作');
+  const scope = commandScope(context, input);
+  const result = context.quests[command]({ ...scope, actorId: context.player.actorId, questId });
+  broadcastTownStateUpdated({ reason: 'quest_changed' });
+  return result;
+}
+
+/** 供对话/面板等显式入口上架奇遇（触发类型与 key 由服务端判定，不收客户端模板 id）。 */
+export function offerTownQuestFromTrigger(trigger, input) {
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) throw Object.assign(new Error('奇遇任务暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  const scope = commandScope(context, input);
+  const result = context.quests.offer({ ...scope, actorId: context.player.actorId }, trigger);
+  broadcastTownStateUpdated({ reason: 'quest_changed' });
+  return result;
+}
+
+/** 「问问邻居有没有事可做」的共享核心：要求玩家与对方同场，服务端从注册表挑一份可接的奇遇。 */
+function offerQuestToLinkedNpc(context, npcId, scope) {
+  const npc = Number.isSafeInteger(npcId) ? context.db.prepare('SELECT id FROM town_npcs WHERE id = ?').get(npcId) : null;
+  if (!npc) throw Object.assign(new Error('居民不存在'), { status: 404 });
+  const actorId = context.registry.resolveAgentKey(`npc:${npc.id}`)?.actorId ?? null;
+  const actor = actorId && context.registry.getActor(actorId, context.scope.worldId);
+  if (!actor || actor.archived || actor.mergedInto || !actor.participating) {
+    throw Object.assign(new Error('居民目前不在镇上'), { status: 409, code: 'ACTOR_UNAVAILABLE' });
+  }
+  const playerSpot = getTownActorPosition(context.player.actorId);
+  const actorSpot = getTownActorPosition(actorId);
+  const shared = actorSpot && !actorSpot.moving && playerSpot && !playerSpot.moving
+    ? (actorSpot.locationKeys || []).find(key => (playerSpot.locationKeys || []).includes(key)) : null;
+  if (!shared) throw Object.assign(new Error('请走到这位邻居身边再问问看'), { status: 409, code: 'NOT_ARRIVED' });
+  const result = context.quests.offer({ ...scope, actorId: context.player.actorId },
+    { type: 'npc', key: null, locationKey: shared, actorId, questTemplateIds: npcQuestTemplateIdsFor(context.db, npc.id) });
+  broadcastTownStateUpdated({ reason: 'quest_changed' });
+  return result;
+}
+
+/** 手动「问问邻居有没有事可做」：入参是小镇居民（town_npcs）id。 */
+export function offerTownQuestForNpc(npcId, input) {
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) throw Object.assign(new Error('奇遇任务暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  const scope = commandScope(context, input);
+  return offerQuestToLinkedNpc(context, npcId, scope);
+}
+
+/** 入住角色侧的同款入口：经 town_npcs.character_id 反查镇上档案后走同一套逻辑。 */
+export function offerTownQuestForCharacter(characterId, input) {
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) throw Object.assign(new Error('奇遇任务暂未开启'), { status: 409, code: 'ECONOMY_DISABLED' });
+  const scope = commandScope(context, input);
+  const linked = Number.isSafeInteger(characterId)
+    ? context.db.prepare('SELECT id FROM town_npcs WHERE character_id = ?').get(characterId) : null;
+  if (!linked) throw Object.assign(new Error('这位角色还没有镇上档案'), { status: 404, code: 'NPC_NOT_FOUND' });
+  return offerQuestToLinkedNpc(context, linked.id, scope);
+}
+
+/** 就地聊天后的奇遇钩子：恰有可接的托付时随回复带出邀约；不满足条件就安静返回 null。
+ * 聊天本身已由服务端判定同场，这里不再重复距离校验；同一分钟内重复聊天返回同一份邀约。 */
+export function maybeOfferTownQuestAfterNpcChat({ actorId = null, npcId = null } = {}) {
+  if (!actorId) return null;
+  const context = getTownBusinessRuntime();
+  if (!questEnabled()) return null;
+  try {
+    const playerSpot = getTownActorPosition(context.player.actorId);
+    return context.quests.offer({ ...context.scope, actorId: context.player.actorId,
+      idempotencyKey: `npc-chat-offer:${context.scope.worldEpoch}:${actorId}:${Math.floor(Date.now() / 60000)}` },
+      { type: 'npc', key: null, locationKey: playerSpot?.locationKeys?.[0] ?? null, actorId,
+        questTemplateIds: npcQuestTemplateIdsFor(context.db, npcId) });
+  } catch (error) {
+    if (['QUEST_ACTIVE_LIMIT', 'QUEST_POOL_LIMIT', 'NO_QUEST_AVAILABLE', 'ECONOMY_DISABLED',
+      'STALE_EPOCH', 'IDEMPOTENCY_CONFLICT', 'SLICE_NOT_CONFIGURED'].includes(error.code)) return null;
+    throw error;
+  }
 }
 
 function maintainTownCafeRestock(context) {

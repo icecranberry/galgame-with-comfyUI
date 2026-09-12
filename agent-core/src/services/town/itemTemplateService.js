@@ -129,7 +129,7 @@ export function createItemTemplateService({db,clock,getWorldEpoch,getActor,effec
     requireText(input.sourceId);
     return execute('grant',{...input,sourceKey:`grant:${digest({sourceType:input.sourceType,sourceId:input.sourceId})}`},()=>{
       owner(input.ownerKey,input.worldId);
-      if(!['service','production','reward','seed'].includes(input.sourceType))throw townError('INVALID_GRANT_SOURCE');
+      if(!['service','production','reward','seed','trade'].includes(input.sourceType))throw townError('INVALID_GRANT_SOURCE');
       if(!Number.isSafeInteger(input.quantity) || input.quantity<1 || input.quantity>20)throw townError('INVALID_QUANTITY');
       const template=getTemplate(input);
       if(!template)throw townError('TEMPLATE_NOT_FOUND');
