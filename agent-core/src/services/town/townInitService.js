@@ -21,6 +21,9 @@ import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc, isPe
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
 import { generateLocalLayout } from './townLayoutGenerator.js';
 import { refineTownDraftWithLLM } from './townLayoutAI.js';
+import { prepareTownBlueprintResponsibilities, townBuildingKind, townBusinessKinds, TOWN_BUSINESS_ROLES } from './townResponsibilityDefinitions.js';
+import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
+import { reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_PATH = path.resolve(__dirname, '..', '..', '..', 'data', 'town', 'init-state.json');
@@ -101,6 +104,7 @@ export function getInitState() {
     npcIds: job.npcIds || [],
     wizardNpcs: (job.npcIds || []).map(id => getNpc(id)).filter(Boolean),
     playerKitDone: !!job.playerKitDone,
+    businessKinds: [{ value: 'none', label: '住宅 / 景观' }, ...Object.entries(TOWN_BUSINESS_ROLES).map(([value, role]) => ({ value, label: role.name }))],
   };
 }
 
@@ -223,15 +227,15 @@ function buildBlueprintOutputStructure() {
     '    { "key": "road_01", "name": "石板路", "variants": 1 }',
     '  ],',
     '  "buildings": [',
-    '    { "key": "residential", "name": "普通居民楼", "reusable": true, "maxInstances": 6, "footprint": { "w": 4, "h": 3 }, "special": false },',
-    '    { "key": "cafe", "name": "兽人咖啡厅", "reusable": false, "maxInstances": 1, "footprint": { "w": 5, "h": 4 }, "special": true }',
+    '    { "key": "residential", "name": "普通居民楼", "businessKind": "none", "capabilities": ["service"], "reusable": true, "maxInstances": 6, "footprint": { "w": 3, "h": 2 }, "special": false },',
+    '    { "key": "cafe", "name": "兽人咖啡厅", "businessKind": "cafe", "capabilities": ["service"], "reusable": false, "maxInstances": 1, "footprint": { "w": 3, "h": 3 }, "special": true }',
     '  ],',
     '  "props": [',
     '    { "key": "tree_01", "name": "橡树", "footprint": { "w": 2, "h": 2 }, "blocking": true },',
     '    { "key": "bench_01", "name": "长椅", "footprint": { "w": 1, "h": 1 }, "blocking": false }',
     '  ],',
     '  "npcs": [',
-    '    { "displayName": "咕噜", "brief": "开朗的兽人面包师，嗓门大心肠软，喜欢给邻居塞试吃品", "job": "面包师" },',
+    '    { "displayName": "咕噜", "brief": "开朗的兽人咖啡师，嗓门大心肠软，喜欢给邻居介绍今天的咖啡，也会认真记住熟客的口味", "job": "咖啡师", "workplaceKey": "cafe", "capabilities": ["service"] }',
     '  ]',
     '}',
   ].join('\n');
@@ -252,6 +256,11 @@ function buildBlueprintTaskRequirements(worldName, cfg) {
     '- props：4~8 种；footprint.w/h 是占格数（1~3，橡树一般 2×2，长椅/花丛一般 1×1）；blocking=true 表示不可穿过（树/井），长椅花丛可以是 false',
     `- npcs：恰好 ${cfg.npcCount} 位居民。brief 一句话人设+性格关键词（中文 30~60 字，会作为完整人格卡的设定依据）；job 中文职业`,
     '- 居民职业要和特色建筑呼应（咖啡厅老板/面包师等），名字符合<world_setting>',
+    `- buildings.businessKind 是内容用途而非功能分类，从 ${townBusinessKinds().join('、')} 中选择；住宅与景观用 none。每种营业用途最多一栋，reusable=false、maxInstances=1。`,
+    '- buildings 和 npcs 的 capabilities 是功能权限，必须是 ["service"]、["trade"] 或 ["service","trade"]，禁止其他值或空数组。service 提供服务并有权创建特殊奇遇；trade 打开交易窗口买卖道具；两者可以同时拥有。普通居民与住宅默认 service，纯商贩用 trade；兼做定制、帮工或剧情服务的商店用两项。员工默认与经营建筑一致。',
+    '- 必须规划一处 supplier 材料补给站和一处 workshop 手作工坊；公告站使用自动生成的 central_plaza，无需另造公告建筑。建筑名称、员工人设要融入世界观。',
+    '- npcs.workplaceKey：经营者填对应建筑 key，委托员填 central_plaza，普通居民填空字符串。每个工作地点恰好一名员工，一个人只负责一处；职业必须与工作地点用途一致。',
+    '- 先安排委托员、供货员、工坊师傅及每家店的经营者，再安排普通居民。名单不足以覆盖所有营业建筑时减少可选店铺，必要岗位缺失会在生成清单中补齐。',
   ].join('\n');
 }
 function normalizeBlueprint(parsed, cfg) {
@@ -297,6 +306,8 @@ function normalizeBlueprint(parsed, cfg) {
       maxInstances: Math.max(1, Math.min(8, parseInt(b.maxInstances, 10) || 1)),
       footprint: { w: Math.max(2, Math.min(3, parseInt(fp.w, 10) || 3)), h: Math.max(2, Math.min(3, parseInt(fp.h, 10) || 2)) },
       special: !!b.special,
+      businessKind: townBuildingKind(b),
+      capabilities: townCapabilities(b, defaultTownCapabilities(townBuildingKind(b))),
     });
   }
   for (const p of arr(parsed.props)) {
@@ -310,7 +321,7 @@ function normalizeBlueprint(parsed, cfg) {
       blocking: p.blocking !== false,
     });
   }
-  const npcList = arr(parsed.npcs).slice(0, cfg.npcCount);
+  const npcList = arr(parsed.npcs).slice(0, 32);
   const seenNames = new Set();
   for (const n of npcList) {
     if (!n?.displayName) continue;
@@ -325,12 +336,14 @@ function normalizeBlueprint(parsed, cfg) {
       brief: String(n.brief || (isPersonaCard(rawPersona) ? '' : rawPersona)).slice(0, 300),
       persona: isPersonaCard(rawPersona) ? rawPersona : '',
       job: String(n.job || '').slice(0, 20),
+      workplaceKey: typeof n.workplaceKey === 'string' && n.workplaceKey ? sanitizeKey(n.workplaceKey) : '',
+      capabilities: n.capabilities,
     });
   }
   if (bp.groundAssets.length === 0) bp.groundAssets.push({ key: 'grass_01', name: '草地', desc: '', variants: 2 });
   if (bp.roadAssets.length === 0) bp.roadAssets.push({ key: 'road_01', name: '土路', desc: '', variants: 1 });
   if (bp.buildings.length === 0) bp.buildings.push({ key: 'house', name: '小屋', desc: '', reusable: true, maxInstances: 4, footprint: { w: 4, h: 3 }, special: false });
-  return bp;
+  return prepareTownBlueprintResponsibilities(bp);
 }
 
 /** 用户编辑蓝图（styleTags / 增删素材 / 调整居民）后保存 */
@@ -488,6 +501,8 @@ export function generateSamples() {
               desc: spec.bpItem.desc, styleTags,
               footprint: spec.kind === 'building' ? spec.bpItem.footprint : undefined,
               special: spec.kind === 'building' ? !!spec.bpItem.special : undefined,
+              businessKind: spec.kind === 'building' ? spec.bpItem.businessKind : undefined,
+              capabilities: spec.kind === 'building' ? spec.bpItem.capabilities : undefined,
             },
             worldSettingId: worldId,
           });
@@ -534,7 +549,7 @@ function expandBatchJobs() {
     for (let v = 1; v <= (r.variants || 1); v++) push('road', r, {}, r.variants > 1 ? String(v).padStart(2, '0') : '');
   }
   for (const b of bp.buildings) {
-    push('building', b, { footprint: b.footprint, special: b.special, reusable: b.reusable, maxInstances: b.maxInstances });
+    push('building', b, { footprint: b.footprint, special: b.special, reusable: b.reusable, maxInstances: b.maxInstances, businessKind: b.businessKind, capabilities: b.capabilities });
   }
   for (const p of bp.props) {
     push('prop', p, { blocking: p.blocking });
@@ -848,6 +863,8 @@ export function expandLayout(parsed, readyAssets, bp, cols, rows) {
         key: sanitizeKey(loc.key), name: String(loc.name).slice(0, 30),
         aliases: Array.isArray(loc.aliases) ? loc.aliases.map(a => String(a).slice(0, 20)).slice(0, 8) : [],
         kind: 'place', x: anchor.x, y: anchor.y, radius: 2,
+        businessKind: townBuildingKind((bp?.buildings || []).find(b => b.key === obj.assetKey) || asset),
+        capabilities: townCapabilities((bp?.buildings || []).find(b => b.key === obj.assetKey) || asset, defaultTownCapabilities(townBuildingKind(asset))),
         ambient: String(loc.ambient || '').slice(0, 80),
         objectId: obj.id ?? null, objectAssetKey: obj.assetKey, objectInstance: obj.instance,
       });
@@ -952,7 +969,7 @@ export function commitWizardNpcs() {
             fallback: brief || persona,
           });
         }
-        updateNpc(existingId, { persona, brief, job: n.job });
+        updateNpc(existingId, { persona, brief, job: n.job, workplaceKey: n.workplaceKey || null, capabilities: n.capabilities });
         n.persona = persona;
         n.brief = brief;
         continue;
@@ -973,6 +990,8 @@ export function commitWizardNpcs() {
         persona,
         brief,
         job: n.job,
+        workplaceKey: n.workplaceKey || null,
+        capabilities: n.capabilities,
         traits: {},
         routine: [],
       });
@@ -1003,7 +1022,7 @@ export function regenerateNpcRoster(count) {
           '必须严格按以下 JSON 格式输出，禁止输出 JSON 以外的任何文字（解释、注释、markdown 代码块都不允许）：',
           '{',
           '  "npcs": [',
-          '    { "displayName": "咕噜", "brief": "开朗的兽人面包师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "job": "面包师" }',
+          '    { "displayName": "咕噜", "brief": "开朗的兽人咖啡师，嗓门大心肠软（一句话人设+性格关键词，中文30~60字）", "job": "咖啡师", "workplaceKey": "cafe", "capabilities": ["service"] }',
           '  ]',
           '}',
         ].join('\n'),
@@ -1017,6 +1036,9 @@ export function regenerateNpcRoster(count) {
           '字段约束：',
           `- 恰好 ${n} 位；displayName 中文 2~6 字不重复`,
           '- 职业要和小镇特色建筑/业态呼应、互相错开',
+          `- 实际岗位：${JSON.stringify([{ key: 'central_plaza', businessKind: 'board', capabilities: ['service'] }, ...job.blueprint.buildings.filter(b => b.businessKind !== 'none' || b.capabilities?.includes('trade')).map(b => ({ key: b.key, name: b.name, businessKind: b.businessKind, capabilities: b.capabilities }))])}`,
+          '- workplaceKey 必须填实际岗位的 key；每岗一人，不可重复占岗，普通居民用空字符串。优先配齐实际岗位后再安排普通居民，缺少的必要人员会在名单中补齐。',
+          '- capabilities 只允许 ["service"]、["trade"] 或 ["service","trade"]；服务类可创建特殊奇遇，交易类可买卖道具，两项可兼具。普通居民默认 service；员工默认与实际工作地点的 capabilities 一致，除非人设有独立功能。',
           '- brief 一句话人设+性格关键词（中文30~60字），符合世界观，会作为完整人格卡的设定依据',
         ].join('\n'),
       },
@@ -1053,10 +1075,13 @@ export function regenerateNpcRoster(count) {
           brief: isPersonaCard(rawBrief) ? '' : rawBrief.slice(0, 300),
           persona: '',           // 名单换了，人格卡要按新 brief 重新生成
           job: String(x.job || '').slice(0, 20),
+          workplaceKey: typeof x.workplaceKey === 'string' && x.workplaceKey ? sanitizeKey(x.workplaceKey) : '',
+          capabilities: x.capabilities,
         };
       });
     // 名单变了：已建档的旧居民作废（confirm 时会清理）
     job.npcIds = [];
+    prepareTownBlueprintResponsibilities(job.blueprint);
     setStatus(job.status, `居民名单已更新（${job.blueprint.npcs.length} 位）`);
     return getInitState();
   });
@@ -1076,7 +1101,12 @@ export function confirmInit() {
       name: draft.name, cols: draft.cols, rows: draft.rows,
       tileSize: draft.tileSize || 32, layers: draft.layers,
       worldSettingId: job.config.worldSettingId,
-      locations: draft.locations ?? [],
+      locations: (draft.locations ?? []).map(location => ({ ...location,
+        businessKind: location.businessKind ?? townBuildingKind(bp.buildings.find(b => b.key === (location.objectAssetKey || location.key)) || location),
+        capabilities: townCapabilities(bp.buildings.find(b => b.key === (location.objectAssetKey || location.key)) || location,
+          defaultTownCapabilities(townBuildingKind(location))),
+      })),
+      assignResponsibilities: false,
     });
     db.exec('DELETE FROM town_agent_state');
 
@@ -1098,6 +1128,9 @@ export function confirmInit() {
       db.prepare(`UPDATE town_npcs SET map_id = ? WHERE id IN (${keep})`).run(saved.mapId);
       for (const id of wizardIds) {
         const row = db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(id);
+        const plannedNpc = row && bp.npcs.find(n => n.displayName === row.display_name);
+        if (plannedNpc) db.prepare('UPDATE town_npcs SET workplace_key=?,capabilities_json=?,capabilities_explicit=1 WHERE id=?')
+          .run(plannedNpc.workplaceKey || null, JSON.stringify(townCapabilities(plannedNpc)), id);
         const spawnKey = row ? spawnByKey.get(row.display_name) : null;
         if (spawnKey && locationIdByKey.has(spawnKey)) {
           db.prepare('UPDATE town_npcs SET home_location_id = ? WHERE id = ?').run(locationIdByKey.get(spawnKey), id);
@@ -1112,6 +1145,9 @@ export function confirmInit() {
           persona: n.persona || n.brief || '',
           brief: n.brief || '',
           job: n.job,
+          workplaceKey: n.workplaceKey || null,
+          capabilities: n.capabilities,
+          assignResponsibilities: false,
           traits: {},
           routine: [],
         });
@@ -1128,6 +1164,11 @@ export function confirmInit() {
       INSERT INTO town_players (id, display_name, appearance_desc) VALUES ('me', ?, ?)
       ON CONFLICT(id) DO UPDATE SET appearance_desc = excluded.appearance_desc
     `).run(config.user.nickname || '我', appearance);
+
+    // Buildings and residents are now both persisted: bind duties and seed the finite
+    // shop accounts before the town becomes playable or any background generation starts.
+    const responsibilities = reconcileTownResponsibilities({ db, allowFallback: true });
+    job.warnings = [...new Set([...(job.warnings || []), ...responsibilities.pending.map(p => p.message)])];
     spawnPlayerSprites(appearance, bp.styleTags);
 
     // 5. NPC 作息后台补齐：建档时不再提前生成作息，进镇后按已落库的真实地点 key 逐个 LLM 生成

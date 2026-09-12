@@ -3,6 +3,8 @@ import { canonicalJson, createTownEventService, requireText, townError } from '.
 
 const terminal = new Set(['completed', 'cancelled', 'failed']);
 const types = new Set(['move_to', 'wait', 'rest', 'work_shift']);
+/** Bookkeeping-only transitions: no resident-visible change, kept out of events and the activity feed. */
+export const QUIET_ACTIVITY_REASONS = new Set(['VALIDATED', 'RESERVE', 'RECOVER']);
 const decode = row => row && ({ id: row.id, worldId: row.world_id, worldEpoch: row.world_epoch,
   actorId: row.actor_id, type: row.type, phase: row.status, version: row.version,
   target: row.target, payload: JSON.parse(row.payload), ruleKey: row.rule_key, ruleVersion: row.rule_version,
@@ -53,6 +55,8 @@ export function createTownActionRunner({ db, clock, getWorldEpoch, getActor, rea
       ruleKey: input.ruleKey ?? null, ruleVersion: input.ruleVersion ?? null };
   }
   function record(a, reason) {
+    // A recover that actually breaks (lease lost) records LEASE_EXPIRED instead, so quiet skips stay safe.
+    if (QUIET_ACTIVITY_REASONS.has(reason)) return;
     const eventId = `action:${a.id}:${a.version}`;
     events.append({ eventId, type: 'town.action.changed', worldId: a.worldId, worldEpoch: a.worldEpoch,
       actorIds: [a.actorId], locationKey: a.target, occurredAt: a.updatedAt,
@@ -176,11 +180,5 @@ export function createTownActionRunner({ db, clock, getWorldEpoch, getActor, rea
     });
   }
   return { validate, create, get, events, cancelActive,
-    ...Object.fromEntries(['reserve','start','advance','cancel','fail','recover'].map(command => [command,input => change(command,input)])),
-    activities: ({ worldId, worldEpoch, actorId, cursor = 0, limit = 10 }) => {
-      epoch({worldId,worldEpoch}); requireText(actorId);
-      if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) throw townError('INVALID_PAGE');
-      return db.prepare(`SELECT * FROM town_activity_log WHERE world_id=? AND world_epoch=? AND actor_id=? AND seq>?
-        ORDER BY seq LIMIT ?`).all(worldId,worldEpoch,actorId,cursor,limit);
-    } };
+    ...Object.fromEntries(['reserve','start','advance','cancel','fail','recover'].map(command => [command,input => change(command,input)])) };
 }

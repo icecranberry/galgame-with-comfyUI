@@ -6,6 +6,9 @@
  * 建筑贴门放路，道具按地图分桶轮转散布。LLM 保留给蓝图、素材提示词和叙事内容。
  */
 
+import { townBuildingKind } from './townResponsibilityDefinitions.js';
+import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
+
 const TAU = Math.PI * 2;
 
 function createRandom(seed) {
@@ -153,11 +156,11 @@ function nearestCellsBetween(aCells, bCells) {
 
 function buildBuildingInstances(buildingAssets, requestedBuildings, random) {
   // 只有普通可复用建筑参与超密度循环复用，特殊建筑始终只放一座。
-  const reusable = buildingAssets.filter(a => a.meta?.reusable && !a.meta?.special);
+  const reusable = buildingAssets.filter(a => a.meta?.reusable && !a.meta?.special && !hasFixedBusiness(a));
   const firstLimit = (asset) => Math.max(1, Math.min(24, parseInt(asset.meta?.maxInstances, 10) || 1)) - 1;
   const declaredCapacity = buildingAssets.length
     + reusable.reduce((sum, asset) => sum + firstLimit(asset), 0);
-  const ordered = [...buildingAssets];
+  const ordered = [...buildingAssets].sort((a, b) => Number(hasFixedBusiness(b)) - Number(hasFixedBusiness(a)));
   for (const asset of reusable) {
     for (let i = 0; i < firstLimit(asset); i++) ordered.push(asset);
   }
@@ -166,6 +169,10 @@ function buildBuildingInstances(buildingAssets, requestedBuildings, random) {
     for (let i = 0; i < extraCount; i++) ordered.push(reusable[i % reusable.length]);
   }
   return ordered.slice(0, requestedBuildings);
+}
+
+function hasFixedBusiness(asset) {
+  return townBuildingKind(asset) !== 'none' || townCapabilities(asset).includes('trade');
 }
 
 export function generateLocalLayout({
@@ -185,7 +192,11 @@ export function generateLocalLayout({
 
   const groundAssets = readyAssets.filter(a => a.kind === 'ground');
   const roadAssets = readyAssets.filter(a => a.kind === 'road');
-  const buildingAssets = readyAssets.filter(a => a.kind === 'building');
+  const buildingAssets = readyAssets.filter(a => a.kind === 'building').map(asset => {
+    const planned = (blueprint?.buildings || []).find(b => b.key === asset.key);
+    return planned ? { ...asset, meta: { ...asset.meta, businessKind: planned.businessKind, capabilities: planned.capabilities,
+      special: planned.special, reusable: planned.reusable, maxInstances: planned.maxInstances } } : asset;
+  });
   const propAssets = readyAssets.filter(a => a.kind === 'prop');
   if (!groundAssets.length || !roadAssets.length || !buildingAssets.length) {
     throw new Error('可用素材不足：至少需要地皮、道路和建筑');
@@ -339,7 +350,7 @@ export function generateLocalLayout({
     return null;
   }
 
-  const buildingTarget = Math.min(requestedBuildings, Math.max(1, Math.floor(cellCount / 8)));
+  const buildingTarget = Math.min(Math.max(requestedBuildings, buildingAssets.filter(hasFixedBusiness).length), Math.max(1, Math.floor(cellCount / 8)));
   const assignedBuildings = buildBuildingInstances(buildingAssets, buildingTarget, random);
   const instanceCounters = new Map();
   const roadUse = roadCellsBySite.map(() => new Map());
@@ -390,7 +401,7 @@ export function generateLocalLayout({
       assetId: asset.id,
       x: candidate.x,
       y: candidate.y + candidate.h - 1,
-      flip: random() < 0.5,
+      flip: false,
       assetKey: asset.key,
       instance,
       _layoutKind: 'building',
@@ -473,7 +484,7 @@ export function generateLocalLayout({
             assetId: desired.id,
             x,
             y: y + h - 1,
-            flip: random() < 0.5,
+            flip: false,
             assetKey: desired.key,
             instance: 1,
             _layoutKind: 'prop',
@@ -494,13 +505,9 @@ export function generateLocalLayout({
 
   objects.forEach((object, index) => { object.id = index + 1; });
 
-  // 特殊建筑全部作为 POI；没有特殊建筑时拿前几个建筑兜底，保证日程有地点。
+  // Every generated building has its own interaction source, including repeated homes.
   const buildingById = new Map(buildingAssets.map(a => [a.id, a]));
-  const specialObjects = objects.filter(o => o._layoutKind === 'building'
-    && !buildingById.get(o.assetId)?.meta?.reusable);
-  const poiObjects = specialObjects.length
-    ? specialObjects
-    : objects.filter(o => o._layoutKind === 'building').slice(0, Math.min(4, objects.length));
+  const poiObjects = objects.filter(o => o._layoutKind === 'building');
   const usedLocationKeys = new Set();
   const locations = poiObjects.map((obj, index) => {
     const asset = buildingById.get(obj.assetId);
@@ -513,6 +520,9 @@ export function generateLocalLayout({
     return {
       key,
       name: String(asset?.name || key).slice(0, 30),
+      businessKind: townBuildingKind((blueprint?.buildings || []).find(b => b.key === asset?.key) || asset),
+      capabilities: townCapabilities((blueprint?.buildings || []).find(b => b.key === asset?.key) || asset,
+        defaultTownCapabilities(townBuildingKind(asset))),
       aliases: [],
       kind: 'place',
       x: Math.max(0, Math.min(width - 1, obj.x + door.dx)),
@@ -540,6 +550,8 @@ export function generateLocalLayout({
     locations.push({
       key: 'central_plaza',
       name: '中央广场',
+      businessKind: 'board',
+      capabilities: ['service'],
       aliases: ['广场'],
       kind: 'outdoor',
       x: Math.max(0, Math.min(width - 1, plazaRoad.x)),
@@ -555,7 +567,8 @@ export function generateLocalLayout({
   const npcList = Array.isArray(blueprint?.npcs) ? blueprint.npcs : [];
   const npcSpawns = npcList.map((npc, index) => ({
     npcRef: String(npc?.displayName || ''),
-    locationKey: locations.length ? locations[index % locations.length].key : 'central_plaza',
+    locationKey: locations.find(l => l.key === npc.workplaceKey)?.key
+      || (locations.length ? locations[index % locations.length].key : 'central_plaza'),
   })).filter(item => item.npcRef);
 
   const layerObjects = objects.map(({ assetKey, instance, _layoutKind, ...rest }) => rest);

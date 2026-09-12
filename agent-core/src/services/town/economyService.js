@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson, createTownEventService, requireText, townError } from './townEventService.js';
-import { TOWN_LIQUIDITY_LIMITS, readTownLiquidityUsage } from './townLiquidityPolicy.js';
 
 const MAX = Number.MAX_SAFE_INTEGER;
 const accountDto = r => r && ({ accountId:r.account_id,worldId:r.world_id,ownerKey:r.owner_key,actorId:r.actor_id,
@@ -168,97 +167,6 @@ export function createEconomyService({db,clock,getWorldEpoch,getActor,consumers=
       moneyChange(ctx,from,-input.amount); moneyChange(ctx,to,input.amount);
     });
   }
-  // Only the synchronous production completion transaction may issue output.
-  // Stable production identity is independent of caller request/source keys.
-  function produceStock(input) {
-    if (!db.inTransaction) throw townError('PRODUCTION_TRANSACTION_REQUIRED');
-    requireText(input.productionId);
-    epoch(input);
-    const identity=db.prepare('SELECT world_id,world_epoch FROM town_productions WHERE production_id=?').get(input.productionId);
-    if (!identity || identity.world_id!==input.worldId || identity.world_epoch!==input.worldEpoch) throw townError('INVALID_PRODUCTION_OUTPUT');
-    return execute('produceStock',{...input,sourceKey:`production:stock:${input.productionId}`},ctx=>{
-      const invalid=()=>{throw townError('INVALID_PRODUCTION_OUTPUT');};
-      const row=db.prepare('SELECT * FROM town_productions WHERE production_id=? AND world_id=? AND world_epoch=?')
-        .get(input.productionId,input.worldId,input.worldEpoch);
-      if (!row || row.status!=='reserved' || input.amount!==1) invalid();
-      const config=JSON.parse(row.config),to=stock(input.stockId,input.worldId),now=clock.now();integer(now,0);
-      if (config.recipe?.key!=='town.raw_material.harvest.v1' || config.recipe.quantity!==1 ||
-          input.stockId!==config.stocks?.supplier || to.resourceKey!=='delivery:raw_material' ||
-          to.ownerKey!=='delivery:business:supplier' || now>=row.expires_at) invalid();
-      const money=db.prepare('SELECT * FROM economy_reservations WHERE reservation_id=?').get(row.money_reservation_id);
-      if (!money || money.world_id!==input.worldId || money.world_epoch!==input.worldEpoch || money.asset_type!=='money' ||
-          money.asset_id!==config.accounts.workshop || money.owner_ref!==`production:${row.production_id}` ||
-          money.amount!==30 || money.remaining!==30) invalid();
-      const proofs=db.prepare(`SELECT p.role,a.* FROM town_production_proofs p JOIN town_actions a ON a.id=p.action_id
-        WHERE p.production_id=?`).all(row.production_id);
-      if (proofs.length!==2 || new Set(proofs.map(p=>p.role)).size!==2 || new Set(proofs.map(p=>p.actor_id)).size!==2) invalid();
-      for (const proof of proofs) {
-        const actorId=config.npcActorIds?.[proof.role],target=config.locationKeys?.[proof.role];
-        const result=JSON.parse(proof.result||'null');
-        if (proof.actor_id!==actorId || proof.world_id!==input.worldId || proof.world_epoch!==input.worldEpoch ||
-            proof.type!=='work_shift' || proof.status!=='completed' || proof.target!==target ||
-            !Number.isSafeInteger(proof.started_at) || proof.started_at<row.created_at ||
-            !Number.isSafeInteger(proof.due_at) || proof.due_at-proof.started_at<300000 || proof.updated_at>now ||
-            !Number.isSafeInteger(result?.attendanceMs) || result.attendanceMs<300000 ||
-            !Number.isSafeInteger(result?.completedAt) || result.completedAt<proof.due_at ||
-            result.completedAt!==proof.updated_at || result.economicEffects!=='none') invalid();
-        if (!db.prepare(`SELECT 1 FROM town_activity_log WHERE action_id=? AND actor_id=? AND world_id=? AND world_epoch=?
-          AND phase='completed' AND reason_code='DURATION_ELAPSED' AND location_key=? AND occurred_at=?`)
-          .get(proof.id,actorId,input.worldId,input.worldEpoch,target,proof.updated_at)) invalid();
-      }
-      // With the write lock held, exactly this batch must have consumed capacity
-      // after reservation and before its immutable output ledger is inserted.
-      const node=db.prepare('SELECT * FROM town_production_nodes WHERE world_id=?').get(input.worldId);
-      const issued=db.prepare("SELECT count(*) n FROM economy_transactions WHERE world_id=? AND command='produceStock'").get(input.worldId).n;
-      const reserved=db.prepare("SELECT count(*) n FROM town_productions WHERE world_id=? AND status='reserved'").get(input.worldId).n;
-      if (!node || node.capacity!==200 || node.capacity-node.remaining!==issued+1 || node.reserved!==reserved-1) invalid();
-      stockChange(ctx,to,1);
-      return {productionId:row.production_id};
-    });
-  }
-  /** Policy-only issuance backed by a real unpublished-to-clients order and its
-   * two reservations. A naked request/amount or seed version cannot authorize it. */
-  function issueLiquidity(input) {
-    if(!db.inTransaction)throw townError('LIQUIDITY_TRANSACTION_REQUIRED');
-    epoch(input);requireText(input.authorizationId);
-    const proof=db.prepare('SELECT * FROM town_liquidity_authorizations WHERE authorization_id=?').get(input.authorizationId);
-    if(!proof||proof.world_id!==input.worldId||proof.world_epoch!==input.worldEpoch)throw townError('LIQUIDITY_PROOF_INVALID');
-    return execute('issueLiquidity',{...input,sourceKey:`liquidity:issue:${input.authorizationId}`,reasonCode:'PUBLIC_DELIVERY_LIQUIDITY'},ctx=>{
-      const invalid=()=>{throw townError('LIQUIDITY_PROOF_INVALID');};
-      const state=db.prepare('SELECT * FROM town_liquidity_state WHERE world_id=?').get(input.worldId);
-      const now=clock.now();integer(now,0);
-      if(!state||state.enabled!==1||state.version!==proof.state_version||state.last_observed_at!==proof.occurred_at||now<proof.occurred_at)invalid();
-      const actor=getActor(proof.actor_id,input.worldId);
-      if(!actor||actor.actorId!==proof.actor_id||actor.playerId!=='me'||!actor.participating||actor.archived||actor.mergedInto)invalid();
-      const order=db.prepare('SELECT * FROM town_delivery_orders WHERE order_id=?').get(proof.order_id);
-      if(!order||order.world_id!==input.worldId||order.world_epoch!==input.worldEpoch||order.status!=='open'||order.version!==1||
-          order.created_at<proof.occurred_at||order.created_at>now||order.expires_at<=now)invalid();
-      const config=JSON.parse(order.config),fund=account(proof.fund_id,input.worldId);
-      if(config.reward!==30||config.materialQuantity!==1||config.accounts.fund!==fund.accountId||fund.accountType!=='fund'||
-          fund.ownerKey!=='delivery:public-fund'||fund.version!==proof.fund_version||fund.available!==proof.before_available-30||
-          proof.amount!==TOWN_LIQUIDITY_LIMITS.target-proof.before_available||proof.amount<1||proof.amount>TOWN_LIQUIDITY_LIMITS.maxIssue||
-          proof.before_available<TOWN_LIQUIDITY_LIMITS.reserve||proof.before_available>=TOWN_LIQUIDITY_LIMITS.target)invalid();
-      for(const [id,type,assetId,amount] of [[order.money_reservation_id,'money',fund.accountId,30],
-        [order.material_reservation_id,'stock',config.stocks.supplier,1]]) {
-        const hold=db.prepare('SELECT * FROM economy_reservations WHERE reservation_id=?').get(id);
-        if(!hold||hold.world_id!==input.worldId||hold.world_epoch!==input.worldEpoch||hold.asset_type!==type||
-            hold.asset_id!==assetId||hold.owner_ref!==`order:${order.order_id}`||hold.amount!==amount||hold.remaining!==amount)invalid();
-      }
-      if(!db.prepare(`SELECT 1 FROM town_business_log l JOIN town_domain_events e ON e.event_id=l.event_id
-        WHERE l.order_id=? AND l.world_id=? AND l.world_epoch=? AND l.phase='open' AND l.event_id=?
-        AND l.occurred_at=? AND e.type='town.delivery.changed'`).get(order.order_id,input.worldId,input.worldEpoch,
-          `delivery:${order.order_id}:1`,order.created_at))invalid();
-      const usage=readTownLiquidityUsage(db,input.worldId,proof.occurred_at);
-      if(usage.lastIssuedAt!==null&&proof.occurred_at-usage.lastIssuedAt<TOWN_LIQUIDITY_LIMITS.cooldownMs)throw townError('LIQUIDITY_COOLDOWN');
-      if(usage.grossIssued+proof.amount>TOWN_LIQUIDITY_LIMITS.grossWorld||usage.issued24h+proof.amount>TOWN_LIQUIDITY_LIMITS.rolling24h||
-          usage.issued7d+proof.amount>TOWN_LIQUIDITY_LIMITS.rolling7d)throw townError('LIQUIDITY_CAP');
-      const circulation=db.prepare("SELECT COALESCE(SUM(balance),0) total FROM economy_accounts WHERE world_id=? AND account_type<>'issuance'").get(input.worldId).total;
-      if(BigInt(circulation)+BigInt(proof.amount)>BigInt(TOWN_LIQUIDITY_LIMITS.circulation))throw townError('LIQUIDITY_CIRCULATION_CAP');
-      moneyChange(ctx,issuance(input.worldId),-proof.amount);moneyChange(ctx,fund,proof.amount);
-      db.prepare('INSERT INTO town_liquidity_issues VALUES(?,?,?,?,?)').run(proof.authorization_id,ctx.transactionId,input.worldId,proof.amount,proof.occurred_at);
-      return {authorizationId:proof.authorization_id,orderId:order.order_id,issued:proof.amount};
-    });
-  }
   function transferStock(input) {
     return execute('transferStock',input,ctx=>{
       integer(input.amount); const from=stock(input.fromStockId,input.worldId),to=stock(input.toStockId,input.worldId);
@@ -340,7 +248,7 @@ export function createEconomyService({db,clock,getWorldEpoch,getActor,consumers=
       return {count:releases.length,releases};
     });
   }
-  return {ensureAccount,ensureStock,seed,seedStock,produceStock,issueLiquidity,transfer,transferStock,flushNotifications,releaseActive,events,
+  return {ensureAccount,ensureStock,seed,seedStock,transfer,transferStock,flushNotifications,releaseActive,events,
     reserve:input=>reserveAsset('money',input),reserveStock:input=>reserveAsset('stock',input),
     capture:input=>finishReservation('money','capture',input),release:input=>finishReservation('money','release',input),
     captureStock:input=>finishReservation('stock','capture',input),releaseStock:input=>finishReservation('stock','release',input),

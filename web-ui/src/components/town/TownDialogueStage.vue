@@ -32,6 +32,11 @@
           </article>
         </template>
       </div>
+      <slot name="feedback" />
+      <div v-if="actions.length" class="td-extra">
+        <linshe-button v-for="item in actions" :key="item.key" variant="ghost" size="sm"
+          :disabled="loading || sending || blocked" @click="$emit('action', item.key)">{{ item.label }}</linshe-button>
+      </div>
       <p v-if="sending" class="td-status" role="status">正在回应…关闭后可重新打开查看记录。</p>
       <p v-else-if="status" class="td-status" role="status">{{ status }}</p>
       <div v-if="error" class="td-error" role="alert">
@@ -39,16 +44,11 @@
         <linshe-button v-if="retryable" variant="link" size="sm" :disabled="loading || sending" @click="$emit('retry')">重试同一条消息</linshe-button>
         <linshe-button variant="link" size="sm" :disabled="loading || sending" @click="$emit('reload')">重新读取记录</linshe-button>
       </div>
-      <form class="td-input" @submit.prevent="submit">
+      <form v-if="showInput" class="td-input" @submit.prevent="submit">
         <linshe-input ref="input" v-model="draft" size="sm" :disabled="loading || sending || blocked" :maxlength="maxLength" aria-label="对话内容" placeholder="说点什么…"
           @compositionstart="composing = true" @compositionend="composing = false" @keydown.enter="onEnter" />
         <linshe-button type="submit" variant="primary" size="sm" :loading="sending" :disabled="loading || blocked || !draft.trim()">发送</linshe-button>
       </form>
-      <div class="td-extra">
-        <linshe-button v-for="item in actions" :key="item.key" variant="link" size="sm"
-          :disabled="loading || sending || blocked" @click="$emit('action', item.key)">{{ item.label }}</linshe-button>
-        <linshe-button v-if="showActivity" variant="link" size="sm" @click="$emit('activity')">查看居民近况</linshe-button>
-      </div>
     </div>
   </section>
 </template>
@@ -61,11 +61,12 @@ const props = defineProps({
   displayName: { type: String, default: '邻居' }, playerName: { type: String, default: '我' },
   portraitUrl: String, playerPortraitUrl: String,
   messages: { type: Array, default: () => [] }, loading: Boolean, sending: Boolean, blocked: Boolean,
+  showInput: { type: Boolean, default: true },
   error: { type: String, default: '' },
   status: { type: String, default: '' }, hasMoreHistory: Boolean, maxLength: { type: Number, default: 200 },
-  retryable: Boolean, draftRestore: Object, showActivity: Boolean, actions: { type: Array, default: () => [] },
+  retryable: Boolean, draftRestore: Object, actions: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['send', 'close', 'reload', 'load-older', 'retry', 'activity', 'action'])
+const emit = defineEmits(['send', 'close', 'reload', 'load-older', 'retry', 'action'])
 const root = ref(null), input = ref(null), body = ref(null)
 const draft = ref(''), composing = ref(false), historyOpen = ref(false), failedImages = ref({})
 const viewportStyle = ref({}), compact = ref(false), zoomed = ref(null)
@@ -168,7 +169,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.town-dialogue-stage { position: absolute; inset: auto 0 0; height: min(680px, calc(100% - 108px)); z-index: 60; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) minmax(330px, 540px) minmax(0, 1fr); align-items: end; gap: 8px; box-sizing: border-box; padding: 0 18px 24px; pointer-events: none; color: #574a40; overscroll-behavior: contain; outline: none; }
+.town-dialogue-stage { position: absolute; inset: auto 0 0; height: min(680px, calc(100% - 108px)); z-index: 60; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) minmax(330px, 540px) minmax(0, 1fr); align-items: end; gap: 8px; box-sizing: border-box; padding: 0 18px 24px; pointer-events: none; color: #574a40; overscroll-behavior: contain; outline: none;
+  /* 暖纸色岛：舞台在两种主题下都是纸面观感，糖纸控件 token 在此重映射到小镇纸色，
+     暗夜里 ghost 按钮 / 输入框才不会变成深色玻璃浮在奶油纸上 */
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f3ecdf;
+  --border: #e0c9aa;
+  --border-strong: var(--town-paper-line);
+  --text-secondary: var(--town-paper-muted);
+  --text-bright: var(--town-paper-ink); }
 .td-portraits { display: contents; }
 .td-portraits figure { pointer-events: auto; position: relative; align-self: stretch; margin: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
 .td-portraits figure:first-child { grid-column: 1; }
@@ -183,14 +192,16 @@ header { justify-content: space-between; }
 h2 { color: #59483d; font-size: 20px; font-weight: 700; margin: 4px 0 8px; }
 .td-kicker { color: #a1846e; font-size: 10px; letter-spacing: .15em; }
 .td-speaker, .td-muted { font-size: 12px; color: #947f6d; }
-.td-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+/* overflow-x 同样 clip：消息里的果冻按钮贴边放大时会把横向滚动条闪出来（同 TownResidentActions） */
+.td-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: clip; overflow-clip-margin: 6px; overscroll-behavior: contain; overflow-wrap: anywhere; }
 article { margin: 10px 0 18px; }
 article p { white-space: pre-wrap; line-height: 1.8; margin: 4px 0; font-size: 15px; }
 .td-input { margin-top: 12px; }
 .td-input > :first-child { flex: 1; min-width: 0; }
 .td-status, .td-error { font-size: 12px; margin: 6px 0 0; }
 .td-error { color: #ad5147; }
-.td-extra { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+/* 舞台级游戏选项与 #feedback 里的居民选项同一语言：ghost 糖纸按钮、同一行距 */
+.td-extra { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
 @container town-world (max-width: 700px) {
   .town-dialogue-stage { height: calc(100% - 112px); grid-template-columns: 1fr 1fr; grid-template-rows: minmax(80px, 1fr) minmax(220px, 48%); gap: 0; padding: 0 6px 10px; }
   .td-portraits { display: flex; justify-content: space-between; grid-column: 1 / -1; grid-row: 1; width: 100%; height: 100%; }

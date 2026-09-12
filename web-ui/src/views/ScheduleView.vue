@@ -97,10 +97,6 @@
       :open="drawerOpen"
       :char="detailChar"
       :activities="detailActs"
-      :town-overlays="store.townOverlays"
-      :overlays-loading="store.townOverlaysLoading"
-      :overlays-error="store.townOverlaysError"
-      @refresh-overlays="store.refreshTownOverlays()"
       :loading="detailLoading"
       :peek-busy="peekBusy"
       :regenerating="detailRegenerating"
@@ -671,8 +667,6 @@ let _overviewRefreshTimer: ReturnType<typeof setInterval> | null = null
 function refreshOverviewWhenVisible() {
   if (document.visibilityState !== 'visible') return
   store.fetchOverview(true)
-  // Reuse the existing 60s/visibility/focus cadence; never fan out to other characters.
-  if (drawerOpen.value && !store.townOverlaysLoading) store.refreshTownOverlays()
 }
 
 onMounted(async () => {

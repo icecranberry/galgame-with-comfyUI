@@ -39,7 +39,7 @@
       </div>
       <div v-if="initialized" class="town-topbar-actions">
         <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
-        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showQuestPanel" @click="openQuestPanel">奇遇</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" @click="openTownEvents" :title="npcEncounterCount ? `镇上有 ${npcEncounterCount} 段进行中的奇遇` : '镇上暂时没有进行中的奇遇'">奇遇{{ npcEncounterCount ? ` · ${npcEncounterCount}` : '' }}</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
@@ -47,7 +47,7 @@
     </div>
 
     <div v-if="initialized && !editing" class="town-hint">
-      点击空地走过去 · 点一下店门或掌柜就能进店办事 · 点一点邻居打个招呼 · WASD 移动 · 滚轮缩放
+      点击空地走过去 · 点一下建筑或邻居就能互动、展开奇遇 · 点一点邻居打个招呼 · WASD 移动 · 滚轮缩放
     </div>
 
     <div v-if="rendererNotice" class="town-render-notice" role="status">
@@ -137,6 +137,7 @@
         <div v-if="poiEdit" class="town-poi-form">
           <div class="poi-title">{{ poiEdit.objectId ? '绑定地点' : '新地点' }}</div>
           <linshe-input v-model="poiEdit.name" size="sm" placeholder="地点名称" />
+          <TownCapabilityPicker v-model="poiEdit.capabilities" />
           <linshe-input v-model="poiEdit.ambient" size="sm" placeholder="环境氛围（如：咖啡香四溢）" />
           <linshe-input v-model="poiEdit.aliasText" size="sm" placeholder="别名（逗号分隔，日程匹配用）" />
           <div class="row">
@@ -155,33 +156,27 @@
     <Transition name="npc-stage" :duration="300">
       <div v-if="dialogueOpen" class="npc-stage" @click.self="closeDialogue">
         <TownCharacterChat v-if="chatCharacterId != null" :key="`char:${chatCharacterId}`"
-          :character-id="chatCharacterId" :town-context="dialogueContext" :service-busy="dialogueServiceBusy" @context-invalid="refreshDialogueWorld" :display-name="chatResident?.displayName"
+          :character-id="chatCharacterId" :town-context="dialogueContext" @context-invalid="refreshDialogueWorld" :display-name="chatResident?.displayName"
           :standing-url="chatResident?.standingUrl" :avatar-url="chatResident?.avatarPath"
-          :player-name="player?.displayName || '我'" show-activity @activity="openDialogueActivity" @close="closeDialogue" />
+          :player-name="player?.displayName || '我'" @close="closeDialogue"
+          @story="openResidentStory" />
         <TownNpcChat v-else-if="chatNpcId != null"
           :key="chatNpcId"
-          :npc-id="chatNpcId" :world-id="dialogueContext?.worldId" :world-epoch="dialogueContext?.worldEpoch" :service-busy="dialogueServiceBusy"
+          :npc-id="chatNpcId" :world-id="dialogueContext?.worldId" :world-epoch="dialogueContext?.worldEpoch"
           :player-name="player?.displayName || '我'"
           :display-name="chatNpcName"
-          show-activity @activity="openDialogueActivity"
-          @close="closeDialogue"
+          @close="closeDialogue" @story="openResidentStory"
           @character-chat="openLinkedCharacterChat" @context-invalid="refreshDialogueWorld"
         />
       </div>
     </Transition>
     <p v-if="dialogueOpening || dialogueError || lifeMoveError" class="town-dialogue-notice" role="status">{{ lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
     <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
-    <TownBoardPanel :open="showBoardPanel" @close="closeBoardPanel" @move-to="moveToLifeLocation" @appointments="openAppointments" @quests="openQuestPanel" />
-    <TownQuestPanel :open="showQuestPanel" :locations="locations" @close="closeQuestPanel" @move-to="moveToLifeLocation" />
-    <town-workshop-service v-if="spotReady && worldSpot.type === 'workshop'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
-      :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
-    <town-cafe-work-panel v-if="spotReady && worldSpot.type === 'cafe'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
-      :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName" @close="closeWorldSpot" @chat="openSpotDialogue" />
-    <town-venue-service-panel v-if="spotReady && worldSpot.type === 'venue'" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
-      :business-key="worldSpot.businessKey" :session-id="worldSpot.sessionId" :provider-name="worldSpot.providerName"
-      @close="closeWorldSpot" @chat="openSpotDialogue" @quests="openQuestPanel" />
-    <TownAppointmentPanel :open="showAppointments" :residents="agents" :locations="locations" @close="showAppointments = false" />
-    <TownActivityPanel :open="!!activityActor" :actor="activityActor" @close="activityActorId = null" />
+    <TownPaperPanel v-if="spotReady && worldSpot" :open="true" :title="worldSpot.displayName" @close="closeWorldSpot">
+      <p>选择这里的功能。服务可展开特殊奇遇，交易可查看商品并买卖。</p>
+      <TownResidentActions :actor-key="`location:${worldSpot.locationKey}`" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+        @story="openResidentStory" />
+    </TownPaperPanel>
     <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
     <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
 
@@ -213,6 +208,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, reactive } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTownStore } from '../stores/town.js'
 import { formatTownTemperature } from '../utils/townWeather.js'
@@ -231,17 +227,13 @@ import TownAssetManager from '../components/town/TownAssetManager.vue'
 import TownNpcChat from '../components/town/TownNpcChat.vue'
 import TownCharacterChat from '../components/town/TownCharacterChat.vue'
 import TownWalletPanel from '../components/town/TownWalletPanel.vue'
-import TownBoardPanel from '../components/town/TownBoardPanel.vue'
-import TownQuestPanel from '../components/town/TownQuestPanel.vue'
-import TownWorkshopService from '../components/town/TownWorkshopService.vue'
-import TownCafeWorkPanel from '../components/town/TownCafeWorkPanel.vue'
-import TownVenueServicePanel from '../components/town/TownVenueServicePanel.vue'
-import TownActivityPanel from '../components/town/TownActivityPanel.vue'
-import TownAppointmentPanel from '../components/town/TownAppointmentPanel.vue'
+import TownPaperPanel from '../components/town/TownPaperPanel.vue'
+import TownResidentActions from '../components/town/TownResidentActions.vue'
+import TownCapabilityPicker from '../components/town/TownCapabilityPicker.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
 
-const props = defineProps({ initialPanel: { type: String, default: '' } })
+const router = useRouter(), route = useRoute()
 const town = useTownStore()
 const { map: mapMeta, locations, agents, player, weather, loaded, connected, initialized, renderMap } = storeToRefs(town)
 
@@ -378,31 +370,17 @@ const dialogueContext = ref(null)
 const dialogueOpening = ref(false)
 const dialogueError = ref('')
 const showWalletPanel = ref(false)
-const showBoardPanel = ref(false)
-const showQuestPanel = ref(false)
-// 世界里点开的建筑玩法：{ type, businessKey, displayName, providerName, providerActorId, sessionId }
+// 世界里点开的建筑互动面板：{ displayName, locationKey }
 const worldSpot = ref(null)
 const approaching = ref('')
-const townEconomy = ref(null)
-const showAppointments = ref(false)
-const activityActorId = ref(null)
-const activityActor = computed(() => {
-  const actor = agents.value.find(agent => agent.actorId === activityActorId.value)
-  return actor ? { ...actor, worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch } : null
-})
 const lifeMoving = ref(false)
 const lifeMoveError = ref('')
 let dialogueRequest = 0
 let lifeMoveRequest = 0
+let dialogueHoldTimer = null
 const dialogueOpen = computed(() => chatNpcId.value != null || chatCharacterId.value != null)
-const dialogueServiceBusy = computed(() => {
-  const resident = agents.value.find(agent => dialogueContext.value?.actorId
-    ? agent.actorId === dialogueContext.value.actorId
-    : chatCharacterId.value != null ? agent.characterId === chatCharacterId.value : agent.npcId === chatNpcId.value)
-  return resident?.busyReason === 'SERVICE_BUSY'
-})
 const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showWalletPanel.value
-  || showBoardPanel.value || showQuestPanel.value || !!worldSpot.value || lifeMoving.value || showAppointments.value || !!activityActor.value)
+  || !!worldSpot.value || lifeMoving.value)
 const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
 const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
 const showAdmin = ref(false)
@@ -419,10 +397,8 @@ watch(dialogueInputBlocked, blocked => {
   onCanvasLeave()
 }, { flush: 'sync' })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
-  activityActorId.value = null; showAppointments.value = false
-  showWalletPanel.value = false; showBoardPanel.value = false; showQuestPanel.value = false; worldSpot.value = null; approaching.value = ''
+  showWalletPanel.value = false; worldSpot.value = null; approaching.value = ''
   ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
-  refreshTownEconomy()
 })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch,
   chatCharacterId.value == null || agents.value.some(agent => agent.actorId === dialogueContext.value?.actorId && agent.characterId === chatCharacterId.value)], () => {
@@ -549,47 +525,21 @@ function hitAgent(cssX, cssY) {
   return hdRenderer?.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
 }
 
-// ── 世界里的店：走到门口点一下就能进店办事 ──
-// 店台账面只在服务端；前端只按 /api/town/economy 的投影把地点映成可点的热区，
-// 新增建筑只改后端注册表，这里不需要再认名字。
-let economyRead = 0
-async function refreshTownEconomy() {
-  const request = ++economyRead
-  try {
-    const data = await api.getTownEconomy()
-    if (disposed || request !== economyRead) return
-    if (!data || typeof data.configured !== 'boolean') throw new Error('小镇状态不完整')
-    townEconomy.value = data
-  } catch {
-    if (request === economyRead) townEconomy.value = null
-  }
-}
-function actorName(actorId, fallback) {
-  if (!actorId) return fallback
-  return (townEconomy.value?.participants || []).find(item => item.actorId === actorId)?.displayName || fallback
-}
+// ── 世界里的建筑：走到门口点一下就能展开互动与奇遇 ──
+// 热区直接来自地图地点；互动目录（奇遇邀请/交易）由互动接口按建筑与岗位实时给出。
 const venueSpots = computed(() => {
-  const economy = townEconomy.value
-  if (!economy?.configured) return []
   const map = renderMap.value
   // /api/town/map 的地点带 objectId，是画布所画的那一份；载荷还没到时退回快照地点，两处同源。
   const places = map?.locations?.length ? map.locations : (locations.value || [])
-  const placeByKey = new Map(places.map(item => [item.key, item]))
   const objectById = new Map((map?.layers?.objects || []).map(item => [item.id, item]))
   const assetById = new Map((map?.assets || []).map(item => [item.id, item]))
   const rows = []
-  const push = (type, businessKey, displayName, locationKey, providerActorId = null) => {
-    const location = placeByKey.get(locationKey)
-    if (!location || !Number.isInteger(location.x) || !Number.isInteger(location.y)) return
+  for (const location of places) {
+    if (!location || !Number.isInteger(location.x) || !Number.isInteger(location.y)) continue
     const object = location.objectId ? objectById.get(location.objectId) : null
     const rect = object ? objectRect(object, assetById.get(object.assetId)?.meta || {}) : null
-    rows.push({ type, businessKey, displayName, location, rect, providerActorId,
-      providerName: actorName(providerActorId, type === 'workshop' ? '工坊邻居' : displayName) })
+    rows.push({ displayName: location.name, location, rect })
   }
-  push('board', 'board', '公告站', economy.slice?.locationKeys?.board)
-  push('workshop', 'workshop', '工坊', economy.service?.locationKey, economy.service?.providerActorId)
-  push('cafe', 'cafe', '咖啡馆', economy.cafe?.locationKey, economy.cafe?.providerActorId)
-  for (const venue of economy.venues || []) push('venue', venue.businessKey, venue.displayName, venue.locationKey, venue.providerActorId)
   return rows
 })
 /** 按格子找热区：建筑占地整块都算，没绑建筑的地点按锚点半径算。 */
@@ -603,10 +553,6 @@ function spotAtCell(cell) {
     if (distance <= (location.radius ?? 2) && (!best || distance < best.distance)) best = { spot, distance }
   }
   return best ? best.spot : null
-}
-function spotForActor(actorId) {
-  if (!actorId) return null
-  return venueSpots.value.find(spot => spot.providerActorId === actorId) || null
 }
 function hitWorldSpot(cssX, cssY) {
   if (!venueSpots.value.length) return null
@@ -640,30 +586,13 @@ function waitForSpot(location, current) {
     tick()
   })
 }
-function inFlightSessionId(spot) {
-  const sessions = spot.type === 'cafe' ? townEconomy.value?.cafe?.sessions
-    : spot.type === 'workshop' ? townEconomy.value?.service?.sessions
-      : (townEconomy.value?.venues || []).find(item => item.businessKey === spot.businessKey)?.sessions
-  return (sessions || []).find(item => ['offered', 'active', 'resolving', 'settling'].includes(item.status))?.sessionId || null
-}
 function openSpotPanel(spot) {
-  worldSpot.value = { type: spot.type, businessKey: spot.businessKey, displayName: spot.displayName,
-    providerName: spot.providerName, providerActorId: spot.providerActorId, sessionId: inFlightSessionId(spot) }
+  worldSpot.value = { displayName: spot.displayName, locationKey: spot.location.key }
 }
 function closeWorldSpot() {
   worldSpot.value = null
-  refreshTownEconomy()
 }
-function openSpotDialogue() {
-  const spot = worldSpot.value
-  if (!spot) return
-  const resident = agents.value.find(agent => agent.actorId === spot.providerActorId) || null
-  closeWorldSpot()
-  if (resident) openDialogue(resident)
-  else dialogueError.value = `暂时找不到${spot.providerName}，请稍后再试。`
-}
-async function walkToSpot(spot) {
-  const request = ++lifeMoveRequest
+async function walkToSpot(spot, request = ++lifeMoveRequest) {
   const current = () => !disposed && request === lifeMoveRequest
   approaching.value = spot.displayName
   lifeMoveError.value = ''
@@ -672,7 +601,7 @@ async function walkToSpot(spot) {
     if (result?.ok === false) throw new Error('这个门口暂时走不过去，请稍后再试。')
     const arrived = await waitForSpot(spot.location, current)
     if (!current()) return
-    // 到店才开店：服务端要求玩家真的站在地点范围内，面板里的报价与接受才有意义。
+    // 到店才能开互动：服务端要求玩家真的站在地点范围内，邀请与交易才有意义。
     if (arrived) openSpotPanel(spot)
     else lifeMoveError.value = `还没走到${spot.displayName}门口，再点一次就好。`
   } catch (err) {
@@ -684,7 +613,6 @@ async function walkToSpot(spot) {
 /** 点建筑或点经营者都走同一条路：先到门口，再开这家店的玩法面板。 */
 function enterWorldSpot(spot) {
   if (!spot || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
-  if (spot.type === 'board') { openBoardPanel(); return }
   lifeMoveError.value = ''
   if (playerAtLocation(spot.location)) { openSpotPanel(spot); return }
   walkToSpot(spot)
@@ -788,10 +716,8 @@ function onCanvasClick(e) {
   if (!initialized.value) return
   const hit = hitAgent(e.offsetX, e.offsetY)
   if (hit) {
-    // 掌柜本人也是这家店的入口：点他就进店办事，面板里还留着聊天入口。
-    const spot = spotForActor(hit.actorId)
-    if (spot) { enterWorldSpot(spot); return }
     // 入住角色与居民同口径：点一下直接开对话舞台（立绘 + 对话框），不再弹资料卡。
+    // 经营者也不例外——店铺入口只留在建筑热区上（hitWorldSpot），点人永远是对话。
     if (hit.characterId) { goChat(hit.characterId); return }
     openDialogue(hit)
     return
@@ -897,6 +823,7 @@ function beginEdit() {
 function normalizeLocation(l) {
   return {
     id: l.id, key: l.key, name: l.name, aliases: l.aliases || [],
+    capabilities: l.capabilities || ['service'], businessKind: l.businessKind,
     kind: l.kind, x: l.x, y: l.y, radius: l.radius, ambient: l.ambient || '', objectId: null,
   }
 }
@@ -1088,6 +1015,7 @@ function handleEditClick(e) {
         objectId: obj.id,
         key: (asset?.key || 'poi').replace(/[^a-z0-9_]/g, '_'),
         name: asset?.name || '',
+        capabilities: asset?.meta?.capabilities || ['service'], businessKind: asset?.meta?.businessKind,
         aliases: [],
         kind: 'place',
         // 锚点 = 朝向镜头的底角格（门前）
@@ -1138,6 +1066,7 @@ async function saveEditor() {
       layers: editLayers.value,
       locations: editLocations.value.map(l => ({
         key: l.key, name: l.name, aliases: l.aliases, kind: l.kind,
+        capabilities: l.capabilities, businessKind: l.businessKind,
         x: l.x, y: l.y, radius: l.radius, ambient: l.ambient, objectId: l.objectId ?? null,
       })),
     })
@@ -1345,7 +1274,7 @@ function draw(nowMs) {
     return adaptAgent(a, pos, agentFacing(a, pos), nowMs)
   })
   const interactionActorKeys = ['me', hoverAgentKey.value,
-    chatResident.value?.actorId, activityActorId.value].filter(Boolean)
+    chatResident.value?.actorId].filter(Boolean)
   if (hdRenderer) {
     try {
       hdRenderer.setCamera(cam)
@@ -1476,7 +1405,6 @@ async function prepareWorldResources() {
     const snapshot = await town.fetchState()
     if (disposed) return
     if (snapshot?.initialized) {
-      refreshTownEconomy()
       await waitForRenderMap()
       if (disposed) return
       await preloadWorldResources()
@@ -1512,11 +1440,6 @@ watch(editing, (v) => {
   if (!v) staticDirty = true
 })
 
-// A mailbox task link opens the current snapshot for review; it never accepts or moves.
-watch(() => [resourcesReady.value, props.initialPanel], ([ready, panel]) => {
-  if (ready && initialized.value && panel === 'life' && !disposed) openWalletPanel()
-})
-
 watch(editLayers, () => { staticDirty = true }, { deep: true })
 watch(townAssets, () => { staticDirty = true }, { deep: true })
 
@@ -1532,6 +1455,8 @@ onMounted(async () => {
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', clearMovementKeys)
   rafId = requestAnimationFrame(draw)
+  refreshNpcEncounters()
+  encounterTimer = window.setInterval(refreshNpcEncounters, 60000)
   await prepareWorldResources()
 })
 
@@ -1550,13 +1475,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', clearMovementKeys)
   if (moveTimer) { clearInterval(moveTimer); moveTimer = null }
+  if (encounterTimer) { clearInterval(encounterTimer); encounterTimer = null }
   dialogueRequest++
+  stopDialogueHoldTimer()
+  releaseDialogueResident(chatResident.value)
+  chatResident.value = null
   town.stopTownStream()
 })
 
 async function openDialogue(resident) {
-  if (showWalletPanel.value || showBoardPanel.value || worldSpot.value || lifeMoving.value) return
-  if (rejectBusyDialogue(resident)) return
+  if (showWalletPanel.value || worldSpot.value || lifeMoving.value) return
   const request = ++dialogueRequest
   dialogueOpening.value = true
   dialogueError.value = ''
@@ -1565,40 +1493,64 @@ async function openDialogue(resident) {
     const result = await api.moveTownPlayerDir(0, 0)
     if (request !== dialogueRequest) return
     if (result?.ok !== true) throw new Error('Unable to stop')
-    if (rejectBusyDialogue(resident)) return
+    // 对话框一打开就把对方也停在原地：闲聊、奇遇都就地面对面，不用再等TA走完这段路
+    await holdDialogueResident(resident)
     dialogueContext.value = { worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch, actorId: resident.actorId }
     chatResident.value = resident
     chatCharacterId.value = resident.characterId || null
     chatNpcId.value = resident.characterId ? null : resident.npcId
     chatNpcName.value = resident.displayName || '邻居'
+    startDialogueHoldTimer()
   } catch {
     if (request === dialogueRequest) dialogueError.value = '暂时没能停下脚步，请再点一次邻居。'
   } finally {
     if (request === dialogueRequest) dialogueOpening.value = false
   }
 }
-function rejectBusyDialogue(resident) {
-  const current = agents.value.find(agent => resident.actorId ? agent.actorId === resident.actorId
-    : resident.characterId ? agent.characterId === resident.characterId : agent.npcId === resident.npcId) || resident
-  if (current.busyReason !== 'SERVICE_BUSY') return false
-  dialogueError.value = `${current.displayName || '这位居民'}正在提供工坊服务，请稍后再交谈。`
-  return true
+
+// ── 对话驻留：对话框开着的时候，让对方站在原地陪聊 ──
+// 服务端按租约驻留（90s）；开着期间每 30s 续租，关闭即释放，客户端失联最多冻结 90s。
+function dialogueHoldScope() {
+  return { worldId: town.snapshot?.worldId, worldEpoch: town.snapshot?.worldEpoch }
+}
+async function holdDialogueResident(resident) {
+  if (!resident?.actorId) return
+  try { await api.holdTownActor(resident.actorId, dialogueHoldScope()) }
+  catch { /* 驻留失败不拦对话：奇遇/闲聊照常可用 */ }
+}
+function startDialogueHoldTimer() {
+  stopDialogueHoldTimer()
+  const actorId = chatResident.value?.actorId
+  if (!actorId) return
+  dialogueHoldTimer = window.setInterval(() => {
+    api.holdTownActor(actorId, dialogueHoldScope()).catch(() => {})
+  }, 30_000)
+}
+function stopDialogueHoldTimer() {
+  if (dialogueHoldTimer) { clearInterval(dialogueHoldTimer); dialogueHoldTimer = null }
+}
+function releaseDialogueResident(resident) {
+  if (!resident?.actorId) return
+  api.releaseTownActor(resident.actorId, dialogueHoldScope()).catch(() => {})
 }
 function goChat(characterId) {
   const resident = agents.value.find(agent => agent.characterId === characterId) || { characterId }
   return openDialogue(resident)
 }
 function closeDialogue() {
+  const resident = chatResident.value
   dialogueError.value = ''
   dialogueRequest++
   dialogueOpening.value = false
+  stopDialogueHoldTimer()
   chatNpcId.value = null
   chatCharacterId.value = null
   chatResident.value = null
   dialogueContext.value = null
+  releaseDialogueResident(resident)
 }
 async function refreshDialogueWorld(err) {
-  if (err.code !== 'TOWN_CHAT_TOO_FAR') await town.fetchState().catch(() => {})
+  await town.fetchState().catch(() => {})
 }
 async function openLinkedCharacterChat(characterId) {
   // Invitation may have changed identity after the clicked snapshot; resolve the latest actor mapping.
@@ -1614,69 +1566,30 @@ function openWalletPanel() {
   dialogueError.value = ''
   lifeMoveError.value = ''
   showWalletPanel.value = true
-  refreshTownEconomy()
-}
-function openBoardPanel() {
-  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
-  dialogueError.value = ''
-  lifeMoveError.value = ''
-  showBoardPanel.value = true
-  refreshTownEconomy()
-}
-function openQuestPanel() {
-  if (editing.value || showAdmin.value || showWizard.value || lifeMoving.value) return
-  dialogueError.value = ''
-  lifeMoveError.value = ''
-  showBoardPanel.value = false
-  showWalletPanel.value = false
-  worldSpot.value = null
-  showQuestPanel.value = true
-}
-function closeQuestPanel() {
-  showQuestPanel.value = false
-  refreshTownEconomy()
-}
-function openActivityPanel(actor) {
-  if (!actor?.actorId || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
-  activityActorId.value = actor.actorId
-}
-function openDialogueActivity() {
-  const actor = chatResident.value
-  closeDialogue()
-  openActivityPanel(actor)
 }
 function closeWalletPanel() {
   showWalletPanel.value = false
 }
-function closeBoardPanel() {
-  showBoardPanel.value = false
-  refreshTownEconomy()
-}
-function openAppointments() {
-  if (!showBoardPanel.value || lifeMoving.value) return
-  closeBoardPanel()
-  showAppointments.value = true
-}
-async function moveToLifeLocation(locationKey) {
-  if (!showBoardPanel.value || lifeMoving.value) return
-  const request = ++lifeMoveRequest
-  const current = () => !disposed && request === lifeMoveRequest
-  // Keep the shared input lock until the movement command is acknowledged.
-  lifeMoving.value = true
-  closeBoardPanel()
-  lifeMoveError.value = ''
-  const location = locations.value.find(location => location.key === locationKey)
+// 顶栏奇遇入口：查询当前进行中的镇民奇遇，点击进奇遇页查看和继续。
+const npcEncounterCount = ref(0)
+let encounterTimer = null
+async function refreshNpcEncounters() {
+  if (disposed) return
   try {
-    if (!location || !Number.isInteger(location.x) || !Number.isInteger(location.y)) {
-      throw new Error('这个地点暂时不可前往，请刷新小镇后再试。')
-    }
-    const result = await town.movePlayer(location.x, location.y)
-    if (result?.ok === false) throw new Error('暂时无法前往这个地点，请稍后再试。')
-  } catch (err) {
-    if (current()) lifeMoveError.value = err.message || '暂时无法前往这个地点，请稍后再试。'
-  } finally {
-    if (current()) lifeMoving.value = false
-  }
+    const data = await api.listEvents()
+    if (disposed) return
+    npcEncounterCount.value = (data.active || []).filter(item => item.npc_event).length
+  } catch { /* 读取失败不打扰小镇页面，下个周期再试 */ }
+}
+function openTownEvents() {
+  closeWorldSpot()
+  closeDialogue()
+  router.push({ path: '/events' })
+}
+function openResidentStory(eventId) {
+  closeWorldSpot()
+  closeDialogue()
+  router.push({ path: '/events', query: { event: String(eventId) } })
 }
 </script>
 

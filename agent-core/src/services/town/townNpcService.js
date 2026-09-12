@@ -20,10 +20,11 @@ import { getMapRow } from './townMapService.js';
 import { broadcastTownBubble } from './townBus.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { ensureNpcFunctions, describeNpcFunctions } from './townNpcFunctions.js';
-import { questTemplateList } from './townQuestDefinitions.js';
 import { findRoutineSlot } from './routineSchedule.js';
 import { randomUUID } from 'node:crypto';
 import { beginTownDialogueRequest, finishTownDialogueRequest, failTownDialogueRequest } from './townDialogueRequests.js';
+import { initializeTownNpcFunctions, reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
+import { townCapabilities, normalizeTownCapabilities } from './townCapabilities.js';
 
 // ── 查询 ──
 
@@ -63,6 +64,8 @@ function npcToDto(row) {
     persona: row.persona || '',
     brief: row.brief || '',
     job: row.job || '',
+    workplaceKey: row.workplace_key || null,
+    capabilities: townCapabilities(row),
     homeLocationId: row.home_location_id,
     routine,
     traits,
@@ -81,19 +84,27 @@ export function npcCount() {
 
 // ── CRUD ──
 
-export function createNpc({ mapId, displayName, persona = '', brief = '', job = '', traits = {}, routine = [], homeLocationId = null, townEnabled = 1 }) {
+export function createNpc({ mapId, displayName, persona = '', brief = '', job = '', traits = {}, routine = [], homeLocationId = null, townEnabled = 1, workplaceKey = null, capabilities, assignResponsibilities = true }) {
   const db = getDb();
+  return db.transaction(() => {
   const r = db.prepare(`
     INSERT INTO town_npcs (map_id, display_name, persona, brief, job, routine_json, traits_json, home_location_id, town_enabled)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(mapId ?? null, displayName, persona, brief, job, JSON.stringify(routine), JSON.stringify(traits), homeLocationId, townEnabled ? 1 : 0);
-  return getNpc(Number(r.lastInsertRowid));
+  const id = Number(r.lastInsertRowid);
+  db.prepare('UPDATE town_npcs SET workplace_key=? WHERE id=?').run(workplaceKey, id);
+  if (capabilities !== undefined) db.prepare('UPDATE town_npcs SET capabilities_json=?,capabilities_explicit=1 WHERE id=?').run(JSON.stringify(normalizeTownCapabilities(capabilities)), id);
+  initializeTownNpcFunctions(db, db.prepare('SELECT * FROM town_npcs WHERE id=?').get(id));
+  if (mapId && assignResponsibilities) reconcileTownResponsibilities({ db });
+  return getNpc(id);
+  }).immediate();
 }
 
-export function updateNpc(id, { displayName, persona, brief, job, routine, traits, homeLocationId, townEnabled } = {}) {
+export function updateNpc(id, { displayName, persona, brief, job, routine, traits, homeLocationId, townEnabled, workplaceKey, capabilities } = {}) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(id);
   if (!row) return null;
+  return db.transaction(() => {
   db.prepare(`
     UPDATE town_npcs SET
       display_name = ?, persona = ?, brief = ?, job = ?,
@@ -110,7 +121,12 @@ export function updateNpc(id, { displayName, persona, brief, job, routine, trait
     townEnabled === undefined ? row.town_enabled : (townEnabled ? 1 : 0),
     id,
   );
+  if (workplaceKey !== undefined) db.prepare('UPDATE town_npcs SET workplace_key=? WHERE id=?').run(workplaceKey, id);
+  if (capabilities !== undefined) db.prepare('UPDATE town_npcs SET capabilities_json=?,capabilities_explicit=1 WHERE id=?').run(JSON.stringify(normalizeTownCapabilities(capabilities)), id);
+  initializeTownNpcFunctions(db, db.prepare('SELECT * FROM town_npcs WHERE id=?').get(id));
+  if (row.map_id) reconcileTownResponsibilities({ db });
   return getNpc(id);
+  }).immediate();
 }
 
 export function deleteNpc(id) {
@@ -859,39 +875,25 @@ export async function chatWithNpc(npcId, message, opts = {}) {
   const useModel = config.features.townLLM;
   try {
     const actor = registry.resolveAgentKey(`npc:${npcId}`);
-    if (actor && db.prepare(`SELECT 1 FROM town_service_sessions WHERE provider_actor_id = ?
-      AND escrow_account_id IS NOT NULL AND status IN ('active', 'resolving', 'settling')`).get(actor.actorId)) {
-      throw Object.assign(new Error('居民正在提供服务，请稍后再聊'), { status: 409, code: 'NPC_BUSY' });
-    }
 
     const history = getNpcChatHistory(npcId, 12);
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const scene = currentRoutineLine(npc, now);
-    // 功能点事实：让 NPC 知道自己能托付/送东西/做买卖；给不给仍由服务端决定。
+    // 功能点事实：让 NPC 知道自己能送东西/做买卖；给不给仍由服务端决定。
     let functionLine = '';
     try {
       const row = db.prepare('SELECT id, display_name, job, functions_json FROM town_npcs WHERE id = ?').get(npcId);
-      if (row) {
-        functionLine = describeNpcFunctions(ensureNpcFunctions(db, row, {
-          npcQuestTemplateIds: questTemplateList().filter(template => template.trigger?.type === 'npc').map(template => template.id),
-        }));
-      }
+      if (row) functionLine = describeNpcFunctions(ensureNpcFunctions(db, row));
     } catch { /* 功能档案不可用不影响聊天 */ }
-    // 任务事实：玩家手头有进行中的奇遇时，让 NPC 知情，聊天才接得上。
-    let questLine = '';
-    try {
-      if (actor) {
-        const active = db.prepare(`SELECT title, current_step, config FROM town_quests WHERE world_id = ? AND world_epoch = ?
-          AND actor_id = ? AND status = 'active' LIMIT 1`).get(world.worldId, world.epoch, actor.actorId);
-        if (active) {
-          const questConfig = JSON.parse(active.config);
-          const step = questConfig.steps?.[active.current_step];
-          questLine = `来访者手头有一件没做完的事「${active.title}」${step ? `，当前这一步是：${step.label}` : ''}。如果TA提起，可以顺着聊，也可以打打气。`;
-        }
-      }
-    } catch { /* 任务事实不可用不影响聊天 */ }
 
+    let interactionCatalog = [];
+    try {
+      const { getTownInteractions } = await import('./townInteractionRuntime.js');
+      const interactions = getTownInteractions(`npc:${npcId}`);
+      interactionCatalog = interactions.catalog;
+      functionLine = describeNpcFunctions(interactions.functions);
+    } catch { /* 无经济配置时仍能正常闲聊 */ }
     const reply = useModel ? await chatSync([
       {
         role: 'system',
@@ -900,9 +902,12 @@ export async function chatWithNpc(npcId, message, opts = {}) {
           npc.persona ? `你的人设：${npc.persona}` : '',
           npc.job ? `你的职业：${npc.job}` : '',
           functionLine ? `你在小镇里的生活设定：${functionLine}` : '',
-          questLine,
           `现在是 ${timeStr}，你${scene}。`,
-          '要求：用中文回复，1~2 句话（不超过 60 字），口语化、符合人设，可以聊眼前的生活；小动作用（括号）内嵌。不要输出旁白、不要自称 AI、不要列选项。',
+          '用中文回复，1~2句话、不超过60字，口语化且符合人设；小动作用括号内嵌，不要自称AI。',
+          `可提出的真实邀请目录：${JSON.stringify(interactionCatalog.map(item => ({ key: item.key, title: item.title, description: item.description })))}`,
+          '聊到购物、工作、护理或故事时，可以从目录中选一个合适的key提出邀请；日常闲聊不必邀请。不能编造价格、道具、服务或已完成的交易。',
+          '严格按以下完整JSON示例输出，不要输出解释、Markdown或JSON以外的文字：',
+          '{"reply":"中文1~2句话，不超过60字，符合人设，不声称已扣款或已交物；如果邀请则自然说明意图", "requestKey":"只能填上面目录里一个完全一致的key，不适合邀请时填空字符串"}',
           '以下是你们之前在镇上的对话（可能为空）：',
           history.length
             ? history.map(h => `${h.role === 'user' ? '玩家' : npc.displayName}：${h.content}`).join('\n')
@@ -916,17 +921,20 @@ export async function chatWithNpc(npcId, message, opts = {}) {
       label: '小镇就地聊天',
     }) : `（点点头）你好呀，${config.user.nickname || '邻居'}。我${scene}，见到你很高兴。`;
 
-    const text = String(reply || '').trim().slice(0, 200);
+    let parsed = null;
+    if (useModel) {
+      try { parsed = JSON.parse(stripFence(String(reply || ''))); } catch { /* 旧模型回退纯文本，不据此执行请求 */ }
+    }
+    const text = String((typeof parsed?.reply === 'string' ? parsed.reply : null)
+      || (!String(reply).trim().startsWith('{') ? reply : '（想了想）我们慢慢聊，你也可以看看我这里能办的事。') || '').trim().slice(0, 200);
     if (!text) throw new Error('NPC 没有回应');
     const result = { reply: text, source: useModel ? 'model' : 'template', requestId: request.requestId };
-
-    // 奇遇钩子：镇上恰有可接的托付时，把邀约随回复带给前端（并随请求存档，重放可见）。
-    // 安静失败：邀约只是聊天的小概率惊喜，任何不满足都不能影响聊天本身。
-    try {
-      const { maybeOfferTownQuestAfterNpcChat } = await import('./townEconomyRuntime.js');
-      const questOffer = maybeOfferTownQuestAfterNpcChat({ actorId: actor?.actorId ?? null, npcId });
-      if (questOffer) result.questOffer = questOffer;
-    } catch { /* 奇遇不可用不阻塞对话 */ }
+    if (parsed?.requestKey && interactionCatalog.some(item => item.key === parsed.requestKey)) {
+      try {
+        const { offerTownInteraction } = await import('./townInteractionRuntime.js');
+        result.interactionRequest = offerTownInteraction(`npc:${npcId}`, parsed.requestKey, { worldId: world.worldId, worldEpoch: world.epoch });
+      } catch { /* 邀请资格变化不丢弃已经生成的聊天回复 */ }
+    }
 
     db.transaction(() => {
       registry.assertEpoch(world.epoch);

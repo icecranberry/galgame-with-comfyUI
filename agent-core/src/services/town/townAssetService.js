@@ -20,6 +20,8 @@ import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
 import { removeDeletedAssetReferences } from './townMapService.js';
 import { getTownGenerationSettings, generationStepForAsset, isPortraitAsset, normalizeTownGenerationLoras } from './townGenerationConfig.js';
+import { townBuildingKind } from './townResponsibilityDefinitions.js';
+import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
 
 /** 建筑 LLM 出 prompt（酒馆立绘同款结构）；失败回退静态串 */
 async function buildBuildingPromptViaLlm(p) {
@@ -680,6 +682,8 @@ export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId =
   if (!ASSET_SPECS[kind]) throw new Error(`unknown asset kind: ${kind}`);
   const db = getDb();
   const metaJson = { desc: desc || '', ...meta };
+  if (kind === 'building') metaJson.businessKind = townBuildingKind({ key, name, meta });
+  if (kind === 'building') metaJson.capabilities = townCapabilities({ meta }, defaultTownCapabilities(metaJson.businessKind));
   delete metaJson.appearanceSource; // client metadata is not generation evidence
   const { row, guard } = db.transaction(() => {
     assertWorldCurrent(expectedWorld);

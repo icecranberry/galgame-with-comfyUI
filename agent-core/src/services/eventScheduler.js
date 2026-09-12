@@ -13,6 +13,7 @@
 
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
+import { concludeTownNpcEvent } from './town/townNpcEventGenerator.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
@@ -76,6 +77,25 @@ async function tick(opts = {}) {
         await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
       } catch (err) {
         console.error(`[eventScheduler] Conclude error for ${event.display_name}:`, err.message);
+      }
+    }
+
+    // ── 1.5 镇民奇遇到期检查（与角色事件同一套结算口径，无记忆写入） ──
+    const expiredNpcEvents = db.prepare(`
+      SELECT e.*, n.display_name
+      FROM town_npc_events e
+      JOIN town_npcs n ON n.id = e.npc_id
+      WHERE e.expires_at <= datetime('now')
+        AND e.status IN ('open','engaged')
+        AND e.processing = 0
+    `).all();
+    for (const event of expiredNpcEvents) {
+      console.log(`[eventScheduler] Town npc event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
+      try {
+        const npc = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(event.npc_id);
+        await concludeTownNpcEvent(npc, event, event.engaged ? 'completed' : 'expired');
+      } catch (err) {
+        console.error(`[eventScheduler] Town npc conclude error for ${event.display_name}:`, err.message);
       }
     }
 
@@ -342,6 +362,26 @@ function cleanupStuckEvents() {
     if (stuckProc.changes > 0) {
       console.log(`[eventScheduler] Reset ${stuckProc.changes} stuck processing flag(s)`);
     }
+
+    // 镇民奇遇：没有 pending 状态，只清理卡住的 processing 标记。
+    // 新事件的 last_interaction_at 为 NULL，用 created_at 兜底，避免首幕生成中断后永远 409。
+    const stuckNpcProc = db.prepare(`
+      UPDATE town_npc_events SET processing = 0
+      WHERE processing = 1
+        AND COALESCE(last_interaction_at, created_at) < datetime('now', '-5 minutes')
+    `).run();
+    if (stuckNpcProc.changes > 0) {
+      console.log(`[eventScheduler] Reset ${stuckNpcProc.changes} stuck town npc processing flag(s)`);
+    }
+
+    // 小镇互动邀请：崩溃残留的 generating 请求统一放回 offered，与面板打开时的 20 分钟自愈同口径
+    const stuckOffers = db.prepare(`
+      UPDATE town_interaction_offers SET status = 'offered'
+      WHERE status = 'generating' AND updated_at < ?
+    `).run(Date.now() - 20 * 60000);
+    if (stuckOffers.changes > 0) {
+      console.log(`[eventScheduler] Released ${stuckOffers.changes} stuck story offer(s)`);
+    }
   } catch (err) {
     console.error('[eventScheduler] cleanup error:', err.message);
   }
@@ -351,6 +391,8 @@ export function startEventScheduler() {
   const intervalMs = getCheckIntervalMs();
   if (intervalMs === Infinity) {
     console.log('[eventScheduler] eventFreq=0, scheduler disabled');
+    // 即使关闭自动生成，启动清理也要执行：崩溃残留的 processing 锁和 generating 请求靠它解锁
+    cleanupStuckEvents();
     return;
   }
   console.log('[eventScheduler] Starting (generation interval:', (intervalMs / 60000).toFixed(1), 'min, half-time check interval: 3 min, freq:', config.features.eventFreq ?? 1, ')');

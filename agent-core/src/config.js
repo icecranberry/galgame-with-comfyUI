@@ -104,10 +104,6 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
   },
   town: {
     simulation: process.env.TOWN_SIMULATION === 'rules' ? 'rules' : 'legacy',
-    economyEnabled: false,
-    liquidityEnabled: false,
-    // 奇遇任务总开关（管理面板可切，DB 持久化；FEATURE_TOWN_QUEST=false 为环境级熄火开关）
-    questEnabled: process.env.FEATURE_TOWN_QUEST !== 'false',
     timeZone: process.env.TOWN_TIME_ZONE || 'Asia/Shanghai',
     tickSeconds: Math.max(20, Math.min(300, parseInt(process.env.TOWN_TICK_SECONDS, 10) || 60)), // 模拟步长（真实秒）
     npcSpeed: 0.5,        // NPC 移动速度（格/秒），服务端推进与前端插值共用

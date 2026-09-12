@@ -47,6 +47,8 @@
 
     <!-- 事件库管理弹窗 -->
     <LibraryModal v-model="libraryOpen" type="event-types" />
+    <EventCard v-if="linkedEvent" :key="`town-story:${linkedEvent.id}`" :event="linkedEvent" initial-open
+      @updated="onEventUpdated" @closed="closeLinkedEvent" />
 
     <!-- 可滚动内容区 -->
     <div class="events-scroll" @scroll.passive="onScroll" @wheel.passive="onPageWheel" @touchmove.passive="onPageTouchMove" ref="scrollEl">
@@ -61,12 +63,10 @@
       <template v-else-if="store.filteredActive.length > 0">
         <div class="waterfall-row" :style="{ '--cols': colCount }">
           <div v-for="(col, ci) in activeColumns" :key="ci" class="waterfall-col stagger">
-            <EventCard
-              v-for="evt in col"
-              :key="evt.id"
-              :event="evt"
-              @updated="onEventUpdated"
-            />
+            <div v-for="evt in col" :key="evt.id">
+              <EventCard :event="evt" @updated="onEventUpdated" />
+              <linshe-button v-if="evt.town_origin" variant="link" size="sm" @click="returnToTown()">来自{{ evt.town_origin.sourceName }}的线索 · 回到小镇</linshe-button>
+            </div>
           </div>
         </div>
       </template>
@@ -115,13 +115,10 @@
           </div>
           <div class="waterfall-row" :style="{ '--cols': colCount }">
             <div v-for="(col, ci) in historyColumns" :key="'hc_' + ci" class="waterfall-col">
-              <EventCard
-                v-for="eh in col"
-                :key="'h_' + eh.id"
-                :event="eh"
-                :conclusion="eh.conclusion"
-                compact
-              />
+              <div v-for="eh in col" :key="'h_' + eh.id">
+                <EventCard :event="eh" :conclusion="eh.conclusion" compact />
+                <linshe-button v-if="eh.town_origin" variant="link" size="sm" @click="returnToTown()">来自{{ eh.town_origin.sourceName }}的线索 · 回到小镇</linshe-button>
+              </div>
             </div>
           </div>
         </div>
@@ -134,6 +131,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
@@ -145,6 +143,12 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import GearIcon from '../components/GearIcon.vue'
 
 const store = useEventsStore()
+const router = useRouter(), route = useRoute()
+const linkedEvent = computed(() => [...store.activeEvents, ...store.history].find(event => String(event.id) === route.query.event))
+function closeLinkedEvent() { const query = { ...route.query }; delete query.event; router.replace({ query }) }
+function returnToTown() {
+  router.push({ path: '/town' })
+}
 const chat = useChatStore()
 const showHistory = ref(false)
 const showPicker = ref(false)

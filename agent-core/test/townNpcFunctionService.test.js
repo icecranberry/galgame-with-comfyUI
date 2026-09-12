@@ -12,7 +12,6 @@ import { createTownActorRegistry } from '../src/services/town/townActorRegistry.
 import { createEconomyService } from '../src/services/town/economyService.js';
 import { createItemTemplateService } from '../src/services/town/itemTemplateService.js';
 import { createTownNpcFunctionService } from '../src/services/town/townNpcFunctionService.js';
-import { venueProductTemplates } from '../src/services/town/townVenuePlaybooks.js';
 import { createTownExperienceService, TOWN_EXPERIENCE_CONSUMER } from '../src/services/town/townExperienceService.js';
 
 const EFFECT_REGISTRY = Object.freeze({ mood_fix: { kind: 'mood' }, energy: { kind: 'buff' },
@@ -52,10 +51,7 @@ function fixture(t) {
   const itemTemplates = createItemTemplateService({ db, clock, getWorldEpoch: registry.getWorldEpoch,
     getActor: registry.getActor, effectRegistry: EFFECT_REGISTRY, economy });
   itemTemplates.ensureDefaultTemplates({ ...scope });
-  itemTemplates.ensureVenueTemplates({ ...scope }, venueProductTemplates());
-  const sameSpotMap = new Map();
-  const sameSpot = (input, actorId) => sameSpotMap.get(actorId) !== false;
-  const service = createTownNpcFunctionService({ db, clock, registry, economy, itemTemplates, sameSpot,
+  const service = createTownNpcFunctionService({ db, clock, registry, economy, itemTemplates,
     consumers: [TOWN_EXPERIENCE_CONSUMER] });
   let counter = 0;
   const cmd = fields => ({ ...scope, idempotencyKey: `request-${++counter}`, ...fields });
@@ -64,28 +60,23 @@ function fixture(t) {
   const seedPlayer = amount => economy.seed({ ...scope, accountId: playerAccountId, amount,
     idempotencyKey: `seed-${++counter}`, sourceKey: `seed-${counter}`, reasonCode: 'TEST' });
   const playerBalance = () => economy.getAccount({ ...scope, accountId: playerAccountId }).balance;
-  return { db, registry, clock, economy, itemTemplates, service, cmd, seedPlayer, playerBalance, sameSpotMap,
+  return { db, registry, clock, economy, itemTemplates, service, cmd, seedPlayer, playerBalance,
     get scope() { return scope; }, setTime: value => { time = value; }, get time() { return time; } };
 }
 
-test('npc functions are assigned by job keywords, persisted, and always include a quest binding', t => {
+test('NPCs persist two nonexclusive permissions; functions follow capabilities', t => {
   const f = fixture(t);
   const trader = f.service.functionsOf(1, f.cmd({}));
   assert.ok(trader.functions.trader, '杂货摊主应是 trader');
-  assert.equal(trader.functions.quest_giver.questTemplateIds.length, 2, '每位 NPC 轮派两条 NPC 线奇遇');
+  assert.deepEqual(trader.capabilities, ['trade']);
+  assert.equal(trader.functions.gift_giver, undefined);
   const gift = f.service.functionsOf(2, f.cmd({}));
   assert.ok(gift.functions.gift_giver, '茶艺师应是 gift_giver');
   assert.ok(!gift.functions.trader);
-  // 不同居民的托付组合不同（按种子轮派），但都出自同一条 NPC 奇遇池
-  const full = f.service.functionsOf(3, f.cmd({}));
-  const pool = new Set(['quest.npc.first_favor', 'quest.npc.study_letter', 'quest.npc.tailor_moral', 'quest.npc.warm_stay']);
-  for (const id of [...trader.functions.quest_giver.questTemplateIds, ...full.functions.quest_giver.questTemplateIds]) {
-    assert.ok(pool.has(id), `未知任务绑定 ${id}`);
-  }
-  assert.notDeepEqual(trader.functions.quest_giver.questTemplateIds, full.functions.quest_giver.questTemplateIds);
   // 分配结果落库，第二次读取走同一份声明
   const stored = JSON.parse(f.db.prepare('SELECT functions_json FROM town_npcs WHERE id=1').get().functions_json);
-  assert.deepEqual(stored, trader.functions);
+  assert.deepEqual(stored.trader, trader.functions.trader);
+  assert.deepEqual(f.service.functionsOf(1, f.cmd({})), trader);
 });
 
 test('gift_giver grants a reward item once per cooldown and writes an experience event', t => {
@@ -115,56 +106,46 @@ test('trader buy mints the item to the npc then trades it to the player for the 
   const f = fixture(t);
   f.seedPlayer(100);
   const before = f.playerBalance();
-  const command = { ...f.scope, idempotencyKey: 'trade-buy-1' };
-  const result = f.service.executeTrade(1, { ...command, direction: 'buy', templateId: 'town.mood_patch' });
+  const result = f.service.executeTrade(1, f.cmd({ templateId: 'town.mood_patch' }));
   assert.equal(result.price, 15);
   assert.equal(f.playerBalance(), before - 15);
   const item = f.db.prepare(`SELECT owner_key, source_type, collected_at FROM backpack_items WHERE id=?`).get(result.itemId);
   assert.equal(item.owner_key, 'me');
   assert.equal(item.source_type, 'trade');
   assert.ok(item.collected_at);
-  // 幂等重放：同一幂等键重放返回同一件商品，不重复扣钱也不重复发货
-  const replay = f.service.executeTrade(1, { ...command, direction: 'buy', templateId: 'town.mood_patch' });
-  assert.equal(replay.itemId, result.itemId);
-  assert.equal(f.playerBalance(), before - 15);
+  // 再买一件是全新的一笔交易：新幂等键、新物品、再扣一次钱
+  const second = f.service.executeTrade(1, f.cmd({ templateId: 'town.mood_patch' }));
+  assert.notEqual(second.itemId, result.itemId);
+  assert.equal(f.playerBalance(), before - 30);
   const minted = f.db.prepare(`SELECT count(*) n FROM backpack_items WHERE source_type='trade' AND owner_key='me'`).get().n;
-  assert.equal(minted, 1);
-  // 换个方向的商品：inn_tea 不在 sells 里
-  assert.throws(() => f.service.executeTrade(1, f.cmd({ direction: 'buy', templateId: 'town.inn_tea' })),
+  assert.equal(minted, 2);
+  // 不在 sells 里的商品直接拒绝
+  assert.throws(() => f.service.executeTrade(1, f.cmd({ templateId: 'town.inn_tea' })),
     err => err.code === 'INVALID_TRADE_ITEM');
 });
 
 test('trader buy fails cleanly without funds and rolls back the mint', t => {
   const f = fixture(t);
-  assert.throws(() => f.service.executeTrade(1, f.cmd({ direction: 'buy', templateId: 'town.mood_patch' })),
+  assert.throws(() => f.service.executeTrade(1, f.cmd({ templateId: 'town.mood_patch' })),
     err => err.code === 'INSUFFICIENT_FUNDS');
   const npcStock = f.db.prepare(`SELECT count(*) n FROM backpack_items WHERE owner_key LIKE 'actor:%'`).get().n;
   assert.equal(npcStock, 0);
 });
 
-test('trader sell pays the player the listed buyback price via item trade', t => {
-  const f = fixture(t);
-  const grant = f.itemTemplates.grant({ ...f.scope, templateId: 'town.tavern_meal', templateVersion: 1,
-    ownerKey: 'me', quantity: 1, sourceType: 'seed', sourceId: 'test-meal',
-    idempotencyKey: 'grant-meal', reasonCode: 'TEST' });
-  const before = f.playerBalance();
-  const result = f.service.executeTrade(1, f.cmd({ direction: 'sell', templateId: 'town.tavern_meal',
-    itemId: grant.itemIds[0], expectedVersion: 1 }));
-  assert.equal(result.price, 8);
-  assert.equal(f.playerBalance(), before + 8);
-  const item = f.db.prepare(`SELECT owner_key FROM backpack_items WHERE id=?`).get(grant.itemIds[0]);
-  assert.match(item.owner_key, /^actor:/);
-});
-
-test('trading requires the two sides to share a spot', t => {
-  const f = fixture(t);
-  f.seedPlayer(100);
-  f.sameSpotMap.set(f.registry.resolveAgentKey('npc:1').actorId, false);
-  assert.throws(() => f.service.executeTrade(1, f.cmd({ direction: 'buy', templateId: 'town.mood_patch' })),
-    err => err.code === 'NOT_ARRIVED');
-});
-
 test('non trader refuses trades', t => {
   const f = fixture(t);
   assert.throws(() => f.service.tradeCatalog(2, f.cmd({})), err => err.code === 'NOT_A_TRADER');
+});
+
+test('explicit two-function permissions gate direct trade', t => {
+  const f = fixture(t);
+  f.seedPlayer(100);
+  f.db.prepare('UPDATE town_npcs SET capabilities_json=? WHERE id=2').run('["service","trade"]');
+  assert.ok(f.service.functionsOf(2, f.cmd({})).functions.trader);
+  const first = f.service.executeTrade(2, f.cmd({ templateId: 'town.energy_charm' }));
+  assert.equal(first.price, 15);
+  f.db.prepare('UPDATE town_npcs SET capabilities_json=? WHERE id=2').run('["service"]');
+  assert.throws(() => f.service.tradeCatalog(2, f.cmd({})), { code: 'NOT_A_TRADER' });
+  assert.throws(() => f.service.executeTrade(2, f.cmd({ templateId: 'town.energy_charm' })), { code: 'NOT_A_TRADER' });
+  assert.equal(f.playerBalance(), 85);
 });

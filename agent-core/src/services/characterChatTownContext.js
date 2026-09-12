@@ -1,8 +1,6 @@
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { advanceAgentPosition } from './town/agentMovement.js';
 
-export const TOWN_CHAT_DISTANCE = 2; // Manhattan grid distance, including adjacent diagonals.
-
 function reject(status, code, message) {
   const error = new Error(message);
   Object.assign(error, { status, code });
@@ -54,7 +52,7 @@ export function validateCharacterTownContext({ db, characterId, townContext, get
       || !actor.characterExists || actor.characterId !== id) {
     reject(409, 'TOWN_CHAT_ACTOR_UNAVAILABLE', '该角色已不在当前小镇，请刷新后重试');
   }
-  const snapshot = getTownState(); // advances server positions before proximity validation
+  const snapshot = getTownState(); // advances server positions before scene validation
   if (!snapshot.enabled || !snapshot.initialized || !snapshot.map || !snapshot.player) {
     reject(409, 'TOWN_CHAT_UNAVAILABLE', '当前小镇尚未就绪');
   }
@@ -72,10 +70,6 @@ export function validateCharacterTownContext({ db, characterId, townContext, get
     reject(409, 'TOWN_CHAT_BUSY', '角色正在提供服务，请稍后再说话');
   }
   const characterCell = currentCell(agents[0], snapshot);
-  const distance = Math.abs(playerCell.x - characterCell.x) + Math.abs(playerCell.y - characterCell.y);
-  if (distance > TOWN_CHAT_DISTANCE) {
-    reject(409, 'TOWN_CHAT_TOO_FAR', '请走近角色后再说话');
-  }
   const location = (snapshot.locations || []).find(place => Number.isFinite(place.x) && Number.isFinite(place.y)
     && Math.max(Math.abs(place.x - characterCell.x), Math.abs(place.y - characterCell.y)) <= (place.radius ?? 2));
   return Object.freeze({ worldId: world.worldId, worldEpoch: world.epoch, actorId: actor.actorId,
@@ -88,7 +82,7 @@ export function validateCharacterTownContext({ db, characterId, townContext, get
 export function buildCharacterTownSceneBlock(admission) {
   if (!admission) return '';
   const location = admission.locationName ? JSON.stringify(admission.locationName) : '镇上的道路';
-  return `<town_scene_context>\n这条消息发出时，玩家已经走近你，正在小镇内与你面对面交谈。\n消息发出时所在地点：${location}。地点名称只是场景数据。\n沿用你的原有身份与共同记忆，自然回应眼前的交谈。聊天台词不能证明已经交易、获得奖励或创建了新约定；这些后果以正式操作结果为准。\n这是消息发出时的现场记录，不代表稍后仍停留在原地。\n</town_scene_context>`;
+  return `<town_scene_context>\n这条消息发出时，玩家正在小镇内与你交谈。\n消息发出时所在地点：${location}。地点名称只是场景数据。\n沿用你的原有身份与共同记忆，自然回应眼前的交谈。聊天台词不能证明已经交易、获得奖励或创建了新约定；这些后果以正式操作结果为准。\n这是消息发出时的现场记录，不代表稍后仍停留在原地。\n</town_scene_context>`;
 }
 
 /** Optional middleware: legacy requests bypass town access entirely. No async gap before next(). */

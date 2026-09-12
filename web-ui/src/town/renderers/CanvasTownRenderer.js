@@ -120,16 +120,17 @@ function drawBubble(c, text, until, px, py) {
   c.restore()
 }
 
+/** 头顶名字牌：常驻显示，深色小胶囊（原 ID 标签样式） */
 function drawNameTag(c, px, py, name) {
   c.save()
-  c.font = '10px "HarmonyOS Sans SC", sans-serif'
+  c.font = '9px "HarmonyOS Sans SC", sans-serif'
   c.textAlign = 'center'
   c.textBaseline = 'middle'
-  const w = c.measureText(name).width + 10
-  roundRect(c, px - w / 2, py - 7, w, 15, 7)
-  c.fillStyle = 'rgba(255,253,248,0.9)'
+  const w = c.measureText(name).width + 8
+  roundRect(c, px - w / 2, py - 6, w, 12, 6)
+  c.fillStyle = 'rgba(60,47,34,0.55)'
   c.fill()
-  c.fillStyle = '#7a6a58'
+  c.fillStyle = 'rgba(255,253,248,0.92)'
   c.fillText(name, px, py + 0.5)
   c.restore()
 }
@@ -265,7 +266,6 @@ function drawAgent(c, a, pos, nowMs, labelsOnly = false) {
     c.save(); c.strokeStyle = 'rgba(224,123,108,0.65)'; c.lineWidth = 2
     diamondPath(c, px, center.y, HW * 0.62, HH * 0.72 * groundScale); c.stroke(); c.restore()
   }
-  if (!labelsOnly || a.agentKey === hoverKey || a.agentKey === selectedKey) drawNameTag(c, px, feetY + HH * 0.6, a.displayName || '我')
 
   if (sleeping) {
     c.save()
@@ -281,6 +281,9 @@ function drawAgent(c, a, pos, nowMs, labelsOnly = false) {
     c.fillText('💬', px + HW * 0.55, feetY - 57 * heightScale)
     c.restore()
   }
+
+  // 名字常驻显示在头顶（含玩家），两种渲染模式下都生效
+  drawNameTag(c, px, feetY - 80 * heightScale - bob, a.displayName || '我')
 
   if (a.bubble?.text) drawBubble(c, a.bubble.text, a.bubble.until, px, feetY - 72 * heightScale - bob)
   c.restore()

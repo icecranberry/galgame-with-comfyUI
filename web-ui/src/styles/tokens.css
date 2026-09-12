@@ -21,6 +21,11 @@
   --border-strong: #d0c3b8;      /* 漫画格描边（组件级 2px 描边用） */
   --cel-outline: #4a3d36;        /* 赛璐璐深描边色 */
   --text-primary: #333333;
+  /* 小镇 NPC 对话舞台的暖纸色岛，两种主题都保持纸面上的墨色可读。 */
+  --town-paper-ink: #554a43;
+  --town-paper-muted: #76665a;
+  --town-paper-line: #cbb599;
+  --town-paper-accent: #ae6451;
   --text-secondary: #8c8074;
   --text-bright: #111111;
   --on-accent: #ffffff;

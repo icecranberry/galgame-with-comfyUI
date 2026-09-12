@@ -11,6 +11,16 @@
 
 除非任务明确要求，不要随意重做已有设计或引入新的 UI 体系。
 
+## 小镇游戏化 UI
+
+小镇玩法以「奇遇」为唯一链路：NPC 互动（`TownResidentActions.vue`）发出邀请 → 服务线索/特殊奇遇走 LLM 叙事事件 → 玩家在奇遇页（`EventsView.vue`）用选项推进。建筑服务（按摩、喝酒、喝咖啡等）、NPC 邀请与 NPC 服务都由奇遇承载，不做步骤式结算面板。
+
+1. 小镇内的 UI 设计以「在地图上点击 NPC 后打开的对话框」为直接参考，优先复用 `web-ui/src/components/town/TownDialogueStage.vue` 的立绘舞台、暖纸不规则对话框、墨色描边和游戏选项布局，整体偏向游戏化。
+2. 邻币钱包、NPC 赠礼/交易是仅存的轻结算（`TownWalletPanel.vue`、`TownNpcTradePanel.vue`）；新的玩法一律优先奇遇叙事，不要重新引入步骤机/表单式面板。
+3. 镇内生活面板复用 `TownPaperPanel.vue`；对话与人物互动优先复用 `TownDialogueStage.vue`，不得另造不一致的视觉体系。
+4. 按钮、输入框、选择框、开关和弹窗继续遵循下方统一组件约定；配色、尺寸和反馈沿用 `docs/design-system.md` 与现有 token。
+5. 修改完成后，对照点击 NPC 打开的对话框检查视觉一致性，并验证桌面、移动端及暖色 / 暗夜主题。
+
 ## 按钮（LinsheButton）
 
 web-ui 中所有常规按钮必须使用统一组件 `web-ui/src/components/ui/LinsheButton.vue`，禁止写裸 `<button>` 标签或全局 button 样式。
@@ -78,6 +88,14 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 2. 示例中每个字段的值要写明该字段的内容要求与约束（如字数、语气、格式、禁止项），让模型照着填，参考 `agent-core/src/services/eventGenerator.js` 中 `formatPrompt` 的写法
 3. 必须明确要求模型严格按示例格式输出，不要输出任何解释或 JSON 以外的文字
 4. 新增或修改输出字段时，同步更新 prompt 中的 JSON 示例与解析代码，保持两者一致
+
+## 临时测试脚本
+
+调试过程中产生的临时验证脚本（`test.js`、`debug-*.js`、根目录散落的 scratch 脚本等）默认用完即删，不要留在仓库里污染 `git status` 和搜索结果。
+
+1. 临时脚本只用于当场验证，跑完、结论确认后就删除；随手生成的调试日志（如 `*.log`）一并清理
+2. 如果脚本验证的是真实 bug 的复现路径，或是一段以后还要反复跑的回归逻辑，把它改写成正式测试：`agent-core` 放 `agent-core/test/*.test.js`（还会扫 `src/services/*.test.js`），`web-ui` 放 `web-ui/test/*.test.js`，统一用 `node --test`（`npm test`）
+3. 判断口径：进了 `test/` 目录、命名规范、能被 `npm test` 收集到的是正式测试，随代码一起维护；其余一律不留
 
 ## 角色生图人格组装（characterPersona）
 

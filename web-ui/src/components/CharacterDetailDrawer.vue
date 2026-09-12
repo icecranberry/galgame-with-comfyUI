@@ -138,19 +138,6 @@
                 </div>
               </div>
             </div>
-            <section v-if="overlayAppointments.length || overlaysError" class="dr-overlays" aria-label="已接受的回访安排">
-              <div class="dr-overlay-heading"><h4>已接受的回访安排</h4><linshe-button variant="link" size="sm" :disabled="overlaysLoading" @click="$emit('refreshOverlays')">重新读取回访</linshe-button></div>
-              <p v-if="overlaysError" class="dr-overlay-note" role="status">{{ overlaysError }}</p>
-              <template v-if="overlayAppointments.length">
-                <p class="dr-overlay-note">时间采用 {{ overlayTimeZoneLabel }}。回访不覆盖原日程，已接受不代表已到场。</p>
-                <ul class="dr-overlay-list"><li v-for="appointment in overlayAppointments" :key="appointment.appointmentId">
-                  <strong>{{ appointment.availability === 'currently_free' ? '已接受回访 · 当前可安排' : '已接受回访 · 需重新确认' }}</strong>
-                  <p>{{ formatTownScheduleTime(appointment.startAt, townOverlays.timeZone) }} — {{ formatTownScheduleTime(appointment.endAt, townOverlays.timeZone) }}</p>
-                  <p>{{ typeof appointment.location === 'string' ? appointment.location : '地点待确认' }}</p>
-                  <p v-if="appointment.availability !== 'currently_free'" class="dr-overlay-note">原日程或地点暂时无法确认，工作、休息和离镇安排优先。</p>
-                </li></ul>
-              </template>
-            </section>
           </div>
         </div>
       </div>
@@ -172,7 +159,6 @@
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
 import LinsheButton from './ui/LinsheButton.vue'
-import { formatTownScheduleTime } from '../api/index.js'
 
 const props = defineProps<{
   open: boolean
@@ -181,12 +167,9 @@ const props = defineProps<{
   loading: boolean
   peekBusy: boolean
   regenerating?: boolean
-  townOverlays?: any
-  overlaysLoading?: boolean
-  overlaysError?: string
 }>()
 
-const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt', 'refreshOverlays'])
+const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt'])
 const drawerPanel = ref<HTMLElement | null>(null)
 let drawerReturnFocus: HTMLElement | null = null
 watch(() => props.open, async open => {
@@ -196,7 +179,7 @@ watch(() => props.open, async open => {
     if (props.open) drawerPanel.value?.focus({ preventScroll: true })
   } else if (drawerReturnFocus?.isConnected) drawerReturnFocus.focus({ preventScroll: true })
 }, { immediate: true })
-watch(() => [props.loading, props.overlaysLoading, props.overlaysError], async () => {
+watch(() => [props.loading], async () => {
   await nextTick()
   if (props.open && document.activeElement === document.body) drawerPanel.value?.focus({ preventScroll: true })
 })
@@ -210,9 +193,6 @@ function onDrawerKeydown(event: KeyboardEvent) {
   else if (event.shiftKey && [first, drawerPanel.value].includes(document.activeElement as HTMLElement)) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && [last, drawerPanel.value].includes(document.activeElement as HTMLElement)) { event.preventDefault(); first.focus() }
 }
-const overlayAppointments = computed(() => Number(props.townOverlays?.characterId) === Number(props.char?.id) ? props.townOverlays?.appointments || [] : [])
-const overlayTimeZoneLabel = computed(() => props.townOverlays?.timeZone === 'Asia/Shanghai' ? '北京时间（Asia/Shanghai，UTC+8）' : props.townOverlays?.timeZone || '服务端时区')
-
 const { tooltip, tipStyle, onEnter, onMove, onLeave } = useTooltip()
 
 const currentAct = computed(() => props.activities.find((a: any) => a.isCurrent) || null)
@@ -421,13 +401,6 @@ onUnmounted(() => {
 /* ── Body ── */
 .dr-body { flex: 1; overflow-y: auto; padding: 14px 20px; user-select: none; cursor: default; position: relative; scrollbar-width: none; }
 .dr-body::-webkit-scrollbar { display: none; }
-.dr-overlays { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
-.dr-overlay-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.dr-overlay-heading h4 { margin: 0; font-size: .85rem; color: var(--text-primary); }
-.dr-overlay-note { font-size: .75rem; color: var(--text-secondary); line-height: 1.6; }
-.dr-overlay-list { list-style: none; padding: 0; margin: 12px 0 0; }
-.dr-overlay-list li { padding: 10px 0; font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
-.dr-overlay-list p { margin: 4px 0; }
 .dr-body-scanning { overflow: hidden; }
 
 .dr-skel { padding: 8px 0; }

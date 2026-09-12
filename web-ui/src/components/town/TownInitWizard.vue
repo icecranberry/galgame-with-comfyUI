@@ -10,7 +10,7 @@
 
         <!-- 白色内衬卡（对齐角色详情弹窗的 lora-body-card 风格） -->
         <div v-if="showInitAlphaBanner" class="wiz-alpha-banner" role="note">
-          目前小镇功能极其不完善，就是看看美术素材图一乐，没任何功能，主包正在努力女娲补天
+          建筑与居民生成后会自动配好岗位，进镇就能到店办事、交易和探索奇遇。缺少的必要岗位会在清单中补齐。
         </div>
         <div class="wiz-inner">
         <!-- 步骤条 -->
@@ -84,6 +84,7 @@
                   <linshe-input v-model="item.name" size="sm" class="wiz-list-name" placeholder="名称" />
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="!item.special" @click="item.special = false; item.reusable = true">通用</linshe-button>
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="item.special" @click="item.special = true; item.reusable = false">特殊</linshe-button>
+                  <TownCapabilityPicker v-if="group.kind === 'building'" v-model="item.capabilities" />
                   <linshe-select
                     v-if="group.kind === 'prop'"
                     class="wiz-list-size"
@@ -117,7 +118,7 @@
                 <p class="wiz-desc">
                   {{ localStep === 'tiles'
                     ? '地皮资源生成。修改风格方向或单项描述后逐张生成，全部满意再进入下一步。'
-                    : '建筑与道具生成。通用建筑会多实例复用，特殊建筑是世界观专属地标。' }}
+                    : '建筑用途随清单确定，居民到齐后自动开张。通用住宅会多实例复用，营业建筑各有固定业务。' }}
                 </p>
 
                 <!-- 全局风格总输入框 -->
@@ -152,6 +153,7 @@
                         <div class="wiz-asset-name">
                           {{ item.name }}
                           <span v-if="item.badge" class="wiz-badge" :class="'is-' + item.badge">{{ item.badgeText }}</span>
+                          <span v-for="type in item.capabilities || ['service']" :key="type" class="wiz-badge">{{ type === 'trade' ? '交易类' : '服务类' }}</span>
                         </div>
                         <linshe-input v-model="item.desc" size="sm" class="wiz-asset-desc" placeholder="生成提示词…" />
                       </div>
@@ -246,6 +248,8 @@
                       <linshe-input v-model="n.job" size="sm" class="is-job" placeholder="职业" />
                     </div>
                     <div class="wiz-persona-block">
+                      <span v-if="n.workplaceKey" class="wiz-duty">工作地点：{{ bpForm.buildings.find(b => b.key === n.workplaceKey)?.name || (n.workplaceKey === 'central_plaza' ? '中央广场公告站' : n.workplaceKey) }}</span>
+                      <TownCapabilityPicker v-model="n.capabilities" />
                       <span class="wiz-label">一句话人设</span>
                       <linshe-input
                         v-model="n.brief"
@@ -423,6 +427,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
+import TownCapabilityPicker from './TownCapabilityPicker.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
@@ -875,6 +880,8 @@ async function genAssetItem(item, force = false) {
             artist: activeParams.artist,
             footprint: kind === 'building' || kind === 'prop' ? item.footprint || { w: 1, h: 1 } : undefined,
             special: kind === 'building' ? !!item.special : undefined,
+            businessKind: kind === 'building' ? item.businessKind : undefined,
+            capabilities: kind === 'building' ? item.capabilities : undefined,
             reusable: kind === 'building' ? !!item.reusable : undefined,
             maxInstances: kind === 'building' ? item.maxInstances : undefined,
             blocking: kind === 'prop' ? item.blocking : undefined,
@@ -1505,6 +1512,7 @@ onBeforeUnmount(() => {
 
 .wiz-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .wiz-label { font-size: 12px; color: var(--text-primary); }
+.wiz-duty { display: block; font-size: 12px; color: var(--town-paper-ink); overflow-wrap: anywhere; }
 
 /* 拉条 */
 .wiz-slider-row { display: flex; align-items: center; gap: 12px; }
@@ -1758,6 +1766,13 @@ onBeforeUnmount(() => {
 }
 
 .wiz-npc-form { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.wiz-npc-form .wiz-label { color: var(--town-paper-muted); }
+
+@media (max-width: 640px) {
+  .wiz-split :deep(.prompt-panel) { position: static; width: 100%; flex-basis: 100%; }
+  .wiz-npc-form { flex-basis: 100%; }
+  .wiz-npc-portrait { width: 100%; min-width: 0; height: 200px; }
+}
 
 .wiz-npc-sprite { width: 48px; height: 62px; }
 .wiz-npc-line { display: flex; gap: 6px; }

@@ -14,16 +14,10 @@ import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { migrateTownActionSchema } from './townActionSchema.js';
 import { ensureTownDialogueSchema } from './townDialogueSchema.js';
 import { migrateTownEconomySchema } from './townEconomySchema.js';
-import { migrateTownBusinessSchema } from './townBusinessSchema.js';
-import { migrateTownQuestSchema } from './townQuestSchema.js';
 import { migrateTownNpcFunctionsSchema } from './townNpcFunctionsSchema.js';
-import { migrateTownServiceSessionSchema } from './townServiceSessionSchema.js';
+import { migrateTownNpcEventSchema } from './townNpcEventSchema.js';
+import { migrateTownResponsibilitySchema } from './townResponsibilitySchema.js';
 import { migrateTownExperienceSchema } from './townExperienceSchema.js';
-import { migrateTownVenueRegularSchema } from './townVenueRegularSchema.js';
-import { migrateTownProductionSchema } from './townProductionSchema.js';
-import { migrateTownAppointmentSchema } from './townAppointmentSchema.js';
-import { migrateTownLiquidityPolicySchema } from './townLiquidityPolicySchema.js';
-import { migrateTownDeliveryDiagnosticsSchema } from '../services/town/townDeliveryDiagnostics.js';
 import { cleanupTownDialogueRequests } from '../services/town/townDialogueRequests.js';
 import { migrateTownItemSchema } from './townItemSchema.js';
 import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
@@ -925,16 +919,10 @@ function initSchema(db) {
   migrateTownActionSchema(db);
   ensureTownDialogueSchema(db);
   migrateTownEconomySchema(db);
-  migrateTownBusinessSchema(db);
-  migrateTownQuestSchema(db);
   migrateTownNpcFunctionsSchema(db);
-  migrateTownServiceSessionSchema(db);
+  migrateTownNpcEventSchema(db);
+  migrateTownResponsibilitySchema(db);
   migrateTownExperienceSchema(db);
-  migrateTownVenueRegularSchema(db);
-  migrateTownProductionSchema(db);
-  migrateTownAppointmentSchema(db);
-  migrateTownLiquidityPolicySchema(db);
-  migrateTownDeliveryDiagnosticsSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）

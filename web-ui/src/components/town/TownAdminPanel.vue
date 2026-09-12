@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="admin-slide">
-    <div v-if="open" v-show="!deliveriesOpen" class="admin-mask" @click.self="$emit('close')">
+    <div v-if="open" class="admin-mask" @click.self="$emit('close')">
       <div class="admin-panel" role="dialog" aria-label="小镇管理">
         <div class="ap-head">
           <linshe-button v-if="detail" variant="ghost" size="sm" @click="detail = null">← 返回</linshe-button>
@@ -117,6 +117,13 @@
                 :aria-label="`${detailNpc.displayName} 启停`"
                 @change="v => toggleNpc(detailNpc, v)"
               />
+            </div>
+
+            <div class="ap-section">
+              <div class="ap-section-title">功能权限 · 可同时选择</div>
+              <TownCapabilityPicker :model-value="detailNpc.capabilities" :disabled="busyFlags[`capabilities${detailNpc.id}`]"
+                @update:model-value="value => saveNpcCapabilities(detailNpc, value)" />
+              <p v-if="capabilityErrors[detailNpc.id]" role="alert">{{ capabilityErrors[detailNpc.id] }}</p>
             </div>
 
             <div class="ap-section">
@@ -329,29 +336,8 @@
             <linshe-select v-model="settings.simulation" size="sm" :disabled="settingsLocked"
               :options="[{ label: '兼容作息', value: 'legacy' }, { label: '本地行为 · 可恢复', value: 'rules' }]" />
           </div>
-          <p class="ap-layout-desc">本地行为会记录行动原因，并在到达地点后开始工作或休息。开启配送时，岗位居民仍会记录可恢复的工作进度。</p>
-          <div class="ap-setting">
-            <span class="ap-setting-label">配送与工坊接单</span>
-            <linshe-switch v-model="settings.economyEnabled" size="sm" :disabled="settingsLocked" aria-label="配送与工坊接单" />
-          </div>
-          <p class="ap-layout-desc">在生活面板配置居民与路线。关闭后暂停新委托和服务，已经接下的仍可完成或取消。</p>
-          <div class="ap-setting">
-            <span class="ap-setting-label">奇遇任务</span>
-            <linshe-switch v-model="settings.questEnabled" size="sm" :disabled="settingsLocked" aria-label="奇遇任务" />
-          </div>
-          <p class="ap-layout-desc">默认开启（需先开「配送与工坊接单」）。居民和店铺会托付有明确完成点的小任务，赏钱由店铺或公共基金托管支付。</p>
-          <div class="ap-setting">
-            <span class="ap-setting-label">公共基金有限保障</span>
-            <linshe-switch v-model="settings.liquidityEnabled" size="sm" :disabled="settingsLocked" aria-label="公共基金有限保障" />
-          </div>
-          <p class="ap-layout-desc">默认关闭。仅在发布有原料的配送委托时按需向公共基金发行补助。重建不重置额度，不补充原料；不会直接给玩家发钱。</p>
-          <div v-if="liquidity" aria-label="公共基金保障状态">
-            <p class="ap-layout-desc">{{ liquidity.availableFund == null ? '基金尚未配置' : `基金可用 ${liquidity.availableFund} 邻币` }}。{{ liquidity.activationAllowed ? '已满足开启准备金条件，保存时会再次核验。' : '尚未满足开启条件，保存时由服务器核验。' }}</p>
-            <p v-if="liquidity.limits" class="ap-layout-desc">开启至少需要 {{ liquidity.limits.reserve }} 邻币可用准备金；每24小时最多 {{ liquidity.limits.rolling24h }}，滚动7天最多 {{ liquidity.limits.rolling7d }}，本镇累计最多 {{ liquidity.limits.grossWorld }}，流通总量上限 {{ liquidity.limits.circulation }}。</p>
-            <p class="ap-layout-desc">累计补助 {{ liquidity.grossIssued }}，剩余额度 {{ liquidity.remainingWorldBudget }}；过去24小时发行 {{ liquidity.issued24h }}，过去7天发行 {{ liquidity.issued7d }}。</p>
-          </div>
-          <p v-if="liquidityError" class="ap-layout-desc" role="status">{{ liquidityError }}</p>
-          <linshe-button variant="link" size="sm" :disabled="loadingSettings || savingSettings" @click="loadSettings">重新读取设置与基金状态</linshe-button>
+          <p class="ap-layout-desc">本地行为会记录行动原因，并在到达地点后开始工作或休息。</p>
+          <linshe-button variant="link" size="sm" :disabled="loadingSettings || savingSettings" @click="loadSettings">重新读取设置</linshe-button>
           <div v-for="f in SETTING_FIELDS" :key="f.key" class="ap-setting">
             <span class="ap-setting-label">{{ f.label }}</span>
             <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :disabled="settingsLocked" :min="f.min" :max="f.max" :step="f.step" />
@@ -359,8 +345,6 @@
           <linshe-button variant="primary" size="sm" :disabled="settingsLocked" :loading="savingSettings" @click="saveSettings">保存设置</linshe-button>
           <p v-if="settingsError" class="ap-player-error" role="alert">{{ settingsError }}</p>
           <p v-else-if="settingsSaved" class="ap-layout-desc" role="status">设置已保存。</p>
-          <linshe-button ref="deliveriesTrigger" variant="link" size="sm" @click="deliveriesOpen = true">查看记录投递状态</linshe-button>
-
             <div class="ap-layout-zone">
               <div class="ap-section-title">重新布局</div>
             <p class="ap-layout-desc">会用当前素材重建地图、道路和地点；居民与入住角色会保留，手动地图修改会被覆盖。</p>
@@ -421,7 +405,6 @@
       />
     </div>
     </Transition>
-    <TownDeliveryDiagnostics :open="open && deliveriesOpen" @close="closeDeliveries" />
   </Teleport>
 </template>
 
@@ -430,25 +413,22 @@ import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
+import TownCapabilityPicker from './TownCapabilityPicker.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSwitch from '../ui/LinsheSwitch.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
-import TownDeliveryDiagnostics from './TownDeliveryDiagnostics.vue'
 
 defineEmits(['close'])
 
 const props = defineProps({ open: Boolean })
-const deliveriesOpen = ref(false), deliveriesTrigger = ref(null)
-async function closeDeliveries() { deliveriesOpen.value = false; await nextTick(); deliveriesTrigger.value?.$el?.focus() }
-
 const town = useTownStore()
 const tab = ref('npcs')
 const npcs = ref([])
 const chars = ref([])
-const settings = ref({ liquidityEnabled: false })
-const liquidity = ref(null), liquidityError = ref(''), loadingSettings = ref(false), settingsReady = ref(false)
+const settings = ref({})
+const loadingSettings = ref(false), settingsReady = ref(false)
 let settingsScope = 0
 let assetScope = 0, alive = true
 const assetReads = { npcs: 0, chars: 0, player: 0 }
@@ -492,6 +472,7 @@ const layoutMapSize = computed({
 })
 const mapSizeSummary = computed(() => `${layoutMapSize.value}×${layoutMapSize.value}`)
 const newNpc = reactive({ name: '', job: '', persona: '' })
+const capabilityErrors = reactive({})
 const playerKit = reactive({ sprites: {}, portrait: null })
 const playerOperation = ref(null)
 const playerKitBusy = computed(() => playerOperation.value !== null)
@@ -615,12 +596,10 @@ async function loadSettings() {
   if (savingSettings.value) return
   const token = ++settingsScope
   loadingSettings.value = true; settingsReady.value = false; settingsError.value = ''; settingsSaved.value = false
-  const [config, economy] = await Promise.allSettled([api.fetchTownSettings(), api.getTownLiquidity()])
+  const config = await api.fetchTownSettings().then(value => ({ status: 'fulfilled', value }), value => ({ status: 'rejected', value }))
   if (token !== settingsScope) return
-  if (config.status === 'fulfilled') { settings.value = { liquidityEnabled: false, ...config.value }; settingsReady.value = true }
+  if (config.status === 'fulfilled') { settings.value = { ...config.value }; settingsReady.value = true }
   else settingsError.value = '设置读取失败，请重新读取后再保存。'
-  liquidity.value = economy.status === 'fulfilled' ? economy.value.liquidity ?? null : null
-  liquidityError.value = economy.status === 'rejected' ? '基金状态暂时无法读取，请重新读取。' : ''
   loadingSettings.value = false
 }
 
@@ -631,6 +610,15 @@ async function toggleNpc(npc, enabled) {
     npc.townEnabled = !enabled
     console.warn('[town-admin] toggle npc failed:', err?.message)
   }
+}
+
+async function saveNpcCapabilities(npc, capabilities) {
+  const flag = `capabilities${npc.id}`
+  if (busyFlags[flag]) return
+  busyFlags[flag] = true; capabilityErrors[npc.id] = ''
+  try { await api.updateTownNpc(npc.id, { capabilities }); npc.capabilities = capabilities }
+  catch { capabilityErrors[npc.id] = '功能权限未保存，请重试。' }
+  finally { busyFlags[flag] = false }
 }
 
 // 入住前置：后端会先把立绘 + 正/背小人补齐（优先复用关联居民的素材，缺失才生成），
@@ -937,7 +925,6 @@ watch(() => [props.open, town.snapshot?.worldId, town.snapshot?.worldEpoch], ([o
   }
   for (const key of Object.keys(spriteErrors)) delete spriteErrors[key]
   if (!open) {
-    deliveriesOpen.value = false
     // 关面板只暂停轮询；后台生成继续，npcId 保留以便重开面板时恢复进度显示
     if (autoGen.timer) { clearInterval(autoGen.timer); autoGen.timer = null }
   } else if (autoGen.npcId && !autoGen.timer) {

@@ -2,6 +2,11 @@ import { Router } from 'express';
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { config } from '../config.js';
 import { generateEvent, generateNextBranch, concludeEvent } from '../services/eventGenerator.js';
+import { townStoryOrigins } from '../services/town/townInteractionRuntime.js';
+import {
+  parseTownNpcEventId, townNpcEventDto, townNpcEventHistoryDto,
+  generateTownNpcNextBranch, concludeTownNpcEvent,
+} from '../services/town/townNpcEventGenerator.js';
 import { matchAll } from '../services/characterSearch.js';
 import {
   addSSEClient,
@@ -62,11 +67,15 @@ router.get('/unread-count', (req, res) => {
   const lastSeenSQLite = toSQLite(lastSeen);
 
   // 未读 = 新创建的事件 + 已有事件但有新分支更新（last_interaction_at 在每次用户选择后更新）
+  // 镇民奇遇（town_npc_events）与角色奇遇合并计数
   const row = db.prepare(
     `SELECT COUNT(*) AS count FROM character_events WHERE status IN ('open','engaged') AND (created_at > ? OR (last_interaction_at IS NOT NULL AND last_interaction_at > ?))`
   ).get(lastSeenSQLite, lastSeenSQLite);
+  const npcRow = db.prepare(
+    `SELECT COUNT(*) AS count FROM town_npc_events WHERE status IN ('open','engaged') AND (created_at > ? OR (last_interaction_at IS NOT NULL AND last_interaction_at > ?))`
+  ).get(lastSeenSQLite, lastSeenSQLite);
 
-  res.json({ count: row ? row.count : 0 });
+  res.json({ count: (row ? row.count : 0) + npcRow.count });
 });
 
 // POST /api/events/mark-read — 标记已读
@@ -84,6 +93,7 @@ router.post('/mark-read', (req, res) => {
 // GET /api/events — 列出所有活跃事件 + 全部事件历史
 router.get('/', (req, res) => {
   const db = getDb();
+  const townOrigins = townStoryOrigins(db);
 
   const activeEvents = db.prepare(`
     SELECT ce.*, c.display_name, c.avatar_path
@@ -100,9 +110,27 @@ router.get('/', (req, res) => {
     ORDER BY eh.ended_at DESC
   `).all();
 
+  // 镇民奇遇与角色奇遇在同一个奇遇标签里展示（id 以 town: 前缀区分）
+  const activeNpcEvents = db.prepare(`
+    SELECT e.*, n.display_name
+    FROM town_npc_events e
+    JOIN town_npcs n ON n.id = e.npc_id
+    WHERE e.status IN ('open','engaged')
+    ORDER BY e.created_at DESC
+  `).all();
+  const npcHistory = db.prepare(`
+    SELECT h.*, n.display_name
+    FROM town_npc_event_history h
+    JOIN town_npcs n ON n.id = h.npc_id
+    ORDER BY h.ended_at DESC
+  `).all();
+  const formatNpcActive = (e) => ({ ...townNpcEventDto(e, e.display_name), town_origin: townOrigins.get(e.id) || null });
+  const formatNpcHistory = (e) => ({ ...townNpcEventHistoryDto(e), town_origin: townOrigins.get(e.id) || null });
+
   // 序列化
   const format = (e) => ({
     ...e,
+    town_origin: townOrigins.get(e.id) || null,
     choice_history: JSON.parse(e.choice_history || '[]'),
     created_at: toISO(e.created_at),
     expires_at: e.expires_at ? toISO(e.expires_at) : null,
@@ -111,8 +139,8 @@ router.get('/', (req, res) => {
   });
 
   res.json({
-    active: activeEvents.map(format),
-    history: history.map(format),
+    active: [...activeEvents.map(format), ...activeNpcEvents.map(formatNpcActive)],
+    history: [...history.map(format), ...npcHistory.map(formatNpcHistory)],
   });
 });
 
@@ -145,6 +173,18 @@ router.get('/active/:characterId', (req, res) => {
 router.get('/by-id/:id', (req, res) => {
   const db = getDb();
   const id = req.params.id;
+
+  // 镇民奇遇：活跃表优先，回退历史表
+  const townNpcId = parseTownNpcEventId(id);
+  if (townNpcId) {
+    let npcEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    if (!npcEvent) {
+      npcEvent = db.prepare(`SELECT *, final_image AS image FROM town_npc_event_history WHERE id = ?`).get(townNpcId);
+      if (npcEvent) return res.json(townNpcEventHistoryDto(npcEvent));
+    }
+    if (!npcEvent) return res.status(404).json({ error: 'event_not_found' });
+    return res.json(townNpcEventDto(npcEvent));
+  }
 
   // 先查活跃事件
   let event = db.prepare(`
@@ -184,6 +224,50 @@ router.get('/by-id/:id', (req, res) => {
 // POST /api/events/:id/choose — 选择选项 (A/B/C)
 router.post('/:id/choose', async (req, res) => {
   const db = getDb();
+
+  // 镇民奇遇分支（id 形如 town:12）：推进 town_npc_events
+  const townNpcId = parseTownNpcEventId(req.params.id);
+  if (townNpcId) {
+    const npcEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    if (!npcEvent) return res.status(404).json({ error: 'event_not_found' });
+    if (npcEvent.status !== 'open' && npcEvent.status !== 'engaged') {
+      return res.status(400).json({ error: 'event_not_active' });
+    }
+    if (npcEvent.processing === 1) {
+      return res.status(409).json({ error: 'event_processing', message: '上一个分支仍在推进中，请等待完成后再选择' });
+    }
+    const expiresAt = new Date(npcEvent.expires_at + 'Z');
+    if (new Date() >= expiresAt) {
+      return res.status(410).json({ error: 'event_expired' });
+    }
+    const { choice, customText } = req.body;
+    if (!choice || !['A', 'B', 'C'].includes(choice)) {
+      return res.status(400).json({ error: 'invalid_choice', message: 'choice must be "A", "B", or "C"' });
+    }
+    const npc = db.prepare(`SELECT * FROM town_npcs WHERE id = ?`).get(npcEvent.npc_id);
+    if (!npc) return res.status(404).json({ error: 'npc_not_found' });
+
+    const choiceLabel = choice === 'A' ? npcEvent.choice_a
+      : choice === 'B' ? npcEvent.choice_b
+      : (customText || '自由行动');
+
+    try {
+      const updatedEvent = await generateTownNpcNextBranch(npc, npcEvent, {
+        choice,
+        label: choiceLabel,
+        customText: choice === 'C' ? customText : '',
+      });
+      if (!updatedEvent) return res.json({ concluded: true });
+      return res.json({
+        concluded: false,
+        event: townNpcEventDto(updatedEvent),
+      });
+    } catch (err) {
+      console.error(`[events] town npc choose error:`, err.message);
+      return res.status(500).json({ error: 'internal_error', message: err.message });
+    }
+  }
+
   const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
 
   if (!event) {
@@ -271,6 +355,34 @@ router.post('/:id/choose', async (req, res) => {
 // POST /api/events/:id/dismiss — 取消事件（不互动直接关闭）
 router.post('/:id/dismiss', async (req, res) => {
   const db = getDb();
+
+  // 镇民奇遇分支：移入 town_npc_event_history，不生成结局
+  const townNpcId = parseTownNpcEventId(req.params.id);
+  if (townNpcId) {
+    const npcEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    if (!npcEvent) return res.status(404).json({ error: 'event_not_found' });
+    db.prepare(`
+      INSERT INTO town_npc_event_history (id, npc_id, event_type_key, title, description, final_image, summary, conclusion,
+        choice_history, total_branches, engaged, outcome, world_id, world_epoch, location_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'cancelled', ?, ?, ?, ?)
+    `).run(
+      npcEvent.id, npcEvent.npc_id, npcEvent.event_type_key,
+      npcEvent.title, npcEvent.description, npcEvent.image,
+      npcEvent.summary || npcEvent.description,
+      npcEvent.choice_history, npcEvent.current_branch || 0,
+      npcEvent.engaged, npcEvent.world_id, npcEvent.world_epoch, npcEvent.location_key, npcEvent.created_at,
+    );
+    db.prepare(`DELETE FROM town_npc_events WHERE id = ?`).run(townNpcId);
+    broadcastEventExpired({
+      event_id: req.params.id,
+      npc_event: true,
+      character_id: null,
+      event_title: npcEvent.title,
+      outcome: 'cancelled',
+    });
+    return res.json({ ok: true });
+  }
+
   const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
 
   if (!event) {
@@ -363,6 +475,16 @@ router.post('/generate', async (req, res) => {
 // DELETE /api/events/:id — 删除事件（活跃或历史均可）
 router.delete('/:id', (req, res) => {
   const db = getDb();
+  // 镇民奇遇分支：两张表都尝试删除
+  const townNpcId = parseTownNpcEventId(req.params.id);
+  if (townNpcId) {
+    const ne = db.prepare(`DELETE FROM town_npc_events WHERE id = ?`).run(townNpcId);
+    const nh = db.prepare(`DELETE FROM town_npc_event_history WHERE id = ?`).run(townNpcId);
+    if (ne.changes === 0 && nh.changes === 0) {
+      return res.status(404).json({ error: 'event_not_found' });
+    }
+    return res.json({ ok: true });
+  }
   // 尝试从活跃表删除
   const ce = db.prepare(`DELETE FROM character_events WHERE id = ?`).run(req.params.id);
   // 尝试从历史表删除
@@ -376,6 +498,43 @@ router.delete('/:id', (req, res) => {
 // POST /api/events/:id/undo — 撤回上一次分支选择，回到上一步
 router.post('/:id/undo', (req, res) => {
   const db = getDb();
+
+  // 镇民奇遇分支：与角色事件同一套撤回口径
+  const townNpcId = parseTownNpcEventId(req.params.id);
+  if (townNpcId) {
+    const npcEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    if (!npcEvent) return res.status(404).json({ error: 'event_not_found' });
+    if (npcEvent.status !== 'open' && npcEvent.status !== 'engaged') {
+      return res.status(400).json({ error: 'event_not_active' });
+    }
+    if (npcEvent.processing === 1) {
+      return res.status(409).json({ error: 'event_processing', message: '事件正在推进中，请等待完成后再撤回' });
+    }
+    const choiceHistory = JSON.parse(npcEvent.choice_history || '[]');
+    if (choiceHistory.length <= 1) {
+      return res.status(400).json({ error: 'cannot_undo', message: '已经是初始状态，无法继续撤回' });
+    }
+    const popped = choiceHistory.pop();
+    const newLast = choiceHistory[choiceHistory.length - 1];
+    db.prepare(`
+      UPDATE town_npc_events SET
+        description = ?, image = ?, prompt = ?,
+        choice_a = ?, choice_b = ?, choice_c_label = ?,
+        current_branch = ?, choice_history = ?,
+        processing = 0, last_interaction_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      newLast.summary || npcEvent.description, newLast.image || null, popped.prev_prompt || npcEvent.prompt || '',
+      popped.prev_choice_a || npcEvent.choice_a, popped.prev_choice_b || npcEvent.choice_b,
+      popped.prev_choice_c_label || npcEvent.choice_c_label || '自由行动',
+      Math.max(0, npcEvent.current_branch - 1), JSON.stringify(choiceHistory),
+      townNpcId,
+    );
+    const updatedEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    broadcastEventUpdate(townNpcEventDto(updatedEvent));
+    return res.json({ event: townNpcEventDto(updatedEvent) });
+  }
+
   const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
 
   if (!event) {
@@ -461,6 +620,23 @@ router.post('/:id/undo', (req, res) => {
 // POST /api/events/:id/conclude — 前端倒计时归零时主动触发结局生成（必须在 /generate 之后避免 id 捕获 "generate"）
 router.post('/:id/conclude', async (req, res) => {
   const db = getDb();
+
+  // 镇民奇遇分支
+  const townNpcId = parseTownNpcEventId(req.params.id);
+  if (townNpcId) {
+    const npcEvent = db.prepare(`SELECT * FROM town_npc_events WHERE id = ?`).get(townNpcId);
+    if (!npcEvent) return res.status(404).json({ error: 'event_not_found' });
+    const npc = db.prepare(`SELECT * FROM town_npcs WHERE id = ?`).get(npcEvent.npc_id);
+    if (!npc) return res.status(404).json({ error: 'npc_not_found' });
+    try {
+      await concludeTownNpcEvent(npc, npcEvent, npcEvent.engaged ? 'completed' : 'expired');
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error(`[events] town npc conclude error:`, err.message);
+      return res.status(500).json({ error: 'internal_error', message: err.message });
+    }
+  }
+
   const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(req.params.id);
 
   if (!event) {

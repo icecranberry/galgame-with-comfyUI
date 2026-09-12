@@ -12,6 +12,9 @@
  */
 import { getDb } from '../../db/index.js';
 import { broadcastTownMapUpdated } from './townBus.js';
+import { reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
+import { townBuildingKind } from './townResponsibilityDefinitions.js';
+import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
 
 /** 对象占用的阻挡格：建筑 = footprint 全格 - 门前格；道具 = blocking 锚点，或有 footprintKind 时按全 footprint */
 export function getObjectBlockingCells(obj, assetMeta, assetKind = assetMeta?.kind) {
@@ -150,6 +153,8 @@ export function getMapPayload() {
       id: l.id, key: l.key, name: l.name,
       aliases: (() => { try { return JSON.parse(l.aliases_json || '[]'); } catch { return []; } })(),
       kind: l.kind, x: l.grid_x, y: l.grid_y, radius: l.radius, ambient: l.ambient || '',
+      businessKind: l.business_kind || 'none',
+      capabilities: townCapabilities(l, defaultTownCapabilities(l.business_kind)),
       objectId: l.object_id ?? null,
     }));
   const assets = getLayersAssets(row.layers);
@@ -176,7 +181,7 @@ export function getMapPayload() {
  * key 是不可变身份：同 key 原位更新并保留 id；传入 id 时必须与该 key 匹配。
  * 地图、POI 与删除地点的住宅引用在同一事务提交，成功后才广播。
  */
-export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingId = null, locations = null }) {
+export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingId = null, locations = null, assignResponsibilities = true }) {
   const db = getDb();
   if (locations !== null && !Array.isArray(locations)) throw new Error('locations 必须为数组或 null');
   const keys = new Set();
@@ -223,7 +228,7 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
     }
 
     if (Array.isArray(locations)) {
-      const oldLocations = db.prepare('SELECT id, key FROM town_locations WHERE map_id = ?').all(mapId);
+      const oldLocations = db.prepare('SELECT id, key, business_kind, capabilities_json FROM town_locations WHERE map_id = ?').all(mapId);
       const oldByKey = new Map(oldLocations.map(loc => [loc.key, loc]));
       const insLoc = db.prepare(`
         INSERT INTO town_locations (map_id, key, name, aliases_json, kind, grid_x, grid_y, radius, ambient, object_id)
@@ -242,6 +247,11 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
           loc.x ?? 0, loc.y ?? 0, loc.radius ?? 2, loc.ambient || '', loc.objectId ?? null];
         if (old) updLoc.run(...values, old.id, mapId);
         else insLoc.run(mapId, loc.key, ...values);
+        const businessKind = loc.businessKind ?? old?.business_kind;
+        if (businessKind != null) db.prepare('UPDATE town_locations SET business_kind=? WHERE map_id=? AND key=?')
+          .run(townBuildingKind({ businessKind }), mapId, loc.key);
+        const capabilities = townCapabilities({ ...old, ...loc }, defaultTownCapabilities(townBuildingKind(loc)));
+        db.prepare('UPDATE town_locations SET capabilities_json=? WHERE map_id=? AND key=?').run(JSON.stringify(capabilities), mapId, loc.key);
       }
       for (const old of oldLocations) {
         if (keys.has(old.key)) continue;
@@ -252,7 +262,8 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
         db.prepare('DELETE FROM town_locations WHERE id = ? AND map_id = ?').run(old.id, mapId);
       }
     }
-    return { ok: true, mapId, version, layers };
+    if (assignResponsibilities) reconcileTownResponsibilities({ db });
+    return { ok: true, mapId, version: db.prepare('SELECT version FROM town_maps WHERE id=?').get(mapId).version, layers };
   })();
   broadcastTownMapUpdated({ mapId: result.mapId, version: result.version });
   return result;

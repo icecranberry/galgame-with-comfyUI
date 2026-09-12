@@ -187,7 +187,7 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
   initialOpen: { type: Boolean, default: false },
 })
-const emit = defineEmits(['updated'])
+const emit = defineEmits(['updated', 'closed'])
 const store = useEventsStore()
 
 const detailOpen = ref(false)
@@ -306,6 +306,7 @@ function openDetail() {
 }
 function closeDetail() {
   detailOpen.value = false
+  emit('closed')
   choosing.value = false // 关闭详情时重置选择状态
 }
 

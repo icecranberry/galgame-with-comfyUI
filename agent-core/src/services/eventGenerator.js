@@ -596,7 +596,13 @@ ${directorPrompt}`
   }];
   const expiresAt = new Date(now.getTime() + eventType.durationMin * 60 * 1000).toISOString();
 
-  const insertResult = db.prepare(`
+  // 生成期间可能有另一个入口先完成；写入与镇上邀请的关联在同一事务内提交。
+  const eventId = db.transaction(() => {
+    options.beforePersist?.();
+    if (db.prepare("SELECT 1 FROM character_events WHERE character_id=? AND status IN ('pending','open','engaged') LIMIT 1").get(character.id)) {
+      throw new Error('ALREADY_ACTIVE_EVENT');
+    }
+    const insertResult = db.prepare(`
     INSERT INTO character_events (character_id, event_type_key, status, title, description, image, prompt, style, resolution, choice_a, choice_b, choice_c_label, current_branch, max_branches, choice_history, expires_at)
     VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
   `).run(
@@ -614,7 +620,10 @@ ${directorPrompt}`
     JSON.stringify(initialChoiceEntry),
     toSQLite(expiresAt)
   );
-  const eventId = insertResult.lastInsertRowid;
+    const id = Number(insertResult.lastInsertRowid);
+    options.afterPersist?.(id);
+    return id;
+  }).immediate();
 
   // 7. 构建返回数据
   const event = db.prepare(`SELECT * FROM character_events WHERE id = ?`).get(eventId);
@@ -871,9 +880,10 @@ ${directorPrompt2}${prevSceneBlock}`
       rawBranchResult = await chatSync(msgs, { temperature: 0.7, max_tokens: 4096, response_format: { type: 'json_object' }, label: '事件分支' });
       const jsonStr = extractFirstJson(rawBranchResult);
       if (!jsonStr) throw new Error('No JSON found in LLM response');
-      branchData = JSON.parse(repairJson(jsonStr));
-      const branchPromptText = branchData.prompt || branchData.imagePrompt;
-      if (!branchData.description || !branchData.choiceA || !branchData.choiceB) throw new Error('Incomplete branch data');
+      const parsed = JSON.parse(repairJson(jsonStr));
+      const branchPromptText = parsed.prompt || parsed.imagePrompt;
+      if (!parsed.description || !parsed.choiceA || !parsed.choiceB) throw new Error('Incomplete branch data');
+      branchData = parsed;
       branchData.prompt = branchPromptText || event.prompt;
       break;
     } catch (err) {
@@ -1199,7 +1209,7 @@ function toSQLite(iso) {
 }
 
 // 修复 LLM 输出的非法 JSON 转义（image_prompt 规则中的 \( \) 等不是合法 JSON 转义）
-function repairJson(text) {
+export function repairJson(text) {
   return text.replace(/\\([^"\\\/bfnrtu])/g, '$1');
 }
 
@@ -1213,7 +1223,7 @@ function conclusionHasFirstPerson(text) {
 }
 
 // 从 LLM 原始输出中提取第一个完整 JSON 对象（括号计数，防 LLM 输出多段 JSON 拼在一起）
-function extractFirstJson(text) {
+export function extractFirstJson(text) {
   const start = text.indexOf('{');
   if (start === -1) return null;
   let depth = 0, inString = false, escaped = false;

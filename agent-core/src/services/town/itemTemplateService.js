@@ -84,7 +84,7 @@ export function createItemTemplateService({db,clock,getWorldEpoch,getActor,effec
   /** 功能建筑的本地产出模板（不调用模型）：只发布注册表声明过的商品。 */
   function ensureVenueTemplates(input,products) {
     if(!Array.isArray(products))throw townError('INVALID_TEMPLATE');
-    return db.transaction(()=>products.map(product=>publishTemplate({...input,templateId:product.templateId,
+    return db.transaction(()=>products.map(product=>product.templateId==='town.bob_cut' ? ensureBobCutTemplate(input) : publishTemplate({...input,templateId:product.templateId,
       version:product.templateVersion,effectKey:product.effectKey,name:product.name,description:product.description,
       tradable:true}))).immediate();
   }

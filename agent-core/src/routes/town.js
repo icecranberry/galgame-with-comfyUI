@@ -4,6 +4,8 @@
  * 运行时   GET  /api/town/state                     — 全量快照（地图版本/居民/玩家/天气/相遇）
  *          POST /api/town/player/move               — 点击寻路 {x, y}
  *          POST /api/town/player/dir                — WASD 单步 {dx, dy}
+ *          POST /api/town/actors/:id/hold           — 对话驻留：让居民停走在原地（租约制）
+ *          POST /api/town/actors/:id/release        — 解除对话驻留
  *          GET  /api/town/encounters/:id/messages   — 相遇对话记录
  *          POST /api/town/tick                      — 调试：手动触发一拍
  * 素材库   GET/POST /api/town/assets、POST :id/regenerate、POST :id/upload（手动上传图片替换）、DELETE :id、POST /batch
@@ -23,6 +25,7 @@ import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
   setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
   generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld,
+  holdTownActor, releaseTownActor,
 } from '../services/town/townService.js';
 import {
   listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, importAssetImage, getAssetById, cropAssetImage, cropTileAssetImage, refineAssetWithHires,
@@ -30,13 +33,8 @@ import {
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
 import { getMapPayload, saveMap } from '../services/town/townMapService.js';
-import { getTownWallet, getTownActorActivities, getTownEconomyState, setupTownEconomy, executeTownOrder, maintainTownOrders, executeTownService, getTownService,
-  getTownQuests, executeTownQuest } from '../services/town/townEconomyRuntime.js';
-import { getTownAppointments, executeTownAppointment } from '../services/town/townEconomyRuntime.js';
-import { getTownDeliveryDiagnostics, retryTownDelivery } from '../services/town/townEconomyRuntime.js';
-import { getTownLiquidityStatus } from '../services/town/townEconomyRuntime.js';
-import { getTownMailboxTaskCards } from '../services/town/townEconomyRuntime.js';
-import { offerTownQuestForNpc, offerTownQuestForCharacter, getTownNpcFunctions, receiveTownNpcGift, getTownNpcTrade, executeTownNpcTrade } from '../services/town/townEconomyRuntime.js';
+import { getTownWallet, getTownNpcFunctions, receiveTownNpcGift } from '../services/town/townEconomyRuntime.js';
+import { getTownInteractions, offerTownInteraction, respondTownInteraction, getTownTargetTrade, executeTownTargetTrade } from '../services/town/townInteractionRuntime.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
@@ -88,6 +86,19 @@ router.post('/player/dir', (req, res) => {
   const result = movePlayerDir(parseInt(dx, 10) || 0, parseInt(dy, 10) || 0);
   if (!result.ok) return res.status(400).json({ error: result.error });
   res.json(result);
+});
+
+// 对话驻留：打开对话框让对方停走（租约制，客户端续租/关闭释放，失联自动过期恢复）
+router.post('/actors/:id/hold', (req, res) => {
+  if (!checkMovementScope(req.body || {}, res)) return;
+  const result = holdTownActor(req.params.id);
+  if (!result.ok) return res.status(404).json({ error: result.error });
+  res.json(result);
+});
+
+router.post('/actors/:id/release', (req, res) => {
+  if (!checkMovementScope(req.body || {}, res)) return;
+  res.json(releaseTownActor(req.params.id));
 });
 
 router.get('/encounters/:id/messages', (req, res) => {
@@ -145,68 +156,20 @@ router.get('/wallet', (req, res) => {
 });
 
 const townCommandMessages = {
-  LIQUIDITY_ACTIVATION_RESERVE_REQUIRED: '公共基金至少需要 60 邻币可用准备金，暂不能开启保障',
-  LIQUIDITY_RESERVE_REQUIRED: '公共基金准备金不足，暂不能发布新的委托',
-  LIQUIDITY_CLOCK_ROLLBACK: '系统时间回拨，基金保障暂时暂停',
-  LIQUIDITY_COOLDOWN: '公共基金补助尚在冷却，请稍后再来',
-  LIQUIDITY_CAP: '公共基金补助已达到本期或本镇额度上限',
-  LIQUIDITY_CIRCULATION_CAP: '小镇流通邻币已达到保障政策上限',
-  SCHEDULE_UNAVAILABLE: '这段时间与原日程冲突，请选择其他时间',
-  APPOINTMENT_CONFLICT: '这段时间已有预约，请选择其他时间',
-  INVALID_APPOINTMENT_TIME: '请选择有效期内的未来时间，并预留完整的三十分钟',
-  PROVIDER_NOT_LINKED: '这位居民尚未成为入住角色，暂时不能预约回访',
-  CANDIDATE_NOT_FOUND: '回访邀请不存在，请重新读取',
-  CANDIDATE_EXPIRED: '这份回访邀请已过期',
-  CANDIDATE_CLOSED: '这份回访邀请已处理，请重新读取',
-  APPOINTMENT_NOT_FOUND: '预约不存在，请重新读取',
-  APPOINTMENT_CLOSED: '这次预约已结束，请重新读取',
-  APPOINTMENT_NOT_OWNED: '这次预约不属于当前玩家',
-  SERVICE_NOT_OPEN: '这家店目前未营业，请稍后再来',
-  SERVICE_LOCKED: '这家店完成一次真实备料后，才能提供这项服务',
-  INVALID_SERVICE_KEY: '请选择当前提供的服务',
-  INVALID_SERVICE_DEFINITION: '这份服务记录暂时无法确认，请重新读取服务状态',
-  SERVICE_ACTOR_BUSY: '居民正在忙于其他事情，请稍后再来',
-  SESSION_NOT_OWNED: '这次服务不属于当前玩家，请重新读取',
-  SESSION_NOT_FOUND: '服务记录不存在，请重新读取',
-  SESSION_STATE_CONFLICT: '服务状态已变化，请重新读取',
-  INVALID_SERVICE_INTENT: '当前阶段已变化，请重新选择',
-  INVALID_SERVICE_INPUT: '服务输入无效，请检查后重试',
-  VENUE_NOT_CONFIGURED: '这家店还没有配置经营者或地点',
-  ITEM_TEMPLATES_REQUIRED: '这家店的商品模板尚未就绪，请稍后再来',
-  SERVICE_GRANT_INVALID: '商品发放未完成，已改为原路退回',
-  SESSION_BUSY: '服务正在处理中，请稍后重新读取',
-  SESSION_CLOSED: '这次服务已结束，请查看结算记录',
-  OFFER_EXPIRED: '这份报价已过期，请重新查看',
-  NOT_ARRIVED: '请走到委托要求的地点，停下后再试',
+  STORY_GENERATION_FAILED: '这段奇遇暂时没能展开，稍后再问一次就好。',
+  NOT_ARRIVED: '请先走到目标地点，停下后再试',
   INSUFFICIENT_FUNDS: '可用邻币不足，暂时无法完成这项操作',
   INSUFFICIENT_STOCK: '原料暂时不足，请稍后再来',
-  ORDER_EXPIRED: '这份委托已到期，请刷新查看',
   VERSION_CONFLICT: '状态已变化，请刷新后重试',
   IDEMPOTENCY_CONFLICT: '这次请求内容已变化，请刷新后重试',
   SOURCE_CONFLICT: '这项操作已有记录，请刷新查看',
-  SLICE_NOT_CONFIGURED: '请先选择经营者与地点',
-  SLICE_CONFLICT: '当前小镇已配置委托地点，重建后才能重新选择',
   ACTOR_UNAVAILABLE: '居民目前不在镇上，请重新选择',
   LOCATION_UNAVAILABLE: '地点已变化，请刷新后重试',
-  INVALID_SLICE: '请选择互不相同的居民和地点',
-  QUEST_NOT_FOUND: '这份奇遇不存在，请重新读取',
-  QUEST_NOT_OWNED: '这份奇遇不属于当前玩家，请重新读取',
-  QUEST_STATE_CONFLICT: '奇遇状态已变化，请重新读取',
-  QUEST_ACTIVE_LIMIT: '已经有进行中的奇遇了，先完成它再说',
-  QUEST_POOL_LIMIT: '镇上的奇遇已经够多了，稍后再来看',
-  NO_QUEST_AVAILABLE: '现在没有合适的奇遇，稍后再来问问',
-  INVALID_QUEST_TRIGGER: '这份奇遇的来路不对，请重新读取',
-  INVALID_QUEST_TEMPLATE: '这份奇遇的定义暂时无法确认，请重新读取',
-  QUEST_REWARD_MISSING: '赏钱托管记录丢失，任务暂时无法结算',
-  QUEST_REWARD_UNAVAILABLE: '赏钱托管出了问题，已停止结算，请稍后再试',
-  QUESTS_DISABLED: '奇遇任务暂未开启',
-  ECONOMY_DISABLED: '小镇经济暂未开启，先去设置里开张吧',
   NPC_NOT_FOUND: '这位居民不存在，请重新读取',
   NOT_A_GIFT_GIVER: '这位邻居没有随身带礼物的习惯',
   GIFT_COOLDOWN: '这位邻居今天已经送过东西了，改天再来',
   NOT_A_TRADER: '这位邻居不做买卖',
   INVALID_TRADE_ITEM: '这里不做这件物品的生意',
-  INVALID_TRADE_DIRECTION: '交易方向无效，请重新读取',
   ITEM_NOT_FOUND: '背包里找不到这件物品，请重新读取',
   ITEM_NOT_TRADABLE: '这件物品不能交易',
   ITEM_LOCKED: '这件物品正被占用，稍后再试',
@@ -218,101 +181,6 @@ function sendTownCommandError(res, err) {
   res.status(err.status || (err.code ? 409 : 500)).json({ error: message, code: err.code });
 }
 
-router.get('/economy', (req, res) => {
-  try { maintainTownOrders(); res.json(getTownEconomyState()); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/liquidity', (req, res) => {
-  try { res.json(getTownLiquidityStatus()); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/mailbox-tasks', (req, res) => {
-  let cursor = null;
-  if (req.query.cursor != null) {
-    try { cursor = JSON.parse(req.query.cursor); }
-    catch { return res.status(400).json({ error: '分页位置无效，请重新读取委托。', code: 'INVALID_PAGE' }); }
-  }
-  try { res.json(getTownMailboxTaskCards({ cursor, limit: req.query.limit == null ? 10 : Number(req.query.limit) })); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/appointments', (req, res) => {
-  try { res.json(getTownAppointments()); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/deliveries', (req, res) => {
-  try {
-    const cursor = req.query.cursorSeq == null && req.query.cursorConsumer == null ? null
-      : { seq: Number(req.query.cursorSeq), consumerKey: req.query.cursorConsumer };
-    res.json(getTownDeliveryDiagnostics({ cursor, limit: req.query.limit == null ? 20 : Number(req.query.limit) }));
-  } catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/deliveries/retry', (req, res) => {
-  try { res.json(retryTownDelivery(req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/appointments/candidates/:id/accept', (req, res) => {
-  try { res.json(executeTownAppointment('accept', req.params.id, req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/appointments/:id/cancel', (req, res) => {
-  try { res.json(executeTownAppointment('cancel', req.params.id, req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/economy/setup', (req, res) => {
-  try { res.json(setupTownEconomy(req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/orders', (req, res) => {
-  try { maintainTownOrders(); res.json({ orders: getTownEconomyState().orders }); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/orders/publish', (req, res) => {
-  try { res.json(executeTownOrder('publish', null, req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-for (const command of ['accept', 'pickup', 'complete', 'cancel']) {
-  router.post(`/orders/:id/${command}`, (req, res) => {
-    try { res.json(executeTownOrder(command, req.params.id, req.body || {})); }
-    catch (err) { sendTownCommandError(res, err); }
-  });
-}
-
-router.post('/services/offer', async (req, res) => {
-  try { res.json(await executeTownService('offer', null, req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-
-// ── 奇遇任务 ──
-
-router.get('/quests', (req, res) => {
-  try { res.json(getTownQuests()); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-for (const command of ['accept', 'abandon', 'progress']) {
-  router.post(`/quests/:id/${command}`, (req, res) => {
-    try { res.json(executeTownQuest(command, req.params.id, req.body || {})); }
-    catch (err) { sendTownCommandError(res, err); }
-  });
-}
-router.get('/services/:id', (req, res) => {
-  try { res.json(getTownService(req.params.id)); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-for (const command of ['accept', 'turn', 'cancel']) {
-  router.post(`/services/:id/${command}`, async (req, res) => {
-    try { res.json(await executeTownService(command, req.params.id, req.body || {})); }
-    catch (err) { sendTownCommandError(res, err); }
-  });
-}
-
-router.get('/actors/:id/activities', (req, res) => {
-  try {
-    res.json(getTownActorActivities(req.params.id, {
-      cursor: req.query.cursor === undefined ? 0 : Number(req.query.cursor),
-      limit: req.query.limit === undefined ? 20 : Number(req.query.limit),
-    }));
-  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
-});
 router.post('/assets/:id/regenerate-prompt', async (req, res) => {
   try {
     const asset = getAssetById(parseInt(req.params.id, 10));
@@ -618,18 +486,28 @@ router.get('/npcs/:id/messages', (req, res) => {
   res.json({ messages: getNpcChatHistory(parseInt(req.params.id, 10)) });
 });
 
-// 问邻居有没有能帮上忙的事：同场才能问，服务端决定是否真的有奇遇可给
-router.post('/npcs/:id/quest-offer', (req, res) => {
-  try { res.json({ questOffer: offerTownQuestForNpc(parseInt(req.params.id, 10), req.body || {}) }); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-// 入住角色侧的同款入口：经 town_npcs.character_id 反查镇上档案
-router.post('/characters/:id/quest-offer', (req, res) => {
-  try { res.json({ questOffer: offerTownQuestForCharacter(parseInt(req.params.id, 10), req.body || {}) }); }
-  catch (err) { sendTownCommandError(res, err); }
-});
+// ── NPC 功能点（送东西 / 做买卖） ──
 
-// ── NPC 功能点（给任务 / 送东西 / 做买卖） ──
+for (const [path, prefix] of [['npcs', 'npc'], ['characters', 'char'], ['locations', 'location']]) {
+  const target = req => `${prefix}:${prefix === 'location' ? req.params.id : Number(req.params.id)}`;
+  router.get(`/${path}/:id/interactions`, (req, res) => {
+    try { res.json(getTownInteractions(target(req))); } catch (error) { sendTownCommandError(res, error); }
+  });
+  router.post(`/${path}/:id/interactions`, (req, res) => {
+    try { res.json(offerTownInteraction(target(req), req.body?.key, req.body || {})); }
+    catch (error) { sendTownCommandError(res, error); }
+  });
+  router.post(`/${path}/:id/interactions/:requestId`, async (req, res) => {
+    try { res.json(await respondTownInteraction(target(req), req.params.requestId, req.body?.decision, req.body || {})); }
+    catch (error) { sendTownCommandError(res, error); }
+  });
+  router.get(`/${path}/:id/trade`, (req, res) => {
+    try { res.json(getTownTargetTrade(target(req))); } catch (error) { sendTownCommandError(res, error); }
+  });
+  router.post(`/${path}/:id/trade`, (req, res) => {
+    try { res.json(executeTownTargetTrade(target(req), req.body || {})); } catch (error) { sendTownCommandError(res, error); }
+  });
+}
 
 router.get('/npcs/:id/functions', (req, res) => {
   try { res.json(getTownNpcFunctions(parseInt(req.params.id, 10))); }
@@ -637,14 +515,6 @@ router.get('/npcs/:id/functions', (req, res) => {
 });
 router.post('/npcs/:id/gift', (req, res) => {
   try { res.json(receiveTownNpcGift(parseInt(req.params.id, 10), req.body || {})); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.get('/npcs/:id/trade', (req, res) => {
-  try { res.json(getTownNpcTrade(parseInt(req.params.id, 10))); }
-  catch (err) { sendTownCommandError(res, err); }
-});
-router.post('/npcs/:id/trade', (req, res) => {
-  try { res.json(executeTownNpcTrade(parseInt(req.params.id, 10), req.body || {})); }
   catch (err) { sendTownCommandError(res, err); }
 });
 

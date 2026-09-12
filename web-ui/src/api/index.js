@@ -1597,18 +1597,20 @@ export function moveTownPlayerDir(dx, dy, { worldId, worldEpoch } = {}) {
   return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy, worldId, worldEpoch }))
 }
 
+// 对话驻留：打开对话框时让对方停走（服务端租约制，开窗续租、关闭释放、失联自动过期）
+export function holdTownActor(actorId, { worldId, worldEpoch } = {}) {
+  return jsonRequest(`${BASE}/town/actors/${encodeURIComponent(actorId)}/hold`, townJson('POST', { worldId, worldEpoch }))
+}
+
+export function releaseTownActor(actorId, { worldId, worldEpoch } = {}) {
+  return jsonRequest(`${BASE}/town/actors/${encodeURIComponent(actorId)}/release`, townJson('POST', { worldId, worldEpoch }))
+}
+
 
 export function regenerateTownPlayerPortrait(overrides = {}) {
   return jsonRequest(`${BASE}/town/player/portrait`, townJson('POST', overrides))
 }
 
-export { getTownEconomy, getTownLiquidity, getTownServiceSession, createTownLifeCommand, executeTownLifeCommand,
-  getPendingTownLifeCommand, savePendingTownLifeCommand, fetchTownQuests,
-  fetchTownNpcFunctions, fetchTownNpcTrade, askTownNpcQuestOffer, askTownCharacterQuestOffer, receiveTownNpcGift, tradeWithTownNpc } from './townLife.js'
-export { getTownActorActivities } from './townActivity.js'
-export { getTownMailboxTasks } from './townMailboxTasks.js'
-export { getTownAppointments, parseTownAppointmentBeijingTime, createTownAppointmentCommand,
-  executeTownAppointmentCommand, loadPendingTownAppointment, savePendingTownAppointment } from './townAppointments.js'
-export { getTownDeliveries, createTownDeliveryRetry, executeTownDeliveryRetry,
-  savePendingTownDeliveryRetry, loadPendingTownDeliveryRetry } from './townDeliveries.js'
-export { getTownScheduleOverlays, formatTownScheduleTime } from './townSchedule.js'
+export { getTownWallet, executeTownLifeCommand, createTownTargetTradeCommand,
+  fetchTownInteractions, offerTownInteraction, respondTownInteraction,
+  fetchTownNpcFunctions, receiveTownNpcGift } from './townLife.js'

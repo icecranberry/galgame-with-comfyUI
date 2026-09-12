@@ -350,15 +350,18 @@ export const useEventsStore = defineStore('events', () => {
         _bumpUnreadLocal()
       }),
       onEvent('event_concluded', (data) => {
+        // 镇民奇遇（town: 前缀）带 event_id，按 id 精确匹配；角色事件沿用 character_id+title 口径
         activeEvents.value = activeEvents.value.filter(e =>
-          !(e.character_id === data.character_id && e.title === data.event_title)
+          data.event_id ? String(e.id) !== String(data.event_id)
+            : !(e.character_id === data.character_id && e.title === data.event_title)
         )
         _bumpUnreadLocal()
         if (isViewingEvents.value) loadEvents()
       }),
       onEvent('event_expired', (data) => {
         activeEvents.value = activeEvents.value.filter(e =>
-          !(e.character_id === data.character_id && e.title === data.event_title)
+          data.event_id ? String(e.id) !== String(data.event_id)
+            : !(e.character_id === data.character_id && e.title === data.event_title)
         )
         _bumpUnreadLocal()
       }),
