@@ -477,6 +477,17 @@ export class Hd2dTownRenderer {
     const rain = /雨|阴|雪/.test(weather?.text || '')
     const look = daylightLook(hour, rain)
     const glow = look.glow
+    const exposure = 1.25 - .13 * glow
+    for (const card of cards) {
+      const daylight = card.material?.userData.townDaylight
+      if (daylight) daylight.value = look.daylight
+      const spriteExposure = card.material?.userData.townExposure
+      if (spriteExposure) {
+        spriteExposure.value = exposure
+        // An 8-bit HDR fallback cannot hold inverse-mapped highlights above 1.
+        card.material.userData.townSpriteWhite.value = this.composer.renderTarget1.texture.type === T.HalfFloatType ? .95 : .8
+      }
+    }
     for (const building of this.objects.values()) if (building.userData.volume) setBuildingVolumeNight(building, glow)
     const target = this.cameraState ? isoToGround(this.cameraState.x, this.cameraState.y) : { x: 8, z: 8 }
     // Shadow texels follow the visible streets instead of spreading over the entire map.
@@ -487,7 +498,7 @@ export class Hd2dTownRenderer {
     this.fill.intensity = look.ambient; this.fill.color.set(look.sky)
     this.fill.groundColor.set(look.fillGround)
     // A slightly cooler exposure deepens the night without clipping the day.
-    this.renderer.toneMappingExposure = 1.25 - .13 * glow
+    this.renderer.toneMappingExposure = exposure
     // Project each prop's alpha silhouette directly onto the receiving ground.
     // This avoids shadow-map depth bias opening a gap at a small object's foot.
     for (const mesh of this.objects.values()) {
@@ -514,6 +525,8 @@ export class Hd2dTownRenderer {
     const depths = focusPoints.map(p => -new T.Vector3(p.x, p.y || 0, p.z).applyMatrix4(this.camera.matrixWorldInverse).z)
     this.tiltPass.setFocus(Math.min(focal, ...depths), Math.max(focal, ...depths), this.camera.near, this.camera.far)
     this.tiltPass.defocus = this.tilt && this.quality !== 'low'
+    // Daytime artwork is display color, not a source of emissive bloom.
+    this.tiltPass.bloom = 1 - look.daylight
     // Animate the light rig: lamp pools/halos flicker gently, doorway pools stay
     // steady; both follow the dusk→night glow and interaction occlusion fades.
     const now = performance.now() / 1000

@@ -9,6 +9,7 @@ export class TiltShiftPass extends Pass {
   constructor() {
     super()
     this.defocus = true
+    this.bloom = 1
     this.horizontal = new WebGLRenderTarget(1, 1, { depthBuffer: false })
     this.vertical = this.horizontal.clone()
     this.blur = new ShaderMaterial({
@@ -22,9 +23,9 @@ export class TiltShiftPass extends Pass {
       depthTest: false, depthWrite: false,
     })
     this.composite = new ShaderMaterial({
-      uniforms: { sharp: { value: null }, blurred: { value: this.vertical.texture }, sceneDepth: { value: null }, focusRange: { value: new Vector2(155, 155) }, clipping: { value: new Vector2(.1, 1000) }, defocus: { value: 1 } }, vertexShader,
+      uniforms: { sharp: { value: null }, blurred: { value: this.vertical.texture }, sceneDepth: { value: null }, focusRange: { value: new Vector2(155, 155) }, clipping: { value: new Vector2(.1, 1000) }, defocus: { value: 1 }, bloom: { value: 1 } }, vertexShader,
       fragmentShader: `uniform sampler2D sharp;uniform sampler2D blurred;uniform sampler2D sceneDepth;
-        uniform vec2 focusRange;uniform vec2 clipping;uniform float defocus;varying vec2 vUv;
+        uniform vec2 focusRange;uniform vec2 clipping;uniform float defocus;uniform float bloom;varying vec2 vUv;
         void main(){
           float depth=mix(clipping.x,clipping.y,texture2D(sceneDepth,vUv).x);
           float farBlur=smoothstep(3.,12.,depth-focusRange.y);
@@ -33,7 +34,7 @@ export class TiltShiftPass extends Pass {
           vec3 crisp=texture2D(sharp,vUv).rgb, soft=texture2D(blurred,vUv).rgb;
           vec3 color=mix(crisp,soft,amount);
           // Restrained highlight bloom in linear HDR, before the one output transform.
-          color+=max(soft-vec3(1.05),vec3(0.))*0.16*defocus;
+          color+=max(soft-vec3(1.05),vec3(0.))*0.16*defocus*bloom;
           float luma=dot(color,vec3(.2126,.7152,.0722));
           color=mix(vec3(luma),color,1.0);
           color*=mix(vec3(.98,1.01,1.035),vec3(1.025,1.015,.99),smoothstep(.06,.8,luma));
@@ -67,6 +68,7 @@ export class TiltShiftPass extends Pass {
     this.composite.uniforms.sharp.value = readBuffer.texture
     this.composite.uniforms.sceneDepth.value = readBuffer.depthTexture
     this.composite.uniforms.defocus.value = this.defocus ? 1 : 0
+    this.composite.uniforms.bloom.value = this.bloom
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer); this.quad.render(renderer)
   }
   dispose() {

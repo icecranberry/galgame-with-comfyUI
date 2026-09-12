@@ -1,5 +1,6 @@
 import * as T from 'three'
 import { withTownOcclusionFade } from './interactionOcclusion.js'
+import { authoredSpriteColorShader } from './authoredSpriteColor.js'
 
 const smooth = t => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t) }
 
@@ -21,6 +22,8 @@ export function daylightLook(hour = 12, rainy = false) {
   const dusk = !night && (hour >= 17 || hour < 8)
   return {
     night, glow: nightGlowFactor(hour, rainy),
+    // Overcast may light lamps during the day, but must not dim painted cards.
+    daylight: 1 - nightGlowFactor(hour),
     sun: night ? 1.55 : rainy ? 2.0 : 3.8,
     ambient: night ? .22 : rainy ? 1.05 : .9,
     color: night ? '#9db9f0' : dusk ? '#ffba73' : '#fff5df',
@@ -34,6 +37,12 @@ export function daylightLook(hour = 12, rainy = false) {
 
 export function townMaterial(kind, options = {}) {
   const material = new T.MeshLambertMaterial(options)
+  const paintedCard = kind === 'agent' || kind === 'building'
+  if (paintedCard) material.userData.townDaylight = { value: 1 }
+  if (kind === 'agent') {
+    material.userData.townExposure = { value: 1.25 }
+    material.userData.townSpriteWhite = { value: .95 }
+  }
   if (kind === 'lamp') material.userData.townGlow = { value: 0 }
   material.onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTownWorld; varying vec2 vTownUv;')
@@ -50,12 +59,32 @@ export function townMaterial(kind, options = {}) {
         float variation = .98 + .04*sin(vTownWorld.x*.63+sin(vTownWorld.z*.49)) + .025*sin(vTownWorld.z*1.8+vTownWorld.x*.31);
         diffuseColor.rgb = mix(vec3(townLuma), diffuseColor.rgb, .94) * variation;`)
     } else {
-      // Authored legacy cards already contain painted shading. Preserve that detail
-      // under backlight, with a modest roof lift and darker wall roots.
+      // Preserve the existing night shading. Buildings receive a neutral daylight
+      // fill; character daylight is calibrated to the authored display color below.
       shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += diffuseColor.rgb * ${kind === 'building' ? '(.22 + .07*smoothstep(.52,.86,vTownUv.y))' : '.30'};
-        diffuseColor.rgb *= mix(.76,1.,smoothstep(0.,.28,vTownUv.y));`)
+        totalEmissiveRadiance += diffuseColor.rgb * ${kind === 'building'
+          ? 'mix(.22 + .07*smoothstep(.52,.86,vTownUv.y), .65, townDaylight)'
+          : '.30'};
+        diffuseColor.rgb *= ${kind === 'building'
+          ? 'mix(mix(.76,1.,smoothstep(0.,.28,vTownUv.y)), mix(.96,1.,smoothstep(0.,.28,vTownUv.y)), townDaylight)'
+          : 'mix(.76,1.,smoothstep(0.,.28,vTownUv.y))'};`)
+      if (paintedCard) {
+        shader.uniforms.townDaylight = material.userData.townDaylight
+        shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float townDaylight;')
+      }
+      if (kind === 'agent') {
+        shader.uniforms.townExposure = material.userData.townExposure
+        shader.uniforms.townSpriteWhite = material.userData.townSpriteWhite
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', `#include <common>\n${authoredSpriteColorShader}`)
+          .replace('#include <color_fragment>', '#include <color_fragment>\nvec3 townAuthoredColor = diffuseColor.rgb;')
+          .replace('#include <opaque_fragment>', `
+            outgoingLight = mix(outgoingLight, townSpriteRadiance(townAuthoredColor), townDaylight);
+            #include <opaque_fragment>`)
+      }
       if (kind === 'building') {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+          reflectedLight.directDiffuse *= mix(1., .55, townDaylight);`)
         // Fixed-view relief normals approximate the two facades and roof of legacy
         // isometric artwork; the actual shadow caster remains the footprint prism.
         shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
@@ -77,7 +106,7 @@ export function townMaterial(kind, options = {}) {
       }
     }
   }
-  material.customProgramCacheKey = () => `town-cinematic-v5-${kind}`
+  material.customProgramCacheKey = () => `town-cinematic-v8-${kind}`
   return withTownOcclusionFade(material)
 }
 
