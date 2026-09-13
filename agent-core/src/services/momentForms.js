@@ -6,7 +6,6 @@ export const MOMENT_FORMS = [
   { name: '碎碎念', desc: '围绕同一件小事写两三行短句，想到哪说到哪，像随手记', len: '20-60字', weight: 1.2, nightBoost: false },
   { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
-  { name: '认真长文', desc: '围绕一件事展开细节，可以带分段，但不要中途另开一个话题', len: '80-200字', weight: 0.8, nightBoost: false },
   { name: '自言自语', desc: '像没写完的心里话，带点欲言又止', len: '10-40字', weight: 1.0, nightBoost: true },
   { name: '冷幽默', desc: '一句或几句自嘲冷幽默，结尾抖个小包袱', len: '15-50字', weight: 0.7, nightBoost: false },
   { name: '清单体', desc: '围绕同一件事或同一个主题把细节逐条列出来，条目感强，不要混入另一件事', len: '30-100字', weight: 0.7, nightBoost: false },

@@ -11,6 +11,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
   const deepThinkMode = ref(false)  // 私聊深度思考：planner 先规划媒介组合（文字/表情包/图片）再回复
   const realtimeAffinityDisplay = ref(false)
+  const bgmMuted = ref(false) // 小镇 BGM 静音（system_settings 持久化，loadComfyConfig 后修正）
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
   const theme = ref(getSavedTheme()) // main.js 已在挂载前应用过，这里只是同步状态
@@ -44,6 +45,9 @@ export const useSettingsStore = defineStore('settings', () => {
       }
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
+      }
+      if (data.features?.bgmMuted !== undefined) {
+        bgmMuted.value = !!data.features.bgmMuted
       }
       hasApiKey.value = data.llm?.hasApiKey ?? false
       weatherCity.value = data.weather?.city || ''
@@ -88,6 +92,12 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateFeatureFlag('realtimeAffinityDisplay', v)
   }
 
+  /** 切换小镇 BGM 静音（只负责状态与持久化，播放/暂停由 TownView 侧响应） */
+  async function setBgmMuted(v) {
+    bgmMuted.value = !!v
+    await api.updateFeatureFlag('bgmMuted', bgmMuted.value)
+  }
+
   function setHasApiKey(v) { hasApiKey.value = v }
 
   async function setWeatherCity(city) {
@@ -110,5 +120,5 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(theme.value)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
 })

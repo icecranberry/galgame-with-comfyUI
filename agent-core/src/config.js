@@ -101,6 +101,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     town: process.env.FEATURE_TOWN !== 'false', // 默认开：AI 小镇（世界页）
     townLLM: process.env.FEATURE_TOWN_LLM !== 'false', // 默认开：小镇 LLM 事件（相遇对话/状态气泡）；关闭则退化为纯移动模拟
     townAutoLLM: process.env.FEATURE_TOWN_AUTO_LLM !== 'false', // 默认开：小镇「自动/定时」LLM 事件（tick 驱动的相遇对话+摘要、批量状态气泡）；关闭只影响后台自动生成，玩家主动发起的 NPC/工坊对话仍走模型
+    bgmMuted: false, // 默认关：小镇 BGM 静音（世界页顶栏音符钮切换）
   },
   town: {
     timeZone: process.env.TOWN_TIME_ZONE || 'Asia/Shanghai',

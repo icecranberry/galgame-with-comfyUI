@@ -79,6 +79,7 @@ export const SETTING_TO_CONFIG = {
   feature_town:                      { obj: 'features', key: 'town',                  type: 'bool' },
   feature_townLLM:                   { obj: 'features', key: 'townLLM',               type: 'bool' },
   feature_townAutoLLM:               { obj: 'features', key: 'townAutoLLM',           type: 'bool' },
+  feature_bgmMuted:                  { obj: 'features', key: 'bgmMuted',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
   feature_deepThinkMode:             { obj: 'features', key: 'deepThinkMode',          type: 'bool' },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },

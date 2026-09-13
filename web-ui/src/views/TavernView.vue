@@ -1054,11 +1054,21 @@ async function confirmNew() {
 }
 
 async function saveWorld() {
-  if (worldSaving.value || !selectedWorldId.value) return
+  if (worldSaving.value) return
   worldSaving.value = true
   try {
-    const result = await api.updateWorldSetting(selectedWorldId.value, { content: worldContent.value.trim() })
-    if (!result?.ok) throw new Error(result?.error || '保存失败')
+    let targetId = selectedWorldId.value
+    if (!targetId) {
+      // 兜底：没有任何世界观（如旧库空表）时，把当前内容存为新的一套并激活
+      const created = await api.createWorldSetting({ name: '默认世界观', content: worldContent.value.trim() })
+      if (!created?.ok) throw new Error(created?.error || '创建失败')
+      targetId = created.item.id
+      await api.activateWorldSetting(targetId)
+    } else {
+      const result = await api.updateWorldSetting(targetId, { content: worldContent.value.trim() })
+      if (!result?.ok) throw new Error(result?.error || '保存失败')
+    }
+    selectedWorldId.value = targetId
     worldDirty.value = false
     worldSaved.value = true
     setTimeout(() => worldSaved.value = false, 2000)

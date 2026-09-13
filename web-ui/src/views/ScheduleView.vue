@@ -430,9 +430,6 @@ const detailChar = computed(() => {
 const detailActs = ref<any[]>([])
 const detailLoading = ref(false)
 const detailRegenerating = ref(false)
-watch(() => [drawerOpen.value, selectedCharId.value], ([open, id]) => {
-  store.selectTownOverlayCharacter(open ? id : null)
-})
 
 // ── 快照 ──
 const peekOpen = ref(false)
@@ -714,7 +711,6 @@ onUnmounted(() => {
   disposed = true
   for (const unsubscribe of peekUnsubscribers.splice(0)) unsubscribe()
   ++detailRequestSequence
-  store.selectTownOverlayCharacter(null)
   if (_overviewRefreshTimer) { clearInterval(_overviewRefreshTimer); _overviewRefreshTimer = null }
   document.removeEventListener('visibilitychange', refreshOverviewWhenVisible)
   window.removeEventListener('focus', refreshOverviewWhenVisible)

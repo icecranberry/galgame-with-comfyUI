@@ -882,6 +882,9 @@ function initSchema(db) {
   // 迁移: 将 global_rules.world_setting 移至 world_settings 表（多套世界观）
   migrateWorldSettings(db);
 
+  // 空表补默认激活世界观：前端世界观弹窗的保存依赖选中项，空表时写入无法落库
+  seedDefaultWorldSetting(db);
+
   // 迁移: LLM 多配置切换（需在 seed 之后，确保 DB 已初始化）
   migrateLlmProfiles(db);
 
@@ -2090,6 +2093,20 @@ function migrateWorldSettings(db) {
     console.log('[db] migrateWorldSettings: removed legacy global_rules.world_setting row');
   } catch (err) {
     console.log('[db] migrateWorldSettings error:', err.message);
+  }
+}
+
+// 空表补一套默认激活世界观（idempotent：仅在 world_settings 无任何行时插入）
+export function seedDefaultWorldSetting(db) {
+  try {
+    const already = db.prepare(`SELECT id FROM world_settings LIMIT 1`).get();
+    if (already) return;
+    db.prepare(
+      `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, '', 1, 0)`
+    ).run('默认世界观');
+    console.log('[db] seedDefaultWorldSetting: created default active world setting');
+  } catch (err) {
+    console.log('[db] seedDefaultWorldSetting error:', err.message);
   }
 }
 

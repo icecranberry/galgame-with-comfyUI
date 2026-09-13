@@ -38,6 +38,16 @@
         <span v-if="!connected" class="town-chip is-warn">连接中…</span>
       </div>
       <div v-if="initialized" class="town-topbar-actions">
+        <linshe-button variant="icon" size="sm" class="town-bgm-btn"
+          :title="bgmMuted ? '播放小镇 BGM' : '静音小镇 BGM'"
+          :aria-label="bgmMuted ? '播放小镇 BGM' : '静音小镇 BGM'"
+          @click="toggleBgmMuted">
+          <svg class="town-bgm-note" :class="{ 'is-playing': !bgmMuted }" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13s1.12-2 2.5-2 2.5.896 2.5 2zm9-2c0 1.105-1.12 2-2.5 2s-2.5-.895-2.5-2 1.12-2 2.5-2 2.5.895 2.5 2z"/>
+            <path d="M14 11V2h1v9h-1zM6 3v10H5V3h1z"/>
+            <path d="M5 2.905a1 1 0 0 1 .9-.995l8-.8a1 1 0 0 1 1.1.995V3L5 4V2.905z"/>
+          </svg>
+        </linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" @click="openTownEvents" :title="npcEncounterCount ? `镇上有 ${npcEncounterCount} 段进行中的奇遇` : '镇上暂时没有进行中的奇遇'">奇遇{{ npcEncounterCount ? ` · ${npcEncounterCount}` : '' }}</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
@@ -211,6 +221,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTownStore } from '../stores/town.js'
+import { useSettingsStore } from '../stores/settings.js'
+import { playTownBgm, pauseTownBgm, setTownBgmMuted } from '../utils/townBgm.js'
 import { formatTownTemperature } from '../utils/townWeather.js'
 import * as api from '../api/index.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
@@ -236,6 +248,14 @@ import TownInitWizard from '../components/town/TownInitWizard.vue'
 const router = useRouter(), route = useRoute()
 const town = useTownStore()
 const { map: mapMeta, locations, agents, player, weather, loaded, connected, initialized, renderMap } = storeToRefs(town)
+
+// ── BGM：进入世界页续播、离开暂停（断点存内存），静音状态同步 system_settings ──
+const settingsStore = useSettingsStore()
+const bgmMuted = computed(() => settingsStore.bgmMuted)
+function toggleBgmMuted() {
+  settingsStore.setBgmMuted(!bgmMuted.value)
+}
+watch(bgmMuted, (muted) => setTownBgmMuted(muted))
 
 // 地砖贴图里菱形中心的纵向位置（占贴图高度比例；生成图菱形居中 → 0.5）
 const GROUND_ANCHOR_Y = 0.5
@@ -1445,6 +1465,7 @@ watch(townAssets, () => { staticDirty = true }, { deep: true })
 
 onMounted(async () => {
   ctx = canvasEl.value.getContext('2d')
+  if (!settingsStore.bgmMuted) playTownBgm()
   canvasRenderer = createCanvasTownRenderer({ getImg, agentFacing, isImagePending: url => { const entry = imgCache.get(url); return !!entry && !entry.ok && !entry.failed } })
   town.startTownStream()
   relayout()
@@ -1462,6 +1483,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true; rendererEpoch++
+  pauseTownBgm()
   for (const cancel of [...bootWaits]) cancel()
   hdRenderer?.dispose(); hdRenderer = null
   canvasRenderer?.dispose()
@@ -1750,6 +1772,21 @@ function openResidentStory(eventId) {
 .town-chip.is-warn { color: var(--accent-hover); }
 
 .town-topbar-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
+
+/* ── BGM 音符钮：播放中旋转，静音变暗停转 ── */
+.town-bgm-note {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  color: var(--text-primary);
+  transform-origin: center;
+}
+.town-bgm-note.is-playing { animation: town-bgm-spin 3.2s linear infinite; }
+.town-bgm-btn:has(.town-bgm-note:not(.is-playing)) .town-bgm-note { opacity: 0.4; }
+@keyframes town-bgm-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 @container town-world (max-width: 700px) {
   .town-topbar { flex-wrap: wrap; width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
   .town-chips { flex: 1; }
