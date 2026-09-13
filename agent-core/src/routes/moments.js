@@ -556,25 +556,31 @@ async function generateMomentPost(character, opts = {}) {
 - 每张照片的描述要求都与 imagePrompt 完全一致：英文、独立完整（场景、人物、动作、光线、构图都要写全），禁止写"同上""同 imagePrompt""参考第一张"这类省略。`
       : '';
 
-    const rules = `规则：
+    // 缓存约束：staticRules 必须整体位于 jsonFmt 之前（jsonFmt 内的天气/多人插值是前缀缓存分叉点），
+    // 会随调用变化的要求一律放后面的 dynamicRules，不要与 staticRules 混排。
+    const staticRules = `通用规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
-- text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 - **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
+- text里禁止输出'#下午茶的仪式感'类似这种tag标签
+- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
+
+    const dynamicRules = `- text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 ${multiImageRule}
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
 ${imperfectionNote}
-- text里禁止输出'#下午茶的仪式感'类似这种tag标签
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
-- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。
 ${continuationNote}`;
 
     return `${postingTaskIntro}
 
+${staticRules}
+
 ${jsonFmt}
 
-${rules}`;
+本次要求（随本次情况变化，与上方通用规则同时生效）：
+${dynamicRules}`;
   })();
 
   const timeTag = getTimeTag(now, false);
