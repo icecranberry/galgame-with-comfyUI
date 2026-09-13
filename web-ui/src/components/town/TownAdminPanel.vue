@@ -110,11 +110,13 @@
             <div class="ap-detail-name">
               {{ detailNpc.displayName }}
               <span v-if="detailNpc.job" class="ap-npc-job">{{ detailNpc.job }}</span>
+              <span class="ap-switch-hint">镇上活动</span>
               <linshe-switch
                 class="ap-detail-switch"
                 v-model="detailNpc.townEnabled"
                 size="sm"
-                :aria-label="`${detailNpc.displayName} 启停`"
+                title="关闭后该居民暂停在小镇活动，开启即恢复"
+                :aria-label="`${detailNpc.displayName} 镇上活动开关`"
                 @change="v => toggleNpc(detailNpc, v)"
               />
             </div>
@@ -283,12 +285,14 @@
 
             <div class="ap-detail-name">
               {{ detailChar.displayName }}
+              <span class="ap-switch-hint">入住小镇</span>
               <linshe-switch
                 class="ap-detail-switch"
                 v-model="detailChar.townEnabled"
                 size="sm"
                 :disabled="!!busyFlags[`chartoggle${detailChar.id}`]"
-                :aria-label="`${detailChar.displayName} 入住`"
+                title="开启后该角色入住小镇，会先自动补齐立绘与正/背小人"
+                :aria-label="`${detailChar.displayName} 入住小镇开关`"
                 @change="v => toggleChar(detailChar, v)"
               />
             </div>
@@ -940,10 +944,9 @@ async function saveSettings() {
   }
 }
 
-// 未记录外观版本的素材（老图/上传图）不算过时，只有明确 needs_update 才提示
+// 未记录外观版本的素材（老图/上传图）不算过时，只有明确 needs_update 才提示；「与当前外观一致」不打扰
 function appearanceText(status) {
-  return status === 'needs_update' ? '外观已变化，图片待更新'
-    : status === 'current' ? '与当前外观一致' : ''
+  return status === 'needs_update' ? '外观已变化，图片待更新' : ''
 }
 const spriteErrors = reactive({})
 function npcSpritesStale(npc) {
@@ -1206,7 +1209,9 @@ onBeforeUnmount(() => {
   color: var(--text-bright);
 }
 
-.ap-detail-switch { margin-left: auto; }
+.ap-detail-switch { flex-shrink: 0; }
+/* 开关用途提示：名字与开关之间的静态说明，开关自身 title 里有更完整的解释 */
+.ap-switch-hint { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-secondary); white-space: nowrap; }
 
 .ap-section { display: flex; flex-direction: column; gap: 8px; }
 .ap-section-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
@@ -1226,9 +1231,8 @@ onBeforeUnmount(() => {
 
 .ap-sprite img { height: 100%; image-rendering: pixelated; }
 .ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
-.ap-sprite-row > :last-child { margin-left: auto; }
 
-.ap-player-sprite { flex: 1; min-width: 0; width: 130px; }
+.ap-player-sprite { flex: 0 0 auto; min-width: 0; width: 130px; }
 
 .ap-player-error { color: #b85343; font-size: 12px; }
 .ap-persona, .ap-appearance {

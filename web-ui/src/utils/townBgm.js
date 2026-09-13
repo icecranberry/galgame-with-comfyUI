@@ -2,7 +2,7 @@
 // 播放断点就是 Audio.paused 时保留的 currentTime，只存在内存里——刷新页面自然从头开始。
 
 const BGM_SRC = encodeURI('/Whimsy of the Village.mp3')
-const BGM_VOLUME = 0.35
+const BGM_VOLUME = 0.25
 
 let audio = null
 let wantPlaying = false // 当前是否有播放意图（区别于「因为静音/离开页面而暂停」）

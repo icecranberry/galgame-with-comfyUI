@@ -149,6 +149,9 @@ onUnmounted(stopTips)
   align-items: center;
   justify-content: center;
   gap: 8px;
+  /* 底部给「收入背包」按钮留出常驻空间：舞台连同道具卡整体上移，
+     矮视口（手机浏览器地址栏/小屏）下道具描述不会长进按钮区 */
+  padding-bottom: 110px;
 }
 .fs-status {
   min-height: 26px;
@@ -255,16 +258,41 @@ onUnmounted(stopTips)
   line-height: 1.7;
   color: #cbb99a;
   text-align: center;
-  max-width: 340px;
+  max-width: min(340px, 86vw);
 }
-/* 收下按钮钉在底部：出现/消失不推移舞台内容 */
+/* 收下按钮钉在底部：出现/消失不推移舞台内容。
+   z-index 压过道具卡（z-index:2），即使极端矮视口下描述擦到按钮也保证可点 */
 .fs-actions {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 48px;
+  bottom: calc(48px + env(safe-area-inset-bottom));
   display: flex;
   justify-content: center;
+  z-index: 3;
+}
+
+/* 矮视口适配：收缩道具图与金光、描述降字号，保证道具卡整体不侵入底部按钮区。
+   预算参考：360px 宽手机 + 640px 视口（带地址栏/小屏）下 4 行描述仍留有约 30px 余量 */
+@media (max-height: 700px) {
+  .fs-item-image { width: 160px; height: 160px; }
+  .fs-item-halo { width: 270px; height: 270px; }
+  .fs-item-rays { width: 320px; height: 320px; }
+  .fs-item-desc { font-size: 12px; }
+}
+/* 极端矮视口（手机横屏、桌面窄窗）：描述最多 3 行，超出截断；
+   底部预留同步加大，把道具卡再抬高一点，与按钮留出净空 */
+@media (max-height: 560px) {
+  .fs-content { padding-bottom: 140px; }
+  .fs-item-image { width: 132px; height: 132px; }
+  .fs-item-halo { width: 220px; height: 220px; }
+  .fs-item-rays { width: 260px; height: 260px; }
+  .fs-item-desc {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+  }
 }
 
 /* 揭示：道具从箱口渐入、冒泡般上浮弹出（弹性过冲） */

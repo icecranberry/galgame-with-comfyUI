@@ -423,15 +423,16 @@ function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
       loc = sleeping ? getHomeLocation(agent.refId) : state.matcher(activity?.location);
       const scheduled = !!activity?.startTime;
       hasOriginalTask = sleeping || !isIdleScheduleActivity(activity);
-      intent = sleeping ? 'rest' : scheduled && !loc ? 'off_town'
-        : activity?.tags?.includes('work') && loc ? 'work' : 'wait';
+      // 日程地点匹配不到镇内 POI 时不判离镇（日程 location 是 LLM 自由文本，对不上号是常态）：
+      // 一律当「没被安排到镇内地点」处理，人留在镇上，活动文案保留日程叙事
+      intent = sleeping ? 'rest' : activity?.tags?.includes('work') && loc ? 'work' : 'wait';
       target = loc?.key || null;
       scheduleKey = scheduled ? JSON.stringify([activity.startTime, activity.endTime, activity.location, sleeping]) : `idle:${sleeping}`;
       agent.activityText = sleeping ? '睡得正香' : activity?.activity || '自由时间';
-      // 入驻角色：没在睡觉、也没被日程活动安排地点时，同样在镇上到处走动
+      // 入驻角色：没在睡觉、日程也没把人钉到镇内地点时，同样在镇上到处走动
       if (!sleeping && intent === 'wait' && !loc) {
         const stroll = pickStrollLocation(agent, nowUtcMs);
-        if (stroll) { loc = stroll; target = stroll.key; agent.activityText = '在镇上闲逛'; }
+        if (stroll) { loc = stroll; target = stroll.key; if (!scheduled) agent.activityText = '在镇上闲逛'; }
       }
     }
     agent.sleeping = sleeping;
