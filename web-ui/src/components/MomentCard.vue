@@ -76,11 +76,13 @@
         />
       </div>
 
+      <!-- 翻页箭头：悬停 / 键盘聚焦时才浮现，触屏走滑动翻页 -->
       <linshe-button
         variant="icon"
         size="md"
         class="deck-nav deck-nav--prev"
         aria-label="上一张"
+        tabindex="-1"
         @click.stop="flipDeck(-1)"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
@@ -90,6 +92,7 @@
         size="md"
         class="deck-nav deck-nav--next"
         aria-label="下一张"
+        tabindex="-1"
         @click.stop="flipDeck(1)"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
@@ -649,7 +652,8 @@ function formatTime(iso) {
   aspect-ratio: var(--deck-ar, 4 / 3);
   max-height: 520px;
   margin-top: 15px;
-  margin-bottom: 16px;
+  /* 底部给沉到相片下方的张数角标留出血空间 */
+  margin-bottom: 34px;
   touch-action: pan-y;
 }
 /* 舞台只负责定位和翻页动画：底面透明、不拦指针（露在外面的那张也能点到），
@@ -666,23 +670,26 @@ function formatTime(iso) {
   will-change: transform;
 }
 /* 相片：按原始比例缩放到舞台内（完整不裁切），尺寸由 max-width/height 决定 */
+/* 相纸白边让堆叠中每张相片的边缘都清晰可辨，白底固定色与 deck-counter 同理（照片纸质感）；
+   直角 + 黑色重投影走实体照片风 */
 .deck-img {
   display: block;
   width: auto;
   height: auto;
   max-width: 100%;
   max-height: 100%;
-  border-radius: 10px;
+  border: 4px solid #fff;
+  border-radius: 0;
   background: var(--bg-tertiary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   cursor: pointer;
   user-select: none;
   transition: box-shadow var(--dur-base) var(--ease-standard);
 }
-.deck-card.is-top .deck-img { box-shadow: var(--shadow-md); }
+.deck-card.is-top .deck-img { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38); }
 /* 翻页中飞的那张影子拉深一点（层级由 deckCardStyle 顶到 30） */
-.deck-card.is-flying .deck-img { box-shadow: var(--shadow-lg); }
+.deck-card.is-flying .deck-img { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45); }
 
 /* 下一张：顶张往右上甩出去，再落回最底下那一层 */
 .deck-card.fly-next { animation: deck-throw-out 480ms var(--ease-out) both; }
@@ -697,18 +704,28 @@ function formatTime(iso) {
   0% { transform: translate(var(--fly-x), var(--fly-y)) rotate(var(--fly-r)) scale(0.97); }
   100% { transform: translate(0, 0) rotate(0deg) scale(1); }
 }
-/* 只补定位，皮肤仍归 LinsheButton；md 圆形图标钮 30px，故上移 15px 居中 */
+/* 翻页箭头：默认隐藏，悬停 / 聚焦到 deck 时浮现；皮肤归 LinsheButton，这里只补定位与显隐
+   （md 圆形图标钮 30px，故上移 15px 居中） */
 .moment-deck .deck-nav {
   position: absolute;
   top: calc(50% - 15px);
   z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-standard);
+}
+.moment-deck:hover .deck-nav,
+.moment-deck:focus-within .deck-nav {
+  opacity: 1;
+  pointer-events: auto;
 }
 .moment-deck .deck-nav--prev { left: 8px; }
 .moment-deck .deck-nav--next { right: 8px; }
+/* 角标沉到相片下方靠右，不压图；stage 需要留出这段出血高度 */
 .deck-counter {
   position: absolute;
-  right: 14px;
-  bottom: 12px;
+  right: 12px;
+  bottom: -26px;
   z-index: 40;
   padding: 2px 10px;
   border-radius: 999px;
