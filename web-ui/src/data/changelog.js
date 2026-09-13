@@ -24,7 +24,7 @@
 //    手动改它没有意义（下次 tag 会被覆盖），想让用户重新看到弹窗，
 //    改文案就行了 —— 哪怕只是加一个标点。
 // ────────────────────────────────────────────────────────────────────────
-export const CHANGELOG_FLAG = '27d918f0ef4b'
+export const CHANGELOG_FLAG = '0d59db40f534'
 
 /** 弹窗标题 */
 export const CHANGELOG_TITLE = '更新说明'
