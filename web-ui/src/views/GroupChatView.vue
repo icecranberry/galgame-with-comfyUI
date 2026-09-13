@@ -53,9 +53,12 @@
           <div
             class="msg-avatar"
             :class="{ 'avatar-clickable': msg.role !== 'user' && memberOf(msg) }"
-            :style="msg.role === 'user' ? userAvatarStyle : speakerAvatarStyle(msg)"
+            :style="msgAvatarSrc(msg) ? {} : { background: 'var(--accent)' }"
             @click="openMsgAvatarMenu(msg, $event)"
-          ><span v-if="avatarFallback(msg)" class="avatar-fallback">{{ avatarFallback(msg) }}</span></div>
+          >
+            <img v-if="msgAvatarSrc(msg)" :src="msgAvatarSrc(msg)" class="avatar-img" loading="lazy" decoding="async" alt="" />
+            <span v-else class="avatar-fallback">{{ avatarFallback(msg) }}</span>
+          </div>
           <div class="msg-col">
             <div v-if="msg.role !== 'user' && !isSameSpeaker(idx)" class="speaker-name">{{ msg.speaker_name || '?' }}</div>
             <div v-if="msg.content" class="msg-bubble">
@@ -117,7 +120,10 @@
           class="mention-item"
           @click="pickMention(m)"
         >
-          <div class="mention-avatar" :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'var(--accent)' }">{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+          <div class="mention-avatar" :style="m.avatar_path ? {} : { background: 'var(--accent)' }">
+            <img v-if="m.avatar_path" :src="m.avatar_path" class="avatar-img" alt="" />
+            <span v-else>{{ m.display_name.charAt(0) }}</span>
+          </div>
           <span>{{ m.display_name }}</span>
         </div>
       </div>
@@ -219,10 +225,10 @@
                 @keydown.space.prevent="toggleMember(c.id)"
                 @click="toggleMember(c.id)"
               >
-                <div
-                  class="gc-member-avatar"
-                  :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})` } : { background: 'var(--accent)' }"
-                >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+                <div class="gc-member-avatar" :style="c.avatar_path ? {} : { background: 'var(--accent)' }">
+                  <img v-if="c.avatar_path" :src="c.avatar_path" class="avatar-img" alt="" />
+                  <span v-else>{{ c.display_name.charAt(0) }}</span>
+                </div>
                 <span>{{ c.display_name }}</span>
               </div>
             </div>
@@ -250,8 +256,9 @@
         <div v-if="avatarMenu" class="avatar-pop-layer" @click.self="avatarMenu = null">
           <div class="avatar-pop-card" :style="avatarMenuStyle" role="dialog" aria-label="成员操作">
             <div class="avatar-pop-head">
-              <div class="avatar-pop-avatar" :style="memberAvatarStyle(avatarMenu.member)">
-                <span v-if="!avatarMenu.member.avatar_path" class="avatar-pop-fallback">{{ avatarMenu.member.display_name?.charAt(0) || '?' }}</span>
+              <div class="avatar-pop-avatar" :style="avatarMenu.member.avatar_path ? {} : { background: 'var(--accent)' }">
+                <img v-if="avatarMenu.member.avatar_path" :src="avatarMenu.member.avatar_path" class="avatar-img" alt="" />
+                <span v-else class="avatar-pop-fallback">{{ avatarMenu.member.display_name?.charAt(0) || '?' }}</span>
               </div>
               <div class="avatar-pop-info">
                 <div class="avatar-pop-name">{{ avatarMenu.member.display_name }}</div>
@@ -321,29 +328,17 @@ const sortedCharacters = computed(() => [...chat.characters].sort((left, right) 
 
 // ── 头像 ──
 
-const userAvatarStyle = computed(() => {
-  return userAvatar.value
-    ? { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: 'var(--accent)' }
-})
-
 function memberOf(msg) {
   return (store.activeGroup?.members || []).find(m => m.id === msg.speaker_character_id)
     || chat.characters.find(c => c.id === msg.speaker_character_id)
     || null
 }
-function speakerAvatarStyle(msg) {
-  const path = memberOf(msg)?.avatar_path || msg.speaker_avatar
-  return path
-    ? { backgroundImage: `url(${path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: 'var(--accent)' }
+function msgAvatarSrc(msg) {
+  if (msg.role === 'user') return userAvatar.value || ''
+  return memberOf(msg)?.avatar_path || msg.speaker_avatar || ''
 }
 function avatarFallback(msg) {
-  if (msg.role === 'user') {
-    return userAvatar.value ? '' : '我'
-  }
-  const path = memberOf(msg)?.avatar_path || msg.speaker_avatar
-  return path ? '' : (msg.speaker_name || '?').charAt(0)
+  return msgAvatarSrc(msg) ? '' : (msg.role === 'user' ? '我' : (msg.speaker_name || '?').charAt(0))
 }
 // 表情包贴纸（/images/emoji/）按 140px 渲染，与私聊 .msg-sticker-img 同款
 function isEmojiSticker(url) {
@@ -370,12 +365,6 @@ const avatarMenuStyle = computed(() => {
   top = Math.max(gap, Math.min(top, viewportH - AVATAR_POP_H - gap))
   return { left: `${left}px`, top: `${top}px` }
 })
-
-function memberAvatarStyle(member) {
-  return member?.avatar_path
-    ? { backgroundImage: `url(${member.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: 'var(--accent)' }
-}
 
 function openAvatarMenu(member, event) {
   if (!member?.id) return
@@ -939,10 +928,14 @@ async function onDissolve() {
 
 .msg-avatar {
   width:42px; height:42px; border-radius:50%; flex-shrink:0;
-  background-size:cover; background-position:center;
   display:flex; align-items:center; justify-content:center;
   /* 顶部对齐：文字+图片同属一条消息时，头像跟着第一行而不是沉到图片底部 */
   align-self:flex-start;
+}
+/* 头像图片：填满容器，圆角随容器（与私聊同款） */
+.avatar-img {
+  width:100%; height:100%; object-fit:cover;
+  border-radius:inherit; display:block;
 }
 .msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
 .avatar-fallback { color:#fff; font-size:14px; font-weight:700; user-select:none; }
@@ -969,7 +962,6 @@ async function onDissolve() {
 .avatar-pop-avatar {
   width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background-size: cover; background-position: center;
   color: #fff;
 }
 .avatar-pop-fallback { font-size: 17px; font-weight: 700; user-select: none; }
@@ -1164,7 +1156,6 @@ async function onDissolve() {
 .gc-member-avatar {
   width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background-size: cover; background-position: center;
   color: #fff; font-size: 16px; font-weight: 600;
 }
 .gc-member-hint { font-size: 12px; color: var(--text-secondary); }

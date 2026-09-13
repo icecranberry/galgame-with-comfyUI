@@ -58,8 +58,9 @@
 
             <!-- Event share card (奇遇分享卡片) -->
             <div v-else-if="item.msg.type === 'event_card'" class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
-              <div class="msg-avatar clickable" :style="agentAvatarStyle" title="角色设置" @click="openSettings()">
-                <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
+              <div class="msg-avatar clickable" title="角色设置" @click="openSettings()">
+                <img v-if="chat.activeChar?.avatar_path" :src="chat.activeChar.avatar_path" class="avatar-img" alt="" />
+                <span v-else class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <EventShareCard
                 :msg="item.msg"
@@ -74,8 +75,9 @@
 
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
-              <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :style="item.msg.role === 'user' ? userAvatarStyle : agentAvatarStyle" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
-                <span v-if="item.msg.role === 'user' ? !userAvatar : !(chat.activeChar?.avatar_path)" class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
+              <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
+                <img v-if="msgAvatarSrc(item.msg.role)" :src="msgAvatarSrc(item.msg.role)" class="avatar-img" loading="lazy" decoding="async" alt="" />
+                <span v-else class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
               <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
@@ -104,8 +106,9 @@
 
             <!-- Image generation bubble -->
             <div v-else class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
-              <div class="msg-avatar clickable" :style="agentAvatarStyle" title="角色设置" @click="openSettings()">
-                <span v-if="!chat.activeChar?.avatar_path" class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
+              <div class="msg-avatar clickable" title="角色设置" @click="openSettings()">
+                <img v-if="chat.activeChar?.avatar_path" :src="chat.activeChar.avatar_path" class="avatar-img" alt="" />
+                <span v-else class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
               </div>
               <ImageGenBubble
                 :msg="item.msg"
@@ -234,9 +237,12 @@
           <div class="avatar-row">
             <div
               class="avatar-preview clickable"
-              :style="avatarPreviewStyle"
+              :style="chat.activeChar?.avatar_path ? {} : { background: 'var(--accent)' }"
               @click="openAvatarPicker"
-            >{{ chat.activeChar?.avatar_path ? '' : chat.activeChar?.display_name?.charAt(0) }}</div>
+            >
+              <img v-if="chat.activeChar?.avatar_path" :src="chat.activeChar.avatar_path" class="avatar-img" alt="" />
+              <span v-else>{{ chat.activeChar?.display_name?.charAt(0) }}</span>
+            </div>
             <div>
               <div role="button" tabindex="0" class="sp-btn-small" @click="openAvatarPicker" @keydown.enter.prevent="openAvatarPicker" @keydown.space.prevent="openAvatarPicker">更换头像</div>
               <div v-if="chat.activeChar?.avatar_path" role="button" tabindex="0" class="sp-btn-small sp-btn-subtle" @click="removeAvatar" @keydown.enter.prevent="removeAvatar" @keydown.space.prevent="removeAvatar">移除</div>
@@ -1215,22 +1221,10 @@ function confidenceLevel(confidence, index = 0) {
   return val >= threshold ? 'on' : 'off'
 }
 
-const avatarPreviewStyle = computed(() => {
-  const p = chat.activeChar?.avatar_path
-  if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: 'var(--accent)' }
-})
-
-const agentAvatarStyle = computed(() => {
-const p = chat.activeChar?.avatar_path
-if (p) return { backgroundImage: `url(${p})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-return { background: 'var(--accent)' }
-})
-
-const userAvatarStyle = computed(() => {
-if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-return { background: 'var(--accent)' }
-})
+// 消息行头像地址：用户用本人头像，其余用当前角色头像（无则回落首字母）
+function msgAvatarSrc(role) {
+  return role === 'user' ? (userAvatar.value || '') : (chat.activeChar?.avatar_path || '')
+}
 
 function openSettings() { showSettings.value = true }
 function closeSettings() { showSettings.value = false }
@@ -1769,9 +1763,13 @@ function renderContent(text) {
 
 .msg-avatar {
   width:42px; height:42px; border-radius:50%; flex-shrink:0;
-  background-size:cover; background-position:center;
   display:flex; align-items:center; justify-content:center;
   transition: opacity 0.15s;
+}
+/* 头像图片：填满圆形容器，圆角随容器 */
+.avatar-img {
+  width:100%; height:100%; object-fit:cover;
+  border-radius:inherit; display:block;
 }
 .msg-avatar.clickable {
   cursor: pointer;

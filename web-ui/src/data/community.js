@@ -20,7 +20,7 @@ export const COMMUNITY_LINKS = [
   {
     key: 'github',
     label: 'GitHub 仓库',
-    text: 'icecranberry/galgame-with-comfyUI',
+    text: 'galgame-with-comfyUI',
     url: 'https://github.com/icecranberry/galgame-with-comfyUI',
     title: 'https://github.com/icecranberry/galgame-with-comfyUI',
   },
