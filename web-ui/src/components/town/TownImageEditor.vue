@@ -7,6 +7,7 @@
       :class="{ 'is-crop': cropActive, 'is-erase': eraseMode, 'is-viewer': !cropActive && !eraseMode, 'is-panning': panning }"
       @pointerdown.prevent="onDown"
       @wheel.prevent="onWheel"
+      @contextmenu="onContextMenu"
       @pointermove="onMove"
       @pointerup="onUp"
       @pointercancel="onCancel"
@@ -50,7 +51,7 @@
       </section>
       <div class="ie-hint">{{ cropHint }}</div>
       <div class="ie-buttons">
-        <linshe-button variant="chip" size="sm" :active="gapOpen" :loading="detecting" :disabled="!loaded || saving || cropping" @click="toggleGaps">
+        <linshe-button variant="primary" size="sm" :loading="detecting" :disabled="!loaded || saving || cropping" @click="toggleGaps">
           <span class="ie-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
@@ -65,7 +66,7 @@
           </span>
           自动抠白
         </linshe-button>
-        <linshe-button variant="chip" size="sm" :active="eraseMode" :disabled="editLocked" @click="toggleErase">
+        <linshe-button variant="primary" size="sm" :disabled="editLocked" @click="toggleErase">
           <span class="ie-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
@@ -76,7 +77,7 @@
           {{ eraseMode ? '点选抠白中' : '手动抠白' }}
         </linshe-button>
 
-        <linshe-button v-if="cropMode" variant="chip" size="sm" :active="cropActive" :disabled="editLocked" @click="toggleCrop">
+        <linshe-button v-if="cropMode" variant="primary" size="sm" :disabled="editLocked" @click="toggleCrop">
           <span class="ie-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="6" cy="6" r="3" />
@@ -396,7 +397,7 @@ function cropDisplayRect() {
 
 const cropHint = computed(() => {
   if (gapOpen.value) return '调低强度即可恢复 · 拖动画布查看 · 滚轮缩放'
-  if (eraseMode.value) return props.hint || '点击要去除的白色或底色'
+  if (eraseMode.value) return props.hint ? `${props.hint} · 右键拖动画布` : '点击要去除的白色或底色 · 右键拖动画布'
   if (cropActive.value) return '拖动移动截取框 · 拖右下角手柄调大小 · 框内即最终成图范围'
   return '滚轮缩放 · 拖动画布查看'
 })
@@ -545,6 +546,13 @@ function sizeCanvas() {
 function onDown(e) {
   if (!loaded.value || !img || saving.value || cropping.value || detecting.value) return
   const point = canvasPoint(e)
+  // 手动/自动抠白下右键只负责拖动画布，左键才是点选抠色
+  if (e.button === 2 && (eraseMode.value || gapOpen.value)) {
+    viewDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, viewX: view.x, viewY: view.y }
+    panning.value = true
+    frameEl.value?.setPointerCapture?.(e.pointerId)
+    return
+  }
   if (eraseMode.value) {
     eraseColorAt(point.x, point.y)
     return
@@ -597,6 +605,11 @@ function onCancel() {
   cropDrag = null
   viewDrag = null
   panning.value = false
+}
+
+/** 抠白（手动/自动）下右键用于拖动画布，屏蔽浏览器右键菜单 */
+function onContextMenu(e) {
+  if (eraseMode.value || gapOpen.value) e.preventDefault()
 }
 
 /** 点击颜色区域：以点击点颜色为种子，容差洪泛 → 透明 */

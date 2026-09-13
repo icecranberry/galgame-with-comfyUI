@@ -429,9 +429,10 @@ function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
       target = loc?.key || null;
       scheduleKey = scheduled ? JSON.stringify([activity.startTime, activity.endTime, activity.location, sleeping]) : `idle:${sleeping}`;
       agent.activityText = sleeping ? '睡得正香' : activity?.activity || '自由时间';
-      // 入驻角色：没在睡觉、日程也没把人钉到镇内地点时，同样在镇上到处走动
+      // 入驻角色：没在睡觉、日程也没把人钉到镇内地点时，同样在镇上到处走动。
+      // 日程醒着的角色（当前时段有安排且非睡眠档）深夜也照常游走，否则会被深夜闸门整夜冻在原地
       if (!sleeping && intent === 'wait' && !loc) {
-        const stroll = pickStrollLocation(agent, nowUtcMs);
+        const stroll = pickStrollLocation(agent, nowUtcMs, { allowNight: !!activity && activity.replyDelay !== -1 });
         if (stroll) { loc = stroll; target = stroll.key; if (!scheduled) agent.activityText = '在镇上闲逛'; }
       }
     }
@@ -665,12 +666,13 @@ const strollHash = (key, seed) => {
 };
 
 /** 当前时间桶的游走目的地（全镇非住宅地点）。桶内（以及行走中）重复读到的事实必须稳定，
- * 否则引擎会不停 SCHEDULE_CHANGED；雨天原地歇脚让位给避雨，深夜安静；
- * 正在前往/脚下的地点不重选，保证每个桶都真的迈步；到站后停留 TOWN_STROLL_REST_MS 再启程。 */
-function pickStrollLocation(agent, nowUtcMs) {
+ * 否则引擎会不停 SCHEDULE_CHANGED；雨天原地歇脚让位给避雨，深夜安静（nightOwl 特质或
+ * 日程醒着的入驻角色除外）；正在前往/脚下的地点不重选，保证每个桶都真的迈步；
+ * 到站后停留 TOWN_STROLL_REST_MS 再启程。 */
+function pickStrollLocation(agent, nowUtcMs, { allowNight = false } = {}) {
   if (isRaining()) return null;
   const localMinute = townLocalTime(nowUtcMs).minuteOfDay;
-  if (!agent.traits?.nightOwl && (localMinute >= 23 * 60 || localMinute < 6 * 60)) return null;
+  if (!agent.traits?.nightOwl && !allowNight && (localMinute >= 23 * 60 || localMinute < 6 * 60)) return null;
   const bucket = Math.floor((nowUtcMs + strollHash(agent.agentKey, 0) % TOWN_STROLL_PERIOD_MS) / TOWN_STROLL_PERIOD_MS);
   if (agent.path?.length || agent.stroll?.bucket === bucket) {
     return agent.stroll ? state.locations.find(l => l.key === agent.stroll.targetKey) || null : null;

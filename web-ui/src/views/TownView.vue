@@ -656,7 +656,7 @@ function onCanvasDown(e) {
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false }
   if (editing.value && e.button === 0) {
     const cell = screenToCell(e.offsetX, e.offsetY)
-    if (['ground', 'road'].includes(editTool.value) && selectedAsset.value) {
+    if (['ground', 'road'].includes(editTool.value) && selectedAsset.value && inBounds(cell)) {
       paintDrag.value = { startCell: cell, lastCell: cell }
       paintCell(cell)
     }
@@ -668,7 +668,10 @@ function onCanvasMove(e) {
   if (editing.value) {
     ghostCell.value = screenToCell(e.offsetX, e.offsetY)
     if (paintDrag.value) {
-      paintDrag.value.lastCell = screenToCell(e.offsetX, e.offsetY)
+      const cell = screenToCell(e.offsetX, e.offsetY)
+      // 越界时保持最后一个界内格：拾取在地图外只会返回 {-1,-1}，
+      // 松手的矩形填充按 start→last 两点取整片，混入界外点会沿边界刷出一大片
+      if (inBounds(cell)) paintDrag.value.lastCell = cell
       paintCell(paintDrag.value.lastCell)
     }
   }
@@ -1124,6 +1127,26 @@ function drawEditorOverlays(c) {
   const layers = editing.value ? editLayers.value : m?.layers
   if (!m || !layers) return
 
+  // 地图边界：提示可绘制的范围（画笔越界不生效）
+  {
+    const n = cellTopWorld(0, 0)
+    const e = cellTopWorld(m.cols - 1, 0)
+    const s = cellTopWorld(m.cols - 1, m.rows - 1)
+    const w = cellTopWorld(0, m.rows - 1)
+    c.save()
+    c.beginPath()
+    c.moveTo(n.x, n.y)
+    c.lineTo(e.x + HW, e.y + HH)
+    c.lineTo(s.x, s.y + 2 * HH)
+    c.lineTo(w.x - HW, w.y + HH)
+    c.closePath()
+    c.setLineDash([10, 6])
+    c.strokeStyle = 'rgba(224, 123, 108, 0.85)'
+    c.lineWidth = 2
+    c.stroke()
+    c.restore()
+  }
+
   // 阻挡格：菱形红叉
   const override = layers.blockOverride
   if (Array.isArray(override)) {
@@ -1506,6 +1529,9 @@ onBeforeUnmount(() => {
 })
 
 async function openDialogue(resident) {
+  // 玩家自己也在渲染帧里，点自己的小人会命中 hitAgent；对话驻留只对居民生效，
+  // 后端对 player actor 恒返 404，这里直接不进对话流程。
+  if (resident?.agentKey === 'me' || resident?.kind === 'player') return
   if (showWalletPanel.value || worldSpot.value || lifeMoving.value) return
   const request = ++dialogueRequest
   dialogueOpening.value = true
@@ -1791,6 +1817,8 @@ function openResidentStory(eventId) {
   .town-topbar { flex-wrap: wrap; width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
   .town-chips { flex: 1; }
   .town-topbar-actions { width: 100%; flex-wrap: wrap; }
+  /* 顶栏在此宽度会折成两行，编辑动作卡下移避让 */
+  .town-edit-actions { top: 96px; }
   .town-hint { max-width: calc(100% - 28px); white-space: normal; text-align: center; }
 }
 
@@ -1808,9 +1836,6 @@ function openResidentStory(eventId) {
   pointer-events: none;
   white-space: nowrap;
 }
-
-.town-hint.is-edit { bottom: 14px; }
-.town-hint.is-edit { bottom: 76px; }
 
 /* ── 未开镇 ── */
 .town-empty {
@@ -2008,7 +2033,7 @@ function openResidentStory(eventId) {
 .town-edit-actions {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  top: 70px;
   z-index: 40;
   transform: translateX(-50%);
   display: flex;
@@ -2126,7 +2151,7 @@ function openResidentStory(eventId) {
 .town-editor-leave-to .town-library { transform: translateX(-16px); }
 
 .town-editor-enter-from .town-edit-actions,
-.town-editor-leave-to .town-edit-actions { transform: translate(-50%, 16px); }
+.town-editor-leave-to .town-edit-actions { transform: translate(-50%, -16px); }
 
 .town-pop-enter-active,
 .town-pop-leave-active { transition: opacity 0.24s ease, transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1); }
