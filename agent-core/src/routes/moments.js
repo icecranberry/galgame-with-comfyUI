@@ -219,6 +219,19 @@ router.post('/generate', async (req, res) => {
   }
 });
 
+// PUT /api/moments/:id — 编辑帖子文字（原 content 直接覆盖，读取时统一走 sanitizeMomentContent）
+router.put('/:id', (req, res) => {
+  const { content } = req.body;
+  if (typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ error: 'content is required' });
+  }
+  const db = getDb();
+  const post = db.prepare('SELECT id FROM moment_posts WHERE id = ?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  db.prepare('UPDATE moment_posts SET content = ? WHERE id = ?').run(content.trim(), req.params.id);
+  res.json({ ok: true, content: content.trim() });
+});
+
 // DELETE /api/moments/:id — 删除帖子及关联的评论和点赞
 router.delete('/:id', (req, res) => {
   const db = getDb();

@@ -811,6 +811,10 @@ export async function generateMoment(characterId) {
   return request(`/moments/generate`, { method: 'POST', body: { character_id: characterId } })
 }
 
+export async function updateMoment(postId, content) {
+  return request(`/moments/${postId}`, { method: 'PUT', body: { content } })
+}
+
 export async function deleteMoment(id) {
   return request(`/moments/${id}`, { method: 'DELETE' })
 }
@@ -1432,6 +1436,11 @@ export function fetchTownMap() {
 
 export function saveTownMap(payload) {
   return jsonRequest(`${BASE}/town/map`, townJson('PUT', payload))
+}
+
+// 天空远景：生成/重生成地图外圈的两层剪影（世界观 LLM 出词 + ComfyUI）
+export function generateTownSkyBackdrops() {
+  return jsonRequest(`${BASE}/town/sky-backdrops`, townJson('POST', {}))
 }
 
 // 初始化向导

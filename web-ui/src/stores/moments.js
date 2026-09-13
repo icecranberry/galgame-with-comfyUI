@@ -167,6 +167,13 @@ export const useMomentsStore = defineStore('moments', () => {
     return result
   }
 
+  // 编辑帖子文字
+  async function updatePost(postId, content) {
+    const { content: saved } = await api.updateMoment(postId, content)
+    const post = posts.value.find(p => p.id === postId)
+    if (post && saved) post.content = saved
+  }
+
   // 删除帖子
   async function deletePost(postId) {
     await api.deleteMoment(postId)
@@ -230,6 +237,6 @@ export const useMomentsStore = defineStore('moments', () => {
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
-    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, deletePost,
+    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, updatePost, deletePost,
     connectSSE, disconnectSSE, markSeen, refreshUnreadCount }
 })

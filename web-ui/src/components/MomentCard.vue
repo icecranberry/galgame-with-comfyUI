@@ -28,14 +28,45 @@
         </div>
         <Transition name="menu-pop">
           <div v-if="showMenu" class="moment-dropdown">
-            <div class="moment-dropdown-item danger" role="button" tabindex="0" @click.stop="onDelete" @keydown.enter.prevent="onDelete" @keydown.space.prevent="onDelete">🗑️ 删除</div>
+            <div class="moment-dropdown-item" role="button" tabindex="0" @click.stop="startEdit" @keydown.enter.prevent="startEdit" @keydown.space.prevent="startEdit">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+              </svg>
+              编辑
+            </div>
+            <div class="moment-dropdown-item danger" role="button" tabindex="0" @click.stop="onDelete" @keydown.enter.prevent="onDelete" @keydown.space.prevent="onDelete">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+              删除
+            </div>
           </div>
         </Transition>
       </div>
     </div>
 
-    <!-- 正文 -->
-    <div class="moment-content">{{ post.content }}</div>
+    <!-- 正文（编辑时切换为文本域 + 保存 / 取消） -->
+    <div v-if="!editing" class="moment-content">{{ post.content }}</div>
+    <div v-else class="moment-edit-area">
+      <linshe-input
+        ref="editInput"
+        v-model="editText"
+        type="textarea"
+        :rows="4"
+        maxlength="2000"
+        placeholder="编辑朋友圈文字..."
+        :disabled="savingEdit"
+        @keydown.escape.prevent="cancelEdit"
+      />
+      <div class="moment-edit-actions">
+        <linshe-button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEdit">取消</linshe-button>
+        <linshe-button variant="primary" size="sm" :disabled="!editText.trim() || editText === post.content" :loading="savingEdit" @click="saveEdit">保存</linshe-button>
+      </div>
+    </div>
 
     <!-- 配图：单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
     <div v-if="visibleImages.length === 1" class="moment-images">
@@ -494,6 +525,40 @@ async function onDelete() {
   await moments.deletePost(props.post.id)
 }
 
+// ── 编辑文字 ──
+const editing = ref(false)
+const editText = ref('')
+const savingEdit = ref(false)
+const editInput = ref(null)
+
+async function startEdit() {
+  showMenu.value = false
+  editText.value = props.post.content
+  editing.value = true
+  await nextTick()
+  editInput.value?.focus()
+}
+
+function cancelEdit() {
+  editing.value = false
+  editText.value = ''
+}
+
+async function saveEdit() {
+  const text = editText.value.trim()
+  if (!text || savingEdit.value) return
+  savingEdit.value = true
+  try {
+    await moments.updatePost(props.post.id, text)
+    editing.value = false
+    editText.value = ''
+  } catch (err) {
+    console.error('[MomentCard] edit error:', err)
+  } finally {
+    savingEdit.value = false
+  }
+}
+
 const likeBursting = ref(false)
 let burstTimer = null
 async function onLike() {
@@ -558,7 +623,7 @@ function formatTime(iso) {
   margin-bottom: 14px;
 }
 .moment-avatar {
-  width: 60px; height: 60px; border-radius: 50%;
+  width: 55px; height: 55px; border-radius: 50%;
   background: #e07b6c;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 22px; font-weight: 700; flex-shrink: 0;
@@ -614,7 +679,8 @@ function formatTime(iso) {
   overflow: hidden; z-index: 30;
 }
 .moment-dropdown-item {
-  display: block; width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
   padding: 10px 14px;
   border: none; border-radius: 0;
   background: transparent;
@@ -624,6 +690,8 @@ function formatTime(iso) {
   text-align: left;
   user-select: none;
 }
+.moment-dropdown-item svg { flex-shrink: 0; color: var(--text-secondary); }
+.moment-dropdown-item.danger svg { color: var(--danger); }
 .moment-dropdown-item:hover { background: rgba(0,0,0,0.05); }
 .moment-dropdown-item.danger { color: var(--danger); }
 .moment-dropdown-item.danger:hover { background: rgba(255,77,79,0.06); }
@@ -640,6 +708,12 @@ function formatTime(iso) {
 .moment-content {
   font-size: 14px; line-height: 1.8; color: var(--text-primary);
   white-space: pre-wrap; word-break: break-word;
+}
+
+/* 内联编辑文字 */
+.moment-edit-area { display: flex; flex-direction: column; gap: 10px; }
+.moment-edit-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
 }
 
 /* 单图 */
