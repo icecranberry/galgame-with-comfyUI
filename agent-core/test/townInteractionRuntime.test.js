@@ -17,7 +17,7 @@ test('store leads, special stories and direct purchases share one interaction lo
   config.dbPath = ':memory:';
   const db = getDb();
   config.features.town = true; config.features.townLLM = false; config.features.events = true;
-  Object.assign(config.town, { simulation: 'legacy', playerSpeed: 1, npcSpeed: 1, maxActiveEncounters: 0, timeZone: 'Asia/Shanghai' });
+  Object.assign(config.town, { playerSpeed: 1, npcSpeed: 1, maxActiveEncounters: 0, timeZone: 'Asia/Shanghai' });
   t.after(() => { town.stopTownScheduler(); closeDb(); });
   const roles = ['commissioner', 'supplier', 'workshop', 'cafe', 'clothing_shop', 'salon', 'massage', 'tavern', 'neighbor'];
   const jobs = ['委托员', '供货员', '工坊师傅', '咖啡师', '裁缝', '理发师', '按摩师', '酒馆掌柜', '散步居民'];

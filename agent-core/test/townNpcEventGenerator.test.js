@@ -85,3 +85,46 @@ test('town npc event id helpers only accept the town: prefix', () => {
   assert.equal(gen.parseTownNpcEventId(42), null);
   assert.equal(gen.townNpcEventRef(7), 'town:7');
 });
+
+test('ambient events anchor on two townsfolk and let the player step in at branch 1', async t => {
+  const db = getDb();
+  t.after(() => closeDb());
+  const npc = fakeNpc(db);
+  db.prepare(`INSERT INTO town_npcs(map_id, display_name, persona, brief, appearance_desc, job)
+    VALUES(1, '茶娘阿圆', '爱打听。', '茶摊主人', '圆脸、粗布裙', '茶摊主')`).run();
+  const other = db.prepare(`SELECT * FROM town_npcs WHERE display_name = '茶娘阿圆'`).get();
+
+  const seen = [];
+  const recordingLlm = payload => ({ chatSync: async msgs => { seen.push(msgs); return JSON.stringify(payload); } });
+  const llm = recordingLlm({ title: '茶摊挤爆了？！', description: '两位镇民围着茶摊忙个不停。',
+    prompt: '两位镇民在茶摊', choiceA: '上前帮忙招呼', choiceB: '坐下看热闹' });
+
+  const before = Date.now();
+  const event = await gen.generateTownNpcEvent(npc, {
+    customPrompt: '镇民小孙和茶娘阿圆在茶摊碰面，聊起了今天的稀罕事。',
+    ambient: true,
+    companionNpc: { name: other.display_name, appearance: other.appearance_desc, persona: other.persona },
+    locationName: '茶摊', locationKey: 'tea', manual: false,
+    worldId: 'w1', worldEpoch: 1, durationMin: 120,
+    llm, image: noImage,
+  });
+
+  // 落库口径：town.ambient 类型 + 120 分钟限时
+  assert.equal(event.event_type_key, 'town.ambient');
+  const durationMs = new Date(event.expires_at + 'Z').getTime() - before;
+  assert.ok(durationMs > 110 * 60_000 && durationMs <= 121 * 60_000, `expected ~120min, got ${durationMs}`);
+
+  // 开场 prompt：两位镇民同框、玩家不出场，同伴资料注入
+  const opening = seen.map(msgs => msgs.map(m => m.content).join('\n')).join('\n');
+  assert.ok(opening.includes('茶娘阿圆'), 'companion name should be injected');
+  assert.ok(opening.includes('不要描写玩家'), 'opening must keep the player out of the scene');
+  assert.ok(opening.includes('注意到了这场面') || opening.includes('介入'), 'choices should be about the player stepping in');
+
+  // 第一分支：提示玩家刚入场
+  seen.length = 0;
+  const branched = await gen.generateTownNpcNextBranch(npc, event, { choice: 'A', label: '上前帮忙招呼' },
+    { llm: recordingLlm({ description: '玩家挤进茶摊搭了把手。', prompt: '三人同框', choiceA: '一起收拾摊子', choiceB: '先付茶钱' }), image: noImage });
+  assert.equal(branched.current_branch, 1);
+  const branchText = seen.map(msgs => msgs.map(m => m.content).join('\n')).join('\n');
+  assert.ok(branchText.includes('玩家刚按选项介入'), 'first branch should bridge the player into the scene');
+});

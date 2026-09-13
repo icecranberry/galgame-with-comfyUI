@@ -1338,6 +1338,11 @@ export function fetchTownState() {
   return jsonRequest(`${BASE}/town/state`)
 }
 
+// 世界页在线打点：TownView 挂载期间定期调用，服务端据此开启相遇/气泡等页面演出
+export function townViewerHeartbeat() {
+  return jsonRequest(`${BASE}/town/viewer/heartbeat`, townJson('POST'))
+}
+
 // 玩家 token 移动（服务端寻路 + town_move 广播）
 export function moveTownPlayer(x, y, { worldId, worldEpoch } = {}) {
   return jsonRequest(`${BASE}/town/player/move`, {

@@ -23,11 +23,17 @@ export const useMomentsStore = defineStore('moments', () => {
     scrollToTopSignal.value++
   }
 
-  // 按角色筛选后的帖子
+  // 帖子作者的稳定标识：角色用数字 id，镇民用 'npc:{id}' 字符串
+  function authorOf(p) {
+    if (p.npc_id != null) return `npc:${p.npc_id}`
+    return p.character_id ?? null
+  }
+
+  // 按作者筛选后的帖子
   const filteredPosts = computed(() => {
     let result = posts.value
     if (filterCharacterId.value !== null) {
-      result = result.filter(p => p.character_id === filterCharacterId.value)
+      result = result.filter(p => authorOf(p) === filterCharacterId.value)
     }
     if (filterLiked.value) {
       result = result.filter(p => p.liked)
@@ -40,19 +46,20 @@ export const useMomentsStore = defineStore('moments', () => {
 
   const hasMore = computed(() => filteredPosts.value.length > page.value * PAGE_SIZE)
 
-  // 有帖子的角色列表（按最新帖子时间降序）
+  // 有帖子的作者列表（角色 + 镇民，按最新帖子时间降序）
   const charactersWithPosts = computed(() => {
     const map = new Map()
     for (const p of posts.value) {
-      const id = p.character_id
-      if (!id) continue
+      const id = authorOf(p)
+      if (id === null) continue
       const existing = map.get(id)
       const postTime = new Date(p.created_at || 0).getTime()
       if (!existing || postTime > existing._latestPostAt) {
         map.set(id, {
-          character_id: id,
+          author: id,
           display_name: p.display_name || '未知',
           avatar_path: p.avatar_path || '',
+          author_type: p.author_type || 'character',
           _latestPostAt: postTime,
         })
       }

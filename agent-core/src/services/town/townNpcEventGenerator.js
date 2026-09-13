@@ -23,6 +23,7 @@ import {
 } from '../eventNotificationBus.js';
 
 export const TOWN_NPC_EVENT_TYPE_KEY = 'town.custom';
+export const TOWN_NPC_AMBIENT_EVENT_TYPE_KEY = 'town.ambient';
 export const TOWN_NPC_EVENT_DURATION_MIN = 60;
 
 // ── ID 与素材工具 ──
@@ -108,6 +109,13 @@ function twoPersonImageNote(npc, playerName, playerAppearance) {
     + `描述清楚两人的外观、位置、互动动作。用句号分隔两人描述。`;
 }
 
+/** 环境奇遇开场：画面是两位镇民的同框，玩家尚未入场。 */
+function ambientImageNote(npc, companion) {
+  return `**双人画面**：prompt 中必须同时包含${npc.display_name}和${companion.name}两位镇民，画面中不要出现玩家。`
+    + `${npc.display_name}的外观：${npc.appearance_desc || '见资料'}；${companion.name}的外观：${companion.appearance || '见资料'}。`
+    + `描述清楚两人的外观、位置、互动动作。用句号分隔两人描述。`;
+}
+
 function townPlayerInfo(db) {
   const player = db.prepare("SELECT display_name, appearance_desc FROM town_players WHERE id='me'").get();
   return {
@@ -163,7 +171,10 @@ export async function generateTownNpcEvent(npc, options = {}) {
     ? { playerName: options.playerName, playerAppearance: '' }
     : townPlayerInfo(db);
   const displayName = npc.display_name;
-  const personaMsg = `以下是小镇镇民「${displayName}」的资料，供你参考ta的外貌、身份和行为模式：\n\n${npcPersonaBlock(npc, playerName, playerAppearance)}`;
+  const isAmbient = options.ambient === true;
+  const companion = isAmbient && options.companionNpc ? options.companionNpc : null;
+  const personaMsg = `以下是小镇镇民「${displayName}」的资料，供你参考ta的外貌、身份和行为模式：\n\n${npcPersonaBlock(npc, playerName, playerAppearance)}`
+    + (companion ? `\n\n另一位镇民「${companion.name}」的资料：\n${companion.name}的外观：${companion.appearance || '见资料'}；${companion.name}的资料：${companion.persona || '普通镇民'}` : '');
 
   const timeTag = getTimeTag(now, false);
   const weatherNote = getLightNoteWithWeather(now);
@@ -171,18 +182,30 @@ export async function generateTownNpcEvent(npc, options = {}) {
   const locationLine = options.locationName ? `起点地点：小镇的${options.locationName}。` : '';
 
   const imagePromptInstruction = imageRulesText
-    || `描述小镇场景、${displayName}的外观、${playerName}的外观、动作与氛围`;
-  const twoPersonNote = twoPersonImageNote(npc, playerName, playerAppearance);
+    || (isAmbient
+      ? `描述小镇场景、${displayName}的外观、${companion?.name || '另一位镇民'}的外观、动作与氛围`
+      : `描述小镇场景、${displayName}的外观、${playerName}的外观、动作与氛围`);
+  const twoPersonNote = isAmbient
+    ? ambientImageNote(npc, companion || { name: '另一位镇民', appearance: '' })
+    : twoPersonImageNote(npc, playerName, playerAppearance);
 
-  // [2] JSON 格式（与角色奇遇同构，字段约束按镇民奇遇改写）
+  // [2] JSON 格式（与角色奇遇同构，字段约束按镇民奇遇改写；ambient 开场玩家不在现场）
+  const sceneConstraint = isAmbient
+    ? `"description": "场景叙述（80-150字。不要像讲故事，而像镜头正在发生：镇民${displayName}和${companion?.name || '另一位镇民'}必须同时出现在现场，两人的动作与对话共同推进，此时玩家${playerName}还没有加入，不要描写玩家。行动需要符合当前天气和时间，但禁止直接提及天气时间）"`
+    : `"description": "场景叙述（80-150字。不要像讲故事，而像镜头正在发生：玩家${playerName}和${displayName}必须同时出现在现场，两人的动作与对话共同推进，叙述要能看出两人各自在做什么。行动需要符合当前天气和时间，但禁止直接提及天气时间）"`;
+  const choiceConstraint = isAmbient
+    ? `"choiceA": "选项A（具体行动，8-15字。是玩家${playerName}注意到这场面后可以立刻介入做的事——玩家在附近，随时能走近）",
+  "choiceB": "选项B（与A形成真正的行动对比——玩家介入的另一条路径，把奇遇往意料之外但符合小镇日常的情况发展。8-15字）"`
+    : `"choiceA": "选项A（具体行动，8-15字。是玩家${playerName}和${displayName}接下来真的会一起做的事）",
+  "choiceB": "选项B（与A形成真正的行动对比——把奇遇往意料之外但符合小镇日常的情况发展。8-15字）"`;
+
   const formatPrompt = `请严格按照以下 JSON 格式输出，不要任何解释或额外文字：
 
 {
   "title": "事件标题（≤8字，口语感叹。从你刚写完的现场里抓最戳人的那个瞬间，用当事人的第一反应喊出来——不要给事件'取名'。正确：这缸布全废了？！|你的手在抖啊。错误：裁缝铺的麻烦|意外的委托——这些是在概括事件。禁止万能感叹'天哪''不是吧'——必须带上这个奇遇的具体信息点）",
-  "description": "场景叙述（80-150字。不要像讲故事，而像镜头正在发生：玩家${playerName}和${displayName}必须同时出现在现场，两人的动作与对话共同推进，叙述要能看出两人各自在做什么。行动需要符合当前天气和时间，但禁止直接提及天气时间）",
+  ${sceneConstraint},
   "prompt": "${imagePromptInstruction}${weatherHint}${twoPersonNote}",
-  "choiceA": "选项A（具体行动，8-15字。是玩家${playerName}和${displayName}接下来真的会一起做的事）",
-  "choiceB": "选项B（与A形成真正的行动对比——把奇遇往意料之外但符合小镇日常的情况发展。8-15字）"
+  ${choiceConstraint}
 }
 
 选项设计原则：
@@ -191,6 +214,14 @@ export async function generateTownNpcEvent(npc, options = {}) {
 - 根据场景选择最合适的对比维度：做vs不做、直面vs绕开、自己解决vs求助、立刻vs等等、坦白vs保留、介入vs旁观`;
 
   // [3] 创作任务
+  const openingRoleLine = isAmbient
+    ? `你正在为小镇镇民「${displayName}」与「${companion?.name || '另一位镇民'}」的自发场景截取开场——玩家${playerName}此刻不在画面里，这段场景自己正在发生。`
+    : `你正在为小镇镇民「${displayName}」与玩家「${playerName}」的共同奇遇截取开场——这是两个人一起经历的事，不是其中任何一方的独角戏。`;
+
+  const ambientEntryNote = isAmbient
+    ? `\n【环境奇遇——镇民自发场景】\n这是镇民之间自发展开的场景：玩家${playerName}是路过或在附近的旅行者，正巧注意到这一幕。开场只写两位镇民的场景，不要描写玩家；选项A/B写的是玩家介入的两种方式，要给玩家留出自然的入场角度。\n`
+    : '';
+
   const directorPrompt = `事件方向：**${options.customPrompt || '一段小镇日常里的意外际遇'}**
 
 【人称】
@@ -203,7 +234,7 @@ export async function generateTownNpcEvent(npc, options = {}) {
 
 【结尾——停在行动门槛】
 结尾停在一个具体动作即将发生之前，下一步由玩家决定。
-
+${ambientEntryNote}
 ${timeTag}${locationLine}
 
 请以紧密第三人称创作这个奇遇的开场。场景长度 80-150 字。`;
@@ -212,7 +243,7 @@ ${timeTag}${locationLine}
     { role: 'system', content: jailbreakPrompt },
     ...(worldIntegrationBlock ? [{ role: 'system', content: worldIntegrationBlock }] : []),
     { role: 'system', content: formatPrompt },
-    { role: 'system', content: `你正在为小镇镇民「${displayName}」与玩家「${playerName}」的共同奇遇截取开场——这是两个人一起经历的事，不是其中任何一方的独角戏。
+    { role: 'system', content: `${openingRoleLine}
 
 ${worldPenetrationLine}
 【镇民锚定】${displayName}的行为必须贴合上面资料里的人格与小镇岗位职责；不要声称ta搬入了小镇、改变了工作岗位，或做出与身份相悖的事。
@@ -291,7 +322,9 @@ ${worldPenetrationLine}
     summary: eventData.description,
     image: imageUrl,
   }];
-  const expiresAt = new Date(now.getTime() + TOWN_NPC_EVENT_DURATION_MIN * 60 * 1000).toISOString();
+  const durationMin = Number.isSafeInteger(options.durationMin) && options.durationMin >= 5
+    ? Math.min(options.durationMin, 720) : TOWN_NPC_EVENT_DURATION_MIN;
+  const expiresAt = new Date(now.getTime() + durationMin * 60 * 1000).toISOString();
 
   const eventId = db.transaction(() => {
     options.beforePersist?.();
@@ -304,7 +337,7 @@ ${worldPenetrationLine}
     VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, '自由行动', 0, ?, ?, ?, ?, ?)
   `).run(
       npc.id,
-      TOWN_NPC_EVENT_TYPE_KEY,
+      isAmbient ? TOWN_NPC_AMBIENT_EVENT_TYPE_KEY : TOWN_NPC_EVENT_TYPE_KEY,
       eventData.title,
       eventData.description,
       imageUrl,
@@ -418,6 +451,9 @@ ${historyText}
       ...(worldIntegrationBlock ? [{ role: 'system', content: worldIntegrationBlock }] : []),
       { role: 'system', content: formatPrompt },
       { role: 'system', content: `你正在为小镇镇民「${displayName}」与玩家「${playerName}」的共同奇遇生成下一幕——上一幕中玩家做出了选择，现在展现选择之后发生的事情，选择已经完成，描述的是选择的结果。${displayName}的行为必须贴合ta的人格与小镇岗位职责。
+${event.event_type_key === TOWN_NPC_AMBIENT_EVENT_TYPE_KEY && event.current_branch === 0
+    ? `\n这是由镇民自发场景升级成的奇遇：开场时玩家${playerName}还在画面之外，现在${playerName}刚按选项介入现场——本幕要自然描写${playerName}走进这一幕的衔接，之后的画面里${playerName}与${displayName}同框。`
+    : ''}
 
 ${worldPenetrationLine}
 【天气约束】description中行动需要符合当前天气和时间，但禁止直接提及天气时间` },

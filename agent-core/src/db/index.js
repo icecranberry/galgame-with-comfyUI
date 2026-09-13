@@ -223,7 +223,8 @@ function initSchema(db) {
     -- 朋友圈帖子表
     CREATE TABLE IF NOT EXISTS moment_posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,  -- 入住角色作者；镇民作者时为 NULL（二选一，见下方 CHECK）
+      npc_id INTEGER REFERENCES town_npcs(id) ON DELETE CASCADE,         -- 镇民作者；角色作者时为 NULL
       content TEXT NOT NULL,
       images TEXT DEFAULT '[]',
       prompt TEXT,
@@ -231,7 +232,8 @@ function initSchema(db) {
       resolution TEXT DEFAULT '1600x1200',
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
       error_message TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CHECK ((character_id IS NULL) != (npc_id IS NULL))
     );
 
     -- 朋友圈评论表
@@ -1237,6 +1239,56 @@ function migrateRollingSummaryCheckpointSchema(db) {
   }
 }
 
+/** 镇民朋友圈：moment_posts 作者扩展为「角色或镇民二选一」。
+ * 老库的 character_id 带 NOT NULL，只能整体重建才能挂 npc_id；
+ * FK 子表（评论/点赞）按表名解析，重建后自动指向新表。 */
+export function migrateMomentPostNpcAuthors(db) {
+  const cols = db.prepare('PRAGMA table_info(moment_posts)').all();
+  const charCol = cols.find(c => c.name === 'character_id');
+  if (!charCol) return;
+  if (!charCol.notnull) {
+    if (!cols.find(c => c.name === 'npc_id')) {
+      db.exec(`ALTER TABLE moment_posts ADD COLUMN npc_id INTEGER REFERENCES town_npcs(id) ON DELETE CASCADE`);
+      console.log('[db] Added moment_posts.npc_id column');
+    }
+    return;
+  }
+  const rebuild = () => {
+    db.exec(`
+      CREATE TABLE moment_posts_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+        npc_id INTEGER REFERENCES town_npcs(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        images TEXT DEFAULT '[]',
+        prompt TEXT,
+        style TEXT,
+        resolution TEXT DEFAULT '1600x1200',
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        CHECK ((character_id IS NULL) != (npc_id IS NULL))
+      );
+      INSERT INTO moment_posts_new (id, character_id, npc_id, content, images, prompt, style, resolution, status, error_message, created_at)
+        SELECT id, character_id, NULL, content, images, prompt, style, resolution, status, error_message, created_at FROM moment_posts;
+      DROP TABLE moment_posts;
+      ALTER TABLE moment_posts_new RENAME TO moment_posts;
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(status);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_npc ON moment_posts(npc_id, created_at DESC);
+    `);
+  };
+  const fkWasOn = db.pragma('foreign_keys', { simple: true });
+  if (fkWasOn) db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(rebuild)();
+    console.log('[db] Rebuilt moment_posts to support town npc authors');
+  } finally {
+    if (fkWasOn) db.pragma('foreign_keys = ON');
+  }
+}
+
 function migrateMomentsSchema(db) {
   try {
     const cols = db.prepare(`PRAGMA table_info(characters)`).all();
@@ -1248,6 +1300,7 @@ function migrateMomentsSchema(db) {
       db.exec(`ALTER TABLE characters ADD COLUMN moments_disabled INTEGER DEFAULT 0`);
       console.log('[db] Added characters.moments_disabled column (default 0)');
     }
+    migrateMomentPostNpcAuthors(db);
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);
   }

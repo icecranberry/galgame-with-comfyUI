@@ -709,7 +709,7 @@ onBeforeUnmount(() => {
 .share-hero-hint {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  top: 14px;
   transform: translateX(-50%);
   z-index: 3;
   display: flex;
@@ -841,7 +841,7 @@ onBeforeUnmount(() => {
   }
 
   .share-hero-hint {
-    bottom: 10px;
+    top: 10px;
     padding: 3px 12px;
   }
 

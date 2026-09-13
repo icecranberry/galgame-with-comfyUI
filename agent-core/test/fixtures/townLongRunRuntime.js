@@ -24,7 +24,7 @@ export function createReplay(t) {
   config.dbPath = ':memory:';
   const db = getDb(); assert.equal(db.name, ':memory:');
   config.features.town = true; config.features.townLLM = false;
-  Object.assign(config.town,{simulation:'legacy',economyEnabled:false,liquidityEnabled:false,
+  Object.assign(config.town,{economyEnabled:false,liquidityEnabled:false,
     playerSpeed:1,npcSpeed:1,maxActiveEncounters:0,timeZone:'Asia/Shanghai'});
   const grid = () => Array.from({length:6},()=>Array(6).fill(null));
   const {mapId} = saveMap({name:'long-run runtime fixture',cols:6,rows:6,

@@ -8,7 +8,8 @@
  *                  由 config.features.townAutoLLM 统一控制：关闭时这两个 tick 驱动的自动
  *                  生成不再调用模型（相遇仍照常发生，只是静默）；玩家主动发起的 NPC 交谈
  *                  与互动奇遇不受影响，仍由 config.features.townLLM 决定。
- *   L3 记忆回写：  角色×角色相遇摘要 → memory_fragments；NPC 对话历史由 townNpcService 落库
+ *   L3 记忆回写：  相遇摘要入账为 town.encounter.happened 事件 → townExperienceService 沉淀双方
+ *                  经历与角色记忆；NPC 对话历史由 townNpcService 落库
  *
  * 状态原则：服务端权威 + 内存为准；坐标只在换目标/换活动时落库，
  * 进程重启后由「作息/日程 + 当前时刻」重建（town_agent_state 仅是恢复快照）。
@@ -25,11 +26,13 @@ import { createTownClock } from './townClock.js';
 import { createTownSimulation } from './townSimulation.js';
 import { createEconomyService } from './economyService.js';
 import { maintainTownLife } from './townEconomyRuntime.js';
+import { createTownEventService } from './townEventService.js';
+import { TOWN_EXPERIENCE_CONSUMER } from './townExperienceService.js';
+import { generateTownNpcEvent, TOWN_NPC_AMBIENT_EVENT_TYPE_KEY } from './townNpcEventGenerator.js';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { getCurrentActivity, isSleeping } from '../scheduleManager.js';
-import { applyMemoryActions } from '../memory/memoryRepository.js';
 import { getTimeLight, getSeason } from '../timeLight.js';
 import { createTownWeatherFacts } from './townWeatherFacts.js';
 import { getWeatherSourceKey } from '../weatherSource.js';
@@ -170,6 +173,21 @@ function readTownWeather(now = Date.now()) {
 function isRaining() {
   const weather = readTownWeather();
   return weather.status === 'known' && weather.precipitation === 'rain';
+}
+
+// ── 世界页在线状态 ──
+// 前端 TownView 挂载期间定期打点（POST /town/viewer/heartbeat）；超过 TTL 没有心跳
+// 即视为无人观看。相遇对话、环境奇遇升级、批量状态气泡都属于「给人看」的 LLM 消耗，
+// 无人观看时 tick 跳过它们，页面回来自动恢复。
+const VIEWER_TTL_MS = 45_000;
+let lastViewerSeenAt = 0;
+
+export function touchTownViewer() {
+  lastViewerSeenAt = Date.now();
+}
+
+export function hasTownViewers() {
+  return Date.now() - lastViewerSeenAt < VIEWER_TTL_MS;
 }
 
 // ── 启动 / 状态装载 ──
@@ -333,7 +351,6 @@ function initializeSimulation() {
   state.simulation = createTownSimulation({ db,
     registry: createTownActorRegistry(db),
     clock: createTownClock({ timeZone: config.town.timeZone || 'Asia/Shanghai' }),
-    mode: config.town.simulation === 'rules' ? 'rules' : 'legacy',
     leaseMs: Math.max(180000, config.town.tickSeconds * 3000),
     readActorFacts: readSimulationFacts,
     moveToTarget: ({ actor, action, target, nowUtcMs }) => {
@@ -353,12 +370,9 @@ function initializeSimulation() {
   });
 }
 
-function reconcileSimulationScope(now) {
+function reconcileSimulationScope() {
   const selected = new Set();
-  if (config.town.simulation === 'rules') {
-    for (const agent of state.agents.values()) if (agent.actorId) selected.add(agent.actorId);
-  }
-  state.simulation?.setMode(selected.size ? 'rules' : 'legacy');
+  for (const agent of state.agents.values()) if (agent.actorId) selected.add(agent.actorId);
   for (const actorId of state.simulationActorIds) {
     if (!selected.has(actorId)) state.simulation?.cancelActor(actorId,'SIMULATION_SCOPE_ENDED');
   }
@@ -366,9 +380,9 @@ function reconcileSimulationScope(now) {
   return selected;
 }
 
-function tickTownSimulation(now = Date.now(), selected = reconcileSimulationScope(now)) {
-  if (config.town.simulation === 'rules') state.simulation?.tick();
-  else state.simulation?.tick({ actorIds: [...selected] });
+function tickTownSimulation() {
+  reconcileSimulationScope();
+  state.simulation?.tick();
 }
 
 function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
@@ -431,11 +445,10 @@ function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {
       && intent !== 'off_town',
     durationMs: 15 * 60000, minDurationMs: 60000 };
   const enriched = facts;
-  if (config.town.simulation !== 'rules' || !agent || hasOriginalTask
+  if (!agent || hasOriginalTask
       || !enriched.allowsAction || enriched.intent !== 'wait' || enriched.target !== null
       || enriched.scheduleKey !== facts.scheduleKey) return enriched;
-  // Keep legacy's default rest window out of new weather behavior; do not change
-  // rules sleep semantics or an explicit night-owl preference here.
+  // Do not change rules sleep semantics or an explicit night-owl preference here.
   const localMinute = townLocalTime(nowUtcMs).minuteOfDay;
   if (agent.kind === 'npc' && !agent.traits?.nightOwl && (localMinute >= 23 * 60 || localMinute < 6 * 60)) return enriched;
   const db = getDb();
@@ -553,7 +566,11 @@ function restoreAgent(agentKey, meta, savedRow, anchorLoc) {
 // ── L0 确定性移动 ──
 
 function advanceAgent(agent, now) {
-  advanceAgentPosition(agent, now);
+  if (advanceAgentPosition(agent, now) && agent.stroll?.targetKey) {
+    // 游走到站：停留一段时间再换下一个目的地
+    const loc = state.locations.find(l => l.key === agent.stroll.targetKey);
+    if (loc && agent.targetLocId === loc.id) agent.stroll.restUntil = now + TOWN_STROLL_REST_MS;
+  }
 }
 
 function advancePlayer(now) {
@@ -635,71 +652,10 @@ function locationFromKey(key) {
   return state.locations.find(l => l.key === key) || state.matcher(key) || null;
 }
 
-function refreshNpcAgent(agent, now) {
-  if (isChatHeld(agent, now)) return; // 对话驻留：正与玩家交谈，作息与游走先冻结
-  const slot = getRoutineSlot(agent, now);
-  const hour = Math.floor(townLocalTime(now).minuteOfDay / 60);
-  const isNight = hour >= 23 || hour < 6;
-
-  if (!slot && isNight && !agent.traits?.nightOwl) {
-    // 无作息覆盖的深夜 → 睡觉（在家/任一地点）
-    const home = agent.refId ? (getDb().prepare('SELECT home_location_id FROM town_npcs WHERE id = ?').get(agent.refId)?.home_location_id) : null;
-    const loc = state.locations.find(l => l.id === home) || state.locations[0];
-    agent.sleeping = true;
-    agent.activityText = '睡得正香';
-    if (loc && loc.id !== agent.targetLocId && agent.encounterId === null) assignTarget(agent, loc, now);
-    return;
-  }
-
-  agent.sleeping = false;
-
-  let loc = null;
-  if (slot) {
-    if (slot.locationKey === 'home') {
-      const home = agent.refId ? (getDb().prepare('SELECT home_location_id FROM town_npcs WHERE id = ?').get(agent.refId)?.home_location_id) : null;
-      loc = state.locations.find(l => l.id === home) || null;
-    } else {
-      loc = locationFromKey(slot.locationKey);
-    }
-    agent.activityText = slot.activity || agent.activityText || '忙着自己的事';
-  }
-
-  if (!loc) {
-    // 空闲时段：按 traits 偏好伪随机选地闲逛（雨天少外出）
-    loc = pickWanderLocation(agent);
-    if (loc) agent.activityText = agent.activityText && agent.activityText !== '睡得正香' ? agent.activityText : '在镇上闲逛';
-  }
-
-  if (agent.encounterId !== null) return; // 相遇中：原地聊天
-  if (loc && loc.id !== agent.targetLocId) {
-    const wanderProb = isRaining() ? 0.06 : 0.15;
-    if (Math.random() < Math.max(0.5, wanderProb * 3)) assignTarget(agent, loc, now);
-    else agent.activityText = agent.activityText || '在镇上闲逛';
-  } else if (loc && agent.path === null && Math.random() < (isRaining() ? 0.03 : 0.08)) {
-    assignTarget(agent, loc, now); // 同一地点小游走
-  }
-}
-
-function pickWanderLocation(agent) {
-  if (state.locations.length === 0) return null;
-  const outdoorPref = Math.max(0, Math.min(1, agent.traits?.outdoor ?? 0.5));
-  const weighted = [];
-  for (const l of state.locations) {
-    const w = l.kind === 'outdoor' ? 0.4 + outdoorPref : 0.4 + (1 - outdoorPref);
-    weighted.push({ l, w });
-  }
-  const total = weighted.reduce((s, i) => s + i.w, 0);
-  let r = Math.random() * total;
-  for (const { l, w } of weighted) {
-    r -= w;
-    if (r <= 0) return l;
-  }
-  return state.locations[0];
-}
-
 // ── 居民游走（模拟引擎事实层）：除睡觉与营业在岗外，全镇到处走动 ──
 
-const TOWN_STROLL_PERIOD_MS = 15_000;    // 换游走目的地的时间桶
+const TOWN_STROLL_PERIOD_MS = 30_000;    // 换游走目的地的时间桶
+const TOWN_STROLL_REST_MS = 60_000;      // 到站后的停留时长
 
 const strollHash = (key, seed) => {
   let h = seed >>> 0;
@@ -709,7 +665,7 @@ const strollHash = (key, seed) => {
 
 /** 当前时间桶的游走目的地（全镇非住宅地点）。桶内（以及行走中）重复读到的事实必须稳定，
  * 否则引擎会不停 SCHEDULE_CHANGED；雨天原地歇脚让位给避雨，深夜安静；
- * 正在前往/脚下的地点不重选，保证每个桶都真的迈步。 */
+ * 正在前往/脚下的地点不重选，保证每个桶都真的迈步；到站后停留 TOWN_STROLL_REST_MS 再启程。 */
 function pickStrollLocation(agent, nowUtcMs) {
   if (isRaining()) return null;
   const localMinute = townLocalTime(nowUtcMs).minuteOfDay;
@@ -723,48 +679,14 @@ function pickStrollLocation(agent, nowUtcMs) {
     agent.stroll = { bucket, targetKey: null };
     return null;
   }
+  // 到站停留中：原地不动，等 restUntil 过了再选下一个目的地
+  if (Number.isSafeInteger(agent.stroll.restUntil) && nowUtcMs < agent.stroll.restUntil) return null;
   const candidates = state.locations.filter(l => l.kind !== 'home' && Number.isInteger(l.x) && Number.isInteger(l.y)
     && l.id !== agent.targetLocId
     && Math.max(Math.abs(l.x - agent.x), Math.abs(l.y - agent.y)) > (l.radius ?? 2));
   const targetKey = candidates.length ? candidates[strollHash(agent.agentKey, bucket) % candidates.length].key : null;
   agent.stroll = { bucket, targetKey };
   return state.locations.find(l => l.key === targetKey) || null;
-}
-
-function refreshCharAgent(agent, now) {
-  if (isChatHeld(agent, now)) return; // 对话驻留：正与玩家交谈，日程游走先冻结
-  const meta = state.meta.get(agent.agentKey);
-  if (!meta) return;
-
-  let sleeping = false;
-  let act = null;
-  try {
-    const sleepState = isSleeping(agent.refId, new Date(now));
-    sleeping = !!sleepState.sleeping;
-    act = getCurrentActivity(agent.refId, new Date(now));
-    if (act && act.replyDelay === -1) sleeping = true;
-  } catch { /* 日程系统异常时按自由活动处理 */ }
-
-  agent.sleeping = sleeping;
-
-  let loc = null;
-  if (sleeping) {
-    loc = getHomeLocation(agent.refId);
-    agent.activityText = '睡得正香';
-  } else if (act) {
-    loc = state.matcher(act.location) || pickWanderLocation(agent);
-    agent.activityText = act.activity || agent.activityText || '自由时间';
-  } else {
-    loc = pickWanderLocation(agent);
-    if (!agent.activityText) agent.activityText = '自由时间';
-  }
-
-  if (agent.encounterId !== null) return;
-  if (loc && loc.id !== agent.targetLocId) {
-    assignTarget(agent, loc, now);
-  } else if (loc && agent.path === null && Math.random() < 0.08) {
-    assignTarget(agent, loc, now);
-  }
 }
 
 // ── L1 规则触发 ──
@@ -897,8 +819,10 @@ function endEncounter(enc, now) {
     .run(new Date(now).toISOString().slice(0, 19).replace('T', ' '), enc.id);
   broadcastTownEncounterEnd({ id: enc.id });
 
-  if (enc.messages.length > 0 && enc.a.startsWith('char:') && enc.b.startsWith('char:')) {
+  if (enc.messages.length > 0) {
+    // 任何组合（镇民×镇民 / 镇民×角色 / 角色×角色）的相遇都沉淀摘要并入账经历
     enqueueLlm(() => runEncounterSummary(enc));
+    maybeUpgradeToAmbientStory(enc, now);
   }
 }
 
@@ -1066,35 +990,103 @@ async function runEncounterSummary(enc) {
     if (enc.generation !== state.generation) return;
     const parsed = safeJsonParse(content);
     const summary = String(parsed?.summary || '').trim().slice(0, 120);
-    const tags = (Array.isArray(parsed?.tags) ? parsed.tags : [])
-      .map(t => String(t).trim().slice(0, 8)).filter(Boolean).slice(0, 4);
     if (!summary) return;
 
     const db = getDb();
     db.prepare('UPDATE town_encounters SET summary = ? WHERE id = ?').run(summary, enc.id);
 
-    try {
-      applyMemoryActions({
-        conversationId: `town_enc_${enc.id}`,
-        sourceRawStartId: null,
-        sourceRawEndId: null,
-        actions: [{
-          action: 'create',
-          sourceMemoryIds: [],
-          memory: {
-            memoryType: 'event',
-            subject: 'character',
-            judgment: summary,
-            reasoning: `${metaA.displayName}与${metaB.displayName}在${enc.location.name}的小镇相遇对话`,
-            tags: [...new Set([...tags, '小镇相遇'])].slice(0, 6),
-          },
-        }],
-      });
-    } catch (memErr) {
-      console.warn('[town] encounter memory writeback failed:', memErr?.message || memErr);
-    }
+    // 相遇入账：townExperienceService 消费后写入双方 town_experiences（角色侧自动写记忆）
+    settleEncounterExperience(enc, summary);
   } catch (err) {
     console.warn('[town] encounter summary failed:', err?.message || err);
+  }
+}
+
+/** 相遇经历事件服务：只在 townService 侧追加，校验由这里的 validators 承担。 */
+let encounterEvents = null;
+function encounterEventService() {
+  if (!encounterEvents) {
+    encounterEvents = createTownEventService({
+      db: getDb(), clock: { now: Date.now },
+      getWorldEpoch: worldId => createTownActorRegistry(getDb()).getWorldEpoch(worldId),
+      validators: {
+        'town.encounter.happened': payload => !!payload && Number.isSafeInteger(payload.encounterId)
+          && payload.encounterId > 0 && typeof payload.summary === 'string'
+          && payload.summary.trim().length > 0 && payload.summary.length <= 200,
+      },
+    });
+  }
+  return encounterEvents;
+}
+
+function settleEncounterExperience(enc, summary) {
+  try {
+    const world = state.world;
+    const actorIds = [enc.a, enc.b].map(key => state.meta.get(key)?.actorId).filter(Boolean);
+    if (!world || actorIds.length !== 2) return;
+    encounterEventService().append({
+      eventId: `encounter:${enc.id}`, worldId: world.worldId, worldEpoch: world.epoch,
+      type: 'town.encounter.happened', occurredAt: Date.now(),
+      actorIds, locationKey: enc.location?.key || null,
+      source: { system: 'town.encounters', entityId: `encounter:${enc.id}` },
+      payload: { encounterId: enc.id, summary: String(summary).slice(0, 200) },
+    }, [TOWN_EXPERIENCE_CONSUMER]);
+  } catch (err) {
+    console.warn('[town] encounter experience settlement failed:', err?.message || err);
+  }
+}
+
+function ambientStoryCountToday(db) {
+  const active = db.prepare(`SELECT count(*) n FROM town_npc_events
+    WHERE event_type_key = ? AND created_at >= datetime('now', '-24 hours')`).get(TOWN_NPC_AMBIENT_EVENT_TYPE_KEY).n;
+  const history = db.prepare(`SELECT count(*) n FROM town_npc_event_history
+    WHERE event_type_key = ? AND created_at >= datetime('now', '-24 hours')`).get(TOWN_NPC_AMBIENT_EVENT_TYPE_KEY).n;
+  return active + history;
+}
+
+/** 环境奇遇钩子：NPC×NPC 相遇后有概率升级为一条镇民奇遇（town.ambient），进玩家奇遇列表。 */
+function maybeUpgradeToAmbientStory(enc) {
+  try {
+    if (!config.features.townLLM || !config.features.townAutoLLM || !config.features.events) return;
+    if (!hasTownViewers()) return; // 无人观看不消耗 LLM（残留相遇收尾时同样不升级）
+    if (!state.world) return;
+    if (Math.random() >= (config.town.ambientStoryProb ?? 0)) return;
+    const metaA = state.meta.get(enc.a), metaB = state.meta.get(enc.b);
+    if (!metaA || !metaB) return;
+    if (metaA.kind !== 'npc' || metaB.kind !== 'npc') return; // 环境奇遇只锚定镇民；角色相遇走角色管线
+    const db = getDb();
+    if (ambientStoryCountToday(db) >= (config.town.ambientStoryDailyCap ?? 0)) return;
+    const npcRow = db.prepare('SELECT * FROM town_npcs WHERE id = ? AND town_enabled = 1').get(metaA.refId);
+    const companionRow = db.prepare('SELECT display_name, appearance_desc, persona FROM town_npcs WHERE id = ?').get(metaB.refId);
+    if (!npcRow || !companionRow) return;
+
+    const owner = npcRow;
+    const transcript = enc.messages.slice(-4)
+      .map(m => `${(m.speakerAgentKey === enc.a ? metaA : metaB).displayName}：${m.content}`)
+      .join('\n');
+    const customPrompt = `镇民${metaA.displayName}和${metaB.displayName}刚在${enc.location.name}碰面，聊了几句：\n${transcript}\n以${owner.display_name}为主角、${companionRow.display_name}为同伴，从这次碰面出发，展开一段正在发生的小镇日常奇遇。`;
+
+    enqueueLlm(async () => {
+      try {
+        if (ambientStoryCountToday(db) >= (config.town.ambientStoryDailyCap ?? 0)) return;
+        await generateTownNpcEvent(owner, {
+          customPrompt,
+          ambient: true,
+          companionNpc: { name: companionRow.display_name, appearance: companionRow.appearance_desc, persona: companionRow.persona },
+          locationName: enc.location?.name || null,
+          locationKey: enc.location?.key || null,
+          manual: false,
+          worldId: state.world?.worldId ?? null,
+          worldEpoch: state.world?.epoch ?? null,
+          durationMin: config.town.ambientStoryDurationMin,
+        });
+        console.log(`[town] ambient story spawned from encounter #${enc.id} (${owner.display_name} × ${companionRow.display_name})`);
+      } catch (err) {
+        if (err?.message !== 'ALREADY_ACTIVE_EVENT') console.warn('[town] ambient story failed:', err?.message || err);
+      }
+    });
+  } catch (err) {
+    console.warn('[town] ambient story hook failed:', err?.message || err);
   }
 }
 
@@ -1260,22 +1252,23 @@ function tick() {
     }
     if (now - state.lastMoodRefreshAt > 5 * 60_000) refreshMoods();
     synchronizeMembership();
-    const simulatedActors = reconcileSimulationScope(now);
     for (const agent of state.agents.values()) {
       advanceAgent(agent, now);
-      if (config.town.simulation !== 'rules' && !simulatedActors.has(agent.actorId)) {
-        if (agent.kind === 'npc') refreshNpcAgent(agent, now);
-        else refreshCharAgent(agent, now);
-      }
     }
-    tickTownSimulation(now,simulatedActors);
+    tickTownSimulation();
     maintainTownLife();
-    if (config.town.simulation === 'rules') broadcastTownStateUpdated({ reason: 'simulation_tick' });
+    broadcastTownStateUpdated({ reason: 'simulation_tick' });
     advancePlayer(now);
     playerNearbyReactions(now);
-    scanEncounters(now);
+    // 无人观看时不开新相遇、不发状态气泡：相遇对话/环境奇遇/气泡都是页面演出，
+    // 有 LLM 成本；expireEncounters 保留，把残留相遇正常收尾。
+    if (hasTownViewers()) {
+      scanEncounters(now);
+    }
     expireEncounters(now);
-    maybeStatusBubbles(now);
+    if (hasTownViewers()) {
+      maybeStatusBubbles(now);
+    }
     for (const agent of state.agents.values()) {
       if (agent.dirty) persistAgent(agent);
     }
@@ -1293,7 +1286,6 @@ const TOWN_SIM_SUBTICK_MS = 5000;
 
 function simSubTick() {
   if (!state.running || !state.map) return;
-  if (config.town.simulation !== 'rules') return;
   try {
     tickTownSimulation(Date.now());
   } catch (err) {
@@ -1700,7 +1692,8 @@ export async function generateCharacterSprites(characterId, { expectedWorld = ca
     assertCurrent();
     const key = `char_${characterId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
-    if (existing?.status === 'ready' && (refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) === 'current')) continue;
+    // 未记录外观签名的素材（老图/上传图）不视为过时，只有明确 needs_update 才重绘
+    if (existing?.status === 'ready' && (refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) !== 'needs_update')) continue;
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
       assertCurrent();
@@ -1833,7 +1826,6 @@ export async function ensureCharacterTownAssets(characterId) {
 }
 
 const TOWN_SETTING_FIELDS = {
-  simulation: { type: 'enum', values: ['legacy', 'rules'] },
   timeZone: { type: 'timezone' },
   tickSeconds: { min: 20, max: 300, type: 'int' },
   npcSpeed: { min: 0.1, max: 4, type: 'float' },
@@ -1848,6 +1840,7 @@ const TOWN_SETTING_FIELDS = {
   propDensity: { min: 0.5, max: 40, type: 'float' },
   mapSize: { min: 30, max: 80, type: 'int' },
   aiLayoutOptimize: { type: 'boolean' },
+  npcMomentsDisabled: { type: 'boolean' },
 };
 
 export function getTownSettings() {
@@ -1913,12 +1906,7 @@ export function updateTownSettings(patch = {}) {
       clearInterval(state.timer);
       state.timer = setInterval(tick, config.town.tickSeconds * 1000);
     }
-    if (applied.simulation || applied.timeZone || applied.tickSeconds) {
-      if (applied.simulation === 'legacy') {
-        state.simulation?.setMode('legacy');
-        state.simulation?.tick();
-        for (const agent of state.agents.values()) agent.presence = 'town';
-      }
+    if (applied.timeZone || applied.tickSeconds) {
       initializeSimulation();
       broadcastTownStateUpdated({ reason: 'settings_changed' });
     }

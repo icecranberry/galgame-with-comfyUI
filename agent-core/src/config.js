@@ -103,7 +103,6 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     townAutoLLM: process.env.FEATURE_TOWN_AUTO_LLM !== 'false', // 默认开：小镇「自动/定时」LLM 事件（tick 驱动的相遇对话+摘要、批量状态气泡）；关闭只影响后台自动生成，玩家主动发起的 NPC/工坊对话仍走模型
   },
   town: {
-    simulation: process.env.TOWN_SIMULATION === 'rules' ? 'rules' : 'legacy',
     timeZone: process.env.TOWN_TIME_ZONE || 'Asia/Shanghai',
     tickSeconds: Math.max(20, Math.min(300, parseInt(process.env.TOWN_TICK_SECONDS, 10) || 60)), // 模拟步长（真实秒）
     npcSpeed: 0.5,        // NPC 移动速度（格/秒），服务端推进与前端插值共用
@@ -114,6 +113,17 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     encounterRelatedProb: 0.28,  // 有关系角色同地点相遇概率（每 tick）
     encounterStrangerProb: 0.05, // 陌生人相遇概率（用于发展新关系）
     statusBubbleIntervalMin: 45, // 批量状态气泡间隔（分钟）
+    // 环境奇遇：镇民相遇后有概率升级为一条可参与的镇民奇遇（进玩家奇遇列表）
+    ambientStoryProb: 0.12,          // 每场 NPC×NPC 相遇的升级概率
+    ambientStoryDailyCap: 2,         // 全镇每天环境奇遇上限（历史表按 event_type_key=town.ambient 计数）
+    ambientStoryDurationMin: 120,    // 环境奇遇限时（分钟；比玩家发起的 60 分钟长，留出发现时间）
+    // 镇民朋友圈：镇民会把今天遇到的事发进朋友圈（moment_posts，npc_id 作者）
+    npcMomentsDisabled: false, // 管理面板开关：禁止镇民发朋友圈（默认允许）
+    npcMoments: {
+      minGapHours: 3,      // 同一镇民两次发帖的最小间隔
+      maxGapHours: 10,     // 两次发帖的最大间隔
+      dailyCap: 4,         // 全镇每天镇民帖子上限
+    },
     // 布图密度：每 1000 格的目标对象数。原建筑均值约 2.8，默认提升 50% 后为 4.2；
     // 道具必须始终高于建筑，由 updateTownSettings 统一夹紧。
     buildingDensity: 4.2,

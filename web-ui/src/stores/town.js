@@ -303,10 +303,19 @@ export const useTownStore = defineStore('town', () => {
   let _refs = 0
   const _unsubs = []
 
+  // 世界页在线心跳：服务端用「最近一次打点时间」判断有没有人开着小镇，
+  // 无人观看时跳过相遇对话/环境奇遇/状态气泡等 LLM 演出（间隔需小于服务端 45s TTL）
+  let _viewerHeartbeatTimer = null
+  function _sendViewerHeartbeat() {
+    api.townViewerHeartbeat().catch(() => {})
+  }
+
   function startTownStream() {
     _refs++
     if (_refs > 1) return
     fetchState().catch(err => console.warn('[town] initial fetch failed:', err?.message))
+    _sendViewerHeartbeat()
+    _viewerHeartbeatTimer = setInterval(_sendViewerHeartbeat, 15_000)
     _unsubs.push(
       onEvent('connected', () => {
         connected.value = true
@@ -372,6 +381,10 @@ export const useTownStore = defineStore('town', () => {
     ++_previewRequest
     _agentMoveGenerations.clear()
     mapLoading.value = false
+    if (_viewerHeartbeatTimer) {
+      clearInterval(_viewerHeartbeatTimer)
+      _viewerHeartbeatTimer = null
+    }
     while (_unsubs.length) _unsubs.pop()()
     if (_agentSpriteRefreshTimer) {
       clearTimeout(_agentSpriteRefreshTimer)

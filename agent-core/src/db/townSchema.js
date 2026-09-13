@@ -41,6 +41,11 @@ export function migrateTownSchema(db) {
         archived: 'INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))',
         merged_into: 'TEXT REFERENCES town_actors(actor_id)',
       }],
+      // town_npcs 的必需列刻意只校验 id：极简测试夹具可能省略 map_id 等业务列。
+      ['town_npcs', ['id'], {
+        next_moment_at: 'DATETIME',
+        moments_disabled: 'INTEGER NOT NULL DEFAULT 0',
+      }],
     ]) {
       const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
       for (const name of required) {

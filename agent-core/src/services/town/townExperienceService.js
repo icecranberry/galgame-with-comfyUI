@@ -12,7 +12,12 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
   const calendar = createTownClock({ timeZone });
   function facts(event) {
     if (event.presentationOnly || event.visibility === 'public') return null;
-    if (event.type !== 'town.gift.given') return null;
+    if (event.type === 'town.gift.given') return giftFacts(event);
+    if (event.type === 'town.encounter.happened') return encounterFacts(event);
+    return null;
+  }
+
+  function giftFacts(event) {
     const payload = event.payload || {};
     const item = db.prepare(`SELECT id, template_id, name, source_id, owner_key FROM backpack_items
       WHERE id = ? AND world_id = ? AND source_type = 'reward'`).get(payload.itemId, event.worldId);
@@ -25,6 +30,33 @@ export function createTownExperienceService({ db, clock, registry, writeMemory, 
       ? db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(npcActor.npcId)?.display_name || '邻居' : '邻居';
     return { actorIds: [...new Set([payload.npcActorId])],
       summary: `${npcName}送了玩家一份「${item.name}」的小心意。`, locationKey: event.locationKey ?? null };
+  }
+
+  /** 相遇经历：只有已收尾且摘要落库的 town_encounters 行授权一条经历；参与人就是事件的 actorIds。 */
+  function encounterFacts(event) {
+    const payload = event.payload || {};
+    if (!Number.isSafeInteger(payload.encounterId) || typeof payload.summary !== 'string'
+      || !payload.summary.trim() || payload.summary.length > 200
+      || !Array.isArray(event.actorIds) || event.actorIds.length !== 2
+      || new Set(event.actorIds).size !== 2) throw townError('EXPERIENCE_SOURCE_INVALID');
+    const row = db.prepare('SELECT id, summary, status FROM town_encounters WHERE id = ?').get(payload.encounterId);
+    if (!row || row.status !== 'done' || row.summary !== payload.summary) throw townError('EXPERIENCE_SOURCE_INVALID');
+    const names = event.actorIds.map(actorId => {
+      const actor = sync(registry.getActor(actorId, event.worldId, { followMerged: false }));
+      if (!actor || actor.actorId !== actorId || actor.archived || actor.mergedInto) throw townError('EXPERIENCE_SOURCE_INVALID');
+      if (actor.npcExists) {
+        return db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(actor.npcId)?.display_name || '邻居';
+      }
+      if (actor.characterExists) {
+        return db.prepare('SELECT display_name FROM characters WHERE id = ?').get(actor.characterId)?.display_name || '邻居';
+      }
+      throw townError('EXPERIENCE_SOURCE_INVALID');
+    });
+    const location = event.locationKey
+      ? db.prepare('SELECT name FROM town_locations WHERE key = ?').get(event.locationKey)?.name || '小镇' : '小镇';
+    return { actorIds: event.actorIds,
+      summary: `${names[0]}和${names[1]}在${location}聊了会儿：${payload.summary.slice(0, 80)}`,
+      locationKey: event.locationKey ?? null };
   }
   function consume(event) {
     const source = facts(event);

@@ -16,6 +16,7 @@ import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 const router = Router();
 
@@ -117,12 +118,18 @@ router.get('/', (req, res) => {
   const db = getDb();
 
   const posts = db.prepare(`
-    SELECT mp.*, c.display_name, c.avatar_path,
+    SELECT mp.*,
+      COALESCE(c.display_name, n.display_name) AS display_name,
+      CASE WHEN mp.npc_id IS NOT NULL
+        THEN (SELECT image_path FROM town_assets WHERE key = 'npc_' || mp.npc_id || '_portrait' AND status = 'ready')
+        ELSE c.avatar_path END AS avatar_path,
+      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc' ELSE 'character' END AS author_type,
       (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id) AS comment_count,
       (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count,
       (SELECT id FROM moment_likes WHERE post_id = mp.id) IS NOT NULL AS liked
     FROM moment_posts mp
-    JOIN characters c ON c.id = mp.character_id
+    LEFT JOIN characters c ON c.id = mp.character_id
+    LEFT JOIN town_npcs n ON n.id = mp.npc_id
     WHERE mp.status = 'done'
     ORDER BY mp.id DESC
   `).all().map(p => ({
@@ -140,9 +147,15 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const db = getDb();
   const post = db.prepare(`
-    SELECT mp.*, c.display_name, c.avatar_path
+    SELECT mp.*,
+      COALESCE(c.display_name, n.display_name) AS display_name,
+      CASE WHEN mp.npc_id IS NOT NULL
+        THEN (SELECT image_path FROM town_assets WHERE key = 'npc_' || mp.npc_id || '_portrait' AND status = 'ready')
+        ELSE c.avatar_path END AS avatar_path,
+      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc' ELSE 'character' END AS author_type
     FROM moment_posts mp
-    JOIN characters c ON c.id = mp.character_id
+    LEFT JOIN characters c ON c.id = mp.character_id
+    LEFT JOIN town_npcs n ON n.id = mp.npc_id
     WHERE mp.id = ?
   `).get(req.params.id);
 
@@ -229,11 +242,13 @@ router.post('/:id/comments', async (req, res) => {
   const post = db.prepare(`
     SELECT mp.*, c.display_name, c.base_prompt, c.avatar_path, c.emotion_baseline
     FROM moment_posts mp
-    JOIN characters c ON c.id = mp.character_id
+    LEFT JOIN characters c ON c.id = mp.character_id
     WHERE mp.id = ?
   `).get(req.params.id);
 
   if (!post) return res.status(404).json({ error: 'Post not found' });
+  // 镇民帖子暂不自动回评（二期：镇民回评），用户评论正常入库
+  const isNpcPost = post.npc_id != null;
 
   // 1. 写入用户评论
   const userComment = db.prepare(
@@ -261,7 +276,7 @@ router.post('/:id/comments', async (req, res) => {
 
   // 3. 调用 LLM 生成角色回复
   let replyData = null;
-  try {
+  if (!isNpcPost) try {
     const reply = await generateCharacterReply(post, historyComments);
     if (reply) {
       const replyResult = db.prepare(
@@ -316,22 +331,7 @@ router.post('/:id/like', (req, res) => {
 
 // 配图张数分布：70% 一张 / 20% 两张 / 10% 三张
 // 多于一张时 LLM 一并给出对应数量的 prompt，之后串行出图
-const MOMENT_IMAGE_COUNT_DIST = [
-  { count: 1, weight: 0.70 },
-  { count: 2, weight: 0.20 },
-  { count: 3, weight: 0.10 },
-];
-const MOMENT_IMAGE_FIELDS = ['imagePrompt', 'imagePrompt2', 'imagePrompt3'];
-const CHINESE_NUM = ['', '一', '两', '三'];
-
-function pickMomentImageCount() {
-  let roll = Math.random() * MOMENT_IMAGE_COUNT_DIST.reduce((sum, i) => sum + i.weight, 0);
-  for (const item of MOMENT_IMAGE_COUNT_DIST) {
-    roll -= item.weight;
-    if (roll <= 0) return item.count;
-  }
-  return 1;
-}
+// 形态池/配图工具与镇民发帖共用，见 services/momentForms.js
 
 /**
  * 生成一条朋友圈帖子（文案 + 配图）
@@ -370,34 +370,6 @@ async function generateMomentPost(character, opts = {}) {
   const SPECIAL_MODES = [
     { name: '做梦/幻想', desc: '分享昨晚的怪梦或白日梦——内容完全自由，不受现实逻辑约束。可以描述梦境场景、超现实体验、天马行空的脑洞。配图是超现实或梦幻风格' },
   ];
-
-// 发布形态池：决定"怎么发"，与"发什么"(Topic)正交。
-// weight 基础权重；nightBoost=true 的形态在深夜(22-5点)权重 ×1.8，让发圈时刻更有状态感。
-const MOMENT_FORMS = [
-  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 0.8, nightBoost: false },
-  { name: '碎碎念', desc: '两三行短句，想到哪说到哪，像随手记', len: '20-60字', weight: 1.2, nightBoost: false },
-  { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
-  { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
-  { name: '认真长文', desc: '认真记录一件事，可以展开细节（带格式）', len: '80-200字', weight: 0.8, nightBoost: false },
-  { name: '自言自语', desc: '像没写完的心里话，带点欲言又止', len: '10-40字', weight: 1.0, nightBoost: true },
-  { name: '冷幽默', desc: '一句或几句自嘲冷幽默，结尾抖个小包袱', len: '15-50字', weight: 0.7, nightBoost: false },
-  { name: '清单体', desc: '用列表逐条列出来，像在写一张清单，条目感强', len: '30-100字', weight: 0.7, nightBoost: false },
-  { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.6, nightBoost: false },
-];
-
-  function weightedPick(arr, weightMap = {}) {
-    const items = arr.map(item => ({
-      item,
-      weight: weightMap[item.name] || 1.0,
-    }));
-    const totalWeight = items.reduce((sum, i) => sum + i.weight, 0);
-    let rand = Math.random() * totalWeight;
-    for (const { item, weight } of items) {
-      rand -= weight;
-      if (rand <= 0) return item;
-    }
-    return items[items.length - 1].item;
-  }
 
   // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% Topic 模式
   let pickedSpecialMode = null;
@@ -549,12 +521,12 @@ const MOMENT_FORMS = [
 
   // 不完美注入：5% 概率允许 1 处轻微口语瑕疵，打破"标准小作文"感
   const imperfectionNote = Math.random() < 0.05
-    ? '\n- 这条朋友圈可以有 1 处轻微的口语瑕疵：比如打错一个字不修、句尾多个语气词、写了一半改用别的说法。最多 1 处，不要刻意。'
+    ? '\n- 这条朋友圈可以有 1 处轻微的口语瑕疵：比如打错一个字不修、句尾多个语气词、写到一半换一种更口语的说法。最多 1 处，不要刻意，也不要因为重写而改变主线。'
     : '';
 
   // 10% 概率弱呼应最近一条朋友圈（自由模式不注入）
   const continuationNote = Math.random() < 0.10 && prevMomentText && !isFreeMode
-    ? `\n- 你最近一条朋友圈是：「${prevMomentText.slice(0, 60)}...」。可以自然地呼应它（比如"上次说的事有后续了"），但不要硬蹭。`
+    ? `\n- 如果这条朋友圈与最近一条“${prevMomentText.slice(0, 60)}...”是同一件事的自然延续，可以顺带呼应；否则忽略它。不要为了呼应而把旧内容单独写成第二段。`
     : '';
 
   const postingTask = (() => {
@@ -564,7 +536,7 @@ const MOMENT_FORMS = [
       : `"${name}":"第${i + 1}张照片的英文画面描述：同一次经历里的另一张照片，内容要求与 imagePrompt 完全一致（英文、完整独立、贴合正文）"`
     )).join(',');
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（自然口语化）",${imageFieldJson}}`;
+{"text":"朋友圈文案（自然口语化，只围绕一个中心）",${imageFieldJson}}`;
 
     const multiImageRule = imageCount > 1
       ? `- **本次要发${CHINESE_NUM[imageCount]}张照片**：${imageFieldNames.join('、')} 是同一次经历里的${CHINESE_NUM[imageCount]}张不同照片——比如一张近景一张远景、一张拍自己一张拍身旁的风景或同伴、一张抓拍一张合影。每张都要能对应上 text 写的事，画面彼此不要重复，合起来才是一条完整的朋友圈。
@@ -573,6 +545,7 @@ const MOMENT_FORMS = [
 
     const rules = `规则：
 - 只输出 JSON，不要解释
+${MOMENT_SINGLE_FOCUS_RULE}
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 - **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
@@ -593,27 +566,28 @@ ${rules}`;
 
   const timeTag = getTimeTag(now, false);
 
-  // 日程注入：告知 LLM 角色此刻在做什么，朋友圈内容应反映此时段状态
+  // 日程注入：当前正在做什么；与发圈动因共同合成一条主线
   let scheduleContext = '';
   try {
     if (!isFreeMode && config.features.schedule !== false) {
       const activity = getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
-        const descPart = activity.description ? `（${activity.description}）` : '';
-        scheduleContext = `\n【日程状态】${character.display_name}此刻正在${activity.location}${activity.activity}${descPart}。朋友圈的内容应当反映这个时段角色的状态和见闻。`;
+        scheduleContext = buildMomentScheduleContext(character.display_name, activity);
       }
     }
   } catch { /* schedule not available, skip */ }
 
   const styleDirective = isFreeMode
     ? ''
-    : isSpecialMode
-      ? `\n**本次必须使用「${pickedSpecialMode.name}」风格：${pickedSpecialMode.desc}**`
-      : `\n**本次发朋友圈你是正在做或者想到：【${pickedTopic.desc}】**`;
+    : buildMomentMotiveDirective(
+        isSpecialMode
+          ? `${pickedSpecialMode.name}：${pickedSpecialMode.desc}`
+          : pickedTopic.desc
+      );
 
   const userJsonHint = `{"text":"...",${imageFieldNames.map(n => `"${n}":"..."`).join(',')}}`;
   const userMsg = multiPersons.length > 0
-    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起，发一条朋友圈。只输出 ${userJsonHint} JSON。`
+    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，text 仍只围绕由此刻正在做与发圈动因合成的同一个中心，不要另写人物介绍或关系感想。发一条朋友圈。只输出 ${userJsonHint} JSON。`
     : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 ${userJsonHint} JSON。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 任务 → msgs[2] 角色 → msgs[3] 交互(多人) → user
@@ -644,7 +618,7 @@ ${rules}`;
     try {
       const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
         registry: createTownActorRegistry(db), timeZone: config.town.timeZone })(character.id);
-      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: lifeContext });
+      if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: `${MOMENT_RECORD_BACKDROP_RULE}\n\n${lifeContext}` });
     } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
   }
   // 每多一张配图就多一段画面描述，max_tokens 相应放宽（一张 2048 / 两张 3072 / 三张 4096）
@@ -947,5 +921,7 @@ export default router;
 export { generateMomentPost };
 
 // 装配：把生成函数注入调度器（解除 momentScheduler → routes 的反向依赖）
-import { setMomentPostGenerator } from '../services/momentScheduler.js';
+import { setMomentPostGenerator, setTownNpcPostGenerator } from '../services/momentScheduler.js';
+import { generateTownNpcMoment } from '../services/town/townNpcMomentGenerator.js';
 setMomentPostGenerator(generateMomentPost);
+setTownNpcPostGenerator(npc => generateTownNpcMoment(npc, { broadcastPost: broadcastNewPost }));

@@ -61,7 +61,7 @@
                 <template v-if="npc.characterId"> · 已入邻舍</template>
                 <template v-else> · 未邀请</template>
               </div>
-              <p v-if="npc.portrait?.status === 'ready' || npc.sprites?.down?.status === 'ready'" class="ap-asset-appearance">{{ appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus) }}</p>
+              <p v-if="(npc.portrait?.status === 'ready' || npc.sprites?.down?.status === 'ready') && appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus)" class="ap-asset-appearance">{{ appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
           </div>
@@ -99,7 +99,7 @@
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <p v-if="detailNpc.portrait?.status === 'ready'" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailNpc.portrait.appearanceStatus) }}</p>
+              <p v-if="detailNpc.portrait?.status === 'ready' && appearanceText(detailNpc.portrait.appearanceStatus)" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailNpc.portrait.appearanceStatus) }}</p>
               <div v-if="!detailNpc.portrait?.id" class="ap-btn-row">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`portrait${detailNpc.id}`]" @click="makePortrait(detailNpc)">
                   生成 900×1600 立绘
@@ -139,7 +139,7 @@
                     @edit="openAssetManager(detailNpc.sprites[dir], `${detailNpc.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
                   />
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
-                  <p v-if="detailNpc.sprites?.[dir]?.status === 'ready'" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailNpc.sprites[dir].appearanceStatus) }}</p>
+                  <p v-if="detailNpc.sprites?.[dir]?.status === 'ready' && appearanceText(detailNpc.sprites[dir].appearanceStatus)" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailNpc.sprites[dir].appearanceStatus) }}</p>
                 </div>
                 <div v-if="!detailNpc.sprites?.down?.id || !detailNpc.sprites?.up?.id" class="ap-btn-row">
                   <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc)">
@@ -149,7 +149,7 @@
               </div>
               <div v-if="npcSpritesStale(detailNpc)" class="ap-actions is-column">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`sprites${detailNpc.id}`]" @click="regenSprites(detailNpc, true)">按当前外观更新小人</linshe-button>
-                <p class="ap-asset-appearance">会重绘未记录版本或外观过时的小人</p>
+                <p class="ap-asset-appearance">会重绘外观过时的小人</p>
               </div>
               <div v-if="spriteErrors[`npc:${detailNpc.id}`]" class="ap-actions is-column">
                 <p class="ap-sprite-error" role="alert">{{ spriteErrors[`npc:${detailNpc.id}`] }}</p>
@@ -257,7 +257,7 @@
             <div class="ap-npc-info">
               <div class="ap-npc-name">{{ c.displayName }}</div>
               <div class="ap-npc-meta">spirit {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
-              <p v-if="c.portrait?.status === 'ready' || c.spriteAssets?.down?.status === 'ready'" class="ap-asset-appearance">{{ appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down) }}</p>
+              <p v-if="(c.portrait?.status === 'ready' || c.spriteAssets?.down?.status === 'ready') && appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down)" class="ap-asset-appearance">{{ appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
           </div>
@@ -278,7 +278,7 @@
                 />
                 <span v-else class="ap-thumb-missing is-big">还没有立绘</span>
               </div>
-              <p v-if="detailChar.portrait?.status === 'ready'" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.appearanceStatus?.portrait) }}</p>
+              <p v-if="detailChar.portrait?.status === 'ready' && appearanceText(detailChar.appearanceStatus?.portrait)" class="ap-asset-appearance" aria-label="立绘外观状态">{{ appearanceText(detailChar.appearanceStatus?.portrait) }}</p>
             </div>
 
             <div class="ap-detail-name">
@@ -307,7 +307,7 @@
                     @edit="openAssetManager(detailChar.spriteAssets[dir], `${detailChar.displayName} ${dir === 'down' ? '正面' : '背面'}小人`)"
                   />
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
-                  <p v-if="detailChar.spriteAssets?.[dir]?.status === 'ready'" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
+                  <p v-if="detailChar.spriteAssets?.[dir]?.status === 'ready' && appearanceText(detailChar.appearanceStatus?.sprites?.[dir])" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
                 </div>
                 <div v-if="charMissingAssets(detailChar)" class="ap-btn-row">
                   <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charassets${detailChar.id}`]" @click="completeCharAssets(detailChar)">
@@ -319,7 +319,7 @@
               <p v-if="charMissingAssets(detailChar)" class="ap-asset-appearance">这里只认角色自己的小镇立绘与小人，没做的就是空槽。点「补全图片素材」会把缺的立绘、正/背小人一次补齐（优先复用关联居民的素材，没有才生成）；也可在「角色素材」列表点「一键生成所有缺失素材」，或直接打开上方入住开关（会先补齐素材再入住）。</p>
               <div v-if="charSpritesStale(detailChar)" class="ap-actions is-column">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar, true)">按当前外观更新小人</linshe-button>
-                <p class="ap-asset-appearance">会重绘未记录版本或外观过时的小人</p>
+                <p class="ap-asset-appearance">会重绘外观过时的小人</p>
               </div>
               <div v-if="spriteErrors[`char:${detailChar.id}`]" class="ap-actions is-column">
                 <p class="ap-sprite-error" role="alert">{{ spriteErrors[`char:${detailChar.id}`] }}</p>
@@ -332,18 +332,38 @@
         <!-- ── 小镇设置 ── -->
         <div v-if="!detail && tab === 'settings'" class="ap-body ap-settings">
           <div class="ap-setting">
-            <span class="ap-setting-label">居民生活方式</span>
-            <linshe-select v-model="settings.simulation" size="sm" :disabled="settingsLocked"
-              :options="[{ label: '兼容作息', value: 'legacy' }, { label: '本地行为 · 可恢复', value: 'rules' }]" />
+            <span class="ap-setting-label">禁止居民发朋友圈</span>
+            <linshe-switch v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
+              on-text="开启" off-text="关闭" aria-label="禁止居民发朋友圈" />
           </div>
-          <p class="ap-layout-desc">本地行为会记录行动原因，并在到达地点后开始工作或休息。</p>
-          <linshe-button variant="link" size="sm" :disabled="loadingSettings || savingSettings" @click="loadSettings">重新读取设置</linshe-button>
-          <div v-for="f in SETTING_FIELDS" :key="f.key" class="ap-setting">
-            <span class="ap-setting-label">{{ f.label }}</span>
-            <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :disabled="settingsLocked" :min="f.min" :max="f.max" :step="f.step" />
+          <p class="ap-layout-desc">开启后居民不再自动发朋友圈，已有帖子保留；关闭即恢复正常发帖。</p>
+          <div class="ap-density-field">
+            <span class="ap-density-label">相遇频率</span>
+            <div class="ap-density-slider-row">
+              <input class="ap-density-slider" type="range" min="1" max="10" step="1" :value="encounterLevel" :disabled="settingsLocked" aria-label="相遇频率" :style="{ '--fill': ((encounterLevel - 1) / 9 * 100) + '%' }" @input="applyEncounterLevel">
+              <span class="ap-density-value">{{ encounterLevel }} · {{ encounterPreset.label }}</span>
+            </div>
+            <p class="ap-layout-desc">{{ encounterSummary }}</p>
+            <p class="ap-layout-desc">拉动拉条即可整体调高 / 调低居民相遇的频繁程度，具体数值会按档位自动填入。</p>
+          </div>
+          <div class="ap-advanced-zone">
+            <div class="ap-advanced-toggle" role="button" tabindex="0" :aria-expanded="showAdvancedSettings ? 'true' : 'false'" @click="showAdvancedSettings = !showAdvancedSettings" @keydown.enter.prevent="showAdvancedSettings = !showAdvancedSettings" @keydown.space.prevent="showAdvancedSettings = !showAdvancedSettings">
+              <span>高级设置</span>
+              <span class="ap-advanced-arrow" :class="{ open: showAdvancedSettings }" aria-hidden="true">▸</span>
+            </div>
+            <template v-if="showAdvancedSettings">
+              <div v-for="f in ADVANCED_SETTING_FIELDS" :key="f.key" class="ap-setting">
+                <span class="ap-setting-label">{{ f.label }}</span>
+                <linshe-input v-model.number="settings[f.key]" size="sm" type="number" :disabled="settingsLocked" :min="f.min" :max="f.max" :step="f.step" />
+              </div>
+              <p class="ap-layout-desc">这些参数一般不用调整；相遇相关的字段已由上方「相遇频率」拉条统一控制。</p>
+            </template>
           </div>
           <linshe-button variant="primary" size="sm" :disabled="settingsLocked" :loading="savingSettings" @click="saveSettings">保存设置</linshe-button>
-          <p v-if="settingsError" class="ap-player-error" role="alert">{{ settingsError }}</p>
+          <p v-if="settingsError" class="ap-player-error" role="alert">
+            {{ settingsError }}
+            <linshe-button v-if="!settingsReady" variant="link" size="sm" :loading="loadingSettings" @click="loadSettings">重新读取</linshe-button>
+          </p>
           <p v-else-if="settingsSaved" class="ap-layout-desc" role="status">设置已保存。</p>
             <div class="ap-layout-zone">
               <div class="ap-section-title">重新布局</div>
@@ -540,17 +560,65 @@ async function regenPlayerKit(part = 'kit') {
   }
 }
 
-const SETTING_FIELDS = [
+const ADVANCED_SETTING_FIELDS = [
   { key: 'tickSeconds', label: '模拟步长（秒）', min: 20, max: 300, step: 5 },
   { key: 'npcSpeed', label: '居民速度（格/秒）', min: 0.1, max: 4, step: 0.1 },
   { key: 'playerSpeed', label: '玩家速度（格/秒）', min: 0.2, max: 6, step: 0.1 },
-  { key: 'maxActiveEncounters', label: '同时相遇上限', min: 0, max: 6, step: 1 },
-  { key: 'encounterMinStartGapMin', label: '相遇最小间隔（分）', min: 1, max: 120, step: 1 },
-  { key: 'encounterCooldownHours', label: '同对相遇冷却（时）', min: 0.5, max: 24, step: 0.5 },
-  { key: 'encounterRelatedProb', label: '熟人相遇概率', min: 0, max: 1, step: 0.01 },
-  { key: 'encounterStrangerProb', label: '陌生人相遇概率', min: 0, max: 1, step: 0.01 },
   { key: 'statusBubbleIntervalMin', label: '状态气泡间隔（分）', min: 5, max: 240, step: 5 },
 ]
+
+// 相遇频率拉条：1-10 档，每档对应一组相遇字段（第 5 档 = 出厂默认值）。
+// 后端字段范围见 townService.js 的 TOWN_SETTING_VALIDATORS，档位取值不能越界。
+const ENCOUNTER_LEVELS = [
+  { label: '冷清', values: { maxActiveEncounters: 0, encounterMinStartGapMin: 120, encounterCooldownHours: 24, encounterRelatedProb: 0.05, encounterStrangerProb: 0 } },
+  { label: '稀少', values: { maxActiveEncounters: 1, encounterMinStartGapMin: 60, encounterCooldownHours: 12, encounterRelatedProb: 0.1, encounterStrangerProb: 0.01 } },
+  { label: '偶尔', values: { maxActiveEncounters: 1, encounterMinStartGapMin: 30, encounterCooldownHours: 8, encounterRelatedProb: 0.15, encounterStrangerProb: 0.02 } },
+  { label: '清淡', values: { maxActiveEncounters: 2, encounterMinStartGapMin: 15, encounterCooldownHours: 5, encounterRelatedProb: 0.2, encounterStrangerProb: 0.03 } },
+  { label: '适中', values: { maxActiveEncounters: 2, encounterMinStartGapMin: 8, encounterCooldownHours: 3, encounterRelatedProb: 0.28, encounterStrangerProb: 0.05 } },
+  { label: '活跃', values: { maxActiveEncounters: 3, encounterMinStartGapMin: 6, encounterCooldownHours: 2, encounterRelatedProb: 0.35, encounterStrangerProb: 0.08 } },
+  { label: '热闹', values: { maxActiveEncounters: 4, encounterMinStartGapMin: 4, encounterCooldownHours: 1.5, encounterRelatedProb: 0.45, encounterStrangerProb: 0.12 } },
+  { label: '繁忙', values: { maxActiveEncounters: 4, encounterMinStartGapMin: 3, encounterCooldownHours: 1, encounterRelatedProb: 0.55, encounterStrangerProb: 0.18 } },
+  { label: '频繁', values: { maxActiveEncounters: 5, encounterMinStartGapMin: 2, encounterCooldownHours: 0.5, encounterRelatedProb: 0.7, encounterStrangerProb: 0.25 } },
+  { label: '熙攘', values: { maxActiveEncounters: 6, encounterMinStartGapMin: 1, encounterCooldownHours: 0.5, encounterRelatedProb: 0.85, encounterStrangerProb: 0.35 } },
+]
+const ENCOUNTER_FIELD_RANGES = {
+  maxActiveEncounters: 6,
+  encounterMinStartGapMin: 119,
+  encounterCooldownHours: 23.5,
+  encounterRelatedProb: 1,
+  encounterStrangerProb: 1,
+}
+
+const showAdvancedSettings = ref(false)
+const encounterLevel = ref(5)
+const encounterPreset = computed(() => ENCOUNTER_LEVELS[encounterLevel.value - 1])
+const encounterSummary = computed(() => {
+  const v = encounterPreset.value.values
+  return `同时最多 ${v.maxActiveEncounters} 场 · 最短间隔 ${v.encounterMinStartGapMin} 分钟 · 同对冷却 ${v.encounterCooldownHours} 小时 · 熟人相遇 ${Math.round(v.encounterRelatedProb * 100)}% · 陌生人相遇 ${Math.round(v.encounterStrangerProb * 100)}%`
+})
+
+function applyEncounterLevel(event) {
+  const level = Number(event.target.value)
+  if (!Number.isFinite(level) || !ENCOUNTER_LEVELS[level - 1]) return
+  encounterLevel.value = level
+  Object.assign(settings.value, ENCOUNTER_LEVELS[level - 1].values)
+}
+
+// 读取/保存设置后，按当前字段值反推最接近的档位（完全一致即对应档位）；
+// 自定义数值只决定显示档位，不改动字段，直到用户真的拖动拉条。
+function syncEncounterLevelFromSettings() {
+  const s = settings.value
+  if (Object.keys(ENCOUNTER_FIELD_RANGES).some(key => !Number.isFinite(Number(s[key])))) return
+  let best = 0, bestDist = Infinity
+  ENCOUNTER_LEVELS.forEach((preset, i) => {
+    let dist = 0
+    for (const [key, range] of Object.entries(ENCOUNTER_FIELD_RANGES)) {
+      dist += ((Number(s[key]) - preset.values[key]) / range) ** 2
+    }
+    if (dist < bestDist) { bestDist = dist; best = i }
+  })
+  encounterLevel.value = best + 1
+}
 
 const detailNpc = computed(() => {
   if (detail.value?.type !== 'npc') return null
@@ -598,7 +666,7 @@ async function loadSettings() {
   loadingSettings.value = true; settingsReady.value = false; settingsError.value = ''; settingsSaved.value = false
   const config = await api.fetchTownSettings().then(value => ({ status: 'fulfilled', value }), value => ({ status: 'rejected', value }))
   if (token !== settingsScope) return
-  if (config.status === 'fulfilled') { settings.value = { ...config.value }; settingsReady.value = true }
+  if (config.status === 'fulfilled') { settings.value = { ...config.value }; settingsReady.value = true; syncEncounterLevelFromSettings() }
   else settingsError.value = '设置读取失败，请重新读取后再保存。'
   loadingSettings.value = false
 }
@@ -861,6 +929,7 @@ async function saveSettings() {
     const result = await api.updateTownSettings({ ...settings.value })
     if (token !== settingsScope) return
     if (result?.applied) settings.value = { ...settings.value, ...result.applied }
+    syncEncounterLevelFromSettings()
     settingsSaved.value = true
   } catch (err) {
     if (token !== settingsScope) return
@@ -871,16 +940,17 @@ async function saveSettings() {
   }
 }
 
+// 未记录外观版本的素材（老图/上传图）不算过时，只有明确 needs_update 才提示
 function appearanceText(status) {
   return status === 'needs_update' ? '外观已变化，图片待更新'
-    : status === 'current' ? '与当前外观一致' : '未记录外观版本'
+    : status === 'current' ? '与当前外观一致' : ''
 }
 const spriteErrors = reactive({})
 function npcSpritesStale(npc) {
-  return ['down', 'up'].some(dir => npc.sprites?.[dir]?.status === 'ready' && npc.sprites[dir].appearanceStatus !== 'current')
+  return ['down', 'up'].some(dir => npc.sprites?.[dir]?.status === 'ready' && npc.sprites[dir].appearanceStatus === 'needs_update')
 }
 function charSpritesStale(char) {
-  return ['down', 'up'].some(dir => char.spriteAssets?.[dir]?.status === 'ready' && char.appearanceStatus?.sprites?.[dir] !== 'current')
+  return ['down', 'up'].some(dir => char.spriteAssets?.[dir]?.status === 'ready' && char.appearanceStatus?.sprites?.[dir] === 'needs_update')
 }
 
 async function doRelayout() {
@@ -1259,6 +1329,35 @@ onBeforeUnmount(() => {
 .ap-setting { display: flex; align-items: center; gap: 12px; }
 .ap-setting-label { flex: 1; font-size: 12px; color: var(--text-primary); }
 .ap-setting > :last-child { width: 90px; }
+
+.ap-advanced-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--bg-sunken);
+}
+.ap-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 8px;
+  padding: 2px 4px;
+  text-align: left;
+}
+.ap-advanced-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ap-advanced-arrow {
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.ap-advanced-arrow.open { transform: rotate(90deg); }
 
 .ap-density-field {
   display: flex;

@@ -61,12 +61,12 @@
           </div>
           <div
             v-for="ch in moments.charactersWithPosts"
-            :key="ch.character_id"
+            :key="ch.author"
             class="filter-avatar"
-            :class="{ active: moments.filterCharacterId === ch.character_id }"
-            @click="moments.setFilter(ch.character_id)"
+            :class="{ active: moments.filterCharacterId === ch.author }"
+            @click="moments.setFilter(ch.author)"
           >
-            <img v-if="ch.avatar_path" :src="ch.avatar_path" class="filter-avatar-img" alt="" />
+            <img v-if="ch.avatar_path" :src="ch.avatar_path" class="filter-avatar-img" :class="{ 'is-npc-portrait': ch.author_type === 'npc' }" alt="" />
             <span v-else>{{ ch.display_name?.charAt(0) || '?' }}</span>
           </div>
         </div>
@@ -406,6 +406,7 @@ async function triggerGenerate(c) {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden; /* 镇民立绘放大裁头时在圆框内裁切 */
   cursor: pointer;
   opacity: 0.55;
   border: 2px solid var(--glass-border);
@@ -420,8 +421,14 @@ async function triggerGenerate(c) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: top;
   border-radius: inherit;
   display: block;
+}
+/* 镇民头像是整张立绘：放大只取头部（与帖子头像的 250% 取顶同口径） */
+.filter-avatar-img.is-npc-portrait {
+  transform: scale(2.5);
+  transform-origin: 50% 0;
 }
 .filter-avatar.active {
   opacity: 1;

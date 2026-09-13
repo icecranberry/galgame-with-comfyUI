@@ -4,9 +4,17 @@
     <div class="moment-header">
       <div
         class="moment-avatar avatar-wiggle"
-        :style="avatarStyle"
         @click="goToChat"
-      ><span v-if="!post.avatar_path">{{ post.display_name?.charAt(0) }}</span></div>
+      >
+        <img
+          v-if="post.avatar_path"
+          :src="post.avatar_path"
+          class="moment-avatar-img"
+          :class="{ 'is-npc-portrait': post.author_type === 'npc' }"
+          alt=""
+        />
+        <span v-else>{{ post.display_name?.charAt(0) }}</span>
+      </div>
       <div class="moment-header-info">
         <span class="moment-name">{{ post.display_name }}</span>
         <span class="moment-time">{{ formatTime(post.created_at) }}</span>
@@ -236,11 +244,6 @@ const alwaysVisible = computed(() => comments.value.slice(0, MAX_VISIBLE))
 const hiddenComments = computed(() => comments.value.slice(MAX_VISIBLE))
 const hiddenCount = computed(() => Math.max(0, comments.value.length - MAX_VISIBLE))
 
-const avatarStyle = computed(() => {
-  const p = props.post
-  if (p.avatar_path) return { backgroundImage: `url(${p.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  return { background: 'var(--accent)' }
-})
 
 // 带原始下标的可见配图：加载失败按下标剔除，多图翻看与灯箱都基于这个顺序
 const visibleImages = computed(() => {
@@ -555,16 +558,29 @@ function formatTime(iso) {
   margin-bottom: 14px;
 }
 .moment-avatar {
-  width: 50px; height: 50px; border-radius: 50%;
+  width: 60px; height: 60px; border-radius: 50%;
   background: #e07b6c;
   display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0;
+  color: #fff; font-size: 22px; font-weight: 700; flex-shrink: 0;
   cursor: pointer;
+  overflow: hidden; /* 镇民立绘放大裁头时在圆框内裁切 */
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .moment-avatar:hover {
   transform: scale(1.08);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+}
+.moment-avatar-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+/* 镇民没有专用头像，只有 900×1600 整张立绘：基准取顶 + 放大，圆框里只露头部 */
+.moment-avatar-img.is-npc-portrait {
+  object-position: top;
+  transform: scale(2.5);
+  transform-origin: 50% 0;
 }
 .moment-header-info {
   display: flex; flex-direction: column; gap: 2px;

@@ -22,7 +22,7 @@ export function migrateTownSimulationSchema(db) {
 }
 
 /**
- * Synchronous simulation bridge; default mode='legacy' performs no writes/movement.
+ * Synchronous simulation bridge.
  * registry: createTownActorRegistry(db), already synchronized by the host.
  * readActorFacts(actor,{worldId,worldEpoch,nowUtcMs,action}) returns a batch:
  * {actorId,worldEpoch,intent:'work'|'rest'|'wait'|'off_town',scheduleKey,
@@ -36,22 +36,20 @@ export function migrateTownSimulationSchema(db) {
  * action.id, synchronous, and epoch fenced. They run after DB commit. Arrival
  * is acknowledged only by the next authoritative fact batch, never the callback.
  *
- * API: tick({actorIds?}), advanceActor(actorId), getState(actorId), setMode(mode),
+ * API: tick(), advanceActor(actorId), getState(actorId),
  * cancelActor(actorId,reason='SIMULATION_CANCELLED'). tick defaults to canonical
  * non-player actors (including retirees, so their owned actions can be cancelled).
- * legacy stops new decisions but still cancels tracked actions on explicit ticks.
  * No timers, LLM, wages, items, or replay of offline attendance. Catch-up metadata
  * reports bounded elapsed windows; only current observed arrival starts work.
  */
 export function createTownSimulation({ db, clock, registry, readActorFacts, moveToTarget,
-  stopMoving = () => {}, mode = 'legacy', leaseMs = 120000, cooldownSeconds = 60,
+  stopMoving = () => {}, leaseMs = 120000, cooldownSeconds = 60,
   retryMs = 30000, maxRetryMs = 600000, maxCatchUpMs = 21600000 } = {}) {
   if (!db?.transaction || !clock?.now || !registry?.getWorldState || !registry?.getActor
     || typeof readActorFacts !== 'function' || typeof moveToTarget !== 'function'
     || typeof stopMoving !== 'function') throw error('MISSING_SIMULATION_DEPENDENCY');
   for (const n of [retryMs, maxRetryMs, maxCatchUpMs]) if (!Number.isSafeInteger(n) || n < 1) throw error('INVALID_SIMULATION_LIMIT');
   if (maxRetryMs < retryMs) throw error('INVALID_SIMULATION_LIMIT');
-  if (!['legacy', 'rules'].includes(mode)) throw error('INVALID_SIMULATION_MODE');
   let initialized = false, executing = false, activeFacts = null, executionNow = null, executionSequence = null;
   const recovered = new Set();
   const ensure = () => { if (!initialized) { migrateTownSimulationSchema(db); initialized = true; } };
@@ -129,7 +127,6 @@ export function createTownSimulation({ db, clock, registry, readActorFacts, move
   function advanceActor(actorId, cancelReason = null) {
     if (!text(actorId)) throw error('INVALID_ACTOR_ID');
     if (executing) throw error('REENTRANT_SIMULATION');
-    if (mode === 'legacy' && !hasTable()) return { actorId, reason: 'legacy', action: null };
     ensure(); executing = true;
     const effects = [];
     let result;
@@ -138,7 +135,6 @@ export function createTownSimulation({ db, clock, registry, readActorFacts, move
         const world = registry.getWorldState();
         const actor = registry.getActor(actorId, world.worldId, { followMerged: false });
         let state = load(world, actorId);
-        if (mode === 'legacy' && !state) return { actorId, reason: 'legacy', action: null };
         const now = assertUtcMs(clock.now());
         executionNow = Math.max(now, state?.cursorUtcMs ?? now);
         const catchUp = planCatchUp({ cursorUtcMs: state?.cursorUtcMs ?? executionNow, nowUtcMs: executionNow, maxCatchUpMs });
@@ -162,8 +158,8 @@ export function createTownSimulation({ db, clock, registry, readActorFacts, move
           if (action?.type === 'move_to') state.pendingStop = { actionId: action.id, reason };
           state.actionId = null; state.plan = null; state.minUntil = null;
         };
-        if (cancelReason || mode === 'legacy' || !actor || actor.archived || !actor.participating || actor.mergedInto || actor.playerId) {
-          const reason = cancelReason || (mode === 'legacy' ? 'legacy' : 'actor_unavailable');
+        if (cancelReason || !actor || actor.archived || !actor.participating || actor.mergedInto || actor.playerId) {
+          const reason = cancelReason || 'actor_unavailable';
           end('cancel', reason); return finish(reason);
         }
         // Runner is the sole owner. Do not commandeer player services or other callers' actions.
@@ -265,16 +261,11 @@ export function createTownSimulation({ db, clock, registry, readActorFacts, move
     } finally { executing = false; executionNow = null; executionSequence = null; activeFacts = null; }
   }
   function tick({ actorIds } = {}) {
-    if (mode === 'legacy' && !hasTable()) return { mode, actors: [] };
     const ids = actorIds ?? db.prepare('SELECT actor_id FROM town_actors WHERE player_id IS NULL ORDER BY actor_id').all().map(r => r.actor_id);
-    return { mode, actors: [...new Set(ids)].sort().map(id => {
+    return { actors: [...new Set(ids)].sort().map(id => {
       try { return advanceActor(id); } catch (e) { return { actorId: id, reason: 'error', error: e.code ?? e.message }; }
     }) };
   }
-  function setMode(next) {
-    if (!['legacy', 'rules'].includes(next)) throw error('INVALID_SIMULATION_MODE');
-    mode = next;
-  }
-  return { tick, advanceActor, getState, setMode,
+  return { tick, advanceActor, getState,
     cancelActor: (actorId, reason = 'SIMULATION_CANCELLED') => advanceActor(actorId, reason) };
 }

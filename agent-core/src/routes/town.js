@@ -25,7 +25,7 @@ import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
   setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
   generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld,
-  holdTownActor, releaseTownActor,
+  holdTownActor, releaseTownActor, touchTownViewer,
 } from '../services/town/townService.js';
 import {
   listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, importAssetImage, getAssetById, cropAssetImage, cropTileAssetImage, refineAssetWithHires,
@@ -107,6 +107,13 @@ router.get('/encounters/:id/messages', (req, res) => {
 
 router.post('/tick', (req, res) => {
   res.json(forceTick());
+});
+
+// 世界页在线打点：TownView 挂载期间前端定期调用，服务端据此决定是否跑
+// 相遇对话 / 环境奇遇 / 状态气泡等「给人看」的 LLM 消耗
+router.post('/viewer/heartbeat', (req, res) => {
+  touchTownViewer();
+  res.json({ ok: true });
 });
 
 // ── 素材库 ──

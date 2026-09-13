@@ -224,8 +224,9 @@ export async function generateNpcSprites(npcId, overrides = {}) {
     appearanceGuard.assertCurrent();
     const key = `npc_${npcId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
+    // 未记录外观签名的素材（老图/上传图）不视为过时，只有明确 needs_update 才重绘
     if (existing?.status === 'ready' && !overrides.force
-      && (overrides.refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) === 'current')) continue;
+      && (overrides.refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) !== 'needs_update')) continue;
     try {
       const preset = typeof presetPrompts?.[dir] === 'string' ? presetPrompts[dir].trim() : '';
       const prompt = preset || await generateSpritePrompt({ appearanceInfo, direction: dir });

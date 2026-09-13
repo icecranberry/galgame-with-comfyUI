@@ -7,8 +7,8 @@
  *   blockOverride: [[0|1|-1]]                              // 可走性手动覆盖，-1 = 默认
  * }
  *
- * 可走性 = 非 blockOverride=1 且未被对象 blocking 格占用（建筑主体阻挡、门前留空），
- * 运行时计算；v1 的 walk_grid 列废弃不再读写。
+ * 可走性 = 非 blockOverride=1 且未被对象 blocking 格占用（建筑主体阻挡、门前留空，
+ * 建筑另外扩一圈缓冲带，道路格除外），运行时计算；v1 的 walk_grid 列废弃不再读写。
  */
 import { getDb } from '../../db/index.js';
 import { broadcastTownMapUpdated } from './townBus.js';
@@ -59,6 +59,19 @@ export function buildWalkGridFromLayers(cols, rows, layers, assetsById) {
     const asset = assetsById.get(obj.assetId);
     for (const c of getObjectBlockingCells(obj, asset?.meta, asset?.kind)) {
       if (c.x >= 0 && c.x < cols && c.y >= 0 && c.y < rows) grid[c.y][c.x] = 0;
+    }
+    // 建筑外扩一圈缓冲带（n×n 占格实际阻挡 (n+2)×(n+2)），NPC 不贴墙走；
+    // 道路格除外，否则贴墙马路被挡死会切断路网连通性
+    const fp = asset?.kind === 'building' ? asset?.meta?.footprint : null;
+    if (fp && fp.w > 0 && fp.h > 0) {
+      for (let y = obj.y - fp.h; y <= obj.y + 1; y++) {
+        for (let x = obj.x - 1; x <= obj.x + fp.w; x++) {
+          const inside = x >= obj.x && x < obj.x + fp.w && y >= obj.y - fp.h + 1 && y <= obj.y;
+          if (inside || x < 0 || y < 0 || x >= cols || y >= rows) continue;
+          if (layers?.road?.[y]?.[x] != null) continue;
+          grid[y][x] = 0;
+        }
+      }
     }
   }
   // 手动清障在对象阻挡之后应用
