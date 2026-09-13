@@ -409,12 +409,12 @@ async function generateMomentPost(character, opts = {}) {
     }
   }
 
-  // 1.5 发布形态抽取：做梦/幻想 → 叙事长文（讲故事需要空间）；自由模式 → 不设形态；
-  //     主路径 → 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
+  // 1.5 发布形态抽取：做梦/幻想 → 叙事长文（讲故事需要空间）；
+  //     其余（自由模式与主路径）→ 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
   let pickedForm = null;
   if (isSpecialMode) {
     pickedForm = { name: '叙事长文', desc: '像在讲一个故事或一场梦，可以自由展开', len: '80-200字' };
-  } else if (!isFreeMode) {
+  } else {
     const _hour = new Date().getHours();
     const _isNight = _hour >= 22 || _hour < 5;
     const formWeights = {};

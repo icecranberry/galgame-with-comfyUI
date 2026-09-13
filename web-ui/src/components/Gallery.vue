@@ -2,6 +2,28 @@
   <div class="gallery" ref="scrollContainer" @scroll="onScroll">
     <!-- 空状态 -->
 
+    <!-- 角色筛选条（横向滚动头像，与文件夹筛选叠加） -->
+    <div v-if="!loading && chat.characters.length > 0" class="char-bar">
+      <div ref="charScrollRef" class="char-scroll" @wheel="onCharWheel">
+        <div
+          class="char-avatar char-all"
+          :class="{ active: activeCharId === null }"
+          @click="onCharChange(null)"
+        >全部</div>
+        <div
+          v-for="ch in chat.characters"
+          :key="ch.id"
+          class="char-avatar"
+          :class="{ active: activeCharId === ch.id }"
+          :title="ch.display_name"
+          @click="onCharChange(ch.id)"
+        >
+          <img v-if="ch.avatar_path" :src="ch.avatar_path" class="char-avatar-img" alt="" />
+          <span v-else>{{ ch.display_name?.charAt(0) || '?' }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 文件夹筛选按钮（常驻） -->
     <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
       <linshe-button
@@ -43,6 +65,9 @@
       </div>
     </template>
 
+    <!-- 空状态提示 -->
+    <div v-else-if="!loading" class="load-more">— {{ activeCharId !== null ? 'ta还没有留下图片' : '相册还是空的' }} —</div>
+
     <!-- 加载更多 -->
     <div v-if="!loading && hasMore && images.length > 0" class="load-more">
       <span v-if="loadingMore">加载中...</span>
@@ -69,6 +94,7 @@ import { listGalleryImages } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
+import { useChatStore } from '../stores/chat.js'
 
 const PAGE_SIZE = 60
 
@@ -85,6 +111,10 @@ const scrollContainer = ref(null)
 
 const folders = ref([])
 const activeFolder = ref(null)
+const activeCharId = ref(null)
+const charScrollRef = ref(null)
+
+const chat = useChatStore()
 
 const folderButtons = computed(() => {
   const all = { key: null, label: '全部', count: total.value }
@@ -183,15 +213,38 @@ function onDeleted(deletedUrl) {
 function onFolderChange(key) {
   if (activeFolder.value === key) return
   activeFolder.value = key
-  images.value = []
-  total.value = 0
-  hasMore.value = false
   loadPage(0)
+  scrollContainer.value?.scrollTo({ top: 0 })
 }
 
+function onCharChange(id) {
+  if (activeCharId.value === id) return
+  activeCharId.value = id
+  loadPage(0)
+  scrollContainer.value?.scrollTo({ top: 0 })
+}
+
+function onCharWheel(e) {
+  const el = charScrollRef.value
+  if (!el) return
+  const atLeftEdge = el.scrollLeft <= 0 && e.deltaY < 0
+  const atRightEdge = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 && e.deltaY > 0
+  if (atLeftEdge || atRightEdge) return
+  e.preventDefault()
+  el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
+}
+
+// 请求序号：筛选切换不复位旧数据（避免计数闪 0、网格闪空），靠序号丢弃过期响应
+let loadSeq = 0
+let pendingFirstPage = false
+
 async function loadPage(offset) {
+  const seq = ++loadSeq
+  if (offset === 0) pendingFirstPage = true
   try {
-    const data = await listGalleryImages(PAGE_SIZE, offset, activeFolder.value || '')
+    const data = await listGalleryImages(PAGE_SIZE, offset, activeFolder.value || '', activeCharId.value)
+    if (seq !== loadSeq) return
+    pendingFirstPage = false
     if (offset === 0) {
       images.value = data.images || []
       if (data.folders) folders.value = data.folders
@@ -202,12 +255,13 @@ async function loadPage(offset) {
     hasMore.value = data.hasMore ?? false
     emit('loaded', total.value)
   } catch (err) {
+    if (seq === loadSeq) pendingFirstPage = false
     console.error('[gallery] load images error:', err)
   }
 }
 
 async function loadMore() {
-  if (loadingMore.value || !hasMore.value) return
+  if (loadingMore.value || !hasMore.value || pendingFirstPage) return
   loadingMore.value = true
   await loadPage(images.value.length)
   loadingMore.value = false
@@ -227,9 +281,6 @@ onMounted(async () => {
 })
 
 async function refresh() {
-  images.value = []
-  total.value = 0
-  hasMore.value = false
   await loadPage(0)
 }
 
@@ -241,6 +292,77 @@ defineExpose({ refresh })
   height: 100%;
   overflow-y: auto;
   padding: 16px;
+}
+
+/* ── 角色筛选条（与朋友圈筛选条同款交互） ── */
+.char-bar {
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.char-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 6px 4px;
+  margin: -6px -4px 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.char-scroll::-webkit-scrollbar { display: none; }
+
+.char-avatar {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 0.55;
+  border: 2px solid var(--glass-border);
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  user-select: none;
+  background: var(--accent);
+  transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.char-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  border-radius: inherit;
+  display: block;
+}
+.char-avatar.active {
+  opacity: 1;
+  border-color: var(--accent);
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+}
+.char-avatar:hover:not(.active) {
+  opacity: 0.85;
+  border-color: var(--text-secondary);
+}
+/* 「全部」按钮：只覆盖视觉属性，结构尺寸继承 .char-avatar */
+.char-all {
+  background: rgba(255,255,255,0.75);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.char-all.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  opacity: 1;
 }
 
 /* ── 文件夹筛选栏 ── */
@@ -352,6 +474,13 @@ defineExpose({ refresh })
     gap: 6px;
     padding: 2px 0 12px;
     margin-bottom: 12px;
+  }
+  .char-bar {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+  }
+  .char-scroll {
+    gap: 8px;
   }
 }
 </style>

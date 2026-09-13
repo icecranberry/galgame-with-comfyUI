@@ -45,10 +45,13 @@ function getClient() {
       opts.defaultHeaders = headers;
     }
     // 每日免费鸡蛋：端点免 Key。SDK 构造时要求 apiKey 非 undefined（用随机占位符绕过），
-    // 且值为 null 的请求头会被 SDK 从请求中删除 → 真正不发送 Authorization
+    // 且值为 null 的请求头会被 SDK 从请求中删除 → 真正不发送 Authorization。
+    // 2026-09 起 zen 免费档强制要求 x-opencode-session 头（否则 400 MissingSessionID），
+    // 与 apiKey 占位符共用同一个随机 UUID，客户端生命周期内保持不变。
     if (config.llm.freeEgg) {
-      opts.apiKey = randomUUID(); // 占位符，非真实凭据
-      opts.defaultHeaders = { Authorization: null, ...(opts.defaultHeaders || {}) };
+      const sessionId = randomUUID();
+      opts.apiKey = sessionId; // 占位符，非真实凭据
+      opts.defaultHeaders = { Authorization: null, 'x-opencode-session': sessionId, ...(opts.defaultHeaders || {}) };
     }
     _client = new OpenAI(opts);
   }

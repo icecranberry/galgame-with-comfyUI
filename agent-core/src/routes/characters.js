@@ -24,6 +24,7 @@ import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
+import { collectCharacterImageUrls } from '../services/characterImages.js';
 
 const router = Router();
 
@@ -307,106 +308,10 @@ router.post('/:id/avatar', (req, res) => {
 });
 
 // GET /api/characters/:id/recent-images — 该角色全部渠道的图片（按新到旧、URL 去重；供头像/立绘选取）
+// 渠道聚合逻辑收口在 services/characterImages.js（相册按角色筛选共用同一口径）；
 // 磁盘上已不存在的 URL 一并过滤（重生成会替换删除旧文件，但 image_tasks 里的旧 URL 仍会返回，前端会 404）
 router.get('/:id/recent-images', (req, res) => {
-  const db = getDb();
-  const characterId = req.params.id;
-  const conversationId = `char_${characterId}`;
-
-  const urls = [];
-  const seen = new Set();
-  const push = (u) => {
-    if (typeof u !== 'string' || !u.trim() || seen.has(u)) return;
-    seen.add(u);
-    if (!imageUrlExists(u)) return;
-    urls.push(u);
-  };
-
-  // 1. 生图任务登记：所有以 char_{id} 为前缀的渠道（私聊配图 / 送礼 / 主动聊天 / 立绘 /
-  //    日程拍照 / AI 头像 / 奇遇 / 朋友圈 / 信箱 / 梦境等），新到旧统一收口
-  const taskRows = db.prepare(`
-    SELECT output_paths FROM image_tasks
-    WHERE status = 'done' AND output_paths IS NOT NULL
-      AND (conversation_id = ? OR conversation_id GLOB ?)
-    ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 120
-  `).all(conversationId, `${conversationId}_*`);
-  for (const row of taskRows) {
-    try {
-      for (const u of JSON.parse(row.output_paths)) push(u);
-    } catch {}
-  }
-
-  // 2. 私聊气泡配图（兜底：用户上传、未登记任务的图片）
-  const chatRows = db.prepare(`
-    SELECT images FROM messages
-    WHERE conversation_id = ? AND images IS NOT NULL
-    ORDER BY id DESC LIMIT 60
-  `).all(conversationId);
-  for (const row of chatRows) {
-    try {
-      for (const u of JSON.parse(row.images)) push(u);
-    } catch {}
-  }
-
-  // 3. 朋友圈配图（新图已入 image_tasks，这里兜底老数据）
-  const momentRows = db.prepare(`
-    SELECT images FROM moment_posts
-    WHERE character_id = ? AND status = 'done' AND images IS NOT NULL
-    ORDER BY created_at DESC LIMIT 60
-  `).all(characterId);
-  for (const row of momentRows) {
-    try {
-      for (const u of JSON.parse(row.images)) push(u);
-    } catch {}
-  }
-
-  // 4. 表情包
-  const emojiRows = db.prepare(`
-    SELECT image_path FROM character_emojis
-    WHERE character_id = ? AND status = 'done' AND image_path IS NOT NULL AND image_path != ''
-    ORDER BY id DESC LIMIT 40
-  `).all(characterId);
-  for (const row of emojiRows) push(row.image_path);
-
-  // 5. 梦境配图
-  const dreamRows = db.prepare(`
-    SELECT image_path FROM character_dreams
-    WHERE character_id = ? AND image_path IS NOT NULL AND image_path != ''
-    ORDER BY id DESC LIMIT 20
-  `).all(characterId);
-  for (const row of dreamRows) push(row.image_path);
-
-  // 6. 奇遇事件图（当前事件 + 历史结案图）
-  const eventRows = db.prepare(`
-    SELECT image AS u, created_at AS t FROM character_events
-    WHERE character_id = ? AND image IS NOT NULL AND image != ''
-    UNION ALL
-    SELECT final_image AS u, ended_at AS t FROM event_history
-    WHERE character_id = ? AND final_image IS NOT NULL AND final_image != ''
-    ORDER BY t DESC LIMIT 40
-  `).all(characterId, characterId);
-  for (const row of eventRows) push(row.u);
-
-  // 7. 信箱信件（角色画像与插图；信纸底纹 paper_path 不属于角色图，不收录）
-  const mailRows = db.prepare(`
-    SELECT portrait_path, illustration_path FROM mailbox_letters
-    WHERE character_id = ?
-      AND ((portrait_path IS NOT NULL AND portrait_path != '')
-        OR (illustration_path IS NOT NULL AND illustration_path != ''))
-    ORDER BY created_at DESC LIMIT 40
-  `).all(characterId);
-  for (const row of mailRows) {
-    push(row.portrait_path);
-    push(row.illustration_path);
-  }
-
-  // 8. 角色当前头像与立绘
-  const char = db.prepare('SELECT avatar_path, standing_url FROM characters WHERE id = ?').get(characterId);
-  if (char) {
-    push(char.avatar_path);
-    push(char.standing_url);
-  }
-
+  const urls = collectCharacterImageUrls(req.params.id).filter(u => imageUrlExists(u));
   res.json({ images: urls });
 });
 

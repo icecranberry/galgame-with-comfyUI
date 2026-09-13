@@ -12,8 +12,9 @@ dotenv.config({ path: envPath });
 
 // 每日免费鸡蛋：opencode zen 免费端点（无需 API Key，按 IP 限流）
 const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
-// 免费模型轮换顺序：deepseek → MiMo → Hy3；本轮失败过的模型只记内存，下次开启重新开始
-export const FREE_EGG_MODELS = ['deepseek-flash-free', 'mimo-v2.5-free', 'hy3-free'];
+// 免费模型名单（2026-09 检测：deepseek-flash-free / hy3-free 已下线，muse-spark 系地区封锁）；
+// 本轮失败过的模型只记内存，下次开启重新开始
+export const FREE_EGG_MODELS = ['mimo-v2.5-free'];
 const FREE_EGG_MODEL = FREE_EGG_MODELS[0];
 
 export const config = {

@@ -10,6 +10,7 @@ import { buildImageCrossRefInfo } from '../services/characterPersona.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
+import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { chatSync } from '../llm/llm-client.js';
 import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
@@ -37,21 +38,38 @@ import { galleryCache, refreshGalleryCache, invalidateGalleryCache } from '../se
 // 兼容再导出：characters.js 等历史调用方仍从本模块导入
 export { invalidateGalleryCache };
 
-// GET /api/images/gallery — 获取相册图片列表（按修改时间倒序，支持分页 + 文件夹筛选）
+// GET /api/images/gallery — 获取相册图片列表（按修改时间倒序，支持分页 + 文件夹/角色筛选）
 router.get('/gallery', async (req, res) => {
   try {
     if (!galleryCache.data || Date.now() - galleryCache.mtime > galleryCache.ttl) {
       await refreshGalleryCache();
     }
 
-    const { folder } = req.query;
-    let { images, total } = galleryCache.data;
+    const { folder, character } = req.query;
+    let images = galleryCache.data.images;
+
+    // 按角色筛选：与该角色全部渠道登记的图片 URL 求交集（磁盘扫描结果保证文件都存在）
+    if (character) {
+      const charUrlSet = new Set();
+      for (const u of collectCharacterImageUrls(character, { limit: 1000 })) {
+        const clean = String(u || '').split('?')[0];
+        charUrlSet.add(clean);
+        try { charUrlSet.add(decodeURIComponent(clean)); } catch {}
+        // PNG 已被 AVIF 压缩替换时磁盘文件名会变，两种扩展名都收进集合
+        if (/\.png$/i.test(clean)) charUrlSet.add(clean.replace(/\.png$/i, '.avif'));
+        if (/\.avif$/i.test(clean)) charUrlSet.add(clean.replace(/\.avif$/i, '.png'));
+      }
+      images = images.filter(img => charUrlSet.has(img.url));
+    }
+
+    // 文件夹计数跟随角色筛选口径（不受文件夹筛选影响，与「全部」计数同口径）
+    const folders = getAvailableFolders(images);
 
     if (folder) {
       images = images.filter(img => img.folder === folder);
-      total = images.length;
     }
 
+    const total = images.length;
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const offset = parseInt(req.query.offset) || 0;
 
@@ -60,7 +78,7 @@ router.get('/gallery', async (req, res) => {
       images: pageImages.map(img => ({ name: img.name, url: img.url, size: img.size, mtime: img.mtime, folder: img.folder })),
       total,
       hasMore: offset + limit < total,
-      folders: getAvailableFolders(galleryCache.data.images),
+      folders,
     });
   } catch (err) {
     console.error('[gallery] read images dir error:', err.message);

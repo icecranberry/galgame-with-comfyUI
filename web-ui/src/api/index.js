@@ -879,9 +879,10 @@ export async function removeOath(characterId) {
 }
 
 // ── Gallery 相册 ──
-export function listGalleryImages(limit = 100, offset = 0, folder = '') {
+export function listGalleryImages(limit = 100, offset = 0, folder = '', characterId = null) {
   let path = `/images/gallery?limit=${limit}&offset=${offset}`
   if (folder) path += `&folder=${encodeURIComponent(folder)}`
+  if (characterId) path += `&character=${encodeURIComponent(characterId)}`
   return request(path)
 }
 
