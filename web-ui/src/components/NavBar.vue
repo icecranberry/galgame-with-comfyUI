@@ -82,8 +82,12 @@
     </div>
 
     <div class="nav-bottom">
-      <router-link to="/settings" data-nav="settings" class="nav-item" :class="{ active: $route.path === '/settings' }" title="设置">
-        <gear-icon :size="24" />
+      <router-link to="/settings" data-nav="settings" class="nav-item" :class="{ active: $route.path === '/settings' }" :title="updateInfo.hasUpdate ? '设置 · 有新版本' : '设置'">
+        <div class="nav-icon-wrap">
+          <gear-icon :size="24" />
+          <!-- 远端有更新的 tag 时亮红点，与聊天 / 朋友圈未读红点同一套语言 -->
+          <span v-if="updateInfo.hasUpdate" class="nav-dot" aria-hidden="true"></span>
+        </div>
         <span class="nav-label">设置</span>
       </router-link>
     </div>
@@ -98,6 +102,7 @@ import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
+import { useUpdateStore } from '../stores/updateInfo.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 import GearIcon from './GearIcon.vue'
 
@@ -108,6 +113,7 @@ const events = useEventsStore()
 const proactive = useProactiveStore()
 const scheduleStore = useScheduleStore()
 const mailbox = useMailboxStore()
+const updateInfo = useUpdateStore()
 
 function handleMomentsClick() {
   if (route.path === '/moments') {

@@ -2,20 +2,20 @@
  * （services/town/townNpcMomentGenerator.js）共用，避免两端口径漂移。 */
 
 export const MOMENT_FORMS = [
-  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 0.8, nightBoost: false },
-  { name: '碎碎念', desc: '围绕同一件小事写两三行短句，想到哪说到哪，像随手记', len: '20-60字', weight: 1.2, nightBoost: false },
+  { name: '短句流', desc: '一句话说清楚，极简不解释', len: '5-20字', weight: 1.2, nightBoost: false },
   { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
-  { name: '自言自语', desc: '像没写完的心里话，带点欲言又止', len: '10-40字', weight: 1.0, nightBoost: true },
   { name: '冷幽默', desc: '一句或几句自嘲冷幽默，结尾抖个小包袱', len: '15-50字', weight: 0.7, nightBoost: false },
   { name: '清单体', desc: '围绕同一件事或同一个主题把细节逐条列出来，条目感强，不要混入另一件事', len: '30-100字', weight: 0.7, nightBoost: false },
-  { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.6, nightBoost: false },
+  { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.4, nightBoost: false },
+  { name: '抛个问题', desc: '整条就是一个具体问题或求助，带够场景让人能回答；禁止"有没有人懂这种感觉"这类空泛句式', len: '15-45字', weight: 0.8, nightBoost: false },
+  { name: '颜文字体', desc: '用颜文字或半角符号代替 emoji 表达状态，配一句极短的话', len: '0-20字', weight: 1.0, nightBoost: true },
 ];
 
 /** text 必须具备单一中心；同时给出的日程与发圈动因应合并成同一条主线。 */
 export const MOMENT_SINGLE_FOCUS_RULE = [
   '- **单中心（最高优先级）**：text 只能围绕一段连续发生的经历、一件具体的事或一种情绪展开，开头选定后不再转移到另一件事。',
-  '- 当同时给出【此刻正在做】和【本次发圈动因】时，它们是这条主线的两个同等重要的构成条件，不是两个重点：必须让它们在同一场景或同一段连续经历里共同成立，并在因果或细节上自然衔接。',
+  '- 当同时给出【此刻正在做】和【本次发圈动因】时，它们是这条主线的两个同等重要的构成条件，不是两个重点：尽量让它们在同一场景或同一段连续经历里共同成立，并在因果或细节上自然衔接。如果这两个实在是关联系太小，优先保证【此刻正在做】。',
   '- 可以补充同一场景里的内心OS、吐槽、感官细节和结果；禁止把日程、经历、旧动态、世界观分别写成几个独立段落，也禁止用“另外、再说、其实我还发现、顺便”另起第二件事。',
 ].join('\n');
 

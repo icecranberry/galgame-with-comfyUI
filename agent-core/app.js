@@ -2,6 +2,7 @@ import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { config, autoDetectWorkflowMode } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
@@ -56,6 +57,8 @@ const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
+// 仓库根目录：发布包里 agent-core 与 VERSION 同级（VERSION 由 `npm run tag` 写入）
+const ROOT_DIR = path.join(__dirname, '..');
 
 // 中间件
 app.use(cors());
@@ -127,6 +130,21 @@ app.use('/api/items', wrapRouterAsync(itemsRoutes));
 app.use('/api/town', wrapRouterAsync(townRoutes));
 
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
+
+// 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
+// 前端「有更新噢」拿它当本地版本去比 GitHub 上的 tag —— 这一步只读本地文件、不碰网络，
+// 所以放后端；查 GitHub 那一步是浏览器直连，见 web-ui/src/utils/githubUpdate.js
+app.get('/api/version', (req, res) => {
+  let version = '';
+  try {
+    // 每次现读：文件只有几个字节，省得更新之后内存里的旧值跟实际装的对不上
+    version = readFileSync(path.join(ROOT_DIR, 'VERSION'), 'utf-8').trim();
+  } catch {
+    // VERSION 缺失（非标准部署）时返回空串，前端据此跳过更新提示
+  }
+  res.json({ version });
+});
+
 // 健康检查
 app.get('/api/health', asyncHandler(async (req, res) => {
   const vectorOk = await vectorHealth();

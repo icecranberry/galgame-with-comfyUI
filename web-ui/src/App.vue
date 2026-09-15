@@ -48,6 +48,7 @@ import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
 import { playNotificationSound } from './utils/sound.js'
 import { useMailboxStore } from './stores/mailbox.js'
+import { useUpdateStore } from './stores/updateInfo.js'
 import { onEvent as onStreamEvent } from './stores/unifiedStream.js'
 import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -63,6 +64,7 @@ const chat = useChatStore()
 const settings = useSettingsStore()
 const proactive = useProactiveStore()
 const mailbox = useMailboxStore()
+const update = useUpdateStore()
 const route = useRoute()
 const confirmDialog = ref(null)
 const toastEl = ref(null)
@@ -192,6 +194,7 @@ onMounted(async () => {
   themeAutoTimer.value = window.setInterval(() => settings.refreshTheme(), 60_000)
   window.addEventListener('focus', settings.refreshTheme)
   loadUserConfig()  // 应用启动即加载，不阻塞渲染
+  update.check()  // 版本更新检查：设置页「有更新噢」标签与侧边栏红点共用；失败静默
   await chat.loadCharacters()
 
   // 连接主动聊天 SSE 通知流

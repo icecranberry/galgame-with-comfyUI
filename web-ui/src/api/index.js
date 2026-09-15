@@ -40,6 +40,14 @@ async function consumeSSE(res, onEvent) {
   }
 }
 
+// ── 应用自身版本 ──
+// 后端读仓库根目录 VERSION 给出的版本号（不带 v）。「本地装的是哪版」只有本机能知道，
+// 所以这一步走后端；对比 GitHub 上有没有新 tag 那一步是浏览器直连，不走后端。
+export async function getAppVersion() {
+  const data = await request('/version')
+  return String(data?.version || '')
+}
+
 // ── Characters ──
 export async function listCharacters() {
   return request(`/characters`)

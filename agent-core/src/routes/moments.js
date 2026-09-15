@@ -642,7 +642,7 @@ ${dynamicRules}`;
   }
   // 每多一张配图就多一段画面描述，max_tokens 相应放宽（一张 2048 / 两张 3072 / 三张 4096）
   const maxTokens = 2048 + (imageCount - 1) * 1024;
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
+  const result = await chatSync(msgs, { temperature: 0.8, max_tokens: maxTokens, response_format: { type: 'json_object' }, label: '发朋友圈助手' });
 
   // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content
   const parsed = parseMomentResponse(result);

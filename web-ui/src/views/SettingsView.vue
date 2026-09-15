@@ -2,7 +2,10 @@
   <div ref="scrollEl" class="settings-view" @scroll="onSettingsScroll">
     <div class="page-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <h2 @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">系统参数</h2>
-      <span class="hint">修改即时生效，无需重启</span>
+      <div class="header-meta">
+        <span class="hint">修改即时生效，无需重启</span>
+        <update-tag />
+      </div>
     </div>
 
     <div class="settings-grid">
@@ -939,6 +942,7 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
+import UpdateTag from '../components/UpdateTag.vue'
 import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
 const settingsStore = useSettingsStore()
@@ -2140,11 +2144,16 @@ function resetTestPrompts() {
   margin-bottom: 28px;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
+  /* will-change 让标题栏自成层叠上下文，「有更新噢」弹层的 z-index 被封在里面，
+     默认（auto）会被下面的 .card 整块盖住 —— 给标题栏正层级，弹层才盖得住卡片 */
+  position: relative;
+  z-index: 20;
 }
 .page-header.header-hidden { transform: translateY(-200%); margin-bottom: 0; }
 .page-header h2 { font-size: 24px; color: var(--text-bright); font-weight: 700; }
 .is-clickable { cursor: pointer; }
-.hint { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.header-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.hint { font-size: 13px; color: var(--text-secondary); }
 
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .memory-settings-card { gap: 0; }
