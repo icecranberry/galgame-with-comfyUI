@@ -116,11 +116,17 @@ function adminHandler(name, state) {
   return new Function('state', `with (state) { return (${adminScript.slice(node.start, node.end)}) }`)(state)
 }
 
-function resetPanel(currentMapId) {
+function resetPanel(currentMapId, { fail } = {}) {
   const calls = []
   const state = {
     resetting: ref(true), detail: ref({ npcId: 1 }),
-    api: { resetTownMap: async id => calls.push(['reset', id]) },
+    resetBusy: ref(false), resetError: ref(''), resetDone: ref(false), resetDoneName: ref(''),
+    resetTargetName: { value: '海边的镇' },
+    api: { resetTownMap: async id => {
+      calls.push(['reset', id])
+      calls.push(['busy-during-request', state.resetBusy.value])
+      if (fail) throw new Error('地图不存在')
+    } },
     town: { currentMapId,
       fetchState: async () => calls.push(['state']),
       fetchMaps: async () => calls.push(['maps']) },
@@ -132,8 +138,14 @@ function resetPanel(currentMapId) {
 test('the danger-zone reset targets the map the player is on', async () => {
   const { state, calls } = resetPanel(3)
   await state.doReset()
-  assert.deepEqual(calls, [['reset', 3], ['state'], ['maps']], '只重置玩家所在地图，并重拉状态与目录')
+  assert.deepEqual(calls.filter(([name]) => name !== 'busy-during-request'),
+    [['reset', 3], ['state'], ['maps']], '只重置玩家所在地图，并重拉状态与目录')
+  assert.deepEqual(calls.find(([name]) => name === 'busy-during-request'),
+    ['busy-during-request', true], '请求在途时确认清除要转圈，别让玩家以为没点上')
   assert.equal(state.resetting.value, false)
+  assert.equal(state.resetBusy.value, false, '跑完收起 loading')
+  assert.equal(state.resetDone.value, true)
+  assert.equal(state.resetDoneName.value, '海边的镇', '结果提示报出被清的是哪一座')
   assert.equal(state.detail.value, null, '选中的人已经不在了，清掉详情')
 })
 
@@ -142,6 +154,22 @@ test('the danger-zone reset sends nothing when there is no current map', async (
   await state.doReset()
   assert.deepEqual(calls, [], '没有当前地图就别发请求')
   assert.equal(state.resetting.value, false)
+})
+
+test('the danger-zone reset keeps the confirm row when the request fails', async () => {
+  const { state } = resetPanel(3, { fail: true })
+  await state.doReset()
+  assert.equal(state.resetBusy.value, false, '失败也要收起 loading，不然按钮一直转圈')
+  assert.equal(state.resetting.value, true, '失败保留确认条，可以直接再按一次')
+  assert.match(state.resetError.value, /地图不存在/)
+  assert.equal(state.resetDone.value, false)
+})
+
+test('danger-zone copy only claims the town underfoot', async () => {
+  const tpl = parseSfc(readFileSync(new URL('../src/components/town/TownAdminPanel.vue', import.meta.url), 'utf8')).descriptor.template.content
+  const desc = tpl.match(/<p class="ap-danger-desc">([\s\S]*?)<\/p>/)[1]
+  assert.match(desc, /只清你脚下的这一个小镇/, '文案要说清只动脚下这一座')
+  assert.match(desc, /别的小镇照常过日子/, '别的小镇不受影响要写明')
 })
 
 test('map reset is a DELETE on the map resource', async t => {

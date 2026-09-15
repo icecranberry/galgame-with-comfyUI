@@ -1,6 +1,6 @@
 <template>
   <div class="ttc">
-    <!-- 地皮专用：在「裁剪前原图」上拖菱形，而不是在已经裁好的 64×32 成品上做文章 -->
+    <!-- 地皮专用：在「裁剪前原图」上拖菱形，而不是在已经裁好的 128×64 成品上做文章 -->
     <div
       ref="frameEl"
       class="ttc-frame"
@@ -69,8 +69,8 @@ import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
 
-/** 与 agent-core ASSET_SPECS.ground.pixel 一致：地砖成品就是 64×32 */
-const TILE_PIXEL = { w: 64, h: 32 }
+/** 与 agent-core TILE_PIXEL / ASSET_SPECS.ground.pixel 一致：地砖成品就是 128×64 */
+const TILE_PIXEL = { w: 128, h: 64 }
 /** 与后端 extractIsoDiamond 的菱形蒙版容差一致（略外扩，避免相邻菱形间出现发丝缝） */
 const DIAMOND_EPS = 1.06
 const HANDLE_SIZE = 12
@@ -243,7 +243,7 @@ function draw() {
   ctx.stroke()
 }
 
-/** 按菱形（含后端同款外扩蒙版）实时算一张 64×32 预览 */
+/** 按菱形（含后端同款外扩蒙版）实时算一张 TILE_PIXEL 预览 */
 function renderPreview() {
   const canvas = previewEl.value
   if (!canvas || !img || diamond.w <= 0) return
@@ -280,8 +280,8 @@ function renderPreview() {
 }
 
 /**
- * 逐级折半再落到 64×32。
- * canvas 一步缩到 1/N（源图 800~1536，目标只有 64）时，每个目标像素只采样源图两三个像素，
+ * 逐级折半再落到 TILE_PIXEL。
+ * canvas 一步缩到 1/N（源图 800~1536，目标只有 128）时，每个目标像素只采样源图两三个像素，
  * 大部分源像素被丢掉（混叠），预览会与后端 sharp 的缩图结果对不上；
  * 逐级折半近似 box 平均，缩图比例再大也能保持与后端一致。
  */
@@ -565,9 +565,9 @@ onBeforeUnmount(() => {
 .ttc-previews { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .ttc-preview { display: flex; flex-direction: column; gap: 4px; }
 .ttc-preview-label { font-size: 10px; color: var(--text-secondary); }
-/* 320×160 = 64×32 的 5 倍整数放大：像素块清晰，菱形四个尖端能看清单像素 */
+/* 384×192 = 128×64 的 3 倍整数放大：像素块清晰，菱形四个尖端能看清单像素 */
 .ttc-preview-canvas {
-  width: min(320px, 27vw);
+  width: min(384px, 27vw);
   height: auto;
   aspect-ratio: 2 / 1;
   border-radius: 8px;

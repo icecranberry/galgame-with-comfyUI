@@ -536,7 +536,7 @@ const editTool = ref('ground')
 const libKind = ref('ground')
 const selectedAssetId = ref(null)
 const genDesc = ref('')
-// 建筑/道具新素材的占地档位；地砖/道路是固定 64×32 菱形贴图，不涉及占地
+// 建筑/道具新素材的占地档位；地砖/道路是固定 128×64 菱形贴图，不涉及占地
 const genFootprint = ref('1x1')
 watch(libKind, (kind) => {
   if (kind === 'building') genFootprint.value = '2x2'

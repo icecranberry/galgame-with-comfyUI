@@ -42,7 +42,10 @@ export function groundUvs(asset, width = 64, height = 32) {
   if (Array.isArray(custom) && custom.length === 4 && custom.every(p => Array.isArray(p) && p.length === 2 && p.every(v => Number.isFinite(v) && v >= 0 && v <= 1))) return custom
   const center = 1 - (asset?.meta?.groundAnchorY ?? 0.5)
   const half = width / (4 * height)
-  const inset = asset?.kind === 'ground' ? 4 : 0.5
+  // 内缩按贴图宽度等比换算（64 宽 = 4 texel，128 宽 = 8 texel）：写死 texel 数的话，
+  // 地砖从 64×32 提到 128×64 后 UV 会往回收一半，把本该裁在画幅外的菱形蒙版边 / 派生扩色带
+  // 重新采样进来，接缝会露白边。等比换算保证两种分辨率采到的是同一块画面。
+  const inset = asset?.kind === 'ground' ? width / 16 : width / 128
   const u = inset * 2 / width, v = inset / height
   return [[0.5, Math.min(1 - v, center + half - v)], [1 - u, center], [0.5, Math.max(v, center - half + v)], [u, center]]
 }

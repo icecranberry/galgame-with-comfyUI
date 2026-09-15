@@ -20,7 +20,7 @@
           >
 
           <div class="tam-editor">
-            <!-- 地皮：单独一套菱形裁剪逻辑——在裁剪前原图上调菱形，而不是在已成型的 64×32 上裁 -->
+            <!-- 地皮：单独一套菱形裁剪逻辑——在裁剪前原图上调菱形，而不是在已成型的 128×64 上裁 -->
             <TownTileCropper
               v-if="open && displayAsset?.id && useTileCropper"
               :key="`tile-${displayAsset.id}`"
@@ -150,7 +150,7 @@ const srcUrl = computed(() => displayAsset.value?.image_path
   ? `${displayAsset.value.image_path}?v=${displayAsset.value.meta?.updatedAt ?? Date.now()}`
   : displayAsset.value?.src || '')
 
-/** 地皮 / 道路：成品是 64×32 菱形贴图，单独走菱形裁剪逻辑（其余素材仍是通用编辑器） */
+/** 地皮 / 道路：成品是 128×64 菱形贴图，单独走菱形裁剪逻辑（其余素材仍是通用编辑器） */
 const isTileAsset = computed(() => ['ground', 'road'].includes(String(displayAsset.value?.kind || '')))
 const tileSourceUrl = computed(() => {
   const meta = displayAsset.value?.meta

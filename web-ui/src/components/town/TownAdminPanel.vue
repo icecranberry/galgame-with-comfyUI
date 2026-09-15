@@ -414,15 +414,17 @@
 
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
-            <p class="ap-danger-desc">重新初始化会清除这座小镇的地图、地点、居民与相遇记录，清理未完成委托并退回服务托管款；世界里别的小镇不受影响。已有角色、邻币、背包道具和交易履历会保留。</p>
-            <linshe-button variant="danger" size="sm" :loading="resetting" :disabled="town.currentMapId == null" @click="resetting = true">
+            <p class="ap-danger-desc">只清你脚下的这一个小镇：重来后「{{ resetTargetName }}」的地图、地点、居民与相遇记录都会清空，未完成的委托作废、服务托管款退回；世界里别的小镇照常过日子，已有角色、邻币、背包道具和交易履历都保留。</p>
+            <linshe-button variant="danger" size="sm" :loading="resetBusy" :disabled="town.currentMapId == null || resetBusy" @click="openResetConfirm">
               重新初始化这座小镇
             </linshe-button>
             <div v-if="resetting" class="ap-confirm">
-              <span>确定要推倒重来吗？只清「{{ town.currentMap?.name || '当前小镇' }}」，别的镇不动。</span>
-              <linshe-button variant="danger" size="sm" @click="doReset">确认清除</linshe-button>
-              <linshe-button variant="ghost" size="sm" @click="resetting = false">手滑了</linshe-button>
+              <span>确定要推倒重来吗？只清「{{ resetTargetName }}」这一座，别的镇不动。</span>
+              <linshe-button variant="danger" size="sm" :loading="resetBusy" :disabled="resetBusy" @click="doReset">确认清除</linshe-button>
+              <linshe-button variant="ghost" size="sm" :disabled="resetBusy" @click="resetting = false">手滑了</linshe-button>
             </div>
+            <div v-if="resetError" class="ap-layout-error" role="alert">{{ resetError }}</div>
+            <div v-else-if="resetDone" class="ap-layout-done" role="status">已清空「{{ resetDoneName }}」，要重来就用「再建一座小镇」重新生成。</div>
           </div>
         </div>
       </div>
@@ -478,6 +480,11 @@ const adding = ref(false)
 const batchSprites = ref(false)
 const batchChars = ref(false)
 const resetting = ref(false)
+const resetBusy = ref(false)
+const resetError = ref('')
+const resetDone = ref(false)
+const resetDoneName = ref('')
+const resetTargetName = computed(() => town.currentMap?.name || '当前小镇')
 const layoutConfirm = ref(false)
 const relayoutBusy = ref(false)
 const relayoutError = ref('')
@@ -983,18 +990,34 @@ async function doRelayout() {
   }
 }
 
+/** 展开危险区确认条：先把上一次的结果清掉，避免「已清空」和新的确认条同屏 */
+function openResetConfirm() {
+  resetError.value = ''
+  resetDone.value = false
+  resetting.value = true
+}
+
 async function doReset() {
+  if (resetBusy.value) return
   const mapId = town.currentMapId
   if (mapId == null) { resetting.value = false; return }
+  const name = resetTargetName.value
+  resetBusy.value = true            // 请求期间确认条上的按钮转圈，别让玩家以为没点上
+  resetError.value = ''
+  resetDone.value = false
   try {
     await api.resetTownMap(mapId)
     resetting.value = false
+    resetDoneName.value = name
+    resetDone.value = true
     detail.value = null
     town.fetchState().catch(() => {})
     town.fetchMaps().catch(() => {})
   } catch (err) {
     console.warn('[town-admin] reset failed:', err?.message)
-    resetting.value = false
+    resetError.value = err?.message || '清除失败，请重试'   // 失败保留确认条，可以直接再按一次
+  } finally {
+    resetBusy.value = false
   }
 }
 
@@ -1449,6 +1472,7 @@ onBeforeUnmount(() => {
 .ap-confirm {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
   color: var(--text-primary);

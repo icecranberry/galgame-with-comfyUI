@@ -39,41 +39,54 @@ export const TOWN_ASSETS_DIR = path.resolve(__dirname, '..', '..', '..', 'data',
 /** 固定像素风基础串（整套素材共享 → 风格一致） */
 const PIXEL_BASE = 'pixel art, clean pixel edges, limited color palette, no anti-aliasing, no text, no watermark, no outline glow';
 
+/**
+ * 等距地砖/道路的成品贴图尺寸：一格在屏幕上宽 64px（zoom=1），贴图取 2 倍边长。
+ * 为什么不是 1:1 的 64×32：源图菱形宽约 740px，64 宽时 1 texel 要吃掉 11.6 源像素，
+ * 而这类插画地砖的砖缝只有 4px 上下（≈0.35 texel），降采样只会把它平均成中间色（看起来就是「糊」）；
+ * 128×64 时砖缝约 0.69 texel，线条才留得住。默认桌面 zoom 1.5 + DPR 1.5 下 128 texel 落在约 144 设备像素上，
+ * 也正好接近 1:1（旧的 64×32 在同场景是被拉到 2.25 倍放大）。
+ */
+export const TILE_PIXEL = Object.freeze({ w: 128, h: 64 });
+
 /** kind 专属生成规格（2.1）：尺寸 / 专属串 / 像素化目标
  *  地砖/道路不带画师串（illustration 画师会把平铺纹理带偏成场景插画） */
 export const ASSET_SPECS = {
   ground: {
-    // 成品是 64×32 的平铺贴图，生成端不需要 1536：800×800 出图更省时间/显存，缩到像素尺寸前细节仍够
+    // 成品是 TILE_PIXEL 的平铺贴图，生成端不需要 1536：800×800 出图更省时间/显存，缩到像素尺寸前细节仍够
     size: { width: 800, height: 800 },
     // {desc} 会被插进「顶面完全被该材质覆盖」的句子里，避免模型画成花坛（顶面裸土、草只长边缘）
     promptTemplate: 'isometric ground tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
-    pixel: { w: 64, h: 32 },
+    pixel: TILE_PIXEL,
     artist: '',
   },
   road: {
     size: { width: 800, height: 800 }, // 与 ground 一致，见上
     promptTemplate: 'isometric road tile, one single flat diamond-shaped block seen from a 45 degree angle, the entire top face is fully covered edge to edge by {desc}, the material reaches every corner of the top face, soil visible only on the thin sides below the top face, tile centered and filling the whole square frame, straight edges, game map tile',
     removeBg: false,
-    pixel: { w: 64, h: 32 },
+    pixel: TILE_PIXEL,
     artist: '',
   },
   building: {
-    size: { width: 1200, height: 1200 },
+    // 成品边长 = (w+h)*128，最大占格 3×3 时是 768：生成端最短边必须压得住它，否则烘焙等于把糊图放大。
+    // cropContent 会裁掉留白（内容常只占画幅 60~85%），所以留到 1536，对 768 仍是降采样
+    size: { width: 1536, height: 1536 },
     // 英文 prompt 由 LLM 按酒馆立绘同款四层结构生成（townPromptBuilder），此串仅兜底
     prompt: 'isometric building game sprite on an empty white background, seen from a 45 degree angle showing two walls and the roof, the building sits directly on the background with a clean straight bottom edge, no base platform, no foundation slab, no ground tiles, no pavement, nothing attached below or beside the walls, complete building centered and filling the frame, game map asset',
     removeBg: true,
     cropContent: true,
-    // 按等距占格宽 (w+h)*32 画：烘焙成 2× 做超采样，zoom=1 时约 2 texel/px，放到 2.5 倍仍有富余
-    pixelWidth: (fp) => (fp.w + fp.h) * 64, // 2× 烘焙：贴图密度高于屏幕需求，缩小/放大都由 GPU 采样
+    // 屏幕占格宽是 (w+h)*32（zoom=1）：按它的 4 倍边长烘焙（贴图边长是旧口径的 2 倍），
+    // 配 linear+mipmap 后默认桌面 zoom 1.5 + DPR 1.5 仍是缩采样，放到上限 zoom 2.5 也接近 1:1
+    pixelWidth: (fp) => (fp.w + fp.h) * 128,
   },
   prop: {
-    size: { width: 512, height: 512 },
+    // 同 building：成品边长最大 (3+3)*128 = 768，生成端 1024 保证是降采样
+    size: { width: 1024, height: 1024 },
     prompt: 'a single object sprite standing on an empty white background, small soft shadow right under it, nothing else in the image, isolated game sprite, slight three-quarter view from a bit above, complete object visible, centered',
     removeBg: true,
     cropContent: true,
     pixel: { w: 64, h: 64 },
-    pixelWidth: (fp) => (fp.w + fp.h) * 64, // 2× 烘焙：贴图密度高于屏幕需求，缩小/放大都由 GPU 采样
+    pixelWidth: (fp) => (fp.w + fp.h) * 128,
   },
   // 像素小人：600×800 制作 → 抠白裁切 → 轻缩存储（保留生成图的画质，像素风由 prompt 控制）
   npc: {
@@ -349,7 +362,7 @@ function rowToAsset(row) {
  * @param {object} p - { row, guard, meta, spec, size, buffer, prompt, inheritAppearanceSource }
  */
 async function commitProcessedSource({ row, guard, meta, spec, size, buffer, prompt = null, inheritAppearanceSource = false }) {
-  // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
+  // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 TILE_PIXEL
   const isTile = row.kind === 'ground' || row.kind === 'road';
   let work = buffer;
   let tileRect = null;
@@ -363,9 +376,9 @@ async function commitProcessedSource({ row, guard, meta, spec, size, buffer, pro
   let th;
   let smoothResize = false;
   if (isTile) {
-    tw = 64; th = 32;
+    tw = TILE_PIXEL.w; th = TILE_PIXEL.h;
   } else if (spec.pixelWidth && meta.footprint?.w) {
-    // 建筑/大件道具按等距占格宽 (w+h)*32 的 2× 烘焙：配 linear+mipmap，放大不结块
+    // 建筑/大件道具按等距占格宽 (w+h)*32 的 4× 烘焙：配 linear+mipmap，放大不结块
     tw = spec.pixelWidth(meta.footprint);
     th = Math.max(1, Math.round(tw * size.height / size.width));
   } else if (spec.maxSide) {
@@ -605,7 +618,7 @@ export async function cropAssetImage(id, rect) {
 }
 
 /**
- * 地砖专用裁剪：在「裁剪前原图」上按用户选定的 2:1 菱形重裁 → 像素化到 64×32 覆盖成品。
+ * 地砖专用裁剪：在「裁剪前原图」上按用户选定的 2:1 菱形重裁 → 像素化到 TILE_PIXEL 覆盖成品。
  * 与生成时的自动归一化走同一条管线（extractIsoDiamond → pixelate），用户可微调菱形避开侧面 / 顶面装饰。
  * @param {number} id - 素材 id
  * @param {{x:number,y:number,w:number}} diamond - 原图像素坐标的菱形包围框（高 = 宽 / 2）
@@ -624,7 +637,7 @@ export async function cropTileAssetImage(id, diamond) {
   const diamondBuffer = await extractIsoDiamond(fs.readFileSync(sourcePath), diamond);
   assertAssetCurrent(guard);
   const spec = ASSET_SPECS[row.kind] || {};
-  const out = await postProcessAsset(diamondBuffer, { targetW: spec.pixel?.w ?? 64, targetH: spec.pixel?.h ?? 32 });
+  const out = await postProcessAsset(diamondBuffer, { targetW: spec.pixel?.w ?? TILE_PIXEL.w, targetH: spec.pixel?.h ?? TILE_PIXEL.h });
   assertAssetCurrent(guard);
   const outMeta = await sharp(out).metadata();
   assertAssetCurrent(guard);
