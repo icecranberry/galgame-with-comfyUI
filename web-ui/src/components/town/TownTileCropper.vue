@@ -50,9 +50,9 @@
 
     <div class="ttc-toolbar">
       <linshe-button variant="ghost" size="sm" :disabled="!loaded" @click="resetDiamond">还原自动裁剪</linshe-button>
-      <!-- 外部注入的操作（重新生成）：与确认按钮同排 -->
+      <!-- 外部注入的操作（上传图片 / 重新生成 / 微调提示词）：与确认按钮同排 -->
       <slot name="actions" />
-      <linshe-button variant="primary" size="sm" :loading="cropping" :disabled="!loaded" @click="confirm">确认裁剪</linshe-button>
+      <linshe-button class="ttc-primary" variant="primary" size="sm" :loading="cropping" :disabled="!loaded" @click="confirm">确认裁剪</linshe-button>
     </div>
 
     <Teleport to="body">
@@ -585,7 +585,8 @@ onBeforeUnmount(() => {
 .ttc-preview-note { opacity: 0.85; }
 
 .ttc-toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
-.ttc-toolbar > :last-child { margin-left: auto; }
+/* 主按钮贴右：行内注入的是父组件传进来的按钮，:last-child 命不中，所以显式标记主按钮 */
+.ttc-toolbar > .ttc-primary { margin-left: auto; }
 
 .ttc-tip {
   position: fixed;

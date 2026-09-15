@@ -2,14 +2,18 @@
  * 放大细化（HiresFix）服务
  *
  * 流程:
- *   1. 读取原图文件 → 上传到 ComfyUI input 目录
+ *   1. 读取原图文件 → 透明背景（抠过图的人像）先垫白成不透明图 → 上传到 ComfyUI input 目录
  *   2. 加载 workflow/放大细化工作流.json（仅 ComfyUI 官方节点，像素放大而非 latent 放大）:
  *      LoadImage → ImageScaleToMaxDimension(按长边像素放大，默认 lanczos/长边2000，不固定倍数)
  *      → VAEEncode → KSampler(图生图低重绘, 默认 35步/cfg5.0/denoise0.35) → VAEDecode → PreviewImage
  *   3. 继承原图的模型加载器(UNET/CLIP/VAE)、负面提示词、提示词链(画面描述/质量提示词/画师串/lora触发词)，
  *      以及与原图一致的 LoRA 链（全局画风 LoRA 按场景过滤 + 角色 LoRA），
  *      再追加 HiresFix 细化专用 LoRA（设置页单独配置）到链尾
- *   4. 提交 ComfyUI → 下载结果 → 原子覆盖原文件
+ *   4. 提交 ComfyUI → 下载结果 → 原子覆盖原文件（细化产物是不透明图，透明背景由调用方按常规流程抠白）
+ *
+ * ComfyUI 的 LoadImage 会丢掉 alpha：透明像素只剩 RGB，而抠过图的素材透明区 RGB 往往是 0
+ * （浏览器 canvas 导出的 PNG 尤其如此），不垫白就会被当成黑底一起重绘。所以上传前统一垫白，
+ * 细化产物是不透明图；透明背景不在这一层还原，交给调用方的常规后处理去重新抠（小镇素材走素材管线）。
  *
  * KSampler 采样参数（步数/cfg/denoise/采样器）与放大长边以细化工作流文件为基础，
  * 步数/cfg/denoise 可被系统参数中的 HiresFix 设置覆盖；不从原图工作流继承（原图 denoise=1
@@ -223,6 +227,29 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   return { wf, wfPath: hiresPath() };
 }
 
+/** 垫白背景色：抠过图的素材在 ComfyUI 里会因丢失 alpha 变黑底，送细化前先把透明区垫成它 */
+const WHITE_BG = { r: 255, g: 255, b: 255 };
+
+/**
+ * 上传前的透明背景归一：把透明像素垫成白色。
+ *
+ * 抠过图的人像透明区 RGB 往往是 0（浏览器 canvas 导出的 PNG 尤其如此），ComfyUI 的 LoadImage
+ * 丢掉 alpha 后只剩一片黑，细化结果连带变黑底。垫白后细化产物是干净的不透明图，背景由调用方
+ * 按各自常规流程重新抠（小镇素材走素材后处理管线，用户再在素材库里微调）。
+ * 全不透明的图原样返回，不做多余重编码。
+ *
+ * @param {Buffer} buffer - 原图
+ * @returns {Promise<Buffer>} 可直接上传的图（需要垫白时是 PNG 字节）
+ */
+export async function flattenTransparentOnWhite(buffer) {
+  const meta = await sharp(buffer).metadata();
+  if (!meta.hasAlpha) return buffer;
+  const stats = await sharp(buffer).ensureAlpha().extractChannel(3).stats();
+  if ((stats.channels?.[0]?.min ?? 255) >= 255) return buffer; // 有 alpha 通道但全不透明
+  console.log('[imageRefine] Source has transparent pixels: flattened onto white before HiresFix');
+  return sharp(buffer).flatten({ background: WHITE_BG }).png().toBuffer();
+}
+
 /**
  * 执行放大细化（默认覆盖保存，测试模式可仅返回内存结果）
  *
@@ -241,20 +268,6 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
  * @param {string} [opts.output]       - 'file' 写文件（默认）| 'buffer' 仅返回 base64
  * @returns {Promise<{success: boolean, wfPath: string, filename: string}>}
  */
-async function applySourceAlpha(refinedBuf, sourceBuf) {
-  const refinedMeta = await sharp(refinedBuf).metadata();
-  const alpha = await sharp(sourceBuf)
-    .ensureAlpha()
-    .extractChannel(3)
-    .resize(refinedMeta.width, refinedMeta.height, { fit: 'fill' })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  return sharp(refinedBuf).removeAlpha()
-    .joinChannel(alpha.data, { raw: { width: alpha.info.width, height: alpha.info.height, channels: 1 } })
-    .png()
-    .toBuffer();
-}
-
 export async function refineImage({
   filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, onProgress,
   buffer, ext, output = 'file',
@@ -262,8 +275,10 @@ export async function refineImage({
   const sourceBuf = buffer || (filePath ? fs.readFileSync(filePath) : null);
   if (!sourceBuf) throw new Error('filePath or buffer is required');
   const fileExt = (ext || (filePath ? path.extname(filePath) : '') || '.png').toLowerCase();
-  const uploadFilename = await uploadImage(sourceBuf, `linshe-hires-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${fileExt}`);
-  console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(sourceBuf.length / 1024).toFixed(0)}KB)`);
+  const uploadBuf = await flattenTransparentOnWhite(sourceBuf);
+  const uploadExt = uploadBuf === sourceBuf ? fileExt : '.png'; // 垫白后是 PNG 字节，扩展名跟着换
+  const uploadFilename = await uploadImage(uploadBuf, `linshe-hires-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${uploadExt}`);
+  console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(uploadBuf.length / 1024).toFixed(0)}KB)`);
 
   const { wf } = buildHiresWorkflow(promptText, {
     uploadFilename, artist, loras, customWorkflow, sourceMode, scene,
@@ -277,12 +292,7 @@ export async function refineImage({
 
   const img = result.images[0];
   const rawBase64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
-  let refinedBuf = Buffer.from(rawBase64, 'base64');
-  const sourceHasAlpha = (await sharp(sourceBuf).metadata()).hasAlpha;
-  if (sourceHasAlpha) refinedBuf = await applySourceAlpha(refinedBuf, sourceBuf);
-  const base64 = img.base64.startsWith('data:')
-    ? `[image omitted];base64,${refinedBuf.toString('base64')}`
-    : refinedBuf.toString('base64');
+  const refinedBuf = Buffer.from(rawBase64, 'base64');
 
   if (output === 'buffer') {
     console.log('[imageRefine] Refined image returned in memory (not saved)');

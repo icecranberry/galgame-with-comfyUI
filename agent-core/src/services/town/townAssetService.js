@@ -346,9 +346,9 @@ function rowToAsset(row) {
 /**
  * 把「源图」处理成该素材可用的成品并落盘落库：地砖归一成 2:1 菱形贴图、抠白、裁到内容、按规格缩放。
  * ComfyUI 生成与用户手动上传共用这条后处理管线，保证尺寸 / 画幅约定一致。
- * @param {object} p - { row, guard, meta, spec, size, buffer, prompt }
+ * @param {object} p - { row, guard, meta, spec, size, buffer, prompt, inheritAppearanceSource }
  */
-async function commitProcessedSource({ row, guard, meta, spec, size, buffer, prompt = null }) {
+async function commitProcessedSource({ row, guard, meta, spec, size, buffer, prompt = null, inheritAppearanceSource = false }) {
   // 等距地砖：先裁出顶面菱形归一化成 2:1 贴图（接缝完美互锁），再像素化到 64×32
   const isTile = row.kind === 'ground' || row.kind === 'road';
   let work = buffer;
@@ -397,7 +397,8 @@ async function commitProcessedSource({ row, guard, meta, spec, size, buffer, pro
   }
   // Provenance describes these new pixels, never the prompt merely saved for a future job.
   if (guard.appearanceGuard) meta.appearanceSource = guard.appearanceGuard.source;
-  else delete meta.appearanceSource;
+  // HiresFix 细化的是同一张原图，外观来源随之继承；手工上传/编辑的像素则没有可信来源
+  else if (!inheritAppearanceSource) delete meta.appearanceSource;
   // 地砖：一并留下裁剪前的原图（素材库里可在这张图上手动画菱形重裁）
   let tileSourceFile = null;
   if (isTile) {
@@ -485,6 +486,33 @@ async function generateIntoRow(row, guard) {
   }
 }
 
+/** 素材成品边长上限：手动上传与编辑产物同一口径（各生成规格都远小于它） */
+export const MAX_ASSET_IMAGE_SIDE = 4096;
+
+/**
+ * 超过上限就等比缩到能存下的尺寸（PNG），未超限原样返回。
+ * 系统自己产出的图（HiresFix 之后的立绘）可能比素材常规尺寸大：能存就存，存不下就缩，不报错。
+ */
+export async function fitWithinMaxSide(buffer) {
+  let meta;
+  try {
+    meta = await sharp(buffer).metadata();
+  } catch {
+    throw new Error('图片尺寸异常');
+  }
+  if (!meta.width || !meta.height) throw new Error('图片尺寸异常');
+  if (Math.max(meta.width, meta.height) <= MAX_ASSET_IMAGE_SIDE) {
+    return { buffer, width: meta.width, height: meta.height, resized: false };
+  }
+  const out = await sharp(buffer)
+    .resize(MAX_ASSET_IMAGE_SIDE, MAX_ASSET_IMAGE_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .png()
+    .toBuffer();
+  const outMeta = await sharp(out).metadata();
+  console.log(`[townAssets] ${meta.width}x${meta.height} exceeds ${MAX_ASSET_IMAGE_SIDE}px, scaled to ${outMeta.width}x${outMeta.height}`);
+  return { buffer: out, width: outMeta.width, height: outMeta.height, resized: true };
+}
+
 /**
  * 保存前端编辑后的素材图片（点击抠白 / 裁底等编辑产物，dataUrl PNG）
  * 发布新文件路径并 bump meta.updatedAt 供前端缓存穿透
@@ -498,17 +526,16 @@ export async function saveEditedAssetImage(id, dataUrl) {
   }
   const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
   const guard = claimAsset(row);
-  // 尺寸守卫：编辑产物不超过 2048px
-  const meta = await sharp(buffer).metadata();
+  // 尺寸兼容：编辑产物可能比这张素材的常规尺寸大（HiresFix 之后的立绘尤其明显），
+  // 能存就存，超上限（与手动上传同一口径）等比缩小，不再直接 400 打回
+  const fitted = await fitWithinMaxSide(buffer);
   assertAssetCurrent(guard);
-  if (!meta.width || !meta.height || meta.width > 2048 || meta.height > 2048) {
-    throw new Error('图片尺寸异常');
-  }
   const m = JSON.parse(row.meta_json || '{}');
   m.updatedAt = Date.now();
   m.editedAt = m.updatedAt;
+  m.pixelSize = { w: fitted.width, h: fitted.height };
   delete m.appearanceSource; // arbitrary uploaded pixels have no trusted generation source
-  return commitAssetImage(guard, row, buffer, m, 'ready');
+  return commitAssetImage(guard, row, fitted.buffer, m, 'ready');
 }
 
 const UPLOAD_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
@@ -537,7 +564,7 @@ export async function importAssetImage(id, dataUrl) {
   }
   assertAssetCurrent(guard);
   if (!info.width || !info.height) throw new Error('图片尺寸异常');
-  if (Math.max(info.width, info.height) > 4096) throw new Error('图片边长请控制在 4096px 以内');
+  if (Math.max(info.width, info.height) > MAX_ASSET_IMAGE_SIDE) throw new Error(`图片边长请控制在 ${MAX_ASSET_IMAGE_SIDE}px 以内`);
   const meta = JSON.parse(row.meta_json || '{}');
   meta.uploadedAt = Date.now();
   const fresh = await commitProcessedSource({ row, guard, meta, spec, size: spec.size, buffer });
@@ -610,7 +637,7 @@ export async function cropTileAssetImage(id, diamond) {
   return commitAssetImage(guard, row, out, m);
 }
 
-/** 小镇素材 HiresFix：沿用素材 source_prompt/meta，并按全局 HiresFix 设置细化后覆盖 */
+/** 小镇素材 HiresFix：沿用素材 source_prompt/meta，按全局 HiresFix 设置细化，再走素材常规后处理（系统抠白 → 落盘） */
 export async function refineAssetWithHires(id) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(id);
@@ -621,6 +648,7 @@ export async function refineAssetWithHires(id) {
 
   const guard = claimAsset(row);
   const meta = JSON.parse(row.meta_json || '{}');
+  const spec = ASSET_SPECS[row.kind] || {};
   fs.mkdirSync(TOWN_ASSETS_DIR, { recursive: true });
   const stagePath = path.join(TOWN_ASSETS_DIR, `.hires-${guard.token}.png`);
   try {
@@ -633,12 +661,21 @@ export async function refineAssetWithHires(id) {
       scene: 'town',
     });
     assertAssetCurrent(guard);
-    const sharpMeta = await sharp(stagePath).metadata();
+    // 细化产物不再沿用原图 alpha：背景交给素材管线重新抠白，成品再交回素材库让用户微调。
+    // 分辨率按细化结果保留 —— 生成规格只是出图规格，不把放大后的立绘压回 900×1600；
+    // 但也不能超过素材边长上限（HiresFix 最长边可配到 8192），超了就等比缩小。
+    const fitted = await fitWithinMaxSide(fs.readFileSync(stagePath));
     assertAssetCurrent(guard);
-    meta.updatedAt = Date.now();
-    meta.hiresAt = meta.updatedAt;
-    meta.pixelSize = { w: sharpMeta.width, h: sharpMeta.height };
-    return commitAssetImage(guard, row, fs.readFileSync(stagePath), meta);
+    meta.hiresAt = Date.now();
+    return commitProcessedSource({
+      row,
+      guard,
+      meta,
+      spec,
+      size: { width: fitted.width, height: fitted.height },
+      buffer: fitted.buffer,
+      inheritAppearanceSource: true,
+    });
   } finally {
     for (const staged of [stagePath, `${stagePath}.refining`]) {
       try { fs.unlinkSync(staged); } catch { /* only this operation's staging files */ }

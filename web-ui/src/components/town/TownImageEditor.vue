@@ -91,10 +91,10 @@
         </linshe-button>
 
         <linshe-button variant="ghost" size="sm" :disabled="(!canUndo && !(gapOpen && gapPixelCount)) || editLocked" @click="undoErase">{{ gapOpen && gapPixelCount ? '撤销抠白预览' : '撤销上一步' }}</linshe-button>
-        <!-- 外部注入的操作（重新生成 / 立绘 HiresFix）：与主按钮同排 -->
+        <!-- 外部注入的操作（HiresFix / 上传图片 / 重新生成 / 微调提示词）：与主按钮同排 -->
         <slot name="actions" />
-        <linshe-button v-if="cropActive && !eraseMode" variant="primary" size="sm" :loading="cropping" :disabled="editLocked" @click="confirmCrop">确认裁剪</linshe-button>
-        <linshe-button v-else variant="primary" size="sm" :loading="saving" :disabled="(!dirty && !(gapOpen && gapPixelCount)) || editLocked" @click="save">{{ gapOpen && gapPixelCount ? '应用并保存' : '保存编辑' }}</linshe-button>
+        <linshe-button v-if="cropActive && !eraseMode" class="ie-primary" variant="primary" size="sm" :loading="cropping" :disabled="editLocked" @click="confirmCrop">确认裁剪</linshe-button>
+        <linshe-button v-else class="ie-primary" variant="primary" size="sm" :loading="saving" :disabled="(!dirty && !(gapOpen && gapPixelCount)) || editLocked" @click="save">{{ gapOpen && gapPixelCount ? '应用并保存' : '保存编辑' }}</linshe-button>
       </div>
     </div>
 
@@ -985,7 +985,8 @@ onBeforeUnmount(() => {
 }
 .ie-hint { font-size: 10px; color: var(--text-secondary); }
 .ie-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
-.ie-buttons > :last-child { margin-left: auto; }
+/* 主按钮贴右：行内注入的是父组件传进来的按钮，:last-child 命不中，所以显式标记主按钮 */
+.ie-buttons > .ie-primary { margin-left: auto; }
 
 /* chip 按钮的行内图标：跟字色走、不参与压缩 */
 .ie-icon { display: inline-flex; flex-shrink: 0; }

@@ -7,12 +7,6 @@
               <span class="tam-title">{{ displayAsset?.name || title || '图片管理' }}</span>
             </div>
             <div class="tam-head-actions">
-              <linshe-button
-                v-if="displayAsset?.id"
-                variant="ghost"
-                size="sm"
-                @click="promptOpen = true"
-              >✎ 图片提示词</linshe-button>
               <linshe-button variant="icon" size="sm" aria-label="关闭" @click="close">✕</linshe-button>
             </div>
           </div>
@@ -55,6 +49,7 @@
                   :disabled="!displayAsset?.id"
                   @click="regenerateAsset"
                 >重新生成</linshe-button>
+                <linshe-button variant="ghost" size="sm" @click="promptOpen = true">✎ 微调提示词</linshe-button>
               </template>
             </TownTileCropper>
             <TownImageEditor
@@ -93,6 +88,7 @@
                   :disabled="!displayAsset?.id"
                   @click="regenerateAsset"
                 >重新生成</linshe-button>
+                <linshe-button variant="ghost" size="sm" @click="promptOpen = true">✎ 微调提示词</linshe-button>
               </template>
             </TownImageEditor>
           </div>
