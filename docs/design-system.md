@@ -25,7 +25,6 @@
 
 引入顺序（main.js）：fonts → tokens → base → components → animations。**禁止在组件内硬编码主题色值**，必须引用变量。
 
-<<<<<<< HEAD
 **迁移约定**：组件改用全局组件类时必须删除自己的 scoped 副本（scoped 属性选择器优先级更高，双写会以本地为准）。
 
 ## 核心 Token
@@ -63,10 +62,11 @@
 
 ## Linshe 表单控件层（v3.2 合入）
 
-表单与操作控件统一使用上游 3.2 引入的 5 个 Linshe 组件（`web-ui/src/components/ui/`）。它们是 Cel Glow 体系的**结构层**：交互与布局归组件，皮肤色值必须引用 Cel Glow token、随暖色 / 暗夜两套主题联动，**禁止保留上游的珊瑚色硬编码**（上游文档中的「珊瑚糖」在本体系下即 `var(--accent)` 主题糖）：
+表单与操作控件统一使用上游 3.2 引入的 7 个 Linshe 组件（`web-ui/src/components/ui/`）。它们是 Cel Glow 体系的**结构层**：交互与布局归组件，皮肤色值必须引用 Cel Glow token、随暖色 / 暗夜两套主题联动，**禁止保留上游的珊瑚色硬编码**（上游文档中的「珊瑚糖」在本体系下即 `var(--accent)` 主题糖）：
 
 - **`LinsheButton`**：表单与弹窗按钮不留裸 `<button>`。变体 `primary`（主操作实心，每屏至多一个）/ `secondary`（次要，默认）/ `danger` / `ghost`（描边幽灵）/ `icon`（圆形小图标钮，中性糖面 + 悬停转主题色，尺寸档位为正方形）/ `chip`（胶囊选择、页签）/ `link`（文字链接）。「软糖立体」＝亮面填充 + 深色厚底硬投影 + 按下下沉压扁，与 `.btn-primary` 贴纸按钮语言同源；实底色走 `--accent` / `--fun-*`，底厚与投影走 `--btn-lip` / `--shadow-hard` 系 token。
 - **`LinsheInput`**：文本输入框 / 文本域统一使用。「软糖凹陷」皮肤与按钮互补（按钮是凸起的糖，输入框是按进糖纸的凹痕），caret 与聚焦描边/光环用 `--accent`。聊天输入框、信纸、透明嵌入输入等特殊输入界面保留独立设计，但皮肤色值应对齐 token。
+- **`LinsheAutoTextarea`**：需要自动增高、或收起时单行省略的长文本域使用（`collapsible` / `min-height`），皮肤与 `LinsheInput` 同源，不要自己写 auto-resize。
 - **`LinsheSelect`**：下拉选择统一使用。触发器与 LinsheInput 同皮肤；选项面板 Teleport 到 body 的轻量浮层，选中态用 `--accent`，空间不足自动向上翻转。
 - **`LinsheSwitch`**：拨动开关统一使用，不写裸 checkbox 开关样式。关/开两态等高不跳变（关＝中性糖、开＝主题糖）；`aria-label`、`title` 等透传到内部 input。
 - **`LinsheTabs`**：分段选择/页签统一使用，不写裸 div 或 button 分段控件；`options` 为 `{ label, value }`；轨道用 `--bg-sunken` 暖纸凹陷，`md` 页签式（选中项 `--accent` 浅底 + 底部指示条）、`sm` 小分段（选中项主题表面胶囊 + `--shadow-xs`），文案统一 `--accent`。
@@ -84,4 +84,3 @@
 新功能设计时先明确内容、主要操作和信息层级，再决定组件和布局；优先复用全局组件类与既有交互模式。
 
 **目标：让新功能看起来像“邻舍的一部分”，而不是后来添加的独立页面。**
-- **`LinsheTabs`**：分段选择/页签统一使用，不写裸 div 或 button 分段控件；`options` 为 `{ label, value }`；轨道用 `--bg-sunken` 暖纸凹陷，`md` 页签式（选中项 `--accent` 浅底 + 底部指示条）、`sm` 小分段（选中项主题表面胶囊 + `--shadow-xs`），文案统一 `--accent`。

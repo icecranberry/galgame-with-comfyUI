@@ -5,6 +5,7 @@ globalThis.fetch = async () => { throw new Error('Network forbidden'); };
 const { config } = await import('../src/config.js');
 const { getDb, closeDb } = await import('../src/db/index.js');
 const gen = await import('../src/services/town/townNpcEventGenerator.js');
+const { addClient, removeClient } = await import('../src/services/unifiedStreamBus.js');
 
 config.dbPath = ':memory:';
 
@@ -127,4 +128,70 @@ test('ambient events anchor on two townsfolk and let the player step in at branc
   assert.equal(branched.current_branch, 1);
   const branchText = seen.map(msgs => msgs.map(m => m.content).join('\n')).join('\n');
   assert.ok(branchText.includes('玩家刚按选项介入'), 'first branch should bridge the player into the scene');
+});
+
+/**
+ * 多地图拍板口径：NPC 奇遇「时间到了就到了」——玩家不在那张图（后台图）时到点直接用模板结题，
+ * 不花模型钱写文学性结局。这里同时钉住两件事：这条路径**同步返回**（结构上不存在 await 模型的空间），
+ * 以及归档与 SSE 结局广播照旧（奇遇不会因为没人看而卡在活跃表里）。
+ */
+test('后台图的镇民奇遇到点直接模板结题：归档 + 广播，且全程不 await 模型', async t => {
+  const db = getDb();
+  t.after(() => closeDb());
+
+  const sent = [];
+  const client = { write: chunk => { sent.push(String(chunk)); } };
+  addClient(client);
+  t.after(() => removeClient(client));
+
+  const npc = fakeNpc(db);
+  const event = await gen.generateTownNpcEvent(npc, {
+    customPrompt: '起点是小镇的理发店。玩家和理发师小孙一起……', locationName: '理发店', manual: true,
+    worldId: 'w1', worldEpoch: 3, locationKey: 'salon',
+    llm: fakeLlm({ title: '这缸染膏冒泡了？！', description: '两人围着染膏缸手忙脚乱。', prompt: '场景图',
+      choiceA: '一起抢救染膏', choiceB: '改约明天再做' }),
+    image: noImage,
+  });
+  db.prepare('UPDATE town_npc_events SET engaged = 1 WHERE id = ?').run(event.id);
+  const active = db.prepare('SELECT * FROM town_npc_events WHERE id = ?').get(event.id);
+
+  const out = gen.expireTownNpcEvent(npc, active, 'completed');
+  assert.equal(out instanceof Promise, false, '这条路径必须同步走完，不能 await 任何模型调用');
+  assert.equal(out.outcome, 'completed');
+  assert.equal(out.conclusion, '故事告一段落。理发师小孙和玩家从这次经历中各有收获。');
+  assert.ok(out.summary.includes('这缸染膏冒泡了？！'), '摘要沿用事件本身，不额外请模型润色');
+
+  // 归档口径与 LLM 收尾完全一致：活跃行删除、历史行保留原 id / 结局 / 互动标记
+  assert.equal(db.prepare('SELECT count(*) n FROM town_npc_events').get().n, 0);
+  const row = db.prepare('SELECT * FROM town_npc_event_history WHERE id = ?').get(event.id);
+  assert.equal(row.outcome, 'completed');
+  assert.equal(row.engaged, 1);
+  assert.equal(row.conclusion, out.conclusion);
+  assert.equal(row.summary, out.summary);
+
+  // 没互动的际遇同样到点即结题（措辞换一版，仍然不是模型写的）
+  const quietNpc = fakeNpc(db);
+  const quiet = await gen.generateTownNpcEvent(quietNpc, {
+    customPrompt: '起点是小镇的理发店。', locationName: '理发店', manual: true,
+    worldId: 'w1', worldEpoch: 3, locationKey: 'salon',
+    llm: fakeLlm({ title: '门口的信没署名', description: '一封信被塞在门缝里。', prompt: '场景图',
+      choiceA: '追出去看看', choiceB: '先收进柜台' }),
+    image: noImage,
+  });
+  const quietOut = gen.expireTownNpcEvent(quietNpc,
+    db.prepare('SELECT * FROM town_npc_events WHERE id = ?').get(quiet.id), 'expired');
+  assert.equal(quietOut.conclusion, '这个偶然的际遇悄然结束，没有留下太多痕迹。');
+  assert.ok(quietOut.summary.includes('事件因时间流逝而自然结束。'));
+  assert.equal(db.prepare('SELECT outcome FROM town_npc_event_history WHERE id = ?').get(quiet.id).outcome, 'expired');
+
+  // 结局照旧推给前端（每归档一条推一条，后台图的奇遇也不会静默消失）；
+  // 生成时那两条 new_event 不算在内
+  const conclusions = sent.filter(chunk => chunk.startsWith('event: event_concluded\n'));
+  assert.equal(conclusions.length, 2);
+  const payload = JSON.parse(conclusions[0].slice(conclusions[0].indexOf('data: ') + 6));
+  assert.equal(payload.npc_event, true);
+  assert.equal(payload.npc_id, npc.id);
+  assert.equal(payload.outcome, 'completed');
+  assert.equal(payload.conclusion, out.conclusion);
+  assert.equal(payload.character_id, null);
 });

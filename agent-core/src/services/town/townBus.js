@@ -14,22 +14,29 @@
 import { broadcast } from '../unifiedStreamBus.js';
 let worldScope = {};
 export function setTownBusScope({ worldId, epoch }) { worldScope = { worldId, worldEpoch: epoch }; }
-export function broadcastTownStateUpdated(payload) { broadcast('town_state_updated', { ...worldScope, ...payload }); }
+
+// 当前地图作用域：小镇运行时在处理某张图时设置，事件里带上 mapId，
+// 客户端只应用自己当前那张图的事件（多图并存时不会把 A 镇的气泡画到 B 镇）。
+let mapScope = null;
+export function setTownBusMapScope(mapId) { mapScope = mapId ?? null; }
+const withMap = payload => ({ ...worldScope, ...(mapScope != null ? { mapId: mapScope } : {}), ...payload });
+
+export function broadcastTownStateUpdated(payload) { broadcast('town_state_updated', withMap(payload)); }
 
 export function broadcastTownMove({ charId, from, path, speed, startedAt, revision }) {
-  broadcast('town_move', { ...worldScope, charId, from, path, speed, startedAt, ...(revision != null ? { revision } : {}) });
+  broadcast('town_move', withMap({ charId, from, path, speed, startedAt, ...(revision != null ? { revision } : {}) }));
 }
 
 export function broadcastTownBubble({ charId, encounterId = null, text, ttl }) {
-  broadcast('town_bubble', { ...worldScope, charId, encounterId, text, ttl });
+  broadcast('town_bubble', withMap({ charId, encounterId, text, ttl }));
 }
 
 export function broadcastTownEncounterStart(payload) {
-  broadcast('town_encounter_start', { ...worldScope, ...payload });
+  broadcast('town_encounter_start', withMap(payload));
 }
 
 export function broadcastTownEncounterEnd(payload) {
-  broadcast('town_encounter_end', { ...worldScope, ...payload });
+  broadcast('town_encounter_end', withMap(payload));
 }
 
 export function broadcastTownPing() {
@@ -41,7 +48,12 @@ export function broadcastTownInitProgress(payload) {
 }
 
 export function broadcastTownMapUpdated(payload) {
-  broadcast('town_map_updated', { ...worldScope, ...payload });
+  broadcast('town_map_updated', withMap(payload));
+}
+
+/** 玩家换图（出行）：玩家级事件，不带地图过滤，客户端以它为准 */
+export function broadcastTownPlayerMapChanged(payload) {
+  broadcast('town_player_map_changed', { ...worldScope, ...payload });
 }
 
 // 进程内订阅：素材提交/删除除了推给前端，还要让小镇运行时重建内存里的立绘/小人引用

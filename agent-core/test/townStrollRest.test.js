@@ -28,7 +28,7 @@ test('居民游走到站后停留 60 秒再启程', async t => {
     ] });
   createNpc({ mapId, displayName: '闲逛的阿慢' });
   const npcId = db.prepare('SELECT max(id) id FROM town_npcs').get().id;
-  db.prepare('INSERT INTO town_agent_state(agent_key,grid_x,grid_y) VALUES(?,?,?)').run(`npc:${npcId}`, 0, 0);
+  db.prepare('INSERT INTO town_agent_state(agent_key,map_id,grid_x,grid_y) VALUES(?,?,?,?)').run(`npc:${npcId}`, mapId, 0, 0);
 
   town.startTownScheduler();
   t.after(() => { town.stopTownScheduler(); closeDb(); t.mock.restoreAll(); t.mock.timers.reset(); });

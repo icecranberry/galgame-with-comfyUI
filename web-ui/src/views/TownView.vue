@@ -48,8 +48,10 @@
             <path d="M5 2.905a1 1 0 0 1 .9-.995l8-.8a1 1 0 0 1 1.1.995V3L5 4V2.905z"/>
           </svg>
         </linshe-button>
-        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
-        <linshe-button variant="ghost" size="sm" :disabled="editing || showAdmin || showWizard || dialogueInputBlocked" @click="openTownEvents" :title="npcEncounterCount ? `镇上有 ${npcEncounterCount} 段进行中的奇遇` : '镇上暂时没有进行中的奇遇'">奇遇{{ npcEncounterCount ? ` · ${npcEncounterCount}` : '' }}</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="uiLocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="uiLocked" @click="openTownEvents" :title="npcEncounterCount ? `镇上有 ${npcEncounterCount} 段进行中的奇遇` : '镇上暂时没有进行中的奇遇'">奇遇{{ npcEncounterCount ? ` · ${npcEncounterCount}` : '' }}</linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="uiLocked || !town.maps.length" :aria-expanded="showTravelPanel"
+          :title="town.maps.length > 1 ? '去别的小镇看看' : '世界上只有一座小镇'" @click="openTravelPanel">出行</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
@@ -71,7 +73,7 @@
       <div class="town-empty-card">
         <div class="town-empty-title">小镇还没有建成</div>
         <p class="town-empty-desc">选一套世界观，AI 会为你生成像素素材、规划布局、送来一群小镇居民。</p>
-        <linshe-button variant="primary" @click="showWizard = true">初始化小镇</linshe-button>
+        <linshe-button variant="primary" @click="openFirstTown">初始化小镇</linshe-button>
       </div>
     </div>
 
@@ -180,15 +182,68 @@
         />
       </div>
     </Transition>
-    <p v-if="dialogueOpening || dialogueError || lifeMoveError" class="town-dialogue-notice" role="status">{{ lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
+    <p v-if="dialogueOpening || dialogueError || lifeMoveError || travelNotice" class="town-dialogue-notice" role="status">{{ travelNotice || lifeMoveError || dialogueError || '正在停下脚步…' }}</p>
     <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
     <TownPaperPanel v-if="spotReady && worldSpot" :open="true" :title="worldSpot.displayName" @close="closeWorldSpot">
       <p>选择这里的功能。服务可展开特殊奇遇，交易可查看商品并买卖。</p>
       <TownResidentActions :actor-key="`location:${worldSpot.locationKey}`" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
         @story="openResidentStory" />
     </TownPaperPanel>
-    <TownAdminPanel :open="showAdmin" @close="showAdmin = false" />
-    <TownInitWizard v-if="showWizard" @close="showWizard = false" @applied="onTownApplied" />
+    <!-- 出行：镇子目录。每行一个目的地（整行热区，用 role=radio 而不是按钮），底部唯一主操作「启程」 -->
+    <TownPaperPanel v-if="showTravelPanel" :open="true" title="出行" kicker="邻舍小镇"
+      :busy="travelLoading" :refreshing="travelLoading" :refresh-disabled="travelLoading || traveling"
+      footer-text="路费不记，出发就当到了" @close="closeTravelPanel" @refresh="refreshTravelMaps">
+      <div class="travel-body">
+        <div class="tl-notice" aria-live="polite">
+          <p v-if="travelError" class="tl-error" role="alert">{{ travelError }}</p>
+          <p v-if="renameError" class="tl-error" role="alert">{{ renameError }}</p>
+          <p v-if="travelLoading && !town.maps.length" role="status">正在读取地图…</p>
+        </div>
+        <section aria-label="可以前往的小镇">
+          <h3>可以前往的小镇</h3>
+          <div class="travel-list" role="radiogroup" aria-label="目的地">
+            <div v-for="m in town.maps" :key="m.id" class="travel-row"
+              :class="{ 'is-current': m.id === town.currentMapId, 'is-picked': m.id === travelTargetId,
+                'is-disabled': !travelSelectable(m), 'is-renaming': renamingMapId === m.id }"
+              role="radio" :aria-checked="m.id === travelTargetId" :aria-disabled="!travelSelectable(m)"
+              :tabindex="travelSelectable(m) ? 0 : -1"
+              @click="pickTravelTarget(m)" @keydown.enter.prevent="pickTravelTarget(m)" @keydown.space.prevent="pickTravelTarget(m)">
+              <span v-if="renamingMapId === m.id" class="travel-row-main">
+                <linshe-input class="travel-rename-input" size="sm" :model-value="renameDraft" :maxlength="RENAME_MAX"
+                  :invalid="!renameDraft.trim()" aria-label="小镇名字" @click.stop
+                  @update:model-value="renameDraft = $event"
+                  @keydown.enter.stop.prevent="submitRename" @keydown.esc.stop.prevent="cancelRename" />
+                <span>只改名字，镇上的人和地图都不动</span>
+              </span>
+              <span v-else class="travel-row-main">
+                <strong>{{ m.name || '未命名小镇' }}</strong>
+                <span>{{ m.residentCount }} 位居民 · {{ m.cols }}×{{ m.rows }}</span>
+              </span>
+              <span v-if="renamingMapId === m.id" class="travel-row-side">
+                <linshe-button variant="secondary" size="sm" :loading="renameBusy" @click.stop="submitRename">改好了</linshe-button>
+                <linshe-button variant="ghost" size="sm" :disabled="renameBusy" @click.stop="cancelRename">算了</linshe-button>
+              </span>
+              <span v-else class="travel-row-side">
+                <span class="travel-status">{{ travelStatusLabel(m) }}</span>
+                <linshe-button variant="icon" size="sm" title="给这座小镇改个名字" :disabled="renameBusy"
+                  @click.stop="startRename(m)">✎</linshe-button>
+              </span>
+            </div>
+          </div>
+        </section>
+        <p v-if="travelReadyCount <= 1" class="tl-muted">世界上只有一座小镇，别处还是一片空地。</p>
+        <p v-else class="tl-muted">出发后旧镇照旧过日子，只是不再有新的演出。</p>
+        <div class="travel-actions">
+          <linshe-button class="travel-go" variant="primary" :disabled="!travelCanDepart" :loading="traveling" @click="startTravel">启程</linshe-button>
+        </div>
+      </div>
+    </TownPaperPanel>
+    <TownAdminPanel :open="showAdmin" @close="showAdmin = false" @new-town="openNewTown" />
+    <TownInitWizard v-if="showWizard" :new-town="wizardNewTown" @close="showWizard = false" @applied="onTownApplied" />
+    <!-- 出行过场：暖纸双帘 + 出行牌 + 抵达环，时序由 startTravel 驱动 -->
+    <TownTravelOverlay :phase="travelPhase" :destination="travelTarget?.name" :flavor="travelFlavor"
+      :weather-text="travelWeather" :arrival="travelArrival" :announcement="travelAnnouncement"
+      :reduced="prefersReducedMotion" />
 
     <Teleport to="body">
       <Transition name="town-modal">
@@ -244,6 +299,7 @@ import TownResidentActions from '../components/town/TownResidentActions.vue'
 import TownCapabilityPicker from '../components/town/TownCapabilityPicker.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
+import TownTravelOverlay from '../components/town/TownTravelOverlay.vue'
 
 const router = useRouter(), route = useRoute()
 const town = useTownStore()
@@ -398,14 +454,54 @@ const lifeMoveError = ref('')
 let dialogueRequest = 0
 let lifeMoveRequest = 0
 let dialogueHoldTimer = null
+
+// ── 出行（多地图切换）：出行面板 + 过场 ──
+// 面板打开与过场进行中都算「画布不可操作」，统一并进 dialogueInputBlocked：
+// 点选、滚轮、键盘移动、长按拖动全部走既有那一条锁输入通道，不另开一套判断。
+const showTravelPanel = ref(false)
+const travelTargetId = ref(null)
+const travelLoading = ref(false)
+const travelError = ref('')
+const travelNotice = ref('')
+const travelPhase = ref('')        // '' | depart | cover | reveal | failed
+const traveling = ref(false)
+const travelArrival = ref('')
+const travelAnnouncement = ref('')
+const travelWeather = ref('')
+const prefersReducedMotion = ref(false)
+let travelMotionQuery = null
+let travelRun = 0
+let travelWaitTimer = null
+let travelWaitDone = null
+let travelNoticeTimer = null
+// 出行面板行内改名：只改名字（服务端 renameMap 不碰图层与 POI）
+const RENAME_MAX = 24
+const renamingMapId = ref(null)
+const renameDraft = ref('')
+const renameBusy = ref(false)
+const renameError = ref('')
 const dialogueOpen = computed(() => chatNpcId.value != null || chatCharacterId.value != null)
 const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showWalletPanel.value
-  || !!worldSpot.value || lifeMoving.value)
+  || !!worldSpot.value || lifeMoving.value || showTravelPanel.value || traveling.value)
 const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
 const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
 const showAdmin = ref(false)
 const showWizard = ref(false)
 const dragging = ref(false)
+
+// 顶栏动作的统一禁用口径：编辑中 / 管理面板 / 开镇向导 / 画布被对话、建筑面板或过场占住。
+// 顶栏按钮不再各写一份 `editing || showAdmin || showWizard || dialogueInputBlocked`。
+const uiLocked = computed(() => editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value)
+const travelTarget = computed(() => town.maps.find(m => m.id === travelTargetId.value) || null)
+const travelReadyCount = computed(() => town.maps.filter(m => m.status === 'ready').length)
+const travelCanDepart = computed(() => !!travelTarget.value && travelTarget.value.status === 'ready'
+  && travelTarget.value.id !== town.currentMapId && !traveling.value && !travelLoading.value)
+const travelFlavor = computed(() => {
+  const m = travelTarget.value
+  if (!m) return ''
+  if (m.status !== 'ready') return '这里的地还没画好，等镇子建成再来。'
+  return `${m.cols}×${m.rows} 的小镇 · ${m.residentCount} 位居民住在那里`
+})
 
 // 键盘移动（等距屏幕方向 → 逻辑格对角）
 const keysDown = new Set()
@@ -418,6 +514,8 @@ watch(dialogueInputBlocked, blocked => {
 }, { flush: 'sync' })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
   showWalletPanel.value = false; worldSpot.value = null; approaching.value = ''
+  showTravelPanel.value = false; travelTargetId.value = null; travelError.value = ''
+  renamingMapId.value = null; renameDraft.value = ''; renameError.value = ''
   ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
 })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch,
@@ -432,6 +530,8 @@ watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch,
 
 // ── 编辑器状态 ──
 const editing = ref(false)
+// 编辑器固定「开始编辑时的那张图」：多地图下保存必须写回这张，不能读保存时的当前图
+let editMapId = null
 const editTool = ref('ground')
 const libKind = ref('ground')
 const selectedAssetId = ref(null)
@@ -476,6 +576,7 @@ const canvasClass = computed(() => ({
   'is-hoverable': !!hoverAgentKey.value || !!hoverSpotKey.value,
   'is-editing': editing.value,
   'is-panning': dragging.value,
+  'is-traveling': traveling.value,
 }))
 
 const mapDisplayName = computed(() => renderMap.value?.name || mapMeta.value?.name || '邻舍小镇')
@@ -750,6 +851,7 @@ function onCanvasClick(e) {
   const cell = screenToCell(e.offsetX, e.offsetY)
   if (!inBounds(cell) || blockedCells.has(`${cell.x},${cell.y}`)) return
   town.movePlayer(cell.x, cell.y).catch(err => {
+    if (realignAfterStaleMap(err)) return
     console.warn('[town] move failed:', err?.message)
   })
 }
@@ -789,7 +891,7 @@ const KEY_DIRS = {
 }
 
 function onKeyDown(e) {
-  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  if (uiLocked.value) return
   if (e.isComposing || document.activeElement?.closest('input, textarea, [contenteditable="true"], [role="combobox"], [role="listbox"]')) return
   if (KEY_DIRS[e.code]) {
     e.preventDefault()
@@ -815,11 +917,11 @@ function clearMovementKeys() {
 }
 
 function stepByKey() {
-  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value || document.hidden) { clearMovementKeys(); return }
+  if (uiLocked.value || document.hidden) { clearMovementKeys(); return }
   for (const code of keysDown) {
     const [dx, dy] = KEY_DIRS[code] || [0, 0]
     if (dx || dy) {
-      town.movePlayerDir(dx, dy).catch(() => {})
+      town.movePlayerDir(dx, dy).catch(err => { realignAfterStaleMap(err) })
       break
     }
   }
@@ -835,6 +937,7 @@ function toggleEdit() {
 function beginEdit() {
   const m = renderMap.value
   if (!m) return
+  editMapId = m.id ?? town.currentMapId ?? null
   editLayers.value = JSON.parse(JSON.stringify(m.layers))
   editLocations.value = JSON.parse(JSON.stringify(m.locations || locations.value.map(normalizeLocation)))
   editing.value = true
@@ -1082,6 +1185,7 @@ async function saveEditor() {
   try {
     const m = renderMap.value
     await api.saveTownMap({
+      mapId: editMapId ?? m.id ?? null,
       name: m.name,
       cols: m.cols,
       rows: m.rows,
@@ -1107,7 +1211,15 @@ function onTownApplied() {
   showWizard.value = false
   town.clearDraftPreview()
   town.fetchState().catch(() => {})
+  // 新镇建成后不会自动把玩家搬过去，只更新出行目录（服务端也会广播 town_map_updated）
+  town.fetchMaps().catch(() => {})
 }
+
+// 世界里还没有镇：向导是「开镇」；已经有镇（管理面板「新建小镇」）时是「再建一座」，
+// 后者不续跑上一次的完成态，直接从配置步重新选世界观。
+const wizardNewTown = ref(false)
+function openFirstTown() { wizardNewTown.value = false; showWizard.value = true }
+function openNewTown() { showAdmin.value = false; wizardNewTown.value = true; showWizard.value = true }
 
 // ── 渲染 ──
 
@@ -1413,8 +1525,10 @@ function minimumBootDelay() {
   })
 }
 
-function collectWorldResourceUrls() {
-  const m = renderMap.value
+// source 传地图载荷时只算这张图的贴图（出行 depart 阶段预载目的地用），
+// 不传则算当前场景：当前图在用的贴图 + 场上所有小人的精灵与头像。
+function collectWorldResourceUrls(source = null) {
+  const m = source || renderMap.value
   if (!m) return []
   const urls = []
   const usedAssets = new Set()
@@ -1428,9 +1542,11 @@ function collectWorldResourceUrls() {
     const asset = assetsById.get(id)
     if (asset?.status === 'ready') urls.push(assetUrl(asset))
   }
-  for (const agent of [...agents.value, ...(player.value ? [player.value] : [])]) {
-    for (const spriteUrl of Object.values(agent.sprites || {})) urls.push(spriteUrl)
-    urls.push(agent.standingUrl, agent.avatarPath)
+  if (!source) {
+    for (const agent of [...agents.value, ...(player.value ? [player.value] : [])]) {
+      for (const spriteUrl of Object.values(agent.sprites || {})) urls.push(spriteUrl)
+      urls.push(agent.standingUrl, agent.avatarPath)
+    }
   }
   return [...new Set(urls.filter(Boolean))]
 }
@@ -1489,6 +1605,12 @@ watch(townAssets, () => { staticDirty = true }, { deep: true })
 onMounted(async () => {
   ctx = canvasEl.value.getContext('2d')
   if (!settingsStore.bgmMuted) playTownBgm()
+  // 出行过场与面板读一次系统的「减少动态」偏好，之后跟着系统变
+  if (typeof window.matchMedia === 'function') {
+    travelMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    prefersReducedMotion.value = travelMotionQuery.matches
+    travelMotionQuery.addEventListener('change', onMotionPreferenceChange)
+  }
   canvasRenderer = createCanvasTownRenderer({ getImg, agentFacing, isImagePending: url => { const entry = imgCache.get(url); return !!entry && !entry.ok && !entry.failed } })
   town.startTownStream()
   relayout()
@@ -1506,6 +1628,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true; rendererEpoch++
+  // 过场中途离开页面：让挂起的等待立刻收尾（异步流程本来就靠 token 作废）
+  ++travelRun
+  clearTravelNotice()
+  if (travelWaitTimer) { clearTimeout(travelWaitTimer); travelWaitTimer = null }
+  travelWaitDone?.(); travelWaitDone = null
+  travelMotionQuery?.removeEventListener('change', onMotionPreferenceChange)
   pauseTownBgm()
   for (const cancel of [...bootWaits]) cancel()
   hdRenderer?.dispose(); hdRenderer = null
@@ -1610,7 +1738,7 @@ async function openLinkedCharacterChat(characterId) {
 }
 
 function openWalletPanel() {
-  if (editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
+  if (uiLocked.value) return
   dialogueError.value = ''
   lifeMoveError.value = ''
   showWalletPanel.value = true
@@ -1639,10 +1767,241 @@ function openResidentStory(eventId) {
   closeDialogue()
   router.push({ path: '/events', query: { event: String(eventId) } })
 }
+
+// ── 出行（多地图切换） ──
+// 多图世界里带 mapId 的写操作，服务端在玩家已经不在那张图时回 STALE_MAP。
+// 这时不猜也不静默重试：重新对齐目录与快照，一切以服务端当前图为准。
+function realignAfterStaleMap(err) {
+  if (err?.code !== 'STALE_MAP') return false
+  town.fetchMaps().catch(() => {})
+  town.fetchState().catch(() => {})
+  return true
+}
+
+const TRAVEL_DEPART_MS = 240, TRAVEL_COVER_MS = 380, TRAVEL_REVEAL_MS = 460, TRAVEL_REDUCED_MS = 180
+// 换场后场景还没重建好时给的那句提示；清理时按它比对，不会误清 HD2D 自己的报错
+const TRAVEL_SCENE_SLOW = '新小镇的场景还在准备，画面可能慢半拍'
+
+function clearTravelNotice() {
+  if (travelNoticeTimer) { clearTimeout(travelNoticeTimer); travelNoticeTimer = null }
+  travelNotice.value = ''
+}
+function showTravelNotice(text) {
+  clearTravelNotice()
+  travelNotice.value = text
+  travelNoticeTimer = window.setTimeout(() => { travelNoticeTimer = null; travelNotice.value = '' }, 2600)
+}
+function travelWait(ms) {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise(resolve => {
+    travelWaitDone = resolve
+    travelWaitTimer = window.setTimeout(() => { travelWaitTimer = null; travelWaitDone = null; resolve() }, ms)
+  })
+}
+// 过场每一步都拿本次出行的 token 对照：期间被别的换场（另一个标签页出行）抢先就作废，
+// 但换场本身以服务端为准，已经发生的换场不会因此回退。
+function travelAborted(token) { return disposed || token !== travelRun }
+
+function onMotionPreferenceChange(event) { prefersReducedMotion.value = !!event.matches }
+
+function travelSelectable(m) { return m?.status === 'ready' && m.id !== town.currentMapId }
+function travelStatusLabel(m) {
+  if (m.id === town.currentMapId) return '此处'
+  if (m.status === 'ready') return '可前往'
+  return m.status === 'generating' || m.status === 'draft' ? '正在建成' : '没建成'
+}
+function travelErrorMessage(err) {
+  switch (err?.code) {
+    case 'PLAYER_SCENE_CHANGED': return '场景已经变化，重新打开出行面板再试。'
+    case 'MAP_NOT_READY': return '那座小镇还没建成。'
+    case 'STALE_WORLD': return '世界已经更新，刷新页面后再出发。'
+    case 'INVALID_MAP':
+    case 'MAP_NOT_FOUND': return '找不到那座小镇。'
+    default: return `没能出发：${err?.message || '请稍后再试'}`
+  }
+}
+// 目的地的天候：出发前顺手读到就显示，读不到就不显示，不为一个 chip 再等一次请求
+function destinationWeatherText(preview) {
+  const w = preview?.weather
+  if (!w) return ''
+  return [w.text, formatTownTemperature(w.temperature)].filter(Boolean).join(' ')
+}
+
+function openTravelPanel() {
+  if (uiLocked.value || !town.maps.length) return
+  dialogueError.value = ''
+  lifeMoveError.value = ''
+  travelError.value = ''
+  clearTravelNotice()
+  // 默认选中「另一座能去的镇子」，没有就停在当前镇（启程按钮随之禁用）
+  const fallback = town.maps.find(m => travelSelectable(m)) || travelTarget.value || town.maps[0]
+  travelTargetId.value = fallback?.id ?? null
+  showTravelPanel.value = true
+  refreshTravelMaps()
+}
+function closeTravelPanel() {
+  showTravelPanel.value = false
+  renamingMapId.value = null; renameDraft.value = ''; renameError.value = ''
+}
+async function refreshTravelMaps() {
+  travelLoading.value = true
+  try {
+    await town.fetchMaps()
+    if (!town.maps.some(m => m.id === travelTargetId.value)) {
+      travelTargetId.value = town.maps.find(m => travelSelectable(m))?.id ?? town.maps[0]?.id ?? null
+    }
+  } catch {
+    travelError.value = '暂时读不到地图目录，请稍后再试。'
+  } finally {
+    travelLoading.value = false
+  }
+}
+function pickTravelTarget(m) {
+  if (renamingMapId.value != null) return  // 正在改名：整行热区让位给输入框
+  if (!travelSelectable(m)) return
+  travelTargetId.value = m.id
+}
+
+/** 改名（出行面板行内编辑）：提交后刷新目录，镇名与画布标题随之更新 */
+function startRename(m) {
+  if (renameBusy.value) return
+  renamingMapId.value = m.id
+  renameDraft.value = m.name || ''
+  renameError.value = ''
+}
+function cancelRename() {
+  if (renameBusy.value) return
+  renamingMapId.value = null
+  renameDraft.value = ''
+  renameError.value = ''
+}
+async function submitRename() {
+  const mapId = renamingMapId.value
+  if (mapId == null || renameBusy.value) return
+  const name = renameDraft.value.trim().slice(0, RENAME_MAX)
+  if (!name) { renameError.value = '小镇得有个名字。'; return }
+  renameBusy.value = true
+  renameError.value = ''
+  try {
+    await api.renameTownMap(mapId, name)
+    renamingMapId.value = null
+    renameDraft.value = ''
+    await town.fetchMaps()
+  } catch (err) {
+    renameError.value = `没能改名：${err?.message || '请稍后再试'}`
+  } finally {
+    renameBusy.value = false
+  }
+}
+
+/**
+ * 一次出行：depart 预载目的地 → cover 合帘 → 遮罩下原子换场 → reveal 拉帘。
+ * 换场必须发生在两帘完全盖住的那一帧；失败则原图状态一点不动，只把帘子反向拉开。
+ * 不走路由、不重挂载，BGM 照旧（本期不做按镇切 BGM）。
+ */
+async function startTravel() {
+  const target = travelTarget.value
+  if (!travelCanDepart.value || !target) return
+  const token = ++travelRun
+  const reduced = prefersReducedMotion.value
+  const name = target.name || '下一座小镇'
+  travelError.value = ''
+  clearTravelNotice()
+  travelArrival.value = `已抵达${name}`
+  travelAnnouncement.value = `正在前往${name}`
+  travelWeather.value = ''
+  showTravelPanel.value = false
+  traveling.value = true
+  followPlayer = false
+  clearMovementKeys()
+  travelPhase.value = 'depart'
+  try {
+    // 耗时工作（目标图载荷、订票）都放在合帘之前，遮罩那一帧只做原子换场
+    const prep = await town.prepareTravel(target.id)
+    if (travelAborted(token)) return
+    if (prep?.result?.alreadyThere) {
+      // 服务端说玩家已经在那张图上了（另一个标签页先出发）：不做过场，直接以服务端为准
+      await Promise.all([town.fetchState().catch(() => {}), town.fetchMaps().catch(() => {})])
+      if (travelAborted(token)) return
+      showTravelNotice(`你已经在${name}了`)
+      return
+    }
+    travelWeather.value = destinationWeatherText(prep?.preview)
+    cam.zoom = Math.min(2.5, cam.zoom * 1.05)
+    await Promise.all([
+      travelWait(reduced ? 0 : TRAVEL_DEPART_MS),
+      Promise.allSettled(collectWorldResourceUrls(prep?.payload).map(preloadImage)),
+    ])
+    if (travelAborted(token)) return
+    travelPhase.value = 'cover'
+    await travelWait(reduced ? 0 : TRAVEL_COVER_MS)
+    if (travelAborted(token)) return
+    // 两帘已经盖满：这一刻才换场景与状态，旧图的坐标、悬浮、寻路线一概不带过来
+    const switched = await town.commitTravel(prep).catch(() => false)
+    if (travelAborted(token)) return
+    if (!switched) throw new Error('没能换到那座小镇')
+    // 等新图的渲染载荷与场景重建就位再拉帘；等不到也照常拉，最多提示一句画面慢半拍
+    const ready = await waitForRenderMap(reduced ? 1600 : 800)
+    if (travelAborted(token)) return
+    if (rendererNotice.value === TRAVEL_SCENE_SLOW) rendererNotice.value = ''
+    if (!ready) rendererNotice.value = TRAVEL_SCENE_SLOW
+    else {
+      await nextFrames(reduced ? 1 : 3)
+      if (travelAborted(token)) return
+    }
+    centerCamera()
+    travelAnnouncement.value = travelArrival.value
+    travelPhase.value = 'reveal'
+    await travelWait(reduced ? TRAVEL_REDUCED_MS : TRAVEL_REVEAL_MS)
+    if (travelAborted(token)) return
+    showTravelNotice(travelArrival.value)
+  } catch (err) {
+    if (travelAborted(token)) return
+    travelError.value = travelErrorMessage(err)
+    travelAnnouncement.value = travelError.value
+    travelPhase.value = 'failed'
+    await travelWait(reduced ? TRAVEL_REDUCED_MS : TRAVEL_COVER_MS)
+    if (travelAborted(token)) return
+    showTravelNotice(travelError.value)
+  } finally {
+    town.endTravel()
+    if (!travelAborted(token)) {
+      travelPhase.value = ''
+      traveling.value = false
+      followPlayer = true
+    }
+  }
+}
 </script>
 
 <style scoped>
 .town-dialogue-notice { position: absolute; left: 50%; top: 80px; transform: translateX(-50%); z-index: 65; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 14px; color: #574a40; background: #f4f1eeed; font-size: 13px; }
+
+/* ── 出行面板：镇子目录。内容在 TownPaperPanel 的暖纸外壳里，配色沿用钱袋那套暖纸口径 ── */
+.travel-body { display: flex; flex-direction: column; gap: 14px; }
+.travel-body .tl-notice:empty { display: none; }
+.travel-body .tl-notice { font-size: 13px; }
+.travel-body .tl-error { margin: 0; color: #b8574f; }
+.travel-body h3 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+.travel-body .tl-muted { margin: 0; color: #918278; font-size: 13px; }
+.travel-list { display: flex; flex-direction: column; gap: 8px; }
+.travel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #fffaf5; border: 2px solid transparent; border-radius: 14px; cursor: pointer; text-align: left; }
+.travel-row:not(.is-disabled):hover { background: #fff4ea; }
+.travel-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+.travel-row.is-picked { border-color: var(--accent); box-shadow: var(--shadow-hard-sm); }
+.travel-row.is-current { background: var(--list-item-active-bg); }
+.travel-row.is-disabled { cursor: not-allowed; opacity: .55; }
+.travel-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.travel-row-main strong { font-size: 15px; overflow-wrap: anywhere; }
+.travel-row-main > span { color: #8d7b70; font-size: 12px; }
+.travel-status { flex-shrink: 0; padding: 2px 10px; border: 1px solid #e5d9cc; border-radius: 999px; color: #8d7b70; font-size: 12px; }
+.travel-row.is-picked .travel-status { color: var(--accent); border-color: var(--accent); }
+.travel-row-side { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.travel-row.is-renaming { background: var(--list-item-active-bg); cursor: default; }
+.travel-row.is-renaming .travel-row-main { flex: 1 1 auto; }
+.travel-rename-input { width: 100%; min-width: 0; }
+.travel-actions { display: flex; justify-content: flex-end; }
+.travel-go { min-width: 120px; }
 .npc-stage { position: absolute; inset: 0; z-index: 60; overflow: clip; }
 .npc-stage-enter-active, .npc-stage-leave-active { transition: opacity .3s ease; }
 .npc-stage-enter-active :deep(.td-portraits figure),
@@ -1701,6 +2060,8 @@ function openResidentStory(eventId) {
 .town-canvas.is-hoverable { cursor: pointer; }
 .town-canvas.is-editing { cursor: cell; }
 .town-canvas.is-panning { cursor: grabbing; }
+/* 过场期间画布彻底交出去：不接指针、不给悬停光标（输入闸门在 dialogueInputBlocked） */
+.town-canvas.is-traveling { pointer-events: none; cursor: default; }
 
 /* ── 进入世界时的资源就绪遮罩 ── */
 .town-boot-mask {
@@ -1766,12 +2127,16 @@ function openResidentStory(eventId) {
 .town-topbar {
   position: absolute;
   top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* 居中但按内容定宽：left:50% + translate 居中会把药丸压到容器一半宽，内容只好往内部折行 */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 8px 16px;
+  flex-wrap: wrap;
   background: rgba(252, 250, 247, 0.92);
   border: 1px solid rgba(232, 221, 208, 0.8);
   border-radius: 16px;
@@ -1784,7 +2149,8 @@ function openResidentStory(eventId) {
 .town-title { font-size: 15px; font-weight: 700; color: var(--text-bright); }
 .town-sub { font-size: 11px; color: var(--text-secondary); }
 
-.town-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* 天气 / 时段 / 人数始终平铺成一行，空间不够时整组换行，不在内部折行 */
+.town-chips { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 
 .town-chip {
   font-size: 11px;
@@ -1814,8 +2180,7 @@ function openResidentStory(eventId) {
   to { transform: rotate(360deg); }
 }
 @container town-world (max-width: 700px) {
-  .town-topbar { flex-wrap: wrap; width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
-  .town-chips { flex: 1; }
+  .town-topbar { width: calc(100% - 24px); box-sizing: border-box; gap: 6px; }
   .town-topbar-actions { width: 100%; flex-wrap: wrap; }
   /* 顶栏在此宽度会折成两行，编辑动作卡下移避让 */
   .town-edit-actions { top: 96px; }
@@ -2165,6 +2530,9 @@ function openResidentStory(eventId) {
   .town-hint { bottom: 10px; }
   .town-library { width: 220px; }
   .town-edit-card { max-width: calc(100vw - 24px); gap: 8px; }
+  /* 手机上改名那行改成竖排，输入框才有整行宽度 */
+  .travel-row.is-renaming { flex-direction: column; align-items: stretch; gap: 8px; }
+  .travel-row.is-renaming .travel-row-side { justify-content: flex-end; }
 }
 
 @media (prefers-reduced-motion: reduce) {

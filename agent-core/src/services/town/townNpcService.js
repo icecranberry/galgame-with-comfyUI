@@ -95,7 +95,7 @@ export function createNpc({ mapId, displayName, persona = '', brief = '', job = 
   db.prepare('UPDATE town_npcs SET workplace_key=? WHERE id=?').run(workplaceKey, id);
   if (capabilities !== undefined) db.prepare('UPDATE town_npcs SET capabilities_json=?,capabilities_explicit=1 WHERE id=?').run(JSON.stringify(normalizeTownCapabilities(capabilities)), id);
   initializeTownNpcFunctions(db, db.prepare('SELECT * FROM town_npcs WHERE id=?').get(id));
-  if (mapId && assignResponsibilities) reconcileTownResponsibilities({ db });
+  if (mapId && assignResponsibilities) reconcileTownResponsibilities({ db, mapId });
   return getNpc(id);
   }).immediate();
 }

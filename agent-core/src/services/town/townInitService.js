@@ -16,7 +16,7 @@ import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createAsset, listAssets, captureTownAssetWorld } from './townAssetService.js';
-import { getMapRow, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
+import { getMapRow, getLayersAssets, listMaps, saveMap, buildWalkGridFromLayers, getObjectBlockingCells } from './townMapService.js';
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc, isPersonaCard } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
 import { generateLocalLayout } from './townLayoutGenerator.js';
@@ -26,7 +26,10 @@ import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js
 import { reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATE_PATH = path.resolve(__dirname, '..', '..', '..', 'data', 'town', 'init-state.json');
+// 测试用 TOWN_INIT_STATE_PATH 指到临时文件，避免动到真实的向导存档
+const STATE_PATH = process.env.TOWN_INIT_STATE_PATH
+  ? path.resolve(process.env.TOWN_INIT_STATE_PATH)
+  : path.resolve(__dirname, '..', '..', '..', 'data', 'town', 'init-state.json');
 
 // ── job 状态 ──
 
@@ -40,13 +43,42 @@ function defaultJob() {
     config: { worldSettingId: null, npcCount: 8, mapCols: 50, mapRows: 50 },
     blueprint: null,       // { styleTags, groundAssets, roadAssets, buildings, props, npcs }
     sampleAssetIds: [],
+    assetIds: [],          // 本次向导自己产出的素材（小样 + 批量）：自动布图只从这批里选
     progress: { stage: '', done: 0, total: 0, current: '' },
     draftMap: null,        // 布图展开结果（确认前预览）
     warnings: [],
     npcIds: [],            // 向导内提前建档的居民（稳定人格卡，confirm 时复用）
     playerKitDone: false,
     createdAt: null,
+    targetMapId: null,     // 多地图：确认时写入哪张图；null = 新建一张（默认图不再被覆盖）
   };
+}
+
+/** 布图用得上的素材种类（其余 npc / player / portrait / backdrop 不参与自动布局） */
+const LAYOUT_ASSET_KINDS = ['ground', 'road', 'building', 'prop'];
+
+/** 记下「本次向导自己产出的素材」。世界里同时存在多套素材时靠这份名单区分镇与镇。 */
+function claimOwnedAssets(ids) {
+  const owned = new Set(job.assetIds || []);
+  for (const id of ids || []) if (Number.isInteger(id)) owned.add(id);
+  job.assetIds = [...owned];
+}
+
+/**
+ * 本镇自己的布图素材（ground / road / building / prop 且 ready）。
+ *
+ * 多地图下全世界共用一张 town_assets 表，若直接 listAssets() 取全量，新镇会摆上老镇的地皮和建筑
+ * （实测：小镇 B 的布局里混进了小镇 A 的草地、石板路与全部 9 栋楼）。改成只取本次向导产出的那一批。
+ * 改动前落盘的老存档没有名单，退回全量以免卡住进行中的向导（重新开镇即按新口径走）。
+ */
+function ownedLayoutAssets() {
+  const ready = listAssets({}).filter(a => a.status === 'ready' && LAYOUT_ASSET_KINDS.includes(a.kind));
+  const owned = new Set(job?.assetIds || []);
+  if (owned.size === 0) {
+    console.warn('[townInit] 向导存档缺少素材名单，退回全量素材布图（重新开镇即可修正）');
+    return ready;
+  }
+  return ready.filter(a => owned.has(a.id));
 }
 
 function persistJob() {
@@ -104,6 +136,7 @@ export function getInitState() {
     npcIds: job.npcIds || [],
     wizardNpcs: (job.npcIds || []).map(id => getNpc(id)).filter(Boolean),
     playerKitDone: !!job.playerKitDone,
+    targetMapId: job.targetMapId ?? null,
     businessKinds: [{ value: 'none', label: '住宅 / 景观' }, ...Object.entries(TOWN_BUSINESS_ROLES).map(([value, role]) => ({ value, label: role.name }))],
   };
 }
@@ -164,16 +197,38 @@ function getWorldSetting(id) {
 
 // ── Step 1+2：配置 + LLM 蓝图 ──
 
-export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRows } = {}) {
+export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRows, targetMapId = null } = {}) {
   return enqueueStep(async () => {
-    // 初始化 = 全部数据抛弃：旧地图/地点/居民/相遇历史/运行态/素材索引全清（磁盘图片文件保留不删）
     const db = getDb();
-    const { resetWorld } = await import('./townService.js');
-    resetWorld();
-    db.exec('DELETE FROM town_assets');
+    const wanted = targetMapId == null ? null : Number(targetMapId);
+    // 多地图：世界里已经有镇时，向导是「再建一座」——保留现有地图/居民/素材，玩家照常在原镇生活；
+    // 只有在世界里还没有任何地图（首次开镇 / 世界已被重置）或明确指定要重建某张图时，才走整世界清空。
+    const rebuild = wanted != null || listMaps().length === 0;
+    if (wanted != null) {
+      // 定向重建：只清这一张图，别的镇的地图/居民/相遇原样保留，素材库也不动（批量按 key 幂等复用）
+      const { resetMap } = await import('./townService.js');
+      const reset = resetMap(wanted);
+      if (!reset.ok) console.warn('[townInit] 定向重建失败：', reset.error);
+    } else if (rebuild) {
+      // 世界里还没有任何镇（首次开镇 / 世界已被重置）：没有别的镇可连坐，才整世界清空
+      const { resetWorld } = await import('./townService.js');
+      resetWorld();
+      // 清仓库，但两类素材留着：
+      // 1) 「我」自己的立绘 / 正背小人（player_*）：由用户资料生成、不参与批量布图，也不属于
+      //    哪一版小镇美术。之前一律清空，导致向导第 7 步确认好的形象凭空消失，只有点过一次
+      //    「重新生成」的那张会重建成新行，另外两张永远是空槽。
+      // 2) 角色素材（char_{id}_portrait 与 char_{id}_down/up）：跟着角色走、不跟地图走。重置世界
+      //    只是换一座镇，角色形象不该陪葬——清掉的话管理面板所有角色都掉回空槽，重新入住还得
+      //    整批重烧生图。ensureCharacterTownAssets 认 key 幂等复用，留着就是直接复用。
+      // 地皮 / 建筑 / 居民（npc_*）是那一版小镇的美术资产，随世界一起清。
+      // 用 GLOB 而不是 LIKE：GLOB 里 `_` 是字面量（LIKE 里是通配符），正好匹配 char_ 前缀。
+      db.exec(`DELETE FROM town_assets
+        WHERE NOT (kind = 'player' OR key = 'player_portrait' OR COALESCE(key, '') GLOB 'char_*')`);
+    }
 
     job = defaultJob();
     job.createdAt = new Date().toISOString();
+    job.targetMapId = rebuild ? wanted : null;
     job.config = {
       worldSettingId: worldSettingId ?? null,
       npcCount: Math.max(3, Math.min(16, parseInt(npcCount, 10) || 8)),
@@ -489,6 +544,7 @@ export function generateSamples() {
       const existingAsset = existing.find(a => a.key === spec.bpItem.key && a.status === 'ready');
       if (existingAsset) {
         job.sampleAssetIds.push(existingAsset.id);
+        claimOwnedAssets([existingAsset.id]);
       } else {
         try {
           const asset = await createAsset({
@@ -508,6 +564,7 @@ export function generateSamples() {
           });
           guard.assertCurrent();
           job.sampleAssetIds.push(asset.id);
+          claimOwnedAssets([asset.id]);
         } catch (err) {
           guard.assertCurrent();
           if (err.code === 'TOWN_ASSET_STALE') throw err;
@@ -567,7 +624,10 @@ export function startBatch() {
 
     const jobs = expandBatchJobs();
     const existing = listAssets({});
-    const pending = jobs.filter(j => !existing.find(a => a.key === j.key && a.kind === j.kind && a.status === 'ready'));
+    const reusable = j => existing.find(a => a.key === j.key && a.kind === j.kind && a.status === 'ready');
+    // 断点续跑 / 同名复用命中的既有素材同样算本镇产出，否则续跑后布图池会缺一大半
+    claimOwnedAssets(jobs.map(j => reusable(j)?.id));
+    const pending = jobs.filter(j => !reusable(j));
 
     job.progress = { stage: 'batch', done: 0, total: pending.length, current: '' };
     persistJob();
@@ -578,8 +638,9 @@ export function startBatch() {
       job.progress.current = j.name;
       broadcastTownInitProgress({ status: 'batching', stage: 'batch', done, total: pending.length, current: j.name });
       try {
-        await createAsset({ ...j, expectedWorld: guard.expectedWorld });
+        const asset = await createAsset({ ...j, expectedWorld: guard.expectedWorld });
         guard.assertCurrent();
+        claimOwnedAssets([asset?.id]);
       } catch (err) {
         guard.assertCurrent();
         if (err.code === 'TOWN_ASSET_STALE') throw err;
@@ -590,7 +651,8 @@ export function startBatch() {
       persistJob();
     }
 
-    const readyCount = listAssets({}).filter(a => a.status === 'ready').length;
+    // 只看本镇自己的素材：别镇有存货不代表这批生成成功
+    const readyCount = ownedLayoutAssets().length;
     if (readyCount < 4) {
       setStatus('failed', `可用素材不足（${readyCount} 张），请检查 ComfyUI 后重试批量`);
       throw new Error('素材批量生成失败');
@@ -609,7 +671,7 @@ export function generateLayout() {
     if (!job?.blueprint) return { ok: false, error: '没有进行中的初始化任务' };
     setStatus('layout_pending', '正在生成小镇布局…');
 
-    const ready = listAssets({}).filter(a => a.status === 'ready' && ['ground', 'road', 'building', 'prop'].includes(a.kind));
+    const ready = ownedLayoutAssets();
     if (ready.length < 4) {
       setStatus('failed', '可用素材不足，请先完成批量生成');
       throw new Error('素材不足');
@@ -934,10 +996,14 @@ export function commitWizardNpcs() {
     const db = getDb();
     job.npcIds = job.npcIds || [];
 
-    // 蓝图外的居民全部清掉（含名单换代后的孤儿、重名多建的多余行）
+    // 蓝图外的居民全部清掉（含名单换代后的孤儿、重名多建的多余行）。
+    // 多地图：名单只覆盖「本向导要写的那张图 + 还没归属的档案」，别的镇的居民不会因为在这里建镇被删光。
     const wanted = new Set(job.blueprint.npcs.map(n => n.displayName));
     const seen = new Set();
-    for (const row of db.prepare('SELECT id, display_name FROM town_npcs').all()) {
+    const roster = job.targetMapId == null
+      ? db.prepare('SELECT id, display_name FROM town_npcs WHERE map_id IS NULL').all()
+      : db.prepare('SELECT id, display_name FROM town_npcs WHERE map_id IS NULL OR map_id = ?').all(job.targetMapId);
+    for (const row of roster) {
       if (!wanted.has(row.display_name) || seen.has(row.display_name)) {
         db.prepare('DELETE FROM town_npcs WHERE id = ?').run(row.id);
         job.npcIds = job.npcIds.filter(x => x !== row.id);
@@ -1097,10 +1163,12 @@ export function confirmInit() {
     const db = getDb();
 
     // 1. 地图与 POI 统一保存：同 key 保留 id/家地址，移除的地点由 saveMap 解除引用。
+    // 多地图：targetMapId 为空时**新建一张图**，不再覆盖世界里的第一张。
     const saved = saveMap({
       name: draft.name, cols: draft.cols, rows: draft.rows,
       tileSize: draft.tileSize || 32, layers: draft.layers,
       worldSettingId: job.config.worldSettingId,
+      ...(job.targetMapId != null ? { mapId: job.targetMapId } : { create: true }),
       locations: (draft.locations ?? []).map(location => ({ ...location,
         businessKind: location.businessKind ?? townBuildingKind(bp.buildings.find(b => b.key === (location.objectAssetKey || location.key)) || location),
         capabilities: townCapabilities(bp.buildings.find(b => b.key === (location.objectAssetKey || location.key)) || location,
@@ -1108,7 +1176,7 @@ export function confirmInit() {
       })),
       assignResponsibilities: false,
     });
-    db.exec('DELETE FROM town_agent_state');
+    db.prepare('DELETE FROM town_agent_state WHERE map_id = ?').run(saved.mapId);
 
     // 2. 从已提交的地点读取真实 id，供蓝图出生点/作息分配使用。
     const locationIdByKey = new Map(
@@ -1123,8 +1191,11 @@ export function confirmInit() {
     if (wizardIds.length > 0) {
       // 复用向导人格卡（素材已生成，作息随后台补齐），清掉名单外的旧居民
       const keep = wizardIds.join(',');
-      db.exec(`DELETE FROM town_npc_chat_messages WHERE npc_id NOT IN (${keep})`);
-      db.exec(`DELETE FROM town_npcs WHERE id NOT IN (${keep})`);
+      // 只清理「这张图 + 尚未归属的向导档案」，别的镇居民不受影响
+      db.prepare(`DELETE FROM town_npc_chat_messages WHERE npc_id IN (
+        SELECT id FROM town_npcs WHERE map_id = ? OR map_id IS NULL) AND npc_id NOT IN (${keep})`).run(saved.mapId);
+      db.prepare(`DELETE FROM town_npcs WHERE (map_id = ? OR map_id IS NULL)
+        AND id NOT IN (${keep})`).run(saved.mapId);
       db.prepare(`UPDATE town_npcs SET map_id = ? WHERE id IN (${keep})`).run(saved.mapId);
       for (const id of wizardIds) {
         const row = db.prepare('SELECT display_name FROM town_npcs WHERE id = ?').get(id);
@@ -1161,19 +1232,20 @@ export function confirmInit() {
     const appearance = [config.user.nickname, config.user.gender, config.user.appearance]
       .filter(Boolean).join('，');
     db.prepare(`
-      INSERT INTO town_players (id, display_name, appearance_desc) VALUES ('me', ?, ?)
-      ON CONFLICT(id) DO UPDATE SET appearance_desc = excluded.appearance_desc
-    `).run(config.user.nickname || '我', appearance);
+      INSERT INTO town_players (id, display_name, appearance_desc, map_id) VALUES ('me', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET appearance_desc = excluded.appearance_desc,
+        map_id = COALESCE(town_players.map_id, excluded.map_id)
+    `).run(config.user.nickname || '我', appearance, saved.mapId);
 
     // Buildings and residents are now both persisted: bind duties and seed the finite
     // shop accounts before the town becomes playable or any background generation starts.
-    const responsibilities = reconcileTownResponsibilities({ db, allowFallback: true });
+    const responsibilities = reconcileTownResponsibilities({ db, allowFallback: true, mapId: saved.mapId });
     job.warnings = [...new Set([...(job.warnings || []), ...responsibilities.pending.map(p => p.message)])];
     spawnPlayerSprites(appearance, bp.styleTags);
 
     // 5. NPC 作息后台补齐：建档时不再提前生成作息，进镇后按已落库的真实地点 key 逐个 LLM 生成
     //    （失败降级为空作息自由闲逛；已有作息的跳过，重复确认不覆盖）
-    const npcRows = db.prepare('SELECT id, routine_json FROM town_npcs').all();
+    const npcRows = db.prepare('SELECT id, routine_json FROM town_npcs WHERE map_id = ?').all(saved.mapId);
     const routineKeys = [...locationKeys, 'home'];
     const { refreshNpcRoutine } = await import('./townService.js');
     (async () => {
@@ -1200,7 +1272,7 @@ export function confirmInit() {
     setStatus('done', `开镇成功！version=${saved.version}`);
     job.draftMap = draft; // 保留 draft 供查看
     persistJob();
-    return getInitState();
+    return { ...getInitState(), mapId: saved.mapId };
   });
 }
 
@@ -1252,12 +1324,17 @@ export function relayoutWorld() {
   const guard = captureInitGenerationGuard();
   return enqueueStep(async () => {
     guard.assertCurrent();
-    const mapRow = getMapRow();
+    // 多地图：重建的是玩家正在玩的那张图（没有玩家上下文时退回旧口径「第一张图」）
+    const { getTownMaps } = await import('./townService.js');
+    const targetMapId = getTownMaps().currentMapId ?? null;
+    const mapRow = getMapRow(targetMapId);
     if (!mapRow) return { ok: false, error: '小镇尚未初始化' };
     const desiredSize = Math.max(30, Math.min(80, parseInt(config.town.mapSize, 10) || mapRow.grid_cols || 50));
     const cols = desiredSize;
     const rows = desiredSize;
-    const ready = listAssets({}).filter(a => a.status === 'ready' && ['ground', 'road', 'building', 'prop'].includes(a.kind));
+    // 复用「这张图现在摆着的素材」当素材池：世界里有多套素材时，别镇的地皮与建筑不能混进来
+    const ready = getLayersAssets(mapRow.layers)
+      .filter(a => a.status === 'ready' && LAYOUT_ASSET_KINDS.includes(a.kind));
     if (ready.length < 4) return { ok: false, error: '可用素材不足，无法重新布局' };
 
     const db = getDb();
@@ -1284,6 +1361,7 @@ export function relayoutWorld() {
       }
     }
     const saved = saveMap({
+      mapId: mapRow.id,
       name: mapRow.name || '小镇',
       cols, rows,
       tileSize: mapRow.tile_size || 32,

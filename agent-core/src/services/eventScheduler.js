@@ -13,7 +13,8 @@
 
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { generateEvent, concludeEvent, getUrgencyLevel } from './eventGenerator.js';
-import { concludeTownNpcEvent } from './town/townNpcEventGenerator.js';
+import { concludeTownNpcEvent, expireTownNpcEvent } from './town/townNpcEventGenerator.js';
+import { isMapFocused } from './town/townService.js';
 import { broadcastEventUrgency } from './eventNotificationBus.js';
 import { broadcastProactiveMessage } from './notificationBus.js';
 import { config } from '../config.js';
@@ -81,6 +82,8 @@ async function tick(opts = {}) {
     }
 
     // ── 1.5 镇民奇遇到期检查（与角色事件同一套结算口径，无记忆写入） ──
+    // 多地图：镇民奇遇「时间到了就到了」——聚焦图才花模型钱写文学性结局，
+    // 后台图直接模板结题归档（走位/结算照常，只是不产生 LLM 调用）。
     const expiredNpcEvents = db.prepare(`
       SELECT e.*, n.display_name
       FROM town_npc_events e
@@ -93,7 +96,13 @@ async function tick(opts = {}) {
       console.log(`[eventScheduler] Town npc event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
       try {
         const npc = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(event.npc_id);
-        await concludeTownNpcEvent(npc, event, event.engaged ? 'completed' : 'expired');
+        if (!npc) continue;
+        const outcome = event.engaged ? 'completed' : 'expired';
+        if (isMapFocused(npc.map_id)) {
+          await concludeTownNpcEvent(npc, event, outcome);
+        } else {
+          expireTownNpcEvent(npc, event, outcome);
+        }
       } catch (err) {
         console.error(`[eventScheduler] Town npc conclude error for ${event.display_name}:`, err.message);
       }

@@ -24,15 +24,16 @@ import { getDb } from '../db/index.js';
 import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
   setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
-  generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld,
+  generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld, resetMap,
   holdTownActor, releaseTownActor, touchTownViewer,
+  getTownMaps, travelPlayer, reloadMap,
 } from '../services/town/townService.js';
 import {
   listAssets, createAsset, regenerateAsset, deleteAsset, generateAssetsBatch, saveEditedAssetImage, importAssetImage, getAssetById, cropAssetImage, cropTileAssetImage, refineAssetWithHires,
   updateAssetGenerationConfig,
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
-import { getMapPayload, saveMap } from '../services/town/townMapService.js';
+import { getMapPayload, saveMap, renameMap } from '../services/town/townMapService.js';
 import { getTownWallet, getTownNpcFunctions, receiveTownNpcGift } from '../services/town/townEconomyRuntime.js';
 import { getTownInteractions, offerTownInteraction, respondTownInteraction, getTownTargetTrade, executeTownTargetTrade } from '../services/town/townInteractionRuntime.js';
 import {
@@ -54,10 +55,16 @@ const router = Router();
 // ── 运行时 ──
 
 router.get('/state', (req, res) => {
-  res.json(getTownState());
+  // mapId 省略 = 玩家当前那张图；显式指定用于出行前预载目标图（不含玩家坐标）
+  res.json(getTownState(req.query.mapId ?? null));
 });
 
 function checkMovementScope(body, res) {
+  // 多地图：写操作必须发生在玩家当前所在的那张图上，避免旧参数跨图生效
+  if (Object.hasOwn(body, 'mapId') && Number(body.mapId) !== getTownMaps().currentMapId) {
+    res.status(409).json({ code: 'STALE_MAP', error: '你已经不在那张地图上了，请刷新后重试' });
+    return false;
+  }
   if (!Object.hasOwn(body, 'worldId') && !Object.hasOwn(body, 'worldEpoch')) return true;
   if (typeof body.worldId !== 'string' || !body.worldId.trim()
     || !Number.isSafeInteger(body.worldEpoch) || body.worldEpoch < 1) {
@@ -114,6 +121,31 @@ router.post('/tick', (req, res) => {
 router.post('/viewer/heartbeat', (req, res) => {
   touchTownViewer();
   res.json({ ok: true });
+});
+
+// 出行目录：所有地图 + 玩家所在地图 + 场景修订号（顶栏「出行」面板）
+router.get('/maps', (req, res) => {
+  res.json(getTownMaps());
+});
+
+// 改名：只动名字，不重写图层与 POI（编辑器那条 PUT /map 会整图覆盖，不能拿来改名）
+router.patch('/maps/:id', (req, res) => {
+  try {
+    res.json(renameMap({ mapId: req.params.id, name: req.body?.name }));
+  } catch (err) {
+    res.status(400).json({ error: err?.message || '改名失败' });
+  }
+});
+
+// 出行：把玩家搬到另一张图。旧图随即降级为后台图，不再产生 LLM 演出。
+router.post('/travel', (req, res) => {
+  const { targetMapId, expectedPlayerRevision, worldId, worldEpoch } = req.body || {};
+  const result = travelPlayer({ targetMapId, expectedPlayerRevision, worldId, worldEpoch });
+  if (!result.ok) {
+    const status = ['MAP_NOT_READY', 'PLAYER_SCENE_CHANGED', 'STALE_WORLD'].includes(result.code) ? 409 : 400;
+    return res.status(status).json(result);
+  }
+  res.json(result);
 });
 
 // ── 素材库 ──
@@ -270,17 +302,20 @@ router.post('/assets/batch', async (req, res) => {
 // ── 地图 ──
 
 router.get('/map', (req, res) => {
-  res.json(getMapPayload());
+  // mapId 省略 = 玩家当前那张图（与 /state 同口径），否则画布会去拿「世界里 id 最小的那张」，
+  // 玩家站在新镇却看到老镇；显式指定用于出行预载与编辑器固定图。
+  const requested = req.query.mapId;
+  res.json(getMapPayload(requested == null || requested === '' ? (getTownMaps().currentMapId ?? null) : requested));
 });
 
 router.put('/map', (req, res) => {
   try {
-    const { name, cols, rows, tileSize, layers, locations } = req.body || {};
+    const { mapId, name, cols, rows, tileSize, layers, locations } = req.body || {};
     if (!layers || !Number.isInteger(cols) || !Number.isInteger(rows)) {
       return res.status(400).json({ error: 'layers/cols/rows 必填' });
     }
-    const result = saveMap({ name, cols, rows, tileSize, layers, locations });
-    reloadTown();
+    const result = saveMap({ name, cols, rows, tileSize, layers, locations, mapId: mapId ?? null });
+    if (!reloadMap(result.mapId).ok) reloadTown();
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err?.message || '保存失败' });
@@ -374,7 +409,18 @@ router.post('/init/npc-roster', async (req, res) => {
 router.post('/init/confirm', async (req, res) => {
   try {
     const state = await confirmInit();
-    reloadTown();
+    // 多地图：只重建刚建成的那张图，玩家当前那张不被打断
+    if (state?.mapId != null) {
+      if (!reloadMap(state.mapId).ok) reloadTown();
+      // 开镇的最后一步：新镇直接成为玩家所在地图（多图同时在跑，只有聚焦图产生 LLM 演出）。
+      // 世界还没装载时（首次开镇）交给 reloadTown → loadState 的玩家图口径兜底。
+      const moved = travelPlayer({ targetMapId: state.mapId });
+      if (moved && !moved.ok && moved.code !== 'NO_WORLD') {
+        console.warn('[town] focus new town failed:', moved.code || moved.error);
+      }
+    } else {
+      reloadTown();
+    }
     res.json(state);
   } catch (err) {
     res.status(500).json({ error: err?.message || '开镇失败' });
@@ -402,7 +448,8 @@ router.post('/npcs', (req, res) => {
   if (!displayName || !String(displayName).trim()) return res.status(400).json({ error: 'displayName 必填' });
   // 一句话人设统一归位到 brief（旧字段名叫 persona），由后台流水线据此生成完整人格卡
   const npcBrief = String(brief ?? persona ?? '').trim().slice(0, 300);
-  const mapId = getMapPayload()?.id ?? null;
+  // 居民挂在玩家当前那张图上，不是「世界里 id 最小的那张」
+  const mapId = getMapPayload(getTownMaps().currentMapId ?? null)?.id ?? null;
   // 建档同步返回，人格卡 → 作息 → 全套图片素材在后台自动生成
   const npc = createNpcWithOnboarding({
     mapId,
@@ -611,7 +658,8 @@ router.post('/map/relayout', async (req, res) => {
   try {
     const result = await relayoutWorld();
     if (!result?.ok) return res.status(400).json({ error: result?.error || '重新布局失败' });
-    reloadTown();
+    // 只重建这张图（saveMap 广播 town_map_updated 后客户端会自行重拉）
+    if (result.mapId == null || !reloadMap(result.mapId).ok) reloadTown();
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || '重新布局失败' });
@@ -621,6 +669,15 @@ router.post('/map/relayout', async (req, res) => {
 router.delete('/world', (req, res) => {
   const r = resetWorld();
   cancelInit(); // 世界重置后向导从头开始（避免残留 done 状态卡住入口）
+  res.json(r);
+});
+
+// 重新初始化**一张图**：只清这一张的地图/POI/居民/相遇，世界里别的镇原样保留。
+// 顺带把向导退回起点——重置会跨 epoch，在途的向导生成无论如何都已作废。
+router.delete('/maps/:id', (req, res) => {
+  const r = resetMap(req.params.id);
+  if (!r?.ok) return res.status(400).json({ error: r?.error || '重新初始化失败' });
+  cancelInit();
   res.json(r);
 });
 

@@ -1339,8 +1339,24 @@ export function removeActiveEffect(effectId) {
 // ── AI 小镇（世界页）──
 
 // 全量快照：地图/POI/agents/玩家/天气/活跃相遇
-export function fetchTownState() {
-  return jsonRequest(`${BASE}/town/state`)
+// mapId 省略 = 玩家当前那张图；显式指定用于出行前预载目标图（不含玩家坐标）
+export function fetchTownState(mapId = null) {
+  return jsonRequest(`${BASE}/town/state${mapId != null ? `?mapId=${encodeURIComponent(mapId)}` : ''}`)
+}
+
+// 出行目录：所有小镇（含居民数与建成状态）+ 玩家所在地图 + 场景修订号
+export function fetchTownMaps() {
+  return jsonRequest(`${BASE}/town/maps`)
+}
+
+// 给一座小镇改名（只动名字，不重写图层与 POI）
+export function renameTownMap(mapId, name) {
+  return jsonRequest(`${BASE}/town/maps/${encodeURIComponent(mapId)}`, townJson('PATCH', { name }))
+}
+
+// 出行：把玩家搬到另一张图。expectedPlayerRevision 用于并发时只让第一个请求生效
+export function travelTown(targetMapId, { expectedPlayerRevision = null, worldId, worldEpoch } = {}) {
+  return jsonRequest(`${BASE}/town/travel`, townJson('POST', { targetMapId, expectedPlayerRevision, worldId, worldEpoch }))
 }
 
 // 世界页在线打点：TownView 挂载期间定期调用，服务端据此开启相遇/气泡等页面演出
@@ -1348,12 +1364,12 @@ export function townViewerHeartbeat() {
   return jsonRequest(`${BASE}/town/viewer/heartbeat`, townJson('POST'))
 }
 
-// 玩家 token 移动（服务端寻路 + town_move 广播）
-export function moveTownPlayer(x, y, { worldId, worldEpoch } = {}) {
+// 玩家 token 移动（服务端寻路 + town_move 广播）；带 mapId 让跨图后的旧请求被服务端拒掉
+export function moveTownPlayer(x, y, { worldId, worldEpoch, mapId } = {}) {
   return jsonRequest(`${BASE}/town/player/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ x, y, worldId, worldEpoch }),
+    body: JSON.stringify({ x, y, worldId, worldEpoch, ...(mapId != null ? { mapId } : {}) }),
   })
 }
 
@@ -1430,9 +1446,9 @@ export function refineTownAssetHires(id) {
   return jsonRequest(`${BASE}/town/assets/${id}/hires`, townJson('POST', {}))
 }
 
-// 地图（编辑器保存 / 渲染载荷）
-export function fetchTownMap() {
-  return jsonRequest(`${BASE}/town/map`)
+// 地图（编辑器保存 / 渲染载荷）；mapId 省略 = 玩家当前那张图
+export function fetchTownMap(mapId = null) {
+  return jsonRequest(`${BASE}/town/map${mapId != null ? `?mapId=${encodeURIComponent(mapId)}` : ''}`)
 }
 
 export function saveTownMap(payload) {
@@ -1607,9 +1623,13 @@ export function resetTownWorld() {
   return jsonRequest(`${BASE}/town/world`, { method: 'DELETE' })
 }
 
-// 玩家方向键单步移动（本地节流上报）
-export function moveTownPlayerDir(dx, dy, { worldId, worldEpoch } = {}) {
-  return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy, worldId, worldEpoch }))
+// 重新初始化**一座小镇**：只清这一张图的地图/POI/居民/相遇，别的镇不受影响
+export function resetTownMap(mapId) {
+  return jsonRequest(`${BASE}/town/maps/${encodeURIComponent(mapId)}`, { method: 'DELETE' })
+}
+// 玩家方向键单步移动（本地节流上报）；带 mapId 让跨图后的旧按键请求被服务端拒掉
+export function moveTownPlayerDir(dx, dy, { worldId, worldEpoch, mapId } = {}) {
+  return jsonRequest(`${BASE}/town/player/dir`, townJson('POST', { dx, dy, worldId, worldEpoch, ...(mapId != null ? { mapId } : {}) }))
 }
 
 // 对话驻留：打开对话框时让对方停走（服务端租约制，开窗续租、关闭释放、失联自动过期）

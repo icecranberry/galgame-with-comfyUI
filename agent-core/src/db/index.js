@@ -616,6 +616,7 @@ function initSchema(db) {
       tile_size INTEGER DEFAULT 32,      -- 世界像素/格（1x 缩放下）
       world_setting_id INTEGER,          -- 初始化用的世界观
       version INTEGER DEFAULT 1,         -- 编辑保存版本号（SSE 通知其他端重载）
+      status TEXT NOT NULL DEFAULT 'ready',  -- ready | archived（多地图：出行目录只列 ready）
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -637,7 +638,7 @@ function initSchema(db) {
     CREATE TABLE IF NOT EXISTS town_locations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,
-      key TEXT NOT NULL UNIQUE,          -- 'cafe'
+      key TEXT NOT NULL,                 -- 'cafe'（图内唯一，两张镇可以各有自己的咖啡馆）
       name TEXT NOT NULL,                -- '兽人咖啡厅'
       aliases_json TEXT NOT NULL DEFAULT '[]',
       kind TEXT NOT NULL DEFAULT 'place' CHECK(kind IN ('home','place','outdoor')),
@@ -646,7 +647,8 @@ function initSchema(db) {
       radius INTEGER NOT NULL DEFAULT 2, -- 锚点周围可站立半径
       ambient TEXT DEFAULT '',           -- 环境氛围描述（注入对话 prompt）
       object_id INTEGER,                 -- v2：绑定的地图对象 id（建筑 POI）
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(map_id, key)
     );
 
     -- 轻量小镇居民（世界观生成，不进 characters 表）
@@ -677,6 +679,7 @@ function initSchema(db) {
 
     CREATE TABLE IF NOT EXISTS town_characters (
       character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+      map_id INTEGER,                    -- 入住镇（多地图）；NULL = 尚未指定，按住宅推断
       home_location_id INTEGER REFERENCES town_locations(id),
       town_enabled INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -684,13 +687,15 @@ function initSchema(db) {
 
     -- 运行时状态快照（v2：agent_key = 'npc:3' / 'char:12' / 'me'，进程重启后由作息/日程重建）
     CREATE TABLE IF NOT EXISTS town_agent_state (
-      agent_key TEXT PRIMARY KEY,
+      agent_key TEXT NOT NULL,
+      map_id INTEGER NOT NULL,           -- 运行时快照按图保存：玩家每图一份最近坐标
       grid_x INTEGER,
       grid_y INTEGER,
       path_json TEXT DEFAULT '[]',
       current_location_id INTEGER,
       activity_text TEXT DEFAULT '',
-      updated_at DATETIME
+      updated_at DATETIME,
+      PRIMARY KEY (agent_key, map_id)
     );
 
     CREATE TABLE IF NOT EXISTS town_encounters (
@@ -716,6 +721,7 @@ function initSchema(db) {
     CREATE TABLE IF NOT EXISTS town_players (
       id TEXT PRIMARY KEY,               -- 'me'（单用户）
       display_name TEXT NOT NULL,
+      map_id INTEGER,                    -- 玩家当前所在地图（聚焦口径的权威来源）
       grid_x INTEGER,
       grid_y INTEGER,
       sprite_asset_id INTEGER,           -- v2：玩家spirit素材（player_down 等 4 方向共用一套 meta）
@@ -928,6 +934,7 @@ function initSchema(db) {
   migrateTownNpcEventSchema(db);
   migrateTownResponsibilitySchema(db);
   migrateTownExperienceSchema(db);
+  migrateTownMultiMapSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）
@@ -1637,6 +1644,126 @@ function migrateTownV2Schema(db) {
     }
   } catch (err) {
     console.log('[db] migrateTownV2Schema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: AI 小镇多地图
+ * - town_maps 加 status（出行目录只列 ready）
+ * - town_players 加 map_id（玩家所在地图 = 聚焦口径的权威来源）
+ * - town_characters 加 map_id（入住镇），旧数据按住宅所在图回填，缺住宅落到默认图
+ * - town_npcs.map_id 为空的历史行（向导提前建档）落到默认图
+ * - town_locations 的 key 唯一约束从「全库唯一」改为「图内唯一」（重建表，行 id 原样保留）
+ * - town_agent_state 主键从 agent_key 改为 (agent_key, map_id)（重建表，旧快照归入默认图）
+ * 幂等：已迁移的库不会重复重建。
+ */
+export function migrateTownMultiMapSchema(db) {
+  try {
+    const tableSql = name => db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`).get(name)?.sql || '';
+    const columns = name => db.prepare(`PRAGMA table_info(${name})`).all().map(c => c.name);
+    const defaultMapId = db.prepare('SELECT id FROM town_maps ORDER BY id LIMIT 1').get()?.id ?? null;
+
+    const mapCols = columns('town_maps');
+    if (mapCols.length > 0 && !mapCols.includes('status')) {
+      db.exec(`ALTER TABLE town_maps ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'`);
+      console.log('[db] Added town_maps.status column (multi-map)');
+    }
+
+    const playerCols = columns('town_players');
+    if (playerCols.length > 0 && !playerCols.includes('map_id')) {
+      db.exec('ALTER TABLE town_players ADD COLUMN map_id INTEGER');
+      console.log('[db] Added town_players.map_id column (multi-map)');
+    }
+
+    const charCols = columns('town_characters');
+    if (charCols.length > 0 && !charCols.includes('map_id')) {
+      db.exec('ALTER TABLE town_characters ADD COLUMN map_id INTEGER');
+      console.log('[db] Added town_characters.map_id column (multi-map)');
+    }
+
+    // 旧库单图：地点归属天然就是默认图；居民、角色、玩家与快照按默认图补齐
+    if (defaultMapId != null) {
+      db.prepare('UPDATE town_npcs SET map_id = ? WHERE map_id IS NULL').run(defaultMapId);
+      db.prepare(`UPDATE town_characters SET map_id = (SELECT map_id FROM town_locations WHERE id = town_characters.home_location_id)
+        WHERE home_location_id IS NOT NULL AND map_id IS NULL`).run();
+      db.prepare('UPDATE town_characters SET map_id = ? WHERE map_id IS NULL').run(defaultMapId);
+      db.prepare('UPDATE town_players SET map_id = ? WHERE map_id IS NULL').run(defaultMapId);
+    }
+
+    const fkWasOn = db.pragma('foreign_keys', { simple: true });
+    // 重建表：先建新表并逐列搬运（保留行 id），再换名。外键约束临时关闭。
+    const rebuild = (name, { create, columns: nextColumns, select }) => {
+      if (fkWasOn) db.pragma('foreign_keys = OFF');
+      try {
+        db.transaction(() => {
+          db.exec(`DROP TABLE IF EXISTS ${name}_multimap_mig`);
+          db.exec(create);
+          db.exec(`INSERT INTO ${name}_multimap_mig (${nextColumns.join(', ')}) SELECT ${select} FROM ${name}`);
+          db.exec(`DROP TABLE ${name}`);
+          db.exec(`ALTER TABLE ${name}_multimap_mig RENAME TO ${name}`);
+        })();
+      } finally {
+        if (fkWasOn) db.pragma('foreign_keys = ON');
+      }
+    };
+
+    const locSql = tableSql('town_locations');
+    if (locSql && !locSql.includes('UNIQUE(map_id, key)')) {
+      const cols = columns('town_locations');
+      rebuild('town_locations', {
+        create: `CREATE TABLE town_locations_multimap_mig (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,
+          key TEXT NOT NULL,
+          name TEXT NOT NULL,
+          aliases_json TEXT NOT NULL DEFAULT '[]',
+          kind TEXT NOT NULL DEFAULT 'place' CHECK(kind IN ('home','place','outdoor')),
+          grid_x INTEGER NOT NULL,
+          grid_y INTEGER NOT NULL,
+          radius INTEGER NOT NULL DEFAULT 2,
+          ambient TEXT DEFAULT '',
+          object_id INTEGER,
+          business_kind TEXT,
+          capabilities_json TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(map_id, key)
+        )`,
+        columns: cols,
+        select: cols.join(', '),
+      });
+      db.exec('CREATE INDEX IF NOT EXISTS idx_town_locations_map ON town_locations(map_id)');
+      console.log('[db] Rebuilt town_locations with UNIQUE(map_id, key) (multi-map)');
+    }
+
+    const agentSql = tableSql('town_agent_state');
+    if (agentSql && !agentSql.includes('PRIMARY KEY (agent_key, map_id)')) {
+      const cols = columns('town_agent_state');
+      if (defaultMapId == null) {
+        // 没有地图可归属的库（升级后还没开镇）：旧快照本就无意义，清空后照样重建表结构，
+        // 否则后续 persistAgent 的 ON CONFLICT(agent_key, map_id) 会因为旧主键直接报错。
+        db.exec('DELETE FROM town_agent_state');
+      }
+      const carried = cols.filter(c => c !== 'agent_key');
+      rebuild('town_agent_state', {
+        create: `CREATE TABLE town_agent_state_multimap_mig (
+          agent_key TEXT NOT NULL,
+          map_id INTEGER NOT NULL,
+          grid_x INTEGER,
+          grid_y INTEGER,
+          path_json TEXT DEFAULT '[]',
+          current_location_id INTEGER,
+          activity_text TEXT DEFAULT '',
+          updated_at DATETIME,
+          PRIMARY KEY (agent_key, map_id)
+        )`,
+        columns: ['agent_key', 'map_id', ...carried],
+        // 表已清空时这里没有行，取值只为满足 NOT NULL 的列定义
+        select: `agent_key, ${defaultMapId ?? 0}, ${carried.join(', ')}`,
+      });
+      console.log('[db] Rebuilt town_agent_state keyed by (agent_key, map_id) (multi-map)');
+    }
+  } catch (err) {
+    console.log('[db] migrateTownMultiMapSchema error:', err.message);
   }
 }
 

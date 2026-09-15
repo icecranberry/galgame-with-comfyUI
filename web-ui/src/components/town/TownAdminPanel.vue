@@ -370,6 +370,13 @@
           </p>
           <p v-else-if="settingsSaved" class="ap-layout-desc" role="status">设置已保存。</p>
             <div class="ap-layout-zone">
+              <div class="ap-section-title">再建一座小镇</div>
+              <p class="ap-layout-desc">用向导再开一座镇：选世界观、生成素材与居民。建镇期间你仍待在现在这座镇里，新镇没被聚焦前不会有任何演出。</p>
+              <div class="ap-actions">
+                <linshe-button variant="secondary" size="sm" @click="$emit('new-town')">新建小镇</linshe-button>
+              </div>
+            </div>
+            <div class="ap-layout-zone">
               <div class="ap-section-title">重新布局</div>
             <p class="ap-layout-desc">会用当前素材重建地图、道路和地点；居民与入住角色会保留，手动地图修改会被覆盖。</p>
             <div class="ap-density-field">
@@ -407,12 +414,12 @@
 
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
-            <p class="ap-danger-desc">重新初始化会清除当前地图、地点、居民与相遇记录，清理未完成委托并退回服务托管款。已有角色、邻币、背包道具和交易履历会保留。</p>
-            <linshe-button variant="danger" size="sm" :loading="resetting" @click="resetting = true">
-              重新初始化世界
+            <p class="ap-danger-desc">重新初始化会清除这座小镇的地图、地点、居民与相遇记录，清理未完成委托并退回服务托管款；世界里别的小镇不受影响。已有角色、邻币、背包道具和交易履历会保留。</p>
+            <linshe-button variant="danger" size="sm" :loading="resetting" :disabled="town.currentMapId == null" @click="resetting = true">
+              重新初始化这座小镇
             </linshe-button>
             <div v-if="resetting" class="ap-confirm">
-              <span>确定要推倒重来吗？</span>
+              <span>确定要推倒重来吗？只清「{{ town.currentMap?.name || '当前小镇' }}」，别的镇不动。</span>
               <linshe-button variant="danger" size="sm" @click="doReset">确认清除</linshe-button>
               <linshe-button variant="ghost" size="sm" @click="resetting = false">手滑了</linshe-button>
             </div>
@@ -444,7 +451,7 @@ import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
 
-defineEmits(['close'])
+defineEmits(['close', 'new-town'])
 
 const props = defineProps({ open: Boolean })
 const town = useTownStore()
@@ -977,11 +984,14 @@ async function doRelayout() {
 }
 
 async function doReset() {
+  const mapId = town.currentMapId
+  if (mapId == null) { resetting.value = false; return }
   try {
-    await api.resetTownWorld()
+    await api.resetTownMap(mapId)
     resetting.value = false
     detail.value = null
     town.fetchState().catch(() => {})
+    town.fetchMaps().catch(() => {})
   } catch (err) {
     console.warn('[town-admin] reset failed:', err?.message)
     resetting.value = false

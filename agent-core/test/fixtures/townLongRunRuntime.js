@@ -36,7 +36,7 @@ export function createReplay(t) {
     createNpc({mapId,displayName});
     const id = db.prepare('SELECT max(id) id FROM town_npcs').get().id;
     db.prepare('UPDATE town_npcs SET routine_json=? WHERE id=?').run(JSON.stringify([{start:'00:00',end:'24:00',locationKey:key,activity:'固定岗位'}]),id);
-    db.prepare('INSERT INTO town_agent_state(agent_key,grid_x,grid_y,current_location_id) VALUES(?,?,?,(SELECT id FROM town_locations WHERE key=?))').run(`npc:${id}`,x,y,key);
+    db.prepare('INSERT INTO town_agent_state(agent_key,map_id,grid_x,grid_y,current_location_id) VALUES(?,?,?,?,(SELECT id FROM town_locations WHERE key=? AND map_id=?))').run(`npc:${id}`,mapId,x,y,key,mapId);
   }
   db.prepare("INSERT INTO town_players(id,display_name,grid_x,grid_y) VALUES('me','玩家',0,0)").run();
   town.startTownScheduler();

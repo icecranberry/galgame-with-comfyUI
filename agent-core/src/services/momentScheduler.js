@@ -10,6 +10,7 @@
 
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
+import { getTownMaps } from './town/townService.js';
 
 // 生成函数由路由层装配时注入（setMomentPostGenerator / setTownNpcPostGenerator），
 // 避免服务层静态反向依赖路由模块（service → route）。
@@ -56,12 +57,18 @@ async function tick() {
     `).get();
 
     // 镇民朋友圈总开关（管理面板）：关闭后镇民不再进入调度，角色发帖不受影响
+    // 多地图：只有玩家当前所在地图（聚焦图）的镇民能发帖，否则不消耗 LLM
+    const currentMapId = getTownMaps().currentMapId;
     const townNpcMomentsOn = config.features.town === true && config.town.npcMomentsDisabled !== true;
+    // 地图范围从句：拿到玩家所在地图就按图过滤镇民，世界还没建图（如旧库/测试桩）退回不分图口径
+    const npcMapClause = currentMapId != null ? 'AND map_id = ?' : '';
+    const npcMapClauseAliased = currentMapId != null ? 'AND n.map_id = ?' : '';
+    const npcMapArgs = currentMapId != null ? [currentMapId] : [];
     // 镇民首次启动初始化：从未定时的镇民设定首帖时间（1~4 小时内），须在选候选前完成
     if (townNpcMomentsOn) {
       const pendingNpcs = db.prepare(
-        'SELECT id FROM town_npcs WHERE town_enabled = 1 AND moments_disabled = 0 AND next_moment_at IS NULL'
-      ).all();
+        `SELECT id FROM town_npcs WHERE town_enabled = 1 AND moments_disabled = 0 AND next_moment_at IS NULL ${npcMapClause}`
+      ).all(...npcMapArgs);
       for (const n of pendingNpcs) {
         const delay = 3600_000 + Math.random() * 3 * 3600_000;
         db.prepare('UPDATE town_npcs SET next_moment_at = ? WHERE id = ?')
@@ -73,6 +80,7 @@ async function tick() {
     const npcCandidate = townNpcMomentsOn ? db.prepare(`
       SELECT n.* FROM town_npcs n
       WHERE n.town_enabled = 1 AND n.moments_disabled = 0
+        ${npcMapClauseAliased}
         AND (n.next_moment_at IS NULL OR n.next_moment_at <= datetime('now'))
         AND n.id NOT IN (
           SELECT npc_id FROM moment_posts
@@ -81,7 +89,7 @@ async function tick() {
         )
       ORDER BY n.next_moment_at ASC NULLS FIRST
       LIMIT 1
-    `).get() : null;
+    `).get(...npcMapArgs) : null;
 
     // 两个来源都到期时，谁等得更久谁先发（NULL 视为最早）
     const dueKey = row => row?.next_moment_at || '';

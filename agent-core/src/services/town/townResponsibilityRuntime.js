@@ -22,10 +22,12 @@ export function initializeTownNpcFunctions(db, npc) {
 /** No LLM, timers or movement. Both generation orders (buildings first / residents first)
  * converge on the same stored bindings. Buildings get addresses, residents get workplaces;
  * the binding lives in town_npcs.workplace_key, so repeated runs are stable. */
-export function reconcileTownResponsibilities({ db = getDb(), allowFallback = false } = {}) {
+export function reconcileTownResponsibilities({ db = getDb(), allowFallback = false, mapId = null } = {}) {
   let mapUpdate = null;
   const result = db.transaction(() => {
-    const map = db.prepare('SELECT * FROM town_maps ORDER BY id LIMIT 1').get();
+    const map = mapId == null
+      ? db.prepare('SELECT * FROM town_maps ORDER BY id LIMIT 1').get()
+      : db.prepare('SELECT * FROM town_maps WHERE id = ?').get(mapId);
     if (!map) return { pending: [], changed: false };
     const registry = createTownActorRegistry(db);
     const actors = registry.synchronize();

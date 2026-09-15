@@ -39,7 +39,7 @@ test('日程醒着的入驻角色深夜也游走，睡眠档原地不动', async
   ];
   db.prepare('INSERT INTO daily_schedules (character_id, schedule_date, schedule_json) VALUES (?, ?, ?)')
     .run(charId, getLocalDateKey(), JSON.stringify(schedule));
-  db.prepare('INSERT INTO town_agent_state (agent_key, grid_x, grid_y) VALUES (?, 0, 0)').run(`char:${charId}`);
+  db.prepare('INSERT INTO town_agent_state (agent_key, map_id, grid_x, grid_y) VALUES (?, ?, 0, 0)').run(`char:${charId}`, mapId);
 
   town.startTownScheduler();
   t.after(() => { town.stopTownScheduler(); closeDb(); t.mock.restoreAll(); t.mock.timers.reset(); });

@@ -566,6 +566,63 @@ ${npcPersonaBlock(npc, playerName, playerAppearance)}` },
 // ── 结局 ──
 
 /**
+ * 把镇民奇遇移入历史表并广播（不调 LLM）。
+ * 时间到了就直接结题、玩家未参与的际遇不写文学性结局，也不需要任何模型开销。
+ */
+export function expireTownNpcEvent(npc, event, outcome = 'expired') {
+  const db = getDb();
+  const { playerName } = townPlayerInfo(db);
+  const displayName = npc.display_name;
+  const conclusionData = {
+    conclusion: event.engaged
+      ? `故事告一段落。${displayName}和${playerName}从这次经历中各有收获。`
+      : `这个偶然的际遇悄然结束，没有留下太多痕迹。`,
+    summary: `${displayName}和${playerName}经历了一场"${event.title}"——${event.description}。结局：${outcome === 'completed' ? '事件顺利完成。' : '事件因时间流逝而自然结束。'}`,
+  };
+  return archiveNpcEvent(npc, event, outcome, conclusionData);
+}
+
+/** 归档：移入 town_npc_event_history（保留原始 ID）并广播结局 */
+function archiveNpcEvent(npc, event, outcome, conclusionData) {
+  const db = getDb();
+  const { playerName } = townPlayerInfo(db);
+  const displayName = npc.display_name;
+  db.transaction(() => {
+    db.prepare(`
+    INSERT INTO town_npc_event_history (id, npc_id, event_type_key, title, description, final_image, summary, conclusion,
+      choice_history, total_branches, engaged, outcome, world_id, world_epoch, location_key, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+      event.id,
+      npc.id, event.event_type_key,
+      event.title, event.description, event.image,
+      conclusionData.summary,
+      conclusionData.conclusion || null,
+      event.choice_history, event.current_branch || 0,
+      event.engaged, outcome,
+      event.world_id, event.world_epoch, event.location_key,
+      event.created_at,
+    );
+    db.prepare(`DELETE FROM town_npc_events WHERE id = ?`).run(event.id);
+  }).immediate();
+
+  broadcastEventConclusion({
+    event_id: townNpcEventRef(event.id),
+    npc_event: true,
+    character_id: null,
+    npc_id: npc.id,
+    character_name: displayName,
+    event_title: event.title,
+    conclusion: conclusionData.conclusion,
+    summary: conclusionData.summary,
+    outcome,
+    engaged: event.engaged,
+  });
+  console.log(`[townNpcEventGen] Event archived: "${event.title}" → ${outcome}`);
+  return { ...conclusionData, outcome };
+}
+
+/**
  * 生成结局并移入历史表（镇民无记忆系统，不写记忆）
  */
 export async function concludeTownNpcEvent(npc, event, outcome, deps = {}) {
@@ -629,40 +686,6 @@ ${worldConsistencyLine}- 【叙事视角·最高优先级】全程第三人称�
     };
   }
 
-  // 1. 移到 town_npc_event_history（保留原始 ID）
-  db.transaction(() => {
-    db.prepare(`
-    INSERT INTO town_npc_event_history (id, npc_id, event_type_key, title, description, final_image, summary, conclusion,
-      choice_history, total_branches, engaged, outcome, world_id, world_epoch, location_key, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-      event.id,
-      npc.id, event.event_type_key,
-      event.title, event.description, event.image,
-      conclusionData.summary,
-      conclusionData.conclusion || null,
-      event.choice_history, event.current_branch || 0,
-      event.engaged, outcome,
-      event.world_id, event.world_epoch, event.location_key,
-      event.created_at,
-    );
-    db.prepare(`DELETE FROM town_npc_events WHERE id = ?`).run(event.id);
-  }).immediate();
-
-  // 2. SSE 广播
-  broadcastEventConclusion({
-    event_id: townNpcEventRef(event.id),
-    npc_event: true,
-    character_id: null,
-    npc_id: npc.id,
-    character_name: displayName,
-    event_title: event.title,
-    conclusion: conclusionData.conclusion,
-    summary: conclusionData.summary,
-    outcome,
-    engaged: event.engaged,
-  });
-
   console.log(`[townNpcEventGen] Event concluded: "${event.title}" → ${outcome}`);
-  return { ...conclusionData, outcome };
+  return archiveNpcEvent(npc, event, outcome, conclusionData);
 }

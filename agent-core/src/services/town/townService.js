@@ -25,7 +25,7 @@ import { findRoutineSlot } from './routineSchedule.js';
 import { createTownClock } from './townClock.js';
 import { createTownSimulation } from './townSimulation.js';
 import { createEconomyService } from './economyService.js';
-import { maintainTownLife } from './townEconomyRuntime.js';
+import { maintainTownLife, getTownLifeRuntime } from './townEconomyRuntime.js';
 import { createTownEventService } from './townEventService.js';
 import { TOWN_EXPERIENCE_CONSUMER } from './townExperienceService.js';
 import { generateTownNpcEvent, TOWN_NPC_AMBIENT_EVENT_TYPE_KEY } from './townNpcEventGenerator.js';
@@ -37,7 +37,7 @@ import { getTimeLight, getSeason } from '../timeLight.js';
 import { createTownWeatherFacts } from './townWeatherFacts.js';
 import { getWeatherSourceKey } from '../weatherSource.js';
 import { createTownWeatherShelter, isIdleScheduleActivity } from './townWeatherShelter.js';
-import { getMapRow, buildWalkGridFromLayers } from './townMapService.js';
+import { getMapRow, listMaps, buildWalkGridFromLayers } from './townMapService.js';
 import { getTownGenerationSettings, mergeTownGenerationSettings } from './townGenerationConfig.js';
 import { buildLocationMatcher } from './townLocationMatch.js';
 import { findPath, isWalkable, pickStandingCell } from './townPathfinding.js';
@@ -48,34 +48,95 @@ import { createTownAppearanceSignature, townAssetAppearanceStatus } from './town
 import {
   broadcastTownMove, broadcastTownBubble,
   broadcastTownEncounterStart, broadcastTownEncounterEnd, broadcastTownPing,
-  broadcastTownStateUpdated, setTownBusScope, onTownAssetsUpdated,
+  broadcastTownStateUpdated, broadcastTownPlayerMapChanged,
+  setTownBusScope, setTownBusMapScope, onTownAssetsUpdated,
 } from './townBus.js';
 
-const state = {
-  generation: 0,        // 内存装载代次；异步表达不能回写已卸载的场景
+/**
+ * 世界级共享状态：与具体地图无关，多图并存时也只有一份。
+ * - 玩家整局只有一个身份，`playerMapId` 是聚焦口径的权威来源
+ * - `llmChain` 全局串行：多张图不会同时打模型
+ */
+const shared = {
   world: null,
-  actors: new Map(),
-  simulation: null,
-  simulationActorIds: new Set(),
+  actors: new Map(),   // agentKey -> actor（身份注册表视图，全世界一份）
   running: false,
   timer: null,
   startupTimer: null,
-  map: null,             // { id, name, cols, rows, tileSize, version, layers, walkGrid, assetsById }
-  locations: [],         // [{ id, key, name, aliases, kind, x, y, radius, ambient }]
-  matcher: null,
-  agents: new Map(),     // agentKey -> agent
-  meta: new Map(),       // agentKey -> { agentKey, kind, refId, displayName, personaPrompt, avatarPath, sprites }
-  relationships: new Set(),   // 'min:max'（有 relationship_text 的角色无向对）
-  moods: new Map(),      // charId -> { valence, arousal, dominantEmotion, updatedAt }
-  encounters: new Map(), // id -> encounter
-  pairCooldown: new Map(),   // 'aKey|bKey' -> 可再次相遇/问候的时间戳
-  occupied: new Map(),   // 'x,y' -> agentKey
-  player: null,          // { agentKey:'me', displayName, x, y, path, speed, moveStartedAt, sprites }
-  lastBubbleBatchAt: 0,
-  lastMoodRefreshAt: 0,
-  lastEncounterStartAt: 0,
+  playerMapId: null,
+  player: null,        // { agentKey:'me', displayName, x, y, path, speed, moveStartedAt, sprites }
+  playerRevision: 0,   // 场景修订号：出行等关键场景变更时递增，客户端据此丢弃迟到结果
   llmChain: Promise.resolve(),  // L2 串行队列：同一时刻最多一个 LLM 调用在跑
 };
+
+/** mapId -> 该地图的运行实例；字段与原单图状态同构 */
+const runtimes = new Map();
+
+function createRuntimeState({ mapId = null, map = null, locations = [], matcher = null } = {}) {
+  return {
+    mapId,
+    generation: 0,       // 内存装载代次；异步表达不能回写已卸载的场景
+    world: shared.world,
+    map,                 // { id, name, cols, rows, tileSize, version, layers, walkGrid, assetsById }
+    locations,           // [{ id, key, name, aliases, kind, x, y, radius, ambient }]
+    matcher,
+    agents: new Map(),   // agentKey -> agent
+    meta: new Map(),     // agentKey -> { agentKey, kind, refId, displayName, personaPrompt, avatarPath, sprites }
+    relationships: new Set(),   // 'min:max'（有 relationship_text 的角色无向对）
+    moods: new Map(),    // charId -> { valence, arousal, dominantEmotion, updatedAt }
+    encounters: new Map(), // id -> encounter
+    pairCooldown: new Map(),   // 'aKey|bKey' -> 可再次相遇/问候的时间戳
+    occupied: new Map(),   // 'x,y' -> agentKey
+    player: null,        // 只有玩家所在地图指向 shared.player
+    simulation: null,
+    simulationActorIds: new Set(),
+    lastBubbleBatchAt: 0,
+    lastMoodRefreshAt: 0,
+    lastEncounterStartAt: 0,
+  };
+}
+
+/** 未开镇时使用的空实例，保证所有 state.* 读取与旧行为一致 */
+const EMPTY_RUNTIME = createRuntimeState();
+
+/**
+ * 当前正在处理的运行实例：默认指向聚焦图。
+ * 既有逻辑全部通过 `state.` 读写「这一张图」，tick 遍历其他图时用 withRuntime 临时切换。
+ */
+let state = EMPTY_RUNTIME;
+
+function withRuntime(rt, fn) {
+  const previous = state;
+  state = rt || EMPTY_RUNTIME;
+  setTownBusMapScope(state.mapId);
+  try {
+    return fn();
+  } finally {
+    state = previous;
+    setTownBusMapScope(previous?.mapId ?? null);
+  }
+}
+
+/** 玩家所在地图的运行实例（多图里唯一允许产生 LLM 演出的那一张） */
+function focusedRuntime() {
+  return shared.playerMapId == null ? null : runtimes.get(shared.playerMapId) || null;
+}
+
+function firstRuntime() {
+  for (const rt of runtimes.values()) return rt;
+  return null;
+}
+
+/** 把 state 复位到聚焦图：所有导出的玩家/管理接口默认作用于玩家所在地图 */
+function syncFocusRuntime() {
+  state = focusedRuntime() || firstRuntime() || EMPTY_RUNTIME;
+  setTownBusMapScope(state.mapId);
+}
+
+/** 玩家坐标对象只挂在所在地图的运行实例上，切图时同步引用 */
+function syncPlayerRefs() {
+  for (const rt of runtimes.values()) rt.player = rt.mapId === shared.playerMapId ? shared.player : null;
+}
 
 // ── 身份编码（town_encounters.char_a/char_b 存整数：NPC 取负，角色取正） ──
 
@@ -190,6 +251,15 @@ export function hasTownViewers() {
   return Date.now() - lastViewerSeenAt < VIEWER_TTL_MS;
 }
 
+/**
+ * 聚焦闸门：玩家在这张图上，而且小镇页面在线（viewer 心跳未过期）。
+ * 只有聚焦图才产生 LLM 演出（相遇对话/摘要、状态气泡、环境奇遇、镇民朋友圈）；
+ * 后台图照常走位、上下班、结算与维护，只是不花模型钱。
+ */
+export function isMapFocused(mapId) {
+  return shared.running && mapId != null && shared.playerMapId === mapId && hasTownViewers();
+}
+
 // ── 启动 / 状态装载 ──
 
 export function startTownScheduler() {
@@ -197,74 +267,103 @@ export function startTownScheduler() {
     console.log('[town] feature disabled, scheduler skipped');
     return;
   }
-  if (state.running) return;
-  state.running = true;
+  if (shared.running) return;
+  shared.running = true;
   loadState();
 
   // 首拍延后几秒：等 app.js 里日程管理器完成初始化
-  state.startupTimer = setTimeout(() => {
-    state.startupTimer = null;
-    if (state.running) tick();
+  shared.startupTimer = setTimeout(() => {
+    shared.startupTimer = null;
+    if (shared.running) tick();
   }, 5000);
-  state.timer = setInterval(tick, config.town.tickSeconds * 1000);
-  state.simTimer = setInterval(simSubTick, TOWN_SIM_SUBTICK_MS);
-  console.log(`[town] scheduler started (tick=${config.town.tickSeconds}s, simSubtick=${TOWN_SIM_SUBTICK_MS / 1000}s, agents=${state.agents.size}${state.map ? '' : ', 等待世界初始化'})`);
+  shared.timer = setInterval(tick, config.town.tickSeconds * 1000);
+  shared.simTimer = setInterval(simSubTick, TOWN_SIM_SUBTICK_MS);
+  console.log(`[town] scheduler started (tick=${config.town.tickSeconds}s, simSubtick=${TOWN_SIM_SUBTICK_MS / 1000}s, maps=${runtimes.size}${shared.playerMapId ? '' : ', 等待世界初始化'})`);
 }
 
 export function stopTownScheduler() {
-  state.running = false;
-  if (state.timer) { clearInterval(state.timer); state.timer = null; }
-  if (state.simTimer) { clearInterval(state.simTimer); state.simTimer = null; }
-  if (state.startupTimer) { clearTimeout(state.startupTimer); state.startupTimer = null; }
-  invalidateSceneCallbacks();
-  persistAllAgents();
-  if (state.player) persistPlayer();
+  shared.running = false;
+  if (shared.timer) { clearInterval(shared.timer); shared.timer = null; }
+  if (shared.simTimer) { clearInterval(shared.simTimer); shared.simTimer = null; }
+  if (shared.startupTimer) { clearTimeout(shared.startupTimer); shared.startupTimer = null; }
+  persistAllRuntimes();
 }
 
 /** 地图保存/开镇后重载世界（不重启 tick 定时器） */
 export function reloadTown() {
-  if (!state.running) return;
+  if (!shared.running) return;
   try {
-    persistAllAgents();
-    if (state.player) persistPlayer();
+    persistAllRuntimes();
     loadState();
-    console.log(`[town] world reloaded (agents=${state.agents.size})`);
+    console.log(`[town] world reloaded (maps=${runtimes.size})`);
   } catch (err) {
     console.error('[town] reload failed:', err?.message || err);
   }
 }
 
 function loadState() {
-  invalidateSceneCallbacks();
   const db = getDb();
-  reconcileTownResponsibilities({ db, allowFallback: true });
-  state.world = createTownActorRegistry(db).getWorldState();
-  setTownBusScope(state.world);
-  const mapRow = getMapRow();
+  shared.world = createTownActorRegistry(db).getWorldState();
+  setTownBusScope(shared.world);
+
+  // 旧实例先落盘再作废其异步回调（generation 递增让在途 LLM 结果不再回写）
+  persistAllRuntimes();
+  runtimes.clear();
+
   const assets = listAssets({});
   const assetsById = new Map(assets.map(a => [a.id, a]));
+  for (const meta of listMaps()) {
+    if (meta.status === 'archived') continue;
+    const mapRow = getMapRow(meta.id);
+    if (!mapRow) continue;
+    // 每张图各自补岗/补地址，两镇的店铺与岗位互不串
+    reconcileTownResponsibilities({ db, allowFallback: true, mapId: mapRow.id });
+    const rt = buildRuntimeState(mapRow, assetsById);
+    runtimes.set(rt.mapId, rt);
+    withRuntime(rt, () => hydrateRuntime(assets));
+  }
 
-  state.agents.clear();
-  state.occupied.clear();
-  state.encounters.clear();
-  state.meta.clear();
+  // 玩家：显式记录的地图 → 默认图（首图）→ 尚未开镇
+  db.prepare(`INSERT INTO town_players (id, display_name) VALUES ('me', ?) ON CONFLICT(id) DO NOTHING`)
+    .run(config.user.nickname || '我');
+  const pRow = db.prepare(`SELECT * FROM town_players WHERE id = 'me'`).get() || {};
+  shared.playerMapId = (pRow.map_id != null && runtimes.has(pRow.map_id)) ? pRow.map_id : (firstRuntime()?.mapId ?? null);
+  if (shared.playerMapId != null && pRow.map_id !== shared.playerMapId) {
+    db.prepare('UPDATE town_players SET map_id = ? WHERE id = ?').run(shared.playerMapId, 'me');
+  }
+  loadPlayer(pRow);
+  syncPlayerRefs();
+  syncFocusRuntime();
+  closeStaleEncounters();
+}
 
-  if (!mapRow) {
-    state.map = null;
-    state.locations = [];
-    state.matcher = null;
-  } else {
-    const walkGrid = buildWalkGridFromLayers(mapRow.grid_cols, mapRow.grid_rows, mapRow.layers, assetsById);
-    state.map = {
+/** 由地图行构造运行实例（walkGrid 按图层现算） */
+function buildRuntimeState(mapRow, assetsById) {
+  const walkGrid = buildWalkGridFromLayers(mapRow.grid_cols, mapRow.grid_rows, mapRow.layers, assetsById);
+  const rt = createRuntimeState({
+    mapId: mapRow.id,
+    map: {
       id: mapRow.id, name: mapRow.name,
       cols: mapRow.grid_cols, rows: mapRow.grid_rows,
       tileSize: mapRow.tile_size || 32, version: mapRow.version || 1,
       layers: mapRow.layers, walkGrid, assetsById,
-    };
-  }
+    },
+  });
+  syncRuntimeWorld(rt);
+  return rt;
+}
 
-  state.locations = state.map
-    ? db.prepare('SELECT * FROM town_locations WHERE map_id = ? ORDER BY id').all(state.map.id)
+/** 世界身份是全世界一份：实例登记与重建时同步引用 */
+function syncRuntimeWorld(rt) {
+  rt.world = shared.world;
+}
+
+/** 装载某张图的场景内容：地点、成员、关系、冷却、心情与模拟引擎 */
+function hydrateRuntime(assets = listAssets({})) {
+  const db = getDb();
+  const rt = state;
+  rt.locations = rt.map
+    ? db.prepare('SELECT * FROM town_locations WHERE map_id = ? ORDER BY id').all(rt.map.id)
       .map(row => ({
         id: row.id, key: row.key, name: row.name,
         businessKind: row.business_kind || 'none', capabilities: townCapabilities(row, defaultTownCapabilities(row.business_kind)),
@@ -273,71 +372,89 @@ function loadState() {
         radius: row.radius, ambient: row.ambient || '',
       }))
     : [];
-  state.matcher = buildLocationMatcher(state.locations);
+  rt.matcher = buildLocationMatcher(rt.locations);
+  rt.spriteAssets = assets;
 
-  // actor registry 决定唯一实体；邀请后沿用原 NPC 的身份与位置。
+  // actor registry 决定唯一实体；邀请后沿用原 NPC 的身份与位置（按所在图过滤）
   synchronizeMembership();
 
   // 关系（角色无向对，相遇概率修正用）
-  state.relationships.clear();
+  rt.relationships.clear();
   for (const row of db.prepare(`
     SELECT from_character_id, to_character_id FROM character_relationships
     WHERE relationship_text IS NOT NULL AND TRIM(relationship_text) != ''
   `).all()) {
-    state.relationships.add(pairKey(`char:${row.from_character_id}`, `char:${row.to_character_id}`));
+    rt.relationships.add(pairKey(`char:${row.from_character_id}`, `char:${row.to_character_id}`));
   }
 
-  // 冷却：最近一段时间的 done 相遇重建（进程重启不重置冷却）
-  state.pairCooldown.clear();
+  // 冷却：最近一段时间的 done 相遇重建（进程重启不重置冷却，按图各自计算）
+  rt.pairCooldown.clear();
   const cooldownCutoff = Date.now() - config.town.encounterCooldownHours * 3600_000;
   for (const row of db.prepare(`
     SELECT char_a, char_b, ended_at, created_at FROM town_encounters
-    WHERE status IN ('done','cancelled') AND COALESCE(ended_at, created_at) >= ?
-  `).all(new Date(cooldownCutoff).toISOString().slice(0, 19).replace('T', ' '))) {
+    WHERE map_id = ? AND status IN ('done','cancelled') AND COALESCE(ended_at, created_at) >= ?
+  `).all(rt.mapId, new Date(cooldownCutoff).toISOString().slice(0, 19).replace('T', ' '))) {
     const endTs = toEpochSeconds(row.ended_at || row.created_at);
-    state.pairCooldown.set(pairKey(decodeAgentId(row.char_a), decodeAgentId(row.char_b)), endTs + config.town.encounterCooldownHours * 3600_000);
+    rt.pairCooldown.set(pairKey(decodeAgentId(row.char_a), decodeAgentId(row.char_b)), endTs + config.town.encounterCooldownHours * 3600_000);
   }
 
-  // 玩家
-  db.prepare(`INSERT INTO town_players (id, display_name) VALUES ('me', ?) ON CONFLICT(id) DO NOTHING`)
-    .run(config.user.nickname || '我');
-  const pRow = db.prepare(`SELECT * FROM town_players WHERE id = 'me'`).get();
-  const playerSaved = db.prepare("SELECT * FROM town_agent_state WHERE agent_key = 'me'").get() || pRow;
-  const center = state.map
-    ? { x: Math.floor(state.map.cols / 2), y: Math.floor(state.map.rows / 2) }
+  refreshMoods();
+  initializeSimulation();
+}
+
+/** 玩家坐标：优先本图上次落点，其次 town_players 记录，最后地图中心的可走格 */
+function loadPlayer(pRow) {
+  const db = getDb();
+  const rt = focusedRuntime();
+  const saved = shared.playerMapId != null
+    ? db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ? AND map_id = ?').get('me', shared.playerMapId)
+    : null;
+  const center = rt?.map
+    ? { x: Math.floor(rt.map.cols / 2), y: Math.floor(rt.map.rows / 2) }
     : { x: 0, y: 0 };
-  state.player = {
+  const player = {
     agentKey: 'me',
     displayName: pRow?.display_name || config.user.nickname || '我',
     x: center.x,
     y: center.y,
     path: null, speed: config.town.playerSpeed, moveStartedAt: 0,
-    sprites: spriteUrlsByKey('player_', assets),
+    moveRevision: shared.playerRevision,
+    sprites: spriteUrlsByKey('player_', listAssets({})),
   };
-  if (state.map) {
-    const savedOk = playerSaved && Number.isInteger(playerSaved.grid_x) && Number.isInteger(playerSaved.grid_y)
-      && isWalkable(state.map.walkGrid, playerSaved.grid_x, playerSaved.grid_y);
-    if (savedOk) {
-      state.player.x = playerSaved.grid_x;
-      state.player.y = playerSaved.grid_y;
-    } else if (!isWalkable(state.map.walkGrid, center.x, center.y)) {
-      // 中心被占（建筑/阻挡）→ 找一个可走格落位
-      const cell = pickStandingCell(state.map.walkGrid, state.occupied, center, Math.max(state.map.cols, state.map.rows));
-      if (cell) { state.player.x = cell.x; state.player.y = cell.y; }
-    }
+  const savedRow = (saved && Number.isInteger(saved.grid_x) && Number.isInteger(saved.grid_y))
+    ? saved
+    : (pRow?.map_id === shared.playerMapId && Number.isInteger(pRow?.grid_x) && Number.isInteger(pRow?.grid_y) ? pRow : null);
+  if (rt?.map && savedRow && isWalkable(rt.map.walkGrid, savedRow.grid_x, savedRow.grid_y)) {
+    player.x = savedRow.grid_x;
+    player.y = savedRow.grid_y;
+  } else if (rt?.map && !isWalkable(rt.map.walkGrid, center.x, center.y)) {
+    // 中心被占（建筑/阻挡）→ 找一个可走格落位
+    const cell = pickStandingCell(rt.map.walkGrid, rt.occupied, center, Math.max(rt.map.cols, rt.map.rows));
+    if (cell) { player.x = cell.x; player.y = cell.y; }
   }
+  shared.player = player;
+}
 
-  // 活跃 encounter 恢复：重启后对话上下文丢失，直接收尾
+/** 重启后 chatting 状态的相遇无法恢复上下文：统一收尾（不调 LLM） */
+function closeStaleEncounters() {
+  const db = getDb();
   const activeEncs = db.prepare(`SELECT * FROM town_encounters WHERE status = 'chatting'`).all();
-  if (activeEncs.length > 0) {
-    const nowIso = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    const upd = db.prepare(`UPDATE town_encounters SET status = 'done', ended_at = ?, summary = COALESCE(NULLIF(summary,''), '（对话被打断）') WHERE id = ?`);
-    for (const enc of activeEncs) upd.run(nowIso, enc.id);
-    console.log(`[town] closed ${activeEncs.length} stale encounter(s) on boot`);
-  }
+  if (activeEncs.length === 0) return;
+  const nowIso = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const upd = db.prepare(`UPDATE town_encounters SET status = 'done', ended_at = ?, summary = COALESCE(NULLIF(summary,''), '（对话被打断）') WHERE id = ?`);
+  for (const enc of activeEncs) upd.run(nowIso, enc.id);
+  console.log(`[town] closed ${activeEncs.length} stale encounter(s) on boot`);
+}
 
-  refreshMoods();
-  initializeSimulation();
+/** 每张图各自落盘后作废异步回调（停止调度 / 世界重载） */
+function persistAllRuntimes() {
+  for (const rt of runtimes.values()) {
+    withRuntime(rt, () => {
+      invalidateSceneCallbacks();
+      persistAllAgents();
+      if (rt.player) persistPlayer();
+    });
+  }
 }
 
 function initializeSimulation() {
@@ -824,8 +941,11 @@ function endEncounter(enc, now) {
 
   if (enc.messages.length > 0) {
     // 任何组合（镇民×镇民 / 镇民×角色 / 角色×角色）的相遇都沉淀摘要并入账经历
-    enqueueLlm(() => runEncounterSummary(enc));
-    maybeUpgradeToAmbientStory(enc, now);
+    // 只有聚焦图才花 LLM：玩家离开后残留的相遇直接静默收尾（不写摘要、不升级奇遇）
+    if (isMapFocused(state.mapId)) {
+      enqueueLlm(() => runEncounterSummary(enc));
+      maybeUpgradeToAmbientStory(enc, now);
+    }
   }
 }
 
@@ -838,15 +958,20 @@ function expireEncounters(now) {
 // ── L2 LLM 事件 ──
 
 /** 串行队列：小镇 LLM 永远一次只有一单，独立于聊天/后台任务池 */
-function enqueueLlm(fn) {
-  const generation = state.generation;
-  state.llmChain = state.llmChain.then(() => {
-    if (generation !== state.generation) return;
-    return fn();
+/**
+ * L2 串行队列：同一时刻最多一个 LLM 调用在跑（多图共用一条链）。
+ * 任务绑定提交时的运行实例，排队期间即使用户切图，结果也只写回原来那张图。
+ */
+function enqueueLlm(fn, rt = state) {
+  const runtime = rt || EMPTY_RUNTIME;
+  const generation = runtime.generation;
+  shared.llmChain = shared.llmChain.then(() => {
+    if (generation !== runtime.generation) return;
+    return withRuntime(runtime, () => fn());
   }).catch(err => {
     console.warn('[town] llm task failed:', err?.message || err);
   });
-  return state.llmChain;
+  return shared.llmChain;
 }
 
 function personaLine(agentKey) {
@@ -938,7 +1063,10 @@ async function runEncounterDialogue(enc) {
       const speaker = line?.speaker === 'B' ? enc.b : enc.a;
       if (!text) return;
       const at = now + i * 3800 + 1800;
-      const timer = setTimeout(() => {
+      // 定时器在之后的拍子里才触发：必须回到这场相遇所属的那张图，
+      // 否则读到的会是别的实例（气泡丢失、mapId 串图）
+      const owner = state;
+      const timer = setTimeout(() => withRuntime(owner, () => {
         if (enc.generation !== state.generation || state.encounters.get(enc.id) !== enc) return;
         enc.messages.push({ speakerAgentKey: speaker, content: text, at });
         try {
@@ -948,7 +1076,7 @@ async function runEncounterDialogue(enc) {
         const ag = state.agents.get(speaker);
         if (ag) ag.bubble = { text, until: at + 9_000 };
         broadcastTownBubble({ charId: speaker, encounterId: enc.id, text, ttl: 9 });
-      }, at - now);
+      }), at - now);
       enc.timeouts.push(timer);
     });
 
@@ -1051,7 +1179,7 @@ function ambientStoryCountToday(db) {
 function maybeUpgradeToAmbientStory(enc) {
   try {
     if (!config.features.townLLM || !config.features.townAutoLLM || !config.features.events) return;
-    if (!hasTownViewers()) return; // 无人观看不消耗 LLM（残留相遇收尾时同样不升级）
+    if (!isMapFocused(state.mapId)) return; // 非聚焦图不消耗 LLM（残留相遇收尾时同样不升级）
     if (!state.world) return;
     if (Math.random() >= (config.town.ambientStoryProb ?? 0)) return;
     const metaA = state.meta.get(enc.a), metaB = state.meta.get(enc.b);
@@ -1217,15 +1345,15 @@ function refreshMoods() {
 function persistAgent(agent) {
   try {
     getDb().prepare(`
-      INSERT INTO town_agent_state (agent_key, grid_x, grid_y, path_json, current_location_id, activity_text, updated_at)
-      VALUES (?, ?, ?, '[]', ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(agent_key) DO UPDATE SET
+      INSERT INTO town_agent_state (agent_key, map_id, grid_x, grid_y, path_json, current_location_id, activity_text, updated_at)
+      VALUES (?, ?, ?, ?, '[]', ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(agent_key, map_id) DO UPDATE SET
         grid_x = excluded.grid_x, grid_y = excluded.grid_y,
         current_location_id = excluded.current_location_id,
         activity_text = excluded.activity_text,
         updated_at = CURRENT_TIMESTAMP
     `).run(
-      agent.agentKey, agent.x, agent.y,
+      agent.agentKey, state.mapId, agent.x, agent.y,
       agent.targetLocId, agent.activityText,
     );
     agent.dirty = false;
@@ -1238,46 +1366,62 @@ function persistAllAgents() {
 
 function persistPlayer() {
   try {
-    getDb().prepare('UPDATE town_players SET grid_x = ?, grid_y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(state.player.x, state.player.y, 'me');
+    const player = state.player;
+    if (!player) return;
+    getDb().prepare('UPDATE town_players SET grid_x = ?, grid_y = ?, map_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(player.x, player.y, state.mapId, 'me');
+    getDb().prepare(`
+      INSERT INTO town_agent_state (agent_key, map_id, grid_x, grid_y, path_json, current_location_id, activity_text, updated_at)
+      VALUES ('me', ?, ?, ?, '[]', NULL, '', CURRENT_TIMESTAMP)
+      ON CONFLICT(agent_key, map_id) DO UPDATE SET
+        grid_x = excluded.grid_x, grid_y = excluded.grid_y, updated_at = CURRENT_TIMESTAMP
+    `).run(state.mapId, player.x, player.y);
   } catch { /* 可容忍 */ }
 }
 
 // ── tick 主循环 ──
 
 function tick() {
-  if (!state.running) return;
+  if (!shared.running) return;
   const now = Date.now();
-  try {
-    if (!state.map) {
-      broadcastTownPing();
-      return; // 尚未开镇：心跳保连接，等向导初始化
-    }
-    if (now - state.lastMoodRefreshAt > 5 * 60_000) refreshMoods();
-    synchronizeMembership();
-    for (const agent of state.agents.values()) {
-      advanceAgent(agent, now);
-    }
-    tickTownSimulation();
-    maintainTownLife();
-    broadcastTownStateUpdated({ reason: 'simulation_tick' });
-    advancePlayer(now);
-    playerNearbyReactions(now);
-    // 无人观看时不开新相遇、不发状态气泡：相遇对话/环境奇遇/气泡都是页面演出，
-    // 有 LLM 成本；expireEncounters 保留，把残留相遇正常收尾。
-    if (hasTownViewers()) {
-      scanEncounters(now);
-    }
-    expireEncounters(now);
-    if (hasTownViewers()) {
-      maybeStatusBubbles(now);
-    }
-    for (const agent of state.agents.values()) {
-      if (agent.dirty) persistAgent(agent);
-    }
-    broadcastTownPing();
-  } catch (err) {
-    console.error('[town] tick failed:', err?.message || err);
+  // 逐图驱动：每张图各自走位、上下班、结算；只有聚焦图跑 LLM 演出
+  for (const rt of [...runtimes.values()]) {
+    withRuntime(rt, () => {
+      try {
+        tickRuntime(rt, now);
+      } catch (err) {
+        console.error(`[town] tick failed (map ${rt.mapId}):`, err?.message || err);
+      }
+    });
+  }
+  broadcastTownPing();
+}
+
+/** 单张图的一拍：无 LLM 的模拟对每张图都跑，演出类只在聚焦图跑 */
+function tickRuntime(rt, now) {
+  if (!shared.running || !rt.map) return; // 尚未开镇的图：等向导初始化
+  const focused = isMapFocused(rt.mapId);
+  if (now - rt.lastMoodRefreshAt > 5 * 60_000) refreshMoods();
+  synchronizeMembership();
+  for (const agent of rt.agents.values()) {
+    advanceAgent(agent, now);
+  }
+  tickTownSimulation();
+  maintainTownLife();
+  broadcastTownStateUpdated({ reason: 'simulation_tick' });
+  advancePlayer(now);
+  playerNearbyReactions(now);
+  // 聚焦图才开新相遇、发状态气泡：相遇对话/环境奇遇/气泡都是页面演出，有 LLM 成本。
+  // expireEncounters 保留给所有图，把残留相遇正常收尾（非聚焦图按无 LLM 方式收尾）。
+  if (focused) {
+    scanEncounters(now);
+  }
+  expireEncounters(now);
+  if (focused) {
+    maybeStatusBubbles(now);
+  }
+  for (const agent of rt.agents.values()) {
+    if (agent.dirty) persistAgent(agent);
   }
 }
 
@@ -1288,22 +1432,59 @@ function tick() {
 const TOWN_SIM_SUBTICK_MS = 5000;
 
 function simSubTick() {
-  if (!state.running || !state.map) return;
-  try {
-    tickTownSimulation(Date.now());
-  } catch (err) {
-    console.error('[town] sim subtick failed:', err?.message || err);
+  if (!shared.running) return;
+  for (const rt of [...runtimes.values()]) {
+    if (!rt.map) continue;
+    withRuntime(rt, () => {
+      try {
+        tickTownSimulation();
+      } catch (err) {
+        console.error(`[town] sim subtick failed (map ${rt.mapId}):`, err?.message || err);
+      }
+    });
   }
 }
 
 // ── 对外 API ──
 
-export function getTownState() {
+/**
+ * 场景快照。不传 mapId 时返回玩家当前那张图（既有多数调用点的口径）；
+ * 传 mapId 可取任意 ready 图（出行面板预载目标图），但只有玩家所在地图带 player。
+ */
+export function getTownState(mapId = null) {
+  const rt = mapId == null ? (focusedRuntime() || firstRuntime()) : (runtimes.get(Number(mapId)) || null);
+  if (!rt) return emptyTownState();
+  return withRuntime(rt, () => buildTownState(rt));
+}
+
+function emptyTownState() {
   const now = Date.now();
-  if (state.map) synchronizeMembership();
+  return {
+    enabled: config.features.town,
+    worldId: shared.world?.worldId || null,
+    worldEpoch: shared.world?.epoch || null,
+    stateVersion: 0,
+    initialized: false,
+    serverTime: now,
+    tickSeconds: config.town.tickSeconds,
+    mapId: null,
+    map: null,
+    locations: [],
+    agents: [],
+    awayAgents: [],
+    encountersActive: [],
+    player: null,
+    playerRevision: shared.playerRevision,
+    weather: readTownWeather(now),
+  };
+}
+
+function buildTownState(rt) {
+  const now = Date.now();
+  if (rt.map) synchronizeMembership();
   for (const agent of state.agents.values()) advanceAgent(agent, now);
   advancePlayer(now);
-  if (state.running && config.features.town) tickTownSimulation(now);
+  if (shared.running && config.features.town) tickTownSimulation(now);
 
   const locName = (id) => state.locations.find(l => l.id === id)?.name || null;
 
@@ -1348,8 +1529,10 @@ export function getTownState() {
     initialized: !!state.map,
     serverTime: now,
     tickSeconds: config.town.tickSeconds,
+    mapId: state.mapId,
+    playerRevision: shared.playerRevision,
     map: state.map
-      ? { name: state.map.name, cols: state.map.cols, rows: state.map.rows, tileSize: state.map.tileSize, version: state.map.version }
+      ? { id: state.mapId, name: state.map.name, cols: state.map.cols, rows: state.map.rows, tileSize: state.map.tileSize, version: state.map.version }
       : null,
     locations: state.locations.map(l => ({
       id: l.id, key: l.key, name: l.name, kind: l.kind, x: l.x, y: l.y, radius: l.radius, ambient: l.ambient,
@@ -1361,7 +1544,7 @@ export function getTownState() {
     player: state.player
       ? {
         agentKey: 'me', kind: 'player',
-        actorId: state.actors.get('me')?.actorId || null,
+        actorId: shared.actors.get('me')?.actorId || null,
         displayName: state.player.displayName,
         moveRevision: state.player.moveRevision || 0,
         sprites: state.player.sprites,
@@ -1386,7 +1569,7 @@ function currentActorAction(actorId) {
 
 /** Server-only position evidence for orders/services; no renderer coordinates. */
 export function getTownActorPosition(actorId) {
-  if (!state.running || !config.features.town || !state.map || !state.world) return null;
+  if (!shared.running || !config.features.town || !state.map || !state.world) return null;
   const actor = createTownActorRegistry(getDb()).getActor(actorId, state.world.worldId);
   if (!actor || actor.actorId !== actorId || !actor.participating || actor.archived) return null;
   const agent = actor.playerId === 'me' ? state.player : state.agents.get(actor.agentKey);
@@ -1400,7 +1583,7 @@ export function getTownActorPosition(actorId) {
 }
 
 function resolveTownActorAgent(actorId) {
-  if (!state.running || !config.features.town || !state.map || !state.world
+  if (!shared.running || !config.features.town || !state.map || !state.world
     || typeof actorId !== 'string' || !actorId.length) return null;
   const actor = createTownActorRegistry(getDb()).getActor(actorId, state.world.worldId);
   if (!actor || actor.actorId !== actorId || !actor.participating || actor.archived || actor.playerId === 'me') return null;
@@ -1488,8 +1671,11 @@ export function setTownCharacterEnabled(characterId, { townEnabled } = {}) {
     db.prepare('UPDATE town_characters SET town_enabled = ? WHERE character_id = ?').run(enabled, characterId);
   } else if (townEnabled !== undefined) {
     enabled = townEnabled ? 1 : 0;
-    db.prepare('INSERT INTO town_characters (character_id, town_enabled) VALUES (?, ?) ON CONFLICT(character_id) DO UPDATE SET town_enabled = excluded.town_enabled')
-      .run(characterId, enabled);
+    // 入住归属当前所在的镇；已有归属不因为一次勾选被搬走
+    db.prepare(`INSERT INTO town_characters (character_id, map_id, town_enabled) VALUES (?, ?, ?)
+      ON CONFLICT(character_id) DO UPDATE SET town_enabled = excluded.town_enabled,
+        map_id = COALESCE(town_characters.map_id, excluded.map_id)`)
+      .run(characterId, state.mapId, enabled);
   } else {
     enabled = 0;
   }
@@ -1507,10 +1693,28 @@ export function setNpcEnabled(npcId, enabled) {
   return { ok: true };
 }
 
+/** agentKey -> 归属地图：镇民看 town_npcs.map_id，入住角色看 town_characters.map_id（退回住宅所在图） */
+function actorMapIds() {
+  const db = getDb();
+  // 未指定归属（向导提前建档 / 老行）的居民按默认图（最小 id）处理：
+  // 与 getMapRow(null) 的「第一张图」旧口径一致，避免居民在分图后凭空消失
+  const fallbackMapId = db.prepare('SELECT id FROM town_maps ORDER BY id LIMIT 1').get()?.id ?? null;
+  const npcMaps = new Map(db.prepare('SELECT id, map_id FROM town_npcs').all().map(r => [r.id, r.map_id]));
+  const charMaps = new Map(db.prepare(`SELECT tc.character_id, COALESCE(tc.map_id, tl.map_id) AS map_id
+    FROM town_characters tc LEFT JOIN town_locations tl ON tl.id = tc.home_location_id`).all()
+    .map(r => [r.character_id, r.map_id]));
+  return actor => {
+    if (actor.playerId === 'me') return shared.playerMapId;
+    if (actor.characterId != null && charMaps.has(actor.characterId)) return charMaps.get(actor.characterId) ?? fallbackMapId;
+    if (actor.npcId != null && npcMaps.has(actor.npcId)) return npcMaps.get(actor.npcId) ?? fallbackMapId;
+    return null;
+  };
+}
+
 function synchronizeMembership() {
   const registry = createTownActorRegistry(getDb());
   const actors = registry.synchronize();
-  state.actors = new Map(actors.filter(a => a.agentKey).map(a => [a.agentKey, a]));
+  shared.actors = new Map(actors.filter(a => a.agentKey).map(a => [a.agentKey, a]));
   // meta 只在入住时构建一次，改名落库后这里刷新 displayName，避免快照一直吐旧名字
   const db = getDb();
   for (const meta of state.meta.values()) {
@@ -1522,7 +1726,10 @@ function synchronizeMembership() {
       if (row) meta.displayName = row.display_name || row.name;
     }
   }
-  const desired = new Set(actors.filter(a => a.participating && a.agentKey && a.agentKey !== 'me').map(a => a.agentKey));
+  // 只有归属这张图的居民进入本图运行实例：同一个角色不会同时出现在两镇
+  const mapOf = actorMapIds();
+  const desired = new Set(actors.filter(a => a.participating && a.agentKey && a.agentKey !== 'me'
+    && mapOf(a) === state.mapId).map(a => a.agentKey));
   const membershipChanged = desired.size !== state.meta.size || [...desired].some(key => !state.meta.has(key));
   for (const key of state.agents.keys()) if (!desired.has(key)) {
     const agent = state.agents.get(key);
@@ -1538,9 +1745,9 @@ function synchronizeMembership() {
 function applyMembershipChange(agentKey, enabled) {
   if (enabled && !state.agents.has(agentKey)) {
     const db = getDb();
-    const actor = state.actors.get(agentKey);
-    const saved = db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ?').get(agentKey)
-      || (actor?.npcExists ? db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ?').get(`npc:${actor.npcId}`) : null);
+    const actor = shared.actors.get(agentKey);
+    const saved = db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ? AND map_id = ?').get(agentKey, state.mapId)
+      || (actor?.npcExists ? db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ? AND map_id = ?').get(`npc:${actor.npcId}`, state.mapId) : null);
     if (agentKey.startsWith('npc:')) {
       const row = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(Number(agentKey.slice(4)));
       if (!row) return;
@@ -1658,9 +1865,140 @@ export function listTownCharacters() {
 
 /** 调试用：手动触发一拍 */
 export function forceTick() {
-  if (!state.running) return { ok: false, error: 'town scheduler not running' };
+  if (!shared.running) return { ok: false, error: 'town scheduler not running' };
   tick();
   return { ok: true };
+}
+
+/** 地图列表（出行目录）+ 玩家所在地图与场景修订号 */
+export function getTownMaps() {
+  return {
+    maps: listMaps(),
+    currentMapId: shared.playerMapId,
+    playerRevision: shared.playerRevision,
+  };
+}
+
+/** 目标图尚未装载时按数据库现建（新建镇、存档里后加的地图） */
+function ensureRuntime(mapId) {
+  const existing = runtimes.get(mapId);
+  if (existing) return existing;
+  const mapRow = getMapRow(mapId);
+  if (!mapRow) return null;
+  const assets = listAssets({});
+  reconcileTownResponsibilities({ db: getDb(), allowFallback: true, mapId });
+  const rt = buildRuntimeState(mapRow, new Map(assets.map(a => [a.id, a])));
+  runtimes.set(rt.mapId, rt);
+  withRuntime(rt, () => hydrateRuntime(assets));
+  syncPlayerRefs();
+  return rt;
+}
+
+/** 只重建一张图（地图保存 / 新镇建成）：不打断玩家当前那张图 */
+export function reloadMap(mapId) {
+  if (!shared.running) return { ok: false, error: 'town scheduler not running' };
+  const id = Number(mapId);
+  if (!Number.isInteger(id)) return { ok: false, error: '地图 id 无效' };
+  const existing = runtimes.get(id);
+  if (existing) {
+    withRuntime(existing, () => {
+      invalidateSceneCallbacks();
+      persistAllAgents();
+      if (existing.player) persistPlayer();
+    });
+  }
+  runtimes.delete(id);
+  const mapRow = getMapRow(id);
+  if (mapRow) {
+    const assets = listAssets({});
+    reconcileTownResponsibilities({ db: getDb(), allowFallback: true, mapId: id });
+    const rt = buildRuntimeState(mapRow, new Map(assets.map(a => [a.id, a])));
+    runtimes.set(rt.mapId, rt);
+    withRuntime(rt, () => hydrateRuntime(assets));
+  }
+  syncPlayerRefs();
+  syncFocusRuntime();
+  // 重建出来的这张图要把内存引用对齐到当前素材：shared.player 是跨图复用的同一个对象，
+  // 它身上的小人清单只在 loadPlayer 那一刻算过，不刷新就会一直吐开工时的旧 URL。
+  refreshAgentVisuals();
+  broadcastTownStateUpdated({ reason: 'map_reloaded' });
+  return { ok: true, mapId: id };
+}
+
+/** 落点：目标图上一次离开的位置 → 该图的户外广场 → 地图中心附近的空位 */
+function placePlayerOnMap(rt) {
+  const player = shared.player;
+  if (!player || !rt?.map) return;
+  const db = getDb();
+  const saved = db.prepare('SELECT * FROM town_agent_state WHERE agent_key = ? AND map_id = ?').get('me', rt.mapId);
+  const pRow = db.prepare(`SELECT * FROM town_players WHERE id = 'me'`).get();
+  const center = { x: Math.floor(rt.map.cols / 2), y: Math.floor(rt.map.rows / 2) };
+  player.path = null;
+  player.moveStartedAt = 0;
+  const candidates = [];
+  if (saved && Number.isInteger(saved.grid_x) && Number.isInteger(saved.grid_y)) candidates.push({ x: saved.grid_x, y: saved.grid_y });
+  if (pRow?.map_id === rt.mapId && Number.isInteger(pRow.grid_x) && Number.isInteger(pRow.grid_y)) candidates.push({ x: pRow.grid_x, y: pRow.grid_y });
+  const outdoor = rt.locations.find(l => l.kind === 'outdoor') || rt.locations[0];
+  if (outdoor) candidates.push({ x: outdoor.x, y: outdoor.y });
+  candidates.push(center);
+  for (const anchor of candidates) {
+    const cell = pickStandingCell(rt.map.walkGrid, rt.occupied, anchor, 4)
+      || (isWalkable(rt.map.walkGrid, anchor.x, anchor.y) ? anchor : null);
+    if (cell) { player.x = cell.x; player.y = cell.y; return; }
+  }
+  player.x = center.x;
+  player.y = center.y;
+}
+
+/**
+ * 玩家出行（顶栏「出行」）：把玩家搬到目标地图。
+ * 不传 expectedPlayerRevision 视为强制出行；并发时后到的请求会拿到 PLAYER_SCENE_CHANGED。
+ * 旧图立刻降级为后台图（不再产生 LLM 演出），新图成为聚焦图。
+ */
+export function travelPlayer({ targetMapId, expectedPlayerRevision = null, worldId = null, worldEpoch = null } = {}) {
+  if (!config.features.town) return { ok: false, code: 'DISABLED', error: '小镇未启用' };
+  if (!shared.world) return { ok: false, code: 'NO_WORLD', error: '尚未开镇' };
+  if (worldId != null && worldId !== shared.world.worldId) return { ok: false, code: 'STALE_WORLD', error: '世界已更新，请刷新后重试' };
+  if (worldEpoch != null && Number(worldEpoch) !== shared.world.epoch) return { ok: false, code: 'STALE_WORLD', error: '世界已更新，请刷新后重试' };
+  const targetId = Number(targetMapId);
+  if (!Number.isInteger(targetId)) return { ok: false, code: 'INVALID_MAP', error: '目的地无效' };
+  const meta = listMaps().find(m => m.id === targetId);
+  if (!meta) return { ok: false, code: 'MAP_NOT_FOUND', error: '目的地不存在' };
+  if (meta.status !== 'ready') return { ok: false, code: 'MAP_NOT_READY', error: '这座小镇还没建成' };
+  if (shared.playerMapId === targetId) {
+    return { ok: true, alreadyThere: true, mapId: targetId, playerRevision: shared.playerRevision,
+      position: shared.player ? { x: shared.player.x, y: shared.player.y } : null, map: meta };
+  }
+  if (expectedPlayerRevision != null && Number(expectedPlayerRevision) !== shared.playerRevision) {
+    return { ok: false, code: 'PLAYER_SCENE_CHANGED', error: '场景已变化，请重试',
+      mapId: shared.playerMapId, playerRevision: shared.playerRevision };
+  }
+  const target = ensureRuntime(targetId);
+  if (!target) return { ok: false, code: 'MAP_NOT_FOUND', error: '目的地还没有布局' };
+
+  // 离开：先落盘旧图坐标，并静默收尾玩家仍在参与的相遇
+  // （旧图随后就是后台图，按聚焦闸门口径不再产生摘要/奇遇）
+  const fromRt = focusedRuntime();
+  if (fromRt) {
+    withRuntime(fromRt, () => {
+      persistPlayer();
+      for (const enc of [...fromRt.encounters.values()]) {
+        if (enc.a === 'me' || enc.b === 'me') endEncounter(enc, Date.now());
+      }
+    });
+  }
+
+  shared.playerMapId = targetId;
+  shared.playerRevision += 1;
+  syncPlayerRefs();
+  placePlayerOnMap(target);
+  syncFocusRuntime();
+  withRuntime(target, () => persistPlayer());
+  broadcastTownPlayerMapChanged({ mapId: targetId, playerRevision: shared.playerRevision });
+  broadcastTownStateUpdated({ reason: 'player_map_changed' });
+  console.log(`[town] player travelled ${fromRt?.mapId ?? '-'} → ${targetId}`);
+  return { ok: true, mapId: targetId, playerRevision: shared.playerRevision,
+    position: shared.player ? { x: shared.player.x, y: shared.player.y } : null, map: meta };
 }
 
 // ── 管理面板：角色spirit / 小镇设置 / 重置世界 ──
@@ -1746,18 +2084,23 @@ export function refreshNpcRoutine(npcId) {
  * 空查结果不回退旧值：旧值指向的文件可能已被删，宁可让渲染端走立绘/占位兜底。
  */
 export function refreshAgentVisuals() {
-  if (!state.meta.size && !state.player) return;
   const assets = listAssets({});
-  for (const meta of state.meta.values()) {
-    if (meta.kind === 'npc') {
-      meta.sprites = spriteUrlsByKey(`npc_${meta.refId}_`, assets);
-    } else if (meta.kind === 'char') {
-      meta.sprites = spriteUrlsByKey(`char_${meta.refId}_`, assets)
-        || (meta.npcId ? spriteUrlsByKey(`npc_${meta.npcId}_`, assets) : null);
-      meta.standingUrl = charPortraitUrl(meta.refId, { npcId: meta.npcId, standingUrl: characterStandingUrl(meta.refId) });
+  // 素材是全世界共用的：每张图摆在场景里的引用都要按新文件重建（多图并存时别只刷新聚焦那张）
+  for (const rt of runtimes.values()) {
+    for (const meta of rt.meta.values()) {
+      if (meta.kind === 'npc') {
+        meta.sprites = spriteUrlsByKey(`npc_${meta.refId}_`, assets);
+      } else if (meta.kind === 'char') {
+        meta.sprites = spriteUrlsByKey(`char_${meta.refId}_`, assets)
+          || (meta.npcId ? spriteUrlsByKey(`npc_${meta.npcId}_`, assets) : null);
+        meta.standingUrl = charPortraitUrl(meta.refId, { npcId: meta.npcId, standingUrl: characterStandingUrl(meta.refId) });
+      }
     }
   }
-  if (state.player) state.player.sprites = spriteUrlsByKey('player_', assets);
+  // 玩家身份只有一份，且**开镇前就存在**（loadPlayer 在向导阶段就建好了这个对象，地图随后才有）：
+  // 所以这里看 shared.player 而不是 state.player——没有运行实例时 state.player 是 null，
+  // 开镇前补生成的正面/背面小人就永远进不了这份清单（表现：素材库有图，地图上是占位色块）。
+  if (shared.player) shared.player.sprites = spriteUrlsByKey('player_', assets);
 }
 
 // 素材提交/删除统一走 townBus 广播：运行中的小镇就地重建内存引用，避免快照吐出已删除文件的 URL
@@ -1905,12 +2248,13 @@ export function updateTownSettings(patch = {}) {
   Object.assign(config.town, next);
   if (Object.keys(applied).length > 0) {
     // tick 间隔变更即时生效
-    if (applied.tickSeconds && state.timer) {
-      clearInterval(state.timer);
-      state.timer = setInterval(tick, config.town.tickSeconds * 1000);
+    if (applied.tickSeconds && shared.timer) {
+      clearInterval(shared.timer);
+      shared.timer = setInterval(tick, config.town.tickSeconds * 1000);
     }
     if (applied.timeZone || applied.tickSeconds) {
-      initializeSimulation();
+      // 每张图的模拟引擎各自重建（时区/节拍是全局设置，但实例是每图一个）
+      for (const rt of runtimes.values()) withRuntime(rt, initializeSimulation);
       broadcastTownStateUpdated({ reason: 'settings_changed' });
     }
   }
@@ -1926,19 +2270,49 @@ function invalidateSceneCallbacks() {
 }
 
 export function resetWorldState() {
-  invalidateSceneCallbacks();
-  state.map = null;
-  state.locations = [];
-  state.matcher = null;
-  state.player = null;
-  state.simulation = null;
-  state.simulationActorIds.clear();
-  state.actors.clear();
-  state.pairCooldown.clear();
-  state.agents.clear();
-  state.meta.clear();
-  state.occupied.clear();
-  state.encounters.clear();
+  for (const rt of runtimes.values()) withRuntime(rt, invalidateSceneCallbacks);
+  runtimes.clear();
+  shared.player = null;
+  shared.playerMapId = null;
+  shared.actors.clear();
+  state = EMPTY_RUNTIME;
+  setTownBusMapScope(null);
+}
+
+/**
+ * 重置前的止血：作废在途演出、释放道具锁与托管款，然后跨 epoch。
+ *
+ * 这套记账只有世界维度（world_id + world_epoch），没有地图维度，所以整世界重置和单图重置共用。
+ * 它动到的只有在途请求本身（会被标记成失败/过期，下个 tick 自行重排），不删任何镇的数据。
+ */
+function fenceInFlightWork(db, registry, world, reasonCode) {
+  db.prepare(`UPDATE town_dialogue_requests SET status = 'failed', error = ?, updated_at = ?
+    WHERE world_id = ? AND world_epoch = ? AND status = 'processing'`).run(reasonCode, Date.now(), world.worldId, world.epoch);
+  db.prepare(`UPDATE town_interaction_offers SET status='expired',updated_at=?
+    WHERE world_id=? AND world_epoch=? AND status IN ('offered','generating')`).run(Date.now(), world.worldId, world.epoch);
+  // 旧 epoch 仍有效时原子取消在途动作、释放资源，然后再跨 epoch。
+  createTownActionRunner({ db, clock: { now: Date.now },
+    getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor, readFacts: () => ({})
+  }).cancelActive({ worldId: world.worldId, worldEpoch: world.epoch,
+    reasonCode, idempotencyKey: `reset:${world.epoch}` });
+  const economy = createEconomyService({ db, clock: { now: Date.now }, getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor });
+  getTownLifeRuntime().itemTemplates.releaseLocks({ worldId: world.worldId, worldEpoch: world.epoch,
+    idempotencyKey: `reset-items:${world.epoch}`, sourceKey: `reset-items:${world.epoch}`, reasonCode });
+  economy.releaseActive({ worldId: world.worldId, worldEpoch: world.epoch,
+      idempotencyKey: `reset-reserves:${world.epoch}`, sourceKey: `reset-reserves:${world.epoch}`, reasonCode });
+  db.prepare(`UPDATE town_event_deliveries SET status = 'dead', lease_token = NULL,
+    lease_until = NULL, last_error = ? WHERE status IN ('pending', 'processing')
+    AND event_id IN (SELECT event_id FROM town_domain_events WHERE world_id = ? AND world_epoch = ?)`)
+    .run(reasonCode, world.worldId, world.epoch);
+  registry.advanceEpoch({ expectedEpoch: world.epoch });
+}
+
+/** 丢掉一张图的运行实例且不回写（地图行已经被删了，回写会把它的居民又写回库里） */
+function dropRuntime(mapId) {
+  const rt = runtimes.get(mapId);
+  if (!rt) return;
+  withRuntime(rt, invalidateSceneCallbacks);   // 在途回调不再回写这一张图
+  runtimes.delete(mapId);
 }
 
 /** 重新初始化世界：清地图/POI/居民/相遇历史，走向导 */
@@ -1947,25 +2321,7 @@ export function resetWorld() {
   const registry = createTownActorRegistry(db);
   const world = registry.getWorldState();
   const nextWorld = db.transaction(() => {
-    db.prepare(`UPDATE town_dialogue_requests SET status = 'failed', error = 'WORLD_RESET', updated_at = ?
-      WHERE world_id = ? AND world_epoch = ? AND status = 'processing'`).run(Date.now(), world.worldId, world.epoch);
-    db.prepare(`UPDATE town_interaction_offers SET status='expired',updated_at=?
-      WHERE world_id=? AND world_epoch=? AND status IN ('offered','generating')`).run(Date.now(), world.worldId, world.epoch);
-    // 旧 epoch 仍有效时原子取消在途动作、释放资源，然后再跨 epoch。
-    createTownActionRunner({ db, clock: { now: Date.now },
-      getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor, readFacts: () => ({})
-    }).cancelActive({ worldId: world.worldId, worldEpoch: world.epoch,
-      reasonCode: 'WORLD_RESET', idempotencyKey: `reset:${world.epoch}` });
-    const economy = createEconomyService({ db, clock: { now: Date.now }, getWorldEpoch: registry.getWorldEpoch, getActor: registry.getActor });
-    getTownLifeRuntime().itemTemplates.releaseLocks({ worldId: world.worldId, worldEpoch: world.epoch,
-      idempotencyKey: `reset-items:${world.epoch}`, sourceKey: `reset-items:${world.epoch}`, reasonCode: 'WORLD_RESET' });
-    economy.releaseActive({ worldId: world.worldId, worldEpoch: world.epoch,
-        idempotencyKey: `reset-reserves:${world.epoch}`, sourceKey: `reset-reserves:${world.epoch}`, reasonCode: 'WORLD_RESET' });
-    db.prepare(`UPDATE town_event_deliveries SET status = 'dead', lease_token = NULL,
-      lease_until = NULL, last_error = 'WORLD_RESET' WHERE status IN ('pending', 'processing')
-      AND event_id IN (SELECT event_id FROM town_domain_events WHERE world_id = ? AND world_epoch = ?)`)
-      .run(world.worldId, world.epoch);
-    registry.advanceEpoch({ expectedEpoch: world.epoch });
+    fenceInFlightWork(db, registry, world, 'WORLD_RESET');
     db.exec('UPDATE town_npcs SET home_location_id = NULL');
     db.exec('DELETE FROM town_npc_chat_messages');
     db.exec('DELETE FROM town_chat_messages');
@@ -1975,13 +2331,68 @@ export function resetWorld() {
     db.exec('DELETE FROM town_locations');
     db.exec('DELETE FROM town_agent_state');
     db.exec('DELETE FROM town_maps');
-    db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL WHERE id = 'me'");
+    db.exec("UPDATE town_players SET sprite_asset_id = NULL, grid_x = NULL, grid_y = NULL, map_id = NULL WHERE id = 'me'");
     registry.synchronize();
     return registry.getWorldState();
   })();
   resetWorldState();
-  state.world = nextWorld;
+  shared.world = nextWorld;
   setTownBusScope(nextWorld);
   broadcastTownStateUpdated({ reason: 'world_reset' });
   return { ok: true, worldId: nextWorld.worldId, worldEpoch: nextWorld.epoch };
+}
+
+/**
+ * 重新初始化**一张图**：清掉这张图的地图数据、POI、居民、相遇记录与入住角色，
+ * 世界里别的镇原样保留——地图、地点、居民、相遇历史和运行实例都不动。
+ *
+ * 与 resetWorld 的区别只在「删什么」：删除全部按 map_id 收窄；止血那一段（作废在途演出、
+ * 释放道具锁与托管款、跨 epoch）是世界维度的记账，没有地图维度，所以两侧共用。
+ * 素材库不动：批量生图按 key 幂等复用，同世界观重建直接复用旧图，不重复烧生图。
+ */
+export function resetMap(mapId) {
+  const db = getDb();
+  const id = Number(mapId);
+  if (!Number.isInteger(id)) return { ok: false, error: '地图 id 无效' };
+  if (!getMapRow(id)) return { ok: false, error: '地图不存在' };
+
+  const registry = createTownActorRegistry(db);
+  const world = registry.getWorldState();
+  const npcIds = db.prepare('SELECT id FROM town_npcs WHERE map_id = ?').all(id).map(r => r.id);
+  const encounterIds = db.prepare('SELECT id FROM town_encounters WHERE map_id = ?').all(id).map(r => r.id);
+  const inList = ids => `(${ids.map(() => '?').join(',')})`;
+
+  const nextWorld = db.transaction(() => {
+    fenceInFlightWork(db, registry, world, 'MAP_RESET');
+    // 聊天记录按「这张图的居民 / 这张图的相遇」清，别的镇的对话不跟着陪葬
+    if (npcIds.length) {
+      db.prepare(`DELETE FROM town_npc_chat_messages WHERE npc_id IN ${inList(npcIds)}`).run(...npcIds);
+    }
+    if (encounterIds.length) {
+      db.prepare(`DELETE FROM town_chat_messages WHERE encounter_id IN ${inList(encounterIds)}`).run(...encounterIds);
+    }
+    db.prepare('DELETE FROM town_encounters WHERE map_id = ?').run(id);
+    db.prepare('DELETE FROM town_characters WHERE map_id = ?').run(id);
+    db.prepare('DELETE FROM town_npcs WHERE map_id = ?').run(id);
+    db.prepare('DELETE FROM town_locations WHERE map_id = ?').run(id);
+    db.prepare('DELETE FROM town_agent_state WHERE map_id = ?').run(id);
+    db.prepare('DELETE FROM town_maps WHERE id = ?').run(id);
+    // 玩家正站在这张图上：坐标作废，下面 loadState 会把他落到还活着的镇（没有别的镇就回未落座）
+    db.prepare("UPDATE town_players SET grid_x = NULL, grid_y = NULL, map_id = NULL WHERE id = 'me' AND map_id = ?").run(id);
+    registry.synchronize();
+    return registry.getWorldState();
+  })();
+
+  dropRuntime(id);
+  shared.world = nextWorld;
+  setTownBusScope(nextWorld);
+  if (shared.running) {
+    loadState();   // 重建存活各图的实例，让它们拿到新的 world 视图并重新安置玩家
+  } else {
+    shared.player = null;
+    shared.playerMapId = null;
+    syncFocusRuntime();
+  }
+  broadcastTownStateUpdated({ reason: 'map_reset' });
+  return { ok: true, mapId: id, worldId: nextWorld.worldId, worldEpoch: nextWorld.epoch };
 }

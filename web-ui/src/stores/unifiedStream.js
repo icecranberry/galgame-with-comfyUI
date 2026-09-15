@@ -101,6 +101,8 @@ function _connect() {
     town_state_updated:   d => _dispatch('town_state_updated', d),
     town_init_progress:   d => _dispatch('town_init_progress', d),
     town_map_updated:     d => _dispatch('town_map_updated', d),
+    // 玩家换图（出行）：player 级事件，不受地图过滤，是别的标签页/设备出行时本端换场的入口
+    town_player_map_changed: d => _dispatch('town_player_map_changed', d),
     town_assets_updated:  d => _dispatch('town_assets_updated', d),
   }, {
     onClose: _scheduleReconnect,

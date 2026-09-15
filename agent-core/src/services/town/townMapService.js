@@ -83,10 +83,15 @@ export function buildWalkGridFromLayers(cols, rows, layers, assetsById) {
   return grid;
 }
 
-/** 当前地图行（含解析后的 layers）；无 v2 地图返回 null（走向导） */
-export function getMapRow() {
+/**
+ * 指定地图行（含解析后的 layers）；无 v2 地图返回 null（走向导）。
+ * 不传 mapId 时取默认图（ORDER BY id 的第一张），供尚未分图的历史调用点兼容。
+ */
+export function getMapRow(mapId = null) {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM town_maps ORDER BY id LIMIT 1').get();
+  const row = mapId == null
+    ? db.prepare('SELECT * FROM town_maps ORDER BY id LIMIT 1').get()
+    : db.prepare('SELECT * FROM town_maps WHERE id = ?').get(mapId);
   if (!row || !row.layers_json) return null;
   let layers = null;
   try { layers = JSON.parse(row.layers_json); } catch { return null; }
@@ -158,8 +163,8 @@ function scrubMissingAssetReferences(layers, knownIds) {
 }
 
 /** 供前端渲染的完整地图载荷 */
-export function getMapPayload() {
-  const row = getMapRow();
+export function getMapPayload(mapId = null) {
+  const row = getMapRow(mapId);
   if (!row) return null;
   const locations = getDb().prepare('SELECT * FROM town_locations WHERE map_id = ? ORDER BY id').all(row.id)
     .map(l => ({
@@ -188,13 +193,39 @@ export function getMapPayload() {
 }
 
 /**
+ * 出行目录：所有地图的轻量描述（不含图层），供顶栏「出行」面板与切换前校验。
+ * 只列 status = 'ready' 的图可前往；archived 仅保留在列表里做历史说明。
+ */
+export function listMaps() {
+  const db = getDb();
+  const rows = db.prepare(`SELECT id, name, status, version, grid_cols, grid_rows, tile_size,
+    world_setting_id, created_at FROM town_maps ORDER BY id`).all();
+  const residentCount = db.prepare(`SELECT map_id, COUNT(*) AS n FROM town_npcs
+    WHERE town_enabled = 1 GROUP BY map_id`).all();
+  const residents = new Map(residentCount.map(r => [r.map_id, r.n]));
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    status: row.status || 'ready',
+    version: row.version || 1,
+    cols: row.grid_cols,
+    rows: row.grid_rows,
+    tileSize: row.tile_size || 32,
+    worldSettingId: row.world_setting_id || null,
+    residentCount: residents.get(row.id) || 0,
+    createdAt: row.created_at || null,
+  }));
+}
+
+/**
  * 保存地图（编辑器确认 / 向导开镇共用）：单地图 upsert，version+1 并广播
  * layers 内未带 id 的对象自动补 id。
  * locations 缺省/null 保留 POI；数组为当前地图完整集合，[] 清空。
  * key 是不可变身份：同 key 原位更新并保留 id；传入 id 时必须与该 key 匹配。
  * 地图、POI 与删除地点的住宅引用在同一事务提交，成功后才广播。
  */
-export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingId = null, locations = null, assignResponsibilities = true }) {
+export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingId = null, locations = null,
+  assignResponsibilities = true, mapId: targetMapId = null, create = false }) {
   const db = getDb();
   if (locations !== null && !Array.isArray(locations)) throw new Error('locations 必须为数组或 null');
   const keys = new Set();
@@ -218,7 +249,13 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
   for (const o of layers.objects) if (!Number.isInteger(o.id)) o.id = nextId++;
 
   const result = db.transaction(() => {
-    const existing = db.prepare('SELECT id, version FROM town_maps ORDER BY id LIMIT 1').get();
+    // 目标地图解析：create 永远新建；显式 mapId 只更新那一张；两者都没有才退回「默认图」旧口径
+    const requestedId = targetMapId == null ? null : Number(targetMapId);
+    if (requestedId != null && !Number.isInteger(requestedId)) throw new Error(`地图 id 无效: ${targetMapId}`);
+    const existing = create ? null : (requestedId != null
+      ? db.prepare('SELECT id, version FROM town_maps WHERE id = ?').get(requestedId) || null
+      : db.prepare('SELECT id, version FROM town_maps ORDER BY id LIMIT 1').get());
+    if (requestedId != null && !existing && !create) throw new Error(`地图不存在: ${requestedId}`);
     const layersJson = JSON.stringify(layers);
     let mapId;
     let version;
@@ -275,11 +312,29 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
         db.prepare('DELETE FROM town_locations WHERE id = ? AND map_id = ?').run(old.id, mapId);
       }
     }
-    if (assignResponsibilities) reconcileTownResponsibilities({ db });
+    if (assignResponsibilities) reconcileTownResponsibilities({ db, mapId });
     return { ok: true, mapId, version: db.prepare('SELECT version FROM town_maps WHERE id=?').get(mapId).version, layers };
   })();
   broadcastTownMapUpdated({ mapId: result.mapId, version: result.version });
   return result;
+}
+
+/**
+ * 只改名字：图层、POI、居民、素材一概不动（编辑器那条 saveMap 要整图回写，改名不能走它）。
+ * version+1 并广播 town_map_updated，各端据此刷新目录与顶栏镇名。
+ */
+export function renameMap({ mapId, name }) {
+  const db = getDb();
+  const id = Number(mapId);
+  if (!Number.isInteger(id)) throw new Error('地图 id 无效');
+  const clean = String(name ?? '').trim().slice(0, 24);
+  if (!clean) throw new Error('小镇名字不能为空');
+  const row = db.prepare('SELECT id, version FROM town_maps WHERE id = ?').get(id);
+  if (!row) throw new Error('地图不存在');
+  const version = (row.version || 0) + 1;
+  db.prepare('UPDATE town_maps SET name = ?, version = ? WHERE id = ?').run(clean, version, id);
+  broadcastTownMapUpdated({ mapId: id, version });
+  return { ok: true, mapId: id, name: clean, version };
 }
 
 /**

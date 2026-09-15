@@ -21,12 +21,18 @@
 4. 按钮、输入框、选择框、开关和弹窗继续遵循下方统一组件约定；配色、尺寸和反馈沿用 `docs/design-system.md` 与现有 token。
 5. 修改完成后，对照点击 NPC 打开的对话框检查视觉一致性，并验证桌面、移动端及暖色 / 暗夜主题。
 
+## 统一组件（Linshe）
+
+按钮、输入框、选择框、开关、分段选择与弹窗一律使用 `web-ui/src/components/ui/` 下的 Linshe 组件，禁止写裸 `<button>` / `<input>` / `<select>` 或遮罩面板皮肤。
+
+以下各小节只写**接入口径**（引入方式、prop 行为、特例白名单、改哪个文件）；皮肤语言（软糖立体 / 软糖凹陷）、变体语义、色值与 token 归属以 `docs/design-system.md`「Linshe 表单控件层」为准，不要在本文件重复描述。
+
 ## 按钮（LinsheButton）
 
 web-ui 中所有常规按钮必须使用统一组件 `web-ui/src/components/ui/LinsheButton.vue`，禁止写裸 `<button>` 标签或全局 button 样式。
 
 1. 引入：`import LinsheButton from '.../components/ui/LinsheButton.vue'`，模板中写 `<linshe-button>`
-2. 按层级选 variant：`primary`（珊瑚实心，每屏至多一个主操作）/ `secondary`（白底珊瑚描边，默认）/ `danger`（红色）/ `ghost`（暖白糖纸，弱操作）/ `icon`（圆形图标钮，如弹窗关闭 ✕）/ `chip`（胶囊选择、页签，配 `:active`）/ `link`（文字链接）；尺寸用 `size="sm|md|lg"`
+2. 按层级选 variant：`primary`（主操作实心，每屏至多一个）/ `secondary`（默认）/ `danger`（危险操作）/ `ghost`（弱操作）/ `icon`（圆形图标钮，如弹窗关闭 ✕）/ `chip`（胶囊选择、页签，配 `:active`）/ `link`（文字链接）；尺寸用 `size="sm|md|lg"`；各变体的皮肤与色值见设计系统
 3. 禁用与加载用 `:disabled` / `loading` prop，不要手写禁用样式
 4. 特殊交互元素（长按手势、动态配色、整卡热区、下拉菜单项、已有独立设计的控件）不套组件：用 `<div role="button" tabindex="0">` + 自包含样式，补齐 `cursor/text-align` 等基础属性，禁用态用 `.is-disabled` class + `aria-disabled` + 点击守卫
 5. 调整按钮风格只改 `LinsheButton.vue`，不要在各页面里覆盖组件皮肤
@@ -40,14 +46,15 @@ web-ui 中所有文本输入框 / 文本域统一使用组件 `web-ui/src/compon
 3. 尺寸用 `size="sm|md|lg"`（与 LinsheButton 对齐）；校验错误态用 `invalid` prop（红色描边），不要手写 `.xx-error` 样式；禁用用 `:disabled`
 4. 组件上遗留的 `class="fi"` 只承担部分页面的表单间距（margin/width）布局，新页面不要依赖它
 5. 特殊输入界面不套组件，保持自包含样式：聊天主输入框（`.chat-input`）、信纸 textarea（`.paper-textarea`）、透明嵌入输入（`.vn-input`、`.fav-input`、日程筛选胶囊搜索）、深色玻璃输入（TavernView `.inline-input`）、测试画风折叠输入（`.free-scene-textarea`）、提示词预览盒（`.generated-prompt-box`）
-6. 调整输入框风格只改 `LinsheInput.vue`；`App.vue` 里的全局 `input, textarea` 样式只是少数未组件化控件的兜底
+6. 需要自动增高、或收起时单行省略的长文本域用 `LinsheAutoTextarea.vue`（`collapsible` / `min-height`，SettingsView 在用），不要自己写 auto-resize
+7. 调整输入框风格只改 `LinsheInput.vue`；`App.vue` 里的全局 `input, textarea` 样式只是少数未组件化控件的兜底
 
 ## 选择框（LinsheSelect）
 
 web-ui 中所有下拉选择统一使用组件 `web-ui/src/components/ui/LinsheSelect.vue`（原 `DropdownSelect.vue` 已改名收编），禁止手写 `<select>` 或下拉皮肤样式。
 
 1. 引入：`import LinsheSelect from '.../components/ui/LinsheSelect.vue'`，模板中写 `<linshe-select>`；`v-model` 绑定选中值，`options` 为 `{ label, value }` 数组
-2. 触发器与 LinsheInput 同皮肤（软糖凹陷）；尺寸用 `size="sm|md|lg"`（与按钮/输入框对齐）；禁用用 `:disabled`
+2. 触发器与 LinsheInput 同皮肤；尺寸用 `size="sm|md|lg"`（与按钮/输入框对齐）；禁用用 `:disabled`
 3. `searchable` 开启搜索过滤；`allow-free-input` 允许自由输入（输入即值，选项仅作联想）；`ref` 拿到组件实例，已 expose `open()`（程序化展开，如获取模型列表后自动弹出）
 4. 特殊下拉界面（已有独立设计的胶囊搜索等）不套组件；调整选择框风格只改 `LinsheSelect.vue`，不要在各页面里覆盖组件皮肤
 
@@ -60,25 +67,23 @@ web-ui 中所有拨动开关（toggle switch）统一使用组件 `web-ui/src/co
 3. 尺寸用 `size="sm|md|lg"`（默认 md），与 LinsheButton / LinsheInput 尺寸档位对齐
 4. 调整开关风格只改 `LinsheSwitch.vue`，不要在各页面里覆盖组件皮肤
 
+## 分段选择（LinsheTabs）
+
+web-ui 中所有分段选择 / 页签统一使用组件 `web-ui/src/components/ui/LinsheTabs.vue`，禁止手写裸 div 或 button 分段控件。
+
+1. 引入：`import LinsheTabs from '.../components/ui/LinsheTabs.vue'`，模板中写 `<linshe-tabs>`；`v-model` 绑定选中值，`options` 为 `{ label, value }` 数组，选项可带 `disabled` / `title`
+2. 尺寸用 `size="sm|md"`：`md` 页签式（同级内容切换）、`sm` 小分段（筛选 / 模式切换）；整体禁用用 `:disabled`
+3. 调整分段选择风格只改 `LinsheTabs.vue`，不要在各页面里覆盖组件皮肤
+
 ## 弹窗（LinsheModal）
 
 web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.vue`（原 `BaseModal.vue` 已改名收编），禁止手写遮罩 / 面板皮肤。
 
 1. 引入：`import LinsheModal from '.../components/ui/LinsheModal.vue'`，模板中写 `<linshe-modal>`；`v-model` 控制显隐（旧代码仍可传 `:visible`），`title` 为标题
 2. 尺寸用 `wide`（加宽）/ `full`（大型管理面板）；内容用默认插槽，底部操作区用 `#footer`，头部右侧附加内容（如计数）用 `#header-extra`；需要局部布局差异用 `panel-class` / `body-class`
-3. 暖色主题沿用人物详情卡 pr 前口径（对齐 LoRA 设置窗）：暖纸外壳 + 白色内衬，标题栏与 `#footer` 留在外壳上、白色内衬只包正文（`--modal-*` token，见 `styles/tokens.css`）；暗夜保持 Cel Glow 深色玻璃；Esc / 点遮罩关闭
+3. 暖色为暖纸外壳 + 白色内衬（标题栏与 `#footer` 留在外壳上、白色内衬只包正文），暗夜保持 Cel Glow 深色玻璃；主题色值一律走 `styles/tokens.css` 的 `--modal-*`；Esc / 点遮罩关闭
 4. 调整弹窗风格只改 `LinsheModal.vue` 与 `tokens.css` 的 `--modal-*`，不要在各页面里覆盖组件皮肤
 
-## 更新说明（ChangelogDialog）
-
-面向用户的改动通过更新说明弹窗告知，内容与标志位机制如下，不要再另造一套：
-
-1. 内容全部写在 `web-ui/src/data/changelog.js` 的 `CHANGELOG_ENTRIES` 里，**最新的条目放最前面**；组件 `web-ui/src/components/ChangelogDialog.vue` 只负责渲染，不要在组件里写文案
-2. `changelog.js` 里的 `export const CHANGELOG_FLAG = '...'` 由 `scripts/tag.mjs` 自动维护（值 = 该文件除本行外内容的 sha256 前 12 位），**禁止手写**。想让用户重新看到弹窗，改文案即可
-3. 弹窗触发口径在 `App.vue`：拿 `CHANGELOG_FLAG` 和 `localStorage['linshe_changelog_seen']` 比，不一致才弹；关闭时回写。因此同一份更新说明只弹一次，首次启动必弹
-4. 该检查刻意写在**独立的 `onMounted`** 里，不依赖角色加载 / SSE 等启动流程，改动那段启动代码时请勿把两者合并
-5. 页脚的交流群 / 仓库地址 / 哔哩哔哩主页 / 特别鸣谢名单属于**长期信息**，写在 `web-ui/src/data/community.js`，不要放进 `changelog.js` —— 后者的内容一变就会给所有用户重弹一次更新说明
-6. **`web-ui/src/data/changelog.js` 不要擅自更改**：补条目、改文案、动 `CHANGELOG_FLAG` 都只在用户明确要求时才做。哪怕这次改动面向用户、按上面的口径「应该」记一条，也先问一句再做，不要自己顺手加上
 
 ## LLM 输出
 

@@ -3,14 +3,14 @@
     <div class="wiz-mask" @click.self="tryClose">
       <div class="wiz-panel" role="dialog" aria-label="小镇初始化向导">
         <div class="wiz-head">
-          <span class="wiz-title">小镇初始化</span>
+          <span class="wiz-title">{{ addingTown ? '再建一座小镇' : '小镇初始化' }}</span>
           <span class="wiz-step-hint">{{ stepHint }}</span>
           <linshe-button variant="icon" size="sm" aria-label="关闭" @click="tryClose">✕</linshe-button>
         </div>
 
         <!-- 白色内衬卡（对齐角色详情弹窗的 lora-body-card 风格） -->
         <div v-if="showInitAlphaBanner" class="wiz-alpha-banner" role="note">
-          建筑与居民生成后会自动配好岗位，进镇就能到店办事、交易和探索奇遇。缺少的必要岗位会在清单中补齐。
+          目前小镇功能极其不完善，就是看看美术素材图一乐，没任何功能，主包正在努力女娲补天
         </div>
         <div class="wiz-inner">
         <!-- 步骤条 -->
@@ -163,12 +163,16 @@
                             variant="ghost" size="sm"
                             :loading="item.promptBusy"
                             @click="regenAssetPrompt(item)"
-                          >重出提示词</linshe-button>
+                          >
+重出提示词
+</linshe-button>
                           <linshe-button
                             variant="secondary" size="sm"
                             :loading="item.busy"
                             @click="genAssetItem(item, true)"
-                          >{{ assetOf(item)?.status === 'ready' ? '重生成' : '生成' }}</linshe-button>
+                          >
+{{ assetOf(item)?.status === 'ready' ? '重生成' : '生成' }}
+</linshe-button>
                         </div>
                       </div>
                     </div>
@@ -222,7 +226,9 @@
                 :loading="rosterBusy"
                 :disabled="npcSlider === (bpForm.npcs.length || 0)"
                 @click="regenRoster"
-              >按 {{ npcSlider }} 人重新生成名单</linshe-button>
+              >
+按 {{ npcSlider }} 人重新生成名单
+</linshe-button>
 
               <TransitionGroup name="wiz-pop" tag="div" class="wiz-npc-grid">
                 <div
@@ -288,13 +294,17 @@
                       :loading="n.genBusy"
                       :disabled="n.personaBusy"
                       @click.stop="genNpcAssets(n)"
-                    >重新生成所有图片</linshe-button>
+                    >
+重新生成所有图片
+</linshe-button>
                     <linshe-button
                       variant="primary" size="sm"
                       :loading="n.personaBusy"
                       :disabled="n.genBusy"
                       @click.stop="regenNpcPersonaCard(n)"
-                    >重新生成人格卡</linshe-button>
+                    >
+重新生成人格卡
+</linshe-button>
                   </div>
                 </div>
               </TransitionGroup>
@@ -306,14 +316,18 @@
                 <linshe-button
                   variant="primary"
                   :loading="assetsBusy"
-                  :disabled="committedIds.length === 0"
+                  :disabled="!allPersonaReady"
                   @click="genAllNpcAssets"
-                >2、一键生成全员素材（立绘 + 正/背小人）</linshe-button>
+                >
+{{ allPersonaReady ? '2、一键生成全员素材（立绘 + 正/背小人）' : `2、一键生成全员素材（待人格卡 ${personaReadyCount}/${bpForm.npcs.length}）` }}
+</linshe-button>
                 <linshe-button
                   variant="primary"
                   :disabled="!allNpcReady"
                   @click="localStep = 'player'"
-                >{{ allNpcReady ? '3️⃣ 确认居民，确认「我」的形象 →' : `素材齐了才能继续（${npcReadyCount}/${bpForm.npcs.length}）` }}</linshe-button>
+                >
+{{ allNpcReady ? '3️⃣ 确认居民，确认「我」的形象 →' : `素材齐了才能继续（${npcReadyCount}/${bpForm.npcs.length}）` }}
+</linshe-button>
               </div>
               </div>
             </div>
@@ -419,7 +433,8 @@
       :regenerate="regenerateManagedAsset"
       @close="manager.open = false"
       @updated="onManagerUpdated"
-    />  </Teleport>
+    />
+</Teleport>
 </template>
 
 <script setup>
@@ -440,6 +455,11 @@ import {
 } from '../../utils/townFootprint.js'
 
 const emit = defineEmits(['close', 'applied'])
+
+// 世界里已经有镇（管理面板「新建小镇」）时为真：这次是「再建一座」，
+// 不续跑上一次的完成态，直接从配置步重新选世界观。
+const props = defineProps({ newTown: Boolean })
+const addingTown = ref(!!props.newTown)
 
 const town = useTownStore()
 const busy = ref(false)
@@ -500,9 +520,19 @@ const STEP_LIST = [
 ]
 
 const initState = computed(() => town.initState)
-const committedIds = computed(() => initState.value?.npcIds || [])
 const allNpcReady = computed(() => bpForm.npcs.length > 0 && bpForm.npcs.every(n => npcAssetOf(n, 'portrait')))
 const npcReadyCount = computed(() => bpForm.npcs.filter(n => npcAssetOf(n, 'portrait')).length)
+
+/**
+ * 已建档的居民行（按 displayName 对齐，口径同后端 commitWizardNpcs）。
+ * 人格卡由 commit 逐位写入，只有 persona 落库才说明这张卡写完了。
+ */
+function npcPersonaRow(n) {
+  return initState.value?.wizardNpcs?.find(w => w.displayName === n.displayName) || null
+}
+const personaReadyCount = computed(() => bpForm.npcs.filter(n => npcPersonaRow(n)?.persona).length)
+// 「一键生成全员素材」的解锁条件：所有人格卡都写完（生成素材要先有人格卡）
+const allPersonaReady = computed(() => bpForm.npcs.length > 0 && personaReadyCount.value === bpForm.npcs.length)
 
 // ── 素材步通用 ──
 
@@ -594,7 +624,7 @@ function groupReady(group) {
 /** 蓝图项 → 素材（匹配 base key 或 _01 变体前缀，取第一张就绪的） */
 function assetOf(item) {
   return assets.value.find(a => a.key === item.key && a.status === 'ready')
-    || assets.value.find(a => (a.key === item.key || a.key.startsWith(item.key + '_')) && a.status === 'ready')
+    || assets.value.find(a => (a.key === item.key || a.key?.startsWith(item.key + '_')) && a.status === 'ready')
 }
 
 function assetUrl(a) {
@@ -682,7 +712,8 @@ function syncBpForm(force = false) {
   // 蓝图 = 最后一次保存的清单，此刻与表单一致，正好当作「没变化」的基准
   listBaselines.tiles = listSignature('tiles')
   listBaselines.buildings = listSignature('buildings')
-  if (localStep.value === 'config') localStep.value = 'groundList'
+  // 「再建一座」时停在配置步：上一次的清单与这次的新镇无关，等用户按下「生成蓝图」再往下走
+  if (localStep.value === 'config' && !addingTown.value) localStep.value = 'groundList'
   refreshAssets()
 }
 
@@ -791,6 +822,8 @@ function start() {
       mapCols: form.mapSize,
       mapRows: form.mapSize,
     })
+    // 新的 job 已经在跑，从这一刻起按普通流程往下推进
+    addingTown.value = false
     await town.fetchInitState()
     syncBpForm()
   })
@@ -1148,6 +1181,8 @@ async function regenerateManagedAsset(asset) {
     applyPlayerKit(data.kit)
     await town.fetchInitState()
     await refreshAssets()
+    // 单张重绘只回这一张：另外两张若在服务器上已经不存在（重建世界 / 素材被删），就地补回来
+    fillMissingPlayerKit()
     return context.what === 'portrait' ? data.kit?.portrait : data.kit?.sprites?.[context.what]
   }
   const data = await api.regenerateTownAsset(asset.id, {})
@@ -1262,11 +1297,46 @@ function tryClose() {
   emit('close')
 }
 
-async function loadPlayerKitIfAny() {
+/** 以服务器为准同步「我」的三张素材：清掉跨世界 / 已被删除留下的幽灵缩略图 */
+async function syncPlayerKit() {
   try {
-    const kit = await api.fetchTownPlayerKit()
-    if (kit.sprites?.down || kit.portrait) applyPlayerKit(kit)
-  } catch { /* ignore */ }
+    applyPlayerKit(await api.fetchTownPlayerKit())
+  } catch { /* 网络抖动：沿用本地已有状态 */ }
+}
+
+/** 只补缺的那几张（立绘 / 正面 / 背面），已有的不动：单张重绘不会连带重画掉另外两张 */
+async function fillMissingPlayerKit() {
+  if (playerBusy.value) return
+  const missing = []
+  if (!playerKit.spriteAssets?.down) missing.push('down')
+  if (!playerKit.spriteAssets?.up) missing.push('up')
+  if (!playerKit.portraitAsset) missing.push('portrait')
+  if (missing.length === 0) return
+  playerBusy.value = true
+  try {
+    for (const what of missing) {
+      try {
+        const data = what === 'portrait'
+          ? await api.regenerateTownPlayerPortrait({
+            ...generationParams('player', { portrait: true }), styleTags: bpForm.styleTags || '',
+          })
+          : await api.regenerateTownPlayerSprite(what, {
+            ...generationParams('player'), styleTags: bpForm.styleTags || '',
+          })
+        applyPlayerKit(data.kit)
+      } catch (err) {
+        console.warn(`[wizard] player ${what} failed:`, err?.message)
+      }
+    }
+  } finally {
+    playerBusy.value = false
+  }
+}
+
+/** 进「我」这一步（含首次挂载）：先同步服务器，再把缺的补上 */
+async function refreshPlayerKit() {
+  await syncPlayerKit()
+  await fillMissingPlayerKit()
 }
 
 let pollTimer = null
@@ -1284,10 +1354,11 @@ function stopPolling() {
 
 // 蓝图到位后同步表单
 watch(() => initState.value?.blueprint, (bp) => { if (bp) syncBpForm() })
-watch([bpForm.styleTags, stepParams], scheduleGenerationSettingsSave, { deep: true })
+watch([() => bpForm.styleTags, stepParams], scheduleGenerationSettingsSave, { deep: true })
 watch(localStep, (v) => {
   // 地皮清单/建筑清单与各自生成步骤独立，切换时不会重建提示词
-  if (v === 'player' && !playerKit.portrait && !playerKit.down && !playerBusy.value) genPlayerKit()
+  // 「我」这一步先落一次服务器状态再补缺：本地可能还留着上一次世界 / 已删素材的缩略图
+  if (v === 'player') refreshPlayerKit()
   if (v === 'town' && initState.value?.status !== 'confirm' && !layoutBusy.value) genLayout()
 })
 
@@ -1318,22 +1389,27 @@ onMounted(async () => {
   await town.fetchInitState().catch(() => {})
   const s = initState.value?.status
   // 断点续跑：从已完成程度恢复到对应步骤
-  if (s === 'blueprint') localStep.value = 'working'
-  else syncBpForm()
-  if (s === 'confirm') {
-    await town.refreshDraftPreview().catch(() => {})
-    localStep.value = 'town'
-  } else if (s === 'layout_pending') {
-    localStep.value = 'town'
-  } else if (s === 'done') {
-    localStep.value = 'done'
-  } else if ((initState.value?.npcIds || []).length > 0) {
-    localStep.value = 'npcs'
-  } else if (s === 'batch_pending') {
-    localStep.value = 'npcs'
+  // 「再建一座」不续跑：上一次的完成态/布图预览属于另一座镇，直接停在配置步。
+  if (addingTown.value && (s === 'done' || s === 'confirm')) {
+    localStep.value = 'config'
+  } else {
+    if (s === 'blueprint') localStep.value = 'working'
+    else syncBpForm()
+    if (s === 'confirm') {
+      await town.refreshDraftPreview().catch(() => {})
+      localStep.value = 'town'
+    } else if (s === 'layout_pending') {
+      localStep.value = 'town'
+    } else if (s === 'done') {
+      localStep.value = 'done'
+    } else if ((initState.value?.npcIds || []).length > 0) {
+      localStep.value = 'npcs'
+    } else if (s === 'batch_pending') {
+      localStep.value = 'npcs'
+    }
   }
   startPolling()
-  loadPlayerKitIfAny()
+  refreshPlayerKit()
 })
 
 onBeforeUnmount(() => {
