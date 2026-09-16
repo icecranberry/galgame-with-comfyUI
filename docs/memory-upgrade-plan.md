@@ -337,14 +337,19 @@ memoryLines.push(`${i + 1}. [${label}] ${text}`);
    └─ 历史模式：hybridSearch 放宽 valid_to IS NOT NULL + superseded 状态，
                 结果逐条带 [历史·{valid_to} 过时] 徽标与后继版本（查 memory_relations）
 2. 三元组联想扩展（查询→三元组→关联记忆，HippoRAG 2 query-to-triple 思路）：
-   query 嵌入 → vectorSearch(corpus='memory_triples_v1', topK=5)
+   query 嵌入 → vectorSearch(corpus=memory_triples_<嵌入指纹>, topK=5)   // 见下方修订
    → 命中三元组的 memory_id 关联碎片（去重、限 5 条、标 source='triple')
    三元组库为空时此步自动跳过（对存量数据的自然降级）
 3. 实体 1 跳扩展：query 实体命中 → entity_links → 已命中之外的关联记忆（限 3 条）
 4. RRF 融合 → 返回 [{ fragment, injectionText, badge }]
 ```
 
-三元组嵌入：扩展 `memory_index_worker` 支持 `job_type='triple_upsert'/'triple_delete'`（`processIndexJob` L388 的 switch 加分支），嵌入文本 = `subject_text + predicate + object_text`，metadata 含 `memory_id/conversation_id/predicate`，corpus `memory_triples_v1`。
+三元组嵌入：扩展 `memory_index_worker` 支持 `job_type='triple_upsert'/'triple_delete'`（`processIndexJob` L388 的 switch 加分支），嵌入文本 = `subject_text + predicate + object_text`，metadata 含 `memory_id/conversation_id/predicate`。
+
+> **修订（2026-09-17）**：三元组语料不再固定 `memory_triples_v1`，改为随嵌入 profile 分流 ——
+> 远端/用户嵌入各占 `memory_triples_<指纹>`，本地 768 维兜底占 `memory_triples_local_builtin`，
+> 查询向量与语料必然同维；共享语料 `memory_triples_v1` 只留给分流前的存量数据（只删不写）。
+> 原因与验证见 `docs/memory-upgrade-progress.md` 的「三元组语料随嵌入 profile 分流（2026-09-17）」。
 
 ### 5.4 UI（实现前先读 `docs/design-system.md`）
 

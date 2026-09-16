@@ -9,7 +9,7 @@ import { hybridSearch, rrfFusion, formatRow, auditQueryText } from '../memorySea
 import { vectorSearch } from '../vectorClient.js';
 import { embedMemoryText } from './memoryProviders.js';
 import { getMemorySettings, isMemoryV3Enabled } from './memoryConfig.js';
-import { MEMORY_TRIPLES_CORPUS } from './memoryRepository.js';
+import { tripleCorpusFor } from './memoryRepository.js';
 
 const DEFAULT_TOP_K = 8;
 const TRIPLE_TOP_K = 5;
@@ -84,7 +84,9 @@ export async function activeMemorySearch(query, options = {}, deps = {}) {
   }
 }
 
-// 三元组联想扩展：query 嵌入 → memory_triples_v1 向量库 top5 → 命中三元组的关联记忆（去重、限 5 条）。
+// 三元组联想扩展：query 嵌入 → memory_triples_<嵌入指纹> 向量库 top5 → 命中三元组的关联记忆
+// （去重、限 5 条）。语料跟着查询向量走：换嵌入模型或回退本地模型那天，查询会落到对应维度的语料，
+// 而不是拿 768 维向量去查 1024 维的库、报错后被 catch 吞成静默失效。
 // 历史模式（时态查询）：已失效的三元组与其 superseded 记忆也参与联想，结果由上层标历史徽标——
 // 否则"她以前讨厌什么"在旧事实已演化时会联想不到任何东西。
 async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3Enabled, getDepsDb = getDb, getSettings = getMemorySettings, embed = embedMemoryText, searchVectors = vectorSearch, historical = false } = {}) {
@@ -96,8 +98,9 @@ async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3E
       : db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
     if (tripleCount === 0) return [];
     const settings = getSettings({ includeSecrets: true });
-    const { embedding } = await embed(query, settings);
-    if (!embedding) return [];
+    // embedding 为 null 表示回退本地模型：把 null 透传给向量服务（由它用自带模型编码查询），
+    // 语料按同一个 profile 分流，查询向量与语料维度必然一致。
+    const { embedding, profile } = await embed(query, settings);
     const vectorScope = conversationIds.length === 0
       ? null
       : (conversationIds.length === 1 ? conversationIds[0] : conversationIds);
@@ -105,7 +108,7 @@ async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3E
       embedding,
       topK: TRIPLE_TOP_K,
       conversationId: vectorScope,
-      corpus: MEMORY_TRIPLES_CORPUS,
+      corpus: tripleCorpusFor(profile),
     });
     const tripleIds = raw
       .map(item => Number(String(item?.id || '').replace(/^trip_/, '')))

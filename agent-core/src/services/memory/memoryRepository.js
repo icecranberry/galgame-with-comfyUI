@@ -11,6 +11,18 @@ const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
 const INDEX_CONCURRENCY = 2;
 // Memory v3 阶段二：三元组向量语料（query-to-triple 联想扩展，docs/memory-upgrade-plan.md §5.3）
 export const MEMORY_TRIPLES_CORPUS = 'memory_triples_v1';
+// 三元组语料随嵌入 profile 分流（方案 A）：语料维度必须与查询向量同源，否则本地 768 维兜底那天
+// 查询向量与语料维度不一致，联想直接报错被 catch 吞掉（activeSearch 只留一行 warn）。
+export const MEMORY_TRIPLES_PREFIX = 'memory_triples_';
+
+// profile → 三元组语料：远端/用户嵌入各占 memory_triples_<指纹>，本地兜底占 memory_triples_local_builtin
+// （与前面 768 维的 memory_fragments 同维，但独立 collection 免与远端 1024 维混库）。
+// 指纹为空 = 分流前的存量行，向量躺在共享语料 memory_triples_v1 里，删旧向量时按它兜底。
+export function tripleCorpusFor(profile) {
+  const fingerprint = typeof profile === 'string' ? profile : profile?.fingerprint;
+  if (!fingerprint) return MEMORY_TRIPLES_CORPUS;
+  return `${MEMORY_TRIPLES_PREFIX}${fingerprint}`;
+}
 // 三元组向量 id 前缀：与记忆碎片 id 共用 memory_index_jobs 表，前缀隔离避免任务去重/互斥互相干扰
 export const TRIPLE_JOB_PREFIX = 'trip_';
 // 记忆整理嵌入走用户自定义 → 系统内置 API（120s）→ 本地 ONNX 的优先级，
@@ -260,8 +272,10 @@ function findEntityIdByName(db, name) {
 }
 
 // 三元组向量索引任务：以 trip_ 前缀隔离 memory_id 键，processIndexJob 按 job_type 分支处理
-function enqueueTripleIndexJob(db, jobType, tripleId, priority = PRIORITY_HISTORY) {
-  return enqueueIndexJob(db, jobType, `${TRIPLE_JOB_PREFIX}${tripleId}`, null, priority);
+// profile 只对 triple_delete 有意义（删除要先知道语料，行可能已被回滚/清空事务删掉），
+// triple_upsert 在 indexMemoryTriple 里按嵌入结果重新取 profile。
+function enqueueTripleIndexJob(db, jobType, tripleId, priority = PRIORITY_HISTORY, profile = null) {
+  return enqueueIndexJob(db, jobType, `${TRIPLE_JOB_PREFIX}${tripleId}`, profile, priority);
 }
 
 function parseTripleIdFromJobKey(memoryId) {
@@ -287,11 +301,12 @@ async function indexMemoryTriple(tripleId) {
       conversation_id: fragment?.conversation_id || null,
       predicate: row.predicate,
     };
-    const { embedding } = await embedMemoryText(text, settings, { timeoutMs: INDEX_EMBED_TIMEOUT_MS, failureKind: 'embedding_index', slowThresholdMs: null });
+    const { embedding, profile } = await embedMemoryText(text, settings, { timeoutMs: INDEX_EMBED_TIMEOUT_MS, failureKind: 'embedding_index', slowThresholdMs: null });
     const current = getDb().prepare(`SELECT valid_to FROM memory_triples WHERE id = ?`).get(tripleId);
     if (!current || current.valid_to != null) return false;
-    await upsertVector(vectorId, text, metadata, null, MEMORY_TRIPLES_CORPUS, embedding);
-    getDb().prepare(`UPDATE memory_triples SET embedding_state = 'indexed' WHERE id = ?`).run(tripleId);
+    await upsertVector(vectorId, text, metadata, null, tripleCorpusFor(profile), embedding);
+    getDb().prepare(`UPDATE memory_triples SET embedding_state = 'indexed', embedding_profile = ? WHERE id = ?`)
+      .run(profile?.fingerprint || null, tripleId);
     return true;
   } catch (error) {
     getDb().prepare(`UPDATE memory_triples SET embedding_state = 'failed' WHERE id = ?`).run(tripleId);
@@ -299,16 +314,18 @@ async function indexMemoryTriple(tripleId) {
   }
 }
 
-async function removeMemoryTripleVector(tripleId) {
-  await deleteVector(`${TRIPLE_JOB_PREFIX}${tripleId}`, MEMORY_TRIPLES_CORPUS);
+async function removeMemoryTripleVector(tripleId, profile = null) {
+  // 任务带的 profile 优先（回滚/清空事务会先把行删掉，读不到列），其次读列，都没有按存量共享语料兜底
+  const stored = profile ?? getDb().prepare(`SELECT embedding_profile FROM memory_triples WHERE id = ?`).get(tripleId)?.embedding_profile ?? null;
+  await deleteVector(`${TRIPLE_JOB_PREFIX}${tripleId}`, tripleCorpusFor(stored));
 }
 
 function invalidateMemoryTriples(db, memoryId) {
-  const rows = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ? AND valid_to IS NULL`).all(memoryId);
+  const rows = db.prepare(`SELECT id, embedding_profile FROM memory_triples WHERE memory_id = ? AND valid_to IS NULL`).all(memoryId);
   if (rows.length === 0) return;
   db.prepare(`UPDATE memory_triples SET valid_to = CURRENT_TIMESTAMP WHERE memory_id = ? AND valid_to IS NULL`).run(memoryId);
   // 双时态失效的三元组同步出向量库（阶段二联想扩展只用现行三元组）
-  for (const row of rows) enqueueTripleIndexJob(db, 'triple_delete', row.id, PRIORITY_LIVE);
+  for (const row of rows) enqueueTripleIndexJob(db, 'triple_delete', row.id, PRIORITY_LIVE, row.embedding_profile);
 }
 
 export function getMemoryById(memoryId) {
@@ -363,9 +380,11 @@ export function enqueueMemoryDeleteJob(memoryId, row = null) {
   wakeMemoryIndexWorker();
 }
 
-export function enqueueTripleDeleteJob(tripleId) {
+export function enqueueTripleDeleteJob(tripleId, row = null) {
   const db = getDb();
-  enqueueTripleIndexJob(db, 'triple_delete', tripleId, PRIORITY_LIVE);
+  // 语料随 profile 分流：删除前把行的 profile 记进任务（墓碑扫描挑的是已失效三元组，行还在）
+  const profile = row?.embedding_profile ?? db.prepare(`SELECT embedding_profile FROM memory_triples WHERE id = ?`).get(tripleId)?.embedding_profile ?? null;
+  enqueueTripleIndexJob(db, 'triple_delete', tripleId, PRIORITY_LIVE, profile);
   wakeMemoryIndexWorker();
 }
 
@@ -385,9 +404,9 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
       db.prepare(`UPDATE memory_fragments SET status = 'deleted', source_msg_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.id);
       db.prepare(`DELETE FROM memory_entity_links WHERE memory_id = ?`).run(row.memory_id);
       // 回滚删除的三元组同步出向量库（trip_ 前缀任务不受本事务中碎片任务清理影响）
-      const tripleRows = db.prepare(`SELECT id FROM memory_triples WHERE memory_id = ?`).all(row.memory_id);
+      const tripleRows = db.prepare(`SELECT id, embedding_profile FROM memory_triples WHERE memory_id = ?`).all(row.memory_id);
       db.prepare(`DELETE FROM memory_triples WHERE memory_id = ?`).run(row.memory_id);
-      for (const tripleRow of tripleRows) enqueueTripleIndexJob(db, 'triple_delete', tripleRow.id, PRIORITY_LIVE);
+      for (const tripleRow of tripleRows) enqueueTripleIndexJob(db, 'triple_delete', tripleRow.id, PRIORITY_LIVE, tripleRow.embedding_profile);
       const predecessors = db.prepare(`SELECT from_memory_id FROM memory_relations WHERE to_memory_id = ?`).all(row.memory_id);
       for (const predecessor of predecessors) {
         if (affectedIds.has(predecessor.from_memory_id)) continue;
@@ -412,10 +431,10 @@ export function rollbackMemoriesFromRawId(conversationId, rawStartId) {
 export function clearConversationMemories(conversationId) {
   const db = getDb();
   const rows = db.prepare(`SELECT memory_id, embedding_profile FROM memory_fragments WHERE conversation_id = ?`).all(conversationId);
-  // 先收出现行三元组 id：清空后需补发 triple_delete 任务出向量库
+  // 先收出现行三元组 id + 语料 profile：清空后需补发 triple_delete 任务出向量库
   const ids = rows.map(row => row.memory_id).filter(Boolean);
-  const tripleIds = ids.length
-    ? db.prepare(`SELECT id FROM memory_triples WHERE memory_id IN (${ids.map(() => '?').join(',')})`).all(...ids).map(row => row.id)
+  const tripleRows = ids.length
+    ? db.prepare(`SELECT id, embedding_profile FROM memory_triples WHERE memory_id IN (${ids.map(() => '?').join(',')})`).all(...ids)
     : [];
   const transaction = db.transaction(() => {
     if (ids.length) {
@@ -430,11 +449,15 @@ export function clearConversationMemories(conversationId) {
     db.prepare(`DELETE FROM memory_retrieval_audits WHERE conversation_id = ?`).run(conversationId);
   });
   transaction();
-  for (const tripleId of tripleIds) enqueueTripleIndexJob(db, 'triple_delete', tripleId, PRIORITY_LIVE);
+  for (const tripleRow of tripleRows) {
+    enqueueTripleIndexJob(db, 'triple_delete', tripleRow.id, PRIORITY_LIVE, tripleRow.embedding_profile);
+  }
   wakeMemoryIndexWorker();
   const corpora = [...new Set(rows.map(row => row.embedding_profile).filter(profile => profile && profile !== 'local_builtin').map(profile => `memory_v2_${profile}`))];
+  // 三元组语料按 profile 分流，逐个 profile 语料清（空 profile 的老行落在共享语料里）
+  const tripleCorpora = [...new Set(tripleRows.map(row => tripleCorpusFor(row.embedding_profile)))];
   void deleteByConversation(conversationId).catch(() => {});
-  void deleteByConversation(conversationId, MEMORY_TRIPLES_CORPUS).catch(() => {});
+  for (const corpus of tripleCorpora) void deleteByConversation(conversationId, corpus).catch(() => {});
   for (const corpus of corpora) void deleteByConversation(conversationId, corpus).catch(() => {});
   return rows.length;
 }
@@ -487,9 +510,25 @@ export async function reindexAllMemories() {
   const db = getDb();
   const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments WHERE status = 'active'`).get().count;
   db.prepare(`UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL WHERE status = 'active'`).run();
+  // 换嵌入模型时三元组同样要重嵌：语料按 profile 分流，旧语料的向量查询时命中不了（也不该删，
+  // 回切模型还能直接用），所以这里只补嵌新语料、不清理旧语料。
+  db.prepare(`UPDATE memory_triples SET embedding_state = 'stale' WHERE valid_to IS NULL`).run();
+  const tripleTotal = requeueTriples(db, `
+    SELECT id, embedding_profile FROM memory_triples WHERE valid_to IS NULL AND embedding_state = 'stale'
+  `);
   enqueueFollowUpsForProcessingUpserts(db, PRIORITY_RETRY);
   wakeMemoryIndexWorker();
-  return { total, queued: total };
+  return { total, queued: total, tripleTotal, tripleQueued: tripleTotal };
+}
+
+// 三元组语料分流（方案 A）的自愈补嵌：分流前的存量三元组 embedding_profile 为空、向量躺在共享
+// 语料 memory_triples_v1 里，查询侧却按当前 profile 找 memory_triples_<指纹>，会静默联想不到。
+// 判据就是"还没有 profile"，嵌完自然归零，所以不需要开关位；嵌失败的行下次启动会再试。
+export function backfillTriplesWithoutEmbeddingProfile(db = getDb()) {
+  return requeueTriples(db, `
+    SELECT id, embedding_profile FROM memory_triples
+    WHERE valid_to IS NULL AND COALESCE(embedding_profile, '') = ''
+  `);
 }
 
 export async function ensureDefaultMemoryIndexes() {
@@ -497,9 +536,10 @@ export async function ensureDefaultMemoryIndexes() {
   const settingKey = 'memory_default_models_indexed_v1';
   startMemoryIndexWorker();
   const existing = db.prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(settingKey);
+  const triplesBackfilled = backfillTriplesWithoutEmbeddingProfile(db);
   if (existing?.setting_value === '1') {
     wakeMemoryIndexWorker();
-    return { skipped: true, pending: pendingIndexJobCount(db) };
+    return { skipped: true, pending: pendingIndexJobCount(db), triplesBackfilled };
   }
 
   db.prepare(`UPDATE memory_fragments SET embedding_state = 'stale', embedding_error = NULL WHERE status = 'active' AND embedding_state = 'disabled'`).run();
@@ -521,7 +561,7 @@ export async function ensureDefaultMemoryIndexes() {
   `).run(settingKey);
   wakeMemoryIndexWorker();
   console.log(`[memory] default index initialization scheduled: total=${total}, concurrency=${INDEX_CONCURRENCY}`);
-  return { total, queued: total };
+  return { total, queued: total, triplesBackfilled };
 }
 
 export async function retryFailedIndexJobs() {
@@ -540,12 +580,22 @@ export async function retryFailedIndexJobs() {
   for (const row of deletes) {
     retryOrEnqueueIndexJob(db, 'delete', row.memory_id, row.profile, PRIORITY_RETRY);
   }
+
+  // 三元组此前没有重试入口：embedding_state 一旦卡在 failed 就再也回不来（memory_triples_v1 曾被
+  // 向量服务语料白名单拒成 422，17 个三元组全卡死）。这里跟碎片一样重新入队，并把状态放回 pending。
+  const tripleTotal = requeueTriples(db, `
+    SELECT id, embedding_profile FROM memory_triples
+    WHERE valid_to IS NULL AND embedding_state IN ('failed', 'pending', 'stale')
+  `);
+
   wakeMemoryIndexWorker();
   return {
     total: upsertCount,
     queued: upsertCount,
     deleteTotal: deletes.length,
     deleteQueued: deletes.length,
+    tripleTotal,
+    tripleQueued: tripleTotal,
   };
 }
 
@@ -623,6 +673,19 @@ function enqueueFollowUpsForProcessingUpserts(db, priority) {
   for (const row of rows) enqueueIndexJob(db, 'upsert', row.memory_id, profile, priority);
 }
 
+// 三元组重嵌回队（换嵌入模型 / 失败重试 / 分流前老行补嵌共用）。
+// 语料由 indexMemoryTriple 按当时的嵌入 profile 现算，所以这里不传语料、只回队。
+function requeueTriples(db, sql, priority = PRIORITY_RETRY) {
+  const rows = db.prepare(sql).all();
+  const markPending = db.prepare(`UPDATE memory_triples SET embedding_state = 'pending' WHERE id = ?`);
+  for (const row of rows) {
+    markPending.run(row.id);
+    retryOrEnqueueIndexJob(db, 'triple_upsert', `${TRIPLE_JOB_PREFIX}${row.id}`, row.embedding_profile, priority);
+  }
+  if (rows.length > 0) wakeMemoryIndexWorker();
+  return rows.length;
+}
+
 function claimNextIndexJob() {
   const db = getDb();
   return db.transaction(() => {
@@ -680,7 +743,7 @@ async function processIndexJob(job) {
       if (tripleId) await indexMemoryTriple(tripleId);
     } else if (job.job_type === 'triple_delete') {
       const tripleId = parseTripleIdFromJobKey(job.memory_id);
-      if (tripleId) await removeMemoryTripleVector(tripleId);
+      if (tripleId) await removeMemoryTripleVector(tripleId, job.profile);
     } else {
       throw new Error(`unsupported memory index job type: ${job.job_type}`);
     }

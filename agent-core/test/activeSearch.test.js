@@ -277,3 +277,35 @@ test('activeMemorySearch 现行模式：失效三元组不参与联想', async (
   assert.equal(result.results.length, 0);
   db.close();
 });
+
+test('activeMemorySearch 三元组语料随查询嵌入 profile 分流（本地兜底照查不静默失效）', async () => {
+  const db = createSearchDb();
+  const vectorCalls = [];
+  const baseDeps = {
+    hybridSearch: async () => [],
+    isMemoryV3Enabled: () => true,
+    getMemorySettings: () => ({ v3: { enabled: true } }),
+    getDb: () => db,
+    vectorSearch: async (query, opts) => { vectorCalls.push(opts); return []; },
+    writeAudit: () => {},
+  };
+  // 远端嵌入：语料跟着查询向量的指纹走，换模型后各查各的库
+  await activeMemorySearch('她讨厌香菜吗', { conversationId: 'c1' }, {
+    ...baseDeps,
+    embed: async () => ({ embedding: [0.1, 0.2], profile: { fingerprint: 'abc123' } }),
+  });
+  assert.equal(vectorCalls.length, 1);
+  assert.equal(vectorCalls[0].corpus, 'memory_triples_abc123');
+
+  // 本地兜底：embedding 为 null 交给向量服务用自己的本地模型编码，语料同样按指纹分流
+  // （此前这里直接 return []，回退本地那天三元组联想静默失效）
+  vectorCalls.length = 0;
+  await activeMemorySearch('她讨厌香菜吗', { conversationId: 'c1' }, {
+    ...baseDeps,
+    embed: async () => ({ embedding: null, profile: { fingerprint: 'local_builtin' } }),
+  });
+  assert.equal(vectorCalls.length, 1);
+  assert.equal(vectorCalls[0].embedding, null);
+  assert.equal(vectorCalls[0].corpus, 'memory_triples_local_builtin');
+  db.close();
+});

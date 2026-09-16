@@ -7,6 +7,13 @@ import { buildAnalysisUserContent, buildChatLogLines, buildSharedAnalysisSystemP
 
 const conversationQueues = new Map();
 const CURATE_EVERY_N_MESSAGES = 40; // 每 40 句整理一次长期记忆
+// 输出预算：v3 一条记忆实测约 250~350 token，旧的 3000 会在写到第 8 条时被 max_tokens 砍断，
+// 输出变成半截 JSON（Unterminated string）→ 解析失败 → 整理反复重试、checkpoint 不前进。
+const CURATION_MAX_TOKENS = 6000;
+/** prompt 里声明的条数必须与 parseMemoryActions 的截断保持一致：模型多写的部分会被静默丢掉 */
+export const CURATION_MAX_ACTIONS = 12;
+const CURATION_COMPACT_ACTIONS = 4; // 输出被截断后重发时压小的条数
+const CURATION_MAIBOT_ACTIONS = 5; // 不落库的 maibot 路径只取判断句，输出预算 1800
 
 export function curateChatMemories(options) {
   const key = options.conversationId;
@@ -53,23 +60,39 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
 
   try {
     const related = await hybridSearch(transcript, { conversationId, topK: 12, timeoutMs: 20000 });
-    const curationMessages = buildCurationMessages({ transcript, related, timeRange });
     // 不带 response_format 发：部分渠道会给 json 模式额外注入 token，导致 prompt 前缀与
-    // 对话摘要对不上、整段聊天记录掉命中（实测 18% vs 93%）。prompt 本身已强制严格 JSON，
-    // 万一模型没照做，再用 json 模式补发一次。
-    const raw = await chatSync(curationMessages, {
+    // 对话摘要对不上、整段聊天记录掉命中（实测 18% vs 93%）。prompt 本身已强制严格 JSON。
+    let requestMessages = buildCurationMessages({ transcript, related, timeRange });
+    let result = await chatSync(requestMessages, {
       temperature: 0.2,
-      max_tokens: 3000,
+      max_tokens: CURATION_MAX_TOKENS,
       label: '聊天记忆整理',
+      returnMeta: true,
     });
+    // 被 max_tokens 砍断时原样重发只会再砍一次（半截 JSON 用 json 模式也修不好），
+    // 换成条数更少的精简指令重发：共享前缀（system + <chat_log>）没动，缓存照样命中。
+    if (planCurationRecovery({ finishReason: result.finishReason }) === 'compact') {
+      console.warn(`[memoryExtractor] 输出被 max_tokens(${CURATION_MAX_TOKENS}) 截断，改用精简指令重发: ${conversationId} raw ${startId}-${endId}`);
+      requestMessages = buildCurationMessages({ transcript, related, timeRange, compact: true });
+      result = await chatSync(requestMessages, {
+        temperature: 0.2,
+        max_tokens: CURATION_MAX_TOKENS,
+        label: '聊天记忆整理(截断重发)',
+        returnMeta: true,
+      });
+    }
     let actions;
     try {
-      actions = parseMemoryActions(raw);
+      actions = parseMemoryActions(result.content);
     } catch (parseError) {
+      // 截断导致的半截 JSON 补发 json 模式也修不好，直接抛出，省掉一次全量未命中缓存的请求
+      if (planCurationRecovery({ finishReason: result.finishReason, parseFailed: true }) !== 'json') {
+        throw new Error(`输出连续被 max_tokens(${CURATION_MAX_TOKENS}) 截断，无法解析（记录正文 ${transcript.length} 字符）：${parseError.message}`);
+      }
       console.warn(`[memoryExtractor] 输出非严格 JSON，改用 json 模式补发一次: ${parseError.message}`);
-      const strict = await chatSync(curationMessages, {
+      const strict = await chatSync(requestMessages, {
         temperature: 0.2,
-        max_tokens: 3000,
+        max_tokens: CURATION_MAX_TOKENS,
         response_format: { type: 'json_object' },
         label: '聊天记忆整理(json回退)',
       });
@@ -86,10 +109,15 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
   }
 }
 
-export function buildMemoryCurationPrompt({ transcript, related = [], timeRange = '', v3 = isMemoryV3Enabled() }) {
+export function buildMemoryCurationPrompt({ transcript, related = [], timeRange = '', v3 = isMemoryV3Enabled(), compact = false, maxActions = CURATION_MAX_ACTIONS }) {
   const existing = related.length
     ? related.map(item => `- ${item.memory_id} | ${item.memory_type} | ${item.judgment} | tags=${JSON.stringify(item.tags)}`).join('\n')
     : '（无相关旧记忆）';
+  // 条数上限：与 parseMemoryActions 的 slice 保持一致。输出预算有限，条数写多了会被 max_tokens 砍断，
+  // 写超 slice 的部分又会被静默丢掉，所以直接在 prompt 里钉死上限。
+  const actionBudget = compact
+    ? `- 上一次输出超出长度上限被截断：这次最多输出 ${CURATION_COMPACT_ACTIONS} 条，字段从简（reasoning 一句、episodicNote/semanticNote 各一句、entities 最多 2 个、triple 可省略）`
+    : `- 最多输出 ${maxActions} 条：按重要性排序只留最重要的 ${maxActions} 条，同一件事不要拆成多条`;
   const common = `你是聊天长期记忆整理器。只保存未来对话仍有价值、可独立理解的信息，不保存密码、密钥、一次性请求、泛化寒暄、角色固有设定或生图提示词。
 
 记忆类型：
@@ -103,7 +131,8 @@ export function buildMemoryCurationPrompt({ transcript, related = [], timeRange 
 - update：替代一条旧记忆，sourceMemoryIds 必须正好 1 个
 - merge：合并至少两条旧记忆，sourceMemoryIds 至少 2 个
 - 没有值得记忆的信息时 memoryActions 返回 []
-- 不得引用下面列表之外的 memoryId`;
+- 不得引用下面列表之外的 memoryId
+${actionBudget}`;
 
   // v2 回滚分支：与历史 prompt 逐字兼容（含禁评分约束）
   const v2Format = `- 不输出 importance、confidence 或自由评分
@@ -143,13 +172,25 @@ export function buildCurationMessages(options = {}) {
   ];
 }
 
+/**
+ * 记忆整理出问题后的补救动作（纯判断，便于单测）：
+ * - compact：finish_reason=length，输出被 max_tokens 砍断，半截 JSON 用 json 模式补发也修不好，
+ *   只能让模型少写几条、字段从简，重发一次
+ * - json：纯格式问题（裹了 markdown、多写了说明），json 模式能让模型只吐 JSON
+ * 返回 null 表示不需要补救。
+ */
+export function planCurationRecovery({ finishReason, parseFailed = false } = {}) {
+  if (finishReason === 'length') return 'compact';
+  return parseFailed ? 'json' : null;
+}
+
 export function parseMemoryActions(raw) {
   let text = String(raw || '').trim();
   if (text.startsWith('```')) text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
   const parsed = JSON.parse(text);
   const actions = parsed.memoryActions ?? parsed.actions ?? [];
   if (!Array.isArray(actions)) throw new Error('memoryActions 必须是数组');
-  return actions.slice(0, 8);
+  return actions.slice(0, CURATION_MAX_ACTIONS);
 }
 
 // 旧调用兼容；新代码应传 raw assistant id。
@@ -157,7 +198,7 @@ export function parseMemoryActions(raw) {
 export async function curateAccumulatedMemory({ accumulatedText, characterName = '', userName = '用户' }) {
   // 不落库的记忆整理：把累积对话整理成判断句列表，用于 MaiBot 主聊天流注入。
   // 该路径只消费 judgment，强制 v2 精简格式，避免为不落库的扩展字段浪费输出 token。
-  const raw = await chatSync(buildCurationMessages({ transcript: accumulatedText, related: [], v3: false }), {
+  const raw = await chatSync(buildCurationMessages({ transcript: accumulatedText, related: [], v3: false, maxActions: CURATION_MAIBOT_ACTIONS }), {
     temperature: 0.2,
     max_tokens: 1800,
     response_format: { type: 'json_object' },

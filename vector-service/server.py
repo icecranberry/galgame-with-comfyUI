@@ -15,10 +15,25 @@ import cloudscraper
 from bs4 import BeautifulSoup
 
 from embedding import embed, embed_single
-from chroma_store import upsert_memory, upsert_memories, search_similar, delete_by_id, delete_by_metadata, collection_count
+from chroma_store import (
+    CORPUS_PATTERN,
+    DEFAULT_CORPUS,
+    upsert_memory,
+    upsert_memories,
+    search_similar,
+    delete_by_id,
+    delete_by_metadata,
+    collection_count,
+)
 from config import MODEL_PATH
 
 app = FastAPI(title="Vector Service", version="1.0.0")
+
+
+def corpus_field(description: str = "向量语料分区"):
+    """语料白名单只此一份：pattern 由 chroma_store 的语料常量拼出，
+    避免各请求模型各写一份字面量、新增语料时漏改（memory_triples_v1 就是这么漏掉的）。"""
+    return Field(default=DEFAULT_CORPUS, pattern=CORPUS_PATTERN, description=description)
 
 
 # ── Request / Response models ──
@@ -37,7 +52,7 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100)
     filter_type: str | None = Field(default=None, pattern="^(fact|preference|emotion)$")
     conversation_id: str | list[str] | None = Field(default=None, description="可选，限定一个或多个会话范围")
-    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+    corpus: str = corpus_field()
 
 
 class SearchResult(BaseModel):
@@ -57,7 +72,7 @@ class UpsertRequest(BaseModel):
     embedding: list[float] | None = None
     metadata: dict = Field(default_factory=dict)
     fragment_type: str | None = None
-    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+    corpus: str = corpus_field()
 
 
 class UpsertResponse(BaseModel):
@@ -74,7 +89,7 @@ class UpsertBatchItem(BaseModel):
 
 class UpsertBatchRequest(BaseModel):
     items: list[UpsertBatchItem] = Field(..., min_length=1, max_length=100)
-    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+    corpus: str = corpus_field()
 
 
 class UpsertBatchResponse(BaseModel):
@@ -83,12 +98,12 @@ class UpsertBatchResponse(BaseModel):
 
 class DeleteRequest(BaseModel):
     chroma_id: str
-    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+    corpus: str = corpus_field()
 
 
 class DeleteByConversationRequest(BaseModel):
     conversation_id: str = Field(..., description="会话 ID，如 char_5")
-    corpus: str = Field(default="memory_fragments", pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$")
+    corpus: str = corpus_field()
 
 
 # ── Routes ──

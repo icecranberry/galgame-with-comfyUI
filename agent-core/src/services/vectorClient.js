@@ -19,6 +19,18 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT) 
   }
 }
 
+/**
+ * 失败响应的可读描述：FastAPI 的校验错误是 {detail:[{loc,msg,input,...}]}，
+ * 直接拼进模板串会变成 "[object Object]"，把真正的失败原因（比如语料白名单不匹配）吃掉。
+ */
+async function describeFailure(res) {
+  const body = await res.json().catch(() => null);
+  const detail = body?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail) return JSON.stringify(detail);
+  return `HTTP ${res.status}`;
+}
+
 export async function embedText(text) {
   const res = await fetchWithTimeout(`${BASE}/embed`, {
     method: 'POST',
@@ -26,8 +38,7 @@ export async function embedText(text) {
     body: JSON.stringify({ text }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Embed error: ${err.detail || res.status}`);
+    throw new Error(`Embed error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   // 单文本返回第一个向量
@@ -41,8 +52,7 @@ export async function embedBatch(texts) {
     body: JSON.stringify({ text: texts }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Embed error: ${err.detail || res.status}`);
+    throw new Error(`Embed error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   return data.embeddings;
@@ -55,8 +65,7 @@ export async function vectorSearch(text, { topK = 20, filterType = null, convers
     body: JSON.stringify({ text, embedding, top_k: topK, filter_type: filterType, conversation_id: conversationId, corpus }),
   }, timeoutMs);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Search error: ${err.detail || res.status}`);
+    throw new Error(`Search error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   return data.results;
@@ -76,8 +85,7 @@ export async function upsertVector(chromaId, text, metadata = {}, fragmentType =
     }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Upsert error: ${err.detail || res.status}`);
+    throw new Error(`Upsert error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   return data.chroma_id;
@@ -90,8 +98,7 @@ export async function upsertVectors(items, corpus = 'memory_fragments', timeoutM
     body: JSON.stringify({ items, corpus }),
   }, timeoutMs);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Batch upsert error: ${err.detail || res.status}`);
+    throw new Error(`Batch upsert error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   return data.count;
@@ -104,8 +111,7 @@ export async function deleteVector(chromaId, corpus = 'memory_fragments') {
     body: JSON.stringify({ chroma_id: chromaId, corpus }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Delete error: ${err.detail || res.status}`);
+    throw new Error(`Delete error: ${await describeFailure(res)}`);
   }
   return true;
 }
@@ -117,8 +123,7 @@ export async function deleteByConversation(conversationId, corpus = 'memory_frag
     body: JSON.stringify({ conversation_id: conversationId, corpus }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`DeleteByConversation error: ${err.detail || res.status}`);
+    throw new Error(`DeleteByConversation error: ${await describeFailure(res)}`);
   }
   const data = await res.json();
   return data.deleted;

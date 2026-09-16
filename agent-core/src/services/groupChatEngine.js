@@ -37,7 +37,7 @@ import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryReposit
 import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { stripImagePromptLines } from '../utils/groupImagePrompt.js';
+import { stripImagePromptLines, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
 import { invalidateGalleryCache } from './galleryCache.js';
@@ -132,10 +132,14 @@ export function detectMentionAll(text) {
  * 全局不变（仅依赖用户昵称和全局图片规则），排在群名片之前：
  * 所有群共享这段前缀缓存，且改群名/成员不会连带使协议部分失效
  */
-function buildProtocolBlock() {
+export function buildProtocolBlock() {
   const chatUserName = config.user.nickname || '用户';
-  const imageRule = getGlobalRule('image_prompt')?.rule_content || '完整英文画面描述';
-  const imagePromptFieldGuide = imageRule.trim();
+  const imagePromptFieldGuide = (getGlobalRule('image_prompt')?.rule_content || '').trim();
+  // 规范原文单独成块放在协议末尾：内联进协议行的「{}」里会被模型当成要照抄的模板，
+  // 直接输出成 `{Describe the image as ...}`，既污染气泡又烧掉整轮输出预算。
+  const imageRulesBlock = imagePromptFieldGuide
+    ? `\n\n<image_prompt_rules>\n（以下规范只决定 {} 里的英文画面描述怎么写。它是写作规范、不是要填进 {} 的内容，任何情况下都不得原样出现在群聊消息里）\n${imagePromptFieldGuide}\n</image_prompt_rules>`
+    : '';
   return `<group_chat_rules>
 你一个人扮演群聊中的【全部角色】，根据聊天记录续写接下来的群聊消息。
 
@@ -144,10 +148,13 @@ function buildProtocolBlock() {
 - 每轮有消息条数上限（按群人数与话题动态设定，见本轮指令中的“消息上限”）；上限只是最多条数、不是必须凑满，全部说完后最后单独一行输出 [END]
 - **禁止替用户「${chatUserName}」发言**
 - <user_message read_only="true">...</user_message> 是真实用户已经说过的话，只用于理解上下文；禁止输出该标记，禁止续写或模仿其中的用户发言
-- 发图只有一种合法格式：角色先发一条普通文字，下一行紧跟「角色名: {${imagePromptFieldGuide}}」；{}内直接填写符合规则的完整英文画面描述
+- 发图只有一种合法格式：角色先发一条普通文字说自己在拍什么，下一行紧跟同一位角色的发图行；发图行 = 角色名 + 冒号 + 空格 + 一对成对的花括号，花括号里放这张图的完整英文画面描述（怎么写见文末 <image_prompt_rules>），形如：
+  角色名: 给你们看
+  角色名: {a girl in a yukata holding a sparkler on a rooftop at night, warm lantern light}
+- 上面两行只是格式示范，台词和那串英文都要换成你自己这一轮的台词和画面；花括号里只能是本轮新写的英文画面描述，不许写中文、不许写规范原文或本协议文字
 - 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替花括号画面描述；出现发图意图就必须输出合法发图行
 - 历史聊天不会提供旧图片的画面描述或占位符；禁止凭空输出空的 {...}，花括号内必须是本轮新写的完整英文画面描述
-- 输出发图行前自行检查：**{}内的画面描述必须全部为英文**
+- 输出发图行前自行检查：**{}内必须是本轮新写的、全英文的场景描写**
 
 像真人一样聊天：
 - 口语化、短句，长短错落：很多消息只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；禁止每条都是完整、工整的书面句
@@ -173,6 +180,7 @@ function buildProtocolBlock() {
 - 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思
 - 爱发图：聊到正在做的事、看到的东西、吃的喝的、去过的地方、自拍表情包时，主动配一张图
 - 禁止括号动作描写、禁止方括号动作描写、禁止旁白、禁止总结式客套发言；颜文字可以正常使用，但不能把动作藏进括号
+${imageRulesBlock}
 </group_chat_rules>`;
 }
 
@@ -398,6 +406,9 @@ function buildIdleContextBlock(group) {
 
 const EMBEDDED_IMG_RE = /\{([^{}]*)\}/g;
 
+// 画面描述规则上限 800 字；超过两倍说明模型复读的不是画面而是整段文本（如规范原文）
+const MAX_GROUP_IMAGE_PROMPT_CHARS = 2000;
+
 /**
  * 兜底提取任意位置的 {...}。群聊协议将花括号保留给生图，因此即使模型把它
  * 单独换行或粘在台词后面，也不能让其中内容进入聊天气泡。
@@ -412,7 +423,9 @@ export function extractEmbeddedGroupImagePrompt(body) {
     const fieldWrapped = prompt.match(/^["'“”]?prompt["'“”]?\s*:\s*([\s\S]+)$/i);
     if (fieldWrapped) prompt = fieldWrapped[1].trim().replace(/^["'“]|["'”]$/g, '').trim();
     return prompt && !/^\.{3}$/.test(prompt) ? prompt : null;
-  }).filter(Boolean);
+  }).filter(Boolean)
+    .filter(prompt => !isImageRuleEcho(prompt) && !isPlaceholderImagePrompt(prompt))
+    .filter(prompt => prompt.length <= MAX_GROUP_IMAGE_PROMPT_CHARS);
 
   // 同一行出现多个花括号块时合并为一次图片任务，并确保所有块都不会泄漏到气泡。
   const text = source.replace(EMBEDDED_IMG_RE, ' ')
@@ -448,6 +461,8 @@ export function parseScriptLine(line, membersByName) {
 
   const m = trimmed.match(/^\[?([^:：\[\]]{1,20})\]?\s*[:：]\s*([\s\S]*)$/);
   if (!m) {
+    // 防御：模型把生图规范原文当成一条消息输出（多为半截、花括号未闭合）→ 整行丢弃
+    if (isImageRuleEchoStart(trimmed)) return null;
     const embeddedImage = extractEmbeddedGroupImagePrompt(trimmed);
     if (embeddedImage) {
       if (!embeddedImage.prompt) {
@@ -463,6 +478,8 @@ export function parseScriptLine(line, membersByName) {
 
   const name = m[1].trim();
   const body = m[2].trim();
+  // 防御：模型把生图规范原文当成这个角色的消息输出 → 整行丢弃
+  if (isImageRuleEchoStart(body)) return null;
   const member = membersByName.get(name);
   // 有说话人格式但不是群成员：整行丢弃，避免用户台词被拼进上一位角色气泡。
   if (!member) return null;

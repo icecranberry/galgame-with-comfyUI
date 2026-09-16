@@ -2628,6 +2628,7 @@ export function migrateChatMemoryV3Schema(db) {
         event_time DATETIME,
         valid_from DATETIME,
         valid_to DATETIME,
+        embedding_profile TEXT,
         embedding_state TEXT NOT NULL DEFAULT 'disabled',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`,
@@ -2659,6 +2660,13 @@ export function migrateChatMemoryV3Schema(db) {
       )`,
     ];
     for (const sql of ddlStatements) db.prepare(sql).run();
+
+    // 三元组语料随嵌入 profile 分流（方案 A）的列：存量库补列，旧行 embedding_profile 为空，
+    // 由 memoryRepository 启动时的补嵌任务重新入队（旧向量躺在共享语料 memory_triples_v1 里）。
+    const tripleColumns = new Set(db.prepare(`PRAGMA table_info(memory_triples)`).all().map(c => c.name));
+    if (!tripleColumns.has('embedding_profile')) {
+      db.prepare(`ALTER TABLE memory_triples ADD COLUMN embedding_profile TEXT`).run();
+    }
 
     upgradeMemoryFtsToV3(db);
   } catch (err) {

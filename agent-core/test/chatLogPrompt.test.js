@@ -100,3 +100,17 @@ test('记忆未启用 / 从未整理 / 整理点反而更靠后时，退回摘�
   assert.equal(pickWindowStartId({ summaryCheckpoint: 0, memoryCheckpoint: 40, memoryEnabled: true }), 0);
   assert.equal(pickWindowStartId(), 0);
 });
+
+// 输出被 max_tokens 截断后的精简重发只允许改「条数上限」那一行指令：
+// 共享前缀（system + <chat_log> + 其余指令）一旦被动过，整段缓存就没了。
+test('被截断后的精简重发不动共享前缀', () => {
+  const transcript = buildChatLogLines(MESSAGES, NAMES);
+  const block = buildChatLogBlock(MESSAGES, NAMES);
+  const normal = buildCurationMessages({ transcript })[1].content;
+  const compact = buildCurationMessages({ transcript, compact: true })[1].content;
+  assert.notEqual(normal, compact, '精简重发要真的换掉指令，否则重发没有意义');
+  assert.ok(compact.startsWith(block), '记录块必须原样留在 user 内容最前面');
+  const prefix = normal.slice(0, commonPrefixLength(normal, compact));
+  assert.ok(prefix.includes(block), '记录块整段落在公共前缀里');
+  assert.ok(!prefix.includes('最多输出'), '只有条数上限那一行不同，其余指令仍留在公共前缀里');
+});

@@ -12,7 +12,7 @@
             <TransitionGroup name="lora-card" tag="div" class="lora-list">
               <div v-for="(item, idx) in activeItems" :key="'global-' + idx" class="lora-item-card" :class="{ 'lora-disabled': !item.enabled }">
                 <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="删除 LoRA">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                 </linshe-button>
                 <div class="lora-item-row">
                   <div class="form-group lora-path-group">
@@ -88,15 +88,13 @@
             </div>
 
             <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
               添加 LoRA
             </div>
           </div>
 
           <div class="modal-actions" style="margin-top:16px">
             <span class="lora-civitai-label">LoRA 获取：</span>
-            <a href="https://civitai.com/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=style" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI 搜索Style</a>
-            <span class="lora-civitai-label">或</span>
             <a href="https://civitai.red/search/models?baseModel=Anima&modelType=LORA&sortBy=models_v9&query=style" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">CivitAI.red 搜索Style</a>
             <span class="lora-civitai-label">（但实际上作者并不会都以Style为画风LoRA取名，可以自行寻找其他关键词）</span>
             <div style="flex:1"></div>

@@ -228,6 +228,92 @@
 
 **下游影响**：摘要写库的 `end_msg_id` 仍是窗口末条 assistant，`start_msg_id` 无人读取；上下文装配用的是 `end_msg_id` + 固定 10 轮滑动窗口，所以摘要窗口变宽不会让聊天上下文变胖（`contextAssembler.getSplitHistory` 两侧都是固定轮数）。整理去掉 json 模式后如果偶发非 JSON 输出，会先补发一次 json 模式请求，再失败才留 checkpoint 重试（不会丢这批对话）。剩下的备选优化（未做）：记录倒序、两次调用合并成一次。
 
+### 记忆整理输出被 max_tokens 截断卡死（2026-09-17）
+
+上一节把整理改成不带 `response_format` 发之后，线上出现持续失败：`[cache] 聊天记忆整理: 命中 30208/31358 prompt tokens (96%)` 紧跟着 `[memoryExtractor] 输出非严格 JSON，改用 json 模式补发一次: Unterminated string in JSON at position 6696`，整理反复失败、checkpoint 停在原处。**这不是去掉 json 模式引起的**（更早的 `char_372` 在 2026-08-25、json 模式还开着时就以同样的错误卡住了），根因是输出被 `max_tokens` 砍断：
+
+- `max_tokens` 当时是 3000，日志里的 `输出 3000` 正好顶到上限。v3 一条记忆实测约 250~350 token，模型一次会写 8~15 条 → 必然超预算，JSON 停在某个字符串中间 → `Unterminated string in JSON at position N` → `parseMemoryActions` 抛错
+- 旧逻辑在解析失败后**原样重发一次 json 模式**：同一个请求照样会被砍第二次，而且 json 模式吃不到纯文本前缀缓存（模式隔离，见上一节），等于白烧一次全量未命中 token；两次都失败 → checkpoint 不推进 → 下一轮窗口更大，永久卡死
+- `parseMemoryActions` 的 `slice(0, 8)` 与 prompt 没有对齐：模型按自己的判断写 15 条，超出的 7 条被静默丢掉，日志上看不出来
+
+**修复**（`services/memoryExtractor.js`、`llm/llm-client.js`）：
+
+1. `chatSync` 新增可选 `returnMeta`，回传 `{ content, finishReason }`（默认路径仍只返回字符串，其余 50 多处调用不受影响）
+2. 新增 `planCurationRecovery`：`finishReason === 'length'` → `compact`（换精简指令重发）；只有**非截断**的解析失败才走 `json` 补发；截断导致的半截 JSON 直接抛出，不再白烧一次全量请求
+3. `CURATION_MAX_TOKENS`：3000 → 6000
+4. prompt 里钉死条数上限（常规 12 条 / 截断重发 4 条 / 不落库的 maibot 路径 5 条），并与 `parseMemoryActions` 的 slice 上限统一为 `CURATION_MAX_ACTIONS`——模型写超上限的部分不会再被静默丢弃
+5. 精简重发**只改「条数上限」那一行指令**，共享前缀（system + `<chat_log>` + 其余指令）逐字节不动，所以这次重发仍然命中缓存。代价是这条窗口最坏只保下 4 条记忆（原先的失败路径是整批 0 条且 checkpoint 卡死）
+
+**实测（真实渠道 tokenrhythm.studio，`group_9` 真实窗口：64 条 / 记录正文 45920 字符 / 31k prompt token）**：
+
+| 请求 | finish_reason | 输出 | 结果 |
+| --- | --- | --- | --- |
+| 旧参数 `max_tokens=3000` | `length` | 3000 token / 6777 字符，停在字符串中间 | 复现 `Unterminated string in JSON at position 6777` |
+| 同窗口、旧 prompt（无条数上限） | `stop` | 3836 token / 15 条动作 | 证明 3000 确实不够 |
+| 新参数 `max_tokens=6000` + 12 条上限 | `stop` | 3225 token / 7145 字符 / 12 条动作 | 正常产出 |
+| 截断重发（compact） | `stop` | 922 token / 1997 字符 / 4 条动作 | 命中 30592/31254（**98%**，前缀没动） |
+| `char_372`（另一条卡住的会话，64 条） | `stop` | 2711 token / 6488 字符 / 12 条动作 | 此前在 4283 字符处被砍 |
+
+对照上一节：json 模式补发的命中率只有 18%，这版重发几乎不额外花钱。
+
+**遗留**：`group_9`（checkpoint 0，64 条）、`char_372` 的失败 checkpoint 会在该会话下一条消息触发整理时自愈；`char_3471` 的 `status='processing'` 是 2026-08-25 旧 bug 留下的僵尸锁，整理流程不读这个字段，只影响状态展示。
+
+**测试**：`src/services/memoryExtractor.test.js` 新增 3 例（补救动作判定、条数上限与 slice 一致、截断形状的解析失败），`test/chatLogPrompt.test.js` 新增 1 例（精简重发不动公共前缀）。
+
+### 三元组语料被向量服务白名单拒收（2026-09-17）
+
+整理修好之后日志里接着冒出一串：
+
+```
+[vector-service] INFO: "POST /upsert HTTP/1.1" 422 Unprocessable Content
+[agent-core] [memory-index] worker failed for job 3054: Upsert error: [object Object]
+```
+
+结论：**三元组的写入与检索从阶段二上线起就没成功过**，query-to-triple 联想一直是死的 —— 不是这次改动引起的。
+
+- 根因：语料白名单在 `server.py` 的 5 个请求模型上各写了一份字面量 `pattern="^(memory_fragments|image_prompt_knowledge|memory_v2_[A-Za-z0-9]+)$"`。阶段二新增 `memory_triples_v1` 时只补了 `chroma_store._collection_name()` 的分支（当时文档也记了这条），漏了这 5 处 pattern → FastAPI 在进 handler 之前就 422，连 `_collection_name()` 都没走到
+- 现状（本机库）：`memory_index_jobs` 的 `triple_upsert` 17 个任务 17 个 failed，`memory_triples` 17 行全部 `embedding_state='failed'`；`/search` 带 `corpus=memory_triples_v1` 同样 422，所以 `activeSearch` 的三元组联想扩展整条路径静默失效
+- 附带问题：客户端把 FastAPI 的 `detail` 直接拼进模板串，打印成 `Upsert error: [object Object]`，把真正的失败原因吃掉了
+- 与内置嵌入 provider 无关：`LOCAL_PROFILE.corpus` 是 `memory_fragments`，不会产生 `memory_v2_local_builtin` 这种语料
+
+**修复**：
+
+1. 白名单收成一份：`chroma_store.CORPUS_PATTERN` 由语料常量拼出，`server.py` 新增 `corpus_field()` 工厂，5 个请求模型共用；`vectorClient.js` 的失败信息改为序列化 `detail`
+2. 三元组补重试入口：`retryFailedIndexJobs()` 此前只回队碎片 upsert 与 delete，现在把 `embedding_state='failed'` 的三元组一起放回 pending 并重发 `triple_upsert`（返回值加 `tripleTotal/tripleQueued`）
+3. 契约测试 `agent-core/test/vectorCorpusContract.test.js`：扫 agent-core 里所有语料字面量逐个对照 chroma_store 的白名单常量，并断言 `server.py` 不再硬编码 pattern
+
+**验证**：用 `vector-service/venv` 的 Python 直接实例化 5 个请求模型 —— `memory_triples_v1` 全部受理、`memory_evil` 仍被拒；白名单正则 `^(memory_fragments|image_prompt_knowledge|memory_triples_v1|memory_v2_[A-Za-z0-9]+)$`。
+
+**生效步骤**：向量服务要重启才会加载新的 `server.py`；重启后调一次 `POST /api/memory/retry-failed`，那 17 个三元组会被重新入队补进向量库。
+
+---
+
+### 三元组语料随嵌入 profile 分流（2026-09-17）
+
+**症状**：回退本地嵌入模型（内置 provider 当日失败 5 次 → 768 维 jina 本地模型）时，三元组联想会静默失效，且是两层。
+
+```
+[vector-service] "POST /search HTTP/1.1" 500
+{"detail": "Collection expecting embedding with dimension of 1024, got 768"}
+```
+
+- `memory_triples_v1` 的 collection（`memory_fragments_memory_triples`）按第一次写入固定成 1024 维，本地 768 维向量进去就 500；错误在 `activeSearch.tripleExpansion` 的 catch 里只剩一行 warn
+- `activeSearch` 另外还有 `if (!embedding) return []`：本地兜底时 `embedMemoryText` 返回 `embedding: null`（约定是"交给向量服务用自己的模型编码"），这条早退把联想整条跳过
+- 碎片记忆没这个问题：语料跟着 profile 走（`memory_fragments` / `memory_v2_<指纹>`），本地那天查 768 的库，只是召回旧记忆打折（审计记 `fallbackReason`）
+
+**修复（方案 A：语料按维度分流，不做维度预检）**：
+
+1. `memory_triples` 新增 `embedding_profile` 列（`migrateChatMemoryV3Schema` 里补列 + 存量库 `ALTER TABLE`）
+2. `tripleCorpusFor(profile)`：`memory_triples_<指纹>`；本地兜底占 `memory_triples_local_builtin`（独立 collection，768，不与远端 1024 混库）；指纹为空 = 分流前的存量行，回落到共享语料 `memory_triples_v1`（该语料此后只用来删，不再写）
+3. 写/删两侧同源：`indexMemoryTriple` 按嵌入结果的 profile 选语料并落 `embedding_profile`；`triple_delete` 任务把 profile 记进 job（回滚/清空事务会先删行，任务跑起来已经读不到列）
+4. `activeSearch` 去掉 `if (!embedding) return []`，null 透传给向量服务本地编码，语料跟着同一个 profile
+5. 启动补嵌 `backfillTriplesWithoutEmbeddingProfile()`（判据就是"还没有指纹"，嵌完自然归零，所以不需要开关位），挂在 `ensureDefaultMemoryIndexes` 上；`reindexAllMemories()` 与 `retry-failed` 也一并带上三元组
+6. vector-service：`MEMORY_TRIPLES_PREFIX` 进白名单，`_is_profile_corpus()` 被两条前缀分支共用（指纹允许下划线——本地兜底指纹就是 `local_builtin`，早先的 `isalnum()` 会把它判成非法语料）
+
+**验证**：237/237 测试通过；本机 17 个三元组补嵌后 `embedding_profile` 全为 `5006f4a66a1d8f61`、`embedding_state='indexed'`，真实 `activeMemorySearch` 的三个查询都出现 `triple` 命中；本地兜底语料 upsert→search→delete 往返通（768 维自洽）；反证：把 768 维查询打到 1024 维集合仍是 500，所以本地必须独立 collection。
+
+**遗留**：共享语料 `memory_triples_v1`（chroma collection `memory_fragments_memory_triples`）里还留着分流前写入的 17 条 1024 维向量，已无人写入也无人查询，可择机清理。
+
 ---
 
 ## 长期备选（未排期）

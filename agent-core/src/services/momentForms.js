@@ -6,7 +6,6 @@ export const MOMENT_FORMS = [
   { name: '纯图党', desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字', weight: 0.6, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽', len: '30-80字', weight: 1.0, nightBoost: false },
   { name: '冷幽默', desc: '一句或几句自嘲冷幽默，结尾抖个小包袱', len: '15-50字', weight: 0.7, nightBoost: false },
-  { name: '清单体', desc: '围绕同一件事或同一个主题把细节逐条列出来，条目感强，不要混入另一件事', len: '30-100字', weight: 0.7, nightBoost: false },
   { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '20-80字', weight: 0.4, nightBoost: false },
   { name: '抛个问题', desc: '整条就是一个具体问题或求助，带够场景让人能回答；禁止"有没有人懂这种感觉"这类空泛句式', len: '15-45字', weight: 0.8, nightBoost: false },
   { name: '颜文字体', desc: '用颜文字或半角符号代替 emoji 表达状态，配一句极短的话', len: '0-20字', weight: 1.0, nightBoost: true },

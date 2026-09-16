@@ -78,6 +78,8 @@ test('v3 迁移：扩列、回填 valid_from、建实体/三元组表、FTS 六�
     for (const table of ['memory_entities', 'memory_entity_links', 'memory_triples', 'memory_consolidation_jobs', 'portrait_suggestions']) {
       assert.ok(tableColumns(db, table).size > 0, `缺少新表 ${table}`);
     }
+    // 三元组语料随嵌入 profile 分流（方案 A）需要这一列
+    assert.ok(tableColumns(db, 'memory_triples').has('embedding_profile'), 'memory_triples 缺少 embedding_profile 列');
 
     // 存量行 valid_from 回填为 updated_at
     const legacy = db.prepare(`SELECT valid_from, valid_to, importance, strength FROM memory_fragments WHERE memory_id = 'mem_legacy_1'`).get();
@@ -108,6 +110,38 @@ test('v3 迁移：扩列、回填 valid_from、建实体/三元组表、FTS 六�
       db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments_fts`).get().count,
       db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments`).get().count,
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 迁移：存量 memory_triples 表补 embedding_profile 列，旧行保留待补嵌', () => {
+  const db = createV2Db();
+  try {
+    db.prepare(`CREATE TABLE memory_triples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id TEXT NOT NULL,
+      subject_text TEXT NOT NULL,
+      predicate TEXT NOT NULL,
+      object_text TEXT NOT NULL,
+      valid_from DATETIME,
+      valid_to DATETIME,
+      embedding_state TEXT NOT NULL DEFAULT 'disabled',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    db.prepare(`INSERT INTO memory_triples(memory_id, subject_text, predicate, object_text, embedding_state)
+      VALUES ('mem_legacy_1', '她', '讨厌', '香菜', 'indexed')`).run();
+
+    migrateChatMemoryV3Schema(db);
+
+    assert.ok(tableColumns(db, 'memory_triples').has('embedding_profile'));
+    const row = db.prepare(`SELECT embedding_profile, embedding_state FROM memory_triples WHERE memory_id = 'mem_legacy_1'`).get();
+    // 指纹为空 = 分流前的共享语料形态，向量还在 memory_triples_v1 里，由启动补嵌重新入队
+    assert.equal(row.embedding_profile, null);
+    assert.equal(row.embedding_state, 'indexed');
+
+    migrateChatMemoryV3Schema(db); // 幂等：重复执行不报错
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM memory_triples`).get().count, 1);
   } finally {
     db.close();
   }

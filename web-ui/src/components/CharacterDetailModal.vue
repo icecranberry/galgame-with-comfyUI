@@ -34,8 +34,8 @@
                 <div class="detail-rel-header">
                   <span class="detail-rel-title">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                      <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                      <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
+                      <line x1="9" y1="6" x2="11" y2="14" /><line x1="15" y1="6" x2="13" y2="14" />
                     </svg>
                     角色关系网
                   </span>
@@ -45,19 +45,23 @@
                       variant="secondary"
                       class="detail-rel-btn"
                       @click="$emit('open-deduction', character)"
-                    >推演关系</linshe-button>
+                    >
+推演关系
+</linshe-button>
                     <linshe-button
                       v-if="detail.relationships.length > 0"
                       variant="secondary"
                       class="detail-rel-btn"
                       @click="$emit('open-relation-graph', character)"
-                    >管理关系图 &rarr;</linshe-button>
+                    >
+管理关系图 &rarr;
+</linshe-button>
                   </div>
                 </div>
                 <div v-if="detail.relationships.length > 0" class="detail-rel-list">
                   <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
                     <span class="rel-from">{{ character?.display_name }}</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
                     <span class="rel-to">{{ rel.to_display_name }}</span>
                     <span class="rel-text">{{ rel.relationship_text }}</span>
                   </div>
@@ -74,14 +78,14 @@
                     <div class="detail-rel-ctas">
                       <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-deduction', character)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                         </svg>
                         推演关系
                       </linshe-button>
                       <linshe-button variant="primary" class="detail-rel-btn" @click="$emit('open-relation-graph', character)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                          <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="17" r="3"/>
-                          <line x1="9" y1="6" x2="11" y2="14"/><line x1="15" y1="6" x2="13" y2="14"/>
+                          <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
+                          <line x1="9" y1="6" x2="11" y2="14" /><line x1="15" y1="6" x2="13" y2="14" />
                         </svg>
                         手动设置关系
                       </linshe-button>
@@ -108,7 +112,7 @@
             <div class="mobile-detail-toolbar" v-if="isMobile">
               <div class="toolbar-title">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                  <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
                 </svg>
                 更多设置
               </div>
@@ -148,7 +152,7 @@
               <linshe-button variant="secondary" @click="openRefineModal">修正外观</linshe-button>
               <div class="recruit-appearance-hint">
                 外观描述补充tag查阅
-                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{character?.name}}</a>
+                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{ character?.name }}</a>
               </div>
               <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
             </div>
@@ -160,7 +164,7 @@
           <div class="float-panel">
             <div class="float-panel-header">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
               </svg>
               更多设置
             </div>
@@ -219,7 +223,7 @@
               <TransitionGroup name="lora-card" tag="div" class="lora-list">
                 <div v-for="(item, idx) in loraItems" :key="idx" class="lora-item-card">
                   <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeLoraGroup(idx)" title="移除">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                   </linshe-button>
                   <div class="lora-item-row">
                     <div class="form-group lora-path-group">
@@ -284,7 +288,7 @@
 
               <!-- ── 添加 Lora 按钮 ── -->
               <div class="lora-add-btn" role="button" tabindex="0" @click="addLoraGroup" @keydown.enter.prevent="addLoraGroup" @keydown.space.prevent="addLoraGroup">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 添加 LoRA
               </div>
 
@@ -296,7 +300,7 @@
                 <span class="lora-checkbox-wrap">
                   <input type="checkbox" v-model="customWorkflowEnabled" class="lora-checkbox" />
                   <span class="lora-checkmark">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                   </span>
                 </span>
                 <span class="lora-check-text">启用自定义工作流</span>
@@ -315,7 +319,7 @@
                   <span class="lora-checkbox-wrap">
                     <input type="checkbox" v-model="artistOverrideEnabled" class="lora-checkbox" />
                     <span class="lora-checkmark">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                     </span>
                   </span>
                   <span class="lora-check-text">单独设置画师串</span>
@@ -331,10 +335,6 @@
 
             <div class="modal-actions" style="margin-top:16px">
               <span class="lora-civitai-label">LoRA 获取：</span>
-              <a :href="civitaiSearchUrl" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">
-                CivitAI 搜索：{{ civitaiDisplayName }}
-              </a>
-              <span class="lora-civitai-label">或</span>
               <a :href="civitaiRedSearchUrl" target="_blank" rel="noopener noreferrer" class="lora-civitai-link">
                 CivitAI.red 搜索：{{ civitaiDisplayName }}
               </a>
@@ -365,7 +365,7 @@
               <TransitionGroup name="lora-card" tag="div" class="lora-list">
                 <div v-for="(item, idx) in outfitItems" :key="item.id ?? `new-${idx}`" class="lora-item-card" :class="{ 'outfit-deleted': item._deleted }">
                   <linshe-button variant="icon" size="sm" class="lora-remove-btn" @click="removeOutfit(idx)" title="移除">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                   </linshe-button>
                   <div class="lora-item-row">
                     <div class="form-group lora-path-group">
@@ -395,7 +395,7 @@
               </div>
 
               <linshe-button variant="secondary" size="sm" class="lora-add-btn" @click="addOutfit">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 添加形态
               </linshe-button>
             </div>
@@ -431,14 +431,14 @@
           @keydown.space.prevent="openRefineFilePicker"
         >
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
           </svg>
           <span class="refine-dropzone-title">点击上传或拖拽图片到这里</span>
           <span class="refine-dropzone-sub">PNG / JPG / WEBP，不超过 6MB，也可以直接 Ctrl+V 粘贴</span>
         </div>
         <linshe-button v-if="!refineImage" variant="secondary" block class="refine-recent-btn" :disabled="refineAnalyzing" @click="openRecentPicker">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
           </svg>
           从最近图片中挑选并截取
         </linshe-button>
@@ -586,10 +586,6 @@ const customWorkflowOptions = computed(() =>
   filteredWorkflows.value.map(w => ({ value: w.filename, label: w.label }))
 )
 
-const civitaiSearchUrl = computed(() => {
-  const name = (props.character?.name || props.character?.display_name || '').replaceAll('_', ' ')
-  return `https://civitai.com/search/models?baseModel=Anima&sortBy=models_v9&query=${encodeURIComponent(name)}`
-})
 const civitaiRedSearchUrl = computed(() => {
   const name = (props.character?.name || props.character?.display_name || '').replaceAll('_', ' ')
   return `https://civitai.red/search/models?baseModel=Anima&sortBy=models_v9&query=${encodeURIComponent(name)}`

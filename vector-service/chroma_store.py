@@ -14,6 +14,27 @@ DEFAULT_CORPUS = "memory_fragments"
 IMAGE_PROMPT_CORPUS = "image_prompt_knowledge"
 CHAT_MEMORY_PREFIX = "memory_v2_"
 MEMORY_TRIPLES_CORPUS = "memory_triples_v1"
+# 三元组语料随嵌入 profile 分流（agent-core 方案 A）：memory_triples_<指纹>，
+# 本地兜底模型占 memory_triples_local_builtin，各自独立 collection 保证维度自洽。
+MEMORY_TRIPLES_PREFIX = "memory_triples_"
+
+# 语料白名单只此一份：server.py 的请求模型直接用它做校验（Field(pattern=CORPUS_PATTERN)）。
+# 此前这段白名单在 server.py 的 5 个请求模型里各写了一份字面量，新增 memory_triples_v1 时
+# 只补了下面 _collection_name() 的分支、漏了 pattern，于是三元组的写入与检索全部 422
+# （query-to-triple 联想从上线起就是死的，memory_triples 全部卡在 embedding_state='failed'）。
+CORPUS_PATTERN = "^(" + "|".join([
+    DEFAULT_CORPUS,
+    IMAGE_PROMPT_CORPUS,
+    MEMORY_TRIPLES_CORPUS,
+    f"{MEMORY_TRIPLES_PREFIX}[A-Za-z0-9_]+",
+    f"{CHAT_MEMORY_PREFIX}[A-Za-z0-9_]+",
+]) + ")$"
+
+
+def _is_profile_corpus(corpus: str, prefix: str) -> bool:
+    """<prefix><指纹> 形态。指纹允许下划线：本地兜底的指纹就是 local_builtin。"""
+    suffix = corpus[len(prefix):] if corpus.startswith(prefix) else ""
+    return bool(suffix) and all(ch.isalnum() or ch == "_" for ch in suffix)
 
 
 def _collection_name(corpus: str) -> str:
@@ -22,9 +43,12 @@ def _collection_name(corpus: str) -> str:
     if corpus == IMAGE_PROMPT_CORPUS:
         return f"{CHROMA_COLLECTION}_image_prompt_knowledge"
     if corpus == MEMORY_TRIPLES_CORPUS:
-        # Memory v3 阶段二：三元组联想扩展专用语料（docs/memory-upgrade-plan.md §5.3）
+        # 分流前的共享语料（存量向量在这里，agent-core 只用来删、不再写）
         return f"{CHROMA_COLLECTION}_memory_triples"
-    if corpus.startswith(CHAT_MEMORY_PREFIX) and corpus[len(CHAT_MEMORY_PREFIX):].isalnum():
+    if _is_profile_corpus(corpus, MEMORY_TRIPLES_PREFIX):
+        # Memory v3 阶段二：三元组联想扩展专用语料（docs/memory-upgrade-plan.md §5.3）
+        return f"{CHROMA_COLLECTION}_{corpus}"
+    if _is_profile_corpus(corpus, CHAT_MEMORY_PREFIX):
         return f"{CHROMA_COLLECTION}_{corpus}"
     raise ValueError(f"unsupported corpus: {corpus}")
 

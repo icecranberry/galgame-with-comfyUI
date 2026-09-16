@@ -196,6 +196,7 @@ async function _chatSyncFreeEgg(messages, opts) {
  * @param {AbortSignal} opts.signal - 覆盖排队、退避、请求与免费模型切换；取消后不再重发
  * @param {number} opts.timeout - SDK 单次请求超时 ms（不含排队）；缺省沿用 SDK 默认
  * @param {number} opts.maxRetries - SDK 内部重试次数；与外层 retries 独立，缺省不变
+ * @param {boolean} opts.returnMeta - true 时返回 { content, finishReason }（判断是否被 max_tokens 截断）；缺省仍只返回 content 字符串
  * @param {boolean} opts.freeEggFailover - false 禁止免费模型轮换/回退自有端点，缺省保持旧行为
  * 单次请求用 { signal, timeout: 10000, retries: 0, maxRetries: 0, freeEggFailover: false }。
  */
@@ -208,13 +209,16 @@ export async function chatSync(messages, opts = {}) {
     throw new TypeError('chatSync maxRetries must be a nonnegative integer');
   }
   try {
-    if (config.llm.freeEgg) return await _chatSyncFreeEgg(messages, opts);
-    return await _chatSyncInner(messages, opts);
+    const result = config.llm.freeEgg
+      ? await _chatSyncFreeEgg(messages, opts)
+      : await _chatSyncInner(messages, opts);
+    return opts.returnMeta ? result : result.content;
   } catch (err) {
     throwIfSyncAborted(opts.signal, err);
     if (err && err.__freeEggFailover && opts.freeEggFailover !== false) {
       console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'sync'})`);
-      return await _chatSyncInner(messages, opts);
+      const retried = await _chatSyncInner(messages, opts);
+      return opts.returnMeta ? retried : retried.content;
     }
     throw err;
   }
@@ -388,7 +392,8 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       throwIfSyncAborted(signal);
       const res = await getClient().chat.completions.create(params, requestOptions);
       throwIfSyncAborted(signal);
-      const content = res.choices[0].message.content;
+      const choice = res.choices[0];
+      const content = choice.message.content;
 
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
       console.log(requestLog);
@@ -400,7 +405,8 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       recordLlmCall(label, res.usage);
       console.log('═════════════════════════════════════════════\n');
 
-      return content;
+      // finish_reason 只在 opts.returnMeta 时回传：调用方用它判断输出是不是被 max_tokens 砍断
+      return { content, finishReason: choice.finish_reason ?? null };
     } catch (err) {
       throwIfSyncAborted(signal, err);
       lastError = err;

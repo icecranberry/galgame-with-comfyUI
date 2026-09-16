@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { selectMemorySourceRows } from './memoryExtractor.js';
+import {
+  CURATION_MAX_ACTIONS,
+  buildMemoryCurationPrompt,
+  parseMemoryActions,
+  planCurationRecovery,
+  selectMemorySourceRows,
+} from './memoryExtractor.js';
 import { buildChatLogLines, buildChatLogBlock } from './chatLogPrompt.js';
 import { stripBracePromptBlocks } from '../utils/groupImagePrompt.js';
 
@@ -92,4 +98,31 @@ test('stripBracePromptBlocks removes legacy curly-quote JSON but keeps the same 
   );
   assert.equal(stripBracePromptBlocks('没有花括号的普通发言'), '没有花括号的普通发言');
   assert.equal(stripBracePromptBlocks('{a,b}\n{a,b}'), '');
+});
+
+// 输出被 max_tokens 砍断时输出的是半截 JSON（Unterminated string），json 模式补发修不好，
+// 只能让模型少写几条重发；只有纯格式问题才值得补发 json 模式。
+test('被截断走精简重发，格式问题才走 json 模式', () => {
+  assert.equal(planCurationRecovery({ finishReason: 'length' }), 'compact');
+  assert.equal(planCurationRecovery({ finishReason: 'length', parseFailed: true }), 'compact');
+  assert.equal(planCurationRecovery({ finishReason: 'stop', parseFailed: true }), 'json');
+  assert.equal(planCurationRecovery({ finishReason: 'stop' }), null);
+  assert.equal(planCurationRecovery(), null);
+});
+
+test('prompt 里声明的条数上限与解析时的截断一致', () => {
+  assert.match(buildMemoryCurationPrompt({ transcript: '[小明] 你好' }), new RegExp(`最多输出 ${CURATION_MAX_ACTIONS} 条`));
+  assert.match(buildMemoryCurationPrompt({ transcript: '[小明] 你好', compact: true }), /被截断：这次最多输出 4 条/);
+  // 不落库的 maibot 路径输出预算只有 1800，条数上限更小
+  assert.match(buildMemoryCurationPrompt({ transcript: '[小明] 你好', v3: false, maxActions: 5 }), /最多输出 5 条/);
+});
+
+test('parseMemoryActions 解析并截断到上限', () => {
+  const raw = JSON.stringify({
+    memoryActions: Array.from({ length: 15 }, (_, index) => ({ action: 'create', memory: { judgment: `j${index}` } })),
+  });
+  assert.equal(parseMemoryActions(raw).length, CURATION_MAX_ACTIONS);
+  assert.equal(parseMemoryActions('```json\n{"memoryActions":[]}\n```').length, 0);
+  // 被 max_tokens 砍断的真实形状：JSON 停在某个字符串中间
+  assert.throws(() => parseMemoryActions('{"memoryActions":[{"action":"create","memory":{"judgment":"被砍断的半句'), /Unterminated string/);
 });
