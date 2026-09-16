@@ -193,6 +193,22 @@ router.put('/standing-mode', (req, res) => {
   res.json({ ok: true, mode });
 });
 
+// ── 角色置顶 ──
+// 必须注册在 put('/:id') 之前，避免被参数路由吞掉
+
+// PUT /api/characters/:id/pin — 设置角色置顶状态
+router.put('/:id/pin', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  // 幂等的「设置为」而非 toggle：前端每次显式传目标值，避免两端状态打架
+  const { pinned } = req.body || {};
+  const val = pinned ? 1 : 0;
+  db.prepare('UPDATE characters SET pinned = ? WHERE id = ?').run(val, req.params.id);
+  res.json({ ok: true, pinned: val });
+});
+
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();

@@ -39,6 +39,22 @@
         </div>
       </div>
 
+      <!-- 左上角置顶按钮 -->
+      <div
+        class="card-pin-btn"
+        :class="{ pinned: char.pinned, 'like-burst': pinBursting }"
+        role="button"
+        tabindex="0"
+        :title="char.pinned ? '取消置顶' : '置顶'"
+        @click.stop="onPin"
+        @keydown.enter.prevent="onPin"
+        @keydown.space.prevent="onPin"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" :fill="char.pinned ? 'currentColor' : 'none'" :stroke="char.pinned ? 'none' : 'currentColor'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+      </div>
+
       <!-- 右上角相机按钮（有日程才显示） -->
       <div
         v-if="tagList.length"
@@ -93,15 +109,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
+import { useBurst } from '../composables/useBurst.js'
 
 const props = defineProps<{
   char: any
 }>()
 
-const emit = defineEmits(['select', 'peek', 'wake'])
+const emit = defineEmits(['select', 'peek', 'wake', 'pin'])
 
 const wakeShaking = ref(false)
 const wakeBusy = ref(false)
+
+// 置顶按钮的点击特效：复用 animations.css 的 .like-burst（爱心 pop + 粒子环）。
+// 状态卡每张都是独立实例，用单元素形态即可。
+const { bursting: pinBursting, burst: burstPin } = useBurst()
+
+function onPin() {
+  burstPin()
+  emit('pin')
+}
 
 function onWake() {
   if (wakeBusy.value) return
@@ -237,6 +263,30 @@ const footnote = computed(() => {
 .peek-btn:hover {
   background: rgba(var(--accent-rgb),0.08);
   color: var(--accent);
+}
+
+/* ── 左上角置顶按钮（未置顶时悬停卡片才浮现） ── */
+.card-pin-btn {
+  position: absolute; top: 6px; left: 6px;
+  z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  box-sizing: border-box;
+  border: none; background: transparent;
+  color: var(--text-secondary); cursor: pointer; user-select: none;
+  transition: all 0.2s;
+  opacity: 0;
+}
+.status-card:hover .card-pin-btn { opacity: 0.6; }
+.card-pin-btn:hover {
+  opacity: 1;
+  background: rgba(var(--accent-rgb),0.08);
+  color: var(--accent);
+}
+.card-pin-btn.pinned {
+  opacity: 1;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb),0.1);
 }
 
 /* ── Top ── */

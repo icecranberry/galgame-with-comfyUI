@@ -61,6 +61,11 @@ export async function updateCharacter(id, data) {
   return request(`/characters/${id}`, { method: 'PUT', body: data })
 }
 
+// 设置角色置顶状态（幂等写入，不是 toggle —— 传目标值）
+export async function togglePin(characterId, pinned) {
+  return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
+}
+
 // ── 角色专属外观/形态 ──
 export function listCharacterOutfits(characterId) {
   return request(`/characters/${characterId}/outfits`)

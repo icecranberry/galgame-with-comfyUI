@@ -903,6 +903,9 @@ function initSchema(db) {
   // 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
   migrateChatBgSchema(db);
 
+  // 迁移: 角色置顶 — characters 表新增 pinned 列
+  migratePinSchema(db);
+
   // 迁移: 奇遇强调降格 — character_events 表新增 emphasis_delivered 列
   migrateEventEmphasisSchema(db);
 
@@ -2289,6 +2292,21 @@ function migrateOathSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateOathSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色置顶 — characters 表新增 pinned 列（默认 0，未置顶）
+ */
+export function migratePinSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'pinned')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN pinned INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.pinned column');
+    }
+  } catch (err) {
+    console.log('[db] migratePinSchema error:', err.message);
   }
 }
 

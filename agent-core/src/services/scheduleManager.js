@@ -634,7 +634,7 @@ export function getAllOverview() {
   const now = new Date();
 
   const chars = db.prepare(`
-    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode
+    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode, pinned
     FROM characters
     ORDER BY display_name ASC
   `).all();
@@ -660,6 +660,7 @@ export function getAllOverview() {
       temporary_wake_until: char.temporary_wake_until,
       wake_mode: char.wake_mode,
       is_temp_woken: tempWoken,
+      pinned: char.pinned ? 1 : 0,
     };
   });
 }

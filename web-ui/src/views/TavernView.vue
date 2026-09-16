@@ -148,9 +148,9 @@
       </div>
       <span class="relation-entry-arrow">›</span>
     </div>
-    <div class="char-grid">
+    <TransitionGroup name="char-pin" tag="div" class="char-grid" :class="{ stagger: gridStagger }">
         <!-- 表情包管理入口：永远在招募前 -->
-        <div class="char-card emoji-manage-card" @click="showEmojiManager = true">
+        <div key="emoji-manage" class="char-card emoji-manage-card" @click="showEmojiManager = true">
           <div class="emoji-manage-icon">
             <svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true">
               <path d="M334.711467 160.290133a413.013333 413.013333 0 0 1 239.547733-48.674133 37.614933 37.614933 0 0 1-7.509333 74.683733A338.056533 338.056533 0 0 0 197.973333 567.022933a337.92 337.92 0 0 0 672.9728-42.5984v-37.546666a37.546667 37.546667 0 1 1 75.093334 0v37.751466a413.013333 413.013333 0 1 1-611.328-364.3392z"/>
@@ -161,7 +161,7 @@
         </div>
 
       <!-- 招募卡片：永远在第一格 -->
-      <div class="char-card recruit-card" @click="openRecruit">
+      <div key="recruit" class="char-card recruit-card" @click="openRecruit">
         <div class="recruit-plus">+</div>
         <span>招募</span>
       </div>
@@ -173,6 +173,21 @@
         class="char-card"
         @click="openCharDetail(c)"
       >
+        <!-- 左上角置顶按钮 -->
+        <div
+          class="char-pin-btn"
+          :class="{ pinned: c.pinned, 'like-burst': burstKey === c.id }"
+          role="button"
+          tabindex="0"
+          :title="c.pinned ? '取消置顶' : '置顶'"
+          @click.stop="onPinClick(c)"
+          @keydown.enter.prevent="onPinClick(c)"
+          @keydown.space.prevent="onPinClick(c)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" :fill="c.pinned ? 'currentColor' : 'none'" :stroke="c.pinned ? 'none' : 'currentColor'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          </svg>
+        </div>
         <div v-if="c.moments_disabled || c.proactive_disabled || c.events_disabled" class="char-card-badges">
           <span v-if="c.moments_disabled" class="char-status-dot dot-moments" title="不看ta的朋友圈"></span>
           <span v-if="c.proactive_disabled" class="char-status-dot dot-proactive" title="不主动聊天"></span>
@@ -205,7 +220,7 @@
           </span>
         </div>
       </div>
-    </div>
+    </TransitionGroup>
 
     <!-- ═══════════════════════════════════════════
          招募弹窗
@@ -576,7 +591,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, inject, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
@@ -591,6 +606,7 @@ import BackpackModal from '../components/BackpackModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import { useBurst } from '../composables/useBurst.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useBackpackStore } from '../stores/backpack.js'
 
@@ -605,11 +621,13 @@ const showEmojiManager = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
 const backpackChestReady = computed(() => backpackStore.chestReady)
 
-// 按 display_name 首字母排序（中文按拼音）
+// 置顶优先，组内按 display_name 首字母排序（中文按拼音）
 const sortedCharacters = computed(() =>
-  [...chat.characters].sort((a, b) =>
-    (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
-  )
+  [...chat.characters].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
+  })
 )
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -1227,6 +1245,33 @@ async function confirmPolish() {
 async function openCharDetail(c) {
   detailChar.value = c
   detailVisible.value = true
+}
+
+// ── 角色置顶 ──
+const { burstKey, burst: burstPin } = useBurst()
+
+// 首屏错峰入场：.stagger 的动画跑完就摘掉，不能常驻。
+// 常驻有两个副作用：① 位移过渡前的自检会读到时长更长的入场动画，判定成 animation
+// 后整段 FLIP 被跳过，卡片直接跳位；② DOM 位移会让入场动画重播，重排的卡片先「消失」
+// 再淡回来。摘掉后两个问题都没有，入场动画仍照常播一次。
+const gridStagger = ref(true)
+let staggerTimer = null
+onMounted(() => {
+  // 最长一档错峰是 440ms 延迟 + 450ms 动画
+  staggerTimer = setTimeout(() => { gridStagger.value = false }, 1000)
+})
+onUnmounted(() => clearTimeout(staggerTimer))
+
+// 置顶按钮：先播一次爆心特效，再切状态（重排由 TransitionGroup 的 FLIP 兜住）
+function onPinClick(c) {
+  burstPin(c.id)
+  toggleCharPin(c)
+}
+
+async function toggleCharPin(c) {
+  // sortedCharacters 是浅拷贝，元素与 store 同引用，改这里即改 store
+  c.pinned = c.pinned ? 0 : 1
+  try { await api.togglePin(c.id, c.pinned) } catch {}
 }
 
 function closeCharDetail() {
@@ -2012,10 +2057,49 @@ onMounted(async () => {
 .dot-moments { background: #b0a0d0; }
 .dot-proactive { background: #e8a87c; }
 .dot-events { background: #c0a0a0; }
+
+/* ── 左上角置顶按钮（常驻半透明，悬停加深） ── */
+.char-pin-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  opacity: 0.5;
+}
+
+.char-pin-btn:hover {
+  opacity: 1;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+}
+
+.char-pin-btn.pinned {
+  opacity: 1;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
 .char-card:hover {
   background: rgba(255, 255, 255, 0.45);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   transform: translateY(-2px);
+}
+
+/* ── 置顶 / 取消置顶后卡片重排：TransitionGroup 的 FLIP 位移过渡 ── */
+.char-card.char-pin-move {
+  transition: transform var(--dur-slow) var(--ease-out);
 }
 
 .char-card-avatar {

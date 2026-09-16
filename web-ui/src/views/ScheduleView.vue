@@ -41,6 +41,7 @@
               @select="onSelectChar(c.id)"
               @peek="onCardPeek(c.id)"
               @wake="onCardWake(c.id)"
+              @pin="toggleCharPin(c)"
             />
           </div>
         </template>
@@ -393,7 +394,12 @@ const filterPills = [
 // ── 数据增强：解析 current_activity → _location + _behavior ──
 const enrichedChars = computed(() => {
   return [...store.characters]
-    .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN'))
+    // 置顶优先，组内按 display_name 首字母（中文按拼音）
+    .sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1
+      if (!a.pinned && b.pinned) return 1
+      return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
+    })
     .map(c => {
     const raw = c.current_activity || ''
     const sep = raw.indexOf(' · ')
@@ -884,6 +890,16 @@ async function onCardWake(id: number) {
     toastFn('叫醒失败: ' + (err.message || '未知错误'), 'error')
     await store.fetchOverview(true)
   }
+}
+
+// ── 卡片置顶 ──
+async function toggleCharPin(c: any) {
+  const pinned = c.pinned ? 0 : 1
+  c.pinned = pinned
+  // enrichedChars 是 .map() 出来的副本，必须回写 store 源对象，否则切页签后状态回退
+  const src = store.characters.find((ch: any) => ch.id === c.id)
+  if (src) src.pinned = pinned
+  try { await api.togglePin(c.id, pinned) } catch {}
 }
 
 // ── 叫醒系统（抽屉内） ──

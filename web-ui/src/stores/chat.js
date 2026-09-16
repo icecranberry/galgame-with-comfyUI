@@ -45,6 +45,19 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadCharacters() {
     try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
+    sortCharactersByPin()
+  }
+
+  // 置顶优先 + 最近消息时间降序（置顶组内部仍按消息时间排）
+  function sortCharactersByPin() {
+    characters.value.sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1
+      if (!a.pinned && b.pinned) return 1
+      if (!a.last_message_at && !b.last_message_at) return 0
+      if (!a.last_message_at) return 1
+      if (!b.last_message_at) return -1
+      return new Date(b.last_message_at) - new Date(a.last_message_at)
+    })
   }
 
   async function loadMessages(charId) {
@@ -800,13 +813,8 @@ export const useChatStore = defineStore('chat', () => {
     if (char) {
       char.last_message = data.content
       char.last_message_at = data.created_at
-      // 按最后消息时间降序重排，让主动发消息的角色冒泡到顶部
-      characters.value.sort((a, b) => {
-        if (!a.last_message_at && !b.last_message_at) return 0
-        if (!a.last_message_at) return 1
-        if (!b.last_message_at) return -1
-        return new Date(b.last_message_at) - new Date(a.last_message_at)
-      })
+      // 重排（置顶优先 + 时间降序），让主动发消息的角色冒泡到置顶组内最前
+      sortCharactersByPin()
       // 通知 Sidebar 滚动到顶部，用户能直接看到是谁发来的
       sidebarScrollSignal.value++
     }
@@ -878,12 +886,7 @@ export const useChatStore = defineStore('chat', () => {
       const firstMsg = data.messages?.[0]
       char.last_message = firstMsg?.content || '(延迟回复)'
       char.last_message_at = data.created_at
-      characters.value.sort((a, b) => {
-        if (!a.last_message_at && !b.last_message_at) return 0
-        if (!a.last_message_at) return 1
-        if (!b.last_message_at) return -1
-        return new Date(b.last_message_at) - new Date(a.last_message_at)
-      })
+      sortCharactersByPin()
       sidebarScrollSignal.value++
     }
 
