@@ -3,7 +3,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { hybridSearch } from './memorySearch.js';
 import { applyMemoryActions, getCheckpoint, setCheckpoint } from './memory/memoryRepository.js';
 import { isMemoryV3Enabled } from './memory/memoryConfig.js';
-import { cleanChatText } from '../maibot-bridge/textCleaner.js';
+import { buildAnalysisUserContent, buildChatLogLines, buildSharedAnalysisSystemPrompt, wrapChatLogBlock } from './chatLogPrompt.js';
 
 const conversationQueues = new Map();
 const CURATE_EVERY_N_MESSAGES = 40; // 每 40 句整理一次长期记忆
@@ -44,7 +44,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
   const startId = messages[0].id;
   const endId = messages[messages.length - 1].id;
   const sourceMessageId = db.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND raw_id = ? ORDER BY id LIMIT 1`).get(conversationId, startId)?.id || null;
-  const transcript = messages.map(item => `[${item.role === 'user' ? (userName || 'user') : (characterName || item.role)}] ${cleanChatText(item.content)}`).join('\n');
+  const transcript = buildChatLogLines(messages, { userName, characterName });
   // v3 事件时间：取窗口内最后一条 user 消息时间（服务端事实来源，不让 LLM 猜时间）
   const lastUserRow = [...messages].reverse().find(item => item.role === 'user');
   const eventTime = lastUserRow?.created_at || messages[messages.length - 1]?.created_at || null;
@@ -53,14 +53,28 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
 
   try {
     const related = await hybridSearch(transcript, { conversationId, topK: 12, timeoutMs: 20000 });
-    const prompt = buildMemoryCurationPrompt({ transcript, related, timeRange });
-    let raw = await chatSync([{ role: 'user', content: prompt }], {
+    const curationMessages = buildCurationMessages({ transcript, related, timeRange });
+    // 不带 response_format 发：部分渠道会给 json 模式额外注入 token，导致 prompt 前缀与
+    // 对话摘要对不上、整段聊天记录掉命中（实测 18% vs 93%）。prompt 本身已强制严格 JSON，
+    // 万一模型没照做，再用 json 模式补发一次。
+    const raw = await chatSync(curationMessages, {
       temperature: 0.2,
       max_tokens: 3000,
-      response_format: { type: 'json_object' },
       label: '聊天记忆整理',
     });
-    const actions = parseMemoryActions(raw);
+    let actions;
+    try {
+      actions = parseMemoryActions(raw);
+    } catch (parseError) {
+      console.warn(`[memoryExtractor] 输出非严格 JSON，改用 json 模式补发一次: ${parseError.message}`);
+      const strict = await chatSync(curationMessages, {
+        temperature: 0.2,
+        max_tokens: 3000,
+        response_format: { type: 'json_object' },
+        label: '聊天记忆整理(json回退)',
+      });
+      actions = parseMemoryActions(strict);
+    }
     const saved = applyMemoryActions({ conversationId, sourceRawStartId: startId, sourceRawEndId: endId, sourceMessageId, actions, eventTime });
     setCheckpoint(conversationId, endId, 'idle', null);
     console.log(`[memoryExtractor] curated ${saved.length} memories for ${conversationId}, raw ${startId}-${endId}`);
@@ -111,8 +125,22 @@ export function buildMemoryCurationPrompt({ transcript, related = [], timeRange 
 - entities：具体的人名/地名/事物名；代词（她/他/我/你/它）和抽象概念不算；没有就给 []
 - triple：仅当存在清晰的主谓宾事实（如 她-讨厌-香菜、他-承诺-周末看电影）才输出，谓词尽量是单个词；没有就省略整个 triple 字段`;
 
+  // 顺序即缓存：<chat_log> 排在最前（与摘要共用同一段记录），指令随后，时间窗口/旧记忆这些变量后置
   const timeBlock = timeRange ? `\n<window_time>\n${timeRange}\n</window_time>\n` : '\n';
-  return `${common}\n\n${v3 ? v3Format : v2Format}\n${timeBlock}<related_memories>\n${existing}\n</related_memories>\n\n<new_round>\n${transcript}\n</new_round>\n\n只返回严格 JSON：{"memoryActions":[{"action":"create|update|merge","sourceMemoryIds":[],"memory":{...}}]}`;
+  const chatLogBlock = wrapChatLogBlock(transcript);
+  const taskText = `${common}\n\n${v3 ? v3Format : v2Format}\n\n只返回严格 JSON：{"memoryActions":[{"action":"create|update|merge","sourceMemoryIds":[],"memory":{...}}]}\n${timeBlock}<related_memories>\n${existing}\n</related_memories>`;
+  return buildAnalysisUserContent(chatLogBlock, taskText);
+}
+
+/**
+ * 记忆整理的完整请求：共享 system 块 + 任务指令 + 聊天记录。
+ * 与对话摘要共用同一份共享前缀，两个调用能互相吃对方写进前缀缓存的 system 块。
+ */
+export function buildCurationMessages(options = {}) {
+  return [
+    { role: 'system', content: buildSharedAnalysisSystemPrompt() },
+    { role: 'user', content: buildMemoryCurationPrompt(options) },
+  ];
 }
 
 export function parseMemoryActions(raw) {
@@ -124,17 +152,12 @@ export function parseMemoryActions(raw) {
   return actions.slice(0, 8);
 }
 
-function stripPromptJson(content) {
-  return String(content || '').replace(/\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs, '').trim();
-}
-
 // 旧调用兼容；新代码应传 raw assistant id。
 
 export async function curateAccumulatedMemory({ accumulatedText, characterName = '', userName = '用户' }) {
   // 不落库的记忆整理：把累积对话整理成判断句列表，用于 MaiBot 主聊天流注入。
   // 该路径只消费 judgment，强制 v2 精简格式，避免为不落库的扩展字段浪费输出 token。
-  const prompt = buildMemoryCurationPrompt({ transcript: accumulatedText, related: [], v3: false });
-  const raw = await chatSync([{ role: 'user', content: prompt }], {
+  const raw = await chatSync(buildCurationMessages({ transcript: accumulatedText, related: [], v3: false }), {
     temperature: 0.2,
     max_tokens: 1800,
     response_format: { type: 'json_object' },

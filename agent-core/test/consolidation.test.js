@@ -761,7 +761,7 @@ test('migrateMemoryConsolidationSettings：补全 consolidation 且其余配置�
 
   const first = migrateMemoryConsolidationSettings(db);
   assert.equal(first.updated, true);
-  assert.deepEqual(first.consolidation, { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: true });
+  assert.deepEqual(first.consolidation, { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60, portraitSuggest: false });
   const stored = JSON.parse(db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'memory_settings'`).get().setting_value);
   assert.equal(stored.topK, 7, '其余配置不得被动到');
   assert.equal(stored.embedding.enabled, false);
@@ -776,7 +776,7 @@ test('migrateMemoryConsolidationSettings：旧键 dailyMaxLlmCalls 归位且不�
 
   const result = migrateMemoryConsolidationSettings(db);
   assert.equal(result.updated, true);
-  assert.deepEqual(result.consolidation, { enabled: false, idleDelayMinutes: 120, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 9, portraitSuggest: true });
+  assert.deepEqual(result.consolidation, { enabled: false, idleDelayMinutes: 120, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 9, portraitSuggest: false });
   assert.equal(result.consolidation.dailyMaxLlmCalls, undefined, '旧键被归位而非保留');
   db.close();
 });

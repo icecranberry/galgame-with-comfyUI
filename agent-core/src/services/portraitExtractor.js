@@ -7,9 +7,10 @@
  * 每个角色独立维护其"眼中"的用户画像，反映该角色对用户的独特认知。
  */
 
-import { getDb, getSystemRules } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { embedBatch } from './vectorClient.js';
+import { buildAnalysisUserContent, buildChatLogBlock, buildSharedAnalysisSystemPrompt } from './chatLogPrompt.js';
 
 const EXTRACT_INTERVAL = 10; // 每 10 条用户消息触发
 const SIMILARITY_THRESHOLD = 0.85; // 余弦相似度阈值，超过即判定为语义重复
@@ -62,9 +63,10 @@ async function checkDuplicate(characterId, traitType, content) {
   return false;
 }
 
-const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不是角色扮演角色。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。只输出被要求的结构化结果。
+// 顺序即缓存：<chat_log> 排在任务之前（见 buildAnalysisUserContent）
+const EXTRACT_PROMPT = `你是用户特征分析器。请以第三人称、客观分析师的角度工作，禁止使用任何角色扮演语气、禁止对用户说话、禁止输出情感回应。
 
-你是一个用户特征分析器。从以下对话中，提取关于"用户（user）"的特征描述。
+从 <chat_log> 里的这段用户发言中提取关于"用户"的特征描述。
 
 从两个维度分析：
 - personality: 用户的**性格特征**（开朗、冷淡、温柔、毒舌、急性子等）
@@ -81,19 +83,18 @@ const EXTRACT_PROMPT = `[系统指令] 你是一个纯信息提取工具，不�
 5. 每个维度最多输出一个，优先最有特点的
 
 输出格式：
-{"traits":[{"type":"personality","content":"性格冷静，喜欢理性分析"}]}
-
-对话内容：
-{{messages}}`;
+{"traits":[{"type":"personality","content":"性格冷静，喜欢理性分析"}]}`;
 
 /**
  * 检查并提取用户画像
  *
  * @param {string} conversationId - 会话 ID
  * @param {number} characterId - 角色 ID
+ * @param {{ userName?: string }} [nameHints] - 记录里用户行的显示名
  * @returns {Promise<number>} 新增的特征数量
  */
-export async function maybeExtractPortrait(conversationId, characterId) {
+export async function maybeExtractPortrait(conversationId, characterId, nameHints = {}) {
+  const userName = nameHints.userName || 'user';
   const db = getDb();
 
   // 统计用户消息数
@@ -126,22 +127,17 @@ export async function maybeExtractPortrait(conversationId, characterId) {
 
   if (recent.length === 0) return 0;
 
-  const messagesText = recent
-    .map(m => `[${m.role}]: ${m.content}`)
-    .join('\n');
+  const chatLogBlock = buildChatLogBlock(recent, { userName });
+  // 整段都是生图 prompt（没有真实发言）时不值得调用模型
+  if (!chatLogBlock) return 0;
 
   // 调用 LLM 提取
   let raw;
   try {
     raw = await chatSync(
       [
-        { role: 'system', content: getSystemRules({ roleplay: false }) },
-        {
-          role: 'user',
-          content: EXTRACT_PROMPT
-            .replace('{{existing_portraits}}', existingText)
-            .replace('{{messages}}', messagesText),
-        },
+        { role: 'system', content: buildSharedAnalysisSystemPrompt() },
+        { role: 'user', content: buildAnalysisUserContent(chatLogBlock, EXTRACT_PROMPT.replace('{{existing_portraits}}', existingText)) },
       ],
       { temperature: 0.3, max_tokens: 600, response_format: { type: 'json_object' }, label: '提取用户画像' }
     );

@@ -7,6 +7,7 @@
  */
 import { getDb } from '../db/index.js';
 import { curateAccumulatedMemory } from '../services/memoryExtractor.js';
+import { stripBracePromptBlocks } from '../utils/groupImagePrompt.js';
 import { cleanChatText } from './textCleaner.js';
 
 const CURATE_EVERY_N_MESSAGES = 40;
@@ -26,9 +27,9 @@ export async function saveConversation({ character, user_name = '', user_message
     return { skipped: true, memory_saved: false };
   }
 
-  // 只累积清洗后的真实发言，不写入聊天库
-  const userText = cleanChatText(user_message);
-  const replyText = cleanChatText(reply_text, { assistant: true });
+  // 只累积清洗后的真实发言（并剥掉 {} 包裹的生图 prompt），不写入聊天库
+  const userText = stripBracePromptBlocks(cleanChatText(user_message));
+  const replyText = stripBracePromptBlocks(cleanChatText(reply_text, { assistant: true }));
   // 群聊中用户昵称/ID 天然来自消息前缀，无需缺省值；为空时不写发言者前缀
   const speakerTag = user_name ? `[${user_name}] ` : '';
   const line = `${speakerTag}${userText}\n[${character.display_name || '角色'}] ${replyText}`;

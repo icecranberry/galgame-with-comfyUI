@@ -32,6 +32,7 @@ import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
 import { curateChatMemories } from './memoryExtractor.js';
+import { GROUP_LOG_LABEL } from './chatLogPrompt.js';
 import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryRepository.js';
 import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
@@ -1032,23 +1033,25 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   }
 
   // ── 后处理：每轮群聊按配置轮次整理 v2 记忆，同时推进群聊摘要 ──
+  // 摘要排在整理之前：整理会把 checkpoint 推到本批末尾，摘要要读推进前的值，
+  // 两个调用才会取到同一段记录、互相命中前缀缓存。
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {
       try {
-        await maybeExtractGroupMemory(group, { incrementRound: true });
-      } catch (err) {
-        console.error('[group] memory post-processing error:', err.message);
-      }
-      try {
         await maybeSummarize(conversationId, {
-          characterName: '群聊记录',
+          characterName: GROUP_LOG_LABEL,
           userName: chatUserName,
           triggerRole: 'assistant',
           interval: getGroupSummaryInterval(),
         });
       } catch (err) {
         console.error('[group] summarization error:', err.message);
+      }
+      try {
+        await maybeExtractGroupMemory(group, { incrementRound: true });
+      } catch (err) {
+        console.error('[group] memory post-processing error:', err.message);
       }
     } finally {
       markGroupPostProcessing(group.id, -1);
@@ -1133,8 +1136,7 @@ async function maybeExtractGroupMemory(group, { incrementRound = false } = {}) {
       await curateChatMemories({
         conversationId,
         throughRawMsgId: throughRawId,
-        characterPrompt: `这是群聊「${group.name}」的聊天记录；assistant raw 内每行开头的 [名字] 是真实发言角色。`,
-        characterName: '群聊角色',
+        characterName: GROUP_LOG_LABEL,
         userName: chatUserName,
       });
 

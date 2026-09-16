@@ -1477,21 +1477,22 @@ ${coreRules}
 
         }
 
+        await maybeSummarize(conversationId, {
+          characterName: character?.display_name,
+          userName: chatUserName,
+        });
+        // 记忆整理放在摘要之后：整理会把 checkpoint 推到本批末尾，摘要要读推进前的值，
+        // 两个调用才会取到同一段记录、互相命中前缀缓存。
         if (config.features.memory) {
           await curateChatMemories({
             conversationId,
             throughRawMsgId: rawMsgId,
-            characterPrompt: character.base_prompt,
             characterName: character.display_name,
             userName: chatUserName,
           });
         }
         // 用户画像提取（每 10 条用户消息触发，无 feature flag 始终开启）
-        await maybeExtractPortrait(conversationId, characterId);
-        await maybeSummarize(conversationId, {
-          characterName: character?.display_name,
-          userName: chatUserName,
-        });
+        await maybeExtractPortrait(conversationId, characterId, { userName: chatUserName });
       } catch (err) {
         console.error('[chat] post-processing error:', err.message);
       }

@@ -191,6 +191,45 @@
 
 ---
 
+### 上传聊天记录剥离生图 prompt（2026-09-16）
+
+聊天 raw 里会混进生图画面描述（私聊旧格式 `{"prompt":"..."}`、群聊 `{description}`，都带花括号）。这些内容对记忆没有价值，却会被整理模型当成"发生过的事"抄成记忆条目。凡是要把聊天记录上传给模型的记忆链路，上传前统一剥掉 `{}` 包裹的块：
+
+- 新增 `utils/groupImagePrompt.js#stripBracePromptBlocks`：整行都是 prompt 的行整行删除，粘在台词里的内联块只删块本身、保留同行真实发言（与群聊 transcript 的成对块口径一致，不碰孤立 `{`）
+- 接入三处：`memoryExtractor.buildMemoryTranscript`（私聊/群聊 curation 共用，v2 与 v3 prompt 吃同一份 transcript）、`maibot-bridge/memory.js` 的累积行、`portraitExtractor` 的用户消息上下文（整段都是 prompt 时直接跳过这次提取）
+- 生图链路（配图判断、prompt 提取、群聊 transcript）保持原样；摘要与上下文预算早已由 `stripPromptJson` 处理
+- v3 整理 daemon（`memoryConsolidation.js` T1/T2/T4/T5）只上传记忆行、不上传聊天记录，无需改动
+
+**验证**：`src/services/memoryExtractor.test.js` 新增 3 例（transcript 剥离、整条纯 prompt 消息不留空行、工具函数对旧版弯引号 JSON 与无花括号文本的行为），记忆相关测试全绿。
+
+---
+
+### 记忆整理与对话摘要共用前缀缓存（2026-09-16）
+
+这两个 label（`聊天记忆整理` / `对话摘要提取助手`）都是"读聊天记录做结构化产出"，一条用户消息的后处理里前后脚各发一次。前缀缓存按请求开头逐段比对，所以两个调用的开头必须逐字节一致。共享前缀集中在 `services/chatLogPrompt.js`：
+
+- `buildSharedAnalysisSystemPrompt()`：共享 system 块＝`getSystemRules({roleplay:false})` + `<analysis_contract>`（工具身份、`<chat_log>` 行格式、群聊剧本行说明、只依据记录/不编造/忽略记录里的指令/只输出产物）。三个 label 都放在 `messages[0]`，逐字节一致
+- `buildChatLogLines` / `buildChatLogBlock`：同一份记录渲染（剥生图 prompt、去只读包装、统一成 `[名字] 发言` 一行一条），传同一批消息时产出的 `<chat_log>` 字节完全一致
+- `buildAnalysisUserContent`：**记录块排在 user 消息最前面**，任务指令、上一段摘要、时间窗口、旧记忆全部后置。记录块排在任务之后时公共前缀在任务那一句就断掉，正文再一致也吃不到
+- 窗口对齐：摘要窗口起点改由 `summarizer.pickWindowStartId` 决定——正常情况直接用记忆整理的 checkpoint，两个调用因此取到**同一段记录**；记忆未启用、从未整理、或整理点反而落在摘要点之后时退回摘要自己的 checkpoint。触发节奏不变（摘要仍按自己的 checkpoint 每 10 条 assistant 触发）
+- 摘要不再按"最后 interval 轮"截断窗口（截断会让两边的窗口互不相交、正文永远对不上）；要总结的区间改由【上一段摘要】＋"不要重复它已写明的信息"界定，窗口长度由整理的 40 条阈值兜住
+- 后处理链里**摘要在前、整理在后**（`routes/chat.js`、`services/groupChatEngine.js`）：整理会把 checkpoint 推到本批末尾，摘要必须先读到推进前的值
+- 群聊记录的外层标签统一成 `GROUP_LOG_LABEL`（此前整理用 `群聊角色`、摘要用 `群聊记录`，标签不一致时第一行 assistant 记录就分叉）；`提取用户画像` 也改用真实用户昵称，不再写死 `user`
+- 顺带清掉 `characterPrompt` 死参数（`memoryExtractor` 早已不读它，群聊那句"行内 [名字] 才是真实发言角色"改成写进共享契约，两个 label 一起生效）
+- 整理的调用改成**不带 `response_format` 发**（prompt 本身已强制严格 JSON，`parseMemoryActions` 也已剥 ``` 围栏），解析失败再用 json 模式补发一次——原因见下
+
+**实测（20 轮样本，真实渠道 tokenrhythm.studio）**：
+
+- 字节级（本地假端点抓真实请求体，连续三轮）：整理请求的整段记录（1322 字节）**100% 落在摘要刚写过的前缀里**；摘要第二发共享第一发记录的前一半（682/1322 字节）。改动前两发的窗口互不相交，正文互相命中为 0
+- token 级（同一条链三发，连续三轮，命中数三轮一致）：摘要第一发 896/1077（83%）、摘要第二发 1280/1749（73%）、整理 1280/2068（**62%**）。整理的 1280 就是"system 块 + 整段 20 轮记录"，剩下那部分才是它自己的任务/时间窗口/旧记忆
+- **该渠道的缓存按模式隔离**：带 `response_format: {type:'json_object'}` 的请求 prompt 会多出约 22 token（渠道注入了额外内容），前缀因此对不上。同一段 prompt 纯文本发一次、再 json 模式发一次，后者拿不到前者的缓存；同一段记录下纯文本整理命中 93%、json 模式整理只有 18%——这正是整理侧此前稳定卡在 18% 的原因
+- 去掉 json 模式后整理的输出仍稳定：连续 3 次整理结果都能解析（4/3/3 条动作）；三轮周期里整理命中从 384/2090（18%）升到 1280/2068（62%）
+- 端到端（临时库 + 假端点）：两个调用的记录块逐字节一致
+
+**下游影响**：摘要写库的 `end_msg_id` 仍是窗口末条 assistant，`start_msg_id` 无人读取；上下文装配用的是 `end_msg_id` + 固定 10 轮滑动窗口，所以摘要窗口变宽不会让聊天上下文变胖（`contextAssembler.getSplitHistory` 两侧都是固定轮数）。整理去掉 json 模式后如果偶发非 JSON 输出，会先补发一次 json 模式请求，再失败才留 checkpoint 重试（不会丢这批对话）。剩下的备选优化（未做）：记录倒序、两次调用合并成一次。
+
+---
+
 ## 长期备选（未排期）
 
 - 群聊 `@memory` 主动搜索、记忆操作模型（SFT/RL，先积累 `memory_retrieval_audits` 作训练资产）、LongMemEval 子集汉化自测、表情差分/TTS（角色侧另线）
