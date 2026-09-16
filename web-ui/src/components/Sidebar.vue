@@ -16,13 +16,17 @@
         @click="onGroupClick(g)"
       >
         <div class="char-avatar-wrap">
-          <div class="group-avatar-grid">
-            <div
-              v-for="m in g.members.slice(0, 4)"
-              :key="m.id"
-              class="group-avatar-cell"
-              :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: 'var(--accent)' }"
-            >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+          <!-- 自定义群头像整块展示，否则退回成员拼图 -->
+          <div class="group-avatar-grid" :class="{ 'group-avatar-single': !!g.avatar_path }">
+            <img v-if="g.avatar_path" :src="g.avatar_path" class="group-avatar-img" alt="" />
+            <template v-else>
+              <div
+                v-for="m in g.members.slice(0, 4)"
+                :key="m.id"
+                class="group-avatar-cell"
+                :style="m.avatar_path ? { backgroundImage: `url(${m.avatar_path})` } : { background: 'var(--accent)' }"
+              >{{ m.avatar_path ? '' : m.display_name.charAt(0) }}</div>
+            </template>
           </div>
         </div>
         <div class="char-info">
@@ -608,6 +612,8 @@ function formatTime(iso) {
   display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
   background: rgba(255,255,255,0.5);
 }
+/* 自定义群头像：整块一张图 */
+.group-avatar-grid.group-avatar-single { grid-template-columns: 1fr; gap: 0; }
 .group-avatar-cell {
   background-size: cover; background-position: center;
   display: flex; align-items: center; justify-content: center;

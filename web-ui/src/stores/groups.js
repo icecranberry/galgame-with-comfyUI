@@ -116,6 +116,13 @@ export const useGroupsStore = defineStore('groups', () => {
     return data.group
   }
 
+  /** 设置群头像（base64）；base64 为空 = 恢复默认的成员拼图 */
+  async function setGroupAvatar(id, base64) {
+    const data = await api.uploadGroupAvatar(id, base64)
+    await loadGroups()
+    return data.avatar_path
+  }
+
   async function deleteGroup(id) {
     await api.deleteGroup(id)
     _sessions.delete(id)
@@ -588,6 +595,7 @@ export const useGroupsStore = defineStore('groups', () => {
     groups, activeGroupId, activeGroup, messages, visibleMessages, hasMoreOlder,
     playing, sending, undoing, scrollSignal, totalUnread, lullCount,
     loadGroups, createGroup, updateGroup, deleteGroup,
+    setGroupAvatar,
     selectGroup, leaveGroup, expandWindow, sendMessage, nudge, undoLastRound,
     connectSSE, disconnectSSE, markGroupImageLoaded,
   }

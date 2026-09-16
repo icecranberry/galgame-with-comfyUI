@@ -555,6 +555,7 @@ function initSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       topic TEXT DEFAULT '',
+      avatar_path TEXT,
       created_by TEXT NOT NULL DEFAULT 'user' CHECK(created_by IN ('user','character')),
       creator_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
       idle_enabled INTEGER DEFAULT 1,
@@ -902,6 +903,9 @@ function initSchema(db) {
 
   // 迁移: 角色聊天背景 — characters 表新增 chat_bg_path 列
   migrateChatBgSchema(db);
+
+  // 迁移: 群头像 — group_chats 表新增 avatar_path 列
+  migrateGroupAvatarSchema(db);
 
   // 迁移: 角色置顶 — characters 表新增 pinned 列
   migratePinSchema(db);
@@ -2279,6 +2283,21 @@ function migrateChatBgSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateChatBgSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 群头像 — group_chats 表新增 avatar_path 列
+ */
+function migrateGroupAvatarSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(group_chats)`).all();
+    if (!cols.find(c => c.name === 'avatar_path')) {
+      db.exec(`ALTER TABLE group_chats ADD COLUMN avatar_path TEXT`);
+      console.log('[db] Added group_chats.avatar_path column');
+    }
+  } catch (err) {
+    console.log('[db] migrateGroupAvatarSchema error:', err.message);
   }
 }
 

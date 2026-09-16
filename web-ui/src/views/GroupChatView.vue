@@ -240,7 +240,9 @@
               <linshe-button
                 size="sm"
                 @click="openGroupAvatarPicker"
-              >设置群头像</linshe-button>
+              >
+设置群头像
+</linshe-button>
               <linshe-button
                 v-if="groupAvatarUrl"
                 variant="ghost"
@@ -260,7 +262,7 @@
             </div>
             <input
               class="gc-range"
-              type="range" min="0.5" max="1.2" step="0.1"
+              type="range" min="0.5" max="1" step="0.1"
               v-model.number="editTemperature"
               @change="onTemperatureChange"
             />

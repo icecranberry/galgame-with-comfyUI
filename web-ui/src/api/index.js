@@ -385,6 +385,11 @@ export async function updateGroup(id, data) {
   return request(`/groups/${id}`, { method: 'PATCH', body: data })
 }
 
+/** 设置群头像（base64 png）；传空值 = 恢复默认的成员拼图 */
+export async function uploadGroupAvatar(id, base64) {
+  return request(`/groups/${id}/avatar`, { method: 'POST', body: { base64 } })
+}
+
 export async function deleteGroup(id) {
   return request(`/groups/${id}`, { method: 'DELETE' })
 }

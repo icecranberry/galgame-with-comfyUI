@@ -21,6 +21,13 @@
             <div class="av-upload-text">点击选择图片文件</div>
           </div>
         </label>
+        <!-- 粘贴入口与上传并列，避免藏在角落没人发现 -->
+        <div class="av-paste-tip">
+          <span class="av-paste-label">或直接粘贴图片</span>
+          <span class="av-paste-keys" aria-hidden="true">
+            <kbd>Ctrl</kbd><span class="av-paste-sep">+</span><kbd>V</kbd>
+          </span>
+        </div>
       </div>
 
       <!-- 最近图片 tab -->
@@ -78,7 +85,8 @@
         <linshe-button variant="icon" @click="cancelCrop">&times;</linshe-button>
       </div>
       <div class="crop-body">
-        <canvas ref="cropCanvas" class="crop-canvas"
+        <canvas
+ref="cropCanvas" class="crop-canvas"
           @mousedown.prevent="cropMouseDown"
           @mousemove.prevent="cropMouseMove"
           @mouseup="cropMouseUp"
@@ -95,7 +103,16 @@
         </div>
       </div>
       <div class="crop-actions">
-        <linshe-button variant="secondary" @click="regenerateAvatar" :disabled="isGenerating">重新生成</linshe-button>
+        <!-- 无角色（群头像 / 用户头像）时没有可重新生成的对象，不摆这个死按钮 -->
+        <linshe-button
+          v-if="characterId"
+          variant="secondary"
+          :disabled="isGenerating"
+          @click="regenerateAvatar"
+        >
+重新生成
+</linshe-button>
+        <div v-else></div>
         <linshe-button variant="primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</linshe-button>
       </div>
     </div>
@@ -103,7 +120,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 
@@ -164,7 +181,21 @@ function stopPhaseCycle() {
   if (_genPhaseTimer) { clearInterval(_genPhaseTimer); _genPhaseTimer = null }
 }
 
-onUnmounted(() => { stopPhaseCycle() })
+// 选择器打开期间支持直接粘贴图片（上传 / 最近图片 / 裁剪阶段都可用）
+function onPaste(e) {
+  const item = Array.from(e.clipboardData?.items || []).find(it => it.type?.startsWith('image/'))
+  if (!item) return
+  const file = item.getAsFile()
+  if (!file) return
+  e.preventDefault()
+  loadImageFromFile(file)
+}
+
+onMounted(() => document.addEventListener('paste', onPaste))
+onUnmounted(() => {
+  document.removeEventListener('paste', onPaste)
+  stopPhaseCycle()
+})
 
 async function startGenerate() {
   if (!props.characterId || genStatus.value === 'generating') return
@@ -333,6 +364,19 @@ function drawCrop() {
 }
 
 // ── 鼠标拖拽 ──
+
+/**
+ * 画布 CSS 显示尺寸 ÷ 逻辑尺寸：移动端画布被 CSS 缩放（max-width），
+ * 指针位移/坐标必须先换算回画布坐标，否则拖拽与缩放会随缩放比例失真。
+ * 桌面端不被 CSS 缩放，比值恒为 1。
+ */
+function pointerScale() {
+  const canvas = cropCanvas.value
+  if (!canvas) return 1
+  const rect = canvas.getBoundingClientRect()
+  return rect.width > 0 ? CROP_CANVAS / rect.width : 1
+}
+
 function cropMouseDown(e) {
   cropDragging = true
   cropDragStart = { x: e.clientX, y: e.clientY, imgX: cropVars.imgX, imgY: cropVars.imgY }
@@ -340,8 +384,9 @@ function cropMouseDown(e) {
 
 function cropMouseMove(e) {
   if (!cropDragging) return
-  const dx = e.clientX - cropDragStart.x
-  const dy = e.clientY - cropDragStart.y
+  const scale = pointerScale()
+  const dx = (e.clientX - cropDragStart.x) * scale
+  const dy = (e.clientY - cropDragStart.y) * scale
   cropVars.imgX = cropDragStart.imgX + dx
   cropVars.imgY = cropDragStart.imgY + dy
   drawCrop()
@@ -352,8 +397,9 @@ function cropMouseUp() { cropDragging = false }
 // ── 滚轮缩放（以鼠标/手指位置为中心） ──
 function cropWheel(e) {
   const rect = cropCanvas.value.getBoundingClientRect()
-  const mx = e.clientX - rect.left
-  const my = e.clientY - rect.top
+  const scale = pointerScale()
+  const mx = (e.clientX - rect.left) * scale
+  const my = (e.clientY - rect.top) * scale
   const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
   zoomAt(mx, my, factor)
 }
@@ -380,20 +426,21 @@ function cropTouchStart(e) {
 }
 
 function cropTouchMove(e) {
+  const scale = pointerScale()
   if (e.touches.length === 2) {
     const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
     const factor = dist / cropPinchDist
     const newS = Math.max(0.1, Math.min(5, cropPinchScale * factor))
     const rect = cropCanvas.value.getBoundingClientRect()
-    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
-    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+    const cx = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left) * scale
+    const cy = ((e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top) * scale
     cropVars.imgX = cx - (cx - cropVars.imgX) * (newS / cropVars.imgScale)
     cropVars.imgY = cy - (cy - cropVars.imgY) * (newS / cropVars.imgScale)
     cropVars.imgScale = newS
     drawCrop()
   } else if (e.touches.length === 1 && cropDragging) {
-    const dx = e.touches[0].clientX - cropDragStart.x
-    const dy = e.touches[0].clientY - cropDragStart.y
+    const dx = (e.touches[0].clientX - cropDragStart.x) * scale
+    const dy = (e.touches[0].clientY - cropDragStart.y) * scale
     cropVars.imgX = cropDragStart.imgX + dx
     cropVars.imgY = cropDragStart.imgY + dy
     drawCrop()
@@ -474,6 +521,32 @@ async function saveCrop() {
 .av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:62px 21px; gap:13px; }
 .av-upload-icon { font-size:52px; }
 .av-upload-text { font-size:18px; color:var(--text-secondary); }
+
+/* 粘贴入口：与虚线上传框并列的醒目提示条 */
+.av-paste-tip {
+  margin-top:14px; padding:12px 16px;
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  border:2px solid var(--accent); border-radius:14px;
+  background:rgb(var(--accent-rgb) / 14%);
+  box-shadow:var(--shadow-glow);
+  color:var(--accent); font-size:16px; font-weight:700;
+}
+.av-paste-tip strong { font-weight:800; }
+.av-paste-icon {
+  width:34px; height:34px; flex-shrink:0; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--accent); color:var(--on-accent); font-size:18px;
+  box-shadow:0 2px 0 var(--btn-lip);
+}
+.av-paste-label { flex:1; min-width:0; }
+.av-paste-keys { display:flex; align-items:center; gap:5px; }
+.av-paste-sep { font-size:13px; opacity:0.7; }
+.av-paste-keys kbd {
+  font-family:inherit; font-size:13px; font-weight:700;
+  padding:3px 9px; border-radius:8px;
+  background:var(--accent); border:1px solid var(--accent-hover);
+  color:var(--on-accent); box-shadow:0 2px 0 var(--btn-lip);
+}
 
 .av-gallery { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
 .av-loading, .av-empty { font-size:17px; color:var(--text-secondary); text-align:center; padding:52px 0; grid-column:1/-1; }
@@ -560,4 +633,19 @@ async function saveCrop() {
 .gen-error-icon { font-size: 47px; }
 .gen-error-text { font-size: 17px; color: var(--accent); text-align: center; }
 .gen-retry-btn { margin-top: 10px; }
+
+/* ── 移动端：裁剪台竖排，画布按视口宽度缩放（指针换算见 pointerScale） ── */
+@media (max-width: 767px) {
+  .avpicker-panel { max-height: 88vh; }
+  .avpicker-header { padding: 14px 16px; }
+  .avpicker-tabs .avtab { font-size: 15px; padding: 11px 0; }
+  .avtab-body { padding: 14px; max-height: 60vh; }
+  .av-upload-inner { padding: 40px 14px; }
+  .crop-header { padding: 14px 16px; }
+  .crop-header span { font-size: 15px; }
+  .crop-body { flex-direction: column; gap: 14px; padding: 16px; align-items: center; }
+  .crop-canvas { max-width: calc(100vw - 56px); }
+  .crop-preview-container { flex-direction: row; gap: 12px; }
+  .crop-actions { padding: 14px 16px; }
+}
 </style>

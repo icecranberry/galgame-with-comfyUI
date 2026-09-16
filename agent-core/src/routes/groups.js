@@ -4,12 +4,16 @@
  * GET    /api/groups                 群列表（含成员、未读数）
  * POST   /api/groups                 建群 { name?, topic?, member_ids }
  * PATCH  /api/groups/:id             改名/主题/成员调整
+ * POST   /api/groups/:id/avatar      上传/清除群头像（base64，空值 = 恢复成员拼图）
  * DELETE /api/groups/:id             解散（级联清理消息/记忆/摘要/向量）
  * GET    /api/groups/:id/messages    全部消息（含发言角色信息）
  * POST   /api/groups/:id/seen        清未读
  * POST   /api/groups/:id/chat        用户发言 → SSE 流式返回本轮剧本
  */
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 import {
@@ -23,6 +27,16 @@ import { beginTurn } from '../services/llmTelemetry.js';
 import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 
 const router = Router();
+
+// 群头像与角色/用户头像同目录（app.js 静态挂载 /avatars → data/avatars）
+const AVATARS_DIR = path.join(path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url)))), 'data', 'avatars');
+
+/** 删除群头像文件：只取 basename，杜绝路径穿越 */
+function deleteGroupAvatarFile(avatarPath) {
+  if (!avatarPath) return;
+  const filePath = path.join(AVATARS_DIR, path.basename(avatarPath));
+  try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { /* 文件已不存在时忽略 */ }
+}
 
 function toISODate(sqliteDT) {
   if (!sqliteDT) return sqliteDT;
@@ -68,6 +82,7 @@ function serializeGroup(group) {
     topic: group.topic || '',
     created_by: group.created_by,
     creator_character_id: group.creator_character_id,
+    avatar_path: group.avatar_path || null,
     idle_enabled: !!group.idle_enabled,
     last_message_at: toISODate(group.last_message_at),
     created_at: toISODate(group.created_at),
@@ -158,6 +173,36 @@ router.patch('/:id', (req, res) => {
   res.json({ group: serializeGroup(getGroupWithMembers(groupId)) });
 });
 
+// POST /api/groups/:id/avatar — 上传群头像（base64 png），空 base64 = 恢复默认（成员拼图）
+router.post('/:id/avatar', (req, res) => {
+  const db = getDb();
+  // :id 会拼进头像文件名，先归一化为正整数，防止编码绕过造成目录穿越
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+    return res.status(400).json({ error: '无效的群聊 ID' });
+  }
+  const group = db.prepare('SELECT id, avatar_path FROM group_chats WHERE id = ?').get(groupId);
+  if (!group) return res.status(404).json({ error: '群不存在' });
+
+  const { base64 } = req.body || {};
+  if (!base64) {
+    deleteGroupAvatarFile(group.avatar_path);
+    db.prepare('UPDATE group_chats SET avatar_path = NULL WHERE id = ?').run(groupId);
+    return res.json({ ok: true, avatar_path: null });
+  }
+
+  fs.mkdirSync(AVATARS_DIR, { recursive: true });
+  // 文件名带时间戳：/avatars 静态缓存 30 天，换头像必须换 URL
+  const filename = `group_${groupId}_${Date.now()}.png`;
+  const base64Data = String(base64).replace(/^data:image\/\w+;base64,/, '');
+  fs.writeFileSync(path.join(AVATARS_DIR, filename), Buffer.from(base64Data, 'base64'));
+
+  deleteGroupAvatarFile(group.avatar_path);
+  const avatarPath = `/avatars/${filename}`;
+  db.prepare('UPDATE group_chats SET avatar_path = ? WHERE id = ?').run(avatarPath, groupId);
+  res.json({ ok: true, avatar_path: avatarPath });
+});
+
 // DELETE /api/groups/:id/messages/last-round — 撤回最后一轮用户消息和角色回复
 router.delete('/:id/messages/last-round', async (req, res, next) => {
   const groupId = parseInt(req.params.id, 10);
@@ -202,7 +247,7 @@ router.delete('/:id', (req, res, next) => {
 
   const conversationId = groupConvId(groupId);
   try {
-    const group = db.prepare(`SELECT id FROM group_chats WHERE id = ?`).get(groupId);
+    const group = db.prepare(`SELECT id, avatar_path FROM group_chats WHERE id = ?`).get(groupId);
     if (!group) return res.status(404).json({ error: '群不存在' });
 
     // SQLite 记忆正文、版本关系、checkpoint、审计、索引任务及所有 profile/legacy 向量统一清理。
@@ -215,6 +260,8 @@ router.delete('/:id', (req, res, next) => {
       db.prepare(`DELETE FROM group_chats WHERE id = ?`).run(groupId);
     });
     transaction();
+    // 群头像文件随群一起清掉，避免 data/avatars 里堆积孤儿图
+    deleteGroupAvatarFile(group.avatar_path);
     invalidateGroupTranscriptBoundary(groupId);
     res.json({ ok: true });
   } catch (err) {
