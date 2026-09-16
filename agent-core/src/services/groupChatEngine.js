@@ -93,12 +93,15 @@ export function getGroupWithMembers(groupId) {
  * 基础值 = 3 + 成员数 × 3（2 人 = 9 条起步，封顶 MAX_ROUND_MESSAGES）；
  * 有明确话题（群主题或本轮话题引子）时放宽 3 条（仍封顶 MAX_ROUND_MESSAGES）。
  * 该上限只是“最多”，不是“必须凑满”——话题自然聊完即可输出 [END]。
+ * minMessages 用于 @全体成员：至少保证每位成员都轮得到一条。
+ * 用户明确要求全员发言时，该下限优先于常规上限（上限以群人数为界，不会无限放大）。
  */
-function computeRoundMessageLimit(group, { hasTopicSeed = false } = {}) {
+export function computeRoundMessageLimit(group, { hasTopicSeed = false, minMessages = 0 } = {}) {
   const memberCount = Math.max(1, (group.members || []).length);
   const base = Math.min(MAX_ROUND_MESSAGES, Math.max(9, 3 + memberCount * 3));
   const hasTopic = Boolean(group.topic || hasTopicSeed);
-  return hasTopic ? Math.min(MAX_ROUND_MESSAGES, base + 3) : base;
+  const limit = hasTopic ? Math.min(MAX_ROUND_MESSAGES, base + 3) : base;
+  return Math.max(limit, minMessages);
 }
 
 
@@ -111,6 +114,14 @@ export function detectMentions(text, members) {
     }
   }
   return hits;
+}
+
+// ── @全体成员（@所有人 / @全员）──
+/** 与单人 @点名 区分：命中即要求本轮每一位群成员都发言 */
+const MENTION_ALL_RE = /@\s*(?:全体成员|所有人|全员|全体)/;
+
+export function detectMentionAll(text) {
+  return MENTION_ALL_RE.test(String(text || ''));
 }
 
 // ── 上下文组装 ──
@@ -743,12 +754,19 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const directiveBlocks = [];
   directiveBlocks.push(`<time_context>${getTimeTag(new Date())}</time_context>`);
 
-  let dyn = null;   // 本轮话题引子（idle 轮从成员动态中抽取）
+  let dyn = null;         // 本轮话题引子（idle 轮从成员动态中抽取）
+  let mentionAll = false; // 用户 @全体成员：本轮全员都必须发言
   if (trigger === 'user') {
-    directiveBlocks.push(`「${chatUserName}」刚刚发了消息，接下来角色们要接话。`);
-    const mentions = detectMentions(userMessage, group.members);
-    if (mentions.length > 0) {
-      directiveBlocks.push(`「${mentions[0].display_name}」被点名/提到了，必须第一个回应。`);
+    directiveBlocks.push(`「${chatUserName}」在群里发了消息，接下来角色们要接话。`);
+    mentionAll = detectMentionAll(userMessage);
+    if (mentionAll) {
+      const roster = group.members.map(m => m.display_name).join('、');
+      directiveBlocks.push(`「${chatUserName}」@了全体成员，本轮【每一位】群成员都必须发言：${roster}，一个都不能少；每人至少一条，各自按自己的人格自然接话，不要只让一两个人代答。`);
+    } else {
+      const mentions = detectMentions(userMessage, group.members);
+      if (mentions.length > 0) {
+        directiveBlocks.push(`「${mentions[0].display_name}」被点名/提到了，必须第一个回应。`);
+      }
     }
   } else if (trigger === 'idle') {
     directiveBlocks.push(`角色们自然地聊起天来。`);
@@ -791,7 +809,10 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   }
 
   // ── 每轮消息上限：按群人数与话题动态设定；上限只是最多条数，不是必须凑满 ──
-  const roundMessageLimit = computeRoundMessageLimit(group, { hasTopicSeed: !!dyn });
+  const roundMessageLimit = computeRoundMessageLimit(group, {
+    hasTopicSeed: !!dyn,
+    minMessages: mentionAll ? group.members.length : 0,
+  });
   directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
 
   // 发图指令：主动/自动发起的群聊轮（idle 后台闲聊、lull 冷场续聊）强制要求配一张图；user/opening 维持抽卡鼓励

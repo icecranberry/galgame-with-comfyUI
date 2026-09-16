@@ -3,9 +3,23 @@
     <!-- 头部（与私聊 chat-header 同款） -->
     <div class="chat-header">
       <linshe-button v-if="isMobile" variant="icon" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6" /></svg>
       </linshe-button>
-      <div class="group-avatar-grid header-avatar">
+      <!-- 有自定义群头像时整块展示，点击即进入更换；未设置时保留成员拼图 -->
+      <div
+        v-if="groupAvatarUrl"
+        role="button"
+        tabindex="0"
+        class="group-avatar-grid group-avatar-single header-avatar avatar-clickable"
+        title="设置群头像"
+        aria-label="设置群头像"
+        @keydown.enter.prevent="openGroupAvatarPicker"
+        @keydown.space.prevent="openGroupAvatarPicker"
+        @click.stop="openGroupAvatarPicker"
+      >
+        <img :src="groupAvatarUrl" class="group-avatar-img" alt="" />
+      </div>
+      <div v-else class="group-avatar-grid header-avatar">
         <div
           v-for="m in (store.activeGroup?.members || []).slice(0, 4)"
           :key="m.id"
@@ -25,7 +39,7 @@
       </div>
       <div class="chat-header-right">
         <div class="btn-header-settings" title="群设置" @click="showSettings = true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
         </div>
       </div>
     </div>
@@ -113,29 +127,50 @@
 
     <!-- 输入区（与私聊 input-area 同款） -->
     <div class="input-area">
-      <div v-if="showMentionPicker" class="mention-panel">
+      <Transition name="mention-fade">
         <div
-          v-for="m in store.activeGroup?.members || []"
-          :key="m.id"
-          class="mention-item"
-          @click="pickMention(m)"
+          v-if="showMentionPicker"
+          id="mention-list"
+          ref="mentionListEl"
+          class="mention-panel"
+          role="listbox"
+          aria-label="选择要@的成员"
         >
-          <div class="mention-avatar" :style="m.avatar_path ? {} : { background: 'var(--accent)' }">
-            <img v-if="m.avatar_path" :src="m.avatar_path" class="avatar-img" alt="" />
-            <span v-else>{{ m.display_name.charAt(0) }}</span>
+          <div
+            v-for="(opt, idx) in mentionOptions"
+            :id="`mention-opt-${opt.key}`"
+            :key="opt.key"
+            class="mention-item"
+            :class="{ 'is-active': idx === mentionIndex }"
+            role="option"
+            :aria-selected="idx === mentionIndex"
+            @mouseenter="mentionIndex = idx"
+            @click="pickMention(opt)"
+          >
+            <div class="mention-avatar" :style="opt.avatar_path ? {} : { background: 'var(--accent)' }">
+              <img v-if="opt.avatar_path" :src="opt.avatar_path" class="avatar-img" alt="" />
+              <span v-else>{{ opt.isAll ? '@' : opt.display_name.charAt(0) }}</span>
+            </div>
+            <span>{{ opt.display_name }}</span>
           </div>
-          <span>{{ m.display_name }}</span>
         </div>
-      </div>
+      </Transition>
       <textarea
         ref="inputEl"
         v-model="draft"
         class="chat-input"
         rows="1"
         placeholder="输入消息… "
-        @input="onInput"
-        @keydown.enter.exact.prevent="onSend"
+        aria-autocomplete="list"
+        :aria-expanded="showMentionPicker"
+        aria-controls="mention-list"
+        :aria-activedescendant="activeMentionId"
+        @input="syncInputHeight"
+        @keydown.enter.exact="onSendKey"
         @keydown.enter.shift.exact="draft += '\n'"
+        @keydown.up="onMentionArrow(-1, $event)"
+        @keydown.down="onMentionArrow(1, $event)"
+        @keydown.esc="onMentionEscape"
       ></textarea>
       <div
         role="button"
@@ -154,7 +189,7 @@
         :title="store.undoing ? '正在撤回…' : '发送（长按可撤回上一轮）'"
       >
         <svg class="send-icon" viewBox="0 0 1024 1024" fill="#fff">
-          <path d="M659.655431 521.588015q23.970037-6.71161 46.022472-13.423221 19.17603-5.752809 39.310861-11.505618t33.558052-10.546816l-13.423221 50.816479q-5.752809 21.093633-10.546816 31.640449-9.588015 25.88764-22.531835 47.940075t-24.449438 38.35206q-13.423221 19.17603-27.805243 35.475655l-117.932584 35.475655 96.838951 17.258427q-19.17603 16.299625-41.228464 33.558052-19.17603 14.382022-43.625468 30.202247t-51.29588 29.243446-59.925094 13.902622-62.801498-4.314607q-34.516854-4.794007-69.033708-16.299625 10.546816-16.299625 23.011236-36.434457 10.546816-17.258427 25.40824-40.749064t31.161049-52.254682q46.022472-77.662921 89.168539-152.449438t77.662921-135.191011q39.310861-69.992509 75.745318-132.314607-45.06367 51.775281-94.921348 116.014981-43.146067 54.651685-95.88015 129.917603t-107.385768 164.434457q-11.505618 18.217228-25.88764 42.187266t-30.202247 50.816479-32.599251 55.131086-33.078652 55.131086q-38.35206 62.322097-78.621723 130.397004 0.958801-20.134831 7.670412-51.775281 5.752809-26.846442 19.17603-67.116105t38.35206-94.921348q16.299625-34.516854 24.928839-53.692884t13.423221-29.722846q4.794007-11.505618 7.670412-15.340824-4.794007-5.752809-1.917603-23.011236 1.917603-15.340824 11.026217-44.58427t31.161049-81.977528q22.052434-53.692884 58.007491-115.535581t81.018727-122.726592 97.797753-117.932584 107.865169-101.153558 110.262172-72.389513 106.906367-32.11985q0.958801 33.558052-6.71161 88.689139t-19.17603 117.932584-25.88764 127.520599-27.805243 117.453184z"/>
+          <path d="M659.655431 521.588015q23.970037-6.71161 46.022472-13.423221 19.17603-5.752809 39.310861-11.505618t33.558052-10.546816l-13.423221 50.816479q-5.752809 21.093633-10.546816 31.640449-9.588015 25.88764-22.531835 47.940075t-24.449438 38.35206q-13.423221 19.17603-27.805243 35.475655l-117.932584 35.475655 96.838951 17.258427q-19.17603 16.299625-41.228464 33.558052-19.17603 14.382022-43.625468 30.202247t-51.29588 29.243446-59.925094 13.902622-62.801498-4.314607q-34.516854-4.794007-69.033708-16.299625 10.546816-16.299625 23.011236-36.434457 10.546816-17.258427 25.40824-40.749064t31.161049-52.254682q46.022472-77.662921 89.168539-152.449438t77.662921-135.191011q39.310861-69.992509 75.745318-132.314607-45.06367 51.775281-94.921348 116.014981-43.146067 54.651685-95.88015 129.917603t-107.385768 164.434457q-11.505618 18.217228-25.88764 42.187266t-30.202247 50.816479-32.599251 55.131086-33.078652 55.131086q-38.35206 62.322097-78.621723 130.397004 0.958801-20.134831 7.670412-51.775281 5.752809-26.846442 19.17603-67.116105t38.35206-94.921348q16.299625-34.516854 24.928839-53.692884t13.423221-29.722846q4.794007-11.505618 7.670412-15.340824-4.794007-5.752809-1.917603-23.011236 1.917603-15.340824 11.026217-44.58427t31.161049-81.977528q22.052434-53.692884 58.007491-115.535581t81.018727-122.726592 97.797753-117.932584 107.865169-101.153558 110.262172-72.389513 106.906367-32.11985q0.958801 33.558052-6.71161 88.689139t-19.17603 117.932584-25.88764 127.520599-27.805243 117.453184z" />
         </svg>
       </div>
     </div>
@@ -167,6 +202,20 @@
       @update:visible="v => { if (!v) previewUrl = null }"
       @deleted="onGroupImageDeleted"
     />
+
+    <!-- 群头像选择器：本地上传 / 直接粘贴 / 相册最近图片，选完进裁剪 -->
+    <Teleport to="body">
+      <AvatarCropper
+        v-if="showGroupAvatarPicker"
+        title="设置群头像"
+        :show-recent-tab="true"
+        :recent-images="groupAlbumImages"
+        :recent-loading="groupAlbumLoading"
+        @close="showGroupAvatarPicker = false"
+        @save="onGroupAvatarSave"
+        @switch-to-recent="loadGroupAvatarRecents"
+      />
+    </Teleport>
 
     <!-- 群设置抽屉 -->
     <Transition name="drawer">
@@ -181,6 +230,29 @@
             <span>群主题</span>
             <linshe-input v-model="editTopic" type="text" maxlength="60" placeholder="（可选）大家围绕什么话题聊" />
           </label>
+          <div class="gc-field">
+            <div class="gc-member-title"><span>群头像</span></div>
+            <div class="gc-avatar-row">
+              <div class="gc-avatar-preview" :style="groupAvatarUrl ? {} : { background: 'var(--accent)' }">
+                <img v-if="groupAvatarUrl" :src="groupAvatarUrl" alt="" />
+                <span v-else>{{ (store.activeGroup?.name || '群').charAt(0) }}</span>
+              </div>
+              <linshe-button
+                size="sm"
+                @click="openGroupAvatarPicker"
+              >设置群头像</linshe-button>
+              <linshe-button
+                v-if="groupAvatarUrl"
+                variant="ghost"
+                size="sm"
+                :disabled="groupAvatarSaving"
+                @click="clearGroupAvatar"
+              >
+恢复默认
+</linshe-button>
+            </div>
+            <span class="gc-member-hint">上传图片、直接粘贴，或从相册最近图片中选取；不设置就显示成员拼图。</span>
+          </div>
           <div class="gc-field">
             <div class="gc-member-title">
               <span>温度设置</span>
@@ -240,7 +312,9 @@
               variant="secondary"
               :disabled="!canUndo"
               @click="requestUndoLastRound"
-            >撤回上一轮对话</linshe-button>
+            >
+撤回上一轮对话
+</linshe-button>
           </div>
           <div class="gc-drawer-actions">
             <linshe-button class="gc-btn" variant="danger" @click="onDissolve">解散群聊</linshe-button>
@@ -267,11 +341,11 @@
             </div>
             <div class="avatar-pop-actions">
               <div class="avatar-pop-btn" role="button" tabindex="0" @keydown.enter.prevent="startPrivateChat(avatarMenu.member)" @keydown.space.prevent="startPrivateChat(avatarMenu.member)" @click="startPrivateChat(avatarMenu.member)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
                 <span>私聊</span>
               </div>
               <div class="avatar-pop-btn" role="button" tabindex="0" @keydown.enter.prevent="viewMemberMoments(avatarMenu.member)" @keydown.space.prevent="viewMemberMoments(avatarMenu.member)" @click="viewMemberMoments(avatarMenu.member)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
                 <span>查看ta的朋友圈</span>
               </div>
             </div>
@@ -288,12 +362,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
 import { useChatStore } from '../stores/chat.js'
 import { useMomentsStore } from '../stores/moments.js'
-import { getConfig, updateGroupSummaryInterval, updateGroupTemperature } from '../api/index.js'
+import { getConfig, updateGroupSummaryInterval, updateGroupTemperature, listGalleryImages } from '../api/index.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
+import AvatarCropper from '../components/AvatarCropper.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import { applyMention, useMentionPicker } from '../composables/useMentionPicker.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -307,7 +383,14 @@ const scrollEl = ref(null)
 const msgListInner = ref(null)
 const inputEl = ref(null)
 const draft = ref('')
-const showMentionPicker = ref(false)
+const mentionListEl = ref(null)
+const mention = useMentionPicker(() => store.activeGroup?.members || [])
+const {
+  open: showMentionPicker,
+  index: mentionIndex,
+  options: mentionOptions,
+  activeId: activeMentionId,
+} = mention
 const showSettings = ref(false)
 const previewUrl = ref(null)
 const isFollowingLatest = ref(true)
@@ -714,17 +797,58 @@ function onVisibilityChange() {
 
 // ── 输入 / @点名 ──
 
-function onInput(e) {
-  showMentionPicker.value = draft.value.endsWith('@')
-  const el = e.target
+// @ 面板：输入 @ 后可按名字过滤；↑↓ 选择、回车确认（面板打开时回车不发送）、Esc 关闭。
+// 候选与状态机见 composables/useMentionPicker.js，首项固定是 @全体成员。
+
+function syncInputHeight() {
+  const el = inputEl.value
+  if (!el) return
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 120) + 'px'
 }
 
-function pickMention(m) {
-  draft.value = draft.value.replace(/@$/, '') + `@${m.display_name} `
-  showMentionPicker.value = false
+function scrollMentionIntoView() {
+  nextTick(() => {
+    const el = mentionListEl.value?.children?.[mentionIndex.value]
+    el?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+/** draft 任何变化（打字、Shift+Enter 换行、选中后回填）都重新对齐面板 */
+function syncMention(text) {
+  if (mention.sync(text)) scrollMentionIntoView()
+}
+
+watch(draft, syncMention)
+
+/** ↑↓ 在面板里挪选择；面板没开时保持光标默认行为 */
+function onMentionArrow(delta, event) {
+  if (event.isComposing) return   // 中文输入法选词时把 ↑↓ 留给输入法
+  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+  if (!mention.move(delta)) return
+  event.preventDefault()
+  scrollMentionIntoView()
+}
+
+function onMentionEscape() {
+  mention.close()
+}
+
+function pickMention(opt) {
+  if (!opt) return false
+  draft.value = applyMention(draft.value, opt.display_name)
+  mention.close()
+  syncInputHeight()
   inputEl.value?.focus()
+  return true
+}
+
+/** 回车：@ 面板打开时优先确认选择，不发送文本 */
+function onSendKey(event) {
+  if (event?.isComposing) return   // 输入法还在选词，这一下回车交给输入法
+  event?.preventDefault()
+  if (pickMention(mention.current.value)) return
+  onSend()
 }
 
 async function onSend() {
@@ -732,8 +856,8 @@ async function onSend() {
   const text = draft.value.trim()
   if (!text) return   // 播放/请求中也允许发言：打断播放或进入 5s 聚合
   draft.value = ''
-  showMentionPicker.value = false
-  if (inputEl.value) inputEl.value.style.height = 'auto'
+  mention.close()
+  syncInputHeight()
   clearLullTimer()
   isFollowingLatest.value = true
   hasNewMessages.value = false
@@ -835,6 +959,52 @@ async function onDissolve() {
   showSettings.value = false
   router.push('/chat')
 }
+
+// ── 群头像（上传 / 粘贴 / 相册最近图片，选完统一进裁剪） ──
+
+const showGroupAvatarPicker = ref(false)
+const groupAvatarSaving = ref(false)
+const groupAlbumImages = ref([])
+const groupAlbumLoading = ref(false)
+const groupAvatarUrl = computed(() => store.activeGroup?.avatar_path || '')
+
+function openGroupAvatarPicker() {
+  groupAlbumImages.value = []   // 每次打开重新拉取，避免选中已被清理的旧图
+  showGroupAvatarPicker.value = true
+}
+
+async function loadGroupAvatarRecents() {
+  if (groupAlbumLoading.value) return
+  groupAlbumLoading.value = true
+  try {
+    const data = await listGalleryImages(24)
+    groupAlbumImages.value = (data.images || []).map(img => img.url)
+  } catch { /* 拉取失败保留空列表，仍可上传 / 粘贴 */ }
+  finally { groupAlbumLoading.value = false }
+}
+
+async function onGroupAvatarSave(base64) {
+  if (!store.activeGroupId || groupAvatarSaving.value || !base64) return
+  groupAvatarSaving.value = true
+  try {
+    await store.setGroupAvatar(store.activeGroupId, base64)
+    showGroupAvatarPicker.value = false
+    toast?.('群头像已更新', 'success')
+  } catch (err) {
+    toast?.(err.message || '群头像保存失败', 'error')
+  } finally { groupAvatarSaving.value = false }
+}
+
+async function clearGroupAvatar() {
+  if (!store.activeGroupId || groupAvatarSaving.value) return
+  groupAvatarSaving.value = true
+  try {
+    await store.setGroupAvatar(store.activeGroupId, '')
+    toast?.('已恢复默认群头像', 'success')
+  } catch (err) {
+    toast?.(err.message || '恢复默认群头像失败', 'error')
+  } finally { groupAvatarSaving.value = false }
+}
 </script>
 
 <style scoped>
@@ -893,6 +1063,8 @@ async function onDissolve() {
   object-fit: cover;
   display: block;
 }
+/* 自定义群头像：整块一张图，不再切分成员格 */
+.group-avatar-grid.group-avatar-single { grid-template-columns: 1fr; gap: 0; }
 
 /* ── 消息区 ── */
 .message-area { position:relative; flex:1; min-height:0; }
@@ -1097,12 +1269,21 @@ async function onDissolve() {
   z-index: 20;
   max-height: 240px; overflow-y: auto;
 }
+/* 出现/消失：淡入淡出 + 从输入框上方浮起（只动 opacity/transform，时长缓动走 token） */
+.mention-fade-enter-active { transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); }
+.mention-fade-leave-active { transition: opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard); }
+.mention-fade-enter-from, .mention-fade-leave-to { opacity: 0; transform: translateY(6px); }
 .mention-item {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 14px 8px 8px; border-radius: 10px;
   font-size: 14px; color: var(--text-primary); cursor: pointer;
 }
 .mention-item:hover { background: rgba(0,0,0,0.05); }
+.mention-item.is-active { background: rgba(var(--accent-rgb), 0.16); }
+.mention-item-hint {
+  margin-left: auto; padding-left: 10px;
+  font-size: 11px; color: var(--text-secondary); white-space: nowrap;
+}
 .mention-avatar {
   width: 28px; height: 28px; border-radius: 50%;
   color: #fff; font-size: 12px; font-weight: 600;
@@ -1136,7 +1317,7 @@ async function onDissolve() {
 .gc-member-field { flex: 1; min-height: 0; }
 .gc-member-edit {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px;
-  flex: 1; min-height: 160px; overflow-y: auto;
+  flex: 1; min-height: 124px; overflow-y: auto;
   border: 1px solid rgba(var(--accent-rgb),0.14); border-radius: 12px; padding: 8px;
   scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb),0.35) transparent;
 }
@@ -1159,6 +1340,13 @@ async function onDissolve() {
   color: #fff; font-size: 16px; font-weight: 600;
 }
 .gc-member-hint { font-size: 12px; color: var(--text-secondary); }
+.gc-avatar-row { display: flex; align-items: center; gap: 10px; }
+.gc-avatar-preview {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 16px; font-weight: 600;
+}
+.gc-avatar-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gc-temp-val { font-size: 13px; font-weight: 600; color: var(--accent); }
 .gc-range {
   width: 100%; height: 6px; margin: 4px 0 2px;
