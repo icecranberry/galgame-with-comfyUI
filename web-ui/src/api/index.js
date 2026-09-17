@@ -588,6 +588,16 @@ export function getMemoryStats() {
   return request(`/memory/stats`)
 }
 
+// 记忆系统体检：当前生效配置 + 缺失项 + 每条问题的处置建议（设置页展示用）
+export function getMemoryHealth() {
+  return request(`/memory/health`)
+}
+
+// 阶段三：整理 daemon 运行状态 + 待整理候选数
+export function getConsolidationState() {
+  return request(`/memory/consolidation/state`)
+}
+
 // 阶段四：archived 记忆恢复
 export function restoreMemoryFragment(id) {
   return request(`/memory/fragments/${encodeURIComponent(id)}/restore`, { method: 'POST' })
