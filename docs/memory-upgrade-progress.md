@@ -316,6 +316,33 @@
 
 ---
 
+### v3 记忆向量环节同类问题排查（2026-09-17）
+
+按「三元组语料被白名单拒收」同一类缺陷（语料写死 / 维度与模型不同源 / 失败被静默吞掉）把 v3 记忆的其它环节过了一遍。
+
+**已修**：
+
+1. 失败的三元组删除没人重试。`rollbackMemoriesFromRawId` / `clearConversationMemories` 是「先删行、再发 `triple_delete`」，任务一旦失败，DB 里再无痕迹 —— T3 墓碑扫描扫的是"现存的已失效行"，兜不住，向量就成了永久孤儿（碎片侧是软删除、行还在，墓碑扫描能兜底）。`retryFailedIndexJobs()` 现在把 `triple_delete` 与 `delete` 一起回队。实测：往队列塞一条 failed 的 `triple_delete`，调 `POST /api/memory/retry-failed` 后变 completed（修复前 `deleteTotal` 是 0）。
+2. 语料指纹有两套算法。`memoryConfig.getEmbeddingProfile()` 自己拼哈希载荷、少了 `source` 字段，跟真正决定 collection 名的 `memoryProviders.profileFor()` **永远算不出同一个指纹**；更糟的是用户走默认内置 provider 时它固定返回 null。`/api/memory/stats` 与设置页展示的 `profile` 就来自它（实际在用 `memory_v2_5006f4a66a1d8f61`，页面显示 null）。现在载荷对齐（`source: 'user'`）、`memoryStats()` 直接报告检索真正在用的指纹，并加了契约测试把两者钉在一起。
+
+**待决策（尚未动）**：
+
+3. 语料漂移不会自动回补。索引侧与查询侧各自维护一套每日失败计数（`embedding_index` vs `embedding`，满 5 次降级本地、次日归零），两者可以不同步：
+   - 索引降级本地、查询还在远端（索引侧硬失败 5 次）→ 当天新记忆只写进 `memory_fragments`（768），第二天查询切回 `memory_v2_<指纹>`（1024）后，这些行的 `embedding_state` 仍是 `indexed`，没有任何机制会重嵌它们 —— 只能靠 FTS/ngram/实体通道召回，向量通道永久漏，直到手动 `reindex` 或换模型。
+   - 反方向（查询降级本地、索引仍在远端）会自愈：第二天查询回到远端语料，向量本来就在那儿。
+   - 建议修法：加一条「回程对账」——现行碎片/三元组里 `embedding_profile = 'local_builtin'` 且当前首选指纹 != 本地时，置 stale 并回队重嵌（只修这个方向，避免坏的那天把远端向量整批重嵌成本地、第二天再搬回来的来回抖动）。代价是一次全量重嵌（本机 593 条），只在真的漂移过之后触发一次。
+
+**排查后确认没问题的**（记录结论，免得下次重复查）：
+
+- `image_prompt_knowledge`（绘图知识库）：写入不带向量、由向量服务本地模型编码；检索也不带 `embedding` → 读侧同样本地 768，读写自洽；它是独立语料，**不跟**记忆 embedding provider 走（设计如此）。
+- `portraitExtractor`（用户画像去重）与 `localRerank`（重排兜底）：都用 `embedBatch` 本地模型 + JS 余弦，两个比较对象在同一次调用里编码，维度必然一致。
+- 检索主通道 `memorySearch` 用 `profile.corpus`；整理时的 `related` 走同一个 `hybridSearch`；整理 daemon 的删除走仓库回调、profile 随行取自行记录。
+- `memory_entities.embedding_state` 一直是 `disabled`：实体只做文本/别名匹配，没有实体向量。
+- 会话清空：`clearConversationMemories` 已覆盖 profile 语料与三元组语料，`routes/chat.js`、`routes/characters.js` 里额外那次 `deleteByConversation` 只是默认语料的兜底。
+- 向量服务两个 ONNX 会话（chat / index）加载同一个模型文件，只看并发，维度不会不同。
+
+---
+
 ## 长期备选（未排期）
 
 - 群聊 `@memory` 主动搜索、记忆操作模型（SFT/RL，先积累 `memory_retrieval_audits` 作训练资产）、LongMemEval 子集汉化自测、表情差分/TTS（角色侧另线）

@@ -228,7 +228,10 @@ export function saveMemorySettings(input) {
 
 export function getEmbeddingProfile(settings = getMemorySettings({ includeSecrets: true })) {
   if (!settings.embedding.enabled || !settings.embedding.baseURL || !settings.embedding.model) return null;
+  // 指纹载荷必须与 memoryProviders.profileFor(provider, 'user') 逐字段一致：这里少一个字段，设置页
+  // 报告的语料就会是另一个名字（此前少了 source，算出来的指纹跟真正写入的 collection 对不上）。
   const raw = JSON.stringify({
+    source: 'user',
     provider: settings.embedding.provider,
     baseURL: settings.embedding.baseURL,
     model: settings.embedding.model,

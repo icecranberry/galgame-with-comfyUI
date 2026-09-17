@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/index.js';
-import { getMemorySettings } from './memoryConfig.js';
+import { getMemorySettings, MEMORY_MODE } from './memoryConfig.js';
 import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
 import { createMemoryIndexWorker } from './memoryIndexWorker.js';
@@ -576,9 +576,15 @@ export async function retryFailedIndexJobs() {
   `).run();
   enqueueFollowUpsForProcessingUpserts(db, PRIORITY_RETRY);
 
-  const deletes = db.prepare(`SELECT DISTINCT memory_id, profile FROM memory_index_jobs WHERE job_type = 'delete' AND status = 'failed'`).all();
+  // 回滚与清空会话会先把三元组行删掉再发 triple_delete：任务失败后 DB 里已经没有行，
+  // T3 墓碑扫描扫的是"还存在的行"，兜不住 → 向量变永久孤儿。这里把 triple_delete 一起重试
+  // （碎片 delete 同理，但碎片是软删除、行还在，墓碑扫描能兜底）。
+  const deletes = db.prepare(`
+    SELECT DISTINCT job_type, memory_id, profile FROM memory_index_jobs
+    WHERE job_type IN ('delete', 'triple_delete') AND status = 'failed'
+  `).all();
   for (const row of deletes) {
-    retryOrEnqueueIndexJob(db, 'delete', row.memory_id, row.profile, PRIORITY_RETRY);
+    retryOrEnqueueIndexJob(db, row.job_type, row.memory_id, row.profile, PRIORITY_RETRY);
   }
 
   // 三元组此前没有重试入口：embedding_state 一旦卡在 failed 就再也回不来（memory_triples_v1 曾被
@@ -602,15 +608,16 @@ export async function retryFailedIndexJobs() {
 export function memoryStats() {
   const db = getDb();
   const counts = db.prepare(`SELECT status, embedding_state, COUNT(*) AS count FROM memory_fragments GROUP BY status, embedding_state`).all();
-  const settings = getMemorySettings();
+  const settings = getMemorySettings({ includeSecrets: true });
   const entities = db.prepare(`SELECT COUNT(*) AS count FROM memory_entities`).get().count;
   const triples = db.prepare(`SELECT COUNT(*) AS count FROM memory_triples WHERE valid_to IS NULL`).get().count;
   // 阶段四：分层计数 + 强度概览（archived 占比供存储管理视图用）
   const layerRow = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived, SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) AS superseded FROM memory_fragments`).get();
   const strengthRow = db.prepare(`SELECT AVG(strength) AS avgStrength, SUM(CASE WHEN strength < 0.15 THEN 1 ELSE 0 END) AS nearThreshold FROM memory_fragments WHERE status = 'active'`).get();
   return {
-    mode: settings.mode,
-    profile: settings.profile,
+    mode: MEMORY_MODE,
+    // 语料指纹只此一份：报告检索真正在用的那个（此前取 maskSecrets 里另算的一套，内置 provider 下恒为 null）
+    profile: getPreferredMemoryEmbeddingProfile(settings).fingerprint || null,
     rows: counts,
     entities,
     activeTriples: triples,

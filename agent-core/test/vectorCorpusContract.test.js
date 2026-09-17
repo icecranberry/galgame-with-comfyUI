@@ -12,6 +12,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MEMORY_TRIPLES_CORPUS, tripleCorpusFor } from '../src/services/memory/memoryRepository.js';
+import { getEmbeddingProfile } from '../src/services/memory/memoryConfig.js';
+import { getPreferredMemoryEmbeddingProfile } from '../src/services/memory/memoryProviders.js';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const VECTOR_DIR = path.join(ROOT, 'vector-service');
@@ -70,6 +72,19 @@ test('三元组语料随嵌入 profile 分流，存量空指纹回落到共享�
   for (const empty of [null, undefined, {}, { fingerprint: '' }]) {
     assert.equal(tripleCorpusFor(empty), MEMORY_TRIPLES_CORPUS);
   }
+});
+
+test('语料指纹只此一份：设置页报告的指纹等于检索真正用的语料', () => {
+  const settings = {
+    embedding: { enabled: true, provider: 'custom', baseURL: 'https://example.test/v1', model: 'bge-m3', apiKey: 'sk-test', dimensions: null },
+    reranker: { enabled: false },
+  };
+  const reported = getEmbeddingProfile(settings);
+  const actual = getPreferredMemoryEmbeddingProfile(settings);
+  // memoryConfig.getEmbeddingProfile 的哈希载荷少一个字段就会算出另一个语料名（曾经就少了 source）
+  assert.equal(reported.corpus, actual.corpus);
+  assert.equal(reported.fingerprint, actual.fingerprint);
+  assert.equal(getEmbeddingProfile({ embedding: { enabled: false } }), null);
 });
 
 test('chroma_store 的语料白名单由语料常量拼出', () => {
