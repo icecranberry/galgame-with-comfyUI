@@ -18,7 +18,7 @@ import { getTimeTag, getLightNoteWithWeather } from '../timeLight.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { townNpcPortraitUrl } from './townNpcEventGenerator.js';
-import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE } from '../momentForms.js';
+import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES } from '../momentForms.js';
 import { parseMomentResponse } from '../momentResponseParser.js';
 
 function toSQLite(iso) {
@@ -157,11 +157,12 @@ export async function generateTownNpcMoment(npc, opts = {}) {
     : `- 今天没什么特别的事，就选一件符合你身份和此刻时段的小事作为唯一主线，随手记录小镇日常`;
 
   const formatPrompt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（只围绕一个具体中心）","imagePrompt":"配图的英文画面描述"}
+{"text":"朋友圈正文：中文口语，第一人称「我」，只围绕一个具体中心（一个瞬间或一件事），像随手打的字，可以很短、可以是半句话、可以带语气词；不要写成完整的文章、总结或感悟","imagePrompt":"配图的英文画面描述"}
 
 规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
+${MOMENT_TONE_RULES}
 - text 用中文，第一人称「我」，${pickedForm.len}，${pickedForm.desc}
 - ${factsRule}
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告
@@ -178,8 +179,8 @@ ${MOMENT_SINGLE_FOCUS_RULE}
   msgs.push({ role: 'system', content: formatPrompt });
   msgs.push({ role: 'system', content: personaMsg });
   msgs.push({ role: 'user', content: worldSetting
-    ? `请遵循当前<world_setting>来发朋友圈。${timeTag}${factsBlock}现在发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。`
-    : `${timeTag}${factsBlock}现在发一条朋友圈。只输出 {"text":"...","imagePrompt":"..."} JSON。` });
+    ? `请遵循当前<world_setting>来发朋友圈。${timeTag}${factsBlock}现在发一条朋友圈。`
+    : `${timeTag}${factsBlock}现在发一条朋友圈。` });
 
   let text = '', imagePrompt = '';
   try {

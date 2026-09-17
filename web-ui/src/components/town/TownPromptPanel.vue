@@ -207,7 +207,7 @@ onMounted(async () => {
 .prompt-panel {
   width: 232px;
   flex-shrink: 0;
-  background: rgba(240, 236, 232, 0.75);
+  background: rgba(240, 236, 232);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;

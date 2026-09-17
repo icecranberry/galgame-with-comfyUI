@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { cropPersonalityForEmotion } from './emotionEngine.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
+import { MOMENT_COMMENT_RULES } from './momentForms.js';
 
 // Sigmoid 参数（与 moments.js 多人模式一致）
 const MULTI_P_MIN = 0.30;
@@ -111,12 +112,9 @@ ${post.content}
 ---
 
 请以你的身份（${friendName}），在${posterName}的朋友圈评论区留一条自然的评论。
-规则：
-- 15~50 字，自然口语化，像熟人之间刷朋友圈随口评论一样
-- 保持你自身的人设和语气
-- 可以调侃、关心、吐槽、点赞——看你的性格和你们的关系
-- 不用刻意称呼对方名字，熟人之间不需要每句都叫
-- 只输出评论文本，不要带任何前缀或引号`;
+
+${MOMENT_COMMENT_RULES}
+- 看你的性格和你们的关系，决定是调侃、关心、吐槽，还是只起个哄`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
@@ -167,11 +165,9 @@ ${post.content}
 
 ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
 请以你的身份自然回复${friendName}的评论。
-规则：
-- 15~50 字，自然口语化，像熟人聊天一样随意
-- 保持你自身的人设和语气
-- 可以参考上下文但不要重复自己说过的话
-- 只输出回复文本，不要带任何前缀或引号`;
+
+${MOMENT_COMMENT_RULES}
+- 可以参考上下文，但不要重复自己说过的话`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
@@ -223,12 +219,10 @@ ${threadText}
 ---
 
 现在轮到你回复了。请以你的身份（${friendName}）继续这段对话。
-规则：
-- 15~50 字，自然口语化，像熟人聊天一样随意
-- 保持你自身的人设和语气
+
+${MOMENT_COMMENT_RULES}
 - 看上下文，不要重复自己说过的话，也别重复对方说过的话
-- 可以顺着话题聊下去，也可以自然转移
-- 只输出回复文本，不要带任何前缀或引号`;
+- 可以顺着话题聊下去，也可以自然转移`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });

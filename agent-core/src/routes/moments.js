@@ -16,7 +16,7 @@ import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
 import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_COMMENT_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 const router = Router();
 
@@ -381,7 +381,7 @@ async function generateMomentPost(character, opts = {}) {
   // 1. 一维/二维组合选取，代码侧硬随机避免 LLM 偏见
 
   const SPECIAL_MODES = [
-    { name: '做梦/幻想', desc: '分享昨晚的怪梦或白日梦——内容完全自由，不受现实逻辑约束。可以描述梦境场景、超现实体验、天马行空的脑洞。配图是超现实或梦幻风格' },
+    { name: '做梦/幻想', desc: '分享怪梦或白日梦——内容完全自由，不受现实逻辑约束。可以描述梦境场景、超现实体验、天马行空的脑洞。配图是超现实或梦幻风格' },
   ];
 
   // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% Topic 模式
@@ -506,8 +506,8 @@ async function generateMomentPost(character, opts = {}) {
 - **多人画面**：imagePrompt 中必须包含你和${multiPersons.map(p => p.otherName).join('、')}共${multiPersons.length + 1}人。描述各自外观、互动方式、肢体距离和表情，贴合你们的关系。用句号分隔每人描述` : '';
 
   const postingTaskIntro = worldSetting
-    ? '你正在发朋友圈。你的人设生存在<world_setting>中，融入世界观，把世界观当做常识，生成一条自然的朋友圈动态。'
-    : '你正在发朋友圈。请根据你的人设，生成一条自然的朋友圈动态。';
+    ? '你正在发朋友圈。你的人设生存在<world_setting>中，融入世界观，把世界观当做常识，像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。'
+    : '你正在发朋友圈。请根据你的人设，像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。';
 
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
@@ -548,8 +548,11 @@ async function generateMomentPost(character, opts = {}) {
       ? `"imagePrompt":"第一张照片的英文画面描述：${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"`
       : `"${name}":"第${i + 1}张照片的英文画面描述：同一次经历里的另一张照片，内容要求与 imagePrompt 完全一致（英文、完整独立、贴合正文）"`
     )).join(',');
+    const textShape = isSpecialMode
+      ? '朋友圈正文：中文口语，第一人称，只围绕一件事或一场梦完整讲完，可以自由展开；不要写总结、感悟或祝福'
+      : '朋友圈正文：中文口语，只围绕一个瞬间或一件事，像随手打的字，可以很短、可以是半句话、可以带语气词；不要写成完整的文章、总结或感悟';
     const jsonFmt = `输出格式（严格 JSON）：
-{"text":"朋友圈文案（自然口语化，只围绕一个中心）",${imageFieldJson}}`;
+{"text":"${textShape}",${imageFieldJson}}`;
 
     const multiImageRule = imageCount > 1
       ? `- **本次要发${CHINESE_NUM[imageCount]}张照片**：${imageFieldNames.join('、')} 是同一次经历里的${CHINESE_NUM[imageCount]}张不同照片——比如一张近景一张远景、一张拍自己一张拍身旁的风景或同伴、一张抓拍一张合影。每张都要能对应上 text 写的事，画面彼此不要重复，合起来才是一条完整的朋友圈。
@@ -561,6 +564,7 @@ async function generateMomentPost(character, opts = {}) {
     const staticRules = `通用规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
+${MOMENT_TONE_RULES}
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
 - **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
@@ -569,6 +573,7 @@ ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting
     const dynamicRules = `- text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
 ${multiImageRule}
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
+${isSpecialMode ? '- **形态例外**：叙事长文不受上面「只写一个瞬间」「半句话」「写完就停」的限制，可以把这一件事或这场梦讲完整；但依然禁止总结、感悟、祝福和金句。' : ''}
 ${imperfectionNote}
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
 ${continuationNote}`;
@@ -604,10 +609,9 @@ ${dynamicRules}`;
           : pickedTopic.desc
       );
 
-  const userJsonHint = `{"text":"...",${imageFieldNames.map(n => `"${n}":"..."`).join(',')}}`;
   const userMsg = multiPersons.length > 0
-    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，text 仍只围绕由此刻正在做与发圈动因合成的同一个中心，不要另写人物介绍或关系感想。发一条朋友圈。只输出 ${userJsonHint} JSON。`
-    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。只输出 ${userJsonHint} JSON。`;
+    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。发一条朋友圈。`
+    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。`;
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 任务 → msgs[2] 角色 → msgs[3] 交互(多人) → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -889,9 +893,9 @@ async function generateCharacterReply(post, historyComments) {
 ${post.content}
 ---
 
-请以角色的身份自然回复评论区的最新评论。规则：
-- 15~50 字，自然口语化，像熟人聊天一样随意
-- **不要反复叫对方名字**——熟人之间连续对话不需要每句都称呼，只在特别强调时用
+请以角色的身份自然回复评论区的最新评论。
+
+${MOMENT_COMMENT_RULES}
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
 ${momentRules}`;
 

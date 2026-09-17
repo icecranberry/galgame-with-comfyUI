@@ -32,7 +32,7 @@ import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, 
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
-import { getCoreDialogueRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
+import { getCoreDialogueRules, getChatRhythmRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
 import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
@@ -671,7 +671,10 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
       userInfoParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
-    // 固定格式规则保持在稳定前缀；随好感度/本轮生图意图变化的长度提示放到动态尾部。
+    // 固定格式规则保持在稳定前缀（<dialogue_format_rules>）；
+    // 静态活人感规则（<dialogue_rules>）与表情包清单（<emoji_stickers>）走下方 preSummarySystem，
+    // 独立成一条 system 紧贴摘要之上；
+    // 随好感度变化的长度条（<reply_length>）不进稳定层（见下方 dynamicBlocks），避免换档时挪动缓存前缀。
     const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
     userInfoParts.push(`<dialogue_format_rules>
 ${coreRules}
@@ -810,14 +813,25 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 7. 回复长度提示（随好感度变化）
+    // 7. 活人感节奏规则：静态规则 + 表情包清单（跨轮不变，可缓存）拼成一条独立 system，
+    //    由 buildChatContext 插在稳定前缀之后、摘要之上，作为缓存前缀的收尾；
+    //    随好感度变化的长度条单独降为 dynamicBlocks 首项——好感度换档只动提示词末尾那一小块，
+    //    前面的大段（世界观、人格、格式规则、活人感规则、表情包）不再跟着重算。
     const sentenceHint = (() => {
       if (explicitImageIntent) return '15个汉字以内';
       if (affinity == null || affinity < 60) return '10~30个汉字';
       if (affinity < 80) return '10~40个汉字';
       return '10~60个汉字';
     })();
-    dynamicBlocks.push(`<dialogue_rules>\n- **回复控制在${sentenceHint}，保持口语化轻快节奏**\n</dialogue_rules>`);
+    const preSummarySystem = [
+      getChatRhythmRules(),
+      emojiNote,
+    ];
+    // 长度条放动态块最前，仍紧跟在规则区之后（<dynamic_context> 顶部）
+    // 单独用 <reply_length>，与上方静态 <dialogue_rules> 区分：静态管怎么说话，这条只改本轮长度
+    dynamicBlocks.push(`<reply_length>
+- **回复控制在${sentenceHint}，保持口语化轻快节奏**
+</reply_length>`);
 
     // 8. VAD 三维情绪描述
     if (config.features.emotion && emotionPrompt) {
@@ -950,12 +964,13 @@ ${coreRules}
     // ── 通过 buildChatContext 组装基础请求 ──
     // 深度思考时 planner 与主回复共用这一完全相同的消息结构（稳定块+摘要+历史+含全部动态块的用户消息），
     // 任务块合并到 user 消息头部（末尾另附触发提醒），盘算结果追加到 user 消息末尾，不新增独立 user 消息
+    // 摘要之上另有一条独立 system：静态活人感规则 + <emoji_stickers> 清单（跨轮不变；长度条已降为动态块）
     const { messages: baseMsgs, metadata } = buildChatContext({
       stableBlocks,
+      preSummarySystem,
       summaryBlock,
       history: checkpointHistory,
       dynamicBlocks: budgetedBlocks,
-      userPrefix: emojiNote,
     });
 
     // ── 深度思考 Planner：先以角色视角盘算回复的媒介组合（text/sticker/image），再据此自然回复 ──
@@ -1155,10 +1170,10 @@ ${coreRules}
       dynamicBlocks.push(formatMemoryRecallBlock(recallQuery, recallResults, { failed: recallFailed }));
       const { messages: recallMsgs } = buildChatContext({
         stableBlocks,
+        preSummarySystem,
         summaryBlock,
         history: checkpointHistory,
         dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
-        userPrefix: emojiNote,
       });
 
       // 重置流状态：指令行不进气泡不落库；闸门前已发出的零散片段用 context_update 清空
