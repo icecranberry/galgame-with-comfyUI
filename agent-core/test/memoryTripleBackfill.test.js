@@ -30,6 +30,7 @@ function createDb() {
       profile TEXT,
       priority INTEGER NOT NULL DEFAULT 10,
       status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
       error TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

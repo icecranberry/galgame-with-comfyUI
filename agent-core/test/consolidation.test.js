@@ -327,11 +327,17 @@ test('findGeneralizationGroups：同实体同主体的多条情景记忆跨 14 �
 test('findBackfillCandidates 与 findPortraitSuggestionConversations', () => {
   const db = createDb();
   insertFragment(db, { memoryId: 'mem_legacy', judgment: '旧格式记忆', keywords: null, createdAt: daysAgo(10) });
-  // v3 字段全部填齐的记忆不是回填候选
+  // v3 字段全部填齐 + 已有实体链接的记忆不是回填候选
   db.prepare(`UPDATE memory_fragments SET keywords = '["已补"]', perspectives = '["饮食"]', semantic_note = '已完整' WHERE memory_id = 'mem_legacy'`).run();
+  const entityId = db.prepare(`INSERT INTO memory_entities(name) VALUES ('花生')`).run().lastInsertRowid;
+  db.prepare(`INSERT INTO memory_entity_links(memory_id, entity_id, role) VALUES (?, ?, 'subject')`).run('mem_legacy', entityId);
   insertFragment(db, { memoryId: 'mem_legacy2', judgment: '另一条旧记忆', keywords: null, createdAt: daysAgo(20) });
   const backfill = findBackfillCandidates(db);
   assert.deepEqual(backfill.map(row => row.memory_id), ['mem_legacy2']);
+  // v3 字段齐全但一条实体链接都没有 → 仍是候选：实体只在写入时按 v3 entities 数组建链，
+  // tags 无法可靠还原实体，只能再问一次模型，否则第四路召回永远命中不了这条记忆
+  db.prepare(`UPDATE memory_fragments SET keywords = '["有"]', perspectives = '["x"]', semantic_note = '有' WHERE memory_id = 'mem_legacy2'`).run();
+  assert.deepEqual(findBackfillCandidates(db).map(row => row.memory_id), ['mem_legacy2']);
   // 高重要度 knowledge（char_ 会话）→ 画像建议候选
   insertFragment(db, { memoryId: 'mem_core', judgment: '用户对花生过敏', type: 'knowledge', importance: 5, conversationId: 'char_7' });
   const conversations = findPortraitSuggestionConversations(db, { minImportance: 4 });
@@ -549,6 +555,79 @@ test('runBackfillTask：预算为 0 时直接让位', async () => {
   const result = await runBackfillTask({ candidates: [{ memory_id: 'x' }], llmBudgetRemaining: 0, deps: {} });
   assert.equal(result.done, false);
   assert.equal(result.llmCalls, 0);
+  // 预算让位与模型失败是两件事：前者不是错误，不该被上报成 llmFailures
+  assert.equal(result.llmFailures, 0);
+});
+
+test('runBackfillTask：补出实体时写入 memory_entity_links，且只补实体不置 stale', async () => {
+  const db = createDb();
+  // 该记忆 v3 检索字段齐全、但没有任何实体链接 → 仍在候选里（第四路召回需要它）
+  insertFragment(db, { memoryId: 'mem_noentity', judgment: '用户养了一只叫团子的猫' });
+  db.prepare(`UPDATE memory_fragments SET keywords = '["猫"]', perspectives = '["生活"]', semantic_note = '养了只猫叫团子' WHERE memory_id = 'mem_noentity'`).run();
+  db.prepare(`UPDATE memory_fragments SET embedding_state = 'indexed' WHERE memory_id = 'mem_noentity'`).run();
+  const before = db.prepare(`SELECT updated_at, embedding_state FROM memory_fragments WHERE memory_id = 'mem_noentity'`).get();
+
+  const result = await runBackfillTask({
+    candidates: findBackfillCandidates(db),
+    llmBudgetRemaining: 1,
+    deps: {
+      db,
+      chatSync: async () => JSON.stringify({
+        items: [{ memoryId: 'mem_noentity', keywords: [], perspectives: [], semanticNote: '', episodicNote: '', importance: 3,
+          entities: [{ name: '团子', role: 'object' }, { name: '狸花猫', role: 'mention' }, { name: '猫', role: 'mention' }] }],
+      }),
+    },
+  });
+
+  // 单字名（"猫"）被 upsertMemoryEntity 的「短于 2 字视为代词」守卫拒绝，所以只落 2 条
+  assert.equal(result.linked, 2);
+  assert.equal(result.updated, 1);
+  assert.equal(result.skipped, 0);
+  const links = db.prepare(`
+    SELECT me.name, mel.role FROM memory_entity_links mel
+    JOIN memory_entities me ON me.id = mel.entity_id
+    WHERE mel.memory_id = 'mem_noentity' ORDER BY me.name
+  `).all();
+  assert.deepEqual(links, [{ name: '团子', role: 'object' }, { name: '狸花猫', role: 'mention' }]);
+  // 实体不进 retrievalText，只补实体时不该重置 embedding_state / updated_at（否则白付一次重嵌）
+  const after = db.prepare(`SELECT updated_at, embedding_state FROM memory_fragments WHERE memory_id = 'mem_noentity'`).get();
+  assert.equal(after.embedding_state, before.embedding_state, '只补实体不应置 stale');
+  assert.equal(after.updated_at, before.updated_at, '只补实体不应刷新 updated_at');
+  // 补过链之后不再回环（记账生效）
+  assert.equal(findBackfillCandidates(db).length, 0);
+  db.close();
+});
+
+test('runBackfillTask：模型调用失败时上报 llmFailures 与原因（供调度层落库）', async () => {
+  const db = createDb();
+  insertFragment(db, { memoryId: 'mem_legacy', judgment: '用户养了一只猫', keywords: null });
+  const result = await runBackfillTask({
+    candidates: findBackfillCandidates(db),
+    llmBudgetRemaining: 1,
+    deps: { db, chatSync: async () => { throw new Error('401 Unauthorized'); } },
+  });
+  assert.equal(result.llmFailures, 1);
+  assert.equal(result.error, '401 Unauthorized');
+  assert.equal(result.done, false);
+  // 调用失败不记账：下一轮自然重试
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM memory_consolidation_marks WHERE job_type = 'backfill'`).get().count, 0);
+  db.close();
+});
+
+test('runConflictResolutionTask：LLM 全部失败时 llmFailures 计数（不再与"成功但无变化"同形）', async () => {
+  const clusters = [
+    { conversationId: 'c', memories: [{ memory_id: 'a', judgment: 'x' }] },
+    { conversationId: 'c', memories: [{ memory_id: 'b', judgment: 'y' }] },
+  ];
+  const result = await runConflictResolutionTask({
+    clusters,
+    llmBudgetRemaining: 2,
+    deps: { chatSync: async () => { throw new Error('no api key'); }, applyMemoryActions: () => {} },
+  });
+  assert.equal(result.llmCalls, 2);
+  assert.equal(result.llmFailures, 2);
+  assert.equal(result.error, 'no api key');
+  assert.equal(result.done, true);
 });
 
 test('findGeneralizationGroups：已有存活泛化后代的组被跳过（防反复升华）', () => {

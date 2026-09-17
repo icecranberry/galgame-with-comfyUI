@@ -303,6 +303,9 @@ export async function runConsolidationOnce({ force = false } = {}) {
   const summary = {};
   let jobsExecuted = 0;
   let llmCallsUsed = 0;
+  // 本轮最后一个失败的整理任务：写进 state 供设置页直接展示"上次为什么没整理成"。
+  // 干过活的轮次会把它清空，空转 / 失败轮保留上次的值（否则一次成功扫描就把线索抹掉了）。
+  let lastFailedJob = null;
   try {
     const daily = readDailyUsage(state);
     const dailyRemaining = Math.max(0, cfg.dailyLlmCalls - daily.used);
@@ -322,6 +325,18 @@ export async function runConsolidationOnce({ force = false } = {}) {
       try {
         const result = await executeJob(job, { llmBudgetRemaining: budgetRemaining, db, portraitSuggest: cfg.portraitSuggest });
         llmCallsUsed += result.llmCalls || 0;
+        if (isLlmJob && result.llmFailures > 0) {
+          // 模型调用失败：runner 已吞掉异常（保证"不记账、下轮重试"），调度层必须把状态与原因落库。
+          // 此前这种情况被当成"成功但无变化"写成 completed，任务表里完全看不出模型这一环挂了。
+          const attempts = (job.attempts || 0) + 1;
+          const nextStatus = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
+          finishJob(db, job.id, nextStatus, result.error || `LLM 调用失败 ${result.llmFailures} 次`);
+          console.warn(`[consolidation] job ${job.job_type}#${job.id} LLM 失败 ${result.llmFailures} 次 → ${nextStatus} (attempt ${attempts}):`, result.error);
+          summary[job.job_type] = result;
+          lastFailedJob = { jobType: job.job_type, error: result.error || `LLM 调用失败 ${result.llmFailures} 次`, at: new Date().toISOString() };
+          // 模型不可用通常不是单个任务的问题（缺 Key / 网络），不在同一轮里反复捶同一个任务
+          break;
+        }
         // LLM 任务因预算中途让位 → 补一个后续任务（下轮接着跑剩余候选）
         if (isLlmJob && result.done === false && llmBudgetForRun - llmCallsUsed <= 0) {
           enqueueJob(db, job.job_type, { continuation: true });
@@ -335,6 +350,7 @@ export async function runConsolidationOnce({ force = false } = {}) {
         const nextStatus = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
         finishJob(db, job.id, nextStatus, error.message);
         console.warn(`[consolidation] job ${job.job_type}#${job.id} ${nextStatus} (attempt ${attempts}):`, error.message);
+        lastFailedJob = { jobType: job.job_type, error: error.message, at: new Date().toISOString() };
       }
     }
     if (llmCallsUsed > 0) notifyMemoryIndexWorker();
@@ -344,6 +360,7 @@ export async function runConsolidationOnce({ force = false } = {}) {
       lastFinishedAt: nowIso,
       ...(worked ? { lastWorkedAt: nowIso, lastEmptyScanAt: null } : { lastEmptyScanAt: nowIso }),
       lastRunIdle: idle,
+      lastFailedJob: lastFailedJob || (worked ? null : state.lastFailedJob) || null,
       llmCallsUsed,
       llmCallsPerRun: llmBudgetForRun,
       dailyLlmCalls: cfg.dailyLlmCalls,

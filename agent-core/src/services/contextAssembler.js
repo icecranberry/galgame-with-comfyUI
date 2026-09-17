@@ -263,8 +263,11 @@ const BLOCK_PRIORITY = Object.freeze({
 });
 const DEFAULT_BLOCK_PRIORITY = 4;
 
+// 块标签提取。必须容忍带属性的开标签（如 `<current_event priority="active">`）：
+// 此前只匹配 `^<name>`，带属性的块取不到标签 → 一律落到 DEFAULT_BLOCK_PRIORITY，
+// 整块丢弃时日志还会打成「无标签块」，看不出丢的是哪个块。
 export function blockTag(block) {
-  const match = String(block || '').match(/^\s*<([a-z_]+)>/i);
+  const match = String(block || '').match(/^\s*<([a-z_]+)[\s>]/i);
   return match ? match[1].toLowerCase() : null;
 }
 

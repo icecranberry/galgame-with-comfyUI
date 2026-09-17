@@ -15,7 +15,9 @@ import { getDb } from '../../db/index.js';
 
 export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   enabled: true,
-  topK: 5,
+  // 与 db/index.js 建库种子行保持一致（种子写的是 7）。此前默认值 5、种子 7，
+  // 全新库实际生效 7 而代码默认读作 5，两边对不上时很难判断"到底搜几条"。
+  topK: 7,
   textCandidates: 24,
   vectorCandidates: 24,
   recordUnengagedEvents: true,

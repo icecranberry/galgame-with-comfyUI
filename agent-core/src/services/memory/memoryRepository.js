@@ -32,6 +32,18 @@ const INDEX_JOB_DELAY_MS = 100;
 const PRIORITY_LIVE = 0;
 const PRIORITY_RETRY = 5;
 const PRIORITY_HISTORY = 10;
+// 索引任务失败自动重试上限（与整理 daemon 的 MAX_ATTEMPTS 同口径）：
+// 到上限才落 failed，否则回 pending，由 worker 在 100ms 重泵时自然重试。
+export const MAX_INDEX_ATTEMPTS = 3;
+
+/**
+ * 索引任务失败后应落的状态（纯函数，便于单测）。
+ * 向量服务没起来、内置嵌入服务临时 5xx、远端限流这类都是可恢复的，值得自动重试；
+ * 此前一次失败就永久 failed，只能人工点「重试失败任务」。
+ */
+export function nextIndexJobStatus(attempts) {
+  return (Number(attempts) || 0) + 1 >= MAX_INDEX_ATTEMPTS ? 'failed' : 'pending';
+}
 
 const memoryIndexWorker = createMemoryIndexWorker({
   concurrency: INDEX_CONCURRENCY,
@@ -665,7 +677,7 @@ function retryOrEnqueueIndexJob(db, jobType, memoryId, profile, priority) {
   db.prepare(`
     UPDATE memory_index_jobs
     SET profile = ?, priority = ?, status = CASE WHEN status = 'processing' THEN status ELSE 'pending' END,
-        error = NULL, updated_at = CURRENT_TIMESTAMP
+        attempts = 0, error = NULL, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(profile, priority, existing.id);
   return existing.id;
@@ -756,13 +768,19 @@ async function processIndexJob(job) {
     }
     finishIndexJob(job.id, 'completed');
   } catch (error) {
-    finishIndexJob(job.id, 'failed', error.message);
+    const attempts = (Number(job.attempts) || 0) + 1;
+    const nextStatus = nextIndexJobStatus(job.attempts);
+    finishIndexJob(job.id, nextStatus, error.message);
+    if (nextStatus === 'pending') {
+      console.warn(`[memory-index] job ${job.job_type}#${job.id} 第 ${attempts}/${MAX_INDEX_ATTEMPTS} 次失败，稍后重试:`, error.message);
+    }
+    // 仍向上抛给 worker 的 onError（负责打日志），但不影响已写回的重试状态
     throw error;
   }
 }
 
 function finishIndexJob(jobId, status, error = null) {
-  getDb().prepare(`UPDATE memory_index_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+  getDb().prepare(`UPDATE memory_index_jobs SET status = ?, error = ?, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .run(status, error ? String(error).slice(0, 500) : null, jobId);
 }
 
