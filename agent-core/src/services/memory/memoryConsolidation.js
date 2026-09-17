@@ -13,7 +13,7 @@
  * consolidationScheduler.js。所有函数依赖可注入（db/llm/落库动作），单测用 :memory: 库。
  */
 
-import { applyMemoryActions, insertGeneralizedMemory } from './memoryRepository.js';
+import { applyMemoryActions, insertGeneralizedMemory, normalizeMemoryEntities, upsertMemoryEntity } from './memoryRepository.js';
 import { isMemoryV3Enabled } from './memoryConfig.js';
 
 // ── 遗忘曲线参数（方案 §6.2 T3）──
@@ -385,7 +385,10 @@ export function findPortraitSuggestionConversations(db, { minImportance = 4, lim
   return result;
 }
 
-// T5：v3 检索字段（keywords/perspectives/semantic_note）全缺失的 active 旧记忆，最旧优先。
+// T5：v3 检索字段（keywords/perspectives/semantic_note）缺失、或还没有任何实体链接的 active 记忆，
+// 最旧优先。实体一并纳入候选是必须的：实体链接只在 applyMemoryActions / insertGeneralizedMemory 里
+// 按 v3 形态的 entities 数组建立，写入时走了 v2 降级形态（模型没输出 entities）的记忆永远没有链接，
+// 而第四路召回（实体反查）与 T1/T2 的候选发现都依赖它 —— tags 无法可靠还原实体，只能再问一次模型。
 // TTL 内已补过的记忆不再入选（模型"宁可留空"时同样记账，否则同一批每轮都会被重补 + 重嵌入）。
 // 额外带出待比较字段，供 runner 判断"是否真的需要写库"。
 export function findBackfillCandidates(db, { limit = 10, now = new Date() } = {}) {
@@ -397,6 +400,7 @@ export function findBackfillCandidates(db, { limit = 10, now = new Date() } = {}
       mf.keywords IS NULL OR mf.keywords IN ('', '[]')
       OR mf.perspectives IS NULL OR mf.perspectives IN ('', '[]')
       OR mf.semantic_note IS NULL OR mf.semantic_note = ''
+      OR NOT EXISTS (SELECT 1 FROM memory_entity_links mel WHERE mel.memory_id = mf.memory_id)
     )
       AND NOT EXISTS (
         SELECT 1 FROM memory_consolidation_marks mcm
@@ -444,8 +448,12 @@ export async function runConflictResolutionTask({ clusters, llmBudgetRemaining =
   let llmCalls = 0;
   let applied = 0;
   let skipped = 0;
+  // 模型调用失败次数：必须随结果返回，否则"每次都调用失败"与"成功但没有需要处理的"在任务表里
+  // 完全一样（此前只在日志里留一行 warn，调度层无从区分，只能写成 completed）。
+  let llmFailures = 0;
+  let lastLlmError = null;
   for (const cluster of clusters || []) {
-    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, skipped, done: false };
+    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, skipped, done: false, llmFailures, error: lastLlmError };
     const listing = cluster.memories.map((m, index) => {
       const note = m.semantic_note ? `（转述：${m.semantic_note}）` : '';
       return `${index + 1}. ${m.memory_id} [${m.memory_type}|主体:${m.subject}] ${m.judgment}${note}`;
@@ -469,6 +477,8 @@ ${listing}
     } catch (error) {
       // 调用失败不记账：下一轮自然重试（与"模型判定无关"区分开）
       console.warn('[memory-consolidation] T1 LLM failed:', error.message);
+      llmFailures++;
+      lastLlmError = error.message;
       continue;
     }
     // 记账：本簇已被模型判定过（含"无关"结论）。不记账则同一簇每轮扫描都会重问，永不停止。
@@ -528,7 +538,7 @@ ${listing}
       }
     }
   }
-  return { llmCalls, applied, skipped, done: true };
+  return { llmCalls, applied, skipped, done: true, llmFailures, error: lastLlmError };
 }
 
 // ── T2：泛化升华 runner ──
@@ -544,8 +554,10 @@ export async function runGeneralizationTask({ groups, llmBudgetRemaining = 0, de
   let llmCalls = 0;
   let applied = 0;
   let skipped = 0;
+  let llmFailures = 0;
+  let lastLlmError = null;
   for (const group of groups || []) {
-    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, skipped, done: false };
+    if (llmCalls >= llmBudgetRemaining) return { llmCalls, applied, skipped, done: false, llmFailures, error: lastLlmError };
     const listing = group.members.map((m, index) => {
       const when = m.event_time || m.created_at || '';
       return `${index + 1}. [${when.slice(0, 10)}] ${m.judgment}`;
@@ -566,6 +578,8 @@ ${listing}
       generalization = parseJsonObject(raw).generalization;
     } catch (error) {
       console.warn('[memory-consolidation] T2 LLM failed:', error.message);
+      llmFailures++;
+      lastLlmError = error.message;
       continue;
     }
     // 记账：无论模型是否归纳出结论，本组都已被判定过。
@@ -593,7 +607,7 @@ ${listing}
       console.warn('[memory-consolidation] T2 insert failed:', error.message);
     }
   }
-  return { llmCalls, applied, skipped, done: true };
+  return { llmCalls, applied, skipped, done: true, llmFailures, error: lastLlmError };
 }
 
 // ── T4：核心记忆升华 runner（半自动：只产出建议，人工确认后才入画像）──
@@ -603,8 +617,10 @@ export async function runPortraitSuggestionTask({ conversations, llmBudgetRemain
   const db = deps.db;
   let llmCalls = 0;
   let suggestions = 0;
+  let llmFailures = 0;
+  let lastLlmError = null;
   for (const conversation of conversations || []) {
-    if (llmCalls >= llmBudgetRemaining) return { llmCalls, suggestions, done: false };
+    if (llmCalls >= llmBudgetRemaining) return { llmCalls, suggestions, done: false, llmFailures, error: lastLlmError };
     const existingPortraits = db.prepare(`SELECT trait_type, content FROM user_portraits WHERE character_id = ?`).all(conversation.characterId);
     const pending = db.prepare(`
       SELECT suggestion FROM portrait_suggestions WHERE character_id = ? AND status = 'pending'
@@ -632,6 +648,8 @@ ${pendingLines}
       items = parseJsonObject(raw).suggestions || [];
     } catch (error) {
       console.warn('[memory-consolidation] T4 LLM failed:', error.message);
+      llmFailures++;
+      lastLlmError = error.message;
       continue;
     }
     // 记账：本会话已被模型提炼过（含“提不出新建议”）。不记账则同一会话每轮都要重问一遍。
@@ -654,14 +672,15 @@ ${pendingLines}
       accepted.push(normalized);
     }
   }
-  return { llmCalls, suggestions, done: true };
+  return { llmCalls, suggestions, done: true, llmFailures, error: lastLlmError };
 }
 
 // ── T5：存量表示回填 runner ──
 
 /**
- * 每批 ≤10 条一次 LLM 调用，补齐 keywords/perspectives/semantic_note/importance。
- * 补完置 embedding_state='stale'——index worker 的 stale 兜底会自动重嵌入，无需额外入队。
+ * 每批 ≤10 条一次 LLM 调用，补齐 keywords/perspectives/semantic_note/importance 与 entities。
+ * 补齐 v3 检索字段置 embedding_state='stale'——index worker 的 stale 兜底会自动重嵌入，无需额外入队；
+ * 实体只写 memory_entity_links，不进向量文本，所以单独补链时不置 stale（不重复付费重嵌）。
  *
  * 两条硬约束：
  *   1. 只在字段真的变化时才写库（含 updated_at / stale）——否则模型留空时既刷新了排序用的
@@ -675,10 +694,10 @@ export async function runBackfillTask({ candidates, llmBudgetRemaining = 0, deps
   let updated = 0;
   let skipped = 0;
   const batch = (candidates || []).slice(0, 10);
-  if (batch.length === 0) return { llmCalls: 0, updated: 0, skipped: 0, done: true };
-  if (llmBudgetRemaining <= 0) return { llmCalls: 0, updated: 0, skipped: 0, done: false };
+  if (batch.length === 0) return { llmCalls: 0, updated: 0, skipped: 0, linked: 0, done: true, llmFailures: 0, error: null };
+  if (llmBudgetRemaining <= 0) return { llmCalls: 0, updated: 0, skipped: 0, linked: 0, done: false, llmFailures: 0, error: null };
   const listing = batch.map(m => `- ${m.memory_id} [${m.memory_type}|主体:${m.subject}] 判断：${m.judgment}｜依据：${m.reasoning || '无'}｜tags：${m.tags || '[]'}`).join('\n');
-  const prompt = `你是记忆表示补全器。下面这些旧记忆缺少 v3 检索字段，请逐条补全：
+  const prompt = `你是记忆表示补全器。下面这些旧记忆缺少 v3 检索字段或还没有实体索引，请逐条补全：
 
 ${listing}
 
@@ -688,9 +707,11 @@ ${listing}
 - episodicNote：情景信息（大约何时、在哪、发生了什么），不确定就给空字符串
 - semanticNote：把 judgment 提炼成一句可直接转述的话；写不出就给空字符串
 - importance：1（琐碎）~5（重大）
+- entities：具体的人名/地名/事物名（每条最多 6 个，role 用 subject/object/mention）；
+  代词（她/他/我/你/它）和抽象概念不算；没有就给 []
 宁可留空不要编造。
 
-只返回严格 JSON：{"items":[{"memoryId":"...","keywords":["..."],"perspectives":["..."],"episodicNote":"...","semanticNote":"...","importance":3}]}`;
+只返回严格 JSON：{"items":[{"memoryId":"...","keywords":["..."],"perspectives":["..."],"episodicNote":"...","semanticNote":"...","importance":3,"entities":[{"name":"...","role":"subject"}]}]}`;
   llmCalls++;
   let items = [];
   try {
@@ -698,9 +719,12 @@ ${listing}
     items = parseJsonObject(raw).items || [];
   } catch (error) {
     console.warn('[memory-consolidation] T5 LLM failed:', error.message);
-    return { llmCalls, updated: 0, skipped: 0, done: false };
+    // llmFailures/error 必须随结果返回：调度层据此把任务写成 pending/failed 并记录原因。
+    // 此前只返回 done:false，与"预算耗尽"同形，任务表里被写成 completed，看不出模型这一环挂了。
+    return { llmCalls, updated: 0, skipped: 0, linked: 0, done: false, llmFailures: 1, error: error.message };
   }
   const byId = new Map(batch.map(m => [m.memory_id, m]));
+  let linked = 0;
   for (const item of items) {
     const row = byId.get(item.memoryId);
     if (!row) continue;
@@ -710,32 +734,56 @@ ${listing}
     const episodicNote = String(item.episodicNote || '').trim().slice(0, 400);
     const importance = Math.min(5, Math.max(1, Number(item.importance) || 3));
 
-    // 逐字段判定"是否真的需要写"，只写变化项
+    // 逐字段判定"是否真的需要写"，只写变化项。
+    // reindex 只跟"进向量检索文本"的字段走（retrievalText = judgment + keywords + perspectives +
+    // episodic_note）；importance 与 entities 都不进向量文本，改了不该触发重嵌。
     const changes = {};
+    let reindex = false;
     if (keywords.length && JSON.stringify(keywords) !== JSON.stringify(stringList(row.keywords))) {
       changes.keywords = JSON.stringify(keywords);
+      reindex = true;
     }
     if (perspectives.length && JSON.stringify(perspectives) !== JSON.stringify(stringList(row.perspectives))) {
       changes.perspectives = JSON.stringify(perspectives);
+      reindex = true;
     }
     const currentSemantic = String(row.semantic_note || '').trim();
-    if (semanticNote && semanticNote !== currentSemantic) changes.semantic_note = semanticNote;
+    if (semanticNote && semanticNote !== currentSemantic) { changes.semantic_note = semanticNote; reindex = true; }
     const currentEpisodic = String(row.episodic_note || '').trim();
-    if (episodicNote && episodicNote !== currentEpisodic) changes.episodic_note = episodicNote;
+    if (episodicNote && episodicNote !== currentEpisodic) { changes.episodic_note = episodicNote; reindex = true; }
     if (importance !== (Number(row.importance) || 3)) changes.importance = importance;
 
+    // 实体补链：内存态去重 + INSERT OR IGNORE（表上 UNIQUE(memory_id, entity_id, role)）双保险
+    const entities = normalizeMemoryEntities(item.entities);
+    const existing = new Set(
+      db.prepare(`SELECT entity_id FROM memory_entity_links WHERE memory_id = ?`).all(row.memory_id).map(link => link.entity_id),
+    );
+    const newEntities = [];
+    for (const entity of entities) {
+      const entityId = upsertMemoryEntity(db, entity.name);
+      if (entityId && !existing.has(entityId)) newEntities.push({ entityId, role: entity.role });
+    }
+
     const columns = Object.keys(changes);
-    if (columns.length === 0) { skipped++; continue; }
-    db.prepare(`
-      UPDATE memory_fragments
-      SET ${columns.map(column => `${column} = ?`).join(', ')}, embedding_state = 'stale', updated_at = CURRENT_TIMESTAMP
-      WHERE memory_id = ? AND status = 'active'
-    `).run(...columns.map(column => changes[column]), row.memory_id);
+    if (columns.length === 0 && newEntities.length === 0) { skipped++; continue; }
+    if (columns.length > 0) {
+      db.prepare(`
+        UPDATE memory_fragments
+        SET ${columns.map(column => `${column} = ?`).join(', ')}${reindex ? ", embedding_state = 'stale'" : ''},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE memory_id = ? AND status = 'active'
+      `).run(...columns.map(column => changes[column]), row.memory_id);
+    }
+    for (const entity of newEntities) {
+      db.prepare(`INSERT OR IGNORE INTO memory_entity_links(memory_id, entity_id, role) VALUES (?, ?, ?)`)
+        .run(row.memory_id, entity.entityId, entity.role);
+      linked++;
+    }
     updated++;
   }
   // 记账：整批都已被模型看过（含模型留空的条数），下一轮换下一批，不再回环
   markConsolidated(db, 'backfill', batch.map(row => row.memory_id));
-  return { llmCalls, updated, skipped, done: true };
+  return { llmCalls, updated, skipped, linked, done: true, llmFailures: 0, error: null };
 }
 
 function stringList(value) {

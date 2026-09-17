@@ -874,6 +874,9 @@ function initSchema(db) {
   // 迁移: 把整理 daemon 的显式配置写进既有 memory_settings 行（缺失才补，不覆盖用户值）
   migrateMemoryConsolidationSettings(db);
 
+  // 迁移: 把 v3 / activeSearch / contextBudget 等阶段开关也显式化，让库里能读出实际生效值
+  migrateMemorySettingsExplicitBlocks(db);
+
   // 迁移: 叫醒系统 — characters 表新增 wake 相关列
   migrateWakeSchema(db);
 
@@ -2435,7 +2438,8 @@ function migrateEventCrossRef(db) {
 // ── 世界观收藏 CRUD 已下沉到 db/worldRepository.js ──
 
 // 迁移: PAI 风格聊天记忆 v2。保留旧字段供现有管理界面兼容，新增字段作为权威语义。
-function migrateChatMemoryV2Schema(db) {
+// 导出供迁移回归测试使用（test/memoryIndexRetry.test.js 断言存量库的 attempts 补列行为）。
+export function migrateChatMemoryV2Schema(db) {
   try {
     const columns = new Set(db.prepare(`PRAGMA table_info(memory_fragments)`).all().map(c => c.name));
     const additions = [
@@ -2495,6 +2499,7 @@ function migrateChatMemoryV2Schema(db) {
         profile TEXT,
         priority INTEGER NOT NULL DEFAULT 10,
         status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
         error TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -2533,6 +2538,11 @@ function migrateChatMemoryV2Schema(db) {
     const indexJobColumns = new Set(db.prepare(`PRAGMA table_info(memory_index_jobs)`).all().map(c => c.name));
     if (!indexJobColumns.has('priority')) {
       db.exec(`ALTER TABLE memory_index_jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 10`);
+    }
+    // 失败自动重试的计数列（上限见 memoryRepository.MAX_INDEX_ATTEMPTS）：
+    // 此前索引任务没有 attempts，一次失败就永久停在 failed，只能人工点「重试失败任务」。
+    if (!indexJobColumns.has('attempts')) {
+      db.exec(`ALTER TABLE memory_index_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`);
     }
     db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_index_jobs_queue ON memory_index_jobs(status, priority, id)`);
     const ftsCount = db.prepare(`SELECT COUNT(*) AS count FROM memory_fragments_fts`).get().count;
@@ -2750,6 +2760,61 @@ export function migrateMemoryConsolidationSettings(db) {
   } catch (err) {
     // 配置显式化失败不应阻止启动：读取侧仍有默认值兜底
     console.warn('[db] migrateMemoryConsolidationSettings skipped:', err.message);
+    return { error: err.message };
+  }
+}
+
+// 迁移: 把 v3 / activeSearch / contextBudget 三个阶段开关块与 useBuiltin / recordUnengagedEvents
+// 显式写进既有 memory_settings 行。
+//
+// 背景：memory_settings 只在首次运行时 INSERT OR IGNORE，老库里这些键根本不存在，一直靠
+// normalizeMemorySettings 的默认值兜底——从库里读不出实际生效值，将来修改代码默认值时老库还会
+// 静默跟随新默认（排障时"为什么行为和文档不一样"往往就出在这里）。这里做一次幂等显式化：
+//   - 只补缺失键，已有值一律不覆盖（用户手改过就以用户为准）；
+//   - 不做范围钳制，钳制统一在读取侧 normalizeMemorySettings（与 migrateMemoryConsolidationSettings 同口径）；
+//   - 数值与 memoryConfig.DEFAULT_MEMORY_SETTINGS 保持同步（本文件不能 import 它，会形成循环依赖）。
+export function migrateMemorySettingsExplicitBlocks(db) {
+  try {
+    const row = db.prepare(`SELECT setting_value FROM system_settings WHERE setting_key = 'memory_settings'`).get();
+    if (!row) return { skipped: 'no-settings' };
+
+    let stored = {};
+    try { stored = JSON.parse(row.setting_value) || {}; } catch { stored = {}; }
+
+    const blockDefaults = {
+      v3: { enabled: true },
+      activeSearch: { enabled: false, timeoutMs: 4000 },
+      contextBudget: { enabled: false, dynamicTokens: 8000 },
+    };
+    let changed = false;
+    for (const [key, defaults] of Object.entries(blockDefaults)) {
+      const current = stored[key];
+      if (current && typeof current === 'object' && !Array.isArray(current)) {
+        for (const [field, fallback] of Object.entries(defaults)) {
+          if (current[field] === undefined) { current[field] = fallback; changed = true; }
+        }
+      } else {
+        stored[key] = { ...defaults };
+        changed = true;
+      }
+    }
+    if (stored.recordUnengagedEvents === undefined) { stored.recordUnengagedEvents = true; changed = true; }
+    for (const key of ['embedding', 'reranker']) {
+      const provider = stored[key];
+      if (provider && typeof provider === 'object' && !Array.isArray(provider) && provider.useBuiltin === undefined) {
+        provider.useBuiltin = true;
+        changed = true;
+      }
+    }
+    if (!changed) return { skipped: 'up-to-date' };
+
+    db.prepare(`UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = 'memory_settings'`)
+      .run(JSON.stringify(stored));
+    console.log('[db] migrateMemorySettingsExplicitBlocks: v3/activeSearch/contextBudget 等开关已显式化');
+    return { updated: true, keys: [...Object.keys(blockDefaults), 'recordUnengagedEvents', 'useBuiltin'] };
+  } catch (err) {
+    // 配置显式化失败不应阻止启动：读取侧仍有默认值兜底
+    console.warn('[db] migrateMemorySettingsExplicitBlocks skipped:', err.message);
     return { error: err.message };
   }
 }

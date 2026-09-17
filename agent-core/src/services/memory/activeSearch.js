@@ -52,7 +52,7 @@ export async function activeMemorySearch(query, options = {}, deps = {}) {
     // 2. 三元组联想扩展（空库/嵌入失败自动跳过，存量数据自然降级）；历史模式连已失效三元组一起联想
     const tripleResults = await tripleExpansion(query, conversationIds, { v3Enabled, getDepsDb, getSettings, embed: deps.embed, searchVectors: deps.vectorSearch, historical });
     // 3. 实体 1 跳扩展
-    const entityHopResults = entityHopExpansion(primary, conversationIds, { v3Enabled, getDepsDb });
+    const entityHopResults = entityHopExpansion(primary, conversationIds, { v3Enabled, getDepsDb, historical });
 
     // 4. RRF 融合
     const candidateSets = [primary];
@@ -141,7 +141,7 @@ async function tripleExpansion(query, conversationIds, { v3Enabled = isMemoryV3E
 }
 
 // 实体 1 跳扩展：主检索 top 命中 → 共享实体 → 其他关联记忆（限 3 条，已命中的不再重复）
-function entityHopExpansion(primary, conversationIds, { v3Enabled = isMemoryV3Enabled, getDepsDb = getDb } = {}) {
+function entityHopExpansion(primary, conversationIds, { v3Enabled = isMemoryV3Enabled, getDepsDb = getDb, historical = false } = {}) {
   try {
     if (primary.length === 0 || !v3Enabled()) return [];
     const db = getDepsDb();
@@ -156,11 +156,16 @@ function entityHopExpansion(primary, conversationIds, { v3Enabled = isMemoryV3En
     const knownIds = primary.map(item => item.memory_id).filter(Boolean);
     const entityPlaceholders = entityIds.map(() => '?').join(',');
     const params = [...entityIds];
+    // 历史模式与主检索 / 三元组联想同口径：时态查询（"以前 / 曾经…"）要能看到 superseded 的记忆，
+    // 否则同一次回想里三路扩展各自放宽标准不一，结果集合自相矛盾（此前这里硬编码现行过滤）。
+    const visibility = historical
+      ? `mf.status IN ('active', 'superseded')`
+      : `mf.status = 'active' AND mf.valid_to IS NULL`;
     let sql = `
       SELECT mf.*, COUNT(DISTINCT mel.entity_id) AS shared_entities
       FROM memory_entity_links mel
       JOIN memory_fragments mf ON mf.memory_id = mel.memory_id
-      WHERE mel.entity_id IN (${entityPlaceholders}) AND mf.status = 'active' AND mf.valid_to IS NULL
+      WHERE mel.entity_id IN (${entityPlaceholders}) AND ${visibility}
     `;
     sql = appendConversationFilter(sql, params, conversationIds);
     if (knownIds.length) {

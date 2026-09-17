@@ -95,3 +95,17 @@ test('applyContextBudget：极小预算下也不静默——degraded 有完整�
   assert.ok(result.blocks.some(b => blockTag(b) === 'rag_memories'));
   assert.ok(result.tokensAfter < result.tokensBefore);
 });
+
+test('blockTag：带属性的开标签也要能取出标签名', () => {
+  // chat.js 的 <current_event priority="active"> 此前取不到标签 → 落默认优先级，
+  // 丢弃日志还会打成「无标签块」，看不出丢的是哪个块
+  assert.equal(blockTag('<current_event priority="active">\n正在经历突发事件'), 'current_event');
+  assert.equal(blockTag('<rag_memories>\n1. [knowledge] x\n</rag_memories>'), 'rag_memories');
+  assert.equal(blockTag('  <time_context>'), 'time_context');
+  assert.equal(blockTag('<user_portrait class="x" data-y="z">'), 'user_portrait');
+  // 非标签开头与闭标签不应被误认
+  assert.equal(blockTag('普通文本 <rag_memories>'), null);
+  assert.equal(blockTag('</rag_memories>'), null);
+  assert.equal(blockTag(''), null);
+  assert.equal(blockTag(null), null);
+});

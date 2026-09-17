@@ -25,25 +25,37 @@ export async function hybridSearch(query, options = {}) {
   let rerankerElapsedMs = null;
   let vectorResults = [];
   let fallbackReason = null;
+  // 失败原因可能来自多个阶段（本地兜底提示 + 向量检索失败），统一累加而不是互相覆盖
+  const noteFallback = (message) => {
+    fallbackReason = [fallbackReason, message].filter(Boolean).join('; ');
+  };
 
+  // 嵌入与向量检索分两个 try：连不上本地 vector-service(8765) 与"嵌入接口失败"是两件事。
+  // 此前两者同处一个 catch、一律标成 `embedding:`，导致"8765 没启动"被误报成"嵌入失败"，
+  // 排查时会一路去查嵌入 provider，而真正缺席的是那个本地进程。
   try {
     const embeddingResult = await embedMemoryText(query, settings);
     profile = embeddingResult.profile;
     embeddingSource = embeddingResult.source;
     embeddingElapsedMs = embeddingResult.elapsedMs;
+    if (embeddingResult.source === 'local') noteFallback('embedding: using local built-in model');
     const vectorConversationScope = conversationIds.length === 0
       ? null
       : (conversationIds.length === 1 ? conversationIds[0] : conversationIds);
-    const raw = await vectorSearch(query, {
-      embedding: embeddingResult.embedding,
-      topK: vectorLimit,
-      conversationId: vectorConversationScope,
-      corpus: profile.corpus,
-    });
-    vectorResults = hydrateVectorResults(raw, conversationIds, { includeHistorical: options.includeHistorical });
-    if (embeddingResult.source === 'local') fallbackReason = 'embedding: using local built-in model';
+    try {
+      const raw = await vectorSearch(query, {
+        embedding: embeddingResult.embedding,
+        topK: vectorLimit,
+        conversationId: vectorConversationScope,
+        corpus: profile.corpus,
+      });
+      vectorResults = hydrateVectorResults(raw, conversationIds, { includeHistorical: options.includeHistorical });
+    } catch (error) {
+      // 向量通道的现行过滤在 Node 侧水合时做；这里失败只丢向量这一路，文本与实体路照常
+      noteFallback(`vector-search: ${error.message}`);
+    }
   } catch (error) {
-    fallbackReason = `embedding: ${error.message}`;
+    noteFallback(`embedding: ${error.message}`);
   }
 
   const candidateSets = [textResults];
@@ -160,7 +172,14 @@ function ngramSearch(tokens, conversationIds, limit, { includeHistorical = false
   sql = appendConversationFilter(sql, params, conversationIds);
   sql += ` ORDER BY text_score DESC, COALESCE(mf.updated_at, mf.created_at) DESC LIMIT ?`;
   params.push(limit);
-  return db.prepare(sql).all(...params).map(row => formatRow(row, 'ngram', Number(row.text_score || 0)));
+  // 四路里唯一没有局部降级的通道：抛错会冒泡出 hybridSearch、让本轮完全没有任何 RAG 注入
+  // （不是"少一路"，是四路全丢）。与 FTS / 向量 / 实体保持一致，失败只丢这一路。
+  try {
+    return db.prepare(sql).all(...params).map(row => formatRow(row, 'ngram', Number(row.text_score || 0)));
+  } catch (error) {
+    console.warn('[memorySearch] ngram fallback:', error.message);
+    return [];
+  }
 }
 
 // 实体通道：查询 token 命中实体（名字相等 > 互相包含 > 别名）→ 反查关联记忆，

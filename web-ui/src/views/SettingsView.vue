@@ -671,6 +671,10 @@
           </div>
         </div>
 
+        <!-- 状态与配置提示：记忆"记不住 / 搜不到 / 整理没动静"的原因分散在多个开关里，
+             这里把结论直接摆在卡片最上面，并明确这一块是可以配置的 -->
+        <memory-health-panel mode="compact" class="memory-settings-health" />
+
         <div class="toggle-row memory-settings-row">
           <div class="memory-settings-copy">
             <div class="tl">启用聊天记忆</div>
@@ -682,7 +686,7 @@
           role="button"
           tabindex="0"
           class="memory-settings-entry sheen"
-          aria-label="管理聊天记忆：查看、删除记忆，调整查找方式"
+          aria-label="打开记忆设置：调整智能匹配模型、整理节奏、记忆条数与归档管理"
           @click="router.push('/settings/memory')"
           @keydown.enter.prevent="router.push('/settings/memory')"
           @keydown.space.prevent="router.push('/settings/memory')"
@@ -693,8 +697,14 @@
             </svg>
           </span>
           <span class="memory-entry-copy">
-            <span class="memory-entry-title">管理聊天记忆</span>
-            <span class="memory-entry-desc">查看、删除记忆，调整记忆的查找方式</span>
+            <span class="memory-entry-title">打开记忆设置</span>
+            <span class="memory-entry-desc">智能匹配模型、整理节奏、记忆条数与归档，都在这里调</span>
+            <span class="memory-entry-tags">
+              <span class="memory-entry-tag">智能匹配模型</span>
+              <span class="memory-entry-tag">整理节奏</span>
+              <span class="memory-entry-tag">记忆条数</span>
+              <span class="memory-entry-tag">归档管理</span>
+            </span>
           </span>
           <span class="memory-entry-arrow" aria-hidden="true">
             <svg viewBox="0 0 24 24">
@@ -942,6 +952,7 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import GearIcon from '../components/GearIcon.vue'
+import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
 import UpdateTag from '../components/UpdateTag.vue'
 import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
@@ -2167,6 +2178,18 @@ function resetTestPrompts() {
 }
 .memory-settings-copy { flex: 1; min-width: 0; }
 .memory-settings-row { margin-top: 6px; }
+.memory-settings-health { display: block; margin-top: 12px; }
+/* 入口卡片上直接列出"可配置项"，避免用户以为记忆只有开 / 关 */
+.memory-entry-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.memory-entry-tag {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  line-height: 1.7;
+}
 .memory-settings-entry {
   width: 100%; min-height: 68px; margin-top: auto; padding: 12px 14px;
   display: flex; align-items: center; gap: 12px;

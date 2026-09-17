@@ -13,6 +13,10 @@
       <span class="mode-badge hybrid">自动选择模型</span>
     </header>
 
+    <!-- 体检面板：把"当前生效的是哪套配置、缺什么、缺了会怎样、去哪里配"放在最前面，
+         避免记忆出问题时只能靠猜（症状在别处，原因分散在四个开关 + 两套 provider + 向量服务） -->
+    <memory-health-panel class="health-panel" />
+
     <div v-if="loading" class="state-card">正在加载…</div>
     <template v-else>
       <section class="card overview">
@@ -334,6 +338,7 @@ import CollapseTransition from '../components/CollapseTransition.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
+import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
 import {
   deleteMemoryFragment,
   getConsolidationJobs,
@@ -790,6 +795,7 @@ onMounted(() => Promise.all([load(), loadConversationDirectory(), loadIndexJobs(
 .advanced-content { padding: 0 16px 16px; overflow: hidden; max-height: 0; transition: max-height .3s cubic-bezier(0.22, 0.61, 0.36, 1), padding .3s cubic-bezier(0.22, 0.61, 0.36, 1); }
 .advanced-content.collapsing { padding-top: 0; padding-bottom: 0; }
 .overview { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
+.health-panel { display: block; margin-bottom: 16px; }
 .stats { display: flex; gap: 24px; flex-shrink: 0; }
 .stats div { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
 .stats strong { font-size: 22px; color: var(--accent); }
