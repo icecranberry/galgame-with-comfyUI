@@ -31,14 +31,23 @@ function cloneMessage(message) {
  * 组装模型请求上下文。
  *
  * @param {string[]}  stableBlocks   稳定前缀：数组每项为一整条 system content，顺序即为请求中 system 顺序
+ * @param {string|string[]} [preSummarySystem] 摘要前 system：与世界观分离的独立提示层（活人感节奏、表情包等），
+ *                                       多条以空行拼成一条，位置紧贴摘要之上
  * @param {string}    [summaryBlock] 最新摘要文本（可选），置于稳定块之后、历史之前
  * @param {object[]}  history        不可变历史消息数组，[{ role, content }]
  * @param {string[]}  dynamicBlocks  本轮动态上下文块，会以 <dynamic_context> 标签附加到最新 user 消息尾部
  * @returns {{ messages: object[], metadata: object }}
  */
-export function buildChatContext({ stableBlocks = [], summaryBlock = null, history = [], dynamicBlocks = [], userPrefix = '' } = {}) {
+export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, history = [], dynamicBlocks = [] } = {}) {
   const stableMessages = stableBlocks.filter(Boolean).map(content => ({ role: 'system', content: String(content) }));
   const historyMessages = history.map(cloneMessage);
+
+  // 摘要前 system：多条按空行拼成一条（空段自动省略）
+  const preSummaryContent = (Array.isArray(preSummarySystem) ? preSummarySystem : [preSummarySystem])
+    .map(part => String(part ?? '').trim())
+    .filter(Boolean)
+    .join('\n\n');
+  const preSummaryMessage = preSummaryContent ? { role: 'system', content: preSummaryContent } : null;
 
   // 摘要块放在稳定块之后、历史之前
   let summaryMessage = null;
@@ -48,31 +57,29 @@ export function buildChatContext({ stableBlocks = [], summaryBlock = null, histo
 
   const messages = [];
   messages.push(...stableMessages);
+  if (preSummaryMessage) messages.push(preSummaryMessage);
   if (summaryMessage) messages.push(summaryMessage);
   messages.push(...historyMessages);
 
   // 动态上下文块附加到最新 user 消息
   const dynamicText = dynamicBlocks.filter(Boolean).join('\n\n');
-  const prefixText = String(userPrefix || '').trim();
-  if (dynamicText || prefixText) {
+  if (dynamicText) {
     const reverseIdx = [...messages].reverse().findIndex(m => m.role === 'user');
     if (reverseIdx >= 0) {
       const latestUserIdx = messages.length - 1 - reverseIdx;
       const originalContent = messages[latestUserIdx].content;
-      const dynamicPart = dynamicText
-        ? `<dynamic_context>\n${dynamicText}\n</dynamic_context>\n\n${originalContent}`
-        : originalContent;
       messages[latestUserIdx] = {
         role: 'user',
-        content: prefixText ? `${prefixText}\n\n${dynamicPart}` : dynamicPart,
+        content: `<dynamic_context>\n${dynamicText}\n</dynamic_context>\n\n${originalContent}`,
       };
     }
   }
 
-  // hash：稳定前缀不含摘要和历史
+  // hash：稳定前缀不含摘要前 system、摘要和历史
   const stablePrefixHash = sha256(stableSerialize(stableMessages));
-  // 完整前缀含摘要
+  // 完整前缀含摘要前 system 与摘要
   const fullPrefixMessages = [...stableMessages];
+  if (preSummaryMessage) fullPrefixMessages.push(preSummaryMessage);
   if (summaryMessage) fullPrefixMessages.push(summaryMessage);
   const fullPrefixHash = sha256(stableSerialize(fullPrefixMessages));
   // 历史 hash
@@ -89,6 +96,7 @@ export function buildChatContext({ stableBlocks = [], summaryBlock = null, histo
       historyPrefixHash,
       requestHash,
       dynamicSnapshot: dynamicText,
+      preSummarySnapshot: preSummaryContent,
     },
   };
 }

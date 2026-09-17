@@ -1,5 +1,8 @@
 <template>
-  <section class="memory-health" :class="[`lv-${level}`, { 'is-compact': mode === 'compact' }]">
+  <section
+    class="memory-health"
+    :class="[{ card: mode === 'full', 'is-compact': mode === 'compact' }, `lv-${level}`]"
+  >
     <div class="mh-head">
       <span class="mh-dot" aria-hidden="true" />
       <div class="mh-headline">
@@ -115,65 +118,79 @@ onMounted(load)
 <style scoped>
 .memory-health {
   --mh-tone: var(--fun-teal);
-  border: 2px solid var(--border);
-  border-left: 6px solid var(--mh-tone);
-  border-radius: var(--radius-md);
-  background: #fff;
-  box-shadow: var(--shadow-hard-sm, 0 2px 0 rgba(55, 48, 107, 0.13));
-  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
 }
-.memory-health.lv-ok { --mh-tone: var(--success, #3fbf7f); }
-.memory-health.lv-warn { --mh-tone: var(--warning, #faad14); }
-.memory-health.lv-error { --mh-tone: var(--danger, #ff4d5f); }
+.memory-health.lv-ok { --mh-tone: var(--success); }
+.memory-health.lv-warn { --mh-tone: var(--warning); }
+.memory-health.lv-error { --mh-tone: var(--danger); }
 .memory-health.lv-off { --mh-tone: var(--fun-neutral); }
-.memory-health.lv-loading { --mh-tone: var(--accent-light, #a99df2); }
-.memory-health.is-compact { padding: 10px 12px; }
+.memory-health.lv-loading { --mh-tone: var(--accent-light); }
+/* full：表面交给全局 .card 与页面级毛玻璃装饰，这里不再自带底色、描边和状态色边条 */
+.memory-health.is-compact {
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: var(--radius-md);
+}
 
 .mh-head { display: flex; align-items: center; gap: 10px; }
 .mh-dot {
   flex: none;
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--mh-tone);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mh-tone) 20%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mh-tone) 12%, transparent);
 }
 .mh-headline { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mh-headline strong { font-size: 13.5px; color: var(--text-primary); }
+.mh-headline strong { font-size: var(--fs-base); color: var(--text-primary); }
 .mh-sub {
-  font-size: 12px; color: var(--text-secondary);
+  font-size: var(--fs-xs); color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .mh-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .mh-chip {
-  font-size: 11.5px;
-  border: 1px solid var(--border);
-  background: var(--bg-tertiary);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-xs);
+  padding: 1px 8px;
+  line-height: 1.7;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--text-secondary);
   border-radius: var(--radius-full);
-  padding: 2px 10px;
   white-space: nowrap;
 }
 .mh-chip.bad {
-  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-  background: color-mix(in srgb, var(--danger) 10%, #fff);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--danger);
 }
 
 .mh-issues { list-style: none; margin: 11px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .mh-issues li {
-  border-radius: var(--radius-sm);
-  padding: 8px 11px;
-  background: var(--bg-tertiary);
-  border-left: 3px solid var(--fun-neutral);
+  --mh-issue-tone: var(--fun-neutral);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  background: var(--tint-subtle);
   display: flex; flex-direction: column; gap: 3px;
 }
-.mh-issues li.is-error { background: color-mix(in srgb, var(--danger) 8%, #fff); border-left-color: var(--danger); }
-.mh-issues li.is-warn { background: color-mix(in srgb, var(--warning) 10%, #fff); border-left-color: var(--warning); }
-.mh-issues li.is-info { background: color-mix(in srgb, var(--fun-blue) 8%, #fff); border-left-color: var(--fun-blue); }
-.mh-issue-title { font-size: 12.8px; font-weight: 700; color: var(--text-primary); }
-.mh-issue-detail { font-size: 12.3px; color: var(--text-secondary); line-height: 1.6; }
-.mh-issue-where { font-size: 11.8px; color: var(--accent); font-weight: 600; }
+.mh-issues li.is-error { --mh-issue-tone: var(--danger); }
+.mh-issues li.is-warn { --mh-issue-tone: var(--warning); }
+.mh-issues li.is-info { --mh-issue-tone: var(--fun-blue); }
+.mh-issue-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); font-weight: 700; color: var(--text-primary);
+}
+.mh-issue-title::before {
+  content: '';
+  flex: none;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--mh-issue-tone);
+}
+.mh-issue-detail { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.6; }
+.mh-issue-where { font-size: var(--fs-xs); color: var(--accent); font-weight: 600; }
 
-.mh-ok { margin: 10px 0 0; font-size: 12.4px; color: var(--text-secondary); }
-.mh-error { margin: 10px 0 0; font-size: 12.4px; color: var(--danger); }
+.mh-ok { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
+.mh-error { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--danger); }
 </style>

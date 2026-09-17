@@ -3,7 +3,7 @@
 
 export const MOMENT_FORMS = [
   { name: '短句流',  desc: '一句话说清楚，极简不解释',                     len: '5-20字',  weight: 2.0, nightBoost: false },
-  { name: '纯图党',  desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字',  weight: 1.3, nightBoost: true },
+  { name: '纯图党',  desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字',  weight: 1.0, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽',                len: '20-60字', weight: 0.8, nightBoost: false },
   { name: '冷幽默',  desc: '一句或几句自嘲冷幽默，结尾抖个小包袱',            len: '15-50字', weight: 0.6, nightBoost: false },
   { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '15-60字', weight: 0.5, nightBoost: false },
