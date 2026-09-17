@@ -203,11 +203,6 @@ export async function uploadChatBg(characterId, base64) {
   return request(`/characters/${characterId}/chat-bg`, { method: 'POST', body: { base64 } })
 }
 
-/** AI 生成角色聊天背景（依据角色设定与可选场景提示，横版无人物） */
-export function generateChatBg(characterId, prompt = '') {
-  return request(`/characters/${characterId}/generate-chat-bg`, { method: 'POST', body: { prompt } })
-}
-
 /** 生成角色立绘（requirement 为额外立绘需求，可空） */
 export function generateStanding(characterId, requirement = '') {
   return request(`/characters/${characterId}/generate-standing`, { method: 'POST', body: { requirement } })

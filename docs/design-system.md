@@ -58,7 +58,7 @@
 
 ## 主题切换 / 角色聊天背景（既有能力）
 
-* 设置页「功能开关」卡片中的「界面主题」切换主题；聊天背景经 `ChatBgPanel.vue`（本地上传 / ComfyUI 生成 / 恢复默认），渲染于 `ChatView` 的 `.chat-bg + .chat-bg-veil`，图片存 `data/images/chatbg/`（相册分类「聊天背景」）。
+* 设置页「功能开关」卡片中的「界面主题」切换主题；聊天背景经 `ChatBgPanel.vue`（本地上传 / 恢复默认），渲染于 `ChatView` 的 `.chat-bg + .chat-bg-veil`，图片存 `data/images/chatbg/`（相册分类「聊天背景」）。
 
 ## Linshe 表单控件层（v3.2 合入）
 
