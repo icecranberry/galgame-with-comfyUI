@@ -1050,8 +1050,8 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   }
 
   // ── 后处理：每轮群聊按配置轮次整理 v2 记忆，同时推进群聊摘要 ──
-  // 摘要排在整理之前：整理会把 checkpoint 推到本批末尾，摘要要读推进前的值，
-  // 两个调用才会取到同一段记录、互相命中前缀缓存。
+  // 摘要窗口与整理互相独立（摘要读自己的 checkpoint，按最后 interval 条触发消息截断），
+  // 先后顺序不再影响缓存命中，此处保持摘要在前。
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
     try {

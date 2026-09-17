@@ -1496,8 +1496,8 @@ ${coreRules}
           characterName: character?.display_name,
           userName: chatUserName,
         });
-        // 记忆整理放在摘要之后：整理会把 checkpoint 推到本批末尾，摘要要读推进前的值，
-        // 两个调用才会取到同一段记录、互相命中前缀缓存。
+        // 摘要与整理的取数窗口互相独立：摘要读自己的 checkpoint，并按「最后 interval 条
+        // 触发角色消息」截断，因此先后顺序不再影响前缀缓存命中，此处保持摘要在前。
         if (config.features.memory) {
           await curateChatMemories({
             conversationId,

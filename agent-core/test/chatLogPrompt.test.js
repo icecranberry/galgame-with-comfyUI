@@ -1,15 +1,16 @@
 /**
- * 记忆整理与对话摘要的共享前缀：两个调用必须在开头逐字节一致，
- * 后发的那个才能整段命中前一个刚写进前缀缓存的 system 块与聊天记录。
- * 两半前提：摘要窗口起点对齐记忆整理 checkpoint（pickWindowStartId），
- * 记录块排在任务指令之前（buildAnalysisUserContent）。
+ * 记忆整理与对话摘要的共享前缀：两个调用共用同一份 system 块，
+ * 记录块都排在任务指令之前（buildAnalysisUserContent），前缀结构一致时才命中缓存。
+ * 窗口互相独立：整理按自己的阈值推进，摘要按「最后 interval 条触发角色消息」
+ * 自行截断（pickSummaryBatchStart），因此记录正文只在两边恰好取到同一批消息时
+ * 才逐字节一致。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GROUP_LOG_LABEL, buildChatLogBlock, buildChatLogLines, buildSharedAnalysisSystemPrompt } from '../src/services/chatLogPrompt.js';
 import { buildCurationMessages } from '../src/services/memoryExtractor.js';
-import { buildSummaryMessages, pickWindowStartId } from '../src/services/summarizer.js';
+import { buildSummaryMessages, pickSummaryBatchStart } from '../src/services/summarizer.js';
 
 const MESSAGES = [
   { role: 'user', content: '今天去公园了' },
@@ -89,16 +90,42 @@ test('群聊记录的发言者标签由共享常量给出，避免两个调用�
   assert.equal(block, '<chat_log>\n[群聊记录] [琪亚娜]: 本小姐现在在干嘛\n</chat_log>');
 });
 
-test('摘要窗口起点跟在记忆整理 checkpoint 上，两个调用才取到同一段记录', () => {
-  assert.equal(pickWindowStartId({ summaryCheckpoint: 60, memoryCheckpoint: 20, memoryEnabled: true }), 20);
+test('摘要批次起点＝从末尾倒数第 interval 条触发角色消息', () => {
+  const messages = [
+    { role: 'user', content: 'u1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'user', content: 'u2' },
+    { role: 'assistant', content: 'a2' },
+    { role: 'user', content: 'u3' },
+    { role: 'assistant', content: 'a3' },
+  ];
+  assert.equal(pickSummaryBatchStart(messages, { interval: 2 }), 3, '倒数第 2 条 assistant 的下标');
+  assert.equal(pickSummaryBatchStart(messages, { interval: 3 }), 1);
+  assert.equal(pickSummaryBatchStart(messages, { interval: 1 }), 5, '窗口只含最后一条 assistant 之后不截断');
 });
 
-test('记忆未启用 / 从未整理 / 整理点反而更靠后时，退回摘要自己的 checkpoint', () => {
-  assert.equal(pickWindowStartId({ summaryCheckpoint: 60, memoryCheckpoint: 20, memoryEnabled: false }), 60);
-  assert.equal(pickWindowStartId({ summaryCheckpoint: 60, memoryCheckpoint: 0, memoryEnabled: true }), 60);
-  assert.equal(pickWindowStartId({ summaryCheckpoint: 20, memoryCheckpoint: 60, memoryEnabled: true }), 20);
-  assert.equal(pickWindowStartId({ summaryCheckpoint: 0, memoryCheckpoint: 40, memoryEnabled: true }), 0);
-  assert.equal(pickWindowStartId(), 0);
+test('不足 interval 条触发角色消息时返回 -1，调用方视为还不需要摘要', () => {
+  assert.equal(pickSummaryBatchStart([
+    { role: 'user', content: 'u1' },
+    { role: 'assistant', content: 'a1' },
+  ], { interval: 2 }), -1);
+  assert.equal(pickSummaryBatchStart([], { interval: 1 }), -1);
+  assert.equal(pickSummaryBatchStart(null, { interval: 1 }), -1);
+});
+
+test('触发角色可切到 user（多角色混杂），interval 非法时回退默认', () => {
+  const messages = [
+    { role: 'user', content: 'u1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'user', content: 'u2' },
+    { role: 'assistant', content: 'a2' },
+  ];
+  assert.equal(pickSummaryBatchStart(messages, { triggerRole: 'user', interval: 2 }), 0);
+  assert.equal(pickSummaryBatchStart(messages, { triggerRole: 'user', interval: 1 }), 2);
+  // 非正整数 / 未传 interval → 回退 SUMMARIZE_INTERVAL(10)，此处不足 10 条
+  assert.equal(pickSummaryBatchStart(messages, { interval: 0 }), -1);
+  assert.equal(pickSummaryBatchStart(messages, { interval: -3 }), -1);
+  assert.equal(pickSummaryBatchStart(messages), -1);
 });
 
 // 输出被 max_tokens 截断后的精简重发只允许改「条数上限」那一行指令：

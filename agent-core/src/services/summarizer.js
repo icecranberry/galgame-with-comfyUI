@@ -2,17 +2,16 @@
  * 滚动摘要生成器
  *
  * 每个会话每 10 条 assistant 消息触发一次摘要生成（含主动聊天消息）。
- * 新摘要 = LLM(上一段摘要 + 记录窗口)；窗口起点对齐记忆整理的 checkpoint（pickWindowStartId），
- * 两个调用取到同一段记录、渲染后逐字节一致，才能互相命中前缀缓存。
+ * 新摘要 = LLM(上一段摘要 + 记录窗口)；窗口与滑动窗口同拍：
+ * 从摘要自己的 checkpoint 之后取记录，再按「最后 interval 条触发角色消息」截断，
+ * 一次只总结刚滑出上下文窗口的那一批轮次（与记忆整理互相独立，不共享窗口起点）。
  * 滚动摘要只用于上下文压缩，不进入长期记忆索引。
  */
 
-import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { DIRECT_IMG_LINE_RE, stripLegacyPromptJson } from '../utils/groupImagePrompt.js';
 import { buildAnalysisUserContent, buildChatLogBlock, buildSharedAnalysisSystemPrompt } from './chatLogPrompt.js';
-import { getCheckpoint } from './memory/memoryRepository.js';
 
 /**
  * 摘要前过滤生图 prompt：
@@ -59,7 +58,8 @@ const SUMMARY_TASK_PROMPT = `【上一段摘要】（更早的对话，已压缩
 
 /**
  * 摘要的完整请求：与记忆整理共用同一份共享 system 块、同一份 <chat_log> 渲染，
- * 且记录块同样排在任务之前，两个调用因此能互相复用前缀缓存。
+ * 且记录块同样排在任务之前。记录正文只在两边恰好取到同一批消息时才逐字节一致，
+ * 其余情况共享的是 system 块与前缀结构。
  */
 export function buildSummaryMessages({ previousSummary = '', chatLogBlock = '' } = {}) {
   const task = SUMMARY_TASK_PROMPT.replace('{{previous_summary}}', previousSummary || '（新对话开始）');
@@ -70,14 +70,22 @@ export function buildSummaryMessages({ previousSummary = '', chatLogBlock = '' }
 }
 
 /**
- * 摘要窗口起点：正常情况下与记忆整理的 checkpoint 对齐（两边记录正文逐字节一致，可互相命中前缀缓存）。
- * 记忆未启用、从未整理、或整理点反而落在摘要点之后（整理失败）时退回摘要自己的 checkpoint，保持原口径。
+ * 摘要批次的起点下标：从末尾往前数到第 interval 条触发角色消息。
+ *
+ * 摘要与「携带上下文消息记忆轮数」（滑动窗口）同拍：窗口滑出多少，就总结多少。
+ * 不足 interval 条时返回 -1，调用方视为「还不需要摘要」。
+ * 纯函数，刻意不依赖 DB / LLM，便于单测。
  */
-export function pickWindowStartId({ summaryCheckpoint = 0, memoryCheckpoint = 0, memoryEnabled = false } = {}) {
-  const summaryStart = summaryCheckpoint || 0;
-  if (summaryStart <= 0 || !memoryEnabled) return summaryStart;
-  const memoryStart = memoryCheckpoint || 0;
-  return memoryStart > 0 && memoryStart < summaryStart ? memoryStart : summaryStart;
+export function pickSummaryBatchStart(messages, { triggerRole = 'assistant', interval = SUMMARIZE_INTERVAL } = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  const step = Number.isInteger(interval) && interval > 0 ? interval : SUMMARIZE_INTERVAL;
+  let triggerCount = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i]?.role !== triggerRole) continue;
+    triggerCount++;
+    if (triggerCount >= step) return i;
+  }
+  return -1;
 }
 
 /**
@@ -114,29 +122,24 @@ export async function maybeSummarize(conversationId, nameHints = {}) {
 
   if (count < interval) return null;
 
-  // 窗口起点与记忆整理对齐；触发节奏仍按摘要自己的 checkpoint，不随整理走动。
-  // 与整理链路的开关口径一致（chat.js / groupChatEngine 都按 truthy 判断）
-  const memoryEnabled = !!config.features.memory;
-  const windowStartId = pickWindowStartId({
-    summaryCheckpoint: checkpointEndId,
-    memoryCheckpoint: memoryEnabled ? (getCheckpoint(conversationId).last_raw_msg_id || 0) : 0,
-    memoryEnabled,
-  });
   const previousSummary = lastSummary?.summary || '（新对话开始）';
-  // 获取窗口内的记录（与记忆整理同一段，渲染后逐字节一致）
+  // 取摘要自己的 checkpoint 之后的记录。起点固定为 checkpointEndId，
+  // 不跟随记忆整理的 checkpoint —— 整理点一旦停滞，窗口会回溯上千条消息。
   const allUnsummarized = db.prepare(`
     SELECT id, role, content FROM raw_messages
     WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
     ORDER BY id ASC
-  `).all(conversationId, windowStartId);
+  `).all(conversationId, checkpointEndId);
 
   // 群聊按用户轮次计数时，用户消息在 LLM 流式回复开始前就已写库；
   // 末尾若还有未收到 assistant 回复的 user，说明该轮还没输出完，不参与摘要。
-  //
-  // 窗口整段交给模型，不再按「最后 interval 轮」截断：截断会让摘要与记忆整理的记录正文对不上，
-  // 两边就无法复用前缀缓存。要总结的区间由【上一段摘要】＋「不要重复它已写明的信息」界定，
-  // 窗口本身已由摘要触发间隔（对齐时由整理的 40 条阈值）兜住长度。
-  const recentMessages = trimUnrepliedUserMessages(allUnsummarized);
+  const completedMessages = trimUnrepliedUserMessages(allUnsummarized);
+
+  // 截到「最后 interval 条触发角色消息」覆盖的那一段：正好是刚滑出上下文窗口的批次。
+  // end_msg_id 随之推到该批末尾，旧数据不会重复进入下一次摘要。
+  const batchStart = pickSummaryBatchStart(completedMessages, { triggerRole, interval });
+  if (batchStart < 0) return null;
+  const recentMessages = completedMessages.slice(batchStart);
   if (recentMessages.length === 0) return null;
 
   const chatLogBlock = buildChatLogBlock(recentMessages, { userName, characterName });

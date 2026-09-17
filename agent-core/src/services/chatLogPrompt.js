@@ -11,8 +11,9 @@
  *   3. buildAnalysisUserContent()：记录块必须排在 user 消息最前面，任务指令与变量数据全部后置。
  *      前缀缓存从请求开头逐段比对，记录正文只要排在任务之前，两边的记录才落在公共前缀里。
  *
- * 注意：记录正文能否互相命中，取决于两边的取数窗口起点是否相同。摘要窗口已对齐到记忆整理的
- * checkpoint（见 summarizer.js 的 pickWindowStartId），窗口起点相同时记录正文逐字节一致。
+ * 注意：记录正文能否互相命中，取决于两边是否恰好取到同一批消息。摘要按「最后 interval 条
+ * 触发角色消息」自行截断窗口（见 summarizer.js 的 pickSummaryBatchStart），取数窗口与记忆
+ * 整理互相独立，因此通常只共享 system 块与前缀结构，记录正文不保证一致。
  */
 import { getSystemRules } from '../db/index.js';
 import { cleanChatText } from '../maibot-bridge/textCleaner.js';

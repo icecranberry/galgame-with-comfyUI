@@ -343,6 +343,34 @@
 
 ---
 
+### 摘要窗口回退为「与滑动窗口同拍」（2026-09-18）
+
+线上出现 `[cache] 对话摘要提取助手: 命中 256/24480 prompt tokens (1%)`：一次摘要请求带了 2.4 万 token 的记录。查出根因是「记忆整理与对话摘要共用前缀缓存（2026-09-16）」那一节引入的 `summarizer.pickWindowStartId`，本节把它整条回退。
+
+**问题**：那一节为了让摘要和整理复用前缀缓存，把摘要的取数起点对齐到「摘要 checkpoint 与整理 checkpoint 的较小值」，同时取消了「最后 interval 轮」的截断。当时的前提是「窗口长度由整理的 40 条阈值兜住」——可整理点并不保证前进：`memoryExtractor.js` 的 `CURATE_EVERY_N_MESSAGES = 40` 在待整理消息不足 40 条时直接提前返回，整理 checkpoint 可以长期趴着不动（状态仍是 idle，不报错）。摘要照常按自己的节奏推进，两者差值越拉越大，窗口一路回溯。
+
+**实测**（本机库 `memory_extraction_checkpoints`）：
+
+1. `group_6` 摘要点 6890 / 整理点 6827 → 窗口 13 条；`char_1092` 6905 / 6378 → 19 条（正常）
+2. `group_2` 摘要点 6912 / 整理点 5677（整理点停在 2026-07-31）→ 窗口 67 条用户消息；那次摘要记录行 `id=284` 从 `start_msg_id=5840` 记到 `end_msg_id=6912`，一条摘要吞掉 1000+ 原始 id，正是 24480 token 那一发
+
+**修复**：
+
+1. `summarizer.js` 删掉 `pickWindowStartId` 与 `getCheckpoint` 依赖，取数起点固定回摘要自己的 `checkpointEndId`，不再跟整理的 checkpoint 走
+2. 新增导出纯函数 `pickSummaryBatchStart(messages, {triggerRole, interval})`：从末尾往前数第 `interval` 条触发角色消息，返回其下标（不足则 -1 ＝还不需要摘要）；取数后即按它截断，一次只摘要刚滑出上下文窗口的那一批
+3. 截断后 `end_msg_id` 落在该批末尾，下一轮不会重复摘要旧数据；触发节奏不变（仍按摘要自己的 checkpoint，每 interval 条触发角色消息）
+4. 摘要与整理的取数窗口自此**互相独立**，`routes/chat.js`、`services/groupChatEngine.js` 里「摘要在前、整理在后」的顺序只为保持既有行为，不再影响缓存命中
+
+**权衡**：截断一恢复，那一节想要的「两次调用共享前缀缓存」就退化了——只有两边恰好取到同一批消息时记录正文才逐字节一致，其余情况共享的只剩 system 块与记录块的位置。这是有意为之：2.4 万 token 的 prompt 体积远比缓存命中率重要。同理，「窗口长度由整理的 40 条阈值兜住」在整理停滞时是**错误**说法，一并废弃；那一节里「窗口对齐（pickWindowStartId）」「窗口长度由整理的 40 条阈值兜住」两条口径作废，其余实测数据保留。
+
+**验证**：`cd agent-core && ../runtime/nodejs/node.exe --test "test/*.test.js" "src/services/*.test.js"` → 249/249 通过（原 `pickWindowStartId` 的两个测试换成 `pickSummaryBatchStart` 的三个）。
+
+**下游影响**：`contextAssembler` 用 `end_msg_id` + 固定轮数滑动窗口装配上下文，摘要窗口变窄只让摘要覆盖更细，不影响聊天上下文长度。`group_2` 那类积压跑一次整理（或手动重跑摘要）即可，本次修复本身不写数据。
+
+**遗留**：整理点停滞（待整理不足 40 条就不推进）本身没动。旧口径下它会把摘要窗口撑爆，如今两个窗口独立，危害解除；若希望整理点稳定前进，需要另行把 `CURATE_EVERY_N_MESSAGES` 的提前返回改成「攒够或超时都整理」。
+
+---
+
 ## 长期备选（未排期）
 
 - 群聊 `@memory` 主动搜索、记忆操作模型（SFT/RL，先积累 `memory_retrieval_audits` 作训练资产）、LongMemEval 子集汉化自测、表情差分/TTS（角色侧另线）
