@@ -44,7 +44,7 @@ export { checkWorkflowHealth };
 
 /**
  * 根据全局模式和场景选择工作流文件
- * @param {'chat'|'group'|'moments'|'events'|'schedule'|'mailbox'} [scene]
+ * @param {'chat'|'group'|'portrait'|'moments'|'events'|'schedule'|'mailbox'} [scene]
  * @returns {string} 工作流文件路径
  */
 function resolveWorkflowPath(scene) {
@@ -74,6 +74,25 @@ export const NODE_TITLES = {
 };
 
 /**
+ * 按场景过滤全局 LoRA。
+ * scenes 缺失或空数组 = 所有场景生效；currentScene 为空 = 不过滤。
+ * @param {Array} loras - config.comfyui.globalLora
+ * @param {string} [currentScene]
+ * @returns {Array} 已归一化 path 的生效 LoRA
+ */
+export function filterGlobalLoras(loras, currentScene) {
+  return (loras || [])
+    .map(l => ({ ...l, path: normalizeLoraValue(l.path) }))
+    .filter(l => {
+      if (!l.path || typeof l.path !== 'string') return false;
+      if (l.enabled === false) return false;
+      if (!currentScene) return true;
+      if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
+      return l.scenes.includes(currentScene);
+    });
+}
+
+/**
  * 构建注入参数后的 workflow 副本
  *
  * @param {string}   promptText  - 优化后的画面描述
@@ -84,27 +103,19 @@ export const NODE_TITLES = {
  * @param {Array}    [overrides.loras]  - [{path, weight, triggerWord}]
  * @param {string}   [overrides.customWorkflow] - 自定义工作流文件名（单人时替代基础工作流）
  * @param {string}   [overrides.scene] - 全局 LoRA 的场景过滤；未指定 workflowScene 时也用于选择工作流
- * @param {string}   [overrides.workflowScene] - hybrid 模式下单独用于选择工作流
+ * @param {string|null} [overrides.workflowScene] - hybrid 模式下单独用于选择工作流；
+ *        显式传 null 表示不按场景选择（沿用上次模式），与 scene 解耦
  */
 function buildWorkflow(promptText, overrides = {}) {
-  const workflowScene = overrides.workflowScene ?? overrides.scene;
+  // 用 undefined 区分"没传"与"显式不按场景选工作流"：后者传 null
+  const workflowScene = overrides.workflowScene !== undefined ? overrides.workflowScene : overrides.scene;
   let wfPath = overrides.customWorkflow
     ? (fs.existsSync(path.join(WORKFLOW_DIR, overrides.customWorkflow))
         ? path.join(WORKFLOW_DIR, overrides.customWorkflow)
         : resolveWorkflowPath(workflowScene))
     : resolveWorkflowPath(workflowScene);
   // 全局 LoRA 前置 + 角色 LoRA，按 path 去重（全局优先），关闭的 LoRA 跳过
-  // scenes 限制：空数组或无 scenes 字段=所有场景，overrides.scene 为空时也加载全部
-  const currentScene = overrides.scene;
-  const globalLoras = (config.comfyui.globalLora || [])
-    .map(l => ({ ...l, path: normalizeLoraValue(l.path) }))
-    .filter(l => {
-      if (!l.path || typeof l.path !== 'string') return false;
-      if (l.enabled === false) return false;
-      if (!currentScene) return true;
-      if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
-      return l.scenes.includes(currentScene);
-    });
+  const globalLoras = filterGlobalLoras(config.comfyui.globalLora || [], overrides.scene);
   const providedLoras = (overrides.loras || [])
     .map(l => ({ ...l, path: normalizeLoraValue(l.path) }))
     .filter(l => l.path && typeof l.path === 'string');

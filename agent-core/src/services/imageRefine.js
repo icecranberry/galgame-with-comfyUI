@@ -95,12 +95,19 @@ function findNegativeEncodeNode(wf) {
  * @param {string} [overrides.customWorkflow] - 原图使用的自定义工作流文件名
  * @param {string} [overrides.sourceMode]     - 原图工作流模式 'turbo' | 'base'（image_tasks.workflow_template）
  * @param {string} [overrides.scene]          - 全局 LoRA 场景过滤 + 无模式记录时的工作流兜底
+ * @param {string|null} [overrides.workflowScene] - hybrid 模式下单独用于选择源工作流；
+ *        显式传 null 表示不按场景兜底，与 scene 解耦
  * @returns {{wf: object, wfPath: string}}
  */
 export function buildHiresWorkflow(promptText, overrides = {}) {
   if (!fs.existsSync(hiresPath())) autoRestoreMissing();
   const wf = JSON.parse(fs.readFileSync(hiresPath(), 'utf8'));
-  const srcResult = loadSourceWorkflow(overrides);
+  const workflowScene = overrides.workflowScene !== undefined ? overrides.workflowScene : overrides.scene;
+  const srcResult = loadSourceWorkflow({
+    sourceMode: overrides.sourceMode,
+    customWorkflow: overrides.customWorkflow,
+    scene: workflowScene,
+  });
   const src = srcResult.wf;
 
   const srcLoader = (type) => {
@@ -263,13 +270,14 @@ export async function flattenTransparentOnWhite(buffer) {
  * @param {string} [opts.customWorkflow]
  * @param {string} [opts.sourceMode]
  * @param {string} [opts.scene]         - 全局 LoRA 场景过滤 + 无模式记录时的场景兜底
+ * @param {string|null} [opts.workflowScene] - hybrid 模式下单独用于选择源工作流，可与 scene 解耦
  * @param {function} [opts.onProgress]
  * @param {string} [opts.ext]          - 上传文件扩展名（buffer 模式且无 filePath 时使用）
  * @param {string} [opts.output]       - 'file' 写文件（默认）| 'buffer' 仅返回 base64
  * @returns {Promise<{success: boolean, wfPath: string, filename: string}>}
  */
 export async function refineImage({
-  filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, onProgress,
+  filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, workflowScene, onProgress,
   buffer, ext, output = 'file',
 }) {
   const sourceBuf = buffer || (filePath ? fs.readFileSync(filePath) : null);
@@ -281,7 +289,7 @@ export async function refineImage({
   console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(uploadBuf.length / 1024).toFixed(0)}KB)`);
 
   const { wf } = buildHiresWorkflow(promptText, {
-    uploadFilename, artist, loras, customWorkflow, sourceMode, scene,
+    uploadFilename, artist, loras, customWorkflow, sourceMode, scene, workflowScene,
   });
 
   if (onProgress) onProgress({ stage: 'submitting' });

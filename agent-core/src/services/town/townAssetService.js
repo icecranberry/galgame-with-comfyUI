@@ -473,7 +473,9 @@ async function generateIntoRow(row, guard) {
 
   try {
     const result = await generateImageRaw(prompt, {
-      scene: 'town',
+      // 大立绘按立绘场景过滤全局 LoRA，其余镇内素材按小镇场景；工作流仍按小镇场景选择
+      scene: isPortraitAsset(row) ? 'portrait' : 'town',
+      workflowScene: 'town',
       disableRAG: true,
       artist: meta.artist !== undefined ? meta.artist : generationDefaults.artist,
       width: size.width,
@@ -671,7 +673,9 @@ export async function refineAssetWithHires(id) {
       promptText: row.source_prompt,
       artist: meta.artist !== undefined ? meta.artist : config.comfyui.artist,
       loras: Array.isArray(meta.loras) ? meta.loras : [],
-      scene: 'town',
+      // 与生成时同口径：大立绘按立绘场景过滤全局 LoRA，工作流仍按小镇场景选择
+      scene: isPortraitAsset(row) ? 'portrait' : 'town',
+      workflowScene: 'town',
     });
     assertAssetCurrent(guard);
     // 细化产物不再沿用原图 alpha：背景交给素材管线重新抠白，成品再交回素材库让用户微调。

@@ -1195,6 +1195,9 @@ async function runStandingGeneration(char, promptText, { stageBase, onProgress }
   const standingArtist = charArtistOverride(char);
   let lastStage = '';
   const result = await generateImageRaw(promptText, {
+    // 立绘：全局 LoRA 按立绘场景过滤；工作流选择保持原样（不按场景走，沿用上次模式）
+    scene: 'portrait',
+    workflowScene: null,
     promptScene: 'avatar',
     disableRAG: true,
     ragTimeoutMs: RAG_TIMEOUT_FAST_MS,

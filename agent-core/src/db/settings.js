@@ -115,6 +115,27 @@ function castValue(raw, type) {
   }
 }
 
+// 全局 LoRA 场景的演进：初版弹窗只有这五个，之后陆续加了群聊与立绘。
+// 存量配置的 scenes 恰好等于旧集合（末尾可能已带 group）时，视为"漏了后加的场景"一次性补齐。
+const LEGACY_LORA_SCENES = ['chat', 'moments', 'events', 'mailbox', 'schedule'];
+const LORA_SCENE_ADDITIONS = ['group', 'portrait'];
+
+function sameSceneSet(scenes, list) {
+  return scenes.length === list.length && list.every(s => scenes.includes(s));
+}
+
+export function migrateGlobalLoraScenes(loras) {
+  if (!Array.isArray(loras)) return loras;
+  return loras.map(l => {
+    if (!l || !Array.isArray(l.scenes)) return l;
+    // 初版五项，或群聊上线后用户在 UI 重新保存过的六项（旧五项 + group），都还缺立绘
+    const needsMigration = sameSceneSet(l.scenes, LEGACY_LORA_SCENES)
+      || sameSceneSet(l.scenes, [...LEGACY_LORA_SCENES, 'group']);
+    if (!needsMigration) return l;
+    return { ...l, scenes: [...LEGACY_LORA_SCENES, ...LORA_SCENE_ADDITIONS] };
+  });
+}
+
 // 从 DB 读取 system_settings 覆盖 config 内存（DB 优先于代码默认值）
 export function loadSystemSettings(db) {
   const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
@@ -126,6 +147,7 @@ export function loadSystemSettings(db) {
       if (value !== undefined) {
         // 群聊记忆轮数历史遗留值收敛到 2~6
         if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(6, value));
+        if (row.setting_key === 'comfy_global_lora') value = migrateGlobalLoraScenes(value);
         config[mapping.obj][mapping.key] = value;
         applied++;
       }

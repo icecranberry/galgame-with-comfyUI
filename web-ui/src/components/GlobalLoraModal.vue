@@ -129,11 +129,15 @@ const activeItems = computed(() => globalItems.value)
 
 const sceneOptions = [
   { value: 'chat', label: '聊天' },
+  { value: 'group', label: '群聊' },
+  { value: 'portrait', label: '立绘' },
   { value: 'moments', label: '朋友圈' },
   { value: 'events', label: '奇遇' },
   { value: 'mailbox', label: '信件' },
   { value: 'schedule', label: '日程' },
 ]
+
+const defaultScenes = () => sceneOptions.map(s => s.value)
 
 const lorasFiles = ref([])
 const activeLoraFileIdx = ref(null)
@@ -148,7 +152,7 @@ watch(() => props.modelValue, (v) => {
       const raw = list.length > 0 ? JSON.parse(JSON.stringify(list)) : []
       for (const item of raw) {
         if (item.enabled === undefined) item.enabled = true
-        if (!Array.isArray(item.scenes)) item.scenes = ['chat', 'moments', 'events', 'mailbox', 'schedule']
+        if (!Array.isArray(item.scenes)) item.scenes = defaultScenes()
         // 已有数据的 scenes=[] 保持原样（后端视为全部场景）
       }
       return raw
@@ -163,7 +167,7 @@ function close() {
 }
 
 function addLoraGroup() {
-  activeItems.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true, scenes: ['chat', 'moments', 'events', 'mailbox', 'schedule'] })
+  activeItems.value.push({ path: '', weight: 0.8, triggerWord: '', enabled: true, scenes: defaultScenes() })
 }
 
 function removeLoraGroup(idx) {
