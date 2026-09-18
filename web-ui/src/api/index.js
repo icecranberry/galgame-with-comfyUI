@@ -223,6 +223,11 @@ export function refineAppearance(characterId, image) {
   return request(`/characters/${characterId}/refine-appearance`, { method: 'POST', body: { image } })
 }
 
+/** 生成角色立绘任务（已有立绘时走对比确认，requirement 为额外需求 / prompt 为直接复用提示词） */
+export function generateStandingTask(characterId, body = {}) {
+  return request(`/characters/${characterId}/generate-standing-task`, { method: 'POST', body })
+}
+
 /** 用已有英文 prompt 直接重出立绘（不重新请求提示词） */
 export function regenerateStandingImage(characterId, prompt) {
   return request(`/characters/${characterId}/generate-standing-image`, { method: 'POST', body: { prompt } })

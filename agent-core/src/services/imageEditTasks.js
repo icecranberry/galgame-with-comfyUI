@@ -64,21 +64,25 @@ function cleanupStageFiles(stageBase) {
  * 提交一个后台图片编辑任务。
  *
  * @param {object} spec
- * @param {'regenerate'|'upscale'} spec.action
+ * @param {string} spec.action       - 'regenerate' | 'upscale' | 自定义标识（如 'standing'）
  * @param {string} spec.url          - 原图 URL（不带 query）
- * @param {string} spec.targetPath   - 原图绝对路径（确认覆盖时写入）
+ * @param {string} [spec.targetPath] - 原图绝对路径（确认覆盖时原地写入）
  * @param {Function} spec.run        - async ({ stageBase, onProgress }) => { filename }
  *                                     必须把生成结果写到 `${stageBase}.${ext}` 并返回文件名
+ * @param {Function} [spec.finalize] - async (task) => string；自定义落库钩子，返回新图 URL（自带存储语义的场景用，
+ *                                     提供后不再做原地 rename，上面的 targetPath 可省略）
+ * @param {Function} [spec.restart]  - () => object：重新生成时自定义重启钩子
+ * @param {object}   [spec.meta]     - 透传给 finalize / restart 的上下文数据
  * @returns {object} 任务记录
  */
-export function startEditTask({ action, url, targetPath, run }) {
+export function startEditTask({ action, url, targetPath, run, finalize, restart, meta }) {
   const id = randomUUID();
   const token = randomBytes(12).toString('hex');
   const stageBase = path.join(getPendingDir(), `${id}-${token}`);
   fs.mkdirSync(path.dirname(stageBase), { recursive: true });
 
   const task = {
-    id, action, url, targetPath, token, stageBase,
+    id, action, url, targetPath, finalize, restart, meta, token, stageBase,
     status: 'running', progress: null, previewUrl: null, error: null, createdAt: Date.now(),
   };
   tasks.set(id, task);
@@ -127,8 +131,12 @@ export async function applyEditTask(id, token) {
   if (task.token !== token) throw httpError('任务凭证无效', 403);
   if (!task.pendingPath || !fs.existsSync(task.pendingPath)) throw httpError('暂存文件不存在', 404);
 
-  fs.mkdirSync(path.dirname(task.targetPath), { recursive: true });
-  fs.renameSync(task.pendingPath, task.targetPath);
+  if (typeof task.finalize === 'function') {
+    task.appliedUrl = await task.finalize(task);
+  } else {
+    fs.mkdirSync(path.dirname(task.targetPath), { recursive: true });
+    fs.renameSync(task.pendingPath, task.targetPath);
+  }
   task.status = 'applied';
   tasks.delete(id);
 
@@ -162,9 +170,10 @@ export function rerunEditTask(id, token, startAgain) {
   if (task.status === 'running') throw httpError('任务仍在运行，请等待完成', 409);
   if (task.token !== token) throw httpError('任务凭证无效', 403);
 
-  const { action, url } = task;
+  const { action, url, meta, restart } = task;
   discardEditTask(id, token);
-  return startAgain({ action, url });
+  if (typeof restart === 'function') return restart();
+  return startAgain({ action, url, meta });
 }
 
 /** 清理超时未确认的暂存任务与孤儿文件 */

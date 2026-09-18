@@ -13,6 +13,7 @@
             <div class="iet-modal-preview">
               <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" fit-mode="container" />
             </div>
+            <div v-if="modalTask.action === 'standing'" class="iet-modal-hint">确认后将覆盖当前立绘（原立绘会被删除）</div>
             <div class="iet-modal-actions">
               <linshe-button variant="secondary" class="iet-btn" :disabled="busy" @click="onRerun(modalTask)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
@@ -31,7 +32,7 @@
             <span v-if="task.status === 'running'" class="iet-spinner"></span>
             <span v-else class="iet-state-icon">{{ task.status === 'failed' ? '!' : '✓' }}</span>
             <div class="iet-card-text">
-              <div class="iet-card-title">{{ actionLabel(task.action) }}{{ cardStatusText(task) }}</div>
+              <div class="iet-card-title">{{ cardTitleLabel(task.action) }}{{ cardStatusText(task) }}</div>
               <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
                 <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
               </div>
@@ -78,7 +79,13 @@ watch(modalTask, (t) => {
 store.connect()
 
 function actionLabel(action) {
+  if (action === 'standing') return '立绘'
   return action === 'upscale' ? 'HiresFix 细化' : '重新生成'
+}
+
+function cardTitleLabel(action) {
+  if (action === 'standing') return '生成立绘'
+  return actionLabel(action)
 }
 
 function cardStatusText(task) {
@@ -102,7 +109,7 @@ async function onApply(task) {
   busy.value = true
   try {
     await store.apply(task)
-    toastFn?.('已确认覆盖原图', 'success')
+    toastFn?.(task.action === 'standing' ? '已更新立绘' : '已确认覆盖原图', 'success')
     if (activeTaskId.value === task.id) activeTaskId.value = null
   } catch (err) {
     console.error('[ImageEditTaskFloater] apply failed:', err.message)

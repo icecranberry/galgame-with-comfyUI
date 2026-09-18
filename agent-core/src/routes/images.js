@@ -620,7 +620,7 @@ function taskHttpError(message, status) {
   return err;
 }
 
-function dataUriExt(dataUri) {
+export function dataUriExt(dataUri) {
   const m = String(dataUri || '').match(/^data:image\/(png|jpe?g|webp|avif|gif);/i);
   if (!m) return '.png';
   return m[1].toLowerCase() === 'jpeg' ? '.jpg' : `.${m[1].toLowerCase()}`;
@@ -725,7 +725,8 @@ router.post('/edit-tasks/:id/apply', async (req, res) => {
   try {
     const task = await applyEditTask(req.params.id, req.body?.token);
     const cleanUrl = task.url.replace(/\?.*$/, '');
-    res.json({ success: true, url: `${cleanUrl}?t=${Date.now()}`, task_id: task.id });
+    const url = task.appliedUrl || `${cleanUrl}?t=${Date.now()}`;
+    res.json({ success: true, url, task_id: task.id });
   } catch (err) { sendTaskError(res, err); }
 });
 

@@ -502,6 +502,7 @@ import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import RecentImageCropper from './RecentImageCropper.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
+import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -523,6 +524,7 @@ const chat = useChatStore()
 const confirmFn = inject('confirm')
 const toastFn = inject('toast')
 const isMobile = inject('isMobile')
+const imageEditTasks = useImageEditTasksStore()
 
 // ── 详情编辑状态 ──
 const detail = reactive({
@@ -1174,8 +1176,20 @@ const standingGenerating = computed(() =>
 const standingReimageing = computed(() =>
   standingRegenCharId.value != null && standingRegenCharId.value === props.character?.id
 )
-const standingBusy = computed(() => standingGenCharId.value != null || standingRegenCharId.value != null)
-const standingBusyForChar = computed(() => standingGenerating.value || standingReimageing.value)
+// 后台出图任务：立绘画完前一直算忙碌（扫描线要持续到待确认 / 失败才算结束）
+const standingTaskRunning = computed(() => {
+  const c = props.character
+  if (!c) return false
+  const base = (c.standing_url || '').replace(/\?.*$/, '')
+  return imageEditTasks.tasks.some(t =>
+    t.action === 'standing' && t.status === 'running' &&
+    (t.characterId === c.id || (t.characterId == null && !!base && (t.url || '').replace(/\?.*$/, '') === base))
+  )
+})
+const standingBusy = computed(() =>
+  standingGenCharId.value != null || standingRegenCharId.value != null || standingTaskRunning.value
+)
+const standingBusyForChar = computed(() => standingGenerating.value || standingReimageing.value || standingTaskRunning.value)
 const standingLightboxVisible = ref(false)
 
 // 立绘展示 URL：大图「重新生成 / 放大细化」确认覆盖后原 URL 内容已换，
@@ -1192,6 +1206,7 @@ onMounted(() => {
   api.getStandingMode()
     .then(r => { standingMode.value = r.mode === 'dynamic' ? 'dynamic' : 'normal' })
     .catch(() => {})
+  window.addEventListener('standing-overwritten', onStandingOverwritten)
 })
 
 async function toggleStandingMode() {
@@ -1244,7 +1259,17 @@ watch(standingBusyForChar, (busy) => {
   }
 })
 
-onUnmounted(stopStandingTips)
+// 后台任务跑到终点后收起本地记账，扫描线随之停止
+watch(standingTaskRunning, (running) => {
+  if (running) return
+  standingGenCharId.value = null
+  standingRegenCharId.value = null
+})
+
+onUnmounted(() => {
+  stopStandingTips()
+  window.removeEventListener('standing-overwritten', onStandingOverwritten)
+})
 
 function toggleStandingFunc() {
   standingFuncOpen.value = !standingFuncOpen.value
@@ -1269,6 +1294,15 @@ async function generateStanding() {
   standingFuncOpen.value = true
   standingGenCharId.value = c.id
   try {
+    if (c.standing_url) {
+      // 已有立绘：后台出图 → 前后对比确认 → 确认后才覆盖旧立绘
+      const res = await imageEditTasks.start('standing', c.standing_url, {
+        characterId: c.id,
+        requirement: standingRequirement.value.trim(),
+      })
+      standingPrompt.value = res?.promptText || standingPrompt.value
+      return
+    }
     const res = await api.generateStanding(c.id, standingRequirement.value.trim())
     c.standing_url = res.standing_url
     standingPrompt.value = res.promptText || ''
@@ -1277,7 +1311,7 @@ async function generateStanding() {
     console.error('generateStanding failed:', e)
     toastFn(e?.message || '立绘生成失败', 'error')
   } finally {
-    standingGenCharId.value = null
+    if (!standingTaskRunning.value) standingGenCharId.value = null
   }
 }
 
@@ -1289,6 +1323,11 @@ async function regenerateStanding() {
   standingFuncOpen.value = true
   standingRegenCharId.value = c.id
   try {
+    if (c.standing_url) {
+      // 已有立绘：后台出图 → 前后对比确认 → 确认后才覆盖旧立绘
+      await imageEditTasks.start('standing', c.standing_url, { characterId: c.id, prompt })
+      return
+    }
     const res = await api.regenerateStandingImage(c.id, prompt)
     c.standing_url = res.standing_url
     toastFn('立绘已生成', 'success')
@@ -1296,8 +1335,15 @@ async function regenerateStanding() {
     console.error('regenerateStanding failed:', e)
     toastFn(e?.message || '立绘生成失败', 'error')
   } finally {
-    standingRegenCharId.value = null
+    if (!standingTaskRunning.value) standingRegenCharId.value = null
   }
+}
+
+// 对比确认后新立绘是新文件名（不会撞浏览器缓存），直接把 URL 换到当前角色
+function onStandingOverwritten(e) {
+  const c = props.character
+  if (!c || !e?.detail || c.id !== e.detail.characterId) return
+  c.standing_url = e.detail.url
 }
 
 async function removeStanding() {

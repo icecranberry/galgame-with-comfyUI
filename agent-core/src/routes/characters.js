@@ -8,7 +8,8 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js'; // 出站已白名单化（见 webSearch.js assertAllowedOutboundUrl / toSafeMoegirlScrapeUrl）
 import { clearImageJudgeCounter } from './chat.js';
-import { invalidateGalleryCache } from './images.js';
+import { invalidateGalleryCache, dataUriExt } from './images.js';
+import { startEditTask } from '../services/imageEditTasks.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
@@ -16,7 +17,7 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
-import { saveBase64Image, deleteImageFileByUrl, imageUrlExists } from '../services/imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl, imageUrlExists, buildImageUrl, getImageDir, getPendingDir } from '../services/imagePaths.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
@@ -1183,11 +1184,11 @@ router.post('/:id/generate-standing', async (req, res) => {
 });
 
 /**
- * 用给定英文 prompt 渲染立绘并落库（ComfyUI 1:2 出图 → 替换旧文件 → 更新 characters.standing_url）。
- * generate-standing（完整流程）与 generate-standing-image（复用 prompt 重出图）共用。
- * @returns {string} standing_url
+ * 立绘出图：朋友圈画师串口径（角色单独画师串优先），固定 1:2 竖幅 768x1536。
+ * 只写暂存文件，不落库；落库由 commitStandingImage 或确认覆盖时执行。
+ * @returns {Promise<{filename: string, promptRefined: string, sourceFilename: string}>}
  */
-async function renderStandingImage(char, promptText) {
+async function runStandingGeneration(char, promptText, { stageBase, onProgress }) {
   // 出图：朋友圈画师串口径（角色单独画师串优先），固定 1:2 竖幅 768x1536
   console.log(`[generate-standing] Step 2/2: generating image at 768x1536...`);
   const charLoras = _parseCharLoras(char.loras);
@@ -1208,6 +1209,7 @@ async function renderStandingImage(char, promptText) {
         lastStage = p.stage;
         console.log(`[generate-standing] ComfyUI: ${p.stage}`);
       }
+      if (onProgress) onProgress(p);
     },
   });
 
@@ -1215,25 +1217,59 @@ async function renderStandingImage(char, promptText) {
     throw Object.assign(new Error(result.error || '图像生成失败，请重试'), { statusCode: 500 });
   }
 
+  const img = result.images[0];
+  const ext = dataUriExt(img.base64);
+  fs.writeFileSync(stageBase + ext, Buffer.from(img.base64.replace(/^data:image\/\w+;base64,/, ''), 'base64'));
+  return {
+    filename: path.basename(stageBase) + ext,
+    promptRefined: result.promptRefined || promptText,
+    sourceFilename: img.filename || 'comfy.png',
+  };
+}
+
+/**
+ * 确认落库：删旧立绘 → 暂存文件转正 → 更新 characters.standing_url → 记 image_tasks。
+ * @returns {string} standing_url
+ */
+function commitStandingImage({ characterId, pendingPath, promptText, promptRefined, sourceFilename }) {
   // 旧立绘文件先清掉，再保存新图
   const db = getDb();
-  const old = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(char.id);
+  const old = db.prepare('SELECT standing_url FROM characters WHERE id = ?').get(characterId);
   if (old?.standing_url) deleteImageFileByUrl(old.standing_url);
 
-  const ts = Date.now();
-  const img = result.images[0];
-  const filename = `standing_${char.id}_${ts}_${img.filename || 'comfy.png'}`;
-  const url = saveBase64Image('standing', filename, img.base64);
-  db.prepare('UPDATE characters SET standing_url = ? WHERE id = ?').run(url, char.id);
+  const filename = `standing_${characterId}_${Date.now()}_${sourceFilename || 'comfy.png'}`;
+  const destPath = path.join(getImageDir('standing'), filename);
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  fs.renameSync(pendingPath, destPath);
+  const url = buildImageUrl('standing', filename);
+
+  db.prepare('UPDATE characters SET standing_url = ? WHERE id = ?').run(url, characterId);
 
   console.log(`[generate-standing] Image saved: ${url}`);
 
   db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status, output_paths, workflow_template, finished_at)
     VALUES (?, ?, ?, 'done', ?, ?, datetime('now'))`)
-    .run(`char_${char.id}_standing`, promptText, result.promptRefined || promptText, JSON.stringify([url]), getLastWorkflowMode());
+    .run(`char_${characterId}_standing`, promptText, promptRefined || promptText, JSON.stringify([url]), getLastWorkflowMode());
 
   invalidateGalleryCache();
   return url;
+}
+
+/**
+ * 用给定英文 prompt 渲染立绘并直接落库（generate-standing / generate-standing-image 同步入口）。
+ * @returns {Promise<string>} standing_url
+ */
+async function renderStandingImage(char, promptText) {
+  const stageBase = path.join(getPendingDir(), `standing-${char.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(path.dirname(stageBase), { recursive: true });
+  const staged = await runStandingGeneration(char, promptText, { stageBase });
+  return commitStandingImage({
+    characterId: char.id,
+    pendingPath: path.join(getPendingDir(), staged.filename),
+    promptText,
+    promptRefined: staged.promptRefined,
+    sourceFilename: staged.sourceFilename,
+  });
 }
 
 // POST /api/characters/:id/generate-standing-image — 用已有英文 prompt 直接重出立绘（不重新请求 LLM）
@@ -1253,6 +1289,74 @@ router.post('/:id/generate-standing-image', async (req, res) => {
   } catch (err) {
     console.error('[generate-standing-image] error:', err.message);
     res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : '生成失败: ' + err.message });
+  }
+});
+
+// POST /api/characters/:id/generate-standing-task — 带二次确认的立绘重出（后台出图 → 前后对比 → 确认后才覆盖旧立绘）
+// 已有立绘时走这里：body.prompt 有效则直接复用（重新生成），否则用 LLM 出新 prompt
+router.post('/:id/generate-standing-task', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const requirement = typeof req.body?.requirement === 'string' ? req.body.requirement.trim().slice(0, 500) : '';
+  let promptText = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+
+  try {
+    if (promptText.length < 10) {
+      const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
+      const model = config.llm.model || 'deepseek-chat';
+      console.log(`[generate-standing-task] Step 1/2: generating prompt for character "${char.display_name}" (mode: ${mode})${requirement ? ` (requirement: ${requirement.slice(0, 50)})` : ''}...`);
+
+      const llmResult = await chatSync(buildStandingMessages(char, requirement, mode), {
+        model,
+        temperature: 0.7,
+        max_tokens: 1024,
+        label: '生成立绘提示词',
+      });
+
+      promptText = llmResult.trim()
+        .replace(/^```(?:[a-z]+)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+
+      if (!promptText || promptText.length < 10) {
+        return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+      }
+      console.log(`[generate-standing-task] Prompt ready (${promptText.length} chars): "${promptText.slice(0, 80)}..."`);
+    }
+
+    const beforeUrl = char.standing_url ? String(char.standing_url).replace(/\?.*$/, '') : '';
+    // run 与 finalize 共用上下文：promptRefined / sourceFilename 要等出图完成才知道
+    const ctx = { characterId: char.id, promptText, promptRefined: null, sourceFilename: 'comfy.png' };
+
+    const buildTask = (text) => startEditTask({
+      action: 'standing',
+      url: beforeUrl,
+      meta: ctx,
+      run: async ({ stageBase, onProgress }) => {
+        const staged = await runStandingGeneration(char, text, { stageBase, onProgress });
+        ctx.promptRefined = staged.promptRefined;
+        ctx.sourceFilename = staged.sourceFilename;
+        return { filename: staged.filename };
+      },
+      finalize: (task) => commitStandingImage({
+        characterId: task.meta.characterId,
+        pendingPath: task.pendingPath,
+        promptText: task.meta.promptText,
+        promptRefined: ctx.promptRefined,
+        sourceFilename: ctx.sourceFilename,
+      }),
+      restart: () => buildTask(text),
+    });
+
+    const task = buildTask(promptText);
+    res.status(202).json({ success: true, task_id: task.id, status: 'running', promptText });
+  } catch (err) {
+    console.error('[generate-standing-task] error:', err.message);
+    const status = err.statusCode || err.status || 500;
+    res.status(status).json({ error: status === 500 ? '生成失败: ' + err.message : err.message });
   }
 });
 
