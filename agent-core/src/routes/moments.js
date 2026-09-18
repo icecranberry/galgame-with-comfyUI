@@ -20,6 +20,31 @@ import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, 
 
 const router = Router();
 
+/**
+ * 把落库的 prompt 拆回逐张提示词（多图用 `---` 分隔线拼接）
+ * 空 prompt 回退默认风景提示词，保证补图总有可用提示词
+ * @returns {string[]}
+ */
+export function splitMomentImagePrompts(prompt) {
+  const prompts = String(prompt || '')
+    .split(/\n?\s*---\s*\n?/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  return prompts.length > 0 ? prompts : [DEFAULT_MOMENT_IMAGE_PROMPT];
+}
+
+/**
+ * 解析落库的 `WxH` 分辨率，缺失或非法时回退当前配置的出图尺寸
+ * @returns {{ width: number, height: number }}
+ */
+export function parseMomentResolution(resolution) {
+  const match = /^(\d+)x(\d+)$/.exec(String(resolution || '').trim());
+  if (!match) {
+    return { width: config.comfyui.momentsWidth, height: config.comfyui.momentsHeight };
+  }
+  return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
+}
+
 // Helper: SQLite datetime → ISO (UTC)
 function toISO(dt) {
   if (!dt) return dt;
@@ -340,11 +365,214 @@ router.post('/:id/like', (req, res) => {
   }
 });
 
+// POST /api/moments/:id/regenerate-image — 按帖子原本的提示词重新出图（补上没生成出来的配图）
+router.post('/:id/regenerate-image', async (req, res) => {
+  const db = getDb();
+  const post = db.prepare(
+    'SELECT id, character_id, npc_id, content, prompt, resolution FROM moment_posts WHERE id = ?'
+  ).get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  // 作者可能是角色（character_id）或镇民（npc_id，character_id 为 NULL），两者都支持补图
+  const isNpcPost = post.character_id == null;
+  const author = isNpcPost
+    ? (post.npc_id != null ? db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(post.npc_id) : null)
+    : db.prepare('SELECT * FROM characters WHERE id = ?').get(post.character_id);
+  if (!author) {
+    return res.status(404).json({ error: isNpcPost ? 'NPC not found' : 'Character not found' });
+  }
+
+  // 落库的 prompt 多图时用分隔线拼接，按同一分隔线拆回逐张提示词
+  const imagePrompts = splitMomentImagePrompts(post.prompt);
+  // 宽高沿用发帖时记录的尺寸，解析失败再退回当前配置
+  const { width, height } = parseMomentResolution(post.resolution);
+
+  try {
+    const { imageUrls, usedPrompts } = await (isNpcPost
+      ? generateTownNpcMomentImages(author, imagePrompts, {
+          text: post.content || '',
+          width,
+          height,
+          postId: post.id,
+        })
+      : generateMomentImages(author, imagePrompts, {
+          text: post.content || '',
+          manual: true,
+          otherChars: [],
+          width,
+          height,
+          postId: post.id,
+        }));
+    if (imageUrls.length === 0) {
+      return res.status(502).json({ error: '图片生成失败，请稍后重试' });
+    }
+    const prompt = usedPrompts.length > 0 ? usedPrompts.join('\n---\n') : post.prompt;
+    db.prepare(`
+      UPDATE moment_posts
+      SET images = ?, prompt = ?, status = 'done', error_message = NULL
+      WHERE id = ?
+    `).run(JSON.stringify(imageUrls), prompt, post.id);
+    res.json({ ok: true, images: imageUrls });
+  } catch (err) {
+    console.error(`[moments] Regenerate image failed for post ${post.id}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ──────────────── 内部函数 ────────────────
 
 // 配图张数分布：70% 一张 / 20% 两张 / 10% 三张
 // 多于一张时 LLM 一并给出对应数量的 prompt，之后串行出图
 // 形态池/配图工具与镇民发帖共用，见 services/momentForms.js
+
+/**
+ * 朋友圈配图生成（发帖与补图共用）
+ * 串行出图，单张失败只丢那一张、不影响其余张；不抛异常，全军覆没时返回空 imageUrls
+ * @returns {Promise<{ imageUrls: string[], usedPrompts: string[] }>}
+ */
+async function generateMomentImages(character, imagePrompts, opts = {}) {
+  const db = getDb();
+  const {
+    text = '',
+    manual = false,
+    otherChars = [],
+    width = config.comfyui.momentsWidth,
+    height = config.comfyui.momentsHeight,
+    postId = null,
+  } = opts;
+
+  const imageUrls = [];
+  const usedPrompts = [];
+  try {
+    // 构建 lora 参数：合并自身 + 对方们的 lora
+    let loraOpts = {};
+    const selfLoras = _parseCharLoras(character.loras);
+    const otherLoras = otherChars.flatMap(c => _parseCharLoras(c.loras));
+    const allLoras = [...selfLoras, ...otherLoras];
+    const seen = new Set();
+    const uniqueLoras = allLoras.filter(l => {
+      if (seen.has(l.path)) return false;
+      seen.add(l.path);
+      return true;
+    });
+
+    if (uniqueLoras.length > 0) {
+      loraOpts = {
+        customWorkflow: otherChars.length > 0 ? null : (character.custom_workflow || null),
+        loras: uniqueLoras,
+      };
+      console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
+    }
+
+    const charArtist = charArtistOverrideWithFallback(character, otherChars);
+    // 多图模式串行出图：单张失败只丢那一张，不影响其他张和发帖
+    for (let i = 0; i < imagePrompts.length; i++) {
+      try {
+        const genResult = await generateImageRaw(imagePrompts[i], {
+          ragQuery: text,
+          artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
+          width,
+          height,
+          scene: 'moments',
+          priority: manual ? 'high' : 'low',
+          ...loraOpts,
+        });
+
+        if (!genResult.success || genResult.images.length === 0) continue;
+
+        const usedPrompt = genResult.promptRefined || imagePrompts[i];
+        usedPrompts.push(usedPrompt);
+
+        const batchUrls = [];
+        for (const img of genResult.images) {
+          const ts = Date.now();
+          const filename = `moment_${ts}_${i + 1}_${img.filename || 'comfy.png'}`;
+          const url = saveBase64Image('moments', filename, img.base64);
+          batchUrls.push(url);
+          imageUrls.push(url);
+        }
+        recordCompletedImageTask({
+          conversationId: `char_${character.id}_moments`,
+          promptOriginal: imagePrompts[i],
+          promptRefined: usedPrompt,
+          outputPaths: batchUrls,
+          style: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
+          resolution: `${width}x${height}`,
+          workflowTemplate: genResult.wfMode,
+          db,
+        });
+      } catch (err) {
+        console.error(`[moments] Image ${i + 1}/${imagePrompts.length} failed for post ${postId}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error(`[moments] Image generation failed for post ${postId}:`, err.message);
+    return { imageUrls: [], usedPrompts: [] };
+  }
+
+  return { imageUrls, usedPrompts };
+}
+
+/**
+ * 镇民朋友圈配图生成（镇民发帖与补图共用）
+ * 镇民无 LoRA，走朋友圈画师出图；不抛异常，全失败时返回空 imageUrls
+ * @returns {Promise<{ imageUrls: string[], usedPrompts: string[] }>}
+ */
+async function generateTownNpcMomentImages(npc, imagePrompts, opts = {}) {
+  const db = getDb();
+  const {
+    text = '',
+    width = config.comfyui.momentsWidth,
+    height = config.comfyui.momentsHeight,
+    postId = null,
+  } = opts;
+
+  const imageUrls = [];
+  const usedPrompts = [];
+  try {
+    for (let i = 0; i < imagePrompts.length; i++) {
+      try {
+        const genResult = await generateImageRaw(imagePrompts[i], {
+          ragQuery: text,
+          artist: config.comfyui.momentsArtist,
+          width,
+          height,
+          scene: 'moments',
+          priority: 'high',
+        });
+        if (!genResult.success || genResult.images.length === 0) continue;
+
+        const usedPrompt = genResult.promptRefined || imagePrompts[i];
+        usedPrompts.push(usedPrompt);
+
+        const batchUrls = [];
+        for (const img of genResult.images) {
+          const filename = `moment_npc_${npc.id}_${Date.now()}_${img.filename || 'comfy.png'}`;
+          const url = saveBase64Image('moments', filename, img.base64);
+          batchUrls.push(url);
+          imageUrls.push(url);
+        }
+        recordCompletedImageTask({
+          conversationId: `town_npc_${npc.id}_moments`,
+          promptOriginal: imagePrompts[i],
+          promptRefined: usedPrompt,
+          outputPaths: batchUrls,
+          style: config.comfyui.momentsArtist,
+          resolution: `${width}x${height}`,
+          workflowTemplate: genResult.wfMode,
+          db,
+        });
+      } catch (err) {
+        console.error(`[moments] NPC image ${i + 1}/${imagePrompts.length} failed for post ${postId}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error(`[moments] NPC image generation failed for post ${postId}:`, err.message);
+    return { imageUrls: [], usedPrompts: [] };
+  }
+
+  return { imageUrls, usedPrompts };
+}
 
 /**
  * 生成一条朋友圈帖子（文案 + 配图）
@@ -665,77 +893,19 @@ ${dynamicRules}`;
   console.log(`[moments] Generated post for ${character.display_name}: "${text.slice(0, 40)}..."`);
 
   // 3. 生成配图
-  try {
-    // 构建 lora 参数：合并自身 + 对方们的 lora
-    let loraOpts = {};
-    const selfLoras = _parseCharLoras(character.loras);
-    const otherChars = multiPersons.map(mp => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(mp.otherId)).filter(Boolean);
-    const otherLoras = otherChars.flatMap(c => _parseCharLoras(c.loras));
-    const allLoras = [...selfLoras, ...otherLoras];
-    const seen = new Set();
-    const uniqueLoras = allLoras.filter(l => {
-      if (seen.has(l.path)) return false;
-      seen.add(l.path);
-      return true;
-    });
-
-    if (uniqueLoras.length > 0) {
-      loraOpts = {
-        customWorkflow: multiPersons.length > 0 ? null : (character.custom_workflow || null),
-        loras: uniqueLoras,
-      };
-      console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
-    }
-
-    const charArtist = charArtistOverrideWithFallback(character, otherChars);
-    const usedPrompts = [];
-    // 多图模式串行出图：单张失败只丢那一张，不影响其他张和发帖
-    for (let i = 0; i < imagePrompts.length; i++) {
-      try {
-        const genResult = await generateImageRaw(imagePrompts[i], {
-          ragQuery: text,
-          artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
-          width: config.comfyui.momentsWidth,
-          height: config.comfyui.momentsHeight,
-          scene: 'moments',
-          priority: opts.manual ? 'high' : 'low',
-          ...loraOpts,
-        });
-
-        if (!genResult.success || genResult.images.length === 0) continue;
-
-        const usedPrompt = genResult.promptRefined || imagePrompts[i];
-        usedPrompts.push(usedPrompt);
-
-        const batchUrls = [];
-        for (const img of genResult.images) {
-          const ts = Date.now();
-          const filename = `moment_${ts}_${i + 1}_${img.filename || 'comfy.png'}`;
-          const url = saveBase64Image('moments', filename, img.base64);
-          batchUrls.push(url);
-          imageUrls.push(url);
-        }
-        recordCompletedImageTask({
-          conversationId: `char_${character.id}_moments`,
-          promptOriginal: imagePrompts[i],
-          promptRefined: usedPrompt,
-          outputPaths: batchUrls,
-          style: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
-          resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
-          workflowTemplate: genResult.wfMode,
-          db,
-        });
-      } catch (err) {
-        console.error(`[moments] Image ${i + 1}/${imagePrompts.length} failed for post ${postId}:`, err.message);
-      }
-    }
-    // 落库用实际生效的 prompt；多图用分隔线拼起来，供图片反查 / 重绘参考
-    if (usedPrompts.length > 0) imagePrompt = usedPrompts.join('\n---\n');
-  } catch (err) {
-    console.error(`[moments] Image generation failed for post ${postId}:`, err.message);
-    // 生图失败不阻塞发帖——无图但有文案
-    imageUrls = [];
-  }
+  const otherChars = multiPersons
+    .map(mp => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(mp.otherId))
+    .filter(Boolean);
+  const { imageUrls: genImageUrls, usedPrompts } = await generateMomentImages(character, imagePrompts, {
+    text,
+    manual: opts.manual,
+    otherChars,
+    postId,
+  });
+  // 生图失败不阻塞发帖——无图但有文案
+  imageUrls = genImageUrls;
+  // 落库用实际生效的 prompt；多图用分隔线拼起来，供图片反查 / 重绘参考
+  if (usedPrompts.length > 0) imagePrompt = usedPrompts.join('\n---\n');
 
   // 4. 更新帖子
   db.prepare(`

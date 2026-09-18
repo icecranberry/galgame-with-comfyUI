@@ -152,6 +152,14 @@ export const useMomentsStore = defineStore('moments', () => {
     return liked
   }
 
+  // 按原本的提示词补生成配图（生图失败导致无图的帖子）
+  async function regeneratePostImage(postId) {
+    const { images } = await api.regenerateMomentImage(postId)
+    const post = posts.value.find(p => p.id === postId)
+    if (post) post.images = images || []
+    return images || []
+  }
+
   // 手动触发某角色发帖
   async function generatePost(characterId) {
     const result = await api.generateMoment(characterId)
@@ -237,6 +245,6 @@ export const useMomentsStore = defineStore('moments', () => {
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
-    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, generatePost, updatePost, deletePost,
+    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, updatePost, deletePost,
     connectSSE, disconnectSSE, markSeen, refreshUnreadCount }
 })

@@ -859,6 +859,11 @@ export async function likeMoment(postId) {
   return request(`/moments/${postId}/like`, { method: 'POST' })
 }
 
+/** 按帖子原本的提示词重新出图，补上因生图失败缺失的配图 */
+export async function regenerateMomentImage(postId) {
+  return request(`/moments/${postId}/regenerate-image`, { method: 'POST' })
+}
+
 // ── 角色对用户的画像（user_portraits）──
 export async function getCharacterPortrait(characterId) {
   return request(`/portraits/${characterId}`)

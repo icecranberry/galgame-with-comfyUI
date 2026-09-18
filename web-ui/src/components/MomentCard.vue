@@ -68,8 +68,27 @@
       </div>
     </div>
 
-    <!-- 配图：单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
-    <div v-if="visibleImages.length === 1" class="moment-images">
+    <!-- 配图：无图给缺省遮罩（生图失败可原地补图）；单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
+    <div v-if="visibleImages.length === 0" class="moment-images-empty">
+      <div class="moment-empty-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+      </div>
+      <span class="moment-empty-text">图片没生成出来</span>
+      <linshe-button
+        v-if="canRegenerateImage"
+        variant="secondary"
+        size="sm"
+        :loading="regenerating"
+        @click="regenerateImage"
+      >
+        重新生成图片
+      </linshe-button>
+    </div>
+    <div v-else-if="visibleImages.length === 1" class="moment-images">
       <img
         :src="visibleImages[0].url"
         class="moment-img"
@@ -246,6 +265,7 @@ const router = useRouter()
 const moments = useMomentsStore()
 const isMobile = inject('isMobile')
 const confirmFn = inject('confirm')
+const toastFn = inject('toast', null)
 
 const MAX_VISIBLE = 2
 const showReplyInput = ref(false)
@@ -285,6 +305,22 @@ const visibleImages = computed(() => {
 
 function onImgError(idx) {
   imgErrors.add(idx)
+}
+
+// 生图失败（多半是 ComfyUI 掉线）导致的无图帖：按帖子原本的提示词原地补图
+const regenerating = ref(false)
+const canRegenerateImage = computed(() => props.post.character_id != null)
+
+async function regenerateImage() {
+  regenerating.value = true
+  try {
+    await moments.regeneratePostImage(props.post.id)
+    imgErrors.clear()
+  } catch (err) {
+    toastFn?.(err.message, 'error')
+  } finally {
+    regenerating.value = false
+  }
 }
 
 function onPreviewImg(i) {
@@ -715,6 +751,24 @@ function formatTime(iso) {
 .moment-edit-actions {
   display: flex; justify-content: flex-end; gap: 8px;
 }
+
+/* 无图（生图失败）：虚线相框 + 补图入口 */
+.moment-images-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 15px;
+  margin-bottom: 14px;
+  padding: 26px 16px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+}
+.moment-empty-icon { display: flex; opacity: 0.65; }
+.moment-empty-text { font-size: 13px; }
 
 /* 单图 */
 .moment-images {
