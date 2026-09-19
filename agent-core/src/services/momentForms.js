@@ -3,13 +3,13 @@
 
 export const MOMENT_FORMS = [
   { name: '短句流',  desc: '一句话说清楚，极简不解释',                     len: '5-20字',  weight: 2.0, nightBoost: false },
-  { name: '纯图党',  desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-10字',  weight: 1.0, nightBoost: true },
+  { name: '纯图党',  desc: '文字只用 0-3 个 emoji 加上极短一句，主要靠图说话', len: '0-15字',  weight: 0.5, nightBoost: true },
   { name: '括号吐槽', desc: '正文加一句括号里的内心OS或吐槽',                len: '20-60字', weight: 0.8, nightBoost: false },
   { name: '冷幽默',  desc: '一句或几句自嘲冷幽默，结尾抖个小包袱',            len: '15-50字', weight: 0.6, nightBoost: false },
-  { name: '发疯文学', desc: '语气夸张、情绪上头的无厘头输出，标点和语气词拉满', len: '15-60字', weight: 0.5, nightBoost: false },
+  { name: '发疯文学', desc: '语气夸张、情绪上头的输出，标点和语气词拉满', len: '15-60字', weight: 0.5, nightBoost: false },
   { name: '抛个问题', desc: '整条就是一个具体问题或求助，带够场景让人能回答；禁止"有没有人懂这种感觉"这类空泛句式', len: '15-45字', weight: 0.9, nightBoost: false },
   { name: '颜文字体', desc: '用颜文字或半角符号代替 emoji 表达状态，配一句极短的话', len: '0-20字', weight: 1.4, nightBoost: true },
-  { name: '只发个语气词', desc: '整条只有几个语气词或一个 emoji（如「唉」「困了」「？」），不解释、不展开、不交代前因后果', len: '0-12字', weight: 1.0, nightBoost: true },
+  { name: '只发个语气词', desc: '整条只有几个语气词或一个 emoji（如「唉」「困了」「？」），不解释、不展开、不交代前因后果', len: '0-12字', weight: 0.2, nightBoost: true },
   { name: '话说一半', desc: '写到一半就停下，像是话到嘴边又懒得说完，可以用省略号收尾', len: '5-30字', weight: 0.8, nightBoost: false },
 ];
 

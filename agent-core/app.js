@@ -33,6 +33,7 @@ import townRoutes from './src/routes/town.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
+import { startSpecialMomentScheduler } from './src/services/scheduleSpecialMoment.js';
 import { startProactiveChatScheduler } from './src/services/proactiveChatScheduler.js';
 import { startEventScheduler } from './src/services/eventScheduler.js';
 import { startDisturbScheduler } from './src/services/disturbModeScheduler.js';
@@ -182,6 +183,9 @@ autoRestoreMissing();
 
 // 启动朋友圈定时调度器
 startMomentScheduler();
+
+// 启动特殊日程朋友圈队列（启动时先检查所有角色的日程：过时的直接跳过，到点的立即发送）
+startSpecialMomentScheduler();
 
 // 启动主动对话调度器（由 config.features.proactiveChat 控制开关，scheduler 内部自行判断）
 startProactiveChatScheduler();

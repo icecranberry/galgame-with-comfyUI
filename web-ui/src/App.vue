@@ -103,6 +103,18 @@ function confirm(opts) {
 function toast(message, type = 'info', duration) {
   toastEl.value?.show(message, type, duration)
 }
+
+/** 目标日期的口语化描述：明天 / 后天 / 大后天，再往后显示 M月D日 */
+function describeTargetDate(dateKey) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(`${dateKey}T00:00:00`)
+  const diffDays = Math.round((target - today) / 86400000)
+  if (diffDays === 1) return '明天'
+  if (diffDays === 2) return '后天'
+  if (diffDays === 3) return '大后天'
+  return `${target.getMonth() + 1}月${target.getDate()}日`
+}
 function showGuide(opts) {
   return guideDialog.value?.show(opts) ?? Promise.resolve()
 }
@@ -216,6 +228,17 @@ onMounted(async () => {
     if (data.character_id !== chat.activeCharId) {
       playNotificationSound()
       proactive.addProactive(data)
+    }
+  })
+
+  // 日程更改成功（手动编辑 / 聊天约定 / 跨天约定应用）→ 右上角提示
+  onStreamEvent('schedule_changed', (data) => {
+    const name = data.display_name || '角色'
+    const todayKey = new Date().toLocaleDateString('sv-SE') // 本地时区 YYYY-MM-DD
+    if (data.target_date && data.target_date !== todayKey) {
+      toast(`「${name}」的约定已排入${describeTargetDate(data.target_date)}的日程`, 'success')
+    } else {
+      toast(`「${name}」日程已更新`, 'success')
     }
   })
 

@@ -26,6 +26,7 @@ import {
   scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
+import { updateScheduleActivity } from '../services/scheduleEditor.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
@@ -219,6 +220,46 @@ router.get('/:characterId', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] GET /:id error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /api/schedule/:characterId/activity — 编辑单条日程（标记为特殊日程）──
+// 编辑后的条目带 edited 标记，到点后进入当天特殊朋友圈队列（scheduleSpecialMoment）
+
+router.put('/:characterId/activity', (req, res) => {
+  try {
+    if (config.features.schedule === false) {
+      return res.status(403).json({ error: 'schedule feature disabled' });
+    }
+
+    const characterId = parseInt(req.params.characterId, 10);
+    if (isNaN(characterId)) {
+      return res.status(400).json({ error: 'invalid characterId' });
+    }
+
+    const character = getDb().prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+    if (!character) {
+      return res.status(404).json({ error: 'character not found' });
+    }
+
+    const { index, startTime, endTime, activity, location, description } = req.body || {};
+    if (typeof index !== 'number' || index < 0) {
+      return res.status(400).json({ error: 'invalid index' });
+    }
+
+    const result = updateScheduleActivity(characterId, index, { startTime, endTime, activity, location, description });
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.json({
+      ok: true,
+      character_id: characterId,
+      activities: result.activities.map(act => ({ ...act, isCurrent: undefined })),
+    });
+  } catch (err) {
+    console.error('[schedule] PUT /:id/activity error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

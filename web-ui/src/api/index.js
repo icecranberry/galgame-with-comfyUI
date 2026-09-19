@@ -1147,6 +1147,11 @@ export function getCurrentActivity(characterId) {
   return request(`/schedule/${characterId}/current`)
 }
 
+/** 编辑单条日程（标记为已编辑，进入当天特殊朋友圈队列） */
+export function updateScheduleActivity(characterId, index, patch) {
+  return request(`/schedule/${characterId}/activity`, { method: 'PUT', body: { index, ...patch } })
+}
+
 export function peekSnapshot(characterId, genImage = true, activityContext = null) {
   const body = { gen_image: genImage };
   if (activityContext) body.activity = activityContext;

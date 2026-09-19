@@ -29,6 +29,7 @@ import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
+import { detectAndApplyAppointment } from '../services/appointmentDetector.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
@@ -1490,6 +1491,16 @@ ${coreRules}
             console.error('[chat] Failed to reset next_proactive_at:', err.message);
           }
 
+        }
+
+        // 12.1 约定检测：用户消息命中约定句式时，用双方对话判断是否要改今日日程
+        //      （fire-and-forget，不阻塞记忆整理；命中后改日程 + 排入当天特殊朋友圈队列）
+        if (config.features.schedule !== false && character && displayContent && message) {
+          detectAndApplyAppointment({
+            character,
+            userText: message,
+            replyText: displayContent,
+          });
         }
 
         await maybeSummarize(conversationId, {

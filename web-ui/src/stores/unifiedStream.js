@@ -81,6 +81,7 @@ function _connect() {
     schedule_peek_progress: d => _dispatch('schedule_peek_progress', d),
     schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
     schedule_state_change: d => _dispatch('schedule_state_change', d),
+    schedule_changed: d => _dispatch('schedule_changed', d),
     image_compress_progress: d => _dispatch('image_compress_progress', d),
     group_message:     d => _dispatch('group_message', d),
     group_message_update: d => _dispatch('group_message_update', d),

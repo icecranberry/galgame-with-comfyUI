@@ -820,11 +820,15 @@ ${dynamicRules}`;
 
   // 日程注入：当前正在做什么；与发圈动因共同合成一条主线
   let scheduleContext = '';
+  let scheduleWithUser = false; // 日程提到了用户（如聊天约定改写的日程）→ 本条朋友圈带上用户
   try {
     if (!isFreeMode && config.features.schedule !== false) {
       const activity = getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
         scheduleContext = buildMomentScheduleContext(character.display_name, activity);
+        const nickname = (config.user.nickname || '').trim();
+        const haystack = `${activity.activity || ''}${activity.description || ''}${activity.location || ''}`;
+        scheduleWithUser = (nickname.length >= 2 && haystack.includes(nickname)) || haystack.includes('用户');
       }
     }
   } catch { /* schedule not available, skip */ }
@@ -847,6 +851,26 @@ ${dynamicRules}`;
   msgs.push({ role: 'system', content: postingTask });
   // 整卡人格（统一入口，含生效外观注入；输出含 imagePrompt，配图需体现当前外观）
   msgs.push({ role: 'system', content: buildCharacterPersona(character, { variant: 'full' }) });
+  // 日程里提到了用户（如聊天约定改写的日程）→ 用户同框：注入用户信息与关系
+  if (scheduleWithUser) {
+    const relRow = db.prepare(
+      'SELECT relationship_text FROM user_relationships WHERE character_id = ?'
+    ).get(character.id);
+    const userName = userNickname();
+    const userDesc = [config.user.gender, config.user.appearance, config.user.persona]
+      .filter(Boolean).join('；');
+    msgs.push({
+      role: 'system',
+      content: `**【此刻与你同在的人：${userName}】**
+你们的关系：${relRow?.relationship_text || '朋友'}。
+${userName}的信息：${userDesc || '信息未知，按普通人处理'}
+
+你现在正和${userName}一起做【此刻正在做】里的事，这条朋友圈必须带上${userName}：
+- text 自然地提到${userName}（用你们关系里会用的称呼），记录你们一起做的这个瞬间；
+- imagePrompt 必须同时包含你和${userName}两个人，分别描述各自外观与互动，贴合你们的关系；${userName}的外观严格按上面的信息描绘。`,
+    });
+    console.log(`[moments] Schedule mentions user → user co-presence mode for ${character.display_name}`);
+  }
   if (multiPersons.length > 0) {
     for (const mp of multiPersons) {
       msgs.push({
@@ -1110,11 +1134,167 @@ function _parseCharLoras(raw) {
   return [];
 }
 
+/**
+ * 特殊日程朋友圈（不走动机库）
+ *
+ * 被手动编辑 / 聊天约定改写的日程条目（edited 标记）到点后由 scheduleSpecialMoment
+ * 队列调用：只突出这个约定日程本身，画面里带上「我」的外观设定。
+ * 成功返回后由调用方把条目标记为 sent；抛出异常则回退 pending 等下轮重试。
+ */
+async function generateSpecialScheduleMoment({ characterId, activity }) {
+  const db = getDb();
+  const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+  if (!character) throw new Error('character not found');
+
+  // 睡眠条目不产生朋友圈（手动把睡眠块改了时间也会走到这里，静默跳过）
+  if (activity.replyDelay === -1) {
+    console.log(`[moments] Special schedule moment skipped (sleep block) for ${character.display_name}`);
+    return;
+  }
+
+  // 并发保护：该角色已有生成中的帖子时放弃本轮（队列会回退 pending 重试）
+  const existingGenerating = db.prepare(
+    `SELECT id FROM moment_posts WHERE character_id = ? AND status = 'generating' LIMIT 1`
+  ).get(character.id);
+  if (existingGenerating) throw new Error('ALREADY_GENERATING');
+
+  const userName = userNickname();
+  const worldSetting = getWorldSetting();
+  const permissionPrompt = worldSetting
+    ? getSystemRulesWithWorld()
+    : getSystemRules();
+  const worldIntegrationNote = worldSetting
+    ? getWorldIntegrationRule('moments')
+    : null;
+
+  const imagePromptRule = getGlobalRule('image_prompt');
+  const imagePromptGuide = imagePromptRule?.rule_content || '';
+
+  const now = new Date();
+  const weatherNote = getLightNoteWithWeather(now);
+  const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
+
+  const isOath = Boolean(db.prepare(
+    'SELECT is_oath FROM user_relationships WHERE character_id = ?'
+  ).pluck().get(character.id));
+  const oathImageNote = isOath
+    ? '誓约画面特征：imagePrompt 中角色左手无名指戴一枚清晰可见的银白细戒指。'
+    : '';
+
+  const userDesc = [config.user.gender, config.user.appearance || config.user.persona]
+    .filter(Boolean).join('；');
+
+  const postingTask = `你正在发朋友圈。像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。
+
+通用规则：
+- 只输出 JSON，不要解释
+${MOMENT_SINGLE_FOCUS_RULE}
+${MOMENT_TONE_RULES}
+${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。' : ''}
+- **图文强一致**：imagePrompt 必须准确可视化 text 正在记录的同一场景，不得改换场景或添加与正文冲突的情节。
+- text里禁止输出'#下午茶的仪式感'类似这种tag标签
+- text中做的事情要符合当前时间但禁止直接提及时间。
+
+输出格式（严格 JSON）：
+{"text":"朋友圈正文：中文口语，第一人称，围绕你和${userName}的这个约定瞬间，像随手打的字，可以很短；不要写成总结或感悟","imagePrompt":"照片的英文画面描述：${imagePromptGuide}${weatherHint}"}
+
+本次要求（随本次情况变化，与上方通用规则同时生效）：
+- **这条朋友圈是履约现场**：只突出你们约好的这件事本身，不要扯别的话题。
+- **画面必须同框**：imagePrompt 中必须同时出现你和${userName}两个人，分别描述各自外观、动作与互动，贴合你们的关系，用句号分隔两人描述。${oathImageNote}`;
+
+  const timeTag = getTimeTag(now, false);
+  const doing = `${activity.location || ''}${activity.activity || ''}`;
+  const descPart = activity.description ? `（${activity.description}）` : '';
+  const userMsg = `${timeTag}
+**【此刻正在做】${character.display_name}此刻正在${doing}${descPart}**
+**【本次发圈动因】这是你与${userName}约好的事情——就是上面【此刻正在做】的内容，只围绕它发一条朋友圈。**`;
+
+  const msgs = [{ role: 'system', content: permissionPrompt }];
+  if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  msgs.push({ role: 'system', content: postingTask });
+  msgs.push({ role: 'system', content: buildCharacterPersona(character, { variant: 'full' }) });
+  // 约定对象「我」的外观设定：画面必须带上这个人
+  msgs.push({
+    role: 'system',
+    content: `**【与你同行的人：${userName}】**
+${userDesc || '信息未知，按普通人处理。'}
+
+imagePrompt 中${userName}的外观以上述描述为准。`,
+  });
+
+  const worldRulePrefix = worldSetting
+    ? '请遵循<world_setting>来发朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
+
+  // 创建 generating 记录（style 标记为日程赴约，与普通帖区分）
+  const postResult = db.prepare(
+    `INSERT INTO moment_posts (character_id, content, prompt, style, resolution, status)
+     VALUES (?, '', '', '日程赴约', ?, 'generating')`
+  ).run(character.id, `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`);
+  const postId = postResult.lastInsertRowid;
+
+  try {
+    const result = await chatSync(msgs, {
+      temperature: 0.8,
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      label: '日程赴约朋友圈',
+    });
+    const parsed = parseMomentResponse(result);
+    let text = parsed.text || '出门赴约啦～';
+    let imagePrompts = [parsed.imagePrompt].filter(Boolean);
+    if (imagePrompts.length === 0) {
+      imagePrompts = [DEFAULT_MOMENT_IMAGE_PROMPT];
+    }
+
+    const { imageUrls, usedPrompts } = await generateMomentImages(character, imagePrompts, {
+      text,
+      manual: true,
+      postId,
+    });
+    const imagePrompt = usedPrompts.length > 0 ? usedPrompts.join('\n---\n') : imagePrompts[0];
+
+    db.prepare(`
+      UPDATE moment_posts
+      SET content = ?, prompt = ?, images = ?, status = 'done'
+      WHERE id = ?
+    `).run(text, imagePrompt, JSON.stringify(imageUrls), postId);
+
+    console.log(`[moments] Special schedule post ${postId} done for ${character.display_name}: "${text.slice(0, 40)}"`);
+
+    broadcastNewPost({
+      id: postId,
+      character_id: character.id,
+      content: text,
+      images: imageUrls,
+      display_name: character.display_name,
+      avatar_path: character.avatar_path,
+      status: 'done',
+      created_at: new Date().toISOString(),
+    });
+
+    const postRecord = { id: postId, content: text, images: imageUrls };
+    setTimeout(() => {
+      triggerFriendComments(postRecord, character).catch(err =>
+        console.error('[moments] friend interaction error:', err.message)
+      );
+    }, 5000);
+  } catch (err) {
+    console.error(`[moments] Special schedule post failed for ${character.display_name}:`, err.message);
+    db.prepare('UPDATE moment_posts SET status = ?, error_message = ? WHERE id = ?')
+      .run('failed', err.message, postId);
+    throw err;
+  }
+}
+
 export default router;
 export { generateMomentPost };
 
 // 装配：把生成函数注入调度器（解除 momentScheduler → routes 的反向依赖）
 import { setMomentPostGenerator, setTownNpcPostGenerator } from '../services/momentScheduler.js';
+import { setSpecialScheduleMomentGenerator } from '../services/scheduleSpecialMoment.js';
 import { generateTownNpcMoment } from '../services/town/townNpcMomentGenerator.js';
 setMomentPostGenerator(generateMomentPost);
 setTownNpcPostGenerator(npc => generateTownNpcMoment(npc, { broadcastPost: broadcastNewPost }));
+setSpecialScheduleMomentGenerator(generateSpecialScheduleMoment);

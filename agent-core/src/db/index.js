@@ -464,6 +464,17 @@ function initSchema(db) {
       UNIQUE(character_id, schedule_date)
     );
 
+    -- 待应用日程变更队列（聊天约定的是未来某天时先入队，到那天再合并进当日日程）
+    CREATE TABLE IF NOT EXISTS pending_schedule_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      target_date TEXT NOT NULL,
+      activity_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      source TEXT NOT NULL DEFAULT 'chat',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- 消息回复队列表（延迟回复 + 睡眠合并）
     CREATE TABLE IF NOT EXISTS reply_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -792,6 +803,7 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_ce_expires ON character_events(expires_at);
     CREATE INDEX IF NOT EXISTS idx_eh_char ON event_history(character_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ds_char_date ON daily_schedules(character_id, schedule_date);
+    CREATE INDEX IF NOT EXISTS idx_psc_status_date ON pending_schedule_changes(status, target_date);
     CREATE INDEX IF NOT EXISTS idx_rq_scheduled ON reply_queue(scheduled_reply_at, status);
     CREATE INDEX IF NOT EXISTS idx_rq_character ON reply_queue(character_id, status);
     CREATE INDEX IF NOT EXISTS idx_weather_lookup ON weather_hourly(weather_time);

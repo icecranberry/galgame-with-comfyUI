@@ -108,6 +108,7 @@
       @chat="onChat"
       @wakePhone="onWakePhone"
       @wakeDoor="onWakeDoor"
+      @updated="detailActs = $event"
     />
 
     <!-- ═══ 瞄一眼快照弹窗（胶卷边框风格） ═══ -->

@@ -39,6 +39,7 @@ import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import { stripImagePromptLines, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
+import { detectAndApplyAppointment } from './appointmentDetector.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
 import { invalidateGalleryCache } from './galleryCache.js';
 import { buildGroupEmojiNote, getCharacterEmojiMap, parseGroupEmojiText, getEmojiCategories, parseEmojiText } from './emojiService.js';
@@ -1054,6 +1055,21 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   // 先后顺序不再影响缓存命中，此处保持摘要在前。
   markGroupPostProcessing(group.id, 1);
   setImmediate(async () => {
+    // 约定检测：用户 @/提到的角色，用本轮对话判断是否要改其今日日程（fire-and-forget）
+    if (trigger === 'user' && userMessage && config.features.schedule !== false) {
+      for (const member of detectMentions(userMessage, group.members)) {
+        const memberReply = written
+          .filter(w => w.speaker_character_id === member.id && w.content)
+          .map(w => w.content)
+          .join('\n');
+        if (!memberReply) continue;
+        detectAndApplyAppointment({
+          character: member,
+          userText: userMessage,
+          replyText: memberReply,
+        });
+      }
+    }
     try {
       try {
         await maybeSummarize(conversationId, {
