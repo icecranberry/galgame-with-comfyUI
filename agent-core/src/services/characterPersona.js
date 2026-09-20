@@ -17,6 +17,7 @@
  */
 
 import { getActiveOutfits } from './outfitService.js';
+import { config } from '../config.js';
 
 const APPEARANCE_HEADING_RE = /##\s*你的外观/;
 
@@ -297,4 +298,22 @@ export function buildImageCrossRefInfo(char, opts = {}) {
     parts.push(toThirdPerson(injected, person));
   }
   return parts.join('\n');
+}
+
+/**
+ * 用户（玩家本人）的生图交叉参考信息：画面里提到用户名字时注入其自述资料。
+ *
+ * 用户不是 characters 表的一行，没有身份行、没有外观段、没有 LoRA，资料唯一来源是
+ * config.user（性别 / 外观 / 说明三项自述）。与 buildImageCrossRefInfo 对齐：只返回
+ * 内容，不含 `[名字]` 标题行（标题由调用方拼），调用方也不得把用户并入角色 LoRA 列表。
+ * @returns {string}
+ */
+export function buildUserImageCrossRefInfo() {
+  const parts = [];
+  if (config.user?.gender) parts.push(`性别：${config.user.gender}`);
+  if (config.user?.appearance) parts.push(`外观：${config.user.appearance}`);
+  if (config.user?.persona) parts.push(`其他说明：${config.user.persona}`);
+  // 三项全空时不能返回空串：空块会让模型只看到标题行而自由发挥用户长相
+  if (parts.length === 0) return '（用户未填写个人资料，按普通人处理）';
+  return parts.join('；');
 }

@@ -52,7 +52,7 @@
     </div>
 
     <!-- 正文（编辑时切换为文本域 + 保存 / 取消） -->
-    <div v-if="!editing" class="moment-content">{{ post.content }}</div>
+    <div v-if="!editing && visibleContent" class="moment-content">{{ visibleContent }}</div>
     <div v-else class="moment-edit-area">
       <linshe-input
         ref="editInput"
@@ -66,7 +66,7 @@
       />
       <div class="moment-edit-actions">
         <linshe-button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEdit">取消</linshe-button>
-        <linshe-button variant="primary" size="sm" :disabled="!editText.trim() || editText === post.content" :loading="savingEdit" @click="saveEdit">保存</linshe-button>
+        <linshe-button variant="primary" size="sm" :disabled="canSaveEdit" :loading="savingEdit" @click="saveEdit">保存</linshe-button>
       </div>
     </div>
 
@@ -319,6 +319,7 @@ import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import MomentCommentItem from './MomentCommentItem.vue'
 import { groupMomentComments } from '../utils/momentComments.js'
+import { extractMomentImageRequest, stripMomentImageRequest, appendMomentImageRequest } from '../utils/momentImageRequest.js'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -364,6 +365,7 @@ function goToChat() {
   }
 }
 const comments = computed(() => props.post._comments || [])
+const visibleContent = computed(() => stripMomentImageRequest(props.post.content || ''))
 const commentsLoading = ref(false)
 const commentText = ref('')
 const sending = ref(false)
@@ -723,10 +725,13 @@ const editing = ref(false)
 const editText = ref('')
 const savingEdit = ref(false)
 const editInput = ref(null)
+const storedImageRequest = ref('')
+const canSaveEdit = computed(() => savingEdit.value || (!editText.value.trim() && !storedImageRequest.value) || editText.value === visibleContent.value)
 
 async function startEdit() {
   showMenu.value = false
-  editText.value = props.post.content
+  storedImageRequest.value = extractMomentImageRequest(props.post.content || '')
+  editText.value = visibleContent.value
   editing.value = true
   await nextTick()
   editInput.value?.focus()
@@ -739,10 +744,10 @@ function cancelEdit() {
 
 async function saveEdit() {
   const text = editText.value.trim()
-  if (!text || savingEdit.value) return
+  if (savingEdit.value || (!text && !storedImageRequest.value)) return
   savingEdit.value = true
   try {
-    await moments.updatePost(props.post.id, text)
+    await moments.updatePost(props.post.id, appendMomentImageRequest(text, storedImageRequest.value))
     editing.value = false
     editText.value = ''
   } catch (err) {

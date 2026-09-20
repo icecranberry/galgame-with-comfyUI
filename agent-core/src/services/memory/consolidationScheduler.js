@@ -275,7 +275,7 @@ async function executeJob(job, { llmBudgetRemaining, db, portraitSuggest = false
       return runPortraitSuggestionTask({ conversations, llmBudgetRemaining, deps });
     }
     case 'backfill': {
-      const candidates = findBackfillCandidates(db, { limit: 10 });
+      const candidates = findBackfillCandidates(db, { limit: 5 });
       return runBackfillTask({ candidates, llmBudgetRemaining, deps });
     }
     default:

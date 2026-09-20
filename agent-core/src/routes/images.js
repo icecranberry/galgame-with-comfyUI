@@ -6,7 +6,7 @@ import { generateImage, generateImageRaw, getLastWorkflowMode } from '../service
 import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
-import { buildImageCrossRefInfo } from '../services/characterPersona.js';
+import { buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 import { config } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
@@ -15,6 +15,7 @@ import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { chatSync } from '../llm/llm-client.js';
 import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
+import { getUserName, matchUser } from '../services/userSearch.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
 import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
 import fs from 'fs';
@@ -198,6 +199,7 @@ router.post('/test-style', async (req, res) => {
    * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
    *   system0 = 破甲 + 世界观 / system1 = 世界观强化 / system2 = 生图规则
    *   system3 = 画面描述中匹配到的角色（注入外观描述，返回值附带其 loras）
+   *             以及画面描述中提到的用户本人（只注入其自述资料，不参与 loras）
    */
   const generateScenePrompt = async (desc) => {
     const msgs = [{ role: 'system', content: getSystemRulesWithWorld() || '你是一个角色扮演 AI。' }];
@@ -207,20 +209,25 @@ router.post('/test-style', async (req, res) => {
     msgs.push({ role: 'system', content: `【生图规则】\n${IMAGE_PROMPT_RULE.rule_content}` });
 
     const loras = [];
+    const crossBlocks = [];
     const matched = matchAll(desc);
     if (matched.length > 0) {
       const db = getDb();
       const chars = matched.map(m =>
         db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
       ).filter(Boolean);
-      if (chars.length > 0) {
-        const blocks = chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`).join('\n\n');
-        msgs.push({
-          role: 'system',
-          content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${blocks}`,
-        });
-        loras.push(...chars.flatMap(c => parseLoras(c)));
-      }
+      crossBlocks.push(...chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
+      loras.push(...chars.flatMap(c => parseLoras(c)));
+    }
+    // 画面描述里提到用户本人时同样注入其资料（用户不是角色：没有 id、没有 LoRA）
+    if (matchUser(desc)) {
+      crossBlocks.push(`[${getUserName()}]\n${buildUserImageCrossRefInfo()}`);
+    }
+    if (crossBlocks.length > 0) {
+      msgs.push({
+        role: 'system',
+        content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`,
+      });
     }
 
     msgs.push({

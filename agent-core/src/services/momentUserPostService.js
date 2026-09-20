@@ -15,7 +15,9 @@ import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote } from './momentForms.js';
+import { compressDataUriToAvif } from './imageTranscode.js';
+import { MOMENT_COMMENT_RULES, firstMomentImagePrompt } from './momentForms.js';
+import { extractMomentImageRequest, stripMomentImageRequest } from './momentImageRequest.js';
 
 const USER_POST_MAX_IMAGES = 3;
 // 单张图片解码前的 base64 上限（base64 约为原大小 4/3，express.json 全局限 10mb）
@@ -78,7 +80,7 @@ export async function describeUserMomentImages(images = [], deps = {}) {
     {
       role: 'user',
       content: [
-        { type: 'text', text: '这些是同一条朋友圈的配图。请压缩成 120 字以内；多张图时用「第1张：」「第2张：」标明顺序。' },
+        { type: 'text', text: '这些是同一条朋友圈的配图。请压缩成 100 字以内；多张图时用「第1张：」「第2张：」标明顺序。' },
         ...imageParts,
       ],
     },
@@ -137,12 +139,13 @@ export function selectUserPostRepliers(db) {
 
 /**
  * 角色评论用户的朋友圈。
- * 用户资料、动态、图片与自然评论规则合并成一个稳定前缀，排在角色人设之前，
+ * 评论规则、用户资料、动态和配图描述组成稳定前缀；描述排在角色人设前，
  * 同一条动态的多个角色评论能共享前缀缓存；人设后只保留差异信息和短任务。
  */
 export async function generateUserPostComment(character, post, historyComments, deps = {}) {
   const db = getDb();
   const userName = userNickname();
+  const userPersona = buildUserPersona();
   const displayName = character.display_name || character.name;
 
   const worldSetting = getWorldSetting();
@@ -152,6 +155,7 @@ export async function generateUserPostComment(character, post, historyComments, 
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('momentReply')
     : null;
+
 
   const commentRulesContext = [
     '<user_moment_comment_rules>',
@@ -165,11 +169,30 @@ export async function generateUserPostComment(character, post, historyComments, 
     '</user_moment_comment_rules>',
   ].join('\n\n');
 
-  const hasOriginalImages = (post.imageDataUris || []).filter(Boolean).length > 0;
-  const imageNote = hasOriginalImages ? '' : buildMomentImagePromptNote(post.prompt);
+  const imageRequest = extractMomentImageRequest(post.content);
+  const visibleContent = stripMomentImageRequest(post.content || '');
+  const postBody = imageRequest
+    ? `${visibleContent}\n（AI 配图需求：${imageRequest}）`
+    : visibleContent;
+
+  // 配图信息独立 system 消息；AI 配图的防误认提醒放末位任务里（末位指令权重最高）
+  const imageDescription = firstMomentImagePrompt(post.prompt);
+  const hasImageContent = Boolean(imageDescription) || Boolean(imageRequest);
+  let imageContext = '';
+  if (hasImageContent) {
+    const lines = ['<post_image>'];
+    if (imageDescription) {
+      lines.push(`画面内容（图片观察助手识别）：${imageDescription}`);
+    }
+    if (imageRequest) {
+      lines.push(`来源：AI 根据配图需求生成的图片，不是${userName}的真实照片；图中人物不是${userName}，${userName}只是分享这张图的人。`);
+    }
+    lines.push('</post_image>');
+    imageContext = lines.join('\n');
+  }
   const userPostContext = [
-    `关于${userName}：\n${buildUserPersona()}`,
-    `${userName}刚刚在朋友圈发了一条动态：\n---\n${post.content || ''}\n---${imageNote}`,
+    `关于${userName}：\n${userPersona}`,
+    `${userName}刚刚在朋友圈发了一条动态：\n---\n${postBody}\n---`,
   ].join('\n\n');
 
   // 规则先于动态和人设；仅用户资料/动态合并成一个 system，保证高缓存前缀。
@@ -184,30 +207,19 @@ export async function generateUserPostComment(character, post, historyComments, 
   const worldRulePrefix = worldSetting
     ? '请遵循当前<world_setting>来评论朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
-  const task = `${worldRulePrefix}请以你的身份（${displayName}），看你的性格和你与${userName}的关系，去评论区留一条评论：`;
+  const imageTaskNote = imageRequest
+    ? `（注意：配图里的人物不是${userName}，${userName}只是发帖分享这张图的人。请把图中角色当作图里的其他人来评论，不要把图中人物当成${userName}，也不要对${userName}本人描写图中角色的外貌或行为。）`
+    : '';
+  const task = `${worldRulePrefix}请以你的身份（${displayName}），看你的性格和你与${userName}的关系，去评论区留一条评论：\n${imageTaskNote}`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: commentRulesContext });
   msgs.push({ role: 'system', content: userPostContext });
+  if (imageContext) msgs.push({ role: 'system', content: imageContext });
   msgs.push({ role: 'system', content: character.base_prompt || '' });
   if (relationContext) msgs.push({ role: 'system', content: relationContext });
-  const imageDataUris = (post.imageDataUris || []).filter(Boolean);
-  if (imageDataUris.length > 0) {
-    const imageParts = imageDataUris.map(uri => ({
-      type: 'image_url',
-      image_url: { url: String(uri) },
-    }));
-    msgs.push({
-      role: 'user',
-      content: [
-        { type: 'text', text: `${task}\n（下面附的是这条动态的原始配图，请直接看图，结合正文和角色关系去评论。）` },
-        ...imageParts,
-      ],
-    });
-  } else {
-    msgs.push({ role: 'user', content: task });
-  }
+  msgs.push({ role: 'user', content: task });
 
   const chat = deps.chatSync || chatSync;
   const result = await chat(msgs, { temperature: 0.7, max_tokens: 128, label: '用户朋友圈评论' });
@@ -233,17 +245,21 @@ export async function publishUserMoment({ content, images = [] }, deps = {}) {
   }
 
   const urls = [];
+  const compressedUris = [];
   for (let i = 0; i < imgList.length; i++) {
     const dataUri = String(imgList[i] || '');
-    if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(dataUri)) {
-      throw Object.assign(new Error('只支持 PNG / JPG / WEBP / GIF 图片'), { status: 400 });
+    if (!/^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,/i.test(dataUri)) {
+      throw Object.assign(new Error('只支持 PNG / JPG / WEBP / GIF / AVIF 图片'), { status: 400 });
     }
     if (dataUri.length > USER_POST_MAX_IMAGE_CHARS) {
       throw Object.assign(new Error('图片过大，请压缩后再发（单张不超过 6MB）'), { status: 400 });
     }
+    const compressImage = deps.compressImage || compressDataUriToAvif;
+    const compressed = await compressImage(dataUri);
+    compressedUris.push(compressed.dataUri);
     const save = deps.saveImage || saveBase64Image;
-    const filename = `moment_user_${Date.now()}_${i + 1}.png`;
-    urls.push(save('moments', filename, dataUri));
+    const filename = `moment_user_${Date.now()}_${i + 1}${compressed.ext}`;
+    urls.push(save('moments', filename, compressed.dataUri));
   }
 
   const ins = db.prepare(
@@ -280,7 +296,7 @@ export async function publishUserMoment({ content, images = [] }, deps = {}) {
       content: text,
       prompt: '',
       images: urls,
-      imageDataUris: imgList,
+      imageDataUris: compressedUris,
     }, deps).catch(err => console.error('[momentUserPost] reply flow error:', err.message));
   });
 
@@ -289,16 +305,14 @@ export async function publishUserMoment({ content, images = [] }, deps = {}) {
 
 /**
  * 触发用户朋友圈的异步评论。
- * 图片描述异步写入 post.prompt 供后续私聊/群聊语境使用（与评论流程并行，不阻塞评论）；
- * 即时评论直接带原图 content part，不经描述中转。
+ * 先等图片描述助手返回并写入 post.prompt，评论改用文字描述，不再传原图。
  */
 export async function triggerUserPostReplies(post, deps = {}) {
   const db = getDb();
 
   const archiveUris = post.imageDataUris?.length ? post.imageDataUris : (post.images || []);
-  let archivePromise = null;
   if (!post.prompt && archiveUris.length > 0) {
-    archivePromise = archiveImageDescription(db, post.id, archiveUris, deps);
+    await archiveImageDescription(db, post.id, archiveUris, deps);
   }
 
   // 读库拿统一形状，避免角色评论逻辑再区分首条用户数据结构
@@ -308,7 +322,6 @@ export async function triggerUserPostReplies(post, deps = {}) {
     WHERE mp.id = ?
   `).get(post.id);
   if (!postRecord) return;
-  postRecord.imageDataUris = post.imageDataUris || [];
   const repliers = selectUserPostRepliers(db);
 
   for (const character of repliers) {
@@ -348,8 +361,6 @@ export async function triggerUserPostReplies(post, deps = {}) {
     const broadcastComment = deps.broadcastComment || ((c) => broadcastToUnified('new_comment', c));
     broadcastComment(payload);
   }
-  // 等描述存档完成（评论流程不阻塞等它，但函数返回前确保异步收尾）
-  if (archivePromise) await archivePromise;
 }
 
 /**

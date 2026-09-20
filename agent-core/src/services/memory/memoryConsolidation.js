@@ -391,7 +391,7 @@ export function findPortraitSuggestionConversations(db, { minImportance = 4, lim
 // 而第四路召回（实体反查）与 T1/T2 的候选发现都依赖它 —— tags 无法可靠还原实体，只能再问一次模型。
 // TTL 内已补过的记忆不再入选（模型"宁可留空"时同样记账，否则同一批每轮都会被重补 + 重嵌入）。
 // 额外带出待比较字段，供 runner 判断"是否真的需要写库"。
-export function findBackfillCandidates(db, { limit = 10, now = new Date() } = {}) {
+export function findBackfillCandidates(db, { limit = 5, now = new Date() } = {}) {
   return db.prepare(`
     SELECT mf.memory_id, mf.memory_type, mf.subject, mf.judgment, mf.reasoning, mf.tags, mf.created_at,
            mf.keywords, mf.perspectives, mf.semantic_note, mf.episodic_note, mf.importance
@@ -678,7 +678,7 @@ ${pendingLines}
 // ── T5：存量表示回填 runner ──
 
 /**
- * 每批 ≤10 条一次 LLM 调用，补齐 keywords/perspectives/semantic_note/importance 与 entities。
+ * 每批 ≤5 条一次 LLM 调用，补齐 keywords/perspectives/semantic_note/importance 与 entities。
  * 补齐 v3 检索字段置 embedding_state='stale'——index worker 的 stale 兜底会自动重嵌入，无需额外入队；
  * 实体只写 memory_entity_links，不进向量文本，所以单独补链时不置 stale（不重复付费重嵌）。
  *
@@ -687,13 +687,17 @@ ${pendingLines}
  *      updated_at，又让 index worker 用完全相同的文本重复付费嵌入；
  *   2. 无论模型是否补出字段都记账，否则这批候选每轮扫描都会被重补 + 重嵌入，永不前进。
  */
+const BACKFILL_BATCH_SIZE = 5;
+// T5 的旧记忆正文很长；10 条曾实测在 1500 tokens 处截断，导致整批 JSON 解析失败。
+const BACKFILL_LLM_OPTS = { ...LLM_OPTS, max_tokens: 3000 };
+
 export async function runBackfillTask({ candidates, llmBudgetRemaining = 0, deps = {} } = {}) {
   const chatSync = deps.chatSync;
   const db = deps.db;
   let llmCalls = 0;
   let updated = 0;
   let skipped = 0;
-  const batch = (candidates || []).slice(0, 10);
+  const batch = (candidates || []).slice(0, BACKFILL_BATCH_SIZE);
   if (batch.length === 0) return { llmCalls: 0, updated: 0, skipped: 0, linked: 0, done: true, llmFailures: 0, error: null };
   if (llmBudgetRemaining <= 0) return { llmCalls: 0, updated: 0, skipped: 0, linked: 0, done: false, llmFailures: 0, error: null };
   const listing = batch.map(m => `- ${m.memory_id} [${m.memory_type}|主体:${m.subject}] 判断：${m.judgment}｜依据：${m.reasoning || '无'}｜tags：${m.tags || '[]'}`).join('\n');
@@ -715,7 +719,7 @@ ${listing}
   llmCalls++;
   let items = [];
   try {
-    const raw = await chatSync([{ role: 'user', content: prompt }], LLM_OPTS);
+    const raw = await chatSync([{ role: 'user', content: prompt }], BACKFILL_LLM_OPTS);
     items = parseJsonObject(raw).items || [];
   } catch (error) {
     console.warn('[memory-consolidation] T5 LLM failed:', error.message);

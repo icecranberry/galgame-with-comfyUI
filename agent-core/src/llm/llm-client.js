@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { config, updateFreeEggEnabled, FREE_EGG_MODELS } from '../config.js';
+import { compressLlmImageInputs } from '../services/llmImageInput.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 
@@ -208,6 +209,7 @@ export async function chatSync(messages, opts = {}) {
   if (opts.maxRetries !== undefined && (!Number.isSafeInteger(opts.maxRetries) || opts.maxRetries < 0)) {
     throw new TypeError('chatSync maxRetries must be a nonnegative integer');
   }
+  messages = await compressLlmImageInputs(messages);
   try {
     const result = config.llm.freeEgg
       ? await _chatSyncFreeEgg(messages, opts)
@@ -487,6 +489,7 @@ async function* _chatStreamFreeEgg(messages, opts) {
  * @returns {AsyncGenerator<string>}
  */
 export async function* chatStream(messages, opts = {}) {
+  messages = await compressLlmImageInputs(messages);
   let anyYielded = false;
   try {
     if (config.llm.freeEgg) {

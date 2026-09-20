@@ -1,9 +1,10 @@
-import test from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MOMENT_SINGLE_FOCUS_RULE,
   buildMomentMotiveDirective,
   buildMomentScheduleContext,
+  buildMomentMultiImageRule,
   MOMENT_RECORD_BACKDROP_RULE,
 } from './momentForms.js';
 
@@ -35,4 +36,26 @@ test('schedule context states only the current place and activity', () => {
 test('background records remain supplementary to the synthesized main scene', () => {
   assert.match(MOMENT_RECORD_BACKDROP_RULE, /最多选取一条/);
   assert.match(MOMENT_RECORD_BACKDROP_RULE, /禁止逐条概括/);
+});
+
+test('multi-image rule asks for a continuous photo sequence with shared anchors', () => {
+  const two = buildMomentMultiImageRule(2);
+  assert.match(two, /同一段连续经历里的两帧/);
+  assert.match(two, /imagePrompt、imagePrompt2/);
+  assert.match(two, /同一组连续性锚点/);
+  assert.match(two, /第 1 张.*建立场景/);
+  assert.match(two, /第 2 张.*推进/);
+  assert.match(two, /禁止换活动/);
+});
+
+test('three-image rule keeps a complete beginning, middle, and end', () => {
+  const three = buildMomentMultiImageRule(3);
+  assert.match(three, /第 1 张.*建立场景/);
+  assert.match(three, /第 2 张.*推进/);
+  assert.match(three, /第 3 张.*收束/);
+  assert.match(three, /imagePrompt、imagePrompt2、imagePrompt3/);
+});
+
+test('single-image posts do not receive the sequence rule', () => {
+  assert.equal(buildMomentMultiImageRule(1), '');
 });

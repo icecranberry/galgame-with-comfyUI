@@ -871,3 +871,29 @@ test('migrateMemoryConsolidationSettings：用户显式关掉的 T4 不被迁移
   assert.equal(migrateMemoryConsolidationSettings(db).skipped, 'up-to-date', '幂等');
   db.close();
 });
+test('runBackfillTask：一次最多补 5 条并放宽输出预算', async () => {
+  const db = createDb();
+  const candidates = Array.from({ length: 7 }, (_, index) => ({ memory_id: `mem_batch_${index + 1}` }));
+  let prompt = '';
+  let options = null;
+  const result = await runBackfillTask({
+    candidates,
+    llmBudgetRemaining: 1,
+    deps: {
+      db,
+      chatSync: async (messages, llmOptions) => {
+        prompt = messages[0].content;
+        options = llmOptions;
+        return JSON.stringify({ items: [] });
+      },
+    },
+  });
+  for (let index = 1; index <= 5; index++) {
+    assert.ok(prompt.includes(`mem_batch_${index}`));
+  }
+  assert.ok(!prompt.includes('mem_batch_6'));
+  assert.ok(!prompt.includes('mem_batch_7'));
+  assert.equal(options.max_tokens, 3000);
+  assert.equal(result.done, true);
+  db.close();
+});

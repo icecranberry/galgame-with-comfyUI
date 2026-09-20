@@ -17,7 +17,7 @@ import { publishUserMoment } from '../services/momentUserPostService.js';
 import { handleUserComment } from '../services/momentCommentService.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 const router = Router();
 
@@ -762,18 +762,15 @@ async function generateMomentPost(character, opts = {}) {
     // 本次发几张图就要几个画面描述字段：第 1 张是 imagePrompt，之后依次 imagePrompt2 / imagePrompt3
     const imageFieldJson = imageFieldNames.map((name, i) => (i === 0
       ? `"imagePrompt":"第一张照片的英文画面描述：${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"`
-      : `"${name}":"第${i + 1}张照片的英文画面描述：同一次经历里的另一张照片，内容要求与 imagePrompt 完全一致（英文、完整独立、贴合正文）"`
+      : `"${name}":"第${i + 1}张照片的英文画面描述：同一段连续经历的第${i + 1}帧，与 imagePrompt 使用同一组连续性锚点（人物、同伴、地点、关键道具、天气光线、服装），只改变景别、角度、拍摄时机或动作阶段（英文、完整独立、贴合正文）"`
     )).join(',');
     const textShape = isSpecialMode
       ? '朋友圈正文：中文口语，第一人称，只围绕一件事或一场梦完整讲完，可以自由展开；不要写总结、感悟或祝福'
-      : '朋友圈正文：中文口语，只围绕一个瞬间或一件事，像随手打的字，可以很短、可以是半句话、可以带语气词；不要写成完整的文章、总结或感悟';
+      : '朋友圈正文：中文口语，只围绕一个瞬间或一件事';
     const jsonFmt = `输出格式（严格 JSON）：
 {"text":"${textShape}",${imageFieldJson}}`;
 
-    const multiImageRule = imageCount > 1
-      ? `- **本次要发${CHINESE_NUM[imageCount]}张照片**：${imageFieldNames.join('、')} 是同一次经历里的${CHINESE_NUM[imageCount]}张不同照片——比如一张近景一张远景、一张拍自己一张拍身旁的风景或同伴、一张抓拍一张合影。每张都要能对应上 text 写的事，画面彼此不要重复，合起来才是一条完整的朋友圈。
-- 每张照片的描述要求都与 imagePrompt 完全一致：英文、独立完整（场景、人物、动作、光线、构图都要写全），禁止写"同上""同 imagePrompt""参考第一张"这类省略。`
-      : '';
+    const multiImageRule = buildMomentMultiImageRule(imageCount);
 
     // 缓存约束：staticRules 必须整体位于 jsonFmt 之前（jsonFmt 内的天气/多人插值是前缀缓存分叉点），
     // 会随调用变化的要求一律放后面的 dynamicRules，不要与 staticRules 混排。
@@ -786,7 +783,7 @@ ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting
 - text里禁止输出'#下午茶的仪式感'类似这种tag标签
 - text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
 
-    const dynamicRules = `- text用中文（${pickedForm ? pickedForm.len : '50-200字'}），imagePrompt 用英文
+    const dynamicRules = `- text用中文（${pickedForm ? pickedForm.len : '30-80字'}），imagePrompt 用英文
 ${multiImageRule}
 ${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
 ${isSpecialMode ? '- **形态例外**：叙事长文不受上面「只写一个瞬间」「半句话」「写完就停」的限制，可以把这一件事或这场梦讲完整；但依然禁止总结、感悟、祝福和金句。' : ''}

@@ -15,7 +15,8 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt, cropPersonalityForEmotion } from './emotionEngine.js';
-import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, firstMomentImagePrompt } from './momentForms.js';
+import { extractMomentImageRequest, stripMomentImageRequest } from './momentImageRequest.js';
 import { userNickname, loadCommentHistory, isCharacterSleeping } from './momentUserPostService.js';
 
 /** 单条用户评论最多触发几个角色回复（@ 多人时截断，防止 LLM 调用失控） */
@@ -89,7 +90,6 @@ export async function generateCharacterCommentReply(character, post, historyComm
     const replyPrefix = replyTo ? `（回复 ${commentAuthorName(replyTo)}）` : '';
     return `${commentAuthorName(comment)}${replyPrefix}：${comment.content}`;
   };
-  const commentHistory = historyComments.map(formatCommentLine).filter(Boolean).join('\n');
 
   // 用户→角色关系
   let userRelMsg = '';
@@ -168,15 +168,35 @@ export async function generateCharacterCommentReply(character, post, historyComm
     latestCommentLines.push('被回复的原评论：', '---', formatCommentLine(targetComment), '---');
   }
   latestCommentLines.push(`请直接回应${userName}刚刚发出的这条最新评论；不要把朋友圈正文、配图或其他旧评论当成主要回复对象。`);
+  // 最新评论与被回复的原评论已单独高亮，从对话历史里排除，避免同一条出现两次
+  const highlightedIds = new Set([latestComment?.id, targetComment?.id].filter(id => id != null));
+  const commentHistory = historyComments
+    .filter(c => !highlightedIds.has(c.id))
+    .map(formatCommentLine)
+    .filter(Boolean)
+    .join('\n');
   const mentionNote = opts.isMentioned ? `\n- ${userName}在评论里 @ 了你，先回应 ta 的这条评论。` : '';
   const threadNote = opts.isThreadReply ? `\n- 这条评论是楼中楼里的回复，回应时照顾好楼层里的上下文。` : '';
   const momentRules = getCoreDialogueRules({ userName, identityAnchor: false });
 
-  const imageNote = buildMomentImagePromptNote(post.prompt);
+  // 配图信息独立标签块；用户帖的 AI 配图需要身份隔离，防止把图中人物当成发帖人
+  const imageRequest = extractMomentImageRequest(post.content);
+  const visibleContent = stripMomentImageRequest(post.content || '');
+  const imageDescription = firstMomentImagePrompt(post.prompt);
+  const imageLines = [];
+  if (imageDescription || imageRequest) {
+    imageLines.push('<post_image>');
+    if (imageDescription) imageLines.push(`画面内容（图片观察助手识别）：${imageDescription}`);
+    if (isUserPost && imageRequest) {
+      imageLines.push(`来源：AI 根据配图需求生成的图片，不是${postAuthorName}的真实照片；图中人物不是${postAuthorName}，${postAuthorName}只是分享这张图的人。`);
+    }
+    imageLines.push('</post_image>');
+  }
+  const imageNote = imageLines.join('\n');
   const contextTask = isPostAuthor
     ? `你在朋友圈发了：
 ---
-${post.content}
+${visibleContent}
 ---${imageNote}
 
 请以角色的身份自然回复评论区的最新评论。${mentionNote}${threadNote}
@@ -195,7 +215,7 @@ ${momentRules}`
         }
         return `${postAuthorName}的朋友圈动态：
 ---
-${post.content}
+${visibleContent}
 ---${imageNote}
 ${posterSection}
 ${userName}在评论区${opts.isThreadReply ? '楼里回复' : '评论'}${opts.isMentioned ? '并 @ 了你' : ''}。
@@ -220,15 +240,15 @@ ${MOMENT_COMMENT_RULES}
 
   msgs.push({ role: 'system', content: contextTask });
 
+  // 用户帖 AI 配图的防误认提醒放末位 user 消息（末位指令权重最高）
+  const replyImageNote = isUserPost && imageRequest
+    ? `\n（注意：配图里的人物不是${postAuthorName}，${postAuthorName}只是发帖分享这张图的人。请把图中角色当作图里的其他人来回应，不要把图中人物当成${postAuthorName}。）`
+    : '';
+
   const userMsg = `关于${userName}：
 ${userPersona}
-
-评论区目前的对话：
----
-${commentHistory}
----
-
-回复这条评论：`;
+${commentHistory ? `\n\n评论区目前的对话：\n---\n${commentHistory}\n---` : ''}
+回复这条评论：${replyImageNote}`;
   msgs.push({ role: 'user', content: userMsg });
 
   const chat = opts.deps?.chatSync || chatSync;

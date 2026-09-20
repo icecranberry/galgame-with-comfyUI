@@ -10,6 +10,8 @@
 // 与网页朋友圈 DOM 完全独立：纯 Canvas2D 绘制，坐标全部以 u（= W / 1080）为基准，
 // 之后支持 1440×2560 只需把 options.width 传 1440。与网页共用同一份 post 数据，布局独立。
 
+import { stripMomentImageRequest } from './momentImageRequest.js'
+
 const FONT_STACK = '"HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif'
 
 export const MOMENT_SHARE_STYLES = [
@@ -559,7 +561,7 @@ async function buildModel(post) {
     name: post.display_name || '邻友',
     time: formatPosterTime(post.created_at),
     date: formatPosterDate(post.created_at),
-    content: String(post.content || '').trim(),
+    content: stripMomentImageRequest(post.content || '').trim(),
     images,
     avatarImg,
     dominant: images[0]?.img ? extractDominantColor(images[0].img) : null,

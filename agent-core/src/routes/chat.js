@@ -18,7 +18,7 @@ import {
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
-import { buildCharacterPersona, buildImageCrossRefInfo } from '../services/characterPersona.js';
+import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
@@ -35,6 +35,7 @@ import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt 
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCoreDialogueRules, getChatRhythmRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
+import { getUserName, matchUser } from '../services/userSearch.js';
 import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
 import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
 import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
@@ -1770,22 +1771,27 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   const crossMatches = matchAll(scanText, character.id);
   let crossRefCharIdsForImage = [];
   let crossRefImageMsgs = [];
+  const crossBlocks = [];
   if (crossMatches.length > 0) {
     const crossChars = crossMatches.map(m =>
       db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
     ).filter(Boolean);
 
-    const crossBlocks = crossChars.map(c => {
-      const info = buildImageCrossRefInfo(c);
-      return `[${c.display_name}]\n${info}`;
-    }).join('\n\n');
-
-    crossRefImageMsgs.push({
-      role: 'system',
-      content: `【画面交叉参考】以下角色的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks}`
-    });
+    crossBlocks.push(...crossChars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
 
     crossRefCharIdsForImage = crossChars.map(c => c.id);
+  }
+
+  // 文本里提到用户本人时同样注入其资料（用户不是角色：没有 id、没有 LoRA）
+  if (matchUser(scanText)) {
+    crossBlocks.push(`[${getUserName()}]\n${buildUserImageCrossRefInfo()}`);
+  }
+
+  if (crossBlocks.length > 0) {
+    crossRefImageMsgs.push({
+      role: 'system',
+      content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`
+    });
   }
 
   const formatGuide = imagePromptRule?.rule_content || '';

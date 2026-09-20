@@ -50,6 +50,16 @@
     <div class="composer-actions">
       <div class="composer-hint">今天~有什么想要分享？</div>
       <div class="composer-btns">
+        <linshe-button
+          variant="chip"
+          size="sm"
+          :active="hasAutoImagePrompt"
+          :disabled="sending || images.length >= MAX_IMAGES"
+          title="发布时自动生成配图"
+          @click="showAutoImageModal = true"
+        >
+自动配图
+        </linshe-button>
         <div
           v-if="images.length < MAX_IMAGES"
           class="composer-attach"
@@ -75,11 +85,35 @@
       </div>
     </div>
 
+    <linshe-modal v-model="showAutoImageModal" title="自动配图">
+      <label class="auto-image-label" for="auto-image-prompt">图片需求</label>
+      <linshe-input
+        id="auto-image-prompt"
+        v-model="autoImagePrompt"
+        type="textarea"
+        rows="6"
+        maxlength="2000"
+        placeholder="描述想要生成的画面..."
+        :disabled="sending"
+      />
+      <template #footer>
+        <linshe-button
+          variant="ghost"
+          tone="danger"
+          :disabled="!hasAutoImagePrompt || sending"
+          @click="clearAutoImagePrompt"
+        >
+          清除
+        </linshe-button>
+        <linshe-button variant="primary" @click="showAutoImageModal = false">完成</linshe-button>
+      </template>
+    </linshe-modal>
+
     <input
       ref="fileInput"
       type="file"
       accept="image/*"
-      multiple
+      :multiple="allowMultiple"
       class="composer-file-input"
       @change="onFiles"
     />
@@ -93,6 +127,9 @@ import { onEvent } from '../stores/unifiedStream.js'
 import { userAvatar } from '../userConfig.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import LinsheModal from './ui/LinsheModal.vue'
+import { testStyle } from '../api/index.js'
+import { appendMomentImageRequest } from '../utils/momentImageRequest.js'
 
 const MAX_IMAGES = 3
 // 超过该大小的原图统一压到最长边 1600 的 JPEG（base64 传输体积 + GIF 动图例外保留）
@@ -100,15 +137,24 @@ const COMPRESS_THRESHOLD = 1.5 * 1024 * 1024
 
 const moments = useMomentsStore()
 const toastFn = inject('toast', null)
+const isMobile = inject('isMobile', null)
 
 const text = ref('')
 const images = ref([])
 const sending = ref(false)
 const fileInput = ref(null)
+const allowMultiple = ref(true)
 const avatarFailed = ref(false)
+const autoImagePrompt = ref('')
+const showAutoImageModal = ref(false)
 let unsubscribeVisionError = null
 
 onMounted(() => {
+  // 手机相册多选返回路径不稳定（部分 ROM 会回 RESULT_CANCELED，选完不派发 change），
+  // 移动端与安卓壳内一律退回单选（壳内多选解析失败时 WebView 连 change 都不会触发）
+  if (isMobile?.value || (typeof window !== 'undefined' && !!window.AndroidBridge)) {
+    allowMultiple.value = false
+  }
   unsubscribeVisionError = onEvent('user_moment_vision_error', (data) => {
     if (!data?.message) return
     toastFn?.(data.message, 'error', 6000, data.description)
@@ -119,7 +165,8 @@ onUnmounted(() => {
   unsubscribeVisionError?.()
 })
 
-const canSend = computed(() => !sending.value && (text.value.trim() || images.value.length > 0))
+const canSend = computed(() => !sending.value && (text.value.trim() || images.value.length > 0 || hasAutoImagePrompt.value))
+const hasAutoImagePrompt = computed(() => autoImagePrompt.value.trim().length > 0)
 const showAvatar = computed(() => !!userAvatar.value && !avatarFailed.value)
 const avatarStyle = computed(() => (
   showAvatar.value
@@ -131,9 +178,24 @@ function removeImage(i) {
   images.value.splice(i, 1)
 }
 
+function clearAutoImagePrompt() {
+  autoImagePrompt.value = ''
+  showAutoImageModal.value = false
+}
+
+// 部分安卓 ROM 回传的 MIME 是 application/octet-stream 或空串，这里用扩展名兜底判断
+const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i
+function isImageFile(file) {
+  return !!file && (file.type?.startsWith('image/') || IMAGE_EXT_RE.test(file.name || ''))
+}
+
 function addFiles(list) {
-  const files = Array.from(list || []).filter(f => f.type.startsWith('image/'))
-  if (!files.length) return
+  const all = Array.from(list || [])
+  const files = all.filter(isImageFile)
+  if (!files.length) {
+    if (all.length) toastFn?.('没有读取到图片，请重新选择', 'error')
+    return
+  }
   for (const file of files) {
     if (images.value.length >= MAX_IMAGES) {
       toastFn?.(`最多配 ${MAX_IMAGES} 张图片`, 'error')
@@ -156,7 +218,7 @@ function onFiles(e) {
 function onPaste(e) {
   const files = e.clipboardData?.files
   if (files && files.length) {
-    const hasImage = Array.from(files).some(f => f.type.startsWith('image/'))
+    const hasImage = Array.from(files).some(isImageFile)
     if (hasImage) {
       e.preventDefault()
       addFiles(files)
@@ -194,14 +256,35 @@ async function normalizeImage(file) {
   return canvas.toDataURL('image/jpeg', 0.88)
 }
 
+async function generateAutoImage() {
+  const desc = autoImagePrompt.value.trim()
+  if (!desc) return null
+  if (images.value.length >= MAX_IMAGES) throw new Error(`最多配 ${MAX_IMAGES} 张图片，无法自动配图`)
+
+  // 与图片实验室的自由画面描述链路保持一致，使用当前朋友圈画师串与分辨率配置。
+  const result = await testStyle({ mode: 'moments', sceneDesc: desc })
+  if (!result?.success || !result.images?.length) {
+    throw new Error(result?.error || '自动配图生成失败')
+  }
+  const dataUrl = result.images[0]?.base64
+  if (!dataUrl) throw new Error('自动配图生成失败')
+  return dataUrl
+}
+
 async function send() {
   const content = text.value.trim()
   if (!canSend.value) return
   sending.value = true
   try {
-    await moments.createUserPost({ content, images: [...images.value] })
+    const autoImage = await generateAutoImage()
+    const payloadImages = [...images.value]
+    if (autoImage) payloadImages.push(autoImage)
+
+    const storedContent = appendMomentImageRequest(content, autoImagePrompt.value.trim())
+    await moments.createUserPost({ content: storedContent, images: payloadImages })
     text.value = ''
     images.value = []
+    autoImagePrompt.value = ''
   } catch (err) {
     console.error('[UserMomentComposer] publish error:', err)
     toastFn?.(err.message || '发布失败', 'error')
@@ -223,6 +306,11 @@ async function send() {
 }
 @media (max-width: 767px) {
   .user-composer { padding: 12px 15px; }
+}
+
+@media (max-width: 480px) {
+  .composer-actions { flex-wrap: wrap; }
+  .composer-hint { flex-basis: 100%; }
 }
 
 .composer-row {
@@ -317,6 +405,14 @@ async function send() {
   user-select: none;
 }
 .composer-attach:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+
+.auto-image-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
 .composer-file-input { display: none; }
 </style>

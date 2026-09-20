@@ -5,11 +5,13 @@
  * 的私聊中注入，且发帖时间不超过两天，避免旧帖长期污染对话人格。
  */
 
+import { stripMomentImageRequest } from './momentImageRequest.js';
+
 export const USER_MOMENT_CONTEXT_DAYS = 2;
 export const GROUP_USER_MOMENT_CONTEXT_DAYS = 1;
 
 function formatUserMomentLine(index, moment, comments, characterName, userName) {
-  const content = moment.content?.trim() || '';
+  const content = stripMomentImageRequest(moment.content);
   const prompt = moment.prompt?.trim() || '';
   const body = prompt ? `${content}（配图：${prompt}）` : (content || '（图片动态）');
   let line = `${index + 1}. [${moment.created_at}] ${body}`;
@@ -128,7 +130,7 @@ export function buildGroupUserMomentContext(db, {
     LIMIT ?
   `).all(userMomentDays, ...memberIds, userLimit);
   const lines = posts.map((post) => {
-    const content = post.content?.trim() || '（图片动态）';
+    const content = stripMomentImageRequest(post.content) || '（图片动态）';
     return `「${userName}」发了朋友圈：「${content.slice(0, 100)}」`;
   });
   return { posts, lines };
