@@ -28,6 +28,14 @@ test('群聊用户朋友圈按群成员评论和一天窗口注入，且不包�
     `INSERT INTO moment_comments (post_id, author_type, author_id, content) VALUES (?, 'character', ?, '群员评论')`
   ).run(Number(eligible.lastInsertRowid), memberA);
 
+  const olderEligible = db.prepare(`
+    INSERT INTO moment_posts (character_id, npc_id, content, status, created_at)
+    VALUES (NULL, NULL, '较旧的群聊动态', 'done', datetime('now', '-3 hours'))
+  `).run();
+  db.prepare(
+    `INSERT INTO moment_comments (post_id, author_type, author_id, content) VALUES (?, 'character', ?, '旧评论')`
+  ).run(Number(olderEligible.lastInsertRowid), memberB);
+
   const stale = db.prepare(`
     INSERT INTO moment_posts (character_id, npc_id, content, status, created_at)
     VALUES (NULL, NULL, '超过一天的动态', 'done', datetime('now', '-25 hours'))
@@ -54,6 +62,7 @@ test('群聊用户朋友圈按群成员评论和一天窗口注入，且不包�
   assert.deepEqual(context.lines, ['「测试员」发了朋友圈：「群聊里的新鲜动态」']);
   assert.ok(!context.lines.join('\n').includes('群员评论'));
   assert.ok(!context.lines.join('\n').includes('超过一天的动态'));
+  assert.ok(!context.lines.join('\n').includes('较旧的群聊动态'));
   assert.ok(!context.lines.join('\n').includes('只有群外角色评论的动态'));
 
   assert.deepEqual(

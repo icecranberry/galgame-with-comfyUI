@@ -296,11 +296,23 @@ test('triggerUserPostReplies 原图识别一次，稳定注入全部评论提示
     delay: async () => {},
   });
 
+  // 描述存档仍会被调用一次，结果写入 post.prompt 供私聊/群聊消费
   assert.equal(recognitionMsgs.length, 1);
   assert.deepEqual(recognitionMsgs[0].images, [dataUri]);
-  assert.equal(seenMsgs.length, 1);
-  assert.ok(seenMsgs[0].some(m => m.content?.includes('餐桌上有两杯咖啡和一块蛋糕')));
   assert.equal(db.prepare('SELECT prompt FROM moment_posts WHERE id = ?').get(post.id).prompt, '第1张：餐桌上有两杯咖啡和一块蛋糕');
+
+  // 即时评论用多模态原图，不经过描述中转
+  assert.equal(seenMsgs.length, 1);
+  const userMsg = seenMsgs[0].find(m => m.role === 'user');
+  assert.ok(Array.isArray(userMsg.content), '有原图时 user 消息应为多模态数组');
+  const imagePart = userMsg.content.find(p => p.type === 'image_url');
+  assert.ok(imagePart, '评论 prompt 应附带原图 content part');
+  assert.equal(imagePart.image_url.url, dataUri);
+  const textPart = userMsg.content.find(p => p.type === 'text');
+  assert.ok(textPart.text.includes('原始配图'), '应有方向性衔接说明');
+  // 描述不应作为文本注入评论 prompt（不走 buildMomentImagePromptNote 中转）
+  const flat = seenMsgs.map(m => Array.isArray(m.content) ? m.content.map(p => p.text || '').join('\n') : m.content).join('\n');
+  assert.ok(!flat.includes('餐桌上有两杯咖啡和一块蛋糕'), '即时评论不应注入描述文本');
 });
 
 test('generateUserPostComment 用户画像和动态先于角色人设，且不带评论区历史', async t => {
@@ -412,6 +424,30 @@ test('generateUserPostComment 帖子带 prompt 时注入首图画面描述', asy
   const flat = msgs.map(m => m.map(x => x.content).join('\n')).join('\n');
   assert.ok(flat.includes('a lively night market'), '注入第一张的画面描述');
   assert.ok(!flat.includes('second photo'), '只带第一张，不带后面的');
+});
+
+test('generateUserPostComment 带原图时用多模态格式，不注入描述文本', async t => {
+  t.after(() => closeDb());
+  const db = getDb();
+  const id = seedCharacter(db, { name: 'mm1', display_name: '多模态', base_prompt: '多模态人设' });
+  const dataUri = 'data:image/png;base64,' + Buffer.from('photo-data').toString('base64');
+
+  const msgs = [];
+  await generateUserPostComment(
+    db.prepare('SELECT * FROM characters WHERE id = ?').get(id),
+    { content: '今天天空真美', prompt: '', imageDataUris: [dataUri] },
+    [],
+    { chatSync: async (m) => { msgs.push(m); return '好看'; } }
+  );
+
+  const userMsg = msgs.flat().find(m => m.role === 'user');
+  assert.ok(Array.isArray(userMsg.content), '有原图时 user 消息应为多模态数组');
+  const imgPart = userMsg.content.find(p => p.type === 'image_url');
+  assert.equal(imgPart?.image_url?.url, dataUri);
+  const textPart = userMsg.content.find(p => p.type === 'text');
+  assert.ok(textPart.text.includes('原始配图'), '应有衔接说明');
+  const allText = msgs.flat().map(m => Array.isArray(m.content) ? m.content.map(p => p.text || '').join('\n') : m.content).join('\n');
+  assert.ok(!allText.includes('配图的画面描述'), '有原图时不应注入描述中转文本');
 });
 
 test('generateUserPostComment 不把评论区历史塞进用户帖首评提示词', async t => {

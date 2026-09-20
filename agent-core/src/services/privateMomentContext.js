@@ -32,6 +32,7 @@ export function buildPrivateMomentContext(db, {
   characterName,
   userName,
   ownLimit = 2,
+  userLimit = 2,
   userMomentDays = USER_MOMENT_CONTEXT_DAYS,
 } = {}) {
   const ownMoments = db.prepare(`
@@ -49,7 +50,8 @@ export function buildPrivateMomentContext(db, {
       AND mp.created_at >= datetime('now', '-' || ? || ' days')
       AND mc.author_type = 'character' AND mc.author_id = ?
     ORDER BY mp.created_at DESC
-  `).all(userMomentDays, characterId);
+    LIMIT ?
+  `).all(userMomentDays, characterId, userLimit);
 
   if (ownMoments.length === 0 && userMoments.length === 0) return null;
 
@@ -107,6 +109,7 @@ export function buildGroupUserMomentContext(db, {
   memberIds = [],
   userName = '用户',
   userMomentDays = GROUP_USER_MOMENT_CONTEXT_DAYS,
+  userLimit = 1,
 } = {}) {
   if (memberIds.length === 0) return { posts: [], lines: [] };
   const placeholders = memberIds.map(() => '?').join(', ');
@@ -122,7 +125,8 @@ export function buildGroupUserMomentContext(db, {
           AND mc.author_type = 'character' AND mc.author_id IN (${placeholders})
       )
     ORDER BY mp.created_at DESC
-  `).all(userMomentDays, ...memberIds);
+    LIMIT ?
+  `).all(userMomentDays, ...memberIds, userLimit);
   const lines = posts.map((post) => {
     const content = post.content?.trim() || '（图片动态）';
     return `「${userName}」发了朋友圈：「${content.slice(0, 100)}」`;

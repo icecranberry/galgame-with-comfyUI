@@ -165,9 +165,11 @@ export async function generateUserPostComment(character, post, historyComments, 
     '</user_moment_comment_rules>',
   ].join('\n\n');
 
+  const hasOriginalImages = (post.imageDataUris || []).filter(Boolean).length > 0;
+  const imageNote = hasOriginalImages ? '' : buildMomentImagePromptNote(post.prompt);
   const userPostContext = [
     `关于${userName}：\n${buildUserPersona()}`,
-    `${userName}刚刚在朋友圈发了一条动态：\n---\n${post.content || ''}\n---${buildMomentImagePromptNote(post.prompt)}`,
+    `${userName}刚刚在朋友圈发了一条动态：\n---\n${post.content || ''}\n---${imageNote}`,
   ].join('\n\n');
 
   // 规则先于动态和人设；仅用户资料/动态合并成一个 system，保证高缓存前缀。
@@ -190,7 +192,22 @@ export async function generateUserPostComment(character, post, historyComments, 
   msgs.push({ role: 'system', content: userPostContext });
   msgs.push({ role: 'system', content: character.base_prompt || '' });
   if (relationContext) msgs.push({ role: 'system', content: relationContext });
-  msgs.push({ role: 'user', content: task });
+  const imageDataUris = (post.imageDataUris || []).filter(Boolean);
+  if (imageDataUris.length > 0) {
+    const imageParts = imageDataUris.map(uri => ({
+      type: 'image_url',
+      image_url: { url: String(uri) },
+    }));
+    msgs.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: `${task}\n（下面附的是这条动态的原始配图，请直接看图，结合正文和角色关系去评论。）` },
+        ...imageParts,
+      ],
+    });
+  } else {
+    msgs.push({ role: 'user', content: task });
+  }
 
   const chat = deps.chatSync || chatSync;
   const result = await chat(msgs, { temperature: 0.7, max_tokens: 128, label: '用户朋友圈评论' });
@@ -272,30 +289,16 @@ export async function publishUserMoment({ content, images = [] }, deps = {}) {
 
 /**
  * 触发用户朋友圈的异步评论。
- * 图片只识别一次；识别结果写入 post.prompt，供后续每个评论角色复用。
+ * 图片描述异步写入 post.prompt 供后续私聊/群聊语境使用（与评论流程并行，不阻塞评论）；
+ * 即时评论直接带原图 content part，不经描述中转。
  */
 export async function triggerUserPostReplies(post, deps = {}) {
   const db = getDb();
 
-  let prompt = post.prompt || '';
-  if (!prompt && (post.images || []).length > 0) {
-    try {
-      const describeImages = deps.describeImages || describeUserMomentImages;
-      prompt = await describeImages(post.imageDataUris?.length ? post.imageDataUris : post.images, deps);
-      if (!prompt) throw new Error('model returned no image description');
-      db.prepare('UPDATE moment_posts SET prompt = ? WHERE id = ?').run(prompt, post.id);
-    } catch (err) {
-      const visionUnsupported = err.message === 'model returned no image description' || isVisionUnsupportedError(err);
-      const payload = {
-        post_id: post.id,
-        vision_unsupported: visionUnsupported,
-        message: visionUnsupported ? '当前模型不能识图' : '图片识别失败',
-        description: visionUnsupported ? '请更换支持图片输入的模型' : (err.message || '请检查模型配置'),
-      };
-      const broadcastVisionError = deps.broadcastVisionError || ((data) => broadcastToUnified('user_moment_vision_error', data));
-      broadcastVisionError(payload);
-      console.warn('[momentUserPost] image recognition failed:', err.message);
-    }
+  const archiveUris = post.imageDataUris?.length ? post.imageDataUris : (post.images || []);
+  let archivePromise = null;
+  if (!post.prompt && archiveUris.length > 0) {
+    archivePromise = archiveImageDescription(db, post.id, archiveUris, deps);
   }
 
   // 读库拿统一形状，避免角色评论逻辑再区分首条用户数据结构
@@ -305,8 +308,7 @@ export async function triggerUserPostReplies(post, deps = {}) {
     WHERE mp.id = ?
   `).get(post.id);
   if (!postRecord) return;
-
-  postRecord.prompt = prompt;
+  postRecord.imageDataUris = post.imageDataUris || [];
   const repliers = selectUserPostRepliers(db);
 
   for (const character of repliers) {
@@ -345,6 +347,32 @@ export async function triggerUserPostReplies(post, deps = {}) {
     };
     const broadcastComment = deps.broadcastComment || ((c) => broadcastToUnified('new_comment', c));
     broadcastComment(payload);
+  }
+  // 等描述存档完成（评论流程不阻塞等它，但函数返回前确保异步收尾）
+  if (archivePromise) await archivePromise;
+}
+
+/**
+ * 异步生成图片描述并写入 post.prompt，供后续私聊/群聊的 recent_moments 语境消费。
+ * 失败时广播 vision 错误但不阻塞评论流程。
+ */
+async function archiveImageDescription(db, postId, images, deps = {}) {
+  try {
+    const describeImages = deps.describeImages || describeUserMomentImages;
+    const prompt = await describeImages(images, deps);
+    if (!prompt) throw new Error('model returned no image description');
+    db.prepare('UPDATE moment_posts SET prompt = ? WHERE id = ?').run(prompt, postId);
+  } catch (err) {
+    const visionUnsupported = err.message === 'model returned no image description' || isVisionUnsupportedError(err);
+    const payload = {
+      post_id: postId,
+      vision_unsupported: visionUnsupported,
+      message: visionUnsupported ? '当前模型不能识图' : '图片识别失败',
+      description: visionUnsupported ? '请更换支持图片输入的模型' : (err.message || '请检查模型配置'),
+    };
+    const broadcastVisionError = deps.broadcastVisionError || ((data) => broadcastToUnified('user_moment_vision_error', data));
+    broadcastVisionError(payload);
+    console.warn('[momentUserPost] image recognition failed:', err.message);
   }
 }
 function isVisionUnsupportedError(err) {

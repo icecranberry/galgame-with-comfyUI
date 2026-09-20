@@ -44,6 +44,18 @@ test('私聊朋友圈与信件语料按双方参与和时间窗口注入', async
   db.prepare(
     `INSERT INTO moment_comments (post_id, author_type, author_id, content) VALUES (?, 'character', ?, '海水真蓝')`
   ).run(Number(eligibleUserPost.lastInsertRowid), char2);
+  for (const [content, age] of [
+    ['九十分钟前的动态', '-90 minutes'],
+    ['更早的动态', '-110 minutes'],
+  ]) {
+    const post = db.prepare(`
+      INSERT INTO moment_posts (character_id, npc_id, content, status, created_at)
+      VALUES (NULL, NULL, ?, 'done', datetime('now', ?))
+    `).run(content, age);
+    db.prepare(
+      `INSERT INTO moment_comments (post_id, author_type, author_id, content) VALUES (?, 'character', ?, '路过')`
+    ).run(Number(post.lastInsertRowid), char1);
+  }
 
   const oldUserPost = db.prepare(`
     INSERT INTO moment_posts (character_id, npc_id, content, status, created_at)
@@ -72,6 +84,8 @@ test('私聊朋友圈与信件语料按双方参与和时间窗口注入', async
   assert.ok(char1Block.includes('用户评论'));
   assert.ok(char1Block.indexOf('林一最近发了朋友圈：') < char1Block.indexOf('测试员最近发的朋友圈（你评论过）：'));
   assert.ok(char1Block.includes('昨天去了海边（配图：A quiet beach at sunset.）'));
+  assert.ok(char1Block.includes('九十分钟前的动态'));
+  assert.ok(!char1Block.includes('更早的动态'));
   assert.ok(char1Block.includes('双方回复：'));
   assert.ok(char1Block.includes('林一：海好美'));
   assert.ok(char1Block.includes('测试员：真的很治愈'));
