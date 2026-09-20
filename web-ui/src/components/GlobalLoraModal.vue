@@ -133,11 +133,13 @@ const sceneOptions = [
   { value: 'portrait', label: '立绘' },
   { value: 'moments', label: '朋友圈' },
   { value: 'events', label: '奇遇' },
+  { value: 'sticker', label: '表情包' },
   { value: 'mailbox', label: '信件' },
   { value: 'schedule', label: '日程' },
 ]
 
-const defaultScenes = () => sceneOptions.map(s => s.value)
+// 表情包是后补作用范围；新增 LoRA 默认只勾选既有七类，显式打开后才生效。
+const defaultScenes = () => sceneOptions.filter(s => s.value !== 'sticker').map(s => s.value)
 
 const lorasFiles = ref([])
 const activeLoraFileIdx = ref(null)

@@ -13,6 +13,7 @@ const { filterGlobalLoras } = await import('../src/services/imageSkill.js');
 const LEGACY_FIVE = ['chat', 'moments', 'events', 'mailbox', 'schedule'];
 const LEGACY_SIX = [...LEGACY_FIVE, 'group'];
 const CURRENT_SEVEN = [...LEGACY_FIVE, 'group', 'portrait'];
+const SCENES_WITH_STICKER = [...CURRENT_SEVEN, 'sticker'];
 
 test('存量全局 LoRA 恰好是旧五项场景时补上 group 与 portrait', () => {
   const out = migrateGlobalLoraScenes([
@@ -113,4 +114,15 @@ test('filterGlobalLoras: 关闭的 LoRA 与空路径始终跳过；无场景不�
     { path: 'legacy-only.safetensors', weight: 1, enabled: true, scenes: [...LEGACY_FIVE] },
   ], undefined);
   assert.deepEqual(noScene.map(l => l.path), ['legacy-only.safetensors']);
+});
+
+test('filterGlobalLoras: sticker scene only uses LoRAs explicitly enabled for stickers', () => {
+  const base = { weight: 1, enabled: true };
+  const out = filterGlobalLoras([
+    { ...base, path: 'sticker-ok.safetensors', scenes: SCENES_WITH_STICKER },
+    { ...base, path: 'default-off.safetensors', scenes: [...CURRENT_SEVEN] },
+    { ...base, path: 'chat-only.safetensors', scenes: ['chat'] },
+  ], 'sticker');
+
+  assert.deepEqual(out.map(l => l.path), ['sticker-ok.safetensors']);
 });
