@@ -50,7 +50,7 @@
         >
           <div
             class="filter-avatar filter-all"
-            :class="{ active: moments.filterCharacterId === null }"
+            :class="{ active: moments.filterCharacterId === null && !moments.filterUser }"
             @click="moments.setFilter(null)"
           >全部</div>
           <!-- 赞过筛选 -->
@@ -90,6 +90,7 @@
 
       <!-- 加载更多 -->
       <div v-if="moments.loading" class="load-more">加载中...</div>
+      <div v-else-if="moments.filterUser && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— 还没有发过朋友圈 —</div>
       <div v-else-if="moments.filterLiked && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— 还没有赞过的帖子 —</div>
       <div v-else-if="moments.filterCharacterId !== null && moments.filteredPosts.length === 0 && !moments.loading" class="load-more">— ta还没有发朋友圈 —</div>
       <div v-else-if="!moments.hasMore && moments.posts.length > 0" class="load-more">— 没有更多了 —</div>

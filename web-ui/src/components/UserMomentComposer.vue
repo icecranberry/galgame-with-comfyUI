@@ -1,7 +1,19 @@
 <template>
   <div class="user-composer" @paste.capture="onPaste">
     <div class="composer-row">
-      <div class="composer-avatar" :class="{ 'is-user': true }" :style="avatarStyle">
+      <div
+        class="composer-avatar is-user"
+        :class="{ 'is-filter-active': moments.filterUser }"
+        :style="avatarStyle"
+        role="button"
+        tabindex="0"
+        aria-label="只看我的朋友圈"
+        :aria-pressed="moments.filterUser ? 'true' : 'false'"
+        title="只看我的朋友圈"
+        @click="moments.toggleFilterUser()"
+        @keydown.enter.prevent="moments.toggleFilterUser()"
+        @keydown.space.prevent="moments.toggleFilterUser()"
+      >
         <img v-if="showAvatar" :src="userAvatar" alt="" @error="avatarFailed = true" />
         <span v-else>我</span>
       </div>
@@ -327,7 +339,19 @@ async function send() {
   overflow: hidden;
   user-select: none;
   box-shadow: 0 0 0 1.5px rgba(var(--accent-rgb), 0.35);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
+.composer-avatar:hover { transform: scale(1.06); filter: brightness(1.06); }
+.composer-avatar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.composer-avatar.is-filter-active {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 2.5px var(--accent), 0 0 0 6px rgba(var(--accent-rgb), 0.22);
+}
+.composer-avatar.is-filter-active:hover { transform: scale(1.1); }
 .composer-avatar img {
   width: 100%; height: 100%;
   object-fit: cover;

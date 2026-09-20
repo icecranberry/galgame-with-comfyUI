@@ -12,6 +12,7 @@ export const useMomentsStore = defineStore('moments', () => {
   const page = ref(0)             // 当前渲染到第几批（0-based）
   const filterCharacterId = ref(null)  // null = 全部
   const filterLiked = ref(false)        // 是否只显示赞过的
+  const filterUser = ref(false)         // 是否只显示「我」发的（与角色筛选互斥）
 
   // ── 红点通知状态 ──
   const newPostCount = ref(0)
@@ -34,6 +35,10 @@ export const useMomentsStore = defineStore('moments', () => {
     let result = posts.value
     if (filterCharacterId.value !== null) {
       result = result.filter(p => authorOf(p) === filterCharacterId.value)
+    }
+    if (filterUser.value) {
+      // author_type 由后端返回；旧数据缺该字段时按「无角色 / 无镇民」兜底判定
+      result = result.filter(p => (p.author_type ? p.author_type === 'user' : authorOf(p) === null))
     }
     if (filterLiked.value) {
       result = result.filter(p => p.liked)
@@ -97,6 +102,7 @@ export const useMomentsStore = defineStore('moments', () => {
   // 设置筛选角色（null = 全部）
   function setFilter(id) {
     filterCharacterId.value = id
+    filterUser.value = false
     page.value = 1
   }
 
@@ -106,10 +112,18 @@ export const useMomentsStore = defineStore('moments', () => {
     page.value = 1
   }
 
+  // 切换「我发的」筛选（与角色筛选互斥，避免出现空交集）
+  function toggleFilterUser() {
+    filterUser.value = !filterUser.value
+    filterCharacterId.value = null
+    page.value = 1
+  }
+
   // 重置所有筛选条件（进入页面时调用）
   function resetFilters() {
     filterCharacterId.value = null
     filterLiked.value = false
+    filterUser.value = false
     page.value = 1
   }
 
@@ -260,8 +274,8 @@ export const useMomentsStore = defineStore('moments', () => {
     newPostCount.value = 0
   }
 
-  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
+  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filterUser, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
-    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, createUserPost, updatePost, deletePost,
+    loadPosts, setFilter, toggleFilterLiked, toggleFilterUser, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, createUserPost, updatePost, deletePost,
     connectSSE, disconnectSSE, markSeen, refreshUnreadCount }
 })
