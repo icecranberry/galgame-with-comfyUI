@@ -73,6 +73,7 @@ function _connect() {
     event_urgency:     d => _dispatch('event_urgency', d),
     new_post:          d => _dispatch('new_post', d),
     new_comment:       d => _dispatch('new_comment', d),
+    user_moment_vision_error: d => _dispatch('user_moment_vision_error', d),
     proactive_message: d => _dispatch('proactive_message', d),
     reply_processing:  d => _dispatch('reply_processing', d),
     reply_ready:       d => _dispatch('reply_ready', d),

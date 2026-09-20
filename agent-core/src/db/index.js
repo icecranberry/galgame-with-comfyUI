@@ -233,7 +233,8 @@ function initSchema(db) {
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
       error_message TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      CHECK ((character_id IS NULL) != (npc_id IS NULL))
+      -- 作者三选一：角色 / 镇民 / 用户（用户发帖时两者均为 NULL，见 migrateMomentPostUserAuthors）
+      CHECK (character_id IS NULL OR npc_id IS NULL)
     );
 
     -- 朋友圈评论表
@@ -1321,6 +1322,51 @@ export function migrateMomentPostNpcAuthors(db) {
   }
 }
 
+/** 用户朋友圈：moment_posts 允许「用户作者」（character_id 与 npc_id 同时为 NULL）。
+ * 老库/上一版建表带严格 CHECK（恰一作者），需整体重建为「至多一作者」。 */
+export function migrateMomentPostUserAuthors(db) {
+  const row = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'moment_posts'`
+  ).get();
+  if (!row?.sql) return;
+  if (!row.sql.includes('(character_id IS NULL) != (npc_id IS NULL)')) return;
+
+  const rebuild = () => {
+    db.exec(`
+      CREATE TABLE moment_posts_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+        npc_id INTEGER REFERENCES town_npcs(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        images TEXT DEFAULT '[]',
+        prompt TEXT,
+        style TEXT,
+        resolution TEXT DEFAULT '1600x1200',
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        CHECK (character_id IS NULL OR npc_id IS NULL)
+      );
+      INSERT INTO moment_posts_new (id, character_id, npc_id, content, images, prompt, style, resolution, status, error_message, created_at)
+        SELECT id, character_id, npc_id, content, images, prompt, style, resolution, status, error_message, created_at FROM moment_posts;
+      DROP TABLE moment_posts;
+      ALTER TABLE moment_posts_new RENAME TO moment_posts;
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_character ON moment_posts(character_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_created ON moment_posts(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_filter ON moment_posts(status);
+      CREATE INDEX IF NOT EXISTS idx_moment_posts_npc ON moment_posts(npc_id, created_at DESC);
+    `);
+  };
+  const fkWasOn = db.pragma('foreign_keys', { simple: true });
+  if (fkWasOn) db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(rebuild)();
+    console.log('[db] Rebuilt moment_posts to support user authors');
+  } finally {
+    if (fkWasOn) db.pragma('foreign_keys = ON');
+  }
+}
+
 function migrateMomentsSchema(db) {
   try {
     const cols = db.prepare(`PRAGMA table_info(characters)`).all();
@@ -1333,6 +1379,7 @@ function migrateMomentsSchema(db) {
       console.log('[db] Added characters.moments_disabled column (default 0)');
     }
     migrateMomentPostNpcAuthors(db);
+    migrateMomentPostUserAuthors(db);
   } catch (err) {
     console.log('[db] migrateMomentsSchema error:', err.message);
   }
@@ -1445,7 +1492,8 @@ function migrateWakeSchema(db) {
 }
 
 /**
- * 迁移: moment_comments 新增 auto_trigger + thread_root_id（朋友圈关系网互动）
+ * 迁移: moment_comments 新增 auto_trigger + thread_root_id + reply_to_comment_id
+ * （朋友圈关系网互动 / 用户楼中楼回复与 @ 点名）
  */
 function migrateMomentAutoTrigger(db) {
   try {
@@ -1457,6 +1505,10 @@ function migrateMomentAutoTrigger(db) {
     if (!cols.find(c => c.name === 'thread_root_id')) {
       db.exec(`ALTER TABLE moment_comments ADD COLUMN thread_root_id INTEGER DEFAULT NULL`);
       console.log('[db] Added moment_comments.thread_root_id column (nullable)');
+    }
+    if (!cols.find(c => c.name === 'reply_to_comment_id')) {
+      db.exec(`ALTER TABLE moment_comments ADD COLUMN reply_to_comment_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added moment_comments.reply_to_comment_id column (nullable)');
     }
   } catch (err) {
     console.log('[db] migrateMomentAutoTrigger error:', err.message);

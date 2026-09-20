@@ -90,3 +90,18 @@ export const MOMENT_COMMENT_RULES = [
   '- 禁止括号里的动作描写（如（笑）（点头））和旁白，禁止解释自己在评论什么。',
   '- 只输出评论/回复的文本本身，不要任何前缀、引号、JSON 或说明。',
 ].join('\n');
+
+/** 评论侧取帖子首张配图的画面描述：帖子落库的 prompt 多图用 `\n---\n` 拼接，
+ * 评论只需要第一张；无 prompt（用户手发帖 / 未落提示词）返回空串，不注入默认兜底词。 */
+export function firstMomentImagePrompt(prompt) {
+  if (!prompt) return '';
+  const segments = String(prompt).split(/\n?\s*---\s*\n?/).map(s => s.trim()).filter(Boolean);
+  return segments[0] || '';
+}
+
+/** 评论 prompt 的配图说明段：帮角色理解照片里是什么，从而把图聊进评论里。 */
+export function buildMomentImagePromptNote(prompt) {
+  const first = firstMomentImagePrompt(prompt);
+  if (!first) return '';
+  return `\n配图的画面描述（帮你理解照片里是什么，评论时可以自然提到照片内容）：${first}`;
+}

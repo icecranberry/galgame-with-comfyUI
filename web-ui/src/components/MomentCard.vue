@@ -1,22 +1,24 @@
 <template>
   <div class="moment-card">
-    <!-- 头部：角色信息 -->
+    <!-- 头部：作者信息（角色 / 镇民 / 用户自己） -->
     <div class="moment-header">
       <div
         class="moment-avatar avatar-wiggle"
+        :class="{ 'is-user': isUserPost }"
         @click="goToChat"
       >
         <img
-          v-if="post.avatar_path"
-          :src="post.avatar_path"
+          v-if="headerAvatar"
+          :src="headerAvatar"
           class="moment-avatar-img"
           :class="{ 'is-npc-portrait': post.author_type === 'npc' }"
           alt=""
+          @error="headerAvatarFailed = true"
         />
-        <span v-else>{{ post.display_name?.charAt(0) }}</span>
+        <span v-else>{{ headerName?.charAt(0) }}</span>
       </div>
       <div class="moment-header-info">
-        <span class="moment-name">{{ post.display_name }}</span>
+        <span class="moment-name">{{ headerName }}</span>
         <span class="moment-time">{{ formatTime(post.created_at) }}</span>
       </div>
       <!-- ⋮ 菜单按钮 -->
@@ -68,8 +70,8 @@
       </div>
     </div>
 
-    <!-- 配图：无图给缺省遮罩（生图失败可原地补图）；单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
-    <div v-if="visibleImages.length === 0" class="moment-images-empty">
+    <!-- 配图：用户纯文字帖不显示；角色帖无图给缺省遮罩（生图失败可原地补图）；单图普通卡片；多图扇形堆成一摞相片，滚轮 / 滑动 / 点左右翻看 -->
+    <div v-if="visibleImages.length === 0 && !isUserPost" class="moment-images-empty">
       <div class="moment-empty-icon">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -184,27 +186,39 @@
       </div>
     </div>
 
-    <!-- 评论区域 -->
+    <!-- 评论区域：点某条评论可针对它回复（被回复的作者会回评），输入 @ 可点名角色 -->
     <div v-if="comments.length > 0" class="comments-section">
       <!-- 始终可见：最早 2 条 -->
       <div class="comments-list">
-        <moment-comment-item
-          v-for="c in alwaysVisible"
-          :key="c.id"
-          :comment="c"
-          :post="post"
-        />
+        <div v-for="group in visibleThreads" :key="group.comment.id" class="comment-group">
+          <moment-comment-item :comment="group.comment" :post="post" @reply="onReplyToComment" />
+          <div v-if="group.replies.length > 0" class="comment-replies">
+            <moment-comment-item
+              v-for="reply in group.replies"
+              :key="reply.id"
+              :comment="reply"
+              :post="post"
+              @reply="onReplyToComment"
+            />
+          </div>
+        </div>
       </div>
 
       <!-- 超出部分：max-height 动画展开 -->
       <div class="expand-wrapper" :class="{ open: expanded }">
         <div v-if="hiddenCount > 0" class="comments-list">
-          <moment-comment-item
-            v-for="c in hiddenComments"
-            :key="c.id"
-            :comment="c"
-            :post="post"
-          />
+          <div v-for="group in hiddenThreads" :key="group.comment.id" class="comment-group">
+            <moment-comment-item :comment="group.comment" :post="post" @reply="onReplyToComment" />
+            <div v-if="group.replies.length > 0" class="comment-replies">
+              <moment-comment-item
+                v-for="reply in group.replies"
+                :key="reply.id"
+                :comment="reply"
+                :post="post"
+                @reply="onReplyToComment"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -220,16 +234,43 @@
       >展开剩余 {{ hiddenCount }} 条评论</div>
     </div>
 
-    <!-- 回复输入 -->
-    <div class="reply-input-wrapper" :class="{ open: showReplyInput }">
+    <!-- 回复输入：楼中楼回复时顶部显示目标；@ 按钮或手打 @ 唤起角色点名面板 -->
+    <div class="reply-input-wrapper" :class="{ open: showReplyInput, 'mention-open': mentionOpen }">
+      <div v-if="replyTarget" class="reply-target-chip">
+        <span class="chip-label">回复 {{ replyTargetName }}</span>
+        <div
+          class="chip-cancel"
+          role="button"
+          tabindex="0"
+          aria-label="取消回复"
+          @click="clearReplyTarget"
+          @keydown.enter.prevent="clearReplyTarget"
+          @keydown.space.prevent="clearReplyTarget"
+        >
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+        </div>
+      </div>
       <div class="comment-input-row">
+        <linshe-button
+          variant="icon"
+          size="md"
+          class="comment-mention-btn"
+          aria-label="点名角色"
+          title="点名角色"
+          :disabled="sending"
+          @click="onMentionButton"
+        >
+          @
+        </linshe-button>
         <linshe-input
           ref="commentInput"
           v-model="commentText"
           class="comment-input"
-          placeholder="写评论..."
-          @keydown.enter.exact.prevent="sendComment"
-          @keydown.escape.exact="closeReplyInput"
+          :placeholder="replyTarget ? `回复 ${replyTargetName}...` : '写评论...'"
+          @keydown.enter.exact.prevent="onEnterKey"
+          @keydown.up.exact.prevent="mentionOpen && mention.move(-1)"
+          @keydown.down.exact.prevent="mentionOpen && mention.move(1)"
+          @keydown.escape.exact="onEscapeKey"
           :disabled="sending"
         />
         <linshe-button
@@ -243,6 +284,26 @@
           <template v-if="!sending">发送</template>
         </linshe-button>
       </div>
+
+      <!-- @ 点名候选面板：锚在输入框上方 -->
+      <div v-if="mentionOpen" class="mention-panel" role="listbox" aria-label="选择要点名的角色">
+        <div
+          v-for="(opt, i) in mention.options.value"
+          :key="opt.key"
+          class="mention-option"
+          :class="{ active: i === mention.index.value }"
+          role="option"
+          :aria-selected="i === mention.index.value"
+          @mousedown.prevent="applyMentionOption(opt)"
+          @mousemove="mention.index.value = i"
+        >
+          <div class="mention-avatar" :style="opt.avatar_path ? { backgroundImage: `url(${opt.avatar_path})`, backgroundSize: 'cover', backgroundPosition: 'center top' } : {}">
+            <span v-if="!opt.avatar_path">{{ opt.display_name?.charAt(0) || '?' }}</span>
+          </div>
+          <span class="mention-name">{{ opt.display_name }}</span>
+        </div>
+        <div v-if="mention.options.value.length === 0" class="mention-empty">没有匹配的角色</div>
+      </div>
     </div>
   </div>
 </template>
@@ -251,9 +312,13 @@
 import { ref, reactive, computed, nextTick, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMomentsStore } from '../stores/moments.js'
+import { useChatStore } from '../stores/chat.js'
+import { userAvatar, userNickname } from '../userConfig.js'
+import { useMentionPicker, applyMention as applyMentionText } from '../composables/useMentionPicker.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import MomentCommentItem from './MomentCommentItem.vue'
+import { groupMomentComments } from '../utils/momentComments.js'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -263,6 +328,7 @@ const emit = defineEmits(['preview', 'share'])
 
 const router = useRouter()
 const moments = useMomentsStore()
+const chat = useChatStore()
 const isMobile = inject('isMobile')
 const confirmFn = inject('confirm')
 const toastFn = inject('toast', null)
@@ -272,6 +338,18 @@ const showReplyInput = ref(false)
 const expanded = ref(true)
 const showMenu = ref(false)
 const imgErrors = reactive(new Set())
+
+// ── 作者展示：角色 / 镇民取 DB 字段，用户帖取本地用户配置 ──
+const isUserPost = computed(() => props.post.author_type === 'user')
+const headerAvatarFailed = ref(false)
+const headerAvatar = computed(() => {
+  if (props.post.avatar_path) return props.post.avatar_path
+  if (isUserPost.value && !headerAvatarFailed.value) return userAvatar.value || ''
+  return ''
+})
+const headerName = computed(() => (
+  props.post.display_name || (isUserPost.value ? (userNickname.value || '我') : '')
+))
 // 点击菜单外自动关闭
 watch(showMenu, (v) => {
   if (v) setTimeout(() => document.addEventListener('click', closeMenuOnOutside, { once: true }))
@@ -291,9 +369,72 @@ const commentText = ref('')
 const sending = ref(false)
 const commentInput = ref(null)
 
-const alwaysVisible = computed(() => comments.value.slice(0, MAX_VISIBLE))
-const hiddenComments = computed(() => comments.value.slice(MAX_VISIBLE))
-const hiddenCount = computed(() => Math.max(0, comments.value.length - MAX_VISIBLE))
+// ── 楼中楼回复目标：点某条评论后，输入框针对该评论 ──
+const replyTarget = ref(null)
+const replyTargetName = computed(() => {
+  const t = replyTarget.value
+  if (!t) return ''
+  if (t.author_type === 'character') return t.char_display_name || props.post.display_name || 'ta'
+  return userNickname.value || '我'
+})
+
+function onReplyToComment(comment) {
+  if (!comment) return
+  // 点自己（用户）的评论不再嵌套指定目标，回复帖主/评论区的上下文由后端兜底
+  replyTarget.value = comment
+  openAll()
+}
+
+function clearReplyTarget() {
+  replyTarget.value = null
+  if (!isMobile) commentInput.value?.focus()
+}
+
+// ── @ 点名：输入末尾「@过滤词」时唤起候选面板（朋友圈不提供 @全体）──
+const mention = useMentionPicker(() => chat.characters, { includeAll: false })
+const mentionOpen = computed(() => mention.open.value)
+watch(commentText, (t) => { mention.sync(t) })
+
+function applyMentionOption(opt) {
+  if (!opt || opt.isAll) return
+  commentText.value = applyMentionText(commentText.value, opt.display_name)
+  mention.close()
+  if (!isMobile) commentInput.value?.focus()
+}
+
+// @ 按钮：在输入末尾补一个「@」唤起点名面板；已有「@过滤词」时只重开面板不重复追加
+function onMentionButton() {
+  if (!/@[^\s@]*$/.test(commentText.value)) {
+    const base = commentText.value.replace(/\s+$/, '')
+    commentText.value = base ? `${base} @` : '@'
+  }
+  mention.sync(commentText.value)
+  if (!isMobile) commentInput.value?.focus()
+}
+
+function onEnterKey() {
+  if (mentionOpen.value && mention.current.value && !mention.current.value.isAll) {
+    applyMentionOption(mention.current.value)
+    return
+  }
+  sendComment()
+}
+
+function onEscapeKey() {
+  if (mentionOpen.value) {
+    mention.close()
+    return
+  }
+  closeReplyInput()
+}
+
+const commentThreads = computed(() => groupMomentComments(comments.value))
+const visibleThreads = computed(() => commentThreads.value.slice(0, MAX_VISIBLE))
+const hiddenThreads = computed(() => commentThreads.value.slice(MAX_VISIBLE))
+const hiddenCount = computed(() => hiddenThreads.value.reduce(
+  (count, group) => count + 1 + group.replies.length,
+  0
+))
 
 
 // 带原始下标的可见配图：加载失败按下标剔除，多图翻看与灯箱都基于这个顺序
@@ -510,6 +651,8 @@ function closeAll() {
   expanded.value = false
   showReplyInput.value = false
   commentText.value = ''
+  replyTarget.value = null
+  mention.close()
 }
 
 function closeReplyInput() {
@@ -521,26 +664,39 @@ async function sendComment() {
   if (!text || sending.value) return
   sending.value = true
 
+  const target = replyTarget.value
   const tempId = 'temp_' + Date.now()
   if (!props.post._comments) props.post._comments = []
   props.post._comments.push({
     id: tempId,
     author_type: 'user',
     content: text,
+    reply_to_name: target ? replyTargetName.value : undefined,
+    reply_to_author_type: target ? (target.author_type || 'user') : undefined,
+    reply_to_avatar_path: target && target.author_type === 'character'
+      ? (target.char_avatar_path || null)
+      : undefined,
+    reply_to_comment_id: target ? target.id : null,
+    thread_root_id: target ? (target.thread_root_id ?? target.id) : null,
     created_at: new Date().toISOString(),
   })
   commentText.value = ''
+  replyTarget.value = null
+  mention.close()
   if (!isMobile) commentInput.value?.focus()
 
   expanded.value = true
   try {
-    const result = await moments.addComment(props.post.id, text)
+    const result = await moments.addComment(props.post.id, text, target?.id ?? null)
     const idx = props.post._comments.findIndex(c => c.id === tempId)
     if (idx >= 0 && result.comment) {
-      props.post._comments.splice(idx, 1, result.comment)
+      // 乐观数据已带「回复谁」；合并返回值，避免楼中楼被薄响应覆盖
+      props.post._comments.splice(idx, 1, { ...props.post._comments[idx], ...result.comment })
     }
-    if (result.reply) {
-      props.post._comments.push(result.reply)
+    // 兼容两种返回形态：replies 数组（支持 @ 多人 / 楼中楼）与旧版单个 reply
+    const replies = result.replies || (result.reply ? [result.reply] : [])
+    for (const reply of replies) {
+      props.post._comments.push(reply)
     }
   } catch (err) {
     console.error('[MomentCard] comment error:', err)
@@ -549,6 +705,7 @@ async function sendComment() {
       props.post._comments.length = 0
       props.post._comments.push(...filteredVal)
     }
+    toastFn?.(err.message || '评论发送失败', 'error')
   } finally {
     sending.value = false
   }
@@ -671,6 +828,9 @@ function formatTime(iso) {
   transform: scale(1.08);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
+/* 用户自己的帖子：头像走本地配置，加一圈主题描边与评论区「我」同口径 */
+.moment-avatar.is-user { box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.3); }
+
 .moment-avatar-img {
   width: 100%; height: 100%;
   object-fit: cover;
@@ -911,6 +1071,12 @@ function formatTime(iso) {
   margin-bottom: 12px;
 }
 /* 单条评论（含评论人头像）皮肤在 MomentCommentItem.vue */
+.comment-group + .comment-group { margin-top: 8px; }
+.comment-replies {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 4px; padding-left: 16px;
+  border-left: 1px solid var(--glass-border);
+}
 
 /* 评论展开动画：max-height 过渡 */
 .expand-wrapper {
@@ -944,6 +1110,10 @@ function formatTime(iso) {
   flex: 1;
   padding: 8px 12px;
 }
+/* @ 按钮皮肤由 LinsheButton(variant="icon") 提供，这里只保留布局属性 */
+.comment-mention-btn {
+  flex-shrink: 0;
+}
 /* 发送按钮皮肤由 LinsheButton(variant="primary" size="sm") 提供，这里只保留布局属性 */
 .comment-send {
   flex-shrink: 0;
@@ -954,13 +1124,93 @@ function formatTime(iso) {
   max-height: 0;
   opacity: 0;
   transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.22s cubic-bezier(0.2, 1, 0.2, 1),
               margin-top 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   margin-top: 0;
+  position: relative;
 }
 .reply-input-wrapper.open {
-  max-height: 56px;
+  max-height: 92px;
   opacity: 1;
   margin-top: 12px;
+}
+/* @ 候选面板浮出输入框上方：打开期间放开裁切，面板锚定在输入行上沿 */
+.reply-input-wrapper.mention-open { overflow: visible; }
+.reply-input-wrapper.mention-open.open { max-height: 92px; }
+
+/* 楼中楼回复目标 chip */
+.reply-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.08);
+  font-size: 12px;
+  color: var(--accent-hover);
+}
+.reply-target-chip .chip-label {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reply-target-chip .chip-cancel {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--dur-fast) var(--ease-standard);
+}
+.reply-target-chip .chip-cancel:hover { color: var(--danger); background: rgba(255, 77, 79, 0.1); }
+
+/* @ 点名候选面板：悬浮在输入框上方 */
+.mention-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--popover-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.mention-option.active { background: rgba(var(--accent-rgb), 0.1); }
+.mention-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.mention-name {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.mention-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 </style>

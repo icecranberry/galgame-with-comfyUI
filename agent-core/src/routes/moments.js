@@ -10,13 +10,14 @@ import { createCharacterTownLifeContext } from '../services/characterTownLifeCon
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
 import { broadcast as broadcastToUnified } from '../services/unifiedStreamBus.js';
-import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt } from '../services/emotionEngine.js';
 import { getTimeTag, getLightNoteWithWeather } from '../services/timeLight.js';
 import { getCurrentActivity } from '../services/scheduleManager.js';
 import { triggerFriendComments } from '../services/momentInteractionService.js';
-import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
+import { publishUserMoment } from '../services/momentUserPostService.js';
+import { handleUserComment } from '../services/momentCommentService.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_COMMENT_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, CHINESE_NUM, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 const router = Router();
 
@@ -141,14 +142,17 @@ router.post('/mark-read', (req, res) => {
 // GET /api/moments — 全量返回所有帖子（本地 SQLite，数据量可控，无需分页）
 router.get('/', (req, res) => {
   const db = getDb();
+  const nickname = userNickname();
 
   const posts = db.prepare(`
     SELECT mp.*,
-      COALESCE(c.display_name, n.display_name) AS display_name,
+      COALESCE(c.display_name, n.display_name, ?) AS display_name,
       CASE WHEN mp.npc_id IS NOT NULL
         THEN (SELECT image_path FROM town_assets WHERE key = 'npc_' || mp.npc_id || '_portrait' AND status = 'ready')
         ELSE c.avatar_path END AS avatar_path,
-      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc' ELSE 'character' END AS author_type,
+      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc'
+           WHEN mp.character_id IS NOT NULL THEN 'character'
+           ELSE 'user' END AS author_type,
       (SELECT COUNT(*) FROM moment_comments WHERE post_id = mp.id) AS comment_count,
       (SELECT COUNT(*) FROM moment_likes WHERE post_id = mp.id) AS like_count,
       (SELECT id FROM moment_likes WHERE post_id = mp.id) IS NOT NULL AS liked
@@ -157,7 +161,7 @@ router.get('/', (req, res) => {
     LEFT JOIN town_npcs n ON n.id = mp.npc_id
     WHERE mp.status = 'done'
     ORDER BY mp.id DESC
-  `).all().map(p => ({
+  `).all(nickname).map(p => ({
     ...p,
     content: sanitizeMomentContent(p.content),
     liked: !!p.liked,
@@ -171,32 +175,38 @@ router.get('/', (req, res) => {
 // GET /api/moments/:id — 单个帖子详情（含评论）
 router.get('/:id', (req, res) => {
   const db = getDb();
+  const nickname = userNickname();
+
   const post = db.prepare(`
     SELECT mp.*,
-      COALESCE(c.display_name, n.display_name) AS display_name,
+      COALESCE(c.display_name, n.display_name, ?) AS display_name,
       CASE WHEN mp.npc_id IS NOT NULL
         THEN (SELECT image_path FROM town_assets WHERE key = 'npc_' || mp.npc_id || '_portrait' AND status = 'ready')
         ELSE c.avatar_path END AS avatar_path,
-      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc' ELSE 'character' END AS author_type
+      CASE WHEN mp.npc_id IS NOT NULL THEN 'npc'
+           WHEN mp.character_id IS NOT NULL THEN 'character'
+           ELSE 'user' END AS author_type
     FROM moment_posts mp
     LEFT JOIN characters c ON c.id = mp.character_id
     LEFT JOIN town_npcs n ON n.id = mp.npc_id
     WHERE mp.id = ?
-  `).get(req.params.id);
+  `).get(nickname, req.params.id);
 
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
+  // 回复对象优先取显式 reply_to_comment_id（用户楼中楼 / @ 回评），
+  // 关系网自动评论（无显式指向）回退到线程内前一条评论的旧口径
   const comments = db.prepare(`
     SELECT mc.*,
       CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE NULL END AS char_display_name,
       CASE WHEN mc.author_type = 'character' THEN c.avatar_path ELSE NULL END AS char_avatar_path,
-      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL
-        THEN CASE WHEN prev.author_type = 'character' THEN pc.display_name ELSE '用户' END
+      CASE WHEN rt.id IS NOT NULL
+        THEN CASE WHEN rt.author_type = 'character' THEN rc.display_name ELSE ? END
         ELSE NULL END AS reply_to_name,
-      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL AND prev.author_type = 'character'
-        THEN pc.avatar_path ELSE NULL END AS reply_to_avatar_path,
-      CASE WHEN mc.auto_trigger = 1 AND prev.id IS NOT NULL
-        THEN prev.author_type ELSE NULL END AS reply_to_author_type
+      CASE WHEN rt.id IS NOT NULL AND rt.author_type = 'character'
+        THEN rc.avatar_path ELSE NULL END AS reply_to_avatar_path,
+      CASE WHEN rt.id IS NOT NULL
+        THEN rt.author_type ELSE NULL END AS reply_to_author_type
     FROM moment_comments mc
     LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
     LEFT JOIN moment_comments prev ON prev.id = (
@@ -206,10 +216,11 @@ router.get('/:id', (req, res) => {
         AND p2.id < mc.id
       ORDER BY p2.id DESC LIMIT 1
     )
-    LEFT JOIN characters pc ON pc.id = prev.author_id
+    LEFT JOIN moment_comments rt ON rt.id = COALESCE(mc.reply_to_comment_id, CASE WHEN mc.auto_trigger = 1 THEN prev.id END)
+    LEFT JOIN characters rc ON rc.id = rt.author_id AND rt.author_type = 'character'
     WHERE mc.post_id = ?
-    ORDER BY mc.created_at ASC
-  `).all(req.params.id);
+    ORDER BY mc.id ASC
+  `).all(nickname, req.params.id);
 
   const liked = !!db.prepare('SELECT id FROM moment_likes WHERE post_id = ?').get(post.id);
 
@@ -269,9 +280,28 @@ router.delete('/:id', (req, res) => {
 
 // ──────────────── 评论 ────────────────
 
+// POST /api/moments/user-post — 用户自己发朋友圈（文字 + 可选本地图片），角色随后陆续来评论
+router.post('/user-post', async (req, res) => {
+  try {
+    const post = await publishUserMoment(
+      { content: req.body?.content, images: req.body?.images },
+      { broadcastPost: broadcastNewPost }
+    );
+    res.json(post);
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error('[moments] user post error:', err.message);
+    res.status(status).json({ error: err.message });
+  }
+});
+
 // POST /api/moments/:id/comments — 发评论 + 角色自动回复
+// body: { content, reply_to_comment_id? }
+//   - 普通评论：帖主（角色帖）回评（原有行为）
+//   - content 里 @ 了角色：被点名的角色回评
+//   - reply_to_comment_id：楼中楼，被回复评论的作者回评
 router.post('/:id/comments', async (req, res) => {
-  const { content } = req.body;
+  const { content, reply_to_comment_id } = req.body;
   if (!content || typeof content !== 'string') {
     return res.status(400).json({ error: 'content is required' });
   }
@@ -285,61 +315,19 @@ router.post('/:id/comments', async (req, res) => {
   `).get(req.params.id);
 
   if (!post) return res.status(404).json({ error: 'Post not found' });
-  // 镇民帖子暂不自动回评（二期：镇民回评），用户评论正常入库
-  const isNpcPost = post.npc_id != null;
 
-  // 1. 写入用户评论
-  const userComment = db.prepare(
-    `INSERT INTO moment_comments (post_id, author_type, content) VALUES (?, 'user', ?)`
-  ).run(post.id, content.trim());
-
-  const userCommentData = {
-    id: userComment.lastInsertRowid,
-    post_id: post.id,
-    author_type: 'user',
-    content: content.trim(),
-    created_at: new Date().toISOString(),
-  };
-
-  // 2. 加载该帖子的历史评论（含用户评论），构建对话上下文
-  const historyComments = db.prepare(`
-    SELECT mc.author_type, mc.content,
-      CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE ? END AS display_name
-    FROM moment_comments mc
-    LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
-    WHERE mc.post_id = ?
-    ORDER BY mc.created_at ASC
-  `).all(userNickname(), post.id);
-
-
-  // 3. 调用 LLM 生成角色回复
-  let replyData = null;
-  if (!isNpcPost) try {
-    const reply = await generateCharacterReply(post, historyComments);
-    if (reply) {
-      const replyResult = db.prepare(
-        `INSERT INTO moment_comments (post_id, author_type, author_id, content) VALUES (?, 'character', ?, ?)`
-      ).run(post.id, post.character_id, reply);
-
-      replyData = {
-        id: replyResult.lastInsertRowid,
-        post_id: post.id,
-        author_type: 'character',
-        author_id: post.character_id,
-        content: reply,
-        char_display_name: post.display_name,
-        char_avatar_path: post.avatar_path,
-        reply_to_author_type: 'user',   // 角色回复的是用户评论 → 前端用本地用户头像
-        reply_to_avatar_path: null,
-        created_at: new Date().toISOString(),
-      };
-    }
+  try {
+    const result = await handleUserComment({
+      post,
+      content,
+      replyToCommentId: reply_to_comment_id != null ? Number(reply_to_comment_id) : null,
+    });
+    res.json(result);
   } catch (err) {
-    console.error('[moments] auto-reply error:', err.message);
-    // 评论已写入，回复失败不阻塞
+    const status = err.status || 500;
+    if (status >= 500) console.error('[moments] comment error:', err.message);
+    res.status(status).json({ error: err.message });
   }
-
-  res.json({ comment: userCommentData, reply: replyData });
 });
 
 // DELETE /api/moments/:id/comments/:commentId
@@ -960,7 +948,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   });
 
   // 异步触发关系网朋友互动（5 秒后启动，不阻塞，完全独立于用户）
-  const postRecord = { id: postId, content: text, images: imageUrls };
+  const postRecord = { id: postId, content: text, prompt: imagePrompt, images: imageUrls };
   setTimeout(() => {
     triggerFriendComments(postRecord, character).catch(err =>
       console.error('[moments] friend interaction error:', err.message)
@@ -991,139 +979,10 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
 }
 
 /**
- * 角色自动回复评论
+ * 角色自动回复评论 → 已迁移到 services/momentCommentService.js
+ * （帖主回评 / @ 点名回复 / 楼中楼回评共用 generateCharacterCommentReply，
+ * prompt 结构与原实现保持一致，另带上首图画面描述）
  */
-async function generateCharacterReply(post, historyComments) {
-  const db = getDb();
-
-  // 睡眠检查：角色在睡觉时不自动回复评论
-  try {
-    if (config.features.schedule !== false) {
-      const { isSleeping } = await import('../services/scheduleManager.js');
-      const sleepStatus = isSleeping(post.character_id);
-      if (sleepStatus.sleeping) {
-        console.log(`[moments] ${post.display_name} is sleeping, skipping comment reply`);
-        return null;
-      }
-    }
-  } catch { /* schedule not available */ }
-
-  const userName = config.user.nickname || '用户';
-  const u = config.user;
-  let userPersona = u.appearance || u.persona || '你最重要的朋友';
-  if (u.gender) userPersona = `[性别：${u.gender}] ${userPersona}`;
-
-  // 构建评论区对话历史
-  const commentHistory = historyComments.map(c => {
-    const name = c.author_type === 'character' ? (c.display_name || post.display_name) : userName;
-    return `${name}：${c.content}`;
-  }).join('\n');
-
-  // 用户→角色关系
-  let userRelMsg = '';
-  const userRel = db.prepare(
-    'SELECT relationship_text, is_oath FROM user_relationships WHERE character_id = ?'
-  ).get(post.character_id);
-  if (userRel && userRel.relationship_text) {
-    userRelMsg = `**【你与user的关系】\n你对于user而言的身份是${userRel.relationship_text}。**这个关系为最高优先级，请在回复中自然体现。`;
-  }
-  if (userRel?.is_oath) {
-    userRelMsg += `\n\n**【特殊羁绊】**\n你和user之间有一个比普通关系更深一层的约定——user曾经郑重地送过你一枚戒指。这代表了独一无二的羁绊和承诺。在回复时，你的行为和情感会自然地带有"你是我最重要的人"的底色。`;
-  }
-
-  // 角色间关系（双向）
-  let charRelMsg = '';
-  const charRels = db.prepare(`
-    SELECT 'from' AS direction, cr.relationship_text, c.display_name
-    FROM character_relationships cr
-    JOIN characters c ON c.id = cr.to_character_id
-    WHERE cr.from_character_id = ? AND cr.relationship_text != ''
-    UNION ALL
-    SELECT 'to' AS direction, cr.relationship_text, c.display_name
-    FROM character_relationships cr
-    JOIN characters c ON c.id = cr.from_character_id
-    WHERE cr.to_character_id = ? AND cr.relationship_text != ''
-  `).all(post.character_id, post.character_id);
-
-  if (charRels.length > 0) {
-    const relLines = charRels.map(r => {
-      if (r.direction === 'from') {
-        return `- ${r.display_name}是你的${r.relationship_text}`;
-      } else {
-        return `- ${r.display_name}认为你是她的${r.relationship_text}`;
-      }
-    }).join('\n');
-    charRelMsg = `**【你与其他角色的关系】**\n${relLines}\n\n请在回复中自然体现这些关系，不必刻意说明。你的人设可能会有其他的性格，但是在私下里，你的关系网就是这样的，在回复里不用完全保持公开人设，以私下关系为最高优先级。`;
-  }
-
-  // 权限层
-  const worldSettingReply = getWorldSetting();
-  const permissionPrompt = worldSettingReply
-    ? getSystemRulesWithWorld()
-    : getSystemRules();
-  const worldIntegrationNoteReply = worldSettingReply
-    ? getWorldIntegrationRule('momentReply')
-    : null;
-
-  // 加载情绪状态 + 好感度（提前，用于 msgs[1] 和 msgs[2]）
-  let emotionPrompt = '';
-  let affPrompt = '';
-  if (config.features.emotion) {
-    const convId = `char_${post.character_id}`;
-    const emotionBaseline = post.emotion_baseline
-      ? JSON.parse(post.emotion_baseline)
-      : { valence: 0.5, arousal: 0.5, dominance: 0.5 };
-    const emotionState = loadEmotionState(convId, emotionBaseline);
-    emotionPrompt = stateToPrompt(emotionState) || '';
-
-    const affinity = loadAffinity(post.character_id);
-    affPrompt = affinityToPrompt(affinity) || '';
-  }
-
-  // 朋友圈上下文 + 回复规则（user 特征和评论区交互放到最后的 user 消息中）
-  const momentRules = getCoreDialogueRules({ userName, identityAnchor: false });
-  const contextTask = `你在朋友圈发了：
----
-${post.content}
----
-
-请以角色的身份自然回复评论区的最新评论。
-
-${MOMENT_COMMENT_RULES}
-- 可以参考评论区的上下文，但不要重复自己已经说过的话
-${momentRules}`;
-
-  // msgs[0] 舞台 → [世界观] → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
-  const msgs = [{ role: 'system', content: permissionPrompt }];
-  if (worldIntegrationNoteReply) msgs.push({ role: 'system', content: worldIntegrationNoteReply });
-
-  // msgs[1] — 角色：人格 + 情绪
-  const charContent = [post.base_prompt, emotionPrompt].filter(Boolean).join('\n\n');
-  msgs.push({ role: 'system', content: charContent });
-
-  // msgs[2] — 交互：用户关系 + 角色间关系 + 好感度
-  const relContext = [userRelMsg, charRelMsg, affPrompt].filter(Boolean).join('\n\n');
-  if (relContext) msgs.push({ role: 'system', content: relContext });
-
-  // msgs[3] — 任务：朋友圈内容 + 规则
-  msgs.push({ role: 'system', content: contextTask });
-
-  // user 消息 — user 特征 + 评论区交互（独立于系统人设，避免人称混淆，不含光线时间）
-  const userMsg = `关于${userName}：
-${userPersona}
-
-评论区目前的对话：
----
-${commentHistory}
----
-
-回复这条评论：`;
-  msgs.push({ role: 'user', content: userMsg });
-
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '回评' });
-
-  return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
-}
 
 function _parseCharLoras(raw) {
   if (!raw) return [];
@@ -1274,7 +1133,7 @@ imagePrompt 中${userName}的外观以上述描述为准。`,
       created_at: new Date().toISOString(),
     });
 
-    const postRecord = { id: postId, content: text, images: imageUrls };
+    const postRecord = { id: postId, content: text, prompt: imagePrompt, images: imageUrls };
     setTimeout(() => {
       triggerFriendComments(postRecord, character).catch(err =>
         console.error('[moments] friend interaction error:', err.message)

@@ -16,7 +16,7 @@ import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { cropPersonalityForEmotion } from './emotionEngine.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { MOMENT_COMMENT_RULES } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote } from './momentForms.js';
 
 // Sigmoid 参数（与 moments.js 多人模式一致）
 const MULTI_P_MIN = 0.30;
@@ -109,7 +109,7 @@ async function generateFriendInitialComment(friend, posterChar, post, relDesc) {
   const contextTask = `${posterName}刚刚在朋友圈发了一条动态：
 ---
 ${post.content}
----
+---${buildMomentImagePromptNote(post.prompt)}
 
 请以你的身份（${friendName}），在${posterName}的朋友圈评论区留一条自然的评论。
 
@@ -161,7 +161,7 @@ async function generatePosterReplyToFriend(posterChar, friend, post, friendComme
   const contextTask = `你的朋友圈帖子：
 ---
 ${post.content}
----
+---${buildMomentImagePromptNote(post.prompt)}
 
 ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
 请以你的身份自然回复${friendName}的评论。
@@ -211,7 +211,7 @@ async function generateFriendContinuation(friend, posterChar, post, threadContex
   const contextTask = `${posterName}的朋友圈帖子：
 ---
 ${post.content}
----
+---${buildMomentImagePromptNote(post.prompt)}
 
 评论区你们的对话（从上到下）：
 ---
@@ -430,7 +430,7 @@ async function runInteractionThread(post, posterChar, friend) {
       FROM moment_comments mc
       LEFT JOIN characters c ON c.id = mc.author_id
       WHERE mc.thread_root_id = ?
-      ORDER BY mc.created_at ASC
+      ORDER BY mc.id ASC
     `).all(userName, threadRootId);
 
     // 标注 poster ID 以便 formatThreadContext 区分
@@ -473,7 +473,7 @@ async function runInteractionThread(post, posterChar, friend) {
       FROM moment_comments mc
       LEFT JOIN characters c ON c.id = mc.author_id
       WHERE mc.thread_root_id = ?
-      ORDER BY mc.created_at ASC
+      ORDER BY mc.id ASC
     `).all(userName, threadRootId);
     for (const tc of threadComments2) tc._posterId = posterId;
 

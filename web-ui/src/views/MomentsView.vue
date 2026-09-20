@@ -36,6 +36,11 @@
     <!-- 内容区 -->
     <div ref="scrollContainer" class="moments-feed" @scroll="onScroll">
 
+      <!-- 用户自己发朋友圈：文字 + 粘贴/上传图片 -->
+      <div class="moments-composer-wrap">
+        <UserMomentComposer />
+      </div>
+
       <!-- 角色筛选条 -->
       <div class="moments-filter-bar">
         <div
@@ -116,6 +121,7 @@ import { useChatStore } from '../stores/chat.js'
 import { useRoute } from 'vue-router'
 import { loadUserConfig, loadUserAvatar } from '../userConfig.js'
 import MomentCard from '../components/MomentCard.vue'
+import UserMomentComposer from '../components/UserMomentComposer.vue'
 import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LibraryModal from '../components/LibraryModal.vue'
@@ -139,14 +145,48 @@ const shareImage = ref('')
 const scrollContainer = ref(null)
 const filterScrollRef = ref(null)
 
+let filterScrollTarget = null
+let filterScrollFrame = 0
+
+function stopFilterScroll() {
+  if (filterScrollFrame) cancelAnimationFrame(filterScrollFrame)
+  filterScrollFrame = 0
+  filterScrollTarget = null
+}
+
+function animateFilterScroll() {
+  const el = filterScrollRef.value
+  if (!el || filterScrollTarget === null) {
+    filterScrollFrame = 0
+    return
+  }
+
+  const remaining = filterScrollTarget - el.scrollLeft
+  if (Math.abs(remaining) < 0.5) {
+    el.scrollLeft = filterScrollTarget
+    filterScrollTarget = null
+    filterScrollFrame = 0
+    return
+  }
+
+  el.scrollLeft += remaining * 0.3
+  filterScrollFrame = requestAnimationFrame(animateFilterScroll)
+}
+
 function onFilterWheel(e) {
   const el = filterScrollRef.value
   if (!el) return
-  const atLeftEdge = el.scrollLeft <= 0 && e.deltaY < 0
-  const atRightEdge = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 && e.deltaY > 0
-  if (atLeftEdge || atRightEdge) return
+  const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
+  const currentTarget = Math.min(filterScrollTarget ?? el.scrollLeft, maxScrollLeft)
+  if (maxScrollLeft <= 0) return
+  const atHorizontalEdge = (e.deltaY < 0 && currentTarget <= 0) || (e.deltaY > 0 && currentTarget >= maxScrollLeft)
+  if (atHorizontalEdge) {
+    e.preventDefault()
+    return
+  }
   e.preventDefault()
-  el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
+  filterScrollTarget = Math.max(0, Math.min(maxScrollLeft, currentTarget + e.deltaY))
+  if (!filterScrollFrame) filterScrollFrame = requestAnimationFrame(animateFilterScroll)
 }
 
 const characters = computed(() => [...chat.characters].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
@@ -181,6 +221,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopFilterScroll()
   moments.isViewingMoments = false
   moments.refreshUnreadCount()
   document.removeEventListener('click', onDocumentClick)
@@ -375,6 +416,15 @@ async function triggerGenerate(c) {
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px;
+}
+
+/* 用户发帖输入框：与帖子列表同宽 */
+.moments-composer-wrap {
+  max-width: 600px;
+  margin: 0 auto 14px;
+}
+@media (max-width: 767px) {
+  .moments-composer-wrap { max-width: 100%; }
 }
 
 /* 筛选条外层：与帖子列表同宽 */

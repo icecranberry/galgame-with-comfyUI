@@ -39,6 +39,8 @@ import { buildChatContext, getSplitHistory, applyContextBudget } from '../servic
 import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
 import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../services/characterChatTownContext.js';
+import { buildPrivateMomentContext } from '../services/privateMomentContext.js';
+import { listRecentMailboxLetters } from '../services/privateMailboxContext.js';
 import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { getTownState } from '../services/town/townService.js';
@@ -728,14 +730,7 @@ ${coreRules}
     const memorySnapshot = [];
 
     // 1. 最近信箱往来
-    const recentLetters = db.prepare(`
-      SELECT content, content_short, reply_content,
-             CAST(julianday('now') - julianday(replied_at) AS INTEGER) AS days_ago
-      FROM mailbox_letters
-      WHERE character_id = ? AND direction = 'char_to_user' AND status = 'completed'
-        AND content != '' AND reply_content != ''
-      ORDER BY replied_at DESC LIMIT 2
-    `).all(characterId);
+    const recentLetters = listRecentMailboxLetters(db, { characterId });
     if (recentLetters.length > 0) {
       const letterLines = recentLetters.map(l => {
         const daysLabel = formatRelativeDay(l.days_ago);
@@ -758,34 +753,12 @@ ${coreRules}
     }
 
     // 3. 最近朋友圈（含评论区）
-    const recentMoments = db.prepare(`
-      SELECT id, content, created_at FROM moment_posts
-      WHERE character_id = ? AND status = 'done'
-      ORDER BY created_at DESC LIMIT 2
-    `).all(characterId);
-    if (recentMoments.length > 0) {
-      const momentLines = recentMoments.map((m, i) => {
-        let line = `${i + 1}. [${m.created_at}] ${m.content}`;
-        const hasUserComment = db.prepare(`SELECT COUNT(*) AS cnt FROM moment_comments WHERE post_id = ? AND author_type = 'user'`).get(m.id);
-        if (hasUserComment && hasUserComment.cnt > 0) {
-          const comments = db.prepare(`
-            SELECT mc.author_type, mc.content,
-              CASE WHEN mc.author_type = 'character' THEN c.display_name ELSE ? END AS display_name
-            FROM moment_comments mc LEFT JOIN characters c ON c.id = mc.author_id AND mc.author_type = 'character'
-            WHERE mc.post_id = ? ORDER BY mc.created_at ASC
-          `).all(chatUserName, m.id);
-          if (comments.length > 0) {
-            const commentLines = comments.map(c => {
-              const name = c.author_type === 'character' ? c.display_name : chatUserName;
-              return `  ${name}：${c.content}`;
-            }).join('\n');
-            line += `\n  评论区：\n${commentLines}`;
-          }
-        }
-        return line;
-      }).join('\n');
-      dynamicBlocks.push(`<recent_moments>\n${character.display_name}最近发了朋友圈：\n${momentLines}\n你可以把这些当做聊天话题，自然地在对话中提到。\n</recent_moments>`);
-    }
+    const recentMomentsBlock = buildPrivateMomentContext(db, {
+      characterId,
+      characterName: character.display_name,
+      userName: chatUserName,
+    });
+    if (recentMomentsBlock) dynamicBlocks.push(recentMomentsBlock);
 
     // 4. 日程上下文（当前在做什么 / 睡醒等）
     const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;

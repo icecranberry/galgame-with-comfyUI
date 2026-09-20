@@ -119,15 +119,32 @@ export const useMomentsStore = defineStore('moments', () => {
     page.value++
   }
 
-  // 发评论 → 返回 { comment, reply }
+  // 发评论 → 返回 { comment, replies }
   // 注意：组件侧（MomentCard）已做乐观更新 + 数组操作，store 只负责 comment_count 统计
-  async function addComment(postId, content) {
-    const result = await api.commentMoment(postId, content)
+  async function addComment(postId, content, replyToCommentId = null) {
+    const result = await api.commentMoment(postId, content, replyToCommentId)
     const post = posts.value.find(p => p.id === postId)
     if (post) {
-      post.comment_count = (post.comment_count || 0) + (result.comment ? 1 : 0) + (result.reply ? 1 : 0)
+      const added = (result.comment ? 1 : 0) + (result.replies?.length || (result.reply ? 1 : 0))
+      post.comment_count = (post.comment_count || 0) + added
     }
     return result
+  }
+
+  // 用户自己发朋友圈（文字 + 可选 base64 图片），角色随后通过 SSE 陆续来评论
+  async function createUserPost(payload) {
+    const post = await api.createUserMoment(payload)
+    if (post?.id) {
+      posts.value.unshift({
+        ...post,
+        images: post.images || [],
+        comment_count: 0,
+        like_count: 0,
+        liked: false,
+      })
+      if (isViewingMoments.value) await markSeen()
+    }
+    return post
   }
 
   // 加载单个帖子的评论
@@ -245,6 +262,6 @@ export const useMomentsStore = defineStore('moments', () => {
 
   return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
-    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, updatePost, deletePost,
+    loadPosts, setFilter, toggleFilterLiked, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, createUserPost, updatePost, deletePost,
     connectSSE, disconnectSSE, markSeen, refreshUnreadCount }
 })

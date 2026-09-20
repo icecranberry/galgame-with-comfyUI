@@ -847,8 +847,16 @@ export async function deleteMoment(id) {
   return request(`/moments/${id}`, { method: 'DELETE' })
 }
 
-export async function commentMoment(postId, content) {
-  return request(`/moments/${postId}/comments`, { method: 'POST', body: { content } })
+export async function commentMoment(postId, content, replyToCommentId = null) {
+  return request(`/moments/${postId}/comments`, {
+    method: 'POST',
+    body: { content, reply_to_comment_id: replyToCommentId },
+  })
+}
+
+/** 用户自己发朋友圈（文字 + 可选 base64 图片数组），角色随后陆续来评论 */
+export async function createUserMoment({ content, images = [] }) {
+  return request(`/moments/user-post`, { method: 'POST', body: { content, images } })
 }
 
 export async function deleteMomentComment(postId, commentId) {

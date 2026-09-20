@@ -28,6 +28,7 @@ import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { buildCharacterPersona } from './characterPersona.js';
+import { buildGroupUserMomentContext } from './privateMomentContext.js';
 import { RAG_TIMEOUT_FAST_MS } from './imagePromptKnowledge.js';
 import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { maybeSummarize, getRecentSummaries } from './summarizer.js';
@@ -398,8 +399,13 @@ function buildIdleContextBlock(group) {
   }
 
   const parts = [];
+  const { lines: userMomentLines } = buildGroupUserMomentContext(db, {
+    memberIds: group.members.map(m => m.id),
+    userName: config.user.nickname || '用户',
+  });
   if (scheduleLines.length > 0) parts.push(`群员当前日程：\n${scheduleLines.join('\n')}`);
   if (momentLines.length > 0) parts.push(`上次群聊后群友的新朋友圈：\n${momentLines.join('\n')}`);
+  if (userMomentLines.length > 0) parts.push(`一天内的${config.user.nickname || '用户'}朋友圈：\n${userMomentLines.join('\n')}`);
   return parts.length > 0 ? parts.join('\n\n') : null;
 }
 

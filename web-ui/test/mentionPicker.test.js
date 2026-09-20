@@ -122,3 +122,19 @@ test('选中后回填：替换末尾的 @过滤词，没有 @ 时补在末尾', 
   assert.equal(applyMention('', '阿离'), '@阿离 ')
   assert.equal(applyMention('@小美 然后 @阿', '阿离'), '@小美 然后 @阿离 ')
 })
+
+test('includeAll=false（朋友圈评论 @）不提供全体成员项', () => {
+  const none = buildMentionOptions(members, '')
+  assert.equal(none.some(o => o.isAll), true)
+
+  const noAll = buildMentionOptions(members, '', false)
+  assert.equal(noAll.some(o => o.isAll), false)
+  assert.deepEqual(noAll.map(o => o.display_name), ['小美', '阿离', '小满'])
+
+  const noAllFiltered = buildMentionOptions(members, '小', false)
+  assert.deepEqual(noAllFiltered.map(o => o.display_name), ['小美', '小满'])
+
+  const p = useMentionPicker(() => members, { includeAll: false })
+  p.sync('')
+  assert.equal(p.options.value.some(o => o.isAll), false)
+})

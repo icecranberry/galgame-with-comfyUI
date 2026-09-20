@@ -27,19 +27,19 @@ export function applyMention(text, label) {
   return MENTION_QUERY_RE.test(base) ? base.replace(/@[^\s@]*$/, `@${label} `) : `${base}@${label} `
 }
 
-/** 候选列表：过滤词命中「全体成员」时首位永远是它，其余按角色名包含匹配 */
-export function buildMentionOptions(members, query = '') {
+/** 候选列表：过滤词命中「全体成员」时首位永远是它（includeAll=false 时只列角色），其余按角色名包含匹配 */
+export function buildMentionOptions(members, query = '', includeAll = true) {
   const list = (members || []).map(m => ({ ...m, key: `m${m.id}`, isAll: false }))
-  const allMatched = !query || MENTION_ALL_LABELS.some(label => label.includes(query))
+  const allMatched = includeAll && (!query || MENTION_ALL_LABELS.some(label => label.includes(query)))
   const matched = query ? list.filter(m => (m.display_name || '').includes(query)) : list
   return allMatched ? [MENTION_ALL_OPTION, ...matched] : matched
 }
 
-export function useMentionPicker(getMembers) {
+export function useMentionPicker(getMembers, { includeAll = true } = {}) {
   const open = ref(false)
   const index = ref(0)
   const query = ref('')
-  const options = computed(() => buildMentionOptions(getMembers(), query.value))
+  const options = computed(() => buildMentionOptions(getMembers(), query.value, includeAll))
   const current = computed(() => (open.value ? options.value[index.value] : null))
   // 输入框 aria-activedescendant 指向当前高亮项
   const activeId = computed(() => (current.value ? `mention-opt-${current.value.key}` : undefined))
