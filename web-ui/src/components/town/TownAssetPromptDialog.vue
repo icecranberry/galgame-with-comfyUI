@@ -116,6 +116,7 @@ async function regen() {
   error.value = ''
   try {
     const prompt = draft.value.trim()
+    // 留空 = 不重写提示词，直接把当前 source_prompt 提交 ComfyUI 重出图（常用于换随机种子）
     // verbatim: true → 后端原样使用这段手写提示词出图，不再补固定前缀 / chibi、big head 等硬 tag
     await api.regenerateTownAsset(props.assetId, prompt ? { prompt, verbatim: true } : {})
     emit('regenerated')

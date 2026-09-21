@@ -251,41 +251,126 @@ export async function generateBuildingPrompt({ name, desc, footprint, special = 
   return text;
 }
 
-// ── 已有素材：根据用户要求改写当前提示词 ──
+// ── 已有素材：按「原始需求 + 当前提示词」重写提示词 ──
+
+/** 素材形态的中文标签：让 LLM 明确「这是什么形态的素材」，而不是只看 kind 缩写 */
+const ASSET_FORM_LABELS = {
+  ground: '等距地皮贴图（isometric ground tile）',
+  road: '等距道路贴图（isometric road tile）',
+  building: '等距建筑（isometric building sprite）',
+  prop: '等距道具（isometric object sprite）',
+  npc: '像素小人（chibi pixel sprite，纯白底全身图）',
+  player: '像素小人（chibi pixel sprite，纯白底全身图）',
+  portrait: '白底立绘（character portrait，纯白背景）',
+};
+
+/** 角色类素材的 desc 是角色外观描述（锚点特征），其余类型是画面内容描述 */
+const CHARACTER_KINDS = new Set(['npc', 'player', 'portrait']);
+
 /**
- * 按用户自然语言要求改写已有素材提示词。
- * @param {object} p - { currentPrompt, requirement, kind, name }
+ * 素材的「原始需求快照」 结构化中文要点块（每条要点独立成行，多行原文缩进保留）。
+ * 数据来自素材行 meta 的生成期快照（desc / styleTags / direction / footprint / special）；
+ * 对角色立绘、像素小人来说 desc 就是生成当时的外观描述。没有任何内容时返回空串。
+ * @param {object} snapshot
+ * @param {object} [options] - { kind }：决定 desc 的标签口径与视角说明
  */
-export async function regenerateAssetPrompt({ currentPrompt, requirement = '', kind = 'asset', name = '' }) {
+export function renderAssetRequestSnapshot(snapshot, { kind = '' } = {}) {
+  const s = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const fp = s.footprint || {};
+  const footprint = Number(fp.w) > 0 && Number(fp.h) > 0 ? `${Number(fp.w)}×${Number(fp.h)} 格` : '';
+  const descLines = String(s.desc || '').trim().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const descLabel = CHARACTER_KINDS.has(String(kind))
+    ? '角色形象描述（角色锚点特征，夹带的英文 tag 必须原样保留）'
+    : '内容描述（这张图要画的主体，夹带的英文 tag 必须原样保留）';
+  const direction = s.direction === 'up'
+    ? '背面（角色背对观众，back view）'
+    : s.direction === 'down'
+      ? '正面（角色面朝观众，front view）'
+      : (s.direction ? String(s.direction) : '');
+  return [
+    descLines.length ? `- ${descLabel}：\n${descLines.map(line => '  ' + line).join('\n')}` : '',
+    direction ? `- 视角：${direction}` : '',
+    s.styleTags ? `- 风格基调：${String(s.styleTags).trim()}` : '',
+    footprint ? `- 占地：${footprint}` : '',
+    s.special ? '- 地标：是（需要更精细、更有辨识度）' : '',
+  ].filter(Boolean).join('\n');
+}/**
+ * 组装「重写素材提示词」的 system/user 消息（不含 system0/system1，那两条要读世界观配置）。
+ * 三种口径：
+ *   fromRequestOnly=true  纯按原始需求重写，不参考既有提示词（图片管理里的「重新生成」）；
+ *   有用户要求            以用户要求决定改什么，原始需求作为事实基线（微调弹窗的改写）；
+ *   其余                  以原始需求为准修正当前提示词的漂移。
+ * @param {object} p - { currentPrompt, requirement, kind, name, requestSnapshot, fromRequestOnly }
+ */
+export function buildAssetRewriteMessages({ currentPrompt = '', requirement = '', kind = 'asset', name = '', requestSnapshot = null, fromRequestOnly = false } = {}) {
   const source = String(currentPrompt || '').trim();
-  if (!source) throw new Error('当前素材缺少提示词');
+  const snapshotText = renderAssetRequestSnapshot(requestSnapshot, { kind });
   const request = String(requirement || '').trim();
+  const rebuildOnly = fromRequestOnly === true;
+  if (rebuildOnly && !snapshotText) throw new Error('这张素材没有可依据的原始需求，无法重写提示词');
+  if (!rebuildOnly && !source && !snapshotText) throw new Error('当前素材缺少提示词');
+
+  const authority = !snapshotText
+    ? ''
+    : rebuildOnly
+      ? '- Rely ONLY on the original requirement snapshot below; there is no existing prompt to preserve.'
+      : request
+        ? '- The original requirement snapshot is the factual baseline; the user request decides what to change.'
+        : '- The original requirement snapshot is the authority: stay faithful to it, and correct anything in the current prompt that drifted away from it.';
+
+  const rules = [
+    'Rewrite the game-asset image prompt as one natural English paragraph.',
+    '',
+    'Hard Rules:',
+    '- Preserve the original asset type, required composition, and technical constraints (for example white background, isometric view, sprite framing, or front/back view).',
+    authority,
+    '- Preserve the style unless the user explicitly asks to change it.',
+    '- Merge duplicate features: each appearance anchor (hairstyle, hair color, eye color, outfit) must appear exactly once in the final prompt.',
+    '- Apply every explicit user request. If a request conflicts with the asset type, favor the asset type and make a conservative compromise.',
+    '- ALL text in English. No Chinese characters anywhere.',
+    '- Output only the rewritten prompt, without headings, explanations, analysis, lists, or code fences.',
+    "- Do not use unescaped double quotation marks (\"). Use single quotes (') instead.",
+    '- MAX 700 characters total.',
+  ].filter(Boolean).join('\n');
+
+  const formLabel = ASSET_FORM_LABELS[String(kind)] || '游戏素材（game asset）';
+  const material = [
+    '【当前素材】',
+    name ? `名称：${name}` : '',
+    `类型：${kind} / ${formLabel}`,
+    rebuildOnly
+      ? '既有提示词：忽略（本次完全按原始需求重写）'
+      : (source ? `当前提示词：${source}` : '当前提示词：（这张素材还没有落过提示词）'),
+    snapshotText ? `\n【原始需求快照（这张图最初要画的东西，最高优先级）】\n${snapshotText}` : '',
+  ].filter(Boolean).join('\n');
+
+  const userText = rebuildOnly
+    ? '请执行：忽略既有提示词，完全按原始需求快照重写这张素材的提示词，并以英文 prompt 输出。'
+    : request
+      ? `【用户修改要求】\n${request}\n\n请执行：以原始需求为准，在满足用户修改要求的前提下重写提示词，并以英文 prompt 输出。`
+      : snapshotText
+        ? (source
+          ? '请执行：对照原始需求快照重写提示词，纠正偏离原始需求的地方、保留仍然成立的技术约束，并以英文 prompt 输出。'
+          : '请执行：按原始需求快照设计这张素材的提示词，并以英文 prompt 输出。')
+        : '请执行：在保持素材主体与技术要求的前提下优化当前提示词，并以英文 prompt 输出。';
+
+  return [
+    { role: 'system', content: `【输出结构】\n${rules}` },
+    { role: 'system', content: material },
+    { role: 'user', content: userText },
+  ];
+}
+
+/**
+ * 重写已有素材提示词。
+ * fromRequestOnly=true 时纯按 meta 里的原始需求快照重写（不看 source_prompt）；
+ * 否则按用户要求 / 原始需求对照改写。
+ * @param {object} p - { currentPrompt, requirement, kind, name, requestSnapshot, fromRequestOnly }
+ */
+export async function regenerateAssetPrompt({ currentPrompt, requirement = '', kind = 'asset', name = '', requestSnapshot = null, fromRequestOnly = false }) {
   const msgs = [
     ...system0And1(),
-    {
-      role: 'system',
-      content: `【输出结构】
-Rewrite the existing game-asset image prompt as one natural English paragraph.
-
-Hard Rules:
-- Preserve the original asset type, required composition, and technical constraints (for example white background, isometric view, sprite framing, or front/back view).
-- Preserve the style unless the user explicitly asks to change it.
-- Apply every explicit user request. If a request conflicts with the asset type, favor the asset type and make a conservative compromise.
-- ALL text in English. No Chinese characters anywhere.
-- Output only the rewritten prompt, without headings, explanations, analysis, lists, or code fences.
-- Do not use unescaped double quotation marks ("). Use single quotes (') instead.
-- MAX 700 characters total.`
-    },
-    {
-      role: 'system',
-      content: [`【当前素材】`, name ? `名称：${name}` : '', `类型：${kind}`, `当前提示词：${source}`].filter(Boolean).join('\n')
-    },
-    {
-      role: 'user',
-      content: request
-        ? `【用户修改要求】\n${request}\n\n请执行：改写当前提示词，并以英文 prompt 输出。`
-        : '请执行：在保持素材主体与技术要求的前提下优化当前提示词，并以英文 prompt 输出。'
-    },
+    ...buildAssetRewriteMessages({ currentPrompt, requirement, kind, name, requestSnapshot, fromRequestOnly }),
   ];
   const out = await chatSync(msgs, {
     temperature: 0.55,

@@ -32,3 +32,40 @@ test('角色详情模板：入住开关受素材就绪约束，并带职能选�
   assert.match(template, /<TownCapabilityPicker[\s\S]{0,240}:model-value="detailChar\.capabilities"/)
   assert.match(template, /@update:model-value="value => saveCharCapabilities\(detailChar, value\)"/)
 })
+function makeGenFixture ({ result = { ok: true, ready: true } } = {}) {
+  const calls = []
+  const state = {
+    assetScope: 'scope-a',
+    alive: true,
+    props: { open: true },
+    spriteErrors: {},
+    busyFlags: {},
+    loadChars: async () => {},
+    api: {
+      async ensureTownCharacterAssets (id, options) {
+        calls.push([id, options])
+        return result
+      },
+    },
+  }
+  state.generateCharAssets = handler('generateCharAssets', state)
+  return { state, calls }
+}
+
+test('素材按钮常显：缺素材时是「生成角色素材」，齐了变「重新生成角色素材」并整套重绘', async () => {
+  const template = descriptor.template.content
+  assert.match(template, /\{\{ charAssetsReady\(detailChar\) \? '重新生成角色素材' : '生成角色素材' \}\}/)
+  assert.match(template, /@click="generateCharAssets\(detailChar, \{ force: charAssetsReady\(detailChar\) \}\)"/)
+  assert.doesNotMatch(template, /charMissingAssets\(detailChar\)" class="ap-btn-row"/)
+
+  const { state, calls } = makeGenFixture()
+  await state.generateCharAssets({ id: 42 }, { force: true })
+  assert.deepEqual(calls, [[42, { force: true }]])
+  assert.equal(state.busyFlags['charassets42'], false)
+  assert.equal(state.spriteErrors['char:42'], '')
+})
+test('重新生成时部分素材没成功：保留旧图并给出提示', async () => {
+  const { state } = makeGenFixture({ result: { ok: true, ready: true, steps: { portrait: 'failed', sprites: 'regenerated' } } })
+  await state.generateCharAssets({ id: 7 }, { force: true })
+  assert.match(state.spriteErrors['char:7'], /旧图仍在使用/)
+})

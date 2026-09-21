@@ -1,11 +1,11 @@
 <template>
   <section ref="root" class="town-dialogue-stage" role="dialog" aria-modal="true" :aria-label="`与${displayName}对话`"
-    :style="viewportStyle" :class="{ compact }" tabindex="-1" @keydown.stop="onKeydown" @keyup.stop @pointerdown.stop @mousedown.stop @click.stop @wheel.stop @touchstart.stop @touchmove.stop>
-    <div class="td-portraits" aria-label="对话人物" :inert="zoomed ? true : undefined">
+    :style="viewportStyle" :class="{ compact }" tabindex="-1" @keydown.stop="onKeydown" @keyup.stop @pointerdown.stop @mousedown.stop @click.stop="onStageClick" @wheel.stop @touchstart.stop @touchmove.stop>
+    <div class="td-portraits" aria-label="对话人物">
       <figure v-for="person in portraits" :key="person.side">
         <img v-if="person.url && !failedImages[person.url]" :src="person.url" :alt="`${person.name}立绘`" @error="failedImages[person.url] = true">
         <div v-else class="td-placeholder" aria-hidden="true">{{ person.name.slice(0, 1) }}</div>
-        <figcaption>{{ person.name }} <linshe-button v-if="person.url && !failedImages[person.url]" variant="icon" size="sm" :aria-label="`放大${person.name}立绘`" @click="zoomed = person.url">⤢</linshe-button></figcaption>
+        <figcaption>{{ person.name }}</figcaption>
         <div v-if="person.side === 'left' && npcBubble && chatActive && !historyOpen" :key="npcBubble.id ?? bubbleIndex"
           class="td-say-bubble" role="status" aria-live="polite">
           <span class="td-say-name">{{ displayName }}</span>
@@ -13,8 +13,7 @@
         </div>
       </figure>
     </div>
-    <div v-if="zoomed" class="td-zoom" @click.self="zoomed = null"><img :src="zoomed" alt="立绘大图"><linshe-button variant="icon" size="sm" aria-label="关闭立绘" @click="zoomed = null">✕</linshe-button></div>
-    <div class="td-panel" :inert="zoomed ? true : undefined">
+    <div class="td-panel">
       <svg class="td-dialog-shape" viewBox="0 0 600 420" preserveAspectRatio="none" aria-hidden="true">
         <path d="M22 15 L216 8 L406 17 L574 11 L589 44 L582 174 L594 360 L574 401 L351 411 L173 400 L23 408 L9 375 L18 209 L8 53 Z" fill="#fffaf1" stroke="#8d7968" stroke-width="2" vector-effect="non-scaling-stroke" />
         <path d="M29 24 L216 18 L405 26 L567 21 M29 392 L173 385 L350 395 L566 387" fill="none" stroke="#e0c9aa" stroke-width="1.5" vector-effect="non-scaling-stroke" />
@@ -91,7 +90,7 @@ const props = defineProps({
 const emit = defineEmits(['send', 'close', 'reload', 'load-older', 'retry', 'action'])
 const root = ref(null), input = ref(null), body = ref(null)
 const draft = ref(''), composing = ref(false), historyOpen = ref(false), failedImages = ref({})
-const viewportStyle = ref({}), compact = ref(false), zoomed = ref(null)
+const viewportStyle = ref({}), compact = ref(false)
 watch(() => props.draftRestore, value => { if (value) draft.value = value.text })
 // 对话模式只展示最近几条；完整记录交给「历史」按钮展开
 const pageKey = computed(() => (props.chatActive ? 'chat' : 'idle'))
@@ -131,11 +130,15 @@ function onEnter(event) {
   event.preventDefault()
   if (!event.isComposing && event.keyCode !== 229 && !event.repeat) submit()
 }
+// td-panel 以外都算空白：立绘、舞台留白、屏幕其它位置，点一下都能退出对话
+function onStageClick(event) {
+  if (event.target instanceof Element && event.target.closest('.td-panel')) return
+  emit('close')
+}
 function onKeydown(event) {
   if (event.key === 'Escape' && !event.isComposing && !composing.value) {
     event.preventDefault()
-    if (zoomed.value) zoomed.value = null
-    else if (historyOpen.value) historyOpen.value = false
+    if (historyOpen.value) historyOpen.value = false
     else emit('close')
   }
   if (event.key !== 'Tab') return
@@ -177,13 +180,6 @@ function resize() {
     : { top: `${offset}px`, height: `${height}px` }
 }
 let previousFocus, observer
-let zoomTrigger
-watch(zoomed, async value => {
-  if (value) zoomTrigger = document.activeElement
-  await nextTick()
-  if (value) root.value?.querySelector('.td-zoom button')?.focus()
-  else if (zoomTrigger?.isConnected) zoomTrigger.focus({ preventScroll: true })
-})
 watch(() => [props.messages.length, props.sending, historyOpen.value, props.chatActive], async () => {
   await nextTick()
   if (body.value) body.value.scrollTop = (historyOpen.value || props.chatActive) ? body.value.scrollHeight : 0
@@ -271,8 +267,6 @@ h2 { color: #59483d; font-size: 20px; font-weight: 700; margin: 4px 0 8px; }
 }
 .compact .td-portraits { display: none; }
 .compact .td-panel { grid-column: 1 / -1; width: 100%; height: 100%; }
-.td-zoom { position: absolute; inset: 0; z-index: 2; background: rgba(0,0,0,.45); display: flex; justify-content: center; align-items: center; pointer-events: auto; }
-.td-zoom img { max-width: 85%; max-height: 90%; object-fit: contain; }
 /* 手机横屏：整屏高度通常只有 ~380px。旧规则是 @media (max-height: 500px) 直接
    .td-portraits { display: none }，而横屏手机高度必然小于 500px —— 等于手机上永远看不到双方立绘。
    现在改成：有立绘的舞台只收紧留白、把中栏收窄，让两侧立绘站得住；

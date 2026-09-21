@@ -296,12 +296,12 @@
                 v-model="detailChar.townEnabled"
                 size="sm"
                 :disabled="!!busyFlags[`chartoggle${detailChar.id}`] || (!charAssetsReady(detailChar) && !detailChar.townEnabled)"
-                :title="charAssetsReady(detailChar) ? '开启后该角色入住小镇，会先自动补齐立绘与正/背小人' : '大立绘、正面、背面小人齐了才能入住，先补全图片素材'"
+                :title="charAssetsReady(detailChar) ? '开启后该角色入住小镇，会先自动补齐立绘与正/背小人' : '大立绘、正面、背面小人齐了才能入住，先点下方「生成角色素材」'"
                 :aria-label="`${detailChar.displayName} 入住小镇开关`"
                 @change="v => toggleChar(detailChar, v)"
               />
             </div>
-            <p v-if="!charAssetsReady(detailChar) && !detailChar.townEnabled" class="ap-asset-appearance">大立绘、正面、背面小人齐了才能入住，先点下方「补全图片素材」。</p>
+            <p v-if="!charAssetsReady(detailChar) && !detailChar.townEnabled" class="ap-asset-appearance">大立绘、正面、背面小人齐了才能入住，先点下方「生成角色素材」。</p>
 
             <div class="ap-section">
               <div class="ap-section-title">职能权限（可同时选择，覆盖关联居民的默认权限）</div>
@@ -330,14 +330,15 @@
                   <div v-else class="ap-sprite"><span class="ap-sprite-missing">·</span></div>
                   <p v-if="detailChar.spriteAssets?.[dir]?.status === 'ready' && appearanceText(detailChar.appearanceStatus?.sprites?.[dir])" class="ap-asset-appearance" :aria-label="`${dir === 'down' ? '正面' : '背面'}小人外观状态`">{{ appearanceText(detailChar.appearanceStatus?.sprites?.[dir]) }}</p>
                 </div>
-                <div v-if="charMissingAssets(detailChar)" class="ap-btn-row">
-                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charassets${detailChar.id}`]" @click="completeCharAssets(detailChar)">
-                    补全图片素材
+                <div class="ap-btn-row">
+                  <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charassets${detailChar.id}`]" @click="generateCharAssets(detailChar, { force: charAssetsReady(detailChar) })">
+                    {{ charAssetsReady(detailChar) ? '重新生成角色素材' : '生成角色素材' }}
                   </linshe-button>
                 </div>
               </div>
-              <p v-if="busyFlags[`charassets${detailChar.id}`]" class="ap-asset-appearance">正在补齐立绘与正/背小人，请稍候…</p>
-              <p v-if="charMissingAssets(detailChar)" class="ap-asset-appearance">这里只认角色自己的小镇立绘与小人，没做的就是空槽。点「补全图片素材」会把缺的立绘、正/背小人一次补齐（优先复用关联居民的素材，没有才生成）；也可在「角色素材」列表点「一键生成所有缺失素材」，或直接打开上方入住开关（会先补齐素材再入住）。</p>
+              <p v-if="busyFlags[`charassets${detailChar.id}`]" class="ap-asset-appearance">正在生成立绘与正/背小人，请稍候…</p>
+              <p v-if="charMissingAssets(detailChar)" class="ap-asset-appearance">这里只认角色自己的小镇立绘与小人，没做的就是空槽。点「生成角色素材」会把缺的立绘、正/背小人一次补齐（优先复用关联居民的素材，没有才生成）；也可在「角色素材」列表点「一键生成所有缺失素材」，或直接打开上方入住开关（会先补齐素材再入住）。</p>
+              <p v-else-if="!busyFlags[`charassets${detailChar.id}`]" class="ap-asset-appearance">素材已齐，点「重新生成角色素材」会把立绘、正/背小人整套重绘（覆盖当前图片，也不再复用关联居民素材）。</p>
               <div v-if="charSpritesStale(detailChar)" class="ap-actions is-column">
                 <linshe-button variant="secondary" size="sm" :loading="busyFlags[`charsprites${detailChar.id}`]" @click="regenCharSprites(detailChar, true)">按当前外观更新小人</linshe-button>
                 <p class="ap-asset-appearance">会重绘外观过时的小人</p>
@@ -559,7 +560,7 @@ function charThumbAsset(c) {
   return listThumbAsset({ portrait: c?.portrait, sprites: c?.spriteAssets })
 }
 
-// 素材没齐（缺 / 生成中 / 失败）就露出「补全图片素材」入口，免得入住开关被禁用后又没有补救的路
+// 素材没齐（缺 / 生成中 / 失败）：详情页按钮显示为「生成角色素材」，列表批量入口也只处理这些角色
 function charMissingAssets(c) {
   return !charAssetsReady(c)
 }
@@ -941,26 +942,29 @@ async function regenCharSprites(c, refreshAppearance = false) {
 }
 
 /**
- * 补全角色的图片素材：大立绘 + 正/背像素小人（后端 ensureCharacterTownAssets，
+ * 角色的图片素材：大立绘 + 正/背像素小人（后端 ensureCharacterTownAssets，
  * 优先登记关联居民已有素材、缺失才生成；已有 ready 的环节自动跳过）。
+ * force = true 走「重新生成」：立绘与正/背小人整套重绘，既不跳过已有素材也不复用关联居民素材。
  */
-async function completeCharAssets(c) {
+async function generateCharAssets(c, { force = false } = {}) {
   const scope = assetScope
   const current = () => alive && props.open && scope === assetScope
   spriteErrors[`char:${c.id}`] = ''
   busyFlags[`charassets${c.id}`] = true
   try {
-    const result = await api.ensureTownCharacterAssets(c.id)
+    const result = await api.ensureTownCharacterAssets(c.id, { force })
     if (!alive || !props.open) return
     await loadChars()
     if (result?.ok === false) {
-      spriteErrors[`char:${c.id}`] = result.error || '素材还没补齐，请稍后重试。'
+      spriteErrors[`char:${c.id}`] = result.error || '素材还没生成好，请稍后重试。'
     } else if (result?.ready === false) {
       spriteErrors[`char:${c.id}`] = '立绘或小人没生成成功，请重新读取素材状态后再试。'
+    } else if (Object.values(result?.steps || {}).some(step => step === 'failed')) {
+      spriteErrors[`char:${c.id}`] = '有素材没重新生成成功，旧图仍在使用，可稍后重试。'
     }
   } catch (err) {
     if (!current()) return
-    spriteErrors[`char:${c.id}`] = err?.message || '素材补齐失败，请稍后重试。'
+    spriteErrors[`char:${c.id}`] = err?.message || (force ? '素材重新生成失败，请稍后重试。' : '素材生成失败，请稍后重试。')
     console.warn('[town-admin] char assets failed:', err?.message)
   } finally {
     busyFlags[`charassets${c.id}`] = false

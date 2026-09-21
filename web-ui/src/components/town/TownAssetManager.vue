@@ -47,6 +47,7 @@
                   variant="secondary" size="sm"
                   :loading="regenBusy"
                   :disabled="!displayAsset?.id"
+                  :title="regenButtonTitle"
                   @click="regenerateAsset"
                 >重新生成</linshe-button>
                 <linshe-button variant="ghost" size="sm" @click="promptOpen = true">✎ 微调提示词</linshe-button>
@@ -86,6 +87,7 @@
                   variant="secondary" size="sm"
                   :loading="regenBusy"
                   :disabled="!displayAsset?.id"
+                  :title="regenButtonTitle"
                   @click="regenerateAsset"
                 >重新生成</linshe-button>
                 <linshe-button variant="ghost" size="sm" @click="promptOpen = true">✎ 微调提示词</linshe-button>
@@ -93,8 +95,9 @@
             </TownImageEditor>
           </div>
 
-          <div v-if="error" class="tam-actions">
-            <span class="tam-error">{{ error }}</span>
+          <div v-if="error || regenStatus" class="tam-actions">
+            <span v-if="error" class="tam-error">{{ error }}</span>
+            <span v-else class="tam-status">{{ regenStatus }}</span>
           </div>
         </div>
       </div>
@@ -133,6 +136,7 @@ const emit = defineEmits(['close', 'updated'])
 const localAsset = ref(null)
 const promptOpen = ref(false)
 const regenBusy = ref(false)
+const regenStatus = ref('')
 const hiresBusy = ref(false)
 const uploadBusy = ref(false)
 const fileEl = ref(null)
@@ -161,6 +165,16 @@ const useTileCropper = computed(() => isTileAsset.value && !!tileSourceUrl.value
 /** 初始菱形：用户上次调的 > 生成时自动检测的 */
 const tileCropInitial = computed(() => displayAsset.value?.meta?.tileCrop || displayAsset.value?.meta?.sourceDiamond || null)
 const editorHint = computed(() => (isTileAsset.value ? '这张地皮没有裁剪前原图，重新生成后才能用菱形微调' : props.hint))
+/** 这张素材在 meta 里有没有生成期的原始需求快照（desc/styleTags/朝向/占格/地标） */
+const hasRequestSnapshot = computed(() => {
+  const meta = displayAsset.value?.meta || {}
+  return !!(String(meta.desc || '').trim() || String(meta.styleTags || '').trim()
+    || meta.footprint || meta.special || meta.direction)
+})
+/** 向导传入 regenerate 时是「按外观重绘」；图片管理里则是「按原始需求重写提示词再出图」 */
+const regenButtonTitle = computed(() => (props.regenerate
+  ? '按当前外观与配置重新出图'
+  : '按这张图的原始需求重新生成提示词，再按新提示词出图'))
 
 function generationStepForAsset(asset) {
   const kind = String(asset?.kind || '')
@@ -287,25 +301,53 @@ async function refreshAsset() {
   }
 }
 
+/**
+ * 图片管理里的「重新生成」= 纯按原始需求重写提示词，再按新提示词出图；
+ * 不再沿用原提示词换种子重跑（那是「微调提示词」弹窗留空时的口径）。
+ */
 async function regenerateAsset() {
   const asset = displayAsset.value
   if (!asset?.id || regenBusy.value) return
   await flushGenerationConfigSave()
   regenBusy.value = true
   error.value = ''
+  regenStatus.value = ''
   try {
     let next = null
-    if (props.regenerate) next = await props.regenerate(asset)
-    else {
-      const data = await api.regenerateTownAsset(asset.id, {})
+    if (props.regenerate) {
+      // 向导传入的重绘：外观与配置沿用调用方逻辑，不改写提示词
+      next = await props.regenerate(asset)
+    } else {
+      const prompt = await rewritePromptFromRequest(asset)
+      regenStatus.value = prompt ? '正在按新提示词出图…' : '正在按当前提示词出图…'
+      const data = await api.regenerateTownAsset(asset.id, prompt ? { prompt, verbatim: true } : {})
       next = data.asset
+      regenStatus.value = prompt ? '已按原始需求重写出图' : '已重新出图'
     }
     localAsset.value = next || await refreshAsset()
     if (next) emit('updated', next)
   } catch (err) {
+    regenStatus.value = ''
     error.value = err?.message || '重新生成失败'
   } finally {
     regenBusy.value = false
+  }
+}
+
+/**
+ * 纯按原始需求重写提示词（不看当前 source_prompt）。
+ * 素材没有需求快照（上传图 / 手编图）时返回空串，调用方退回「用当前提示词出图」。
+ */
+async function rewritePromptFromRequest(asset) {
+  if (!hasRequestSnapshot.value) return ''
+  regenStatus.value = '正在按原始需求重写提示词…'
+  try {
+    const data = await api.regenerateTownAssetPrompt(asset.id, '', { fromRequestOnly: true })
+    return String(data?.prompt || '').trim()
+  } catch (err) {
+    // 后端同样判定「没有可依据的原始需求」时也退回当前提示词，不让整条链路卡死
+    if (/原始需求/.test(err?.message || '')) return ''
+    throw err
   }
 }
 
@@ -376,6 +418,7 @@ watch(() => props.open, async (open) => {
     localAsset.value = null
     promptOpen.value = false
     error.value = ''
+    regenStatus.value = ''
     generationStatus.value = ''
     generationSettings.value = null
     generationLoaded.value = false
@@ -432,6 +475,13 @@ watch(() => props.open, async (open) => {
   font-size: 11px;
   color: #c0564a;
   background: rgba(192, 86, 74, 0.08);
+  border-radius: 8px;
+  padding: 5px 9px;
+}
+.tam-status {
+  font-size: 11px;
+  color: #6b6259;
+  background: rgba(120, 90, 70, 0.08);
   border-radius: 8px;
   padding: 5px 9px;
 }

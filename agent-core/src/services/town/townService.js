@@ -2090,8 +2090,11 @@ export function travelPlayer({ targetMapId, expectedPlayerRevision = null, world
 
 // ── 管理面板：角色spirit / 小镇设置 / 重置世界 ──
 
-/** 生成一个入住角色的正/背像素小人（600×800 → 36×48；外观走 characterPersona 统一入口 + 酒馆式 LLM 出 prompt） */
-export async function generateCharacterSprites(characterId, { expectedWorld = captureTownAssetWorld(), refreshAppearance = false } = {}) {
+/**
+ * 生成一个入住角色的正/背像素小人（600×800 → 36×48；外观走 characterPersona 统一入口 + 酒馆式 LLM 出 prompt）
+ * force = true 时无条件重绘（含已就绪的方向），用于「重新生成角色素材」整套重画。
+ */
+export async function generateCharacterSprites(characterId, { expectedWorld = captureTownAssetWorld(), refreshAppearance = false, force = false } = {}) {
   const db = getDb();
   const generation = state.generation;
   const row = db.prepare(`
@@ -2121,7 +2124,7 @@ export async function generateCharacterSprites(characterId, { expectedWorld = ca
     const key = `char_${characterId}_${dir}`;
     const existing = getAssetsByKey([key])[0];
     // 未记录外观签名的素材（老图/上传图）不视为过时，只有明确 needs_update 才重绘
-    if (existing?.status === 'ready' && (refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) !== 'needs_update')) continue;
+    if (!force && existing?.status === 'ready' && (refreshAppearance !== true || townAssetAppearanceStatus(existing, appearanceGuard) !== 'needs_update')) continue;
     try {
       const prompt = await generateSpritePrompt({ appearanceInfo, direction: dir });
       assertCurrent();
@@ -2199,8 +2202,9 @@ onTownAssetsUpdated(() => refreshAgentVisuals());
  * 2) 正/背小人：优先登记关联居民的小镇小人（char_{id}_*）；没有才 LLM 生成
  * 已有 ready 素材的环节直接跳过，重复调用安全。
  * 返回的 `ready` 表示三张素材（立绘 + 正/背小人）是否齐备 —— 入住的前置条件。
+ * force = true 时改为「重新生成全套」：立绘与正/背小人都重画，既不复用关联居民素材、也不跳过已有素材。
  */
-export async function ensureCharacterTownAssets(characterId) {
+export async function ensureCharacterTownAssets(characterId, { force = false } = {}) {
   const db = getDb();
   const char = db.prepare('SELECT id, name, display_name, standing_url FROM characters WHERE id = ?').get(characterId);
   if (!char) return { ok: false, error: '角色不存在' };
@@ -2210,13 +2214,14 @@ export async function ensureCharacterTownAssets(characterId) {
   const steps = { portrait: 'skipped', sprites: 'skipped' };
 
   try {
-    if (readyAssetUrl(getAssetsByKey([`char_${characterId}_portrait`])[0])) {
+    if (!force && readyAssetUrl(getAssetsByKey([`char_${characterId}_portrait`])[0])) {
       steps.portrait = 'ready';
     } else {
-      const npcPortrait = npcId ? readyAssetUrl(getAssetsByKey([`npc_${npcId}_portrait`])[0]) : null;
+      // 重新生成时不复用关联居民的立绘，按角色当前外观重画一张
+      const npcPortrait = force || !npcId ? null : readyAssetUrl(getAssetsByKey([`npc_${npcId}_portrait`])[0]);
       const { generateCharacterPortrait } = await import('./townNpcService.js');
       const result = await generateCharacterPortrait(characterId, { fallbackUrl: npcPortrait });
-      steps.portrait = result.reused ? 'imported' : 'generated';
+      steps.portrait = result.reused ? 'imported' : (force ? 'regenerated' : 'generated');
     }
   } catch (err) {
     steps.portrait = 'failed';
@@ -2227,7 +2232,11 @@ export async function ensureCharacterTownAssets(characterId) {
   const ownSpriteUrl = (dir) => readyAssetUrl(getAssetsByKey([`char_${characterId}_${dir}`])[0]);
   const npcSpriteUrl = (dir) => (npcId ? readyAssetUrl(getAssetsByKey([`npc_${npcId}_${dir}`])[0]) : null);
   try {
-    if (SPRITE_DIRECTIONS.every(ownSpriteUrl)) {
+    if (force) {
+      // 重新生成：正/背整套重画，已就绪的方向也重绘
+      await generateCharacterSprites(characterId, { force: true });
+      steps.sprites = 'regenerated';
+    } else if (SPRITE_DIRECTIONS.every(ownSpriteUrl)) {
       steps.sprites = 'ready';
     } else if (SPRITE_DIRECTIONS.every(npcSpriteUrl)) {
       // 关联居民正/背都在才整套登记，避免只借来半套让角色半身可动

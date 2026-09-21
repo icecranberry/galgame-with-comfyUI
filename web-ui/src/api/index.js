@@ -1460,8 +1460,8 @@ export function fetchTownAsset(id) {
   return jsonRequest(`${BASE}/town/assets/${id}`)
 }
 
-export function regenerateTownAssetPrompt(id, requirement) {
-  return jsonRequest(`${BASE}/town/assets/${id}/regenerate-prompt`, townJson('POST', { requirement }))
+export function regenerateTownAssetPrompt(id, requirement, options = {}) {
+  return jsonRequest(`${BASE}/town/assets/${id}/regenerate-prompt`, townJson('POST', { requirement, ...options }))
 }
 
 // 保存单张素材的画师串 / LoRA / 固定前缀
@@ -1611,9 +1611,9 @@ export function generateTownCharacterPortrait(characterId) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/portrait`, townJson('POST', {}))
 }
 
-// 一键补齐入住角色的全套素材（立绘 + 正/背小人；已有素材的环节后端自动跳过）
-export function ensureTownCharacterAssets(characterId) {
-  return jsonRequest(`${BASE}/town/characters/${characterId}/assets`, townJson('POST', {}))
+// 入住角色的全套素材（立绘 + 正/背小人；已有素材的环节后端自动跳过，force = true 时整套重新生成）
+export function ensureTownCharacterAssets(characterId, options = {}) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/assets`, townJson('POST', options?.force === true ? { force: true } : {}))
 }
 
 export function rerollTownNpc(id) {

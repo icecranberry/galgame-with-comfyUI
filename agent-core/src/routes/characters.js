@@ -247,6 +247,15 @@ router.put('/:id', (req, res) => {
   params.push(req.params.id);
   db.prepare(`UPDATE characters SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 
+  // 托管影子档案（character_managed=1）只是角色卡在小镇里的投影、没有独立演化：
+  // 角色卡改了人格就跟着改，避免小镇侧一直用建档时那份旧快照（普通居民档案不动）。
+  if (base_prompt !== undefined) {
+    const fresh = db.prepare('SELECT base_prompt, short_prompt FROM characters WHERE id = ?').get(parseInt(req.params.id, 10));
+    db.prepare(`UPDATE town_npcs SET persona = ?, brief = ?
+      WHERE character_id = ? AND COALESCE(character_managed, 0) = 1`)
+      .run(fresh?.base_prompt || '', fresh?.short_prompt || '', parseInt(req.params.id, 10));
+  }
+
   // 如果更新了 base_prompt（非纯外观修改，日程人格只取外观段之前），标记日程模板需要重新生成
   if (base_prompt !== undefined && !appearanceOnlyEdit && config.features.schedule !== false) {
     const charId = parseInt(req.params.id, 10);

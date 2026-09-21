@@ -34,6 +34,7 @@ import {
   updateAssetGenerationConfig,
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
+import { buildAssetRequestSnapshot } from '../services/town/townAssetRequest.js';
 import { getMapPayload, saveMap, renameMap } from '../services/town/townMapService.js';
 import { getTownWallet, getTownNpcFunctions, receiveTownNpcGift, getTownEconomyContext, buyTownNpcStock } from '../services/town/townEconomyRuntime.js';
 import { getTownNpcStockView } from '../services/town/townNpcStockService.js';
@@ -245,6 +246,11 @@ router.post('/assets/:id/regenerate-prompt', async (req, res) => {
       requirement: req.body?.requirement,
       kind: asset.kind,
       name: asset.name,
+      // 角色类素材（立绘 / 小人）实时重取「short_prompt + 外观段」，
+      // 不用 meta.desc  它可能已退化成整卡 / 人格卡全文
+      requestSnapshot: await buildAssetRequestSnapshot(asset),
+      // 图片管理里的「重新生成」= 纯按原始需求重写提示词，不看既有 source_prompt
+      fromRequestOnly: req.body?.fromRequestOnly === true,
     });
     res.json({ prompt });
   } catch (err) {
@@ -648,12 +654,12 @@ router.post('/characters/:id/profile', async (req, res) => {
   }
 });
 
-// 一键补齐角色的全套素材（立绘 + 正/背小人；已有 ready 素材的环节自动跳过）
+// 角色的全套素材（立绘 + 正/背小人）：已有 ready 素材的环节自动跳过；body.force = true 时整套重新生成
 router.post('/characters/:id/assets', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-    res.json(await ensureCharacterTownAssets(id));
+    res.json(await ensureCharacterTownAssets(id, { force: req.body?.force === true }));
   } catch (err) {
     if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
     res.status(500).json({ error: err?.message || '素材补齐失败' });
