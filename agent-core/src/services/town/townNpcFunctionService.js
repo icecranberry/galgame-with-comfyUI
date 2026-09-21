@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson, createTownEventService, requireText, townError } from './townEventService.js';
-import { ensureNpcFunctions, NPC_TRADE_STARTING_BALANCE } from './townNpcFunctions.js';
+import { ensureNpcFunctions } from './townNpcFunctions.js';
 import { sourceTradeCapabilities } from './townInteractionTarget.js';
 import { TRADER_SELLS } from './townNpcFunctions.js';
 
@@ -49,19 +49,6 @@ export function createTownNpcFunctionService({ db, clock, registry, economy, ite
   };
   const playerAccountId = input => sync(economy.ensureAccount({ ...input, ownerKey: `actor:${sync(registry.resolveAgentKey('me')).actorId}`,
     actorId: sync(registry.resolveAgentKey('me')).actorId, accountType: 'actor' })).accountId;
-  const npcAccountId = (input, actorId) => sync(economy.ensureAccount({ ...input, ownerKey: `actor:${actorId}`,
-    actorId, accountType: 'actor' })).accountId;
-  function ensureTraderWallet(input, actorId) {
-    const businessAccount = tradingAccount?.(actorId);
-    if (businessAccount) return sync(economy.getAccount({ ...input, accountId: businessAccount }));
-    const account = sync(economy.ensureAccount({ ...input, ownerKey: `actor:${actorId}`, actorId, accountType: 'actor' }));
-    if (account.balance === 0) {
-      sync(economy.seed({ ...input, accountId: account.accountId, amount: NPC_TRADE_STARTING_BALANCE,
-        seedVersion: 1, idempotencyKey: `npc-wallet-seed:${actorId}`, sourceKey: `npc-wallet-seed:${actorId}`,
-        reasonCode: 'NPC_TRADE_SEED' }));
-    }
-    return sync(economy.getAccount({ ...input, accountId: account.accountId }));
-  }
   function receiveGift(npcId, input) {
     epoch(input); requireText(input.idempotencyKey);
     if (!itemTemplates?.grant) throw townError('ITEM_TEMPLATES_REQUIRED');
@@ -97,14 +84,10 @@ export function createTownNpcFunctionService({ db, clock, registry, economy, ite
     epoch(input);
     const context = resolveNpc(npcId, input);
     if (!context.functions.trader) throw townError('NOT_A_TRADER');
-    const businessAccount = tradingAccount?.(context.actorId);
-    const npcWallet = businessAccount ? sync(economy.getAccount({ ...input, accountId: businessAccount }))
-      : sync(economy.ensureAccount({ ...input, ownerKey: `actor:${context.actorId}`, actorId: context.actorId, accountType: 'actor' }));
     const nameOf = spec => itemTemplates?.getTemplate
       ? itemTemplates.getTemplate({ ...input, templateId: spec.templateId, templateVersion: spec.templateVersion })?.name ?? spec.templateId
       : spec.templateId;
     return { npcActorId: context.actorId, displayName: context.npcRow.display_name,
-      walletBalance: npcWallet.balance,
       sells: context.functions.trader.sells.map(spec => ({ ...spec, name: nameOf(spec) })) };
   }
   /** 玩家向 NPC 直接购买：一件起买，付钱即发货进背包，没有交易单与确认流程。 */
@@ -118,18 +101,17 @@ export function createTownNpcFunctionService({ db, clock, registry, economy, ite
       const spec = trader.sells.find(entry => entry.templateId === input.templateId);
       if (!spec) throw townError('INVALID_TRADE_ITEM');
       const playerAccount = playerAccountId(input);
-      const npcAccount = ensureTraderWallet(input, context.actorId);
       sync(itemTemplates.ensureDefaultTemplates({ ...input }));
       const sourceId = `npc-trade:${hash({ key: input.idempotencyKey, spec: spec.templateId })}`;
+      // 居民不持有钱包：货直接发给玩家，钱从玩家账上销毁。
       const grant = sync(itemTemplates.grant({ ...input, templateId: spec.templateId, templateVersion: spec.templateVersion,
-        ownerKey: npcAccount.ownerKey, quantity: 1, sourceType: 'trade', sourceId,
+        ownerKey: 'me', quantity: 1, sourceType: 'trade', sourceId,
         idempotencyKey: `${input.idempotencyKey}:grant`, reasonCode: 'NPC_TRADE' }));
       const item = grant.items[0];
-      const payment = sync(itemTemplates.trade({ ...input, ownerKey: npcAccount.ownerKey, itemId: item.id,
-        expectedVersion: item.version, toOwnerKey: 'me', fromAccountId: playerAccount, toAccountId: npcAccount.accountId,
-        amount: spec.price, idempotencyKey: input.idempotencyKey, sourceKey: `npc-trade:${input.idempotencyKey}`,
+      sync(economy.burn({ ...input, accountId: playerAccount, amount: spec.price,
+        idempotencyKey: input.idempotencyKey, sourceKey: `npc-trade:${input.idempotencyKey}`,
         reasonCode: 'NPC_TRADE_PURCHASE' }));
-      const result = { direction: 'buy', itemId: payment.itemIds[0], templateId: spec.templateId, price: spec.price };
+      const result = { direction: 'buy', itemId: item.id, templateId: spec.templateId, price: spec.price };
       db.prepare(`INSERT INTO town_npc_trade_receipts(world_id,world_epoch,actor_id,direction,template_id,price,item_id,occurred_at,result)
         VALUES(?,?,?,?,?,?,?,?,?)`).run(input.worldId, input.worldEpoch, context.actorId, result.direction,
         result.templateId, result.price, result.itemId, now(), canonicalJson(result));

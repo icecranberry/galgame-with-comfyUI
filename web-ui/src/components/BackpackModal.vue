@@ -210,6 +210,9 @@
   </Teleport>
 
   <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示） ── -->
+  <!-- 礼物叙事：把小镇货摊买来的道具送给角色，图片 + 描述沿用小镇服务/打工的胶片样式 -->
+  <TownServiceStage :open="giftStage.open" :session="giftStage.session" @close="giftStage.open = false" />
+
   <ChestRevealOverlay
     :show="fullscreen"
     :chest-anim="chestAnim"
@@ -228,6 +231,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import ChestSvg from './ChestSvg.vue'
 import ItemFallbackIcon from './ItemFallbackIcon.vue'
 import ChestRevealOverlay from './ChestRevealOverlay.vue'
+import TownServiceStage from './town/TownServiceStage.vue'
 import { useBackpackActions, ITEM_KIND_LABELS as KIND_LABELS } from '../composables/useBackpackActions.js'
 
 const props = defineProps({
@@ -247,7 +251,7 @@ const {
   chestButtonLabel, startCountdown, stopCountdown,
   effectKindLabel, effectIconPath, effectRemainingText, isEffectUrgent,
   removingEffectId, onRemoveEffect,
-  detailItem, openDetail, startUse,
+  detailItem, openDetail, startUse, giftStage,
   showCharPicker, pendingItem, cancelPick, pickCharacter,
   onDiscard, resetUi,
 } = useBackpackActions({

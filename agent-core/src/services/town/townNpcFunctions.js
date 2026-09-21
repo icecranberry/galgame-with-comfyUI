@@ -17,7 +17,6 @@ const TRADER_SELLS = Object.freeze([
   Object.freeze({ templateId: 'town.energy_charm', templateVersion: 1, price: 15 }),
   Object.freeze({ templateId: 'town.tavern_meal', templateVersion: 1, price: 10 }),
 ]);
-const TRADER_STARTING_BALANCE = 200;
 
 const JOB_TRADE_KEYWORDS = Object.freeze(['商', '店', '摊', '市', '掌柜', '老板', '货郎', '杂货']);
 const JOB_GIFT_KEYWORDS = Object.freeze(['医', '师', '匠', '厨', '花', '茶', '糕', '裁缝', '教书', '先生']);
@@ -83,7 +82,6 @@ export function assignNpcFunctions(npc) {
   return validate(functions);
 }
 
-export const NPC_TRADE_STARTING_BALANCE = TRADER_STARTING_BALANCE;
 export { GIFT_COOLDOWN_MS, GIFT_POOL, TRADER_SELLS };
 
 /** 读取（并按需补齐）某居民的 functions_json；损坏的声明按重新分配处理，绝不把坏数据吐给调用方。 */

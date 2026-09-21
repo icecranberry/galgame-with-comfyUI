@@ -3,7 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.resolve(__dirname, '..', '..', 'data', 'images');
+// 默认落在 agent-core/data/images；测试或离线脚本可用 IMAGES_DIR 指到别处，
+// 避免像「清理测试产物」那样误伤真实图片目录。
+const DATA_DIR = process.env.IMAGES_DIR
+  ? path.resolve(process.env.IMAGES_DIR)
+  : path.resolve(__dirname, '..', '..', 'data', 'images');
 const AVATARS_DIR = path.resolve(__dirname, '..', '..', 'data', 'avatars');
 
 export const IMAGE_CATEGORIES = {
@@ -18,7 +22,7 @@ export const IMAGE_CATEGORIES = {
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },
   standing:  { dir: 'standing',  label: '立绘' },
-  town_service: { dir: 'town_service', label: '小镇服务' },
+  town_service: { dir: 'town_service', label: '小镇生活' }, // 打工与服务共用此目录
 };
 
 export const LEGACY_CATEGORY = 'history';

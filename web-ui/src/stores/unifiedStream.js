@@ -112,6 +112,9 @@ function _connect() {
     town_npc_stock_ready:      d => _dispatch('town_npc_stock_ready', d),
     town_npc_stock_rolled:     d => _dispatch('town_npc_stock_rolled', d),
     town_npc_stock_progress:   d => _dispatch('town_npc_stock_progress', d),
+    // 小镇货摊买来的道具送给角色：礼物叙事（图片 + 描述）
+    item_gift_ready:           d => _dispatch('item_gift_ready', d),
+    item_gift_progress:        d => _dispatch('item_gift_progress', d),
   }, {
     onClose: _scheduleReconnect,
   })

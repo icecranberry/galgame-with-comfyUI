@@ -287,7 +287,9 @@ ${worldPenetrationLine}
       artist: config.comfyui.eventArtist,
       width: config.comfyui.eventWidth,
       height: config.comfyui.eventHeight,
-      scene: 'events',
+      // 小镇奇遇的全局 LoRA 跟随「日程」勾选框；工作流仍按 events 选。
+      scene: 'schedule',
+      workflowScene: 'events',
       priority: options.manual ? 'high' : 'low',
     });
     if (genResult.success && genResult.images.length > 0) {
@@ -502,7 +504,7 @@ ${npcPersonaBlock(npc, playerName, playerAppearance)}` },
         ragQuery: branchData.description || event.description,
         artist: config.comfyui.eventArtist,
         width: config.comfyui.eventWidth,
-        height: config.comfyui.eventHeight, scene: 'events',
+        height: config.comfyui.eventHeight, scene: 'schedule', workflowScene: 'events',
         priority: 'high',
       });
       if (genResult.success && genResult.images.length > 0) {

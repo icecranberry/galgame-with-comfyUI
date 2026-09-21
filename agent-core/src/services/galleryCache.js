@@ -37,11 +37,16 @@ async function scanDirectory(dirPath, category, urlPrefix) {
 }
 
 /** 刷新相册缓存：扫描所有子目录 + 历史平铺目录，批量 stat */
+// 相册里不出现的目录：道具是背包图标等游戏素材，不是「留影」。
+// 注意只在相册层排除：图片压缩等其它调用方仍然要处理它们。
+const GALLERY_EXCLUDED_CATEGORIES = new Set(['items']);
+
 export async function refreshGalleryCache() {
   const dirs = getAllImageDirs();
   const allResults = [];
 
   for (const { category, dir, urlPrefix } of dirs) {
+    if (GALLERY_EXCLUDED_CATEGORIES.has(category)) continue;
     const results = await scanDirectory(dir, category, urlPrefix);
     allResults.push(...results);
   }

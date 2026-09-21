@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { listBackpack, listActiveEffects, openChest, useItem, discardItem, collectItem, removeActiveEffect } from '../services/itemService.js';
+import { startGiftNarrative, getGiftNarrative } from '../services/itemGiftNarrative.js';
 
 const router = Router();
 
@@ -47,11 +48,24 @@ router.post('/:id/use', (req, res) => {
     if (!character_id) return res.status(400).json({ error: '缺少 character_id' });
     const result = useItem(Number(req.params.id), Number(character_id));
     if (!result.ok) return res.status(400).json({ error: result.error });
+    // 小镇货摊买来的礼物：道具已消费，故事与配图异步产出，走 item_gift_* 推送。
+    if (result.gift) {
+      const { id } = startGiftNarrative({ item: result.item, characterId: Number(character_id) });
+      return res.json({ ok: true, gift: true, sessionId: id,
+        characterName: result.characterName, itemName: result.item?.name || '' });
+    }
     res.json(result);
   } catch (err) {
     console.error('[items] use error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/items/gift/:id  礼物叙事状态（前端错过 SSE 时兜底查询）
+router.get('/gift/:id', (req, res) => {
+  const task = getGiftNarrative(req.params.id);
+  if (!task) return res.status(404).json({ error: '这段礼物叙事已经结束' });
+  res.json(task);
 });
 
 // DELETE /api/items/effects/:id — 提前移除已生效的效果

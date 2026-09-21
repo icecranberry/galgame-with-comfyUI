@@ -6,6 +6,11 @@
         <img v-if="person.url && !failedImages[person.url]" :src="person.url" :alt="`${person.name}立绘`" @error="failedImages[person.url] = true">
         <div v-else class="td-placeholder" aria-hidden="true">{{ person.name.slice(0, 1) }}</div>
         <figcaption>{{ person.name }} <linshe-button v-if="person.url && !failedImages[person.url]" variant="icon" size="sm" :aria-label="`放大${person.name}立绘`" @click="zoomed = person.url">⤢</linshe-button></figcaption>
+        <div v-if="person.side === 'left' && npcBubble && chatActive && !historyOpen" :key="npcBubble.id ?? bubbleIndex"
+          class="td-say-bubble" role="status" aria-live="polite">
+          <span class="td-say-name">{{ displayName }}</span>
+          <p>{{ npcBubble.content }}</p>
+        </div>
       </figure>
     </div>
     <div v-if="zoomed" class="td-zoom" @click.self="zoomed = null"><img :src="zoomed" alt="立绘大图"><linshe-button variant="icon" size="sm" aria-label="关闭立绘" @click="zoomed = null">✕</linshe-button></div>
@@ -17,38 +22,53 @@
       <header>
         <div><span class="td-kicker">小镇 · 相谈</span><h2>{{ displayName }}</h2></div>
         <div class="td-actions">
-          <linshe-button variant="ghost" size="sm" :aria-expanded="historyOpen" @click="historyOpen = !historyOpen">{{ historyOpen ? '返回对白' : '历史' }}</linshe-button>
+          <linshe-button variant="ghost" size="sm" :aria-expanded="historyOpen" @click="historyOpen = !historyOpen">{{ historyOpen ? '收起记录' : '历史' }}</linshe-button>
           <linshe-button variant="icon" size="sm" aria-label="关闭对话" @click="$emit('close')">✕</linshe-button>
         </div>
       </header>
-      <div ref="body" class="td-body" tabindex="0" aria-live="polite" :aria-label="historyOpen ? '最近对话记录' : '当前对白'">
-        <p v-if="loading" role="status">正在读取对话…</p>
-        <template v-else>
-          <linshe-button v-if="historyOpen && hasMoreHistory" variant="link" size="sm" @click="$emit('load-older')">更早的记录</linshe-button>
-          <p v-if="!messages.length" class="td-muted">这是你们在镇上的第一次交谈</p>
-          <article v-for="(message, index) in shownMessages" :key="message.id ?? index">
-            <span class="td-speaker">{{ message.role === 'user' ? playerName : displayName }}</span>
-            <slot name="message" :message="message"><p>{{ message.content }}</p></slot>
-          </article>
-        </template>
+      <div class="td-page" :key="pageKey">
+        <div ref="body" class="td-body" :class="{ 'td-body--history': historyOpen }" tabindex="0" :aria-live="historyOpen ? 'polite' : 'off'" :aria-label="historyOpen ? '最近对话记录' : chatActive ? '当前对话' : '场景'">
+          <template v-if="historyOpen">
+            <p v-if="loading" role="status">正在读取对话…</p>
+            <template v-else>
+              <linshe-button v-if="hasMoreHistory" variant="link" size="sm" @click="$emit('load-older')">更早的记录</linshe-button>
+              <p v-if="!messages.length" class="td-muted">这是你们在镇上的第一次交谈</p>
+              <div v-else class="td-chat">
+                <article v-for="(message, index) in messages" :key="message.id ?? index" class="td-bubble" :class="message.role === 'user' ? 'is-user' : 'is-npc'">
+                  <span class="td-speaker">{{ message.role === 'user' ? playerName : displayName }}</span>
+                  <slot name="message" :message="message"><p>{{ message.content }}</p></slot>
+                </article>
+              </div>
+            </template>
+          </template>
+          <template v-else-if="chatActive">
+            <p v-if="loading" role="status">正在读取对话…</p>
+            <p v-else-if="!messages.length" class="td-muted">打个招呼，开始这次交谈吧。</p>
+            <div v-else class="td-chat">
+              <article v-for="(message, index) in recentMessages" :key="message.id ?? index" class="td-bubble" :class="message.role === 'user' ? 'is-user' : 'is-npc'">
+                <span class="td-speaker">{{ message.role === 'user' ? playerName : displayName }}</span>
+                <slot name="message" :message="message"><p>{{ message.content }}</p></slot>
+              </article>
+            </div>
+          </template>
+        </div>
+        <slot v-if="!historyOpen" name="feedback" />
+        <div v-if="actions.length" class="td-extra">
+          <TownVnChoice v-for="item in actions" :key="item.key" :disabled="loading || sending || blocked" @select="$emit('action', item.key)">{{ item.label }}</TownVnChoice>
+        </div>
+        <p v-if="sending" class="td-status" role="status">正在回应…关闭后可重新打开查看记录。</p>
+        <p v-else-if="status" class="td-status" role="status">{{ status }}</p>
+        <div v-if="error" class="td-error" role="alert">
+          <span>{{ error }}</span>
+          <linshe-button v-if="retryable" variant="link" size="sm" :disabled="loading || sending" @click="$emit('retry')">重试同一条消息</linshe-button>
+          <linshe-button variant="link" size="sm" :disabled="loading || sending" @click="$emit('reload')">重新读取记录</linshe-button>
+        </div>
+        <form v-if="showInput && chatActive" class="td-input" @submit.prevent="submit">
+          <linshe-input ref="input" v-model="draft" size="sm" :disabled="loading || sending || blocked" :maxlength="maxLength" aria-label="对话内容" placeholder="说点什么…"
+            @compositionstart="composing = true" @compositionend="composing = false" @keydown.enter="onEnter" />
+          <linshe-button type="submit" variant="primary" size="sm" :loading="sending" :disabled="loading || blocked || !draft.trim()">发送</linshe-button>
+        </form>
       </div>
-      <slot name="feedback" />
-      <div v-if="actions.length" class="td-extra">
-        <linshe-button v-for="item in actions" :key="item.key" variant="ghost" size="sm"
-          :disabled="loading || sending || blocked" @click="$emit('action', item.key)">{{ item.label }}</linshe-button>
-      </div>
-      <p v-if="sending" class="td-status" role="status">正在回应…关闭后可重新打开查看记录。</p>
-      <p v-else-if="status" class="td-status" role="status">{{ status }}</p>
-      <div v-if="error" class="td-error" role="alert">
-        <span>{{ error }}</span>
-        <linshe-button v-if="retryable" variant="link" size="sm" :disabled="loading || sending" @click="$emit('retry')">重试同一条消息</linshe-button>
-        <linshe-button variant="link" size="sm" :disabled="loading || sending" @click="$emit('reload')">重新读取记录</linshe-button>
-      </div>
-      <form v-if="showInput" class="td-input" @submit.prevent="submit">
-        <linshe-input ref="input" v-model="draft" size="sm" :disabled="loading || sending || blocked" :maxlength="maxLength" aria-label="对话内容" placeholder="说点什么…"
-          @compositionstart="composing = true" @compositionend="composing = false" @keydown.enter="onEnter" />
-        <linshe-button type="submit" variant="primary" size="sm" :loading="sending" :disabled="loading || blocked || !draft.trim()">发送</linshe-button>
-      </form>
     </div>
   </section>
 </template>
@@ -56,12 +76,14 @@
 <script setup>
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
+import TownVnChoice from './TownVnChoice.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 const props = defineProps({
   displayName: { type: String, default: '邻居' }, playerName: { type: String, default: '我' },
   portraitUrl: String, playerPortraitUrl: String,
   messages: { type: Array, default: () => [] }, loading: Boolean, sending: Boolean, blocked: Boolean,
   showInput: { type: Boolean, default: true },
+  chatActive: { type: Boolean, default: false },
   error: { type: String, default: '' },
   status: { type: String, default: '' }, hasMoreHistory: Boolean, maxLength: { type: Number, default: 200 },
   retryable: Boolean, draftRestore: Object, actions: { type: Array, default: () => [] },
@@ -71,16 +93,35 @@ const root = ref(null), input = ref(null), body = ref(null)
 const draft = ref(''), composing = ref(false), historyOpen = ref(false), failedImages = ref({})
 const viewportStyle = ref({}), compact = ref(false), zoomed = ref(null)
 watch(() => props.draftRestore, value => { if (value) draft.value = value.text })
+// 对话模式只展示最近几条；完整记录交给「历史」按钮展开
+const pageKey = computed(() => (props.chatActive ? 'chat' : 'idle'))
+const recentMessages = computed(() => props.messages.slice(-10))
+// 立绘右侧冒泡：只有本次发出消息后收到的新回复才冒泡，进入对话模式不会把旧消息顶上来
+const bubbleIndex = ref(-1)
+let awaitingReply = false
+watch(() => props.sending, sending => {
+  if (!sending) return
+  awaitingReply = true
+  bubbleIndex.value = -1
+})
+watch(() => props.messages, list => {
+  if (!awaitingReply || !props.chatActive) return
+  const last = list[list.length - 1]
+  if (last && last.role !== 'user' && last.content) {
+    bubbleIndex.value = list.length - 1
+    awaitingReply = false
+  }
+})
+watch(() => props.chatActive, active => {
+  if (active) return
+  awaitingReply = false
+  bubbleIndex.value = -1
+})
+const npcBubble = computed(() => bubbleIndex.value >= 0 ? props.messages[bubbleIndex.value] : null)
 const portraits = computed(() => [
   { side: 'left', name: props.displayName, url: props.portraitUrl },
   { side: 'right', name: props.playerName, url: props.playerPortraitUrl },
 ])
-const shownMessages = computed(() => {
-  if (historyOpen.value) return props.messages
-  const lastUser = props.messages.findLastIndex(message => message.role === 'user')
-  const start = lastUser < 0 ? Math.max(0, props.messages.length - 1) : (lastUser < props.messages.length - 1 ? lastUser + 1 : lastUser)
-  return props.messages.slice(start)
-})
 function submit() {
   if (composing.value || props.loading || props.sending || props.blocked || !draft.value.trim()) return
   emit('send', draft.value.trim())
@@ -143,13 +184,19 @@ watch(zoomed, async value => {
   if (value) root.value?.querySelector('.td-zoom button')?.focus()
   else if (zoomTrigger?.isConnected) zoomTrigger.focus({ preventScroll: true })
 })
-watch(() => [props.messages.length, props.sending, historyOpen.value], async () => {
+watch(() => [props.messages.length, props.sending, historyOpen.value, props.chatActive], async () => {
   await nextTick()
-  if (body.value) body.value.scrollTop = historyOpen.value ? body.value.scrollHeight : 0
+  if (body.value) body.value.scrollTop = (historyOpen.value || props.chatActive) ? body.value.scrollHeight : 0
 })
 watch(() => props.loading || props.sending || props.blocked, async busy => {
   await nextTick()
-  if (!busy && root.value?.contains(document.activeElement) && !matchMedia('(pointer: coarse)').matches) input.value?.focus({ preventScroll: true })
+  if (!busy && props.chatActive && root.value?.contains(document.activeElement) && !matchMedia('(pointer: coarse)').matches) input.value?.focus({ preventScroll: true })
+})
+// 进入对话模式后把焦点交给输入框
+watch(() => props.chatActive, async active => {
+  if (!active) return
+  await nextTick()
+  if (!matchMedia('(pointer: coarse)').matches) input.value?.focus({ preventScroll: true })
 })
 onMounted(() => {
   previousFocus = document.activeElement
@@ -184,6 +231,12 @@ onBeforeUnmount(() => {
 .td-portraits figure:last-child { grid-column: 3; }
 .td-portraits img { min-height: 0; height: 75vh; max-height: 100%; width: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 8px 16px #362a382e); }
 .td-portraits figcaption { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: #fffaf1; text-shadow: 0 1px 4px #302822; font-size: 14px; }
+/* NPC 说话气泡：从立绘右侧冒出来，只在对话模式出现 */
+.td-say-bubble { position: absolute; left: calc(100% + 12px); top: 10%; z-index: 5; width: max-content; max-width: min(300px, 40vw); padding: 10px 14px; border: 2px solid #8d7968; border-radius: 16px 16px 16px 4px; background: #fffdf7; color: #554a43; box-shadow: 0 4px 0 rgba(141, 121, 104, .32), 0 10px 22px rgba(54, 42, 56, .18); pointer-events: none; animation: td-bubble-pop .3s var(--ease-spring); }
+.td-say-bubble::after { content: ''; position: absolute; left: -8px; top: 16px; width: 12px; height: 12px; background: #fffdf7; border-left: 2px solid #8d7968; border-bottom: 2px solid #8d7968; transform: rotate(45deg); }
+.td-say-bubble p { margin: 2px 0 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.td-say-name { font-size: 11px; color: #947f6d; }
+@keyframes td-bubble-pop { from { opacity: 0; transform: translate(-10px, 8px) scale(.92); } to { opacity: 1; transform: none; } }
 .td-placeholder { background: #f4f1eeed; color: #947f6d; border-radius: 48px 48px 12px 12px; padding: 24px; font-size: 32px; }
 .td-panel { pointer-events: auto; position: relative; isolation: isolate; grid-column: 2; grid-row: 1; align-self: end; width: 100%; max-width: 540px; height: min(420px, 100%); min-height: 0; display: flex; flex-direction: column; box-sizing: border-box; padding: 27px 30px 30px; }
 .td-dialog-shape { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; filter: drop-shadow(0 8px 18px #362a3826); pointer-events: none; }
@@ -193,16 +246,24 @@ h2 { color: #59483d; font-size: 20px; font-weight: 700; margin: 4px 0 8px; }
 .td-kicker { color: #a1846e; font-size: 10px; letter-spacing: .15em; }
 .td-speaker, .td-muted { font-size: 12px; color: #947f6d; }
 /* overflow-x 同样 clip：消息里的果冻按钮贴边放大时会把横向滚动条闪出来（同 TownResidentActions） */
+.td-page { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: td-page-in .3s var(--ease-out) both; }
+@keyframes td-page-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
 .td-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: clip; overflow-clip-margin: 6px; overscroll-behavior: contain; overflow-wrap: anywhere; }
-article { margin: 10px 0 18px; }
-article p { white-space: pre-wrap; line-height: 1.8; margin: 4px 0; font-size: 15px; }
+/* 对话记录：玩家靠右、NPC 靠左的暖纸气泡 */
+.td-chat { display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
+.td-bubble { max-width: 86%; margin: 0; padding: 8px 12px; border: 2px solid var(--town-paper-line); border-radius: 14px; background: #fffdf7; box-shadow: 0 2px 0 rgba(141, 121, 104, .22); }
+.td-bubble.is-user { align-self: flex-end; border-color: #dcb894; background: linear-gradient(180deg, #fff3e6, #ffe3c9); border-bottom-right-radius: 4px; }
+.td-bubble.is-npc { align-self: flex-start; border-bottom-left-radius: 4px; }
+.td-bubble p { white-space: pre-wrap; line-height: 1.7; margin: 2px 0 0; font-size: 14px; }
+.td-bubble .td-speaker { display: block; font-size: 11px; color: #947f6d; }
 .td-input { margin-top: 12px; }
 .td-input > :first-child { flex: 1; min-width: 0; }
 .td-status, .td-error { font-size: 12px; margin: 6px 0 0; }
 .td-error { color: #ad5147; }
 /* 舞台级游戏选项与 #feedback 里的居民选项同一语言：ghost 糖纸按钮、同一行距 */
-.td-extra { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
+.td-extra { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0; }
 @container town-world (max-width: 700px) {
+  .td-say-bubble { left: calc(100% + 8px); right: auto; top: 4%; max-width: min(300px, 46vw); }
   .town-dialogue-stage { height: calc(100% - 112px); grid-template-columns: 1fr 1fr; grid-template-rows: minmax(80px, 1fr) minmax(220px, 48%); gap: 0; padding: 0 6px 10px; }
   .td-portraits { display: flex; justify-content: space-between; grid-column: 1 / -1; grid-row: 1; width: 100%; height: 100%; }
   .td-portraits figure { grid-column: auto; grid-row: auto; width: 48%; height: 100%; padding: 0 8px; }

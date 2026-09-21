@@ -46,7 +46,7 @@ globalThis.fetch = async (url, options) => {
     next.selected = body.decorationKey; decorations.value = next; data = next
   } else if (path.endsWith('/services/offer')) {
     session = { ...world, sessionId:'fixture-shift', serviceKey:'town.cafe.work_shift', serviceName:'咖啡馆 · 临时代班',
-      version:1, status:'offered', turnCount:0, template:{ wage:24, maxTurns:4 }, turns:[], dialogue:'这班保底24邻币，三件小事做好了，另有最多6邻币小费。' }; data = session
+      version:1, status:'offered', turnCount:0, template:{ wage:24, maxTurns:4 }, turns:[], dialogue:'这班保底24金币，三件小事做好了，另有最多6金币小费。' }; data = session
   } else if (path.endsWith('/accept')) {
     session = { ...session, status:'active', version:2, work:{ answered:0, total:3, bonus:0, question:questions[0] }, choices:['work_answer_0','work_answer_1','work_answer_2','cancel'], dialogue:questions[0].text }; data = session
   } else if (path.endsWith('/turn')) {
@@ -71,7 +71,7 @@ createApp({ setup() {
     ]),
     view.value === 'work' ? h(TownCafeWorkPanel, { ...world, providerName:'小栗', onClose:() => { view.value = '' } })
       : view.value === 'wallet' ? h(TownPaperPanel, { open:true, title:'钱袋', kicker:'UI 回归样例 · 不影响存档', onClose:() => { view.value = '' } }, () => [
-        h('h2', `${balance.value} 邻币`), h(TownEarningNotice, { value:opportunities }),
+        h('h2', `${balance.value} 金币`), h(TownEarningNotice, { value:opportunities }),
         h(TownDecorations, { ...world, value:decorations.value, balance:balance.value }),
       ]) : null,
   ])

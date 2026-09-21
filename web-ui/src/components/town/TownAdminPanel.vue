@@ -11,8 +11,8 @@
         </div>
 
         <div v-if="!detail" class="ap-tabs">
-          <linshe-button variant="chip" size="sm" :active="tab === 'npcs'" @click="tab = 'npcs'">居民</linshe-button>
-          <linshe-button variant="chip" size="sm" :active="tab === 'chars'" @click="tab = 'chars'">角色素材</linshe-button>
+          <linshe-button variant="chip" size="sm" :active="tab === 'npcs'" @click="tab = 'npcs'">小镇NPC</linshe-button>
+          <linshe-button variant="chip" size="sm" :active="tab === 'chars'" @click="tab = 'chars'">酒馆角色</linshe-button>
           <linshe-button variant="chip" size="sm" :active="tab === 'settings'" @click="tab = 'settings'">设置</linshe-button>
         </div>
 
@@ -124,8 +124,10 @@
 
             <div class="ap-section">
               <div class="ap-section-title">功能权限 · 可同时选择</div>
-              <TownCapabilityPicker :model-value="detailNpc.capabilities" :disabled="busyFlags[`capabilities${detailNpc.id}`]"
-                @update:model-value="value => saveNpcCapabilities(detailNpc, value)" />
+              <TownCapabilityPicker
+:model-value="detailNpc.capabilities" :disabled="busyFlags[`capabilities${detailNpc.id}`]"
+                @update:model-value="value => saveNpcCapabilities(detailNpc, value)"
+/>
               <p v-if="capabilityErrors[detailNpc.id]" role="alert">{{ capabilityErrors[detailNpc.id] }}</p>
             </div>
 
@@ -179,7 +181,9 @@
                 v-if="!detailNpc.characterId"
                 variant="primary" size="sm" :loading="busyFlags[`invite${detailNpc.id}`]"
                 @click="invite(detailNpc)"
-              >邀请入邻舍（成为聊天角色）</linshe-button>
+              >
+邀请入邻舍（成为聊天角色）
+</linshe-button>
               <div v-else class="ap-invited">已邀请入邻舍（角色 #{{ detailNpc.characterId }}，在聊天侧边栏可见）</div>
               <linshe-button variant="secondary" size="sm" :loading="busyFlags[`reroll${detailNpc.id}`]" @click="rerollNpc(detailNpc)">
                 重掷人设与作息
@@ -291,11 +295,23 @@
                 class="ap-detail-switch"
                 v-model="detailChar.townEnabled"
                 size="sm"
-                :disabled="!!busyFlags[`chartoggle${detailChar.id}`]"
-                title="开启后该角色入住小镇，会先自动补齐立绘与正/背小人"
+                :disabled="!!busyFlags[`chartoggle${detailChar.id}`] || (!charAssetsReady(detailChar) && !detailChar.townEnabled)"
+                :title="charAssetsReady(detailChar) ? '开启后该角色入住小镇，会先自动补齐立绘与正/背小人' : '大立绘、正面、背面小人齐了才能入住，先补全图片素材'"
                 :aria-label="`${detailChar.displayName} 入住小镇开关`"
                 @change="v => toggleChar(detailChar, v)"
               />
+            </div>
+            <p v-if="!charAssetsReady(detailChar) && !detailChar.townEnabled" class="ap-asset-appearance">大立绘、正面、背面小人齐了才能入住，先点下方「补全图片素材」。</p>
+
+            <div class="ap-section">
+              <div class="ap-section-title">职能权限（可同时选择，覆盖关联居民的默认权限）</div>
+              <TownCapabilityPicker
+                :model-value="detailChar.capabilities"
+                :disabled="!!busyFlags[`charcapabilities${detailChar.id}`]"
+                @update:model-value="value => saveCharCapabilities(detailChar, value)"
+              />
+              <p v-if="charCapabilityErrors[detailChar.id]" class="ap-sprite-error" role="alert">{{ charCapabilityErrors[detailChar.id] }}</p>
+              <p v-else-if="!detailChar.capabilitiesExplicit" class="ap-asset-appearance">还没单独配过，当前沿用关联居民的职能。</p>
             </div>
             <p v-if="busyFlags[`chartoggle${detailChar.id}`]" class="ap-asset-appearance">正在补齐立绘与正/背小人，补齐后才算入住…</p>
 
@@ -338,8 +354,10 @@
         <div v-if="!detail && tab === 'settings'" class="ap-body ap-settings">
           <div class="ap-setting">
             <span class="ap-setting-label">禁止居民发朋友圈</span>
-            <linshe-switch v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
-              on-text="开启" off-text="关闭" aria-label="禁止居民发朋友圈" />
+            <linshe-switch
+v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
+              on-text="开启" off-text="关闭" aria-label="禁止居民发朋友圈"
+/>
           </div>
           <p class="ap-layout-desc">开启后居民不再自动发朋友圈，已有帖子保留；关闭即恢复正常发帖。</p>
           <div class="ap-density-field">
@@ -415,7 +433,7 @@
 
           <div class="ap-danger-zone">
             <div class="ap-danger-title">危险区</div>
-            <p class="ap-danger-desc">只清你脚下的这一个小镇：重来后「{{ resetTargetName }}」的地图、地点、居民与相遇记录都会清空，未完成的委托作废、服务托管款退回；世界里别的小镇照常过日子，已有角色、邻币、背包道具和交易履历都保留。</p>
+            <p class="ap-danger-desc">只清你脚下的这一个小镇：重来后「{{ resetTargetName }}」的地图、地点、居民与相遇记录都会清空，未完成的委托作废、服务托管款退回；世界里别的小镇照常过日子，已有角色、金币、背包道具和交易履历都保留。</p>
             <linshe-button variant="danger" size="sm" :loading="resetBusy" :disabled="town.currentMapId == null || resetBusy" @click="openResetConfirm">
               重新初始化这座小镇
             </linshe-button>
@@ -513,6 +531,7 @@ const layoutMapSize = computed({
 const mapSizeSummary = computed(() => `${layoutMapSize.value}×${layoutMapSize.value}`)
 const newNpc = reactive({ name: '', job: '', persona: '' })
 const capabilityErrors = reactive({})
+const charCapabilityErrors = reactive({})
 const playerKit = reactive({ sprites: {}, portrait: null })
 const playerOperation = ref(null)
 const playerKitBusy = computed(() => playerOperation.value !== null)
@@ -540,8 +559,16 @@ function charThumbAsset(c) {
   return listThumbAsset({ portrait: c?.portrait, sprites: c?.spriteAssets })
 }
 
+// 素材没齐（缺 / 生成中 / 失败）就露出「补全图片素材」入口，免得入住开关被禁用后又没有补救的路
 function charMissingAssets(c) {
-  return c.spriteCount < 2 || !c.portrait
+  return !charAssetsReady(c)
+}
+
+/** 入住前置：角色自己的大立绘 + 正/背小人三张都就绪，才允许打开入住开关 */
+function charAssetsReady(c) {
+  return c?.portrait?.status === 'ready'
+    && c?.spriteAssets?.down?.status === 'ready'
+    && c?.spriteAssets?.up?.status === 'ready'
 }
 
 
@@ -707,6 +734,20 @@ async function saveNpcCapabilities(npc, capabilities) {
   try { await api.updateTownNpc(npc.id, { capabilities }); npc.capabilities = capabilities }
   catch { capabilityErrors[npc.id] = '功能权限未保存，请重试。' }
   finally { busyFlags[flag] = false }
+}
+
+// 入住角色的职能权限：角色自己配过就覆盖关联居民的默认权限，保存后以角色为准。
+async function saveCharCapabilities(c, capabilities) {
+  const flag = `charcapabilities${c.id}`
+  if (busyFlags[flag]) return
+  busyFlags[flag] = true; charCapabilityErrors[c.id] = ''
+  try {
+    await api.setTownCharacterCapabilities(c.id, capabilities)
+    c.capabilities = capabilities
+    c.capabilitiesExplicit = true
+  } catch (err) {
+    charCapabilityErrors[c.id] = err?.message || '职能权限未保存，请重试。'
+  } finally { busyFlags[flag] = false }
 }
 
 // 入住前置：后端会先把立绘 + 正/背小人补齐（优先复用关联居民的素材，缺失才生成），
@@ -1032,6 +1073,7 @@ watch(() => [props.open, town.snapshot?.worldId, town.snapshot?.worldEpoch], ([o
     stopAutoGenWatch() // 世界重置后旧居民已不存在，停止进度跟踪
   }
   for (const key of Object.keys(spriteErrors)) delete spriteErrors[key]
+  for (const key of Object.keys(charCapabilityErrors)) delete charCapabilityErrors[key]
   if (!open) {
     // 关面板只暂停轮询；后台生成继续，npcId 保留以便重开面板时恢复进度显示
     if (autoGen.timer) { clearInterval(autoGen.timer); autoGen.timer = null }

@@ -113,18 +113,22 @@ test('service is rejected up front when the player cannot pay, without creating 
       actorId: f.context.registry.resolveAgentKey('me').actorId, accountType: 'actor' }).accountId }).balance, 10);
 });
 
-test('work is rejected when the resident cannot cover the wage', async t => {
+test('work never depends on a resident wallet  the wage is always paid to the player', async t => {
   const f = setup();
   t.after(() => closeDb());
   const offerId = f.offer('work', 45);
-  // 先成功打一次工：顺带按规则把居民账户开出来并注入启动金（否则开单校验会重新注入）。
-  await runtime.startNpcService(f.npcId, { offerId },
+  const playerBalance = () => f.context.economy.getAccount({ ...f.context.scope,
+    accountId: f.context.economy.ensureAccount({ ...f.context.scope,
+      ownerKey: `actor:${f.context.registry.resolveAgentKey('me').actorId}`,
+      actorId: f.context.registry.resolveAgentKey('me').actorId, accountType: 'actor' }).accountId }).balance;
+  const before = playerBalance();
+  const ready = await runtime.startNpcService(f.npcId, { offerId },
     { db: f.db, llm: fakeLlm(), image: fakeImage, persistImage: fakePersist, awaitPipeline: true });
-  f.db.prepare("UPDATE economy_accounts SET balance = 5 WHERE owner_key = ?").run(`npc:${f.npcId}`);
-  assert.throws(
-    () => runtime.startNpcService(f.npcId, { offerId }, { db: f.db, llm: fakeLlm(), image: fakeImage, persistImage: fakePersist, awaitPipeline: true }),
-    err => err.code === 'NPC_CANNOT_PAY',
-  );
+  assert.equal(ready.money.delta, 45, '打工照常给玩家发工钱');
+  assert.equal(playerBalance(), before + 45);
+  // 居民不再有自己的钱包账户
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM economy_accounts WHERE owner_key = ?').get(`npc:${f.npcId}`).n, 0,
+    '居民不该再有 economy 账户');
 });
 
 test('bold continue is rejected when the player cannot cover the upper bound', async t => {
@@ -158,4 +162,29 @@ test('continuing with the bold option pays 1.5x~3x the base amount', async t => 
 
   const session = runtime.getNpcServiceSession(first.sessionId, { db: f.db });
   assert.equal(session.turns, 3, 'three turns should be recorded');
+});
+
+test('mint and burn only touch the player account and the issuance sink', t => {
+  const f = setup();
+  t.after(() => closeDb());
+  const me = f.context.registry.resolveAgentKey('me');
+  const accountId = f.context.economy.ensureAccount({ ...f.context.scope,
+    ownerKey: `actor:${me.actorId}`, actorId: me.actorId, accountType: 'actor' }).accountId;
+  const balance = () => f.context.economy.getAccount({ ...f.context.scope, accountId }).balance;
+  const before = balance();
+
+  f.context.economy.burn({ ...f.context.scope, accountId, amount: 60,
+    idempotencyKey: 'burn-1', sourceKey: 'burn-1', reasonCode: 'TEST_BURN' });
+  assert.equal(balance(), before - 60, '销毁：玩家少 60');
+
+  f.context.economy.mint({ ...f.context.scope, accountId, amount: 45,
+    idempotencyKey: 'mint-1', sourceKey: 'mint-1', reasonCode: 'TEST_MINT' });
+  assert.equal(balance(), before - 15, '发行：玩家多 45');
+
+  // 居民全程不产生任何账户
+  assert.equal(f.db.prepare("SELECT COUNT(*) n FROM economy_accounts WHERE owner_key LIKE 'npc:%'").get().n, 0);
+
+  assert.throws(() => f.context.economy.burn({ ...f.context.scope, accountId, amount: 999999,
+    idempotencyKey: 'burn-2', sourceKey: 'burn-2', reasonCode: 'TEST_BURN' }),
+    err => err.code === 'INSUFFICIENT_FUNDS');
 });

@@ -3,7 +3,7 @@
   <TownDialogueStage :display-name="character?.display_name || displayName || '邻居'" :player-name="playerName"
     :portrait-url="standingUrl || character?.standing_url || character?.avatar_path || avatarUrl"
     :player-portrait-url="playerPortraitUrl" :messages="messages" :loading="loading" :sending="sending"
-    :blocked="blocked || !settingsReady || interactionBusy" :error="error" :draft-restore="draftRestore" :status="status" :has-more-history="hasMoreOlder" :max-length="4000"
+    :blocked="blocked || !settingsReady || interactionBusy" :error="error" :draft-restore="draftRestore" :status="status" :has-more-history="hasMoreOlder" :max-length="4000" :chat-active="chatActive"
     @send="sendWithSettings" @reload="load" @load-older="loadOlder" @close="$emit('close')">
     <template #message="{ message }">
       <details v-if="message.type === 'thinking'" class="tcc-thinking">
@@ -26,9 +26,10 @@
       </template>
     </template>
     <template #feedback>
-      <TownResidentActions :actor-key="`char:${characterId}`" :world-id="townContext?.worldId" :world-epoch="townContext?.worldEpoch"
+      <TownVnChoice v-if="chatActive" :disabled="sending" @select="exitChat">结束对话</TownVnChoice>
+      <TownResidentActions v-else :actor-key="`char:${characterId}`" :world-id="townContext?.worldId" :world-epoch="townContext?.worldEpoch"
         :revision="sending ? 0 : messages.length" :blocked="loading || sending || blocked || !settingsReady || serviceBusy"
-        @busy="interactionBusy = $event" @talk="sendWithSettings" @story="$emit('story', $event)" />
+        @busy="interactionBusy = $event" @talk="onTalk" @story="$emit('story', $event)" />
     </template>
   </TownDialogueStage>
 </template>
@@ -40,15 +41,25 @@ import { useTownCharacterChat } from '../../town/dialogue/useTownCharacterChat.j
 import * as api from '../../api/index.js'
 import TownDialogueStage from './TownDialogueStage.vue'
 import TownResidentActions from './TownResidentActions.vue'
+import TownVnChoice from './TownVnChoice.vue'
 const props = defineProps({ characterId: { type: Number, required: true }, displayName: String, standingUrl: String,
   avatarUrl: String, townContext: Object, serviceBusy: Boolean, playerName: { type: String, default: '我' } })
 const emit = defineEmits(['close', 'context-invalid', 'story'])
 const interactionBusy = ref(false)
+// 对话模式：点「聊聊近况」后才出现输入框与聊天记录，其余功能长条先收起
+const chatActive = ref(false)
 const settings = useSettingsStore()
 const { loading, error, blocked, sending, messages, character, status, draftRestore, load, send, hasMoreOlder, loadOlder } =
   useTownCharacterChat(toRef(props, 'characterId'), { settings, serviceBusy: toRef(props, 'serviceBusy'), townContext: toRef(props, 'townContext'), onContextInvalid: err => emit('context-invalid', err) })
 const playerPortraitUrl = ref(null), settingsReady = ref(false)
 
+function onTalk(text) {
+  chatActive.value = true
+  return sendWithSettings(text)
+}
+function exitChat() {
+  chatActive.value = false
+}
 function sendWithSettings(text) { if (settingsReady.value) return send(text) }
 let disposed = false
 function imageSource(image) {

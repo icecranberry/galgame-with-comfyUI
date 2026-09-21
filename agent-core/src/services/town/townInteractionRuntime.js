@@ -72,7 +72,7 @@ function runtime(target, expected = {}) {
         if (!template) continue;
         items.push({ key: `trade:buy:${spec.templateId}`, kind: 'trade', capability: 'trade', direction: 'buy',
           title: `买一份${template.name}`,
-          description: `支付 ${spec.price} 邻币，物品放进背包。`,
+          description: `支付 ${spec.price} 金币，物品放进背包。`,
           price: spec.price, templateId: spec.templateId, templateVersion: spec.templateVersion });
       }
     }
@@ -230,11 +230,11 @@ export async function respondTownInteraction(target, requestId, decision, expect
       AND player_actor_id=? AND status='accepted' AND kind IN ('trade','service') ORDER BY updated_at DESC LIMIT 2`)
       .all(input.worldId, input.worldEpoch, input.actorId, input.playerActorId).map(row => JSON.parse(row.spec_json).title);
     const serviceTask = result.kind === 'service' && result.title
-      ? `玩家正在${name}这里想办理「${result.title}」${result.price != null ? `（标价 ${result.price} 邻币）` : ''}：${result.description}由办理这件事的过程`
+      ? `玩家正在${name}这里想办理「${result.title}」${result.price != null ? `（标价 ${result.price} 金币）` : ''}：${result.description}由办理这件事的过程`
       : '由这个线索';
     const prompt = `起点是小镇的${location?.name || '街边'}。玩家${source.building ? `正在${name}体验服务与探索` : `正在与居民${name}交谈并了解对方的服务`}，遇到了关于${character.display_name}的线索。
 ${serviceTask}展开一段适合玩家参与的生活奇遇，保持${character.display_name}原有人格。角色可以作为来访者到场，不要声称角色已经搬入小镇或改变了工作岗位。${recent.length ? `最近发生过的真实来往：${recent.join('、')}。` : ''}
-可以邀请一起探索、求助或交谈。不要声称已扣邻币、增加物品或完成小镇任务。`;
+可以邀请一起探索、求助或交谈。不要声称已扣金币、增加物品或完成小镇任务。`;
     const generate = generateStory || (await import('../eventGenerator.js')).generateEvent;
     await generate(character, { customPrompt: prompt, manual: true,
       beforePersist: () => {
@@ -274,11 +274,11 @@ async function startTownNpcStory({ context, requests, input, target, requestId, 
     // 服务邀请（店里能办什么）与特殊奇遇共用这条管线：服务只是奇遇的起点线索，
     // 故事里不得声称已扣款或已交付物品。
     const serviceTask = result.kind === 'service' && result.title
-      ? `玩家想在小店办理「${result.title}」${result.price != null ? `（标价 ${result.price} 邻币）` : ''}：${result.description}请围绕两人一起办理这件事的过程`
+      ? `玩家想在小店办理「${result.title}」${result.price != null ? `（标价 ${result.price} 金币）` : ''}：${result.description}请围绕两人一起办理这件事的过程`
       : '请从两人当下的交谈与现场出发，';
     const prompt = `起点是小镇的${location?.name || '街边'}${location?.ambient ? `（${location.ambient}）` : ''}。玩家${source.building ? `正在${name}体验服务与探索` : `正在与镇民${name}交谈并了解对方的服务`}。
 ${serviceTask}展开一段玩家和${npc.display_name}一起经历、一起行动的生活奇遇：${npc.display_name}是这段奇遇的主角之一，玩家也是参与者，两人的行动共同推进故事。${recent.length ? `最近发生过的真实来往：${recent.join('、')}。` : ''}
-保持${npc.display_name}原有人格与小镇岗位职责。不要声称已扣邻币、增加物品或完成小镇任务。`;
+保持${npc.display_name}原有人格与小镇岗位职责。不要声称已扣金币、增加物品或完成小镇任务。`;
     const generate = generateNpcStory || ((npcArg, opts) =>
       import('./townNpcEventGenerator.js').then(module => module.generateTownNpcEvent(npcArg, opts)));
     await generate(npc, {

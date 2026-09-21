@@ -153,6 +153,22 @@ export function createEconomyService({db,clock,getWorldEpoch,getActor,consumers=
       moneyChange(ctx,from,-input.amount); moneyChange(ctx,to,input.amount);
     });
   }
+  /** 发行：issuance -> account。与 seed 的区别是 sourceKey 由调用方给，可按业务重复发行（例如每次打工的工钱）。 */
+  function mint(input) {
+    return execute('mint',input,ctx=>{
+      integer(input.amount,0); const to=account(input.accountId,input.worldId); ordinary(to);
+      const from=issuance(input.worldId);
+      moneyChange(ctx,from,-input.amount); moneyChange(ctx,to,input.amount);
+    });
+  }
+  /** 销毁：account -> issuance。玩家花掉的钱直接离开流通居民不再持有自己的钱包。 */
+  function burn(input) {
+    return execute('burn',input,ctx=>{
+      integer(input.amount,0); const from=account(input.accountId,input.worldId); ordinary(from);
+      const to=issuance(input.worldId);
+      moneyChange(ctx,from,-input.amount); moneyChange(ctx,to,input.amount);
+    });
+  }
   function seedStock(input) {
     const seedVersion=input.seedVersion??1; integer(seedVersion);
     return execute('seedStock',{...input,seedVersion,sourceKey:`seed:stock:${input.stockId}:${seedVersion}`},ctx=>{
@@ -248,7 +264,7 @@ export function createEconomyService({db,clock,getWorldEpoch,getActor,consumers=
       return {count:releases.length,releases};
     });
   }
-  return {ensureAccount,ensureStock,seed,seedStock,transfer,transferStock,flushNotifications,releaseActive,events,
+  return {ensureAccount,ensureStock,seed,mint,burn,seedStock,transfer,transferStock,flushNotifications,releaseActive,events,
     reserve:input=>reserveAsset('money',input),reserveStock:input=>reserveAsset('stock',input),
     capture:input=>finishReservation('money','capture',input),release:input=>finishReservation('money','release',input),
     captureStock:input=>finishReservation('stock','capture',input),releaseStock:input=>finishReservation('stock','release',input),

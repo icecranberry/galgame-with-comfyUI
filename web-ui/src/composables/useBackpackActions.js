@@ -43,6 +43,8 @@ export function useBackpackActions({ confirm, toast }) {
   const showCharPicker = ref(false)
   const pendingItem = ref(null)
   const detailItem = ref(null)
+  // 小镇货摊买来的礼物：送出后等图片 + 故事（复用小镇服务/打工的胶片展示）
+  const giftStage = ref({ open: false, session: null })
   const removingEffectId = ref(null)
   const effectNow = ref(Date.now())
   const collecting = ref(false)
@@ -152,6 +154,7 @@ export function useBackpackActions({ confirm, toast }) {
     showCharPicker.value = false
     pendingItem.value = null
     detailItem.value = null
+    giftStage.value = { open: false, session: null }
   }
 
   // ── 开箱：全屏蓄力 → 等图片生成完毕 → 开盖揭示 ──
@@ -289,25 +292,37 @@ export function useBackpackActions({ confirm, toast }) {
     const item = pendingItem.value
     if (!item) return
     showCharPicker.value = false
-    const effectHint = {
-      outfit: `会让 ${char.display_name} 换上这套服装，持续一天`,
-      world_outfit: `会让 ${char.display_name} 换上这套来自当前世界观的服装，持续一天`,
-      hairstyle: `会让 ${char.display_name} 换上这个发型，持续一天`,
-      transform: `会让 ${char.display_name} 变身成这种形态，持续一天`,
-      buff: `会让 ${char.display_name} 在接下来几小时的对话中带上这种状态`,
-      mood: `会立即把 ${char.display_name} 的心情修复为开心`,
-      favor: `会立即提升与 ${char.display_name} 的亲密度`,
-    }[item.kind] || '使用后立即生效'
+    // 小镇货摊买来的道具不是消耗品，是送给角色的礼物：送出后由后端写一段 TA 怎么用它的小故事并配图。
+    const isGift = item.source_type === 'trade'
+    const effectHint = isGift
+      ? ``
+      : {
+          outfit: `会让 ${char.display_name} 换上这套服装，持续一天`,
+          world_outfit: `会让 ${char.display_name} 换上这套来自当前世界观的服装，持续一天`,
+          hairstyle: `会让 ${char.display_name} 换上这个发型，持续一天`,
+          transform: `会让 ${char.display_name} 变身成这种形态，持续一天`,
+          buff: `会让 ${char.display_name} 在接下来几小时的对话中带上这种状态`,
+          mood: `会立即把 ${char.display_name} 的心情修复为开心`,
+          favor: `会立即提升与 ${char.display_name} 的亲密度`,
+        }[item.kind] || '使用后立即生效'
 
     const ok = await confirm?.({
-      title: '使用道具',
-      message: `确定对 ${char.display_name} 使用「${item.name}」吗？\n${effectHint}`,
-      okText: '使用',
+      title: isGift ? '送出礼物' : '使用道具',
+      message: isGift
+        ? `确定把「${item.name}」送给 ${char.display_name} 吗？\n${effectHint}`
+        : `确定对 ${char.display_name} 使用「${item.name}」吗？\n${effectHint}`,
+      okText: isGift ? '送出' : '使用',
     })
     if (!ok) { pendingItem.value = null; return }
     try {
       const result = await store.useItem(item.id, char.id)
-      if (result.ok) {
+      if (result.ok && result.gift) {
+        giftStage.value = { open: true, session: {
+          sessionId: result.sessionId, kind: 'gift',
+          npcName: result.characterName || char.display_name,
+          offerTitle: result.itemName || item.name,
+        } }
+      } else if (result.ok) {
         toast?.(result.summary || '道具已使用', 'success')
       } else {
         toast?.(result.error || '使用失败', 'error')
@@ -383,7 +398,7 @@ export function useBackpackActions({ confirm, toast }) {
     effectKindLabel, effectIconPath, effectRemainingText, isEffectUrgent,
     removingEffectId, onRemoveEffect,
     // 道具使用 / 丢弃
-    detailItem, openDetail, startUse,
+    detailItem, openDetail, startUse, giftStage,
     showCharPicker, pendingItem, cancelPick, pickCharacter,
     onDiscard,
     resetUi,

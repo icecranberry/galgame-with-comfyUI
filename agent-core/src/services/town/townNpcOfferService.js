@@ -5,6 +5,7 @@ import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { extractFirstJson, repairJson } from '../eventGenerator.js';
 import { townError } from './townEventService.js';
+import { parseCharacterCapabilities } from './townCapabilities.js';
 
 export const TOWN_OFFER_KINDS = Object.freeze(['service', 'work']);
 export const MAX_OFFERS_PER_KIND = 3;
@@ -129,7 +130,7 @@ export function buildNpcOfferTaskPrompt(kind, npc) {
     '- offers：数组，1~3 项，每项是一个独立项目。',
     '- title：字符串，4~10 个字，游戏任务名风格，结尾不加标点。',
     '- description：字符串，30~80 个字，写清谁做了什么、有什么细节，贴合这位居民的人格。',
-    `- price：整数，${min}~${max} 之间的邻币数量，不要加引号、不要带单位。`,
+    `- price：整数，${min}~${max} 之间的金币数量，不要加引号、不要带单位。`,
     '- 必须严格按上面的示例格式输出，不要输出任何解释或 JSON 以外的文字。',
   ].join('\n');
 }
@@ -256,10 +257,20 @@ export function deleteNpcOffers({ worldId = 'default', npcId, kind = null } = {}
   return db.prepare('DELETE FROM town_npc_offers WHERE world_id = ? AND npc_id = ?').run(worldId, id).changes;
 }
 
-/** 服务管理面板用：有 service/work 权限的居民 + 已有项目数量。 */
+/**
+ * 服务管理面板用：有 service/work 权限的居民 + 已有项目数量。
+ * 由酒馆角色接管身份的居民（town_npcs.character_id 有值）职能以**角色自己的配置**为准，
+ * 与小镇运行时同一口径；同时带出角色档案，面板据此筛查「酒馆角色」。
+ */
 export function listOfferOverview({ worldId = 'default' } = {}) {
   const db = getDb();
-  const npcs = db.prepare('SELECT * FROM town_npcs ORDER BY id').all();
+  const npcs = db.prepare(`
+    SELECT n.*, c.display_name AS character_name, cc.capabilities_json AS character_capabilities
+    FROM town_npcs n
+    LEFT JOIN characters c ON c.id = n.character_id
+    LEFT JOIN town_character_capabilities cc ON cc.character_id = n.character_id
+    ORDER BY n.id
+  `).all();
   const counts = db.prepare(`SELECT npc_id, kind, COUNT(*) AS n FROM town_npc_offers WHERE world_id = ? GROUP BY npc_id, kind`)
     .all(worldId);
   const byNpc = new Map();
@@ -268,11 +279,16 @@ export function listOfferOverview({ worldId = 'default' } = {}) {
     byNpc.get(row.npc_id)[row.kind] = row.n;
   }
   return npcs.map(npc => {
-    const capabilities = parseCapabilities(npc);
+    const characterId = npc.character_id ?? null;
+    // 角色单独配过职能就以角色为准，没配过才用居民自己的权限
+    const capabilities = (characterId ? parseCharacterCapabilities(npc.character_capabilities) : null)
+      ?? parseCapabilities(npc);
     const tally = byNpc.get(npc.id) || { service: 0, work: 0 };
     return {
       npcId: npc.id,
-      displayName: npc.display_name || '',
+      characterId,
+      source: characterId ? 'character' : 'npc',
+      displayName: npc.display_name || npc.character_name || '',
       job: npc.job || '',
       brief: npc.brief || '',
       capabilities,

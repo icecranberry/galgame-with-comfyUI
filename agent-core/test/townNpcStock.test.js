@@ -70,13 +70,15 @@ function insertStock(f, { npcId = 1, title = '当天没卖完的牛奶', price =
   return Number(info.lastInsertRowid);
 }
 
-test('stock count stays within 1~5 and splits roughly half chest / half free', () => {
+test('stock count stays within 1~5 and keeps the shelf mostly resident-made', () => {
   for (let i = 0; i < 60; i++) {
     const count = pickStockCount(`seed-${i}`);
     assert.ok(count >= 1 && count <= 5, `count ${count} out of range`);
     const plan = splitStockPlan(count, `seed-${i}`);
     assert.equal(plan.chest + plan.free, count);
-    assert.equal(plan.chest, Math.round(count / 2));
+    // 宝箱取材最多 1 件（满 4 件才放 1 件），其余全部按人格卡自由创作。
+    assert.equal(plan.chest, count >= 4 ? 1 : 0);
+    assert.ok(plan.free >= plan.chest, `free ${plan.free} should dominate chest ${plan.chest}`);
   }
 });
 
@@ -108,17 +110,22 @@ test('stock task prompt carries the persona card, chest pool and target count', 
   assert.match(task, /恰好 4 项/);
   assert.match(task, /其中 2 件/);
   for (const good of CHEST_GOODS) assert.match(task, new RegExp(good.effectKey));
+  // 宝箱配额为 0 时不出现「其中 0 件」，而是明确要求整架都长在居民身上。
+  const noChest = buildStockTaskPrompt(npc, { count: 3, chest: 0, free: 3 });
+  assert.match(noChest, /全部从这位居民身上长出来/);
+  assert.doesNotMatch(noChest, /其中 0 件/);
 });
 
-test('buying a good deducts coins, drops it in the backpack and raises favor', t => {
+test('buying a good deducts coins and drops it in the backpack as a gift', t => {
   const f = fixture(t);
   f.seedPlayer(100);
   const stockId = insertStock(f, { price: 30, favor: 3 });
   const result = f.service.buyStock(1, stockId, f.cmd({}));
   assert.equal(result.money.delta, -30);
   assert.equal(f.playerBalance(), 70);
-  assert.equal(result.favor.delta, 3);
-  assert.equal(getNpcFavor(f.db, f.scope.worldId, 1), 3);
+  // 货品是送给角色的礼物：不再写 NPC 好感（town_npc_favor 表与 favor_delta 列保留，以后另有用途）。
+  assert.equal(result.favor, null);
+  assert.equal(getNpcFavor(f.db, f.scope.worldId, 1), 0);
   assert.ok(result.item?.id);
   const row = f.db.prepare(`SELECT * FROM backpack_items WHERE id=?`).get(result.item.id);
   assert.equal(row.owner_key, 'me');
@@ -129,15 +136,15 @@ test('buying a good deducts coins, drops it in the backpack and raises favor', t
   assert.ok(stock.sold_at != null);
 });
 
-test('buying the same stock twice is idempotent and never double-charges or double-favors', t => {
+test('buying the same stock twice is idempotent and never double-charges', t => {
   const f = fixture(t);
   f.seedPlayer(100);
   const stockId = insertStock(f, { price: 30, favor: 3 });
   f.service.buyStock(1, stockId, f.cmd({}));
   const replay = f.service.buyStock(1, stockId, f.cmd({}));
   assert.equal(f.playerBalance(), 70);
-  assert.equal(getNpcFavor(f.db, f.scope.worldId, 1), 3);
-  assert.equal(replay.favor.delta, 0);
+  assert.equal(getNpcFavor(f.db, f.scope.worldId, 1), 0);
+  assert.equal(replay.favor, null);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM backpack_items WHERE owner_key=\'me\'').get().n, 1);
 });
 

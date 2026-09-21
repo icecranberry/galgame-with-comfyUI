@@ -2,15 +2,16 @@
   <TownDialogueStage :display-name="displayName" :player-name="playerName" :portrait-url="portraitUrl"
     :player-portrait-url="playerPortraitUrl" :messages="messages" :loading="loading" :sending="sending"
     :blocked="blocked || serviceBusy || admissionBusy || giftBusy || interactionBusy" :status="serviceBusy || admissionBusy ? '正在提供服务，请稍后再交谈。' : ''" :error="error" :retryable="retryable" :draft-restore="draftRestore"
-    :actions="actions" @action="onAction"
+    :chat-active="chatActive" :actions="actions" @action="onAction"
     @send="send" @retry="retry" @reload="load" @close="$emit('close')">
     <template #message="{ message }">
       <p>{{ message.content }}</p>
     </template>
     <template #feedback>
-      <TownResidentActions :actor-key="`npc:${npcId}`" :world-id="worldId" :world-epoch="worldEpoch" :revision="historyMessages.length"
+      <TownVnChoice v-if="chatActive" :disabled="sending" @select="exitChat">结束对话</TownVnChoice>
+      <TownResidentActions v-else :actor-key="`npc:${npcId}`" :world-id="worldId" :world-epoch="worldEpoch" :revision="historyMessages.length"
         :blocked="loading || sending || blocked || serviceBusy || admissionBusy || giftBusy"
-        @busy="interactionBusy = $event" @talk="send" @story="$emit('story', $event)" />
+        @busy="interactionBusy = $event" @talk="onTalk" @story="$emit('story', $event)" />
       <div class="tq-feedback" aria-live="polite">
         <p v-if="giftError" class="tq-error" role="alert">{{ giftError }}</p>
       </div>
@@ -24,9 +25,12 @@ import * as api from '../../api/index.js'
 import { npcTurnKey, getNpcPendingTurn, createNpcPendingTurn, forgetNpcPendingTurn } from '../../town/dialogue/npcPendingTurns.js'
 import TownDialogueStage from './TownDialogueStage.vue'
 import TownResidentActions from './TownResidentActions.vue'
+import TownVnChoice from './TownVnChoice.vue'
 const props = defineProps({ npcId: { type: Number, required: true }, displayName: String, playerName: String, worldId: String, worldEpoch: Number, serviceBusy: Boolean })
 const emit = defineEmits(['close', 'character-chat', 'context-invalid', 'story'])
 const interactionBusy = ref(false)
+// 对话模式：点「聊聊近况」后才出现输入框与聊天记录，其余功能长条先收起
+const chatActive = ref(false)
 const historyMessages = ref([]), loading = ref(true), sending = ref(false), blocked = ref(true), error = ref('')
 const portraitUrl = ref(null), playerPortraitUrl = ref(null), draftRestore = ref(null), pendingTurn = ref(null)
 const admissionBusy = ref(false)
@@ -123,6 +127,13 @@ async function run(turn) {
     sending.value = false
   }
 }
+function onTalk(text) {
+  chatActive.value = true
+  return send(text)
+}
+function exitChat() {
+  chatActive.value = false
+}
 function send(text) {
   if (sending.value || loading.value || blocked.value || props.serviceBusy || admissionBusy.value || !text.trim()) return
   const turn = createNpcPendingTurn(scopeKey(), text, { worldId: props.worldId, worldEpoch: props.worldEpoch })
@@ -132,7 +143,7 @@ function send(text) {
 function retry() { if (retryable.value) return run(pendingTurn.value) }
 const messages = computed(() => historyMessages.value)
 watch(() => [props.npcId, props.worldId, props.worldEpoch], () => {
-  historyMessages.value = []; portraitUrl.value = null; playerPortraitUrl.value = null; sending.value = false; pendingTurn.value = null; admissionBusy.value = false
+  chatActive.value = false; historyMessages.value = []; portraitUrl.value = null; playerPortraitUrl.value = null; sending.value = false; pendingTurn.value = null; admissionBusy.value = false
   npcFunctions.value = null; giftBusy.value = false; giftError.value = ''
   load()
 }, { immediate: true })

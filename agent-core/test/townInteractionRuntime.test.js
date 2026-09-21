@@ -71,7 +71,7 @@ test('store leads, special stories and direct purchases share one interaction lo
   assert.match(String(accepted.result.eventId), /^town:\d+$/, 'the service receipt points at the resident event via town: prefix');
   assert.ok(accepted.result?.npcEvent, 'the service receipt marks a resident encounter');
   assert.match(servicePrompt, /修剪发型/, 'the service itself seeds the encounter direction');
-  assert.match(servicePrompt, /不要声称已扣邻币/, 'the story never claims the paid service settled');
+  assert.match(servicePrompt, /不要声称已扣金币/, 'the story never claims the paid service settled');
   // 直购：货摊交易走账本，重复确认不重复扣款
   move(8);
   const neighbor = `npc:${ids[8]}`;

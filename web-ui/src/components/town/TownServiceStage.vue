@@ -11,10 +11,12 @@
                 <div class="svc-ring-container">
                   <svg viewBox="0 0 80 80" class="svc-ring">
                     <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="3" />
-                    <circle cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="3"
+                    <circle
+cx="40" cy="40" r="34" fill="none" stroke="var(--accent)" stroke-width="3"
                       stroke-linecap="round" :stroke-dasharray="2 * Math.PI * 34"
                       :stroke-dashoffset="2 * Math.PI * 34 * (1 - progress / 100)"
-                      class="svc-ring-progress" />
+                      class="svc-ring-progress"
+/>
                   </svg>
                   <div class="svc-ring-pct">{{ progress }}%</div>
                 </div>
@@ -30,7 +32,7 @@
               <div class="svc-error">
                 <p>这次没能成行</p>
                 <span>{{ error }}</span>
-                <linshe-button variant="secondary" size="sm" @click="retry">再试一次</linshe-button>
+                <linshe-button v-if="kind !== 'gift'" variant="secondary" size="sm" @click="retry">再试一次</linshe-button>
               </div>
             </template>
 
@@ -52,7 +54,7 @@
               <span class="svc-offer">{{ offerTitle }}</span>
             </div>
             <div v-if="money" class="svc-coin" :class="money.delta >= 0 ? 'is-earn' : 'is-pay'">
-              {{ money.delta >= 0 ? '+' : '' }}{{ money.delta }} 邻币
+              {{ money.delta >= 0 ? '+' : '' }}{{ money.delta }} 金币
             </div>
           </div>
         </div>
@@ -60,9 +62,11 @@
         <Transition name="svc-tale">
           <div v-if="phase === 'ready'" class="svc-tale" @click.stop>
             <p class="svc-tale-text">{{ tale }}</p>
-            <div class="svc-options">
-              <linshe-button v-for="option in options" :key="option.tone" variant="secondary" size="sm"
-                :class="option.tone === 'bold' ? 'is-bold' : ''" :disabled="busy" @click="choose(option)">
+            <div v-if="options.length" class="svc-options">
+              <linshe-button
+v-for="option in options" :key="option.tone" variant="secondary" size="sm"
+                :class="option.tone === 'bold' ? 'is-bold' : ''" :disabled="busy" @click="choose(option)"
+>
                 <span>{{ option.label }}</span>
                 <span v-if="option.delta != null" class="svc-opt-price" :class="option.delta >= 0 ? 'is-earn' : 'is-pay'">
                   {{ option.delta >= 0 ? '+' : '' }}{{ option.delta }}
@@ -75,17 +79,15 @@
     </Transition>
   </Teleport>
 
+  <!-- 查看详情：复用全站统一的图片灯箱（缩放 / 旋转 / 拖拽 / ESC 关闭） -->
   <Teleport to="body">
-    <Transition name="svc-modal">
-      <div v-if="zoom && imageUrl" class="svc-zoom" @click="zoom = false">
-        <img :src="imageUrl" alt="" />
-      </div>
-    </Transition>
+    <ImageLightbox :visible="zoom" :imgs="imageUrl ? [imageUrl] : []" :z-index="1300" @hide="zoom = false" />
   </Teleport>
 </template>
 
 <script setup>
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import ImageLightbox from '../ImageLightbox.vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 import { onEvent } from '../../stores/unifiedStream.js'
 import { continueNpcService } from '../../api/townLife.js'
@@ -113,7 +115,7 @@ const zoom = ref(false)
 const currentSession = ref(null)
 
 const kind = computed(() => currentSession.value?.kind || props.session?.kind || 'service')
-const kindLabel = computed(() => (kind.value === 'work' ? '打工' : '服务'))
+const kindLabel = computed(() => (kind.value === 'work' ? '打工' : kind.value === 'gift' ? '礼物' : '服务'))
 const npcName = computed(() => currentSession.value?.npcName || props.session?.npcName || '')
 const offerTitle = computed(() => currentSession.value?.offerTitle || props.session?.offerTitle || '')
 const progress = computed(() => {
@@ -125,7 +127,16 @@ const progress = computed(() => {
 
 // 加载文案轮播：和「瞄一眼」同款的上浮淡出 / 下方浮入。
 // 服务是「别人伺候你」、打工是「你去伺候别人」，两套文案分开写，具体一点、带点自嘲。
-const phrases = computed(() => (kind.value === 'work'
+const phrases = computed(() => {
+  // 礼物：把小镇货摊买来的道具送给角色，等 TA 拆开、用起来的样子。
+  if (kind.value === 'gift') return [
+    '正在把礼物递过去',
+    '正在看 TA 拆开包装',
+    '正在想 TA 会不会喜欢',
+    '正在等 TA 抬起头',
+    '正在把这一刻拍下来',
+  ]
+  return (kind.value === 'work'
   ? [
       '正在把袖子挽到手肘',
       '正在找那把不知道被谁顺走的扫帚',
@@ -141,7 +152,8 @@ const phrases = computed(() => (kind.value === 'work'
       '正在问你这力道还行不行',
       '正在假装没听见你喊「轻点」',
       '正在给你递一杯温水',
-    ]))
+    ])
+})
 const phraseIndex = ref(0)
 const currentPhrase = computed(() => `${phrases.value[phraseIndex.value % phrases.value.length]}\u2026\u2026`)
 let phraseTimer = null
@@ -209,7 +221,7 @@ function applyReady(data) {
   requestAnimationFrame(() => { shutter.value = true })
   if (money.value && money.value.delta) {
     const gain = money.value.delta > 0
-    if (toast) toast(`${gain ? '+' : ''}${money.value.delta} 邻币，${kindLabel.value}${gain ? '收入' : '支出'}`, gain ? 'success' : 'info')
+    if (toast) toast(`${gain ? '+' : ''}${money.value.delta} 金币，${kindLabel.value}${gain ? '收入' : '支出'}`, gain ? 'success' : 'info')
     emit('money', money.value)
   }
 }
@@ -219,10 +231,13 @@ function messageForCode(code) {
     SERVICE_IMAGE_FAILED: '画面没能画出来，请重试。',
     SERVICE_JSON_MISSING: '这段经历没能生成出来，请重试。',
     SERVICE_PAYLOAD_INCOMPLETE: '这段经历不完整，请重试。',
-    INSUFFICIENT_FUNDS: '可用邻币不足，这次先算了。',
-    NPC_CANNOT_PAY: '这位居民手头暂时没钱付工资。',
+    INSUFFICIENT_FUNDS: '可用金币不足，这次先算了。',
     ACTOR_UNAVAILABLE: '居民现在不在镇上。',
     STALE_EPOCH: '小镇已变化，请关闭后重新进入。',
+    GIFT_IMAGE_FAILED: '画面没能画出来。',
+    GIFT_JSON_MISSING: '这段礼物故事没能写出来。',
+    GIFT_PAYLOAD_INCOMPLETE: '这段礼物故事不完整。',
+    CHARACTER_NOT_FOUND: '目标角色不存在。',
   })[code] || code || '这次没能成行。'
 }
 
@@ -273,6 +288,17 @@ function subscribe() {
   unsubscribers.push(onEvent('town_npc_service_ready', d => {
     if (!d || d.sessionId !== currentSession.value?.sessionId) return
     applyReady(d)
+  }))
+  // 礼物叙事：道具送出去之后由 itemGiftNarrative 异步产出，payload 口径与小镇服务一致。
+  unsubscribers.push(onEvent('item_gift_progress', d => {
+    if (!d || d.sessionId !== currentSession.value?.sessionId) return
+    const pct = Number(d.progress)
+    if (!Number.isFinite(pct)) return
+    realPct.value = Math.max(0, Math.min(100, pct))
+  }))
+  unsubscribers.push(onEvent('item_gift_ready', d => {
+    if (!d || d.sessionId !== currentSession.value?.sessionId) return
+    applyReady({ ...d, images: d.imageUrl ? [d.imageUrl] : [], options: [], money: null })
   }))
 }
 function unsubscribe() { for (const off of unsubscribers.splice(0)) off() }
@@ -383,8 +409,6 @@ onBeforeUnmount(() => { unsubscribe(); stopProgress(); stopPhrases() })
 .svc-tale-enter-active, .svc-tale-leave-active { transition: opacity .28s ease, transform .28s cubic-bezier(.22, .61, .36, 1); }
 .svc-tale-enter-from, .svc-tale-leave-to { opacity: 0; transform: translateY(10px); }
 
-.svc-zoom { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .9); padding: 24px; }
-.svc-zoom img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .svc-modal-enter-active, .svc-modal-leave-active { transition: opacity .22s ease; }
 .svc-modal-enter-from, .svc-modal-leave-to { opacity: 0; }
 </style>

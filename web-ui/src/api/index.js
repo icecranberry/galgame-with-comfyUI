@@ -1633,6 +1633,11 @@ export function setTownCharacterEnabled(characterId, townEnabled) {
   return jsonRequest(`${BASE}/town/characters/${characterId}`, townJson('PUT', { townEnabled }))
 }
 
+// 入住角色的职能权限（打工 / 服务 / 交易，至少一项）
+export function setTownCharacterCapabilities(characterId, capabilities) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}`, townJson('PUT', { capabilities }))
+}
+
 // 角色四方向spirit生成（管理面板）
 export function generateTownCharacterSprites(characterId, options = {}) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST',

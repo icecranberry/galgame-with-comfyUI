@@ -59,3 +59,36 @@ export function upgradeTownNpcCapabilities(db, npc, extra = []) {
 export function capabilityForTownService(serviceKey) {
   return /\.(buy_ready|buy_meal)$/.test(serviceKey || '') ? 'trade' : 'service';
 }
+
+
+/**
+ * 入住角色显式配置的职能权限。
+ * 没配置、空数组或坏数据都返回 null，由调用方回退（关联居民、再到默认值）。
+ * 免得一份坏档案把角色锁成「什么都不能做」。
+ */
+export function parseCharacterCapabilities(raw) {
+  if (raw == null) return null;
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) && value.length ? normalizeTownCapabilities(value) : null;
+  } catch { return null; }
+}
+
+export function readCharacterCapabilities(db, characterId) {
+  if (characterId == null) return null;
+  const row = db.prepare('SELECT capabilities_json FROM town_character_capabilities WHERE character_id = ?').get(characterId);
+  return parseCharacterCapabilities(row?.capabilities_json ?? null);
+}
+
+/**
+ * 写入入住角色的职能权限（至少一项，否则抛 INVALID_TOWN_CAPABILITIES）。
+ * 只动职能表，不碰 town_characters：配职能不该改变角色的入住状态。
+ */
+export function setCharacterCapabilities(db, characterId, capabilities) {
+  const list = normalizeTownCapabilities(capabilities);
+  db.prepare(`INSERT INTO town_character_capabilities (character_id, capabilities_json, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(character_id) DO UPDATE SET capabilities_json = excluded.capabilities_json,
+      updated_at = CURRENT_TIMESTAMP`).run(characterId, JSON.stringify(list));
+  return list;
+}

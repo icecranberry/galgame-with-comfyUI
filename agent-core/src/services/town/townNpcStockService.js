@@ -9,7 +9,7 @@ import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { extractFirstJson, repairJson } from '../eventGenerator.js';
 import { generateImageRaw } from '../imageSkill.js';
-import { saveBase64Image } from '../imagePaths.js';
+import { saveBase64Image, imageUrlExists } from '../imagePaths.js';
 import { broadcast } from '../unifiedStreamBus.js';
 import { broadcastTownStateUpdated } from './townBus.js';
 import { townError } from './townEventService.js';
@@ -79,9 +79,9 @@ export function pickStockCount(seed) {
   return STOCK_MIN_ITEMS + (hashSeed(`count:${seed}`) % span);
 }
 
-/** 约一半走宝箱取材，其余自由创作；奇数件时宝箱侧取整。 */
+/** 货架以居民特有货品为主：宝箱取材最多 1 件（满 4 件才放 1 件），其余全部按人格卡自由创作。 */
 export function splitStockPlan(count, seed) {
-  const chest = Math.round(count / 2);
+  const chest = count >= 4 ? 1 : 0;
   return { chest, free: count - chest, order: hashSeed(`order:${seed}`) % 2 === 0 ? 'chest-first' : 'free-first' };
 }
 
@@ -114,17 +114,22 @@ export function buildStockPersonaBlock(npc) {
 export function buildStockTaskPrompt(npc, plan) {
   const name = npc.display_name || '无名居民';
   const chestLines = CHEST_GOODS.map(item => `  - ${item.effectKey}（${item.name}）：${item.hint}`).join('\n');
+  const chestLine = plan.chest > 0
+    ? `其中 ${plan.chest} 件允许从「宝箱里能开出来的东西」里取材（用下面给出的 effect_key，保留其效果定位，只把名称、描述、画面按这位居民的风格重新包装）；`
+    : '本期货架不要照搬宝箱物品，全部从这位居民身上长出来；';
   return [
     '【本次任务目标】',
-    `为有交易权限的居民「${name}」设计本期货架上的 ${plan.count} 件货品。玩家用邻币买下后放进背包，并会因此和这位居民更亲近一点。`,
-    `其中 ${plan.chest} 件要从「宝箱里能开出来的东西」里取材（用下面给出的 effect_key，保留其效果定位，只把名称、描述、画面按这位居民的风格重新包装）；`,
-    `另外 ${plan.free} 件由你完全自由创作，必须长在这位居民的人格卡与职业上（例：奶牛娘卖自己产的奶、铁匠卖打铁剩下的边角料做的护身符、花店姑娘卖当天没卖完的花束）。`,
+    `为有交易权限的居民「${name}」设计本期货架上的 ${plan.count} 件货品。玩家用金币买下后放进背包，并会因此和这位居民更亲近一点。`,
+    chestLine,
+    `另外 ${plan.free} 件必须完全长在这位居民身上：从人格卡、职业、外貌、最近在做的事里挑一个具体切口（例：奶牛娘卖当天挤的奶、铁匠卖打铁剩下的边角料做的护身符、花店姑娘卖当天没卖完的花束）。`,
     '',
-    '【宝箱货品取材池】（chest 件请从中选，effectKey 必须原样使用）',
+    '【effectKey 取材池】（每件货品的 effectKey 都必须原样取自这里）',
     chestLines,
     '',
     '【创作要求】',
-    '- 货品要像这个小镇里真实会卖的东西，有具体质感、气味或来历，不要写成通用商店条目。',
+    '- 每件货品都要像这个小镇里真实会卖的东西，有具体质感、气味或来历，不要写成通用商店条目。',
+    '- 每件货品都要能回答「为什么偏偏是这个人卖它」：把来历、做法、限定条件写进描述，让玩家一看就知道只有这家才有。',
+    '- 给货品一点小脾气或小条件：只在下雨天卖、熟客才拿出来、每天只有一份、买之前 TA 会先问你一句。把这些写进描述里。',
     '- 自由创作的货品 effectKey 也要从上面的取材池里挑一个最贴近的（它决定玩家在背包里使用时的实际效果）。',
     '- 标题 3~8 个字，像游戏物品名，结尾不加标点。',
     '- 描述 20~60 个字，写清这是什么、为什么出现在这里，带一点这位居民的口吻或小故事。',
@@ -337,8 +342,41 @@ async function generateStockImageAsync(stockId, options = {}) {
  * 后台补画：把待画 / 画失败 / 进程中断的货品图标补齐（有次数上限）。
  * 由 townNpcStockScheduler 周期调用，保证玩家打开货摊时图片已经生成好，而不是点开才画。
  */
-export async function ensureStockImages({ worldId = null, limit = 4, minAgeMs = 60_000, generateImageRaw: injected } = {}) {
+/**
+ * 自愈：数据库认为图标 ready，但磁盘文件已经不存在（目录被清理 / 迁移只搬了库没搬图）时，
+ * 把它退回 pending 并允许重画，否则货摊会一直显示 404 的破图。
+ */
+export function reconcileStockImages({ worldId = null } = {}) {
   const db = getDb();
+  const rows = db.prepare(`SELECT id, image_url FROM town_npc_stock
+    WHERE image_status = 'ready' ${worldId ? 'AND world_id = ?' : ''}`).all(...(worldId ? [worldId] : []));
+  const reset = db.prepare(`UPDATE town_npc_stock
+    SET image_url = NULL, image_status = 'pending', image_attempts = 0 WHERE id = ?`);
+  let lost = 0;
+  for (const row of rows) {
+    if (imageUrlExists(row.image_url)) continue;
+    reset.run(row.id);
+    lost += 1;
+  }
+  return lost;
+}
+
+let imagePumpBusy = false;
+
+export async function ensureStockImages({ worldId = null, limit = 4, minAgeMs = 60_000, generateImageRaw: injected } = {}) {
+  if (imagePumpBusy) return 0;
+  imagePumpBusy = true;
+  try {
+    return await runStockImagePump({ worldId, limit, minAgeMs, injected });
+  } finally {
+    imagePumpBusy = false;
+  }
+}
+
+async function runStockImagePump({ worldId, limit, minAgeMs, injected }) {
+  const db = getDb();
+  // 先自愈：把「库里有、盘上没了」的图标退回 pending，本轮的补画就能带上它们。
+  reconcileStockImages({ worldId });
   const cutoff = Date.now() - minAgeMs;
   const rows = db.prepare(`SELECT id FROM town_npc_stock
     WHERE image_status <> 'ready' AND image_attempts < ? AND rolled_at <= ?
@@ -367,7 +405,7 @@ function insertBackpackItem(db, { worldId, sourceId, effectKey, name, descriptio
 }
 
 /**
- * 买下货架上的货品：扣邻币 -> 进背包 -> 随机提升好感度。
+ * 买下货架上的货品：扣金币 -> 进背包 -> 随机提升好感度。
  * 幂等：同一件货的 sourceId 只入包一次，重放请求直接返回同一份收据。
  */
 export function createTownNpcStockService({ db, clock, registry, economy }) {
@@ -394,9 +432,6 @@ export function createTownNpcStockService({ db, clock, registry, economy }) {
       ON CONFLICT(world_id, npc_id) DO UPDATE SET favor = excluded.favor, updated_at = excluded.updated_at`)
       .run(worldId, npcId, after, now());
     return { before, after, delta };
-  }
-  function npcBusinessAccountId(input, npcId) {
-    return economy.ensureAccount({ ...input, ownerKey: `npc:${npcId}`, accountType: 'business' }).accountId;
   }
   function playerAccount(input) {
     const me = registry.resolveAgentKey('me');
@@ -425,22 +460,20 @@ export function createTownNpcStockService({ db, clock, registry, economy }) {
       if (stock.sold_at != null || existingItem) {
         if (!existingItem) throw townError('STOCK_SOLD');
         // 同一件货只入包一次：重放请求返回同一份收据，不再扣款。
-        const favorNow = getNpcFavor(db, input.worldId, npc.id);
-        return { ...receipt(stock, existingItem, { before: favorNow, delta: 0, after: favorNow }),
+        return { ...receipt(stock, existingItem, null),
           alreadyOwned: true, money: { delta: 0, amount: 0, direction: 'none' } };
       }
       const player = playerAccount(input);
-      const npcAccountId = npcBusinessAccountId(input, npc.id);
-      economy.transfer({
+      // 居民不持有钱包：买货的钱直接从玩家账上销毁（离开流通）。
+      economy.burn({
         ...input,
+        accountId: player.accountId,
         idempotencyKey: `npc-stock:${input.idempotencyKey}`,
         sourceKey: `npc-stock:${stock.id}:${input.idempotencyKey}`,
         reasonCode: 'NPC_STOCK_PURCHASE',
         amount: stock.price,
-        fromAccountId: player.accountId,
-        toAccountId: npcAccountId,
       });
-      const favor = grantFavor(input.worldId, npc.id, stock.favor_delta);
+      // 货品是送给角色的礼物，不再记 NPC 好感（town_npc_favor 表与 favor_delta 列保留，以后另有用途）。
       const itemId = insertBackpackItem(db, {
         worldId: input.worldId,
         sourceId,
@@ -451,7 +484,7 @@ export function createTownNpcStockService({ db, clock, registry, economy }) {
       });
       db.prepare('UPDATE town_npc_stock SET sold_at = ? WHERE id = ? AND sold_at IS NULL').run(now(), stock.id);
       const itemRow = db.prepare('SELECT * FROM backpack_items WHERE id = ?').get(itemId);
-      return receipt({ ...stock, sold_at: now() }, itemRow, favor);
+      return receipt({ ...stock, sold_at: now() }, itemRow, null);
     }).immediate();
   }
   return { buyStock, getFavor: (worldId, npcId) => getNpcFavor(db, worldId, npcId), grantFavor, ensureFavor };
@@ -470,6 +503,11 @@ export async function getTownNpcStockView({ worldId = 'default', npcId, refresh 
   }
   const rolling = stockNeedsRoll(db, worldId, npc.id, Date.now());
   if (rolling) rollNpcStock({ worldId, npcId: npc.id, force: true }).catch(() => {});
-  return { npcId: npc.id, displayName: npc.display_name, favor: getNpcFavor(db, worldId, npc.id),
-    goods: listNpcStock({ worldId, npcId: npc.id }), rolling };
+  // 图标文件丢失时当场退回 pending（前端显示「绘制中」而不是破图），并让后台马上补画。
+  reconcileStockImages({ worldId });
+  const goods = listNpcStock({ worldId, npcId: npc.id });
+  if (goods.some(good => good.imageStatus !== 'ready')) {
+    ensureStockImages({ worldId, limit: 12, minAgeMs: 0 }).catch(() => {});
+  }
+  return { npcId: npc.id, displayName: npc.display_name, favor: getNpcFavor(db, worldId, npc.id), goods, rolling };
 }

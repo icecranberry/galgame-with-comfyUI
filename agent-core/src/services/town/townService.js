@@ -19,7 +19,7 @@ import { playerRouteStart, applyPlayerRoute } from './playerMovement.js';
 import { advanceAgentPosition } from './agentMovement.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
-import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
+import { townCapabilities, defaultTownCapabilities, parseCharacterCapabilities, setCharacterCapabilities } from './townCapabilities.js';
 import { createTownActionRunner } from './townActionRunner.js';
 import { findRoutineSlot } from './routineSchedule.js';
 import { createTownClock } from './townClock.js';
@@ -1683,6 +1683,28 @@ export function setTownCharacterEnabled(characterId, { townEnabled } = {}) {
   return { ok: true, townEnabled: !!enabled };
 }
 
+/**
+ * 角色职能权限（管理面板）：写入角色自己的小镇职能（打工 / 服务 / 交易，至少一项）。
+ * 只写职能表，不动入住状态；角色没配过时运行时会回退到关联居民的权限，配过就以角色为准。
+ */
+export function setTownCharacterCapabilities(characterId, capabilities) {
+  const db = getDb();
+  if (!db.prepare('SELECT id FROM characters WHERE id = ?').get(characterId)) {
+    return { ok: false, error: '角色不存在' };
+  }
+  let list;
+  try {
+    list = setCharacterCapabilities(db, characterId, capabilities);
+  } catch (err) {
+    if (err?.code === 'INVALID_TOWN_CAPABILITIES') {
+      return { ok: false, error: '职能权限无效，至少要选一项。' };
+    }
+    throw err;
+  }
+  // 职能只影响能提供什么服务，不动入住状态，所以不用同步成员名单
+  return { ok: true, capabilities: list };
+}
+
 /** NPC 启停（管理面板） */
 export function setNpcEnabled(npcId, enabled) {
   const db = getDb();
@@ -1810,9 +1832,13 @@ export function listTownCharacters() {
   const db = getDb();
   const rows = db.prepare(`
     SELECT c.id, c.name, c.display_name, c.avatar_path,
-           COALESCE(tc.town_enabled, 0) AS town_enabled
+           COALESCE(tc.town_enabled, 0) AS town_enabled,
+           cc.capabilities_json AS char_capabilities,
+           n.id AS linked_npc_id, n.job AS linked_job, n.capabilities_json AS linked_npc_capabilities
     FROM characters c
     LEFT JOIN town_characters tc ON tc.character_id = c.id
+    LEFT JOIN town_character_capabilities cc ON cc.character_id = c.id
+    LEFT JOIN town_npcs n ON n.id = (SELECT id FROM town_npcs WHERE character_id = c.id ORDER BY id LIMIT 1)
     ORDER BY c.id
   `).all();
   const assets = listAssets({});
@@ -1843,10 +1869,16 @@ export function listTownCharacters() {
     appearanceStatus.portrait = portrait ? statusFor(portrait, 'portrait') : 'unknown';
     const agentKey = `char:${r.id}`;
     const agent = state.agents.get(agentKey);
+    // 职能权限：角色自己的设置优先，没配过才回退到关联居民，再回退到默认（服务）
+    const ownCapabilities = parseCharacterCapabilities(r.char_capabilities);
+    const linkedNpc = r.linked_npc_id != null
+      ? { id: r.linked_npc_id, job: r.linked_job, capabilities_json: r.linked_npc_capabilities } : null;
     return {
       id: r.id,
       displayName: r.display_name || r.name,
       avatarPath: r.avatar_path || null,
+      capabilities: ownCapabilities ?? (linkedNpc ? townCapabilities(linkedNpc) : defaultTownCapabilities(null)),
+      capabilitiesExplicit: ownCapabilities !== null,
       // 立绘 / 小人都是角色自己的小镇素材，没做过就是 null（面板显示空槽）
       portrait,
       townEnabled: !!r.town_enabled,

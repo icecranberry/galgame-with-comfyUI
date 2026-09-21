@@ -16,7 +16,7 @@
 小镇玩法以「奇遇」为唯一链路：NPC 互动（`TownResidentActions.vue`）发出邀请 → 服务线索/特殊奇遇走 LLM 叙事事件 → 玩家在奇遇页（`EventsView.vue`）用选项推进。建筑服务（按摩、喝酒、喝咖啡等）、NPC 邀请与 NPC 服务都由奇遇承载，不做步骤式结算面板。
 
 1. 小镇内的 UI 设计以「在地图上点击 NPC 后打开的对话框」为直接参考，优先复用 `web-ui/src/components/town/TownDialogueStage.vue` 的立绘舞台、暖纸不规则对话框、墨色描边和游戏选项布局，整体偏向游戏化。
-2. 邻币钱包、NPC 赠礼/交易是仅存的轻结算（`TownWalletPanel.vue`、`TownNpcTradePanel.vue`）；新的玩法一律优先奇遇叙事，不要重新引入步骤机/表单式面板。
+2. 金币钱包、NPC 赠礼/交易是仅存的轻结算（`TownWalletPanel.vue`、`TownNpcTradePanel.vue`）；新的玩法一律优先奇遇叙事，不要重新引入步骤机/表单式面板。
 3. 镇内生活面板复用 `TownPaperPanel.vue`；对话与人物互动优先复用 `TownDialogueStage.vue`，不得另造不一致的视觉体系。
 4. 按钮、输入框、选择框、开关和弹窗继续遵循下方统一组件约定；配色、尺寸和反馈沿用 `docs/design-system.md` 与现有 token。
 5. 修改完成后，对照点击 NPC 打开的对话框检查视觉一致性，并验证桌面、移动端及暖色 / 暗夜主题。

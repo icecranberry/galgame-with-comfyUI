@@ -34,11 +34,12 @@ export const TOWN_NPC_SERVICE_PROGRESS_EVENT = 'town_npc_service_progress';
 export const TOWN_NPC_SERVICE_READY_EVENT = 'town_npc_service_ready';
 export const SERVICE_SESSION_STATUSES = Object.freeze(['generating', 'ready', 'failed']);
 
-const NPC_STARTING_BALANCE = 200;
-const NPC_SEED_VERSION = 2;
 const BOLD_MIN_FACTOR = 1.5;
 const BOLD_MAX_FACTOR = 3;
-const SERVICE_SCENE = 'town_service';
+const SERVICE_SCENE = 'town_service'; // 图片存储分类（落盘目录）
+// 全局 LoRA 的场景：小镇的打工/服务出图统一跟随「日程」勾选框，
+// 同时用 workflowScene 保持原本的工作流选择不变。
+const SERVICE_LORA_SCENE = 'schedule';
 
 function hashSeed(value) {
   return parseInt(createHash('sha256').update(String(value)).digest('hex').slice(0, 8), 16);
@@ -100,11 +101,13 @@ function twoPersonNote(npc, playerName, playerAppearance) {
   ].join('\n');
 }
 
+// 风格示例：只用于让模型学习 tale 的语气、节奏与收尾方式，与世界观、NPC 人设无关。
+const TALE_STYLE_EXAMPLE = '老周擦柜台擦到一半，抹布没攥住，甩出去正好糊在刚进门那位的新皮鞋上。两人对着那只鞋看了三秒，谁也没先说话。老周把抹布捡起来，说：「这鞋……本来也得擦。」对方真把脚抬起来让他擦完，付钱走人时鞋面上留着一道没抹开的灰印。老周低头接着擦柜台，像什么都没发生。';
 const OUTPUT_STRUCTURE = [
   '【输出结构】',
   '你必须严格输出一个 JSON 对象，不要输出任何解释、前后缀或 JSON 以外的文字。格式如下：',
   '{',
-  '  "tale": "本次服务/打工过程中发生的趣事，120~220 字。要求有具体动作、有意外或反差、最好带一句对话；禁止写成「老板看到工作认真，夸奖了一句」这种平淡流水账。",',
+  '  "tale": "本次服务/打工过程中发生的趣事，120~220 字。要有具体动作、一个物理层面的意外、一句不像在交代信息的对话，结尾留下一个没人处理的痕迹。",',
   '  "prompt": "English image prompt, describing the scene where BOTH the NPC and the user appear together. Include: character appearances, clothing, action, facial expression, location, time of day, lighting, camera angle, and art style. Output English only, 60-140 words, no line breaks.",',
   '  "options": [',
   '    { "label": "稳妥的下一步（12 字以内，口吻自然，如「干得不错，继续」）", "tone": "normal" },',
@@ -112,7 +115,13 @@ const OUTPUT_STRUCTURE = [
   '  ]',
   '}',
   '【字段约束】',
-  '- tale：中文，120~220 字，必须写出具体发生了什么（谁做了什么、出现了什么小意外/小插曲、结果如何），禁止空泛抒情与流水账。',
+  '- tale：中文，120~220 字，必须同时满足下面五条：',
+  '  1) 意外来自物理层面：手滑、打喷嚏、没攥住、风吹、脚下打滑、瓶盖崩开……让某样东西沾到/洒到/掉到不该在的地方。禁止把意外写成态度问题（粗心、不认真、被夸奖）。',
+  '  2) 意外要留下可见痕迹：一根头发、一圈水渍、一道没抹开的灰印、歪掉的标签，且这个痕迹到结尾仍然存在。',
+  '  3) 只写 1~2 句对话，且必须答非所问、嘴硬、自言自语或吐槽，不能用来交代信息；不要写「笑着说」「解释道」「随即回答」这类标签。',
+  '  4) 结尾不总结、不写双方反应、不升华，停在一个没人处理的细节上。',
+  '  5) 长短句混着来：可以有四字短句，也可以一句话里塞三个动作；禁止相邻两句字数接近。',
+  '  禁用词：倒不恼、愣了愣、随即、顿时、气氛、认真、夸奖、似乎、仿佛、不禁、不由得。',
   '- prompt：英文，60~140 词，单行，必须同时描述 NPC 与用户两个人以及他们的互动，禁止出现中文。',
   '- options：必须是长度为 2 的数组，第一条 tone 固定为 "normal"（平稳继续），第二条 tone 固定为 "bold"（更激进、更意外、更有可能出状况的继续）。',
   '- label：中文，12 字以内，直接可点击，不要带标点前缀。',
@@ -130,13 +139,18 @@ export function buildMessages({ npc, offer, kind, priorTale, priorChoice, turns 
     roleLine,
     `项目标题：${offer.title}`,
     offer.description ? `项目详情：${offer.description}` : '',
-    `基准金额：${offer.price} 邻币`,
+    `基准金额：${offer.price} 金币`,
     twoPersonNote(npc, playerName, playerAppearance),
     '',
     '【创作要求】',
-    `1. 写一段这次${kindLabel}过程中真实发生的趣事，要有画面感、有意外或反差，读起来让人觉得有意思。`,
+    `1. 写一段这次${kindLabel}过程中真实发生的趣事，要有画面感、有意外或反差。tale 必须满足【字段约束】里列出的五条写法。`,
     '2. 画面 prompt 用英文，必须让 NPC 与用户同框出现并产生互动，符合世界观里的环境与着装。',
     '3. 给出两个后续选项：normal 是平稳继续；bold 要更跳脱、更意外，可能引发小状况。',
+    '',
+    '【风格示例】（只学语气、节奏与收尾方式，禁止复用其中的人物、道具、事件与句子）',
+    TALE_STYLE_EXAMPLE,
+    '',
+    '【输出前自检】tale 里有物理意外吗？痕迹留到结尾了吗？有相邻两句字数接近吗？出现禁用词了吗？结尾在总结或升华吗？',
     '4. 严格按【输出结构】的 JSON 格式输出，不要输出 JSON 以外的任何文字。',
   ].filter(Boolean);
 
@@ -205,59 +219,32 @@ function createEconomyRuntime(db) {
   return { db, registry, world, scope, economy };
 }
 
-function ensureNpcAccount(context, npcId) {
+/** 开单前先确认玩家付得起。只有「服务」要玩家掏钱；「打工」是给玩家发钱，不看余额。 */
+function assertAffordable(context, { kind, amount }) {
+  if (kind !== 'service') return null;
   const { registry, scope, economy } = context;
-  const account = economy.ensureAccount({ ...scope, ownerKey: `npc:${npcId}`, accountType: 'business' });
-  const grantKey = `seed:money:${account.accountId}:${NPC_SEED_VERSION}`;
-  const granted = context.db.prepare('SELECT 1 FROM economy_transactions WHERE world_id=? AND source_key=?').get(scope.worldId, grantKey);
-  if (!granted) {
-    try {
-      economy.seed({
-        ...scope,
-        accountId: account.accountId,
-        amount: NPC_STARTING_BALANCE,
-        seedVersion: NPC_SEED_VERSION,
-        idempotencyKey: `npc-starting-grant:${npcId}:${scope.worldEpoch}`,
-        reasonCode: 'NPC_STARTING_GRANT',
-      });
-    } catch (error) {
-      if (!['SOURCE_CONFLICT', 'IDEMPOTENCY_CONFLICT'].includes(error?.code)) throw error;
-    }
-  }
-  return economy.ensureAccount({ ...scope, ownerKey: `npc:${npcId}`, accountType: 'business' });
-}
-
-/** 开单前先确认付款方付得起：服务看玩家，打工看居民。付不起就不开单，避免「结算失败被吞、白拿服务」。 */
-function assertAffordable(context, { npcId, kind, amount }) {
-  const { registry, scope, economy } = context;
-  let payer;
-  if (kind === 'service') {
-    const me = registry.resolveAgentKey('me');
-    if (!me?.actorId) throw townError('PLAYER_ACTOR_MISSING');
-    payer = economy.ensureAccount({ ...scope, ownerKey: `actor:${me.actorId}`, actorId: me.actorId, accountType: 'actor' });
-  } else {
-    payer = ensureNpcAccount(context, npcId);
-  }
-  if ((payer?.available ?? 0) < amount) throw townError(kind === 'service' ? 'INSUFFICIENT_FUNDS' : 'NPC_CANNOT_PAY');
+  const me = registry.resolveAgentKey('me');
+  if (!me?.actorId) throw townError('PLAYER_ACTOR_MISSING');
+  const payer = economy.ensureAccount({ ...scope, ownerKey: `actor:${me.actorId}`, actorId: me.actorId, accountType: 'actor' });
+  if ((payer?.available ?? 0) < amount) throw townError('INSUFFICIENT_FUNDS');
   return payer;
 }
 
-function settleCoins(context, { npcId, kind, amount, sessionId, turns }) {
+/** 只有玩家记账：服务是玩家把钱花掉（销毁），打工是玩家领到工钱（发行）。居民不持有钱包。 */
+function settleCoins(context, { kind, amount, sessionId, turns }) {
   const { registry, scope, economy } = context;
   const me = registry.resolveAgentKey('me');
   if (!me?.actorId) throw townError('PLAYER_ACTOR_MISSING');
   const playerAccount = economy.ensureAccount({ ...scope, ownerKey: `actor:${me.actorId}`, actorId: me.actorId, accountType: 'actor' });
-  const npcAccount = ensureNpcAccount(context, npcId);
 
   const playerPays = kind === 'service';
-  const transfer = economy.transfer({
+  const receipt = (playerPays ? economy.burn : economy.mint)({
     ...scope,
+    accountId: playerAccount.accountId,
+    amount,
     idempotencyKey: `npc-service:${sessionId}:${turns}`,
     sourceKey: `town_npc_service:${sessionId}:${turns}`,
     reasonCode: playerPays ? 'TOWN_NPC_SERVICE_PAYMENT' : 'TOWN_NPC_WORK_WAGE',
-    amount,
-    fromAccountId: playerPays ? playerAccount.accountId : npcAccount.accountId,
-    toAccountId: playerPays ? npcAccount.accountId : playerAccount.accountId,
   });
 
   const after = economy.ensureAccount({ ...scope, ownerKey: `actor:${me.actorId}`, actorId: me.actorId, accountType: 'actor' });
@@ -265,11 +252,12 @@ function settleCoins(context, { npcId, kind, amount, sessionId, turns }) {
     delta: playerPays ? -amount : amount,
     amount,
     direction: playerPays ? 'pay' : 'earn',
-    transactionId: transfer?.transactionId || null,
+    transactionId: receipt?.transactionId || null,
     balance: after?.balance ?? null,
     available: after?.available ?? null,
   };
 }
+
 
 function updateSession(db, sessionId, patch) {
   const fields = Object.keys(patch);
@@ -294,7 +282,8 @@ async function generateServiceImage(prompt, { npc, kind, sessionId, options }) {
     artist: config.comfyui.eventArtist,
     width: config.comfyui.eventWidth,
     height: config.comfyui.eventHeight,
-    scene: SERVICE_SCENE,
+    scene: SERVICE_LORA_SCENE,
+    workflowScene: SERVICE_SCENE,
     priority: 'high',
     onProgress,
   });
@@ -455,7 +444,7 @@ export function startNpcService(npcId, input = {}, options = {}) {
   const offer = loadOffer(db, npcId, input.offerId);
   const kind = normalizeOfferKind(offer.kind);
   // 服务=玩家付钱、打工=居民付钱：付不起就别开单。
-  assertAffordable(context, { npcId: npc.id, kind, amount: clampOfferPrice(kind, offer.price) });
+  assertAffordable(context, { kind, amount: clampOfferPrice(kind, offer.price) });
 
   const now = Date.now();
   const insertInfo = db.prepare(
@@ -513,7 +502,7 @@ export function continueNpcService(npcId, input = {}, options = {}) {
 
   const tone = input.choice === 'bold' ? 'bold' : 'normal';
   const prior = { tale: session.last_tale || '', choice: input.choiceLabel || '', tone };
-  assertAffordable(context, { npcId: npc.id, kind,
+  assertAffordable(context, { kind,
     amount: turnAmount({ kind, basePrice: offer?.price ?? null, sessionId: session.id, turns: session.turns || 0, tone }) });
   updateSession(db, session.id, { status: 'generating' });
 

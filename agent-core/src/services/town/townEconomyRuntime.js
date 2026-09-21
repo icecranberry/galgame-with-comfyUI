@@ -52,7 +52,7 @@ export function getTownWallet() {
     ORDER BY t.rowid DESC LIMIT 20`).all(wallet.accountId)
     .map(r => ({ command: r.command, reasonCode: r.reason_code, occurredAt: r.occurred_at, amount: r.amount,
       ...receiptContext(db, r.source_key) }));
-  return { ...scope, actorId: player.actorId, currency: '邻币', balance: wallet.balance,
+  return { ...scope, actorId: player.actorId, currency: '金币', balance: wallet.balance,
     reserved: wallet.reserved, available: wallet.available, version: wallet.version, receipts };
 }
 
@@ -110,7 +110,7 @@ export function getTownNpcStockRuntime() {
   return { ...context, stock };
 }
 
-/** 买下一件货品：扣邻币、进背包、随机提升好感度。 */
+/** 买下一件货品：扣金币、进背包、随机提升好感度。 */
 export function buyTownNpcStock(npcId, stockId, input) {
   const context = getTownNpcStockRuntime();
   const scope = lifeScope(context, input);

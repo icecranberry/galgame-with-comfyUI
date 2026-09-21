@@ -17,6 +17,7 @@ import { migrateTownEconomySchema } from './townEconomySchema.js';
 import { migrateTownNpcFunctionsSchema } from './townNpcFunctionsSchema.js';
 import { migrateTownNpcEventSchema } from './townNpcEventSchema.js';
 import { migrateTownResponsibilitySchema } from './townResponsibilitySchema.js';
+import { migrateTownCharacterCapabilitiesSchema } from './townCharacterCapabilitiesSchema.js';
 import { migrateTownExperienceSchema } from './townExperienceSchema.js';
 import { migrateTownServiceOfferSchema } from './townServiceOfferSchema.js';
 import { cleanupTownDialogueRequests } from '../services/town/townDialogueRequests.js';
@@ -958,6 +959,7 @@ function initSchema(db) {
   migrateTownNpcFunctionsSchema(db);
   migrateTownNpcEventSchema(db);
   migrateTownResponsibilitySchema(db);
+  migrateTownCharacterCapabilitiesSchema(db);
   migrateTownExperienceSchema(db);
   migrateTownServiceOfferSchema(db);
   migrateTownMultiMapSchema(db);

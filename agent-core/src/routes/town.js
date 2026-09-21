@@ -14,7 +14,7 @@
  * 向导     GET/POST/PUT/DELETE /api/town/init*      — 七步初始化流程
  * 居民     GET/POST /api/town/npcs、PUT/DELETE :id、:id/sprites、:id/portrait、:id/asset-set（一次出齐全套）、:id/reroll、:id/chat、:id/messages
  * 角色     GET  /api/town/characters                — 素材状态 + 入住状态（管理面板；只含角色自己的小镇素材）
- *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}（入住前先补齐素材，齐了才入住）
+ *          PUT  /api/town/characters/:id            — 入住/退住 {townEnabled}（入住前先补齐素材，齐了才入住）；单独传 {capabilities} 保存打工/服务/交易职能
  *          POST /api/town/characters/:id/portrait   — 立绘（复用关联居民立绘，缺失才生成；酒馆立绘不参与）
  *          POST /api/town/characters/:id/sprites    — 正/背像素小人
  *          POST /api/town/characters/:id/assets     — 一键补齐全套素材
@@ -23,7 +23,7 @@ import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
-  setTownCharacterEnabled, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
+  setTownCharacterEnabled, setTownCharacterCapabilities, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
   generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld, resetMap,
   holdTownActor, releaseTownActor, touchTownViewer,
   getTownMaps, travelPlayer, reloadMap,
@@ -200,7 +200,7 @@ router.get('/wallet', (req, res) => {
 const townCommandMessages = {
   STORY_GENERATION_FAILED: '这段奇遇暂时没能展开，稍后再问一次就好。',
   NOT_ARRIVED: '请先走到目标地点，停下后再试',
-  INSUFFICIENT_FUNDS: '可用邻币不足，暂时无法完成这项操作',
+  INSUFFICIENT_FUNDS: '可用金币不足，暂时无法完成这项操作',
   INSUFFICIENT_STOCK: '原料暂时不足，请稍后再来',
   VERSION_CONFLICT: '状态已变化，请刷新后重试',
   IDEMPOTENCY_CONFLICT: '这次请求内容已变化，请刷新后重试',
@@ -223,8 +223,7 @@ const townCommandMessages = {
   SERVICE_SESSION_NOT_FOUND: '这段服务已经结束，请重新选择',
   SERVICE_JSON_MISSING: '这次的经历没能生成出来，请重试',
   SERVICE_PAYLOAD_INCOMPLETE: '这次的经历不完整，请重试',
-  SERVICE_IMAGE_FAILED: '画面没能画出来，请重试',
-  NPC_CANNOT_PAY: '这位居民手头暂时没钱付工资，先去做点别的吧',
+  SERVICE_IMAGE_FAILED: '画面没能画出来，请重试',
   STOCK_JSON_MISSING: '这次没能生成出货品，请再试一次',
   STOCK_EMPTY: '这次没有生成出可用的货品，请再试一次',
   STOCK_NOT_FOUND: '这件货品已经不在货架上了',
@@ -612,7 +611,13 @@ router.put('/characters/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-    const { townEnabled } = req.body || {};
+    const { townEnabled, capabilities } = req.body || {};
+    // 职能权限（打工 / 服务 / 交易）与入住状态互不依赖：先落职能，再处理开关
+    if (capabilities !== undefined) {
+      const result = setTownCharacterCapabilities(id, capabilities);
+      if (!result.ok) return res.status(400).json(result);
+      if (townEnabled === undefined) return res.json(result);
+    }
     if (townEnabled === undefined) return res.json(setTownCharacterEnabled(id));
     if (!townEnabled) return res.json(setTownCharacterEnabled(id, { townEnabled: false }));
 
@@ -798,7 +803,7 @@ router.post('/npcs/:id/stock/refresh', async (req, res) => {
   } catch (err) { sendTownCommandError(res, err); }
 });
 
-// 买下货品：扣邻币、放进背包、随机提升好感度。
+// 买下货品：扣金币、放进背包、随机提升好感度。
 router.post('/npcs/:id/stock/:stockId/buy', (req, res) => {
   try {
     res.json({ ok: true, ...buyTownNpcStock(req.params.id, req.params.stockId, req.body || {}) });

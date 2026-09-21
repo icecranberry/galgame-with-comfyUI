@@ -6,17 +6,17 @@
     </div>
     <template v-if="wallet">
       <section class="tl-wallet" aria-label="我的钱包">
-        <span>我的邻币</span><strong>{{ money(wallet.available) }}<small>可用</small></strong>
+        <span>我的金币</span><strong>{{ money(wallet.available) }}<small>可用</small></strong>
         <p>余额 {{ money(wallet.balance) }} <span v-if="wallet.reserved">·</span> <template v-if="wallet.reserved">预留 {{ money(wallet.reserved) }}</template></p>
       </section>
       <section v-if="wallet.receipts?.length" aria-label="最近的账目">
         <h3>最近的账目</h3>
         <article v-for="(receipt, index) in wallet.receipts" :key="index" class="tl-receipt">
           <span>{{ receiptLabel(receipt) }}</span>
-          <em>{{ receipt.amount > 0 ? `+${money(receipt.amount)}` : receipt.amount < 0 ? money(receipt.amount) : '—' }} 邻币</em>
+          <em>{{ receipt.amount > 0 ? `+${money(receipt.amount)}` : receipt.amount < 0 ? money(receipt.amount) : '—' }} 金币</em>
         </article>
       </section>
-      <p class="tl-muted">邻币来自邻居的买卖与心意；在居民对话里发起「交易」或收下赠礼都会记在这里。</p>
+      <p class="tl-muted">金币来自邻居的买卖与心意；在居民对话里发起「交易」或收下赠礼都会记在这里。</p>
     </template>
   </town-paper-panel>
 </template>
@@ -56,7 +56,7 @@ function receiptLabel(receipt) {
     default:
       break
   }
-  if (receipt.command === 'seed') return receipt.amount > 0 ? '获得邻币' : '账目变动'
+  if (receipt.command === 'seed') return receipt.amount > 0 ? '获得金币' : '账目变动'
   if (receipt.command === 'transfer') return receipt.amount > 0 ? '收到一笔' : '付出一笔'
   return '账目变动'
 }

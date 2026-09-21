@@ -36,7 +36,7 @@ test('overdue town npc events are hidden and archived when the npc panel is read
   const f = setup(t);
   const eventId = Number(f.db.prepare(`INSERT INTO town_npc_events
     (npc_id, event_type_key, status, title, description, expires_at)
-    VALUES (?, 'town.custom', 'open', '十邻币能泡多久？', '测试用事件', datetime('now', '-1 hour'))`).run(f.npcId).lastInsertRowid);
+    VALUES (?, 'town.custom', 'open', '十金币能泡多久？', '测试用事件', datetime('now', '-1 hour'))`).run(f.npcId).lastInsertRowid);
 
   const view = interaction.getTownInteractions(`npc:${f.npcId}`);
   assert.equal(view.activeStory, null, '过期奇遇不应再作为活跃奇遇下发');

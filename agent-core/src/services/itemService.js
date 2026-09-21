@@ -27,7 +27,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from 
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
-import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl, imageUrlExists } from './imagePaths.js';
 import { PLAYER_ITEM_SQL, CHEST_ITEM_SQL, hasGeneratingChest, completeChestItem, completeStaleChestItems } from './itemLifecycle.js';
 import { broadcast } from './unifiedStreamBus.js';
 import {
@@ -404,6 +404,39 @@ async function generateItemImageAsync(itemId, imagePrompt) {
   }
 }
 
+/**
+ * 修复丢失的道具图标：逐件按「名称 + 描述 + 效果主题」重新生成，写回原路径（image_url 不变）。
+ * 只在文件确实不存在时才会生成，可安全重复执行。
+ */
+export async function repairMissingItemImages({ limit = 100, onProgress } = {}) {
+  const db = getDb();
+  const rows = db.prepare(`SELECT * FROM backpack_items WHERE ${PLAYER_ITEM_SQL} AND image_url IS NOT NULL
+    ORDER BY id`).all().filter(row => !imageUrlExists(row.image_url));
+  const targets = rows.slice(0, Math.max(0, limit));
+  const results = [];
+  for (let i = 0; i < targets.length; i++) {
+    const row = targets[i];
+    const effect = ITEM_EFFECTS[row.effect_key];
+    const theme = String(effect?.theme || effect?.name || row.effect_key || '').slice(0, 240);
+    const prompt = `game item icon, ${row.name}, ${row.description}, ${theme}, floating, glowing softly, no humans, simple background, best quality`;
+    try {
+      const result = await generateImageRaw(prompt, {
+        scene: 'items', disableRAG: true, persistPreparation: false, width: 512, height: 512, artist: '@ebora',
+      });
+      if (!result.success || !result.images?.length) throw new Error(result.error || 'ComfyUI 未返回图片');
+      const filename = String(row.image_url).split('/').pop();
+      const url = saveBase64Image('items', filename, result.images[0].base64);
+      db.prepare('UPDATE backpack_items SET image_url = ? WHERE id = ?').run(url, row.id);
+      broadcast('item_ready', { itemId: row.id, imageUrl: url });
+      results.push({ id: row.id, name: row.name, ok: true });
+    } catch (err) {
+      results.push({ id: row.id, name: row.name, ok: false, error: err.message });
+    }
+    if (onProgress) onProgress(i + 1, targets.length, row, results[results.length - 1]);
+  }
+  return { total: targets.length, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok), results };
+}
+
 function serializeItem(row) {
   return {
     id: row.id,
@@ -573,8 +606,10 @@ function useItemInTransaction(itemId, characterId, options) {
   if (item.status === 'used') return { ok: false, error: '道具已经使用过了' };
   if (item.status !== 'ready') return { ok: false, error: '道具尚未就绪' };
   if (!item.collected_at) return { ok: false, error: '道具还未收下' };
-  const effect = ITEM_EFFECTS[item.effect_key];
-  if (!effect) return { ok: false, error: '未知的道具效果类型' };
+  // 小镇货摊买来的道具是「送给角色的礼物」：没有固定效果，使用时走礼物叙事出图 + 描述。
+  const isGift = item.source_type === 'trade';
+  const effect = isGift ? null : ITEM_EFFECTS[item.effect_key];
+  if (!isGift && !effect) return { ok: false, error: '未知的道具效果类型' };
   const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
   if (!char) return { ok: false, error: '目标角色不存在' };
 
@@ -583,7 +618,9 @@ function useItemInTransaction(itemId, characterId, options) {
   let effectId = null;
   let effectExpiresAt = null;
 
-  if (isClothesKind(effect.kind)) {
+  if (isGift) {
+    summary = `「${item.name}」送给了 ${char.display_name}`;
+  } else if (isClothesKind(effect.kind)) {
     const name = payload.outfit_name || effect.name;
     const description = payload.outfit_description || effect.theme || item.description;
     const expiresAt = sqliteLater(OUTFIT_DURATION_HOURS);
@@ -640,6 +677,10 @@ function useItemInTransaction(itemId, characterId, options) {
     expires_at: effectExpiresAt,
     remaining_seconds: secondsUntil(effectExpiresAt),
   };
+  if (isGift) {
+    return { ok: true, gift: true, summary, characterName: char.display_name,
+      item: { id: item.id, name: item.name, description: item.description, imageUrl: item.image_url, effectKey: item.effect_key } };
+  }
   return { ok: true, summary, effect: { kind: effect.kind, effect_key: item.effect_key }, activeEffect };
 }
 
