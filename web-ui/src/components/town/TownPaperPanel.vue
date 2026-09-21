@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="tl-overlay" @click.self="$emit('close')" @keydown.stop="onKeydown" @keyup.stop
+    <Transition name="tl-fade">
+    <div v-if="open" class="tl-overlay" :class="{ 'tl-fade-on': fade }" @click.self="$emit('close')" @keydown.stop="onKeydown" @keyup.stop
       @pointerdown.stop @mousedown.stop @click.stop @wheel.stop @touchstart.stop @touchmove.stop>
       <section ref="panel" class="tl-panel" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1" :style="viewportStyle">
         <header class="tl-header">
@@ -8,10 +9,11 @@
           <linshe-button variant="icon" size="sm" :aria-label="`关闭${title}`" @click="$emit('close')">✕</linshe-button>
         </header>
         <div ref="content" class="tl-content" :aria-busy="busy"><slot /></div>
-        <footer class="tl-footer"><span>{{ footerText }}</span>
+        <footer v-if="!hideFooter" class="tl-footer"><span>{{ footerText }}</span>
           <linshe-button variant="ghost" size="sm" :disabled="refreshDisabled" @click="$emit('refresh')">{{ refreshing ? '读取中…' : '重新读取' }}</linshe-button></footer>
       </section>
     </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -21,7 +23,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 
-const props = defineProps({ open: Boolean, title: { type: String, default: '小镇' }, kicker: { type: String, default: '邻舍小镇' },
+const props = defineProps({ open: Boolean, fade: Boolean, hideFooter: Boolean, title: { type: String, default: '小镇' }, kicker: { type: String, default: '邻舍小镇' },
   busy: Boolean, refreshing: Boolean, refreshDisabled: Boolean, footerText: { type: String, default: '钱物与到达状态以小镇确认为准' } })
 const emit = defineEmits(['close', 'refresh'])
 
@@ -60,6 +62,17 @@ onBeforeUnmount(() => { window.visualViewport?.removeEventListener('resize', res
 </script>
 
 <style scoped>
+/* 渐入渐出：只有传了 fade 的面板才动，其余面板仍是瞬间开合 */
+.tl-overlay.tl-fade-on.tl-fade-enter-active,
+.tl-overlay.tl-fade-on.tl-fade-leave-active { transition: opacity .18s ease; }
+.tl-overlay.tl-fade-on.tl-fade-enter-active .tl-panel,
+.tl-overlay.tl-fade-on.tl-fade-leave-active .tl-panel { transition: transform .2s cubic-bezier(.22,.61,.36,1), opacity .18s ease; }
+.tl-overlay.tl-fade-on.tl-fade-enter-from,
+.tl-overlay.tl-fade-on.tl-fade-leave-to { opacity: 0; }
+.tl-overlay.tl-fade-on.tl-fade-enter-from .tl-panel,
+.tl-overlay.tl-fade-on.tl-fade-leave-to .tl-panel { transform: translateY(10px) scale(.985); opacity: 0; }
+/* 退场时别再拦住鼠标，免得 0.18s 内点不到底下的东西 */
+.tl-overlay.tl-fade-on.tl-fade-leave-active { pointer-events: none; }
 .tl-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(0,0,0,.45); box-sizing: border-box; }
 .tl-panel { width: min(640px, 100%); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; background: #f4f1eeed; color: #554a43; border-radius: 22px; box-shadow: 0 12px 36px #352a231f; overflow: hidden; font-size: 14px; line-height: 1.65; text-align: left; outline: none; }
 .tl-header, .tl-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; flex-shrink: 0; }

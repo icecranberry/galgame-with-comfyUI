@@ -47,6 +47,7 @@ import { startKnowledgeSyncScheduler } from './src/services/imagePromptKnowledge
 import { startItemScheduler } from './src/services/itemScheduler.js';
 import { applyFromConfig } from './src/services/llmConcurrency.js';
 import { startTownScheduler, stopTownScheduler } from './src/services/town/townService.js';
+import { startTownNpcStockScheduler, stopTownNpcStockScheduler } from './src/services/town/townNpcStockScheduler.js';
 import { restoreInitJob } from './src/services/town/townInitService.js';
 import { refresh as refreshCharSearch } from './src/services/characterSearch.js';
 import { ensureDefaultMemoryIndexes, stopMemoryIndexWorker } from './src/services/memory/memoryRepository.js';
@@ -226,6 +227,7 @@ startItemScheduler();
 // 启动小镇调度器（世界页：瓦片地图 + 轻量居民生态，由 config.features.town 控制）
 restoreInitJob();  // 恢复未完成的初始化向导（断点续跑）
 startTownScheduler();
+startTownNpcStockScheduler(); // 货架：后台 3 天换货 + 预生成图标
 
 // 先启动 HTTP 服务，向量检查异步进行
 const server = app.listen(config.port, () => {
@@ -286,6 +288,7 @@ const shutdown = () => {
   stopMemoryIndexWorker();
   stopConsolidationScheduler();
   stopTownScheduler();
+  stopTownNpcStockScheduler();
 
   // 1. WAL checkpoint：确保所有未落盘事务写入主 DB
   try {

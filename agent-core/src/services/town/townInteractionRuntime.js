@@ -5,7 +5,7 @@ import { createTownInteractionService } from './townInteractionService.js';
 import { townError } from './townEventService.js';
 import { broadcastTownStateUpdated } from './townBus.js';
 import { resolveTownInteractionTarget } from './townInteractionTarget.js';
-import { townNpcEventRef } from './townNpcEventGenerator.js';
+import { townNpcEventRef, expireTownNpcEvent } from './townNpcEventGenerator.js';
 import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
 
 /** 服务线索目录：建筑能办什么事，只作为奇遇的起点线索；接受后走叙事管线，不再有步骤结算。
@@ -70,12 +70,13 @@ function runtime(target, expected = {}) {
       for (const spec of functions.trader.sells || []) {
         const template = context.itemTemplates.getTemplate({ ...scope, templateId: spec.templateId, templateVersion: spec.templateVersion });
         if (!template) continue;
-        items.push({ key: `trade:buy:${spec.templateId}`, kind: 'trade', direction: 'buy',
+        items.push({ key: `trade:buy:${spec.templateId}`, kind: 'trade', capability: 'trade', direction: 'buy',
           title: `买一份${template.name}`,
           description: `支付 ${spec.price} 邻币，物品放进背包。`,
           price: spec.price, templateId: spec.templateId, templateVersion: spec.templateVersion });
       }
     }
+
     if (capabilities.includes('service') && config.features.events) {
       // 特殊奇遇的主角就是当前这位镇民：奇遇由这名居民与玩家共同展开，不再邀请外来角色。
       // 入住角色（char: 目标）仍走角色奇遇管线，保留其人格卡与记忆收益。
@@ -90,6 +91,24 @@ function runtime(target, expected = {}) {
     }
     return items;
   }
+  // 服务 / 打工项目走「瞄一眼」式出图，不进奇遇目录：这里只做展示与金币方向的声明，
+  // 前端点选后调用 /npcs/:id/service/start，与 town_interaction_offers / 特殊奇遇完全解耦。
+  function serviceOffers() {
+    if (!npc) return [];
+    const rows = db.prepare(`SELECT id, kind, title, description, price FROM town_npc_offers
+      WHERE world_id=? AND npc_id=? ORDER BY kind, sort_order, id`).all(scope.worldId, npc.id);
+    const list = [];
+    for (const offer of rows) {
+      if (!capabilities.includes(offer.kind)) continue;
+      list.push(offer.kind === 'work'
+        ? { key: `work:offer:${offer.id}`, kind: 'work', offerId: offer.id, npcId: npc.id,
+            title: offer.title, description: offer.description, wage: offer.price, price: 0, direction: 'earn' }
+        : { key: `service:offer:${offer.id}`, kind: 'service', offerId: offer.id, npcId: npc.id,
+            title: offer.title, description: offer.description, price: offer.price, direction: 'pay' });
+    }
+    return list;
+  }
+
   function assertPresent() {
     if (building) {
       const me = getTownActorPosition(player.actorId);
@@ -105,23 +124,40 @@ function runtime(target, expected = {}) {
     return { kind: 'trade', ...trade };
   }
   const requests = createTownInteractionService({ db, clock: { now: Date.now }, registry, catalog, assertPresent, execute });
-  return { context, input, actor, name, functions, catalog, requests, locationKey, capabilities, source };
+  return { context, input, actor, name, functions, catalog, serviceOffers, requests, locationKey, capabilities, source };
 }
 
 export function getTownInteractions(target) {
   const value = runtime(target);
-  const { context, input, actor, name, functions, requests, catalog } = value;
+  const { context, input, actor, name, functions, requests, catalog, serviceOffers } = value;
   // 中断进程不会永久锁住故事；生成中的请求最多占用二十分钟。
   // 不看 event_id：finish 未跑完就崩溃的请求（事件已落库）同样卡在 generating，一并放行。
   // 旧生成若在放行后才落库，beforePersist 的状态/updatedAt 校验会以 REQUEST_EXPIRED 拒绝。
   context.db.prepare("UPDATE town_interaction_offers SET status='offered' WHERE status='generating' AND updated_at<?")
     .run(Date.now() - 20 * 60000);
+
+  // 过期但还没被调度器归档的镇民奇遇：读面板时顺手按模板结案归档（不花模型钱）。
+  // 否则它会继续占着 idx_one_active_town_npc_event 唯一索引挡住新奇遇，
+  // 并在界面上残留成「还能继续」的旧事件。
+  if (actor?.npcId) {
+    const overdue = context.db.prepare(`SELECT * FROM town_npc_events
+      WHERE npc_id = ? AND status IN ('open','engaged') AND expires_at <= datetime('now')`).all(actor.npcId);
+    if (overdue.length) {
+      const npcRow = context.db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(actor.npcId);
+      if (npcRow) {
+        for (const event of overdue) {
+          try { expireTownNpcEvent(npcRow, event, event.engaged ? 'completed' : 'expired'); }
+          catch (err) { console.warn('[town] lazy expire failed:', err?.message || err); }
+        }
+      }
+    }
+  }
   // 镇民的活跃奇遇走 town_npc_events（id 加 town: 前缀进前端）；入住角色仍看 character_events。
   const activeStory = actor?.npcId
-    ? context.db.prepare(`SELECT id,title,status FROM town_npc_events WHERE npc_id=? AND status IN ('open','engaged')
+    ? context.db.prepare(`SELECT id,title,status FROM town_npc_events WHERE npc_id=? AND status IN ('open','engaged') AND expires_at > datetime('now')
         ORDER BY id DESC LIMIT 1`).get(actor.npcId)
     : actor?.characterId && context.db.prepare(`SELECT id,title,status FROM character_events WHERE character_id=?
-        AND status IN ('open','engaged') ORDER BY id DESC LIMIT 1`).get(actor.characterId);
+        AND status IN ('open','engaged') AND expires_at > datetime('now') ORDER BY id DESC LIMIT 1`).get(actor.characterId);
   if (activeStory && actor?.npcId) activeStory.id = townNpcEventRef(activeStory.id);
   // 已接受的奇遇回执只在对应事件仍存在、仍属该居民、仍在进行中时才下发；
   // 旧时代遗留或已收尾/已删除的回执不能再渲染成「继续这段奇遇」。
@@ -137,16 +173,16 @@ export function getTownInteractions(target) {
     const id = Number(ref.startsWith('town:') ? ref.slice(5) : ref);
     if (!Number.isSafeInteger(id)) return false;
     return isTownEvent
-      ? !!context.db.prepare("SELECT 1 FROM town_npc_events WHERE id=? AND npc_id=? AND status IN ('open','engaged')")
+      ? !!context.db.prepare("SELECT 1 FROM town_npc_events WHERE id=? AND npc_id=? AND status IN ('open','engaged') AND expires_at > datetime('now')")
         .get(id, actor?.npcId ?? -1)
-      : !!context.db.prepare("SELECT 1 FROM character_events WHERE id=? AND character_id=? AND status IN ('open','engaged')")
+      : !!context.db.prepare("SELECT 1 FROM character_events WHERE id=? AND character_id=? AND status IN ('open','engaged') AND expires_at > datetime('now')")
         .get(id, actor?.characterId ?? -1);
   });
   return { ...input, npcId: actor?.npcId, name, functions, capabilities: value.capabilities,
     storyHint: !config.features.events ? '奇遇功能暂未开启。' : '',
     serviceHint: !value.locationKey && /理发|按摩|护理|裁缝|服装/.test(String(functions.dialogue?.job || ''))
       ? '这位居民的店铺还在筹备，建筑与岗位到齐后会自动开张。' : '',
-    catalog: catalog(), requests: liveRequests, activeStory: activeStory || null };
+    catalog: catalog(), offers: serviceOffers(), requests: liveRequests, activeStory: activeStory || null };
 }
 
 export function offerTownInteraction(target, key, expected) {
@@ -160,7 +196,7 @@ export function getTownTargetTrade(target) {
   const npcId = value.source.npc?.id;
   const catalog = npcId ? value.context.npcFunctions.tradeCatalog(npcId, value.input) : { sells: [] };
   return { ...catalog, displayName: value.name, locationKey: value.locationKey,
-    purchases: value.catalog().filter(item => item.kind === 'service' && item.capability === 'trade') };
+    purchases: value.catalog().filter(item => item.kind === 'trade') };
 }
 
 export function executeTownTargetTrade(target, command) {
@@ -227,7 +263,7 @@ async function startTownNpcStory({ context, requests, input, target, requestId, 
   try {
     const npc = db.prepare('SELECT * FROM town_npcs WHERE id=? AND town_enabled=1').get(npcId);
     if (!config.features.events || !npc) throw townError('REQUEST_UNAVAILABLE');
-    const existing = db.prepare(`SELECT id,title FROM town_npc_events WHERE npc_id=? AND status IN ('open','engaged') LIMIT 1`).get(npc.id);
+    const existing = db.prepare(`SELECT id,title FROM town_npc_events WHERE npc_id=? AND status IN ('open','engaged') AND expires_at > datetime('now') LIMIT 1`).get(npc.id);
     if (existing) return requests.finish(input, requestId,
       { kind: 'story', eventId: townNpcEventRef(existing.id), npcEvent: true }, existing.id);
     const spot = source.location?.key || getTownActorPosition(actor?.actorId)?.locationKeys?.[0];

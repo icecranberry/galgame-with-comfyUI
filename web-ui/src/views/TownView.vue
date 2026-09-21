@@ -239,6 +239,7 @@
       </div>
     </TownPaperPanel>
     <TownAdminPanel :open="showAdmin" @close="showAdmin = false" @new-town="openNewTown" />
+    <TownServiceManagerHost />
     <TownInitWizard v-if="showWizard" :new-town="wizardNewTown" @close="showWizard = false" @applied="onTownApplied" />
     <!-- 出行过场：暖纸双帘 + 出行牌 + 抵达环，时序由 startTravel 驱动 -->
     <TownTravelOverlay :phase="travelPhase" :destination="travelTarget?.name" :flavor="travelFlavor"
@@ -298,6 +299,7 @@ import TownPaperPanel from '../components/town/TownPaperPanel.vue'
 import TownResidentActions from '../components/town/TownResidentActions.vue'
 import TownCapabilityPicker from '../components/town/TownCapabilityPicker.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
+import TownServiceManagerHost from '../components/town/TownServiceManagerHost.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
 import TownTravelOverlay from '../components/town/TownTravelOverlay.vue'
 

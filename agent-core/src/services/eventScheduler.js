@@ -37,10 +37,79 @@ let timer = null;
 let halfTimeTimer = null; // 半程通知独立定时器（高频，解耦于事件生成周期）
 let processing = false;
 let halfTimeProcessing = false; // 半程通知并发锁（防 LLM 调用未完成时下一次 setInterval 触发）
+const EXPIRY_CHECK_MS = 3 * 60 * 1000; // 到期结案独立检查间隔 3 分钟（与 eventFreq 无关）
+let expiryTimer = null;
+let expiryStartupTimer = null;
+let expiryProcessing = false;
 
 function toSQLiteDate(iso) {
   if (!iso) return iso;
   return iso.replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
+}
+
+/**
+ * 到期结案：角色奇遇 + 镇民奇遇。
+ *
+ * 必须与「自动生成」的 eventFreq 周期解耦：freq 调低时生成周期会拉到几小时
+ * （freq=0.1  5 小时），若沿用同一个定时器，过期事件会长时间挂在界面上，
+ * 还会因为唯一索引占位而挡住新的奇遇。
+ */
+async function expireDueEvents() {
+  if (expiryProcessing) return;
+  if (!config.features.events) return;
+  expiryProcessing = true;
+  const db = getDb();
+  try {
+  // ── 1. 到期检查 ──
+  const expiredEvents = db.prepare(`
+    SELECT ce.*, c.display_name, c.base_prompt
+    FROM character_events ce
+    JOIN characters c ON c.id = ce.character_id
+    WHERE ce.expires_at <= datetime('now')
+      AND ce.status IN ('open','engaged')
+  `).all();
+
+  for (const event of expiredEvents) {
+    console.log(`[eventScheduler] Event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
+    try {
+      const character = { id: event.character_id, display_name: event.display_name, base_prompt: event.base_prompt };
+      await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
+  } catch (err) {
+    console.error(`[eventScheduler] Conclude error for ${event.display_name}:`, err.message);
+  }
+}
+
+// ── 1.5 镇民奇遇到期检查（与角色事件同一套结算口径，无记忆写入） ──
+// 多地图：镇民奇遇「时间到了就到了」——聚焦图才花模型钱写文学性结局，
+// 后台图直接模板结题归档（走位/结算照常，只是不产生 LLM 调用）。
+const expiredNpcEvents = db.prepare(`
+  SELECT e.*, n.display_name
+  FROM town_npc_events e
+  JOIN town_npcs n ON n.id = e.npc_id
+  WHERE e.expires_at <= datetime('now')
+    AND e.status IN ('open','engaged')
+    AND e.processing = 0
+`).all();
+for (const event of expiredNpcEvents) {
+  console.log(`[eventScheduler] Town npc event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
+  try {
+    const npc = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(event.npc_id);
+    if (!npc) continue;
+    const outcome = event.engaged ? 'completed' : 'expired';
+    if (isMapFocused(npc.map_id)) {
+      await concludeTownNpcEvent(npc, event, outcome);
+    } else {
+      expireTownNpcEvent(npc, event, outcome);
+    }
+  } catch (err) {
+    console.error(`[eventScheduler] Town npc conclude error for ${event.display_name}:`, err.message);
+  }
+}
+  } catch (err) {
+    console.error('[eventScheduler] expiry tick error:', err.message);
+  } finally {
+    expiryProcessing = false;
+  }
 }
 
 async function tick(opts = {}) {
@@ -62,51 +131,8 @@ async function tick(opts = {}) {
   processing = true;
   const db = getDb();
   try {
-    // ── 1. 到期检查 ──
-    const expiredEvents = db.prepare(`
-      SELECT ce.*, c.display_name, c.base_prompt
-      FROM character_events ce
-      JOIN characters c ON c.id = ce.character_id
-      WHERE ce.expires_at <= datetime('now')
-        AND ce.status IN ('open','engaged')
-    `).all();
-
-    for (const event of expiredEvents) {
-      console.log(`[eventScheduler] Event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
-      try {
-        const character = { id: event.character_id, display_name: event.display_name, base_prompt: event.base_prompt };
-        await concludeEvent(character, event, event.engaged ? 'completed' : 'expired');
-      } catch (err) {
-        console.error(`[eventScheduler] Conclude error for ${event.display_name}:`, err.message);
-      }
-    }
-
-    // ── 1.5 镇民奇遇到期检查（与角色事件同一套结算口径，无记忆写入） ──
-    // 多地图：镇民奇遇「时间到了就到了」——聚焦图才花模型钱写文学性结局，
-    // 后台图直接模板结题归档（走位/结算照常，只是不产生 LLM 调用）。
-    const expiredNpcEvents = db.prepare(`
-      SELECT e.*, n.display_name
-      FROM town_npc_events e
-      JOIN town_npcs n ON n.id = e.npc_id
-      WHERE e.expires_at <= datetime('now')
-        AND e.status IN ('open','engaged')
-        AND e.processing = 0
-    `).all();
-    for (const event of expiredNpcEvents) {
-      console.log(`[eventScheduler] Town npc event expired: "${event.title}" for ${event.display_name} (engaged=${event.engaged})`);
-      try {
-        const npc = db.prepare('SELECT * FROM town_npcs WHERE id = ?').get(event.npc_id);
-        if (!npc) continue;
-        const outcome = event.engaged ? 'completed' : 'expired';
-        if (isMapFocused(npc.map_id)) {
-          await concludeTownNpcEvent(npc, event, outcome);
-        } else {
-          expireTownNpcEvent(npc, event, outcome);
-        }
-      } catch (err) {
-        console.error(`[eventScheduler] Town npc conclude error for ${event.display_name}:`, err.message);
-      }
-    }
+    // 1. 到期结案（主 tick 兜底；时效由独立短周期定时器保证）
+    await expireDueEvents();
 
     // ── 3. 新事件生成 ──
     // 开发环境：启动首检只做到期结案/僵尸清理，不自动生成新事件（避免每次重启都触发奇遇）
@@ -397,9 +423,18 @@ function cleanupStuckEvents() {
 }
 
 export function startEventScheduler() {
+  // 幂等：重复调用不再叠加定时器（restart 走 stop  start）。
+  if (timer || startupTimer || halfTimeTimer || expiryTimer) {
+    console.log('[eventScheduler] already running, start skipped');
+    return;
+  }
   const intervalMs = getCheckIntervalMs();
+  // 到期结案独立定时器：固定 3 分钟一跑，与 eventFreq 无关；关闭自动生成（eventFreq=0）时也必须跑，
+  // 否则过期事件会一直挂在界面上，还会因为唯一索引占位挡住新的奇遇。
+  if (!expiryTimer) expiryTimer = setInterval(() => { expireDueEvents().catch(() => {}); }, EXPIRY_CHECK_MS);
+  if (!expiryStartupTimer) expiryStartupTimer = setTimeout(() => { expiryStartupTimer = null; expireDueEvents().catch(() => {}); }, 15_000);
   if (intervalMs === Infinity) {
-    console.log('[eventScheduler] eventFreq=0, scheduler disabled');
+    console.log('[eventScheduler] eventFreq=0, auto-generation disabled (expiry timer still running)');
     // 即使关闭自动生成，启动清理也要执行：崩溃残留的 processing 锁和 generating 请求靠它解锁
     cleanupStuckEvents();
     return;
@@ -437,6 +472,15 @@ export function stopEventScheduler() {
     clearInterval(halfTimeTimer);
     halfTimeTimer = null;
     console.log('[eventScheduler] Stopped (half-time timer)');
+  }
+  if (expiryTimer) {
+    clearInterval(expiryTimer);
+    expiryTimer = null;
+    console.log('[eventScheduler] Stopped (expiry timer)');
+  }
+  if (expiryStartupTimer) {
+    clearTimeout(expiryStartupTimer);
+    expiryStartupTimer = null;
   }
 }
 

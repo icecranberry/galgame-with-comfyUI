@@ -1,6 +1,5 @@
 <template>
-  <town-paper-panel :open="open" title="钱袋" :busy="loading" :refreshing="loading"
-    :refresh-disabled="loading" @close="$emit('close')" @refresh="refresh">
+  <town-paper-panel :open="open" fade hide-footer title="钱袋" :busy="loading" @close="$emit('close')">
     <div class="tl-notice" aria-live="polite">
       <p v-if="error" class="tl-error" role="alert">{{ error }}</p>
       <p v-if="loading && !wallet" role="status">正在读取钱袋…</p>
@@ -31,8 +30,36 @@ const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 const wallet = ref(null), loading = ref(false), error = ref('')
 const money = value => Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—'
-const receiptLabel = receipt => receipt.reasonCode === 'NPC_TRADE' ? '和邻居做了一笔买卖'
-  : receipt.command === 'seed' ? '获得邻币' : receipt.command === 'transfer' ? (receipt.amount > 0 ? '收到转账' : '付出一笔') : '账目变动'
+// 账目标题：能认出是谁、做了什么事，就写具体一点，别只剩「付出一笔」。
+function receiptLabel(receipt) {
+  const who = receipt.npcName || '邻居'
+  switch (receipt.reasonCode) {
+    case 'TOWN_NPC_SERVICE_PAYMENT':
+      return receipt.offerTitle ? `请${who}提供「${receipt.offerTitle}」` : `请${who}提供服务`
+    case 'TOWN_NPC_WORK_WAGE':
+      return receipt.offerTitle ? `帮${who}做「${receipt.offerTitle}」的工钱` : `帮${who}打工的工钱`
+    case 'NPC_STOCK_PURCHASE':
+      return receipt.itemName ? `在${who}的货摊买下「${receipt.itemName}」` : `在${who}的货摊买了东西`
+    case 'NPC_TRADE_PURCHASE':
+      return `向${who}买了一件东西`
+    case 'NPC_TRADE':
+      return `和${who}做了一笔买卖`
+    case 'NPC_GIFT':
+      return `收到${who}的心意`
+    case 'NPC_STARTING_GRANT':
+    case 'NPC_TRADE_SEED':
+      return `${who}的启动资金`
+    case 'TOWN_OPENING_GRANT':
+      return '开镇补贴'
+    case 'delivery.initial_budget':
+      return '初始预算'
+    default:
+      break
+  }
+  if (receipt.command === 'seed') return receipt.amount > 0 ? '获得邻币' : '账目变动'
+  if (receipt.command === 'transfer') return receipt.amount > 0 ? '收到一笔' : '付出一笔'
+  return '账目变动'
+}
 let reads = 0, alive = true
 async function refresh() {
   if (!props.open) return

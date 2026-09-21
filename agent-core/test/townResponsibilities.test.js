@@ -122,7 +122,7 @@ test('generation plan completes essential roles before art/persona generation an
 
 test('only service and trade permissions persist, survive editing, and transfer through generation', t => {
   const db = fresh(t);
-  assert.deepEqual(TOWN_CAPABILITIES, ['service', 'trade']);
+  assert.deepEqual(TOWN_CAPABILITIES, ['service', 'trade', 'work']);
   for (const invalid of [[], ['quest'], 'trade', ['service', 'shop']]) {
     assert.throws(() => normalizeTownCapabilities(invalid), { code: 'INVALID_TOWN_CAPABILITIES' });
   }

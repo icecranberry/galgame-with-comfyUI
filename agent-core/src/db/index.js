@@ -18,6 +18,7 @@ import { migrateTownNpcFunctionsSchema } from './townNpcFunctionsSchema.js';
 import { migrateTownNpcEventSchema } from './townNpcEventSchema.js';
 import { migrateTownResponsibilitySchema } from './townResponsibilitySchema.js';
 import { migrateTownExperienceSchema } from './townExperienceSchema.js';
+import { migrateTownServiceOfferSchema } from './townServiceOfferSchema.js';
 import { cleanupTownDialogueRequests } from '../services/town/townDialogueRequests.js';
 import { migrateTownItemSchema } from './townItemSchema.js';
 import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
@@ -59,6 +60,7 @@ function cleanupOrphanedInFlight(database) {
     ['image_tasks', `status IN ('pending','running')`, `status = 'failed', error_message = '服务重启导致任务中断', finished_at = datetime('now')`],
     ['reply_queue', `status = 'processing'`, `status = 'waiting'`],
     ['character_dreams', `status = 'generating'`, `status = 'failed'`],
+    ['town_npc_service_sessions', `status = 'generating'`, `status = 'failed'`],
   ];
   for (const [table, where, set] of tasks) {
     try {
@@ -957,6 +959,7 @@ function initSchema(db) {
   migrateTownNpcEventSchema(db);
   migrateTownResponsibilitySchema(db);
   migrateTownExperienceSchema(db);
+  migrateTownServiceOfferSchema(db);
   migrateTownMultiMapSchema(db);
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，

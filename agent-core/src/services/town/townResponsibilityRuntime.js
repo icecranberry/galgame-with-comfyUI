@@ -8,7 +8,7 @@ import { TOWN_BUSINESS_ROLES, inferTownBusinessKind, townBuildingKind } from './
 import { buildWalkGridFromLayers } from './townMapService.js';
 import { findPath } from './townPathfinding.js';
 import { broadcastTownMapUpdated } from './townBus.js';
-import { ensureTownCapabilities, defaultTownCapabilities, townCapabilities } from './townCapabilities.js';
+import { ensureTownCapabilities, defaultTownCapabilities, townCapabilities, upgradeTownNpcCapabilities, shouldHaveWorkPermission } from './townCapabilities.js';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 export function initializeTownNpcFunctions(db, npc) {
@@ -16,6 +16,8 @@ export function initializeTownNpcFunctions(db, npc) {
   ensureTownCapabilities(db, 'town_npcs', npc, workplace
     ? townCapabilities(workplace, defaultTownCapabilities(workplace.business_kind))
     : defaultTownCapabilities(inferTownBusinessKind(npc.job), npc.job));
+  // 老档案只有 service/trade，工作岗位要单独补上 work 权限。
+  if (shouldHaveWorkPermission(npc.job)) upgradeTownNpcCapabilities(db, npc, ['work']);
   return ensureNpcFunctions(db, npc);
 }
 
@@ -167,7 +169,7 @@ export function reconcileTownResponsibilities({ db = getDb(), allowFallback = fa
       // Persist factual workplace without rewriting an existing personality, home or routine.
       db.prepare('UPDATE town_npcs SET workplace_key=? WHERE id=?').run(location.key, npc.id);
       if (!npc.capabilities_explicit) db.prepare('UPDATE town_npcs SET capabilities_json=? WHERE id=?')
-        .run(JSON.stringify(townCapabilities(location, defaultTownCapabilities(kind))), npc.id);
+        .run(JSON.stringify(townCapabilities(location, defaultTownCapabilities(kind, npc.job))), npc.id);
       if (location.business_kind === 'none') db.prepare('UPDATE town_locations SET business_kind=? WHERE id=?').run(kind, location.id);
     }
     return { changed: selected.some(item => item.isNew), pending };

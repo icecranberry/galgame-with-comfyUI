@@ -34,7 +34,10 @@ import {
 } from '../services/town/townAssetService.js';
 import { regenerateAssetPrompt } from '../services/town/townPromptBuilder.js';
 import { getMapPayload, saveMap, renameMap } from '../services/town/townMapService.js';
-import { getTownWallet, getTownNpcFunctions, receiveTownNpcGift } from '../services/town/townEconomyRuntime.js';
+import { getTownWallet, getTownNpcFunctions, receiveTownNpcGift, getTownEconomyContext, buyTownNpcStock } from '../services/town/townEconomyRuntime.js';
+import { getTownNpcStockView } from '../services/town/townNpcStockService.js';
+import { listNpcOffers, generateNpcOffers, rerollNpcOffer, listOfferOverview } from '../services/town/townNpcOfferService.js';
+import { startNpcService, continueNpcService, listNpcServiceSessions } from '../services/town/townNpcServiceRuntime.js';
 import { getTownInteractions, offerTownInteraction, respondTownInteraction, getTownTargetTrade, executeTownTargetTrade } from '../services/town/townInteractionRuntime.js';
 import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
@@ -214,6 +217,19 @@ const townCommandMessages = {
   ITEM_LOCKED: '这件物品正被占用，稍后再试',
   ACCOUNT_OWNER_MISMATCH: '交易账户校验未通过，请重新读取后再试',
   TEMPLATE_NOT_FOUND: '这件商品的模板还没准备好，请稍后再来',
+  INVALID_OFFER_KIND: '这个项目类型不支持',
+  OFFER_JSON_MISSING: '这次没能生成出项目，请再试一次',
+  OFFER_EMPTY: '这次没有生成出可用的项目，请再试一次',
+  SERVICE_SESSION_NOT_FOUND: '这段服务已经结束，请重新选择',
+  SERVICE_JSON_MISSING: '这次的经历没能生成出来，请重试',
+  SERVICE_PAYLOAD_INCOMPLETE: '这次的经历不完整，请重试',
+  SERVICE_IMAGE_FAILED: '画面没能画出来，请重试',
+  NPC_CANNOT_PAY: '这位居民手头暂时没钱付工资，先去做点别的吧',
+  STOCK_JSON_MISSING: '这次没能生成出货品，请再试一次',
+  STOCK_EMPTY: '这次没有生成出可用的货品，请再试一次',
+  STOCK_NOT_FOUND: '这件货品已经不在货架上了',
+  STOCK_SOLD: '这件货品已经卖掉了',
+  INVALID_IDEMPOTENCY_KEY: '请求标识无效，请刷新后重试',
 };
 function sendTownCommandError(res, err) {
   const message = townCommandMessages[err.code] || err.message || '操作未完成';
@@ -708,6 +724,85 @@ router.post('/player/sprites/:direction', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err?.message || '重绘小人失败' });
   }
+});
+
+//  NPC 服务 / 打工（服务管理 + 图片叙事） 
+
+function currentWorldId() {
+  try { return getTownEconomyContext().scope.worldId; } catch { return 'default'; }
+}
+
+// 服务管理面板：所有拥有「服务」或「打工」职责的居民 + 已有项目数量。
+router.get('/npc-offers/overview', (req, res) => {
+  try { res.json(listOfferOverview({ worldId: req.query.worldId || currentWorldId() })); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+
+router.get('/npcs/:id/offers', (req, res) => {
+  try {
+    res.json({ offers: listNpcOffers({ worldId: req.query.worldId || currentWorldId(),
+      npcId: req.params.id, kind: req.query.kind || null }) });
+  } catch (err) { sendTownCommandError(res, err); }
+});
+
+// 逐个生成：前端对筛选出的居民依次调用（服务 / 打工分别生成，每种 1~3 个）。
+router.post('/npcs/:id/offers/generate', async (req, res) => {
+  try {
+    const offers = await generateNpcOffers({ worldId: req.body?.worldId || currentWorldId(),
+      npcId: req.params.id, kind: req.body?.kind });
+    res.json({ ok: true, offers });
+  } catch (err) { sendTownCommandError(res, err); }
+});
+
+// 单条项目重新生成。
+router.post('/npcs/:id/offers/:offerId/reroll', async (req, res) => {
+  try {
+    const offer = await rerollNpcOffer({ worldId: req.body?.worldId || currentWorldId(),
+      npcId: req.params.id, offerId: req.params.offerId });
+    res.json({ ok: true, offer });
+  } catch (err) { sendTownCommandError(res, err); }
+});
+
+// 点选服务 / 打工后开始一次图片叙事（立即返回 generating，结果走 town_npc_service_ready）。
+router.post('/npcs/:id/service/start', (req, res) => {
+  try { res.json(startNpcService(req.params.id, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+
+// 点击「继续」推进下一次服务 / 打工（normal 正常结算，bold 1.5~3 倍波动）。
+router.post('/npcs/:id/service/continue', (req, res) => {
+  try { res.json(continueNpcService(req.params.id, req.body || {})); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+
+router.get('/npcs/:id/service/sessions', (req, res) => {
+  try { res.json({ sessions: listNpcServiceSessions(req.params.id) }); }
+  catch (err) { sendTownCommandError(res, err); }
+});
+
+//  NPC 货架（交易） 
+
+// 读取货架：缺货 / 满 7 天时自动换一批（图片异步生成，走 town_npc_stock_ready）。
+router.get('/npcs/:id/stock', async (req, res) => {
+  try {
+    res.json(await getTownNpcStockView({ worldId: req.query.worldId || currentWorldId(),
+      npcId: req.params.id, refresh: false }));
+  } catch (err) { sendTownCommandError(res, err); }
+});
+
+// 服务管理面板主动刷新货品种类。
+router.post('/npcs/:id/stock/refresh', async (req, res) => {
+  try {
+    res.json(await getTownNpcStockView({ worldId: req.body?.worldId || currentWorldId(),
+      npcId: req.params.id, refresh: true }));
+  } catch (err) { sendTownCommandError(res, err); }
+});
+
+// 买下货品：扣邻币、放进背包、随机提升好感度。
+router.post('/npcs/:id/stock/:stockId/buy', (req, res) => {
+  try {
+    res.json({ ok: true, ...buyTownNpcStock(req.params.id, req.params.stockId, req.body || {}) });
+  } catch (err) { sendTownCommandError(res, err); }
 });
 
 export { router as default };

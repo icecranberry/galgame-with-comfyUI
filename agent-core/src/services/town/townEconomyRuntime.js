@@ -5,6 +5,7 @@ import { config } from '../../config.js';
 import { broadcastTownStateUpdated } from './townBus.js';
 import { createTownNpcFunctionService } from './townNpcFunctionService.js';
 import { createItemTemplateService } from './itemTemplateService.js';
+import { createTownNpcStockService } from './townNpcStockService.js';
 import { ITEM_EFFECTS } from '../itemService.js';
 import { createTownExperienceService, TOWN_EXPERIENCE_CONSUMER } from './townExperienceService.js';
 import { applyMemoryActions } from '../memory/memoryRepository.js';
@@ -22,14 +23,35 @@ export function getTownEconomyContext() {
   return { db, registry, world, player, scope, economy };
 }
 
+/** 从 source_key 里挖出这条账目的上下文（哪位居民、哪件事），
+ *  让钱袋列表能写出「请铃兰提供「量体裁衣」」而不是干巴巴的「付出一笔」。 */
+function receiptContext(db, sourceKey) {
+  const key = String(sourceKey || '');
+  const service = /^town_npc_service:(\d+):/.exec(key);
+  if (service) {
+    const row = db.prepare(`SELECT s.kind, s.offer_title, n.display_name FROM town_npc_service_sessions s
+      LEFT JOIN town_npcs n ON n.id = s.npc_id WHERE s.id = ?`).get(Number(service[1]));
+    if (row) return { npcName: row.display_name || '', offerTitle: row.offer_title || '', kind: row.kind || '' };
+  }
+  const stock = /^npc-stock:(\d+):/.exec(key);
+  if (stock) {
+    const row = db.prepare(`SELECT s.custom_name, n.display_name FROM town_npc_stock s
+      LEFT JOIN town_npcs n ON n.id = s.npc_id WHERE s.id = ?`).get(Number(stock[1]));
+    if (row) return { npcName: row.display_name || '', itemName: row.custom_name || '' };
+  }
+  return {};
+}
+
 export function getTownWallet() {
   const { db, player, scope, economy } = getTownEconomyContext();
   const wallet = economy.ensureAccount({ ...scope, ownerKey: `actor:${player.actorId}`,
     accountType: 'actor', actorId: player.actorId });
-  const receipts = db.prepare(`SELECT t.command, t.reason_code, t.occurred_at, e.amount FROM economy_transactions t
+  const receipts = db.prepare(`SELECT t.command, t.reason_code, t.source_key, t.occurred_at, e.amount
+    FROM economy_transactions t
     JOIN economy_entries e ON e.transaction_id = t.transaction_id WHERE e.account_id = ?
     ORDER BY t.rowid DESC LIMIT 20`).all(wallet.accountId)
-    .map(r => ({ command: r.command, reasonCode: r.reason_code, occurredAt: r.occurred_at, amount: r.amount }));
+    .map(r => ({ command: r.command, reasonCode: r.reason_code, occurredAt: r.occurred_at, amount: r.amount,
+      ...receiptContext(db, r.source_key) }));
   return { ...scope, actorId: player.actorId, currency: '邻币', balance: wallet.balance,
     reserved: wallet.reserved, available: wallet.available, version: wallet.version, receipts };
 }
@@ -76,5 +98,23 @@ export function receiveTownNpcGift(npcId, input) {
   const scope = lifeScope(context, input);
   const result = context.npcFunctions.receiveGift(npcId, scope);
   broadcastTownStateUpdated({ reason: 'npc_gift' });
+  return result;
+}
+
+
+/** 货架运行时：真实 economy 装配，供交易面板读取 / 换货 / 购买。 */
+export function getTownNpcStockRuntime() {
+  const context = getTownLifeRuntime();
+  const stock = createTownNpcStockService({ db: context.db, clock: { now: Date.now },
+    registry: context.registry, economy: context.economy });
+  return { ...context, stock };
+}
+
+/** 买下一件货品：扣邻币、进背包、随机提升好感度。 */
+export function buyTownNpcStock(npcId, stockId, input) {
+  const context = getTownNpcStockRuntime();
+  const scope = lifeScope(context, input);
+  const result = context.stock.buyStock(npcId, stockId, scope);
+  broadcastTownStateUpdated({ reason: 'npc_stock_bought' });
   return result;
 }

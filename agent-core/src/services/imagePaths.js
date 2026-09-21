@@ -18,6 +18,7 @@ export const IMAGE_CATEGORIES = {
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },
   standing:  { dir: 'standing',  label: '立绘' },
+  town_service: { dir: 'town_service', label: '小镇服务' },
 };
 
 export const LEGACY_CATEGORY = 'history';

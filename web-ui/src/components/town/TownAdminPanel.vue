@@ -36,6 +36,7 @@
             <linshe-button variant="secondary" size="sm" :loading="batchSprites" @click="generateAllMissingNpcSprites">
               一键补齐缺失spirit
             </linshe-button>
+            <linshe-button variant="secondary" size="sm" @click.stop="openServiceManager(town.snapshot?.worldId || '')">服务管理</linshe-button>
           </div>
           <div v-if="npcs.length === 0" class="ap-empty">镇上还没有居民，先完成世界初始化吧。</div>
           <div
@@ -452,6 +453,7 @@ import LinsheSwitch from '../ui/LinsheSwitch.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
 import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
+import { openServiceManager } from '../../town/serviceManagerState.js'
 
 defineEmits(['close', 'new-town'])
 

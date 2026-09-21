@@ -37,6 +37,9 @@ export default [
       'no-empty': ['error', { allowEmptyCatch: true }], // 空 catch 是本库既定的"忽略失败"手法
       'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
       'no-undef': 'error',
+      // 模板里用到但没在 <script setup> 声明的标识符：这类"幽灵状态"不会触发重渲染，
+      // 表现为点了没反应、要等下一次别的原因重渲染才生效。必须报错。
+      'vue/no-undef-properties': 'error',
       'no-dupe-keys': 'error',
     },
   },

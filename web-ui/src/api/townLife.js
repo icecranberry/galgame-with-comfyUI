@@ -38,3 +38,24 @@ export const executeTownLifeCommand = command => request(command.path, command.b
 export const fetchTownNpcFunctions = npcId => request(`/npcs/${encodeURIComponent(npcId)}/functions`)
 export const receiveTownNpcGift = (npcId, { worldEpoch } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/gift`,
   { idempotencyKey: crypto.randomUUID(), ...(Number.isSafeInteger(worldEpoch) ? { worldEpoch } : {}) })
+
+//  NPC 服务 / 打工 
+
+/** 服务管理面板：拥有「服务」或「打工」职责的居民 + 已有项目数量。 */
+export const fetchNpcOfferOverview = worldId => request(`/npc-offers/overview${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`)
+export const fetchNpcOffers = (npcId, { worldId, kind } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/offers?${new URLSearchParams({
+  ...(worldId ? { worldId } : {}), ...(kind ? { kind } : {}),
+})}`)
+export const generateNpcOffers = (npcId, kind, worldId) => request(`/npcs/${encodeURIComponent(npcId)}/offers/generate`, { kind, worldId })
+export const rerollNpcOffer = (npcId, offerId, worldId) => request(`/npcs/${encodeURIComponent(npcId)}/offers/${encodeURIComponent(offerId)}/reroll`, { worldId })
+/** 点选服务 / 打工：立即返回 generating，结果通过 town_npc_service_ready 推送。 */
+export const startNpcService = (npcId, { offerId, worldId, worldEpoch } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/service/start`, { offerId, worldId, worldEpoch })
+export const continueNpcService = (npcId, { sessionId, choice, choiceLabel, worldId, worldEpoch } = {}) =>
+  request(`/npcs/${encodeURIComponent(npcId)}/service/continue`, { sessionId, choice, choiceLabel, worldId, worldEpoch })
+
+//  NPC 货架（交易） 
+
+export const fetchNpcStock = (npcId, worldId) => request(`/npcs/${encodeURIComponent(npcId)}/stock${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`)
+export const refreshNpcStock = (npcId, worldId) => request(`/npcs/${encodeURIComponent(npcId)}/stock/refresh`, { worldId })
+export const buyNpcStock = (npcId, stockId, { worldId, worldEpoch } = {}) =>
+  request(`/npcs/${encodeURIComponent(npcId)}/stock/${encodeURIComponent(stockId)}/buy`, { worldId, worldEpoch, idempotencyKey: crypto.randomUUID() })

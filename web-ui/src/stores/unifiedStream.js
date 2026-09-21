@@ -106,6 +106,12 @@ function _connect() {
     // 玩家换图（出行）：player 级事件，不受地图过滤，是别的标签页/设备出行时本端换场的入口
     town_player_map_changed: d => _dispatch('town_player_map_changed', d),
     town_assets_updated:  d => _dispatch('town_assets_updated', d),
+    // 小镇 NPC 服务 / 打工（图片叙事）与货架换货
+    town_npc_service_ready:    d => _dispatch('town_npc_service_ready', d),
+    town_npc_service_progress: d => _dispatch('town_npc_service_progress', d),
+    town_npc_stock_ready:      d => _dispatch('town_npc_stock_ready', d),
+    town_npc_stock_rolled:     d => _dispatch('town_npc_stock_rolled', d),
+    town_npc_stock_progress:   d => _dispatch('town_npc_stock_progress', d),
   }, {
     onClose: _scheduleReconnect,
   })
