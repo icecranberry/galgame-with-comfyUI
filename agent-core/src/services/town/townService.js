@@ -19,7 +19,7 @@ import { playerRouteStart, applyPlayerRoute } from './playerMovement.js';
 import { advanceAgentPosition } from './agentMovement.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
-import { townCapabilities, defaultTownCapabilities, parseCharacterCapabilities, setCharacterCapabilities } from './townCapabilities.js';
+import { townCapabilities, defaultTownCapabilities, parseCharacterCapabilities, readCharacterCapabilities, setCharacterCapabilities } from './townCapabilities.js';
 import { createTownActionRunner } from './townActionRunner.js';
 import { findRoutineSlot } from './routineSchedule.js';
 import { createTownClock } from './townClock.js';
@@ -1701,8 +1701,63 @@ export function setTownCharacterCapabilities(characterId, capabilities) {
     }
     throw err;
   }
+  // 影子档案的权限跟着角色走：货架调度之类的旁路直接读 town_npcs
+  db.prepare('UPDATE town_npcs SET capabilities_json = ? WHERE character_id = ? AND COALESCE(character_managed, 0) = 1')
+    .run(JSON.stringify(list), characterId);
   // 职能只影响能提供什么服务，不动入住状态，所以不用同步成员名单
   return { ok: true, capabilities: list };
+}
+
+/**
+ * 为酒馆角色补一份「托管居民档案」。
+ * 角色的服务 / 打工 / 货架项目都以 npc_id 落库，所以先要有这条影子档案；
+ * 它不进居民名单、不派岗、不发朋友圈，角色删除时一并清理。幂等：已有档案直接返回。
+ */
+export async function ensureCharacterNpcProfile(characterId) {
+  const db = getDb();
+  const id = Number(characterId);
+  if (!Number.isInteger(id)) return { ok: false, error: '角色无效' };
+  const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(id);
+  if (!character) return { ok: false, error: '角色不存在' };
+  const existing = db.prepare('SELECT id FROM town_npcs WHERE character_id = ? ORDER BY id LIMIT 1').get(id);
+  if (existing) return { ok: true, npcId: existing.id, created: false };
+  const member = db.prepare('SELECT * FROM town_characters WHERE character_id = ?').get(id);
+  if (!member || member.town_enabled !== 1) return { ok: false, error: '先让角色入住小镇，再建镇上的档案。' };
+
+  const { createNpc } = await import('./townNpcService.js');
+  const npc = createNpc({
+    mapId: member.map_id ?? state.mapId,
+    displayName: character.display_name || character.name,
+    persona: character.base_prompt || '',
+    brief: character.short_prompt || '',
+    job: '',
+    routine: [],
+    homeLocationId: member.home_location_id ?? null,
+    townEnabled: 1,
+    workplaceKey: null,
+    capabilities: readCharacterCapabilities(db, id) ?? defaultTownCapabilities(null),
+    assignResponsibilities: false,
+  });
+  // 影子档案：与角色绑定、不派岗、不发朋友圈
+  db.prepare('UPDATE town_npcs SET character_id = ?, character_managed = 1, moments_disabled = 1 WHERE id = ?').run(id, npc.id);
+  createTownActorRegistry(db).linkNpcCharacter(npc.id, id);
+  synchronizeMembership();
+  return { ok: true, npcId: npc.id, created: true };
+}
+
+/**
+ * 删除角色的托管居民档案（影子档案不留在镇上）；普通居民档案不受影响。
+ * 返回删掉的档案条数，并同步小镇运行时。
+ */
+export function removeCharacterNpcProfile(characterId) {
+  const db = getDb();
+  const ids = db.prepare('SELECT id FROM town_npcs WHERE character_id = ? AND COALESCE(character_managed, 0) = 1').all(characterId);
+  if (!ids.length) return 0;
+  db.prepare('DELETE FROM town_npcs WHERE character_id = ? AND COALESCE(character_managed, 0) = 1').run(characterId);
+  try { createTownActorRegistry(db).synchronize(); }
+  catch (err) { console.warn('[town] profile actor sync failed:', err?.message); }
+  reloadTown();
+  return ids.length;
 }
 
 /** NPC 启停（管理面板） */

@@ -1638,6 +1638,11 @@ export function setTownCharacterCapabilities(characterId, capabilities) {
   return jsonRequest(`${BASE}/town/characters/${characterId}`, townJson('PUT', { capabilities }))
 }
 
+// 为酒馆角色建托管居民档案（服务 / 打工 / 货架项目落库用，幂等）
+export function ensureTownCharacterProfile(characterId) {
+  return jsonRequest(`${BASE}/town/characters/${characterId}/profile`, townJson('POST', {}))
+}
+
 // 角色四方向spirit生成（管理面板）
 export function generateTownCharacterSprites(characterId, options = {}) {
   return jsonRequest(`${BASE}/town/characters/${characterId}/sprites`, townJson('POST',

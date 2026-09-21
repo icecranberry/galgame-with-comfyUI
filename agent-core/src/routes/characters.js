@@ -333,7 +333,7 @@ router.get('/:id/recent-images', (req, res) => {
 });
 
 // DELETE /api/characters/:id — 删除角色并清理所有关联数据
-router.delete('/:id', (req, res, next) => {
+router.delete('/:id', async (req, res, next) => {
   const db = getDb();
   const char = db.prepare('SELECT id, name, avatar_path FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
@@ -384,6 +384,9 @@ router.delete('/:id', (req, res, next) => {
 
     // 4. 删除角色（CASCADE 自动清理 character_relationships / user_relationships / character_events / event_history）
     clearImageJudgeCounter(char.id);
+    // 角色的托管居民档案一并删除（影子档案不留在镇上）；普通居民档案不受影响
+    const { removeCharacterNpcProfile } = await import('../services/town/townService.js');
+    removeCharacterNpcProfile(char.id);
     db.prepare(`DELETE FROM characters WHERE id = ?`).run(char.id);
 
     // 5. 最后删聊天消息（此时已无 FK 引用 messages，FTS5 通过 trigger 自动同步）

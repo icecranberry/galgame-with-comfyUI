@@ -49,3 +49,21 @@ test('分段选项覆盖全部 / 小镇NPC / 酒馆角色', () => {
   assert.deepEqual(options.map(option => option.value), ['all', 'npc', 'character'])
   assert.deepEqual(options.map(option => option.label), ['全部', '小镇NPC', '酒馆角色'])
 })
+test('待建档案的酒馆角色：名单里有建档入口，建档后回到常规流程', () => {
+  const template = descriptor.template.content
+  assert.match(template, /v-if="npc\.pendingProfile"/)
+  assert.match(template, /@click="createProfile\(npc\)"/)
+  assert.match(template, /待建档案/)
+  // 缓存键统一走 npc.key：待建档案的角色还没有 npcId
+  assert.match(template, /:key="npc\.key"/)
+  assert.doesNotMatch(template, /:key="npc\.npcId"/)
+
+  const scriptText = script
+  assert.match(scriptText, /key: item\.npcId != null \? `npc:\$\{item\.npcId\}` : `char:\$\{item\.characterId\}`/)
+  assert.match(scriptText, /ensureTownCharacterProfile\(npc\.characterId\)/)
+  assert.match(scriptText, /async function createProfile\(npc\)/)
+  // 生成 / 换一个 / 刷货架仍然用真正的 npcId 打接口
+  assert.match(scriptText, /generateNpcOffers\(npc\.npcId, kind, props\.worldId\)/)
+  assert.match(scriptText, /rerollNpcOffer\(npc\.npcId, offer\.id, props\.worldId\)/)
+  assert.match(scriptText, /refreshNpcStock\(npc\.npcId, props\.worldId\)/)
+})

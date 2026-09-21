@@ -84,7 +84,8 @@ export function reconcileTownResponsibilities({ db = getDb(), allowFallback = fa
         ? townCapabilities({ meta: parse(asset.meta_json) }, defaultTownCapabilities(location.business_kind))
         : defaultTownCapabilities(location.business_kind));
     }
-    const npcs = db.prepare('SELECT * FROM town_npcs WHERE map_id=? ORDER BY id').all(map.id);
+    // 角色的托管档案不参与岗位绑定：它们只是角色挂服务 / 打工项目的影子身份
+    const npcs = db.prepare('SELECT * FROM town_npcs WHERE map_id=? AND COALESCE(character_managed, 0) = 0 ORDER BY id').all(map.id);
     for (const npc of npcs) initializeTownNpcFunctions(db, npc);
     const residents = npcs.map(npc => ({ ...npc, actor: actors.find(a => a.npcId === npc.id) }))
       .filter(npc => npc.actor?.participating && !npc.actor.archived && !npc.actor.mergedInto);

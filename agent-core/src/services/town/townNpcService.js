@@ -30,7 +30,8 @@ import { townCapabilities, normalizeTownCapabilities } from './townCapabilities.
 
 export function listNpcs() {
   const db = getDb();
-  const npcs = db.prepare('SELECT * FROM town_npcs ORDER BY id').all();
+  // 角色的托管档案不进居民名单：它们归「酒馆角色」管理，不属于小镇居民
+  const npcs = db.prepare('SELECT * FROM town_npcs WHERE COALESCE(character_managed, 0) = 0 ORDER BY id').all();
   return npcs.map(npcToDto);
 }
 

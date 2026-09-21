@@ -27,7 +27,7 @@ variant="secondary" size="sm" :loading="batchRunning" :disabled="batchRunning ||
     <p v-else-if="!filtered.length" class="sm-muted">{{ scopeEmptyText }}</p>
 
     <div class="sm-list">
-      <article v-for="npc in filtered" :key="npc.npcId" class="sm-card">
+      <article v-for="npc in filtered" :key="npc.key" class="sm-card">
         <div
 class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
           @keydown.enter.prevent="toggle(npc)" @keydown.space.prevent="toggle(npc)"
@@ -36,12 +36,13 @@ class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
             <b>{{ npc.displayName }}</b>
             <span v-if="npc.job" class="sm-job">{{ npc.job }}</span>
             <span v-if="npc.source === 'character'" class="sm-tag">酒馆角色</span>
+            <span v-if="npc.pendingProfile" class="sm-tag is-pending">待建档案</span>
           </div>
           <div class="sm-counts">
             <span v-if="npc.capabilities.includes('service')" class="sm-count is-service">服务 {{ npc.serviceCount }}</span>
             <span v-if="npc.capabilities.includes('work')" class="sm-count is-work">打工 {{ npc.workCount }}</span>
             <span v-if="npc.capabilities.includes('trade')" class="sm-count is-trade">货架</span>
-            <span class="sm-arrow">{{ expanded === npc.npcId ? '收起' : '展开' }}</span>
+            <span class="sm-arrow">{{ expanded === npc.key ? '收起' : '展开' }}</span>
           </div>
         </div>
 
@@ -49,29 +50,37 @@ class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
 :css="false" @enter="expandEnter" @leave="expandLeave"
           @enter-cancelled="resetExpand" @leave-cancelled="resetExpand"
 >
-          <div v-if="expanded === npc.npcId" class="sm-body">
+          <div v-if="expanded === npc.key" class="sm-body">
             <div class="sm-body-inner">
+            <template v-if="npc.pendingProfile">
+              <p class="sm-muted">这位酒馆角色还没有镇上的档案。服务 / 打工项目要以居民档案落库，先建一份：它不进居民名单、不派岗、也不发朋友圈。</p>
+              <div class="sm-actions">
+                <linshe-button variant="secondary" size="sm" :loading="busy[`profile:${npc.key}`]" :disabled="batchRunning" @click="createProfile(npc)">建立镇上档案</linshe-button>
+              </div>
+              <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
+            </template>
+            <template v-else>
             <div class="sm-actions">
               <linshe-button
 v-for="kind in kindsOf(npc)" :key="kind" variant="secondary" size="sm"
-                :loading="busy[`gen:${npc.npcId}:${kind}`]" :disabled="batchRunning" @click="generate(npc, kind)"
+                :loading="busy[`gen:${npc.key}:${kind}`]" :disabled="batchRunning" @click="generate(npc, kind)"
 >
                 {{ kindLabel(kind) }}  {{ hasOffers(npc, kind) ? '重新生成' : '生成' }}
               </linshe-button>
               <linshe-button
 v-if="npc.capabilities.includes('trade')" variant="ghost" size="sm"
-                :loading="busy[`stock:${npc.npcId}`]" :disabled="batchRunning" @click="refreshStock(npc)"
+                :loading="busy[`stock:${npc.key}`]" :disabled="batchRunning" @click="refreshStock(npc)"
 >
 刷新货品种类
 </linshe-button>
             </div>
-            <p v-if="errors[npc.npcId]" class="sm-error" role="alert">{{ errors[npc.npcId] }}</p>
-            <p v-if="stockInfo[npc.npcId]" class="sm-stock" role="status">{{ stockInfo[npc.npcId] }}</p>
+            <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
+            <p v-if="stockInfo[npc.key]" class="sm-stock" role="status">{{ stockInfo[npc.key] }}</p>
 
             <div v-for="kind in kindsOf(npc)" :key="`list:${kind}`" class="sm-group">
               <div class="sm-group-title">{{ kindLabel(kind) }}项目</div>
-              <p v-if="!offersOf(npc.npcId, kind).length" class="sm-muted">还没有项目，点上面的按钮生成。</p>
-              <div v-for="offer in offersOf(npc.npcId, kind)" :key="offer.id" class="sm-offer">
+              <p v-if="!offersOf(npc, kind).length" class="sm-muted">还没有项目，点上面的按钮生成。</p>
+              <div v-for="offer in offersOf(npc, kind)" :key="offer.id" class="sm-offer">
                 <div class="sm-offer-main">
                   <b>{{ offer.title }}</b>
                   <span class="sm-price">{{ kind === 'work' ? `工资 ${offer.price}` : `收费 ${offer.price}` }} 金币</span>
@@ -85,6 +94,7 @@ variant="ghost" size="sm" :loading="busy[`reroll:${offer.id}`]" :disabled="batch
 </linshe-button>
               </div>
             </div>
+            </template>
             </div>
           </div>
         </Transition>
@@ -100,6 +110,7 @@ import LinsheTabs from '../ui/LinsheTabs.vue'
 import TownPaperPanel from './TownPaperPanel.vue'
 import {
   fetchNpcOfferOverview, fetchNpcOffers, generateNpcOffers, rerollNpcOffer, refreshNpcStock,
+  ensureTownCharacterProfile,
 } from '../../api/townLife.js'
 
 const props = defineProps({ open: Boolean, worldId: String })
@@ -133,7 +144,7 @@ const scopeEmptyText = computed(() => scope.value === 'character'
 function kindsOf(npc) { return ['service', 'work'].filter(kind => npc.capabilities.includes(kind)) }
 function kindLabel(kind) { return kind === 'work' ? '打工' : '服务' }
 function hasOffers(npc, kind) { return kind === 'work' ? npc.workCount > 0 : npc.serviceCount > 0 }
-function offersOf(npcId, kind) { return offers[`${npcId}:${kind}`] || [] }
+function offersOf(npc, kind) { return offers[`${npc.key}:${kind}`] || [] }
 
 // 展开/收拢：子项内容高度是动态的，纯 CSS 做不到，用 scrollHeight 驱动 height 过渡。
 function expandEnter(el, done) { runExpand(el, done, 'in') }
@@ -189,7 +200,11 @@ async function load() {
   loading.value = true; error.value = ''
   try {
     const list = await fetchNpcOfferOverview(props.worldId)
-    overview.value = Array.isArray(list) ? list : []
+    // 名单里既有居民也有酒馆角色：统一给一个稳定 key（待建档案的角色还没有 npcId）
+    overview.value = (Array.isArray(list) ? list : []).map(item => ({
+      ...item,
+      key: item.npcId != null ? `npc:${item.npcId}` : `char:${item.characterId}`,
+    }))
   } catch (err) {
     error.value = messageFor(err)
   } finally {
@@ -197,68 +212,87 @@ async function load() {
   }
 }
 
-async function loadOffers(npcId) {
+async function loadOffers(npc) {
   try {
     const [service, work] = await Promise.all([
-      fetchNpcOffers(npcId, { worldId: props.worldId, kind: 'service' }),
-      fetchNpcOffers(npcId, { worldId: props.worldId, kind: 'work' }),
+      fetchNpcOffers(npc.npcId, { worldId: props.worldId, kind: 'service' }),
+      fetchNpcOffers(npc.npcId, { worldId: props.worldId, kind: 'work' }),
     ])
-    offers[`${npcId}:service`] = service.offers || []
-    offers[`${npcId}:work`] = work.offers || []
+    offers[`${npc.key}:service`] = service.offers || []
+    offers[`${npc.key}:work`] = work.offers || []
   } catch (err) {
-    errors[npcId] = messageFor(err)
+    errors[npc.key] = messageFor(err)
   }
 }
 
 function toggle(npc) {
-  if (expanded.value === npc.npcId) { expanded.value = null; return }
-  expanded.value = npc.npcId
-  errors[npc.npcId] = ''
-  if (!offers[`${npc.npcId}:service`] && !offers[`${npc.npcId}:work`]) loadOffers(npc.npcId)
+  if (expanded.value === npc.key) { expanded.value = null; return }
+  expanded.value = npc.key
+  errors[npc.key] = ''
+  if (npc.pendingProfile) return
+  if (!offers[`${npc.key}:service`] && !offers[`${npc.key}:work`]) loadOffers(npc)
 }
 
-function syncCounts(npcId, kind, list) {
-  const npc = overview.value.find(item => item.npcId === npcId)
-  if (npc) npc[kind === 'work' ? 'workCount' : 'serviceCount'] = list.length
+function syncCounts(npc, kind, list) {
+  const target = overview.value.find(item => item.key === npc.key)
+  if (target) target[kind === 'work' ? 'workCount' : 'serviceCount'] = list.length
 }
 
 async function generate(npc, kind) {
-  busy[`gen:${npc.npcId}:${kind}`] = true; errors[npc.npcId] = ''
+  busy[`gen:${npc.key}:${kind}`] = true; errors[npc.key] = ''
   try {
     const result = await generateNpcOffers(npc.npcId, kind, props.worldId)
-    offers[`${npc.npcId}:${kind}`] = result.offers || []
-    syncCounts(npc.npcId, kind, result.offers || [])
+    offers[`${npc.key}:${kind}`] = result.offers || []
+    syncCounts(npc, kind, result.offers || [])
   } catch (err) {
-    errors[npc.npcId] = messageFor(err)
+    errors[npc.key] = messageFor(err)
   } finally {
-    busy[`gen:${npc.npcId}:${kind}`] = false
+    busy[`gen:${npc.key}:${kind}`] = false
+  }
+}
+
+/** 待建档案的酒馆角色：先补一份托管居民档案，服务 / 打工项目才有地方落库 */
+async function createProfile(npc) {
+  busy[`profile:${npc.key}`] = true; errors[npc.key] = ''
+  try {
+    const result = await ensureTownCharacterProfile(npc.characterId)
+    await load()
+    if (result?.npcId) {
+      const key = `npc:${result.npcId}`
+      expanded.value = key
+      stockInfo[key] = '镇上档案已建好，现在可以生成服务 / 打工项目了。'
+    }
+  } catch (err) {
+    errors[npc.key] = messageFor(err)
+  } finally {
+    busy[`profile:${npc.key}`] = false
   }
 }
 
 async function reroll(npc, offer) {
-  busy[`reroll:${offer.id}`] = true; errors[npc.npcId] = ''
+  busy[`reroll:${offer.id}`] = true; errors[npc.key] = ''
   try {
     const result = await rerollNpcOffer(npc.npcId, offer.id, props.worldId)
-    const list = offers[`${npc.npcId}:${offer.kind}`] || []
+    const list = offers[`${npc.key}:${offer.kind}`] || []
     const index = list.findIndex(item => item.id === offer.id)
     if (index >= 0) list.splice(index, 1, result.offer)
   } catch (err) {
-    errors[npc.npcId] = messageFor(err)
+    errors[npc.key] = messageFor(err)
   } finally {
     busy[`reroll:${offer.id}`] = false
   }
 }
 
 async function refreshStock(npc) {
-  busy[`stock:${npc.npcId}`] = true; errors[npc.npcId] = ''
+  busy[`stock:${npc.key}`] = true; errors[npc.key] = ''
   try {
     const result = await refreshNpcStock(npc.npcId, props.worldId)
     const pending = (result.goods || []).filter(good => good.imageStatus !== 'ready').length
-    stockInfo[npc.npcId] = `货架已换新：${(result.goods || []).length} 件货品${pending ? `，${pending} 张图还在后台画` : ''}。`
+    stockInfo[npc.key] = `货架已换新：${(result.goods || []).length} 件货品${pending ? `，${pending} 张图还在后台画` : ''}。`
   } catch (err) {
-    errors[npc.npcId] = messageFor(err)
+    errors[npc.key] = messageFor(err)
   } finally {
-    busy[`stock:${npc.npcId}`] = false
+    busy[`stock:${npc.key}`] = false
   }
 }
 
@@ -302,6 +336,7 @@ watch(() => props.open, open => {
 .sm-name b { font-size: 14px; }
 .sm-job { font-size: 12px; color: #9b8c80; }
 .sm-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid #cbb9a6; color: #a08363; }
+.sm-tag.is-pending { border-color: #d9b3ae; color: #b8574f; }
 .sm-scope { margin-bottom: 10px; }
 .sm-counts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sm-count { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #f0e9e2; color: #7d6f64; }

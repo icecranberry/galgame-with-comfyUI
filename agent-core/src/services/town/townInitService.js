@@ -1338,7 +1338,7 @@ export function relayoutWorld() {
     if (ready.length < 4) return { ok: false, error: '可用素材不足，无法重新布局' };
 
     const db = getDb();
-    const npcRows = db.prepare('SELECT display_name FROM town_npcs ORDER BY id').all();
+    const npcRows = db.prepare('SELECT display_name FROM town_npcs WHERE COALESCE(character_managed, 0) = 0 ORDER BY id').all();
     const bp = {
       styleTags: job?.blueprint?.styleTags || config.town.generation?.styleTags || '',
       npcs: npcRows.map(r => ({ displayName: r.display_name })),

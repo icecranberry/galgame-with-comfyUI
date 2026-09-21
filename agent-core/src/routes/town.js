@@ -18,12 +18,13 @@
  *          POST /api/town/characters/:id/portrait   — 立绘（复用关联居民立绘，缺失才生成；酒馆立绘不参与）
  *          POST /api/town/characters/:id/sprites    — 正/背像素小人
  *          POST /api/town/characters/:id/assets     — 一键补齐全套素材
+ *          POST /api/town/characters/:id/profile    — 为角色建托管居民档案（挂服务 / 打工 / 货架项目用，幂等）
  */
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import {
   getTownState, movePlayerTo, movePlayerDir, getEncounterMessages,
-  setTownCharacterEnabled, setTownCharacterCapabilities, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
+  setTownCharacterEnabled, setTownCharacterCapabilities, ensureCharacterNpcProfile, listTownCharacters, forceTick, setNpcEnabled, reloadTown,
   generateCharacterSprites, ensureCharacterTownAssets, getTownSettings, updateTownSettings, resetWorld, resetMap,
   holdTownActor, releaseTownActor, touchTownViewer,
   getTownMaps, travelPlayer, reloadMap,
@@ -632,6 +633,18 @@ router.put('/characters/:id', async (req, res) => {
   } catch (err) {
     if (err?.code === 'TOWN_ASSET_STALE') return res.status(409).json({ error: err.message || '素材生成已过期，请重试', code: err.code });
     res.status(500).json({ error: err?.message || '入住失败' });
+  }
+});
+
+// 为酒馆角色建一份托管居民档案（服务 / 打工 / 货架项目都以 npc_id 落库，幂等）
+router.post('/characters/:id/profile', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+    const result = await ensureCharacterNpcProfile(id);
+    res.status(result.ok ? 200 : 400).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || '建立档案失败' });
   }
 });
 

@@ -39,7 +39,11 @@ export const fetchTownNpcFunctions = npcId => request(`/npcs/${encodeURIComponen
 export const receiveTownNpcGift = (npcId, { worldEpoch } = {}) => request(`/npcs/${encodeURIComponent(npcId)}/gift`,
   { idempotencyKey: crypto.randomUUID(), ...(Number.isSafeInteger(worldEpoch) ? { worldEpoch } : {}) })
 
-//  NPC 服务 / 打工 
+//  NPC 服务 / 打工
+
+/** 为酒馆角色建托管居民档案（服务 / 打工 / 货架项目落库用，幂等）。 */
+export const ensureTownCharacterProfile = characterId =>
+  request(`/characters/${encodeURIComponent(characterId)}/profile`, {}) 
 
 /** 服务管理面板：拥有「服务」或「打工」职责的居民 + 已有项目数量。 */
 export const fetchNpcOfferOverview = worldId => request(`/npc-offers/overview${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`)

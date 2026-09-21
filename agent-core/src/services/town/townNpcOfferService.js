@@ -295,7 +295,35 @@ export function listOfferOverview({ worldId = 'default' } = {}) {
       serviceCount: tally.service || 0,
       workCount: tally.work || 0,
     };
-  }).filter(item => item.capabilities.includes('service') || item.capabilities.includes('work'));
+  }).filter(item => item.capabilities.includes('service') || item.capabilities.includes('work'))
+    .concat(listPendingCharacterProfiles(db));
+}
+
+/**
+ * 服务管理名单的第二段：已经入住、自己配过服务 / 打工职能、但还没有镇上档案的酒馆角色。
+ * 这些角色要先生成托管居民档案，项目才有地方落库。
+ */
+function listPendingCharacterProfiles(db) {
+  const rows = db.prepare(`
+    SELECT c.id, c.display_name, cc.capabilities_json AS character_capabilities
+    FROM characters c
+    JOIN town_characters tc ON tc.character_id = c.id AND tc.town_enabled = 1
+    LEFT JOIN town_character_capabilities cc ON cc.character_id = c.id
+    WHERE NOT EXISTS (SELECT 1 FROM town_npcs n WHERE n.character_id = c.id)
+    ORDER BY c.id
+  `).all();
+  return rows.map(row => ({
+    npcId: null,
+    characterId: row.id,
+    source: 'character',
+    pendingProfile: true,
+    displayName: row.display_name || '',
+    job: '',
+    brief: '',
+    capabilities: parseCharacterCapabilities(row.character_capabilities) || [],
+    serviceCount: 0,
+    workCount: 0,
+  })).filter(item => item.capabilities.includes('service') || item.capabilities.includes('work'));
 }
 
 function parseCapabilities(npc) {

@@ -200,8 +200,9 @@ export function listMaps() {
   const db = getDb();
   const rows = db.prepare(`SELECT id, name, status, version, grid_cols, grid_rows, tile_size,
     world_setting_id, created_at FROM town_maps ORDER BY id`).all();
+  // 角色的托管档案不算居民
   const residentCount = db.prepare(`SELECT map_id, COUNT(*) AS n FROM town_npcs
-    WHERE town_enabled = 1 GROUP BY map_id`).all();
+    WHERE town_enabled = 1 AND COALESCE(character_managed, 0) = 0 GROUP BY map_id`).all();
   const residents = new Map(residentCount.map(r => [r.map_id, r.n]));
   return rows.map(row => ({
     id: row.id,
