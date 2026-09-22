@@ -34,7 +34,7 @@ class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
 >
           <div class="sm-name">
             <b>{{ npc.displayName }}</b>
-            <span v-if="npc.job" class="sm-job">{{ npc.job }}</span>
+            <span class="sm-job">{{ townJobLabel(npc) }}</span>
             <span v-if="npc.source === 'character'" class="sm-tag">酒馆角色</span>
             <span v-if="npc.pendingProfile" class="sm-tag is-pending">待建档案</span>
           </div>
@@ -149,6 +149,12 @@ const scopeEmptyText = computed(() => scope.value === 'character'
   : '这些居民里没有拥有服务或打工职责的。')
 
 function kindsOf(npc) { return ['service', 'work'].filter(kind => npc.capabilities.includes(kind)) }
+function townJobLabel(npc) {
+  const townName = npc.mapId == null
+    ? '尚未分配小镇'
+    : town.maps.find(map => Number(map.id) === Number(npc.mapId))?.name || `小镇 #${npc.mapId}`
+  return npc.job ? `${townName}-${npc.job}` : townName
+}
 function kindLabel(kind) { return kind === 'work' ? '打工' : '服务' }
 function hasOffers(npc, kind) { return kind === 'work' ? npc.workCount > 0 : npc.serviceCount > 0 }
 function offersOf(npc, kind) { return offers[`${npc.key}:${kind}`] || [] }
@@ -206,7 +212,7 @@ function messageFor(err) {
 async function load() {
   loading.value = true; error.value = ''
   try {
-    const list = await fetchNpcOfferOverview(props.worldId)
+    const [list] = await Promise.all([fetchNpcOfferOverview(props.worldId), town.fetchMaps()])
     // 名单里既有居民也有酒馆角色：统一给一个稳定 key（待建档案的角色还没有 npcId）
     overview.value = (Array.isArray(list) ? list : []).map(item => ({
       ...item,
@@ -339,7 +345,7 @@ watch(() => props.open, open => {
 .sm-list { display: flex; flex-direction: column; gap: 8px; }
 .sm-card { border: 1px solid #e0d8d0; border-radius: 14px; background: #fbf8f5; overflow: hidden; }
 .sm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; cursor: pointer; }
-.sm-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sm-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
 .sm-name b { font-size: 14px; }
 .sm-job { font-size: 12px; color: #9b8c80; }
 .sm-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid #cbb9a6; color: #a08363; }

@@ -5,7 +5,7 @@ import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { extractFirstJson, repairJson } from '../eventGenerator.js';
 import { townError } from './townEventService.js';
-import { parseCharacterCapabilities } from './townCapabilities.js';
+import { defaultTownCapabilities, parseCharacterCapabilities } from './townCapabilities.js';
 
 export const TOWN_OFFER_KINDS = Object.freeze(['service', 'work']);
 export const MAX_OFFERS_PER_KIND = 3;
@@ -303,7 +303,8 @@ export function listOfferOverview({ worldId = 'default' } = {}) {
 }
 
 /**
- * 服务管理名单的第二段：已经入住、自己配过服务 / 打工职能、但还没有镇上档案的酒馆角色。
+ * 服务管理名单的第二段：已经入住、有服务 / 打工职能、但还没有镇上档案的酒馆角色。
+ * 未单独配置职能时沿用默认服务权限，与角色详情及建档逻辑一致。
  * 这些角色要先生成托管居民档案，项目才有地方落库。
  */
 function listPendingCharacterProfiles(db) {
@@ -324,7 +325,7 @@ function listPendingCharacterProfiles(db) {
     displayName: row.display_name || '',
     job: '',
     brief: '',
-    capabilities: parseCharacterCapabilities(row.character_capabilities) || [],
+    capabilities: parseCharacterCapabilities(row.character_capabilities) ?? defaultTownCapabilities(null),
     serviceCount: 0,
     workCount: 0,
   })).filter(item => item.capabilities.includes('service') || item.capabilities.includes('work'));

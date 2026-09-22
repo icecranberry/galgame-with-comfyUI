@@ -114,10 +114,12 @@ test('新建同名小镇自动递增编号，更新已有地图保留名字', t 
     layers: { ground: [[null, null], [null, null]] }, assignResponsibilities: false });
   const readName = result => db.prepare('SELECT name FROM town_maps WHERE id = ?').get(result.mapId).name;
   assert.equal(readName(save('新小镇')), '新小镇');
-  assert.equal(readName(save('新小镇')), '新小镇-1');
-  assert.equal(readName(save('新小镇')), '新小镇-2');
-  assert.equal(readName(save('新小镇-1')), '新小镇-3');
-  assert.equal(readName(save('  新小镇  ')), '新小镇-4');
+  assert.equal(readName(save('新小镇')), '新小镇1');
+  assert.equal(readName(save('新小镇')), '新小镇2');
+  assert.equal(readName(save('新小镇1')), '新小镇3');
+  assert.equal(readName(save('  新小镇  ')), '新小镇4');
+  assert.equal(readName(save('新小镇10')), '新小镇10');
+  assert.equal(readName(save('新小镇10')), '新小镇11');
   const other = save('海风镇');
   assert.equal(readName(other), '海风镇');
   assert.equal(readName(save('海风镇', { mapId: other.mapId })), '海风镇');

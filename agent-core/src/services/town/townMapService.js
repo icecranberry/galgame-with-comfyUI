@@ -291,15 +291,15 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
       mapId = existing.id;
     } else {
       version = 1;
-      // 在创建事务内分配名字；带编号的重名继续递增，避免出现「小镇-1-1」。
+      // 在创建事务内分配名字；编号直接接在镇名后，带编号的重名继续递增。
       const names = new Set(db.prepare('SELECT name FROM town_maps').all().map(row => row.name));
       let uniqueName = String(name || '').trim() || '新小镇';
       if (names.has(uniqueName)) {
-        const suffix = uniqueName.match(/^(.*)-(\d+)$/);
+        const suffix = uniqueName.match(/^(.*?)(\d+)$/);
         const base = suffix ? suffix[1] : uniqueName;
         let index = suffix ? BigInt(suffix[2]) + 1n : 1n;
-        while (names.has(`${base}-${index}`)) index++;
-        uniqueName = `${base}-${index}`;
+        while (names.has(`${base}${index}`)) index++;
+        uniqueName = `${base}${index}`;
       }
       const r = db.prepare(`
         INSERT INTO town_maps (name, grid_cols, grid_rows, layers_json, tile_size, world_setting_id, version)

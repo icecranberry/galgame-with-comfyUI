@@ -76,6 +76,32 @@ test('职能权限校验：空选、未知值、不存在的角色都拒绝', as
   assert.equal(town.setTownCharacterCapabilities(999999, ['service']).ok, false);
   assert.deepEqual(town.listTownCharacters().find(c => c.id === charId).capabilities, ['service'], '非法输入不落库');
 });
+
+test('服务管理名单：无居民档案的入住角色沿用详情默认服务，显式配置仍优先', t => {
+  const { db, mapId, soloId } = seed(t);
+  const entry = () => listOfferOverview().find(row => row.characterId === soloId);
+  assert.equal(entry(), undefined, '未入住角色不进服务管理');
+  db.prepare('INSERT INTO town_characters (character_id, map_id, town_enabled) VALUES (?, ?, 1)')
+    .run(soloId, mapId);
+
+  const detail = town.listTownCharacters().find(row => row.id === soloId);
+  assert.equal(detail.capabilitiesExplicit, false);
+  assert.deepEqual(detail.capabilities, ['service']);
+  assert.deepEqual(entry(), {
+    npcId: null, mapId, characterId: soloId, source: 'character', pendingProfile: true,
+    displayName: '独行客', job: '', brief: '', capabilities: detail.capabilities,
+    serviceCount: 0, workCount: 0,
+  });
+  assert.equal(db.prepare('SELECT count(*) n FROM town_character_capabilities WHERE character_id = ?').get(soloId).n, 0,
+    '读取默认权限不应写入显式配置');
+
+  town.setTownCharacterCapabilities(soloId, ['trade']);
+  assert.equal(entry(), undefined, '只开交易不进服务管理');
+  town.setTownCharacterCapabilities(soloId, ['work']);
+  assert.deepEqual(entry().capabilities, ['work'], '显式打工配置优先于默认服务');
+  db.prepare('UPDATE town_characters SET town_enabled = 0 WHERE character_id = ?').run(soloId);
+  assert.equal(entry(), undefined, '搬出后不进待建档名单');
+});
 test('服务管理名单：酒馆角色的职能以角色配置为准，并带出来源标记', async t => {
   const { db, charId } = seed(t);
   const npcId = db.prepare('SELECT id FROM town_npcs WHERE character_id = ?').get(charId).id;

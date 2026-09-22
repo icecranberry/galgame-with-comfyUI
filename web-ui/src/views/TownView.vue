@@ -38,20 +38,26 @@
         <span v-if="!connected" class="town-chip is-warn">连接中…</span>
       </div>
       <div v-if="initialized" class="town-topbar-actions">
-        <linshe-button variant="icon" size="sm" class="town-bgm-btn"
+        <linshe-button
+variant="icon" size="sm" class="town-bgm-btn"
           :title="bgmMuted ? '播放小镇 BGM' : '静音小镇 BGM'"
           :aria-label="bgmMuted ? '播放小镇 BGM' : '静音小镇 BGM'"
-          @click="toggleBgmMuted">
+          @click="toggleBgmMuted"
+>
           <svg class="town-bgm-note" :class="{ 'is-playing': !bgmMuted }" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13s1.12-2 2.5-2 2.5.896 2.5 2zm9-2c0 1.105-1.12 2-2.5 2s-2.5-.895-2.5-2 1.12-2 2.5-2 2.5.895 2.5 2z"/>
-            <path d="M14 11V2h1v9h-1zM6 3v10H5V3h1z"/>
-            <path d="M5 2.905a1 1 0 0 1 .9-.995l8-.8a1 1 0 0 1 1.1.995V3L5 4V2.905z"/>
+            <path d="M6 13c0 1.105-1.12 2-2.5 2S1 14.105 1 13s1.12-2 2.5-2 2.5.896 2.5 2zm9-2c0 1.105-1.12 2-2.5 2s-2.5-.895-2.5-2 1.12-2 2.5-2 2.5.895 2.5 2z" />
+            <path d="M14 11V2h1v9h-1zM6 3v10H5V3h1z" />
+            <path d="M5 2.905a1 1 0 0 1 .9-.995l8-.8a1 1 0 0 1 1.1.995V3L5 4V2.905z" />
           </svg>
         </linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="uiLocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
         <linshe-button v-if="npcEncounterCount > 0" variant="ghost" size="sm" :disabled="uiLocked" @click="openTownEvents" :title="`镇上有 ${npcEncounterCount} 段进行中的奇遇`">奇遇 · {{ npcEncounterCount }}</linshe-button>
-        <linshe-button variant="ghost" size="sm" :disabled="uiLocked || !town.maps.length" :aria-expanded="showTravelPanel"
-          :title="town.maps.length > 1 ? '去别的小镇看看' : '世界上只有一座小镇'" @click="openTravelPanel">出行</linshe-button>
+        <linshe-button
+variant="ghost" size="sm" :disabled="uiLocked || !town.maps.length" :aria-expanded="showTravelPanel"
+          :title="town.maps.length > 1 ? '去别的小镇看看' : '世界上只有一座小镇'" @click="openTravelPanel"
+>
+出行
+</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
         <linshe-button variant="chip" size="sm" :active="editing" @click="toggleEdit">{{ editing ? '完成编辑' : '编辑' }}</linshe-button>
         <linshe-button variant="chip" size="sm" :active="showAdmin" @click="showAdmin = !showAdmin">管理</linshe-button>
@@ -64,8 +70,12 @@
 
     <div v-if="rendererNotice" class="town-render-notice" role="status">
       <span>{{ rendererNotice }}</span>
-      <linshe-button v-if="!hdActive" variant="ghost" size="sm"
-        :loading="rendererPending" :disabled="rendererPending" @click="!rendererPending && selectRenderer()">重试 HD2D</linshe-button>
+      <linshe-button
+v-if="!hdActive" variant="ghost" size="sm"
+        :loading="rendererPending" :disabled="rendererPending" @click="!rendererPending && selectRenderer()"
+>
+重试 HD2D
+</linshe-button>
     </div>
 
     <!-- 未开镇入口 -->
@@ -93,7 +103,9 @@
           :title="tool.label"
           @click="editTool = tool.id"
           @keydown.enter="editTool = tool.id"
-        >{{ tool.icon }}</div>
+        >
+{{ tool.icon }}
+</div>
       </div>
 
       <!-- 素材库面板 -->
@@ -103,7 +115,9 @@
             v-for="tab in LIB_TABS" :key="tab.id"
             variant="chip" size="sm" :active="libKind === tab.id"
             @click="libKind = tab.id"
-          >{{ tab.label }}</linshe-button>
+          >
+{{ tab.label }}
+</linshe-button>
         </div>
         <div class="tl-grid">
           <TownAssetThumb
@@ -167,12 +181,15 @@
     <!-- 就地聊天 / 管理面板 / 向导 -->
     <Transition name="npc-stage" :duration="300">
       <div v-if="dialogueOpen" class="npc-stage" @click.self="closeDialogue">
-        <TownCharacterChat v-if="chatCharacterId != null" :key="`char:${chatCharacterId}`"
+        <TownCharacterChat
+v-if="chatCharacterId != null" :key="`char:${chatCharacterId}`"
           :character-id="chatCharacterId" :town-context="dialogueContext" @context-invalid="refreshDialogueWorld" :display-name="chatResident?.displayName"
           :standing-url="chatResident?.standingUrl" :avatar-url="chatResident?.avatarPath"
           :player-name="player?.displayName || '我'" @close="closeDialogue"
-          @story="openResidentStory" />
-        <TownNpcChat v-else-if="chatNpcId != null"
+          @story="openResidentStory"
+/>
+        <TownNpcChat
+v-else-if="chatNpcId != null"
           :key="chatNpcId"
           :npc-id="chatNpcId" :world-id="dialogueContext?.worldId" :world-epoch="dialogueContext?.worldEpoch"
           :player-name="player?.displayName || '我'"
@@ -186,12 +203,16 @@
     <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
     <TownPaperPanel v-if="spotReady && worldSpot" :open="true" :title="worldSpot.displayName" @close="closeWorldSpot">
       <p>选择这里的功能。服务可展开特殊奇遇，交易可查看商品并买卖。</p>
-      <TownResidentActions :actor-key="`location:${worldSpot.locationKey}`" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
-        @story="openResidentStory" />
+      <TownResidentActions
+:actor-key="`location:${worldSpot.locationKey}`" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+        @story="openResidentStory"
+/>
     </TownPaperPanel>
     <!-- 出行：镇子目录。每行一个目的地（整行热区，用 role=radio 而不是按钮），底部唯一主操作「启程」 -->
-    <TownPaperPanel v-if="showTravelPanel" :open="true" hide-footer title="出行" kicker="邻舍小镇"
-      :busy="travelLoading" @close="closeTravelPanel">
+    <TownPaperPanel
+v-if="showTravelPanel" :open="true" hide-footer title="出行" kicker="邻舍小镇"
+      :busy="travelLoading" @close="closeTravelPanel"
+>
       <div class="travel-body">
         <div class="tl-notice" aria-live="polite">
           <p v-if="travelError" class="tl-error" role="alert">{{ travelError }}</p>
@@ -204,17 +225,21 @@
             <linshe-button variant="secondary" size="sm" :disabled="traveling || renameBusy" @click="openNewTown">新建小镇</linshe-button>
           </div>
           <div class="travel-list" role="radiogroup" aria-label="目的地">
-            <div v-for="m in town.maps" :key="m.id" class="travel-row"
+            <div
+v-for="m in town.maps" :key="m.id" class="travel-row"
               :class="{ 'is-current': m.id === town.currentMapId, 'is-picked': m.id === travelTargetId,
                 'is-disabled': !travelSelectable(m), 'is-renaming': renamingMapId === m.id }"
               role="radio" :aria-checked="m.id === travelTargetId" :aria-disabled="!travelSelectable(m)"
               :tabindex="travelSelectable(m) ? 0 : -1"
-              @click="pickTravelTarget(m)" @keydown.enter.prevent="pickTravelTarget(m)" @keydown.space.prevent="pickTravelTarget(m)">
+              @click="pickTravelTarget(m)" @keydown.enter.prevent="pickTravelTarget(m)" @keydown.space.prevent="pickTravelTarget(m)"
+>
               <span v-if="renamingMapId === m.id" class="travel-row-main">
-                <linshe-input class="travel-rename-input" size="sm" :model-value="renameDraft" :maxlength="RENAME_MAX"
+                <linshe-input
+class="travel-rename-input" size="sm" :model-value="renameDraft" :maxlength="RENAME_MAX"
                   :invalid="!renameDraft.trim()" aria-label="小镇名字" @click.stop
                   @update:model-value="renameDraft = $event"
-                  @keydown.enter.stop.prevent="submitRename" @keydown.esc.stop.prevent="cancelRename" />
+                  @keydown.enter.stop.prevent="submitRename" @keydown.esc.stop.prevent="cancelRename"
+/>
                 <span>只改名字，镇上的人和地图都不动</span>
               </span>
               <span v-else class="travel-row-main">
@@ -227,14 +252,15 @@
               </span>
               <span v-else class="travel-row-side">
                 <span class="travel-status">{{ travelStatusLabel(m) }}</span>
-                <linshe-button variant="icon" size="sm" title="给这座小镇改个名字" :disabled="renameBusy"
-                  @click.stop="startRename(m)">✎</linshe-button>
+                <linshe-button
+variant="icon" size="sm" title="给这座小镇改个名字" :disabled="renameBusy"
+                  @click.stop="startRename(m)"
+>✎</linshe-button>
               </span>
             </div>
           </div>
         </section>
         <p v-if="travelReadyCount <= 1" class="tl-muted">世界上只有一座小镇，别处还是一片空地。</p>
-        <p v-else class="tl-muted">出发后旧镇照旧过日子，只是不再有新的演出。</p>
         <div class="travel-actions">
           <linshe-button class="travel-go" variant="primary" :disabled="!travelCanDepart" :loading="traveling" @click="startTravel">启程</linshe-button>
         </div>
@@ -244,9 +270,11 @@
     <TownServiceManagerHost />
     <TownInitWizard v-if="showWizard" :new-town="wizardNewTown" @close="showWizard = false" @applied="onTownApplied" />
     <!-- 出行过场：暖纸双帘 + 出行牌 + 抵达环，时序由 startTravel 驱动 -->
-    <TownTravelOverlay :phase="travelPhase" :destination="travelTarget?.name" :flavor="travelFlavor"
+    <TownTravelOverlay
+:phase="travelPhase" :destination="travelTarget?.name" :flavor="travelFlavor"
       :weather-text="travelWeather" :arrival="travelArrival" :announcement="travelAnnouncement"
-      :reduced="prefersReducedMotion" />
+      :reduced="prefersReducedMotion"
+/>
 
     <Teleport to="body">
       <Transition name="town-modal">
@@ -270,7 +298,8 @@
       :regenerate="regenerateManagedAsset"
       @close="assetManager.open = false"
       @updated="onManagedAssetUpdated"
-    />  </div>
+    />
+</div>
   </div>
 </template>
 
