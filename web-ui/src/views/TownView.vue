@@ -1470,7 +1470,7 @@ function draw(nowMs) {
       hdRenderer.setCamera(cam)
       hdRenderer.updateAgents(frames)
       hdRenderer.render(weather.value, frames.filter(f => interactionActorKeys.includes(f.agent.agentKey)
-        || interactionActorKeys.includes(f.agent.actorId)).map(f => f.ground), { interactionActorKeys })
+        || interactionActorKeys.includes(f.agent.actorId)).map(f => f.ground), { interactionActorKeys, serverNow: Date.now() + town.serverOffset })
     } catch (error) {
       console.warn('[town] render failed:', error)
       fallbackRenderer('画面渲染中断，HD2D 已停止')

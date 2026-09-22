@@ -228,7 +228,8 @@ function readTownWeather(now = Date.now()) {
     facts = { source: 'forecast', status: 'unknown', precipitation: null, text: '', temperature: null,
       forecastAt: null, fetchedAt: null, validUntil: null, reason: 'READ_FAILED' };
   }
-  return { timeDesc, hour, season: getSeason(Number(local.date.slice(5, 7))), ...facts };
+  return { timeDesc, hour, minuteOfDay: local.minuteOfDay, sampledAt: now,
+    season: getSeason(Number(local.date.slice(5, 7))), ...facts };
 }
 
 function isRaining() {

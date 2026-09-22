@@ -72,3 +72,29 @@ test('待建档案的酒馆角色：名单里有建档入口，建档后回到�
   assert.match(scriptText, /rerollNpcOffer\(npc\.npcId, offer\.id, props\.worldId\)/)
   assert.match(scriptText, /refreshNpcStock\(npc\.npcId, props\.worldId\)/)
 })
+
+test('角色管理页有服务管理入口，打开时带上当前小镇 worldId', () => {
+  const adminPath = new URL('../src/components/town/TownAdminPanel.vue', import.meta.url)
+  const admin = parseSfc(readFileSync(adminPath, 'utf8')).descriptor
+  const template = admin.template.content
+  // 小镇NPC 列表、酒馆角色列表、酒馆角色详情三处都能一键跳到服务管理面板
+  const entries = template.match(/openServiceManager\(town\.snapshot\?\.worldId \|\| ''\)/g) || []
+  assert.equal(entries.length, 3)
+  assert.match(admin.scriptSetup.content, /import \{ openServiceManager \} from '\.\.\/\.\.\/town\/serviceManagerState\.js'/)
+})
+test('分栏切换时内容高度平滑过渡，容器随新旧高度做动画', () => {
+  const template = descriptor.template.content
+  assert.match(template, /<div ref="scopeView" class="sm-scope-view">/)
+  // 空态提示与列表在同一个过渡容器里，切换分栏时整块内容一起收放
+  const wrapper = template.slice(template.indexOf('class="sm-scope-view"'), template.indexOf("</TownPaperPanel>"))
+  assert.match(wrapper, /class="sm-list"/)
+  assert.match(wrapper, /scopeEmptyText/)
+
+  assert.match(script, /const scopeView = ref\(null\)/)
+  assert.match(script, /watch\(scope, \(\) => \{/)
+  assert.match(script, /el\.scrollHeight/)
+  assert.match(script, /is-height-animating/)
+
+  const style = descriptor.styles.map(sheet => sheet.content).join("\n")
+  assert.match(style, /\.sm-scope-view\.is-height-animating\s*\{[^}]*transition:\s*height var\(--dur-slow\)/)
+})

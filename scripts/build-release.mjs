@@ -197,10 +197,13 @@ function extractZip(zipPath, destDir) {
 /**
  * robocopy 复制目录
  */
-async function robocopy(src, dest, excludeDirs = []) {
+async function robocopy(src, dest, excludeDirs = [], excludeFiles = []) {
   const args = [src, dest, "/E", "/NFL", "/NDL", "/NJH", "/NJS"];
   for (const d of excludeDirs) {
     args.push("/XD", d);
+  }
+  for (const f of excludeFiles) {
+    args.push("/XF", f);
   }
   const result = await exec("robocopy", args);
   return result.code < 8;
@@ -642,7 +645,9 @@ async function main() {
 
     // robocopy 排除目录
     const robocopyExclude = [".git", "node_modules", "release", "__pycache__", ".cache"];
-    const rcOk = await robocopy(ROOT, RELEASE_DIR, robocopyExclude);
+    // 运行时临时快照（如 agent-core/townstate.tmp.json）不属于发布内容，别带进用户包里
+    const robocopyExcludeFiles = ["*.tmp.json"];
+    const rcOk = await robocopy(ROOT, RELEASE_DIR, robocopyExclude, robocopyExcludeFiles);
     if (!rcOk) { fail("文件复制失败!"); process.exit(1); }
   } else {
     // 修正 remote URL：clone 会把 origin 设为本机路径，客户电脑上不存在

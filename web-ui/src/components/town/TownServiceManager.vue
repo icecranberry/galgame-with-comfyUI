@@ -21,90 +21,92 @@ variant="secondary" size="sm" :loading="batchRunning" :disabled="batchRunning ||
       <span v-if="batchRunning" class="sm-progress" role="status">{{ batchProgress }}</span>
     </div>
 
-    <p v-if="error" class="sm-error" role="alert">{{ error }}</p>
-    <p v-if="loading && !overview.length" class="sm-muted" role="status">正在读取居民名单</p>
-    <p v-else-if="!overview.length" class="sm-muted">镇上还没有拥有服务或打工职责的居民，可以在居民详情里给 TA 授权限。</p>
-    <p v-else-if="!filtered.length" class="sm-muted">{{ scopeEmptyText }}</p>
+    <div ref="scopeView" class="sm-scope-view">
+      <p v-if="error" class="sm-error" role="alert">{{ error }}</p>
+      <p v-if="loading && !overview.length" class="sm-muted" role="status">正在读取居民名单</p>
+      <p v-else-if="!overview.length" class="sm-muted">镇上还没有拥有服务或打工职责的居民，可以在居民详情里给 TA 授权限。</p>
+      <p v-else-if="!filtered.length" class="sm-muted">{{ scopeEmptyText }}</p>
 
-    <div class="sm-list">
-      <article v-for="npc in filtered" :key="npc.key" class="sm-card">
-        <div
-class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
-          @keydown.enter.prevent="toggle(npc)" @keydown.space.prevent="toggle(npc)"
->
-          <div class="sm-name">
-            <b>{{ npc.displayName }}</b>
-            <span class="sm-job">{{ townJobLabel(npc) }}</span>
-            <span v-if="npc.source === 'character'" class="sm-tag">酒馆角色</span>
-            <span v-if="npc.pendingProfile" class="sm-tag is-pending">待建档案</span>
+      <div class="sm-list">
+        <article v-for="npc in filtered" :key="npc.key" class="sm-card">
+          <div
+            class="sm-head" role="button" tabindex="0" @click="toggle(npc)"
+            @keydown.enter.prevent="toggle(npc)" @keydown.space.prevent="toggle(npc)"
+          >
+            <div class="sm-name">
+              <b>{{ npc.displayName }}</b>
+              <span class="sm-job">{{ townJobLabel(npc) }}</span>
+              <span v-if="npc.source === 'character'" class="sm-tag">酒馆角色</span>
+              <span v-if="npc.pendingProfile" class="sm-tag is-pending">待建档案</span>
+            </div>
+            <div class="sm-counts">
+              <span v-if="npc.capabilities.includes('service')" class="sm-count is-service">服务 {{ npc.serviceCount }}</span>
+              <span v-if="npc.capabilities.includes('work')" class="sm-count is-work">打工 {{ npc.workCount }}</span>
+              <span v-if="npc.capabilities.includes('trade')" class="sm-count is-trade">货架</span>
+              <span class="sm-arrow">{{ expanded === npc.key ? '收起' : '展开' }}</span>
+            </div>
           </div>
-          <div class="sm-counts">
-            <span v-if="npc.capabilities.includes('service')" class="sm-count is-service">服务 {{ npc.serviceCount }}</span>
-            <span v-if="npc.capabilities.includes('work')" class="sm-count is-work">打工 {{ npc.workCount }}</span>
-            <span v-if="npc.capabilities.includes('trade')" class="sm-count is-trade">货架</span>
-            <span class="sm-arrow">{{ expanded === npc.key ? '收起' : '展开' }}</span>
-          </div>
-        </div>
 
-        <Transition
-:css="false" @enter="expandEnter" @leave="expandLeave"
-          @enter-cancelled="resetExpand" @leave-cancelled="resetExpand"
->
-          <div v-if="expanded === npc.key" class="sm-body">
-            <div class="sm-body-inner">
-            <template v-if="npc.pendingProfile">
-              <p class="sm-muted">这位酒馆角色还没有镇上的档案。服务 / 打工项目要以居民档案落库，先建一份：它不进居民名单、不派岗、也不发朋友圈。</p>
-              <div class="sm-actions">
-                <linshe-button variant="secondary" size="sm" :loading="busy[`profile:${npc.key}`]" :disabled="batchRunning" @click="createProfile(npc)">建立镇上档案</linshe-button>
+          <Transition
+            :css="false" @enter="expandEnter" @leave="expandLeave"
+            @enter-cancelled="resetExpand" @leave-cancelled="resetExpand"
+          >
+            <div v-if="expanded === npc.key" class="sm-body">
+              <div class="sm-body-inner">
+                <template v-if="npc.pendingProfile">
+                  <p class="sm-muted">这位酒馆角色还没有镇上的档案。服务 / 打工项目要以居民档案落库，先建一份：它不进居民名单、不派岗、也不发朋友圈。</p>
+                  <div class="sm-actions">
+                    <linshe-button variant="secondary" size="sm" :loading="busy[`profile:${npc.key}`]" :disabled="batchRunning" @click="createProfile(npc)">建立镇上档案</linshe-button>
+                  </div>
+                  <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
+                </template>
+                <template v-else>
+                  <div class="sm-actions">
+                    <linshe-button
+                      v-for="kind in kindsOf(npc)" :key="kind" variant="secondary" size="sm"
+                      :loading="busy[`gen:${npc.key}:${kind}`]" :disabled="batchRunning" @click="generate(npc, kind)"
+                    >
+                      {{ kindLabel(kind) }}  {{ hasOffers(npc, kind) ? '重新生成' : '生成' }}
+                    </linshe-button>
+                    <linshe-button
+                      v-if="npc.capabilities.includes('trade')" variant="ghost" size="sm"
+                      :loading="busy[`stock:${npc.key}`]" :disabled="batchRunning" @click="refreshStock(npc)"
+                    >
+                      刷新货品种类
+                    </linshe-button>
+                  </div>
+                  <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
+                  <p v-if="stockInfo[npc.key]" class="sm-stock" role="status">{{ stockInfo[npc.key] }}</p>
+
+                  <div v-for="kind in kindsOf(npc)" :key="`list:${kind}`" class="sm-group">
+                    <div class="sm-group-title">{{ kindLabel(kind) }}项目</div>
+                    <p v-if="!offersOf(npc, kind).length" class="sm-muted">还没有项目，点上面的按钮生成。</p>
+                    <div v-for="offer in offersOf(npc, kind)" :key="offer.id" class="sm-offer">
+                      <div class="sm-offer-main">
+                        <b>{{ offer.title }}</b>
+                        <span class="sm-price">{{ kind === 'work' ? `工资 ${offer.price}` : `收费 ${offer.price}` }} 金币</span>
+                        <p>{{ offer.description }}</p>
+                      </div>
+                      <linshe-button
+                        variant="ghost" size="sm" :loading="busy[`reroll:${offer.id}`]" :disabled="batchRunning"
+                        @click="reroll(npc, offer)"
+                      >
+                        换一个
+                      </linshe-button>
+                    </div>
+                  </div>
+                </template>
               </div>
-              <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
-            </template>
-            <template v-else>
-            <div class="sm-actions">
-              <linshe-button
-v-for="kind in kindsOf(npc)" :key="kind" variant="secondary" size="sm"
-                :loading="busy[`gen:${npc.key}:${kind}`]" :disabled="batchRunning" @click="generate(npc, kind)"
->
-                {{ kindLabel(kind) }}  {{ hasOffers(npc, kind) ? '重新生成' : '生成' }}
-              </linshe-button>
-              <linshe-button
-v-if="npc.capabilities.includes('trade')" variant="ghost" size="sm"
-                :loading="busy[`stock:${npc.key}`]" :disabled="batchRunning" @click="refreshStock(npc)"
->
-刷新货品种类
-</linshe-button>
             </div>
-            <p v-if="errors[npc.key]" class="sm-error" role="alert">{{ errors[npc.key] }}</p>
-            <p v-if="stockInfo[npc.key]" class="sm-stock" role="status">{{ stockInfo[npc.key] }}</p>
-
-            <div v-for="kind in kindsOf(npc)" :key="`list:${kind}`" class="sm-group">
-              <div class="sm-group-title">{{ kindLabel(kind) }}项目</div>
-              <p v-if="!offersOf(npc, kind).length" class="sm-muted">还没有项目，点上面的按钮生成。</p>
-              <div v-for="offer in offersOf(npc, kind)" :key="offer.id" class="sm-offer">
-                <div class="sm-offer-main">
-                  <b>{{ offer.title }}</b>
-                  <span class="sm-price">{{ kind === 'work' ? `工资 ${offer.price}` : `收费 ${offer.price}` }} 金币</span>
-                  <p>{{ offer.description }}</p>
-                </div>
-                <linshe-button
-variant="ghost" size="sm" :loading="busy[`reroll:${offer.id}`]" :disabled="batchRunning"
-                  @click="reroll(npc, offer)"
->
-换一个
-</linshe-button>
-              </div>
-            </div>
-            </template>
-            </div>
-          </div>
-        </Transition>
-      </article>
+          </Transition>
+        </article>
+      </div>
     </div>
   </TownPaperPanel>
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheTabs from '../ui/LinsheTabs.vue'
@@ -148,6 +150,35 @@ const scopeEmptyText = computed(() => scope.value === 'character'
   ? '还没有酒馆角色接管的居民拥有服务或打工职责。'
   : '这些居民里没有拥有服务或打工职责的。')
 
+// 分栏切换：切之前先量旧高度，DOM 更新后再过渡到新内容高度，避免生硬跳变
+const scopeView = ref(null)
+let heightAnimToken = 0
+watch(scope, () => {
+  const el = scopeView.value
+  if (!el) return
+  const from = el.offsetHeight // watch 早于 DOM 更新，这里量到的还是旧高度
+  nextTick(() => {
+    if (!el.isConnected) return
+    const token = ++heightAnimToken
+    el.classList.remove('is-height-animating')
+    el.style.height = ''
+    const to = el.scrollHeight
+    if (from === to) return
+    el.style.height = `${from}px`
+    void el.offsetHeight // 强制回流，让起始高度先生效
+    el.classList.add('is-height-animating')
+    el.style.height = `${to}px`
+    const finish = (event) => {
+      if (event && (event.target !== el || event.propertyName !== 'height')) return
+      el.removeEventListener('transitionend', finish)
+      if (token !== heightAnimToken) return // 新一轮动画已在跑，别把它清掉
+      el.classList.remove('is-height-animating')
+      el.style.height = ''
+    }
+    el.addEventListener('transitionend', finish)
+    setTimeout(() => finish(), 400) // 兜底：过渡事件偶尔不来，别让容器卡在定高
+  })
+})
 function kindsOf(npc) { return ['service', 'work'].filter(kind => npc.capabilities.includes(kind)) }
 function townJobLabel(npc) {
   const townName = npc.mapId == null
@@ -351,6 +382,8 @@ watch(() => props.open, open => {
 .sm-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid #cbb9a6; color: #a08363; }
 .sm-tag.is-pending { border-color: #d9b3ae; color: #b8574f; }
 .sm-scope { margin-bottom: 10px; }
+/* 分栏内容的高度过渡：新旧高度由 JS 驱动，这里只给过渡曲线 */
+.sm-scope-view.is-height-animating { overflow: hidden; transition: height var(--dur-slow) var(--ease-out); }
 .sm-counts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sm-count { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #f0e9e2; color: #7d6f64; }
 .sm-count.is-service { color: #b8874f; }

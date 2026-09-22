@@ -8,7 +8,7 @@ import { adaptObject, assetUrl, groundUvs, renderMeta } from './TownSceneAdapter
 import { sortCards, cardOccludesAgent } from './cardLayers.js'
 import { imageFootV } from './imageAlpha.js'
 import { roadEdges } from './terrainEdges.js'
-import { daylightLook, townMaterial, makeContactShadow, buildingShadowGeometry, makeLightPool, makeLightHalo } from './sceneLook.js'
+import { daylightHour, daylightLook, townMaterial, makeContactShadow, buildingShadowGeometry, makeLightPool, makeLightHalo } from './sceneLook.js'
 import { deriveGroundImage, GROUND_DERIVATIVE_VERSION } from './groundTexture.js'
 import { createBuildingVolume, setBuildingVolumeNight } from './buildingVolumeGeometry.js'
 import { setBuildingOcclusion, volumeOccludesAgent } from './interactionOcclusion.js'
@@ -292,20 +292,25 @@ export class Hd2dTownRenderer {
     let contact = mesh.userData.contact, shadowProxy = mesh.userData.shadowProxy
     let projectedShadow = mesh.userData.projectedShadow
     const fp = dto.asset?.meta?.footprint
-    if (!isAgent && materialKind !== 'building' && meta.shadowMode !== 'volume') {
+    // Painted characters and props share one alpha projection. Shadow-map
+    // occlusion would make characters much darker than the translucent props.
+    const useProjectedShadow = isAgent || (materialKind !== 'building' && meta.shadowMode !== 'volume')
+    if (useProjectedShadow) {
       if (!projectedShadow) {
         projectedShadow = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ color: '#26352b', transparent: true, opacity: .52, depthWrite: false, side: T.DoubleSide, forceSinglePass: true, alphaTest: .05, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
-        // Sample only source alpha: painted greens/flowers must not tint the shadow.
+        // Sample only source alpha: clothing, greens and flowers must not tint the shadow.
         projectedShadow.material.onBeforeCompile = shader => {
           shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = vec3(.028,.045,.033);')
         }
-        projectedShadow.material.customProgramCacheKey = () => 'town-prop-shadow-alpha'
+        projectedShadow.material.customProgramCacheKey = () => 'town-card-shadow-alpha'
         projectedShadow.frustumCulled = false
         this.scene.add(projectedShadow)
       }
       if (projectedShadow.material.map !== map) { projectedShadow.material.map = map; projectedShadow.material.needsUpdate = true }
       projectedShadow.visible = meta.shadowMode !== 'none' && !!map
       mesh.castShadow = false
+    } else if (projectedShadow) { freeMesh(projectedShadow); projectedShadow = null }
+    if (!isAgent && useProjectedShadow) {
       const width = Math.min(w * .72, (fp?.w || 1) * 1.15)
       const signature = `prop:${width}`
       if (contact?.userData.signature !== signature) {
@@ -340,7 +345,6 @@ export class Hd2dTownRenderer {
       if (contact) { freeMesh(contact); contact = null }
       if (shadowProxy) { freeMesh(shadowProxy); shadowProxy = null }
     }
-    if ((isAgent || materialKind === 'building' || meta.shadowMode === 'volume') && projectedShadow) { freeMesh(projectedShadow); projectedShadow = null }
     mesh.userData = { projectedShadow, dto, entry, isAgent, contact, shadowProxy, materialKind, placeholder: mesh.userData.placeholder, footV, lightPool: mesh.userData.lightPool, halo: mesh.userData.halo, lightPhase: mesh.userData.lightPhase }
     this.syncCardLights(mesh, dto, materialKind, h, footV, groundShift)
     return mesh
@@ -449,7 +453,7 @@ export class Hd2dTownRenderer {
     const y = Math.max(0, Math.min(height - 1, Math.floor((1 - hit.uv.y) * height)))
     return data[(y * width + x) * 4 + 3] / 255 >= hit.object.material.alphaTest
   }
-  render(weather, focusPoints = [], { interactionActorKeys } = {}) {
+  render(weather, focusPoints = [], { interactionActorKeys, serverNow = Date.now() } = {}) {
     if (this.disposed) return
     this.frame = (this.frame || 0) + 1
     if (this.sceneDirty) this.syncScene()
@@ -473,7 +477,7 @@ export class Hd2dTownRenderer {
         : building.userData.materialKind === 'building' && cardOccludesAgent(building, agent, this.camera))
       setBuildingOcclusion(building, hidden)
     }
-    const hour = weather?.hour ?? new Date().getHours()
+    const hour = daylightHour(weather, serverNow)
     const rain = /雨|阴|雪/.test(weather?.text || '')
     const look = daylightLook(hour, rain)
     const glow = look.glow
@@ -499,9 +503,9 @@ export class Hd2dTownRenderer {
     this.fill.groundColor.set(look.fillGround)
     // A slightly cooler exposure deepens the night without clipping the day.
     this.renderer.toneMappingExposure = exposure
-    // Project each prop's alpha silhouette directly onto the receiving ground.
+    // Project each character/prop alpha silhouette directly onto the ground.
     // This avoids shadow-map depth bias opening a gap at a small object's foot.
-    for (const mesh of this.objects.values()) {
+    for (const mesh of cards) {
       const shadow = mesh.userData.projectedShadow
       if (!shadow?.visible) continue
       mesh.updateMatrixWorld(true)
@@ -513,7 +517,7 @@ export class Hd2dTownRenderer {
         target.setXYZ(i, point.x - height * look.offset.x / look.offset.y, .014, point.z - height * look.offset.z / look.offset.y)
       }
       target.needsUpdate = true
-      shadow.material.opacity = look.night ? .25 : rain ? .30 : .52
+      shadow.material.opacity = look.shadowOpacity
     }
     const extent = Math.max(16, Math.min(64, this.width / (PIXELS_PER_UNIT * (this.cameraState?.zoom || 1)) * .7 + 8))
     Object.assign(this.sun.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: .1, far: 180 })

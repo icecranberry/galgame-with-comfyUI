@@ -150,11 +150,16 @@ let img = null
 let ctx = null
 
 const ERASE_TOLERANCE = 42
+/** 连续抠白：拖动时相邻两次采样的间距（原图像素） */
+const ERASE_BRUSH_STEP = 6
+/** 连续抠白：单帧最多采样点数，快速划动时不会一次性洪泛太多次 */
+const ERASE_BRUSH_MAX_SAMPLES = 32
 const cropRect = ref(null)
 const cropping = ref(false)
 let cropDrag = null
 let viewDrag = null
 let eraseHistory = []
+let eraseBrush = null
 const gapOpen = ref(false)
 const detecting = ref(false)
 const gapError = ref('')
@@ -350,12 +355,6 @@ function drawGapMarkers() {
   ctx.restore()
 }
 
-function rememberEdit() {
-  eraseHistory.push({ image: compositeFull(), dirty: dirty.value })
-  if (eraseHistory.length > 8) eraseHistory.shift()
-  canUndo.value = true
-}
-
 /** object-fit: contain 时，canvas 元素边框不等于实际内容区域；交互必须按内容区域换算 */
 function canvasContentRect(canvas) {
   const rect = canvas.getBoundingClientRect()
@@ -397,7 +396,7 @@ function cropDisplayRect() {
 
 const cropHint = computed(() => {
   if (gapOpen.value) return '调低强度即可恢复 · 拖动画布查看 · 滚轮缩放'
-  if (eraseMode.value) return props.hint ? `${props.hint} · 右键拖动画布` : '点击要去除的白色或底色 · 右键拖动画布'
+  if (eraseMode.value) return props.hint ? `${props.hint} · 按住左键拖动可连续抠白 · 右键拖动画布` : '按住左键拖动可连续抠白 · 右键拖动画布'
   if (cropActive.value) return '拖动移动截取框 · 拖右下角手柄调大小 · 框内即最终成图范围'
   return '滚轮缩放 · 拖动画布查看'
 })
@@ -554,7 +553,9 @@ function onDown(e) {
     return
   }
   if (eraseMode.value) {
-    eraseColorAt(point.x, point.y)
+    // 按住左键持续抠白：按下即开始会话，移动时按固定间距连续采样
+    beginEraseBrush(e.pointerId, point.x, point.y)
+    frameEl.value?.setPointerCapture?.(e.pointerId)
     return
   }
   if (cropActive.value && cropRect.value) {
@@ -579,6 +580,12 @@ function onDown(e) {
 }
 
 function onMove(e) {
+  // 连续抠白：按住左键移动时持续采样，经过的位置都会被抠白
+  if (eraseBrush && e.pointerId === eraseBrush.pointerId) {
+    const point = canvasPoint(e)
+    queueErasePoint(point.x, point.y)
+    return
+  }
   if (viewDrag && e.pointerId === viewDrag.pointerId) {
     view.x = viewDrag.viewX + e.clientX - viewDrag.x
     view.y = viewDrag.viewY + e.clientY - viewDrag.y
@@ -605,6 +612,7 @@ function onCancel() {
   cropDrag = null
   viewDrag = null
   panning.value = false
+  finishEraseBrush()
 }
 
 /** 抠白（手动/自动）下右键用于拖动画布，屏蔽浏览器右键菜单 */
@@ -612,57 +620,160 @@ function onContextMenu(e) {
   if (eraseMode.value || gapOpen.value) e.preventDefault()
 }
 
-/** 点击颜色区域：以点击点颜色为种子，容差洪泛 → 透明 */
-function eraseColorAt(px, py) {
-  if (editLocked.value || !img) return
-  const ix = Math.floor(px)
-  const iy = Math.floor(py)
-  if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) return
-
-  const work = document.createElement('canvas')
-  work.width = img.width
-  work.height = img.height
-  const wctx = work.getContext('2d', { willReadFrequently: true })
-  wctx.drawImage(img, 0, 0)
-  const data = wctx.getImageData(0, 0, img.width, img.height)
-  const d = data.data
-  const at = (x, y) => (y * img.width + x) * 4
-  const seed = at(ix, iy)
-  const target = [d[seed], d[seed + 1], d[seed + 2]]
-  if (d[seed + 3] < 8) {
+/** 结束连续抠白会话：先补做最后一次采样，再释放工作画布 */
+function finishEraseBrush() {
+  const brush = eraseBrush
+  if (!brush) return
+  if (brush.frame !== null) cancelAnimationFrame(brush.frame)
+  const target = brush.target
+  brush.target = null
+  if (target) runEraseAt(target.x, target.y)
+  eraseBrush = null
+  brush.workCanvas = null
+  brush.data = null
+  // 整段按住都没抠掉任何像素（例如按在已经透明的区域）才提示一次
+  if (!brush.recorded) {
     savedTip.value = '点击的位置已经是透明区域'
     setTimeout(() => { savedTip.value = '' }, 1500)
-    return
   }
-  rememberEdit()
+}
+
+/** 开始连续抠白会话：整图只读回一次，按住左键期间一直有效 */
+function beginEraseBrush(pointerId, x, y) {
+  if (!img || editLocked.value) return
+  // 图像外的空白区不建立会话，避免无意义地复制整图
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return
+  if (x < 0 || y < 0 || x >= img.width || y >= img.height) return
+  finishEraseBrush()
+  const workCanvas = document.createElement('canvas')
+  workCanvas.width = img.width
+  workCanvas.height = img.height
+  const wctx = workCanvas.getContext('2d', { willReadFrequently: true })
+  wctx.drawImage(img, 0, 0)
+  eraseBrush = {
+    pointerId,
+    workCanvas,
+    wctx,
+    data: wctx.getImageData(0, 0, workCanvas.width, workCanvas.height),
+    lastX: x,
+    lastY: y,
+    // 拖动期间复用同一块访问标记，避免每个采样点都新分配一份整图大小数组
+    seen: null,
+    stamp: 0,
+    target: null,
+    frame: null,
+    recorded: false,
+  }
+  runEraseAt(x, y)
+}
+
+/** 拖动采样节流：每帧最多处理一次，避免高频 pointermove 反复整图洪泛 */
+function queueErasePoint(x, y) {
+  const brush = eraseBrush
+  if (!brush || editLocked.value) return
+  brush.target = { x, y }
+  if (brush.frame !== null) return
+  brush.frame = requestAnimationFrame(() => {
+    const current = eraseBrush
+    if (!current) return
+    current.frame = null
+    const target = current.target
+    current.target = null
+    if (target) runEraseAt(target.x, target.y)
+  })
+}
+
+/** 一次按住只压一次撤销快照，避免拖一下就把撤销栈用光 */
+function rememberBrushEdit() {
+  if (!eraseBrush || eraseBrush.recorded) return
+  eraseHistory.push({ image: compositeFull(), dirty: dirty.value })
+  if (eraseHistory.length > 8) eraseHistory.shift()
+  canUndo.value = true
+  eraseBrush.recorded = true
+}
+
+/** 采样点：按固定间距铺满上次采样点到目标点的线段，快速划动也不会漏掉中间区域 */
+function eraseSamplePoints(brush, x, y) {
+  const dx = x - brush.lastX
+  const dy = y - brush.lastY
+  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / ERASE_BRUSH_STEP))
+  const stride = Math.max(1, Math.ceil(steps / ERASE_BRUSH_MAX_SAMPLES))
+  const points = []
+  for (let i = stride; i < steps; i += stride) {
+    points.push([brush.lastX + (dx * i) / steps, brush.lastY + (dy * i) / steps])
+  }
+  points.push([x, y])
+  return points
+}
+
+/**
+ * 以 (ix, iy) 为种子做容差洪泛，把连通同色块写成透明。
+ * 抽成纯函数，方便拖动期间对每个采样点反复调用。
+ * @param {Uint8ClampedArray} d RGBA 像素缓冲
+ * @param {number} width 图像宽（像素）
+ * @param {number} height 图像高（像素）
+ * @param {number} ix 种子 x
+ * @param {number} iy 种子 y
+ * @param {{ seen: Int32Array|null, stamp: number }} [scratch] 复用的访问标记：拖动时传入会话对象，靠自增戳记省去反复清空整块内存
+ * @returns {boolean} 是否真的擦掉了像素（种子越界或已经是透明时为 false）
+ */
+function floodErase(d, width, height, ix, iy, scratch) {
+  if (ix < 0 || iy < 0 || ix >= width || iy >= height) return false
+  const at = (x, y) => (y * width + x) * 4
+  const seed = at(ix, iy)
+  if (d[seed + 3] < 8) return false
+  const target = [d[seed], d[seed + 1], d[seed + 2]]
   const nearSeed = (o) =>
     Math.abs(d[o] - target[0]) <= ERASE_TOLERANCE &&
     Math.abs(d[o + 1] - target[1]) <= ERASE_TOLERANCE &&
     Math.abs(d[o + 2] - target[2]) <= ERASE_TOLERANCE
-
-  const seen = new Uint8Array(img.width * img.height)
+  let marks = scratch?.seen
+  if (!marks || marks.length !== width * height) {
+    marks = new Int32Array(width * height)
+    if (scratch) scratch.seen = marks
+  }
+  const stamp = scratch ? (scratch.stamp += 1) : 1
   const stack = [ix, iy]
-  seen[iy * img.width + ix] = 1
+  marks[iy * width + ix] = stamp
   while (stack.length > 0) {
     const y = stack.pop()
     const x = stack.pop()
     const o = at(x, y)
     d[o + 3] = 0
     for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
-      if (nx < 0 || ny < 0 || nx >= img.width || ny >= img.height) continue
-      const k = ny * img.width + nx
-      if (seen[k]) continue
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+      const k = ny * width + nx
+      if (marks[k] === stamp) continue
       const no = at(nx, ny)
-      if (d[no + 3] > 8 && nearSeed(no)) { seen[k] = 1; stack.push(nx, ny) }
+      if (d[no + 3] > 8 && nearSeed(no)) { marks[k] = stamp; stack.push(nx, ny) }
     }
   }
-  wctx.putImageData(data, 0, 0)
+  return true
+}
 
-  img = work
+/** 对一段采样路径洪泛抠白；一帧只回写画布、重绘一次 */
+function runEraseAt(x, y) {
+  const brush = eraseBrush
+  if (!brush || !img || editLocked.value) return false
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+  const width = img.width
+  const height = img.height
+  const points = eraseSamplePoints(brush, x, y)
+  let hit = false
+  for (const [sx, sy] of points) {
+    if (floodErase(brush.data.data, width, height, Math.floor(sx), Math.floor(sy), brush)) hit = true
+  }
+  brush.lastX = x
+  brush.lastY = y
+  if (!hit) return false
+  rememberBrushEdit()
+  brush.wctx.putImageData(brush.data, 0, 0)
+  img = brush.workCanvas
   imageVersion++
   dirty.value = true
   clearGaps()
   draw()
+  return true
 }
 
 function undoErase() {
@@ -799,6 +910,7 @@ onBeforeUnmount(() => {
   clearGaps()
   cropDrag = null
   viewDrag = null
+  finishEraseBrush()
   infoResizeObserver?.disconnect()
   infoResizeObserver = null
   window.removeEventListener('resize', updateInfoPosition)

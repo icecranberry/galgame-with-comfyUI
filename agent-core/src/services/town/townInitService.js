@@ -66,11 +66,66 @@ function claimOwnedAssets(ids) {
 }
 
 /**
+ * 认领「本次向导产出的素材」，供素材库链路（POST /api/town/assets 等）在生成成功后回调。
+ *
+ * 向导 UI 的地皮 / 建筑 / 道具是前端逐张调素材库接口生成的，不走 /init/samples 与 /init/batch；
+ * 不在素材落地时认领，job.assetIds 就永远是空名单，布图必然误判「素材不足」。
+ * 只认布局用得上的种类；向导不在进行中（idle / 已开镇）时不认领，免得把事后手动加的素材算成本镇产出。
+ */
+export function claimWizardAssets(ids) {
+  if (!job || job.status === 'idle' || job.status === 'done') return [];
+  const wanted = new Set((ids || []).map(Number).filter(Number.isInteger));
+  if (wanted.size === 0) return [];
+  const claimed = listAssets({}).filter(a => wanted.has(a.id) && LAYOUT_ASSET_KINDS.includes(a.kind));
+  if (claimed.length === 0) return [];
+  claimOwnedAssets(claimed.map(a => a.id));
+  persistJob();
+  return claimed.map(a => a.id);
+}
+
+/** 素材 key 是否命中蓝图声明的某一项（含 moss_lawn_01 这类变体前缀） */
+function blueprintOwnsAsset(asset, blueprint) {
+  const items = [
+    ...(blueprint?.groundAssets || []),
+    ...(blueprint?.roadAssets || []),
+    ...(blueprint?.buildings || []),
+    ...(blueprint?.props || []),
+  ];
+  const key = String(asset?.key || '');
+  if (!key) return false;
+  return items.some(item => item?.key && (key === item.key || key.startsWith(`${item.key}_`)));
+}
+
+/** 本次向导开始时间，与 town_assets.created_at 同为 UTC 的 'YYYY-MM-DD HH:MM:SS' */
+function wizardStartedAt() {
+  const started = Date.parse(job?.createdAt || '');
+  if (!Number.isFinite(started)) return null;
+  return new Date(started).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * 名单缺失时按本次蓝图声明的 key 兜底认领本镇素材，并把结果固化进名单（下次不必再算）。
+ *
+ * 绝不退回全库：那会让新镇摆上老镇的地皮与建筑（用户实测：小镇 B 混进了小镇 A 的草地、石板路与全部 9 栋楼）。
+ * 优先只认「向导开始之后创建」的，避免同世界观再建一座镇时认错；一张都没有时再放宽到同名复用。
+ */
+function claimBlueprintOwnedAssets(ready) {
+  if ((job?.assetIds || []).length > 0) return [];
+  const matched = ready.filter(a => blueprintOwnsAsset(a, job?.blueprint));
+  const since = wizardStartedAt();
+  const fresh = since ? matched.filter(a => String(a.created_at || '') >= since) : [];
+  const picked = fresh.length ? fresh : matched;
+  if (picked.length === 0) return [];
+  claimOwnedAssets(picked.map(a => a.id));
+  console.warn(`[townInit] 向导存档缺少素材名单，按蓝图 key 兜底认领 ${picked.length} 张本镇素材`);
+  return picked.map(a => a.id);
+}
+
+/**
  * 本镇自己的布图素材（ground / road / building / prop 且 ready）。
  *
- * 多地图下全世界共用一张 town_assets 表，若直接 listAssets() 取全量，新镇会摆上老镇的地皮和建筑
- * （实测：小镇 B 的布局里混进了小镇 A 的草地、石板路与全部 9 栋楼）。改成只取本次向导产出的那一批。
- * 老存档只从小样和已有草图恢复明确引用的素材；名单缺失时绝不退回全库。
+ * 多地图下全世界共用一张 town_assets 表，若直接 listAssets() 取全量，新镇会摆上老镇的地皮和建筑。
+ * 改成只取本次向导产出的那一批；名单缺失（老存档，或素材库链路漏认领）时按蓝图 key 兜底认领。
  */
 function ownedLayoutAssets() {
   const ready = listAssets({}).filter(a => a.status === 'ready' && LAYOUT_ASSET_KINDS.includes(a.kind));
@@ -79,7 +134,24 @@ function ownedLayoutAssets() {
     for (const id of job?.sampleAssetIds || []) owned.add(Number(id));
     for (const asset of getLayersAssets(job?.draftMap?.layers)) owned.add(asset.id);
   }
+  if (owned.size === 0) {
+    for (const id of claimBlueprintOwnedAssets(ready)) owned.add(id);
+  }
   return ready.filter(a => owned.has(a.id));
+}
+
+/**
+ * 升级自愈：3.4.7 及以前的向导把地皮 / 建筑走素材库接口生成、没记名单，卡在「素材不足」的存档
+ * 升级后仍会顶着 failed。这里补一次兜底认领，够布图就把状态推回「可布图」，用户无需手动重试。
+ */
+function healInsufficientLayoutAssets() {
+  if (job?.status !== 'failed' || !job.blueprint) return false;
+  if (!String(job.error || '').includes('素材不足')) return false;
+  if (ownedLayoutAssets().length < 4) return false;
+  job.status = 'layout_pending';
+  job.error = null;
+  console.warn('[townInit] 存量存档自愈：已按蓝图 key 补认本镇素材，布图可以重试');
+  return true;
 }
 
 function persistJob() {
@@ -129,6 +201,8 @@ export function restoreInitJob() {
       job.error = '服务重启导致蓝图生成中断，请重新开始';
     }
     // batch_pending（批量可断点续跑）/ layout_pending（重新触发布图即可）原样保留
+    // 存量存档自愈：旧版本卡在「素材不足」的向导补一次兜底认领，能布图就推回「可布图」
+    healInsufficientLayoutAssets();
     persistJob();
     console.log(`[townInit] job restored: status=${job.status}`);
   } catch (err) {

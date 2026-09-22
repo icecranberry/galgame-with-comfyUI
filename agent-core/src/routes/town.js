@@ -45,6 +45,7 @@ import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
   generateLayout, rerollLayout, relayoutWorld, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
+  claimWizardAssets,
   regenerateNpcRoster,
 } from '../services/town/townInitService.js';
 import {
@@ -171,6 +172,8 @@ router.post('/assets', async (req, res) => {
     const { kind, key, name, desc, meta, worldSettingId } = req.body || {};
     if (!kind || !name) return res.status(400).json({ error: 'kind/name 必填' });
     const asset = await createAsset({ kind, key, name, desc, meta, worldSettingId, mapId: getTownMaps().currentMapId });
+    // 向导期间从素材库接口产出的素材同样属于本镇，漏记会让布图误判「素材不足」
+    claimWizardAssets([asset?.id]);
     res.json({ asset });
   } catch (err) {
     res.status(500).json({ error: err?.message || '生成失败' });
@@ -180,6 +183,8 @@ router.post('/assets', async (req, res) => {
 router.post('/assets/:id/regenerate', async (req, res) => {
   try {
     const asset = await regenerateAsset(parseInt(req.params.id, 10), req.body || {});
+    // 向导期间从素材库接口产出的素材同样属于本镇，漏记会让布图误判「素材不足」
+    claimWizardAssets([asset?.id]);
     res.json({ asset });
   } catch (err) {
     res.status(500).json({ error: err?.message || '重生成失败' });

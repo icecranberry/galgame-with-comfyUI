@@ -421,7 +421,7 @@ const editMemberIds = ref([])
 const editTemperature = ref(0.7)
 const editSummaryInterval = ref(4)
 const editActivity = ref(2)
-const activityDelaySeconds = { 1: 60, 2: 40, 3: 27, 4: 20, 5: 16 }
+const activityDelaySeconds = { 1: 80, 2: 40, 3: 27, 4: 20, 5: 16 }
 const savedActivity = ref(2)
 const activitySaving = ref(false)
 

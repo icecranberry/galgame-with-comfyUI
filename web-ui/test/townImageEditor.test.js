@@ -183,3 +183,130 @@ test('failed apply-and-save preserves the source, slider preview, and manual und
   assert.equal(await f.save(), true)
   assert.deepEqual(f.exported(), f.source)
 })
+
+// 连续抠白：按住左键拖动时，对采样路径上的每个点逐个洪泛，实现「按住不放持续抠白」
+const floodAt = state => editorFunction('floodErase', { ERASE_TOLERANCE: 42, ...state })
+const sampledPath = state => editorFunction('eraseSamplePoints', { ERASE_BRUSH_STEP: 6, ERASE_BRUSH_MAX_SAMPLES: 32, ...state })
+
+test('floodErase cuts the connected same-color block and skips transparent or out-of-range seeds', () => {
+  const flood = floodAt()
+  // 三个像素：纯白、接近白、纯红；红色超出容差，必须留下
+  const data = new Uint8ClampedArray([250, 250, 250, 255, 240, 238, 236, 255, 200, 40, 40, 255])
+  assert.equal(flood(data, 3, 1, 0, 0), true)
+  assert.deepEqual([...data], [250, 250, 250, 0, 240, 238, 236, 0, 200, 40, 40, 255])
+  // 种子已透明：不重复擦除
+  assert.equal(flood(data, 3, 1, 0, 0), false)
+  // 越界种子不产生任何副作用
+  assert.equal(flood(data, 3, 1, 3, 0), false)
+  assert.equal(flood(data, 3, 1, 0, -1), false)
+  assert.deepEqual([...data], [250, 250, 250, 0, 240, 238, 236, 0, 200, 40, 40, 255])
+})
+
+test('eraseSamplePoints walks the drag path at fixed spacing and caps samples per frame', () => {
+  const sample = sampledPath()
+  assert.deepEqual(sample({ lastX: 0, lastY: 0 }, 12, 0), [[6, 0], [12, 0]])
+  // 原地按下：至少采样当前点，保证按下的那一刻就生效
+  assert.deepEqual(sample({ lastX: 5, lastY: 5 }, 5, 5), [[5, 5]])
+  // 快速划动：限流后仍覆盖全程，终点必须保留
+  const far = sample({ lastX: 0, lastY: 0 }, 600, 0)
+  assert.ok(far.length <= 33, `samples = ${far.length}`)
+  assert.deepEqual(far[far.length - 1], [600, 0])
+  assert.ok(far.every(([x]) => x > 0 && x <= 600))
+})
+
+test('one drag history snapshot covers the whole stroke', () => {
+  const state = {
+    eraseBrush: { recorded: false },
+    eraseHistory: [],
+    dirty: { value: false },
+    canUndo: { value: false },
+    compositeFull: () => ({ id: 'before-drag' }),
+  }
+  const remember = editorFunction('rememberBrushEdit', state)
+  remember()
+  remember()
+  assert.equal(state.eraseHistory.length, 1, '拖动过程中只压一次快照')
+  assert.equal(state.eraseBrush.recorded, true)
+  assert.equal(state.canUndo.value, true)
+  assert.equal(state.eraseHistory[0].image.id, 'before-drag')
+  // 没有会话时（例如自动抠白流程）不应写入历史
+  state.eraseBrush = null
+  remember()
+  assert.equal(state.eraseHistory.length, 1)
+})
+
+test('drag sessions reuse one visit-mark buffer instead of allocating per sample', () => {
+  const flood = floodAt()
+  const scratch = { seen: null, stamp: 0 }
+  const data = new Uint8ClampedArray([250, 250, 250, 255, 250, 250, 250, 255, 200, 40, 40, 255])
+  assert.equal(flood(data, 3, 1, 0, 0, scratch), true)
+  const marks = scratch.seen
+  assert.equal(marks.length, 3)
+  assert.equal(scratch.stamp, 1)
+  // 换个种子继续擦：戳记递增，但访问标记缓冲原地复用
+  assert.equal(flood(data, 3, 1, 2, 0, scratch), true)
+  assert.equal(scratch.seen, marks)
+  assert.equal(scratch.stamp, 2)
+  // 种子已透明时直接返回，不消耗戳记
+  assert.equal(flood(data, 3, 1, 0, 0, scratch), false)
+  assert.equal(scratch.stamp, 2)
+  // 图像尺寸变化时自动换一块，不会串用上一张图的标记
+  const wide = new Uint8ClampedArray([250, 250, 250, 255, 250, 250, 250, 255, 250, 250, 250, 255, 250, 250, 250, 255])
+  assert.equal(flood(wide, 4, 1, 0, 0, scratch), true)
+  assert.equal(scratch.seen.length, 4)
+  assert.notEqual(scratch.seen, marks)
+  assert.equal(scratch.stamp, 3)
+})
+
+test('holding the pointer keeps erasing along the drag with a single undo step', () => {
+  const source = new Uint8ClampedArray([250, 250, 250, 255, 250, 250, 250, 255, 200, 40, 40, 255])
+  const makeWorkCanvas = () => {
+    const buffer = new Uint8ClampedArray(source.length)
+    return {
+      width: 3, height: 1, pixels: buffer,
+      getContext: () => ({
+        drawImage: src => { buffer.set(src.pixels) },
+        getImageData: () => ({ data: buffer.slice(), width: 3, height: 1 }),
+        putImageData: imageData => { buffer.set(imageData.data) },
+      }),
+    }
+  }
+  const frames = []
+  const state = {
+    ERASE_TOLERANCE: 42, ERASE_BRUSH_STEP: 6, ERASE_BRUSH_MAX_SAMPLES: 32,
+    img: { width: 3, height: 1, pixels: source },
+    eraseBrush: null, eraseHistory: [], imageVersion: 0,
+    editLocked: { value: false }, dirty: { value: false }, canUndo: { value: false }, savedTip: { value: '' },
+    document: { createElement: () => makeWorkCanvas() },
+    requestAnimationFrame: cb => frames.push(cb), cancelAnimationFrame: () => {}, setTimeout: () => {},
+    compositeFull: () => ({ id: 'before-drag' }), clearGaps: () => {}, draw: () => {},
+  }
+  for (const name of ['beginEraseBrush', 'queueErasePoint', 'finishEraseBrush', 'runEraseAt', 'eraseSamplePoints', 'floodErase', 'rememberBrushEdit']) {
+    state[name] = editorFunction(name, state)
+  }
+  // 按下：立刻抠掉种子所在的白色块
+  state.beginEraseBrush(1, 0, 0)
+  assert.deepEqual([...state.img.pixels.slice(0, 8)], [250, 250, 250, 0, 250, 250, 250, 0])
+  // 按住不放划过红色像素：帧回调里被采样并抠掉
+  state.queueErasePoint(2, 0)
+  assert.equal(frames.length, 1, '同一帧内只排一次回调')
+  frames.shift()()
+  assert.deepEqual([...state.img.pixels], [250, 250, 250, 0, 250, 250, 250, 0, 200, 40, 40, 0])
+  // 继续移动：已经透明的区域不会重复抠，也不会再排多余的帧回调
+  state.queueErasePoint(1, 0)
+  state.queueErasePoint(2, 0)
+  assert.equal(frames.length, 1)
+  frames.shift()()
+  state.finishEraseBrush()
+  assert.equal(state.eraseBrush, null)
+  assert.equal(state.eraseHistory.length, 1, '整段拖动只留一步撤销')
+  assert.equal(state.canUndo.value, true)
+  // 只统计真正改了像素的两帧：最后一次划过已透明区域不算一次修改
+  assert.equal(state.imageVersion, 2)
+  assert.equal(state.savedTip.value, '', '抠到东西就不提示')
+  // 按在已经透明的区域：整段都没抠掉像素，松手时提示一次
+  state.beginEraseBrush(1, 0, 0)
+  state.finishEraseBrush()
+  assert.match(state.savedTip.value, /透明/)
+  assert.equal(state.eraseHistory.length, 1, '没抠到东西就不该多压一步撤销')
+})

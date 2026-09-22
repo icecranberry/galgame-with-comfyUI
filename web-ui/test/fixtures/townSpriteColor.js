@@ -2,7 +2,7 @@
 // No live town, saved data, generated assets or backend requests are used.
 import * as T from 'three'
 import { Hd2dTownRenderer } from '../../src/town/renderers/Hd2dTownRenderer.js'
-import { adaptAgent } from '../../src/town/renderers/TownSceneAdapter.js'
+import { adaptAgent, adaptObject } from '../../src/town/renderers/TownSceneAdapter.js'
 
 const colors = ['#ffe6dd', '#ebb3a3', '#cd9283', '#f5f5f5', '#838c92', '#74283c', '#171e22', '#365f92']
 const source = document.createElement('canvas')
@@ -42,6 +42,55 @@ function checkColors(samples, maxError, label) {
   checks.push({ label, maxChannelError: Math.max(...errors), samples })
 }
 
+// Regression: characters used shadow-map occlusion while props used a lighter
+// alpha projection. Compare both live rendering paths, including facing/motion.
+async function checkShadowConsistency() {
+  const asset = { id: 1, kind: 'prop', imagePath: '/test/fixtures/townObjectColors.svg',
+    meta: { footprint: { w: 2, h: 2 }, anchor: { u: .5, v: 1 } } }
+  const object = { id: 'shadow-prop', assetId: 1, x: 4, y: 3 }
+  const propDto = adaptObject(object, asset)
+  const agent = { agentKey: 'shadow-agent', sprites: { down: url, up: propDto.url } }
+  renderer.setScene({ cols: 8, rows: 8, assets: [asset], layers: { objects: [object] } })
+  for (let attempt = 0; attempt < 120; attempt++) {
+    renderer.render({ hour: 12 })
+    if (renderer.objects.get('shadow-prop')?.userData.entry?.ready) break
+    await new Promise(requestAnimationFrame)
+  }
+  assert(renderer.objects.get('shadow-prop')?.userData.entry?.ready, 'Shadow prop texture did not load')
+  let previous = null, liveShadow = null
+  for (const quality of ['balanced', 'low']) for (const hour of [6, 12, 18.5, 22]) for (const facing of ['down', 'up']) {
+    renderer.setQuality(quality, false)
+    const moving = facing === 'up'
+    const pose = adaptAgent(agent, { x: moving ? 2 : 1, y: 2, moving }, facing, moving ? 130 : 0)
+    renderer.updateAgents([pose])
+    renderer.render({ hour, text: hour === 12 ? '阴' : '晴' })
+    const character = renderer.agents.get(agent.agentKey), prop = renderer.objects.get(object.id)
+    const characterShadow = character.userData.projectedShadow, propShadow = prop.userData.projectedShadow
+    assert(characterShadow?.visible && propShadow?.visible, 'Characters and props must both have a projected shadow')
+    assert(!character.castShadow && !prop.castShadow, 'Do not overlay a second, darker shadow-map silhouette')
+    assert(characterShadow.material.opacity === propShadow.material.opacity, 'Character/prop shadow opacity mismatch')
+    assert(characterShadow.material.customProgramCacheKey() === propShadow.material.customProgramCacheKey(), 'Shadow tint shader mismatch')
+    assert(characterShadow.material.map === character.material.map, 'Shadow must use the currently visible facing')
+    const light = renderer.sun.position.clone().sub(renderer.sun.target.position)
+    for (const mesh of [character, prop]) {
+      const projected = mesh.userData.projectedShadow.geometry.attributes.position
+      for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
+        const point = new T.Vector3().fromBufferAttribute(mesh.geometry.attributes.position, i).applyMatrix4(mesh.matrixWorld)
+        const delta = new T.Vector3().fromBufferAttribute(projected, i).sub(point)
+        assert(Math.abs(delta.x * light.y + point.y * light.x) < .001, 'Shadow must follow the current pose and light on X')
+        assert(Math.abs(delta.z * light.y + point.y * light.z) < .001, 'Shadow must follow the current pose and light on Z')
+        assert(Math.abs(projected.getY(i) - .014) < .0001, 'Walking shadows must stay on the ground')
+      }
+    }
+    const position = [...characterShadow.geometry.attributes.position.array]
+    assert(JSON.stringify(position) !== JSON.stringify(previous), 'Character shadow stopped updating')
+    previous = position; liveShadow = characterShadow
+  }
+  renderer.updateAgents([])
+  assert(liveShadow.parent === null, 'A removed character must not leave a shadow behind')
+  checks.push({ label: 'character/prop shadow consistency', cases: 16, walking: true, facing: true, cleanup: true })
+}
+
 try {
   for (let attempt = 0; attempt < 120; attempt++) {
     render(14)
@@ -60,6 +109,7 @@ try {
     assert(dusk.every(rgb => rgb.every(Number.isFinite)), 'Dusk output must remain finite')
     assert(JSON.stringify(render(14)) === JSON.stringify(day), 'Returning from night must restore identical daytime color')
   }
+  await checkShadowConsistency()
   if (hdr) {
     for (const target of [renderer.composer.renderTarget1, renderer.composer.renderTarget2]) {
       target.dispose(); target.texture.type = T.UnsignedByteType

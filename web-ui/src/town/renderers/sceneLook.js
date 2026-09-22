@@ -3,14 +3,31 @@ import { withTownOcclusionFade } from './interactionOcclusion.js'
 import { authoredSpriteColorShader } from './authoredSpriteColor.js'
 
 const smooth = t => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t) }
+const wrapHour = hour => Number.isFinite(hour) ? ((hour % 24) + 24) % 24 : 12
+const mix = (a, b, t) => a + (b - a) * t
+const mixColor = (a, b, t) => new T.Color(a).lerp(new T.Color(b), t)
+
+// Advance the town's zoned wall clock between snapshots, using the caller's
+// server-adjusted UTC time. Do not replace it with the browser's time zone.
+export function daylightHour(weather, now = Date.now()) {
+  if (Number.isFinite(weather?.minuteOfDay) && Number.isFinite(weather?.sampledAt)) {
+    const subMinute = ((weather.sampledAt % 60000) + 60000) % 60000
+    return wrapHour(weather.minuteOfDay / 60 + (subMinute + now - weather.sampledAt) / 3600000)
+  }
+  // Explicit hours remain deterministic for older snapshots and render previews.
+  if (Number.isFinite(weather?.hour)) return wrapHour(weather.hour)
+  const date = new Date(now)
+  return wrapHour(date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600 + date.getMilliseconds() / 3600000)
+}
 
 // Lamp/window glow factor: 0 in daylight, ramps through dusk (17-20) and dawn
 // (5-8), full at night. Gloomy overcast keeps a faint daytime glow.
 export function nightGlowFactor(hour = 12, rainy = false) {
-  if (hour >= 20 || hour < 5) return 1
-  if (hour >= 17) return smooth((hour - 17) / 3)
-  if (hour < 8) return 1 - smooth((hour - 5) / 3)
-  return rainy ? .3 : 0
+  hour = wrapHour(hour)
+  const night = hour >= 20 || hour < 5 ? 1
+    : hour >= 17 ? smooth((hour - 17) / 3)
+    : hour < 8 ? 1 - smooth((hour - 5) / 3) : 0
+  return Math.max(night, rainy ? .3 : 0)
 }
 
 // Shared look: directional daylight is much stronger than the cool ambient fill.
@@ -18,20 +35,27 @@ export function nightGlowFactor(hour = 12, rainy = false) {
 // ambient washed the streets out, so shadows now go deep while moon-facing
 // facades stay readable.
 export function daylightLook(hour = 12, rainy = false) {
+  hour = wrapHour(hour)
   const night = hour >= 20 || hour < 5
-  const dusk = !night && (hour >= 17 || hour < 8)
+  const moon = nightGlowFactor(hour), daylight = 1 - moon
+  const angle = (hour - 12) / 24 * Math.PI * 2
+  const sin = Math.sin(angle), cos = Math.cos(angle)
   return {
     night, glow: nightGlowFactor(hour, rainy),
     // Overcast may light lamps during the day, but must not dim painted cards.
-    daylight: 1 - nightGlowFactor(hour),
-    sun: night ? 1.55 : rainy ? 2.0 : 3.8,
-    ambient: night ? .22 : rainy ? 1.05 : .9,
-    color: night ? '#9db9f0' : dusk ? '#ffba73' : '#fff5df',
-    sky: night ? '#41566e' : rainy ? '#b0c5ca' : '#c9e4ed',
-    fillGround: night ? '#3d4350' : '#9a967b',
-    fog: night ? '#1d2f3b' : rainy ? '#b5c9c6' : '#c5ddd2',
-    // Side/back light throws readable diagonal shadows across the street.
-    offset: new T.Vector3(-24 + Math.sin(hour / 24 * Math.PI * 2) * 5, dusk ? 15 : night ? 24 : 26, 12),
+    daylight,
+    sun: mix(rainy ? 2.0 : 3.8, 1.55, moon),
+    ambient: mix(rainy ? 1.05 : .9, .22, moon),
+    color: mixColor('#9db9f0', '#ffba73', smooth(daylight * 2))
+      .lerp(new T.Color('#fff5df'), smooth((daylight - .5) * 2)),
+    sky: mixColor(rainy ? '#b0c5ca' : '#c9e4ed', '#41566e', moon),
+    fillGround: mixColor('#9a967b', '#3d4350', moon),
+    fog: mixColor(rainy ? '#b5c9c6' : '#c5ddd2', '#1d2f3b', moon),
+    shadowOpacity: mix(rainy ? .30 : .52, .25, moon),
+    // One stylized sun/moon orbit, continuous even at midnight and handoff.
+    // Low dawn/dusk elevation lengthens shadows; the positive floor prevents
+    // infinite projections. Noon retains the existing diagonal light bearing.
+    offset: new T.Vector3(-24 * cos - 12 * sin, 12 + 26 * cos * cos, 12 * cos - 24 * sin),
   }
 }
 

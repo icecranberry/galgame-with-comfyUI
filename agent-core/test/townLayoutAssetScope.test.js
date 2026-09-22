@@ -21,7 +21,7 @@ const init = await import('../src/services/town/townInitService.js');
 
 // 多地图回归：全世界共用一张 town_assets 表，新镇的自动布图曾经 listAssets() 取全量，
 // 于是小镇 B 的布局里混进了小镇 A 的草地、石板路和全部建筑（用户实测）。
-// 现在只认「本次向导产出的那一批素材」。
+// 现在只认「本次向导产出的那一批素材」；名单整个丢失时按本次蓝图声明的 key 兜底，仍不吸入老镇素材。
 
 /** 老镇（A）已经摆在自己地图上的那一套素材 */
 const OLD_TOWN = [
@@ -133,7 +133,19 @@ test('再建一座镇：自动布图只用本镇的素材，不混进老镇的',
   await init.rerollLayout();
   for (const id of layerAssetIds(init.getInitPreview().layers)) assert.ok(newIds.includes(id));
 
-  for (const extra of [{}, { assetIds: [] }, { assetIds: [newIds[0]] }, { sampleAssetIds: newIds.slice(0, 3) }]) {
+  // 名单整个丢了（旧口径存档）：按本次蓝图声明的 key 兜底认本镇素材，照常布图，且不吸入老镇素材
+  for (const extra of [{}, { assetIds: [] }]) {
+    seedWizardJob(BLUEPRINT, extra);
+    await init.generateLayout();
+    assert.equal(init.getInitState().status, 'confirm', '兜底后应当能布图');
+    const used = layerAssetIds(init.getInitPreview().layers);
+    assert.ok(used.size >= 4, `兜底后确实铺开了素材（实际 ${used.size} 张）`);
+    assert.deepEqual([...used].filter(id => oldIds.includes(id)), [], '老镇素材不能混入兜底结果');
+    for (const id of used) assert.ok(newIds.includes(id), `素材 #${id} 应来自本次蓝图`);
+  }
+
+  // 名单只认领了一部分时保持严格口径：素材不够就报错，绝不拿全库补齐
+  for (const extra of [{ assetIds: [newIds[0]] }, { sampleAssetIds: newIds.slice(0, 3) }]) {
     seedWizardJob(BLUEPRINT, extra);
     await assert.rejects(init.generateLayout(), /素材不足/);
     assert.equal(init.getInitState().status, 'failed');

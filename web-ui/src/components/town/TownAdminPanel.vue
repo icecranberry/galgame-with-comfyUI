@@ -245,6 +245,7 @@
             <linshe-button variant="primary" size="sm" :loading="batchChars" @click="generateAllMissingCharAssets">
               一键生成所有缺失素材
             </linshe-button>
+            <linshe-button variant="secondary" size="sm" @click.stop="openServiceManager(town.snapshot?.worldId || '')">服务管理</linshe-button>
           </div>
           <div
             v-for="c in chars" :key="c.id"
@@ -310,6 +311,9 @@
               />
               <p v-if="charCapabilityErrors[detailChar.id]" class="ap-sprite-error" role="alert">{{ charCapabilityErrors[detailChar.id] }}</p>
               <p v-else-if="!detailChar.capabilitiesExplicit" class="ap-asset-appearance">还没单独配过，当前沿用关联居民的职能。</p>
+              <div class="ap-actions">
+                <linshe-button variant="secondary" size="sm" @click.stop="openServiceManager(town.snapshot?.worldId || '')">服务管理</linshe-button>
+              </div>
             </div>
             <p v-if="busyFlags[`chartoggle${detailChar.id}`]" class="ap-asset-appearance">正在补齐立绘与正/背小人，补齐后才算入住…</p>
 
@@ -1175,7 +1179,7 @@ onBeforeUnmount(() => {
 }
 .ap-settings > * { flex-shrink: 0; }
 
-.ap-actions { display: flex; gap: 8px; }
+.ap-actions { display: flex; gap: 8px; flex-direction: column; }
 .ap-actions.is-column { flex-direction: column; }
 
 .ap-empty {
