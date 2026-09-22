@@ -32,15 +32,16 @@ export const CHANGELOG_TITLE = '更新说明'
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
   {
-    version: 'v3.4.7',
+    version: 'v3.5.0',
     date: '2026-09-22',
-    title: '小镇生态船新上线，能打工能消费了！',
+    title: '小镇生态船新上线，能打工能消费了！已支持NovalAI',
     summary: '这是小镇的一小步，却是邻舍的一小步',
     items: [
       '现在NPC可以打工、服务、交易，经济系统初具雏形',
       '小镇创建已经可以自动推进了，放空大脑，完全自动默认',
       '群聊活跃度可调整，添加一个上次看到哪的标签',
       '朋友圈可自动配图',
+      '现已支持NovalAI'
     ],
   },
   {

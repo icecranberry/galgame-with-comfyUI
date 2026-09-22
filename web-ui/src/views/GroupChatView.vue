@@ -1243,9 +1243,11 @@ async function clearGroupAvatar() {
 
 /* 时间分隔符（与私聊 .time-divider 同款） */
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
-.last-seen-divider { display:flex; align-items:center; gap:12px; padding:16px 0; color:var(--text-secondary); font-size:var(--fs-xs); user-select:none; }
-.last-seen-divider span { flex-shrink:0; }
-.last-seen-divider::before, .last-seen-divider::after { content:''; flex:1; height:1px; background:var(--border); }
+.last-seen-divider { display:flex; align-items:center; gap:12px; padding:18px 0; color:var(--accent); font-size:var(--fs-xs); font-weight:700; user-select:none; }
+.last-seen-divider span { display:inline-flex; align-items:center; gap:7px; flex-shrink:0; }
+.last-seen-divider span::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px rgba(var(--accent-rgb), .14); }
+.last-seen-divider::before, .last-seen-divider::after { content:''; flex:1; height:2px; border-radius:var(--radius-full); background:linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 64%, var(--border))); }
+.last-seen-divider::after { transform:scaleX(-1); }
 
 /* ── 输入区 ── */
 .input-area {

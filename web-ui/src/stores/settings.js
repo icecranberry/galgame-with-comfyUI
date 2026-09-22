@@ -8,6 +8,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const comfyHeight = ref(1200)
   const eventWidth = ref(1600)
   const eventHeight = ref(1200)
+  const imageProvider = ref('comfyui')
   const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
   const deepThinkMode = ref(false)  // 私聊深度思考：planner 先规划媒介组合（文字/表情包/图片）再回复
   const realtimeAffinityDisplay = ref(false)
@@ -35,6 +36,7 @@ export const useSettingsStore = defineStore('settings', () => {
       comfyHeight.value = data.comfy?.height || 1200
       eventWidth.value = data.comfy?.eventWidth || 1600
       eventHeight.value = data.comfy?.eventHeight || 1200
+      imageProvider.value = data.comfy?.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
       if (data.features?.imageGenMode !== undefined) {
         imageGenMode.value = data.features.imageGenMode
       } else if (data.features?.forceImageGen !== undefined) {
@@ -68,6 +70,10 @@ export const useSettingsStore = defineStore('settings', () => {
   function setEventSize(width, height) {
     eventWidth.value = width
     eventHeight.value = height
+  }
+
+  function setImageProvider(provider) {
+    imageProvider.value = provider === 'novelai' ? 'novelai' : 'comfyui'
   }
 
   /**
@@ -120,5 +126,5 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(theme.value)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageGenMode, deepThinkMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageProvider, imageGenMode, deepThinkMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageProvider, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
 })

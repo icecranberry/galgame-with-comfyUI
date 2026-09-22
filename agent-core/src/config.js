@@ -57,7 +57,18 @@ export const config = {
 defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
   },
   comfyui: {
+    imageProvider: 'comfyui',
     url: (process.env.COMFYUI_URL || 'http://localhost:8188').replace(/\/+$/, ''),
+    novelaiUrl: (process.env.NOVELAI_URL || '').replace(/\/+$/, ''),
+    novelaiModel: process.env.NOVELAI_MODEL || 'nai-diffusion-4-5-full',
+    novelaiArtist: process.env.NOVELAI_ARTIST || '@ebora',
+    novelaiWidth: parseInt(process.env.NOVELAI_WIDTH, 10) || 1216,
+    novelaiHeight: parseInt(process.env.NOVELAI_HEIGHT, 10) || 832,
+    novelaiSteps: Math.min(50, Math.max(1, parseInt(process.env.NOVELAI_STEPS, 10) || 28)),
+    novelaiSampler: process.env.NOVELAI_SAMPLER || 'k_euler_ancestral',
+    novelaiNoiseSchedule: process.env.NOVELAI_NOISE_SCHEDULE || 'karras',
+    novelaiGuidance: Number.isFinite(Number.parseFloat(process.env.NOVELAI_GUIDANCE)) ? Number.parseFloat(process.env.NOVELAI_GUIDANCE) : 5,
+    novelaiQualityPrompt: process.env.NOVELAI_QUALITY_PROMPT || 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025',
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
     artist: process.env.COMFYUI_ARTIST || '@ebora',
     width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,
@@ -219,7 +230,79 @@ function persistSettingSync(key, value) {
   }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt }) {
+export function getNovelaiApiKey() {
+  try { return getSetting('novelai_api_key') ?? process.env.NOVELAI_API_KEY ?? ''; }
+  catch { return process.env.NOVELAI_API_KEY || ''; }
+}
+
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiApiKey, clearNovelaiApiKey }) {
+  if (imageProvider !== undefined) {
+    const provider = imageProvider === 'novelai' ? 'novelai' : 'comfyui';
+    config.comfyui.imageProvider = provider;
+    persistSettingSync('image_provider', provider);
+  }
+  if (novelaiUrl !== undefined) {
+    const value = String(novelaiUrl).trim().replace(/\/+$/, '');
+    config.comfyui.novelaiUrl = value;
+    persistSettingSync('novelai_url', value);
+  }
+  if (novelaiModel !== undefined) {
+    const value = String(novelaiModel).trim() || 'nai-diffusion-4-5-full';
+    config.comfyui.novelaiModel = value;
+    persistSettingSync('novelai_model', value);
+  }
+  if (novelaiArtist !== undefined) {
+    const value = String(novelaiArtist).trim();
+    config.comfyui.novelaiArtist = value;
+    persistSettingSync('novelai_artist', value);
+  }
+  if (novelaiWidth !== undefined && novelaiHeight !== undefined) {
+    const parsedWidth = parseInt(novelaiWidth, 10);
+    const parsedHeight = parseInt(novelaiHeight, 10);
+    if (Number.isInteger(parsedWidth) && Number.isInteger(parsedHeight)
+      && parsedWidth >= 64 && parsedHeight >= 64 && parsedWidth <= 4096 && parsedHeight <= 4096) {
+      config.comfyui.novelaiWidth = parsedWidth;
+      config.comfyui.novelaiHeight = parsedHeight;
+      persistSettingSync('novelai_width', config.comfyui.novelaiWidth);
+      persistSettingSync('novelai_height', config.comfyui.novelaiHeight);
+    }
+  }
+  if (novelaiSteps !== undefined) {
+    const value = Math.min(50, Math.max(1, parseInt(novelaiSteps, 10) || 28));
+    config.comfyui.novelaiSteps = value;
+    persistSettingSync('novelai_steps', value);
+  }
+  if (novelaiSampler !== undefined) {
+    const allowed = new Set(['k_euler', 'k_euler_ancestral', 'k_dpm_2', 'k_dpm_2_ancestral', 'k_dpmpp_2m', 'k_dpmpp_2m_sde', 'k_dpmpp_2s_ancestral', 'k_dpmpp_sde', 'ddim', 'ddim_v3']);
+    if (allowed.has(novelaiSampler)) {
+      config.comfyui.novelaiSampler = novelaiSampler;
+      persistSettingSync('novelai_sampler', novelaiSampler);
+    }
+  }
+  if (novelaiNoiseSchedule !== undefined) {
+    const allowed = new Set(['native', 'karras', 'exponential', 'polyexponential']);
+    if (allowed.has(novelaiNoiseSchedule)) {
+      config.comfyui.novelaiNoiseSchedule = novelaiNoiseSchedule;
+      persistSettingSync('novelai_noise_schedule', novelaiNoiseSchedule);
+    }
+  }
+  if (novelaiGuidance !== undefined) {
+    const value = Number(novelaiGuidance);
+    if (Number.isFinite(value)) {
+      config.comfyui.novelaiGuidance = Math.round(Math.min(10, Math.max(0, value)) * 10) / 10;
+      persistSettingSync('novelai_guidance', config.comfyui.novelaiGuidance);
+    }
+  }
+  if (novelaiQualityPrompt !== undefined) {
+    const value = typeof novelaiQualityPrompt === 'string' ? novelaiQualityPrompt.trim() : '';
+    config.comfyui.novelaiQualityPrompt = value;
+    persistSettingSync('novelai_quality_prompt', value);
+  }
+  if (novelaiApiKey !== undefined) {
+    persistSettingSync('novelai_api_key', String(novelaiApiKey).trim());
+  } else if (clearNovelaiApiKey === true) {
+    persistSettingSync('novelai_api_key', '');
+  }
   if (artist !== undefined) { config.comfyui.artist = artist; persistSettingSync('comfy_artist', artist); }
   if (qualityPrompt !== undefined) {
     config.comfyui.qualityPrompt = typeof qualityPrompt === 'string' ? qualityPrompt.trim() : '';
@@ -243,7 +326,7 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
       delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     }
   }
-  console.log('[config] ComfyUI settings saved');
+  console.log('[config] Image generation settings saved');
 }
 
 export function updateGlobalLora(loras) {

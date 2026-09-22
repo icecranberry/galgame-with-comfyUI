@@ -40,7 +40,9 @@
                   @click="addToFavorites(comfyTab)"
                   @keydown.enter.prevent="addToFavorites(comfyTab)"
                   @keydown.space.prevent="addToFavorites(comfyTab)"
-                >☆</div>
+                >
+☆
+</div>
               </div>
               <template v-if="artistFavorites.length">
                 <div class="fav-section-title">收藏的画师 / 风格</div>
@@ -67,7 +69,7 @@
           </Transition>
         </div>
 
-        <div class="hiresfix-section">
+        <div v-if="imageProvider !== 'novelai'" class="hiresfix-section">
           <div class="hiresfix-header">
             <span class="hiresfix-title">HiresFix 细化</span>
           </div>
@@ -102,14 +104,14 @@
         </div>
       </div>
 
-      <GlobalLoraModal v-model="globalLoraModalVisible" :initialLoras="globalLoras" @saved="onGlobalLoraSaved" />
-      <HiresFixModal v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" :initial-max-size="hiresMaxSize" :initial-artist-mode="hiresArtistMode" :initial-artist="hiresArtist" @saved="onHiresFixSaved" />
+      <GlobalLoraModal v-model="globalLoraModalVisible" :initial-loras="globalLoras" @saved="onGlobalLoraSaved" />
+      <HiresFixModal v-if="imageProvider !== 'novelai'" v-model="hiresFixModalVisible" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" :initial-max-size="hiresMaxSize" :initial-artist-mode="hiresArtistMode" :initial-artist="hiresArtist" @saved="onHiresFixSaved" />
 
 
       <!-- 测试画风：自由画面描述（LLM 完善提示词）或固定提示词测试 -->
       <div class="card">
         <h3>图片实验室</h3>
-        <p class="fd">可测试ComfyUI是否正常，使用对应画师串和分辨率发送生图请求，图片仅作预览不保存</p>
+        <p class="fd">可测试当前生图服务，使用对应画师串和分辨率发送生图请求，图片仅作预览不保存</p>
         <p class="fd">Anima文生图模型的数据库大约在2025年9月，过新的角色不识别，越久的角色特征越稳定</p>
         <p class="fd">切换模型之后首次生图需要加载模型所以会慢一点</p>
 
@@ -124,7 +126,8 @@
               @focus="onSceneDescFocus"
               @blur="onSceneDescBlur"
               @enter="submitOnEnter($event, runFreeSceneTest)"
-            />          </div>
+            />
+</div>
           <!-- 有输入内容时才出现，渐入渐出 -->
           <Transition name="gen-btn-fade">
             <linshe-button
@@ -144,7 +147,9 @@
           class="generated-prompt-box editable"
           title="点击编辑提示词"
           @click="startPromptEdit"
-        >{{ generatedPrompt }}</div>
+        >
+{{ generatedPrompt }}
+</div>
         <linshe-auto-textarea
           v-else-if="generatedPrompt"
           ref="promptEditRef"
@@ -159,14 +164,14 @@
 
         <div v-if="styleTesting" class="style-loading">
           <span class="style-spinner"></span>
-          <span>ComfyUI 正在生成图片，请耐心等待...</span>
+          <span>{{ imageProvider === 'novelai' ? 'NovelAI 正在生成图片，请耐心等待...' : 'ComfyUI 正在生成图片，请耐心等待...' }}</span>
         </div>
 
         <div v-if="styleImages.length > 0" class="style-result">
           <div v-if="styleElapsed != null" class="style-elapsed">
             ⏱ 生成耗时 {{ formatElapsed(styleElapsed) }}
             <span v-if="styleTiming" class="style-timing-breakdown">
-              · ComfyUI {{ formatElapsed(styleTiming.comfyui_ms) }}
+              · {{ imageProvider === 'novelai' ? 'NovelAI' : 'ComfyUI' }} {{ formatElapsed(styleTiming.comfyui_ms) }}
               · 下载 {{ formatElapsed(styleTiming.download_ms) }}
               <span v-if="styleTiming.ws_setup_ms != null" title="WebSocket 建连 + ComfyUI 预热">
                 · 连接预热 {{ formatElapsed(styleTiming.ws_setup_ms) }}
@@ -200,6 +205,7 @@
             class="test-mode-segmented"
           />
           <linshe-button
+            v-if="imageProvider !== 'novelai'"
             class="style-test-btn hires-test-btn"
             variant="primary"
             :disabled="hireTesting"
@@ -210,14 +216,14 @@
           <linshe-button class="test-prompt-btn" variant="link" @click="openPromptEditor">默认测试提示词</linshe-button>
         </div>
 
-        <div v-if="hiresError" class="style-error">{{ hiresError }}</div>
+        <div v-if="imageProvider !== 'novelai' && hiresError" class="style-error">{{ hiresError }}</div>
 
-        <div v-if="hireTesting" class="style-loading">
+        <div v-if="imageProvider !== 'novelai' && hireTesting" class="style-loading">
           <span class="style-spinner"></span>
           <span>正在按 HiresFix 参数细化最近一张图...</span>
         </div>
 
-        <div v-if="hiresCompare" class="style-result">
+        <div v-if="imageProvider !== 'novelai' && hiresCompare" class="style-result">
           <div class="style-elapsed">细化耗时 {{ formatElapsed(hiresCompare.elapsed) }}</div>
           <BeforeAfterSlider :before="hiresCompare.original" :after="hiresCompare.refined" />
         </div>
@@ -377,7 +383,9 @@
             variant="secondary"
             :disabled="llmModelsLoading || !llmBaseURL.trim()"
             @click="loadAvailableModels"
-          >{{ llmModelsLoading ? '获取中…' : '自动获取' }}</linshe-button>
+          >
+{{ llmModelsLoading ? '获取中…' : '自动获取' }}
+</linshe-button>
         </div>
         <p v-if="llmModelsError" class="model-fetch-error" role="alert">{{ llmModelsError }}</p>
 
@@ -425,7 +433,7 @@
               class="fi llm-json-textarea"
               type="textarea"
               :invalid="!llmHeadersValid"
-              placeholder='{"HTTP-Referer":"https://example.com","X-Title":"MyApp"}'
+              placeholder="{&quot;HTTP-Referer&quot;:&quot;https://example.com&quot;,&quot;X-Title&quot;:&quot;MyApp&quot;}"
               @input="markLlmDirty"
             />
             <p v-if="!llmHeadersValid" class="gen-error" role="alert">JSON 格式无效</p>
@@ -447,7 +455,7 @@
               class="fi llm-json-textarea"
               type="textarea"
               :invalid="!llmExtraBodyValid"
-              placeholder='{"agent":"my-agent","agentName":"Nova"}'
+              placeholder="{&quot;agent&quot;:&quot;my-agent&quot;,&quot;agentName&quot;:&quot;Nova&quot;}"
               @input="markLlmDirty"
             />
             <p v-if="!llmExtraBodyValid" class="gen-error" role="alert">JSON 格式无效</p>
@@ -467,8 +475,10 @@
               <div class="td">同时运行的后台 LLM 任务数上限</div>
             </div>
             <div class="freq-control">
-              <input type="range" min="1" max="10" step="1"
-                v-model.number="backgroundConcurrency" @change="markLlmDirty()" />
+              <input
+type="range" min="1" max="10" step="1"
+                v-model.number="backgroundConcurrency" @change="markLlmDirty()"
+/>
               <span class="freq-val">{{ backgroundConcurrency }}</span>
             </div>
           </div>
@@ -497,7 +507,9 @@
             @click="showRelayModal = true"
             @keydown.enter.prevent="showRelayModal = true"
             @keydown.space.prevent="showRelayModal = true"
-          >推荐中转站</div>
+          >
+推荐中转站
+</div>
         </div>
         </div>
 
@@ -530,6 +542,21 @@
         <p class="relay-sponsor-note">可以注意到以上中转均未支付赞助费，看到请及时支付 <strong>**广告位招租**</strong></p>
       </linshe-modal>
 
+      <linshe-modal v-model="showNovelaiRelayModal" title="NovelAI 推荐中转站" wide>
+        <p class="relay-modal-tip">以下为 NovelAI 图像生成兼容中转服务，API Key 请在其官网获取。</p>
+        <div class="relay-station">
+          <div class="relay-station-head">
+            <span class="relay-station-name">NAI.Rinko</span>
+            <linshe-button class="relay-quick-btn" variant="secondary" :loading="novelaiRelayConfigBusy" @click="applyNovelaiRelayConfig">
+              <svg class="relay-quick-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+              <span>{{ novelaiRelayConfigBusy ? '配置中…' : '快速配置' }}</span>
+            </linshe-button>
+          </div>
+          <p class="relay-station-desc">点击快速配置会保存接口地址 https://nai.rinko.ai；API Key 需在官网获取后自行填写。</p>
+          <p class="relay-station-line"><a href="https://nai.rinko.ai/sign-up?aff=gOkj" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
+        </div>
+      </linshe-modal>
+
       <!-- 功能开关 -->
       <div class="card">
         <h3>功能开关</h3>
@@ -547,7 +574,9 @@
               variant="chip"
               :active="settingsStore.themeMode === t.id"
               @click="settingsStore.setThemeMode(t.id)"
-            >{{ t.name }}</linshe-button>
+            >
+{{ t.name }}
+</linshe-button>
           </div>
         </div>
 
@@ -589,7 +618,8 @@
             <div class="td">0 关闭，越大越频繁。</div>
           </div>
           <div class="freq-control">
-            <input type="range" min="0" max="1" step="0.1"
+            <input
+type="range" min="0" max="1" step="0.1"
               v-model.number="freqSlider"
               @change="onFreqChange"
             />
@@ -603,7 +633,8 @@
             <div class="td">0 关闭自动触发，1 为默认频率（约 30 分钟一次）。</div>
           </div>
           <div class="freq-control">
-            <input type="range" min="0" max="1" step="0.1"
+            <input
+type="range" min="0" max="1" step="0.1"
               v-model.number="eventFreqSlider"
               @change="onEventFreqChange"
             />
@@ -622,7 +653,9 @@
             class="disturb-setup-btn"
             title="防打扰设置"
             @click="openDisturbDialog"
-          ><gear-icon :size="17" /></div>
+          >
+<gear-icon :size="17" />
+</div>
           <linshe-switch v-model="disturbMode" @change="onDisturbModeToggle" />
         </div>
 
@@ -637,28 +670,140 @@
             class="disturb-setup-btn"
             title="设置城市"
             @click="openWeatherCityDialog"
-          ><gear-icon :size="17" /></div>
+          >
+<gear-icon :size="17" />
+</div>
           <linshe-switch v-model="features.weather" @change="saveFeature('weather', features.weather)" />
         </div>
       </div>
 
-      <!-- ComfyUI 连接 -->
-      <div class="card">
-        <h3>ComfyUI 连接</h3>
-        <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
-        <linshe-input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
-        <label class="cb">
-          <input type="checkbox" v-model="comfySkipTls" @change="markConnDirty" />
-          <span>跳过 TLS 证书验证（连接云端 HTTPS ComfyUI 失败时勾选）</span>
-        </label>
+      <!-- 生图服务连接 -->
+      <div class="card image-connection-card">
+        <h3>图片生成服务</h3>
+        <linshe-tabs
+          v-model="imageProvider"
+          :options="imageProviderOptions"
+          size="sm"
+          class="image-provider-tabs"
+          @update:model-value="onImageProviderChange"
+        />
+        <Transition name="expand" mode="out-in">
+          <div v-if="imageProvider === 'comfyui'" key="comfyui" class="image-connection-fields">
+            <p class="fd">ComfyUI 服务地址，默认 http://localhost:8188</p>
+            <linshe-input v-model="comfyUrl" class="fi" placeholder="http://localhost:8188" @input="markConnDirty" />
+            <div class="conn-switch-row">
+              <span>跳过 TLS 证书验证（仅在连接云端 HTTPS ComfyUI 失败时开启）</span>
+              <linshe-switch v-model="comfySkipTls" @change="markConnDirty" />
+            </div>
+          </div>
+          <div v-else key="novelai" class="image-connection-fields">
+            <p class="fd">NovelAI 图像服务通过兼容接口连接；API Key 会保存在本机设置中。生图固定单张，并使用这里设置的分辨率和参数，不跟随系统分辨率。免费标准档适用尺寸：512×512、832×1216、1216×832、1024×1024，步数上限为 28。</p>
+            <label class="novelai-setting-label" for="novelai-url">接口地址</label>
+            <linshe-input id="novelai-url" v-model="novelaiUrl" class="fi" placeholder="填写 NovelAI 兼容接口地址" @input="markConnDirty" />
+            <div class="novelai-model-row">
+              <linshe-select v-model="novelaiModel" class="novelai-model-select" :options="novelaiModels" placeholder="请先自动获取模型" @update:model-value="markConnDirty" />
+              <linshe-button variant="secondary" size="md" :loading="novelaiModelsLoading" @click="fetchNovelaiModels">自动获取</linshe-button>
+            </div>
+            <p v-if="novelaiModels.length === 0" class="novelai-model-hint">填写 API Key 后点击“自动获取”，读取当前接口提供的模型。</p>
+            <label class="novelai-setting-label" for="novelai-quality-prompt">质量提示词</label>
+            <linshe-input
+              id="novelai-quality-prompt"
+              v-model="novelaiQualityPrompt"
+              class="novelai-quality-prompt"
+              placeholder="masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025"
+              @input="markConnDirty"
+            />
+            <label class="novelai-setting-label" for="novelai-artist">画师串</label>
+            <linshe-input
+              id="novelai-artist"
+              v-model="novelaiArtist"
+              placeholder="例如：@ebora"
+              @input="markConnDirty"
+            />
+            <div class="novelai-resolution-field">
+              <div class="fpresets-head">
+                <span class="resolution-title">分辨率</span>
+                <span class="resolution-hint">输入宽高，或选用预设</span>
+              </div>
+              <div class="fr novelai-dimensions-row">
+                <div class="fh"><label class="fl" for="novelai-width">宽度</label><linshe-input id="novelai-width" v-model.number="novelaiWidth" type="number" min="64" max="4096" step="64" @input="onNovelaiDimensionInput('width', $event)" /></div>
+                <div class="fh"><label class="fl" for="novelai-height">高度</label><linshe-input id="novelai-height" v-model.number="novelaiHeight" type="number" min="64" max="4096" step="64" @input="onNovelaiDimensionInput('height', $event)" /></div>
+              </div>
+              <div class="fpresets novelai-resolution-presets">
+                <span class="pl">预设：</span>
+                <linshe-button v-for="preset in novelaiResolutionPresets" :key="preset.label" class="pbtn" variant="chip" :active="novelaiWidth === preset.width && novelaiHeight === preset.height" @click="applyNovelaiResolutionPreset(preset)">{{ preset.label }}</linshe-button>
+              </div>
+            </div>
+            <div class="novelai-param-row">
+              <div class="novelai-param-field">
+                <label class="fl" for="novelai-sampler">采样器</label>
+                <linshe-select id="novelai-sampler" v-model="novelaiSampler" :options="novelaiSamplerOptions" @update:model-value="markConnDirty" />
+              </div>
+              <div class="novelai-param-field">
+                <label class="fl" for="novelai-noise-schedule">噪声调度</label>
+                <linshe-select id="novelai-noise-schedule" v-model="novelaiNoiseSchedule" :options="novelaiNoiseScheduleOptions" @update:model-value="markConnDirty" />
+              </div>
+            </div>
+            <div class="novelai-steps-field">
+              <div class="novelai-slider-heading">
+                <label class="fl" for="novelai-steps">步数（1–50）</label>
+                <span>{{ novelaiSteps }}</span>
+              </div>
+              <linshe-slider id="novelai-steps" v-model="novelaiSteps" :min="1" :max="50" :step="1" aria-label="NovelAI 步数" @update:model-value="markConnDirty" />
+            </div>
+            <div class="novelai-steps-field">
+              <div class="novelai-slider-heading">
+                <label class="fl" for="novelai-guidance">引导强度</label>
+                <span>{{ Number(novelaiGuidance).toFixed(1) }}</span>
+              </div>
+              <linshe-slider id="novelai-guidance" v-model="novelaiGuidance" :min="0" :max="10" :step="0.1" aria-label="NovelAI 引导强度" @update:model-value="markConnDirty" />
+            </div>
+            <label class="novelai-setting-label" for="novelai-api-key">NovelAI API Key（接口密钥）</label>
+            <linshe-input
+              id="novelai-api-key"
+              v-model="novelaiApiKey"
+              class="fi"
+              type="password"
+              autocomplete="new-password"
+              :placeholder="novelaiApiKeySaved ? '已保存，留空保持不变' : '输入 NovelAI API Key'"
+              @input="onNovelaiKeyInput"
+            />
+            <div class="conn-key-hint">
+              <span v-if="novelaiApiKeySaved && !novelaiApiKeyCleared">API Key 已保存；留空会继续使用已保存的密钥。</span>
+              <span v-else>保存后可测试服务连接。</span>
+              <linshe-button
+                v-if="novelaiApiKeySaved && !novelaiApiKey && !novelaiApiKeyCleared"
+                variant="link"
+                size="sm"
+                @click="clearNovelaiKey"
+              >
+清除密钥
+</linshe-button>
+            </div>
+          </div>
+        </Transition>
         <div class="sr">
           <span :class="['sd', health?.connected ? 'on' : 'off']"></span>
           <span>{{ health?.connected ? '已连接' : '未连接' }}</span>
+          <span v-if="health?.provider === 'novelai' && health?.modelAvailable === false" class="conn-health-hint">当前模型未在服务端模型列表中</span>
+          <span v-else-if="health?.error" class="conn-health-hint">{{ health.error }}</span>
         </div>
         <div class="sa" style="margin-top:12px">
           <linshe-button variant="primary" :disabled="!connDirty" @click="saveComfyUrl">保存</linshe-button>
           <span v-if="connSaved" class="smsg">已保存</span>
-          <linshe-button variant="secondary" @click="checkHealth">刷新连接</linshe-button>
+          <linshe-button variant="secondary" @click="checkHealth">测试连接</linshe-button>
+        </div>
+        <div v-if="imageProvider === 'novelai'" class="sa novelai-relay-entry-row">
+          <div
+            role="button"
+            tabindex="0"
+            class="relay-intro-btn relay-intro-footer"
+            @click="showNovelaiRelayModal = true"
+            @keydown.enter.prevent="showNovelaiRelayModal = true"
+            @keydown.space.prevent="showNovelaiRelayModal = true"
+          >
+推荐中转站
+</div>
         </div>
       </div>
 
@@ -787,8 +932,7 @@
           </span>
         </div>
       </div>
-
-    </div>
+</div>
 
     <!-- 收藏画师串弹窗 -->
     <linshe-modal v-model="favDialog.show" title="收藏画师串">
@@ -884,13 +1028,15 @@
     <!-- 工作流模式弹窗 -->
     <linshe-modal v-model="showWfModeDialog" title="工作流模式" wide>
       <div class="wf-mode-options">
-        <div v-for="m in workflowModeOptions" :key="m.value"
+        <div
+v-for="m in workflowModeOptions" :key="m.value"
           role="button"
           tabindex="0"
           :class="['wf-mode-option', { active: wfModeDraft === m.value }]"
           @click="wfModeDraft = m.value"
           @keydown.enter.prevent="wfModeDraft = m.value"
-          @keydown.space.prevent="wfModeDraft = m.value">
+          @keydown.space.prevent="wfModeDraft = m.value"
+>
           <span class="wf-mo-title">{{ m.label }}</span>
           <span class="wf-mo-desc" v-html="m.desc"></span>
         </div>
@@ -916,12 +1062,20 @@
           <div v-for="s in sceneOptions" :key="s.key" class="wf-scene-row-h">
             <span class="wf-scene-name">{{ s.label }}</span>
             <div class="wf-scene-toggle">
-              <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+              <linshe-button
+class="wf-toggle-btn" variant="chip" size="sm"
                 :active="wfSceneDraft[s.key] === 'turbo'"
-                @click="wfSceneDraft[s.key] = 'turbo'">turbo</linshe-button>
-              <linshe-button class="wf-toggle-btn" variant="chip" size="sm"
+                @click="wfSceneDraft[s.key] = 'turbo'"
+>
+turbo
+</linshe-button>
+              <linshe-button
+class="wf-toggle-btn" variant="chip" size="sm"
                 :active="wfSceneDraft[s.key] === 'base'"
-                @click="wfSceneDraft[s.key] = 'base'">base</linshe-button>
+                @click="wfSceneDraft[s.key] = 'base'"
+>
+base
+</linshe-button>
             </div>
           </div>
         </div>
@@ -930,13 +1084,14 @@
         <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
         <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
       </template>
-    </linshe-modal>  </div>
+    </linshe-modal>
+</div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, comfyuiHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -951,6 +1106,7 @@ import { THEME_MODES } from '../theme.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
+import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import GearIcon from '../components/GearIcon.vue'
 import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
 import UpdateTag from '../components/UpdateTag.vue'
@@ -1028,6 +1184,52 @@ function switchComfyTab(mode) {
 }
 const comfyUrl = ref('')
 const comfySkipTls = ref(false)
+const imageProvider = ref('comfyui')
+const imageProviderOptions = [
+  { value: 'comfyui', label: 'ComfyUI' },
+  { value: 'novelai', label: 'NovelAI' },
+]
+const novelaiUrl = ref('')
+const novelaiModel = ref('nai-diffusion-4-5-full')
+const novelaiArtist = ref('@ebora')
+const novelaiModels = ref([])
+const novelaiWidth = ref(1216)
+const novelaiHeight = ref(832)
+const novelaiResolutionPresets = [
+  { label: '512×512', width: 512, height: 512 },
+  { label: '832×1216', width: 832, height: 1216 },
+  { label: '1216×832', width: 1216, height: 832 },
+  { label: '1024×1024', width: 1024, height: 1024 },
+  { label: '1024×1536', width: 1024, height: 1536 },
+  { label: '1536×1024', width: 1536, height: 1024 },
+]
+const novelaiSteps = ref(28)
+const novelaiSampler = ref('k_euler_ancestral')
+const novelaiSamplerOptions = [
+  { value: 'k_euler', label: 'Euler' },
+  { value: 'k_euler_ancestral', label: 'Euler Ancestral' },
+  { value: 'k_dpm_2', label: 'DPM 2' },
+  { value: 'k_dpm_2_ancestral', label: 'DPM 2 Ancestral' },
+  { value: 'k_dpmpp_2m', label: 'DPM++ 2M' },
+  { value: 'k_dpmpp_2m_sde', label: 'DPM++ 2M SDE' },
+  { value: 'k_dpmpp_2s_ancestral', label: 'DPM++ 2S Ancestral' },
+  { value: 'k_dpmpp_sde', label: 'DPM++ SDE' },
+  { value: 'ddim', label: 'DDIM' },
+  { value: 'ddim_v3', label: 'DDIM V3' },
+]
+const novelaiNoiseSchedule = ref('karras')
+const novelaiNoiseScheduleOptions = [
+  { value: 'native', label: 'Native' },
+  { value: 'karras', label: 'Karras' },
+  { value: 'exponential', label: 'Exponential' },
+  { value: 'polyexponential', label: 'Polyexponential' },
+]
+const novelaiGuidance = ref(5)
+const novelaiQualityPrompt = ref('masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025')
+const novelaiModelsLoading = ref(false)
+const novelaiApiKey = ref('')
+const novelaiApiKeySaved = ref(false)
+const novelaiApiKeyCleared = ref(false)
 const connDirty = ref(false)
 const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
@@ -1217,12 +1419,33 @@ function toggleLlmAdvanced() { llmAdvancedOpen.value = !llmAdvancedOpen.value }
 
 // 推荐第三方 LLM 中转站
 const showRelayModal = ref(false)
+const showNovelaiRelayModal = ref(false)
 const relayStations = [
   { name: '词元跳动', keysUrl: 'https://tokendance.space/keys', url: 'https://tokendance.space/gateway/v1', desc: '仍然提供v4flash预览版，所以没有涨价' },
   { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_sFVpaGViDHbVQrjGtHKXT2in', url: 'https://tokenrhythm.studio/v1', desc: '注册即送68元，邀请还送68元，同样还有flash预览版，但是不够稳定' },
 ]
 
 const relayConfigBusy = ref(false)
+const novelaiRelayConfigBusy = ref(false)
+
+async function applyNovelaiRelayConfig() {
+  if (novelaiRelayConfigBusy.value) return
+  novelaiRelayConfigBusy.value = true
+  try {
+    const url = 'https://nai.rinko.ai'
+    const result = await updateComfyConfig({ novelaiUrl: url })
+    novelaiUrl.value = result.novelaiUrl || url
+    health.value = null
+    connSaved.value = true
+    setTimeout(() => { connSaved.value = false }, 2000)
+    showNovelaiRelayModal.value = false
+    toastFn?.('已配置 NAI.Rinko 接口地址；请填写 API Key 后测试连接', 'success')
+  } catch (err) {
+    toastFn?.('快速配置失败: ' + (err.message || '未知错误'), 'error')
+  } finally {
+    novelaiRelayConfigBusy.value = false
+  }
+}
 
 function uniqueProfileName(baseName) {
   const names = new Set(llmProfiles.value.map(p => p.name))
@@ -1589,6 +1812,18 @@ onMounted(async () => {
     qualityPrompt.value = data.comfy.qualityPrompt ?? ''
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
+    imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
+    novelaiUrl.value = data.comfy.novelaiUrl ?? ''
+    novelaiModel.value = data.comfy.novelaiModel || 'nai-diffusion-4-5-full'
+    novelaiArtist.value = data.comfy.novelaiArtist ?? '@ebora'
+    novelaiWidth.value = data.comfy.novelaiWidth || 1216
+    novelaiHeight.value = data.comfy.novelaiHeight || 832
+    novelaiSteps.value = data.comfy.novelaiSteps || 28
+    novelaiSampler.value = data.comfy.novelaiSampler || 'k_euler_ancestral'
+    novelaiNoiseSchedule.value = data.comfy.novelaiNoiseSchedule || 'karras'
+    novelaiGuidance.value = data.comfy.novelaiGuidance ?? 5
+    novelaiQualityPrompt.value = data.comfy.novelaiQualityPrompt ?? 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025'
+    novelaiApiKeySaved.value = data.comfy.novelaiApiKeySet === true
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
@@ -1630,7 +1865,38 @@ onMounted(async () => {
 })
 
 function markDirty() { dirty.value = true; saved.value = false }
-function markConnDirty() { connDirty.value = true; connSaved.value = false }
+function markConnDirty() { connDirty.value = true; connSaved.value = false; health.value = null }
+async function onImageProviderChange(provider) {
+  health.value = null
+  try {
+    const result = await updateComfyConfig({ imageProvider: provider })
+    settingsStore.setImageProvider(result.imageProvider)
+    connSaved.value = true
+    setTimeout(() => { connSaved.value = false }, 2000)
+  } catch (err) {
+    imageProvider.value = settingsStore.imageProvider
+    toastFn?.(err.message || '切换生图服务失败', 'error')
+  }
+}
+function applyNovelaiResolutionPreset(preset) {
+  novelaiWidth.value = preset.width
+  novelaiHeight.value = preset.height
+  markConnDirty()
+}
+function onNovelaiDimensionInput(axis, event) {
+  const value = Number(event?.target?.value)
+  if (axis === 'width') novelaiWidth.value = value
+  else novelaiHeight.value = value
+  markConnDirty()
+}
+function onNovelaiKeyInput() {
+  novelaiApiKeyCleared.value = false
+  markConnDirty()
+}
+function clearNovelaiKey() {
+  novelaiApiKeyCleared.value = true
+  markConnDirty()
+}
 
 async function saveComfy() {
   await updateComfyConfig({
@@ -1688,12 +1954,83 @@ async function saveQualityPrompt() {
 }
 
 async function saveComfyUrl() {
-  comfyUrl.value = comfyUrl.value.replace(/\/+$/, '')
-  await updateComfyConfig({ url: comfyUrl.value, tlsVerify: !comfySkipTls.value })
-  connDirty.value = false; connSaved.value = true
-  setTimeout(() => connSaved.value = false, 2000)
-  // 保存后立即刷新连接状态
-  await checkHealth()
+  try {
+    if (imageProvider.value === 'novelai' && (!Number.isInteger(Number(novelaiWidth.value)) || !Number.isInteger(Number(novelaiHeight.value))
+      || Number(novelaiWidth.value) < 64 || Number(novelaiHeight.value) < 64
+      || Number(novelaiWidth.value) > 4096 || Number(novelaiHeight.value) > 4096)) {
+      toastFn?.('NovelAI 分辨率需为 64–4096 之间的整数像素', 'error')
+      return
+    }
+    const hasNovelaiKey = Boolean(novelaiApiKey.value.trim() || (novelaiApiKeySaved.value && !novelaiApiKeyCleared.value))
+    if (imageProvider.value === 'novelai' && !hasNovelaiKey) {
+      toastFn?.('切换到 NovelAI 前，请先填写 API Key', 'error')
+      return
+    }
+    const payload = {
+      imageProvider: imageProvider.value,
+      novelaiUrl: novelaiUrl.value.trim().replace(/\/+$/, ''),
+      novelaiModel: novelaiModel.value,
+      novelaiArtist: novelaiArtist.value,
+      novelaiWidth: Number(novelaiWidth.value),
+      novelaiHeight: Number(novelaiHeight.value),
+      novelaiSteps: Math.min(50, Math.max(1, Number(novelaiSteps.value) || 28)),
+      novelaiSampler: novelaiSampler.value,
+      novelaiNoiseSchedule: novelaiNoiseSchedule.value,
+      novelaiGuidance: Number(novelaiGuidance.value),
+      novelaiQualityPrompt: novelaiQualityPrompt.value,
+    }
+    if (imageProvider.value === 'comfyui') {
+      payload.url = comfyUrl.value.trim().replace(/\/+$/, '')
+      payload.tlsVerify = !comfySkipTls.value
+    }
+    if (novelaiApiKey.value.trim()) payload.novelaiApiKey = novelaiApiKey.value.trim()
+    if (novelaiApiKeyCleared.value) payload.clearNovelaiApiKey = true
+    const result = await updateComfyConfig(payload)
+    settingsStore.setImageProvider(result.imageProvider)
+    novelaiApiKeySaved.value = result.novelaiApiKeySet === true
+    novelaiApiKey.value = ''
+    novelaiApiKeyCleared.value = false
+    connDirty.value = false; connSaved.value = true
+    setTimeout(() => connSaved.value = false, 2000)
+    await checkHealth()
+  } catch (err) {
+    toastFn?.(err.message || '生图连接设置保存失败', 'error')
+  }
+}
+
+async function checkHealth() {
+  const result = await imageProviderHealth({
+    provider: imageProvider.value,
+    url: imageProvider.value === 'novelai' ? novelaiUrl.value : comfyUrl.value,
+    model: novelaiModel.value,
+    ...(novelaiApiKey.value.trim() ? { apiKey: novelaiApiKey.value.trim() } : {}),
+  })
+  health.value = result
+  if (result.provider === 'novelai') {
+    novelaiModels.value = Array.isArray(result.models)
+      ? result.models.map(model => ({ value: model, label: model }))
+      : []
+  }
+}
+
+async function fetchNovelaiModels() {
+  novelaiModelsLoading.value = true
+  try {
+    const result = await imageProviderHealth({
+      provider: 'novelai',
+      url: novelaiUrl.value,
+      model: novelaiModel.value,
+      ...(novelaiApiKey.value.trim() ? { apiKey: novelaiApiKey.value.trim() } : {}),
+    })
+    health.value = result
+    novelaiModels.value = Array.isArray(result.models)
+      ? result.models.map(model => ({ value: model, label: model }))
+      : []
+    if (result.connected) toastFn?.(`已获取 ${result.modelCount} 个模型`, 'success')
+    else toastFn?.(result.error || '获取模型列表失败', 'error')
+  } finally {
+    novelaiModelsLoading.value = false
+  }
 }
 
 function buildLlmPayload() {
@@ -1902,10 +2239,6 @@ async function loadAllCharacters() {
   } catch { /* 非关键 */ }
 }
 
-async function checkHealth() { health.value = await comfyuiHealth() }
-
-
-
 // ── 测试画风 ──
 const testMode = ref('chat')
 const testModes = [
@@ -2060,7 +2393,7 @@ async function executeStyleTest({ prompt = '', sceneDesc = '', reuseSceneLoras =
     if (result.success && result.images?.length > 0) {
       styleImages.value = result.images
     } else {
-      styleError.value = result.error || '生成失败，请检查 ComfyUI 连接'
+      styleError.value = result.error || `生成失败，请检查${imageProvider.value === 'novelai' ? ' NovelAI' : ' ComfyUI'} 连接`
     }
   } catch (err) {
     styleError.value = '请求失败: ' + (err.message || '网络错误')
@@ -2559,6 +2892,32 @@ function resetTestPrompts() {
   flex: 1; min-width: 140px; font-size: 12px; color: var(--text-secondary);
 }
 .sr { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+.image-connection-card { gap: 8px; }
+.novelai-relay-entry-row { justify-content: flex-end; }
+.image-provider-tabs { margin-bottom: 4px; }
+.image-connection-fields { min-width: 0; }
+.image-connection-fields .fd { margin-bottom: 8px; line-height: 1.5; }
+.novelai-model-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 14px; }
+.novelai-model-select { flex: 1; min-width: 0; }
+.novelai-model-hint { margin: -4px 0 6px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.novelai-resolution-field { min-width: 0; margin: 10px 0; }
+.novelai-steps-field { min-width: 0; margin: 10px 0; }
+.novelai-param-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.novelai-param-field { min-width: 0; }
+.novelai-slider-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.novelai-slider-heading > span { min-width: 32px; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.novelai-setting-label { display: block; margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; }
+.novelai-dimensions-row { margin-bottom: 8px; }
+.novelai-resolution-presets { margin-bottom: 8px; }
+.conn-switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 8px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.45;
+}
+.conn-key-hint {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: -2px 0 4px; color: var(--text-secondary); font-size: 11px; line-height: 1.45;
+}
+.conn-health-hint { color: var(--text-secondary); font-size: 11px; }
 .sd { width: 9px; height: 9px; border-radius: 50%; }
 .sd.on { background: var(--success); }
 .sd.off { background: var(--danger); }
@@ -2879,6 +3238,7 @@ function resetTestPrompts() {
     padding: 8px 0; margin-bottom: 20px;
   }
   .settings-grid { grid-template-columns: 1fr; }
+  .novelai-param-row { grid-template-columns: 1fr; gap: 8px; }
   .fr { flex-direction: column; gap: 10px; }
   .style-preview-img { max-width: 100%; }
   /* 自由画面测试：textarea 与按钮纵向堆叠，输入区占满卡片宽度 */

@@ -7,7 +7,7 @@ import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
-import { config } from '../config.js';
+import { config, getNovelaiApiKey } from '../config.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
@@ -407,6 +407,9 @@ async function pickLatestTestImage() {
 
 // POST /api/images/test-hires — 测试细化（最近一张图，HiresFix 参数流程，不落盘）
 router.post('/test-hires', async (req, res) => {
+  if (config.comfyui.imageProvider === 'novelai') {
+    return res.status(409).json({ success: false, error: 'NovelAI 模式不支持 HiresFix 细化' });
+  }
   const t0 = performance.now();
   try {
     const source = await pickLatestTestImage();
@@ -716,6 +719,9 @@ router.post('/regenerate', async (req, res) => {
 
 // POST /api/images/upscale — 提交后台 HiresFix 细化任务（确认后才覆盖原图）
 router.post('/upscale', async (req, res) => {
+  if (config.comfyui.imageProvider === 'novelai') {
+    return res.status(409).json({ error: 'NovelAI 模式不支持 HiresFix 细化' });
+  }
   try {
     const task = await startImageEditTask('upscale', req.body?.url);
     res.status(202).json({ success: true, task_id: task.id, status: 'running' });
@@ -848,28 +854,67 @@ router.delete('/delete', async (req, res) => {
   }
 });
 
-// GET /api/images/comfyui-health — ComfyUI 连接检查
-router.get('/comfyui-health', async (req, res) => {
+async function checkImageProviderConnection({ provider, url, apiKey, model } = {}) {
+  const activeProvider = provider === 'novelai' ? 'novelai' : 'comfyui';
+  if (activeProvider === 'novelai') {
+    const baseUrl = String(url ?? config.comfyui.novelaiUrl ?? '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return { connected: false, provider: activeProvider, url: '', error: '请先填写 NovelAI 接口地址' };
+    const token = String(apiKey || getNovelaiApiKey() || '').trim();
+    if (!token) return { connected: false, provider: activeProvider, url: baseUrl, error: '请先填写 NovelAI API Key' };
+    try {
+      const response = await fetch(`${baseUrl}/v1/models`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) return { connected: false, provider: activeProvider, url: baseUrl, error: `服务返回 HTTP ${response.status}` };
+      const payload = await response.json();
+      const models = Array.isArray(payload.data) ? payload.data.map(item => item?.id).filter(Boolean) : [];
+      const selectedModel = model || config.comfyui.novelaiModel;
+      return {
+        connected: models.length > 0,
+        provider: activeProvider,
+        url: baseUrl,
+        modelCount: models.length,
+        models,
+        modelAvailable: !selectedModel || models.includes(selectedModel),
+        error: models.length === 0 ? '连接成功，但服务没有返回可用模型' : undefined,
+      };
+    } catch (error) {
+      return { connected: false, provider: activeProvider, url: baseUrl, error: error.name === 'TimeoutError' ? '连接超时' : '无法连接到 NovelAI 服务' };
+    }
+  }
+
+  const baseUrl = String(url || config.comfyui.url || '').replace(/\/+$/, '');
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    const cres = await fetch(`${config.comfyui.url}/system_stats`, { signal: controller.signal });
+    const cres = await fetch(`${baseUrl}/system_stats`, { signal: controller.signal });
     clearTimeout(timer);
 
     if (cres.ok) {
       const stats = await cres.json().catch(() => ({}));
-      res.json({
+      return {
         connected: true,
-        url: config.comfyui.url,
+        provider: 'comfyui',
+        url: baseUrl,
         device: stats.devices?.[0]?.name || stats.system?.device || 'unknown',
         vram_total: stats.devices?.[0]?.vram_total || 0,
-      });
-    } else {
-      res.json({ connected: false, url: config.comfyui.url });
+      };
     }
+    return { connected: false, provider: 'comfyui', url: baseUrl };
   } catch {
-    res.json({ connected: false, url: config.comfyui.url });
+    return { connected: false, provider: 'comfyui', url: baseUrl };
   }
+}
+
+// POST /api/images/provider-health — 检查当前编辑中的图像服务
+router.post('/provider-health', async (req, res) => {
+  res.json(await checkImageProviderConnection(req.body || {}));
+});
+
+// GET /api/images/comfyui-health — 保留旧接口，同时检查当前选中的图像服务
+router.get('/comfyui-health', async (req, res) => {
+  res.json(await checkImageProviderConnection({ provider: config.comfyui.imageProvider }));
 });
 
 // ── 图片压缩 API ──

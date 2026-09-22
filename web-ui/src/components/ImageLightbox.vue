@@ -41,6 +41,7 @@ import VueEasyLightbox from 'vue-easy-lightbox'
 import 'vue-easy-lightbox/dist/external-css/vue-easy-lightbox.css'
 import { deleteImage } from '../api/index.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
+import { useSettingsStore } from '../stores/settings.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -71,6 +72,8 @@ const emit = defineEmits(['hide', 'update:visible', 'regenerated', 'upscaled', '
 const toastFn = inject('toast', null)
 const confirmFn = inject('confirm', null)
 const imageEditTasks = useImageEditTasksStore()
+const settingsStore = useSettingsStore()
+const showUpscaleAction = computed(() => props.showUpscale && settingsStore.imageProvider !== 'novelai')
 
 // 灯箱 key：覆盖登记后自增，重挂载强制按新登记重算 cachedImgs（登记表本身非响应式）
 const lightboxKey = ref(0)
@@ -120,7 +123,7 @@ function removeActionBar() {
 function injectActionBar() {
   if (_actionBar || !props.visible) return
   // 四个操作按钮全关 → 不注入操作栏（纯预览模式）
-  if (!props.showDelete && !props.showRegenerate && !props.showUpscale && !props.showDownload) return
+  if (!props.showDelete && !props.showRegenerate && !showUpscaleAction.value && !props.showDownload) return
   const modal = document.querySelector('.vel-modal')
   if (!modal) return
 
@@ -142,12 +145,12 @@ function injectActionBar() {
     if (props.showDownload) bar.appendChild(mkBtn('dl', '', { 'data-vel-download': '', title: '下载图片' }, null, onDownload))
     if (props.showDelete) bar.appendChild(mkBtn('delete', '', { 'data-vel-delete': '', title: '删除图片' }, null, onDelete))
     if (props.showRegenerate) bar.appendChild(mkBtn('regen', '', { 'data-vel-regenerate': '', title: '重新生成' }, null, onRegenerate))
-    if (props.showUpscale) bar.appendChild(mkBtn('ups', '', { 'data-vel-upscale': '', title: '放大细化（高清放大重绘）' }, null, onUpscale))
+    if (showUpscaleAction.value) bar.appendChild(mkBtn('ups', '', { 'data-vel-upscale': '', title: '放大细化（高清放大重绘）' }, null, onUpscale))
   } else {
     if (props.showDownload) bar.appendChild(mkBtn('dl', 'vel-rail-btn dl', {}, '下载', onDownload))
     if (props.showDelete) bar.appendChild(mkBtn('delete', 'vel-rail-btn danger', {}, '删除', onDelete))
     if (props.showRegenerate) bar.appendChild(mkBtn('regen', 'vel-rail-btn regen', {}, '重新生成', onRegenerate))
-    if (props.showUpscale) bar.appendChild(mkBtn('ups', 'vel-rail-btn accent', {}, '放大细化', onUpscale))
+    if (showUpscaleAction.value) bar.appendChild(mkBtn('ups', 'vel-rail-btn accent', {}, '放大细化', onUpscale))
   }
 
   // 插入在图片节点之前 → 层级低于图片；容器本身不带 z-index
@@ -195,6 +198,13 @@ watch(() => props.visible, async (v) => {
   } else {
     removeActionBar()
   }
+})
+
+watch(() => settingsStore.imageProvider, async () => {
+  removeActionBar()
+  if (!props.visible) return
+  await nextTick()
+  setTimeout(injectActionBar, 80)
 })
 
 watch([regenerating, upscaling, deleting, downloading], syncActionBar)

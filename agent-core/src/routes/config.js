@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity } from '../config.js';
+import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -76,7 +76,19 @@ router.post('/memory/test-reranker', async (req, res) => {
 router.get('/', (req, res) => {
   res.json({
     comfy: {
+      imageProvider: config.comfyui.imageProvider || 'comfyui',
       url: config.comfyui.url,
+      novelaiUrl: config.comfyui.novelaiUrl,
+      novelaiModel: config.comfyui.novelaiModel,
+      novelaiArtist: config.comfyui.novelaiArtist ?? '',
+      novelaiWidth: config.comfyui.novelaiWidth,
+      novelaiHeight: config.comfyui.novelaiHeight,
+      novelaiSteps: config.comfyui.novelaiSteps,
+      novelaiSampler: config.comfyui.novelaiSampler,
+      novelaiNoiseSchedule: config.comfyui.novelaiNoiseSchedule,
+      novelaiGuidance: config.comfyui.novelaiGuidance,
+      novelaiQualityPrompt: config.comfyui.novelaiQualityPrompt ?? '',
+      novelaiApiKeySet: Boolean(getNovelaiApiKey()),
       artist: config.comfyui.artist,
       width: config.comfyui.width,
       height: config.comfyui.height,
@@ -149,13 +161,21 @@ router.put('/group-summary-interval', (req, res) => {
 
 // PUT /api/config/comfy — 更新 ComfyUI 参数
 router.put('/comfy', (req, res) => {
-  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt } = req.body;
-  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt });
+  const { artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiApiKey, clearNovelaiApiKey } = req.body;
+  if (novelaiUrl !== undefined && String(novelaiUrl).trim()) {
+    try {
+      const parsed = new URL(String(novelaiUrl));
+      if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('invalid protocol');
+    } catch {
+      return res.status(400).json({ error: 'NovelAI 地址必须是有效的 HTTP 或 HTTPS URL' });
+    }
+  }
+  updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiApiKey, clearNovelaiApiKey });
   // URL 或 TLS 设置变更后立即重启 ComfyUI 客户端连接（使新地址/证书策略立即生效）
   if (url !== undefined || tlsVerify !== undefined) {
     restartComfyClient();
   }
-  res.json({ ok: true, ...config.comfyui });
+  res.json({ ok: true, imageProvider: config.comfyui.imageProvider, url: config.comfyui.url, novelaiUrl: config.comfyui.novelaiUrl, novelaiModel: config.comfyui.novelaiModel, novelaiArtist: config.comfyui.novelaiArtist, novelaiWidth: config.comfyui.novelaiWidth, novelaiHeight: config.comfyui.novelaiHeight, novelaiSteps: config.comfyui.novelaiSteps, novelaiSampler: config.comfyui.novelaiSampler, novelaiNoiseSchedule: config.comfyui.novelaiNoiseSchedule, novelaiGuidance: config.comfyui.novelaiGuidance, novelaiQualityPrompt: config.comfyui.novelaiQualityPrompt, novelaiApiKeySet: Boolean(getNovelaiApiKey()) });
 });
 
 // PUT /api/config/global-lora — 更新全局 LoRA

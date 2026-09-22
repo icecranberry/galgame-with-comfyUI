@@ -456,7 +456,7 @@ export async function getConfig() {
 }
 
 export async function updateComfyConfig(data) {
-  await request(`/config/comfy`, { method: 'PUT', body: data })
+  return request(`/config/comfy`, { method: 'PUT', body: data })
 }
 
 export async function fetchLorasFiles() {
@@ -898,6 +898,12 @@ export async function comfyuiHealth() {
   try {
     return await request(`/images/comfyui-health`)
   } catch { return { connected: false } }
+}
+
+export async function imageProviderHealth(data = {}) {
+  try {
+    return await request(`/images/provider-health`, { method: 'POST', body: data })
+  } catch { return { connected: false, provider: data.provider || 'comfyui' } }
 }
 
 // ── Gift 送礼 ──

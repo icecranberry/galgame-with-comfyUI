@@ -36,6 +36,7 @@ const DB_ONLY_KEYS = new Set([
   'emoji_fixed_tags',
   'emoji_style_mode',
   'standing_prompt_mode',
+  'novelai_api_key',
 ]);
 
 /** 写入单条系统设置 */
@@ -50,6 +51,17 @@ export function setSetting(key, value) {
 
 // 需要从 DB 迁移到 config 的字段映射
 export const SETTING_TO_CONFIG = {
+  image_provider:         { obj: 'comfyui',   key: 'imageProvider',    type: 'string'  },
+  novelai_url:            { obj: 'comfyui',   key: 'novelaiUrl',       type: 'string'  },
+  novelai_model:          { obj: 'comfyui',   key: 'novelaiModel',     type: 'string'  },
+  novelai_artist:          { obj: 'comfyui',   key: 'novelaiArtist',   type: 'string'  },
+  novelai_width:          { obj: 'comfyui',   key: 'novelaiWidth',     type: 'int'     },
+  novelai_height:         { obj: 'comfyui',   key: 'novelaiHeight',    type: 'int'     },
+  novelai_steps:          { obj: 'comfyui',   key: 'novelaiSteps',     type: 'int'     },
+  novelai_sampler:        { obj: 'comfyui',   key: 'novelaiSampler',   type: 'string'  },
+  novelai_noise_schedule: { obj: 'comfyui',   key: 'novelaiNoiseSchedule', type: 'string' },
+  novelai_guidance:       { obj: 'comfyui',   key: 'novelaiGuidance',  type: 'float'   },
+  novelai_quality_prompt: { obj: 'comfyui',   key: 'novelaiQualityPrompt', type: 'string' },
   comfy_artist:            { obj: 'comfyui',   key: 'artist',          type: 'string'  },
   comfy_width:             { obj: 'comfyui',   key: 'width',           type: 'int'     },
   comfy_height:            { obj: 'comfyui',   key: 'height',          type: 'int'     },

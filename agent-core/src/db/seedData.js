@@ -7,6 +7,17 @@
 // key 与 system_settings 表的 setting_key 一致
 export const DEFAULT_SYSTEM_SETTINGS = {
   // ComfyUI 参数
+  image_provider: 'comfyui',
+  novelai_url: '',
+  novelai_model: 'nai-diffusion-4-5-full',
+  novelai_artist: '@ebora',
+  novelai_width: '1216',
+  novelai_height: '832',
+  novelai_steps: '28',
+  novelai_sampler: 'k_euler_ancestral',
+  novelai_noise_schedule: 'karras',
+  novelai_guidance: '5.0',
+  novelai_quality_prompt: 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025',
   comfy_artist: '@ebora',
   comfy_width: '768',
   comfy_height: '512',

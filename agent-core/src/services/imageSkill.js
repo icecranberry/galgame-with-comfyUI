@@ -18,7 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui } from './comfyClient.js';
-import { config } from '../config.js';
+import { config, getNovelaiApiKey } from '../config.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
 import { prepareImagePrompt } from './imagePromptPreparer.js';
 
@@ -72,6 +72,79 @@ export const NODE_TITLES = {
   prompt: '画面描述',
   loraTrigger: 'lora触发词',
 };
+
+async function submitNovelaiImage(promptText, { onProgress } = {}) {
+  const baseUrl = String(config.comfyui.novelaiUrl || '').trim().replace(/\/+$/, '');
+  const apiKey = getNovelaiApiKey();
+  if (!baseUrl) throw new Error('请先配置 NovelAI 服务地址');
+  if (!apiKey) throw new Error('请先配置 NovelAI API Key');
+
+  const novelaiArtist = String(config.comfyui.novelaiArtist || '').trim();
+  const qualityPrompt = String(config.comfyui.novelaiQualityPrompt || '').trim();
+  const finalPrompt = [qualityPrompt, novelaiArtist, finalizeCountTags(String(promptText || '').trim())]
+    .filter(Boolean)
+    .join(', ');
+  if (!finalPrompt) throw new Error('画面描述为空');
+  const width = config.comfyui.novelaiWidth || 1216;
+  const height = config.comfyui.novelaiHeight || 832;
+
+  onProgress?.({ stage: 'submitting' });
+  onProgress?.({ phase: 'submitted' });
+  onProgress?.({ phase: 'started' });
+  const response = await fetch(`${baseUrl}/v1/images/generations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.comfyui.novelaiModel || 'nai-diffusion-4-5-full',
+      prompt: finalPrompt,
+      size: `${width}x${height}`,
+      steps: config.comfyui.novelaiSteps || 28,
+      sampler: config.comfyui.novelaiSampler || 'k_euler_ancestral',
+      noise_schedule: config.comfyui.novelaiNoiseSchedule || 'karras',
+      scale: config.comfyui.novelaiGuidance ?? 5,
+      n: 1,
+      response_format: 'b64_json',
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  onProgress?.({ phase: 'executed' });
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    const upstreamMessage = String(detail?.error?.message || detail?.message || `HTTP ${response.status}`);
+    if (/gems balance is insufficient/i.test(upstreamMessage)) {
+      throw new Error('NovelAI 接口服务的 Gems 余额不足，请补充该服务的 Gems 后重试，或切换到有余额的接口。');
+    }
+    const message = upstreamMessage
+      .replaceAll(apiKey, '[redacted]')
+      .slice(0, 300);
+    throw new Error(`NovelAI 生图失败：${message}`);
+  }
+
+  const payload = await response.json();
+  const entries = Array.isArray(payload?.data) ? payload.data : [];
+  const images = entries.map((entry, index) => {
+    const value = entry?.b64_json || '';
+    if (!value) return null;
+    const base64 = value.startsWith('data:image/')
+      ? value
+      : `data:image/png;base64,${value}`;
+    return { base64, filename: `novelai_${Date.now()}_${index + 1}.png` };
+  }).filter(Boolean);
+
+  if (images.length === 0) throw new Error('NovelAI 服务没有返回图片数据');
+  onProgress?.({ phase: 'done', imageCount: images.length, progress: 1 });
+  return {
+    success: true,
+    images,
+    source: 'novelai',
+    promptId: payload.created || `novelai_${Date.now()}`,
+    wfMode: 'novelai',
+  };
+}
 
 /**
  * 按场景过滤全局 LoRA。
@@ -363,6 +436,12 @@ async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
   loras, customWorkflow, scene, workflowScene,
 } = {}) {
+  if (config.comfyui.imageProvider === 'novelai') {
+    // NovelAI receives the same prepared scene description and artist tags as ComfyUI,
+    // but does not use either character or global LoRA data.
+    return submitNovelaiImage(rawPrompt, { artist, onProgress });
+  }
+
   // 1. 最终阀门
   let finalPrompt = finalizeCountTags(rawPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
