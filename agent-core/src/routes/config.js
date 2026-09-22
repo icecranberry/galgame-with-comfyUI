@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature } from '../config.js';
+import { config, updateComfyConfig, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -111,10 +111,20 @@ router.get('/', (req, res) => {
     },
     workflow: getWorkflowConfig(),
     groupChat: {
+      activity: config.groupChat?.activity ?? 2,
       temperature: config.groupChat?.temperature ?? 0.7,
       summaryInterval: config.groupChat?.summaryInterval ?? 4,
     },
   });
+});
+
+// PUT /api/config/group-activity — 群聊活跃度 1~5（所有群共享）
+router.put('/group-activity', (req, res) => {
+  const value = req.body?.value;
+  if (!Number.isInteger(value) || value < 1 || value > 5) {
+    return res.status(400).json({ error: 'value must be an integer from 1 to 5' });
+  }
+  res.json({ ok: true, activity: updateGroupActivity(value) });
 });
 
 // PUT /api/config/group-temperature — 更新群聊 LLM 温度 0.5~1.2（所有群共享）

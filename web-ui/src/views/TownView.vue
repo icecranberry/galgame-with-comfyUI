@@ -64,9 +64,6 @@ variant="ghost" size="sm" :disabled="uiLocked || !town.maps.length" :aria-expand
       </div>
     </div>
 
-    <div v-if="initialized && !editing" class="town-hint">
-      点击空地走过去 · 点一下建筑或邻居就能互动、展开奇遇 · 点一点邻居打个招呼 · WASD 移动 · 滚轮缩放
-    </div>
 
     <div v-if="rendererNotice" class="town-render-notice" role="status">
       <span>{{ rendererNotice }}</span>

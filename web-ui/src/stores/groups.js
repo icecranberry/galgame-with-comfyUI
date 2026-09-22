@@ -17,13 +17,22 @@ export const useGroupsStore = defineStore('groups', () => {
   const activeGroupId = ref(null)
   const activeGroup = computed(() => groups.value.find(g => g.id === activeGroupId.value) || null)
   const messages = ref([])          // 已上屏消息
+  const lastSeenDividerId = ref(null) // 本次进群固定的分界消息，不随清未读或新消息移动
   // 与私聊一致：历史消息保留在内存中，窗口策略统一由 useMessageWindow 提供
   const { renderStart, visibleMessages, hasMoreOlder, resetToLatest } = useMessageWindow(messages)
   const playing = ref(false)        // 播放队列是否正在逐条上屏
   const sending = ref(false)
   const undoing = ref(false)
   const scrollSignal = ref(0)       // 消息上屏后通知视图滚动到底
-  const lullCount = ref(0)          // 前台冷场自动触发计数：跨群/跨路由不重置，仅用户发言时归零
+  const lullCount = ref(0)          // 前台冷场自动触发计数：跨群/跨路由不重置，跨天或用户发言归零
+  let lullDate = new Date().toDateString()
+  function resetLullOnNewDay() {
+    const today = new Date().toDateString()
+    if (today !== lullDate) {
+      lullDate = today
+      lullCount.value = 0
+    }
+  }
 
   const _sessions = new Map()
   let _unsubs = []
@@ -136,8 +145,17 @@ export const useGroupsStore = defineStore('groups', () => {
 
   // ── 进入群聊 ──
 
+  function captureLastSeenDivider(lastSeenAt) {
+    const seenTime = lastSeenAt ? Date.parse(lastSeenAt) : NaN
+    lastSeenDividerId.value = Number.isFinite(seenTime)
+      ? messages.value.find(msg => Date.parse(msg.created_at) > seenTime)?.id ?? null
+      : null
+  }
+
   async function selectGroup(id) {
     const requestId = ++_selectRequestId
+    const lastSeenAt = groups.value.find(group => group.id === id)?.last_seen_at
+    lastSeenDividerId.value = null
     _flushAggNow()   // 切群前把上一个群未发送的聚合消息立即发出
     const previous = _activeSession()
     if (previous) {
@@ -151,6 +169,7 @@ export const useGroupsStore = defineStore('groups', () => {
     playing.value = session.playing
 
     if (session.loaded) {
+      captureLastSeenDivider(lastSeenAt)
       scrollSignal.value++
       api.markGroupSeen(id).then(() => {
         if (activeGroupId.value !== id) return
@@ -168,6 +187,7 @@ export const useGroupsStore = defineStore('groups', () => {
     session.seenMsgIds.clear()
     for (const m of session.messages) session.seenMsgIds.add(m.id)
     session.loaded = true
+    captureLastSeenDivider(lastSeenAt === undefined ? data.group?.last_seen_at : lastSeenAt)
     scrollSignal.value++
     api.markGroupSeen(id).then(() => {
       if (requestId !== _selectRequestId || activeGroupId.value !== id) return
@@ -178,6 +198,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   function leaveGroup() {
     _selectRequestId++
+    lastSeenDividerId.value = null
     _flushAggNow()
     const session = _activeSession()
     if (session) {
@@ -289,6 +310,7 @@ export const useGroupsStore = defineStore('groups', () => {
     if (!groupId || !text.trim()) return
     const session = _getSession(groupId)
     if (!session) return
+    lullDate = new Date().toDateString()
     lullCount.value = 0   // 用户发言 → 重置冷场自动触发额度
     const clientMsgId = `g${groupId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -592,8 +614,8 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   return {
-    groups, activeGroupId, activeGroup, messages, visibleMessages, hasMoreOlder,
-    playing, sending, undoing, scrollSignal, totalUnread, lullCount,
+    groups, activeGroupId, activeGroup, messages, visibleMessages, hasMoreOlder, lastSeenDividerId,
+    playing, sending, undoing, scrollSignal, totalUnread, lullCount, resetLullOnNewDay,
     loadGroups, createGroup, updateGroup, deleteGroup,
     setGroupAvatar,
     selectGroup, leaveGroup, expandWindow, sendMessage, nudge, undoLastRound,

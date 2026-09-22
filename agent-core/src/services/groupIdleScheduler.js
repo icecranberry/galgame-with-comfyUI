@@ -3,8 +3,8 @@
  *
  * 线路 A · 预算制后台闲聊：
  *   - 每 10 分钟扫描 next_idle_at <= now 且 idle_enabled=1 的群，每次只处理一个（串行）
- *   - 每群每日轮数预算 group_chats.idle_budget（默认 2），每个群独立计数：触发一次减一
- *   - 用户在群里发言或跨天时自动恢复为默认值 2
+ *   - 每群每日轮数预算 groupChat.activity（默认 2），每个群独立计数：触发一次减一
+ *   - 用户在群里发言或跨天时自动恢复为当前活跃度对应轮数
  *   - 预算当天用满后不再触发，直到用户发言重置或跨天自动恢复
  *   - 闲聊后随机设定 0~24 小时内的下次时间（全天候随机，任意时刻都可能），消息经统一 SSE 总线广播
  *
@@ -36,9 +36,9 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** 消耗一次预算；预算耗尽返回 false。预算为每群独立计数 group.idle_budget（默认 2），跨天懒重置 */
+/** 消耗一次预算；预算耗尽返回 false。预算为每群独立计数 groupChat.activity（默认 2），跨天懒重置 */
 function consumeIdleBudget(db, group) {
-  const budget = group.idle_budget ?? 2;
+  const budget = config.groupChat?.activity ?? 2;
   if (budget <= 0) return false;
   const today = todayStr();
   const used = group.idle_budget_date === today ? (group.idle_budget_used || 0) : 0;
@@ -194,7 +194,7 @@ async function maybeCreateGroup() {
 }
 
 export function startGroupIdleScheduler() {
-  console.log('[groupIdle] Starting (idle interval:', IDLE_CHECK_INTERVAL / 60000, 'min, per-group budget: group_chats.idle_budget (default 2/day))');
+  console.log('[groupIdle] Starting (idle interval:', IDLE_CHECK_INTERVAL / 60000, 'min, per-group budget: groupChat.activity (default 2/day))');
   setTimeout(() => {
     idleTick();
     idleTimer = setInterval(idleTick, IDLE_CHECK_INTERVAL);

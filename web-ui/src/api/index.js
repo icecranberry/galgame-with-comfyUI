@@ -488,6 +488,10 @@ export function updateGroupTemperature(value) {
 }
 
 /** 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享） */
+export function updateGroupActivity(value) {
+  return request('/config/group-activity', { method: 'PUT', body: { value } })
+}
+
 export function updateGroupSummaryInterval(value) {
   return request(`/config/group-summary-interval`, { method: 'PUT', body: { value } })
 }

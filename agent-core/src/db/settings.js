@@ -82,6 +82,7 @@ export const SETTING_TO_CONFIG = {
   feature_bgmMuted:                  { obj: 'features', key: 'bgmMuted',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
   feature_deepThinkMode:             { obj: 'features', key: 'deepThinkMode',          type: 'bool' },
+  group_activity: { obj: 'groupChat', key: 'activity', type: 'int' },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
   group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },
   weather_city:                      { obj: 'weather',  key: 'city',                  type: 'string' },

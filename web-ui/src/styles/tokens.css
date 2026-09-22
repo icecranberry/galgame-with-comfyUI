@@ -34,6 +34,8 @@
   --accent: #e07b6c;
   --accent-hover: #cc6a5c;
   --accent-light: #f0a89a;
+  --slider-track-start: #f0d5cd;
+  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   --accent-rgb: 224, 123, 108;
   --accent-2: #ff8a4c;
   --accent-2-hover: #f27632;
@@ -190,6 +192,8 @@
   --accent: #ff7a64;
   --accent-hover: #f0644e;
   --accent-light: #ffa58f;
+  --slider-track-start: var(--bg-sunken);
+  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
   --accent-rgb: 255, 122, 100;
   --accent-2: #ffb35c;
   --accent-2-hover: #f09c3e;

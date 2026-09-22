@@ -173,6 +173,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     persona: process.env.USER_PERSONA || '',
   },
   groupChat: {
+    activity: 2, // 1~5：仅控制冷场等待时长和自动闲聊轮数
     // 群聊 LLM 温度（0.5~1.2），所有群共享；DB system_settings 持久化，启动时覆盖默认值
     temperature: parseFloat(process.env.GROUP_CHAT_TEMPERATURE) >= 0.5 && parseFloat(process.env.GROUP_CHAT_TEMPERATURE) <= 1.2
       ? parseFloat(process.env.GROUP_CHAT_TEMPERATURE)
@@ -395,6 +396,12 @@ export function updateGroupSummaryInterval(value) {
   persistSettingSync('group_summary_interval', String(n));
   console.log(`[config] groupChat summaryInterval = ${n}`);
   return n;
+}
+
+export function updateGroupActivity(value) {
+  persistSettingSync('group_activity', String(value));
+  config.groupChat.activity = value;
+  return value;
 }
 
 function resolveLlmApiKey() {

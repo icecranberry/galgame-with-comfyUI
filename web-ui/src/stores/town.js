@@ -243,8 +243,8 @@ export const useTownStore = defineStore('town', () => {
     if (d.deleted != null) _scrubDeletedAssetFromLayers(d.deleted)
 
     if (!d.asset) {
-      // spirit重绘采用“删旧建新”的旧路径时，先退回占位图，避免继续请求已删除文件。
-      if (deleted?.kind === 'player' || deleted?.kind === 'npc') _scheduleAgentSpriteRefresh()
+      // 小人/立绘删旧建新时，重取角色的图片引用，避免继续请求已删除文件。
+      if (['player', 'npc', 'portrait'].includes(deleted?.kind)) _scheduleAgentSpriteRefresh()
       return
     }
 
@@ -252,7 +252,8 @@ export const useTownStore = defineStore('town', () => {
     assets.value = assets.value.filter(a => a.id !== d.asset.id && !(a.kind === d.asset.kind && a.key === d.asset.key))
     assets.value.push(d.asset)
 
-    if (d.asset.kind === 'player' || d.asset.kind === 'npc') _scheduleAgentSpriteRefresh()
+    // 立绘保存也会换文件路径；只更新素材库无法更新快照里的 standingUrl。
+    if (['player', 'npc', 'portrait'].includes(d.asset.kind)) _scheduleAgentSpriteRefresh()
   }
 
   // 素材删除后同步清掉当前地图图层里的引用（悬空对象渲染成白块、悬空地砖渲染成黑洞）：

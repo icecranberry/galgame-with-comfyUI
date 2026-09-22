@@ -85,6 +85,7 @@ function serializeGroup(group) {
     avatar_path: group.avatar_path || null,
     idle_enabled: !!group.idle_enabled,
     last_message_at: toISODate(group.last_message_at),
+    last_seen_at: toISODate(group.last_seen_at),
     created_at: toISODate(group.created_at),
     unread,
     ...getLastMessagePreview(group.id),

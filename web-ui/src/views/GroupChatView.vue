@@ -60,6 +60,9 @@
           <template v-for="(msg, idx) in store.visibleMessages" :key="msg.id">
           <!-- 时间分隔符（与私聊同款：间隔超 10 分钟显示） -->
           <div v-if="showTimeDivider(idx)" class="time-divider">{{ timeLabel(msg.created_at) }}</div>
+          <div v-if="msg.id === store.lastSeenDividerId" class="last-seen-divider" role="separator" aria-label="上次看到这里">
+            <span>上次看到这里</span>
+          </div>
           <div
             class="message"
             :class="[msg.role === 'user' ? 'user' : 'assistant', { 'msg-same-role': isSameSpeaker(idx) }]"
@@ -260,10 +263,10 @@
               <span>温度设置</span>
               <span class="gc-temp-val">{{ Number(editTemperature).toFixed(1) }}</span>
             </div>
-            <input
-              class="gc-range"
-              type="range" min="0.5" max="1" step="0.1"
-              v-model.number="editTemperature"
+            <linshe-slider
+              aria-label="温度设置"
+              :min="0.5" :max="1" :step="0.1"
+              v-model="editTemperature"
               @change="onTemperatureChange"
             />
             <span class="gc-member-hint">群聊生成温度（所有群共享），越低越稳定、越高越有创意，默认 0.7。</span>
@@ -273,13 +276,25 @@
               <span>携带上下文消息记忆轮数</span>
               <span class="gc-temp-val">{{ editSummaryInterval }} 轮</span>
             </div>
-            <input
-              class="gc-range"
-              type="range" min="2" max="6" step="1"
-              v-model.number="editSummaryInterval"
+            <linshe-slider
+              aria-label="携带上下文消息记忆轮数"
+              :min="2" :max="6" :step="1"
+              v-model="editSummaryInterval"
               @change="onSummaryIntervalChange"
             />
             <span class="gc-member-hint">达到设置轮数之后将上下文压缩成总结，默认 4 轮。</span>
+          </div>
+          <div class="gc-field">
+            <div class="gc-member-title">
+              <label for="group-activity">群聊活跃度</label>
+              <span class="gc-temp-val">{{ editActivity }}</span>
+            </div>
+            <linshe-slider
+              id="group-activity" v-model="editActivity"
+              :min="1" :max="5" :step="1" :disabled="activitySaving"
+              @change="onActivityChange"
+            />
+            <span class="gc-member-hint">所有群共享，默认 2。</span>
           </div>
           <div class="gc-field gc-member-field">
             <div class="gc-member-title">
@@ -364,12 +379,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
 import { useChatStore } from '../stores/chat.js'
 import { useMomentsStore } from '../stores/moments.js'
-import { getConfig, updateGroupSummaryInterval, updateGroupTemperature, listGalleryImages } from '../api/index.js'
+import { getConfig, updateGroupActivity, updateGroupSummaryInterval, updateGroupTemperature, listGalleryImages } from '../api/index.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import { applyMention, useMentionPicker } from '../composables/useMentionPicker.js'
 
@@ -404,6 +420,34 @@ const editTopic = ref('')
 const editMemberIds = ref([])
 const editTemperature = ref(0.7)
 const editSummaryInterval = ref(4)
+const editActivity = ref(2)
+const activityDelaySeconds = { 1: 60, 2: 40, 3: 27, 4: 20, 5: 16 }
+const savedActivity = ref(2)
+const activitySaving = ref(false)
+
+async function loadGroupActivity() {
+  try {
+    const cfg = await getConfig()
+    const level = cfg?.groupChat?.activity
+    if (Number.isInteger(level) && level >= 1 && level <= 5) {
+      savedActivity.value = editActivity.value = level
+    }
+  } catch { /* 保留最近一次成功读取的值 */ }
+}
+
+async function onActivityChange() {
+  if (activitySaving.value) return
+  activitySaving.value = true
+  try {
+    const res = await updateGroupActivity(editActivity.value)
+    savedActivity.value = editActivity.value = res.activity
+    armLullTimer()
+    toast?.('群聊活跃度已保存', 'success')
+  } catch (err) {
+    editActivity.value = savedActivity.value
+    toast?.(err.message || '群聊活跃度保存失败', 'error')
+  } finally { activitySaving.value = false }
+}
 const canUndo = computed(() => (
   store.messages.length > 0 && !store.sending && !store.playing && !store.undoing
 ))
@@ -502,6 +546,7 @@ function onGroupImageDeleted(deletedUrl) {
 /** 连续同一发言人 → 隐藏头像和名字（与私聊 msg-same-role 一致）；跨时间分隔符时重新显示 */
 function isSameSpeaker(idx) {
   if (idx === 0) return false
+  if (store.visibleMessages[idx]?.id === store.lastSeenDividerId) return false
   if (showTimeDivider(idx)) return false
   const cur = store.visibleMessages[idx]
   const prev = store.visibleMessages[idx - 1]
@@ -541,6 +586,7 @@ async function enterGroup(id) {
   if (!id) return
   isFollowingLatest.value = true
   hasNewMessages.value = false
+  await loadGroupActivity()
   await store.loadGroups()
   await store.selectGroup(parseInt(id, 10))
   scrollToBottom(true)   // 进群直接定位底部，不要缓动
@@ -565,6 +611,7 @@ watch(showSettings, (open) => {
     editName.value = store.activeGroup.name
     editTopic.value = store.activeGroup.topic || ''
     editMemberIds.value = store.activeGroup.members.map(m => m.id)
+    loadGroupActivity()
     loadGroupTemperature()
     loadGroupSummaryInterval()
   }
@@ -761,11 +808,7 @@ function scrollToBottom(force = false) {
   })
 }
 
-// ── 冷场检测：停留 40s 无新消息 → 自动触发角色续聊 ──
-// 自动触发最多 2 次（计数存 store，切群/离开页面不重置，仅用户发言归零），防止无限自嗨烧 token
-
-const LULL_DELAY = 40_000
-const MAX_LULL_PER_USER_MSG = 2
+// ── 冷场检测：活跃度只调整等待时长和轮数上限（默认 40 秒 / 2 轮） ──
 let lullTimer = null
 
 function clearLullTimer() {
@@ -775,7 +818,7 @@ function clearLullTimer() {
 function armLullTimer() {
   clearLullTimer()
   if (!route.path.startsWith('/group/')) return
-  lullTimer = setTimeout(tryLull, LULL_DELAY)
+  lullTimer = setTimeout(tryLull, activityDelaySeconds[savedActivity.value] * 1000)
 }
 
 async function tryLull() {
@@ -784,7 +827,8 @@ async function tryLull() {
   // 页面不可见 / 正在发送 / 正在播放 / 次数用尽 → 不触发；除次数用尽外重新计时
   if (document.visibilityState !== 'visible') return  // 等 visibilitychange 恢复计时
   if (store.sending || store.playing) { armLullTimer(); return }
-  if (store.lullCount >= MAX_LULL_PER_USER_MSG) return
+  store.resetLullOnNewDay()
+  if (store.lullCount >= savedActivity.value) { armLullTimer(); return }
   store.lullCount++
   const accepted = await store.nudge()
   if (!accepted) store.lullCount--
@@ -1199,6 +1243,9 @@ async function clearGroupAvatar() {
 
 /* 时间分隔符（与私聊 .time-divider 同款） */
 .time-divider { text-align:center; padding:16px 0 8px; font-size:12px; color:var(--text-secondary); user-select:none; }
+.last-seen-divider { display:flex; align-items:center; gap:12px; padding:16px 0; color:var(--text-secondary); font-size:var(--fs-xs); user-select:none; }
+.last-seen-divider span { flex-shrink:0; }
+.last-seen-divider::before, .last-seen-divider::after { content:''; flex:1; height:1px; background:var(--border); }
 
 /* ── 输入区 ── */
 .input-area {
@@ -1350,24 +1397,6 @@ async function clearGroupAvatar() {
 }
 .gc-avatar-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gc-temp-val { font-size: 13px; font-weight: 600; color: var(--accent); }
-.gc-range {
-  width: 100%; height: 6px; margin: 4px 0 2px;
-  -webkit-appearance: none; appearance: none;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #f0d5cd, var(--accent));
-  outline: none; cursor: pointer;
-}
-.gc-range::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: #fff; border: 2px solid var(--accent);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
-.gc-range::-moz-range-thumb {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: #fff; border: 2px solid var(--accent);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
 .gc-record-actions { flex-shrink: 0; }
 .gc-drawer-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .gc-btn {
