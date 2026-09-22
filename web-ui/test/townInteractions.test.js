@@ -23,11 +23,20 @@ test('trade opens only through the trade gate (capability plus actual goods), an
   openTrade(); assert.equal(state.tradeOpen.value, false)
 })
 
-test('trade posts directly against the resolved target', () => {
-  const command = createTownTargetTradeCommand('location:cloth_shop', { worldId:'town', worldEpoch:7, templateId:'town.mood_patch' })
-  assert.equal(command.path, '/locations/cloth_shop/trade')
-  assert.equal(command.body.templateId, 'town.mood_patch')
-  assert.ok(command.body.idempotencyKey)
+test('trade commands use the resolved resident or location and carry scope plus an idempotency key', () => {
+  for (const [actorKey, path] of [
+    ['npc:3', '/npcs/3/trade'],
+    ['char:4', '/characters/4/trade'],
+    ['location:cloth_shop', '/locations/cloth_shop/trade'],
+  ]) {
+    const command = createTownTargetTradeCommand(actorKey, { worldId: 'town', worldEpoch: 7, templateId: 'town.mood_patch' })
+    assert.equal(command.path, path)
+    assert.equal(command.worldId, 'town')
+    assert.ok(command.body.idempotencyKey)
+    assert.deepEqual(command.body, {
+      worldEpoch: 7, templateId: 'town.mood_patch', idempotencyKey: command.body.idempotencyKey,
+    })
+  }
 })
 function flow() {
   const events = []

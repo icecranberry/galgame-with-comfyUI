@@ -17,7 +17,7 @@ import { publishUserMoment } from '../services/momentUserPostService.js';
 import { handleUserComment } from '../services/momentCommentService.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_IMAGE_FIELDS, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 const router = Router();
 
@@ -641,7 +641,6 @@ async function generateMomentPost(character, opts = {}) {
 
   // 1.6 配图掷骰：70% 一张 / 20% 两张 / 10% 三张，prompt 由下面的 LLM 调用一并给出
   const imageCount = pickMomentImageCount();
-  const imageFieldNames = MOMENT_IMAGE_FIELDS.slice(0, imageCount);
   if (imageCount > 1) console.log(`[moments] ${character.display_name} posts ${imageCount} images this time`);
 
   // 2. 创建 pending 记录
@@ -719,7 +718,7 @@ async function generateMomentPost(character, opts = {}) {
     : null;
 
   const multiPersonImageNote = multiPersons.length > 0 ? `
-- **多人画面**：imagePrompt 中必须包含你和${multiPersons.map(p => p.otherName).join('、')}共${multiPersons.length + 1}人。描述各自外观、互动方式、肢体距离和表情，贴合你们的关系。用句号分隔每人描述` : '';
+- **多人画面**：包含你和${multiPersons.map(p => p.otherName).join('、')}，另指定同框的用户也计入人数；每人独立描述，参与同一活动。` : '';
 
   const postingTaskIntro = worldSetting
     ? '你正在发朋友圈。你的人设生存在<world_setting>中，融入世界观，把世界观当做常识，像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。'
@@ -748,9 +747,9 @@ async function generateMomentPost(character, opts = {}) {
     ).get(character.id)?.content || '';
   } catch { /* ignore */ }
 
-  // 不完美注入：5% 概率允许 1 处轻微口语瑕疵，打破"标准小作文"感
+  // 5% 概率保留自然的口语停顿，不靠故意错字制造生活感
   const imperfectionNote = Math.random() < 0.05
-    ? '\n- 这条朋友圈可以有 1 处轻微的口语瑕疵：比如打错一个字不修、句尾多个语气词、写到一半换一种更口语的说法。最多 1 处，不要刻意，也不要因为重写而改变主线。'
+    ? '\n- 可留一处自然重复或停顿，不故意打错字。'
     : '';
 
   // 10% 概率弱呼应最近一条朋友圈（自由模式不注入）
@@ -759,37 +758,35 @@ async function generateMomentPost(character, opts = {}) {
     : '';
 
   const postingTask = (() => {
-    // 本次发几张图就要几个画面描述字段：第 1 张是 imagePrompt，之后依次 imagePrompt2 / imagePrompt3
-    const imageFieldJson = imageFieldNames.map((name, i) => (i === 0
-      ? `"imagePrompt":"第一张照片的英文画面描述：${imagePromptGuide}${weatherHint}${multiPersonImageNote}${oathImageNote}"`
-      : `"${name}":"第${i + 1}张照片的英文画面描述：同一段连续经历的第${i + 1}帧，与 imagePrompt 使用同一组连续性锚点（人物、同伴、地点、关键道具、天气光线、服装），只改变景别、角度、拍摄时机或动作阶段（英文、完整独立、贴合正文）"`
-    )).join(',');
     const textShape = isSpecialMode
-      ? '朋友圈正文：中文口语，第一人称，只围绕一件事或一场梦完整讲完，可以自由展开；不要写总结、感悟或祝福'
-      : '朋友圈正文：中文口语，只围绕一个瞬间或一件事';
-    const jsonFmt = `输出格式（严格 JSON）：
-{"text":"${textShape}",${imageFieldJson}}`;
+      ? '中文口语，第一人称，讲完一场梦或幻想'
+      : '中文口语，只围绕一个具体中心，留下角色的反应';
+    const jsonFmt = buildMomentOutputFormat({ imageCount, textRequirement: textShape });
 
     const multiImageRule = buildMomentMultiImageRule(imageCount);
 
-    // 缓存约束：staticRules 必须整体位于 jsonFmt 之前（jsonFmt 内的天气/多人插值是前缀缓存分叉点），
-    // 会随调用变化的要求一律放后面的 dynamicRules，不要与 staticRules 混排。
+    // 缓存约束：通用规则放在按张数变化的 jsonFmt 之前；天气、同行者等放 dynamicRules。
     const staticRules = `通用规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
+${MOMENT_IMAGE_RULES}
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。你分享的日常、你的语气、你描述的场景和互动方式，都应该是这个世界里一个普通人发的朋友圈——这个世界的"日常"就是你的日常，不需要刻意解释。' : ''}
-- **图文强一致**：imagePrompt 必须准确可视化 text 正在记录或表达的同一场景，以正文中的主体、人物、动作、地点、物品和情绪为准；可以补充正文未明说但由上下文确定的天气、光线、构图和环境细节，不得改换场景、添加与正文冲突的情节，或生成与正文无关的泛化画面。
-- text里禁止输出'#下午茶的仪式感'类似这种tag标签
-- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气。imagePrompt一定会体现天气。除非极度需要说明时间和天气text才会提及。`;
+- text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。`;
 
-    const dynamicRules = `- text用中文（${pickedForm ? pickedForm.len : '30-80字'}），imagePrompt 用英文
+    const dynamicRules = `- text用中文（参考 ${pickedForm ? pickedForm.len : '30-80字'}，不凑字数），imagePrompt 用英文
 ${multiImageRule}
-${pickedForm ? `- **发布形态**：${pickedForm.desc}。text严格按这个形态写，不要写成标准小作文。` : ''}
-${isSpecialMode ? '- **形态例外**：叙事长文不受上面「只写一个瞬间」「半句话」「写完就停」的限制，可以把这一件事或这场梦讲完整；但依然禁止总结、感悟、祝福和金句。' : ''}
+${pickedForm ? `- **发布形态**：${pickedForm.desc}。` : ''}
+${isSpecialMode ? '- **梦境例外**：可展开长文；日程与天气只约束现实，不必另叙现实活动。正文分清梦与现实，配图只取梦内同一场景。' : ''}
 ${imperfectionNote}
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
-${continuationNote}`;
+${continuationNote}
+
+生图格式（每个 imagePrompt 均适用）：
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
+${weatherHint}
+${multiPersonImageNote}
+${oathImageNote}`;
 
     return `${postingTaskIntro}
 
@@ -851,8 +848,8 @@ ${dynamicRules}`;
 ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
 
 你现在正和${userName}一起做【此刻正在做】里的事，这条朋友圈必须带上${userName}：
-- text 自然地提到${userName}（用你们关系里会用的称呼），记录你们一起做的这个瞬间；
-- imagePrompt 必须同时包含你和${userName}两个人，分别描述各自外观与互动，贴合你们的关系；${userName}的外观严格按上面的信息描绘。`,
+- text 可用昵称、你或我们带出互动；极短形态只在照片体现同行即可。
+- imagePrompt 包含你、${userName}及其他指定同行者，人数准确，外观按资料。`,
     });
     console.log(`[moments] Schedule mentions user → user co-presence mode for ${character.display_name}`);
   }
@@ -860,7 +857,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     for (const mp of multiPersons) {
       msgs.push({
         role: 'system',
-        content: `**【最高优先级——你与${mp.otherName}的真实关系】**\n${mp.relDesc}。\n\n这是你们私下相处的真实状态。你的公开人设是你对外展示的一面，但在${mp.otherName}面前，你们有只属于彼此的相处方式——你们的肢体接触、距离、语气、眼神，都是这个关系里才会有的。不要退回普通朋友的距离，不要用营业微笑面对这个人。\n\n朋友圈记录的是你们独处的真实瞬间，不是给粉丝看的舞台。\n\n${mp.otherName}的公开信息供参考：\n---\n${mp.otherPersona}\n---`
+        content: `**【你与${mp.otherName}的真实关系】**\n${mp.relDesc}。\n用称呼、距离或小动作自然体现，不擅改关系、不另开话题。\n\n${mp.otherName}的公开信息：\n---\n${mp.otherPersona}\n---`
       });
     }
   }
@@ -1046,17 +1043,19 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
+${MOMENT_IMAGE_RULES}
 ${worldSetting ? '- **世界观驱动**：你的朋友圈发生在<world_setting>中，不是在真空或现实世界中。' : ''}
-- **图文强一致**：imagePrompt 必须准确可视化 text 正在记录的同一场景，不得改换场景或添加与正文冲突的情节。
-- text里禁止输出'#下午茶的仪式感'类似这种tag标签
-- text中做的事情要符合当前时间但禁止直接提及时间。
+- text 中的事符合当前时间，不用特意报时。
 
-输出格式（严格 JSON）：
-{"text":"朋友圈正文：中文口语，第一人称，围绕你和${userName}的这个约定瞬间，像随手打的字，可以很短；不要写成总结或感悟","imagePrompt":"照片的英文画面描述：${imagePromptGuide}${weatherHint}"}
+${buildMomentOutputFormat({ textRequirement: `中文口语，第一人称，写你和${userName}赴约时的一个细节或互动` })}
 
 本次要求（随本次情况变化，与上方通用规则同时生效）：
 - **这条朋友圈是履约现场**：只突出你们约好的这件事本身，不要扯别的话题。
-- **画面必须同框**：imagePrompt 中必须同时出现你和${userName}两个人，分别描述各自外观、动作与互动，贴合你们的关系，用句号分隔两人描述。${oathImageNote}`;
+- **画面必须同框**：imagePrompt 中必须同时出现你和${userName}两个人，分别描述各自外观、动作与互动，贴合你们的关系，用句号分隔两人描述。${oathImageNote}
+
+生图格式：
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
+${weatherHint}`;
 
   const timeTag = getTimeTag(now, false);
   const doing = `${activity.location || ''}${activity.activity || ''}`;

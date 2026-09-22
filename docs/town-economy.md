@@ -1,5 +1,7 @@
 # 小镇挣钱玩法
 
+> 历史设计记录：本文描述的步骤式打工、订单和铭牌玩法已退出当前主链路，原测试与预览入口已清理。当前小镇玩法以 NPC 邀请 → 奇遇叙事推进为准；现行回归入口见 [测试维护说明](testing.md)。
+
 小镇货币沿用「金币」。目标是空钱包也能开始做事，常回来能稳步攒钱，接单次数与真实结算共同约束产出。UI 以点击 NPC 打开的 `TownDialogueStage.vue` 为参考，使用工作牌、对话选择、任务步骤和结算回执。
 
 ## 接单机会
@@ -31,6 +33,4 @@
 
 ## 验证入口
 
-- `agent-core/test/townEarningPolicy.test.js`：空钱包、资金/材料耗尽、取消及重试、跨天存储、跨地图请求、关联任务、手艺解锁、回执防复用和周任务冷却；含连续 30 天挣钱与消费的余额、库存、账本守恒检查。
-- `web-ui/test/townEarningCommands.test.js`：工作命令与购买命令的持久化重试。
-- Vite 开发环境的 `/test/fixtures/townEarning.html`：使用真实组件与内存 API 检查界面，不接触存档。支持 `panel=wallet|work`、`theme=warm|dark`。
+旧挣钱策略测试和预览页已失效。现有交易命令检查统一维护在 `web-ui/test/townInteractions.test.js`；钱包、NPC 交易与奇遇链路等现行测试见 [测试维护说明](testing.md)。

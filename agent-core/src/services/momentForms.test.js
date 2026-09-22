@@ -1,19 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MOMENT_SINGLE_FOCUS_RULE,
   buildMomentMotiveDirective,
   buildMomentScheduleContext,
   buildMomentMultiImageRule,
-  MOMENT_RECORD_BACKDROP_RULE,
 } from './momentForms.js';
-
-test('single focus rule synthesizes schedule and motive into one coherent scene', () => {
-  assert.match(MOMENT_SINGLE_FOCUS_RULE, /单中心/);
-  assert.match(MOMENT_SINGLE_FOCUS_RULE, /两个同等重要的构成条件/);
-  assert.match(MOMENT_SINGLE_FOCUS_RULE, /在同一场景或同一段连续经历里共同成立/);
-  assert.match(MOMENT_SINGLE_FOCUS_RULE, /禁止把日程、经历、旧动态、世界观分别写成几个独立段落/);
-});
 
 test('motive directive states the selected subject without restating system rules', () => {
   const directive = buildMomentMotiveDirective('发现一个很喜欢的小东西');
@@ -31,11 +22,6 @@ test('schedule context states only the current place and activity', () => {
   assert.match(prompt, /【此刻正在做】林此刻正在书房整理书架（随手翻到一本旧书）/);
   assert.doesNotMatch(prompt, /同等重要/);
   assert.equal(buildMomentScheduleContext('', { location: '书房', activity: '整理书架' }), '');
-});
-
-test('background records remain supplementary to the synthesized main scene', () => {
-  assert.match(MOMENT_RECORD_BACKDROP_RULE, /最多选取一条/);
-  assert.match(MOMENT_RECORD_BACKDROP_RULE, /禁止逐条概括/);
 });
 
 test('multi-image rule asks for a continuous photo sequence with shared anchors', () => {

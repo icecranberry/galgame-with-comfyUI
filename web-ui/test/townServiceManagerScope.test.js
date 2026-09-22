@@ -20,7 +20,7 @@ test('服务管理模板能编译，并带来源筛查与来源标记', () => {
   assert.match(template, /v-else-if="!filtered\.length"/)
 })
 
-test('分段筛选按来源过滤名单', () => {
+test('名单按来源筛选，同镇居民优先且不改动原始顺序', () => {
   const declaration = nodes
     .filter(node => node.type === 'VariableDeclaration')
     .flatMap(node => node.declarations)
@@ -28,16 +28,21 @@ test('分段筛选按来源过滤名单', () => {
   assert.ok(declaration, 'filtered computed 应存在')
   const arrow = declaration.init.arguments[0]
   const rows = [
-    { npcId: 1, source: 'npc' },
-    { npcId: 2, source: 'character' },
+    { npcId: 1, source: 'npc', mapId: 1 },
+    { npcId: 2, source: 'character', mapId: '2' },
+    { npcId: 3, source: 'npc', mapId: 2 },
+    { npcId: 4, source: 'character', mapId: null },
   ]
-  const state = { scope: ref('all'), overview: ref(rows) }
+  const state = { scope: ref('all'), overview: ref(rows), town: { currentMapId: null } }
   const compute = new Function('state', `with (state) { return (${script.slice(arrow.start, arrow.end)}) }`)(state)
-  assert.equal(compute().length, 2)
+  assert.deepEqual(compute().map(r => r.npcId), [1, 2, 3, 4])
+  state.town.currentMapId = 2
+  assert.deepEqual(compute().map(r => r.npcId), [2, 3, 1, 4])
   state.scope.value = 'character'
-  assert.deepEqual(compute().map(r => r.npcId), [2])
+  assert.deepEqual(compute().map(r => r.npcId), [2, 4])
   state.scope.value = 'npc'
-  assert.deepEqual(compute().map(r => r.npcId), [1])
+  assert.deepEqual(compute().map(r => r.npcId), [3, 1])
+  assert.deepEqual(state.overview.value.map(r => r.npcId), [1, 2, 3, 4])
 })
 
 test('分段选项覆盖全部 / 小镇NPC / 酒馆角色', () => {

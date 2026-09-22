@@ -18,7 +18,7 @@ import { getTimeTag, getLightNoteWithWeather } from '../timeLight.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { townNpcPortraitUrl } from './townNpcEventGenerator.js';
-import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES } from '../momentForms.js';
+import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat } from '../momentForms.js';
 import { parseMomentResponse } from '../momentResponseParser.js';
 
 function toSQLite(iso) {
@@ -156,21 +156,24 @@ export async function generateTownNpcMoment(npc, opts = {}) {
     ? `- 上面「今天真实发生的事」是你今天亲历的记录：只从中选一件最想分享的事作为唯一主线，其余都忽略；没提到的部分写日常即可。禁止否认或编造更大的事`
     : `- 今天没什么特别的事，就选一件符合你身份和此刻时段的小事作为唯一主线，随手记录小镇日常`;
 
-  const formatPrompt = `输出格式（严格 JSON）：
-{"text":"朋友圈正文：中文口语，第一人称「我」，只围绕一个具体中心（一个瞬间或一件事），像随手打的字，可以很短、可以是半句话、可以带语气词；不要写成完整的文章、总结或感悟","imagePrompt":"配图的英文画面描述"}
-
-规则：
+  const formatPrompt = `规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
-- text 用中文，第一人称「我」，${pickedForm.len}，${pickedForm.desc}
+${MOMENT_IMAGE_RULES}
+
+${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心' })}
+
+本次要求：
+- text 用中文，第一人称（可省略主语），参考 ${pickedForm.len}，不凑字数；${pickedForm.desc}
 - ${factsRule}
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告
-- text里禁止输出'#下午茶的仪式感'类似这种tag标签
-- text中做的事情要符合当前时间和天气但禁止直接提及时间和天气
-- imagePrompt 用英文：${imagePromptGuide}${weatherHint}
-- **图文强一致**：imagePrompt 必须可视化 text 记录的同一场景（场景、人物、动作、光线、构图写全）
-- **画面里只有你自己**（或你正在看的风景/物件），不要出现玩家`;
+- text 中的事符合当前时间和天气，不用报时或报天气；只有它直接触发了这次反应才自然提及
+- **画面里只有你自己**（或你正在看的风景/物件），不要出现玩家
+
+生图格式：
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
+${weatherHint}`;
 
   const personaMsg = `以下是小镇镇民「${npc.display_name}」的资料，发帖时保持这个人设：\n\n${npcPersonaBlock(npc)}`;
 

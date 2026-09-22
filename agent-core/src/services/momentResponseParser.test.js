@@ -80,3 +80,16 @@ test('never leaks JSON syntax into stored content', () => {
   assert.equal(sanitizeMomentContent('{"text":"正文","imagePrompt":"a cat"}'), '正文');
   assert.equal(sanitizeMomentContent('普通正文'), '普通正文');
 });
+
+test('preserves valid JSON escapes in kaomoji and image descriptions', () => {
+  const content = { text: '\\(・_・)/ 找到了', imagePrompt: 'A note with a \\ mark beside the book.' };
+  const parsed = parseMomentResponse(JSON.stringify(content));
+  assert.equal(parsed.text, content.text);
+  assert.equal(parsed.imagePrompt, content.imagePrompt);
+});
+
+test('still recovers model output containing invalid JSON escapes', () => {
+  const parsed = parseMomentResponse(String.raw`{"text":"找到了","imagePrompt":"A note beside a book \(open\)."}`);
+  assert.equal(parsed.text, '找到了');
+  assert.equal(parsed.imagePrompt, 'A note beside a book (open).');
+});

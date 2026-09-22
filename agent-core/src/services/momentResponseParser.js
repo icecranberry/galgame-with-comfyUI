@@ -59,7 +59,13 @@ function unescapeJsonString(value) {
 
 function tryParseJson(text) {
   try {
-    const parsed = JSON.parse(repairInvalidEscapes(text));
+    // 合法 JSON 直接解析，避免修复逻辑误伤颜文字或画面描述中已正确转义的反斜杠。
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = JSON.parse(repairInvalidEscapes(text));
+    }
     const textValue = typeof parsed?.text === 'string' ? parsed.text.trim() : '';
     if (!textValue) return null;
     return {
