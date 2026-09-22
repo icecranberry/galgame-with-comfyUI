@@ -18,7 +18,7 @@ import { postProcessAsset, detectTileAnchorY, flattenIsoTileWithRect, extractIso
 import { refineImage } from '../imageRefine.js';
 import { generateBuildingPrompt } from './townPromptBuilder.js';
 import { broadcastTownAssetsUpdated } from './townBus.js';
-import { removeDeletedAssetReferences } from './townMapService.js';
+import { removeDeletedAssetReferences, addMapAssets } from './townMapService.js';
 import { getTownGenerationSettings, generationStepForAsset, isPortraitAsset, normalizeTownGenerationLoras } from './townGenerationConfig.js';
 import { townBuildingKind } from './townResponsibilityDefinitions.js';
 import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
@@ -732,7 +732,7 @@ export function getAssetsByKey(keys) {
  * @param {object} p - { kind, key, name, desc, meta, worldSettingId, expectedWorld? }
  * @returns {Promise<object>} 完成后的素材行（ready/failed）
  */
-export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId = null, expectedWorld = captureTownAssetWorld(), appearanceGuard = null }) {
+export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId = null, mapId = null, expectedWorld = captureTownAssetWorld(), appearanceGuard = null }) {
   if (!ASSET_SPECS[kind]) throw new Error(`unknown asset kind: ${kind}`);
   const db = getDb();
   const metaJson = { desc: desc || '', ...meta };
@@ -746,6 +746,7 @@ export function createAsset({ kind, key, name, desc, meta = {}, worldSettingId =
       VALUES (?, ?, ?, '', ?, ?, 'pending')
     `).run(kind, key || null, name, JSON.stringify(metaJson), worldSettingId);
     const row = db.prepare('SELECT * FROM town_assets WHERE id = ?').get(Number(result.lastInsertRowid));
+    if (mapId != null) addMapAssets(mapId, [row.id]);
     return { row, guard: claimAsset(row, expectedWorld, appearanceGuard) };
   }).immediate();
   broadcastTownAssetsUpdated({ asset: getAssetById(row.id) });

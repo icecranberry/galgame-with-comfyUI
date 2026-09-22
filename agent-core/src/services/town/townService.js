@@ -1887,6 +1887,7 @@ export function listTownCharacters() {
   const db = getDb();
   const rows = db.prepare(`
     SELECT c.id, c.name, c.display_name, c.avatar_path,
+           tc.map_id,
            COALESCE(tc.town_enabled, 0) AS town_enabled,
            cc.capabilities_json AS char_capabilities,
            n.id AS linked_npc_id, n.job AS linked_job, n.capabilities_json AS linked_npc_capabilities
@@ -1937,6 +1938,7 @@ export function listTownCharacters() {
       // 立绘 / 小人都是角色自己的小镇素材，没做过就是 null（面板显示空槽）
       portrait,
       townEnabled: !!r.town_enabled,
+      mapId: r.map_id ?? null,
       spriteReady: ready === 2,
       spriteCount: ready,
       sprites,

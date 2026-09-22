@@ -105,6 +105,7 @@ variant="ghost" size="sm" :loading="busy[`reroll:${offer.id}`]" :disabled="batch
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import LinsheTabs from '../ui/LinsheTabs.vue'
 import TownPaperPanel from './TownPaperPanel.vue'
@@ -117,6 +118,7 @@ const props = defineProps({ open: Boolean, worldId: String })
 defineEmits(['close'])
 
 const overview = ref([])
+const town = useTownStore()
 const offers = reactive({})
 const busy = reactive({})
 const errors = reactive({})
@@ -134,9 +136,14 @@ const scopeOptions = [
   { label: '小镇NPC', value: 'npc' },
   { label: '酒馆角色', value: 'character' },
 ]
-const filtered = computed(() => scope.value === 'all'
-  ? overview.value
-  : overview.value.filter(item => item.source === scope.value))
+const filtered = computed(() => {
+  const list = scope.value === 'all'
+    ? overview.value
+    : overview.value.filter(item => item.source === scope.value)
+  if (town.currentMapId == null) return list
+  const isCurrentTown = item => item.mapId != null && Number(item.mapId) === Number(town.currentMapId)
+  return [...list].sort((a, b) => Number(isCurrentTown(b)) - Number(isCurrentTown(a)))
+})
 const scopeEmptyText = computed(() => scope.value === 'character'
   ? '还没有酒馆角色接管的居民拥有服务或打工职责。'
   : '这些居民里没有拥有服务或打工职责的。')

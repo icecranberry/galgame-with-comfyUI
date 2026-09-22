@@ -94,3 +94,31 @@ test('改名拒绝空名字与不存在的地图', async t => {
   assert.equal((await call('PATCH', '/maps/99999', { body: { name: '查无此镇' } })).status, 400);
   assert.equal((await call('PATCH', '/maps/abc', { body: { name: '查无此镇' } })).status, 400);
 });
+
+test('酒馆角色列表返回角色入住的地图，不使用玩家所在地图', t => {
+  const { db, oldTown, newTown } = startWorld(t);
+  const characterId = db.prepare('SELECT id FROM characters ORDER BY id LIMIT 1').get().id;
+  const readCharacter = () => town.listTownCharacters().find(c => c.id === characterId);
+  assert.equal(readCharacter().mapId, null);
+  db.prepare('INSERT INTO town_characters (character_id, map_id, town_enabled) VALUES (?, ?, 1)')
+    .run(characterId, oldTown);
+  assert.equal(readCharacter().mapId, oldTown);
+  assert.equal(readCharacter().townEnabled, true);
+  db.prepare('UPDATE town_characters SET map_id = ? WHERE character_id = ?').run(newTown, characterId);
+  assert.equal(readCharacter().mapId, newTown);
+});
+
+test('新建同名小镇自动递增编号，更新已有地图保留名字', t => {
+  const { db } = startWorld(t);
+  const save = (name, options = { create: true }) => saveMap({ ...options, name, cols: 2, rows: 2,
+    layers: { ground: [[null, null], [null, null]] }, assignResponsibilities: false });
+  const readName = result => db.prepare('SELECT name FROM town_maps WHERE id = ?').get(result.mapId).name;
+  assert.equal(readName(save('新小镇')), '新小镇');
+  assert.equal(readName(save('新小镇')), '新小镇-1');
+  assert.equal(readName(save('新小镇')), '新小镇-2');
+  assert.equal(readName(save('新小镇-1')), '新小镇-3');
+  assert.equal(readName(save('  新小镇  ')), '新小镇-4');
+  const other = save('海风镇');
+  assert.equal(readName(other), '海风镇');
+  assert.equal(readName(save('海风镇', { mapId: other.mapId })), '海风镇');
+});

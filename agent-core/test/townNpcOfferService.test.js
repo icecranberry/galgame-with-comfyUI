@@ -84,6 +84,7 @@ test('overview lists only residents with service/work permissions and counts off
   const overview = offers.listOfferOverview({ worldId: world });
   assert.deepEqual(overview.map(item => item.npcId).sort(), [f.serviceNpc, f.workNpc].sort());
   const work = overview.find(item => item.npcId === f.workNpc);
+  assert.equal(work.mapId, 1);
   assert.equal(work.workCount, 2);
   assert.equal(work.serviceCount, 2);
   assert.deepEqual(work.capabilities, ['service', 'work']);

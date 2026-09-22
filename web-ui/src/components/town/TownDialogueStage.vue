@@ -13,7 +13,7 @@
         </div>
       </figure>
     </div>
-    <div class="td-panel">
+    <div class="td-panel" @click.stop>
       <svg class="td-dialog-shape" viewBox="0 0 600 420" preserveAspectRatio="none" aria-hidden="true">
         <path d="M22 15 L216 8 L406 17 L574 11 L589 44 L582 174 L594 360 L574 401 L351 411 L173 400 L23 408 L9 375 L18 209 L8 53 Z" fill="#fffaf1" stroke="#8d7968" stroke-width="2" vector-effect="non-scaling-stroke" />
         <path d="M29 24 L216 18 L405 26 L567 21 M29 392 L173 385 L350 395 L566 387" fill="none" stroke="#e0c9aa" stroke-width="1.5" vector-effect="non-scaling-stroke" />
@@ -132,7 +132,14 @@ function onEnter(event) {
 }
 // td-panel 以外都算空白：立绘、舞台留白、屏幕其它位置，点一下都能退出对话
 function onStageClick(event) {
+  // 键盘触发的 click 没有坐标，交给各自按钮处理，不算空白点击
+  if (event.detail === 0) return
+  // 面板内的点击已在 .td-panel 上截断冒泡；这里再按目标与坐标兜两层，
+  // 万一目标元素在 mousedown 与 click 之间被重渲染掉、冒泡路径丢失，也不会误关
   if (event.target instanceof Element && event.target.closest('.td-panel')) return
+  const rect = root.value?.querySelector('.td-panel')?.getBoundingClientRect()
+  if (rect && event.clientX >= rect.left && event.clientX <= rect.right
+    && event.clientY >= rect.top && event.clientY <= rect.bottom) return
   emit('close')
 }
 function onKeydown(event) {

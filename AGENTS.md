@@ -8,6 +8,8 @@
 2. 优先复用现有组件和设计模式
 3. 新功能必须融入现有设计语言，不得自行引入新的视觉风格
 4. 修改完成后检查与现有 Toast、世界观、信箱等页面的一致性
+5. UI 切换（如页面、页签、内容区域切换）需要考虑 0.3 秒的过渡动画，避免生硬跳变
+6. 窗口（含弹窗）打开时使用 0.3 秒的渐入动画，关闭时使用 0.3 秒的渐出动画；关闭动画完成后再隐藏或卸载窗口
 
 除非任务明确要求，不要随意重做已有设计或引入新的 UI 体系。
 
@@ -123,4 +125,3 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 1. 数据源两张表：`character_outfits`（角色专属形态/装甲/衣服，每角色同时只启用一套，启用互斥由 `outfitService` 保证；详情卡 UI 入口暂注释隐藏在 `CharacterDetailModal.vue`，搜「暂时隐藏」）、`global_outfits`（通用限时服饰如女仆装 tag 组合，可多套叠加；管理方式未定，`condition_json` 预留注入条件，当前 `enabled` 即生效）
 2. 查询生效外观只走 `outfitService.getActiveOutfits(characterId)`；注入文本格式与着装优先级说明（两者都有 / 只有限时 / 只有专属三种）只改 `buildOutfitInjectionBlocks`，不要在调用点拼
 3. 修改拼接口径（正则、连接符、注入格式）只改 `characterPersona.js`，并同步维护 `agent-core/test/characterPersona.test.js`（含无外观时与旧口径逐字节一致的回归断言）
-

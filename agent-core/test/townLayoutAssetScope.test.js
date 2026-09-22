@@ -71,7 +71,7 @@ function seedAssets(db, specs) {
 }
 
 /** 向导已停在「素材就绪、等布图」这一步（工作台里由批量生图推进到这里） */
-function seedWizardJob(blueprint) {
+function seedWizardJob(blueprint, extra = {}) {
   fs.writeFileSync(STATE_FILE, JSON.stringify({
     status: 'batch_pending',
     config: { worldSettingId: null, npcCount: 1, mapCols: 30, mapRows: 30 },
@@ -81,6 +81,7 @@ function seedWizardJob(blueprint) {
     npcIds: [],
     warnings: [],
     targetMapId: null,
+    ...extra,
   }));
   init.restoreInitJob();
 }
@@ -120,5 +121,23 @@ test('再建一座镇：自动布图只用本镇的素材，不混进老镇的',
   assert.deepEqual([...used].filter(id => oldIds.includes(id)), [], '新镇布局里不能出现老镇的素材');
   for (const id of used) {
     assert.ok(newIds.includes(id), `素材 #${id} 不属于本次向导产出的那一批`);
+  }
+
+  await init.rerollLayout();
+  for (const id of layerAssetIds(init.getInitPreview().layers)) assert.ok(newIds.includes(id));
+  for (const asset of init.getInitPreview().assets) assert.ok(newIds.includes(asset.id), '预览只带本镇引用的素材');
+
+  const draftMap = init.getInitPreview();
+  // 老存档没有名单时，只能从已有草图和小样恢复，不能吸入整个素材库。
+  seedWizardJob(BLUEPRINT, { draftMap });
+  await init.rerollLayout();
+  for (const id of layerAssetIds(init.getInitPreview().layers)) assert.ok(newIds.includes(id));
+
+  for (const extra of [{}, { assetIds: [] }, { assetIds: [newIds[0]] }, { sampleAssetIds: newIds.slice(0, 3) }]) {
+    seedWizardJob(BLUEPRINT, extra);
+    await assert.rejects(init.generateLayout(), /素材不足/);
+    assert.equal(init.getInitState().status, 'failed');
+    assert.match(init.getInitState().error, /只使用本镇素材/);
+    assert.equal(init.getInitPreview(), null, '缺少本镇素材时不生成混入其他小镇素材的预览');
   }
 });

@@ -170,7 +170,7 @@ router.post('/assets', async (req, res) => {
   try {
     const { kind, key, name, desc, meta, worldSettingId } = req.body || {};
     if (!kind || !name) return res.status(400).json({ error: 'kind/name 必填' });
-    const asset = await createAsset({ kind, key, name, desc, meta, worldSettingId });
+    const asset = await createAsset({ kind, key, name, desc, meta, worldSettingId, mapId: getTownMaps().currentMapId });
     res.json({ asset });
   } catch (err) {
     res.status(500).json({ error: err?.message || '生成失败' });
@@ -314,7 +314,8 @@ router.post('/assets/batch', async (req, res) => {
   try {
     const { jobs } = req.body || {};
     if (!Array.isArray(jobs) || jobs.length === 0) return res.status(400).json({ error: 'jobs 为空' });
-    const results = await generateAssetsBatch(jobs.slice(0, 60));
+    const mapId = getTownMaps().currentMapId;
+    const results = await generateAssetsBatch(jobs.slice(0, 60).map(job => ({ ...job, mapId })));
     res.json({ results });
   } catch (err) {
     res.status(500).json({ error: err?.message || '批量生成失败' });

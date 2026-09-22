@@ -20,7 +20,7 @@
     @mouseleave="startJelly('leave')"
     @animationend="endJelly"
   >
-    <span v-if="loading" class="ls-btn__spinner" aria-hidden="true"></span>
+    <span v-if="loading || running" class="ls-btn__spinner" aria-hidden="true"></span>
     <slot></slot>
   </button>
 </template>
@@ -36,6 +36,8 @@ defineProps({
   type: { type: String, default: 'button' },
   disabled: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
+  /** 持续执行提示，保留点击能力（如暂停自动执行） */
+  running: { type: Boolean, default: false },
   /** 宽度撑满父容器 */
   block: { type: Boolean, default: false },
   /** chip 变体的选中态 */

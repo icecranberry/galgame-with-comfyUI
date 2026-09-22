@@ -40,7 +40,7 @@
           </div>
           <div v-if="npcs.length === 0" class="ap-empty">镇上还没有居民，先完成世界初始化吧。</div>
           <div
-            v-for="npc in npcs" :key="npc.id"
+            v-for="npc in sortedNpcs" :key="npc.id"
             class="ap-row" role="button" tabindex="0"
             @click="detail = { type: 'npc', id: npc.id }"
             @keydown.enter="detail = { type: 'npc', id: npc.id }"
@@ -58,9 +58,7 @@
                 <span v-if="npc.job" class="ap-npc-job">{{ npc.job }}</span>
               </div>
               <div class="ap-npc-meta">
-                {{ npc.townEnabled ? (npc.sleepingHint || '在镇上活动') : '已暂停' }} · spirit {{ spriteCount(npc) }}/2
-                <template v-if="npc.characterId"> · 已入邻舍</template>
-                <template v-else> · 未邀请</template>
+                {{ residentTownName(npc) }} · {{ npc.townEnabled ? (npc.sleepingHint || '在镇上活动') : '已暂停' }}
               </div>
               <p v-if="(npc.portrait?.status === 'ready' || npc.sprites?.down?.status === 'ready') && appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus)" class="ap-asset-appearance">{{ appearanceText(npc.portrait?.status === 'ready' ? npc.portrait.appearanceStatus : npc.sprites.down.appearanceStatus) }}</p>
             </div>
@@ -263,7 +261,7 @@
             />
             <div class="ap-npc-info">
               <div class="ap-npc-name">{{ c.displayName }}</div>
-              <div class="ap-npc-meta">spirit {{ c.spriteCount }}/2 · {{ c.townEnabled ? '已入住' : '未入住' }}</div>
+              <div class="ap-npc-meta">spirit {{ c.spriteCount }}/2 · {{ c.townEnabled ? `已入住 · ${residentTownName(c)}` : '未入住' }}</div>
               <p v-if="(c.portrait?.status === 'ready' || c.spriteAssets?.down?.status === 'ready') && appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down)" class="ap-asset-appearance">{{ appearanceText(c.portrait?.status === 'ready' ? c.appearanceStatus?.portrait : c.appearanceStatus?.sprites?.down) }}</p>
             </div>
             <span class="ap-row-arrow">›</span>
@@ -480,6 +478,11 @@ const props = defineProps({ open: Boolean })
 const town = useTownStore()
 const tab = ref('npcs')
 const npcs = ref([])
+const sortedNpcs = computed(() => {
+  if (town.currentMapId == null) return npcs.value
+  const isCurrentTown = npc => npc.mapId != null && Number(npc.mapId) === Number(town.currentMapId)
+  return [...npcs.value].sort((a, b) => Number(isCurrentTown(b)) - Number(isCurrentTown(a)))
+})
 const chars = ref([])
 const settings = ref({})
 const loadingSettings = ref(false), settingsReady = ref(false)
@@ -682,6 +685,11 @@ const detailName = computed(() => detail.value?.type === 'player' ? '我的形�
 
 function spriteCount(npc) {
   return ['down', 'up'].filter(d => npc.sprites?.[d]?.status === 'ready').length
+}
+
+function residentTownName(resident) {
+  if (resident.mapId == null) return '尚未分配小镇'
+  return town.maps.find(map => Number(map.id) === Number(resident.mapId))?.name || `小镇 #${resident.mapId}`
 }
 
 async function loadNpcs() {
@@ -1090,6 +1098,7 @@ watch(() => [props.open, town.snapshot?.worldId, town.snapshot?.worldEpoch], ([o
   ++settingsScope; savingSettings.value = false; loadingSettings.value = false; settingsReady.value = false
   settingsError.value = ''; settingsSaved.value = false
   if (open) {
+    town.fetchMaps().catch(err => console.warn('[town-admin] maps load failed:', err?.message))
     loadSettings()
     loadNpcs()
     loadChars()

@@ -265,9 +265,11 @@ export function deleteNpcOffers({ worldId = 'default', npcId, kind = null } = {}
 export function listOfferOverview({ worldId = 'default' } = {}) {
   const db = getDb();
   const npcs = db.prepare(`
-    SELECT n.*, c.display_name AS character_name, cc.capabilities_json AS character_capabilities
+    SELECT n.*, c.display_name AS character_name, cc.capabilities_json AS character_capabilities,
+           COALESCE(tc.map_id, n.map_id) AS resident_map_id
     FROM town_npcs n
     LEFT JOIN characters c ON c.id = n.character_id
+    LEFT JOIN town_characters tc ON tc.character_id = c.id
     LEFT JOIN town_character_capabilities cc ON cc.character_id = n.character_id
     ORDER BY n.id
   `).all();
@@ -286,6 +288,7 @@ export function listOfferOverview({ worldId = 'default' } = {}) {
     const tally = byNpc.get(npc.id) || { service: 0, work: 0 };
     return {
       npcId: npc.id,
+      mapId: npc.resident_map_id ?? null,
       characterId,
       source: characterId ? 'character' : 'npc',
       displayName: npc.display_name || npc.character_name || '',
@@ -305,7 +308,7 @@ export function listOfferOverview({ worldId = 'default' } = {}) {
  */
 function listPendingCharacterProfiles(db) {
   const rows = db.prepare(`
-    SELECT c.id, c.display_name, cc.capabilities_json AS character_capabilities
+    SELECT c.id, c.display_name, tc.map_id, cc.capabilities_json AS character_capabilities
     FROM characters c
     JOIN town_characters tc ON tc.character_id = c.id AND tc.town_enabled = 1
     LEFT JOIN town_character_capabilities cc ON cc.character_id = c.id
@@ -314,6 +317,7 @@ function listPendingCharacterProfiles(db) {
   `).all();
   return rows.map(row => ({
     npcId: null,
+    mapId: row.map_id ?? null,
     characterId: row.id,
     source: 'character',
     pendingProfile: true,

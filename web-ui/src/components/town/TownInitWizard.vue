@@ -5,6 +5,15 @@
         <div class="wiz-head">
           <span class="wiz-title">{{ addingTown ? '再建一座小镇' : '小镇初始化' }}</span>
           <span class="wiz-step-hint">{{ stepHint }}</span>
+          <linshe-button
+            v-if="localStep !== 'done'"
+            variant="secondary" size="sm" class="wiz-auto-btn"
+            :running="autoRun"
+            :aria-pressed="autoRun"
+            @click="toggleAuto"
+          >
+            {{ autoRun ? '暂停自动' : '自动推进' }}
+          </linshe-button>
           <linshe-button variant="icon" size="sm" aria-label="关闭" @click="tryClose">✕</linshe-button>
         </div>
 
@@ -33,6 +42,7 @@
         </div>
         </div>
 
+        <div v-if="autoNotice" class="wiz-auto-notice">{{ autoNotice }}</div>
         <div class="wiz-body">
           <Transition name="wiz-slide" mode="out-in">
             <!-- ── 1. 配置 ── -->
@@ -416,7 +426,7 @@
 
             <!-- 完成 -->
             <div v-else-if="localStep === 'done'" key="done">
-              <p class="wiz-desc">🎉 小镇已经开张！居民们正在陆续入住，作息正在后台生成。</p>
+              <p class="wiz-desc">🎉 小镇已经开张！居民们正在陆续入住，作息、服务、打工与商品正在后台生成。</p>
               <linshe-button variant="primary" class="wiz-go" @click="finish">进入小镇</linshe-button>
             </div>
           </Transition>
@@ -441,6 +451,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
+import { AUTO_ACTION, resolveAutoAction } from '../../utils/townInitAuto.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownCapabilityPicker from './TownCapabilityPicker.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
@@ -486,6 +497,12 @@ const commitBusy = ref(false)
 const assetsBusy = ref(false)
 const playerBusy = ref(false)
 const playerKit = reactive({ portrait: null, portraitId: null, down: null, downId: null, up: null, upId: null, portraitAsset: null, spriteAssets: {} })
+// 自动推进：从当前步一路推进到开镇完成，可随时暂停 / 继续
+const autoRun = ref(false)
+const autoNotice = ref('')
+const playerKitReady = computed(() => !!(
+  playerKit.portraitAsset && playerKit.spriteAssets?.down && playerKit.spriteAssets?.up
+))
 const manager = reactive({ open: false, asset: null, title: '', context: null })
 const editorAssetBusy = ref(false)
 const editorHiresBusy = ref(false)
@@ -688,7 +705,11 @@ function syncBpForm(force = false) {
   const bp = initState.value?.blueprint
   if (!bp) return
   const json = JSON.stringify(bp)
-  if (!force && json === lastBpJson) return // 轮询拿到相同内容时不动表单（保住编辑中状态与 uid）
+  if (!force && json === lastBpJson) {
+    // 内容没变也要保证步骤能往前走：蓝图就绪后不该停在配置步
+    if (localStep.value === 'config' && !addingTown.value) localStep.value = 'groundList'
+    return
+  }
   lastBpJson = json
   bpForm.styleTags = generationStyleTags || bp.styleTags || DEFAULT_STYLE_TAGS
   const sections = [
@@ -804,7 +825,7 @@ async function guard(fn) {
   if (busy.value) return
   busy.value = true
   try {
-    await fn()
+    return await fn()
   } catch (err) {
     console.warn('[wizard]', err?.message)
     town.fetchInitState().catch(() => {})
@@ -815,7 +836,7 @@ async function guard(fn) {
 }
 
 function start() {
-  guard(async () => {
+  return guard(async () => {
     await api.startTownInit({
       worldSettingId: form.worldSettingId,
       npcCount: form.npcCount,
@@ -1281,7 +1302,7 @@ function applyPlayerKit(kit) {
 }
 
 function confirmInit() {
-  guard(async () => {
+  return guard(async () => {
     await api.confirmTownInit()
     await town.fetchInitState()
     localStep.value = 'done'
@@ -1289,12 +1310,159 @@ function confirmInit() {
 }
 
 function finish() {
+  stopAuto()
   emit('applied')
   emit('close')
 }
 
 function tryClose() {
+  stopAuto()
   emit('close')
+}
+
+//  自动推进：从当前步一路推进到开镇完成，可随时暂停 / 继续 
+
+const AUTO_MAX_TRIES = 10
+let autoToken = 0
+let autoLastStep = null
+let autoTries = 0
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
+
+function stopAuto(notice = '') {
+  const wasRunning = autoRun.value
+  autoRun.value = false
+  autoToken += 1
+  if (notice) autoNotice.value = notice
+  else if (wasRunning) autoNotice.value = ''
+}
+
+function toggleAuto() {
+  if (autoRun.value) {
+    stopAuto()
+    autoNotice.value = '已暂停，点「自动推进」接着跑'
+    return
+  }
+  autoNotice.value = ''
+  autoLastStep = null
+  autoTries = 0
+  autoRun.value = true
+  autoLoop()
+}
+
+/** 有前排动作在跑时先让路，避免并发堆叠 */
+function autoBusy() {
+  return busy.value || promptBusy.value || commitBusy.value || assetsBusy.value
+    || playerBusy.value || layoutBusy.value || rosterBusy.value || stepGenerating.value
+}
+
+function autoState() {
+  return {
+    step: localStep.value,
+    status: initState.value?.status || '',
+    addingTown: addingTown.value,
+    hasBlueprint: !!initState.value?.blueprint,
+    listCanSkip: listCanSkip.value,
+    stepReady: stepReadyCount.value,
+    stepTotal: stepTotal.value,
+    npcCount: bpForm.npcs.length,
+    personaReady: personaReadyCount.value,
+    portraitReady: npcReadyCount.value,
+    playerReady: playerKitReady.value,
+    error: stepError.value
+      || (initState.value?.status === 'failed' ? (initState.value?.error || '生成失败') : ''),
+  }
+}
+
+/** 素材步只补缺的那些，不把已经满意的图重画一遍 */
+async function autoGenerateStep() {
+  await saveBlueprint()
+  for (const item of stepItems.value) {
+    if (item.busy) continue
+    if (assetOf(item)?.status === 'ready') continue
+    await genAssetItem(item, false)
+  }
+}
+
+function autoNextStep() {
+  if (localStep.value === 'npcs') localStep.value = 'player'
+  else nextFromAssetStep()
+}
+
+async function runAutoAction(decision) {
+  switch (decision.action) {
+    case AUTO_ACTION.SYNC:
+      addingTown.value = false
+      syncBpForm()
+      // syncBpForm 可能因为蓝图内容没变而早退，这里兜底把步骤切过去（包括刷新后停在 working 的情况）
+      if (initState.value?.blueprint && (localStep.value === 'config' || localStep.value === 'working')) {
+        localStep.value = 'groundList'
+      }
+      return true
+    case AUTO_ACTION.START:
+      await start()
+      return true
+    case AUTO_ACTION.LIST_PROMPTS:
+      await confirmAssetList()
+      return true
+    case AUTO_ACTION.NEXT_FROM_LIST:
+      await goNextFromList()
+      return true
+    case AUTO_ACTION.GENERATE_ASSETS:
+      await autoGenerateStep()
+      return true
+    case AUTO_ACTION.NEXT_STEP:
+      autoNextStep()
+      return true
+    case AUTO_ACTION.COMMIT_NPCS:
+      await commitNpcs()
+      return true
+    case AUTO_ACTION.GEN_NPC_ASSETS:
+      await genAllNpcAssets()
+      return true
+    case AUTO_ACTION.GEN_PLAYER:
+      await refreshPlayerKit()
+      return true
+    case AUTO_ACTION.PLAN_TOWN:
+      await startTownPlanning()
+      return true
+    case AUTO_ACTION.CONFIRM:
+      await confirmInit()
+      return true
+    case AUTO_ACTION.DONE:
+      stopAuto('小镇已创建完成，点「进入小镇」即可入园')
+      return false
+    case AUTO_ACTION.STOP:
+      stopAuto(decision.reason || '自动推进已停止')
+      return false
+    default:
+      return false
+  }
+}
+
+async function autoLoop() {
+  const token = ++autoToken
+  while (autoRun.value && token === autoToken) {
+    if (autoBusy()) { await sleep(800); continue }
+    const decision = resolveAutoAction(autoState())
+    // 纯等待（后端还在跑）不记失败次数，免得长任务被误判成卡死
+    if (decision.action === AUTO_ACTION.WAIT) { await sleep(1200); continue }
+    const step = localStep.value
+    if (step !== autoLastStep) { autoLastStep = step; autoTries = 0; stepError.value = '' }
+    else autoTries += 1
+    if (autoTries > AUTO_MAX_TRIES) {
+      stopAuto('这一步自动推进卡住了，先手动确认一下再继续')
+      break
+    }
+    let acted = false
+    try {
+      acted = await runAutoAction(decision)
+    } catch (err) {
+      console.warn('[wizard auto]', err?.message)
+    }
+    if (!autoRun.value || token !== autoToken) break
+    await sleep(acted ? 500 : 1000)
+  }
 }
 
 /** 以服务器为准同步「我」的三张素材：清掉跨世界 / 已被删除留下的幽灵缩略图 */
@@ -1353,7 +1521,12 @@ function stopPolling() {
 }
 
 // 蓝图到位后同步表单
-watch(() => initState.value?.blueprint, (bp) => { if (bp) syncBpForm() })
+watch(() => initState.value?.blueprint, (bp) => {
+  if (!bp) return
+  syncBpForm()
+  // 刷新后停在「AI 正在思考」时，蓝图一到就把它送进清单步
+  if (localStep.value === 'working') localStep.value = 'groundList'
+})
 watch([() => bpForm.styleTags, stepParams], scheduleGenerationSettingsSave, { deep: true })
 watch(localStep, (v) => {
   // 地皮清单/建筑清单与各自生成步骤独立，切换时不会重建提示词
@@ -1413,6 +1586,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopAuto()
   stopPolling()
   if (generationSaveTimer) {
     clearTimeout(generationSaveTimer)
@@ -1485,6 +1659,19 @@ onBeforeUnmount(() => {
 
 .wiz-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
 .wiz-step-hint { flex: 1; font-size: 11px; color: var(--text-secondary); }
+.wiz-auto-btn { flex-shrink: 0; }
+.wiz-auto-notice {
+  margin: 0 14px 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(124, 176, 116, 0.12);
+  border: 1px solid rgba(124, 176, 116, 0.28);
+  color: #5c7d55;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 
 .wiz-alpha-banner {
   margin: 2px 12px 10px;

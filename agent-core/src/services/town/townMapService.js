@@ -99,6 +99,25 @@ export function getMapRow(mapId = null) {
   return { ...row, layers };
 }
 
+/** 小镇素材库成员独立于地图摆放；移除摆放不会移除素材库成员。 */
+export function addMapAssets(mapId, assetIds) {
+  const db = getDb();
+  const insert = db.prepare(`INSERT OR IGNORE INTO town_map_assets (map_id, asset_id)
+    SELECT ?, id FROM town_assets WHERE id = ? AND EXISTS (SELECT 1 FROM town_maps WHERE id = ?)`);
+  db.transaction(() => {
+    for (const id of new Set(assetIds || [])) insert.run(mapId, id, mapId);
+  })();
+}
+
+export function getMapLibraryAssets(mapId) {
+  const map = getMapRow(mapId);
+  if (!map) return [];
+  // 兼容旧地图；成员只增不减，未摆放的素材仍保留。
+  addMapAssets(map.id, getLayersAssets(map.layers).map(a => a.id));
+  const ids = getDb().prepare('SELECT asset_id FROM town_map_assets WHERE map_id = ?').all(map.id);
+  return getLayersAssets({ objects: ids.map(row => ({ assetId: row.asset_id })) });
+}
+
 /** 图层引用的全部素材（去重，含 meta） */
 export function getLayersAssets(layers) {
   const db = getDb();
@@ -258,6 +277,7 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
       : db.prepare('SELECT id, version FROM town_maps ORDER BY id LIMIT 1').get());
     if (requestedId != null && !existing && !create) throw new Error(`地图不存在: ${requestedId}`);
     const layersJson = JSON.stringify(layers);
+    if (existing) addMapAssets(existing.id, getLayersAssets(getMapRow(existing.id)?.layers).map(a => a.id));
     let mapId;
     let version;
     if (existing) {
@@ -271,13 +291,24 @@ export function saveMap({ name, cols, rows, tileSize = 32, layers, worldSettingI
       mapId = existing.id;
     } else {
       version = 1;
+      // 在创建事务内分配名字；带编号的重名继续递增，避免出现「小镇-1-1」。
+      const names = new Set(db.prepare('SELECT name FROM town_maps').all().map(row => row.name));
+      let uniqueName = String(name || '').trim() || '新小镇';
+      if (names.has(uniqueName)) {
+        const suffix = uniqueName.match(/^(.*)-(\d+)$/);
+        const base = suffix ? suffix[1] : uniqueName;
+        let index = suffix ? BigInt(suffix[2]) + 1n : 1n;
+        while (names.has(`${base}-${index}`)) index++;
+        uniqueName = `${base}-${index}`;
+      }
       const r = db.prepare(`
         INSERT INTO town_maps (name, grid_cols, grid_rows, layers_json, tile_size, world_setting_id, version)
         VALUES (?, ?, ?, ?, ?, ?, 1)
-      `).run(name, cols, rows, layersJson, tileSize, worldSettingId);
+      `).run(uniqueName, cols, rows, layersJson, tileSize, worldSettingId);
       mapId = Number(r.lastInsertRowid);
     }
 
+    addMapAssets(mapId, getLayersAssets(layers).map(a => a.id));
     if (Array.isArray(locations)) {
       const oldLocations = db.prepare('SELECT id, key, business_kind, capabilities_json FROM town_locations WHERE map_id = ?').all(mapId);
       const oldByKey = new Map(oldLocations.map(loc => [loc.key, loc]));

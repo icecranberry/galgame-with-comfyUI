@@ -652,6 +652,12 @@ function initSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_town_assets_kind ON town_assets(kind, status);
 
+    CREATE TABLE IF NOT EXISTS town_map_assets (
+      map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,
+      asset_id INTEGER NOT NULL REFERENCES town_assets(id) ON DELETE CASCADE,
+      PRIMARY KEY (map_id, asset_id)
+    );
+
     CREATE TABLE IF NOT EXISTS town_locations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       map_id INTEGER NOT NULL REFERENCES town_maps(id) ON DELETE CASCADE,

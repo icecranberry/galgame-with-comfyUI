@@ -49,7 +49,7 @@
           </svg>
         </linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="uiLocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
-        <linshe-button variant="ghost" size="sm" :disabled="uiLocked" @click="openTownEvents" :title="npcEncounterCount ? `镇上有 ${npcEncounterCount} 段进行中的奇遇` : '镇上暂时没有进行中的奇遇'">奇遇{{ npcEncounterCount ? ` · ${npcEncounterCount}` : '' }}</linshe-button>
+        <linshe-button v-if="npcEncounterCount > 0" variant="ghost" size="sm" :disabled="uiLocked" @click="openTownEvents" :title="`镇上有 ${npcEncounterCount} 段进行中的奇遇`">奇遇 · {{ npcEncounterCount }}</linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="uiLocked || !town.maps.length" :aria-expanded="showTravelPanel"
           :title="town.maps.length > 1 ? '去别的小镇看看' : '世界上只有一座小镇'" @click="openTravelPanel">出行</linshe-button>
         <linshe-switch v-if="hdActive" v-model="tiltShift" size="sm" on-text="移轴" off-text="移轴" aria-label="远景移轴" />
@@ -190,9 +190,8 @@
         @story="openResidentStory" />
     </TownPaperPanel>
     <!-- 出行：镇子目录。每行一个目的地（整行热区，用 role=radio 而不是按钮），底部唯一主操作「启程」 -->
-    <TownPaperPanel v-if="showTravelPanel" :open="true" title="出行" kicker="邻舍小镇"
-      :busy="travelLoading" :refreshing="travelLoading" :refresh-disabled="travelLoading || traveling"
-      footer-text="路费不记，出发就当到了" @close="closeTravelPanel" @refresh="refreshTravelMaps">
+    <TownPaperPanel v-if="showTravelPanel" :open="true" hide-footer title="出行" kicker="邻舍小镇"
+      :busy="travelLoading" @close="closeTravelPanel">
       <div class="travel-body">
         <div class="tl-notice" aria-live="polite">
           <p v-if="travelError" class="tl-error" role="alert">{{ travelError }}</p>
@@ -200,7 +199,10 @@
           <p v-if="travelLoading && !town.maps.length" role="status">正在读取地图…</p>
         </div>
         <section aria-label="可以前往的小镇">
-          <h3>可以前往的小镇</h3>
+          <div class="travel-list-header">
+            <h3>可以前往的小镇</h3>
+            <linshe-button variant="secondary" size="sm" :disabled="traveling || renameBusy" @click="openNewTown">新建小镇</linshe-button>
+          </div>
           <div class="travel-list" role="radiogroup" aria-label="目的地">
             <div v-for="m in town.maps" :key="m.id" class="travel-row"
               :class="{ 'is-current': m.id === town.currentMapId, 'is-picked': m.id === travelTargetId,
@@ -1221,7 +1223,12 @@ function onTownApplied() {
 // 后者不续跑上一次的完成态，直接从配置步重新选世界观。
 const wizardNewTown = ref(false)
 function openFirstTown() { wizardNewTown.value = false; showWizard.value = true }
-function openNewTown() { showAdmin.value = false; wizardNewTown.value = true; showWizard.value = true }
+function openNewTown() {
+  closeTravelPanel()
+  showAdmin.value = false
+  wizardNewTown.value = true
+  showWizard.value = true
+}
 
 // ── 渲染 ──
 
@@ -1984,7 +1991,8 @@ async function startTravel() {
 .travel-body .tl-notice:empty { display: none; }
 .travel-body .tl-notice { font-size: 13px; }
 .travel-body .tl-error { margin: 0; color: #b8574f; }
-.travel-body h3 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+.travel-list-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 8px; }
+.travel-body h3 { font-size: 16px; margin: 0; font-weight: 600; }
 .travel-body .tl-muted { margin: 0; color: #918278; font-size: 13px; }
 .travel-list { display: flex; flex-direction: column; gap: 8px; }
 .travel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #fffaf5; border: 2px solid transparent; border-radius: 14px; cursor: pointer; text-align: left; }

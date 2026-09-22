@@ -20,6 +20,7 @@ import { getMapRow, getLayersAssets, listMaps, saveMap, buildWalkGridFromLayers,
 import { createNpc, generateRoutine, generateNpcSprites, updateNpc, getNpc, isPersonaCard } from './townNpcService.js';
 import { broadcastTownInitProgress, broadcastTownMapUpdated } from './townBus.js';
 import { generateLocalLayout } from './townLayoutGenerator.js';
+import { addMapAssets, getMapLibraryAssets } from './townMapService.js';
 import { refineTownDraftWithLLM } from './townLayoutAI.js';
 import { prepareTownBlueprintResponsibilities, townBuildingKind, townBusinessKinds, TOWN_BUSINESS_ROLES } from './townResponsibilityDefinitions.js';
 import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
@@ -69,14 +70,14 @@ function claimOwnedAssets(ids) {
  *
  * 多地图下全世界共用一张 town_assets 表，若直接 listAssets() 取全量，新镇会摆上老镇的地皮和建筑
  * （实测：小镇 B 的布局里混进了小镇 A 的草地、石板路与全部 9 栋楼）。改成只取本次向导产出的那一批。
- * 改动前落盘的老存档没有名单，退回全量以免卡住进行中的向导（重新开镇即按新口径走）。
+ * 老存档只从小样和已有草图恢复明确引用的素材；名单缺失时绝不退回全库。
  */
 function ownedLayoutAssets() {
   const ready = listAssets({}).filter(a => a.status === 'ready' && LAYOUT_ASSET_KINDS.includes(a.kind));
-  const owned = new Set(job?.assetIds || []);
+  const owned = new Set((job?.assetIds || []).map(Number));
   if (owned.size === 0) {
-    console.warn('[townInit] 向导存档缺少素材名单，退回全量素材布图（重新开镇即可修正）');
-    return ready;
+    for (const id of job?.sampleAssetIds || []) owned.add(Number(id));
+    for (const asset of getLayersAssets(job?.draftMap?.layers)) owned.add(asset.id);
   }
   return ready.filter(a => owned.has(a.id));
 }
@@ -88,6 +89,18 @@ function persistJob() {
   } catch (err) {
     console.warn('[townInit] persist job failed:', err?.message);
   }
+}
+
+function restoreCompletedJobLibrary() {
+  if (job?.status !== 'done') return;
+  const maps = listMaps();
+  const matched = maps.filter(map => {
+    if (job.targetMapId != null) return map.id === job.targetMapId;
+    const layers = getMapRow(map.id)?.layers;
+    return layers && job.draftMap?.layers && ['ground', 'road', 'objects'].every(
+      key => JSON.stringify(job.draftMap.layers[key]) === JSON.stringify(layers[key]));
+  });
+  if (matched.length === 1) addMapAssets(matched[0].id, [...(job.assetIds || []), ...(job.sampleAssetIds || [])]);
 }
 
 function setStatus(status, extraMsg = '') {
@@ -104,6 +117,7 @@ export function restoreInitJob() {
     const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
     if (!raw || typeof raw !== 'object') return;
     job = { ...defaultJob(), ...raw };
+    restoreCompletedJobLibrary();
     // 旧 job 迁移：蓝图里塞在 persona 的一句话人设归位到 brief（口径同 updateBlueprint）
     if (job.blueprint) {
       try { job.blueprint = normalizeBlueprint(job.blueprint, job.config || defaultJob().config); }
@@ -145,7 +159,7 @@ export function getInitState() {
 export function getInitPreview() {
   if (!job?.draftMap) return null;
   const { layers, name, cols, rows, tileSize } = job.draftMap;
-  return { name, cols, rows, tileSize: tileSize || 32, layers, assets: listAssets({}).filter(a => a.status === 'ready') };
+  return { name, cols, rows, tileSize: tileSize || 32, layers, assets: getLayersAssets(layers).filter(a => a.status === 'ready') };
 }
 
 function enqueueStep(fn) {
@@ -673,7 +687,7 @@ export function generateLayout() {
 
     const ready = ownedLayoutAssets();
     if (ready.length < 4) {
-      setStatus('failed', '可用素材不足，请先完成批量生成');
+      setStatus('failed', '本次小镇可用素材不足，请先完成批量生成；自动布局只使用本镇素材');
       throw new Error('素材不足');
     }
 
@@ -1177,6 +1191,8 @@ export function confirmInit() {
       assignResponsibilities: false,
     });
     db.prepare('DELETE FROM town_agent_state WHERE map_id = ?').run(saved.mapId);
+    addMapAssets(saved.mapId, [...(job.assetIds || []), ...(job.sampleAssetIds || [])]);
+    job.targetMapId = saved.mapId;
 
     // 2. 从已提交的地点读取真实 id，供蓝图出生点/作息分配使用。
     const locationIdByKey = new Map(
@@ -1268,6 +1284,17 @@ export function confirmInit() {
       }
     })();
 
+    // 7. 经营内容后台补齐：有权限的居民生成「服务 / 打工 / 商品」，与开镇解耦，静默跑
+    (async () => {
+      try {
+        const { seedTownNpcOfferings } = await import('./townNpcOfferingSeed.js');
+        const summary = await seedTownNpcOfferings({ mapId: saved.mapId });
+        console.log(`[townInit] npc offerings seeded: offers=${summary.offers} stock=${summary.stock} skipped=${summary.skipped} failed=${summary.failed}`);
+      } catch (err) {
+        console.warn('[townInit] npc offerings seed stopped:', err?.message || err);
+      }
+    })();
+
     broadcastTownMapUpdated({ mapId: saved.mapId, version: saved.version });
     setStatus('done', `开镇成功！version=${saved.version}`);
     job.draftMap = draft; // 保留 draft 供查看
@@ -1332,10 +1359,11 @@ export function relayoutWorld() {
     const desiredSize = Math.max(30, Math.min(80, parseInt(config.town.mapSize, 10) || mapRow.grid_cols || 50));
     const cols = desiredSize;
     const rows = desiredSize;
-    // 复用「这张图现在摆着的素材」当素材池：世界里有多套素材时，别镇的地皮与建筑不能混进来
-    const ready = getLayersAssets(mapRow.layers)
+    restoreCompletedJobLibrary();
+    // 当前小镇完整素材库，包含尚未摆放或已从地图移除的素材。
+    const ready = getMapLibraryAssets(mapRow.id)
       .filter(a => a.status === 'ready' && LAYOUT_ASSET_KINDS.includes(a.kind));
-    if (ready.length < 4) return { ok: false, error: '可用素材不足，无法重新布局' };
+    if (ready.length < 4) return { ok: false, error: '当前小镇素材库可用素材不足，请先添加素材；重新布局只使用本镇素材库的素材' };
 
     const db = getDb();
     const npcRows = db.prepare('SELECT display_name FROM town_npcs WHERE COALESCE(character_managed, 0) = 0 ORDER BY id').all();

@@ -17,11 +17,11 @@ const { resetClient } = await import('../src/llm/llm-client.js');
 resetClient();
 const { getDb, closeDb } = await import('../src/db/index.js');
 const town = await import('../src/services/town/townService.js');
-const { saveMap, getMapRow } = await import('../src/services/town/townMapService.js');
+const { saveMap, getMapRow, addMapAssets, getMapLibraryAssets } = await import('../src/services/town/townMapService.js');
 const init = await import('../src/services/town/townInitService.js');
 
 // 管理面板重新布局的多地图回归：素材池曾经取全量，于是重排小镇 A 会被摆上小镇 B 的地皮与建筑。
-// 现在只认「这张图自己正在用的那批素材」。
+// 按小镇素材库归属隔离，尚未摆放的成员也要参与重排。
 
 /** 本镇（A）在用的素材 */
 const LOCAL = [
@@ -64,7 +64,7 @@ function layerAssetIds(layers) {
   return ids;
 }
 
-test('重新布局：只用这张图自己在用的素材，别的镇的素材不参与', async t => {
+test('重新布局：使用本镇完整素材库，包含未摆放素材，隔离其他小镇', async t => {
   config.dbPath = ':memory:';
   config.features.town = true; config.features.townLLM = false;
   Object.assign(config.town, { economyEnabled: false, liquidityEnabled: false,
@@ -76,7 +76,7 @@ test('重新布局：只用这张图自己在用的素材，别的镇的素材�
   const other = seedAssets(db, OTHER_TOWN);
   assert.equal(other.length > 0, true);
 
-  // 本镇的地图上摆着自己那一整套素材（这是重排时的素材池：「复用现有素材」）
+  // 已有地图引用可恢复素材库归属，但不是素材库的全部成员。
   const ground = Array.from({ length: ROWS }, () => Array(COLS).fill(local[0]));
   for (let y = 0; y < 6; y++) for (let x = 0; x < COLS; x++) ground[y][x] = local[1];
   const road = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
@@ -92,6 +92,17 @@ test('重新布局：只用这张图自己在用的素材，别的镇的素材�
   db.prepare("INSERT INTO town_players (id, display_name, grid_x, grid_y, map_id) VALUES ('me', '玩家', 15, 15, ?)")
     .run(before.mapId);
 
+  const [unplaced] = seedAssets(db, [{ kind: 'building', key: 'local_library', name: '本镇图书馆', footprint: { w: 3, h: 2 } }]);
+  // 旧的已完成向导没有目标地图 id，也要按匹配的草图恢复全部产出。
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ status: 'done', assetIds: [...local, unplaced],
+    draftMap: { layers: getMapRow(before.mapId).layers } }));
+  init.restoreInitJob();
+  assert.ok(getMapLibraryAssets(before.mapId).some(a => a.id === unplaced));
+  init.cancelInit(); // 下一次向导清空存档也不会丢掉素材库归属。
+  addMapAssets(before.mapId, [unplaced]);
+  local.push(unplaced);
+  assert.ok(!layerAssetIds(before.layers).has(unplaced), '新建筑在素材库中，但尚未摆放');
+
   town.startTownScheduler();
   town.touchTownViewer();
   t.after(() => { town.stopTownScheduler(); closeDb(); if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE); });
@@ -103,7 +114,31 @@ test('重新布局：只用这张图自己在用的素材，别的镇的素材�
   const after = getMapRow(before.mapId);
   assert.equal(after.name, '老镇');
   const used = layerAssetIds(after.layers);
+  assert.ok(used.has(unplaced), '重排应使用素材库里未摆放过的建筑');
   assert.ok(used.size >= 4, `重排后确实铺开了素材（实际 ${used.size} 张）`);
   assert.deepEqual([...used].filter(id => other.includes(id)), [], '别的镇的素材不能出现在本镇的重新布局里');
   for (const id of used) assert.ok(local.includes(id), `素材 #${id} 不属于这张图在用的那一批`);
+
+  // 用户手动跨镇添加建筑后，它已是当前地图的一部分，后续重新布局应允许使用。
+  after.layers.objects.push({ id: 9999, assetId: other[2], x: 2, y: 2, flip: false });
+  saveMap({ mapId: before.mapId, name: after.name, cols: COLS, rows: ROWS, layers: after.layers });
+  assert.equal((await init.relayoutWorld()).ok, true);
+  const manuallyExtended = layerAssetIds(getMapRow(before.mapId).layers);
+  assert.ok(manuallyExtended.has(other[2]), '手动加入的跨镇建筑可以参与重新布局');
+  for (const id of manuallyExtended) assert.ok(local.includes(id) || id === other[2]);
+
+  const sparseLayers = { ground, road, objects: [] };
+  saveMap({ mapId: before.mapId, name: after.name, cols: COLS, rows: ROWS, layers: sparseLayers });
+  assert.ok(getMapLibraryAssets(before.mapId).some(a => a.id === unplaced), '从地图移除建筑仍保留素材库成员');
+  assert.equal((await init.relayoutWorld()).ok, true, '地图摆放不足不影响使用完整素材库重排');
+  assert.ok(layerAssetIds(getMapRow(before.mapId).layers).has(unplaced));
+
+  // 同世界观的另一座镇没有共享成员；全库库存不能补齐本镇不足的素材。
+  const emptyTown = saveMap({ create: true, name: '空镇', cols: COLS, rows: ROWS,
+    layers: { ground: Array.from({ length: ROWS }, () => Array(COLS).fill(other[0])), road: [], objects: [] } });
+  assert.deepEqual(getMapLibraryAssets(emptyTown.mapId).map(a => a.id), [other[0]]);
+  assert.equal(town.travelPlayer({ targetMapId: emptyTown.mapId }).ok, true);
+  const insufficient = await init.relayoutWorld();
+  assert.equal(insufficient.ok, false);
+  assert.match(insufficient.error, /只使用本镇素材库/);
 });
