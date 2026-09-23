@@ -697,14 +697,27 @@ type="range" min="0" max="1" step="0.1"
             </div>
           </div>
           <div v-else key="novelai" class="image-connection-fields">
-            <p class="fd">NovelAI 图像服务通过兼容接口连接；API Key 会保存在本机设置中。生图固定单张，并使用这里设置的分辨率和参数，不跟随系统分辨率。免费标准档适用尺寸：512×512、832×1216、1216×832、1024×1024，步数上限为 28。</p>
-            <label class="novelai-setting-label" for="novelai-url">接口地址</label>
-            <linshe-input id="novelai-url" v-model="novelaiUrl" class="fi" placeholder="填写 NovelAI 兼容接口地址" @input="markConnDirty" />
+            <p class="fd">NovelAI 生图固定单张，使用这里设置的分辨率和参数，不跟随系统分辨率。免费标准档适用尺寸：512×512、832×1216、1216×832、1024×1024，步数上限为 28。</p>
+            <div class="novelai-api-mode-row">
+              <div class="novelai-api-mode-toggle">
+                <span>官方 API</span>
+                <linshe-switch v-model="novelaiApiFormatOfficial" aria-label="使用 NovelAI 官方 API" @change="markConnDirty" />
+              </div>
+              <linshe-input
+                id="novelai-url"
+                v-model="novelaiUrl"
+                class="novelai-api-url"
+                placeholder="接口地址"
+                aria-label="NovelAI 接口地址"
+                @input="markConnDirty"
+              />
+            </div>
+            <p class="novelai-model-hint">{{ novelaiApiFormatOfficial ? '官方 API 直连 NovelAI。' : '中转站模式使用上方地址。' }}保存后生效。</p>
             <div class="novelai-model-row">
-              <linshe-select v-model="novelaiModel" class="novelai-model-select" :options="novelaiModels" placeholder="请先自动获取模型" @update:model-value="markConnDirty" />
+              <linshe-select v-model="novelaiModel" class="novelai-model-select" :options="novelaiModels" searchable allow-free-input placeholder="请先自动获取模型" @update:model-value="markConnDirty" />
               <linshe-button variant="secondary" size="md" :loading="novelaiModelsLoading" @click="fetchNovelaiModels">自动获取</linshe-button>
             </div>
-            <p v-if="novelaiModels.length === 0" class="novelai-model-hint">填写 API Key 后点击“自动获取”，读取当前接口提供的模型。</p>
+            <p v-if="novelaiModels.length === 0" class="novelai-model-hint">填写 API Key 后点击“自动获取”，读取{{ novelaiApiFormatOfficial ? '官方 API' : '当前中转站' }}提供的模型。</p>
             <label class="novelai-setting-label" for="novelai-quality-prompt">质量提示词</label>
             <linshe-input
               id="novelai-quality-prompt"
@@ -718,6 +731,13 @@ type="range" min="0" max="1" step="0.1"
               id="novelai-artist"
               v-model="novelaiArtist"
               placeholder="例如：@ebora"
+              @input="markConnDirty"
+            />
+            <label class="novelai-setting-label" for="novelai-negative-prompt">反向提示词</label>
+            <linshe-input
+              id="novelai-negative-prompt"
+              v-model="novelaiNegativePrompt"
+              placeholder="输入希望避免出现的内容，留空表示不额外限制"
               @input="markConnDirty"
             />
             <div class="novelai-resolution-field">
@@ -758,7 +778,7 @@ type="range" min="0" max="1" step="0.1"
               </div>
               <linshe-slider id="novelai-guidance" v-model="novelaiGuidance" :min="0" :max="10" :step="0.1" aria-label="NovelAI 引导强度" @update:model-value="markConnDirty" />
             </div>
-            <label class="novelai-setting-label" for="novelai-api-key">NovelAI API Key（接口密钥）</label>
+            <label class="novelai-setting-label" for="novelai-api-key">NovelAI API Key（按当前接口格式发送）</label>
             <linshe-input
               id="novelai-api-key"
               v-model="novelaiApiKey"
@@ -770,7 +790,7 @@ type="range" min="0" max="1" step="0.1"
             />
             <div class="conn-key-hint">
               <span v-if="novelaiApiKeySaved && !novelaiApiKeyCleared">API Key 已保存；留空会继续使用已保存的密钥。</span>
-              <span v-else>保存后可测试服务连接。</span>
+              <span v-else>填写对应接口使用的 API Key，保存后可测试连接。</span>
               <linshe-button
                 v-if="novelaiApiKeySaved && !novelaiApiKey && !novelaiApiKeyCleared"
                 variant="link"
@@ -1190,6 +1210,7 @@ const imageProviderOptions = [
   { value: 'novelai', label: 'NovelAI' },
 ]
 const novelaiUrl = ref('')
+const novelaiApiFormatOfficial = ref(false)
 const novelaiModel = ref('nai-diffusion-4-5-full')
 const novelaiArtist = ref('@ebora')
 const novelaiModels = ref([])
@@ -1226,6 +1247,8 @@ const novelaiNoiseScheduleOptions = [
 ]
 const novelaiGuidance = ref(5)
 const novelaiQualityPrompt = ref('masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025')
+const novelaiDefaultNegativePrompt = 'lowres, bad_anatomy, bad_hands, text, error, missing_fingers, extra_digit, fewer_digits, cropped, worst_quality, low_quality, normal_quality, jpeg_artifacts, signature, watermark, username, blurry, bad_feet, fused_fingers, too_many_fingers, long_neck, cross-eyed, mutated_hands, polar_lowres, bad_body, bad_proportions, gross_proportions, text, error, missing_fingers, missing_arms, missing_legs, extra_digit, extra_arms, extra_leg, extra_foot'
+const novelaiNegativePrompt = ref(novelaiDefaultNegativePrompt)
 const novelaiModelsLoading = ref(false)
 const novelaiApiKey = ref('')
 const novelaiApiKeySaved = ref(false)
@@ -1813,6 +1836,7 @@ onMounted(async () => {
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
+    novelaiApiFormatOfficial.value = data.comfy.novelaiApiFormat === 'official'
     novelaiUrl.value = data.comfy.novelaiUrl ?? ''
     novelaiModel.value = data.comfy.novelaiModel || 'nai-diffusion-4-5-full'
     novelaiArtist.value = data.comfy.novelaiArtist ?? '@ebora'
@@ -1823,6 +1847,7 @@ onMounted(async () => {
     novelaiNoiseSchedule.value = data.comfy.novelaiNoiseSchedule || 'karras'
     novelaiGuidance.value = data.comfy.novelaiGuidance ?? 5
     novelaiQualityPrompt.value = data.comfy.novelaiQualityPrompt ?? 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025'
+    novelaiNegativePrompt.value = data.comfy.novelaiNegativePrompt ?? novelaiDefaultNegativePrompt
     novelaiApiKeySaved.value = data.comfy.novelaiApiKeySet === true
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
@@ -1968,6 +1993,7 @@ async function saveComfyUrl() {
     }
     const payload = {
       imageProvider: imageProvider.value,
+      novelaiApiFormat: novelaiApiFormatOfficial.value ? 'official' : 'relay',
       novelaiUrl: novelaiUrl.value.trim().replace(/\/+$/, ''),
       novelaiModel: novelaiModel.value,
       novelaiArtist: novelaiArtist.value,
@@ -1978,6 +2004,7 @@ async function saveComfyUrl() {
       novelaiNoiseSchedule: novelaiNoiseSchedule.value,
       novelaiGuidance: Number(novelaiGuidance.value),
       novelaiQualityPrompt: novelaiQualityPrompt.value,
+      novelaiNegativePrompt: novelaiNegativePrompt.value,
     }
     if (imageProvider.value === 'comfyui') {
       payload.url = comfyUrl.value.trim().replace(/\/+$/, '')
@@ -2001,6 +2028,7 @@ async function saveComfyUrl() {
 async function checkHealth() {
   const result = await imageProviderHealth({
     provider: imageProvider.value,
+    apiFormat: novelaiApiFormatOfficial.value ? 'official' : 'relay',
     url: imageProvider.value === 'novelai' ? novelaiUrl.value : comfyUrl.value,
     model: novelaiModel.value,
     ...(novelaiApiKey.value.trim() ? { apiKey: novelaiApiKey.value.trim() } : {}),
@@ -2018,6 +2046,7 @@ async function fetchNovelaiModels() {
   try {
     const result = await imageProviderHealth({
       provider: 'novelai',
+      apiFormat: novelaiApiFormatOfficial.value ? 'official' : 'relay',
       url: novelaiUrl.value,
       model: novelaiModel.value,
       ...(novelaiApiKey.value.trim() ? { apiKey: novelaiApiKey.value.trim() } : {}),
@@ -2899,6 +2928,9 @@ function resetTestPrompts() {
 .image-connection-fields .fd { margin-bottom: 8px; line-height: 1.5; }
 .novelai-model-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 14px; }
 .novelai-model-select { flex: 1; min-width: 0; }
+.novelai-api-mode-row { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 8px 0; }
+.novelai-api-mode-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 0 0 100px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.novelai-api-url { flex: 1; min-width: 0; }
 .novelai-model-hint { margin: -4px 0 6px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
 .novelai-resolution-field { min-width: 0; margin: 10px 0; }
 .novelai-steps-field { min-width: 0; margin: 10px 0; }
@@ -2999,6 +3031,7 @@ function resetTestPrompts() {
 .relay-sponsor-note strong { font-weight: 600; color: var(--text-muted, #b3aca4); }
 @media (max-width: 640px) {
   .relay-station-head { align-items: flex-start; }
+  .novelai-api-mode-toggle { flex-basis: 120px; }
 }
 
 /* LLM API 面板切换：退出淡出上收，进入弹性下压 */

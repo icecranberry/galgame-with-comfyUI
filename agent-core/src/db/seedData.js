@@ -8,6 +8,7 @@
 export const DEFAULT_SYSTEM_SETTINGS = {
   // ComfyUI 参数
   image_provider: 'comfyui',
+  novelai_api_format: 'relay',
   novelai_url: '',
   novelai_model: 'nai-diffusion-4-5-full',
   novelai_artist: '@ebora',
@@ -18,6 +19,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   novelai_noise_schedule: 'karras',
   novelai_guidance: '5.0',
   novelai_quality_prompt: 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025',
+  novelai_negative_prompt: 'lowres, bad_anatomy, bad_hands, text, error, missing_fingers, extra_digit, fewer_digits, cropped, worst_quality, low_quality, normal_quality, jpeg_artifacts, signature, watermark, username, blurry, bad_feet, fused_fingers, too_many_fingers, long_neck, cross-eyed, mutated_hands, polar_lowres, bad_body, bad_proportions, gross_proportions, text, error, missing_fingers, missing_arms, missing_legs, extra_digit, extra_arms, extra_leg, extra_foot',
   comfy_artist: '@ebora',
   comfy_width: '768',
   comfy_height: '512',

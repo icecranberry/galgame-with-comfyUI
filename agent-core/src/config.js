@@ -59,6 +59,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
   comfyui: {
     imageProvider: 'comfyui',
     url: (process.env.COMFYUI_URL || 'http://localhost:8188').replace(/\/+$/, ''),
+    novelaiApiFormat: process.env.NOVELAI_API_FORMAT === 'official' ? 'official' : 'relay',
     novelaiUrl: (process.env.NOVELAI_URL || '').replace(/\/+$/, ''),
     novelaiModel: process.env.NOVELAI_MODEL || 'nai-diffusion-4-5-full',
     novelaiArtist: process.env.NOVELAI_ARTIST || '@ebora',
@@ -69,6 +70,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     novelaiNoiseSchedule: process.env.NOVELAI_NOISE_SCHEDULE || 'karras',
     novelaiGuidance: Number.isFinite(Number.parseFloat(process.env.NOVELAI_GUIDANCE)) ? Number.parseFloat(process.env.NOVELAI_GUIDANCE) : 5,
     novelaiQualityPrompt: process.env.NOVELAI_QUALITY_PROMPT || 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025',
+    novelaiNegativePrompt: process.env.NOVELAI_NEGATIVE_PROMPT || 'lowres, bad_anatomy, bad_hands, text, error, missing_fingers, extra_digit, fewer_digits, cropped, worst_quality, low_quality, normal_quality, jpeg_artifacts, signature, watermark, username, blurry, bad_feet, fused_fingers, too_many_fingers, long_neck, cross-eyed, mutated_hands, polar_lowres, bad_body, bad_proportions, gross_proportions, text, error, missing_fingers, missing_arms, missing_legs, extra_digit, extra_arms, extra_leg, extra_foot',
     outputDir: process.env.COMFYUI_OUTPUT_DIR || './output',
     artist: process.env.COMFYUI_ARTIST || '@ebora',
     width: parseInt(process.env.COMFYUI_WIDTH, 10) || 768,
@@ -235,11 +237,16 @@ export function getNovelaiApiKey() {
   catch { return process.env.NOVELAI_API_KEY || ''; }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiApiKey, clearNovelaiApiKey }) {
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiApiFormat, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiNegativePrompt, novelaiApiKey, clearNovelaiApiKey }) {
   if (imageProvider !== undefined) {
     const provider = imageProvider === 'novelai' ? 'novelai' : 'comfyui';
     config.comfyui.imageProvider = provider;
     persistSettingSync('image_provider', provider);
+  }
+  if (novelaiApiFormat !== undefined) {
+    const value = novelaiApiFormat === 'official' ? 'official' : 'relay';
+    config.comfyui.novelaiApiFormat = value;
+    persistSettingSync('novelai_api_format', value);
   }
   if (novelaiUrl !== undefined) {
     const value = String(novelaiUrl).trim().replace(/\/+$/, '');
@@ -297,6 +304,11 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
     const value = typeof novelaiQualityPrompt === 'string' ? novelaiQualityPrompt.trim() : '';
     config.comfyui.novelaiQualityPrompt = value;
     persistSettingSync('novelai_quality_prompt', value);
+  }
+  if (novelaiNegativePrompt !== undefined) {
+    const value = typeof novelaiNegativePrompt === 'string' ? novelaiNegativePrompt.trim() : '';
+    config.comfyui.novelaiNegativePrompt = value;
+    persistSettingSync('novelai_negative_prompt', value);
   }
   if (novelaiApiKey !== undefined) {
     persistSettingSync('novelai_api_key', String(novelaiApiKey).trim());

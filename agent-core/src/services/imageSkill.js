@@ -74,9 +74,12 @@ export const NODE_TITLES = {
 };
 
 async function submitNovelaiImage(promptText, { onProgress } = {}) {
-  const baseUrl = String(config.comfyui.novelaiUrl || '').trim().replace(/\/+$/, '');
+  const apiFormat = config.comfyui.novelaiApiFormat === 'official' ? 'official' : 'relay';
+  const baseUrl = apiFormat === 'official'
+    ? 'https://image.novelai.net'
+    : String(config.comfyui.novelaiUrl || '').trim().replace(/\/+$/, '');
   const apiKey = getNovelaiApiKey();
-  if (!baseUrl) throw new Error('请先配置 NovelAI 服务地址');
+  if (!baseUrl) throw new Error('请先配置 NovelAI 中转站接口地址');
   if (!apiKey) throw new Error('请先配置 NovelAI API Key');
 
   const novelaiArtist = String(config.comfyui.novelaiArtist || '').trim();
@@ -87,34 +90,78 @@ async function submitNovelaiImage(promptText, { onProgress } = {}) {
   if (!finalPrompt) throw new Error('画面描述为空');
   const width = config.comfyui.novelaiWidth || 1216;
   const height = config.comfyui.novelaiHeight || 832;
+  const model = config.comfyui.novelaiModel || 'nai-diffusion-4-5-full';
+  const steps = config.comfyui.novelaiSteps || 28;
+  const sampler = config.comfyui.novelaiSampler || 'k_euler_ancestral';
+  const noiseSchedule = config.comfyui.novelaiNoiseSchedule || 'karras';
+  const scale = config.comfyui.novelaiGuidance ?? 5;
+  const negativePrompt = String(config.comfyui.novelaiNegativePrompt || '').trim();
+  const requestUrl = apiFormat === 'official'
+    ? `${baseUrl}/ai/generate-image`
+    : `${baseUrl}/v1/images/generations`;
+  const requestBody = apiFormat === 'official'
+    ? {
+        action: 'generate',
+        input: finalPrompt,
+        model,
+        parameters: {
+          width,
+          height,
+          steps,
+          sampler,
+          noise_schedule: noiseSchedule,
+          scale,
+          n_samples: 1,
+          image_format: 'png',
+          ...(model.startsWith('nai-diffusion-5-')
+            ? {
+                params_version: 4,
+                legacy: false,
+                v4_prompt: { caption: { base_caption: finalPrompt, char_captions: [] }, use_coords: false, use_order: true },
+                v4_negative_prompt: { caption: { base_caption: negativePrompt, char_captions: [] }, legacy_uc: false, use_coords: false, use_order: true },
+              }
+            : model.startsWith('nai-diffusion-4-')
+              ? {
+                  params_version: 3,
+                  legacy: false,
+                  legacy_v3_extend: false,
+                  v4_prompt: { caption: { base_caption: finalPrompt, char_captions: [] }, use_coords: false, use_order: true },
+                  v4_negative_prompt: { caption: { base_caption: negativePrompt, char_captions: [] }, legacy_uc: false, use_coords: false, use_order: true },
+                }
+              : { params_version: 1, negative_prompt: negativePrompt }),
+        },
+      }
+    : {
+        model,
+        prompt: finalPrompt,
+        size: `${width}x${height}`,
+        steps,
+        sampler,
+        noise_schedule: noiseSchedule,
+        scale,
+        ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+        n: 1,
+        response_format: 'b64_json',
+      };
 
   onProgress?.({ stage: 'submitting' });
   onProgress?.({ phase: 'submitted' });
   onProgress?.({ phase: 'started' });
-  const response = await fetch(`${baseUrl}/v1/images/generations`, {
+  const response = await fetch(requestUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      ...(apiFormat === 'official' ? { Accept: 'application/json' } : {}),
     },
-    body: JSON.stringify({
-      model: config.comfyui.novelaiModel || 'nai-diffusion-4-5-full',
-      prompt: finalPrompt,
-      size: `${width}x${height}`,
-      steps: config.comfyui.novelaiSteps || 28,
-      sampler: config.comfyui.novelaiSampler || 'k_euler_ancestral',
-      noise_schedule: config.comfyui.novelaiNoiseSchedule || 'karras',
-      scale: config.comfyui.novelaiGuidance ?? 5,
-      n: 1,
-      response_format: 'b64_json',
-    }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(180_000),
   });
   onProgress?.({ phase: 'executed' });
 
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
-    const upstreamMessage = String(detail?.error?.message || detail?.message || `HTTP ${response.status}`);
+    const upstreamMessage = String(detail?.error?.message || detail?.message || detail?.details || `HTTP ${response.status}`);
     if (/gems balance is insufficient/i.test(upstreamMessage)) {
       throw new Error('NovelAI 接口服务的 Gems 余额不足，请补充该服务的 Gems 后重试，或切换到有余额的接口。');
     }
@@ -125,9 +172,11 @@ async function submitNovelaiImage(promptText, { onProgress } = {}) {
   }
 
   const payload = await response.json();
-  const entries = Array.isArray(payload?.data) ? payload.data : [];
+  const entries = apiFormat === 'official'
+    ? (Array.isArray(payload?.images) ? payload.images : [])
+    : (Array.isArray(payload?.data) ? payload.data : []);
   const images = entries.map((entry, index) => {
-    const value = entry?.b64_json || '';
+    const value = apiFormat === 'official' ? entry?.image || '' : entry?.b64_json || '';
     if (!value) return null;
     const base64 = value.startsWith('data:image/')
       ? value

@@ -854,15 +854,21 @@ router.delete('/delete', async (req, res) => {
   }
 });
 
-async function checkImageProviderConnection({ provider, url, apiKey, model } = {}) {
+async function checkImageProviderConnection({ provider, url, apiKey, model, apiFormat } = {}) {
   const activeProvider = provider === 'novelai' ? 'novelai' : 'comfyui';
   if (activeProvider === 'novelai') {
-    const baseUrl = String(url ?? config.comfyui.novelaiUrl ?? '').trim().replace(/\/+$/, '');
-    if (!baseUrl) return { connected: false, provider: activeProvider, url: '', error: '请先填写 NovelAI 接口地址' };
+    const activeFormat = apiFormat === 'official' || apiFormat === 'relay'
+      ? apiFormat
+      : (config.comfyui.novelaiApiFormat === 'official' ? 'official' : 'relay');
+    const baseUrl = activeFormat === 'official'
+      ? 'https://image.novelai.net'
+      : String(url ?? config.comfyui.novelaiUrl ?? '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return { connected: false, provider: activeProvider, url: '', error: '请先填写 NovelAI 中转站接口地址' };
     const token = String(apiKey || getNovelaiApiKey() || '').trim();
     if (!token) return { connected: false, provider: activeProvider, url: baseUrl, error: '请先填写 NovelAI API Key' };
     try {
-      const response = await fetch(`${baseUrl}/v1/models`, {
+      const modelsPath = activeFormat === 'official' ? '/oa/v1/models' : '/v1/models';
+      const response = await fetch(`${baseUrl}${modelsPath}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(10000),
       });
@@ -871,13 +877,14 @@ async function checkImageProviderConnection({ provider, url, apiKey, model } = {
       const models = Array.isArray(payload.data) ? payload.data.map(item => item?.id).filter(Boolean) : [];
       const selectedModel = model || config.comfyui.novelaiModel;
       return {
-        connected: models.length > 0,
+        connected: activeFormat === 'official' || models.length > 0,
         provider: activeProvider,
         url: baseUrl,
+        apiFormat: activeFormat,
         modelCount: models.length,
         models,
-        modelAvailable: !selectedModel || models.includes(selectedModel),
-        error: models.length === 0 ? '连接成功，但服务没有返回可用模型' : undefined,
+        modelAvailable: models.length > 0 ? (!selectedModel || models.includes(selectedModel)) : undefined,
+        error: activeFormat === 'relay' && models.length === 0 ? '连接成功，但服务没有返回可用模型' : undefined,
       };
     } catch (error) {
       return { connected: false, provider: activeProvider, url: baseUrl, error: error.name === 'TimeoutError' ? '连接超时' : '无法连接到 NovelAI 服务' };
