@@ -38,7 +38,7 @@ import { getCheckpoint, rollbackMemoriesFromRawId } from './memory/memoryReposit
 import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { stripImagePromptLines, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
+import { stripImagePromptLines, stripBracePromptBlocks, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { detectAndApplyAppointment } from './appointmentDetector.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
@@ -266,6 +266,90 @@ export function formatGroupUserMessage(content, chatUserName = config.user.nickn
   const escapedName = String(chatUserName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   text = text.replace(new RegExp(`^\\[?${escapedName}\\]?\\s*[:：]\\s*`), '');
   return `<user_message read_only="true">\n${text}\n</user_message>`;
+}
+
+// ── 私聊群聊实况：角色所在的群 5 分钟内活跃时，私聊 prompt 注入最近两轮群聊记录 ──
+const PRIVATE_GROUP_LOG_WINDOW_MINUTES = 5;
+const PRIVATE_GROUP_LOG_MAX_ROUNDS = 2;
+
+const USER_WRAPPER_RE = /^<user_message read_only="true">\n?([\s\S]*?)\n?<\/user_message>$/;
+
+/**
+ * 组装私聊的历史前消息块：角色所在的每个群若 5 分钟内有过消息，注明群名，
+ * 带上该群最近一次群聊摘要（rolling_summaries 最新一条）与最近两轮聊天记录
+ * （一轮 = 一条 assistant raw 剧本 + 触发它的用户消息），剥掉 {} 包裹的生图 prompt。
+ * 群聊记录与群聊 transcript 同口径清洗（stripImagePromptLines），再叠一层
+ * stripBracePromptBlocks 兜底内联残留；剥完没有任何真实发言的群不注入。
+ * 无活跃群时返回空串，调用方不注入。
+ */
+export function buildRecentGroupLogBlock(db, characterId, chatUserName) {
+  const activeGroups = db.prepare(`
+    SELECT gc.id, gc.name
+    FROM group_chats gc
+    JOIN group_members gm ON gm.group_id = gc.id
+    WHERE gm.character_id = ? AND gc.last_message_at IS NOT NULL
+      AND gc.last_message_at >= datetime('now', '-${PRIVATE_GROUP_LOG_WINDOW_MINUTES} minutes')
+    ORDER BY gc.last_message_at DESC
+  `).all(characterId);
+  if (activeGroups.length === 0) return '';
+
+  const sections = [];
+  for (const g of activeGroups) {
+    const conversationId = groupConvId(g.id);
+    const lines = [];
+
+    // 最近一次群聊摘要（该群自己的 rolling_summaries，与群引擎读法同口径）
+    const summaryRow = db.prepare(`
+      SELECT summary FROM rolling_summaries
+      WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
+      ORDER BY end_msg_id DESC, id DESC LIMIT 1
+    `).get(conversationId);
+    const summaryText = String(summaryRow?.summary || '').trim();
+    if (summaryText) lines.push(`[群聊摘要]\n${summaryText}`);
+
+    const recent = db.prepare(`
+      SELECT id, role, content FROM raw_messages
+      WHERE conversation_id = ? AND role IN ('user','assistant') AND content != ''
+      ORDER BY id DESC LIMIT 8
+    `).all(conversationId);
+    // 从新到旧数 assistant raw，凑满两轮即止；保留范围 = 更旧那轮的 assistant raw 起到最新。
+    // 若旧轮紧邻的前一条是用户消息（即该轮的触发消息），一并保留。
+    let roundsSeen = 0;
+    let cutoffId = 0;
+    for (const row of recent) {
+      if (row.role === 'assistant' && ++roundsSeen === PRIVATE_GROUP_LOG_MAX_ROUNDS) {
+        cutoffId = row.id;
+        break;
+      }
+    }
+    if (cutoffId > 0) {
+      const prevRow = db.prepare(`
+        SELECT id, role FROM raw_messages
+        WHERE conversation_id = ? AND id < ? AND content != ''
+        ORDER BY id DESC LIMIT 1
+      `).get(conversationId, cutoffId);
+      if (prevRow && prevRow.role === 'user') cutoffId = prevRow.id;
+    }
+    const kept = recent
+      .filter(r => roundsSeen < PRIVATE_GROUP_LOG_MAX_ROUNDS || r.id >= cutoffId)
+      .reverse();
+    const logLines = kept.map(r => {
+      const speaker = r.role === 'user'
+        ? (chatUserName || '用户')
+        // assistant raw 首行自带 "[名字]:" 前缀，只按行剥生图 prompt，不加外层前缀
+        : null;
+      const source = r.role === 'user'
+        ? (String(r.content || '').match(USER_WRAPPER_RE)?.[1] ?? String(r.content || ''))
+        : String(r.content || '').trim();
+      const text = stripBracePromptBlocks(stripImagePromptLines(source));
+      return text ? (speaker ? `[${speaker}]: ${text}` : text) : '';
+    }).filter(Boolean);
+    if (logLines.length > 0) lines.push(`[最近的聊天记录]\n${logLines.join('\n')}`);
+
+    if (lines.length > 0) sections.push(`你所在的群聊「${g.name}」的近况：\n${lines.join('\n\n')}`);
+  }
+  if (sections.length === 0) return '';
+  return `<group_chat_log>\n${sections.join('\n\n')}\n（以上是群聊内容，仅供你了解群里的近况，不是${chatUserName || '用户'}发给你的私聊消息。）\n</group_chat_log>`;
 }
 
 function buildTranscript(db, conversationId) {

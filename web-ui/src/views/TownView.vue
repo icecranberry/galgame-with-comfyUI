@@ -2322,10 +2322,15 @@ async function startTravel() {
 
 .tl-grid {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px 10px 12px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  /* 行高必须按内容撑开：缩略图卡片带 overflow: hidden，网格项的自动最小尺寸会退化成 0，
+     素材一多行高就被等分压扁（图片裁成窄条），内容总高又撑不满容器，滚动条永远不出现 */
+  grid-auto-rows: min-content;
   gap: 8px;
   align-content: start;
 }

@@ -118,13 +118,13 @@ const DIRECTION_PROMPT = {
   up: 'seen from behind, back view',
 };
 
-/** 各 kind 的默认硬逻辑前缀（用户可在向导/编辑器覆盖 meta.promptPrefix） */
+/** 各 kind 的默认硬逻辑前缀（用户可在向导/编辑器覆盖 meta.promptPrefix；大立绘固定不套面板前缀） */
 export const DEFAULT_PROMPT_PREFIX = {
   building: 'pixel art, game sprite, white background',
   prop: 'pixel art, game sprite, white background',
   npc: 'pixel art, game sprite, mini human sized, full body',
   player: 'pixel art, game sprite, mini human sized, full body',
-  portrait: '',
+  portrait: 'full body, white background',
   ground: 'pixel art, game sprite, white background',
   road: 'pixel art, game sprite, white background',
 };
@@ -165,10 +165,22 @@ function generationDefaultsForAsset(row) {
   return {
     artist: typeof step.artist === 'string' ? step.artist : '',
     loras: portrait && !step.portraitLoras ? [] : (Array.isArray(step.loras) ? step.loras : []),
-    prefix: portrait ? '' : (typeof step.prefix === 'string' ? step.prefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '')),
+    prefix: portrait ? DEFAULT_PROMPT_PREFIX.portrait : (typeof step.prefix === 'string' ? step.prefix : (DEFAULT_PROMPT_PREFIX[row.kind] || '')),
     portraitLoras: step.portraitLoras === true,
   };
 }
+
+/**
+ * 生成时实际使用的固定前缀。
+ * 大立绘固定 'full body, white background'：立绘是整幅白底插画，不套面板里给小人的
+ * 「pixel art, game sprite, mini human sized...」前缀，素材级 meta.promptPrefix 同样对它无效。
+ * 其余素材：素材级覆盖优先，缺省回落类型配置（向导 / 素材编辑器可改）。
+ */
+export function resolvePromptPrefix({ kind = '', meta = {} } = {}, fallbackPrefix = '') {
+  if (String(kind || '') === 'portrait') return DEFAULT_PROMPT_PREFIX.portrait;
+  return meta.promptPrefix !== undefined ? meta.promptPrefix : fallbackPrefix;
+}
+
 /** 地砖/道路专用：styleTags 里的聚落类名词会泄漏成「草地上长出小房子」，剥掉 */
 const TILE_STYLE_STRIP = /\b(village|town|city|street|hamlet|townsquare|buildings?)\b/gi;
 
@@ -458,11 +470,12 @@ async function generateIntoRow(row, guard) {
     });
   }
 
-  // 固定前缀和画师/LoRA 优先使用素材级覆盖；未覆盖时回落到 system_settings 里的类型配置。
+  // 固定前缀和画师/LoRA 优先使用素材级覆盖；未覆盖时回落到 system_settings 里的类型配置；
+  // 大立绘例外：固定 'full body, white background'，不套面板里的小人前缀（素材级覆盖也无效）。
   // promptVerbatim = true 表示 prompt 已是完整提示词（弹窗手写或 source_prompt 复用）：
   // 原样送 ComfyUI，不再补前缀 / 硬 tag（弹窗「改动后完全按新提示词出图」的兑现口径）。
   const generationDefaults = generationDefaultsForAsset(row);
-  const prefix = meta.promptPrefix !== undefined ? meta.promptPrefix : generationDefaults.prefix;
+  const prefix = resolvePromptPrefix({ kind: row.kind, meta }, generationDefaults.prefix);
   prompt = composeAssetPrompt({ kind: row.kind, prefix, prompt, verbatim: promptVerbatim });
   db.transaction(() => {
     assertAssetCurrent(guard);

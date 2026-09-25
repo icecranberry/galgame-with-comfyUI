@@ -115,10 +115,41 @@ test('老素材没落 appearanceSource：按 meta.characterId / key 前缀推断
     kind: 'npc', key: 'npc_' + npcId + '_down', meta: { desc: '过期的短人格' },
   })).desc;
   assert.match(byNpcKey, /银白色长发/);
+});
 
-  // 玩家素材无从推断：仍回落 meta.desc
-  const fallback = (await buildAssetRequestSnapshot({
-    kind: 'player', key: 'player_down', meta: { desc: '玩家外观描述' },
+
+
+test('玩家素材：实时重取用户配置里的「我」的外观，而不是生成时的占位 desc', async t => {
+  seed(t);
+  const saved = { ...config.user };
+  Object.assign(config.user, { nickname: '小北', gender: '女', appearance: '银色短发，红色连帽衫，黑色短裤', persona: '爱冒险的旅行者' });
+  t.after(() => Object.assign(config.user, saved));
+
+  // 立绘：key player_portrait，生成时 meta.desc 只是占位
+  const snapshot = await buildAssetRequestSnapshot({
+    kind: 'portrait', key: 'player_portrait', name: '玩家 立绘',
+    meta: { desc: 'the player character', styleTags: 'cozy pixel town' },
+  });
+  assert.match(snapshot.desc, /银色短发/);
+  assert.match(snapshot.desc, /红色连帽衫/);
+  assert.match(snapshot.desc, /爱冒险的旅行者/);
+  assert.ok(!snapshot.desc.includes('the player character'), '占位 desc 不该留在需求里');
+  assert.equal(snapshot.styleTags, 'cozy pixel town', '风格仍走 meta 透传');
+
+  // 正/背小人（kind player，key player_down）同样口径
+  const sprite = (await buildAssetRequestSnapshot({
+    kind: 'player', key: 'player_down', meta: { desc: 'the player character', direction: 'down' },
   })).desc;
-  assert.equal(fallback, '玩家外观描述');
+  assert.match(sprite, /银色短发/);
+  assert.ok(!sprite.includes('the player character'));
+});
+test('用户配置里没有形象信息时，玩家素材回落 meta.desc', async t => {
+  seed(t);
+  const saved = { ...config.user };
+  Object.assign(config.user, { nickname: '用户', gender: '', appearance: '', persona: '' });
+  t.after(() => Object.assign(config.user, saved));
+  const desc = (await buildAssetRequestSnapshot({
+    kind: 'portrait', key: 'player_portrait', meta: { desc: 'the player character' },
+  })).desc;
+  assert.equal(desc, 'the player character');
 });

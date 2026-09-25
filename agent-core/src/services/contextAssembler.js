@@ -34,11 +34,12 @@ function cloneMessage(message) {
  * @param {string|string[]} [preSummarySystem] 摘要前 system：与世界观分离的独立提示层（活人感节奏、表情包等），
  *                                       多条以空行拼成一条，位置紧贴摘要之上
  * @param {string}    [summaryBlock] 最新摘要文本（可选），置于稳定块之后、历史之前
+ * @param {object[]}  [preHistoryMessages] 历史之前的消息层块（如群聊实况），插在摘要之后、私聊历史之前
  * @param {object[]}  history        不可变历史消息数组，[{ role, content }]
  * @param {string[]}  dynamicBlocks  本轮动态上下文块，会以 <dynamic_context> 标签附加到最新 user 消息尾部
  * @returns {{ messages: object[], metadata: object }}
  */
-export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, history = [], dynamicBlocks = [] } = {}) {
+export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, preHistoryMessages = [], history = [], dynamicBlocks = [] } = {}) {
   const stableMessages = stableBlocks.filter(Boolean).map(content => ({ role: 'system', content: String(content) }));
   const historyMessages = history.map(cloneMessage);
 
@@ -59,6 +60,7 @@ export function buildChatContext({ stableBlocks = [], preSummarySystem = null, s
   messages.push(...stableMessages);
   if (preSummaryMessage) messages.push(preSummaryMessage);
   if (summaryMessage) messages.push(summaryMessage);
+  messages.push(...preHistoryMessages.filter(Boolean).map(cloneMessage));
   messages.push(...historyMessages);
 
   // 动态上下文块附加到最新 user 消息

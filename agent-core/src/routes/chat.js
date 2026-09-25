@@ -37,6 +37,7 @@ import { getCoreDialogueRules, getChatRhythmRules, JUDGE_PROMPT, detectImageInte
 import { matchAll } from '../services/characterSearch.js';
 import { getUserName, matchUser } from '../services/userSearch.js';
 import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
+import { buildRecentGroupLogBlock } from '../services/groupChatEngine.js';
 import { getContextBudgetConfig } from '../services/memory/memoryConfig.js';
 import { chatStreamStarted, chatStreamEnded } from '../services/chatActivity.js';
 import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../services/characterChatTownContext.js';
@@ -936,6 +937,17 @@ ${coreRules}
     const budgetedBlocks = budgetConfig.enabled
       ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens)
       : dynamicBlocks;
+    // ── 群聊实况：角色所在的群 5 分钟内活跃时，在私聊聊天记录之前（消息层）注入
+    //    群名 + 该群最近一次群聊摘要 + 最近两轮群聊记录（已剥掉 {} 生图 prompt）──
+    const preHistoryMessages = [];
+    if (config.features.groupChat) {
+      try {
+        const groupLogBlock = buildRecentGroupLogBlock(db, characterId, chatUserName);
+        if (groupLogBlock) preHistoryMessages.push({ role: 'user', content: groupLogBlock });
+      } catch (err) {
+        console.warn('[chat] recent group log unavailable:', err.message);
+      }
+    }
     // ── 通过 buildChatContext 组装基础请求 ──
     // 深度思考时 planner 与主回复共用这一完全相同的消息结构（稳定块+摘要+历史+含全部动态块的用户消息），
     // 任务块合并到 user 消息头部（末尾另附触发提醒），盘算结果追加到 user 消息末尾，不新增独立 user 消息
@@ -944,6 +956,7 @@ ${coreRules}
       stableBlocks,
       preSummarySystem,
       summaryBlock,
+      preHistoryMessages,
       history: checkpointHistory,
       dynamicBlocks: budgetedBlocks,
     });
@@ -1147,6 +1160,7 @@ ${coreRules}
         stableBlocks,
         preSummarySystem,
         summaryBlock,
+        preHistoryMessages,
         history: checkpointHistory,
         dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
       });

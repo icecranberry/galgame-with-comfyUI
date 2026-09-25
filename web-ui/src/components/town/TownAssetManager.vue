@@ -320,7 +320,8 @@ async function regenerateAsset() {
     } else {
       const prompt = await rewritePromptFromRequest(asset)
       regenStatus.value = prompt ? '正在按新提示词出图…' : '正在按当前提示词出图…'
-      const data = await api.regenerateTownAsset(asset.id, prompt ? { prompt, verbatim: true } : {})
+      // 重写产物只是描述正文，不标 verbatim：由后端按生成配置补回固定前缀与 chibi / big head 等硬 tag
+      const data = await api.regenerateTownAsset(asset.id, prompt ? { prompt } : {})
       next = data.asset
       regenStatus.value = prompt ? '已按原始需求重写出图' : '已重新出图'
     }

@@ -6,10 +6,14 @@
  * 可能已经退化成整卡 / 人格卡全文（角色卡缺标准外观段时的兜底口径）。
  * 所以重写提示词时重新调生成端的包装函数取「short_prompt + 外观段」：
  * 角色卡缺外观段时先按需补全（characterAppearanceService），取不到再回落 meta.desc。
+ *
+ * 玩家素材（player_portrait / player_*）没有角色卡来源，外观只存在用户配置里，
+ * 同样实时重取 playerAppearanceInfo()，否则重写时只剩生成当初的占位 desc。
  */
 import { getDb } from '../../db/index.js';
 import { buildCharacterPersona } from '../characterPersona.js';
 import { ensureCharacterAppearanceSection } from '../characterAppearanceService.js';
+import { playerAppearanceInfo } from './playerAppearance.js';
 
 function isValidAppearanceSource(source) {
   return !!source && source.version === 1
@@ -45,6 +49,25 @@ function inferAppearanceSource(asset) {
     return { version: 1, sourceKind: 'npc', sourceId: id, characterId: null, mode };
   }
   return null;
+}
+
+/**
+ * 玩家素材：立绘 key 是 player_portrait，正/背小人是 player_{direction}（kind 也标成 player）。
+ * 它们没有角色卡来源，外观只存在用户配置里，重写提示词时要实时重取。
+ */
+function isPlayerAsset(asset) {
+  const kind = String(asset?.kind || '');
+  const key = String(asset?.key || '');
+  return kind === 'player' || key === 'player_portrait' || key.startsWith('player_');
+}
+
+/**
+ * 玩家素材的实时需求：用户配置里连外观 / 性别 / 人设都没有时返回 ''，
+ * 让 meta.desc（可能还留着生成当时更具体的外观）兜底。
+ */
+function playerRequestDesc() {
+  const info = playerAppearanceInfo();
+  return /【(外观描述|性别|人设)】/.test(info) ? info : '';
 }
 
 /** 素材的外观来源：优先落库的 appearanceSource，其次按关联推断 */
@@ -83,12 +106,13 @@ async function loadCharacterWithAppearance(characterId) {
 }
 
 /**
- * 角色类素材：实时取「short_prompt + 外观段」；来源缺失或档案已删时返回 ''。
+ * 角色类素材：实时取「short_prompt + 外观段」；玩家素材取用户配置；来源缺失或档案已删时返回 ''。
  * @param {object} asset - 素材行（含 kind / key / meta）
  */
 export async function buildCharacterRequestDesc(asset) {
   const source = resolveAppearanceSource(asset);
-  if (!source) return '';
+  // 玩家素材没有角色卡来源：实时读用户配置里的「我」的外观
+  if (!source) return isPlayerAsset(asset) ? playerRequestDesc() : '';
   const db = getDb();
   if (source.sourceKind === 'character') {
     return characterRequestDesc(await loadCharacterWithAppearance(source.sourceId));

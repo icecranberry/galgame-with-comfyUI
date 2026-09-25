@@ -462,10 +462,18 @@ function initializeSimulation() {
   const db = getDb();
   // Include persisted owners so an appointment that ended while offline cannot
   // leave an excluded actor's old movement/station lease behind after reload.
+  // 多图共享同一张 town_simulation_state：只认领归属本图的 actor，
+  // 否则启动 reconcile 会把别的图居民的动作当成「离开作用域」取消掉。
   const hasSimulationState = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='town_simulation_state'").get();
-  state.simulationActorIds = new Set(hasSimulationState && state.world
-    ? db.prepare('SELECT actor_id FROM town_simulation_state WHERE world_id=? AND world_epoch=?')
-      .all(state.world.worldId,state.world.epoch).map(row => row.actor_id) : []);
+  const mapOf = actorMapIds();
+  const persisted = hasSimulationState && state.world
+    ? db.prepare(`SELECT s.actor_id AS actor_id, a.player_id AS playerId, a.npc_id AS npcId, a.character_id AS characterId
+        FROM town_simulation_state s JOIN town_actors a ON a.actor_id = s.actor_id
+        WHERE s.world_id=? AND s.world_epoch=?`)
+      .all(state.world.worldId, state.world.epoch) : [];
+  state.simulationActorIds = new Set(persisted
+    .filter(row => row.playerId == null && mapOf(row) === state.mapId)
+    .map(row => row.actor_id));
   state.simulation = createTownSimulation({ db,
     registry: createTownActorRegistry(db),
     clock: createTownClock({ timeZone: config.town.timeZone || 'Asia/Shanghai' }),
@@ -499,8 +507,10 @@ function reconcileSimulationScope() {
 }
 
 function tickTownSimulation() {
-  reconcileSimulationScope();
-  state.simulation?.tick();
+  const scope = reconcileSimulationScope();
+  // 只推进本图的 actor：多图共享同一个世界账本，不按图过滤的话，
+  // 别的图读不到本图 agent（allowsAction=false），会把本图刚启动的动作取消掉
+  state.simulation?.tick({ actorIds: [...scope] });
 }
 
 function readSimulationFacts(actor, { worldEpoch, nowUtcMs, action }) {

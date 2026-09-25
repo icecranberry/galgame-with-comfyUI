@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { beginTownDialogueRequest, finishTownDialogueRequest, failTownDialogueRequest } from './townDialogueRequests.js';
 import { initializeTownNpcFunctions, reconcileTownResponsibilities } from './townResponsibilityRuntime.js';
 import { townCapabilities, normalizeTownCapabilities } from './townCapabilities.js';
+import { getWorldStyleTags, playerAppearanceInfo } from './playerAppearance.js';
 
 // ── 查询 ──
 
@@ -141,14 +142,8 @@ export function deleteNpc(id) {
 
 // ── spirit / 立绘生成 ──
 
-/** 世界观 styleTags：优先取素材库中已存的（整套共享），保证spirit与小镇风格一致 */
-export function getWorldStyleTags() {
-  const row = getDb().prepare(`
-    SELECT meta_json FROM town_assets WHERE status = 'ready' AND kind IN ('ground','road','building','prop') ORDER BY id LIMIT 1
-  `).get();
-  if (!row) return '';
-  try { return JSON.parse(row.meta_json || '{}').styleTags || ''; } catch { return ''; }
-}
+// 玩家形象口径（styleTags / 外观信息）与小镇生图共用一份实现，这里只做转出
+export { getWorldStyleTags, playerAppearanceInfo };
 
 /** 统一从 NPC 人格卡的「## 你的外观」段取生图外观 */
 function npcAppearanceSection(npcRow) {
@@ -170,17 +165,6 @@ function npcAppearanceInfo(npcRow, styleTags) {
         ? `【人格卡（缺少标准外观段）】\n${npcRow.persona}`
         : '',
     `【画风基调】${activeStyleTags || 'cozy pixel town'}`,
-  ].filter(Boolean).join('\n');
-}
-
-export function playerAppearanceInfo() {
-  const u = config.user;
-  return [
-    `【名字】${u.nickname || '我'}（来到小镇的玩家）`,
-    u.gender ? `【性别】${u.gender}` : '',
-    u.appearance ? `【外观描述】${u.appearance}` : '',
-    u.persona ? `【人设】${u.persona}` : '',
-    `【画风基调】${getWorldStyleTags() || 'cozy pixel town'}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -272,6 +256,7 @@ export async function generateNpcPortrait(npcId, overrides = {}) {
   const guard = imageGenerationGuard(overrides.expectedWorld, { table: 'town_npcs', row: npcRow,
     fields: ['created_at', 'character_id', 'persona', 'display_name'] });
   const key = `npc_${npcId}_portrait`;
+  // 大立绘前缀由 resolvePromptPrefix 固定为 full body, white background，调用方传的 promptPrefix 一律忽略
   const existing = getAssetsByKey([key])[0];
   const styleTags = overrides.styleTags !== undefined ? overrides.styleTags : getWorldStyleTags();
   const appearanceGuard = captureNpcAppearance(npcId, 'portrait', styleTags);
@@ -282,12 +267,12 @@ export async function generateNpcPortrait(npcId, overrides = {}) {
   // 大立绘默认不套 LoRA：调用方要显式传 portraitLoras 才应用（与玩家立绘一致）
   const asset = existing
     ? await regenerateAsset(existing.id, {
-      styleTags, prompt, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist, expectedWorld: guard.expectedWorld, appearanceGuard,
+      styleTags, prompt, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist, expectedWorld: guard.expectedWorld, appearanceGuard,
     })
     : await createAsset({
       kind: 'portrait', key, name: `${npcRow.display_name} 立绘`, expectedWorld: guard.expectedWorld, appearanceGuard,
       desc: appearanceGuard.description,
-      meta: { npcId, promptOverride: prompt, styleTags, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
+      meta: { npcId, promptOverride: prompt, styleTags, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
     });
   guard.assertCurrent();
   return { ok: true, asset };
@@ -518,6 +503,7 @@ export async function regeneratePlayerKit(overrides = {}) {
 /** Regenerate only the player's portrait, leaving both sprites untouched. */
 export async function regeneratePlayerPortrait(overrides = {}) {
   const guard = imageGenerationGuard(overrides.expectedWorld);
+  // 大立绘前缀由 resolvePromptPrefix 固定为 full body, white background，调用方传的 promptPrefix 一律忽略
   const info = playerAppearanceInfo();
   const styleTags = getWorldStyleTags();
   const existingPortrait = getAssetsByKey(['player_portrait'])[0];
@@ -525,7 +511,7 @@ export async function regeneratePlayerPortrait(overrides = {}) {
   guard.assertCurrent();
   if (existingPortrait) {
     const portrait = await regenerateAsset(existingPortrait.id, {
-      styleTags, prompt: portraitPrompt, promptPrefix: overrides.promptPrefix,
+      styleTags, prompt: portraitPrompt,
       loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist, expectedWorld: guard.expectedWorld,
     });
     guard.assertCurrent();
@@ -533,7 +519,7 @@ export async function regeneratePlayerPortrait(overrides = {}) {
   }
   const portrait = await createAsset({
     kind: 'portrait', key: 'player_portrait', name: '玩家 立绘', desc: 'the player character', expectedWorld: guard.expectedWorld,
-    meta: { styleTags, promptOverride: portraitPrompt, promptPrefix: overrides.promptPrefix, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
+    meta: { styleTags, promptOverride: portraitPrompt, loras: overrides.portraitLoras ? overrides.loras : [], artist: overrides.artist },
   });
   guard.assertCurrent();
   return { ok: true, kit: getPlayerKit(), portrait };

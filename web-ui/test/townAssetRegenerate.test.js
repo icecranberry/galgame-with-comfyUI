@@ -49,7 +49,7 @@ test('图片管理里的「重新生成」纯按原始需求重写提示词，�
   await run()
   assert.deepEqual(calls, [
     ['rewrite-prompt', 7, '', { fromRequestOnly: true }],
-    ['regenerate', 7, { prompt: 'new prompt', verbatim: true }],
+    ['regenerate', 7, { prompt: 'new prompt' }], // 不标 verbatim：固定前缀 / 硬 tag 交给后端补
   ])
   assert.equal(state.regenBusy.value, false)
   assert.equal(state.error.value, '')
