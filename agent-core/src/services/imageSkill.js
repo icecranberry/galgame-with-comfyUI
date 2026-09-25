@@ -67,11 +67,29 @@ const PROMPT_PLACEHOLDER = '请输入画面描述';
 export const NODE_TITLES = {
   artist: '画师串',
   quality: '质量提示词',
+  negative: '负面提示词',
   width:  '图片的宽',
   height: '图片的长',
   prompt: '画面描述',
   loraTrigger: 'lora触发词',
 };
+
+/** 顺着 KSampler negative 输入找到源头 CLIPTextEncode 节点（跳过 Reroute），用于无 title 的工作流兜底 */
+export function findNegativeEncodeNode(wf) {
+  const sampler = wf.nodes.find(n => n.type === 'KSampler' || n.type === 'KSamplerAdvanced');
+  if (!sampler) return null;
+  const negInp = (sampler.inputs || []).find(i => i.name === 'negative');
+  let linkId = negInp?.link;
+  for (let hop = 0; linkId != null && hop < 10; hop++) {
+    const link = (wf.links || []).find(l => l[0] === linkId);
+    if (!link) return null;
+    const src = wf.nodes.find(n => n.id === link[1]);
+    if (!src) return null;
+    if (src.type === 'Reroute') { linkId = src.inputs?.[0]?.link; continue; }
+    return src.type === 'CLIPTextEncode' ? src : null;
+  }
+  return null;
+}
 
 async function submitNovelaiImage(promptText, { onProgress } = {}) {
   const apiFormat = config.comfyui.novelaiApiFormat === 'official' ? 'official' : 'relay';
@@ -278,6 +296,9 @@ function buildWorkflow(promptText, overrides = {}) {
   // 质量提示词：非空才覆盖工作流节点里的默认值，留空不注入
   const qualityPrompt = typeof config.comfyui.qualityPrompt === 'string' ? config.comfyui.qualityPrompt.trim() : '';
   if (qualityPrompt) defaults[NODE_TITLES.quality] = qualityPrompt;
+  // 负面提示词：非空才覆盖工作流节点里的默认值，留空不注入
+  const negativePrompt = typeof config.comfyui.negativePrompt === 'string' ? config.comfyui.negativePrompt.trim() : '';
+  if (negativePrompt) defaults[NODE_TITLES.negative] = negativePrompt;
 
   for (const node of wf.nodes || []) {
     if (!Array.isArray(node.widgets_values)) continue;
@@ -309,10 +330,19 @@ function buildWorkflow(promptText, overrides = {}) {
       continue;
     }
 
-    // 画师串 / 宽 / 高：替换第一个 widget
+    // 画师串 / 宽 / 高 / 质量提示词 / 负面提示词：替换第一个 widget
     const val = defaults[node.title];
     if (val !== undefined && node.widgets_values.length > 0) {
       node.widgets_values[0] = val;
+    }
+  }
+
+  // 负面提示词兜底：存量工作流文件的负面 CLIPTextEncode 节点没有「负面提示词」title，
+  // 顺着 KSampler negative 输入找到它并注入
+  if (negativePrompt && !wf.nodes.some(n => n.title === NODE_TITLES.negative)) {
+    const negNode = findNegativeEncodeNode(wf);
+    if (negNode && Array.isArray(negNode.widgets_values) && negNode.widgets_values.length > 0) {
+      negNode.widgets_values[0] = negativePrompt;
     }
   }
 

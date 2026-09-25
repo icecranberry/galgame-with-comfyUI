@@ -90,6 +90,14 @@
             <span class="quality-summary" :class="{ 'is-default': !qualityPrompt }" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt ? qualityPrompt : '系统默认' }}</span>
             <linshe-button class="quality-link" variant="link" @click="openQualityDialog">更改 →</linshe-button>
           </div>
+          <div class="quality-row">
+            <div class="quality-copy">
+              <div class="quality-subtitle">负面提示词</div>
+              <div class="quality-desc">生图时排除的负面词条，留空使用工作流内置默认</div>
+            </div>
+            <span class="quality-summary" :class="{ 'is-default': !negativePrompt }" :title="negativePrompt || '使用工作流内置的负面提示词'">{{ negativePrompt ? negativePrompt : '工作流默认' }}</span>
+            <linshe-button class="quality-link" variant="link" @click="openNegativeDialog">更改 →</linshe-button>
+          </div>
         </div>
         <div class="sa">
           <linshe-button variant="primary" :disabled="!dirty" @click="saveComfy">保存</linshe-button>
@@ -986,6 +994,22 @@ type="range" min="0" max="1" step="0.1"
       </template>
     </linshe-modal>
 
+    <!-- 负面提示词弹窗 -->
+    <linshe-modal v-model="negativeDialog.show" title="负面提示词">
+      <p class="form-dialog-desc">填写英文负面提示词覆盖工作流默认值，留空则使用工作流内置默认</p>
+      <linshe-input
+        v-model="negativeDialog.text"
+        type="textarea"
+        rows="4"
+        maxlength="500"
+        placeholder="lowres, bad anatomy, bad hands..."
+      />
+      <template #footer>
+        <linshe-button variant="secondary" @click="negativeDialog.show = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="negativeSaving" @click="saveNegativePrompt">{{ negativeSaving ? '保存中…' : '保存' }}</linshe-button>
+      </template>
+    </linshe-modal>
+
     <!-- 防打扰模式设置弹窗 -->
     <linshe-modal v-model="disturbDialog.show" title="防打扰设置" wide>
       <div class="disturb-dialog-section">
@@ -1183,6 +1207,10 @@ const hiresLoraCount = computed(() => (hiresLoras.value || []).filter(l => l.pat
 const qualityPrompt = ref('')
 const qualityDialog = reactive({ show: false, text: '' })
 const qualitySaving = ref(false)
+// ── 负面提示词（非空覆盖工作流默认，留空不改） ──
+const negativePrompt = ref('')
+const negativeDialog = reactive({ show: false, text: '' })
+const negativeSaving = ref(false)
 const comfyTab = ref('chat')
 const comfyTabs = [
   { value: 'chat', label: '对话配图' },
@@ -1833,6 +1861,7 @@ onMounted(async () => {
     hiresArtistMode.value = data.comfy.hiresArtistMode ?? 'empty'
     hiresArtist.value = data.comfy.hiresArtist ?? ''
     qualityPrompt.value = data.comfy.qualityPrompt ?? ''
+    negativePrompt.value = data.comfy.negativePrompt ?? ''
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
@@ -1975,6 +2004,27 @@ async function saveQualityPrompt() {
     toastFn(e.message || '保存失败', 'error')
   } finally {
     qualitySaving.value = false
+  }
+}
+
+function openNegativeDialog() {
+  negativeDialog.text = negativePrompt.value
+  negativeDialog.show = true
+}
+
+async function saveNegativePrompt() {
+  negativeSaving.value = true
+  try {
+    const text = negativeDialog.text.trim()
+    await updateComfyConfig({ negativePrompt: text })
+    negativePrompt.value = text
+    negativeDialog.show = false
+    toastFn(text ? '负面提示词已更新，下张图生效' : '已恢复工作流默认负面提示词', 'success')
+  } catch (e) {
+    console.error('saveNegativePrompt failed:', e)
+    toastFn(e.message || '保存失败', 'error')
+  } finally {
+    negativeSaving.value = false
   }
 }
 
@@ -2704,6 +2754,7 @@ function resetTestPrompts() {
   border-bottom: 1px solid var(--border);
 }
 .quality-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.quality-row + .quality-row { margin-top: 14px; }
 .quality-copy { flex: 1; min-width: 180px; }
 .quality-subtitle { font-size: 13px; font-weight: 700; color: var(--text-bright); }
 .quality-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }

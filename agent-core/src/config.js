@@ -82,6 +82,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     eventWidth: parseInt(process.env.COMFYUI_EVENT_WIDTH, 10) || 1600,
     eventHeight: parseInt(process.env.COMFYUI_EVENT_HEIGHT, 10) || 1200,
     qualityPrompt: process.env.COMFYUI_QUALITY_PROMPT || '',  // 质量提示词覆盖（留空=沿用工作流默认）
+    negativePrompt: process.env.COMFYUI_NEGATIVE_PROMPT || '',  // 负面提示词覆盖（留空=沿用工作流默认）
     tlsVerify: process.env.COMFYUI_TLS_VERIFY !== 'false',
     globalLora: [],
     hiresLora: [],   // HiresFix 放大细化专用 LoRA（仅注入细化工作流，追加在 LoRA 链末尾）
@@ -237,7 +238,7 @@ export function getNovelaiApiKey() {
   catch { return process.env.NOVELAI_API_KEY || ''; }
 }
 
-export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, imageProvider, novelaiApiFormat, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiNegativePrompt, novelaiApiKey, clearNovelaiApiKey }) {
+export function updateComfyConfig({ artist, width, height, url, momentsArtist, momentsWidth, momentsHeight, eventArtist, eventWidth, eventHeight, tlsVerify, qualityPrompt, negativePrompt, imageProvider, novelaiApiFormat, novelaiUrl, novelaiModel, novelaiArtist, novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance, novelaiQualityPrompt, novelaiNegativePrompt, novelaiApiKey, clearNovelaiApiKey }) {
   if (imageProvider !== undefined) {
     const provider = imageProvider === 'novelai' ? 'novelai' : 'comfyui';
     config.comfyui.imageProvider = provider;
@@ -319,6 +320,10 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
   if (qualityPrompt !== undefined) {
     config.comfyui.qualityPrompt = typeof qualityPrompt === 'string' ? qualityPrompt.trim() : '';
     persistSettingSync('comfy_quality_prompt', config.comfyui.qualityPrompt);
+  }
+  if (negativePrompt !== undefined) {
+    config.comfyui.negativePrompt = typeof negativePrompt === 'string' ? negativePrompt.trim() : '';
+    persistSettingSync('comfy_negative_prompt', config.comfyui.negativePrompt);
   }
   if (width !== undefined) { config.comfyui.width = parseInt(width, 10) || config.comfyui.width; persistSettingSync('comfy_width', config.comfyui.width); }
   if (height !== undefined) { config.comfyui.height = parseInt(height, 10) || config.comfyui.height; persistSettingSync('comfy_height', config.comfyui.height); }

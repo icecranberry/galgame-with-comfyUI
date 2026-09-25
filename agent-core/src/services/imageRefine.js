@@ -6,7 +6,7 @@
  *   2. 加载 workflow/放大细化工作流.json（仅 ComfyUI 官方节点，像素放大而非 latent 放大）:
  *      LoadImage → ImageScaleToMaxDimension(按长边像素放大，默认 lanczos/长边2000，不固定倍数)
  *      → VAEEncode → KSampler(图生图低重绘, 默认 35步/cfg5.0/denoise0.35) → VAEDecode → PreviewImage
- *   3. 继承原图的模型加载器(UNET/CLIP/VAE)、负面提示词、提示词链(画面描述/质量提示词/画师串/lora触发词)，
+ *   3. 继承原图的模型加载器(UNET/CLIP/VAE)、负面提示词（系统参数非空时改为覆盖）、提示词链(画面描述/质量提示词/画师串/lora触发词)，
  *      以及与原图一致的 LoRA 链（全局画风 LoRA 按场景过滤 + 角色 LoRA），
  *      再追加 HiresFix 细化专用 LoRA（设置页单独配置）到链尾
  *   4. 提交 ComfyUI → 下载结果 → 原子覆盖原文件（细化产物是不透明图，透明背景由调用方按常规流程抠白）
@@ -29,7 +29,7 @@ import { config } from '../config.js';
 import {
   HIRES_WORKFLOW, ACTIVE_WORKFLOW, PRO_WORKFLOW, autoRestoreMissing,
 } from './workflowTemplates.js';
-import { injectLoraNodes, NODE_TITLES } from './imageSkill.js';
+import { injectLoraNodes, NODE_TITLES, findNegativeEncodeNode } from './imageSkill.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
@@ -65,23 +65,6 @@ function loadSourceWorkflow({ sourceMode, customWorkflow, scene } = {}) {
   } catch {
     return { wf: null, resolvedMode };
   }
-}
-
-/** 顺着 link 找到 KSampler negative 输入源头的 CLIPTextEncode 节点（跳过 Reroute） */
-function findNegativeEncodeNode(wf) {
-  const sampler = wf.nodes.find(n => n.type === 'KSampler' || n.type === 'KSamplerAdvanced');
-  if (!sampler) return null;
-  const negInp = (sampler.inputs || []).find(i => i.name === 'negative');
-  let linkId = negInp?.link;
-  for (let hop = 0; linkId != null && hop < 10; hop++) {
-    const link = (wf.links || []).find(l => l[0] === linkId);
-    if (!link) return null;
-    const src = wf.nodes.find(n => n.id === link[1]);
-    if (!src) return null;
-    if (src.type === 'Reroute') { linkId = src.inputs?.[0]?.link; continue; }
-    return src.type === 'CLIPTextEncode' ? src : null;
-  }
-  return null;
 }
 
 /**
@@ -153,6 +136,8 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   const artist = artistMode === 'empty' ? '' : artistMode === 'specified' ? (config.comfyui.hiresArtist || '') : baseArtist;
   // 质量提示词覆盖（与生图工作流共用一份系统参数）
   const qualityPrompt = typeof config.comfyui.qualityPrompt === 'string' ? config.comfyui.qualityPrompt.trim() : '';
+  // 负面提示词覆盖（与生图工作流共用一份系统参数；留空时继承原图工作流的负面提示词）
+  const negativePrompt = typeof config.comfyui.negativePrompt === 'string' ? config.comfyui.negativePrompt.trim() : '';
 
   const loaderCopies = {
     UNETLoader: srcLoader('UNETLoader'),
@@ -193,9 +178,10 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
       continue;
     }
 
-    // 负面提示词继承
-    if (node.type === 'CLIPTextEncode' && srcNegative !== null && node === findNegativeEncodeNode(wf)) {
-      node.widgets_values[0] = srcNegative;
+    // 负面提示词：系统参数非空时覆盖；留空则继承原图工作流的负面提示词（无源工作流时沿用细化模板默认）
+    if (node.type === 'CLIPTextEncode' && node === findNegativeEncodeNode(wf)) {
+      if (negativePrompt) node.widgets_values[0] = negativePrompt;
+      else if (srcNegative !== null) node.widgets_values[0] = srcNegative;
       continue;
     }
 
