@@ -2760,7 +2760,9 @@ function resetTestPrompts() {
 .quality-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 .quality-summary {
   font-size: 12px; color: var(--text-secondary);
-  max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 桌面端压缩摘要宽度：flex 换行按 max-width 参与分配，太宽会把摘要挤到第二行 */
+  max-width: 200px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .quality-summary.is-default { color: var(--text-secondary); }
 .pl { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }

@@ -184,8 +184,7 @@ function onFilterWheel(e) {
   el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
 }
 
-const historyColCount = computed(() => Math.min(colCount.value + 1, 6))
-const historyColumns = computed(() => splitColumns(store.visibleHistory, historyColCount.value))
+const historyColumns = computed(() => splitColumns(store.visibleHistory, colCount.value))
 
 const winWidth = ref(window.innerWidth)
 

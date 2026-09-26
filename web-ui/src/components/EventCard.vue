@@ -508,7 +508,7 @@ watch(isExpired, (val) => {
   transform: scale(1.08);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
-.preview-header-info { flex: 1; min-width: 0; }
+.preview-header-info { flex: 1 1 56px; min-width: 0; }
 .preview-name { font-size: 14px; font-weight: 600; color: var(--text-bright); display: block; }
 .preview-title {
   display: inline-block;
@@ -529,7 +529,9 @@ watch(isExpired, (val) => {
   white-space: nowrap; flex-shrink: 0;
 }
 .preview-badge.urgent { color: var(--danger); background: rgba(var(--accent-rgb), 0.08); }
-.preview-badge.history-time { color: var(--text-secondary); background: transparent; padding: 0; font-size: 10px; }
+/* 徽标允许收缩省略，避免把名字/标题挤成竖排；compact 的 12px 覆盖不作用于历史时间（恢复 10px 小字保证完整显示） */
+.preview-badge.history-time { color: var(--text-secondary); background: transparent; padding: 0; font-size: 10px; flex-shrink: 1; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; }
+.event-preview.is-compact .preview-badge.history-time { font-size: 10px; padding: 0; }
 
 /* 更多菜单 */
 .card-more-wrap { position: relative; margin-left: auto; flex-shrink: 0; }
