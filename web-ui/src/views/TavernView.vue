@@ -340,6 +340,7 @@
               </div>
               <div class="world-header-right">
                 <span v-if="activeWorldName" class="world-active-badge" :title="`当前激活：${activeWorldName}`">● {{ activeWorldName }}</span>
+                <linshe-button variant="secondary" size="sm" @click="startGuide">设置引导</linshe-button>
                 <linshe-button class="modal-close" variant="icon" @click="closeWorldSetting">✕</linshe-button>
               </div>
             </div>
@@ -391,44 +392,67 @@
                 <div class="world-tag world-tag-add" @click="startNew">+</div>
               </div>
 
-              <!-- 内容编辑区 -->
-              <div class="world-editor">
-                <div class="world-editor-bar">
-                  <span class="world-editor-label">世界观内容</span>
-                  <div class="world-editor-tools">
-                    <linshe-button
-                      class="btn-polish"
-                      variant="secondary"
-                      :disabled="polishLoading || !worldContent.trim()"
-                      title="AI 按酒馆世界书风格润色扩写当前世界观"
-                      @click="openPolish"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/>
-                        <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>
-                      </svg>
-                      一键润色
-                    </linshe-button>
+              <!-- 分框编辑区：每个框只装一种世界观要素，AI 帮写 / 导入按框进行 -->
+              <div class="world-fields">
+                <div v-for="def in WORLD_FIELD_DEFS" :key="def.key" class="world-field-block">
+                  <div class="world-field-bar">
+                    <div class="world-field-head">
+                      <span class="world-field-label">{{ def.label }}</span>
+                      <span class="world-field-hint">{{ def.hint }}</span>
+                    </div>
+                    <linshe-button variant="ghost" size="sm" @click="startFieldAi(def)">AI 帮写</linshe-button>
                   </div>
-                </div>
-                <div class="world-editor-body">
+                  <div v-if="fieldAi.key === def.key" class="world-field-ai-row">
+                    <linshe-input
+                      v-model="fieldAi.idea"
+                      size="sm"
+                      class="world-field-ai-input"
+                      placeholder="用一句话说说你的想法，例如：妖怪隐居在现代都市"
+                      @keyup.enter="runFieldAi(def)"
+                    />
+                    <linshe-button variant="secondary" size="sm" :loading="fieldAi.loading" @click="runFieldAi(def)">生成</linshe-button>
+                  </div>
                   <linshe-input
-                    ref="worldTextareaRef"
-                    v-model="worldContent"
+                    v-model="worldForm[def.key]"
                     type="textarea"
-                    class="world-textarea"
-                    rows="10"
-                    placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
+                    class="world-field-textarea"
+                    :rows="def.key === 'background' ? 4 : 3"
+                    :placeholder="def.example"
                     @input="worldDirty = true"
                   />
                 </div>
-                <div class="world-editor-meta">
-                  <span class="world-char-count"></span>
-                  <span v-if="worldSaved" class="world-saved-hint">✓ 已保存</span>
-                </div>
+              </div>
+
+              <!-- 导入 / 拆分 / 注入开关 -->
+              <div class="world-toolbar">
+                <linshe-button variant="ghost" size="sm" @click="openBookImport">导入世界书 JSON</linshe-button>
+                <linshe-button
+                  variant="ghost" size="sm"
+                  title="把旧的整段世界观文本重新按要素自动拆分入框"
+                  @click="resplitFields"
+                >从现有内容重新拆分</linshe-button>
+                <div class="world-toolbar-spacer"></div>
+                <linshe-switch
+                  v-model="scopedInject"
+                  on-text="生图时精简注入"
+                  title="开启后：生图类场景跳过「社会结构」框，让画面提示词更干净；关闭则所有场景全量注入"
+                  @change="worldDirty = true"
+                />
               </div>
 
               <div class="modal-actions">
+                <linshe-button
+                  variant="ghost"
+                  :disabled="polishLoading || !worldSourceText.trim()"
+                  title="AI 按酒馆世界书风格润色扩写当前世界观（结果回填到各框）"
+                  @click="openPolish"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3l1.9 5.7L19.6 10l-5.7 1.9L12 17.6l-1.9-5.7L4.4 10l5.7-1.3z"/>
+                    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>
+                  </svg>
+                  一键润色
+                </linshe-button>
                 <linshe-button variant="secondary" @click="closeWorldSetting">取消</linshe-button>
                 <linshe-button
                   variant="primary"
@@ -438,6 +462,125 @@
                   {{ worldSaving ? '保存中...' : '保存' }}
                 </linshe-button>
               </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         世界观设置引导向导（唯一模板：按要素逐步引导填写）
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="wizard.open" class="modal-overlay" @mousedown.self="wizard.open = false">
+          <div class="modal-panel world-wizard-panel">
+            <div class="modal-header">
+              <h3>{{ wizard.step < WORLD_FIELD_DEFS.length ? '世界观引导 · ' + WORLD_FIELD_DEFS[wizard.step].label : '世界观引导 · 完成' }}</h3>
+              <linshe-button class="modal-close" variant="icon" @click="wizard.open = false">✕</linshe-button>
+            </div>
+            <div class="modal-body">
+              <!-- 逐要素步骤 -->
+              <div v-if="wizard.step < WORLD_FIELD_DEFS.length">
+                <div class="wizard-progress">
+                  <span
+                    v-for="(def, i) in WORLD_FIELD_DEFS"
+                    :key="def.key"
+                    class="wizard-progress-dot"
+                    :class="{ 'is-active': i === wizard.step, 'is-done': i < wizard.step || worldForm[def.key].trim() }"
+                  ></span>
+                </div>
+                <p class="wizard-hint">{{ WORLD_FIELD_DEFS[wizard.step].hint }}</p>
+                <p class="wizard-example">{{ WORLD_FIELD_DEFS[wizard.step].example }}</p>
+                <linshe-input
+                  v-model="worldForm[WORLD_FIELD_DEFS[wizard.step].key]"
+                  type="textarea"
+                  class="world-field-textarea"
+                  rows="4"
+                  placeholder="自己写，或点下方「AI 帮写」"
+                  @input="worldDirty = true"
+                />
+                <div class="world-field-ai-row">
+                  <linshe-input
+                    v-model="wizard.idea"
+                    size="sm"
+                    class="world-field-ai-input"
+                    placeholder="（可选）用一句话告诉 AI 你的想法"
+                    @keyup.enter="runWizardAi"
+                  />
+                  <linshe-button variant="secondary" size="sm" :loading="wizard.aiLoading" @click="runWizardAi">AI 帮写</linshe-button>
+                </div>
+              </div>
+
+              <!-- 完成步骤：拼装预览 -->
+              <div v-else>
+                <p class="wizard-hint">这就是最终注入给 AI 的世界观文本。确认无误后保存{{ wizard.activateOnFinish ? '并激活' : '' }}。</p>
+                <pre class="wizard-preview">{{ assembledWorldText || '（各框都还是空的）' }}</pre>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <linshe-button v-if="wizard.step > 0" variant="ghost" @click="wizard.step--">上一步</linshe-button>
+              <div class="wizard-actions-spacer"></div>
+              <linshe-button variant="secondary" @click="wizard.step = Math.min(wizard.step + 1, WORLD_FIELD_DEFS.length)">
+                {{ wizard.step < WORLD_FIELD_DEFS.length ? (worldForm[WORLD_FIELD_DEFS[wizard.step].key]?.trim() ? '下一步' : '跳过') : '再看看' }}
+              </linshe-button>
+              <linshe-button
+                v-if="wizard.step >= WORLD_FIELD_DEFS.length"
+                variant="primary"
+                :loading="worldSaving"
+                @click="saveWorld({ activate: true, closeWizard: true })"
+              >保存{{ wizard.activateOnFinish ? '并激活' : '' }}</linshe-button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ═══════════════════════════════════════════
+         酒馆世界书 JSON 导入弹窗
+         ═══════════════════════════════════════════ -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div v-if="bookImport.open" class="modal-overlay" @mousedown.self="bookImport.open = false">
+          <div class="modal-panel world-wizard-panel">
+            <div class="modal-header">
+              <h3>导入酒馆世界书 JSON</h3>
+              <linshe-button class="modal-close" variant="icon" @click="bookImport.open = false">✕</linshe-button>
+            </div>
+            <div class="modal-body">
+              <template v-if="!bookImport.entries.length">
+                <p class="wizard-hint">粘贴酒馆世界书 / 角色卡的 JSON 原文（支持 character_book / entries 结构），解析后逐条选择要放进哪个要素框。</p>
+                <linshe-input
+                  v-model="bookImport.raw"
+                  type="textarea"
+                  class="world-field-textarea"
+                  rows="8"
+                  placeholder='{"entries": { "0": { "key": ["妖怪协会"], "content": "..." } }}'
+                />
+                <p v-if="bookImport.error" class="wizard-error">{{ bookImport.error }}</p>
+              </template>
+              <template v-else>
+                <p class="wizard-hint">已解析 {{ bookImport.entries.length }} 条。每条已按内容预分配目标框，可以改；不需要的条目取消勾选。</p>
+                <div class="book-entry-list">
+                  <label v-for="entry in bookImport.entries" :key="entry.index" class="book-entry-row">
+                    <input v-model="entry.checked" type="checkbox" class="book-entry-check" />
+                    <div class="book-entry-main">
+                      <span class="book-entry-title">{{ entry.title }}</span>
+                      <span class="book-entry-content">{{ entry.content }}</span>
+                    </div>
+                    <select v-model="entry.field" class="book-entry-field">
+                      <option v-for="def in WORLD_FIELD_DEFS" :key="def.key" :value="def.key">{{ def.label }}</option>
+                    </select>
+                  </label>
+                </div>
+                <p v-if="bookImport.error" class="wizard-error">{{ bookImport.error }}</p>
+              </template>
+            </div>
+            <div class="modal-actions">
+              <linshe-button v-if="bookImport.entries.length" variant="ghost" @click="resetBookImport">重新粘贴</linshe-button>
+              <div class="wizard-actions-spacer"></div>
+              <linshe-button v-if="!bookImport.entries.length" variant="primary" :loading="bookImport.loading" @click="parseBook">解析</linshe-button>
+              <linshe-button v-else variant="primary" :loading="bookImport.loading" @click="confirmBookImport">导入到当前世界观</linshe-button>
             </div>
           </div>
         </div>
@@ -971,13 +1114,23 @@ watch(showRelationGraph, async (val) => {
 })
 
 // ═══════════════════════════════════════
-// 世界观收藏（标签行 + textarea）
+// 世界观分框编辑（标签行 + 四要素框；注入方式不变，content 由后端按框拼装）
 // ═══════════════════════════════════════
+// 与后端 agent-core/src/services/worldFields.js 的 WORLD_FIELD_DEFS 保持一致（纯 UI 元数据）
+const WORLD_FIELD_DEFS = [
+  { key: 'background', label: '世界背景', hint: '这是一个什么样的世界：时代、舞台、基本法则。', example: '例如：一个灵气复苏的现代都市，妖怪隐居在人类城市里，双方维持着脆弱的和平。' },
+  { key: 'society', label: '社会结构', hint: '人们怎么生活、怎么相处：日常规则、行为方式、组织与群体。', example: '例如：妖怪协会负责调解纠纷；人类对妖怪的存在心照不宣，假装看不见。' },
+  { key: 'abilities', label: '特殊能力', hint: '这个世界超越现实的能力与规则（没有可留空）。', example: '例如：妖怪能附身在旧物上；人类灵视者可以看见常人看不见的影子。' },
+  { key: 'reinforce', label: '需要强化的设定', hint: '希望 AI 每次都严格遵守、不许偏移的关键设定。', example: '例如：妖怪不能主动暴露身份；任何冲突都优先用谈判解决。' },
+]
+const emptyWorldForm = () => ({ background: '', society: '', abilities: '', reinforce: '' })
+
 const showWorldModal = ref(false)
 const worldItems = ref([])
 const activeWorldName = ref('')
 const selectedWorldId = ref(null)
-const worldContent = ref('')
+const worldForm = ref(emptyWorldForm())
+const scopedInject = ref(true)
 const worldDirty = ref(false)
 const worldSaving = ref(false)
 const worldSaved = ref(false)
@@ -987,7 +1140,27 @@ const newNameInput = ref(null)
 const editingNameId = ref(null)
 const editNameValue = ref('')
 const editNameInput = ref(null)
-const worldTextareaRef = ref(null)
+
+// 各框拼装后的最终注入文本（预览/润色底稿用；真正的拼装与注入在后端完成）
+const assembledWorldText = computed(() => {
+  const parts = []
+  for (const def of WORLD_FIELD_DEFS) {
+    const body = String(worldForm.value[def.key] || '').trim()
+    if (body) parts.push(`## ${def.label}\n${body}`)
+  }
+  return parts.join('\n\n')
+})
+// 一键润色的底稿：已保存的快照，或未保存编辑时用当前分框拼装
+const worldSourceText = computed(() => assembledWorldText.value || '')
+
+// 单框 AI 帮写状态
+const fieldAi = reactive({ key: '', idea: '', loading: false })
+
+// 设置引导向导状态
+const wizard = reactive({ open: false, step: 0, idea: '', aiLoading: false, activateOnFinish: false })
+
+// 世界书 JSON 导入状态
+const bookImport = reactive({ open: false, raw: '', entries: [], loading: false, error: '' })
 
 // 纯文本世界观 → 带层级标记的展示 HTML（不改变原始文本内容）
 function toWorldHighlightHtml(text) {
@@ -1016,9 +1189,26 @@ async function loadWorldSettings() {
     activeWorldName.value = active?.name || ''
     if (active) {
       selectedWorldId.value = active.id
-      worldContent.value = active.content || ''
+      await applyItemToForm(active)
     }
   } catch {}
+}
+
+/** 把一套世界观（API 行）填进分框表单；老路径行（fields 为 null 且有整段 content）先让后端重切 */
+async function applyItemToForm(item) {
+  if (!item.fields && String(item.content || '').trim() && item.id) {
+    try {
+      const result = await api.resplitWorldSetting(item.id)
+      if (result?.ok && result.item) {
+        const idx = worldItems.value.findIndex(w => w.id === item.id)
+        if (idx >= 0) worldItems.value[idx] = result.item
+        item = result.item
+      }
+    } catch { /* 切分失败则按空框处理，原 content 仍会作为快照被注入 */ }
+  }
+  worldForm.value = { ...emptyWorldForm(), ...(item.fields || {}) }
+  scopedInject.value = item.scoped_inject !== 0
+  worldDirty.value = false
 }
 
 function openWorldSetting() {
@@ -1037,8 +1227,7 @@ function closeWorldSetting() {
 function selectWorld(item) {
   if (selectedWorldId.value === item.id) return
   selectedWorldId.value = item.id
-  worldContent.value = item.content || ''
-  worldDirty.value = false
+  applyItemToForm(item)
   activateWorld(item.id)
 }
 
@@ -1059,7 +1248,7 @@ async function confirmNew() {
     worldNewName.value = ''
     await loadWorldSettings()
     selectedWorldId.value = result.item.id
-    worldContent.value = ''
+    worldForm.value = emptyWorldForm()
     worldDirty.value = false
     activateWorld(result.item.id, { silent: true })
     showToast(`已创建世界观「${name}」`, 'success')
@@ -1071,19 +1260,20 @@ async function confirmNew() {
   }
 }
 
-async function saveWorld() {
+async function saveWorld({ activate = false, closeWizard = false } = {}) {
   if (worldSaving.value) return
   worldSaving.value = true
   try {
+    const payload = { fields: { ...worldForm.value }, scopedInject: scopedInject.value ? 1 : 0 }
     let targetId = selectedWorldId.value
     if (!targetId) {
-      // 兜底：没有任何世界观（如旧库空表）时，把当前内容存为新的一套并激活
-      const created = await api.createWorldSetting({ name: '默认世界观', content: worldContent.value.trim() })
+      // 兜底：没有任何世界观（如旧库空表）时，把当前分框存为新的一套并激活
+      const created = await api.createWorldSetting({ name: '默认世界观', ...payload })
       if (!created?.ok) throw new Error(created?.error || '创建失败')
       targetId = created.item.id
       await api.activateWorldSetting(targetId)
     } else {
-      const result = await api.updateWorldSetting(targetId, { content: worldContent.value.trim() })
+      const result = await api.updateWorldSetting(targetId, payload)
       if (!result?.ok) throw new Error(result?.error || '保存失败')
     }
     selectedWorldId.value = targetId
@@ -1091,6 +1281,8 @@ async function saveWorld() {
     worldSaved.value = true
     setTimeout(() => worldSaved.value = false, 2000)
     await loadWorldSettings()
+    if (activate) await activateWorld(targetId, { silent: true })
+    if (closeWizard) wizard.open = false
     showToast('世界观已保存', 'success')
   } catch (err) {
     console.error('[world] save failed:', err)
@@ -1129,7 +1321,7 @@ async function handleDelete(item) {
     if (!result?.ok) throw new Error(result?.error || '删除失败')
     if (selectedWorldId.value === item.id) {
       selectedWorldId.value = null
-      worldContent.value = ''
+      worldForm.value = emptyWorldForm()
       worldDirty.value = false
     }
     await loadWorldSettings()
@@ -1137,7 +1329,7 @@ async function handleDelete(item) {
       const first = worldItems.value.find(w => w.id !== item.id)
       if (first) {
         selectedWorldId.value = first.id
-        worldContent.value = first.content || ''
+        await applyItemToForm(first)
       }
     }
     showToast(`已删除世界观「${item.name}」`, 'success')
@@ -1182,9 +1374,10 @@ const showPolishModal = ref(false)
 const polishLoading = ref(false)
 const polishError = ref('')
 const polishContent = ref('')
+const polishResultFields = ref(null)
 
 function openPolish() {
-  const source = worldContent.value.trim()
+  const source = worldSourceText.value.trim()
   if (!source || polishLoading.value) return
   polishError.value = ''
   polishContent.value = ''
@@ -1197,11 +1390,12 @@ function closePolishModal() {
   polishLoading.value = false
   polishError.value = ''
   polishContent.value = ''
+  polishResultFields.value = null
 }
 
 async function runPolish() {
   if (polishLoading.value) return
-  const source = worldContent.value.trim()
+  const source = worldSourceText.value.trim()
   if (!source) {
     polishError.value = '当前世界观内容为空，请先填写内容再润色'
     return
@@ -1226,6 +1420,7 @@ async function runPolish() {
       throw new Error(result?.error || '润色失败，请稍后重试')
     }
     polishContent.value = result.content
+    polishResultFields.value = result.fields || null
   } catch (err) {
     polishError.value = err?.message || '润色失败，请稍后重试'
   } finally {
@@ -1235,11 +1430,151 @@ async function runPolish() {
 
 async function confirmPolish() {
   if (!polishContent.value) return
-  worldContent.value = polishContent.value
+  // 润色结果按四框回填（后端已解析）；解析失败时整段塞进世界背景框，仍可手调
+  if (polishResultFields.value) {
+    worldForm.value = { ...emptyWorldForm(), ...polishResultFields.value }
+  } else {
+    worldForm.value = { ...emptyWorldForm(), background: polishContent.value }
+  }
   worldDirty.value = true
   worldSaved.value = false
   closePolishModal()
   await saveWorld()
+}
+
+// ═══════════════════════════════════════
+// 世界观分框辅助：单框 AI 帮写 / 重新拆分 / 设置引导 / 世界书导入
+// ═══════════════════════════════════════
+
+/** 单框 AI 帮写（弹窗内联行） */
+function startFieldAi(def) {
+  fieldAi.key = fieldAi.key === def.key ? '' : def.key
+  fieldAi.idea = ''
+}
+
+async function runFieldAi(def) {
+  const idea = fieldAi.idea.trim()
+  if (!idea || fieldAi.loading) return
+  fieldAi.loading = true
+  try {
+    const item = worldItems.value.find(w => w.id === selectedWorldId.value)
+    const result = await api.generateWorldField({ field: def.key, idea, name: item?.name || '' })
+    if (!result?.ok || !result.text) throw new Error(result?.error || '生成失败')
+    worldForm.value[def.key] = result.text
+    worldDirty.value = true
+    fieldAi.key = ''
+    fieldAi.idea = ''
+  } catch (err) {
+    showToast(`AI 帮写失败: ${err?.message || '未知错误'}`, 'error')
+  } finally {
+    fieldAi.loading = false
+  }
+}
+
+/** 把旧的整段 content 重新自动切分入框（后端 splitWorldContentIntoFields） */
+async function resplitFields() {
+  if (!selectedWorldId.value) {
+    showToast('还没有可拆分的世界观内容', 'info')
+    return
+  }
+  try {
+    const result = await api.resplitWorldSetting(selectedWorldId.value)
+    if (!result?.ok) throw new Error(result?.error || '拆分失败')
+    await applyItemToForm(result.item)
+    await loadWorldSettings()
+    showToast('已按要素重新拆分入框', 'success')
+  } catch (err) {
+    showToast(`拆分失败: ${err?.message || '未知错误'}`, 'error')
+  }
+}
+
+/** 设置引导：从第一个要素框开始逐步引导；各框全空时假定是新世界，完成后自动激活 */
+function startGuide() {
+  const empty = WORLD_FIELD_DEFS.every(def => !String(worldForm.value[def.key] || '').trim())
+  wizard.open = true
+  wizard.step = 0
+  wizard.idea = ''
+  wizard.activateOnFinish = empty
+}
+
+async function runWizardAi() {
+  const idea = wizard.idea.trim()
+  if (!idea || wizard.aiLoading) return
+  const def = WORLD_FIELD_DEFS[wizard.step]
+  if (!def) return
+  wizard.aiLoading = true
+  try {
+    const item = worldItems.value.find(w => w.id === selectedWorldId.value)
+    const result = await api.generateWorldField({ field: def.key, idea, name: item?.name || '' })
+    if (!result?.ok || !result.text) throw new Error(result?.error || '生成失败')
+    worldForm.value[def.key] = result.text
+    worldDirty.value = true
+    wizard.idea = ''
+  } catch (err) {
+    showToast(`AI 帮写失败: ${err?.message || '未知错误'}`, 'error')
+  } finally {
+    wizard.aiLoading = false
+  }
+}
+
+function openBookImport() {
+  resetBookImport()
+  bookImport.open = true
+}
+
+function resetBookImport() {
+  bookImport.raw = ''
+  bookImport.entries = []
+  bookImport.error = ''
+}
+
+async function parseBook() {
+  const raw = bookImport.raw.trim()
+  if (!raw || bookImport.loading) return
+  bookImport.loading = true
+  bookImport.error = ''
+  try {
+    const result = await api.importWorldBook(raw)
+    if (!result?.ok) throw new Error(result?.error || '解析失败')
+    bookImport.entries = (result.entries || []).map(e => ({
+      ...e,
+      checked: true,
+      field: e.field || 'background',
+    }))
+    if (bookImport.entries.length === 0) throw new Error('没有解析到可导入的词条')
+  } catch (err) {
+    bookImport.error = err?.message || '解析失败'
+  } finally {
+    bookImport.loading = false
+  }
+}
+
+async function confirmBookImport() {
+  if (bookImport.loading) return
+  if (!selectedWorldId.value) {
+    bookImport.error = '请先选择或创建一套世界观再导入'
+    return
+  }
+  const assignments = bookImport.entries
+    .filter(e => e.checked && String(e.content || '').trim())
+    .map(e => ({ index: e.index, title: e.title, content: e.content, field: e.field }))
+  if (assignments.length === 0) {
+    bookImport.error = '没有勾选任何词条'
+    return
+  }
+  bookImport.loading = true
+  try {
+    const result = await api.applyWorldBookImport(selectedWorldId.value, assignments)
+    if (!result?.ok) throw new Error(result?.error || '导入失败')
+    await applyItemToForm(result.item)
+    await loadWorldSettings()
+    bookImport.open = false
+    showToast(`已导入 ${assignments.length} 条词条到当前世界观`, 'success')
+  } catch (err) {
+    bookImport.error = err?.message || '导入失败'
+  } finally {
+    bookImport.loading = false
+  }
 }
 
 async function openCharDetail(c) {
@@ -1811,6 +2146,180 @@ onMounted(async () => {
   gap: 5px;
   padding: 4px 10px;
 }
+
+/* ── 世界观分框编辑 ── */
+.world-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.world-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.world-field-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.world-field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.world-field-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-bright);
+  white-space: nowrap;
+}
+.world-field-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.world-field-textarea :deep(textarea),
+.world-field-textarea textarea {
+  font-size: 13px;
+  line-height: 1.7;
+  resize: vertical;
+}
+.world-field-ai-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.world-field-ai-input {
+  flex: 1;
+  min-width: 0;
+}
+.world-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.world-toolbar-spacer {
+  flex: 1;
+}
+
+/* ── 世界观设置引导向导 ── */
+.world-wizard-panel {
+  width: min(620px, 94vw);
+}
+.wizard-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.wizard-progress-dot {
+  width: 28px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  transition: background 0.25s var(--ease-standard);
+}
+.wizard-progress-dot.is-active {
+  background: var(--accent);
+}
+.wizard-progress-dot.is-done {
+  background: rgba(var(--accent-rgb), 0.35);
+}
+.wizard-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.wizard-example {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+.wizard-error {
+  font-size: 12px;
+  color: var(--danger, #ff4d4f);
+  margin-top: 8px;
+}
+.wizard-preview {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 42vh;
+  overflow-y: auto;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text-primary);
+}
+.wizard-actions-spacer {
+  flex: 1;
+}
+
+/* ── 酒馆世界书导入 ── */
+.book-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.book-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--bg-secondary);
+}
+.book-entry-check {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+.book-entry-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.book-entry-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.book-entry-content {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-entry-field {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
 
 .world-editor-body {
   position: relative;

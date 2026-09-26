@@ -26,6 +26,7 @@ import { migrateTownItemSchema } from './townItemSchema.js';
 import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
 import { cleanupInterruptedChestItems } from '../services/itemLifecycle.js';
 import { migrateWeatherHourlySchema } from './weatherHourlySchema.js';
+import { splitWorldContentIntoFields } from '../services/worldFields.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -285,10 +286,15 @@ function initSchema(db) {
     );
 
     -- 世界观收藏表（多套设定，可切换激活）
+    -- fields_json: 分框内容 { background, society, abilities, reinforce }（2026-09 世界观分框改造）
+    -- scoped_inject: 生图/轻量场景按框精简注入开关（1=按场景精简，0=始终全量）
+    -- content 退化为拼装快照：分框保存时由 fields 自动生成；老数据原样保留
     CREATE TABLE IF NOT EXISTS world_settings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       content TEXT NOT NULL DEFAULT '',
+      fields_json TEXT,
+      scoped_inject INTEGER DEFAULT 1,
       is_active INTEGER DEFAULT 0,
       sort_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -917,6 +923,9 @@ function initSchema(db) {
 
   // 空表补默认激活世界观：前端世界观弹窗的保存依赖选中项，空表时写入无法落库
   seedDefaultWorldSetting(db);
+
+  // 迁移: 世界观分框（fields_json / scoped_inject 列 + 旧内容自动切分）
+  migrateWorldFieldsSchema(db);
 
   // 迁移: LLM 多配置切换（需在 seed 之后，确保 DB 已初始化）
   migrateLlmProfiles(db);
@@ -2321,6 +2330,36 @@ export function seedDefaultWorldSetting(db) {
     console.log('[db] seedDefaultWorldSetting: created default active world setting');
   } catch (err) {
     console.log('[db] seedDefaultWorldSetting error:', err.message);
+  }
+}
+
+// 迁移: 世界观分框 — world_settings 加 fields_json / scoped_inject 列（idempotent），
+// 并把已有单块 content 自动切分入框（只切一次：fields_json 为空的行才处理）。
+// content 快照保持原样不重写；切分零丢失（识别不了的段落归入「世界背景」框）。
+export function migrateWorldFieldsSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(world_settings)`).all();
+    if (!cols.find(c => c.name === 'fields_json')) {
+      db.exec(`ALTER TABLE world_settings ADD COLUMN fields_json TEXT`);
+      console.log('[db] Added world_settings.fields_json column');
+    }
+    if (!cols.find(c => c.name === 'scoped_inject')) {
+      db.exec(`ALTER TABLE world_settings ADD COLUMN scoped_inject INTEGER DEFAULT 1`);
+      console.log('[db] Added world_settings.scoped_inject column');
+    }
+    const rows = db.prepare(`SELECT id, content FROM world_settings WHERE fields_json IS NULL OR fields_json = ''`).all();
+    let split = 0;
+    for (const row of rows) {
+      // 空内容行保持 fields_json 为 NULL：NULL 表示「尚无分框数据，content 是唯一事实」，
+      // 直接写库更新 content 的旧路径（含测试）不会被空框遮蔽
+      if (!String(row.content || '').trim()) continue;
+      const fields = splitWorldContentIntoFields(row.content);
+      db.prepare(`UPDATE world_settings SET fields_json = ? WHERE id = ?`).run(JSON.stringify(fields), row.id);
+      split++;
+    }
+    if (split > 0) console.log(`[db] migrateWorldFieldsSchema: ${split} 套世界观的旧内容已自动切分为分框结构`);
+  } catch (err) {
+    console.log('[db] migrateWorldFieldsSchema error:', err.message);
   }
 }
 

@@ -202,9 +202,9 @@ router.post('/test-style', async (req, res) => {
    *             以及画面描述中提到的用户本人（只注入其自述资料，不参与 loras）
    */
   const generateScenePrompt = async (desc) => {
-    const msgs = [{ role: 'system', content: getSystemRulesWithWorld() || '你是一个角色扮演 AI。' }];
+    const msgs = [{ role: 'system', content: getSystemRulesWithWorld({ scope: 'visual' }) || '你是一个角色扮演 AI。' }];
     try {
-      if (getWorldSetting()) msgs.push({ role: 'system', content: getWorldIntegrationRule('photo') });
+      if (getWorldSetting({ scope: 'visual' })) msgs.push({ role: 'system', content: getWorldIntegrationRule('photo') });
     } catch { /* 规则缺失非致命 */ }
     msgs.push({ role: 'system', content: `【生图规则】\n${IMAGE_PROMPT_RULE.rule_content}` });
 

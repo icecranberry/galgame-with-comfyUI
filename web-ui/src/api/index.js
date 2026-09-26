@@ -676,6 +676,26 @@ export async function activateWorldSetting(id) {
   return request(`/config/world-settings/${id}/activate`, { method: 'POST' })
 }
 
+/** 把某套世界观的整段 content 重新自动切分入四框（切错了可反复重切） */
+export async function resplitWorldSetting(id) {
+  return request(`/config/world-settings/${id}/resplit`, { method: 'POST' })
+}
+
+/** 单框 AI 帮写：{ field, idea, name } → { text } */
+export async function generateWorldField(data) {
+  return request(`/config/world-settings/generate-field`, { method: 'POST', body: data })
+}
+
+/** 解析酒馆世界书 JSON → { entries: [{index,title,keys,constant,field,content}], fields }（不落库） */
+export async function importWorldBook(book) {
+  return request(`/config/world-settings/import-book`, { method: 'POST', body: { book } })
+}
+
+/** 把确认后的词条追加进指定世界观对应框：{ worldId, assignments } */
+export async function applyWorldBookImport(worldId, assignments) {
+  return request(`/config/world-settings/import-book/apply`, { method: 'POST', body: { worldId, assignments } })
+}
+
 // ── Global Rules ──
 export async function getGlobalRules() {
   return request(`/config/rules`)
