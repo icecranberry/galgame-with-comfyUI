@@ -2152,10 +2152,7 @@ async function generateReplyGuesses(conversationId, character) {
 
   // msgs[0] — 舞台：破限词 + 世界观（不含 roleplay，避免预测助手站错角色）
   const jailbreak = getSystemRules({ roleplay: false });
-  let worldSetting = getWorldSetting();
-  if (worldSetting && worldSetting.length > 500) {
-    worldSetting = worldSetting.slice(0, 500);
-  }
+  const worldSetting = getWorldSetting({ scope: 'light' });
   const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
 
   // msgs[1] — 任务：预测指令（先定义任务） + 角色背景（后补充上下文）

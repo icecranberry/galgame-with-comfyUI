@@ -18,6 +18,7 @@ import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 import { getMemorySettings, saveMemorySettings, normalizeMemorySettings } from '../services/memory/memoryConfig.js';
 import { getPreferredMemoryEmbeddingProfile, testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
 import { reindexAllMemories } from '../services/memory/memoryRepository.js';
+import { WORLD_FIELD_DEFS, splitWorldContentIntoFields, extractLorebookEntries, suggestFieldForEntry, mergeLorebookAssignments } from '../services/worldFields.js';
 
 const router = Router();
 
@@ -827,31 +828,39 @@ router.post('/rules/:key/reset', (req, res) => {
   res.json({ ok: true, rule: updated });
 });
 
-// ── 世界观收藏 ──
+// ── 世界观收藏（分框模型：name + 四个要素框，content 为拼装快照）──
 
-// GET /api/world-settings — 获取全部世界观列表
+// 行 → API 形态：解析 fields_json 为 fields 对象
+function worldRowToApi(row) {
+  if (!row) return row;
+  let fields = null;
+  try { fields = row.fields_json ? JSON.parse(row.fields_json) : null; } catch { fields = null; }
+  return { ...row, fields: fields || null, scoped_inject: row.scoped_inject === 0 ? 0 : 1 };
+}
+
+// GET /world-settings — 获取全部世界观列表（含分框 fields）
 router.get('/world-settings', (req, res) => {
-  res.json({ list: listWorldSettings() });
+  res.json({ list: listWorldSettings().map(worldRowToApi) });
 });
 
-// POST /api/world-settings — 创建新世界观
+// POST /world-settings — 创建新世界观（fields 分框优先；只传 content 则按旧路径整段存储）
 router.post('/world-settings', (req, res) => {
-  const { name, content } = req.body;
+  const { name, content, fields, scopedInject } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-  const item = createWorldSetting({ name: name.trim(), content: content?.trim() || '' });
-  res.json({ ok: true, item });
+  const item = createWorldSetting({ name: name.trim(), content: content?.trim() || '', fields, scopedInject });
+  res.json({ ok: true, item: worldRowToApi(item) });
 });
 
-// PUT /api/world-settings/:id — 编辑某个世界观
+// PUT /world-settings/:id — 编辑某个世界观（fields 分框 / scoped_inject 开关 / 旧 content 路径兼容）
 router.put('/world-settings/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || !getWorldSettingById(id)) return res.status(404).json({ error: 'not found' });
-  const { name, content } = req.body;
-  const item = updateWorldSetting(id, { name: name?.trim(), content: content?.trim() });
-  res.json({ ok: true, item });
+  const { name, content, fields, scopedInject } = req.body;
+  const item = updateWorldSetting(id, { name: name?.trim(), content: content?.trim(), fields, scopedInject });
+  res.json({ ok: true, item: worldRowToApi(item) });
 });
 
-// DELETE /api/world-settings/:id — 删除某个世界观
+// DELETE /world-settings/:id — 删除某个世界观
 router.delete('/world-settings/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const result = deleteWorldSetting(id);
@@ -859,12 +868,22 @@ router.delete('/world-settings/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/world-settings/:id/activate — 切换激活某个世界观
+// POST /world-settings/:id/activate — 切换激活某个世界观
 router.post('/world-settings/:id/activate', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const item = activateWorldSetting(id);
   if (!item) return res.status(404).json({ error: 'not found' });
-  res.json({ ok: true, item });
+  res.json({ ok: true, item: worldRowToApi(item) });
+});
+
+// POST /world-settings/:id/resplit — 把当前整段 content 重新自动切分入框（切错了可以反复重切）
+router.post('/world-settings/:id/resplit', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = getWorldSettingById(id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  const fields = splitWorldContentIntoFields(row.content);
+  const item = updateWorldSetting(id, { fields });
+  res.json({ ok: true, item: worldRowToApi(item) });
 });
 
 // GET /api/config/system-rules — 获取系统破限词（供世界观润色等 AI 功能请求体携带）
@@ -872,7 +891,7 @@ router.get('/system-rules', (_req, res) => {
   res.json({ content: getSystemRules({ roleplay: false }) || '' });
 });
 
-// POST /api/world-settings/polish — AI 一键润色扩写世界观（酒馆世界书风格）
+// POST /world-settings/polish — AI 按四框结构润色扩写世界观（世界背景/社会结构/特殊能力/需要强化的设定）
 // 请求体带系统破限词：LLM 首条 system 消息注入破限词，保证扩写创作自由。
 router.post('/world-settings/polish', async (req, res) => {
   const { name, content } = req.body || {};
@@ -891,32 +910,32 @@ router.post('/world-settings/polish', async (req, res) => {
 
 const systemPrompt = `你是一名资深的世界观设定师，擅长撰写「酒馆AI世界书（World Info / Lorebook）」风格的设定文本，服务于沉浸式角色扮演。
 
-用户会提供一份世界观底稿。请忠于原意进行润色与扩写，写成一份简洁、自然、可直接用于角色扮演的世界书。
+用户会提供一份世界观底稿。请忠于原意进行润色与扩写，按下面四个要素整理成一份简洁、自然、可直接用于角色扮演的世界书。
 
 核心原则：
-- 把底稿中最有冲击力的设定，当成这个世界**已经彻底内化**的绝对常识，不要写任何“怎么变成这样”的过程（禁止写改造、强制、适应期、带头示范等起源故事）。
+- 把底稿中最有冲击力的设定，当成这个世界**已经彻底内化**的绝对常识，不要写任何"怎么变成这样"的过程（禁止写改造、强制、适应期、带头示范等起源故事）。
 - 重点写清两件事：1. 人们日常真正怎么做；2. 支撑这些行为的深层逻辑是什么。
 - 整体语气要口语化、生活化，像在跟朋友随口介绍这个世界，自然随意，不要写成说明书，也不要有文学腔和修辞。
 - 所有在常人看来私密或特殊的行为，必须处理得极其平淡自然，像喝水、上厕所、打哈欠一样普通，不要写成表演、炫耀或社交手段。
 - 不要面面俱到，只抓住最能改变日常生活的核心点写透。
 
-【输出结构要求】严格按以下 Markdown 分节顺序输出：
+【输出结构要求】严格按以下 Markdown 分节顺序输出，四个标题一个都不能少、不能改名；某一节在底稿里完全没有对应内容时，该节标题下只写一行"（无）"：
 
 ## 世界背景
-- （用极短篇幅点明最核心的常识差异，不超过3行）
+- （这个世界的核心常识与舞台，不超过3行）
 
-## 日常规则
-- （写真正管着大家日常生活的规矩，用口语化的短句，直接说清楚平时该怎么做）
-
-## 深层逻辑
-- （用轻松自然的口吻解释，为什么在这个世界里这些事会变得这么理所当然。只讲现在的认知，不讲历史）
-
-## 人们的行为
-- （全篇重点。写 5-6 条典型行为。
+## 社会结构
+- （全篇重点之一。写 5-6 条典型日常行为。
   不要出现具体人名。
   用「在……的时候，大家通常会……」这种口语结构。
   每条只写一个主要动作，怎么处理就怎么写，别加多余的描写和铺垫。
   涉及私密行为时，必须写得冷静、随意，不要出现故意展示、围观起哄、提升人气这类内容。）
+
+## 特殊能力
+- （这个世界超越现实的能力与规则，逐条列出；底稿没有就只写"（无）"）
+
+## 需要强化的设定
+- （底稿中最要紧、最不能被 AI 忽略或写偏的硬设定，逐条列出；没有就只写"（无）"）
 
 【写作要求】
 - 保留原文专有名词与核心设定，不得弱化或道德化原设定；
@@ -944,11 +963,118 @@ const systemPrompt = `你是一名资深的世界观设定师，擅长撰写「�
     if (!polished) {
       return res.status(500).json({ error: 'AI 生成结果为空，请重试' });
     }
-    res.json({ ok: true, content: polished });
+    // 四框解析：按标题归位（「（无）」与空节清洗为空框）；解析失败时把整段放进世界背景，前端仍可手调
+    const fields = splitWorldContentIntoFields(polished);
+    for (const key of Object.keys(fields)) {
+      fields[key] = fields[key]
+        .split('\n')
+        .filter(line => !/^\s*[（(]无[)）]\s*$/.test(line))
+        .join('\n')
+        .trim();
+    }
+    if (Object.values(fields).every(v => !v)) fields.background = polished;
+    res.json({ ok: true, fields, content: polished });
   } catch (err) {
     console.error('[world-settings] polish failed:', err.message);
     res.status(500).json({ error: '润色失败: ' + err.message });
   }
+});
+
+// POST /world-settings/generate-field — 单框 AI 帮写
+// 请求体：{ field, idea, name, jailbreak }；返回 { text }（该框正文，纯文本）
+router.post('/world-settings/generate-field', async (req, res) => {
+  const { field, idea, name } = req.body || {};
+  const def = WORLD_FIELD_DEFS.find(d => d.key === field);
+  if (!def) return res.status(400).json({ error: '未知的世界观要素框' });
+  const idea_ = typeof idea === 'string' ? idea.trim() : '';
+  if (!idea_) return res.status(400).json({ error: '请先写一句你的想法' });
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    const jailbreak = (typeof req.body?.jailbreak === 'string' && req.body.jailbreak.trim())
+      ? req.body.jailbreak.trim()
+      : getSystemRules({ roleplay: false });
+
+    const systemPrompt = `你是一名资深的世界观设定师，为沉浸式角色扮演应用撰写世界书要素。
+
+用户正在搭建一个世界，现在只需要你写「${def.label}」这一个要素，其他要素一概不写。
+
+写作要求：
+- 把用户的想法当成这个世界已经彻底内化的绝对常识，直接写"现在是什么样的"，禁止写起源、改造过程或适应期。
+- 口语化、自然，像跟朋友随口介绍，不要说明书腔和文学修辞；逐条短句，每条只说一件事。
+- 紧扣用户的想法，不要自行扩写无关要素；控制在 60～200 字。
+- 只输出「${def.label}」的正文，不要输出任何标题、解释、前后缀或代码块；使用简体中文。`;
+
+    const userPrompt = [
+      typeof name === 'string' && name.trim() ? `世界名称：${name.trim()}` : '',
+      `我的想法：${idea_}`,
+    ].filter(Boolean).join('\n');
+
+    const msgs = [];
+    if (jailbreak) msgs.push({ role: 'system', content: jailbreak });
+    msgs.push({ role: 'system', content: systemPrompt });
+    msgs.push({ role: 'user', content: userPrompt });
+
+    const result = await chatSync(msgs, { model, temperature: 0.8, max_tokens: 1024, label: `世界观帮写·${def.label}` });
+    let text = (result || '').trim();
+    const fence = text.match(/^```[a-zA-Z]*\n?([\s\S]*?)\n?```$/);
+    if (fence) text = fence[1].trim();
+    // 模型偶尔无视禁令带出标题行，剥掉
+    text = text.replace(new RegExp(`^#{0,4}\\s*\\[?${def.label}\\]?[：:]?\\s*\\n`), '').trim();
+    if (!text) return res.status(500).json({ error: 'AI 生成结果为空，请重试' });
+    res.json({ ok: true, text });
+  } catch (err) {
+    console.error('[world-settings] generate-field failed:', err.message);
+    res.status(500).json({ error: '帮写失败: ' + err.message });
+  }
+});
+
+// POST /world-settings/import-book — 解析酒馆世界书 JSON，返回逐条词条与建议目标框（不落库）
+// 请求体：{ book: object | string }（对象直接用；字符串按 JSON.parse 解析，兼容粘贴文本）
+router.post('/world-settings/import-book', (req, res) => {
+  let book = req.body?.book;
+  if (typeof book === 'string') {
+    try { book = JSON.parse(book); } catch {
+      return res.status(400).json({ error: '不是有效的 JSON：请粘贴世界书/角色卡的 JSON 原文' });
+    }
+  }
+  const entries = extractLorebookEntries(book);
+  if (entries.length === 0) {
+    return res.status(400).json({ error: '没有在 JSON 里找到世界书条目（需要 entries / character_book.entries 结构）' });
+  }
+  res.json({
+    ok: true,
+    entries: entries.map(e => ({
+      index: e.index,
+      title: e.title,
+      keys: e.keys,
+      constant: e.constant,
+      enabled: e.enabled,
+      content: e.content,
+      field: suggestFieldForEntry(e),
+    })),
+    fields: WORLD_FIELD_DEFS.map(d => ({ key: d.key, label: d.label })),
+  });
+});
+
+// POST /world-settings/import-book/apply — 把用户确认后的词条写进指定世界观（追加到对应框，不覆盖已有内容）
+// 请求体：{ worldId, assignments: [{ index, title, content, field }] }
+router.post('/world-settings/import-book/apply', (req, res) => {
+  const { worldId, assignments } = req.body || {};
+  const row = getWorldSettingById(parseInt(worldId, 10));
+  if (!row) return res.status(404).json({ error: 'not found' });
+  if (!Array.isArray(assignments) || assignments.length === 0) {
+    return res.status(400).json({ error: '没有要导入的词条' });
+  }
+  let existing = {};
+  try { existing = row.fields_json ? JSON.parse(row.fields_json) : {}; } catch { existing = {}; }
+  const merged = mergeLorebookAssignments([
+    // 已有各框内容先原样占位，保证 append 语义
+    ...Object.entries(existing).map(([field, content]) => ({ field, content: String(content || '') })),
+    ...assignments.map(a => ({ field: a.field, title: a.title, content: a.content })),
+  ]);
+  const item = updateWorldSetting(row.id, { fields: merged });
+  res.json({ ok: true, item: worldRowToApi(item) });
 });
 // PUT /api/config/weather-city — 设置天气城市
 router.put('/weather-city', (req, res) => {

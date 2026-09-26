@@ -12,12 +12,12 @@ import { STANDING_IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../../built
 
 function system0() {
   const rules = getSystemRules({ roleplay: false });
-  const world = getWorldSetting();
+  const world = getWorldSetting({ scope: 'visual' });
   return [rules, world].filter(Boolean).join('\n\n');
 }
 
 function system0And1() {
-  const world = getWorldSetting();
+  const world = getWorldSetting({ scope: 'visual' });
   const msgs = [{ role: 'system', content: system0() }];
   if (world) {
     msgs.push({ role: 'system', content: getWorldIntegrationRule('town_asset') });
