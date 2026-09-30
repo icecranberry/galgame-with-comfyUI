@@ -1,7 +1,12 @@
 // 世界观 / 全局规则 / 系统规则仓储（独立模块，缩小 db/index.js 体积）。
 // 依赖方向（单向）：db/index.js 打开数据库后注入句柄并再导出本模块的函数。
+//
+// 分框模型（2026-09）：内容拆为 fields_json（{background, society, abilities, reinforce}），
+// content 退化为拼装快照。getWorldSetting() 无参调用行为与改造前完全一致（全量注入）；
+// 生图类调用点可传 { scope: 'visual' }、回复猜测传 { scope: 'light' } 做按框精简。
 import { config } from '../config.js';
 import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { assembleWorldContent, normalizeWorldFields } from '../services/worldFields.js';
 
 let _db = null;
 
@@ -47,10 +52,40 @@ function isInDisturbTimeRange(now, startTime, endTime) {
   }
 }
 
+/** 解析行上的 fields_json（容错：坏 JSON 按空框处理，不打断读取路径） */
+function parseFields(row) {
+  if (!row) return null;
+  if (row.fields === undefined) {
+    let parsed = null;
+    try { parsed = row.fields_json ? JSON.parse(row.fields_json) : null; } catch { parsed = null; }
+    row.fields = parsed ? normalizeWorldFields(parsed) : null;
+  }
+  return row.fields;
+}
+
+/**
+ * 按行 + 场景档位计算最终注入文本。
+ * 有分框数据 → 按框拼装（scoped_inject=0 时无视档位一律全量）；
+ * 分框数据全空或缺失（直接写库的旧行）→ 原样返回 content，档位不生效。
+ */
+function composeWorldContentFor(row, scope = 'full') {
+  const fields = parseFields(row);
+  if (!fields) return row.content || '';
+  if (row.scoped_inject === 0) scope = 'full';
+  const composed = assembleWorldContent(fields, scope);
+  // 全空框不遮蔽 content 快照（防直接写库更新 content 的旧路径被空框吞掉）
+  if (!composed && String(row.content || '').trim()) return row.content;
+  return composed;
+}
+
 /** 获取世界观（独立消息注入，不拼入全局规则）
  *  防打扰模式 hideWorld 开启时，时间段内返回 null 但不修改 DB 原值
- *  优先从 world_settings 表读取激活项，兼容旧 global_rules.world_setting */
-export function getWorldSetting() {
+ *  优先从 world_settings 表读取激活项，兼容旧 global_rules.world_setting
+ * @param {object} [options]
+ * @param {'full'|'visual'|'light'} [options.scope='full'] 注入场景档位（full=全量，与历史行为一致）
+ * @param {number} [options.worldId] 指定某套世界观（缺省=当前激活项）
+ */
+export function getWorldSetting({ scope = 'full', worldId = null } = {}) {
   // 防打扰隐藏世界观：不改 DB，仅在 prompt 构建时返回 null
   if (config.features.disturbMode && config.disturb.hideWorld) {
     const now = new Date();
@@ -62,9 +97,10 @@ export function getWorldSetting() {
   }
 
   // 只要存在激活项就以它为准：内容为空视为用户主动选择"无世界观"，不再回退旧表
-  const active = getActiveWorldSetting();
+  const active = worldId ? getWorldSettingById(worldId) : getActiveWorldSetting();
   if (active) {
-    return active.content?.trim() ? `<world_setting>\n${active.content}\n</world_setting>` : null;
+    const content = composeWorldContentFor(active, scope);
+    return content?.trim() ? `<world_setting>\n${content}\n</world_setting>` : null;
   }
 
   // 兼容旧表（仅 world_settings 表无激活项时）
@@ -78,7 +114,7 @@ export function getWorldSetting() {
 /** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用 */
 export function getSystemRulesWithWorld(opts = {}) {
   const rules = getSystemRules(opts);
-  const world = getWorldSetting();
+  const world = getWorldSetting({ scope: opts.scope || 'full' });
   return [rules, world].filter(Boolean).join('\n\n');
 }
 
@@ -132,21 +168,36 @@ export function getWorldSettingById(id) {
   return database.prepare(`SELECT * FROM world_settings WHERE id = ?`).get(id);
 }
 
-export function createWorldSetting({ name, content }) {
+export function createWorldSetting({ name, content, fields, scopedInject }) {
   const database = handle();
   const maxOrder = database.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_settings`).get().m;
+  // 分框保存：fields 为准生成 content 快照；纯文本保存（旧路径/导入整段文本）不落框，
+  // fields_json 置 NULL，读取时回退整段 content
+  const hasFields = fields !== undefined;
+  const normalized = hasFields ? normalizeWorldFields(fields) : null;
+  const snapshot = hasFields ? assembleWorldContent(normalized) : (content ?? '');
   const result = database.prepare(
-    `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 0, ?)`
-  ).run(name, content, maxOrder + 1);
+    `INSERT INTO world_settings (name, content, fields_json, scoped_inject, is_active, sort_order) VALUES (?, ?, ?, ?, 0, ?)`
+  ).run(name, snapshot, hasFields ? JSON.stringify(normalized) : null, scopedInject === 0 ? 0 : 1, maxOrder + 1);
   return getWorldSettingById(result.lastInsertRowid);
 }
 
-export function updateWorldSetting(id, { name, content }) {
+export function updateWorldSetting(id, { name, content, fields, scopedInject }) {
   const database = handle();
   const sets = [];
   const params = [];
   if (name !== undefined) { sets.push('name = ?'); params.push(name); }
-  if (content !== undefined) { sets.push('content = ?'); params.push(content); }
+  if (fields !== undefined) {
+    // 分框保存：以 fields 为准，重新生成 content 快照
+    const normalized = normalizeWorldFields(fields);
+    sets.push('fields_json = ?'); params.push(JSON.stringify(normalized));
+    sets.push('content = ?'); params.push(assembleWorldContent(normalized));
+  } else if (content !== undefined) {
+    // 旧路径整段写 content：分框数据作废（结构已对不上），读取回退整段
+    sets.push('content = ?'); params.push(content);
+    sets.push('fields_json = NULL');
+  }
+  if (scopedInject !== undefined) { sets.push('scoped_inject = ?'); params.push(scopedInject ? 1 : 0); }
   if (sets.length === 0) return null;
   sets.push("updated_at = datetime('now')");
   params.push(id);

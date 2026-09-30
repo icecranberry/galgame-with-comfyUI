@@ -1130,7 +1130,7 @@ router.post('/:id/chat-bg', (req, res) => {
  * @param {'normal'|'dynamic'} [mode='normal'] - 姿势风格档位
  */
 function buildStandingMessages(char, requirement, mode = 'normal') {
-  const worldSetting = getWorldSetting();
+  const worldSetting = getWorldSetting({ scope: 'visual' });
   const msgs = [
     { role: 'system', content: worldSetting
       ? getSystemRulesWithWorld({ roleplay: false })

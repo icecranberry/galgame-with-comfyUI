@@ -277,7 +277,7 @@ async function generateItemFlavor(effect) {
   //   system0 = 破甲词 + 世界观（有世界观时拼接，否则仅破甲词，创作流程不带 roleplay）
   //   system1 = 世界观强化（有世界观时才注入；world_outfit 走服装专属穿透规则）
   //   之后才是道具工坊设计师规则与本次需求
-  const worldSetting = getWorldSetting();
+  const worldSetting = getWorldSetting({ scope: 'visual' });
   const msgs = [
     { role: 'system', content: worldSetting
       ? getSystemRulesWithWorld({ roleplay: false })
