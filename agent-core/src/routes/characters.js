@@ -345,6 +345,21 @@ router.post('/schedule-enabled-all', (req, res) => {
   res.json({ ok: true, schedule_enabled: enabled, changed: r.changes });
 });
 
+// POST /api/characters/archived-all — 批量归档 / 取消归档全体角色
+// 与单个归档同一语义（独立拦截层，不改写四个细分开关）；取消归档时把刷新排期置空，
+// 后台会重新把角色排进日程队列。
+router.post('/archived-all', (req, res) => {
+  const db = getDb();
+  const archived = req.body?.archived ? 1 : 0;
+  const r = archived
+    ? db.prepare(`UPDATE characters SET archived = 1, next_schedule_refresh_at = NULL
+                  WHERE COALESCE(archived, 0) = 0`).run()
+    : db.prepare(`UPDATE characters SET archived = 0, next_schedule_refresh_at = NULL
+                  WHERE COALESCE(archived, 0) = 1`).run();
+  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${r.changes} character(s) in bulk`);
+  res.json({ ok: true, archived, changed: r.changes });
+});
+
 // PUT /api/characters/:id/archived — 归档 / 取消归档
 //
 // 归档 = 该角色不再参与任何主动行为：主动聊天、发朋友圈、触发奇遇、刷新日程、

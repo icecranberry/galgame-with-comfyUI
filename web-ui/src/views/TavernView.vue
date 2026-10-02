@@ -146,23 +146,49 @@
          ═══════════════════════════════════════════ -->
     <div class="char-toolbar">
       <div class="section-title">角色 ({{ charCountLabel }})</div>
-      <div class="char-search">
-        <linshe-input
-          v-model="charSearch"
-          size="sm"
-          class="char-search-input"
-          placeholder="搜索角色名..."
-        />
+      <div class="char-toolbar-right">
         <div
-          v-if="charSearch"
-          class="char-search-clear"
-          role="button"
-          tabindex="0"
-          title="清空搜索"
-          @click="charSearch = ''"
-          @keydown.enter.prevent="charSearch = ''"
-          @keydown.space.prevent="charSearch = ''"
-        >✕</div>
+          class="char-archive-all"
+          :title="archivedCount > 0
+            ? `已归档 ${archivedCount} 个角色：它们不参与任何主动活动，你找它们聊天仍会回复`
+            : '一键让所有角色不参与任何主动活动（主动聊天、朋友圈、奇遇、日程生成、拉群）'"
+        >
+          <span class="char-archive-all-label">全部不参与活动</span>
+          <span v-if="archivedCount > 0" class="char-archive-all-count">{{ archivedCount }}/{{ chat.characters.length }}</span>
+          <linshe-switch
+            :model-value="allArchived"
+            :disabled="archiveAllToggling"
+            size="sm"
+            @change="toggleAllArchived"
+            aria-label="全部不参与活动"
+          />
+          <!-- 部分归档时开关键得点两下才能全恢复，给个直达入口 -->
+          <linshe-button
+            v-if="archivedCount > 0 && !allArchived"
+            variant="link"
+            size="sm"
+            :disabled="archiveAllToggling"
+            @click="toggleAllArchived(false)"
+          >全部恢复</linshe-button>
+        </div>
+        <div class="char-search">
+          <linshe-input
+            v-model="charSearch"
+            size="sm"
+            class="char-search-input"
+            placeholder="搜索角色名..."
+          />
+          <div
+            v-if="charSearch"
+            class="char-search-clear"
+            role="button"
+            tabindex="0"
+            title="清空搜索"
+            @click="charSearch = ''"
+            @keydown.enter.prevent="charSearch = ''"
+            @keydown.space.prevent="charSearch = ''"
+          >✕</div>
+        </div>
       </div>
     </div>
     
@@ -852,6 +878,7 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import { useBurst } from '../composables/useBurst.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useBackpackStore } from '../stores/backpack.js'
@@ -924,6 +951,36 @@ function folderName(id) {
 
 // 角色增删后各文件夹的成员数会变，跟着刷新一次（首屏由 onMounted 负责）
 watch(() => chat.characters.length, () => folderStore.load())
+
+// ═══════════════════════════════════════
+// 批量归档（工具栏的「全部不参与活动」）
+// ═══════════════════════════════════════
+const archiveAllToggling = ref(false)
+const archivedCount = computed(() => chat.characters.filter(c => c.archived).length)
+// 全部归档才算「开」；部分归档时开关显示为关，点一下 = 把剩下的也归档
+const allArchived = computed(() =>
+  chat.characters.length > 0 && archivedCount.value === chat.characters.length
+)
+
+async function toggleAllArchived(next) {
+  if (archiveAllToggling.value) return
+  archiveAllToggling.value = true
+  try {
+    const r = await api.setAllCharactersArchived(next)
+    // 本地同步：省一次整表拉取，也避免网格整体重排的抖动
+    chat.characters.forEach(c => { c.archived = next ? 1 : 0 })
+    showToast(
+      next
+        ? `已归档 ${r?.changed ?? 0} 个角色，它们不再参与任何主动活动`
+        : `已恢复 ${r?.changed ?? 0} 个角色参与活动`,
+      'success'
+    )
+  } catch (err) {
+    showToast(err?.message || '操作失败', 'error')
+  } finally {
+    archiveAllToggling.value = false
+  }
+}
 
 // 当前文件夹范围内的角色（未叠加搜索词）
 const folderScopedCharacters = computed(() => {
@@ -2493,15 +2550,46 @@ onMounted(async () => {
   font-family: inherit;
 }
 /* ── 角色网格 ── */
-/* 工具行：标题 + 搜索框 */
+/* 工具行：标题 + 批量归档 + 搜索框 */
 .char-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 14px;
 }
 .char-toolbar .section-title { margin-bottom: 0; }
+
+.char-toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+/* 批量归档开关 */
+.char-archive-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.char-archive-all-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.char-archive-all-count {
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
 
 .char-search {
   position: relative;

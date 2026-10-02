@@ -83,6 +83,11 @@ export async function setCharacterArchived(characterId, archived) {
   return request(`/characters/${characterId}/archived`, { method: 'PUT', body: { archived } })
 }
 
+// 批量归档 / 取消归档全体角色
+export async function setAllCharactersArchived(archived) {
+  return request('/characters/archived-all', { method: 'POST', body: { archived } })
+}
+
 // ── 角色文件夹（单层分类）──
 export function listCharacterFolders() {
   return request('/characters/folders')
