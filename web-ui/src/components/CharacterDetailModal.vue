@@ -128,6 +128,10 @@
                 <span>不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
               </div>
+              <div class="toolbar-item toolbar-item-toggle" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span>不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" size="sm" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
+              </div>
               <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
                 <span>设置 Lora</span>
                 <span v-if="hasLoraSetup" class="toolbar-badge active">已配置</span>
@@ -183,6 +187,10 @@
               <div class="float-row">
                 <span class="float-label">不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="float-row" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span class="float-label">不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
               </div>
               <div class="float-row float-row-action" @click="openLoraModal">
                 <span class="float-label">设置 Lora</span>
@@ -485,10 +493,12 @@ const detail = reactive({
   momentsDisabled: false,
   proactiveDisabled: false,
   eventsDisabled: false,
+  scheduleDisabled: false,
   dirty: false,
   momentsToggling: false,
   proactiveToggling: false,
   eventsToggling: false,
+  scheduleToggling: false,
 })
 
 // ── Lora 设置状态 ──
@@ -598,6 +608,8 @@ function init(c) {
   detail.momentsDisabled = !!c.moments_disabled
   detail.proactiveDisabled = !!c.proactive_disabled
   detail.eventsDisabled = !!c.events_disabled
+  // 日程开关是「不生成」，库里存的是 schedule_enabled（NULL/1 = 开启，0 = 关闭）
+  detail.scheduleDisabled = c.schedule_enabled === 0
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
@@ -722,6 +734,30 @@ async function toggleEventsDisabled() {
     console.error('toggleEventsDisabled failed:', e)
   } finally {
     detail.eventsToggling = false
+  }
+}
+
+// 日程开关是反向的：UI 上是「不生成日程」，落库是 schedule_enabled
+async function toggleScheduleDisabled() {
+  const c = props.character
+  if (!c) return
+  const enabled = !detail.scheduleDisabled
+  detail.scheduleToggling = true
+  try {
+    await api.setCharacterScheduleEnabled(c.id, enabled)
+    c.schedule_enabled = enabled ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.schedule_enabled = c.schedule_enabled
+    toastFn(
+      enabled ? '已恢复日程生成' : '已停止日程生成，该角色之后不再消耗日程额度',
+      'success'
+    )
+  } catch (e) {
+    detail.scheduleDisabled = !detail.scheduleDisabled
+    toastFn('设置失败', 'error')
+    console.error('toggleScheduleDisabled failed:', e)
+  } finally {
+    detail.scheduleToggling = false
   }
 }
 

@@ -301,6 +301,35 @@ router.put('/:id/pin', (req, res) => {
   res.json({ ok: true, pinned: val });
 });
 
+// PUT /api/characters/:id/schedule-enabled — 开关该角色的日程生成
+//
+// 关闭后，replyQueueScheduler 的日程刷新不再挑中它（那条查询本就按 schedule_enabled 过滤），
+// 于是省下每次刷新的 LLM 调用。已生成的 schedule_templates 会被保留，
+// snapshotTodaySchedule 仍能把模板铺成每天的 daily_schedules ——
+// 角色照旧按既有日程活动，只是内容不再变化（省 token 又不丢体验）。
+// 睡眠同步已与这个开关解耦（见 scheduleManager），所以不用手动改 is_sleeping。
+router.put('/:id/schedule-enabled', (req, res) => {
+  const db = getDb();
+  const characterId = parseInt(req.params.id, 10);
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const enabled = req.body?.enabled ? 1 : 0;
+  if (enabled) {
+    // 重新开启：刷新时间置空，后台会优先挑中它，尽快生成一次
+    db.prepare('UPDATE characters SET schedule_enabled = 1, next_schedule_refresh_at = NULL WHERE id = ?')
+      .run(characterId);
+  } else {
+    db.prepare('UPDATE characters SET schedule_enabled = 0, next_schedule_refresh_at = NULL WHERE id = ?')
+      .run(characterId);
+    // 顺手对齐一次睡眠状态（此刻可能刚好处在入睡/起床边界）
+    syncSleepingState(characterId);
+  }
+  invalidateScheduleCache(characterId);
+  console.log(`[char] Schedule generation ${enabled ? 'enabled' : 'disabled'} for ${char.display_name}`);
+  res.json({ ok: true, schedule_enabled: enabled });
+});
+
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();

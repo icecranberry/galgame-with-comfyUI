@@ -66,6 +66,12 @@ export async function togglePin(characterId, pinned) {
   return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
 }
 
+// 开关角色的日程生成：关闭后不再刷 LLM 生成日程（省 token），
+// 已生成的日程模板保留，角色仍按既有日程活动，只是内容不再变化
+export async function setCharacterScheduleEnabled(characterId, enabled) {
+  return request(`/characters/${characterId}/schedule-enabled`, { method: 'PUT', body: { enabled } })
+}
+
 // ── 角色文件夹（单层分类）──
 export function listCharacterFolders() {
   return request('/characters/folders')
