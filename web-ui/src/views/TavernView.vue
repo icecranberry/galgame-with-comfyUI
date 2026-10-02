@@ -832,6 +832,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
+import { useCharacterFoldersStore } from '../stores/characterFolders.js'
 import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
@@ -898,11 +899,13 @@ const sortedCharacters = computed(() =>
 )
 // ═══════════════════════════════════════
 // 角色文件夹（单层分类）+ 名称搜索
+// 文件夹数据由共享 store 持有，左侧会话栏的分组用的是同一份 —— 两边同屏，必须同步
 // ═══════════════════════════════════════
-const folders = ref([])
-const uncategorizedCount = ref(0)
+const folderStore = useCharacterFoldersStore()
+const folders = computed(() => folderStore.folders)
+const uncategorizedCount = computed(() => folderStore.uncategorizedCount)
 // 文件夹接口就绪后才显示分类 UI，接口不可用时保持原样（不出现半坏的筛选栏）
-const folderFeatureReady = ref(false)
+const folderFeatureReady = computed(() => folderStore.ready)
 // 'all' | 'uncategorized' | 文件夹 id
 const folderFilter = ref('all')
 const charSearch = ref('')
@@ -917,19 +920,8 @@ function folderName(id) {
   return folders.value.find(f => f.id === id)?.name || ''
 }
 
-async function loadFolders() {
-  try {
-    const data = await api.listCharacterFolders()
-    folders.value = data.folders || []
-    uncategorizedCount.value = data.uncategorized || 0
-    folderFeatureReady.value = true
-  } catch {
-    // 接口不可用（如后端尚未重启）时保持原样，角色网格退化为扁平列表
-  }
-}
-
 // 角色增删后各文件夹的成员数会变，跟着刷新一次（首屏由 onMounted 负责）
-watch(() => chat.characters.length, loadFolders)
+watch(() => chat.characters.length, () => folderStore.load())
 
 // 当前文件夹范围内的角色（未叠加搜索词）
 const folderScopedCharacters = computed(() => {
@@ -998,16 +990,15 @@ async function submitFolderEditor() {
   if (!name) return
   try {
     if (editingFolder.value) {
-      await api.renameCharacterFolder(editingFolder.value.id, name)
+      await folderStore.renameFolder(editingFolder.value.id, name)
       showToast(`已重命名为「${name}」`, 'success')
     } else {
-      const created = await api.createCharacterFolder(name)
+      const created = await folderStore.createFolder(name)
       showToast(`已创建文件夹「${name}」`, 'success')
       // 新建后直接切过去，省得再点一次
       if (created?.id) folderFilter.value = created.id
     }
     showFolderEditor.value = false
-    await loadFolders()
   } catch (err) {
     showToast(err?.message || '操作失败', 'error')
   }
@@ -1023,9 +1014,8 @@ async function askDeleteFolder(f) {
   })
   if (!ok) return
   try {
-    await api.deleteCharacterFolder(f.id)
+    await folderStore.removeFolder(f.id)
     if (folderFilter.value === f.id) folderFilter.value = 'all'
-    await loadFolders()
     showToast(`已删除文件夹「${f.name}」`, 'success')
   } catch (err) {
     showToast(err?.message || '删除失败', 'error')
@@ -1055,8 +1045,7 @@ async function doMoveToFolder(folderId) {
   c.folder_id = target           // 乐观更新：网格与同一引用，立即重排
   showMoveFolder.value = false
   try {
-    await api.moveCharacterToFolder(c.id, target)
-    await loadFolders()
+    await folderStore.moveCharacter(c.id, target)
     showToast(target ? `已移入「${folderName(target)}」` : '已移出到「未分类」', 'success')
   } catch (err) {
     c.folder_id = prev
@@ -1834,7 +1823,7 @@ onMounted(async () => {
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
   // 文件夹列表（含各组成员数）与角色一起在首屏拉取
-  loadFolders()
+  folderStore.load()
   // 拉一次宝箱状态，驱动入口卡上的「可开启」小圆点
   backpackStore.fetchItems()
   // 拉今天的《邻舍日报》，驱动报纸入口卡的未读红点

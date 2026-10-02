@@ -40,29 +40,58 @@
       </div>
 
       <div v-if="groups.groups.length > 0" class="group-section-header"><span>角色</span></div>
-      <div
-        v-for="c in chat.characters"
-        :key="c.id"
-        class="char-item"
-        :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat') }"
-        @click="onCharClick(c)"
-      >
-        <div class="char-avatar-wrap">
+
+      <!-- 按文件夹分组：每个分组标题可点击折叠；没有文件夹时退化为单个无标题分组 -->
+      <template v-for="g in characterGroups" :key="g.key">
+        <div
+          v-if="g.name !== null"
+          class="folder-group-header"
+          :class="{ collapsed: isGroupCollapsed(g.key) }"
+          role="button"
+          tabindex="0"
+          :aria-expanded="!isGroupCollapsed(g.key)"
+          :title="isGroupCollapsed(g.key) ? `展开「${g.name}」` : `收起「${g.name}」`"
+          @click="toggleGroup(g.key)"
+          @keydown.enter.prevent="toggleGroup(g.key)"
+          @keydown.space.prevent="toggleGroup(g.key)"
+        >
+          <svg class="folder-group-arrow" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6,9 12,15 18,9" />
+          </svg>
+          <span class="folder-group-name">{{ g.name }}</span>
+          <span class="folder-group-count">{{ g.characters.length }}</span>
+        </div>
+        <TransitionGroup
+          v-if="!isGroupCollapsed(g.key)"
+          name="folder-chars"
+          tag="div"
+          class="folder-group-body"
+        >
           <div
-            class="char-avatar avatar-wiggle"
-            :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
-          >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
-        </div>
-        <div class="char-info">
-          <div class="char-name">{{ c.display_name }}</div>
-          <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
-          <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
-        </div>
-        <div class="char-meta">
-          <span class="char-time">{{ formatTime(c.last_message_at) }}</span>
-        </div>
-        <span v-if="proactive.hasUnread(c.id)" class="proactive-dot"></span>
-      </div>
+            v-for="c in g.characters"
+            :key="c.id"
+            class="char-item"
+            :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat'), 'in-folder': g.name !== null }"
+            @click="onCharClick(c)"
+          >
+            <div class="char-avatar-wrap">
+              <div
+                class="char-avatar avatar-wiggle"
+                :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
+              >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+            </div>
+            <div class="char-info">
+              <div class="char-name">{{ c.display_name }}</div>
+              <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
+              <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
+            </div>
+            <div class="char-meta">
+              <span class="char-time">{{ formatTime(c.last_message_at) }}</span>
+            </div>
+            <span v-if="proactive.hasUnread(c.id)" class="proactive-dot"></span>
+          </div>
+        </TransitionGroup>
+      </template>
 
       <!-- 新手引导：仅剩默认助手时显示，点击前往酒馆创建角色 -->
       <div
@@ -297,6 +326,7 @@ import { useMailboxStore } from '../stores/mailbox.js'
 import { useGroupsStore } from '../stores/groups.js'
 import { useBackpackStore } from '../stores/backpack.js'
 import { useNewspaperStore } from '../stores/newspaper.js'
+import { useCharacterFoldersStore, groupCharactersByFolder } from '../stores/characterFolders.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import GearIcon from './GearIcon.vue'
@@ -320,9 +350,41 @@ const mailbox = useMailboxStore()
 const groups = useGroupsStore()
 const backpack = useBackpackStore()
 const newspaper = useNewspaperStore()
+const folderStore = useCharacterFoldersStore()
 const toast = inject('toast', null)
 const showMoreMenu = ref(false)
 const charListEl = ref(null)
+
+// ── 角色文件夹分组（可折叠） ──
+// 没有文件夹时退化成单个「无标题」分组，模板只写一份即可
+const characterGroups = computed(() => {
+  if (!folderStore.ready || !folderStore.folders.length) {
+    return [{ key: '__flat__', id: null, name: null, characters: chat.characters }]
+  }
+  return groupCharactersByFolder(chat.characters, folderStore.folders)
+})
+
+// 折叠状态记在设备本地：刷新、重启后仍保持展开/收起的选择
+const COLLAPSE_KEY = 'linshe.sidebar.collapsedFolders'
+function readCollapsed() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')
+    return new Set(Array.isArray(raw) ? raw : [])
+  } catch {
+    return new Set()
+  }
+}
+const collapsedGroups = ref(readCollapsed())
+function isGroupCollapsed(key) {
+  return collapsedGroups.value.has(key)
+}
+function toggleGroup(key) {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedGroups.value = next
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])) } catch {}
+}
 
 // ── 建群弹窗 ──
 const showCreateGroup = ref(false)
@@ -398,7 +460,11 @@ onMounted(() => {
   groups.connectSSE()
   groups.loadGroups()
   backpack.fetchItems()
+  folderStore.load()
 })
+
+// 角色增删（招募/删除）后各文件夹的成员数会变，跟着刷新一次
+watch(() => chat.characters.length, () => folderStore.load())
 
 onUnmounted(() => {})
 
@@ -602,6 +668,47 @@ function formatTime(iso) {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   letter-spacing: 1px;
 }
+
+/* ── 角色文件夹分组（可折叠） ── */
+.folder-group-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 20px 5px 18px;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer; user-select: none;
+  transition: color 0.15s ease;
+}
+.folder-group-header:hover { color: var(--accent); }
+.folder-group-arrow {
+  flex-shrink: 0;
+  transition: transform 0.18s var(--ease-standard);
+}
+.folder-group-header.collapsed .folder-group-arrow { transform: rotate(-90deg); }
+.folder-group-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.folder-group-count {
+  flex-shrink: 0;
+  min-width: 16px; padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--tint-subtle);
+  color: var(--text-secondary);
+  font-size: 10px; font-weight: 600;
+  text-align: center;
+}
+.folder-group-header.collapsed .folder-group-count { color: var(--accent); }
+
+/* 组内角色缩进，形成层级 */
+.folder-group-body { position: relative; }
+.char-item.in-folder { margin-left: 20px; }
+
+/* 折叠/展开的淡入淡出；离开项脱离文档流，避免下方条目跟着跳 */
+.folder-chars-enter-active { transition: opacity 0.18s ease; }
+.folder-chars-leave-active { transition: opacity 0.12s ease; position: absolute; left: 0; right: 0; }
+.folder-chars-enter-from,
+.folder-chars-leave-to { opacity: 0; }
+
 .group-create-btn {
   border: none; background: rgb(224 123 108 / 12%);
   width: 24px; height: 24px; min-width: 24px; padding: 0; border-radius: 8px;
