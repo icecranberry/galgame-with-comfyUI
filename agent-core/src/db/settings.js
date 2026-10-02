@@ -109,6 +109,7 @@ export const SETTING_TO_CONFIG = {
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
   user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
   workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
+  workflow_custom_template:        { obj: 'workflow',key: 'customTemplate',   type: 'string' },
   comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },
   comfy_hires_workflow_mode: { obj: 'comfyui', key: 'hiresWorkflowMode', type: 'string' },
   comfy_hires_upscale_model: { obj: 'comfyui', key: 'hiresUpscaleModel', type: 'string' },

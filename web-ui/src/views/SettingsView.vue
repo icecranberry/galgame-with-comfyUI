@@ -1086,7 +1086,18 @@ v-for="m in workflowModeOptions" :key="m.value"
           <span class="wf-mo-desc" v-html="m.desc"></span>
         </div>
       </div>
-      <div class="wf-mode-downloads">
+      <Transition name="expand">
+        <div v-if="wfModeDraft === 'custom'" class="wf-mode-custom">
+          <p class="wf-mode-hint">从 workflow 目录中选择工作流，所有生图场景统一使用</p>
+          <linshe-select
+v-model="wfCustomDraft" :options="customWorkflowOptions"
+            :disabled="customWorkflowLoading" placeholder="请选择自定义工作流" />
+          <p v-if="!customWorkflowLoading && customWorkflowOptions.length === 0" class="wf-mode-custom-empty">
+            未找到可选工作流，请把 .json 文件放入 workflow 目录
+          </p>
+        </div>
+      </Transition>
+      <div v-if="wfModeDraft !== 'custom'" class="wf-mode-downloads">
         <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
         <div class="wf-dl-item">
           <span class="wf-dl-label">Anima-turbo：</span>
@@ -1136,7 +1147,7 @@ base
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1921,6 +1932,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
+      workflowCustomTemplate.value = data.workflow.customTemplate || ''
       workflowScene.value = { chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
@@ -2385,11 +2397,20 @@ const hiresError = ref('')
 const hiresCompare = ref(null)
 
 // ── 工作流 ──
-const workflowModeOptions = [
+const BASE_WORKFLOW_MODE_OPTIONS = [
   { value: 'turbo', label: 'turbo', desc: '只用 Anima_turbo 模型，<span class="wf-mo-highlight">速度提升300%+</span>，但代价是构图能力下降，画师串影响略微下降' },
   { value: 'base', label: 'base', desc: '只用 Anima_base 模型，泛用性最强的基底模型，构图能力强，画师串遵循强，速度较慢' },
   { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，切换时需要加载模型导致首图较慢' },
 ]
+// 自定义工作流卡片：仅当 workflow 目录里存在可选工作流时才出现
+const CUSTOM_WORKFLOW_MODE_OPTION = {
+  value: 'custom',
+  label: '自定义',
+  desc: '使用你自己放在 workflow 目录下的工作流，所有生图场景统一生效（角色专属工作流仍优先）',
+}
+// 放大细化工作流由 HiresFix 单独管理，不作为生图工作流选项
+const NON_GENERATION_WORKFLOWS = ['放大细化工作流.json', '放大细化工作流-进阶.json']
+
 const sceneOptions = [
   { key: 'chat', label: '私聊' },
   { key: 'group', label: '群聊' },
@@ -2401,31 +2422,66 @@ const sceneOptions = [
 
 const workflowMode = ref('turbo')
 const workflowScene = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const workflowCustomTemplate = ref('')
+const customWorkflowList = ref([])
+const customWorkflowLoading = ref(false)
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
+const workflowModeOptions = computed(() =>
+  customWorkflowList.value.length > 0
+    ? [...BASE_WORKFLOW_MODE_OPTIONS, CUSTOM_WORKFLOW_MODE_OPTION]
+    : BASE_WORKFLOW_MODE_OPTIONS
+)
+const customWorkflowOptions = computed(() =>
+  customWorkflowList.value.map(w => ({ value: w.filename, label: w.label }))
+)
+
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
 const wfSceneDraft = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const wfCustomDraft = ref('')
+
+async function fetchCustomWorkflows() {
+  customWorkflowLoading.value = true
+  try {
+    const data = await getWorkflows()
+    customWorkflowList.value = (data.workflows || [])
+      .filter(w => !NON_GENERATION_WORKFLOWS.includes(w.filename))
+  } catch {
+    customWorkflowList.value = []
+  } finally {
+    customWorkflowLoading.value = false
+  }
+}
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value
   wfSceneDraft.value = { ...workflowScene.value }
+  wfCustomDraft.value = workflowCustomTemplate.value
   showWfModeDialog.value = true
+  // 每次打开都重新拉取，workflow 目录新增文件后无需刷新页面
+  fetchCustomWorkflows()
 }
 
 async function saveWfModeDialog() {
+  if (wfModeDraft.value === 'custom' && !wfCustomDraft.value) {
+    toastFn?.('请先选择一个自定义工作流', 'warning')
+    return
+  }
   wfSaving.value = true
   try {
     const modeChanged = wfModeDraft.value !== workflowMode.value
     const sceneChanged = JSON.stringify(wfSceneDraft.value) !== JSON.stringify(workflowScene.value)
+    const customChanged = wfCustomDraft.value !== workflowCustomTemplate.value
 
-    if (modeChanged) await updateWorkflowMode(wfModeDraft.value)
+    if (modeChanged || customChanged) await updateWorkflowMode(wfModeDraft.value, wfCustomDraft.value)
     if (sceneChanged || modeChanged) await updateWorkflowScene({ ...wfSceneDraft.value })
 
     workflowMode.value = wfModeDraft.value
     workflowScene.value = { ...wfSceneDraft.value }
+    workflowCustomTemplate.value = wfCustomDraft.value
     showWfModeDialog.value = false
   } catch {} finally { wfSaving.value = false }
 }
@@ -3430,6 +3486,16 @@ function resetTestPrompts() {
 .wf-mode-hint {
   font-size: 12px; color: var(--text-secondary);
   margin-bottom: 10px; text-align: center;
+}
+.wf-mode-custom {
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 8px; padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.wf-mode-custom-empty {
+  font-size: 12px; color: var(--text-secondary);
+  margin: 8px 0 0; text-align: center;
 }
 .wf-mode-scenes {
   background: rgba(var(--accent-rgb), 0.04);

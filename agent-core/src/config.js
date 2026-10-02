@@ -251,7 +251,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     type: 'oxipng',   // 'oxipng' | 'avif'
   },
   workflow: {
-    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid'
+    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid' | 'custom'
+    // mode === 'custom' 时使用的工作流文件名（位于 workflow/ 目录，如 制图工作流-pro-yinyue.json）
+    // 文件缺失时自动回退 turbo，不会导致生图失败
+    customTemplate: '',
     scene: {           // hybrid 模式下的场景→工作流映射
       chat: 'turbo',
       group: 'base',
@@ -774,12 +777,27 @@ export function updateCompressConfig({ enabled, type }) {
 }
 
 export function updateWorkflowMode(mode) {
-  if (!['base', 'turbo', 'hybrid'].includes(mode)) {
-    return { ok: false, error: 'mode must be base, turbo, or hybrid' };
+  if (!['base', 'turbo', 'hybrid', 'custom'].includes(mode)) {
+    return { ok: false, error: 'mode must be base, turbo, hybrid, or custom' };
   }
   config.workflow.mode = mode;
   persistSettingSync('workflow_mode', mode);
   console.log(`[config] workflowMode = ${mode}`);
+  return { ok: true };
+}
+
+/**
+ * 设置全局自定义工作流文件名（mode === 'custom' 时生效）
+ * 仅接受 workflow/ 目录下的 .json 文件名；传空字符串表示清除。
+ */
+export function updateWorkflowCustomTemplate(filename) {
+  if (filename !== undefined && filename !== null && typeof filename !== 'string') {
+    return { ok: false, error: 'customTemplate must be a string' };
+  }
+  const value = typeof filename === 'string' ? filename.trim() : '';
+  config.workflow.customTemplate = value;
+  persistSettingSync('workflow_custom_template', value);
+  console.log(`[config] workflowCustomTemplate = ${value || '(cleared)'}`);
   return { ok: true };
 }
 
@@ -974,6 +992,11 @@ export function autoDetectWorkflowMode() {
   if (getSetting(MARKER_KEY) === 'true') {
     // 已检测过，不再自动干预
     return { skipped: true, reason: 'already_detected' };
+  }
+
+  // 用户显式选择自定义工作流时，自动检测不干预（也不标记，便于日后改回 turbo/base 时仍能自动检测）
+  if (config.workflow?.mode === 'custom') {
+    return { skipped: true, reason: 'explicit_custom_mode' };
   }
 
   try {

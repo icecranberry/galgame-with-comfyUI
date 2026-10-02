@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
+import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -758,11 +758,16 @@ router.put('/disturb-mode', (req, res) => {
   res.json({ ok: true, disturbMode: config.features.disturbMode });
 });
 
-// PUT /api/config/workflow-mode — 更新工作流模式 (base|turbo|hybrid)
+// PUT /api/config/workflow-mode — 更新工作流模式 (base|turbo|hybrid|custom)
+// mode === 'custom' 时可同时传 customTemplate（workflow/ 目录下的文件名）
 router.put('/workflow-mode', (req, res) => {
-  const { mode } = req.body;
-  if (!mode || !['base', 'turbo', 'hybrid'].includes(mode)) {
-    return res.status(400).json({ error: 'mode must be base, turbo, or hybrid' });
+  const { mode, customTemplate } = req.body;
+  if (!mode || !['base', 'turbo', 'hybrid', 'custom'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be base, turbo, hybrid, or custom' });
+  }
+  if (customTemplate !== undefined) {
+    const customResult = updateWorkflowCustomTemplate(customTemplate);
+    if (!customResult.ok) return res.status(400).json(customResult);
   }
   const result = updateWorkflowMode(mode);
   if (!result.ok) return res.status(400).json(result);
