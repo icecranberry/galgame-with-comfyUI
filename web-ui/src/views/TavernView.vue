@@ -144,7 +144,27 @@
     <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
-    <div class="section-title">角色 ({{ sortedCharacters.length }})</div>
+    <div class="char-toolbar">
+      <div class="section-title">角色 ({{ charCountLabel }})</div>
+      <div class="char-search">
+        <linshe-input
+          v-model="charSearch"
+          size="sm"
+          class="char-search-input"
+          placeholder="搜索角色名..."
+        />
+        <div
+          v-if="charSearch"
+          class="char-search-clear"
+          role="button"
+          tabindex="0"
+          title="清空搜索"
+          @click="charSearch = ''"
+          @keydown.enter.prevent="charSearch = ''"
+          @keydown.space.prevent="charSearch = ''"
+        >✕</div>
+      </div>
+    </div>
     
     <!-- ═══════════════════════════════════════════
          世界观设置入口卡片
@@ -164,6 +184,77 @@
       </div>
       <span class="relation-entry-arrow">›</span>
     </div>
+
+    <!-- ═══════════════════════════════════════════
+         文件夹筛选栏（单层分类：全部 / 未分类 / 各文件夹）
+         ═══════════════════════════════════════════ -->
+    <div v-if="folderFeatureReady" class="folder-bar">
+      <div
+        class="chip folder-chip"
+        :class="{ active: folderFilter === 'all' }"
+        role="button"
+        tabindex="0"
+        @click="folderFilter = 'all'"
+        @keydown.enter.prevent="folderFilter = 'all'"
+        @keydown.space.prevent="folderFilter = 'all'"
+      >
+        全部<span class="folder-chip-count">{{ chat.characters.length }}</span>
+      </div>
+      <div
+        class="chip folder-chip"
+        :class="{ active: folderFilter === 'uncategorized' }"
+        role="button"
+        tabindex="0"
+        @click="folderFilter = 'uncategorized'"
+        @keydown.enter.prevent="folderFilter = 'uncategorized'"
+        @keydown.space.prevent="folderFilter = 'uncategorized'"
+      >
+        未分类<span class="folder-chip-count">{{ uncategorizedCount }}</span>
+      </div>
+      <div
+        v-for="f in folders"
+        :key="f.id"
+        class="chip folder-chip"
+        :class="{ active: folderFilter === f.id }"
+        role="button"
+        tabindex="0"
+        @click="folderFilter = f.id"
+        @keydown.enter.prevent="folderFilter = f.id"
+        @keydown.space.prevent="folderFilter = f.id"
+      >
+        <span class="folder-chip-name">{{ f.name }}</span>
+        <span class="folder-chip-count">{{ f.count }}</span>
+        <template v-if="folderFilter === f.id">
+          <span
+            class="chip-x folder-chip-op"
+            role="button"
+            tabindex="0"
+            title="重命名文件夹"
+            @click.stop="openRenameFolder(f)"
+            @keydown.enter.stop.prevent="openRenameFolder(f)"
+            @keydown.space.stop.prevent="openRenameFolder(f)"
+          >✎</span>
+          <span
+            class="chip-x folder-chip-op"
+            role="button"
+            tabindex="0"
+            title="删除文件夹（角色回到未分类）"
+            @click.stop="askDeleteFolder(f)"
+            @keydown.enter.stop.prevent="askDeleteFolder(f)"
+            @keydown.space.stop.prevent="askDeleteFolder(f)"
+          >✕</span>
+        </template>
+      </div>
+      <div
+        class="chip folder-chip folder-chip-new"
+        role="button"
+        tabindex="0"
+        @click="openNewFolder"
+        @keydown.enter.prevent="openNewFolder"
+        @keydown.space.prevent="openNewFolder"
+      >＋ 新建文件夹</div>
+    </div>
+
     <TransitionGroup name="char-pin" tag="div" class="char-grid" :class="{ stagger: gridStagger }">
         <!-- 表情包管理入口：永远在招募前 -->
         <div key="emoji-manage" class="char-card emoji-manage-card" @click="showEmojiManager = true">
@@ -196,7 +287,7 @@
 
       <!-- 角色卡片 -->
       <div
-        v-for="c in sortedCharacters"
+        v-for="c in visibleCharacters"
         :key="c.id"
         class="char-card"
         @click="openCharDetail(c)"
@@ -214,6 +305,22 @@
         >
           <svg width="14" height="14" viewBox="0 0 24 24" :fill="c.pinned ? 'currentColor' : 'none'" :stroke="c.pinned ? 'none' : 'currentColor'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          </svg>
+        </div>
+        <!-- 文件夹入口（左上侧栏，与置顶按钮同列） -->
+        <div
+          v-if="folderFeatureReady"
+          class="char-folder-btn"
+          :class="{ 'has-folder': c.folder_id }"
+          role="button"
+          tabindex="0"
+          :title="c.folder_id ? `已归入「${folderName(c.folder_id)}」 · 点击移动` : '移入文件夹'"
+          @click.stop="openMoveFolder(c)"
+          @keydown.enter.stop.prevent="openMoveFolder(c)"
+          @keydown.space.stop.prevent="openMoveFolder(c)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
           </svg>
         </div>
         <div v-if="c.moments_disabled || c.proactive_disabled || c.events_disabled" class="char-card-badges">
@@ -249,6 +356,18 @@
         </div>
       </div>
     </TransitionGroup>
+
+    <!-- 空状态：文件夹内无角色 / 搜索无匹配 -->
+    <div v-if="!visibleCharacters.length" class="char-empty empty">
+      <div class="empty-title">{{ emptyTitle }}</div>
+      <div class="empty-hint">{{ emptyDesc }}</div>
+      <linshe-button
+        v-if="canSearchEverywhere"
+        variant="secondary"
+        size="sm"
+        @click="folderFilter = 'all'"
+      >在全部角色中搜索</linshe-button>
+    </div>
 
     <!-- ═══════════════════════════════════════════
          招募弹窗
@@ -638,6 +757,74 @@
 
       <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
       <StandingManagerModal :open="showStandingManager" :characters="sortedCharacters" @close="showStandingManager = false" />
+
+    <!-- ═══════════════════════════════════════════
+         角色文件夹：新建 / 重命名
+         ═══════════════════════════════════════════ -->
+    <LinsheModal
+      v-model="showFolderEditor"
+      :title="editingFolder ? '重命名文件夹' : '新建文件夹'"
+      panel-class="folder-editor-modal"
+    >
+      <div class="folder-editor-body">
+        <linshe-input
+          v-model="folderNameInput"
+          :maxlength="20"
+          placeholder="例：原创角色 / 绝区零 / 高冷系"
+          @keyup.enter="submitFolderEditor"
+        />
+        <p class="folder-editor-hint">按角色来源或类型分组，之后可在文件夹栏里快速筛选。</p>
+      </div>
+      <template #footer>
+        <linshe-button variant="secondary" @click="showFolderEditor = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="!folderNameInput.trim()" @click="submitFolderEditor">
+          {{ editingFolder ? '保存' : '创建' }}
+        </linshe-button>
+      </template>
+    </LinsheModal>
+
+    <!-- ═══════════════════════════════════════════
+         角色文件夹：把角色移入某个文件夹
+         ═══════════════════════════════════════════ -->
+    <LinsheModal
+      v-model="showMoveFolder"
+      :title="movingChar ? `移动「${movingChar.display_name}」` : '移动到文件夹'"
+      panel-class="move-folder-modal"
+    >
+      <div class="folder-pick-list">
+        <div
+          class="folder-pick-item"
+          :class="{ active: !movingChar || !movingChar.folder_id }"
+          role="button"
+          tabindex="0"
+          @click="doMoveToFolder(null)"
+          @keydown.enter.prevent="doMoveToFolder(null)"
+          @keydown.space.prevent="doMoveToFolder(null)"
+        >
+          <span class="folder-pick-name">未分类</span>
+          <span class="folder-pick-count">{{ uncategorizedCount }}</span>
+        </div>
+        <div
+          v-for="f in folders"
+          :key="f.id"
+          class="folder-pick-item"
+          :class="{ active: !!movingChar && movingChar.folder_id === f.id }"
+          role="button"
+          tabindex="0"
+          @click="doMoveToFolder(f.id)"
+          @keydown.enter.prevent="doMoveToFolder(f.id)"
+          @keydown.space.prevent="doMoveToFolder(f.id)"
+        >
+          <span class="folder-pick-name">{{ f.name }}</span>
+          <span class="folder-pick-count">{{ f.count }}</span>
+        </div>
+        <p v-if="!folders.length" class="folder-pick-hint">还没有文件夹，点下面「新建文件夹」建一个。</p>
+      </div>
+      <template #footer>
+        <linshe-button variant="ghost" @click="openNewFolderFromMove">＋ 新建文件夹</linshe-button>
+        <linshe-button variant="secondary" @click="showMoveFolder = false">完成</linshe-button>
+      </template>
+    </LinsheModal>
   </div>
 </template>
 
@@ -661,6 +848,7 @@ import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheModal from '../components/ui/LinsheModal.vue'
 import { useBurst } from '../composables/useBurst.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useBackpackStore } from '../stores/backpack.js'
@@ -708,6 +896,174 @@ const sortedCharacters = computed(() =>
     return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
   })
 )
+// ═══════════════════════════════════════
+// 角色文件夹（单层分类）+ 名称搜索
+// ═══════════════════════════════════════
+const folders = ref([])
+const uncategorizedCount = ref(0)
+// 文件夹接口就绪后才显示分类 UI，接口不可用时保持原样（不出现半坏的筛选栏）
+const folderFeatureReady = ref(false)
+// 'all' | 'uncategorized' | 文件夹 id
+const folderFilter = ref('all')
+const charSearch = ref('')
+
+const showFolderEditor = ref(false)
+const editingFolder = ref(null)   // null = 新建；否则为被重命名的文件夹
+const folderNameInput = ref('')
+const showMoveFolder = ref(false)
+const movingChar = ref(null)
+
+function folderName(id) {
+  return folders.value.find(f => f.id === id)?.name || ''
+}
+
+async function loadFolders() {
+  try {
+    const data = await api.listCharacterFolders()
+    folders.value = data.folders || []
+    uncategorizedCount.value = data.uncategorized || 0
+    folderFeatureReady.value = true
+  } catch {
+    // 接口不可用（如后端尚未重启）时保持原样，角色网格退化为扁平列表
+  }
+}
+
+// 角色增删后各文件夹的成员数会变，跟着刷新一次（首屏由 onMounted 负责）
+watch(() => chat.characters.length, loadFolders)
+
+// 当前文件夹范围内的角色（未叠加搜索词）
+const folderScopedCharacters = computed(() => {
+  if (folderFilter.value === 'uncategorized') return chat.characters.filter(c => !c.folder_id)
+  if (folderFilter.value === 'all') return chat.characters
+  return chat.characters.filter(c => c.folder_id === folderFilter.value)
+})
+
+// 实际渲染：文件夹筛选 + 名称搜索，置顶优先、组内按拼音排序
+const visibleCharacters = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  const list = kw
+    ? folderScopedCharacters.value.filter(c => (c.display_name || '').toLowerCase().includes(kw))
+    : folderScopedCharacters.value
+  return [...list].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
+  })
+})
+
+// 标题计数：没筛选时只给总数，筛选中显示「可见 / 总数」
+const charCountLabel = computed(() => {
+  const total = chat.characters.length
+  const shown = visibleCharacters.value.length
+  return shown === total ? `${total}` : `${shown} / ${total}`
+})
+
+// 搜索词在全部角色里有命中，但当前文件夹内没有 —— 提示可以放宽到全部范围
+const canSearchEverywhere = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  if (!kw || folderFilter.value === 'all') return false
+  return chat.characters.some(c => (c.display_name || '').toLowerCase().includes(kw))
+})
+
+const emptyTitle = computed(() => {
+  if (charSearch.value.trim()) return `没有找到「${charSearch.value.trim()}」`
+  if (!chat.characters.length) return '还没有角色'
+  if (folderFilter.value === 'uncategorized') return '「未分类」里没有角色'
+  return '这个文件夹还是空的'
+})
+const emptyDesc = computed(() => {
+  if (charSearch.value.trim()) {
+    return folderFilter.value === 'all' ? '换个关键词试试。' : '换个关键词，或者切到「全部」看看。'
+  }
+  if (!chat.characters.length) return '点上面的「招募」认识第一位邻居。'
+  if (folderFilter.value === 'uncategorized') return '所有角色都已经归好类了。'
+  return '用角色卡上的文件夹按钮，把角色移进来。'
+})
+
+// ── 新建 / 重命名文件夹 ──
+function openNewFolder() {
+  editingFolder.value = null
+  folderNameInput.value = ''
+  showFolderEditor.value = true
+}
+
+function openRenameFolder(f) {
+  editingFolder.value = f
+  folderNameInput.value = f.name
+  showFolderEditor.value = true
+}
+
+async function submitFolderEditor() {
+  const name = folderNameInput.value.trim()
+  if (!name) return
+  try {
+    if (editingFolder.value) {
+      await api.renameCharacterFolder(editingFolder.value.id, name)
+      showToast(`已重命名为「${name}」`, 'success')
+    } else {
+      const created = await api.createCharacterFolder(name)
+      showToast(`已创建文件夹「${name}」`, 'success')
+      // 新建后直接切过去，省得再点一次
+      if (created?.id) folderFilter.value = created.id
+    }
+    showFolderEditor.value = false
+    await loadFolders()
+  } catch (err) {
+    showToast(err?.message || '操作失败', 'error')
+  }
+}
+
+// ── 删除文件夹（成员回到未分类，不删角色） ──
+async function askDeleteFolder(f) {
+  const ok = await confirmFn({
+    title: '删除文件夹',
+    message: `确定删除「${f.name}」吗？里面的 ${f.count} 个角色会回到「未分类」，角色本身不会被删除。`,
+    okText: '删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await api.deleteCharacterFolder(f.id)
+    if (folderFilter.value === f.id) folderFilter.value = 'all'
+    await loadFolders()
+    showToast(`已删除文件夹「${f.name}」`, 'success')
+  } catch (err) {
+    showToast(err?.message || '删除失败', 'error')
+  }
+}
+
+// ── 把角色移入 / 移出文件夹 ──
+function openMoveFolder(c) {
+  movingChar.value = c
+  showMoveFolder.value = true
+}
+
+function openNewFolderFromMove() {
+  showMoveFolder.value = false
+  openNewFolder()
+}
+
+async function doMoveToFolder(folderId) {
+  const c = movingChar.value
+  if (!c) return
+  const target = folderId || null
+  if ((c.folder_id || null) === target) {
+    showMoveFolder.value = false
+    return
+  }
+  const prev = c.folder_id || null
+  c.folder_id = target           // 乐观更新：网格与同一引用，立即重排
+  showMoveFolder.value = false
+  try {
+    await api.moveCharacterToFolder(c.id, target)
+    await loadFolders()
+    showToast(target ? `已移入「${folderName(target)}」` : '已移出到「未分类」', 'success')
+  } catch (err) {
+    c.folder_id = prev
+    showToast(err?.message || '移动失败', 'error')
+  }
+}
+
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const confirmFn = inject('confirm')
@@ -1477,6 +1833,8 @@ onMounted(async () => {
   userAppearanceInput.value = userAppearance.value
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
+  // 文件夹列表（含各组成员数）与角色一起在首屏拉取
+  loadFolders()
   // 拉一次宝箱状态，驱动入口卡上的「可开启」小圆点
   backpackStore.fetchItems()
   // 拉今天的《邻舍日报》，驱动报纸入口卡的未读红点
@@ -2144,6 +2502,149 @@ onMounted(async () => {
   font-family: inherit;
 }
 /* ── 角色网格 ── */
+/* 工具行：标题 + 搜索框 */
+.char-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.char-toolbar .section-title { margin-bottom: 0; }
+
+.char-search {
+  position: relative;
+  width: 220px;
+  max-width: 46vw;
+  flex-shrink: 0;
+}
+.char-search-input { width: 100%; }
+.char-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--dur-fast) ease;
+}
+.char-search-clear:hover { background: var(--accent); color: #fff; }
+
+/* ── 文件夹筛选栏 ── */
+.folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.folder-chip {
+  user-select: none;
+  max-width: 220px;
+}
+.folder-chip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-chip-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+.folder-chip.active .folder-chip-count {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+}
+.folder-chip-op {
+  font-size: 11px;
+  line-height: 13px;
+}
+.folder-chip-new {
+  border-style: dashed;
+}
+.folder-chip-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 空状态（文件夹为空 / 搜索无结果），皮肤走全局 .empty */
+.char-empty {
+  margin-top: 8px;
+}
+
+/* ── 文件夹选择弹窗 / 编辑弹窗 ── */
+.folder-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.folder-editor-hint,
+.folder-pick-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.folder-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.folder-pick-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-bright);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.folder-pick-item:hover {
+  border-color: var(--accent-light);
+  color: var(--accent);
+}
+.folder-pick-item.active {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
+  font-weight: 600;
+}
+.folder-pick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-pick-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.folder-pick-item.active .folder-pick-count { color: var(--accent); }
+
 .section-title {
   font-size: 15px; font-weight: 600; color: var(--text-secondary);
   margin-bottom: 14px;
@@ -2223,6 +2724,40 @@ onMounted(async () => {
   opacity: 1;
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.1);
+}
+
+/* ── 左上角文件夹入口（与置顶按钮同一列，常驻半透明） ── */
+.char-folder-btn {
+  position: absolute;
+  top: 36px;
+  left: 6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  opacity: 0.4;
+}
+.char-folder-btn:hover {
+  opacity: 1;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+}
+.char-folder-btn.has-folder {
+  opacity: 0.8;
+  color: var(--accent);
+}
+/* 触屏没有 hover，常驻可见 */
+@media (hover: none) {
+  .char-folder-btn { opacity: 0.7; }
 }
 
 .char-card:hover {

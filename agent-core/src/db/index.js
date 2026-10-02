@@ -998,6 +998,9 @@ function initSchema(db) {
   // 迁移: 角色立绘 — characters 表新增 standing_url 列
   migrateStandingSchema(db);
 
+  // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
+  migrateCharacterFolderSchema(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1786,6 +1789,31 @@ function migrateStandingSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色文件夹 — 新建 character_folders 表，characters 表新增 folder_id 列
+ * 单层分类：一个角色只属于一个文件夹，folder_id 为 NULL 表示「未分类」。
+ * 删除文件夹只把成员置回未分类（folder_id = NULL），不动角色本体。
+ */
+function migrateCharacterFolderSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS character_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'folder_id')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN folder_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added characters.folder_id column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterFolderSchema error:', err.message);
   }
 }
 

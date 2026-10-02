@@ -66,6 +66,28 @@ export async function togglePin(characterId, pinned) {
   return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
 }
 
+// ── 角色文件夹（单层分类）──
+export function listCharacterFolders() {
+  return request('/characters/folders')
+}
+
+export function createCharacterFolder(name) {
+  return request('/characters/folders', { method: 'POST', body: { name } })
+}
+
+export function renameCharacterFolder(id, name) {
+  return request(`/characters/folders/${id}`, { method: 'PUT', body: { name } })
+}
+
+export function deleteCharacterFolder(id) {
+  return request(`/characters/folders/${id}`, { method: 'DELETE' })
+}
+
+// folderId 传 null 表示移回「未分类」
+export function moveCharacterToFolder(characterId, folderId) {
+  return request(`/characters/${characterId}/folder`, { method: 'PUT', body: { folder_id: folderId } })
+}
+
 // ── 角色专属外观/形态 ──
 export function listCharacterOutfits(characterId) {
   return request(`/characters/${characterId}/outfits`)
@@ -1277,8 +1299,11 @@ export async function restoreWorkflow() {
   return request(`/workflows/restore`, { method: 'POST' })
 }
 
-export async function updateWorkflowMode(mode) {
-  return request(`/config/workflow-mode`, { method: 'PUT', body: { mode } })
+export async function updateWorkflowMode(mode, customTemplate) {
+  const body = { mode }
+  // mode === 'custom' 时一并提交全局自定义工作流文件名
+  if (customTemplate !== undefined) body.customTemplate = customTemplate
+  return request(`/config/workflow-mode`, { method: 'PUT', body })
 }
 
 export async function updateWorkflowScene(scene) {

@@ -195,6 +195,96 @@ router.put('/standing-mode', (req, res) => {
   res.json({ ok: true, mode });
 });
 
+// ── 角色文件夹（单层分类）──
+// 一个角色只属于一个文件夹，folder_id 为 NULL = 未分类。删除文件夹只解绑成员，不删角色。
+
+// 文件夹名校验：非空、最长 20 字
+const FOLDER_NAME_MAX = 20;
+function normalizeFolderName(raw) {
+  const name = String(raw ?? '').trim();
+  if (!name) return { error: '文件夹名称不能为空' };
+  if (name.length > FOLDER_NAME_MAX) return { error: `文件夹名称最多 ${FOLDER_NAME_MAX} 个字` };
+  return { name };
+}
+
+// GET /api/characters/folders — 文件夹列表（含成员数量）＋未分类数量
+router.get('/folders', (req, res) => {
+  const db = getDb();
+  const folders = db.prepare(`
+    SELECT f.id, f.name, f.sort_order, COUNT(c.id) AS count
+    FROM character_folders f
+    LEFT JOIN characters c ON c.folder_id = f.id
+    GROUP BY f.id
+    ORDER BY f.sort_order ASC, f.id ASC
+  `).all();
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM characters WHERE folder_id IS NULL').get();
+  res.json({ folders, uncategorized: n || 0 });
+});
+
+// POST /api/characters/folders — 新建文件夹
+router.post('/folders', (req, res) => {
+  const db = getDb();
+  const { name, error } = normalizeFolderName(req.body?.name);
+  if (error) return res.status(400).json({ error });
+  if (db.prepare('SELECT id FROM character_folders WHERE name = ?').get(name)) {
+    return res.status(409).json({ error: '已存在同名文件夹' });
+  }
+  const { next } = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM character_folders').get();
+  const r = db.prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)').run(name, next);
+  res.status(201).json({ id: r.lastInsertRowid, name, sort_order: next, count: 0 });
+});
+
+// PUT /api/characters/folders/:id — 重命名文件夹
+router.put('/folders/:id', (req, res) => {
+  const db = getDb();
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid folder id' });
+  if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: '文件夹不存在' });
+  }
+  const { name, error } = normalizeFolderName(req.body?.name);
+  if (error) return res.status(400).json({ error });
+  if (db.prepare('SELECT id FROM character_folders WHERE name = ? AND id != ?').get(name, id)) {
+    return res.status(409).json({ error: '已存在同名文件夹' });
+  }
+  db.prepare('UPDATE character_folders SET name = ? WHERE id = ?').run(name, id);
+  res.json({ ok: true, id, name });
+});
+
+// DELETE /api/characters/folders/:id — 删除文件夹（成员回到未分类）
+router.delete('/folders/:id', (req, res) => {
+  const db = getDb();
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid folder id' });
+  if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: '文件夹不存在' });
+  }
+  const tx = db.transaction((fid) => {
+    db.prepare('UPDATE characters SET folder_id = NULL WHERE folder_id = ?').run(fid);
+    db.prepare('DELETE FROM character_folders WHERE id = ?').run(fid);
+  });
+  tx(id);
+  res.json({ ok: true });
+});
+
+// PUT /api/characters/:id/folder — 把角色移入文件夹（folder_id 传 null 表示移回未分类）
+router.put('/:id/folder', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const raw = req.body?.folder_id;
+  let folderId = null;
+  if (raw !== null && raw !== undefined && raw !== '') {
+    folderId = parseInt(raw, 10);
+    if (!Number.isSafeInteger(folderId) || folderId <= 0) return res.status(400).json({ error: 'invalid folder id' });
+    if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(folderId)) {
+      return res.status(404).json({ error: '文件夹不存在' });
+    }
+  }
+  db.prepare('UPDATE characters SET folder_id = ? WHERE id = ?').run(folderId, req.params.id);
+  res.json({ ok: true, folder_id: folderId });
+});
+
 // ── 角色置顶 ──
 // 必须注册在 put('/:id') 之前，避免被参数路由吞掉
 
