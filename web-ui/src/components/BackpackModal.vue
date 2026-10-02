@@ -45,7 +45,7 @@
                 :disabled="!store.chest.canOpen || chestProcessActive"
                 @click="onOpenChest"
               >{{ chestButtonLabel }}</linshe-button>
-              <p class="chest-hint">每 {{ store.chest.cooldownHours || 16 }} 小时可开启一次</p>
+              <p class="chest-hint">{{ formatChestCooldown(store.chest.cooldownSeconds) }}</p>
             </div>
 
             <!-- ── Right: 道具网格 ── -->
@@ -233,6 +233,7 @@ import ItemFallbackIcon from './ItemFallbackIcon.vue'
 import ChestRevealOverlay from './ChestRevealOverlay.vue'
 import TownServiceStage from './town/TownServiceStage.vue'
 import { useBackpackActions, ITEM_KIND_LABELS as KIND_LABELS } from '../composables/useBackpackActions.js'
+import { formatChestCooldown } from '../utils/chestCooldown.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

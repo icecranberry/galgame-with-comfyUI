@@ -1521,7 +1521,7 @@ export function listItems() {
   return request(`/items`)
 }
 
-// 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
+// 开启每日宝箱（冷却由后端 CHEST_COOLDOWN_SECONDS 决定，本地为 1 分钟；道具图片异步生成，完成后经 item_ready 事件刷新）
 export function openChest() {
   return request(`/items/chest/open`, { method: 'POST' })
 }
