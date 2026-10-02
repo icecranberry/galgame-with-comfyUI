@@ -330,6 +330,44 @@ router.put('/:id/schedule-enabled', (req, res) => {
   res.json({ ok: true, schedule_enabled: enabled });
 });
 
+// POST /api/characters/schedule-enabled-all — 批量开关全体角色的日程生成
+// 「全量省 token」入口：一次把所有角色排期清空／恢复，不必逐个点。
+// 恢复时只重排那些被关掉的（schedule_enabled = 0），已经开着的角色不受打扰。
+router.post('/schedule-enabled-all', (req, res) => {
+  const db = getDb();
+  const enabled = req.body?.enabled ? 1 : 0;
+  const r = enabled
+    ? db.prepare(`UPDATE characters SET schedule_enabled = 1, next_schedule_refresh_at = NULL
+                  WHERE schedule_enabled = 0`).run()
+    : db.prepare(`UPDATE characters SET schedule_enabled = 0, next_schedule_refresh_at = NULL
+                  WHERE schedule_enabled = 1 OR schedule_enabled IS NULL`).run();
+  console.log(`[char] Schedule generation ${enabled ? 'enabled' : 'disabled'} for ${r.changes} character(s)`);
+  res.json({ ok: true, schedule_enabled: enabled, changed: r.changes });
+});
+
+// PUT /api/characters/:id/archived — 归档 / 取消归档
+//
+// 归档 = 该角色不再参与任何主动行为：主动聊天、发朋友圈、触发奇遇、刷新日程、
+// 自己拉群、参与小镇奇遇；但角色卡数据完整保留，你主动找它聊天它照常回复。
+//
+// 刻意做成独立的拦截层（各调度器的选人查询叠加 COALESCE(archived,0)=0），
+// 不修改四个细分开关 —— 否则归档再取消，会把用户单独设过的「不主动聊天」之类偏好一起抹掉。
+router.put('/:id/archived', (req, res) => {
+  const db = getDb();
+  const characterId = parseInt(req.params.id, 10);
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const archived = req.body?.archived ? 1 : 0;
+  // 两种方向都把刷新排期清空：归档时避免「刚好被排到」，取消归档时让它重新进队列尽快生成一次
+  db.prepare('UPDATE characters SET archived = ?, next_schedule_refresh_at = NULL WHERE id = ?')
+    .run(archived, characterId);
+  if (archived) syncSleepingState(characterId);
+  invalidateScheduleCache(characterId);
+  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${char.display_name}`);
+  res.json({ ok: true, archived });
+});
+
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();

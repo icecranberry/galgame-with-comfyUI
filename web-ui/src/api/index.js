@@ -72,6 +72,17 @@ export async function setCharacterScheduleEnabled(characterId, enabled) {
   return request(`/characters/${characterId}/schedule-enabled`, { method: 'PUT', body: { enabled } })
 }
 
+// 批量开关全体角色的日程生成（「全量省 token」入口）
+export async function setAllCharactersScheduleEnabled(enabled) {
+  return request('/characters/schedule-enabled-all', { method: 'POST', body: { enabled } })
+}
+
+// 归档 / 取消归档：归档后该角色不再参与任何主动行为（主动聊天、朋友圈、奇遇、
+// 日程刷新、自己拉群、小镇奇遇），仅保留角色卡数据与「你主动找它时仍会回复」
+export async function setCharacterArchived(characterId, archived) {
+  return request(`/characters/${characterId}/archived`, { method: 'PUT', body: { archived } })
+}
+
 // ── 角色文件夹（单层分类）──
 export function listCharacterFolders() {
   return request('/characters/folders')

@@ -116,6 +116,11 @@
                 </svg>
                 更多设置
               </div>
+              <div class="toolbar-item toolbar-item-toggle" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span>不参与活动</span>
+                <linshe-switch v-model="detail.archived" size="sm" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="toolbar-divider"></div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -176,6 +181,11 @@
               更多设置
             </div>
             <div class="float-panel-body">
+              <div class="float-row" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span class="float-label">不参与活动</span>
+                <linshe-switch v-model="detail.archived" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="float-divider"></div>
               <div class="float-row">
                 <span class="float-label">不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -494,11 +504,13 @@ const detail = reactive({
   proactiveDisabled: false,
   eventsDisabled: false,
   scheduleDisabled: false,
+  archived: false,
   dirty: false,
   momentsToggling: false,
   proactiveToggling: false,
   eventsToggling: false,
   scheduleToggling: false,
+  archivedToggling: false,
 })
 
 // ── Lora 设置状态 ──
@@ -610,6 +622,7 @@ function init(c) {
   detail.eventsDisabled = !!c.events_disabled
   // 日程开关是「不生成」，库里存的是 schedule_enabled（NULL/1 = 开启，0 = 关闭）
   detail.scheduleDisabled = c.schedule_enabled === 0
+  detail.archived = !!c.archived
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
@@ -758,6 +771,30 @@ async function toggleScheduleDisabled() {
     console.error('toggleScheduleDisabled failed:', e)
   } finally {
     detail.scheduleToggling = false
+  }
+}
+
+// 归档：一键停掉该角色的所有主动行为（主动聊天/朋友圈/奇遇/日程刷新/拉群/小镇奇遇）。
+// 独立拦截层，不会覆盖上面四个细分开关，取消归档后原设置原样回来。
+async function toggleArchived() {
+  const c = props.character
+  if (!c) return
+  detail.archivedToggling = true
+  try {
+    await api.setCharacterArchived(c.id, detail.archived)
+    c.archived = detail.archived ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.archived = c.archived
+    toastFn(
+      detail.archived ? '已归档：不再参与任何主动活动，你找它聊天仍会回复' : '已取消归档，恢复参与活动',
+      'success'
+    )
+  } catch (e) {
+    detail.archived = !detail.archived
+    toastFn('设置失败', 'error')
+    console.error('toggleArchived failed:', e)
+  } finally {
+    detail.archivedToggling = false
   }
 }
 
@@ -1431,6 +1468,13 @@ const standingPanel = reactive({
   gap: 12px; padding: 8px 10px;
 }
 .float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+/* 归档是总开关，与下面四个细分开关用一条细线分开 */
+.float-divider,
+.toolbar-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--glass-border);
+}
 .float-row-action {
   margin-top: 2px; padding: 8px 10px;
   border-radius: 10px; cursor: pointer;

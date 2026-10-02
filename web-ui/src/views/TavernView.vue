@@ -290,6 +290,7 @@
         v-for="c in visibleCharacters"
         :key="c.id"
         class="char-card"
+        :class="{ archived: c.archived }"
         @click="openCharDetail(c)"
       >
         <!-- 左上角置顶按钮 -->
@@ -333,6 +334,7 @@
           :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
         >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-card-name">{{ c.display_name }}</div>
+        <div v-if="c.archived" class="char-card-archived" title="已归档：不参与任何主动活动">已归档</div>
         <div class="char-card-foot">
           <span class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
             {{ c.message_count > 0 ? `${c.message_count} 条消息` : '待唤醒' }}
@@ -2776,6 +2778,20 @@ onMounted(async () => {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+/* ── 已归档：整卡压暗 + 角标，但仍可点开详情 ── */
+.char-card.archived { opacity: 0.55; }
+.char-card.archived:hover { opacity: 0.9; }
+.char-card-archived {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  user-select: none;
 }
 
 .char-card-foot {

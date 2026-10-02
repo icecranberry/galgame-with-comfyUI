@@ -1001,6 +1001,9 @@ function initSchema(db) {
   // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
   migrateCharacterFolderSchema(db);
 
+  // 迁移: 角色归档 — characters 表新增 archived 列
+  migrateCharacterArchiveSchema(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1604,6 +1607,28 @@ function migrateDisturbSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateDisturbSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色归档 — characters 表新增 archived 列
+ *
+ * 归档 = 该角色不再参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 日程刷新 / 拉群），
+ * 仅保留角色卡数据与「你主动找它时仍会回复」的能力。
+ *
+ * 刻意做成独立的拦截层，而不是去改动 moments_disabled / proactive_disabled /
+ * events_disabled / schedule_enabled 这四个开关 —— 否则归档再取消会把用户单独设过的
+ * 偏好一起抹掉。各调度器的选人查询统一叠加 `COALESCE(archived, 0) = 0`。
+ */
+function migrateCharacterArchiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'archived')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN archived INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.archived column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterArchiveSchema error:', err.message);
   }
 }
 

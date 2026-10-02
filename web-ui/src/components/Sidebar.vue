@@ -71,7 +71,7 @@
             v-for="c in g.characters"
             :key="c.id"
             class="char-item"
-            :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat'), 'in-folder': g.name !== null }"
+            :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat'), 'in-folder': g.name !== null, archived: c.archived }"
             @click="onCharClick(c)"
           >
             <div class="char-avatar-wrap">
@@ -81,7 +81,9 @@
               >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
             </div>
             <div class="char-info">
-              <div class="char-name">{{ c.display_name }}</div>
+              <div class="char-name">
+                {{ c.display_name }}<span v-if="c.archived" class="char-archived-tag" title="已归档：不参与任何主动活动">归档</span>
+              </div>
               <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
               <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
             </div>
@@ -702,6 +704,21 @@ function formatTime(iso) {
 /* 组内角色缩进，形成层级 */
 .folder-group-body { position: relative; }
 .char-item.in-folder { margin-left: 20px; }
+
+/* 已归档：压暗 + 小角标，位置不动 */
+.char-item.archived { opacity: 0.5; }
+.char-item.archived:hover { opacity: 0.85; }
+.char-archived-tag {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 
 /* 折叠/展开的淡入淡出；离开项脱离文档流，避免下方条目跟着跳 */
 .folder-chars-enter-active { transition: opacity 0.18s ease; }

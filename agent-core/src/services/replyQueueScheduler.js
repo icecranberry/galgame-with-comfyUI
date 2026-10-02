@@ -87,6 +87,7 @@ async function maybeRefreshOneSchedule() {
   const candidate = db.prepare(`
     SELECT id, display_name, base_prompt FROM characters
     WHERE schedule_enabled = 1
+      AND COALESCE(archived, 0) = 0
       AND (
         next_schedule_refresh_at IS NULL
         OR next_schedule_refresh_at <= datetime('now')

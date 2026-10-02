@@ -127,6 +127,19 @@
     <!-- ═══ 日程设置弹窗 ═══ -->
     <linshe-modal v-model="settingsOpen" title="日程设置">
       <div class="sched-settings-body">
+        <div class="sched-settings-toggle-row">
+          <div class="sched-settings-toggle-text">
+            <span class="sched-settings-toggle-label">停止所有角色生成日程</span>
+            <span class="sched-settings-hint">开启后不再调用模型编排日程，已生成的日程照常使用、内容保持不变；想单独控制某个角色，去它的详情卡「更多设置」里关。</span>
+          </div>
+          <linshe-switch
+            :model-value="allSchedulesDisabled"
+            :disabled="scheduleAllToggling"
+            @change="toggleAllSchedules"
+            aria-label="停止所有角色生成日程"
+          />
+        </div>
+        <div class="sched-settings-divider"></div>
         <div class="sched-settings-slider-heading">
           <label for="schedule-refresh-days">日程刷新周期</label>
           <span class="sched-settings-value">每 {{ refreshDays }} 天刷新一次</span>
@@ -376,7 +389,10 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
+// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary store（日记本入口）、本地补丁新增 chat store（归档角色判定），
+//    两者用途不同且都在本文件被调用（diaryStore.openBook / chatStore），故**一并保留**。
 import { useDiaryStore } from '../stores/diary.js'
+import { useChatStore } from '../stores/chat.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import * as api from '../api/index.js'
@@ -389,6 +405,7 @@ import { emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 
 const store = useScheduleStore()
 const diaryStore = useDiaryStore()
@@ -414,6 +431,33 @@ const cardGridEl = ref<HTMLElement | null>(null)
 const settingsOpen = ref(false)
 const refreshDays = ref(1)
 const savingRefreshDays = ref(false)
+
+// ── 批量停止日程生成（全量省 token） ──
+const chatStore = useChatStore()
+const scheduleAllToggling = ref(false)
+// 所有角色都关着才算「已停止」；部分关时开关显示为关（点一下 = 全部停掉）
+const allSchedulesDisabled = computed(() =>
+  chatStore.characters.length > 0 && chatStore.characters.every(c => c.schedule_enabled === 0)
+)
+
+async function toggleAllSchedules(next) {
+  if (scheduleAllToggling.value) return
+  scheduleAllToggling.value = true
+  try {
+    const r = await api.setAllCharactersScheduleEnabled(next)
+    await chatStore.loadCharacters()
+    toastFn(
+      next
+        ? `已停止 ${r?.changed ?? 0} 个角色的日程生成，之后不再消耗日程额度`
+        : `已恢复 ${r?.changed ?? 0} 个角色的日程生成`,
+      'success'
+    )
+  } catch (err) {
+    toastFn('设置失败: ' + (err?.message || '未知错误'), 'error')
+  } finally {
+    scheduleAllToggling.value = false
+  }
+}
 
 async function openSettings() {
   try {
@@ -1302,6 +1346,22 @@ function finishReset() {
 .sched-settings-slider-heading label { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
 .sched-settings-value { font-size: 0.85rem; font-weight: 600; color: var(--accent); }
 .sched-settings-hint { margin: 6px 0 0; font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); }
+/* 批量开关（停止所有角色生成日程） */
+.sched-settings-toggle-row {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.sched-settings-toggle-text {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.sched-settings-toggle-label {
+  font-size: 0.9rem; font-weight: 600; color: var(--text-primary);
+}
+.sched-settings-toggle-text .sched-settings-hint { margin-top: 4px; }
+.sched-settings-divider {
+  height: 1px; margin: 14px 0;
+  background: var(--glass-border);
+}
 
 
 /* ── Card Grid ── */
