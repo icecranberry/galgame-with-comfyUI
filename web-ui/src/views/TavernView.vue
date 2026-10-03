@@ -224,7 +224,7 @@
         @keydown.enter.prevent="folderFilter = 'all'"
         @keydown.space.prevent="folderFilter = 'all'"
       >
-        全部<span class="folder-chip-count">{{ chat.characters.length }}</span>
+        全部<span class="folder-chip-count">{{ activeCharacters.length }}</span>
       </div>
       <div
         class="chip folder-chip"
@@ -236,6 +236,26 @@
         @keydown.space.prevent="folderFilter = 'uncategorized'"
       >
         未分类<span class="folder-chip-count">{{ uncategorizedCount }}</span>
+      </div>
+      <!-- 归档管理：归档角色只在「全部 / 未分类 / 各文件夹」之外的这一处集中出现，
+           免得几十个压暗的卡片混在活跃角色里（见 folderScopedCharacters） -->
+      <div
+        v-if="archivedCharacters.length > 0"
+        class="chip folder-chip folder-chip-archived"
+        :class="{ active: folderFilter === 'archived' }"
+        role="button"
+        tabindex="0"
+        title="集中管理已归档角色：它们不参与任何主动活动，你找它们聊天仍会回复"
+        @click="folderFilter = 'archived'"
+        @keydown.enter.prevent="folderFilter = 'archived'"
+        @keydown.space.prevent="folderFilter = 'archived'"
+      >
+        <svg class="folder-chip-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="4" rx="1"/>
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/>
+          <path d="M10 12h4"/>
+        </svg>
+        归档管理<span class="folder-chip-count">{{ archivedCharacters.length }}</span>
       </div>
       <div
         v-for="f in folders"
@@ -260,7 +280,7 @@
         @dragend="onFolderDragEnd"
       >
         <span class="folder-chip-name">{{ f.name }}</span>
-        <span class="folder-chip-count">{{ f.count }}</span>
+        <span class="folder-chip-count">{{ folderCountOf(f.id) }}</span>
         <template v-if="folderFilter === f.id">
           <span
             class="chip-x folder-chip-op"
@@ -372,6 +392,18 @@
         >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-card-name">{{ c.display_name }}</div>
         <div v-if="c.archived" class="char-card-archived" title="已归档：不参与任何主动活动">已归档</div>
+        <!-- 归档管理视图里直接给「取消归档」，免得逐个点进详情卡去关开关 -->
+        <div
+          v-if="folderFilter === 'archived'"
+          class="char-unarchive-btn"
+          role="button"
+          tabindex="0"
+          :class="{ 'is-busy': unarchiveBusyId === c.id }"
+          :title="`让「${c.display_name}」重新参与活动`"
+          @click.stop="onUnarchive(c)"
+          @keydown.enter.stop.prevent="onUnarchive(c)"
+          @keydown.space.stop.prevent="onUnarchive(c)"
+        >{{ unarchiveBusyId === c.id ? '恢复中…' : '取消归档' }}</div>
         <div class="char-card-foot">
           <span class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
             {{ c.message_count > 0 ? `${c.message_count} 条消息` : '待唤醒' }}
@@ -943,7 +975,24 @@ const sortedCharacters = computed(() =>
 // ═══════════════════════════════════════
 const folderStore = useCharacterFoldersStore()
 const folders = computed(() => folderStore.folders)
-const uncategorizedCount = computed(() => folderStore.uncategorizedCount)
+
+/**
+ * 活跃角色 / 归档角色。
+ *
+ * 归档角色只在「归档管理」里出现；其余视图（全部 / 未分类 / 各文件夹）一律排除 ——
+ * 否则几十个压暗的卡片会和活跃角色平铺在一起，很难找（本机 67 个角色里 56 个是归档的）。
+ * 声明放在这里（而非靠近 folderScopedCharacters）是因为下面的 uncategorizedCount 与
+ * folderCountOf 都要用 —— computed 虽是惰性求值，但不该依赖求值时机。
+ */
+const archivedCharacters = computed(() => chat.characters.filter(c => c.archived))
+const activeCharacters = computed(() => chat.characters.filter(c => !c.archived))
+
+// 计数按「活跃角色」算 —— 与视图里实际渲染的一致（归档角色另有「归档管理」入口）
+const uncategorizedCount = computed(() => activeCharacters.value.filter(c => !c.folder_id).length)
+/** 各文件夹的活跃角色数（后端返回的 f.count 含归档，会与实际看到的不符） */
+function folderCountOf(id) {
+  return activeCharacters.value.filter(c => c.folder_id === id).length
+}
 // 文件夹接口就绪后才显示分类 UI，接口不可用时保持原样（不出现半坏的筛选栏）
 const folderFeatureReady = computed(() => folderStore.ready)
 // 'all' | 'uncategorized' | 文件夹 id
@@ -1056,11 +1105,33 @@ async function toggleAllArchived(next) {
   }
 }
 
+/** 归档管理视图里单卡「取消归档」：只这一张卡在转，其余卡片保持可点 */
+const unarchiveBusyId = ref(null)
+async function onUnarchive(c) {
+  if (unarchiveBusyId.value !== null) return
+  unarchiveBusyId.value = c.id
+  try {
+    await api.setCharacterArchived(c.id, false)
+    // 本地同步：取消归档后该角色会离开「归档管理」进入活跃视图
+    c.archived = 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.archived = 0
+    showToast(`「${c.display_name}」已恢复参与活动`, 'success')
+  } catch (err) {
+    showToast(err?.message || '取消归档失败', 'error')
+  } finally {
+    unarchiveBusyId.value = null
+  }
+}
+
 // 当前文件夹范围内的角色（未叠加搜索词）
+// 归档角色只在「归档管理」里出现，此处用 activeCharacters 排除掉（见其声明处的说明）
 const folderScopedCharacters = computed(() => {
-  if (folderFilter.value === 'uncategorized') return chat.characters.filter(c => !c.folder_id)
-  if (folderFilter.value === 'all') return chat.characters
-  return chat.characters.filter(c => c.folder_id === folderFilter.value)
+  if (folderFilter.value === 'archived') return archivedCharacters.value
+  const list = activeCharacters.value
+  if (folderFilter.value === 'uncategorized') return list.filter(c => !c.folder_id)
+  if (folderFilter.value === 'all') return list
+  return list.filter(c => c.folder_id === folderFilter.value)
 })
 
 // 实际渲染：文件夹筛选 + 名称搜索，置顶优先、组内按拼音排序
@@ -1076,11 +1147,11 @@ const visibleCharacters = computed(() => {
   })
 })
 
-// 标题计数：没筛选时只给总数，筛选中显示「可见 / 总数」
+// 标题计数：以**当前筛选范围**为分母（视图已排除归档，用总数当分母会一直显示「11 / 67」）
 const charCountLabel = computed(() => {
-  const total = chat.characters.length
+  const scoped = folderScopedCharacters.value.length
   const shown = visibleCharacters.value.length
-  return shown === total ? `${total}` : `${shown} / ${total}`
+  return shown === scoped ? `${scoped}` : `${shown} / ${scoped}`
 })
 
 // 搜索词在全部角色里有命中，但当前文件夹内没有 —— 提示可以放宽到全部范围
@@ -1090,9 +1161,24 @@ const canSearchEverywhere = computed(() => {
   return chat.characters.some(c => (c.display_name || '').toLowerCase().includes(kw))
 })
 
+/**
+ * 当前筛选范围里被归档的角色数。
+ *
+ * 用于空状态：某个文件夹的成员可能**全部**是归档的（本机「少女与战车」24 个、「武装JK世界」26 个
+ * 都是这种情况），此时视图是空的，但说「这个文件夹还是空的」并不准确 —— 得告诉用户去「归档管理」。
+ */
+const hiddenArchivedInScope = computed(() => {
+  if (folderFilter.value === 'archived') return 0
+  if (folderFilter.value === 'uncategorized') return archivedCharacters.value.filter(c => !c.folder_id).length
+  if (folderFilter.value === 'all') return archivedCharacters.value.length
+  return archivedCharacters.value.filter(c => c.folder_id === folderFilter.value).length
+})
+
 const emptyTitle = computed(() => {
   if (charSearch.value.trim()) return `没有找到「${charSearch.value.trim()}」`
   if (!chat.characters.length) return '还没有角色'
+  if (folderFilter.value === 'archived') return '没有归档角色'
+  if (hiddenArchivedInScope.value > 0) return `这里的角色都已归档（${hiddenArchivedInScope.value} 个）`
   if (folderFilter.value === 'uncategorized') return '「未分类」里没有角色'
   return '这个文件夹还是空的'
 })
@@ -1101,6 +1187,9 @@ const emptyDesc = computed(() => {
     return folderFilter.value === 'all' ? '换个关键词试试。' : '换个关键词，或者切到「全部」看看。'
   }
   if (!chat.characters.length) return '点上面的「招募」认识第一位邻居。'
+  if (folderFilter.value === 'archived') return '归档过的角色会集中在这里，方便统一恢复或清理。'
+  // 成员全被归档时，指向「归档管理」而不是让人以为文件夹坏了
+  if (hiddenArchivedInScope.value > 0) return '去「归档管理」可以把它们恢复成参与活动。'
   if (folderFilter.value === 'uncategorized') return '所有角色都已经归好类了。'
   return '用角色卡上的文件夹按钮，把角色移进来。'
 })
@@ -2719,6 +2808,19 @@ onMounted(async () => {
   outline: 2px dashed var(--accent);
   outline-offset: 2px;
 }
+/* 「归档管理」入口：与文件夹 chip 同排，但用低调的虚线边提示它是另一种视图。
+   它不参与拖拽排序，所以要覆盖掉 .folder-chip 的 grab 光标。 */
+.folder-chip-archived {
+  border-style: dashed;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.folder-chip-archived:active { cursor: pointer; }
+.folder-chip-archived.active {
+  border-style: solid;
+  color: var(--on-accent, #fff);
+}
+.folder-chip-icon { flex-shrink: 0; opacity: 0.8; }
 .folder-chip-name {
   max-width: 120px;
   overflow: hidden;
@@ -2968,6 +3070,22 @@ onMounted(async () => {
   line-height: 1.6;
   user-select: none;
 }
+
+/* 「取消归档」：只在归档管理视图出现，替代/补位于「已归档」角标下方 */
+.char-unarchive-btn {
+  margin-top: 2px;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-bright);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.char-unarchive-btn:hover { border-color: var(--accent); color: var(--accent); }
+.char-unarchive-btn.is-busy { opacity: 0.6; pointer-events: none; }
 
 .char-card-foot {
   display: flex;
