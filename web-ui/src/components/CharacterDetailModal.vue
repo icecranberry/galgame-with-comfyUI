@@ -427,6 +427,10 @@
               </linshe-button>
             </div>
 
+            <!-- 场景服装（工装/外出/居家/睡眠）：与上面的「形态」不同——形态互斥单套，
+                 场景服装四套并存，由日程的 outfit 标注决定此刻注入哪套 -->
+            <SceneOutfitsPanel :character="character" />
+
             <div class="modal-actions" style="margin-top:16px">
               <span class="outfit-save-hint">启用中的形态会注入到所有生图链路，优先级高于人物卡原有外观</span>
               <div style="flex:1"></div>
@@ -470,6 +474,7 @@ import LinsheModal from './ui/LinsheModal.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
+import SceneOutfitsPanel from './SceneOutfitsPanel.vue'
 import PersonaRefineModal from './PersonaRefineModal.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'

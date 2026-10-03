@@ -132,6 +132,28 @@ export function deleteCharacterOutfit(characterId, outfitId) {
   return request(`/characters/${characterId}/outfits/${outfitId}`, { method: 'DELETE' })
 }
 
+// ── 场景服装（工装/外出/居家/睡眠，由日程决定穿哪套）──
+
+/** 该角色的场景服装 + 场景定义 */
+export function listSceneOutfits(characterId) {
+  return request(`/characters/${characterId}/outfits/scene`)
+}
+
+/** 此刻按日程该穿哪套（用于界面展示/调试） */
+export function getCurrentSceneOutfit(characterId) {
+  return request(`/characters/${characterId}/outfit-now`)
+}
+
+/** 用 LLM 生成四套基础场景服装；save=true 时直接落库 */
+export function generateSceneOutfits(characterId, save = false) {
+  return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save } })
+}
+
+/** 批量保存四套场景服装（同场景已存在则更新描述） */
+export function saveSceneOutfits(characterId, outfits) {
+  return request(`/characters/${characterId}/outfits/scene`, { method: 'PUT', body: { outfits } })
+}
+
 export async function clearMessages(characterId) {
   return request(`/characters/${characterId}/messages`, { method: 'DELETE' })
 }
