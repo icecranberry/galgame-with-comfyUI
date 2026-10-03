@@ -661,7 +661,7 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
               v-model.number="momentFreqStepIdx"
               @change="onMomentFreqChange"
             />
-            <span class="freq-val freq-val-wide">{{ momentFreqLabel }}</span>
+            <span class="freq-val">{{ momentFreqLabel }}</span>
           </div>
         </div>
 
@@ -3003,12 +3003,11 @@ function resetTestPrompts() {
   background: var(--accent); border: none; cursor: pointer;
 }
 .freq-val {
-  font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
-}
-/* 档位标签是中文（「30 分钟」「8 小时」），比数字宽，给个固定宽度免得布局抖 */
-.freq-val-wide {
-  min-width: 66px;
-  white-space: nowrap;
+  font-size: 14px; font-weight: 600; color: var(--accent);
+  /* 固定宽度 + 右对齐：这几行是 space-between 布局、值区靠右，
+     宽度不一致会把滑块往左挤（「5 分钟」比「1.0」宽就错位了）。
+     统一宽度后所有滑块左右边缘才能对齐。56px 容得下最宽的「30 分钟」。 */
+  min-width: 56px; text-align: right; white-space: nowrap;
 }
 
 /* ── 防打扰模式 ── */
