@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { readFileSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { config, autoDetectWorkflowMode } from './src/config.js';
+import { config, autoDetectWorkflowMode, activateLlmProfile, getActiveProfileId } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
@@ -179,6 +179,19 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 恢复激活的 LLM profile 到内存 config。
+// 不做这一步的话，config.llm 会一直停在 .env 的值（LLM_API_KEY），而
+// syncActiveLlmProfile() 会在每次保存设置时把 config.llm.apiKey 写回 profile ——
+// 于是「用户为某个 profile 单独设的 key」会被 .env 里的旧值悄悄覆盖掉。
+{
+  const activeId = getActiveProfileId();
+  if (activeId) {
+    const r = activateLlmProfile(activeId);
+    if (r?.ok) console.log(`[config] restored active LLM profile: ${activeId}`);
+    else console.log(`[config] active LLM profile not found: ${activeId}`);
+  }
+}
 
 // 启动自动压缩：清理任务删除大量行后，SQLite 只把页还回内部空闲列表，文件对操作系统的
 // 占用不变。空闲页占比超阈值时在监听端口前做一次 VACUUM（阻塞启动数秒到数分钟，一次性
