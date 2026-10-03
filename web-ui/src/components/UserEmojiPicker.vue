@@ -72,6 +72,7 @@ import LinsheInput from './ui/LinsheInput.vue'
 
 const emit = defineEmits(['close', 'pick'])
 const toastFn = inject('toast', null)
+const confirmFn = inject('confirm', null)
 
 const emojis = ref([])
 const loading = ref(true)
@@ -140,6 +141,12 @@ async function confirmUpload() {
 }
 
 async function remove(e) {
+  // 删除前确认：按钮常显后容易误触（与 EmojiManagerModal 同一套口径）
+  const message = `确定删除表情「${e.key}」吗？删掉后聊天里已发过的 [${e.key}] 标记会变成纯文字。`
+  const confirmed = confirmFn
+    ? await confirmFn({ title: '删除表情', message, okText: '删除', danger: true })
+    : window.confirm(message)
+  if (!confirmed) return
   try {
     await api.deleteUserEmoji(e.key)
     emojis.value = emojis.value.filter(x => x.key !== e.key)
@@ -209,14 +216,17 @@ onMounted(load)
 }
 .ue-del {
   position: absolute; top: 2px; right: 2px;
-  width: 18px; height: 18px; border-radius: 50%;
+  width: 19px; height: 19px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; line-height: 1;
-  background: rgba(0, 0, 0, 0.35); color: #fff;
-  opacity: 0; transition: opacity 0.15s ease;
+  /* 常显：之前用 opacity:0 + hover 才出现，移动端没有 hover，等于永远看不到这个按钮 */
+  background: rgba(0, 0, 0, 0.42); color: #fff;
+  opacity: 0.72;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  z-index: 1;
 }
 .ue-item:hover .ue-del { opacity: 1; }
-.ue-del:hover { background: rgba(var(--accent-rgb), 0.9); }
+.ue-del:hover { background: rgba(220, 70, 70, 0.95); transform: scale(1.08); }
 
 .ue-footer {
   display: flex; align-items: center; gap: 8px;
