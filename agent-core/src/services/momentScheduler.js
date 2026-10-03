@@ -2,7 +2,7 @@ import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 朋友圈定时发帖调度器
  *
- * - 每 10 分钟扫描一次
+ * - 每 5 分钟扫描一次
  * - 找出 next_moment_at <= now 或 NULL 的角色 / 镇民（双来源，谁先到期谁先发）
  * - 镇民每个自然滚动 24 小时最多发一条（调度查询里硬过滤，生成器排期兜底）
  * - 每次只处理一个（排队），避免并发生图撑爆 ComfyUI
@@ -25,7 +25,9 @@ export function setTownNpcPostGenerator(fn) {
   townNpcPostGenerator = fn;
 }
 
-const CHECK_INTERVAL = 10 * 60 * 1000; // 10 分钟
+// 5 分钟：必须 <= 最快发帖周期（momentFreq=24 时约 5~20 分钟），
+// 否则周期设得再快也会被扫描间隔卡成 10 分钟一条。
+const CHECK_INTERVAL = 5 * 60 * 1000;
 
 let timer = null;
 let processing = false;

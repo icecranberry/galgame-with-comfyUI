@@ -657,11 +657,11 @@ type="range" min="0" max="1" step="0.1"
           </div>
           <div class="freq-control">
             <input
-type="range" min="0" max="3" step="0.5"
-              v-model.number="momentFreqSlider"
+type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
+              v-model.number="momentFreqStepIdx"
               @change="onMomentFreqChange"
             />
-            <span class="freq-val">{{ momentFreqSlider.toFixed(1) }}</span>
+            <span class="freq-val freq-val-wide">{{ momentFreqLabel }}</span>
           </div>
         </div>
 
@@ -1318,16 +1318,34 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
-const momentFreqSlider = ref(1)
-// 把倍率换算成「大约多久一条」，比单看数字直观（基准：1 → 2~8 小时）
-const momentFreqHint = computed(() => {
-  const f = momentFreqSlider.value
-  if (f <= 0) return '0 = 关闭自动发帖（仍可手动发）。'
-  const lo = (2 / f).toFixed(1).replace(/\.0$/, '')
-  const hi = (8 / f).toFixed(1).replace(/\.0$/, '')
-  const base = f === 1 ? '，1 为默认节奏' : ''
-  return `每个角色约 ${lo}~${hi} 小时一条${base}。调高会明显增加 LLM 与生图消耗。`
-})
+// 朋友圈发帖频率档位：value 是 momentFreq（周期 = 基准 2~8 小时 / value）。
+// 用档位而不是连续滑块：周期跨度从 5 分钟到 32 小时，连续拖动既拖不准也说不清。
+// 顺序按「越往右越频繁」，与「频率」的直觉一致。
+const MOMENT_FREQ_STEPS = [
+  { value: 0,    label: '关闭',    hint: '关闭自动发帖（仍可手动发）。' },
+  { value: 0.25, label: '8 小时',  hint: '每个角色约 8~32 小时一条。' },
+  { value: 0.5,  label: '4 小时',  hint: '每个角色约 4~16 小时一条。' },
+  { value: 1,    label: '2 小时',  hint: '每个角色约 2~8 小时一条（默认节奏）。' },
+  { value: 2,    label: '1 小时',  hint: '每个角色约 1~4 小时一条。' },
+  { value: 4,    label: '30 分钟', hint: '每个角色约 30 分钟~2 小时一条。' },
+  { value: 8,    label: '15 分钟', hint: '每个角色约 15~60 分钟一条。' },
+  { value: 24,   label: '5 分钟',  hint: '每个角色约 5~20 分钟一条，LLM 与生图消耗很高。' },
+]
+const DEFAULT_MOMENT_STEP = 3   // 对应 value=1（2 小时）
+const momentFreqStepIdx = ref(DEFAULT_MOMENT_STEP)
+const momentFreqHint = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.hint || '')
+const momentFreqLabel = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.label || '')
+/** 库里存的 momentFreq → 最接近的档位下标（老值可能是任意数） */
+function momentStepFromValue(v) {
+  if (v == null) return DEFAULT_MOMENT_STEP
+  let best = 0
+  let bestDiff = Infinity
+  MOMENT_FREQ_STEPS.forEach((s, i) => {
+    const d = Math.abs(s.value - v)
+    if (d < bestDiff) { bestDiff = d; best = i }
+  })
+  return best
+}
 const backgroundConcurrency = ref(3)
 
 // ── 防打扰模式 ──
@@ -1814,7 +1832,7 @@ async function switchProfile(id) {
         backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
         freqSlider.value = cfg.features.proactiveChatFreq ?? 0.5
         eventFreqSlider.value = cfg.features.eventFreq ?? 1
-        momentFreqSlider.value = cfg.features.momentFreq ?? 1
+        momentFreqStepIdx.value = momentStepFromValue(cfg.features.momentFreq)
       }
     }
   } catch (err) {
@@ -1930,7 +1948,7 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
-    momentFreqSlider.value = features.momentFreq ?? 1
+    momentFreqStepIdx.value = momentStepFromValue(features.momentFreq)
     backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
@@ -2292,11 +2310,13 @@ async function onEventFreqChange() {
 }
 
 async function onMomentFreqChange() {
-  const v = momentFreqSlider.value
+  const step = MOMENT_FREQ_STEPS[momentFreqStepIdx.value]
+  if (!step) return
+  const v = step.value
   features.momentFreq = v
   try {
     await updateMomentFreq(v)
-    toastFn?.(v <= 0 ? '已关闭自动发帖' : `朋友圈频率已设为 ${v.toFixed(1)}`, 'success')
+    toastFn?.(v <= 0 ? '已关闭自动发帖' : `朋友圈频率已设为「${step.label}」`, 'success')
   } catch (err) {
     toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
   }
@@ -2984,6 +3004,11 @@ function resetTestPrompts() {
 }
 .freq-val {
   font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
+}
+/* 档位标签是中文（「30 分钟」「8 小时」），比数字宽，给个固定宽度免得布局抖 */
+.freq-val-wide {
+  min-width: 66px;
+  white-space: nowrap;
 }
 
 /* ── 防打扰模式 ── */

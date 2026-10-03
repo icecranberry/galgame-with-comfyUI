@@ -269,11 +269,11 @@ router.put('/event-freq', (req, res) => {
   res.json({ ok: true, eventFreq: config.features.eventFreq });
 });
 
-// PUT /api/config/moment-freq — 更新朋友圈发帖频率 0~3（1=默认 2~8 小时，>1 更快，0=关闭）
+// PUT /api/config/moment-freq — 更新朋友圈发帖频率 0~24（1=默认 2~8 小时，24=最快 5~20 分钟，0=关闭）
 router.put('/moment-freq', (req, res) => {
   const { value } = req.body;
-  if (value == null || typeof value !== 'number' || value < 0 || value > 3) {
-    return res.status(400).json({ error: 'value must be 0~3' });
+  if (value == null || typeof value !== 'number' || value < 0 || value > 24) {
+    return res.status(400).json({ error: 'value must be 0~24' });
   }
   updateMomentFreq(value);
   res.json({ ok: true, momentFreq: config.features.momentFreq });
